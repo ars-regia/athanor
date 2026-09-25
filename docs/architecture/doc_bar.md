@@ -47,7 +47,7 @@ Status: **revision 1, approved by the maintainer on 2026-09-25.** It is the spec
   - X11 applications reach cosmic-comp through XWayland, outside any context.
   - Applications started from a terminal, from cosmic-launcher until stage 3 and by XDG autostart still hold the main socket, and can read every title and the clipboard.
   - A Flatpak application started on our socket cannot create its own context, because a context offers no security-context manager; it is expected to pass our socket through. The plan of 2b verifies it.
-  - The context confines a socket, not the application. The application runs as the user, so it can still connect by path to the main socket, `$XDG_RUNTIME_DIR/wayland-1`, or to another application's `$XDG_RUNTIME_DIR/athanor/<id>/wayland`.
+  - The context confines a socket, not the application. The application runs as the user, so it can still connect by path to the session's main socket, `$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY` of the user manager (`wayland-1` today), or to another application's `$XDG_RUNTIME_DIR/athanor/<random>/wayland`.
   - The application reaches the session bus. It can put a process on the main socket through the user manager, with `StartTransientUnit`, or read the main socket's name with `systemctl --user show-environment`.
   - A terminal that hands its window to an existing server process, such as gnome-terminal or ptyxis, draws on that server's socket, not on the one its unit received.
   - Real confinement, a filesystem and bus sandbox for launched applications, is a later design entry and is not designed here.
