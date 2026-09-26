@@ -8,6 +8,7 @@
 pub mod apply;
 pub mod cosmic;
 pub mod document;
+pub mod favorites;
 pub mod first_session;
 pub mod loader;
 pub mod placement;

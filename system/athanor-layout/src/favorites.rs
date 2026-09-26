@@ -1,0 +1,466 @@
+//! The favourites of the bar and the dock (doc_bar.md, BR7): `~/.config/athanor/favorites.toml`,
+//! a schema and a list of desktop ids. They are not part of the layout document. At the
+//! first start, when the file is absent, they are imported once from COSMIC's list, else
+//! from the vendor list; afterwards the file is the only source.
+
+use std::error::Error;
+use std::fmt;
+use std::fs;
+use std::io::{self, Read};
+use std::path::{Path, PathBuf};
+
+use toml::{Table, Value};
+
+use crate::apply::write_atomically;
+use crate::user::write_target;
+
+pub const SCHEMA: i64 = 1;
+pub const VENDOR_FILE: &str = "/usr/share/athanor/favorites.toml";
+/// More than a bar or a dock can show; a longer list is a broken or hostile file.
+pub const MAX_FAVORITES: usize = 64;
+/// NAME_MAX: a longer id cannot be a file name.
+pub const MAX_ID_BYTES: usize = 255;
+/// 64 ids of 255 bytes with their quoting fit well within this.
+pub const MAX_FILE_BYTES: u64 = 64 * 1024;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum FavoritesError {
+    Unreadable(String),
+    Unwritable(String),
+    Malformed(String),
+    NewerSchema(i64),
+    UnknownKey(String),
+    BadId(String),
+    TooMany(usize),
+}
+
+impl fmt::Display for FavoritesError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FavoritesError::Unreadable(reason) => write!(f, "cannot read the favourites: {reason}"),
+            FavoritesError::Unwritable(reason) => {
+                write!(f, "cannot write the favourites: {reason}")
+            }
+            FavoritesError::Malformed(reason) => {
+                write!(f, "the favourites file is malformed: {reason}")
+            }
+            FavoritesError::NewerSchema(schema) => {
+                write!(
+                    f,
+                    "the favourites file has schema {schema}, newer than {SCHEMA}"
+                )
+            }
+            FavoritesError::UnknownKey(key) => {
+                write!(f, "the favourites file has an unknown key `{key}`")
+            }
+            FavoritesError::BadId(id) => write!(f, "`{id}` is not a desktop id"),
+            FavoritesError::TooMany(count) => {
+                write!(
+                    f,
+                    "{count} favourites, more than the {MAX_FAVORITES} allowed"
+                )
+            }
+        }
+    }
+}
+
+impl Error for FavoritesError {}
+
+pub fn user_file(config_home: &Path) -> PathBuf {
+    config_home.join("athanor/favorites.toml")
+}
+
+/// A desktop file name (Desktop Entry Specification, "Desktop File ID") with no path
+/// separator: letters, digits, `.`, `_` and `-`, ending in `.desktop`, at most NAME_MAX.
+pub fn is_desktop_id(id: &str) -> bool {
+    id.len() <= MAX_ID_BYTES
+        && id.strip_suffix(".desktop").is_some_and(|stem| {
+            !stem.is_empty()
+                && stem
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        })
+}
+
+/// The schema is read first, so a newer file is reported as newer, whatever else it holds.
+pub fn parse(text: &str) -> Result<Vec<String>, FavoritesError> {
+    let table: Table = text
+        .parse()
+        .map_err(|err: toml::de::Error| FavoritesError::Malformed(err.message().to_owned()))?;
+    match table.get("schema") {
+        Some(Value::Integer(SCHEMA)) => {}
+        Some(Value::Integer(schema)) if *schema > SCHEMA => {
+            return Err(FavoritesError::NewerSchema(*schema))
+        }
+        _ => {
+            return Err(FavoritesError::Malformed(format!(
+                "`schema` must be {SCHEMA}"
+            )))
+        }
+    }
+    if let Some(key) = table
+        .keys()
+        .find(|key| !matches!(key.as_str(), "schema" | "favorites"))
+    {
+        return Err(FavoritesError::UnknownKey(key.clone()));
+    }
+    let Some(Value::Array(items)) = table.get("favorites") else {
+        return Err(FavoritesError::Malformed(
+            "`favorites` must be a list".to_owned(),
+        ));
+    };
+    if items.len() > MAX_FAVORITES {
+        return Err(FavoritesError::TooMany(items.len()));
+    }
+    let mut ids: Vec<String> = Vec::with_capacity(items.len());
+    for item in items {
+        let Value::String(id) = item else {
+            return Err(FavoritesError::Malformed(
+                "favourites are strings".to_owned(),
+            ));
+        };
+        if !is_desktop_id(id) {
+            return Err(FavoritesError::BadId(id.escape_debug().to_string()));
+        }
+        if !ids.contains(id) {
+            ids.push(id.clone());
+        }
+    }
+    Ok(ids)
+}
+
+pub fn to_toml(ids: &[String]) -> String {
+    let list = Value::Array(ids.iter().cloned().map(Value::String).collect());
+    format!("schema = {SCHEMA}\nfavorites = {list}\n")
+}
+
+/// `Ok(None)` when the file does not exist. The read stops one byte past the bound.
+pub fn read(path: &Path) -> Result<Option<Vec<String>>, FavoritesError> {
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => {
+            return Err(FavoritesError::Unreadable(format!(
+                "{}: {err}",
+                path.display()
+            )))
+        }
+    };
+    let mut text = String::new();
+    file.take(MAX_FILE_BYTES + 1)
+        .read_to_string(&mut text)
+        .map_err(|err| match err.kind() {
+            io::ErrorKind::InvalidData => FavoritesError::Malformed("not UTF-8".to_owned()),
+            _ => FavoritesError::Unreadable(format!("{}: {err}", path.display())),
+        })?;
+    if text.len() as u64 > MAX_FILE_BYTES {
+        return Err(FavoritesError::Malformed(format!(
+            "larger than {MAX_FILE_BYTES} bytes"
+        )));
+    }
+    parse(&text).map(Some)
+}
+
+/// Validates, then writes through a link the way the layout document is written, so a
+/// file kept in a dotfiles repository stays a link.
+pub fn save(path: &Path, ids: &[String]) -> Result<(), FavoritesError> {
+    if ids.len() > MAX_FAVORITES {
+        return Err(FavoritesError::TooMany(ids.len()));
+    }
+    if let Some(bad) = ids.iter().find(|id| !is_desktop_id(id)) {
+        return Err(FavoritesError::BadId(bad.escape_debug().to_string()));
+    }
+    let unwritable =
+        |err: io::Error| FavoritesError::Unwritable(format!("{}: {err}", path.display()));
+    let target = write_target(path).map_err(unwritable)?;
+    if let Some(dir) = target.parent() {
+        fs::create_dir_all(dir).map_err(unwritable)?;
+    }
+    write_atomically(&target, &to_toml(ids)).map_err(unwritable)
+}
+
+/// The favourites at start. An existing file wins. When it is absent: COSMIC's list, else
+/// the vendor list, else nothing, saved once so the import never runs again. A save that
+/// fails is logged and the list is still returned; the import then runs again at the next
+/// start. A file that exists but is rejected is returned as the error and never replaced.
+pub fn load_or_import(
+    path: &Path,
+    cosmic: impl FnOnce() -> Option<Vec<String>>,
+    vendor: &Path,
+) -> Result<Vec<String>, FavoritesError> {
+    if let Some(ids) = read(path)? {
+        return Ok(ids);
+    }
+    let ids = match cosmic() {
+        Some(ids) => sanitized(ids),
+        None => match read(vendor) {
+            Ok(Some(ids)) => ids,
+            Ok(None) => Vec::new(),
+            Err(err) => {
+                tracing::error!(error = %err, file = %vendor.display(), "the vendor favourites are unusable");
+                Vec::new()
+            }
+        },
+    };
+    if let Err(err) = save(path, &ids) {
+        tracing::warn!(error = %err, "the imported favourites were not saved; the import runs again at the next start");
+    }
+    Ok(ids)
+}
+
+/// COSMIC's list as this file accepts it: desktop ids only, once each, at most the bound.
+fn sanitized(ids: Vec<String>) -> Vec<String> {
+    let mut kept: Vec<String> = Vec::new();
+    for id in ids {
+        if kept.len() == MAX_FAVORITES {
+            break;
+        }
+        if is_desktop_id(&id) && !kept.contains(&id) {
+            kept.push(id);
+        }
+    }
+    kept
+}
+
+/// `ids` with `id` at the end; unchanged when it is already there.
+pub fn pinned(ids: &[String], id: &str) -> Result<Vec<String>, FavoritesError> {
+    if !is_desktop_id(id) {
+        return Err(FavoritesError::BadId(id.escape_debug().to_string()));
+    }
+    if ids.iter().any(|known| known == id) {
+        return Ok(ids.to_vec());
+    }
+    if ids.len() >= MAX_FAVORITES {
+        return Err(FavoritesError::TooMany(ids.len() + 1));
+    }
+    let mut out = ids.to_vec();
+    out.push(id.to_owned());
+    Ok(out)
+}
+
+pub fn unpinned(ids: &[String], id: &str) -> Vec<String> {
+    ids.iter().filter(|known| *known != id).cloned().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::scratch;
+    use std::cell::Cell;
+
+    fn ids(list: &[&str]) -> Vec<String> {
+        list.iter().map(|id| (*id).to_owned()).collect()
+    }
+
+    #[test]
+    fn the_documented_file_parses_in_order_without_duplicates() {
+        let text = "schema = 1\nfavorites = [\"org.mozilla.firefox.desktop\", \"com.system76.CosmicTerm.desktop\", \"org.mozilla.firefox.desktop\"]\n";
+        assert_eq!(
+            parse(text),
+            Ok(ids(&[
+                "org.mozilla.firefox.desktop",
+                "com.system76.CosmicTerm.desktop"
+            ]))
+        );
+    }
+
+    #[test]
+    fn the_schema_is_checked_first() {
+        assert_eq!(
+            parse("schema = 2\nfavorites = 7\nextra = 1\n"),
+            Err(FavoritesError::NewerSchema(2))
+        );
+        for text in [
+            "favorites = []\n",
+            "schema = \"1\"\nfavorites = []\n",
+            "schema = 0\nfavorites = []\n",
+        ] {
+            assert!(
+                matches!(parse(text), Err(FavoritesError::Malformed(_))),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_keys_and_wrong_types_are_refused() {
+        assert_eq!(
+            parse("schema = 1\nfavorites = []\norder = 3\n"),
+            Err(FavoritesError::UnknownKey("order".to_owned()))
+        );
+        for text in [
+            "schema = 1\n",
+            "schema = 1\nfavorites = \"a.desktop\"\n",
+            "schema = 1\nfavorites = [1]\n",
+            "not toml at all [",
+        ] {
+            assert!(
+                matches!(parse(text), Err(FavoritesError::Malformed(_))),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn ids_that_are_not_desktop_ids_are_refused() {
+        let long = format!("{}.desktop", "x".repeat(MAX_ID_BYTES));
+        for id in [
+            "../../etc/passwd.desktop",
+            "a b.desktop",
+            "firefox",
+            ".desktop",
+            "a/b.desktop",
+            long.as_str(),
+        ] {
+            assert!(!is_desktop_id(id), "{id:?}");
+            let text = format!(
+                "schema = 1\nfavorites = [{}]\n",
+                toml::Value::String(id.to_owned())
+            );
+            assert!(
+                matches!(parse(&text), Err(FavoritesError::BadId(_))),
+                "{id:?}"
+            );
+        }
+        assert!(is_desktop_id("org.mozilla.firefox.desktop"));
+        assert!(is_desktop_id("steam_app-570.desktop"));
+    }
+
+    #[test]
+    fn more_than_the_bound_is_refused() {
+        let many: Vec<String> = (0..=MAX_FAVORITES)
+            .map(|n| format!("app{n}.desktop"))
+            .collect();
+        assert_eq!(
+            parse(&to_toml(&many)),
+            Err(FavoritesError::TooMany(MAX_FAVORITES + 1))
+        );
+        assert_eq!(
+            save(&scratch("too-many").join("favorites.toml"), &many),
+            Err(FavoritesError::TooMany(MAX_FAVORITES + 1))
+        );
+    }
+
+    #[test]
+    fn written_lists_read_back_unchanged() {
+        let list = ids(&["a-b_c.desktop", "org.example.App.desktop"]);
+        assert_eq!(parse(&to_toml(&list)), Ok(list.clone()));
+        let path = scratch("round-trip").join("athanor/favorites.toml");
+        save(&path, &list).expect("save creates the directory");
+        assert_eq!(read(&path), Ok(Some(list)));
+    }
+
+    #[test]
+    fn an_absent_file_reads_as_none() {
+        assert_eq!(read(&scratch("absent").join("favorites.toml")), Ok(None));
+    }
+
+    #[test]
+    fn a_file_over_the_size_bound_is_malformed() {
+        let path = scratch("large").join("favorites.toml");
+        let padding = "#".repeat(usize::try_from(MAX_FILE_BYTES).expect("fits"));
+        std::fs::write(&path, format!("schema = 1\nfavorites = []\n{padding}\n")).expect("write");
+        assert!(matches!(read(&path), Err(FavoritesError::Malformed(_))));
+    }
+
+    #[test]
+    fn an_existing_file_wins_and_cosmic_is_not_asked() {
+        let path = scratch("existing").join("favorites.toml");
+        save(&path, &ids(&["mine.desktop"])).expect("save");
+        let asked = Cell::new(false);
+        let found = load_or_import(
+            &path,
+            || {
+                asked.set(true);
+                Some(ids(&["cosmic.desktop"]))
+            },
+            Path::new("/nonexistent"),
+        );
+        assert_eq!(found, Ok(ids(&["mine.desktop"])));
+        assert!(!asked.get());
+    }
+
+    #[test]
+    fn the_first_start_imports_cosmic_filtered_and_saves_it() {
+        let path = scratch("import").join("athanor/favorites.toml");
+        let found = load_or_import(
+            &path,
+            || {
+                Some(ids(&[
+                    "a.desktop",
+                    "a.desktop",
+                    "../x.desktop",
+                    "b.desktop",
+                ]))
+            },
+            Path::new("/nonexistent"),
+        );
+        assert_eq!(found, Ok(ids(&["a.desktop", "b.desktop"])));
+        assert_eq!(read(&path), Ok(Some(ids(&["a.desktop", "b.desktop"]))));
+    }
+
+    #[test]
+    fn without_cosmic_the_vendor_list_then_nothing() {
+        let dir = scratch("vendor");
+        let vendor = dir.join("vendor.toml");
+        save(&vendor, &ids(&["vendor.desktop"])).expect("save");
+        assert_eq!(
+            load_or_import(&dir.join("one/favorites.toml"), || None, &vendor),
+            Ok(ids(&["vendor.desktop"]))
+        );
+        std::fs::write(&vendor, "schema = 9\n").expect("write");
+        assert_eq!(
+            load_or_import(&dir.join("two/favorites.toml"), || None, &vendor),
+            Ok(Vec::new())
+        );
+        assert_eq!(
+            load_or_import(
+                &dir.join("three/favorites.toml"),
+                || None,
+                &dir.join("absent.toml")
+            ),
+            Ok(Vec::new())
+        );
+    }
+
+    #[test]
+    fn a_rejected_file_is_an_error_and_is_left_untouched() {
+        let path = scratch("rejected").join("favorites.toml");
+        let text = "schema = 2\nfavorites = [\"future.desktop\"]\n";
+        std::fs::write(&path, text).expect("write");
+        assert_eq!(
+            load_or_import(
+                &path,
+                || Some(ids(&["cosmic.desktop"])),
+                Path::new("/nonexistent")
+            ),
+            Err(FavoritesError::NewerSchema(2))
+        );
+        assert_eq!(std::fs::read_to_string(&path).expect("read"), text);
+    }
+
+    #[test]
+    fn pin_appends_once_and_unpin_removes() {
+        let list = ids(&["a.desktop"]);
+        assert_eq!(
+            pinned(&list, "b.desktop"),
+            Ok(ids(&["a.desktop", "b.desktop"]))
+        );
+        assert_eq!(pinned(&list, "a.desktop"), Ok(list.clone()));
+        assert!(matches!(
+            pinned(&list, "../b.desktop"),
+            Err(FavoritesError::BadId(_))
+        ));
+        let full: Vec<String> = (0..MAX_FAVORITES)
+            .map(|n| format!("app{n}.desktop"))
+            .collect();
+        assert_eq!(
+            pinned(&full, "one-more.desktop"),
+            Err(FavoritesError::TooMany(MAX_FAVORITES + 1))
+        );
+        assert_eq!(
+            unpinned(&ids(&["a.desktop", "b.desktop"]), "a.desktop"),
+            ids(&["b.desktop"])
+        );
+    }
+}
