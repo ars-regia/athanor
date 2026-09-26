@@ -3,7 +3,9 @@
 //! the layout document, resolved by the loader the chooser and the translator use, so a
 //! key the policy marks mandatory holds here too. Every change applies live.
 
+mod clock;
 mod openers;
+mod popup;
 
 use std::cell::{Cell, RefCell};
 use std::env;
@@ -222,6 +224,7 @@ fn build(module: Module, bar: &Rc<Bar>, _connector: Option<&str>) -> Option<Box<
         Module::Launcher => openers::new(bar, Opener::Launcher),
         Module::AppLibrary => openers::new(bar, Opener::AppLibrary),
         Module::Workspaces => openers::new(bar, Opener::Workspaces),
+        Module::Clock => clock::new(bar),
         // Later tasks of this plan, and the plans of 2b.3 to 2b.5.
         _ => None,
     }
@@ -230,6 +233,18 @@ fn build(module: Module, bar: &Rc<Bar>, _connector: Option<&str>) -> Option<Box<
 impl Bar {
     pub fn client(&self) -> Option<&Client> {
         self.client.as_ref()
+    }
+
+    pub fn layout(&self) -> Layout {
+        self.layout.get()
+    }
+
+    /// BR6: at most one popover of the bar is open; opening one closes the other.
+    pub fn popover_opened(&self, popover: &gtk4::Popover) {
+        let previous = self.open_popover.replace(Some(popover.clone()));
+        if let Some(previous) = previous.filter(|previous| previous != popover) {
+            previous.popdown();
+        }
     }
 
     pub fn refresh(self: &Rc<Self>, changed: Changed) {

@@ -2,5 +2,6 @@
 //! each preset holds, favourites against windows, what logind offers, the time zone. The
 //! binary draws it.
 
+pub mod clock;
 pub mod dirs;
 pub mod order;
