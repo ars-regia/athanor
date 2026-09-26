@@ -5,3 +5,4 @@
 pub mod clock;
 pub mod dirs;
 pub mod order;
+pub mod power;

@@ -4,8 +4,10 @@
 //! key the policy marks mandatory holds here too. Every change applies live.
 
 mod clock;
+mod logind;
 mod openers;
 mod popup;
+mod power;
 
 use std::cell::{Cell, RefCell};
 use std::env;
@@ -225,6 +227,7 @@ fn build(module: Module, bar: &Rc<Bar>, _connector: Option<&str>) -> Option<Box<
         Module::AppLibrary => openers::new(bar, Opener::AppLibrary),
         Module::Workspaces => openers::new(bar, Opener::Workspaces),
         Module::Clock => clock::new(bar),
+        Module::Power => power::new(bar),
         // Later tasks of this plan, and the plans of 2b.3 to 2b.5.
         _ => None,
     }
