@@ -12,6 +12,7 @@
 #   rig.sh build-layout     clippy, tests and release build of the layout crates (translator and chooser) and athanor-unit into <out>/bin
 #   rig.sh build-compositor-client  clippy, tests and release build of cc-probe into <out>/bin
 #   rig.sh build-shelld     clippy, tests and release build of athanor-shelld into <out>/bin
+#   rig.sh build-bar        clippy, tests and release build of athanor-bar into <out>/bin, with the DT_NEEDED check
 #   rig.sh shelld-e2e       athanor-shelld on a session bus: names, notifications, refusal of the private interface, tray watcher, memory
 #   rig.sh compositor-e2e   the compositor client against cosmic-comp, and against sway without the COSMIC globals
 #   rig.sh layer-guard      the greeter must refuse to run when the shim loads late
@@ -228,6 +229,14 @@ build-shelld)
                  && cargo build --release --locked -p athanor-shelld \
                  && install -m 0755 /out/target/release/athanor-shelld /out/bin/'
     ;;
+build-bar)
+    mkdir -p "$out/bin" "$out/target"
+    podman run --rm --memory 6g --security-opt label=disable \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -e CARGO_TARGET_DIR=/out/target -w /repo "$local_image:build" \
+        bash -c 'cargo clippy --locked -p athanor-bar --all-targets -- -D warnings \
+                 && cargo test --locked -p athanor-bar'
+    ;;
 shelld-e2e)
     rm -f "$out/shelld-e2e.log"
     in_rig "$(rig_image)" dbus-run-session -- python3 /repo/forge/test/shell/shelld_e2e.py
@@ -348,7 +357,7 @@ cosmic-panel-defaults)
     echo "cosmic-panel-defaults: the fixture matches the COSMIC in the rig"
     ;;
 *)
-    sed -n '2,19p' "${BASH_SOURCE[0]}" >&2
+    sed -n '2,/^set -euo pipefail$/{/^#/p}' "${BASH_SOURCE[0]}" >&2
     exit 2
     ;;
 esac
