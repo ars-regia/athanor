@@ -6435,6 +6435,7 @@ dependencies = [
  "libc",
  "log",
  "memoffset 0.9.1",
+ "once_cell",
  "pkg-config",
 ]
 

@@ -16,7 +16,10 @@ gio-unix = { workspace = true }
 gtk4 = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-wayland-client = { workspace = true }
+# dlopen, not a build-time link: a direct NEEDED for libwayland-client.so.0 here would race
+# gtk4-layer-shell for it in a consuming binary's DT_NEEDED order (doc_shell.md SH4), and
+# only a load-time symbol lookup, not the link order, is ours to control from this crate.
+wayland-client = { workspace = true, features = ["dlopen"] }
 wayland-protocols = { workspace = true }
 wayland-scanner = { workspace = true }
 

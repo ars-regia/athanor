@@ -61,7 +61,7 @@ jobs:
       - name: Build the greeter and check the DT_NEEDED order
         run: bash forge/test/shell/rig.sh build-greeter
       - name: Layer-surface guard
-        run: bash forge/test/shell/rig.sh layer-guard
+        run: bash forge/test/shell/rig.sh layer-guard greeter
       - name: Accessibility tree of the greeter
         run: bash forge/test/shell/rig.sh atspi greeter
       - name: Greeter surface cases (12) against the goldens
