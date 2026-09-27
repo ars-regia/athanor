@@ -3,11 +3,14 @@
 //! the layout document, resolved by the loader the chooser and the translator use, so a
 //! key the policy marks mandatory holds here too. Every change applies live.
 
+mod accessibility;
 mod clock;
+mod input;
 mod logind;
 mod openers;
 mod popup;
 mod power;
+mod tiling;
 
 use std::cell::{Cell, RefCell};
 use std::env;
@@ -221,13 +224,16 @@ fn changed_by(event: &Event) -> Changed {
 
 /// Builds `module` for the surface on `connector`; `None` when it is not built, or its
 /// source is absent.
-fn build(module: Module, bar: &Rc<Bar>, _connector: Option<&str>) -> Option<Box<dyn ModuleUi>> {
+fn build(module: Module, bar: &Rc<Bar>, connector: Option<&str>) -> Option<Box<dyn ModuleUi>> {
     match module {
         Module::Launcher => openers::new(bar, Opener::Launcher),
         Module::AppLibrary => openers::new(bar, Opener::AppLibrary),
         Module::Workspaces => openers::new(bar, Opener::Workspaces),
         Module::Clock => clock::new(bar),
         Module::Power => power::new(bar),
+        Module::InputSource => input::new(bar),
+        Module::Tiling => tiling::new(bar, connector),
+        Module::Accessibility => accessibility::new(bar),
         // Later tasks of this plan, and the plans of 2b.3 to 2b.5.
         _ => None,
     }

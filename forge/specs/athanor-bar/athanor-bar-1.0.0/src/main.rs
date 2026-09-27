@@ -10,6 +10,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 use athanor_bar::dirs::Dirs;
+use athanor_compositor_client::theme;
 use athanor_layout::favorites;
 use athanor_layout::loader::{Paths, VENDOR_DIR};
 use athanor_layout::user::write_target;
@@ -52,7 +53,10 @@ fn main() -> glib::ExitCode {
     // SH8: after five failures the bar still runs, on the vendor layout and without the
     // favourites, the two inputs a user can break. The shell is never lost.
     let (source, favorites_file) = match crash_loop::given_up(&dirs.failures, now) {
-        Ok(false) => (Source::Live(Paths::for_config_home(&dirs.config)), Some(favorites_file)),
+        Ok(false) => (
+            Source::Live(Paths::for_config_home(&dirs.config)),
+            Some(favorites_file),
+        ),
         Ok(true) => {
             tracing::error!(
                 failures = crash_loop::GIVE_UP_AFTER,
@@ -80,14 +84,24 @@ fn main() -> glib::ExitCode {
     if let Err(err) = std::fs::create_dir_all(&favorites_dir) {
         tracing::warn!(error = %err, dir = %favorites_dir.display(), "cannot create the favourites directory");
     }
+    let high_contrast_dirs = theme::high_contrast_dirs();
+    for dir in &high_contrast_dirs {
+        if let Err(err) = std::fs::create_dir_all(dir) {
+            tracing::warn!(error = %err, dir = %dir.display(), "cannot create the high contrast directory");
+        }
+    }
     // Before GTK starts a thread. Writes only (athanor-unit::sandbox): the launch sockets and
-    // dconf under the runtime directory, the caches, the favourites, /tmp, and the DRM nodes.
-    let write = [
+    // dconf under the runtime directory, the caches, the favourites, the COSMIC high
+    // contrast keys, /tmp, and the DRM nodes.
+    let write: Vec<&Path> = [
         dirs.runtime.as_path(),
         dirs.cache.as_path(),
         favorites_dir.as_path(),
         Path::new("/tmp"),
-    ];
+    ]
+    .into_iter()
+    .chain(high_contrast_dirs.iter().map(PathBuf::as_path))
+    .collect();
     let confined = sandbox::ensure_single_threaded()
         .and_then(|()| sandbox::restrict_writes(&write, &[Path::new("/dev/dri")]));
     if let Err(err) = confined {

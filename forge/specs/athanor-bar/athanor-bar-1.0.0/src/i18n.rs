@@ -27,6 +27,12 @@ pub fn tr(msgid: &str) -> String {
     catalog().tr(msgid).to_string()
 }
 
+/// The translation of `msgid` with `{key}` replaced by `value`. Translators move the
+/// placeholder freely; a value is never part of a message id.
+pub fn tr_with(msgid: &str, key: &str, value: &str) -> String {
+    catalog().tr(msgid).replace(&format!("{{{key}}}"), value)
+}
+
 pub fn is_rtl() -> bool {
     catalog().is_rtl()
 }
