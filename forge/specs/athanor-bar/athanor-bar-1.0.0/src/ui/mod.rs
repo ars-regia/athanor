@@ -10,6 +10,7 @@ mod logind;
 mod openers;
 mod popup;
 mod power;
+mod running;
 mod tiling;
 
 use std::cell::{Cell, RefCell};
@@ -95,9 +96,7 @@ pub trait ModuleUi {
 }
 
 enum Favorites {
-    // ponytail: no payload until Task 8's `Bar::favorites()` reads it (deferred-code.md);
-    // carrying the ids here now would be a write-only field, which clippy already caught once.
-    Loaded,
+    Loaded(Vec<String>),
     /// A rejected file, a give-up, or no configuration directory: nothing is pinned or
     /// unpinned, and the file is never replaced.
     Unavailable,
@@ -189,9 +188,9 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
 }
 
 /// The favourites at start. `Favorites::Unavailable` when there is no configuration
-/// directory, the file is rejected, or a rejected file cannot be told from one whose
-/// import failed to save: either way nothing is pinned or unpinned, and the file on disk
-/// is left exactly as `favorites::load_or_import` left it.
+/// directory or the file exists and is rejected. A failed import save is a different
+/// case: `load_or_import` logs it itself and still returns the imported list, so it
+/// reaches this function as `Ok` and yields `Favorites::Loaded`.
 fn load_favorites(file: Option<&Path>) -> Favorites {
     let Some(file) = file else {
         return Favorites::Unavailable;
@@ -201,7 +200,7 @@ fn load_favorites(file: Option<&Path>) -> Favorites {
         athanor_compositor_client::favorites::cosmic_favorites,
         Path::new(favorites::VENDOR_FILE),
     ) {
-        Ok(_ids) => Favorites::Loaded,
+        Ok(ids) => Favorites::Loaded(ids),
         Err(err) => {
             tracing::error!(error = %err, file = %file.display(), "the favourites are unavailable; the file is left as it is");
             Favorites::Unavailable
@@ -234,6 +233,7 @@ fn build(module: Module, bar: &Rc<Bar>, connector: Option<&str>) -> Option<Box<d
         Module::InputSource => input::new(bar),
         Module::Tiling => tiling::new(bar, connector),
         Module::Accessibility => accessibility::new(bar),
+        Module::RunningApps => running::new(bar),
         // Later tasks of this plan, and the plans of 2b.3 to 2b.5.
         _ => None,
     }
@@ -246,6 +246,31 @@ impl Bar {
 
     pub fn layout(&self) -> Layout {
         self.layout.get()
+    }
+
+    pub fn favorites(&self) -> Option<Vec<String>> {
+        match &*self.favorites.borrow() {
+            Favorites::Loaded(ids) => Some(ids.clone()),
+            Favorites::Unavailable => None,
+        }
+    }
+
+    /// Saves `ids` and shows them. A save that fails is logged and nothing changes; the
+    /// same when the current state is `Favorites::Unavailable` (a rejected file, a
+    /// crash-loop give-up, no configuration directory): the file is never replaced.
+    pub fn set_favorites(self: &Rc<Self>, ids: Vec<String>) {
+        if matches!(*self.favorites.borrow(), Favorites::Unavailable) {
+            return;
+        }
+        let Some(file) = &self.favorites_file else {
+            return;
+        };
+        if let Err(err) = favorites::save(file, &ids) {
+            tracing::error!(error = %err, "the favourites were not saved");
+            return;
+        }
+        self.favorites.replace(Favorites::Loaded(ids));
+        self.refresh(Changed::Favorites);
     }
 
     /// BR6: at most one popover of the bar is open; opening one closes the other.
@@ -458,7 +483,9 @@ impl Bar {
         self.outputs.replace(outputs);
         if let Some(file) = &self.favorites_file {
             let now = match favorites::read(file) {
-                Ok(_ids) => Favorites::Loaded,
+                // A file removed since start is a deliberate user act, not an error: the
+                // next start re-imports from COSMIC.
+                Ok(ids) => Favorites::Loaded(ids.unwrap_or_default()),
                 Err(err) => {
                     tracing::error!(error = %err, file = %file.display(), "the favourites are unavailable; the file is left as it is");
                     Favorites::Unavailable

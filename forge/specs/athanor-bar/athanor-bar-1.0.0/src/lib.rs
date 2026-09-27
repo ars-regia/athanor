@@ -7,4 +7,5 @@ pub mod dirs;
 pub mod keyboard;
 pub mod order;
 pub mod power;
+pub mod running;
 pub mod tiling;
