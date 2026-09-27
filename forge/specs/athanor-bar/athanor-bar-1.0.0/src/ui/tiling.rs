@@ -9,7 +9,7 @@ use athanor_compositor_client::WorkspaceId;
 use gtk4::glib;
 use gtk4::prelude::*;
 
-use super::popup::Popup;
+use super::popup::{switch_row, Popup};
 use super::{Bar, Changed, ModuleUi};
 use crate::i18n::tr;
 
@@ -62,17 +62,7 @@ pub fn new(bar: &Rc<Bar>, connector: Option<&str>) -> Option<Box<dyn ModuleUi>> 
     bar.client()?;
     let icon = gtk4::Image::from_icon_name("view-grid-symbolic");
     let popup = Popup::new(bar, &icon, &tr("Tiling"));
-    let label = gtk4::Label::new(Some(&tr("Tile windows")));
-    label.set_xalign(0.0);
-    label.set_hexpand(true);
-    let switch = gtk4::Switch::new();
-    switch.set_valign(gtk4::Align::Center);
-    switch.update_relation(&[gtk4::accessible::Relation::LabelledBy(
-        &[label.upcast_ref()],
-    )]);
-    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
-    row.append(&label);
-    row.append(&switch);
+    let (row, switch) = switch_row(&tr("Tile windows"));
     popup.popover.set_child(Some(&row));
     popup.button.set_visible(false);
 

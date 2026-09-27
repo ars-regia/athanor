@@ -10,7 +10,7 @@ use athanor_compositor_client::{theme, ScreenFilter};
 use gtk4::prelude::*;
 use gtk4::{gio, glib};
 
-use super::popup::Popup;
+use super::popup::{switch_row, Popup};
 use super::{Bar, Changed, ModuleUi};
 use crate::i18n::tr;
 
@@ -66,21 +66,6 @@ async fn reader_enabled() -> Option<bool> {
             None
         }
     }
-}
-
-fn switch_row(text: &str) -> (gtk4::Box, gtk4::Switch) {
-    let label = gtk4::Label::new(Some(text));
-    label.set_xalign(0.0);
-    label.set_hexpand(true);
-    let switch = gtk4::Switch::new();
-    switch.set_valign(gtk4::Align::Center);
-    switch.update_relation(&[gtk4::accessible::Relation::LabelledBy(
-        &[label.upcast_ref()],
-    )]);
-    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
-    row.append(&label);
-    row.append(&switch);
-    (row, switch)
 }
 
 struct Inner {

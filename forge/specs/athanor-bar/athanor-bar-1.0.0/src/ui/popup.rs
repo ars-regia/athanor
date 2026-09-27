@@ -42,6 +42,23 @@ impl Popup {
     }
 }
 
+/// A labelled switch, as a row of popover content: the label and the switch, with the
+/// switch's `LabelledBy` relation set to it.
+pub fn switch_row(text: &str) -> (gtk4::Box, gtk4::Switch) {
+    let label = gtk4::Label::new(Some(text));
+    label.set_xalign(0.0);
+    label.set_hexpand(true);
+    let switch = gtk4::Switch::new();
+    switch.set_valign(gtk4::Align::Center);
+    switch.update_relation(&[gtk4::accessible::Relation::LabelledBy(
+        &[label.upcast_ref()],
+    )]);
+    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+    row.append(&label);
+    row.append(&switch);
+    (row, switch)
+}
+
 /// A popover for `button`: parented to it, opening towards the inside of the screen, and
 /// keeping the button's `Expanded` state. The running applications' context menu uses it
 /// too, with its own triggers.
