@@ -129,23 +129,32 @@ pub fn write_atomically(path: &Path, text: &str) -> io::Result<()> {
     let name = path
         .file_name()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "the path has no file name"))?;
-    let temporary = path.with_file_name(format!(
-        ".{}.{}.{}.athanor-tmp",
-        name.to_string_lossy(),
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    ));
-    let written = (|| {
-        let mut file = fs::OpenOptions::new()
+    let (temporary, mut file) = loop {
+        let temporary = path.with_file_name(format!(
+            ".{}.{}.{}.athanor-tmp",
+            name.to_string_lossy(),
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        match fs::OpenOptions::new()
             .write(true)
             .create_new(true)
-            .open(&temporary)?;
+            .open(&temporary)
+        {
+            Ok(file) => break (temporary, file),
+            // A dead writer's leftover under a reused pid: not ours to touch, take the next name.
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(err) => return Err(err),
+        }
+    };
+    let written = (|| {
         file.write_all(text.as_bytes())?;
         file.sync_all()?;
         fs::rename(&temporary, path)
     })();
     if written.is_err() {
-        // The rename did not happen: the temporary is ours alone to remove.
+        // The rename did not happen, and the open above succeeded: the temporary is ours
+        // alone to remove.
         let _ignored = fs::remove_file(&temporary);
     }
     written?;
@@ -404,6 +413,28 @@ mod tests {
         std::fs::write(dir.join(".key.athanor-tmp"), "stale").expect("write");
         write_atomically(&path, "new").expect("writes");
         assert_eq!(std::fs::read_to_string(&path).expect("read"), "new");
+    }
+
+    #[test]
+    fn a_dead_writers_temporary_under_this_pid_is_skipped_and_left_alone() {
+        let dir = scratch("reused-pid-tmp");
+        let path = dir.join("key");
+        let pid = std::process::id();
+        let planted: Vec<PathBuf> = (0..1024)
+            .map(|n| dir.join(format!(".key.{pid}.{n}.athanor-tmp")))
+            .collect();
+        for temporary in &planted {
+            std::fs::write(temporary, "stale").expect("plant");
+        }
+        write_atomically(&path, "new").expect("writes");
+        assert_eq!(std::fs::read_to_string(&path).expect("read"), "new");
+        for temporary in &planted {
+            assert_eq!(
+                std::fs::read_to_string(temporary).expect("still there"),
+                "stale",
+                "{temporary:?} was touched"
+            );
+        }
     }
 
     #[test]
