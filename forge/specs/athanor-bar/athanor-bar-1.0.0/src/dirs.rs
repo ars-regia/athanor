@@ -6,6 +6,8 @@ use std::path::PathBuf;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Dirs {
+    /// The unit's own runtime directory, `%t/athanor-bar`.
+    pub unit_runtime: PathBuf,
     /// The crash-loop record (doc_shell.md, SH8), in the unit's runtime directory.
     pub failures: PathBuf,
     /// `$XDG_CONFIG_HOME`: the layout document and the favourites.
@@ -42,6 +44,7 @@ impl Dirs {
             .unwrap_or_else(|| runtime.join("athanor-bar"));
         Some(Dirs {
             failures: unit_runtime.join("failures"),
+            unit_runtime,
             config,
             cache,
             runtime,
@@ -74,6 +77,7 @@ mod tests {
         assert_eq!(
             dirs,
             Some(Dirs {
+                unit_runtime: PathBuf::from("/run/user/1/athanor-bar"),
                 failures: PathBuf::from("/run/user/1/athanor-bar/failures"),
                 config: PathBuf::from("/c"),
                 cache: PathBuf::from("/k"),
