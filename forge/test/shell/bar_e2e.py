@@ -108,7 +108,7 @@ def buttons(app, Atspi, name):
     return found
 
 
-def name_of(accessible):
+def name_or_none(accessible):
     """The accessible's name, or None once the bar destroyed it."""
     try:
         return accessible.get_name()
@@ -119,6 +119,7 @@ def name_of(accessible):
 def retitle(number, title):
     """Retitles cc_window.py `number`'s windows through its SIGUSR1 hook."""
     Path(f"/tmp/cc-window-{number}.title").write_text(title, encoding="utf-8")
+    signalled = 0
     for proc in Path("/proc").iterdir():
         if not proc.name.isdigit():
             continue
@@ -129,6 +130,9 @@ def retitle(number, title):
         for index, arg in enumerate(argv[:-1]):
             if arg.endswith(b"cc_window.py") and argv[index + 1] == number.encode():
                 os.kill(int(proc.name), signal.SIGUSR1)
+                signalled += 1
+    if signalled == 0:
+        raise RuntimeError(f"no cc_window {number} to retitle")
 
 
 def labelled(app, Atspi, role, label):
@@ -298,11 +302,16 @@ def main():
     check(
         "a title change updates the button in place, not a new one (BR3)",
         bool(before)
-        and wait_for(lambda: name_of(before[0]) == "CC Window: cc-window-1 renamed", 3),
-        repr(name_of(before[0])) if before else "no button",
+        and wait_for(
+            lambda: name_or_none(before[0]) == "CC Window: cc-window-1 renamed", 3
+        ),
+        repr(name_or_none(before[0])) if before else "no button",
     )
     retitle("1", "cc-window-1")
-    wait_for(lambda: buttons(app, Atspi, RUNNING_WINDOW_BUTTON), 3)
+    check(
+        "the title restores to cc-window-1",
+        wait_for(lambda: buttons(app, Atspi, RUNNING_WINDOW_BUTTON), 3),
+    )
 
     third = subprocess.Popen(["python3", WINDOW, "3"])
     check(
