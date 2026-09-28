@@ -39,8 +39,13 @@ MemoryMax=192M
 RuntimeDirectory=athanor-bar athanor
 RuntimeDirectoryMode=0700
 RuntimeDirectoryPreserve=yes
-# The favourites file, ~/.config/athanor/favorites.toml (BR7).
-ConfigurationDirectory=athanor
+# The favourites file, ~/.config/athanor/favorites.toml (BR7), and COSMIC's is_high_contrast
+# key in both theme modes, which the accessibility menu writes (BR3). Under
+# ProtectHome=read-only these are the only writable directories in the home directory:
+# systemd creates each one, parents included, and binds it read-write into the unit's
+# namespace. The mode is the default 0755, what the usual umask 022 gives them: systemd
+# 258 leaves an existing directory's mode alone and only logs one that differs.
+ConfigurationDirectory=athanor cosmic/com.system76.CosmicTheme.Dark/v1 cosmic/com.system76.CosmicTheme.Light/v1
 
 ProtectSystem=strict
 ProtectHome=read-only
