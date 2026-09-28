@@ -20,6 +20,7 @@ started by bar_session.py --hang CanReboot --window --pinnable and no favourites
 """
 
 import os
+import re
 import signal
 import sys
 import time
@@ -80,15 +81,16 @@ def showing(accessible, Atspi):
     return accessible.get_state_set().contains(Atspi.StateType.SHOWING)
 
 
-def buttons(app, Atspi, name):
-    """Every showing push button called `name`, found afresh: a rebuild replaces them."""
+def buttons_matching(app, Atspi, regex):
+    """Every showing push button whose name matches `regex`, found afresh: a rebuild
+    replaces them."""
     found = []
 
     def visit(accessible):
         try:
             if (
                 accessible.get_role_name() == "button"
-                and accessible.get_name() == name
+                and regex.search(accessible.get_name())
                 and showing(accessible, Atspi)
             ):
                 found.append(accessible)
@@ -106,6 +108,11 @@ def buttons(app, Atspi, name):
 
     visit(app)
     return found
+
+
+def buttons(app, Atspi, name):
+    """Every showing push button called `name` exactly."""
+    return buttons_matching(app, Atspi, re.compile(f"^{re.escape(name)}$"))
 
 
 def name_or_none(accessible):
@@ -292,6 +299,32 @@ def main():
     )
     pss_float = pss_kb(pid)
     print(f"athanor-bar PSS (float): {pss_float} kB")
+
+    clock_setting = (
+        Path(os.environ["XDG_CONFIG_HOME"])
+        / "cosmic"
+        / "com.system76.CosmicAppletTime"
+        / "v1"
+        / "military_time"
+    )
+
+    def clock_buttons(pattern):
+        return buttons_matching(app, Atspi, re.compile(pattern))
+
+    check(
+        "the clock shows 24 hours as COSMIC says",
+        wait_for(lambda: clock_buttons(r", \d\d:\d\d$"), 3),
+    )
+    clock_setting.write_text("false", encoding="utf-8")
+    check(
+        "the clock follows COSMIC's military_time live (BR3)",
+        wait_for(lambda: clock_buttons(r", \d{1,2}:\d\d (AM|PM)$"), 3),
+    )
+    clock_setting.write_text("true", encoding="utf-8")
+    check(
+        "the clock returns to 24 hours",
+        wait_for(lambda: clock_buttons(r", \d\d:\d\d$"), 3),
+    )
 
     user.write_text(BAR, encoding="utf-8")
     check(

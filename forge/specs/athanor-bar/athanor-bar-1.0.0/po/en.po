@@ -53,16 +53,28 @@ msgid "Colour filter"
 msgstr "Colour filter"
 
 #. TRANSLATORS: a g_date_time_format() pattern for the clock on the bar.
-#: src/ui/clock.rs:65
+#: src/ui/clock.rs:83
 msgid "%a %-d %b %H:%M"
 msgstr "%a %-d %b %H:%M"
 
 #. TRANSLATORS: a g_date_time_format() pattern, read aloud by screen readers.
-#: src/ui/clock.rs:67
+#: src/ui/clock.rs:85
 msgid "%A %-d %B %Y, %H:%M"
 msgstr "%A %-d %B %Y, %H:%M"
 
-#: src/ui/clock.rs:86
+#. TRANSLATORS: a g_date_time_format() pattern for the clock on the bar (12-hour clock).
+#: src/ui/clock.rs:90
+#, fuzzy
+msgid "%a %-d %b %-I:%M %p"
+msgstr "%a %-d %b %H:%M"
+
+#. TRANSLATORS: a g_date_time_format() pattern, read aloud by screen readers (12-hour clock).
+#: src/ui/clock.rs:92
+#, fuzzy
+msgid "%A %-d %B %Y, %-I:%M %p"
+msgstr "%A %-d %B %Y, %H:%M"
+
+#: src/ui/clock.rs:127
 msgid "Clock"
 msgstr "Clock"
 
@@ -135,64 +147,64 @@ msgstr "Power"
 msgid "Cancel"
 msgstr "Cancel"
 
-#: src/ui/running.rs:72
+#: src/ui/running.rs:160
 msgid "Running applications"
 msgstr "Running applications"
 
-#: src/ui/running.rs:84
+#: src/ui/running.rs:184
 msgid "Unknown application"
 msgstr "Unknown application"
 
-#: src/ui/running.rs:97
+#: src/ui/running.rs:197
 #, rust-format
 msgid "{app}: {title}"
 msgstr "{app}: {title}"
 
-#: src/ui/running.rs:103
+#: src/ui/running.rs:203
 #, rust-format
 msgid "{app} ({count} windows)"
 msgstr "{app} ({count} windows)"
 
-#: src/ui/running.rs:130
+#: src/ui/running.rs:230
 msgid "Running"
 msgstr "Running"
 
-#: src/ui/running.rs:277
+#: src/ui/running.rs:385
 msgid "Untitled window"
 msgstr "Untitled window"
 
-#: src/ui/running.rs:285
+#: src/ui/running.rs:393
 #, rust-format
 msgid "Minimise {title}"
 msgstr "Minimise {title}"
 
-#: src/ui/running.rs:289
+#: src/ui/running.rs:397
 #, rust-format
 msgid "Close {title}"
 msgstr "Close {title}"
 
-#: src/ui/running.rs:314
+#: src/ui/running.rs:422
 msgid "Open"
 msgstr "Open"
 
-#: src/ui/running.rs:316
+#: src/ui/running.rs:424
 msgid "New Window"
 msgstr "New Window"
 
-#: src/ui/running.rs:326
+#: src/ui/running.rs:434
 msgid "Unpin from Bar"
 msgstr "Unpin from Bar"
 
-#: src/ui/running.rs:332
+#: src/ui/running.rs:440
 msgid "Pin to Bar"
 msgstr "Pin to Bar"
 
-#: src/ui/running.rs:379
+#: src/ui/running.rs:487
 #, rust-format
 msgid "{name} could not start"
 msgstr "{name} could not start"
 
-#: src/ui/running.rs:380
+#: src/ui/running.rs:488
 msgid "The reason is in the system journal."
 msgstr "The reason is in the system journal."
 
