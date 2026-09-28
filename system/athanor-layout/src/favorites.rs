@@ -306,12 +306,12 @@ mod tests {
 
     #[test]
     fn the_documented_file_parses_in_order_without_duplicates() {
-        let text = "schema = 1\nfavorites = [\"org.mozilla.firefox.desktop\", \"com.system76.CosmicTerm.desktop\", \"org.mozilla.firefox.desktop\"]\n";
+        let text = "schema = 1\nfavorites = [\"org.mozilla.firefox.desktop\", \"org.gnome.Ptyxis.desktop\", \"org.mozilla.firefox.desktop\"]\n";
         assert_eq!(
             parse(text),
             Ok(ids(&[
                 "org.mozilla.firefox.desktop",
-                "com.system76.CosmicTerm.desktop"
+                "org.gnome.Ptyxis.desktop"
             ]))
         );
     }
