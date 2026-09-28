@@ -3,11 +3,11 @@
 Shell and application work does not need an image build and a desktop reboot for every
 change. Pick the fastest tier that can show the change:
 
-| Tier | Where | Turnaround | For |
-|------|-------|------------|-----|
-| A | `nested.sh`: cosmic-comp in a window on the host | seconds | a Wayland client (shell, settings, applets) against the real compositor |
-| B | this VM: the published image under KVM, `deploy.sh` into it | minutes | anything that needs the real system: greetd and the session, units, sandboxing, polkit, `/usr` layout |
-| C | CI image build, `bootc upgrade` on the desktop | hours | the image itself, the kernel, drivers, what only real hardware shows |
+| Tier | Where                                                       | Turnaround | For                                                                                                   |
+| ---- | ----------------------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------- |
+| A    | `nested.sh`: cosmic-comp in a window on the host            | seconds    | a Wayland client (shell, settings, applets) against the real compositor                               |
+| B    | this VM: the published image under KVM, `deploy.sh` into it | minutes    | anything that needs the real system: greetd and the session, units, sandboxing, polkit, `/usr` layout |
+| C    | CI image build, `bootc upgrade` on the desktop              | hours      | the image itself, the kernel, drivers, what only real hardware shows                                  |
 
 ## Tier A
 
@@ -78,6 +78,10 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   rotation, live presets, a rejected document, a mandatory key added mid-session, memory,
   and the crash loop. Screenshots land in `.scratch/layout-acceptance/`; the script checks
   the panel configuration, so look at them: they are the only check of what the panel draws.
+- `bar-acceptance.sh [stage...]`: athanor-bar under its real unit (package 2b.2):
+  Type=notify, the confinement against glycin's sandbox, PSS within 64 MB, and the
+  crash-loop fallback to the vendor layout. Build the binary first with
+  `forge/test/shell/rig.sh build-bar`.
 - `compositor-acceptance.sh [stage...]` deploys `cc-probe` from `.scratch/shell-rig/bin`
   (build it with `forge/test/shell/rig.sh build-compositor-client`) and checks, in the VM's
   session, the launch of package 2a (`doc_bar.md`, BR2 and BR3): an application on its own
