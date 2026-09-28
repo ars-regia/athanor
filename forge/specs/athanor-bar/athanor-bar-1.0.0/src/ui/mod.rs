@@ -113,15 +113,42 @@ type Content = (
 
 struct Surface {
     window: gtk4::ApplicationWindow,
-    /// Identifies the output this surface belongs to, the way `rebuild` matches an
-    /// existing surface against the wanted monitor list: `None` for the outputs GDK
-    /// cannot name, which then never matches and is always torn down and rebuilt.
+    /// The output this surface is on. `rebuild` keeps a surface only while this very
+    /// monitor object is still listed: an output that leaves and comes back, even under the
+    /// same connector, is a new `GdkMonitor` and a new `wl_output`.
+    monitor: gdk::Monitor,
+    /// The output's connector, for the modules that follow one output (tiling); `None`
+    /// when GDK cannot name it.
     connector: Option<String>,
     groups: [gtk4::Box; 3],
     modules: Vec<(Module, Box<dyn ModuleUi>)>,
+    /// The monitor's `invalidate` handler, which rebuilds the surfaces when the output
+    /// leaves (see `surface`).
+    invalidated: glib::SignalHandlerId,
 }
 
 impl Surface {
+    /// Still realized: a window torn down behind the bar's back is replaced, never reused.
+    fn alive(&self) -> bool {
+        self.window.is_realized()
+    }
+
+    fn destroy(self) {
+        self.monitor.disconnect(self.invalidated);
+        self.window.destroy();
+    }
+
+    /// Empties the window of an output that left and lets it go without destroying it:
+    /// cosmic-comp 1.8 closes the connection of a client that destroys a layer surface whose
+    /// output left, whenever it does so (seen in the dev VM with a bare gtk4-layer-shell
+    /// client too). GTK's list of toplevels keeps the window.
+    // ponytail: one empty window per output removal for the life of the process; destroy
+    // it instead once cosmic-comp tolerates that.
+    fn abandon(self) {
+        self.monitor.disconnect(self.invalidated);
+        self.window.set_child(None::<&gtk4::Widget>);
+    }
+
     /// A group with nothing visible in it is not drawn: an empty island is a facade.
     fn fit_groups(&self) {
         for group in &self.groups {
@@ -304,40 +331,57 @@ impl Bar {
         }
     }
 
-    /// Diffs the wanted outputs against the live surfaces by connector, so a layout or
+    /// The outputs now, as GDK's monitor objects.
+    fn monitors(&self) -> Vec<gdk::Monitor> {
+        let monitors = self.display.monitors();
+        (0..monitors.n_items())
+            .filter_map(|index| monitors.item(index).and_downcast::<gdk::Monitor>())
+            .collect()
+    }
+
+    /// One live surface per current output, each on that very monitor object.
+    fn surfaces_current(&self) -> bool {
+        let monitors = self.monitors();
+        let surfaces = self.surfaces.borrow();
+        surfaces.len() == monitors.len()
+            && surfaces
+                .iter()
+                .zip(&monitors)
+                .all(|(surface, monitor)| surface.monitor == *monitor && surface.alive())
+    }
+
+    /// Diffs the outputs against the live surfaces by monitor object, so a layout or
     /// module change (by far the common case a live reload applies) reconfigures the
     /// existing layer surfaces in place instead of destroying and recreating them: a
     /// compositor that tears its own reservation down before the destroy is acknowledged
     /// closes the connection outright, and this was the reload's untested path (the `Rc`
     /// that used to keep the bar alive was dropped before any second rebuild could ever
-    /// run - see `start`). Only an output that actually appeared or disappeared destroys
-    /// or creates a surface.
+    /// run - see `start`). A surface is reused only on the same monitor object and while
+    /// still on screen; a new output, or one that came back as a new monitor, gets a new
+    /// surface, and a surface whose output left goes.
     fn rebuild(self: &Rc<Self>) {
         self.open_popover.take();
         let layout = self.layout.get();
-        let monitors = self.display.monitors();
-        let mut wanted = Vec::new();
-        for index in 0..monitors.n_items() {
-            let Some(monitor) = monitors.item(index).and_downcast::<gdk::Monitor>() else {
-                continue;
-            };
-            let connector = monitor.connector().map(|name| name.to_string());
-            wanted.push((monitor, connector));
-        }
         let mut old = self.surfaces.take();
         let mut surfaces = Vec::new();
-        for (monitor, connector) in wanted {
-            let reused = connector
-                .as_ref()
-                .and_then(|id| old.iter().position(|s| s.connector.as_deref() == Some(id)))
+        for monitor in self.monitors() {
+            let reused = old
+                .iter()
+                .position(|surface| surface.monitor == monitor && surface.alive())
                 .map(|pos| old.remove(pos));
             surfaces.push(match reused {
-                Some(surface) => self.update_surface(surface, &monitor, connector, layout),
-                None => self.surface(&monitor, connector.as_deref(), layout),
+                Some(surface) => self.update_surface(surface, layout),
+                None => self.surface(&monitor, layout),
             });
         }
+        // Every surface on a listed monitor and still realized was reused: one still
+        // realized here is on an output that left.
         for leftover in old {
-            leftover.window.destroy();
+            if leftover.alive() {
+                leftover.abandon();
+            } else {
+                leftover.destroy();
+            }
         }
         self.surfaces.replace(surfaces);
         for changed in Changed::ALL {
@@ -377,12 +421,8 @@ impl Bar {
         (centre_box, groups, modules)
     }
 
-    fn surface(
-        self: &Rc<Self>,
-        monitor: &gdk::Monitor,
-        connector: Option<&str>,
-        layout: Layout,
-    ) -> Surface {
+    fn surface(self: &Rc<Self>, monitor: &gdk::Monitor, layout: Layout) -> Surface {
+        let connector = monitor.connector().map(|name| name.to_string());
         let window = gtk4::ApplicationWindow::new(&self.app);
         window.init_layer_shell();
         if let Err(reason) = layer_guard::require_layer_surface(&window) {
@@ -406,7 +446,7 @@ impl Bar {
         }
         window.add_css_class(&format!("preset-{}", layout.preset().id()));
 
-        let (centre_box, groups, modules) = self.build_content(connector, layout);
+        let (centre_box, groups, modules) = self.build_content(connector.as_deref(), layout);
         window.set_child(Some(&centre_box));
         let weak = Rc::downgrade(self);
         window.connect_map(move |_| {
@@ -414,27 +454,43 @@ impl Bar {
                 bar.mapped();
             }
         });
+        // When an output leaves, gtk4-layer-shell 1.3 answers its monitor's `invalidate`
+        // (connected after, so that the application goes first) by moving the window to no
+        // monitor: it destroys the layer surface and creates another one on the default
+        // output. cosmic-comp closes the connection of a client that destroys a layer
+        // surface of an output that left (see `Surface::abandon`), so the emission stops
+        // here and the rebuild, a debounce later, lets the surface go.
+        let weak = Rc::downgrade(self);
+        let invalidated = monitor.connect_invalidate(move |monitor| {
+            monitor.stop_signal_emission_by_name("invalidate");
+            if let Some(bar) = weak.upgrade() {
+                tracing::info!("an output left; the bar surfaces are rebuilt");
+                bar.schedule();
+            }
+        });
         window.present();
         Surface {
             window,
-            connector: connector.map(str::to_string),
+            monitor: monitor.clone(),
+            connector,
             groups,
             modules,
+            invalidated,
         }
     }
 
     /// Reconfigures a surface already on screen for a new layout: the panel edge (the
     /// only anchor that ever changes), the preset's CSS class, and the module row. The
-    /// window and its layer surface are never touched, which is the point (see `rebuild`).
-    fn update_surface(
-        self: &Rc<Self>,
-        surface: Surface,
-        monitor: &gdk::Monitor,
-        connector: Option<String>,
-        layout: Layout,
-    ) -> Surface {
-        let window = surface.window;
-        window.set_monitor(Some(monitor));
+    /// window, its monitor and its layer surface are never touched, which is the point
+    /// (see `rebuild`): gtk4-layer-shell recreates the layer surface for a new monitor.
+    fn update_surface(self: &Rc<Self>, surface: Surface, layout: Layout) -> Surface {
+        let Surface {
+            window,
+            monitor,
+            connector,
+            invalidated,
+            ..
+        } = surface;
         let (edge, edge_class) = match layout.panel() {
             PanelEdge::Top => (Edge::Top, "edge-top"),
             PanelEdge::Bottom => (Edge::Bottom, "edge-bottom"),
@@ -456,9 +512,11 @@ impl Bar {
         window.set_child(Some(&centre_box));
         Surface {
             window,
+            monitor,
             connector,
             groups,
             modules,
+            invalidated,
         }
     }
 
@@ -560,7 +618,11 @@ impl Bar {
     fn reload(self: &Rc<Self>) {
         let layout = self.source.layout();
         let outputs = outputs::current(&self.display);
-        let moved = layout != self.layout.get() || outputs != *self.outputs.borrow();
+        // The snapshot catches a change of size or connector; `surfaces_current` an output
+        // that left and came back within the debounce, and a surface whose output left.
+        let moved = layout != self.layout.get()
+            || outputs != *self.outputs.borrow()
+            || !self.surfaces_current();
         self.layout.set(layout);
         self.outputs.replace(outputs);
         if let Some(file) = &self.favorites_file {
