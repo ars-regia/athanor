@@ -427,22 +427,22 @@ fn menu_content(
     on_press(&open, bar, menu, move |bar| launch(bar, &app));
     list.append(&open);
     // Pinning needs the favourites and a desktop id; when either is missing there is no row.
-    let (Some(ids), Some(id)) = (bar.favorites(), entry.desktop_id.clone()) else {
+    if bar.favorites().is_none() {
+        return list;
+    }
+    let Some(id) = entry.desktop_id.clone() else {
         return list;
     };
     let pin = if entry.pinned {
         let row = menu_row(&tr("Unpin from Bar"));
         on_press(&row, bar, menu, move |bar| {
-            bar.set_favorites(favorites::unpinned(&ids, &id))
+            bar.change_favorites(|ids| Ok(favorites::unpinned(ids, &id)))
         });
         row
     } else {
         let row = menu_row(&tr("Pin to Bar"));
         on_press(&row, bar, menu, move |bar| {
-            match favorites::pinned(&ids, &id) {
-                Ok(ids) => bar.set_favorites(ids),
-                Err(err) => tracing::error!(error = %err, "the application was not pinned"),
-            }
+            bar.change_favorites(|ids| favorites::pinned(ids, &id))
         });
         row
     };

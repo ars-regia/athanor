@@ -242,6 +242,36 @@ pub fn unpinned(ids: &[String], id: &str) -> Vec<String> {
     ids.iter().filter(|known| *known != id).cloned().collect()
 }
 
+/// Reads the file, applies `change` and saves the result, under an exclusive lock that every
+/// writer of the file takes (the bar, the dock of 2c): two writers never lose each other's
+/// change. The lock is a separate file, `.favorites.toml.lock`, beside the file's target: the
+/// file itself is replaced by a rename on every save, so a lock on it would lock the old
+/// inode. An absent file reads as an empty list; a rejected one is returned as the error and
+/// left untouched.
+pub fn update(
+    path: &Path,
+    change: impl FnOnce(&[String]) -> Result<Vec<String>, FavoritesError>,
+) -> Result<Vec<String>, FavoritesError> {
+    let unwritable =
+        |err: io::Error| FavoritesError::Unwritable(format!("{}: {err}", path.display()));
+    let target = write_target(path).map_err(unwritable)?;
+    let dir = target.parent().unwrap_or(Path::new("."));
+    fs::create_dir_all(dir).map_err(unwritable)?;
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.join(".favorites.toml.lock"))
+        .map_err(unwritable)?;
+    // ponytail: a blocking lock on the GTK thread; writers hold it for one small file's
+    // read and rename. A try_lock with a retry on idle if a writer is ever seen holding it long.
+    lock.lock().map_err(unwritable)?;
+    let current = read(path)?.unwrap_or_default();
+    let ids = change(&current)?;
+    save(path, &ids)?;
+    Ok(ids)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -468,6 +498,44 @@ mod tests {
         assert_eq!(
             unpinned(&ids(&["a.desktop", "b.desktop"]), "a.desktop"),
             ids(&["b.desktop"])
+        );
+    }
+
+    #[test]
+    fn two_writers_pinning_at_once_lose_neither_change() {
+        let dir = scratch("two-writers");
+        let path = dir.join("favorites.toml");
+        save(&path, &[]).expect("seed");
+        let writers: Vec<_> = (0..8)
+            .map(|n| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    update(&path, |ids| pinned(ids, &format!("app{n}.desktop")))
+                })
+            })
+            .collect();
+        for writer in writers {
+            writer.join().expect("joins").expect("updates");
+        }
+        let mut ids = read(&path).expect("reads").expect("exists");
+        ids.sort();
+        assert_eq!(
+            ids,
+            (0..8)
+                .map(|n| format!("app{n}.desktop"))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_rejected_file_is_not_updated() {
+        let dir = scratch("update-rejected");
+        let path = dir.join("favorites.toml");
+        std::fs::write(&path, "schema = 2\n").expect("write");
+        assert!(update(&path, |ids| pinned(ids, "a.desktop")).is_err());
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            "schema = 2\n"
         );
     }
 }
