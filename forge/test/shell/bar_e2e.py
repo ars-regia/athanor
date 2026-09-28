@@ -7,7 +7,9 @@ started by bar_session.py --hang CanReboot --window --pinnable and no favourites
 - the preset follows the user's layout document live, a broken document falls back to the
   vendor layout without stopping the bar, and a key the policy marks mandatory holds
   (acceptance item 16);
-- the test window shows as a running application under the bar preset; with a second
+- the test window shows as a running application under the bar preset, a title change
+  updates its button in place, and a desktop entry installed while the bar runs claims a
+  window by StartupWMClass; with a second
   window its button opens the menu, whose Pin to Bar and Unpin from Bar write the
   favourites file and whose row follows the pinned state;
 - the accessibility popover offers high contrast, which writes COSMIC's is_high_contrast;
@@ -18,6 +20,7 @@ started by bar_session.py --hang CanReboot --window --pinnable and no favourites
 """
 
 import os
+import signal
 import sys
 import time
 from pathlib import Path
@@ -103,6 +106,29 @@ def buttons(app, Atspi, name):
 
     visit(app)
     return found
+
+
+def name_of(accessible):
+    """The accessible's name, or None once the bar destroyed it."""
+    try:
+        return accessible.get_name()
+    except GLib.Error:
+        return None
+
+
+def retitle(number, title):
+    """Retitles cc_window.py `number`'s windows through its SIGUSR1 hook."""
+    Path(f"/tmp/cc-window-{number}.title").write_text(title, encoding="utf-8")
+    for proc in Path("/proc").iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            argv = (proc / "cmdline").read_bytes().split(b"\0")
+        except OSError:
+            continue
+        for index, arg in enumerate(argv[:-1]):
+            if arg.endswith(b"cc_window.py") and argv[index + 1] == number.encode():
+                os.kill(int(proc.name), signal.SIGUSR1)
 
 
 def labelled(app, Atspi, role, label):
@@ -267,6 +293,35 @@ def main():
         "bar: the test window is a running application",
         wait_for(lambda: buttons(app, Atspi, RUNNING_WINDOW_BUTTON), 5),
     )
+    before = buttons(app, Atspi, RUNNING_WINDOW_BUTTON)
+    retitle("1", "cc-window-1 renamed")
+    check(
+        "a title change updates the button in place, not a new one (BR3)",
+        bool(before)
+        and wait_for(lambda: name_of(before[0]) == "CC Window: cc-window-1 renamed", 3),
+        repr(name_of(before[0])) if before else "no button",
+    )
+    retitle("1", "cc-window-1")
+    wait_for(lambda: buttons(app, Atspi, RUNNING_WINDOW_BUTTON), 3)
+
+    third = subprocess.Popen(["python3", WINDOW, "3"])
+    check(
+        "a window with no desktop entry shows under its app id",
+        wait_for(lambda: buttons(app, Atspi, "org.athanor.CcWindow3: cc-window-3"), 5),
+    )
+    entry = Path(os.environ["XDG_DATA_HOME"]) / "applications" / "cc-three.desktop"
+    entry.write_text(
+        "[Desktop Entry]\nType=Application\nName=CC Three\nExec=true\n"
+        "StartupWMClass=org.athanor.CcWindow3\n",
+        encoding="utf-8",
+    )
+    check(
+        "an entry installed while the bar runs claims the window by StartupWMClass",
+        wait_for(lambda: buttons(app, Atspi, "CC Three: cc-window-3"), 10),
+    )
+    third.terminate()
+    third.wait(5)
+    entry.unlink()
     pss_bar = pss_kb(pid)
     print(f"athanor-bar PSS (bar, window shown): {pss_bar} kB")
 

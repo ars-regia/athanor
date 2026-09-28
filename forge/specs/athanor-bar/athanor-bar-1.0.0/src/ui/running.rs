@@ -2,12 +2,14 @@
 //! the open windows, grouped by app id, minimised windows included. A press launches,
 //! activates or minimises; with several windows, the secondary button, Shift+F10 or the
 //! Menu key, a menu lists the windows with minimise and close, a new window, and pinning.
+//! A change that keeps the buttons and their windows (a title, the focus) updates the
+//! buttons in place; the installed applications are cached until GIO reports a change.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use athanor_bar::running::{self, Entry, Open, Primary};
+use athanor_bar::running::{self, AppIndex, Entry, Open, Primary};
 use athanor_compositor_client::WindowId;
 use athanor_layout::favorites;
 use gio_unix::DesktopAppInfo;
@@ -21,11 +23,68 @@ use crate::i18n::{tr, tr_with};
 
 const NOTIFY_TIMEOUT_MS: i32 = 5000;
 
+/// The installed applications: the index windows are matched through, and the desktop
+/// entries by id.
+struct Apps {
+    index: AppIndex,
+    infos: HashMap<String, DesktopAppInfo>,
+}
+
+impl Apps {
+    fn installed() -> Apps {
+        let infos: HashMap<String, DesktopAppInfo> = gio::AppInfo::all()
+            .into_iter()
+            .filter_map(|info| info.downcast::<DesktopAppInfo>().ok())
+            .filter_map(|info| Some((info.id()?.to_string(), info)))
+            .collect();
+        let index = AppIndex::new(infos.iter().map(|(id, info)| {
+            (
+                id.clone(),
+                info.startup_wm_class().map(|class| class.to_string()),
+            )
+        }));
+        Apps { index, infos }
+    }
+}
+
+type State = (Entry<WindowId>, Option<DesktopAppInfo>);
+
+/// One button of the row. Its handlers read `state` when they fire, so an update in place
+/// reaches them.
+struct Shown {
+    button: gtk4::Button,
+    image: gtk4::Image,
+    state: Rc<RefCell<State>>,
+}
+
 struct RunningUi {
     row: gtk4::Box,
-    shown: RefCell<Vec<Entry<WindowId>>>,
+    shown: RefCell<Vec<Shown>>,
     /// A menu is open: the row is rebuilt when it closes, not under the pointer.
     menu_open: Rc<Cell<bool>>,
+    /// `None` when stale: the next refresh lists the installed applications again.
+    apps: Rc<RefCell<Option<Rc<Apps>>>>,
+    monitor: gio::AppInfoMonitor,
+    apps_changed: Option<glib::SignalHandlerId>,
+}
+
+impl RunningUi {
+    fn apps(&self) -> Rc<Apps> {
+        self.apps
+            .borrow_mut()
+            .get_or_insert_with(|| Rc::new(Apps::installed()))
+            .clone()
+    }
+}
+
+impl Drop for RunningUi {
+    /// A rebuilt surface drops its modules: a handler left connected would keep a dead
+    /// module's cache and refresh the bar for it.
+    fn drop(&mut self) {
+        if let Some(handler) = self.apps_changed.take() {
+            self.monitor.disconnect(handler);
+        }
+    }
 }
 
 impl ModuleUi for RunningUi {
@@ -50,19 +109,47 @@ impl ModuleUi for RunningUi {
             })
             .collect();
         let favorites = bar.favorites().unwrap_or_default();
-        let entries =
-            running::entries(&favorites, &windows, |id| DesktopAppInfo::new(id).is_some());
-        if *self.shown.borrow() == entries {
+        let apps = self.apps();
+        let states: Vec<State> = running::entries(&favorites, &windows, &apps.index)
+            .into_iter()
+            .map(|entry| {
+                let info = entry
+                    .desktop_id
+                    .as_deref()
+                    .and_then(|id| apps.infos.get(id).cloned());
+                (entry, info)
+            })
+            .collect();
+        let shown_entries: Vec<Entry<WindowId>> = self
+            .shown
+            .borrow()
+            .iter()
+            .map(|shown| shown.state.borrow().0.clone())
+            .collect();
+        let entries: Vec<Entry<WindowId>> = states.iter().map(|(entry, _)| entry.clone()).collect();
+        if running::same_shape(&shown_entries, &entries) {
+            // Only the presentation changed, if anything: the buttons stay, so do their
+            // accessibles and any focus on them.
+            for (shown, state) in self.shown.borrow().iter().zip(states) {
+                if *shown.state.borrow() != state {
+                    shown.state.replace(state);
+                    present(shown);
+                }
+            }
             return;
         }
         while let Some(child) = self.row.first_child() {
             self.row.remove(&child);
         }
-        for entry in &entries {
-            self.row.append(&entry_button(bar, entry, &self.menu_open));
+        let shown: Vec<Shown> = states
+            .into_iter()
+            .map(|state| entry_button(bar, state, &self.menu_open))
+            .collect();
+        for button in &shown {
+            self.row.append(&button.button);
         }
-        self.row.set_visible(!entries.is_empty());
-        self.shown.replace(entries);
+        self.row.set_visible(!shown.is_empty());
+        self.shown.replace(shown);
     }
 }
 
@@ -71,10 +158,22 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 2);
     row.update_property(&[Property::Label(&tr("Running applications"))]);
     row.set_visible(false);
+    let apps = Rc::new(RefCell::new(None));
+    let monitor = gio::AppInfoMonitor::get();
+    let (weak_bar, stale) = (Rc::downgrade(bar), apps.clone());
+    let apps_changed = monitor.connect_changed(move |_| {
+        stale.replace(None);
+        if let Some(bar) = weak_bar.upgrade() {
+            bar.refresh(Changed::Favorites);
+        }
+    });
     Some(Box::new(RunningUi {
         row,
         shown: RefCell::new(Vec::new()),
         menu_open: Rc::new(Cell::new(false)),
+        apps,
+        monitor,
+        apps_changed: Some(apps_changed),
     }))
 }
 
@@ -107,25 +206,25 @@ fn entry_label<K>(name: &str, windows: &[Open<K>]) -> String {
     }
 }
 
-fn entry_button(
-    bar: &Rc<Bar>,
-    entry: &Entry<WindowId>,
-    menu_open: &Rc<Cell<bool>>,
-) -> gtk4::Button {
-    let info = entry.desktop_id.as_deref().and_then(DesktopAppInfo::new);
-    let name = app_name(entry, info.as_ref());
-    let label = entry_label(&name, &entry.windows);
-    let image = match info.as_ref().and_then(|info| info.icon()) {
-        Some(icon) => gtk4::Image::from_gicon(&icon),
-        None => gtk4::Image::from_icon_name("application-x-executable-symbolic"),
-    };
-    image.set_pixel_size(24);
-    let button = gtk4::Button::new();
-    button.set_child(Some(&image));
-    button.add_css_class("bar-button");
+/// Shows `shown`'s state on its button: the label, the icon, and whether the app runs and
+/// has the focus. A new button and an update in place both come here.
+fn present(shown: &Shown) {
+    let state = shown.state.borrow();
+    let (entry, info) = &*state;
+    let label = entry_label(&app_name(entry, info.as_ref()), &entry.windows);
+    let button = &shown.button;
     button.set_tooltip_text(Some(&label));
     button.update_property(&[Property::Label(&label)]);
-    if !entry.windows.is_empty() {
+    match info.as_ref().and_then(|info| info.icon()) {
+        Some(icon) => shown.image.set_from_gicon(&icon),
+        None => shown
+            .image
+            .set_icon_name(Some("application-x-executable-symbolic")),
+    }
+    if entry.windows.is_empty() {
+        button.remove_css_class("running");
+        button.reset_property(gtk4::AccessibleProperty::Description);
+    } else {
         button.add_css_class("running");
         button.update_property(&[Property::Description(&tr("Running"))]);
     }
@@ -135,7 +234,23 @@ fn entry_button(
         .any(|window| window.activated && !window.minimized)
     {
         button.add_css_class("active");
+    } else {
+        button.remove_css_class("active");
     }
+}
+
+fn entry_button(bar: &Rc<Bar>, state: State, menu_open: &Rc<Cell<bool>>) -> Shown {
+    let image = gtk4::Image::new();
+    image.set_pixel_size(24);
+    let button = gtk4::Button::new();
+    button.set_child(Some(&image));
+    button.add_css_class("bar-button");
+    let shown = Shown {
+        button: button.clone(),
+        image,
+        state: Rc::new(RefCell::new(state)),
+    };
+    present(&shown);
 
     let menu = popup::attach(bar, &button);
     let (weak_bar, closed_flag) = (Rc::downgrade(bar), menu_open.clone());
@@ -150,17 +265,17 @@ fn entry_button(
         });
     });
     let show_menu: Rc<dyn Fn()> = {
-        let (weak_bar, weak_menu, entry, info, menu_open) = (
+        let (weak_bar, weak_menu, state, menu_open) = (
             Rc::downgrade(bar),
             menu.downgrade(),
-            entry.clone(),
-            info.clone(),
+            shown.state.clone(),
             menu_open.clone(),
         );
         Rc::new(move || {
             let (Some(bar), Some(menu)) = (weak_bar.upgrade(), weak_menu.upgrade()) else {
                 return;
             };
+            let (entry, info) = state.borrow().clone();
             menu.set_child(Some(&menu_content(&bar, &menu, &entry, info.as_ref())));
             menu_open.set(true);
             bar.popover_opened(&menu);
@@ -168,28 +283,20 @@ fn entry_button(
         })
     };
 
-    let (weak_bar, entry_for_click, info_for_click, choose) = (
-        Rc::downgrade(bar),
-        entry.clone(),
-        info.clone(),
-        show_menu.clone(),
-    );
+    let (weak_bar, state, choose) = (Rc::downgrade(bar), shown.state.clone(), show_menu.clone());
     button.connect_clicked(move |_| {
         let Some(bar) = weak_bar.upgrade() else {
             return;
         };
-        match running::primary(&entry_for_click) {
+        let (entry, info) = state.borrow().clone();
+        match running::primary(&entry) {
             Primary::Launch => {
-                if let Some(info) = &info_for_click {
+                if let Some(info) = &info {
                     launch(&bar, info);
                 }
             }
             Primary::Activate(id) => {
-                if let Some(window) = entry_for_click
-                    .windows
-                    .iter()
-                    .find(|window| window.id == id)
-                {
+                if let Some(window) = entry.windows.iter().find(|window| window.id == id) {
                     activate(&bar, window);
                 }
             }
@@ -220,7 +327,7 @@ fn entry_button(
         keys.add_shortcut(gtk4::Shortcut::new(Some(trigger), Some(action)));
     }
     button.add_controller(keys);
-    button
+    shown
 }
 
 fn menu_row(label: &str) -> gtk4::Button {
