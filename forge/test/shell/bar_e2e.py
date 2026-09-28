@@ -312,7 +312,7 @@ def main():
         ),
         repr(name_or_none(before[0])) if before else "no button",
     )
-    retitle("1", "cc-window\u0007-1")
+    retitle("1", "cc-\u202ewindow\u0007-1")
     check(
         "a title's control and bidi characters never reach the bar (SH12)",
         wait_for(lambda: buttons(app, Atspi, RUNNING_WINDOW_BUTTON), 3),
