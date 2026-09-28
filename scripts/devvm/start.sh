@@ -42,7 +42,7 @@ systemd-run --user --unit="$UNIT" --collect --quiet \
   -netdev "user,id=n0,hostfwd=tcp:127.0.0.1:$SSH_PORT-:22" \
   -device "virtio-net-pci,netdev=n0,$NIC_PCI_ADDR" \
   -device virtio-rng-pci -device qemu-xhci -device usb-kbd -device usb-tablet \
-  -device virtio-vga-gl "${display[@]}" \
+  -device "virtio-vga-gl,max_outputs=$GPU_OUTPUTS" "${display[@]}" \
   -chardev "socket,id=devvm-console,path=$STATE/console.sock,server=on,wait=off,logfile=$STATE/console.log,logappend=on" \
   -serial chardev:devvm-console \
   -monitor "unix:$STATE/monitor.sock,server,nowait"

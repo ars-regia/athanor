@@ -89,7 +89,7 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   and the three COSMIC openers, cold and warm. Screenshots land in
   `.scratch/compositor-acceptance/`; look at the openers' ones.
 - Settings are in `devvm.env` and are overridden from the environment: `CPUS=4`,
-  `MEMORY=8G`, `DISK_GIB=40`, `SSH_PORT`, `ISO_TAG`, `REGISTRY`. State (ISO, disks, logs)
+  `MEMORY=8G`, `DISK_GIB=40`, `GPU_OUTPUTS=1`, `SSH_PORT`, `ISO_TAG`, `REGISTRY`. State (ISO, disks, logs)
   is in `${XDG_DATA_HOME:-~/.local/share}/athanor-devvm`: about 6 GB of ISO and up to
   `DISK_GIB` of disk.
 - Needs `qemu-system-x86_64` with the virtio-gpu-gl device, `qemu-img`, OVMF, `skopeo`,

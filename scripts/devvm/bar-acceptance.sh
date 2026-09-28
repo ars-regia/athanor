@@ -3,7 +3,8 @@
 # Package 2b.2 of docs/architecture/doc_bar.md in the dev VM's real session, under the real
 # unit file and the real user manager: the bar starts as a Type=notify unit, its
 # confinement leaves glycin's image sandbox working, it stays within its memory budget
-# (section 5, item 17), and a crash loop falls back to the vendor layout (SH8).
+# (section 5, item 17), high contrast reaches COSMIC's theme from inside it (BR3), and a
+# crash loop falls back to the vendor layout (SH8).
 # athanor-shelld is masked for the run: COSMIC owns its bus names in this session.
 # Deploys the binary, the unit and the vendor favourites from .scratch/shell-rig/bin and
 # forge/specs/athanor-bar (build the binary with forge/test/shell/rig.sh build-bar). With no
@@ -22,7 +23,7 @@ BIN=$ROOT/.scratch/shell-rig/bin
 DATA=$ROOT/forge/specs/athanor-bar/athanor-bar-1.0.0/data
 SHOTS=$ROOT/.scratch/bar-acceptance
 PSS_LIMIT_KB=$((64 * 1024))
-STAGES=(deploy unit memory crash-loop cleanup)
+STAGES=(deploy unit memory high-contrast crash-loop cleanup)
 STAGE=
 CLEANED=0
 
@@ -106,6 +107,13 @@ stage_unit() {
     fi
     [[ $(unit is-active) == active ]] || fail "not active after 5 s: $(unit show -p Result --value)"
     runtime_athanor_writable || fail "mkdir/rmdir under %t/athanor failed inside the unit's own mount namespace"
+    local config dir
+    # shellcheck disable=SC2016 # expanded by the guest's shell
+    config=$(in_session 'echo "${XDG_CONFIG_HOME:-$HOME/.config}"')
+    for dir in athanor cosmic/com.system76.CosmicTheme.Dark/v1 cosmic/com.system76.CosmicTheme.Light/v1; do
+        config_writable "$config/$dir" ||
+            fail "creating and removing a file in $config/$dir failed inside the unit's own mount namespace"
+    done
 }
 
 # Proves that %t/athanor is writable from *inside* athanor-bar.service's own confinement,
@@ -117,12 +125,25 @@ stage_unit() {
 # This is what launch() (athanor-compositor-client) relies on for a started application's
 # Wayland security context.
 runtime_athanor_writable() {
-    local pid uid dir
+    local uid
+    uid=$(in_session id -u)
+    in_unit_namespace "mkdir \"/run/user/$uid/athanor/bar-acceptance-$$\" &&
+        rmdir \"/run/user/$uid/athanor/bar-acceptance-$$\""
+}
+
+# The same proof for the directories ConfigurationDirectory= binds read-write under
+# ProtectHome=read-only: the favourites file (BR7) and COSMIC's is_high_contrast key in
+# both theme modes (BR3). A file, not a directory, since that is what the bar writes there.
+config_writable() { # config_writable DIR
+    in_unit_namespace "touch \"$1/bar-acceptance-$$\" && rm \"$1/bar-acceptance-$$\""
+}
+
+# Runs a shell command as the session user inside athanor-bar.service's mount namespace.
+in_unit_namespace() { # in_unit_namespace SHELL-COMMAND
+    local pid uid
     pid=$(unit show -p MainPID --value)
     uid=$(in_session id -u)
-    dir="/run/user/$uid/athanor/bar-acceptance-$$"
-    guest_ssh "sudo nsenter --target $pid --mount --setuid=$uid --setgid=$uid -- \
-        sh -c 'mkdir \"$dir\" && rmdir \"$dir\"'"
+    guest_ssh "sudo nsenter --target $pid --mount --setuid=$uid --setgid=$uid -- sh -c '$1'"
 }
 
 stage_memory() {
@@ -135,6 +156,15 @@ stage_memory() {
     echo "memory: athanor-bar PSS $pss kB"
     [[ $pss =~ ^[0-9]+$ ]] || fail "Pss '$pss' from /proc/$pid/smaps_rollup"
     ((pss <= PSS_LIMIT_KB)) || fail "PSS $pss kB is above $PSS_LIMIT_KB kB (item 17)"
+}
+
+# Switches high contrast on and off through the bar's own menu over AT-SPI; the bar writes
+# the key from inside its confinement (bar_high_contrast.py).
+stage_high-contrast() {
+    [[ $(unit is-active) == active ]] || fresh_start
+    in_session python3 - < "$HERE/bar_high_contrast.py" ||
+        fail "the switch did not reach COSMIC's is_high_contrast (steps above)"
+    [[ $(unit is-active) == active ]] || fail "not active after switching: $(unit show -p Result --value)"
 }
 
 stage_crash-loop() {
