@@ -202,10 +202,24 @@ pub fn load_or_import(
             }
         },
     };
-    if let Err(err) = save(path, &ids) {
-        tracing::warn!(error = %err, "the imported favourites were not saved; the import runs again at the next start");
+    // Under the same lock `update` takes: a concurrent first start (the dock of 2c) may have
+    // imported and saved while this one was reading COSMIC's or the vendor's list, so the
+    // file is re-checked once the lock is held, and that import wins over this one's.
+    let saved = lock_writer(path).and_then(|_lock| match read(path)? {
+        Some(existing) => Ok(Some(existing)),
+        None => {
+            save(path, &ids)?;
+            Ok(None)
+        }
+    });
+    match saved {
+        Ok(Some(existing)) => Ok(existing),
+        Ok(None) => Ok(ids),
+        Err(err) => {
+            tracing::warn!(error = %err, "the imported favourites were not saved; the import runs again at the next start");
+            Ok(ids)
+        }
     }
-    Ok(ids)
 }
 
 /// COSMIC's list as this file accepts it: desktop ids only, once each, at most the bound.
@@ -242,16 +256,12 @@ pub fn unpinned(ids: &[String], id: &str) -> Vec<String> {
     ids.iter().filter(|known| *known != id).cloned().collect()
 }
 
-/// Reads the file, applies `change` and saves the result, under an exclusive lock that every
-/// writer of the file takes (the bar, the dock of 2c): two writers never lose each other's
-/// change. The lock is a separate file, `.favorites.toml.lock`, beside the file's target: the
-/// file itself is replaced by a rename on every save, so a lock on it would lock the old
-/// inode. An absent file reads as an empty list; a rejected one is returned as the error and
-/// left untouched.
-pub fn update(
-    path: &Path,
-    change: impl FnOnce(&[String]) -> Result<Vec<String>, FavoritesError>,
-) -> Result<Vec<String>, FavoritesError> {
+/// The exclusive lock every writer of the file takes (see `update`): opens, creating if
+/// needed, `.favorites.toml.lock` beside `path`'s target, creating the target's directory
+/// first, and blocks until it is held. The lock is a separate file: the file itself is
+/// replaced by a rename on every save, so a lock on it would lock the old inode. Dropping
+/// the returned file releases the lock.
+fn lock_writer(path: &Path) -> Result<fs::File, FavoritesError> {
     let unwritable =
         |err: io::Error| FavoritesError::Unwritable(format!("{}: {err}", path.display()));
     let target = write_target(path).map_err(unwritable)?;
@@ -266,6 +276,18 @@ pub fn update(
     // ponytail: a blocking lock on the GTK thread; writers hold it for one small file's
     // read and rename. A try_lock with a retry on idle if a writer is ever seen holding it long.
     lock.lock().map_err(unwritable)?;
+    Ok(lock)
+}
+
+/// Reads the file, applies `change` and saves the result, under an exclusive lock that every
+/// writer of the file takes (the bar, the dock of 2c): two writers never lose each other's
+/// change. An absent file reads as an empty list; a rejected one is returned as the error and
+/// left untouched.
+pub fn update(
+    path: &Path,
+    change: impl FnOnce(&[String]) -> Result<Vec<String>, FavoritesError>,
+) -> Result<Vec<String>, FavoritesError> {
+    let _lock = lock_writer(path)?;
     let current = read(path)?.unwrap_or_default();
     let ids = change(&current)?;
     save(path, &ids)?;
@@ -434,6 +456,23 @@ mod tests {
         );
         assert_eq!(found, Ok(ids(&["a.desktop", "b.desktop"])));
         assert_eq!(read(&path), Ok(Some(ids(&["a.desktop", "b.desktop"]))));
+    }
+
+    #[test]
+    fn a_concurrent_first_start_does_not_overwrite_the_other_writers_import() {
+        let path = scratch("concurrent-import").join("favorites.toml");
+        let found = load_or_import(
+            &path,
+            || {
+                // Another writer's own first-start import lands on disk while this one is
+                // still asking COSMIC for its list; the lock, taken after, must see it.
+                save(&path, &ids(&["other.desktop"])).expect("the other writer saves first");
+                Some(ids(&["mine.desktop"]))
+            },
+            Path::new("/nonexistent"),
+        );
+        assert_eq!(found, Ok(ids(&["other.desktop"])));
+        assert_eq!(read(&path), Ok(Some(ids(&["other.desktop"]))));
     }
 
     #[test]
