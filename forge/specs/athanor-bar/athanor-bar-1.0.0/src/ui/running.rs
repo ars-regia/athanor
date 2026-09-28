@@ -179,11 +179,21 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     }))
 }
 
+/// The window's app id is set by the client (`xdg_toplevel.set_app_id`): arbitrary UTF-8,
+/// control and bidi characters included (SH12). With no desktop entry to name it, it is
+/// shown only sanitised, never raw; an id that sanitises to nothing falls back like an
+/// empty one.
 fn app_name(entry: &Entry<WindowId>, info: Option<&DesktopAppInfo>) -> String {
     match info {
         Some(info) => info.name().to_string(),
-        None if entry.app_id.is_empty() => tr("Unknown application"),
-        None => entry.app_id.clone(),
+        None => {
+            let sanitized = text::line(&entry.app_id, text::NAME_CHARS);
+            if sanitized.is_empty() {
+                tr("Unknown application")
+            } else {
+                sanitized
+            }
+        }
     }
 }
 
@@ -523,6 +533,32 @@ mod tests {
             activated: false,
             minimized: false,
         }
+    }
+
+    fn entry(app_id: &str) -> Entry<WindowId> {
+        Entry {
+            desktop_id: None,
+            app_id: app_id.to_owned(),
+            pinned: false,
+            windows: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn an_app_id_of_hidden_characters_only_falls_back_to_unknown_application() {
+        assert_eq!(
+            app_name(&entry("\u{202e}\u{7}"), None),
+            tr("Unknown application")
+        );
+        assert_eq!(app_name(&entry(""), None), tr("Unknown application"));
+    }
+
+    #[test]
+    fn an_app_id_with_no_desktop_entry_is_shown_sanitised_not_raw() {
+        assert_eq!(
+            app_name(&entry("org.athanor.CcWindow3\u{202e}evil"), None),
+            "org.athanor.CcWindow3evil"
+        );
     }
 
     #[test]

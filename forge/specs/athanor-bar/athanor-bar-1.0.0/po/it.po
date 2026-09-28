@@ -145,64 +145,64 @@ msgstr "Alimentazione"
 msgid "Cancel"
 msgstr "Annulla"
 
-#: src/ui/running.rs:160
+#: src/ui/running.rs:161
 msgid "Running applications"
 msgstr "Applicazioni in esecuzione"
 
-#: src/ui/running.rs:184
+#: src/ui/running.rs:192 src/ui/running.rs:551 src/ui/running.rs:553
 msgid "Unknown application"
 msgstr "Applicazione sconosciuta"
 
-#: src/ui/running.rs:197
+#: src/ui/running.rs:208
 #, rust-format
 msgid "{app}: {title}"
 msgstr "{app}: {title}"
 
-#: src/ui/running.rs:203
+#: src/ui/running.rs:214
 #, rust-format
 msgid "{app} ({count} windows)"
 msgstr "{app} ({count} finestre)"
 
-#: src/ui/running.rs:230
+#: src/ui/running.rs:241
 msgid "Running"
 msgstr "In esecuzione"
 
-#: src/ui/running.rs:385
+#: src/ui/running.rs:396
 msgid "Untitled window"
 msgstr "Finestra senza titolo"
 
-#: src/ui/running.rs:393
+#: src/ui/running.rs:404
 #, rust-format
 msgid "Minimise {title}"
 msgstr "Riduci a icona {title}"
 
-#: src/ui/running.rs:397
+#: src/ui/running.rs:408
 #, rust-format
 msgid "Close {title}"
 msgstr "Chiudi {title}"
 
-#: src/ui/running.rs:422
+#: src/ui/running.rs:433
 msgid "Open"
 msgstr "Apri"
 
-#: src/ui/running.rs:424
+#: src/ui/running.rs:435
 msgid "New Window"
 msgstr "Nuova finestra"
 
-#: src/ui/running.rs:434
+#: src/ui/running.rs:448
 msgid "Unpin from Bar"
 msgstr "Rimuovi dalla barra"
 
-#: src/ui/running.rs:440
+#: src/ui/running.rs:454
 msgid "Pin to Bar"
 msgstr "Aggiungi alla barra"
 
-#: src/ui/running.rs:487
+#: src/ui/running.rs:498
 #, rust-format
 msgid "{name} could not start"
 msgstr "Impossibile avviare {name}"
 
-#: src/ui/running.rs:488
+#: src/ui/running.rs:499
 msgid "The reason is in the system journal."
 msgstr "Il motivo è nel registro di sistema."
 
