@@ -22,6 +22,8 @@ import sys
 import time
 from pathlib import Path
 
+from gi.repository import GLib
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from atspi_check import find_application, walk  # noqa: E402
 
@@ -80,14 +82,22 @@ def buttons(app, Atspi, name):
     found = []
 
     def visit(accessible):
-        if (
-            accessible.get_role_name() == "button"
-            and accessible.get_name() == name
-            and showing(accessible, Atspi)
-        ):
-            found.append(accessible)
-        for index in range(accessible.get_child_count()):
-            child = accessible.get_child_at_index(index)
+        try:
+            if (
+                accessible.get_role_name() == "button"
+                and accessible.get_name() == name
+                and showing(accessible, Atspi)
+            ):
+                found.append(accessible)
+            children = [
+                accessible.get_child_at_index(index)
+                for index in range(accessible.get_child_count())
+            ]
+        except GLib.Error:
+            # A window event rebuilt the row mid-walk and this node is gone: it is not
+            # there to be found. The callers poll, so the next walk sees the new row.
+            return
+        for child in children:
             if child:
                 visit(child)
 
@@ -116,14 +126,21 @@ def labelled(app, Atspi, role, label):
         return name
 
     def visit(accessible):
-        if (
-            accessible.get_role_name() == role
-            and showing(accessible, Atspi)
-            and name_of(accessible) == label
-        ):
-            found.append(accessible)
-        for index in range(accessible.get_child_count()):
-            child = accessible.get_child_at_index(index)
+        try:
+            if (
+                accessible.get_role_name() == role
+                and showing(accessible, Atspi)
+                and name_of(accessible) == label
+            ):
+                found.append(accessible)
+            children = [
+                accessible.get_child_at_index(index)
+                for index in range(accessible.get_child_count())
+            ]
+        except GLib.Error:
+            # As in `buttons`: a node destroyed mid-walk is not there to be found.
+            return
+        for child in children:
             if child:
                 visit(child)
 
@@ -202,9 +219,7 @@ def menu_row_after(app, Atspi, opener, row):
     window event can rebuild the row of buttons between the lookup and the press, which
     then lands on a button already gone: press again, up to three times."""
     for _ in range(3):
-        if press(app, Atspi, opener) and wait_for(
-            lambda: buttons(app, Atspi, row), 2
-        ):
+        if press(app, Atspi, opener) and wait_for(lambda: buttons(app, Atspi, row), 2):
             return buttons(app, Atspi, row)[0]
     print(f"no showing button named {row!r} after {opener!r}; tree:", file=sys.stderr)
     for role, label, _, depth in walk(app, Atspi):
@@ -285,8 +300,10 @@ def main():
     check(
         "Unpin from Bar removes the id from the favourites file",
         wait_for(
-            lambda: favorites_text().startswith("schema = 1")
-            and PINNED_ID not in favorites_text(),
+            lambda: (
+                favorites_text().startswith("schema = 1")
+                and PINNED_ID not in favorites_text()
+            ),
             3,
         ),
         repr(favorites_text()),
