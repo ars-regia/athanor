@@ -21,6 +21,7 @@ started by bar_session.py --hang CanReboot --window --pinnable and no favourites
 
 import os
 import re
+import shutil
 import signal
 import sys
 import time
@@ -467,6 +468,40 @@ def main():
     # Switched back off so the checks after this one run in the normal, non-high-contrast
     # variant, same as every other capture in the rig.
     check("high contrast is switched back off", wait_for(high_contrast_is(False), 2))
+
+    # A regular file where Dark's v1 directory belongs makes the next write fail:
+    # create_dir_all meets a file, and the bar's Landlock grant was bound to the old
+    # directory's inode. Dark is written first, so nothing is written (BR3).
+    dark_v1 = high_contrast_files()[0].parent
+    shutil.rmtree(dark_v1)
+    dark_v1.write_text("", encoding="utf-8")
+    switches = labelled(app, Atspi, "check box", "High contrast")
+    if switches:
+        switches[0].do_action(0)
+
+    def reverted():
+        found = labelled(app, Atspi, "check box", "High contrast")
+        return bool(found) and not found[0].get_state_set().contains(
+            Atspi.StateType.CHECKED
+        )
+
+    time.sleep(0.5)
+    check(
+        "a failed high-contrast write puts the switch back off (BR3)",
+        wait_for(reverted, 3),
+    )
+    check(
+        "the failed write is logged",
+        wait_for(
+            lambda: (
+                "cannot switch high contrast" in client_log.read_text(errors="replace")
+            ),
+            3,
+        ),
+    )
+    check("the bar stays alive after the failed write", alive(pid))
+    dark_v1.unlink()
+    dark_v1.mkdir()
 
     check("the power menu opens", press(app, Atspi, "Power"))
     check(
