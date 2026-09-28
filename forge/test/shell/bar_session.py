@@ -1,12 +1,14 @@
 #!/usr/bin/python3
-"""bar_session.py [--hang METHOD] [--window] - athanor-bar in the rig, as its unit runs it:
-a private system bus with a fake logind on it, NOTIFY_SOCKET for Type=notify, and with
---window one test window for the running applications. It is scene.sh's client and exits
-with the bar's status.
+"""bar_session.py [--hang METHOD] [--window] [--pinnable] - athanor-bar in the rig, as its
+unit runs it: a private system bus with a fake logind on it, NOTIFY_SOCKET for Type=notify,
+and with --window one test window for the running applications. --pinnable installs a
+desktop entry for the test window's app id, so the bar offers to pin it. It is scene.sh's
+client and exits with the bar's status.
 
 The fake logind answers CanSuspend "yes", CanReboot "yes" and CanPowerOff "challenge",
 except the method named by --hang, which it never answers. Every call that acts is appended
-to /out/$RIG_TAG-logind.log as "<Method> <arguments>", e.g. "Suspend True".
+to /out/$RIG_TAG-logind.log as "<Method> <arguments>", e.g. "Suspend True". The log is
+created empty before the bar starts: a missing log means the fake logind never ran.
 
 It is a small Gio service, not python3-dbusmock: dbusmock replies to each call from the
 method's code, and the power menu must also meet a logind that never replies.
@@ -27,6 +29,12 @@ READY_FILE = Path("/tmp/athanor-bar.ready")
 PID_FILE = Path("/tmp/athanor-bar.pid")
 BAR = "/out/bin/athanor-bar"
 WINDOW = "/repo/forge/test/shell/cc_window.py"
+# The desktop entry of --pinnable, for the app id cc_window.py 1 uses.
+DESKTOP_ENTRY = """[Desktop Entry]
+Type=Application
+Name=CC Window
+Exec=python3 /repo/forge/test/shell/cc_window.py 1
+"""
 
 NODE = Gio.DBusNodeInfo.new_for_xml("""
 <node>
@@ -76,22 +84,30 @@ def wait_for_path(path, seconds):
 
 
 def parse(args):
-    hang, window = None, False
+    hang, window, pinnable = None, False, False
     while args:
         if args[0] == "--hang" and len(args) > 1:
             hang, args = args[1], args[2:]
         elif args[0] == "--window":
             window, args = True, args[1:]
+        elif args[0] == "--pinnable":
+            pinnable, args = True, args[1:]
         else:
             print(__doc__, file=sys.stderr)
             raise SystemExit(2)
-    return hang, window
+    return hang, window, pinnable
 
 
 def main():
-    hang, window = parse(sys.argv[1:])
+    hang, window, pinnable = parse(sys.argv[1:])
     log = Path("/out") / f"{os.environ.get('RIG_TAG', 'bar')}-logind.log"
-    log.unlink(missing_ok=True)
+    log.write_text("", encoding="utf-8")
+    if pinnable:
+        applications = Path(os.environ["XDG_DATA_HOME"]) / "applications"
+        applications.mkdir(parents=True, exist_ok=True)
+        (applications / "org.athanor.CcWindow1.desktop").write_text(
+            DESKTOP_ENTRY, encoding="utf-8"
+        )
     daemon = subprocess.Popen(
         ["dbus-daemon", "--session", "--nofork", f"--address=unix:path={SYSTEM_BUS}"]
     )

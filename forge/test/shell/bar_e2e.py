@@ -1,12 +1,15 @@
 #!/usr/bin/python3
 """bar_e2e.py - athanor-bar end to end in the rig, as scene.sh's RIG_HOLD, with the bar
-started by bar_session.py --hang CanReboot --window:
+started by bar_session.py --hang CanReboot --window --pinnable and no favourites file:
 
 - READY=1 reaches NOTIFY_SOCKET (Type=notify);
+- the first start imports the favourites and saves the file (BR7);
 - the preset follows the user's layout document live, a broken document falls back to the
   vendor layout without stopping the bar, and a key the policy marks mandatory holds
   (acceptance item 16);
-- the test window shows as a running application under the bar preset;
+- the test window shows as a running application under the bar preset; with a second
+  window its button opens the menu, whose Pin to Bar and Unpin from Bar write the
+  favourites file and whose row follows the pinned state;
 - the accessibility popover offers high contrast, which writes COSMIC's is_high_contrast;
 - the power menu asks first, with Cancel focused, and calls logind only on confirmation;
 - a logind that never answers hides the action, logs it and leaves the bar running with
@@ -31,10 +34,13 @@ BROKEN = "schema = 1\n[output"
 MANDATORY_FLOAT = (
     'schema = 1\nmandatory = ["preset"]\n\n[output."*"]\npreset = "float"\n'
 )
-# The name the bar gives the test window's button (BR3, Task 8): no installed desktop
-# entry claims the id cc_window.py uses, so the app name is the raw app id, and with one
-# titled window the label is "{app}: {title}".
-RUNNING_WINDOW_BUTTON = "org.athanor.CcWindow1: cc-window-1"
+# The name the bar gives the test window's button (BR3, Task 8): the app name comes from
+# the desktop entry bar_session.py --pinnable installs, and with one titled window the
+# label is "{app}: {title}"; with two, "{app} ({count} windows)".
+WINDOW = "/repo/forge/test/shell/cc_window.py"
+RUNNING_WINDOW_BUTTON = "CC Window: cc-window-1"
+RUNNING_WINDOWS_BUTTON = "CC Window (2 windows)"
+PINNED_ID = "org.athanor.CcWindow1.desktop"
 
 failures = []
 
@@ -180,7 +186,35 @@ def high_contrast_is(value):
     return check_now
 
 
+def favorites_file():
+    return Path(os.environ["XDG_CONFIG_HOME"]) / "athanor" / "favorites.toml"
+
+
+def favorites_text():
+    try:
+        return favorites_file().read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return ""
+
+
+def menu_row_after(app, Atspi, opener, row):
+    """Opens the menu of the button named `opener` and returns its row named `row`. A
+    window event can rebuild the row of buttons between the lookup and the press, which
+    then lands on a button already gone: press again, up to three times."""
+    for _ in range(3):
+        if press(app, Atspi, opener) and wait_for(
+            lambda: buttons(app, Atspi, row), 2
+        ):
+            return buttons(app, Atspi, row)[0]
+    print(f"no showing button named {row!r} after {opener!r}; tree:", file=sys.stderr)
+    for role, label, _, depth in walk(app, Atspi):
+        print(f"{'  ' * depth}{role}: {label!r}", file=sys.stderr)
+    return None
+
+
 def main():
+    import subprocess
+
     import gi
 
     gi.require_version("Atspi", "2.0")
@@ -196,6 +230,11 @@ def main():
     app = find_application(Atspi, "athanor-bar")
     if not check("the bar is on the accessibility bus", app is not None):
         return 1
+    check(
+        "the first start saved the imported favourites",
+        wait_for(lambda: favorites_text().startswith("schema = 1"), 5),
+        repr(favorites_text()),
+    )
 
     check(
         "float: Workspaces shows",
@@ -215,6 +254,44 @@ def main():
     )
     pss_bar = pss_kb(pid)
     print(f"athanor-bar PSS (bar, window shown): {pss_bar} kB")
+
+    # A second start of the same app asks the first for another window: with two, a press
+    # opens the button's menu (BR3).
+    subprocess.Popen(["python3", WINDOW, "1"])
+    check(
+        "a second window groups under the same button",
+        wait_for(lambda: buttons(app, Atspi, RUNNING_WINDOWS_BUTTON), 5),
+    )
+    check(
+        "the test app is not pinned before the menu pins it",
+        PINNED_ID not in favorites_text(),
+        repr(favorites_text()),
+    )
+    pin = menu_row_after(app, Atspi, RUNNING_WINDOWS_BUTTON, "Pin to Bar")
+    if check("the menu offers Pin to Bar", pin is not None):
+        pin.do_action(0)
+    check(
+        "Pin to Bar writes the id to the favourites file",
+        wait_for(lambda: PINNED_ID in favorites_text(), 3),
+        repr(favorites_text()),
+    )
+    unpin = menu_row_after(app, Atspi, RUNNING_WINDOWS_BUTTON, "Unpin from Bar")
+    check(
+        "the pinned app's menu offers Unpin from Bar, not Pin to Bar",
+        unpin is not None and not buttons(app, Atspi, "Pin to Bar"),
+    )
+    if unpin is not None:
+        unpin.do_action(0)
+    check(
+        "Unpin from Bar removes the id from the favourites file",
+        wait_for(
+            lambda: favorites_text().startswith("schema = 1")
+            and PINNED_ID not in favorites_text(),
+            3,
+        ),
+        repr(favorites_text()),
+    )
+    check("the bar survives pinning and unpinning", alive(pid))
 
     user.write_text(BROKEN, encoding="utf-8")
     check(
@@ -291,9 +368,10 @@ def main():
         cancel is not None and cancel.get_state_set().contains(Atspi.StateType.FOCUSED),
     )
     time.sleep(1)
+    # bar_session.py creates the log before the bar starts: missing is a failure.
     check(
         "nothing reached logind before the confirmation",
-        not log.exists() or "Suspend" not in log.read_text(),
+        log.exists() and "Suspend" not in log.read_text(),
     )
     if confirm is not None:
         confirm.do_action(0)
@@ -304,19 +382,44 @@ def main():
         ),
     )
 
+    # Every opening asks logind again, with a 5 s timeout. Restart starts hidden, so it
+    # being hidden proves nothing on its own: wait for this opening's timeout line, which
+    # lands 5 s after the opening (an earlier opening's lands sooner), then look.
+    def reboot_timeouts():
+        if not client_log.exists():
+            return 0
+        text = client_log.read_text(encoding="utf-8", errors="replace")
+        return sum(
+            1
+            for line in text.splitlines()
+            if "did not say" in line and "CanReboot" in line
+        )
+
+    opened = time.monotonic()
     press(app, Atspi, "Power")
-    time.sleep(6)
     check(
-        "a CanReboot that never answers hides Restart",
+        "the power menu opens again",
+        wait_for(lambda: buttons(app, Atspi, "Suspend"), 3),
+    )
+    seen = reboot_timeouts()
+
+    def this_opening_timed_out():
+        nonlocal seen
+        now = reboot_timeouts()
+        timed_out = now > seen and time.monotonic() - opened >= 4.5
+        seen = now
+        return timed_out
+
+    check(
+        "the bar logged this opening's CanReboot timeout",
+        wait_for(this_opening_timed_out, 8),
+    )
+    check(
+        "after the timeout, Restart is hidden",
         not buttons(app, Atspi, "Restart"),
     )
     check(
-        "the bar logged the CanReboot timeout",
-        client_log.exists()
-        and "CanReboot" in client_log.read_text(encoding="utf-8", errors="replace"),
-    )
-    check(
-        "Suspend is still offered after the CanReboot timeout",
+        "after the timeout, Suspend, which logind answered, still shows",
         bool(buttons(app, Atspi, "Suspend")),
     )
     check("and the bar keeps running", alive(pid))

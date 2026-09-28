@@ -14,7 +14,7 @@
 #   rig.sh build-shelld     clippy, tests and release build of athanor-shelld into <out>/bin
 #   rig.sh build-bar        clippy, tests and release build of athanor-bar into <out>/bin, with the DT_NEEDED check
 #   rig.sh shelld-e2e       athanor-shelld on a session bus: names, notifications, refusal of the private interface, tray watcher, memory
-#   rig.sh bar-e2e          athanor-bar in a scene: READY, live layout, mandatory keys, running windows, the power menu against a fake logind, memory
+#   rig.sh bar-e2e          athanor-bar in a scene: READY, live layout, mandatory keys, running windows, the favourites import and pinning, the power menu against a fake logind, memory
 #   rig.sh compositor-e2e   the compositor client against cosmic-comp, and against sway without the COSMIC globals
 #   rig.sh layer-guard <greeter|bar>   the surface must refuse to run when the shim loads late
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
@@ -296,13 +296,15 @@ shelld-e2e)
     ;;
 bar-e2e)
     seed_bar "$out/seed-bar-e2e" float top visible light
+    # No favourites file: the first start imports the favourites and saves them (BR7).
+    rm "$out/seed-bar-e2e/athanor/favorites.toml"
     rm -f "$out/bar-e2e-logind.log"
     in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-bar-e2e \
         RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
         RIG_HOLD="python3 /repo/forge/test/shell/bar_e2e.py" \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 bar-e2e -- \
         bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
-                 && exec python3 /repo/forge/test/shell/bar_session.py --hang CanReboot --window"
+                 && exec python3 /repo/forge/test/shell/bar_session.py --hang CanReboot --window --pinnable"
     ;;
 compositor-e2e)
     # cosmic-comp reads the keyboard layouts from its configuration: two, so the switch shows.
