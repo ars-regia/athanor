@@ -42,6 +42,7 @@ impl Apps {
             (
                 id.clone(),
                 info.startup_wm_class().map(|class| class.to_string()),
+                info.should_show(),
             )
         }));
         Apps { index, infos }

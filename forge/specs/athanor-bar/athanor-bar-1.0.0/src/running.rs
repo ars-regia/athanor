@@ -50,17 +50,22 @@ pub struct AppIndex {
 }
 
 impl AppIndex {
-    /// `apps` are pairs of desktop id and `StartupWMClass`. When two entries claim the same
-    /// key, the first desktop id in byte order wins, so the result does not depend on the
-    /// order GIO lists them in.
-    pub fn new(apps: impl IntoIterator<Item = (String, Option<String>)>) -> AppIndex {
+    /// `apps` are `(desktop id, StartupWMClass, shown)` triples, `shown` being
+    /// `DesktopAppInfo::should_show()` (not `NoDisplay`/`Hidden`). When two entries claim
+    /// the same key, a shown entry wins over a hidden one, so a helper like a NoDisplay
+    /// URL-handler entry never steals a class or a stem from the application it belongs
+    /// to; among ties of the same visibility, the first desktop id in byte order wins, so
+    /// the result does not depend on the order GIO lists them in.
+    pub fn new(apps: impl IntoIterator<Item = (String, Option<String>, bool)>) -> AppIndex {
         let mut apps: Vec<_> = apps
             .into_iter()
-            .filter(|(id, _)| is_desktop_id(id))
+            .filter(|(id, _, _)| is_desktop_id(id))
             .collect();
-        apps.sort();
+        apps.sort_by(|(id_a, _, shown_a), (id_b, _, shown_b)| {
+            (!shown_a, id_a).cmp(&(!shown_b, id_b))
+        });
         let mut index = AppIndex::default();
-        for (id, wm_class) in apps {
+        for (id, wm_class, _shown) in apps {
             if let Some(stem) = id.strip_suffix(".desktop") {
                 index
                     .stems
@@ -196,7 +201,7 @@ mod tests {
     fn index(apps: &[(&str, Option<&str>)]) -> AppIndex {
         AppIndex::new(
             apps.iter()
-                .map(|(id, class)| ((*id).to_owned(), class.map(str::to_owned))),
+                .map(|(id, class)| ((*id).to_owned(), class.map(str::to_owned), true)),
         )
     }
 
@@ -333,6 +338,28 @@ mod tests {
         let backward = index(&[("b.desktop", Some("x")), ("a.desktop", Some("X"))]);
         assert_eq!(forward.resolve("x").as_deref(), Some("a.desktop"));
         assert_eq!(backward.resolve("x").as_deref(), Some("a.desktop"));
+    }
+
+    #[test]
+    fn a_shown_entry_wins_a_startup_wm_class_tie_over_a_hidden_one() {
+        let hidden_first = AppIndex::new([
+            (
+                "foo-url-handler.desktop".to_owned(),
+                Some("Foo".to_owned()),
+                false,
+            ),
+            ("foo.desktop".to_owned(), Some("Foo".to_owned()), true),
+        ]);
+        assert_eq!(hidden_first.resolve("Foo").as_deref(), Some("foo.desktop"));
+        let shown_first = AppIndex::new([
+            ("foo.desktop".to_owned(), Some("Foo".to_owned()), true),
+            (
+                "foo-url-handler.desktop".to_owned(),
+                Some("Foo".to_owned()),
+                false,
+            ),
+        ]);
+        assert_eq!(shown_first.resolve("Foo").as_deref(), Some("foo.desktop"));
     }
 
     #[test]
