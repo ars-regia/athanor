@@ -12,6 +12,7 @@ use std::rc::Rc;
 use athanor_bar::running::{self, AppIndex, Entry, Open, Primary};
 use athanor_compositor_client::WindowId;
 use athanor_layout::favorites;
+use athanor_unit::text;
 use gio_unix::DesktopAppInfo;
 use gtk4::accessible::Property;
 use gtk4::prelude::*;
@@ -103,7 +104,7 @@ impl ModuleUi for RunningUi {
             .map(|window| Open {
                 id: window.id,
                 app_id: window.app_id,
-                title: window.title,
+                title: text::line(&window.title, text::TITLE_CHARS),
                 activated: window.state.activated,
                 minimized: window.state.minimized,
             })
@@ -552,5 +553,17 @@ mod tests {
             entry_label("Firefox", &[open("a"), open("b")]),
             "Firefox (2 windows)"
         );
+    }
+
+    #[test]
+    fn a_title_of_hidden_characters_only_falls_back_to_the_app_name() {
+        let window = Open {
+            id: 1u32,
+            app_id: "a".into(),
+            title: athanor_unit::text::line("\u{202e}\u{7}", athanor_unit::text::TITLE_CHARS),
+            activated: false,
+            minimized: false,
+        };
+        assert_eq!(entry_label("App", &[window]), "App");
     }
 }
