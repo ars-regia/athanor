@@ -17,7 +17,7 @@ use std::cell::{Cell, RefCell};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use athanor_bar::order::{self, Module};
 use athanor_compositor_client::{outputs, theme, Client, Event, Opener};
@@ -531,36 +531,13 @@ impl Bar {
         });
         self.watches.borrow_mut().extend(theme_watches);
 
-        // The directory monitors above are the fast path, but not a reliable one in every
-        // session (some main-loop/kernel combinations never dispatch their "changed"
-        // signal, nor a >=1s glib timeout - observed in the shell rig). A short poll is
-        // the one mechanism proven to fire reliably there, so it also drives the clock
-        // tick and catches any layout, output or theme change the fast path missed. A
-        // change already headed for `schedule`'s debounce is not queued again: at this
-        // poll's own interval, restarting the debounce every tick would keep deferring it
-        // forever.
         let weak = Rc::downgrade(self);
-        let last_tick = Cell::new(Instant::now());
-        let last_theme = Cell::new(theme::read());
-        glib::timeout_add_local(Duration::from_millis(200), move || {
-            let Some(bar) = weak.upgrade() else {
-                return glib::ControlFlow::Break;
-            };
-            if last_tick.get().elapsed() >= Duration::from_secs(1) {
-                last_tick.set(Instant::now());
+        glib::timeout_add_seconds_local(1, move || match weak.upgrade() {
+            Some(bar) => {
                 bar.refresh(Changed::Tick);
+                glib::ControlFlow::Continue
             }
-            let changed = bar.source.layout() != bar.layout.get()
-                || outputs::current(&bar.display) != *bar.outputs.borrow();
-            if changed && bar.debounce.borrow().is_none() {
-                bar.schedule();
-            }
-            let theme = theme::read();
-            if last_theme.replace(theme) != theme {
-                calmo::load(&bar.display, theme.variant());
-                theme::load_accent(&bar.display, &theme);
-            }
-            glib::ControlFlow::Continue
+            None => glib::ControlFlow::Break,
         });
     }
 
