@@ -24,6 +24,16 @@ host itself.
   unreachable across many polls, `vm.sh` only logs a warning and leaves the guest
   running — its own `RuntimeMaxSec` (8 h in the unit) is the backstop, since killing a
   running job over a network blip is worse than a late shutdown.
+- The guest's memory is lent, not reserved. An image build fills the guest with page
+  cache, and QEMU does not give those pages back by itself: on 2026-09-28 the host ran
+  out of memory twice and its OOM killer ended the job by killing QEMU. The guest now has
+  a virtio balloon with free page reporting (what the guest frees returns to the host)
+  and deflate-on-oom (the guest takes pages back rather than OOM itself), and
+  `balloon.py`, started by `vm.sh` on a QMP socket of its own, steers it: every 2 s it
+  sizes the guest so that the host keeps `HOST_RESERVE` available, never below
+  `BALLOON_FLOOR` nor above `VM_MEMORY`. Under pressure the guest drops its cache first;
+  once the host has room it grows back. The regulator is not part of the job: if it
+  fails, the job goes on and the reason is in the journal (lines start with `balloon:`).
 - Two extra disks: `cache.raw` persists across jobs (podman storage, `~/.cache/azoth`),
   `scratch.raw` is recreated empty before every job (the work directory).
 - The GitHub token is a service credential encrypted with the host key and the TPM2
@@ -34,7 +44,8 @@ host itself.
   contributor.
 
 Pins and sizing are in `runner.env`: Fedora Cloud Base and actions/runner by SHA-256,
-12 vCPUs and 16 GB, CPU and I/O weights that leave the desktop responsive.
+12 vCPUs and up to 16 GB (at least 6 GB, keeping 3 GB available on the host), CPU and
+I/O weights that leave the desktop responsive.
 
 ## Install
 
