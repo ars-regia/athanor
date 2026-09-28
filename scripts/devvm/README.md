@@ -79,9 +79,9 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   and the crash loop. Screenshots land in `.scratch/layout-acceptance/`; the script checks
   the panel configuration, so look at them: they are the only check of what the panel draws.
 - `bar-acceptance.sh [stage...]`: athanor-bar under its real unit (package 2b.2):
-  Type=notify, the confinement against glycin's sandbox, PSS within 64 MB, and the
-  crash-loop fallback to the vendor layout. Build the binary first with
-  `forge/test/shell/rig.sh build-bar`.
+  Type=notify, the confinement against glycin's sandbox, PSS within 64 MB, an output that
+  comes and goes (needs `GPU_OUTPUTS=2`, the default), and the crash-loop fallback to the
+  vendor layout. Build the binary first with `forge/test/shell/rig.sh build-bar`.
 - `compositor-acceptance.sh [stage...]` deploys `cc-probe` from `.scratch/shell-rig/bin`
   (build it with `forge/test/shell/rig.sh build-compositor-client`) and checks, in the VM's
   session, the launch of package 2a (`doc_bar.md`, BR2 and BR3): an application on its own
@@ -89,7 +89,9 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   and the three COSMIC openers, cold and warm. Screenshots land in
   `.scratch/compositor-acceptance/`; look at the openers' ones.
 - Settings are in `devvm.env` and are overridden from the environment: `CPUS=4`,
-  `MEMORY=8G`, `DISK_GIB=40`, `GPU_OUTPUTS=1`, `SSH_PORT`, `ISO_TAG`, `REGISTRY`. State (ISO, disks, logs)
+  `MEMORY=8G`, `DISK_GIB=40`, `GPU_OUTPUTS=2` (the second head starts disconnected, so
+  every other stage sees one output; `bar-acceptance.sh hotplug` is the one that needs
+  it), `SSH_PORT`, `ISO_TAG`, `REGISTRY`. State (ISO, disks, logs)
   is in `${XDG_DATA_HOME:-~/.local/share}/athanor-devvm`: about 6 GB of ISO and up to
   `DISK_GIB` of disk.
 - Needs `qemu-system-x86_64` with the virtio-gpu-gl device, `qemu-img`, OVMF, `skopeo`,
