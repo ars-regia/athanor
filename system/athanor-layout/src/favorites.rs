@@ -265,6 +265,13 @@ mod tests {
     }
 
     #[test]
+    fn the_vendor_file_of_the_bar_parses() {
+        let text =
+            include_str!("../../../forge/specs/athanor-bar/athanor-bar-1.0.0/data/favorites.toml");
+        assert_eq!(parse(text).expect("the vendor favourites").len(), 4);
+    }
+
+    #[test]
     fn the_schema_is_checked_first() {
         assert_eq!(
             parse("schema = 2\nfavorites = 7\nextra = 1\n"),

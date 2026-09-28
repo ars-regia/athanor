@@ -14,11 +14,12 @@
 #   rig.sh build-shelld     clippy, tests and release build of athanor-shelld into <out>/bin
 #   rig.sh build-bar        clippy, tests and release build of athanor-bar into <out>/bin, with the DT_NEEDED check
 #   rig.sh shelld-e2e       athanor-shelld on a session bus: names, notifications, refusal of the private interface, tray watcher, memory
+#   rig.sh bar-e2e          athanor-bar in a scene: READY, live layout, mandatory keys, running windows, the power menu against a fake logind, memory
 #   rig.sh compositor-e2e   the compositor client against cosmic-comp, and against sway without the COSMIC globals
 #   rig.sh layer-guard <greeter|bar>   the surface must refuse to run when the shim loads late
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
-#   rig.sh atspi <greeter|chooser>   every interactive widget has a role and a name
+#   rig.sh atspi <greeter|chooser|bar>   every interactive widget has a role and a name
 #   rig.sh rig-tests        unit tests of the rig's own scripts, against the rig's tools
 #   rig.sh cosmic-panel-defaults   COSMIC's shipped panel keys equal the renderer's fixture
 #   rig.sh chooser-e2e      press a preset in the chooser and wait for the panel configuration
@@ -94,6 +95,18 @@ seed_layout() { # seed_layout <dir> <preset> <panel> <dock or ->
         printf 'schema = 1\n\n[output."*"]\npreset = "%s"\npanel = "%s"\n' "$2" "$3"
         if [ "$4" != - ]; then printf 'dock = "%s"\n' "$4"; fi
     } > "$1/athanor/layout.toml"
+}
+
+# The seed of a bar case: the layout document, two keyboard layouts so the input source
+# shows, one favourite the rig has installed, and COSMIC's mode (SH5).
+seed_bar() { # seed_bar <dir> <preset> <panel> <dock or -> <light|dark>
+    seed_layout "$1" "$2" "$3" "$4"
+    mkdir -p "$1/cosmic/com.system76.CosmicComp/v1" "$1/cosmic/com.system76.CosmicTheme.Mode/v1"
+    printf '(rules: "", model: "pc105", layout: "us,it", variant: ",", options: None, repeat_delay: 600, repeat_rate: 25)' \
+        > "$1/cosmic/com.system76.CosmicComp/v1/xkb_config"
+    if [ "$5" = dark ]; then printf true; else printf false; fi \
+        > "$1/cosmic/com.system76.CosmicTheme.Mode/v1/is_dark"
+    printf 'schema = 1\nfavorites = ["com.system76.CosmicSettings.desktop"]\n' > "$1/athanor/favorites.toml"
 }
 
 capture_layout() {
@@ -245,6 +258,16 @@ shelld-e2e)
     rm -f "$out/shelld-e2e.log"
     in_rig "$(rig_image)" dbus-run-session -- python3 /repo/forge/test/shell/shelld_e2e.py
     ;;
+bar-e2e)
+    seed_bar "$out/seed-bar-e2e" float top visible light
+    rm -f "$out/bar-e2e-logind.log"
+    in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-bar-e2e \
+        RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
+        RIG_HOLD="python3 /repo/forge/test/shell/bar_e2e.py" \
+        dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 bar-e2e -- \
+        bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
+                 && exec python3 /repo/forge/test/shell/bar_session.py --hang CanReboot --window"
+    ;;
 compositor-e2e)
     # cosmic-comp reads the keyboard layouts from its configuration: two, so the switch shows.
     seed=$out/compositor-e2e-seed/cosmic/com.system76.CosmicComp/v1
@@ -320,6 +343,15 @@ atspi)
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-layout-chooser 8" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-chooser -- \
             bash -c "$enable && exec /out/bin/athanor-layout-chooser"
+        ;;
+    bar)
+        # 7 interactive widgets under float: workspaces, applications, clock, input source,
+        # accessibility, tiling, power.
+        seed_bar "$out/seed-atspi-bar" float top visible light
+        in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-bar \
+            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar 7" \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-bar -- \
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py"
         ;;
     *)
         echo "rig.sh atspi: unknown surface '${2:-}'" >&2

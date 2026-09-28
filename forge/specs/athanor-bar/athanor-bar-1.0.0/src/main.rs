@@ -5,9 +5,10 @@ mod i18n;
 mod layer_guard;
 mod ui;
 
-use std::cell::Cell;
+use std::cell::RefCell;
 use std::env;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use athanor_bar::dirs::Dirs;
 use athanor_compositor_client::theme;
@@ -111,11 +112,15 @@ fn main() -> glib::ExitCode {
     i18n::init();
 
     let app = Application::builder().application_id(APP_ID).build();
-    // A second `athanor-bar` activates this one and exits; the bar is built once.
-    let started = Cell::new(false);
+    // A second `athanor-bar` activates this one and exits; the bar is built once. The
+    // handle is kept for the app's lifetime: every live-reload watch holds only a weak
+    // reference to the bar, so nothing else keeps it alive once `connect_activate`
+    // returns.
+    let handle: Rc<RefCell<Option<Rc<ui::Bar>>>> = Rc::new(RefCell::new(None));
     app.connect_activate(move |app| {
-        if !started.replace(true) {
-            ui::start(app, source.clone(), favorites_file.clone());
+        if handle.borrow().is_none() {
+            let bar = ui::start(app, source.clone(), favorites_file.clone());
+            handle.replace(Some(bar));
         }
     });
     app.run_with_args(&Vec::<String>::new())

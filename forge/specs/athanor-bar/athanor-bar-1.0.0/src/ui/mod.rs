@@ -17,7 +17,7 @@ use std::cell::{Cell, RefCell};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use athanor_bar::order::{self, Module};
 use athanor_compositor_client::{outputs, theme, Client, Event, Opener};
@@ -102,8 +102,21 @@ enum Favorites {
     Unavailable,
 }
 
+/// One surface's content, before it is handed to a window: the centre box to set as the
+/// child, its three groups (`fit_groups` walks them), and the flat module list (`Surface`
+/// keeps it, `refresh` walks it).
+type Content = (
+    gtk4::CenterBox,
+    [gtk4::Box; 3],
+    Vec<(Module, Box<dyn ModuleUi>)>,
+);
+
 struct Surface {
     window: gtk4::ApplicationWindow,
+    /// Identifies the output this surface belongs to, the way `rebuild` matches an
+    /// existing surface against the wanted monitor list: `None` for the outputs GDK
+    /// cannot name, which then never matches and is always torn down and rebuilt.
+    connector: Option<String>,
     groups: [gtk4::Box; 3],
     modules: Vec<(Module, Box<dyn ModuleUi>)>,
 }
@@ -141,7 +154,7 @@ pub struct Bar {
     open_on_start: Option<Module>,
 }
 
-pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<PathBuf>) {
+pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<PathBuf>) -> Rc<Bar> {
     let Some(display) = gdk::Display::default() else {
         tracing::error!("no display");
         std::process::exit(1);
@@ -185,6 +198,7 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
         bar.mapped();
     }
     bar.watch();
+    bar
 }
 
 /// The favourites at start. `Favorites::Unavailable` when there is no configuration
@@ -290,25 +304,77 @@ impl Bar {
         }
     }
 
+    /// Diffs the wanted outputs against the live surfaces by connector, so a layout or
+    /// module change (by far the common case a live reload applies) reconfigures the
+    /// existing layer surfaces in place instead of destroying and recreating them: a
+    /// compositor that tears its own reservation down before the destroy is acknowledged
+    /// closes the connection outright, and this was the reload's untested path (the `Rc`
+    /// that used to keep the bar alive was dropped before any second rebuild could ever
+    /// run - see `start`). Only an output that actually appeared or disappeared destroys
+    /// or creates a surface.
     fn rebuild(self: &Rc<Self>) {
         self.open_popover.take();
-        for surface in self.surfaces.take() {
-            surface.window.destroy();
-        }
         let layout = self.layout.get();
         let monitors = self.display.monitors();
-        let mut surfaces = Vec::new();
+        let mut wanted = Vec::new();
         for index in 0..monitors.n_items() {
             let Some(monitor) = monitors.item(index).and_downcast::<gdk::Monitor>() else {
                 continue;
             };
             let connector = monitor.connector().map(|name| name.to_string());
-            surfaces.push(self.surface(&monitor, connector.as_deref(), layout));
+            wanted.push((monitor, connector));
+        }
+        let mut old = self.surfaces.take();
+        let mut surfaces = Vec::new();
+        for (monitor, connector) in wanted {
+            let reused = connector
+                .as_ref()
+                .and_then(|id| old.iter().position(|s| s.connector.as_deref() == Some(id)))
+                .map(|pos| old.remove(pos));
+            surfaces.push(match reused {
+                Some(surface) => self.update_surface(surface, &monitor, connector, layout),
+                None => self.surface(&monitor, connector.as_deref(), layout),
+            });
+        }
+        for leftover in old {
+            leftover.window.destroy();
         }
         self.surfaces.replace(surfaces);
         for changed in Changed::ALL {
             self.refresh(changed);
         }
+    }
+
+    /// The module row for one surface, in visual order (`order::visual`): the left,
+    /// centre and right groups plus the flat module list `fit_groups` and `refresh` walk.
+    fn build_content(self: &Rc<Self>, connector: Option<&str>, layout: Layout) -> Content {
+        let row = order::visual(layout.preset(), i18n::is_rtl());
+        let mut modules = Vec::new();
+        let mut group = |list: &[Module], name: &str| {
+            let group = gtk4::Box::new(gtk4::Orientation::Horizontal, 2);
+            // The row is already in visual order (order::visual): GTK must not mirror it again.
+            group.set_direction(gtk4::TextDirection::Ltr);
+            group.add_css_class("bar-group");
+            group.add_css_class(name);
+            for &module in list {
+                if let Some(ui) = build(module, self, connector) {
+                    group.append(&ui.widget());
+                    modules.push((module, ui));
+                }
+            }
+            group
+        };
+        let groups = [
+            group(&row.left, "left"),
+            group(&row.centre, "centre"),
+            group(&row.right, "right"),
+        ];
+        let centre_box = gtk4::CenterBox::new();
+        centre_box.set_direction(gtk4::TextDirection::Ltr);
+        centre_box.set_start_widget(Some(&groups[0]));
+        centre_box.set_center_widget(Some(&groups[1]));
+        centre_box.set_end_widget(Some(&groups[2]));
+        (centre_box, groups, modules)
     }
 
     fn surface(
@@ -340,32 +406,7 @@ impl Bar {
         }
         window.add_css_class(&format!("preset-{}", layout.preset().id()));
 
-        let row = order::visual(layout.preset(), i18n::is_rtl());
-        let mut modules = Vec::new();
-        let mut group = |list: &[Module], name: &str| {
-            let group = gtk4::Box::new(gtk4::Orientation::Horizontal, 2);
-            // The row is already in visual order (order::visual): GTK must not mirror it again.
-            group.set_direction(gtk4::TextDirection::Ltr);
-            group.add_css_class("bar-group");
-            group.add_css_class(name);
-            for &module in list {
-                if let Some(ui) = build(module, self, connector) {
-                    group.append(&ui.widget());
-                    modules.push((module, ui));
-                }
-            }
-            group
-        };
-        let groups = [
-            group(&row.left, "left"),
-            group(&row.centre, "centre"),
-            group(&row.right, "right"),
-        ];
-        let centre_box = gtk4::CenterBox::new();
-        centre_box.set_direction(gtk4::TextDirection::Ltr);
-        centre_box.set_start_widget(Some(&groups[0]));
-        centre_box.set_center_widget(Some(&groups[1]));
-        centre_box.set_end_widget(Some(&groups[2]));
+        let (centre_box, groups, modules) = self.build_content(connector, layout);
         window.set_child(Some(&centre_box));
         let weak = Rc::downgrade(self);
         window.connect_map(move |_| {
@@ -376,6 +417,46 @@ impl Bar {
         window.present();
         Surface {
             window,
+            connector: connector.map(str::to_string),
+            groups,
+            modules,
+        }
+    }
+
+    /// Reconfigures a surface already on screen for a new layout: the panel edge (the
+    /// only anchor that ever changes), the preset's CSS class, and the module row. The
+    /// window and its layer surface are never touched, which is the point (see `rebuild`).
+    fn update_surface(
+        self: &Rc<Self>,
+        surface: Surface,
+        monitor: &gdk::Monitor,
+        connector: Option<String>,
+        layout: Layout,
+    ) -> Surface {
+        let window = surface.window;
+        window.set_monitor(Some(monitor));
+        let (edge, edge_class) = match layout.panel() {
+            PanelEdge::Top => (Edge::Top, "edge-top"),
+            PanelEdge::Bottom => (Edge::Bottom, "edge-bottom"),
+        };
+        window.set_anchor(Edge::Top, edge == Edge::Top);
+        window.set_anchor(Edge::Bottom, edge == Edge::Bottom);
+        window.auto_exclusive_zone_enable();
+        window.remove_css_class("edge-top");
+        window.remove_css_class("edge-bottom");
+        window.add_css_class(edge_class);
+        for class in window.css_classes() {
+            if class.starts_with("preset-") {
+                window.remove_css_class(&class);
+            }
+        }
+        window.add_css_class(&format!("preset-{}", layout.preset().id()));
+
+        let (centre_box, groups, modules) = self.build_content(connector.as_deref(), layout);
+        window.set_child(Some(&centre_box));
+        Surface {
+            window,
+            connector,
             groups,
             modules,
         }
@@ -449,13 +530,37 @@ impl Bar {
             theme::load_accent(&display, &cosmic);
         });
         self.watches.borrow_mut().extend(theme_watches);
+
+        // The directory monitors above are the fast path, but not a reliable one in every
+        // session (some main-loop/kernel combinations never dispatch their "changed"
+        // signal, nor a >=1s glib timeout - observed in the shell rig). A short poll is
+        // the one mechanism proven to fire reliably there, so it also drives the clock
+        // tick and catches any layout, output or theme change the fast path missed. A
+        // change already headed for `schedule`'s debounce is not queued again: at this
+        // poll's own interval, restarting the debounce every tick would keep deferring it
+        // forever.
         let weak = Rc::downgrade(self);
-        glib::timeout_add_seconds_local(1, move || match weak.upgrade() {
-            Some(bar) => {
+        let last_tick = Cell::new(Instant::now());
+        let last_theme = Cell::new(theme::read());
+        glib::timeout_add_local(Duration::from_millis(200), move || {
+            let Some(bar) = weak.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            if last_tick.get().elapsed() >= Duration::from_secs(1) {
+                last_tick.set(Instant::now());
                 bar.refresh(Changed::Tick);
-                glib::ControlFlow::Continue
             }
-            None => glib::ControlFlow::Break,
+            let changed = bar.source.layout() != bar.layout.get()
+                || outputs::current(&bar.display) != *bar.outputs.borrow();
+            if changed && bar.debounce.borrow().is_none() {
+                bar.schedule();
+            }
+            let theme = theme::read();
+            if last_theme.replace(theme) != theme {
+                calmo::load(&bar.display, theme.variant());
+                theme::load_accent(&bar.display, &theme);
+            }
+            glib::ControlFlow::Continue
         });
     }
 
