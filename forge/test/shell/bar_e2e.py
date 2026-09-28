@@ -280,6 +280,11 @@ def main():
         wait_for(lambda: favorites_text().startswith("schema = 1"), 5),
         repr(favorites_text()),
     )
+    check(
+        "the import ignores COSMIC's system default list (BR7)",
+        "org.mozilla.firefox" not in favorites_text(),
+        repr(favorites_text()),
+    )
 
     check(
         "float: Workspaces shows",
