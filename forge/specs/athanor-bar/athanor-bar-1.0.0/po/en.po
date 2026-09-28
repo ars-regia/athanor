@@ -64,15 +64,13 @@ msgstr "%A %-d %B %Y, %H:%M"
 
 #. TRANSLATORS: a g_date_time_format() pattern for the clock on the bar (12-hour clock).
 #: src/ui/clock.rs:90
-#, fuzzy
 msgid "%a %-d %b %-I:%M %p"
-msgstr "%a %-d %b %H:%M"
+msgstr "%a %-d %b %-I:%M %p"
 
 #. TRANSLATORS: a g_date_time_format() pattern, read aloud by screen readers (12-hour clock).
 #: src/ui/clock.rs:92
-#, fuzzy
 msgid "%A %-d %B %Y, %-I:%M %p"
-msgstr "%A %-d %B %Y, %H:%M"
+msgstr "%A %-d %B %Y, %-I:%M %p"
 
 #: src/ui/clock.rs:127
 msgid "Clock"
