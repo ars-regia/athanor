@@ -75,6 +75,9 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     stack.add_named(&confirm_page, Some("confirm"));
     popup.popover.set_child(Some(&stack));
 
+    // Every handler below lives on a widget inside the popover and holds the other widgets
+    // weakly: a strong reference to an ancestor would be a cycle that keeps the whole menu
+    // alive after a rebuild replaces it.
     let pending: Rc<Cell<Option<Action>>> = Rc::new(Cell::new(None));
     let mut asked = Vec::new();
     for action in Action::ALL {
@@ -84,12 +87,20 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
         row.set_visible(action.can_method().is_none());
         let (pending, question, confirm, stack, cancel) = (
             pending.clone(),
-            question.clone(),
-            confirm.clone(),
-            stack.clone(),
-            cancel.clone(),
+            question.downgrade(),
+            confirm.downgrade(),
+            stack.downgrade(),
+            cancel.downgrade(),
         );
         row.connect_clicked(move |_| {
+            let (Some(question), Some(confirm), Some(stack), Some(cancel)) = (
+                question.upgrade(),
+                confirm.upgrade(),
+                stack.upgrade(),
+                cancel.upgrade(),
+            ) else {
+                return;
+            };
             pending.set(Some(action));
             question.set_text(&ask);
             confirm.set_label(&label);
@@ -103,19 +114,23 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     }
 
     let back = {
-        let (pending, stack) = (pending.clone(), stack.clone());
+        let (pending, stack) = (pending.clone(), stack.downgrade());
         move || {
             pending.set(None);
-            stack.set_visible_child_name("actions");
+            if let Some(stack) = stack.upgrade() {
+                stack.set_visible_child_name("actions");
+            }
         }
     };
     let cancel_back = back.clone();
     cancel.connect_clicked(move |_| cancel_back());
     popup.popover.connect_closed(move |_| back());
-    let popover = popup.popover.clone();
+    let popover = popup.popover.downgrade();
     confirm.connect_clicked(move |_| {
         let Some(action) = pending.take() else { return };
-        popover.popdown();
+        if let Some(popover) = popover.upgrade() {
+            popover.popdown();
+        }
         glib::spawn_future_local(async move {
             if let Err(err) = logind::run(action).await {
                 tracing::error!(error = %err, action = action.id(), "the power action failed");

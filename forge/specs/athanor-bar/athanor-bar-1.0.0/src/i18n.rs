@@ -16,7 +16,9 @@ pub fn init() {
         tracing::error!(path = %path.display(), error = %err, "translations are unavailable");
         Catalog::empty()
     });
-    let _already_set = CATALOG.set(catalog);
+    if CATALOG.set(catalog).is_err() {
+        tracing::warn!("the translations were already loaded; the second load is ignored");
+    }
 }
 
 fn catalog() -> &'static Catalog {

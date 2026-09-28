@@ -1,7 +1,7 @@
 //! The clock and its calendar (doc_bar.md, BR3). Every tick reads the zone and the wall
 //! clock again: nothing is counted, so a resume or a clock that jumps shows at once.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -23,6 +23,8 @@ struct ClockUi {
     popup: Popup,
     label: gtk4::Label,
     zone: Zone,
+    /// The last tick could not read or format the time: logged once, not every second.
+    failed: Cell<bool>,
 }
 
 fn current_zone(zone: &Zone) -> glib::TimeZone {
@@ -58,15 +60,24 @@ impl ModuleUi for ClockUi {
         if changed != Changed::Tick {
             return;
         }
-        let Ok(now) = glib::DateTime::now(&current_zone(&self.zone)) else {
-            return;
-        };
-        // TRANSLATORS: a g_date_time_format() pattern for the clock on the bar.
-        let short = now.format(&tr("%a %-d %b %H:%M"));
-        // TRANSLATORS: a g_date_time_format() pattern, read aloud by screen readers.
-        let long = now.format(&tr("%A %-d %B %Y, %H:%M"));
-        let (Ok(short), Ok(long)) = (short, long) else {
-            return;
+        let texts = glib::DateTime::now(&current_zone(&self.zone)).and_then(|now| {
+            // TRANSLATORS: a g_date_time_format() pattern for the clock on the bar.
+            let short = now.format(&tr("%a %-d %b %H:%M"))?;
+            // TRANSLATORS: a g_date_time_format() pattern, read aloud by screen readers.
+            let long = now.format(&tr("%A %-d %B %Y, %H:%M"))?;
+            Ok((short, long))
+        });
+        let (short, long) = match texts {
+            Ok(texts) => {
+                self.failed.set(false);
+                texts
+            }
+            Err(err) => {
+                if !self.failed.replace(true) {
+                    tracing::error!(error = %err, "cannot read or format the time; the clock is not updated");
+                }
+                return;
+            }
         };
         if self.label.text() != short {
             self.label.set_text(&short);
@@ -94,5 +105,10 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
             calendar.select_day(&now);
         }
     });
-    Some(Box::new(ClockUi { popup, label, zone }))
+    Some(Box::new(ClockUi {
+        popup,
+        label,
+        zone,
+        failed: Cell::new(false),
+    }))
 }

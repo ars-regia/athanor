@@ -70,7 +70,7 @@ pub fn new(bar: &Rc<Bar>, connector: Option<&str>) -> Option<Box<dyn ModuleUi>> 
     let updating = Rc::new(Cell::new(false));
     let (weak, switch_target, switch_updating) =
         (Rc::downgrade(bar), target.clone(), updating.clone());
-    switch.connect_state_set(move |_, _| {
+    switch.connect_state_set(move |switch, _| {
         if switch_updating.get() {
             return glib::Propagation::Proceed;
         }
@@ -82,6 +82,16 @@ pub fn new(bar: &Rc<Bar>, connector: Option<&str>) -> Option<Box<dyn ModuleUi>> 
             .map(|client| client.set_tiling(id, tiling::toggled(mode)))
         {
             tracing::error!(error = %err, "cannot change the tiling mode");
+            // No workspace event follows a request that was not sent: show the mode the
+            // workspace still has, once this handler has returned.
+            let (switch, updating) = (switch.downgrade(), switch_updating.clone());
+            glib::idle_add_local_once(move || {
+                if let Some(switch) = switch.upgrade() {
+                    updating.set(true);
+                    switch.set_active(mode == Tiling::Tiled);
+                    updating.set(false);
+                }
+            });
         }
         // The switch follows the compositor's answer, which arrives as a workspace event.
         glib::Propagation::Proceed

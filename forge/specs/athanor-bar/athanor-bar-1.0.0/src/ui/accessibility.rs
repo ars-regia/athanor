@@ -207,6 +207,13 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
         {
             if let Err(err) = theme::set_high_contrast(enabled) {
                 tracing::error!(error = %err, "cannot switch high contrast");
+                // Show what COSMIC's keys hold, once this handler has returned.
+                let weak_inner = weak_inner.clone();
+                glib::idle_add_local_once(move || {
+                    if let Some(inner) = weak_inner.upgrade() {
+                        inner.sync_high_contrast();
+                    }
+                });
             }
         }
         glib::Propagation::Proceed
