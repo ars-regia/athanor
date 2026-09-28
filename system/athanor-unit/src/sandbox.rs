@@ -46,10 +46,10 @@ pub fn restrict(read: &[&Path], write: &Path) -> Result<(), Box<dyn Error>> {
 
 /// Reads stay open. Every write access beneath each of `write` that exists; writing to
 /// existing files, and nothing else, beneath each of `write_file` that exists (a device
-/// directory such as `/dev/dri`). No other write anywhere. A kernel that cannot enforce the
-/// ruleset is an error, not a best effort.
+/// directory such as `/dev/dri`). No other write anywhere, truncation included (Landlock
+/// ABI 3). A kernel that cannot enforce the ruleset is an error, not a best effort.
 pub fn restrict_writes(write: &[&Path], write_file: &[&Path]) -> Result<(), Box<dyn Error>> {
-    let writes = AccessFs::from_write(ABI::V1);
+    let writes = AccessFs::from_write(ABI::V3);
     let mut ruleset = Ruleset::default()
         .set_compatibility(CompatLevel::HardRequirement)
         .handle_access(writes)?
@@ -155,6 +155,19 @@ mod tests {
                     .expect_err("a file grant creates nothing")
                     .kind(),
                 std::io::ErrorKind::PermissionDenied
+            );
+            assert_eq!(
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .truncate(true)
+                    .open(device.join("file"))
+                    .expect_err("a file grant truncates nothing")
+                    .kind(),
+                std::io::ErrorKind::PermissionDenied
+            );
+            assert!(
+                std::fs::write(writable.join("file"), b"y").is_ok(),
+                "a write grant truncates"
             );
         })
         .join()
