@@ -156,17 +156,20 @@ def main():
     notify = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
     notify.bind(NOTIFY_SOCKET)
 
+    # The test window starts only once the bar is on screen: cosmic-comp places a new
+    # window inside the area the bar's exclusive zone leaves, so a window mapped before
+    # the bar lands a few pixels off and the capture no longer matches its golden.
     def on_notify(_fd, _condition):
         if "READY=1" in notify.recv(4096).decode("utf-8", "replace").split("\n"):
             READY_FILE.write_text("READY=1\n", encoding="utf-8")
+            if window:
+                subprocess.Popen(["python3", WINDOW, "1"])
         return True
 
     GLib.io_add_watch(
         notify.fileno(), GLib.PRIORITY_DEFAULT, GLib.IOCondition.IN, on_notify
     )
 
-    if window:
-        subprocess.Popen(["python3", WINDOW, "1"])
     env = dict(
         os.environ,
         DBUS_SYSTEM_BUS_ADDRESS=f"unix:path={SYSTEM_BUS}",
