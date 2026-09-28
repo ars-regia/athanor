@@ -475,33 +475,39 @@ def main():
     dark_v1 = high_contrast_files()[0].parent
     shutil.rmtree(dark_v1)
     dark_v1.write_text("", encoding="utf-8")
-    switches = labelled(app, Atspi, "check box", "High contrast")
-    if switches:
-        switches[0].do_action(0)
-
-    def reverted():
-        found = labelled(app, Atspi, "check box", "High contrast")
-        return bool(found) and not found[0].get_state_set().contains(
-            Atspi.StateType.CHECKED
+    try:
+        switches = labelled(app, Atspi, "check box", "High contrast")
+        check(
+            "the High contrast switch is pressed with its theme directory unwritable",
+            bool(switches) and switches[0].do_action(0),
         )
 
-    time.sleep(0.5)
-    check(
-        "a failed high-contrast write puts the switch back off (BR3)",
-        wait_for(reverted, 3),
-    )
-    check(
-        "the failed write is logged",
-        wait_for(
-            lambda: (
-                "cannot switch high contrast" in client_log.read_text(errors="replace")
+        def reverted():
+            found = labelled(app, Atspi, "check box", "High contrast")
+            return bool(found) and not found[0].get_state_set().contains(
+                Atspi.StateType.CHECKED
+            )
+
+        time.sleep(0.5)
+        check(
+            "a failed high-contrast write puts the switch back off (BR3)",
+            wait_for(reverted, 3),
+        )
+        check(
+            "the failed write is logged",
+            wait_for(
+                lambda: (
+                    client_log.exists()
+                    and "cannot switch high contrast"
+                    in client_log.read_text(encoding="utf-8", errors="replace")
+                ),
+                3,
             ),
-            3,
-        ),
-    )
-    check("the bar stays alive after the failed write", alive(pid))
-    dark_v1.unlink()
-    dark_v1.mkdir()
+        )
+        check("the bar stays alive after the failed write", alive(pid))
+    finally:
+        dark_v1.unlink()
+        dark_v1.mkdir()
 
     check("the power menu opens", press(app, Atspi, "Power"))
     check(
