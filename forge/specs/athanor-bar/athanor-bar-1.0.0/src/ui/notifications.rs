@@ -16,6 +16,7 @@ use gtk4::prelude::*;
 use gtk4::{gdk, gio, glib, pango};
 
 use super::popup::{switch_row, Popup};
+use super::popups::Window;
 use super::{Bar, Changed, ModuleUi};
 use crate::i18n::{tr, tr_with};
 
@@ -67,6 +68,10 @@ pub struct Service {
     last_tick: Cell<Option<Instant>>,
     /// `ATHANOR_BAR_OPEN=notifications` came before the list: open once it is live.
     pending_open: Cell<bool>,
+    /// The popup surface, created at the first popup and then only hidden.
+    window: RefCell<Option<Window>>,
+    /// The pointer is over the popups (ruling 4).
+    pointer_inside: Cell<bool>,
 }
 
 impl Service {
@@ -106,6 +111,8 @@ impl Service {
                 ticking: Cell::new(false),
                 last_tick: Cell::new(None),
                 pending_open: Cell::new(false),
+                window: RefCell::new(None),
+                pointer_inside: Cell::new(false),
             }
         })
     }
@@ -344,9 +351,9 @@ impl Service {
     }
 
     /// While a popover of the bar is open the popups are hidden, and their time stands
-    /// still (BR6 "Stacking", ruling 3).
+    /// still (BR6 "Stacking", ruling 3); the pointer over them pauses it too (ruling 4).
     fn paused(&self) -> bool {
-        self.bar.upgrade().is_some_and(|bar| bar.popover_is_open())
+        self.pointer_inside.get() || self.bar.upgrade().is_some_and(|bar| bar.popover_is_open())
     }
 
     fn call(&self, method: &'static str, args: glib::Variant) {
@@ -474,8 +481,57 @@ impl Service {
     }
 
     fn changed(&self) {
+        self.redraw_popups();
         if let Some(bar) = self.bar.upgrade() {
             bar.refresh(Changed::Notifications);
+        }
+    }
+
+    pub(super) fn pointer(&self, inside: bool) {
+        self.pointer_inside.set(inside);
+    }
+
+    /// Draws the visible popups, or hides the surface when there are none or a popover of
+    /// the bar is open. GTK sends no `leave` to a window that hides, so hiding also clears
+    /// the pointer (Review Focus 1).
+    pub(super) fn redraw_popups(&self) {
+        let (Some(bar), Some(me)) = (self.bar.upgrade(), self.me.upgrade()) else {
+            return;
+        };
+        let shown: Vec<Notice> = {
+            let held = self.held.borrow();
+            self.popups
+                .borrow()
+                .visible()
+                .into_iter()
+                .filter_map(|id| held.get(id).cloned())
+                .collect()
+        };
+        if shown.is_empty() || !self.live() || bar.popover_is_open() {
+            if let Some(window) = self.window.borrow().as_ref() {
+                window.hide();
+            }
+            self.pointer_inside.set(false);
+            return;
+        }
+        let mut window = self.window.borrow_mut();
+        let window = window.get_or_insert_with(|| Window::new(&bar, &self.me));
+        window.show(&bar, &me, &shown);
+    }
+
+    /// An output left. If the popups show, their surface may be on it: it is abandoned, and
+    /// the next popup gets a new one on an output still there (Review Focus 4).
+    pub(super) fn output_left(&self) {
+        let showing = self
+            .window
+            .borrow()
+            .as_ref()
+            .is_some_and(|window| window.visible());
+        if showing {
+            if let Some(window) = self.window.take() {
+                window.abandon();
+            }
+            self.pointer_inside.set(false);
         }
     }
 
