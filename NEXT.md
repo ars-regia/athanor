@@ -365,7 +365,7 @@ Specification: [docs/architecture/doc_shell.md](docs/architecture/doc_shell.md),
 
 - [x] **Spike P4**: compositor privileges and the second connection, five questions (section 3 of the spec). Gates 2a. Run 2026-09-25: all five answered, revision 5 stands; the licence of `cosmic-client-toolkit` is open for 2a.
 - [ ] **2a**: `athanor-compositor-client` and the boundary check in `scripts/verify.py`.
-- [ ] **`doc_bar.md`**: specification of the bar and the dock, written after P4 and reviewed. Gates 2b.
+- [x] **`doc_bar.md`**: specification of the bar and the dock, written after P4 and reviewed. Gates 2b. Approved 2026-09-25 (revision 1).
 - [ ] **2b**: our bar, with tray, notifications and the shield.
 - [ ] **2c**: our dock.
 - [ ] **Switch**: bar and dock become the default; cosmic-panel, cosmic-applets, cosmic-notifications and the translator leave the image.
