@@ -4,6 +4,7 @@
 
 pub mod clock;
 pub mod keyboard;
+pub mod notices;
 pub mod order;
 pub mod power;
 pub mod tiling;
