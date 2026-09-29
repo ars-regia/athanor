@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use athanor_bar::order::{self, Module};
 use athanor_compositor_client::{outputs, theme, Client, Event, Opener};
-use athanor_layout::favorites;
+use athanor_layout::favorites::{self, FavoritesError};
 use athanor_layout::loader::{self, Paths};
 use athanor_layout::placement::Output;
 use athanor_layout::preset::{Layout, PanelEdge};
@@ -296,22 +296,27 @@ impl Bar {
         }
     }
 
-    /// Saves `ids` and shows them. A save that fails is logged and nothing changes; the
-    /// same when the current state is `Favorites::Unavailable` (a rejected file, a
-    /// crash-loop give-up, no configuration directory): the file is never replaced.
-    pub fn set_favorites(self: &Rc<Self>, ids: Vec<String>) {
+    /// Applies `change` to the favourites file under its lock (`favorites::update`) and shows
+    /// the result. A failure is logged and nothing changes; the same when the current state
+    /// is `Favorites::Unavailable` (a rejected file, a crash-loop give-up, no configuration
+    /// directory): the file is never replaced.
+    pub fn change_favorites(
+        self: &Rc<Self>,
+        change: impl FnOnce(&[String]) -> Result<Vec<String>, FavoritesError>,
+    ) {
         if matches!(*self.favorites.borrow(), Favorites::Unavailable) {
             return;
         }
         let Some(file) = &self.favorites_file else {
             return;
         };
-        if let Err(err) = favorites::save(file, &ids) {
-            tracing::error!(error = %err, "the favourites were not saved");
-            return;
+        match favorites::update(file, change) {
+            Ok(ids) => {
+                self.favorites.replace(Favorites::Loaded(ids));
+                self.refresh(Changed::Favorites);
+            }
+            Err(err) => tracing::error!(error = %err, "the favourites were not changed"),
         }
-        self.favorites.replace(Favorites::Loaded(ids));
-        self.refresh(Changed::Favorites);
     }
 
     /// BR6: at most one popover of the bar is open; opening one closes the other.

@@ -8,7 +8,9 @@ use std::path::Path;
 use std::rc::Rc;
 
 use athanor_bar::clock;
+use athanor_compositor_client::clock as cosmic_clock;
 use gtk4::accessible::Property;
+use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
 
@@ -25,6 +27,21 @@ struct ClockUi {
     zone: Zone,
     /// The last tick could not read or format the time: logged once, not every second.
     failed: Cell<bool>,
+    /// Whether the clock shows 24 hours (BR3): COSMIC's `military_time`, else the locale.
+    hours24: Rc<Cell<bool>>,
+    _watch: Option<gio::FileMonitor>,
+}
+
+/// COSMIC's `military_time` when it is set, else the locale's own 12/24-hour convention.
+fn read_hours24() -> bool {
+    let now = glib::DateTime::from_utc(2000, 1, 1, 13, 0, 0.0).ok();
+    let format = |pattern| {
+        now.as_ref()
+            .and_then(|now| now.format(pattern).ok())
+            .map(|text| text.to_string())
+            .unwrap_or_default()
+    };
+    clock::twenty_four_hour(cosmic_clock::military_time(), &format("%X"), &format("%p"))
 }
 
 fn current_zone(zone: &Zone) -> glib::TimeZone {
@@ -60,11 +77,24 @@ impl ModuleUi for ClockUi {
         if changed != Changed::Tick {
             return;
         }
+        let (short_pattern, long_pattern) = if self.hours24.get() {
+            (
+                // TRANSLATORS: a g_date_time_format() pattern for the clock on the bar.
+                tr("%a %-d %b %H:%M"),
+                // TRANSLATORS: a g_date_time_format() pattern, read aloud by screen readers.
+                tr("%A %-d %B %Y, %H:%M"),
+            )
+        } else {
+            (
+                // TRANSLATORS: a g_date_time_format() pattern for the clock on the bar (12-hour clock).
+                tr("%a %-d %b %-I:%M %p"),
+                // TRANSLATORS: a g_date_time_format() pattern, read aloud by screen readers (12-hour clock).
+                tr("%A %-d %B %Y, %-I:%M %p"),
+            )
+        };
         let texts = glib::DateTime::now(&current_zone(&self.zone)).and_then(|now| {
-            // TRANSLATORS: a g_date_time_format() pattern for the clock on the bar.
-            let short = now.format(&tr("%a %-d %b %H:%M"))?;
-            // TRANSLATORS: a g_date_time_format() pattern, read aloud by screen readers.
-            let long = now.format(&tr("%A %-d %B %Y, %H:%M"))?;
+            let short = now.format(&short_pattern)?;
+            let long = now.format(&long_pattern)?;
             Ok((short, long))
         });
         let (short, long) = match texts {
@@ -105,10 +135,15 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
             calendar.select_day(&now);
         }
     });
+    let hours24 = Rc::new(Cell::new(read_hours24()));
+    let watched = hours24.clone();
+    let watch = cosmic_clock::watch(move || watched.set(read_hours24()));
     Some(Box::new(ClockUi {
         popup,
         label,
         zone,
         failed: Cell::new(false),
+        hours24,
+        _watch: watch,
     }))
 }

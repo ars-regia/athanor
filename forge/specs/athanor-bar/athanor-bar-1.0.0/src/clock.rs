@@ -4,6 +4,15 @@
 
 use std::path::{Component, Path};
 
+/// Whether the clock shows 24 hours. COSMIC's `military_time` decides when it is set, so the
+/// bar agrees with COSMIC's own clock. Otherwise the locale does: `locale_time` is 13:00
+/// formatted with `%X` (the locale's time format) and `locale_pm` is `%p` at 13:00. A
+/// locale whose time format shows no PM marker is a 24-hour locale, even when it defines
+/// one (en_GB).
+pub fn twenty_four_hour(military_time: Option<bool>, locale_time: &str, locale_pm: &str) -> bool {
+    military_time.unwrap_or_else(|| locale_pm.is_empty() || !locale_time.contains(locale_pm))
+}
+
 /// The zone identifier, or `None` for GLib's local zone.
 pub fn zone(tz: Option<&str>, localtime: Option<&Path>) -> Option<String> {
     let tz = tz
@@ -46,6 +55,19 @@ pub fn time_zone(id: Option<&str>) -> (glib::TimeZone, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cosmics_setting_wins_over_the_locale() {
+        assert!(twenty_four_hour(Some(true), "01:00:00 PM", "PM"));
+        assert!(!twenty_four_hour(Some(false), "13:00:00", ""));
+    }
+
+    #[test]
+    fn without_it_the_locale_decides_by_its_pm_marker() {
+        assert!(!twenty_four_hour(None, "01:00:00 PM", "PM")); // en_US
+        assert!(twenty_four_hour(None, "13:00:00", "pm")); // en_GB: a marker it does not use
+        assert!(twenty_four_hour(None, "13:00:00", "")); // de_DE
+    }
 
     #[test]
     fn an_absolute_or_relative_link_gives_the_zone() {

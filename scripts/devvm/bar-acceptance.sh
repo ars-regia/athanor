@@ -3,7 +3,8 @@
 # Package 2b.2 of docs/architecture/doc_bar.md in the dev VM's real session, under the real
 # unit file and the real user manager: the bar starts as a Type=notify unit, its
 # confinement leaves glycin's image sandbox working, it stays within its memory budget
-# (section 5, item 17), high contrast reaches COSMIC's theme from inside it (BR3), and a
+# (section 5, item 17), high contrast reaches COSMIC's theme from inside it (BR3), an
+# output that comes and goes never restarts the process or leaks a surface, and a
 # crash loop falls back to the vendor layout (SH8).
 # athanor-shelld is masked for the run: COSMIC owns its bus names in this session.
 # Deploys the binary, the unit and the vendor favourites from .scratch/shell-rig/bin and
@@ -23,7 +24,7 @@ BIN=$ROOT/.scratch/shell-rig/bin
 DATA=$ROOT/forge/specs/athanor-bar/athanor-bar-1.0.0/data
 SHOTS=$ROOT/.scratch/bar-acceptance
 PSS_LIMIT_KB=$((64 * 1024))
-STAGES=(deploy unit memory high-contrast crash-loop cleanup)
+STAGES=(deploy unit memory high-contrast hotplug crash-loop cleanup)
 STAGE=
 CLEANED=0
 
@@ -167,6 +168,36 @@ stage_high-contrast() {
     [[ $(unit is-active) == active ]] || fail "not active after switching: $(unit show -p Result --value)"
 }
 
+HEAD2=/sys/class/drm/card1-Virtual-2/status
+
+# The second virtio head: status on or off, then a change uevent, which cosmic-comp needs
+# to see the output come or go (the forced status alone raises none).
+second_head() { # second_head on|off|detect
+    guest_ssh "echo $1 | sudo tee $HEAD2 > /dev/null && sudo udevadm trigger --action=change /sys/class/drm/card1"
+}
+surfaces_are() { [[ $(in_session python3 - < "$HERE/bar_surfaces.py") == "$1" ]]; }
+
+# An output that comes and goes, three times: the bar keeps its process, draws one populated
+# surface per output, and never destroys a departed output's surface (cosmic-comp 1.8.0
+# closes the connection of a client that does).
+stage_hotplug() {
+    guest_ssh "test -e $HEAD2" || fail "one head: start the dev VM with GPU_OUTPUTS=2 (devvm.env)"
+    [[ $(unit is-active) == active ]] || fresh_start
+    local pid restarts cycle
+    pid=$(unit show -p MainPID --value)
+    restarts=$(unit show -p NRestarts --value)
+    for cycle in 1 2 3; do
+        second_head on
+        wait_until 15 surfaces_are 2 || fail "cycle $cycle: $(in_session python3 - < "$HERE/bar_surfaces.py") populated surfaces with two outputs"
+        second_head off
+        wait_until 15 surfaces_are 1 || fail "cycle $cycle: $(in_session python3 - < "$HERE/bar_surfaces.py") populated surfaces with one output"
+        [[ $(unit show -p MainPID --value) == "$pid" ]] || fail "cycle $cycle: MainPID changed from $pid"
+    done
+    [[ $(unit show -p NRestarts --value) == "$restarts" ]] || fail "NRestarts went from $restarts to $(unit show -p NRestarts --value)"
+    [[ $(unit is-active) == active ]] || fail "not active after hotplug: $(unit show -p Result --value)"
+    "$HERE/screenshot.sh" "$SHOTS/hotplug.png" > /dev/null
+}
+
 stage_crash-loop() {
     # SIGKILL, not SIGSEGV: std's stack-overflow handler swallows a SIGSEGV sent by kill(2)
     # (see shelld-acceptance.sh). SH8 counts failures, not which signal caused them.
@@ -190,6 +221,12 @@ stage_crash-loop() {
 stage_cleanup() {
     CLEANED=1
     local failed=0
+    if guest_ssh "test -e $HEAD2"; then
+        second_head detect || {
+            echo "cleanup: restoring $HEAD2 to detect failed" >&2
+            failed=1
+        }
+    fi
     if unit_failed; then
         unit reset-failed || {
             echo "cleanup: systemctl --user reset-failed athanor-bar failed" >&2

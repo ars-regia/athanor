@@ -101,11 +101,15 @@ seed_layout() { # seed_layout <dir> <preset> <panel> <dock or ->
 # shows, one favourite the rig has installed, and COSMIC's mode (SH5).
 seed_bar() { # seed_bar <dir> <preset> <panel> <dock or -> <light|dark>
     seed_layout "$1" "$2" "$3" "$4"
-    mkdir -p "$1/cosmic/com.system76.CosmicComp/v1" "$1/cosmic/com.system76.CosmicTheme.Mode/v1"
+    mkdir -p "$1/cosmic/com.system76.CosmicComp/v1" "$1/cosmic/com.system76.CosmicTheme.Mode/v1" \
+        "$1/cosmic/com.system76.CosmicAppletTime/v1"
     printf '(rules: "", model: "pc105", layout: "us,it", variant: ",", options: None, repeat_delay: 600, repeat_rate: 25)' \
         > "$1/cosmic/com.system76.CosmicComp/v1/xkb_config"
     if [ "$5" = dark ]; then printf true; else printf false; fi \
         > "$1/cosmic/com.system76.CosmicTheme.Mode/v1/is_dark"
+    # Pins the 24-hour clock the scenes' goldens show: en_US and ar_EG would otherwise
+    # switch to 12 hours by locale.
+    printf true > "$1/cosmic/com.system76.CosmicAppletTime/v1/military_time"
     printf 'schema = 1\nfavorites = ["com.system76.CosmicSettings.desktop"]\n' > "$1/athanor/favorites.toml"
 }
 

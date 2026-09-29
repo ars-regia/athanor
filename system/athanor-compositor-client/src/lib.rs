@@ -3,6 +3,7 @@
 //! context (doc_bar.md, BR2). Wayland and COSMIC types stay inside this crate; the shell
 //! sees only the types of [`model`].
 
+pub mod clock;
 mod connection;
 mod cosmic_config;
 pub mod favorites;

@@ -2,6 +2,8 @@
 //! (doc_bar.md, BR3, BR7), minimised windows included. An app id comes from the window, so
 //! from the application: it becomes a desktop id only when it is one, and never a path.
 
+use std::collections::{BTreeSet, HashMap};
+
 use athanor_layout::favorites::is_desktop_id;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,13 +39,79 @@ pub fn desktop_id(app_id: &str) -> Option<String> {
     is_desktop_id(&id).then_some(id)
 }
 
-/// The favourites first, in their order, each with its windows; then one entry per app id
-/// no favourite claimed, in window order, and one per window without an app id. A
-/// favourite with no window shows only when `installed` finds its desktop id.
+/// The installed applications, by what a window can be matched with: the stem of a desktop
+/// id (`firefox` for `firefox.desktop`), and the `StartupWMClass` a desktop entry declares
+/// for an app whose windows do not carry its desktop id. Both compare ignoring ASCII case.
+#[derive(Clone, Debug, Default)]
+pub struct AppIndex {
+    ids: BTreeSet<String>,
+    stems: HashMap<String, String>,
+    wm_classes: HashMap<String, String>,
+}
+
+impl AppIndex {
+    /// `apps` are `(desktop id, StartupWMClass, shown)` triples, `shown` being
+    /// `DesktopAppInfo::should_show()` (not `NoDisplay`/`Hidden`). When two entries claim
+    /// the same key, a shown entry wins over a hidden one, so a helper like a NoDisplay
+    /// URL-handler entry never steals a class or a stem from the application it belongs
+    /// to; among ties of the same visibility, the first desktop id in byte order wins, so
+    /// the result does not depend on the order GIO lists them in.
+    pub fn new(apps: impl IntoIterator<Item = (String, Option<String>, bool)>) -> AppIndex {
+        let mut apps: Vec<_> = apps
+            .into_iter()
+            .filter(|(id, _, _)| is_desktop_id(id))
+            .collect();
+        apps.sort_by(|(id_a, _, shown_a), (id_b, _, shown_b)| {
+            (!shown_a, id_a).cmp(&(!shown_b, id_b))
+        });
+        let mut index = AppIndex::default();
+        for (id, wm_class, _shown) in apps {
+            if let Some(stem) = id.strip_suffix(".desktop") {
+                index
+                    .stems
+                    .entry(stem.to_ascii_lowercase())
+                    .or_insert_with(|| id.clone());
+            }
+            if let Some(class) = wm_class.filter(|class| !class.is_empty()) {
+                index
+                    .wm_classes
+                    .entry(class.to_ascii_lowercase())
+                    .or_insert_with(|| id.clone());
+            }
+            index.ids.insert(id);
+        }
+        index
+    }
+
+    pub fn contains(&self, desktop_id: &str) -> bool {
+        self.ids.contains(desktop_id)
+    }
+
+    /// The desktop id for a window's app id: an installed one by stem, then by
+    /// `StartupWMClass`; otherwise the app id as a desktop id, when it can be one. `None`
+    /// for an empty app id.
+    pub fn resolve(&self, app_id: &str) -> Option<String> {
+        if app_id.is_empty() {
+            return None;
+        }
+        let key = app_id.to_ascii_lowercase();
+        self.stems
+            .get(&key)
+            .or_else(|| self.wm_classes.get(&key))
+            .cloned()
+            .or_else(|| desktop_id(app_id))
+    }
+}
+
+/// The favourites first, in their order, each with its windows; then one entry per app no
+/// favourite claimed, in window order, and one per window without an app id. Windows are
+/// matched through `index`: a window joins the entry of the desktop id its app id resolves
+/// to, or, when either side has none, the entry of the same app id. A favourite with no
+/// window shows only when `index` holds its desktop id.
 pub fn entries<K: Clone>(
     favorites: &[String],
     windows: &[Open<K>],
-    installed: impl Fn(&str) -> bool,
+    index: &AppIndex,
 ) -> Vec<Entry<K>> {
     let mut entries: Vec<Entry<K>> = favorites
         .iter()
@@ -55,17 +123,21 @@ pub fn entries<K: Clone>(
         })
         .collect();
     for window in windows {
+        let resolved = index.resolve(&window.app_id);
         let joined = if window.app_id.is_empty() {
             None
         } else {
             entries
                 .iter()
-                .position(|entry| entry.app_id.eq_ignore_ascii_case(&window.app_id))
+                .position(|entry| match (&entry.desktop_id, &resolved) {
+                    (Some(entry_id), Some(window_id)) => entry_id.eq_ignore_ascii_case(window_id),
+                    _ => entry.app_id.eq_ignore_ascii_case(&window.app_id),
+                })
         };
-        match joined.and_then(|index| entries.get_mut(index)) {
+        match joined.and_then(|position| entries.get_mut(position)) {
             Some(entry) => entry.windows.push(window.clone()),
             None => entries.push(Entry {
-                desktop_id: desktop_id(&window.app_id),
+                desktop_id: resolved,
                 app_id: window.app_id.clone(),
                 pinned: false,
                 windows: vec![window.clone()],
@@ -73,9 +145,27 @@ pub fn entries<K: Clone>(
         }
     }
     entries.retain(|entry| {
-        !entry.windows.is_empty() || entry.desktop_id.as_deref().is_some_and(&installed)
+        !entry.windows.is_empty()
+            || entry
+                .desktop_id
+                .as_deref()
+                .is_some_and(|id| index.contains(id))
     });
     entries
+}
+
+/// Whether `a` and `b` show the same buttons acting on the same windows. Then only the
+/// presentation changed (a title, the focus, a minimised window) and the row is updated in
+/// place, not rebuilt.
+pub fn same_shape<K: PartialEq>(a: &[Entry<K>], b: &[Entry<K>]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(a, b)| {
+            a.desktop_id == b.desktop_id
+                && a.app_id == b.app_id
+                && a.pinned == b.pinned
+                && a.windows.len() == b.windows.len()
+                && a.windows.iter().zip(&b.windows).all(|(x, y)| x.id == y.id)
+        })
 }
 
 pub fn primary<K: Copy>(entry: &Entry<K>) -> Primary<K> {
@@ -99,6 +189,20 @@ mod tests {
             activated: false,
             minimized: false,
         }
+    }
+
+    fn titled(id: u32, app_id: &str, title: &str) -> Open<u32> {
+        Open {
+            title: title.to_owned(),
+            ..open(id, app_id)
+        }
+    }
+
+    fn index(apps: &[(&str, Option<&str>)]) -> AppIndex {
+        AppIndex::new(
+            apps.iter()
+                .map(|(id, class)| ((*id).to_owned(), class.map(str::to_owned), true)),
+        )
     }
 
     fn list(ids: &[&str]) -> Vec<String> {
@@ -127,7 +231,10 @@ mod tests {
         let found = entries(
             &list(&["firefox.desktop", "org.gnome.Nautilus.desktop"]),
             &windows,
-            |_| true,
+            &index(&[
+                ("firefox.desktop", None),
+                ("org.gnome.Nautilus.desktop", None),
+            ]),
         );
         assert_eq!(
             shape(&found),
@@ -148,7 +255,7 @@ mod tests {
         let found = entries(
             &list(&["org.mozilla.firefox.desktop"]),
             &[open(1, "Org.Mozilla.Firefox")],
-            |_| true,
+            &index(&[("org.mozilla.firefox.desktop", None)]),
         );
         assert_eq!(
             shape(&found),
@@ -158,7 +265,7 @@ mod tests {
 
     #[test]
     fn a_window_without_an_app_id_is_an_entry_of_its_own() {
-        let found = entries(&[], &[open(1, ""), open(2, "")], |_| true);
+        let found = entries(&[], &[open(1, ""), open(2, "")], &AppIndex::default());
         assert_eq!(shape(&found), vec![(None, vec![1]), (None, vec![2])]);
     }
 
@@ -178,15 +285,13 @@ mod tests {
     }
 
     #[test]
-    fn installed_is_asked_only_about_desktop_ids_and_hides_only_idle_favourites() {
-        let installed = |id: &str| {
-            assert!(!id.contains('/'), "installed was asked about {id}");
-            id != "missing.desktop"
-        };
+    fn the_index_hides_only_idle_favourites_it_does_not_hold() {
+        let installed = index(&[("kept.desktop", None), ("../x.desktop", None)]);
+        assert!(!installed.contains("../x.desktop"));
         let found = entries(
             &list(&["missing.desktop", "kept.desktop"]),
             &[open(1, "../x")],
-            installed,
+            &installed,
         );
         assert_eq!(
             shape(&found),
@@ -195,9 +300,100 @@ mod tests {
         let found = entries(
             &list(&["missing.desktop"]),
             &[open(2, "missing")],
-            installed,
+            &installed,
         );
         assert_eq!(shape(&found), vec![(Some("missing.desktop"), vec![2])]);
+    }
+
+    #[test]
+    fn a_window_resolves_by_stem_ignoring_ascii_case() {
+        let apps = index(&[("google-chrome.desktop", None)]);
+        assert_eq!(
+            apps.resolve("Google-chrome").as_deref(),
+            Some("google-chrome.desktop")
+        );
+    }
+
+    #[test]
+    fn a_window_resolves_by_startup_wm_class_when_no_stem_matches() {
+        let apps = index(&[("com.visualstudio.code.desktop", Some("Code"))]);
+        assert_eq!(
+            apps.resolve("code").as_deref(),
+            Some("com.visualstudio.code.desktop")
+        );
+    }
+
+    #[test]
+    fn a_stem_wins_over_a_startup_wm_class() {
+        let apps = index(&[
+            ("com.visualstudio.code.desktop", Some("code")),
+            ("code.desktop", None),
+        ]);
+        assert_eq!(apps.resolve("code").as_deref(), Some("code.desktop"));
+    }
+
+    #[test]
+    fn ties_go_to_the_first_desktop_id_whatever_the_listing_order() {
+        let forward = index(&[("a.desktop", Some("X")), ("b.desktop", Some("x"))]);
+        let backward = index(&[("b.desktop", Some("x")), ("a.desktop", Some("X"))]);
+        assert_eq!(forward.resolve("x").as_deref(), Some("a.desktop"));
+        assert_eq!(backward.resolve("x").as_deref(), Some("a.desktop"));
+    }
+
+    #[test]
+    fn a_shown_entry_wins_a_startup_wm_class_tie_over_a_hidden_one() {
+        let hidden_first = AppIndex::new([
+            (
+                "foo-url-handler.desktop".to_owned(),
+                Some("Foo".to_owned()),
+                false,
+            ),
+            ("foo.desktop".to_owned(), Some("Foo".to_owned()), true),
+        ]);
+        assert_eq!(hidden_first.resolve("Foo").as_deref(), Some("foo.desktop"));
+        let shown_first = AppIndex::new([
+            ("foo.desktop".to_owned(), Some("Foo".to_owned()), true),
+            (
+                "foo-url-handler.desktop".to_owned(),
+                Some("Foo".to_owned()),
+                false,
+            ),
+        ]);
+        assert_eq!(shown_first.resolve("Foo").as_deref(), Some("foo.desktop"));
+    }
+
+    #[test]
+    fn an_unknown_app_id_is_its_own_desktop_id_or_none() {
+        let apps = AppIndex::default();
+        assert_eq!(
+            apps.resolve("org.example.App").as_deref(),
+            Some("org.example.App.desktop")
+        );
+        assert_eq!(apps.resolve("a b"), None);
+        assert_eq!(apps.resolve(""), None);
+    }
+
+    #[test]
+    fn a_window_matched_by_wm_class_joins_its_favourite() {
+        let apps = index(&[("com.visualstudio.code.desktop", Some("Code"))]);
+        let favorites = vec!["com.visualstudio.code.desktop".to_owned()];
+        let got = entries(&favorites, &[titled(1, "code", "main.rs")], &apps);
+        assert_eq!(got.len(), 1);
+        assert!(got[0].pinned);
+        assert_eq!(got[0].windows.len(), 1);
+    }
+
+    #[test]
+    fn a_title_or_focus_change_keeps_the_shape_and_a_new_window_does_not() {
+        let apps = index(&[("a.desktop", None)]);
+        let before = entries(&[], &[titled(1, "a", "one")], &apps);
+        let mut renamed = titled(1, "a", "two");
+        renamed.activated = true;
+        assert!(same_shape(&before, &entries(&[], &[renamed], &apps)));
+        let more = entries(&[], &[titled(1, "a", "one"), titled(2, "a", "one")], &apps);
+        assert!(!same_shape(&before, &more));
+        let pinned = entries(&["a.desktop".to_owned()], &[titled(1, "a", "one")], &apps);
+        assert!(!same_shape(&before, &pinned));
     }
 
     #[test]

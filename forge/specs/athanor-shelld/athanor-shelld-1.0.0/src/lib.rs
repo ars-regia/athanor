@@ -10,6 +10,5 @@ pub mod notifications;
 pub mod sender;
 pub mod server;
 pub mod store;
-pub mod text;
 pub mod watcher;
 pub mod wire;

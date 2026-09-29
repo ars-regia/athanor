@@ -7,7 +7,9 @@ started by bar_session.py --hang CanReboot --window --pinnable and no favourites
 - the preset follows the user's layout document live, a broken document falls back to the
   vendor layout without stopping the bar, and a key the policy marks mandatory holds
   (acceptance item 16);
-- the test window shows as a running application under the bar preset; with a second
+- the test window shows as a running application under the bar preset, a title change
+  updates its button in place, and a desktop entry installed while the bar runs claims a
+  window by StartupWMClass; with a second
   window its button opens the menu, whose Pin to Bar and Unpin from Bar write the
   favourites file and whose row follows the pinned state;
 - the accessibility popover offers high contrast, which writes COSMIC's is_high_contrast;
@@ -18,6 +20,9 @@ started by bar_session.py --hang CanReboot --window --pinnable and no favourites
 """
 
 import os
+import re
+import shutil
+import signal
 import sys
 import time
 from pathlib import Path
@@ -77,15 +82,16 @@ def showing(accessible, Atspi):
     return accessible.get_state_set().contains(Atspi.StateType.SHOWING)
 
 
-def buttons(app, Atspi, name):
-    """Every showing push button called `name`, found afresh: a rebuild replaces them."""
+def buttons_matching(app, Atspi, regex):
+    """Every showing push button whose name matches `regex`, found afresh: a rebuild
+    replaces them."""
     found = []
 
     def visit(accessible):
         try:
             if (
                 accessible.get_role_name() == "button"
-                and accessible.get_name() == name
+                and regex.search(accessible.get_name())
                 and showing(accessible, Atspi)
             ):
                 found.append(accessible)
@@ -103,6 +109,38 @@ def buttons(app, Atspi, name):
 
     visit(app)
     return found
+
+
+def buttons(app, Atspi, name):
+    """Every showing push button called `name` exactly."""
+    return buttons_matching(app, Atspi, re.compile(f"^{re.escape(name)}$"))
+
+
+def name_or_none(accessible):
+    """The accessible's name, or None once the bar destroyed it."""
+    try:
+        return accessible.get_name()
+    except GLib.Error:
+        return None
+
+
+def retitle(number, title):
+    """Retitles cc_window.py `number`'s windows through its SIGUSR1 hook."""
+    Path(f"/tmp/cc-window-{number}.title").write_text(title, encoding="utf-8")
+    signalled = 0
+    for proc in Path("/proc").iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            argv = (proc / "cmdline").read_bytes().split(b"\0")
+        except OSError:
+            continue
+        for index, arg in enumerate(argv[:-1]):
+            if arg.endswith(b"cc_window.py") and argv[index + 1] == number.encode():
+                os.kill(int(proc.name), signal.SIGUSR1)
+                signalled += 1
+    if signalled == 0:
+        raise RuntimeError(f"no cc_window {number} to retitle")
 
 
 def labelled(app, Atspi, role, label):
@@ -250,6 +288,11 @@ def main():
         wait_for(lambda: favorites_text().startswith("schema = 1"), 5),
         repr(favorites_text()),
     )
+    check(
+        "the import ignores COSMIC's system default list (BR7)",
+        "org.mozilla.firefox" not in favorites_text(),
+        repr(favorites_text()),
+    )
 
     check(
         "float: Workspaces shows",
@@ -257,6 +300,32 @@ def main():
     )
     pss_float = pss_kb(pid)
     print(f"athanor-bar PSS (float): {pss_float} kB")
+
+    clock_setting = (
+        Path(os.environ["XDG_CONFIG_HOME"])
+        / "cosmic"
+        / "com.system76.CosmicAppletTime"
+        / "v1"
+        / "military_time"
+    )
+
+    def clock_buttons(pattern):
+        return buttons_matching(app, Atspi, re.compile(pattern))
+
+    check(
+        "the clock shows 24 hours as COSMIC says",
+        wait_for(lambda: clock_buttons(r", \d\d:\d\d$"), 3),
+    )
+    clock_setting.write_text("false", encoding="utf-8")
+    check(
+        "the clock follows COSMIC's military_time live (BR3)",
+        wait_for(lambda: clock_buttons(r", \d{1,2}:\d\d (AM|PM)$"), 3),
+    )
+    clock_setting.write_text("true", encoding="utf-8")
+    check(
+        "the clock returns to 24 hours",
+        wait_for(lambda: clock_buttons(r", \d\d:\d\d$"), 3),
+    )
 
     user.write_text(BAR, encoding="utf-8")
     check(
@@ -267,6 +336,40 @@ def main():
         "bar: the test window is a running application",
         wait_for(lambda: buttons(app, Atspi, RUNNING_WINDOW_BUTTON), 5),
     )
+    before = buttons(app, Atspi, RUNNING_WINDOW_BUTTON)
+    retitle("1", "cc-window-1 renamed")
+    check(
+        "a title change updates the button in place, not a new one (BR3)",
+        bool(before)
+        and wait_for(
+            lambda: name_or_none(before[0]) == "CC Window: cc-window-1 renamed", 3
+        ),
+        repr(name_or_none(before[0])) if before else "no button",
+    )
+    retitle("1", "cc-\u202ewindow\u0007-1")
+    check(
+        "a title's control and bidi characters never reach the bar (SH12)",
+        wait_for(lambda: buttons(app, Atspi, RUNNING_WINDOW_BUTTON), 3),
+    )
+
+    third = subprocess.Popen(["python3", WINDOW, "3"])
+    check(
+        "a window with no desktop entry shows under its app id",
+        wait_for(lambda: buttons(app, Atspi, "org.athanor.CcWindow3: cc-window-3"), 5),
+    )
+    entry = Path(os.environ["XDG_DATA_HOME"]) / "applications" / "cc-three.desktop"
+    entry.write_text(
+        "[Desktop Entry]\nType=Application\nName=CC Three\nExec=true\n"
+        "StartupWMClass=org.athanor.CcWindow3\n",
+        encoding="utf-8",
+    )
+    check(
+        "an entry installed while the bar runs claims the window by StartupWMClass",
+        wait_for(lambda: buttons(app, Atspi, "CC Three: cc-window-3"), 10),
+    )
+    third.terminate()
+    third.wait(5)
+    entry.unlink()
     pss_bar = pss_kb(pid)
     print(f"athanor-bar PSS (bar, window shown): {pss_bar} kB")
 
@@ -365,6 +468,46 @@ def main():
     # Switched back off so the checks after this one run in the normal, non-high-contrast
     # variant, same as every other capture in the rig.
     check("high contrast is switched back off", wait_for(high_contrast_is(False), 2))
+
+    # A regular file where Dark's v1 directory belongs makes the next write fail:
+    # create_dir_all meets a file, and the bar's Landlock grant was bound to the old
+    # directory's inode. Dark is written first, so nothing is written (BR3).
+    dark_v1 = high_contrast_files()[0].parent
+    shutil.rmtree(dark_v1)
+    dark_v1.write_text("", encoding="utf-8")
+    try:
+        switches = labelled(app, Atspi, "check box", "High contrast")
+        check(
+            "the High contrast switch is pressed with its theme directory unwritable",
+            bool(switches) and switches[0].do_action(0),
+        )
+
+        def reverted():
+            found = labelled(app, Atspi, "check box", "High contrast")
+            return bool(found) and not found[0].get_state_set().contains(
+                Atspi.StateType.CHECKED
+            )
+
+        time.sleep(0.5)
+        check(
+            "a failed high-contrast write puts the switch back off (BR3)",
+            wait_for(reverted, 3),
+        )
+        check(
+            "the failed write is logged",
+            wait_for(
+                lambda: (
+                    client_log.exists()
+                    and "cannot switch high contrast"
+                    in client_log.read_text(encoding="utf-8", errors="replace")
+                ),
+                3,
+            ),
+        )
+        check("the bar stays alive after the failed write", alive(pid))
+    finally:
+        dark_v1.unlink()
+        dark_v1.mkdir()
 
     check("the power menu opens", press(app, Atspi, "Power"))
     check(

@@ -1,14 +1,22 @@
 //! The one-time import of COSMIC's favourites (doc_bar.md, BR7). This crate is the only
 //! one that knows COSMIC's paths; the favourites file itself belongs to `athanor-layout`.
 
+use std::path::Path;
+
 use crate::cosmic_config;
 
 const APP_LIST: &str = "com.system76.CosmicAppList";
 
-/// The desktop ids of COSMIC's favourites, in COSMIC's order; `None` when COSMIC has no
-/// readable list. COSMIC stores app ids, desktop ids without the `.desktop` suffix.
+/// The desktop ids of the user's own COSMIC favourites, in COSMIC's order; `None` when
+/// the user has no readable list. COSMIC's system default under `/usr/share/cosmic` is a
+/// vendor choice like our own list, not the user's: importing it would shadow the vendor
+/// favourites of the bar (doc_bar.md, BR7).
 pub fn cosmic_favorites() -> Option<Vec<String>> {
-    let text = cosmic_config::key(&cosmic_config::dirs(), APP_LIST, "favorites")?;
+    cosmic_favorites_in(&cosmic_config::user_dir()?)
+}
+
+fn cosmic_favorites_in(user_cosmic_dir: &Path) -> Option<Vec<String>> {
+    let text = cosmic_config::key(&[user_cosmic_dir.to_path_buf()], APP_LIST, "favorites")?;
     let favorites = parse(&text);
     if favorites.is_none() {
         tracing::warn!("COSMIC's favourites list does not parse; it is not imported");
@@ -88,6 +96,20 @@ mod tests {
     fn bad_entries_are_skipped_and_duplicates_dropped() {
         let text = r#"["../../etc/passwd", "", "a b", "ok", "ok", "we\"ird"]"#;
         assert_eq!(parse(text), Some(vec!["ok.desktop".to_owned()]));
+    }
+
+    #[test]
+    fn only_the_users_own_list_is_read() {
+        let dir = std::env::temp_dir().join(format!("athanor-favs-{}", std::process::id()));
+        let _fresh = std::fs::remove_dir_all(&dir);
+        assert_eq!(cosmic_favorites_in(&dir), None);
+        let list = crate::cosmic_config::component(&dir, APP_LIST);
+        std::fs::create_dir_all(&list).expect("mkdir");
+        std::fs::write(list.join("favorites"), "[\"firefox\"]").expect("write");
+        assert_eq!(
+            cosmic_favorites_in(&dir),
+            Some(vec!["firefox.desktop".to_owned()])
+        );
     }
 
     #[test]
