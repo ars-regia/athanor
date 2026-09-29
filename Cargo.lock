@@ -749,6 +749,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-trust-state"
+version = "1.0.0"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "athanor-unit"
 version = "1.0.0"
 dependencies = [
@@ -756,6 +765,40 @@ dependencies = [
  "nix 0.29.0",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "athanor-update"
+version = "1.0.0"
+dependencies = [
+ "athanor-bus-api",
+ "athanor-trust-state",
+ "base64 0.21.7",
+ "chrono",
+ "clap",
+ "hex",
+ "p256",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "zbus",
+]
+
+[[package]]
+name = "athanor-update-notify"
+version = "1.0.0"
+dependencies = [
+ "athanor-trust-state",
+ "chrono",
+ "futures-util",
+ "landlock",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "zbus",
 ]
 
 [[package]]

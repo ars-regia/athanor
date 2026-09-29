@@ -1,0 +1,19 @@
+[Unit]
+Description=Athanor update notifications
+Documentation=https://github.com/hr-mes/athanor/blob/iso-v0/docs/architecture/doc_update_trust.md
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/athanor-update-notify
+Restart=on-failure
+RestartSec=30
+NoNewPrivileges=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+SystemCallFilter=@system-service
+
+[Install]
+WantedBy=graphical-session.target

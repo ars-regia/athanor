@@ -17,6 +17,12 @@ on:
       SECUREBOOT_SIGNING_KEY:
         description: "Secure Boot private key (PEM) that signs the UKI and its PCR policy; supplied by the signing environment"
         required: false
+      COSIGN_PRIVATE_KEY:
+        description: "Private key that signs the system images for the update service (system/keys); supplied by the signing environment"
+        required: false
+      COSIGN_PASSWORD:
+        description: "Passphrase of COSIGN_PRIVATE_KEY; supplied by the signing environment"
+        required: false
 
 jobs:
   lint:
@@ -282,12 +288,13 @@ jobs:
         # is pushed until all three have built.
         env:
           RUN_ID: ${{ github.run_id }}
+          RUN_NUMBER: ${{ github.run_number }}
           SECUREBOOT_SIGNING_KEY: ${{ secrets.SECUREBOOT_SIGNING_KEY }}
         run: |
           set -euo pipefail
           [[ -n ${SECUREBOOT_SIGNING_KEY:-} ]] || { echo "SECUREBOOT_SIGNING_KEY is not available to this job: check the signing environment" >&2; exit 1; }
           for gpu in none nvidia nvidia-legacy; do
-            bash system/build-image.sh --gpu "$gpu" --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" --tag "${DEFAULT_TAG}"
+            bash system/build-image.sh --gpu "$gpu" --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" --tag "${DEFAULT_TAG}" --serial "${RUN_NUMBER}"
           done
           df -h
 
@@ -299,6 +306,18 @@ jobs:
           for gpu in none nvidia nvidia-legacy; do
             bash system/build-image.sh --gpu "$gpu" --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" --tag "${DEFAULT_TAG}" --push-only
           done
+
+      - name: 🧾 Record the pushed digests for the signing job
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: bash system/image-digests.sh --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" --out artifacts/image-digests.txt
+
+      - name: 📎 Hand the digests to the signing job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: image-digests
+          path: artifacts/image-digests.txt
+          if-no-files-found: error
 
       - name: 🔐 Sign & Attest OS Image (Zero-Trust Keyless Sigstore)
         # One signature and one SBOM attestation per image digest: the :latest tag
@@ -391,3 +410,32 @@ jobs:
           else
             chown -R 1001:1001 . || chown -R 1000:1000 . || true
           fi
+
+  sign-system-images:
+    name: 🔏 Key-based signature of the system images
+    # The only job that receives COSIGN_*. It builds nothing and runs no third-party tool
+    # beside the key: checkout, registry login, system/sign-images.sh (doc_update_trust.md UT2).
+    needs: [dag-system-image]
+    runs-on: ubuntu-24.04
+    environment: signing
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: 📎 Digests recorded by the build job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: image-digests
+          path: artifacts
+      - name: 🔑 Login to the registry
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: echo "${GITHUB_TOKEN}" | skopeo login "$(cut -d/ -f1 artifacts/image-digests.txt | head -n 1)" -u "${GITHUB_ACTOR}" --password-stdin
+      - name: 🔏 Sign, then verify as a machine will (system/sign-images.sh)
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: bash system/sign-images.sh artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"

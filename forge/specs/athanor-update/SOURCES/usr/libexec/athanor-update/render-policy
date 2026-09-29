@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Renders the container signature policy of an Athanor image from its templates
+# (docs/architecture/doc_update_trust.md, UT3): policy.json, attachments-policy.json and
+# registries.d/athanor.yaml under --out. keyPaths is every *.pub of --keys-dir, sorted, so
+# a key rotation is a file added to or removed from that directory.
+# Callers: system/Containerfile (image build), system/sign-images.sh (the pipeline verifies
+# with the policy a machine will have), scripts/devvm/acceptance (throwaway registry and key).
+# Usage: render-policy --registry REGISTRY/OWNER --keys-dir DIR --out DIR [--link-etc ETC]
+#   --link-etc ETC  also make ETC/containers/policy.json and ETC/containers/registries.d/athanor.yaml
+#                   symbolic links to the rendered files (the image build passes /etc)
+set -euo pipefail
+
+usage() { echo "usage: ${0##*/} --registry REGISTRY/OWNER --keys-dir DIR --out DIR [--link-etc ETC]" >&2; exit 2; }
+registry='' keys_dir='' out='' etc=''
+while [[ $# -gt 0 ]]; do
+  [[ $# -ge 2 ]] || usage
+  case $1 in
+    --registry) registry=$2 ;;
+    --keys-dir) keys_dir=$2 ;;
+    --out) out=$2 ;;
+    --link-etc) etc=$2 ;;
+    *) usage ;;
+  esac
+  shift 2
+done
+[[ -n $registry && -n $keys_dir && -n $out ]] || usage
+templates=${ATHANOR_POLICY_TEMPLATES:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../share/athanor/containers/templates}
+
+# Both values are pasted into JSON and YAML: refuse anything that would need quoting.
+[[ $registry =~ ^[a-z0-9]([a-z0-9._:/-]*[a-z0-9])?$ ]] || { echo "${0##*/}: not a registry/owner: '$registry'" >&2; exit 2; }
+keys_dir=$(readlink -f "$keys_dir")
+shopt -s nullglob
+keys=("$keys_dir"/*.pub)
+[[ ${#keys[@]} -gt 0 ]] || { echo "${0##*/}: no *.pub under $keys_dir: a policy with no key refuses every image" >&2; exit 2; }
+key_paths=''
+for key in "${keys[@]}"; do
+  [[ $key =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "${0##*/}: key path needs quoting: '$key'" >&2; exit 2; }
+  grep -q -- '-----BEGIN PUBLIC KEY-----' "$key" || { echo "${0##*/}: $key is not a PEM public key" >&2; exit 2; }
+  key_paths+="${key_paths:+, }\"$key\""
+done
+
+mkdir -p "$out/registries.d"
+render() { sed -e "s|@REGISTRY@|$registry|g" -e "s|@KEY_PATHS@|$key_paths|g" "$templates/$1" > "$2"; }
+render policy.json.in "$out/policy.json"
+render attachments-policy.json.in "$out/attachments-policy.json"
+render athanor.yaml.in "$out/registries.d/athanor.yaml"
+chmod 0644 "$out/policy.json" "$out/attachments-policy.json" "$out/registries.d/athanor.yaml"
+
+if [[ -n $etc ]]; then
+  mkdir -p "$etc/containers/registries.d"
+  ln -sfn "$(readlink -f "$out")/policy.json" "$etc/containers/policy.json"
+  ln -sfn "$(readlink -f "$out")/registries.d/athanor.yaml" "$etc/containers/registries.d/athanor.yaml"
+fi

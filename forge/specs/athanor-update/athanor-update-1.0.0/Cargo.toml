@@ -1,0 +1,23 @@
+[package]
+name = "athanor-update"
+version = "1.0.0"
+edition = "2021"
+authors = ["Athanor Forge <forge@athanor.os>"]
+description = "Checks, downloads and applies Athanor system image updates, and publishes the trust state"
+license = "MIT"
+
+[dependencies]
+athanor-trust-state = { path = "../../../../system/athanor-trust-state" }
+athanor-bus-api = { path = "../../../../system/athanor-bus-api" }
+zbus = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+p256 = { version = "0.13", features = ["ecdsa", "pem"] }
+base64 = "0.21"
+chrono = { version = "0.4", default-features = false, features = ["std"] }

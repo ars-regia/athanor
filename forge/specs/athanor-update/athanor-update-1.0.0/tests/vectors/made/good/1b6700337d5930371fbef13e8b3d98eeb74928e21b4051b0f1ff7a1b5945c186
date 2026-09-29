@@ -1,0 +1,1 @@
+{"critical":{"identity":{"docker-reference":"registry.example/owner/athanor-system:101"},"image":{"docker-manifest-digest":"sha256:5d74aca46333c087a384efd46229304451589038a608f361b803a31cf1673e41"},"type":"cosign container image signature"},"optional":{"creator":"make.sh"}}
