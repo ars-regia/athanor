@@ -59,10 +59,32 @@ pub fn switch_row(text: &str) -> (gtk4::Box, gtk4::Switch) {
     (row, switch)
 }
 
-/// A popover for `button`, opening towards the inside of the screen. athanor-apps parents
-/// it and keeps the button's `Expanded` state.
+/// A popover for `button`, attached by [`attach_popover`].
 pub fn attach(bar: &Rc<Bar>, button: &gtk4::Button) -> gtk4::Popover {
-    athanor_apps::menu::attach(button, towards_inside(bar))
+    let popover = gtk4::Popover::new();
+    attach_popover(bar, button, &popover);
+    popover
+}
+
+/// `athanor_apps::menu::attach_popover` towards the inside of the screen, for a popover of
+/// the bar (`Popup`'s, or the tray's `PopoverMenu`), which also tells the bar when it shows
+/// and closes so the notification popups hide under it (BR6, "Stacking"). The rows' menus
+/// reach the bar through `Host::menu_opened` and `Host::hold` instead.
+pub fn attach_popover(bar: &Rc<Bar>, button: &gtk4::Button, popover: &impl IsA<gtk4::Popover>) {
+    athanor_apps::menu::attach_popover(button, popover, towards_inside(bar));
+    let popover = popover.upcast_ref::<gtk4::Popover>();
+    let weak_bar = Rc::downgrade(bar);
+    popover.connect_show(move |_| {
+        if let Some(bar) = weak_bar.upgrade() {
+            bar.popovers_changed_later();
+        }
+    });
+    let weak_bar = Rc::downgrade(bar);
+    popover.connect_closed(move |_| {
+        if let Some(bar) = weak_bar.upgrade() {
+            bar.popovers_changed_later();
+        }
+    });
 }
 
 /// Where the bar's popovers and menus open: towards the inside of the screen.

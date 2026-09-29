@@ -16,6 +16,8 @@
 #   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout)
 #   rig.sh shelld-e2e       athanor-shelld on a session bus: names, notifications, refusal of the private interface, tray watcher, memory
 #   rig.sh bar-e2e          athanor-bar in a scene: READY, live layout, mandatory keys, running windows, the favourites import and pinning, the power menu against a fake logind, memory
+#   rig.sh notifications-e2e  athanor-bar against a fake of athanor-shelld's private interface: popups, list, actions, do not disturb, hostile input, restart, memory
+#   rig.sh tray-e2e         athanor-bar as the tray host of athanor-shelld (run build-shelld first): items, dbusmenu menu, activation, the refused List, the watcher's restart, memory
 #   rig.sh compositor-e2e   the compositor client against cosmic-comp, and against sway without the COSMIC globals
 #   rig.sh layer-guard <greeter|bar>   the surface must refuse to run when the shim loads late
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
@@ -24,7 +26,7 @@
 #   rig.sh rig-tests        unit tests of the rig's own scripts, against the rig's tools
 #   rig.sh cosmic-panel-defaults   COSMIC's shipped panel keys equal the renderer's fixture
 #   rig.sh chooser-e2e      press a preset in the chooser and wait for the panel configuration
-#   rig.sh surface <greeter|layout|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling>  capture every case of a surface and compare with the goldens
+#   rig.sh surface <greeter|layout|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling|bar-popups|bar-notifications|bar-tray>  capture every case of a surface and compare with the goldens
 #   rig.sh update-goldens <name>   replace the goldens with a fresh capture, deliberately
 set -euo pipefail
 
@@ -163,8 +165,17 @@ capture_chooser() {
     done < <(python3 -B "$rig/cases.py" chooser)
 }
 
-# doc_bar.md, BR9: the bar under its own preset with one running window, and the five
-# popovers the bar owns in 2b.2, opened by ATHANOR_BAR_OPEN over the float preset.
+require_shelld() { # the tray scenes run the real watcher
+    if [ ! -x "$out/bin/athanor-shelld" ]; then
+        echo "rig.sh: $out/bin/athanor-shelld is missing; run rig.sh build-shelld first" >&2
+        exit 1
+    fi
+}
+
+# doc_bar.md, BR9: the bar under its own preset with one running window, the five
+# popovers the bar owns in 2b.2, opened by ATHANOR_BAR_OPEN over the float preset, and
+# 2b.3's notification popups (four waiting notifications: three show), the notification
+# list and a tray menu.
 capture_bar() { # capture_bar <surface>
     local surface=$1 open="" preset=float panel=top dock=visible
     local session=(python3 /repo/forge/test/shell/bar_session.py)
@@ -175,6 +186,12 @@ capture_bar() { # capture_bar <surface>
     bar-calendar) open=clock ;;
     bar-accessibility) open=accessibility ;;
     bar-tiling) open=tiling ;;
+    bar-popups) session+=(--notifications) ;;
+    bar-notifications) open=notifications session+=(--notifications) ;;
+    bar-tray)
+        require_shelld
+        open=tray session+=(--tray)
+        ;;
     esac
     in_rig "$(rig_image)" bash -c '
         set -euo pipefail
@@ -318,6 +335,29 @@ bar-e2e)
         bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
                  && exec python3 /repo/forge/test/shell/bar_session.py --hang CanReboot --window --pinnable"
     ;;
+notifications-e2e)
+    seed_bar "$out/seed-notifications-e2e" float top visible light
+    rm -f "$out/notifications-e2e-notifications.log"
+    in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 \
+        RIG_CONFIG_SEED=/out/seed-notifications-e2e \
+        RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
+        RIG_HOLD="python3 /repo/forge/test/shell/notifications_e2e.py" \
+        dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 notifications-e2e -- \
+        bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
+                 && exec python3 /repo/forge/test/shell/bar_session.py --notifications --respawn"
+    ;;
+tray-e2e)
+    require_shelld
+    seed_bar "$out/seed-tray-e2e" float top visible light
+    rm -f "$out/tray-e2e-tray.log" "$out/tray-e2e-shelld.log"
+    in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 \
+        RIG_CONFIG_SEED=/out/seed-tray-e2e ATHANOR_BAR_OPEN=tray \
+        RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
+        RIG_HOLD="python3 /repo/forge/test/shell/tray_e2e.py" \
+        dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 tray-e2e -- \
+        bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
+                 && exec python3 /repo/forge/test/shell/bar_session.py --tray --respawn"
+    ;;
 compositor-e2e)
     # cosmic-comp reads the keyboard layouts from its configuration: two, so the switch shows.
     seed=$out/compositor-e2e-seed/cosmic/com.system76.CosmicComp/v1
@@ -431,7 +471,7 @@ surface | update-goldens)
     greeter) capture_greeter ;;
     layout) capture_layout ;;
     chooser) capture_chooser ;;
-    bar | bar-power | bar-input | bar-calendar | bar-accessibility | bar-tiling) capture_bar "$surface" ;;
+    bar | bar-power | bar-input | bar-calendar | bar-accessibility | bar-tiling | bar-popups | bar-notifications | bar-tray) capture_bar "$surface" ;;
     *)
         echo "rig.sh $1: unknown surface '$surface'" >&2
         exit 2

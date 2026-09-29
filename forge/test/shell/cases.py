@@ -32,7 +32,8 @@ SURFACES = {
     "greeter": {"variants": ("light", "dark"), "scales": ("1.0", "1.5")},
     "chooser": {"variants": ("light", "dark"), "scales": ("1.0", "1.5")},
     # doc_bar.md, BR9: the bar, and the popovers of power, input source, calendar,
-    # accessibility and tiling. The other nine scenes come with 2b.3 to 2b.5.
+    # accessibility and tiling; the notification popups, the notification list and a
+    # tray menu (2b.3). The other six scenes come with 2b.4 and 2b.5.
     **{
         surface: {"variants": ("light", "dark"), "scales": ("1.0", "1.5")}
         for surface in (
@@ -42,6 +43,9 @@ SURFACES = {
             "bar-calendar",
             "bar-accessibility",
             "bar-tiling",
+            "bar-popups",
+            "bar-notifications",
+            "bar-tray",
         )
     },
 }

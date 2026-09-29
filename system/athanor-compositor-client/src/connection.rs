@@ -338,7 +338,7 @@ impl Client {
     /// An `xdg_activation_v1` token from the surface that received the last input event,
     /// so the window it starts takes the focus. GDK waits for the token on its own queue;
     /// what it read for ours meanwhile is dispatched here.
-    pub(crate) fn activation_token(&self, app: Option<&gio::AppInfo>) -> Option<String> {
+    pub fn activation_token(&self, app: Option<&gio::AppInfo>) -> Option<String> {
         if self.inner.closed.get() {
             return None;
         }
