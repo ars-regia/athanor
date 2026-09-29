@@ -4,7 +4,6 @@ athanor-mesh-bus
 athanor-cluster-mesh
 athanor-mesh-sync
 athanor-cloud-rs
-athanor-compositor
 athanor-hypervisor-daemon
 athanor-net-unikernel
 athanor-telemetry
