@@ -30,9 +30,9 @@ athanor-greeter
 # session bus, outside its hardened system unit, and claimed os.athanor.Bedrock and the
 # athanor portal name there; nothing in the COSMIC session uses it.
 #
-# Out of the workspace since 2026-09-19, and athanor-dock has no unit since the COSMIC
-# dock replaced it; the crate stays a library of athanor-shell-rs, in that program's
-# frozen workspace, and only its standalone binary leaves the image.
+# The GTK 0.7 dock library of athanor-shell-rs lives in that program's frozen workspace,
+# at forge/specs/athanor-shell-rs/athanor-dock-0.7, since 2026-09-29; the name
+# athanor-dock and forge/specs/athanor-dock belong to the dock of package 2c.
 # athanor-gatekeeper-rs is not fit to enable (independent review, 2026-09-17): its global
 # allocator ignores alignment, launch success is reported before any isolation boundary
 # runs, the fanotify group fd is inherited by sandboxed applications, and applications

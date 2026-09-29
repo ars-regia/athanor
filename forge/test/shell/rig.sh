@@ -13,6 +13,7 @@
 #   rig.sh build-compositor-client  clippy, tests and release build of cc-probe into <out>/bin
 #   rig.sh build-shelld     clippy, tests and release build of athanor-shelld into <out>/bin
 #   rig.sh build-bar        clippy, tests and release build of athanor-bar into <out>/bin, with the DT_NEEDED check
+#   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout)
 #   rig.sh shelld-e2e       athanor-shelld on a session bus: names, notifications, refusal of the private interface, tray watcher, memory
 #   rig.sh bar-e2e          athanor-bar in a scene: READY, live layout, mandatory keys, running windows, the favourites import and pinning, the power menu against a fake logind, memory
 #   rig.sh compositor-e2e   the compositor client against cosmic-comp, and against sway without the COSMIC globals
@@ -282,6 +283,13 @@ build-shelld)
                  && cargo test --locked -p athanor-unit -p athanor-shelld \
                  && cargo build --release --locked -p athanor-shelld \
                  && install -m 0755 /out/target/release/athanor-shelld /out/bin/'
+    ;;
+cargo)
+    shift
+    mkdir -p "$out/target"
+    podman run --rm --memory 6g --security-opt label=disable \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -e CARGO_TARGET_DIR=/out/target -w /repo "$local_image:build" cargo "$@"
     ;;
 build-bar)
     mkdir -p "$out/bin" "$out/target"

@@ -4,7 +4,7 @@ version = "1.0.0"
 edition = "2021"
 authors = ["Athanor Forge <forge@athanor.os>"]
 description = "Visual Dock and taskbar application logic for Athanor OS"
-workspace = "../../athanor-shell-rs"
+workspace = ".."
 
 [dependencies]
 gtk4 = { workspace = true }
@@ -13,7 +13,7 @@ glib = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 notify = "6.1.1"
-athanor-style = { path = "../../athanor-shell-rs/athanor-style-0.7" }
+athanor-style = { path = "../athanor-style-0.7" }
 athanor-niri-ipc = { path = "../../athanor-niri-ipc" }
 anyhow = { workspace = true }
 log = { workspace = true }
