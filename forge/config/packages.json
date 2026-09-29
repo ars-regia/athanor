@@ -18,6 +18,8 @@
     "dart-sass",
     "shell-rs",
     "greeter-ui",
+    "layout-translator",
+    "layout-chooser",
     "doctor",
     "cliphist",
     "backup",
@@ -77,6 +79,8 @@
   "custom_tier3": [
     "shell-rs",
     "greeter-ui",
+    "layout-translator",
+    "layout-chooser",
     "doctor",
     "system-services",
     "desktop-ui",

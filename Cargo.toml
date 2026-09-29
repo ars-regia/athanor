@@ -5,6 +5,8 @@ members = [
   "forge/specs/athanor-doctor/athanor-doctor-1.0.0",
   "forge/specs/athanor-gatekeeper-rs/athanor-gatekeeper-rs-1.0.0",
   "forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0",
+  "forge/specs/athanor-layout-translator/athanor-layout-translator-1.0.0",
+  "forge/specs/athanor-layout-chooser/athanor-layout-chooser-1.0.0",
   "forge/specs/athanor-lvfs-rs/athanor-lvfs-rs-1.0.0",
   "forge/specs/athanor-mdm-rs/athanor-mdm-rs-1.0.0",
   "forge/specs/athanor-mesh-sync/athanor-mesh-sync-1.0.0",
@@ -24,6 +26,7 @@ members = [
   "system/athanor-hypervisor-daemon",
   "system/athanor-i18n",
   "system/athanor-init-oracle",
+  "system/athanor-layout",
   "system/athanor-mesh-bus",
   "system/athanor-net-unikernel",
   "system/athanor-store",
@@ -75,6 +78,7 @@ wayland-server = "0.31.0"
 # Serialization & Error Handling
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+toml = "0.8"
 thiserror = "2.0.19"
 anyhow = "1.0.99"
 

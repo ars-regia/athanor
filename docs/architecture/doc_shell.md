@@ -1,6 +1,6 @@
 # Athanor shell: direction, layout model, stage 1
 
-Status: **approved on 2026-09-18, revision 3.** The maintainer took the decisions below and delegated the validation. Revision 1 failed two independent reviews, an adversarial one and a security one: the direction held, the update and trust part did not. Revision 2 took their findings, both reviewers then found it approvable with changes, and revision 3 takes those changes. The four reports are `.superpowers/shell-spec-review.md`, `shell-spec-security-review.md` and their `-r2` successors.
+Status: **approved on 2026-09-18, revision 3; revision 4, approved by the maintainer on 2026-09-24, adds outputs taller than wide to SH7, SH10, SH13 and sections 4, 5 and 7.** The maintainer took the decisions below and delegated the validation. Revision 1 failed two independent reviews, an adversarial one and a security one: the direction held, the update and trust part did not. Revision 2 took their findings, both reviewers then found it approvable with changes, and revision 3 takes those changes. The four reports are `.superpowers/shell-spec-review.md`, `shell-spec-security-review.md` and their `-r2` successors.
 
 The approval covers the direction and packages 1a, 1b-shield and 1c. Package 1b-system starts only when `doc_update_trust.md` exists, has passed the `auditor` and has the maintainer's consent, because it changes the signing pipeline (SH12). Section 5 lists what is still unverified; doubt 10 waits for a maintainer decision.
 
@@ -98,16 +98,17 @@ COSMIC applications (`cosmic-files`, `cosmic-term`, `cosmic-edit`, `cosmic-store
 
 | Id | Display name | Style | Factory panel | Factory dock |
 |---|---|---|---|---|
-| `float` | Isola | floating rounded panel, floating centred dock; COSMIC's shipped defaults | top | visible |
+| `float` | Isola | floating rounded panel (COSMIC 1.8.0 ships an edge-to-edge one), floating centred dock as COSMIC ships it | top | visible |
 | `bar` | Barra | one edge-to-edge bar holding launcher, running applications, tray and clock | bottom | no knob |
 | `minimal` | Essenziale | thin edge-to-edge bar | top | none |
 
 - **Identifiers are permanent and English; display names are translated.** A fourth preset, three separate islands with a vertical dock (`split`), needs our own panel and is not in version 1.
 - **Knobs:** panel position (top, bottom); dock (visible, auto-hide, none).
 - **A knob exists only where it means something.** `bar` holds the applications in the bar, so it has no dock knob and the schema rejects one. That leaves 2 × 3 layouts for `float`, 2 for `bar` and 2 × 3 for `minimal`: 14 in version 1.
-- **Dock placement is derived, not chosen:** the dock sits on the bottom edge, and on the left edge when the panel is at the bottom. A vertical dock carries icons only (SH9.3).
+- **Dock placement is derived, not chosen,** from the panel position and from the shape of each output. On an output wider than tall the dock sits on the bottom edge, and on the left edge when the panel is at the bottom. On an output taller than wide it never takes a side edge, which would spend the scarce dimension: it sits on the bottom edge, stacked above the panel when the panel is at the bottom. A vertical dock carries icons only (SH9.3).
+- **Rotation matters only through the shape.** A flipped or mirrored output keeps its logical geometry and takes the layout of the unrotated one; a quarter turn (90° or 270°) makes it taller than wide. The document stays keyed by `[output."*"]`: the shape is read from each output, never stored.
 - **`bar` in stage 1 is an icon taskbar:** no COSMIC applet renders window titles. Titles wait for our panel and for a decision on who may read them. `minimal` is subject to cosmic-panel#560 being absent on 1.8.
-- In stage 1 a translator turns the effective document into cosmic-panel configuration. It writes `entries` last, because that configuration is live and not atomic. It runs when the effective document changes, not at every login, and it is idempotent. cosmic-panel's configuration is not the user's layout document: SH8's promise covers `layout.toml`, not the files under `~/.config/cosmic`.
+- In stage 1 a translator turns the effective document into cosmic-panel configuration. It writes `entries` last, because that configuration is live and not atomic. It runs when the effective document changes and when an output is added, removed or rotated, because the dock's edge depends on each output's shape; it therefore stays resident in the session and watches the outputs, but it rewrites nothing at login unless the result differs, and it is idempotent. It writes one dock for every output while all of them share a shape, and one dock per output otherwise. cosmic-panel's configuration is not the user's layout document: SH8's promise covers `layout.toml`, not the files under `~/.config/cosmic`.
 
 **SH8. The schema is the ratchet.** Everything the schema can express is supported and tested; nothing else is expressible.
 
@@ -122,7 +123,7 @@ COSMIC applications (`cosmic-files`, `cosmic-term`, `cosmic-edit`, `cosmic-store
 2. No third-party code runs in our surfaces: modules are a closed, in-image set. A third-party module mechanism may exist only inside a compartment with a declared capability manifest.
 3. Elements that carry text are horizontal.
 
-**SH10. The default preset is chosen once per user,** at the first session, from the smallest logical height among the connected outputs; Wayland has no primary output. Below 800 logical pixels the pick is `bar`, which spends one edge instead of two; otherwise `float`. A 1080p laptop at 150 % is 720 logical pixels and gets `bar`: that is intended. The pick writes only the `preset` key, and nothing at all when the policy layer names a preset. A marker under `$XDG_STATE_HOME/athanor/` records that it ran, so it is never re-evaluated. The chassis type is not used: `hostnamectl chassis` answers `vm` or nothing on too many machines.
+**SH10. The default preset is chosen once per user,** at the first session, from the smallest logical height among the connected outputs; Wayland has no primary output. Below 800 logical pixels the pick is `bar`, which spends one edge instead of two; otherwise `float`. A 1080p laptop at 150 % is 720 logical pixels and gets `bar`: that is intended. When any connected output is taller than wide the pick is `float` whatever the heights: `bar` lays the running applications and the tray along the scarce dimension and runs out of room there first, while `float` spends height, which such an output has. The pick writes only the `preset` key, and nothing at all when the policy layer names a preset. A marker under `$XDG_STATE_HOME/athanor/` records that it ran, so it is never re-evaluated. The chassis type is not used: `hostnamectl chassis` answers `vm` or nothing on too many machines.
 
 **SH11. Updates are never forced, and never applied unconfirmed.** Stage 1b is the interim implementation of the Athanor update service of `doc_kernel_profile.md`, section 8 (D31, D36), behind the same interface, so `systemd-sysupdate` with A/B `/usr` later replaces bootc without changing the experience.
 
@@ -160,9 +161,9 @@ COSMIC applications (`cosmic-files`, `cosmic-term`, `cosmic-edit`, `cosmic-store
 
 **SH13. Tests.**
 
-- **Layouts** are captured left-to-right in English with a fixed clock and an empty tray. The three presets at their factory knobs run outputs {1, 2} × scale {1.0, 1.5}: 12 cases. The other 11 layouts of SH7 run once at one output and scale 1.0: 23 layout cases.
+- **Layouts** are captured left-to-right in English with a fixed clock and an empty tray. The three presets at their factory knobs run outputs {1, 2} × scale {1.0, 1.5}: 12 cases. The other 11 layouts of SH7 run once at one output and scale 1.0. On one output taller than wide, at scale 1.0, the three presets at their factory knobs run once more, and so does `float` with the panel at the bottom, which stacks the dock above the panel: 27 layout cases.
 - **Our own surfaces** (greeter, shield popover, chooser) run scale {1.0, 1.5} × theme {light, dark} × text {English, German for length, a right-to-left pseudo-locale}: 36 surface cases. Italian and English are the shipped locales.
-- **Where they run** (spike P3): in a rootless `fedora:43` container on the hosted `ubuntu-24.04` runner, with no GPU: a headless sway on pixman, cosmic-comp with its winit backend on llvmpipe, `cosmic-randr` for size and scale, cosmic-panel, and `grim` over `ext-image-copy-capture-v1`. A scene costs 8 seconds and 1 GiB, and two independent runs are byte-identical.
+- **Where they run** (spike P3): in a rootless `fedora:43` container on the hosted `ubuntu-24.04` runner, with no GPU: a headless sway on pixman, cosmic-comp with its winit backend on llvmpipe, `cosmic-randr` for size and scale (an output taller than wide is set as a portrait size, not as a transform: only the shape matters, SH7), cosmic-panel, and `grim` over `ext-image-copy-capture-v1`. A scene costs 8 seconds and 1 GiB, and two independent runs are byte-identical.
 - **Two outputs are not reachable there:** cosmic-comp has no headless backend and Smithay's winit backend has one output. The 6 two-output cases run as a scheduled job on the KVM runner. They do not gate a push, and they are not dropped: they are the ones that catch a per-output regression in cosmic-panel. A `vkms` device on the hosted runner may replace the KVM job; nobody has tried it.
 - **What makes a golden reproducible:** isolated `XDG_*` directories per case, a frozen wall clock with a live monotonic clock, `TZ=UTC`, `LC_ALL` per case, a fixed set of running clients, the runner label `ubuntu-24.04` and the container pinned by digest. A case passes when at most a stated number of pixels differ from its golden image; the plan states the number.
 - **There is no input in that environment,** so a surface is captured by starting it in the state under test. The shield's sheet, being its own process, starts open.
@@ -198,7 +199,7 @@ Out of stage 1: our own panel, dock, launcher, notifications, lock and Settings;
 - **The shim.** GTK 4.16 broke `gtk4-layer-shell` once. SH4 bounds the damage to one call site per surface; the greeter is the exposed surface in stage 1.
 - **A wrong signature policy blocks updates,** not boot. It is proven on the dev VM against a signed image, the same image without its signature and an image signed with another key, before it reaches the image. Going back stays available.
 - **Two editors of the panel configuration.** COSMIC Settings keeps its Panel and Dock pages, where the user can also remove the shield. An edit there lasts until the next layout change, when the translator rewrites the configuration. Accepted for stage 1; it ends with our own panel.
-- **cosmic-panel moves fast.** The translator targets a configuration format we do not own. The 23 layout cases run against every COSMIC bump.
+- **cosmic-panel moves fast.** The translator targets a configuration format we do not own. The 27 layout cases run against every COSMIC bump.
 - **The translator is throwaway.** It dies with cosmic-panel. The schema, the loader and the presets are the permanent part, and they are what the tests of 1c protect first.
 - **Scope.** Stage 1 is four packages for one maintainer and an agent. They ship one at a time, and each is useful alone. Each later stage re-solves something COSMIC already solved; SH1's replacement rule is the brake.
 
@@ -214,6 +215,7 @@ Out of stage 1: our own panel, dock, launcher, notifications, lock and Settings;
 8. **Inter** is a proposal from the mockups, not yet seen on real hardware at fractional scale.
 9. **Multi-user and kiosk machines** are covered by wording (per-user notices and picks, SH9.1 without a panel), not yet by a test.
 10. **How often a user is asked to restart.** The Orchestrator builds every night, and "one notice per digest" then means one notice a day. A promoted `stable` tag that users follow, with `latest` kept for testing, would fix it; `doc_kernel_profile.md` leaves channels to release 1.1. The maintainer decides whether one hand-promoted channel comes forward into `doc_update_trust.md`.
+11. **Outputs taller than wide: settled on 2026-09-24.** The fourteen layouts in both shapes, and two outputs of different shape side by side, were drawn and approved by the maintainer (`.superpowers/brainstorm/89841-1789751828/content/layout-orientations.html`). cosmic-panel 1.8.0 on cosmic-comp 1.8.0 stacks the dock above the panel when both are anchored to the bottom edge with an exclusive zone; this was checked in a nested cosmic-comp (tier A of `scripts/devvm`) with the packages the image ships.
 
 ## 6. Changes to other documents
 
@@ -237,5 +239,5 @@ On a fresh install in the dev VM, and on the maintainer's desktop upgraded in pl
 7. The same image without its signature, and an image signed with another key, are refused; the badge is the cross, never the check.
 8. A signed image reads "verified" after the restart that boots it. The fresh install reads "not verified: installed from media" until the migration has run and "verified" after it, never the check by default. With the clock moved 15 days past the last successful check and the network down, the badge is the exclamation mark.
 9. The upgraded desktop moves from `ostree-unverified-registry:` to the signed reference by the documented step and keeps updating. On the dev VM, an image that carries a second public key and is signed with the first is accepted, and so is the next one, signed with the second.
-10. The three presets and the two knobs apply from the chooser without a restart of the session. A user document with an unknown key degrades to a preset and the file is byte-identical afterwards. A key marked mandatory in `/etc` is greyed in the chooser. A new user on a screen under 800 logical pixels gets `bar`. A translator made to fail repeatedly leaves the vendor layout on screen, not an empty one.
-11. The 23 layout cases and the 36 surface cases pass in CI.
+10. The three presets and the two knobs apply from the chooser without a restart of the session. A user document with an unknown key degrades to a preset and the file is byte-identical afterwards. A key marked mandatory in `/etc` is greyed in the chooser. A new user on a screen under 800 logical pixels gets `bar`, and one with an output taller than wide gets `float`. Turning an output a quarter moves a side dock to the bottom edge without a restart of the session. A translator made to fail repeatedly leaves the vendor layout on screen, not an empty one.
+11. The 27 layout cases and the 36 surface cases pass in CI.

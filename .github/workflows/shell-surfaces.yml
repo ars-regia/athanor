@@ -6,6 +6,9 @@ on:
     paths:
       - "system/athanor-style/**"
       - "forge/specs/athanor-greeter-ui/**"
+      - "system/athanor-layout/**"
+      - "forge/specs/athanor-layout-translator/**"
+      - "forge/specs/athanor-layout-chooser/**"
       - "system/athanor-i18n/**"
       - "forge/test/shell/**"
       - ".github/workflows/shell-surfaces.yml"
@@ -13,6 +16,9 @@ on:
     paths:
       - "system/athanor-style/**"
       - "forge/specs/athanor-greeter-ui/**"
+      - "system/athanor-layout/**"
+      - "forge/specs/athanor-layout-translator/**"
+      - "forge/specs/athanor-layout-chooser/**"
       - "system/athanor-i18n/**"
       - "forge/test/shell/**"
       - ".github/workflows/shell-surfaces.yml"
@@ -61,3 +67,35 @@ jobs:
           path: |
             .scratch/shell-rig/*.log
             .scratch/shell-rig/greeter-*.png
+
+  layout:
+    name: Layout library, translator and chooser; layout and chooser cases; end-to-end press
+    needs: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rig image
+        run: bash forge/test/shell/rig.sh build-image
+      - name: Unit tests of the rig's scripts, against the rig's ImageMagick 7
+        run: bash forge/test/shell/rig.sh rig-tests
+      - name: COSMIC's shipped panel keys match the renderer's fixture
+        run: bash forge/test/shell/rig.sh cosmic-panel-defaults
+      - name: Build and test the layout crates
+        run: bash forge/test/shell/rig.sh build-layout
+      - name: Layout cases (21) against the goldens
+        run: bash forge/test/shell/rig.sh surface layout
+      - name: Accessibility tree of the chooser
+        run: bash forge/test/shell/rig.sh atspi chooser
+      - name: Chooser surface cases (12) against the goldens
+        run: bash forge/test/shell/rig.sh surface chooser
+      - name: A preset picked in the chooser applies without a restart
+        run: bash forge/test/shell/rig.sh chooser-e2e
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: shell-rig-layout
+          path: |
+            .scratch/shell-rig/*.log
+            .scratch/shell-rig/layout-*.png
+            .scratch/shell-rig/chooser-*.png

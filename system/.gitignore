@@ -12,3 +12,5 @@ test_*/
 ctr_id
 output/
 .worktrees/
+# cosmic-panel names one of its config keys "output"; the layout fixture must track it.
+!/athanor-layout/fixtures/**/output

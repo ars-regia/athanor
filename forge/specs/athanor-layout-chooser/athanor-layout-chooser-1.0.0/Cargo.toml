@@ -1,0 +1,16 @@
+[package]
+name = "athanor-layout-chooser"
+version = "1.0.0"
+edition = "2021"
+authors = ["Athanor Forge <forge@athanor.os>"]
+license = "MIT"
+description = "The Athanor layout chooser: three presets and two knobs, written to the user's layout document"
+
+[dependencies]
+athanor-i18n = { path = "../../../../system/athanor-i18n" }
+athanor-layout = { path = "../../../../system/athanor-layout" }
+athanor-style = { path = "../../../../system/athanor-style" }
+gtk4 = { workspace = true }
+landlock = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }

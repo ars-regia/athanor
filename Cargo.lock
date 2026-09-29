@@ -522,6 +522,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-layout"
+version = "1.0.0"
+dependencies = [
+ "toml 0.8.2",
+ "tracing",
+]
+
+[[package]]
+name = "athanor-layout-chooser"
+version = "1.0.0"
+dependencies = [
+ "athanor-i18n",
+ "athanor-layout",
+ "athanor-style",
+ "gtk4",
+ "landlock",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "athanor-layout-translator"
+version = "1.0.0"
+dependencies = [
+ "athanor-layout",
+ "gtk4",
+ "nix 0.29.0",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "athanor-lvfs-rs"
 version = "1.0.0"
 dependencies = [

@@ -4,6 +4,7 @@
 //! and they are deleted (doc_shell.md, SH4).
 
 pub mod calmo;
+pub mod cosmic_theme;
 
 #[allow(clippy::all, warnings)]
 pub mod accent_engine;

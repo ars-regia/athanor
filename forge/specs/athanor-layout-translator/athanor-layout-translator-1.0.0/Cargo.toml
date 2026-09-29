@@ -1,0 +1,15 @@
+[package]
+name = "athanor-layout-translator"
+version = "1.0.0"
+edition = "2021"
+authors = ["Athanor Forge <forge@athanor.os>"]
+license = "MIT"
+description = "Renders the Athanor layout document as cosmic-panel configuration, for the life of the session"
+
+[dependencies]
+athanor-layout = { path = "../../../../system/athanor-layout" }
+gtk4 = { workspace = true }
+# clock_gettime(CLOCK_BOOTTIME) for the crash-loop window.
+nix = { workspace = true, features = ["time"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }

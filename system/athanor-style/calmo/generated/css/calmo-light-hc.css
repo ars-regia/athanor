@@ -172,3 +172,46 @@ button.greeter-chip:checked {
     -gtk-icon-palette: success @ath_ok, warning @ath_warn, error @ath_bad;
     color: @ath_ink;
 }
+
+/* The layout chooser (stage 1c): an ordinary window of labelled groups of choices. The
+ * choice in force carries the accent, which may be the user's COSMIC accent. */
+window.athanor-layout {
+    background-color: @ath_surf;
+}
+
+.layout-group-title {
+    color: @ath_ink2;
+    font-size: 11.5px;
+    font-weight: 600;
+}
+
+button.layout-choice {
+    min-height: 34px;
+    padding: 0 14px;
+    border: 2px solid @ath_line;
+    border-radius: 8px;
+    background-image: none;
+    background-color: @ath_surf2;
+    color: @ath_ink;
+    box-shadow: none;
+}
+
+button.layout-choice:hover {
+    background-color: @ath_chip;
+}
+
+button.layout-choice:checked {
+    border-color: @ath_acc;
+    background-color: @ath_acc;
+    color: @ath_acc_ink;
+}
+
+button.layout-choice:disabled {
+    color: @ath_ink3;
+}
+
+.layout-note,
+.layout-status {
+    color: @ath_ink2;
+    font-size: 11.5px;
+}

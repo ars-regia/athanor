@@ -24,6 +24,33 @@ class CasesTest(unittest.TestCase):
         with self.assertRaises(KeyError):
             cases.surface_cases("launcher")
 
+    def test_the_layouts_have_the_twenty_seven_cases_of_sh13(self):
+        found = cases.layout_cases()
+        self.assertEqual(len(found), 27)
+        self.assertEqual(len({c.tag for c in found}), 27)
+        self.assertEqual(len([c for c in found if c.outputs == 1]), 21)
+        self.assertEqual(len([c for c in found if c.outputs == 2]), 6)
+
+    def test_every_layout_of_sh7_runs_at_least_once(self):
+        seen = {(c.preset, c.panel, c.dock) for c in cases.layout_cases()}
+        self.assertEqual(len(seen), 14)
+        self.assertNotIn("visible", {c.dock for c in cases.layout_cases() if c.preset == "bar"})
+
+    def test_portrait_cases_are_the_factory_presets_and_float_at_the_bottom(self):
+        portrait = [c for c in cases.layout_cases() if c.height > c.width]
+        self.assertEqual({(c.preset, c.panel, c.dock) for c in portrait},
+                         {("float", "top", "visible"), ("bar", "bottom", "-"), ("minimal", "top", "none"),
+                          ("float", "bottom", "visible")})
+        self.assertEqual({(c.outputs, c.scale) for c in portrait}, {(1, "1.0")})
+
+    def test_layout_tags_are_file_names(self):
+        for case in cases.layout_cases():
+            self.assertRegex(case.tag, r"^layout-(float|bar|minimal)-(top|bottom)(-(visible|auto-hide|none))?"
+                                       r"-[12]o-(1\.0|1\.5)-(land|port)$")
+
+    def test_the_chooser_has_the_twelve_cases_of_sh13(self):
+        self.assertEqual(len(cases.surface_cases("chooser")), 12)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -72,6 +72,12 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   default) and reboots into it. `bootc upgrade` cannot do this on its own: the ISO's
   kickstart pins the guest to the run-id tag it was installed from, and upgrade only
   re-pulls that same tag.
+- `layout-acceptance.sh [stage...]` deploys the stage 1c layout crates from
+  `.scratch/shell-rig/bin` (build them with `forge/test/shell/rig.sh build-layout`) and runs
+  acceptance item 10 of `doc_shell.md` in the VM's session: the first-session default,
+  rotation, live presets, a rejected document, a mandatory key added mid-session, memory,
+  and the crash loop. Screenshots land in `.scratch/layout-acceptance/`; the script checks
+  the panel configuration, so look at them: they are the only check of what the panel draws.
 - Settings are in `devvm.env` and are overridden from the environment: `CPUS=4`,
   `MEMORY=8G`, `DISK_GIB=40`, `SSH_PORT`, `ISO_TAG`, `REGISTRY`. State (ISO, disks, logs)
   is in `${XDG_DATA_HOME:-~/.local/share}/athanor-devvm`: about 6 GB of ISO and up to
