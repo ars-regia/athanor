@@ -14,6 +14,8 @@ members = [
   "forge/specs/athanor-shelld/athanor-shelld-1.0.0",
   "forge/specs/athanor-bar/athanor-bar-1.0.0",
   "forge/specs/athanor-sysmon-ebpf/athanor-sysmon-ebpf-1.0.0",
+  "forge/specs/athanor-update/athanor-update-1.0.0",
+  "forge/specs/athanor-update/athanor-update-notify-1.0.0",
   "forge/specs/athanor-xdg-desktop-portal-athanor/xdg-desktop-portal-athanor-1.0.0",
   "forge/specs/athanor-niri-ipc",
   "system/confidential_computing/athanor-attestation",
@@ -22,7 +24,6 @@ members = [
   "system/athanor-agentic-kernel",
   "system/athanor-bus-api",
   "system/athanor-cluster-mesh",
-  "system/athanor-compositor",
   "system/athanor-compositor-client",
   "system/athanor-ebpf-sched",
   "system/athanor-greeter",
@@ -35,6 +36,7 @@ members = [
   "system/athanor-net-unikernel",
   "system/athanor-store",
   "system/athanor-telemetry",
+  "system/athanor-trust-state",
   "system/athanor-updater-rs",
 ]
 
@@ -77,8 +79,6 @@ gtk4 = { version = "0.11.4", features = ["v4_18"] }
 gtk4-layer-shell = "0.8.1"
 glib = "0.22.9"
 relm4 = "0.11.0"
-smithay = { version = "0.3.0", default-features = false }
-wayland-server = "0.31.0"
 bitflags = "2"
 gdk4-wayland = { version = "0.11", features = ["wayland_crate"] }
 gio-unix = "0.22"
@@ -113,7 +113,6 @@ subtle = "2.6.1"
 aya = "0.13.1"
 
 # System Utilities & CLI
-glam = "0.29.0"
 nix = "0.29.0"
 clap = { version = "4.6.4", features = ["derive"] }
 mimalloc = { version = "0.1.43", default-features = false }

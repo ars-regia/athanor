@@ -1,0 +1,1 @@
+{"critical":{"identity":{"docker-reference":"localhost:5000/spike/athanor-system:v1"},"image":{"docker-manifest-digest":"sha256:08d9f3ab2f3fd065175df48841e6434914170493578a3f59d6f6fc5dcdb971f9"},"type":"cosign container image signature"},"optional":{"creator":"containers/image 5.39.2","timestamp":1789810073}}

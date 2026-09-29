@@ -49,6 +49,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 -B -m unittest discover -s forge/specs/athanor-system-services/tests -v
+      - name: Update and trust package (unit tests)
+        run: python3 -B -m unittest discover -s forge/specs/athanor-update/tests -v
       - name: Greeter session script (unit tests)
         run: python3 -B -m unittest discover -s forge/specs/athanor-system-config/tests -v
       # Run directly rather than through unittest discovery: this suite holds no

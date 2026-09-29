@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:45.fc43}
+Release:        %{?autorelease}%{!?autorelease:46.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        MIT
 URL:            https://github.com/hr-mes/athanor-forge
@@ -91,6 +91,10 @@ mkdir -p /etc/yum.repos.d
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Thu Sep 24 2026 Athanor Forge <forge@athanor.os> - 1.0.0-46
+- Stop enabling bootc-fetch-apply.timer: no unit of that name exists, so no update ever
+  ran by itself. athanor-update ships the timer that does (doc_update_trust.md, UT1).
+
 * Thu Sep 24 2026 Athanor Forge <forge@athanor.os> - 1.0.0-45
 - Stop binding /dev/nvidia-uvm and /dev/nvidia-uvm-tools into the greeter's sandbox.
   They serve CUDA only, and on the -nvidia variants they can appear with the generic

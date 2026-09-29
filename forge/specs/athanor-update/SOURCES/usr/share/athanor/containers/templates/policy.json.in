@@ -1,0 +1,17 @@
+{
+  "default": [{"type": "reject"}],
+  "transports": {
+    "docker": {
+      "": [{"type": "insecureAcceptAnything"}],
+      "@REGISTRY@/athanor-system": [{"type": "sigstoreSigned", "keyPaths": [@KEY_PATHS@], "signedIdentity": {"type": "matchRepository"}}],
+      "@REGISTRY@/athanor-system-nvidia": [{"type": "sigstoreSigned", "keyPaths": [@KEY_PATHS@], "signedIdentity": {"type": "matchRepository"}}],
+      "@REGISTRY@/athanor-system-nvidia-legacy": [{"type": "sigstoreSigned", "keyPaths": [@KEY_PATHS@], "signedIdentity": {"type": "matchRepository"}}]
+    },
+    "docker-archive": {"": [{"type": "insecureAcceptAnything"}]},
+    "oci": {"": [{"type": "insecureAcceptAnything"}]},
+    "oci-archive": {"": [{"type": "insecureAcceptAnything"}]},
+    "dir": {"": [{"type": "insecureAcceptAnything"}]},
+    "containers-storage": {"": [{"type": "insecureAcceptAnything"}]},
+    "docker-daemon": {"": [{"type": "insecureAcceptAnything"}]}
+  }
+}

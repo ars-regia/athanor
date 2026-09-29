@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-base-config
 Version:        43.0.0
-Release:        9%{?dist}
+Release:        10%{?dist}
 Summary:        Athanor OS Base Configuration (Systemd, Branding, GPG)
 
 License:        MIT
@@ -79,9 +79,12 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 /usr/share/pixmaps/*
 /usr/share/plymouth/themes/spinner/watermark.png
 /usr/share/polkit-1/rules.d/*
-/usr/lib/systemd/system/bootc-fetch-apply-updates.service.d/override.conf
 
 %changelog
+* Thu Sep 24 2026 Athanor Forge <forge@athanor.os> - 43.0.0-10
+- Drop the override of bootc-fetch-apply-updates.service: it called `bootc upgrade --stage`,
+  a flag bootc 1.16 does not have. The stock timer stays disabled by athanor-update's preset.
+
 * Fri Sep 18 2026 Athanor Forge <forge@athanor.os> - 43.0.0-9
 - Rename 99-Athanor-Base.preset to 80-athanor-base.preset, so mcelog.service is really
   disabled. systemd takes the FIRST preset line that matches a unit, in lexicographic

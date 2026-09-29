@@ -1,0 +1,21 @@
+# One acceptance image: the published system image plus the locally built athanor-update
+# RPM, the policy rendered for the throwaway registry and keys, and three test conveniences
+# (an insecure local registry, a two-minute timer, an automatic login of the guest user).
+ARG BASE
+FROM ${BASE}
+ARG REGISTRY
+ARG MARKER
+ARG GUEST_USER
+COPY rpm/ /tmp/acceptance-rpm/
+COPY keys/ /usr/share/athanor/keys/
+RUN rpm -Uvh --replacepkgs --replacefiles /tmp/acceptance-rpm/athanor-update-*.rpm && rm -rf /tmp/acceptance-rpm && \
+    /usr/libexec/athanor-update/render-policy --registry "${REGISTRY}" --keys-dir /usr/share/athanor/keys \
+        --out /usr/share/athanor/containers --link-etc /etc && \
+    systemctl preset athanor-update-check.timer athanor-update-state.service athanor-update-migrate.service bootc-fetch-apply-updates.timer && \
+    systemctl --global preset athanor-update-notify.service && \
+    printf '[[registry]]\nlocation = "%s"\ninsecure = true\n' "${REGISTRY%%/*}" > /etc/containers/registries.conf.d/50-acceptance.conf && \
+    mkdir -p /usr/lib/systemd/system/athanor-update-check.timer.d && \
+    printf '[Timer]\nOnBootSec=\nOnBootSec=2min\nRandomizedDelaySec=0\n' > /usr/lib/systemd/system/athanor-update-check.timer.d/10-acceptance.conf && \
+    printf '\n[initial_session]\ncommand = "/usr/bin/athanor-session"\nuser = "%s"\n' "${GUEST_USER}" >> /usr/share/athanor-system-config/greetd.toml && \
+    echo "${MARKER}" > /usr/share/athanor-acceptance-marker && \
+    bootc container lint

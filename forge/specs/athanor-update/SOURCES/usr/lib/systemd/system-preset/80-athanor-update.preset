@@ -1,0 +1,7 @@
+# Numbered below 81: the first preset line that matches a unit wins, and Fedora's
+# 90-default.preset would otherwise decide first (see 80-athanor-base.preset).
+enable athanor-update-check.timer
+enable athanor-update-state.service
+enable athanor-update-migrate.service
+# The stock timer applies an update and reboots by itself (doc_shell.md, SH11: never).
+disable bootc-fetch-apply-updates.timer
