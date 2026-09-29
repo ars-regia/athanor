@@ -9,8 +9,10 @@
 #   rig.sh cosmic-keys      every key COSMIC ships exists in our overlay
 #   rig.sh cosmic-preview   capture cosmic-panel and Settings under the Calmo defaults
 #   rig.sh build-greeter    release build of athanor-greeter-ui into <out>/bin
-#   rig.sh build-layout     clippy, tests and release build of the layout crates (translator and chooser) into <out>/bin
+#   rig.sh build-layout     clippy, tests and release build of the layout crates (translator and chooser) and athanor-unit into <out>/bin
 #   rig.sh build-compositor-client  clippy, tests and release build of cc-probe into <out>/bin
+#   rig.sh build-shelld     clippy, tests and release build of athanor-shelld into <out>/bin
+#   rig.sh shelld-e2e       athanor-shelld on a session bus: names, notifications, refusal of the private interface, tray watcher, memory
 #   rig.sh compositor-e2e   the compositor client against cosmic-comp, and against sway without the COSMIC globals
 #   rig.sh layer-guard      the greeter must refuse to run when the shim loads late
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
@@ -201,8 +203,8 @@ build-layout)
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$local_image:build" \
-        bash -c 'cargo clippy --locked -p athanor-layout -p athanor-layout-translator -p athanor-layout-chooser --all-targets -- -D warnings \
-                 && cargo test --locked -p athanor-layout -p athanor-layout-translator -p athanor-layout-chooser \
+        bash -c 'cargo clippy --locked -p athanor-layout -p athanor-layout-translator -p athanor-layout-chooser -p athanor-unit --all-targets -- -D warnings \
+                 && cargo test --locked -p athanor-layout -p athanor-layout-translator -p athanor-layout-chooser -p athanor-unit \
                  && cargo build --release --locked -p athanor-layout-translator -p athanor-layout-chooser \
                  && install -m 0755 /out/target/release/athanor-layout-translator /out/target/release/athanor-layout-chooser /out/bin/'
     ;;
@@ -215,6 +217,20 @@ build-compositor-client)
                  && cargo test --locked -p athanor-compositor-client \
                  && cargo build --release --locked -p athanor-compositor-client --example cc-probe \
                  && install -m 0755 /out/target/release/examples/cc-probe /out/bin/'
+    ;;
+build-shelld)
+    mkdir -p "$out/bin" "$out/target"
+    podman run --rm --memory 6g --security-opt label=disable \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -e CARGO_TARGET_DIR=/out/target -w /repo "$local_image:build" \
+        bash -c 'cargo clippy --locked -p athanor-unit -p athanor-shelld --all-targets -- -D warnings \
+                 && cargo test --locked -p athanor-unit -p athanor-shelld \
+                 && cargo build --release --locked -p athanor-shelld \
+                 && install -m 0755 /out/target/release/athanor-shelld /out/bin/'
+    ;;
+shelld-e2e)
+    rm -f "$out/shelld-e2e.log"
+    in_rig "$(rig_image)" dbus-run-session -- python3 /repo/forge/test/shell/shelld_e2e.py
     ;;
 compositor-e2e)
     # cosmic-comp reads the keyboard layouts from its configuration: two, so the switch shows.

@@ -11,6 +11,7 @@ members = [
   "forge/specs/athanor-mdm-rs/athanor-mdm-rs-1.0.0",
   "forge/specs/athanor-mesh-sync/athanor-mesh-sync-1.0.0",
   "forge/specs/athanor-recovery/athanor-recovery-1.0.0",
+  "forge/specs/athanor-shelld/athanor-shelld-1.0.0",
   "forge/specs/athanor-sysmon-ebpf/athanor-sysmon-ebpf-1.0.0",
   "forge/specs/athanor-xdg-desktop-portal-athanor/xdg-desktop-portal-athanor-1.0.0",
   "forge/specs/athanor-niri-ipc",
@@ -28,6 +29,7 @@ members = [
   "system/athanor-i18n",
   "system/athanor-init-oracle",
   "system/athanor-layout",
+  "system/athanor-unit",
   "system/athanor-mesh-bus",
   "system/athanor-net-unikernel",
   "system/athanor-store",
@@ -63,6 +65,7 @@ libc = "0.2.189"
 
 # D-Bus & Inter-Process Communication
 zbus = { version = "5.18.0", features = ["tokio"] }
+zvariant = "5.15.0"
 notify-rust = "4.11"
 
 # HTTP & Network Clients

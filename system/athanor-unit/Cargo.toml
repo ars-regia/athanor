@@ -1,0 +1,14 @@
+[package]
+name = "athanor-unit"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+description = "What a user unit of the shell does at start: the crash-loop record, journal priorities, readiness and Landlock"
+authors = ["Athanor Forge <forge@athanor.os>"]
+
+[dependencies]
+landlock = { workspace = true }
+# clock_gettime(CLOCK_BOOTTIME) for the crash-loop window.
+nix = { workspace = true, features = ["time"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }

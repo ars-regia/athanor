@@ -4,9 +4,7 @@
 //! athanor-layout.service starts it before cosmic-panel. `--record-exit` is the unit's
 //! ExecStopPost: it counts a failed run towards the crash-loop limit.
 
-mod journal;
 mod resident;
-mod supervision;
 
 use std::env;
 use std::io;
@@ -16,6 +14,7 @@ use std::process::{Command, ExitCode};
 use athanor_layout::apply::{self, Applied};
 use athanor_layout::placement::Output;
 use athanor_layout::{cosmic, first_session, loader};
+use athanor_unit::{crash_loop, journal, notify};
 use gtk4::gdk;
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -59,7 +58,7 @@ fn main() -> ExitCode {
         tracing::error!("no absolute XDG_CONFIG_HOME, XDG_STATE_HOME, XDG_RUNTIME_DIR or HOME");
         return ExitCode::FAILURE;
     };
-    let now = match supervision::boottime() {
+    let now = match crash_loop::boottime() {
         Ok(now) => now,
         Err(err) => {
             tracing::error!(error = %err, "cannot read CLOCK_BOOTTIME");
@@ -68,7 +67,7 @@ fn main() -> ExitCode {
     };
     if env::args().nth(1).as_deref() == Some("--record-exit") {
         let result = env::var("SERVICE_RESULT").ok();
-        return match supervision::record_exit(&dirs.failures, now, result.as_deref()) {
+        return match crash_loop::record_exit(&dirs.failures, now, result.as_deref()) {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
                 tracing::error!(error = %err, "cannot record the failed run");
@@ -76,11 +75,11 @@ fn main() -> ExitCode {
             }
         };
     }
-    if let Err(err) = supervision::record_start(&dirs.failures, now) {
+    if let Err(err) = crash_loop::record_start(&dirs.failures, now) {
         tracing::error!(error = %err, "cannot update the crash-loop record");
         return ExitCode::FAILURE;
     }
-    match supervision::given_up(&dirs.failures, now) {
+    match crash_loop::given_up(&dirs.failures, now) {
         Ok(true) => return give_up(&dirs),
         Ok(false) => {}
         Err(err) => {
@@ -143,7 +142,7 @@ pub(crate) fn outputs(display: &gdk::Display) -> Vec<Output> {
 }
 
 pub(crate) fn notify_ready() {
-    if let Err(err) = supervision::notify_ready() {
+    if let Err(err) = notify::notify_ready() {
         tracing::error!(error = %err, "cannot tell systemd that the layout is applied");
     }
 }
@@ -171,8 +170,8 @@ fn restart_panel() {
 /// depend on anything that might be what keeps failing.
 fn give_up(dirs: &Dirs) -> ExitCode {
     tracing::error!(
-        failures = supervision::GIVE_UP_AFTER,
-        window_seconds = supervision::FAILURE_WINDOW_SECONDS,
+        failures = crash_loop::GIVE_UP_AFTER,
+        window_seconds = crash_loop::FAILURE_WINDOW_SECONDS,
         "the layout translator keeps failing; the vendor layout applies until the next session"
     );
     let plan = cosmic::render(&loader::vendor_layout(&dirs.paths.vendor_dir), &[]);

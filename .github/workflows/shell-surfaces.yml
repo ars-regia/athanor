@@ -11,6 +11,8 @@ on:
       - "forge/specs/athanor-layout-chooser/**"
       - "system/athanor-compositor-client/**"
       - "system/athanor-i18n/**"
+      - "forge/specs/athanor-shelld/**"
+      - "system/athanor-unit/**"
       - "forge/test/shell/**"
       - ".github/workflows/shell-surfaces.yml"
   pull_request:
@@ -22,6 +24,8 @@ on:
       - "forge/specs/athanor-layout-chooser/**"
       - "system/athanor-compositor-client/**"
       - "system/athanor-i18n/**"
+      - "forge/specs/athanor-shelld/**"
+      - "system/athanor-unit/**"
       - "forge/test/shell/**"
       - ".github/workflows/shell-surfaces.yml"
   workflow_dispatch:
@@ -122,3 +126,22 @@ jobs:
           path: |
             .scratch/shell-rig/*.log
             .scratch/shell-rig/compositor-e2e.png
+
+  shelld:
+    name: Shell daemon, notifications and the tray watcher
+    needs: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rig image
+        run: bash forge/test/shell/rig.sh build-image
+      - name: Build and test the daemon
+        run: bash forge/test/shell/rig.sh build-shelld
+      - name: The daemon on a session bus
+        run: bash forge/test/shell/rig.sh shelld-e2e
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: shell-rig-shelld
+          path: .scratch/shell-rig/shelld-e2e.log

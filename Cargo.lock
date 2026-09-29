@@ -567,10 +567,9 @@ name = "athanor-layout-translator"
 version = "1.0.0"
 dependencies = [
  "athanor-layout",
+ "athanor-unit",
  "gtk4",
- "nix 0.29.0",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -697,6 +696,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-shelld"
+version = "1.0.0"
+dependencies = [
+ "athanor-unit",
+ "futures-util",
+ "serde",
+ "tokio",
+ "tracing",
+ "zbus",
+ "zvariant",
+]
+
+[[package]]
 name = "athanor-store"
 version = "0.1.0"
 dependencies = [
@@ -754,6 +766,16 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "zbus",
+]
+
+[[package]]
+name = "athanor-unit"
+version = "1.0.0"
+dependencies = [
+ "landlock",
+ "nix 0.29.0",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

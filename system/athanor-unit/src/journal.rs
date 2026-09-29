@@ -1,6 +1,6 @@
 //! Log lines for the journal. Each line starts with `<N>`, its syslog priority, which
 //! journald reads from a service's stderr (SyslogLevelPrefix=, on by default), so
-//! `journalctl --user -u athanor-layout -p err` finds a rejected document (SH8).
+//! `journalctl --user -u <unit> -p err` finds what went wrong.
 
 use std::fmt;
 use std::io;

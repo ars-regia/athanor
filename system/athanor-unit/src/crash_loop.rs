@@ -1,21 +1,17 @@
-//! Crash-loop protection (doc_shell.md, SH8), on the policy of /usr/bin/athanor-cosmic-panel:
-//! five failures within ten minutes on CLOCK_BOOTTIME, then the vendor layout, and the
-//! translator stops until the next session. CLOCK_BOOTTIME keeps counting across suspend,
-//! so the window means the ten minutes it says.
+//! Crash-loop protection (doc_shell.md SH8), on the policy of /usr/bin/athanor-cosmic-panel:
+//! five failures within ten minutes on CLOCK_BOOTTIME, then the unit gives up until the
+//! next session. CLOCK_BOOTTIME keeps counting across suspend, so the window means the ten
+//! minutes it says.
 //!
-//! The record lives in the unit's runtime directory, which survives restarts
-//! (RuntimeDirectoryPreserve=restart) and is cleared when the session stops it.
+//! The record lives in the unit's runtime directory. Whether it survives a stop, not only a
+//! restart, is the unit's own choice: `RuntimeDirectoryPreserve=restart` clears it on a full
+//! stop, `=yes` keeps it until the login session itself ends and $XDG_RUNTIME_DIR goes with
+//! it — a give-up must stay a give-up across a stop wherever the unit is meant to (SH8).
 
-use std::env;
-use std::ffi::OsStr;
 use std::fs;
 use std::io;
-use std::os::linux::net::SocketAddrExt;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::net::{SocketAddr, UnixDatagram};
+use std::io::Write;
 use std::path::Path;
-
-use athanor_layout::apply::write_atomically;
 
 pub const FAILURE_WINDOW_SECONDS: i64 = 600;
 pub const GIVE_UP_AFTER: usize = 5;
@@ -97,33 +93,28 @@ fn write_record(path: &Path, stamps: &[i64], running: bool) -> io::Result<()> {
     write_atomically(path, &text)
 }
 
-/// Tells systemd the layout is applied (Type=notify). Does nothing outside systemd.
-pub fn notify_ready() -> io::Result<()> {
-    match env::var_os("NOTIFY_SOCKET") {
-        Some(socket) => notify_ready_to(&socket),
-        None => Ok(()),
-    }
-}
-
-/// `socket` is a path, or an abstract name when it starts with '@' (sd_notify(3)).
-fn notify_ready_to(socket: &OsStr) -> io::Result<()> {
-    let address = match socket.as_bytes().strip_prefix(b"@") {
-        Some(name) => SocketAddr::from_abstract_name(name)?,
-        None => SocketAddr::from_pathname(socket)?,
-    };
-    UnixDatagram::unbound()?.send_to_addr(b"READY=1", &address)?;
-    Ok(())
+/// Write to a hidden sibling, sync, rename: a reader sees the old record or the new one.
+fn write_atomically(path: &Path, text: &str) -> io::Result<()> {
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "the path has no file name"))?;
+    let temporary = path.with_file_name(format!(".{}.athanor-tmp", name.to_string_lossy()));
+    let mut file = fs::File::create(&temporary)?;
+    file.write_all(text.as_bytes())?;
+    file.sync_all()?;
+    fs::rename(&temporary, path)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::env;
     use std::path::PathBuf;
 
     use super::*;
 
     fn scratch(name: &str) -> PathBuf {
         let dir = env::temp_dir().join(format!(
-            "athanor-layout-translator-{}-{name}",
+            "athanor-unit-crash-loop-{}-{name}",
             std::process::id()
         ));
         fs::create_dir_all(&dir).expect("mkdir");
@@ -199,22 +190,5 @@ mod tests {
     fn the_record_keeps_only_the_window() {
         assert_eq!(recent_failures("1\n2\nnot a number\n900\n", 1000), [900]);
         assert_eq!(recent_failures("2000\n", 1000), Vec::<i64>::new());
-    }
-
-    #[test]
-    fn readiness_reaches_a_path_socket_and_an_abstract_one() {
-        let path = scratch("notify").join("notify");
-        let listener = UnixDatagram::bind(&path).expect("bind");
-        notify_ready_to(path.as_os_str()).expect("notify");
-        let mut buffer = [0u8; 16];
-        let read = listener.recv(&mut buffer).expect("recv");
-        assert_eq!(&buffer[..read], b"READY=1");
-
-        let name = format!("athanor-layout-notify-{}", std::process::id());
-        let address = SocketAddr::from_abstract_name(name.as_bytes()).expect("address");
-        let listener = UnixDatagram::bind_addr(&address).expect("bind");
-        notify_ready_to(OsStr::new(&format!("@{name}"))).expect("notify");
-        let read = listener.recv(&mut buffer).expect("recv");
-        assert_eq!(&buffer[..read], b"READY=1");
     }
 }
