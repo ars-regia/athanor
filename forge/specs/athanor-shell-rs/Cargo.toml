@@ -7,7 +7,7 @@
 members = [
     "athanor-shell-rs-1.0.0",
     "athanor-style-0.7",
-    "../athanor-dock/athanor-dock-1.0.0"
+    "athanor-dock-0.7"
 ]
 resolver = "2"
 

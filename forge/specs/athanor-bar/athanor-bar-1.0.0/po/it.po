@@ -8,6 +8,73 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
+#: ../../../../system/athanor-apps/src/openers.rs:19
+msgid "Launcher"
+msgstr "Avvio applicazioni"
+
+#: ../../../../system/athanor-apps/src/openers.rs:20
+msgid "Applications"
+msgstr "Applicazioni"
+
+#: ../../../../system/athanor-apps/src/openers.rs:21
+msgid "Workspaces"
+msgstr "Spazi di lavoro"
+
+#: ../../../../system/athanor-apps/src/row.rs:88
+msgid "Running applications"
+msgstr "Applicazioni in esecuzione"
+
+#: ../../../../system/athanor-apps/src/row.rs:202
+#: ../../../../system/athanor-apps/src/row.rs:640
+#: ../../../../system/athanor-apps/src/row.rs:642
+msgid "Unknown application"
+msgstr "Applicazione sconosciuta"
+
+#: ../../../../system/athanor-apps/src/row.rs:218
+#, rust-format
+msgid "{app}: {title}"
+msgstr "{app}: {title}"
+
+#: ../../../../system/athanor-apps/src/row.rs:224
+#, rust-format
+msgid "{app} ({count} windows)"
+msgstr "{app} ({count} finestre)"
+
+#: ../../../../system/athanor-apps/src/row.rs:251
+msgid "Running"
+msgstr "In esecuzione"
+
+#: ../../../../system/athanor-apps/src/row.rs:479
+msgid "Untitled window"
+msgstr "Finestra senza titolo"
+
+#: ../../../../system/athanor-apps/src/row.rs:487
+#, rust-format
+msgid "Minimise {title}"
+msgstr "Riduci a icona {title}"
+
+#: ../../../../system/athanor-apps/src/row.rs:491
+#, rust-format
+msgid "Close {title}"
+msgstr "Chiudi {title}"
+
+#: ../../../../system/athanor-apps/src/row.rs:518
+msgid "Open"
+msgstr "Apri"
+
+#: ../../../../system/athanor-apps/src/row.rs:520
+msgid "New Window"
+msgstr "Nuova finestra"
+
+#: ../../../../system/athanor-apps/src/row.rs:587
+#, rust-format
+msgid "{name} could not start"
+msgstr "Impossibile avviare {name}"
+
+#: ../../../../system/athanor-apps/src/row.rs:588
+msgid "The reason is in the system journal."
+msgstr "Il motivo è nel registro di sistema."
+
 #: src/ui/accessibility.rs:35
 msgid "Greyscale"
 msgstr "Scala di grigi"
@@ -85,17 +152,13 @@ msgstr "Sorgente di input: {name}"
 msgid "Input source"
 msgstr "Sorgente di input"
 
-#: src/ui/openers.rs:30
-msgid "Launcher"
-msgstr "Avvio applicazioni"
+#: src/ui/mod.rs:566
+msgid "Unpin from Bar"
+msgstr "Rimuovi dalla barra"
 
-#: src/ui/openers.rs:31
-msgid "Applications"
-msgstr "Applicazioni"
-
-#: src/ui/openers.rs:32
-msgid "Workspaces"
-msgstr "Spazi di lavoro"
+#: src/ui/mod.rs:568
+msgid "Pin to Bar"
+msgstr "Aggiungi alla barra"
 
 #: src/ui/power.rs:36
 msgid "Lock"
@@ -144,67 +207,6 @@ msgstr "Alimentazione"
 #: src/ui/power.rs:62
 msgid "Cancel"
 msgstr "Annulla"
-
-#: src/ui/running.rs:161
-msgid "Running applications"
-msgstr "Applicazioni in esecuzione"
-
-#: src/ui/running.rs:192 src/ui/running.rs:551 src/ui/running.rs:553
-msgid "Unknown application"
-msgstr "Applicazione sconosciuta"
-
-#: src/ui/running.rs:208
-#, rust-format
-msgid "{app}: {title}"
-msgstr "{app}: {title}"
-
-#: src/ui/running.rs:214
-#, rust-format
-msgid "{app} ({count} windows)"
-msgstr "{app} ({count} finestre)"
-
-#: src/ui/running.rs:241
-msgid "Running"
-msgstr "In esecuzione"
-
-#: src/ui/running.rs:396
-msgid "Untitled window"
-msgstr "Finestra senza titolo"
-
-#: src/ui/running.rs:404
-#, rust-format
-msgid "Minimise {title}"
-msgstr "Riduci a icona {title}"
-
-#: src/ui/running.rs:408
-#, rust-format
-msgid "Close {title}"
-msgstr "Chiudi {title}"
-
-#: src/ui/running.rs:433
-msgid "Open"
-msgstr "Apri"
-
-#: src/ui/running.rs:435
-msgid "New Window"
-msgstr "Nuova finestra"
-
-#: src/ui/running.rs:448
-msgid "Unpin from Bar"
-msgstr "Rimuovi dalla barra"
-
-#: src/ui/running.rs:454
-msgid "Pin to Bar"
-msgstr "Aggiungi alla barra"
-
-#: src/ui/running.rs:498
-#, rust-format
-msgid "{name} could not start"
-msgstr "Impossibile avviare {name}"
-
-#: src/ui/running.rs:499
-msgid "The reason is in the system journal."
-msgstr "Il motivo è nel registro di sistema."
 
 #: src/ui/tiling.rs:64
 msgid "Tiling"
