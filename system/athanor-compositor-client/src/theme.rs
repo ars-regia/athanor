@@ -2,19 +2,15 @@
 //! SH5): light or dark, high contrast, and the accent. The greeter never reads it: it
 //! runs before any user exists.
 //!
-//! cosmic-config resolves every key on its own, the user's file first, then the system
-//! directories; so does this reader. A key that cannot be read keeps Calmo's default.
-//! ponytail: read once at start; a surface that lives longer than a dialog needs a
-//! watcher here, which the shield popover (stage 1b-shield) will bring.
+//! A key that cannot be read keeps Calmo's default.
 
-use std::cell::RefCell;
-use std::env;
-use std::fs;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 
-use gtk4::gdk;
+use athanor_style::calmo::Variant;
+use gtk4::{gdk, gio, prelude::*};
 
-use crate::calmo::Variant;
+use crate::cosmic_config::{self, key};
 
 const MODE: &str = "com.system76.CosmicTheme.Mode";
 const DARK: &str = "com.system76.CosmicTheme.Dark";
@@ -66,26 +62,9 @@ impl Default for CosmicTheme {
     }
 }
 
-/// The theme from `$XDG_CONFIG_HOME/cosmic`, then `<dir>/cosmic` for every directory
-/// in `XDG_DATA_DIRS`.
+/// The theme from the user's COSMIC configuration, then the system's.
 pub fn read() -> CosmicTheme {
-    let mut dirs = Vec::new();
-    let config = env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .filter(|dir| dir.is_absolute())
-        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")));
-    dirs.extend(config.map(|dir| dir.join("cosmic")));
-    let data = env::var("XDG_DATA_DIRS")
-        .ok()
-        .filter(|dirs| !dirs.is_empty());
-    let data = data.as_deref().unwrap_or("/usr/local/share:/usr/share");
-    dirs.extend(
-        data.split(':')
-            .map(PathBuf::from)
-            .filter(|dir| dir.is_absolute())
-            .map(|dir| dir.join("cosmic")),
-    );
-    read_from(&dirs)
+    read_from(&cosmic_config::dirs())
 }
 
 /// The theme from `dirs`, each a `cosmic` configuration directory, highest first.
@@ -102,11 +81,6 @@ pub fn read_from(dirs: &[PathBuf]) -> CosmicTheme {
             .unwrap_or(false),
         accent: key(dirs, theme, "accent").and_then(|text| parse_accent(&text)),
     }
-}
-
-fn key(dirs: &[PathBuf], component: &str, name: &str) -> Option<String> {
-    dirs.iter()
-        .find_map(|dir| fs::read_to_string(dir.join(component).join("v1").join(name)).ok())
 }
 
 fn parse_bool(text: &str) -> Option<bool> {
@@ -197,22 +171,61 @@ thread_local! {
 }
 
 /// Installs the user's accent above the Calmo sheet (calmo.rs names this mechanism).
+/// Called again after a change, it replaces the accent it installed, or removes it when
+/// the theme has none any more.
 pub fn load_accent(display: &gdk::Display, theme: &CosmicTheme) {
-    let Some(css) = theme.accent_css() else {
-        return;
-    };
-    let provider = gtk4::CssProvider::new();
-    provider.load_from_string(&css);
-    ACCENT_PROVIDER.with(|slot| {
-        if let Some(previous) = slot.borrow_mut().replace(provider.clone()) {
-            gtk4::style_context_remove_provider_for_display(display, &previous);
-        }
+    let provider = theme.accent_css().map(|css| {
+        let provider = gtk4::CssProvider::new();
+        provider.load_from_string(&css);
+        provider
     });
-    gtk4::style_context_add_provider_for_display(
-        display,
-        &provider,
-        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
-    );
+    let previous = ACCENT_PROVIDER.with(|slot| slot.replace(provider.clone()));
+    if let Some(previous) = previous {
+        gtk4::style_context_remove_provider_for_display(display, &previous);
+    }
+    if let Some(provider) = provider {
+        gtk4::style_context_add_provider_for_display(
+            display,
+            &provider,
+            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
+        );
+    }
+}
+
+/// Calls `on_change` with the new theme each time the user's theme keys change it. The
+/// watch lasts as long as the returned monitors. A directory that does not exist yet is
+/// watched too: GIO polls for it.
+#[must_use = "the watch stops when the monitors are dropped"]
+pub fn watch(on_change: impl Fn(CosmicTheme) + 'static) -> Vec<gio::FileMonitor> {
+    let Some(user) = cosmic_config::user_dir() else {
+        tracing::warn!("no home directory: theme changes are not followed");
+        return Vec::new();
+    };
+    let last = std::rc::Rc::new(Cell::new(read()));
+    let on_change = std::rc::Rc::new(on_change);
+    [MODE, DARK, LIGHT]
+        .into_iter()
+        .filter_map(|component| {
+            let dir = gio::File::for_path(cosmic_config::component(&user, component));
+            match dir.monitor_directory(gio::FileMonitorFlags::WATCH_MOVES, gio::Cancellable::NONE)
+            {
+                Ok(monitor) => Some(monitor),
+                Err(err) => {
+                    tracing::warn!(component, "theme changes are not followed: {err}");
+                    None
+                }
+            }
+        })
+        .inspect(|monitor| {
+            let (last, on_change) = (last.clone(), on_change.clone());
+            monitor.connect_changed(move |_, _, _, _| {
+                let theme = read();
+                if last.replace(theme) != theme {
+                    on_change(theme);
+                }
+            });
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -224,7 +237,7 @@ mod tests {
     const ACCENT: &str = "(\n    base: (\n        red: 0.3882353,\n        green: 0.8156863,\n        blue: 0.8745098,\n        alpha: 1.0,\n    ),\n    hover: (\n        red: 0.1,\n        green: 0.1,\n        blue: 0.1,\n        alpha: 1.0,\n    ),\n)";
 
     fn cosmic_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("athanor-style-{}-{name}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("athanor-theme-{}-{name}", std::process::id()));
         let _fresh = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("mkdir");
         dir

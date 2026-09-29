@@ -9,6 +9,7 @@ on:
       - "system/athanor-layout/**"
       - "forge/specs/athanor-layout-translator/**"
       - "forge/specs/athanor-layout-chooser/**"
+      - "system/athanor-compositor-client/**"
       - "system/athanor-i18n/**"
       - "forge/test/shell/**"
       - ".github/workflows/shell-surfaces.yml"
@@ -19,6 +20,7 @@ on:
       - "system/athanor-layout/**"
       - "forge/specs/athanor-layout-translator/**"
       - "forge/specs/athanor-layout-chooser/**"
+      - "system/athanor-compositor-client/**"
       - "system/athanor-i18n/**"
       - "forge/test/shell/**"
       - ".github/workflows/shell-surfaces.yml"
@@ -99,3 +101,24 @@ jobs:
             .scratch/shell-rig/*.log
             .scratch/shell-rig/layout-*.png
             .scratch/shell-rig/chooser-*.png
+
+  compositor:
+    name: Compositor client against cosmic-comp and against a compositor without COSMIC
+    needs: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rig image
+        run: bash forge/test/shell/rig.sh build-image
+      - name: Build and test the compositor client
+        run: bash forge/test/shell/rig.sh build-compositor-client
+      - name: The client against cosmic-comp and sway
+        run: bash forge/test/shell/rig.sh compositor-e2e
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: shell-rig-compositor
+          path: |
+            .scratch/shell-rig/*.log
+            .scratch/shell-rig/compositor-e2e.png

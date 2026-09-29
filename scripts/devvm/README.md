@@ -78,6 +78,12 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   rotation, live presets, a rejected document, a mandatory key added mid-session, memory,
   and the crash loop. Screenshots land in `.scratch/layout-acceptance/`; the script checks
   the panel configuration, so look at them: they are the only check of what the panel draws.
+- `compositor-acceptance.sh [stage...]` deploys `cc-probe` from `.scratch/shell-rig/bin`
+  (build it with `forge/test/shell/rig.sh build-compositor-client`) and checks, in the VM's
+  session, the launch of package 2a (`doc_bar.md`, BR2 and BR3): an application on its own
+  restricted socket in a transient unit, a `Terminal=true` entry through `xdg-terminal-exec`,
+  and the three COSMIC openers, cold and warm. Screenshots land in
+  `.scratch/compositor-acceptance/`; look at the openers' ones.
 - Settings are in `devvm.env` and are overridden from the environment: `CPUS=4`,
   `MEMORY=8G`, `DISK_GIB=40`, `SSH_PORT`, `ISO_TAG`, `REGISTRY`. State (ISO, disks, logs)
   is in `${XDG_DATA_HOME:-~/.local/share}/athanor-devvm`: about 6 GB of ISO and up to

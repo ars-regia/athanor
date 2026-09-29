@@ -10,6 +10,8 @@
 #   rig.sh cosmic-preview   capture cosmic-panel and Settings under the Calmo defaults
 #   rig.sh build-greeter    release build of athanor-greeter-ui into <out>/bin
 #   rig.sh build-layout     clippy, tests and release build of the layout crates (translator and chooser) into <out>/bin
+#   rig.sh build-compositor-client  clippy, tests and release build of cc-probe into <out>/bin
+#   rig.sh compositor-e2e   the compositor client against cosmic-comp, and against sway without the COSMIC globals
 #   rig.sh layer-guard      the greeter must refuse to run when the shim loads late
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
 #   rig.sh atspi <greeter|chooser>   every interactive widget has a role and a name
@@ -203,6 +205,26 @@ build-layout)
                  && cargo test --locked -p athanor-layout -p athanor-layout-translator -p athanor-layout-chooser \
                  && cargo build --release --locked -p athanor-layout-translator -p athanor-layout-chooser \
                  && install -m 0755 /out/target/release/athanor-layout-translator /out/target/release/athanor-layout-chooser /out/bin/'
+    ;;
+build-compositor-client)
+    mkdir -p "$out/bin" "$out/target"
+    podman run --rm --memory 6g --security-opt label=disable \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -e CARGO_TARGET_DIR=/out/target -w /repo "$local_image:build" \
+        bash -c 'cargo clippy --locked -p athanor-compositor-client --all-targets -- -D warnings \
+                 && cargo test --locked -p athanor-compositor-client \
+                 && cargo build --release --locked -p athanor-compositor-client --example cc-probe \
+                 && install -m 0755 /out/target/release/examples/cc-probe /out/bin/'
+    ;;
+compositor-e2e)
+    # cosmic-comp reads the keyboard layouts from its configuration: two, so the switch shows.
+    seed=$out/compositor-e2e-seed/cosmic/com.system76.CosmicComp/v1
+    mkdir -p "$seed"
+    printf '(rules: "", model: "pc105", layout: "us,it", variant: ",", options: None, repeat_delay: 600, repeat_rate: 25)' > "$seed/xkb_config"
+    in_rig "$(rig_image)" env RIG_CONFIG_SEED=/out/compositor-e2e-seed \
+        RIG_HOLD="python3 /repo/forge/test/shell/compositor_e2e.py" \
+        dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 compositor-e2e -- \
+        python3 /repo/forge/test/shell/cc_window.py 1
     ;;
 layer-guard)
     rm -f "$out/layer-guard.status"

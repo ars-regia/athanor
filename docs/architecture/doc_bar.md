@@ -12,7 +12,7 @@ Status: **revision 1, approved by the maintainer on 2026-09-25.** It is the spec
   - cosmic-launcher and cosmic-app-library open from their shortcuts with cosmic-panel stopped.
   - A GTK popover opens from a top-level layer surface. A bar of one button and one popover on the Cairo renderer holds 16 MB PSS, 18 MB with the popover open.
 - **What the panel shows today.** The translator of package 1c places, beside the clock, the applets of `system/athanor-layout/src/cosmic.rs`: input sources, accessibility, status area (the tray), tiling, audio, Bluetooth, network, battery, notifications and power, and on the other side the workspaces and application-library buttons. The dock holds the launcher, workspaces and application-library buttons, the application list and the minimised windows. The module list of package 2b does not name the workspaces, application-library, tiling, accessibility or minimised-windows applets; BR3 adds them, because the replacement rule (SH1) forbids a switch that takes a control away.
-- **What this document does not decide.** The licence of `cosmic-client-toolkit` and `cosmic-protocols` (GPL-3.0-only) is decided at the start of package 2a (`doc_shell.md`, section 3). The input-source module needs a keyboard-layout protocol that `cosmic-protocols` 0.2.0 lacks; package 2a supplies it.
+- **What this document does not decide.** The licence of the compositor client and the source of its keyboard-layout protocol, both recorded in `doc_shell.md`, section 3, row 2a (decided 2026-09-25): no GPL-3.0-only crate is linked, and the protocol is generated inside package 2a (open doubt 1).
 
 ## 2. Decisions
 
@@ -34,19 +34,23 @@ Status: **revision 1, approved by the maintainer on 2026-09-25.** It is the spec
 **BR2. Applications start behind a security context.** The bar and the dock start every application they start, from the favourites and from the running-application list, on a `wp_security_context_v1` socket. The code lives in `athanor-compositor-client`, because it needs the Wayland connection; the protocol is a standard one (SH2).
 
 1. **The entry.** `gio::DesktopAppInfo` resolves the desktop entry: `Exec`, its field codes and `Terminal=true`. A terminal application runs inside the default terminal, and the terminal is what receives the context.
-2. **The context.** Engine id `os.athanor.shell`, the desktop id as the app id, the unit name as the instance id. The listening socket lives under `$XDG_RUNTIME_DIR/athanor/`. The application inherits the close file descriptor, not the bar: the context lives as long as the application and its children, and a restart of the bar does not stop an application from opening a new connection.
-3. **The unit.** The application starts as a transient service of the user manager, `app-athanor-<escaped desktop id>-<random>.service`, the XDG convention for application units, and receives the close descriptor through `ExtraFileDescriptors`. It is a child of the user manager, not of the bar: it inherits neither the bar's Landlock ruleset, which would break it, nor its cgroup, so oomd and resource limits act on the application and never on the bar.
+2. **The context.** Engine id `os.athanor.shell`, the desktop id without `.desktop` as the app id, the unit name as the instance id. The listening socket lives under `$XDG_RUNTIME_DIR/athanor/`. The application inherits the close file descriptor, not the bar: the context lives as long as the application and its children, and a restart of the bar does not stop an application from opening a new connection.
+3. **The unit.** The application starts as a transient service of the user manager, `app-athanor-<escaped desktop id>@<random>.service`, the XDG convention for application units, and receives the close descriptor through `ExtraFileDescriptors`. It is a child of the user manager, not of the bar: it inherits neither the bar's Landlock ruleset, which would break it, nor its cgroup, so oomd and resource limits act on the application and never on the bar.
 4. **The environment.** `WAYLAND_DISPLAY` is the absolute path of the restricted socket. `XDG_ACTIVATION_TOKEN` carries an `xdg_activation_v1` token obtained from the surface that was clicked, so the new window takes the focus.
 5. **No D-Bus activation.** An entry with `DBusActivatable=true` runs its `Exec` line: bus activation would start it with the user manager's environment, which holds the main socket.
 6. **Fail closed.** When the context cannot be created, the application does not start on the main socket. The bar sends a notification that names the application and logs the error at err priority.
 
 - **The shell's own components keep the main socket.** cosmic-launcher, cosmic-app-library and cosmic-workspaces, opened by the bar until their stages, are part of the shell and need layer shell.
-- **Who reads window titles.** Titles and app ids reach a client only through the privileged globals, which only the main socket offers. The bar and the dock read them; the bar shows them in `bar` and uses them as accessible names. An application started from the bar or the dock cannot read the titles of other windows.
+- **Who reads window titles.** Titles and app ids reach a client only through the privileged globals, which only the main socket offers. The bar and the dock read them; the bar shows them in `bar` and uses them as accessible names. The context confines what an application started from the bar or the dock reaches through the `WAYLAND_DISPLAY` it is given: on that socket it cannot read the titles of other windows.
 - **Declared limits,** not guarantees:
   - An application with one instance that is already running opens the new window in its existing process, with the socket that process started with.
   - X11 applications reach cosmic-comp through XWayland, outside any context.
   - Applications started from a terminal, from cosmic-launcher until stage 3 and by XDG autostart still hold the main socket, and can read every title and the clipboard.
   - A Flatpak application started on our socket cannot create its own context, because a context offers no security-context manager; it is expected to pass our socket through. The plan of 2b verifies it.
+  - The context confines a socket, not the application. The application runs as the user, so it can still connect by path to the main socket, `$XDG_RUNTIME_DIR/wayland-1`, or to another application's `$XDG_RUNTIME_DIR/athanor/<id>/wayland`.
+  - The application reaches the session bus. It can put a process on the main socket through the user manager, with `StartTransientUnit`, or read the main socket's name with `systemctl --user show-environment`.
+  - A terminal that hands its window to an existing server process, such as gnome-terminal or ptyxis, draws on that server's socket, not on the one its unit received.
+  - Real confinement, a filesystem and bus sandbox for launched applications, is a later design entry and is not designed here.
 
 **BR3. The modules of the bar.** Each module reads a system service. A module whose service or hardware is absent, such as a battery on a desktop or a Bluetooth adapter, is not shown: a greyed control with no source is a facade (SH1). Each does at least what the COSMIC applet it replaces does.
 
@@ -168,7 +172,7 @@ Applied on 2026-09-25, with the approval of this document.
 
 ## 4. Open doubts
 
-1. **The keyboard-layout protocol** is missing from `cosmic-protocols` 0.2.0. Package 2a supplies it from a newer release or from the protocol description, inside the compositor client; until then the input-source module has no source and is not shown.
+1. **The keyboard-layout protocol**: closed on 2026-09-25. Package 2a generates it inside the compositor client from the description in `pop-os/cosmic-protocols` at the commit pinned in `system/athanor-compositor-client/protocols/README.md`.
 2. **Flatpak on our socket** is expected to pass the socket through (BR2); the plan of 2b verifies it.
 3. **Applications that escape the context** (BR2): single-instance applications already running, X11 applications, and anything started from a terminal, from cosmic-launcher or by XDG autostart. Stage 3 closes the launcher; the others need their own design.
 4. **The dbusmock templates** of BR9 are assumed present in Fedora 43; the plan confirms them.

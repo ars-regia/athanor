@@ -164,6 +164,7 @@
     "usbguard",
     "bolt",
     "wayland-utils",
+    "xdg-terminal-exec",
     "xdg-user-dirs",
     "xdg-user-dirs-gtk"
   ],

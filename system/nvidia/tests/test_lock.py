@@ -7,7 +7,6 @@ import pathlib
 import sys
 import tempfile
 import unittest
-import unittest.mock
 from contextlib import redirect_stderr, redirect_stdout
 
 HERE = pathlib.Path(__file__).resolve().parents[1]
@@ -30,21 +29,6 @@ def package(name, epoch, ver, rel, arch, href, sha):
 def primary(*packages):
     return f'<?xml version="1.0"?><metadata {COMMON} packages="{len(packages)}">{"".join(packages)}</metadata>'.encode()
 
-
-
-class FakeMirror:
-    """An OCI mirror holding `blobs` (sha -> bytes); a missing blob raises like a 404."""
-
-    def __init__(self, blobs=None):
-        self.blobs = blobs or {}
-
-    def has(self, sha):
-        return sha in self.blobs
-
-    def get(self, sha):
-        if sha not in self.blobs:
-            raise OSError("HTTP Error 404: Not Found")
-        return self.blobs[sha]
 
 class Select(unittest.TestCase):
     def test_picks_every_name_at_the_exact_version(self):
@@ -231,7 +215,7 @@ class Fetch(unittest.TestCase):
             out = tmp / "out"
             err = io.StringIO()
             with redirect_stderr(err):
-                code = lock.main(["fetch", "open", "--out", str(out), "--locks", str(tmp)], download=lambda url: payload, mirror=FakeMirror())
+                code = lock.main(["fetch", "open", "--out", str(out), "--locks", str(tmp)], download=lambda url: payload)
             self.assertEqual(code, 1)
             self.assertIn("a.rpm", err.getvalue())
             self.assertFalse((out / "a.rpm").exists())
@@ -244,7 +228,7 @@ class Fetch(unittest.TestCase):
             lock.write_lock(tmp / "open.lock", "open", "610.57.04", OPEN, [(sha, OPEN + "a.rpm")])
             out = tmp / "out"
             with redirect_stdout(io.StringIO()):
-                code = lock.main(["fetch", "open", "--out", str(out), "--locks", str(tmp)], download=lambda url: payload, mirror=FakeMirror())
+                code = lock.main(["fetch", "open", "--out", str(out), "--locks", str(tmp)], download=lambda url: payload)
             self.assertEqual(code, 0)
             self.assertEqual((out / "a.rpm").read_bytes(), payload)
 
@@ -255,7 +239,7 @@ class Fetch(unittest.TestCase):
             lock.write_lock(tmp / "open.lock", branch, "610.57.04", baseurl, [(hashlib.sha256(payload).hexdigest(), url)])
             err = io.StringIO()
             with redirect_stderr(err), redirect_stdout(io.StringIO()):
-                code = lock.main(["fetch", "open", "--out", str(tmp / "out"), "--locks", str(tmp)], download=lambda url: payload, mirror=FakeMirror())
+                code = lock.main(["fetch", "open", "--out", str(tmp / "out"), "--locks", str(tmp)], download=lambda url: payload)
             self.assertEqual(code, 1)
             self.assertIn(message, err.getvalue())
             self.assertFalse((tmp / "out").exists())
@@ -460,83 +444,6 @@ class Verify(unittest.TestCase):
         code, _, _ = self.verify(download)
         self.assertEqual(code, 1)
 
-
-
-class MirrorFirst(unittest.TestCase):
-    PAYLOAD = b"rpm bytes"
-    SHA = hashlib.sha256(PAYLOAD).hexdigest()
-
-    def run_lock(self, command, mirror, download):
-        with tempfile.TemporaryDirectory() as d:
-            tmp = pathlib.Path(d)
-            lock.write_lock(tmp / "open.lock", "open", "610.57.04", OPEN, [(self.SHA, OPEN + "a.rpm")])
-            out, err = io.StringIO(), io.StringIO()
-            argv = [command, "open", "--locks", str(tmp)] + (["--out", str(tmp / "out")] if command == "fetch" else [])
-            with redirect_stdout(out), redirect_stderr(err):
-                code = lock.main(argv, download=download, mirror=mirror)
-            written = (tmp / "out" / "a.rpm").read_bytes() if (tmp / "out" / "a.rpm").exists() else None
-            return code, out.getvalue(), err.getvalue(), written
-
-    def test_fetch_takes_a_mirrored_rpm_without_touching_the_repository(self):
-        def download(url):
-            raise AssertionError(f"downloaded {url}")
-        code, _, err, written = self.run_lock("fetch", FakeMirror({self.SHA: self.PAYLOAD}), download)
-        self.assertEqual((code, written), (0, self.PAYLOAD))
-        self.assertIn("a.rpm from the mirror", err)
-
-    def test_fetch_falls_back_to_the_lock_url_when_the_mirror_lacks_the_rpm(self):
-        code, _, err, written = self.run_lock("fetch", FakeMirror(), lambda url: self.PAYLOAD)
-        self.assertEqual((code, written), (0, self.PAYLOAD))
-        self.assertIn("not in the mirror", err)
-        self.assertIn(f"a.rpm from {OPEN}a.rpm", err)
-
-    def test_fetch_falls_back_when_the_mirror_returns_other_bytes(self):
-        code, _, err, written = self.run_lock("fetch", FakeMirror({self.SHA: b"tampered"}), lambda url: self.PAYLOAD)
-        self.assertEqual((code, written), (0, self.PAYLOAD))
-        self.assertIn("the mirror returned other bytes", err)
-
-    def test_fetch_still_refuses_wrong_bytes_from_both_sources(self):
-        code, _, err, written = self.run_lock("fetch", FakeMirror({self.SHA: b"tampered"}), lambda url: b"also wrong")
-        self.assertEqual((code, written), (1, None))
-        self.assertIn("locked " + self.SHA, err)
-
-    def test_mirrored_prints_the_reference_and_succeeds_when_complete(self):
-        code, out, _, _ = self.run_lock("mirrored", FakeMirror({self.SHA: self.PAYLOAD}), None)
-        self.assertEqual(code, 0)
-        self.assertRegex(out.strip(), r"/athanor-nvidia-rpms:open-610\.57\.04-[0-9a-f]{12}$")
-
-    def test_mirrored_names_what_the_mirror_lacks(self):
-        code, out, err, _ = self.run_lock("mirrored", FakeMirror(), None)
-        self.assertEqual(code, lock.NOT_MIRRORED)
-        self.assertEqual(lock.NOT_MIRRORED, 5)
-        self.assertIn("athanor-nvidia-rpms:open-610.57.04-", out)
-        self.assertIn("lacks a.rpm", err)
-
-    def test_the_tag_follows_the_lock_content(self):
-        with tempfile.TemporaryDirectory() as d:
-            path = pathlib.Path(d) / "open.lock"
-            lock.write_lock(path, "open", "610.57.04", OPEN, [(self.SHA, OPEN + "a.rpm")])
-            first = lock.mirror_tag("open", "610.57.04", path)
-            lock.write_lock(path, "open", "610.57.04", OPEN, [("b" * 64, OPEN + "a.rpm")])
-            self.assertNotEqual(first, lock.mirror_tag("open", "610.57.04", path))
-
-
-class MirrorLocation(unittest.TestCase):
-    def test_kernel_registry_wins(self):
-        with unittest.mock.patch.dict(lock.os.environ, {"KERNEL_REGISTRY": "registry.example/athanor", "GITHUB_REPOSITORY_OWNER": "X"}):
-            self.assertEqual(lock.mirror_repository(), "registry.example/athanor/athanor-nvidia-rpms")
-
-    def test_default_is_the_owner_on_ghcr_in_lower_case(self):
-        with unittest.mock.patch.dict(lock.os.environ, {"GITHUB_REPOSITORY_OWNER": "Some-Owner"}, clear=True):
-            self.assertEqual(lock.mirror_repository(), "ghcr.io/some-owner/athanor-nvidia-rpms")
-
-    def test_bearer_challenge_gives_the_token_url(self):
-        url = lock.bearer_challenge('Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:o/r:pull"')
-        self.assertEqual(url, "https://ghcr.io/token?service=ghcr.io&scope=repository%3Ao%2Fr%3Apull")
-
-    def test_a_challenge_other_than_bearer_is_refused(self):
-        with self.assertRaisesRegex(lock.LockError, "authentication challenge"):
-            lock.bearer_challenge('Basic realm="registry"')
 
 if __name__ == "__main__":
     unittest.main()

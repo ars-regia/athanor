@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # The RPMs of the NVIDIA image variants (docs/architecture/doc_system_image.md, S4-S7), built in
 # the nvidia-rpms stage of system/Containerfile on registry.fedoraproject.org/fedora:43, as
-# root in a throwaway stage. For each branch: the locked vendor RPMs (lock.py fetch: from the
-# mirror under $KERNEL_REGISTRY, else the vendor repository; SHA-256 either way),
+# root in a throwaway stage. For each branch: the locked vendor RPMs (lock.py fetch: SHA-256),
 # their GPG signatures checked with the vendored keys, and azoth-nvidia-kmod plus
 # athanor-nvidia-config built at the branch's pinned version.
 #

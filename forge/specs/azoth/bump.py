@@ -4,9 +4,6 @@
     bump.py check   prints to stdout a JSON with the current pins, the new ones and the notes
     bump.py apply   rewrites pins.env, the FROM lines of the Containerfiles and the pins
                     table of KERNEL.md; prints the PR body (Markdown) to stdout
-    bump.py verify  verifies only the NVIDIA locks at their pins against the repositories and
-                    exits non-zero naming each lock that is stale or gone; the workflow runs it
-                    while a bump PR is open, when check and apply do not run
 
 Kernel pair (spec, section 2): for the X.Y series that both Fedora (stable, F43 then F44)
 and CachyOS (GitHub releases of CachyOS/linux) ship, the highest patch level X.Y.Z present
@@ -254,19 +251,6 @@ def nvidia_version(branch, candidate, current, notes, check=lock_check, verify=l
     return current, state == "stale"
 
 
-def lock_problems(pins, verify=lock_verify):
-    """One line per NVIDIA lock that no longer matches its repository at the pinned version."""
-    problems = []
-    for branch in ("open", "legacy"):
-        version = pins[f"NVIDIA_{branch.upper()}_VERSION"]
-        state = verify(branch, version)
-        if state == "stale":
-            problems.append(f"NVIDIA {branch} {version}: the repository republished the locked packages, the lock must be regenerated")
-        elif state == "gone":
-            problems.append(f"NVIDIA {branch} {version}: the repository no longer publishes it, the pin must move")
-    return problems
-
-
 def image_digest(image, tag):
     """The digest that `podman pull image:tag` resolves: the one of the tag's manifest (index)."""
     registry, _, name = image.partition("/")
@@ -406,14 +390,8 @@ def body(result):
 
 
 def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in ("check", "apply", "verify"):
+    if len(sys.argv) != 2 or sys.argv[1] not in ("check", "apply"):
         sys.exit(__doc__)
-    if sys.argv[1] == "verify":
-        problems = lock_problems(read_pins())
-        if problems:
-            sys.exit("\n".join(problems))
-        print("NVIDIA locks: both match their repositories")
-        return
     result = compute()
     if sys.argv[1] == "check":
         print(json.dumps(result, indent=2))

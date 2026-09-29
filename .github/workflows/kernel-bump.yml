@@ -10,11 +10,7 @@ name: Kernel Bump
 # goes into the PR, green or red. pr: opens the PR with the regenerated files and, only
 # when prep is green, enables its auto-merge; the check required by the branch protection
 # is "Kernel gate" of Kernel Build. A bump that moves system/Containerfile or an NVIDIA lock
-# never auto-merges: System Image Check and a human review decide. One open bump PR at a time:
-# while one is open, check only verifies the NVIDIA locks (bump.py verify) and fails when one
-# must be regenerated, instead of skipping. Every run, whatever happened before, mirrors the
-# RPMs of both NVIDIA locks to $KERNEL_REGISTRY/athanor-nvidia-rpms (system/nvidia/mirror.sh,
-# doc_system_image.md S7), so an image build outlives the vendor repositories. `schedule` only works from
+# never auto-merges: System Image Check and a human review decide. One open bump PR at a time. `schedule` only works from
 # the default branch; by hand on any branch; and on a push of this file: a change to the
 # bot exercises it right away, and that is how GitHub registers the workflow outside the
 # default branch, where workflow_dispatch alone does not make it runnable.
@@ -38,16 +34,12 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-24.04
-    # Regenerating both NVIDIA locks downloads about 650 MB of RPMs, and mirroring them as much.
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      packages: write
+    # Regenerating both NVIDIA locks downloads about 650 MB of RPMs.
+    timeout-minutes: 30
     outputs:
       changed: ${{ steps.bump.outputs.changed }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
@@ -55,24 +47,13 @@ jobs:
         id: open
         run: |
           set -euo pipefail
-          open=$(gh pr list --label kernel-bump --state open --json number --jq 'map("#\(.number)") | join(", ")')
-          [[ -z $open ]] || echo "bump PR ${open} is open: only the NVIDIA locks are verified until it is closed" | tee -a "$GITHUB_STEP_SUMMARY"
+          open=$(gh pr list --label kernel-bump --state open --json number --jq 'length')
+          [[ $open -eq 0 ]] || echo "a bump PR is already open: nothing to do until it is closed" | tee -a "$GITHUB_STEP_SUMMARY"
           echo "open=${open}" >> "$GITHUB_OUTPUT"
-
-      - name: Verify the NVIDIA locks while a bump PR is open
-        if: ${{ steps.open.outputs.open != '' }}
-        env:
-          OPEN_PR: ${{ steps.open.outputs.open }}
-        run: |
-          set -euo pipefail
-          if ! python3 forge/specs/azoth/bump.py verify; then
-            echo "::error::an NVIDIA lock must be regenerated and the bot opens no PR while ${OPEN_PR} is open: merge or close ${OPEN_PR}"
-            exit 1
-          fi
 
       - name: Run bump.py apply
         id: bump
-        if: ${{ steps.open.outputs.open == '' }}
+        if: ${{ steps.open.outputs.open == '0' }}
         run: |
           set -euo pipefail
           python3 forge/specs/azoth/bump.py apply > body.md
@@ -97,20 +78,6 @@ jobs:
             system/nvidia/locks/open.lock
             system/nvidia/locks/legacy.lock
           if-no-files-found: error
-
-      - if: ${{ !cancelled() }}
-        uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1
-        with:
-          version: 1.3.1
-
-      - name: Mirror the RPMs of the NVIDIA locks
-        if: ${{ !cancelled() }}
-        run: |
-          set -euo pipefail
-          registry=${KERNEL_REGISTRY:-ghcr.io/${GITHUB_REPOSITORY_OWNER,,}}
-          oras login "${registry%%/*}" -u "${GITHUB_ACTOR}" --password-stdin <<< "${GH_TOKEN}"
-          bash system/nvidia/mirror.sh open
-          bash system/nvidia/mirror.sh legacy
 
   prep:
     needs: check

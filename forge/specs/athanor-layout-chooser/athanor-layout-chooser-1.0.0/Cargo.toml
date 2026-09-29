@@ -7,6 +7,7 @@ license = "MIT"
 description = "The Athanor layout chooser: three presets and two knobs, written to the user's layout document"
 
 [dependencies]
+athanor-compositor-client = { path = "../../../../system/athanor-compositor-client" }
 athanor-i18n = { path = "../../../../system/athanor-i18n" }
 athanor-layout = { path = "../../../../system/athanor-layout" }
 athanor-style = { path = "../../../../system/athanor-style" }
