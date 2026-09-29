@@ -349,15 +349,28 @@ Specification: [docs/architecture/doc_kernel_profile.md](docs/architecture/doc_k
 
 ## BLOCCO S — shell, stage 1
 
-Specification: [docs/architecture/doc_shell.md](docs/architecture/doc_shell.md), approved on 2026-09-18 after two review rounds. COSMIC stays underneath; stage 1 adds a design system, the update experience and the trust shield. Packages run in this order, each with its own plan:
+Specification: [docs/architecture/doc_shell.md](docs/architecture/doc_shell.md), approved on 2026-09-18 after two review rounds. COSMIC stays underneath; stage 1 adds a design system, the update experience, the trust state and the greeter's seal. Packages run in this order, each with its own plan:
 
-- [ ] **Spikes P1–P3** (GTK4 applet in cosmic-panel; gtk4/relm4 bump on the greeter; headless screenshots). Each gates the plan named in section 3 of the spec.
-- [ ] **1b-system**: `doc_update_trust.md` written, audited and consented to by the maintainer; then key-based signature, policy, download timer, state file, helper, notifier.
-- [ ] **1a**: design system and the greeter on it.
-- [ ] **1b-shield**: shield applet and the seal in the greeter.
-- [ ] **1c**: layout document, three presets, two knobs, chooser.
+- [x] **Spikes P1–P3** (GTK4 applet in cosmic-panel; gtk4/relm4 bump on the greeter; headless screenshots). Each gates the plan named in section 3 of the spec. Ran on 2026-09-18.
+- [x] **1b-system**: `doc_update_trust.md` written, audited and consented to by the maintainer; then key-based signature, policy, download timer, state file, helper, notifier. Dev VM acceptance passed 2026-09-24; the project key and its policy went in on 2026-09-25. The first signed Orchestrator run and the first promotion follow the merge.
+- [x] **1a**: design system and the greeter on it. PR #55.
+- [ ] **1d**: the seal in the greeter. It replaces 1b-shield, whose applet in cosmic-panel is not built: the session shield is born in our bar (BLOCCO S2).
+- [x] **1c**: layout document, three presets, two knobs, chooser. PR #63; its translator to cosmic-panel is a bridge until the switch of stage 2.
 
 Gate: section 7 of the spec, on a fresh install in the dev VM and on the maintainer's desktop upgraded in place.
+
+## BLOCCO S2 — shell, stage 2
+
+Specification: [docs/architecture/doc_shell.md](docs/architecture/doc_shell.md), revision 5 (2026-09-25), sections 3 and 8. Of COSMIC only cosmic-comp stays; stage 2 brings our bar and dock, enabled by hand until they pass the replacement rule of SH1. Packages run in this order, each with its own plan:
+
+- [x] **Spike P4**: compositor privileges and the second connection, five questions (section 3 of the spec). Gates 2a. Run 2026-09-25: all five answered, revision 5 stands; the licence of `cosmic-client-toolkit` is open for 2a.
+- [ ] **2a**: `athanor-compositor-client` and the boundary check in `scripts/verify.py`.
+- [ ] **`doc_bar.md`**: specification of the bar and the dock, written after P4 and reviewed. Gates 2b.
+- [ ] **2b**: our bar, with tray, notifications and the shield.
+- [ ] **2c**: our dock.
+- [ ] **Switch**: bar and dock become the default; cosmic-panel, cosmic-applets, cosmic-notifications and the translator leave the image.
+
+Gate: section 8 of the spec, after the switch, on a fresh install in the dev VM and on the maintainer's desktop upgraded in place.
 
 ## Shell — lacune funzionali verso un utente Windows/macOS
 
