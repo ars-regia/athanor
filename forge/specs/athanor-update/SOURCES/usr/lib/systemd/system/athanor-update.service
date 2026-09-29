@@ -1,0 +1,28 @@
+[Unit]
+Description=Athanor update requests (os.athanor.Update1)
+Documentation=https://github.com/hr-mes/athanor/blob/iso-v0/docs/architecture/doc_update_trust.md
+
+[Service]
+Type=dbus
+BusName=os.athanor.Update1
+ExecStart=/usr/bin/athanor-update serve
+# The unit unprivileged callers talk to never reaches the network: Apply() never downloads.
+PrivateNetwork=yes
+# Measured by spike U1 against a real `bootc upgrade --download-only` and a real
+# `--from-downloaded` (doc_update_trust.md, UT1). Do not add RestrictSUIDSGID (bootc fails on
+# its runtime auth file), an allow-list CapabilityBoundingSet (breaks the setpriv bootc starts
+# its skopeo proxy with) or ProtectSystem=strict (bootc writes the sysroot).
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+UMask=0022
+SystemCallFilter=@system-service @mount
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=~user
+CapabilityBoundingSet=~CAP_SYS_MODULE CAP_SYS_BOOT CAP_SYS_RAWIO CAP_NET_ADMIN

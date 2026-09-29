@@ -158,6 +158,19 @@ RUN if ls /usr/share/selinux/packages/*.cil >/dev/null 2>&1; then \
         semodule -i /usr/share/selinux/packages/*.cil; \
     fi
 
+# Signature policy of the system images (docs/architecture/doc_update_trust.md, UT3). The
+# container tools read /etc/containers only, so the policy is rendered under /usr, for the
+# registry this image is published to and the public keys committed under system/keys, and
+# /etc/containers/policy.json and registries.d/athanor.yaml become links to it. No default:
+# build-image.sh always passes the registry, and the renderer refuses an empty one.
+ARG IMAGE_REGISTRY
+COPY system/keys/ /usr/share/athanor/keys/
+RUN /usr/libexec/athanor-update/render-policy --registry "${IMAGE_REGISTRY}" --keys-dir /usr/share/athanor/keys \
+        --out /usr/share/athanor/containers --link-etc /etc && \
+    test "$(readlink /etc/containers/policy.json)" = /usr/share/athanor/containers/policy.json && \
+    test "$(readlink /etc/containers/registries.d/athanor.yaml)" = /usr/share/athanor/containers/registries.d/athanor.yaml && \
+    test "$(grep -c sigstoreSigned /etc/containers/policy.json)" -eq 3
+
 # Declarative Systemd presets & sysusers
 RUN authselect enable-feature with-systemd-homed && \
     systemctl enable tetragon.service systemd-sysext.service systemd-homed.service athanor-tpm-rollback-check.service athanor-tpm-rollback-update.service athanor-tpm-luks-seal.service && systemd-sysusers && systemctl preset-all && systemctl --global preset-all

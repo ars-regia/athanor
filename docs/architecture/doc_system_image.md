@@ -163,7 +163,12 @@ These defects were found on the same boot and each needs its own fix:
 2. **Once the variant is published:** `sudo rpm-ostree kargs --delete=modprobe.blacklist=nvidia,nvidia_drm,nvidia_modeset,nvidia_uvm,nvidia_peermem` and `sudo bootc switch ghcr.io/hr-mes/athanor-system-nvidia:latest`, then a reboot at the maintainer's choice.
 3. The checks of section 6, item 3.
 
-## 8. Changes owed by other documents
+## 8. Version and signatures
+
+- **Version.** `system/build-image.sh` labels every image with `org.opencontainers.image.version`, `<base major>.<UTC build date>.<serial>`, and `org.opencontainers.image.created`. The serial is the CI run number in the pipeline and `0` in a local build. Ordering uses the build time, never the version string (`doc_update_trust.md`, UT9).
+- **Signatures.** The three images carry two signatures. The keyless Sigstore signature and SBOM attestation (`forge/scripts/sign_attest.sh`) record provenance. The key-based signature, made by `system/sign-images.sh` in the `sign-system-images` job, is what machines verify: the policy rendered from the public keys under `system/keys` is in force in the image (`/etc/containers/policy.json` links to it), and the job verifies each signature through that policy before it reports success (`doc_update_trust.md`, UT2 and UT3).
+
+## 9. Changes owed by other documents
 
 - **`doc_kernel_build.md` section 10:** the variant names become `athanor-system-nvidia` and `athanor-system-nvidia-legacy`. The modules still come from `nvidia-kmod.yml`; the userspace and firmware come from S4 and S5. Section 13 records this decision.
 - **`doc_kernel_profile.md`:** "NVIDIA parameters and dracut configuration … apply only where an NVIDIA GPU is detected" becomes "… apply only in the NVIDIA image variants (doc_system_image.md, S4 and S5)". Section 14's note on `athanor-base-config` shipping NVIDIA configuration to every machine is resolved by S4.

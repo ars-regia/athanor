@@ -470,6 +470,10 @@ good boot. Only drift attributable to the image fails `boot-complete.target`: de
 mode and hardware findings (a missing TPM, firmware that does not mark external ports) are
 reported, never failed, so no machine is locked out of updates by its hardware.
 
+Until the update service below exists, `doc_update_trust.md` is the interim update
+service: bootc behind the same interface, key-based image signatures, a download-only
+timer and confirmation by the user (`doc_shell.md`, SH11).
+
 **Release 1.0 updates** (D31 classes A and D, D36, D41):
 
 1. Applications update through Flatpak with no interruption (class A).
@@ -919,11 +923,10 @@ Found on the running system and in the repository (2026-09-14):
   `bootc-fetch-apply-updates` override, with masks for `akmods@` and `dkms`; it disappears with
   the switch to `base-atomic` (doc_system_image.md, S1), which does not ship it. The NVIDIA dracut
   and kargs configuration moved to `athanor-nvidia-config`, installed only by the NVIDIA image
-  variants (doc_system_image.md, S4). `athanor-base-config` overrides
-  `bootc-fetch-apply-updates` to stage updates automatically, which conflicts with the
-  confirmation of section 8 once enabled (inactive today only because `80-athanor-system.preset` names the non-existent
-  `bootc-fetch-apply.timer`); `doc_shell.md`, SH11, removes that override and the preset line and replaces them with a
-  `--download-only` timer that follows section 8.
+  variants (doc_system_image.md, S4). The `bootc-fetch-apply-updates` override that staged
+  updates automatically and the preset line naming the non-existent `bootc-fetch-apply.timer`
+  are removed; `athanor-update` disables `bootc-fetch-apply-updates.timer` and ships a
+  `--download-only` timer that follows section 8 (`doc_shell.md`, SH11; `doc_update_trust.md`, UT1).
 - **Command line sources:** `kargs.d` 02–06, `system/athanor-install.ks`,
   `system/scripts/assemble_uki.sh`, `forge/specs/athanor-secure-boot/SOURCES/usr/libexec/athanor-secure-boot-measure.sh`
   (`iommu=pt`, `oops=panic`,

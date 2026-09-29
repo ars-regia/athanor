@@ -1,0 +1,35 @@
+[Unit]
+Description=Move this machine onto the signed Athanor image reference
+Documentation=https://github.com/hr-mes/athanor/blob/iso-v0/docs/architecture/doc_update_trust.md
+ConditionPathExists=!/var/lib/athanor-update/migrated
+After=network-online.target athanor-update-state.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/athanor-update migrate
+# NetworkManager-wait-online is disabled on this image (80-athanor-base.preset), so
+# network-online.target says little: a run without a network fails and is tried again.
+Restart=on-failure
+RestartSec=5min
+# Measured by spike U1 against a real `bootc upgrade --download-only` and a real
+# `--from-downloaded` (doc_update_trust.md, UT1). Do not add RestrictSUIDSGID (bootc fails on
+# its runtime auth file), an allow-list CapabilityBoundingSet (breaks the setpriv bootc starts
+# its skopeo proxy with) or ProtectSystem=strict (bootc writes the sysroot).
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+UMask=0022
+SystemCallFilter=@system-service @mount
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=~user
+CapabilityBoundingSet=~CAP_SYS_MODULE CAP_SYS_BOOT CAP_SYS_RAWIO CAP_NET_ADMIN
+
+[Install]
+WantedBy=multi-user.target
