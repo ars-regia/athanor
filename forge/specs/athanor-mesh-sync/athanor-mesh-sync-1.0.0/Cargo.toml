@@ -14,7 +14,7 @@ base64 = "0.21"
 rand_core = "0.6"
 pqc_dilithium = { workspace = true }
 athanor-bus-api = { path = "../../../../system/athanor-bus-api" }
-rtnetlink = "0.14.1"
+rtnetlink = "0.23.0"
 netlink-packet-route = "0.19.0"
 defguard_wireguard_rs = "0.11.1"
 futures = "0.3"
