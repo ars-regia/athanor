@@ -532,7 +532,7 @@ mod tests {
             "",
             "a.png",
             "/usr/../etc/shadow",
-            "/tmp/a\n.png",
+            "/usr/a\n.png",
             long.as_str(),
         ] {
             assert!(!is_icon_file(bad), "{bad:?}");
