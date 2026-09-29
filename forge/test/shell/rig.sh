@@ -14,10 +14,12 @@
 #   rig.sh build-shelld     clippy, tests and release build of athanor-shelld into <out>/bin
 #   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps) into <out>/bin, with the DT_NEEDED check
 #   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout)
+#   rig.sh build-dock       clippy, tests and release build of athanor-dock (and athanor-apps) into <out>/bin, with the DT_NEEDED check
+#   rig.sh dock-roundtrip   the dock's surface off screen and back, three times, under cosmic-comp (BR7)
 #   rig.sh shelld-e2e       athanor-shelld on a session bus: names, notifications, refusal of the private interface, tray watcher, memory
 #   rig.sh bar-e2e          athanor-bar in a scene: READY, live layout, mandatory keys, running windows, the favourites import and pinning, the power menu against a fake logind, memory
 #   rig.sh compositor-e2e   the compositor client against cosmic-comp, and against sway without the COSMIC globals
-#   rig.sh layer-guard <greeter|bar>   the surface must refuse to run when the shim loads late
+#   rig.sh layer-guard <greeter|bar|dock>   the surface must refuse to run when the shim loads late
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
 #   rig.sh atspi <greeter|chooser|bar>   every interactive widget has a role and a name
@@ -302,6 +304,28 @@ build-bar)
                  && install -m 0755 /out/target/release/athanor-bar /out/bin/ \
                  && python3 -B forge/scripts/check_shim_link_order.py /out/bin/athanor-bar'
     ;;
+build-dock)
+    mkdir -p "$out/bin" "$out/target"
+    podman run --rm --memory 6g --security-opt label=disable \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -e CARGO_TARGET_DIR=/out/target -w /repo "$local_image:build" \
+        bash -c 'cargo clippy --locked -p athanor-apps -p athanor-dock --all-targets -- -D warnings \
+                 && cargo test --locked -p athanor-apps -p athanor-dock \
+                 && cargo build --release --locked -p athanor-dock \
+                 && install -m 0755 /out/target/release/athanor-dock /out/bin/ \
+                 && python3 -B forge/scripts/check_shim_link_order.py /out/bin/athanor-dock'
+    ;;
+dock-roundtrip)
+    # BR7's knob none and the bar preset take the surface off screen, and visible brings it
+    # back: cosmic-comp must keep the dock's connection across every round trip.
+    seed_bar "$out/seed-dock-roundtrip" float top visible light
+    in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-dock-roundtrip \
+        RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
+        RIG_HOLD="python3 /repo/forge/test/shell/dock_roundtrip.py" \
+        dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 dock-roundtrip -- \
+        bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
+                 && exec /out/bin/athanor-dock"
+    ;;
 shelld-e2e)
     rm -f "$out/shelld-e2e.log"
     in_rig "$(rig_image)" dbus-run-session -- python3 /repo/forge/test/shell/shelld_e2e.py
@@ -329,10 +353,11 @@ compositor-e2e)
         python3 /repo/forge/test/shell/cc_window.py 1
     ;;
 layer-guard)
-    surface=${2:?usage: rig.sh layer-guard <greeter|bar>}
+    surface=${2:?usage: rig.sh layer-guard <greeter|bar|dock>}
     case "$surface" in
     greeter) binary=athanor-greeter-ui ;;
     bar) binary=athanor-bar ;;
+    dock) binary=athanor-dock ;;
     *)
         echo "rig.sh layer-guard: unknown surface '$surface'" >&2
         exit 2
