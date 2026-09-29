@@ -268,16 +268,20 @@ window.athanor-dock .dock-island {
     box-shadow: 0 1px 2px @ath_shadow_near, 0 6px 18px @ath_shadow_panel;
 }
 
+/* Room for the island's shadow (0 6px 18px) on the transparent surface. Along the edge the
+ * room is symmetric, so the island stays centred, and it adds nothing to the exclusive
+ * zone, which is the surface's depth: 18px to each side, 24px along a vertical dock, which
+ * the 6px offset pushes down. Across the edge the depth stays 6px + island + 14px. */
 window.athanor-dock.edge-bottom .dock-island {
-    margin: 14px 8px 6px;
+    margin: 14px 18px 6px;
 }
 
 window.athanor-dock.edge-left .dock-island {
-    margin: 8px 14px 8px 6px;
+    margin: 24px 14px 24px 6px;
 }
 
 window.athanor-dock.edge-right .dock-island {
-    margin: 8px 6px 8px 14px;
+    margin: 24px 6px 24px 14px;
 }
 
 button.bar-button {
