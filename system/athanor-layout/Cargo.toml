@@ -1,0 +1,11 @@
+[package]
+name = "athanor-layout"
+version = "1.0.0"
+edition = "2021"
+authors = ["Athanor Forge <forge@athanor.os>"]
+license = "MIT"
+description = "The Athanor layout document: schema, layers, presets, and its rendering for cosmic-panel"
+
+[dependencies]
+toml = { workspace = true }
+tracing = { workspace = true }

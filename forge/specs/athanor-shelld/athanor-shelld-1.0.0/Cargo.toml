@@ -1,0 +1,16 @@
+[package]
+name = "athanor-shelld"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+description = "The shell's headless daemon: desktop notifications and the StatusNotifier watcher"
+authors = ["Athanor Forge <forge@athanor.os>"]
+
+[dependencies]
+athanor-unit = { path = "../../../../system/athanor-unit" }
+futures-util = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+zbus = { workspace = true }
+zvariant = { workspace = true }

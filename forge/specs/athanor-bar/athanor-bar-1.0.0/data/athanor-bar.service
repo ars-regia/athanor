@@ -1,0 +1,70 @@
+[Unit]
+Description=Athanor bar
+# Enabled by hand until the switch of stage 2 (doc_bar.md, BR8): the package enables nothing.
+# It starts the shell daemon, which has no D-Bus activation file until then (BR1).
+Wants=athanor-shelld.service
+After=graphical-session.target athanor-desktop.service athanor-shelld.service
+Requisite=athanor-desktop.service
+PartOf=graphical-session.target
+# The bar counts its own failures and falls back to the vendor layout after five in ten
+# minutes (doc_shell.md, SH8); this is only the outer backstop.
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/athanor-bar
+ExecStopPost=/usr/bin/athanor-bar --record-exit
+TimeoutStartSec=20s
+Restart=on-failure
+RestartSec=1s
+RestartSteps=5
+RestartMaxDelaySec=60s
+Slice=session.slice
+# SH4: the layer surfaces are drawn with Cairo, on every GPU.
+Environment=GSK_RENDERER=cairo
+# GTK's and fontconfig's caches, inside the Landlock ruleset (BR1).
+Environment=XDG_CACHE_HOME=%C/athanor-bar
+CacheDirectory=athanor-bar
+# Budget 64 MB PSS at rest (doc_bar.md, section 5, item 17). MemoryHigh throttles well above
+# it; MemoryMax is the hard cap for an icon theme or a font cache loaded at once.
+MemoryHigh=96M
+MemoryMax=192M
+
+# The failure record must survive a stop, not just a restart: a give-up (SH8) must still be
+# one the next time the unit starts. Only the session ending clears it.
+# Under ProtectSystem=strict /run/user is read-only except the unit's own runtime
+# directories: "athanor" is also declared here because launch() creates %t/athanor/<random>
+# for the Wayland security context of a started application (athanor-compositor-client).
+RuntimeDirectory=athanor-bar athanor
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+# The favourites file, ~/.config/athanor/favorites.toml (BR7), and COSMIC's is_high_contrast
+# key in both theme modes, which the accessibility menu writes (BR3). Under
+# ProtectHome=read-only these are the only writable directories in the home directory:
+# systemd creates each one, parents included, and binds it read-write into the unit's
+# namespace. The mode is the default 0755, what the usual umask 022 gives them: systemd
+# 258 leaves an existing directory's mode alone and only logs one that differs.
+ConfigurationDirectory=athanor cosmic/com.system76.CosmicTheme.Dark/v1 cosmic/com.system76.CosmicTheme.Light/v1
+
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+NoNewPrivileges=yes
+# No MemoryDenyWriteExecute: GTK's GL renderers and the Mesa drivers GTK loads map
+# executable memory. The renderer is Cairo, but GDK still probes GL at start.
+# @mount: glycin decodes every image in a bubblewrap sandbox, which mounts its own root.
+SystemCallFilter=@system-service @mount
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# Wayland, D-Bus and journald over Unix sockets; AF_NETLINK because bubblewrap brings up
+# the loopback interface of glycin's sandbox over rtnetlink.
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+
+[Install]
+WantedBy=athanor-session.target

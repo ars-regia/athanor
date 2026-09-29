@@ -6,14 +6,28 @@ on:
     paths:
       - "system/athanor-style/**"
       - "forge/specs/athanor-greeter-ui/**"
+      - "system/athanor-layout/**"
+      - "forge/specs/athanor-layout-translator/**"
+      - "forge/specs/athanor-layout-chooser/**"
+      - "system/athanor-compositor-client/**"
       - "system/athanor-i18n/**"
+      - "forge/specs/athanor-shelld/**"
+      - "forge/specs/athanor-bar/**"
+      - "system/athanor-unit/**"
       - "forge/test/shell/**"
       - ".github/workflows/shell-surfaces.yml"
   pull_request:
     paths:
       - "system/athanor-style/**"
       - "forge/specs/athanor-greeter-ui/**"
+      - "system/athanor-layout/**"
+      - "forge/specs/athanor-layout-translator/**"
+      - "forge/specs/athanor-layout-chooser/**"
+      - "system/athanor-compositor-client/**"
       - "system/athanor-i18n/**"
+      - "forge/specs/athanor-shelld/**"
+      - "forge/specs/athanor-bar/**"
+      - "system/athanor-unit/**"
       - "forge/test/shell/**"
       - ".github/workflows/shell-surfaces.yml"
   workflow_dispatch:
@@ -49,7 +63,7 @@ jobs:
       - name: Build the greeter and check the DT_NEEDED order
         run: bash forge/test/shell/rig.sh build-greeter
       - name: Layer-surface guard
-        run: bash forge/test/shell/rig.sh layer-guard
+        run: bash forge/test/shell/rig.sh layer-guard greeter
       - name: Accessibility tree of the greeter
         run: bash forge/test/shell/rig.sh atspi greeter
       - name: Greeter surface cases (12) against the goldens
@@ -61,3 +75,133 @@ jobs:
           path: |
             .scratch/shell-rig/*.log
             .scratch/shell-rig/greeter-*.png
+
+  layout:
+    name: Layout library, translator and chooser; layout and chooser cases; end-to-end press
+    needs: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rig image
+        run: bash forge/test/shell/rig.sh build-image
+      - name: Unit tests of the rig's scripts, against the rig's ImageMagick 7
+        run: bash forge/test/shell/rig.sh rig-tests
+      - name: COSMIC's shipped panel keys match the renderer's fixture
+        run: bash forge/test/shell/rig.sh cosmic-panel-defaults
+      - name: Build and test the layout crates
+        run: bash forge/test/shell/rig.sh build-layout
+      - name: Layout cases (21) against the goldens
+        run: bash forge/test/shell/rig.sh surface layout
+      - name: Accessibility tree of the chooser
+        run: bash forge/test/shell/rig.sh atspi chooser
+      - name: Chooser surface cases (12) against the goldens
+        run: bash forge/test/shell/rig.sh surface chooser
+      - name: A preset picked in the chooser applies without a restart
+        run: bash forge/test/shell/rig.sh chooser-e2e
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: shell-rig-layout
+          path: |
+            .scratch/shell-rig/*.log
+            .scratch/shell-rig/layout-*.png
+            .scratch/shell-rig/chooser-*.png
+
+  compositor:
+    name: Compositor client against cosmic-comp and against a compositor without COSMIC
+    needs: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rig image
+        run: bash forge/test/shell/rig.sh build-image
+      - name: Build and test the compositor client
+        run: bash forge/test/shell/rig.sh build-compositor-client
+      - name: The client against cosmic-comp and sway
+        run: bash forge/test/shell/rig.sh compositor-e2e
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: shell-rig-compositor
+          path: |
+            .scratch/shell-rig/*.log
+            .scratch/shell-rig/compositor-e2e.png
+
+  shelld:
+    name: Shell daemon, notifications and the tray watcher
+    needs: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rig image
+        run: bash forge/test/shell/rig.sh build-image
+      - name: Build and test the daemon
+        run: bash forge/test/shell/rig.sh build-shelld
+      - name: The daemon on a session bus
+        run: bash forge/test/shell/rig.sh shelld-e2e
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: shell-rig-shelld
+          path: .scratch/shell-rig/shelld-e2e.log
+
+  bar:
+    name: Bar, build and end to end
+    needs: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rig image
+        run: bash forge/test/shell/rig.sh build-image
+      - name: Build and test the bar and check the DT_NEEDED order
+        run: bash forge/test/shell/rig.sh build-bar
+      - name: Layer-surface guard
+        run: bash forge/test/shell/rig.sh layer-guard bar
+      - name: Accessibility tree of the bar
+        run: bash forge/test/shell/rig.sh atspi bar
+      - name: Live layout, mandatory keys, running windows, the power menu and memory
+        run: bash forge/test/shell/rig.sh bar-e2e
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: shell-rig-bar
+          path: |
+            .scratch/shell-rig/*.log
+            .scratch/shell-rig/bar-e2e.png
+
+  bar-scenes:
+    name: Bar scene ${{ matrix.scene }} (12 cases) against the goldens
+    needs: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        scene:
+          [
+            bar,
+            bar-power,
+            bar-input,
+            bar-calendar,
+            bar-accessibility,
+            bar-tiling,
+          ]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rig image
+        run: bash forge/test/shell/rig.sh build-image
+      - name: Build the bar
+        run: bash forge/test/shell/rig.sh build-bar
+      - name: Cases against the goldens
+        run: bash forge/test/shell/rig.sh surface "${{ matrix.scene }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: shell-rig-${{ matrix.scene }}
+          path: |
+            .scratch/shell-rig/*.log
+            .scratch/shell-rig/${{ matrix.scene }}-*.png

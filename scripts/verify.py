@@ -20,6 +20,7 @@ import os
 import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -579,6 +580,77 @@ def check_specs():
                    f"%setup, quindi %install gira dalla radice del build e quel file "
                    f"non è lì. Usa il percorso completo dalla radice del repo")
 
+    return r
+
+
+# --------------------------------------------------------------------------- #
+# 10. boundary — COSMIC stays behind the compositor client (doc_shell.md, SH2)
+# --------------------------------------------------------------------------- #
+
+# The only places that may depend on COSMIC. The translator and the two layout modules
+# leave the list when our bar replaces COSMIC's panel (doc_shell.md, SH2).
+COSMIC_ALLOWED = (
+    "system/athanor-compositor-client/",
+    "forge/tools/calmo-cosmic-theme/",
+    "forge/specs/athanor-layout-translator/",
+    "system/athanor-layout/src/cosmic.rs",
+    "system/athanor-layout/src/apply.rs",
+)
+BOUNDARY_DIRS = ("system", "forge/specs", "forge/tools")
+DEPENDENCY_TABLES = ("dependencies", "dev-dependencies", "dev_dependencies",
+                     "build-dependencies", "build_dependencies")
+
+
+def cosmic_dependencies(manifest):
+    """The crate names of a parsed Cargo manifest's dependencies that are libcosmic or
+    cosmic-*. A renamed dependency (`package = "cosmic-..."`) is found by its crate name."""
+    tables = [manifest.get(name, {}) for name in DEPENDENCY_TABLES]
+    tables += [target.get(name, {}) for target in manifest.get("target", {}).values()
+               for name in DEPENDENCY_TABLES]
+    tables.append(manifest.get("workspace", {}).get("dependencies", {}))
+    found = []
+    for table in tables:
+        for key, value in table.items():
+            crate = value.get("package", key) if isinstance(value, dict) else key
+            if crate == "libcosmic" or crate.startswith("cosmic-"):
+                found.append(crate)
+    return found
+
+
+def boundary_problems(root):
+    """What crosses the COSMIC boundary under root: a crate that depends on COSMIC, or Rust
+    code that names a com.system76 configuration, outside COSMIC_ALLOWED."""
+    root = Path(root)
+    problems = []
+    for base in BOUNDARY_DIRS:
+        for path in walk(root / base, ".toml"):
+            relative = path.relative_to(root).as_posix()
+            if path.name != "Cargo.toml" or relative.startswith(COSMIC_ALLOWED) or is_frozen(relative):
+                continue
+            try:
+                manifest = tomllib.loads(read(path))
+            except tomllib.TOMLDecodeError as error:
+                problems.append(f"{relative}: not valid TOML ({error})")
+                continue
+            for crate in cosmic_dependencies(manifest):
+                problems.append(f"{relative} depends on {crate}: only athanor-compositor-client "
+                                f"may depend on COSMIC")
+        for path in walk(root / base, ".rs"):
+            relative = path.relative_to(root).as_posix()
+            if relative.startswith(COSMIC_ALLOWED) or is_frozen(relative):
+                continue
+            for i, line in enumerate(read(path).split("\n"), 1):
+                if "com.system76" in line.split("//")[0]:
+                    problems.append(f"{relative}:{i} names a com.system76 configuration: read it "
+                                    f"through athanor-compositor-client")
+    return problems
+
+
+@check("boundary", "Only the compositor client depends on COSMIC or reads its configuration")
+def check_boundary():
+    r = Result()
+    for problem in boundary_problems(ROOT):
+        r.fail(problem)
     return r
 
 
