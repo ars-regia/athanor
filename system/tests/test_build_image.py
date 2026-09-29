@@ -47,6 +47,27 @@ class BuildImage(unittest.TestCase):
         args = (self.dir / "podman.args").read_text().splitlines() if (self.dir / "podman.args").exists() else []
         return r, args
 
+    def test_every_image_carries_its_own_version_and_build_time(self):
+        self.artifacts_file()
+        self.env["SOURCE_DATE_EPOCH"] = "1789466400"  # 2026-09-15T10:00:00Z
+        r = subprocess.run(["bash", str(BUILD), "--gpu", "none", "--registry", "localhost", "--tag", "check", "--serial", "412"],
+                           capture_output=True, text=True, env=self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        args = (self.dir / "podman.args").read_text().splitlines()
+        self.assertIn("org.opencontainers.image.version=43.20260915.412", args)
+        self.assertIn("org.opencontainers.image.created=2026-09-15T10:00:00Z", args)
+        self.assertIn("IMAGE_REGISTRY=localhost", args)
+
+    def test_a_local_build_has_serial_zero_and_a_serial_is_a_number(self):
+        self.artifacts_file()
+        self.env["SOURCE_DATE_EPOCH"] = "1789466400"
+        r, args = self.build("none")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("org.opencontainers.image.version=43.20260915.0", args)
+        r = subprocess.run(["bash", str(BUILD), "--gpu", "none", "--registry", "localhost", "--tag", "check", "--serial", "v2"],
+                           capture_output=True, text=True, env=self.env)
+        self.assertEqual(r.returncode, 2)
+
     def test_nvidia_builds_from_the_open_module_digest(self):
         self.artifacts_file()
         r, args = self.build("nvidia")

@@ -11,7 +11,6 @@
 /system/athanor-mesh-bus/ @hr-mes-architect
 
 # Wayland & UI
-/system/athanor-compositor/ @hr-mes-architect
 /system/athanor-greeter/ @hr-mes-architect
 
 # CI/CD

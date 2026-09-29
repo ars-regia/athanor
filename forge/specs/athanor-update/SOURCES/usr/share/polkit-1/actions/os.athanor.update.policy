@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Athanor</vendor>
+  <vendor_url>https://github.com/hr-mes/athanor</vendor_url>
+
+  <!-- logind's own defaults for a reboot on this image: the request grants nothing beyond
+       the reboot logind already allows the active local user (doc_shell.md, SH11). -->
+  <action id="os.athanor.update.apply">
+    <description>Restart to install the downloaded system update</description>
+    <description xml:lang="it">Riavvia per installare l'aggiornamento di sistema scaricato</description>
+    <message>Authentication is required to restart and install the system update</message>
+    <message xml:lang="it">È richiesta l'autenticazione per riavviare e installare l'aggiornamento di sistema</message>
+    <defaults>
+      <allow_any>auth_admin_keep</allow_any>
+      <allow_inactive>auth_admin_keep</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+
+  <!-- Never kept: every return to the previous version is authenticated on its own. -->
+  <action id="os.athanor.update.rollback">
+    <description>Go back to the previous system version</description>
+    <description xml:lang="it">Torna alla versione di sistema precedente</description>
+    <message>Authentication is required to go back to the previous system version</message>
+    <message xml:lang="it">È richiesta l'autenticazione per tornare alla versione di sistema precedente</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+</policyconfig>
