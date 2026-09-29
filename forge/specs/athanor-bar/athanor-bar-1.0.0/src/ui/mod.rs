@@ -15,13 +15,14 @@ mod tiling;
 
 use std::cell::{Cell, RefCell};
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
+use athanor_apps::favorites::Store;
+use athanor_apps::Host;
 use athanor_bar::order::{self, Module};
 use athanor_compositor_client::{outputs, theme, Client, Event, Opener};
-use athanor_layout::favorites::{self, FavoritesError};
 use athanor_layout::loader::Source;
 use athanor_layout::placement::Output;
 use athanor_layout::preset::{Layout, PanelEdge};
@@ -31,7 +32,7 @@ use gtk4::prelude::*;
 use gtk4::{gdk, gio, glib};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
-use crate::i18n;
+use crate::i18n::{self, tr};
 use crate::layer_guard;
 
 /// What changed, so that each module refreshes only for what it shows.
@@ -63,13 +64,6 @@ pub trait ModuleUi {
     fn refresh(&self, bar: &Rc<Bar>, changed: Changed);
     /// Opens the module's popover, for the captures of BR9 (`ATHANOR_BAR_OPEN`).
     fn open(&self, _bar: &Rc<Bar>) {}
-}
-
-enum Favorites {
-    Loaded(Vec<String>),
-    /// A rejected file, a give-up, or no configuration directory: nothing is pinned or
-    /// unpinned, and the file is never replaced.
-    Unavailable,
 }
 
 /// One surface's content, before it is handed to a window: the centre box to set as the
@@ -139,10 +133,9 @@ pub struct Bar {
     display: gdk::Display,
     client: Option<Client>,
     source: Source,
-    favorites_file: Option<PathBuf>,
     layout: Cell<Layout>,
     outputs: RefCell<Vec<Output>>,
-    favorites: RefCell<Favorites>,
+    favorites: Store,
     surfaces: RefCell<Vec<Surface>>,
     watches: RefCell<Vec<gio::FileMonitor>>,
     debounce: RefCell<Option<glib::SourceId>>,
@@ -169,7 +162,6 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
             None
         }
     };
-    let favorites = load_favorites(favorites_file.as_deref());
     let bar = Rc::new(Bar {
         app: app.clone(),
         _hold: app.hold(),
@@ -178,8 +170,7 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
         client,
         layout: Cell::new(source.layout()),
         source,
-        favorites_file,
-        favorites: RefCell::new(favorites),
+        favorites: Store::load(favorites_file),
         surfaces: RefCell::new(Vec::new()),
         watches: RefCell::new(Vec::new()),
         debounce: RefCell::new(None),
@@ -196,27 +187,6 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
     }
     bar.watch();
     bar
-}
-
-/// The favourites at start. `Favorites::Unavailable` when there is no configuration
-/// directory or the file exists and is rejected. A failed import save is a different
-/// case: `load_or_import` logs it itself and still returns the imported list, so it
-/// reaches this function as `Ok` and yields `Favorites::Loaded`.
-fn load_favorites(file: Option<&Path>) -> Favorites {
-    let Some(file) = file else {
-        return Favorites::Unavailable;
-    };
-    match favorites::load_or_import(
-        file,
-        athanor_compositor_client::favorites::cosmic_favorites,
-        Path::new(favorites::VENDOR_FILE),
-    ) {
-        Ok(ids) => Favorites::Loaded(ids),
-        Err(err) => {
-            tracing::error!(error = %err, file = %file.display(), "the favourites are unavailable; the file is left as it is");
-            Favorites::Unavailable
-        }
-    }
 }
 
 fn changed_by(event: &Event) -> Changed {
@@ -257,36 +227,6 @@ impl Bar {
 
     pub fn layout(&self) -> Layout {
         self.layout.get()
-    }
-
-    pub fn favorites(&self) -> Option<Vec<String>> {
-        match &*self.favorites.borrow() {
-            Favorites::Loaded(ids) => Some(ids.clone()),
-            Favorites::Unavailable => None,
-        }
-    }
-
-    /// Applies `change` to the favourites file under its lock (`favorites::update`) and shows
-    /// the result. A failure is logged and nothing changes; the same when the current state
-    /// is `Favorites::Unavailable` (a rejected file, a crash-loop give-up, no configuration
-    /// directory): the file is never replaced.
-    pub fn change_favorites(
-        self: &Rc<Self>,
-        change: impl FnOnce(&[String]) -> Result<Vec<String>, FavoritesError>,
-    ) {
-        if matches!(*self.favorites.borrow(), Favorites::Unavailable) {
-            return;
-        }
-        let Some(file) = &self.favorites_file else {
-            return;
-        };
-        match favorites::update(file, change) {
-            Ok(ids) => {
-                self.favorites.replace(Favorites::Loaded(ids));
-                self.refresh(Changed::Favorites);
-            }
-            Err(err) => tracing::error!(error = %err, "the favourites were not changed"),
-        }
     }
 
     /// BR6: at most one popover of the bar is open; opening one closes the other.
@@ -600,22 +540,40 @@ impl Bar {
             || !self.surfaces_current();
         self.layout.set(layout);
         self.outputs.replace(outputs);
-        if let Some(file) = &self.favorites_file {
-            let now = match favorites::read(file) {
-                // A file removed since start is a deliberate user act, not an error: the
-                // next start re-imports from COSMIC.
-                Ok(ids) => Favorites::Loaded(ids.unwrap_or_default()),
-                Err(err) => {
-                    tracing::error!(error = %err, file = %file.display(), "the favourites are unavailable; the file is left as it is");
-                    Favorites::Unavailable
-                }
-            };
-            self.favorites.replace(now);
-        }
+        self.favorites.reload();
         if moved {
             self.rebuild();
         } else {
             self.refresh(Changed::Favorites);
         }
+    }
+}
+
+impl Host for Bar {
+    const APP: &'static str = "athanor-bar";
+    const REORDER: bool = false;
+
+    fn client(&self) -> Option<&Client> {
+        self.client.as_ref()
+    }
+
+    fn favorites(&self) -> &Store {
+        &self.favorites
+    }
+
+    fn pin_label(&self, pinned: bool) -> String {
+        if pinned {
+            tr("Unpin from Bar")
+        } else {
+            tr("Pin to Bar")
+        }
+    }
+
+    fn menu_opened(&self, menu: &gtk4::Popover) {
+        self.popover_opened(menu);
+    }
+
+    fn refresh_rows(self: &Rc<Self>) {
+        self.refresh(Changed::Favorites);
     }
 }

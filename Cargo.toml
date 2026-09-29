@@ -25,6 +25,7 @@ members = [
   "system/athanor-bus-api",
   "system/athanor-cluster-mesh",
   "system/athanor-compositor-client",
+  "system/athanor-apps",
   "system/athanor-ebpf-sched",
   "system/athanor-greeter",
   "system/athanor-hypervisor-daemon",
