@@ -54,12 +54,12 @@ Read it with `docs/architecture/doc_shell.md` rev 5: SH1 (no facades) and SH13 (
 | **2b.4 (this plan)** | the network, Bluetooth, audio and battery modules on dbusmock fixtures. It confirms the Fedora 43 templates (BR9 and open doubt 4). |
 | 2b.5                 | the shield and its sheet, and the BR8 signals                                                                                        |
 
-**Order.** 2b.4 runs after 2b.3 on the bar, and after Tasks 1 to 3 of the dock plan (2c). Before Task 1, merge the 2b.3 branch and the branch that carries those dock tasks into this one. Those tasks move code this plan uses:
-- `ui/running.rs`, `ui/openers.rs`, the popover attachment (`Popup::new`, `Popup::open`, `attach`), the favourites store and the i18n bridge (`tr`, `tr_with`) move into `system/athanor-apps`;
-- `dirs.rs` moves into `athanor_unit::dirs`;
-- 2b.3 rewrites `bar_session.py`'s argument parsing with argparse, and edits `ui/mod.rs`, `rig.sh`, `cases.py`, the translations and the workflow.
+**Order.** 2b.4 runs after Tasks 1 to 3 of the dock plan (2c Unit A, branch `shell-2c-dock` at `b648f633`) and after 2b.3 on the bar. Before Task 1, merge the Unit A branch into `shell-2b4-modules`, then the 2b.3 branch, each with `git merge`. Never rebase: those branches are shared, and their commits stay as they were published. What they change under this plan:
+- Unit A moves the applications row, the favourites store and the openers into `system/athanor-apps` (`athanor_apps::{row, favorites, openers}`), `athanor_bar::running` into `athanor_apps::model`, `dirs.rs` into `athanor_unit::dirs`, and the layout `Source` into `athanor_layout::loader::Source`. The bar's `lib.rs` keeps `clock`, `keyboard`, `order`, `power` and `tiling`. `po/POTFILES.in` lists athanor-apps' `openers.rs` and `row.rs` after the bar's own sources.
+- The bar keeps `ui/popup.rs`. `Popup::new(bar, child, name)`, `Popup::open` and `switch_row(text)` are unchanged; `popup::attach(bar, button)` wraps `athanor_apps::menu::attach(button, popup::towards_inside(bar))`, and `popup::towards_inside(bar)` is the side facing the inside of the screen. The bar also keeps `crate::i18n::{tr, tr_with}`, which hands its catalogue to `athanor_apps::i18n::set_catalog`. Every popover of this plan is built by `Popup::new`, so the modules import nothing from athanor-apps. A popover built elsewhere would be attached with `athanor_apps::menu::attach_popover(button, popover, popup::towards_inside(bar))`.
+- 2b.3 adds `Bar::popovers_changed` and calls it when a popover of the bar shows or closes (BR6, "Stacking"), so the modules' popovers reach it through `Popup::new`. 2b.3 also adds `dbusmenu`, `notices`, `popups` and `tray` to `lib.rs` and `menu`, `notifications`, `popups` and `tray` to `ui/mod.rs`, rewrites `bar_session.py` with argparse, adds three scenes, and edits `rig.sh`, the translations and the workflow.
 
-Every step that touches one of these is marked **re-point after 2c Unit A / 2b.3**. Its code is written against the base commit `6e1d357f`. When executing, adapt the marked lines to the moved API (import path, constructor, argparse flag), keep the behaviour the step describes, and change nothing else in the step. This plan brings 4 of the 15 scenes of BR9, which is 48 of the 180 surface cases: `bar-network`, `bar-bluetooth`, `bar-audio` and `bar-battery`.
+The code of this plan is written against Unit A: every signature it uses from the bar, athanor-apps and athanor-unit was checked on `b648f633`. A step that inserts at an anchor where 2b.3 also inserts holds as written. Two steps rewrite lines that 2b.3 rewrites: Task 3, Step 2 (`bar_session.py`) and Task 8, Step 5 (the scenes). They are written against the 2b.3 plan at `7651c3b5`, because its code does not exist yet, and are marked **re-point after 2b.3**: when executing, check their anchors against the merged 2b.3 code, keep the behaviour the step describes, and change nothing else in the step. This plan brings 4 of the 15 scenes of BR9, which is 48 of the 180 surface cases: `bar-network`, `bar-bluetooth`, `bar-audio` and `bar-battery`.
 
 **Rulings this plan makes.** The spec leaves these open, or says them differently:
 
@@ -178,7 +178,7 @@ forge/test/shell/system_fixtures.py       NEW: dbusmock services, PipeWire with 
 forge/test/shell/bar_session.py           MODIFY (shared): --fixtures, logind SetBrightness
 forge/test/shell/bar_modules_e2e.py       NEW: the four modules end to end
 forge/test/shell/cases.py                 MODIFY (shared): four scenes
-forge/test/shell/tests/test_cases.py      MODIFY (shared): ten scenes, 120 cases
+forge/test/shell/tests/test_cases.py      MODIFY (shared): thirteen scenes, 156 cases
 forge/test/shell/locale/bar-de.po         MODIFY (shared): the new messages
 forge/test/shell/golden/bar-{network,bluetooth,audio,battery}/*.png   NEW: 48 goldens
 .github/workflows/shell-surfaces.yml      MODIFY (shared): a bar step, four matrix entries
@@ -188,7 +188,7 @@ scripts/devvm/bar_modules.py              NEW: the modules in the VM over AT-SPI
 forge/config/packages.json                MODIFY (shared): pulseaudio-libs-glib2 in upstream_desktop (Task 9)
 ```
 
-"Shared" marks the files 2b.3 or 2c may also change. Rebase conflicts are expected there and nowhere else.
+"Shared" marks the files 2b.3 or 2c may also change. Merge conflicts are expected there and nowhere else.
 
 ---
 
@@ -209,7 +209,7 @@ forge/config/packages.json                MODIFY (shared): pulseaudio-libs-glib2
 
 The published rig carries the pixels of every golden: fonts, Mesa, GTK, COSMIC. Rebuilding it from Fedora would move all of them. The new packages are therefore a layer on top of the published image, and only a first build from scratch (no digest file) builds the base.
 
-- [ ] **Step 1: Layer the Containerfile** (re-point after 2c Unit A / 2b.3)
+- [ ] **Step 1: Layer the Containerfile**
 
 Replace the first line of the stage header, and add the new `rig` stage between the base and the build stage. Apply with Edit, in three places.
 
@@ -243,7 +243,7 @@ RUN dnf5 -y install --setopt=install_weak_deps=False \
       pulseaudio-libs-devel \
 ```
 
-- [ ] **Step 2: Pass the published rig as the base in `rig.sh`** (re-point after 2c Unit A / 2b.3)
+- [ ] **Step 2: Pass the published rig as the base in `rig.sh`**
 
 After `rig_image() { … }`, add:
 
@@ -296,15 +296,16 @@ Expected:
 
 - [ ] **Step 4: The existing scenes are unchanged in the layered image**
 
-Run each of the six bar scenes and `greeter` against the local image:
+Run each of the nine bar scenes of 2b.2 and 2b.3, and `greeter`, against the local image:
 
 ```bash
-for scene in bar bar-power bar-input bar-calendar bar-accessibility bar-tiling greeter; do
+for scene in bar bar-power bar-input bar-calendar bar-accessibility bar-tiling \
+             bar-popups bar-notifications bar-tray greeter; do
   ATHANOR_RIG_IMAGE=localhost/athanor-shell-rig:rig bash forge/test/shell/rig.sh surface "$scene" || exit 1
 done
 ```
 
-Run `bash forge/test/shell/rig.sh build-bar` first if `.scratch/shell-rig/bin/athanor-bar` is missing.
+Run `bash forge/test/shell/rig.sh build-bar` first if `.scratch/shell-rig/bin/athanor-bar` is missing, and `build-shelld` if `.scratch/shell-rig/bin/athanor-shelld` is missing: `bar-tray` runs the real watcher.
 
 Expected: every case PASS.
 
@@ -386,7 +387,7 @@ The new image is the old one plus a layer, so no golden changes with the digest.
     - `fn profiles(&Props) -> Option<(Vec<&'static str>, String)>`;
     - `fn read_backlight(&Path) -> Option<Backlight>`, `Backlight::percent(&self) -> f64` and `Backlight::raw(&self, f64) -> u32`.
 
-- [ ] **Step 1: Add the libpulse crates and regenerate the lock file** (re-point after 2c Unit A / 2b.3)
+- [ ] **Step 1: Add the libpulse crates and regenerate the lock file**
 
 In `forge/specs/athanor-bar/athanor-bar-1.0.0/Cargo.toml`, after the `gtk4-layer-shell` line, add:
 
@@ -416,26 +417,27 @@ Expected:
 
 If a `-` line appears, stop. Cargo moved an existing crate, and that is a separate change.
 
-- [ ] **Step 2: Declare the modules** (re-point after 2c Unit A / 2b.3)
+- [ ] **Step 2: Declare the modules**
 
-In `src/lib.rs`, extend the module list so that it reads, in alphabetical order:
+In `src/lib.rs`, add these five lines, each in its alphabetical place:
 
 ```rust
 pub mod audio;
 pub mod battery;
 pub mod bluetooth;
-pub mod clock;
-pub mod dirs;
-pub mod keyboard;
 pub mod network;
-pub mod order;
-pub mod power;
 pub mod props;
-pub mod running;
-pub mod tiling;
 ```
 
-Also change the doc comment's first sentence to: `//! The logic of athanor-bar, with no GTK type (doc_bar.md, section 2, "Shared code"): what each preset holds, favourites against windows, what logind offers, the time zone, and the state of NetworkManager, BlueZ, the sound server and UPower.` Keep its line wrapping at 92 columns.
+With Unit A and 2b.3 merged, the list then reads `audio`, `battery`, `bluetooth`, `clock`, `dbusmenu`, `keyboard`, `network`, `notices`, `order`, `popups`, `power`, `props`, `tiling`, `tray`.
+
+Replace the doc comment with:
+
+```rust
+//! The logic of athanor-bar, with no GTK type (doc_bar.md, section 2, "Shared code"): what
+//! each preset holds, what logind offers, the time zone, and the state of NetworkManager,
+//! BlueZ, the sound server and UPower. The binary draws it.
+```
 
 - [ ] **Step 3: Write `src/props.rs` with its tests**
 
@@ -2571,11 +2573,11 @@ def start(tag):
     ]
 ```
 
-- [ ] **Step 2: Give `bar_session.py` the fixtures and `SetBrightness`** (re-point after 2c Unit A / 2b.3)
+- [ ] **Step 2: Give `bar_session.py` the fixtures and `SetBrightness`** (re-point after 2b.3)
 
 Apply these edits to `forge/test/shell/bar_session.py`:
 
-1. The docstring's first line becomes `"""bar_session.py [--hang METHOD] [--window] [--pinnable] [--fixtures] - athanor-bar in the rig, as its`. Append this paragraph after the paragraph that starts "The fake logind answers":
+1. In the docstring's usage lines, `[--respawn]` becomes `[--respawn] [--fixtures]`; rewrap the two lines within 100 columns. Append this paragraph after the paragraph that starts "--notifications starts":
 
 ```text
 --fixtures starts system_fixtures.py's services before the bar (NetworkManager, BlueZ, UPower
@@ -2618,52 +2620,26 @@ import system_fixtures
             invocation.return_value(None)
 ```
 
-5. `parse` returns a fourth value:
+5. In `parse`, after `parser.add_argument("--respawn", action="store_true")`, add:
 
 ```python
-def parse(args):
-    hang, window, pinnable, fixtures = None, False, False, False
-    while args:
-        if args[0] == "--hang" and len(args) > 1:
-            hang, args = args[1], args[2:]
-        elif args[0] == "--window":
-            window, args = True, args[1:]
-        elif args[0] == "--pinnable":
-            pinnable, args = True, args[1:]
-        elif args[0] == "--fixtures":
-            fixtures, args = True, args[1:]
-        else:
-            print(__doc__, file=sys.stderr)
-            raise SystemExit(2)
-    return hang, window, pinnable, fixtures
+    parser.add_argument("--fixtures", action="store_true")
 ```
 
 6. In `main`:
-   - the first line becomes `hang, window, pinnable, fixtures = parse(sys.argv[1:])`;
-   - after the `RequestName` check (`if owned != 1: ...`), insert:
+   - replace `helpers = []`, after the `RequestName` check, with:
 
    ```python
-       # The services exist before the bar starts, as they do at login.
-       services = system_fixtures.start(os.environ.get("RIG_TAG", "bar")) if fixtures else []
+       # The services exist before the bar starts, as they do at login. The loop at the end
+       # of main terminates them with the other helpers.
+       helpers = system_fixtures.start(os.environ.get("RIG_TAG", "bar")) if args.fixtures else []
    ```
 
-   - the `env = dict(...)` call gains the backlight directory when there are fixtures:
+   - after the `env = dict(...)` call, add the backlight directory when there are fixtures:
 
    ```python
-       env = dict(
-           os.environ,
-           DBUS_SYSTEM_BUS_ADDRESS=f"unix:path={SYSTEM_BUS}",
-           NOTIFY_SOCKET=NOTIFY_SOCKET,
-       )
-       if fixtures:
+       if args.fixtures:
            env["ATHANOR_BAR_BACKLIGHT_DIR"] = str(system_fixtures.BACKLIGHT_DIR)
-   ```
-
-   - before `daemon.terminate()`, stop the services:
-
-   ```python
-       for service in services:
-           service.terminate()
    ```
 
 - [ ] **Step 3: Write the skeleton of `forge/test/shell/bar_modules_e2e.py`**
@@ -2816,7 +2792,7 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 4: Add `rig.sh bar-modules-e2e`** (re-point after 2c Unit A / 2b.3)
+- [ ] **Step 4: Add `rig.sh bar-modules-e2e`**
 
 In `forge/test/shell/rig.sh`, add this header line after the `bar-e2e` line:
 
@@ -2839,7 +2815,7 @@ bar-modules-e2e)
     ;;
 ```
 
-- [ ] **Step 5: Add the CI step** (re-point after 2c Unit A / 2b.3)
+- [ ] **Step 5: Add the CI step**
 
 In `.github/workflows/shell-surfaces.yml`, job `bar`, after the step `Live layout, mandatory keys, running windows, the power menu and memory`, add:
 
@@ -3194,9 +3170,9 @@ impl Drop for Mirror {
 }
 ```
 
-- [ ] **Step 2: Add `Bar::fit_groups` and declare the modules in `src/ui/mod.rs`** (re-point after 2c Unit A / 2b.3)
+- [ ] **Step 2: Add `Bar::fit_groups` and declare the modules in `src/ui/mod.rs`**
 
-After `mod accessibility;` add `mod bus;`, and after `mod logind;` add `mod network;`, so that the list stays alphabetical.
+After `mod accessibility;` add `mod bus;`, and add `mod network;` between `mod menu;` and `mod notifications;` (both from 2b.3), so that the list stays alphabetical.
 
 In `build`, before the `_ => None` arm:
 
@@ -3216,7 +3192,7 @@ In `impl Bar`, after `refresh`:
     }
 ```
 
-- [ ] **Step 3: Write `src/ui/network.rs`** (re-point after 2c Unit A / 2b.3)
+- [ ] **Step 3: Write `src/ui/network.rs`**
 
 ```rust
 //! The network module (doc_bar.md, BR3): the wired state, the Wi-Fi list, joining with a
@@ -4309,7 +4285,7 @@ The agent:
   - `AuthorizeService` follows the same rule. After a pairing from the bar the device is set `Trusted`, and bluetoothd does not ask the agent about a trusted device again; a device paired elsewhere and not trusted is refused until the person trusts it in Settings;
   - one request is open at a time.
 
-- [ ] **Step 1: Write `src/ui/bluetooth.rs`** (re-point after 2c Unit A / 2b.3)
+- [ ] **Step 1: Write `src/ui/bluetooth.rs`**
 
 ```rust
 //! The Bluetooth module (doc_bar.md, BR3): the adapter's power, the paired devices, the
@@ -5035,7 +5011,7 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
 }
 ```
 
-- [ ] **Step 2: Declare the module and build it** (re-point after 2c Unit A / 2b.3)
+- [ ] **Step 2: Declare the module and build it**
 
 In `src/ui/mod.rs`, add `mod bluetooth;` after `mod accessibility;`. Then add this arm next to `Module::Network`:
 
@@ -5361,7 +5337,7 @@ impl Media {
 }
 ```
 
-- [ ] **Step 2: Write `src/ui/audio.rs`** (re-point after 2c Unit A / 2b.3)
+- [ ] **Step 2: Write `src/ui/audio.rs`**
 
 ```rust
 //! The audio module (doc_bar.md, BR3): output and input volume, mute, the device in use,
@@ -6020,9 +5996,9 @@ Notes for the implementer:
 - If clippy flags `let_underscore_future` or `drop_non_drop` on these lines, bind each operation to `_operation` inside its arm. Do not add `allow`.
 - `ChannelVolumes::max` is the loudest channel, so the slider follows it. `scale` keeps the balance between channels.
 
-- [ ] **Step 3: Declare the modules and build them** (re-point after 2c Unit A / 2b.3)
+- [ ] **Step 3: Declare the modules and build them**
 
-In `src/ui/mod.rs`, add `mod audio;` after `mod accessibility;`, and `mod mpris;` after `mod logind;` (next to `mod network;`). Then add the arm:
+In `src/ui/mod.rs`, add `mod audio;` after `mod accessibility;`, and `mod mpris;` before `mod network;`. Then add the arm:
 
 ```rust
         Module::Audio => audio::new(bar),
@@ -6148,7 +6124,7 @@ The module talks to three services and to none of COSMIC's (BR3):
 - **The power-profiles interface.** `org.freedesktop.UPower.PowerProfiles` is served by tuned-ppd on Fedora 43. The module reads it through a second `Fixed` mirror and sets `ActiveProfile`. The daemon asks polkit (`power-profiles-daemon.switch-profile` or tuned-ppd's equivalent), and an active local session is allowed by default.
 - **logind's `Session.SetBrightness`.** It needs no polkit for the session's own seat. The bar only reads `/sys/class/backlight` (Landlock restricts writes, not reads), and logind writes the level.
 
-- [ ] **Step 1: Write `src/ui/battery.rs`** (re-point after 2c Unit A / 2b.3)
+- [ ] **Step 1: Write `src/ui/battery.rs`**
 
 ```rust
 //! The battery module (doc_bar.md, BR3): the charge and the time left from UPower's display
@@ -6537,7 +6513,7 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
 
 Note for the implementer: the slider starts at 1, not 0, because `Backlight::raw` never returns 0: a slider at its left end must not turn the panel black.
 
-- [ ] **Step 2: Declare the module and build it** (re-point after 2c Unit A / 2b.3)
+- [ ] **Step 2: Declare the module and build it**
 
 In `src/ui/mod.rs`, add `mod battery;` after `mod audio;`, and the arm:
 
@@ -6620,7 +6596,7 @@ def battery(ctx):
 SECTIONS.append(battery)
 ```
 
-- [ ] **Step 4: Add `rig.sh atspi bar-modules` and its CI step** (re-point after 2c Unit A / 2b.3)
+- [ ] **Step 4: Add `rig.sh atspi bar-modules` and its CI step**
 
 In `forge/test/shell/rig.sh`, in the `atspi)` case, after the `bar)` branch (its `;;`), add:
 
@@ -6695,9 +6671,9 @@ git commit -m "feat(bar): the battery module, with the power profile and the bri
   - `ATHANOR_BAR_OPEN=<module id>`, which reaches `ModuleUi::open`. Each module opens as soon as its data arrives, through `pending_open`.
 - Produces:
   - the scenes `bar-network`, `bar-bluetooth`, `bar-audio` and `bar-battery`, of 12 cases each (light and dark, scales 1.0 and 1.5, en, de and pseudo-RTL);
-  - 120 bar cases in all with the six of 2b.2 (item 18 counts 180 once 2b.3 and 2b.5 add theirs).
+  - 156 bar cases in all with the six scenes of 2b.2 and the three of 2b.3 (item 18 counts 180 once 2b.5 adds its two).
 
-- [ ] **Step 1: List the new sources for xgettext** (re-point after 2c Unit A / 2b.3)
+- [ ] **Step 1: List the new sources for xgettext**
 
 ```bash
 python3 - <<'PY'
@@ -6705,15 +6681,23 @@ from pathlib import Path
 
 path = Path("forge/specs/athanor-bar/athanor-bar-1.0.0/po/POTFILES.in")
 lines = path.read_text(encoding="utf-8").splitlines()
+# The bar's own sources, sorted, then athanor-apps' sources as Unit A lists them.
+own = [line for line in lines if line.startswith("src/")]
+shared = [line for line in lines if not line.startswith("src/")]
 new = ["src/ui/audio.rs", "src/ui/battery.rs", "src/ui/bluetooth.rs", "src/ui/network.rs"]
-path.write_text("\n".join(sorted(set(lines) | set(new))) + "\n", encoding="utf-8")
+path.write_text("\n".join(sorted(set(own) | set(new)) + shared) + "\n", encoding="utf-8")
 PY
 git diff --stat forge/specs/athanor-bar/athanor-bar-1.0.0/po/POTFILES.in
+tail -n 2 forge/specs/athanor-bar/athanor-bar-1.0.0/po/POTFILES.in
 ```
 
-Expected: `1 file changed, 4 insertions(+)`, and no deletions. The file was sorted already; if the diff shows deletions, `git checkout` the file and insert the four lines by hand in their sorted places.
+Expected:
+- `1 file changed, 4 insertions(+)`, and no deletions;
+- the last two lines are `../../../../system/athanor-apps/src/openers.rs` and `../../../../system/athanor-apps/src/row.rs`.
 
-- [ ] **Step 2: Regenerate the template and merge it into the catalogs** (re-point after 2c Unit A / 2b.3)
+The bar's own lines were sorted already. If the diff shows deletions, `git checkout` the file and insert the four lines by hand in their sorted places.
+
+- [ ] **Step 2: Regenerate the template and merge it into the catalogs**
 
 ```bash
 podman run --rm --security-opt label=disable -v "$(git rev-parse --show-toplevel):/repo" -w /repo \
@@ -6728,7 +6712,7 @@ Expected: the count grows by 43. "Cancel" is already in the template, so the new
 
 If the number differs, compare with the table in Step 3: that table is the list of new message ids.
 
-- [ ] **Step 3: Fill `it.po` and `en.po`** (re-point after 2c Unit A / 2b.3)
+- [ ] **Step 3: Fill `it.po` and `en.po`**
 
 ```bash
 python3 - <<'PY'
@@ -6811,7 +6795,7 @@ msgfmt --check --statistics -o /dev/null forge/specs/athanor-bar/athanor-bar-1.0
 
 Expected: both report every message translated, with no fuzzy and no untranslated messages. `en.po` is ASCII: every English message above is ASCII, and the script writes the message id back.
 
-- [ ] **Step 4: German for the scenes' test catalog** (re-point after 2c Unit A / 2b.3)
+- [ ] **Step 4: German for the scenes' test catalog**
 
 ```bash
 cat >> forge/test/shell/locale/bar-de.po <<'EOF'
@@ -6950,18 +6934,18 @@ msgfmt --check -o /dev/null forge/test/shell/locale/bar-de.po
 
 Expected: `msgfmt` exits 0, with no duplicate message definitions.
 
-- [ ] **Step 5: The four scenes in `rig.sh`, `cases.py`, the unit test and CI** (re-point after 2c Unit A / 2b.3)
+- [ ] **Step 5: The four scenes in `rig.sh`, `cases.py`, the unit test and CI** (re-point after 2b.3)
 
 In `forge/test/shell/rig.sh`:
 
-1. The `surface` header line gains `|bar-network|bar-bluetooth|bar-audio|bar-battery` after `bar-tiling`.
+1. The `surface` header line gains `|bar-network|bar-bluetooth|bar-audio|bar-battery` after `bar-tray`.
 2. In `capture_bar`, the first `local` line becomes:
 
 ```bash
     local surface=$1 open="" preset=float panel=top dock=visible settle=8
 ```
 
-3. Its `case` gains, after `bar-tiling) open=tiling ;;`:
+3. Its `case` gains, after the `bar-tray)` arm (its `;;`):
 
 ```bash
     # The system modules against the fixtures, which start before the bar: a longer settle.
@@ -6975,23 +6959,26 @@ In `forge/test/shell/rig.sh`:
 5. The comment above `capture_bar` becomes:
 
 ```bash
-# doc_bar.md, BR9: the bar under its own preset with one running window, and the popovers
-# the bar owns, opened by ATHANOR_BAR_OPEN over the float preset; the system modules' four
-# run against system_fixtures.py.
+# doc_bar.md, BR9: the bar under its own preset with one running window, the five
+# popovers the bar owns in 2b.2, opened by ATHANOR_BAR_OPEN over the float preset,
+# 2b.3's notification popups (four waiting notifications: three show), the notification
+# list and a tray menu, and the popovers of the four system modules against
+# system_fixtures.py.
 ```
 
 6. The `surface` dispatch line becomes:
 
 ```bash
-    bar | bar-power | bar-input | bar-calendar | bar-accessibility | bar-tiling | bar-network | bar-bluetooth | bar-audio | bar-battery) capture_bar "$surface" ;;
+    bar | bar-power | bar-input | bar-calendar | bar-accessibility | bar-tiling | bar-popups | bar-notifications | bar-tray | bar-network | bar-bluetooth | bar-audio | bar-battery) capture_bar "$surface" ;;
 ```
 
-In `forge/test/shell/cases.py`, the bar tuple gains the four scenes after `"bar-tiling",`, and its comment becomes:
+In `forge/test/shell/cases.py`, the bar tuple gains the four scenes after `"bar-tray",`, and its comment becomes:
 
 ```python
-    # doc_bar.md, BR9: the bar, the popovers of power, input source, calendar,
-    # accessibility and tiling, and those of network, Bluetooth, audio and battery. The
-    # remaining scenes come with 2b.3 and 2b.5.
+    # doc_bar.md, BR9: the bar, and the popovers of power, input source, calendar,
+    # accessibility and tiling; the notification popups, the notification list and a
+    # tray menu (2b.3); the popovers of network, Bluetooth, audio and battery (2b.4). The
+    # other two scenes come with 2b.5.
 ```
 
 The new entries are:
@@ -7004,22 +6991,20 @@ The new entries are:
 ```
 
 In `forge/test/shell/tests/test_cases.py`:
-- `BAR_SCENES` gains the same four entries after `"bar-tiling",`;
-- `test_the_bar_brings_six_scenes_of_twelve_cases` becomes:
+- `BAR_SCENES` gains the same four entries after `"bar-tray",`;
+- `test_the_bar_brings_nine_scenes_of_twelve_cases` becomes:
 
 ```python
     def test_every_bar_scene_brings_twelve_cases(self):
         found = [
             case for surface in self.BAR_SCENES for case in cases.surface_cases(surface)
         ]
-        self.assertEqual(len(self.BAR_SCENES), 10)
+        self.assertEqual(len(self.BAR_SCENES), 13)
         self.assertEqual(len(found), 12 * len(self.BAR_SCENES))
         self.assertEqual(len({c.tag for c in found}), len(found))
 ```
 
-When 2b.4 rebases on 2b.3, the tuple merges and the count follows the list: only the literal `10` changes, to the merged number of scenes.
-
-In `.github/workflows/shell-surfaces.yml`, job `bar-scenes`, the matrix list gains `bar-network`, `bar-bluetooth`, `bar-audio` and `bar-battery` after `bar-tiling`.
+In `.github/workflows/shell-surfaces.yml`, job `bar-scenes`, the matrix list gains `bar-network`, `bar-bluetooth`, `bar-audio` and `bar-battery` after `bar-tray`.
 
 Run:
 
@@ -7245,7 +7230,7 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: Add the library check and the `modules` stage to `bar-acceptance.sh`** (re-point after 2c Unit A / 2b.3)
+- [ ] **Step 2: Add the library check and the `modules` stage to `bar-acceptance.sh`**
 
 1. In the header comment, after "...high contrast reaches COSMIC's theme from inside it (BR3),", insert:
 
@@ -7454,7 +7439,7 @@ Item 15 needs a Wi-Fi radio and a Bluetooth radio. The rig mocks both services, 
 
 **Type consistency.**
 - Tasks 4 to 7 use `bus::call`, `bus::set_property`, `bus::spawn`, `Mirror::new` and `Source` with the signatures that Task 4 defines.
-- `ModuleUi`, `Popup::new`, `switch_row`, `tr` and `tr_with` are used as `ui/mod.rs` declares them on the base commit.
+- `ModuleUi`, `Changed`, `Popup::new`, `switch_row`, `tr` and `tr_with` are used as the bar declares them on Unit A (`b648f633`): `Popup::new(bar, child, name)` attaches through `popup::attach`, which calls `athanor_apps::menu::attach(button, popup::towards_inside(bar))`.
 - The e2e helpers (`open_popover`, `property_of`, `mock_calls`, `labelled`, `wait_for`) are defined in Tasks 3 and 4 before any later task uses them.
 - The accessible names that `bar_modules.py` and the e2e look up match the msgids in the modules and in Task 8's translations:
   - "Sound", "Network", "Bluetooth", "Battery";
@@ -7498,6 +7483,7 @@ ATHANOR_RIG_IMAGE=localhost/athanor-shell-rig:rig bash forge/test/shell/rig.sh a
 
 # 4. BR9 and item 18: the four new scenes and the existing bar scenes against the goldens
 for scene in bar bar-power bar-input bar-calendar bar-accessibility bar-tiling \
+             bar-popups bar-notifications bar-tray \
              bar-network bar-bluetooth bar-audio bar-battery; do
   ATHANOR_RIG_IMAGE=localhost/athanor-shell-rig:rig bash forge/test/shell/rig.sh surface "$scene" || exit 1
 done
@@ -7522,7 +7508,8 @@ podman run --rm --security-opt label=disable -v "$(git rev-parse --show-toplevel
     localhost/athanor-shell-rig:build rpmspec -P forge/specs/athanor-bar/athanor-bar.spec > /dev/null
 
 # 8. Out of scope files are untouched: no stylesheet, polkit, Gatekeeper or attestation change
-test -z "$(git diff --name-only 6e1d357f..HEAD -- \
+# Only this branch's own commits: the merges of Unit A, 2b.3 and iso-v0 bring changes of their own.
+test -z "$(git log --first-parent --no-merges --format= --name-only 6e1d357f..HEAD -- \
     system/athanor-style system/athanor-bus-api/src/polkit.rs \
     forge/specs/athanor-gatekeeper-rs system/confidential_computing/athanor-attestation)"
 ```
