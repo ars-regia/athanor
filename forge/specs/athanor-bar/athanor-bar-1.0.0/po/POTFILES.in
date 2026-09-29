@@ -1,5 +1,4 @@
 src/clock.rs
-src/dirs.rs
 src/i18n.rs
 src/keyboard.rs
 src/layer_guard.rs
@@ -7,7 +6,6 @@ src/lib.rs
 src/main.rs
 src/order.rs
 src/power.rs
-src/running.rs
 src/tiling.rs
 src/ui/accessibility.rs
 src/ui/clock.rs
@@ -19,3 +17,5 @@ src/ui/popup.rs
 src/ui/power.rs
 src/ui/running.rs
 src/ui/tiling.rs
+../../../../system/athanor-apps/src/openers.rs
+../../../../system/athanor-apps/src/row.rs
