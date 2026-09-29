@@ -94,6 +94,7 @@ This plan brings 3 of the 15 scenes of BR9, which is 36 of the 180 surface cases
 - A module whose source is absent is not shown (SH1): no service, or a refused `List`, hides the notification button; no watcher, or no item that is not Passive, hides the tray.
 - At most one popover of the bar is open at a time (BR6). A tray menu is a bar popover like any other.
 - Memory: `athanor-bar` at most 64 MB PSS at rest, with every 2b.3 module loaded (item 17).
+- **Before Task 1, merge 2c's Unit A:** `git merge --no-ff shell-2c-dock` (b648f633), then `bash forge/test/shell/rig.sh build-bar` passes (it now covers `athanor-apps` too). A merge, never a rebase.
 - Code goes in the files the File Structure names. Shared files are touched only where it names them: 2b.4 builds on this branch and 2c runs in parallel.
 - Never edit `scripts/verify.py`, `forge/config/packages.json` or `docs/architecture/*.md` with the Edit or Write tool: the formatter rewrites the whole file. This plan edits none of them.
 - Never prefix a command with `cd`. Run podman, git writes and gh unsandboxed.
@@ -130,8 +131,10 @@ forge/specs/athanor-bar/athanor-bar-1.0.0/
   src/dbusmenu.rs                    NEW: dbusmenu layouts, bounded
   src/ui/mod.rs                      MODIFY (shared): Changed::Notifications/Tray, Bar fields,
                                      build arms, popover_is_open, open_module,
-                                     popovers_changed, output_left in the invalidate handler
-  src/ui/popup.rs                    MODIFY (shared): attach_popover, closed/shown hooks
+                                     popovers_changed(_later), the Host hooks menu_opened
+                                     and hold, output_left in the invalidate handler
+  src/ui/popup.rs                    MODIFY (shared): attach_popover over
+                                     athanor_apps::menu::attach_popover, show/closed hooks
   src/ui/notifications.rs            NEW: the service of the private interface, the card, the list
   src/ui/popups.rs                   NEW: the popup layer surface
   src/ui/tray.rs                     NEW: the tray host and its buttons
@@ -158,7 +161,7 @@ scripts/devvm/notifications-acceptance.sh             NEW
 scripts/devvm/README.md              MODIFY: one bullet
 ```
 
-**Shared files, for the plans that run beside this one.** 2b.4 builds on this branch and touches `ui/mod.rs` (the `Changed` list, the build match), `lib.rs`, `Cargo.toml`, `Cargo.lock`, `rig.sh`, `bar_session.py`, `cases.py`, `tests/test_cases.py`, the po files, `bar-de.po`, the CSS template and the workflow. 2c (`athanor-dock`, in parallel) may touch `connection.rs`, `ui/popup.rs`, `rig.sh`, the workflow, the CSS template and `Cargo.lock`. Most edits to those files are insertions at a named anchor, so a rebase meets adjacent-line conflicts. Two are not: Task 6 Step 4 replaces the whole of `attach` in `ui/popup.rs`, and Task 8 Step 3 rewrites `bar_session.py` whole (2b.4 edits it too, and the dock's rig session reuses it through `--client`). Those two meet whole-block conflicts, and the steps that touch code 2c moves say so ("re-point after 2c Unit A").
+**Shared files, for the plans that run beside this one.** 2b.4 builds on this branch and touches `ui/mod.rs` (the `Changed` list, the build match), `lib.rs`, `Cargo.toml`, `Cargo.lock`, `rig.sh`, `bar_session.py`, `cases.py`, `tests/test_cases.py`, the po files, `bar-de.po`, the CSS template and the workflow. 2c's Unit A (`athanor-apps`: the applications row, the favourites store, the openers and `athanor_apps::menu`) is merged into this branch before Task 1 (`git merge shell-2c-dock`, b648f633; see Global Constraints), so every anchor and signature below is the merged tree's. The rest of 2c (`athanor-dock`) may still touch `connection.rs`, `rig.sh`, the workflow, the CSS template and `Cargo.lock`; a later `git merge shell-2c-dock` meets adjacent-line conflicts there at most, since most edits to those files are insertions at a named anchor. One is not: Task 8 Step 3 rewrites `bar_session.py` whole (2b.4 edits it too, and the dock's rig session reuses it through `--client`), which Unit A leaves unchanged. In `ui/popup.rs`, Task 6 Step 4 changes only the bar's three-line `attach` and adds `attach_popover` beside it.
 
 ## The helper every task uses
 
@@ -2040,7 +2043,7 @@ git commit -m "feat(bar): parse dbusmenu layouts within depth, node and label bo
   - `pub(super) fn has_icon(name: &str) -> bool` (the tray draws a themed name only when the theme has it);
   - on `Bar`: the field `notifications: Rc<notifications::Service>`, `pub fn popover_is_open(&self) -> bool`, `pub fn open_module(self: &Rc<Self>, module: Module)`.
 
-- [ ] **Step 1: Expose the activation token** (re-point after 2c Unit A: 2c needs the same `pub` for launches from athanor-apps; land it once, in whichever plan merges first, and drop the step from the other)
+- [ ] **Step 1: Expose the activation token** (Unit A leaves it `pub(crate)` at b648f633; this plan makes it `pub`)
 
 In `system/athanor-compositor-client/src/connection.rs`, the bar needs the token for `InvokeAction` (BR4, "Actions"). Replace:
 
@@ -2062,7 +2065,7 @@ git add system/athanor-compositor-client/src/connection.rs
 git commit -m "feat(compositor-client): expose the activation token to the bar's notification actions"
 ```
 
-- [ ] **Step 2: Write `src/ui/notifications.rs`** (re-point after 2c Unit A: the `crate::i18n` and `super::popup::{Popup, switch_row}` imports, and `Bar::client()` in `invoke`)
+- [ ] **Step 2: Write `src/ui/notifications.rs`**
 
 ```rust
 //! The notifications module (doc_bar.md BR3, BR4): the service that talks to
@@ -2923,7 +2926,7 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
 }
 ```
 
-- [ ] **Step 3: Wire the module into `ui/mod.rs`** (re-point after 2c Unit A: the anchors beside the running-apps arm, `Favorites` and the popovers of the running applications)
+- [ ] **Step 3: Wire the module into `ui/mod.rs`**
 
 Each edit is an insertion at the named anchor.
 
@@ -3069,14 +3072,17 @@ bash forge/test/shell/rig.sh css-parse
 
 Expected: `--check` reports no drift, the unit tests pass, and GTK parses the four stylesheets.
 
-- [ ] **Step 5: The strings** (re-point after 2c Unit A: 2c moves the running-apps and openers msgids out of these catalogs)
+- [ ] **Step 5: The strings**
 
-Add the new source to `po/POTFILES.in`, keeping it sorted:
+Add the new source to `po/POTFILES.in`, after `src/ui/mod.rs`. Do not re-sort the file: since Unit A it lists the bar's sources in order and then, last, the two `athanor-apps` sources `../../../../system/athanor-apps/src/openers.rs` and `row.rs`.
 
 ```bash
 f=forge/specs/athanor-bar/athanor-bar-1.0.0/po/POTFILES.in
-{ cat "$f"; echo src/ui/notifications.rs; } | LC_ALL=C sort -u -o "$f"
+sed -i '\|^src/ui/mod\.rs$|a src/ui/notifications.rs' "$f"
+grep -c '^src/ui/notifications\.rs$' "$f"
 ```
+
+Expected: `1`.
 
 Regenerate the template and merge it, in the build image:
 
@@ -3087,7 +3093,7 @@ podman run --rm --security-opt label=disable -v "$PWD:/repo" -w /repo localhost/
                 forge/specs/athanor-bar/athanor-bar-1.0.0/po/en.po'
 ```
 
-`Close {title}` and `Unknown application` already exist. The new messages:
+`Close {title}` and `Unknown application` already exist: they come from `athanor-apps`' `row.rs`, which the catalog lists since Unit A. The new messages:
 
 | msgid                            | it                            | de (test catalog)                    |
 | -------------------------------- | ----------------------------- | ------------------------------------ |
@@ -3198,8 +3204,9 @@ git commit -m "feat(bar): notification list with grouping, clear all and do not 
 - Produces:
   - `ui::popups::Window` with `new(bar: &Rc<Bar>, service: &Weak<Service>) -> Window`, `show(&self, bar: &Bar, service: &Rc<Service>, notices: &[Notice])`, `hide(&self)`, `visible(&self) -> bool`, `abandon(self)`;
   - on `Service`: `pub(super) fn pointer(&self, inside: bool)`, `pub(super) fn redraw_popups(&self)`, `pub(super) fn output_left(&self)`;
-  - on `Bar`: `pub fn popovers_changed(&self)` — the hook item 13 asks for; 2b.5's shield sheet calls it too (ruling 11);
-  - in `ui::popup`: `pub fn attach_popover(bar: &Rc<Bar>, button: &gtk4::Button, popover: &impl IsA<gtk4::Popover>)`. `attach` keeps its signature. Task 7's menus use `attach_popover`.
+  - on `Bar`: `pub fn popovers_changed(&self)` — the hook item 13 asks for; 2b.5's shield sheet calls it too (ruling 11) — and `pub fn popovers_changed_later(&self)`, the same on the next idle, through the new field `me: Weak<Bar>`;
+  - in `impl athanor_apps::Host for Bar` (Unit A): `menu_opened` also calls `popovers_changed_later()`, and a new `hold` override calls `popovers_changed()` on `false`. These carry the rows' menus, which `athanor-apps` attaches itself;
+  - in `ui::popup`: `pub fn attach_popover(bar: &Rc<Bar>, button: &gtk4::Button, popover: &impl IsA<gtk4::Popover>)`, over `athanor_apps::menu::attach_popover`. `attach` keeps its signature. `Popup::new` and Task 7's menus go through them.
 
 The popups are one layer surface for the whole bar, anchored to the panel edge and to the end edge, with no output named (ruling 2). It is created at the first popup and hidden, never destroyed, when none is left: cosmic-comp closes the connection of a client that destroys a layer surface of an output that left (see `Surface::abandon` in `ui/mod.rs`), and it cannot tell which output the compositor put the surface on.
 
@@ -3410,7 +3417,7 @@ Add these methods to `impl Service`, after `changed`:
 
 `card` connects `dismiss` and `invoke` to buttons inside the window that `redraw_popups` rebuilds: the rebuild runs from `changed`, after the click handler returned, and holds no `RefCell` borrow of the service across `card` calls into GTK that could re-enter it (`window.show` is called with the `window` borrow held, but nothing reached from `show` touches `self.window`).
 
-- [ ] **Step 3: `Bar::popovers_changed` and the output hook in `ui/mod.rs`** (re-point after 2c Unit A: this wiring sits beside `popover_opened`, which the moved running-apps and attach code call)
+- [ ] **Step 3: `Bar::popovers_changed`, the `Host` hooks and the output hook in `ui/mod.rs`**
 
 After `mod popup;` add:
 
@@ -3426,7 +3433,59 @@ In `impl Bar`, after `open_module`:
     pub fn popovers_changed(&self) {
         self.notifications.redraw_popups();
     }
+
+    /// `popovers_changed` on the next idle, once GTK has settled the visibility that
+    /// `popover_is_open` reads: a popover about to pop up is not visible yet in this turn.
+    pub fn popovers_changed_later(&self) {
+        let bar = self.me.clone();
+        glib::idle_add_local_once(move || {
+            if let Some(bar) = bar.upgrade() {
+                bar.popovers_changed();
+            }
+        });
+    }
 ```
+
+In `pub struct Bar`, after `notifications: Rc<notifications::Service>,` (Task 5):
+
+```rust
+    /// The bar itself, for the `&self` methods that defer work to an idle.
+    me: Weak<Bar>,
+```
+
+and in `start`, before `notifications: notifications::Service::start(weak),`:
+
+```rust
+        me: weak.clone(),
+```
+
+In `impl Host for Bar` (Unit A, at the end of the file), replace:
+
+```rust
+    fn menu_opened(&self, menu: &gtk4::Popover) {
+        self.popover_opened(menu);
+    }
+```
+
+with:
+
+```rust
+    fn menu_opened(&self, menu: &gtk4::Popover) {
+        self.popover_opened(menu);
+        // The row calls this before `popup()`: the menu is visible only after this turn.
+        self.popovers_changed_later();
+    }
+
+    fn hold(&self, held: bool) {
+        // A row's menu closed (the row calls this from an idle after `closed`) or a drag
+        // ended: the popups come back unless another popover is open.
+        if !held {
+            self.popovers_changed();
+        }
+    }
+```
+
+The rows' menus are attached by `athanor_apps::menu::attach` inside `athanor-apps` and never pass through the bar's `popup.rs`: these two hooks are how they reach the popups. A drag's `hold(false)` redraws too, which changes nothing when no popover is open.
 
 At the end of `rebuild`, after the `for changed in Changed::ALL { … }` loop:
 
@@ -3453,66 +3512,51 @@ with:
             }
 ```
 
-- [ ] **Step 4: `attach_popover` in `ui/popup.rs`** (re-point after 2c Unit A: athanor-apps will own `attach`, and its `Host` trait will carry the hooks that call `popovers_changed()`; this whole-function replacement becomes an implementation of those hooks in the bar)
+- [ ] **Step 4: `attach_popover` in `ui/popup.rs`**
 
-Replace the whole `attach` function with the pair below. `attach` keeps its signature for the running applications' context menu and for `Popup::new`.
+Since Unit A, `ui/popup.rs` attaches through `athanor_apps::menu`, which parents the popover, sets its position and css class, and keeps the button's `HasPopup` and `Expanded` state. The bar adds its `show` and `closed` hooks on top. Replace:
 
 ```rust
-/// A popover for `button`: parented to it, opening towards the inside of the screen, and
-/// keeping the button's `Expanded` state. The running applications' context menu uses it
-/// too, with its own triggers.
+/// A popover for `button`, opening towards the inside of the screen. athanor-apps parents
+/// it and keeps the button's `Expanded` state.
+pub fn attach(bar: &Rc<Bar>, button: &gtk4::Button) -> gtk4::Popover {
+    athanor_apps::menu::attach(button, towards_inside(bar))
+}
+```
+
+with the pair below. `attach` keeps its signature for `Popup::new`.
+
+```rust
+/// A popover for `button`, attached by [`attach_popover`].
 pub fn attach(bar: &Rc<Bar>, button: &gtk4::Button) -> gtk4::Popover {
     let popover = gtk4::Popover::new();
     attach_popover(bar, button, &popover);
     popover
 }
 
-/// `attach` for a popover built elsewhere (the tray's `PopoverMenu`). Every popover of the
-/// bar tells the bar when it shows and closes, after GTK has settled its visibility, so the
-/// notification popups hide under it (BR6, "Stacking").
+/// `athanor_apps::menu::attach_popover` towards the inside of the screen, for a popover of
+/// the bar (`Popup`'s, or the tray's `PopoverMenu`), which also tells the bar when it shows
+/// and closes so the notification popups hide under it (BR6, "Stacking"). The rows' menus
+/// reach the bar through `Host::menu_opened` and `Host::hold` instead.
 pub fn attach_popover(bar: &Rc<Bar>, button: &gtk4::Button, popover: &impl IsA<gtk4::Popover>) {
+    athanor_apps::menu::attach_popover(button, popover, towards_inside(bar));
     let popover = popover.upcast_ref::<gtk4::Popover>();
-    button.update_property(&[Property::HasPopup(true)]);
-    button.update_state(&[State::Expanded(Some(false))]);
-    popover.add_css_class("athanor-bar-popover");
-    popover.set_parent(button);
-    popover.set_position(match bar.layout().panel() {
-        PanelEdge::Top => gtk4::PositionType::Bottom,
-        PanelEdge::Bottom => gtk4::PositionType::Top,
-    });
-    let changed = |bar: &std::rc::Weak<Bar>| {
-        let bar = bar.clone();
-        glib::idle_add_local_once(move || {
-            if let Some(bar) = bar.upgrade() {
-                bar.popovers_changed();
-            }
-        });
-    };
-    let (weak_button, weak_bar) = (button.downgrade(), Rc::downgrade(bar));
+    let weak_bar = Rc::downgrade(bar);
     popover.connect_show(move |_| {
-        if let Some(button) = weak_button.upgrade() {
-            button.update_state(&[State::Expanded(Some(true))]);
+        if let Some(bar) = weak_bar.upgrade() {
+            bar.popovers_changed_later();
         }
-        changed(&weak_bar);
     });
-    let (weak_button, weak_bar) = (button.downgrade(), Rc::downgrade(bar));
+    let weak_bar = Rc::downgrade(bar);
     popover.connect_closed(move |_| {
-        if let Some(button) = weak_button.upgrade() {
-            button.update_state(&[State::Expanded(Some(false))]);
+        if let Some(bar) = weak_bar.upgrade() {
+            bar.popovers_changed_later();
         }
-        changed(&weak_bar);
     });
-    // The popover is parented by hand, so it is unparented by hand.
-    let child = popover.clone();
-    button.connect_destroy(move |_| child.unparent());
 }
 ```
 
-and add `glib` to the imports of `popup.rs`:
-
-```rust
-use gtk4::glib;
-```
+The imports of `popup.rs` do not change: `IsA` comes with `gtk4::prelude::*`.
 
 - [ ] **Step 5: Build and run the bar's gates**
 
@@ -3591,7 +3635,7 @@ pub fn scroll_delta(delta: f64) -> Option<i32> {
 Run: `rig_cargo test --locked -p athanor-bar --lib tray::`
 Expected: PASS.
 
-- [ ] **Step 2: Write `src/ui/menu.rs`** (re-point after 2c Unit A: `popup::attach_popover` and `bar.popover_opened`, which follow the ownership of `attach`)
+- [ ] **Step 2: Write `src/ui/menu.rs`**
 
 ```rust
 //! A tray item's menu (doc_bar.md BR5): `com.canonical.dbusmenu`, bounded by
@@ -3902,7 +3946,7 @@ impl Menu {
 }
 ```
 
-- [ ] **Step 3: Write `src/ui/tray.rs`** (re-point after 2c Unit A: the `crate::i18n` import)
+- [ ] **Step 3: Write `src/ui/tray.rs`**
 
 ```rust
 //! The tray (doc_bar.md BR5): the host of `org.kde.StatusNotifierWatcher` and one button per
@@ -4475,7 +4519,7 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
 }
 ```
 
-- [ ] **Step 4: Wire the module into `ui/mod.rs`** (re-point after 2c Unit A: the `mod running;` anchor)
+- [ ] **Step 4: Wire the module into `ui/mod.rs`**
 
 After `mod logind;` (next to `mod notifications;`):
 
@@ -4488,6 +4532,8 @@ and after `mod running;`:
 ```rust
 mod tray;
 ```
+
+`ui/mod.rs` imports the trait `athanor_apps::Host` since Unit A; the tray's `Host` stays path-qualified there (`tray::Host`), so the two never meet.
 
 In `enum Changed`, after `Notifications,`:
 
@@ -4530,11 +4576,13 @@ In `fn build`, after `Module::Notifications => notifications::new(bar),`:
         Module::Tray => tray::new(bar),
 ```
 
-- [ ] **Step 5: The string** (re-point after 2c Unit A: the po catalogs 2c also rewrites)
+- [ ] **Step 5: The string**
+
+`src/ui/tray.rs` goes after `src/ui/tiling.rs`, before the two `athanor-apps` sources; the file is not re-sorted (Task 5 Step 5).
 
 ```bash
 f=forge/specs/athanor-bar/athanor-bar-1.0.0/po/POTFILES.in
-{ cat "$f"; echo src/ui/tray.rs; } | LC_ALL=C sort -u -o "$f"
+sed -i '\|^src/ui/tiling\.rs$|a src/ui/tray.rs' "$f"
 podman run --rm --security-opt label=disable -v "$PWD:/repo" -w /repo localhost/athanor-shell-rig:build \
     bash -c 'forge/specs/athanor-bar/athanor-bar-1.0.0/po/update.sh \
              && msgen --no-wrap -o forge/specs/athanor-bar/athanor-bar-1.0.0/po/en.po \
@@ -4596,7 +4644,7 @@ git commit -m "feat(bar): tray host with dbusmenu menus"
 - Create: `forge/test/shell/notifications_e2e.py`
 - Create: `forge/test/shell/tray_e2e.py`
 - Modify (shared): `forge/test/shell/bar_session.py` (rewritten whole: four new flags)
-- Modify (shared): `forge/test/shell/rig.sh` (help, `build-bar`, `capture_bar`, two e2e blocks, the surface dispatch)
+- Modify (shared): `forge/test/shell/rig.sh` (help, `capture_bar`, two e2e blocks, the surface dispatch)
 - Modify (shared): `forge/test/shell/atspi_check.py` (two roles)
 - Modify (shared): `forge/test/shell/cases.py`, `forge/test/shell/tests/test_cases.py`
 - Create: `forge/test/shell/golden/bar-popups/*.png`, `golden/bar-notifications/*.png`, `golden/bar-tray/*.png` (12 each, by `update-goldens`)
@@ -5040,7 +5088,7 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 3: `bar_session.py`, rewritten with four new flags** (re-point after 2c Unit A: this whole-file rewrite keeps `--window`, `--pinnable` and `DESKTOP_ENTRY`, the running-apps and favourites path 2c moves; the dock's rig session reuses this file through `--client athanor-dock`)
+- [ ] **Step 3: `bar_session.py`, rewritten with four new flags** (Unit A leaves this file as it is at 6e1d357f. The whole-file rewrite keeps `--window`, `--pinnable` and `DESKTOP_ENTRY`; the dock's rig session reuses this file through `--client athanor-dock`)
 
 The window now starts once only: a respawned bar sends READY=1 again, and a second test window would change the scene. The helpers start before the bar, so its first question finds them. A bar or an `athanor-shelld` killed with SIGKILL is started again, as `Restart=on-failure` does; any other exit of either ends the session with a failure. `athanor-shelld` runs without the frozen clock: `LD_PRELOAD` and `FAKETIME*` are dropped from its environment, so it runs exactly as `shelld-e2e` runs it.
 
@@ -6190,7 +6238,7 @@ git commit -m "ci(shell): run the notification and tray scenes and their end-to-
 
 This is item 9 against the real daemon (ruling 12): the real `athanor-shelld` admits the real `athanor-bar.service`, and after the bar is killed it fetches the list again. COSMIC owns `org.freedesktop.Notifications` and `org.kde.StatusNotifierWatcher` on the VM's session bus, so both units run on a private bus, reached through one drop-in each, as `shelld-acceptance.sh` does for the daemon alone. On that bus the bar has no accessibility bus, so the checks read the bar's journal and the unit's state, and the screenshots are for the eye.
 
-- [ ] **Step 1: Write `scripts/devvm/notifications-acceptance.sh`** (re-point after 2c Unit A: the `favorites.toml` path in `stage_deploy` follows the favourites store if 2c moves its data file)
+- [ ] **Step 1: Write `scripts/devvm/notifications-acceptance.sh`**
 
 ```bash
 #!/usr/bin/env bash
@@ -6583,7 +6631,7 @@ Expected: every command exits 0; the e2e commands end with `every check passed`;
 | BR3/SH1: a module with no source is not shown | Task 5 (button hidden unless `Live`), Task 7 (tray hidden with no watcher or no non-Passive item) |
 | BR4: 3 popups, "+N waiting", critical waits, DND, transient, actions with an activation token, default action, grouping, clear all, list of 100 | Tasks 1, 2, 5, 6; `notifications_e2e.py` |
 | BR5: tray host, Activate/SecondaryActivate/ContextMenu/Scroll, ItemIsMenu, dbusmenu with check, radio, disabled, submenus, invisible entries, AboutToShow, Event | Tasks 3, 4, 7; `tray_e2e.py` |
-| BR6 Stacking: popups hidden under any bar popover, one popover at a time | Task 6 (`redraw_popups`, `attach_popover` hooks), Task 7 (menus are bar popovers); `notifications_e2e.py` |
+| BR6 Stacking: popups hidden under any bar popover, one popover at a time | Task 6 (`redraw_popups`; the `attach_popover` hooks for the bar's popovers, `Host::menu_opened` and `Host::hold` for the rows' menus), Task 7 (menus are bar popovers); `notifications_e2e.py` |
 | BR9: unit tests for every parser of untrusted input; scenes; accessible names | Tasks 1, 3, 4 (tests); Task 8 (three scenes, `problems()` checks) |
 | Item 9: bar killed, then back; shelld killed, icons back | Task 8 (both e2e scripts; `notifications_e2e.py` also restarts the bar under do not disturb and requires the listed transient notification closed as Expired), Task 9 (`away`, against an emptied daemon) |
 | Item 10: markup, bidi overrides, control characters as text; oversized `image-data` refused | Task 1 (tests), Task 8 (`notifications_e2e.py` hostile block) |
@@ -6594,7 +6642,7 @@ Expected: every command exits 0; the e2e commands end with `every check passed`;
 
 **Placeholder scan.** No "TBD", "TODO" or "similar to Task N"; every code step carries its code. Every `ponytail:` note names its ceiling and its upgrade path.
 
-**Type consistency.** Checked across tasks: `Service::output_left()` takes no argument (Task 6, called from `ui/mod.rs`); `notifications::has_icon` is `pub(super)` and used by `ui/tray.rs` (Tasks 5, 7); `popup::attach_popover(bar, button, &impl IsA<gtk4::Popover>)` is used by `ui/menu.rs` (Tasks 6, 7); `tray::scroll_delta(f64) -> Option<i32>` (Task 7); the wire signature `(usssa(ss)ybbsssuuayuu)` is the same string in `notices.rs`, `fake_notifications.py` and athanor-shelld's `wire.rs`; the log lines the e2e scripts read (`Close <id> <reason>`, `InvokeAction <id> <key> token` (the fake writes `no-token` for an empty one, which the rig refuses), `SetDoNotDisturb True|False`, `Activate 0 0`, `AboutToShow 0`, `GetLayout 0 -1`, `Event <id> <name>`) are the ones the fakes write; the bar's journal lines `listed N notifications from athanor-shelld` and `refused the bar's List` (Task 5) are the ones Tasks 8 and 9 grep.
+**Type consistency.** Checked across tasks: `Service::output_left()` takes no argument (Task 6, called from `ui/mod.rs`); `notifications::has_icon` is `pub(super)` and used by `ui/tray.rs` (Tasks 5, 7); `popup::attach_popover(bar, button, &impl IsA<gtk4::Popover>)` is used by `ui/menu.rs` (Tasks 6, 7); it and `Host::menu_opened` call `Bar::popovers_changed_later`, and `Host::hold(false)` calls `Bar::popovers_changed`, against `athanor_apps::Host` and `athanor_apps::menu::attach_popover` at b648f633 (Task 6); `tray::scroll_delta(f64) -> Option<i32>` (Task 7); the wire signature `(usssa(ss)ybbsssuuayuu)` is the same string in `notices.rs`, `fake_notifications.py` and athanor-shelld's `wire.rs`; the log lines the e2e scripts read (`Close <id> <reason>`, `InvokeAction <id> <key> token` (the fake writes `no-token` for an empty one, which the rig refuses), `SetDoNotDisturb True|False`, `Activate 0 0`, `AboutToShow 0`, `GetLayout 0 -1`, `Event <id> <name>`) are the ones the fakes write; the bar's journal lines `listed N notifications from athanor-shelld` and `refused the bar's List` (Task 5) are the ones Tasks 8 and 9 grep.
 
 **Review Focus.** Each of the five has its pin in the owning task; the pointer half of item 1 has no automated test (no pointer in the headless rig) and is named as such.
 
