@@ -3,6 +3,7 @@
 
 import json
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -14,6 +15,20 @@ VECTORS = PACKAGE / "athanor-update-1.0.0/tests/vectors"
 REPOSITORIES = ["athanor-system", "athanor-system-nvidia", "athanor-system-nvidia-legacy"]
 OPEN_TRANSPORTS = ["docker-archive", "oci", "oci-archive", "dir", "containers-storage", "docker-daemon"]
 ACCEPT = [{"type": "insecureAcceptAnything"}]
+# `keyPaths` in a sigstoreSigned requirement arrived with containers/image 5.29, first shipped
+# in skopeo 1.14. The image ships a newer one; an older skopeo on the host (Ubuntu 24.04 has
+# 1.13) rejects the key and says nothing about the policy the machine will load.
+SKOPEO_FLOOR = (1, 14)
+
+
+def skopeo_version():
+    if not shutil.which("skopeo"):
+        return None
+    out = subprocess.run(["skopeo", "--version"], capture_output=True, text=True, check=True).stdout
+    match = re.search(r"version (\d+)\.(\d+)", out)
+    if not match:
+        raise RuntimeError(f"cannot read the skopeo version from {out!r}")
+    return int(match[1]), int(match[2])
 
 
 class Render(unittest.TestCase):
@@ -77,7 +92,7 @@ class Render(unittest.TestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("no *.pub", r.stderr)
 
-    @unittest.skipUnless(shutil.which("skopeo"), "skopeo is not installed")
+    @unittest.skipUnless((skopeo_version() or (0, 0)) >= SKOPEO_FLOOR, "needs skopeo 1.14 or later, which knows keyPaths")
     def test_containers_image_loads_the_rendered_policy(self):
         self.render()
         r = subprocess.run(["skopeo", "copy", "--policy", str(self.dir / "out/policy.json"), f"dir:{VECTORS / 'real'}", f"dir:{self.dir / 'copy'}"],
