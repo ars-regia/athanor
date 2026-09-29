@@ -12,6 +12,7 @@ src/ui/clock.rs
 src/ui/input.rs
 src/ui/logind.rs
 src/ui/mod.rs
+src/ui/notifications.rs
 src/ui/openers.rs
 src/ui/popup.rs
 src/ui/power.rs

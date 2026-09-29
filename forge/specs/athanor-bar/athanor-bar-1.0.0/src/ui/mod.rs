@@ -7,6 +7,7 @@ mod accessibility;
 mod clock;
 mod input;
 mod logind;
+mod notifications;
 mod openers;
 mod popup;
 mod power;
@@ -16,7 +17,7 @@ mod tiling;
 use std::cell::{Cell, RefCell};
 use std::env;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use athanor_apps::favorites::Store;
@@ -43,18 +44,21 @@ pub enum Changed {
     Keyboard,
     Accessibility,
     Favorites,
+    /// The notification service: its state, the list, the popups.
+    Notifications,
     /// Once a second: the clock, and a time zone that changed.
     Tick,
 }
 
 impl Changed {
-    pub const ALL: [Changed; 6] = [
+    pub const ALL: [Changed; 7] = [
         Changed::Windows,
         Changed::Workspaces,
         Changed::Keyboard,
         Changed::Accessibility,
         Changed::Favorites,
         Changed::Tick,
+        Changed::Notifications,
     ];
 }
 
@@ -142,6 +146,8 @@ pub struct Bar {
     open_popover: RefCell<Option<gtk4::Popover>>,
     ready: Cell<bool>,
     open_on_start: Option<Module>,
+    /// One service per bar, not per surface: every surface's button reads it.
+    notifications: Rc<notifications::Service>,
 }
 
 pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<PathBuf>) -> Rc<Bar> {
@@ -162,7 +168,7 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
             None
         }
     };
-    let bar = Rc::new(Bar {
+    let bar = Rc::new_cyclic(|weak: &Weak<Bar>| Bar {
         app: app.clone(),
         _hold: app.hold(),
         outputs: RefCell::new(outputs::current(&display)),
@@ -179,6 +185,7 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
         open_on_start: env::var("ATHANOR_BAR_OPEN")
             .ok()
             .and_then(|id| Module::from_id(&id)),
+        notifications: notifications::Service::start(weak),
     });
     bar.rebuild();
     if bar.surfaces.borrow().is_empty() {
@@ -215,6 +222,7 @@ fn build(module: Module, bar: &Rc<Bar>, connector: Option<&str>) -> Option<Box<d
         Module::Tiling => tiling::new(bar, connector),
         Module::Accessibility => accessibility::new(bar),
         Module::RunningApps => running::new(bar),
+        Module::Notifications => notifications::new(bar),
         // Later tasks of this plan, and the plans of 2b.3 to 2b.5.
         _ => None,
     }
@@ -234,6 +242,30 @@ impl Bar {
         let previous = self.open_popover.replace(Some(popover.clone()));
         if let Some(previous) = previous.filter(|previous| previous != popover) {
             previous.popdown();
+        }
+    }
+
+    /// A popover of the bar is on screen (BR6, "Stacking").
+    pub fn popover_is_open(&self) -> bool {
+        self.open_popover
+            .borrow()
+            .as_ref()
+            .is_some_and(|popover| popover.is_visible())
+    }
+
+    /// Opens `module`'s popover on the first surface, for the captures of BR9
+    /// (`ATHANOR_BAR_OPEN`). A module whose source answers later opens itself then.
+    pub fn open_module(self: &Rc<Self>, module: Module) {
+        let surfaces = self.surfaces.borrow();
+        let target = surfaces
+            .first()
+            .and_then(|surface| surface.modules.iter().find(|(m, _)| *m == module));
+        match target {
+            Some((_, ui)) => ui.open(self),
+            None => tracing::warn!(
+                module = module.id(),
+                "ATHANOR_BAR_OPEN names a module the bar does not show"
+            ),
         }
     }
 
@@ -447,17 +479,8 @@ impl Bar {
         if let Some(module) = self.open_on_start {
             let weak = Rc::downgrade(self);
             glib::idle_add_local_once(move || {
-                let Some(bar) = weak.upgrade() else { return };
-                let surfaces = bar.surfaces.borrow();
-                let target = surfaces
-                    .first()
-                    .and_then(|surface| surface.modules.iter().find(|(m, _)| *m == module));
-                match target {
-                    Some((_, ui)) => ui.open(&bar),
-                    None => tracing::warn!(
-                        module = module.id(),
-                        "ATHANOR_BAR_OPEN names a module the bar does not show"
-                    ),
+                if let Some(bar) = weak.upgrade() {
+                    bar.open_module(module);
                 }
             });
         }
