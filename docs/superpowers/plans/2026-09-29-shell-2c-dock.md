@@ -10,6 +10,10 @@
 
 **Spec:** `docs/architecture/doc_bar.md` (revision 1), with `docs/architecture/doc_shell.md` (revision 5) for SH1 to SH13.
 
+**Units.** The plan runs as two units.
+- **Unit A (Tasks 1-3):** the legacy move, the shared start-up pieces and the `athanor-apps` extraction. It is self-contained: the tests stay green and the bar's behaviour and goldens stay unchanged. It ends at the "Unit A checkpoint" after Task 3 and merges into the bar branches first.
+- **Unit B (Tasks 4-9):** the dock, its packaging, the rig, CI and dev-VM checks, and the DAG hash of path dependencies. It starts once Unit A has merged, in parallel with 2b.3 and 2b.4, which rebase onto Unit A. Task 7 also needs 2b.3 merged, for `bar_session.py --client`.
+
 ## Global Constraints
 
 - BR7: "**The dock (2c).** One surface per output. `dock_edge(panel, shape)` picks its edge; a vertical dock carries icons only (SH9.3)."
@@ -34,7 +38,8 @@
 1. **A favourites file that turns invalid while the dock runs** (a hand edit, a half-written file): the dock keeps showing the last good favourites, refuses to pin, unpin or reorder, and never rewrites the user's file; after the file is fixed the next change applies. Test: Task 3, `a_file_rejected_while_running_blocks_pinning_and_is_left_untouched`.
 2. **Another writer changes the favourites at the same time** (the bar in `bar`, a sync tool, a second dock surface): a pin or a reorder applies on top of the file as it is on disk, not on a stale copy, and a drop carrying a string that is not a pinned id changes nothing. Tests: Task 3, `another_writers_change_is_kept_when_this_store_pins`; Task 2, `a_move_with_an_unknown_id_changes_nothing`; Task 7, the e2e external-write check.
 3. **An output that is not sized yet, or is hot-plugged or rotated**: no surface on an output of size 0, a new surface when an output arrives, the edge recomputed on rotation, and no destroyed layer surface on an output that left. Tests: Task 4, `an_output_not_sized_yet_gets_no_dock` and `rotation_moves_the_dock_to_the_bottom`; Task 8, the hotplug stage.
-4. **The pointer under auto-hide**: a quick pass over the strip never shows the dock; a menu or a drag keeps a shown dock shown; a menu open on another output never reveals a hidden dock; a stray timer changes nothing. Tests: Task 4, the `autohide` tests.
+4. **The pointer under auto-hide**: a quick pass over the strip never shows the dock; a menu or a drag keeps a shown dock shown; a menu open on another output never reveals a hidden dock, nor cuts a reveal's delay short; the strip spans the whole edge; a stray timer changes nothing. Tests: Task 4, the `autohide` tests, including `a_hold_while_revealing_waits_for_the_delay`.
+6. **The surface off screen and back** (knob `none`, the `bar` preset, then `visible`): cosmic-comp keeps the dock's connection. Test: Task 5, `dock-roundtrip`; if it fails, Step 4b and a decision for the maintainer.
 5. **Right-to-left text with a vertical dock**: the dock sits on the right edge, its menus open towards the centre, and the golden cases include the pseudo-locale. Tests: Task 4, `a_vertical_dock_mirrors_to_the_right_under_rtl`; Task 7, the `dock-*-rtl` goldens.
 
 ## Rulings
@@ -45,7 +50,9 @@
 - **Strings.** The dock's pin rows read "Pin to Dock" and "Unpin from Dock". The CSS classes `bar-button`, `bar-row` and `athanor-bar-popover` are reused by the dock, so the two programs look the same without a second stylesheet block for the same widgets.
 - **No compositor client, no dock (SH1).** Without the privileged globals there is no window list and no secure launch, so the dock presents no surface and still reports READY.
 - **Auto-hide timing.** Reveal after 200 ms of pointer on the 4 px strip; hide 1000 ms after the pointer leaves. A menu or a drag keeps a shown dock shown and never reveals a hidden one.
-- **Memory.** `MemoryHigh=72M`, `MemoryMax=144M` in the unit, three times the 48 MB acceptance budget as for the bar.
+- **Memory.** `MemoryHigh=72M` (1.5 times the 48 MB acceptance budget) and `MemoryMax=144M` (3 times) in the unit, in the bar's proportions.
+- **The auto-hide strip spans the whole edge.** While hidden, the surface anchors to both ends of its edge, so the pointer finds the strip anywhere along it. Once shown, the surface holds only the island, centred on the edge.
+- **Knob `none` and the `bar` preset.** The surface is unmapped (BR7: "None: no surface") only if cosmic-comp survives an unmap and a later map of the same layer surface. Task 5, Step 4 proves this against cosmic-comp before anything else builds on it. If it does not survive, Step 4b keeps the surface in place, empty, and that departure from the letter of BR7 goes to the maintainer.
 - **Vendor favourites** stay in the bar's RPM (`/usr/share/athanor/favorites.toml`); the dock's RPM `Requires: athanor-bar`.
 - **Until 2b.5** the dock runs beside COSMIC's dock when enabled by hand (BR8).
 
@@ -59,8 +66,9 @@ Moved:
 Created:
 - `system/athanor-apps/Cargo.toml`, `src/lib.rs` (the `Host` trait), `src/favorites.rs` (the `Store`), `src/i18n.rs` (the catalog bridge), `src/menu.rs` (popover attachment), `src/openers.rs` (opener buttons), `src/row.rs` (the running-application row, with pin, unpin and drag reorder).
 - `forge/specs/athanor-dock/athanor-dock-1.0.0/`: `Cargo.toml`; `src/lib.rs`, `src/placement.rs` (edge and existence of a surface), `src/autohide.rs` (the auto-hide state machine); `src/main.rs`, `src/i18n.rs`, `src/layer_guard.rs`, `src/ui/mod.rs` (the `Dock`), `src/ui/surface.rs` (one surface per output); `data/athanor-dock.service`; `po/POTFILES.in`, `po/update.sh`, `po/athanor-dock.pot`, `po/it.po`, `po/en.po`.
-- `forge/test/shell/dock_session.py`, `forge/test/shell/dock_e2e.py`, `forge/test/shell/locale/dock-de.po`, `forge/test/shell/golden/dock/*.png` (generated).
-- `scripts/devvm/dock-acceptance.sh`.
+- `forge/test/shell/dock_roundtrip.py`, `forge/test/shell/dock_e2e.py`, `forge/test/shell/locale/dock-de.po`, `forge/test/shell/golden/dock/*.png` (generated).
+- `scripts/devvm/dock-acceptance.sh`, `scripts/devvm/dock_press.py`.
+- `forge/scripts/tests/test_dag_orchestrator.py`.
 
 Modified:
 - Root `Cargo.toml` (members and exclude), `Cargo.lock` (regenerated by cargo), `forge/specs/athanor-shell-rs/Cargo.toml`, `forge/specs/athanor-shell-rs/athanor-shell-rs-1.0.0/Cargo.toml`, `experimental/EXEMPT`.
@@ -69,8 +77,28 @@ Modified:
 - `forge/specs/athanor-dock/athanor-dock.spec` (rewritten for the new dock), `forge/config/packages.json`.
 - `system/athanor-style/calmo/templates/surfaces.css.in` and the CSS `generate.py` writes from it.
 - `forge/test/shell/rig.sh`, `cases.py`, `tests/test_cases.py`; `.github/workflows/shell-surfaces.yml`; `scripts/devvm/bar_surfaces.py`, `scripts/devvm/README.md`.
+- `forge/scripts/dag_orchestrator.py` (a package's hash covers its path dependencies).
 
 Every command block below starts with `R=/var/home/hr-mes/athanor/.claude/worktrees/shell-2c-dock`. Build the rig image once before Task 1: `bash $R/forge/test/shell/rig.sh build-image`.
+
+At 6e1d357f, five of the ten `verify.py` checks already fail for reasons outside this plan: polkit, paths, shipped, docs and panics. So `verify.py` is judged by the findings it adds, never by its exit status. Record the baseline once, before Task 1:
+
+```bash
+R=/var/home/hr-mes/athanor/.claude/worktrees/shell-2c-dock
+mkdir -p $R/.scratch
+python3 $R/scripts/verify.py > $R/.scratch/verify-baseline.txt
+```
+
+Every later "no new `verify.py` finding" check is this block. `verify.py` exits with the number of failed checks, 5 at the baseline, so its own status is not the verdict. The `grep -q` proves the run completed, and the block passes when it prints nothing and its last command exits 0:
+
+```bash
+R=/var/home/hr-mes/athanor/.claude/worktrees/shell-2c-dock
+python3 $R/scripts/verify.py > $R/.scratch/verify-now.txt
+grep -q '^Problemi totali: ' $R/.scratch/verify-now.txt
+comm -13 <(grep '^          ' $R/.scratch/verify-baseline.txt | sort) <(grep '^          ' $R/.scratch/verify-now.txt | sort) > $R/.scratch/verify-new.txt
+cat $R/.scratch/verify-new.txt
+test ! -s $R/.scratch/verify-new.txt
+```
 
 ---
 
@@ -518,14 +546,20 @@ git -C $R commit -m "refactor(shell): share the unit directories, the layout sou
 **Interfaces:**
 - Consumes: `athanor_layout::favorites::{moved, pinned, unpinned, update, read, load_or_import, VENDOR_FILE, FavoritesError}` (Task 2 for `moved`); `athanor_compositor_client::{Client, Opener, WindowId, favorites::cosmic_favorites}`.
 - Produces:
-  - `athanor_apps::Host` trait: `const APP: &'static str`, `const REORDER: bool`, `fn client(&self) -> Option<&Client>`, `fn favorites(&self) -> &favorites::Store`, `fn pin_label(&self, pinned: bool) -> String`, `fn menu_opened(&self, menu: &gtk4::Popover)`, `fn refresh_rows(self: &Rc<Self>)`, `fn hold(&self, _held: bool) {}`.
+  - `athanor_apps::Host` trait: `const APP: &'static str`, `const REORDER: bool`, `fn client(&self) -> Option<&Client>`, `fn favorites(&self) -> &favorites::Store`, `fn pin_label(&self, pinned: bool) -> String`, `fn menu_opened(&self, menu: &gtk4::Popover)`, `fn refresh_rows(self: &Rc<Self>)`, `fn hold(&self, _held: bool) {}`. The row calls `menu_opened` just before a menu pops up, `hold(true)` when a drag starts, and `hold(false)` when a drag ends and, from an idle callback, after a menu closed.
   - `athanor_apps::favorites::Store`: `load(file: Option<PathBuf>) -> Store`, `ids(&self) -> Option<Vec<String>>`, `reload(&self)`, `change(&self, impl FnOnce(&[String]) -> Result<Vec<String>, FavoritesError>) -> bool`.
   - `athanor_apps::row::Row`: `new<H: Host>(host: &Rc<H>, orientation: gtk4::Orientation, menu_position: gtk4::PositionType) -> Option<Row>`, `widget(&self) -> gtk4::Widget`, `refresh<H: Host>(&self, host: &Rc<H>)`.
-  - `athanor_apps::menu::attach(button: &gtk4::Button, position: gtk4::PositionType) -> gtk4::Popover`.
+  - `athanor_apps::menu::attach(button: &gtk4::Button, position: gtk4::PositionType) -> gtk4::Popover`: a new popover, attached by `attach_popover`.
+  - `athanor_apps::menu::attach_popover(button: &gtk4::Button, popover: &impl IsA<gtk4::Popover>, position: gtk4::PositionType)`: parents `popover` (a `gtk4::Popover` or a subclass) to `button`, opens it at `position`, gives it the `athanor-bar-popover` class, keeps the button's `HasPopup` and `Expanded` state, and unparents it when the button is destroyed. It connects nothing else: what a popover's showing or closing means to its program is the caller's to connect.
   - `athanor_apps::openers::button<H: Host>(host: &Rc<H>, opener: Opener) -> Option<gtk4::Button>`.
   - `athanor_apps::i18n::{set_catalog(&'static Catalog), tr, tr_with}`.
   - `athanor_apps::model` (the former `athanor_bar::running`): `Open<K>`, `Entry<K>`, `Primary<K>`, `AppIndex`, `entries`, `same_shape`, `primary`.
-  - Bar: `ui::popup::towards_inside(bar: &Bar) -> gtk4::PositionType`.
+  - Bar: `ui::popup::attach(bar: &Rc<Bar>, button: &gtk4::Button) -> gtk4::Popover` keeps its signature and becomes `athanor_apps::menu::attach(button, towards_inside(bar))`; new `ui::popup::towards_inside(bar: &Bar) -> gtk4::PositionType`.
+
+**Handover to 2b.3 and 2b.4.** Unit A merges into the bar branches before 2b.3 and 2b.4 go on, and they are re-pointed to this API:
+- 2b.3 builds its `attach_popover(bar, button, popover)` on `athanor_apps::menu::attach_popover(button, popover, towards_inside(bar))`, and adds its idle `popovers_changed()` notification on show and closed around it. Its notification and tray popovers go through that function; none parents a popover by hand.
+- 2b.3 also keeps the row's menus in the BR6 stacking. The row's menus bypass `popup::attach`, so the bar's `impl Host` gains the hooks: `menu_opened` defers `self.popovers_changed()` to an idle callback, because the row calls it before `popup()`, and `fn hold(&self, held: bool) { if !held { self.popovers_changed(); } }` covers the close. `popovers_changed()` does not exist before 2b.3, so Unit A leaves `hold` at its default.
+- 2b.4 uses `popup::attach` and `Popup::new` unchanged.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -708,12 +742,14 @@ pub trait Host: 'static {
     fn favorites(&self) -> &favorites::Store;
     /// The label of the pin row: to unpin when `pinned`, to pin otherwise.
     fn pin_label(&self, pinned: bool) -> String;
-    /// A menu of a row is about to open: the host closes any other popover (BR6).
+    /// A menu of a row is about to pop up: the host closes any other popover (BR6) and
+    /// redraws whatever it stacks against its popovers.
     fn menu_opened(&self, menu: &gtk4::Popover);
     /// The favourites or the installed applications changed: every row refreshes.
     fn refresh_rows(self: &Rc<Self>);
     /// A menu or a drag started (`true`) or ended (`false`) on a row: an auto-hiding
-    /// host stays shown meanwhile.
+    /// host stays shown meanwhile, and a host that stacks surfaces against its popovers
+    /// redraws them on `false`.
     fn hold(&self, _held: bool) {}
 }
 EOF
@@ -867,21 +903,35 @@ pub fn tr_with(msgid: &str, key: &str, value: &str) -> String {
 EOF
 ```
 
-`system/athanor-apps/src/menu.rs` (the body of the bar's `popup::attach`, with the position given by the caller):
+`system/athanor-apps/src/menu.rs` (the body of the bar's `popup::attach`, with the position given by the caller, split so that a caller can attach a popover it built):
 
 ```bash
 R=/var/home/hr-mes/athanor/.claude/worktrees/shell-2c-dock
 cat > $R/system/athanor-apps/src/menu.rs <<'EOF'
-//! A popover for a button (doc_bar.md, BR6): parented to it, opening where the caller
-//! says (towards the inside of the screen), and keeping the button's `Expanded` state.
+//! Popovers for buttons (doc_bar.md, BR6): parented to the button, opening where the caller
+//! says (towards the inside of the screen), and keeping the button's `HasPopup` and
+//! `Expanded` state. Every popover of the bar and of the dock is attached here; what its
+//! showing or closing means to the program is the caller's to connect.
 
 use gtk4::accessible::{Property, State};
 use gtk4::prelude::*;
 
+/// A new popover for `button`, attached by [`attach_popover`].
 pub fn attach(button: &gtk4::Button, position: gtk4::PositionType) -> gtk4::Popover {
+    let popover = gtk4::Popover::new();
+    attach_popover(button, &popover, position);
+    popover
+}
+
+/// Attaches `popover`, a `gtk4::Popover` or a subclass, to `button`.
+pub fn attach_popover(
+    button: &gtk4::Button,
+    popover: &impl IsA<gtk4::Popover>,
+    position: gtk4::PositionType,
+) {
+    let popover = popover.upcast_ref::<gtk4::Popover>();
     button.update_property(&[Property::HasPopup(true)]);
     button.update_state(&[State::Expanded(Some(false))]);
-    let popover = gtk4::Popover::new();
     // One class for the bar's and the dock's popovers: they look the same.
     popover.add_css_class("athanor-bar-popover");
     popover.set_parent(button);
@@ -904,7 +954,6 @@ pub fn attach(button: &gtk4::Button, position: gtk4::PositionType) -> gtk4::Popo
     // The popover is parented by hand, so it is unparented by hand.
     let child = popover.clone();
     button.connect_destroy(move |_| child.unparent());
-    popover
 }
 EOF
 ```
@@ -1604,20 +1653,60 @@ swap("src/i18n.rs",
      '    // The row and the openers of athanor-apps speak through the same catalog.\n'
      '    athanor_apps::i18n::set_catalog(catalog());\n}\n')
 # popup: the attachment moved to athanor-apps; the position stays the bar's decision.
+# The exact text of the bar's attach is replaced, and nothing else: popup.rs must end with it.
 swap("src/ui/popup.rs", "use gtk4::accessible::{Property, State};\n", "use gtk4::accessible::Property;\n")
-swap("src/ui/popup.rs", "        let popover = attach(bar, &button);\n",
-     "        let popover = athanor_apps::menu::attach(&button, towards_inside(bar));\n")
-path = crate / "src/ui/popup.rs"
-text = path.read_text()
-start = text.index("/// A popover for `button`: parented to it, opening towards the inside of the screen, and\n")
-path.write_text(text[:start] + '''/// Where the bar's popovers and menus open: towards the inside of the screen.
+OLD = '''/// A popover for `button`: parented to it, opening towards the inside of the screen, and
+/// keeping the button's `Expanded` state. The running applications' context menu uses it
+/// too, with its own triggers.
+pub fn attach(bar: &Rc<Bar>, button: &gtk4::Button) -> gtk4::Popover {
+    button.update_property(&[Property::HasPopup(true)]);
+    button.update_state(&[State::Expanded(Some(false))]);
+    let popover = gtk4::Popover::new();
+    popover.add_css_class("athanor-bar-popover");
+    popover.set_parent(button);
+    popover.set_position(match bar.layout().panel() {
+        PanelEdge::Top => gtk4::PositionType::Bottom,
+        PanelEdge::Bottom => gtk4::PositionType::Top,
+    });
+    let expanded = |button: &gtk4::Button, open: bool| {
+        button.update_state(&[State::Expanded(Some(open))]);
+    };
+    let weak_button = button.downgrade();
+    popover.connect_show(move |_| {
+        if let Some(button) = weak_button.upgrade() {
+            expanded(&button, true);
+        }
+    });
+    let weak_button = button.downgrade();
+    popover.connect_closed(move |_| {
+        if let Some(button) = weak_button.upgrade() {
+            expanded(&button, false);
+        }
+    });
+    // The popover is parented by hand, so it is unparented by hand.
+    let child = popover.clone();
+    button.connect_destroy(move |_| child.unparent());
+    popover
+}
+'''
+NEW = '''/// A popover for `button`, opening towards the inside of the screen. athanor-apps parents
+/// it and keeps the button's `Expanded` state.
+pub fn attach(bar: &Rc<Bar>, button: &gtk4::Button) -> gtk4::Popover {
+    athanor_apps::menu::attach(button, towards_inside(bar))
+}
+
+/// Where the bar's popovers and menus open: towards the inside of the screen.
 pub fn towards_inside(bar: &Bar) -> gtk4::PositionType {
     match bar.layout().panel() {
         PanelEdge::Top => gtk4::PositionType::Bottom,
         PanelEdge::Bottom => gtk4::PositionType::Top,
     }
 }
-''')
+'''
+path = crate / "src/ui/popup.rs"
+text = path.read_text()
+assert text.count(OLD) == 1 and text.endswith(OLD), "popup.rs no longer ends with the bar's attach"
+path.write_text(text[: -len(OLD)] + NEW)
 EOF
 cat > $B/src/ui/running.rs <<'EOF'
 //! The running applications of the `bar` preset (doc_bar.md, BR3, BR7), drawn by the row
@@ -1804,7 +1893,7 @@ bash $R/forge/test/shell/rig.sh bar-e2e
 bash $R/forge/test/shell/rig.sh surface bar
 ```
 
-Expected: `build-bar` PASS with the four store tests and the eight label tests of `athanor-apps` listed as `ok`, and clippy silent; `bar-e2e` PASS (pinning, unpinning and the running windows go through the shared row now); `surface bar` PASS against the unchanged goldens.
+Expected: `build-bar` PASS with the four store tests and the eight label tests of `athanor-apps` listed as `ok`, and clippy silent; `bar-e2e` PASS (pinning, unpinning and the running windows go through the shared row now); `surface bar` PASS against the unchanged goldens. `verify.py panics` is red from Step 1 to Step 3 of this task, because `favorites.rs` is written with its test module first; it is back to the baseline here, and nothing is pushed in between.
 
 - [ ] **Step 6: Commit**
 
@@ -1813,6 +1902,27 @@ R=/var/home/hr-mes/athanor/.claude/worktrees/shell-2c-dock
 git -C $R add -A system/athanor-apps forge/specs/athanor-bar Cargo.toml Cargo.lock forge/test/shell/rig.sh
 git -C $R commit -m "refactor(bar): move the applications row, favourites store and openers into athanor-apps"
 ```
+
+### Unit A checkpoint
+
+Tasks 1 to 3 stop here as a unit of their own: the legacy move, the shared start-up pieces and `athanor-apps`, with the bar on them and nothing of the dock yet. The bar's behaviour and goldens are unchanged.
+
+```bash
+R=/var/home/hr-mes/athanor/.claude/worktrees/shell-2c-dock
+bash $R/forge/test/shell/rig.sh cargo metadata --locked --format-version 1 > /dev/null
+bash $R/forge/test/shell/rig.sh cargo metadata --locked --format-version 1 --manifest-path forge/specs/athanor-shell-rs/Cargo.toml > /dev/null
+bash $R/forge/test/shell/rig.sh cargo test --locked -p athanor-unit -p athanor-layout -p athanor-apps
+bash $R/forge/test/shell/rig.sh build-layout
+bash $R/forge/test/shell/rig.sh build-bar
+bash $R/forge/test/shell/rig.sh layer-guard bar
+bash $R/forge/test/shell/rig.sh atspi bar
+bash $R/forge/test/shell/rig.sh bar-e2e
+bash $R/forge/test/shell/rig.sh surface bar
+git -C $R diff --stat --exit-code 6e1d357f -- forge/test/shell/golden
+python3 -B -m unittest discover -s $R/forge/test/shell/tests
+```
+
+Then the `verify.py` baseline comparison from the preface. Expected: every command exits 0, the rig verbs print PASS, and the `git diff` prints nothing because no golden changed. Stop here and open the Unit A pull request. Unit B starts once Unit A has merged into the bar branches, and 2b.3 and 2b.4 rebase onto it.
 
 ### Task 4: The dock's decisions: placement and auto-hide
 
@@ -2061,8 +2171,12 @@ mod tests {
     }
 
     #[test]
-    fn the_strip_is_a_few_pixels_wide() {
-        assert!((1..=8).contains(&STRIP_PX));
+    fn a_hold_while_revealing_waits_for_the_delay() {
+        let (mut state, timers) = fed(&[Event::PointerIn, Event::Held(true)]);
+        assert_eq!(timers.last(), Some(&Timer::Keep));
+        assert_eq!(state.phase(), Phase::Revealing);
+        assert_eq!(state.feed(Event::PointerOut), Timer::Cancel);
+        assert_eq!(state.phase(), Phase::Hidden);
     }
 }
 EOF
@@ -2226,7 +2340,9 @@ impl AutoHide {
             (Phase::Shown, Event::PointerOut) if !self.held => {
                 (Phase::Hiding, Timer::Start(HIDE_DELAY))
             }
-            (Phase::Revealing | Phase::Hiding, Event::Held(true)) => (Phase::Shown, Timer::Cancel),
+            // A hold only keeps a dock that is on screen: one that is still revealing
+            // waits for its delay, so a hold on another output reveals nothing here.
+            (Phase::Hiding, Event::Held(true)) => (Phase::Shown, Timer::Cancel),
             (Phase::Shown, Event::Held(false)) if !self.pointer => {
                 (Phase::Hiding, Timer::Start(HIDE_DELAY))
             }
@@ -2266,11 +2382,12 @@ git -C $R commit -m "feat(dock): decide each output's dock edge and the auto-hid
 
 **Files:**
 - Create: `forge/specs/athanor-dock/athanor-dock-1.0.0/src/main.rs`, `src/i18n.rs`, `src/layer_guard.rs` (copied from the bar), `src/ui/mod.rs`, `src/ui/surface.rs`
-- Modify: `forge/test/shell/rig.sh` (`build-dock`, `layer-guard dock`)
+- Create: `forge/test/shell/dock_roundtrip.py`
+- Modify: `forge/test/shell/rig.sh` (`build-dock`, `layer-guard dock`, `dock-roundtrip`)
 
 **Interfaces:**
 - Consumes: `athanor_dock::placement::{place, Anchor, Placement}` and `athanor_dock::autohide::{AutoHide, Event, Timer, STRIP_PX}` (Task 4); `athanor_apps::{Host, favorites::Store, row::Row, openers::button, i18n::set_catalog}` (Task 3); `athanor_unit::dirs::Dirs::from_vars(unit, var)` and `athanor_layout::loader::Source` (Task 2).
-- Produces: the binary `athanor-dock`; `ui::start(app, source: Source, favorites_file: Option<PathBuf>) -> Rc<ui::Dock>`; `impl Host for Dock` with `APP = "athanor-dock"`, `REORDER = true`, labels "Pin to Dock" and "Unpin from Dock"; the layer-shell namespace `athanor-dock`; the CSS classes `athanor-dock`, `edge-bottom|edge-left|edge-right`, `auto-hide`, `dock-island`, `dock-strip`; `rig.sh build-dock` and `rig.sh layer-guard dock`.
+- Produces: the binary `athanor-dock`; `ui::start(app, source: Source, favorites_file: Option<PathBuf>) -> Rc<ui::Dock>`; `impl Host for Dock` with `APP = "athanor-dock"`, `REORDER = true`, labels "Pin to Dock" and "Unpin from Dock"; the layer-shell namespace `athanor-dock`; the CSS classes `athanor-dock`, `edge-bottom|edge-left|edge-right`, `auto-hide`, `dock-island`, `dock-strip`; `rig.sh build-dock`, `rig.sh layer-guard dock` and `rig.sh dock-roundtrip`; `dock_roundtrip.layout(preset, panel, dock) -> str`, which Task 7 reuses.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2290,6 +2407,7 @@ usage = re.search(r"^#   rig\.sh cargo <args>[^\n]*\n", text, re.M)
 assert usage, "cargo usage line"
 text = (text[:usage.end()]
         + "#   rig.sh build-dock       clippy, tests and release build of athanor-dock (and athanor-apps) into <out>/bin, with the DT_NEEDED check\n"
+        + "#   rig.sh dock-roundtrip   the dock's surface off screen and back, three times, under cosmic-comp (BR7)\n"
         + text[usage.end():])
 swap("#   rig.sh layer-guard <greeter|bar>   ", "#   rig.sh layer-guard <greeter|bar|dock>   ")
 swap("usage: rig.sh layer-guard <greeter|bar>}", "usage: rig.sh layer-guard <greeter|bar|dock>}")
@@ -2306,6 +2424,17 @@ build-dock)
                  && cargo build --release --locked -p athanor-dock \\
                  && install -m 0755 /out/target/release/athanor-dock /out/bin/ \\
                  && python3 -B forge/scripts/check_shim_link_order.py /out/bin/athanor-dock'
+    ;;
+dock-roundtrip)
+    # BR7's knob none and the bar preset take the surface off screen, and visible brings it
+    # back: cosmic-comp must keep the dock's connection across every round trip.
+    seed_bar "$out/seed-dock-roundtrip" float top visible light
+    in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-dock-roundtrip \\
+        RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \\
+        RIG_HOLD="python3 /repo/forge/test/shell/dock_roundtrip.py" \\
+        dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 dock-roundtrip -- \\
+        bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \\
+                 && exec /out/bin/athanor-dock"
     ;;
 shelld-e2e)
 ''')
@@ -2825,6 +2954,8 @@ use crate::layer_guard;
 
 /// The auto-hide state of one surface and its one timer.
 struct Hider {
+    window: gtk4::ApplicationWindow,
+    edge: Edge,
     stack: gtk4::Stack,
     state: RefCell<AutoHide>,
     timer: RefCell<Option<glib::SourceId>>,
@@ -2850,8 +2981,18 @@ impl Hider {
             }
         }
         let shown = self.state.borrow().shown();
+        self.show(shown);
+    }
+
+    /// Hidden, the surface is anchored to both ends of its edge, so the strip spans the
+    /// whole edge and the pointer finds it anywhere along it; shown, it holds the island
+    /// alone, centred. The anchors change in place: the layer surface is never recreated.
+    fn show(&self, shown: bool) {
         self.stack
             .set_visible_child_name(if shown { "island" } else { "strip" });
+        for side in across(self.edge) {
+            self.window.set_anchor(side, !shown);
+        }
     }
 
     fn cancel(&self) {
@@ -2864,6 +3005,14 @@ impl Hider {
 impl Drop for Hider {
     fn drop(&mut self) {
         self.cancel();
+    }
+}
+
+/// The two edges at the ends of `edge`.
+fn across(edge: Edge) -> [Edge; 2] {
+    match edge {
+        Edge::Left | Edge::Right => [Edge::Top, Edge::Bottom],
+        _ => [Edge::Left, Edge::Right],
     }
 }
 
@@ -2994,7 +3143,7 @@ impl Surface {
         if let Some(button) = openers::button(dock, Opener::AppLibrary) {
             island.append(&button);
         }
-        // The strip spans the island along the edge and is STRIP_PX deep.
+        // The strip is STRIP_PX deep; hidden, the surface stretches it along the whole edge.
         let strip = gtk4::Box::new(orientation, 0);
         strip.add_css_class("dock-strip");
         if vertical {
@@ -3007,13 +3156,17 @@ impl Surface {
         stack.set_vhomogeneous(vertical);
         stack.add_named(&island, Some("island"));
         stack.add_named(&strip, Some("strip"));
-        stack.set_visible_child_name(if placement.auto_hide { "strip" } else { "island" });
+        stack.set_visible_child_name("island");
         if placement.auto_hide {
-            self.hider.replace(Some(Rc::new(Hider {
+            let hider = Rc::new(Hider {
+                window: self.window.clone(),
+                edge,
                 stack: stack.clone(),
                 state: RefCell::new(AutoHide::default()),
                 timer: RefCell::new(None),
-            })));
+            });
+            hider.show(false);
+            self.hider.replace(Some(hider));
         }
         self.window.set_child(Some(&stack));
         self.row = row;
@@ -3064,22 +3217,162 @@ rustfmt --edition 2021 $D/src/main.rs
 
 `rustfmt` on `main.rs` formats the modules it declares too.
 
+The round trip that `rig.sh dock-roundtrip` holds its scene with. `place(None)` unmaps the window, which makes gtk4-layer-shell destroy the layer surface, and `present()` creates a new one. cosmic-comp is known to close the connection of a client that destroys and recreates a layer surface, so this check runs against cosmic-comp before Tasks 6 to 8 build on it:
+
+```bash
+R=/var/home/hr-mes/athanor/.claude/worktrees/shell-2c-dock
+cat > $R/forge/test/shell/dock_roundtrip.py <<'EOF'
+#!/usr/bin/python3
+"""dock_roundtrip.py - scene.sh's RIG_HOLD for rig.sh dock-roundtrip. BR7's knob `none`
+and the `bar` preset take the dock's surface off screen, and `visible` brings it back.
+Three times each, the island must leave and come back within 3 s, in the same process: a
+client whose connection cosmic-comp closes exits, so the same pid alive at the end proves
+the compositor kept it.
+"""
+
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from atspi_check import find_application  # noqa: E402
+from bar_e2e import alive, buttons, check, failures, wait_for  # noqa: E402
+
+CYCLES = 3
+
+
+def layout(preset, panel, dock):
+    """A layout document for every output; `dock=None` leaves the knob to the preset."""
+    text = f'schema = 1\n\n[output."*"]\npreset = "{preset}"\npanel = "{panel}"\n'
+    return text + (f'dock = "{dock}"\n' if dock else "")
+
+
+def dock_pid():
+    for comm in Path("/proc").glob("[0-9]*/comm"):
+        try:
+            if comm.read_text(encoding="utf-8").strip() == "athanor-dock":
+                return int(comm.parent.name)
+        except OSError:
+            # The process exited between the listing and the read.
+            continue
+    return None
+
+
+def main():
+    import gi
+
+    gi.require_version("Atspi", "2.0")
+    from gi.repository import Atspi
+
+    user = Path(os.environ["XDG_CONFIG_HOME"]) / "athanor" / "layout.toml"
+    pid = dock_pid()
+    if not check("athanor-dock is running", pid is not None):
+        return 1
+    app = find_application(Atspi, "athanor-dock")
+    if not check("the dock is on the accessibility bus", app is not None):
+        return 1
+
+    def shows():
+        return bool(buttons(app, Atspi, "Launcher"))
+
+    check("visible: the island shows", wait_for(shows, 5))
+    off = (
+        ("none", layout("float", "top", "none")),
+        ("the bar preset", layout("bar", "bottom", None)),
+    )
+    for cycle in range(1, CYCLES + 1):
+        for name, text in off:
+            user.write_text(text, encoding="utf-8")
+            check(
+                f"{cycle}: {name} takes the surface off screen",
+                wait_for(lambda: not shows(), 3),
+            )
+            user.write_text(layout("float", "top", "visible"), encoding="utf-8")
+            check(f"{cycle}: visible after {name} brings it back", wait_for(shows, 3))
+            check(
+                f"{cycle}: after {name}, the same dock process runs",
+                alive(pid) and dock_pid() == pid,
+            )
+    if failures:
+        print(f"dock-roundtrip: {len(failures)} failed", file=sys.stderr)
+        return 1
+    print("dock-roundtrip: every check passed")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+EOF
+```
+
 - [ ] **Step 4: Run it and see it pass**
 
 ```bash
 R=/var/home/hr-mes/athanor/.claude/worktrees/shell-2c-dock
 bash $R/forge/test/shell/rig.sh build-dock
 bash $R/forge/test/shell/rig.sh layer-guard dock
+bash $R/forge/test/shell/rig.sh dock-roundtrip
 ! grep -n '\.unwrap()' $R/forge/specs/athanor-dock/athanor-dock-1.0.0/src/main.rs $R/forge/specs/athanor-dock/athanor-dock-1.0.0/src/ui/*.rs
 ```
 
-Expected: `build-dock` PASS (clippy silent, the Task 4 tests and the `athanor-apps` tests `ok`, `check_shim_link_order` reports the shim ahead of `libwayland-client`); `layer-guard: athanor-dock refused to run as an ordinary window`; the negated `grep` prints nothing and succeeds.
+Expected: `build-dock` PASS (clippy silent, the Task 4 tests and the `athanor-apps` tests `ok`, `check_shim_link_order` reports the shim ahead of `libwayland-client`); `layer-guard: athanor-dock refused to run as an ordinary window`; `dock-roundtrip: every check passed`; the negated `grep` prints nothing and succeeds.
+
+- [ ] **Step 4b: Only if `dock-roundtrip` fails: keep the surface, and ask the maintainer**
+
+If the dock exits during `dock-roundtrip`, or its client log shows the connection closed, cosmic-comp does not survive an unmap and a later map of the dock's layer surface. The fix is the bar's: change the surface in place and never recreate it. `None` then keeps a surface that was already on screen mapped and empty, with no exclusive zone; a surface that was never on screen stays unmapped. `release()` and `alive()` look at whether the window is mapped, not at the placement, so an emptied surface whose output leaves is emptied again, never destroyed:
+
+```bash
+R=/var/home/hr-mes/athanor/.claude/worktrees/shell-2c-dock
+python3 - "$R/forge/specs/athanor-dock/athanor-dock-1.0.0/src/ui/surface.rs" <<'EOF'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+text = path.read_text()
+def swap(old, new):
+    global text
+    assert text.count(old) == 1, old
+    text = text.replace(old, new)
+swap('''        let Some(placement) = placement else {
+            self.window.set_visible(false);
+            self.window.set_child(None::<&gtk4::Widget>);
+            return;
+        };
+''', '''        let Some(placement) = placement else {
+            // cosmic-comp closes the connection of a client that unmaps a layer surface and
+            // maps it again, so a surface on screen stays mapped: empty, one pixel, no
+            // exclusive zone and no input on its child.
+            if self.window.is_mapped() {
+                self.window.set_exclusive_zone(0);
+                let empty = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+                empty.set_size_request(1, 1);
+                empty.set_can_target(false);
+                self.window.set_child(Some(&empty));
+            }
+            return;
+        };
+''')
+swap('''        self.placement.is_none() || self.window.is_realized()
+''', '''        !self.window.is_mapped() || self.window.is_realized()
+''')
+swap('''        if self.placement.is_some() && self.window.is_realized() {
+''', '''        if self.window.is_mapped() && self.window.is_realized() {
+''')
+path.write_text(text)
+EOF
+bash $R/forge/test/shell/rig.sh build-dock
+bash $R/forge/test/shell/rig.sh dock-roundtrip
+```
+
+This departs from the letter of BR7 ("None: no surface"), so it is the maintainer's decision, not this plan's. Do not edit `doc_bar.md`. Put the failing log and this decision point in the pull request:
+- (a) keep an empty, one-pixel mapped surface under `none` and the `bar` preset, as Step 4b does, until cosmic-comp tolerates a recreated layer surface; or
+- (b) honour "no surface" to the letter: unmap it, and create none on that output until the output is re-added or the dock restarts, so `visible` takes effect only then.
+
+Tasks 6 to 8 do not depend on the choice: their checks look at the island, which is gone in both.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 R=/var/home/hr-mes/athanor/.claude/worktrees/shell-2c-dock
-git -C $R add forge/specs/athanor-dock/athanor-dock-1.0.0/src forge/test/shell/rig.sh
+git -C $R add forge/specs/athanor-dock/athanor-dock-1.0.0/src forge/test/shell/rig.sh forge/test/shell/dock_roundtrip.py
 git -C $R commit -m "feat(dock): one layer surface per output with the openers, the applications row and auto-hide"
 ```
 
@@ -3099,12 +3392,13 @@ The project verifier already fails on the tree Task 5 left: the dock has a binar
 
 ```bash
 R=/var/home/hr-mes/athanor/.claude/worktrees/shell-2c-dock
-python3 $R/scripts/verify.py shipped
+python3 $R/scripts/verify.py shipped > $R/.scratch/verify-shipped.txt
+grep 'athanor-dock:' $R/.scratch/verify-shipped.txt
 ```
 
 - [ ] **Step 2: Run it and see it fail**
 
-Expected: FAIL with `athanor-dock: non in packages.json -> compila ma non arriva sul sistema`.
+Expected: the `grep` prints `athanor-dock: non in packages.json -> compila ma non arriva sul sistema`. The `shipped` check fails at the baseline for seven other crates, so only the dock's line counts.
 
 - [ ] **Step 3: Implement**
 
@@ -3432,13 +3726,13 @@ A vertical dock shows the running indicator on its edge side; the horizontal one
 
 ```bash
 R=/var/home/hr-mes/athanor/.claude/worktrees/shell-2c-dock
-python3 $R/scripts/verify.py shipped
+python3 $R/scripts/verify.py shipped > $R/.scratch/verify-shipped.txt
+! grep 'athanor-dock:' $R/.scratch/verify-shipped.txt
 python3 $R/scripts/verify.py specs
-python3 $R/scripts/verify.py
 bash $R/forge/test/shell/rig.sh build-dock
 ```
 
-Expected: every `verify.py` check PASS; `build-dock` PASS.
+Then the `verify.py` baseline comparison from the preface. Expected: the negated `grep` prints nothing and succeeds; `verify.py specs` PASS; `build-dock` PASS; the comparison prints nothing, so the tree has no finding the baseline did not have.
 
 - [ ] **Step 5: Commit**
 
@@ -3451,14 +3745,27 @@ git -C $R commit -m "build(dock): package athanor-dock 1.0.0-3 with its unit, ca
 ### Task 7: The dock in the rig and in CI: end to end, accessibility and the twelve cases
 
 **Files:**
-- Create: `forge/test/shell/dock_session.py`, `forge/test/shell/dock_e2e.py`, `forge/test/shell/locale/dock-de.po`, `forge/test/shell/golden/dock/dock-*.png` (12, captured)
+- Create: `forge/test/shell/dock_e2e.py`, `forge/test/shell/locale/dock-de.po`, `forge/test/shell/golden/dock/dock-*.png` (12, captured)
 - Modify: `forge/test/shell/rig.sh` (`dock-e2e`, `atspi dock`, `capture_dock`, `surface dock`), `forge/test/shell/cases.py`, `forge/test/shell/tests/test_cases.py`, `.github/workflows/shell-surfaces.yml`
 
 **Interfaces:**
-- Consumes: `rig.sh build-dock` and the binary (Task 5); the catalog template `po/athanor-dock.pot` (Task 6); `bar_session.main()` and its module globals `NOTIFY_SOCKET`, `READY_FILE`, `PID_FILE`, `BAR`; the `bar_e2e` helpers `alive`, `buttons`, `check`, `failures`, `favorites_file`, `favorites_text`, `menu_row_after`, `pss_kb`, `wait_for`; `atspi_check.find_application`.
+- Consumes: `rig.sh build-dock` and the binary (Task 5); the catalog template `po/athanor-dock.pot` (Task 6); `bar_session.py --client NAME` and its `READY_FILE` and `PID_FILE` (package 2b.3); `dock_roundtrip.layout` (Task 5); the `bar_e2e` helpers `alive`, `buttons`, `check`, `failures`, `favorites_file`, `favorites_text`, `menu_row_after`, `pss_kb`, `wait_for`; `atspi_check.find_application`.
 - Produces: `rig.sh dock-e2e`, `rig.sh atspi dock`, `rig.sh surface dock`, `rig.sh update-goldens dock`; `cases.py dock` (12 cases); the CI jobs `dock` and `dock-scene`.
 
-`bar_session.py` is not edited: the dock's session reuses it by setting its four module globals before calling `main()`, so this package does not touch a file package 2b.4 changes.
+**Depends on package 2b.3.** The dock's rig session is 2b.3's `bar_session.py`, which takes `--client NAME` (default `athanor-bar`) and runs `/out/bin/NAME` as its client, with the private system bus, `NOTIFY_SOCKET`, `--window` and `--pinnable` unchanged. This package does not edit `bar_session.py`, and it has no session script of its own. `dock_e2e.py` reads `READY_FILE` and `PID_FILE` from `bar_session`, so it follows the paths 2b.3 writes, whatever the client.
+
+- [ ] **Step 0: Merge the 2b.3 branch**
+
+Unit B starts once Unit A has merged into the bar branches, so the 2b.3 branch already carries Unit A. Worktrees share the repository's branches, so the local branch is merged:
+
+```bash
+R=/var/home/hr-mes/athanor/.claude/worktrees/shell-2c-dock
+git -C $R merge --no-edit shell-2b3-notifications
+grep -n -- '"--client"' $R/forge/test/shell/bar_session.py
+grep -n '^READY_FILE = \|^PID_FILE = ' $R/forge/test/shell/bar_session.py
+```
+
+Expected: the merge completes. A conflict in `rig.sh`, the workflow, the CSS template or `Cargo.lock` is resolved by keeping both sides' insertions, and `Cargo.lock` is regenerated with `bash $R/forge/test/shell/rig.sh cargo metadata --format-version 1 > /dev/null`, never edited by hand. The greps show the `--client` argument and the two paths. If `--client` is missing, stop: this task waits for 2b.3.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3483,36 +3790,14 @@ path.write_text(text.replace(anchor, test + anchor))
 EOF
 ```
 
-The session and the end-to-end check:
+The end-to-end check:
 
 ```bash
 R=/var/home/hr-mes/athanor/.claude/worktrees/shell-2c-dock
-cat > $R/forge/test/shell/dock_session.py <<'EOF'
-#!/usr/bin/python3
-"""dock_session.py [--window] [--pinnable] - athanor-dock in the rig, as its unit runs it:
-bar_session.py's session (NOTIFY_SOCKET for Type=notify, the test window once READY=1
-arrives, the desktop entry of --pinnable) with the dock's binary and files. The fake
-logind bar_session.py brings up goes unused. It is scene.sh's client and exits with the
-dock's status.
-"""
-
-import sys
-from pathlib import Path
-
-import bar_session
-
-bar_session.NOTIFY_SOCKET = "/tmp/athanor-dock-notify"
-bar_session.READY_FILE = Path("/tmp/athanor-dock.ready")
-bar_session.PID_FILE = Path("/tmp/athanor-dock.pid")
-bar_session.BAR = "/out/bin/athanor-dock"
-
-if __name__ == "__main__":
-    sys.exit(bar_session.main())
-EOF
 cat > $R/forge/test/shell/dock_e2e.py <<'EOF'
 #!/usr/bin/python3
 """dock_e2e.py - athanor-dock end to end in the rig, as scene.sh's RIG_HOLD, with the dock
-started by dock_session.py --window --pinnable over the float preset:
+started by bar_session.py --client athanor-dock --window --pinnable over the float preset:
 
 - READY=1 reaches NOTIFY_SOCKET (Type=notify), and the dock is on the accessibility bus;
 - the launcher, workspaces and application-library buttons show (BR7);
@@ -3520,7 +3805,7 @@ started by dock_session.py --window --pinnable over the float preset:
 - the button's menu pins and unpins the app in the favourites file (BR7), and a change
   another writer makes to the file is followed live;
 - the dock knob and the preset apply live: auto-hide leaves only the strip, none and the
-  bar preset remove the surface, a bottom panel moves the dock to the side, and a broken
+  bar preset remove the island, a bottom panel stands the dock upright, and a broken
   document falls back to the vendor layout without stopping the dock;
 - the dock stays within 48 MB PSS at rest (acceptance item 17).
 
@@ -3546,9 +3831,9 @@ from bar_e2e import (  # noqa: E402
     pss_kb,
     wait_for,
 )
+from bar_session import PID_FILE, READY_FILE  # noqa: E402
+from dock_roundtrip import layout  # noqa: E402
 
-READY_FILE = Path("/tmp/athanor-dock.ready")
-PID_FILE = Path("/tmp/athanor-dock.pid")
 PSS_LIMIT_KB = 48 * 1024
 WINDOW = "/repo/forge/test/shell/cc_window.py"
 RUNNING_WINDOW_BUTTON = "CC Window: cc-window-1"
@@ -3557,9 +3842,19 @@ PINNED_ID = "org.athanor.CcWindow1.desktop"
 BROKEN = "schema = 1\n[output"
 
 
-def layout(preset, panel, dock):
-    text = f'schema = 1\n\n[output."*"]\npreset = "{preset}"\npanel = "{panel}"\n'
-    return text + (f'dock = "{dock}"\n' if dock else "")
+def upright(app, Atspi):
+    """Launcher above Applications, in one column: the dock stands vertically. WINDOW
+    coordinates, because a Wayland client does not know where its surface is on screen;
+    the edge itself (left, right in the -rtl cases) is proven by the goldens."""
+    found = []
+    for name in ("Launcher", "Applications"):
+        match = buttons(app, Atspi, name)
+        if not match:
+            return False, f"no {name} button"
+        found.append(match[0].get_extents(Atspi.CoordType.WINDOW))
+    first, last = found
+    detail = f"Launcher at ({first.x}, {first.y}), Applications at ({last.x}, {last.y})"
+    return abs(first.x - last.x) <= 2 and last.y > first.y, detail
 
 
 def main():
@@ -3660,9 +3955,11 @@ def main():
     check("the bar preset: no dock surface", wait_for(gone("Launcher"), 2))
     apply(layout("float", "bottom", "visible"))
     check(
-        "a bottom panel: the dock comes back, on the side edge",
+        "a bottom panel: the dock comes back",
         wait_for(shows("Launcher"), 2),
     )
+    vertical, detail = upright(app, Atspi)
+    check("a bottom panel: the dock stands vertically, on a side edge", vertical, detail)
     apply(layout("float", "top", "none"))
     wait_for(gone("Launcher"), 2)
     apply(BROKEN)
@@ -3710,8 +4007,11 @@ assert usage, "bar-e2e usage line"
 text = (text[:usage.end()]
         + "#   rig.sh dock-e2e         athanor-dock in a scene: READY, openers, running windows, pinning, the favourites followed live, the knob and presets live, memory\n"
         + text[usage.end():])
-swap("#   rig.sh atspi <greeter|chooser|bar>   ", "#   rig.sh atspi <greeter|chooser|bar|dock>   ")
-swap("|bar-accessibility|bar-tiling>  capture", "|bar-accessibility|bar-tiling|dock>  capture")
+# The usage lines list the surfaces 2b.3 and 2b.4 add too: the dock goes last, whatever
+# precedes it.
+for verb in ("atspi", "surface"):
+    text, n = re.subn(rf"^(#   rig\.sh {verb} <[^>]*)>", r"\1|dock>", text, flags=re.M)
+    assert n == 1, f"{verb} usage line"
 swap('\ncase "${1:-}" in\nbuild-image)\n', '''
 # doc_bar.md, BR9: the dock with one running window, beside a bottom panel so that it
 # stands on the start edge: the left one, the right one in the right-to-left cases.
@@ -3733,7 +4033,7 @@ capture_dock() {
         in_rig "$(rig_image)" env RIG_LOCALE="$locale" RIG_SETTLE=8 RIG_CONFIG_SEED="/out/seed-$tag" \\
             RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic "${override[@]}" \\
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 "$scale" "$tag" -- \\
-            python3 /repo/forge/test/shell/dock_session.py --window
+            python3 /repo/forge/test/shell/bar_session.py --client athanor-dock --window
     done < <(python3 -B "$rig/cases.py" dock)
 }
 
@@ -3748,7 +4048,7 @@ dock-e2e)
         RIG_HOLD="python3 /repo/forge/test/shell/dock_e2e.py" \\
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 dock-e2e -- \\
         bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \\
-                 && exec python3 /repo/forge/test/shell/dock_session.py --window --pinnable"
+                 && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-dock --window --pinnable"
     ;;
 compositor-e2e)
 ''')
@@ -3760,7 +4060,7 @@ swap('''    *)
         in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-dock \\
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-dock 4" \\
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-dock -- \\
-            bash -c "$enable && exec python3 /repo/forge/test/shell/dock_session.py"
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-dock"
         ;;
     *)
         echo "rig.sh atspi: unknown surface''')
@@ -3825,14 +4125,17 @@ body = "".join(f'\nmsgid "{msgid}"\nmsgstr "{german[msgid]}"\n' for msgid in wan
 open(sys.argv[3], "w", encoding="utf-8").write(header + body)
 EOF
 python3 - "$R/.github/workflows/shell-surfaces.yml" <<'EOF'
-import pathlib, sys
+import pathlib, re, sys
 path = pathlib.Path(sys.argv[1])
 text = path.read_text()
 old = '      - "forge/specs/athanor-bar/**"\n'
 assert text.count(old) == 2
 text = text.replace(old, old + '      - "forge/specs/athanor-dock/**"\n      - "system/athanor-apps/**"\n')
-assert text.endswith("            .scratch/shell-rig/${{ matrix.scene }}-*.png\n")
-text += '''
+# The dock's jobs go right after the bar-scenes job, whatever jobs 2b.3 and 2b.4 add.
+job = re.search(r"^  bar-scenes:\n(?:(?!  \S).*\n)*", text, re.M)
+assert job, "no bar-scenes job"
+head, rest = text[: job.end()].rstrip("\n") + "\n", text[job.end():]
+jobs = '''
   dock:
     name: Dock, build and end to end
     needs: lint
@@ -3879,7 +4182,7 @@ text += '''
             .scratch/shell-rig/*.log
             .scratch/shell-rig/dock-*.png
 '''
-path.write_text(text)
+path.write_text(head + jobs + ("\n" + rest if rest else ""))
 EOF
 python3 $R/scripts/verify.py workflows
 ```
@@ -3910,7 +4213,7 @@ Expected: 12 cases PASS.
 
 ```bash
 R=/var/home/hr-mes/athanor/.claude/worktrees/shell-2c-dock
-git -C $R add forge/test/shell/dock_session.py forge/test/shell/dock_e2e.py forge/test/shell/locale/dock-de.po \
+git -C $R add forge/test/shell/dock_e2e.py forge/test/shell/locale/dock-de.po \
     forge/test/shell/golden/dock forge/test/shell/rig.sh forge/test/shell/cases.py forge/test/shell/tests/test_cases.py \
     .github/workflows/shell-surfaces.yml
 git -C $R commit -m "test(dock): end-to-end, accessibility and twelve-case scene in the shell rig and CI"
@@ -3919,14 +4222,14 @@ git -C $R commit -m "test(dock): end-to-end, accessibility and twelve-case scene
 ### Task 8: The dock in the dev VM's real session
 
 **Files:**
-- Create: `scripts/devvm/dock-acceptance.sh`
+- Create: `scripts/devvm/dock-acceptance.sh`, `scripts/devvm/dock_press.py`
 - Modify: `scripts/devvm/bar_surfaces.py` (the application name from the command line, `athanor-bar` by default), `scripts/devvm/README.md`
 
 **Interfaces:**
 - Consumes: `.scratch/shell-rig/bin/athanor-dock` (`rig.sh build-dock`, Task 5); `data/athanor-dock.service` (Task 6); the bar package's `data/favorites.toml`; `devvm.env` (`guest_ssh`, `die`), `deploy.sh`, `screenshot.sh`.
-- Produces: `dock-acceptance.sh [deploy|unit|memory|hotplug|crash-loop|cleanup ...]`, printing `PASS <stage>` or `FAIL <stage>: <what was read>`; `python3 - <app> < bar_surfaces.py`.
+- Produces: `dock-acceptance.sh [deploy|unit|memory|launch|hotplug|crash-loop|cleanup ...]`, printing `PASS <stage>` or `FAIL <stage>: <what was read>`; `python3 - <app> < bar_surfaces.py`; `python3 - <app> <button> < dock_press.py`.
 
-The rig has no user manager, no real unit and one fixed output; this is where the unit file, the confinement, the memory budget (item 17), hot-plug without a destroyed surface, and the crash-loop fallback (SH8) are proven. athanor-shelld is not masked: the dock does not use it. COSMIC's own dock keeps running in the dev VM's session; both draw, which is expected until the switch.
+The rig has no user manager, no real unit and one fixed output; this is where the unit file, the confinement, the memory budget (item 17), a launch from the dock behind a security context (item 8), hot-plug without a destroyed surface, and the crash-loop fallback (SH8) are proven. athanor-shelld is not masked: the dock does not use it. COSMIC's own dock keeps running in the dev VM's session; both draw, which is expected until the switch. The launch stage is `compositor-acceptance.sh`'s `restricted` stage with the dock as the launcher: a pinned entry pressed through AT-SPI, from the dock running under its own unit and confinement.
 
 - [ ] **Step 1: Write the failing check**
 
@@ -3962,15 +4265,80 @@ swap('app.get_name() == "athanor-bar"', "app.get_name() == name")
 swap("    app = application()\n", '    app = application(sys.argv[1] if len(sys.argv) > 1 else "athanor-bar")\n')
 path.write_text(text)
 EOF
+cat > $R/scripts/devvm/dock_press.py <<'EOF'
+"""dock_press.py: run in the guest's session by dock-acceptance.sh (stage launch), as
+`python3 - APP NAME < dock_press.py`.
+
+Presses the showing push button called NAME in the accessibility tree of the application
+APP through its first action, as a click does. Waits up to 10 s for the button; exits 1
+when it never shows.
+"""
+
+import sys
+import time
+
+import gi
+
+gi.require_version("Atspi", "2.0")
+from gi.repository import Atspi, GLib  # noqa: E402
+
+
+def application(name):
+    desktop = Atspi.get_desktop(0)
+    for index in range(desktop.get_child_count()):
+        app = desktop.get_child_at_index(index)
+        if app is not None and app.get_name() == name:
+            return app
+    return None
+
+
+def button(app, name):
+    pending = [app]
+    while pending:
+        node = pending.pop()
+        try:
+            if (
+                node.get_role() == Atspi.Role.PUSH_BUTTON
+                and node.get_name() == name
+                and node.get_state_set().contains(Atspi.StateType.SHOWING)
+            ):
+                return node
+            children = [node.get_child_at_index(i) for i in range(node.get_child_count())]
+        except GLib.Error:
+            # The widget was destroyed while the tree was walked: a rebuild replaced it.
+            continue
+        pending.extend(child for child in children if child is not None)
+    return None
+
+
+def main():
+    app_name, name = sys.argv[1], sys.argv[2]
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        app = application(app_name)
+        found = button(app, name) if app is not None else None
+        if found is not None:
+            found.do_action(0)
+            print(f"pressed {name}")
+            return 0
+        time.sleep(0.5)
+    print(f"no showing button {name!r} in {app_name}", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+EOF
 cat > $R/scripts/devvm/dock-acceptance.sh <<'EOF'
 #!/usr/bin/env bash
 # dock-acceptance.sh [stage...]
 # Package 2c of docs/architecture/doc_bar.md in the dev VM's real session, under the real
 # unit file and the real user manager: the dock starts as a Type=notify unit, its
 # confinement leaves glycin's image sandbox working and the favourites file writable, it
-# stays within its memory budget (section 5, item 17), an output that comes and goes never
-# restarts the process or leaks a surface, and a crash loop falls back to the vendor
-# layout (SH8).
+# stays within its memory budget (section 5, item 17), a pinned entry pressed on the dock
+# starts behind a Wayland security context in its own transient unit (item 8), an output
+# that comes and goes never restarts the process or leaks a surface, and a crash loop falls
+# back to the vendor layout (SH8).
 # Deploys the binary and the unit from .scratch/shell-rig/bin and forge/specs/athanor-dock,
 # and the vendor favourites from forge/specs/athanor-bar (the dock requires the bar's
 # package, which ships them). Build the binary with forge/test/shell/rig.sh build-dock.
@@ -3990,9 +4358,18 @@ DATA=$ROOT/forge/specs/athanor-dock/athanor-dock-1.0.0/data
 BAR_DATA=$ROOT/forge/specs/athanor-bar/athanor-bar-1.0.0/data
 SHOTS=$ROOT/.scratch/dock-acceptance
 PSS_LIMIT_KB=$((48 * 1024))
-STAGES=(deploy unit memory hotplug crash-loop cleanup)
+STAGES=(deploy unit memory launch hotplug crash-loop cleanup)
 STAGE=
 CLEANED=0
+# The launch stage's entry, and the file its wayland-info writes the globals it sees to.
+LAUNCH_ID=os.athanor.DockAcceptanceWaylandInfo
+GLOBALS=/tmp/athanor-dock-acceptance-globals
+# Globals only the main socket offers: an application behind the context sees none of them
+# (the list compositor-acceptance.sh checks).
+PRIVILEGED=(zcosmic_toplevel_info_v1 zcosmic_toplevel_manager_v1 ext_workspace_manager_v1
+    zcosmic_workspace_manager_v2 zwlr_layer_shell_v1 ext_data_control_manager_v1
+    zwlr_data_control_manager_v1 wp_security_context_manager_v1
+    zcosmic_keyboard_layout_manager_v1 cosmic_a11y_manager_v1)
 
 # Runs a command as the session user, with the session's bus and compositor.
 in_session() {
@@ -4104,6 +4481,61 @@ in_unit_namespace() { # in_unit_namespace SHELL-COMMAND
     guest_ssh "sudo nsenter --target $pid --mount --setuid=$uid --setgid=$uid -- sh -c '$1'"
 }
 
+# The session user's favourites file, which the dock and the bar share.
+favorites_path() {
+    # shellcheck disable=SC2016 # expanded by the guest's shell
+    in_session 'echo "${XDG_CONFIG_HOME:-$HOME/.config}/athanor/favorites.toml"'
+}
+
+# The application units the session holds, one per line, sorted.
+app_units() {
+    in_session "systemctl --user list-units --all --plain --no-legend 'app-athanor-*' | cut -d' ' -f1 | sort"
+}
+# The application units that were not among BEFORE, a list app_units printed earlier.
+new_units() { comm -13 <(printf '%s\n' "$1") <(app_units); }
+has_new_unit() { [[ -n $(new_units "$1") ]]; }
+
+# Item 8 from the dock: a pinned entry pressed on the dock starts in its own transient unit,
+# behind a security context that offers none of the privileged globals.
+stage_launch() {
+    local file before launched seen main global environment display
+    file=$(favorites_path)
+    [[ $(unit is-active) == active ]] || fresh_start
+    in_session test -e "$file" || fail "no favourites file at $file: the dock writes it on its first start"
+    ! in_session test -e "$file.dock-acceptance" ||
+        fail "$file.dock-acceptance is left from an earlier run: restore it by hand first"
+    # The session's favourites are kept aside; cleanup puts them back.
+    in_session cp -p "$file" "$file.dock-acceptance"
+    printf '%s\n' '[Desktop Entry]' 'Type=Application' "Name=$LAUNCH_ID" \
+        "Exec=sh -c \"wayland-info > $GLOBALS; exec sleep 600\"" |
+        in_session "mkdir -p ~/.local/share/applications && cat > ~/.local/share/applications/$LAUNCH_ID.desktop"
+    printf 'schema = 1\nfavorites = ["%s.desktop"]\n' "$LAUNCH_ID" | in_session "cat > $file"
+    in_session rm -f "$GLOBALS"
+    # A restart reads the new entry and the favourites at start, not through a monitor.
+    fresh_start
+    before=$(app_units)
+    in_session python3 - athanor-dock "$LAUNCH_ID" < "$HERE/dock_press.py" ||
+        fail "no pinned $LAUNCH_ID button on the dock"
+    wait_until 10 has_new_unit "$before" || fail "no new application unit after the press"
+    launched=$(new_units "$before")
+    [[ $launched =~ ^app-athanor-os\.athanor\.DockAcceptanceWaylandInfo@[0-9a-f]{32}\.service$ ]] ||
+        fail "unit name '$launched'"
+    wait_until 10 in_session "grep -q \"^interface: 'wl_compositor'\" $GLOBALS" ||
+        fail "no wayland-info output in $GLOBALS for $launched"
+    seen=$(in_session cat "$GLOBALS" | sed -n "s/^interface: '\([a-z0-9_]*\)'.*/\1/p")
+    main=$(in_session wayland-info | grep -c '^interface: ')
+    (($(wc -l <<< "$seen") < main)) || fail "$(wc -l <<< "$seen") globals behind the context, $main on the main socket"
+    for global in "${PRIVILEGED[@]}"; do
+        if grep -qx "$global" <<< "$seen"; then
+            fail "$global is offered behind the context"
+        fi
+    done
+    environment=$(in_session systemctl --user show -p Environment --value "$launched")
+    display=$(tr ' ' '\n' <<< "$environment" | sed -n 's/^WAYLAND_DISPLAY=//p')
+    [[ $display =~ ^/run/user/[0-9]+/athanor/[0-9a-f]{32}/wayland$ ]] || fail "WAYLAND_DISPLAY '$display'"
+    in_session systemctl --user stop "$launched"
+}
+
 stage_memory() {
     [[ $(unit is-active) == active ]] || fresh_start
     # At rest: the dock has drawn, and no menu is open.
@@ -4192,6 +4624,18 @@ stage_cleanup() {
         echo "cleanup: removing the crash-loop record failed" >&2
         failed=1
     }
+    local file
+    file=$(favorites_path)
+    if in_session test -e "$file.dock-acceptance"; then
+        in_session mv "$file.dock-acceptance" "$file" || {
+            echo "cleanup: restoring $file from $file.dock-acceptance failed" >&2
+            failed=1
+        }
+    fi
+    in_session "rm -f $GLOBALS ~/.local/share/applications/$LAUNCH_ID.desktop" || {
+        echo "cleanup: removing the launch stage's entry and globals failed" >&2
+        failed=1
+    }
     return "$failed"
 }
 
@@ -4222,8 +4666,10 @@ anchor = "- `compositor-acceptance.sh [stage...]` deploys `cc-probe`"
 assert text.count(anchor) == 1
 path.write_text(text.replace(anchor, """- `dock-acceptance.sh [stage...]`: athanor-dock under its real unit (package 2c):
   Type=notify, the confinement against glycin's sandbox and the favourites file, PSS within
-  48 MB, an output that comes and goes (needs `GPU_OUTPUTS=2`, the default), and the
-  crash-loop fallback to the vendor layout. Build the binary first with
+  48 MB, a pinned entry launched from the dock behind a security context (item 8, pressed
+  through `dock_press.py`; the session's favourites are restored afterwards), an output
+  that comes and goes (needs `GPU_OUTPUTS=2`, the default), and the crash-loop fallback to
+  the vendor layout. Build the binary first with
   `forge/test/shell/rig.sh build-dock`. COSMIC's own dock keeps running beside it.
 """ + anchor))
 EOF
@@ -4238,14 +4684,192 @@ bash $R/scripts/devvm/dock-acceptance.sh
 bash $R/scripts/devvm/bar-acceptance.sh hotplug
 ```
 
-Expected: `PASS deploy`, `PASS unit`, a `memory: athanor-dock PSS <n> kB` line with n ≤ 49152 and `PASS memory`, then `PASS hotplug`, `PASS crash-loop` and `PASS cleanup`; the bar's hotplug stage still passes with the parameterized `bar_surfaces.py`. Look at `.scratch/dock-acceptance/unit.png`: the dock stands at the bottom edge of the float layout with the three openers and non-blank icons. Look at `crash-loop.png`: the dock is back on the vendor layout.
+Expected: `PASS deploy`, `PASS unit`, a `memory: athanor-dock PSS <n> kB` line with n ≤ 49152 and `PASS memory`, `pressed os.athanor.DockAcceptanceWaylandInfo` and `PASS launch`, then `PASS hotplug`, `PASS crash-loop` and `PASS cleanup`; the bar's hotplug stage still passes with the parameterized `bar_surfaces.py`. Look at `.scratch/dock-acceptance/unit.png`: the dock stands at the bottom edge of the float layout with the three openers and non-blank icons. Look at `crash-loop.png`: the dock is back on the vendor layout.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 R=/var/home/hr-mes/athanor/.claude/worktrees/shell-2c-dock
-git -C $R add scripts/devvm/dock-acceptance.sh scripts/devvm/bar_surfaces.py scripts/devvm/README.md
+git -C $R add scripts/devvm/dock-acceptance.sh scripts/devvm/dock_press.py scripts/devvm/bar_surfaces.py scripts/devvm/README.md
 git -C $R commit -m "test(dock): acceptance in the dev VM under the real unit"
+```
+
+### Task 9: The DAG rebuilds a package when a crate it builds from changes
+
+**Files:**
+- Modify: `forge/scripts/dag_orchestrator.py`
+- Create: `forge/scripts/tests/test_dag_orchestrator.py`
+
+**Interfaces:**
+- Produces: `dag_orchestrator.path_dependencies(spec_dir) -> list[str]` (the directories of the Cargo path dependencies outside `spec_dir`, followed transitively, sorted) and `dag_orchestrator.package_hash(spec_dir) -> str`, which `build_dag` uses for every custom package.
+
+`build_dag` hashes only `forge/specs/athanor-<pkg>`, so a change in `system/athanor-apps`, `athanor-unit` or `athanor-layout` dirties neither the bar nor the dock. The limitation predates this plan, but `athanor-apps` exists only for these two programs. The node hash now also covers each path dependency the package's crates reach outside their spec directory. A package without any keeps its plain directory hash, so only the packages that have path dependencies rebuild once after this lands. This task is independent of Tasks 4 to 8.
+
+- [ ] **Step 1: Write the failing test**
+
+```bash
+R=/var/home/hr-mes/athanor/.claude/worktrees/shell-2c-dock
+cat > $R/forge/scripts/tests/test_dag_orchestrator.py <<'EOF'
+"""Unit tests of forge/scripts/dag_orchestrator.py: a package's hash covers the Cargo path
+dependencies it builds from (python3 -B -m unittest discover -s forge/scripts/tests -v)."""
+
+import importlib.util
+import pathlib
+import tempfile
+import unittest
+
+SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "dag_orchestrator.py"
+spec = importlib.util.spec_from_file_location("dag_orchestrator", SCRIPT)
+dag = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(dag)
+
+
+def crate(root, rel, deps=""):
+    directory = root / rel
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "Cargo.toml").write_text(
+        f'[package]\nname = "{directory.name}"\nversion = "1.0.0"\n\n[dependencies]\n{deps}'
+    )
+    (directory / "lib.rs").write_text(f"// {rel}\n")
+    return directory
+
+
+class PathDependenciesTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = pathlib.Path(tmp.name).resolve()
+        crate(self.root, "system/unit")
+        crate(self.root, "system/apps", 'unit = { path = "../unit" }\n')
+        self.spec = self.root / "specs/athanor-dock"
+        crate(
+            self.root,
+            "specs/athanor-dock/dock-1.0.0",
+            'apps = { path = "../../../system/apps" }\ninner = { path = "inner" }\nserde = "1"\n',
+        )
+        crate(self.root, "specs/athanor-dock/dock-1.0.0/inner")
+
+    def test_path_dependencies_are_followed_and_those_inside_are_skipped(self):
+        self.assertEqual(
+            dag.path_dependencies(str(self.spec)),
+            [str(self.root / "system/apps"), str(self.root / "system/unit")],
+        )
+
+    def test_a_change_two_path_dependencies_away_changes_the_package_hash(self):
+        before = dag.package_hash(str(self.spec))
+        (self.root / "system/unit/lib.rs").write_text("// changed\n")
+        self.assertNotEqual(dag.package_hash(str(self.spec)), before)
+
+    def test_a_package_without_path_dependencies_keeps_its_directory_hash(self):
+        plain = crate(self.root, "specs/athanor-plain/plain-1.0.0", 'serde = "1"\n').parent
+        self.assertEqual(dag.package_hash(str(plain)), dag.compute_dir_hash(str(plain)))
+
+
+if __name__ == "__main__":
+    unittest.main()
+EOF
+```
+
+- [ ] **Step 2: Run it and see it fail**
+
+```bash
+R=/var/home/hr-mes/athanor/.claude/worktrees/shell-2c-dock
+python3 -B -m unittest discover -s $R/forge/scripts/tests -v
+```
+
+Expected: the three new tests error with `AttributeError: module 'dag_orchestrator' has no attribute 'path_dependencies'` (and `package_hash`); the link-order tests pass.
+
+- [ ] **Step 3: Implement**
+
+```bash
+R=/var/home/hr-mes/athanor/.claude/worktrees/shell-2c-dock
+python3 - "$R/forge/scripts/dag_orchestrator.py" <<'EOF'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+text = path.read_text()
+def swap(old, new):
+    global text
+    assert text.count(old) == 1, old
+    text = text.replace(old, new)
+swap("import hashlib\n", "import hashlib\nimport tomllib\n")
+swap("\ndef parse_spec_dependencies(spec_path):\n", '''
+def path_dependencies(spec_dir):
+    """The directories of the Cargo path dependencies that the crates under spec_dir reach
+    outside it, followed transitively, sorted. The package builds from their sources too."""
+    spec_root = os.path.realpath(spec_dir)
+    pending = []
+    for root, dirs, files in os.walk(spec_dir):
+        dirs[:] = sorted(d for d in dirs if d != "target" and not d.startswith("."))
+        if "Cargo.toml" in files:
+            pending.append(os.path.join(root, "Cargo.toml"))
+    found = set()
+    while pending:
+        manifest = pending.pop()
+        with open(manifest, "rb") as f:
+            data = tomllib.load(f)
+        tables = [data, *data.get("target", {}).values()]
+        for table in tables:
+            for kind in ("dependencies", "build-dependencies", "dev-dependencies"):
+                for dep in table.get(kind, {}).values():
+                    if not isinstance(dep, dict) or "path" not in dep:
+                        continue
+                    target = os.path.realpath(os.path.join(os.path.dirname(manifest), dep["path"]))
+                    inside = target == spec_root or target.startswith(spec_root + os.sep)
+                    if inside or target in found:
+                        continue
+                    found.add(target)
+                    pending.append(os.path.join(target, "Cargo.toml"))
+    return sorted(found)
+
+
+def package_hash(spec_dir):
+    """The hash of a custom package: its spec directory and, when its crates have path
+    dependencies outside it, each of those directories, named relative to spec_dir. A
+    package without any keeps the plain directory hash."""
+    dependencies = path_dependencies(spec_dir)
+    if not dependencies:
+        return compute_dir_hash(spec_dir)
+    hasher = hashlib.sha256(compute_dir_hash(spec_dir).encode())
+    spec_root = os.path.realpath(spec_dir)
+    for dependency in dependencies:
+        hasher.update(os.path.relpath(dependency, spec_root).encode())
+        hasher.update(compute_dir_hash(dependency).encode())
+    return hasher.hexdigest()[:16]
+
+
+def parse_spec_dependencies(spec_path):
+''')
+swap("        hash_val = compute_dir_hash(spec_dir)\n", "        hash_val = package_hash(spec_dir)\n")
+path.write_text(text)
+EOF
+```
+
+The orchestrator runs on ubuntu-24.04 with Python 3.12, so `tomllib` is in the standard library.
+
+- [ ] **Step 4: Run it and see it pass, and list the packages that rebuild once**
+
+```bash
+R=/var/home/hr-mes/athanor/.claude/worktrees/shell-2c-dock
+python3 -B -m unittest discover -s $R/forge/scripts/tests -v
+python3 - "$R/forge/scripts/dag_orchestrator.py" "$R/forge/specs" <<'EOF'
+import importlib.util, pathlib, sys
+spec = importlib.util.spec_from_file_location("dag_orchestrator", sys.argv[1])
+dag = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(dag)
+for directory in sorted(pathlib.Path(sys.argv[2]).iterdir()):
+    if directory.is_dir() and dag.path_dependencies(str(directory)):
+        print(directory.name)
+EOF
+```
+
+Expected: every test passes. The listing parses every spec directory's manifests without an error and names the packages whose hash changes, which rebuild once: `athanor-bar` and `athanor-dock` among them (17 packages at 6e1d357f, measured). Put the listing in the pull request.
+
+- [ ] **Step 5: Commit**
+
+```bash
+R=/var/home/hr-mes/athanor/.claude/worktrees/shell-2c-dock
+git -C $R add forge/scripts/dag_orchestrator.py forge/scripts/tests/test_dag_orchestrator.py
+git -C $R commit -m "fix(forge): hash the Cargo path dependencies of a package into its DAG node"
 ```
 
 ---
@@ -4256,29 +4880,38 @@ git -C $R commit -m "test(dock): acceptance in the dev VM under the real unit"
 - One surface per output, edge from `dock_edge(panel, shape)`, icons only when vertical: Task 4 (`place`), Task 5 (`Surface::place`, the `vertical()` orientation of the row).
 - Launcher, workspaces, application library, favourites, running applications with minimised windows: Task 3 (`openers`, `row`, `model`), Task 5 (the island), Task 7 (e2e and atspi).
 - Pin and unpin from the context menu, reorder by drag: Task 3 (`row`, `Store::change`, `REORDER`), Task 2 (`favorites::moved`), Task 7 (pin, unpin, external write). Drag itself is unit-tested only: the rig has no pointer.
-- Visible, auto-hide and none, live: Task 4 (`autohide`, `Placement::auto_hide`), Task 5 (exclusive zone, strip, stack), Task 7 (knob and presets applied live).
+- Visible, auto-hide and none, live: Task 4 (`autohide`, `Placement::auto_hide`), Task 5 (exclusive zone, a strip along the whole edge, stack, and `dock-roundtrip`: the surface off screen and back against cosmic-comp), Task 7 (knob and presets applied live).
 - Right-to-left mirroring of the vertical dock: Task 4, Task 7 (`-rtl` goldens).
 - Surfaces: layer-surface guard, Cairo renderer, `DT_NEEDED` order: Task 5 (`layer_guard.rs`, `check_shim_link_order`), Task 6 (unit `GSK_RENDERER=cairo`, `%check`).
 - Live layout and outputs, including hot-plug and rotation, never destroying a departed output's surface: Task 5 (`watch`, `rebuild`, `release`), Task 8 (hotplug).
 - Favourites file shared with the bar, one module: Tasks 2 and 3.
-- Landlock at start (BR1): Task 5 (`main.rs`). Secure launch (BR2): Task 3 routes every start through `athanor-compositor-client`'s launch.
+- Landlock at start (BR1): Task 5 (`main.rs`). Secure launch (BR2): Task 3 routes every start through `athanor-compositor-client`'s launch, and Task 8's `launch` stage proves acceptance item 8 from the dock under its own unit.
 - Crash-loop fallback (SH8): Task 5 (`main.rs`), Task 8.
 - BR9, twelve cases: Task 7. Acceptance 17, 48 MB: Task 7 (rig) and Task 8 (real unit).
-- Packaging and image: Task 6.
+- Packaging and image: Task 6. The DAG rebuilds bar and dock when a shared crate changes: Task 9.
 
-**Left to other packages, on purpose:** BR8 (the session wrapper and the translator stop starting COSMIC's dock, and the unit is enabled) is package 2b.5. Acceptance item 8 (`wayland-info` started from the dock) rests on the launch code of package 2a, which `compositor-acceptance.sh` already proves; the dock adds no launch path of its own. SH13 retargeting of the goldens follows the existing process.
+**Left to other packages, on purpose:** BR8 (the session wrapper and the translator stop starting COSMIC's dock, and the unit is enabled) is package 2b.5, which must land before the switch and start `athanor-dock.service`: until then the dock is installed but not started. SH13 retargeting of the goldens follows the existing process.
 
-**Not provable in the rig, and where it is proven instead:** drag reorder, the pointer on the strip and its timing (unit tests in Tasks 3 and 4, and by hand in the dev VM); keyboard reach into a hidden dock (none in this package: a hidden dock is reached by the pointer, as COSMIC's); the atspi count of 4 (Task 7, Step 4 confirms it against the tree before it is relied on).
+**Not provable in the rig, and where it is proven instead:** drag reorder, the pointer on the strip and its timing (unit tests in Tasks 3 and 4, and by hand in the dev VM); keyboard reach into a hidden dock (none in this package: a hidden dock is reached by the pointer, as COSMIC's); the atspi count of 4 is an estimate (Task 7, Step 4 confirms it against the tree before it is relied on).
+
+**Sequencing:** Unit A (Tasks 1 to 3) ends at its checkpoint and merges into the bar branches first; 2b.3 and 2b.4 are re-pointed to `athanor_apps::menu::{attach, attach_popover}` and the `Host` hooks (Task 3, Interfaces). Unit B (Tasks 4 to 9) follows, and Task 7 merges the 2b.3 branch for `bar_session.py --client`.
+
+**Decision left to the maintainer:** if `dock-roundtrip` fails (Task 5, Step 4b), BR7's "None: no surface" cannot be kept to the letter while cosmic-comp closes the connection of a client that recreates a layer surface. Step 4b keeps an empty mapped surface and puts the choice to the maintainer; `doc_bar.md` is not changed by this plan.
+
+**Follow-ups, out of scope:** the old dock's name survives in three places, and the new binary takes that name over:
+- `system/athanor-style/src/appearance_engine.rs:580-582` runs `pkill -STOP athanor-dock` and `pkill -CONT athanor-dock`. It has no caller outside the frozen shell-rs today, but it would freeze the new dock if it were invoked.
+- `forge/specs/athanor-settings-rs/.../pages/desktop.rs:76,88` starts and stops `athanor-dock.service`; the crate is out of the workspace.
+- `NEXT.md:157`.
 
 **Placeholder scan:** every step carries its code or its exact command; the only generated artefacts are the goldens (reviewed by eye in Task 7) and the `.pot` (written by `update.sh`).
 
 **Type consistency:** `Host`, `Store`, `Row`, `openers::button`, `Placement`, `Anchor`, `AutoHide`, `Event` and `Timer` are used in Tasks 5 to 8 with the signatures Tasks 3 and 4 produce.
 
-**Order:** `verify.py shipped` is red between Task 5 (a new binary member) and Task 6 (its package entry), by design; nothing is pushed in between.
+**Order:** `verify.py panics` is red inside Task 3, from Step 1 to Step 3, because `favorites.rs` is written with its test module first. `verify.py shipped` is red between Task 5 (a new binary member) and Task 6 (its package entry), by design; nothing is pushed in between.
 
 ## Acceptance
 
-Run in order; every command must exit 0.
+Run in order; every command must exit 0, except the `verify.py` run of the baseline comparison, which exits with the number of failed checks.
 
 ```bash
 R=/var/home/hr-mes/athanor/.claude/worktrees/shell-2c-dock
@@ -4294,12 +4927,17 @@ bash $R/forge/test/shell/rig.sh bar-e2e
 bash $R/forge/test/shell/rig.sh surface bar
 bash $R/forge/test/shell/rig.sh build-dock
 bash $R/forge/test/shell/rig.sh layer-guard dock
+bash $R/forge/test/shell/rig.sh dock-roundtrip
 bash $R/forge/test/shell/rig.sh atspi dock
 bash $R/forge/test/shell/rig.sh dock-e2e
 bash $R/forge/test/shell/rig.sh surface dock
 python3 -B -m unittest discover -s $R/forge/test/shell/tests
+python3 -B -m unittest discover -s $R/forge/scripts/tests
 python3 $R/system/athanor-style/calmo/generate.py --check
-python3 $R/scripts/verify.py
+python3 $R/scripts/verify.py > $R/.scratch/verify-now.txt
+grep -q '^Problemi totali: ' $R/.scratch/verify-now.txt
+comm -13 <(grep '^          ' $R/.scratch/verify-baseline.txt | sort) <(grep '^          ' $R/.scratch/verify-now.txt | sort) > $R/.scratch/verify-new.txt
+test ! -s $R/.scratch/verify-new.txt
 bash $R/scripts/devvm/dock-acceptance.sh
 bash $R/scripts/devvm/bar-acceptance.sh
 ```
