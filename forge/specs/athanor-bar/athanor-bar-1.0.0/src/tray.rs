@@ -141,6 +141,18 @@ pub fn read(props: &Variant, wanted_px: u32) -> Option<Item> {
     })
 }
 
+/// The `Scroll` delta for a GTK scroll step: 120 per notch as Qt counts, positive away
+/// from the user (GTK counts down as positive), bounded to ten notches. `None` for no
+/// movement (open doubt 4: the sign follows KDE's host).
+#[must_use]
+pub fn scroll_delta(delta: f64) -> Option<i32> {
+    if !delta.is_finite() || delta.abs() < f64::EPSILON {
+        return None;
+    }
+    // In range after the clamp, so the cast neither saturates nor truncates past a notch.
+    Some((-(delta * 120.0)).clamp(-1200.0, 1200.0) as i32)
+}
+
 /// An object path, or a string holding one, as some items send. `/` and `/NO_DBUSMENU`
 /// mean "no menu".
 fn menu_path(value: &Variant) -> Option<String> {
@@ -430,5 +442,18 @@ mod tests {
         ] {
             assert_eq!(split_id(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn scroll_turns_gtk_steps_into_bounded_sni_deltas() {
+        assert_eq!(
+            scroll_delta(1.0),
+            Some(-120),
+            "down in GTK is negative in SNI"
+        );
+        assert_eq!(scroll_delta(-0.5), Some(60));
+        assert_eq!(scroll_delta(0.0), None);
+        assert_eq!(scroll_delta(1.0e9), Some(-1200));
+        assert_eq!(scroll_delta(f64::NAN), None);
     }
 }

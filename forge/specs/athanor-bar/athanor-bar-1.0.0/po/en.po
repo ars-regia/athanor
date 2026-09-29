@@ -26,7 +26,7 @@ msgstr "Running applications"
 
 #: ../../../../system/athanor-apps/src/row.rs:202
 #: ../../../../system/athanor-apps/src/row.rs:640
-#: ../../../../system/athanor-apps/src/row.rs:642 src/ui/notifications.rs:521
+#: ../../../../system/athanor-apps/src/row.rs:642 src/ui/notifications.rs:577
 msgid "Unknown application"
 msgstr "Unknown application"
 
@@ -53,7 +53,7 @@ msgstr "Untitled window"
 msgid "Minimise {title}"
 msgstr "Minimise {title}"
 
-#: ../../../../system/athanor-apps/src/row.rs:491 src/ui/notifications.rs:647
+#: ../../../../system/athanor-apps/src/row.rs:491 src/ui/notifications.rs:703
 #, rust-format
 msgid "Close {title}"
 msgstr "Close {title}"
@@ -152,33 +152,33 @@ msgstr "Input source: {name}"
 msgid "Input source"
 msgstr "Input source"
 
-#: src/ui/mod.rs:589
+#: src/ui/mod.rs:621
 msgid "Unpin from Bar"
 msgstr "Unpin from Bar"
 
-#: src/ui/mod.rs:591
+#: src/ui/mod.rs:623
 msgid "Pin to Bar"
 msgstr "Pin to Bar"
 
-#: src/ui/notifications.rs:763
+#: src/ui/notifications.rs:819
 #, rust-format
 msgid "Notifications, {count} waiting"
 msgstr "Notifications, {count} waiting"
 
-#: src/ui/notifications.rs:768 src/ui/notifications.rs:801
-#: src/ui/notifications.rs:804
+#: src/ui/notifications.rs:824 src/ui/notifications.rs:857
+#: src/ui/notifications.rs:860
 msgid "Notifications"
 msgstr "Notifications"
 
-#: src/ui/notifications.rs:808
+#: src/ui/notifications.rs:864
 msgid "Clear all"
 msgstr "Clear all"
 
-#: src/ui/notifications.rs:813
+#: src/ui/notifications.rs:869
 msgid "No notifications"
 msgstr "No notifications"
 
-#: src/ui/notifications.rs:823
+#: src/ui/notifications.rs:879
 msgid "Do not disturb"
 msgstr "Do not disturb"
 
@@ -237,3 +237,7 @@ msgstr "Tiling"
 #: src/ui/tiling.rs:65
 msgid "Tile windows"
 msgstr "Tile windows"
+
+#: src/ui/tray.rs:589
+msgid "System tray"
+msgstr "System tray"

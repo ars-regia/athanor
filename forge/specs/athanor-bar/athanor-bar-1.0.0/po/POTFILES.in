@@ -18,5 +18,6 @@ src/ui/popup.rs
 src/ui/power.rs
 src/ui/running.rs
 src/ui/tiling.rs
+src/ui/tray.rs
 ../../../../system/athanor-apps/src/openers.rs
 ../../../../system/athanor-apps/src/row.rs

@@ -7,6 +7,7 @@ mod accessibility;
 mod clock;
 mod input;
 mod logind;
+mod menu;
 mod notifications;
 mod openers;
 mod popup;
@@ -14,6 +15,7 @@ mod popups;
 mod power;
 mod running;
 mod tiling;
+mod tray;
 
 use std::cell::{Cell, RefCell};
 use std::env;
@@ -47,12 +49,14 @@ pub enum Changed {
     Favorites,
     /// The notification service: its state, the list, the popups.
     Notifications,
+    /// The tray: an item came, left, or changed.
+    Tray,
     /// Once a second: the clock, and a time zone that changed.
     Tick,
 }
 
 impl Changed {
-    pub const ALL: [Changed; 7] = [
+    pub const ALL: [Changed; 8] = [
         Changed::Windows,
         Changed::Workspaces,
         Changed::Keyboard,
@@ -60,6 +64,7 @@ impl Changed {
         Changed::Favorites,
         Changed::Tick,
         Changed::Notifications,
+        Changed::Tray,
     ];
 }
 
@@ -149,6 +154,8 @@ pub struct Bar {
     open_on_start: Option<Module>,
     /// One service per bar, not per surface: every surface's button reads it.
     notifications: Rc<notifications::Service>,
+    /// One tray host per bar: the watcher knows the bar as a single host.
+    tray: Rc<tray::Host>,
     /// The bar itself, for the `&self` methods that defer work to an idle.
     me: Weak<Bar>,
 }
@@ -190,6 +197,7 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
             .and_then(|id| Module::from_id(&id)),
         me: weak.clone(),
         notifications: notifications::Service::start(weak),
+        tray: tray::Host::start(weak),
     });
     bar.rebuild();
     if bar.surfaces.borrow().is_empty() {
@@ -227,6 +235,7 @@ fn build(module: Module, bar: &Rc<Bar>, connector: Option<&str>) -> Option<Box<d
         Module::Accessibility => accessibility::new(bar),
         Module::RunningApps => running::new(bar),
         Module::Notifications => notifications::new(bar),
+        Module::Tray => tray::new(bar),
         // Later tasks of this plan, and the plans of 2b.3 to 2b.5.
         _ => None,
     }

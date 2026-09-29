@@ -169,3 +169,6 @@ msgstr "Alle löschen"
 
 msgid "No notifications"
 msgstr "Keine Benachrichtigungen"
+
+msgid "System tray"
+msgstr "Infobereich"
