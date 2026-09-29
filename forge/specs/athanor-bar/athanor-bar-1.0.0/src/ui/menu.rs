@@ -7,6 +7,7 @@ use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use athanor_bar::dbusmenu::{self, Entry, Layout, Toggle};
+use gtk4::accessible::Property;
 use gtk4::prelude::*;
 use gtk4::{gio, glib};
 
@@ -176,6 +177,7 @@ impl Menu {
         }
         let model = self.model(&layout.entries);
         self.popover.set_menu_model(Some(&model));
+        name_items(self.popover.upcast_ref());
     }
 
     /// Separators split sections, as GMenu draws them.
@@ -303,4 +305,47 @@ impl Menu {
         self.again.set(false);
         self.event(0, "closed");
     }
+}
+
+/// Names every menu entry after its label. GTK 4.20 names a model button only through a
+/// LabelledBy relation to its label, and that label's accessible name is empty, so a screen
+/// reader heard every entry as an unnamed "menu item" (BR9). The relation outranks the Label
+/// property in the name computation, so it goes.
+fn name_items(widget: &gtk4::Widget) {
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        if matches!(
+            current.accessible_role(),
+            gtk4::AccessibleRole::MenuItem
+                | gtk4::AccessibleRole::MenuItemCheckbox
+                | gtk4::AccessibleRole::MenuItemRadio
+        ) {
+            if let Some(text) = label_text(&current) {
+                current.reset_relation(gtk4::AccessibleRelation::LabelledBy);
+                current.update_property(&[Property::Label(&text)]);
+            }
+        } else {
+            name_items(&current);
+        }
+        child = current.next_sibling();
+    }
+}
+
+/// The first non-empty label under `widget`, without its mnemonic underscore: the entry's
+/// own label comes before its accelerator.
+fn label_text(widget: &gtk4::Widget) -> Option<glib::GString> {
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        if let Some(label) = current.downcast_ref::<gtk4::Label>() {
+            let text = label.text();
+            if !text.is_empty() {
+                return Some(text);
+            }
+        }
+        if let Some(text) = label_text(&current) {
+            return Some(text);
+        }
+        child = current.next_sibling();
+    }
+    None
 }
