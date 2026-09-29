@@ -73,14 +73,17 @@ class CasesTest(unittest.TestCase):
         "bar-calendar",
         "bar-accessibility",
         "bar-tiling",
+        "bar-popups",
+        "bar-notifications",
+        "bar-tray",
     )
 
-    def test_the_bar_brings_six_scenes_of_twelve_cases(self):
+    def test_the_bar_brings_nine_scenes_of_twelve_cases(self):
         found = [
             case for surface in self.BAR_SCENES for case in cases.surface_cases(surface)
         ]
-        self.assertEqual(len(found), 72)
-        self.assertEqual(len({c.tag for c in found}), 72)
+        self.assertEqual(len(found), 108)
+        self.assertEqual(len({c.tag for c in found}), 108)
 
     def test_bar_tags_are_file_names_and_name_their_scene(self):
         for surface in self.BAR_SCENES:
