@@ -59,7 +59,7 @@ Read it with `docs/architecture/doc_shell.md` rev 5: SH1 (no facades) and SH13 (
 - The bar keeps `ui/popup.rs`. `Popup::new(bar, child, name)`, `Popup::open` and `switch_row(text)` are unchanged; `popup::attach(bar, button)` wraps `athanor_apps::menu::attach(button, popup::towards_inside(bar))`, and `popup::towards_inside(bar)` is the side facing the inside of the screen. The bar also keeps `crate::i18n::{tr, tr_with}`, which hands its catalogue to `athanor_apps::i18n::set_catalog`. Every popover of this plan is built by `Popup::new`, so the modules import nothing from athanor-apps. A popover built elsewhere would be attached with `athanor_apps::menu::attach_popover(button, popover, popup::towards_inside(bar))`.
 - 2b.3 adds `Bar::popovers_changed` and calls it when a popover of the bar shows or closes (BR6, "Stacking"), so the modules' popovers reach it through `Popup::new`. 2b.3 also adds `dbusmenu`, `notices`, `popups` and `tray` to `lib.rs` and `menu`, `notifications`, `popups` and `tray` to `ui/mod.rs`, rewrites `bar_session.py` with argparse, adds three scenes, and edits `rig.sh`, the translations and the workflow.
 
-The code of this plan is written against Unit A: every signature it uses from the bar, athanor-apps and athanor-unit was checked on `b648f633`. A step that inserts at an anchor where 2b.3 also inserts holds as written. Two steps rewrite lines that 2b.3 rewrites: Task 3, Step 2 (`bar_session.py`) and Task 8, Step 5 (the scenes). They are written against the 2b.3 plan at `7651c3b5`, because its code does not exist yet, and are marked **re-point after 2b.3**: when executing, check their anchors against the merged 2b.3 code, keep the behaviour the step describes, and change nothing else in the step. This plan brings 4 of the 15 scenes of BR9, which is 48 of the 180 surface cases: `bar-network`, `bar-bluetooth`, `bar-audio` and `bar-battery`.
+The code of this plan is written against Unit A: every signature it uses from the bar, athanor-apps and athanor-unit was checked on `b648f633`. A step that inserts at an anchor where 2b.3 also inserts holds as written. Two steps rewrite lines that 2b.3 rewrote: Task 3, Step 2 (`bar_session.py`) and Task 8, Step 5 (the scenes). Their anchors were checked against the 2b.3 code at `29d9293f`: the argparse `parse`, `helpers = []` after the `RequestName` check, the `bar-tray)` arm of `capture_bar`, and the nine-scene lists in `cases.py`, `test_cases.py` and the workflow matrix. This plan brings 4 of the 15 scenes of BR9, which is 48 of the 180 surface cases: `bar-network`, `bar-bluetooth`, `bar-audio` and `bar-battery`.
 
 **Rulings this plan makes.** The spec leaves these open, or says them differently:
 
@@ -2573,7 +2573,7 @@ def start(tag):
     ]
 ```
 
-- [ ] **Step 2: Give `bar_session.py` the fixtures and `SetBrightness`** (re-point after 2b.3)
+- [ ] **Step 2: Give `bar_session.py` the fixtures and `SetBrightness`**
 
 Apply these edits to `forge/test/shell/bar_session.py`:
 
@@ -6934,7 +6934,7 @@ msgfmt --check -o /dev/null forge/test/shell/locale/bar-de.po
 
 Expected: `msgfmt` exits 0, with no duplicate message definitions.
 
-- [ ] **Step 5: The four scenes in `rig.sh`, `cases.py`, the unit test and CI** (re-point after 2b.3)
+- [ ] **Step 5: The four scenes in `rig.sh`, `cases.py`, the unit test and CI**
 
 In `forge/test/shell/rig.sh`:
 
