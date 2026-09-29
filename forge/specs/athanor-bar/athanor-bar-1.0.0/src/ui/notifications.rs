@@ -491,9 +491,9 @@ impl Service {
         self.pointer_inside.set(inside);
     }
 
-    /// Draws the visible popups, or hides the surface when there are none or a popover of
-    /// the bar is open. GTK sends no `leave` to a window that hides, so hiding also clears
-    /// the pointer (Review Focus 1).
+    /// Draws the visible popups, or takes them off the screen when there are none or a
+    /// popover of the bar is open. The pointer may never see a `leave` from a surface that
+    /// stops taking input, so hiding also clears it (Review Focus 1).
     pub(super) fn redraw_popups(&self) {
         let (Some(bar), Some(me)) = (self.bar.upgrade(), self.me.upgrade()) else {
             return;

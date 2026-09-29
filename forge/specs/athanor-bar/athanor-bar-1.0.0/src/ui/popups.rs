@@ -1,11 +1,17 @@
 //! The notification popups (doc_bar.md BR4): one layer surface at the end corner on the
 //! panel's side, above windows, never taking the keyboard focus (ruling 14). The newest
 //! popup sits nearest the panel.
+//!
+//! Once mapped, the surface stays mapped for the life of the process: cosmic-comp 1.8.0
+//! drops the Wayland connection of a gtk4-layer-shell client that destroys a mapped layer
+//! surface, which is what hiding the window does. With no popup to show, the window holds
+//! no card and takes no input, so it is neither seen nor in the pointer's way.
 
 use std::rc::{Rc, Weak};
 
 use athanor_bar::notices::Notice;
 use athanor_layout::preset::PanelEdge;
+use gtk4::cairo;
 use gtk4::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
@@ -85,14 +91,33 @@ impl Window {
             self.cards.append(&card(service, notice, Place::Popup));
         }
         self.window.present();
+        self.set_input(true);
     }
 
+    /// Takes every popup off the screen without unmapping the surface (see the module's
+    /// documentation): no card, and an empty input region.
     pub(super) fn hide(&self) {
-        self.window.set_visible(false);
+        while let Some(child) = self.cards.first_child() {
+            self.cards.remove(&child);
+        }
+        self.set_input(false);
     }
 
+    /// A popup is on screen.
     pub(super) fn visible(&self) -> bool {
-        self.window.is_visible()
+        self.cards.first_child().is_some()
+    }
+
+    /// The whole surface takes the pointer, or none of it does.
+    // ponytail: GTK resets the input region of client-decorated windows only; a layer
+    // surface is not one, so the region set here holds until the next call.
+    fn set_input(&self, taking: bool) {
+        let Some(surface) = self.window.surface() else {
+            return;
+        };
+        // No region is the whole surface.
+        let empty = cairo::Region::create();
+        surface.set_input_region((!taking).then_some(&empty));
     }
 
     /// Lets the window go without destroying its layer surface (see `Surface::abandon`).
