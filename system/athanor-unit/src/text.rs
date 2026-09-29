@@ -2,12 +2,13 @@
 //! characters and bidirectional formatting characters removed, then truncated to a number
 //! of characters. Markup is never interpreted: the bar sets these strings as plain text, so
 //! a tag shows as written.
-// ponytail: the filter of athanor_trust_state::display (PR #64, not below this branch yet).
-// Once it is, both call one function.
+// The bar and athanor-shelld share this filter.
 
 pub const NAME_CHARS: usize = 64;
 pub const SUMMARY_CHARS: usize = 256;
 pub const BODY_CHARS: usize = 2048;
+/// A window title, as the bar shows it (doc_bar.md, BR3).
+pub const TITLE_CHARS: usize = 256;
 
 /// One line: every control character goes, newlines too.
 #[must_use]

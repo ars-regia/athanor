@@ -12,15 +12,18 @@
 #   rig.sh build-layout     clippy, tests and release build of the layout crates (translator and chooser) and athanor-unit into <out>/bin
 #   rig.sh build-compositor-client  clippy, tests and release build of cc-probe into <out>/bin
 #   rig.sh build-shelld     clippy, tests and release build of athanor-shelld into <out>/bin
+#   rig.sh build-bar        clippy, tests and release build of athanor-bar into <out>/bin, with the DT_NEEDED check
 #   rig.sh shelld-e2e       athanor-shelld on a session bus: names, notifications, refusal of the private interface, tray watcher, memory
+#   rig.sh bar-e2e          athanor-bar in a scene: READY, live layout, mandatory keys, running windows, the favourites import and pinning, the power menu against a fake logind, memory
 #   rig.sh compositor-e2e   the compositor client against cosmic-comp, and against sway without the COSMIC globals
-#   rig.sh layer-guard      the greeter must refuse to run when the shim loads late
+#   rig.sh layer-guard <greeter|bar>   the surface must refuse to run when the shim loads late
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
-#   rig.sh atspi <greeter|chooser>   every interactive widget has a role and a name
+#   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
+#   rig.sh atspi <greeter|chooser|bar>   every interactive widget has a role and a name
 #   rig.sh rig-tests        unit tests of the rig's own scripts, against the rig's tools
 #   rig.sh cosmic-panel-defaults   COSMIC's shipped panel keys equal the renderer's fixture
 #   rig.sh chooser-e2e      press a preset in the chooser and wait for the panel configuration
-#   rig.sh surface <name>          capture every case of a surface and compare with the goldens
+#   rig.sh surface <greeter|layout|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling>  capture every case of a surface and compare with the goldens
 #   rig.sh update-goldens <name>   replace the goldens with a fresh capture, deliberately
 set -euo pipefail
 
@@ -94,6 +97,22 @@ seed_layout() { # seed_layout <dir> <preset> <panel> <dock or ->
     } > "$1/athanor/layout.toml"
 }
 
+# The seed of a bar case: the layout document, two keyboard layouts so the input source
+# shows, one favourite the rig has installed, and COSMIC's mode (SH5).
+seed_bar() { # seed_bar <dir> <preset> <panel> <dock or -> <light|dark>
+    seed_layout "$1" "$2" "$3" "$4"
+    mkdir -p "$1/cosmic/com.system76.CosmicComp/v1" "$1/cosmic/com.system76.CosmicTheme.Mode/v1" \
+        "$1/cosmic/com.system76.CosmicAppletTime/v1"
+    printf '(rules: "", model: "pc105", layout: "us,it", variant: ",", options: None, repeat_delay: 600, repeat_rate: 25)' \
+        > "$1/cosmic/com.system76.CosmicComp/v1/xkb_config"
+    if [ "$5" = dark ]; then printf true; else printf false; fi \
+        > "$1/cosmic/com.system76.CosmicTheme.Mode/v1/is_dark"
+    # Pins the 24-hour clock the scenes' goldens show: en_US and ar_EG would otherwise
+    # switch to 12 hours by locale.
+    printf true > "$1/cosmic/com.system76.CosmicAppletTime/v1/military_time"
+    printf 'schema = 1\nfavorites = ["com.system76.CosmicSettings.desktop"]\n' > "$1/athanor/favorites.toml"
+}
+
 capture_layout() {
     while IFS=$'\t' read -r tag preset panel dock scale width height; do
         tags+=("$tag")
@@ -141,6 +160,42 @@ capture_chooser() {
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 "$scale" "$tag" -- \
             /out/bin/athanor-layout-chooser
     done < <(python3 -B "$rig/cases.py" chooser)
+}
+
+# doc_bar.md, BR9: the bar under its own preset with one running window, and the five
+# popovers the bar owns in 2b.2, opened by ATHANOR_BAR_OPEN over the float preset.
+capture_bar() { # capture_bar <surface>
+    local surface=$1 open="" preset=float panel=top dock=visible
+    local session=(python3 /repo/forge/test/shell/bar_session.py)
+    case "$surface" in
+    bar) preset=bar panel=bottom dock=- session+=(--window) ;;
+    bar-power) open=power ;;
+    bar-input) open=input-source ;;
+    bar-calendar) open=clock ;;
+    bar-accessibility) open=accessibility ;;
+    bar-tiling) open=tiling ;;
+    esac
+    in_rig "$(rig_image)" bash -c '
+        set -euo pipefail
+        mkdir -p /out/locale/bar
+        msgfmt --check -o /out/locale/bar/de.mo /repo/forge/test/shell/locale/bar-de.po
+        python3 /repo/forge/test/shell/locale/make_pseudo_rtl.py \
+            /repo/forge/specs/athanor-bar/athanor-bar-1.0.0/po/athanor-bar.pot /out/bar-pseudo-rtl.po
+        msgfmt -o /out/locale/bar/rtl.mo /out/bar-pseudo-rtl.po'
+    while IFS=$'\t' read -r tag variant scale locale catalog; do
+        tags+=("$tag")
+        seed_bar "$out/seed-$tag" "$preset" "$panel" "$dock" "$variant"
+        override=()
+        if [ "$catalog" != - ]; then
+            override+=(ATHANOR_I18N_CATALOG="/out/locale/bar/$catalog")
+        fi
+        if [ -n "$open" ]; then
+            override+=(ATHANOR_BAR_OPEN="$open")
+        fi
+        in_rig "$(rig_image)" env RIG_LOCALE="$locale" RIG_SETTLE=8 RIG_CONFIG_SEED="/out/seed-$tag" \
+            RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic "${override[@]}" \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 "$scale" "$tag" -- "${session[@]}"
+    done < <(python3 -B "$rig/cases.py" "$surface")
 }
 
 case "${1:-}" in
@@ -228,9 +283,32 @@ build-shelld)
                  && cargo build --release --locked -p athanor-shelld \
                  && install -m 0755 /out/target/release/athanor-shelld /out/bin/'
     ;;
+build-bar)
+    mkdir -p "$out/bin" "$out/target"
+    podman run --rm --memory 6g --security-opt label=disable \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -e CARGO_TARGET_DIR=/out/target -w /repo "$local_image:build" \
+        bash -c 'cargo clippy --locked -p athanor-bar --all-targets -- -D warnings \
+                 && cargo test --locked -p athanor-bar \
+                 && cargo build --release --locked -p athanor-bar \
+                 && install -m 0755 /out/target/release/athanor-bar /out/bin/ \
+                 && python3 -B forge/scripts/check_shim_link_order.py /out/bin/athanor-bar'
+    ;;
 shelld-e2e)
     rm -f "$out/shelld-e2e.log"
     in_rig "$(rig_image)" dbus-run-session -- python3 /repo/forge/test/shell/shelld_e2e.py
+    ;;
+bar-e2e)
+    seed_bar "$out/seed-bar-e2e" float top visible light
+    # No favourites file: the first start imports the favourites and saves them (BR7).
+    rm "$out/seed-bar-e2e/athanor/favorites.toml"
+    rm -f "$out/bar-e2e-logind.log"
+    in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-bar-e2e \
+        RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
+        RIG_HOLD="python3 /repo/forge/test/shell/bar_e2e.py" \
+        dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 bar-e2e -- \
+        bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
+                 && exec python3 /repo/forge/test/shell/bar_session.py --hang CanReboot --window --pinnable"
     ;;
 compositor-e2e)
     # cosmic-comp reads the keyboard layouts from its configuration: two, so the switch shows.
@@ -243,19 +321,27 @@ compositor-e2e)
         python3 /repo/forge/test/shell/cc_window.py 1
     ;;
 layer-guard)
-    rm -f "$out/layer-guard.status"
+    surface=${2:?usage: rig.sh layer-guard <greeter|bar>}
+    case "$surface" in
+    greeter) binary=athanor-greeter-ui ;;
+    bar) binary=athanor-bar ;;
+    *)
+        echo "rig.sh layer-guard: unknown surface '$surface'" >&2
+        exit 2
+        ;;
+    esac
+    rm -f "$out/layer-guard-$surface.status"
     # Preloading libwayland-client reproduces the wrong load order on purpose.
-    # shellcheck disable=SC2016  # the body is expanded by the shell inside the rig.
     in_rig "$(rig_image)" env RIG_SETTLE=6 ATHANOR_LOGIN_USER=rig \
-        dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 layer-guard -- \
-        bash -c 'LD_PRELOAD=/usr/lib64/libwayland-client.so.0 /out/bin/athanor-greeter-ui; echo $? > /out/layer-guard.status; sleep 60'
-    # A greeter that never exits writes no status file: report that, do not die on cat.
-    status=$(cat "$out/layer-guard.status" 2> /dev/null) || status=
-    if [ "$status" != 1 ] || ! grep -q "not a layer surface" "$out/layer-guard-client.log"; then
-        echo "layer-guard: expected exit status 1 and the guard's message, got status '$status'" >&2
+        dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 "layer-guard-$surface" -- \
+        bash -c "LD_PRELOAD=/usr/lib64/libwayland-client.so.0 /out/bin/$binary; echo \$? > /out/layer-guard-$surface.status; sleep 60"
+    # A surface that never exits writes no status file: report that, do not die on cat.
+    status=$(cat "$out/layer-guard-$surface.status" 2> /dev/null) || status=
+    if [ "$status" != 1 ] || ! grep -q "not a layer surface" "$out/layer-guard-$surface-client.log"; then
+        echo "layer-guard: expected exit status 1 and the guard's message from $binary, got status '$status'" >&2
         exit 1
     fi
-    echo "layer-guard: the greeter refused to run as an ordinary window"
+    echo "layer-guard: $binary refused to run as an ordinary window"
     ;;
 greeter-preview)
     stage_greeter_icons
@@ -266,6 +352,21 @@ greeter-preview)
             /out/bin/athanor-greeter-ui
     done
     echo "look at $out/greeter-preview-*.png"
+    ;;
+bar-preview)
+    # The three factory layouts, for the eye; the goldens are `surface bar`.
+    while read -r preset panel dock; do
+        seed_layout "$out/seed-bar-preview-$preset" "$preset" "$panel" "$dock"
+        in_rig "$(rig_image)" env RIG_LOCALE=en_US.UTF-8 RIG_CONFIG_SEED="/out/seed-bar-preview-$preset" \
+            RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 "bar-preview-$preset" -- \
+            /out/bin/athanor-bar
+    done << 'EOF'
+float top visible
+bar bottom -
+minimal top none
+EOF
+    echo "look at $out/bar-preview-*.png"
     ;;
 atspi)
     # A screen reader announces itself by setting IsEnabled; GTK exports its tree then.
@@ -284,6 +385,15 @@ atspi)
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-layout-chooser 8" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-chooser -- \
             bash -c "$enable && exec /out/bin/athanor-layout-chooser"
+        ;;
+    bar)
+        # 7 interactive widgets under float: workspaces, applications, clock, input source,
+        # accessibility, tiling, power.
+        seed_bar "$out/seed-atspi-bar" float top visible light
+        in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-bar \
+            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar 7" \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-bar -- \
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py"
         ;;
     *)
         echo "rig.sh atspi: unknown surface '${2:-}'" >&2
@@ -313,6 +423,7 @@ surface | update-goldens)
     greeter) capture_greeter ;;
     layout) capture_layout ;;
     chooser) capture_chooser ;;
+    bar | bar-power | bar-input | bar-calendar | bar-accessibility | bar-tiling) capture_bar "$surface" ;;
     *)
         echo "rig.sh $1: unknown surface '$surface'" >&2
         exit 2
@@ -348,7 +459,7 @@ cosmic-panel-defaults)
     echo "cosmic-panel-defaults: the fixture matches the COSMIC in the rig"
     ;;
 *)
-    sed -n '2,19p' "${BASH_SOURCE[0]}" >&2
+    sed -n '2,/^set -euo pipefail$/{/^#/p}' "${BASH_SOURCE[0]}" >&2
     exit 2
     ;;
 esac

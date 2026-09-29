@@ -5,8 +5,10 @@
 //! A key that cannot be read keeps Calmo's default.
 
 use std::cell::{Cell, RefCell};
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
 
+use athanor_layout::apply::write_atomically;
 use athanor_style::calmo::Variant;
 use gtk4::{gdk, gio, prelude::*};
 
@@ -81,6 +83,41 @@ pub fn read_from(dirs: &[PathBuf]) -> CosmicTheme {
             .unwrap_or(false),
         accent: key(dirs, theme, "accent").and_then(|text| parse_accent(&text)),
     }
+}
+
+/// The `v1` directories of `is_high_contrast`, one per mode, under the user's `cosmic`
+/// configuration directory. Empty when there is no home directory to write it in.
+pub fn high_contrast_dirs() -> Vec<PathBuf> {
+    let Some(user) = cosmic_config::user_dir() else {
+        return Vec::new();
+    };
+    [DARK, LIGHT]
+        .into_iter()
+        .map(|component| cosmic_config::component(&user, component))
+        .collect()
+}
+
+/// Writes `is_high_contrast` for both the dark and the light mode of `cosmic_dir`, so a
+/// mode switch keeps the setting, the way cosmic-settings does.
+pub fn set_high_contrast_in(cosmic_dir: &Path, enabled: bool) -> io::Result<()> {
+    for mode in [DARK, LIGHT] {
+        let dir = cosmic_config::component(cosmic_dir, mode);
+        std::fs::create_dir_all(&dir)?;
+        write_atomically(&dir.join("is_high_contrast"), &enabled.to_string())?;
+    }
+    Ok(())
+}
+
+/// Writes the user's own `is_high_contrast`. `NotFound` when there is no home directory to
+/// resolve the user's `cosmic` configuration directory in.
+pub fn set_high_contrast(enabled: bool) -> io::Result<()> {
+    let user = cosmic_config::user_dir().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "no home directory for the user's cosmic configuration",
+        )
+    })?;
+    set_high_contrast_in(&user, enabled)
 }
 
 fn parse_bool(text: &str) -> Option<bool> {
@@ -357,5 +394,17 @@ mod tests {
             theme.accent_css().as_deref(),
             Some("@define-color ath_acc #1f3a93;\n@define-color ath_acc_ink #ffffff;\n")
         );
+    }
+
+    #[test]
+    fn set_high_contrast_in_covers_both_modes_a_switch_keeps() {
+        let dir = cosmic_dir("high-contrast");
+        let dirs = std::slice::from_ref(&dir);
+        set_high_contrast_in(&dir, true).expect("write");
+        assert!(read_from(dirs).is_high_contrast, "dark mode");
+        put(&dir, MODE, "is_dark", "false");
+        assert!(read_from(dirs).is_high_contrast, "light mode");
+        set_high_contrast_in(&dir, false).expect("write");
+        assert!(!read_from(dirs).is_high_contrast);
     }
 }

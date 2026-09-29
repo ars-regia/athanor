@@ -22,8 +22,8 @@ use crate::icon;
 use crate::sender::BarUnit;
 use crate::server::{NOTIFICATIONS_PATH, PRIVATE_PATH};
 use crate::store::{self, Content, Reason, Store, Urgency, Visual};
-use crate::text;
 use crate::wire::WireNotification;
+use athanor_unit::text;
 
 pub const CAPABILITIES: [&str; 4] = ["actions", "body", "icon-static", "persistence"];
 pub const MAX_ACTIONS: usize = 8;

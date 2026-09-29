@@ -287,6 +287,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-bar"
+version = "1.0.0"
+dependencies = [
+ "athanor-compositor-client",
+ "athanor-i18n",
+ "athanor-layout",
+ "athanor-style",
+ "athanor-unit",
+ "gio-unix",
+ "glib",
+ "gtk4",
+ "gtk4-layer-shell",
+ "tracing",
+]
+
+[[package]]
 name = "athanor-bus-api"
 version = "1.0.0"
 dependencies = [

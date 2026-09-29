@@ -1,7 +1,8 @@
 //! Landlock at start, as the greeter and the notifier do: first prove the process is
-//! single-threaded, then restrict. Reads are handled too: a unit names the trees it reads
-//! and the one directory it writes. Connecting to a bus socket is not a filesystem access
-//! Landlock mediates.
+//! single-threaded, then restrict. A headless unit names the trees it reads and the one
+//! directory it writes (`restrict`). A GTK program cannot name what it reads (icon themes,
+//! fonts, the GL driver, glycin's loaders), so it restricts writes only (`restrict_writes`).
+//! Connecting to a bus socket is not a filesystem access Landlock mediates.
 
 use std::error::Error;
 use std::path::Path;
@@ -39,6 +40,26 @@ pub fn restrict(read: &[&Path], write: &Path) -> Result<(), Box<dyn Error>> {
         ))?;
     }
     ruleset = ruleset.add_rule(PathBeneath::new(PathFd::new(write)?, all))?;
+    ruleset.restrict_self()?;
+    Ok(())
+}
+
+/// Reads stay open. Every write access beneath each of `write` that exists; writing to
+/// existing files, and nothing else, beneath each of `write_file` that exists (a device
+/// directory such as `/dev/dri`). No other write anywhere, truncation included (Landlock
+/// ABI 3). A kernel that cannot enforce the ruleset is an error, not a best effort.
+pub fn restrict_writes(write: &[&Path], write_file: &[&Path]) -> Result<(), Box<dyn Error>> {
+    let writes = AccessFs::from_write(ABI::V3);
+    let mut ruleset = Ruleset::default()
+        .set_compatibility(CompatLevel::HardRequirement)
+        .handle_access(writes)?
+        .create()?;
+    for path in write.iter().filter(|path| path.exists()) {
+        ruleset = ruleset.add_rule(PathBeneath::new(PathFd::new(path)?, writes))?;
+    }
+    for path in write_file.iter().filter(|path| path.exists()) {
+        ruleset = ruleset.add_rule(PathBeneath::new(PathFd::new(path)?, AccessFs::WriteFile))?;
+    }
     ruleset.restrict_self()?;
     Ok(())
 }
@@ -90,5 +111,67 @@ mod tests {
         assert!(ensure_single_threaded().is_err());
         release.send(()).expect("release");
         other.join().expect("join").expect("released");
+    }
+
+    #[test]
+    fn restrict_writes_leaves_reads_open_and_grants_writes_by_kind() {
+        let base = std::env::temp_dir().join(format!(
+            "athanor-unit-landlock-writes-{}",
+            std::process::id()
+        ));
+        let (writable, device, closed, missing) = (
+            base.join("writable"),
+            base.join("device"),
+            base.join("closed"),
+            base.join("missing"),
+        );
+        for dir in [&writable, &device, &closed] {
+            std::fs::create_dir_all(dir).expect("mkdir");
+            std::fs::write(dir.join("file"), b"x").expect("write");
+        }
+        std::thread::spawn(move || {
+            restrict_writes(&[&writable, &missing], &[&device])
+                .expect("Landlock must be enforced, not skipped");
+            assert!(
+                std::fs::read(closed.join("file")).is_ok(),
+                "reads stay open"
+            );
+            assert_eq!(
+                std::fs::write(closed.join("new"), b"x")
+                    .expect_err("not granted")
+                    .kind(),
+                std::io::ErrorKind::PermissionDenied
+            );
+            assert!(std::fs::write(writable.join("new"), b"x").is_ok());
+            assert!(
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(device.join("file"))
+                    .is_ok(),
+                "an existing file under a file grant opens for writing"
+            );
+            assert_eq!(
+                std::fs::write(device.join("new"), b"x")
+                    .expect_err("a file grant creates nothing")
+                    .kind(),
+                std::io::ErrorKind::PermissionDenied
+            );
+            assert_eq!(
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .truncate(true)
+                    .open(device.join("file"))
+                    .expect_err("a file grant truncates nothing")
+                    .kind(),
+                std::io::ErrorKind::PermissionDenied
+            );
+            assert!(
+                std::fs::write(writable.join("file"), b"y").is_ok(),
+                "a write grant truncates"
+            );
+        })
+        .join()
+        .expect("sandboxed thread");
+        std::fs::remove_dir_all(base).expect("cleanup");
     }
 }

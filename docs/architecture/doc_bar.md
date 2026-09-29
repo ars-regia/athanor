@@ -47,7 +47,7 @@ Status: **revision 1, approved by the maintainer on 2026-09-25.** It is the spec
   - X11 applications reach cosmic-comp through XWayland, outside any context.
   - Applications started from a terminal, from cosmic-launcher until stage 3 and by XDG autostart still hold the main socket, and can read every title and the clipboard.
   - A Flatpak application started on our socket cannot create its own context, because a context offers no security-context manager; it is expected to pass our socket through. The plan of 2b verifies it.
-  - The context confines a socket, not the application. The application runs as the user, so it can still connect by path to the main socket, `$XDG_RUNTIME_DIR/wayland-1`, or to another application's `$XDG_RUNTIME_DIR/athanor/<id>/wayland`.
+  - The context confines a socket, not the application. The application runs as the user, so it can still connect by path to the session's main socket, `$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY` of the user manager (`wayland-1` today), or to another application's `$XDG_RUNTIME_DIR/athanor/<random>/wayland`.
   - The application reaches the session bus. It can put a process on the main socket through the user manager, with `StartTransientUnit`, or read the main socket's name with `systemctl --user show-environment`.
   - A terminal that hands its window to an existing server process, such as gnome-terminal or ptyxis, draws on that server's socket, not on the one its unit received.
   - Real confinement, a filesystem and bus sandbox for launched applications, is a later design entry and is not designed here.
@@ -62,7 +62,7 @@ Status: **revision 1, approved by the maintainer on 2026-09-25.** It is the spec
 | Battery | UPower; the power-profiles interface (`tuned-ppd`); logind's `SetBrightness` | percentage, time left, power profile, screen brightness; nothing goes through COSMIC's settings daemon |
 | Power | logind; `athanor-session.target` | lock (`loginctl lock-session`, which cosmic-greeter answers until stage 4), log out (stopping `athanor-session.target`), suspend, restart, shut down, each with a confirmation. When an update is downloaded, "Restart to update" stands beside "Restart"; it is the same request as SH11 |
 | Input source | the compositor client | the active keyboard layout and the switch between the configured ones, through the keyboard-layout protocol package 2a supplies |
-| Clock | the system clock, formatted for the locale | time and date; a calendar in its popover. It refreshes on resume from suspend and when the time zone changes |
+| Clock | the system clock, formatted for the locale, in 12 or 24 hours as COSMIC's clock setting says (`military_time`), else as the locale's time format | time and date; a calendar in its popover. It refreshes on resume from suspend and when the time zone changes |
 | Notifications | `athanor-shelld` | BR4 |
 | Tray | `athanor-shelld` and the host in the bar | BR5 |
 | Shield | `athanor-trust-state` | BR6 |
@@ -137,7 +137,7 @@ This closes open doubt 4 of `doc_shell.md`.
 - **The dock (2c).** One surface per output. `dock_edge(panel, shape)` picks its edge; a vertical dock carries icons only (SH9.3).
   - It holds the launcher, workspaces and application-library buttons, the favourites and the running applications, minimised windows included, as COSMIC's dock does. The context menu pins and unpins; dragging reorders the favourites.
   - Visible: an exclusive zone. Auto-hide: no exclusive zone; it appears after a short delay when the pointer reaches a strip a few pixels wide on its edge. None: no surface.
-- **Favourites** live in `~/.config/athanor/favorites.toml`, with `schema = 1` and a list of desktop ids. They are not part of the layout document, which names only a preset and the knobs (SH6). The bar, in `bar`, and the dock both read and write the file; the code is a module of `athanor-layout`. At the first start, when the file is absent, the favourites are imported once from COSMIC's application list through the compositor client, the only crate that knows COSMIC's paths; when that is absent too, from the vendor list under `/usr/share/athanor/`.
+- **Favourites** live in `~/.config/athanor/favorites.toml`, with `schema = 1` and a list of desktop ids. They are not part of the layout document, which names only a preset and the knobs (SH6). The bar, in `bar`, and the dock both read and write the file; the code is a module of `athanor-layout`. At the first start, when the file is absent, the favourites are imported once from the user's own COSMIC application list (`~/.config/cosmic`; COSMIC's system default is a vendor choice and is not imported) through the compositor client, the only crate that knows COSMIC's paths; when that is absent too, from the vendor list under `/usr/share/athanor/`.
 
 **BR8. Enabled by hand until the switch.** The translator and the wrapper of `athanor-system-services` read two signals and act again when either changes:
 
