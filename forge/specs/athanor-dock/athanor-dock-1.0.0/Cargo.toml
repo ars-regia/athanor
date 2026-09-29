@@ -1,0 +1,19 @@
+[package]
+name = "athanor-dock"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+description = "The Athanor dock: one layer-shell surface per output with the openers, the favourites and the running applications"
+authors = ["Athanor Forge <forge@athanor.os>"]
+
+[dependencies]
+athanor-apps = { path = "../../../../system/athanor-apps" }
+athanor-compositor-client = { path = "../../../../system/athanor-compositor-client" }
+athanor-i18n = { path = "../../../../system/athanor-i18n" }
+athanor-layout = { path = "../../../../system/athanor-layout" }
+athanor-style = { path = "../../../../system/athanor-style" }
+athanor-unit = { path = "../../../../system/athanor-unit" }
+glib = { workspace = true }
+gtk4 = { workspace = true }
+gtk4-layer-shell = { workspace = true }
+tracing = { workspace = true }
