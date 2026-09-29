@@ -3,7 +3,6 @@
 //! binary draws it.
 
 pub mod clock;
-pub mod dirs;
 pub mod keyboard;
 pub mod order;
 pub mod power;

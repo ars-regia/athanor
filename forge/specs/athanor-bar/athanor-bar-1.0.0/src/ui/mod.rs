@@ -22,7 +22,7 @@ use std::time::Duration;
 use athanor_bar::order::{self, Module};
 use athanor_compositor_client::{outputs, theme, Client, Event, Opener};
 use athanor_layout::favorites::{self, FavoritesError};
-use athanor_layout::loader::{self, Paths};
+use athanor_layout::loader::Source;
 use athanor_layout::placement::Output;
 use athanor_layout::preset::{Layout, PanelEdge};
 use athanor_style::calmo;
@@ -33,36 +33,6 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use crate::i18n;
 use crate::layer_guard;
-
-/// Where the layout comes from: the three layers, or the vendor layer alone after a
-/// crash-loop give-up (SH8).
-#[derive(Clone)]
-pub enum Source {
-    Live(Paths),
-    Vendor(PathBuf),
-}
-
-impl Source {
-    fn layout(&self) -> Layout {
-        match self {
-            Source::Live(paths) => loader::resolve(paths).layout,
-            Source::Vendor(dir) => loader::vendor_layout(dir),
-        }
-    }
-
-    /// The directories whose changes can change the layout. The user's directory also
-    /// holds the favourites file.
-    fn watched(&self) -> Vec<PathBuf> {
-        match self {
-            Source::Live(paths) => {
-                let mut dirs = vec![paths.vendor_dir.clone(), paths.policy_dir.clone()];
-                dirs.extend(paths.user_file.parent().map(Path::to_path_buf));
-                dirs
-            }
-            Source::Vendor(dir) => vec![dir.clone()],
-        }
-    }
-}
 
 /// What changed, so that each module refreshes only for what it shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

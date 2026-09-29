@@ -98,6 +98,36 @@ pub fn vendor_layout(vendor_dir: &Path) -> Layout {
     choose(&vendor, &Document::default(), &UserState::Absent)
 }
 
+/// Where a shell program's layout comes from: the three layers, or the vendor layer alone
+/// after a crash-loop give-up (doc_shell.md, SH8). The bar and the dock share it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Source {
+    Live(Paths),
+    Vendor(PathBuf),
+}
+
+impl Source {
+    pub fn layout(&self) -> Layout {
+        match self {
+            Source::Live(paths) => resolve(paths).layout,
+            Source::Vendor(dir) => vendor_layout(dir),
+        }
+    }
+
+    /// The directories whose changes can change the layout. The user's directory also
+    /// holds the favourites file.
+    pub fn watched(&self) -> Vec<PathBuf> {
+        match self {
+            Source::Live(paths) => {
+                let mut dirs = vec![paths.vendor_dir.clone(), paths.policy_dir.clone()];
+                dirs.extend(paths.user_file.parent().map(Path::to_path_buf));
+                dirs
+            }
+            Source::Vendor(dir) => vec![dir.clone()],
+        }
+    }
+}
+
 /// The vendor document compiled in, for an image whose vendor directory is missing.
 /// A test keeps it equal to `vendor/10-athanor.toml`, which the translator's RPM ships.
 fn builtin_vendor() -> Document {
@@ -233,6 +263,37 @@ mod tests {
     fn write(path: &Path, text: &str) {
         fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
         fs::write(path, text).expect("write");
+    }
+
+    #[test]
+    fn a_source_watches_its_layers_and_the_vendor_one_only_its_own() {
+        let paths = paths("source-watched");
+        assert_eq!(
+            Source::Live(paths.clone()).watched(),
+            vec![
+                paths.vendor_dir.clone(),
+                paths.policy_dir.clone(),
+                paths.user_file.parent().expect("parent").to_path_buf(),
+            ]
+        );
+        assert_eq!(
+            Source::Vendor(paths.vendor_dir.clone()).watched(),
+            vec![paths.vendor_dir]
+        );
+    }
+
+    #[test]
+    fn a_vendor_source_ignores_the_user_layer() {
+        let paths = paths("source-vendor");
+        write(
+            &paths.user_file,
+            "schema = 1\n\n[output.\"*\"]\npreset = \"bar\"\npanel = \"bottom\"\n",
+        );
+        assert_eq!(Source::Live(paths.clone()).layout().preset(), Preset::Bar);
+        assert_ne!(
+            Source::Vendor(paths.vendor_dir).layout().preset(),
+            Preset::Bar
+        );
     }
 
     #[test]
