@@ -140,3 +140,147 @@ button.greeter-chip:checked {
     -gtk-icon-palette: success @ath_ok, warning @ath_warn, error @ath_bad;
     color: @ath_ink;
 }
+
+/* The layout chooser (stage 1c): an ordinary window of labelled groups of choices. The
+ * choice in force carries the accent, which may be the user's COSMIC accent. */
+window.athanor-layout {
+    background-color: @ath_surf;
+}
+
+.layout-group-title {
+    color: @ath_ink2;
+    font-size: ${size_small}px;
+    font-weight: 600;
+}
+
+button.layout-choice {
+    min-height: 34px;
+    padding: 0 14px;
+    border: ${border_width}px solid @ath_line;
+    border-radius: ${radius_control}px;
+    background-image: none;
+    background-color: @ath_surf2;
+    color: @ath_ink;
+    box-shadow: none;
+}
+
+button.layout-choice:hover {
+    background-color: @ath_chip;
+}
+
+button.layout-choice:checked {
+    border-color: @ath_acc;
+    background-color: @ath_acc;
+    color: @ath_acc_ink;
+}
+
+button.layout-choice:disabled {
+    color: @ath_ink3;
+}
+
+.layout-note,
+.layout-status {
+    color: @ath_ink2;
+    font-size: ${size_small}px;
+}
+
+/* The bar (doc_bar.md, BR7). `bar` is one strip across the output. `float` and `minimal`
+ * draw each group as an island on a transparent surface, as COSMIC's floating panel
+ * does; the margin on the inner side leaves room for the shadow. */
+window.athanor-bar {
+    background-color: @ath_bar;
+}
+
+window.athanor-bar.preset-float,
+window.athanor-bar.preset-minimal {
+    background-color: transparent;
+}
+
+window.athanor-bar .bar-group {
+    padding: 2px 4px;
+}
+
+window.athanor-bar.preset-float .bar-group,
+window.athanor-bar.preset-minimal .bar-group {
+    border-radius: ${radius_chip}px;
+    background-color: @ath_bar;
+    box-shadow: 0 1px 2px @ath_shadow_near, 0 6px 18px @ath_shadow_panel;
+}
+
+window.athanor-bar.preset-float.edge-top .bar-group,
+window.athanor-bar.preset-minimal.edge-top .bar-group {
+    margin: 6px 8px 14px;
+}
+
+window.athanor-bar.preset-float.edge-bottom .bar-group,
+window.athanor-bar.preset-minimal.edge-bottom .bar-group {
+    margin: 14px 8px 6px;
+}
+
+button.bar-button {
+    min-height: 32px;
+    min-width: 32px;
+    padding: 0 8px;
+    border: none;
+    border-radius: ${radius_control}px;
+    background-image: none;
+    background-color: transparent;
+    box-shadow: none;
+    color: @ath_ink;
+}
+
+button.bar-button:hover {
+    background-color: @ath_chip;
+}
+
+button.bar-button.running.active {
+    box-shadow: inset 0 -2px @ath_acc;
+}
+
+.bar-clock {
+    font-feature-settings: "tnum";
+    font-weight: 600;
+}
+
+popover.athanor-bar-popover > contents {
+    padding: 12px;
+    border: ${border_width}px solid @ath_line;
+    border-radius: ${radius_card}px;
+    background-color: @ath_surf;
+    color: @ath_ink;
+}
+
+.bar-popover-title {
+    font-weight: 600;
+}
+
+.bar-popover-note {
+    color: @ath_ink2;
+    font-size: ${size_small}px;
+}
+
+button.bar-row {
+    min-height: 34px;
+    padding: 0 12px;
+    border: none;
+    border-radius: ${radius_control}px;
+    background-image: none;
+    background-color: transparent;
+    box-shadow: none;
+    color: @ath_ink;
+}
+
+button.bar-row:hover {
+    background-color: @ath_chip;
+}
+
+button.bar-confirm {
+    min-height: 34px;
+    padding: 0 14px;
+    border: none;
+    border-radius: ${radius_control}px;
+    background-image: none;
+    background-color: @ath_acc;
+    box-shadow: none;
+    color: @ath_acc_ink;
+}

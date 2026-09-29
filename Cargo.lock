@@ -287,6 +287,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-bar"
+version = "1.0.0"
+dependencies = [
+ "athanor-compositor-client",
+ "athanor-i18n",
+ "athanor-layout",
+ "athanor-style",
+ "athanor-unit",
+ "gio-unix",
+ "glib",
+ "gtk4",
+ "gtk4-layer-shell",
+ "tracing",
+]
+
+[[package]]
 name = "athanor-bus-api"
 version = "1.0.0"
 dependencies = [
@@ -368,6 +384,25 @@ dependencies = [
  "tracing-subscriber",
  "wayland-server 0.31.14",
  "zbus",
+]
+
+[[package]]
+name = "athanor-compositor-client"
+version = "1.0.0"
+dependencies = [
+ "athanor-layout",
+ "athanor-style",
+ "bitflags 2.13.1",
+ "futures-util",
+ "gdk4-wayland",
+ "gio-unix",
+ "gtk4",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tracing",
+ "wayland-client",
+ "wayland-protocols 0.32.13",
+ "wayland-scanner 0.31.11",
 ]
 
 [[package]]
@@ -522,6 +557,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-layout"
+version = "1.0.0"
+dependencies = [
+ "toml 0.8.2",
+ "tracing",
+]
+
+[[package]]
+name = "athanor-layout-chooser"
+version = "1.0.0"
+dependencies = [
+ "athanor-compositor-client",
+ "athanor-i18n",
+ "athanor-layout",
+ "athanor-style",
+ "gtk4",
+ "landlock",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "athanor-layout-translator"
+version = "1.0.0"
+dependencies = [
+ "athanor-layout",
+ "athanor-unit",
+ "gtk4",
+ "tracing",
+]
+
+[[package]]
 name = "athanor-lvfs-rs"
 version = "1.0.0"
 dependencies = [
@@ -645,6 +712,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-shelld"
+version = "1.0.0"
+dependencies = [
+ "athanor-unit",
+ "futures-util",
+ "serde",
+ "tokio",
+ "tracing",
+ "zbus",
+ "zvariant",
+]
+
+[[package]]
 name = "athanor-store"
 version = "0.1.0"
 dependencies = [
@@ -711,6 +791,16 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "athanor-unit"
+version = "1.0.0"
+dependencies = [
+ "landlock",
+ "nix 0.29.0",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2344,6 +2434,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "gdk4-wayland"
+version = "0.11.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "99cc5266dc4e8745a4c4683b26a0c54977a452809d572c940e39c6844663c0ec"
+dependencies = [
+ "gdk4",
+ "gdk4-wayland-sys",
+ "gio",
+ "glib",
+ "libc",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols 0.32.13",
+]
+
+[[package]]
+name = "gdk4-wayland-sys"
+version = "0.11.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb55bc5225519d34fdf1412db3755af88d1388a1c2a053d92e6751db13d96e68"
+dependencies = [
+ "glib-sys",
+ "libc",
+ "system-deps 9.0.0",
+]
+
+[[package]]
 name = "gemm"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2658,6 +2775,31 @@ dependencies = [
  "libc",
  "system-deps 9.0.0",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "gio-unix"
+version = "0.22.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce8d768735e229742c135afa3d3326604088d2df0679901cdb05e791fe2fbe0a"
+dependencies = [
+ "gio",
+ "gio-unix-sys",
+ "glib",
+ "libc",
+]
+
+[[package]]
+name = "gio-unix-sys"
+version = "0.22.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c01dbb58f92f67548d85e2209e073acc7ee04e107c7e04ee69b49e38b4933b4"
+dependencies = [
+ "gio-sys",
+ "glib-sys",
+ "gobject-sys",
+ "libc",
+ "system-deps 9.0.0",
 ]
 
 [[package]]
@@ -5351,7 +5493,7 @@ dependencies = [
  "thiserror 1.0.69",
  "udev",
  "wayland-commons",
- "wayland-protocols",
+ "wayland-protocols 0.29.5",
  "wayland-server 0.29.5",
  "xkbcommon",
 ]
@@ -6220,6 +6362,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "wayland-client"
+version = "0.31.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3c36a0f861ad76d0901f2800b46321410d9f73f2ea88aac0650d86c32688073"
+dependencies = [
+ "bitflags 2.13.1",
+ "rustix 1.1.4",
+ "wayland-backend",
+ "wayland-scanner 0.31.11",
+]
+
+[[package]]
 name = "wayland-commons"
 version = "0.29.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6241,6 +6395,18 @@ dependencies = [
  "wayland-commons",
  "wayland-scanner 0.29.5",
  "wayland-server 0.29.5",
+]
+
+[[package]]
+name = "wayland-protocols"
+version = "0.32.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23d0c813de3daa2ed6520af85a3bd49b0e722a3078506899aa9686fea58dc4b6"
+dependencies = [
+ "bitflags 2.13.1",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-scanner 0.31.11",
 ]
 
 [[package]]

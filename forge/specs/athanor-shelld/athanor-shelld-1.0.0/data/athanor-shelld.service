@@ -1,0 +1,53 @@
+[Unit]
+Description=Athanor shell daemon: desktop notifications and the StatusNotifier watcher
+# No [Install] and no D-Bus activation file until the switch of stage 2: athanor-bar.service
+# wants this unit, so the daemon never takes org.freedesktop.Notifications while
+# cosmic-notifications restarts (doc_bar.md, BR1).
+After=graphical-session.target
+PartOf=graphical-session.target
+# The daemon counts its own failures and gives up after five in ten minutes
+# (doc_shell.md, SH8); this is only the outer backstop.
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/athanor-shelld
+ExecStopPost=/usr/bin/athanor-shelld --record-exit
+TimeoutStartSec=10s
+Restart=on-failure
+RestartSec=1s
+RestartSteps=5
+RestartMaxDelaySec=60s
+Slice=session.slice
+# Budget 16 MB PSS at rest (doc_bar.md, section 5, item 17); MemoryHigh throttles early, well
+# above that budget, to leave room for a large image-data message in flight. MemoryMax is the
+# hard cap: the bus accepts messages up to 128 MiB and zbus buffers a whole message before any
+# parser sees it, so the cap must clear 128 MiB plus the baseline, or one maximum-size message
+# OOM-kills the daemon — and five of them switch it off for the session (crash-loop, SH8).
+MemoryHigh=48M
+MemoryMax=192M
+
+# The failure record lives here and must survive a stop, not just a restart: a clean give-up
+# exit to inactive (SH8) must still be a give-up the next time this unit starts, including
+# when the bar's unit (2b.2) starts it after a full stop. Only the session ending clears it.
+RuntimeDirectory=athanor-shelld
+RuntimeDirectoryPreserve=yes
+# The do-not-disturb switch, in $XDG_STATE_HOME/athanor/shelld.
+StateDirectory=athanor
+
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+NoNewPrivileges=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# The daemon speaks only D-Bus and journald, both over Unix sockets.
+RestrictAddressFamilies=AF_UNIX

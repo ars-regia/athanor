@@ -1,0 +1,96 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: athanor-layout-chooser\n"
+"Report-Msgid-Bugs-To: forge@athanor.os\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=ASCII\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: src/ui.rs:46
+#, rust-format
+msgid "Your layout.toml was written by a newer Athanor (schema {schema}). The nearest layout is in use; choosing one here replaces it."
+msgstr "Your layout.toml was written by a newer Athanor (schema {schema}). The nearest layout is in use; choosing one here replaces it."
+
+#: src/ui.rs:50
+msgid "Your layout.toml could not be read and was left unchanged. The nearest layout is in use; choosing one here replaces it."
+msgstr "Your layout.toml could not be read and was left unchanged. The nearest layout is in use; choosing one here replaces it."
+
+#: src/ui.rs:76
+msgid "Layout"
+msgstr "Layout"
+
+#: src/ui.rs:100
+msgid "Style"
+msgstr "Style"
+
+#: src/ui.rs:102
+msgid "Island"
+msgstr "Island"
+
+#: src/ui.rs:103
+msgid "Bar"
+msgstr "Bar"
+
+#: src/ui.rs:104
+msgid "Essential"
+msgstr "Essential"
+
+#: src/ui.rs:110
+msgid "Panel"
+msgstr "Panel"
+
+#: src/ui.rs:112
+msgid "Top"
+msgstr "Top"
+
+#: src/ui.rs:113
+msgid "Bottom"
+msgstr "Bottom"
+
+#: src/ui.rs:119
+msgid "Dock"
+msgstr "Dock"
+
+#: src/ui.rs:121
+msgid "Visible"
+msgstr "Visible"
+
+#: src/ui.rs:122
+msgid "Auto-hide"
+msgstr "Auto-hide"
+
+#: src/ui.rs:123
+msgid "None"
+msgstr "None"
+
+#: src/ui.rs:218
+msgid "Set by your administrator."
+msgstr "Set by your administrator."
+
+#: src/ui.rs:221
+msgid "The bar holds the running applications."
+msgstr "The bar holds the running applications."
+
+#: src/ui.rs:251
+msgid "Replace the newer layout?"
+msgstr "Replace the newer layout?"
+
+#: src/ui.rs:253
+#, rust-format
+msgid "Athanor keeps the current file as {file}."
+msgstr "Athanor keeps the current file as {file}."
+
+#: src/ui.rs:257
+msgid "Cancel"
+msgstr "Cancel"
+
+#: src/ui.rs:257
+msgid "Replace"
+msgstr "Replace"
+
+#: src/ui.rs:280
+#, rust-format
+msgid "The layout could not be saved: {error}"
+msgstr "The layout could not be saved: {error}"

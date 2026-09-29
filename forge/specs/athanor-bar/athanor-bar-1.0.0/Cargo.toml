@@ -1,0 +1,20 @@
+[package]
+name = "athanor-bar"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+description = "The Athanor bar: one layer-shell surface per output with the modules of doc_bar.md"
+authors = ["Athanor Forge <forge@athanor.os>"]
+
+[dependencies]
+athanor-compositor-client = { path = "../../../../system/athanor-compositor-client" }
+athanor-i18n = { path = "../../../../system/athanor-i18n" }
+athanor-layout = { path = "../../../../system/athanor-layout" }
+athanor-style = { path = "../../../../system/athanor-style" }
+athanor-unit = { path = "../../../../system/athanor-unit" }
+gio-unix = { workspace = true }
+# TimeZone::from_identifier, which reports an unknown zone instead of silently giving UTC.
+glib = { workspace = true, features = ["v2_68"] }
+gtk4 = { workspace = true }
+gtk4-layer-shell = { workspace = true }
+tracing = { workspace = true }

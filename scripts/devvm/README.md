@@ -3,11 +3,11 @@
 Shell and application work does not need an image build and a desktop reboot for every
 change. Pick the fastest tier that can show the change:
 
-| Tier | Where | Turnaround | For |
-|------|-------|------------|-----|
-| A | `nested.sh`: cosmic-comp in a window on the host | seconds | a Wayland client (shell, settings, applets) against the real compositor |
-| B | this VM: the published image under KVM, `deploy.sh` into it | minutes | anything that needs the real system: greetd and the session, units, sandboxing, polkit, `/usr` layout |
-| C | CI image build, `bootc upgrade` on the desktop | hours | the image itself, the kernel, drivers, what only real hardware shows |
+| Tier | Where                                                       | Turnaround | For                                                                                                   |
+| ---- | ----------------------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------- |
+| A    | `nested.sh`: cosmic-comp in a window on the host            | seconds    | a Wayland client (shell, settings, applets) against the real compositor                               |
+| B    | this VM: the published image under KVM, `deploy.sh` into it | minutes    | anything that needs the real system: greetd and the session, units, sandboxing, polkit, `/usr` layout |
+| C    | CI image build, `bootc upgrade` on the desktop              | hours      | the image itself, the kernel, drivers, what only real hardware shows                                  |
 
 ## Tier A
 
@@ -72,8 +72,26 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   default) and reboots into it. `bootc upgrade` cannot do this on its own: the ISO's
   kickstart pins the guest to the run-id tag it was installed from, and upgrade only
   re-pulls that same tag.
+- `layout-acceptance.sh [stage...]` deploys the stage 1c layout crates from
+  `.scratch/shell-rig/bin` (build them with `forge/test/shell/rig.sh build-layout`) and runs
+  acceptance item 10 of `doc_shell.md` in the VM's session: the first-session default,
+  rotation, live presets, a rejected document, a mandatory key added mid-session, memory,
+  and the crash loop. Screenshots land in `.scratch/layout-acceptance/`; the script checks
+  the panel configuration, so look at them: they are the only check of what the panel draws.
+- `bar-acceptance.sh [stage...]`: athanor-bar under its real unit (package 2b.2):
+  Type=notify, the confinement against glycin's sandbox, PSS within 64 MB, an output that
+  comes and goes (needs `GPU_OUTPUTS=2`, the default), and the crash-loop fallback to the
+  vendor layout. Build the binary first with `forge/test/shell/rig.sh build-bar`.
+- `compositor-acceptance.sh [stage...]` deploys `cc-probe` from `.scratch/shell-rig/bin`
+  (build it with `forge/test/shell/rig.sh build-compositor-client`) and checks, in the VM's
+  session, the launch of package 2a (`doc_bar.md`, BR2 and BR3): an application on its own
+  restricted socket in a transient unit, a `Terminal=true` entry through `xdg-terminal-exec`,
+  and the three COSMIC openers, cold and warm. Screenshots land in
+  `.scratch/compositor-acceptance/`; look at the openers' ones.
 - Settings are in `devvm.env` and are overridden from the environment: `CPUS=4`,
-  `MEMORY=8G`, `DISK_GIB=40`, `SSH_PORT`, `ISO_TAG`, `REGISTRY`. State (ISO, disks, logs)
+  `MEMORY=8G`, `DISK_GIB=40`, `GPU_OUTPUTS=2` (the second head starts disconnected, so
+  every other stage sees one output; `bar-acceptance.sh hotplug` is the one that needs
+  it), `SSH_PORT`, `ISO_TAG`, `REGISTRY`. State (ISO, disks, logs)
   is in `${XDG_DATA_HOME:-~/.local/share}/athanor-devvm`: about 6 GB of ISO and up to
   `DISK_GIB` of disk.
 - Needs `qemu-system-x86_64` with the virtio-gpu-gl device, `qemu-img`, OVMF, `skopeo`,

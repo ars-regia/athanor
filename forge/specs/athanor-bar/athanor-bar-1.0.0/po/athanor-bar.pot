@@ -1,0 +1,223 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the athanor-bar package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: athanor-bar\n"
+"Report-Msgid-Bugs-To: forge@athanor.os\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=CHARSET\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: src/ui/accessibility.rs:35
+msgid "Greyscale"
+msgstr ""
+
+#: src/ui/accessibility.rs:36
+msgid "Red-green (protanopia)"
+msgstr ""
+
+#: src/ui/accessibility.rs:37
+msgid "Green-red (deuteranopia)"
+msgstr ""
+
+#: src/ui/accessibility.rs:38
+msgid "Blue-yellow (tritanopia)"
+msgstr ""
+
+#: src/ui/accessibility.rs:39
+msgid "No colour filter"
+msgstr ""
+
+#: src/ui/accessibility.rs:159
+msgid "Accessibility"
+msgstr ""
+
+#: src/ui/accessibility.rs:160
+msgid "High contrast"
+msgstr ""
+
+#: src/ui/accessibility.rs:161
+msgid "Screen reader"
+msgstr ""
+
+#: src/ui/accessibility.rs:162
+msgid "Magnifier"
+msgstr ""
+
+#: src/ui/accessibility.rs:163
+msgid "Invert colours"
+msgstr ""
+
+#: src/ui/accessibility.rs:167
+msgid "Colour filter"
+msgstr ""
+
+#. TRANSLATORS: a g_date_time_format() pattern for the clock on the bar.
+#: src/ui/clock.rs:83
+msgid "%a %-d %b %H:%M"
+msgstr ""
+
+#. TRANSLATORS: a g_date_time_format() pattern, read aloud by screen readers.
+#: src/ui/clock.rs:85
+msgid "%A %-d %B %Y, %H:%M"
+msgstr ""
+
+#. TRANSLATORS: a g_date_time_format() pattern for the clock on the bar (12-hour clock).
+#: src/ui/clock.rs:90
+msgid "%a %-d %b %-I:%M %p"
+msgstr ""
+
+#. TRANSLATORS: a g_date_time_format() pattern, read aloud by screen readers (12-hour clock).
+#: src/ui/clock.rs:92
+msgid "%A %-d %B %Y, %-I:%M %p"
+msgstr ""
+
+#: src/ui/clock.rs:127
+msgid "Clock"
+msgstr ""
+
+#: src/ui/input.rs:41
+#, rust-format
+msgid "Input source: {name}"
+msgstr ""
+
+#: src/ui/input.rs:85
+msgid "Input source"
+msgstr ""
+
+#: src/ui/openers.rs:30
+msgid "Launcher"
+msgstr ""
+
+#: src/ui/openers.rs:31
+msgid "Applications"
+msgstr ""
+
+#: src/ui/openers.rs:32
+msgid "Workspaces"
+msgstr ""
+
+#: src/ui/power.rs:36
+msgid "Lock"
+msgstr ""
+
+#: src/ui/power.rs:36
+msgid "Lock the screen?"
+msgstr ""
+
+#: src/ui/power.rs:37
+msgid "Log Out"
+msgstr ""
+
+#: src/ui/power.rs:37
+msgid "Log out now?"
+msgstr ""
+
+#: src/ui/power.rs:38
+msgid "Suspend"
+msgstr ""
+
+#: src/ui/power.rs:38
+msgid "Suspend now?"
+msgstr ""
+
+#: src/ui/power.rs:39
+msgid "Restart"
+msgstr ""
+
+#: src/ui/power.rs:39
+msgid "Restart now?"
+msgstr ""
+
+#: src/ui/power.rs:40
+msgid "Shut Down"
+msgstr ""
+
+#: src/ui/power.rs:40
+msgid "Shut down now?"
+msgstr ""
+
+#: src/ui/power.rs:55
+msgid "Power"
+msgstr ""
+
+#: src/ui/power.rs:62
+msgid "Cancel"
+msgstr ""
+
+#: src/ui/running.rs:161
+msgid "Running applications"
+msgstr ""
+
+#: src/ui/running.rs:192 src/ui/running.rs:551 src/ui/running.rs:553
+msgid "Unknown application"
+msgstr ""
+
+#: src/ui/running.rs:208
+#, rust-format
+msgid "{app}: {title}"
+msgstr ""
+
+#: src/ui/running.rs:214
+#, rust-format
+msgid "{app} ({count} windows)"
+msgstr ""
+
+#: src/ui/running.rs:241
+msgid "Running"
+msgstr ""
+
+#: src/ui/running.rs:396
+msgid "Untitled window"
+msgstr ""
+
+#: src/ui/running.rs:404
+#, rust-format
+msgid "Minimise {title}"
+msgstr ""
+
+#: src/ui/running.rs:408
+#, rust-format
+msgid "Close {title}"
+msgstr ""
+
+#: src/ui/running.rs:433
+msgid "Open"
+msgstr ""
+
+#: src/ui/running.rs:435
+msgid "New Window"
+msgstr ""
+
+#: src/ui/running.rs:448
+msgid "Unpin from Bar"
+msgstr ""
+
+#: src/ui/running.rs:454
+msgid "Pin to Bar"
+msgstr ""
+
+#: src/ui/running.rs:498
+#, rust-format
+msgid "{name} could not start"
+msgstr ""
+
+#: src/ui/running.rs:499
+msgid "The reason is in the system journal."
+msgstr ""
+
+#: src/ui/tiling.rs:64
+msgid "Tiling"
+msgstr ""
+
+#: src/ui/tiling.rs:65
+msgid "Tile windows"
+msgstr ""
