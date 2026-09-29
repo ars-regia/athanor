@@ -9,3 +9,4 @@ pub mod order;
 pub mod popups;
 pub mod power;
 pub mod tiling;
+pub mod tray;
