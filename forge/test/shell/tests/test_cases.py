@@ -90,5 +90,11 @@ class CasesTest(unittest.TestCase):
                 )
 
 
+    def test_the_dock_has_the_twelve_cases_of_br9(self):
+        found = cases.surface_cases("dock")
+        self.assertEqual(len({c.tag for c in found}), 12)
+        for case in found:
+            self.assertRegex(case.tag, r"^dock-(light|dark)-(1\.0|1\.5)-(en|de|rtl)$")
+
 if __name__ == "__main__":
     unittest.main()

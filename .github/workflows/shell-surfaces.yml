@@ -13,6 +13,8 @@ on:
       - "system/athanor-i18n/**"
       - "forge/specs/athanor-shelld/**"
       - "forge/specs/athanor-bar/**"
+      - "forge/specs/athanor-dock/**"
+      - "system/athanor-apps/**"
       - "system/athanor-unit/**"
       - "forge/test/shell/**"
       - ".github/workflows/shell-surfaces.yml"
@@ -27,6 +29,8 @@ on:
       - "system/athanor-i18n/**"
       - "forge/specs/athanor-shelld/**"
       - "forge/specs/athanor-bar/**"
+      - "forge/specs/athanor-dock/**"
+      - "system/athanor-apps/**"
       - "system/athanor-unit/**"
       - "forge/test/shell/**"
       - ".github/workflows/shell-surfaces.yml"
@@ -205,3 +209,49 @@ jobs:
           path: |
             .scratch/shell-rig/*.log
             .scratch/shell-rig/${{ matrix.scene }}-*.png
+
+  dock:
+    name: Dock, build and end to end
+    needs: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rig image
+        run: bash forge/test/shell/rig.sh build-image
+      - name: Build and test the dock and check the DT_NEEDED order
+        run: bash forge/test/shell/rig.sh build-dock
+      - name: Layer-surface guard
+        run: bash forge/test/shell/rig.sh layer-guard dock
+      - name: Accessibility tree of the dock
+        run: bash forge/test/shell/rig.sh atspi dock
+      - name: Openers, running windows, pinning, the knob and presets live, and memory
+        run: bash forge/test/shell/rig.sh dock-e2e
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: shell-rig-dock
+          path: |
+            .scratch/shell-rig/*.log
+            .scratch/shell-rig/dock-e2e.png
+
+  dock-scene:
+    name: Dock scene (12 cases) against the goldens
+    needs: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rig image
+        run: bash forge/test/shell/rig.sh build-image
+      - name: Build the dock
+        run: bash forge/test/shell/rig.sh build-dock
+      - name: Cases against the goldens
+        run: bash forge/test/shell/rig.sh surface dock
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: shell-rig-dock-scene
+          path: |
+            .scratch/shell-rig/*.log
+            .scratch/shell-rig/dock-*.png
