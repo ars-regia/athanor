@@ -355,3 +355,31 @@ button.bar-confirm {
     box-shadow: none;
     color: @ath_acc_ink;
 }
+
+/* Notification cards (doc_bar.md BR4): in the list, and on the popup surface, which is
+ * transparent so that each card floats with its own shadow. */
+.notification-card {
+    padding: 12px;
+    border: 1px solid @ath_line;
+    border-radius: 18px;
+    background-color: @ath_surf;
+    color: @ath_ink;
+}
+
+.notification-card.critical {
+    border-color: @ath_warn;
+}
+
+window.athanor-notifications {
+    background-color: transparent;
+}
+
+window.athanor-notifications .notification-card {
+    margin: 6px 14px 14px;
+    box-shadow: 0 1px 2px @ath_shadow_near, 0 6px 18px @ath_shadow_panel;
+}
+
+.bar-badge {
+    font-size: 11.5px;
+    font-weight: 600;
+}

@@ -80,6 +80,74 @@ mod tests {
         );
     }
 
+    /// The same table of values as athanor-bar's `notices.rs` test of this name: the struct
+    /// serializes in the order the bar's plain tuple reads it.
+    #[test]
+    fn the_sixteen_fields_keep_their_order() {
+        type BarTuple = (
+            u32,
+            String,
+            String,
+            String,
+            Vec<(String, String)>,
+            u8,
+            bool,
+            bool,
+            String,
+            String,
+            String,
+            u32,
+            u32,
+            Vec<u8>,
+            u32,
+            u32,
+        );
+        let wire = WireNotification {
+            id: 1,
+            app_name: "app".into(),
+            summary: "summary".into(),
+            body: "body".into(),
+            actions: vec![("key".into(), "label".into())],
+            urgency: 2,
+            transient: true,
+            resident: false,
+            desktop_entry: "entry".into(),
+            icon_name: "name".into(),
+            icon_file: "/file".into(),
+            image_width: 3,
+            image_height: 4,
+            image_rgba: vec![5; 48],
+            timeout_ms: 6,
+            popup_ms_left: 7,
+        };
+        let ctxt = zvariant::serialized::Context::new_dbus(zvariant::LE, 0);
+        let bytes = zvariant::to_bytes(ctxt, &wire).expect("the wire value serializes");
+        let (tuple, _): (BarTuple, usize) =
+            bytes.deserialize().expect("the bar's tuple reads it back");
+        // Tuples above twelve fields implement neither `PartialEq` nor `Debug`: compare
+        // them in two halves.
+        let (id, app, summary, body, actions, urgency, transient, resident) = (
+            tuple.0, tuple.1, tuple.2, tuple.3, tuple.4, tuple.5, tuple.6, tuple.7,
+        );
+        assert_eq!(
+            (id, app.as_str(), summary.as_str(), body.as_str()),
+            (1, "app", "summary", "body")
+        );
+        assert_eq!(actions, vec![("key".to_string(), "label".to_string())]);
+        assert_eq!((urgency, transient, resident), (2, true, false));
+        let (entry, name, file, width, height, rgba, timeout, left) = (
+            tuple.8, tuple.9, tuple.10, tuple.11, tuple.12, tuple.13, tuple.14, tuple.15,
+        );
+        assert_eq!(
+            (entry.as_str(), name.as_str(), file.as_str()),
+            ("entry", "name", "/file")
+        );
+        assert_eq!(
+            (width, height, rgba, timeout, left),
+            (3, 4, vec![5; 48], 6, 7)
+        );
+    }
+
     #[test]
     fn pixels_and_names_land_in_their_own_fields() {
         let mut body = content("x", Urgency::Critical, 0);
