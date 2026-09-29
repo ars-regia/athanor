@@ -40,7 +40,7 @@ They are tested end to end in the rig against python3-dbusmock and a real PipeWi
 - BR6: one popover at a time;
 - BR9: fixtures, scenes, and unit tests of parsers;
 - open doubt 4: the Fedora 43 templates;
-- section 5, items 14, 15, 17 and 18.
+- section 5, items 15, 17 and 18. Item 14 covers the modules of 2b.2 and is not part of this plan.
 
 Read it with `docs/architecture/doc_shell.md` rev 5: SH1 (no facades) and SH13 (12 cases per scene, and a popover scene starts open).
 
@@ -54,21 +54,27 @@ Read it with `docs/architecture/doc_shell.md` rev 5: SH1 (no facades) and SH13 (
 | **2b.4 (this plan)** | the network, Bluetooth, audio and battery modules on dbusmock fixtures. It confirms the Fedora 43 templates (BR9 and open doubt 4). |
 | 2b.5                 | the shield and its sheet, and the BR8 signals                                                                                        |
 
-2b.3 lands first and this branch rebases on it. 2c (the dock) runs in parallel. This plan brings 4 of the 15 scenes of BR9, which is 48 of the 180 surface cases: `bar-network`, `bar-bluetooth`, `bar-audio` and `bar-battery`.
+**Order.** 2b.4 runs after 2b.3 on the bar, and after Tasks 1 to 3 of the dock plan (2c). Before Task 1, merge the 2b.3 branch and the branch that carries those dock tasks into this one. Those tasks move code this plan uses:
+- `ui/running.rs`, `ui/openers.rs`, the popover attachment (`Popup::new`, `Popup::open`, `attach`), the favourites store and the i18n bridge (`tr`, `tr_with`) move into `system/athanor-apps`;
+- `dirs.rs` moves into `athanor_unit::dirs`;
+- 2b.3 rewrites `bar_session.py`'s argument parsing with argparse, and edits `ui/mod.rs`, `rig.sh`, `cases.py`, the translations and the workflow.
+
+Every step that touches one of these is marked **re-point after 2c Unit A / 2b.3**. Its code is written against the base commit `6e1d357f`. When executing, adapt the marked lines to the moved API (import path, constructor, argparse flag), keep the behaviour the step describes, and change nothing else in the step. This plan brings 4 of the 15 scenes of BR9, which is 48 of the 180 surface cases: `bar-network`, `bar-bluetooth`, `bar-audio` and `bar-battery`.
 
 **Rulings this plan makes.** The spec leaves these open, or says them differently:
 
-- **GIO, not zbus.** BR3 names `zbus` for the network row. The bar already runs GDBus on GLib's main loop for logind. zbus would bring a second D-Bus stack and an async executor into a process with a 64 MB budget (item 17), and what goes over the bus would be the same. The ledger records the deviation.
+- **GIO, not zbus.** BR3 names `zbus` for the network row. The bar already runs GDBus on GLib's main loop for logind. zbus would bring a second D-Bus stack and an async executor into a process with a 64 MB budget (item 17), and what goes over the bus would be the same. The pull request description records the deviation, under "Deviations from doc_bar.md" (Task 9, Step 5).
 - **The NetworkManager secret agent is registered by `athanor-bar` itself,** on its own system-bus connection, at `/org/freedesktop/NetworkManager/SecretAgent` with the identifier `os.athanor.Bar`. The bar is the process that shows the prompt, so no second process ever holds the password. It is safe because:
   - it refuses every call that does not come from the current unique owner of `org.freedesktop.NetworkManager`;
   - it answers only interactive requests for a Wi-Fi personal password (WPA-PSK or SAE), one at a time, and `NoSecrets` to everything else;
   - the password goes from the `gtk::PasswordEntry` into the reply to NetworkManager and nowhere else. It is never logged, never written by the bar, and the entry is cleared as the reply leaves.
 - **The BlueZ agent is registered by `athanor-bar` itself,** at `/os/athanor/Bar/BluezAgent` with the capability `DisplayYesNo`, and requested as the default agent. It is safe because:
   - it refuses every call that does not come from the current owner of `org.bluez`;
-  - it confirms a passkey only after a press on Pair;
-  - it authorises a service only for a device already paired, and it authorises a pairing only for the device the person asked to pair;
+  - **it answers only the pairing the person started from the bar** (maintainer decision D8, 2026-09-29). The agent keeps one field, `pairing`: the object path of the device whose row the person pressed, set before `Pair` is called and cleared when `Pair` returns. `RequestConfirmation`, `DisplayPasskey`, `DisplayPinCode` and `RequestAuthorization` for any other device, or with no pairing in progress, get `org.bluez.Error.Rejected` and show nothing: no page opens and no open popover closes;
+  - it confirms a passkey only after a press on Pair on that device's page;
+  - **`AuthorizeService` follows the same rule:** it is granted only for the device of the pairing in progress. After a pairing from the bar, the bar sets the device `Trusted`, and bluetoothd never asks the agent again for a trusted device. A device paired elsewhere and not trusted is refused; the person trusts it in Settings;
   - it refuses a legacy PIN request and a passkey entry request.
-- **Joining a new network sends the password inline.** `AddAndActivateConnection` carries the `psk` in `802-11-wireless-security`. NetworkManager stores the password in its own connection profile, and the bar stores nothing. The connection is system-wide, and polkit decides: the call allows interactive authorisation. The secret agent covers the other path, a saved network whose password NetworkManager asks for again.
+- **Joining a new network sends the password inline.** `AddAndActivateConnection` carries the `psk` in `802-11-wireless-security`. NetworkManager stores the password in its own connection profile, and the bar stores nothing. The connection is system-wide, and polkit decides: the call allows interactive authorisation. Task 9 records the image's default for `org.freedesktop.NetworkManager.settings.modify.system`, and the item 15 procedure records whether a prompt appeared. The secret agent covers the other path, a saved network whose password NetworkManager asks for again.
 - **Out of scope; they need Settings:**
   - Enterprise (802.1X) and WEP networks show as rows that cannot be pressed, labelled "needs Settings".
   - Hidden networks are not listed.
@@ -88,10 +94,10 @@ Read it with `docs/architecture/doc_shell.md` rev 5: SH1 (no facades) and SH13 (
   - The NetworkManager template has no AgentManager: the fixture adds one with `AddObject`.
   - The NetworkManager template does not check the `psk` it is sent: the end-to-end test reads it back from the mock's in-memory call log (`GetMethodCalls`), never from a file.
   - The NetworkManager template never calls an agent: a method only the mock has calls `GetSecrets` on the bar.
-  - The BlueZ template's `Pair` never calls an agent: a fixture method, `RequestConfirmation`, calls the bar's agent as bluetoothd would during a pairing, and a confirmed device becomes paired.
+  - The BlueZ template's `Pair` pairs at once and never calls an agent: the fixture overrides `org.bluez.Device1.Pair` on the nearby devices with a method that calls the bar's `RequestConfirmation`, as bluetoothd does, and marks the device paired only when the bar confirms. A second fixture method, `RequestConfirmation`, calls the agent with no pairing in progress, to prove that an unsolicited request is rejected.
 
   logind, the fifth template BR9 names, is present too. The rig keeps `bar_session.py`'s own logind, which 2b.2 needs for a method that never answers, and adds `SetBrightness` to it.
-- **dbusmock logs every call with its arguments,** so the NetworkManager mock runs with `-l /dev/null`. Without it a password would reach the logs.
+- **dbusmock logs every call with its arguments,** so the NetworkManager mock runs with `-l /dev/null`. Without it a password would reach the logs. dbusmock also emits every call, arguments included, as the `org.freedesktop.DBus.Mock.MethodCalled` signal on the rig's private system bus. No file results, so never run `dbus-monitor` or a bus capture in the rig while a password test runs.
 - **Item 15 cannot run in the dev VM,** which has no Wi-Fi and no Bluetooth radio. It is a procedure the maintainer follows on the desktop, written out at the end of Task 9.
 
 ## Global Constraints
@@ -99,7 +105,7 @@ Read it with `docs/architecture/doc_shell.md` rev 5: SH1 (no facades) and SH13 (
 - English in code, comments, commits and docs. There is no attribution line anywhere and no model name.
 - No `|| true`, no `continue-on-error`, and no `let _ =` on a result in non-test code. An error is logged at the right priority or returned.
 - `panic = "abort"` on dev and release. Anything that comes from a D-Bus peer, from libpulse or from sysfs is untrusted: no `unwrap`, `expect` or indexing on it in non-test code, and every variant is type-checked before it is read.
-- **A password or a passkey is never logged, never formatted into an error, and never written to a file** by the bar, the fixtures or the tests. The NetworkManager mock runs with `-l /dev/null`. The end-to-end test fails if the typed password appears in any file under `/out`.
+- **A password or a passkey is never logged, never formatted into an error, and never written to a file** by the bar, the fixtures or the tests. The NetworkManager mock runs with `-l /dev/null`. The end-to-end test fails if the typed password appears in any file the bar can write or the rig keeps: `/out` recursively, the scene's `$XDG_CONFIG_HOME`, `$XDG_CACHE_HOME`, `$XDG_STATE_HOME`, `$XDG_DATA_HOME` and `$XDG_RUNTIME_DIR`, `/run/user/1000` and `/tmp`.
 - The texts shown come from peers (SSIDs, device names, connection ids, media titles). They go through `athanor_unit::text::line` with `NAME_CHARS`, which strips control and bidirectional characters and truncates, before any widget shows them.
 - Names, verbatim:
   - the NetworkManager agent path is `/org/freedesktop/NetworkManager/SecretAgent` and its identifier is `os.athanor.Bar`;
@@ -136,7 +142,7 @@ Read it with `docs/architecture/doc_shell.md` rev 5: SH1 (no facades) and SH13 (
    - `a_hostile_ssid_is_sanitised_and_an_empty_one_is_left_out`;
    - `the_list_is_bounded`;
    - `a_device_name_is_sanitised`.
-4. **A second request while a prompt is open, or a call from a process that is not the service.** A second `GetSecrets` must get `NoSecrets` and leave the first prompt alone. A `GetSecrets` or `RequestConfirmation` from any other bus peer must be refused without a prompt. Pinned by the "refused sender" and "second request" steps in Tasks 4 and 5.
+4. **A second request while a prompt is open, a call from a process that is not the service, or a Bluetooth request the person did not start.** A second `GetSecrets` must get `NoSecrets` and leave the first prompt alone. A `GetSecrets` or `RequestConfirmation` from any other bus peer must be refused without a prompt. A BlueZ request about a device the person did not press in the bar must be rejected with nothing shown and no popover closed (decision D8). Pinned by the "refused sender" and "second request" steps in Task 4, and the "unsolicited" and "another process" steps in Task 5.
 5. **Two outputs, and memory with libpulse loaded.** A prompt must appear once, not on every surface. The popovers of the new modules must not push PSS over 64 MB. The single prompt is pinned by `prompt_view` choosing one view (Task 4); the dev VM's two-head stage of 2b.2 runs with the new modules built. Memory is pinned by the PSS check at the end of `bar_modules_e2e.py` (Task 3) and by the dev VM's `memory` stage.
 
 ---
@@ -166,7 +172,7 @@ forge/specs/athanor-bar/
 Cargo.lock                                MODIFY (shared): the libpulse crates only
 
 forge/test/shell/Containerfile            MODIFY (shared): rig-fresh, RIG_BASE, the fixtures' packages
-forge/test/shell/rig-image.digest         MODIFY (shared): the republished rig
+forge/test/shell/rig-image.digest         MODIFY (shared): the republished rig, pinned by the executor (Task 1, Step 6)
 forge/test/shell/rig.sh                   MODIFY (shared): build-image/publish-image with RIG_BASE, bar-modules-e2e, atspi bar-modules, capture_bar, surface list
 forge/test/shell/system_fixtures.py       NEW: dbusmock services, PipeWire with null sinks, an MPRIS player, a backlight
 forge/test/shell/bar_session.py           MODIFY (shared): --fixtures, logind SetBrightness
@@ -179,6 +185,7 @@ forge/test/shell/golden/bar-{network,bluetooth,audio,battery}/*.png   NEW: 48 go
 
 scripts/devvm/bar-acceptance.sh           MODIFY (shared): stage modules, a library check in deploy
 scripts/devvm/bar_modules.py              NEW: the modules in the VM over AT-SPI
+forge/config/packages.json                MODIFY (shared): pulseaudio-libs-glib2 in upstream_desktop (Task 9)
 ```
 
 "Shared" marks the files 2b.3 or 2c may also change. Rebase conflicts are expected there and nowhere else.
@@ -190,7 +197,7 @@ scripts/devvm/bar_modules.py              NEW: the modules in the VM over AT-SPI
 **Files:**
 - Modify: `forge/test/shell/Containerfile`
 - Modify: `forge/test/shell/rig.sh` (header comment; `build-image`, `publish-image`)
-- Modify: `forge/test/shell/rig-image.digest` (by the maintainer, after `publish-image`)
+- Modify: `forge/test/shell/rig-image.digest` (by the executor, after `publish-image`, Step 6)
 
 **Interfaces:**
 - Consumes: the published rig at `forge/test/shell/rig-image.digest` (today `sha256:85c2909d…`).
@@ -202,7 +209,7 @@ scripts/devvm/bar_modules.py              NEW: the modules in the VM over AT-SPI
 
 The published rig carries the pixels of every golden: fonts, Mesa, GTK, COSMIC. Rebuilding it from Fedora would move all of them. The new packages are therefore a layer on top of the published image, and only a first build from scratch (no digest file) builds the base.
 
-- [ ] **Step 1: Layer the Containerfile**
+- [ ] **Step 1: Layer the Containerfile** (re-point after 2c Unit A / 2b.3)
 
 Replace the first line of the stage header, and add the new `rig` stage between the base and the build stage. Apply with Edit, in three places.
 
@@ -236,7 +243,7 @@ RUN dnf5 -y install --setopt=install_weak_deps=False \
       pulseaudio-libs-devel \
 ```
 
-- [ ] **Step 2: Pass the published rig as the base in `rig.sh`**
+- [ ] **Step 2: Pass the published rig as the base in `rig.sh`** (re-point after 2c Unit A / 2b.3)
 
 After `rig_image() { … }`, add:
 
@@ -310,22 +317,25 @@ git add forge/test/shell/Containerfile forge/test/shell/rig.sh
 git commit -m "test(shell): layer the dbusmock and PipeWire fixtures on the published rig image"
 ```
 
-- [ ] **Step 6: Publish (maintainer)**
+- [ ] **Step 6: Publish the rig image and pin its digest (gate for every later push)**
 
-`publish-image` needs the maintainer's registry login, so the executor does not run it. Until it runs:
-- every later rig command runs locally with `ATHANOR_RIG_IMAGE=localhost/athanor-shell-rig:rig`;
-- CI runs the new jobs against the old published rig, and they fail.
-
-Hand the maintainer these commands:
+From Task 6 on, `athanor-bar` links `libpulse-mainloop-glib.so.0`. The published rig lacks `pulseaudio-libs-glib2`, so CI would fail every bar job, the existing ones included, until the new image is published and pinned. The maintainer consented on 2026-09-29 (decision D9): the executor publishes the image now, from the host, and it stays public as today. Run these outside the sandbox:
 
 ```bash
+gh auth token | podman login ghcr.io -u hr-mes --password-stdin
 bash forge/test/shell/rig.sh publish-image
 cp .scratch/shell-rig/rig-image.digest forge/test/shell/rig-image.digest
+podman pull "ghcr.io/hr-mes/athanor-shell-rig@$(cat forge/test/shell/rig-image.digest)"
+bash forge/test/shell/rig.sh surface bar-power
 git add forge/test/shell/rig-image.digest
 git commit -m "test(shell): pin the rig image with the system modules' fixtures"
 ```
 
-The new image is the old one plus a layer, so no golden changes with the digest.
+Expected:
+- `publish-image` prints `published ghcr.io/hr-mes/athanor-shell-rig@sha256:…`;
+- the pull by digest succeeds, and `surface bar-power`, now on the pinned digest without `ATHANOR_RIG_IMAGE`, passes every case.
+
+The new image is the old one plus a layer, so no golden changes with the digest. The digest commit is its own commit, and it comes before any commit that links libpulse is pushed. If 2b.3 or 2c pinned a newer rig in the meantime, rebuild on top of their digest (`build-image` layers on whatever `rig-image.digest` names) and publish again; never merge two digests by hand.
 
 ---
 
@@ -376,7 +386,7 @@ The new image is the old one plus a layer, so no golden changes with the digest.
     - `fn profiles(&Props) -> Option<(Vec<&'static str>, String)>`;
     - `fn read_backlight(&Path) -> Option<Backlight>`, `Backlight::percent(&self) -> f64` and `Backlight::raw(&self, f64) -> u32`.
 
-- [ ] **Step 1: Add the libpulse crates and regenerate the lock file**
+- [ ] **Step 1: Add the libpulse crates and regenerate the lock file** (re-point after 2c Unit A / 2b.3)
 
 In `forge/specs/athanor-bar/athanor-bar-1.0.0/Cargo.toml`, after the `gtk4-layer-shell` line, add:
 
@@ -406,7 +416,7 @@ Expected:
 
 If a `-` line appears, stop. Cargo moved an existing crate, and that is a separate change.
 
-- [ ] **Step 2: Declare the modules**
+- [ ] **Step 2: Declare the modules** (re-point after 2c Unit A / 2b.3)
 
 In `src/lib.rs`, extend the module list so that it reads, in alphabetical order:
 
@@ -1408,7 +1418,7 @@ mod tests {
 
 Run: `RIG_CARGO --lib network::`
 
-Expected: 12 passed. If `the_list_is_bounded` fails on the count, check `truncate` runs after the sort, not before.
+Expected: 13 passed. If `the_list_is_bounded` fails on the count, check `truncate` runs after the sort, not before.
 
 - [ ] **Step 7: Write `src/bluetooth.rs` with its tests**
 
@@ -2052,7 +2062,7 @@ Expected: 3 passed.
 
 Run: `RIG_CARGO --lib`
 
-Expected: every library test passes. That is the earlier tests plus 30 new ones: 6 props, 12 network, 5 bluetooth, 4 audio, 3 battery.
+Expected: every library test passes. That is the earlier tests plus 31 new ones: 6 props, 13 network, 5 bluetooth, 4 audio, 3 battery.
 
 Run: `bash forge/test/shell/rig.sh build-bar`
 
@@ -2087,7 +2097,8 @@ git commit -m "feat(bar): model NetworkManager, BlueZ, the sound server and UPow
     - `pids_of(comm) -> list[int]`, and `start(tag) -> list[Popen]`.
   - The fixture methods on interface `os.athanor.Fixture`:
     - on NetworkManager's agent manager: `Registrations() -> u`, `AskSecrets(s agent, o connection, s ssid, u flags) -> u`, `SecretsResult(u) -> s`, `CancelSecrets(s agent, o connection)`;
-    - on BlueZ's `/org/bluez`: `DefaultAgent() -> s`, `RequestConfirmation(s agent, o device, u passkey) -> u`, `ConfirmationResult(u) -> s`.
+    - on BlueZ's `/org/bluez`: `DefaultAgent() -> s`, `AgentOwner(s)`, `RequestConfirmation(s agent, o device, u passkey) -> u`, `AgentRequest(s agent, s method, o device) -> u`, `ConfirmationResult(u) -> s`;
+    - on the nearby devices, `org.bluez.Device1.Pair` replaced by `PAIR_WITH_AGENT`, which confirms `fx.PAIRING_PASSKEY` with the agent (the bar shows `fx.PAIRING_CODE`).
   - `bar_session.py --fixtures`: the fixtures before the bar, `ATHANOR_BAR_BACKLIGHT_DIR` for the bar, and logind's `Session.SetBrightness`, logged as `SetBrightness <subsystem> <name> <level>` and written to the fake sysfs file.
   - `bar_modules_e2e.py`: a `SECTIONS` list that Tasks 4 to 7 extend, each section a function of one `SimpleNamespace` with `app`, `Atspi`, `bus`, `bar` (the bar's unique name on the system bus) and `pid`.
   - `rig.sh bar-modules-e2e`.
@@ -2111,10 +2122,16 @@ Fixture methods live on the interface os.athanor.Fixture, added to the mocks:
   returns the count; AskSecrets(agent, connection, ssid, flags) calls the agent's GetSecrets
   as NetworkManager would and returns an index; SecretsResult(index) returns "pending",
   "reply:<psk>" or "error:<D-Bus error name>"; CancelSecrets(agent, connection).
-- BlueZ's /org/bluez: DefaultAgent() returns the default agent's path;
-  RequestConfirmation(agent, device, passkey) calls the agent as bluetoothd would during a
-  pairing and returns an index; ConfirmationResult(index) returns "pending", "confirmed" or
-  "error:<name>", and a confirmed device becomes paired.
+- BlueZ's /org/bluez: DefaultAgent() returns the default agent's path; AgentOwner(name)
+  records the bus name that registered it, which the template does not keep;
+  RequestConfirmation(agent, device, passkey) calls the agent with no pairing in progress
+  and returns an index; AgentRequest(agent, method, device) does the same for
+  RequestAuthorization, AuthorizeService, RequestPinCode, RequestPasskey and DisplayPasskey;
+  ConfirmationResult(index) returns "pending", "confirmed" or "error:<name>".
+- The nearby devices' org.bluez.Device1.Pair is replaced: like bluetoothd, it calls the
+  default agent's RequestConfirmation with PAIRING_PASSKEY and pairs the device only when the
+  agent confirms. It blocks the BlueZ mock until the agent answers, so a test must not call
+  the BlueZ mock while a confirmation page is open.
 """
 
 import os
@@ -2153,6 +2170,25 @@ DEVICES = [
     ("11:22:33:44:55:03", "Phone", False, "phone"),
     ("11:22:33:44:55:04", "Speaker", False, "audio-card"),
 ]
+# The passkey the fixture's Pair asks the agent to confirm, and the six digits the bar shows.
+PAIRING_PASSKEY = 482916
+PAIRING_CODE = "482916"
+# bluetoothd's Pair: ask the default agent, pair only on its confirmation.
+PAIR_WITH_AGENT = f"""
+bluez = get_object('/org/bluez')
+owner = bluez.__dict__.get('agent_owner')
+if not owner or not bluez.default_agent:
+    raise dbus.exceptions.DBusException('no agent', name='org.bluez.Error.AuthenticationFailed')
+try:
+    self.connection.call_blocking(
+        owner, str(bluez.default_agent), 'org.bluez.Agent1', 'RequestConfirmation', 'ou',
+        [dbus.ObjectPath(self.__dbus_object_path__), dbus.UInt32({PAIRING_PASSKEY})], timeout=60)
+except dbus.exceptions.DBusException as error:
+    raise dbus.exceptions.DBusException(
+        'the agent refused: ' + error.get_dbus_name(), name='org.bluez.Error.AuthenticationRejected')
+self.paired = True
+self.UpdateProperties('org.bluez.Device1', {{'Paired': dbus.Boolean(True)}})
+"""
 
 NM_AGENT_METHODS = [
     ("Register", "s", "", "self.registered = getattr(self, 'registered', 0) + 1"),
@@ -2222,6 +2258,33 @@ self.connection.call_async(
 ret = index
 """,
     ),
+    (
+        "AgentRequest",
+        "sso",
+        "u",
+        """
+requests = {
+    'RequestAuthorization': ('o', [args[2]]),
+    'AuthorizeService': ('os', [args[2], '0000110b-0000-1000-8000-00805f9b34fb']),
+    'RequestPinCode': ('o', [args[2]]),
+    'RequestPasskey': ('o', [args[2]]),
+    'DisplayPasskey': ('ouq', [args[2], dbus.UInt32(222333), dbus.UInt16(0)]),
+}
+signature, arguments = requests[args[1]]
+results = self.__dict__.setdefault('confirmations', [])
+index = len(results)
+results.append('pending')
+def done(*_, results=results, index=index):
+    results[index] = 'confirmed'
+def failed(error, results=results, index=index):
+    results[index] = 'error:' + error.get_dbus_name()
+self.connection.call_async(
+    args[0], str(self.default_agent), 'org.bluez.Agent1', args[1], signature, arguments,
+    done, failed, timeout=30)
+ret = index
+""",
+    ),
+    ("AgentOwner", "s", "", "self.agent_owner = args[0]"),
     ("ConfirmationResult", "u", "s", "ret = self.__dict__.get('confirmations', [])[args[0]]"),
 ]
 
@@ -2348,6 +2411,8 @@ def bluez(bus, log):
         )
         if paired:
             call(bus, BLUEZ, "/", BLUEZ_MOCK, "PairDevice", "(ss)", ("hci0", address))
+        else:
+            call(bus, BLUEZ, path, MOCK, "AddMethod", "(sssss)", ("org.bluez.Device1", "Pair", "", "", PAIR_WITH_AGENT))
     (headphones,) = [
         f"/org/bluez/hci0/dev_{address.replace(':', '_')}"
         for address, alias, _, _ in DEVICES
@@ -2506,7 +2571,7 @@ def start(tag):
     ]
 ```
 
-- [ ] **Step 2: Give `bar_session.py` the fixtures and `SetBrightness`**
+- [ ] **Step 2: Give `bar_session.py` the fixtures and `SetBrightness`** (re-point after 2c Unit A / 2b.3)
 
 Apply these edits to `forge/test/shell/bar_session.py`:
 
@@ -2612,9 +2677,12 @@ the scene's client.
 
 Each module is one section in SECTIONS. A section drives the bar over AT-SPI and checks what
 reached the mocks, never the reverse only. The last checks are the bar's memory with every
-module loaded, and that no password typed here reached a file under /out.
+module loaded, and that no password typed here reached a file the bar can write or the rig
+keeps.
 """
 
+import os
+import stat
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -2634,7 +2702,7 @@ from bar_e2e import (  # noqa: E402
     wait_for,
 )
 
-# Typed into the password entries. Searched for in /out at the end.
+# Typed into the password entries. Searched for in every written file at the end.
 PASSWORDS = ["correct horse battery", "staple-9-orbit"]
 # The sections; Tasks 4 to 7 of the 2b.4 plan add network, bluetooth, audio and battery.
 SECTIONS = []
@@ -2659,15 +2727,47 @@ def bar_name(bus, pid):
     return None
 
 
-def no_password_in_out():
-    """No typed password in any file at the top of /out (the logs of every scene)."""
-    for path in Path("/out").iterdir():
-        if path.is_file():
+# Where the bar can write under its Landlock rules and the rig keeps files: /out (logs,
+# goldens, digests), the scene's XDG directories, the runtime directory and /tmp. The build
+# tree and the binaries under /out are not the bar's output and are skipped, as are PNGs.
+SKIPPED_UNDER_OUT = ("target", "bin")
+
+
+def written_roots():
+    roots = [Path("/out"), Path("/run/user/1000"), Path("/tmp")]
+    for variable in ("XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR"):
+        if os.environ.get(variable):
+            roots.append(Path(os.environ[variable]))
+    return roots
+
+
+def regular_files(root):
+    """Every regular file under root, recursively, without following links. Sockets, FIFOs,
+    devices and links are left out by type; a file this process cannot read is reported."""
+    for directory, subdirectories, names in os.walk(root):
+        if Path(directory) == Path("/out"):
+            subdirectories[:] = [name for name in subdirectories if name not in SKIPPED_UNDER_OUT]
+        for name in names:
+            path = Path(directory) / name
+            if path.suffix == ".png" or not stat.S_ISREG(path.lstat().st_mode):
+                continue
+            yield path
+
+
+def no_password_written():
+    """No typed password in any regular file the bar can write or the rig keeps."""
+    clean = True
+    for root in written_roots():
+        for path in regular_files(root):
+            if not os.access(path, os.R_OK):
+                print(f"cannot read {path} to scan it for a password", file=sys.stderr)
+                clean = False
+                continue
             data = path.read_bytes()
             if any(password.encode() in data for password in PASSWORDS):
                 print(f"a password is in {path}", file=sys.stderr)
-                return False
-    return True
+                clean = False
+    return clean
 
 
 def main():
@@ -2704,7 +2804,7 @@ def main():
         pss is not None and pss <= PSS_LIMIT_KB,
         f"{pss} kB",
     )
-    check("no typed password reached a file under /out", no_password_in_out())
+    check("no typed password in any file the bar can write or the rig keeps", no_password_written())
     if failures:
         print(f"bar-modules-e2e: {len(failures)} failed", file=sys.stderr)
         return 1
@@ -2716,7 +2816,7 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 4: Add `rig.sh bar-modules-e2e`**
+- [ ] **Step 4: Add `rig.sh bar-modules-e2e`** (re-point after 2c Unit A / 2b.3)
 
 In `forge/test/shell/rig.sh`, add this header line after the `bar-e2e` line:
 
@@ -2739,7 +2839,7 @@ bar-modules-e2e)
     ;;
 ```
 
-- [ ] **Step 5: Add the CI step**
+- [ ] **Step 5: Add the CI step** (re-point after 2c Unit A / 2b.3)
 
 In `.github/workflows/shell-surfaces.yml`, job `bar`, after the step `Live layout, mandatory keys, running windows, the power menu and memory`, add:
 
@@ -3094,7 +3194,7 @@ impl Drop for Mirror {
 }
 ```
 
-- [ ] **Step 2: Add `Bar::fit_groups` and declare the modules in `src/ui/mod.rs`**
+- [ ] **Step 2: Add `Bar::fit_groups` and declare the modules in `src/ui/mod.rs`** (re-point after 2c Unit A / 2b.3)
 
 After `mod accessibility;` add `mod bus;`, and after `mod logind;` add `mod network;`, so that the list stays alphabetical.
 
@@ -3116,7 +3216,7 @@ In `impl Bar`, after `refresh`:
     }
 ```
 
-- [ ] **Step 3: Write `src/ui/network.rs`**
+- [ ] **Step 3: Write `src/ui/network.rs`** (re-point after 2c Unit A / 2b.3)
 
 ```rust
 //! The network module (doc_bar.md, BR3): the wired state, the Wi-Fi list, joining with a
@@ -3945,7 +4045,7 @@ from gi.repository import Gio, GLib  # noqa: E402
 
 Gio and GLib have a single typelib version, so the last import needs no `gi.require_version`. Tasks 5 to 7 import nothing more.
 
-Below `no_password_in_out`, add:
+Below `no_password_written`, add:
 
 ```python
 NM_PATH = "/org/freedesktop/NetworkManager"
@@ -4197,7 +4297,7 @@ git commit -m "feat(bar): the network module, with NetworkManager's secret agent
   - `athanor_bar::bluetooth::*` (Task 2);
   - `bus::{call, set_property, spawn, Mirror, Source, TIMEOUT_MS, INTERACTIVE_TIMEOUT_MS}` and `Bar::fit_groups` (Task 4);
   - `popup::{Popup, switch_row}`;
-  - in the e2e: `open_popover`, `property_of`, `press_confirm` and the imports (Task 4); `fx.BLUEZ`, `fx.FIXTURE`, and the fixture methods `DefaultAgent`, `RequestConfirmation(sou) -> u` and `ConfirmationResult(u) -> s` (Task 3).
+  - in the e2e: `open_popover`, `property_of`, `press_confirm` and the imports (Task 4); `fx.BLUEZ`, `fx.FIXTURE`, and the fixture methods `DefaultAgent`, `AgentOwner(s)`, `RequestConfirmation(sou) -> u`, `AgentRequest(sso) -> u` and `ConfirmationResult(u) -> s`, and `fx.PAIRING_CODE` (Task 3).
 - Produces: `Module::Bluetooth` built, and the `bluetooth` section.
 
 The agent:
@@ -4205,19 +4305,21 @@ The agent:
 - **Why it is safe:**
   - it answers only calls whose sender is the current unique owner of `org.bluez`, and any other sender gets `org.bluez.Error.Rejected`;
   - it never types a PIN or a passkey: `RequestPinCode` and `RequestPasskey` are rejected. `DisplayYesNo` tells BlueZ to use numeric comparison or display, which the person confirms on both devices;
-  - `RequestAuthorization` (just-works) is granted only for the device the person pressed. `AuthorizeService` is granted only for a paired device or that one. Anything else is rejected, so a device nearby cannot pair or connect on its own;
+  - **it answers only the pairing the person started from the bar** (maintainer decision D8). `pairing` holds the device whose row the person pressed, from just before `Pair` is called until it returns. `RequestConfirmation`, `DisplayPasskey`, `DisplayPinCode`, `RequestAuthorization` and `AuthorizeService` for any other device, or with no pairing in progress, get `org.bluez.Error.Rejected` before anything is shown: no page opens and no open popover closes. A device nearby cannot start a pairing, and cannot choose the name a prompt shows;
+  - `AuthorizeService` follows the same rule. After a pairing from the bar the device is set `Trusted`, and bluetoothd does not ask the agent about a trusted device again; a device paired elsewhere and not trusted is refused until the person trusts it in Settings;
   - one request is open at a time.
 
-- [ ] **Step 1: Write `src/ui/bluetooth.rs`**
+- [ ] **Step 1: Write `src/ui/bluetooth.rs`** (re-point after 2c Unit A / 2b.3)
 
 ```rust
 //! The Bluetooth module (doc_bar.md, BR3): the adapter's power, the paired devices, the
 //! devices nearby while a popover is open, and pairing with a confirmation. One service per
 //! process mirrors BlueZ and is its default agent; each surface has a view.
 //!
-//! The agent answers only the current owner of `org.bluez`. It never types a code: the
-//! capability is DisplayYesNo, so the person compares six digits on both screens. A device
-//! the person did not press is never authorised unless it is already paired.
+//! The agent answers only the current owner of `org.bluez`, and only about the device whose
+//! pairing the person started from the bar: every other request is rejected before anything
+//! shows. It never types a code: the capability is DisplayYesNo, so the person compares six
+//! digits on both screens.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -4388,7 +4490,14 @@ impl Service {
         if state.is_none() {
             self.cancel_pending();
         }
+        // bluetoothd stops discovery when the adapter powers off: start it again when the
+        // adapter comes back on under an open popover.
+        let powered_on = state.as_ref().is_some_and(|state| state.powered)
+            && !self.state.borrow().as_ref().is_some_and(|state| state.powered);
         self.state.replace(state);
+        if powered_on && self.open_popovers.get() > 0 {
+            self.discovery(true);
+        }
         for view in self.views() {
             view.show(self.state.borrow().as_ref());
         }
@@ -4414,6 +4523,12 @@ impl Service {
             return;
         }
         match method {
+            "RequestConfirmation" | "DisplayPasskey" | "DisplayPinCode" | "RequestAuthorization" | "AuthorizeService"
+                if !self.is_bar_pairing(params) =>
+            {
+                tracing::info!(method, "a Bluetooth request the person did not start from the bar was rejected");
+                invocation.return_dbus_error(bluetooth::REJECTED, "the person did not start this pairing from the bar");
+            }
             "RequestConfirmation" => {
                 let request = bluetooth::device_and_passkey(params).and_then(|(device, passkey)| {
                     Some((bluetooth::device_label(&mirror.objects(), &device)?, bluetooth::passkey_label(passkey)?))
@@ -4444,20 +4559,8 @@ impl Service {
                 }
                 invocation.return_value(None);
             }
-            "RequestAuthorization" => {
-                let allowed = bluetooth::device_of(params)
-                    .is_some_and(|device| self.pairing.borrow().as_deref() == Some(device.as_str()));
-                self.authorise(allowed, invocation);
-            }
-            "AuthorizeService" => {
-                let allowed = bluetooth::device_of(params).is_some_and(|device| {
-                    self.pairing.borrow().as_deref() == Some(device.as_str())
-                        || props::lookup(&mirror.objects(), &device, bluetooth::DEVICE)
-                            .and_then(|device| props::value::<bool>(device, "Paired"))
-                            .unwrap_or(false)
-                });
-                self.authorise(allowed, invocation);
-            }
+            // The guard above admitted only the device of the pairing in progress.
+            "RequestAuthorization" | "AuthorizeService" => invocation.return_value(None),
             "RequestPinCode" | "RequestPasskey" => {
                 invocation.return_dbus_error(bluetooth::REJECTED, "this agent does not type codes")
             }
@@ -4473,12 +4576,13 @@ impl Service {
         }
     }
 
-    fn authorise(&self, allowed: bool, invocation: gio::DBusMethodInvocation) {
-        if allowed {
-            invocation.return_value(None);
-        } else {
-            invocation.return_dbus_error(bluetooth::REJECTED, "the person did not ask for this device");
-        }
+    /// Whether a request names the device of the pairing the person started from the bar
+    /// (maintainer decision D8). Every agent request names its device first: `(o)`, `(os)`,
+    /// `(ou)` or `(ouq)`.
+    fn is_bar_pairing(&self, params: &glib::Variant) -> bool {
+        bluetooth::device_of(params)
+            .or_else(|| bluetooth::device_and_passkey(params).map(|(device, _)| device))
+            .is_some_and(|device| self.pairing.borrow().as_deref() == Some(device.as_str()))
     }
 
     fn ask(self: &Rc<Self>, invocation: gio::DBusMethodInvocation, label: &str, code: &str) {
@@ -4890,10 +4994,14 @@ impl View {
 
 impl Drop for View {
     fn drop(&mut self) {
+        let Some(service) = service() else { return };
         if self.asking.get() {
-            if let Some(service) = service() {
-                service.answer(false);
-            }
+            service.answer(false);
+        }
+        // A surface that leaves with its popover open never emits `closed`: count it closed,
+        // or discovery would run on with no popover to show it.
+        if self.popup.popover.is_visible() {
+            service.popover_toggled(false);
         }
     }
 }
@@ -4927,7 +5035,7 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
 }
 ```
 
-- [ ] **Step 2: Declare the module and build it**
+- [ ] **Step 2: Declare the module and build it** (re-point after 2c Unit A / 2b.3)
 
 In `src/ui/mod.rs`, add `mod bluetooth;` after `mod accessibility;`. Then add this arm next to `Module::Network`:
 
@@ -4965,6 +5073,13 @@ def bluetooth(ctx):
         )
         return index
 
+    def request(method, alias):
+        (index,) = fx.call(
+            bus, fx.BLUEZ, "/org/bluez", fx.FIXTURE, "AgentRequest", "(sso)",
+            (ctx.bar, method, device_path(alias)), "(u)",
+        )
+        return index
+
     def result(index):
         (value,) = fx.call(bus, fx.BLUEZ, "/org/bluez", fx.FIXTURE, "ConfirmationResult", "(u)", (index,), "(s)")
         return value
@@ -4977,6 +5092,8 @@ def bluetooth(ctx):
         "the bar is BlueZ's default agent",
         wait_for(lambda: fx.call(bus, fx.BLUEZ, "/org/bluez", fx.FIXTURE, "DefaultAgent", reply="(s)")[0] == BLUEZ_AGENT, 5),
     )
+    # The template does not keep who registered the agent; the fixture's Pair needs it.
+    fx.call(bus, fx.BLUEZ, "/org/bluez", fx.FIXTURE, "AgentOwner", "(s)", (ctx.bar,))
     check(
         "the list shows the connected headphones first",
         open_popover(app, Atspi, "Bluetooth", lambda: buttons(app, Atspi, "Headphones, connected")),
@@ -4993,29 +5110,45 @@ def bluetooth(ctx):
     power()[0].do_action(0)
     check("and on again", wait_for(lambda: adapter("Powered") is True, 5))
 
-    # Pairing a device the person pressed: Pair, Trusted, Connect.
+    # Requests the person did not start from the bar (maintainer decision D8): rejected by the
+    # agent before anything shows, and no open popover closes.
+    unsolicited = confirm("Speaker", 111111)
+    check(
+        "an unsolicited RequestConfirmation from BlueZ is rejected",
+        wait_for(lambda: result(unsolicited) == f"error:{REJECTED}", 5),
+    )
+    check("and shows no digits", not labelled(app, Atspi, "label", "111111"))
+    check("and the popover stays open", bool(buttons(app, Atspi, "Headphones, connected")))
+    check(
+        "the device stays unpaired",
+        property_of(bus, fx.BLUEZ, device_path("Speaker"), device1, "Paired") is False,
+    )
+    for method in ("RequestAuthorization", "AuthorizeService", "DisplayPasskey", "RequestPinCode", "RequestPasskey"):
+        index = request(method, "Speaker")
+        check(f"an unsolicited {method} is rejected", wait_for(lambda: result(index) == f"error:{REJECTED}", 5))
+    check("DisplayPasskey showed nothing", not labelled(app, Atspi, "label", "222333"))
+
+    # Pairing a device the person pressed: bluetoothd asks for the six digits (the fixture's
+    # Pair), the person confirms, then the bar trusts and connects it. The BlueZ mock is
+    # blocked while the page is open, so nothing below calls it until Pair is pressed.
     check("a nearby device is listed while discovering", wait_for(lambda: buttons(app, Atspi, "Phone"), 10))
     press(app, Atspi, "Phone")
+    check("pressing it shows the digits BlueZ sent", wait_for(lambda: labelled(app, Atspi, "label", fx.PAIRING_CODE), 10))
+    check("Pair confirms", wait_for(lambda: press_confirm(app, Atspi, "Pair"), 5))
     phone = device_path("Phone")
-    check("pressing it pairs it", wait_for(lambda: property_of(bus, fx.BLUEZ, phone, device1, "Paired") is True, 10))
+    check("the device is paired", wait_for(lambda: property_of(bus, fx.BLUEZ, phone, device1, "Paired") is True, 10))
     check("trusts it", wait_for(lambda: property_of(bus, fx.BLUEZ, phone, device1, "Trusted") is True, 5))
     check("and connects it", wait_for(lambda: buttons(app, Atspi, "Phone, connected"), 10))
 
-    # Numeric comparison, as bluetoothd asks when the other device pairs.
-    first = confirm("Speaker", 123456)
-    check("RequestConfirmation shows the six digits", wait_for(lambda: labelled(app, Atspi, "label", "123456"), 5))
-    second = confirm("Keyboard", 111111)
-    check("a second request while one is open is rejected", wait_for(lambda: result(second) == f"error:{REJECTED}", 5))
-    check("Pair confirms", wait_for(lambda: press_confirm(app, Atspi, "Pair"), 5))
-    check("BlueZ received the confirmation", wait_for(lambda: result(first) == "confirmed", 5))
-    check(
-        "and the device is paired",
-        wait_for(lambda: property_of(bus, fx.BLUEZ, device_path("Speaker"), device1, "Paired") is True, 5),
-    )
-    third = confirm("Keyboard", 654321)
-    wait_for(lambda: labelled(app, Atspi, "label", "654321"), 5)
+    # Cancel on the page: the agent rejects, BlueZ fails the pairing, the device stays unpaired.
+    press(app, Atspi, "Speaker")
+    check("a second pairing shows its digits", wait_for(lambda: labelled(app, Atspi, "label", fx.PAIRING_CODE), 10))
     press(app, Atspi, "Cancel")
-    check("Cancel rejects", wait_for(lambda: result(third) == f"error:{REJECTED}", 5))
+    check("Cancel closes the page", wait_for(lambda: not labelled(app, Atspi, "label", fx.PAIRING_CODE), 5))
+    check(
+        "and the device stays unpaired",
+        wait_for(lambda: property_of(bus, fx.BLUEZ, device_path("Speaker"), device1, "Paired") is False, 5),
+    )
 
     # The agent refuses any process that is not bluetoothd.
     try:
@@ -5072,9 +5205,9 @@ git commit -m "feat(bar): the Bluetooth module, with BlueZ's pairing agent in th
   - the crates `libpulse-binding` 2.30 and `libpulse-glib-binding` 2.29 (Task 2, Step 1).
   - The libpulse API used below was checked against the sources of libpulse-binding 2.30.1 and libpulse-glib-binding 2.29.0:
     - `Context::{new_with_proplist, set_state_callback, set_subscribe_callback, connect, disconnect, get_state, subscribe, introspect, set_default_sink, set_default_source}`;
-    - `Introspector::{get_server_info, get_sink_info_list, get_source_info_list, set_sink_volume_by_name, set_sink_mute_by_name, set_source_volume_by_name, set_source_mute_by_name}`;
+    - `Introspector::{get_sink_info_by_name, get_source_info_by_name, get_sink_info_list, get_source_info_list, set_sink_volume_by_name, set_sink_mute_by_name, set_source_volume_by_name, set_source_mute_by_name}`;
     - `ChannelVolumes::{is_valid, max, scale}`, `Volume(pub u32)` and `ListResult::{Item, End, Error}`;
-    - `SourceInfo::monitor_of_sink: Option<u32>`, and `ServerInfo::{default_sink_name, default_source_name}: Option<Cow<str>>`;
+    - `SourceInfo::monitor_of_sink: Option<u32>`, and `SinkInfo::name` / `SourceInfo::name`: `Option<Cow<str>>`;
     - `libpulse_glib_binding::Mainloop::new(Option<&mut MainContext>) -> Option<Mainloop>`.
   - In the e2e: `open_popover`, `mock_calls` and `property_of` (Task 4); `fx.pactl`, `fx.pids_of`, `fx.pipewire_pulse`, `fx.PLAYER`, `fx.MPRIS_PATH` and `fx.MPRIS_PLAYER` (Task 3).
 - Produces:
@@ -5085,6 +5218,7 @@ git commit -m "feat(bar): the Bluetooth module, with BlueZ's pairing agent in th
 Two libpulse rules, repeated in the code:
 1. **A libpulse callback only stages data and schedules an idle callback.** `connect()` fires the state callback synchronously while the bar holds the context, and the introspection callbacks run inside libpulse's dispatch.
 2. **Every call on the context goes through `with_ready`.** libpulse-binding asserts on the null operation that a call on a context in any other state returns, and `panic = "abort"` would end the bar. Sink and source names passed back come from the server as C strings, so `CString::new` inside libpulse-binding cannot fail on them.
+3. **Only list-style introspection calls.** A single-item callback such as `get_server_info` asserts that the info pointer is not null (`introspect.rs`, `get_server_info_cb_proxy`). libpulse passes null when the reply is an error or times out, and `catch_unwind` catches nothing under `panic = "abort"`, so a hung sound server would end the bar. The defaults are read with `get_sink_info_by_name("@DEFAULT_SINK@")` and `get_source_info_by_name("@DEFAULT_SOURCE@")`, whose callbacks go through the list proxy: an error becomes `ListResult::Error`. Never call `get_server_info`, or any other introspection call whose callback takes a bare `&Info` instead of a `ListResult`.
 
 - [ ] **Step 1: Write `src/ui/mpris.rs`**
 
@@ -5227,7 +5361,7 @@ impl Media {
 }
 ```
 
-- [ ] **Step 2: Write `src/ui/audio.rs`**
+- [ ] **Step 2: Write `src/ui/audio.rs`** (re-point after 2c Unit A / 2b.3)
 
 ```rust
 //! The audio module (doc_bar.md, BR3): output and input volume, mute, the device in use,
@@ -5280,7 +5414,7 @@ struct Snapshot {
     default_input: Option<String>,
 }
 
-/// What the three introspection calls of one refresh gather.
+/// What the four introspection calls of one refresh gather.
 #[derive(Default)]
 struct Gathering {
     snapshot: Snapshot,
@@ -5435,29 +5569,36 @@ impl Service {
         }
     }
 
-    /// Reads the server's defaults, the sinks and the sources; events during a refresh
-    /// coalesce into one more.
+    /// Reads the default sink and source, the sinks and the sources; events during a
+    /// refresh coalesce into one more. The defaults come through the special names, whose
+    /// callbacks turn an error or a timeout into `ListResult::Error` (rule 3).
     fn refresh(self: &Rc<Self>) {
         if self.gathering.borrow().is_some() {
             self.stale.set(true);
             return;
         }
         self.gathering.replace(Some(Gathering {
-            remaining: 3,
+            remaining: 4,
             ..Gathering::default()
         }));
         let mut started = false;
         self.with_ready(|context| {
             let introspect = context.introspect();
             let weak = Rc::downgrade(self);
-            introspect.get_server_info(move |info| {
-                let output = info.default_sink_name.as_deref().map(str::to_owned);
-                let input = info.default_source_name.as_deref().map(str::to_owned);
-                stage(&weak, |gathering| {
-                    gathering.snapshot.default_output = output;
-                    gathering.snapshot.default_input = input;
-                });
-                finish(&weak);
+            introspect.get_sink_info_by_name("@DEFAULT_SINK@", move |result| match result {
+                ListResult::Item(info) => {
+                    let output = info.name.as_deref().map(str::to_owned);
+                    stage(&weak, |gathering| gathering.snapshot.default_output = output);
+                }
+                ListResult::End | ListResult::Error => finish(&weak),
+            });
+            let weak = Rc::downgrade(self);
+            introspect.get_source_info_by_name("@DEFAULT_SOURCE@", move |result| match result {
+                ListResult::Item(info) => {
+                    let input = info.name.as_deref().map(str::to_owned);
+                    stage(&weak, |gathering| gathering.snapshot.default_input = input);
+                }
+                ListResult::End | ListResult::Error => finish(&weak),
             });
             let weak = Rc::downgrade(self);
             introspect.get_sink_info_list(move |result| match result {
@@ -5500,7 +5641,7 @@ impl Service {
         }
     }
 
-    /// One of the three calls ended: the last one publishes, on an idle callback.
+    /// One of the four calls ended: the last one publishes, on an idle callback.
     fn finished_one(self: &Rc<Self>) {
         let done = match self.gathering.borrow_mut().as_mut() {
             Some(gathering) => {
@@ -5879,7 +6020,7 @@ Notes for the implementer:
 - If clippy flags `let_underscore_future` or `drop_non_drop` on these lines, bind each operation to `_operation` inside its arm. Do not add `allow`.
 - `ChannelVolumes::max` is the loudest channel, so the slider follows it. `scale` keeps the balance between channels.
 
-- [ ] **Step 3: Declare the modules and build them**
+- [ ] **Step 3: Declare the modules and build them** (re-point after 2c Unit A / 2b.3)
 
 In `src/ui/mod.rs`, add `mod audio;` after `mod accessibility;`, and `mod mpris;` after `mod logind;` (next to `mod network;`). Then add the arm:
 
@@ -6007,7 +6148,7 @@ The module talks to three services and to none of COSMIC's (BR3):
 - **The power-profiles interface.** `org.freedesktop.UPower.PowerProfiles` is served by tuned-ppd on Fedora 43. The module reads it through a second `Fixed` mirror and sets `ActiveProfile`. The daemon asks polkit (`power-profiles-daemon.switch-profile` or tuned-ppd's equivalent), and an active local session is allowed by default.
 - **logind's `Session.SetBrightness`.** It needs no polkit for the session's own seat. The bar only reads `/sys/class/backlight` (Landlock restricts writes, not reads), and logind writes the level.
 
-- [ ] **Step 1: Write `src/ui/battery.rs`**
+- [ ] **Step 1: Write `src/ui/battery.rs`** (re-point after 2c Unit A / 2b.3)
 
 ```rust
 //! The battery module (doc_bar.md, BR3): the charge and the time left from UPower's display
@@ -6396,7 +6537,7 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
 
 Note for the implementer: the slider starts at 1, not 0, because `Backlight::raw` never returns 0: a slider at its left end must not turn the panel black.
 
-- [ ] **Step 2: Declare the module and build it**
+- [ ] **Step 2: Declare the module and build it** (re-point after 2c Unit A / 2b.3)
 
 In `src/ui/mod.rs`, add `mod battery;` after `mod audio;`, and the arm:
 
@@ -6479,7 +6620,7 @@ def battery(ctx):
 SECTIONS.append(battery)
 ```
 
-- [ ] **Step 4: Add `rig.sh atspi bar-modules` and its CI step**
+- [ ] **Step 4: Add `rig.sh atspi bar-modules` and its CI step** (re-point after 2c Unit A / 2b.3)
 
 In `forge/test/shell/rig.sh`, in the `atspi)` case, after the `bar)` branch (its `;;`), add:
 
@@ -6520,7 +6661,7 @@ ATHANOR_RIG_IMAGE=localhost/athanor-shell-rig:rig bash forge/test/shell/rig.sh b
 
 Expected:
 - every check PASSes;
-- `bar-modules-e2e` ends with the PSS line within 64 MB (item 17) and "no typed password reached a file under /out";
+- `bar-modules-e2e` ends with the PSS line within 64 MB (item 17) and "no typed password in any file the bar can write or the rig keeps";
 - `atspi bar-modules` lists 11 or more named interactive widgets;
 - `atspi bar` still passes with 7: without the fixtures, the four modules hide.
 
@@ -6556,7 +6697,7 @@ git commit -m "feat(bar): the battery module, with the power profile and the bri
   - the scenes `bar-network`, `bar-bluetooth`, `bar-audio` and `bar-battery`, of 12 cases each (light and dark, scales 1.0 and 1.5, en, de and pseudo-RTL);
   - 120 bar cases in all with the six of 2b.2 (item 18 counts 180 once 2b.3 and 2b.5 add theirs).
 
-- [ ] **Step 1: List the new sources for xgettext**
+- [ ] **Step 1: List the new sources for xgettext** (re-point after 2c Unit A / 2b.3)
 
 ```bash
 python3 - <<'PY'
@@ -6572,7 +6713,7 @@ git diff --stat forge/specs/athanor-bar/athanor-bar-1.0.0/po/POTFILES.in
 
 Expected: `1 file changed, 4 insertions(+)`, and no deletions. The file was sorted already; if the diff shows deletions, `git checkout` the file and insert the four lines by hand in their sorted places.
 
-- [ ] **Step 2: Regenerate the template and merge it into the catalogs**
+- [ ] **Step 2: Regenerate the template and merge it into the catalogs** (re-point after 2c Unit A / 2b.3)
 
 ```bash
 podman run --rm --security-opt label=disable -v "$(git rev-parse --show-toplevel):/repo" -w /repo \
@@ -6587,7 +6728,7 @@ Expected: the count grows by 43. "Cancel" is already in the template, so the new
 
 If the number differs, compare with the table in Step 3: that table is the list of new message ids.
 
-- [ ] **Step 3: Fill `it.po` and `en.po`**
+- [ ] **Step 3: Fill `it.po` and `en.po`** (re-point after 2c Unit A / 2b.3)
 
 ```bash
 python3 - <<'PY'
@@ -6670,7 +6811,7 @@ msgfmt --check --statistics -o /dev/null forge/specs/athanor-bar/athanor-bar-1.0
 
 Expected: both report every message translated, with no fuzzy and no untranslated messages. `en.po` is ASCII: every English message above is ASCII, and the script writes the message id back.
 
-- [ ] **Step 4: German for the scenes' test catalog**
+- [ ] **Step 4: German for the scenes' test catalog** (re-point after 2c Unit A / 2b.3)
 
 ```bash
 cat >> forge/test/shell/locale/bar-de.po <<'EOF'
@@ -6809,7 +6950,7 @@ msgfmt --check -o /dev/null forge/test/shell/locale/bar-de.po
 
 Expected: `msgfmt` exits 0, with no duplicate message definitions.
 
-- [ ] **Step 5: The four scenes in `rig.sh`, `cases.py`, the unit test and CI**
+- [ ] **Step 5: The four scenes in `rig.sh`, `cases.py`, the unit test and CI** (re-point after 2c Unit A / 2b.3)
 
 In `forge/test/shell/rig.sh`:
 
@@ -6944,6 +7085,7 @@ git commit -m "test(bar): the network, Bluetooth, audio and battery popovers as 
 - Create: `scripts/devvm/bar_modules.py`
 - Modify: `scripts/devvm/bar-acceptance.sh` (header, `STAGES`, a library check in `stage_deploy`, `stage_modules`)
 - Modify: `forge/specs/athanor-bar/athanor-bar.spec` (BuildRequires, description, release, changelog)
+- Modify: `forge/config/packages.json` (`pulseaudio-libs-glib2` in `upstream_desktop`, edited through Bash)
 
 **Interfaces:**
 - Consumes: the binary from `rig.sh build-bar` (`.scratch/shell-rig/bin/athanor-bar`), and the dev VM of `scripts/devvm` running the Athanor image with a COSMIC session.
@@ -7103,7 +7245,7 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: Add the library check and the `modules` stage to `bar-acceptance.sh`**
+- [ ] **Step 2: Add the library check and the `modules` stage to `bar-acceptance.sh`** (re-point after 2c Unit A / 2b.3)
 
 1. In the header comment, after "...high contrast reaches COSMIC's theme from inside it (BR3),", insert:
 
@@ -7147,6 +7289,18 @@ stage_modules() {
         fail "refusals in the journal: $(grep -E "$pattern" <<< "$journal")"
     fi
     [[ $(unit is-active) == active ]] || fail "not active after the modules: $(unit show -p Result --value)"
+    # Recorded, not judged: libpulse warns on every connect that it cannot create its cookie
+    # under ProtectHome and Landlock, which pipewire-pulse does not need; a refused connection
+    # is a different line. The polkit default decides whether joining a new network prompts.
+    local notes="$SHOTS/modules-notes.txt"
+    {
+        echo "libpulse cookie warnings: $(grep -ci 'cookie' <<< "$journal")"
+        echo "libpulse refused connections: $(grep -ciE 'connection refused|access denied|connection terminated' <<< "$journal")"
+        echo "polkit, org.freedesktop.NetworkManager.settings.modify.system:"
+        in_session pkaction --verbose --action-id org.freedesktop.NetworkManager.settings.modify.system |
+            grep -E '^\s*implicit (any|inactive|active):'
+    } > "$notes" || fail "could not record the modules' notes"
+    cat "$notes"
     "$HERE/screenshot.sh" "$SHOTS/modules.png" > /dev/null
 }
 ```
@@ -7171,9 +7325,15 @@ bash scripts/devvm/bar-acceptance.sh
 Expected:
 - `PASS` for every stage, including `modules` and `memory`;
 - the memory line prints the PSS with libpulse loaded, within 65536 kB;
-- `.scratch/bar-acceptance/modules.png` shows the Sound and Network buttons in the bar, and no Bluetooth or Battery button.
+- `.scratch/bar-acceptance/modules.png` shows the Sound and Network buttons in the bar, and no Bluetooth or Battery button;
+- `modules` prints, and keeps in `.scratch/bar-acceptance/modules-notes.txt`:
+  - the count of libpulse cookie warnings, expected to be non-zero and harmless;
+  - the count of refused connections, expected 0;
+  - the three `implicit` lines of the polkit action for system-wide connections.
 
-`FAIL deploy: libraries missing from the guest image` names the library. The VM image predates this package: install the RPM of this branch in the dev image, or run the stage after the image that carries athanor-bar is published. Record which one in the handback; do not install the library by hand in the VM.
+  Copy the notes into the handback and the pull request. A non-zero refused count with the audio module shown means libpulse retried until it connected: say so.
+
+`FAIL deploy: libraries missing from the guest image` names the library. The published Athanor image has `pulseaudio-libs` but not `pulseaudio-libs-glib2` (checked with `rpm -q` on an Athanor host on 2026-09-29). Step 3 adds it to the image's package list, so the dev VM has it once the system image is rebuilt from a branch that carries Step 3 and the VM moves to it with `scripts/devvm/upgrade.sh`. Until then this stage is expected to fail at deploy with that message: record it in the handback as the known state, not as a defect. Do not install the library by hand in the VM.
 
 - [ ] **Step 3: The RPM builds against libpulse**
 
@@ -7193,6 +7353,23 @@ In `forge/specs/athanor-bar/athanor-bar.spec`:
 
 `libpulse.so.0` and `libpulse-mainloop-glib.so.0` become automatic `Requires`, which pull in `pulseaudio-libs` and `pulseaudio-libs-glib2`. No explicit `Requires` is added.
 
+The image does not install the bar's RPM with its dependencies when the binary is deployed by hand, and `forge/config/packages.json` lists no `pulseaudio-libs-glib2` today. Add it to `upstream_desktop`, after `gtk4-layer-shell`. The file is reformatted whole by the editor hook, so edit it through Bash and check the diff:
+
+```bash
+python3 - <<'EOF'
+from pathlib import Path
+path = Path("forge/config/packages.json")
+text = path.read_text(encoding="utf-8")
+old = '    "gtk4-layer-shell",\n'
+assert text.count(old) == 1
+path.write_text(text.replace(old, old + '    "pulseaudio-libs-glib2",\n'), encoding="utf-8")
+EOF
+git diff --stat forge/config/packages.json
+python3 -c 'import json; print("pulseaudio-libs-glib2" in json.load(open("forge/config/packages.json"))["upstream_desktop"])'
+```
+
+Expected: `1 file changed, 1 insertion(+)`, then `True`.
+
 Run:
 
 ```bash
@@ -7205,38 +7382,53 @@ Expected: the parsed spec prints the new `BuildRequires` and the 1.0.0-2 changel
 - [ ] **Step 4: Commit**
 
 ```bash
-git add scripts/devvm/bar_modules.py scripts/devvm/bar-acceptance.sh forge/specs/athanor-bar/athanor-bar.spec
+git add scripts/devvm/bar_modules.py scripts/devvm/bar-acceptance.sh forge/specs/athanor-bar/athanor-bar.spec \
+    forge/config/packages.json
 git commit -m "test(devvm): the bar's system modules against the VM's real services; build(bar): libpulse"
 ```
 
-- [ ] **Step 5: Write the procedure for item 15 into the pull request**
+- [ ] **Step 5: Write the deviations and the procedure for item 15 into the pull request**
+
+Under "Deviations from doc_bar.md" in the pull request description, write:
+
+```markdown
+- **GIO, not zbus, for the network row (BR3).** The bar already runs GDBus on GLib's main loop
+  for logind. zbus would add a second D-Bus stack and an async executor to a process with a
+  64 MB budget (section 5, item 17), for the same calls on the bus. Every system module uses
+  GIO.
+- **Bluetooth pairing is started from the bar only (decision D8, 2026-09-29).** The agent
+  answers only the pairing of the device the person pressed; an incoming request from another
+  device is rejected without a prompt, and `AuthorizeService` follows the same rule.
+```
 
 Item 15 needs a Wi-Fi radio and a Bluetooth radio. The rig mocks both services, and the dev VM has neither radio. The maintainer runs this procedure on the desktop, with the image that carries this package. Paste it into the pull request description under "Verification on hardware (doc_bar.md, section 5, item 15)", with one box per line:
 
 1. Note the time: `date +%s`, and keep the number as `SINCE`.
 2. **Wi-Fi with a password.**
    1. Forget the test network if it is saved: `nmcli connection delete "<SSID>"`.
-   2. Open the bar's Network popover, press the network's row, type the password, and press Connect.
+   2. Open the bar's Network popover, press the network's row, type the password, and press Connect. Note whether an authentication prompt appeared before the connection came up, and which program showed it.
    3. Check the connection is active: `nmcli -f NAME,TYPE,DEVICE connection show --active` lists `<SSID>` of type `802-11-wireless`.
    4. Check the password is in NetworkManager's profile only, readable by root: `sudo nmcli -s -g 802-11-wireless-security.psk connection show "<SSID>"` prints it.
 3. **The secret agent.**
-   1. Run `sudo nmcli connection modify "<SSID>" 802-11-wireless-security.psk-flags 1`. With flag 1, NetworkManager asks an agent for the password on every connection.
+   1. Run `sudo nmcli connection modify "<SSID>" 802-11-wireless-security.psk-flags 2`. Flag 2 is `NOT_SAVED`: NetworkManager forgets the password and asks an agent for it on every connection, which is the case the bar's agent serves. Flag 1 (`AGENT_OWNED`) would make NetworkManager ask the agent to store it, which the bar refuses by design.
    2. Run `nmcli connection down "<SSID>"`, then press the row in the bar again.
    3. The bar asks for the password; type it; the connection comes up.
-   4. Restore the flag: `sudo nmcli connection modify "<SSID>" 802-11-wireless-security.psk-flags 0`.
+   4. Restore the flag: `sudo nmcli connection modify "<SSID>" 802-11-wireless-security.psk-flags 0`. NetworkManager asks for the password once more at the next connection and keeps it again.
 4. **Bluetooth pairing with a confirmation.**
    1. Put a phone in pairing mode.
    2. Open the Bluetooth popover, press the phone's row, and check that the six digits in the bar equal the phone's.
    3. Press Pair in the bar and confirm on the phone.
    4. Check with `bluetoothctl info <MAC>`: the output shows `Paired: yes`, `Trusted: yes` and `Connected: yes`.
-5. **Nothing was written by the bar.** Each of these must print nothing:
+5. **Nothing was written by the bar.** Read the password without echoing it, so it never reaches the shell history, then search. Each search must print nothing:
 
    ```bash
-   journalctl --user -u athanor-bar --since "@$SINCE" -o cat | grep -F -- '<the password>'
-   grep -rlF -- '<the password>' ~/.config ~/.local ~/.cache /run/user/$(id -u) 2>/dev/null
+   read -rs -p 'Wi-Fi password: ' PW; echo
+   journalctl --user -u athanor-bar --since "@$SINCE" -o cat | grep -F -- "$PW"
+   grep -rlsF -- "$PW" ~/.config ~/.local ~/.cache ~/.bash_history /run/user/$(id -u) /tmp
+   unset PW
    ```
 
-   The `2>/dev/null` only hides unreadable sockets; the check is the empty output.
+   `grep -r` skips sockets and FIFOs, and `-s` silences unreadable files; the check is the empty output.
 
 ---
 
@@ -7273,7 +7465,7 @@ Item 15 needs a Wi-Fi radio and a Bluetooth radio. The rig mocks both services, 
 - item 1, the sound server restarts: Task 6;
 - item 2, NetworkManager or BlueZ restarts under an open prompt: Task 4;
 - item 3, hostile SSIDs and device names: Task 2's unit tests;
-- item 4, a second request or a foreign sender: Tasks 4 and 5;
+- item 4, a second request, a foreign sender or an unsolicited Bluetooth request: Tasks 4 and 5;
 - item 5, two outputs and memory: `prompt_view` in Task 4, and the PSS checks of Tasks 3 and 9.
 
 ---
@@ -7283,6 +7475,10 @@ Item 15 needs a Wi-Fi radio and a Bluetooth radio. The rig mocks both services, 
 Run from the repository root. `RIG_CARGO` is the command defined in Global Constraints. Every command must exit 0, except the last group, which needs the dev VM or the maintainer and is marked as such.
 
 ```bash
+# 0. The pinned rig image carries the fixtures and the libpulse GLib library (B1, decision D9)
+podman run --rm "ghcr.io/hr-mes/athanor-shell-rig@$(cat forge/test/shell/rig-image.digest)" \
+    rpm -q pulseaudio-libs-glib2 python3-dbusmock pipewire-pulseaudio
+
 # 1. The library and unit tests of the four modules
 podman run --rm --memory 6g --security-opt label=disable \
     -v "$(git rev-parse --show-toplevel):/repo:ro" -v "$(git rev-parse --show-toplevel)/.scratch/shell-rig:/out" \
@@ -7290,7 +7486,8 @@ podman run --rm --memory 6g --security-opt label=disable \
     localhost/athanor-shell-rig:build cargo test --locked -p athanor-bar
 
 # 2. The binary, the end-to-end tests of the existing modules and of the four new ones.
-#    bar-modules-e2e also fails if the typed Wi-Fi password appears in any file under /out.
+#    bar-modules-e2e also fails if a typed Wi-Fi password appears in any file under /out
+#    (recursively), the scene's XDG directories, /run/user/1000 or /tmp.
 bash forge/test/shell/rig.sh build-bar
 ATHANOR_RIG_IMAGE=localhost/athanor-shell-rig:rig bash forge/test/shell/rig.sh bar-e2e
 ATHANOR_RIG_IMAGE=localhost/athanor-shell-rig:rig bash forge/test/shell/rig.sh bar-modules-e2e
@@ -7320,6 +7517,7 @@ done
 
 # 7. The package builds against libpulse
 grep -q '^BuildRequires:.*pulseaudio-libs-devel' forge/specs/athanor-bar/athanor-bar.spec
+python3 -c 'import json, sys; sys.exit("pulseaudio-libs-glib2" not in json.load(open("forge/config/packages.json"))["upstream_desktop"])'
 podman run --rm --security-opt label=disable -v "$(git rev-parse --show-toplevel):/repo:ro" -w /repo \
     localhost/athanor-shell-rig:build rpmspec -P forge/specs/athanor-bar/athanor-bar.spec > /dev/null
 
