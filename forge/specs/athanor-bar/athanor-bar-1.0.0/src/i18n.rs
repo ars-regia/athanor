@@ -19,6 +19,8 @@ pub fn init() {
     if CATALOG.set(catalog).is_err() {
         tracing::warn!("the translations were already loaded; the second load is ignored");
     }
+    // The row and the openers of athanor-apps speak through the same catalog.
+    athanor_apps::i18n::set_catalog(self::catalog());
 }
 
 fn catalog() -> &'static Catalog {

@@ -1,0 +1,16 @@
+[package]
+name = "athanor-apps"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+description = "The applications row the Athanor bar and dock share: favourites, running windows, pinning, launching"
+authors = ["Athanor Forge <forge@athanor.os>"]
+
+[dependencies]
+athanor-compositor-client = { path = "../athanor-compositor-client" }
+athanor-i18n = { path = "../athanor-i18n" }
+athanor-layout = { path = "../athanor-layout" }
+athanor-unit = { path = "../athanor-unit" }
+gio-unix = { workspace = true }
+gtk4 = { workspace = true }
+tracing = { workspace = true }

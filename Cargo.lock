@@ -256,6 +256,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-apps"
+version = "1.0.0"
+dependencies = [
+ "athanor-compositor-client",
+ "athanor-i18n",
+ "athanor-layout",
+ "athanor-unit",
+ "gio-unix",
+ "gtk4",
+ "tracing",
+]
+
+[[package]]
 name = "athanor-backup"
 version = "1.0.0"
 dependencies = [
@@ -275,6 +288,7 @@ dependencies = [
 name = "athanor-bar"
 version = "1.0.0"
 dependencies = [
+ "athanor-apps",
  "athanor-compositor-client",
  "athanor-i18n",
  "athanor-layout",

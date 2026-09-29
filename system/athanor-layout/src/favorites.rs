@@ -256,6 +256,22 @@ pub fn unpinned(ids: &[String], id: &str) -> Vec<String> {
     ids.iter().filter(|known| *known != id).cloned().collect()
 }
 
+/// `ids` with `dragged` moved to the place `target` holds (doc_bar.md, BR7: dragging
+/// reorders the favourites). Unchanged when either id is absent: a drop can carry any
+/// string another client offers.
+pub fn moved(ids: &[String], dragged: &str, target: &str) -> Vec<String> {
+    let (Some(from), Some(to)) = (
+        ids.iter().position(|id| id == dragged),
+        ids.iter().position(|id| id == target),
+    ) else {
+        return ids.to_vec();
+    };
+    let mut out = ids.to_vec();
+    let id = out.remove(from);
+    out.insert(to, id);
+    out
+}
+
 /// The exclusive lock every writer of the file takes (see `update`): opens, creating if
 /// needed, `.favorites.toml.lock` beside `path`'s target, creating the target's directory
 /// first, and blocks until it is held. The lock is a separate file: the file itself is
@@ -513,6 +529,23 @@ mod tests {
             Err(FavoritesError::NewerSchema(2))
         );
         assert_eq!(std::fs::read_to_string(&path).expect("read"), text);
+    }
+
+    #[test]
+    fn a_dragged_favourite_takes_the_place_of_its_target() {
+        let list = ids(&["a", "b", "c"]);
+        assert_eq!(moved(&list, "c", "a"), ids(&["c", "a", "b"]));
+        assert_eq!(moved(&list, "a", "c"), ids(&["b", "c", "a"]));
+        assert_eq!(moved(&list, "b", "c"), ids(&["a", "c", "b"]));
+    }
+
+    #[test]
+    fn a_move_with_an_unknown_id_changes_nothing() {
+        let list = ids(&["a", "b", "c"]);
+        assert_eq!(moved(&list, "x", "a"), list);
+        assert_eq!(moved(&list, "a", "x"), list);
+        assert_eq!(moved(&list, "a", "a"), list);
+        assert_eq!(moved(&[], "a", "b"), Vec::<String>::new());
     }
 
     #[test]

@@ -433,9 +433,6 @@ def update_trust_problems(root=None):
     return problems
 
 
-@check("shipped", "Ogni crate del workspace è impacchettato, o è dichiarato sperimentale")
-
-
 def image_policy_problems(root=None):
     """system/Containerfile puts the policy in force and system/keys holds public keys only."""
     root = root or ROOT
@@ -457,6 +454,7 @@ def image_policy_problems(root=None):
     return problems
 
 
+@check("shipped", "Ogni crate del workspace è impacchettato, o è dichiarato sperimentale")
 def check_shipped():
     r = Result()
     cargo = ROOT / "Cargo.toml"

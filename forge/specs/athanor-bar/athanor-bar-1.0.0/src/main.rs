@@ -12,22 +12,20 @@ use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use athanor_bar::dirs::Dirs;
 use athanor_compositor_client::theme;
 use athanor_layout::favorites;
-use athanor_layout::loader::{Paths, VENDOR_DIR};
+use athanor_layout::loader::{Paths, Source, VENDOR_DIR};
 use athanor_layout::user::write_target;
+use athanor_unit::dirs::Dirs;
 use athanor_unit::{crash_loop, journal, sandbox};
 use gtk4::prelude::*;
 use gtk4::{glib, Application};
-
-use crate::ui::Source;
 
 const APP_ID: &str = "os.athanor.Bar";
 
 fn main() -> glib::ExitCode {
     journal::init();
-    let Some(dirs) = Dirs::from_vars(|name| env::var_os(name)) else {
+    let Some(dirs) = Dirs::from_vars("athanor-bar", |name| env::var_os(name)) else {
         tracing::error!("no absolute XDG_RUNTIME_DIR, or no absolute HOME to place the configuration and the cache");
         return glib::ExitCode::FAILURE;
     };
