@@ -229,10 +229,17 @@ stage_leftovers() {
 # Item 4: the document the chooser writes (rig.sh chooser-e2e presses the chooser itself)
 # applies live, drawn by the bar and the dock. The user's own document comes back afterwards.
 stage_presets_live() {
-    local preset unit
+    local current preset unit presets=()
     # shellcheck disable=SC2016 # expanded by the target's shell
     in_session 'cp -p ~/.config/athanor/layout.toml ~/.config/athanor/layout.toml.switch-acceptance'
+    # The bar and the dock log "layout applied" only when the layout changes, so the preset
+    # already in force goes last: written first, it would change nothing and log nothing.
+    current=$(in_session 'cat ~/.config/athanor/layout.toml' | sed -n 's/^preset = "\(.*\)"$/\1/p')
     for preset in float bar minimal; do
+        [[ $preset == "$current" ]] || presets+=("$preset")
+    done
+    ((${#presets[@]} == 3)) || presets+=("$current")
+    for preset in "${presets[@]}"; do
         in_session "printf '%s\n' 'schema = 1' '[output.\"*\"]' 'preset = \"$preset\"' > ~/.config/athanor/layout.toml"
         for unit in athanor-bar athanor-dock; do
             wait_until 10 in_session "journalctl --user -u $unit -g 'layout applied' -o cat --since -15s | grep -qi 'preset: $preset'" ||
