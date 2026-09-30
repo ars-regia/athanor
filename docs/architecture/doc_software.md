@@ -1,6 +1,6 @@
 # Athanor Software: applications, background activity and developer tools
 
-Status: Draft, rev 1: first review applied, awaiting maintainer review. It turns the maintainer's request of 2026-09-30 into a specification: one application, working title **Software**, with which an average user never has to struggle and which also serves developers. Nothing here is built before the maintainer approves it. Section 6 lists the decisions that are the maintainer's; each carries options and a recommendation. Section 4 lists what must be proven before the first plan is written.
+Status: Approved, rev 2 (2026-09-30): the maintainer accepted every recommendation of section 6, which now records the decisions. It turns the maintainer's request of 2026-09-30 into a specification: one application, working title **Software**, with which an average user never has to struggle and which also serves developers. Section 6 records the maintainer's decisions, with the options that were weighed. Section 4 lists what must be proven before the first plan is written.
 
 ## 1. Context
 
@@ -88,7 +88,7 @@ Two levels in one application. For the average user: Flatpak at the centre (sear
 - **"Where it comes from":** the remote by its display name (Flathub, Fedora), the installation (for everyone, or only for this user), the version, the installed size, the runtime it uses, and, when the remote states it, whether the developer is verified.
 - **What it can reach,** in words, from the permissions in the application's metadata: the network, devices, all files or the home folder, other applications on the session bus. An application with `--filesystem=host` or `home`, or permission to talk to `org.freedesktop.Flatpak`, is described as "Can read and change all your files" and is not called sandboxed, because it can leave its sandbox (`doc_kernel_profile.md:720-722`).
 - **Remove:** one button. "Also delete this app's data" (`~/.var/app/<id>`) is an explicit choice, off by default. Runtimes no installed application uses any more are removed with it. The details page also shows the equivalent command, so that a user with a terminal is never locked into the application.
-- **Updates:** SW15 and open question 6. The Updates page lists pending application updates, the date of the last successful update run and its failure in plain language (SW6); "Update all" runs one job.
+- **Updates:** SW15 and decision 6. The Updates page lists pending application updates, the date of the last successful update run and its failure in plain language (SW6); "Update all" runs one job.
 - **Open:** starts the application as `doc_bar.md` BR2 does, as a transient unit. Software cannot create a security context itself when it runs on one (`doc_bar.md:49`), so the application inherits Software's restricted socket: a declared limit (section 5).
 
 **SW4. Background activity.** One page, "Running in the background", two groups. The words systemd, unit, service and daemon never appear in it (SW14).
@@ -102,7 +102,7 @@ Two levels in one application. For the average user: Flatpak at the centre (sear
 
 **SW5. Features, not units.** A feature is a named, closed set of units that the image ships.
 
-- Each feature is a data file under `/usr/share/athanor/features/<id>.toml`, schema 1: a permanent English id, a translated name and one sentence, its units, whether it opens a network port to other devices (`exposed`), and whether it is shown only in developer mode. The candidates are open question 2.
+- Each feature is a data file under `/usr/share/athanor/features/<id>.toml`, schema 1: a permanent English id, a translated name and one sentence, its units, whether it opens a network port to other devices (`exposed`), and whether it is shown only in developer mode. The candidates are decision 2.
 - **State** is derived, never stored: on when its units are enabled, and SW6's health on top.
 - **Switching** enables and starts the units, or stops and disables them, through the helper of SW12. It writes the enablement links in `/etc`, as a preset does, so the choice survives image updates.
 - **"Restore default"** re-applies the image's presets to the feature's units (systemd's `PresetUnitFiles`).
@@ -150,7 +150,7 @@ Two levels in one application. For the average user: Flatpak at the centre (sear
 | Nix tool                  | **none**: it runs as the user, unconfined, like any binary in the home under D23 | everything the user can do                                                                   |
 | user unit written by hand | **none** by default                                                              | everything the user can do                                                                   |
 
-This document does not claim that Nix tools or hand-written user units are compartmentalised. Their confinement is open question 3; until the maintainer decides it, they carry a "Not isolated: runs with all your rights" badge and exist only in developer mode.
+This document does not claim that Nix tools or hand-written user units are compartmentalised. Their confinement is decision 3 (a): they carry a "Not isolated: runs with all your rights" badge and exist only in developer mode.
 
 **SW11. Who does the work.**
 
@@ -163,7 +163,7 @@ This document does not claim that Nix tools or hand-written user units are compa
 | Feature on, off, restore, Retry    | `athanor-features` (SW12)                                     | root              | SW12's two actions                                                                                                    |
 | System service status              | `org.freedesktop.systemd1` properties                         | user              | none                                                                                                                  |
 | System service logs                | the journal                                                   | user              | membership in `wheel` or `adm`                                                                                        |
-| System service restart             | `athanor-features`, calling systemd's `TryRestartUnit`        | root              | `os.athanor.services.restart` (open question 1)                                                                       |
+| System service restart             | `athanor-features`, calling systemd's `TryRestartUnit`        | root              | `os.athanor.services.restart` (decision 1)                                                                       |
 | User units, Quadlet, linger        | user manager; files in the home                               | user              | none; `set-self-linger` is `yes`                                                                                      |
 | Nix profile                        | `nix` through `nix-daemon.socket`                             | user; daemon root | none                                                                                                                  |
 | Running version                    | `os.athanor.Update1.State()`, parsed by `athanor-trust-state` | root service      | none; the reply is trusted only from a name owner whose uid is 0 (SW16)                                               |
@@ -175,7 +175,7 @@ No always-on daemon is added. The one new root component is SW12's, activated on
 - **Why not systemd directly:** `org.freedesktop.systemd1.manage-unit-files` authorises enabling any unit file on the machine. On this image that includes `debug-shell.service`, a root shell on `tty9` with no password (section 1.2). Software would hold that authorisation for the whole keep window of `auth_admin_keep`, and polkit rules cannot narrow it by unit because, as far as can be read, systemd passes no unit to polkit for unit-file changes (spike S1 verifies it).
 - **What it is:** `athanor-features`, a root D-Bus service on the system bus, `os.athanor.Features1`, activated on demand and exiting after a short idle period. It ships in the same package as Software.
 - **Methods:** `SetEnabled(s feature, b enabled)`, `RestoreDefault(s feature)` and `Retry(s feature)`. The feature id is checked against the files under `/usr/share/athanor/features/`, and only those units are touched. It never accepts a unit name.
-- **Authorisation:** the subject is the bus sender through `check_polkit_auth_zbus` with user interaction allowed (`polkit.rs:97-104`). A feature marked `exposed` takes the stricter action (open question 1). No change to `polkit.rs` is needed.
+- **Authorisation:** the subject is the bus sender through `check_polkit_auth_zbus` with user interaction allowed (`polkit.rs:97-104`). A feature marked `exposed` takes the stricter action (decision 1). No change to `polkit.rs` is needed.
 - **Bus policy and hardening** follow `doc_update_trust.md` UT6 and UT1: `send_destination` only with the interface and each `send_member`, no properties, an activation file with `SystemdService=` and `User=root`, the unit hardened with the directives UT1 measured, and `PrivateNetwork=yes`. `verify.py polkit` covers its actions, which are static strings in the `os.athanor.*` namespace.
 - The caller's uid, the feature and the result are logged at notice.
 
@@ -196,7 +196,7 @@ No always-on daemon is added. The one new root component is SW12's, activated on
 - **Languages:** gettext from the first commit; Italian and English shipped; layout mirrored under right-to-left text.
 - **Words:** the average-user strings carry a `msgctxt` of their own, and CI fails when any of them contains systemd, unit, service or daemon, in English or in Italian.
 
-**SW15. Application updates run without the window.** The class A updates of `doc_kernel_profile.md:479` need something that runs when Software is closed. The system helper allows an update without a password only from an active session (section 1.2), so a user timer cannot do it. The mechanism is open question 6. Whatever it is, it updates the system installation only: a user installation updates while its owner has a session, from a user timer that runs the update job, and the Updates page says so for each application installed only for this user.
+**SW15. Application updates run without the window.** The class A updates of `doc_kernel_profile.md:479` need something that runs when Software is closed. The system helper allows an update without a password only from an active session (section 1.2), so a user timer cannot do it. The mechanism is decision 6. Whatever it is, it updates the system installation only: a user installation updates while its owner has a session, from a user timer that runs the update job, and the Updates page says so for each application installed only for this user.
 
 **SW16. System image updates are not here.** Software shows one read-only row: the running version and the sentence of the shield's header, and "System updates are in the shield, at the end of the bar". It reads the state as the bar does since package 2b.5: through the read-only method `State()` of `os.athanor.Update1`, trusted only when the owner of the name that answered has uid 0 (`GetConnectionUnixUser`), and parsed with `athanor-trust-state`. It never reads `/run/athanor-update/state.json` itself: a sandboxed user unit runs in a user namespace where root is not mapped, so the file's owner reads as the overflow uid and the ownership check cannot be made there. It has no button that applies or goes back. Those remain `Apply()` and `GoBack()` of `doc_update_trust.md` UT6, reached from the shield's sheet (`doc_bar.md`, BR6) and the notifier (UT11).
 
@@ -209,18 +209,18 @@ No always-on daemon is added. The one new root component is SW12's, activated on
 
 ## 3. Placement and packages
 
-**Recommendation (open question 4):** a standalone application, planned after the switch of stage 2 (`doc_shell.md:211`) as an application track beside stages 3 to 8 (`doc_shell.md:40`). It replaces no shell surface, so SH1's order of surfaces does not place it. It depends on two later stages only for comfort: the polkit agent is cosmic-osd until stage 4 (`doc_shell.md:64`), and the developer-mode switch moves into Settings at stage 6 (SW2).
+**Decided (question 4 of section 6):** a standalone application, planned after the switch of stage 2 (`doc_shell.md:211`) as an application track beside stages 3 to 8 (`doc_shell.md:40`). It replaces no shell surface, so SH1's order of surfaces does not place it. It depends on two later stages only for comfort: the polkit agent is cosmic-osd until stage 4 (`doc_shell.md:64`), and the developer-mode switch moves into Settings at stage 6 (SW2).
 
 | Package                                     | Delivers                                                                                                           | Gated by                       |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------ |
 | **S. Spikes**                               | S1, S2, S3 of section 4                                                                                            | this document approved         |
-| **SWa. Applications**                       | the crate, Explore, Installed, Updates, details, removal, SW13 for Flatpak, SW15, SW16; `athanor-store-rs` deleted | S1, S3, open questions 5 and 6 |
-| **SWb. Background and features**            | SW4, SW5, SW6, `athanor-features` with its `.policy` and bus files, the feature files                              | SWa, open questions 1 and 2    |
+| **SWa. Applications**                       | the crate, Explore, Installed, Updates, details, removal, SW13 for Flatpak, SW15, SW16; `athanor-store-rs` deleted | S1, S3, decisions 5 and 6 |
+| **SWb. Background and features**            | SW4, SW5, SW6, `athanor-features` with its `.policy` and bus files, the feature files, remote login off on new installs                              | SWa, decisions 1 and 2    |
 | **SWc. Developer: services and containers** | SW2, SW7, SW8, system service status, logs and restart                                                             | SWb                            |
-| **SWd. Developer: Nix tools**               | SW9, the Nix catalog                                                                                               | SWc, S2, open question 3       |
+| **SWd. Developer: Nix tools**               | SW9, the Nix catalog                                                                                               | SWc, S2, decision 3       |
 
 - Each package ships alone, enabled by hand, and is useful alone.
-- **The switch, at the end of SWa:** when Software passes SH1's rule against `cosmic-store` on the dev VM and on the maintainer's desktop, `cosmic-store` leaves the image (open question 5).
+- **The switch, at the end of SWa:** when Software passes SH1's rule against `cosmic-store` on the dev VM and on the maintainer's desktop, `cosmic-store` leaves the image (decision 5).
 
 ## 4. Spikes
 
@@ -228,7 +228,7 @@ Each runs before the plan it gates and produces an answer, not code we keep.
 
 | #   | Spike                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Settles                              |
 | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| S1  | On the dev VM, on the current `iso-v0` image: (1) whether systemd 258 passes the unit to polkit for `EnableUnitFiles` and for `RestartUnit`; (2) what `xdg-desktop-portal` 1.20 exposes for background applications with no Background backend, and which backend could supply one without GNOME; (3) whether Flatpak reads a remote from a file under `/etc/flatpak/remotes.d/` and `/usr/share/flatpak/remotes.d/`; (4) whether a non-`wheel` user reads their own user journal and what they see of the system journal; (5) whether a `nix profile` tool reaches the session's `PATH` and the launcher; (6) whether `quadlet -dryrun -user` runs under Software's Landlock ruleset, or must itself be a job | SW4, SW6, SW9, SW12, open question 6 |
+| S1  | On the dev VM, on the current `iso-v0` image: (1) whether systemd 258 passes the unit to polkit for `EnableUnitFiles` and for `RestartUnit`; (2) what `xdg-desktop-portal` 1.20 exposes for background applications with no Background backend, and which backend could supply one without GNOME; (3) whether Flatpak reads a remote from a file under `/etc/flatpak/remotes.d/` and `/usr/share/flatpak/remotes.d/`; (4) whether a non-`wheel` user reads their own user journal and what they see of the system journal; (5) whether a `nix profile` tool reaches the session's `PATH` and the launcher; (6) whether `quadlet -dryrun -user` runs under Software's Landlock ruleset, or must itself be a job | SW4, SW6, SW9, SW12, decision 6 |
 | S2  | The Nix catalog: time, peak memory and disk of a local evaluation of nixpkgs on a v3 laptop with 8 GB, against downloading a channel's `packages.json`; how either maps to the revision `nix profile` locks                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | SW13, the job's `MemoryMax`          |
 | S3  | The libflatpak Rust bindings and an AppStream reader: maintenance, licence against `deny.toml`, and whether they build against Fedora 43's libraries in the workspace                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | SW3                                  |
 
@@ -243,7 +243,7 @@ Each runs before the plan it gates and produces an answer, not code we keep.
 - **Scope.** Four packages for one maintainer. The brake is the same as the shell's: each package ships alone and enabled by hand, and `cosmic-store` stays until SWa passes SH1's rule.
 - **libflatpak** is a C library with a large surface in Software's process. Its input is AppStream data from remotes, which SW14 treats as untrusted.
 
-## 6. Open questions for the maintainer
+## 6. Decisions of the maintainer (2026-09-30)
 
 1. **The new polkit actions.**
    - Proposed, both used only by `athanor-features` (SW12), in one `os.athanor.features.policy`:
@@ -251,7 +251,7 @@ Each runs before the plan it gates and produces an answer, not code we keep.
      - `os.athanor.features.change-exposed`: the same for a feature marked `exposed` (remote login, network discovery). Defaults `auth_admin` for all three, never kept.
    - For restarting a system service in developer mode: (a) systemd's own `org.freedesktop.systemd1.manage-units`, `auth_admin_keep`, no new code; (b) a third method on the helper, `RestartService(s unit)`, under a new `os.athanor.services.restart`, `auth_admin`, never kept, which calls systemd's `TryRestartUnit`: it restarts a unit that is running and never starts one that is not.
    - One action per feature was considered and set aside: the names would be built at run time, which `verify.py polkit` cannot check, and a single action with the feature as a detail would need `polkit.rs` to pass details (`polkit.rs:119`), a protected file.
-   - **Recommendation:** the two feature actions, and (b) for restart. Option (a) has the breadth SW12 rejects for unit files: `manage-units` authorises `StartUnit` on any unit, `debug-shell.service` included, and Software would hold it for the whole keep window. A path under (b) never starts a stopped unit, so it cannot bring up the debug shell. Refusing units outside `/usr/lib/systemd/system` would not be enough, because `debug-shell.service` lives there too.
+   - **Decided:** the two feature actions, and (b) for restart. Option (a) has the breadth SW12 rejects for unit files: `manage-units` authorises `StartUnit` on any unit, `debug-shell.service` included, and Software would hold it for the whole keep window. A path under (b) never starts a stopped unit, so it cannot bring up the debug shell. Refusing units outside `/usr/lib/systemd/system` would not be enough, because `debug-shell.service` lives there too.
    - Separately from Software: mask `debug-shell.service` in the image, so that no route, systemd's own included, can start it on a production image. A debug build can unmask it.
    - `os.athanor.store.install` leaves with `athanor-store-rs`.
 2. **The features for average users,** drawn from what the image ships (section 1.2).
@@ -266,37 +266,40 @@ Each runs before the plan it gates and produces an answer, not code we keep.
    | `smart-cards`      | Smart card readers          | `pcscd.socket`                                                 | on            | no      | `90-default.preset:227`                            |
    | `nix` (developer)  | Nix package manager         | `nix-daemon.socket`                                            | on            | no      | `80-athanor-nix.preset:14`                         |
    - Not features: firewalld, usbguard, boltd, Tetragon and the update units, which are security and are not switched off from an application; Bluetooth, which the bar owns (`doc_bar.md`, BR3); file sharing and remote desktop, which the image does not ship (SH1: no facades).
-   - **Recommendation:** the table as it stands, with `backup` bound to whichever snapshot mechanism the backup rewrite keeps, and `smart-cards` shown only when a reader is present. Separately: remote login is on for every install and every user; consider making it off by default on new installs, since the feature switch makes it one click to turn on.
+   - **Decided:** the table as it stands, with `backup` bound to whichever snapshot mechanism the backup rewrite keeps, and `smart-cards` shown only when a reader is present. Remote login is **off** by default on new installs: the kickstart stops enabling `sshd` (`system/athanor-install.ks:37-38`) and stops opening the SSH port in the same package that ships the feature switch (SWb), so that turning it on never needs a terminal. Existing installs keep their state.
 
 3. **Confinement of Nix and Quadlet workloads.**
-   - (a) **Declared exception:** Nix tools and hand-written units stay unconfined, only in developer mode, with the badge of SW10, and the exception is written into the project rule by the maintainer.
+   - (a) **Declared exception:** Nix tools and hand-written units stay unconfined, only in developer mode, with the badge of SW10, and the exception is written into the project rule by the maintainer (section 7).
    - (b) **Per-tool sandbox:** run every Nix tool through a bubblewrap or Landlock wrapper. A generic profile either breaks developer tools, which need the home and the network, or restricts nothing.
    - (c) **A container for untrusted tools:** Nix inside a `toolbox` container (already on the image) or the dev VM, with only the profile's result exported. It isolates, at the cost of friction.
    - (d) **For Quadlet:** rootless podman with SW8's defaults and refusals, and the "Less isolated" badge on anything weaker.
-   - **Recommendation:** (a) now, with (c) documented as the way to run a tool one does not trust, and (d) for containers. A real confinement of user workloads belongs with the confinement of launched applications that `doc_bar.md` BR2 already defers.
+   - **Decided:** (a) now, with (c) documented as the way to run a tool one does not trust, and (d) for containers. A real confinement of user workloads belongs with the confinement of launched applications that `doc_bar.md` BR2 already defers.
 4. **Placement.**
    - (a) A standalone application (section 3).
    - (b) Pages of our future Settings (stage 6).
    - (c) Applications standalone, features and developer tools in Settings.
-   - **Recommendation:** (a). "What runs on my machine and where it came from" is one question and belongs in one place; Settings is three stages away and should not hold Flatpak back. Only the developer-mode switch moves into Settings.
+   - **Decided:** (a). "What runs on my machine and where it came from" is one question and belongs in one place; Settings is three stages away and should not hold Flatpak back. Only the developer-mode switch moves into Settings.
 5. **The fate of `athanor-store-rs`, `system/athanor-store` and `cosmic-store`.**
-   - `athanor-store-rs`: extend, rename, or delete. **Recommendation: delete it** in SWa, per SH4's rule for legacy crates (`doc_shell.md:76`). Nothing is worth mining: its function is two `flatpak` invocations, and its signature check is a facade (section 1.2).
-   - `system/athanor-store`: **recommendation:** remove its `install` and `disconnect-flathub` commands, which hold a placeholder digest in a security path. Its storage engine belongs to the mesh and is decided with the mesh, not here.
-   - `cosmic-store`: keep it for good as COSMIC content (SH3), or remove it at SWa's switch. **Recommendation: remove it at the switch.** Two stores would give two answers to "where does it come from" and two update paths for the same installation.
+   - `athanor-store-rs`: extend, rename, or delete. **Decided: delete it** in SWa, per SH4's rule for legacy crates (`doc_shell.md:76`). Nothing is worth mining: its function is two `flatpak` invocations, and its signature check is a facade (section 1.2).
+   - `system/athanor-store`: **Decided:** remove its `install` and `disconnect-flathub` commands, which hold a placeholder digest in a security path. Its storage engine belongs to the mesh and is decided with the mesh, not here.
+   - `cosmic-store`: keep it for good as COSMIC content (SH3), or remove it at SWa's switch. **Decided: remove it at the switch.** Two stores would give two answers to "where does it come from" and two update paths for the same installation.
 6. **Flatpak remotes and automatic application updates.**
    - Remotes: (a) Fedora's only, as today; (b) Flathub added as a system remote by a file the image ships, beside Fedora's; (c) as (b), limited to Flathub's verified subset. The `flatpaks` list of `packages.json` either gets an installer run on first boot or is deleted.
    - Updates: (i) a hardened system oneshot timer running the system update, with the metered rule of UT12; (ii) updates only while a session is active, from a user service; (iii) a polkit rule that lets a user timer update without a session.
-   - **Recommendation:** (b) and (i). Without Flathub the Explore page would be close to empty, and a system timer is the only one of the three that updates a machine nobody is logged in to, without widening polkit. The `flatpaks` list is deleted: a machine that installs Chrome and Spotify unasked is not "for everyone".
+   - **Decided:** (b) and (i). Without Flathub the Explore page would be close to empty, and a system timer is the only one of the three that updates a machine nobody is logged in to, without widening polkit. The `flatpaks` list is deleted: a machine that installs Chrome and Spotify unasked is not "for everyone".
 
 ## 7. Changes to other documents
 
-Applied only with the approval of this document.
+Each change lands with the package named beside it, not with this document.
 
-- `doc_shell.md`, SH3 (`doc_shell.md:71`): `cosmic-store` leaves the image at the switch of package SWa, if open question 5 is decided as recommended.
-- `doc_shell.md`, section 3, "Later stages": a pointer to this document as an application track after stage 2.
-- `experimental/EXEMPT:18-22`: the comment on `athanor-store-rs` is removed with the crate.
-- `CLAUDE.md`, "Limiti inviolabili": the maintainer writes the exception of open question 3 if (a) is chosen.
-- `forge/config/packages.json`: the `flatpaks` list, per open question 6.
+- `doc_shell.md`, SH3 (`doc_shell.md:71`): `cosmic-store` leaves the image at the switch of package SWa (decision 5). With SWa.
+- `doc_shell.md`, section 3, "Later stages": a pointer to this document as an application track after stage 2. With the first plan (package S).
+- `experimental/EXEMPT:18-22`: the comment on `athanor-store-rs` is removed with the crate. With SWa.
+- `CLAUDE.md`, "Limiti inviolabili": the maintainer writes the exception of decision 3 (a): Nix tools and hand-written user units run unconfined, only in developer mode and marked as such. Before SWc.
+- `forge/config/packages.json`: the `flatpaks` list and `system/scripts/provision_flatpak.sh` are deleted (decision 6). With SWa.
+- `system/athanor-install.ks`: `sshd` no longer enabled and the SSH port no longer opened on new installs (decision 2). With SWb.
+- `system/athanor-store`: the `install` and `disconnect-flathub` commands are removed (decision 5). With SWa.
+- The system image: `debug-shell.service` is masked (decision 1). Independent of Software, in its own change, as soon as possible.
 
 ## 8. Acceptance
 
