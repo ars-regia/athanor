@@ -31,7 +31,7 @@
 #   rig.sh rig-tests        unit tests of the rig's own scripts, against the rig's tools
 #   rig.sh cosmic-panel-defaults   COSMIC's shipped panel keys equal the renderer's fixture
 #   rig.sh chooser-e2e      press a preset in the chooser and wait for the panel configuration
-#   rig.sh surface <greeter|layout|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling|bar-popups|bar-notifications|bar-tray|bar-network|bar-bluetooth|bar-audio|bar-battery|dock>  capture every case of a surface and compare with the goldens
+#   rig.sh surface <greeter|layout|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling|bar-popups|bar-notifications|bar-tray|bar-network|bar-bluetooth|bar-audio|bar-battery|bar-shield|dock>  capture every case of a surface and compare with the goldens
 #   rig.sh update-goldens <name>   replace the goldens with a fresh capture, deliberately
 set -euo pipefail
 
@@ -188,8 +188,8 @@ require_shelld() { # the tray scenes run the real watcher
 # doc_bar.md, BR9: the bar under its own preset with one running window, the five
 # popovers the bar owns in 2b.2, opened by ATHANOR_BAR_OPEN over the float preset,
 # 2b.3's notification popups (four waiting notifications: three show), the notification
-# list and a tray menu, and the popovers of the four system modules against
-# system_fixtures.py.
+# list and a tray menu, the popovers of the four system modules against
+# system_fixtures.py, and the shield's sheet over a downloaded update.
 capture_bar() { # capture_bar <surface>
     local surface=$1 open="" preset=float panel=top dock=visible settle=8
     local session=(python3 /repo/forge/test/shell/bar_session.py)
@@ -211,6 +211,9 @@ capture_bar() { # capture_bar <surface>
     bar-bluetooth) open=bluetooth settle=12 session+=(--fixtures) ;;
     bar-audio) open=audio settle=12 session+=(--fixtures) ;;
     bar-battery) open=battery settle=12 session+=(--fixtures) ;;
+    # The shield's sheet above a bottom panel (item 13's third condition), with a downloaded
+    # update so Restart to update and every row of the sheet show.
+    bar-shield) preset=bar panel=bottom dock=- open=shield session+=(--trust-state downloaded) ;;
     esac
     in_rig "$(rig_image)" bash -c '
         set -euo pipefail
@@ -596,7 +599,7 @@ surface | update-goldens)
     greeter) capture_greeter ;;
     layout) capture_layout ;;
     chooser) capture_chooser ;;
-    bar | bar-power | bar-input | bar-calendar | bar-accessibility | bar-tiling | bar-popups | bar-notifications | bar-tray | bar-network | bar-bluetooth | bar-audio | bar-battery) capture_bar "$surface" ;;
+    bar | bar-power | bar-input | bar-calendar | bar-accessibility | bar-tiling | bar-popups | bar-notifications | bar-tray | bar-network | bar-bluetooth | bar-audio | bar-battery | bar-shield) capture_bar "$surface" ;;
     dock) capture_dock ;;
     *)
         echo "rig.sh $1: unknown surface '$surface'" >&2
