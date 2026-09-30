@@ -10,7 +10,8 @@ The NetworkManager mock logs to /dev/null: dbusmock logs every call with its arg
 a secret agent's reply carries a password. The other mocks log to /out/<tag>-<service>.log.
 
 Fixture methods live on the interface os.athanor.Fixture, added to the mocks:
-- NetworkManager's agent manager (templates lack one): Register counts, Registrations()
+- NetworkManager's agent manager (the upstream template lacks one; nm_agent_template.py
+  adds it while the mock loads): Register counts, Registrations()
   returns the count; AskSecrets(agent, connection, ssid, flags) calls the agent's GetSecrets
   as NetworkManager would and returns an index; SecretsResult(index) returns "pending",
   "reply:<psk>" or "error:<D-Bus error name>"; CancelSecrets(agent, connection).
@@ -26,6 +27,7 @@ Fixture methods live on the interface os.athanor.Fixture, added to the mocks:
   the BlueZ mock while a confirmation page is open.
 """
 
+import json
 import os
 import subprocess
 import time
@@ -33,6 +35,9 @@ from pathlib import Path
 
 from gi.repository import Gio, GLib
 
+HERE = Path(__file__).resolve().parent
+# The dbusmock template of NetworkManager, with the agent manager (see the file).
+NM_TEMPLATE = str(HERE / "nm_agent_template.py")
 SYSTEM_BUS = "/tmp/athanor-system-bus"
 BACKLIGHT_DIR = Path("/tmp/athanor-backlight")
 MOCK = "org.freedesktop.DBus.Mock"
@@ -241,15 +246,29 @@ def real_time_env(**extra):
     return env
 
 
-def spawn_mock(template, log):
+def spawn_mock(template, log, parameters=None):
+    command = ["python3", "-m", "dbusmock", "--system", "--template", template, "--logfile", log]
+    if parameters is not None:
+        command += ["--parameters", json.dumps(parameters)]
     return subprocess.Popen(
-        ["python3", "-m", "dbusmock", "--system", "--template", template, "--logfile", log],
+        command,
         env=real_time_env(DBUS_SYSTEM_BUS_ADDRESS=f"unix:path={SYSTEM_BUS}"),
     )
 
 
 def networkmanager(bus):
-    process = spawn_mock("networkmanager", "/dev/null")
+    # The agent manager comes with the template, so that it answers the first Register a
+    # running bar sends when a restarted NetworkManager appears.
+    process = spawn_mock(
+        NM_TEMPLATE,
+        "/dev/null",
+        {
+            "agent_manager": NM_AGENT_MANAGER,
+            "fixture": FIXTURE,
+            "agent_methods": NM_AGENT_METHODS,
+            "fixture_methods": NM_FIXTURE_METHODS,
+        },
+    )
     wait_for_name(bus, NM)
 
     def mock(method, signature, args):
@@ -283,11 +302,6 @@ def networkmanager(bus):
         NM, NM_SETTINGS, "org.freedesktop.NetworkManager.Settings", "AddConnection",
         vpn, GLib.VariantType("(o)"), Gio.DBusCallFlags.NONE, 5000, None,
     )
-    call(
-        bus, NM, NM_MOCK_PATH, MOCK, "AddObject", "(ssa{sv}a(ssss))",
-        (NM_AGENT_MANAGER, "org.freedesktop.NetworkManager.AgentManager", {}, NM_AGENT_METHODS),
-    )
-    call(bus, NM, NM_AGENT_MANAGER, MOCK, "AddMethods", "(sa(ssss))", (FIXTURE, NM_FIXTURE_METHODS))
     return process
 
 

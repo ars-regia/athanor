@@ -4,10 +4,12 @@
 //! key the policy marks mandatory holds here too. Every change applies live.
 
 mod accessibility;
+mod bus;
 mod clock;
 mod input;
 mod logind;
 mod menu;
+mod network;
 mod notifications;
 mod openers;
 mod popup;
@@ -236,6 +238,7 @@ fn build(module: Module, bar: &Rc<Bar>, connector: Option<&str>) -> Option<Box<d
         Module::RunningApps => running::new(bar),
         Module::Notifications => notifications::new(bar),
         Module::Tray => tray::new(bar),
+        Module::Network => network::new(bar),
         // Later tasks of this plan, and the plans of 2b.3 to 2b.5.
         _ => None,
     }
@@ -304,6 +307,14 @@ impl Bar {
             for (_, module) in &surface.modules {
                 module.refresh(self, changed);
             }
+            surface.fit_groups();
+        }
+    }
+
+    /// Refits every surface's groups after a module showed or hid itself outside `refresh`:
+    /// the system modules follow their service's signals, not the bar's events.
+    pub fn fit_groups(&self) {
+        for surface in self.surfaces.borrow().iter() {
             surface.fit_groups();
         }
     }

@@ -11,7 +11,9 @@ keeps.
 """
 
 import os
+import signal
 import stat
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -26,11 +28,17 @@ from bar_e2e import (  # noqa: E402
     PSS_LIMIT_KB,
     READY_FILE,
     alive,
+    buttons,
     check,
+    confirm_button,
     failures,
+    labelled,
+    press,
     pss_kb,
+    showing,
     wait_for,
 )
+from gi.repository import Gio, GLib  # noqa: E402
 
 # Typed into the password entries. Searched for in every written file at the end.
 PASSWORDS = ["correct horse battery", "staple-9-orbit"]
@@ -102,6 +110,209 @@ def no_password_written():
                 print(f"a password is in {path}", file=sys.stderr)
                 clean = False
     return clean
+
+
+NM_PATH = "/org/freedesktop/NetworkManager"
+LAB_CONNECTION = f"{fx.NM_SETTINGS}/lab"
+SECRET_AGENT = "/org/freedesktop/NetworkManager/SecretAgent"
+AGENT_ERROR = "org.freedesktop.NetworkManager.SecretAgent."
+RETRY_NOTE = "The password was not accepted. Try again."
+ALLOW_INTERACTION, REQUEST_NEW = 0x1, 0x2
+
+
+def showing_role(app, Atspi, role):
+    """Every showing accessible of `role`, found afresh."""
+    found = []
+
+    def visit(accessible):
+        try:
+            if accessible.get_role_name() == role and showing(accessible, Atspi):
+                found.append(accessible)
+            children = [accessible.get_child_at_index(index) for index in range(accessible.get_child_count())]
+        except GLib.Error:
+            return
+        for child in children:
+            if child:
+                visit(child)
+
+    visit(app)
+    return found
+
+
+def type_password(app, Atspi, password):
+    """Types into the showing password entry through AT-SPI's EditableText."""
+    entries = showing_role(app, Atspi, "password text")
+    return bool(entries) and entries[0].set_text_contents(password)
+
+
+def press_confirm(app, Atspi, name):
+    """Presses the confirmation's button `name` once it is sensitive."""
+    _, button = confirm_button(app, Atspi, name)
+    if button is None or not button.get_state_set().contains(Atspi.StateType.SENSITIVE):
+        return False
+    button.do_action(0)
+    return True
+
+
+def mock_calls(bus, name, path, method):
+    """The arguments of each call of `method` a dbusmock object received, from the mock's
+    memory: nothing here goes through a log file."""
+    (calls,) = fx.call(bus, name, path, fx.MOCK, "GetMethodCalls", "(s)", (method,), "(a(tav))")
+    return [arguments for _, arguments in calls]
+
+
+def mock_pids(template):
+    found = []
+    for proc in Path("/proc").iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            argv = (proc / "cmdline").read_bytes().split(b"\0")
+        except OSError:
+            continue
+        if b"dbusmock" in argv and template.encode() in argv:
+            found.append(int(proc.name))
+    return found
+
+
+def property_of(bus, name, path, interface, prop):
+    (value,) = fx.call(
+        bus, name, path, "org.freedesktop.DBus.Properties", "Get", "(ss)", (interface, prop), "(v)"
+    )
+    return value
+
+
+def open_popover(app, Atspi, button, content):
+    """Opens the module's popover unless `content` already shows."""
+    if not content():
+        press(app, Atspi, button)
+    return wait_for(content, 5)
+
+
+def network(ctx):
+    app, Atspi, bus = ctx.app, ctx.Atspi, ctx.bus
+
+    def registrations():
+        (count,) = fx.call(bus, fx.NM, fx.NM_AGENT_MANAGER, fx.FIXTURE, "Registrations", reply="(u)")
+        return count
+
+    def ask(flags):
+        (index,) = fx.call(
+            bus, fx.NM, fx.NM_AGENT_MANAGER, fx.FIXTURE, "AskSecrets", "(sosu)",
+            (ctx.bar, LAB_CONNECTION, "Athanor Lab", flags), "(u)",
+        )
+        return index
+
+    def result(index):
+        (value,) = fx.call(bus, fx.NM, fx.NM_AGENT_MANAGER, fx.FIXTURE, "SecretsResult", "(u)", (index,), "(s)")
+        return value
+
+    def prompt_open():
+        return bool(showing_role(app, Atspi, "password text"))
+
+    check("the network module shows", wait_for(lambda: buttons(app, Atspi, "Network"), 10))
+    check("the bar registered its secret agent once", wait_for(lambda: registrations() == 1, 5))
+    check(
+        "the network list opens with the connected network",
+        open_popover(app, Atspi, "Network", lambda: buttons(app, Atspi, "Athanor Lab, connected")),
+    )
+    check("the wired state is shown", bool(labelled(app, Atspi, "label", "Wired: connected")))
+    check("an open network is listed by name", bool(buttons(app, Atspi, "Corner Café")))
+    campus = buttons(app, Atspi, "Campus, needs Settings")
+    check(
+        "an 802.1X network says it needs Settings and cannot be pressed",
+        bool(campus) and not campus[0].get_state_set().contains(Atspi.StateType.SENSITIVE),
+    )
+
+    # A new WPA2 network: the password goes inline to AddAndActivateConnection.
+    press(app, Atspi, "Home Network, secured")
+    check("a secured network asks for its password", wait_for(prompt_open, 5))
+    type_password(app, Atspi, "short")
+    check("Connect stays off for a password WPA2 refuses", not press_confirm(app, Atspi, "Connect"))
+    type_password(app, Atspi, PASSWORDS[0])
+    check("Connect sends the password", wait_for(lambda: press_confirm(app, Atspi, "Connect"), 5))
+
+    def joined():
+        return mock_calls(bus, fx.NM, NM_PATH, "AddAndActivateConnection")
+
+    check("NetworkManager received one AddAndActivateConnection", wait_for(lambda: len(joined()) == 1, 10))
+    security = joined()[0][0].get("802-11-wireless-security", {}) if joined() else {}
+    check("the connection carries the typed password and WPA-PSK", security.get("psk") == PASSWORDS[0]
+          and security.get("key-mgmt") == "wpa-psk")
+    check("the password page closed", wait_for(lambda: not prompt_open(), 5))
+
+    # The secret agent, as NetworkManager calls it.
+    first = ask(ALLOW_INTERACTION)
+    check("GetSecrets opens the password prompt", wait_for(prompt_open, 5))
+    second = ask(ALLOW_INTERACTION)
+    check("a second request while one is open gets NoSecrets",
+          wait_for(lambda: result(second) == f"error:{AGENT_ERROR}NoSecrets", 5))
+    check("and the first stays open", result(first) == "pending" and prompt_open())
+    fx.call(bus, fx.NM, fx.NM_AGENT_MANAGER, fx.FIXTURE, "CancelSecrets", "(so)", (ctx.bar, LAB_CONNECTION))
+    check("CancelGetSecrets withdraws the prompt",
+          wait_for(lambda: result(first) == f"error:{AGENT_ERROR}AgentCanceled" and not prompt_open(), 5))
+    third = ask(ALLOW_INTERACTION | REQUEST_NEW)
+    check("a request for a new password says the old one was refused",
+          wait_for(lambda: labelled(app, Atspi, "label", RETRY_NOTE), 5))
+    type_password(app, Atspi, PASSWORDS[1])
+    check("Connect answers GetSecrets with the typed password",
+          wait_for(lambda: press_confirm(app, Atspi, "Connect"), 5)
+          and wait_for(lambda: result(third) == f"reply:{PASSWORDS[1]}", 5))
+    fourth = ask(ALLOW_INTERACTION)
+    wait_for(prompt_open, 5)
+    press(app, Atspi, "Cancel")
+    check("Cancel answers UserCanceled", wait_for(lambda: result(fourth) == f"error:{AGENT_ERROR}UserCanceled", 5))
+
+    # The agent refuses any process that is not NetworkManager, without a prompt.
+    request = GLib.Variant(
+        "(a{sa{sv}}osasu)",
+        (
+            {"802-11-wireless-security": {"key-mgmt": GLib.Variant("s", "wpa-psk")}},
+            LAB_CONNECTION, "802-11-wireless-security", [], ALLOW_INTERACTION,
+        ),
+    )
+    try:
+        bus.call_sync(ctx.bar, SECRET_AGENT, "org.freedesktop.NetworkManager.SecretAgent", "GetSecrets",
+                      request, None, Gio.DBusCallFlags.NONE, 5000, None)
+        refused = False
+    except GLib.Error as err:
+        refused = Gio.DBusError.get_remote_error(err) == f"{AGENT_ERROR}PermissionDenied"
+    check("a GetSecrets from another process is refused", refused)
+    check("and opens no prompt", not prompt_open())
+
+    # Airplane mode is NetworkManager's two radio switches.
+    def airplane():
+        return labelled(app, Atspi, "check box", "Airplane mode")
+
+    open_popover(app, Atspi, "Network", airplane)
+    airplane()[0].do_action(0)
+    check("airplane mode turns Wi-Fi and mobile broadband off", wait_for(
+        lambda: property_of(bus, fx.NM, NM_PATH, fx.NM, "WirelessEnabled") is False
+        and property_of(bus, fx.NM, NM_PATH, fx.NM, "WwanEnabled") is False, 5))
+    wait_for(lambda: airplane() and airplane()[0].get_state_set().contains(Atspi.StateType.CHECKED), 5)
+    airplane()[0].do_action(0)
+    check("and back on", wait_for(lambda: property_of(bus, fx.NM, NM_PATH, fx.NM, "WirelessEnabled") is True, 5))
+
+    # The VPN switch activates the saved VPN profile.
+    vpn = labelled(app, Atspi, "check box", "Office VPN")
+    check("the VPN is listed", bool(vpn))
+    if vpn:
+        vpn[0].do_action(0)
+    check("the VPN switch asks NetworkManager to activate the VPN", wait_for(
+        lambda: any(str(args[0]).startswith(fx.NM_SETTINGS) and args[1] == "/"
+                    for args in mock_calls(bus, fx.NM, NM_PATH, "ActivateConnection")), 5))
+    press(app, Atspi, "Network")
+
+    # NetworkManager restarts: the module hides, comes back, and the agent registers again.
+    for pid in mock_pids(fx.NM_TEMPLATE):
+        os.kill(pid, signal.SIGTERM)
+    check("without NetworkManager the module hides", wait_for(lambda: not buttons(app, Atspi, "Network"), 10))
+    ctx.spawned.append(fx.networkmanager(bus))
+    check("NetworkManager back: the module shows again", wait_for(lambda: buttons(app, Atspi, "Network"), 10))
+    check("the agent registered with the new NetworkManager", wait_for(lambda: registrations() == 1, 10))
+
+
+SECTIONS.append(network)
 
 
 def main():
