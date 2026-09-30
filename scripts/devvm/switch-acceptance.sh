@@ -11,6 +11,10 @@
 # reboots twice, and notifier leaves the guest on the update-trust acceptance images, so it
 # runs last; local-image.sh --push-to-vm puts the guest back on the switched image.
 #
+# On the VM the run logs the guest user in through greetd's initial_session, removes the
+# unit files earlier acceptance scripts left in the user's configuration, and on exit puts
+# the image's greetd configuration and container policy back and checks both.
+#
 # Prints PASS <what> for each check and exits non-zero on the first failure. Screenshots go
 # to .scratch/switch-acceptance/.
 set -euo pipefail
@@ -81,9 +85,58 @@ vm_only() { # vm_only WHY: skips the calling stage off the VM
     echo "SKIP  $1"
     return 1
 }
-# The systemd unit of the process that owns a bus name, from its cgroup.
+# The systemd unit of the process that owns a bus name, from its cgroup. Fails when the name
+# has no owner: the bus answers NameHasNoOwner and busctl exits non-zero, with no activation.
 owner_unit() {
-    in_session "pid=\$(busctl --user status $1 | sed -n 's/^PID=//p') && sed -n 's,^0::.*/,,p' /proc/\$pid/cgroup"
+    in_session "out=\$(busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
+    GetConnectionUnixProcessID s $1) && pid=\${out#u } && [ \"\$pid\" -gt 0 ] && sed -n 's,^0::.*/,,p' /proc/\$pid/cgroup"
+}
+
+# Unit files and drop-ins that an acceptance script put under the user's configuration, such
+# as shelld-acceptance.sh's private-bus drop-in: left behind, they move the daemon off the
+# session bus.
+# shellcheck disable=SC2088 # the tilde and the globs are expanded by the target's shell
+ACCEPTANCE_UNITS='~/.config/systemd/user/athanor-*acceptance* ~/.config/systemd/user/athanor-*.d/*acceptance*'
+acceptance_units() { run "for f in $ACCEPTANCE_UNITS; do if [ -e \"\$f\" ]; then echo \"\$f\"; fi; done"; }
+no_acceptance_units() {
+    local left
+    left=$(acceptance_units)
+    [[ -z $left ]] || fail "acceptance unit files are left under the user's configuration: $left"
+}
+
+# The guest user's session on seat0, started by greetd's initial_session as the update-trust
+# acceptance images start it: the switched image's greetd runs only the greeter. The command
+# is the one the greeter starts after a login (athanor-greeter-ui, src/auth.rs). tmpfiles
+# relinks /etc/greetd/config.toml to the image's own file at every boot (L+), so the
+# session is started again after each reboot, and restore_greetd puts the link back.
+GREETD_OWN=/usr/share/athanor-system-config/greetd.toml
+SESSION_COMMAND=/usr/bin/athanor-session
+seat_session() {
+    guest_ssh loginctl list-sessions --no-legend | awk -v user="$GUEST_USER" '$3 == user && $4 == "seat0" { found = 1 } END { exit !found }'
+}
+start_session() {
+    if ! guest_ssh "grep -qF '[initial_session]' $GREETD_OWN"; then
+        guest_ssh test -x "$SESSION_COMMAND" || fail "$SESSION_COMMAND is missing: greetd has no session to start"
+        {
+            guest_ssh cat "$GREETD_OWN"
+            printf '\n[initial_session]\ncommand = "%s"\nuser = "%s"\n' "$SESSION_COMMAND" "$GUEST_USER"
+        } | guest_ssh "sudo cp --remove-destination /dev/stdin /etc/greetd/config.toml"
+        guest_ssh sudo systemctl restart greetd
+    fi
+    wait_until 90 seat_session || fail "greetd's initial_session left no session of $GUEST_USER on seat0"
+    wait_until 60 in_session "systemctl --user is-active --quiet athanor-bar.service" || fail "athanor-bar.service is not active in the session"
+}
+restore_greetd() {
+    guest_ssh sudo ln -sfn "$GREETD_OWN" /etc/greetd/config.toml
+    [[ $(guest_ssh readlink /etc/greetd/config.toml) == "$GREETD_OWN" ]] || die "FAIL  the greetd configuration was not restored"
+}
+# Every check runs, each in a subshell since die exits; any failure fails the run.
+cleanup() {
+    local status=0
+    (restore_policy) || status=1
+    (restore_greetd) || status=1
+    (no_acceptance_units) || status=1
+    ((status == 0)) || exit 1
 }
 
 stage_packages() {
@@ -98,7 +151,7 @@ stage_packages() {
 stage_owners() {
     local name unit
     for name in org.freedesktop.Notifications org.kde.StatusNotifierWatcher; do
-        unit=$(owner_unit "$name")
+        unit=$(owner_unit "$name") || fail "$name has no owner on the session bus"
         [[ $unit == athanor-shelld.service ]] || fail "$name is owned by '$unit', not athanor-shelld.service"
     done
     pass "item 2: both names are owned by athanor-shelld"
@@ -156,7 +209,8 @@ stage_leftovers() {
     if [[ -n $(in_session "journalctl --user -b -u athanor-bar -u athanor-dock -g CosmicPanel -o cat") ]]; then
         fail "the bar or the dock reads the stale CosmicPanel configuration"
     fi
-    pass "leftovers: the marker stops the pick; the stale COSMIC panel tree is inert"
+    no_acceptance_units
+    pass "leftovers: the marker stops the pick; the stale COSMIC panel tree is inert; no acceptance unit is left"
 }
 
 # Item 4: the document the chooser writes (rig.sh chooser-e2e presses the chooser itself)
@@ -182,14 +236,18 @@ stage_rollback() {
     guest_ssh sudo bootc rollback
     reboot_guest
     guest_ssh rpm -q --quiet cosmic-panel || fail "bootc rollback did not bring back the pre-switch deployment"
-    # Each deployment keeps its own /etc: neither may carry the trust of the switch.
+    # Each deployment keeps its own /etc: neither may carry the trust of the switch or the
+    # acceptance login.
     restore_policy
-    pass "bootc rollback returns to the pre-switch image, its policy as rendered"
+    restore_greetd
+    pass "bootc rollback returns to the pre-switch image, its policy and greetd as shipped"
     guest_ssh sudo bootc rollback
     reboot_guest
     stage_packages
     restore_policy
-    pass "bootc rollback returns to the switched image, its policy as rendered"
+    restore_greetd
+    pass "bootc rollback returns to the switched image, its policy and greetd as shipped"
+    start_session
 }
 
 # Item 12: an update downloaded once is offered once, not again at each session start. The
@@ -213,7 +271,7 @@ stage_notifier() {
     point_stable v2
     expect_until "12: v2 downloaded" .update downloaded 20
     wait_until 120 offered_once || fail "the downloaded update was never offered"
-    for session in 2 3; do # greetd's initial_session logs the user in again on each start
+    for session in 2 3; do # the acceptance images' initial_session logs the user in on each start
         guest_ssh sudo systemctl restart greetd
         wait_until 60 in_session "systemctl --user is-active --quiet athanor-update-notify.service" || fail "session $session did not start"
         sleep 70 # two poll periods of the notifier (POLL = 30 s)
@@ -252,8 +310,13 @@ stage_hardware() {
 
 if [[ $target == vm ]]; then
     wait_ssh
-    # A failed stage must not leave the trust of a switch behind (acceptance/lib.sh).
-    trap restore_policy EXIT
+    # A failed stage must leave neither the trust of a switch (acceptance/lib.sh) nor the
+    # acceptance login behind; and a unit file an earlier acceptance left must not decide
+    # who owns the session's names.
+    trap cleanup EXIT
+    run "rm -f $ACCEPTANCE_UNITS"
+    in_session systemctl --user daemon-reload
+    start_session
 fi
 for stage in "${stages[@]}"; do
     "stage_${stage//-/_}"
