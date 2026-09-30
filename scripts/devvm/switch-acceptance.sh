@@ -277,6 +277,10 @@ stage_notifier() {
     # The switched image trusts the project key for this repository; v1 is signed with acc-1.
     trust_tag v1 "$ACC_STATE/keys/acc-1.pub"
     know_acc_registry
+    # The item starts from a machine never migrated to its channel: /var is shared by every
+    # deployment, so a marker left by an earlier acceptance would skip the migration and
+    # leave the machine on $REPO:v1, where no update ever arrives.
+    guest_ssh sudo rm -f /var/lib/athanor-update/migrated
     guest_ssh sudo bootc switch --enforce-container-sigpolicy --transport registry "$REPO:v1"
     restore_policy
     reboot_guest
