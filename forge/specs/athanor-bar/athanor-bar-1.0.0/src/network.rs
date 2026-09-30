@@ -45,7 +45,9 @@ const REQUEST_NEW: u32 = 0x2;
 pub enum Security {
     Open,
     /// WPA or WPA2 with a password; `sae` for WPA3 Personal.
-    Personal { sae: bool },
+    Personal {
+        sae: bool,
+    },
     /// Enterprise, WEP, OWE: the bar does not join these; Settings does.
     Other,
 }
@@ -188,7 +190,9 @@ fn networks(
         let (active_path, link) = saved
             .as_ref()
             .and_then(|path| active.get(path))
-            .map_or((None, Link::Idle), |(path, link)| (Some(path.clone()), *link));
+            .map_or((None, Link::Idle), |(path, link)| {
+                (Some(path.clone()), *link)
+            });
         let network = Network {
             label,
             strength: props::value::<u8>(ap, "Strength").unwrap_or(0).min(100),
@@ -223,7 +227,10 @@ fn networks(
 }
 
 /// The module's state; `None` when NetworkManager is absent, and then the module hides.
-pub fn state(objects: &Objects, connections: &BTreeMap<String, ConnectionInfo>) -> Option<NetworkState> {
+pub fn state(
+    objects: &Objects,
+    connections: &BTreeMap<String, ConnectionInfo>,
+) -> Option<NetworkState> {
     let manager = props::lookup(objects, NM_PATH, NM)?;
     let wireless_enabled = props::value::<bool>(manager, "WirelessEnabled").unwrap_or(false);
     let wwan_enabled = props::value::<bool>(manager, "WwanEnabled").unwrap_or(false);
@@ -256,7 +263,9 @@ pub fn state(objects: &Objects, connections: &BTreeMap<String, ConnectionInfo>) 
         .map(|(path, info)| {
             let (active_path, link) = active
                 .get(path)
-                .map_or((None, Link::Idle), |(active, link)| (Some(active.clone()), *link));
+                .map_or((None, Link::Idle), |(active, link)| {
+                    (Some(active.clone()), *link)
+                });
             Vpn {
                 connection: path.clone(),
                 label: line(&info.id, NAME_CHARS),
@@ -294,10 +303,11 @@ pub fn icon(state: &NetworkState) -> &'static str {
     if state.wired == Some(true) {
         return "network-wired-symbolic";
     }
-    let best = state
-        .wifi
-        .as_ref()
-        .and_then(|wifi| wifi.networks.iter().find(|network| network.link != Link::Idle));
+    let best = state.wifi.as_ref().and_then(|wifi| {
+        wifi.networks
+            .iter()
+            .find(|network| network.link != Link::Idle)
+    });
     match (best, &state.wifi) {
         (Some(network), _) if network.link == Link::Connected => signal_icon(network.strength),
         (Some(_), _) => "network-wireless-acquiring-symbolic",
@@ -321,7 +331,10 @@ fn wifi_settings(network: &Network, password: Option<&str>) -> Variant {
     settings.insert(
         "802-11-wireless".into(),
         Props::from([
-            ("ssid".into(), Variant::array_from_fixed_array(&network.ssid)),
+            (
+                "ssid".into(),
+                Variant::array_from_fixed_array(&network.ssid),
+            ),
             ("mode".into(), "infrastructure".to_variant()),
         ]),
     );
@@ -329,7 +342,10 @@ fn wifi_settings(network: &Network, password: Option<&str>) -> Variant {
         settings.insert(
             SECURITY_SETTING.into(),
             Props::from([
-                ("key-mgmt".into(), if sae { "sae" } else { "wpa-psk" }.to_variant()),
+                (
+                    "key-mgmt".into(),
+                    if sae { "sae" } else { "wpa-psk" }.to_variant(),
+                ),
                 ("psk".into(), password.to_variant()),
             ]),
         );
@@ -338,7 +354,11 @@ fn wifi_settings(network: &Network, password: Option<&str>) -> Variant {
 }
 
 /// The arguments of `AddAndActivateConnection`, `(a{sa{sv}}oo)`.
-pub fn add_and_activate(network: &Network, password: Option<&str>, device: &str) -> Option<Variant> {
+pub fn add_and_activate(
+    network: &Network,
+    password: Option<&str>,
+    device: &str,
+) -> Option<Variant> {
     Some(Variant::tuple_from_iter([
         wifi_settings(network, password),
         props::object_path(device)?,
@@ -371,7 +391,9 @@ pub fn password_acceptable(security: Security, password: &str) -> bool {
                 || (password.len() == 64 && password.chars().all(|c| c.is_ascii_hexdigit()))
         }
         Security::Personal { sae: true } => {
-            !password.is_empty() && password.chars().count() <= 128 && !password.chars().any(char::is_control)
+            !password.is_empty()
+                && password.chars().count() <= 128
+                && !password.chars().any(char::is_control)
         }
         Security::Open | Security::Other => false,
     }
@@ -401,7 +423,9 @@ pub fn secrets_request(params: &Variant) -> Option<SecretsRequest> {
     if !props::has_type(params, "(a{sa{sv}}osasu)") {
         return None;
     }
-    let settings = params.try_child_value(0)?.get::<BTreeMap<String, Props>>()?;
+    let settings = params
+        .try_child_value(0)?
+        .get::<BTreeMap<String, Props>>()?;
     let connection = params.try_child_value(1)?.str()?.to_owned();
     let setting = params.try_child_value(2)?.str()?.to_owned();
     let flags = params.try_child_value(4)?.get::<u32>()?;
@@ -432,7 +456,10 @@ impl SecretsRequest {
     /// The prompt, when the bar can answer this request: a WPA or WPA3 Personal password, and
     /// NetworkManager allows interaction. Anything else is answered `NoSecrets`.
     pub fn prompt(&self) -> Option<PasswordPrompt> {
-        if self.setting != SECURITY_SETTING || self.flags & ALLOW_INTERACTION == 0 || self.label.trim().is_empty() {
+        if self.setting != SECURITY_SETTING
+            || self.flags & ALLOW_INTERACTION == 0
+            || self.label.trim().is_empty()
+        {
             return None;
         }
         let security = match self.key_mgmt.as_deref() {
@@ -450,8 +477,10 @@ impl SecretsRequest {
 
 /// The reply of `GetSecrets`, `(a{sa{sv}})`: the password and nothing else.
 pub fn secrets_reply(password: &str) -> Variant {
-    let secrets: BTreeMap<String, Props> =
-        BTreeMap::from([(SECURITY_SETTING.to_owned(), Props::from([("psk".to_owned(), password.to_variant())]))]);
+    let secrets: BTreeMap<String, Props> = BTreeMap::from([(
+        SECURITY_SETTING.to_owned(),
+        Props::from([("psk".to_owned(), password.to_variant())]),
+    )]);
     (secrets,).to_variant()
 }
 
@@ -476,11 +505,17 @@ mod tests {
     }
 
     fn ops(paths: &[&str]) -> Variant {
-        Variant::array_from_iter_with_type(VariantTy::OBJECT_PATH, paths.iter().map(|path| op(path)))
+        Variant::array_from_iter_with_type(
+            VariantTy::OBJECT_PATH,
+            paths.iter().map(|path| op(path)),
+        )
     }
 
     fn map(pairs: Vec<(&str, Variant)>) -> Props {
-        pairs.into_iter().map(|(name, value)| (name.to_owned(), value)).collect()
+        pairs
+            .into_iter()
+            .map(|(name, value)| (name.to_owned(), value))
+            .collect()
     }
 
     fn add(objects: &mut Objects, path: &str, interface: &str, pairs: Vec<(&str, Variant)>) {
@@ -519,9 +554,30 @@ mod tests {
                 ("ActiveConnections", ops(active)),
             ],
         );
-        add(&mut objects, "/d/eth0", DEVICE, vec![("DeviceType", 1u32.to_variant()), ("State", 100u32.to_variant())]);
-        add(&mut objects, "/d/wlan0", DEVICE, vec![("DeviceType", 2u32.to_variant()), ("State", 30u32.to_variant())]);
-        add(&mut objects, "/d/wlan0", WIRELESS, vec![("AccessPoints", ops(aps))]);
+        add(
+            &mut objects,
+            "/d/eth0",
+            DEVICE,
+            vec![
+                ("DeviceType", 1u32.to_variant()),
+                ("State", 100u32.to_variant()),
+            ],
+        );
+        add(
+            &mut objects,
+            "/d/wlan0",
+            DEVICE,
+            vec![
+                ("DeviceType", 2u32.to_variant()),
+                ("State", 30u32.to_variant()),
+            ],
+        );
+        add(
+            &mut objects,
+            "/d/wlan0",
+            WIRELESS,
+            vec![("AccessPoints", ops(aps))],
+        );
         objects
     }
 
@@ -568,7 +624,11 @@ mod tests {
         ap(&mut objects, "/ap/1", b"\xffEvil\xe2\x80\xaeNet\n", 50, 0);
         ap(&mut objects, "/ap/2", b"", 99, 0);
         ap(&mut objects, "/ap/3", b"\x07\x1b\n", 98, 0);
-        let networks = state(&objects, &BTreeMap::new()).unwrap().wifi.unwrap().networks;
+        let networks = state(&objects, &BTreeMap::new())
+            .unwrap()
+            .wifi
+            .unwrap()
+            .networks;
         assert_eq!(networks.len(), 1);
         assert_eq!(networks[0].label, "\u{fffd}EvilNet");
         assert_eq!(networks[0].ssid, b"\xffEvil\xe2\x80\xaeNet\n");
@@ -580,11 +640,21 @@ mod tests {
         let refs: Vec<&str> = names.iter().map(String::as_str).collect();
         let mut objects = world(&refs, &[], true);
         for (n, path) in names.iter().enumerate() {
-            ap(&mut objects, path, format!("net{n}").as_bytes(), (n % 100) as u8, 0);
+            ap(
+                &mut objects,
+                path,
+                format!("net{n}").as_bytes(),
+                (n % 100) as u8,
+                0,
+            );
         }
         let long = "x".repeat(500);
         ap(&mut objects, "/ap/0", long.as_bytes(), 100, 0);
-        let networks = state(&objects, &BTreeMap::new()).unwrap().wifi.unwrap().networks;
+        let networks = state(&objects, &BTreeMap::new())
+            .unwrap()
+            .wifi
+            .unwrap()
+            .networks;
         assert_eq!(networks.len(), MAX_NETWORKS);
         assert_eq!(networks[0].label.chars().count(), NAME_CHARS);
     }
@@ -594,18 +664,37 @@ mod tests {
         let mut objects = world(&["/ap/1", "/ap/2"], &[], true);
         ap(&mut objects, "/ap/1", b"Mesh", 30, 0);
         ap(&mut objects, "/ap/2", b"Mesh", 70, 0);
-        let networks = state(&objects, &BTreeMap::new()).unwrap().wifi.unwrap().networks;
+        let networks = state(&objects, &BTreeMap::new())
+            .unwrap()
+            .wifi
+            .unwrap()
+            .networks;
         assert_eq!(networks.len(), 1);
-        assert_eq!((networks[0].access_point.as_str(), networks[0].strength), ("/ap/2", 70));
+        assert_eq!(
+            (networks[0].access_point.as_str(), networks[0].strength),
+            ("/ap/2", 70)
+        );
     }
 
     #[test]
     fn security_from_the_flags() {
         assert_eq!(security(0, 0, 0), Security::Open);
-        assert_eq!(security(1, 0, KEY_MGMT_PSK), Security::Personal { sae: false });
-        assert_eq!(security(1, KEY_MGMT_PSK, 0), Security::Personal { sae: false });
-        assert_eq!(security(1, 0, KEY_MGMT_SAE), Security::Personal { sae: true });
-        assert_eq!(security(1, 0, KEY_MGMT_PSK | KEY_MGMT_SAE), Security::Personal { sae: false });
+        assert_eq!(
+            security(1, 0, KEY_MGMT_PSK),
+            Security::Personal { sae: false }
+        );
+        assert_eq!(
+            security(1, KEY_MGMT_PSK, 0),
+            Security::Personal { sae: false }
+        );
+        assert_eq!(
+            security(1, 0, KEY_MGMT_SAE),
+            Security::Personal { sae: true }
+        );
+        assert_eq!(
+            security(1, 0, KEY_MGMT_PSK | KEY_MGMT_SAE),
+            Security::Personal { sae: false }
+        );
         assert_eq!(security(1, 0, KEY_MGMT_8021X), Security::Other);
         assert_eq!(security(1, 0, 0), Security::Other, "WEP");
     }
@@ -623,16 +712,41 @@ mod tests {
     #[test]
     fn vpns_come_from_the_saved_connections() {
         let mut objects = world(&[], &["/active/9"], true);
-        add(&mut objects, "/active/9", ACTIVE, vec![("Connection", op("/s/9")), ("State", 1u32.to_variant())]);
+        add(
+            &mut objects,
+            "/active/9",
+            ACTIVE,
+            vec![("Connection", op("/s/9")), ("State", 1u32.to_variant())],
+        );
         let connections = BTreeMap::from([
-            ("/s/9".to_owned(), ConnectionInfo { id: "Office\u{202e}VPN".into(), kind: "vpn".into(), ssid: None }),
-            ("/s/8".to_owned(), ConnectionInfo { id: "Home WG".into(), kind: "wireguard".into(), ssid: None }),
+            (
+                "/s/9".to_owned(),
+                ConnectionInfo {
+                    id: "Office\u{202e}VPN".into(),
+                    kind: "vpn".into(),
+                    ssid: None,
+                },
+            ),
+            (
+                "/s/8".to_owned(),
+                ConnectionInfo {
+                    id: "Home WG".into(),
+                    kind: "wireguard".into(),
+                    ssid: None,
+                },
+            ),
             ("/s/7".to_owned(), saved(b"Cafe")),
         ]);
         let vpns = state(&objects, &connections).unwrap().vpns;
         assert_eq!(vpns.len(), 2);
-        assert_eq!((vpns[0].label.as_str(), vpns[0].link), ("Home WG", Link::Idle));
-        assert_eq!((vpns[1].label.as_str(), vpns[1].link), ("OfficeVPN", Link::Connecting));
+        assert_eq!(
+            (vpns[0].label.as_str(), vpns[0].link),
+            ("Home WG", Link::Idle)
+        );
+        assert_eq!(
+            (vpns[1].label.as_str(), vpns[1].link),
+            ("OfficeVPN", Link::Connecting)
+        );
         assert_eq!(vpns[1].active.as_deref(), Some("/active/9"));
     }
 
@@ -650,14 +764,31 @@ mod tests {
         };
         let args = add_and_activate(&network, Some("correct horse"), "/d/wlan0").unwrap();
         assert_eq!(args.type_().as_str(), "(a{sa{sv}}oo)");
-        let settings = args.try_child_value(0).unwrap().get::<BTreeMap<String, Props>>().unwrap();
-        assert_eq!(props::value::<Vec<u8>>(&settings["802-11-wireless"], "ssid").unwrap(), b"Lab\xff");
-        assert_eq!(props::value::<String>(&settings[SECURITY_SETTING], "key-mgmt").as_deref(), Some("sae"));
+        let settings = args
+            .try_child_value(0)
+            .unwrap()
+            .get::<BTreeMap<String, Props>>()
+            .unwrap();
+        assert_eq!(
+            props::value::<Vec<u8>>(&settings["802-11-wireless"], "ssid").unwrap(),
+            b"Lab\xff"
+        );
+        assert_eq!(
+            props::value::<String>(&settings[SECURITY_SETTING], "key-mgmt").as_deref(),
+            Some("sae")
+        );
         network.security = Security::Open;
         let open = add_and_activate(&network, None, "/d/wlan0").unwrap();
-        let settings = open.try_child_value(0).unwrap().get::<BTreeMap<String, Props>>().unwrap();
+        let settings = open
+            .try_child_value(0)
+            .unwrap()
+            .get::<BTreeMap<String, Props>>()
+            .unwrap();
         assert!(!settings.contains_key(SECURITY_SETTING));
-        assert_eq!(activate("/s/1", "/", "/").unwrap().type_().as_str(), "(ooo)");
+        assert_eq!(
+            activate("/s/1", "/", "/").unwrap().type_().as_str(),
+            "(ooo)"
+        );
         assert!(deactivate("bad path").is_none());
     }
 
@@ -694,12 +825,39 @@ mod tests {
         assert_eq!(asked.connection, "/s/1");
         assert_eq!(
             asked.prompt(),
-            Some(PasswordPrompt { label: "Home".into(), security: Security::Personal { sae: false }, retry: true })
+            Some(PasswordPrompt {
+                label: "Home".into(),
+                security: Security::Personal { sae: false },
+                retry: true
+            })
         );
-        assert_eq!(secrets_request(&request("sae", SECURITY_SETTING, 0x1)).unwrap().prompt().unwrap().security, Security::Personal { sae: true });
-        assert_eq!(secrets_request(&request("wpa-psk", SECURITY_SETTING, 0x0)).unwrap().prompt(), None, "no interaction");
-        assert_eq!(secrets_request(&request("wpa-eap", SECURITY_SETTING, 0x1)).unwrap().prompt(), None);
-        assert_eq!(secrets_request(&request("wpa-psk", "vpn", 0x1)).unwrap().prompt(), None);
+        assert_eq!(
+            secrets_request(&request("sae", SECURITY_SETTING, 0x1))
+                .unwrap()
+                .prompt()
+                .unwrap()
+                .security,
+            Security::Personal { sae: true }
+        );
+        assert_eq!(
+            secrets_request(&request("wpa-psk", SECURITY_SETTING, 0x0))
+                .unwrap()
+                .prompt(),
+            None,
+            "no interaction"
+        );
+        assert_eq!(
+            secrets_request(&request("wpa-eap", SECURITY_SETTING, 0x1))
+                .unwrap()
+                .prompt(),
+            None
+        );
+        assert_eq!(
+            secrets_request(&request("wpa-psk", "vpn", 0x1))
+                .unwrap()
+                .prompt(),
+            None
+        );
         assert!(secrets_request(&("x",).to_variant()).is_none());
     }
 
@@ -710,13 +868,23 @@ mod tests {
         let (secrets,) = reply.get::<(BTreeMap<String, Props>,)>().unwrap();
         assert_eq!(secrets.len(), 1);
         assert_eq!(secrets[SECURITY_SETTING].len(), 1);
-        assert_eq!(props::value::<String>(&secrets[SECURITY_SETTING], "psk").as_deref(), Some("hunter2hunter2"));
+        assert_eq!(
+            props::value::<String>(&secrets[SECURITY_SETTING], "psk").as_deref(),
+            Some("hunter2hunter2")
+        );
     }
 
     #[test]
     fn a_cancel_names_the_connection_and_the_setting() {
         let params = Variant::tuple_from_iter([op("/s/1"), SECURITY_SETTING.to_variant()]);
-        assert_eq!(cancel_request(&params), Some(("/s/1".into(), SECURITY_SETTING.into())));
-        assert_eq!(cancel_request(&("/s/1", "x").to_variant()), None, "s is not o");
+        assert_eq!(
+            cancel_request(&params),
+            Some(("/s/1".into(), SECURITY_SETTING.into()))
+        );
+        assert_eq!(
+            cancel_request(&("/s/1", "x").to_variant()),
+            None,
+            "s is not o"
+        );
     }
 }

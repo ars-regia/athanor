@@ -39,10 +39,14 @@ pub struct Battery {
 /// The display device's battery; `None` when it is not a present battery, and then the
 /// module hides (SH1).
 pub fn battery(props: &Props) -> Option<Battery> {
-    if props::value::<u32>(props, "Type") != Some(TYPE_BATTERY) || props::value::<bool>(props, "IsPresent") != Some(true) {
+    if props::value::<u32>(props, "Type") != Some(TYPE_BATTERY)
+        || props::value::<bool>(props, "IsPresent") != Some(true)
+    {
         return None;
     }
-    let percent = props::value::<f64>(props, "Percentage").filter(|p| p.is_finite())?.clamp(0.0, 100.0);
+    let percent = props::value::<f64>(props, "Percentage")
+        .filter(|p| p.is_finite())?
+        .clamp(0.0, 100.0);
     let charge = match props::value::<u32>(props, "State") {
         Some(1) => Charge::Charging,
         Some(2 | 3) => Charge::Discharging,
@@ -58,18 +62,52 @@ pub fn battery(props: &Props) -> Option<Battery> {
         .and_then(|key| props::value::<i64>(props, key))
         .and_then(|seconds| u64::try_from(seconds).ok())
         .filter(|&seconds| seconds > 0);
-    Some(Battery { percent, charge, seconds })
+    Some(Battery {
+        percent,
+        charge,
+        seconds,
+    })
 }
 
 pub fn icon(battery: &Battery) -> &'static str {
     let charging = battery.charge == Charge::Charging;
     match (battery.charge, battery.percent) {
         (Charge::Full, _) => "battery-full-charged-symbolic",
-        (_, p) if p >= 80.0 => if charging { "battery-full-charging-symbolic" } else { "battery-full-symbolic" },
-        (_, p) if p >= 50.0 => if charging { "battery-good-charging-symbolic" } else { "battery-good-symbolic" },
-        (_, p) if p >= 20.0 => if charging { "battery-low-charging-symbolic" } else { "battery-low-symbolic" },
-        (_, p) if p >= 5.0 => if charging { "battery-caution-charging-symbolic" } else { "battery-caution-symbolic" },
-        _ => if charging { "battery-empty-charging-symbolic" } else { "battery-empty-symbolic" },
+        (_, p) if p >= 80.0 => {
+            if charging {
+                "battery-full-charging-symbolic"
+            } else {
+                "battery-full-symbolic"
+            }
+        }
+        (_, p) if p >= 50.0 => {
+            if charging {
+                "battery-good-charging-symbolic"
+            } else {
+                "battery-good-symbolic"
+            }
+        }
+        (_, p) if p >= 20.0 => {
+            if charging {
+                "battery-low-charging-symbolic"
+            } else {
+                "battery-low-symbolic"
+            }
+        }
+        (_, p) if p >= 5.0 => {
+            if charging {
+                "battery-caution-charging-symbolic"
+            } else {
+                "battery-caution-symbolic"
+            }
+        }
+        _ => {
+            if charging {
+                "battery-empty-charging-symbolic"
+            } else {
+                "battery-empty-symbolic"
+            }
+        }
     }
 }
 
@@ -89,7 +127,8 @@ pub fn profiles(props: &Props) -> Option<(Vec<&'static str>, String)> {
         .into_iter()
         .filter(|name| offered.iter().any(|offered| offered == name))
         .collect();
-    let active = props::value::<String>(props, "ActiveProfile").filter(|active| known.contains(&active.as_str()))?;
+    let active = props::value::<String>(props, "ActiveProfile")
+        .filter(|active| known.contains(&active.as_str()))?;
     Some((known, active))
 }
 
@@ -104,7 +143,9 @@ pub struct Backlight {
 fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && !name.starts_with('.')
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | ':'))
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | ':'))
 }
 
 fn read_u32(path: &Path) -> Option<u32> {
@@ -124,7 +165,11 @@ pub fn read_backlight(root: &Path) -> Option<Backlight> {
         .ok()?
         .filter_map(Result::ok)
         .filter_map(|entry| {
-            let name = entry.file_name().into_string().ok().filter(|name| valid_name(name))?;
+            let name = entry
+                .file_name()
+                .into_string()
+                .ok()
+                .filter(|name| valid_name(name))?;
             let dir = entry.path();
             let kind = fs::read_to_string(dir.join("type")).ok()?;
             let rank = rank(kind.trim())?;
@@ -145,7 +190,11 @@ impl Backlight {
     /// The level for `percent`, never 0: a slider at the left end must not turn the panel
     /// black.
     pub fn raw(&self, percent: f64) -> u32 {
-        let percent = if percent.is_finite() { percent.clamp(0.0, 100.0) } else { 100.0 };
+        let percent = if percent.is_finite() {
+            percent.clamp(0.0, 100.0)
+        } else {
+            100.0
+        };
         // At most `max`, so the cast cannot truncate.
         ((percent * f64::from(self.max) / 100.0).round() as u32).clamp(1, self.max)
     }
@@ -157,14 +206,27 @@ mod tests {
     use glib::{Variant, VariantTy};
 
     fn device(text: &str) -> Props {
-        crate::props::get_all(&Variant::parse(Some(VariantTy::new("(a{sv})").unwrap()), text).unwrap()).unwrap()
+        crate::props::get_all(
+            &Variant::parse(Some(VariantTy::new("(a{sv})").unwrap()), text).unwrap(),
+        )
+        .unwrap()
     }
 
     #[test]
     fn a_present_battery_is_read_and_anything_else_hides_the_module() {
         let on_battery = device("({'Type': <uint32 2>, 'IsPresent': <true>, 'Percentage': <72.0>, 'State': <uint32 2>, 'TimeToEmpty': <int64 12300>, 'TimeToFull': <int64 0>},)");
-        assert_eq!(battery(&on_battery), Some(Battery { percent: 72.0, charge: Charge::Discharging, seconds: Some(12300) }));
-        assert_eq!(icon(&battery(&on_battery).unwrap()), "battery-good-symbolic");
+        assert_eq!(
+            battery(&on_battery),
+            Some(Battery {
+                percent: 72.0,
+                charge: Charge::Discharging,
+                seconds: Some(12300)
+            })
+        );
+        assert_eq!(
+            icon(&battery(&on_battery).unwrap()),
+            "battery-good-symbolic"
+        );
         assert_eq!(hours_minutes(12300), (3, 25));
         let absent = device("({'Type': <uint32 2>, 'IsPresent': <false>, 'Percentage': <0.0>},)");
         assert_eq!(battery(&absent), None);
@@ -179,15 +241,23 @@ mod tests {
     #[test]
     fn profiles_keep_the_known_ones_in_order() {
         let props = device("({'ActiveProfile': <'balanced'>, 'Profiles': <[{'Profile': <'performance'>}, {'Profile': <'balanced'>}, {'Profile': <'turbo'>}]>},)");
-        assert_eq!(profiles(&props), Some((vec!["balanced", "performance"], "balanced".into())));
-        let unknown = device("({'ActiveProfile': <'turbo'>, 'Profiles': <[{'Profile': <'turbo'>}]>},)");
+        assert_eq!(
+            profiles(&props),
+            Some((vec!["balanced", "performance"], "balanced".into()))
+        );
+        let unknown =
+            device("({'ActiveProfile': <'turbo'>, 'Profiles': <[{'Profile': <'turbo'>}]>},)");
         assert_eq!(profiles(&unknown), None);
-        assert_eq!(profiles(&device("({'ActiveProfile': <'balanced'>},)")), None);
+        assert_eq!(
+            profiles(&device("({'ActiveProfile': <'balanced'>},)")),
+            None
+        );
     }
 
     #[test]
     fn the_backlight_prefers_firmware_and_never_goes_to_zero() {
-        let root = std::env::temp_dir().join(format!("athanor-bar-backlight-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("athanor-bar-backlight-{}", std::process::id()));
         let make = |name: &str, kind: &str, max: &str, level: &str| {
             let dir = root.join(name);
             fs::create_dir_all(&dir).unwrap();
@@ -200,7 +270,14 @@ mod tests {
         make(".hidden", "firmware\n", "10\n", "5\n");
         make("nv_backlight", "platform\n", "100\n", "250\n");
         let backlight = read_backlight(&root).unwrap();
-        assert_eq!(backlight, Backlight { name: "nv_backlight".into(), max: 100, level: 100 });
+        assert_eq!(
+            backlight,
+            Backlight {
+                name: "nv_backlight".into(),
+                max: 100,
+                level: 100
+            }
+        );
         assert_eq!(backlight.raw(0.0), 1);
         assert_eq!(backlight.raw(50.0), 50);
         assert_eq!(backlight.raw(f64::NAN), 100);

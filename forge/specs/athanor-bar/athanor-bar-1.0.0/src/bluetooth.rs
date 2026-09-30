@@ -94,7 +94,11 @@ pub fn state(objects: &Objects) -> Option<BluetoothState> {
             device(path, props)
         })
         .partition(|device| device.paired);
-    paired.sort_by(|a, b| b.connected.cmp(&a.connected).then_with(|| a.label.cmp(&b.label)));
+    paired.sort_by(|a, b| {
+        b.connected
+            .cmp(&a.connected)
+            .then_with(|| a.label.cmp(&b.label))
+    });
     paired.truncate(MAX_DEVICES);
     if discovering {
         nearby.sort_by(|a, b| a.label.cmp(&b.label));
@@ -158,8 +162,14 @@ mod tests {
 
     fn add_device(objects: &mut Objects, path: &str, pairs: Vec<(&str, Variant)>) {
         let mut props: Props = pairs.into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
-        props.insert("Adapter".into(), props::object_path("/org/bluez/hci0").unwrap());
-        objects.entry(path.to_owned()).or_default().insert(DEVICE.into(), props);
+        props.insert(
+            "Adapter".into(),
+            props::object_path("/org/bluez/hci0").unwrap(),
+        );
+        objects
+            .entry(path.to_owned())
+            .or_default()
+            .insert(DEVICE.into(), props);
     }
 
     fn world(discovering: bool) -> Objects {
@@ -171,17 +181,39 @@ mod tests {
                 ("Discovering".into(), discovering.to_variant()),
             ]),
         );
-        add_device(&mut objects, "/org/bluez/hci0/dev_1", vec![
-            ("Alias", "Keyboard".to_variant()), ("Paired", true.to_variant()), ("Icon", "input-keyboard".to_variant()),
-        ]);
-        add_device(&mut objects, "/org/bluez/hci0/dev_2", vec![
-            ("Alias", "Headphones".to_variant()), ("Paired", true.to_variant()), ("Connected", true.to_variant()),
-            ("Icon", "audio-headset".to_variant()),
-        ]);
-        add_device(&mut objects, "/org/bluez/hci0/dev_3", vec![
-            ("Alias", "AA-BB".to_variant()), ("Name", "Phone".to_variant()), ("Icon", "phone".to_variant()),
-        ]);
-        add_device(&mut objects, "/org/bluez/hci0/dev_4", vec![("Alias", "CC-DD".to_variant())]);
+        add_device(
+            &mut objects,
+            "/org/bluez/hci0/dev_1",
+            vec![
+                ("Alias", "Keyboard".to_variant()),
+                ("Paired", true.to_variant()),
+                ("Icon", "input-keyboard".to_variant()),
+            ],
+        );
+        add_device(
+            &mut objects,
+            "/org/bluez/hci0/dev_2",
+            vec![
+                ("Alias", "Headphones".to_variant()),
+                ("Paired", true.to_variant()),
+                ("Connected", true.to_variant()),
+                ("Icon", "audio-headset".to_variant()),
+            ],
+        );
+        add_device(
+            &mut objects,
+            "/org/bluez/hci0/dev_3",
+            vec![
+                ("Alias", "AA-BB".to_variant()),
+                ("Name", "Phone".to_variant()),
+                ("Icon", "phone".to_variant()),
+            ],
+        );
+        add_device(
+            &mut objects,
+            "/org/bluez/hci0/dev_4",
+            vec![("Alias", "CC-DD".to_variant())],
+        );
         objects
     }
 
@@ -206,26 +238,57 @@ mod tests {
     #[test]
     fn a_device_name_is_sanitised() {
         let mut objects = world(false);
-        add_device(&mut objects, "/org/bluez/hci0/dev_5", vec![
-            ("Alias", format!("Evil\u{202e}{}\n", "x".repeat(200)).to_variant()), ("Paired", true.to_variant()),
-            ("Icon", "../../etc/passwd".to_variant()),
-        ]);
-        add_device(&mut objects, "/org/bluez/hci0/dev_6", vec![("Alias", "\u{1b}\u{7}".to_variant()), ("Paired", true.to_variant())]);
+        add_device(
+            &mut objects,
+            "/org/bluez/hci0/dev_5",
+            vec![
+                (
+                    "Alias",
+                    format!("Evil\u{202e}{}\n", "x".repeat(200)).to_variant(),
+                ),
+                ("Paired", true.to_variant()),
+                ("Icon", "../../etc/passwd".to_variant()),
+            ],
+        );
+        add_device(
+            &mut objects,
+            "/org/bluez/hci0/dev_6",
+            vec![
+                ("Alias", "\u{1b}\u{7}".to_variant()),
+                ("Paired", true.to_variant()),
+            ],
+        );
         let paired = state(&objects).unwrap().paired;
         let evil = paired.iter().find(|d| d.path.ends_with("dev_5")).unwrap();
         assert!(evil.label.starts_with("Evilxxx"));
         assert_eq!(evil.label.chars().count(), NAME_CHARS);
         assert_eq!(evil.icon, "bluetooth-symbolic");
-        assert!(paired.iter().all(|d| !d.path.ends_with("dev_6")), "an empty name is left out");
+        assert!(
+            paired.iter().all(|d| !d.path.ends_with("dev_6")),
+            "an empty name is left out"
+        );
     }
 
     #[test]
     fn a_device_of_another_adapter_is_not_listed() {
         let mut objects = world(false);
-        let mut props = Props::from([("Alias".into(), "Other".to_variant()), ("Paired".into(), true.to_variant())]);
-        props.insert("Adapter".into(), props::object_path("/org/bluez/hci1").unwrap());
-        objects.entry("/org/bluez/hci1/dev_9".into()).or_default().insert(DEVICE.into(), props);
-        assert!(state(&objects).unwrap().paired.iter().all(|d| d.label != "Other"));
+        let mut props = Props::from([
+            ("Alias".into(), "Other".to_variant()),
+            ("Paired".into(), true.to_variant()),
+        ]);
+        props.insert(
+            "Adapter".into(),
+            props::object_path("/org/bluez/hci1").unwrap(),
+        );
+        objects
+            .entry("/org/bluez/hci1/dev_9".into())
+            .or_default()
+            .insert(DEVICE.into(), props);
+        assert!(state(&objects)
+            .unwrap()
+            .paired
+            .iter()
+            .all(|d| d.label != "Other"));
     }
 
     #[test]
@@ -235,11 +298,20 @@ mod tests {
         assert_eq!(passkey_label(1_000_000), None);
         let dev = props::object_path("/org/bluez/hci0/dev_3").unwrap();
         let confirm = Variant::tuple_from_iter([dev.clone(), 123_456u32.to_variant()]);
-        assert_eq!(device_and_passkey(&confirm), Some(("/org/bluez/hci0/dev_3".into(), 123_456)));
+        assert_eq!(
+            device_and_passkey(&confirm),
+            Some(("/org/bluez/hci0/dev_3".into(), 123_456))
+        );
         let display = Variant::tuple_from_iter([dev.clone(), 7u32.to_variant(), 2u16.to_variant()]);
         assert_eq!(device_and_passkey(&display).map(|(_, key)| key), Some(7));
         assert_eq!(device_and_passkey(&("x", 1u32).to_variant()), None);
-        assert_eq!(device_of(&Variant::tuple_from_iter([dev])).as_deref(), Some("/org/bluez/hci0/dev_3"));
-        assert_eq!(device_label(&world(false), "/org/bluez/hci0/dev_3").as_deref(), Some("AA-BB"));
+        assert_eq!(
+            device_of(&Variant::tuple_from_iter([dev])).as_deref(),
+            Some("/org/bluez/hci0/dev_3")
+        );
+        assert_eq!(
+            device_label(&world(false), "/org/bluez/hci0/dev_3").as_deref(),
+            Some("AA-BB")
+        );
     }
 }

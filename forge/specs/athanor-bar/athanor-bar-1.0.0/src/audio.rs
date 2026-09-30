@@ -19,7 +19,11 @@ pub fn percent(raw: u32) -> f64 {
 }
 
 pub fn raw(percent: f64) -> u32 {
-    let percent = if percent.is_finite() { percent.clamp(0.0, 100.0) } else { 0.0 };
+    let percent = if percent.is_finite() {
+        percent.clamp(0.0, 100.0)
+    } else {
+        0.0
+    };
     // At most NORMAL, so the cast cannot truncate.
     (percent * f64::from(NORMAL) / 100.0).round() as u32
 }
@@ -86,7 +90,8 @@ pub fn track(player: &Props) -> Option<Track> {
 
 /// A well-known name of an MPRIS player.
 pub fn is_player(name: &str) -> bool {
-    name.strip_prefix(MPRIS_PREFIX).is_some_and(|rest| !rest.is_empty())
+    name.strip_prefix(MPRIS_PREFIX)
+        .is_some_and(|rest| !rest.is_empty())
 }
 
 pub fn playing(player: &Props) -> bool {
@@ -125,12 +130,20 @@ mod tests {
 
     #[test]
     fn the_default_device_is_chosen_else_the_first() {
-        let device = |name: &str| Device { name: name.into(), label: name.into(), percent: 0.0, muted: false };
+        let device = |name: &str| Device {
+            name: name.into(),
+            label: name.into(),
+            percent: 0.0,
+            muted: false,
+        };
         let devices = [device("a"), device("b")];
         assert_eq!(chosen(&devices, Some("b")), Some(1));
         assert_eq!(chosen(&devices, Some("gone")), Some(0));
         assert_eq!(chosen(&[], Some("b")), None);
-        assert_eq!(device_label(Some("\u{202e}Speakers\n"), "sink.0"), "Speakers");
+        assert_eq!(
+            device_label(Some("\u{202e}Speakers\n"), "sink.0"),
+            "Speakers"
+        );
         assert_eq!(device_label(Some(" "), "sink.0"), "sink.0");
     }
 
@@ -138,10 +151,20 @@ mod tests {
     fn the_track_is_sanitised_and_needs_a_title() {
         let player = |metadata: &str| -> Props {
             let v = Variant::parse(Some(VariantTy::new("a{sv}").unwrap()), metadata).unwrap();
-            Props::from([("Metadata".into(), v), ("PlaybackStatus".into(), "Playing".to_variant())])
+            Props::from([
+                ("Metadata".into(), v),
+                ("PlaybackStatus".into(), "Playing".to_variant()),
+            ])
         };
-        let full = player("{'xesam:title': <'Night\u{202e} Drive'>, 'xesam:artist': <['Calmo', 'Duo']>}");
-        assert_eq!(track(&full), Some(Track { title: "Night Drive".into(), artist: Some("Calmo, Duo".into()) }));
+        let full =
+            player("{'xesam:title': <'Night\u{202e} Drive'>, 'xesam:artist': <['Calmo', 'Duo']>}");
+        assert_eq!(
+            track(&full),
+            Some(Track {
+                title: "Night Drive".into(),
+                artist: Some("Calmo, Duo".into())
+            })
+        );
         assert!(playing(&full));
         assert_eq!(track(&player("{'xesam:artist': <['Calmo']>}")), None);
         assert_eq!(track(&player("{'xesam:title': <42>}")), None);

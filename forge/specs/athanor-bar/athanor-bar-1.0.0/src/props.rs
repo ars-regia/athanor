@@ -47,7 +47,11 @@ pub fn managed_objects(reply: &Variant) -> Option<Objects> {
     if !has_type(reply, "(a{oa{sa{sv}}})") {
         return None;
     }
-    reply.try_child_value(0)?.iter().map(|entry| object_entry(&entry)).collect()
+    reply
+        .try_child_value(0)?
+        .iter()
+        .map(|entry| object_entry(&entry))
+        .collect()
 }
 
 /// The reply of `GetAll`, `(a{sv})`.
@@ -153,7 +157,9 @@ pub fn paths(props: &Props, name: &str) -> Vec<String> {
 
 /// `path` as an `o` value; `None` when it is not a valid object path.
 pub fn object_path(path: &str) -> Option<Variant> {
-    ObjectPath::try_from(path).ok().map(|path| path.to_variant())
+    ObjectPath::try_from(path)
+        .ok()
+        .map(|path| path.to_variant())
 }
 
 #[cfg(test)]
@@ -175,7 +181,10 @@ mod tests {
     #[test]
     fn managed_objects_are_read_and_a_wrong_type_is_none() {
         let objects = objects();
-        assert_eq!(value::<bool>(lookup(&objects, "/a", "x.Y").unwrap(), "On"), Some(true));
+        assert_eq!(
+            value::<bool>(lookup(&objects, "/a", "x.Y").unwrap(), "On"),
+            Some(true)
+        );
         assert!(managed_objects(&parse("(a{sv})", "({'On': <true>},)")).is_none());
     }
 
@@ -183,7 +192,16 @@ mod tests {
     fn a_property_change_updates_and_invalidates() {
         let mut objects = objects();
         let params = parse("(sa{sv}as)", "('x.Y', {'On': <false>}, ['Name'])");
-        apply(&mut objects, change("/a", "org.freedesktop.DBus.Properties", "PropertiesChanged", &params).unwrap());
+        apply(
+            &mut objects,
+            change(
+                "/a",
+                "org.freedesktop.DBus.Properties",
+                "PropertiesChanged",
+                &params,
+            )
+            .unwrap(),
+        );
         let props = lookup(&objects, "/a", "x.Y").unwrap();
         assert_eq!(value::<bool>(props, "On"), Some(false));
         assert!(props.get("Name").is_none());
@@ -193,7 +211,16 @@ mod tests {
     fn a_change_of_an_unknown_object_is_ignored() {
         let mut objects = objects();
         let params = parse("(sa{sv}as)", "('x.Y', {'On': <false>}, @as [])");
-        apply(&mut objects, change("/b", "org.freedesktop.DBus.Properties", "PropertiesChanged", &params).unwrap());
+        apply(
+            &mut objects,
+            change(
+                "/b",
+                "org.freedesktop.DBus.Properties",
+                "PropertiesChanged",
+                &params,
+            )
+            .unwrap(),
+        );
         assert_eq!(objects.len(), 1);
         assert!(!objects.contains_key("/b"));
     }
@@ -202,10 +229,28 @@ mod tests {
     fn objects_come_and_go_with_their_interfaces() {
         let mut objects = objects();
         let added = parse("(oa{sa{sv}})", "(objectpath '/b', {'x.Z': @a{sv} {}})");
-        apply(&mut objects, change("/", "org.freedesktop.DBus.ObjectManager", "InterfacesAdded", &added).unwrap());
+        apply(
+            &mut objects,
+            change(
+                "/",
+                "org.freedesktop.DBus.ObjectManager",
+                "InterfacesAdded",
+                &added,
+            )
+            .unwrap(),
+        );
         assert!(lookup(&objects, "/b", "x.Z").is_some());
         let removed = parse("(oas)", "(objectpath '/b', ['x.Z'])");
-        apply(&mut objects, change("/", "org.freedesktop.DBus.ObjectManager", "InterfacesRemoved", &removed).unwrap());
+        apply(
+            &mut objects,
+            change(
+                "/",
+                "org.freedesktop.DBus.ObjectManager",
+                "InterfacesRemoved",
+                &removed,
+            )
+            .unwrap(),
+        );
         assert!(!objects.contains_key("/b"));
     }
 
@@ -218,7 +263,10 @@ mod tests {
             ("org.freedesktop.DBus.ObjectManager", "InterfacesRemoved"),
             ("x.Y", "Other"),
         ] {
-            assert!(change("/a", interface, member, &wrong).is_none(), "{member}");
+            assert!(
+                change("/a", interface, member, &wrong).is_none(),
+                "{member}"
+            );
         }
     }
 
