@@ -20,7 +20,9 @@ Fixture methods live on the interface os.athanor.Fixture, added to the mocks:
   RequestConfirmation(agent, device, passkey) calls the agent with no pairing in progress
   and returns an index; AgentRequest(agent, method, device) does the same for
   RequestAuthorization, AuthorizeService, RequestPinCode, RequestPasskey and DisplayPasskey;
-  ConfirmationResult(index) returns "pending", "confirmed" or "error:<name>".
+  ConfirmationResult(index) returns "pending", "confirmed" or "error:<name>";
+  PairableAtPair() returns "true" or "false", the adapter's Pairable when the last Pair
+  began, or "unknown" before any.
 - The nearby devices' org.bluez.Device1.Pair is replaced: like bluetoothd, it calls the
   default agent's RequestConfirmation with PAIRING_PASSKEY and pairs the device only when the
   agent confirms. It blocks the BlueZ mock until the agent answers, so a test must not call
@@ -70,9 +72,12 @@ DEVICES = [
 # The passkey the fixture's Pair asks the agent to confirm, and the six digits the bar shows.
 PAIRING_PASSKEY = 482916
 PAIRING_CODE = "482916"
-# bluetoothd's Pair: ask the default agent, pair only on its confirmation.
+# bluetoothd's Pair: ask the default agent, pair only on its confirmation. It records whether
+# the adapter was bondable when Pair began: a pairing with an unbondable adapter stores no key.
 PAIR_WITH_AGENT = f"""
 bluez = get_object('/org/bluez')
+adapter = get_object(str(self.props['org.bluez.Device1']['Adapter']))
+bluez.pairable_at_pair = bool(adapter.props['org.bluez.Adapter1']['Pairable'])
 owner = bluez.__dict__.get('agent_owner')
 if not owner or not bluez.default_agent:
     raise dbus.exceptions.DBusException('no agent', name='org.bluez.Error.AuthenticationFailed')
@@ -182,6 +187,7 @@ ret = index
 """,
     ),
     ("AgentOwner", "s", "", "self.agent_owner = args[0]"),
+    ("PairableAtPair", "", "s", "ret = str(self.__dict__.get('pairable_at_pair', 'unknown')).lower()"),
     ("ConfirmationResult", "u", "s", "ret = self.__dict__.get('confirmations', [])[args[0]]"),
 ]
 

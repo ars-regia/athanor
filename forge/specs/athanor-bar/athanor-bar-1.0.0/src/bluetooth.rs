@@ -36,6 +36,8 @@ pub struct BluetoothState {
     pub adapter: String,
     pub powered: bool,
     pub discovering: bool,
+    /// The adapter accepts bonding (BlueZ's `Pairable`, the kernel's bondable flag).
+    pub pairable: bool,
     pub paired: Vec<Device>,
     /// Unpaired devices with a name, only while discovering.
     pub nearby: Vec<Device>,
@@ -110,6 +112,7 @@ pub fn state(objects: &Objects) -> Option<BluetoothState> {
         adapter: adapter.clone(),
         powered: props::value::<bool>(adapter_props, "Powered").unwrap_or(false),
         discovering,
+        pairable: props::value::<bool>(adapter_props, "Pairable").unwrap_or(false),
         paired,
         nearby,
     })
@@ -179,6 +182,7 @@ mod tests {
             Props::from([
                 ("Powered".into(), true.to_variant()),
                 ("Discovering".into(), discovering.to_variant()),
+                ("Pairable".into(), true.to_variant()),
             ]),
         );
         add_device(
@@ -230,6 +234,7 @@ mod tests {
         assert_eq!(idle.paired[0].icon, "audio-headphones-symbolic");
         assert!(idle.nearby.is_empty());
         assert_eq!(module_icon(&idle), "bluetooth-active-symbolic");
+        assert!(idle.pairable);
         let scanning = state(&world(true)).unwrap();
         let nearby: Vec<_> = scanning.nearby.iter().map(|d| d.label.as_str()).collect();
         assert_eq!(nearby, ["Phone"], "a device with no name is not listed");

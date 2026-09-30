@@ -357,6 +357,12 @@ def bluetooth(ctx):
     )
     # The template does not keep who registered the agent; the fixture's Pair needs it.
     fx.call(bus, fx.BLUEZ, "/org/bluez", fx.FIXTURE, "AgentOwner", "(s)", (ctx.bar,))
+    # The template's adapter starts bondable, as bluetoothd makes it once an agent registers:
+    # the bar turns that off, and turns it on only for its own pairing.
+    check("the bar makes the adapter unbondable", wait_for(lambda: adapter("Pairable") is False, 5))
+
+    def pairable_at_pair():
+        return fx.call(bus, fx.BLUEZ, "/org/bluez", fx.FIXTURE, "PairableAtPair", reply="(s)")[0]
     check(
         "the list shows the connected headphones first",
         open_popover(app, Atspi, "Bluetooth", lambda: buttons(app, Atspi, "Headphones, connected")),
@@ -401,6 +407,8 @@ def bluetooth(ctx):
     phone = device_path("Phone")
     check("the device is paired", wait_for(lambda: property_of(bus, fx.BLUEZ, phone, device1, "Paired") is True, 10))
     check("trusts it", wait_for(lambda: property_of(bus, fx.BLUEZ, phone, device1, "Trusted") is True, 5))
+    check("the adapter was bondable while Pair ran", pairable_at_pair() == "true")
+    check("and is unbondable again after it", wait_for(lambda: adapter("Pairable") is False, 5))
     # Pair closes the popover, as Connect does in the network module; opened again, it shows
     # the device connected and discovers again.
     check(
@@ -418,6 +426,7 @@ def bluetooth(ctx):
         "and the device stays unpaired",
         wait_for(lambda: property_of(bus, fx.BLUEZ, device_path("Speaker"), device1, "Paired") is False, 5),
     )
+    check("a cancelled pairing leaves the adapter unbondable", wait_for(lambda: adapter("Pairable") is False, 5))
 
     # The agent refuses any process that is not bluetoothd.
     try:

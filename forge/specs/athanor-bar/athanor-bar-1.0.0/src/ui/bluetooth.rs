@@ -6,6 +6,17 @@
 //! pairing the person started from the bar: every other request is rejected before anything
 //! shows. It never types a code: the capability is DisplayYesNo, so the person compares six
 //! digits on both screens.
+//!
+//! The adapter is bondable only while that pairing runs. Registering an agent makes BlueZ set
+//! the adapter bondable (`adapter_set_io_capability`), and a bondable adapter accepts a remote
+//! device's bonding request. Where neither side asks for MITM protection, the kernel confirms
+//! that request itself, asking no agent, whenever the local IO capability is NoInputNoOutput
+//! (`hci_user_confirm_request_evt`, `smp.c` alike), and any process may register the default
+//! agent that sets it. `Pairable` false clears the kernel's bondable flag
+//! (`MGMT_OP_SET_BONDABLE`), which refuses every bonding request the adapter did not start
+//! (`hci_io_capa_request_evt`, `smp_cmd_pairing_req`) whoever the default agent is: the bar
+//! keeps it false outside its own pairing, and turns it off again whenever BlueZ or another
+//! process turns it on.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -194,6 +205,7 @@ impl Service {
                 .as_ref()
                 .is_some_and(|state| state.powered);
         self.state.replace(state);
+        self.hold_pairable();
         if powered_on && self.open_popovers.get() > 0 {
             self.discovery(true);
         }
@@ -203,6 +215,28 @@ impl Service {
         if let Some(bar) = self.bar.upgrade() {
             bar.fit_groups();
         }
+    }
+
+    /// Keeps `Pairable` true only while the bar's own pairing runs (maintainer decision D8).
+    /// Runs whenever the state changes: at the start, when an adapter appears, when BlueZ
+    /// comes back under a new owner (a bar that died during a pairing left it true), and when
+    /// registering the agent or another process turned it on.
+    fn hold_pairable(&self) {
+        let wanted = self.pairing.borrow().is_some();
+        let Some(mirror) = self.mirror() else { return };
+        let Some(adapter) = self
+            .state
+            .borrow()
+            .as_ref()
+            .filter(|state| state.pairable != wanted)
+            .map(|state| state.adapter.clone())
+        else {
+            return;
+        };
+        if !wanted {
+            tracing::info!("the Bluetooth adapter is bondable with no pairing from the bar; turning it off");
+        }
+        bus::spawn("Pairable", set_pairable(mirror.connection(), &adapter, wanted));
     }
 
     fn agent_call(
@@ -387,10 +421,14 @@ impl Service {
         }
     }
 
-    /// Pairs, trusts, connects: the order GNOME and COSMIC use. Trusting lets the device
-    /// reconnect later without asking again.
+    /// Makes the adapter bondable, pairs, makes it unbondable again, then trusts and connects:
+    /// the order GNOME and COSMIC use. A pairing with an unbondable adapter would store no
+    /// key. Trusting lets the device reconnect later without asking again.
     fn pair(self: &Rc<Self>, device: String) {
         let Some(mirror) = self.mirror() else { return };
+        let Some(adapter) = self.state.borrow().as_ref().map(|s| s.adapter.clone()) else {
+            return;
+        };
         if self.pairing.borrow().is_some() {
             return;
         }
@@ -398,18 +436,36 @@ impl Service {
         let connection = mirror.connection().clone();
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
-            let paired = bus::call(
-                &connection,
-                bluetooth::BLUEZ,
-                &device,
-                bluetooth::DEVICE,
-                "Pair",
-                None,
-                bus::INTERACTIVE_TIMEOUT_MS,
-            )
-            .await;
-            if let Some(service) = weak.upgrade() {
-                service.pairing.replace(None);
+            let paired = match set_pairable(&connection, &adapter, true).await {
+                Ok(_) => {
+                    bus::call(
+                        &connection,
+                        bluetooth::BLUEZ,
+                        &device,
+                        bluetooth::DEVICE,
+                        "Pair",
+                        None,
+                        bus::INTERACTIVE_TIMEOUT_MS,
+                    )
+                    .await
+                }
+                Err(err) => Err(err),
+            };
+            // Every way out of the pairing ends here: success, failure, Cancel, a closed
+            // popover or a dropped view (both answer no), BlueZ leaving (the call fails). A
+            // new owner of BlueZ may have cleared `pairing` and let another pairing start:
+            // that one is left alone.
+            let idle = weak.upgrade().is_none_or(|service| {
+                let mut pairing = service.pairing.borrow_mut();
+                if pairing.as_deref() == Some(device.as_str()) {
+                    *pairing = None;
+                }
+                pairing.is_none()
+            });
+            if idle {
+                if let Err(err) = set_pairable(&connection, &adapter, false).await {
+                    tracing::warn!(error = %err, "the Bluetooth adapter could not be made unbondable again");
+                }
             }
             if let Err(err) = paired {
                 tracing::warn!(error = %err, "pairing failed");
@@ -506,6 +562,21 @@ impl Service {
             self.discovery(false);
         }
     }
+}
+
+fn set_pairable(
+    connection: &gio::DBusConnection,
+    adapter: &str,
+    on: bool,
+) -> impl std::future::Future<Output = Result<glib::Variant, glib::Error>> + 'static {
+    bus::set_property(
+        connection,
+        bluetooth::BLUEZ,
+        adapter,
+        bluetooth::ADAPTER,
+        "Pairable",
+        on.to_variant(),
+    )
 }
 
 /// `RegisterAgent`, then `RequestDefaultAgent`, to this owner.
