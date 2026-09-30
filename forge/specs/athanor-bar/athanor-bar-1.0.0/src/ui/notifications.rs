@@ -4,13 +4,13 @@
 //! the button on every surface reads it, so two outputs never mean two `List` calls.
 
 use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
 use athanor_bar::notices::{self, Held, Notice, Picture, WIRE_SIGNATURE};
 use athanor_bar::order::Module;
-use athanor_bar::popups::Popups;
+use athanor_bar::popups::{target_output, Popups};
 use gtk4::accessible::{Property, Relation};
 use gtk4::prelude::*;
 use gtk4::{gdk, gio, glib, pango};
@@ -68,10 +68,11 @@ pub struct Service {
     last_tick: Cell<Option<Instant>>,
     /// `ATHANOR_BAR_OPEN=notifications` came before the list: open once it is live.
     pending_open: Cell<bool>,
-    /// The popup surface, created at the first popup and then only hidden.
-    window: RefCell<Option<Window>>,
-    /// The pointer is over the popups (ruling 4).
-    pointer_inside: Cell<bool>,
+    /// One popups window per output, made when that output first shows a popup, then only
+    /// emptied, never moved (see `super::popups`).
+    windows: RefCell<Vec<Window>>,
+    /// The output each visible popup was put on.
+    placed: RefCell<HashMap<u32, gdk::Monitor>>,
 }
 
 impl Service {
@@ -111,8 +112,8 @@ impl Service {
                 ticking: Cell::new(false),
                 last_tick: Cell::new(None),
                 pending_open: Cell::new(false),
-                window: RefCell::new(None),
-                pointer_inside: Cell::new(false),
+                windows: RefCell::new(Vec::new()),
+                placed: RefCell::new(HashMap::new()),
             }
         })
     }
@@ -353,7 +354,8 @@ impl Service {
     /// While a popover of the bar is open the popups are hidden, and their time stands
     /// still (BR6 "Stacking", ruling 3); the pointer over them pauses it too (ruling 4).
     fn paused(&self) -> bool {
-        self.pointer_inside.get() || self.bar.upgrade().is_some_and(|bar| bar.popover_is_open())
+        self.windows.borrow().iter().any(Window::pointer_inside)
+            || self.bar.upgrade().is_some_and(|bar| bar.popover_is_open())
     }
 
     fn call(&self, method: &'static str, args: glib::Variant) {
@@ -487,52 +489,86 @@ impl Service {
         }
     }
 
-    pub(super) fn pointer(&self, inside: bool) {
-        self.pointer_inside.set(inside);
-    }
-
-    /// Draws the visible popups, or takes them off the screen when there are none or a
-    /// popover of the bar is open. The pointer may never see a `leave` from a surface that
-    /// stops taking input, so hiding also clears it (Review Focus 1).
+    /// Draws the visible popups, each on the output it was put on (BR4). A new popup goes to
+    /// the output of the activated window and stays there when the focus moves, so nothing
+    /// is drawn twice. The output with an open popover of the bar shows none and takes no new
+    /// one, which waits (BR6, "Stacking"). An output with nothing to show keeps its window,
+    /// emptied.
     pub(super) fn redraw_popups(&self) {
         let (Some(bar), Some(me)) = (self.bar.upgrade(), self.me.upgrade()) else {
             return;
         };
-        let shown: Vec<Notice> = {
+        let visible = if self.live() {
+            self.popups.borrow().visible()
+        } else {
+            Vec::new()
+        };
+        let monitors: Vec<gdk::Monitor> = bar
+            .monitors()
+            .into_iter()
+            .filter(|monitor| monitor.is_valid())
+            .collect();
+        let covered = bar.popover_output();
+        let plan: Vec<(gdk::Monitor, Vec<Notice>)> = {
+            let mut placed = self.placed.borrow_mut();
+            placed.retain(|id, monitor| visible.contains(id) && monitors.contains(monitor));
+            if let Some(target) =
+                target_monitor(&bar, &monitors).filter(|target| covered.as_ref() != Some(target))
+            {
+                for id in &visible {
+                    placed.entry(*id).or_insert_with(|| target.clone());
+                }
+            }
             let held = self.held.borrow();
-            self.popups
-                .borrow()
-                .visible()
+            monitors
                 .into_iter()
-                .filter_map(|id| held.get(id).cloned())
+                .map(|monitor| {
+                    let shown = visible
+                        .iter()
+                        .filter(|id| placed.get(id) == Some(&monitor))
+                        .filter_map(|id| held.get(*id).cloned())
+                        .collect();
+                    (monitor, shown)
+                })
                 .collect()
         };
-        if shown.is_empty() || !self.live() || bar.popover_is_open() {
-            if let Some(window) = self.window.borrow().as_ref() {
-                window.hide();
+        let mut windows = self.windows.borrow_mut();
+        for (monitor, shown) in plan {
+            match windows.iter().find(|window| window.on(&monitor)) {
+                Some(window) if shown.is_empty() => window.hide(),
+                Some(window) => window.show(&bar, &me, &shown),
+                None if shown.is_empty() => {}
+                None => {
+                    let window = Window::new(&bar, &monitor);
+                    window.show(&bar, &me, &shown);
+                    windows.push(window);
+                }
             }
-            self.pointer_inside.set(false);
-            return;
         }
-        let mut window = self.window.borrow_mut();
-        let window = window.get_or_insert_with(|| Window::new(&bar, &self.me));
-        window.show(&bar, &me, &shown);
     }
 
-    /// An output left. If the popups show, their surface may be on it: it is abandoned, and
-    /// the next popup gets a new one on an output still there (Review Focus 4).
-    pub(super) fn output_left(&self) {
-        let showing = self
-            .window
-            .borrow()
-            .as_ref()
-            .is_some_and(|window| window.visible());
-        if showing {
-            if let Some(window) = self.window.take() {
-                window.abandon();
-            }
-            self.pointer_inside.set(false);
+    /// `monitor` left: its popups window is abandoned, and its popups go to an output still
+    /// there at the next redraw, on the next idle (Review Focus 4).
+    pub(super) fn output_left(&self, monitor: &gdk::Monitor) {
+        let gone = {
+            let mut windows = self.windows.borrow_mut();
+            windows
+                .iter()
+                .position(|window| window.on(monitor))
+                .map(|index| windows.swap_remove(index))
+        };
+        if let Some(window) = gone {
+            window.abandon();
         }
+        self.placed
+            .borrow_mut()
+            .retain(|_, placed| placed != monitor);
+        let me = self.me.clone();
+        glib::idle_add_local_once(move || {
+            if let Some(service) = me.upgrade() {
+                service.redraw_popups();
+            }
+        });
     }
 
     pub(super) fn live(&self) -> bool {
@@ -558,6 +594,25 @@ impl Service {
 }
 
 /// The `List` reply: do not disturb, and the last `CAPACITY` notifications, oldest first.
+/// The output new popups go to: the one the activated window is on. With no window
+/// activated, or no compositor client, the first output is the fallback (BR4).
+fn target_monitor(bar: &Bar, monitors: &[gdk::Monitor]) -> Option<gdk::Monitor> {
+    let activated = bar
+        .client()
+        .and_then(|client| {
+            client
+                .windows()
+                .into_iter()
+                .find(|window| window.state.activated)
+        })
+        .map(|window| window.outputs);
+    let connectors: Vec<String> = monitors
+        .iter()
+        .map(|monitor| monitor.connector().map(String::from).unwrap_or_default())
+        .collect();
+    target_output(activated.as_deref(), &connectors).and_then(|index| monitors.get(index).cloned())
+}
+
 fn decode_list(reply: &glib::Variant) -> Option<(bool, Vec<Notice>)> {
     if reply.type_().as_str() != format!("(ba{WIRE_SIGNATURE})") {
         return None;

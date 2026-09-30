@@ -104,9 +104,54 @@ impl Popups {
     }
 }
 
+/// The output new popups go to (BR4, "on the output of the active workspace"): the first
+/// of `outputs` that the activated window is on, `activated` holding that window's outputs
+/// in the order it entered them. The first output when no window is activated, or when the
+/// activated one is on none of `outputs`. `None` with no output.
+#[must_use]
+pub fn target_output(activated: Option<&[String]>, outputs: &[String]) -> Option<usize> {
+    if outputs.is_empty() {
+        return None;
+    }
+    let focused = activated
+        .into_iter()
+        .flatten()
+        .find_map(|name| outputs.iter().position(|output| output == name));
+    Some(focused.unwrap_or(0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn target_output_follows_the_activated_window() {
+        let outputs = ["DP-1".to_owned(), "HDMI-A-1".to_owned()];
+        let on = |names: &[&str]| {
+            names
+                .iter()
+                .map(|&name| name.to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(target_output(Some(&on(&["HDMI-A-1"])), &outputs), Some(1));
+        assert_eq!(
+            target_output(Some(&on(&["HDMI-A-1", "DP-1"])), &outputs),
+            Some(1),
+            "the output the window entered first"
+        );
+        assert_eq!(
+            target_output(Some(&on(&["gone", "HDMI-A-1"])), &outputs),
+            Some(1),
+            "an output that left is skipped"
+        );
+        assert_eq!(target_output(Some(&[]), &outputs), Some(0));
+        assert_eq!(
+            target_output(None, &outputs),
+            Some(0),
+            "no window activated"
+        );
+        assert_eq!(target_output(Some(&on(&["DP-1"])), &[]), None);
+    }
 
     #[test]
     fn three_show_newest_first_and_the_rest_wait() {
