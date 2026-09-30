@@ -959,7 +959,7 @@ Found on the running system and in the repository (2026-09-14):
   `lp` and others) and tmpfiles cannot apply the journal ACLs early in boot.
 - **Desktop** (P3): `cosmic-panel.service`, shipped by `athanor-system-services`, sets
   `MemoryHigh=1G` and `MemoryMax=1536M`, which kill the panel under normal use; the limits
-  are removed in that package.
+  are removed in that package. Since the switch of stage 2 of the shell (PR #83) the unit is gone with cosmic-panel.
 - **Placeholder security code** (before any of these crates re-enters the package DAG, and before the mesh delivery):
   `athanor-mesh-sync`, `athanor-cluster-mesh` and `athanor-mesh-bus` are workspace
   members excluded from the package DAG (`experimental/EXEMPT`); `athanor-mesh-sync`
