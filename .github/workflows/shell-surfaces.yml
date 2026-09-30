@@ -165,6 +165,8 @@ jobs:
         run: bash forge/test/shell/rig.sh atspi bar
       - name: Live layout, mandatory keys, running windows, the power menu and memory
         run: bash forge/test/shell/rig.sh bar-e2e
+      - name: The network, Bluetooth, audio and battery modules against their fixtures
+        run: bash forge/test/shell/rig.sh bar-modules-e2e
       - name: athanor-shelld, the tray watcher of the tray scene
         run: bash forge/test/shell/rig.sh build-shelld
       - name: Notification popups and list against a fake daemon
@@ -178,6 +180,7 @@ jobs:
           path: |
             .scratch/shell-rig/*.log
             .scratch/shell-rig/bar-e2e.png
+            .scratch/shell-rig/bar-modules-e2e.png
             .scratch/shell-rig/notifications-e2e.png
             .scratch/shell-rig/tray-e2e.png
 

@@ -1,9 +1,9 @@
 #!/usr/bin/python3
-"""bar_session.py [--client NAME] [--hang METHOD] [--window] [--pinnable] [--notifications]
-[--tray] [--respawn] - athanor-bar in the rig, as its unit runs it: a private system bus with a fake
-logind on it, NOTIFY_SOCKET for Type=notify, and with --window one test window for the
-running applications. --pinnable installs a desktop entry for the test window's app id, so
-the bar offers to pin it. It is scene.sh's client and exits with the bar's status.
+"""bar_session.py [--client NAME] [--hang METHOD] [--window] [--pinnable] [--notifications] [--tray]
+[--respawn] [--fixtures] - athanor-bar in the rig, as its unit runs it: a private system bus with a
+fake logind on it, NOTIFY_SOCKET for Type=notify, and with --window one test window for the running
+applications. --pinnable installs a desktop entry for the test window's app id, so the bar offers to
+pin it. It is scene.sh's client and exits with the bar's status.
 
 The fake logind answers CanSuspend "yes", CanReboot "yes" and CanPowerOff "challenge",
 except the method named by --hang, which it never answers. Every call that acts is appended
@@ -20,6 +20,11 @@ the tray watcher, with its log in /out/$RIG_TAG-shelld.log and its pid in
 registered. --respawn starts the bar again when it is killed with SIGKILL, and rewrites
 /tmp/athanor-bar.pid; athanor-shelld is always started again after a SIGKILL.
 
+--fixtures starts system_fixtures.py's services before the bar (NetworkManager, BlueZ, UPower
+and the power profiles on the private system bus, PipeWire, an MPRIS player, a backlight)
+and points the bar at the fake backlight. Session.SetBrightness is logged like the other
+acting calls, "SetBrightness backlight intel_backlight 300", and writes the fake sysfs file.
+
 It is a small Gio service, not python3-dbusmock: dbusmock replies to each call from the
 method's code, and the power menu must also meet a logind that never replies.
 """
@@ -34,6 +39,8 @@ import time
 from pathlib import Path
 
 from gi.repository import Gio, GLib
+
+import system_fixtures
 
 SYSTEM_BUS = "/tmp/athanor-system-bus"
 NOTIFY_SOCKET = "/tmp/athanor-bar-notify"
@@ -66,6 +73,11 @@ NODE = Gio.DBusNodeInfo.new_for_xml("""
   </interface>
   <interface name="org.freedesktop.login1.Session">
     <method name="Lock"/>
+    <method name="SetBrightness">
+      <arg type="s" direction="in"/>
+      <arg type="s" direction="in"/>
+      <arg type="u" direction="in"/>
+    </method>
   </interface>
 </node>
 """)
@@ -86,6 +98,11 @@ def logind(log, hang):
             words = [method] + [str(value) for value in parameters.unpack()]
             with log.open("a", encoding="utf-8") as out:
                 out.write(" ".join(words) + "\n")
+            if method == "SetBrightness":
+                subsystem, name, level = parameters.unpack()
+                device = system_fixtures.BACKLIGHT_DIR / name
+                if subsystem == "backlight" and "/" not in name and device.is_dir():
+                    (device / "brightness").write_text(f"{level}\n", encoding="utf-8")
             invocation.return_value(None)
 
     return on_call
@@ -160,6 +177,7 @@ def parse(argv):
     parser.add_argument("--notifications", action="store_true")
     parser.add_argument("--tray", action="store_true")
     parser.add_argument("--respawn", action="store_true")
+    parser.add_argument("--fixtures", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -219,7 +237,9 @@ def main():
         )
 
     session = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-    helpers = []
+    # The services exist before the bar starts, as they do at login. The loop at the end
+    # of main terminates them with the other helpers.
+    helpers = system_fixtures.start(os.environ.get("RIG_TAG", "bar")) if args.fixtures else []
     if args.notifications:
         helpers.append(subprocess.Popen(["python3", f"{HERE}/fake_notifications.py"]))
         wait_until(
@@ -266,6 +286,8 @@ def main():
         DBUS_SYSTEM_BUS_ADDRESS=f"unix:path={SYSTEM_BUS}",
         NOTIFY_SOCKET=NOTIFY_SOCKET,
     )
+    if args.fixtures:
+        env["ATHANOR_BAR_BACKLIGHT_DIR"] = str(system_fixtures.BACKLIGHT_DIR)
     running = {"bar": start_bar(args.client, env), "shelld": shelld}
     status = {"code": None}
     loop = GLib.MainLoop()

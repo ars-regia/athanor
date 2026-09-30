@@ -16,6 +16,7 @@
 #   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout)
 #   rig.sh shelld-e2e       athanor-shelld on a session bus: names, notifications, refusal of the private interface, tray watcher, memory
 #   rig.sh bar-e2e          athanor-bar in a scene: READY, live layout, mandatory keys, running windows, the favourites import and pinning, the power menu against a fake logind, memory
+#   rig.sh bar-modules-e2e  athanor-bar's network, Bluetooth, audio and battery modules against dbusmock, PipeWire and an MPRIS player; memory with every module loaded
 #   rig.sh notifications-e2e  athanor-bar against a fake of athanor-shelld's private interface: popups, list, actions, do not disturb, hostile input, restart, memory
 #   rig.sh tray-e2e         athanor-bar as the tray host of athanor-shelld (run build-shelld first): items, dbusmenu menu, activation, the refused List, the watcher's restart, memory
 #   rig.sh compositor-e2e   the compositor client against cosmic-comp, and against sway without the COSMIC globals
@@ -340,6 +341,16 @@ bar-e2e)
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 bar-e2e -- \
         bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
                  && exec python3 /repo/forge/test/shell/bar_session.py --hang CanReboot --window --pinnable"
+    ;;
+bar-modules-e2e)
+    seed_bar "$out/seed-bar-modules-e2e" float top visible light
+    rm -f "$out"/bar-modules-e2e-*.log
+    in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-bar-modules-e2e \
+        RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
+        RIG_HOLD="python3 /repo/forge/test/shell/bar_modules_e2e.py" \
+        dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 bar-modules-e2e -- \
+        bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
+                 && exec python3 /repo/forge/test/shell/bar_session.py --fixtures"
     ;;
 notifications-e2e)
     seed_bar "$out/seed-notifications-e2e" float top visible light
