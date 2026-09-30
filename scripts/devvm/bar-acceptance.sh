@@ -115,6 +115,15 @@ stage_unit() {
         fail "sandbox errors in the journal: $(grep -Ei "$pattern" <<< "$journal")"
     fi
     [[ $(unit is-active) == active ]] || fail "not active after 5 s: $(unit show -p Result --value)"
+    # libpulse chmods %t/pulse to 0700 before it connects, which the bar's read-only %t
+    # refuses: the socket must create the directory 0700 (50-athanor-bar.conf). By now another
+    # client may have started pipewire-pulse and fixed the mode, so the unit is checked too.
+    [[ $(in_session systemctl --user show -p DirectoryMode --value pipewire-pulse.socket) == 0700 ]] ||
+        fail "pipewire-pulse.socket creates %t/pulse with a mode other than 0700"
+    if grep -qF 'Failed to create secure directory' <<< "$journal"; then
+        fail "libpulse could not use %t/pulse: $(grep -F 'secure directory' <<< "$journal")"
+    fi
+    in_session 'pactl list clients short' | grep -qw athanor-bar || fail "the bar is not a client of the sound server"
     runtime_athanor_writable || fail "mkdir/rmdir under %t/athanor failed inside the unit's own mount namespace"
     local config dir
     # shellcheck disable=SC2016 # expanded by the guest's shell

@@ -42,6 +42,8 @@ install -D -m 0644 forge/specs/athanor-bar/athanor-bar-1.0.0/data/favorites.toml
     %{buildroot}/usr/share/athanor/favorites.toml
 install -D -m 0644 forge/specs/athanor-bar/athanor-bar-1.0.0/data/80-athanor-bar.preset \
     %{buildroot}/usr/lib/systemd/user-preset/80-athanor-bar.preset
+install -D -m 0644 forge/specs/athanor-bar/athanor-bar-1.0.0/data/50-athanor-bar.conf \
+    %{buildroot}/usr/lib/systemd/user/pipewire-pulse.socket.d/50-athanor-bar.conf
 install -D -m 0644 system/athanor-layout/vendor/10-athanor.toml \
     %{buildroot}/usr/share/athanor/layout/10-athanor.toml
 
@@ -57,6 +59,8 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 /usr/bin/athanor-bar
 /usr/lib/systemd/user/athanor-bar.service
 /usr/lib/systemd/user-preset/80-athanor-bar.preset
+%dir /usr/lib/systemd/user/pipewire-pulse.socket.d
+/usr/lib/systemd/user/pipewire-pulse.socket.d/50-athanor-bar.conf
 %dir /usr/share/athanor
 /usr/share/athanor/favorites.toml
 %dir /usr/share/athanor/layout
@@ -73,6 +77,9 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 - The minimal preset draws a thin strip across the output (SH7), no longer float's
   islands.
 - A preset changed live takes the new preset's depth and exclusive zone.
+- pipewire-pulse.socket creates %t/pulse 0700 (a drop-in): at 0755, libpulse's chmod
+  failed on the bar's read-only runtime directory and the audio module stayed away
+  until another client started the sound server.
 
 * Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-3
 - The trust shield and its sheet (doc_bar.md, BR6): the seal and header follow the state
