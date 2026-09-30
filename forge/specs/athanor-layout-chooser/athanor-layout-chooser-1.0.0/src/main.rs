@@ -1,5 +1,5 @@
 //! athanor-layout-chooser: the layout chooser of doc_shell.md, stage 1c. A small window
-//! that writes the user's layout document; athanor-layout-translator applies it.
+//! that writes the user's layout document; athanor-bar and athanor-dock apply it.
 
 mod i18n;
 mod sandbox;

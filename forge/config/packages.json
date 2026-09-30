@@ -18,7 +18,6 @@
     "dart-sass",
     "shell-rs",
     "greeter-ui",
-    "layout-translator",
     "layout-chooser",
     "shelld",
     "bar",
@@ -83,7 +82,6 @@
   "custom_tier3": [
     "shell-rs",
     "greeter-ui",
-    "layout-translator",
     "layout-chooser",
     "shelld",
     "bar",

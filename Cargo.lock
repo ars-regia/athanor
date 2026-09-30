@@ -576,16 +576,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "athanor-layout-translator"
-version = "1.0.0"
-dependencies = [
- "athanor-layout",
- "athanor-unit",
- "gtk4",
- "tracing",
-]
-
-[[package]]
 name = "athanor-lvfs-rs"
 version = "1.0.0"
 dependencies = [

@@ -9,7 +9,7 @@
 #   rig.sh cosmic-keys      every key COSMIC ships exists in our overlay
 #   rig.sh cosmic-preview   capture cosmic-panel and Settings under the Calmo defaults
 #   rig.sh build-greeter    release build of athanor-greeter-ui into <out>/bin
-#   rig.sh build-layout     clippy, tests and release build of the layout crates (translator and chooser) and athanor-unit into <out>/bin
+#   rig.sh build-layout     clippy, tests and release build of athanor-layout, the chooser and athanor-unit into <out>/bin
 #   rig.sh build-compositor-client  clippy, tests and release build of cc-probe into <out>/bin
 #   rig.sh build-shelld     clippy, tests and release build of athanor-shelld into <out>/bin
 #   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps) into <out>/bin, with the DT_NEEDED check
@@ -310,10 +310,10 @@ build-layout)
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$local_image:build" \
-        bash -c 'cargo clippy --locked -p athanor-layout -p athanor-layout-translator -p athanor-layout-chooser -p athanor-unit --all-targets -- -D warnings \
-                 && cargo test --locked -p athanor-layout -p athanor-layout-translator -p athanor-layout-chooser -p athanor-unit \
-                 && cargo build --release --locked -p athanor-layout-translator -p athanor-layout-chooser \
-                 && install -m 0755 /out/target/release/athanor-layout-translator /out/target/release/athanor-layout-chooser /out/bin/'
+        bash -c 'cargo clippy --locked -p athanor-layout -p athanor-layout-chooser -p athanor-unit --all-targets -- -D warnings \
+                 && cargo test --locked -p athanor-layout -p athanor-layout-chooser -p athanor-unit \
+                 && cargo build --release --locked -p athanor-layout-chooser \
+                 && install -m 0755 /out/target/release/athanor-layout-chooser /out/bin/'
     ;;
 build-compositor-client)
     mkdir -p "$out/bin" "$out/target"
