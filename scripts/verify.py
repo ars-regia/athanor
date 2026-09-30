@@ -602,6 +602,69 @@ def check_panics():
 
 
 # --------------------------------------------------------------------------- #
+# 7b. riga di comando del kernel — le decisioni di doc_kernel_profile.md
+# --------------------------------------------------------------------------- #
+
+# Parameters the kernel profile decided against (docs/architecture/doc_kernel_profile.md,
+# "Command line"). A name ending in a dot is a prefix. The command line is written in
+# five places; this keeps a contradicting parameter from coming back to any of them.
+REJECTED_PARAMETERS = {
+    "iommu=pt": "identity mapping for every device, against D16 (lazy translation, strict for untrusted ports)",
+    "oops=panic": "the first oops panics before oops_limit is consulted, against D19",
+    "zswap.": "swap is on zram and zswap is off, against D15",
+    "pti=on": "forces page table isolation on CPUs not affected by Meltdown",
+    "amd_iommu=on": "not a parameter of the amd_iommu driver, which logs it as unknown",
+    "lam=on": "not an x86 parameter",
+    "arm64.mte=on": "not an x86 parameter",
+}
+
+KARGS_DIR = "forge/specs/athanor-base-config/SOURCES/usr/lib/bootc/kargs.d"
+# (file, pattern of the line holding the command line): group 1 is the parameters.
+CMDLINE_LINES = [
+    ("system/scripts/assemble_uki.sh", r'^CMDLINE_STR="([^"]*)"'),
+    ("forge/build/build_uki.sh", r'^CMDLINE="\$\{CMDLINE:-([^}]*)\}"'),
+    ("system/athanor-install.ks", r'^bootloader --append="([^"]*)"'),
+]
+
+
+def cmdline_problems(root=None):
+    """No place that writes the kernel command line carries a parameter the profile rejects."""
+    root = root or ROOT
+    problems = []
+    found = {}
+
+    def read_site(relative, extract):
+        try:
+            found[relative] = extract(read(root / relative))
+        except (OSError, ValueError, AttributeError, tomllib.TOMLDecodeError) as err:
+            problems.append(f"{relative}: cannot read the command line ({err})")
+
+    read_site("forge/specs/azoth/cmdline", str.split)
+    for relative, pattern in CMDLINE_LINES:
+        read_site(relative, lambda text, pattern=pattern: re.search(pattern, text, re.M).group(1).split())
+    kargs = root / KARGS_DIR
+    for path in sorted(kargs.glob("*.toml")) if kargs.is_dir() else []:
+        read_site(str(path.relative_to(root)), lambda text: tomllib.loads(text)["kargs"])
+    if not kargs.is_dir():
+        problems.append(f"{KARGS_DIR}: missing")
+
+    for site, parameters in found.items():
+        for parameter in parameters:
+            for rejected, why in REJECTED_PARAMETERS.items():
+                if parameter == rejected or (rejected.endswith(".") and parameter.startswith(rejected)):
+                    problems.append(f"{site}: {parameter} -> {why}")
+    return problems
+
+
+@check("cmdline", "La riga di comando del kernel non contraddice le decisioni del profilo")
+def check_cmdline():
+    r = Result()
+    for problem in cmdline_problems():
+        r.fail(problem)
+    return r
+
+
+# --------------------------------------------------------------------------- #
 # 8. polkit, il lato codice — il subject deve essere il CHIAMANTE
 # --------------------------------------------------------------------------- #
 

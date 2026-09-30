@@ -1,1 +1,1 @@
-lockdown=integrity mitigations=auto init_on_alloc=1 randomize_kstack_offset=on page_alloc.shuffle=1 vsyscall=none preempt=full amd_pstate=active zswap.enabled=1
+lockdown=integrity mitigations=auto init_on_alloc=1 randomize_kstack_offset=on page_alloc.shuffle=1 vsyscall=none preempt=full amd_pstate=active

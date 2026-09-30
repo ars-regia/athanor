@@ -29,7 +29,7 @@ OUTPUT_EFI="${BUILD_DIR}/AthanorOS.efi"
 VMLINUZ="${VMLINUZ:-}"
 INITRAMFS="${INITRAMFS:-}"
 OS_RELEASE="${OS_RELEASE:-}"
-CMDLINE="${CMDLINE:-quiet splash rw rootflags=noatime iommu=pt intel_iommu=on amd_iommu=on vsyscall=none debugfs=off oops=panic module.sig_enforce=1 lockdown=integrity init_on_free=1}"
+CMDLINE="${CMDLINE:-quiet splash rw rootflags=noatime intel_iommu=on vsyscall=none debugfs=off module.sig_enforce=1 lockdown=integrity init_on_free=1}"
 EFI_STUB="${EFI_STUB:-}"
 
 # Secure Boot Parameters

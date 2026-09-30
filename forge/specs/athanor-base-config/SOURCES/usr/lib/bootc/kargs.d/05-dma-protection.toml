@@ -1,7 +1,6 @@
 # Athanor OS Early DMA Attack Protection Arguments (Thunderbolt / PCIe DMA Mitigation)
 kargs = [
     "intel_iommu=on",
-    "amd_iommu=on",
     "efi=disable_early_pci_dma"
 ]
 match-architectures = ["x86_64", "aarch64"]

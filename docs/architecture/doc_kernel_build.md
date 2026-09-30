@@ -320,7 +320,8 @@ patchano i Makefile per forzarlo.
   su un PC qualsiasi; i moduli non ne dipendono.
 - **`cmdline`** committata: `lockdown=integrity mitigations=auto init_on_alloc=1
 randomize_kstack_offset=on page_alloc.shuffle=1 vsyscall=none preempt=full
-amd_pstate=active zswap.enabled=1`. Niente `iommu=pt`, niente `mitigations=off`.
+amd_pstate=active`. Niente `iommu=pt`, niente `zswap` (lo swap e' su zram, D15),
+niente `mitigations=off`.
 - **Rootfs**: dm-verity con roothash firmato da una chiave del progetto nel
   keyring secondario (non quella Secure Boot, che non vi entra),
   fs-verity per composefs, TPM 2.0 per LUKS (`systemd-cryptenroll`) con fallback

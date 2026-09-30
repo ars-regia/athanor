@@ -19,7 +19,7 @@ lang en_US.UTF-8
 # module.sig_enforce=1 + lockdown=integrity are why every module must be signed: the
 # NVIDIA ones by the project module signing key compiled into Azoth. Secure Boot also
 # needs the project Secure Boot certificate enrolled as a MOK at first boot.
-bootloader --append="quiet splash fastboot iommu=pt intel_iommu=on amd_iommu=on efi=disable_early_pci_dma zswap.enabled=1 zswap.compressor=zstd rootflags=noatime slab_nomerge pti=on randomize_kstack_offset=on vsyscall=none debugfs=off oops=panic module.sig_enforce=1 lockdown=integrity init_on_free=1"
+bootloader --append="quiet splash fastboot intel_iommu=on efi=disable_early_pci_dma rootflags=noatime slab_nomerge randomize_kstack_offset=on vsyscall=none debugfs=off module.sig_enforce=1 lockdown=integrity init_on_free=1"
 
 # The bootc image is the identity of the system, not a user choice. Pin it to the
 # release being shipped rather than :latest, which on a non-default branch may resolve

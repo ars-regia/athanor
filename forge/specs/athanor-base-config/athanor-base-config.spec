@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-base-config
 Version:        43.0.0
-Release:        10%{?dist}
+Release:        11%{?dist}
 Summary:        Athanor OS Base Configuration (Systemd, Branding, GPG)
 
 License:        MIT
@@ -70,7 +70,6 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 /usr/lib/bootc/kargs.d/03-ima-evm.toml
 /usr/lib/bootc/kargs.d/04-confidential-compute.toml
 /usr/lib/bootc/kargs.d/05-dma-protection.toml
-/usr/lib/bootc/kargs.d/06-mte-lam.toml
 /etc/grub.d/01_athanor_grub_auth
 /usr/lib/dracut/dracut.conf.d/*
 /usr/lib/systemd/system-preset/*
@@ -81,6 +80,12 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 /usr/share/polkit-1/rules.d/*
 
 %changelog
+* Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 43.0.0-11
+- Drop the kernel arguments that contradict doc_kernel_profile.md: `oops=panic` (D19: the first
+  oops would panic before oops_limit is consulted), `pti=on` (forces page table isolation on CPUs
+  that are not affected by Meltdown), and `amd_iommu=on`, `lam=on` and `arm64.mte=on`, which are
+  not parameters of those drivers or of x86. Remove kargs.d/06-mte-lam.toml, which held the last
+  two. `intel_iommu=on` and `efi=disable_early_pci_dma` stay until the build carries them (P4b).
 * Thu Sep 24 2026 Athanor Forge <forge@athanor.os> - 43.0.0-10
 - Drop the override of bootc-fetch-apply-updates.service: it called `bootc upgrade --stage`,
   a flag bootc 1.16 does not have. The stock timer stays disabled by athanor-update's preset.

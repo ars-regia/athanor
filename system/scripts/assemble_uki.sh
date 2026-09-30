@@ -113,7 +113,7 @@ if [ -z "$STUB_PATH" ]; then
 fi
 
 UKIFY_BIN=$(command -v ukify || find /usr/lib/systemd /usr/bin -name "ukify" 2>/dev/null | sort -V | head -n 1 || echo "ukify")
-CMDLINE_STR="quiet splash fastboot iommu=pt intel_iommu=on amd_iommu=on efi=disable_early_pci_dma zswap.enabled=1 zswap.compressor=zstd rootflags=noatime slab_nomerge pti=on randomize_kstack_offset=on vsyscall=none debugfs=off oops=panic module.sig_enforce=1 lockdown=integrity init_on_free=1"
+CMDLINE_STR="quiet splash fastboot intel_iommu=on efi=disable_early_pci_dma rootflags=noatime slab_nomerge randomize_kstack_offset=on vsyscall=none debugfs=off module.sig_enforce=1 lockdown=integrity init_on_free=1"
 
 if command -v "$UKIFY_BIN" >/dev/null 2>&1 || [ -f "$UKIFY_BIN" ]; then
     "$UKIFY_BIN" build \
