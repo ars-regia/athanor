@@ -15,10 +15,7 @@ start=${1:-install}
 stage_install() { # the machine starts from v1, on a reference that verifies nothing
   point_stable v1 # where images.sh left it; an earlier run moved it on
   wait_ssh
-  # The installed image does not know the throwaway registry: the first switch needs the
-  # drop-in that every acceptance image ships (Containerfile).
-  printf '[[registry]]\nlocation = "%s"\ninsecure = true\n' "${ACC_REGISTRY%%/*}" |
-    guest_ssh sudo tee /etc/containers/registries.conf.d/50-acceptance.conf > /dev/null
+  know_acc_registry
   guest_ssh sudo bootc switch --transport registry "$REPO:v1"
   reboot_guest
   [[ $(marker) == v1 ]] || die "the guest did not boot v1"

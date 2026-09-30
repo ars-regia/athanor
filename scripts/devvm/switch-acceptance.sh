@@ -276,6 +276,7 @@ stage_notifier() {
     point_stable v1
     # The switched image trusts the project key for this repository; v1 is signed with acc-1.
     trust_tag v1 "$ACC_STATE/keys/acc-1.pub"
+    know_acc_registry
     guest_ssh sudo bootc switch --enforce-container-sigpolicy --transport registry "$REPO:v1"
     restore_policy
     reboot_guest

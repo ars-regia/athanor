@@ -72,6 +72,13 @@ state() { guest_ssh cat /run/athanor-update/state.json | jq -r "$1"; }
 marker() { guest_ssh cat /usr/share/athanor-acceptance-marker; }
 check_now() { guest_ssh sudo systemctl start athanor-update-check.service; }
 point_stable() { skopeo copy --src-tls-verify=false --dest-tls-verify=false "docker://$REPO:$1" "docker://$REPO:stable" > /dev/null; }
+# The images outside the acceptance set do not know the throwaway registry, which serves
+# plain HTTP: a switch from one of them needs the drop-in every acceptance image ships
+# (Containerfile).
+know_acc_registry() {
+  printf '[[registry]]\nlocation = "%s"\ninsecure = true\n' "${ACC_REGISTRY%%/*}" |
+    guest_ssh sudo tee /etc/containers/registries.conf.d/50-acceptance.conf > /dev/null
+}
 
 # One tag trusted for one pull: the policy the guest runs, plus a sigstoreSigned scope for
 # REPO:TAG with KEY, and a registries.d entry for the same tag. A tag scope is more specific
