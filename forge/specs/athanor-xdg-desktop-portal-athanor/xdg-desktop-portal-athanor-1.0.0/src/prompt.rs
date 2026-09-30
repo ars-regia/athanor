@@ -40,10 +40,7 @@ const MAX_APP_ID_CHARS: usize = 128;
 pub enum Resource {
     Camera,
     Microphone,
-    ScreenCast,
     Location,
-    SaveFile,
-    SaveFiles,
 }
 
 impl Resource {
@@ -51,10 +48,7 @@ impl Resource {
         match self {
             Resource::Camera => "Camera",
             Resource::Microphone => "Microphone",
-            Resource::ScreenCast => "ScreenCast",
             Resource::Location => "Location",
-            Resource::SaveFile => "FileChooser:SaveFile",
-            Resource::SaveFiles => "FileChooser:SaveFiles",
         }
     }
 }

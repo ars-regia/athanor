@@ -54,7 +54,7 @@ mod tests {
     use zbus::zvariant::{ObjectPath, Value};
 
     use super::*;
-    use crate::portal::MicrophonePortal;
+    use crate::portal::{FileChooserPortal, MicrophonePortal};
 
     const PORTAL_NAME: &str = "org.freedesktop.impl.portal.desktop.athanor";
 
@@ -163,5 +163,44 @@ mod tests {
         let reply = call(frontend).await.expect("the frontend is answered");
         let code: u32 = reply.body().deserialize().expect("a status code");
         assert_eq!(code, 1);
+    }
+
+    /// Saving is refused, not answered with a made-up path.
+    #[tokio::test]
+    async fn saving_is_refused_and_names_no_path() {
+        let bus = Bus::start("save");
+        let _portal = bus
+            .builder()
+            .name(PORTAL_NAME)
+            .expect("name")
+            .serve_at("/org/freedesktop/portal/desktop", FileChooserPortal)
+            .expect("serve")
+            .build()
+            .await
+            .expect("portal");
+        let frontend = bus.builder().name(FRONTEND).expect("name").build().await.expect("frontend");
+
+        for method in ["SaveFile", "SaveFiles"] {
+            let reply = frontend
+                .call_method(
+                    Some(PORTAL_NAME),
+                    "/org/freedesktop/portal/desktop",
+                    Some("org.freedesktop.impl.portal.FileChooser"),
+                    method,
+                    &(
+                        ObjectPath::try_from("/org/freedesktop/portal/desktop/request/2").expect("path"),
+                        "org.example.App",
+                        "",
+                        "Save",
+                        HashMap::<String, Value<'_>>::new(),
+                    ),
+                )
+                .await
+                .expect("the frontend is answered");
+            let (code, results): (u32, HashMap<String, zbus::zvariant::OwnedValue>) =
+                reply.body().deserialize().expect("a response");
+            assert_eq!(code, 2, "{method} must end in another way, not succeed");
+            assert!(results.is_empty(), "{method} must name no path");
+        }
     }
 }

@@ -2,8 +2,8 @@
 %global crate_dir forge/specs/athanor-%{name}/%{name}-%{version}
 Name:           xdg-desktop-portal-athanor
 Version:        1.0.0
-Release:        4%{?dist}
-Summary:        Athanor OS Desktop Portal (Privacy & ScreenShare)
+Release:        5%{?dist}
+Summary:        Athanor OS Desktop Portal (Privacy & File Chooser)
 
 License:        GPL-3.0-or-later
 URL:            https://github.com/hr-mes/athanor-forge
@@ -36,6 +36,14 @@ install -D -m 0644 %{crate_dir}/athanor.portal %{buildroot}%{_datadir}/xdg-deskt
 %{_datadir}/xdg-desktop-portal/portals/athanor.portal
 
 %changelog
+* Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
+- The portal no longer offers ScreenCast. Its implementation answered with a made-up
+  PipeWire node and could not open the stream, and because the session announces
+  XDG_CURRENT_DESKTOP=Athanor:COSMIC and this portal came first, it stood in for the real
+  ScreenCast of COSMIC's portal. COSMIC's is used again.
+- SaveFile and SaveFiles answer "ended in another way" instead of a fixed path under
+  /home/athanor/Downloads, which every save was told to use and which overwrote what an
+  earlier save had left there. Saving needs a chooser that can pick a place and a name.
 * Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-4
 - A privacy request is granted only when the prompt exits with the status of its Allow
   button; every other outcome denies, including status 0. Before, exit status 0 granted,
