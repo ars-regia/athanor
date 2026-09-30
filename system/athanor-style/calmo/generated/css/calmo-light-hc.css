@@ -249,6 +249,36 @@ window.athanor-bar.preset-minimal.edge-bottom .bar-group {
     margin: 14px 8px 6px;
 }
 
+/* The dock (doc_bar.md, BR7): one island on a transparent surface, on the bottom edge or
+ * on the start edge, with the bar's buttons and popovers. Under auto-hide only a strip
+ * on the edge is drawn until the pointer rests there. */
+window.athanor-dock {
+    background-color: transparent;
+}
+
+window.athanor-dock .dock-island {
+    padding: 4px;
+    border-radius: 10px;
+    background-color: @ath_bar;
+    box-shadow: 0 1px 2px @ath_shadow_near, 0 6px 18px @ath_shadow_panel;
+}
+
+/* Room for the island's shadow (0 6px 18px) on the transparent surface. Along the edge the
+ * room is symmetric, so the island stays centred, and it adds nothing to the exclusive
+ * zone, which is the surface's depth: 18px to each side, 24px along a vertical dock, which
+ * the 6px offset pushes down. Across the edge the depth stays 6px + island + 14px. */
+window.athanor-dock.edge-bottom .dock-island {
+    margin: 14px 18px 6px;
+}
+
+window.athanor-dock.edge-left .dock-island {
+    margin: 24px 14px 24px 6px;
+}
+
+window.athanor-dock.edge-right .dock-island {
+    margin: 24px 6px 24px 14px;
+}
+
 button.bar-button {
     min-height: 32px;
     min-width: 32px;
@@ -267,6 +297,14 @@ button.bar-button:hover {
 
 button.bar-button.running.active {
     box-shadow: inset 0 -2px @ath_acc;
+}
+
+window.athanor-dock.edge-left button.bar-button.running.active {
+    box-shadow: inset 2px 0 @ath_acc;
+}
+
+window.athanor-dock.edge-right button.bar-button.running.active {
+    box-shadow: inset -2px 0 @ath_acc;
 }
 
 .bar-clock {

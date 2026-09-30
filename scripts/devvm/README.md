@@ -82,6 +82,13 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   Type=notify, the confinement against glycin's sandbox, PSS within 64 MB, an output that
   comes and goes (needs `GPU_OUTPUTS=2`, the default), and the crash-loop fallback to the
   vendor layout. Build the binary first with `forge/test/shell/rig.sh build-bar`.
+- `dock-acceptance.sh [stage...]`: athanor-dock under its real unit (package 2c):
+  Type=notify, the confinement against glycin's sandbox and the favourites file, PSS within
+  48 MB, a pinned entry launched from the dock behind a security context (item 8, pressed
+  through `dock_press.py`; the session's favourites are restored afterwards), an output
+  that comes and goes (needs `GPU_OUTPUTS=2`, the default), and the crash-loop fallback to
+  the vendor layout. Build the binary first with
+  `forge/test/shell/rig.sh build-dock`. COSMIC's own dock keeps running beside it.
 - `notifications-acceptance.sh [stage...]`: athanor-bar and athanor-shelld under their real
   units on a private bus (package 2b.3): the daemon admits the bar's List, a notification
   sent while the bar is down shows after its restart (item 9), popups across an output that

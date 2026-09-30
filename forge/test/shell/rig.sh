@@ -14,20 +14,23 @@
 #   rig.sh build-shelld     clippy, tests and release build of athanor-shelld into <out>/bin
 #   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps) into <out>/bin, with the DT_NEEDED check
 #   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout)
+#   rig.sh build-dock       clippy, tests and release build of athanor-dock (and athanor-apps) into <out>/bin, with the DT_NEEDED check
+#   rig.sh dock-roundtrip   the dock's surface off screen and back, three times, under cosmic-comp (BR7)
 #   rig.sh shelld-e2e       athanor-shelld on a session bus: names, notifications, refusal of the private interface, tray watcher, memory
 #   rig.sh bar-e2e          athanor-bar in a scene: READY, live layout, mandatory keys, running windows, the favourites import and pinning, the power menu against a fake logind, memory
 #   rig.sh bar-modules-e2e  athanor-bar's network, Bluetooth, audio and battery modules against dbusmock, PipeWire and an MPRIS player; memory with every module loaded
+#   rig.sh dock-e2e         athanor-dock in a scene: READY, openers, running windows, pinning, the favourites followed live, the knob and presets live, memory
 #   rig.sh notifications-e2e  athanor-bar against a fake of athanor-shelld's private interface: popups, list, actions, do not disturb, hostile input, restart, memory
 #   rig.sh tray-e2e         athanor-bar as the tray host of athanor-shelld (run build-shelld first): items, dbusmenu menu, activation, the refused List, the watcher's restart, memory
 #   rig.sh compositor-e2e   the compositor client against cosmic-comp, and against sway without the COSMIC globals
-#   rig.sh layer-guard <greeter|bar>   the surface must refuse to run when the shim loads late
+#   rig.sh layer-guard <greeter|bar|dock>   the surface must refuse to run when the shim loads late
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
-#   rig.sh atspi <greeter|chooser|bar>   every interactive widget has a role and a name
+#   rig.sh atspi <greeter|chooser|bar|dock>   every interactive widget has a role and a name
 #   rig.sh rig-tests        unit tests of the rig's own scripts, against the rig's tools
 #   rig.sh cosmic-panel-defaults   COSMIC's shipped panel keys equal the renderer's fixture
 #   rig.sh chooser-e2e      press a preset in the chooser and wait for the panel configuration
-#   rig.sh surface <greeter|layout|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling|bar-popups|bar-notifications|bar-tray>  capture every case of a surface and compare with the goldens
+#   rig.sh surface <greeter|layout|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling|bar-popups|bar-notifications|bar-tray|dock>  capture every case of a surface and compare with the goldens
 #   rig.sh update-goldens <name>   replace the goldens with a fresh capture, deliberately
 set -euo pipefail
 
@@ -223,6 +226,30 @@ capture_bar() { # capture_bar <surface>
     done < <(python3 -B "$rig/cases.py" "$surface")
 }
 
+# doc_bar.md, BR9: the dock with one running window, beside a bottom panel so that it
+# stands on the start edge: the left one, the right one in the right-to-left cases.
+capture_dock() {
+    in_rig "$(rig_image)" bash -c '
+        set -euo pipefail
+        mkdir -p /out/locale/dock
+        msgfmt --check -o /out/locale/dock/de.mo /repo/forge/test/shell/locale/dock-de.po
+        python3 /repo/forge/test/shell/locale/make_pseudo_rtl.py \
+            /repo/forge/specs/athanor-dock/athanor-dock-1.0.0/po/athanor-dock.pot /out/dock-pseudo-rtl.po
+        msgfmt -o /out/locale/dock/rtl.mo /out/dock-pseudo-rtl.po'
+    while IFS=$'\t' read -r tag variant scale locale catalog; do
+        tags+=("$tag")
+        seed_bar "$out/seed-$tag" float bottom visible "$variant"
+        override=()
+        if [ "$catalog" != - ]; then
+            override+=(ATHANOR_I18N_CATALOG="/out/locale/dock/$catalog")
+        fi
+        in_rig "$(rig_image)" env RIG_LOCALE="$locale" RIG_SETTLE=8 RIG_CONFIG_SEED="/out/seed-$tag" \
+            RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic "${override[@]}" \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 "$scale" "$tag" -- \
+            python3 /repo/forge/test/shell/bar_session.py --client athanor-dock --window
+    done < <(python3 -B "$rig/cases.py" dock)
+}
+
 case "${1:-}" in
 build-image)
     podman build "${rig_base[@]}" --target rig -t "$local_image:rig" -f "$rig/Containerfile" "$rig"
@@ -326,6 +353,28 @@ build-bar)
                  && install -m 0755 /out/target/release/athanor-bar /out/bin/ \
                  && python3 -B forge/scripts/check_shim_link_order.py /out/bin/athanor-bar'
     ;;
+build-dock)
+    mkdir -p "$out/bin" "$out/target"
+    podman run --rm --memory 6g --security-opt label=disable \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -e CARGO_TARGET_DIR=/out/target -w /repo "$local_image:build" \
+        bash -c 'cargo clippy --locked -p athanor-apps -p athanor-dock --all-targets -- -D warnings \
+                 && cargo test --locked -p athanor-apps -p athanor-dock \
+                 && cargo build --release --locked -p athanor-dock \
+                 && install -m 0755 /out/target/release/athanor-dock /out/bin/ \
+                 && python3 -B forge/scripts/check_shim_link_order.py /out/bin/athanor-dock'
+    ;;
+dock-roundtrip)
+    # BR7's knob none and the bar preset take the surface off screen, and visible brings it
+    # back: cosmic-comp must keep the dock's connection across every round trip.
+    seed_bar "$out/seed-dock-roundtrip" float top visible light
+    in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-dock-roundtrip \
+        RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
+        RIG_HOLD="python3 /repo/forge/test/shell/dock_roundtrip.py" \
+        dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 dock-roundtrip -- \
+        bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
+                 && exec /out/bin/athanor-dock"
+    ;;
 shelld-e2e)
     rm -f "$out/shelld-e2e.log"
     in_rig "$(rig_image)" dbus-run-session -- python3 /repo/forge/test/shell/shelld_e2e.py
@@ -351,6 +400,15 @@ bar-modules-e2e)
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 bar-modules-e2e -- \
         bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
                  && exec python3 /repo/forge/test/shell/bar_session.py --fixtures"
+    ;;
+dock-e2e)
+    seed_bar "$out/seed-dock-e2e" float top visible light
+    in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-dock-e2e \
+        RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
+        RIG_HOLD="python3 /repo/forge/test/shell/dock_e2e.py" \
+        dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 dock-e2e -- \
+        bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
+                 && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-dock --window --pinnable"
     ;;
 notifications-e2e)
     seed_bar "$out/seed-notifications-e2e" float top visible light
@@ -386,10 +444,11 @@ compositor-e2e)
         python3 /repo/forge/test/shell/cc_window.py 1
     ;;
 layer-guard)
-    surface=${2:?usage: rig.sh layer-guard <greeter|bar>}
+    surface=${2:?usage: rig.sh layer-guard <greeter|bar|dock>}
     case "$surface" in
     greeter) binary=athanor-greeter-ui ;;
     bar) binary=athanor-bar ;;
+    dock) binary=athanor-dock ;;
     *)
         echo "rig.sh layer-guard: unknown surface '$surface'" >&2
         exit 2
@@ -460,6 +519,15 @@ atspi)
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-bar -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py"
         ;;
+    dock)
+        # 4 interactive widgets under float: launcher, workspaces, the pinned COSMIC
+        # Settings of the seed, applications.
+        seed_bar "$out/seed-atspi-dock" float top visible light
+        in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-dock \
+            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-dock 4" \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-dock -- \
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-dock"
+        ;;
     *)
         echo "rig.sh atspi: unknown surface '${2:-}'" >&2
         exit 2
@@ -489,6 +557,7 @@ surface | update-goldens)
     layout) capture_layout ;;
     chooser) capture_chooser ;;
     bar | bar-power | bar-input | bar-calendar | bar-accessibility | bar-tiling | bar-popups | bar-notifications | bar-tray) capture_bar "$surface" ;;
+    dock) capture_dock ;;
     *)
         echo "rig.sh $1: unknown surface '$surface'" >&2
         exit 2

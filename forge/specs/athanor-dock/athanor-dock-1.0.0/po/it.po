@@ -1,0 +1,88 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: athanor-dock\n"
+"Report-Msgid-Bugs-To: forge@athanor.os\n"
+"Language: it\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: ../../../../system/athanor-apps/src/openers.rs:19
+msgid "Launcher"
+msgstr "Avvio applicazioni"
+
+#: ../../../../system/athanor-apps/src/openers.rs:20
+msgid "Applications"
+msgstr "Applicazioni"
+
+#: ../../../../system/athanor-apps/src/openers.rs:21
+msgid "Workspaces"
+msgstr "Spazi di lavoro"
+
+#: ../../../../system/athanor-apps/src/row.rs:88
+msgid "Running applications"
+msgstr "Applicazioni in esecuzione"
+
+#: ../../../../system/athanor-apps/src/row.rs:202
+#: ../../../../system/athanor-apps/src/row.rs:640
+#: ../../../../system/athanor-apps/src/row.rs:642
+msgid "Unknown application"
+msgstr "Applicazione sconosciuta"
+
+#: ../../../../system/athanor-apps/src/row.rs:218
+#, rust-format
+msgid "{app}: {title}"
+msgstr "{app}: {title}"
+
+#: ../../../../system/athanor-apps/src/row.rs:224
+#, rust-format
+msgid "{app} ({count} windows)"
+msgstr "{app} ({count} finestre)"
+
+#: ../../../../system/athanor-apps/src/row.rs:251
+msgid "Running"
+msgstr "In esecuzione"
+
+#: ../../../../system/athanor-apps/src/row.rs:479
+msgid "Untitled window"
+msgstr "Finestra senza titolo"
+
+#: ../../../../system/athanor-apps/src/row.rs:487
+#, rust-format
+msgid "Minimise {title}"
+msgstr "Riduci a icona {title}"
+
+#: ../../../../system/athanor-apps/src/row.rs:491
+#, rust-format
+msgid "Close {title}"
+msgstr "Chiudi {title}"
+
+#: ../../../../system/athanor-apps/src/row.rs:518
+msgid "Open"
+msgstr "Apri"
+
+#: ../../../../system/athanor-apps/src/row.rs:520
+msgid "New Window"
+msgstr "Nuova finestra"
+
+#: ../../../../system/athanor-apps/src/row.rs:587
+#, rust-format
+msgid "{name} could not start"
+msgstr "Impossibile avviare {name}"
+
+#: ../../../../system/athanor-apps/src/row.rs:588
+msgid "The reason is in the system journal."
+msgstr "Il motivo è nel registro di sistema."
+
+#: src/ui/mod.rs:246
+msgid "Unpin from Dock"
+msgstr "Rimuovi dal dock"
+
+#: src/ui/mod.rs:248
+msgid "Pin to Dock"
+msgstr "Aggiungi al dock"
+
+#: src/ui/surface.rs:210
+msgid "Dock"
+msgstr "Dock"

@@ -6,17 +6,24 @@ use athanor_shelld::server::{WATCHER_NAME, WATCHER_PATH};
 use athanor_shelld::watcher::{MAX_HOSTS, MAX_ITEMS, MAX_ITEMS_PER_OWNER};
 use common::{Bus, APP_CGROUP};
 use futures_util::StreamExt;
+use zbus::proxy::{Builder, CacheProperties};
 use zbus::{Connection, Proxy};
 
+/// Reads every property from the daemon: a cached proxy updates on PropertiesChanged, which
+/// follows the Registered and Unregistered signals, so a read right after one of them could
+/// see the list before it.
 async fn watcher(conn: &Connection) -> Proxy<'static> {
-    Proxy::new(
-        conn,
-        WATCHER_NAME,
-        WATCHER_PATH,
-        "org.kde.StatusNotifierWatcher",
-    )
-    .await
-    .expect("proxy")
+    Builder::new(conn)
+        .destination(WATCHER_NAME)
+        .expect("destination")
+        .path(WATCHER_PATH)
+        .expect("path")
+        .interface("org.kde.StatusNotifierWatcher")
+        .expect("interface")
+        .cache_properties(CacheProperties::No)
+        .build()
+        .await
+        .expect("proxy")
 }
 
 async fn items(proxy: &Proxy<'_>) -> Vec<String> {
