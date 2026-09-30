@@ -56,7 +56,7 @@ async fn run(state_dir: &Path) -> zbus::Result<()> {
     let (session, system) = (Connection::session().await?, Connection::system().await?);
     let rule = MatchRule::builder().msg_type(zbus::message::Type::Signal).interface(SERVER)?.member("ActionInvoked")?.path(SERVER_PATH)?.build();
     let mut invoked = MessageStream::for_match_rule(rule, &session, None).await?;
-    let mut notices = Notices::default();
+    let mut notices = Notices::new(notices::announced(state_dir));
     let mut poll = tokio::time::interval(POLL);
     loop {
         tokio::select! {
@@ -65,7 +65,15 @@ async fn run(state_dir: &Path) -> zbus::Result<()> {
                 let seen = notices::seen_booted(state_dir);
                 if let Some(notice) = notices.due(&state, seen.as_deref()) {
                     match send(&session, &notice).await {
-                        Ok((id, server)) => { notices.sent.insert(id, Sent { server, notice }); }
+                        Ok((id, server)) => {
+                            if let Notice::Ready { digest } = &notice {
+                                tracing::info!(%digest, "update offered");
+                                if let Err(err) = notices::record_announced(state_dir, digest) {
+                                    tracing::warn!(%err, "the announced digest was not recorded; it is offered once per session");
+                                }
+                            }
+                            notices.sent.insert(id, Sent { server, notice });
+                        }
                         Err(err) => tracing::warn!(%err, "the notification was not sent"),
                     }
                 }
