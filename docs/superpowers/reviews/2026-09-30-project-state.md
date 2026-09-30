@@ -74,7 +74,7 @@ The tier lists of `forge/config/packages.json` decide what is in the image. A cr
 | Component | Tier | Defect |
 |---|---|---|
 | `xdg-desktop-portal-athanor` | 3 | The Microphone and Camera grant is the exit status 0 of `athanor-shell-rs --privacy-prompt`. The prompt is a GTK application with a fixed id and no `NON_UNIQUE`, so a second request made while a prompt is open would be forwarded to it and exit 0. Read, not run. ScreenCast returns a fabricated PipeWire node; SaveFile returns a fixed path. |
-| `backup` | 3, hourly timer enabled | Runs as root and snapshots root's `$HOME` under `ProtectHome=yes`. Its polkit actions are declared in no `.policy`. Its bus activation does not exist. When the bcachefs ioctl fails an empty directory is reported as a snapshot, and a restore of it falls back to `remove_dir_all` on `$HOME`. Both of its tests fail. |
+| `backup` | 3, hourly timer enabled | **Fixed on the branch `claude/adoring-hopper-rl5jkq` by the maintainer's own commit `e66ad6d9` (2026-09-24, never merged into `iso-v0`), cherry-picked as `207e3cb0`.** It ran as a root D-Bus daemon under `ProtectHome=yes` and snapshotted root's `$HOME`, declared no polkit actions, had no bus activation, reported an empty directory as a snapshot, and its restore deleted the live home. It is now a root command for btrfs with a hardened unit, a snapshot subvolume created by `tmpfiles.d`, a tested retention rule and a restore that never overwrites the live home. Unit-tested here (8 tests, `clippy -D warnings` clean); **not yet run on a real btrfs system**. |
 | `recovery` | 2 | Fake 400 ms progress sleeps, a hard-coded `/dev/nvme0n1p2`, and a rollback that only creates a snapshot. |
 | `lvfs-rs` | 3 | Logs "Parsing CAB archive... parsed successfully" without parsing, and "staged successfully" unconditionally. Its bus policy allows only `root` to own the name. |
 | `doctor` | 3 | A binary with no unit and no bus file: nothing starts it. |
@@ -146,7 +146,7 @@ The five largest gaps:
 
 For the maintainer to accept, reorder or reject.
 
-1. **Shipped and defective, security first.** The portal grant (section 5), then `backup` (disable its timer until fixed: it can delete a home directory), then `recovery` and `lvfs-rs`.
+1. **Shipped and defective, security first.** `backup` is fixed on this branch (section 5) and waits for a run on a btrfs system. Next: the portal grant (section 5), then `recovery` and `lvfs-rs`.
 2. **Take the facades out of the tiers.** The five echo specs, `doctor` and `athanor-semantic-db`, or make them real.
 3. **Decide the fate of the `EXEMPT` crates and the crates of section 6.** A placeholder in a security path is a bug by the project's own rule, so each should be redesigned, moved to `experimental/` with a banner, or deleted; none should be promoted as it is.
 4. **Correct the documents of section 8**: mark each statement outdated or never true, starting with the top-level README.

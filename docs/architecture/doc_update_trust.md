@@ -124,7 +124,7 @@ What is available: `skopeo` 1.22 and `bootc` 1.16 are in the image; `bootc upgra
 - **D2. `athanor-secure-boot` leaves the image.** It cannot own its bus name, so it has never answered a call, and UT8 replaces its one reading. **Recommended.** Nothing in the repository calls that name. Retiring means the binary, its unit and its bus name leave; the TPM sealing script and unit, the rollback check and the `systemd-pcrphase-sysinit` drop-in stay, and so does the `SOURCES` tree, which `system/Containerfile` reads directly. Which of those the image enables today is checked before the change. The alternative is a bus policy file and a review of what the service claims to attest.
 - **D3. Who generates and holds the cosign key:** the maintainer, offline, as with the Secure Boot and module keys. The agent never sees the private key.
 
-Found on the way and out of scope: `athanor-backup`, which ships, guards its methods with `org.athanor.backup.*` actions that no `.policy` file declares, so polkit denies every call, and `verify.py polkit` does not look at the `org.athanor.*` namespace.
+Found on the way and since resolved: `athanor-backup` guarded its methods with `org.athanor.backup.*` actions that no `.policy` file declared, so polkit denied every call. It is now a root command with no D-Bus interface and no polkit action (commit `e66ad6d9`). `verify.py polkit` still does not look at the `org.athanor.*` namespace.
 
 ## 5. Changes to other documents
 
