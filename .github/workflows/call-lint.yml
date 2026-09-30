@@ -47,6 +47,8 @@ jobs:
         run: python3 -B -m unittest discover -s system/tests -v
       - name: Update and trust package (unit tests)
         run: python3 -B -m unittest discover -s forge/specs/athanor-update/tests -v
+      - name: Recovery console (unit tests)
+        run: python3 -B -m unittest discover -s forge/specs/athanor-recovery/tests -v
       - name: Greeter session script (unit tests)
         run: python3 -B -m unittest discover -s forge/specs/athanor-system-config/tests -v
       # Run directly rather than through unittest discovery: this suite holds no
