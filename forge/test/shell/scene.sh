@@ -42,40 +42,74 @@ wait_for() { # wait_for <seconds> <command...>: poll four times a second
     done
 }
 
-# 1. The parent: wlroots headless on pixman, one output of the requested size.
-sway -c /repo/forge/test/shell/sway.conf &> "/out/$tag-sway.log" &
-sway_socket() { ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock > /dev/null 2>&1; }
-wait_for 20 sway_socket
-shopt -s nullglob
-sway_sockets=("$XDG_RUNTIME_DIR"/sway-ipc.*.sock)
-shopt -u nullglob
-SWAYSOCK=${sway_sockets[0]}
-export SWAYSOCK
-shopt -s nullglob
-wayland_displays=("$XDG_RUNTIME_DIR"/wayland-[0-9])
-shopt -u nullglob
-oldest=${wayland_displays[0]}
-for display in "${wayland_displays[@]}"; do
-    [ "$display" -ot "$oldest" ] && oldest=$display
-done
-sway_display=$(basename "$oldest")
-swaymsg output HEADLESS-1 mode "${width}x${height}" > /dev/null
-
-# 2. cosmic-comp takes the next free socket; its one tiled window fills the output.
-cosmic_display() {
-    for socket in "$XDG_RUNTIME_DIR"/wayland-[0-9]; do
-        [ "$(basename "$socket")" != "$sway_display" ] && basename "$socket" && return 0
+# RIG_OUTPUTS=2 (kvm/run-in-guest.sh): cosmic-comp on its KMS backend drives the two
+# connected outputs of the vkms card kvm/vkms.sh built, one mode and scale each. libseat's
+# noop backend opens the card directly: the scene is root in a throwaway guest, with no seat
+# daemon, and the vkms card is the guest's only DRM device.
+kms_outputs() { # the connected connectors, e.g. Virtual-1
+    local status connector
+    for status in /sys/class/drm/card*-*/status; do
+        [ "$(cat "$status")" = connected ] || continue
+        connector=$(basename "$(dirname "$status")")
+        echo "${connector#card*-}"
     done
-    return 1
 }
-wait_for 30 cosmic_display > /dev/null
-WAYLAND_DISPLAY=$(cosmic_display)
-export WAYLAND_DISPLAY
-wait_for 20 cosmic-randr list > /dev/null
 
-# 3. Size and fractional scale of the nested output.
-cosmic-randr mode --scale "$scale" WINIT-0 "$width" "$height" &> "/out/$tag-randr.txt"
-sleep 1
+if [ "${RIG_OUTPUTS:-1}" = 2 ]; then
+    COSMIC_BACKEND=kms LIBSEAT_BACKEND=noop cosmic-comp --no-xwayland &> "/out/$tag-cosmic-comp.log" &
+    any_display() { ls "$XDG_RUNTIME_DIR"/wayland-[0-9] > /dev/null 2>&1; }
+    wait_for 30 any_display
+    shopt -s nullglob
+    wayland_displays=("$XDG_RUNTIME_DIR"/wayland-[0-9])
+    shopt -u nullglob
+    WAYLAND_DISPLAY=$(basename "${wayland_displays[0]}")
+    export WAYLAND_DISPLAY
+    wait_for 20 cosmic-randr list > /dev/null
+    mapfile -t outputs < <(kms_outputs)
+    if [ "${#outputs[@]}" != 2 ]; then
+        echo "scene.sh: RIG_OUTPUTS=2 needs two connected connectors, found: ${outputs[*]}" >&2
+        exit 1
+    fi
+    for output in "${outputs[@]}"; do
+        cosmic-randr mode --scale "$scale" "$output" "$width" "$height" &>> "/out/$tag-randr.txt"
+    done
+    sleep 1
+else
+    # 1. The parent: wlroots headless on pixman, one output of the requested size.
+    sway -c /repo/forge/test/shell/sway.conf &> "/out/$tag-sway.log" &
+    sway_socket() { ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock > /dev/null 2>&1; }
+    wait_for 20 sway_socket
+    shopt -s nullglob
+    sway_sockets=("$XDG_RUNTIME_DIR"/sway-ipc.*.sock)
+    shopt -u nullglob
+    SWAYSOCK=${sway_sockets[0]}
+    export SWAYSOCK
+    shopt -s nullglob
+    wayland_displays=("$XDG_RUNTIME_DIR"/wayland-[0-9])
+    shopt -u nullglob
+    oldest=${wayland_displays[0]}
+    for display in "${wayland_displays[@]}"; do
+        [ "$display" -ot "$oldest" ] && oldest=$display
+    done
+    sway_display=$(basename "$oldest")
+    swaymsg output HEADLESS-1 mode "${width}x${height}" > /dev/null
+
+    # 2. cosmic-comp takes the next free socket; its one tiled window fills the output.
+    cosmic_display() {
+        for socket in "$XDG_RUNTIME_DIR"/wayland-[0-9]; do
+            [ "$(basename "$socket")" != "$sway_display" ] && basename "$socket" && return 0
+        done
+        return 1
+    }
+    wait_for 30 cosmic_display > /dev/null
+    WAYLAND_DISPLAY=$(cosmic_display)
+    export WAYLAND_DISPLAY
+    wait_for 20 cosmic-randr list > /dev/null
+
+    # 3. Size and fractional scale of the nested output.
+    cosmic-randr mode --scale "$scale" WINIT-0 "$width" "$height" &> "/out/$tag-randr.txt"
+    sleep 1
+fi
 
 # 4. The scene: the client under test.
 faketime -f "$frozen" "$@" &> "/out/$tag-client.log" &
@@ -89,5 +123,14 @@ if [ -n "${RIG_HOLD:-}" ]; then
     $RIG_HOLD
 fi
 
-# 5. One PNG, from inside the compositor.
-grim -o WINIT-0 "/out/$tag.png"
+# 5. One PNG, from inside the compositor; two outputs side by side, left to right.
+if [ "${RIG_OUTPUTS:-1}" = 2 ]; then
+    parts=()
+    for output in "${outputs[@]}"; do
+        grim -o "$output" "$scratch/$output.png"
+        parts+=("$scratch/$output.png")
+    done
+    magick "${parts[@]}" +append "/out/$tag.png"
+else
+    grim -o WINIT-0 "/out/$tag.png"
+fi

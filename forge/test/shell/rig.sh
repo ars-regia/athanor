@@ -58,11 +58,16 @@ fi
 
 # label=disable: under SELinux's container_t bubblewrap cannot mount devpts, glycin's
 # loaders die, and GTK draws every SVG icon blank without reporting anything.
+# RIG_OUTPUTS=2 runs only in the throwaway guest of kvm/guest.sh, as root: scene.sh drives
+# the vkms card on cosmic-comp's KMS backend, which needs the DRM devices and the udev database.
 in_rig() { # in_rig <image> <command...>
-    local image=$1
+    local image=$1 kms=()
     shift
+    if [ "${RIG_OUTPUTS:-1}" = 2 ]; then
+        kms=(--device /dev/dri -v /run/udev:/run/udev:ro -e RIG_OUTPUTS)
+    fi
     mkdir -p "$out"
-    podman run --rm --memory 6g --security-opt label=disable \
+    podman run --rm --memory 6g --security-opt label=disable "${kms[@]}" \
         -v "$root:/repo:ro" -v "$out:/out" "$image" "$@"
 }
 
