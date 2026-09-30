@@ -1,7 +1,7 @@
 [Unit]
 Description=Athanor bar
 # Enabled for every user by /usr/lib/systemd/user-preset/80-athanor-bar.preset.
-# It starts the shell daemon, which has no D-Bus activation file until then (BR1).
+# It wants the shell daemon, which its own preset and the bus start too (BR1).
 Wants=athanor-shelld.service
 After=graphical-session.target athanor-desktop.service athanor-shelld.service
 Requisite=athanor-desktop.service

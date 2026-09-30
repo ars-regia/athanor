@@ -1,6 +1,6 @@
 [Unit]
 Description=Athanor dock
-# Enabled by hand until the switch of stage 2 (doc_bar.md, BR8): the package enables nothing.
+# Enabled for every user by /usr/lib/systemd/user-preset/80-athanor-dock.preset.
 After=graphical-session.target athanor-desktop.service
 Requisite=athanor-desktop.service
 PartOf=graphical-session.target

@@ -17,6 +17,7 @@ applications with favourites, the input source, accessibility, tiling, the clock
 the power menu. Starts applications behind a Wayland security context, is confined
 with Landlock, and falls back to the vendor layout after five failures in ten minutes.
 Picks the default layout of a user's first session (SH10) and ships the vendor layout.
+Enabled for every user by a user preset under athanor-session.target.
 
 %prep
 
@@ -36,6 +37,8 @@ install -D -m 0644 forge/specs/athanor-bar/athanor-bar-1.0.0/data/athanor-bar.se
     %{buildroot}/usr/lib/systemd/user/athanor-bar.service
 install -D -m 0644 forge/specs/athanor-bar/athanor-bar-1.0.0/data/favorites.toml \
     %{buildroot}/usr/share/athanor/favorites.toml
+install -D -m 0644 forge/specs/athanor-bar/athanor-bar-1.0.0/data/80-athanor-bar.preset \
+    %{buildroot}/usr/lib/systemd/user-preset/80-athanor-bar.preset
 install -D -m 0644 system/athanor-layout/vendor/10-athanor.toml \
     %{buildroot}/usr/share/athanor/layout/10-athanor.toml
 
@@ -50,6 +53,7 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %files
 /usr/bin/athanor-bar
 /usr/lib/systemd/user/athanor-bar.service
+/usr/lib/systemd/user-preset/80-athanor-bar.preset
 %dir /usr/share/athanor
 /usr/share/athanor/favorites.toml
 %dir /usr/share/athanor/layout
@@ -61,6 +65,8 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 * Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
 - Takes over the first-session layout pick (SH10) and the vendor layout from
   athanor-layout-translator, which it obsoletes.
+- Stage 2 switch (doc_bar.md, BR8): enabled for every user by
+  /usr/lib/systemd/user-preset/80-athanor-bar.preset under athanor-session.target.
 
 * Sat Sep 26 2026 Athanor Forge <forge@athanor.os> - 1.0.0-1
 - First release (doc_bar.md, BR1, BR2, BR3, BR6, BR7): one surface per output with the

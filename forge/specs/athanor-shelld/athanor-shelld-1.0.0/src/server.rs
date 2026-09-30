@@ -1,6 +1,7 @@
 //! One connection, the daemon's objects, then its names (doc_bar.md BR1). The names are
-//! requested last and without queueing: when another process owns one (cosmic-notifications,
-//! COSMIC's watcher, a second daemon), the start fails at once instead of waiting in line.
+//! requested last and without queueing: when another process owns one (a second daemon, or
+//! the cosmic-notifications and cosmic-panel that owned them before the switch of stage 2),
+//! the start fails at once instead of waiting in line.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
