@@ -77,7 +77,6 @@ pub enum Source {
     /// `PropertiesChanged`.
     Managed(&'static str),
     /// `GetAll` of each (path, interface), then `PropertiesChanged`.
-    #[expect(dead_code, reason = "the audio and battery modules load fixed objects")]
     Fixed(Vec<(&'static str, &'static str)>),
 }
 

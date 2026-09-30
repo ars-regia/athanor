@@ -4,12 +4,14 @@
 //! key the policy marks mandatory holds here too. Every change applies live.
 
 mod accessibility;
+mod audio;
 mod bluetooth;
 mod bus;
 mod clock;
 mod input;
 mod logind;
 mod menu;
+mod mpris;
 mod network;
 mod notifications;
 mod openers;
@@ -241,6 +243,7 @@ fn build(module: Module, bar: &Rc<Bar>, connector: Option<&str>) -> Option<Box<d
         Module::Tray => tray::new(bar),
         Module::Network => network::new(bar),
         Module::Bluetooth => bluetooth::new(bar),
+        Module::Audio => audio::new(bar),
         // Later tasks of this plan, and the plans of 2b.3 to 2b.5.
         _ => None,
     }
