@@ -204,7 +204,7 @@ stage_launcher() {
             printf 'sendkey %s\n' "$keys" | socat - "unix:$STATE/monitor.sock" > /dev/null
             sleep 2
         done
-        in_session "pgrep -x $process" > /dev/null || fail "$process did not start from its shortcut ($press presses)"
+        in_session "pidof $process" > /dev/null || fail "$process did not start from its shortcut ($press presses)"
         shot "p4-$process"
         printf 'sendkey esc\n' | socat - "unix:$STATE/monitor.sock" > /dev/null
     done
