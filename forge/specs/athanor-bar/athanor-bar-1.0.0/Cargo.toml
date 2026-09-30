@@ -12,6 +12,7 @@ athanor-compositor-client = { path = "../../../../system/athanor-compositor-clie
 athanor-i18n = { path = "../../../../system/athanor-i18n" }
 athanor-layout = { path = "../../../../system/athanor-layout" }
 athanor-style = { path = "../../../../system/athanor-style" }
+athanor-trust-state = { path = "../../../../system/athanor-trust-state" }
 athanor-unit = { path = "../../../../system/athanor-unit" }
 gio-unix = { workspace = true }
 # TimeZone::from_identifier, which reports an unknown zone instead of silently giving UTC.
