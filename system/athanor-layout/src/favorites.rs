@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use toml::{Table, Value};
 
-use crate::apply::write_atomically;
+use crate::atomic::write_atomically;
 use crate::user::write_target;
 
 pub const SCHEMA: i64 = 1;

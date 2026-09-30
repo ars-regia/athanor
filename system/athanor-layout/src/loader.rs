@@ -129,7 +129,7 @@ impl Source {
 }
 
 /// The vendor document compiled in, for an image whose vendor directory is missing.
-/// A test keeps it equal to `vendor/10-athanor.toml`, which the translator's RPM ships.
+/// A test keeps it equal to `vendor/10-athanor.toml`, which athanor-bar's RPM ships.
 fn builtin_vendor() -> Document {
     Document {
         preset: Some(Preset::Float),

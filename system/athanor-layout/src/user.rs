@@ -5,7 +5,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::apply::write_atomically;
+use crate::atomic::write_atomically;
 use crate::document::{Document, DocumentError};
 use crate::loader::{resolve, Paths, Resolved, UserState};
 use crate::preset::{DockKnob, PanelEdge, Preset};

@@ -8,7 +8,7 @@ use std::cell::{Cell, RefCell};
 use std::io;
 use std::path::{Path, PathBuf};
 
-use athanor_layout::apply::write_atomically;
+use athanor_layout::atomic::write_atomically;
 use athanor_style::calmo::Variant;
 use gtk4::{gdk, gio, prelude::*};
 
