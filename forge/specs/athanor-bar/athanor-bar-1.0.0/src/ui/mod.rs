@@ -4,6 +4,7 @@
 //! key the policy marks mandatory holds here too. Every change applies live.
 
 mod accessibility;
+mod bluetooth;
 mod bus;
 mod clock;
 mod input;
@@ -239,6 +240,7 @@ fn build(module: Module, bar: &Rc<Bar>, connector: Option<&str>) -> Option<Box<d
         Module::Notifications => notifications::new(bar),
         Module::Tray => tray::new(bar),
         Module::Network => network::new(bar),
+        Module::Bluetooth => bluetooth::new(bar),
         // Later tasks of this plan, and the plans of 2b.3 to 2b.5.
         _ => None,
     }

@@ -315,6 +315,130 @@ def network(ctx):
 SECTIONS.append(network)
 
 
+BLUEZ_AGENT = "/os/athanor/Bar/BluezAgent"
+ADAPTER = "/org/bluez/hci0"
+REJECTED = "org.bluez.Error.Rejected"
+
+
+def device_path(alias):
+    (address,) = [address for address, name, _, _ in fx.DEVICES if name == alias]
+    return f"{ADAPTER}/dev_{address.replace(':', '_')}"
+
+
+def bluetooth(ctx):
+    app, Atspi, bus = ctx.app, ctx.Atspi, ctx.bus
+    device1 = "org.bluez.Device1"
+
+    def confirm(alias, passkey):
+        (index,) = fx.call(
+            bus, fx.BLUEZ, "/org/bluez", fx.FIXTURE, "RequestConfirmation", "(sou)",
+            (ctx.bar, device_path(alias), passkey), "(u)",
+        )
+        return index
+
+    def request(method, alias):
+        (index,) = fx.call(
+            bus, fx.BLUEZ, "/org/bluez", fx.FIXTURE, "AgentRequest", "(sso)",
+            (ctx.bar, method, device_path(alias)), "(u)",
+        )
+        return index
+
+    def result(index):
+        (value,) = fx.call(bus, fx.BLUEZ, "/org/bluez", fx.FIXTURE, "ConfirmationResult", "(u)", (index,), "(s)")
+        return value
+
+    def adapter(prop):
+        return property_of(bus, fx.BLUEZ, ADAPTER, "org.bluez.Adapter1", prop)
+
+    check("the Bluetooth module shows", wait_for(lambda: buttons(app, Atspi, "Bluetooth"), 10))
+    check(
+        "the bar is BlueZ's default agent",
+        wait_for(lambda: fx.call(bus, fx.BLUEZ, "/org/bluez", fx.FIXTURE, "DefaultAgent", reply="(s)")[0] == BLUEZ_AGENT, 5),
+    )
+    # The template does not keep who registered the agent; the fixture's Pair needs it.
+    fx.call(bus, fx.BLUEZ, "/org/bluez", fx.FIXTURE, "AgentOwner", "(s)", (ctx.bar,))
+    check(
+        "the list shows the connected headphones first",
+        open_popover(app, Atspi, "Bluetooth", lambda: buttons(app, Atspi, "Headphones, connected")),
+    )
+    check("a paired, disconnected device is listed", bool(buttons(app, Atspi, "Keyboard")))
+    check("an open popover discovers", wait_for(lambda: adapter("Discovering") is True, 5))
+
+    def power():
+        return labelled(app, Atspi, "check box", "Bluetooth")
+
+    power()[0].do_action(0)
+    check("the switch turns the adapter off", wait_for(lambda: adapter("Powered") is False, 5))
+    wait_for(lambda: power() and not power()[0].get_state_set().contains(Atspi.StateType.CHECKED), 5)
+    power()[0].do_action(0)
+    check("and on again", wait_for(lambda: adapter("Powered") is True, 5))
+
+    # Requests the person did not start from the bar (maintainer decision D8): rejected by the
+    # agent before anything shows, and no open popover closes.
+    unsolicited = confirm("Speaker", 111111)
+    check(
+        "an unsolicited RequestConfirmation from BlueZ is rejected",
+        wait_for(lambda: result(unsolicited) == f"error:{REJECTED}", 5),
+    )
+    check("and shows no digits", not labelled(app, Atspi, "label", "111111"))
+    check("and the popover stays open", bool(buttons(app, Atspi, "Headphones, connected")))
+    check(
+        "the device stays unpaired",
+        property_of(bus, fx.BLUEZ, device_path("Speaker"), device1, "Paired") is False,
+    )
+    for method in ("RequestAuthorization", "AuthorizeService", "DisplayPasskey", "RequestPinCode", "RequestPasskey"):
+        index = request(method, "Speaker")
+        check(f"an unsolicited {method} is rejected", wait_for(lambda: result(index) == f"error:{REJECTED}", 5))
+    check("DisplayPasskey showed nothing", not labelled(app, Atspi, "label", "222333"))
+
+    # Pairing a device the person pressed: bluetoothd asks for the six digits (the fixture's
+    # Pair), the person confirms, then the bar trusts and connects it. The BlueZ mock is
+    # blocked while the page is open, so nothing below calls it until Pair is pressed.
+    check("a nearby device is listed while discovering", wait_for(lambda: buttons(app, Atspi, "Phone"), 10))
+    press(app, Atspi, "Phone")
+    check("pressing it shows the digits BlueZ sent", wait_for(lambda: labelled(app, Atspi, "label", fx.PAIRING_CODE), 10))
+    check("Pair confirms", wait_for(lambda: press_confirm(app, Atspi, "Pair"), 5))
+    phone = device_path("Phone")
+    check("the device is paired", wait_for(lambda: property_of(bus, fx.BLUEZ, phone, device1, "Paired") is True, 10))
+    check("trusts it", wait_for(lambda: property_of(bus, fx.BLUEZ, phone, device1, "Trusted") is True, 5))
+    # Pair closes the popover, as Connect does in the network module; opened again, it shows
+    # the device connected and discovers again.
+    check(
+        "and connects it",
+        open_popover(app, Atspi, "Bluetooth", lambda: buttons(app, Atspi, "Phone, connected")),
+    )
+
+    # Cancel on the page: the agent rejects, BlueZ fails the pairing, the device stays unpaired.
+    wait_for(lambda: buttons(app, Atspi, "Speaker"), 10)
+    press(app, Atspi, "Speaker")
+    check("a second pairing shows its digits", wait_for(lambda: labelled(app, Atspi, "label", fx.PAIRING_CODE), 10))
+    press(app, Atspi, "Cancel")
+    check("Cancel closes the page", wait_for(lambda: not labelled(app, Atspi, "label", fx.PAIRING_CODE), 5))
+    check(
+        "and the device stays unpaired",
+        wait_for(lambda: property_of(bus, fx.BLUEZ, device_path("Speaker"), device1, "Paired") is False, 5),
+    )
+
+    # The agent refuses any process that is not bluetoothd.
+    try:
+        bus.call_sync(
+            ctx.bar, BLUEZ_AGENT, "org.bluez.Agent1", "RequestConfirmation",
+            GLib.Variant("(ou)", (device_path("Keyboard"), 222222)), None, Gio.DBusCallFlags.NONE, 5000, None,
+        )
+        refused = False
+    except GLib.Error as err:
+        refused = Gio.DBusError.get_remote_error(err) == REJECTED
+    check("a RequestConfirmation from another process is rejected", refused)
+    check("and shows no code", not labelled(app, Atspi, "label", "222222"))
+
+    if buttons(app, Atspi, "Headphones, connected"):
+        press(app, Atspi, "Bluetooth")
+    check("closing the popover stops discovery", wait_for(lambda: adapter("Discovering") is False, 5))
+
+
+SECTIONS.append(bluetooth)
+
+
 def main():
     import gi
 

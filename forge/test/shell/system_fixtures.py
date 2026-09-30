@@ -308,7 +308,11 @@ def networkmanager(bus):
 def bluez(bus, log):
     process = spawn_mock("bluez5", log)
     wait_for_name(bus, BLUEZ)
-    call(bus, BLUEZ, "/", BLUEZ_MOCK, "AddAdapter", "(ss)", ("hci0", "athanor"), "(s)")
+    (adapter,) = call(bus, BLUEZ, "/", BLUEZ_MOCK, "AddAdapter", "(ss)", ("hci0", "athanor"), "(s)")
+    # The template's StartDiscovery and StopDiscovery read the adapter's DiscoveryFilter,
+    # which only SetDiscoveryFilter creates: without it both raise KeyError after changing
+    # Discovering, and emit no PropertiesChanged. An empty filter is BlueZ's default.
+    call(bus, BLUEZ, adapter, "org.bluez.Adapter1", "SetDiscoveryFilter", "(a{sv})", ({},))
     for address, alias, paired, icon in DEVICES:
         (path,) = call(bus, BLUEZ, "/", BLUEZ_MOCK, "AddDevice", "(sss)", ("hci0", address, alias), "(s)")
         call(
