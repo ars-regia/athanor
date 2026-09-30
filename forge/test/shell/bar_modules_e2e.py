@@ -439,6 +439,136 @@ def bluetooth(ctx):
 SECTIONS.append(bluetooth)
 
 
+def audio(ctx):
+    app, Atspi = ctx.app, ctx.Atspi
+    session = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+
+    def slider(name):
+        found = labelled(app, Atspi, "slider", name)
+        return found[0] if found else None
+
+    def near(name, percent):
+        found = slider(name)
+        return found is not None and abs(found.get_current_value() - percent) < 1.0
+
+    def switch(name):
+        found = labelled(app, Atspi, "check box", name)
+        return found[0] if found else None
+
+    def default_sink():
+        return fx.pactl("get-default-sink").strip()
+
+    check("the audio module shows", wait_for(lambda: buttons(app, Atspi, "Sound"), 15))
+    check("the popover shows the output volume", open_popover(app, Atspi, "Sound", lambda: slider("Output volume")))
+    check("the output slider shows the default sink's 40 %", wait_for(lambda: near("Output volume", 40), 5))
+    check("the input slider shows the microphone's 55 %", near("Input volume", 55))
+    check("the device in use is marked", bool(buttons(app, Atspi, "Speakers, in use")))
+
+    press(app, Atspi, "Headphones")
+    check("choosing Headphones makes it the default sink", wait_for(lambda: default_sink() == "headphones", 5))
+    check("and the slider follows it to 70 %", wait_for(lambda: near("Output volume", 70), 5))
+
+    switch("Mute output").do_action(0)
+    check("the mute switch mutes the sink", wait_for(lambda: "yes" in fx.pactl("get-sink-mute", "headphones"), 5))
+    wait_for(lambda: switch("Mute output").get_state_set().contains(Atspi.StateType.CHECKED), 5)
+    switch("Mute output").do_action(0)
+    check("and unmutes it", wait_for(lambda: "no" in fx.pactl("get-sink-mute", "headphones"), 5))
+
+    slider("Output volume").set_current_value(25.0)
+    check("the slider sets the volume", wait_for(lambda: "25%" in fx.pactl("get-sink-volume", "headphones"), 5))
+    fx.pactl("set-sink-volume", "headphones", "60%")
+    check("a change made elsewhere reaches the slider", wait_for(lambda: near("Output volume", 60), 5))
+
+    # The media controls follow the MPRIS player.
+    check("the playing track is shown", wait_for(lambda: labelled(app, Atspi, "label", "Night Drive"), 10))
+    check("with its artist", bool(labelled(app, Atspi, "label", "Calmo")))
+    press(app, Atspi, "Pause")
+    check(
+        "Pause reaches the player",
+        wait_for(lambda: len(mock_calls(session, fx.PLAYER, fx.MPRIS_PATH, "PlayPause")) == 1, 5),
+    )
+    check("and the button becomes Play", wait_for(lambda: buttons(app, Atspi, "Play"), 5))
+
+    # The sound server restarts: the module hides, then comes back on its own.
+    for pid in fx.pids_of("pipewire-pulse"):
+        os.kill(pid, signal.SIGTERM)
+    check("without a sound server the module hides", wait_for(lambda: not buttons(app, Atspi, "Sound"), 10))
+    ctx.spawned.append(fx.pipewire_pulse(subprocess.DEVNULL))
+    check("the sound server back: the module shows within 15 s", wait_for(lambda: buttons(app, Atspi, "Sound"), 15))
+    check("the bar survived the restart", alive(ctx.pid))
+
+
+SECTIONS.append(audio)
+
+
+def battery(ctx):
+    app, Atspi, bus = ctx.app, ctx.Atspi, ctx.bus
+    logind_log = Path("/out") / f"{os.environ['RIG_TAG']}-logind.log"
+    profiles_path = "/org/freedesktop/UPower/PowerProfiles"
+
+    def radio(name):
+        found = labelled(app, Atspi, "radio button", name)
+        return found[0] if found else None
+
+    def checked(name):
+        found = radio(name)
+        return found is not None and found.get_state_set().contains(Atspi.StateType.CHECKED)
+
+    def brightness():
+        found = labelled(app, Atspi, "slider", "Screen brightness")
+        return found[0] if found else None
+
+    def display_device(state, percent, to_empty, to_full, present):
+        fx.call(
+            bus, fx.UPOWER, "/org/freedesktop/UPower", fx.MOCK, "SetupDisplayDevice", "(uuddddxxbsu)",
+            (2, state, percent, percent / 2, 50.0, 10.0, to_empty, to_full, present, "", 1),
+        )
+
+    check("the battery module shows", wait_for(lambda: buttons(app, Atspi, "Battery"), 10))
+    module = buttons(app, Atspi, "Battery")
+    check(
+        "the module describes the charge and the time left",
+        bool(module) and module[0].get_description() == "72 %, 3 h 25 min left",
+        module[0].get_description() if module else "",
+    )
+    check(
+        "the popover shows the charge",
+        open_popover(app, Atspi, "Battery", lambda: labelled(app, Atspi, "label", "3 h 25 min left")),
+    )
+    check("the active profile is Balanced", checked("Balanced"))
+    radio("Performance").do_action(0)
+    check(
+        "choosing Performance reaches the profiles daemon",
+        wait_for(lambda: property_of(bus, fx.PROFILES, profiles_path, fx.PROFILES, "ActiveProfile") == "performance", 5),
+    )
+    fx.call(
+        bus, fx.PROFILES, profiles_path, "org.freedesktop.DBus.Properties", "Set", "(ssv)",
+        (fx.PROFILES, "ActiveProfile", GLib.Variant("s", "power-saver")),
+    )
+    check("a profile chosen elsewhere is shown", wait_for(lambda: checked("Power saver"), 5))
+
+    check(
+        "the brightness slider shows the backlight's 60 %",
+        brightness() is not None and abs(brightness().get_current_value() - 60.0) < 1.0,
+    )
+    brightness().set_current_value(30.0)
+    check(
+        "the slider sets the brightness through logind",
+        wait_for(lambda: "SetBrightness backlight intel_backlight 300" in logind_log.read_text(encoding="utf-8"), 5),
+    )
+
+    display_device(1, 15.0, 0, 5400, True)
+    check("charging shows the time until full", wait_for(lambda: labelled(app, Atspi, "label", "1 h 30 min until full"), 5))
+    check("and the new charge", bool(labelled(app, Atspi, "label", "15 %")))
+    display_device(2, 72.0, 12300, 0, False)
+    check("without a present battery the module hides", wait_for(lambda: not buttons(app, Atspi, "Battery"), 5))
+    display_device(2, 72.0, 12300, 0, True)
+    check("the battery back, the module shows again", wait_for(lambda: buttons(app, Atspi, "Battery"), 5))
+
+
+SECTIONS.append(battery)
+
+
 def main():
     import gi
 

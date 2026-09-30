@@ -119,6 +119,144 @@ msgstr "Inverti i colori"
 msgid "Colour filter"
 msgstr "Filtro colore"
 
+#: src/ui/audio.rs:478
+#, rust-format
+msgid "{device}, in use"
+msgstr "{device}, in uso"
+
+#: src/ui/audio.rs:518
+msgid "Sound"
+msgstr "Audio"
+
+#: src/ui/audio.rs:522
+msgid "Output"
+msgstr "Uscita"
+
+#: src/ui/audio.rs:523
+msgid "Output volume"
+msgstr "Volume di uscita"
+
+#: src/ui/audio.rs:524
+msgid "Mute output"
+msgstr "Silenzia l'uscita"
+
+#: src/ui/audio.rs:528
+msgid "Input"
+msgstr "Ingresso"
+
+#: src/ui/audio.rs:529
+msgid "Input volume"
+msgstr "Volume di ingresso"
+
+#: src/ui/audio.rs:530
+msgid "Mute microphone"
+msgstr "Silenzia il microfono"
+
+#: src/ui/audio.rs:541
+msgid "Previous track"
+msgstr "Brano precedente"
+
+#: src/ui/audio.rs:542 src/ui/audio.rs:653
+msgid "Pause"
+msgstr "Pausa"
+
+#: src/ui/audio.rs:543
+msgid "Next track"
+msgstr "Brano successivo"
+
+#: src/ui/audio.rs:655
+msgid "Play"
+msgstr "Riproduci"
+
+#: src/ui/battery.rs:186
+#, rust-format
+msgid "{percent} %"
+msgstr "{percent}%"
+
+#: src/ui/battery.rs:204
+#, rust-format
+msgid "{hours} h {minutes} min left"
+msgstr "{hours} h {minutes} min rimanenti"
+
+#: src/ui/battery.rs:207
+#, rust-format
+msgid "{hours} h {minutes} min until full"
+msgstr "{hours} h {minutes} min alla carica completa"
+
+#: src/ui/battery.rs:209
+msgid "Charging"
+msgstr "In carica"
+
+#: src/ui/battery.rs:210
+msgid "Fully charged"
+msgstr "Carica completa"
+
+#: src/ui/battery.rs:234
+msgid "Power saver"
+msgstr "Risparmio energetico"
+
+#: src/ui/battery.rs:235
+msgid "Performance"
+msgstr "Prestazioni"
+
+#: src/ui/battery.rs:236
+msgid "Balanced"
+msgstr "Bilanciato"
+
+#: src/ui/battery.rs:263
+msgid "Battery"
+msgstr "Batteria"
+
+#: src/ui/battery.rs:273
+msgid "Power mode"
+msgstr "Modalità di alimentazione"
+
+#: src/ui/battery.rs:291
+msgid "Screen brightness"
+msgstr "Luminosità dello schermo"
+
+#: src/ui/bluetooth.rs:577 src/ui/bluetooth.rs:580
+msgid "Bluetooth"
+msgstr "Bluetooth"
+
+#: src/ui/bluetooth.rs:583
+msgid "Nearby devices"
+msgstr "Dispositivi vicini"
+
+#: src/ui/bluetooth.rs:605 src/ui/network.rs:546 src/ui/power.rs:110
+#: src/ui/shield.rs:476
+msgid "Cancel"
+msgstr "Annulla"
+
+#: src/ui/bluetooth.rs:607
+msgid "Pair"
+msgstr "Associa"
+
+#: src/ui/bluetooth.rs:720
+#, rust-format
+msgid "{device}, connected"
+msgstr "{device}, connesso"
+
+#: src/ui/bluetooth.rs:757
+#, rust-format
+msgid "Pair with {device}?"
+msgstr "Associare {device}?"
+
+#: src/ui/bluetooth.rs:760
+#, rust-format
+msgid "Pair only if {device} shows the same number."
+msgstr "Associa solo se {device} mostra lo stesso numero."
+
+#: src/ui/bluetooth.rs:773
+#, rust-format
+msgid "Pairing with {device}"
+msgstr "Associazione con {device}"
+
+#: src/ui/bluetooth.rs:776
+#, rust-format
+msgid "Type this code on {device}, then press Enter there."
+msgstr "Digita questo codice su {device}, poi premi Invio."
+
 #. TRANSLATORS: a g_date_time_format() pattern for the clock on the bar.
 #: src/ui/clock.rs:83
 msgid "%a %-d %b %H:%M"
@@ -152,13 +290,66 @@ msgstr "Sorgente di input: {name}"
 msgid "Input source"
 msgstr "Sorgente di input"
 
-#: src/ui/mod.rs:657
+#: src/ui/mod.rs:662
 msgid "Unpin from Bar"
 msgstr "Rimuovi dalla barra"
 
-#: src/ui/mod.rs:659
+#: src/ui/mod.rs:664
 msgid "Pin to Bar"
 msgstr "Aggiungi alla barra"
+
+#: src/ui/network.rs:504 src/ui/network.rs:507
+msgid "Network"
+msgstr "Rete"
+
+#: src/ui/network.rs:513
+msgid "Wi-Fi"
+msgstr "Wi-Fi"
+
+#: src/ui/network.rs:522
+msgid "Airplane mode"
+msgstr "Modalità aereo"
+
+#: src/ui/network.rs:539
+msgid "The password was not accepted. Try again."
+msgstr "La password non è stata accettata. Riprova."
+
+#: src/ui/network.rs:548
+msgid "Connect"
+msgstr "Connetti"
+
+#: src/ui/network.rs:661
+msgid "Wired: connected"
+msgstr "Cablata: connessa"
+
+#: src/ui/network.rs:662
+msgid "Wired: not connected"
+msgstr "Cablata: non connessa"
+
+#: src/ui/network.rs:699
+#, rust-format
+msgid "{network}, connected"
+msgstr "{network}, connessa"
+
+#: src/ui/network.rs:700
+#, rust-format
+msgid "{network}, connecting"
+msgstr "{network}, connessione in corso"
+
+#: src/ui/network.rs:701
+#, rust-format
+msgid "{network}, needs Settings"
+msgstr "{network}, richiede Impostazioni"
+
+#: src/ui/network.rs:703
+#, rust-format
+msgid "{network}, secured"
+msgstr "{network}, protetta"
+
+#: src/ui/network.rs:734
+#, rust-format
+msgid "Password for {network}"
+msgstr "Password per {network}"
 
 #: src/ui/notifications.rs:874
 #, rust-format
@@ -226,200 +417,196 @@ msgstr "Spegnere ora?"
 msgid "Power"
 msgstr "Alimentazione"
 
-#: src/ui/power.rs:110 src/ui/shield.rs:388
-msgid "Cancel"
-msgstr "Annulla"
-
-#: src/ui/power.rs:149 src/ui/power.rs:155 src/ui/shield.rs:374
-#: src/ui/shield.rs:410
+#: src/ui/power.rs:149 src/ui/power.rs:155 src/ui/shield.rs:462
+#: src/ui/shield.rs:498
 msgid "Restart to update"
 msgstr "Riavvia per aggiornare"
 
-#: src/ui/power.rs:154 src/ui/shield.rs:409
+#: src/ui/power.rs:154 src/ui/shield.rs:497
 msgid "Restart and install the update now?"
 msgstr "Riavviare e installare l'aggiornamento adesso?"
 
-#: src/ui/shield.rs:159
+#: src/ui/shield.rs:247
 msgid "System image verified"
 msgstr "Immagine di sistema verificata"
 
-#: src/ui/shield.rs:160
+#: src/ui/shield.rs:248
 msgid "Not verified yet"
 msgstr "Non ancora verificata"
 
-#: src/ui/shield.rs:161
+#: src/ui/shield.rs:249
 msgid "Update refused"
 msgstr "Aggiornamento rifiutato"
 
-#: src/ui/shield.rs:167
+#: src/ui/shield.rs:255
 msgid "Signed with a key of the policy in force"
 msgstr "Firmata con una chiave della policy in vigore"
 
-#: src/ui/shield.rs:168
+#: src/ui/shield.rs:256
 msgid "Not verified: installed from media"
 msgstr "Non verificata: installata da supporto"
 
-#: src/ui/shield.rs:169
+#: src/ui/shield.rs:257
 msgid "Not verified: no signature"
 msgstr "Non verificata: nessuna firma"
 
-#: src/ui/shield.rs:170
+#: src/ui/shield.rs:258
 msgid "Not verified: its key is not in the policy"
 msgstr "Non verificata: la sua chiave non è nella policy"
 
-#: src/ui/shield.rs:171
+#: src/ui/shield.rs:259
 msgid "Not verified: fetched under a permissive policy"
 msgstr "Non verificata: scaricata con una policy permissiva"
 
-#: src/ui/shield.rs:172
+#: src/ui/shield.rs:260
 msgid "Not verified: the image is outside the policy's scope"
 msgstr "Non verificata: l'immagine è fuori dall'ambito della policy"
 
-#: src/ui/shield.rs:178
+#: src/ui/shield.rs:266
 msgid "Up to date"
 msgstr "Aggiornato"
 
-#: src/ui/shield.rs:179
+#: src/ui/shield.rs:267
 msgid "An update is available; it downloads at the next check"
 msgstr "È disponibile un aggiornamento; verrà scaricato al prossimo controllo"
 
-#: src/ui/shield.rs:180
+#: src/ui/shield.rs:268
 msgid "An update is ready; it installs when you restart"
 msgstr "Un aggiornamento è pronto; si installa al riavvio"
 
-#: src/ui/shield.rs:181
+#: src/ui/shield.rs:269
 msgid "The update installs at the next restart"
 msgstr "L'aggiornamento si installa al prossimo riavvio"
 
-#: src/ui/shield.rs:182
+#: src/ui/shield.rs:270
 msgid "The last update was refused by the policy"
 msgstr "L'ultimo aggiornamento è stato rifiutato dalla policy"
 
-#: src/ui/shield.rs:184
+#: src/ui/shield.rs:272
 msgid "You went back from the newest version; only a newer one is offered"
 msgstr "Sei tornato indietro dalla versione più recente; verrà proposta solo una versione più nuova"
 
-#: src/ui/shield.rs:186
+#: src/ui/shield.rs:274
 msgid "This version is older than one this machine has run"
 msgstr "Questa versione è più vecchia di una già avviata su questa macchina"
 
-#: src/ui/shield.rs:193
+#: src/ui/shield.rs:281
 msgid "The last check failed: network error"
 msgstr "L'ultimo controllo è fallito: errore di rete"
 
-#: src/ui/shield.rs:194
+#: src/ui/shield.rs:282
 msgid "The last check failed: registry error"
 msgstr "L'ultimo controllo è fallito: errore del registry"
 
-#: src/ui/shield.rs:195
+#: src/ui/shield.rs:283
 msgid "The last check failed: refused by the policy"
 msgstr "L'ultimo controllo è fallito: rifiutato dalla policy"
 
-#: src/ui/shield.rs:196
+#: src/ui/shield.rs:284
 msgid "The last check failed: storage error"
 msgstr "L'ultimo controllo è fallito: errore di archiviazione"
 
-#: src/ui/shield.rs:197
+#: src/ui/shield.rs:285
 msgid "The last check failed: internal error"
 msgstr "L'ultimo controllo è fallito: errore interno"
 
-#: src/ui/shield.rs:203
+#: src/ui/shield.rs:291
 msgid "No trust state yet: the first check has not run"
 msgstr "Nessuno stato di fiducia: il primo controllo non è ancora avvenuto"
 
-#: src/ui/shield.rs:205
+#: src/ui/shield.rs:293
 msgid "The trust state file is not owned by the system and was ignored"
 msgstr "Il file dello stato di fiducia non appartiene al sistema ed è stato ignorato"
 
-#: src/ui/shield.rs:207
+#: src/ui/shield.rs:295
 msgid "The trust state file could not be read"
 msgstr "Impossibile leggere il file dello stato di fiducia"
 
-#: src/ui/shield.rs:213
+#: src/ui/shield.rs:301
 msgid "Not authorised"
 msgstr "Non autorizzato"
 
-#: src/ui/shield.rs:214
+#: src/ui/shield.rs:302
 msgid "Another update request is running"
 msgstr "È in corso un'altra richiesta di aggiornamento"
 
-#: src/ui/shield.rs:216
+#: src/ui/shield.rs:304
 msgid "Nothing is downloaded yet; the update downloads at the next check"
 msgstr "Non c'è ancora nulla di scaricato; l'aggiornamento verrà scaricato al prossimo controllo"
 
-#: src/ui/shield.rs:218
+#: src/ui/shield.rs:306
 msgid "There is no previous version to go back to"
 msgstr "Non c'è una versione precedente a cui tornare"
 
-#: src/ui/shield.rs:219
+#: src/ui/shield.rs:307
 msgid "A program is blocking the restart; close it and try again"
 msgstr "Un programma impedisce il riavvio; chiudilo e riprova"
 
-#: src/ui/shield.rs:220
+#: src/ui/shield.rs:308
 msgid "The request failed; the system journal says why"
 msgstr "La richiesta è fallita; il registro di sistema ne spiega il motivo"
 
-#: src/ui/shield.rs:221
+#: src/ui/shield.rs:309
 msgid "The update service did not answer"
 msgstr "Il servizio di aggiornamento non ha risposto"
 
-#: src/ui/shield.rs:282
+#: src/ui/shield.rs:370
 #, rust-format
 msgid "Version {version}"
 msgstr "Versione {version}"
 
-#: src/ui/shield.rs:287
+#: src/ui/shield.rs:375
 #, rust-format
 msgid "Built on {date}"
 msgstr "Compilata il {date}"
 
-#: src/ui/shield.rs:293
+#: src/ui/shield.rs:381
 #, rust-format
 msgid "Last checked on {date}"
 msgstr "Ultimo controllo il {date}"
 
-#: src/ui/shield.rs:294
+#: src/ui/shield.rs:382
 msgid "Never checked"
 msgstr "Mai controllato"
 
-#: src/ui/shield.rs:300
+#: src/ui/shield.rs:388
 #, rust-format
 msgid "Host: {host}"
 msgstr "Host: {host}"
 
-#: src/ui/shield.rs:304
+#: src/ui/shield.rs:392
 msgid "Signature policy in force"
 msgstr "Policy delle firme in vigore"
 
-#: src/ui/shield.rs:306
+#: src/ui/shield.rs:394
 msgid "Signature policy not in force"
 msgstr "Policy delle firme non in vigore"
 
-#: src/ui/shield.rs:309
+#: src/ui/shield.rs:397
 msgid "The policy is the one Athanor ships"
 msgstr "La policy è quella fornita da Athanor"
 
-#: src/ui/shield.rs:311
+#: src/ui/shield.rs:399
 msgid "The policy was changed on this machine"
 msgstr "La policy è stata modificata su questa macchina"
 
-#: src/ui/shield.rs:314
+#: src/ui/shield.rs:402
 msgid "Secure Boot on"
 msgstr "Secure Boot attivo"
 
-#: src/ui/shield.rs:316
+#: src/ui/shield.rs:404
 msgid "Secure Boot off: this machine runs in the declared degraded mode"
 msgstr "Secure Boot disattivo: questa macchina funziona nella modalità degradata dichiarata"
 
-#: src/ui/shield.rs:376
+#: src/ui/shield.rs:464
 msgid "Go back to the previous version"
 msgstr "Torna alla versione precedente"
 
-#: src/ui/shield.rs:415
+#: src/ui/shield.rs:503
 msgid "Go back to the previous version and restart? This asks for an administrator's password."
 msgstr "Tornare alla versione precedente e riavviare? Serve la password di un amministratore."
 
-#: src/ui/shield.rs:416
+#: src/ui/shield.rs:504
 msgid "Go back"
 msgstr "Torna indietro"
 
