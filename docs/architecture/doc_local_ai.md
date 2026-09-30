@@ -1,6 +1,8 @@
 # Athanor local AI: direction
 
-Status: **revision 1, 2026-09-30, awaiting the maintainer's approval.** It records one decision the maintainer took on 2026-09-30 and proposes the rest. Nothing in it is implemented, and it changes no file outside itself: section 7 lists the changes other files would take.
+Status: **revision 2, 2026-09-30, awaiting the maintainer's approval.** It records one decision the maintainer took on 2026-09-30 and proposes the rest. Nothing in it is implemented, and it changes no file outside itself: section 7 lists the changes other files would take.
+
+Revision 1 was checked the same day against an audit of the shell, the forge and the kernel build on `iso-v0`. Revision 2 corrects what the audit showed wrong (the microphone path, the shipping of models, the fuzz setup, the tier of a stub) and adds package A0, the prerequisites the audit found missing. The direction did not change.
 
 The decision, in the maintainer's words translated: a light local AI of this kind is wanted: a tool-call model (Needle), wake word and voice activity detection, speech recognition, embeddings, speech synthesis, and possibly Laya.
 
@@ -14,8 +16,16 @@ The document does not change the objective of `NEXT.md` (an ISO that boots and s
 
 - `athanor-ai-daemon` is outside the workspace and is built by nothing. Its weights loader allocates zero-filled quantized tensors and reports the model as loaded; its DRM lease returns "unimplemented"; its answer to a query is a formatted string. It carries `.expect` calls and direct dependency versions (`candle-core`, `vulkano`, `openvino`). It is not a base to build on.
 - `athanor-ui-agent` is a Python daemon that asks Ollama and `llama3.2:1b` for widgets and writes `widgets.json` for `athanor-shell-rs`, which is frozen (`doc_shell.md`, SH4).
-- `athanor-semantic-db` is a stub: its spec installs a script that prints one line. It is listed in `custom_packages` and `custom_tier0` of `forge/config/packages.json`, so it ships. That is a facade in the image (`doc_shell.md`, SH1).
-- The portal already implements `org.freedesktop.impl.portal.Microphone` and asks the user before granting it. Its prompt still runs through the frozen shell.
+- `athanor-semantic-db` is a stub: its spec installs a script that prints one line. It is listed in `custom_packages` and `custom_tier3` of `forge/config/packages.json`, so it ships. That is a facade in the image (`doc_shell.md`, SH1).
+- `athanor-ai-daemon` and `athanor-ui-agent` are in no tier list, so neither ships.
+
+**What the audit of 2026-09-30 found that this document depends on.** Each item is a prerequisite in package A0 (section 3).
+
+- **The microphone path is not trustworthy today.** The portal implements `org.freedesktop.impl.portal.Microphone`, but it treats the exit status 0 of `athanor-shell-rs --privacy-prompt` as "granted", keeps no state and enforces nothing. The prompt is a GTK application with a fixed application id and no `NON_UNIQUE` flag, so a second request made while the first prompt is open would be forwarded to it and exit 0. That is a path to a grant without a click; it was read in the code and not run. The prompt has no timeout. `os.athanor.Shell.SetPrivacyIndicator` is called by the portal and implemented by nobody. No microphone indicator exists.
+- **The bar builds 9 of the 16 modules of BR3.** Audio, network, Bluetooth, battery, tray, notifications and the shield are absent, and so is the notification popup. AI6's indicator and A1's offers need a bar that has them.
+- **`athanor-shelld` does not bind a notification to its sender.** `Notify` and `CloseNotification` record and check no sender, and `replaces_id` lets any process of the session replace or close another's notification. `app_name` is self-declared. An extraction offer drawn from such a notification would carry a claim of origin the shell cannot back.
+- **Landlock and the memory controller are not asserted for the main kernel.** `CONFIG_SECURITY_LANDLOCK` is set only in the microVM fragment. The main kernel inherits it from Fedora's configuration, and nothing in the boot or the profile check verifies it. There is no swap and no zram today (D15 is not implemented), KSM is on, and `zswap.enabled=1` is set on the shipped command line without a swap device.
+- **The image has no mechanism for data-only packages.** Nothing ships weights today. The tier repositories are consumed by a mutable tag without a digest, and the kernel is the only artifact pinned by digest and verified. Sources fetched at build time are pinned by URL and a `sources.sha256` file, which suits a data package.
 
 **What was learned on 2026-09-30, from secondary sources.** The environment that produced this document could not reach Hugging Face, `cactuscompute.com` or arXiv. Section 5 lists each claim and its status. None comes from a model card.
 
@@ -43,18 +53,21 @@ Out of scope: a generative chat or summarising model (section 6 records the memo
 
 A compromise of either does not give the other's reach. Neither holds a D-Bus proxy to any service that changes system state.
 
-**AI3. Confinement follows the shell's programs.** Each is a user unit hardened like `athanor-shelld.service`: `ProtectSystem=strict`, `NoNewPrivileges`, `SystemCallFilter=@system-service`, restricted namespaces and realtime, a memory budget with `MemoryHigh` and `MemoryMax` taken from a measurement, and Landlock applied at start (`doc_bar.md`, BR1). `athanor-inference` adds `RestrictAddressFamilies=AF_UNIX` and `IPAddressDeny=any`; `athanor-voice` has the same and reads the microphone only through PipeWire's socket. Whether a runtime needs `MemoryDenyWriteExecute` relaxed is a spike finding, not an assumption. Whether the inference service should also launch inside a Gatekeeper compartment is a question for the maintainer, because the Gatekeeper is not edited without asking (`CLAUDE.md`); this document does not depend on it.
+**AI3. Confinement follows the shell's programs.** Each is a user unit hardened like `athanor-shelld.service`: `ProtectSystem=strict`, `NoNewPrivileges`, `SystemCallFilter=@system-service`, restricted namespaces and realtime, a memory budget with `MemoryHigh` and `MemoryMax` taken from a measurement, and Landlock applied at start (`doc_bar.md`, BR1). Landlock is a fail-closed requirement, so package A0 first makes the kernel assert it (section 3). `athanor-inference` adds `RestrictAddressFamilies=AF_UNIX` and `IPAddressDeny=any`; `athanor-voice` has the same and reads the microphone only through PipeWire's socket. Whether a runtime needs `MemoryDenyWriteExecute` relaxed is a spike finding, not an assumption. Whether the inference service should also launch inside a Gatekeeper compartment is a question for the maintainer, because the Gatekeeper is not edited without asking (`CLAUDE.md`); this document does not depend on it.
 
 **AI4. Models are signed data with a manifest.**
 
-- Weights ship read-only under `/usr/share/athanor/models/`, in the image, or as separate OCI artifacts signed with the project's cosign key (`doc_update_trust.md`). They are never downloaded at run time and never read from a user-writable path. A user-supplied model is not in version 1.
+- **Weights ship inside the image, as data packages.** Each is a `noarch` spec in `forge/specs/` whose source is fetched at build time from a pinned revision and checked against `sources.sha256`, the mechanism `fetch_sources.sh` already provides. It installs read-only under `/usr/share/athanor/models/` and travels through the tier flow like any package, so the image's own signature and update path cover it (`doc_update_trust.md`). Separate cosign-signed OCI artifacts are not in version 1: the signing and policy wiring covers image digests only, and would need new work.
+- Weights are never downloaded at run time and never read from a user-writable path. A user-supplied model is not in version 1.
+- **The service verifies what it loads, and does not trust the path.** The tier repositories reach the image build by a mutable tag, so the digest check in the manifest is the control, not the package manager. The manifest is itself a file of the image.
 - A manifest lists, per model, the digest, the licence, the source repository and revision, the languages verified and the runtime it needs. A service refuses a model whose digest is not in its manifest.
+- Image size grows with the weights (tens of MB for Needle, a recogniser and a voice; hundreds of MB for a dedicated embedding model). The plan of each package states its size and whether it is optional, and only the capabilities a user enables are loaded.
 - Only models under Apache-2.0, MIT or an equivalent permissive licence ship. A new check in `scripts/verify.py` fails when a manifest names another licence.
 
 **AI5. The tool registry is the capability boundary, and there are two paths.**
 
 - **Path A, the user's own utterance** (typed in the launcher, or transcribed from the microphone). C1 may propose a tool call.
-- **Path B, third-party text** (notifications, clipboard, files). C1 may only extract typed data, which the interface offers as a button the user presses ("Copy code", "Open link"). No tool with an effect runs from path B, whatever the text says.
+- **Path B, third-party text** (notifications, clipboard, files). C1 may only extract typed data, which the interface offers as a button the user presses ("Copy code", "Open link"). No tool with an effect runs from path B, whatever the text says. An offer names its source, and a notification offers one only when `athanor-shelld` has bound the notification to its sender (package A0); until then the offer is not shown.
 
 The registry is a closed list in the repository, generated into Needle's schemas at build time. Each tool declares its typed arguments and one effect class:
 
@@ -74,7 +87,7 @@ Rules that hold for every tool:
 
 **AI6. The microphone has one path and one indicator.**
 
-- Capture goes through PipeWire and through the portal's Microphone interface. The wake word and voice activity stage is the only stage that runs while the user is not speaking to the machine; it is small, runs on the CPU, and exists only while the user has enabled voice control.
+- Capture goes through PipeWire and through the portal's Microphone interface, once package A0 has made the portal's grant a real one: an explicit affirmative answer, never an exit status, with a timeout, a single prompt instance and a stored decision. Until then `athanor-voice` does not ship. The wake word and voice activity stage is the only stage that runs while the user is not speaking to the machine; it is small, runs on the CPU, and exists only while the user has enabled voice control.
 - Audio lives in memory, is never written to disk and is discarded once transcribed. Only text leaves `athanor-voice`.
 - The bar shows a microphone indicator whenever a capture stream is open. It reads the state of PipeWire's stream, not the voice program's own report, so a program that lies cannot hide it. A toggle in the bar closes the stream at once and respects a hardware mute.
 
@@ -96,6 +109,7 @@ Rules that hold for every tool:
 
 - All six capabilities together stay within a resident budget the first measurement fixes, proposed at 1 GB. Models load on use and unload after an idle period the plan states; the wake word and voice activity models stay loaded while voice control is on.
 - The recommended hardware stays 8 GiB. On a machine with less, the capabilities are off by default and Settings says why.
+- The budget must hold with no swap, which is the state today. If D15 (zram) lands, the budget may relax; it is never planned on it.
 - Version 1 runs on the CPU and needs no GPU or NPU. Offload is a later specification, and this document retires the "0 % CPU" claim of `athanor-ai-daemon`.
 
 **AI11. The residues go.** The proposal, for the maintainer to approve because it retires code: `athanor-ai-daemon` and `athanor-ui-agent` are deleted when the first package of this document ships; `athanor-semantic-db` leaves `forge/config/packages.json` now, and returns as a real package with AI8.
@@ -113,15 +127,16 @@ Each spike produces an answer, not code we keep. Each package has its own plan.
 | N3 | Speech synthesis through speech-dispatcher with Orca | Which voice covers both locales; latency to first audio |
 | N4 | Laya against a rule baseline on a labelled notification sample | AI9's gate |
 
-N1 to N3 run as soon as the environment can reach the weights. N4 waits for real notifications from `athanor-shelld`.
+N1 to N3 run on the maintainer's own machine, the environment that reaches Hugging Face; the container that produced this document does not. Each reports its answer in a note under `docs/superpowers/`, with the machine's CPU and memory. N4 waits for real notifications from `athanor-shelld`.
 
 ### Packages
 
 | Package | Delivers | Gated by |
 |---|---|---|
-| **A1. Inference service and extraction** | `athanor-inference`, the model manifest and its check, the registry generator, extraction offers in the notification popups of the bar | N1; stage 2b |
+| **A0. Prerequisites** | four independent fixes, each useful without this document: **(a)** the portal's privacy grant: an explicit affirmative answer instead of an exit status, one prompt instance, a timeout, a stored decision, and the prompt moved out of the frozen shell; **(b)** a microphone and camera indicator in the bar, read from PipeWire's stream state, replacing the unimplemented `SetPrivacyIndicator`; **(c)** sender binding in `athanor-shelld`, so a notification can be replaced or closed only by the process that sent it; **(d)** the kernel asserts `CONFIG_SECURITY_LANDLOCK`, the `lsm=` list and the memory controller in `kernel-local`, and `athanor-profile-check` verifies them at boot | none; (b) needs the audio module of BR3 |
+| **A1. Inference service and extraction** | `athanor-inference`, the model manifest and its check, the model data packages, the registry generator, extraction offers in the notification popups of the bar | N1; A0 (c) and (d); stage 2b |
 | **A2. Commands** | typed commands in the launcher, and settings search | A1; stages 3 and 6 |
-| **A3. Voice** | `athanor-voice`, the microphone indicator module of the bar, the voice-control switch | N2; A1 |
+| **A3. Voice** | `athanor-voice`, the voice-control switch | N2; A0 (a), (b) and (d); A1 |
 | **A4. Speech** | the speech-dispatcher module | N3 |
 | **A5. Semantic index** | the index of AI8 | A1; stage 3 |
 
@@ -131,7 +146,8 @@ N1 to N3 run as soon as the environment can reach the weights. N4 waits for real
 - **Text as an attack.** A notification can carry instructions. AI5's path B makes them data. The plan of A1 includes an injection corpus in its tests.
 - **Weights as a supply chain.** Weights are data that can carry behaviour, whoever trained them. Provenance by digest and the closed registry bound the damage: even a model that misbehaves can only call what the registry lists.
 - **A misheard command.** Recognition errors are certain to happen. The threshold, the effect classes and the rule that voice never confirms are what keep a mishearing harmless.
-- **The runtime.** A C or foreign-function runtime is `unsafe` code beside `panic = "abort"`. It goes in one small crate; its input path is fuzzed with the existing `tests/fuzz` setup; a crash costs a restart of one unit, not the session.
+- **The runtime.** A C or foreign-function runtime is `unsafe` code beside `panic = "abort"`. It goes in one small crate; its input path gets a `fuzz/` directory in the crate, the layout `forge/scripts/run_fuzz.sh` runs (the `tests/fuzz` that `fuzzing.yml` and the workspace `exclude` name does not exist in the tree, and the plan of A1 fixes or drops that reference); a crash costs a restart of one unit, not the session.
+- **The shell that would host the offers is unfinished.** The audit found the bar building 9 of 16 modules, and no notification popup. A0 and A1 do not run ahead of stage 2b, and a surface that would be a facade does not ship (`doc_shell.md`, SH1).
 - **Memory on 8 GiB.** The budget of AI10 is a proposal. The first measurement may lower it or turn a capability off on small machines.
 - **Accessibility.** Voice control must not displace Orca or the keyboard. Every new surface exposes a role and a name (`doc_shell.md`, SH13).
 
@@ -166,12 +182,15 @@ N1 to N3 run as soon as the environment can reach the weights. N4 waits for real
 - `forge/config/packages.json`: `athanor-semantic-db` leaves `custom_packages` and `custom_tier0` (AI11).
 - `forge/specs/athanor-ai-daemon` and `forge/specs/athanor-ui-agent`: deleted at the first package (AI11), by the maintainer's decision.
 - `scripts/verify.py`: two checks, the licence of every manifest entry (AI4) and the absence of `forbidden` actions in the registry (AI5).
+- `forge/specs/athanor-xdg-desktop-portal-athanor`, `forge/specs/athanor-shelld`, `forge/specs/azoth/kernel-local` and `athanor-kernel-profile`: the changes of A0. Each is a fix of a defect the audit found, and none waits for the rest of this document.
+- The audit's other findings (the DAG that rebuilds every node, the tier repositories consumed by tag, the `kernel-build.yml` identity that accepts any branch, the shipped command line that contradicts D15 and D16) are outside this document and are reported to the maintainer separately.
 - `NEXT.md`: unchanged.
 
 ## 8. Acceptance
 
 For each package, on the dev VM and on the maintainer's desktop upgraded in place. The plan of the package states every number.
 
+0. **A0:** a second privacy request made while a prompt is open cannot produce a grant; a prompt that is dismissed, times out or fails answers "denied"; a notification can be replaced or closed only by its sender; the boot check fails when Landlock or the memory controller is missing.
 1. On a fresh install no model process is resident and nothing holds the microphone.
 2. With voice control on, the bar shows the microphone indicator while PipeWire holds an open capture stream from `athanor-voice`, and removes it after the stream closes; the toggle closes the stream. Checked in the rig with a null source.
 3. A tool call from an utterance is validated against the schema, runs through D-Bus and polkit, and a request for a `forbidden` action is refused before any bus call.
