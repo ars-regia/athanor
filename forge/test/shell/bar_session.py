@@ -14,7 +14,8 @@ Beside logind, a fake os.athanor.Update1 answers Apply and GoBack and logs them 
 as "Apply" and "GoBack". While /tmp/athanor-update-refuse names an os.athanor.Update1 error
 (e.g. "Blocked"), it refuses with that error instead. It answers State, unlogged, with the
 state file's text, or NoState when there is none; while /tmp/athanor-update-state-error names
-an error (e.g. "Untrusted"), State fails with it instead. --trust-state writes one of
+an error (e.g. "Untrusted", or a whole name such as "org.freedesktop.DBus.Error.NoReply" for
+a service that does not answer), State fails with it instead. --trust-state writes one of
 trust_state.py's state files, "verified" by default, before the bar starts. The fake runs as
 root in the container, so the bar's check that root answered holds; it owns the name with
 ALLOW_REPLACEMENT, so shield_e2e.py can put an impostor of another user in its place, and
@@ -154,7 +155,8 @@ def logind(log, hang):
 def answer_state(invocation):
     if STATE_ERROR_FILE.exists():
         error = STATE_ERROR_FILE.read_text(encoding="utf-8").strip()
-        invocation.return_dbus_error(f"os.athanor.Update1.Error.{error}", error)
+        name = error if "." in error else f"os.athanor.Update1.Error.{error}"
+        invocation.return_dbus_error(name, error)
     elif trust_state.PATH.exists():
         text = trust_state.PATH.read_text(encoding="utf-8")
         invocation.return_value(GLib.Variant("(s)", (text,)))

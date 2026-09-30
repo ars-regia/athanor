@@ -24,8 +24,12 @@ use super::popup::Popup;
 use super::{Bar, Changed, ModuleUi};
 use crate::i18n::{tr, tr_with};
 
-/// The badge ages: "checked within 14 days" turns false without the file changing.
-const AGE_CHECK_SECS: u32 = 3600;
+/// The state is asked again every hour: the badge ages ("checked within 14 days" turns false
+/// without the file changing), and a directory watch that failed or missed an event heals.
+const ASK_AGAIN_SECS: u32 = 3600;
+/// After no answer, the next questions come this many seconds later, then hourly: a service
+/// slow to start under the login's load must not leave the shield unverified for hours.
+const RETRY_SECS: [u32; 3] = [5, 30, 300];
 
 fn now() -> i64 {
     SystemTime::now()
@@ -35,13 +39,17 @@ fn now() -> i64 {
         })
 }
 
-/// The state, asked of the update service at start and whenever the file's directory changes
-/// (the system side renames a new file into place, UT7); the badge is aged once an hour.
+/// The state, asked of the update service at start, every hour, whenever the file's directory
+/// changes (the system side renames a new file into place, UT7), and soon again after no answer.
 pub struct Trust {
     bar: Weak<Bar>,
     read: RefCell<Result<State, ReadError>>,
     /// The number of the latest question: an older answer arriving late is dropped.
     asked: Cell<u64>,
+    /// The questions left unanswered in a row, which pick the next retry's delay.
+    unanswered: Cell<usize>,
+    /// A retry is scheduled: a burst of unanswered questions waits for it, not for more.
+    retrying: Cell<bool>,
     /// The last refusal of Apply or GoBack, shown in the sheet until the sheet closes.
     refusal: Cell<Option<Refusal>>,
     _monitor: Option<gio::FileMonitor>,
@@ -69,10 +77,10 @@ impl Trust {
                     }
                 });
             }
-            let aging = me.clone();
-            glib::timeout_add_seconds_local(AGE_CHECK_SECS, move || match aging.upgrade() {
+            let hourly = me.clone();
+            glib::timeout_add_seconds_local(ASK_AGAIN_SECS, move || match hourly.upgrade() {
                 Some(trust) => {
-                    trust.changed();
+                    trust.reload();
                     glib::ControlFlow::Continue
                 }
                 None => glib::ControlFlow::Break,
@@ -82,6 +90,8 @@ impl Trust {
                 // Until the service answers, nothing backs the badge.
                 read: RefCell::new(Err(ReadError::Io(std::io::ErrorKind::NotConnected))),
                 asked: Cell::new(0),
+                unanswered: Cell::new(0),
+                retrying: Cell::new(false),
                 refusal: Cell::new(None),
                 _monitor: monitor,
             }
@@ -98,8 +108,32 @@ impl Trust {
             let read = ask_state().await;
             let Some(trust) = me.upgrade() else { return };
             if trust.asked.get() == question {
+                let answered = !matches!(read, Err(ReadError::Io(_)));
                 *trust.read.borrow_mut() = read;
                 trust.changed();
+                trust.retry(answered);
+            }
+        });
+    }
+
+    /// After no answer, asks again after the next of `RETRY_SECS`; the hourly question
+    /// takes over once they are spent.
+    fn retry(self: &Rc<Self>, answered: bool) {
+        if answered {
+            self.unanswered.set(0);
+            return;
+        }
+        let missed = self.unanswered.get();
+        let Some(&delay) = RETRY_SECS.get(missed) else { return };
+        if self.retrying.replace(true) {
+            return;
+        }
+        self.unanswered.set(missed + 1);
+        let me = Rc::downgrade(self);
+        glib::timeout_add_seconds_local_once(delay, move || {
+            if let Some(trust) = me.upgrade() {
+                trust.retrying.set(false);
+                trust.reload();
             }
         });
     }

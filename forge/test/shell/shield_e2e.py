@@ -235,6 +235,26 @@ def main():
         toggle_sheet(app, Atspi, False)
     STATE_ERROR_FILE.unlink()
 
+    # No answer is asked again 5 s later, without the file changing.
+    trust_state.write("verified")
+    check(
+        "the shield is verified before the service stops answering",
+        wait_for(lambda: shield_named(app, Atspi, "System image verified"), 3),
+    )
+    STATE_ERROR_FILE.write_text("org.freedesktop.DBus.Error.NoReply\n", encoding="utf-8")
+    trust_state.write("verified")
+    check(
+        "no answer names the shield 'Not verified yet'",
+        wait_for(lambda: shield_named(app, Atspi, "Not verified yet"), 3),
+    )
+    # The questions the rename's events started are answered by now; only a retry asks again.
+    time.sleep(1)
+    STATE_ERROR_FILE.unlink()
+    check(
+        "the shield asks again on its own and reads verified",
+        wait_for(lambda: shield_named(app, Atspi, "System image verified"), 10),
+    )
+
     # Only root's answer is trusted: a verified state from another user is not.
     impostor = subprocess.Popen(
         [
