@@ -86,12 +86,13 @@ class Presets(unittest.TestCase):
 
 
 class Bus(unittest.TestCase):
-    def test_the_bus_policy_allows_two_members_and_introspection_only(self):
+    def test_the_bus_policy_allows_three_members_and_introspection_only(self):
         doc = xml.dom.minidom.parse(str(SOURCES / "usr/share/dbus-1/system.d/os.athanor.Update1.conf"))
         allows = [dict(node.attributes.items()) for node in doc.getElementsByTagName("allow")]
         sends = [a for a in allows if "send_destination" in a]
         self.assertEqual(sorted((a["send_interface"], a["send_member"]) for a in sends),
-                         [("org.freedesktop.DBus.Introspectable", "Introspect"), ("os.athanor.Update1", "Apply"), ("os.athanor.Update1", "GoBack")])
+                         [("org.freedesktop.DBus.Introspectable", "Introspect"), ("os.athanor.Update1", "Apply"), ("os.athanor.Update1", "GoBack"),
+                          ("os.athanor.Update1", "State")])
         self.assertTrue(all(a["send_destination"] == "os.athanor.Update1" for a in sends))
         self.assertEqual([a for a in allows if "own" in a], [{"own": "os.athanor.Update1"}])
 
