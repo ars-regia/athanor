@@ -14,7 +14,8 @@ Requires:       athanor-update >= 1.0.0-2
 One layer-shell surface per output, laid out by the preset of the user's layout
 document: the launcher, application-library and workspaces buttons, running
 applications with favourites, the input source, accessibility, tiling, audio with
-media controls, Bluetooth, network, battery, the clock and the power menu. Starts applications behind a Wayland security context, is confined
+media controls, Bluetooth, network, battery, the clock, the power menu with Restart to
+update, and the trust shield with its sheet. Starts applications behind a Wayland security context, is confined
 with Landlock, and falls back to the vendor layout after five failures in ten minutes.
 Not enabled: until the switch of stage 2 the user enables athanor-bar.service by hand.
 
