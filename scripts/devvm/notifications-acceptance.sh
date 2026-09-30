@@ -119,12 +119,20 @@ stage_deploy() {
         "$BAR_DATA/athanor-bar.service:/usr/lib/systemd/user/athanor-bar.service" \
         "$BAR_DATA/favorites.toml:/usr/share/athanor/favorites.toml" \
         "$SHELLD_DATA/athanor-shelld.service:/usr/lib/systemd/user/athanor-shelld.service" > /dev/null
-    # dbus-broker-launch runs only under socket activation (see shelld-acceptance.sh).
+    # dbus-broker-launch runs only under socket activation (see shelld-acceptance.sh). Its
+    # bus declares no activatable service: with the session's service directories, GTK's
+    # start-up calls to a portal or the AT-SPI bus would ask this bus to activate a service
+    # that systemd runs on the session bus, and wait out the D-Bus timeout for a name that
+    # never appears here, past the bar's TimeoutStartSec.
+    printf '%s\n' '<busconfig>' '  <type>session</type>' '  <policy context="default">' \
+        '    <allow send_destination="*" eavesdrop="true"/>' '    <allow eavesdrop="true"/>' \
+        '    <allow own="*"/>' '  </policy>' '</busconfig>' |
+        in_session "mkdir -p ~/.config/systemd/user && cat > ~/.config/systemd/user/$BUS_UNIT.conf"
     printf '%s\n' '[Socket]' "ListenStream=%t/$BUS_UNIT" |
-        in_session "mkdir -p ~/.config/systemd/user && cat > ~/.config/systemd/user/$BUS_UNIT.socket"
+        in_session "cat > ~/.config/systemd/user/$BUS_UNIT.socket"
     printf '%s\n' '[Unit]' "Requires=$BUS_UNIT.socket" "After=$BUS_UNIT.socket" '' '[Service]' \
         'Type=notify-reload' "Sockets=$BUS_UNIT.socket" \
-        'ExecStart=/usr/bin/dbus-broker-launch --scope user' |
+        "ExecStart=/usr/bin/dbus-broker-launch --scope user --config-file %h/.config/systemd/user/$BUS_UNIT.conf" |
         in_session "cat > ~/.config/systemd/user/$BUS_UNIT.service"
     local unit
     for unit in athanor-bar athanor-shelld; do
@@ -249,7 +257,8 @@ stage_cleanup() {
     fi
     in_session "rm -f ~/.config/systemd/user/athanor-bar.service.d/$DROP_IN \
     ~/.config/systemd/user/athanor-shelld.service.d/$DROP_IN \
-    ~/.config/systemd/user/$BUS_UNIT.socket ~/.config/systemd/user/$BUS_UNIT.service" || {
+    ~/.config/systemd/user/$BUS_UNIT.socket ~/.config/systemd/user/$BUS_UNIT.service \
+    ~/.config/systemd/user/$BUS_UNIT.conf" || {
         echo "cleanup: removing the drop-ins and the private-bus unit files failed" >&2
         failed=1
     }
