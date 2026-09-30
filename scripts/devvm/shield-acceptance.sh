@@ -5,14 +5,17 @@
 # state and closes on a click outside it and when the focus moves to another window
 # (section 5, item 13). Escape is not checked: a sheet opened through AT-SPI has no
 # keyboard grab, and the click on the shield that would give it one needs a pointer QEMU's
-# monitor cannot move under egl-headless. The state stage checks that the unit trusts the root-owned state file.
+# monitor cannot move under egl-headless. The state stage checks that the unit trusts the state
+# root's os.athanor.Update1 answers with, and that the update service exits idle after the call.
 # No stage presses Restart to update or Go back.
 # athanor-shelld is masked for the run, as in bar-acceptance.sh: COSMIC owns its bus names
 # in this session. athanor-update-check.timer and athanor-update-state.service are masked
 # too, so nothing rewrites the fixture; cleanup unmasks them and republishes the real
 # state with athanor-update-state.service.
 # Deploys the binary and the unit from .scratch/shell-rig/bin and forge/specs/athanor-bar
-# (build the binary with forge/test/shell/rig.sh build-bar). With no argument it runs every
+# (build the binary with forge/test/shell/rig.sh build-bar), and athanor-update with its bus
+# policy from .scratch/shell-rig/target/release and forge/specs/athanor-update (build it with
+# forge/test/shell/rig.sh cargo build --locked --release -p athanor-update). With no argument it runs every
 # stage in order; with arguments, only those, in the order given. Prints PASS <stage> or
 # FAIL <stage>: <what was read>, and exits non-zero on the first failure. Cleanup always
 # runs on exit, through a trap. Screenshots go to .scratch/shield-acceptance/.
@@ -24,6 +27,9 @@ ROOT=$(cd "$HERE/../.." && pwd)
 source "$HERE/devvm.env"
 
 BIN=$ROOT/.scratch/shell-rig/bin
+UPDATE_BIN=$ROOT/.scratch/shell-rig/target/release/athanor-update
+UPDATE_POLICY=$ROOT/forge/specs/athanor-update/SOURCES/usr/share/dbus-1/system.d/os.athanor.Update1.conf
+IDLE_EXIT_SECONDS=90 # the service's 60 s idle limit, polled every 5 s, plus margin
 DATA=$ROOT/forge/specs/athanor-bar/athanor-bar-1.0.0/data
 SHOTS=$ROOT/.scratch/shield-acceptance
 STAGES=(deploy sheet state cleanup)
@@ -96,10 +102,18 @@ write_state() { # write_state NAME
 
 stage_deploy() {
     [[ -x $BIN/athanor-bar ]] || fail "no $BIN/athanor-bar: run forge/test/shell/rig.sh build-bar"
+    [[ -x $UPDATE_BIN ]] ||
+        fail "no $UPDATE_BIN: run forge/test/shell/rig.sh cargo build --locked --release -p athanor-update"
     mkdir -p "$SHOTS"
     "$HERE/deploy.sh" \
         "$BIN/athanor-bar:/usr/bin/athanor-bar" \
-        "$DATA/athanor-bar.service:/usr/lib/systemd/user/athanor-bar.service" > /dev/null
+        "$DATA/athanor-bar.service:/usr/lib/systemd/user/athanor-bar.service" \
+        "$UPDATE_BIN:/usr/bin/athanor-update" \
+        "$UPDATE_POLICY:/usr/share/dbus-1/system.d/os.athanor.Update1.conf" > /dev/null
+    # The new policy allows State(); the next call activates the new binary.
+    guest_ssh "sudo busctl call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus ReloadConfig &&
+        sudo systemctl stop athanor-update.service" > /dev/null ||
+        fail "reloading the system bus policy and stopping athanor-update.service"
     in_session systemctl --user mask --runtime athanor-shelld.service > /dev/null ||
         fail "systemctl --user mask --runtime athanor-shelld.service"
     in_session systemctl --user daemon-reload
@@ -132,15 +146,20 @@ stage_sheet() {
     in_session systemctl --user stop "$SETTINGS_UNIT" || fail "stopping cosmic-settings"
 }
 
-# BR6 in the real unit: the shield trusts the root-owned state the system publishes.
+# BR6 in the real unit: the shield trusts the state root's update service answers with, and
+# the service, activated by the call, still exits once idle.
 stage_state() {
     [[ $(unit is-active) == active ]] || fresh_start
     write_state verified
-    probe showing "System image verified" && return 0
-    local map
-    map=$(in_session "cat /proc/\$(systemctl --user show -p MainPID --value athanor-bar)/uid_map")
-    fail "the shield is not 'System image verified' on a root-owned 0644 verified state;" \
-        "the unit's uid_map is '$(xargs <<< "$map")', so root reads as the overflow uid"
+    probe showing "System image verified" ||
+        fail "the shield is not 'System image verified' on a root-owned 0644 verified state"
+    local waited=0
+    until [[ $(guest_ssh "systemctl show -p ActiveState --value athanor-update.service") == inactive ]]; do
+        ((waited < IDLE_EXIT_SECONDS)) ||
+            fail "athanor-update.service still active ${IDLE_EXIT_SECONDS}s after the shield's State() call"
+        sleep 5
+        ((waited += 5))
+    done
 }
 
 stage_cleanup() {
