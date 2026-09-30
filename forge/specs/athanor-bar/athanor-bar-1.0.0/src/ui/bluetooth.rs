@@ -662,6 +662,10 @@ struct View {
     asking: Cell<bool>,
     updating: Cell<bool>,
     pending_open: Cell<bool>,
+    /// The devices the two lists show: they are rebuilt only when these change, not on
+    /// every signal (an RSSI update while discovering), which would take the keyboard
+    /// focus off a row.
+    shown: RefCell<(Vec<Device>, Vec<Device>)>,
 }
 
 fn clear(container: &gtk4::Box) {
@@ -743,6 +747,7 @@ impl View {
             asking: Cell::new(false),
             updating: Cell::new(false),
             pending_open: Cell::new(false),
+            shown: RefCell::new((Vec::new(), Vec::new())),
         });
         view.connect_handlers(&cancel);
         view
@@ -801,13 +806,23 @@ impl View {
         self.updating.set(true);
         self.power.set_active(state.powered);
         self.updating.set(false);
-        clear(&self.paired);
-        for device in &state.paired {
-            self.paired.append(&self.device_row(device));
+        let changed = {
+            let shown = self.shown.borrow();
+            (shown.0 != state.paired, shown.1 != state.nearby)
+        };
+        if changed.0 {
+            clear(&self.paired);
+            for device in &state.paired {
+                self.paired.append(&self.device_row(device));
+            }
+            self.shown.borrow_mut().0 = state.paired.clone();
         }
-        clear(&self.nearby);
-        for device in &state.nearby {
-            self.nearby.append(&self.device_row(device));
+        if changed.1 {
+            clear(&self.nearby);
+            for device in &state.nearby {
+                self.nearby.append(&self.device_row(device));
+            }
+            self.shown.borrow_mut().1 = state.nearby.clone();
         }
         self.paired.set_visible(state.powered);
         self.nearby_title

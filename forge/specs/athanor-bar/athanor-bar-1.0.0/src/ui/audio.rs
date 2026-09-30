@@ -448,6 +448,9 @@ struct Channel {
     mute: gtk4::Switch,
     devices: gtk4::Box,
     chosen: RefCell<Option<String>>,
+    /// What the device rows show, (name, label, in use): they are rebuilt only when it
+    /// changes, not on every volume step, which would take the keyboard focus off them.
+    shown: RefCell<Vec<(String, String, bool)>>,
 }
 
 impl Channel {
@@ -473,6 +476,7 @@ impl Channel {
             mute,
             devices,
             chosen: RefCell::new(None),
+            shown: RefCell::new(Vec::new()),
         }
     }
 
@@ -488,31 +492,43 @@ impl Channel {
             self.scale.set_value(device.percent);
             self.mute.set_active(device.muted);
         }
+        let rows: Vec<(String, String, bool)> = if devices.len() > 1 {
+            devices
+                .iter()
+                .map(|device| {
+                    let in_use = chosen
+                        .as_ref()
+                        .is_some_and(|chosen| chosen.name == device.name);
+                    (device.name.clone(), device.label.clone(), in_use)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if *self.shown.borrow() == rows {
+            return chosen;
+        }
         while let Some(child) = self.devices.first_child() {
             self.devices.remove(&child);
         }
-        if devices.len() > 1 {
-            for device in devices {
-                let in_use = chosen
-                    .as_ref()
-                    .is_some_and(|chosen| chosen.name == device.name);
-                let name = if in_use {
-                    tr_with("{device}, in use", "device", &device.label)
-                } else {
-                    device.label.clone()
-                };
-                let button = gtk4::Button::with_label(&name);
-                button.add_css_class("bar-row");
-                button.update_property(&[Property::Label(&name)]);
-                let (kind, target) = (self.kind, device.name.clone());
-                button.connect_clicked(move |_| {
-                    if let Some(service) = service() {
-                        service.set_default(kind, &target);
-                    }
-                });
-                self.devices.append(&button);
-            }
+        for (target, label, in_use) in &rows {
+            let name = if *in_use {
+                tr_with("{device}, in use", "device", label)
+            } else {
+                label.clone()
+            };
+            let button = gtk4::Button::with_label(&name);
+            button.add_css_class("bar-row");
+            button.update_property(&[Property::Label(&name)]);
+            let (kind, target) = (self.kind, target.clone());
+            button.connect_clicked(move |_| {
+                if let Some(service) = service() {
+                    service.set_default(kind, &target);
+                }
+            });
+            self.devices.append(&button);
         }
+        self.shown.replace(rows);
         chosen
     }
 }

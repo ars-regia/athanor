@@ -113,6 +113,7 @@ def no_password_written():
 
 
 NM_PATH = "/org/freedesktop/NetworkManager"
+ACCESS_POINT = "org.freedesktop.NetworkManager.AccessPoint"
 LAB_CONNECTION = f"{fx.NM_SETTINGS}/lab"
 SECRET_AGENT = "/org/freedesktop/NetworkManager/SecretAgent"
 AGENT_ERROR = "org.freedesktop.NetworkManager.SecretAgent."
@@ -231,6 +232,28 @@ def network(ctx):
         open_popover(app, Atspi, "Network", lambda: buttons(app, Atspi, "Athanor Lab, connected")),
     )
     check("the wired state is shown", bool(labelled(app, Atspi, "label", "Wired: connected")))
+    # The rows are rebuilt when the signal icon of a network changes, and kept when its
+    # strength moves inside the same icon: a rebuild on every update would take the
+    # keyboard focus off a row. A rebuilt row is a new accessible, at a new path.
+    def lab_row():
+        found = buttons(app, Atspi, "Athanor Lab, connected")
+        return found[0].path if found else None
+
+    def set_strength(point, strength):
+        fx.call(
+            bus, fx.NM, f"{NM_PATH}/AccessPoint/{point}", "org.freedesktop.DBus.Properties", "Set", "(ssv)",
+            (ACCESS_POINT, "Strength", GLib.Variant("y", strength)),
+        )
+
+    shown = lab_row()
+    set_strength("lab", 60)
+    check("a new signal icon rebuilds the rows", wait_for(lambda: lab_row() not in (None, shown), 5))
+    shown = lab_row()
+    set_strength("lab", 70)
+    time.sleep(1)
+    check("a strength inside the same icon keeps them", shown is not None and lab_row() == shown)
+    set_strength("lab", 82)
+    check("the strength back, the rows follow", wait_for(lambda: lab_row() not in (None, shown), 5))
     check("an open network is listed by name", bool(buttons(app, Atspi, "Corner Café")))
     campus = buttons(app, Atspi, "Campus, needs Settings")
     check(
