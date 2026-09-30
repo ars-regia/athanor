@@ -57,9 +57,10 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %changelog
 * Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-3
 - The trust shield and its sheet (doc_bar.md, BR6): the seal and header follow the state
-  os.athanor.Update1.State() returns, trusted only from root and asked again when
-  /run/athanor-update/state.json changes; the sheet names the version, the signature, the
-  update, the policy and Secure Boot, and offers Go back; popups wait while it is open.
+  os.athanor.Update1.State() returns, trusted only from root and asked again hourly, when
+  /run/athanor-update/state.json changes and soon after no answer; the sheet names the
+  version, the signature, the update, the policy and Secure Boot, and offers Go back; a
+  refusal opens it on the output that asked; popups wait while it is open.
 - Restart to update in the power menu (BR3), shown only when an update is downloaded.
   Both actions confirm first and call os.athanor.Update1.
 - Requires athanor-update 1.0.0-2 or later, the first to serve State().
