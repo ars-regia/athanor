@@ -51,8 +51,9 @@ pub struct Trust {
     asked: Cell<u64>,
     /// The questions left unanswered in a row, which pick the next retry's delay.
     unanswered: Cell<usize>,
-    /// A retry is scheduled: a burst of unanswered questions waits for it, not for more.
-    retrying: Cell<bool>,
+    /// The scheduled retry: a burst of unanswered questions waits for it, not for more, and
+    /// an answer cancels it.
+    retrying: RefCell<Option<glib::SourceId>>,
     /// The last refusal of Apply or GoBack, shown in the sheet until the sheet closes.
     refusal: Cell<Option<Refusal>>,
     _monitor: Option<gio::FileMonitor>,
@@ -94,7 +95,7 @@ impl Trust {
                 read: RefCell::new(Err(ReadError::Io(std::io::ErrorKind::NotConnected))),
                 asked: Cell::new(0),
                 unanswered: Cell::new(0),
-                retrying: Cell::new(false),
+                retrying: RefCell::new(None),
                 refusal: Cell::new(None),
                 _monitor: monitor,
             }
@@ -124,21 +125,26 @@ impl Trust {
     fn retry(self: &Rc<Self>, answered: bool) {
         if answered {
             self.unanswered.set(0);
+            if let Some(pending) = self.retrying.take() {
+                pending.remove();
+            }
             return;
         }
         let missed = self.unanswered.get();
         let Some(&delay) = RETRY_SECS.get(missed) else { return };
-        if self.retrying.replace(true) {
+        if self.retrying.borrow().is_some() {
             return;
         }
         self.unanswered.set(missed + 1);
         let me = Rc::downgrade(self);
-        glib::timeout_add_seconds_local_once(delay, move || {
+        let pending = glib::timeout_add_seconds_local_once(delay, move || {
             if let Some(trust) = me.upgrade() {
-                trust.retrying.set(false);
+                // Fired: the source is gone, so its id is forgotten, not removed.
+                trust.retrying.replace(None);
                 trust.reload();
             }
         });
+        self.retrying.replace(Some(pending));
     }
 
     fn changed(&self) {
