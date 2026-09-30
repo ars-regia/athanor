@@ -7,7 +7,7 @@
 #   rig.sh probe-sandbox    prove that bubblewrap, and with it glycin, works in the rig
 #   rig.sh css-parse        GTK parse gate over the generated stylesheets
 #   rig.sh cosmic-keys      every key COSMIC ships exists in our overlay
-#   rig.sh cosmic-preview   capture cosmic-panel and Settings under the Calmo defaults
+#   rig.sh cosmic-preview   capture COSMIC Settings' appearance page under the Calmo defaults
 #   rig.sh build-greeter    release build of athanor-greeter-ui into <out>/bin
 #   rig.sh build-layout     clippy, tests and release build of athanor-layout, the chooser and athanor-unit into <out>/bin
 #   rig.sh build-compositor-client  clippy, tests and release build of cc-probe into <out>/bin
@@ -28,9 +28,8 @@
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
 #   rig.sh atspi <greeter|chooser|bar|dock>   every interactive widget has a role and a name
 #   rig.sh rig-tests        unit tests of the rig's own scripts, against the rig's tools
-#   rig.sh cosmic-panel-defaults   COSMIC's shipped panel keys equal the renderer's fixture
-#   rig.sh chooser-e2e      press a preset in the chooser and wait for the panel configuration
-#   rig.sh surface <greeter|layout|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling|bar-popups|bar-notifications|bar-tray|dock>  capture every case of a surface and compare with the goldens
+#   rig.sh chooser-e2e      press a preset in the chooser and wait until the bar and the dock draw it (run build-bar and build-dock first)
+#   rig.sh surface <greeter|layout (run build-bar and build-dock first)|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling|bar-popups|bar-notifications|bar-tray|dock>  capture every case of a surface and compare with the goldens
 #   rig.sh update-goldens <name>   replace the goldens with a fresh capture, deliberately
 set -euo pipefail
 
@@ -126,27 +125,18 @@ seed_bar() { # seed_bar <dir> <preset> <panel> <dock or -> <light|dark>
     printf 'schema = 1\nfavorites = ["com.system76.CosmicSettings.desktop"]\n' > "$1/athanor/favorites.toml"
 }
 
+# The layout cases: the bar and the dock as the session runs them, drawing the seeded preset.
 capture_layout() {
+    require athanor-bar build-bar
+    require athanor-dock build-dock
     while IFS=$'\t' read -r tag preset panel dock scale width height; do
         tags+=("$tag")
         seed_layout "$out/seed-$tag" "$preset" "$panel" "$dock"
-        # A float capture whose gap holds stale panel content is a known cosmic-panel defect
-        # (float_frame.py), not a result: capture it again, and fail after three.
-        for attempt in 1 2 3; do
-            in_rig "$(rig_image)" env RIG_SETTLE=8 RIG_LOCALE=en_US.UTF-8 RIG_CONFIG_SEED="/out/seed-$tag" \
-                RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
-                dbus-run-session -- /repo/forge/test/shell/scene.sh "$width" "$height" "$scale" "$tag" -- \
-                /repo/forge/test/shell/layout_session.sh
-            if [ "$preset" != float ] || in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/float_frame.py "/out/$tag.png"; then
-                break
-            fi
-            if [ "$attempt" = 3 ]; then
-                echo "rig.sh: $tag: stale panel content in the float gap on three captures running" >&2
-                exit 1
-            fi
-            echo "rig.sh: $tag: stale panel content in the float gap, capturing again (attempt $attempt)" >&2
-        done
-    done < <(python3 -B "$rig/cases.py" layout --outputs 1)
+        in_rig "$(rig_image)" env RIG_SETTLE=8 RIG_LOCALE=en_US.UTF-8 RIG_CONFIG_SEED="/out/seed-$tag" \
+            RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh "$width" "$height" "$scale" "$tag" -- \
+            python3 /repo/forge/test/shell/bar_session.py --log --beside athanor-dock
+    done < <(python3 -B "$rig/cases.py" layout --outputs "${RIG_LAYOUT_OUTPUTS:-1}")
 }
 
 capture_chooser() {
@@ -175,9 +165,9 @@ capture_chooser() {
     done < <(python3 -B "$rig/cases.py" chooser)
 }
 
-require_shelld() { # the tray scenes run the real watcher
-    if [ ! -x "$out/bin/athanor-shelld" ]; then
-        echo "rig.sh: $out/bin/athanor-shelld is missing; run rig.sh build-shelld first" >&2
+require() { # require <binary> <recipe>: a scene that runs one of our binaries
+    if [ ! -x "$out/bin/$1" ]; then
+        echo "rig.sh: $out/bin/$1 is missing; run rig.sh $2 first" >&2
         exit 1
     fi
 }
@@ -199,7 +189,7 @@ capture_bar() { # capture_bar <surface>
     bar-popups) session+=(--notifications) ;;
     bar-notifications) open=notifications session+=(--notifications) ;;
     bar-tray)
-        require_shelld
+        require athanor-shelld build-shelld
         open=tray session+=(--tray)
         ;;
     esac
@@ -288,9 +278,9 @@ cosmic-preview)
     mkdir -p "$out/seed-dark/cosmic/com.system76.CosmicTheme.Mode/v1"
     printf 'true' > "$out/seed-dark/cosmic/com.system76.CosmicTheme.Mode/v1/is_dark"
     overlay=/repo/system/athanor-style/calmo/generated/cosmic
-    in_rig "$(rig_image)" env RIG_PANEL=1 RIG_DATA_OVERLAY="$overlay" \
+    in_rig "$(rig_image)" env RIG_DATA_OVERLAY="$overlay" \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1920 1080 1.0 cosmic-preview-light -- cosmic-settings appearance
-    in_rig "$(rig_image)" env RIG_PANEL=1 RIG_DATA_OVERLAY="$overlay" RIG_CONFIG_SEED=/out/seed-dark \
+    in_rig "$(rig_image)" env RIG_DATA_OVERLAY="$overlay" RIG_CONFIG_SEED=/out/seed-dark \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1920 1080 1.0 cosmic-preview-dark -- cosmic-settings appearance
     echo "look at $out/cosmic-preview-light.png and $out/cosmic-preview-dark.png"
     ;;
@@ -422,7 +412,7 @@ notifications-e2e)
                  && exec python3 /repo/forge/test/shell/bar_session.py --notifications --respawn"
     ;;
 tray-e2e)
-    require_shelld
+    require athanor-shelld build-shelld
     seed_bar "$out/seed-tray-e2e" float top visible light
     rm -f "$out/tray-e2e-tray.log" "$out/tray-e2e-shelld.log"
     in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 \
@@ -535,14 +525,16 @@ atspi)
     esac
     ;;
 chooser-e2e)
-    # The translator and the panel as in a session, the chooser as the client; the check
-    # presses a preset and waits for the configuration. The capture shows the result.
+    # The bar and the dock as in a session, the chooser beside them; the check presses a
+    # preset and waits until both have drawn it. The capture shows the result.
+    require athanor-bar build-bar
+    require athanor-dock build-dock
     in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 \
         RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
         RIG_HOLD="python3 /repo/forge/test/shell/layout_e2e.py" \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 chooser-e2e -- \
         bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
-                 && exec /repo/forge/test/shell/layout_session.sh /out/bin/athanor-layout-chooser"
+                 && exec python3 /repo/forge/test/shell/bar_session.py --log --beside athanor-dock --beside /out/bin/athanor-layout-chooser"
     ;;
 surface | update-goldens)
     surface=${2:?usage: rig.sh $1 <surface>}
@@ -579,18 +571,6 @@ rig-tests)
     # The tests of scripts that run in the rig and call its tools (ImageMagick 7). The lint
     # job runs forge/test/shell/tests, which needs nothing beyond Python.
     in_rig "$(rig_image)" python3 -B -m unittest discover -s /repo/forge/test/shell/rig_tests -v
-    ;;
-cosmic-panel-defaults)
-    # The renderer's tests read COSMIC's shipped keys from a committed fixture; this fails
-    # when the COSMIC in the rig ships different ones, so an update cannot drift silently.
-    # The rig has no diffutils: copy the shipped keys out and compare them on the host.
-    in_rig "$(rig_image)" bash -c 'set -euo pipefail
-        rm -rf /out/cosmic-shipped
-        mkdir /out/cosmic-shipped
-        cp -r /usr/share/cosmic/com.system76.CosmicPanel /usr/share/cosmic/com.system76.CosmicPanel.Panel \
-            /usr/share/cosmic/com.system76.CosmicPanel.Dock /out/cosmic-shipped/'
-    diff -r "$root/system/athanor-layout/fixtures/cosmic-panel-1.8.0" "$out/cosmic-shipped"
-    echo "cosmic-panel-defaults: the fixture matches the COSMIC in the rig"
     ;;
 *)
     sed -n '2,/^set -euo pipefail$/{/^#/p}' "${BASH_SOURCE[0]}" >&2

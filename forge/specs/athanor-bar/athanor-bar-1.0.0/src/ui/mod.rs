@@ -174,6 +174,8 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
     let cosmic = theme::read();
     calmo::load(&display, cosmic.variant());
     theme::load_accent(&display, &cosmic);
+    let layout = source.layout();
+    tracing::info!(layout = ?layout, "layout applied");
     let client = match Client::connect(&display) {
         Ok(client) => Some(client),
         Err(err) => {
@@ -187,7 +189,7 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
         outputs: RefCell::new(outputs::current(&display)),
         display,
         client,
-        layout: Cell::new(source.layout()),
+        layout: Cell::new(layout),
         source,
         favorites: Store::load(favorites_file),
         surfaces: RefCell::new(Vec::new()),
@@ -611,6 +613,9 @@ impl Bar {
 
     fn reload(self: &Rc<Self>) {
         let layout = self.source.layout();
+        if layout != self.layout.get() {
+            tracing::info!(layout = ?layout, "layout applied");
+        }
         let outputs = outputs::current(&self.display);
         // The snapshot catches a change of size or connector; `surfaces_current` an output
         // that left and came back within the debounce, and a surface whose output left.

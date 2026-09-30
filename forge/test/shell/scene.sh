@@ -77,10 +77,7 @@ wait_for 20 cosmic-randr list > /dev/null
 cosmic-randr mode --scale "$scale" WINIT-0 "$width" "$height" &> "/out/$tag-randr.txt"
 sleep 1
 
-# 4. The scene: optionally the panel, then the client under test.
-if [ "${RIG_PANEL:-0}" = 1 ]; then
-    faketime -f "$frozen" cosmic-panel &> "/out/$tag-panel.log" &
-fi
+# 4. The scene: the client under test.
 faketime -f "$frozen" "$@" &> "/out/$tag-client.log" &
 client=$!
 sleep "$settle"

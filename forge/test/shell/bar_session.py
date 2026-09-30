@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """bar_session.py [--client NAME] [--hang METHOD] [--window] [--pinnable] [--notifications] [--tray]
-[--respawn] [--fixtures] - athanor-bar in the rig, as its unit runs it: a private system bus with a
+[--respawn] [--fixtures] [--beside PROGRAM]... [--log] - athanor-bar in the rig, as its unit runs it: a private system bus with a
 fake logind on it, NOTIFY_SOCKET for Type=notify, and with --window one test window for the running
 applications. --pinnable installs a desktop entry for the test window's app id, so the bar offers to
 pin it. It is scene.sh's client and exits with the bar's status.
@@ -24,6 +24,12 @@ registered. --respawn starts the bar again when it is killed with SIGKILL, and r
 and the power profiles on the private system bus, PipeWire, an MPRIS player, a backlight)
 and points the bar at the fake backlight. Session.SetBrightness is logged like the other
 acting calls, "SetBrightness backlight intel_backlight 300", and writes the fake sysfs file.
+
+--beside starts PROGRAM once the bar is READY, with the bar's environment less NOTIFY_SOCKET, and
+terminates it with the bar; it is repeatable, and a bare name is looked up under /out/bin. The
+layout cases run athanor-dock beside the bar this way, and chooser-e2e the chooser too. --log
+appends the bar's stderr to /out/$RIG_TAG-<client>.log and each --beside program's to
+/out/$RIG_TAG-<basename>.log, where the checks read the "layout applied" lines.
 
 It is a small Gio service, not python3-dbusmock: dbusmock replies to each call from the
 method's code, and the power menu must also meet a logind that never replies.
@@ -162,8 +168,13 @@ def start_shelld():
     return shelld
 
 
-def start_bar(client, env):
-    bar = subprocess.Popen([BIN / client], env=env)
+def rig_log(name):
+    """The append-only log of one process of the scene; the process keeps it for its life."""
+    return open(f"/out/{os.environ.get('RIG_TAG', 'bar')}-{name}.log", "a", encoding="utf-8")
+
+
+def start_bar(client, env, log):
+    bar = subprocess.Popen([BIN / client], env=env, stderr=rig_log(client) if log else None)
     PID_FILE.write_text(f"{bar.pid}\n", encoding="utf-8")
     return bar
 
@@ -178,6 +189,8 @@ def parse(argv):
     parser.add_argument("--tray", action="store_true")
     parser.add_argument("--respawn", action="store_true")
     parser.add_argument("--fixtures", action="store_true")
+    parser.add_argument("--beside", metavar="PROGRAM", action="append", default=[])
+    parser.add_argument("--log", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -263,18 +276,27 @@ def main():
     notify = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
     notify.bind(NOTIFY_SOCKET)
     window_started = False
+    beside_started = False
 
     # The test window starts only once the bar is on screen: cosmic-comp places a new
     # window inside the area the bar's exclusive zone leaves, so a window mapped before
     # the bar lands a few pixels off and the capture no longer matches its golden. It
-    # starts once: a respawned bar sends READY=1 again.
+    # starts once: a respawned bar sends READY=1 again. The --beside programs follow the
+    # same rule, and do not get the notify socket, so READY_FILE stays the bar's.
     def on_notify(_fd, _condition):
-        nonlocal window_started
+        nonlocal window_started, beside_started
         if "READY=1" in notify.recv(4096).decode("utf-8", "replace").split("\n"):
             READY_FILE.write_text("READY=1\n", encoding="utf-8")
             if args.window and not window_started:
                 window_started = True
                 subprocess.Popen(["python3", WINDOW, "1"])
+            if not beside_started:
+                beside_started = True
+                beside_env = {k: v for k, v in env.items() if k != "NOTIFY_SOCKET"}
+                for program in args.beside:
+                    path = program if "/" in program else str(BIN / program)
+                    stderr = rig_log(Path(program).name) if args.log else None
+                    helpers.append(subprocess.Popen([path], env=beside_env, stderr=stderr))
         return True
 
     GLib.io_add_watch(
@@ -288,7 +310,7 @@ def main():
     )
     if args.fixtures:
         env["ATHANOR_BAR_BACKLIGHT_DIR"] = str(system_fixtures.BACKLIGHT_DIR)
-    running = {"bar": start_bar(args.client, env), "shelld": shelld}
+    running = {"bar": start_bar(args.client, env, args.log), "shelld": shelld}
     status = {"code": None}
     loop = GLib.MainLoop()
 
@@ -297,7 +319,7 @@ def main():
         if bar.poll() is not None:
             if args.respawn and bar.returncode == -signal.SIGKILL:
                 READY_FILE.unlink(missing_ok=True)
-                running["bar"] = start_bar(args.client, env)
+                running["bar"] = start_bar(args.client, env, args.log)
                 return True
             status["code"] = bar.returncode
             loop.quit()

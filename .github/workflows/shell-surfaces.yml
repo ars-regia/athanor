@@ -79,7 +79,7 @@ jobs:
             .scratch/shell-rig/greeter-*.png
 
   layout:
-    name: Layout library, translator and chooser; layout and chooser cases; end-to-end press
+    name: Layout library and chooser; layout cases on the bar and the dock; chooser cases; end-to-end press
     needs: lint
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -89,10 +89,12 @@ jobs:
         run: bash forge/test/shell/rig.sh build-image
       - name: Unit tests of the rig's scripts, against the rig's ImageMagick 7
         run: bash forge/test/shell/rig.sh rig-tests
-      - name: COSMIC's shipped panel keys match the renderer's fixture
-        run: bash forge/test/shell/rig.sh cosmic-panel-defaults
       - name: Build and test the layout crates
         run: bash forge/test/shell/rig.sh build-layout
+      - name: Build and test the bar and check the DT_NEEDED order
+        run: bash forge/test/shell/rig.sh build-bar
+      - name: Build and test the dock and check the DT_NEEDED order
+        run: bash forge/test/shell/rig.sh build-dock
       - name: Layout cases (21) against the goldens
         run: bash forge/test/shell/rig.sh surface layout
       - name: Accessibility tree of the chooser
