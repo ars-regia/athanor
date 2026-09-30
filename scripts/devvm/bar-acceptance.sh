@@ -168,6 +168,26 @@ stage_memory() {
     ((pss <= PSS_LIMIT_KB)) || fail "PSS $pss kB is above $PSS_LIMIT_KB kB (item 17)"
 }
 
+# The bar exports its Bluetooth agent on its system-bus connection, found by the unit's
+# MainPID. The default bus policy denies a user's Introspect of another connection, and no
+# policy file opens Introspectable to every destination; bluetooth.conf lets root send
+# org.freedesktop.DBus.Properties anywhere, and GDBus answers GetAll for an exported
+# interface, which Agent1 is, with its (empty) properties and for any other path with an error.
+agent_exported() {
+    local pid name names
+    pid=$(unit show -p MainPID --value)
+    names=$(in_session "busctl --system list --unique --no-legend" | awk -v pid="$pid" '$2 == pid { print $1 }')
+    [[ -n $names ]] || fail "athanor-bar (pid $pid) has no system-bus connection"
+    for name in $names; do
+        if guest_ssh "sudo busctl --system call $name /os/athanor/Bar/BluezAgent \
+            org.freedesktop.DBus.Properties GetAll s org.bluez.Agent1" > /dev/null; then
+            echo "athanor-bar exports /os/athanor/Bar/BluezAgent on $name"
+            return 0
+        fi
+    done
+    fail "athanor-bar does not export org.bluez.Agent1 at /os/athanor/Bar/BluezAgent on $names"
+}
+
 # The system modules against the VM's real services, under the real unit: libpulse reaches
 # pipewire-pulse, NetworkManager accepts the secret agent, and the modules without hardware
 # hide (bar_modules.py). The journal must show no refusal from a service.
@@ -176,12 +196,13 @@ stage_modules() {
     since=$(in_session date +%s)
     fresh_start
     in_session python3 - < "$HERE/bar_modules.py" || fail "a module did not reach its service (steps above)"
-    local journal pattern='a system service refused or did not answer|refused the pairing agent|cannot export|does not parse|no GLib main loop'
+    local journal pattern='a system service refused or did not answer|refused the pairing agent|cannot export|does not parse|no GLib main loop|no system bus'
     journal=$(in_session "journalctl --user -u athanor-bar --since @$since --no-pager -o cat")
     if grep -qE "$pattern" <<< "$journal"; then
         fail "refusals in the journal: $(grep -E "$pattern" <<< "$journal")"
     fi
     [[ $(unit is-active) == active ]] || fail "not active after the modules: $(unit show -p Result --value)"
+    agent_exported
     # Recorded, not judged: libpulse warns on every connect that it cannot create its cookie
     # under ProtectHome and Landlock, which pipewire-pulse does not need; a refused connection
     # is a different line. The polkit default decides whether joining a new network prompts.

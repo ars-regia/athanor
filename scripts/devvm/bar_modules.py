@@ -68,6 +68,11 @@ def showing(accessible, role, label):
     return found
 
 
+def appears(app, module, seconds=5):
+    """Whether the module's button shows within `seconds`."""
+    return bool(wait_for(lambda: showing(app, "button", module), seconds))
+
+
 def step(name, ok, detail=""):
     print(f"{'ok  ' if ok else 'FAIL'} {name}{f': {detail}' if detail and not ok else ''}")
     if not ok:
@@ -126,15 +131,17 @@ def main():
     step("the wired connection is shown", bool(wait_for(lambda: showing(app, "label", "Wired: connected"), 5)))
     network[0].do_action(0)
 
+    # A module that should show gets the time to load its service; one that should hide gets
+    # the same time to show by mistake, so that the step can fail either way.
     adapter = has_adapter()
     step(
         f"the Bluetooth module {'shows' if adapter else 'hides'}: the VM {'has' if adapter else 'has no'} adapter",
-        bool(showing(app, "button", "Bluetooth")) == adapter,
+        appears(app, "Bluetooth") == adapter,
     )
     battery = has_battery()
     step(
         f"the battery module {'shows' if battery else 'hides'}: the VM {'has' if battery else 'has no'} battery",
-        bool(showing(app, "button", "Battery")) == battery,
+        appears(app, "Battery") == battery,
     )
 
 
