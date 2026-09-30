@@ -77,6 +77,11 @@ write_files:
       Wants=network-online.target user@1001.service
       After=network-online.target runner-disks.service user@1001.service
       Requires=runner-disks.service
+      # One job, then the VM powers off and vm.sh boots a clean one; vm.sh also powers
+      # the guest off itself once GitHub removes the just-in-time registration. These are
+      # [Unit] settings: systemd ignores them under [Service].
+      SuccessAction=poweroff
+      FailureAction=poweroff
 
       [Service]
       User=runner
@@ -87,10 +92,6 @@ write_files:
       # The runner output also on the serial console, which the host keeps in its log.
       StandardOutput=journal+console
       StandardError=journal+console
-      # One job, then the VM powers off and vm.sh boots a clean one; vm.sh also powers
-      # the guest off itself once GitHub removes the just-in-time registration.
-      SuccessAction=poweroff
-      FailureAction=poweroff
 
       [Install]
       WantedBy=multi-user.target
