@@ -38,6 +38,7 @@ LOG = Path("/out") / f"{os.environ.get('RIG_TAG', 'shield-e2e')}-logind.log"
 REFUSE_FILE = Path("/tmp/athanor-update-refuse")
 UNTRUSTED = "The trust state file is not owned by the system and was ignored"
 UNREADABLE = "The trust state file could not be read"
+NO_ANSWER = "The update service did not answer"
 IMPOSTOR = Path(__file__).resolve().parent / "update_impostor.py"
 SHIELD_NAMES = re.compile(r"^(System image verified|Not verified yet|Update refused)$")
 # Rows only the sheet shows: the Secure Boot row of a read state, or why none was read.
@@ -47,6 +48,7 @@ SHEET_ROWS = (
     "No trust state yet: the first check has not run",
     "The trust state file is not owned by the system and was ignored",
     "The trust state file could not be read",
+    "The update service did not answer",
 )
 
 
@@ -223,7 +225,11 @@ def main():
     toggle_sheet(app, Atspi, False)
 
     # The state comes from State(): its errors keep their rows.
-    for error, row in (("Untrusted", UNTRUSTED), ("Unreadable", UNREADABLE)):
+    for error, row in (
+        ("Untrusted", UNTRUSTED),
+        ("Unreadable", UNREADABLE),
+        ("org.freedesktop.DBus.Error.NoReply", NO_ANSWER),
+    ):
         STATE_ERROR_FILE.write_text(f"{error}\n", encoding="utf-8")
         trust_state.write("verified")
         check(

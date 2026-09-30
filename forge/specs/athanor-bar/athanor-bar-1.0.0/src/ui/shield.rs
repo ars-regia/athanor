@@ -330,6 +330,7 @@ fn unreadable_words(why: Unreadable) -> String {
             tr("The trust state file is not owned by the system and was ignored")
         }
         Unreadable::Malformed => tr("The trust state file could not be read"),
+        Unreadable::NoAnswer => tr("The update service did not answer"),
     }
 }
 

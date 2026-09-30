@@ -45,6 +45,7 @@ ROW="Secure Boot on|Secure Boot off: this machine runs in the declared degraded 
 ROW+="|No trust state yet: the first check has not run"
 ROW+="|The trust state file is not owned by the system and was ignored"
 ROW+="|The trust state file could not be read"
+ROW+="|The update service did not answer"
 
 # Runs a command as the session user, with the session's bus and compositor.
 in_session() {

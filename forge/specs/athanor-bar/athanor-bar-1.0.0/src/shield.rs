@@ -34,6 +34,8 @@ pub enum Unreadable {
     Untrusted,
     /// Anything else that is not a schema-1 state.
     Malformed,
+    /// The update service did not answer, or the bus could not say who did.
+    NoAnswer,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -64,7 +66,8 @@ pub fn sheet(read: &Result<State, ReadError>) -> Sheet {
         Ok(state) => state,
         Err(ReadError::Missing) => return Sheet::Unreadable(Unreadable::Missing),
         Err(ReadError::Untrusted) => return Sheet::Unreadable(Unreadable::Untrusted),
-        Err(ReadError::Malformed | ReadError::Io(_)) => return Sheet::Unreadable(Unreadable::Malformed),
+        Err(ReadError::Malformed) => return Sheet::Unreadable(Unreadable::Malformed),
+        Err(ReadError::Io(_)) => return Sheet::Unreadable(Unreadable::NoAnswer),
     };
     Sheet::Read(Rows {
         version: display(&state.booted.version),
@@ -145,8 +148,8 @@ pub fn refusal(remote_error: Option<&str>) -> Refusal {
 /// owner check this process cannot make from inside its user namespace.
 ///
 /// # Errors
-/// `Io` when the service did not answer, `Untrusted` when another user answered, and the
-/// service's own verdict otherwise.
+/// `Io` when the service did not answer or the bus could not name the sender's uid,
+/// `Untrusted` when another user answered, and the service's own verdict otherwise.
 pub fn state_reply(
     answer: Result<&str, Option<&str>>,
     sender_uid: Option<u32>,
@@ -160,8 +163,11 @@ pub fn state_reply(
         },
         Ok(_) => None,
     };
-    if sender_uid != Some(0) {
-        return Err(ReadError::Untrusted);
+    match sender_uid {
+        Some(0) => {}
+        Some(_) => return Err(ReadError::Untrusted),
+        // Not trusted either way; but no one was shown to be another user.
+        None => return Err(ReadError::Io(std::io::ErrorKind::NotConnected)),
     }
     match (answer, service_error) {
         (Ok(json), _) => athanor_trust_state::parse(json),
@@ -209,8 +215,8 @@ mod tests {
             (ReadError::Untrusted, Unreadable::Untrusted),
             (ReadError::Malformed, Unreadable::Malformed),
             (
-                ReadError::Io(std::io::ErrorKind::PermissionDenied),
-                Unreadable::Malformed,
+                ReadError::Io(std::io::ErrorKind::NotConnected),
+                Unreadable::NoAnswer,
             ),
         ] {
             let read = Err(error);
@@ -346,7 +352,11 @@ mod tests {
             include_str!("../../../athanor-update/athanor-update-1.0.0/tests/state-verified.json");
         assert_eq!(state_reply(Ok(json), Some(0)), Ok(verified()));
         assert_eq!(state_reply(Ok(json), Some(1000)), Err(ReadError::Untrusted), "another user owns the name");
-        assert_eq!(state_reply(Ok(json), None), Err(ReadError::Untrusted), "the answering connection is gone");
+        assert_eq!(
+            state_reply(Ok(json), None),
+            Err(ReadError::Io(std::io::ErrorKind::NotConnected)),
+            "the bus could not say who answered: not trusted, and asked again"
+        );
         assert_eq!(state_reply(Ok("{}"), Some(0)), Err(ReadError::Malformed));
     }
 
