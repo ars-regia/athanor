@@ -82,6 +82,13 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   Type=notify, the confinement against glycin's sandbox, PSS within 64 MB, an output that
   comes and goes (needs `GPU_OUTPUTS=2`, the default), and the crash-loop fallback to the
   vendor layout. Build the binary first with `forge/test/shell/rig.sh build-bar`.
+- `dock-acceptance.sh [stage...]`: athanor-dock under its real unit (package 2c):
+  Type=notify, the confinement against glycin's sandbox and the favourites file, PSS within
+  48 MB, a pinned entry launched from the dock behind a security context (item 8, pressed
+  through `dock_press.py`; the session's favourites are restored afterwards), an output
+  that comes and goes (needs `GPU_OUTPUTS=2`, the default), and the crash-loop fallback to
+  the vendor layout. Build the binary first with
+  `forge/test/shell/rig.sh build-dock`. COSMIC's own dock keeps running beside it.
 - `compositor-acceptance.sh [stage...]` deploys `cc-probe` from `.scratch/shell-rig/bin`
   (build it with `forge/test/shell/rig.sh build-compositor-client`) and checks, in the VM's
   session, the launch of package 2a (`doc_bar.md`, BR2 and BR3): an application on its own
