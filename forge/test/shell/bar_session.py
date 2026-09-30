@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """bar_session.py [--client NAME] [--hang METHOD] [--window] [--pinnable] [--notifications] [--tray]
-[--respawn] [--fixtures] - athanor-bar in the rig, as its unit runs it: a private system bus with a
+[--respawn] [--fixtures] [--trust-state NAME] - athanor-bar in the rig, as its unit runs it: a private system bus with a
 fake logind on it, NOTIFY_SOCKET for Type=notify, and with --window one test window for the running
 applications. --pinnable installs a desktop entry for the test window's app id, so the bar offers to
 pin it. It is scene.sh's client and exits with the bar's status.
@@ -9,6 +9,12 @@ The fake logind answers CanSuspend "yes", CanReboot "yes" and CanPowerOff "chall
 except the method named by --hang, which it never answers. Every call that acts is appended
 to /out/$RIG_TAG-logind.log as "<Method> <arguments>", e.g. "Suspend True". The log is
 created empty before the bar starts: a missing log means the fake logind never ran.
+
+Beside logind, a fake os.athanor.Update1 answers Apply and GoBack and logs them the same way,
+as "Apply" and "GoBack". While /tmp/athanor-update-refuse names an os.athanor.Update1 error
+(e.g. "Blocked"), it refuses with that error instead. --trust-state writes one of
+trust_state.py's state files, "verified" by default, before the bar starts; the client runs
+as root in the container, so the file is owned by 0 as athanor-trust-state requires.
 
 --client names the binary under /out/bin that runs as the client, athanor-bar by default;
 the dock's rig session runs athanor-dock through it, with every other flag unchanged.
@@ -41,6 +47,7 @@ from pathlib import Path
 from gi.repository import Gio, GLib
 
 import system_fixtures
+import trust_state
 
 SYSTEM_BUS = "/tmp/athanor-system-bus"
 NOTIFY_SOCKET = "/tmp/athanor-bar-notify"
@@ -71,6 +78,10 @@ NODE = Gio.DBusNodeInfo.new_for_xml("""
     <method name="Reboot"><arg type="b" direction="in"/></method>
     <method name="PowerOff"><arg type="b" direction="in"/></method>
   </interface>
+  <interface name="os.athanor.Update1">
+    <method name="Apply"/>
+    <method name="GoBack"/>
+  </interface>
   <interface name="org.freedesktop.login1.Session">
     <method name="Lock"/>
     <method name="SetBrightness">
@@ -82,13 +93,16 @@ NODE = Gio.DBusNodeInfo.new_for_xml("""
 </node>
 """)
 ANSWERS = {"CanSuspend": "yes", "CanReboot": "yes", "CanPowerOff": "challenge"}
+# While this file names an os.athanor.Update1 error (e.g. "Blocked"), the fake refuses with
+# it; shield_e2e.py writes and removes it. The call is logged either way.
+REFUSE_FILE = Path("/tmp/athanor-update-refuse")
 # The invocations of the hanging method, kept so that they are never answered nor freed.
 UNANSWERED = []
 
 
 def logind(log, hang):
     def on_call(
-        _connection, _sender, _path, _interface, method, parameters, invocation
+        _connection, _sender, _path, interface, method, parameters, invocation
     ):
         if method == hang:
             UNANSWERED.append(invocation)
@@ -98,6 +112,10 @@ def logind(log, hang):
             words = [method] + [str(value) for value in parameters.unpack()]
             with log.open("a", encoding="utf-8") as out:
                 out.write(" ".join(words) + "\n")
+            if interface == "os.athanor.Update1" and REFUSE_FILE.exists():
+                error = REFUSE_FILE.read_text(encoding="utf-8").strip()
+                invocation.return_dbus_error(f"os.athanor.Update1.Error.{error}", error)
+                return
             if method == "SetBrightness":
                 subsystem, name, level = parameters.unpack()
                 device = system_fixtures.BACKLIGHT_DIR / name
@@ -106,6 +124,25 @@ def logind(log, hang):
             invocation.return_value(None)
 
     return on_call
+
+
+def own(bus, name):
+    """Requests `name` on the private system bus, and exits unless it is the primary owner."""
+    (owned,) = bus.call_sync(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RequestName",
+        GLib.Variant("(su)", (name, 4)),
+        GLib.VariantType("(u)"),
+        Gio.DBusCallFlags.NONE,
+        -1,
+        None,
+    ).unpack()
+    if owned != 1:
+        raise SystemExit(
+            f"bar_session.py: RequestName {name} answered {owned}, not primary owner"
+        )
 
 
 def wait_until(ready, what, seconds):
@@ -178,6 +215,7 @@ def parse(argv):
     parser.add_argument("--tray", action="store_true")
     parser.add_argument("--respawn", action="store_true")
     parser.add_argument("--fixtures", action="store_true")
+    parser.add_argument("--trust-state", metavar="NAME", default="verified", choices=trust_state.NAMES)
     return parser.parse_args(argv)
 
 
@@ -185,6 +223,7 @@ def main():
     args = parse(sys.argv[1:])
     log = Path("/out") / f"{os.environ.get('RIG_TAG', 'bar')}-logind.log"
     log.write_text("", encoding="utf-8")
+    trust_state.write(args.trust_state)
     if args.pinnable:
         applications = Path(os.environ["XDG_DATA_HOME"]) / "applications"
         applications.mkdir(parents=True, exist_ok=True)
@@ -219,22 +258,16 @@ def main():
         None,
         None,
     )
-    # Owned before the bar starts, so its first question finds logind.
-    (owned,) = bus.call_sync(
-        "org.freedesktop.DBus",
-        "/org/freedesktop/DBus",
-        "org.freedesktop.DBus",
-        "RequestName",
-        GLib.Variant("(su)", ("org.freedesktop.login1", 4)),
-        GLib.VariantType("(u)"),
-        Gio.DBusCallFlags.NONE,
-        -1,
+    bus.register_object(
+        "/os/athanor/Update1",
+        NODE.lookup_interface("os.athanor.Update1"),
+        on_call,
         None,
-    ).unpack()
-    if owned != 1:
-        raise SystemExit(
-            f"bar_session.py: RequestName answered {owned}, not primary owner"
-        )
+        None,
+    )
+    # Owned before the bar starts, so its first question finds them.
+    own(bus, "org.freedesktop.login1")
+    own(bus, "os.athanor.Update1")
 
     session = Gio.bus_get_sync(Gio.BusType.SESSION, None)
     # The services exist before the bar starts, as they do at login. The loop at the end
