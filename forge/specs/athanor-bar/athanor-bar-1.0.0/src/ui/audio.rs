@@ -88,8 +88,9 @@ fn completion() -> Box<dyn FnMut(bool)> {
 
 struct Service {
     bar: Weak<Bar>,
-    mainloop: Option<Mainloop>,
+    // Fields drop in declaration order: the context, which runs on the main loop, goes first.
     context: RefCell<Option<Context>>,
+    mainloop: Option<Mainloop>,
     retry_ms: Cell<u64>,
     gathering: RefCell<Option<Gathering>>,
     /// An event arrived during a refresh: refresh again once it ends.
@@ -111,8 +112,8 @@ impl Service {
         }
         let service = Rc::new(Service {
             bar: Rc::downgrade(bar),
-            mainloop,
             context: RefCell::new(None),
+            mainloop,
             retry_ms: Cell::new(FIRST_RETRY_MS),
             gathering: RefCell::new(None),
             stale: Cell::new(false),
