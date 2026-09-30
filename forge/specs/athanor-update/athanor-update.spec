@@ -4,7 +4,7 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-update
 Version:        1.0.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Athanor system image updates and trust state
 
 License:        MIT
@@ -72,6 +72,11 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
 %doc /usr/share/doc/athanor-update/RECOVERY.md
 
 %changelog
+* Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
+- os.athanor.Update1.State(): the checked trust state, open to every user without
+  polkit, for sandboxed readers whose user namespace cannot see root as the file's
+  owner; a missing, refused or unreadable state is a named error.
+
 * Thu Sep 24 2026 Athanor Forge <forge@athanor.os> - 1.0.0-1
 - First release: update check timer, os.athanor.Update1 with Apply and GoBack, one-time
   migration to the signed reference, trust state file, notifier, signature policy templates
