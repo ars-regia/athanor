@@ -245,6 +245,9 @@ impl Service {
         self.connections
             .borrow_mut()
             .retain(|path, _| paths.contains(path));
+        self.fetching
+            .borrow_mut()
+            .retain(|path| paths.contains(path));
         let generation = mirror.generation();
         for path in paths {
             if self.connections.borrow().contains_key(&path)
@@ -270,12 +273,15 @@ impl Service {
                 if service.seen.get() != generation {
                     return;
                 }
-                service.fetching.borrow_mut().remove(&path);
                 match reply.as_ref().ok().and_then(network::connection_info) {
                     Some(info) => {
+                        service.fetching.borrow_mut().remove(&path);
                         service.connections.borrow_mut().insert(path, info);
                         service.changed();
                     }
+                    // It stays in `fetching`, so every change of the mirror does not ask again
+                    // (a profile of another user answers PermissionDenied each time): it is read
+                    // again only when NetworkManager restarts or the profile comes back.
                     None => tracing::warn!(
                         path,
                         "a NetworkManager profile has unreadable settings; it is not listed"
