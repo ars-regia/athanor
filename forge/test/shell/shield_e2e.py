@@ -1,14 +1,17 @@
 #!/usr/bin/python3
 """shield_e2e.py - package 2b.5's shield in a scene (doc_bar.md BR3 Power, BR6, item 13):
-the bar against trust_state.py's files and bar_session.py's fake os.athanor.Update1, driven
-through AT-SPI. Runs as scene.sh's RIG_HOLD with
+the bar against trust_state.py's files, served by bar_session.py's fake os.athanor.Update1
+(State, Apply, GoBack), driven through AT-SPI. An impostor of another user, update_impostor.py,
+checks that the bar trusts only root's answer. Runs as scene.sh's RIG_HOLD with
 `bar_session.py --notifications --trust-state downloaded`. One line per check; exits 1 if
 any fails. GTK clicks a button activated through AT-SPI only after its 250 ms press
 animation, so every check after a press waits.
 """
 
+import json
 import os
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -27,11 +30,15 @@ from bar_e2e import (  # noqa: E402
     press,
     wait_for,
 )
+from bar_session import STATE_ERROR_FILE, SYSTEM_BUS  # noqa: E402
 from notifications_e2e import alerts, never, notify  # noqa: E402
 import trust_state  # noqa: E402
 
 LOG = Path("/out") / f"{os.environ.get('RIG_TAG', 'shield-e2e')}-logind.log"
 REFUSE_FILE = Path("/tmp/athanor-update-refuse")
+UNTRUSTED = "The trust state file is not owned by the system and was ignored"
+UNREADABLE = "The trust state file could not be read"
+IMPOSTOR = Path(__file__).resolve().parent / "update_impostor.py"
 SHIELD_NAMES = re.compile(r"^(System image verified|Not verified yet|Update refused)$")
 # Rows only the sheet shows: the Secure Boot row of a read state, or why none was read.
 SHEET_ROWS = (
@@ -214,6 +221,57 @@ def main():
         ),
     )
     toggle_sheet(app, Atspi, False)
+
+    # The state comes from State(): its errors keep their rows.
+    for error, row in (("Untrusted", UNTRUSTED), ("Unreadable", UNREADABLE)):
+        STATE_ERROR_FILE.write_text(f"{error}\n", encoding="utf-8")
+        trust_state.write("verified")
+        check(
+            f"State failing with {error} names the shield 'Not verified yet'",
+            wait_for(lambda: shield_named(app, Atspi, "Not verified yet"), 3),
+        )
+        toggle_sheet(app, Atspi, True)
+        check(f"and the sheet says {row!r}", bool(labelled(app, Atspi, "label", row)))
+        toggle_sheet(app, Atspi, False)
+    STATE_ERROR_FILE.unlink()
+
+    # Only root's answer is trusted: a verified state from another user is not.
+    impostor = subprocess.Popen(
+        [
+            "setpriv",
+            "--reuid=65534",
+            "--regid=65534",
+            "--clear-groups",
+            "python3",
+            str(IMPOSTOR),
+            f"unix:path={SYSTEM_BUS}",
+            json.dumps(trust_state.state("verified", trust_state.FROZEN)),
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    check(
+        "an impostor of uid 65534 owns os.athanor.Update1",
+        impostor.stdout.readline().strip() == "owned",
+    )
+    trust_state.write("verified")
+    check(
+        "its verified state names the shield 'Not verified yet'",
+        wait_for(lambda: shield_named(app, Atspi, "Not verified yet"), 3),
+    )
+    toggle_sheet(app, Atspi, True)
+    check(
+        "and the sheet says the state is not the system's",
+        bool(labelled(app, Atspi, "label", UNTRUSTED)),
+    )
+    toggle_sheet(app, Atspi, False)
+    impostor.terminate()
+    impostor.wait()
+    trust_state.write("verified")
+    check(
+        "root's answer is trusted again once the impostor leaves",
+        wait_for(lambda: shield_named(app, Atspi, "System image verified"), 3),
+    )
 
     # Hostile strings (Review Focus 2).
     trust_state.write("hostile")

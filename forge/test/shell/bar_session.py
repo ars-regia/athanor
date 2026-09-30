@@ -12,9 +12,13 @@ created empty before the bar starts: a missing log means the fake logind never r
 
 Beside logind, a fake os.athanor.Update1 answers Apply and GoBack and logs them the same way,
 as "Apply" and "GoBack". While /tmp/athanor-update-refuse names an os.athanor.Update1 error
-(e.g. "Blocked"), it refuses with that error instead. --trust-state writes one of
-trust_state.py's state files, "verified" by default, before the bar starts; the client runs
-as root in the container, so the file is owned by 0 as athanor-trust-state requires.
+(e.g. "Blocked"), it refuses with that error instead. It answers State, unlogged, with the
+state file's text, or NoState when there is none; while /tmp/athanor-update-state-error names
+an error (e.g. "Untrusted"), State fails with it instead. --trust-state writes one of
+trust_state.py's state files, "verified" by default, before the bar starts. The fake runs as
+root in the container, so the bar's check that root answered holds; it owns the name with
+ALLOW_REPLACEMENT, so shield_e2e.py can put an impostor of another user in its place, and
+the private bus admits every user for that.
 
 --client names the binary under /out/bin that runs as the client, athanor-bar by default;
 the dock's rig session runs athanor-dock through it, with every other flag unchanged.
@@ -81,6 +85,7 @@ NODE = Gio.DBusNodeInfo.new_for_xml("""
   <interface name="os.athanor.Update1">
     <method name="Apply"/>
     <method name="GoBack"/>
+    <method name="State"><arg type="s" direction="out"/></method>
   </interface>
   <interface name="org.freedesktop.login1.Session">
     <method name="Lock"/>
@@ -96,6 +101,16 @@ ANSWERS = {"CanSuspend": "yes", "CanReboot": "yes", "CanPowerOff": "challenge"}
 # While this file names an os.athanor.Update1 error (e.g. "Blocked"), the fake refuses with
 # it; shield_e2e.py writes and removes it. The call is logged either way.
 REFUSE_FILE = Path("/tmp/athanor-update-refuse")
+# While this file names an os.athanor.Update1 error, State fails with it (shield_e2e.py).
+STATE_ERROR_FILE = Path("/tmp/athanor-update-state-error")
+# The private system bus: session.conf, plus every user may connect (the impostor).
+BUS_CONFIG = """<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <include>/usr/share/dbus-1/session.conf</include>
+  <policy context="default"><allow user="*"/></policy>
+</busconfig>
+"""
 # The invocations of the hanging method, kept so that they are never answered nor freed.
 UNANSWERED = []
 
@@ -108,6 +123,8 @@ def logind(log, hang):
             UNANSWERED.append(invocation)
         elif method in ANSWERS:
             invocation.return_value(GLib.Variant("(s)", (ANSWERS[method],)))
+        elif method == "State":
+            answer_state(invocation)
         else:
             words = [method] + [str(value) for value in parameters.unpack()]
             with log.open("a", encoding="utf-8") as out:
@@ -126,14 +143,26 @@ def logind(log, hang):
     return on_call
 
 
-def own(bus, name):
-    """Requests `name` on the private system bus, and exits unless it is the primary owner."""
+def answer_state(invocation):
+    if STATE_ERROR_FILE.exists():
+        error = STATE_ERROR_FILE.read_text(encoding="utf-8").strip()
+        invocation.return_dbus_error(f"os.athanor.Update1.Error.{error}", error)
+    elif trust_state.PATH.exists():
+        text = trust_state.PATH.read_text(encoding="utf-8")
+        invocation.return_value(GLib.Variant("(s)", (text,)))
+    else:
+        invocation.return_dbus_error("os.athanor.Update1.Error.NoState", "no state")
+
+
+def own(bus, name, flags=4):
+    """Requests `name` on the private system bus (DO_NOT_QUEUE unless `flags` says
+    otherwise), and exits unless it is the primary owner."""
     (owned,) = bus.call_sync(
         "org.freedesktop.DBus",
         "/org/freedesktop/DBus",
         "org.freedesktop.DBus",
         "RequestName",
-        GLib.Variant("(su)", (name, 4)),
+        GLib.Variant("(su)", (name, flags)),
         GLib.VariantType("(u)"),
         Gio.DBusCallFlags.NONE,
         -1,
@@ -230,8 +259,15 @@ def main():
         (applications / "org.athanor.CcWindow1.desktop").write_text(
             DESKTOP_ENTRY, encoding="utf-8"
         )
+    config = Path(f"{SYSTEM_BUS}.conf")
+    config.write_text(BUS_CONFIG, encoding="utf-8")
     daemon = subprocess.Popen(
-        ["dbus-daemon", "--session", "--nofork", f"--address=unix:path={SYSTEM_BUS}"]
+        [
+            "dbus-daemon",
+            f"--config-file={config}",
+            "--nofork",
+            f"--address=unix:path={SYSTEM_BUS}",
+        ]
     )
     wait_until(lambda: os.path.exists(SYSTEM_BUS), f"{SYSTEM_BUS} did not appear", 10)
     bus = Gio.DBusConnection.new_for_address_sync(
@@ -267,7 +303,8 @@ def main():
     )
     # Owned before the bar starts, so its first question finds them.
     own(bus, "org.freedesktop.login1")
-    own(bus, "os.athanor.Update1")
+    # ALLOW_REPLACEMENT, queued when replaced: the name comes back when the impostor leaves.
+    own(bus, "os.athanor.Update1", 1)
 
     session = Gio.bus_get_sync(Gio.BusType.SESSION, None)
     # The services exist before the bar starts, as they do at login. The loop at the end
