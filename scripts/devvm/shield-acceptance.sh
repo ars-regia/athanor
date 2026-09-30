@@ -8,9 +8,8 @@
 # monitor cannot move under egl-headless. The state stage checks that the unit trusts the state
 # root's os.athanor.Update1 answers with, and that the update service exits idle after the call.
 # No stage presses Restart to update or Go back.
-# athanor-shelld is masked for the run, as in bar-acceptance.sh: COSMIC owns its bus names
-# in this session. athanor-update-check.timer and athanor-update-state.service are masked
-# too, so nothing rewrites the fixture; cleanup unmasks them and republishes the real
+# athanor-update-check.timer and athanor-update-state.service are masked for the run, so
+# nothing rewrites the fixture; cleanup unmasks them and republishes the real
 # state with athanor-update-state.service.
 # Deploys the binary and the unit from .scratch/shell-rig/bin and forge/specs/athanor-bar
 # (build the binary with forge/test/shell/rig.sh build-bar), and athanor-update with its bus
@@ -115,8 +114,6 @@ stage_deploy() {
     guest_ssh "sudo busctl call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus ReloadConfig &&
         sudo systemctl stop athanor-update.service" > /dev/null ||
         fail "reloading the system bus policy and stopping athanor-update.service"
-    in_session systemctl --user mask --runtime athanor-shelld.service > /dev/null ||
-        fail "systemctl --user mask --runtime athanor-shelld.service"
     in_session systemctl --user daemon-reload
     unit cat > /dev/null || fail "systemctl --user cat athanor-bar.service found no unit"
 }
@@ -186,10 +183,6 @@ stage_cleanup() {
     fi
     clear_failures || {
         echo "cleanup: removing the crash-loop record failed" >&2
-        failed=1
-    }
-    in_session systemctl --user unmask --runtime athanor-shelld.service > /dev/null || {
-        echo "cleanup: systemctl --user unmask --runtime athanor-shelld.service failed" >&2
         failed=1
     }
     # The real state again, published as at boot; then the periodic check.
