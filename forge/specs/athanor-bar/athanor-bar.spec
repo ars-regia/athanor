@@ -1,12 +1,14 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        The Athanor bar
 License:        MIT
 
 BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gtk4-layer-shell-devel binutils python3 gettext
 Requires:       gtk4 gtk4-layer-shell athanor-calmo athanor-shelld
+# The first-session pick and the vendor layout moved here from the translator.
+Obsoletes:      athanor-layout-translator < 1.0.1
 
 %description
 One layer-shell surface per output, laid out by the preset of the user's layout
@@ -14,7 +16,7 @@ document: the launcher, application-library and workspaces buttons, running
 applications with favourites, the input source, accessibility, tiling, the clock and
 the power menu. Starts applications behind a Wayland security context, is confined
 with Landlock, and falls back to the vendor layout after five failures in ten minutes.
-Not enabled: until the switch of stage 2 the user enables athanor-bar.service by hand.
+Picks the default layout of a user's first session (SH10) and ships the vendor layout.
 
 %prep
 
@@ -34,6 +36,8 @@ install -D -m 0644 forge/specs/athanor-bar/athanor-bar-1.0.0/data/athanor-bar.se
     %{buildroot}/usr/lib/systemd/user/athanor-bar.service
 install -D -m 0644 forge/specs/athanor-bar/athanor-bar-1.0.0/data/favorites.toml \
     %{buildroot}/usr/share/athanor/favorites.toml
+install -D -m 0644 system/athanor-layout/vendor/10-athanor.toml \
+    %{buildroot}/usr/share/athanor/layout/10-athanor.toml
 
 mkdir -p %{buildroot}/usr/share/locale
 cp -a locale-build/. %{buildroot}/usr/share/locale/
@@ -48,10 +52,16 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 /usr/lib/systemd/user/athanor-bar.service
 %dir /usr/share/athanor
 /usr/share/athanor/favorites.toml
+%dir /usr/share/athanor/layout
+/usr/share/athanor/layout/10-athanor.toml
 %lang(it) /usr/share/locale/it/LC_MESSAGES/athanor-bar.mo
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
+* Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
+- Takes over the first-session layout pick (SH10) and the vendor layout from
+  athanor-layout-translator, which it obsoletes.
+
 * Sat Sep 26 2026 Athanor Forge <forge@athanor.os> - 1.0.0-1
 - First release (doc_bar.md, BR1, BR2, BR3, BR6, BR7): one surface per output with the
   three presets applied live and mandatory keys honoured; launcher, application library,

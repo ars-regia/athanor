@@ -1,6 +1,7 @@
 //! athanor-bar: the bar of doc_bar.md. athanor-bar.service runs it. `--record-exit` is the
 //! unit's ExecStopPost: it counts a failed run towards the crash-loop limit (doc_shell.md SH8).
 
+mod first_layout;
 mod i18n;
 mod layer_guard;
 mod ui;
@@ -14,7 +15,7 @@ use std::rc::Rc;
 
 use athanor_compositor_client::theme;
 use athanor_layout::favorites;
-use athanor_layout::loader::{Paths, Source, VENDOR_DIR};
+use athanor_layout::loader::{self, Paths, Source, VENDOR_DIR};
 use athanor_layout::user::write_target;
 use athanor_unit::dirs::Dirs;
 use athanor_unit::{crash_loop, journal, sandbox};
@@ -71,6 +72,40 @@ fn main() -> glib::ExitCode {
             return glib::ExitCode::FAILURE;
         }
     };
+    // SH10: the first-session pick writes the user's layout file and a marker in the state
+    // directory. Only on the live source: a bar in give-up mode leaves the user's files alone.
+    let first_session = match &source {
+        Source::Live(paths) => match loader::state_home() {
+            Some(state) => Some((paths.clone(), state.join("athanor"))),
+            None => {
+                tracing::error!("no state directory; the first-session pick is skipped");
+                None
+            }
+        },
+        Source::Vendor(_) => None,
+    };
+    // Created before the ruleset, so the grant has a directory to hold on to. A layout file
+    // that links elsewhere is written where it points, so that directory is granted.
+    let first_session_dirs: Vec<PathBuf> = match &first_session {
+        Some((paths, state)) => {
+            let layout_dir = match write_target(&paths.user_file) {
+                Ok(target) => target
+                    .parent()
+                    .map_or_else(|| dirs.config.join("athanor"), Path::to_path_buf),
+                Err(err) => {
+                    tracing::warn!(error = %err, "cannot resolve the layout file; it is written in place");
+                    dirs.config.join("athanor")
+                }
+            };
+            for dir in [state, &layout_dir] {
+                if let Err(err) = std::fs::create_dir_all(dir) {
+                    tracing::warn!(error = %err, dir = %dir.display(), "cannot create a first-session directory");
+                }
+            }
+            vec![state.clone(), layout_dir]
+        }
+        None => Vec::new(),
+    };
     // Created before the ruleset, so the grant has a directory to hold on to. A favourites
     // file that links elsewhere is written where it points, so that directory is granted.
     let favorites_dir = match write_target(&favorites::user_file(&dirs.config)) {
@@ -106,7 +141,7 @@ fn main() -> glib::ExitCode {
     // Before GTK starts a thread. Writes only (athanor-unit::sandbox): the launch sockets, the
     // bar's own runtime directory and dconf, never the rest of the runtime directory (the
     // compositor's and the bus's sockets); the caches, the favourites, the COSMIC high
-    // contrast keys, /tmp, and the DRM nodes.
+    // contrast keys, the first-session layout and marker, /tmp, and the DRM nodes.
     let write: Vec<&Path> = [
         launch_dir.as_path(),
         dirs.unit_runtime.as_path(),
@@ -117,6 +152,7 @@ fn main() -> glib::ExitCode {
     ]
     .into_iter()
     .chain(high_contrast_dirs.iter().map(PathBuf::as_path))
+    .chain(first_session_dirs.iter().map(PathBuf::as_path))
     .collect();
     let confined = sandbox::ensure_single_threaded()
         .and_then(|()| sandbox::restrict_writes(&write, &[Path::new("/dev/dri")]));
@@ -134,6 +170,11 @@ fn main() -> glib::ExitCode {
     let handle: Rc<RefCell<Option<Rc<ui::Bar>>>> = Rc::new(RefCell::new(None));
     app.connect_activate(move |app| {
         if handle.borrow().is_none() {
+            if let (Some((paths, state)), Some(display)) =
+                (first_session.clone(), gtk4::gdk::Display::default())
+            {
+                first_layout::arm(&display, paths, state.join("layout-first-session"));
+            }
             let bar = ui::start(app, source.clone(), favorites_file.clone());
             handle.replace(Some(bar));
         }

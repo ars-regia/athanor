@@ -207,4 +207,42 @@ mod tests {
         assert!(!s.paths.user_file.exists());
         assert!(!s.marker.exists());
     }
+
+    #[test]
+    fn the_marker_left_by_the_translator_stops_the_pick() {
+        let s = scene("translator-marker");
+        fs::create_dir_all(s.marker.parent().expect("dir")).expect("mkdir");
+        fs::write(&s.marker, "float\n").expect("marker");
+        assert_eq!(run_on(&s, &[screen(1366, 768)]), Outcome::AlreadyRan);
+        assert!(
+            !s.paths.user_file.exists(),
+            "an upgraded desktop keeps the layout the translator picked"
+        );
+    }
+
+    #[test]
+    fn an_unsized_output_defers_the_pick_until_one_is_sized() {
+        let s = scene("deferred");
+        assert_eq!(run_on(&s, &[]), Outcome::NotYet);
+        assert_eq!(
+            run_on(
+                &s,
+                &[Output {
+                    connector: Some("Virtual-1".into()),
+                    width: 0,
+                    height: 0
+                }]
+            ),
+            Outcome::NotYet
+        );
+        assert!(
+            !s.marker.exists(),
+            "nothing is recorded before an output is sized"
+        );
+        assert_eq!(
+            run_on(&s, &[screen(1280, 720)]),
+            Outcome::Wrote(Preset::Bar)
+        );
+        assert!(s.marker.exists());
+    }
 }
