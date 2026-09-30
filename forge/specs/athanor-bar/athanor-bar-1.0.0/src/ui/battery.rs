@@ -14,7 +14,7 @@ use gtk4::prelude::*;
 use gtk4::{gio, glib};
 
 use super::bus::{self, Mirror, Source};
-use super::popup::Popup;
+use super::popup::{expose_choose_action, Popup};
 use super::{Bar, Changed, ModuleUi};
 use crate::i18n::{tr, tr_with};
 
@@ -29,6 +29,17 @@ thread_local! {
 
 fn service() -> Option<Rc<Service>> {
     SERVICE.with(|cell| cell.borrow().clone())
+}
+
+/// For [`bus::act`]: an action the person took did not complete. The views show the
+/// services' state again, which puts a radio or the slider back, and the open popover says so.
+fn action_failed() {
+    if let Some(service) = service() {
+        service.show_all();
+        for view in service.views() {
+            view.popup.failed();
+        }
+    }
 }
 
 /// What one view shows.
@@ -142,7 +153,7 @@ impl Service {
         let Some(connection) = self.connection.borrow().clone() else {
             return;
         };
-        bus::spawn(
+        bus::act(
             "set the power profile",
             bus::set_property(
                 &connection,
@@ -152,6 +163,7 @@ impl Service {
                 "ActiveProfile",
                 profile.to_variant(),
             ),
+            action_failed,
         );
     }
 
@@ -165,7 +177,7 @@ impl Service {
             return;
         };
         let args = ("backlight", backlight.name.as_str(), backlight.raw(percent)).to_variant();
-        bus::spawn(
+        bus::act(
             "set the screen brightness",
             bus::call(
                 &connection,
@@ -176,6 +188,7 @@ impl Service {
                 Some(&args),
                 bus::TIMEOUT_MS,
             ),
+            action_failed,
         );
     }
 }
@@ -210,23 +223,6 @@ fn note(battery: &Battery) -> Option<String> {
         (Charge::Full, _) => Some(tr("Fully charged")),
         (Charge::Discharging | Charge::Unknown, _) => None,
     }
-}
-
-/// GTK 4.20 gives a check button no AT-SPI action: its accessible lists only the widget's own
-/// parameterless actions. Without one, an assistive technology that acts through AT-SPI
-/// (voice control, switch access, the rig) cannot choose a radio item. `profile.choose`
-/// selects this item, as a click would.
-fn expose_choose_action(button: &gtk4::CheckButton) {
-    let choose = gio::SimpleAction::new("choose", None);
-    let weak = button.downgrade();
-    choose.connect_activate(move |_, _| {
-        if let Some(button) = weak.upgrade() {
-            button.set_active(true);
-        }
-    });
-    let group = gio::SimpleActionGroup::new();
-    group.add_action(&choose);
-    button.insert_action_group("profile", Some(&group));
 }
 
 fn profile_label(profile: &str) -> String {
@@ -306,7 +302,7 @@ impl View {
         content.append(&summary);
         content.append(&profiles_section);
         content.append(&brightness_section);
-        popup.popover.set_child(Some(&content));
+        popup.set_content(&content);
 
         let view = Rc::new(View {
             bar: Rc::downgrade(bar),

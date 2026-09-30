@@ -14,7 +14,7 @@ use std::rc::{Rc, Weak};
 
 use athanor_bar::network::{
     self, ConnectionInfo, Link, Network, NetworkState, PasswordPrompt, SecretsRequest, Security,
-    Vpn,
+    Vpn, Wifi,
 };
 use gtk4::accessible::{Property, Relation};
 use gtk4::prelude::*;
@@ -58,6 +58,13 @@ thread_local! {
 
 fn service() -> Option<Rc<Service>> {
     SERVICE.with(|cell| cell.borrow().clone())
+}
+
+/// For [`bus::act`]: an action the person took did not complete.
+fn action_failed() {
+    if let Some(service) = service() {
+        service.failed();
+    }
 }
 
 fn error(name: &str) -> String {
@@ -389,11 +396,21 @@ impl Service {
         }
     }
 
+    /// An action the person took failed: every view shows the mirrored state again, which
+    /// puts a switch back, and the open popover says so.
+    fn failed(&self) {
+        let state = self.state.borrow();
+        for view in self.views() {
+            view.show(state.as_ref());
+            view.popup.failed();
+        }
+    }
+
     fn manager_call(&self, method: &'static str, args: Option<glib::Variant>) {
         let (Some(mirror), Some(args)) = (self.mirror(), args) else {
             return;
         };
-        bus::spawn(
+        bus::act(
             method,
             bus::call(
                 mirror.connection(),
@@ -404,13 +421,14 @@ impl Service {
                 Some(&args),
                 bus::INTERACTIVE_TIMEOUT_MS,
             ),
+            action_failed,
         );
     }
 
     fn set_manager(&self, values: &[(&'static str, bool)]) {
         let Some(mirror) = self.mirror() else { return };
         for (property, value) in values {
-            bus::spawn(
+            bus::act(
                 property,
                 bus::set_property(
                     mirror.connection(),
@@ -420,6 +438,7 @@ impl Service {
                     property,
                     value.to_variant(),
                 ),
+                action_failed,
             );
         }
     }
@@ -490,6 +509,35 @@ struct View {
     updating: Cell<bool>,
     /// `open` came before the module could show (the captures of BR9).
     pending_open: Cell<bool>,
+    /// What the network and VPN rows show: they are rebuilt only when it changes, not on
+    /// every strength update of an access point, which would take the keyboard focus off
+    /// a row.
+    shown: RefCell<(Option<NetworkRows>, Vec<Vpn>)>,
+}
+
+/// What the network rows show: the device, and each network with its strength replaced by
+/// the signal icon it picks. A row keeps the network it was built from for its click, whose
+/// strength it does not read.
+#[derive(PartialEq)]
+struct NetworkRows {
+    device: String,
+    networks: Vec<(&'static str, Network)>,
+}
+
+impl NetworkRows {
+    fn of(wifi: &Wifi) -> NetworkRows {
+        NetworkRows {
+            device: wifi.device.clone(),
+            networks: wifi
+                .networks
+                .iter()
+                .map(|network| {
+                    let icon = network::signal_icon(network.strength);
+                    (icon, Network { strength: 0, ..network.clone() })
+                })
+                .collect(),
+        }
+    }
 }
 
 fn clear(container: &gtk4::Box) {
@@ -561,7 +609,7 @@ impl View {
         let stack = gtk4::Stack::new();
         stack.add_named(&list, Some("list"));
         stack.add_named(&password, Some("password"));
-        popup.popover.set_child(Some(&stack));
+        popup.set_content(&stack);
 
         let view = Rc::new(View {
             bar: Rc::downgrade(bar),
@@ -583,6 +631,7 @@ impl View {
             security: Cell::new(Security::Open),
             updating: Cell::new(false),
             pending_open: Cell::new(false),
+            shown: RefCell::new((None, Vec::new())),
         });
         view.connect_handlers(&cancel);
         view
@@ -669,18 +718,25 @@ impl View {
             .set_active(state.wifi.as_ref().is_some_and(|wifi| wifi.enabled));
         self.airplane.set_active(state.airplane);
         self.updating.set(false);
-        clear(&self.networks);
-        if let Some(wifi) = &state.wifi {
-            for network in &wifi.networks {
-                self.networks
-                    .append(&self.network_row(network, &wifi.device));
+        let rows = state.wifi.as_ref().map(NetworkRows::of);
+        if self.shown.borrow().0 != rows {
+            clear(&self.networks);
+            if let Some(wifi) = &state.wifi {
+                for network in &wifi.networks {
+                    self.networks
+                        .append(&self.network_row(network, &wifi.device));
+                }
             }
+            self.shown.borrow_mut().0 = rows;
         }
         self.scroller
             .set_visible(self.networks.first_child().is_some());
-        clear(&self.vpns);
-        for vpn in &state.vpns {
-            self.vpns.append(&vpn_row(vpn));
+        if self.shown.borrow().1 != state.vpns {
+            clear(&self.vpns);
+            for vpn in &state.vpns {
+                self.vpns.append(&vpn_row(vpn));
+            }
+            self.shown.borrow_mut().1 = state.vpns.clone();
         }
         self.vpns.set_visible(!state.vpns.is_empty());
         self.popup.button.set_visible(true);

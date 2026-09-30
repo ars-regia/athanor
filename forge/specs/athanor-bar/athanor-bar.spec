@@ -1,18 +1,18 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        The Athanor bar
 License:        MIT
 
-BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gtk4-layer-shell-devel binutils python3 gettext
+BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gtk4-layer-shell-devel pulseaudio-libs-devel binutils python3 gettext
 Requires:       gtk4 gtk4-layer-shell athanor-calmo athanor-shelld
 
 %description
 One layer-shell surface per output, laid out by the preset of the user's layout
 document: the launcher, application-library and workspaces buttons, running
-applications with favourites, the input source, accessibility, tiling, the clock and
-the power menu. Starts applications behind a Wayland security context, is confined
+applications with favourites, the input source, accessibility, tiling, audio with
+media controls, Bluetooth, network, battery, the clock and the power menu. Starts applications behind a Wayland security context, is confined
 with Landlock, and falls back to the vendor layout after five failures in ten minutes.
 Not enabled: until the switch of stage 2 the user enables athanor-bar.service by hand.
 
@@ -52,12 +52,19 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
-* Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
-- The trust shield and its sheet (doc_bar.md, BR6): the seal and header follow
-  /run/athanor-update/state.json live, the sheet names the version, the signature, the
+* Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-3
+- The trust shield and its sheet (doc_bar.md, BR6): the seal and header follow the state
+  os.athanor.Update1.State() returns, trusted only from root and asked again when
+  /run/athanor-update/state.json changes; the sheet names the version, the signature, the
   update, the policy and Secure Boot, and offers Go back; popups wait while it is open.
 - Restart to update in the power menu (BR3), shown only when an update is downloaded.
   Both actions confirm first and call os.athanor.Update1.
+
+* Tue Sep 29 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
+- The network, Bluetooth, audio and battery modules (doc_bar.md, BR3): NetworkManager's
+  secret agent and BlueZ's pairing agent registered by the bar, with calls from any other
+  sender refused; audio over libpulse with MPRIS media controls; the power profile over
+  the power-profiles interface and the brightness through logind.
 
 * Sat Sep 26 2026 Athanor Forge <forge@athanor.os> - 1.0.0-1
 - First release (doc_bar.md, BR1, BR2, BR3, BR6, BR7): one surface per output with the

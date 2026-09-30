@@ -113,10 +113,12 @@ def no_password_written():
 
 
 NM_PATH = "/org/freedesktop/NetworkManager"
+ACCESS_POINT = "org.freedesktop.NetworkManager.AccessPoint"
 LAB_CONNECTION = f"{fx.NM_SETTINGS}/lab"
 SECRET_AGENT = "/org/freedesktop/NetworkManager/SecretAgent"
 AGENT_ERROR = "org.freedesktop.NetworkManager.SecretAgent."
 RETRY_NOTE = "The password was not accepted. Try again."
+NOT_COMPLETED = "The action did not complete."
 ALLOW_INTERACTION, REQUEST_NEW = 0x1, 0x2
 
 
@@ -143,6 +145,19 @@ def type_password(app, Atspi, password):
     """Types into the showing password entry through AT-SPI's EditableText."""
     entries = showing_role(app, Atspi, "password text")
     return bool(entries) and entries[0].set_text_contents(password)
+
+
+def described_by(accessible, Atspi):
+    """The names of the accessibles a DescribedBy relation of `accessible` points to."""
+    if accessible is None:
+        return []
+    names = []
+    for relation in accessible.get_relation_set():
+        if relation.get_relation_type() == Atspi.RelationType.DESCRIBED_BY:
+            for index in range(relation.get_n_targets()):
+                target = relation.get_target(index)
+                names.append(target.get_name() if target is not None else None)
+    return names
 
 
 def press_confirm(app, Atspi, name):
@@ -217,6 +232,28 @@ def network(ctx):
         open_popover(app, Atspi, "Network", lambda: buttons(app, Atspi, "Athanor Lab, connected")),
     )
     check("the wired state is shown", bool(labelled(app, Atspi, "label", "Wired: connected")))
+    # The rows are rebuilt when the signal icon of a network changes, and kept when its
+    # strength moves inside the same icon: a rebuild on every update would take the
+    # keyboard focus off a row. A rebuilt row is a new accessible, at a new path.
+    def lab_row():
+        found = buttons(app, Atspi, "Athanor Lab, connected")
+        return found[0].path if found else None
+
+    def set_strength(point, strength):
+        fx.call(
+            bus, fx.NM, f"{NM_PATH}/AccessPoint/{point}", "org.freedesktop.DBus.Properties", "Set", "(ssv)",
+            (ACCESS_POINT, "Strength", GLib.Variant("y", strength)),
+        )
+
+    shown = lab_row()
+    set_strength("lab", 60)
+    check("a new signal icon rebuilds the rows", wait_for(lambda: lab_row() not in (None, shown), 5))
+    shown = lab_row()
+    set_strength("lab", 70)
+    time.sleep(1)
+    check("a strength inside the same icon keeps them", shown is not None and lab_row() == shown)
+    set_strength("lab", 82)
+    check("the strength back, the rows follow", wait_for(lambda: lab_row() not in (None, shown), 5))
     check("an open network is listed by name", bool(buttons(app, Atspi, "Corner Café")))
     campus = buttons(app, Atspi, "Campus, needs Settings")
     check(
@@ -357,6 +394,12 @@ def bluetooth(ctx):
     )
     # The template does not keep who registered the agent; the fixture's Pair needs it.
     fx.call(bus, fx.BLUEZ, "/org/bluez", fx.FIXTURE, "AgentOwner", "(s)", (ctx.bar,))
+    # The template's adapter starts bondable, as bluetoothd makes it once an agent registers:
+    # the bar turns that off, and turns it on only for its own pairing.
+    check("the bar makes the adapter unbondable", wait_for(lambda: adapter("Pairable") is False, 5))
+
+    def pairable_at_pair():
+        return fx.call(bus, fx.BLUEZ, "/org/bluez", fx.FIXTURE, "PairableAtPair", reply="(s)")[0]
     check(
         "the list shows the connected headphones first",
         open_popover(app, Atspi, "Bluetooth", lambda: buttons(app, Atspi, "Headphones, connected")),
@@ -395,12 +438,26 @@ def bluetooth(ctx):
     # Pair), the person confirms, then the bar trusts and connects it. The BlueZ mock is
     # blocked while the page is open, so nothing below calls it until Pair is pressed.
     check("a nearby device is listed while discovering", wait_for(lambda: buttons(app, Atspi, "Phone"), 10))
+    # While the Phone pairs, BlueZ first asks about the Speaker: the agent answers only the
+    # device the person pressed, not whichever device asks while a pairing is in progress.
+    (other,) = fx.call(
+        bus, fx.BLUEZ, "/org/bluez", fx.FIXTURE, "AlsoAsk", "(o)", (device_path("Speaker"),), "(u)",
+    )
     press(app, Atspi, "Phone")
     check("pressing it shows the digits BlueZ sent", wait_for(lambda: labelled(app, Atspi, "label", fx.PAIRING_CODE), 10))
+    check("another device's request during the pairing shows nothing", not labelled(app, Atspi, "label", str(fx.OTHER_PASSKEY)))
+    check(
+        "the Pair button is described by the device, the digits and the note",
+        described_by(confirm_button(app, Atspi, "Pair")[1], Atspi)
+        == ["Pair with Phone?", fx.PAIRING_CODE, "Pair only if Phone shows the same number."],
+    )
     check("Pair confirms", wait_for(lambda: press_confirm(app, Atspi, "Pair"), 5))
     phone = device_path("Phone")
     check("the device is paired", wait_for(lambda: property_of(bus, fx.BLUEZ, phone, device1, "Paired") is True, 10))
     check("trusts it", wait_for(lambda: property_of(bus, fx.BLUEZ, phone, device1, "Trusted") is True, 5))
+    check("and was rejected", wait_for(lambda: result(other) == f"error:{REJECTED}", 5))
+    check("the adapter was bondable while Pair ran", pairable_at_pair() == "true")
+    check("and is unbondable again after it", wait_for(lambda: adapter("Pairable") is False, 5))
     # Pair closes the popover, as Connect does in the network module; opened again, it shows
     # the device connected and discovers again.
     check(
@@ -418,6 +475,7 @@ def bluetooth(ctx):
         "and the device stays unpaired",
         wait_for(lambda: property_of(bus, fx.BLUEZ, device_path("Speaker"), device1, "Paired") is False, 5),
     )
+    check("a cancelled pairing leaves the adapter unbondable", wait_for(lambda: adapter("Pairable") is False, 5))
 
     # The agent refuses any process that is not bluetoothd.
     try:
@@ -556,6 +614,15 @@ def battery(ctx):
         "the slider sets the brightness through logind",
         wait_for(lambda: "SetBrightness backlight intel_backlight 300" in logind_log.read_text(encoding="utf-8"), 5),
     )
+    # logind refuses a level under 100: the slider goes back to the backlight's level and the
+    # popover says the action did not complete.
+    check("no note before an action fails", not labelled(app, Atspi, "label", NOT_COMPLETED))
+    brightness().set_current_value(5.0)
+    check(
+        "a refused brightness puts the slider back",
+        wait_for(lambda: brightness() is not None and abs(brightness().get_current_value() - 30.0) < 1.0, 5),
+    )
+    check("and the popover says the action did not complete", wait_for(lambda: labelled(app, Atspi, "label", NOT_COMPLETED), 5))
 
     display_device(1, 15.0, 0, 5400, True)
     check("charging shows the time until full", wait_for(lambda: labelled(app, Atspi, "label", "1 h 30 min until full"), 5))

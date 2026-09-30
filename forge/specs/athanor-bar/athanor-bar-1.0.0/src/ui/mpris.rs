@@ -150,14 +150,15 @@ impl Media {
         })
     }
 
-    /// `PlayPause`, `Next` or `Previous` to the followed player.
-    pub fn command(&self, method: &'static str) {
+    /// `PlayPause`, `Next` or `Previous` to the followed player; `failed` runs if the player
+    /// refuses it or does not answer.
+    pub fn command(&self, method: &'static str, failed: impl FnOnce() + 'static) {
         let session = self.session.borrow().clone();
         let player = self.player.borrow();
         let (Some(session), Some((name, _))) = (session, player.as_ref()) else {
             return;
         };
-        bus::spawn(
+        bus::act(
             method,
             bus::call(
                 &session,
@@ -168,6 +169,7 @@ impl Media {
                 None,
                 bus::TIMEOUT_MS,
             ),
+            failed,
         );
     }
 }

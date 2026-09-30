@@ -64,10 +64,33 @@ fn service() -> Option<Rc<Service>> {
     SERVICE.with(|cell| cell.borrow().clone())
 }
 
+/// An action the person took did not complete: the views show the last snapshot again, which
+/// puts a slider or a switch back, and the open popover says so.
+fn action_failed() {
+    if let Some(service) = service() {
+        service.show_all();
+        for view in service.views() {
+            view.popup.failed();
+        }
+    }
+}
+
+/// The completion of a libpulse operation the person asked for. It runs inside a libpulse
+/// callback, so a failure is handled on the main loop.
+fn completion() -> Box<dyn FnMut(bool)> {
+    Box::new(|ok| {
+        if !ok {
+            tracing::warn!("the sound server refused an action");
+            glib::idle_add_local_once(action_failed);
+        }
+    })
+}
+
 struct Service {
     bar: Weak<Bar>,
-    mainloop: Option<Mainloop>,
+    // Fields drop in declaration order: the context, which runs on the main loop, goes first.
     context: RefCell<Option<Context>>,
+    mainloop: Option<Mainloop>,
     retry_ms: Cell<u64>,
     gathering: RefCell<Option<Gathering>>,
     /// An event arrived during a refresh: refresh again once it ends.
@@ -89,8 +112,8 @@ impl Service {
         }
         let service = Rc::new(Service {
             bar: Rc::downgrade(bar),
-            mainloop,
             context: RefCell::new(None),
+            mainloop,
             retry_ms: Cell::new(FIRST_RETRY_MS),
             gathering: RefCell::new(None),
             stale: Cell::new(false),
@@ -358,8 +381,8 @@ impl Service {
         self.with_ready(|context| {
             let mut introspect = context.introspect();
             match kind {
-                Kind::Output => introspect.set_sink_volume_by_name(name, &volume, None),
-                Kind::Input => introspect.set_source_volume_by_name(name, &volume, None),
+                Kind::Output => introspect.set_sink_volume_by_name(name, &volume, Some(completion())),
+                Kind::Input => introspect.set_source_volume_by_name(name, &volume, Some(completion())),
             };
         });
     }
@@ -368,8 +391,8 @@ impl Service {
         self.with_ready(|context| {
             let mut introspect = context.introspect();
             match kind {
-                Kind::Output => introspect.set_sink_mute_by_name(name, muted, None),
-                Kind::Input => introspect.set_source_mute_by_name(name, muted, None),
+                Kind::Output => introspect.set_sink_mute_by_name(name, muted, Some(completion())),
+                Kind::Input => introspect.set_source_mute_by_name(name, muted, Some(completion())),
             };
         });
     }
@@ -377,15 +400,15 @@ impl Service {
     fn set_default(&self, kind: Kind, name: &str) {
         self.with_ready(|context| {
             match kind {
-                Kind::Output => context.set_default_sink(name, |_| {}),
-                Kind::Input => context.set_default_source(name, |_| {}),
+                Kind::Output => context.set_default_sink(name, completion()),
+                Kind::Input => context.set_default_source(name, completion()),
             };
         });
     }
 
     fn media(&self, method: &'static str) {
         if let Some(media) = self.media.borrow().as_ref() {
-            media.command(method);
+            media.command(method, action_failed);
         }
     }
 }
@@ -426,6 +449,9 @@ struct Channel {
     mute: gtk4::Switch,
     devices: gtk4::Box,
     chosen: RefCell<Option<String>>,
+    /// What the device rows show, (name, label, in use): they are rebuilt only when it
+    /// changes, not on every volume step, which would take the keyboard focus off them.
+    shown: RefCell<Vec<(String, String, bool)>>,
 }
 
 impl Channel {
@@ -451,6 +477,7 @@ impl Channel {
             mute,
             devices,
             chosen: RefCell::new(None),
+            shown: RefCell::new(Vec::new()),
         }
     }
 
@@ -466,31 +493,43 @@ impl Channel {
             self.scale.set_value(device.percent);
             self.mute.set_active(device.muted);
         }
+        let rows: Vec<(String, String, bool)> = if devices.len() > 1 {
+            devices
+                .iter()
+                .map(|device| {
+                    let in_use = chosen
+                        .as_ref()
+                        .is_some_and(|chosen| chosen.name == device.name);
+                    (device.name.clone(), device.label.clone(), in_use)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if *self.shown.borrow() == rows {
+            return chosen;
+        }
         while let Some(child) = self.devices.first_child() {
             self.devices.remove(&child);
         }
-        if devices.len() > 1 {
-            for device in devices {
-                let in_use = chosen
-                    .as_ref()
-                    .is_some_and(|chosen| chosen.name == device.name);
-                let name = if in_use {
-                    tr_with("{device}, in use", "device", &device.label)
-                } else {
-                    device.label.clone()
-                };
-                let button = gtk4::Button::with_label(&name);
-                button.add_css_class("bar-row");
-                button.update_property(&[Property::Label(&name)]);
-                let (kind, target) = (self.kind, device.name.clone());
-                button.connect_clicked(move |_| {
-                    if let Some(service) = service() {
-                        service.set_default(kind, &target);
-                    }
-                });
-                self.devices.append(&button);
-            }
+        for (target, label, in_use) in &rows {
+            let name = if *in_use {
+                tr_with("{device}, in use", "device", label)
+            } else {
+                label.clone()
+            };
+            let button = gtk4::Button::with_label(&name);
+            button.add_css_class("bar-row");
+            button.update_property(&[Property::Label(&name)]);
+            let (kind, target) = (self.kind, target.clone());
+            button.connect_clicked(move |_| {
+                if let Some(service) = service() {
+                    service.set_default(kind, &target);
+                }
+            });
+            self.devices.append(&button);
         }
+        self.shown.replace(rows);
         chosen
     }
 }
@@ -556,7 +595,7 @@ impl View {
         content.append(&output.section);
         content.append(&input.section);
         content.append(&media);
-        popup.popover.set_child(Some(&content));
+        popup.set_content(&content);
 
         let view = Rc::new(View {
             bar: Rc::downgrade(bar),

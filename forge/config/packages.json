@@ -158,6 +158,7 @@
     "fontawesome-fonts-all",
     "foot",
     "gtk4-layer-shell",
+    "pulseaudio-libs-glib2",
     "gtk-layer-shell",
     "jetbrains-mono-fonts",
     "papirus-icon-theme",

@@ -3,9 +3,11 @@
 # Package 2b.2 of docs/architecture/doc_bar.md in the dev VM's real session, under the real
 # unit file and the real user manager: the bar starts as a Type=notify unit, its
 # confinement leaves glycin's image sandbox working, it stays within its memory budget
-# (section 5, item 17), high contrast reaches COSMIC's theme from inside it (BR3), an
-# output that comes and goes never restarts the process or leaks a surface, and a
-# crash loop falls back to the vendor layout (SH8).
+# (section 5, item 17), high contrast reaches COSMIC's theme from inside it (BR3),
+# the system modules reach NetworkManager, pipewire-pulse, BlueZ and UPower from inside
+# it and hide what the VM lacks (package 2b.4), an output that comes and goes never
+# restarts the process or leaks a surface, and a crash loop falls back to the vendor
+# layout (SH8).
 # athanor-shelld is masked for the run: COSMIC owns its bus names in this session.
 # Deploys the binary, the unit and the vendor favourites from .scratch/shell-rig/bin and
 # forge/specs/athanor-bar (build the binary with forge/test/shell/rig.sh build-bar). With no
@@ -24,7 +26,7 @@ BIN=$ROOT/.scratch/shell-rig/bin
 DATA=$ROOT/forge/specs/athanor-bar/athanor-bar-1.0.0/data
 SHOTS=$ROOT/.scratch/bar-acceptance
 PSS_LIMIT_KB=$((64 * 1024))
-STAGES=(deploy unit memory high-contrast hotplug crash-loop cleanup)
+STAGES=(deploy unit memory modules high-contrast hotplug crash-loop cleanup)
 STAGE=
 CLEANED=0
 
@@ -89,6 +91,13 @@ stage_deploy() {
         fail "systemctl --user mask --runtime athanor-shelld.service"
     in_session systemctl --user daemon-reload
     unit cat > /dev/null || fail "systemctl --user cat athanor-bar.service found no unit"
+    # libpulse and its GLib main loop come with the RPM's automatic dependencies; a binary
+    # deployed by hand needs them in the image already.
+    local libraries
+    libraries=$(in_session ldd /usr/bin/athanor-bar) || fail "ldd /usr/bin/athanor-bar failed in the guest"
+    if grep -q 'not found' <<< "$libraries"; then
+        fail "libraries missing from the guest image: $(grep 'not found' <<< "$libraries")"
+    fi
 }
 
 stage_unit() {
@@ -157,6 +166,56 @@ stage_memory() {
     echo "memory: athanor-bar PSS $pss kB"
     [[ $pss =~ ^[0-9]+$ ]] || fail "Pss '$pss' from /proc/$pid/smaps_rollup"
     ((pss <= PSS_LIMIT_KB)) || fail "PSS $pss kB is above $PSS_LIMIT_KB kB (item 17)"
+}
+
+# The bar exports its Bluetooth agent on its system-bus connection, found by the unit's
+# MainPID. The default bus policy denies a user's Introspect of another connection, and no
+# policy file opens Introspectable to every destination; bluetooth.conf lets root send
+# org.freedesktop.DBus.Properties anywhere, and GDBus answers GetAll for an exported
+# interface, which Agent1 is, with its (empty) properties and for any other path with an error.
+agent_exported() {
+    local pid name names
+    pid=$(unit show -p MainPID --value)
+    names=$(in_session "busctl --system list --unique --no-legend" | awk -v pid="$pid" '$2 == pid { print $1 }')
+    [[ -n $names ]] || fail "athanor-bar (pid $pid) has no system-bus connection"
+    for name in $names; do
+        if guest_ssh "sudo busctl --system call $name /os/athanor/Bar/BluezAgent \
+            org.freedesktop.DBus.Properties GetAll s org.bluez.Agent1" > /dev/null; then
+            echo "athanor-bar exports /os/athanor/Bar/BluezAgent on $name"
+            return 0
+        fi
+    done
+    fail "athanor-bar does not export org.bluez.Agent1 at /os/athanor/Bar/BluezAgent on $names"
+}
+
+# The system modules against the VM's real services, under the real unit: libpulse reaches
+# pipewire-pulse, NetworkManager accepts the secret agent, and the modules without hardware
+# hide (bar_modules.py). The journal must show no refusal from a service.
+stage_modules() {
+    local since
+    since=$(in_session date +%s)
+    fresh_start
+    in_session python3 - < "$HERE/bar_modules.py" || fail "a module did not reach its service (steps above)"
+    local journal pattern='a system service refused or did not answer|refused the pairing agent|cannot export|does not parse|no GLib main loop|no system bus'
+    journal=$(in_session "journalctl --user -u athanor-bar --since @$since --no-pager -o cat")
+    if grep -qE "$pattern" <<< "$journal"; then
+        fail "refusals in the journal: $(grep -E "$pattern" <<< "$journal")"
+    fi
+    [[ $(unit is-active) == active ]] || fail "not active after the modules: $(unit show -p Result --value)"
+    agent_exported
+    # Recorded, not judged: libpulse warns on every connect that it cannot create its cookie
+    # under ProtectHome and Landlock, which pipewire-pulse does not need; a refused connection
+    # is a different line. The polkit default decides whether joining a new network prompts.
+    local notes="$SHOTS/modules-notes.txt"
+    {
+        echo "libpulse cookie warnings: $(grep -ci 'cookie' <<< "$journal")"
+        echo "libpulse refused connections: $(grep -ciE 'connection refused|access denied|connection terminated' <<< "$journal")"
+        echo "polkit, org.freedesktop.NetworkManager.settings.modify.system:"
+        in_session pkaction --verbose --action-id org.freedesktop.NetworkManager.settings.modify.system |
+            grep -E '^\s*implicit (any|inactive|active):'
+    } > "$notes" || fail "could not record the modules' notes"
+    cat "$notes"
+    "$HERE/screenshot.sh" "$SHOTS/modules.png" > /dev/null
 }
 
 # Switches high contrast on and off through the bar's own menu over AT-SPI; the bar writes

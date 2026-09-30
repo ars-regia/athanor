@@ -442,3 +442,6 @@ msgstr "Energiemodus"
 
 msgid "Screen brightness"
 msgstr "Bildschirmhelligkeit"
+
+msgid "The action did not complete."
+msgstr "Die Aktion wurde nicht abgeschlossen."

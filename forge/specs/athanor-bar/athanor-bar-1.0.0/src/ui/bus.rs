@@ -58,17 +58,37 @@ pub fn set_property(
     )
 }
 
-/// Runs a call whose reply nobody reads; a failure is logged with the action's name only.
-/// The arguments are never logged: one of them may be a password.
+/// Runs a call the bar makes on its own, whose reply nobody reads; a failure is logged with
+/// the action's name only. The arguments are never logged: one of them may be a password.
 pub fn spawn(
     action: &'static str,
     future: impl Future<Output = Result<glib::Variant, glib::Error>> + 'static,
 ) {
     glib::spawn_future_local(async move {
         if let Err(err) = future.await {
-            tracing::warn!(error = %err, action, "a system service refused or did not answer");
+            refused(action, &err);
         }
     });
+}
+
+/// Runs a call the person asked for. A failure is logged as by [`spawn`], then `failed` runs:
+/// the module shows its service's state again, since no change arrives that would put a
+/// switch or a slider back, and says in the popover that the action did not complete.
+pub fn act(
+    action: &'static str,
+    future: impl Future<Output = Result<glib::Variant, glib::Error>> + 'static,
+    failed: impl FnOnce() + 'static,
+) {
+    glib::spawn_future_local(async move {
+        if let Err(err) = future.await {
+            refused(action, &err);
+            failed();
+        }
+    });
+}
+
+fn refused(action: &str, err: &glib::Error) {
+    tracing::warn!(error = %err, action, "a system service refused or did not answer");
 }
 
 /// What the mirror loads.
