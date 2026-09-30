@@ -351,6 +351,12 @@ impl Service {
             invocation.return_dbus_error(&error("NoSecrets"), "the bar shows no network module");
             return;
         };
+        // The page may hold the password of a network the user is joining: replacing it would
+        // drop that join and send what they are typing as another network's password.
+        if view.asking.borrow().is_some() {
+            invocation.return_dbus_error(&error("NoSecrets"), "the password page is in use");
+            return;
+        }
         self.pending.replace(Some(Pending {
             request,
             invocation,
