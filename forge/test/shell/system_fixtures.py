@@ -305,7 +305,7 @@ def networkmanager(bus):
     return process
 
 
-def bluez(bus, log):
+def bluez(bus, log, discovering=False):
     process = spawn_mock("bluez5", log)
     wait_for_name(bus, BLUEZ)
     (adapter,) = call(bus, BLUEZ, "/", BLUEZ_MOCK, "AddAdapter", "(ss)", ("hci0", "athanor"), "(s)")
@@ -313,6 +313,11 @@ def bluez(bus, log):
     # which only SetDiscoveryFilter creates: without it both raise KeyError after changing
     # Discovering, and emit no PropertiesChanged. An empty filter is BlueZ's default.
     call(bus, BLUEZ, adapter, "org.bluez.Adapter1", "SetDiscoveryFilter", "(a{sv})", ({},))
+    if discovering:
+        call(
+            bus, BLUEZ, adapter, MOCK, "UpdateProperties", "(sa{sv})",
+            ("org.bluez.Adapter1", {"Discovering": GLib.Variant("b", True)}),
+        )
     for address, alias, paired, icon in DEVICES:
         (path,) = call(bus, BLUEZ, "/", BLUEZ_MOCK, "AddDevice", "(sss)", ("hci0", address, alias), "(s)")
         call(
@@ -492,15 +497,16 @@ def pids_of(comm):
     return found
 
 
-def start(tag):
-    """Every fixture, ready before the bar starts; the processes to stop afterwards."""
+def start(tag, discovering=False):
+    """Every fixture, ready before the bar starts; the processes to stop afterwards.
+    `discovering` starts the adapter already discovering, as the Bluetooth capture needs."""
     backlight()
     bus = system_bus()
     out = Path("/out")
     audio_log = (out / f"{tag}-pipewire.log").open("a", encoding="utf-8")
     return [
         networkmanager(bus),
-        bluez(bus, str(out / f"{tag}-bluez.log")),
+        bluez(bus, str(out / f"{tag}-bluez.log"), discovering),
         upower(bus, str(out / f"{tag}-upower.log")),
         profiles(bus, str(out / f"{tag}-profiles.log")),
         *pipewire(audio_log),

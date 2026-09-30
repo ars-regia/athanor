@@ -509,6 +509,7 @@ struct View {
     next: gtk4::Button,
     /// Widgets are being set from the sound server, not by the person.
     updating: Cell<bool>,
+    /// `ATHANOR_BAR_OPEN=audio` came before the popover's content was complete.
     pending_open: Cell<bool>,
 }
 
@@ -661,12 +662,22 @@ impl View {
             self.next.set_sensitive(now.can_next);
         }
         self.popup.button.set_visible(true);
-        if self.pending_open.take() {
+        if self.pending_open.get() && media_settled() {
+            self.pending_open.set(false);
             if let Some(bar) = self.bar.upgrade() {
                 self.popup.open(&bar);
             }
         }
     }
+}
+
+/// Whether the media controls are final. The captures open the popover only then: a
+/// popover that grows after its first frame leaves its edge column stale in cosmic-comp at
+/// a fractional scale.
+fn media_settled() -> bool {
+    service()
+        .and_then(|service| service.media.borrow().as_ref().map(|media| media.settled()))
+        .unwrap_or(true)
 }
 
 fn media_button(icon: &str, name: &str) -> gtk4::Button {
@@ -689,7 +700,7 @@ impl ModuleUi for AudioUi {
     fn refresh(&self, _bar: &Rc<Bar>, _changed: Changed) {}
 
     fn open(&self, bar: &Rc<Bar>) {
-        if self.view.popup.button.get_visible() {
+        if self.view.popup.button.get_visible() && media_settled() {
             self.view.popup.open(bar);
         } else {
             self.view.pending_open.set(true);

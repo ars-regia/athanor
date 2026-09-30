@@ -2,7 +2,7 @@
 //! by name, mirrored while it owns its name. A player that appears or leaves makes the
 //! choice again.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use athanor_bar::audio::{self, Track};
@@ -25,6 +25,8 @@ pub struct NowPlaying {
 pub struct Media {
     session: RefCell<Option<gio::DBusConnection>>,
     player: RefCell<Option<(String, Rc<Mirror>)>>,
+    /// The session bus's names have been listed once: `player` is the choice, not a guess.
+    listed: Cell<bool>,
     notify: Rc<dyn Fn()>,
     subscription: RefCell<Option<gio::SignalSubscription>>,
 }
@@ -34,6 +36,7 @@ impl Media {
         let media = Rc::new(Media {
             session: RefCell::new(None),
             player: RefCell::new(None),
+            listed: Cell::new(false),
             notify: Rc::new(notify),
             subscription: RefCell::new(None),
         });
@@ -104,8 +107,13 @@ impl Media {
                 .into_iter()
                 .filter(|name| audio::is_player(name))
                 .min();
+            let first_listing = !media.listed.replace(true);
             let current = media.player.borrow().as_ref().map(|(name, _)| name.clone());
+            if first == current && !first_listing {
+                return;
+            }
             if first == current {
+                (media.notify)();
                 return;
             }
             let player = first.map(|name| {
@@ -121,6 +129,12 @@ impl Media {
             media.player.replace(player);
             (media.notify)();
         });
+    }
+
+    /// Whether the media controls show what they will keep showing: the players were
+    /// listed, and the followed one, if any, has answered with its track.
+    pub fn settled(&self) -> bool {
+        self.listed.get() && (self.player.borrow().is_none() || self.now().is_some())
     }
 
     pub fn now(&self) -> Option<NowPlaying> {
