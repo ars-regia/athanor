@@ -54,7 +54,7 @@ mod tests {
     use zbus::zvariant::{ObjectPath, Value};
 
     use super::*;
-    use crate::portal::{FileChooserPortal, MicrophonePortal};
+    use crate::portal::FileChooserPortal;
 
     const PORTAL_NAME: &str = "org.freedesktop.impl.portal.desktop.athanor";
 
@@ -128,7 +128,7 @@ mod tests {
             .builder()
             .name(PORTAL_NAME)
             .expect("name")
-            .serve_at("/org/freedesktop/portal/desktop", MicrophonePortal)
+            .serve_at("/org/freedesktop/portal/desktop", FileChooserPortal)
             .expect("serve")
             .build()
             .await
@@ -140,29 +140,29 @@ mod tests {
             conn.call_method(
                 Some(PORTAL_NAME),
                 "/org/freedesktop/portal/desktop",
-                Some("org.freedesktop.impl.portal.Microphone"),
-                "AccessMicrophone",
+                Some("org.freedesktop.impl.portal.FileChooser"),
+                "OpenFile",
                 &(
                     ObjectPath::try_from("/org/freedesktop/portal/desktop/request/1").expect("path"),
                     "org.example.App",
+                    "",
+                    "Open",
                     HashMap::<String, Value<'_>>::new(),
                 ),
             )
             .await
         };
 
-        // The stranger is refused before any prompt.
+        // The stranger is refused before the chooser is started.
         let refused = call(stranger).await.expect_err("a stranger must be refused");
-        assert!(
-            refused.to_string().contains("only org.freedesktop.portal.Desktop"),
-            "{refused}"
-        );
+        assert!(refused.to_string().contains("only org.freedesktop.portal.Desktop"), "{refused}");
 
-        // The frontend gets an answer. The prompt program is not installed in the test
-        // environment, so the answer is a denial, code 1, and never a grant.
+        // The frontend gets an answer. The chooser program is not the real one under test, so
+        // nothing is chosen and the answer is "cancelled", code 1, with no path.
         let reply = call(frontend).await.expect("the frontend is answered");
-        let code: u32 = reply.body().deserialize().expect("a status code");
+        let (code, results): (u32, HashMap<String, zbus::zvariant::OwnedValue>) = reply.body().deserialize().expect("a response");
         assert_eq!(code, 1);
+        assert!(results.is_empty());
     }
 
     /// Saving is refused, not answered with a made-up path.

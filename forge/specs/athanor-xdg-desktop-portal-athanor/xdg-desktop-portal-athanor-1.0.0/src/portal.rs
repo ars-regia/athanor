@@ -5,52 +5,23 @@ use zbus::zvariant::{ObjectPath, Value};
 use zbus::{interface, Connection};
 
 use crate::caller;
-use crate::prompt::{self, Resource, Verdict};
 
 pub struct AthanorPortal;
 
-pub struct CameraPortal;
-pub struct LocationPortal;
-pub struct MicrophonePortal;
+#[cfg(not(test))]
+const CHOOSER_PROGRAM: &str = "athanor-shell-rs";
+/// Under test the chooser is never the real one: on a developer's machine it would open a window.
+#[cfg(test)]
+const CHOOSER_PROGRAM: &str = "/nonexistent/athanor-shell-rs";
+
 pub struct FileChooserPortal;
 
 impl AthanorPortal {
-    /// Asks the user, through the privacy prompt, whether `app_id` may use `resource`.
-    /// Only a click on Allow grants; anything else denies (see `prompt`).
-    pub async fn request_permission(resource: Resource, app_id: &str) -> bool {
-        info!("Prompting user for {resource:?} permission for app {app_id:?}");
-
-        match prompt::ask(resource, app_id).await {
-            Verdict::Granted => {
-                info!("Permission GRANTED for {resource:?} to app {app_id:?}.");
-                let res = format!("{resource:?}");
-                tokio::spawn(async move {
-                    if let Ok(conn) = Connection::session().await {
-                        let _ = conn
-                            .call_method(
-                                Some("os.athanor.Shell"),
-                                "/os/athanor/Shell",
-                                Some("os.athanor.Shell"),
-                                "SetPrivacyIndicator",
-                                &(res, true),
-                            )
-                            .await;
-                    }
-                });
-                true
-            }
-            Verdict::Denied(reason) => {
-                info!("Permission DENIED for {resource:?} to app {app_id:?}: {reason:?}.");
-                false
-            }
-        }
-    }
-
     /// Queries `athanor-hypervisor-daemon` over DBus to check if `app_id` is running in a Micro-VM
     pub async fn request_file_selection(app_id: &str) -> Option<String> {
         info!("Prompting user for File Selection for app: {}", app_id);
 
-        let output = std::process::Command::new("athanor-shell-rs")
+        let output = std::process::Command::new(CHOOSER_PROGRAM)
             .arg("--file-chooser")
             .output();
 
@@ -139,65 +110,6 @@ impl AthanorPortal {
         Ok(res)
     }
 
-}
-
-#[interface(name = "org.freedesktop.impl.portal.Camera")]
-impl CameraPortal {
-    async fn access_camera(
-        &self,
-        _handle: ObjectPath<'_>,
-        app_id: String,
-        _options: HashMap<String, Value<'_>>,
-        #[zbus(header)] header: Header<'_>,
-        #[zbus(connection)] conn: &Connection,
-    ) -> std::result::Result<u32, zbus::fdo::Error> {
-        caller::authorise(&header, conn).await?;
-        if AthanorPortal::request_permission(Resource::Camera, &app_id).await {
-            Ok(0)
-        } else {
-            Ok(1)
-        }
-    }
-}
-
-#[interface(name = "org.freedesktop.impl.portal.Location")]
-impl LocationPortal {
-    #[zbus(name = "CreateSession")]
-    async fn create_session(
-        &self,
-        _handle: ObjectPath<'_>,
-        _session_handle: ObjectPath<'_>,
-        app_id: String,
-        _options: HashMap<String, Value<'_>>,
-        #[zbus(header)] header: Header<'_>,
-        #[zbus(connection)] conn: &Connection,
-    ) -> std::result::Result<u32, zbus::fdo::Error> {
-        caller::authorise(&header, conn).await?;
-        if AthanorPortal::request_permission(Resource::Location, &app_id).await {
-            Ok(0)
-        } else {
-            Ok(1)
-        }
-    }
-}
-
-#[interface(name = "org.freedesktop.impl.portal.Microphone")]
-impl MicrophonePortal {
-    async fn access_microphone(
-        &self,
-        _handle: ObjectPath<'_>,
-        app_id: String,
-        _options: HashMap<String, Value<'_>>,
-        #[zbus(header)] header: Header<'_>,
-        #[zbus(connection)] conn: &Connection,
-    ) -> std::result::Result<u32, zbus::fdo::Error> {
-        caller::authorise(&header, conn).await?;
-        if AthanorPortal::request_permission(Resource::Microphone, &app_id).await {
-            Ok(0)
-        } else {
-            Ok(1)
-        }
-    }
 }
 
 #[interface(name = "org.freedesktop.impl.portal.FileChooser")]

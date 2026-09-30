@@ -2,8 +2,8 @@
 %global crate_dir forge/specs/athanor-%{name}/%{name}-%{version}
 Name:           xdg-desktop-portal-athanor
 Version:        1.0.0
-Release:        5%{?dist}
-Summary:        Athanor OS Desktop Portal (Privacy & File Chooser)
+Release:        6%{?dist}
+Summary:        Athanor OS Desktop Portal (File Chooser)
 
 License:        GPL-3.0-or-later
 URL:            https://github.com/hr-mes/athanor-forge
@@ -13,7 +13,7 @@ BuildRequires:  rust cargo pkgconf-pkg-config openssl-devel
 Requires:       athanor-shell-rs >= 1.0.0-38
 
 %description
-Athanor OS implementation of the XDG Desktop Portal for native Wayland/Niri integration, privacy prompts, and hardware indicators.
+Athanor OS backend of the XDG Desktop Portal for the file chooser, which opens a single file through the chooser of athanor-shell-rs. Only the owner of org.freedesktop.portal.Desktop may call it.
 
 %prep
 # Built in place from the workspace checkout: nothing to unpack.
@@ -36,6 +36,13 @@ install -D -m 0644 %{crate_dir}/athanor.portal %{buildroot}%{_datadir}/xdg-deskt
 %{_datadir}/xdg-desktop-portal/portals/athanor.portal
 
 %changelog
+* Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
+- The camera, microphone and location interfaces are removed, with the privacy prompt they
+  used. xdg-desktop-portal 1.18.4 defines no backend interface for any of the three, so it
+  never called them and a grant through them controlled nothing. Consent to the microphone
+  is a switch in the bar (doc_local_ai.md, AI6). The portal now offers only FileChooser.
+- Still requires the athanor-shell-rs that logs to standard error: the chooser's answer is
+  its standard output.
 * Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
 - The portal no longer offers ScreenCast. Its implementation answered with a made-up
   PipeWire node and could not open the stream, and because the session announces
