@@ -1,0 +1,9 @@
+[Unit]
+Description=Athanor OS recovery console
+# Started by greetd's OnFailure= (greetd.service.d/recovery-fallback.conf) once greetd has
+# failed three times in a minute, which means the desktop does not start. The person gets a
+# text login on tty1 and, above it, a message saying how to go back to the previous version:
+# `sudo athanor-update go-back`. The root account is locked on this image, so the login is
+# an administrator's own.
+Wants=athanor-recovery-notice.service getty@tty1.service
+After=athanor-recovery-notice.service

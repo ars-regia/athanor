@@ -1,0 +1,14 @@
+
+The desktop did not start.
+Il desktop non si è avviato.
+
+To go back to the previous system version, log in as an administrator and run:
+Per tornare alla versione precedente del sistema, accedi come amministratore ed esegui:
+
+    sudo athanor-update go-back
+
+The machine restarts on that version. To see why the desktop failed first:
+Il sistema si riavvia con quella versione. Per vedere prima perché il desktop non è partito:
+
+    journalctl -b -u greetd
+
