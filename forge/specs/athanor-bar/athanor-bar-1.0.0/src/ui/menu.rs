@@ -275,11 +275,12 @@ impl Menu {
                     return;
                 };
                 menu.refetching.set(false);
-                if menu.generation.get() != generation {
-                    return;
-                }
-                if let Some(layout) = layout {
-                    menu.show(&layout);
+                // A stale fetch shows nothing, but still hands on a refresh the menu opened
+                // since asked for: `refetch` returns if the menu is closed by now.
+                if menu.generation.get() == generation {
+                    if let Some(layout) = layout {
+                        menu.show(&layout);
+                    }
                 }
                 if menu.again.replace(false) {
                     menu.refetch();

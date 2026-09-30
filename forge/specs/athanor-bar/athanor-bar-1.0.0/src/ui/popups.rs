@@ -125,6 +125,9 @@ impl Window {
     // the popups show costs one empty, transparent window for the life of the process; track
     // the surface's monitor (`gdk::Surface::enter-monitor`) if that ever shows up.
     pub(super) fn abandon(self) {
+        // Hidden first: a surface left mapped on another output must not keep the input
+        // region its last `show` gave it.
+        self.hide();
         self.window.set_child(None::<&gtk4::Widget>);
     }
 }
