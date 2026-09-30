@@ -60,6 +60,13 @@ fn service() -> Option<Rc<Service>> {
     SERVICE.with(|cell| cell.borrow().clone())
 }
 
+/// For [`bus::act`]: an action the person took did not complete.
+fn action_failed() {
+    if let Some(service) = service() {
+        service.failed();
+    }
+}
+
 fn error(name: &str) -> String {
     format!("{ERROR}{name}")
 }
@@ -389,11 +396,21 @@ impl Service {
         }
     }
 
+    /// An action the person took failed: every view shows the mirrored state again, which
+    /// puts a switch back, and the open popover says so.
+    fn failed(&self) {
+        let state = self.state.borrow();
+        for view in self.views() {
+            view.show(state.as_ref());
+            view.popup.failed();
+        }
+    }
+
     fn manager_call(&self, method: &'static str, args: Option<glib::Variant>) {
         let (Some(mirror), Some(args)) = (self.mirror(), args) else {
             return;
         };
-        bus::spawn(
+        bus::act(
             method,
             bus::call(
                 mirror.connection(),
@@ -404,13 +421,14 @@ impl Service {
                 Some(&args),
                 bus::INTERACTIVE_TIMEOUT_MS,
             ),
+            action_failed,
         );
     }
 
     fn set_manager(&self, values: &[(&'static str, bool)]) {
         let Some(mirror) = self.mirror() else { return };
         for (property, value) in values {
-            bus::spawn(
+            bus::act(
                 property,
                 bus::set_property(
                     mirror.connection(),
@@ -420,6 +438,7 @@ impl Service {
                     property,
                     value.to_variant(),
                 ),
+                action_failed,
             );
         }
     }
@@ -561,7 +580,7 @@ impl View {
         let stack = gtk4::Stack::new();
         stack.add_named(&list, Some("list"));
         stack.add_named(&password, Some("password"));
-        popup.popover.set_child(Some(&stack));
+        popup.set_content(&stack);
 
         let view = Rc::new(View {
             bar: Rc::downgrade(bar),

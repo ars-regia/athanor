@@ -117,6 +117,7 @@ LAB_CONNECTION = f"{fx.NM_SETTINGS}/lab"
 SECRET_AGENT = "/org/freedesktop/NetworkManager/SecretAgent"
 AGENT_ERROR = "org.freedesktop.NetworkManager.SecretAgent."
 RETRY_NOTE = "The password was not accepted. Try again."
+NOT_COMPLETED = "The action did not complete."
 ALLOW_INTERACTION, REQUEST_NEW = 0x1, 0x2
 
 
@@ -572,6 +573,15 @@ def battery(ctx):
         "the slider sets the brightness through logind",
         wait_for(lambda: "SetBrightness backlight intel_backlight 300" in logind_log.read_text(encoding="utf-8"), 5),
     )
+    # logind refuses a level under 100: the slider goes back to the backlight's level and the
+    # popover says the action did not complete.
+    check("no note before an action fails", not labelled(app, Atspi, "label", NOT_COMPLETED))
+    brightness().set_current_value(5.0)
+    check(
+        "a refused brightness puts the slider back",
+        wait_for(lambda: brightness() is not None and abs(brightness().get_current_value() - 30.0) < 1.0, 5),
+    )
+    check("and the popover says the action did not complete", wait_for(lambda: labelled(app, Atspi, "label", NOT_COMPLETED), 5))
 
     display_device(1, 15.0, 0, 5400, True)
     check("charging shows the time until full", wait_for(lambda: labelled(app, Atspi, "label", "1 h 30 min until full"), 5))

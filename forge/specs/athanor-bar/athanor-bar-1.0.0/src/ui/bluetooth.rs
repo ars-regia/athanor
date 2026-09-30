@@ -69,6 +69,13 @@ fn service() -> Option<Rc<Service>> {
     SERVICE.with(|cell| cell.borrow().clone())
 }
 
+/// For [`bus::act`]: an action the person took did not complete.
+fn action_failed() {
+    if let Some(service) = service() {
+        service.failed();
+    }
+}
+
 struct Pending {
     invocation: gio::DBusMethodInvocation,
     view: Weak<View>,
@@ -84,6 +91,8 @@ struct Service {
     pending: RefCell<Option<Pending>>,
     /// The device the person pressed to pair, until `Pair` returns.
     pairing: RefCell<Option<String>>,
+    /// The person answered no to the pairing in progress: its failure is no news to them.
+    declined: Cell<bool>,
     /// Open popovers: discovery runs while at least one is open.
     open_popovers: Cell<u32>,
     agent: RefCell<Option<gio::RegistrationId>>,
@@ -103,6 +112,7 @@ impl Service {
             last_opened: RefCell::new(Weak::new()),
             pending: RefCell::new(None),
             pairing: RefCell::new(None),
+            declined: Cell::new(false),
             open_popovers: Cell::new(0),
             agent: RefCell::new(None),
         });
@@ -237,6 +247,16 @@ impl Service {
             tracing::info!("the Bluetooth adapter is bondable with no pairing from the bar; turning it off");
         }
         bus::spawn("Pairable", set_pairable(mirror.connection(), &adapter, wanted));
+    }
+
+    /// An action the person took failed: every view shows the mirrored state again, which
+    /// puts a switch back, and the open popover says so.
+    fn failed(&self) {
+        let state = self.state.borrow();
+        for view in self.views() {
+            view.show(state.as_ref());
+            view.popup.failed();
+        }
     }
 
     fn agent_call(
@@ -374,6 +394,7 @@ impl Service {
         let Some(pending) = self.pending.take() else {
             return;
         };
+        self.declined.set(!confirmed);
         if confirmed {
             pending.invocation.return_value(None);
         } else {
@@ -397,7 +418,7 @@ impl Service {
 
     fn device_call(&self, device: &str, method: &'static str) {
         let Some(mirror) = self.mirror() else { return };
-        bus::spawn(
+        bus::act(
             method,
             bus::call(
                 mirror.connection(),
@@ -408,6 +429,7 @@ impl Service {
                 None,
                 bus::TIMEOUT_MS,
             ),
+            action_failed,
         );
     }
 
@@ -433,6 +455,7 @@ impl Service {
             return;
         }
         self.pairing.replace(Some(device.clone()));
+        self.declined.set(false);
         let connection = mirror.connection().clone();
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
@@ -469,6 +492,9 @@ impl Service {
             }
             if let Err(err) = paired {
                 tracing::warn!(error = %err, "pairing failed");
+                if weak.upgrade().is_some_and(|service| !service.declined.get()) {
+                    action_failed();
+                }
                 return;
             }
             let trusted = bus::set_property(
@@ -483,7 +509,7 @@ impl Service {
             if let Err(err) = trusted {
                 tracing::warn!(error = %err, "the paired device could not be trusted");
             }
-            bus::spawn(
+            bus::act(
                 "Connect",
                 bus::call(
                     &connection,
@@ -494,6 +520,7 @@ impl Service {
                     None,
                     bus::TIMEOUT_MS,
                 ),
+                action_failed,
             );
         });
     }
@@ -505,7 +532,7 @@ impl Service {
         ) else {
             return;
         };
-        bus::spawn(
+        bus::act(
             "Powered",
             bus::set_property(
                 mirror.connection(),
@@ -515,6 +542,7 @@ impl Service {
                 "Powered",
                 on.to_variant(),
             ),
+            action_failed,
         );
     }
 
@@ -690,7 +718,7 @@ impl View {
         let stack = gtk4::Stack::new();
         stack.add_named(&list, Some("list"));
         stack.add_named(&page, Some("confirm"));
-        popup.popover.set_child(Some(&stack));
+        popup.set_content(&stack);
 
         let view = Rc::new(View {
             bar: Rc::downgrade(bar),

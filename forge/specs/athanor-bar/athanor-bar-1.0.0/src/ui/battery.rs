@@ -31,6 +31,17 @@ fn service() -> Option<Rc<Service>> {
     SERVICE.with(|cell| cell.borrow().clone())
 }
 
+/// For [`bus::act`]: an action the person took did not complete. The views show the
+/// services' state again, which puts a radio or the slider back, and the open popover says so.
+fn action_failed() {
+    if let Some(service) = service() {
+        service.show_all();
+        for view in service.views() {
+            view.popup.failed();
+        }
+    }
+}
+
 /// What one view shows.
 struct Status {
     battery: Option<Battery>,
@@ -142,7 +153,7 @@ impl Service {
         let Some(connection) = self.connection.borrow().clone() else {
             return;
         };
-        bus::spawn(
+        bus::act(
             "set the power profile",
             bus::set_property(
                 &connection,
@@ -152,6 +163,7 @@ impl Service {
                 "ActiveProfile",
                 profile.to_variant(),
             ),
+            action_failed,
         );
     }
 
@@ -165,7 +177,7 @@ impl Service {
             return;
         };
         let args = ("backlight", backlight.name.as_str(), backlight.raw(percent)).to_variant();
-        bus::spawn(
+        bus::act(
             "set the screen brightness",
             bus::call(
                 &connection,
@@ -176,6 +188,7 @@ impl Service {
                 Some(&args),
                 bus::TIMEOUT_MS,
             ),
+            action_failed,
         );
     }
 }
@@ -306,7 +319,7 @@ impl View {
         content.append(&summary);
         content.append(&profiles_section);
         content.append(&brightness_section);
-        popup.popover.set_child(Some(&content));
+        popup.set_content(&content);
 
         let view = Rc::new(View {
             bar: Rc::downgrade(bar),

@@ -64,6 +64,28 @@ fn service() -> Option<Rc<Service>> {
     SERVICE.with(|cell| cell.borrow().clone())
 }
 
+/// An action the person took did not complete: the views show the last snapshot again, which
+/// puts a slider or a switch back, and the open popover says so.
+fn action_failed() {
+    if let Some(service) = service() {
+        service.show_all();
+        for view in service.views() {
+            view.popup.failed();
+        }
+    }
+}
+
+/// The completion of a libpulse operation the person asked for. It runs inside a libpulse
+/// callback, so a failure is handled on the main loop.
+fn completion() -> Box<dyn FnMut(bool)> {
+    Box::new(|ok| {
+        if !ok {
+            tracing::warn!("the sound server refused an action");
+            glib::idle_add_local_once(action_failed);
+        }
+    })
+}
+
 struct Service {
     bar: Weak<Bar>,
     mainloop: Option<Mainloop>,
@@ -358,8 +380,8 @@ impl Service {
         self.with_ready(|context| {
             let mut introspect = context.introspect();
             match kind {
-                Kind::Output => introspect.set_sink_volume_by_name(name, &volume, None),
-                Kind::Input => introspect.set_source_volume_by_name(name, &volume, None),
+                Kind::Output => introspect.set_sink_volume_by_name(name, &volume, Some(completion())),
+                Kind::Input => introspect.set_source_volume_by_name(name, &volume, Some(completion())),
             };
         });
     }
@@ -368,8 +390,8 @@ impl Service {
         self.with_ready(|context| {
             let mut introspect = context.introspect();
             match kind {
-                Kind::Output => introspect.set_sink_mute_by_name(name, muted, None),
-                Kind::Input => introspect.set_source_mute_by_name(name, muted, None),
+                Kind::Output => introspect.set_sink_mute_by_name(name, muted, Some(completion())),
+                Kind::Input => introspect.set_source_mute_by_name(name, muted, Some(completion())),
             };
         });
     }
@@ -377,15 +399,15 @@ impl Service {
     fn set_default(&self, kind: Kind, name: &str) {
         self.with_ready(|context| {
             match kind {
-                Kind::Output => context.set_default_sink(name, |_| {}),
-                Kind::Input => context.set_default_source(name, |_| {}),
+                Kind::Output => context.set_default_sink(name, completion()),
+                Kind::Input => context.set_default_source(name, completion()),
             };
         });
     }
 
     fn media(&self, method: &'static str) {
         if let Some(media) = self.media.borrow().as_ref() {
-            media.command(method);
+            media.command(method, action_failed);
         }
     }
 }
@@ -556,7 +578,7 @@ impl View {
         content.append(&output.section);
         content.append(&input.section);
         content.append(&media);
-        popup.popover.set_child(Some(&content));
+        popup.set_content(&content);
 
         let view = Rc::new(View {
             bar: Rc::downgrade(bar),

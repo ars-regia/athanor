@@ -24,6 +24,8 @@ registered. --respawn starts the bar again when it is killed with SIGKILL, and r
 and the power profiles on the private system bus, PipeWire, an MPRIS player, a backlight)
 and points the bar at the fake backlight. Session.SetBrightness is logged like the other
 acting calls, "SetBrightness backlight intel_backlight 300", and writes the fake sysfs file.
+A level under 100 is refused as logind refuses a session that is not in the foreground, so
+that a test can see the bar put its slider back.
 --discovering, with --fixtures, starts the Bluetooth adapter already discovering.
 
 It is a small Gio service, not python3-dbusmock: dbusmock replies to each call from the
@@ -101,6 +103,11 @@ def logind(log, hang):
                 out.write(" ".join(words) + "\n")
             if method == "SetBrightness":
                 subsystem, name, level = parameters.unpack()
+                if level < 100:
+                    invocation.return_dbus_error(
+                        "org.freedesktop.login1.NotInControl", "Session is not in foreground, refusing."
+                    )
+                    return
                 device = system_fixtures.BACKLIGHT_DIR / name
                 if subsystem == "backlight" and "/" not in name and device.is_dir():
                     (device / "brightness").write_text(f"{level}\n", encoding="utf-8")

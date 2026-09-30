@@ -119,139 +119,139 @@ msgstr "Inverti i colori"
 msgid "Colour filter"
 msgstr "Filtro colore"
 
-#: src/ui/audio.rs:478
+#: src/ui/audio.rs:500
 #, rust-format
 msgid "{device}, in use"
 msgstr "{device}, in uso"
 
-#: src/ui/audio.rs:518
+#: src/ui/audio.rs:541
 msgid "Sound"
 msgstr "Audio"
 
-#: src/ui/audio.rs:522
+#: src/ui/audio.rs:545
 msgid "Output"
 msgstr "Uscita"
 
-#: src/ui/audio.rs:523
+#: src/ui/audio.rs:546
 msgid "Output volume"
 msgstr "Volume di uscita"
 
-#: src/ui/audio.rs:524
+#: src/ui/audio.rs:547
 msgid "Mute output"
 msgstr "Silenzia l'uscita"
 
-#: src/ui/audio.rs:528
+#: src/ui/audio.rs:551
 msgid "Input"
 msgstr "Ingresso"
 
-#: src/ui/audio.rs:529
+#: src/ui/audio.rs:552
 msgid "Input volume"
 msgstr "Volume di ingresso"
 
-#: src/ui/audio.rs:530
+#: src/ui/audio.rs:553
 msgid "Mute microphone"
 msgstr "Silenzia il microfono"
 
-#: src/ui/audio.rs:541
+#: src/ui/audio.rs:564
 msgid "Previous track"
 msgstr "Brano precedente"
 
-#: src/ui/audio.rs:542 src/ui/audio.rs:653
+#: src/ui/audio.rs:565 src/ui/audio.rs:676
 msgid "Pause"
 msgstr "Pausa"
 
-#: src/ui/audio.rs:543
+#: src/ui/audio.rs:566
 msgid "Next track"
 msgstr "Brano successivo"
 
-#: src/ui/audio.rs:655
+#: src/ui/audio.rs:678
 msgid "Play"
 msgstr "Riproduci"
 
-#: src/ui/battery.rs:186
+#: src/ui/battery.rs:199
 #, rust-format
 msgid "{percent} %"
 msgstr "{percent}%"
 
-#: src/ui/battery.rs:204
+#: src/ui/battery.rs:217
 #, rust-format
 msgid "{hours} h {minutes} min left"
 msgstr "{hours} h {minutes} min rimanenti"
 
-#: src/ui/battery.rs:207
+#: src/ui/battery.rs:220
 #, rust-format
 msgid "{hours} h {minutes} min until full"
 msgstr "{hours} h {minutes} min alla carica completa"
 
-#: src/ui/battery.rs:209
+#: src/ui/battery.rs:222
 msgid "Charging"
 msgstr "In carica"
 
-#: src/ui/battery.rs:210
+#: src/ui/battery.rs:223
 msgid "Fully charged"
 msgstr "Carica completa"
 
-#: src/ui/battery.rs:234
+#: src/ui/battery.rs:247
 msgid "Power saver"
 msgstr "Risparmio energetico"
 
-#: src/ui/battery.rs:235
+#: src/ui/battery.rs:248
 msgid "Performance"
 msgstr "Prestazioni"
 
-#: src/ui/battery.rs:236
+#: src/ui/battery.rs:249
 msgid "Balanced"
 msgstr "Bilanciato"
 
-#: src/ui/battery.rs:263
+#: src/ui/battery.rs:276
 msgid "Battery"
 msgstr "Batteria"
 
-#: src/ui/battery.rs:273
+#: src/ui/battery.rs:286
 msgid "Power mode"
 msgstr "Modalità di alimentazione"
 
-#: src/ui/battery.rs:291
+#: src/ui/battery.rs:304
 msgid "Screen brightness"
 msgstr "Luminosità dello schermo"
 
-#: src/ui/bluetooth.rs:577 src/ui/bluetooth.rs:580
+#: src/ui/bluetooth.rs:676 src/ui/bluetooth.rs:679
 msgid "Bluetooth"
 msgstr "Bluetooth"
 
-#: src/ui/bluetooth.rs:583
+#: src/ui/bluetooth.rs:682
 msgid "Nearby devices"
 msgstr "Dispositivi vicini"
 
-#: src/ui/bluetooth.rs:605 src/ui/network.rs:546 src/ui/power.rs:62
+#: src/ui/bluetooth.rs:704 src/ui/network.rs:565 src/ui/power.rs:62
 msgid "Cancel"
 msgstr "Annulla"
 
-#: src/ui/bluetooth.rs:607
+#: src/ui/bluetooth.rs:706
 msgid "Pair"
 msgstr "Associa"
 
-#: src/ui/bluetooth.rs:720
+#: src/ui/bluetooth.rs:819
 #, rust-format
 msgid "{device}, connected"
 msgstr "{device}, connesso"
 
-#: src/ui/bluetooth.rs:757
+#: src/ui/bluetooth.rs:856
 #, rust-format
 msgid "Pair with {device}?"
 msgstr "Associare {device}?"
 
-#: src/ui/bluetooth.rs:760
+#: src/ui/bluetooth.rs:859
 #, rust-format
 msgid "Pair only if {device} shows the same number."
 msgstr "Associa solo se {device} mostra lo stesso numero."
 
-#: src/ui/bluetooth.rs:773
+#: src/ui/bluetooth.rs:872
 #, rust-format
 msgid "Pairing with {device}"
 msgstr "Associazione con {device}"
 
-#: src/ui/bluetooth.rs:776
+#: src/ui/bluetooth.rs:875
 #, rust-format
 msgid "Type this code on {device}, then press Enter there."
 msgstr "Digita questo codice su {device}, poi premi Invio."
@@ -297,55 +297,55 @@ msgstr "Rimuovi dalla barra"
 msgid "Pin to Bar"
 msgstr "Aggiungi alla barra"
 
-#: src/ui/network.rs:504 src/ui/network.rs:507
+#: src/ui/network.rs:523 src/ui/network.rs:526
 msgid "Network"
 msgstr "Rete"
 
-#: src/ui/network.rs:513
+#: src/ui/network.rs:532
 msgid "Wi-Fi"
 msgstr "Wi-Fi"
 
-#: src/ui/network.rs:522
+#: src/ui/network.rs:541
 msgid "Airplane mode"
 msgstr "Modalità aereo"
 
-#: src/ui/network.rs:539
+#: src/ui/network.rs:558
 msgid "The password was not accepted. Try again."
 msgstr "La password non è stata accettata. Riprova."
 
-#: src/ui/network.rs:548
+#: src/ui/network.rs:567
 msgid "Connect"
 msgstr "Connetti"
 
-#: src/ui/network.rs:661
+#: src/ui/network.rs:680
 msgid "Wired: connected"
 msgstr "Cablata: connessa"
 
-#: src/ui/network.rs:662
+#: src/ui/network.rs:681
 msgid "Wired: not connected"
 msgstr "Cablata: non connessa"
 
-#: src/ui/network.rs:699
+#: src/ui/network.rs:718
 #, rust-format
 msgid "{network}, connected"
 msgstr "{network}, connessa"
 
-#: src/ui/network.rs:700
+#: src/ui/network.rs:719
 #, rust-format
 msgid "{network}, connecting"
 msgstr "{network}, connessione in corso"
 
-#: src/ui/network.rs:701
+#: src/ui/network.rs:720
 #, rust-format
 msgid "{network}, needs Settings"
 msgstr "{network}, richiede Impostazioni"
 
-#: src/ui/network.rs:703
+#: src/ui/network.rs:722
 #, rust-format
 msgid "{network}, secured"
 msgstr "{network}, protetta"
 
-#: src/ui/network.rs:734
+#: src/ui/network.rs:753
 #, rust-format
 msgid "Password for {network}"
 msgstr "Password per {network}"
@@ -371,6 +371,10 @@ msgstr "Nessuna notifica"
 #: src/ui/notifications.rs:934
 msgid "Do not disturb"
 msgstr "Non disturbare"
+
+#: src/ui/popup.rs:29
+msgid "The action did not complete."
+msgstr "L'azione non è stata completata."
 
 #: src/ui/power.rs:36
 msgid "Lock"
