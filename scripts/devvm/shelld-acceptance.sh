@@ -7,7 +7,8 @@
 # .socket/.service pair (the image has no dbus-daemon, and dbus-broker-launch only runs
 # under real socket activation), reached through a systemd drop-in on athanor-shelld.service.
 # Deploys the binary and the unit from .scratch/shell-rig/bin and forge/specs/athanor-shelld
-# (build the binary with forge/test/shell/rig.sh build-shelld). With no argument it runs
+# (build the binary with forge/test/shell/rig.sh build-shelld); INSTALLED=1 keeps the
+# image's binary and unit and sets up the private bus only. With no argument it runs
 # every stage in order; with arguments, only those, in the order given. Prints PASS <stage>
 # or FAIL <stage>: <what was read>, and exits non-zero on the first failure. Cleanup always
 # runs on exit, through a trap, so a failed stage leaves no daemon or drop-in behind.
@@ -24,6 +25,7 @@ BUS_UNIT=athanor-shelld-acceptance-bus
 STAGES=(deploy unit sender crash-loop cleanup)
 STAGE=
 CLEANED=0
+ACTIVE_BEFORE=()
 
 # Runs a command as the session user, with the session's bus and compositor.
 in_session() {
@@ -56,11 +58,24 @@ on_private_bus() { # on_private_bus COMMAND...
 }
 
 # Runs a command inside athanor-bar.service's cgroup, the only caller the private
-# interface admits, pointed at the private bus.
+# interface admits, pointed at the private bus. A transient unit of that name stands in for
+# the bar; the image ships a unit file of that name, which no transient unit can take, so
+# with INSTALLED=1 root moves the command into the running bar's own cgroup and drops back
+# to the session user.
 as_bar() { # as_bar COMMAND...
-    # shellcheck disable=SC2016 # $XDG_RUNTIME_DIR is expanded by the guest's shell
-    in_session "systemd-run --user --unit=athanor-bar --wait --pipe \
-    -E DBUS_SESSION_BUS_ADDRESS=unix:path=\$XDG_RUNTIME_DIR/$BUS_UNIT $*"
+    if [[ ${INSTALLED:-0} != 1 ]]; then
+        # shellcheck disable=SC2016 # $XDG_RUNTIME_DIR is expanded by the guest's shell
+        in_session "systemd-run --user --unit=athanor-bar --wait --pipe \
+        -E DBUS_SESSION_BUS_ADDRESS=unix:path=\$XDG_RUNTIME_DIR/$BUS_UNIT $*"
+        return
+    fi
+    local cgroup uid
+    cgroup=$(in_session systemctl --user show -p ControlGroup --value athanor-bar.service)
+    [[ $cgroup == /*/athanor-bar.service ]] || fail "athanor-bar.service runs in no cgroup: '$cgroup'"
+    uid=$(in_session id -u)
+    in_session "sudo sh -c 'echo \$\$ > /sys/fs/cgroup$cgroup/cgroup.procs &&
+    exec setpriv --reuid=$uid --regid=$uid --init-groups \
+    env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/$BUS_UNIT $*'"
 }
 
 # has_owner NAME: prints gdbus's reply, "(true,)" or "(false,)".
@@ -89,9 +104,11 @@ loaded() { [[ $(in_session systemctl --user show -p LoadState --value "$1") == l
 unit_failed() { [[ $(unit show -p ActiveState --value) == failed ]]; }
 
 stage_deploy() {
-    "$HERE/deploy.sh" \
-        "$BIN/athanor-shelld:/usr/bin/athanor-shelld" \
-        "$DATA/athanor-shelld.service:/usr/lib/systemd/user/athanor-shelld.service" > /dev/null
+    if [[ ${INSTALLED:-0} != 1 ]]; then
+        "$HERE/deploy.sh" \
+            "$BIN/athanor-shelld:/usr/bin/athanor-shelld" \
+            "$DATA/athanor-shelld.service:/usr/lib/systemd/user/athanor-shelld.service" > /dev/null
+    fi
     # The image has no dbus-daemon binary (Fedora 43 ships dbus-broker only), and
     # dbus-broker-launch refuses to bind a socket itself ("No listener socket inherited"):
     # it only runs under real systemd socket activation. A same-named .socket/.service
@@ -116,7 +133,9 @@ stage_unit() {
     if unit_failed; then
         unit reset-failed || fail "reset-failed athanor-shelld"
     fi
-    unit start || fail "systemctl --user start athanor-shelld failed"
+    # restart, not start: where the session already runs the daemon, only a new process
+    # reads the drop-in that points it at the private bus.
+    unit restart || fail "systemctl --user restart athanor-shelld failed"
     [[ $(unit is-active) == active ]] || fail "is-active: $(unit is-active)"
     owned org.freedesktop.Notifications || fail "org.freedesktop.Notifications has no owner on the private bus"
     owned org.kde.StatusNotifierWatcher || fail "org.kde.StatusNotifierWatcher has no owner on the private bus"
@@ -161,6 +180,10 @@ stage_crash-loop() {
     if loaded athanor-shelld; then
         unit stop || fail "stop athanor-shelld before crash-loop"
     fi
+    # The earlier stages, and a session that already ran the daemon, count their starts
+    # against StartLimitBurst: reset-failed empties that counter too, so the five kills below
+    # meet the daemon's own give-up and not systemd's start limit.
+    unit reset-failed || fail "reset-failed athanor-shelld before crash-loop"
     # shellcheck disable=SC2016 # $XDG_RUNTIME_DIR is expanded by the guest's shell
     in_session "rm -f \$XDG_RUNTIME_DIR/athanor-shelld/failures" ||
         fail "cannot clear the crash-loop record before crash-loop"
@@ -180,17 +203,14 @@ stage_crash-loop() {
     wait_until 90 gave_up || fail "the unit ended $(unit show -p ActiveState,Result --value | paste -sd,)"
     # given_up() now reports READY before this clean exit, so Restart=on-failure has nothing to
     # restart on. ActiveState/Result alone would not catch a sixth start that itself ended
-    # inactive/success; NRestarts is the guard for that, but not at 5 — systemd resets the
-    # counter the moment a start reaches "Started" (confirmed in the journal: "restart counter
-    # is at 5" on the failing attempt, then a plain "Started athanor-shelld.service" with no
-    # counter line on the give-up run, right where READY=1 now lands), so it reads 0 straight
-    # after give-up. It must stay 0 through a settling wait, or a sixth start happened.
-    # InvocationID changes on every start by definition, so it pins "no sixth start" whatever
-    # systemd does with the counter.
+    # inactive/success. NRestarts is no fixed number here: whether systemd clears it when a
+    # restart reaches "Started" has varied (0 was once read straight after give-up; systemd
+    # 258 keeps 5), so it must only stay put through a settling wait. InvocationID changes on
+    # every start by definition, so it pins "no sixth start" whatever systemd does with the
+    # counter.
     local restarts invocation
     restarts=$(unit show -p NRestarts --value)
     invocation=$(unit show -p InvocationID --value)
-    [[ $restarts == 0 ]] || fail "NRestarts is $restarts after giving up, expected exactly 0"
     sleep 5
     gave_up || fail "a sixth start ran: $(unit show -p ActiveState,Result --value | paste -sd,)"
     [[ $(unit show -p NRestarts --value) == "$restarts" ]] ||
@@ -250,6 +270,12 @@ stage_cleanup() {
         echo "cleanup: systemctl --user daemon-reload failed" >&2
         failed=1
     }
+    for unit in "${ACTIVE_BEFORE[@]}"; do
+        in_session systemctl --user start "$unit" || {
+            echo "cleanup: systemctl --user start $unit failed; it was running before the run" >&2
+            failed=1
+        }
+    done
     return "$failed"
 }
 
@@ -265,6 +291,9 @@ run=("$@")
 for STAGE in "${run[@]}"; do
     [[ " ${STAGES[*]} " == *" $STAGE "* ]] || die "unknown stage '$STAGE': one of ${STAGES[*]}"
 done
+# On an image that ships the units in the session, they run at the start: cleanup starts
+# again those that did.
+[[ $(unit show -p ActiveState --value) != active ]] || ACTIVE_BEFORE+=(athanor-shelld)
 trap cleanup_on_exit EXIT
 for STAGE in "${run[@]}"; do
     "stage_$STAGE"

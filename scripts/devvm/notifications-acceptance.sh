@@ -10,7 +10,8 @@
 # each. On that bus the bar has no accessibility bus: the stages read its journal and the
 # units' state; the screenshots in .scratch/notifications-acceptance/ are for the eye.
 # Deploys both binaries from .scratch/shell-rig/bin (forge/test/shell/rig.sh build-bar and
-# build-shelld) and both units. With no argument it runs every stage in order; with
+# build-shelld) and both units; INSTALLED=1 keeps the image's and sets up the private bus
+# only. With no argument it runs every stage in order; with
 # arguments, only those, in the order given. Prints PASS <stage> or FAIL <stage>: <what was
 # read>, and exits non-zero on the first failure. Cleanup always runs on exit, through a trap.
 set -euo pipefail
@@ -31,6 +32,7 @@ HEAD2=/sys/class/drm/card1-Virtual-2/status
 STAGES=(deploy admitted away hotplug memory cleanup)
 STAGE=
 CLEANED=0
+ACTIVE_BEFORE=()
 
 # Runs a command as the session user, with the session's bus and compositor.
 in_session() {
@@ -113,12 +115,14 @@ fresh_start() {
 
 stage_deploy() {
     mkdir -p "$SHOTS"
-    "$HERE/deploy.sh" \
-        "$BIN/athanor-bar:/usr/bin/athanor-bar" \
-        "$BIN/athanor-shelld:/usr/bin/athanor-shelld" \
-        "$BAR_DATA/athanor-bar.service:/usr/lib/systemd/user/athanor-bar.service" \
-        "$BAR_DATA/favorites.toml:/usr/share/athanor/favorites.toml" \
-        "$SHELLD_DATA/athanor-shelld.service:/usr/lib/systemd/user/athanor-shelld.service" > /dev/null
+    if [[ ${INSTALLED:-0} != 1 ]]; then
+        "$HERE/deploy.sh" \
+            "$BIN/athanor-bar:/usr/bin/athanor-bar" \
+            "$BIN/athanor-shelld:/usr/bin/athanor-shelld" \
+            "$BAR_DATA/athanor-bar.service:/usr/lib/systemd/user/athanor-bar.service" \
+            "$BAR_DATA/favorites.toml:/usr/share/athanor/favorites.toml" \
+            "$SHELLD_DATA/athanor-shelld.service:/usr/lib/systemd/user/athanor-shelld.service" > /dev/null
+    fi
     # dbus-broker-launch runs only under socket activation (see shelld-acceptance.sh). Its
     # bus declares no activatable service: with the session's service directories, GTK's
     # start-up calls to a portal or the AT-SPI bus would ask this bus to activate a service
@@ -266,6 +270,12 @@ stage_cleanup() {
         echo "cleanup: systemctl --user daemon-reload failed" >&2
         failed=1
     }
+    for unit in "${ACTIVE_BEFORE[@]}"; do
+        in_session systemctl --user start "$unit" || {
+            echo "cleanup: systemctl --user start $unit failed; it was running before the run" >&2
+            failed=1
+        }
+    done
     return "$failed"
 }
 
@@ -280,6 +290,12 @@ run=("$@")
 ((${#run[@]})) || run=("${STAGES[@]}")
 for STAGE in "${run[@]}"; do
     [[ " ${STAGES[*]} " == *" $STAGE "* ]] || die "unknown stage '$STAGE': one of ${STAGES[*]}"
+done
+# On an image that ships the units in the session, they run at the start: cleanup starts
+# again those that did.
+for unit in athanor-bar athanor-shelld; do
+    [[ $(in_session systemctl --user show -p ActiveState --value "$unit") != active ]] ||
+        ACTIVE_BEFORE+=("$unit")
 done
 trap cleanup_on_exit EXIT
 for STAGE in "${run[@]}"; do
