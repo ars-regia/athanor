@@ -12,8 +12,9 @@
 # forge/specs/athanor-bar (build the binary with forge/test/shell/rig.sh build-bar). With no
 # argument it runs every stage in order; with arguments, only those, in the order given.
 # Prints PASS <stage> or FAIL <stage>: <what was read>, and exits non-zero on the first
-# failure. Cleanup always runs on exit, through a trap. Screenshots go to
-# .scratch/bar-acceptance/.
+# failure. Cleanup always runs on exit, through a trap, and leaves the unit as it found it:
+# running when it was running at the start, as on an image that ships it, stopped otherwise.
+# Screenshots go to .scratch/bar-acceptance/.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -27,6 +28,7 @@ SHOTS=$ROOT/.scratch/bar-acceptance
 PSS_LIMIT_KB=$((64 * 1024))
 STAGES=(deploy unit memory modules high-contrast hotplug crash-loop cleanup)
 STAGE=
+STATE_BEFORE=
 CLEANED=0
 
 # Runs a command as the session user, with the session's bus and compositor.
@@ -299,6 +301,12 @@ stage_cleanup() {
         echo "cleanup: removing the crash-loop record failed" >&2
         failed=1
     }
+    if [[ $STATE_BEFORE == active ]]; then
+        unit start || {
+            echo "cleanup: systemctl --user start athanor-bar failed; it was running before the run" >&2
+            failed=1
+        }
+    fi
     return "$failed"
 }
 
@@ -314,6 +322,7 @@ run=("$@")
 for STAGE in "${run[@]}"; do
     [[ " ${STAGES[*]} " == *" $STAGE "* ]] || die "unknown stage '$STAGE': one of ${STAGES[*]}"
 done
+STATE_BEFORE=$(unit show -p ActiveState --value)
 trap cleanup_on_exit EXIT
 for STAGE in "${run[@]}"; do
     "stage_$STAGE"
