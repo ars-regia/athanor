@@ -1,0 +1,96 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the athanor-dock package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: athanor-dock\n"
+"Report-Msgid-Bugs-To: forge@athanor.os\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=CHARSET\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: ../../../../system/athanor-apps/src/openers.rs:19
+msgid "Launcher"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/openers.rs:20
+msgid "Applications"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/openers.rs:21
+msgid "Workspaces"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:88
+msgid "Running applications"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:202
+#: ../../../../system/athanor-apps/src/row.rs:640
+#: ../../../../system/athanor-apps/src/row.rs:642
+msgid "Unknown application"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:218
+#, rust-format
+msgid "{app}: {title}"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:224
+#, rust-format
+msgid "{app} ({count} windows)"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:251
+msgid "Running"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:479
+msgid "Untitled window"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:487
+#, rust-format
+msgid "Minimise {title}"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:491
+#, rust-format
+msgid "Close {title}"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:518
+msgid "Open"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:520
+msgid "New Window"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:587
+#, rust-format
+msgid "{name} could not start"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:588
+msgid "The reason is in the system journal."
+msgstr ""
+
+#: src/ui/mod.rs:246
+msgid "Unpin from Dock"
+msgstr ""
+
+#: src/ui/mod.rs:248
+msgid "Pin to Dock"
+msgstr ""
+
+#: src/ui/surface.rs:210
+msgid "Dock"
+msgstr ""

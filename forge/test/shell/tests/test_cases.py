@@ -73,14 +73,17 @@ class CasesTest(unittest.TestCase):
         "bar-calendar",
         "bar-accessibility",
         "bar-tiling",
+        "bar-popups",
+        "bar-notifications",
+        "bar-tray",
     )
 
-    def test_the_bar_brings_six_scenes_of_twelve_cases(self):
+    def test_the_bar_brings_nine_scenes_of_twelve_cases(self):
         found = [
             case for surface in self.BAR_SCENES for case in cases.surface_cases(surface)
         ]
-        self.assertEqual(len(found), 72)
-        self.assertEqual(len({c.tag for c in found}), 72)
+        self.assertEqual(len(found), 108)
+        self.assertEqual(len({c.tag for c in found}), 108)
 
     def test_bar_tags_are_file_names_and_name_their_scene(self):
         for surface in self.BAR_SCENES:
@@ -89,6 +92,12 @@ class CasesTest(unittest.TestCase):
                     case.tag, rf"^{surface}-(light|dark)-(1\.0|1\.5)-(en|de|rtl)$"
                 )
 
+
+    def test_the_dock_has_the_twelve_cases_of_br9(self):
+        found = cases.surface_cases("dock")
+        self.assertEqual(len({c.tag for c in found}), 12)
+        for case in found:
+            self.assertRegex(case.tag, r"^dock-(light|dark)-(1\.0|1\.5)-(en|de|rtl)$")
 
 if __name__ == "__main__":
     unittest.main()

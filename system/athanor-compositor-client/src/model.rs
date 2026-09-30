@@ -45,6 +45,9 @@ pub struct Window {
     pub app_id: String,
     pub title: String,
     pub state: WindowState,
+    /// The connectors of the outputs the window is on, as GDK names them, in the order it
+    /// entered them. Empty on compositors without COSMIC's toplevel extension.
+    pub outputs: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

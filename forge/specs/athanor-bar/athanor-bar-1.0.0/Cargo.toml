@@ -18,4 +18,6 @@ gio-unix = { workspace = true }
 glib = { workspace = true, features = ["v2_68"] }
 gtk4 = { workspace = true }
 gtk4-layer-shell = { workspace = true }
+# O_NONBLOCK for picture files a peer names: a FIFO must not hang the bar.
+libc = { workspace = true }
 tracing = { workspace = true }

@@ -298,6 +298,7 @@ dependencies = [
  "glib",
  "gtk4",
  "gtk4-layer-shell",
+ "libc",
  "tracing",
 ]
 
@@ -405,6 +406,22 @@ dependencies = [
  "tracing",
  "zbus",
  "zeroize",
+]
+
+[[package]]
+name = "athanor-dock"
+version = "1.0.0"
+dependencies = [
+ "athanor-apps",
+ "athanor-compositor-client",
+ "athanor-i18n",
+ "athanor-layout",
+ "athanor-style",
+ "athanor-unit",
+ "glib",
+ "gtk4",
+ "gtk4-layer-shell",
+ "tracing",
 ]
 
 [[package]]

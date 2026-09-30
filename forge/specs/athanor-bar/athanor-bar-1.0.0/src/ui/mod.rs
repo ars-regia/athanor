@@ -7,16 +7,20 @@ mod accessibility;
 mod clock;
 mod input;
 mod logind;
+mod menu;
+mod notifications;
 mod openers;
 mod popup;
+mod popups;
 mod power;
 mod running;
 mod tiling;
+mod tray;
 
 use std::cell::{Cell, RefCell};
 use std::env;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use athanor_apps::favorites::Store;
@@ -43,18 +47,24 @@ pub enum Changed {
     Keyboard,
     Accessibility,
     Favorites,
+    /// The notification service: its state, the list, the popups.
+    Notifications,
+    /// The tray: an item came, left, or changed.
+    Tray,
     /// Once a second: the clock, and a time zone that changed.
     Tick,
 }
 
 impl Changed {
-    pub const ALL: [Changed; 6] = [
+    pub const ALL: [Changed; 8] = [
         Changed::Windows,
         Changed::Workspaces,
         Changed::Keyboard,
         Changed::Accessibility,
         Changed::Favorites,
         Changed::Tick,
+        Changed::Notifications,
+        Changed::Tray,
     ];
 }
 
@@ -142,6 +152,12 @@ pub struct Bar {
     open_popover: RefCell<Option<gtk4::Popover>>,
     ready: Cell<bool>,
     open_on_start: Option<Module>,
+    /// One service per bar, not per surface: every surface's button reads it.
+    notifications: Rc<notifications::Service>,
+    /// One tray host per bar: the watcher knows the bar as a single host.
+    tray: Rc<tray::Host>,
+    /// The bar itself, for the `&self` methods that defer work to an idle.
+    me: Weak<Bar>,
 }
 
 pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<PathBuf>) -> Rc<Bar> {
@@ -162,7 +178,7 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
             None
         }
     };
-    let bar = Rc::new(Bar {
+    let bar = Rc::new_cyclic(|weak: &Weak<Bar>| Bar {
         app: app.clone(),
         _hold: app.hold(),
         outputs: RefCell::new(outputs::current(&display)),
@@ -179,6 +195,9 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
         open_on_start: env::var("ATHANOR_BAR_OPEN")
             .ok()
             .and_then(|id| Module::from_id(&id)),
+        me: weak.clone(),
+        notifications: notifications::Service::start(weak),
+        tray: tray::Host::start(weak),
     });
     bar.rebuild();
     if bar.surfaces.borrow().is_empty() {
@@ -215,6 +234,8 @@ fn build(module: Module, bar: &Rc<Bar>, connector: Option<&str>) -> Option<Box<d
         Module::Tiling => tiling::new(bar, connector),
         Module::Accessibility => accessibility::new(bar),
         Module::RunningApps => running::new(bar),
+        Module::Notifications => notifications::new(bar),
+        Module::Tray => tray::new(bar),
         // Later tasks of this plan, and the plans of 2b.3 to 2b.5.
         _ => None,
     }
@@ -235,6 +256,58 @@ impl Bar {
         if let Some(previous) = previous.filter(|previous| previous != popover) {
             previous.popdown();
         }
+    }
+
+    /// The output of the open popover of the bar, if one is open (BR6, "Stacking").
+    pub fn popover_output(&self) -> Option<gdk::Monitor> {
+        let popover = self.open_popover.borrow().clone()?;
+        let root = popover.is_visible().then(|| popover.root()).flatten()?;
+        self.surfaces
+            .borrow()
+            .iter()
+            .find(|surface| surface.window.upcast_ref::<gtk4::Root>() == &root)
+            .map(|surface| surface.monitor.clone())
+    }
+
+    /// A popover of the bar is on screen (BR6, "Stacking").
+    pub fn popover_is_open(&self) -> bool {
+        self.open_popover
+            .borrow()
+            .as_ref()
+            .is_some_and(|popover| popover.is_visible())
+    }
+
+    /// Opens `module`'s popover on the first surface, for the captures of BR9
+    /// (`ATHANOR_BAR_OPEN`). A module whose source answers later opens itself then.
+    pub fn open_module(self: &Rc<Self>, module: Module) {
+        let surfaces = self.surfaces.borrow();
+        let target = surfaces
+            .first()
+            .and_then(|surface| surface.modules.iter().find(|(m, _)| *m == module));
+        match target {
+            Some((_, ui)) => ui.open(self),
+            None => tracing::warn!(
+                module = module.id(),
+                "ATHANOR_BAR_OPEN names a module the bar does not show"
+            ),
+        }
+    }
+
+    /// A popover of the bar opened or closed: the notification popups hide or come back
+    /// (BR6, "Stacking"). The shield sheet of 2b.5 calls it too (item 13).
+    pub fn popovers_changed(&self) {
+        self.notifications.redraw_popups();
+    }
+
+    /// `popovers_changed` on the next idle, once GTK has settled the visibility that
+    /// `popover_is_open` reads: a popover about to pop up is not visible yet in this turn.
+    pub fn popovers_changed_later(&self) {
+        let bar = self.me.clone();
+        glib::idle_add_local_once(move || {
+            if let Some(bar) = bar.upgrade() {
+                bar.popovers_changed();
+            }
+        });
     }
 
     pub fn refresh(self: &Rc<Self>, changed: Changed) {
@@ -302,6 +375,7 @@ impl Bar {
         for changed in Changed::ALL {
             self.refresh(changed);
         }
+        self.popovers_changed();
     }
 
     /// The module row for one surface, in visual order (`order::visual`): the left,
@@ -380,6 +454,7 @@ impl Bar {
             monitor.stop_signal_emission_by_name("invalidate");
             if let Some(bar) = weak.upgrade() {
                 tracing::info!("an output left; the bar surfaces are rebuilt");
+                bar.notifications.output_left(monitor);
                 bar.schedule();
             }
         });
@@ -447,17 +522,8 @@ impl Bar {
         if let Some(module) = self.open_on_start {
             let weak = Rc::downgrade(self);
             glib::idle_add_local_once(move || {
-                let Some(bar) = weak.upgrade() else { return };
-                let surfaces = bar.surfaces.borrow();
-                let target = surfaces
-                    .first()
-                    .and_then(|surface| surface.modules.iter().find(|(m, _)| *m == module));
-                match target {
-                    Some((_, ui)) => ui.open(&bar),
-                    None => tracing::warn!(
-                        module = module.id(),
-                        "ATHANOR_BAR_OPEN names a module the bar does not show"
-                    ),
+                if let Some(bar) = weak.upgrade() {
+                    bar.open_module(module);
                 }
             });
         }
@@ -571,6 +637,16 @@ impl Host for Bar {
 
     fn menu_opened(&self, menu: &gtk4::Popover) {
         self.popover_opened(menu);
+        // The row calls this before `popup()`: the menu is visible only after this turn.
+        self.popovers_changed_later();
+    }
+
+    fn hold(&self, held: bool) {
+        // A row's menu closed (the row calls this from an idle after `closed`) or a drag
+        // ended: the popups come back unless another popover is open.
+        if !held {
+            self.popovers_changed();
+        }
     }
 
     fn refresh_rows(self: &Rc<Self>) {
