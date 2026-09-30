@@ -84,23 +84,27 @@ class BoundaryTest(unittest.TestCase):
             found[0].startswith("system/athanor-style/src/theme.rs:2 "), found
         )
 
-    def test_the_translator_and_the_layout_apply_modules_are_allowed_until_the_switch(
-        self,
-    ):
-        self.assertEqual(
-            problems(
-                {
-                    "forge/specs/athanor-layout-translator/athanor-layout-translator-1.0.0/src/main.rs": COSMIC_CONFIG,
-                    "system/athanor-layout/src/cosmic.rs": COSMIC_CONFIG,
-                    "system/athanor-layout/src/apply.rs": COSMIC_CONFIG,
-                    "forge/tools/calmo-cosmic-theme/src/main.rs": COSMIC_CONFIG,
-                }
-            ),
-            [],
-        )
-        self.assertEqual(
-            len(problems({"system/athanor-layout/src/placement.rs": COSMIC_CONFIG})), 1
-        )
+    def test_only_the_theme_tool_and_the_compositor_client_may_name_cosmic(self):
+        allowed = [
+            "forge/tools/calmo-cosmic-theme/src/main.rs",
+            "system/athanor-compositor-client/src/theme.rs",
+        ]
+        for path in allowed:
+            with self.subTest(path):
+                self.assertEqual(problems({path: COSMIC_CONFIG}), [])
+        refused = [
+            "forge/specs/athanor-layout-translator/athanor-layout-translator-1.0.0/src/main.rs",
+            "system/athanor-layout/src/cosmic.rs",
+            "system/athanor-layout/src/apply.rs",
+            "forge/specs/athanor-bar/athanor-bar-1.0.0/src/main.rs",
+        ]
+        for path in refused:
+            with self.subTest(path):
+                self.assertEqual(len(problems({path: COSMIC_CONFIG})), 1)
+
+    def test_the_frozen_tree_is_not_exempt(self):
+        path = "forge/specs/athanor-shell-rs/athanor-style-0.7/src/lib.rs"
+        self.assertEqual(len(problems({path: COSMIC_CONFIG})), 1)
 
     def test_a_manifest_that_does_not_parse_is_a_problem(self):
         found = problems({"system/athanor-dock/Cargo.toml": "[dependencies\n"})
