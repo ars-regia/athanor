@@ -190,52 +190,61 @@ msgstr ""
 msgid "Do not disturb"
 msgstr ""
 
-#: src/ui/power.rs:36
+#: src/ui/power.rs:39
 msgid "Lock"
 msgstr ""
 
-#: src/ui/power.rs:36
+#: src/ui/power.rs:39
 msgid "Lock the screen?"
 msgstr ""
 
-#: src/ui/power.rs:37
+#: src/ui/power.rs:40
 msgid "Log Out"
 msgstr ""
 
-#: src/ui/power.rs:37
+#: src/ui/power.rs:40
 msgid "Log out now?"
 msgstr ""
 
-#: src/ui/power.rs:38
+#: src/ui/power.rs:41
 msgid "Suspend"
 msgstr ""
 
-#: src/ui/power.rs:38
+#: src/ui/power.rs:41
 msgid "Suspend now?"
 msgstr ""
 
-#: src/ui/power.rs:39
+#: src/ui/power.rs:42
 msgid "Restart"
 msgstr ""
 
-#: src/ui/power.rs:39
+#: src/ui/power.rs:42
 msgid "Restart now?"
 msgstr ""
 
-#: src/ui/power.rs:40
+#: src/ui/power.rs:43
 msgid "Shut Down"
 msgstr ""
 
-#: src/ui/power.rs:40
+#: src/ui/power.rs:43
 msgid "Shut down now?"
 msgstr ""
 
-#: src/ui/power.rs:55
+#: src/ui/power.rs:103
 msgid "Power"
 msgstr ""
 
-#: src/ui/power.rs:62 src/ui/shield.rs:388
+#: src/ui/power.rs:110 src/ui/shield.rs:388
 msgid "Cancel"
+msgstr ""
+
+#: src/ui/power.rs:149 src/ui/power.rs:155 src/ui/shield.rs:374
+#: src/ui/shield.rs:410
+msgid "Restart to update"
+msgstr ""
+
+#: src/ui/power.rs:154 src/ui/shield.rs:409
+msgid "Restart and install the update now?"
 msgstr ""
 
 #: src/ui/shield.rs:159
@@ -410,16 +419,8 @@ msgstr ""
 msgid "Secure Boot off: this machine runs in the declared degraded mode"
 msgstr ""
 
-#: src/ui/shield.rs:374 src/ui/shield.rs:410
-msgid "Restart to update"
-msgstr ""
-
 #: src/ui/shield.rs:376
 msgid "Go back to the previous version"
-msgstr ""
-
-#: src/ui/shield.rs:409
-msgid "Restart and install the update now?"
 msgstr ""
 
 #: src/ui/shield.rs:415

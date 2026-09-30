@@ -182,53 +182,63 @@ msgstr "Nessuna notifica"
 msgid "Do not disturb"
 msgstr "Non disturbare"
 
-#: src/ui/power.rs:36
+#: src/ui/power.rs:39
 msgid "Lock"
 msgstr "Blocca"
 
-#: src/ui/power.rs:36
+#: src/ui/power.rs:39
 msgid "Lock the screen?"
 msgstr "Bloccare lo schermo?"
 
-#: src/ui/power.rs:37
+#: src/ui/power.rs:40
 msgid "Log Out"
 msgstr "Termina sessione"
 
-#: src/ui/power.rs:37
+#: src/ui/power.rs:40
 msgid "Log out now?"
 msgstr "Terminare la sessione ora?"
 
-#: src/ui/power.rs:38
+#: src/ui/power.rs:41
 msgid "Suspend"
 msgstr "Sospendi"
 
-#: src/ui/power.rs:38
+#: src/ui/power.rs:41
 msgid "Suspend now?"
 msgstr "Sospendere ora?"
 
-#: src/ui/power.rs:39
+#: src/ui/power.rs:42
 msgid "Restart"
 msgstr "Riavvia"
 
-#: src/ui/power.rs:39
+#: src/ui/power.rs:42
 msgid "Restart now?"
 msgstr "Riavviare ora?"
 
-#: src/ui/power.rs:40
+#: src/ui/power.rs:43
 msgid "Shut Down"
 msgstr "Spegni"
 
-#: src/ui/power.rs:40
+#: src/ui/power.rs:43
 msgid "Shut down now?"
 msgstr "Spegnere ora?"
 
-#: src/ui/power.rs:55
+#: src/ui/power.rs:103
 msgid "Power"
 msgstr "Alimentazione"
 
-#: src/ui/power.rs:62 src/ui/shield.rs:388
+#: src/ui/power.rs:110 src/ui/shield.rs:388
 msgid "Cancel"
 msgstr "Annulla"
+
+#: src/ui/power.rs:149 src/ui/power.rs:155 src/ui/shield.rs:374
+#: src/ui/shield.rs:410
+#, fuzzy
+msgid "Restart to update"
+msgstr "Riavviare ora?"
+
+#: src/ui/power.rs:154 src/ui/shield.rs:409
+msgid "Restart and install the update now?"
+msgstr ""
 
 #: src/ui/shield.rs:159
 msgid "System image verified"
@@ -403,17 +413,8 @@ msgstr ""
 msgid "Secure Boot off: this machine runs in the declared degraded mode"
 msgstr ""
 
-#: src/ui/shield.rs:374 src/ui/shield.rs:410
-#, fuzzy
-msgid "Restart to update"
-msgstr "Riavviare ora?"
-
 #: src/ui/shield.rs:376
 msgid "Go back to the previous version"
-msgstr ""
-
-#: src/ui/shield.rs:409
-msgid "Restart and install the update now?"
 msgstr ""
 
 #: src/ui/shield.rs:415
