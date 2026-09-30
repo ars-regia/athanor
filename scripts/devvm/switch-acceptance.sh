@@ -274,19 +274,19 @@ stage_notifier() {
     ACC_BASE="$ACC_REGISTRY/athanor-system:$(cat "$ROOT/.scratch/local-image/tag")" \
     ACC_RPM_DIR="$ROOT/.scratch/local-image/rpms" "$HERE/acceptance/images.sh"
     point_stable v1
-    # The switched image trusts the project key for this repository; v1 is signed with acc-1.
-    trust_tag v1 "$ACC_STATE/keys/acc-1.pub"
+    # The machine follows the channel tag, as the migration leaves one: the migration itself
+    # is not under test here, and it takes a reference that already enforces the policy as
+    # migrated, so a switch to $REPO:v1 would never see v2. The switched image trusts the
+    # project key for this repository; stable is v1, signed with acc-1.
+    trust_tag stable "$ACC_STATE/keys/acc-1.pub"
     know_acc_registry
-    # The item starts from a machine never migrated to its channel: /var is shared by every
-    # deployment, so a marker left by an earlier acceptance would skip the migration and
-    # leave the machine on $REPO:v1, where no update ever arrives.
-    guest_ssh sudo rm -f /var/lib/athanor-update/migrated
-    guest_ssh sudo bootc switch --enforce-container-sigpolicy --transport registry "$REPO:v1"
+    guest_ssh sudo bootc switch --enforce-container-sigpolicy --transport registry "$REPO:stable"
     restore_policy
     reboot_guest
-    wait_until 600 guest_ssh test -e /var/lib/athanor-update/migrated || fail "the migration did not complete"
-    reboot_guest
+    [[ $(guest_ssh sudo bootc status --format json | jq -r .spec.image.image) == "$REPO:stable" ]] ||
+        fail "the machine does not follow $REPO:stable"
     point_stable v2
+    check_now
     expect_until "12: v2 downloaded" .update downloaded 20
     wait_until 120 offered_once || fail "the downloaded update was never offered"
     for session in 2 3; do # initial_session logs the user in again: restart_greetd_login drops the runfile
