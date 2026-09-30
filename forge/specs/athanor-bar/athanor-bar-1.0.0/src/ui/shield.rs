@@ -172,7 +172,10 @@ async fn ask_state() -> Result<State, ReadError> {
         Some(sender) => uid_of(&system, &sender).await,
         None => None,
     };
-    let json = reply.body().and_then(|body| body.get::<(String,)>()).map(|(json,)| json);
+    let json = reply
+        .body()
+        .and_then(|body| body.get::<(String,)>())
+        .map(|(json,)| json);
     let answer = if reply.message_type() == gio::DBusMessageType::Error {
         Err(reply.error_name())
     } else {
