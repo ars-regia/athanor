@@ -52,6 +52,16 @@ class PathDependenciesTest(unittest.TestCase):
         plain = crate(self.root, "specs/athanor-plain/plain-1.0.0", 'serde = "1"\n').parent
         self.assertEqual(dag.package_hash(str(plain)), dag.compute_dir_hash(str(plain)))
 
+    def test_a_path_dependency_inherited_from_the_workspace_is_followed(self):
+        workspace = self.root / "specs/athanor-shell"
+        workspace.mkdir(parents=True)
+        (workspace / "Cargo.toml").write_text(
+            '[workspace]\nmembers = ["shell-1.0.0"]\n\n'
+            '[workspace.dependencies]\nunit = { path = "../../system/unit" }\nserde = "1"\n'
+        )
+        crate(self.root, "specs/athanor-shell/shell-1.0.0", "unit = { workspace = true }\nserde = { workspace = true }\n")
+        self.assertEqual(dag.path_dependencies(str(workspace)), [str(self.root / "system/unit")])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -49,9 +49,30 @@ def compute_dir_hash(dir_path):
                 pass
     return hasher.hexdigest()[:16]
 
+def workspace_path(manifest, name):
+    """The directory a `name = { workspace = true }` dependency of manifest points at, when
+    the nearest enclosing workspace declares it with a path, else None."""
+    directory = os.path.dirname(os.path.realpath(manifest))
+    while True:
+        candidate = os.path.join(directory, "Cargo.toml")
+        if os.path.isfile(candidate):
+            with open(candidate, "rb") as f:
+                workspace = tomllib.load(f).get("workspace")
+            if workspace is not None:
+                dep = workspace.get("dependencies", {}).get(name)
+                if isinstance(dep, dict) and "path" in dep:
+                    return os.path.realpath(os.path.join(directory, dep["path"]))
+                return None
+        parent = os.path.dirname(directory)
+        if parent == directory:
+            return None
+        directory = parent
+
+
 def path_dependencies(spec_dir):
     """The directories of the Cargo path dependencies that the crates under spec_dir reach
-    outside it, followed transitively, sorted. The package builds from their sources too."""
+    outside it, followed transitively, sorted, including those inherited from a workspace.
+    The package builds from their sources too."""
     spec_root = os.path.realpath(spec_dir)
     pending = []
     for root, dirs, files in os.walk(spec_dir):
@@ -66,10 +87,17 @@ def path_dependencies(spec_dir):
         tables = [data, *data.get("target", {}).values()]
         for table in tables:
             for kind in ("dependencies", "build-dependencies", "dev-dependencies"):
-                for dep in table.get(kind, {}).values():
-                    if not isinstance(dep, dict) or "path" not in dep:
+                for name, dep in table.get(kind, {}).items():
+                    if not isinstance(dep, dict):
                         continue
-                    target = os.path.realpath(os.path.join(os.path.dirname(manifest), dep["path"]))
+                    if "path" in dep:
+                        target = os.path.realpath(os.path.join(os.path.dirname(manifest), dep["path"]))
+                    elif dep.get("workspace") is True:
+                        target = workspace_path(manifest, name)
+                        if target is None:
+                            continue
+                    else:
+                        continue
                     inside = target == spec_root or target.startswith(spec_root + os.sep)
                     if inside or target in found:
                         continue
