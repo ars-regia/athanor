@@ -73,7 +73,7 @@ The tier lists of `forge/config/packages.json` decide what is in the image. A cr
 
 | Component | Tier | Defect |
 |---|---|---|
-| `xdg-desktop-portal-athanor` | 3 | The Microphone and Camera grant is the exit status 0 of `athanor-shell-rs --privacy-prompt`. The prompt is a GTK application with a fixed id and no `NON_UNIQUE`, so a second request made while a prompt is open would be forwarded to it and exit 0. Read, not run. ScreenCast returns a fabricated PipeWire node; SaveFile returns a fixed path. |
+| `xdg-desktop-portal-athanor` | 3 | **The grant path is fixed on this branch** (section 10). Before, the exit status 0 of the privacy prompt was a grant, so a closed prompt or a second identical request was one; the second-request case was measured on 2026-09-30 with a session bus. Now only the Allow button's own status grants, a prompt has a timeout, and only `xdg-desktop-portal` may call the methods. **Not fixed:** `xdg-desktop-portal` 1.18.4 has no backend interface for the camera, the microphone or the location, so those three interfaces are never called and a grant through them enforces nothing. ScreenCast still returns a fabricated PipeWire node; SaveFile returns a fixed path; `SetPrivacyIndicator` has no implementer. |
 | `backup` | 3, hourly timer enabled | **Fixed on the branch `claude/adoring-hopper-rl5jkq` by the maintainer's own commit `e66ad6d9` (2026-09-24, never merged into `iso-v0`), cherry-picked as `207e3cb0`.** It ran as a root D-Bus daemon under `ProtectHome=yes` and snapshotted root's `$HOME`, declared no polkit actions, had no bus activation, reported an empty directory as a snapshot, and its restore deleted the live home. It is now a root command for btrfs with a hardened unit, a snapshot subvolume created by `tmpfiles.d`, a tested retention rule and a restore that never overwrites the live home. Unit-tested here (8 tests, `clippy -D warnings` clean); **not yet run on a real btrfs system**. |
 | `recovery` | 2 | Fake 400 ms progress sleeps, a hard-coded `/dev/nvme0n1p2`, and a rollback that only creates a snapshot. |
 | `lvfs-rs` | 3 | Logs "Parsing CAB archive... parsed successfully" without parsing, and "staged successfully" unconditionally. Its bus policy allows only `root` to own the name. |
@@ -146,7 +146,7 @@ The five largest gaps:
 
 For the maintainer to accept, reorder or reject.
 
-1. **Shipped and defective, security first.** `backup` is fixed on this branch (section 5) and waits for a run on a btrfs system. Next: the portal grant (section 5), then `recovery` and `lvfs-rs`.
+1. **Shipped and defective, security first.** `backup` and the portal's privacy grant are fixed on this branch (section 5); `backup` waits for a run on a btrfs system, and the portal still lacks any enforcement of what it grants. Next: `recovery` and `lvfs-rs`.
 2. **Take the facades out of the tiers.** The five echo specs, `doctor` and `athanor-semantic-db`, or make them real.
 3. **Decide the fate of the `EXEMPT` crates and the crates of section 6.** A placeholder in a security path is a bug by the project's own rule, so each should be redesigned, moved to `experimental/` with a banner, or deleted; none should be promoted as it is.
 4. **Correct the documents of section 8**: mark each statement outdated or never true, starting with the top-level README.
