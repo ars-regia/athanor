@@ -119,7 +119,7 @@ The tier lists of `forge/config/packages.json` decide what is in the image. A cr
 - Built from Fedora's `kernel.spec` at a pinned NVR (`7.2.5-100.fc43`) with the CachyOS base and the BORE patch, clang, `-O2`, kCFI, Rust, `CONFIG_LTO_NONE`. No AutoFDO. Modules are signed with the project key; the UKI is built inside the image build.
 - Not implemented although documented: zram (D15), the compatibility profile, signed PCR policy, `usrhash`, IPE.
 - The command line no longer contradicts D15, D16 and D19: `zswap.enabled=1`, `iommu=pt`, `oops=panic`, `pti=on` and the invalid `amd_iommu=on`, `lam=on`, `arm64.mte=on` are gone from the five places that write it, and `verify.py cmdline` keeps them out. Still to move, as the profile says: `mem_encrypt=on`, `kvm_amd.sev=1` and `kvm_intel.tdx=1` (capability-specific, never global), `preempt=full` (D13), `splash`, `fastboot` and `rootflags=noatime`. There is still no swap device: zram (D15) is not shipped.
-- `CONFIG_SECURITY_LANDLOCK` is not set in the main kernel fragment (only in the microVM one); Fedora's configuration is relied on and nothing checks it.
+- `CONFIG_SECURITY_LANDLOCK=y` and `CONFIG_MEMCG=y` are now stated in the main kernel fragment, so `check_delta` stops a build that loses them, and the boot matrix checks the active LSM list and the memory controller. Written against Fedora's configuration without being able to read it from here: the first Kernel Build is the proof.
 - `kernel-artifacts.sh` now accepts a signature from `kernel-build.yml` only on `iso-v0` and `main` (`KERNEL_TRUSTED_REFS`) and only for a kernel whose attested inputs equal this checkout's. The RPMs are still built on a self-hosted runner.
 
 ## 8. Documents against reality
