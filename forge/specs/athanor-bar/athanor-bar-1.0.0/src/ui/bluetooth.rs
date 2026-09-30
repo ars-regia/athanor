@@ -6,13 +6,24 @@
 //! pairing the person started from the bar: every other request is rejected before anything
 //! shows. It never types a code: the capability is DisplayYesNo, so the person compares six
 //! digits on both screens.
+//!
+//! The adapter is bondable only while that pairing runs. Registering an agent makes BlueZ set
+//! the adapter bondable (`adapter_set_io_capability`), and a bondable adapter accepts a remote
+//! device's bonding request. Where neither side asks for MITM protection, the kernel confirms
+//! that request itself, asking no agent, whenever the local IO capability is NoInputNoOutput
+//! (`hci_user_confirm_request_evt`, `smp.c` alike), and any process may register the default
+//! agent that sets it. `Pairable` false clears the kernel's bondable flag
+//! (`MGMT_OP_SET_BONDABLE`), which refuses every bonding request the adapter did not start
+//! (`hci_io_capa_request_evt`, `smp_cmd_pairing_req`) whoever the default agent is: the bar
+//! keeps it false outside its own pairing, and turns it off again whenever BlueZ or another
+//! process turns it on.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
 use athanor_bar::bluetooth::{self, BluetoothState, Device};
 use athanor_bar::props;
-use gtk4::accessible::Property;
+use gtk4::accessible::{Property, Relation};
 use gtk4::prelude::*;
 use gtk4::{gio, glib, pango};
 
@@ -58,6 +69,13 @@ fn service() -> Option<Rc<Service>> {
     SERVICE.with(|cell| cell.borrow().clone())
 }
 
+/// For [`bus::act`]: an action the person took did not complete.
+fn action_failed() {
+    if let Some(service) = service() {
+        service.failed();
+    }
+}
+
 struct Pending {
     invocation: gio::DBusMethodInvocation,
     view: Weak<View>,
@@ -73,6 +91,8 @@ struct Service {
     pending: RefCell<Option<Pending>>,
     /// The device the person pressed to pair, until `Pair` returns.
     pairing: RefCell<Option<String>>,
+    /// The person answered no to the pairing in progress: its failure is no news to them.
+    declined: Cell<bool>,
     /// Open popovers: discovery runs while at least one is open.
     open_popovers: Cell<u32>,
     agent: RefCell<Option<gio::RegistrationId>>,
@@ -92,6 +112,7 @@ impl Service {
             last_opened: RefCell::new(Weak::new()),
             pending: RefCell::new(None),
             pairing: RefCell::new(None),
+            declined: Cell::new(false),
             open_popovers: Cell::new(0),
             agent: RefCell::new(None),
         });
@@ -194,6 +215,7 @@ impl Service {
                 .as_ref()
                 .is_some_and(|state| state.powered);
         self.state.replace(state);
+        self.hold_pairable();
         if powered_on && self.open_popovers.get() > 0 {
             self.discovery(true);
         }
@@ -202,6 +224,38 @@ impl Service {
         }
         if let Some(bar) = self.bar.upgrade() {
             bar.fit_groups();
+        }
+    }
+
+    /// Keeps `Pairable` true only while the bar's own pairing runs (maintainer decision D8).
+    /// Runs whenever the state changes: at the start, when an adapter appears, when BlueZ
+    /// comes back under a new owner (a bar that died during a pairing left it true), and when
+    /// registering the agent or another process turned it on.
+    fn hold_pairable(&self) {
+        let wanted = self.pairing.borrow().is_some();
+        let Some(mirror) = self.mirror() else { return };
+        let Some(adapter) = self
+            .state
+            .borrow()
+            .as_ref()
+            .filter(|state| state.pairable != wanted)
+            .map(|state| state.adapter.clone())
+        else {
+            return;
+        };
+        if !wanted {
+            tracing::info!("the Bluetooth adapter is bondable with no pairing from the bar; turning it off");
+        }
+        bus::spawn("Pairable", set_pairable(mirror.connection(), &adapter, wanted));
+    }
+
+    /// An action the person took failed: every view shows the mirrored state again, which
+    /// puts a switch back, and the open popover says so.
+    fn failed(&self) {
+        let state = self.state.borrow();
+        for view in self.views() {
+            view.show(state.as_ref());
+            view.popup.failed();
         }
     }
 
@@ -340,6 +394,7 @@ impl Service {
         let Some(pending) = self.pending.take() else {
             return;
         };
+        self.declined.set(!confirmed);
         if confirmed {
             pending.invocation.return_value(None);
         } else {
@@ -363,7 +418,7 @@ impl Service {
 
     fn device_call(&self, device: &str, method: &'static str) {
         let Some(mirror) = self.mirror() else { return };
-        bus::spawn(
+        bus::act(
             method,
             bus::call(
                 mirror.connection(),
@@ -374,6 +429,7 @@ impl Service {
                 None,
                 bus::TIMEOUT_MS,
             ),
+            action_failed,
         );
     }
 
@@ -387,32 +443,58 @@ impl Service {
         }
     }
 
-    /// Pairs, trusts, connects: the order GNOME and COSMIC use. Trusting lets the device
-    /// reconnect later without asking again.
+    /// Makes the adapter bondable, pairs, makes it unbondable again, then trusts and connects:
+    /// the order GNOME and COSMIC use. A pairing with an unbondable adapter would store no
+    /// key. Trusting lets the device reconnect later without asking again.
     fn pair(self: &Rc<Self>, device: String) {
         let Some(mirror) = self.mirror() else { return };
+        let Some(adapter) = self.state.borrow().as_ref().map(|s| s.adapter.clone()) else {
+            return;
+        };
         if self.pairing.borrow().is_some() {
             return;
         }
         self.pairing.replace(Some(device.clone()));
+        self.declined.set(false);
         let connection = mirror.connection().clone();
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
-            let paired = bus::call(
-                &connection,
-                bluetooth::BLUEZ,
-                &device,
-                bluetooth::DEVICE,
-                "Pair",
-                None,
-                bus::INTERACTIVE_TIMEOUT_MS,
-            )
-            .await;
-            if let Some(service) = weak.upgrade() {
-                service.pairing.replace(None);
+            let paired = match set_pairable(&connection, &adapter, true).await {
+                Ok(_) => {
+                    bus::call(
+                        &connection,
+                        bluetooth::BLUEZ,
+                        &device,
+                        bluetooth::DEVICE,
+                        "Pair",
+                        None,
+                        bus::INTERACTIVE_TIMEOUT_MS,
+                    )
+                    .await
+                }
+                Err(err) => Err(err),
+            };
+            // Every way out of the pairing ends here: success, failure, Cancel, a closed
+            // popover or a dropped view (both answer no), BlueZ leaving (the call fails). A
+            // new owner of BlueZ may have cleared `pairing` and let another pairing start:
+            // that one is left alone.
+            let idle = weak.upgrade().is_none_or(|service| {
+                let mut pairing = service.pairing.borrow_mut();
+                if pairing.as_deref() == Some(device.as_str()) {
+                    *pairing = None;
+                }
+                pairing.is_none()
+            });
+            if idle {
+                if let Err(err) = set_pairable(&connection, &adapter, false).await {
+                    tracing::warn!(error = %err, "the Bluetooth adapter could not be made unbondable again");
+                }
             }
             if let Err(err) = paired {
                 tracing::warn!(error = %err, "pairing failed");
+                if weak.upgrade().is_some_and(|service| !service.declined.get()) {
+                    action_failed();
+                }
                 return;
             }
             let trusted = bus::set_property(
@@ -427,7 +509,7 @@ impl Service {
             if let Err(err) = trusted {
                 tracing::warn!(error = %err, "the paired device could not be trusted");
             }
-            bus::spawn(
+            bus::act(
                 "Connect",
                 bus::call(
                     &connection,
@@ -438,6 +520,7 @@ impl Service {
                     None,
                     bus::TIMEOUT_MS,
                 ),
+                action_failed,
             );
         });
     }
@@ -449,7 +532,7 @@ impl Service {
         ) else {
             return;
         };
-        bus::spawn(
+        bus::act(
             "Powered",
             bus::set_property(
                 mirror.connection(),
@@ -459,6 +542,7 @@ impl Service {
                 "Powered",
                 on.to_variant(),
             ),
+            action_failed,
         );
     }
 
@@ -506,6 +590,21 @@ impl Service {
             self.discovery(false);
         }
     }
+}
+
+fn set_pairable(
+    connection: &gio::DBusConnection,
+    adapter: &str,
+    on: bool,
+) -> impl std::future::Future<Output = Result<glib::Variant, glib::Error>> + 'static {
+    bus::set_property(
+        connection,
+        bluetooth::BLUEZ,
+        adapter,
+        bluetooth::ADAPTER,
+        "Pairable",
+        on.to_variant(),
+    )
 }
 
 /// `RegisterAgent`, then `RequestDefaultAgent`, to this owner.
@@ -563,6 +662,10 @@ struct View {
     asking: Cell<bool>,
     updating: Cell<bool>,
     pending_open: Cell<bool>,
+    /// The devices the two lists show: they are rebuilt only when these change, not on
+    /// every signal (an RSSI update while discovering), which would take the keyboard
+    /// focus off a row.
+    shown: RefCell<(Vec<Device>, Vec<Device>)>,
 }
 
 fn clear(container: &gtk4::Box) {
@@ -606,6 +709,13 @@ impl View {
         cancel.add_css_class("bar-row");
         let confirm = gtk4::Button::with_label(&tr("Pair"));
         confirm.add_css_class("bar-confirm");
+        // A screen reader reading the button reads what it confirms: the device, the digits
+        // and the instruction to compare them.
+        confirm.update_relation(&[Relation::DescribedBy(&[
+            title.upcast_ref(),
+            code.upcast_ref(),
+            note.upcast_ref(),
+        ])]);
         let buttons = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
         buttons.set_halign(gtk4::Align::End);
         buttons.append(&cancel);
@@ -619,7 +729,7 @@ impl View {
         let stack = gtk4::Stack::new();
         stack.add_named(&list, Some("list"));
         stack.add_named(&page, Some("confirm"));
-        popup.popover.set_child(Some(&stack));
+        popup.set_content(&stack);
 
         let view = Rc::new(View {
             bar: Rc::downgrade(bar),
@@ -637,6 +747,7 @@ impl View {
             asking: Cell::new(false),
             updating: Cell::new(false),
             pending_open: Cell::new(false),
+            shown: RefCell::new((Vec::new(), Vec::new())),
         });
         view.connect_handlers(&cancel);
         view
@@ -695,13 +806,23 @@ impl View {
         self.updating.set(true);
         self.power.set_active(state.powered);
         self.updating.set(false);
-        clear(&self.paired);
-        for device in &state.paired {
-            self.paired.append(&self.device_row(device));
+        let changed = {
+            let shown = self.shown.borrow();
+            (shown.0 != state.paired, shown.1 != state.nearby)
+        };
+        if changed.0 {
+            clear(&self.paired);
+            for device in &state.paired {
+                self.paired.append(&self.device_row(device));
+            }
+            self.shown.borrow_mut().0 = state.paired.clone();
         }
-        clear(&self.nearby);
-        for device in &state.nearby {
-            self.nearby.append(&self.device_row(device));
+        if changed.1 {
+            clear(&self.nearby);
+            for device in &state.nearby {
+                self.nearby.append(&self.device_row(device));
+            }
+            self.shown.borrow_mut().1 = state.nearby.clone();
         }
         self.paired.set_visible(state.powered);
         self.nearby_title

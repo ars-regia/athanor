@@ -7404,7 +7404,14 @@ Item 15 needs a Wi-Fi radio and a Bluetooth radio. The rig mocks both services, 
    2. Open the Bluetooth popover, press the phone's row, and check that the six digits in the bar equal the phone's.
    3. Press Pair in the bar and confirm on the phone.
    4. Check with `bluetoothctl info <MAC>`: the output shows `Paired: yes`, `Trusted: yes` and `Connected: yes`.
-5. **Nothing was written by the bar.** Read the password without echoing it, so it never reaches the shell history, then search. Each search must print nothing:
+   5. Check with `bluetoothctl show` that the adapter reads `Pairable: no` again: the bar makes it bondable only while its own pairing runs.
+5. **A pairing the bar did not start is refused (decision D8).** It needs a second Linux machine with Bluetooth; `<DESKTOP>` is the desktop adapter's address from `bluetoothctl show`.
+   1. On the desktop, with no Bluetooth popover open, check that `bluetoothctl show` reads `Pairable: no`, then run `bluetoothctl discoverable on` so that the second machine can find it. Discoverable does not make the adapter bondable.
+   2. On the second machine, start a pairing under an agent with no input and no output, the case the kernel would confirm without asking anyone on a bondable adapter: run `bluetoothctl`, then `agent NoInputNoOutput`, `default-agent`, `scan on` until `<DESKTOP>` is listed, `scan off`, and `pair <DESKTOP>`.
+   3. The pairing fails on the second machine, and the bar shows no prompt.
+   4. On the desktop, `bluetoothctl info <MAC of the second machine>` shows `Paired: no` or reports the device unavailable, and `bluetoothctl show` still reads `Pairable: no`.
+   5. Run `bluetoothctl discoverable off` on the desktop.
+6. **Nothing was written by the bar.** Read the password without echoing it, so it never reaches the shell history, then search. Each search must print nothing:
 
    ```bash
    read -rs -p 'Wi-Fi password: ' PW; echo

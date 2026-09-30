@@ -20,7 +20,11 @@ Fixture methods live on the interface os.athanor.Fixture, added to the mocks:
   RequestConfirmation(agent, device, passkey) calls the agent with no pairing in progress
   and returns an index; AgentRequest(agent, method, device) does the same for
   RequestAuthorization, AuthorizeService, RequestPinCode, RequestPasskey and DisplayPasskey;
-  ConfirmationResult(index) returns "pending", "confirmed" or "error:<name>".
+  ConfirmationResult(index) returns "pending", "confirmed" or "error:<name>";
+  AlsoAsk(device) makes the next Pair first send the agent a RequestConfirmation for
+  `device` with OTHER_PASSKEY, and returns its ConfirmationResult index;
+  PairableAtPair() returns "true" or "false", the adapter's Pairable when the last Pair
+  began, or "unknown" before any.
 - The nearby devices' org.bluez.Device1.Pair is replaced: like bluetoothd, it calls the
   default agent's RequestConfirmation with PAIRING_PASSKEY and pairs the device only when the
   agent confirms. It blocks the BlueZ mock until the agent answers, so a test must not call
@@ -70,12 +74,27 @@ DEVICES = [
 # The passkey the fixture's Pair asks the agent to confirm, and the six digits the bar shows.
 PAIRING_PASSKEY = 482916
 PAIRING_CODE = "482916"
-# bluetoothd's Pair: ask the default agent, pair only on its confirmation.
+# The passkey of AlsoAsk's request, for a device other than the one pairing.
+OTHER_PASSKEY = 333444
+# bluetoothd's Pair: ask the default agent, pair only on its confirmation. It records whether
+# the adapter was bondable when Pair began: a pairing with an unbondable adapter stores no key.
 PAIR_WITH_AGENT = f"""
 bluez = get_object('/org/bluez')
+adapter = get_object(str(self.props['org.bluez.Device1']['Adapter']))
+bluez.pairable_at_pair = bool(adapter.props['org.bluez.Adapter1']['Pairable'])
 owner = bluez.__dict__.get('agent_owner')
 if not owner or not bluez.default_agent:
     raise dbus.exceptions.DBusException('no agent', name='org.bluez.Error.AuthenticationFailed')
+# AlsoAsk: another device's confirmation, sent first, while this pairing is in progress.
+also = bluez.__dict__.pop('also_ask', None)
+if also:
+    def done(results=bluez.confirmations, index=also[1]):
+        results[index] = 'confirmed'
+    def failed(error, results=bluez.confirmations, index=also[1]):
+        results[index] = 'error:' + error.get_dbus_name()
+    self.connection.call_async(
+        owner, str(bluez.default_agent), 'org.bluez.Agent1', 'RequestConfirmation', 'ou',
+        [dbus.ObjectPath(also[0]), dbus.UInt32({OTHER_PASSKEY})], done, failed, timeout=30)
 try:
     self.connection.call_blocking(
         owner, str(bluez.default_agent), 'org.bluez.Agent1', 'RequestConfirmation', 'ou',
@@ -182,6 +201,18 @@ ret = index
 """,
     ),
     ("AgentOwner", "s", "", "self.agent_owner = args[0]"),
+    (
+        "AlsoAsk",
+        "o",
+        "u",
+        """
+results = self.__dict__.setdefault('confirmations', [])
+self.also_ask = (str(args[0]), len(results))
+results.append('pending')
+ret = self.also_ask[1]
+""",
+    ),
+    ("PairableAtPair", "", "s", "ret = str(self.__dict__.get('pairable_at_pair', 'unknown')).lower()"),
     ("ConfirmationResult", "u", "s", "ret = self.__dict__.get('confirmations', [])[args[0]]"),
 ]
 
@@ -305,7 +336,7 @@ def networkmanager(bus):
     return process
 
 
-def bluez(bus, log):
+def bluez(bus, log, discovering=False):
     process = spawn_mock("bluez5", log)
     wait_for_name(bus, BLUEZ)
     (adapter,) = call(bus, BLUEZ, "/", BLUEZ_MOCK, "AddAdapter", "(ss)", ("hci0", "athanor"), "(s)")
@@ -313,6 +344,11 @@ def bluez(bus, log):
     # which only SetDiscoveryFilter creates: without it both raise KeyError after changing
     # Discovering, and emit no PropertiesChanged. An empty filter is BlueZ's default.
     call(bus, BLUEZ, adapter, "org.bluez.Adapter1", "SetDiscoveryFilter", "(a{sv})", ({},))
+    if discovering:
+        call(
+            bus, BLUEZ, adapter, MOCK, "UpdateProperties", "(sa{sv})",
+            ("org.bluez.Adapter1", {"Discovering": GLib.Variant("b", True)}),
+        )
     for address, alias, paired, icon in DEVICES:
         (path,) = call(bus, BLUEZ, "/", BLUEZ_MOCK, "AddDevice", "(sss)", ("hci0", address, alias), "(s)")
         call(
@@ -360,6 +396,9 @@ def pactl(*args):
 
 
 def pipewire_pulse(log):
+    # pipewire-pulse stats its runtime directory, then creates it, and gives up if it exists
+    # by then; the `pactl info` polls below create it too. Created first, nobody races.
+    (Path(os.environ["XDG_RUNTIME_DIR"]) / "pulse").mkdir(mode=0o700, exist_ok=True)
     process = subprocess.Popen(
         ["pipewire-pulse"], stdout=log, stderr=subprocess.STDOUT, env=real_time_env()
     )
@@ -385,11 +424,35 @@ def null_node(name, description, media_class, positions):
     )
 
 
+def set_default(kind, name):
+    """Makes `name` the default sink or source. pipewire-pulse answers "Not supported" until
+    WirePlumber has published the `default` metadata, which can come after the nodes are
+    listed, so the call is repeated until the default reads back."""
+    deadline = time.monotonic() + 10
+    while True:
+        result = subprocess.run(["pactl", f"set-default-{kind}", name], capture_output=True, text=True)
+        if result.returncode == 0 and pactl(f"get-default-{kind}").strip() == name:
+            return
+        if time.monotonic() > deadline:
+            raise SystemExit(
+                f"system_fixtures.py: the default {kind} is not {name} after 10 s: {result.stderr.strip()}"
+            )
+        time.sleep(0.2)
+
+
 def pipewire(log):
-    processes = [
-        subprocess.Popen([command], stdout=log, stderr=subprocess.STDOUT, env=real_time_env())
-        for command in ("pipewire", "wireplumber")
-    ]
+    # WirePlumber exits at once if PipeWire's socket is not there yet, and without it
+    # nobody publishes the default devices; it starts once the socket exists.
+    processes = [subprocess.Popen(["pipewire"], stdout=log, stderr=subprocess.STDOUT, env=real_time_env())]
+    socket = Path(os.environ["XDG_RUNTIME_DIR"]) / "pipewire-0"
+    deadline = time.monotonic() + 10
+    while not socket.is_socket():
+        if time.monotonic() > deadline:
+            raise SystemExit("system_fixtures.py: PipeWire did not open its socket within 10 s")
+        time.sleep(0.1)
+    processes.append(
+        subprocess.Popen(["wireplumber"], stdout=log, stderr=subprocess.STDOUT, env=real_time_env())
+    )
     processes.append(pipewire_pulse(log))
     null_node("speakers", "Speakers", "Audio/Sink", "FL FR")
     null_node("headphones", "Headphones", "Audio/Sink", "FL FR")
@@ -401,10 +464,10 @@ def pipewire(log):
         if time.monotonic() > deadline:
             raise SystemExit("system_fixtures.py: the null devices did not appear within 10 s")
         time.sleep(0.2)
-    pactl("set-default-sink", "speakers")
+    set_default("sink", "speakers")
     pactl("set-sink-volume", "speakers", "40%")
     pactl("set-sink-volume", "headphones", "70%")
-    pactl("set-default-source", "microphone")
+    set_default("source", "microphone")
     pactl("set-source-volume", "microphone", "55%")
     return processes
 
@@ -465,15 +528,16 @@ def pids_of(comm):
     return found
 
 
-def start(tag):
-    """Every fixture, ready before the bar starts; the processes to stop afterwards."""
+def start(tag, discovering=False):
+    """Every fixture, ready before the bar starts; the processes to stop afterwards.
+    `discovering` starts the adapter already discovering, as the Bluetooth capture needs."""
     backlight()
     bus = system_bus()
     out = Path("/out")
     audio_log = (out / f"{tag}-pipewire.log").open("a", encoding="utf-8")
     return [
         networkmanager(bus),
-        bluez(bus, str(out / f"{tag}-bluez.log")),
+        bluez(bus, str(out / f"{tag}-bluez.log"), discovering),
         upower(bus, str(out / f"{tag}-upower.log")),
         profiles(bus, str(out / f"{tag}-profiles.log")),
         *pipewire(audio_log),

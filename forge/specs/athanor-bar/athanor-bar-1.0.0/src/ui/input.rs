@@ -8,7 +8,7 @@ use athanor_bar::keyboard;
 use gtk4::accessible::Property;
 use gtk4::prelude::*;
 
-use super::popup::Popup;
+use super::popup::{expose_choose_action, Popup};
 use super::{Bar, Changed, ModuleUi};
 use crate::i18n::{tr, tr_with};
 
@@ -53,6 +53,7 @@ impl ModuleUi for InputUi {
         for (index, layout) in layouts.iter().enumerate() {
             let check = gtk4::CheckButton::with_label(layout);
             check.set_group(first.as_ref());
+            expose_choose_action(&check);
             check.set_active(u32::try_from(index).is_ok_and(|index| index == group));
             let (weak, rebuilding) = (Rc::downgrade(bar), self.rebuilding.clone());
             check.connect_toggled(move |check| {

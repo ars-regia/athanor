@@ -10,7 +10,7 @@ use athanor_compositor_client::{theme, ScreenFilter};
 use gtk4::prelude::*;
 use gtk4::{gio, glib};
 
-use super::popup::{switch_row, Popup};
+use super::popup::{expose_choose_action, switch_row, Popup};
 use super::{Bar, Changed, ModuleUi};
 use crate::i18n::tr;
 
@@ -172,6 +172,7 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     for filter in FILTERS {
         let check = gtk4::CheckButton::with_label(&filter_label(filter));
         check.set_group(filters.first().map(|(_, first)| first));
+        expose_choose_action(&check);
         compositor_rows.append(&check);
         filters.push((filter, check));
     }

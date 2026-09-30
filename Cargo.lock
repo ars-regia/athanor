@@ -293,6 +293,7 @@ dependencies = [
  "athanor-i18n",
  "athanor-layout",
  "athanor-style",
+ "athanor-trust-state",
  "athanor-unit",
  "gio-unix",
  "glib",

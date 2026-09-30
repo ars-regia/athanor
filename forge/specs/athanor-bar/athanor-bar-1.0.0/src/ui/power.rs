@@ -1,11 +1,14 @@
 //! The power menu (doc_bar.md, BR3). Nothing happens on the first press: every action
 //! asks, with Cancel focused, so a stray Enter backs out. The actions logind does not
-//! offer are hidden; the menu asks again each time it opens.
+//! offer are hidden; the menu asks again each time it opens. "Restart to update" stands
+//! beside "Restart" while an update is downloaded, and is the update service's Apply.
 
 use std::cell::Cell;
 use std::rc::Rc;
 
+use athanor_bar::order::Module;
 use athanor_bar::power::Action;
+use athanor_bar::shield::Request;
 use gtk4::glib;
 use gtk4::prelude::*;
 
@@ -38,6 +41,51 @@ fn texts(action: Action) -> (String, String) {
         Action::Suspend => (tr("Suspend"), tr("Suspend now?")),
         Action::Reboot => (tr("Restart"), tr("Restart now?")),
         Action::PowerOff => (tr("Shut Down"), tr("Shut down now?")),
+    }
+}
+
+/// What the confirmation will do: a logind action, or the update service's Apply (BR3:
+/// "Restart to update" stands beside "Restart" and is the same request as SH11).
+#[derive(Clone, Copy)]
+enum Pending {
+    Logind(Action),
+    Update,
+}
+
+/// The confirmation page's widgets, which every row's handler holds weakly.
+struct Page {
+    pending: Rc<Cell<Option<Pending>>>,
+    question: gtk4::Label,
+    confirm: gtk4::Button,
+    stack: gtk4::Stack,
+    cancel: gtk4::Button,
+}
+
+impl Page {
+    /// A press on `row` asks `ask` first, with `label` on the confirming button.
+    fn asks(&self, row: &gtk4::Button, what: Pending, ask: String, label: String) {
+        let (pending, question, confirm, stack, cancel) = (
+            self.pending.clone(),
+            self.question.downgrade(),
+            self.confirm.downgrade(),
+            self.stack.downgrade(),
+            self.cancel.downgrade(),
+        );
+        row.connect_clicked(move |_| {
+            let (Some(question), Some(confirm), Some(stack), Some(cancel)) = (
+                question.upgrade(),
+                confirm.upgrade(),
+                stack.upgrade(),
+                cancel.upgrade(),
+            ) else {
+                return;
+            };
+            pending.set(Some(what));
+            question.set_text(&ask);
+            confirm.set_label(&label);
+            stack.set_visible_child_name("confirm");
+            cancel.grab_focus();
+        });
     }
 }
 
@@ -78,40 +126,39 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     // Every handler below lives on a widget inside the popover and holds the other widgets
     // weakly: a strong reference to an ancestor would be a cycle that keeps the whole menu
     // alive after a rebuild replaces it.
-    let pending: Rc<Cell<Option<Action>>> = Rc::new(Cell::new(None));
+    let page = Page {
+        pending: Rc::new(Cell::new(None)),
+        question: question.clone(),
+        confirm: confirm.clone(),
+        stack: stack.clone(),
+        cancel: cancel.clone(),
+    };
     let mut asked = Vec::new();
+    let mut update = None;
     for action in Action::ALL {
         let (label, ask) = texts(action);
         let row = row_button(&label, "bar-row");
         // Hidden until logind says it is offered.
         row.set_visible(action.can_method().is_none());
-        let (pending, question, confirm, stack, cancel) = (
-            pending.clone(),
-            question.downgrade(),
-            confirm.downgrade(),
-            stack.downgrade(),
-            cancel.downgrade(),
-        );
-        row.connect_clicked(move |_| {
-            let (Some(question), Some(confirm), Some(stack), Some(cancel)) = (
-                question.upgrade(),
-                confirm.upgrade(),
-                stack.upgrade(),
-                cancel.upgrade(),
-            ) else {
-                return;
-            };
-            pending.set(Some(action));
-            question.set_text(&ask);
-            confirm.set_label(&label);
-            stack.set_visible_child_name("confirm");
-            cancel.grab_focus();
-        });
+        page.asks(&row, Pending::Logind(action), ask, label);
         actions.append(&row);
         if action.can_method().is_some() {
             asked.push((action, row));
         }
+        if action == Action::Reboot {
+            let update_row = row_button(&tr("Restart to update"), "bar-row");
+            update_row.set_visible(bar.trust().restart_to_update_offered());
+            page.asks(
+                &update_row,
+                Pending::Update,
+                tr("Restart and install the update now?"),
+                tr("Restart to update"),
+            );
+            actions.append(&update_row);
+            update = Some(update_row);
+        }
     }
+    let pending = page.pending;
 
     let back = {
         let (pending, stack) = (pending.clone(), stack.downgrade());
@@ -126,19 +173,41 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     cancel.connect_clicked(move |_| cancel_back());
     popup.popover.connect_closed(move |_| back());
     let popover = popup.popover.downgrade();
+    let origin = popup.button.downgrade();
+    let weak_bar = Rc::downgrade(bar);
     confirm.connect_clicked(move |_| {
-        let Some(action) = pending.take() else { return };
+        let Some(what) = pending.take() else { return };
         if let Some(popover) = popover.upgrade() {
             popover.popdown();
         }
-        glib::spawn_future_local(async move {
-            if let Err(err) = logind::run(action).await {
-                tracing::error!(error = %err, action = action.id(), "the power action failed");
+        match what {
+            Pending::Logind(action) => {
+                glib::spawn_future_local(async move {
+                    if let Err(err) = logind::run(action).await {
+                        tracing::error!(error = %err, action = action.id(), "the power action failed");
+                    }
+                });
             }
-        });
+            Pending::Update => {
+                let (Some(bar), Some(origin)) = (weak_bar.upgrade(), origin.upgrade()) else {
+                    return;
+                };
+                // The file may have changed while the question was open.
+                if bar.trust().restart_to_update_offered() {
+                    super::shield::request(&bar, Request::Apply, origin.upcast_ref());
+                } else {
+                    bar.trust().refused(bar.trust().withdrawn(Request::Apply));
+                    bar.open_module_near(Module::Shield, Some(origin.upcast_ref()));
+                }
+            }
+        }
     });
 
+    let weak_bar = Rc::downgrade(bar);
     let ask_logind = move || {
+        if let (Some(bar), Some(update)) = (weak_bar.upgrade(), &update) {
+            update.set_visible(bar.trust().restart_to_update_offered());
+        }
         for (action, row) in &asked {
             let (action, row) = (*action, row.clone());
             glib::spawn_future_local(async move {

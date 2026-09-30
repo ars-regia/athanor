@@ -9,11 +9,10 @@ use futures_util::StreamExt;
 use zbus::proxy::{Builder, CacheProperties};
 use zbus::{Connection, Proxy};
 
-/// Reads every property from the daemon: a cached proxy updates on PropertiesChanged, which
-/// follows the Registered and Unregistered signals, so a read right after one of them could
-/// see the list before it.
+/// Uncached: a property read after a signal must ask the watcher, not a cache that its
+/// PropertiesChanged, emitted after that signal, may not have reached yet.
 async fn watcher(conn: &Connection) -> Proxy<'static> {
-    Builder::new(conn)
+    Builder::<Proxy>::new(conn)
         .destination(WATCHER_NAME)
         .expect("destination")
         .path(WATCHER_PATH)

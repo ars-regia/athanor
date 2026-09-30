@@ -21,15 +21,16 @@
 #   rig.sh bar-modules-e2e  athanor-bar's network, Bluetooth, audio and battery modules against dbusmock, PipeWire and an MPRIS player; memory with every module loaded
 #   rig.sh dock-e2e         athanor-dock in a scene: READY, openers, running windows, pinning, the favourites followed live, the knob and presets live, memory
 #   rig.sh notifications-e2e  athanor-bar against a fake of athanor-shelld's private interface: popups, list, actions, do not disturb, hostile input, restart, memory
+#   rig.sh shield-e2e       athanor-bar's trust shield against trust_state.py's files and a fake os.athanor.Update1: seal, sheet, Restart to update, Go back, refusals, hostile strings
 #   rig.sh tray-e2e         athanor-bar as the tray host of athanor-shelld (run build-shelld first): items, dbusmenu menu, activation, the refused List, the watcher's restart, memory
 #   rig.sh compositor-e2e   the compositor client against cosmic-comp, and against sway without the COSMIC globals
 #   rig.sh layer-guard <greeter|bar|dock>   the surface must refuse to run when the shim loads late
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
-#   rig.sh atspi <greeter|chooser|bar|dock>   every interactive widget has a role and a name
+#   rig.sh atspi <greeter|chooser|bar|bar-modules|dock>   every interactive widget has a role and a name
 #   rig.sh rig-tests        unit tests of the rig's own scripts, against the rig's tools
 #   rig.sh chooser-e2e      press a preset in the chooser and wait until the bar and the dock draw it (run build-bar and build-dock first)
-#   rig.sh surface <greeter|layout (run build-bar and build-dock first)|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling|bar-popups|bar-notifications|bar-tray|dock>  capture every case of a surface and compare with the goldens
+#   rig.sh surface <greeter|layout (run build-bar and build-dock first)|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling|bar-popups|bar-notifications|bar-tray|bar-network|bar-bluetooth|bar-audio|bar-battery|bar-shield|dock>  capture every case of a surface and compare with the goldens
 #   rig.sh update-goldens <name>   replace the goldens with a fresh capture, deliberately
 set -euo pipefail
 
@@ -75,6 +76,8 @@ in_rig() { # in_rig <image> <command...>
 # /usr/share/icons/hicolor/scalable/status the way its %install does; the rig has no
 # such package, so the overlay reproduces that one directory, not the whole RPM.
 # The greeter captures hand the overlay to scene.sh as RIG_DATA_OVERLAY=/out/greeter-icons.
+# The bar's runs see both the COSMIC theme overlay and the seal icons of its shield.
+bar_overlay=/repo/system/athanor-style/calmo/generated/cosmic:/out/greeter-icons
 stage_greeter_icons() {
     mkdir -p "$out/greeter-icons/icons/hicolor/scalable/status"
     install -m 0644 "$root"/system/athanor-style/calmo/generated/icons/*.svg \
@@ -134,11 +137,12 @@ seed_bar() { # seed_bar <dir> <preset> <panel> <dock or -> <light|dark>
 capture_layout() {
     require athanor-bar build-bar
     require athanor-dock build-dock
+    stage_greeter_icons
     while IFS=$'\t' read -r tag preset panel dock scale width height; do
         tags+=("$tag")
         seed_layout "$out/seed-$tag" "$preset" "$panel" "$dock"
         in_rig "$(rig_image)" env RIG_SETTLE=8 RIG_LOCALE=en_US.UTF-8 RIG_CONFIG_SEED="/out/seed-$tag" \
-            RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
+            RIG_DATA_OVERLAY="$bar_overlay" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh "$width" "$height" "$scale" "$tag" -- \
             python3 /repo/forge/test/shell/bar_session.py --log --beside athanor-dock
     done < <(python3 -B "$rig/cases.py" layout --outputs "${RIG_LAYOUT_OUTPUTS:-1}")
@@ -178,11 +182,12 @@ require() { # require <binary> <recipe>: a scene that runs one of our binaries
 }
 
 # doc_bar.md, BR9: the bar under its own preset with one running window, the five
-# popovers the bar owns in 2b.2, opened by ATHANOR_BAR_OPEN over the float preset, and
+# popovers the bar owns in 2b.2, opened by ATHANOR_BAR_OPEN over the float preset,
 # 2b.3's notification popups (four waiting notifications: three show), the notification
-# list and a tray menu.
+# list and a tray menu, the popovers of the four system modules against
+# system_fixtures.py, and the shield's sheet over a downloaded update.
 capture_bar() { # capture_bar <surface>
-    local surface=$1 open="" preset=float panel=top dock=visible
+    local surface=$1 open="" preset=float panel=top dock=visible settle=8
     local session=(python3 /repo/forge/test/shell/bar_session.py)
     case "$surface" in
     bar) preset=bar panel=bottom dock=- session+=(--window) ;;
@@ -197,6 +202,16 @@ capture_bar() { # capture_bar <surface>
         require athanor-shelld build-shelld
         open=tray session+=(--tray)
         ;;
+    # The system modules against the fixtures, which start before the bar: a longer settle.
+    bar-network) open=network settle=12 session+=(--fixtures) ;;
+    # The adapter already discovers, so the popover opens at its final size: cosmic-comp
+    # at a fractional scale leaves the edge column of a popover drawn before it grew.
+    bar-bluetooth) open=bluetooth settle=12 session+=(--fixtures --discovering) ;;
+    bar-audio) open=audio settle=12 session+=(--fixtures) ;;
+    bar-battery) open=battery settle=12 session+=(--fixtures) ;;
+    # The shield's sheet above a bottom panel (item 13's third condition), with a downloaded
+    # update so Restart to update and every row of the sheet show.
+    bar-shield) preset=bar panel=bottom dock=- open=shield session+=(--trust-state downloaded) ;;
     esac
     in_rig "$(rig_image)" bash -c '
         set -euo pipefail
@@ -205,6 +220,7 @@ capture_bar() { # capture_bar <surface>
         python3 /repo/forge/test/shell/locale/make_pseudo_rtl.py \
             /repo/forge/specs/athanor-bar/athanor-bar-1.0.0/po/athanor-bar.pot /out/bar-pseudo-rtl.po
         msgfmt -o /out/locale/bar/rtl.mo /out/bar-pseudo-rtl.po'
+    stage_greeter_icons
     while IFS=$'\t' read -r tag variant scale locale catalog; do
         tags+=("$tag")
         seed_bar "$out/seed-$tag" "$preset" "$panel" "$dock" "$variant"
@@ -215,8 +231,8 @@ capture_bar() { # capture_bar <surface>
         if [ -n "$open" ]; then
             override+=(ATHANOR_BAR_OPEN="$open")
         fi
-        in_rig "$(rig_image)" env RIG_LOCALE="$locale" RIG_SETTLE=8 RIG_CONFIG_SEED="/out/seed-$tag" \
-            RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic "${override[@]}" \
+        in_rig "$(rig_image)" env RIG_LOCALE="$locale" RIG_SETTLE="$settle" RIG_CONFIG_SEED="/out/seed-$tag" \
+            RIG_DATA_OVERLAY="$bar_overlay" "${override[@]}" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 "$scale" "$tag" -- "${session[@]}"
     done < <(python3 -B "$rig/cases.py" "$surface")
 }
@@ -375,22 +391,24 @@ shelld-e2e)
     in_rig "$(rig_image)" dbus-run-session -- python3 /repo/forge/test/shell/shelld_e2e.py
     ;;
 bar-e2e)
+    stage_greeter_icons
     seed_bar "$out/seed-bar-e2e" float top visible light
     # No favourites file: the first start imports the favourites and saves them (BR7).
     rm "$out/seed-bar-e2e/athanor/favorites.toml"
     rm -f "$out/bar-e2e-logind.log"
     in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-bar-e2e \
-        RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
+        RIG_DATA_OVERLAY="$bar_overlay" \
         RIG_HOLD="python3 /repo/forge/test/shell/bar_e2e.py" \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 bar-e2e -- \
         bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
                  && exec python3 /repo/forge/test/shell/bar_session.py --hang CanReboot --window --pinnable"
     ;;
 bar-modules-e2e)
+    stage_greeter_icons
     seed_bar "$out/seed-bar-modules-e2e" float top visible light
     rm -f "$out"/bar-modules-e2e-*.log
     in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-bar-modules-e2e \
-        RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
+        RIG_DATA_OVERLAY="$bar_overlay" \
         RIG_HOLD="python3 /repo/forge/test/shell/bar_modules_e2e.py" \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 bar-modules-e2e -- \
         bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
@@ -406,23 +424,37 @@ dock-e2e)
                  && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-dock --window --pinnable"
     ;;
 notifications-e2e)
+    stage_greeter_icons
     seed_bar "$out/seed-notifications-e2e" float top visible light
     rm -f "$out/notifications-e2e-notifications.log"
     in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 \
         RIG_CONFIG_SEED=/out/seed-notifications-e2e \
-        RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
+        RIG_DATA_OVERLAY="$bar_overlay" \
         RIG_HOLD="python3 /repo/forge/test/shell/notifications_e2e.py" \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 notifications-e2e -- \
         bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
                  && exec python3 /repo/forge/test/shell/bar_session.py --notifications --respawn"
     ;;
+shield-e2e)
+    stage_greeter_icons
+    seed_bar "$out/seed-shield-e2e" float top visible light
+    rm -f "$out/shield-e2e-logind.log"
+    in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 \
+        RIG_CONFIG_SEED=/out/seed-shield-e2e \
+        RIG_DATA_OVERLAY="$bar_overlay" \
+        RIG_HOLD="python3 /repo/forge/test/shell/shield_e2e.py" \
+        dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 shield-e2e -- \
+        bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
+                 && exec python3 /repo/forge/test/shell/bar_session.py --notifications --trust-state downloaded"
+    ;;
 tray-e2e)
     require athanor-shelld build-shelld
+    stage_greeter_icons
     seed_bar "$out/seed-tray-e2e" float top visible light
     rm -f "$out/tray-e2e-tray.log" "$out/tray-e2e-shelld.log"
     in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 \
         RIG_CONFIG_SEED=/out/seed-tray-e2e ATHANOR_BAR_OPEN=tray \
-        RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
+        RIG_DATA_OVERLAY="$bar_overlay" \
         RIG_HOLD="python3 /repo/forge/test/shell/tray_e2e.py" \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 tray-e2e -- \
         bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
@@ -473,11 +505,12 @@ greeter-preview)
     echo "look at $out/greeter-preview-*.png"
     ;;
 bar-preview)
+    stage_greeter_icons
     # The three factory layouts, for the eye; the goldens are `surface bar`.
     while read -r preset panel dock; do
         seed_layout "$out/seed-bar-preview-$preset" "$preset" "$panel" "$dock"
         in_rig "$(rig_image)" env RIG_LOCALE=en_US.UTF-8 RIG_CONFIG_SEED="/out/seed-bar-preview-$preset" \
-            RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
+            RIG_DATA_OVERLAY="$bar_overlay" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 "bar-preview-$preset" -- \
             /out/bin/athanor-bar
     done << 'EOF'
@@ -506,13 +539,26 @@ atspi)
             bash -c "$enable && exec /out/bin/athanor-layout-chooser"
         ;;
     bar)
-        # 7 interactive widgets under float: workspaces, applications, clock, input source,
-        # accessibility, tiling, power.
+        # 8 interactive widgets under float: workspaces, applications, clock, input source,
+        # accessibility, tiling, power, the shield.
+        stage_greeter_icons
         seed_bar "$out/seed-atspi-bar" float top visible light
         in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-bar \
-            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar 7" \
+            RIG_DATA_OVERLAY="$bar_overlay" \
+            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar 8" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-bar -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py"
+        ;;
+    bar-modules)
+        # 12 interactive widgets under float with every fixture: the 8 of `bar`, and audio,
+        # Bluetooth, network and battery. The fixtures start first, so the settle is longer.
+        stage_greeter_icons
+        seed_bar "$out/seed-atspi-bar-modules" float top visible light
+        in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=12 RIG_CONFIG_SEED=/out/seed-atspi-bar-modules \
+            RIG_DATA_OVERLAY="$bar_overlay" \
+            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar 12" \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-bar-modules -- \
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --fixtures"
         ;;
     dock)
         # 4 interactive widgets under float: launcher, workspaces, the pinned COSMIC
@@ -534,8 +580,9 @@ chooser-e2e)
     # preset and waits until both have drawn it. The capture shows the result.
     require athanor-bar build-bar
     require athanor-dock build-dock
+    stage_greeter_icons
     in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 \
-        RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
+        RIG_DATA_OVERLAY="$bar_overlay" \
         RIG_HOLD="python3 /repo/forge/test/shell/layout_e2e.py" \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 chooser-e2e -- \
         bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
@@ -553,7 +600,7 @@ surface | update-goldens)
     greeter) capture_greeter ;;
     layout) capture_layout ;;
     chooser) capture_chooser ;;
-    bar | bar-power | bar-input | bar-calendar | bar-accessibility | bar-tiling | bar-popups | bar-notifications | bar-tray) capture_bar "$surface" ;;
+    bar | bar-power | bar-input | bar-calendar | bar-accessibility | bar-tiling | bar-popups | bar-notifications | bar-tray | bar-network | bar-bluetooth | bar-audio | bar-battery | bar-shield) capture_bar "$surface" ;;
     dock) capture_dock ;;
     *)
         echo "rig.sh $1: unknown surface '$surface'" >&2

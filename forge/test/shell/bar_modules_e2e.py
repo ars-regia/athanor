@@ -113,10 +113,12 @@ def no_password_written():
 
 
 NM_PATH = "/org/freedesktop/NetworkManager"
+ACCESS_POINT = "org.freedesktop.NetworkManager.AccessPoint"
 LAB_CONNECTION = f"{fx.NM_SETTINGS}/lab"
 SECRET_AGENT = "/org/freedesktop/NetworkManager/SecretAgent"
 AGENT_ERROR = "org.freedesktop.NetworkManager.SecretAgent."
 RETRY_NOTE = "The password was not accepted. Try again."
+NOT_COMPLETED = "The action did not complete."
 ALLOW_INTERACTION, REQUEST_NEW = 0x1, 0x2
 
 
@@ -143,6 +145,19 @@ def type_password(app, Atspi, password):
     """Types into the showing password entry through AT-SPI's EditableText."""
     entries = showing_role(app, Atspi, "password text")
     return bool(entries) and entries[0].set_text_contents(password)
+
+
+def described_by(accessible, Atspi):
+    """The names of the accessibles a DescribedBy relation of `accessible` points to."""
+    if accessible is None:
+        return []
+    names = []
+    for relation in accessible.get_relation_set():
+        if relation.get_relation_type() == Atspi.RelationType.DESCRIBED_BY:
+            for index in range(relation.get_n_targets()):
+                target = relation.get_target(index)
+                names.append(target.get_name() if target is not None else None)
+    return names
 
 
 def press_confirm(app, Atspi, name):
@@ -217,6 +232,28 @@ def network(ctx):
         open_popover(app, Atspi, "Network", lambda: buttons(app, Atspi, "Athanor Lab, connected")),
     )
     check("the wired state is shown", bool(labelled(app, Atspi, "label", "Wired: connected")))
+    # The rows are rebuilt when the signal icon of a network changes, and kept when its
+    # strength moves inside the same icon: a rebuild on every update would take the
+    # keyboard focus off a row. A rebuilt row is a new accessible, at a new path.
+    def lab_row():
+        found = buttons(app, Atspi, "Athanor Lab, connected")
+        return found[0].path if found else None
+
+    def set_strength(point, strength):
+        fx.call(
+            bus, fx.NM, f"{NM_PATH}/AccessPoint/{point}", "org.freedesktop.DBus.Properties", "Set", "(ssv)",
+            (ACCESS_POINT, "Strength", GLib.Variant("y", strength)),
+        )
+
+    shown = lab_row()
+    set_strength("lab", 60)
+    check("a new signal icon rebuilds the rows", wait_for(lambda: lab_row() not in (None, shown), 5))
+    shown = lab_row()
+    set_strength("lab", 70)
+    time.sleep(1)
+    check("a strength inside the same icon keeps them", shown is not None and lab_row() == shown)
+    set_strength("lab", 82)
+    check("the strength back, the rows follow", wait_for(lambda: lab_row() not in (None, shown), 5))
     check("an open network is listed by name", bool(buttons(app, Atspi, "Corner Café")))
     campus = buttons(app, Atspi, "Campus, needs Settings")
     check(
@@ -357,6 +394,12 @@ def bluetooth(ctx):
     )
     # The template does not keep who registered the agent; the fixture's Pair needs it.
     fx.call(bus, fx.BLUEZ, "/org/bluez", fx.FIXTURE, "AgentOwner", "(s)", (ctx.bar,))
+    # The template's adapter starts bondable, as bluetoothd makes it once an agent registers:
+    # the bar turns that off, and turns it on only for its own pairing.
+    check("the bar makes the adapter unbondable", wait_for(lambda: adapter("Pairable") is False, 5))
+
+    def pairable_at_pair():
+        return fx.call(bus, fx.BLUEZ, "/org/bluez", fx.FIXTURE, "PairableAtPair", reply="(s)")[0]
     check(
         "the list shows the connected headphones first",
         open_popover(app, Atspi, "Bluetooth", lambda: buttons(app, Atspi, "Headphones, connected")),
@@ -395,12 +438,26 @@ def bluetooth(ctx):
     # Pair), the person confirms, then the bar trusts and connects it. The BlueZ mock is
     # blocked while the page is open, so nothing below calls it until Pair is pressed.
     check("a nearby device is listed while discovering", wait_for(lambda: buttons(app, Atspi, "Phone"), 10))
+    # While the Phone pairs, BlueZ first asks about the Speaker: the agent answers only the
+    # device the person pressed, not whichever device asks while a pairing is in progress.
+    (other,) = fx.call(
+        bus, fx.BLUEZ, "/org/bluez", fx.FIXTURE, "AlsoAsk", "(o)", (device_path("Speaker"),), "(u)",
+    )
     press(app, Atspi, "Phone")
     check("pressing it shows the digits BlueZ sent", wait_for(lambda: labelled(app, Atspi, "label", fx.PAIRING_CODE), 10))
+    check("another device's request during the pairing shows nothing", not labelled(app, Atspi, "label", str(fx.OTHER_PASSKEY)))
+    check(
+        "the Pair button is described by the device, the digits and the note",
+        described_by(confirm_button(app, Atspi, "Pair")[1], Atspi)
+        == ["Pair with Phone?", fx.PAIRING_CODE, "Pair only if Phone shows the same number."],
+    )
     check("Pair confirms", wait_for(lambda: press_confirm(app, Atspi, "Pair"), 5))
     phone = device_path("Phone")
     check("the device is paired", wait_for(lambda: property_of(bus, fx.BLUEZ, phone, device1, "Paired") is True, 10))
     check("trusts it", wait_for(lambda: property_of(bus, fx.BLUEZ, phone, device1, "Trusted") is True, 5))
+    check("and was rejected", wait_for(lambda: result(other) == f"error:{REJECTED}", 5))
+    check("the adapter was bondable while Pair ran", pairable_at_pair() == "true")
+    check("and is unbondable again after it", wait_for(lambda: adapter("Pairable") is False, 5))
     # Pair closes the popover, as Connect does in the network module; opened again, it shows
     # the device connected and discovers again.
     check(
@@ -418,6 +475,7 @@ def bluetooth(ctx):
         "and the device stays unpaired",
         wait_for(lambda: property_of(bus, fx.BLUEZ, device_path("Speaker"), device1, "Paired") is False, 5),
     )
+    check("a cancelled pairing leaves the adapter unbondable", wait_for(lambda: adapter("Pairable") is False, 5))
 
     # The agent refuses any process that is not bluetoothd.
     try:
@@ -437,6 +495,145 @@ def bluetooth(ctx):
 
 
 SECTIONS.append(bluetooth)
+
+
+def audio(ctx):
+    app, Atspi = ctx.app, ctx.Atspi
+    session = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+
+    def slider(name):
+        found = labelled(app, Atspi, "slider", name)
+        return found[0] if found else None
+
+    def near(name, percent):
+        found = slider(name)
+        return found is not None and abs(found.get_current_value() - percent) < 1.0
+
+    def switch(name):
+        found = labelled(app, Atspi, "check box", name)
+        return found[0] if found else None
+
+    def default_sink():
+        return fx.pactl("get-default-sink").strip()
+
+    check("the audio module shows", wait_for(lambda: buttons(app, Atspi, "Sound"), 15))
+    check("the popover shows the output volume", open_popover(app, Atspi, "Sound", lambda: slider("Output volume")))
+    check("the output slider shows the default sink's 40 %", wait_for(lambda: near("Output volume", 40), 5))
+    check("the input slider shows the microphone's 55 %", near("Input volume", 55))
+    check("the device in use is marked", bool(buttons(app, Atspi, "Speakers, in use")))
+
+    press(app, Atspi, "Headphones")
+    check("choosing Headphones makes it the default sink", wait_for(lambda: default_sink() == "headphones", 5))
+    check("and the slider follows it to 70 %", wait_for(lambda: near("Output volume", 70), 5))
+
+    switch("Mute output").do_action(0)
+    check("the mute switch mutes the sink", wait_for(lambda: "yes" in fx.pactl("get-sink-mute", "headphones"), 5))
+    wait_for(lambda: switch("Mute output").get_state_set().contains(Atspi.StateType.CHECKED), 5)
+    switch("Mute output").do_action(0)
+    check("and unmutes it", wait_for(lambda: "no" in fx.pactl("get-sink-mute", "headphones"), 5))
+
+    slider("Output volume").set_current_value(25.0)
+    check("the slider sets the volume", wait_for(lambda: "25%" in fx.pactl("get-sink-volume", "headphones"), 5))
+    fx.pactl("set-sink-volume", "headphones", "60%")
+    check("a change made elsewhere reaches the slider", wait_for(lambda: near("Output volume", 60), 5))
+
+    # The media controls follow the MPRIS player.
+    check("the playing track is shown", wait_for(lambda: labelled(app, Atspi, "label", "Night Drive"), 10))
+    check("with its artist", bool(labelled(app, Atspi, "label", "Calmo")))
+    press(app, Atspi, "Pause")
+    check(
+        "Pause reaches the player",
+        wait_for(lambda: len(mock_calls(session, fx.PLAYER, fx.MPRIS_PATH, "PlayPause")) == 1, 5),
+    )
+    check("and the button becomes Play", wait_for(lambda: buttons(app, Atspi, "Play"), 5))
+
+    # The sound server restarts: the module hides, then comes back on its own.
+    for pid in fx.pids_of("pipewire-pulse"):
+        os.kill(pid, signal.SIGTERM)
+    check("without a sound server the module hides", wait_for(lambda: not buttons(app, Atspi, "Sound"), 10))
+    ctx.spawned.append(fx.pipewire_pulse(subprocess.DEVNULL))
+    check("the sound server back: the module shows within 15 s", wait_for(lambda: buttons(app, Atspi, "Sound"), 15))
+    check("the bar survived the restart", alive(ctx.pid))
+
+
+SECTIONS.append(audio)
+
+
+def battery(ctx):
+    app, Atspi, bus = ctx.app, ctx.Atspi, ctx.bus
+    logind_log = Path("/out") / f"{os.environ['RIG_TAG']}-logind.log"
+    profiles_path = "/org/freedesktop/UPower/PowerProfiles"
+
+    def radio(name):
+        found = labelled(app, Atspi, "radio button", name)
+        return found[0] if found else None
+
+    def checked(name):
+        found = radio(name)
+        return found is not None and found.get_state_set().contains(Atspi.StateType.CHECKED)
+
+    def brightness():
+        found = labelled(app, Atspi, "slider", "Screen brightness")
+        return found[0] if found else None
+
+    def display_device(state, percent, to_empty, to_full, present):
+        fx.call(
+            bus, fx.UPOWER, "/org/freedesktop/UPower", fx.MOCK, "SetupDisplayDevice", "(uuddddxxbsu)",
+            (2, state, percent, percent / 2, 50.0, 10.0, to_empty, to_full, present, "", 1),
+        )
+
+    check("the battery module shows", wait_for(lambda: buttons(app, Atspi, "Battery"), 10))
+    module = buttons(app, Atspi, "Battery")
+    check(
+        "the module describes the charge and the time left",
+        bool(module) and module[0].get_description() == "72 %, 3 h 25 min left",
+        module[0].get_description() if module else "",
+    )
+    check(
+        "the popover shows the charge",
+        open_popover(app, Atspi, "Battery", lambda: labelled(app, Atspi, "label", "3 h 25 min left")),
+    )
+    check("the active profile is Balanced", checked("Balanced"))
+    radio("Performance").do_action(0)
+    check(
+        "choosing Performance reaches the profiles daemon",
+        wait_for(lambda: property_of(bus, fx.PROFILES, profiles_path, fx.PROFILES, "ActiveProfile") == "performance", 5),
+    )
+    fx.call(
+        bus, fx.PROFILES, profiles_path, "org.freedesktop.DBus.Properties", "Set", "(ssv)",
+        (fx.PROFILES, "ActiveProfile", GLib.Variant("s", "power-saver")),
+    )
+    check("a profile chosen elsewhere is shown", wait_for(lambda: checked("Power saver"), 5))
+
+    check(
+        "the brightness slider shows the backlight's 60 %",
+        brightness() is not None and abs(brightness().get_current_value() - 60.0) < 1.0,
+    )
+    brightness().set_current_value(30.0)
+    check(
+        "the slider sets the brightness through logind",
+        wait_for(lambda: "SetBrightness backlight intel_backlight 300" in logind_log.read_text(encoding="utf-8"), 5),
+    )
+    # logind refuses a level under 100: the slider goes back to the backlight's level and the
+    # popover says the action did not complete.
+    check("no note before an action fails", not labelled(app, Atspi, "label", NOT_COMPLETED))
+    brightness().set_current_value(5.0)
+    check(
+        "a refused brightness puts the slider back",
+        wait_for(lambda: brightness() is not None and abs(brightness().get_current_value() - 30.0) < 1.0, 5),
+    )
+    check("and the popover says the action did not complete", wait_for(lambda: labelled(app, Atspi, "label", NOT_COMPLETED), 5))
+
+    display_device(1, 15.0, 0, 5400, True)
+    check("charging shows the time until full", wait_for(lambda: labelled(app, Atspi, "label", "1 h 30 min until full"), 5))
+    check("and the new charge", bool(labelled(app, Atspi, "label", "15 %")))
+    display_device(2, 72.0, 12300, 0, False)
+    check("without a present battery the module hides", wait_for(lambda: not buttons(app, Atspi, "Battery"), 5))
+    display_device(2, 72.0, 12300, 0, True)
+    check("the battery back, the module shows again", wait_for(lambda: buttons(app, Atspi, "Battery"), 5))
+
+
+SECTIONS.append(battery)
 
 
 def main():

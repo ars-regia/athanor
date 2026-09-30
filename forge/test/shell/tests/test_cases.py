@@ -76,14 +76,20 @@ class CasesTest(unittest.TestCase):
         "bar-popups",
         "bar-notifications",
         "bar-tray",
+        "bar-network",
+        "bar-bluetooth",
+        "bar-audio",
+        "bar-battery",
+        "bar-shield",
     )
 
-    def test_the_bar_brings_nine_scenes_of_twelve_cases(self):
+    def test_every_bar_scene_brings_twelve_cases(self):
         found = [
             case for surface in self.BAR_SCENES for case in cases.surface_cases(surface)
         ]
-        self.assertEqual(len(found), 108)
-        self.assertEqual(len({c.tag for c in found}), 108)
+        self.assertEqual(len(self.BAR_SCENES), 14)
+        self.assertEqual(len(found), 12 * len(self.BAR_SCENES))
+        self.assertEqual(len({c.tag for c in found}), len(found))
 
     def test_bar_tags_are_file_names_and_name_their_scene(self):
         for surface in self.BAR_SCENES:
@@ -92,6 +98,13 @@ class CasesTest(unittest.TestCase):
                     case.tag, rf"^{surface}-(light|dark)-(1\.0|1\.5)-(en|de|rtl)$"
                 )
 
+
+    def test_br9_has_fifteen_scenes_and_180_cases(self):
+        scenes = self.BAR_SCENES + ("dock",)
+        found = [case for surface in scenes for case in cases.surface_cases(surface)]
+        self.assertEqual(len(scenes), 15)
+        self.assertEqual(len(found), 180)
+        self.assertEqual(len({c.tag for c in found}), 180)
 
     def test_the_dock_has_the_twelve_cases_of_br9(self):
         found = cases.surface_cases("dock")
