@@ -1007,6 +1007,7 @@ impl Dispatch<ExtForeignToplevelListV1, ()> for State {
                 app_id: String::new(),
                 title: String::new(),
                 state: WindowState::default(),
+                outputs: Vec::new(),
             },
         );
         state.toplevels.insert(
@@ -1095,10 +1096,29 @@ impl Dispatch<ZcosmicToplevelHandleV1, WindowId> for State {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let zcosmic_toplevel_handle_v1::Event::State { state: array } = event {
-            if let Some(window) = state.windows.pending(id) {
-                window.state = WindowState::from_cosmic(&array);
+        match event {
+            zcosmic_toplevel_handle_v1::Event::State { state: array } => {
+                if let Some(window) = state.windows.pending(id) {
+                    window.state = WindowState::from_cosmic(&array);
+                }
             }
+            // The compositor names an output in reply to its bind, before it can report a
+            // toplevel on it.
+            zcosmic_toplevel_handle_v1::Event::OutputEnter { output } => {
+                let name = state.output_names.get(&output.id());
+                if let (Some(window), Some(name)) = (state.windows.pending(id), name) {
+                    if !window.outputs.contains(name) {
+                        window.outputs.push(name.clone());
+                    }
+                }
+            }
+            zcosmic_toplevel_handle_v1::Event::OutputLeave { output } => {
+                let name = state.output_names.get(&output.id());
+                if let (Some(window), Some(name)) = (state.windows.pending(id), name) {
+                    window.outputs.retain(|entered| entered != name);
+                }
+            }
+            _ => {}
         }
     }
 }
