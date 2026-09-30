@@ -258,6 +258,17 @@ impl Bar {
         }
     }
 
+    /// The output of the open popover of the bar, if one is open (BR6, "Stacking").
+    pub fn popover_output(&self) -> Option<gdk::Monitor> {
+        let popover = self.open_popover.borrow().clone()?;
+        let root = popover.is_visible().then(|| popover.root()).flatten()?;
+        self.surfaces
+            .borrow()
+            .iter()
+            .find(|surface| surface.window.upcast_ref::<gtk4::Root>() == &root)
+            .map(|surface| surface.monitor.clone())
+    }
+
     /// A popover of the bar is on screen (BR6, "Stacking").
     pub fn popover_is_open(&self) -> bool {
         self.open_popover
@@ -443,7 +454,7 @@ impl Bar {
             monitor.stop_signal_emission_by_name("invalidate");
             if let Some(bar) = weak.upgrade() {
                 tracing::info!("an output left; the bar surfaces are rebuilt");
-                bar.notifications.output_left();
+                bar.notifications.output_left(monitor);
                 bar.schedule();
             }
         });

@@ -89,6 +89,12 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   that comes and goes (needs `GPU_OUTPUTS=2`, the default), and the crash-loop fallback to
   the vendor layout. Build the binary first with
   `forge/test/shell/rig.sh build-dock`. COSMIC's own dock keeps running beside it.
+- `notifications-acceptance.sh [stage...]`: athanor-bar and athanor-shelld under their real
+  units on a private bus (package 2b.3): the daemon admits the bar's List, a notification
+  sent while the bar is down shows after its restart (item 9), popups across an output that
+  comes and goes (needs `GPU_OUTPUTS=2`), and PSS within 64 MB with notifications held.
+  Build both binaries first with `forge/test/shell/rig.sh build-bar` and `build-shelld`.
+  Screenshots land in `.scratch/notifications-acceptance/`; look at them.
 - `compositor-acceptance.sh [stage...]` deploys `cc-probe` from `.scratch/shell-rig/bin`
   (build it with `forge/test/shell/rig.sh build-compositor-client`) and checks, in the VM's
   session, the launch of package 2a (`doc_bar.md`, BR2 and BR3): an application on its own

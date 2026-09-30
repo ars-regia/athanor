@@ -11,7 +11,8 @@ import time
 
 # at-spi2-core 2.58 (the rig's) names ROLE_BUTTON "button"; older releases said "push button".
 INTERACTIVE = {"button", "push button", "toggle button", "check box", "radio button", "password text", "entry",
-               "text", "combo box", "slider", "spin button", "link", "menu item", "switch"}
+               "text", "combo box", "slider", "spin button", "link", "menu item", "check menu item",
+               "radio menu item", "switch"}
 
 
 def problems(nodes, expected):

@@ -169,6 +169,12 @@ jobs:
         run: bash forge/test/shell/rig.sh atspi bar
       - name: Live layout, mandatory keys, running windows, the power menu and memory
         run: bash forge/test/shell/rig.sh bar-e2e
+      - name: athanor-shelld, the tray watcher of the tray scene
+        run: bash forge/test/shell/rig.sh build-shelld
+      - name: Notification popups and list against a fake daemon
+        run: bash forge/test/shell/rig.sh notifications-e2e
+      - name: Tray host and menus against athanor-shelld
+        run: bash forge/test/shell/rig.sh tray-e2e
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -176,6 +182,8 @@ jobs:
           path: |
             .scratch/shell-rig/*.log
             .scratch/shell-rig/bar-e2e.png
+            .scratch/shell-rig/notifications-e2e.png
+            .scratch/shell-rig/tray-e2e.png
 
   bar-scenes:
     name: Bar scene ${{ matrix.scene }} (12 cases) against the goldens
@@ -193,6 +201,9 @@ jobs:
             bar-calendar,
             bar-accessibility,
             bar-tiling,
+            bar-popups,
+            bar-notifications,
+            bar-tray,
           ]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -200,6 +211,9 @@ jobs:
         run: bash forge/test/shell/rig.sh build-image
       - name: Build the bar
         run: bash forge/test/shell/rig.sh build-bar
+      - name: athanor-shelld, the tray watcher of the tray scene
+        if: matrix.scene == 'bar-tray'
+        run: bash forge/test/shell/rig.sh build-shelld
       - name: Cases against the goldens
         run: bash forge/test/shell/rig.sh surface "${{ matrix.scene }}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
