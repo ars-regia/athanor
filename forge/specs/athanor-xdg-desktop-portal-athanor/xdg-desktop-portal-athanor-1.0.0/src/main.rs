@@ -2,7 +2,9 @@ use anyhow::Result;
 use std::future::pending;
 use tracing::info;
 
+mod caller;
 mod portal;
+mod prompt;
 
 #[tokio::main]
 async fn main() -> Result<()> {

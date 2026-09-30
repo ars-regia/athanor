@@ -66,6 +66,9 @@ fn init_telemetry() {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,athanor_shell_rs=debug"))
         )
         .with_target(true)
+        // Standard output is the answer of a prompt or a chooser to the portal that ran it,
+        // so logs go to standard error.
+        .with_writer(std::io::stderr)
         .init();
 }
 
@@ -113,8 +116,12 @@ fn main() -> glib::ExitCode {
     crate::ipc::init_system_controller();
 
     if let Some(req_info) = args.privacy_prompt {
+        // Not unique: with a unique application id a second request, made while a prompt is
+        // open, would be forwarded to it and would exit 0 at once, and the portal would have
+        // no answer of the user's to read. Each request is its own process with its own prompt.
         let app = Application::builder()
             .application_id("os.athanor.PrivacyPrompt")
+            .flags(gio::ApplicationFlags::NON_UNIQUE)
             .build();
         let req_clone = req_info.clone();
         app.connect_activate(move |app| {

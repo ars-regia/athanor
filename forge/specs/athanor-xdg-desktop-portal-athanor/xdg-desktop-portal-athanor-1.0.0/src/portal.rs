@@ -1,8 +1,11 @@
 use std::collections::HashMap;
-use tokio::process::Command;
 use tracing::{info, warn};
+use zbus::message::Header;
 use zbus::zvariant::{ObjectPath, Value};
 use zbus::{interface, Connection};
+
+use crate::caller;
+use crate::prompt::{self, Resource, Verdict};
 
 pub struct AthanorPortal;
 
@@ -13,45 +16,33 @@ pub struct MicrophonePortal;
 pub struct FileChooserPortal;
 
 impl AthanorPortal {
-    /// Prompts the user for permission via `athanor-shell-rs` GUI dialog
-    pub async fn request_permission(resource: &str, app_id: &str) -> bool {
-        info!("Prompting user for {} permission for app: {}", resource, app_id);
+    /// Asks the user, through the privacy prompt, whether `app_id` may use `resource`.
+    /// Only a click on Allow grants; anything else denies (see `prompt`).
+    pub async fn request_permission(resource: Resource, app_id: &str) -> bool {
+        info!("Prompting user for {resource:?} permission for app {app_id:?}");
 
-        let status = Command::new("athanor-shell-rs")
-            .arg("--privacy-prompt")
-            .arg(format!("{}:{}", resource, app_id))
-            .status();
-
-        match status.await {
-            Ok(exit_status) => {
-                let granted = exit_status.success();
-                if granted {
-                    info!("Permission GRANTED for {} to app '{}'.", resource, app_id);
-                    let res = resource.to_string();
-                    tokio::spawn(async move {
-                        if let Ok(conn) = Connection::session().await {
-                            let _ = conn
-                                .call_method(
-                                    Some("os.athanor.Shell"),
-                                    "/os/athanor/Shell",
-                                    Some("os.athanor.Shell"),
-                                    "SetPrivacyIndicator",
-                                    &(res, true),
-                                )
-                                .await;
-                        }
-                    });
-                } else {
-                    info!("Permission DENIED for {} to app '{}'.", resource, app_id);
-                }
-                granted
+        match prompt::ask(resource, app_id).await {
+            Verdict::Granted => {
+                info!("Permission GRANTED for {resource:?} to app {app_id:?}.");
+                let res = format!("{resource:?}");
+                tokio::spawn(async move {
+                    if let Ok(conn) = Connection::session().await {
+                        let _ = conn
+                            .call_method(
+                                Some("os.athanor.Shell"),
+                                "/os/athanor/Shell",
+                                Some("os.athanor.Shell"),
+                                "SetPrivacyIndicator",
+                                &(res, true),
+                            )
+                            .await;
+                    }
+                });
+                true
             }
-            Err(e) => {
-                warn!(
-                    "Failed to launch athanor-shell-rs privacy prompt. Zero-Trust Enforcement: Permission DENIED by default. Error: {}",
-                    e
-                );
-                false // ZT RULE 1: FAIL CLOSED. Nessun fallback insicuro permesso.
+            Verdict::Denied(reason) => {
+                info!("Permission DENIED for {resource:?} to app {app_id:?}: {reason:?}.");
+                false
             }
         }
     }
@@ -218,6 +209,10 @@ impl ScreenCastPortal {
     }
 
     #[zbus(name = "Start")]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the arguments of a portal method are fixed by its D-Bus signature; the header and the connection are added to check the caller"
+    )]
     async fn start(
         &self,
         _handle: ObjectPath<'_>,
@@ -225,10 +220,13 @@ impl ScreenCastPortal {
         app_id: String,
         _parent_window: String,
         _options: HashMap<String, Value<'_>>,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &Connection,
     ) -> std::result::Result<(u32, HashMap<String, Value<'static>>), zbus::fdo::Error> {
+        caller::authorise(&header, conn).await?;
         info!("ScreenCast::Start requested by app: {}", app_id);
 
-        let granted = AthanorPortal::request_permission("ScreenCast", &app_id).await;
+        let granted = AthanorPortal::request_permission(Resource::ScreenCast, &app_id).await;
         if !granted {
             return Ok((1, HashMap::new()));
         }
@@ -271,8 +269,11 @@ impl CameraPortal {
         _handle: ObjectPath<'_>,
         app_id: String,
         _options: HashMap<String, Value<'_>>,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &Connection,
     ) -> std::result::Result<u32, zbus::fdo::Error> {
-        if AthanorPortal::request_permission("Camera", &app_id).await {
+        caller::authorise(&header, conn).await?;
+        if AthanorPortal::request_permission(Resource::Camera, &app_id).await {
             Ok(0)
         } else {
             Ok(1)
@@ -289,8 +290,11 @@ impl LocationPortal {
         _session_handle: ObjectPath<'_>,
         app_id: String,
         _options: HashMap<String, Value<'_>>,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &Connection,
     ) -> std::result::Result<u32, zbus::fdo::Error> {
-        if AthanorPortal::request_permission("Location", &app_id).await {
+        caller::authorise(&header, conn).await?;
+        if AthanorPortal::request_permission(Resource::Location, &app_id).await {
             Ok(0)
         } else {
             Ok(1)
@@ -305,8 +309,11 @@ impl MicrophonePortal {
         _handle: ObjectPath<'_>,
         app_id: String,
         _options: HashMap<String, Value<'_>>,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &Connection,
     ) -> std::result::Result<u32, zbus::fdo::Error> {
-        if AthanorPortal::request_permission("Microphone", &app_id).await {
+        caller::authorise(&header, conn).await?;
+        if AthanorPortal::request_permission(Resource::Microphone, &app_id).await {
             Ok(0)
         } else {
             Ok(1)
@@ -317,6 +324,10 @@ impl MicrophonePortal {
 #[interface(name = "org.freedesktop.impl.portal.FileChooser")]
 impl FileChooserPortal {
     #[zbus(name = "OpenFile")]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the arguments of a portal method are fixed by its D-Bus signature; the header and the connection are added to check the caller"
+    )]
     async fn open_file(
         &self,
         _handle: ObjectPath<'_>,
@@ -324,7 +335,10 @@ impl FileChooserPortal {
         _parent_window: String,
         _title: String,
         _options: HashMap<String, Value<'_>>,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &Connection,
     ) -> std::result::Result<(u32, HashMap<String, Value<'static>>), zbus::fdo::Error> {
+        caller::authorise(&header, conn).await?;
         info!("FileChooser::OpenFile requested by app: {}", app_id);
 
         let selected_file = match AthanorPortal::request_file_selection(&app_id).await {
@@ -349,6 +363,10 @@ impl FileChooserPortal {
     }
 
     #[zbus(name = "SaveFile")]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the arguments of a portal method are fixed by its D-Bus signature; the header and the connection are added to check the caller"
+    )]
     async fn save_file(
         &self,
         _handle: ObjectPath<'_>,
@@ -356,10 +374,13 @@ impl FileChooserPortal {
         _parent_window: String,
         _title: String,
         _options: HashMap<String, Value<'_>>,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &Connection,
     ) -> std::result::Result<(u32, HashMap<String, Value<'static>>), zbus::fdo::Error> {
+        caller::authorise(&header, conn).await?;
         info!("FileChooser::SaveFile requested by app: {}", app_id);
 
-        let granted = AthanorPortal::request_permission("FileChooser:SaveFile", &app_id).await;
+        let granted = AthanorPortal::request_permission(Resource::SaveFile, &app_id).await;
         if !granted {
             return Ok((1, HashMap::new()));
         }
@@ -382,6 +403,10 @@ impl FileChooserPortal {
     }
 
     #[zbus(name = "SaveFiles")]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the arguments of a portal method are fixed by its D-Bus signature; the header and the connection are added to check the caller"
+    )]
     async fn save_files(
         &self,
         _handle: ObjectPath<'_>,
@@ -389,10 +414,13 @@ impl FileChooserPortal {
         _parent_window: String,
         _title: String,
         _options: HashMap<String, Value<'_>>,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &Connection,
     ) -> std::result::Result<(u32, HashMap<String, Value<'static>>), zbus::fdo::Error> {
+        caller::authorise(&header, conn).await?;
         info!("FileChooser::SaveFiles requested by app: {}", app_id);
 
-        let granted = AthanorPortal::request_permission("FileChooser:SaveFiles", &app_id).await;
+        let granted = AthanorPortal::request_permission(Resource::SaveFiles, &app_id).await;
         if !granted {
             return Ok((1, HashMap::new()));
         }
@@ -419,10 +447,12 @@ impl FileChooserPortal {
 mod tests {
     use super::*;
 
+    /// Without the hypervisor to say so, no application is a Micro-VM, whatever its name
+    /// suggests: the answer fails closed and never trusts the text of the id.
     #[tokio::test]
-    async fn test_microvm_detection_fallback() {
-        assert!(AthanorPortal::is_microvm_app("microvm-firefox").await);
-        assert!(AthanorPortal::is_microvm_app("untrusted-app").await);
+    async fn microvm_detection_fails_closed_without_the_hypervisor() {
+        assert!(!AthanorPortal::is_microvm_app("microvm-firefox").await);
+        assert!(!AthanorPortal::is_microvm_app("untrusted-app").await);
         assert!(!AthanorPortal::is_microvm_app("native-calculator").await);
     }
 
