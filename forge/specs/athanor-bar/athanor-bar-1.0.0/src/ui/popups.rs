@@ -6,13 +6,17 @@
 //! drops the Wayland connection of a gtk4-layer-shell client that destroys a mapped layer
 //! surface, which is what hiding the window does. With no popup to show, the window holds
 //! no card and takes no input, so it is neither seen nor in the pointer's way.
+//!
+//! The window is pinned to the output it was made on. gtk4-layer-shell 1.3 remaps a layer
+//! window that has no monitor, destroying its surface, whenever an output comes or goes,
+//! and cosmic-comp then drops the connection. It is let go when that output leaves.
 
 use std::rc::{Rc, Weak};
 
 use athanor_bar::notices::Notice;
 use athanor_layout::preset::PanelEdge;
-use gtk4::cairo;
 use gtk4::prelude::*;
+use gtk4::{cairo, gdk};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use super::notifications::{card, Place, Service};
@@ -24,10 +28,11 @@ const MARGIN: i32 = 8;
 pub(super) struct Window {
     window: gtk4::ApplicationWindow,
     cards: gtk4::Box,
+    monitor: gdk::Monitor,
 }
 
 impl Window {
-    pub(super) fn new(bar: &Rc<Bar>, service: &Weak<Service>) -> Window {
+    pub(super) fn new(bar: &Rc<Bar>, service: &Weak<Service>, monitor: &gdk::Monitor) -> Window {
         let window = gtk4::ApplicationWindow::new(&bar.app);
         window.init_layer_shell();
         if let Err(reason) = layer_guard::require_layer_surface(&window) {
@@ -39,6 +44,7 @@ impl Window {
         window.set_namespace(Some("athanor-notifications"));
         window.set_layer(Layer::Top);
         window.set_keyboard_mode(KeyboardMode::None);
+        window.set_monitor(Some(monitor));
         for class in ["athanor-surface", "athanor-notifications"] {
             window.add_css_class(class);
         }
@@ -59,7 +65,11 @@ impl Window {
             }
         });
         window.add_controller(motion);
-        Window { window, cards }
+        Window {
+            window,
+            cards,
+            monitor: monitor.clone(),
+        }
     }
 
     /// Shows `notices`, newest first, at the end corner of the panel's side.
@@ -103,11 +113,6 @@ impl Window {
         self.set_input(false);
     }
 
-    /// A popup is on screen.
-    pub(super) fn visible(&self) -> bool {
-        self.cards.first_child().is_some()
-    }
-
     /// The whole surface takes the pointer, or none of it does.
     // ponytail: GTK resets the input region of client-decorated windows only; a layer
     // surface is not one, so the region set here holds until the next call.
@@ -120,10 +125,13 @@ impl Window {
         surface.set_input_region((!taking).then_some(&empty));
     }
 
+    /// The output the window is pinned to.
+    pub(super) fn on(&self, monitor: &gdk::Monitor) -> bool {
+        self.monitor == *monitor
+    }
+
     /// Lets the window go without destroying its layer surface (see `Surface::abandon`).
-    // ponytail: the output under the surface is not known, so any output that leaves while
-    // the popups show costs one empty, transparent window for the life of the process; track
-    // the surface's monitor (`gdk::Surface::enter-monitor`) if that ever shows up.
+    /// The bar's own `invalidate` handler on the same monitor stops gtk4-layer-shell's.
     pub(super) fn abandon(self) {
         // Hidden first: a surface left mapped on another output must not keep the input
         // region its last `show` gave it.

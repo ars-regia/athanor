@@ -443,7 +443,7 @@ impl Bar {
             monitor.stop_signal_emission_by_name("invalidate");
             if let Some(bar) = weak.upgrade() {
                 tracing::info!("an output left; the bar surfaces are rebuilt");
-                bar.notifications.output_left();
+                bar.notifications.output_left(monitor);
                 bar.schedule();
             }
         });

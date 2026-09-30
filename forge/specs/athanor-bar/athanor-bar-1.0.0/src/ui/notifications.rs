@@ -515,19 +515,29 @@ impl Service {
             return;
         }
         let mut window = self.window.borrow_mut();
-        let window = window.get_or_insert_with(|| Window::new(&bar, &self.me));
+        let window = match window.as_mut() {
+            Some(window) => window,
+            // ponytail: the first output, not the focused one: ext_workspace names one active
+            // workspace per output, so nothing says which output has the focus.
+            None => {
+                let Some(monitor) = bar.monitors().into_iter().next() else {
+                    return;
+                };
+                window.insert(Window::new(&bar, &self.me, &monitor))
+            }
+        };
         window.show(&bar, &me, &shown);
     }
 
-    /// An output left. If the popups show, their surface may be on it: it is abandoned, and
-    /// the next popup gets a new one on an output still there (Review Focus 4).
-    pub(super) fn output_left(&self) {
-        let showing = self
+    /// `monitor` left. If the popups' surface is on it, it is abandoned, and the next popup
+    /// gets a new one on an output still there (Review Focus 4).
+    pub(super) fn output_left(&self, monitor: &gdk::Monitor) {
+        let on_it = self
             .window
             .borrow()
             .as_ref()
-            .is_some_and(|window| window.visible());
-        if showing {
+            .is_some_and(|window| window.on(monitor));
+        if on_it {
             if let Some(window) = self.window.take() {
                 window.abandon();
             }
