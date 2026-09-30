@@ -16,6 +16,7 @@ src/ui/notifications.rs
 src/ui/openers.rs
 src/ui/popup.rs
 src/ui/power.rs
+src/ui/shield.rs
 src/ui/running.rs
 src/ui/tiling.rs
 src/ui/tray.rs

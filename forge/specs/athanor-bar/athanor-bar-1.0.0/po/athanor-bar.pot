@@ -34,7 +34,7 @@ msgstr ""
 
 #: ../../../../system/athanor-apps/src/row.rs:202
 #: ../../../../system/athanor-apps/src/row.rs:640
-#: ../../../../system/athanor-apps/src/row.rs:642 src/ui/notifications.rs:577
+#: ../../../../system/athanor-apps/src/row.rs:642 src/ui/notifications.rs:632
 msgid "Unknown application"
 msgstr ""
 
@@ -61,7 +61,7 @@ msgstr ""
 msgid "Minimise {title}"
 msgstr ""
 
-#: ../../../../system/athanor-apps/src/row.rs:491 src/ui/notifications.rs:703
+#: ../../../../system/athanor-apps/src/row.rs:491 src/ui/notifications.rs:758
 #, rust-format
 msgid "Close {title}"
 msgstr ""
@@ -160,33 +160,33 @@ msgstr ""
 msgid "Input source"
 msgstr ""
 
-#: src/ui/mod.rs:621
+#: src/ui/mod.rs:657
 msgid "Unpin from Bar"
 msgstr ""
 
-#: src/ui/mod.rs:623
+#: src/ui/mod.rs:659
 msgid "Pin to Bar"
 msgstr ""
 
-#: src/ui/notifications.rs:819
+#: src/ui/notifications.rs:874
 #, rust-format
 msgid "Notifications, {count} waiting"
 msgstr ""
 
-#: src/ui/notifications.rs:824 src/ui/notifications.rs:857
-#: src/ui/notifications.rs:860
+#: src/ui/notifications.rs:879 src/ui/notifications.rs:912
+#: src/ui/notifications.rs:915
 msgid "Notifications"
 msgstr ""
 
-#: src/ui/notifications.rs:864
+#: src/ui/notifications.rs:919
 msgid "Clear all"
 msgstr ""
 
-#: src/ui/notifications.rs:869
+#: src/ui/notifications.rs:924
 msgid "No notifications"
 msgstr ""
 
-#: src/ui/notifications.rs:879
+#: src/ui/notifications.rs:934
 msgid "Do not disturb"
 msgstr ""
 
@@ -234,8 +234,200 @@ msgstr ""
 msgid "Power"
 msgstr ""
 
-#: src/ui/power.rs:62
+#: src/ui/power.rs:62 src/ui/shield.rs:388
 msgid "Cancel"
+msgstr ""
+
+#: src/ui/shield.rs:159
+msgid "System image verified"
+msgstr ""
+
+#: src/ui/shield.rs:160
+msgid "Not verified yet"
+msgstr ""
+
+#: src/ui/shield.rs:161
+msgid "Update refused"
+msgstr ""
+
+#: src/ui/shield.rs:167
+msgid "Signed with a key of the policy in force"
+msgstr ""
+
+#: src/ui/shield.rs:168
+msgid "Not verified: installed from media"
+msgstr ""
+
+#: src/ui/shield.rs:169
+msgid "Not verified: no signature"
+msgstr ""
+
+#: src/ui/shield.rs:170
+msgid "Not verified: its key is not in the policy"
+msgstr ""
+
+#: src/ui/shield.rs:171
+msgid "Not verified: fetched under a permissive policy"
+msgstr ""
+
+#: src/ui/shield.rs:172
+msgid "Not verified: the image is outside the policy's scope"
+msgstr ""
+
+#: src/ui/shield.rs:178
+msgid "Up to date"
+msgstr ""
+
+#: src/ui/shield.rs:179
+msgid "An update is available; it downloads at the next check"
+msgstr ""
+
+#: src/ui/shield.rs:180
+msgid "An update is ready; it installs when you restart"
+msgstr ""
+
+#: src/ui/shield.rs:181
+msgid "The update installs at the next restart"
+msgstr ""
+
+#: src/ui/shield.rs:182
+msgid "The last update was refused by the policy"
+msgstr ""
+
+#: src/ui/shield.rs:184
+msgid "You went back from the newest version; only a newer one is offered"
+msgstr ""
+
+#: src/ui/shield.rs:186
+msgid "This version is older than one this machine has run"
+msgstr ""
+
+#: src/ui/shield.rs:193
+msgid "The last check failed: network error"
+msgstr ""
+
+#: src/ui/shield.rs:194
+msgid "The last check failed: registry error"
+msgstr ""
+
+#: src/ui/shield.rs:195
+msgid "The last check failed: refused by the policy"
+msgstr ""
+
+#: src/ui/shield.rs:196
+msgid "The last check failed: storage error"
+msgstr ""
+
+#: src/ui/shield.rs:197
+msgid "The last check failed: internal error"
+msgstr ""
+
+#: src/ui/shield.rs:203
+msgid "No trust state yet: the first check has not run"
+msgstr ""
+
+#: src/ui/shield.rs:205
+msgid "The trust state file is not owned by the system and was ignored"
+msgstr ""
+
+#: src/ui/shield.rs:207
+msgid "The trust state file could not be read"
+msgstr ""
+
+#: src/ui/shield.rs:213
+msgid "Not authorised"
+msgstr ""
+
+#: src/ui/shield.rs:214
+msgid "Another update request is running"
+msgstr ""
+
+#: src/ui/shield.rs:216
+msgid "Nothing is downloaded yet; the update downloads at the next check"
+msgstr ""
+
+#: src/ui/shield.rs:218
+msgid "There is no previous version to go back to"
+msgstr ""
+
+#: src/ui/shield.rs:219
+msgid "A program is blocking the restart; close it and try again"
+msgstr ""
+
+#: src/ui/shield.rs:220
+msgid "The request failed; the system journal says why"
+msgstr ""
+
+#: src/ui/shield.rs:221
+msgid "The update service did not answer"
+msgstr ""
+
+#: src/ui/shield.rs:282
+#, rust-format
+msgid "Version {version}"
+msgstr ""
+
+#: src/ui/shield.rs:287
+#, rust-format
+msgid "Built on {date}"
+msgstr ""
+
+#: src/ui/shield.rs:293
+#, rust-format
+msgid "Last checked on {date}"
+msgstr ""
+
+#: src/ui/shield.rs:294
+msgid "Never checked"
+msgstr ""
+
+#: src/ui/shield.rs:300
+#, rust-format
+msgid "Host: {host}"
+msgstr ""
+
+#: src/ui/shield.rs:304
+msgid "Signature policy in force"
+msgstr ""
+
+#: src/ui/shield.rs:306
+msgid "Signature policy not in force"
+msgstr ""
+
+#: src/ui/shield.rs:309
+msgid "The policy is the one Athanor ships"
+msgstr ""
+
+#: src/ui/shield.rs:311
+msgid "The policy was changed on this machine"
+msgstr ""
+
+#: src/ui/shield.rs:314
+msgid "Secure Boot on"
+msgstr ""
+
+#: src/ui/shield.rs:316
+msgid "Secure Boot off: this machine runs in the declared degraded mode"
+msgstr ""
+
+#: src/ui/shield.rs:374 src/ui/shield.rs:410
+msgid "Restart to update"
+msgstr ""
+
+#: src/ui/shield.rs:376
+msgid "Go back to the previous version"
+msgstr ""
+
+#: src/ui/shield.rs:409
+msgid "Restart and install the update now?"
+msgstr ""
+
+#: src/ui/shield.rs:415
+msgid "Go back to the previous version and restart? This asks for an administrator's password."
+msgstr ""
+
+#: src/ui/shield.rs:416
+msgid "Go back"
 msgstr ""
 
 #: src/ui/tiling.rs:64
