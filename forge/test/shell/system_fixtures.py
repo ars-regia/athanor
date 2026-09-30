@@ -21,6 +21,8 @@ Fixture methods live on the interface os.athanor.Fixture, added to the mocks:
   and returns an index; AgentRequest(agent, method, device) does the same for
   RequestAuthorization, AuthorizeService, RequestPinCode, RequestPasskey and DisplayPasskey;
   ConfirmationResult(index) returns "pending", "confirmed" or "error:<name>";
+  AlsoAsk(device) makes the next Pair first send the agent a RequestConfirmation for
+  `device` with OTHER_PASSKEY, and returns its ConfirmationResult index;
   PairableAtPair() returns "true" or "false", the adapter's Pairable when the last Pair
   began, or "unknown" before any.
 - The nearby devices' org.bluez.Device1.Pair is replaced: like bluetoothd, it calls the
@@ -72,6 +74,8 @@ DEVICES = [
 # The passkey the fixture's Pair asks the agent to confirm, and the six digits the bar shows.
 PAIRING_PASSKEY = 482916
 PAIRING_CODE = "482916"
+# The passkey of AlsoAsk's request, for a device other than the one pairing.
+OTHER_PASSKEY = 333444
 # bluetoothd's Pair: ask the default agent, pair only on its confirmation. It records whether
 # the adapter was bondable when Pair began: a pairing with an unbondable adapter stores no key.
 PAIR_WITH_AGENT = f"""
@@ -81,6 +85,16 @@ bluez.pairable_at_pair = bool(adapter.props['org.bluez.Adapter1']['Pairable'])
 owner = bluez.__dict__.get('agent_owner')
 if not owner or not bluez.default_agent:
     raise dbus.exceptions.DBusException('no agent', name='org.bluez.Error.AuthenticationFailed')
+# AlsoAsk: another device's confirmation, sent first, while this pairing is in progress.
+also = bluez.__dict__.pop('also_ask', None)
+if also:
+    def done(results=bluez.confirmations, index=also[1]):
+        results[index] = 'confirmed'
+    def failed(error, results=bluez.confirmations, index=also[1]):
+        results[index] = 'error:' + error.get_dbus_name()
+    self.connection.call_async(
+        owner, str(bluez.default_agent), 'org.bluez.Agent1', 'RequestConfirmation', 'ou',
+        [dbus.ObjectPath(also[0]), dbus.UInt32({OTHER_PASSKEY})], done, failed, timeout=30)
 try:
     self.connection.call_blocking(
         owner, str(bluez.default_agent), 'org.bluez.Agent1', 'RequestConfirmation', 'ou',
@@ -187,6 +201,17 @@ ret = index
 """,
     ),
     ("AgentOwner", "s", "", "self.agent_owner = args[0]"),
+    (
+        "AlsoAsk",
+        "o",
+        "u",
+        """
+results = self.__dict__.setdefault('confirmations', [])
+self.also_ask = (str(args[0]), len(results))
+results.append('pending')
+ret = self.also_ask[1]
+""",
+    ),
     ("PairableAtPair", "", "s", "ret = str(self.__dict__.get('pairable_at_pair', 'unknown')).lower()"),
     ("ConfirmationResult", "u", "s", "ret = self.__dict__.get('confirmations', [])[args[0]]"),
 ]

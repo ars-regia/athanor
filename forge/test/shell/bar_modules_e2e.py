@@ -401,12 +401,19 @@ def bluetooth(ctx):
     # Pair), the person confirms, then the bar trusts and connects it. The BlueZ mock is
     # blocked while the page is open, so nothing below calls it until Pair is pressed.
     check("a nearby device is listed while discovering", wait_for(lambda: buttons(app, Atspi, "Phone"), 10))
+    # While the Phone pairs, BlueZ first asks about the Speaker: the agent answers only the
+    # device the person pressed, not whichever device asks while a pairing is in progress.
+    (other,) = fx.call(
+        bus, fx.BLUEZ, "/org/bluez", fx.FIXTURE, "AlsoAsk", "(o)", (device_path("Speaker"),), "(u)",
+    )
     press(app, Atspi, "Phone")
     check("pressing it shows the digits BlueZ sent", wait_for(lambda: labelled(app, Atspi, "label", fx.PAIRING_CODE), 10))
+    check("another device's request during the pairing shows nothing", not labelled(app, Atspi, "label", str(fx.OTHER_PASSKEY)))
     check("Pair confirms", wait_for(lambda: press_confirm(app, Atspi, "Pair"), 5))
     phone = device_path("Phone")
     check("the device is paired", wait_for(lambda: property_of(bus, fx.BLUEZ, phone, device1, "Paired") is True, 10))
     check("trusts it", wait_for(lambda: property_of(bus, fx.BLUEZ, phone, device1, "Trusted") is True, 5))
+    check("and was rejected", wait_for(lambda: result(other) == f"error:{REJECTED}", 5))
     check("the adapter was bondable while Pair ran", pairable_at_pair() == "true")
     check("and is unbondable again after it", wait_for(lambda: adapter("Pairable") is False, 5))
     # Pair closes the popover, as Connect does in the network module; opened again, it shows
