@@ -182,7 +182,7 @@ stage_presets() {
 # Review Focus 3: with shelld stopped, a call to either of its names starts it again.
 stage_activation() {
     in_session "systemctl --user stop athanor-shelld.service"
-    in_session "busctl --user call org.freedesktop.Notifications /org/freedesktop/Notifications org.freedesktop.Notifications \
+    in_session "busctl --user call -- org.freedesktop.Notifications /org/freedesktop/Notifications org.freedesktop.Notifications \
     Notify susssasa{sv}i switch-acceptance 0 '' switch-acceptance activation 0 0 -1" > /dev/null ||
         fail "Notify without a running athanor-shelld failed"
     wait_until 10 in_session "systemctl --user is-active --quiet athanor-shelld.service" || fail "Notify did not activate athanor-shelld"
