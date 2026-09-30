@@ -2,7 +2,7 @@
 # rig.sh - the one entry point of the shell test rig. Workflows call this and nothing
 # else, so every gate runs the same way on a laptop and on the hosted runner.
 #
-#   rig.sh build-image      build the rig and build stages locally
+#   rig.sh build-image      build the rig and build stages locally, layered on the published rig
 #   rig.sh publish-image    push the rig stage and print its digest (needs a registry login)
 #   rig.sh probe-sandbox    prove that bubblewrap, and with it glycin, works in the rig
 #   rig.sh css-parse        GTK parse gate over the generated stylesheets
@@ -46,6 +46,12 @@ rig_image() {
         echo "$local_image:rig"
     fi
 }
+
+# The base of the fixtures' layer: the published rig when there is one (see the Containerfile).
+rig_base=()
+if [ -s "$rig/rig-image.digest" ]; then
+    rig_base=(--build-arg "RIG_BASE=$registry/athanor-shell-rig@$(cat "$rig/rig-image.digest")")
+fi
 
 # label=disable: under SELinux's container_t bubblewrap cannot mount devpts, glycin's
 # loaders die, and GTK draws every SVG icon blank without reporting anything.
@@ -218,11 +224,11 @@ capture_bar() { # capture_bar <surface>
 
 case "${1:-}" in
 build-image)
-    podman build --target rig -t "$local_image:rig" -f "$rig/Containerfile" "$rig"
-    podman build --target build -t "$local_image:build" -f "$rig/Containerfile" "$rig"
+    podman build "${rig_base[@]}" --target rig -t "$local_image:rig" -f "$rig/Containerfile" "$rig"
+    podman build "${rig_base[@]}" --target build -t "$local_image:build" -f "$rig/Containerfile" "$rig"
     ;;
 publish-image)
-    podman build --target rig -t "$local_image:rig" -f "$rig/Containerfile" "$rig"
+    podman build "${rig_base[@]}" --target rig -t "$local_image:rig" -f "$rig/Containerfile" "$rig"
     podman push --digestfile "$out/rig-image.digest" "$local_image:rig" "docker://$registry/athanor-shell-rig:latest"
     echo "published $registry/athanor-shell-rig@$(cat "$out/rig-image.digest")"
     echo "commit that digest as forge/test/shell/rig-image.digest together with the goldens it changes"
