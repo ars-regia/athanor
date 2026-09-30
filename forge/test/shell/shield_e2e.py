@@ -88,6 +88,21 @@ def focused(app, Atspi, name):
     )
 
 
+def said(app, Atspi, row):
+    """The open sheet shows `row`: waited for, as a sheet that just opened may still show the
+    rows of the state before."""
+    return wait_for(lambda: bool(labelled(app, Atspi, "label", row)), 3)
+
+
+def verified_first(app, Atspi, before):
+    """Writes a verified state and checks the shield says so before `before` happens."""
+    trust_state.write("verified")
+    check(
+        f"the shield is verified before {before}",
+        wait_for(lambda: shield_named(app, Atspi, "System image verified"), 3),
+    )
+
+
 def confirm(app, Atspi, name):
     """Presses the confirmation's `name` once it shows; False when it never does."""
     if not wait_for(lambda: confirm_button(app, Atspi, name)[1] is not None, 3):
@@ -217,26 +232,46 @@ def main():
     )
     REFUSE_FILE.unlink()
 
-    # The file changes under an open confirmation (Review Focus 1).
+    # The file changes under an open confirmation (Review Focus 1). The new state's rows are
+    # on the hidden page, so the wait is fixed; a state not re-read by then calls Apply, and
+    # the first check below fails.
     before = applies()
-    press(app, Atspi, "Restart to update")
-    wait_for(lambda: confirm_button(app, Atspi, "Restart to update")[1] is not None, 3)
-    trust_state.write("verified")
-    time.sleep(0.5)
-    _, button = confirm_button(app, Atspi, "Restart to update")
-    if button is not None:
-        button.do_action(0)
+    check("the sheet offers Restart to update", press(app, Atspi, "Restart to update"))
     check(
-        "a confirm after the download vanished calls nothing",
+        "which asks first",
+        wait_for(
+            lambda: confirm_button(app, Atspi, "Restart to update")[1] is not None, 3
+        ),
+    )
+    trust_state.write("verified")
+    time.sleep(1)
+    _, button = confirm_button(app, Atspi, "Restart to update")
+    check(
+        "the confirmation is confirmed after the download vanished",
+        button is not None and button.do_action(0),
+    )
+    check(
+        "and calls nothing",
         never(lambda: applies() > before, 2),
+    )
+    check(
+        "but says nothing is downloaded",
+        wait_for(
+            lambda: shows(
+                app,
+                Atspi,
+                "Nothing is downloaded yet; the update downloads at the next check",
+            ),
+            3,
+        ),
     )
     toggle_sheet(app, Atspi, False)
 
-    # Live refresh of the seal and the header.
+    # Live refresh of the seal and the header: each state names it differently from the one
+    # before, and the file's removal below follows a verified state.
     for name, header in (
         ("refused", "Update refused"),
         ("attention", "Not verified yet"),
-        ("missing", "Not verified yet"),
         ("verified", "System image verified"),
     ):
         trust_state.write(name)
@@ -249,40 +284,34 @@ def main():
         "the shield follows the file's removal",
         wait_for(lambda: shield_named(app, Atspi, "Not verified yet"), 3),
     )
-    toggle_sheet(app, Atspi, True)
+    check("the sheet opens on a missing file", toggle_sheet(app, Atspi, True))
     check(
-        "a missing file says why",
-        bool(
-            labelled(
-                app, Atspi, "label", "No trust state yet: the first check has not run"
-            )
-        ),
+        "and says why",
+        said(app, Atspi, "No trust state yet: the first check has not run"),
     )
-    toggle_sheet(app, Atspi, False)
+    check("and closes", toggle_sheet(app, Atspi, False))
 
-    # The state comes from State(): its errors keep their rows.
+    # The state comes from State(): its errors keep their rows. Each starts from a verified
+    # shield, so "Not verified yet" is the error's doing.
     for error, row in (
         ("Untrusted", UNTRUSTED),
         ("Unreadable", UNREADABLE),
         ("org.freedesktop.DBus.Error.NoReply", NO_ANSWER),
     ):
+        verified_first(app, Atspi, f"State fails with {error}")
         STATE_ERROR_FILE.write_text(f"{error}\n", encoding="utf-8")
         trust_state.write("verified")
         check(
             f"State failing with {error} names the shield 'Not verified yet'",
             wait_for(lambda: shield_named(app, Atspi, "Not verified yet"), 3),
         )
-        toggle_sheet(app, Atspi, True)
-        check(f"and the sheet says {row!r}", bool(labelled(app, Atspi, "label", row)))
-        toggle_sheet(app, Atspi, False)
-    STATE_ERROR_FILE.unlink()
+        check("and the sheet opens", toggle_sheet(app, Atspi, True))
+        check(f"and says {row!r}", said(app, Atspi, row))
+        check("and closes", toggle_sheet(app, Atspi, False))
+        STATE_ERROR_FILE.unlink()
 
     # No answer is asked again 5 s later, without the file changing.
-    trust_state.write("verified")
-    check(
-        "the shield is verified before the service stops answering",
-        wait_for(lambda: shield_named(app, Atspi, "System image verified"), 3),
-    )
+    verified_first(app, Atspi, "the service stops answering")
     STATE_ERROR_FILE.write_text("org.freedesktop.DBus.Error.NoReply\n", encoding="utf-8")
     trust_state.write("verified")
     check(
@@ -298,6 +327,7 @@ def main():
     )
 
     # Only root's answer is trusted: a verified state from another user is not.
+    verified_first(app, Atspi, "an impostor answers")
     impostor = subprocess.Popen(
         [
             "setpriv",
@@ -321,12 +351,9 @@ def main():
         "its verified state names the shield 'Not verified yet'",
         wait_for(lambda: shield_named(app, Atspi, "Not verified yet"), 3),
     )
-    toggle_sheet(app, Atspi, True)
-    check(
-        "and the sheet says the state is not the system's",
-        bool(labelled(app, Atspi, "label", UNTRUSTED)),
-    )
-    toggle_sheet(app, Atspi, False)
+    check("and the sheet opens", toggle_sheet(app, Atspi, True))
+    check("and says the state is not the system's", said(app, Atspi, UNTRUSTED))
+    check("and closes", toggle_sheet(app, Atspi, False))
     impostor.terminate()
     impostor.wait()
     trust_state.write("verified")
