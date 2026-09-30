@@ -8,7 +8,6 @@
 # it and hide what the VM lacks (package 2b.4), an output that comes and goes never
 # restarts the process or leaks a surface, and a crash loop falls back to the vendor
 # layout (SH8).
-# athanor-shelld is masked for the run: COSMIC owns its bus names in this session.
 # Deploys the binary, the unit and the vendor favourites from .scratch/shell-rig/bin and
 # forge/specs/athanor-bar (build the binary with forge/test/shell/rig.sh build-bar). With no
 # argument it runs every stage in order; with arguments, only those, in the order given.
@@ -87,8 +86,6 @@ stage_deploy() {
         "$BIN/athanor-bar:/usr/bin/athanor-bar" \
         "$DATA/athanor-bar.service:/usr/lib/systemd/user/athanor-bar.service" \
         "$DATA/favorites.toml:/usr/share/athanor/favorites.toml" > /dev/null
-    in_session systemctl --user mask --runtime athanor-shelld.service > /dev/null ||
-        fail "systemctl --user mask --runtime athanor-shelld.service"
     in_session systemctl --user daemon-reload
     unit cat > /dev/null || fail "systemctl --user cat athanor-bar.service found no unit"
     # libpulse and its GLib main loop come with the RPM's automatic dependencies; a binary
@@ -300,10 +297,6 @@ stage_cleanup() {
     fi
     clear_failures || {
         echo "cleanup: removing the crash-loop record failed" >&2
-        failed=1
-    }
-    in_session systemctl --user unmask --runtime athanor-shelld.service > /dev/null || {
-        echo "cleanup: systemctl --user unmask --runtime athanor-shelld.service failed" >&2
         failed=1
     }
     return "$failed"
