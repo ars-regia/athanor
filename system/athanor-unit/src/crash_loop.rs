@@ -1,4 +1,4 @@
-//! Crash-loop protection (doc_shell.md SH8), on the policy of /usr/bin/athanor-cosmic-panel:
+//! Crash-loop protection (doc_shell.md SH8) for athanor-bar, athanor-dock and athanor-shelld:
 //! five failures within ten minutes on CLOCK_BOOTTIME, then the unit gives up until the
 //! next session. CLOCK_BOOTTIME keeps counting across suspend, so the window means the ten
 //! minutes it says.
