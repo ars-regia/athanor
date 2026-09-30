@@ -557,9 +557,16 @@ def check_docs():
 # 7. panic — il budget attuale è 1 unwrap in 60k righe. Difendilo.
 # --------------------------------------------------------------------------- #
 
-# Valori misurati sul repo il 2026-09-02. Sono un cricchetto: si abbassano,
+# Valori misurati sul repo il 2026-09-30, senza tests/, benches/ ed examples/. Sono un cricchetto: si abbassano,
 # non si alzano. Se un controllo fallisce qui, propaga con `?`.
-BUDGET = {".unwrap()": 0, ".expect(": 2, "panic!(": 2}
+BUDGET = {".unwrap()": 0, ".expect(": 2, "panic!(": 1}
+
+
+def is_test_file(p):
+    """Integration tests, benchmarks and examples are not code that runs in a daemon:
+    a panic there fails a test, it does not end a service."""
+    parts = Path(rel(p)).parts
+    return any(d in parts for d in ("tests", "benches", "examples")) or Path(p).name == "tests.rs"
 
 
 @check("panics", "Il budget di panic in codice non di test non cresce")
@@ -569,6 +576,8 @@ def check_panics():
     where = {k: [] for k in BUDGET}
 
     for p in rust_files():
+        if is_test_file(p):
+            continue
         txt = read(p)
         cut = txt.find("#[cfg(test)]")
         if cut > 0:
