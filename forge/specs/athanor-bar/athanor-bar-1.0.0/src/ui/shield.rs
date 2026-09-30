@@ -30,6 +30,9 @@ const ASK_AGAIN_SECS: u32 = 3600;
 /// After no answer, the next questions come this many seconds later, then hourly: a service
 /// slow to start under the login's load must not leave the shield unverified for hours.
 const RETRY_SECS: [u32; 3] = [5, 30, 300];
+/// Apply and GoBack wait for the person at the polkit prompt however long it takes: GIO's
+/// `G_MAXINT` means no timeout. The bus still answers NoReply if the service leaves first.
+const REQUEST_TIMEOUT_MS: i32 = i32::MAX;
 
 fn now() -> i64 {
     SystemTime::now()
@@ -265,7 +268,7 @@ pub fn request(bar: &Rc<Bar>, request: Request, origin: &gtk4::Widget) {
                 shield::UPDATE_INTERFACE,
                 request.method(),
                 None,
-                bus::INTERACTIVE_TIMEOUT_MS,
+                REQUEST_TIMEOUT_MS,
             )
             .await
             .map(|_| ()),
