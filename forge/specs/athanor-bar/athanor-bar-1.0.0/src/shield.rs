@@ -8,6 +8,7 @@ use athanor_trust_state::{display, Badge, ErrorCode, ReadError, Reason, State, U
 pub const UPDATE_NAME: &str = "os.athanor.Update1";
 pub const UPDATE_PATH: &str = "/os/athanor/Update1";
 pub const UPDATE_INTERFACE: &str = "os.athanor.Update1";
+pub const STATE_METHOD: &str = "State";
 const ERROR_PREFIX: &str = "os.athanor.Update1.Error.";
 
 #[must_use]
@@ -135,6 +136,38 @@ pub fn refusal(remote_error: Option<&str>) -> Refusal {
         Some("Blocked") => Refusal::Blocked,
         Some(_) => Refusal::Failed,
         None => Refusal::NoAnswer,
+    }
+}
+
+/// The state `os.athanor.Update1.State` answered: its JSON, or its D-Bus error name (`None`
+/// for a local error), and the uid of the connection that sent the reply. Only root's
+/// answer is trusted, whatever it says: the service reads the file as root, which is the
+/// owner check this process cannot make from inside its user namespace.
+///
+/// # Errors
+/// `Io` when the service did not answer, `Untrusted` when another user answered, and the
+/// service's own verdict otherwise.
+pub fn state_reply(
+    answer: Result<&str, Option<&str>>,
+    sender_uid: Option<u32>,
+) -> Result<State, ReadError> {
+    let service_error = match answer {
+        Err(None) => return Err(ReadError::Io(std::io::ErrorKind::NotConnected)),
+        Err(Some(name)) => match name.strip_prefix(ERROR_PREFIX) {
+            Some(error) => Some(error),
+            // The bus answered for it: not activatable, no reply in time.
+            None => return Err(ReadError::Io(std::io::ErrorKind::NotConnected)),
+        },
+        Ok(_) => None,
+    };
+    if sender_uid != Some(0) {
+        return Err(ReadError::Untrusted);
+    }
+    match (answer, service_error) {
+        (Ok(json), _) => athanor_trust_state::parse(json),
+        (_, Some("NoState")) => Err(ReadError::Missing),
+        (_, Some("Untrusted")) => Err(ReadError::Untrusted),
+        _ => Err(ReadError::Malformed),
     }
 }
 
@@ -305,5 +338,34 @@ mod tests {
     fn requests_name_their_method() {
         assert_eq!(Request::Apply.method(), "Apply");
         assert_eq!(Request::GoBack.method(), "GoBack");
+    }
+
+    #[test]
+    fn a_state_reply_is_trusted_only_from_root() {
+        let json =
+            include_str!("../../../athanor-update/athanor-update-1.0.0/tests/state-verified.json");
+        assert_eq!(state_reply(Ok(json), Some(0)), Ok(verified()));
+        assert_eq!(state_reply(Ok(json), Some(1000)), Err(ReadError::Untrusted), "another user owns the name");
+        assert_eq!(state_reply(Ok(json), None), Err(ReadError::Untrusted), "the answering connection is gone");
+        assert_eq!(state_reply(Ok("{}"), Some(0)), Err(ReadError::Malformed));
+    }
+
+    #[test]
+    fn every_state_error_has_its_row() {
+        for (name, read) in [
+            ("os.athanor.Update1.Error.NoState", Err(ReadError::Missing)),
+            ("os.athanor.Update1.Error.Untrusted", Err(ReadError::Untrusted)),
+            ("os.athanor.Update1.Error.Unreadable", Err(ReadError::Malformed)),
+            ("os.athanor.Update1.Error.SomethingNew", Err(ReadError::Malformed)),
+        ] {
+            assert_eq!(state_reply(Err(Some(name)), Some(0)), read, "{name}");
+            assert_eq!(state_reply(Err(Some(name)), Some(1000)), Err(ReadError::Untrusted), "{name} from another user");
+        }
+        for name in [Some("org.freedesktop.DBus.Error.ServiceUnknown"), Some("org.freedesktop.DBus.Error.NoReply"), None] {
+            assert!(
+                matches!(state_reply(Err(name), None), Err(ReadError::Io(_))),
+                "{name:?}: the service did not answer"
+            );
+        }
     }
 }

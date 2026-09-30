@@ -149,8 +149,13 @@ pub enum ReadError {
 /// Parses the text of a state file.
 ///
 /// # Errors
-/// `Malformed` when the text is not schema 1 or contradicts itself.
+/// `Untrusted` when the text is larger than a state file can be, whether it came from the
+/// file or from `os.athanor.Update1.State`; `Malformed` when it is not schema 1 or
+/// contradicts itself.
 pub fn parse(text: &str) -> Result<State, ReadError> {
+    if u64::try_from(text.len()).map_or(true, |len| len > MAX_STATE_BYTES) {
+        return Err(ReadError::Untrusted);
+    }
     let state: State = serde_json::from_str(text).map_err(|_| ReadError::Malformed)?;
     let consistent = state.verified.value == (state.verified.reason == Reason::Signature);
     if state.schema != SCHEMA || !consistent {
@@ -328,6 +333,15 @@ mod tests {
         ] {
             assert_eq!(parse(&good.replace(from, to)), Err(ReadError::Malformed), "{to}");
         }
+    }
+
+    #[test]
+    fn a_text_larger_than_a_state_file_can_be_is_untrusted() {
+        let good = serde_json::to_string(&verified_state()).expect("serialize");
+        let cap = usize::try_from(MAX_STATE_BYTES).expect("64 KiB");
+        let padded = |len: usize| good.clone() + &" ".repeat(len - good.len());
+        assert_eq!(parse(&padded(cap + 1)), Err(ReadError::Untrusted), "a reply over D-Bus is capped as the file is");
+        assert_eq!(parse(&padded(cap)), Ok(verified_state()));
     }
 
     #[test]

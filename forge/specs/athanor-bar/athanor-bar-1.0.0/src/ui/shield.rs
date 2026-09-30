@@ -3,6 +3,10 @@
 //! is written in the bar. The sheet is a popover of the bar, so it stacks and dismisses as
 //! every popover does (P4), and it adds no layer surface. Every string from the state file
 //! is set as plain text; "verified" and "refused" are our own words.
+//!
+//! The state comes from `os.athanor.Update1.State`, not from the file: the unit's sandbox
+//! puts the bar in a user namespace where root is the overflow uid, so only the root service
+//! can check the file's owner. The bar trusts the reply only when the bus says root sent it.
 
 use std::cell::{Cell, RefCell};
 use std::path::Path;
@@ -31,11 +35,13 @@ fn now() -> i64 {
         })
 }
 
-/// The state file, read again whenever its directory changes (the system side renames a
-/// new file into place, UT7) and once an hour for the badge's age.
+/// The state, asked of the update service at start and whenever the file's directory changes
+/// (the system side renames a new file into place, UT7); the badge is aged once an hour.
 pub struct Trust {
     bar: Weak<Bar>,
     read: RefCell<Result<State, ReadError>>,
+    /// The number of the latest question: an older answer arriving late is dropped.
+    asked: Cell<u64>,
     /// The last refusal of Apply or GoBack, shown in the sheet until the sheet closes.
     refusal: Cell<Option<Refusal>>,
     _monitor: Option<gio::FileMonitor>,
@@ -43,7 +49,7 @@ pub struct Trust {
 
 impl Trust {
     pub(super) fn start(bar: &Weak<Bar>) -> Rc<Trust> {
-        Rc::new_cyclic(|me: &Weak<Trust>| {
+        let trust = Rc::new_cyclic(|me: &Weak<Trust>| {
             let monitor = Path::new(STATE_PATH).parent().and_then(|dir| {
                 match gio::File::for_path(dir)
                     .monitor_directory(gio::FileMonitorFlags::WATCH_MOVES, gio::Cancellable::NONE)
@@ -73,16 +79,29 @@ impl Trust {
             });
             Trust {
                 bar: bar.clone(),
-                read: RefCell::new(athanor_trust_state::read()),
+                // Until the service answers, nothing backs the badge.
+                read: RefCell::new(Err(ReadError::Io(std::io::ErrorKind::NotConnected))),
+                asked: Cell::new(0),
                 refusal: Cell::new(None),
                 _monitor: monitor,
             }
-        })
+        });
+        trust.reload();
+        trust
     }
 
-    fn reload(&self) {
-        *self.read.borrow_mut() = athanor_trust_state::read();
-        self.changed();
+    fn reload(self: &Rc<Self>) {
+        let question = self.asked.get().wrapping_add(1);
+        self.asked.set(question);
+        let me = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let read = ask_state().await;
+            let Some(trust) = me.upgrade() else { return };
+            if trust.asked.get() == question {
+                *trust.read.borrow_mut() = read;
+                trust.changed();
+            }
+        });
     }
 
     fn changed(&self) {
@@ -118,6 +137,75 @@ impl Trust {
 
     pub fn take_refusal(&self) -> Option<Refusal> {
         self.refusal.take()
+    }
+}
+
+/// Asks `os.athanor.Update1.State` on the system bus (the call starts the service), then
+/// asks the bus which user sent the reply: the reply's sender is set by the bus, so this is
+/// the uid of the connection that answered, not of whoever owns the name by then.
+async fn ask_state() -> Result<State, ReadError> {
+    let no_answer = shield::state_reply(Err(None), None);
+    let system = match gio::bus_get_future(gio::BusType::System).await {
+        Ok(system) => system,
+        Err(err) => {
+            tracing::warn!(error = %err, "no system bus; the trust state cannot be asked");
+            return no_answer;
+        }
+    };
+    let question = gio::DBusMessage::new_method_call(
+        Some(shield::UPDATE_NAME),
+        shield::UPDATE_PATH,
+        Some(shield::UPDATE_INTERFACE),
+        shield::STATE_METHOD,
+    );
+    let reply = match system
+        .send_message_with_reply_future(&question, gio::DBusSendMessageFlags::NONE, bus::TIMEOUT_MS)
+        .await
+    {
+        Ok(reply) => reply,
+        Err(err) => {
+            tracing::warn!(error = %err, "the update service did not answer State");
+            return no_answer;
+        }
+    };
+    let sender_uid = match reply.sender() {
+        Some(sender) => uid_of(&system, &sender).await,
+        None => None,
+    };
+    let json = reply.body().and_then(|body| body.get::<(String,)>()).map(|(json,)| json);
+    let answer = if reply.message_type() == gio::DBusMessageType::Error {
+        Err(reply.error_name())
+    } else {
+        Ok(json)
+    };
+    let read = match &answer {
+        Ok(json) => shield::state_reply(Ok(json.as_deref().unwrap_or_default()), sender_uid),
+        Err(name) => shield::state_reply(Err(name.as_deref()), sender_uid),
+    };
+    if let Err(err) = &read {
+        tracing::warn!(?err, ?sender_uid, "the trust state is not trusted");
+    }
+    read
+}
+
+/// The uid the bus daemon recorded for `name` when it connected: outside any namespace.
+async fn uid_of(system: &gio::DBusConnection, name: &str) -> Option<u32> {
+    let reply = bus::call(
+        system,
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "GetConnectionUnixUser",
+        Some(&(name,).to_variant()),
+        bus::TIMEOUT_MS,
+    )
+    .await;
+    match reply {
+        Ok(reply) => reply.get::<(u32,)>().map(|(uid,)| uid),
+        Err(err) => {
+            tracing::warn!(error = %err, name, "the bus did not say who answered State");
+            None
+        }
     }
 }
 
