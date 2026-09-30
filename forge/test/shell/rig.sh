@@ -587,6 +587,12 @@ chooser-e2e)
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 chooser-e2e -- \
         bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
                  && exec python3 /repo/forge/test/shell/bar_session.py --log --beside athanor-dock --beside /out/bin/athanor-layout-chooser"
+    # The bar at the depth a fresh start gives the pressed preset: the bottom 40 rows of the
+    # capture, below where float's dock stood, against their golden. A live change once kept
+    # float's 56px surface under the bar's 36px strip.
+    in_rig "$(rig_image)" magick /out/chooser-e2e.png -gravity south -crop x40+0+0 +repage /out/chooser-e2e-bar.png
+    in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/compare.py \
+        /repo/forge/test/shell/golden/chooser-e2e /out chooser-e2e-bar
     ;;
 surface | update-goldens)
     surface=${2:?usage: rig.sh $1 <surface>}

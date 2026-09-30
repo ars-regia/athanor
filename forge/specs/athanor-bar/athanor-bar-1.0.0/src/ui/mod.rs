@@ -542,6 +542,11 @@ impl Bar {
 
         let (centre_box, groups, modules) = self.build_content(connector.as_deref(), layout);
         window.set_child(Some(&centre_box));
+        // GTK remembers the size the surface was configured with and never shrinks below
+        // it: without this, a preset with a thinner surface (float's 56px to minimal's 32px)
+        // keeps the old depth and exclusive zone. The smallest default lets the content's
+        // own height win.
+        window.set_default_size(1, 1);
         Surface {
             window,
             monitor,

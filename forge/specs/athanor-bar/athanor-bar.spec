@@ -72,6 +72,7 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
   /usr/lib/systemd/user-preset/80-athanor-bar.preset under athanor-session.target.
 - The minimal preset draws a thin strip across the output (SH7), no longer float's
   islands.
+- A preset changed live takes the new preset's depth and exclusive zone.
 
 * Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-3
 - The trust shield and its sheet (doc_bar.md, BR6): the seal and header follow the state
