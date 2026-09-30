@@ -7,6 +7,8 @@ License:        MIT
 
 BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gtk4-layer-shell-devel pulseaudio-libs-devel binutils python3 gettext
 Requires:       gtk4 gtk4-layer-shell athanor-calmo athanor-shelld
+# The shield asks os.athanor.Update1.State(), which athanor-update serves from 1.0.0-2.
+Requires:       athanor-update >= 1.0.0-2
 
 %description
 One layer-shell surface per output, laid out by the preset of the user's layout
@@ -59,6 +61,7 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
   update, the policy and Secure Boot, and offers Go back; popups wait while it is open.
 - Restart to update in the power menu (BR3), shown only when an update is downloaded.
   Both actions confirm first and call os.athanor.Update1.
+- Requires athanor-update 1.0.0-2 or later, the first to serve State().
 
 * Tue Sep 29 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
 - The network, Bluetooth, audio and battery modules (doc_bar.md, BR3): NetworkManager's
