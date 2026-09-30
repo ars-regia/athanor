@@ -23,7 +23,7 @@
 #   rig.sh layer-guard <greeter|bar>   the surface must refuse to run when the shim loads late
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
-#   rig.sh atspi <greeter|chooser|bar>   every interactive widget has a role and a name
+#   rig.sh atspi <greeter|chooser|bar|bar-modules>   every interactive widget has a role and a name
 #   rig.sh rig-tests        unit tests of the rig's own scripts, against the rig's tools
 #   rig.sh cosmic-panel-defaults   COSMIC's shipped panel keys equal the renderer's fixture
 #   rig.sh chooser-e2e      press a preset in the chooser and wait for the panel configuration
@@ -459,6 +459,15 @@ atspi)
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar 7" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-bar -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py"
+        ;;
+    bar-modules)
+        # 11 interactive widgets under float with every fixture: the 7 of `bar`, and audio,
+        # Bluetooth, network and battery. The fixtures start first, so the settle is longer.
+        seed_bar "$out/seed-atspi-bar-modules" float top visible light
+        in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=12 RIG_CONFIG_SEED=/out/seed-atspi-bar-modules \
+            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar 11" \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-bar-modules -- \
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --fixtures"
         ;;
     *)
         echo "rig.sh atspi: unknown surface '${2:-}'" >&2

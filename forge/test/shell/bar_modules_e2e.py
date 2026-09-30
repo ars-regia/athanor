@@ -501,6 +501,74 @@ def audio(ctx):
 SECTIONS.append(audio)
 
 
+def battery(ctx):
+    app, Atspi, bus = ctx.app, ctx.Atspi, ctx.bus
+    logind_log = Path("/out") / f"{os.environ['RIG_TAG']}-logind.log"
+    profiles_path = "/org/freedesktop/UPower/PowerProfiles"
+
+    def radio(name):
+        found = labelled(app, Atspi, "radio button", name)
+        return found[0] if found else None
+
+    def checked(name):
+        found = radio(name)
+        return found is not None and found.get_state_set().contains(Atspi.StateType.CHECKED)
+
+    def brightness():
+        found = labelled(app, Atspi, "slider", "Screen brightness")
+        return found[0] if found else None
+
+    def display_device(state, percent, to_empty, to_full, present):
+        fx.call(
+            bus, fx.UPOWER, "/org/freedesktop/UPower", fx.MOCK, "SetupDisplayDevice", "(uuddddxxbsu)",
+            (2, state, percent, percent / 2, 50.0, 10.0, to_empty, to_full, present, "", 1),
+        )
+
+    check("the battery module shows", wait_for(lambda: buttons(app, Atspi, "Battery"), 10))
+    module = buttons(app, Atspi, "Battery")
+    check(
+        "the module describes the charge and the time left",
+        bool(module) and module[0].get_description() == "72 %, 3 h 25 min left",
+        module[0].get_description() if module else "",
+    )
+    check(
+        "the popover shows the charge",
+        open_popover(app, Atspi, "Battery", lambda: labelled(app, Atspi, "label", "3 h 25 min left")),
+    )
+    check("the active profile is Balanced", checked("Balanced"))
+    radio("Performance").do_action(0)
+    check(
+        "choosing Performance reaches the profiles daemon",
+        wait_for(lambda: property_of(bus, fx.PROFILES, profiles_path, fx.PROFILES, "ActiveProfile") == "performance", 5),
+    )
+    fx.call(
+        bus, fx.PROFILES, profiles_path, "org.freedesktop.DBus.Properties", "Set", "(ssv)",
+        (fx.PROFILES, "ActiveProfile", GLib.Variant("s", "power-saver")),
+    )
+    check("a profile chosen elsewhere is shown", wait_for(lambda: checked("Power saver"), 5))
+
+    check(
+        "the brightness slider shows the backlight's 60 %",
+        brightness() is not None and abs(brightness().get_current_value() - 60.0) < 1.0,
+    )
+    brightness().set_current_value(30.0)
+    check(
+        "the slider sets the brightness through logind",
+        wait_for(lambda: "SetBrightness backlight intel_backlight 300" in logind_log.read_text(encoding="utf-8"), 5),
+    )
+
+    display_device(1, 15.0, 0, 5400, True)
+    check("charging shows the time until full", wait_for(lambda: labelled(app, Atspi, "label", "1 h 30 min until full"), 5))
+    check("and the new charge", bool(labelled(app, Atspi, "label", "15 %")))
+    display_device(2, 72.0, 12300, 0, False)
+    check("without a present battery the module hides", wait_for(lambda: not buttons(app, Atspi, "Battery"), 5))
+    display_device(2, 72.0, 12300, 0, True)
+    check("the battery back, the module shows again", wait_for(lambda: buttons(app, Atspi, "Battery"), 5))
+
+
+SECTIONS.append(battery)
+
+
 def main():
     import gi
 

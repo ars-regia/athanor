@@ -163,6 +163,8 @@ jobs:
         run: bash forge/test/shell/rig.sh layer-guard bar
       - name: Accessibility tree of the bar
         run: bash forge/test/shell/rig.sh atspi bar
+      - name: Accessibility tree of the bar with every system module
+        run: bash forge/test/shell/rig.sh atspi bar-modules
       - name: Live layout, mandatory keys, running windows, the power menu and memory
         run: bash forge/test/shell/rig.sh bar-e2e
       - name: The network, Bluetooth, audio and battery modules against their fixtures

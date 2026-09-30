@@ -5,6 +5,7 @@
 
 mod accessibility;
 mod audio;
+mod battery;
 mod bluetooth;
 mod bus;
 mod clock;
@@ -244,6 +245,7 @@ fn build(module: Module, bar: &Rc<Bar>, connector: Option<&str>) -> Option<Box<d
         Module::Network => network::new(bar),
         Module::Bluetooth => bluetooth::new(bar),
         Module::Audio => audio::new(bar),
+        Module::Battery => battery::new(bar),
         // Later tasks of this plan, and the plans of 2b.3 to 2b.5.
         _ => None,
     }
