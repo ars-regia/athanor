@@ -160,6 +160,10 @@ impl Trust {
         shield::go_back_offered(&self.read.borrow())
     }
 
+    pub fn withdrawn(&self, request: Request) -> Refusal {
+        shield::withdrawn(&self.read.borrow(), request)
+    }
+
     pub fn refused(&self, refusal: Refusal) {
         self.refusal.set(Some(refusal));
         self.changed();
@@ -605,10 +609,7 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
                     request(&bar, wanted, origin.upcast_ref());
                 }
             } else {
-                bar.trust().refused(match wanted {
-                    Request::Apply => Refusal::NothingDownloaded,
-                    Request::GoBack => Refusal::NoPreviousVersion,
-                });
+                bar.trust().refused(bar.trust().withdrawn(wanted));
             }
         });
     }

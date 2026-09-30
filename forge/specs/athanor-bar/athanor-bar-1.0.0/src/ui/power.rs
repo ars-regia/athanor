@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use athanor_bar::order::Module;
 use athanor_bar::power::Action;
-use athanor_bar::shield::{Refusal, Request};
+use athanor_bar::shield::Request;
 use gtk4::glib;
 use gtk4::prelude::*;
 
@@ -196,7 +196,7 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
                 if bar.trust().restart_to_update_offered() {
                     super::shield::request(&bar, Request::Apply, origin.upcast_ref());
                 } else {
-                    bar.trust().refused(Refusal::NothingDownloaded);
+                    bar.trust().refused(bar.trust().withdrawn(Request::Apply));
                     bar.open_module_near(Module::Shield, Some(origin.upcast_ref()));
                 }
             }

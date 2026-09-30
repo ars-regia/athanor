@@ -126,6 +126,18 @@ pub enum Refusal {
     NoAnswer,
 }
 
+/// What a confirmation says when the state stopped offering `request` while it was open:
+/// the request's own refusal, unless the service no longer answers, which proves nothing
+/// about a download or a previous version.
+#[must_use]
+pub fn withdrawn(read: &Result<State, ReadError>, request: Request) -> Refusal {
+    match (read, request) {
+        (Err(ReadError::Io(_)), _) => Refusal::NoAnswer,
+        (_, Request::Apply) => Refusal::NothingDownloaded,
+        (_, Request::GoBack) => Refusal::NoPreviousVersion,
+    }
+}
+
 /// The refusal a failed call stands for, from its D-Bus error name (`None` for a local
 /// error). An `os.athanor.Update1.Error` this build does not know is a failure, not silence.
 #[must_use]
@@ -338,6 +350,16 @@ mod tests {
             Refusal::NoAnswer,
             "a local error, such as no system bus"
         );
+    }
+
+    #[test]
+    fn a_withdrawn_request_says_why_only_when_the_state_backs_it() {
+        assert_eq!(withdrawn(&Ok(verified()), Request::Apply), Refusal::NothingDownloaded);
+        assert_eq!(withdrawn(&Ok(verified()), Request::GoBack), Refusal::NoPreviousVersion);
+        assert_eq!(withdrawn(&Err(ReadError::Missing), Request::Apply), Refusal::NothingDownloaded);
+        let no_answer = Err(ReadError::Io(std::io::ErrorKind::NotConnected));
+        assert_eq!(withdrawn(&no_answer, Request::Apply), Refusal::NoAnswer);
+        assert_eq!(withdrawn(&no_answer, Request::GoBack), Refusal::NoAnswer);
     }
 
     #[test]
