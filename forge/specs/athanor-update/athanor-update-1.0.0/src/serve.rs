@@ -150,6 +150,14 @@ fn state_json(path: &Path, owner: u32) -> Result<String, Error> {
     serde_json::to_string(&state).map_err(|err| Error::Unreadable(err.to_string()))
 }
 
+impl Update1 {
+    /// `State()` on the file at `path` owned by `owner`: an activity, so the idle exit waits.
+    fn state_at(&self, path: &Path, owner: u32) -> Result<String, Error> {
+        let _in_flight = self.activity.enter();
+        state_json(path, owner)
+    }
+}
+
 #[interface(name = "os.athanor.Update1")]
 impl Update1 {
     async fn apply(&self, #[zbus(header)] header: Header<'_>, #[zbus(connection)] conn: &Connection) -> Result<(), Error> {
@@ -173,8 +181,7 @@ impl Update1 {
 
     /// The published trust state (UT7) as JSON, for readers that cannot check its owner.
     async fn state(&self) -> Result<String, Error> {
-        let _in_flight = self.activity.enter();
-        state_json(Path::new(athanor_trust_state::STATE_PATH), 0)
+        self.state_at(Path::new(athanor_trust_state::STATE_PATH), 0)
     }
 }
 
@@ -250,7 +257,7 @@ mod tests {
     }
 
     #[test]
-    fn a_state_call_leaves_the_service_idle_afterwards() {
+    fn an_activity_is_busy_until_its_call_ends() {
         let activity = Arc::new(Activity::default());
         let started = Instant::now();
         {
@@ -258,5 +265,16 @@ mod tests {
             assert_eq!(activity.idle_for(started), None, "busy while the call runs");
         }
         assert!(activity.idle_for(started).is_some_and(|idle| idle < IDLE), "idle again, counted from the call");
+    }
+
+    #[test]
+    fn a_state_call_leaves_the_service_idle_afterwards() {
+        let (path, owner) = scratch("activity");
+        published(&path);
+        let service = Update1 { activity: Arc::new(Activity::default()) };
+        let long_ago = Instant::now().checked_sub(IDLE * 2).expect("the clock has run for two idle periods");
+        assert!(service.activity.idle_for(long_ago).is_some_and(|idle| idle >= IDLE), "idle before the call");
+        assert!(service.state_at(&path, owner).is_ok());
+        assert!(service.activity.idle_for(long_ago).is_some_and(|idle| idle < IDLE), "idle again, counted from the call");
     }
 }
