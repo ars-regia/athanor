@@ -120,7 +120,7 @@ start_session() {
         {
             guest_ssh cat "$GREETD_OWN"
             printf '\n[initial_session]\ncommand = "%s"\nuser = "%s"\n' "$SESSION_COMMAND" "$GUEST_USER"
-        } | guest_ssh "sudo cp --remove-destination /dev/stdin /etc/greetd/config.toml"
+        } | guest_ssh "sudo install -m 0644 /dev/stdin /etc/greetd/config.toml"
         restart_greetd_login
     fi
     wait_until 90 seat_session || fail "greetd's initial_session left no session of $GUEST_USER on seat0"
