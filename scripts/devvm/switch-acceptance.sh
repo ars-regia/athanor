@@ -6,7 +6,8 @@
 #
 # Stages, in the default order: packages owners presets activation launcher leftovers
 # presets-live rollback notifier. Two more run only when named: orca (Orca reads the
-# shield sheet; needs SHIELD_HEADING) and hardware (interactive, --here only). launcher,
+# shield; clicks it through a uinput pointer, as root) and hardware (interactive, --here
+# only). launcher,
 # rollback and notifier need the VM: launcher presses keys through QEMU's monitor, rollback
 # reboots twice, and notifier leaves the guest on the update-trust acceptance images, so it
 # runs last; local-image.sh --push-to-vm puts the guest back on the switched image.
@@ -26,8 +27,9 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$HERE/acceptance/lib.sh"
 
 SHOTS=$ROOT/.scratch/switch-acceptance
-# The heading of 2b.5's shield sheet (ui/shield.rs, English locale), which Orca must speak.
-SHIELD_HEADING=${SHIELD_HEADING:-}
+# The shield's badge titles (2b.5, ui/shield.rs, English locale): the button's accessible
+# name and the sheet's heading, whichever state the image is in. Orca must speak one.
+SHIELD_NAMES="System image verified|Not verified yet|Update refused"
 DEFAULT_STAGES=(packages owners presets activation launcher leftovers presets-live rollback notifier)
 
 usage() { sed -n '2,/^set -euo pipefail$/{/^#/{s/^# \{0,1\}//;p}}' "${BASH_SOURCE[0]}"; }
@@ -305,17 +307,38 @@ stage_notifier() {
     pass "item 12: a downloaded update is offered once, not at each session start"
 }
 
-# Item 6: Orca speaks the shield sheet. Orca runs as a transient user unit, so it neither
-# holds the SSH session open nor needs a pattern kill to stop.
+# Item 6: Orca speaks the shield. Orca runs first, as a transient user unit, and the shield
+# opens from a real click: the bar's surface takes the keyboard only from one (on-demand
+# interactivity), and without the keyboard the sheet's focus reaches no assistive
+# technology. Orca flushes its debug file only when it exits, and its main loop never runs
+# the SIGTERM handler, so it quits through its own D-Bus service.
 stage_orca() {
-    [[ -n $SHIELD_HEADING ]] || fail "SHIELD_HEADING is unset: the shield sheet heading of 2b.5 (Task 13)"
     # shellcheck disable=SC2016 # expanded by the target's shell
-    local log='$XDG_RUNTIME_DIR/orca-switch.log'
-    in_session "systemctl --user set-environment ATHANOR_BAR_OPEN=shield && systemctl --user restart athanor-bar.service"
+    local log='$XDG_RUNTIME_DIR/orca-switch.log' spoken center output
+    in_session "rm -f $log; systemctl --user restart athanor-bar.service"
+    output=$(in_session wlr-randr --json | python3 -c '
+import json, sys
+outputs = [o for o in json.load(sys.stdin) if o["enabled"]]
+mode = [m for m in outputs[0]["modes"] if m["current"]][0] if len(outputs) == 1 else None
+if mode and outputs[0]["position"] == {"x": 0, "y": 0} and outputs[0]["scale"] == 1:
+    print(mode["width"], mode["height"])')
+    [[ -n $output ]] || fail "the click needs one output at 0,0 at scale 1: $(in_session wlr-randr)"
     in_session "systemd-run --user --quiet --collect --unit=switch-acceptance-orca orca --replace --debug-file=$log"
-    sleep 8
-    in_session "grep -qF '$SHIELD_HEADING' $log" || fail "Orca did not speak the shield sheet"
-    in_session "systemctl --user stop switch-acceptance-orca.service; systemctl --user unset-environment ATHANOR_BAR_OPEN && systemctl --user restart athanor-bar.service"
+    wait_until 30 in_session "busctl --user status org.gnome.Orca.Service > /dev/null" ||
+        fail "Orca did not take org.gnome.Orca.Service"
+    center=$(in_session python3 - center athanor-bar "\"$SHIELD_NAMES\"" < "$HERE/shield_probe.py") ||
+        fail "no showing shield named any of '$SHIELD_NAMES'"
+    # shellcheck disable=SC2086 # two numbers each
+    run "sudo python3 - $center $output" < "$HERE/pointer_click.py" > /dev/null
+    sleep 3
+    in_session "busctl --user call org.gnome.Orca.Service /org/gnome/Orca/Service org.gnome.Orca.Service Quit > /dev/null"
+    wait_until 10 in_session "! systemctl --user is-active --quiet switch-acceptance-orca.service" ||
+        fail "Orca did not quit"
+    spoken=$(in_session "grep -F 'SPEECH OUTPUT:' $log")
+    shot orca
+    in_session "systemctl --user restart athanor-bar.service"
+    grep -qE "SPEECH OUTPUT: '($SHIELD_NAMES)" <<< "$spoken" ||
+        fail "Orca did not speak the shield: $(cut -d"{" -f1 <<< "$spoken")"
     pass "item 6: Orca reads the shield"
 }
 

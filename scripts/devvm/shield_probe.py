@@ -5,6 +5,8 @@
                        action, as a click does; exits 1 when it never shows
     showing APP TEXT   exits 0 once a showing label or push button called TEXT exists
     hidden APP TEXT    exits 0 once no showing label or push button called TEXT exists
+    center APP NAME    prints "X Y", the middle of the showing push button called NAME in
+                       its window's coordinates; exits 1 when it never shows
 
 NAME and TEXT may list several names separated by "|"; any of them matches. Each command
 waits up to 10 s for its condition, in APP's accessibility tree.
@@ -63,6 +65,12 @@ def main():
                 if found is not None:
                     found.do_action(0)
                     print(f"pressed {name}")
+                    return 0
+            elif command == "center":
+                found = find(app, names, {Atspi.Role.PUSH_BUTTON})
+                if found is not None:
+                    box = found.get_extents(Atspi.CoordType.WINDOW)
+                    print(box.x + box.width // 2, box.y + box.height // 2)
                     return 0
             elif command == "showing":
                 if find(app, names, ROLES) is not None:
