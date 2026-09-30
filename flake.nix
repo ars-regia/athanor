@@ -29,7 +29,7 @@
         # Toolset POSIX di base incluso: rpmbuild, %autosetup e i Makefile upstream
         # danno per scontati grep, diff, patch, gzip, file, which, m4, gettext.
         build-tools = with pkgs; [ rpm cpio createrepo_c buildah skopeo jq git gnutar xz curl wget rsync flex bison bc zstd checkpolicy perl pkg-config autoconf automake libtool util-linux gnugrep diffutils patch which file gzip bzip2 unzip m4 gettext python3 go ];
-        system-deps = with pkgs; [ zlib openssl policycoreutils spdlog systemd nodejs_22 nlohmann_json fmt speechd gnupg ipxe ncurses iproute2 fio gtk4 pango cairo gtk4-layer-shell glib pkg-config ];
+        system-deps = with pkgs; [ zlib openssl policycoreutils spdlog systemd nodejs_22 nlohmann_json fmt speechd gnupg ipxe ncurses iproute2 fio gtk4 pango cairo gtk4-layer-shell glib libpulseaudio pkg-config ];
         # Header e .pc delle librerie di sistema, cioè i -devel di Fedora: in nixpkgs
         # stanno nei dev output. closePropagation segue propagatedBuildInputs come fa
         # stdenv, così le catene Requires dei .pc (gtk4 → pango → harfbuzz → …) sono
@@ -44,7 +44,8 @@
           }) { };
         system-libs = with pkgs; [
           zlib openssl curl spdlog systemd fmt speechd ncurses
-          gtk4 pango cairo graphene gdk-pixbuf gtk4-layer-shell glib
+          # libpulseaudio: athanor-bar audio (libpulse-binding) links libpulse-mainloop-glib.so.0 by soname
+          gtk4 pango cairo graphene gdk-pixbuf gtk4-layer-shell glib libpulseaudio
           # compositor niri (smithay): wayland, gbm/drm/egl, xkbcommon, libseat, libinput, pipewire, libdisplay-info
           wayland wayland-protocols libgbm libdrm libglvnd libxkbcommon seatd libinput pipewire libdisplay-info-target
         ];
