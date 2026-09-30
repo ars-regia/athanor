@@ -16,7 +16,8 @@
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# pass, die, guest_ssh, boot_id, reboot_guest, point_stable, expect_until, REPO.
+# pass, die, guest_ssh, boot_id, reboot_guest, point_stable, expect_until, trust_tag,
+# restore_policy, REPO, ACC_STATE.
 # shellcheck source-path=SCRIPTDIR
 source "$HERE/acceptance/lib.sh"
 
@@ -181,11 +182,14 @@ stage_rollback() {
     guest_ssh sudo bootc rollback
     reboot_guest
     guest_ssh rpm -q --quiet cosmic-panel || fail "bootc rollback did not bring back the pre-switch deployment"
-    pass "bootc rollback returns to the pre-switch image"
+    # Each deployment keeps its own /etc: neither may carry the trust of the switch.
+    restore_policy
+    pass "bootc rollback returns to the pre-switch image, its policy as rendered"
     guest_ssh sudo bootc rollback
     reboot_guest
     stage_packages
-    pass "bootc rollback returns to the switched image"
+    restore_policy
+    pass "bootc rollback returns to the switched image, its policy as rendered"
 }
 
 # Item 12: an update downloaded once is offered once, not again at each session start. The
@@ -199,7 +203,10 @@ stage_notifier() {
     ACC_BASE="$ACC_REGISTRY/athanor-system:$(cat "$ROOT/.scratch/local-image/tag")" \
     ACC_RPM_DIR="$ROOT/.scratch/local-image/rpms" "$HERE/acceptance/images.sh"
     point_stable v1
-    guest_ssh sudo bootc switch --transport registry "$REPO:v1"
+    # The switched image trusts the project key for this repository; v1 is signed with acc-1.
+    trust_tag v1 "$ACC_STATE/keys/acc-1.pub"
+    guest_ssh sudo bootc switch --enforce-container-sigpolicy --transport registry "$REPO:v1"
+    restore_policy
     reboot_guest
     wait_until 600 guest_ssh test -e /var/lib/athanor-update/migrated || fail "the migration did not complete"
     reboot_guest
@@ -243,7 +250,11 @@ stage_hardware() {
     pass "item 15: Wi-Fi with a password and Bluetooth with a PIN on real hardware"
 }
 
-if [[ $target == vm ]]; then wait_ssh; fi
+if [[ $target == vm ]]; then
+    wait_ssh
+    # A failed stage must not leave the trust of a switch behind (acceptance/lib.sh).
+    trap restore_policy EXIT
+fi
 for stage in "${stages[@]}"; do
     "stage_${stage//-/_}"
 done

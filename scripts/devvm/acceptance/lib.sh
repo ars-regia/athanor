@@ -73,6 +73,30 @@ marker() { guest_ssh cat /usr/share/athanor-acceptance-marker; }
 check_now() { guest_ssh sudo systemctl start athanor-update-check.service; }
 point_stable() { skopeo copy --src-tls-verify=false --dest-tls-verify=false "docker://$REPO:$1" "docker://$REPO:stable" > /dev/null; }
 
+# One tag trusted for one pull: the policy the guest runs, plus a sigstoreSigned scope for
+# REPO:TAG with KEY, and a registries.d entry for the same tag. A tag scope is more specific
+# than the repository scope of the rendered policy, which would otherwise decide, so every
+# other scope reads as rendered; and two registries.d files declaring one scope are a hard
+# error, so the entry names the tag too. The signature stays required. restore_policy takes
+# it all back: call it before the reboot, since ostree merges /etc into the staged
+# deployment on the way down, and again from the EXIT trap.
+RENDERED_POLICY=/usr/share/athanor/containers/policy.json
+ACC_TRUST_KEY=/etc/containers/athanor-acceptance-trust.pub
+ACC_TRUST_YAML=/etc/containers/registries.d/50-athanor-acceptance-trust.yaml
+trust_tag() { # trust_tag TAG KEY
+  guest_ssh "sudo tee $ACC_TRUST_KEY > /dev/null" < "$2"
+  guest_ssh cat "$RENDERED_POLICY" |
+    jq --arg scope "$REPO:$1" --arg key "$ACC_TRUST_KEY" \
+      '.transports.docker[$scope] = [{type: "sigstoreSigned", keyPath: $key, signedIdentity: {type: "matchRepository"}}]' |
+    guest_ssh "sudo cp --remove-destination /dev/stdin /etc/containers/policy.json"
+  printf 'docker:\n  %s:\n    use-sigstore-attachments: true\n' "$REPO:$1" | guest_ssh "sudo tee $ACC_TRUST_YAML > /dev/null"
+}
+restore_policy() {
+  guest_ssh "sudo ln -sfn $RENDERED_POLICY /etc/containers/policy.json && sudo rm -f $ACC_TRUST_KEY $ACC_TRUST_YAML"
+  [[ $(guest_ssh readlink /etc/containers/policy.json) == "$RENDERED_POLICY" ]] || die "FAIL  the policy link was not restored"
+  guest_ssh "test ! -e $ACC_TRUST_KEY && test ! -e $ACC_TRUST_YAML" || die "FAIL  the acceptance trust was left on the guest"
+}
+
 pass() { echo "PASS  $*"; }
 expect() { # expect DESCRIPTION JQ-FILTER VALUE
   local got
