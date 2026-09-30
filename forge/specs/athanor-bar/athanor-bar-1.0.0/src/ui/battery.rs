@@ -14,7 +14,7 @@ use gtk4::prelude::*;
 use gtk4::{gio, glib};
 
 use super::bus::{self, Mirror, Source};
-use super::popup::Popup;
+use super::popup::{expose_choose_action, Popup};
 use super::{Bar, Changed, ModuleUi};
 use crate::i18n::{tr, tr_with};
 
@@ -223,23 +223,6 @@ fn note(battery: &Battery) -> Option<String> {
         (Charge::Full, _) => Some(tr("Fully charged")),
         (Charge::Discharging | Charge::Unknown, _) => None,
     }
-}
-
-/// GTK 4.20 gives a check button no AT-SPI action: its accessible lists only the widget's own
-/// parameterless actions. Without one, an assistive technology that acts through AT-SPI
-/// (voice control, switch access, the rig) cannot choose a radio item. `profile.choose`
-/// selects this item, as a click would.
-fn expose_choose_action(button: &gtk4::CheckButton) {
-    let choose = gio::SimpleAction::new("choose", None);
-    let weak = button.downgrade();
-    choose.connect_activate(move |_, _| {
-        if let Some(button) = weak.upgrade() {
-            button.set_active(true);
-        }
-    });
-    let group = gio::SimpleActionGroup::new();
-    group.add_action(&choose);
-    button.insert_action_group("profile", Some(&group));
 }
 
 fn profile_label(profile: &str) -> String {

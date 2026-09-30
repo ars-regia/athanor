@@ -134,3 +134,20 @@ pub fn towards_inside(bar: &Bar) -> gtk4::PositionType {
         PanelEdge::Bottom => gtk4::PositionType::Top,
     }
 }
+
+/// GTK 4.20 gives a check button no AT-SPI action: its accessible lists only the widget's own
+/// parameterless actions. Without one, an assistive technology that acts through AT-SPI
+/// (voice control, switch access, the rig) cannot choose a radio item. `radio.choose`
+/// selects this item, as a click would, so its `toggled` handler runs.
+pub fn expose_choose_action(button: &gtk4::CheckButton) {
+    let choose = gtk4::gio::SimpleAction::new("choose", None);
+    let weak = button.downgrade();
+    choose.connect_activate(move |_, _| {
+        if let Some(button) = weak.upgrade() {
+            button.set_active(true);
+        }
+    });
+    let group = gtk4::gio::SimpleActionGroup::new();
+    group.add_action(&choose);
+    button.insert_action_group("radio", Some(&group));
+}
