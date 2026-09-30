@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """bar_session.py [--client NAME] [--hang METHOD] [--window] [--pinnable] [--notifications] [--tray]
-[--respawn] [--fixtures] [--trust-state NAME] - athanor-bar in the rig, as its unit runs it: a private system bus with a
+[--respawn] [--fixtures [--discovering]] [--trust-state NAME] - athanor-bar in the rig, as its unit runs it: a private system bus with a
 fake logind on it, NOTIFY_SOCKET for Type=notify, and with --window one test window for the running
 applications. --pinnable installs a desktop entry for the test window's app id, so the bar offers to
 pin it. It is scene.sh's client and exits with the bar's status.
@@ -34,6 +34,7 @@ registered. --respawn starts the bar again when it is killed with SIGKILL, and r
 and the power profiles on the private system bus, PipeWire, an MPRIS player, a backlight)
 and points the bar at the fake backlight. Session.SetBrightness is logged like the other
 acting calls, "SetBrightness backlight intel_backlight 300", and writes the fake sysfs file.
+--discovering, with --fixtures, starts the Bluetooth adapter already discovering.
 
 It is a small Gio service, not python3-dbusmock: dbusmock replies to each call from the
 method's code, and the power menu must also meet a logind that never replies.
@@ -245,6 +246,7 @@ def parse(argv):
     parser.add_argument("--respawn", action="store_true")
     parser.add_argument("--fixtures", action="store_true")
     parser.add_argument("--trust-state", metavar="NAME", default="verified", choices=trust_state.NAMES)
+    parser.add_argument("--discovering", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -309,7 +311,11 @@ def main():
     session = Gio.bus_get_sync(Gio.BusType.SESSION, None)
     # The services exist before the bar starts, as they do at login. The loop at the end
     # of main terminates them with the other helpers.
-    helpers = system_fixtures.start(os.environ.get("RIG_TAG", "bar")) if args.fixtures else []
+    helpers = (
+        system_fixtures.start(os.environ.get("RIG_TAG", "bar"), args.discovering)
+        if args.fixtures
+        else []
+    )
     if args.notifications:
         helpers.append(subprocess.Popen(["python3", f"{HERE}/fake_notifications.py"]))
         wait_until(

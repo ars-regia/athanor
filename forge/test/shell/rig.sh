@@ -208,7 +208,9 @@ capture_bar() { # capture_bar <surface>
         ;;
     # The system modules against the fixtures, which start before the bar: a longer settle.
     bar-network) open=network settle=12 session+=(--fixtures) ;;
-    bar-bluetooth) open=bluetooth settle=12 session+=(--fixtures) ;;
+    # The adapter already discovers, so the popover opens at its final size: cosmic-comp
+    # at a fractional scale leaves the edge column of a popover drawn before it grew.
+    bar-bluetooth) open=bluetooth settle=12 session+=(--fixtures --discovering) ;;
     bar-audio) open=audio settle=12 session+=(--fixtures) ;;
     bar-battery) open=battery settle=12 session+=(--fixtures) ;;
     # The shield's sheet above a bottom panel (item 13's third condition), with a downloaded
