@@ -503,7 +503,11 @@ impl ShieldUi {
 }
 
 pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
-    let seal = gtk4::Image::from_icon_name(shield::icon(bar.trust().badge()));
+    // The button carries the name; the seal inside it is decoration, as in the sheet.
+    let seal = gtk4::Image::builder()
+        .icon_name(shield::icon(bar.trust().badge()))
+        .accessible_role(gtk4::AccessibleRole::Presentation)
+        .build();
     seal.add_css_class("athanor-seal");
     let popup = Popup::new(bar, &seal, &header(bar.trust().badge()));
 
