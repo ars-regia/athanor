@@ -75,15 +75,22 @@ now() { in_session date +%s; }
 last_applied() { # last_applied UNIT SINCE
     in_session "journalctl --user -u $1 --since @$2 -g 'layout applied' -o cat --no-pager | tail -n 1"
 }
-# Both surfaces last logged LAYOUT, the Debug form of athanor_layout::Layout.
-is_applied() { # is_applied SINCE LAYOUT
+# The layout UNIT has in force: each surface logs its layout at start and at each change
+# only, so the last one it logged this boot. A document that changes nothing logs nothing.
+in_force() { # in_force UNIT
+    in_session "journalctl --user -u $1 -b -g 'layout applied' -o cat --no-pager | tail -n 1"
+}
+# Both surfaces have LAYOUT in force, the Debug form of athanor_layout::Layout.
+is_applied() { # is_applied LAYOUT
     local surface
     for surface in "${SURFACES[@]}"; do
-        [[ $(last_applied "$surface" "$1") == *"Layout { $2 }"* ]] || return 1
+        [[ $(in_force "$surface") == *"Layout { $1 }"* ]] || return 1
     done
 }
-applied() { # applied SECONDS SINCE LAYOUT : waits for both surfaces, or fails the stage
-    wait_until "$1" is_applied "$2" "$3" ||
+# Waits for both surfaces to have LAYOUT in force, or fails the stage with what each logged
+# since SINCE, when the document was written.
+applied() { # applied SECONDS SINCE LAYOUT
+    wait_until "$1" is_applied "$3" ||
         fail "want Layout { $3 }; athanor-bar: $(last_applied athanor-bar "$2"); athanor-dock: $(last_applied athanor-dock "$2")"
 }
 FLOAT='preset: Float, panel: Top, dock: Visible'
@@ -252,7 +259,8 @@ stage_degrade() {
 }
 
 stage_mandatory-mid-session() {
-    guest_ssh 'sudo find /etc/athanor -maxdepth 1 -name layout -exec rm -r {} +'
+    # An image ships no /etc/athanor: only a run cut short leaves the layout directory.
+    guest_ssh '[ ! -d /etc/athanor/layout ] || sudo rm -r /etc/athanor/layout'
     local since
     since=$(now)
     document preset=float panel=top
