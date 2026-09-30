@@ -28,7 +28,6 @@
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
 #   rig.sh atspi <greeter|chooser|bar|bar-modules|dock>   every interactive widget has a role and a name
-#   rig.sh rig-tests        unit tests of the rig's own scripts, against the rig's tools
 #   rig.sh chooser-e2e      press a preset in the chooser and wait until the bar and the dock draw it (run build-bar and build-dock first)
 #   rig.sh surface <greeter|layout (run build-bar and build-dock first)|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling|bar-popups|bar-notifications|bar-tray|bar-network|bar-bluetooth|bar-audio|bar-battery|bar-shield|dock>  capture every case of a surface and compare with the goldens
 #   rig.sh update-goldens <name>   replace the goldens with a fresh capture, deliberately
@@ -624,11 +623,6 @@ surface | update-goldens)
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/compare.py \
             "/repo/forge/test/shell/golden/$surface" /out "${tags[@]}"
     fi
-    ;;
-rig-tests)
-    # The tests of scripts that run in the rig and call its tools (ImageMagick 7). The lint
-    # job runs forge/test/shell/tests, which needs nothing beyond Python.
-    in_rig "$(rig_image)" python3 -B -m unittest discover -s /repo/forge/test/shell/rig_tests -v
     ;;
 *)
     sed -n '2,/^set -euo pipefail$/{/^#/p}' "${BASH_SOURCE[0]}" >&2

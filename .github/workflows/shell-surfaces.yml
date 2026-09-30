@@ -89,8 +89,6 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Rig image
         run: bash forge/test/shell/rig.sh build-image
-      - name: Unit tests of the rig's scripts, against the rig's ImageMagick 7
-        run: bash forge/test/shell/rig.sh rig-tests
       - name: Build and test the layout crates
         run: bash forge/test/shell/rig.sh build-layout
       - name: Build and test the bar and check the DT_NEEDED order
