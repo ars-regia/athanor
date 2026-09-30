@@ -12,10 +12,18 @@
                                              package in the repository metadata
   lock.py verify open|legacy --version V     compare locks/<branch>.lock, which must be at V, with
                                              the repository metadata, without downloading RPMs
+  lock.py mirrored open|legacy               print the mirror reference of locks/<branch>.lock and
+                                             exit 0 if the mirror holds every locked RPM
+
+The mirror (doc_system_image.md, S7) is the OCI repository $KERNEL_REGISTRY/athanor-nvidia-rpms
+(default ghcr.io/<owner>): mirror.sh pushes each locked RPM as a blob, so its digest is the
+SHA-256 the lock records and the lock is the mirror's index. fetch takes each RPM from the
+mirror, anonymously, and from the lock's URL when the mirror lacks it: the vendor repositories
+keep only the newest builds, so a lock outlives their files.
 
 Exit codes: 0 success, 3 the requested version is not published, 4 (verify) the repository
-publishes V with other files or checksums than the lock, 1 any other error (network,
-metadata, lock file), 2 usage.
+publishes V with other files or checksums than the lock, 5 (mirrored) the mirror lacks a locked
+RPM, 1 any other error (network, metadata, lock file), 2 usage.
 
 GPG signatures are verified by build-rpms.sh with rpmkeys and the keys in keys/: the lock
 covers what the unsigned repository metadata of negativo17 cannot.
@@ -25,8 +33,13 @@ import argparse
 import functools
 import gzip
 import hashlib
+import json
+import os
 import pathlib
+import re
 import sys
+import urllib.error
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 import xml.parsers.expat
@@ -38,6 +51,8 @@ REPO = "{http://linux.duke.edu/metadata/repo}"
 ARCHES = ("x86_64", "noarch")
 NOT_PUBLISHED = 3
 STALE = 4
+NOT_MIRRORED = 5
+MIRROR = "athanor-nvidia-rpms"
 BRANCHES = {
     "open": {
         "primary": "nvidia-driver",
@@ -73,6 +88,81 @@ class NotPublished(LockError):
 def http_get(url):
     with urllib.request.urlopen(url, timeout=120) as response:
         return response.read()
+
+
+def mirror_repository():
+    """<registry>/athanor-nvidia-rpms, the registry resolved as system/kernel-artifacts.sh does."""
+    owner = os.environ.get("GITHUB_REPOSITORY_OWNER", "hr-mes").lower()
+    return f"{os.environ.get('KERNEL_REGISTRY') or f'ghcr.io/{owner}'}/{MIRROR}"
+
+
+def mirror_tag(branch, version, lock_path):
+    """One tag per lock content: a relock never retags the blobs an older lock still names."""
+    return f"{branch}-{version}-{hashlib.sha256(lock_path.read_bytes()).hexdigest()[:12]}"
+
+
+def bearer_challenge(header):
+    """The token URL of a `WWW-Authenticate: Bearer realm=...,service=...,scope=...` challenge."""
+    params = dict(re.findall(r'(\w+)="([^"]*)"', header or ""))
+    if not header or not header.lower().startswith("bearer ") or "realm" not in params:
+        raise LockError(f"unsupported registry authentication challenge: {header!r}")
+    realm = params.pop("realm")
+    return realm + ("&" if "?" in realm else "?") + urllib.parse.urlencode(params)
+
+
+class Mirror:
+    """Anonymous reads of the OCI mirror by digest (OCI distribution spec): the token comes from
+    the registry's own Bearer challenge, so any registry that allows anonymous pulls works."""
+
+    def __init__(self, repository):
+        self.host, _, self.name = repository.partition("/")
+        self.token = None
+
+    def _open(self, sha, method):
+        url = f"https://{self.host}/v2/{self.name}/blobs/sha256:{sha}"
+        for attempt in (1, 2):
+            request = urllib.request.Request(url, method=method)
+            if self.token:
+                # Unredirected: the blob redirects to a CDN URL that must not see the token.
+                request.add_unredirected_header("Authorization", f"Bearer {self.token}")
+            try:
+                return urllib.request.urlopen(request, timeout=120)
+            except urllib.error.HTTPError as error:
+                if error.code != 401 or attempt == 2:
+                    raise
+                with urllib.request.urlopen(bearer_challenge(error.headers.get("WWW-Authenticate")), timeout=60) as reply:
+                    body = json.load(reply)
+                self.token = body.get("token") or body.get("access_token")
+                if not self.token:
+                    raise LockError(f"{self.host}: the token endpoint returned no token")
+        raise AssertionError("unreachable")
+
+    def has(self, sha):
+        try:
+            with self._open(sha, "HEAD"):
+                return True
+        except urllib.error.HTTPError as error:
+            # 403: ghcr's answer for a repository that is private or does not exist yet.
+            if error.code in (403, 404):
+                return False
+            raise
+
+    def get(self, sha):
+        with self._open(sha, "GET") as response:
+            return response.read()
+
+
+def from_mirror(mirror, sha, name):
+    """The RPM's bytes from the mirror, or None when the mirror cannot give the locked ones."""
+    try:
+        data = mirror.get(sha)
+    except (LockError, OSError) as error:
+        print(f"lock.py: {name}: not in the mirror ({error}), using the lock's URL", file=sys.stderr)
+        return None
+    if hashlib.sha256(data).hexdigest() != sha:
+        print(f"lock.py: {name}: the mirror returned other bytes, using the lock's URL", file=sys.stderr)
+        return None
+    return data
 
 
 def parse_xml(data):
@@ -300,9 +390,9 @@ def load_lock(locks, branch):
     return path, version, entries
 
 
-def main(argv=None, download=http_get):
+def main(argv=None, download=http_get, mirror=None):
     parser = argparse.ArgumentParser(description="Locks for the third-party NVIDIA RPMs.")
-    parser.add_argument("command", choices=("generate", "fetch", "check", "latest", "verify"))
+    parser.add_argument("command", choices=("generate", "fetch", "check", "latest", "verify", "mirrored"))
     parser.add_argument("branch", choices=sorted(BRANCHES))
     parser.add_argument("--version")
     parser.add_argument("--major")
@@ -342,16 +432,30 @@ def main(argv=None, download=http_get):
                 entries.append((sha, url))
             write_lock(args.locks / f"{args.branch}.lock", args.branch, args.version, base, entries)
             return 0
+        mirror = mirror or Mirror(mirror_repository())
+        if args.command == "mirrored":
+            path, version, entries = load_lock(args.locks, args.branch)
+            print(f"{mirror_repository()}:{mirror_tag(args.branch, version, path)}")
+            missing = [url.rsplit("/", 1)[1] for sha, url in entries if not mirror.has(sha)]
+            if missing:
+                print(f"lock.py: the mirror lacks {', '.join(missing)}", file=sys.stderr)
+                return NOT_MIRRORED
+            return 0
         if not args.out:
             raise LockError("fetch needs --out")
         _, version, entries = load_lock(args.locks, args.branch)
         args.out.mkdir(parents=True, exist_ok=True)
         for sha, url in entries:
-            data = download(url)
+            name = url.rsplit("/", 1)[1]
+            data = from_mirror(mirror, sha, name)
+            source = "the mirror"
+            if data is None:
+                data, source = download(url), url
             got = hashlib.sha256(data).hexdigest()
             if got != sha:
                 raise LockError(f"{url}: SHA-256 {got}, locked {sha}")
-            (args.out / url.rsplit("/", 1)[1]).write_bytes(data)
+            (args.out / name).write_bytes(data)
+            print(f"lock.py: {name} from {source}", file=sys.stderr)
         print(version)
         return 0
     except NotPublished as error:
