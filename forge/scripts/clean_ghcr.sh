@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Janitor of the container packages on ghcr. Three kinds of package:
+# Janitor of the container packages on ghcr. Four kinds of package:
 #   - the kernel packages (azoth*) are excluded: their only pruner is
 #     forge/specs/azoth/retention.sh (docs/architecture/doc_build_ordering.md, O6);
 #   - the system images (athanor-system*) keep what a machine can still use
@@ -10,6 +10,7 @@
 #     .sbom, and the untagged members of the cosign 3 index at sha256-<hex>. cosign 3 and
 #     containers/image write the signatures of one digest to two different tags, and a
 #     signature is never deleted while its digest is kept. Ninety days is an interim number;
+#   - athanor-nvidia-rpms, the mirror the NVIDIA locks index, is never pruned;
 #   - every other package keeps its two newest tagged versions and every version tagged
 #     latest, main or stable; the other tagged versions and the untagged ones are deleted.
 # Usage: clean_ghcr.sh OWNER. Needs gh with read:packages and delete:packages, and for the
@@ -64,6 +65,9 @@ while IFS= read -r package; do
   [[ -n $package ]] || continue
   case $package in
     azoth*) echo "${package}: pruned by forge/specs/azoth/retention.sh, skipped"; continue ;;
+    # ponytail: never pruned, about 650 MB per relock; prune the tags no lock in git history
+    # names if the package ever grows too large.
+    athanor-nvidia-rpms) echo "${package}: the NVIDIA locks name its blobs, skipped"; continue ;;
   esac
   encoded=$(jq -rn --arg name "$package" '$name | @uri')
   api="/users/${OWNER}/packages/container/${encoded}/versions"

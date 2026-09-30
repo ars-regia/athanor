@@ -17,8 +17,9 @@ FROM ${KERNEL_REGISTRY}/azoth-nvidia@${NVIDIA_LEGACY_DIGEST} AS nvidia-modules-l
 
 # The vendor RPMs of both NVIDIA branches, verified by hash and GPG, with the shim and the
 # configuration package (system/nvidia/build-rpms.sh). A throwaway stage: rpm-build never
-# reaches an image.
+# reaches an image. KERNEL_REGISTRY locates the mirror of the locked RPMs (lock.py).
 FROM registry.fedoraproject.org/fedora:43@sha256:4d9424ff89c5e182c782d0419bf41b6e71d55f30d586ae3c60c837a52ae39c64 AS nvidia-rpms
+ARG KERNEL_REGISTRY
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 COPY forge/specs/azoth/pins.env /src/forge/specs/azoth/pins.env
 COPY system/nvidia/ /src/system/nvidia/

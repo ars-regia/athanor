@@ -48,6 +48,8 @@ SURFACES = {
             "bar-tray",
         )
     },
+    # doc_bar.md, BR9: the dock (2c), vertical beside a bottom panel.
+    "dock": {"variants": ("light", "dark"), "scales": ("1.0", "1.5")},
 }
 
 # SH7: factory knobs per preset; "-" is "no dock knob" (the bar).

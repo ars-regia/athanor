@@ -12,6 +12,7 @@ import glob
 import re
 import json
 import hashlib
+import tomllib
 from collections import defaultdict, deque
 
 try:
@@ -47,6 +48,78 @@ def compute_dir_hash(dir_path):
             except OSError:
                 pass
     return hasher.hexdigest()[:16]
+
+def workspace_path(manifest, name):
+    """The directory a `name = { workspace = true }` dependency of manifest points at, when
+    the nearest enclosing workspace declares it with a path, else None."""
+    directory = os.path.dirname(os.path.realpath(manifest))
+    while True:
+        candidate = os.path.join(directory, "Cargo.toml")
+        if os.path.isfile(candidate):
+            with open(candidate, "rb") as f:
+                workspace = tomllib.load(f).get("workspace")
+            if workspace is not None:
+                dep = workspace.get("dependencies", {}).get(name)
+                if isinstance(dep, dict) and "path" in dep:
+                    return os.path.realpath(os.path.join(directory, dep["path"]))
+                return None
+        parent = os.path.dirname(directory)
+        if parent == directory:
+            return None
+        directory = parent
+
+
+def path_dependencies(spec_dir):
+    """The directories of the Cargo path dependencies that the crates under spec_dir reach
+    outside it, followed transitively, sorted, including those inherited from a workspace.
+    The package builds from their sources too."""
+    spec_root = os.path.realpath(spec_dir)
+    pending = []
+    for root, dirs, files in os.walk(spec_dir):
+        dirs[:] = sorted(d for d in dirs if d != "target" and not d.startswith("."))
+        if "Cargo.toml" in files:
+            pending.append(os.path.join(root, "Cargo.toml"))
+    found = set()
+    while pending:
+        manifest = pending.pop()
+        with open(manifest, "rb") as f:
+            data = tomllib.load(f)
+        tables = [data, *data.get("target", {}).values()]
+        for table in tables:
+            for kind in ("dependencies", "build-dependencies", "dev-dependencies"):
+                for name, dep in table.get(kind, {}).items():
+                    if not isinstance(dep, dict):
+                        continue
+                    if "path" in dep:
+                        target = os.path.realpath(os.path.join(os.path.dirname(manifest), dep["path"]))
+                    elif dep.get("workspace") is True:
+                        target = workspace_path(manifest, name)
+                        if target is None:
+                            continue
+                    else:
+                        continue
+                    inside = target == spec_root or target.startswith(spec_root + os.sep)
+                    if inside or target in found:
+                        continue
+                    found.add(target)
+                    pending.append(os.path.join(target, "Cargo.toml"))
+    return sorted(found)
+
+
+def package_hash(spec_dir):
+    """The hash of a custom package: its spec directory and, when its crates have path
+    dependencies outside it, each of those directories, named relative to spec_dir. A
+    package without any keeps the plain directory hash."""
+    dependencies = path_dependencies(spec_dir)
+    if not dependencies:
+        return compute_dir_hash(spec_dir)
+    hasher = hashlib.sha256(compute_dir_hash(spec_dir).encode())
+    spec_root = os.path.realpath(spec_dir)
+    for dependency in dependencies:
+        hasher.update(os.path.relpath(dependency, spec_root).encode())
+        hasher.update(compute_dir_hash(dependency).encode())
+    return hasher.hexdigest()[:16]
+
 
 def parse_spec_dependencies(spec_path):
     """Extracts BuildRequires and Requires from a .spec file."""
@@ -146,7 +219,7 @@ def build_dag(manifest):
             spec_dir = os.path.join(SPECS_DIR, pkg)
         spec_files = glob.glob(os.path.join(spec_dir, "*.spec"))
         
-        hash_val = compute_dir_hash(spec_dir)
+        hash_val = package_hash(spec_dir)
         node_hashes[pkg] = hash_val
         
         if spec_files:
