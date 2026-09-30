@@ -121,10 +121,23 @@ start_session() {
             guest_ssh cat "$GREETD_OWN"
             printf '\n[initial_session]\ncommand = "%s"\nuser = "%s"\n' "$SESSION_COMMAND" "$GUEST_USER"
         } | guest_ssh "sudo cp --remove-destination /dev/stdin /etc/greetd/config.toml"
-        guest_ssh sudo systemctl restart greetd
+        restart_greetd_login
     fi
     wait_until 90 seat_session || fail "greetd's initial_session left no session of $GUEST_USER on seat0"
     wait_until 60 in_session "systemctl --user is-active --quiet athanor-bar.service" || fail "athanor-bar.service is not active in the session"
+}
+# greetd runs initial_session only on its first start after boot: that start creates the
+# runfile, and every later start skips initial_session while the file exists (greetd(5),
+# runfile). A restart meant to log the user in removes it first. The path is the config's
+# [general] runfile, or greetd's default.
+restart_greetd_login() {
+    local runfile
+    runfile=$(guest_ssh cat /etc/greetd/config.toml |
+        awk -F '"' '/^[[:space:]]*\[/ { general = ($0 ~ /^[[:space:]]*\[general\]/) }
+            general && /^[[:space:]]*runfile[[:space:]]*=/ { print $2 }')
+    runfile=${runfile:-/run/greetd.run}
+    [[ $runfile =~ ^/[A-Za-z0-9._/-]+$ ]] || fail "greetd's runfile is not a plain absolute path: '$runfile'"
+    guest_ssh "sudo rm -f $runfile && sudo systemctl restart greetd"
 }
 restore_greetd() {
     guest_ssh sudo ln -sfn "$GREETD_OWN" /etc/greetd/config.toml
@@ -271,8 +284,8 @@ stage_notifier() {
     point_stable v2
     expect_until "12: v2 downloaded" .update downloaded 20
     wait_until 120 offered_once || fail "the downloaded update was never offered"
-    for session in 2 3; do # the acceptance images' initial_session logs the user in on each start
-        guest_ssh sudo systemctl restart greetd
+    for session in 2 3; do # initial_session logs the user in again: restart_greetd_login drops the runfile
+        restart_greetd_login
         wait_until 60 in_session "systemctl --user is-active --quiet athanor-update-notify.service" || fail "session $session did not start"
         sleep 70 # two poll periods of the notifier (POLL = 30 s)
         offered_once || fail "session $session offered the announced update again"
