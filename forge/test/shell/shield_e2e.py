@@ -179,6 +179,19 @@ def main():
             5,
         ),
     )
+
+    # The polkit agent takes the focus, which closes the sheet before a refusal of Go back
+    # arrives: the refusal opens the sheet again to say it.
+    REFUSE_FILE.write_text("NotAuthorized 3\n", encoding="utf-8")
+    check("the sheet closes before Go back", toggle_sheet(app, Atspi, False))
+    check("and opens for it", toggle_sheet(app, Atspi, True))
+    press(app, Atspi, "Go back to the previous version")
+    check("Go back is confirmed", confirm(app, Atspi, "Go back"))
+    check("the sheet closes while polkit would ask", toggle_sheet(app, Atspi, False))
+    check(
+        "the refusal opens the sheet again and is said there",
+        wait_for(lambda: shows(app, Atspi, "Not authorised"), 6),
+    )
     REFUSE_FILE.unlink()
 
     # The file changes under an open confirmation (Review Focus 1).

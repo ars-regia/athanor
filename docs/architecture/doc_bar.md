@@ -111,7 +111,7 @@ Status: **revision 1, approved by the maintainer on 2026-09-25.** It is the spec
   3. Updates: the date of the last successful check and the update state. After a failed check, the error code in words and at most the host name.
   4. The policy: whether it is in force, and whether it is the shipped one or one changed on the machine.
   5. Secure Boot: on or off. When off, the row says the machine runs in the declared degraded mode of `doc_kernel_profile.md` D3; the badge does not move.
-  6. The actions "Restart to update" and "Go back to the previous version", which call `Apply()` and `GoBack()` of the system service (UT6), as SH11 defines them. Going back asks for the administrator's password through the polkit agent, cosmic-osd until stage 4.
+  6. The actions "Restart to update" and "Go back to the previous version", which call `Apply()` and `GoBack()` of the system service (UT6), as SH11 defines them. Going back asks for the administrator's password through the polkit agent, cosmic-osd until stage 4. A refusal of either action is said in the sheet, which opens again on the output whose shield or power menu made the request: the agent takes the focus, which closes the sheet before the answer comes.
 
   Every string from the file is set as plain text (SH12). The words "verified" and "refused" come only from our own translations.
 - **Dismissal.** The sheet closes on a click outside it, on the loss of focus and on Escape. It is the popover's autohide: the bar's surface uses on-demand keyboard interactivity, so the popover receives the grab.

@@ -247,10 +247,11 @@ async fn uid_of(system: &gio::DBusConnection, name: &str) -> Option<u32> {
 }
 
 /// Sends `request` to the update service on the system bus, with polkit allowed to ask.
-/// A refusal is shown in the sheet: when the request came from the power menu, the sheet
-/// opens on the first surface to show it.
-pub fn request(bar: &Rc<Bar>, request: Request, from_sheet: bool) {
+/// A refusal is shown in the sheet, opened on the surface of `origin`, the button whose menu
+/// made the request: the polkit agent takes the focus, which closes an open sheet.
+pub fn request(bar: &Rc<Bar>, request: Request, origin: &gtk4::Widget) {
     let weak = Rc::downgrade(bar);
+    let origin = origin.downgrade();
     glib::spawn_future_local(async move {
         let result = match gio::bus_get_future(gio::BusType::System).await {
             Ok(system) => bus::call(
@@ -272,9 +273,7 @@ pub fn request(bar: &Rc<Bar>, request: Request, from_sheet: bool) {
         tracing::warn!(error = %err, method = request.method(), ?refusal, "the update service refused");
         if let Some(bar) = weak.upgrade() {
             bar.trust().refused(refusal);
-            if !from_sheet {
-                bar.open_module(Module::Shield);
-            }
+            bar.open_module_near(Module::Shield, origin.upgrade().as_ref());
         }
     });
 }
@@ -591,6 +590,7 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     }
     {
         let bar = Rc::downgrade(bar);
+        let origin = popup.button.downgrade();
         confirm.connect_clicked(move |_| {
             let Some(wanted) = pending.take() else { return };
             back();
@@ -601,7 +601,9 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
                 Request::GoBack => bar.trust().go_back_offered(),
             };
             if still {
-                request(&bar, wanted, true);
+                if let Some(origin) = origin.upgrade() {
+                    request(&bar, wanted, origin.upcast_ref());
+                }
             } else {
                 bar.trust().refused(match wanted {
                     Request::Apply => Refusal::NothingDownloaded,

@@ -12,7 +12,8 @@ created empty before the bar starts: a missing log means the fake logind never r
 
 Beside logind, a fake os.athanor.Update1 answers Apply and GoBack and logs them the same way,
 as "Apply" and "GoBack". While /tmp/athanor-update-refuse names an os.athanor.Update1 error
-(e.g. "Blocked"), it refuses with that error instead. It answers State, unlogged, with the
+(e.g. "Blocked"), it refuses with that error instead, after the seconds a second word names
+(e.g. "NotAuthorized 3", as a polkit agent would take them). It answers State, unlogged, with the
 state file's text, or NoState when there is none; while /tmp/athanor-update-state-error names
 an error (e.g. "Untrusted", or a whole name such as "org.freedesktop.DBus.Error.NoReply" for
 a service that does not answer), State fails with it instead. --trust-state writes one of
@@ -134,8 +135,16 @@ def logind(log, hang):
             with log.open("a", encoding="utf-8") as out:
                 out.write(" ".join(words) + "\n")
             if interface == "os.athanor.Update1" and REFUSE_FILE.exists():
-                error = REFUSE_FILE.read_text(encoding="utf-8").strip()
-                invocation.return_dbus_error(f"os.athanor.Update1.Error.{error}", error)
+                error, _, delay = REFUSE_FILE.read_text(encoding="utf-8").strip().partition(" ")
+
+                def refuse(error=error, invocation=invocation):
+                    invocation.return_dbus_error(f"os.athanor.Update1.Error.{error}", error)
+                    return GLib.SOURCE_REMOVE
+
+                if delay:
+                    GLib.timeout_add_seconds(int(delay), refuse)
+                else:
+                    refuse()
                 return
             if method == "SetBrightness":
                 subsystem, name, level = parameters.unpack()

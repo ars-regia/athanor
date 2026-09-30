@@ -300,9 +300,21 @@ impl Bar {
     /// Opens `module`'s popover on the first surface, for the captures of BR9
     /// (`ATHANOR_BAR_OPEN`). A module whose source answers later opens itself then.
     pub fn open_module(self: &Rc<Self>, module: Module) {
+        self.open_module_near(module, None);
+    }
+
+    /// Opens `module`'s popover on the surface that holds `near`, or on the first surface
+    /// when `near` is gone or on none. An open popover stays open.
+    pub fn open_module_near(self: &Rc<Self>, module: Module, near: Option<&gtk4::Widget>) {
         let surfaces = self.surfaces.borrow();
-        let target = surfaces
-            .first()
+        let root = near.and_then(WidgetExt::root);
+        let target = root
+            .and_then(|root| {
+                surfaces
+                    .iter()
+                    .find(|surface| surface.window.upcast_ref::<gtk4::Root>() == &root)
+            })
+            .or_else(|| surfaces.first())
             .and_then(|surface| surface.modules.iter().find(|(m, _)| *m == module));
         match target {
             Some((_, ui)) => ui.open(self),

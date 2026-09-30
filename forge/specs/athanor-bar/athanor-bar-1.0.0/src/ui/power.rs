@@ -173,6 +173,7 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     cancel.connect_clicked(move |_| cancel_back());
     popup.popover.connect_closed(move |_| back());
     let popover = popup.popover.downgrade();
+    let origin = popup.button.downgrade();
     let weak_bar = Rc::downgrade(bar);
     confirm.connect_clicked(move |_| {
         let Some(what) = pending.take() else { return };
@@ -188,13 +189,15 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
                 });
             }
             Pending::Update => {
-                let Some(bar) = weak_bar.upgrade() else { return };
+                let (Some(bar), Some(origin)) = (weak_bar.upgrade(), origin.upgrade()) else {
+                    return;
+                };
                 // The file may have changed while the question was open.
                 if bar.trust().restart_to_update_offered() {
-                    super::shield::request(&bar, Request::Apply, false);
+                    super::shield::request(&bar, Request::Apply, origin.upcast_ref());
                 } else {
                     bar.trust().refused(Refusal::NothingDownloaded);
-                    bar.open_module(Module::Shield);
+                    bar.open_module_near(Module::Shield, Some(origin.upcast_ref()));
                 }
             }
         }
