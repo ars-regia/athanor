@@ -16,6 +16,7 @@ on:
       - "forge/specs/athanor-dock/**"
       - "system/athanor-apps/**"
       - "system/athanor-unit/**"
+      - "system/athanor-trust-state/**"
       - "forge/test/shell/**"
       - ".github/workflows/shell-surfaces.yml"
   pull_request:
@@ -32,6 +33,7 @@ on:
       - "forge/specs/athanor-dock/**"
       - "system/athanor-apps/**"
       - "system/athanor-unit/**"
+      - "system/athanor-trust-state/**"
       - "forge/test/shell/**"
       - ".github/workflows/shell-surfaces.yml"
   workflow_dispatch:
@@ -175,6 +177,8 @@ jobs:
         run: bash forge/test/shell/rig.sh build-shelld
       - name: Notification popups and list against a fake daemon
         run: bash forge/test/shell/rig.sh notifications-e2e
+      - name: Shield end to end
+        run: bash forge/test/shell/rig.sh shield-e2e
       - name: Tray host and menus against athanor-shelld
         run: bash forge/test/shell/rig.sh tray-e2e
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -186,6 +190,7 @@ jobs:
             .scratch/shell-rig/bar-e2e.png
             .scratch/shell-rig/bar-modules-e2e.png
             .scratch/shell-rig/notifications-e2e.png
+            .scratch/shell-rig/shield-e2e.png
             .scratch/shell-rig/tray-e2e.png
 
   bar-scenes:
