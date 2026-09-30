@@ -143,6 +143,9 @@ if $push; then
     mkdir -p "$keys" "$work/registries.d"
     rm -f "$keys/switch.private" "$keys/switch.pub"
     : > "$keys/empty.pass"
+    # A failed signing must not leave the private key behind; restore_policy's trap below
+    # takes over once it is gone.
+    trap 'rm -f "$keys/switch.private"' EXIT
     skopeo generate-sigstore-key --output-prefix "$keys/switch" --passphrase-file "$keys/empty.pass"
     printf 'docker:\n  %s:\n    use-sigstore-attachments: true\n' "$REPO" > "$work/registries.d/switch.yaml"
     # The source is pinned by digest and --preserve-digests refuses a rewritten manifest, so
@@ -155,6 +158,8 @@ if $push; then
 
     wait_ssh
     trap restore_policy EXIT
+    # The drop-in stays after the switch, unlike the trust: the guest now follows this
+    # plain-HTTP registry, and each later upgrade reads from it. The signature stays required.
     guest_ssh "printf '[[registry]]\nlocation = \"localhost:5000\"\ninsecure = true\n' | sudo tee /etc/containers/registries.conf.d/50-acceptance.conf > /dev/null"
     trust_tag "$tag" "$keys/switch.pub"
     guest_ssh sudo bootc switch --enforce-container-sigpolicy --transport registry "$REPO:$tag"
