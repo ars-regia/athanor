@@ -360,6 +360,9 @@ def pactl(*args):
 
 
 def pipewire_pulse(log):
+    # pipewire-pulse stats its runtime directory, then creates it, and gives up if it exists
+    # by then; the `pactl info` polls below create it too. Created first, nobody races.
+    (Path(os.environ["XDG_RUNTIME_DIR"]) / "pulse").mkdir(mode=0o700, exist_ok=True)
     process = subprocess.Popen(
         ["pipewire-pulse"], stdout=log, stderr=subprocess.STDOUT, env=real_time_env()
     )
@@ -385,11 +388,35 @@ def null_node(name, description, media_class, positions):
     )
 
 
+def set_default(kind, name):
+    """Makes `name` the default sink or source. pipewire-pulse answers "Not supported" until
+    WirePlumber has published the `default` metadata, which can come after the nodes are
+    listed, so the call is repeated until the default reads back."""
+    deadline = time.monotonic() + 10
+    while True:
+        result = subprocess.run(["pactl", f"set-default-{kind}", name], capture_output=True, text=True)
+        if result.returncode == 0 and pactl(f"get-default-{kind}").strip() == name:
+            return
+        if time.monotonic() > deadline:
+            raise SystemExit(
+                f"system_fixtures.py: the default {kind} is not {name} after 10 s: {result.stderr.strip()}"
+            )
+        time.sleep(0.2)
+
+
 def pipewire(log):
-    processes = [
-        subprocess.Popen([command], stdout=log, stderr=subprocess.STDOUT, env=real_time_env())
-        for command in ("pipewire", "wireplumber")
-    ]
+    # WirePlumber exits at once if PipeWire's socket is not there yet, and without it
+    # nobody publishes the default devices; it starts once the socket exists.
+    processes = [subprocess.Popen(["pipewire"], stdout=log, stderr=subprocess.STDOUT, env=real_time_env())]
+    socket = Path(os.environ["XDG_RUNTIME_DIR"]) / "pipewire-0"
+    deadline = time.monotonic() + 10
+    while not socket.is_socket():
+        if time.monotonic() > deadline:
+            raise SystemExit("system_fixtures.py: PipeWire did not open its socket within 10 s")
+        time.sleep(0.1)
+    processes.append(
+        subprocess.Popen(["wireplumber"], stdout=log, stderr=subprocess.STDOUT, env=real_time_env())
+    )
     processes.append(pipewire_pulse(log))
     null_node("speakers", "Speakers", "Audio/Sink", "FL FR")
     null_node("headphones", "Headphones", "Audio/Sink", "FL FR")
@@ -401,10 +428,10 @@ def pipewire(log):
         if time.monotonic() > deadline:
             raise SystemExit("system_fixtures.py: the null devices did not appear within 10 s")
         time.sleep(0.2)
-    pactl("set-default-sink", "speakers")
+    set_default("sink", "speakers")
     pactl("set-sink-volume", "speakers", "40%")
     pactl("set-sink-volume", "headphones", "70%")
-    pactl("set-default-source", "microphone")
+    set_default("source", "microphone")
     pactl("set-source-volume", "microphone", "55%")
     return processes
 

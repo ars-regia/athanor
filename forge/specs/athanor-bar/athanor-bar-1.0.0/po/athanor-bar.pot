@@ -34,7 +34,7 @@ msgstr ""
 
 #: ../../../../system/athanor-apps/src/row.rs:202
 #: ../../../../system/athanor-apps/src/row.rs:640
-#: ../../../../system/athanor-apps/src/row.rs:642 src/ui/notifications.rs:577
+#: ../../../../system/athanor-apps/src/row.rs:642 src/ui/notifications.rs:632
 msgid "Unknown application"
 msgstr ""
 
@@ -61,7 +61,7 @@ msgstr ""
 msgid "Minimise {title}"
 msgstr ""
 
-#: ../../../../system/athanor-apps/src/row.rs:491 src/ui/notifications.rs:703
+#: ../../../../system/athanor-apps/src/row.rs:491 src/ui/notifications.rs:758
 #, rust-format
 msgid "Close {title}"
 msgstr ""
@@ -127,6 +127,143 @@ msgstr ""
 msgid "Colour filter"
 msgstr ""
 
+#: src/ui/audio.rs:478
+#, rust-format
+msgid "{device}, in use"
+msgstr ""
+
+#: src/ui/audio.rs:518
+msgid "Sound"
+msgstr ""
+
+#: src/ui/audio.rs:522
+msgid "Output"
+msgstr ""
+
+#: src/ui/audio.rs:523
+msgid "Output volume"
+msgstr ""
+
+#: src/ui/audio.rs:524
+msgid "Mute output"
+msgstr ""
+
+#: src/ui/audio.rs:528
+msgid "Input"
+msgstr ""
+
+#: src/ui/audio.rs:529
+msgid "Input volume"
+msgstr ""
+
+#: src/ui/audio.rs:530
+msgid "Mute microphone"
+msgstr ""
+
+#: src/ui/audio.rs:541
+msgid "Previous track"
+msgstr ""
+
+#: src/ui/audio.rs:542 src/ui/audio.rs:653
+msgid "Pause"
+msgstr ""
+
+#: src/ui/audio.rs:543
+msgid "Next track"
+msgstr ""
+
+#: src/ui/audio.rs:655
+msgid "Play"
+msgstr ""
+
+#: src/ui/battery.rs:186
+#, rust-format
+msgid "{percent} %"
+msgstr ""
+
+#: src/ui/battery.rs:204
+#, rust-format
+msgid "{hours} h {minutes} min left"
+msgstr ""
+
+#: src/ui/battery.rs:207
+#, rust-format
+msgid "{hours} h {minutes} min until full"
+msgstr ""
+
+#: src/ui/battery.rs:209
+msgid "Charging"
+msgstr ""
+
+#: src/ui/battery.rs:210
+msgid "Fully charged"
+msgstr ""
+
+#: src/ui/battery.rs:234
+msgid "Power saver"
+msgstr ""
+
+#: src/ui/battery.rs:235
+msgid "Performance"
+msgstr ""
+
+#: src/ui/battery.rs:236
+msgid "Balanced"
+msgstr ""
+
+#: src/ui/battery.rs:263
+msgid "Battery"
+msgstr ""
+
+#: src/ui/battery.rs:273
+msgid "Power mode"
+msgstr ""
+
+#: src/ui/battery.rs:291
+msgid "Screen brightness"
+msgstr ""
+
+#: src/ui/bluetooth.rs:577 src/ui/bluetooth.rs:580
+msgid "Bluetooth"
+msgstr ""
+
+#: src/ui/bluetooth.rs:583
+msgid "Nearby devices"
+msgstr ""
+
+#: src/ui/bluetooth.rs:605 src/ui/network.rs:546 src/ui/power.rs:62
+msgid "Cancel"
+msgstr ""
+
+#: src/ui/bluetooth.rs:607
+msgid "Pair"
+msgstr ""
+
+#: src/ui/bluetooth.rs:720
+#, rust-format
+msgid "{device}, connected"
+msgstr ""
+
+#: src/ui/bluetooth.rs:757
+#, rust-format
+msgid "Pair with {device}?"
+msgstr ""
+
+#: src/ui/bluetooth.rs:760
+#, rust-format
+msgid "Pair only if {device} shows the same number."
+msgstr ""
+
+#: src/ui/bluetooth.rs:773
+#, rust-format
+msgid "Pairing with {device}"
+msgstr ""
+
+#: src/ui/bluetooth.rs:776
+#, rust-format
+msgid "Type this code on {device}, then press Enter there."
+msgstr ""
+
 #. TRANSLATORS: a g_date_time_format() pattern for the clock on the bar.
 #: src/ui/clock.rs:83
 msgid "%a %-d %b %H:%M"
@@ -160,33 +297,86 @@ msgstr ""
 msgid "Input source"
 msgstr ""
 
-#: src/ui/mod.rs:621
+#: src/ui/mod.rs:650
 msgid "Unpin from Bar"
 msgstr ""
 
-#: src/ui/mod.rs:623
+#: src/ui/mod.rs:652
 msgid "Pin to Bar"
 msgstr ""
 
-#: src/ui/notifications.rs:819
+#: src/ui/network.rs:504 src/ui/network.rs:507
+msgid "Network"
+msgstr ""
+
+#: src/ui/network.rs:513
+msgid "Wi-Fi"
+msgstr ""
+
+#: src/ui/network.rs:522
+msgid "Airplane mode"
+msgstr ""
+
+#: src/ui/network.rs:539
+msgid "The password was not accepted. Try again."
+msgstr ""
+
+#: src/ui/network.rs:548
+msgid "Connect"
+msgstr ""
+
+#: src/ui/network.rs:661
+msgid "Wired: connected"
+msgstr ""
+
+#: src/ui/network.rs:662
+msgid "Wired: not connected"
+msgstr ""
+
+#: src/ui/network.rs:699
+#, rust-format
+msgid "{network}, connected"
+msgstr ""
+
+#: src/ui/network.rs:700
+#, rust-format
+msgid "{network}, connecting"
+msgstr ""
+
+#: src/ui/network.rs:701
+#, rust-format
+msgid "{network}, needs Settings"
+msgstr ""
+
+#: src/ui/network.rs:703
+#, rust-format
+msgid "{network}, secured"
+msgstr ""
+
+#: src/ui/network.rs:734
+#, rust-format
+msgid "Password for {network}"
+msgstr ""
+
+#: src/ui/notifications.rs:874
 #, rust-format
 msgid "Notifications, {count} waiting"
 msgstr ""
 
-#: src/ui/notifications.rs:824 src/ui/notifications.rs:857
-#: src/ui/notifications.rs:860
+#: src/ui/notifications.rs:879 src/ui/notifications.rs:912
+#: src/ui/notifications.rs:915
 msgid "Notifications"
 msgstr ""
 
-#: src/ui/notifications.rs:864
+#: src/ui/notifications.rs:919
 msgid "Clear all"
 msgstr ""
 
-#: src/ui/notifications.rs:869
+#: src/ui/notifications.rs:924
 msgid "No notifications"
 msgstr ""
 
-#: src/ui/notifications.rs:879
+#: src/ui/notifications.rs:934
 msgid "Do not disturb"
 msgstr ""
 
@@ -232,10 +422,6 @@ msgstr ""
 
 #: src/ui/power.rs:55
 msgid "Power"
-msgstr ""
-
-#: src/ui/power.rs:62
-msgid "Cancel"
 msgstr ""
 
 #: src/ui/tiling.rs:64

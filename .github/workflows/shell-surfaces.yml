@@ -205,6 +205,10 @@ jobs:
             bar-popups,
             bar-notifications,
             bar-tray,
+            bar-network,
+            bar-bluetooth,
+            bar-audio,
+            bar-battery,
           ]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

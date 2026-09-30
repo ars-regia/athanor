@@ -27,7 +27,7 @@
 #   rig.sh rig-tests        unit tests of the rig's own scripts, against the rig's tools
 #   rig.sh cosmic-panel-defaults   COSMIC's shipped panel keys equal the renderer's fixture
 #   rig.sh chooser-e2e      press a preset in the chooser and wait for the panel configuration
-#   rig.sh surface <greeter|layout|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling|bar-popups|bar-notifications|bar-tray>  capture every case of a surface and compare with the goldens
+#   rig.sh surface <greeter|layout|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling|bar-popups|bar-notifications|bar-tray|bar-network|bar-bluetooth|bar-audio|bar-battery>  capture every case of a surface and compare with the goldens
 #   rig.sh update-goldens <name>   replace the goldens with a fresh capture, deliberately
 set -euo pipefail
 
@@ -180,11 +180,12 @@ require_shelld() { # the tray scenes run the real watcher
 }
 
 # doc_bar.md, BR9: the bar under its own preset with one running window, the five
-# popovers the bar owns in 2b.2, opened by ATHANOR_BAR_OPEN over the float preset, and
+# popovers the bar owns in 2b.2, opened by ATHANOR_BAR_OPEN over the float preset,
 # 2b.3's notification popups (four waiting notifications: three show), the notification
-# list and a tray menu.
+# list and a tray menu, and the popovers of the four system modules against
+# system_fixtures.py.
 capture_bar() { # capture_bar <surface>
-    local surface=$1 open="" preset=float panel=top dock=visible
+    local surface=$1 open="" preset=float panel=top dock=visible settle=8
     local session=(python3 /repo/forge/test/shell/bar_session.py)
     case "$surface" in
     bar) preset=bar panel=bottom dock=- session+=(--window) ;;
@@ -199,6 +200,11 @@ capture_bar() { # capture_bar <surface>
         require_shelld
         open=tray session+=(--tray)
         ;;
+    # The system modules against the fixtures, which start before the bar: a longer settle.
+    bar-network) open=network settle=12 session+=(--fixtures) ;;
+    bar-bluetooth) open=bluetooth settle=12 session+=(--fixtures) ;;
+    bar-audio) open=audio settle=12 session+=(--fixtures) ;;
+    bar-battery) open=battery settle=12 session+=(--fixtures) ;;
     esac
     in_rig "$(rig_image)" bash -c '
         set -euo pipefail
@@ -217,7 +223,7 @@ capture_bar() { # capture_bar <surface>
         if [ -n "$open" ]; then
             override+=(ATHANOR_BAR_OPEN="$open")
         fi
-        in_rig "$(rig_image)" env RIG_LOCALE="$locale" RIG_SETTLE=8 RIG_CONFIG_SEED="/out/seed-$tag" \
+        in_rig "$(rig_image)" env RIG_LOCALE="$locale" RIG_SETTLE="$settle" RIG_CONFIG_SEED="/out/seed-$tag" \
             RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic "${override[@]}" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 "$scale" "$tag" -- "${session[@]}"
     done < <(python3 -B "$rig/cases.py" "$surface")
@@ -497,7 +503,7 @@ surface | update-goldens)
     greeter) capture_greeter ;;
     layout) capture_layout ;;
     chooser) capture_chooser ;;
-    bar | bar-power | bar-input | bar-calendar | bar-accessibility | bar-tiling | bar-popups | bar-notifications | bar-tray) capture_bar "$surface" ;;
+    bar | bar-power | bar-input | bar-calendar | bar-accessibility | bar-tiling | bar-popups | bar-notifications | bar-tray | bar-network | bar-bluetooth | bar-audio | bar-battery) capture_bar "$surface" ;;
     *)
         echo "rig.sh $1: unknown surface '$surface'" >&2
         exit 2

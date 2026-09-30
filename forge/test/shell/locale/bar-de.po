@@ -172,3 +172,132 @@ msgstr "Keine Benachrichtigungen"
 
 msgid "System tray"
 msgstr "Infobereich"
+
+msgid "Network"
+msgstr "Netzwerk"
+
+msgid "Wi-Fi"
+msgstr "WLAN"
+
+msgid "Airplane mode"
+msgstr "Flugmodus"
+
+msgid "Wired: connected"
+msgstr "Kabel: verbunden"
+
+msgid "Wired: not connected"
+msgstr "Kabel: nicht verbunden"
+
+msgid "{network}, connected"
+msgstr "{network}, verbunden"
+
+msgid "{network}, connecting"
+msgstr "{network}, wird verbunden"
+
+msgid "{network}, needs Settings"
+msgstr "{network}, erfordert Einstellungen"
+
+msgid "{network}, secured"
+msgstr "{network}, gesichert"
+
+msgid "Password for {network}"
+msgstr "Passwort für {network}"
+
+msgid "The password was not accepted. Try again."
+msgstr "Das Passwort wurde nicht akzeptiert. Bitte erneut versuchen."
+
+msgid "Connect"
+msgstr "Verbinden"
+
+msgid "Bluetooth"
+msgstr "Bluetooth"
+
+msgid "Nearby devices"
+msgstr "Geräte in der Nähe"
+
+msgid "{device}, connected"
+msgstr "{device}, verbunden"
+
+msgid "Pair with {device}?"
+msgstr "Mit {device} koppeln?"
+
+msgid "Pair only if {device} shows the same number."
+msgstr "Nur koppeln, wenn {device} dieselbe Zahl zeigt."
+
+msgid "Pairing with {device}"
+msgstr "Kopplung mit {device}"
+
+msgid "Type this code on {device}, then press Enter there."
+msgstr "Diesen Code auf {device} eingeben und dort die Eingabetaste drücken."
+
+msgid "Pair"
+msgstr "Koppeln"
+
+msgid "Sound"
+msgstr "Ton"
+
+msgid "Output"
+msgstr "Ausgabe"
+
+msgid "Input"
+msgstr "Eingabe"
+
+msgid "Output volume"
+msgstr "Ausgabelautstärke"
+
+msgid "Input volume"
+msgstr "Eingabelautstärke"
+
+msgid "Mute output"
+msgstr "Ausgabe stummschalten"
+
+msgid "Mute microphone"
+msgstr "Mikrofon stummschalten"
+
+msgid "{device}, in use"
+msgstr "{device}, in Verwendung"
+
+msgid "Previous track"
+msgstr "Vorheriger Titel"
+
+msgid "Next track"
+msgstr "Nächster Titel"
+
+msgid "Play"
+msgstr "Wiedergabe"
+
+msgid "Pause"
+msgstr "Pause"
+
+msgid "Battery"
+msgstr "Akku"
+
+msgid "{percent} %"
+msgstr "{percent} %"
+
+msgid "{hours} h {minutes} min left"
+msgstr "Noch {hours} h {minutes} min"
+
+msgid "{hours} h {minutes} min until full"
+msgstr "{hours} h {minutes} min bis voll"
+
+msgid "Charging"
+msgstr "Wird geladen"
+
+msgid "Fully charged"
+msgstr "Vollständig geladen"
+
+msgid "Power saver"
+msgstr "Energiesparen"
+
+msgid "Balanced"
+msgstr "Ausgewogen"
+
+msgid "Performance"
+msgstr "Leistung"
+
+msgid "Power mode"
+msgstr "Energiemodus"
+
+msgid "Screen brightness"
+msgstr "Bildschirmhelligkeit"
