@@ -81,6 +81,13 @@ def toggle_sheet(app, Atspi, open_):
     return wait_for(lambda: sheet_open(app, Atspi) == open_, 3)
 
 
+def focused(app, Atspi, name):
+    return any(
+        button.get_state_set().contains(Atspi.StateType.FOCUSED)
+        for button in buttons(app, Atspi, name)
+    )
+
+
 def confirm(app, Atspi, name):
     """Presses the confirmation's `name` once it shows; False when it never does."""
     if not wait_for(lambda: confirm_button(app, Atspi, name)[1] is not None, 3):
@@ -164,6 +171,22 @@ def main():
     press(app, Atspi, "Go back to the previous version")
     check("Go back asks first, and confirming", confirm(app, Atspi, "Go back"))
     check("calls GoBack", wait_for(lambda: logged("GoBack"), 3))
+
+    # Cancel gives the keyboard back to the action, and a redraw that changes nothing keeps it.
+    go_back = "Go back to the previous version"
+    press(app, Atspi, go_back)
+    check(
+        "Go back asks again",
+        wait_for(lambda: confirm_button(app, Atspi, "Go back")[1] is not None, 3),
+    )
+    check("Cancel backs out", press(app, Atspi, "Cancel"))
+    check(
+        "and gives the focus back to Go back",
+        wait_for(lambda: focused(app, Atspi, go_back), 3),
+    )
+    trust_state.write("downloaded")
+    time.sleep(1)
+    check("a state that changed nothing leaves the focus there", focused(app, Atspi, go_back))
 
     # A refusal is said in the sheet (Review Focus 4).
     REFUSE_FILE.write_text("Blocked\n", encoding="utf-8")

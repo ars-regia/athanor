@@ -458,6 +458,9 @@ struct ShieldUi {
     seal: gtk4::Image,
     content: gtk4::Box,
     actions: Actions,
+    /// What the sheet shows now. A rebuild drops the keyboard focus and announces the
+    /// refusal again, so the sheet is rebuilt only when this changes.
+    drawn: RefCell<Option<(Badge, Sheet, Option<Refusal>)>>,
 }
 
 impl ModuleUi for ShieldUi {
@@ -480,6 +483,10 @@ impl ShieldUi {
     fn draw(&self, bar: &Rc<Bar>) {
         let trust = bar.trust();
         let badge = trust.badge();
+        let drawn = Some((badge, trust.sheet(), trust.refusal()));
+        if *self.drawn.borrow() == drawn {
+            return;
+        }
         let name = header(badge);
         self.seal.set_icon_name(Some(shield::icon(badge)));
         self.popup.button.set_tooltip_text(Some(&name));
@@ -491,6 +498,7 @@ impl ShieldUi {
             parent.remove(&self.actions.row);
         }
         fill_sheet(&self.content, trust, &self.actions);
+        self.drawn.replace(drawn);
     }
 }
 
@@ -577,8 +585,22 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
             }
         }
     };
-    let cancel_back = back.clone();
-    cancel.connect_clicked(move |_| cancel_back());
+    {
+        // Cancel gives the focus back to the action that asked.
+        let (back, pending) = (back.clone(), pending.clone());
+        let (restart, go_back) = (restart.downgrade(), go_back.downgrade());
+        cancel.connect_clicked(move |_| {
+            let opener = match pending.get() {
+                Some(Request::Apply) => restart.upgrade(),
+                Some(Request::GoBack) => go_back.upgrade(),
+                None => None,
+            };
+            back();
+            if let Some(opener) = opener {
+                opener.grab_focus();
+            }
+        });
+    }
     {
         let bar = Rc::downgrade(bar);
         let back = back.clone();
@@ -623,6 +645,7 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
             restart,
             go_back,
         },
+        drawn: RefCell::new(None),
     };
     ui.draw(bar);
     Some(Box::new(ui))
