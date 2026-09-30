@@ -23,7 +23,7 @@ use std::rc::{Rc, Weak};
 
 use athanor_bar::bluetooth::{self, BluetoothState, Device};
 use athanor_bar::props;
-use gtk4::accessible::Property;
+use gtk4::accessible::{Property, Relation};
 use gtk4::prelude::*;
 use gtk4::{gio, glib, pango};
 
@@ -705,6 +705,13 @@ impl View {
         cancel.add_css_class("bar-row");
         let confirm = gtk4::Button::with_label(&tr("Pair"));
         confirm.add_css_class("bar-confirm");
+        // A screen reader reading the button reads what it confirms: the device, the digits
+        // and the instruction to compare them.
+        confirm.update_relation(&[Relation::DescribedBy(&[
+            title.upcast_ref(),
+            code.upcast_ref(),
+            note.upcast_ref(),
+        ])]);
         let buttons = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
         buttons.set_halign(gtk4::Align::End);
         buttons.append(&cancel);

@@ -146,6 +146,19 @@ def type_password(app, Atspi, password):
     return bool(entries) and entries[0].set_text_contents(password)
 
 
+def described_by(accessible, Atspi):
+    """The names of the accessibles a DescribedBy relation of `accessible` points to."""
+    if accessible is None:
+        return []
+    names = []
+    for relation in accessible.get_relation_set():
+        if relation.get_relation_type() == Atspi.RelationType.DESCRIBED_BY:
+            for index in range(relation.get_n_targets()):
+                target = relation.get_target(index)
+                names.append(target.get_name() if target is not None else None)
+    return names
+
+
 def press_confirm(app, Atspi, name):
     """Presses the confirmation's button `name` once it is sensitive."""
     _, button = confirm_button(app, Atspi, name)
@@ -410,6 +423,11 @@ def bluetooth(ctx):
     press(app, Atspi, "Phone")
     check("pressing it shows the digits BlueZ sent", wait_for(lambda: labelled(app, Atspi, "label", fx.PAIRING_CODE), 10))
     check("another device's request during the pairing shows nothing", not labelled(app, Atspi, "label", str(fx.OTHER_PASSKEY)))
+    check(
+        "the Pair button is described by the device, the digits and the note",
+        described_by(confirm_button(app, Atspi, "Pair")[1], Atspi)
+        == ["Pair with Phone?", fx.PAIRING_CODE, "Pair only if Phone shows the same number."],
+    )
     check("Pair confirms", wait_for(lambda: press_confirm(app, Atspi, "Pair"), 5))
     phone = device_path("Phone")
     check("the device is paired", wait_for(lambda: property_of(bus, fx.BLUEZ, phone, device1, "Paired") is True, 10))
