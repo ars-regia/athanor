@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        The Athanor bar
 License:        MIT
 
@@ -52,6 +52,13 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
+* Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
+- The trust shield and its sheet (doc_bar.md, BR6): the seal and header follow
+  /run/athanor-update/state.json live, the sheet names the version, the signature, the
+  update, the policy and Secure Boot, and offers Go back; popups wait while it is open.
+- Restart to update in the power menu (BR3), shown only when an update is downloaded.
+  Both actions confirm first and call os.athanor.Update1.
+
 * Sat Sep 26 2026 Athanor Forge <forge@athanor.os> - 1.0.0-1
 - First release (doc_bar.md, BR1, BR2, BR3, BR6, BR7): one surface per output with the
   three presets applied live and mandatory keys honoured; launcher, application library,
