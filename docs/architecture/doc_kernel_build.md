@@ -288,9 +288,10 @@ patchano i Makefile per forzarlo.
 - **Primo avvio**: arruolamento guidato del certificato Secure Boot
   (`mokutil --import`), unica interazione richiesta per avere Secure Boot acceso
   su un PC qualsiasi; i moduli non ne dipendono.
-- **`cmdline`** committata: `lockdown=integrity mitigations=auto init_on_alloc=1
-randomize_kstack_offset=on page_alloc.shuffle=1 vsyscall=none preempt=full
-amd_pstate=active zswap.enabled=1`. Niente `iommu=pt`, niente `mitigations=off`.
+- **`cmdline`** generata da `forge/specs/athanor-kernel-profile/profile.toml`
+  (tabella `[base.cmdline]`, `doc_kernel_profile.md` sezione 6) insieme al file
+  `kargs.d` dell'immagine: la matrice di avvio prova la stessa riga che l'immagine
+  installa. Niente `iommu=pt`, niente `mitigations=off`.
 - **Rootfs**: dm-verity con roothash firmato da una chiave del progetto nel
   keyring secondario (non quella Secure Boot, che non vi entra),
   fs-verity per composefs, TPM 2.0 per LUKS (`systemd-cryptenroll`) con fallback

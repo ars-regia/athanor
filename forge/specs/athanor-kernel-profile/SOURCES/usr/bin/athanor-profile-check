@@ -5,10 +5,10 @@ Usage: athanor-profile-check [--root DIR] [--profiles DIR] [--quiet]
 
 The role combination comes from the athanor.role= parameters on /proc/cmdline; its
 effective profile is /usr/share/athanor/kernel-profile/<combination>.json, generated from
-profile.toml (docs/architecture/doc_kernel_profile.md, sections 3, 7 and 12). Block P1
-checks the kernel configuration (/proc/config.gz), sysctls (/proc/sys) and the runtime
-state under /sys/kernel/security. Exit status: 0 when every setting holds, 1 on drift, 2
-when the profile cannot be read.
+profile.toml (docs/architecture/doc_kernel_profile.md, sections 3, 7 and 12). It checks
+the kernel configuration (/proc/config.gz), sysctls (/proc/sys), the runtime state under
+/sys/kernel/security and the kernel command line (/proc/cmdline). Exit status: 0 when
+every setting holds, 1 on drift, 2 when the profile cannot be read.
 """
 
 import argparse
@@ -21,7 +21,7 @@ import zlib
 
 PROFILES = pathlib.Path("/usr/share/athanor/kernel-profile")
 SCHEMA = 1
-KINDS = ("kconfig", "sysctl", "runtime")
+KINDS = ("kconfig", "sysctl", "runtime", "cmdline")
 ROLE_PATTERN = re.compile(r"^[a-z0-9-]+$")
 
 
@@ -81,6 +81,20 @@ def sysctl(root: pathlib.Path, name: str):
         return None
 
 
+def cmdline(root: pathlib.Path) -> dict:
+    """{name: value} of /proc/cmdline; a parameter without = reads as an empty value.
+
+    A repeated parameter keeps its last value, as most kernel parameters do. Some combine
+    their occurrences instead (efi=, ima_policy=, intel_iommu=) and lockdown= only ever
+    raises the level: an extra occurrence of those reads as drift, which errs towards
+    reporting. The runtime settings check the lockdown level the kernel actually holds."""
+    values = {}
+    for argument in (root / "proc" / "cmdline").read_text().split():
+        name, _, value = argument.partition("=")
+        values[name] = value
+    return values
+
+
 def lockdown(root: pathlib.Path):
     text = (root / "sys" / "kernel" / "security" / "lockdown").read_text()
     for word in text.split():
@@ -125,6 +139,11 @@ def compare(root: pathlib.Path, settings: dict) -> list:
             holds = found == expected
         if not holds:
             drift.append((f"runtime.{name}", expected, found))
+    arguments = cmdline(root) if settings.get("cmdline") else {}
+    for name, setting in sorted(settings.get("cmdline", {}).items()):
+        found = arguments.get(name)
+        if found != setting["value"]:
+            drift.append((f"cmdline.{name}", setting["value"], found))
     return drift
 
 
