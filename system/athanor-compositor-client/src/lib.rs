@@ -4,6 +4,7 @@
 //! sees only the types of [`model`].
 
 pub mod clock;
+mod capture;
 mod connection;
 mod cosmic_config;
 pub mod favorites;
