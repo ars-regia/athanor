@@ -4,7 +4,7 @@
 //! appear twice.
 //!
 //! Anything an installed application ships is untrusted: the `.ini` files are bounded and
-//! validated, every call carries a timeout and never starts a provider, and every string a
+//! validated, every call carries a timeout, and every string a
 //! provider returns is bounded and cleaned before it reaches a row.
 
 use std::collections::{HashMap, HashSet};
