@@ -30,6 +30,8 @@ const MAX_INI_BYTES: u64 = 64 * 1024;
 const MAX_ID_BYTES: usize = 512;
 /// Bytes read from a provider's name, description or icon string before cleaning.
 const MAX_FIELD_CHARS: usize = 1024;
+/// A larger GetResultMetas reply is refused whole.
+const MAX_METAS_BYTES: usize = 64 * 1024;
 const MAX_DESKTOP_ID_BYTES: usize = 255;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -62,6 +64,7 @@ pub fn discover(dirs: &[PathBuf]) -> Vec<Provider> {
 /// application that is not installed is stale.
 fn discover_with(dirs: &[PathBuf], installed: &dyn Fn(&str) -> Option<String>) -> Vec<Provider> {
     let mut seen = HashSet::new();
+    let mut buses = HashSet::new();
     let mut providers = Vec::new();
     for dir in dirs {
         let Ok(entries) = std::fs::read_dir(dir) else { continue };
@@ -69,9 +72,20 @@ fn discover_with(dirs: &[PathBuf], installed: &dyn Fn(&str) -> Option<String>) -
         files.sort();
         for file in files.into_iter().filter(|f| f.extension().is_some_and(|e| e == "ini")) {
             match read(&file, installed) {
-                Ok(Some(provider)) if seen.insert(provider.desktop_id.clone()) => providers.push(provider),
-                Ok(_) => {}
-                Err(err) => tracing::warn!("{} is not a search provider: {err}", file.display()),
+                // Every .ini that parses claims its desktop id, disabled or not, so an
+                // override in a user directory switches a system provider off, as on GNOME.
+                Ok((id, provider)) => {
+                    if seen.insert(id) {
+                        if let Some(provider) = provider.filter(|p| buses.insert(p.bus_name.clone())) {
+                            providers.push(provider);
+                        }
+                    }
+                }
+                Err(err) => tracing::warn!(
+                    "{} is not a search provider: {}",
+                    text::line(&file.display().to_string(), text::SUMMARY_CHARS),
+                    text::line(&err.to_string(), text::SUMMARY_CHARS)
+                ),
             }
         }
     }
@@ -82,7 +96,7 @@ fn invalid(why: &str) -> glib::Error {
     glib::Error::new(gio::IOErrorEnum::InvalidData, why)
 }
 
-fn read(file: &Path, installed: &dyn Fn(&str) -> Option<String>) -> Result<Option<Provider>, glib::Error> {
+fn read(file: &Path, installed: &dyn Fn(&str) -> Option<String>) -> Result<(String, Option<Provider>), glib::Error> {
     let meta = std::fs::metadata(file).map_err(|err| invalid(&err.to_string()))?;
     if !meta.is_file() || meta.len() > MAX_INI_BYTES {
         return Err(invalid("not a regular file, or larger than 64 KiB"));
@@ -94,7 +108,7 @@ fn read(file: &Path, installed: &dyn Fn(&str) -> Option<String>) -> Result<Optio
         || keys.boolean(GROUP, "DefaultDisabled").unwrap_or(false)
         || SKIPPED.contains(&desktop_id.as_str())
     {
-        return Ok(None);
+        return Ok((desktop_id, None));
     }
     let bus_name = keys.string(GROUP, "BusName")?.to_string();
     let object_path = keys.string(GROUP, "ObjectPath")?.to_string();
@@ -105,8 +119,9 @@ fn read(file: &Path, installed: &dyn Fn(&str) -> Option<String>) -> Result<Optio
     {
         return Err(invalid("DesktopId, BusName or ObjectPath is not valid"));
     }
-    let Some(name) = installed(&desktop_id) else { return Ok(None) };
-    Ok(Some(Provider { bus_name, object_path, name: text::line(&name, text::NAME_CHARS), desktop_id }))
+    let Some(name) = installed(&desktop_id) else { return Ok((desktop_id, None)) };
+    let name = text::line(&name, text::NAME_CHARS);
+    Ok((desktop_id.clone(), Some(Provider { bus_name, object_path, name, desktop_id })))
 }
 
 fn terms(query: &str) -> Vec<String> {
@@ -152,6 +167,9 @@ type Meta = HashMap<String, Variant>;
 
 /// The metas of the reply; `None` when its type is not `(aa{sv})`.
 fn metas(reply: &Variant) -> Option<Vec<Meta>> {
+    if reply.size() > MAX_METAS_BYTES {
+        return None;
+    }
     let list = reply.try_child_value(0).filter(|list| list.type_().as_str() == "aa{sv}")?;
     list.iter().take(Group::PROVIDER_ROWS).map(|meta| meta.get::<Meta>()).collect()
 }
@@ -183,7 +201,7 @@ pub async fn search(provider: &Provider, query: &str) -> Option<Vec<Hit>> {
             None
         }
         Some(Err(err)) => {
-            tracing::warn!(provider = %provider.bus_name, "the search provider failed: {err}");
+            tracing::warn!(provider = %provider.bus_name, "the search provider failed: {}", text::line(&err.to_string(), text::SUMMARY_CHARS));
             None
         }
         None => {
@@ -211,7 +229,8 @@ pub fn metas_to_hits(provider: &Provider, metas: Vec<Meta>, terms: &[String]) ->
             let icon = meta
                 .get("icon")
                 .and_then(gio::Icon::deserialize)
-                .or_else(|| field(&meta, "gicon").and_then(|s| gio::Icon::for_string(&s).ok()));
+                .or_else(|| field(&meta, "gicon").and_then(|s| gio::Icon::for_string(&s).ok()))
+                .filter(|icon| icon.is::<gio::ThemedIcon>());
             Some(Hit {
                 group: Group::Providers,
                 key: String::new(),
@@ -279,6 +298,66 @@ mod tests {
         assert_eq!(buses, ["org.gnome.Calculator.SearchProvider"]);
         assert_eq!(providers[0].object_path, "/org/gnome/Calculator/SearchProvider");
         assert_eq!(providers[0].name, "Firefox");
+    }
+
+    fn write_ini(dir: &Path, name: &str, id: &str, bus: &str, extra: &str) {
+        std::fs::create_dir_all(dir).expect("dir");
+        let body = format!("[Shell Search Provider]\nDesktopId={id}\nBusName={bus}\nObjectPath=/a/b\nVersion=2\n{extra}");
+        std::fs::write(dir.join(name), body).expect("write");
+    }
+
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("athanor-providers-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        dir
+    }
+
+    #[test]
+    fn a_disabled_ini_in_an_earlier_directory_switches_the_provider_off() {
+        let root = scratch("override");
+        write_ini(&root.join("a"), "x.ini", "org.mozilla.firefox.desktop", "org.example.A", "DefaultDisabled=true\n");
+        write_ini(&root.join("b"), "x.ini", "org.mozilla.firefox.desktop", "org.example.A", "");
+        assert!(discover_with(&[root.join("a"), root.join("b")], &fixture_apps).is_empty());
+        assert_eq!(discover_with(&[root.join("b")], &fixture_apps).len(), 1);
+        std::fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
+    fn two_desktop_ids_on_one_bus_name_give_one_provider() {
+        let root = scratch("bus");
+        write_ini(&root, "a.ini", "org.mozilla.firefox.desktop", "org.example.Same", "");
+        write_ini(&root, "b.ini", "bidi.desktop", "org.example.Same", "");
+        let got = discover_with(std::slice::from_ref(&root), &|_| Some("X".into()));
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].desktop_id, "org.mozilla.firefox.desktop");
+        std::fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
+    fn only_themed_icons_survive() {
+        let themed = gio::ThemedIcon::new("folder").serialize().expect("themed");
+        let bytes = gio::BytesIcon::new(&glib::Bytes::from_static(b"x")).serialize().expect("bytes");
+        let file = gio::FileIcon::new(&gio::File::for_path("/etc/passwd")).serialize().expect("file");
+        let icon_of = |icon: Variant| {
+            let mut meta = Meta::new();
+            meta.insert("id".to_owned(), "r".to_variant());
+            meta.insert("name".to_owned(), "n".to_variant());
+            meta.insert("icon".to_owned(), icon);
+            let hits = metas_to_hits(&provider(), vec![meta], &[]);
+            assert_eq!(hits.len(), 1);
+            hits[0].icon.clone()
+        };
+        assert!(icon_of(themed).is_some());
+        assert!(icon_of(bytes).is_none());
+        assert!(icon_of(file).is_none());
+    }
+
+    #[test]
+    fn a_large_metas_reply_is_refused() {
+        let big: Vec<Meta> = (0..3)
+            .map(|_| Meta::from([("name".to_owned(), "x".repeat(40_000).to_variant())]))
+            .collect();
+        assert!(metas(&(big,).to_variant()).is_none());
     }
 
     #[test]
