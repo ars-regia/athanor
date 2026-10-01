@@ -64,19 +64,26 @@ impl Files {
         Files { connection: RefCell::new(Some(connection)), local: true, warned: Cell::new(false) }
     }
 
-    /// The connection, opened only when localsearch already owns its name: asking the bus
-    /// for an absent name would start it (LA10).
+    /// The connection, after asking the bus on every search whether localsearch owns its
+    /// name: a call to an absent name would start it (LA10). Without an owner the cached
+    /// connection is dropped too.
     async fn connection(&self) -> Option<tracker::SparqlConnection> {
+        let bus = if self.local {
+            None
+        } else {
+            let bus = gio::bus_get_future(gio::BusType::Session).await.ok();
+            if !name_has_owner(bus.as_ref()).await {
+                tracing::debug!("localsearch is not running");
+                self.connection.replace(None);
+                return None;
+            }
+            bus
+        };
         let cached = self.connection.borrow().clone();
         if cached.is_some() {
             return cached;
         }
-        let bus = gio::bus_get_future(gio::BusType::Session).await.ok()?;
-        if !name_has_owner(&bus).await {
-            tracing::debug!("localsearch is not running");
-            return None;
-        }
-        match tracker::SparqlConnection::bus_new_future(SERVICE, None, Some(&bus)).await {
+        match tracker::SparqlConnection::bus_new_future(SERVICE, None, bus.as_ref()).await {
             Ok(connection) => {
                 self.connection.replace(Some(connection.clone()));
                 self.warned.set(false);
@@ -149,7 +156,8 @@ async fn within<T>(deadline: Duration, future: impl Future<Output = T>) -> Optio
     done
 }
 
-async fn name_has_owner(bus: &gio::DBusConnection) -> bool {
+async fn name_has_owner(bus: Option<&gio::DBusConnection>) -> bool {
+    let Some(bus) = bus else { return false };
     let reply = bus
         .call_future(
             Some(BUS),
@@ -393,6 +401,33 @@ mod tests {
                 context.block_on(async {
                     let started = std::time::Instant::now();
                     assert!(Files::new().search("rel", &Usage::default(), 0).await.is_none());
+                    assert!(started.elapsed() < Duration::from_secs(3));
+                })
+            })
+            .expect("a fresh context is free");
+    }
+
+    #[test]
+    fn a_cached_connection_is_dropped_when_localsearch_leaves() {
+        // The rig cannot make a name leave a bus, but its session bus (or the lack of one)
+        // has no owner for it, which is the state after localsearch stops.
+        let context = gio::glib::MainContext::new();
+        context
+            .with_thread_default(|| {
+                context.block_on(async {
+                    let ontology = tracker::functions::sparql_get_ontology_nepomuk().expect("ontology");
+                    let connection = tracker::SparqlConnection::new(
+                        tracker::SparqlConnectionFlags::NONE,
+                        None::<&gio::File>,
+                        Some(&ontology),
+                        None::<&gio::Cancellable>,
+                    )
+                    .expect("an in-memory store");
+                    let files = Files::new();
+                    files.connection.replace(Some(connection));
+                    let started = std::time::Instant::now();
+                    assert!(files.search("rel", &Usage::default(), 0).await.is_none());
+                    assert!(files.connection.borrow().is_none());
                     assert!(started.elapsed() < Duration::from_secs(3));
                 })
             })
