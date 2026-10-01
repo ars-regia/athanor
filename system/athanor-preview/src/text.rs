@@ -6,6 +6,8 @@ use std::fs::File;
 use std::io::{self, Read};
 
 pub const MAX_BYTES: usize = 64 * 1024;
+/// A 64 KB file of newlines would make a label tens of thousands of lines tall.
+pub const MAX_LINES: usize = 400;
 
 pub fn head(file: &File) -> io::Result<String> {
     let mut bytes = Vec::with_capacity(MAX_BYTES);
@@ -23,11 +25,10 @@ fn lossy(bytes: &[u8]) -> String {
     clean(&String::from_utf8_lossy(bytes))
 }
 
+/// At most MAX_LINES lines, then the shared filter over the whole body.
 fn clean(text: &str) -> String {
-    text.lines()
-        .map(|line| athanor_unit::text::line(line, athanor_unit::text::BODY_CHARS))
-        .collect::<Vec<_>>()
-        .join("\n")
+    let body = text.lines().take(MAX_LINES).collect::<Vec<_>>().join("\n");
+    athanor_unit::text::lines(&body, MAX_BYTES)
 }
 
 #[cfg(test)]
@@ -48,11 +49,18 @@ mod tests {
     }
 
     #[test]
+    fn a_file_of_newlines_is_cut_to_the_line_cap() {
+        let text = clean(&"x\n".repeat(MAX_LINES * 3));
+        assert_eq!(text.lines().count(), MAX_LINES);
+    }
+
+    #[test]
     fn a_character_cut_by_the_limit_is_dropped() {
         let path = std::env::temp_dir().join(format!("athanor-preview-cut-{}", std::process::id()));
         std::fs::write(&path, [vec![b'a'; MAX_BYTES - 1], "é".as_bytes().to_vec()].concat()).expect("write");
         let text = head(&std::fs::File::open(&path).expect("open")).expect("read");
-        assert!(text.chars().all(|c| c == 'a' || c == '\n'));
+        assert_eq!(text.len(), MAX_BYTES - 1, "the é is dropped, the 'a's stay");
+        assert!(text.chars().all(|c| c == 'a'));
         std::fs::remove_file(path).expect("cleanup");
     }
 }
