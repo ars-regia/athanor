@@ -1,5 +1,6 @@
 [Unit]
 Description=Athanor launcher
+Documentation=https://github.com/hr-mes/athanor/blob/iso-v0/docs/architecture/doc_launcher.md
 # Enabled by hand until the switch (doc_launcher.md, LA12): systemctl --user enable --now
 # athanor-launcher. The session bus also starts it through os.athanor.Launcher1 (LA8).
 After=graphical-session.target athanor-desktop.service
