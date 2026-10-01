@@ -4,3 +4,4 @@
 
 pub mod item;
 pub mod rank;
+pub mod usage;
