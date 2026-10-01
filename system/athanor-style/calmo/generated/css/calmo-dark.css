@@ -221,15 +221,16 @@ button.layout-choice:disabled {
     font-size: 11.5px;
 }
 
-/* The bar (doc_bar.md, BR7). `bar` is one strip across the output. `float` and `minimal`
- * draw each group as an island on a transparent surface, as COSMIC's floating panel
- * does; the margin on the inner side leaves room for the shadow. */
+/* The bar (doc_bar.md, BR7; doc_shell.md, SH7). `bar` is one strip across the output.
+ * `float` draws each group as an island on a transparent surface, as COSMIC's floating
+ * panel does; the margin on the inner side leaves room for the shadow. `minimal` is a
+ * thin strip across the output: the `bar` strip without its vertical padding, as tall as
+ * the 32px buttons every module is drawn with, so no hit target shrinks. */
 window.athanor-bar {
     background-color: @ath_bar;
 }
 
-window.athanor-bar.preset-float,
-window.athanor-bar.preset-minimal {
+window.athanor-bar.preset-float {
     background-color: transparent;
 }
 
@@ -237,20 +238,21 @@ window.athanor-bar .bar-group {
     padding: 2px 4px;
 }
 
-window.athanor-bar.preset-float .bar-group,
 window.athanor-bar.preset-minimal .bar-group {
+    padding: 0 4px;
+}
+
+window.athanor-bar.preset-float .bar-group {
     border-radius: 10px;
     background-color: @ath_bar;
     box-shadow: 0 1px 2px @ath_shadow_near, 0 6px 18px @ath_shadow_panel;
 }
 
-window.athanor-bar.preset-float.edge-top .bar-group,
-window.athanor-bar.preset-minimal.edge-top .bar-group {
+window.athanor-bar.preset-float.edge-top .bar-group {
     margin: 6px 8px 14px;
 }
 
-window.athanor-bar.preset-float.edge-bottom .bar-group,
-window.athanor-bar.preset-minimal.edge-bottom .bar-group {
+window.athanor-bar.preset-float.edge-bottom .bar-group {
     margin: 14px 8px 6px;
 }
 

@@ -1,7 +1,7 @@
 [Unit]
 Description=Athanor bar
-# Enabled by hand until the switch of stage 2 (doc_bar.md, BR8): the package enables nothing.
-# It starts the shell daemon, which has no D-Bus activation file until then (BR1).
+# Enabled for every user by /usr/lib/systemd/user-preset/80-athanor-bar.preset.
+# It wants the shell daemon, which its own preset and the bus start too (BR1).
 Wants=athanor-shelld.service
 After=graphical-session.target athanor-desktop.service athanor-shelld.service
 Requisite=athanor-desktop.service
@@ -39,6 +39,9 @@ MemoryMax=192M
 RuntimeDirectory=athanor-bar athanor
 RuntimeDirectoryMode=0700
 RuntimeDirectoryPreserve=yes
+# ~/.local/state/athanor: the first-session marker (doc_shell.md, SH10). Writable under
+# ProtectHome=read-only, like the configuration directories below.
+StateDirectory=athanor
 # The favourites file, ~/.config/athanor/favorites.toml (BR7), and COSMIC's is_high_contrast
 # key in both theme modes, which the accessibility menu writes (BR3). Under
 # ProtectHome=read-only these are the only writable directories in the home directory:

@@ -1,17 +1,17 @@
 %global debug_package %{nil}
 Name:           athanor-layout-chooser
 Version:        1.0.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        The Athanor layout chooser
 License:        MIT
 
 BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gettext
-Requires:       gtk4 athanor-calmo athanor-layout-translator
+Requires:       gtk4 athanor-calmo athanor-bar
 
 %description
 A small window with three presets (Island, Bar, Essential) and two knobs (panel
-position, dock). It writes the user's layout document, which
-athanor-layout-translator applies without restarting the session. Keys the
+position, dock). It writes the user's layout document; athanor-bar and
+athanor-dock watch it and apply it without restarting the session. Keys the
 administrator marks mandatory are shown greyed.
 
 %prep
@@ -42,6 +42,10 @@ rm -rf locale-build
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-layout-chooser.mo
 
 %changelog
+* Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
+- Requires athanor-bar, which applies the layout with athanor-dock since the switch of
+  stage 2.
+
 * Thu Sep 24 2026 Athanor Forge <forge@athanor.os> - 1.0.0-1
 - First release (doc_shell.md, stage 1c): three presets and two knobs, mandatory keys
   greyed, degraded documents explained, a newer document kept before it is replaced;

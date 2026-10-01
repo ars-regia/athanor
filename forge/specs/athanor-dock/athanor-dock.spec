@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-dock
 Version:        1.0.0
-Release:        3%{?dist}
+Release:        4%{?dist}
 Summary:        The Athanor dock
 License:        MIT
 
@@ -15,7 +15,7 @@ the launcher, workspaces and application-library buttons and the running applica
 with favourites, which a drag reorders. Visible, auto-hiding behind a strip on its
 edge, or absent. Starts applications behind a Wayland security context, is confined
 with Landlock, and falls back to the vendor layout after five failures in ten minutes.
-Not enabled: until the switch of stage 2 the user enables athanor-dock.service by hand.
+Enabled for every user by a user preset under athanor-session.target.
 
 %prep
 
@@ -33,6 +33,8 @@ done
 install -D -m 0755 target/release/athanor-dock %{buildroot}/usr/bin/athanor-dock
 install -D -m 0644 forge/specs/athanor-dock/athanor-dock-1.0.0/data/athanor-dock.service \
     %{buildroot}/usr/lib/systemd/user/athanor-dock.service
+install -D -m 0644 forge/specs/athanor-dock/athanor-dock-1.0.0/data/80-athanor-dock.preset \
+    %{buildroot}/usr/lib/systemd/user-preset/80-athanor-dock.preset
 
 mkdir -p %{buildroot}/usr/share/locale
 cp -a locale-build/. %{buildroot}/usr/share/locale/
@@ -44,10 +46,15 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-dock
 %files
 /usr/bin/athanor-dock
 /usr/lib/systemd/user/athanor-dock.service
+/usr/lib/systemd/user-preset/80-athanor-dock.preset
 %lang(it) /usr/share/locale/it/LC_MESSAGES/athanor-dock.mo
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-dock.mo
 
 %changelog
+* Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-4
+- Stage 2 switch (doc_bar.md, BR8): enabled for every user by
+  /usr/lib/systemd/user-preset/80-athanor-dock.preset under athanor-session.target.
+
 * Tue Sep 29 2026 Athanor Forge <forge@athanor.os> - 1.0.0-3
 - The dock of doc_bar.md, BR7, replacing the GTK 0.7 program of the same name, whose
   library now lives in the athanor-shell-rs workspace: one surface per output on the

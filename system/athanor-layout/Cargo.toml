@@ -4,7 +4,7 @@ version = "1.0.0"
 edition = "2021"
 authors = ["Athanor Forge <forge@athanor.os>"]
 license = "MIT"
-description = "The Athanor layout document: schema, layers, presets, and its rendering for cosmic-panel"
+description = "The Athanor layout document: schema, layers and presets"
 
 [dependencies]
 toml = { workspace = true }

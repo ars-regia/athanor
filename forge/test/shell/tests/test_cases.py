@@ -1,5 +1,6 @@
 import sys
 import unittest
+import zlib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -76,14 +77,20 @@ class CasesTest(unittest.TestCase):
         "bar-popups",
         "bar-notifications",
         "bar-tray",
+        "bar-network",
+        "bar-bluetooth",
+        "bar-audio",
+        "bar-battery",
+        "bar-shield",
     )
 
-    def test_the_bar_brings_nine_scenes_of_twelve_cases(self):
+    def test_every_bar_scene_brings_twelve_cases(self):
         found = [
             case for surface in self.BAR_SCENES for case in cases.surface_cases(surface)
         ]
-        self.assertEqual(len(found), 108)
-        self.assertEqual(len({c.tag for c in found}), 108)
+        self.assertEqual(len(self.BAR_SCENES), 14)
+        self.assertEqual(len(found), 12 * len(self.BAR_SCENES))
+        self.assertEqual(len({c.tag for c in found}), len(found))
 
     def test_bar_tags_are_file_names_and_name_their_scene(self):
         for surface in self.BAR_SCENES:
@@ -93,11 +100,56 @@ class CasesTest(unittest.TestCase):
                 )
 
 
+    def test_br9_has_fifteen_scenes_and_180_cases(self):
+        scenes = self.BAR_SCENES + ("dock",)
+        found = [case for surface in scenes for case in cases.surface_cases(surface)]
+        self.assertEqual(len(scenes), 15)
+        self.assertEqual(len(found), 180)
+        self.assertEqual(len({c.tag for c in found}), 180)
+
     def test_the_dock_has_the_twelve_cases_of_br9(self):
         found = cases.surface_cases("dock")
         self.assertEqual(len({c.tag for c in found}), 12)
         for case in found:
             self.assertRegex(case.tag, r"^dock-(light|dark)-(1\.0|1\.5)-(en|de|rtl)$")
+
+
+def pixels(path):
+    """The decompressed image data of a PNG: equal for two files of one encoder exactly
+    when their size, format and pixels are equal."""
+    data, pos, header, idat = path.read_bytes(), 8, b"", b""
+    while pos < len(data):
+        length = int.from_bytes(data[pos : pos + 4], "big")
+        kind, body = data[pos + 4 : pos + 8], data[pos + 8 : pos + 8 + length]
+        header = body if kind == b"IHDR" else header
+        idat += body if kind == b"IDAT" else b""
+        pos += 12 + length
+    return header, zlib.decompress(idat)
+
+
+class MinimalIsNotFloatTest(unittest.TestCase):
+    """doc_shell.md, SH7: `minimal` is a thin edge-to-edge bar, `float` a floating
+    rounded panel. Every minimal golden with a float twin (same knobs, outputs, scale and
+    shape) must draw differently from it."""
+
+    GOLDENS = Path(__file__).resolve().parent.parent / "golden" / "layout"
+
+    def test_every_minimal_golden_differs_from_its_float_twin(self):
+        pairs = [
+            (case.tag, case.tag.replace("layout-minimal-", "layout-float-", 1))
+            for case in cases.layout_cases()
+            if case.preset == "minimal"
+        ]
+        pairs = [(a, b) for a, b in pairs if (self.GOLDENS / f"{b}.png").exists()]
+        self.assertGreaterEqual(len(pairs), 6)
+        for minimal, float_ in pairs:
+            with self.subTest(minimal):
+                self.assertTrue(
+                    pixels(self.GOLDENS / f"{minimal}.png")
+                    != pixels(self.GOLDENS / f"{float_}.png"),
+                    f"{minimal} draws the same pixels as {float_}",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

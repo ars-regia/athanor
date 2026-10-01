@@ -1,8 +1,7 @@
 [Unit]
 Description=Athanor shell daemon: desktop notifications and the StatusNotifier watcher
-# No [Install] and no D-Bus activation file until the switch of stage 2: athanor-bar.service
-# wants this unit, so the daemon never takes org.freedesktop.Notifications while
-# cosmic-notifications restarts (doc_bar.md, BR1).
+# Started with the session by its preset, and by the bus when a client calls one of its
+# names first (doc_bar.md, BR1 and BR8).
 After=graphical-session.target
 PartOf=graphical-session.target
 # The daemon counts its own failures and gives up after five in ten minutes
@@ -51,3 +50,6 @@ RestrictSUIDSGID=yes
 LockPersonality=yes
 # The daemon speaks only D-Bus and journald, both over Unix sockets.
 RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=athanor-session.target

@@ -9,10 +9,13 @@ use gtk4::accessible::Property;
 use gtk4::prelude::*;
 
 use super::Bar;
+use crate::i18n::tr;
 
 pub struct Popup {
     pub button: gtk4::Button,
     pub popover: gtk4::Popover,
+    /// Under the content set by [`Popup::set_content`]: an action did not complete.
+    note: gtk4::Label,
 }
 
 impl Popup {
@@ -23,6 +26,17 @@ impl Popup {
         button.set_tooltip_text(Some(name));
         button.update_property(&[Property::Label(name)]);
         let popover = attach(bar, &button);
+        let note = gtk4::Label::new(Some(&tr("The action did not complete.")));
+        note.add_css_class("bar-popover-note");
+        note.set_wrap(true);
+        note.set_xalign(0.0);
+        note.set_visible(false);
+        let hidden = note.downgrade();
+        popover.connect_closed(move |_| {
+            if let Some(note) = hidden.upgrade() {
+                note.set_visible(false);
+            }
+        });
         let weak_bar = Rc::downgrade(bar);
         let toggled = popover.clone();
         button.connect_clicked(move |_| {
@@ -33,7 +47,33 @@ impl Popup {
                 toggled.popup();
             }
         });
-        Popup { button, popover }
+        Popup {
+            button,
+            popover,
+            note,
+        }
+    }
+
+    /// The popover's content, with the failure note under it.
+    pub fn set_content(&self, content: &impl IsA<gtk4::Widget>) {
+        let column = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+        column.append(content);
+        column.append(&self.note);
+        self.popover.set_child(Some(&column));
+    }
+
+    /// An action the person took in the open popover did not complete: the note shows until
+    /// the popover closes, and assistive technologies announce it. A closed popover shows
+    /// nothing, and would show a stale note at its next opening.
+    pub fn failed(&self) {
+        if !self.popover.is_visible() {
+            return;
+        }
+        self.note.set_visible(true);
+        self.note.announce(
+            &self.note.text(),
+            gtk4::AccessibleAnnouncementPriority::Medium,
+        );
     }
 
     pub fn open(&self, bar: &Rc<Bar>) {
@@ -93,4 +133,21 @@ pub fn towards_inside(bar: &Bar) -> gtk4::PositionType {
         PanelEdge::Top => gtk4::PositionType::Bottom,
         PanelEdge::Bottom => gtk4::PositionType::Top,
     }
+}
+
+/// GTK 4.20 gives a check button no AT-SPI action: its accessible lists only the widget's own
+/// parameterless actions. Without one, an assistive technology that acts through AT-SPI
+/// (voice control, switch access, the rig) cannot choose a radio item. `radio.choose`
+/// selects this item, as a click would, so its `toggled` handler runs.
+pub fn expose_choose_action(button: &gtk4::CheckButton) {
+    let choose = gtk4::gio::SimpleAction::new("choose", None);
+    let weak = button.downgrade();
+    choose.connect_activate(move |_, _| {
+        if let Some(button) = weak.upgrade() {
+            button.set_active(true);
+        }
+    });
+    let group = gtk4::gio::SimpleActionGroup::new();
+    group.add_action(&choose);
+    button.insert_action_group("radio", Some(&group));
 }

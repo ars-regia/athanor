@@ -172,3 +172,276 @@ msgstr "Keine Benachrichtigungen"
 
 msgid "System tray"
 msgstr "Infobereich"
+
+msgid "Restart to update"
+msgstr "Zum Aktualisieren neu starten"
+
+msgid "Restart and install the update now?"
+msgstr "Jetzt neu starten und die Aktualisierung installieren?"
+
+msgid "System image verified"
+msgstr "Systemabbild verifiziert"
+
+msgid "Not verified yet"
+msgstr "Noch nicht verifiziert"
+
+msgid "Update refused"
+msgstr "Aktualisierung abgelehnt"
+
+msgid "Signed with a key of the policy in force"
+msgstr "Mit einem Schlüssel der geltenden Richtlinie signiert"
+
+msgid "Not verified: installed from media"
+msgstr "Nicht verifiziert: von einem Datenträger installiert"
+
+msgid "Not verified: no signature"
+msgstr "Nicht verifiziert: keine Signatur"
+
+msgid "Not verified: its key is not in the policy"
+msgstr "Nicht verifiziert: sein Schlüssel steht nicht in der Richtlinie"
+
+msgid "Not verified: fetched under a permissive policy"
+msgstr "Nicht verifiziert: unter einer freizügigen Richtlinie abgerufen"
+
+msgid "Not verified: the image is outside the policy's scope"
+msgstr "Nicht verifiziert: das Abbild liegt außerhalb des Geltungsbereichs der Richtlinie"
+
+msgid "Up to date"
+msgstr "Auf dem neuesten Stand"
+
+msgid "An update is available; it downloads at the next check"
+msgstr "Eine Aktualisierung ist verfügbar; sie wird bei der nächsten Prüfung heruntergeladen"
+
+msgid "An update is ready; it installs when you restart"
+msgstr "Eine Aktualisierung ist bereit; sie wird beim Neustart installiert"
+
+msgid "The update installs at the next restart"
+msgstr "Die Aktualisierung wird beim nächsten Neustart installiert"
+
+msgid "The last update was refused by the policy"
+msgstr "Die letzte Aktualisierung wurde von der Richtlinie abgelehnt"
+
+msgid "You went back from the newest version; only a newer one is offered"
+msgstr "Sie sind von der neuesten Version zurückgekehrt; angeboten wird nur eine neuere"
+
+msgid "This version is older than one this machine has run"
+msgstr "Diese Version ist älter als eine, die auf diesem Rechner bereits lief"
+
+msgid "The last check failed: network error"
+msgstr "Die letzte Prüfung ist fehlgeschlagen: Netzwerkfehler"
+
+msgid "The last check failed: registry error"
+msgstr "Die letzte Prüfung ist fehlgeschlagen: Registry-Fehler"
+
+msgid "The last check failed: refused by the policy"
+msgstr "Die letzte Prüfung ist fehlgeschlagen: von der Richtlinie abgelehnt"
+
+msgid "The last check failed: storage error"
+msgstr "Die letzte Prüfung ist fehlgeschlagen: Speicherfehler"
+
+msgid "The last check failed: internal error"
+msgstr "Die letzte Prüfung ist fehlgeschlagen: interner Fehler"
+
+msgid "No trust state yet: the first check has not run"
+msgstr "Noch kein Vertrauensstatus: die erste Prüfung ist noch nicht gelaufen"
+
+msgid "The trust state file is not owned by the system and was ignored"
+msgstr "Die Datei des Vertrauensstatus gehört nicht dem System und wurde ignoriert"
+
+msgid "The trust state file could not be read"
+msgstr "Die Datei des Vertrauensstatus konnte nicht gelesen werden"
+
+msgid "Not authorised"
+msgstr "Nicht berechtigt"
+
+msgid "Another update request is running"
+msgstr "Eine andere Aktualisierungsanfrage läuft bereits"
+
+msgid "Nothing is downloaded yet; the update downloads at the next check"
+msgstr "Noch nichts heruntergeladen; die Aktualisierung wird bei der nächsten Prüfung heruntergeladen"
+
+msgid "There is no previous version to go back to"
+msgstr "Es gibt keine vorherige Version, zu der zurückgekehrt werden kann"
+
+msgid "A program is blocking the restart; close it and try again"
+msgstr "Ein Programm blockiert den Neustart; schließen Sie es und versuchen Sie es erneut"
+
+msgid "The request failed; the system journal says why"
+msgstr "Die Anfrage ist fehlgeschlagen; das Systemjournal nennt den Grund"
+
+msgid "The update service did not answer"
+msgstr "Der Aktualisierungsdienst hat nicht geantwortet"
+
+msgid "Version {version}"
+msgstr "Version {version}"
+
+msgid "Built on {date}"
+msgstr "Erstellt am {date}"
+
+msgid "Last checked on {date}"
+msgstr "Zuletzt geprüft am {date}"
+
+msgid "Never checked"
+msgstr "Nie geprüft"
+
+msgid "Host: {host}"
+msgstr "Host: {host}"
+
+msgid "Signature policy in force"
+msgstr "Signaturrichtlinie in Kraft"
+
+msgid "Signature policy not in force"
+msgstr "Signaturrichtlinie nicht in Kraft"
+
+msgid "The policy is the one Athanor ships"
+msgstr "Die Richtlinie ist die von Athanor ausgelieferte"
+
+msgid "The policy was changed on this machine"
+msgstr "Die Richtlinie wurde auf diesem Rechner geändert"
+
+msgid "Secure Boot on"
+msgstr "Secure Boot aktiv"
+
+msgid "Secure Boot off: this machine runs in the declared degraded mode"
+msgstr "Secure Boot inaktiv: dieser Rechner läuft im erklärten eingeschränkten Modus"
+
+msgid "Go back to the previous version"
+msgstr "Zur vorherigen Version zurückkehren"
+
+msgid "Go back to the previous version and restart? This asks for an administrator's password."
+msgstr "Zur vorherigen Version zurückkehren und neu starten? Dafür ist das Passwort eines Administrators nötig."
+
+msgid "Go back"
+msgstr "Zurückkehren"
+
+msgid "Network"
+msgstr "Netzwerk"
+
+msgid "Wi-Fi"
+msgstr "WLAN"
+
+msgid "Airplane mode"
+msgstr "Flugmodus"
+
+msgid "Wired: connected"
+msgstr "Kabel: verbunden"
+
+msgid "Wired: not connected"
+msgstr "Kabel: nicht verbunden"
+
+msgid "{network}, connected"
+msgstr "{network}, verbunden"
+
+msgid "{network}, connecting"
+msgstr "{network}, wird verbunden"
+
+msgid "{network}, needs Settings"
+msgstr "{network}, erfordert Einstellungen"
+
+msgid "{network}, secured"
+msgstr "{network}, gesichert"
+
+msgid "Password for {network}"
+msgstr "Passwort für {network}"
+
+msgid "The password was not accepted. Try again."
+msgstr "Das Passwort wurde nicht akzeptiert. Bitte erneut versuchen."
+
+msgid "Connect"
+msgstr "Verbinden"
+
+msgid "Bluetooth"
+msgstr "Bluetooth"
+
+msgid "Nearby devices"
+msgstr "Geräte in der Nähe"
+
+msgid "{device}, connected"
+msgstr "{device}, verbunden"
+
+msgid "Pair with {device}?"
+msgstr "Mit {device} koppeln?"
+
+msgid "Pair only if {device} shows the same number."
+msgstr "Nur koppeln, wenn {device} dieselbe Zahl zeigt."
+
+msgid "Pairing with {device}"
+msgstr "Kopplung mit {device}"
+
+msgid "Type this code on {device}, then press Enter there."
+msgstr "Diesen Code auf {device} eingeben und dort die Eingabetaste drücken."
+
+msgid "Pair"
+msgstr "Koppeln"
+
+msgid "Sound"
+msgstr "Ton"
+
+msgid "Output"
+msgstr "Ausgabe"
+
+msgid "Input"
+msgstr "Eingabe"
+
+msgid "Output volume"
+msgstr "Ausgabelautstärke"
+
+msgid "Input volume"
+msgstr "Eingabelautstärke"
+
+msgid "Mute output"
+msgstr "Ausgabe stummschalten"
+
+msgid "Mute microphone"
+msgstr "Mikrofon stummschalten"
+
+msgid "{device}, in use"
+msgstr "{device}, in Verwendung"
+
+msgid "Previous track"
+msgstr "Vorheriger Titel"
+
+msgid "Next track"
+msgstr "Nächster Titel"
+
+msgid "Play"
+msgstr "Wiedergabe"
+
+msgid "Pause"
+msgstr "Pause"
+
+msgid "Battery"
+msgstr "Akku"
+
+msgid "{percent} %"
+msgstr "{percent} %"
+
+msgid "{hours} h {minutes} min left"
+msgstr "Noch {hours} h {minutes} min"
+
+msgid "{hours} h {minutes} min until full"
+msgstr "{hours} h {minutes} min bis voll"
+
+msgid "Charging"
+msgstr "Wird geladen"
+
+msgid "Fully charged"
+msgstr "Vollständig geladen"
+
+msgid "Power saver"
+msgstr "Energiesparen"
+
+msgid "Balanced"
+msgstr "Ausgewogen"
+
+msgid "Performance"
+msgstr "Leistung"
+
+msgid "Power mode"
+msgstr "Energiemodus"
+
+msgid "Screen brightness"
+msgstr "Bildschirmhelligkeit"
+
+msgid "The action did not complete."
+msgstr "Die Aktion wurde nicht abgeschlossen."

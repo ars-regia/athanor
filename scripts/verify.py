@@ -721,14 +721,11 @@ def check_specs():
 # 10. boundary — COSMIC stays behind the compositor client (doc_shell.md, SH2)
 # --------------------------------------------------------------------------- #
 
-# The only places that may depend on COSMIC. The translator and the two layout modules
-# leave the list when our bar replaces COSMIC's panel (doc_shell.md, SH2).
+# SH2: the compositor client is the protocol boundary; the theme tool generates COSMIC's
+# theme files. Nothing else may depend on COSMIC, the frozen tree included.
 COSMIC_ALLOWED = (
     "system/athanor-compositor-client/",
     "forge/tools/calmo-cosmic-theme/",
-    "forge/specs/athanor-layout-translator/",
-    "system/athanor-layout/src/cosmic.rs",
-    "system/athanor-layout/src/apply.rs",
 )
 BOUNDARY_DIRS = ("system", "forge/specs", "forge/tools")
 DEPENDENCY_TABLES = ("dependencies", "dev-dependencies", "dev_dependencies",
@@ -759,7 +756,7 @@ def boundary_problems(root):
     for base in BOUNDARY_DIRS:
         for path in walk(root / base, ".toml"):
             relative = path.relative_to(root).as_posix()
-            if path.name != "Cargo.toml" or relative.startswith(COSMIC_ALLOWED) or is_frozen(relative):
+            if path.name != "Cargo.toml" or relative.startswith(COSMIC_ALLOWED):
                 continue
             try:
                 manifest = tomllib.loads(read(path))
@@ -771,7 +768,7 @@ def boundary_problems(root):
                                 f"may depend on COSMIC")
         for path in walk(root / base, ".rs"):
             relative = path.relative_to(root).as_posix()
-            if relative.startswith(COSMIC_ALLOWED) or is_frozen(relative):
+            if relative.startswith(COSMIC_ALLOWED):
                 continue
             for i, line in enumerate(read(path).split("\n"), 1):
                 if "com.system76" in line.split("//")[0]:

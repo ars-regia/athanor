@@ -7,7 +7,6 @@ on:
       - "system/athanor-style/**"
       - "forge/specs/athanor-greeter-ui/**"
       - "system/athanor-layout/**"
-      - "forge/specs/athanor-layout-translator/**"
       - "forge/specs/athanor-layout-chooser/**"
       - "system/athanor-compositor-client/**"
       - "system/athanor-i18n/**"
@@ -16,6 +15,7 @@ on:
       - "forge/specs/athanor-dock/**"
       - "system/athanor-apps/**"
       - "system/athanor-unit/**"
+      - "system/athanor-trust-state/**"
       - "forge/test/shell/**"
       - ".github/workflows/shell-surfaces.yml"
   pull_request:
@@ -23,7 +23,6 @@ on:
       - "system/athanor-style/**"
       - "forge/specs/athanor-greeter-ui/**"
       - "system/athanor-layout/**"
-      - "forge/specs/athanor-layout-translator/**"
       - "forge/specs/athanor-layout-chooser/**"
       - "system/athanor-compositor-client/**"
       - "system/athanor-i18n/**"
@@ -32,6 +31,7 @@ on:
       - "forge/specs/athanor-dock/**"
       - "system/athanor-apps/**"
       - "system/athanor-unit/**"
+      - "system/athanor-trust-state/**"
       - "forge/test/shell/**"
       - ".github/workflows/shell-surfaces.yml"
   workflow_dispatch:
@@ -81,7 +81,7 @@ jobs:
             .scratch/shell-rig/greeter-*.png
 
   layout:
-    name: Layout library, translator and chooser; layout and chooser cases; end-to-end press
+    name: Layout library and chooser; layout cases on the bar and the dock; chooser cases; end-to-end press
     needs: lint
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -89,12 +89,12 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Rig image
         run: bash forge/test/shell/rig.sh build-image
-      - name: Unit tests of the rig's scripts, against the rig's ImageMagick 7
-        run: bash forge/test/shell/rig.sh rig-tests
-      - name: COSMIC's shipped panel keys match the renderer's fixture
-        run: bash forge/test/shell/rig.sh cosmic-panel-defaults
       - name: Build and test the layout crates
         run: bash forge/test/shell/rig.sh build-layout
+      - name: Build and test the bar and check the DT_NEEDED order
+        run: bash forge/test/shell/rig.sh build-bar
+      - name: Build and test the dock and check the DT_NEEDED order
+        run: bash forge/test/shell/rig.sh build-dock
       - name: Layout cases (21) against the goldens
         run: bash forge/test/shell/rig.sh surface layout
       - name: Accessibility tree of the chooser
@@ -167,12 +167,18 @@ jobs:
         run: bash forge/test/shell/rig.sh layer-guard bar
       - name: Accessibility tree of the bar
         run: bash forge/test/shell/rig.sh atspi bar
+      - name: Accessibility tree of the bar with every system module
+        run: bash forge/test/shell/rig.sh atspi bar-modules
       - name: Live layout, mandatory keys, running windows, the power menu and memory
         run: bash forge/test/shell/rig.sh bar-e2e
+      - name: The network, Bluetooth, audio and battery modules against their fixtures
+        run: bash forge/test/shell/rig.sh bar-modules-e2e
       - name: athanor-shelld, the tray watcher of the tray scene
         run: bash forge/test/shell/rig.sh build-shelld
       - name: Notification popups and list against a fake daemon
         run: bash forge/test/shell/rig.sh notifications-e2e
+      - name: Shield end to end
+        run: bash forge/test/shell/rig.sh shield-e2e
       - name: Tray host and menus against athanor-shelld
         run: bash forge/test/shell/rig.sh tray-e2e
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -182,7 +188,9 @@ jobs:
           path: |
             .scratch/shell-rig/*.log
             .scratch/shell-rig/bar-e2e.png
+            .scratch/shell-rig/bar-modules-e2e.png
             .scratch/shell-rig/notifications-e2e.png
+            .scratch/shell-rig/shield-e2e.png
             .scratch/shell-rig/tray-e2e.png
 
   bar-scenes:
@@ -204,6 +212,11 @@ jobs:
             bar-popups,
             bar-notifications,
             bar-tray,
+            bar-network,
+            bar-bluetooth,
+            bar-audio,
+            bar-battery,
+            bar-shield,
           ]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

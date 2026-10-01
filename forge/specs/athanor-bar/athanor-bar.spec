@@ -1,20 +1,26 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        1%{?dist}
+Release:        4%{?dist}
 Summary:        The Athanor bar
 License:        MIT
 
-BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gtk4-layer-shell-devel binutils python3 gettext
+BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gtk4-layer-shell-devel pulseaudio-libs-devel binutils python3 gettext
 Requires:       gtk4 gtk4-layer-shell athanor-calmo athanor-shelld
+# The shield asks os.athanor.Update1.State(), which athanor-update serves from 1.0.0-2.
+Requires:       athanor-update >= 1.0.0-2
+# The first-session pick and the vendor layout moved here from the translator.
+Obsoletes:      athanor-layout-translator < 1.0.1
 
 %description
 One layer-shell surface per output, laid out by the preset of the user's layout
 document: the launcher, application-library and workspaces buttons, running
-applications with favourites, the input source, accessibility, tiling, the clock and
-the power menu. Starts applications behind a Wayland security context, is confined
+applications with favourites, the input source, accessibility, tiling, audio with
+media controls, Bluetooth, network, battery, the clock, the power menu with Restart to
+update, and the trust shield with its sheet. Starts applications behind a Wayland security context, is confined
 with Landlock, and falls back to the vendor layout after five failures in ten minutes.
-Not enabled: until the switch of stage 2 the user enables athanor-bar.service by hand.
+Picks the default layout of a user's first session (SH10) and ships the vendor layout.
+Enabled for every user by a user preset under athanor-session.target.
 
 %prep
 
@@ -34,6 +40,12 @@ install -D -m 0644 forge/specs/athanor-bar/athanor-bar-1.0.0/data/athanor-bar.se
     %{buildroot}/usr/lib/systemd/user/athanor-bar.service
 install -D -m 0644 forge/specs/athanor-bar/athanor-bar-1.0.0/data/favorites.toml \
     %{buildroot}/usr/share/athanor/favorites.toml
+install -D -m 0644 forge/specs/athanor-bar/athanor-bar-1.0.0/data/80-athanor-bar.preset \
+    %{buildroot}/usr/lib/systemd/user-preset/80-athanor-bar.preset
+install -D -m 0644 forge/specs/athanor-bar/athanor-bar-1.0.0/data/50-athanor-bar.conf \
+    %{buildroot}/usr/lib/systemd/user/pipewire-pulse.socket.d/50-athanor-bar.conf
+install -D -m 0644 system/athanor-layout/vendor/10-athanor.toml \
+    %{buildroot}/usr/share/athanor/layout/10-athanor.toml
 
 mkdir -p %{buildroot}/usr/share/locale
 cp -a locale-build/. %{buildroot}/usr/share/locale/
@@ -46,12 +58,45 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %files
 /usr/bin/athanor-bar
 /usr/lib/systemd/user/athanor-bar.service
+/usr/lib/systemd/user-preset/80-athanor-bar.preset
+%dir /usr/lib/systemd/user/pipewire-pulse.socket.d
+/usr/lib/systemd/user/pipewire-pulse.socket.d/50-athanor-bar.conf
 %dir /usr/share/athanor
 /usr/share/athanor/favorites.toml
+%dir /usr/share/athanor/layout
+/usr/share/athanor/layout/10-athanor.toml
 %lang(it) /usr/share/locale/it/LC_MESSAGES/athanor-bar.mo
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
+* Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-4
+- Takes over the first-session layout pick (SH10) and the vendor layout from
+  athanor-layout-translator, which it obsoletes.
+- Stage 2 switch (doc_bar.md, BR8): enabled for every user by
+  /usr/lib/systemd/user-preset/80-athanor-bar.preset under athanor-session.target.
+- The minimal preset draws a thin strip across the output (SH7), no longer float's
+  islands.
+- A preset changed live takes the new preset's depth and exclusive zone.
+- pipewire-pulse.socket creates %t/pulse 0700 (a drop-in): at 0755, libpulse's chmod
+  failed on the bar's read-only runtime directory and the audio module stayed away
+  until another client started the sound server.
+
+* Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-3
+- The trust shield and its sheet (doc_bar.md, BR6): the seal and header follow the state
+  os.athanor.Update1.State() returns, trusted only from root and asked again hourly, when
+  /run/athanor-update/state.json changes and soon after no answer; the sheet names the
+  version, the signature, the update, the policy and Secure Boot, and offers Go back; a
+  refusal opens it on the output that asked; popups wait while it is open.
+- Restart to update in the power menu (BR3), shown only when an update is downloaded.
+  Both actions confirm first and call os.athanor.Update1.
+- Requires athanor-update 1.0.0-2 or later, the first to serve State().
+
+* Tue Sep 29 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
+- The network, Bluetooth, audio and battery modules (doc_bar.md, BR3): NetworkManager's
+  secret agent and BlueZ's pairing agent registered by the bar, with calls from any other
+  sender refused; audio over libpulse with MPRIS media controls; the power profile over
+  the power-profiles interface and the brightness through logind.
+
 * Sat Sep 26 2026 Athanor Forge <forge@athanor.os> - 1.0.0-1
 - First release (doc_bar.md, BR1, BR2, BR3, BR6, BR7): one surface per output with the
   three presets applied live and mandatory keys honoured; launcher, application library,

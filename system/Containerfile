@@ -121,7 +121,7 @@ COPY forge/config/packages.json /usr/share/athanor/packages.json
 # UPSTREAM PACKAGES: the desktop (COSMIC), media, and CLI packages the manifest lists
 # under upstream_*. Today these are the official Fedora and RPM Fusion binaries,
 # installed here from the repositories the base image configures -- the same origin as
-# cosmic-panel and the rest the base already carries (Vendor: Fedora Project). Zero-trust
+# cosmic-comp and the rest the base already carries (Vendor: Fedora Project). Zero-trust
 # debt (2026-09-11 decision): they are to be rebuilt from source in the Athanor builder
 # and served from the tier repositories, as the custom packages are; until then Fedora's
 # GPG signatures are the provenance. The list is the single source of truth in
@@ -175,6 +175,21 @@ RUN /usr/libexec/athanor-update/render-policy --registry "${IMAGE_REGISTRY}" --k
 # Declarative Systemd presets & sysusers
 RUN authselect enable-feature with-systemd-homed && \
     systemctl enable tetragon.service systemd-sysext.service systemd-homed.service athanor-tpm-rollback-check.service athanor-tpm-rollback-update.service athanor-tpm-luks-seal.service && systemd-sysusers && systemctl preset-all && systemctl --global preset-all
+
+# Stage 2 switch (doc_shell.md, section 8, item 2): the COSMIC shell is gone, our shell is
+# enabled for every user, and each bus name it owns has exactly one activation file.
+RUN for pkg in cosmic-panel cosmic-applets cosmic-notifications athanor-layout-translator; do \
+        if rpm -q --quiet "$pkg"; then echo "the image still carries $pkg" >&2; exit 1; fi; \
+    done && \
+    for unit in athanor-bar athanor-dock athanor-shelld; do \
+        test -L "/etc/systemd/user/athanor-session.target.wants/$unit.service" \
+            || { echo "$unit.service is not enabled for every user" >&2; exit 1; }; \
+    done && \
+    for name in org.freedesktop.Notifications org.kde.StatusNotifierWatcher; do \
+        owners=$(grep -lx "Name=$name" /usr/share/dbus-1/services/*.service); \
+        test "$owners" = "/usr/share/dbus-1/services/$name.service" \
+            || { echo "$name is activated by: $owners" >&2; exit 1; }; \
+    done
 
 # GPU stages (S2-S5): the signed modules of the kernel NVR with the locked vendor packages of
 # the same version, the shim and athanor-nvidia-config. libva-nvidia-driver (VA-API on NVDEC)

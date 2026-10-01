@@ -45,10 +45,6 @@ jobs:
           python3 -B -m unittest discover -s system/nvidia/tests -v
       - name: Build ordering scripts (unit tests against an offline registry)
         run: python3 -B -m unittest discover -s system/tests -v
-      - name: Session services (unit tests)
-        run: |
-          set -euo pipefail
-          python3 -B -m unittest discover -s forge/specs/athanor-system-services/tests -v
       - name: Update and trust package (unit tests)
         run: python3 -B -m unittest discover -s forge/specs/athanor-update/tests -v
       - name: Greeter session script (unit tests)

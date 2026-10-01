@@ -4,16 +4,23 @@
 //! key the policy marks mandatory holds here too. Every change applies live.
 
 mod accessibility;
+mod audio;
+mod battery;
+mod bluetooth;
+mod bus;
 mod clock;
 mod input;
 mod logind;
 mod menu;
+mod mpris;
+mod network;
 mod notifications;
 mod openers;
 mod popup;
 mod popups;
 mod power;
 mod running;
+mod shield;
 mod tiling;
 mod tray;
 
@@ -53,10 +60,12 @@ pub enum Changed {
     Tray,
     /// Once a second: the clock, and a time zone that changed.
     Tick,
+    /// The trust state file changed, or its badge aged (BR6).
+    Trust,
 }
 
 impl Changed {
-    pub const ALL: [Changed; 8] = [
+    pub const ALL: [Changed; 9] = [
         Changed::Windows,
         Changed::Workspaces,
         Changed::Keyboard,
@@ -65,6 +74,7 @@ impl Changed {
         Changed::Tick,
         Changed::Notifications,
         Changed::Tray,
+        Changed::Trust,
     ];
 }
 
@@ -156,6 +166,8 @@ pub struct Bar {
     notifications: Rc<notifications::Service>,
     /// One tray host per bar: the watcher knows the bar as a single host.
     tray: Rc<tray::Host>,
+    /// One trust state per bar: every surface's shield reads it.
+    trust: Rc<shield::Trust>,
     /// The bar itself, for the `&self` methods that defer work to an idle.
     me: Weak<Bar>,
 }
@@ -171,6 +183,8 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
     let cosmic = theme::read();
     calmo::load(&display, cosmic.variant());
     theme::load_accent(&display, &cosmic);
+    let layout = source.layout();
+    tracing::info!(layout = ?layout, "layout applied");
     let client = match Client::connect(&display) {
         Ok(client) => Some(client),
         Err(err) => {
@@ -184,7 +198,7 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
         outputs: RefCell::new(outputs::current(&display)),
         display,
         client,
-        layout: Cell::new(source.layout()),
+        layout: Cell::new(layout),
         source,
         favorites: Store::load(favorites_file),
         surfaces: RefCell::new(Vec::new()),
@@ -198,6 +212,7 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
         me: weak.clone(),
         notifications: notifications::Service::start(weak),
         tray: tray::Host::start(weak),
+        trust: shield::Trust::start(weak),
     });
     bar.rebuild();
     if bar.surfaces.borrow().is_empty() {
@@ -236,8 +251,11 @@ fn build(module: Module, bar: &Rc<Bar>, connector: Option<&str>) -> Option<Box<d
         Module::RunningApps => running::new(bar),
         Module::Notifications => notifications::new(bar),
         Module::Tray => tray::new(bar),
-        // Later tasks of this plan, and the plans of 2b.3 to 2b.5.
-        _ => None,
+        Module::Network => network::new(bar),
+        Module::Bluetooth => bluetooth::new(bar),
+        Module::Shield => shield::new(bar),
+        Module::Audio => audio::new(bar),
+        Module::Battery => battery::new(bar),
     }
 }
 
@@ -248,6 +266,10 @@ impl Bar {
 
     pub fn layout(&self) -> Layout {
         self.layout.get()
+    }
+
+    pub fn trust(&self) -> &Rc<shield::Trust> {
+        &self.trust
     }
 
     /// BR6: at most one popover of the bar is open; opening one closes the other.
@@ -280,9 +302,21 @@ impl Bar {
     /// Opens `module`'s popover on the first surface, for the captures of BR9
     /// (`ATHANOR_BAR_OPEN`). A module whose source answers later opens itself then.
     pub fn open_module(self: &Rc<Self>, module: Module) {
+        self.open_module_near(module, None);
+    }
+
+    /// Opens `module`'s popover on the surface that holds `near`, or on the first surface
+    /// when `near` is gone or on none. An open popover stays open.
+    pub fn open_module_near(self: &Rc<Self>, module: Module, near: Option<&gtk4::Widget>) {
         let surfaces = self.surfaces.borrow();
-        let target = surfaces
-            .first()
+        let root = near.and_then(WidgetExt::root);
+        let target = root
+            .and_then(|root| {
+                surfaces
+                    .iter()
+                    .find(|surface| surface.window.upcast_ref::<gtk4::Root>() == &root)
+            })
+            .or_else(|| surfaces.first())
             .and_then(|surface| surface.modules.iter().find(|(m, _)| *m == module));
         match target {
             Some((_, ui)) => ui.open(self),
@@ -294,7 +328,7 @@ impl Bar {
     }
 
     /// A popover of the bar opened or closed: the notification popups hide or come back
-    /// (BR6, "Stacking"). The shield sheet of 2b.5 calls it too (item 13).
+    /// (BR6, "Stacking"). The shield's sheet reaches it through `Popup::new`, like every popover (item 13).
     pub fn popovers_changed(&self) {
         self.notifications.redraw_popups();
     }
@@ -315,6 +349,14 @@ impl Bar {
             for (_, module) in &surface.modules {
                 module.refresh(self, changed);
             }
+            surface.fit_groups();
+        }
+    }
+
+    /// Refits every surface's groups after a module showed or hid itself outside `refresh`:
+    /// the system modules follow their service's signals, not the bar's events.
+    pub fn fit_groups(&self) {
+        for surface in self.surfaces.borrow().iter() {
             surface.fit_groups();
         }
     }
@@ -500,6 +542,11 @@ impl Bar {
 
         let (centre_box, groups, modules) = self.build_content(connector.as_deref(), layout);
         window.set_child(Some(&centre_box));
+        // GTK remembers the size the surface was configured with and never shrinks below
+        // it: without this, a preset with a thinner surface (float's 56px to minimal's 32px)
+        // keeps the old depth and exclusive zone. The smallest default lets the content's
+        // own height win.
+        window.set_default_size(1, 1);
         Surface {
             window,
             monitor,
@@ -598,6 +645,9 @@ impl Bar {
 
     fn reload(self: &Rc<Self>) {
         let layout = self.source.layout();
+        if layout != self.layout.get() {
+            tracing::info!(layout = ?layout, "layout applied");
+        }
         let outputs = outputs::current(&self.display);
         // The snapshot catches a change of size or connector; `surfaces_current` an output
         // that left and came back within the debounce, and a surface whose output left.
