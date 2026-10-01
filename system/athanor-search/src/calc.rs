@@ -34,8 +34,7 @@ pub fn parse(stdout: &str, query: &str) -> Option<Calc> {
     let line = stdout
         .lines()
         .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .next_back()?;
+        .rfind(|line| !line.is_empty())?;
     if line.starts_with("warning:") || line.starts_with("error:") {
         return None;
     }
