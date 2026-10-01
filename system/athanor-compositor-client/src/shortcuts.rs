@@ -2,6 +2,10 @@
 //! the user's entries over the system's one by one, so the copy holds only what was
 //! changed. The file is a flat RON map of action names to command lines; comments in it
 //! are not kept when it is written again.
+//!
+//! The read-modify-write takes no lock: a write by cosmic-settings between the read and the
+//! rename is lost, as cosmic-config's own writers would lose it. A copy that is a symbolic
+//! link is replaced by a regular file; the permissions of an existing copy are kept.
 
 use std::fs::{self, File};
 use std::io::{self, ErrorKind, Read};
@@ -71,7 +75,11 @@ fn set_in(path: &Path, action: &str, command: &str) -> Result<bool, ShortcutErro
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
+    let permissions = fs::metadata(path).map(|meta| meta.permissions()).ok();
     athanor_layout::atomic::write_atomically(path, &render(&entries))?;
+    if let Some(permissions) = permissions {
+        fs::set_permissions(path, permissions)?;
+    }
     Ok(true)
 }
 
@@ -147,6 +155,28 @@ impl Scanner<'_> {
                     Some('\\') => out.push('\\'),
                     Some('n') => out.push('\n'),
                     Some('t') => out.push('\t'),
+                    Some('r') => out.push('\r'),
+                    Some('0') => out.push('\0'),
+                    Some('\'') => out.push('\''),
+                    Some('u') => {
+                        // `\u{hex}`, as `char::escape_debug` writes it.
+                        let mut hex = String::new();
+                        if chars.next().map(|(_, c)| c) != Some('{') {
+                            return Err("a malformed \\u escape".to_owned());
+                        }
+                        loop {
+                            match chars.next().map(|(_, c)| c) {
+                                Some('}') => break,
+                                Some(c) if c.is_ascii_hexdigit() && hex.len() < 6 => hex.push(c),
+                                _ => return Err("a malformed \\u escape".to_owned()),
+                            }
+                        }
+                        let c = u32::from_str_radix(&hex, 16)
+                            .ok()
+                            .and_then(char::from_u32)
+                            .ok_or("a \\u escape that is not a character")?;
+                        out.push(c);
+                    }
                     _ => return Err("an escape it does not know".to_owned()),
                 },
                 c => out.push(c),
@@ -186,10 +216,53 @@ fn parse(text: &str) -> Result<Vec<(String, String)>, String> {
 mod tests {
     use super::*;
 
-    fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("athanor-shortcuts-{name}-{}", std::process::id()));
+    /// The path of a `system_actions` in a directory of its own, removed on drop.
+    struct Scratch(PathBuf);
+
+    impl std::ops::Deref for Scratch {
+        type Target = Path;
+        fn deref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl AsRef<Path> for Scratch {
+        fn as_ref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            if let Some(dir) = self.0.parent() {
+                let _ = std::fs::remove_dir_all(dir);
+            }
+        }
+    }
+
+    fn scratch(name: &str) -> Scratch {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir()
+            .join(format!("athanor-shortcuts-{name}-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        dir.join("system_actions")
+        Scratch(dir.join("system_actions"))
+    }
+
+    #[test]
+    fn every_escape_cosmic_writes_is_read() {
+        let path = scratch("escapes");
+        std::fs::write(
+            &path,
+            "{\n    Terminal: \"sh -c \\'x\\'\",\n    Other: \"a\\r\\0\\u{e9}\\u{1F600}\",\n}\n",
+        )
+        .unwrap();
+        let entries = parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(entries[0].1, "sh -c 'x'");
+        assert_eq!(entries[1].1, "a\r\0\u{e9}\u{1F600}");
+        assert!(parse("{ A: \"\\u{d800}\" }").is_err());
+        assert!(parse("{ A: \"\\u{110000}\" }").is_err());
+        assert!(parse("{ A: \"\\u41\" }").is_err());
     }
 
     #[test]

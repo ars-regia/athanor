@@ -4,7 +4,7 @@
 use std::fs::{File, OpenOptions};
 use std::future::poll_fn;
 use std::os::fd::AsFd;
-use std::os::unix::fs::{FileExt, OpenOptionsExt};
+use std::os::unix::fs::{DirBuilderExt, FileExt, OpenOptionsExt};
 use std::task::{Poll, Waker};
 use std::time::Duration;
 
@@ -61,13 +61,9 @@ struct Shm {
 impl Pending {
     pub(crate) fn finish(&mut self, result: Result<gdk::MemoryTexture, Error>) {
         self.result.get_or_insert(result);
-        if let Some(waker) = self.waker.take() {
-            waker.wake();
-        }
+        self.wake();
     }
-}
 
-impl Pending {
     /// Wakes the waiting call without a result: it reports the capture as lost.
     pub(crate) fn wake(&mut self) {
         if let Some(waker) = self.waker.take() {
@@ -123,12 +119,23 @@ fn layout(width: u32, height: u32) -> Option<(u32, u32)> {
     (len <= MAX_BYTES).then_some((stride, len))
 }
 
-/// An unlinked file in `$XDG_RUNTIME_DIR`, private to this process and the compositor.
+/// An unlinked file in `$XDG_RUNTIME_DIR/athanor`, private to this process and the
+/// compositor. That directory is the one every confined shell program may write: the bar
+/// and the launcher create it before they confine themselves, and their Landlock rulesets
+/// grant it and nothing else of the runtime directory.
 fn shm_file(len: u32) -> std::io::Result<File> {
-    let dir = std::env::var_os("XDG_RUNTIME_DIR").ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::NotFound, "XDG_RUNTIME_DIR is not set")
-    })?;
-    let path = std::path::Path::new(&dir).join(format!("athanor-capture-{}", unit::random()));
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(std::path::PathBuf::from)
+        .filter(|dir| dir.is_absolute())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "XDG_RUNTIME_DIR is not set to an absolute path",
+            )
+        })?;
+    let dir = runtime.join("athanor");
+    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir)?;
+    let path = dir.join(format!("capture-{}", unit::random()));
     let file = OpenOptions::new().read(true).write(true).create_new(true).mode(0o600).open(&path)?;
     std::fs::remove_file(&path)?;
     file.set_len(u64::from(len))?;

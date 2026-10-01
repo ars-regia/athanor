@@ -178,6 +178,13 @@ fn socket_dir(runtime: Option<OsString>, random: &str) -> Result<PathBuf, Launch
     Ok(dir)
 }
 
+/// `uri` in GIO's canonical form and its local path, or `None` when it has no scheme.
+fn canonical(uri: &str) -> Option<(String, Option<PathBuf>)> {
+    let file = gio::File::for_uri(uri);
+    file.uri_scheme()?;
+    Some((file.uri().to_string(), file.path()))
+}
+
 /// The desktop id the security context and the unit of a typed command carry.
 const COMMAND_ID: &str = "os.athanor.Command.desktop";
 
@@ -220,21 +227,28 @@ impl Client {
         let location = app
             .filename()
             .and_then(|path| path.into_os_string().into_string().ok());
-        let path = uri
-            .and_then(|uri| gio::File::for_uri(uri).path())
+        // A target is a URI with a scheme, in GIO's canonical form: a bare string such as
+        // `+cmd` is not one, and the application would read it as an option.
+        let canonical = match uri {
+            Some(uri) => Some(canonical(uri).ok_or_else(|| entry("the target is not a URI"))?),
+            None => None,
+        };
+        let path = canonical
+            .as_ref()
+            .and_then(|(_, path)| path.clone())
             .and_then(|path| path.into_os_string().into_string().ok());
         let fields = Fields {
             name: &name,
             icon: icon.as_deref(),
             location: location.as_deref(),
-            target: uri.map(|uri| Target {
+            target: canonical.as_ref().map(|(uri, _)| Target {
                 uri,
                 path: path.as_deref(),
             }),
         };
         let mut argv = expand(&exec, &fields).map_err(|reason| entry(&reason))?;
         if app.boolean("Terminal") {
-            argv.insert(0, TERMINAL.to_owned());
+            argv.splice(0..0, [TERMINAL.to_owned(), "--".to_owned()]);
         }
         let working_directory = app
             .string("Path")
@@ -254,7 +268,10 @@ impl Client {
     pub async fn open_uri(&self, uri: &str) -> Result<String, LaunchError> {
         // Not a URI GIO can name, and an argument an application could read as an option.
         if uri.starts_with('-') {
-            return Err(LaunchError::Missing(format!("a file or URL named {uri}")));
+            return Err(LaunchError::Entry {
+                app: "the file or URL".to_owned(),
+                reason: "its name would be read as an option".to_owned(),
+            });
         }
         let file = gio::File::for_uri(uri);
         let app = if file.is_native() {
@@ -284,8 +301,8 @@ impl Client {
 
     /// Runs a command line in the user's default terminal, in a unit and behind a
     /// security context of its own like an application (doc_launcher.md, LA5). `argv` is
-    /// the user's own command, run exactly as given: the terminal launcher reads a first
-    /// word that starts with `-` as its own option, so that is refused.
+    /// the user's own command, run exactly as given, after `--` so the terminal launcher
+    /// takes none of it as an option; a first word starting with `-` is refused as well.
     pub async fn launch_command(&self, argv: &[String]) -> Result<String, LaunchError> {
         self.live()?;
         let command = |reason: &str| LaunchError::Entry {
@@ -304,7 +321,7 @@ impl Client {
             info: None,
             working_directory: "~".to_owned(),
         };
-        let argv = [vec![TERMINAL.to_owned()], argv.to_vec()].concat();
+        let argv = [vec![TERMINAL.to_owned(), "--".to_owned()], argv.to_vec()].concat();
         self.start(&start, argv).await
     }
 
@@ -583,6 +600,15 @@ mod tests {
             expand("viewer %f", &file).unwrap(),
             ["viewer", "/h/x; touch y"]
         );
+    }
+
+    #[test]
+    fn a_target_without_a_scheme_is_refused() {
+        assert!(canonical("+cmd").is_none());
+        assert!(canonical("-rf").is_none());
+        let (uri, path) = canonical("file:///h/a%20b").unwrap();
+        assert_eq!(uri, "file:///h/a%20b");
+        assert_eq!(path.unwrap(), PathBuf::from("/h/a b"));
     }
 
     #[test]
