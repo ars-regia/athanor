@@ -333,6 +333,9 @@ impl Launcher {
                 .collect(),
         );
         self.engine.reload_usage();
+        // The panel is 480 px tall at most and never taller than the output leaves under
+        // its top margin: at 1280x800 with scale 1.5 the output is 533 px high.
+        self.content.set_height_request(surface.monitor.geometry().height().saturating_sub(96 + 24).clamp(200, 480));
         surface.show(self.content.upcast_ref());
         self.shown.replace(Some(surface.monitor.clone()));
         let text = self.memory.borrow_mut().shown(asked).unwrap_or_default();

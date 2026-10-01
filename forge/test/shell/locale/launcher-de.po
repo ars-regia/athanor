@@ -1,0 +1,112 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: athanor-launcher test catalog\n"
+"Report-Msgid-Bugs-To: forge@athanor.os\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+
+msgid "Search"
+msgstr "Suchen"
+
+msgid "Results"
+msgstr "Ergebnisse"
+
+msgid "Enter to open · Ctrl+Enter to show in folder · Ctrl+C to copy · Tab for actions · Esc to close"
+msgstr "Eingabe zum Öffnen · Strg+Eingabe zeigt im Ordner · Strg+C kopiert · Tab für Aktionen · Esc zum Schließen"
+
+msgid "Results: {count}"
+msgstr "Ergebnisse: {count}"
+
+msgid "Command"
+msgstr "Befehl"
+
+msgid "Application"
+msgstr "Anwendung"
+
+msgid "Window"
+msgstr "Fenster"
+
+msgid "Calculation"
+msgstr "Berechnung"
+
+msgid "Settings page"
+msgstr "Einstellungsseite"
+
+msgid "File"
+msgstr "Datei"
+
+msgid "Search result"
+msgstr "Suchergebnis"
+
+msgid "Web search"
+msgstr "Websuche"
+
+msgid "Applications"
+msgstr "Anwendungen"
+
+msgid "Windows"
+msgstr "Fenster"
+
+msgid "Calculator"
+msgstr "Rechner"
+
+msgid "Settings"
+msgstr "Einstellungen"
+
+msgid "Files"
+msgstr "Dateien"
+
+msgid "Web"
+msgstr "Web"
+
+msgid "Indexing files…"
+msgstr "Dateien werden indiziert…"
+
+msgid "Actions"
+msgstr "Aktionen"
+
+msgid "Switch to"
+msgstr "Wechseln zu"
+
+msgid "Run in terminal"
+msgstr "Im Terminal ausführen"
+
+msgid "Search the web"
+msgstr "Im Web suchen"
+
+msgid "Open"
+msgstr "Öffnen"
+
+msgid "Open with {app}"
+msgstr "Öffnen mit {app}"
+
+msgid "Show in folder"
+msgstr "Im Ordner zeigen"
+
+msgid "Copy path"
+msgstr "Pfad kopieren"
+
+msgid "Copy link"
+msgstr "Link kopieren"
+
+msgid "Copy name"
+msgstr "Namen kopieren"
+
+msgid "Copy title"
+msgstr "Titel kopieren"
+
+msgid "Copy"
+msgstr "Kopieren"
+
+msgid "{name} could not be opened"
+msgstr "{name} konnte nicht geöffnet werden"
+
+msgid "Exchange rates of {date}"
+msgstr "Wechselkurse vom {date}"
+
+msgid "System image"
+msgstr "Systemabbild"
