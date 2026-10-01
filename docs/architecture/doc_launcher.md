@@ -1,6 +1,6 @@
 # Athanor launcher and application library
 
-Status: **revision 1, approved by the maintainer on 2026-10-01.** It is the specification of stage 3 of `doc_shell.md` (SH1): our launcher and our application library, which replace cosmic-launcher, cosmic-app-library and pop-launcher. It designs the search library both programs share, the sources a search reaches, ranking, the preview, the two surfaces, how they open and how they launch, their confinement, their tests and the switch. It closes the launcher half of open doubt 3 of `doc_bar.md`.
+Status: **revision 2, awaiting approval.** Revision 1 was approved by the maintainer on 2026-10-01; revision 2 amends it with what the probes for the implementation plan found (LA2, LA5, LA6, LA8, LA9, LA11, LA12, section 4). It is the specification of stage 3 of `doc_shell.md` (SH1): our launcher and our application library, which replace cosmic-launcher, cosmic-app-library and pop-launcher. It designs the search library both programs share, the sources a search reaches, ranking, the preview, the two surfaces, how they open and how they launch, their confinement, their tests and the switch. It closes the launcher half of open doubt 3 of `doc_bar.md`.
 
 ## 1. Context
 
@@ -31,15 +31,16 @@ Status: **revision 1, approved by the maintainer on 2026-10-01.** It is the spec
 |---|---|---|
 | Applications | `gio::AppInfo::all()` and `gio::AppInfoMonitor`, which cover system entries and both Flatpak installations | name, generic name, keywords, executable, the translated names of the current locale; `NoDisplay` entries are skipped |
 | Windows | `athanor-compositor-client` | open windows, by title and app id |
-| Calculator | one resident `qalc` process, line by line | an expression, a unit or a currency conversion; nothing when the text is not an expression |
+| Calculator | one `qalc` run per query, after the pause of LA4, with exchange-rate updates off: 0.06 s and 29 MB per run, measured, while the interactive mode echoes a prompt and colour codes | an expression, a unit or a currency conversion; nothing when `qalc` exits non-zero, which it does for text that is not an expression |
 | Files | localsearch through tinysparql | file name and full-text content, with the matching excerpt; at most 20 hits |
 | Search providers | `org.gnome.Shell.SearchProvider2`, found from the `.ini` files under `/usr/share/gnome-shell/search-providers/` and the two Flatpak export trees | what each application returns; the provider of Nautilus is skipped, because it queries localsearch too and every file would appear twice |
-| Settings | a table of page ids, titles and keywords in `athanor-search`, for cosmic-settings until stage 6; our Settings ships its own table | a page by its title and keywords |
+| Settings | the per-page desktop entries cosmic-settings ships, `com.system76.CosmicSettings.*.desktop`, hidden from the application group by `NoDisplay`; our Settings ships its own in stage 6 | a page by its translated name and keywords |
 | Command | the text after `>` | one entry that runs it in the default terminal |
-| Web | the text | one entry, always last, that opens the default browser on the default engine with the whole query percent-encoded |
+| Web | the text | one entry, always last, that opens the default browser on DuckDuckGo with the whole query percent-encoded; no engine choice until Settings offers one |
 
 - **The only prefix is `>`.** Everything else needs no syntax.
-- **How localsearch is reached** (the `tracker-rs` bindings, MIT, if they resolve beside `glib` 0.22, or the tinysparql D-Bus endpoint) is decided by the plan; either reaches the same data.
+- **localsearch is reached** through the `tracker-rs` 0.8 bindings (MIT), which resolve beside `glib` 0.22, on the bus name `org.freedesktop.LocalSearch3`.
+- **localsearch needs the session class.** Its user unit runs only when the user manager knows `XDG_SESSION_CLASS=user`, which our session never published: on the images built so far localsearch never ran. The plan publishes it from `athanor-desktop`.
 - **Currency rates** are refreshed by a separate user timer, `athanor-launcher-rates.timer`, once a day, running `qalc -e`. The launcher's `qalc` never touches the network (LA9) and uses the rates on disk; the preview shows their date.
 
 **LA3. Ranking and usage.**
@@ -47,7 +48,7 @@ Status: **revision 1, approved by the maintainer on 2026-10-01.** It is the spec
 - **Match quality** comes from `nucleo-matcher` (MPL-2.0, allowed by `deny.toml`), in this order: the start of the name, the initials of its words ("fx" finds Firefox), a substring, a scattered match.
 - **Usage** adds to the match: each launch records the item and the query that led to it. The weight halves every 7 days. A query the user completed before ("rel" then Relazione_Q3) puts the same item first next time.
 - **Groups,** in a fixed order: applications, windows, calculator, settings, files, providers, then the web entry. Each group shows at most 5 rows, a provider at most 3.
-- **A top hit** appears above the groups only when the best item's score leads the second's by a margin the plan states; otherwise the groups alone show.
+- **A top hit** appears above the groups only when the best row was completed from this query before (LA3), or matches in a better way than the second row (the start of the name against initials, initials against a substring). Only applications, windows, settings pages and files compete for it.
 - **Usage is stored** under `$XDG_STATE_HOME/athanor/search/`, written by atomic rename and watched by both programs; the library's Frequent view reads it. It never leaves the machine.
 
 **LA4. The life of a query.**
@@ -67,9 +68,9 @@ Status: **revision 1, approved by the maintainer on 2026-10-01.** It is the spec
 | Escape, a click outside | hide |
 | Arrows, Page Up and Down | move the selection |
 | Enter | the primary action of the result |
-| Ctrl+Enter | show a file in its folder; show an application in the library |
+| Ctrl+Enter | show a file in its folder; show an application in the library, from plan 3b |
 | Ctrl+C | copy a calculation's result, a file's path or an application's name |
-| Tab | the actions menu of the result: Open, Open with, Show in folder, Copy, New window |
+| Tab | the actions menu of the result: Open, Open with, Show in folder, Copy; New window from plan 3b |
 
 | Result | Primary action |
 |---|---|
@@ -81,6 +82,8 @@ Status: **revision 1, approved by the maintainer on 2026-10-01.** It is the spec
 | Settings page | open the page |
 | Web | open the browser (LA8) |
 
+- **Show in folder** opens the file's folder through BR2. It does not select the file: selecting it needs `org.freedesktop.FileManager1`, which the file manager would serve outside our security context.
+- **Ctrl+Enter to the library and New window** arrive with the library (plan 3b): until then neither is offered, because an action with nothing behind it is a facade (LA7).
 - Shown again within 30 seconds, it keeps the last query, selected, so typing replaces it.
 - Accessible roles: the result list announces the number of results and the selected row; each row's accessible name is its title and its kind.
 
@@ -88,12 +91,12 @@ Status: **revision 1, approved by the maintainer on 2026-10-01.** It is the spec
 
 | Result | Preview |
 |---|---|
-| Image | the image, decoded by glycin, whose loaders run sandboxed with bubblewrap and seccomp |
+| Image | the image, decoded by glycin inside `athanor-preview-render` (LA9), with its bubblewrap sandbox forced: under the launcher's Landlock ruleset bubblewrap cannot start and glycin falls back to no sandbox, which a probe showed |
 | PDF | the first page, rendered by `athanor-preview-render` (LA9) |
 | Text | the first lines, read in the launcher, at most 64 KB, cleaned (LA9) |
 | Other files, Office documents included | the icon, path, size and dates; their content is the job of the stage that brings Quick Look |
-| Application | icon, description, version, origin (Flatpak and its remote, or the system image) |
-| Window | a thumbnail through `ext-image-copy-capture-v1`, its title and workspace |
+| Application | icon, description, version, origin (Flatpak and its remote, read from `flatpak list`, or the system image) |
+| Window | a thumbnail through `ext-image-copy-capture-v1`, its title and application; not its workspace, which the compositor client does not report |
 | Calculation | the expression as `qalc` read it; for currencies, the date of the rates |
 
 **LA7. The application library.**
@@ -106,15 +109,15 @@ Status: **revision 1, approved by the maintainer on 2026-10-01.** It is the spec
 
 **LA8. Opening and launching.**
 
-- **Opening.** Each program owns a D-Bus name, `os.athanor.Launcher1` and `os.athanor.Library1`, with one method `Show`. A D-Bus activation file with `SystemdService=` starts the unit when it is down, so the program never runs outside its unit. The compositor client writes the cosmic-comp shortcuts (SH2): Super and Super+A call `Show`. `Opener::Launcher` and `Opener::AppLibrary` in `launch.rs` call the same method.
+- **Opening.** Each program owns a D-Bus name, `os.athanor.Launcher1` and `os.athanor.Library1`, with one method `Show`. A D-Bus activation file with `SystemdService=` starts the unit when it is down, so the program never runs outside its unit. The compositor client writes the cosmic-comp shortcuts (SH2): Super and Super+A call `Show`, which toggles. Super is cosmic-comp's `Launcher` system action, so the client writes our command into the user's copy of `system_actions`, keeping every other entry of the system file. `Opener::Launcher` and `Opener::AppLibrary` in `launch.rs` call the same method.
 - **Launching.** Every application the launcher or the library starts, an application or the default handler of a file or a URL, starts through BR2: a security-context socket, a transient `app-athanor-*.service` unit and an activation token. Engine id `os.athanor.shell` as in BR2. This closes, for the launcher, the limit BR2 declares for applications started from cosmic-launcher.
-- **Show and hide** map and unmap the layer surface. `doc_bar.md` records that cosmic-comp drops a client that destroys and recreates a layer surface on a reload; the plan verifies, first, that unmapping and mapping the same surface keeps the connection.
+- **Show and hide never unmap.** cosmic-comp disconnects a client that destroys, unmaps and remaps, or rebuilds an unpinned layer surface (`doc_bar.md`, and the switch plan). Each program keeps one layer surface per output, pinned to it and always mapped: hidden, it has no content, an empty input region, no keyboard interactivity, the background layer and a size of 1×1; shown, the overlay layer, the four anchors and exclusive keyboard interactivity. The plan proves the swap on cosmic-comp before anything is built on it.
 
 **LA9. Confinement.**
 
-- **Landlock at start,** as in BR1. The launcher reads `$HOME` read-only, because the preview reads files; it writes only its own state. The library does not read `$HOME` beyond its configuration and state. Neither may connect over TCP.
+- **Landlock at start,** as in BR1. The launcher reads `$HOME` read-only, because the preview reads files; it writes only its own state. The library does not read `$HOME` beyond its configuration and state. Neither may connect over TCP: Landlock ABI 4 denies TCP bind and connect, and the unit allows only Unix and netlink sockets.
 - **The launcher holds the main socket,** so it reads window titles and can reach the clipboard; and it reads untrusted text: file names and contents, provider results from any installed application, window titles. Every external string is shown as plain text with control and bidirectional characters removed, the rule `doc_bar.md` applies to notification bodies.
-- **No untrusted file is decoded in the launcher.** Images go through glycin's sandboxed loaders. PDFs go through `athanor-preview-render`, a helper started per request with no network, no Wayland socket and a Landlock ruleset that reads only the one file; it returns a bitmap on a pipe and exits. Text is read in the launcher, bounded and cleaned.
+- **No untrusted file is decoded in the launcher.** Images go through glycin's sandboxed loaders. Images and PDFs go through `athanor-preview-render`, a helper started per request in a transient user unit (`systemd-run --user --pipe`) with no network, no home, no runtime directory and so no bus or Wayland socket. The launcher opens the file and hands it over on standard input; the helper returns a bitmap on standard output and exits, or is killed by its timeout. Text is read in the launcher, bounded and cleaned.
 - **Declared limits,** not guarantees: a provider opens its own results, through bus activation, on the session's main socket and outside our context; an application with one instance already running opens the new window in its existing process (BR2).
 
 **LA10. Failures.**
@@ -126,10 +129,10 @@ Status: **revision 1, approved by the maintainer on 2026-10-01.** It is the spec
 **LA11. Tests.**
 
 - **Without a display,** in `athanor-search`: ranking against fixed cases, the decay of usage, the drop of stale generations, the recognition of an expression, the reading of provider `.ini` files, and the cleaning of strings.
-- **Surface cases** in the rig, as SH13 sets them: the launcher with a query and its preview, and the library on All, each at scale {1.0, 1.5} × theme {light, dark} × text {English, German, right-to-left pseudo-locale}: 24 cases.
-- **On the dev VM,** `scripts/devvm/launcher-acceptance.sh` checks section 5, items 1 to 7.
+- **Surface cases** in the rig, as SH13 sets them: the launcher with a query and its preview, and the library on All, each at scale {1.0, 1.5} × theme {light, dark} × text {English, German, right-to-left pseudo-locale}: 24 cases, the launcher's 12 with plan 3a and the library's 12 with plan 3b. The rig has no systemd, so image and PDF previews are checked on the dev VM.
+- **On the dev VM,** `scripts/devvm/launcher-acceptance.sh` checks section 5, items 1 to 8 and 10, for the launcher; the library's checks join with plan 3b.
 
-**LA12. The switch.** Until it, both programs are enabled by hand and the image keeps cosmic-launcher, cosmic-app-library and pop-launcher. When both pass SH1's rule on the dev VM and on the maintainer's desktop, one change removes the three packages, points `Opener` at our programs for good and adds `qalculate`, `glycin-loaders` and `localsearch` to `forge/config/packages.json` by name, since pop-launcher and Nautilus are what pull them in today.
+**LA12. The switch.** Until it, both programs are enabled by hand and the image keeps cosmic-launcher, cosmic-app-library and pop-launcher. When both pass SH1's rule on the dev VM and on the maintainer's desktop, one change removes the three packages, points `Opener` at our programs for good and adds `qalculate`, `glycin-loaders` and `localsearch` to `forge/config/packages.json` by name, since pop-launcher and Nautilus are what pull them in today. cosmic-launcher also serves Alt+Tab (cosmic-comp's `WindowSwitcher` action runs `cosmic-launcher alt-tab`): the switch removes it only together with a window switcher of ours bound to Alt+Tab, which plan 3c designs.
 
 ## 3. Changes to other documents
 
@@ -140,17 +143,17 @@ Applied on 2026-10-01, with the approval of this document.
 
 ## 4. Open doubts
 
-1. **Reaching localsearch:** the `tracker-rs` bindings or the D-Bus endpoint (LA2). The plan decides.
-2. **Mapping and unmapping** a layer surface on cosmic-comp keeps the connection (LA8). The plan verifies it first.
+1. ~~Reaching localsearch~~ — resolved in revision 2: `tracker-rs` (LA2).
+2. ~~Mapping and unmapping~~ — resolved in revision 2: never unmapped, pinned surfaces swapped between hidden and shown (LA8); the plan proves the swap first.
 3. **Timing values** (120 ms, 1 s, the top-hit margin, the preview delay) are estimates; the first measurement sets them.
 4. **Memory budgets** are proposals: `athanor-launcher` at most 80 MB PSS and `athanor-library` at most 64 MB PSS at rest; the first measurement confirms or corrects them.
-5. **Flatpak search providers:** that Flatpak exports an application's provider `.ini` under `exports/share/gnome-shell/search-providers/` for both the system and the user installation; the plan confirms it.
+5. ~~Flatpak search providers~~ — resolved in revision 2: the `.ini` files are read under `gnome-shell/search-providers/` in every directory of `XDG_DATA_DIRS`, which lists both Flatpak export trees.
 
 ## 5. Acceptance
 
 On a fresh install in the dev VM and on the maintainer's desktop upgraded in place, with both programs enabled:
 
-1. Super shows the launcher and Super+A the library; the time from the `Show` call to the first frame is measured and stays under the bound the plan sets.
+1. Super shows the launcher and Super+A the library; the time from the `Show` call to the first frame is measured and stays under 150 ms.
 2. "fx" puts Firefox first; a Flatpak application is found by its name.
 3. `2+2*3` answers 8; `100 USD to EUR` answers with the date of the rates.
 4. A fixture document is found by a word of its content, with the excerpt.
