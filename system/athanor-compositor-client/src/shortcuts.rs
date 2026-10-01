@@ -9,6 +9,7 @@
 
 use std::fs::{self, File};
 use std::io::{self, ErrorKind, Read};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use crate::cosmic_config;
@@ -78,7 +79,11 @@ fn set_in(path: &Path, action: &str, command: &str) -> Result<bool, ShortcutErro
     let permissions = fs::metadata(path).map(|meta| meta.permissions()).ok();
     athanor_layout::atomic::write_atomically(path, &render(&entries))?;
     if let Some(permissions) = permissions {
-        fs::set_permissions(path, permissions)?;
+        // The write succeeded: a mode that cannot be restored is not a failed binding.
+        let mode = permissions.mode() & 0o666;
+        if let Err(err) = fs::set_permissions(path, fs::Permissions::from_mode(mode)) {
+            tracing::warn!(path = %path.display(), "the file's mode was not restored: {err}");
+        }
     }
     Ok(true)
 }

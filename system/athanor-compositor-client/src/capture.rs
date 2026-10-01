@@ -4,7 +4,7 @@
 use std::fs::{File, OpenOptions};
 use std::future::poll_fn;
 use std::os::fd::AsFd;
-use std::os::unix::fs::{DirBuilderExt, FileExt, OpenOptionsExt};
+use std::os::unix::fs::{FileExt, OpenOptionsExt};
 use std::task::{Poll, Waker};
 use std::time::Duration;
 
@@ -133,8 +133,7 @@ fn shm_file(len: u32) -> std::io::Result<File> {
                 "XDG_RUNTIME_DIR is not set to an absolute path",
             )
         })?;
-    let dir = runtime.join("athanor");
-    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir)?;
+    let dir = crate::launch::runtime_subdir(&runtime)?;
     let path = dir.join(format!("capture-{}", unit::random()));
     let file = OpenOptions::new().read(true).write(true).create_new(true).mode(0o600).open(&path)?;
     std::fs::remove_file(&path)?;

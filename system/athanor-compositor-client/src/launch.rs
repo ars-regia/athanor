@@ -147,6 +147,23 @@ fn resolve(program: &str) -> Result<String, LaunchError> {
         .ok_or_else(|| LaunchError::Missing(program.to_owned()))
 }
 
+/// `<runtime>/athanor`, created private when missing. It must be a real directory, not a
+/// symbolic link: the sockets and capture buffers of the shell's programs live in it.
+pub(crate) fn runtime_subdir(runtime: &std::path::Path) -> io::Result<PathBuf> {
+    let parent = runtime.join("athanor");
+    DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&parent)?;
+    if !fs::symlink_metadata(&parent)?.is_dir() {
+        return Err(io::Error::new(
+            ErrorKind::NotADirectory,
+            format!("{} is not a directory", parent.display()),
+        ));
+    }
+    Ok(parent)
+}
+
 /// `<runtime>/athanor/<random>`, the directory of an application's socket. `athanor` is
 /// created private when missing and must be a directory, not a symbolic link; the leaf must
 /// not exist yet, so no one else prepared it. `runtime` is `$XDG_RUNTIME_DIR`, refused when
@@ -161,18 +178,7 @@ fn socket_dir(runtime: Option<OsString>, random: &str) -> Result<PathBuf, Launch
                 "XDG_RUNTIME_DIR is not set to an absolute path",
             )
         })?;
-    let parent = runtime.join("athanor");
-    DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(&parent)?;
-    if !fs::symlink_metadata(&parent)?.is_dir() {
-        return Err(io::Error::new(
-            ErrorKind::NotADirectory,
-            format!("{} is not a directory", parent.display()),
-        )
-        .into());
-    }
+    let parent = runtime_subdir(&runtime)?;
     let dir = parent.join(random);
     DirBuilder::new().mode(0o700).create(&dir)?;
     Ok(dir)
