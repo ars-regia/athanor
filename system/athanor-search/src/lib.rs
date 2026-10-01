@@ -7,6 +7,7 @@ pub mod calc;
 pub mod command;
 pub mod files;
 pub mod item;
+pub mod providers;
 pub mod rank;
 pub mod usage;
 pub mod web;

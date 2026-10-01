@@ -141,7 +141,7 @@ impl Files {
 
 /// `future`'s output, or `None` when `deadline` passes first; the future is then dropped,
 /// which cancels the bus call it was waiting on.
-async fn within<T>(deadline: Duration, future: impl Future<Output = T>) -> Option<T> {
+pub(crate) async fn within<T>(deadline: Duration, future: impl Future<Output = T>) -> Option<T> {
     let cancellable = gio::Cancellable::new();
     let source = {
         let cancellable = cancellable.clone();
