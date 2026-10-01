@@ -12,6 +12,7 @@ mod launch;
 pub mod model;
 pub mod outputs;
 mod protocols;
+pub mod shortcuts;
 pub mod theme;
 mod unit;
 
