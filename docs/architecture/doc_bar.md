@@ -172,7 +172,7 @@ Applied on 2026-09-25, with the approval of this document.
 
 1. **The keyboard-layout protocol**: closed on 2026-09-25. Package 2a generates it inside the compositor client from the description in `pop-os/cosmic-protocols` at the commit pinned in `system/athanor-compositor-client/protocols/README.md`.
 2. **Flatpak on our socket** is expected to pass the socket through (BR2); the plan of 2b verifies it.
-3. **Applications that escape the context** (BR2): single-instance applications already running, X11 applications, and anything started from a terminal, from cosmic-launcher or by XDG autostart. Stage 3 closes the launcher; the others need their own design.
+3. **Applications that escape the context** (BR2): single-instance applications already running, X11 applications, and anything started from a terminal, from cosmic-launcher or by XDG autostart. Stage 3 closes the launcher (`doc_launcher.md`, LA8); the others need their own design.
 4. **The dbusmock templates** of BR9 are assumed present in Fedora 43; the plan confirms them.
 5. **The memory budgets** of section 5 are proposals: the first measurement confirms or corrects them.
 

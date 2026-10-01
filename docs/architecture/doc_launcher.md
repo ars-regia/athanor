@@ -1,6 +1,6 @@
 # Athanor launcher and application library
 
-Status: **draft, revision 1, for the maintainer's review (2026-10-01).** It is the specification of stage 3 of `doc_shell.md` (SH1): our launcher and our application library, which replace cosmic-launcher, cosmic-app-library and pop-launcher. It designs the search library both programs share, the sources a search reaches, ranking, the preview, the two surfaces, how they open and how they launch, their confinement, their tests and the switch. It closes the launcher half of open doubt 3 of `doc_bar.md`.
+Status: **revision 1, approved by the maintainer on 2026-10-01.** It is the specification of stage 3 of `doc_shell.md` (SH1): our launcher and our application library, which replace cosmic-launcher, cosmic-app-library and pop-launcher. It designs the search library both programs share, the sources a search reaches, ranking, the preview, the two surfaces, how they open and how they launch, their confinement, their tests and the switch. It closes the launcher half of open doubt 3 of `doc_bar.md`.
 
 ## 1. Context
 
@@ -133,7 +133,7 @@ Status: **draft, revision 1, for the maintainer's review (2026-10-01).** It is t
 
 ## 3. Changes to other documents
 
-Applied with the approval of this document.
+Applied on 2026-10-01, with the approval of this document.
 
 - `doc_shell.md`, SH3: the row of cosmic-launcher and cosmic-app-library names this document and adds pop-launcher.
 - `doc_bar.md`, open doubt 3: the launcher is closed by LA8; terminal and autostart remain.
