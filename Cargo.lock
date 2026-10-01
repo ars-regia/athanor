@@ -711,6 +711,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tracing",
+ "tracker-rs",
 ]
 
 [[package]]
@@ -5802,6 +5803,32 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
+]
+
+[[package]]
+name = "tracker-rs"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e03986acbeb10e52af500f8667e9345399835ff50ad55d4909ffac1b9e01ef6b"
+dependencies = [
+ "gio",
+ "glib",
+ "glib-sys",
+ "libc",
+ "tracker-sys",
+]
+
+[[package]]
+name = "tracker-sys"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "092b9fc2d0b7adfab330bddca4ed0d23267817a12ef76aa7f98835d9c3f10254"
+dependencies = [
+ "gio-sys",
+ "glib-sys",
+ "gobject-sys",
+ "libc",
+ "system-deps 7.0.8",
 ]
 
 [[package]]

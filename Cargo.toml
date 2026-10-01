@@ -84,6 +84,7 @@ bitflags = "2"
 gdk4-wayland = { version = "0.11", features = ["wayland_crate"] }
 gio = "0.22"
 gio-unix = "0.22"
+tracker-rs = { version = "0.8", features = ["v3_1"] }
 nucleo-matcher = "0.3"
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
