@@ -6,7 +6,7 @@
 use std::cell::RefCell;
 use std::future::Future;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use gio::glib;
@@ -128,6 +128,9 @@ impl Engine {
         for task in old {
             task.abort();
         }
+        // A command is judged on the whole line (it refuses an over-long one); only the
+        // search sources get the cut.
+        let whole = text;
         let text: String = text.chars().take(MAX_QUERY_CHARS).collect();
         let text = text.as_str();
         self.0.query.replace(text.to_owned());
@@ -136,7 +139,7 @@ impl Engine {
             self.notify();
             return;
         }
-        if let Some(hit) = command::hit(text) {
+        if let Some(hit) = command::hit(whole) {
             self.put(generation, Group::Command, "", "", vec![hit]);
             return;
         }
@@ -152,16 +155,28 @@ impl Engine {
             board.put(generation, Group::Windows, "", "", windows::search(&windows, text, &mut ranker, &usage, now));
             board.put(generation, Group::Web, "", "", web::hit(text).into_iter().collect());
         }
-        self.notify();
 
-        let engine = self.clone();
+        let weak = self.weak();
         let text = text.to_owned();
-        // On the thread-default context, like every other source here.
+        // On the thread-default context, like every other source here. Registered before
+        // the listener runs: a `query` it makes aborts this generation's debounce.
         let handle = glib::spawn_future_local(async move {
             glib::timeout_future(DEBOUNCE).await;
-            engine.start_slow(generation, text);
+            if let Some(engine) = Engine::upgrade(&weak) {
+                engine.start_slow(generation, text);
+            }
         });
         self.0.tasks.borrow_mut().push(handle);
+        self.notify();
+    }
+
+    /// Tasks hold the engine weakly: a dropped engine stops them at their next step.
+    fn weak(&self) -> Weak<Inner> {
+        Rc::downgrade(&self.0)
+    }
+
+    fn upgrade(weak: &Weak<Inner>) -> Option<Engine> {
+        weak.upgrade().map(Engine)
     }
 
     fn spawn(&self, task: impl Future<Output = ()> + 'static) {
@@ -171,25 +186,29 @@ impl Engine {
 
     fn start_slow(&self, generation: u64, text: String) {
         if calc::wanted(&text) {
-            let (engine, text) = (self.clone(), text.clone());
+            let (weak, text) = (self.weak(), text.clone());
             self.spawn(async move {
                 // Files and providers carry their own deadline and warning.
                 match within(DEADLINE, calc::evaluate(&text)).await {
                     Some(answer) => {
-                        engine.put(generation, Group::Calc, "", "", answer.iter().map(calc::hit).collect())
+                        if let Some(engine) = Engine::upgrade(&weak) {
+                            engine.put(generation, Group::Calc, "", "", answer.iter().map(calc::hit).collect());
+                        }
                     }
                     None => tracing::warn!("the calculator missed the deadline of {} ms", DEADLINE.as_millis()),
                 }
             });
         }
         if let Some(files) = self.0.files.clone() {
-            let (engine, text) = (self.clone(), text.clone());
+            let (weak, text) = (self.weak(), text.clone());
+            let usage_path = self.0.usage_path.clone();
             self.spawn(async move {
                 let usage_now = now();
                 let answer = {
-                    let usage = Usage::load(&engine.0.usage_path);
+                    let usage = Usage::load(&usage_path);
                     files.search(&text, &usage, usage_now).await
                 };
+                let Some(engine) = Engine::upgrade(&weak) else { return };
                 if let Some(answer) = answer {
                     if engine.0.board.borrow_mut().set_indexing(generation, answer.indexing) {
                         engine.put(generation, Group::Files, "", "", answer.hits);
@@ -199,9 +218,11 @@ impl Engine {
         }
         let terms = provider_query(&text);
         for provider in self.0.providers.iter().cloned() {
-            let (engine, terms) = (self.clone(), terms.clone());
+            let (weak, terms) = (self.weak(), terms.clone());
             self.spawn(async move {
-                if let Some(hits) = providers::search(&provider, &terms).await {
+                let hits = providers::search(&provider, &terms).await;
+                let Some(engine) = Engine::upgrade(&weak) else { return };
+                if let Some(hits) = hits {
                     engine.put(generation, Group::Providers, &provider.bus_name, &provider.name, hits);
                 }
             });

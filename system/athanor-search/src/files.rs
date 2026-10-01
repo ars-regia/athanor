@@ -116,12 +116,15 @@ impl Files {
         let work = async {
             let connection = self.connection().await?;
             // The progress question runs while the query does.
-            let progress = (!self.local).then(|| gio::glib::spawn_future_local(indexing()));
-            let rows = run(&connection, query).await;
-            let indexing = match progress {
-                Some(progress) => progress.await.unwrap_or(false),
-                None => false,
+            // Joined, not spawned: dropping the search drops the progress call too.
+            let progress = async {
+                if self.local {
+                    false
+                } else {
+                    indexing().await
+                }
             };
+            let (rows, indexing) = join(run(&connection, query), progress).await;
             Some((rows, indexing))
         };
         let Some(done) = within(deadline, work).await else {
@@ -151,9 +154,42 @@ pub(crate) async fn within<T>(deadline: Duration, future: impl Future<Output = T
         })
     };
     source.attach(Some(&gio::glib::MainContext::ref_thread_default()));
-    let done = gio::CancellableFuture::new(future, cancellable).await.ok();
-    source.destroy();
-    done
+    // Destroyed when the future is dropped mid-await too.
+    struct Timer(gio::glib::Source);
+    impl Drop for Timer {
+        fn drop(&mut self) {
+            self.0.destroy();
+        }
+    }
+    let _timer = Timer(source);
+    gio::CancellableFuture::new(future, cancellable).await.ok()
+}
+
+/// Both outputs, polling the two futures on the one task.
+async fn join<A: Future, B: Future>(a: A, b: B) -> (A::Output, B::Output) {
+    let (mut a, mut b) = (std::pin::pin!(a), std::pin::pin!(b));
+    let (mut out_a, mut out_b) = (None, None);
+    std::future::poll_fn(|cx| {
+        if out_a.is_none() {
+            if let std::task::Poll::Ready(v) = a.as_mut().poll(cx) {
+                out_a = Some(v);
+            }
+        }
+        if out_b.is_none() {
+            if let std::task::Poll::Ready(v) = b.as_mut().poll(cx) {
+                out_b = Some(v);
+            }
+        }
+        match (out_a.take(), out_b.take()) {
+            (Some(x), Some(y)) => std::task::Poll::Ready((x, y)),
+            (x, y) => {
+                out_a = x;
+                out_b = y;
+                std::task::Poll::Pending
+            }
+        }
+    })
+    .await
 }
 
 async fn name_has_owner(bus: Option<&gio::DBusConnection>) -> bool {

@@ -7,6 +7,9 @@ use std::time::Duration;
 use athanor_search::engine::{Engine, DEBOUNCE};
 use athanor_search::item::Group;
 
+/// `live_qalc` counts the children of the whole process: the tests that start qalc take turns.
+static QALC: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// The pids of this process's children named qalc that have not exited.
 fn live_qalc() -> Vec<u32> {
     let mut pids = Vec::new();
@@ -26,6 +29,7 @@ fn live_qalc() -> Vec<u32> {
 
 #[test]
 fn typing_cancels_the_previous_generation() {
+    let _turn = QALC.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let context = gio::glib::MainContext::new();
     context
         .with_thread_default(|| {
@@ -68,6 +72,74 @@ fn in_memory_sources_answer_before_the_debounce() {
             assert_eq!(*seen.borrow(), [Group::Command], "synchronously, in the same call");
             engine.query("zzzz");
             assert_eq!(*seen.borrow(), [Group::Web]);
+        })
+        .expect("a fresh context is free");
+}
+
+fn state(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("athanor-engine-{name}-{}/usage.json", std::process::id()))
+}
+
+#[test]
+fn an_over_long_command_line_is_never_run_cut() {
+    let context = gio::glib::MainContext::new();
+    context
+        .with_thread_default(|| {
+            let seen: Rc<RefCell<Vec<Group>>> = Rc::default();
+            let record = seen.clone();
+            let engine = Engine::new(state("long"), None, Vec::new(), move |rows| {
+                *record.borrow_mut() = rows.sections.iter().map(|s| s.group).collect();
+            });
+            engine.query(&format!("> {}", "a".repeat(300)));
+            assert!(!seen.borrow().contains(&Group::Command), "{:?}", seen.borrow());
+        })
+        .expect("a fresh context is free");
+}
+
+#[test]
+fn a_query_made_by_the_listener_aborts_the_outer_generation() {
+    let _turn = QALC.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let context = gio::glib::MainContext::new();
+    context
+        .with_thread_default(|| {
+            context.block_on(async {
+                let slot: Rc<RefCell<Option<Engine>>> = Rc::default();
+                let again = slot.clone();
+                let done = Rc::new(std::cell::Cell::new(false));
+                let engine = Engine::new(state("reentrant"), None, Vec::new(), move |_| {
+                    if !done.replace(true) {
+                        if let Some(engine) = again.borrow().clone() {
+                            engine.query("2+2");
+                        }
+                    }
+                });
+                slot.replace(Some(engine.clone()));
+                engine.query("1+1");
+                gio::glib::timeout_future(DEBOUNCE + Duration::from_millis(15)).await;
+                assert_eq!(live_qalc().len(), 1, "only the second generation runs qalc");
+                slot.replace(None);
+            })
+        })
+        .expect("a fresh context is free");
+}
+
+#[test]
+fn a_dropped_engine_stops_its_pending_work() {
+    let _turn = QALC.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let context = gio::glib::MainContext::new();
+    context
+        .with_thread_default(|| {
+            context.block_on(async {
+                let calls = Rc::new(std::cell::Cell::new(0));
+                let count = calls.clone();
+                let engine = Engine::new(state("dropped"), None, Vec::new(), move |_| count.set(count.get() + 1));
+                engine.query("1+1");
+                let before = calls.get();
+                drop(engine);
+                gio::glib::timeout_future(DEBOUNCE + Duration::from_millis(300)).await;
+                assert_eq!(calls.get(), before, "the listener is never called again");
+                assert!(live_qalc().is_empty());
+            })
         })
         .expect("a fresh context is free");
 }
