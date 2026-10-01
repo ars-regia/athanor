@@ -3,13 +3,14 @@
 //! directory it writes (`restrict`). A GTK program cannot name what it reads (icon themes,
 //! fonts, the GL driver, glycin's loaders), so it restricts writes only (`restrict_writes`).
 //! Connecting to a bus socket is not a filesystem access Landlock mediates.
+//! A program that has no business on the network also calls `deny_tcp`.
 
 use std::error::Error;
 use std::path::Path;
 
 use landlock::{
-    Access, AccessFs, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset, RulesetAttr,
-    RulesetCreatedAttr, ABI,
+    Access, AccessFs, AccessNet, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset,
+    RulesetAttr, RulesetCreatedAttr, ABI,
 };
 
 /// Fails unless the calling process has exactly one thread: Landlock confines the calling
@@ -64,9 +65,51 @@ pub fn restrict_writes(write: &[&Path], write_file: &[&Path]) -> Result<(), Box<
     Ok(())
 }
 
+/// Denies binding and connecting TCP sockets to the calling thread and every thread and
+/// process it starts afterwards (Landlock ABI 4). Unix sockets are not affected.
+pub fn deny_tcp() -> Result<(), Box<dyn Error>> {
+    Ruleset::default()
+        .set_compatibility(CompatLevel::HardRequirement)
+        .handle_access(AccessNet::from_all(ABI::V4))?
+        .create()?
+        .restrict_self()?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deny_tcp_refuses_tcp_and_keeps_unix_sockets() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind before the ruleset");
+        let port = listener.local_addr().expect("address").port();
+        let socket =
+            std::env::temp_dir().join(format!("athanor-unit-tcp-{}.sock", std::process::id()));
+        let unix = std::os::unix::net::UnixListener::bind(&socket).expect("unix bind");
+        let path = socket.clone();
+        std::thread::spawn(move || {
+            deny_tcp().expect("Landlock ABI 4 must be enforced, not skipped");
+            assert_eq!(
+                std::net::TcpStream::connect(("127.0.0.1", port))
+                    .expect_err("connect is denied")
+                    .kind(),
+                std::io::ErrorKind::PermissionDenied
+            );
+            assert!(
+                std::net::TcpListener::bind("127.0.0.1:0").is_err(),
+                "bind is denied"
+            );
+            assert!(
+                std::os::unix::net::UnixStream::connect(&path).is_ok(),
+                "Unix sockets stay open"
+            );
+        })
+        .join()
+        .expect("sandboxed thread");
+        drop((listener, unix));
+        std::fs::remove_file(socket).expect("cleanup");
+    }
 
     #[test]
     fn reads_outside_the_grants_and_writes_outside_the_write_directory_are_denied() {
