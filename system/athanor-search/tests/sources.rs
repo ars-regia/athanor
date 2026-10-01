@@ -159,7 +159,7 @@ fn qalc_answers_and_refuses() {
     assert_eq!(calc.result, "8");
     assert!(on_own_context(athanor_search::calc::evaluate("-f /etc/passwd")).is_none());
     // No query stays on disk: the history is /dev/null and nothing else holds the text.
-    let config = athanor_search::calc::config_home();
+    let config = athanor_search::calc::config_home().expect("prepared");
     let history = config.join("qalculate/qalc.history");
     assert_eq!(std::fs::read_link(&history).expect("a symlink"), std::path::Path::new("/dev/null"));
     for entry in std::fs::read_dir(config.join("qalculate")).expect("dir") {

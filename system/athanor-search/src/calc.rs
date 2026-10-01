@@ -4,6 +4,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
 use athanor_unit::text;
@@ -67,15 +68,28 @@ impl Drop for Running {
 /// (measured with qalc 5.7.0). The launcher runs under Landlock with writes allowed only
 /// in its own state and cache, so qalc gets a config directory there. `HOME` stays: the
 /// rates are read from `$XDG_DATA_HOME/qalculate`, where the timer writes them.
-pub fn config_home() -> &'static Path {
+pub fn config_home() -> Option<&'static Path> {
     static HOME: OnceLock<PathBuf> = OnceLock::new();
-    HOME.get_or_init(|| {
-        let home = gio::glib::user_cache_dir().join("athanor/launcher/qalc");
-        if let Err(err) = private_config(&home) {
-            tracing::warn!("qalc config directory {}: {err}", home.display());
+    ready(&HOME, || gio::glib::user_cache_dir().join("athanor/launcher/qalc"))
+}
+
+/// The prepared directory, or nothing: only a success is kept, so a later call retries a
+/// failed setup, and the calculator does not run without it (a query must not be kept).
+fn ready(slot: &'static OnceLock<PathBuf>, home: impl FnOnce() -> PathBuf) -> Option<&'static Path> {
+    if let Some(home) = slot.get() {
+        return Some(home);
+    }
+    let home = home();
+    match private_config(&home) {
+        Ok(()) => Some(slot.get_or_init(|| home)),
+        Err(err) => {
+            static LOGGED: AtomicBool = AtomicBool::new(false);
+            if !LOGGED.swap(true, Ordering::Relaxed) {
+                tracing::warn!("qalc config directory {}: {err}; no calculator", home.display());
+            }
+            None
         }
-        home
-    })
+    }
 }
 
 /// The directory (0700) with qalc's history sent to /dev/null: no query is kept on disk.
@@ -93,7 +107,17 @@ fn private_config(home: &Path) -> std::io::Result<()> {
         Err(err) if err.kind() != std::io::ErrorKind::NotFound => return Err(err),
         _ => {}
     }
-    symlink("/dev/null", &history)
+    match symlink("/dev/null", &history) {
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+            // A concurrent setup won the race: fine when it made the same link.
+            if std::fs::read_link(&history).is_ok_and(|to| to == Path::new("/dev/null")) {
+                Ok(())
+            } else {
+                Err(err)
+            }
+        }
+        other => other,
+    }
 }
 
 /// Reads the stream to its end; nothing when it is longer than `limit` or fails.
@@ -120,12 +144,13 @@ async fn read_bounded(stream: &gio::InputStream, limit: usize) -> Option<Vec<u8>
 }
 
 pub async fn evaluate(query: &str) -> Option<Calc> {
+    let config = config_home()?;
     // Without STDIN_PIPE or STDIN_INHERIT, GIO gives the child /dev/null as stdin: qalc
     // never waits for input (GIO has no STDIN_SILENCE flag).
     let launcher = gio::SubprocessLauncher::new(
         gio::SubprocessFlags::STDOUT_PIPE | gio::SubprocessFlags::STDERR_SILENCE,
     );
-    launcher.setenv("XDG_CONFIG_HOME", config_home(), true);
+    launcher.setenv("XDG_CONFIG_HOME", config, true);
     // The query comes after `--`: it is an expression even when it starts with `-`.
     let argv = [
         "qalc", "-s", "color 0", "-s", "update exchange rates 0", "--", query,
@@ -239,6 +264,22 @@ mod tests {
         };
         assert_eq!(block_on(read_bounded(&stream(100), 4096)).map(|o| o.len()), Some(100));
         assert!(block_on(read_bounded(&stream(5000), 4096)).is_none());
+    }
+
+    #[test]
+    fn a_failed_setup_is_refused_and_not_kept() {
+        static SLOT: OnceLock<PathBuf> = OnceLock::new();
+        let dir = std::env::temp_dir().join(format!("athanor-search-bad-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let file = dir.join("file");
+        std::fs::write(&file, "x").expect("write");
+        // The parent is a regular file: the directory cannot be made.
+        assert!(ready(&SLOT, || file.join("qalc")).is_none());
+        assert!(SLOT.get().is_none());
+        // The next call retries, and succeeds.
+        let good = dir.join("qalc");
+        assert_eq!(ready(&SLOT, || good.clone()), Some(good.as_path()));
+        std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 
     #[test]
