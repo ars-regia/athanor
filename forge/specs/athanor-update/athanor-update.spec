@@ -4,7 +4,7 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-update
 Version:        1.0.0
-Release:        3%{?dist}
+Release:        4%{?dist}
 Summary:        Athanor system image updates and trust state
 
 License:        MIT
@@ -72,6 +72,11 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
 %doc /usr/share/doc/athanor-update/RECOVERY.md
 
 %changelog
+* Thu Oct 01 2026 Athanor Forge <forge@athanor.os> - 1.0.0-4
+- A deployment bootc reports incompatible (packages layered, removed or replaced with
+  rpm-ostree) is described from rpm-ostree and published as not verified, reason
+  local-changes, instead of failing the check; the migration waits on it.
+
 * Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-3
 - UT11: a downloaded update is announced once per user, not once per session.
 

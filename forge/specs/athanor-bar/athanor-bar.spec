@@ -1,14 +1,15 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        4%{?dist}
+Release:        5%{?dist}
 Summary:        The Athanor bar
 License:        MIT
 
 BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gtk4-layer-shell-devel pulseaudio-libs-devel binutils python3 gettext
 Requires:       gtk4 gtk4-layer-shell athanor-calmo athanor-shelld
-# The shield asks os.athanor.Update1.State(), which athanor-update serves from 1.0.0-2.
-Requires:       athanor-update >= 1.0.0-2
+# The shield asks os.athanor.Update1.State(), which athanor-update serves from 1.0.0-2; the
+# local-changes reason it may publish exists from 1.0.0-4.
+Requires:       athanor-update >= 1.0.0-4
 # The first-session pick and the vendor layout moved here from the translator.
 Obsoletes:      athanor-layout-translator < 1.0.1
 
@@ -69,6 +70,9 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
+* Thu Oct 01 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
+- The shield names the local-changes reason of athanor-update 1.0.0-4.
+
 * Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-4
 - Takes over the first-session layout pick (SH10) and the vendor layout from
   athanor-layout-translator, which it obsoletes.

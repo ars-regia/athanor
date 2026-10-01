@@ -41,6 +41,9 @@ pub enum Reason {
     KeyNotInPolicy,
     PolicyNotInForce,
     ReferenceOutOfScope,
+    /// Packages were layered, removed or replaced on this machine: bootc calls the booted
+    /// deployment incompatible, and what runs is no longer the image that was signed.
+    LocalChanges,
 }
 
 /// The `verified` member of the file. The pair is redundant on purpose, so a reader can
@@ -278,7 +281,7 @@ mod tests {
 
     #[test]
     fn every_reason_but_signature_is_attention() {
-        for reason in [Reason::Media, Reason::NoSignature, Reason::KeyNotInPolicy, Reason::PolicyNotInForce, Reason::ReferenceOutOfScope] {
+        for reason in [Reason::Media, Reason::NoSignature, Reason::KeyNotInPolicy, Reason::PolicyNotInForce, Reason::ReferenceOutOfScope, Reason::LocalChanges] {
             let state = State { verified: reason.into(), ..verified_state() };
             assert_eq!(badge(&state, NOW), Badge::Attention, "{reason:?}");
         }
@@ -350,6 +353,7 @@ mod tests {
         assert_eq!(text, r#""will-apply-at-next-shutdown""#);
         assert_eq!(serde_json::to_string(&UpdateState::OlderThanBooted).expect("serialize"), r#""older-than-booted""#);
         assert_eq!(serde_json::to_string(&Reason::ReferenceOutOfScope).expect("serialize"), r#""reference-out-of-scope""#);
+        assert_eq!(serde_json::to_string(&Reason::LocalChanges).expect("serialize"), r#""local-changes""#);
     }
 
     fn scratch(test: &str) -> std::path::PathBuf {
