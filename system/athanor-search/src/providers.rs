@@ -76,7 +76,7 @@ fn discover_with(dirs: &[PathBuf], installed: &dyn Fn(&str) -> Option<String>) -
                 // override in a user directory switches a system provider off, as on GNOME.
                 Ok((id, provider)) => {
                     if seen.insert(id) {
-                        if let Some(provider) = provider.filter(|p| buses.insert(p.bus_name.clone())) {
+                        if let Some(provider) = provider.filter(|p| buses.insert((p.bus_name.clone(), p.object_path.clone()))) {
                             providers.push(provider);
                         }
                     }
@@ -216,6 +216,17 @@ fn field(meta: &Meta, key: &str) -> Option<String> {
     Some(meta.get(key)?.str()?.chars().take(MAX_FIELD_CHARS).collect())
 }
 
+/// A themed icon whose every name is a plain icon name: never a path.
+fn plain_themed(icon: &gio::Icon) -> bool {
+    icon.downcast_ref::<gio::ThemedIcon>().is_some_and(|themed| {
+        themed.names().iter().all(|name| {
+            !name.is_empty()
+                && name.len() <= 255
+                && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        })
+    })
+}
+
 pub fn metas_to_hits(provider: &Provider, metas: Vec<Meta>, terms: &[String]) -> Vec<Hit> {
     metas
         .into_iter()
@@ -230,7 +241,7 @@ pub fn metas_to_hits(provider: &Provider, metas: Vec<Meta>, terms: &[String]) ->
                 .get("icon")
                 .and_then(gio::Icon::deserialize)
                 .or_else(|| field(&meta, "gicon").and_then(|s| gio::Icon::for_string(&s).ok()))
-                .filter(|icon| icon.is::<gio::ThemedIcon>());
+                .filter(plain_themed);
             Some(Hit {
                 group: Group::Providers,
                 key: String::new(),
@@ -323,13 +334,16 @@ mod tests {
     }
 
     #[test]
-    fn two_desktop_ids_on_one_bus_name_give_one_provider() {
+    fn providers_are_keyed_on_bus_name_and_path() {
         let root = scratch("bus");
         write_ini(&root, "a.ini", "org.mozilla.firefox.desktop", "org.example.Same", "");
         write_ini(&root, "b.ini", "bidi.desktop", "org.example.Same", "");
         let got = discover_with(std::slice::from_ref(&root), &|_| Some("X".into()));
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].desktop_id, "org.mozilla.firefox.desktop");
+        let body = |id: &str, path: &str| format!("[Shell Search Provider]\nDesktopId={id}\nBusName=org.example.Same\nObjectPath={path}\nVersion=2\n");
+        std::fs::write(root.join("b.ini"), body("bidi.desktop", "/other")).expect("write");
+        assert_eq!(discover_with(std::slice::from_ref(&root), &|_| Some("X".into())).len(), 2);
         std::fs::remove_dir_all(&root).expect("cleanup");
     }
 
@@ -350,6 +364,10 @@ mod tests {
         assert!(icon_of(themed).is_some());
         assert!(icon_of(bytes).is_none());
         assert!(icon_of(file).is_none());
+        let named = |name: &str| icon_of(gio::ThemedIcon::new(name).serialize().expect("themed"));
+        assert!(named("../../etc/x").is_none());
+        assert!(named("/tmp/x").is_none());
+        assert!(named("org.gnome.Calculator-symbolic").is_some());
     }
 
     #[test]
