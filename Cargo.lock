@@ -592,6 +592,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-launcher"
+version = "1.0.0"
+dependencies = [
+ "athanor-compositor-client",
+ "athanor-i18n",
+ "athanor-layout",
+ "athanor-preview",
+ "athanor-search",
+ "athanor-style",
+ "athanor-unit",
+ "gio-unix",
+ "glib",
+ "gtk4",
+ "gtk4-layer-shell",
+ "tracing",
+]
+
+[[package]]
 name = "athanor-layout"
 version = "1.0.0"
 dependencies = [

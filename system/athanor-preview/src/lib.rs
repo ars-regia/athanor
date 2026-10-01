@@ -57,7 +57,7 @@ struct Job {
 
 /// The icon the preview may show for something described by another process: a themed one.
 /// A file icon or a bytes icon would make the launcher decode a file (LA9).
-fn themed(icon: Option<gio::Icon>) -> gio::Icon {
+pub fn themed(icon: Option<gio::Icon>) -> gio::Icon {
     match icon {
         Some(icon) if icon.is::<gio::ThemedIcon>() => icon,
         _ => gio::ThemedIcon::new("application-x-executable").upcast(),
