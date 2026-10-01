@@ -276,7 +276,7 @@ pub fn rows_to_hits(rows: Vec<Row>, query: &str, ranker: &mut Ranker, usage: &Us
         })
         .collect();
     // Rows arrive newest first and the sort is stable: equal scores keep that order.
-    hits.sort_by(|a, b| b.score.cmp(&a.score));
+    hits.sort_by_key(|hit| std::cmp::Reverse(hit.score));
     hits.truncate(MAX_HITS);
     hits
 }
@@ -334,7 +334,7 @@ mod tests {
             0,
         );
         let mut sorted = hits.clone();
-        sorted.sort_by(|a, b| b.score.cmp(&a.score));
+        sorted.sort_by_key(|hit| std::cmp::Reverse(hit.score));
         assert_eq!(sorted[0].title, "Relazione_Q3.odt");
         assert_eq!(sorted[1].tier, Tier::Scattered);
     }
