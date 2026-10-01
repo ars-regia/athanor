@@ -51,9 +51,8 @@ fn hit_row(hit: &Hit, top: bool) -> gtk4::ListBoxRow {
     let line = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
     let icon = gtk4::Image::builder().pixel_size(if top { 40 } else { 28 }).build();
     // LA9: only a themed icon is drawn; any other icon is a file this process would decode.
-    if let Some(gicon) = &hit.icon {
-        icon.set_from_gicon(&themed(Some(gicon.clone())));
-    }
+    // No icon, or a refused one, is the preview's generic icon.
+    icon.set_from_gicon(&themed(hit.icon.clone()));
     line.append(&icon);
     let text = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     text.append(&label(&hit.title, "row-title"));

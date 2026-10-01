@@ -29,7 +29,7 @@
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
 #   rig.sh atspi <greeter|chooser|bar|bar-modules|dock|launcher>   every interactive widget has a role and a name
-#   rig.sh launcher-e2e     athanor-launcher in four scenes, confined: READY, calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch
+#   rig.sh launcher-e2e     athanor-launcher in five scenes, confined: READY, calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch, accessible tree
 #   rig.sh launcher-window-preview   the window row's preview carries the window's thumbnail
 #   rig.sh chooser-e2e      press a preset in the chooser and wait until the bar and the dock draw it (run build-bar and build-dock first)
 #   rig.sh surface <greeter|layout (run build-bar and build-dock first)|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling|bar-popups|bar-notifications|bar-tray|bar-network|bar-bluetooth|bar-audio|bar-battery|bar-shield|dock|launcher (run build-launcher first)>  capture every case of a surface and compare with the goldens
@@ -266,7 +266,8 @@ capture_dock() {
 # doc_launcher.md, LA11: the launcher shown at start over the float layout with the query
 # "cc window": the CC Window application on top, its preview (icon, name, description,
 # "System image"), the settings pages and the web row. The rig has no localsearch, so no
-# file group; the clock is frozen, so usage is empty and the order is the ranking's alone.
+# file group; the launcher runs without libfaketime and paints no time, and usage is empty,
+# so the order is the ranking's alone.
 capture_launcher() {
     in_rig "$(rig_image)" bash -c '
         set -euo pipefail
@@ -522,7 +523,7 @@ compositor-e2e)
 launcher-e2e)
     # Every stage is its own scene: the fixtures differ, and each launcher starts fresh.
     require athanor-launcher build-launcher
-    for stage in e2e frozen-provider hostile no-localsearch; do
+    for stage in e2e frozen-provider hostile no-localsearch tree; do
         query="cc window" fixtures=""
         case $stage in
         e2e) query="2+2*3" ;;

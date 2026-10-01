@@ -27,7 +27,7 @@ class CasesTest(unittest.TestCase):
 
     def test_an_unknown_surface_is_an_error(self):
         with self.assertRaises(KeyError):
-            cases.surface_cases("library")
+            cases.surface_cases("no-such-surface")
 
     def test_the_layouts_have_the_twenty_seven_cases_of_sh13(self):
         found = cases.layout_cases()

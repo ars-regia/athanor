@@ -71,8 +71,8 @@ fn usage_reorders_within_a_tier_and_a_learned_query_wins() {
 #[test]
 fn windows_are_found_by_title_and_application() {
     let open = [
-        windows::WindowEntry { index: 0, title: "Relazione_Q3.odt — LibreOffice".into(), app_id: "libreoffice-writer".into(), app_name: Some("LibreOffice Writer".into()) },
-        windows::WindowEntry { index: 1, title: "~ : bash".into(), app_id: "com.system76.CosmicTerm".into(), app_name: Some("COSMIC Terminal".into()) },
+        windows::WindowEntry { index: 0, title: "Relazione_Q3.odt — LibreOffice".into(), app_id: "libreoffice-writer".into(), app_name: Some("LibreOffice Writer".into()), icon: None },
+        windows::WindowEntry { index: 1, title: "~ : bash".into(), app_id: "com.system76.CosmicTerm".into(), app_name: Some("COSMIC Terminal".into()), icon: None },
     ];
     let hits = windows::search(&open, "relaz", &mut Ranker::new("relaz"), &Usage::default(), 0);
     assert_eq!(hits.len(), 1);
@@ -127,7 +127,7 @@ fn a_command_that_would_show_differently_from_what_runs_is_refused() {
 
 #[test]
 fn long_names_and_titles_are_bounded() {
-    let open = [windows::WindowEntry { index: 0, title: "t".repeat(10_000), app_id: "a".repeat(10_000), app_name: None }];
+    let open = [windows::WindowEntry { index: 0, title: "t".repeat(10_000), app_id: "a".repeat(10_000), app_name: None, icon: None }];
     let hits = windows::search(&open, "t", &mut Ranker::new("t"), &Usage::default(), 0);
     assert!(hits[0].title.chars().count() <= athanor_unit::text::TITLE_CHARS);
     assert!(hits[0].subtitle.chars().count() <= athanor_unit::text::NAME_CHARS);

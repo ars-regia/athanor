@@ -28,7 +28,9 @@ and usage after five failures in ten minutes. Enabled by hand until the switch.
 
 %build
 %set_build_flags
-cargo build --release --locked -p %{name} -p athanor-preview-render
+# Two commands: the workspace's zbus tokio feature unified with glycin breaks glycin-core.
+cargo build --release --locked -p %{name}
+cargo build --release --locked -p athanor-preview-render
 
 for catalog in forge/specs/athanor-launcher/athanor-launcher-1.0.0/po/*.po; do
     lang=$(basename "$catalog" .po)

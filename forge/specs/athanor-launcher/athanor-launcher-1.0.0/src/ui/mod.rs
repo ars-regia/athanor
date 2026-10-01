@@ -119,9 +119,9 @@ pub fn start(app: &gtk4::Application, options: &Options) -> Rc<Launcher> {
         .spacing(8)
         .halign(gtk4::Align::Center)
         .valign(gtk4::Align::Start)
-        .margin_top(96)
+        .margin_top(place::TOP_MARGIN)
         .width_request(760)
-        .height_request(480)
+        .height_request(place::MAX_HEIGHT)
         .build();
     content.add_css_class("launcher");
     content.add_css_class("background");
@@ -324,18 +324,20 @@ impl Launcher {
             windows
                 .iter()
                 .enumerate()
-                .map(|(index, window)| WindowEntry {
-                    index,
-                    title: window.title.clone(),
-                    app_id: window.app_id.clone(),
-                    app_name: gio_unix::DesktopAppInfo::new(&format!("{}.desktop", window.app_id)).map(|info| info.name().to_string()),
+                .map(|(index, window)| {
+                    let info = gio_unix::DesktopAppInfo::new(&format!("{}.desktop", window.app_id));
+                    WindowEntry {
+                        index,
+                        title: window.title.clone(),
+                        app_id: window.app_id.clone(),
+                        app_name: info.as_ref().map(|info| info.name().to_string()),
+                        icon: info.and_then(|info| info.icon()),
+                    }
                 })
                 .collect(),
         );
         self.engine.reload_usage();
-        // The panel is 480 px tall at most and never taller than the output leaves under
-        // its top margin: at 1280x800 with scale 1.5 the output is 533 px high.
-        self.content.set_height_request(surface.monitor.geometry().height().saturating_sub(96 + 24).clamp(200, 480));
+        self.content.set_height_request(place::panel_height(surface.monitor.geometry().height()));
         surface.show(self.content.upcast_ref());
         self.shown.replace(Some(surface.monitor.clone()));
         let text = self.memory.borrow_mut().shown(asked).unwrap_or_default();

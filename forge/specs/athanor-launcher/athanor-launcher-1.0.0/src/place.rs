@@ -10,9 +10,30 @@ pub fn focused_output(activated: Option<&[String]>, outputs: &[Option<String>]) 
         .unwrap_or(0)
 }
 
+/// The gap between the top of the output and the panel.
+pub const TOP_MARGIN: i32 = 96;
+/// The room kept under the panel.
+const BOTTOM_MARGIN: i32 = 24;
+const MIN_HEIGHT: i32 = 200;
+pub const MAX_HEIGHT: i32 = 480;
+
+/// The panel's height on an output `output_height` logical pixels high: at most `MAX_HEIGHT`,
+/// and never more than the output leaves under the top margin.
+pub fn panel_height(output_height: i32) -> i32 {
+    output_height.saturating_sub(TOP_MARGIN + BOTTOM_MARGIN).clamp(MIN_HEIGHT, MAX_HEIGHT)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_panel_fits_under_the_top_margin() {
+        assert_eq!(panel_height(800), 480);
+        assert_eq!(panel_height(533), 413, "1280x800 at scale 1.5");
+        assert_eq!(panel_height(100), 200, "a tiny output");
+        assert_eq!(panel_height(i32::MIN), 200);
+    }
 
     fn connectors(names: &[&str]) -> Vec<Option<String>> {
         names.iter().map(|name| Some((*name).to_owned())).collect()

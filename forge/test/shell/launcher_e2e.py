@@ -15,6 +15,10 @@ and shown at start by ATHANOR_LAUNCHER_SHOW. Stages:
   accessible name carries U+202E (Review Focus 3, §5 item 8).
 - no-localsearch: localsearch is absent from the rig's session: no Files group, no
   "Indexing files…" row, and no error in the log (Review Focus 5, §5 item 7).
+- tree: the accessible tree keeps the names the list rows do not carry themselves: the
+  "Results" list and the preview's region role and text (Review Important 1; the menu's
+  "Actions" list cannot be reached, see the stage). atspi launcher counts 1 widget only, the entry: the lists and
+  rows are not in atspi_check.py's INTERACTIVE set, and this stage checks them instead.
 - window-preview: hide and show, so the window that came after the start is listed, and
   wait for its row (the capture follows in scene.sh).
 """
@@ -27,7 +31,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from atspi_check import find_application  # noqa: E402
+from atspi_check import find_application, walk  # noqa: E402
 from bar_e2e import check, failures, pss_kb, wait_for  # noqa: E402
 from bar_session import READY_FILE  # noqa: E402
 
@@ -74,7 +78,19 @@ def launcher_pid():
 
 
 def log_text():
+    """The launcher's log; a missing file fails the stage rather than reading as empty."""
+    check("log exists", LOG.exists(), f"{LOG} is missing")
     return LOG.read_text(encoding="utf-8", errors="replace") if LOG.exists() else ""
+
+
+def tree(Atspi):
+    """[(role name, accessible name, showing)] of the whole launcher tree."""
+    app = find_application(Atspi, "athanor-launcher", 1)
+    return [(role, name, shown) for role, name, shown, _ in walk(app, Atspi)] if app is not None else []
+
+
+def named(Atspi, role, name):
+    return any(r == role and n == name and shown for r, n, shown in tree(Atspi))
 
 
 def show_times():
@@ -111,6 +127,8 @@ def stage_frozen_provider(Atspi):
     check("hidden", wait_for(lambda: not labels(Atspi), 3), str(labels(Atspi)))
     started = time.monotonic()
     show()
+    # The 1 s wait equals the provider deadline on purpose: a group that waited for the
+    # frozen provider would arrive just after it.
     check(
         "applications within the deadline",
         wait_for(lambda: "CC Window, Application" in labels(Atspi), 1),
@@ -136,17 +154,35 @@ def stage_no_localsearch(Atspi):
     check("rows", wait_for(lambda: "CC Window, Application" in labels(Atspi), 5), str(labels(Atspi)))
     time.sleep(2)
     rows = labels(Atspi)
-    check("no file group", not any(row.endswith(", File") or row == "Files" for row in rows), str(rows))
-    check("no indexing row", "Indexing files…" not in rows, str(rows))
-    # The journal format prefixes the priority: <3> is an error.
-    errors = [line for line in log_text().splitlines() if line.startswith("<3>")]
+    check("no file group", not any(row.endswith(", File") for row in rows), str(rows))
+    # Header and status rows are plain labels, not list items: read them through the LABEL role.
+    texts = [name for role, name, _ in tree(Atspi) if role == "label"]
+    check("positive control", "Web" in texts, f"the walk does not find the Web header: {texts}")
+    check("no Files header", "Files" not in texts, str(texts))
+    check("no indexing row", "Indexing files…" not in texts, str(texts))
+    log = log_text()
+    # The journal format prefixes the priority: <6> is info, <3> an error.
+    check("launcher logged", "<6>shown ms=" in log, "no shown line in the log")
+    errors = [line for line in log.splitlines() if line.startswith("<3>")]
     check("no error", not errors, "\n".join(errors))
+
+
+def stage_tree(Atspi):
+    check("READY=1", wait_for(lambda: READY_FILE.exists(), 10), "no READY=1 on NOTIFY_SOCKET")
+    check("rows", wait_for(lambda: "CC Window, Application" in labels(Atspi), 5), str(labels(Atspi)))
+    check("Results list", named(Atspi, "list", "Results"), str(tree(Atspi)))
+    # GTK's Region role reaches at-spi as "filler"; the preview's own labels sit beside it.
+    check("preview region", named(Atspi, "filler", ""), str(tree(Atspi)))
+    check("preview text", named(Atspi, "label", "A window of the shell rig"), str(tree(Atspi)))
+    # The menu's "Actions" list is not checked: the rig has no way to press Tab (no virtual
+    # keyboard, and Atspi key synthesis does not reach a Wayland client).
 
 
 def stage_window_preview(Atspi):
     check("READY=1", wait_for(lambda: READY_FILE.exists(), 10), "no READY=1 on NOTIFY_SOCKET")
     time.sleep(2)  # bar_session.py opens the window at READY
-    show()
+    show()  # hides
+    check("hidden", wait_for(lambda: not labels(Atspi), 3), str(labels(Atspi)))
     show()
     check("window row", wait_for(lambda: any(row.endswith(", Window") for row in labels(Atspi)), 5), str(labels(Atspi)))
     time.sleep(2)  # the preview's delay and the capture
@@ -157,6 +193,7 @@ STAGES = {
     "frozen-provider": stage_frozen_provider,
     "hostile": stage_hostile,
     "no-localsearch": stage_no_localsearch,
+    "tree": stage_tree,
     "window-preview": stage_window_preview,
 }
 

@@ -14,6 +14,8 @@ pub struct WindowEntry {
     pub title: String,
     pub app_id: String,
     pub app_name: Option<String>,
+    /// The icon of the application's desktop entry, when one resolves.
+    pub icon: Option<gio::Icon>,
 }
 
 pub fn search(windows: &[WindowEntry], query: &str, ranker: &mut Ranker, usage: &Usage, now: u64) -> Vec<Hit> {
@@ -30,7 +32,7 @@ pub fn search(windows: &[WindowEntry], query: &str, ranker: &mut Ranker, usage: 
                 group: Group::Windows,
                 title,
                 subtitle: app,
-                icon: None,
+                icon: window.icon.clone(),
                 tier,
                 score: score.saturating_add(bonus),
                 learned,
