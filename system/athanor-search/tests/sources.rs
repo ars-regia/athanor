@@ -109,3 +109,27 @@ fn an_entry_read_by_path_keeps_its_file_name_as_id() {
     let info = gio_unix::DesktopAppInfo::from_filename(path).expect("fixture");
     assert_eq!(info.id().as_deref(), Some("org.mozilla.firefox.desktop"));
 }
+
+#[test]
+fn an_entry_whose_name_is_only_hidden_characters_is_skipped() {
+    let catalog = catalog();
+    assert!(catalog.apps.iter().all(|e| e.id != "blank.desktop"));
+}
+
+#[test]
+fn a_command_that_would_show_differently_from_what_runs_is_refused() {
+    assert!(command::hit("> echo a\u{200b}b").is_none());
+    assert!(command::hit("> echo \u{202e}gpj").is_none());
+    assert!(command::hit(&format!("> {}", "a".repeat(athanor_unit::text::TITLE_CHARS + 1))).is_none());
+    let shown = command::hit("> htop -d 5").expect("hit");
+    assert_eq!(shown.title, "htop -d 5");
+}
+
+#[test]
+fn long_names_and_titles_are_bounded() {
+    let open = [windows::WindowEntry { index: 0, title: "t".repeat(10_000), app_id: "a".repeat(10_000), app_name: None }];
+    let hits = windows::search(&open, "t", &mut Ranker::new("t"), &Usage::default(), 0);
+    assert!(hits[0].title.chars().count() <= athanor_unit::text::TITLE_CHARS);
+    assert!(hits[0].subtitle.chars().count() <= athanor_unit::text::NAME_CHARS);
+    assert!(hits[0].key.chars().count() <= "window:".len() + athanor_unit::text::NAME_CHARS);
+}

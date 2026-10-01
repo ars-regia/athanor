@@ -41,16 +41,16 @@ impl Catalog {
         for info in infos {
             let Some(id) = info.id().map(|id| id.to_string()) else { continue };
             if info.should_show() {
-                catalog.apps.push(entry(&info, id));
+                catalog.apps.extend(entry(&info, id));
             } else if id.starts_with(SETTINGS_PREFIX) {
-                catalog.settings.push(entry(&info, id));
+                catalog.settings.extend(entry(&info, id));
             }
         }
         catalog
     }
 }
 
-fn entry(info: &gio::AppInfo, id: String) -> Entry {
+fn entry(info: &gio::AppInfo, id: String) -> Option<Entry> {
     let mut secondary = Vec::new();
     if let Some(desktop) = info.downcast_ref::<gio_unix::DesktopAppInfo>() {
         secondary.extend(desktop.generic_name().map(|name| name.to_string()));
@@ -64,12 +64,16 @@ fn entry(info: &gio::AppInfo, id: String) -> Entry {
             .and_then(|stem| stem.rsplit('.').next())
             .map(str::to_owned),
     );
-    Entry {
-        name: text::line(&info.display_name(), text::NAME_CHARS),
+    let name = text::line(&info.display_name(), text::NAME_CHARS);
+    if name.trim().is_empty() {
+        return None;
+    }
+    Some(Entry {
+        name,
         secondary: secondary.iter().map(|field| text::line(field, text::NAME_CHARS)).collect(),
         icon: info.icon(),
         id,
-    }
+    })
 }
 
 pub fn search(

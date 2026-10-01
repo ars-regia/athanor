@@ -22,8 +22,9 @@ pub fn search(windows: &[WindowEntry], query: &str, ranker: &mut Ranker, usage: 
         .filter_map(|window| {
             let title = text::line(&window.title, text::TITLE_CHARS);
             let app = text::line(window.app_name.as_deref().unwrap_or(&window.app_id), text::NAME_CHARS);
-            let (tier, score) = ranker.score(&title, &[&app, &window.app_id])?;
-            let key = format!("window:{}", window.app_id);
+            let app_id = text::line(&window.app_id, text::NAME_CHARS);
+            let (tier, score) = ranker.score(&title, &[&app, &app_id])?;
+            let key = format!("window:{app_id}");
             let (bonus, learned) = usage.bonus(query, &key, now);
             Some(Hit {
                 group: Group::Windows,
