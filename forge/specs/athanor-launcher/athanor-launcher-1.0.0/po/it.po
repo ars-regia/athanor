@@ -28,7 +28,7 @@ msgstr "Azioni"
 
 #: src/ui/actions.rs:210
 msgid "Switch to"
-msgstr "Passa a"
+msgstr "Passa alla finestra"
 
 #: src/ui/actions.rs:211
 msgid "Run in terminal"
