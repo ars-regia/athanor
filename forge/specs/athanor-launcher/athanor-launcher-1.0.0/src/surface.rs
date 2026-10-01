@@ -26,6 +26,13 @@ fn empty_input(window: &gtk4::ApplicationWindow) {
 
 impl Surface {
     pub fn new(app: &gtk4::Application, monitor: &gdk::Monitor) -> Surface {
+        // When an output leaves, gtk4-layer-shell answers its monitor's `invalidate` by destroying
+        // the layer surface and creating another on the default output. cosmic-comp 1.8 closes
+        // the connection of a client that destroys a layer surface whose output left (found by
+        // the dev VM hotplug stage, with the launcher shown on that output), so the emission
+        // stops here. The handler is never disconnected: the emission can follow the monitor
+        // list's change, which has already abandoned the surface (see `abandon`).
+        monitor.connect_invalidate(|monitor| monitor.stop_signal_emission_by_name("invalidate"));
         let window = gtk4::ApplicationWindow::new(app);
         window.init_layer_shell();
         if let Err(reason) = layer_guard::require_layer_surface(&window) {
@@ -80,6 +87,6 @@ impl Surface {
     // ponytail: one empty window per output removal for the life of the process; destroy
     // it instead once cosmic-comp tolerates that.
     pub fn abandon(self) {
-        self.hide();
+        self.window.set_child(None::<&gtk4::Widget>);
     }
 }

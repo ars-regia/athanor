@@ -201,7 +201,7 @@ impl Launcher {
                 return glib::Propagation::Proceed;
             };
             let ctrl = state.contains(gdk::ModifierType::CONTROL_MASK);
-            match keys::command(key(value), ctrl, launcher.entry.selection_bounds().is_some()) {
+            match keys::command(key(value), ctrl, launcher.entry.selection_bounds().is_some(), launcher.menu_open()) {
                 Command::Pass => glib::Propagation::Proceed,
                 Command::Hide => {
                     launcher.hide();
@@ -213,6 +213,18 @@ impl Launcher {
                 }
                 Command::Menu => {
                     launcher.open_menu();
+                    glib::Propagation::Stop
+                }
+                Command::MenuMove(delta) => {
+                    launcher.move_menu(delta);
+                    glib::Propagation::Stop
+                }
+                Command::MenuRun => {
+                    launcher.run_menu();
+                    glib::Propagation::Stop
+                }
+                Command::MenuClose => {
+                    launcher.close_menu();
                     glib::Propagation::Stop
                 }
                 Command::Run(choice) => {

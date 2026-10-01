@@ -115,7 +115,7 @@ impl Launcher {
             let label = gtk4::Label::builder().label(label(choice, &hit.action)).xalign(0.0).build();
             list.append(&label);
         }
-        let popover = gtk4::Popover::builder().child(&list).position(gtk4::PositionType::Right).build();
+        let popover = gtk4::Popover::builder().child(&list).position(gtk4::PositionType::Right).autohide(false).build();
         popover.set_parent(row);
         popover.connect_closed(|popover| {
             let popover = popover.clone();
@@ -141,9 +141,38 @@ impl Launcher {
             previous.popdown();
         }
         popover.popup();
+        // The entry keeps the focus: the menu has no grab, and its selection is drawn.
         if let Some(first) = list.row_at_index(0) {
             list.select_row(Some(&first));
-            first.grab_focus();
+        }
+    }
+
+    fn menu_list(&self) -> Option<gtk4::ListBox> {
+        self.menu.borrow().as_ref().filter(|menu| menu.is_visible()).and_then(|menu| menu.child()).and_downcast()
+    }
+
+    pub(super) fn menu_open(&self) -> bool {
+        self.menu_list().is_some()
+    }
+
+    pub(super) fn close_menu(&self) {
+        if let Some(menu) = self.menu.take() {
+            menu.popdown();
+        }
+    }
+
+    pub(super) fn move_menu(&self, delta: i32) {
+        let Some(list) = self.menu_list() else { return };
+        let at = list.selected_row().map_or(0, |row| row.index());
+        // None past either end: the selection stays on the last choice.
+        if let Some(row) = list.row_at_index(at + delta) {
+            list.select_row(Some(&row));
+        }
+    }
+
+    pub(super) fn run_menu(&self) {
+        if let Some(row) = self.menu_list().and_then(|list| list.selected_row()) {
+            row.activate();
         }
     }
 
