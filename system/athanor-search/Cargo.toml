@@ -10,6 +10,7 @@ authors = ["Athanor Forge <forge@athanor.os>"]
 athanor-layout = { path = "../athanor-layout" }
 athanor-unit = { path = "../athanor-unit" }
 gio = { workspace = true }
+gio-unix = { workspace = true }
 nucleo-matcher = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

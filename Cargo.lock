@@ -706,6 +706,7 @@ dependencies = [
  "athanor-layout",
  "athanor-unit",
  "gio",
+ "gio-unix",
  "nucleo-matcher",
  "serde",
  "serde_json",

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Firefox
+GenericName=Web Browser
+Keywords=Internet;WWW;Browser;Web;
+Exec=sh firefox %u
+Icon=org.mozilla.firefox
