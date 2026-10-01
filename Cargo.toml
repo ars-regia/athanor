@@ -32,6 +32,7 @@ members = [
   "system/athanor-i18n",
   "system/athanor-init-oracle",
   "system/athanor-layout",
+  "system/athanor-search",
   "system/athanor-unit",
   "system/athanor-mesh-bus",
   "system/athanor-net-unikernel",
@@ -81,7 +82,9 @@ glib = "0.22.9"
 relm4 = "0.11.0"
 bitflags = "2"
 gdk4-wayland = { version = "0.11", features = ["wayland_crate"] }
+gio = "0.22"
 gio-unix = "0.22"
+nucleo-matcher = "0.3"
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 wayland-scanner = "0.31"
