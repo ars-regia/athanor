@@ -3,8 +3,10 @@
 //! starts a thread or touches GTK.
 
 pub mod apps;
+pub mod board;
 pub mod calc;
 pub mod command;
+pub mod engine;
 pub mod files;
 pub mod item;
 pub mod providers;
