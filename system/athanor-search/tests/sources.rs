@@ -82,6 +82,16 @@ fn windows_are_found_by_title_and_application() {
 }
 
 #[test]
+fn a_window_row_carries_the_icon_of_its_entry() {
+    let icon: gio::Icon = gio::ThemedIcon::new("org.example.Editor").upcast();
+    let entry = |icon| windows::WindowEntry { index: 0, title: "notes".into(), app_id: "org.example.Editor".into(), app_name: None, icon };
+    let hits = windows::search(&[entry(Some(icon.clone()))], "notes", &mut Ranker::new("notes"), &Usage::default(), 0);
+    assert_eq!(hits[0].icon.as_ref().map(|i| i.equal(Some(&icon))), Some(true));
+    let hits = windows::search(&[entry(None)], "notes", &mut Ranker::new("notes"), &Usage::default(), 0);
+    assert!(hits[0].icon.is_none());
+}
+
+#[test]
 fn the_command_prefix_parses_a_command_line() {
     assert_eq!(command::parse("> htop -d 5"), Some(vec!["htop".into(), "-d".into(), "5".into()]));
     assert_eq!(command::parse(">'my tool' \"a b\""), Some(vec!["my tool".into(), "a b".into()]));
