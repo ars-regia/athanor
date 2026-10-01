@@ -28,7 +28,7 @@ fn is_zero_width(c: char) -> bool {
 
 pub fn hit(query: &str) -> Option<Hit> {
     let argv = parse(query)?;
-    let line = query.trim_start().trim_start_matches('>').trim();
+    let line = query.trim_start().strip_prefix('>')?.trim();
     Some(Hit {
         group: Group::Command,
         key: String::new(),

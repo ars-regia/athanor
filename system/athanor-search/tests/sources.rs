@@ -133,3 +133,10 @@ fn long_names_and_titles_are_bounded() {
     assert!(hits[0].subtitle.chars().count() <= athanor_unit::text::NAME_CHARS);
     assert!(hits[0].key.chars().count() <= "window:".len() + athanor_unit::text::NAME_CHARS);
 }
+
+#[test]
+fn the_title_keeps_every_character_the_command_runs() {
+    let hit = command::hit(">>ls").expect("hit");
+    assert_eq!(hit.title, ">ls");
+    assert_eq!(hit.action, Action::Command { argv: vec![">ls".into()] });
+}
