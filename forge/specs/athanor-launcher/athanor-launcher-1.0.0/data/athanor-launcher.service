@@ -47,8 +47,9 @@ ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=yes
 NoNewPrivileges=yes
-# @mount: GTK decodes icons through glycin, whose bubblewrap mounts its own root.
-SystemCallFilter=@system-service @mount
+# No @mount: the Landlock ruleset denies mount(2), so glycin's bubblewrap cannot run in this
+# process (doc_launcher.md, LA9); the preview decodes in a transient unit instead.
+SystemCallFilter=@system-service
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes

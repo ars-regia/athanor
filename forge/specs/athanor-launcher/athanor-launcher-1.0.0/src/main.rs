@@ -111,8 +111,9 @@ fn main() -> glib::ExitCode {
     .into_iter()
     .chain(shortcuts_dir.iter().map(PathBuf::as_path))
     .collect();
+    let devices: Vec<&Path> = athanor_launcher::DEVICE_WRITES.iter().map(Path::new).collect();
     let confined = sandbox::ensure_single_threaded()
-        .and_then(|()| sandbox::restrict_writes(&write, &[Path::new("/dev/dri")]))
+        .and_then(|()| sandbox::restrict_writes(&write, &devices))
         .and_then(|()| sandbox::deny_tcp());
     if let Err(err) = confined {
         tracing::error!(error = %err, "cannot confine the launcher with Landlock; refusing to run unconfined");

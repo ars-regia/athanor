@@ -23,6 +23,12 @@ impl Launcher {
             self.copy(&hit);
             return;
         }
+        if choice == Choice::Open && menu::primary(&hit.action) == Choice::Copy {
+            // Enter on a calculation copies the result and closes (LA5).
+            self.copy(&hit);
+            self.hide();
+            return;
+        }
         if !menu::choices(&hit.action).contains(&choice) && !matches!(choice, Choice::OpenWith(_)) {
             return;
         }
@@ -46,10 +52,6 @@ impl Launcher {
     async fn perform(&self, hit: &Hit, choice: &Choice) -> Result<(), String> {
         let client = || self.client.as_ref().ok_or_else(|| "no compositor client".to_owned());
         match (choice, &hit.action) {
-            (Choice::Open, Action::Copy { .. }) => {
-                self.copy(hit);
-                Ok(())
-            }
             (Choice::Open, Action::Launch { desktop_id }) => {
                 let app = gio_unix::DesktopAppInfo::new(desktop_id).ok_or_else(|| format!("no desktop entry {desktop_id}"))?;
                 client()?.launch(&app).await.map(drop).map_err(|err| err.to_string())
@@ -117,12 +119,19 @@ impl Launcher {
         popover.set_parent(row);
         popover.connect_closed(|popover| {
             let popover = popover.clone();
-            glib::idle_add_local_once(move || popover.unparent());
+            glib::idle_add_local_once(move || {
+                // fill() may have unparented it already.
+                if popover.parent().is_some() {
+                    popover.unparent();
+                }
+            });
         });
         let weak = Rc::downgrade(self);
-        let target = popover.clone();
+        let target = popover.downgrade();
         list.connect_row_activated(move |_, picked| {
-            target.popdown();
+            if let Some(target) = target.upgrade() {
+                target.popdown();
+            }
             let (Some(launcher), Ok(index)) = (weak.upgrade(), usize::try_from(picked.index())) else { return };
             if let Some(choice) = choices.get(index) {
                 launcher.run(hit.clone(), choice.clone());

@@ -29,6 +29,14 @@ pub fn choices(action: &Action) -> Vec<Choice> {
     }
 }
 
+/// What Enter and a click do (LA5): the primary action. A calculation's is to copy its result.
+pub fn primary(action: &Action) -> Choice {
+    match action {
+        Action::Copy { .. } => Choice::Copy,
+        _ => Choice::Open,
+    }
+}
+
 pub fn offers_open_with(action: &Action) -> bool {
     matches!(action, Action::Open { uri } if local(uri))
 }
@@ -59,6 +67,13 @@ mod tests {
         assert_eq!(choices(&remote), [Choice::Open, Choice::Copy]);
         assert!(!offers_open_with(&remote));
         assert_eq!(choices(&Action::Command { argv: vec!["top".into()] }), [Choice::Open]);
+    }
+
+    #[test]
+    fn enter_on_a_calculation_copies_and_on_anything_else_opens() {
+        assert_eq!(primary(&Action::Copy { text: "8".into() }), Choice::Copy);
+        assert_eq!(primary(&Action::Open { uri: "file:///a".into() }), Choice::Open);
+        assert_eq!(primary(&Action::Launch { desktop_id: "a.desktop".into() }), Choice::Open);
     }
 
     #[test]

@@ -69,6 +69,8 @@ pub struct Launcher {
     /// Bumped by every selection, so a late window capture is dropped.
     selection: Cell<u64>,
     watches: RefCell<Vec<gio::FileMonitor>>,
+    /// A context singleton: it lives, and keeps its handler, only while held.
+    apps_monitor: gio::AppInfoMonitor,
 }
 
 pub fn start(app: &gtk4::Application, options: &Options) -> Rc<Launcher> {
@@ -154,6 +156,7 @@ pub fn start(app: &gtk4::Application, options: &Options) -> Rc<Launcher> {
             pending_preview: RefCell::default(),
             selection: Cell::new(0),
             watches: RefCell::default(),
+            apps_monitor: gio::AppInfoMonitor::get(),
         }
     });
     launcher.connect();
@@ -236,7 +239,7 @@ impl Launcher {
             }
         });
         let weak = Rc::downgrade(self);
-        gio::AppInfoMonitor::get().connect_changed(move |_| {
+        self.apps_monitor.connect_changed(move |_| {
             if let Some(launcher) = weak.upgrade() {
                 launcher.engine.set_catalog(Catalog::read());
             }
@@ -336,7 +339,8 @@ impl Launcher {
         self.entry.set_text(&text);
         self.entry.grab_focus();
         self.entry.select_region(0, -1);
-        // §5 item 1: from the Show call to the first frame drawn.
+        // §5 item 1: from the Show call to the first frame-clock tick after present, which is
+        // before the frame is painted.
         surface.window.add_tick_callback(move |_, _| {
             tracing::info!(ms = u64::try_from(asked.elapsed().as_millis()).unwrap_or(u64::MAX), "shown");
             glib::ControlFlow::Break
@@ -367,6 +371,11 @@ impl Launcher {
     }
 
     fn fill(&self, lines: &[Line]) {
+        // The popover is parented to a row that is about to be removed.
+        if let Some(menu) = self.menu.take() {
+            menu.popdown();
+            menu.unparent();
+        }
         let selected = self.selected_hit().map(|hit| if hit.key.is_empty() { hit.title } else { hit.key });
         self.list.remove_all();
         for line in lines {
