@@ -140,3 +140,22 @@ fn the_title_keeps_every_character_the_command_runs() {
     assert_eq!(hit.title, ">ls");
     assert_eq!(hit.action, Action::Command { argv: vec![">ls".into()] });
 }
+
+fn on_own_context<T>(future: impl std::future::Future<Output = T>) -> T {
+    let context = gio::glib::MainContext::new();
+    context
+        .with_thread_default(|| context.block_on(future))
+        .expect("a fresh context is free")
+}
+
+#[test]
+fn qalc_answers_and_refuses() {
+    if gio::glib::find_program_in_path("qalc").is_none() {
+        assert!(std::env::var_os("ATHANOR_REQUIRE_QALC").is_none(), "qalc is required here");
+        eprintln!("qalc is not installed here; the rig runs this test");
+        return;
+    }
+    let calc = on_own_context(athanor_search::calc::evaluate("2+2*3")).expect("an answer");
+    assert_eq!(calc.result, "8");
+    assert!(on_own_context(athanor_search::calc::evaluate("-f /etc/passwd")).is_none());
+}

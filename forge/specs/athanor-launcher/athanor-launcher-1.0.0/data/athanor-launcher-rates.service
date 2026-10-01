@@ -1,0 +1,18 @@
+[Unit]
+Description=Currency rates of the launcher's calculator
+Documentation=file:///usr/share/doc/athanor-launcher/README.md
+
+[Service]
+Type=oneshot
+# The only process of the launcher's that reaches the network. qalc reads "0" as an
+# expression, so it does not wait for input.
+ExecStartPre=+/usr/bin/mkdir -p %h/.local/share/qalculate
+ExecStart=/usr/bin/qalc -e 0
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/share/qalculate
+PrivateTmp=yes
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallFilter=@system-service
+MemoryMax=128M
