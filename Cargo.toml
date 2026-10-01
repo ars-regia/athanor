@@ -32,6 +32,8 @@ members = [
   "system/athanor-i18n",
   "system/athanor-init-oracle",
   "system/athanor-layout",
+  "system/athanor-preview",
+  "system/athanor-preview-render",
   "system/athanor-search",
   "system/athanor-unit",
   "system/athanor-mesh-bus",
@@ -86,6 +88,12 @@ gio = "0.22"
 gio-unix = "0.22"
 tracker-rs = { version = "0.8", features = ["v3_1"] }
 nucleo-matcher = "0.3"
+# The preview's decoder (doc_launcher.md, LA6, LA9): glycin runs image loaders in
+# bubblewrap; poppler renders the first page of a PDF. Linked only by
+# athanor-preview-render.
+glycin = "4"
+poppler-rs = "0.26"
+cairo-rs = "0.22"
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 wayland-scanner = "0.31"
