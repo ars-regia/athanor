@@ -66,7 +66,8 @@ pub fn restrict_writes(write: &[&Path], write_file: &[&Path]) -> Result<(), Box<
 }
 
 /// Denies binding and connecting TCP sockets to the calling thread and every thread and
-/// process it starts afterwards (Landlock ABI 4). Unix sockets are not affected.
+/// process it starts afterwards (Landlock ABI 4). Unix sockets are not affected. Landlock
+/// does not mediate UDP, raw or ICMP sockets: the unit's `RestrictAddressFamilies` closes those.
 pub fn deny_tcp() -> Result<(), Box<dyn Error>> {
     Ruleset::default()
         .set_compatibility(CompatLevel::HardRequirement)
