@@ -4,8 +4,10 @@
 //! Everything localsearch returns is untrusted: counts and lengths are bounded, text is
 //! cleaned by `athanor_unit::text`, and only `file://` URIs become an `Open` action.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::future::Future;
+use std::time::Duration;
 
 use athanor_unit::text;
 use gio::prelude::*;
@@ -22,8 +24,12 @@ const MAX_ROWS: usize = 40;
 const MAX_QUERY_CHARS: usize = 256;
 /// Longer URIs are dropped, not cut: a cut URI opens another file.
 const MAX_URI_BYTES: usize = 4096;
+/// The per-source budget of LA4: a source that misses it is dropped for that query.
+const DEADLINE: Duration = Duration::from_secs(1);
 const SERVICE: &str = "org.freedesktop.LocalSearch3";
 const MINER_PATH: &str = "/org/freedesktop/Tracker3/Miner/Files";
+const BUS: &str = "org.freedesktop.DBus";
+const BUS_PATH: &str = "/org/freedesktop/DBus";
 const MINER: &str = "org.freedesktop.Tracker3.Miner";
 const QUERY: &str = include_str!("files.rq");
 
@@ -45,32 +51,49 @@ pub struct Files {
     connection: RefCell<Option<tracker::SparqlConnection>>,
     /// Tests run against a local store, which has no miner to ask about indexing.
     local: bool,
+    /// A loss of the connection is logged once, not on every keystroke while it lasts.
+    warned: Cell<bool>,
 }
 
 impl Files {
     pub fn new() -> Files {
-        Files { connection: RefCell::new(None), local: false }
+        Files { connection: RefCell::new(None), local: false, warned: Cell::new(false) }
     }
 
     pub fn with_connection(connection: tracker::SparqlConnection) -> Files {
-        Files { connection: RefCell::new(Some(connection)), local: true }
+        Files { connection: RefCell::new(Some(connection)), local: true, warned: Cell::new(false) }
     }
 
+    /// The connection, opened only when localsearch already owns its name: asking the bus
+    /// for an absent name would start it (LA10).
     async fn connection(&self) -> Option<tracker::SparqlConnection> {
         let cached = self.connection.borrow().clone();
         if cached.is_some() {
             return cached;
         }
-        match tracker::SparqlConnection::bus_new_future(SERVICE, None, None).await {
+        let bus = gio::bus_get_future(gio::BusType::Session).await.ok()?;
+        if !name_has_owner(&bus).await {
+            tracing::debug!("localsearch is not running");
+            return None;
+        }
+        match tracker::SparqlConnection::bus_new_future(SERVICE, None, Some(&bus)).await {
             Ok(connection) => {
                 self.connection.replace(Some(connection.clone()));
+                self.warned.set(false);
                 Some(connection)
             }
             Err(err) => {
-                // Absent, stopped, or refused by its unit's conditions: no file group.
                 tracing::debug!("localsearch is not reachable: {err}");
                 None
             }
+        }
+    }
+
+    /// Logs a lost connection once and drops it, so the next search opens a new one.
+    fn lost(&self, why: &str) {
+        self.connection.replace(None);
+        if !self.warned.replace(true) {
+            tracing::warn!("the file search failed: {why}");
         }
     }
 
@@ -79,20 +102,67 @@ impl Files {
         if query.is_empty() {
             return None;
         }
-        let connection = self.connection().await?;
-        let rows = match run(&connection, &query).await {
-            Ok(rows) => rows,
-            Err(err) => {
-                tracing::warn!("the file query failed: {err}");
-                // A connection that failed once is opened again next time: localsearch may
-                // have restarted.
-                self.connection.replace(None);
-                return None;
-            }
-        };
-        let indexing = !self.local && indexing().await;
-        Some(Answer { hits: rows_to_hits(rows, &query, &mut Ranker::new(&query), usage, now), indexing })
+        self.search_within(DEADLINE, &query, usage, now).await
     }
+
+    async fn search_within(&self, deadline: Duration, query: &str, usage: &Usage, now: u64) -> Option<Answer> {
+        let work = async {
+            let connection = self.connection().await?;
+            // The progress question runs while the query does.
+            let progress = (!self.local).then(|| gio::glib::spawn_future_local(indexing()));
+            let rows = run(&connection, query).await;
+            let indexing = match progress {
+                Some(progress) => progress.await.unwrap_or(false),
+                None => false,
+            };
+            Some((rows, indexing))
+        };
+        let Some(done) = within(deadline, work).await else {
+            self.lost("the deadline passed");
+            return None;
+        };
+        let (rows, indexing) = done?;
+        match rows {
+            Ok(rows) => Some(Answer { hits: rows_to_hits(rows, query, &mut Ranker::new(query), usage, now), indexing }),
+            Err(err) => {
+                self.lost(&err.to_string());
+                None
+            }
+        }
+    }
+}
+
+/// `future`'s output, or `None` when `deadline` passes first; the future is then dropped,
+/// which cancels the bus call it was waiting on.
+async fn within<T>(deadline: Duration, future: impl Future<Output = T>) -> Option<T> {
+    let cancellable = gio::Cancellable::new();
+    let source = {
+        let cancellable = cancellable.clone();
+        gio::glib::timeout_source_new(deadline, None, gio::glib::Priority::DEFAULT, move || {
+            cancellable.cancel();
+            gio::glib::ControlFlow::Break
+        })
+    };
+    source.attach(Some(&gio::glib::MainContext::ref_thread_default()));
+    let done = gio::CancellableFuture::new(future, cancellable).await.ok();
+    source.destroy();
+    done
+}
+
+async fn name_has_owner(bus: &gio::DBusConnection) -> bool {
+    let reply = bus
+        .call_future(
+            Some(BUS),
+            BUS_PATH,
+            BUS,
+            "NameHasOwner",
+            Some(&(SERVICE,).to_variant()),
+            Some(gio::glib::VariantTy::new("(b)").unwrap_or(gio::glib::VariantTy::ANY)),
+            gio::DBusCallFlags::NO_AUTO_START,
+            1000,
+        )
+        .await;
+    matches!(reply.ok().and_then(|reply| reply.get::<(bool,)>()), Some((true,)))
 }
 
 impl Default for Files {
@@ -139,9 +209,9 @@ async fn indexing() -> bool {
             MINER,
             "GetProgress",
             None,
-            Some(&<(f64,) as gio::glib::variant::StaticVariantType>::static_variant_type()),
+            Some(gio::glib::VariantTy::new("(d)").unwrap_or(gio::glib::VariantTy::ANY)),
             gio::DBusCallFlags::NO_AUTO_START,
-            1000,
+            500,
         )
         .await;
     match reply.ok().and_then(|reply| reply.get::<(f64,)>()) {
@@ -150,9 +220,15 @@ async fn indexing() -> bool {
     }
 }
 
-/// A `file://` URI without control characters: the only kind that becomes `Action::Open`.
+/// A local `file:///` URI without control characters, raw or percent-encoded (%00-%1F,
+/// %7F): the only kind that becomes `Action::Open`.
 fn is_file_uri(uri: &str) -> bool {
-    uri.len() <= MAX_URI_BYTES && uri.starts_with("file://") && !uri.chars().any(char::is_control)
+    let bytes = uri.as_bytes();
+    let encoded_control = bytes.windows(3).any(|w| {
+        w[0] == b'%'
+            && matches!(u8::from_str_radix(std::str::from_utf8(&w[1..]).unwrap_or("zz"), 16), Ok(b) if b < 0x20 || b == 0x7f)
+    });
+    uri.len() <= MAX_URI_BYTES && uri.starts_with("file:///") && !uri.chars().any(char::is_control) && !encoded_control
 }
 
 /// One row per file, its excerpt kept when it was also found by content; a name match
@@ -176,8 +252,7 @@ pub fn rows_to_hits(rows: Vec<Row>, query: &str, ranker: &mut Ranker, usage: &Us
             }
         }
     }
-    merged.truncate(MAX_HITS);
-    merged
+    let mut hits: Vec<Hit> = merged
         .into_iter()
         .map(|row| {
             let title = text::line(&row.name, text::NAME_CHARS);
@@ -199,7 +274,11 @@ pub fn rows_to_hits(rows: Vec<Row>, query: &str, ranker: &mut Ranker, usage: &Us
                 key: row.uri,
             }
         })
-        .collect()
+        .collect();
+    // Rows arrive newest first and the sort is stable: equal scores keep that order.
+    hits.sort_by(|a, b| b.score.cmp(&a.score));
+    hits.truncate(MAX_HITS);
+    hits
 }
 
 /// The parent folder, with the home directory shown as `~`.
@@ -280,6 +359,47 @@ mod tests {
     }
 
     #[test]
+    fn the_best_name_match_survives_the_cut_even_when_older() {
+        let mut rows: Vec<Row> = (0..30).map(|i| row(&format!("file:///h/n{i}"), &format!("notes{i}"), Some("la relazione"))).collect();
+        rows.push(row("file:///h/Relazione", "Relazione", None));
+        let hits = rows_to_hits(rows, "relazione", &mut Ranker::new("relazione"), &Usage::default(), 0);
+        assert_eq!(hits.len(), MAX_HITS);
+        assert_eq!(hits[0].title, "Relazione");
+    }
+
+    #[test]
+    fn a_future_that_misses_its_deadline_is_dropped() {
+        let context = gio::glib::MainContext::new();
+        context
+            .with_thread_default(|| {
+                context.block_on(async {
+                    let slow = gio::glib::timeout_future(Duration::from_secs(30));
+                    let started = std::time::Instant::now();
+                    assert!(within(Duration::from_millis(50), slow).await.is_none());
+                    assert!(started.elapsed() < Duration::from_secs(5));
+                    assert_eq!(within(Duration::from_secs(5), async { 7 }).await, Some(7));
+                })
+            })
+            .expect("a fresh context is free");
+    }
+
+    #[test]
+    fn without_a_running_localsearch_the_answer_is_none_and_quick() {
+        // Whatever the session bus is (absent, or present without the name) the answer is
+        // None; the rig has no service file for the name, so activation is not exercised.
+        let context = gio::glib::MainContext::new();
+        context
+            .with_thread_default(|| {
+                context.block_on(async {
+                    let started = std::time::Instant::now();
+                    assert!(Files::new().search("rel", &Usage::default(), 0).await.is_none());
+                    assert!(started.elapsed() < Duration::from_secs(3));
+                })
+            })
+            .expect("a fresh context is free");
+    }
+
+    #[test]
     fn only_plain_file_uris_can_be_opened() {
         let long = format!("file:///{}", "a".repeat(MAX_URI_BYTES));
         let hits = rows_to_hits(
@@ -287,6 +407,10 @@ mod tests {
                 row("https://example.org/rel", "rel-web", None),
                 row("x-scheme:rel", "rel-x", None),
                 row("file:///h/rel\nx", "rel-newline", None),
+                row("file:///h/rel%0Ax", "rel-encoded-newline", None),
+                row("file:///h/rel%00", "rel-encoded-nul", None),
+                row("file:///h/rel%7f", "rel-encoded-del", None),
+                row("file://host/rel", "rel-remote", None),
                 row(&long, "rel-long", None),
                 row("file:///h/rel-ok", "rel-ok", None),
             ],
