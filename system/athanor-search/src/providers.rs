@@ -113,7 +113,7 @@ fn terms(query: &str) -> Vec<String> {
     query.split_whitespace().map(str::to_owned).collect()
 }
 
-/// A call to a provider that is already running: never starts one, and ends at the deadline.
+/// A call to a provider, started on demand by bus activation; it ends at the deadline.
 async fn call(
     bus: &gio::DBusConnection,
     bus_name: &str,
@@ -129,7 +129,9 @@ async fn call(
         method,
         Some(&args),
         VariantTy::new(reply).ok(),
-        gio::DBusCallFlags::NO_AUTO_START,
+        // ponytail: a keystroke can start a provider's process, as on GNOME; the deadline
+        // bounds the wait, a slow starter misses this query and answers the next one.
+        gio::DBusCallFlags::NONE,
         TIMEOUT_MS,
     )
     .await
@@ -154,7 +156,7 @@ fn metas(reply: &Variant) -> Option<Vec<Meta>> {
     list.iter().take(Group::PROVIDER_ROWS).map(|meta| meta.get::<Meta>()).collect()
 }
 
-/// At most `Group::PROVIDER_ROWS` results; `None` when the provider is not running, failed,
+/// At most `Group::PROVIDER_ROWS` results; `None` when the provider is unavailable, failed,
 /// answered the wrong types or missed the deadline, which drops its group for this query (LA10).
 pub async fn search(provider: &Provider, query: &str) -> Option<Vec<Hit>> {
     let terms = terms(query);
@@ -175,9 +177,9 @@ pub async fn search(provider: &Provider, query: &str) -> Option<Vec<Hit>> {
     };
     match within(Duration::from_millis(TIMEOUT_MS as u64), work).await {
         Some(Ok(hits)) => Some(hits),
-        // Not running: providers are never started by a query.
+        // No such service, and no .service file to start one.
         Some(Err(err)) if err.matches(gio::DBusError::ServiceUnknown) => {
-            tracing::debug!(provider = %provider.bus_name, "the search provider is not running");
+            tracing::debug!(provider = %provider.bus_name, "the search provider is not available");
             None
         }
         Some(Err(err)) => {
@@ -232,7 +234,7 @@ pub fn metas_to_hits(provider: &Provider, metas: Vec<Meta>, terms: &[String]) ->
 }
 
 /// The provider opens its own result (LA9, a declared limit): `ActivateResult(id, terms,
-/// timestamp)`. Like a search it never starts the provider, and it ends at the deadline.
+/// timestamp)`. Like a search it may start the provider, and it ends at the deadline.
 pub async fn activate(
     bus_name: &str,
     object_path: &str,
