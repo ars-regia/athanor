@@ -80,6 +80,7 @@ mod tests {
         "COSMIC Terminal", "COSMIC Text Editor", "Files", "Firefox", "Foot", "Foot Client",
         "Foot Server", "Layout", "mpv Media Player", "Panel", "Removable Drives and Media",
         "Thunar File Manager", "Thunar Preferences", "Virtual Machine Manager",
+        "Fine Tuning Extras", "Frame Buffer Index",
     ];
 
     fn best(query: &str) -> Vec<&'static str> {
@@ -103,7 +104,9 @@ mod tests {
 
     #[test]
     fn fx_puts_firefox_first() {
-        assert_eq!(best("fx").first(), Some(&"Firefox"));
+        let order = best("fx");
+        assert!(order.len() > 1, "{order:?}");
+        assert_eq!(order.first(), Some(&"Firefox"), "{order:?}");
     }
 
     #[test]
@@ -114,6 +117,16 @@ mod tests {
         assert!(files < cosmic_files, "{order:?}");
         let cs = best("cs");
         assert!(cs[..2].contains(&"COSMIC Settings") && cs[..2].contains(&"COSMIC Store"), "{cs:?}");
+    }
+
+    #[test]
+    fn each_tier_outscores_the_next_for_the_same_query() {
+        let mut ranker = Ranker::new("fo");
+        let (t_prefix, prefix) = ranker.score("Foot", &[]).expect("prefix");
+        let (t_initials, initials) = ranker.score("Fine Output", &[]).expect("initials");
+        let (t_substring, substring) = ranker.score("Big Foot", &[]).expect("substring");
+        assert_eq!((t_prefix, t_initials, t_substring), (Tier::Prefix, Tier::Initials, Tier::Substring));
+        assert!(prefix > initials && initials > substring, "{prefix} {initials} {substring}");
     }
 
     #[test]
