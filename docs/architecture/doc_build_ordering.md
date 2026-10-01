@@ -115,12 +115,14 @@ and the same with `-legacy-<NVIDIA_LEGACY_VERSION>`. A republished kernel with t
 
 On a pure pin bump the variants are therefore built and gated only after the merge, in the Orchestrator, where they fail closed.
 
-**Known limitation.** `kernel-bump.yml` emits one PR carrying both `pins.env` and `system/Containerfile` whenever the base image digest moves on the same day as the kernel or NVIDIA pins. `KERNEL_PIN_FILES` excludes `system/Containerfile` by design (a base bump is reviewed with its package delta, O8), so that PR's diff is never "only the pin files" and System Image Check fails every time by the last row of the table above, with no code path able to tell the two bumps apart after the bot has merged them into one PR. The bot cannot split them itself today. Follow-up: teach `bump.py` to open the base bump as its own PR when it coincides with a pin bump.
+**Two bump groups.** `KERNEL_PIN_FILES` excludes `system/Containerfile` by design (a base bump is reviewed with its package delta, O8), so a PR carrying both could never pass this check. `kernel-bump.yml` therefore splits every bump into two groups with one PR each (`bump.py apply --group kernel|system`): the **kernel** group (label `kernel-bump`) holds only the pin files and passes the `kernel-missing` row, or the `modules-missing` row when only NVIDIA pins move (the base images of the kernel's Containerfiles then wait for the next run); the **system** group (label `system-bump`) holds `system/Containerfile` and the NVIDIA locks republished at an unchanged version, leaves the pins alone, and so meets `ready` and the full check with its package delta. A ref both groups pin (`fedora:43`) may sit at two digests until both PRs merge.
 
 **O8. Bump PRs.**
 
-- **Pure kernel or NVIDIA pin bumps:** they keep auto-merge on a green prep.
-- **System base or lock bumps:** those that touch `system/Containerfile` or `system/nvidia/locks` stay without auto-merge. The reason is the package review of `doc_system_image.md` section 4, not ordering.
+- **Pure kernel or NVIDIA pin bumps:** the kernel group; they keep auto-merge on a green prep.
+- **System base or lock bumps:** those that touch `system/Containerfile` or `system/nvidia/locks` stay without auto-merge. The reason is the package review of `doc_system_image.md` section 4, not ordering. The system group always does; a kernel PR does when an NVIDIA pin move regenerates its lock.
+- **One open PR per group:** an open `kernel-bump` PR holds only the kernel group and an open `system-bump` PR only the system group, so a base bump waiting for review never holds a kernel bump back, nor the reverse.
+- **Accepted overlap:** an NVIDIA pin move in an open kernel PR and a republished lock of the old version in the system group edit the same lock file; the second PR to merge conflicts on it, visibly, and a person closes it. It needs both events on the same day, so no code prevents it.
 
 **O9. Portability.**
 
@@ -148,12 +150,6 @@ On a pure pin bump the variants are therefore built and gated only after the mer
 - **Unanswered approvals:** a run waiting for the `signing` approval holds its concurrency group for up to 30 days; `timeout-minutes` does not count that wait. An approval nobody answers stops image builds on that branch, and on a pin bump there are two such waits. Rejecting the pending approval is how to unblock it.
 - **Queueing:** `cancel-in-progress: false` means a long cycle delays the next one instead of being cut. GitHub keeps only the newest pending run.
 - **Variants on pin bumps:** they are tested only after the merge (O7).
-- **Combined bump PRs red System Image Check by design:** a bump PR carrying `pins.env`
-  and `system/Containerfile` together (the bot emits one PR when the base image moves the
-  same day as the kernel pins) always fails System Image Check, because the pins can no
-  longer be isolated from the base bump it is designed to reject (O7). Not merge-blocking,
-  since only "Kernel gate" is required, but it recurs until `bump.py` splits the base bump
-  into its own PR.
 
 **Out of scope:**
 - **ISO acceptance `newest`:** after a failed cycle it silently picks an older ISO.

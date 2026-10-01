@@ -23,7 +23,7 @@ directory e come si usa.
 | `repro.py` | la riproducibilita': due build dello stesso pin a confronto (config, System.map, vmlinux per sezioni, moduli senza firma) |
 | `bench.sh`, `bench/init`, `bench-report.py` | il benchmark di tendenza: kernel in QEMU/KVM con hackbench, schbench, fio, netperf; tabelle, confronto A/B e grafici dai `results.json` |
 | `build-inputs.py` | gli input della build come JSON: predicato dell'attestazione dei pin e chiave del riuso in CI |
-| `bump.py` | il bot di bump: `check` (JSON dei pin nuovi) e `apply` (riscrive pins.env, i `FROM` dei Containerfile e la tabella dei pin qui sotto; stampa il corpo della PR) |
+| `bump.py` | il bot di bump, in due gruppi (`--group kernel\|system`): `check` (JSON delle modifiche) e `apply` (gruppo kernel: riscrive pins.env, i `FROM` dei Containerfile del kernel e la tabella dei pin qui sotto; gruppo system: i `FROM` di `system/Containerfile` e i lock NVIDIA ripubblicati; stampa il corpo della PR); `verify` controlla i lock NVIDIA |
 | `nvr.sh` | l'NVR del kernel derivato dai pin, lo stesso che rpmbuild produce e che i tag OCI usano |
 | `builder/Containerfile` | l'ambiente: Fedora pinnata per digest piu' la toolchain LLVM |
 | `boot.sh` | la boot matrix: dal kernel-core a quattro avvii QEMU con le asserzioni della spec |
@@ -175,8 +175,10 @@ PR con i pin nuovi, i manifesti rigenerati, l'esito di `prep` e le opzioni deriv
 le mette l'auto-merge sul check `Kernel gate` di Kernel Build. A mano, nella stessa
 sequenza:
 
-1. `python3 bump.py check` mostra cosa muoverebbe; `python3 bump.py apply` riscrive
-   `pins.env`, i `FROM` dei Containerfile e la tabella dei pin qui sopra. Un pin scelto
+1. `python3 bump.py check --group kernel` mostra cosa muoverebbe;
+   `python3 bump.py apply --group kernel` riscrive `pins.env`, i `FROM` dei Containerfile
+   del kernel e la tabella dei pin qui sopra. La base di `system/Containerfile` e i lock
+   NVIDIA ripubblicati sono del gruppo `system` (`--group system`), in una PR a parte. Un pin scelto
    a mano (per esempio un cambio di serie) si scrive in `pins.env` e basta.
 2. Nel builder: `build.sh --stage manifest --out DIR` e `nvidia.sh manifest --out DIR`
    scaricano i sorgenti dei pin e scrivono `DIR/sources.sha256`, da copiare in
