@@ -38,14 +38,14 @@ directory e come si usa.
 <!-- pins:begin (table written by bump.py apply) -->
 | pin | value |
 | --- | --- |
-| `FEDORA_KERNEL_NVR` | `7.2.5-100.fc43` |
+| `FEDORA_KERNEL_NVR` | `7.2.8-100.fc43` |
 | `FEDORA_KEY_FPR` | `c6e7f081cf80e13146676e88829b606631645531` |
 | `KERNEL_CHANNEL` | `stable` |
-| `CACHYOS_RELEASE` | `cachyos-7.2.5-1` |
+| `CACHYOS_RELEASE` | `cachyos-7.2.8-1` |
 | `CACHYOS_CONFIG_COMMIT` | `6676e72b85eb9e30d079a8c3dcdf93aedd1e8226` |
-| `CACHYOS_PATCHES_COMMIT` | `9bf8104a95f8c0c60193fd65be3f11bc1fa05f57` |
-| `NVIDIA_OPEN_VERSION` | `610.57.04` |
-| `NVIDIA_OPEN_COMMIT` | `e4a5faa2567f28c8eabe0ebb6422b6d0abcf37eb` |
+| `CACHYOS_PATCHES_COMMIT` | `d455756ce5afd4d31e7f5f90ed3274cc49e6ab75` |
+| `NVIDIA_OPEN_VERSION` | `615.71.09` |
+| `NVIDIA_OPEN_COMMIT` | `61dcc93722ecb418bb5f2e00923f05b4b8051dd1` |
 | `NVIDIA_LEGACY_VERSION` | `580.178.04` |
 <!-- pins:end -->
 
