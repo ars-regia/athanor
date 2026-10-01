@@ -66,9 +66,11 @@ jobs:
 
       - name: Rebuild the pinned kernel with an empty cache (B)
         # Fresh cache: every source is downloaded and verified again, as on the first build.
+        # Under RUNNER_TEMP, not /tmp: only the runner's work disk carries the SELinux label
+        # (container_file_t) that lets the builder container write to a bind mount.
         run: |
           set -euo pipefail
-          cache=$(mktemp -d)
+          cache=$(mktemp -d -p "$RUNNER_TEMP")
           mkdir -p out-b
           podman run --rm \
             -v "$GITHUB_WORKSPACE:/forge" \
