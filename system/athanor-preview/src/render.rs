@@ -69,19 +69,48 @@ fn properties(kind: Kind) -> Vec<String> {
     let mut properties: Vec<String> = COMMON.iter().map(|property| (*property).to_owned()).collect();
     match kind {
         Kind::Image => {
-            let cores = std::thread::available_parallelism().map_or(1, usize::from);
+            // The cores of the machine, not the launcher's affinity or quota: the loader's
+            // thread pool inside the unit sizes itself by what the manager sees.
+            // (The workspace denies unsafe code, so not sysconf(_SC_NPROCESSORS_ONLN), which
+            // reads the same file.)
+            let cores = std::fs::read_to_string("/sys/devices/system/cpu/online")
+                .map(|list| online_cpus(&list))
+                .unwrap_or(0)
+                .max(1);
             properties.retain(|property| !property.starts_with("RestrictAddressFamilies="));
             properties.push("RestrictAddressFamilies=AF_UNIX AF_NETLINK".to_owned());
             properties.push("SystemCallFilter=@system-service @mount @privileged".to_owned());
+            // glycin and bubblewrap need connect(2), so sockets are hidden by path: the nix
+            // daemon's socket is the one filesystem socket outside /run (bus sockets and the
+            // runtime directory are under the hidden /run). Denying connect, bind, listen
+            // and accept instead was tried: bubblewrap then exits with status 1.
+            properties.push("InaccessiblePaths=-/nix/var/nix/daemon-socket -/var/nix/var/nix/daemon-socket".to_owned());
             properties.push(format!("TasksMax={}", 32 + 4 * cores));
         }
         Kind::Pdf => {
             properties.push("SystemCallFilter=@system-service".to_owned());
+            // The PDF path opens no socket at all.
+            properties.push("SystemCallFilter=~@network-io".to_owned());
+            properties.push("SystemCallErrorNumber=EPERM".to_owned());
             properties.push("RestrictNamespaces=yes".to_owned());
             properties.push("TasksMax=8".to_owned());
         }
     }
     properties
+}
+
+/// The number of CPUs in a kernel list such as `0-3,5,7-9`; 0 when it does not parse.
+fn online_cpus(list: &str) -> usize {
+    list.trim()
+        .split(',')
+        .map(|range| match range.split_once('-') {
+            Some((first, last)) => match (first.parse::<usize>(), last.parse::<usize>()) {
+                (Ok(first), Ok(last)) if last >= first => last - first + 1,
+                _ => 0,
+            },
+            None => usize::from(range.parse::<usize>().is_ok()),
+        })
+        .sum()
 }
 
 /// The arguments of `systemd-run` for one decode, in the named unit.
@@ -146,27 +175,56 @@ pub async fn render(file: File, kind: Kind, side: u32, cancellable: &gio::Cancel
     ))
 }
 
+/// How long a stop is retried.
+const STOP_BUDGET: Duration = Duration::from_secs(3);
+
 /// Stops the unit and waits until it is gone. Terminating systemd-run does not stop the
-/// unit it started (it stays active until RuntimeMaxSec), so the unit is stopped by name;
-/// systemd-run is terminated afterwards so that it is reaped. A stop that fails (the unit
-/// was not created yet) is logged: RuntimeMaxSec still ends the decode.
+/// unit it started (it stays active until RuntimeMaxSec), so the unit is stopped by name.
+/// A systemd-run that already exited has nothing left to stop (its unit was collected). One
+/// that has not created the unit yet makes `systemctl stop` answer "not loaded" (exit
+/// status 5): the stop is retried every 50 ms within STOP_BUDGET. With `--wait`, systemd-run
+/// exits on its own once the unit stops; it is terminated only if it is still there after.
 async fn stop(process: &gio::Subprocess, unit: &str) {
-    let stopped = gio::Subprocess::newv(
-        &["systemctl", "--user", "stop", &format!("{unit}.service")].map(std::ffi::OsStr::new),
-        gio::SubprocessFlags::STDOUT_SILENCE | gio::SubprocessFlags::STDERR_SILENCE,
-    );
-    match stopped {
-        Ok(stopped) => match glib::future_with_timeout(Duration::from_secs(3), stopped.wait_check_future()).await {
-            Ok(Ok(())) => {}
-            Ok(Err(err)) => tracing::warn!(unit, "the decoder's unit was not stopped: {err}"),
-            Err(_) => {
-                tracing::warn!(unit, "stopping the decoder's unit took too long");
-                stopped.force_exit();
-            }
-        },
-        Err(err) => tracing::warn!(unit, "systemctl did not start: {err}"),
+    if process.identifier().is_none() {
+        return;
     }
-    process.send_signal(libc::SIGTERM);
+    let name = format!("{unit}.service");
+    let started = std::time::Instant::now();
+    loop {
+        match systemctl_stop(&name, STOP_BUDGET.saturating_sub(started.elapsed()).max(Duration::from_millis(1))).await {
+            Ok(true) => break,
+            Ok(false) if process.identifier().is_some() && started.elapsed() < STOP_BUDGET => {
+                glib::timeout_future(Duration::from_millis(50)).await;
+            }
+            Ok(false) => break,
+            Err(err) => {
+                tracing::warn!(unit, "the decoder's unit was not stopped: {err}");
+                break;
+            }
+        }
+    }
+    if process.identifier().is_some() {
+        process.send_signal(libc::SIGTERM);
+    }
+}
+
+/// `Ok(true)`: stopped; `Ok(false)`: the unit is not loaded (exit status 5).
+async fn systemctl_stop(name: &str, budget: Duration) -> Result<bool, String> {
+    let stopper = gio::Subprocess::newv(
+        &["systemctl", "--user", "stop", name].map(std::ffi::OsStr::new),
+        gio::SubprocessFlags::STDOUT_SILENCE | gio::SubprocessFlags::STDERR_SILENCE,
+    )
+    .map_err(|err| err.to_string())?;
+    match glib::future_with_timeout(budget, stopper.wait_future()).await {
+        Ok(Ok(())) if stopper.is_successful() => Ok(true),
+        Ok(Ok(())) if stopper.has_exited() && stopper.exit_status() == 5 => Ok(false),
+        Ok(Ok(())) => Err("systemctl failed".to_owned()),
+        Ok(Err(err)) => Err(err.to_string()),
+        Err(_) => {
+            stopper.force_exit();
+            Err("systemctl took too long".to_owned())
+        }
+    }
 }
 
 /// What the helper wrote, read through a fixed buffer: a helper that was subverted cannot
@@ -193,7 +251,9 @@ async fn collect(process: &gio::Subprocess) -> Result<Vec<u8>, RenderError> {
                 tracing::warn!("the decoder said: {}", line(&said, STDERR_LOG));
             }
         }
-        return Err(RenderError::Failed(process.exit_status()));
+        // -1: systemd-run itself was killed by a signal.
+        let status = if process.has_exited() { process.exit_status() } else { -1 };
+        return Err(RenderError::Failed(status));
     }
     Ok(buffer)
 }
@@ -236,14 +296,26 @@ mod tests {
     }
 
     #[test]
+    fn the_kernels_cpu_list_is_counted() {
+        assert_eq!(online_cpus("0-15\n"), 16);
+        assert_eq!(online_cpus("0-3,5,7-9"), 8);
+        assert_eq!(online_cpus("0"), 1);
+        assert_eq!(online_cpus("garbage"), 0);
+        assert_eq!(online_cpus("5-2"), 0);
+    }
+
+    #[test]
     fn a_pdf_gets_no_namespaces_and_no_privileged_calls() {
         let pdf = argv(Kind::Pdf, 64, "u");
         assert!(pdf.iter().any(|a| a == "RestrictNamespaces=yes"));
+        assert!(pdf.iter().any(|a| a == "SystemCallFilter=~@network-io"));
+        assert!(pdf.iter().any(|a| a == "SystemCallErrorNumber=EPERM"));
         assert!(pdf.iter().any(|a| a == "RestrictAddressFamilies=AF_UNIX"));
         assert!(pdf.iter().all(|a| !a.contains("@mount") && !a.contains("@privileged") && !a.contains("AF_NETLINK")));
         let image = argv(Kind::Image, 64, "u");
         assert!(image.iter().any(|a| a.contains("@mount @privileged")));
         assert!(image.iter().all(|a| a != "RestrictNamespaces=yes"));
+        assert!(image.iter().any(|a| a.starts_with("InaccessiblePaths=-/nix/var/nix/daemon-socket")));
     }
 
     #[test]
