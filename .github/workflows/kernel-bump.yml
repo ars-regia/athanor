@@ -111,6 +111,7 @@ jobs:
           oras login "${registry%%/*}" -u "${GITHUB_ACTOR}" --password-stdin <<< "${GH_TOKEN}"
           bash system/nvidia/mirror.sh open
           bash system/nvidia/mirror.sh legacy
+          bash system/nvidia/mirror.sh container-toolkit
 
   prep:
     needs: check

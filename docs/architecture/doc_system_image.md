@@ -67,6 +67,7 @@ The tier packages, the upstream packages, the UKI assembly and the hardening are
   - `nvidia-kmod-common`: GSP firmware, udev rules, `modprobe.d` including the `nouveau` blacklist, dracut configuration;
   - `nvidia-driver` and `nvidia-driver-libs`: EGL, GLX, GBM backend, Vulkan ICD;
   - `nvidia-driver-cuda` and `nvidia-persistenced`: `nvidia-smi`, CUDA libraries.
+- **NVIDIA's container toolkit** (`nvidia-container-toolkit`, `nvidia-container-toolkit-base`, `libnvidia-container1`, `libnvidia-container-tools`) at the version of its own manifest (S7), from NVIDIA's repository. Its `nvidia-cdi-refresh.path`, preset by the package, writes the CDI specification that gives containers the GPU (`--device nvidia.com/gpu=all`). It belongs in the image because the only other way to get it is rpm-ostree layering, which bootc then refuses to upgrade. Fedora's `golang-github-nvidia-container-toolkit` is not used: it stays at 1.17.4, which CVE-2025-23266 affects. The legacy variant ships the same packages.
 - **`azoth-nvidia-kmod`,** a package built in this repository that provides `nvidia-kmod = 3:<version>`. `nvidia-kmod-common` requires that capability. The package contains no module: the modules come from the signed image above, and akmods and DKMS are never installed.
 - **`athanor-nvidia-config`,** which moves out of `athanor-base-config`: `kargs.d/01-nvidia.toml`, `nvidia-drm` options and the persistence daemon preset. It is the same package in both variants:
   - it blacklists `nouveau` and `nova_core` in `modprobe.d` and on the kernel command line (`rd.driver.blacklist=` and `modprobe.blacklist=`), because RPM Fusion sets these arguments only through `grubby`, which does nothing in an image build;
@@ -91,8 +92,8 @@ A mismatch is a build failure with the exact values, never a warning.
 
 **S7. Provenance of third-party RPMs.** Driver packages are installed by exact NVR from the pinned repository URL:
 
-- **Hashes:** the SHA-256 of each RPM is recorded in a manifest, `system/nvidia/locks/<branch>.lock`, one per driver branch (`open`, `legacy`), and the build verifies it before installation. A branch can also lock companion packages whose version does not follow the driver's, such as negativo17's `nvidia-driver-selinux` that `nvidia-kmod-common` requires whenever `selinux-policy-targeted` is installed: they are locked at the newest release the repository publishes, under the same hash and repository rules.
-- **Signatures:** `gpgcheck` stays on, with the negativo17 and RPM Fusion keys vendored in the repository. Package signatures are checked. negativo17 does not sign its repository metadata, which the manifest compensates for.
+- **Hashes:** the SHA-256 of each RPM is recorded in a manifest, `system/nvidia/locks/<branch>.lock`, one per driver branch (`open`, `legacy`) and one for the container toolkit (`container-toolkit`), whose version lives in its manifest alone, and the build verifies it before installation. NVIDIA's repository gives SHA-512 in its metadata: the manifest still records SHA-256, the mirror's digest, after the download has matched the SHA-512. A branch can also lock companion packages whose version does not follow the driver's, such as negativo17's `nvidia-driver-selinux` that `nvidia-kmod-common` requires whenever `selinux-policy-targeted` is installed: they are locked at the newest release the repository publishes, under the same hash and repository rules.
+- **Signatures:** `gpgcheck` stays on, with the negativo17, RPM Fusion and NVIDIA keys vendored in the repository. Package signatures are checked. negativo17 does not sign its repository metadata, which the manifest compensates for.
 - **Mirror:** the vendor repositories keep only their newest builds, so every locked RPM is also kept in our OCI registry, in `$KERNEL_REGISTRY/athanor-nvidia-rpms`:
   - `system/nvidia/mirror.sh` pushes each RPM as a blob whose digest is the SHA-256 the manifest records, so the manifest is the mirror's index. The tag is `<branch>-<version>-<manifest hash>`, so a relock never retags what an older manifest names. Nothing is pushed when the mirror already holds every locked RPM.
   - The build (`lock.py fetch`) reads each RPM from the mirror anonymously, by digest, and from the manifest's URL when the mirror lacks it. The hash and signature checks are the same whichever source served the file.
@@ -101,9 +102,10 @@ A mismatch is a build failure with the exact values, never a warning.
   - the bump bot regenerates the manifests whenever an `NVIDIA_*` pin moves, and on every run verifies each manifest against the repository metadata, regenerating it when the repository republishes the pinned version with other files or checksums;
   - `NVIDIA_OPEN_VERSION` moves only to a version that both `NVIDIA/open-gpu-kernel-modules` and negativo17 publish;
   - `NVIDIA_LEGACY_VERSION` moves to the newest version of its branch that RPM Fusion publishes;
+  - the container toolkit's manifest moves to the newest version of its major that NVIDIA publishes;
   - a bump that moves the system base or a manifest never merges by itself: System Image Check and a human review decide;
-  - while a bump PR is open, the bot opens no other one, but it still verifies both manifests on every run (`bump.py verify`) and fails, naming the open PR, when one must be regenerated;
-  - every run mirrors both manifests, whether or not a bump PR is open.
+  - while a bump PR is open, the bot opens no other one, but it still verifies every manifest on every run (`bump.py verify`) and fails, naming the open PR, when one must be regenerated;
+  - every run mirrors every manifest, whether or not a bump PR is open.
 
 **S8. Build, publication and installation.**
 

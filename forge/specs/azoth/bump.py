@@ -37,6 +37,7 @@ PINS = HERE / "pins.env"
 # every FROM pinned by digest moves in the same bump.
 CONTAINERFILES = [HERE / d / "Containerfile" for d in ("builder", "boot", "nvidia")] + [HERE.parents[2] / "system" / "Containerfile"]
 NVIDIA_LOCK = HERE.parents[2] / "system" / "nvidia" / "lock.py"
+TOOLKIT_LOCK = NVIDIA_LOCK.parent / "locks" / "container-toolkit.lock"
 LOCK_NOT_PUBLISHED = 3  # lock.py's exit code for a version the repository does not publish
 LOCK_STALE = 4  # lock.py verify: the repository publishes the version with other files or checksums
 KERNEL_MD = HERE / "KERNEL.md"
@@ -208,6 +209,20 @@ def nvidia_legacy(current):
     return lock_py("latest", "legacy", "--major", current.split(".")[0]).stdout.strip()
 
 
+def toolkit_version(lock=TOOLKIT_LOCK):
+    """The locked version of NVIDIA's container toolkit: not a kernel input, so its lock is its
+    only pin (doc_system_image.md, S7)."""
+    for line in lock.read_text().splitlines():
+        if line.startswith("# version "):
+            return line.split(" ", 2)[2]
+    sys.exit(f"{lock}: no version line")
+
+
+def nvidia_toolkit(current):
+    """The highest version of the locked major that NVIDIA's container toolkit repository publishes."""
+    return lock_py("latest", "container-toolkit", "--major", current.split(".")[0]).stdout.strip()
+
+
 def lock_py(*args, allowed=(0,)):
     """Run system/nvidia/lock.py; an exit code outside `allowed` aborts the bot with its stderr."""
     done = subprocess.run([sys.executable, "-B", str(NVIDIA_LOCK), *args], capture_output=True, text=True)
@@ -254,11 +269,11 @@ def nvidia_version(branch, candidate, current, notes, check=lock_check, verify=l
     return current, state == "stale"
 
 
-def lock_problems(pins, verify=lock_verify):
-    """One line per NVIDIA lock that no longer matches its repository at the pinned version."""
+def lock_problems(pins, toolkit, verify=lock_verify):
+    """One line per NVIDIA lock that no longer matches its repository at the pinned version;
+    `toolkit` is the container toolkit's, which has no pin outside its lock."""
     problems = []
-    for branch in ("open", "legacy"):
-        version = pins[f"NVIDIA_{branch.upper()}_VERSION"]
+    for branch, version in (("open", pins["NVIDIA_OPEN_VERSION"]), ("legacy", pins["NVIDIA_LEGACY_VERSION"]), ("container-toolkit", toolkit)):
         state = verify(branch, version)
         if state == "stale":
             problems.append(f"NVIDIA {branch} {version}: the repository republished the locked packages, the lock must be regenerated")
@@ -340,6 +355,10 @@ def compute():
         new["NVIDIA_LEGACY_VERSION"] = legacy_version
     if regenerate:
         locks["legacy"] = legacy_version
+    toolkit = toolkit_version()
+    toolkit_next, regenerate = nvidia_version("container-toolkit", nvidia_toolkit(toolkit), toolkit, notes)
+    if regenerate:
+        locks["container-toolkit"] = toolkit_next
     images = {}
     for ref, pinned in base_images().items():
         digest = image_digest(*ref.rsplit(":", 1))
@@ -409,10 +428,10 @@ def main():
     if len(sys.argv) != 2 or sys.argv[1] not in ("check", "apply", "verify"):
         sys.exit(__doc__)
     if sys.argv[1] == "verify":
-        problems = lock_problems(read_pins())
+        problems = lock_problems(read_pins(), toolkit_version())
         if problems:
             sys.exit("\n".join(problems))
-        print("NVIDIA locks: both match their repositories")
+        print("NVIDIA locks: every lock matches its repository")
         return
     result = compute()
     if sys.argv[1] == "check":

@@ -84,6 +84,22 @@ class NvidiaAvailability(unittest.TestCase):
             self.assertEqual(bump.nvidia_legacy("580.178.04"), "580.190.01")
         self.assertEqual(run.call_args.args[0][-4:], ["latest", "legacy", "--major", "580"])
 
+    def test_toolkit_candidate_comes_from_nvidia_repository(self):
+        done = subprocess.CompletedProcess([], 0, stdout="1.20.2\n", stderr="")
+        with mock.patch.object(bump.subprocess, "run", return_value=done) as run:
+            self.assertEqual(bump.nvidia_toolkit("1.20.1"), "1.20.2")
+        self.assertEqual(run.call_args.args[0][-4:], ["latest", "container-toolkit", "--major", "1"])
+
+    def test_toolkit_version_is_read_from_its_lock(self):
+        self.assertEqual(bump.TOOLKIT_LOCK.name, "container-toolkit.lock")
+        with tempfile.TemporaryDirectory() as d:
+            lock = pathlib.Path(d) / "container-toolkit.lock"
+            lock.write_text("# branch container-toolkit\n# version 1.20.1\n# repository https://x/\n")
+            self.assertEqual(bump.toolkit_version(lock), "1.20.1")
+            lock.write_text("# branch container-toolkit\n")
+            with self.assertRaises(SystemExit):
+                bump.toolkit_version(lock)
+
     def test_system_containerfile_is_tracked(self):
         self.assertIn(AZOTH.parents[2] / "system" / "Containerfile", bump.CONTAINERFILES)
 
@@ -93,25 +109,25 @@ class LockProblems(unittest.TestCase):
     PINS = {"NVIDIA_OPEN_VERSION": "615.71.09", "NVIDIA_LEGACY_VERSION": "580.178.04"}
 
     def test_matching_locks_have_no_problem(self):
-        self.assertEqual(bump.lock_problems(self.PINS, verify=lambda branch, version: "ok"), [])
+        self.assertEqual(bump.lock_problems(self.PINS, "1.20.1", verify=lambda branch, version: "ok"), [])
 
     def test_a_stale_lock_is_named_with_its_version(self):
-        states = {"open": "stale", "legacy": "ok"}
-        got = bump.lock_problems(self.PINS, verify=lambda branch, version: states[branch])
+        states = {"open": "stale", "legacy": "ok", "container-toolkit": "ok"}
+        got = bump.lock_problems(self.PINS, "1.20.1", verify=lambda branch, version: states[branch])
         self.assertEqual(len(got), 1)
         self.assertIn("NVIDIA open 615.71.09", got[0])
         self.assertIn("regenerated", got[0])
 
     def test_a_vanished_version_is_named_too(self):
-        got = bump.lock_problems(self.PINS, verify=lambda branch, version: "gone" if branch == "legacy" else "ok")
+        got = bump.lock_problems(self.PINS, "1.20.1", verify=lambda branch, version: "gone" if branch == "legacy" else "ok")
         self.assertEqual(len(got), 1)
         self.assertIn("NVIDIA legacy 580.178.04", got[0])
         self.assertIn("no longer publishes", got[0])
 
     def test_each_branch_is_verified_at_its_own_pin(self):
         seen = []
-        bump.lock_problems(self.PINS, verify=lambda branch, version: seen.append((branch, version)) or "ok")
-        self.assertEqual(seen, [("open", "615.71.09"), ("legacy", "580.178.04")])
+        bump.lock_problems(self.PINS, "1.20.1", verify=lambda branch, version: seen.append((branch, version)) or "ok")
+        self.assertEqual(seen, [("open", "615.71.09"), ("legacy", "580.178.04"), ("container-toolkit", "1.20.1")])
 
 class BaseImages(unittest.TestCase):
     def containerfiles(self, d, *digests):
