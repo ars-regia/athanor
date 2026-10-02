@@ -45,7 +45,9 @@ pub enum RenderError {
 const COMMON: [&str; 13] = [
     "ProtectHome=yes",
     // ProtectHome covers /home, /root and /run/user; on ostree /home and /root are symlinks
-    // to these, which it does not follow. `-`: a system without them still decodes.
+    // to /var/home and /var/roothome. systemd 258 hides those through the symlinks too
+    // (measured in the dev VM); naming them keeps the guarantee from resting on how
+    // ProtectHome resolves them. `-`: a system without them still decodes.
     "InaccessiblePaths=-/var/home -/var/roothome",
     "ProtectSystem=strict",
     "NoNewPrivileges=yes",
