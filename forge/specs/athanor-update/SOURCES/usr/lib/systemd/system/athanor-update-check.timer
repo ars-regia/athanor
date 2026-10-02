@@ -1,0 +1,12 @@
+[Unit]
+Description=Check for Athanor system image updates
+Documentation=https://github.com/hr-mes/athanor/blob/iso-v0/docs/architecture/doc_update_trust.md
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=6h
+RandomizedDelaySec=30min
+Persistent=no
+
+[Install]
+WantedBy=timers.target

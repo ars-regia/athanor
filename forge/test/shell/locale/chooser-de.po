@@ -1,0 +1,75 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: athanor-layout-chooser test catalog\n"
+"Report-Msgid-Bugs-To: forge@athanor.os\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#, rust-format
+msgid "Your layout.toml was written by a newer Athanor (schema {schema}). The nearest layout is in use; choosing one here replaces it."
+msgstr "Ihre layout.toml wurde von einer neueren Athanor-Version geschrieben (Schema {schema}). Die nächstliegende Anordnung ist aktiv; eine Auswahl hier ersetzt sie."
+
+msgid "Your layout.toml could not be read and was left unchanged. The nearest layout is in use; choosing one here replaces it."
+msgstr "Ihre layout.toml konnte nicht gelesen werden und blieb unverändert. Die nächstliegende Anordnung ist aktiv; eine Auswahl hier ersetzt sie."
+
+msgid "Layout"
+msgstr "Anordnung"
+
+msgid "Style"
+msgstr "Stil"
+
+msgid "Island"
+msgstr "Insel"
+
+msgid "Bar"
+msgstr "Balken"
+
+msgid "Essential"
+msgstr "Schlicht"
+
+msgid "Panel"
+msgstr "Leiste"
+
+msgid "Top"
+msgstr "Oben"
+
+msgid "Bottom"
+msgstr "Unten"
+
+msgid "Dock"
+msgstr "Dock"
+
+msgid "Visible"
+msgstr "Sichtbar"
+
+msgid "Auto-hide"
+msgstr "Automatisch ausblenden"
+
+msgid "None"
+msgstr "Keines"
+
+msgid "Set by your administrator."
+msgstr "Von Ihrer Administration festgelegt."
+
+msgid "The bar holds the running applications."
+msgstr "Der Balken enthält die laufenden Anwendungen."
+
+msgid "Replace the newer layout?"
+msgstr "Die neuere Anordnung ersetzen?"
+
+#, rust-format
+msgid "Athanor keeps the current file as {file}."
+msgstr "Athanor bewahrt die aktuelle Datei als {file} auf."
+
+msgid "Cancel"
+msgstr "Abbrechen"
+
+msgid "Replace"
+msgstr "Ersetzen"
+
+#, rust-format
+msgid "The layout could not be saved: {error}"
+msgstr "Die Anordnung konnte nicht gespeichert werden: {error}"

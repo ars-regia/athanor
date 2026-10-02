@@ -1,7 +1,7 @@
 Name:           athanor-secure-boot
 Version:        1.0.0
-Release:        1%{?dist}
-Summary:        Athanor OS Measured Secure Boot & TPM Sealing
+Release:        3%{?dist}
+Summary:        Athanor OS TPM sealing and rollback protection
 
 License:        GPL-3.0-or-later
 URL:            https://github.com/hr-mes/athanor-forge
@@ -22,7 +22,6 @@ UEFI Secure Boot signing, and TPM 2.0 PCR 0, 2, 7, 11 measurement/sealing.
 
 %install
 mkdir -p %{buildroot}%{_libexecdir}/athanor
-install -m 0755 %{_sourcedir}/usr/libexec/athanor-secure-boot-measure.sh %{buildroot}%{_libexecdir}/athanor-secure-boot-measure.sh
 install -m 0755 %{_sourcedir}/usr/libexec/athanor-tpm-luks-seal.sh %{buildroot}%{_libexecdir}/athanor-tpm-luks-seal.sh
 install -m 0755 %{_sourcedir}/usr/libexec/athanor/athanor-tpm-rollback-check.sh %{buildroot}%{_libexecdir}/athanor/athanor-tpm-rollback-check.sh
 install -m 0755 %{_sourcedir}/usr/libexec/athanor/athanor-tpm-rollback-update.sh %{buildroot}%{_libexecdir}/athanor/athanor-tpm-rollback-update.sh
@@ -36,48 +35,21 @@ install -m 0644 %{_sourcedir}/usr/lib/systemd/system/athanor-tpm-luks-seal.servi
 mkdir -p %{buildroot}/usr/lib/systemd/system/systemd-pcrphase-sysinit.service.d
 install -m 0644 %{_sourcedir}/usr/lib/systemd/system/systemd-pcrphase-sysinit.service.d/10-rollback-check.conf %{buildroot}/usr/lib/systemd/system/systemd-pcrphase-sysinit.service.d/10-rollback-check.conf
 
-cat <<EOF > %{buildroot}/usr/lib/systemd/system/athanor-secure-boot.service
-[Unit]
-Description=Athanor OS Measured Boot & UKI Signer
-
-[Service]
-MemoryDenyWriteExecute=true
-CPUWeight=50
-MemoryHigh=384M
-MemoryMax=512M
-Type=oneshot
-ExecStart=%{_libexecdir}/athanor-secure-boot-measure.sh
-RemainAfterExit=yes
-NoNewPrivileges=yes
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=yes
-RestrictAddressFamilies=AF_UNIX
-SystemCallFilter=@system-service
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectKernelLogs=true
-ProtectControlGroups=true
-RestrictRealtime=true
-RestrictSUIDSGID=true
-LockPersonality=true
-ReadWritePaths=/etc/keys /boot/efi /etc/systemd
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
 %files
-%{_libexecdir}/athanor-secure-boot-measure.sh
 %{_libexecdir}/athanor-tpm-luks-seal.sh
 %{_libexecdir}/athanor/athanor-tpm-rollback-check.sh
 %{_libexecdir}/athanor/athanor-tpm-rollback-update.sh
-/usr/lib/systemd/system/athanor-secure-boot.service
 /usr/lib/systemd/system/athanor-tpm-luks-seal.service
 /usr/lib/systemd/system/athanor-tpm-rollback-check.service
 /usr/lib/systemd/system/athanor-tpm-rollback-update.service
 /usr/lib/systemd/system/systemd-pcrphase-sysinit.service.d/10-rollback-check.conf
 
 %changelog
+* Thu Sep 24 2026 Athanor Forge <forge@athanor.os> - 1.0.0-3
+- Retire athanor-secure-boot.service and its measure script (doc_update_trust.md, D2): the
+  unit was never enabled, and the script generated a signing key on the machine. The four
+  Secure Boot readings are published by athanor-update. The TPM sealing, rollback check and
+  pcrphase drop-in stay.
+
 * Fri Aug 07 2026 Athanor <athanor@athanor.os> - 1.0.0-2
 - Add UKI assembly via systemd-stub and ukify, and TPM 2.0 PCR 0,2,7,11 LUKS sealing service

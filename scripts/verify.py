@@ -20,6 +20,7 @@ import os
 import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -328,6 +329,131 @@ def cosmic_defaults_problems(root):
     return problems
 
 
+def crates_built_by_specs(root=None):
+    """crate -> spec directory, for every `-p <crate>` a spec under forge/specs builds.
+    A package may build more than one crate (one crate per program, doc_shell.md SH4)."""
+    built = {}
+    for spec in walk((root or ROOT) / "forge" / "specs", ".spec"):
+        text = read(spec)
+        name = re.search(r"^Name:\s*(\S+)", text, re.M)
+        if not name:
+            continue
+        for line in text.split("\n"):
+            if "cargo build" not in line:
+                continue
+            for crate in re.findall(r"-p\s+(\S+)", line):
+                built[crate.replace("%{name}", name.group(1))] = spec.parent.name
+    return built
+
+
+UPDATE_SOURCES = "forge/specs/athanor-update/SOURCES"
+UPDATE_SHIPPED = [
+    "/usr/bin/athanor-update", "/usr/bin/athanor-update-notify", "/usr/libexec/athanor-update/render-policy",
+    "/usr/share/athanor/containers/templates/policy.json.in",
+    "/usr/share/athanor/containers/templates/attachments-policy.json.in",
+    "/usr/share/athanor/containers/templates/athanor.yaml.in",
+    "/usr/lib/systemd/system/athanor-update-check.timer", "/usr/lib/systemd/system/athanor-update-check.service",
+    "/usr/lib/systemd/system/athanor-update.service", "/usr/lib/systemd/system/athanor-update-state.service",
+    "/usr/lib/systemd/system/athanor-update-migrate.service", "/usr/lib/systemd/user/athanor-update-notify.service",
+    "/usr/lib/systemd/system-preset/80-athanor-update.preset", "/usr/lib/systemd/user-preset/80-athanor-update.preset",
+    "/usr/lib/tmpfiles.d/athanor-update.conf", "/usr/share/dbus-1/system.d/os.athanor.Update1.conf",
+    "/usr/share/dbus-1/system-services/os.athanor.Update1.service", "/usr/share/polkit-1/actions/os.athanor.update.policy",
+]
+SYSTEM_IMAGES = ["athanor-system", "athanor-system-nvidia", "athanor-system-nvidia-legacy"]
+
+
+def update_trust_problems(root=None):
+    """The update and trust package ships what docs/architecture/doc_update_trust.md says
+    (UT1, UT3, UT5, UT6, UT7), and the wiring it replaces is gone."""
+    root = root or ROOT
+    problems = []
+    spec = root / "forge/specs/athanor-update/athanor-update.spec"
+    if not spec.exists():
+        return [f"{rel(spec)}: missing"]
+    files = read(spec).split("%files", 1)[-1]
+    for shipped in UPDATE_SHIPPED:
+        if not re.search(rf"^{re.escape(shipped)}$", files, re.M):
+            problems.append(f"athanor-update.spec: %files does not list {shipped}")
+        source = root / UPDATE_SOURCES / shipped.lstrip("/")
+        if "/usr/bin/" not in shipped and not source.exists():
+            problems.append(f"{UPDATE_SOURCES}{shipped}: missing")
+
+    templates = root / UPDATE_SOURCES / "usr/share/athanor/containers/templates"
+    scopes = [f"@REGISTRY@/{name}" for name in SYSTEM_IMAGES]
+    try:
+        policy = json.loads(read(templates / "policy.json.in").replace("@KEY_PATHS@", '"/k.pub"'))
+        attachments = json.loads(read(templates / "attachments-policy.json.in"))
+        registries = read(templates / "athanor.yaml.in")
+    except (OSError, ValueError) as err:
+        return problems + [f"policy templates: {err}"]
+    for name, doc in (("policy.json.in", policy), ("attachments-policy.json.in", attachments)):
+        if doc.get("default") != [{"type": "reject"}]:
+            problems.append(f"{name}: `default` must be reject (bootc refuses insecureAcceptAnything; "
+                            f"the attachments policy must open our repositories only)")
+    docker = policy.get("transports", {}).get("docker", {})
+    if sorted(docker) != sorted([""] + scopes):
+        problems.append(f"policy.json.in: docker scopes are {sorted(docker)}, expected the three system images and \"\"")
+    for scope in scopes:
+        for req in docker.get(scope, [{}]):
+            if req.get("type") != "sigstoreSigned" or req.get("signedIdentity") != {"type": "matchRepository"} or not req.get("keyPaths"):
+                problems.append(f"policy.json.in: {scope} must be sigstoreSigned with keyPaths and matchRepository")
+    for transport in ("docker-archive", "oci", "oci-archive", "dir", "containers-storage", "docker-daemon"):
+        if policy.get("transports", {}).get(transport) != {"": [{"type": "insecureAcceptAnything"}]}:
+            problems.append(f"policy.json.in: transport {transport} must stay open, or podman users lose it")
+    if sorted(attachments.get("transports", {}).get("docker", {})) != sorted(scopes):
+        problems.append("attachments-policy.json.in: docker scopes must be exactly the three system images")
+    declared = re.findall(r"^  (\S+):$", registries, re.M)
+    if declared != scopes or registries.count("use-sigstore-attachments: true") != 3:
+        problems.append("athanor.yaml.in: must declare use-sigstore-attachments for exactly the three system images "
+                        "(a missing entry makes a signed image read as unsigned, a wider scope collides with default.yaml)")
+
+    preset = root / "forge/specs/athanor-system-config/SOURCES/usr/lib/systemd/system-preset/80-athanor-system.preset"
+    if preset.exists() and re.search(r"^enable bootc-fetch-apply\.timer$", read(preset), re.M):
+        problems.append(f"{rel(preset)}: enables bootc-fetch-apply.timer, which does not exist")
+    override = root / "forge/specs/athanor-base-config/SOURCES/usr/lib/systemd/system/bootc-fetch-apply-updates.service.d/override.conf"
+    if override.exists():
+        problems.append(f"{rel(override)}: calls `bootc upgrade --stage`, a flag bootc 1.16 does not have")
+    for literal in walk(root / "forge/specs/athanor-update", ""):
+        if literal.is_file() and "target" not in literal.parts and "vectors" not in literal.parts and "ghcr.io/hr-mes" in read(literal):
+            problems.append(f"{rel(literal)}: literal ghcr.io/hr-mes; the registry comes from the build's variables")
+    # D2: the Secure Boot daemon is retired, the TPM files of its package are not.
+    secure_boot = root / "forge/specs/athanor-secure-boot"
+    for source in walk(secure_boot, ".rs"):
+        if "org.athanor.SecureBoot" in read(source):
+            problems.append(f"{rel(source)}: serves org.athanor.SecureBoot, a name no bus policy lets it own (retired by D2)")
+    if (secure_boot / "athanor-secure-boot.spec").exists():
+        # The changelog may name what was retired: only what the spec installs counts.
+        text = read(secure_boot / "athanor-secure-boot.spec").split("%changelog", 1)[0]
+        if "athanor-secure-boot.service" in text:
+            problems.append("athanor-secure-boot.spec: still ships athanor-secure-boot.service (retired by D2)")
+        for kept in ("athanor-tpm-luks-seal.sh", "athanor-tpm-luks-seal.service", "athanor-tpm-rollback-check.service",
+                     "athanor-tpm-rollback-update.service", "10-rollback-check.conf"):
+            if kept not in text or not list(walk(secure_boot / "SOURCES", kept)):
+                problems.append(f"athanor-secure-boot: {kept} must stay; system/Containerfile and the rollback check use it")
+    return problems
+
+
+def image_policy_problems(root=None):
+    """system/Containerfile puts the policy in force and system/keys holds public keys only."""
+    root = root or ROOT
+    problems = []
+    containerfile = read(root / "system/Containerfile")
+    if not re.search(r"^ARG IMAGE_REGISTRY$", containerfile, re.M) or "render-policy" not in containerfile or "--link-etc /etc" not in containerfile:
+        problems.append("system/Containerfile: does not run render-policy --link-etc /etc with ARG IMAGE_REGISTRY: "
+                        "the policy is never in force and no machine verifies an image")
+    elif containerfile.index("render-policy") > containerfile.index("systemctl preset-all"):
+        problems.append("system/Containerfile: render-policy runs after preset-all")
+    if "COPY system/keys/ /usr/share/athanor/keys/" not in containerfile:
+        problems.append("system/Containerfile: does not copy system/keys to /usr/share/athanor/keys")
+    keys = sorted((root / "system/keys").glob("*")) if (root / "system/keys").is_dir() else []
+    if not any(key.suffix == ".pub" for key in keys):
+        problems.append("system/keys: no *.pub: the rendered policy would name no key")
+    for key in keys:
+        if key.suffix != ".pub":
+            problems.append(f"system/keys/{key.name}: only *.pub files belong under system/keys")
+    return problems
+
+
 @check("shipped", "Ogni crate del workspace è impacchettato, o è dichiarato sperimentale")
 def check_shipped():
     r = Result()
@@ -359,6 +485,7 @@ def check_shipped():
         exempt = {l.strip() for l in read(exempt_file).split("\n")
                   if l.strip() and not l.startswith("#")}
 
+    built = crates_built_by_specs()
     for m in members:
         name = Path(m).name
         name = re.sub(r"-\d+\.\d+\.\d+$", "", name)
@@ -370,6 +497,10 @@ def check_shipped():
         short = name.replace("athanor-", "")
         has_spec = name in spec_dirs or f"athanor-{short}" in spec_dirs
         in_dag = name in dag or short in dag
+        owner = built.get(name)
+        if owner and not has_spec:
+            # Built and installed by another package's spec: shipped if that package is.
+            has_spec, in_dag = True, owner in dag or owner.replace("athanor-", "") in dag
         if not (has_spec and in_dag):
             why = []
             if not has_spec:
@@ -385,6 +516,10 @@ def check_shipped():
         r.fail(f"{p}: in un tier ma non in custom_packages -> riferimento pendente")
 
     for problem in cosmic_defaults_problems(ROOT):
+        r.fail(problem)
+    for problem in update_trust_problems():
+        r.fail(problem)
+    for problem in image_policy_problems():
         r.fail(problem)
 
     return r
@@ -579,6 +714,74 @@ def check_specs():
                    f"%setup, quindi %install gira dalla radice del build e quel file "
                    f"non è lì. Usa il percorso completo dalla radice del repo")
 
+    return r
+
+
+# --------------------------------------------------------------------------- #
+# 10. boundary — COSMIC stays behind the compositor client (doc_shell.md, SH2)
+# --------------------------------------------------------------------------- #
+
+# SH2: the compositor client is the protocol boundary; the theme tool generates COSMIC's
+# theme files. Nothing else may depend on COSMIC, the frozen tree included.
+COSMIC_ALLOWED = (
+    "system/athanor-compositor-client/",
+    "forge/tools/calmo-cosmic-theme/",
+)
+BOUNDARY_DIRS = ("system", "forge/specs", "forge/tools")
+DEPENDENCY_TABLES = ("dependencies", "dev-dependencies", "dev_dependencies",
+                     "build-dependencies", "build_dependencies")
+
+
+def cosmic_dependencies(manifest):
+    """The crate names of a parsed Cargo manifest's dependencies that are libcosmic or
+    cosmic-*. A renamed dependency (`package = "cosmic-..."`) is found by its crate name."""
+    tables = [manifest.get(name, {}) for name in DEPENDENCY_TABLES]
+    tables += [target.get(name, {}) for target in manifest.get("target", {}).values()
+               for name in DEPENDENCY_TABLES]
+    tables.append(manifest.get("workspace", {}).get("dependencies", {}))
+    found = []
+    for table in tables:
+        for key, value in table.items():
+            crate = value.get("package", key) if isinstance(value, dict) else key
+            if crate == "libcosmic" or crate.startswith("cosmic-"):
+                found.append(crate)
+    return found
+
+
+def boundary_problems(root):
+    """What crosses the COSMIC boundary under root: a crate that depends on COSMIC, or Rust
+    code that names a com.system76 configuration, outside COSMIC_ALLOWED."""
+    root = Path(root)
+    problems = []
+    for base in BOUNDARY_DIRS:
+        for path in walk(root / base, ".toml"):
+            relative = path.relative_to(root).as_posix()
+            if path.name != "Cargo.toml" or relative.startswith(COSMIC_ALLOWED):
+                continue
+            try:
+                manifest = tomllib.loads(read(path))
+            except tomllib.TOMLDecodeError as error:
+                problems.append(f"{relative}: not valid TOML ({error})")
+                continue
+            for crate in cosmic_dependencies(manifest):
+                problems.append(f"{relative} depends on {crate}: only athanor-compositor-client "
+                                f"may depend on COSMIC")
+        for path in walk(root / base, ".rs"):
+            relative = path.relative_to(root).as_posix()
+            if relative.startswith(COSMIC_ALLOWED):
+                continue
+            for i, line in enumerate(read(path).split("\n"), 1):
+                if "com.system76" in line.split("//")[0]:
+                    problems.append(f"{relative}:{i} names a com.system76 configuration: read it "
+                                    f"through athanor-compositor-client")
+    return problems
+
+
+@check("boundary", "Only the compositor client depends on COSMIC or reads its configuration")
+def check_boundary():
+    r = Result()
+    for problem in boundary_problems(ROOT):
+        r.fail(problem)
     return r
 
 

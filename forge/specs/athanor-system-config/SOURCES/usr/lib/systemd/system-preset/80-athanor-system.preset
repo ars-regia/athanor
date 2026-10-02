@@ -5,7 +5,6 @@
 enable greetd.service
 enable firewalld.service
 enable nix-daemon.socket
-enable bootc-fetch-apply.timer
 enable fstrim.timer
 enable athanor-timewarp.timer
 enable athanor-backup-hourly.timer

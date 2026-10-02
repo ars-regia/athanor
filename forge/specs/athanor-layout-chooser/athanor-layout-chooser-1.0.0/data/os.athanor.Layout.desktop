@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Layout
+Name[it]=Disposizione
+Comment=Choose the style of the panel and the dock
+Comment[it]=Scegli lo stile del pannello e del dock
+Exec=athanor-layout-chooser
+Icon=preferences-desktop
+Categories=Settings;DesktopSettings;
+Keywords=panel;dock;taskbar;layout;
+Keywords[it]=pannello;dock;barra;disposizione;
+StartupNotify=true

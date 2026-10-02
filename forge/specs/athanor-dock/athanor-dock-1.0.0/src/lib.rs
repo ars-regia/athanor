@@ -1,18 +1,5 @@
-#![allow(deprecated)]
-pub mod dock_config;
-pub mod dock_data;
-pub mod dock_engine;
-pub mod dock_watcher;
-pub mod controller;
-pub mod ui;
-pub mod preview_popup;
-pub mod dock;
+//! The logic of athanor-dock, with no GTK type (doc_bar.md, BR7): which outputs get a
+//! dock, on which edge, and when an auto-hiding dock shows. The binary draws it.
 
-pub use dock_config::*;
-pub use dock_data::*;
-pub use dock_engine::*;
-pub use dock_watcher::*;
-pub use ui::{build_ui, animate_dock_visibility, toggle_dock_visibility};
-pub use preview_popup::*;
-pub use dock::*;
-
+pub mod autohide;
+pub mod placement;

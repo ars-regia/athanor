@@ -1,0 +1,96 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: athanor-layout-chooser\n"
+"Report-Msgid-Bugs-To: forge@athanor.os\n"
+"Language: it\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: src/ui.rs:46
+#, rust-format
+msgid "Your layout.toml was written by a newer Athanor (schema {schema}). The nearest layout is in use; choosing one here replaces it."
+msgstr "Il tuo layout.toml è stato scritto da una versione di Athanor più recente (schema {schema}). È in uso la disposizione più vicina; sceglierne una qui lo sostituisce."
+
+#: src/ui.rs:50
+msgid "Your layout.toml could not be read and was left unchanged. The nearest layout is in use; choosing one here replaces it."
+msgstr "Il tuo layout.toml non è leggibile ed è stato lasciato intatto. È in uso la disposizione più vicina; sceglierne una qui lo sostituisce."
+
+#: src/ui.rs:76
+msgid "Layout"
+msgstr "Disposizione"
+
+#: src/ui.rs:100
+msgid "Style"
+msgstr "Stile"
+
+#: src/ui.rs:102
+msgid "Island"
+msgstr "Isola"
+
+#: src/ui.rs:103
+msgid "Bar"
+msgstr "Barra"
+
+#: src/ui.rs:104
+msgid "Essential"
+msgstr "Essenziale"
+
+#: src/ui.rs:110
+msgid "Panel"
+msgstr "Pannello"
+
+#: src/ui.rs:112
+msgid "Top"
+msgstr "In alto"
+
+#: src/ui.rs:113
+msgid "Bottom"
+msgstr "In basso"
+
+#: src/ui.rs:119
+msgid "Dock"
+msgstr "Dock"
+
+#: src/ui.rs:121
+msgid "Visible"
+msgstr "Visibile"
+
+#: src/ui.rs:122
+msgid "Auto-hide"
+msgstr "Nascondi automaticamente"
+
+#: src/ui.rs:123
+msgid "None"
+msgstr "Nessuno"
+
+#: src/ui.rs:218
+msgid "Set by your administrator."
+msgstr "Impostato dall'amministratore."
+
+#: src/ui.rs:221
+msgid "The bar holds the running applications."
+msgstr "La barra contiene le applicazioni aperte."
+
+#: src/ui.rs:251
+msgid "Replace the newer layout?"
+msgstr "Sostituire la disposizione più recente?"
+
+#: src/ui.rs:253
+#, rust-format
+msgid "Athanor keeps the current file as {file}."
+msgstr "Athanor conserva il file attuale come {file}."
+
+#: src/ui.rs:257
+msgid "Cancel"
+msgstr "Annulla"
+
+#: src/ui.rs:257
+msgid "Replace"
+msgstr "Sostituisci"
+
+#: src/ui.rs:280
+#, rust-format
+msgid "The layout could not be saved: {error}"
+msgstr "Impossibile salvare la disposizione: {error}"

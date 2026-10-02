@@ -1,0 +1,63 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: athanor-dock test catalog\n"
+"Report-Msgid-Bugs-To: forge@athanor.os\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Launcher"
+msgstr "Anwendungsstarter"
+
+msgid "Applications"
+msgstr "Anwendungen"
+
+msgid "Workspaces"
+msgstr "Arbeitsflächen"
+
+msgid "Running applications"
+msgstr "Laufende Anwendungen"
+
+msgid "Unknown application"
+msgstr "Unbekannte Anwendung"
+
+msgid "{app}: {title}"
+msgstr "{app}: {title}"
+
+msgid "{app} ({count} windows)"
+msgstr "{app} ({count} Fenster)"
+
+msgid "Running"
+msgstr "Wird ausgeführt"
+
+msgid "Untitled window"
+msgstr "Unbenanntes Fenster"
+
+msgid "Minimise {title}"
+msgstr "{title} minimieren"
+
+msgid "Close {title}"
+msgstr "{title} schließen"
+
+msgid "Open"
+msgstr "Öffnen"
+
+msgid "New Window"
+msgstr "Neues Fenster"
+
+msgid "{name} could not start"
+msgstr "{name} konnte nicht gestartet werden"
+
+msgid "The reason is in the system journal."
+msgstr "Der Grund steht im Systemjournal."
+
+msgid "Unpin from Dock"
+msgstr "Vom Dock lösen"
+
+msgid "Pin to Dock"
+msgstr "An das Dock anheften"
+
+msgid "Dock"
+msgstr "Dock"
