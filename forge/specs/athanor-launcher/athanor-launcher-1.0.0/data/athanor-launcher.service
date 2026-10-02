@@ -40,7 +40,9 @@ RuntimeDirectoryMode=0700
 RuntimeDirectoryPreserve=yes
 # ~/.local/state/athanor/search/usage.json (LA3).
 StateDirectory=athanor/search
-# cosmic-comp's shortcuts, where Super is bound to Show (LA8).
+# cosmic-comp's shortcuts, where Super is bound to Show once per user (LA8). The unit must
+# grant it under ProtectHome=read-only for that one write, made before the launcher's
+# Landlock ruleset, which then closes the directory for the rest of the run.
 ConfigurationDirectory=cosmic/com.system76.CosmicSettings.Shortcuts/v1
 
 ProtectSystem=strict

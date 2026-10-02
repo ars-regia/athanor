@@ -13,7 +13,7 @@ use std::cell::RefCell;
 use std::env;
 use std::fs::DirBuilder;
 use std::os::unix::fs::DirBuilderExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::rc::Rc;
 
 use athanor_compositor_client::shortcuts::{self, Binding};
@@ -84,44 +84,12 @@ fn main() -> glib::ExitCode {
     };
     // Created before the ruleset, so each grant has a directory to hold on to.
     let usage_dir = usage_path.parent().map_or_else(|| dirs.unit_runtime.clone(), Path::to_path_buf);
-    let shortcuts_dir = shortcuts::dir();
-    for dir in std::iter::once(&usage_dir).chain(shortcuts_dir.iter()) {
-        if let Err(err) = std::fs::create_dir_all(dir) {
-            tracing::warn!(error = %err, dir = %dir.display(), "cannot create a directory the launcher writes");
-        }
+    if let Err(err) = std::fs::create_dir_all(&usage_dir) {
+        tracing::warn!(error = %err, dir = %usage_dir.display(), "cannot create a directory the launcher writes");
     }
-    let launch_dir = dirs.runtime.join("athanor");
-    if let Err(err) = DirBuilder::new().recursive(true).mode(0o700).create(&launch_dir) {
-        tracing::warn!(error = %err, dir = %launch_dir.display(), "cannot create the directory of the launch sockets");
-    }
-    let dconf_dir = dirs.runtime.join("dconf");
-    // Before GTK starts a thread (LA9). Writes: the launch sockets, the unit's runtime
-    // directory, dconf, the cache (which holds qalc's per-run configuration directory), usage,
-    // cosmic-comp's shortcuts and /tmp; reads stay open, because the preview reads files. The
-    // launch directory is also where the window capture buffers live. No TCP for the launcher
-    // or for qalc and the preview's systemd-run.
-    let write: Vec<&Path> = [
-        launch_dir.as_path(),
-        dirs.unit_runtime.as_path(),
-        dconf_dir.as_path(),
-        dirs.cache.as_path(),
-        usage_dir.as_path(),
-        Path::new("/tmp"),
-    ]
-    .into_iter()
-    .chain(shortcuts_dir.iter().map(PathBuf::as_path))
-    .collect();
-    let devices: Vec<&Path> = athanor_launcher::DEVICE_WRITES.iter().map(Path::new).collect();
-    let confined = sandbox::ensure_single_threaded()
-        .and_then(|()| sandbox::restrict_writes(&write, &devices))
-        .and_then(|()| sandbox::deny_tcp());
-    if let Err(err) = confined {
-        tracing::error!(error = %err, "cannot confine the launcher with Landlock; refusing to run unconfined");
-        return glib::ExitCode::FAILURE;
-    }
-    i18n::init();
     // Super is ours only where the user left it to the system, and only at the first start
     // with a state directory (doc_launcher.md, LA8 and §6): the marker sits beside the usage.
+    // It runs before the ruleset, which then leaves cosmic-comp's shortcuts read-only.
     let bound = match (given_up, loader::state_home()) {
         (false, Some(state)) => {
             shortcuts::set_system_action_once("Launcher", bus::SHOW_COMMAND, &state.join("athanor/search/super-bound"))
@@ -136,6 +104,33 @@ fn main() -> glib::ExitCode {
         Ok(Some(Binding::UserChoice)) => tracing::info!("Super keeps the command the user chose; it does not call {}", bus::NAME),
         Err(err) => tracing::warn!(error = %err, "Super is not bound to the launcher; it still opens from the bar"),
     }
+    let launch_dir = dirs.runtime.join("athanor");
+    if let Err(err) = DirBuilder::new().recursive(true).mode(0o700).create(&launch_dir) {
+        tracing::warn!(error = %err, dir = %launch_dir.display(), "cannot create the directory of the launch sockets");
+    }
+    let dconf_dir = dirs.runtime.join("dconf");
+    // Before GTK starts a thread (LA9). Writes: the launch sockets, the unit's runtime
+    // directory, dconf, the cache (which holds qalc's per-run configuration directory), usage
+    // and /tmp; reads stay open, because the preview reads files. The launch directory is also
+    // where the window capture buffers live. No TCP for the launcher or for qalc and the
+    // preview's systemd-run.
+    let write = [
+        launch_dir.as_path(),
+        dirs.unit_runtime.as_path(),
+        dconf_dir.as_path(),
+        dirs.cache.as_path(),
+        usage_dir.as_path(),
+        Path::new("/tmp"),
+    ];
+    let devices: Vec<&Path> = athanor_launcher::DEVICE_WRITES.iter().map(Path::new).collect();
+    let confined = sandbox::ensure_single_threaded()
+        .and_then(|()| sandbox::restrict_writes(&write, &devices))
+        .and_then(|()| sandbox::deny_tcp());
+    if let Err(err) = confined {
+        tracing::error!(error = %err, "cannot confine the launcher with Landlock; refusing to run unconfined");
+        return glib::ExitCode::FAILURE;
+    }
+    i18n::init();
 
     let app = Application::builder().application_id(APP_ID).build();
     // Built once; the handle keeps the launcher for the app's lifetime, every watch holds a
