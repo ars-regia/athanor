@@ -31,7 +31,7 @@ Status: **revision 2, awaiting approval.** Revision 1 was approved by the mainta
 |---|---|---|
 | Applications | `gio::AppInfo::all()` and `gio::AppInfoMonitor`, which cover system entries and both Flatpak installations | name, generic name, keywords, executable, the translated names of the current locale; `NoDisplay` entries are skipped |
 | Windows | `athanor-compositor-client` | open windows, by title and app id |
-| Calculator | one `qalc` run per query, after the pause of LA4, with exchange-rate updates off: 0.06 s and 29 MB per run, measured, while the interactive mode echoes a prompt and colour codes | an expression, a unit or a currency conversion; nothing when `qalc` exits non-zero, which it does for text that is not an expression |
+| Calculator | one `qalc -s "color 0" -s "update exchange rates 0" -- <query>` run per query, after the pause of LA4: the query follows `--`, so an expression starting with `-` is still an expression; standard input is silenced and `XDG_CONFIG_HOME` points at a per-process directory under the launcher's cache (LA9); 0.06 s and 29 MB per run, measured, while the interactive mode echoes a prompt and colour codes | an expression, a unit or a currency conversion; nothing when `qalc` exits non-zero, which it does for text that is not an expression |
 | Files | localsearch through tinysparql | file name and full-text content, with the matching excerpt; at most 20 hits |
 | Search providers | `org.gnome.Shell.SearchProvider2`, found from the `.ini` files under `/usr/share/gnome-shell/search-providers/` and the two Flatpak export trees | what each application returns; the provider of Nautilus is skipped, because it queries localsearch too and every file would appear twice |
 | Settings | the per-page desktop entries cosmic-settings ships, `com.system76.CosmicSettings.*.desktop`, hidden from the application group by `NoDisplay`; our Settings ships its own in stage 6 | a page by its translated name and keywords |
@@ -112,12 +112,18 @@ Status: **revision 2, awaiting approval.** Revision 1 was approved by the mainta
 - **Opening.** Each program owns a D-Bus name, `os.athanor.Launcher1` and `os.athanor.Library1`, with one method `Show`. A D-Bus activation file with `SystemdService=` starts the unit when it is down, so the program never runs outside its unit. The compositor client writes the cosmic-comp shortcuts (SH2): Super and Super+A call `Show`, which toggles. Super is cosmic-comp's `Launcher` system action, so the client writes our command into the user's copy of `system_actions`, keeping every other entry of the system file. `Opener::Launcher` and `Opener::AppLibrary` in `launch.rs` call the same method.
 - **Launching.** Every application the launcher or the library starts, an application or the default handler of a file or a URL, starts through BR2: a security-context socket, a transient `app-athanor-*.service` unit and an activation token. Engine id `os.athanor.shell` as in BR2. This closes, for the launcher, the limit BR2 declares for applications started from cosmic-launcher.
 - **Show and hide never unmap.** cosmic-comp disconnects a client that destroys, unmaps and remaps, or rebuilds an unpinned layer surface (`doc_bar.md`, and the switch plan). Each program keeps one layer surface per output, pinned to it and always mapped: hidden, it has no content, an empty input region, no keyboard interactivity, the background layer and a size of 1×1; shown, the overlay layer, the four anchors and exclusive keyboard interactivity. The plan proves the swap on cosmic-comp before anything is built on it.
+- **Keyboard focus needs Athanor's cosmic-comp.** The launcher requires Athanor's build (`forge/specs/cosmic-comp`, 1.8.0-1.fc43.athanor1), which carries two patches: 0001, layer-surface keyboard focus follows `keyboard_interactivity` changes; 0002, `build.rs` honours `GIT_HASH`. Both are prepared for upstream and neither is sent yet. On stock cosmic-comp 1.8 the shown launcher gets no keys after the last window closes, and after Escape the hidden surface keeps them. The build is tracked by its own bump workflow, `cosmic-comp-bump.yml`, and is never auto-merged.
+- **Hotplug.** An output removal leaves one window per output, kept for the life of the process. One the launcher had shown on keeps about 3.4 MB (measured 23376 to 26854 kB).
+- **URLs resolve by their own scheme.** An `https` URL goes to the default handler of `https`; GIO's file scheme answers "http", so it is not asked.
 
 **LA9. Confinement.**
 
 - **Landlock at start,** as in BR1. The launcher reads `$HOME` read-only, because the preview reads files; it writes only its own state. The library does not read `$HOME` beyond its configuration and state. Neither may connect over TCP: Landlock ABI 4 denies TCP bind and connect, and the unit allows only Unix and netlink sockets.
 - **The launcher holds the main socket,** so it reads window titles and can reach the clipboard; and it reads untrusted text: file names and contents, provider results from any installed application, window titles. Every external string is shown as plain text with control and bidirectional characters removed, the rule `doc_bar.md` applies to notification bodies.
 - **No untrusted file is decoded in the launcher.** Images go through glycin's sandboxed loaders. Images and PDFs go through `athanor-preview-render`, a helper started per request in a transient user unit (`systemd-run --user --pipe`) with no network, no home, no runtime directory and so no bus or Wayland socket. The launcher opens the file and hands it over on standard input; the helper returns a bitmap on standard output and exits, or is killed by its timeout. Text is read in the launcher, bounded and cleaned.
+- **qalc keeps no history.** `qalc.history` is a link to /dev/null in a 0700 configuration directory under the launcher's cache, and qalc's settings file lives there.
+- **Providers and icons.** A provider `.ini` can claim another installed application's name (the same trust as GNOME), and providers are bus-activated on search. Providers and desktop entries may only give themed icons: file or bytes icons are replaced by a generic one. Themed names resolve through the user-writable `~/.local/share/icons`, which the bar and the dock share.
+- **The bus name.** Any unconfined session peer can call `Show`: focus moves into the query and nothing runs without Enter. Squatting `os.athanor.Launcher1` blocks the launcher.
 - **Declared limits,** not guarantees: a provider opens its own results, through bus activation, on the session's main socket and outside our context; an application with one instance already running opens the new window in its existing process (BR2).
 
 **LA10. Failures.**
@@ -145,8 +151,8 @@ Applied on 2026-10-01, with the approval of this document.
 
 1. ~~Reaching localsearch~~ — resolved in revision 2: `tracker-rs` (LA2).
 2. ~~Mapping and unmapping~~ — resolved in revision 2: never unmapped, pinned surfaces swapped between hidden and shown (LA8); the plan proves the swap first.
-3. **Timing values** (120 ms, 1 s, the top-hit margin, the preview delay) are estimates; the first measurement sets them.
-4. **Memory budgets** are proposals: `athanor-launcher` at most 80 MB PSS and `athanor-library` at most 64 MB PSS at rest; the first measurement confirms or corrects them.
+3. **Timing values** (120 ms, 1 s, the top-hit margin, the preview delay) are estimates; the first measurement sets them. Settled for the launcher in plan 3a (section 6): the first Show takes 16 ms and the later ones 0 ms.
+4. **Memory budgets** are proposals: `athanor-launcher` at most 80 MB PSS and `athanor-library` at most 64 MB PSS at rest; the first measurement confirms or corrects them. The launcher's budget is confirmed in plan 3a (section 6); the library's stays open until plan 3b.
 5. ~~Flatpak search providers~~ — resolved in revision 2: the `.ini` files are read under `gnome-shell/search-providers/` in every directory of `XDG_DATA_DIRS`, which lists both Flatpak export trees.
 
 ## 5. Acceptance
@@ -163,3 +169,17 @@ On a fresh install in the dev VM and on the maintainer's desktop upgraded in pla
 8. A file name with bidirectional overrides shows as plain text; a malformed PDF in the preview crashes nothing but the helper.
 9. The 24 surface cases of LA11 pass in CI, and every interactive widget exposes a role and a name in the AT-SPI tree.
 10. At rest, measured in the rig, the two programs stay within the budgets of open doubt 4.
+
+## 6. State after plan 3a
+
+Plan 3a delivers the launcher, its search and its preview. The library, and the switch, do not exist yet.
+
+- **Section 5 items, and where they pass.** The rig job `launcher` of `shell-surfaces.yml` covers, through `rig.sh launcher-e2e`: item 1 (the show time), item 3 (`2+2*3`, with the real `qalc`), item 7 (a provider that never answers, localsearch absent), the plain-text part of item 8 (hostile names), item 10 for the launcher (80 MB), and the accessible roles and names of item 9 through `rig.sh atspi launcher`; `rig.sh surface launcher` renders the launcher's 12 surface cases. The VM script `scripts/devvm/launcher-acceptance.sh` covers, by stage: `activation` (Super and D-Bus activation, item 1), `search` (item 2), `calc` (item 3, with the date of the rates), `files` (item 4), `windows` (item 5), `launch` (item 6), `localsearch` (item 7), `hostile` and `decoder` (item 8, the malformed PDF and PNG), `memory` (item 10), plus `focus`, `hotplug` and `crash-loop`. Items 1 to 8 and 10 pass for the launcher; the 12 library cases of item 9 and the library half of items 1, 6 and 10 wait for plan 3b.
+- **Measured show time.** 16 ms for the first Show, through D-Bus activation, and 0 ms through Super (the VM script's `full-run5`; runs 3 and 4 give the same). Open doubt 3 is settled for the launcher. Super was picked up live, without a new login.
+- **Measured memory,** own process, after a warm-up and three rounds that each include a decoded image and a PDF preview: Pss 74376, 67876 and 71282 kB; Pss_Anon 17024, 14332 and 15588 kB, with no growth; Pss_Shmem about 42 to 46 MB, the surface buffers shared with the compositor (GPU-dependent). The gates are a total of at most 80 MB and an anonymous growth of at most 2 MB. Open doubt 4 is settled for the launcher; the library's budget stays open until plan 3b.
+- **Decoders.** The malformed PDF and PNG make the helper exit with status 1 and nothing else. A held key leaves at most 1 helper unit, 7 are stopped, and none remains after 6 s.
+- **Super.** The client wrote Super into the user's copy of `system_actions` and cosmic-comp picked it up live: no new login was needed.
+- **The compositor.** The launcher requires Athanor's cosmic-comp (LA8).
+- **Verification.** All 14 stages of the VM script pass with exit 0 (`.scratch/full-run5.log`), on the patched compositor, binary sha256 8d137079. The rig stages pass in a local rig run; the CI run id is added in the pull request.
+- **Left for plan 3b:** the library, Super+A, Ctrl+Enter to the library and the "New window" action.
+- **Left for plan 3c:** the switch (LA12) and the window switcher on Alt+Tab.
