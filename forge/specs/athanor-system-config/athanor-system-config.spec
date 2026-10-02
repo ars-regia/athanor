@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:47.fc43}
+Release:        %{?autorelease}%{!?autorelease:48.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        MIT
 URL:            https://github.com/hr-mes/athanor-forge
@@ -91,9 +91,16 @@ mkdir -p /etc/yum.repos.d
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
-* Thu Oct 01 2026 Athanor Forge <forge@athanor.os> - 1.0.0-47
+* Fri Oct 02 2026 Athanor Forge <forge@athanor.os> - 1.0.0-48
 - athanor-desktop publishes XDG_SESSION_CLASS, read from logind, to the user manager:
   localsearch's unit requires it and never started.
+
+* Fri Oct 02 2026 Athanor Forge <forge@athanor.os> - 1.0.0-47
+- Bind /sys into the greeter's sandbox by the device-tree directories (block, bus,
+  class, dev, devices), the set Flatpak exposes, instead of whole. The recursive bind
+  carried efivarfs, securityfs, tracefs, bpffs, pstore and the cgroup tree into the
+  sandbox, and SELinux refused xdm_t the remount that makes each of them read-only.
+
 * Thu Sep 24 2026 Athanor Forge <forge@athanor.os> - 1.0.0-46
 - Stop enabling bootc-fetch-apply.timer: no unit of that name exists, so no update ever
   ran by itself. athanor-update ships the timer that does (doc_update_trust.md, UT1).

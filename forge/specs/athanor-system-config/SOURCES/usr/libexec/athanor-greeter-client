@@ -137,6 +137,10 @@ done
 # /dev/dri is absent on a machine with no DRM driver at all, where GTK renders in
 # software: its bind is optional, like the udev database, the avatar and font cache
 # directories.
+# /sys is bound by the device-tree directories libdrm, udev and the GPU drivers read,
+# the set Flatpak exposes, rather than whole: a recursive read-only bind of /sys would
+# also carry efivarfs, securityfs, tracefs, bpffs, pstore and the cgroup tree, and
+# SELinux refuses xdm_t the remount that makes each of those read-only.
 exec bwrap \
     --unshare-all \
     --die-with-parent \
@@ -151,7 +155,11 @@ exec bwrap \
     --proc /proc \
     --dev /dev \
     --dev-bind-try /dev/dri /dev/dri \
-    --ro-bind /sys /sys \
+    --ro-bind /sys/block /sys/block \
+    --ro-bind /sys/bus /sys/bus \
+    --ro-bind /sys/class /sys/class \
+    --ro-bind /sys/dev /sys/dev \
+    --ro-bind /sys/devices /sys/devices \
     --ro-bind-try /run/udev /run/udev \
     --tmpfs /tmp \
     --ro-bind-try /var/cache/fontconfig /var/cache/fontconfig \
