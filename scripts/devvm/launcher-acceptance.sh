@@ -605,7 +605,7 @@ stage_hostile() {
 # The properties of render.rs's decoder units, for the checks of what the decoder can reach
 # (the live units are compared with them below).
 decoder_args() { # decoder_args image|pdf: the -p arguments of systemd-run
-    local common=(ProtectHome=yes ProtectSystem=strict NoNewPrivileges=yes PrivateNetwork=yes PrivateIPC=yes
+    local common=(ProtectHome=yes "InaccessiblePaths=-/var/home -/var/roothome" ProtectSystem=strict NoNewPrivileges=yes PrivateNetwork=yes PrivateIPC=yes
         TemporaryFileSystem=/tmp TemporaryFileSystem=/run RuntimeMaxSec=5 MemoryMax=512M MemorySwapMax=0 TimeoutStopSec=1)
     local props
     case $1 in
