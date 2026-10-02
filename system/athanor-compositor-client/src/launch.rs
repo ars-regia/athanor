@@ -295,7 +295,9 @@ impl Client {
             gio::AppInfo::default_for_type(&kind, false)
                 .ok_or_else(|| LaunchError::Missing(format!("an application for {kind}")))?
         } else {
-            let scheme = file.uri_scheme().unwrap_or_default();
+            // From the text: GIO's own answer for an https URL is "http" (gvfs' web backend
+            // serves both), which would pick the handler of the wrong scheme.
+            let scheme = glib::Uri::peek_scheme(uri).unwrap_or_default();
             gio::AppInfo::default_for_uri_scheme(&scheme)
                 .ok_or_else(|| LaunchError::Missing(format!("an application for {scheme}:")))?
         };
@@ -548,6 +550,13 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
+
+    #[test]
+    fn an_https_url_is_looked_up_by_its_own_scheme() {
+        assert_eq!(glib::Uri::peek_scheme("https://duckduckgo.com/?q=a").as_deref(), Some("https"));
+        assert_eq!(glib::Uri::peek_scheme("HTTPS://example.org").as_deref(), Some("https"));
+        assert_eq!(glib::Uri::peek_scheme("not a uri"), None);
+    }
 
     const FIELDS: Fields<'static> = Fields {
         name: "Text Editor",
