@@ -64,5 +64,36 @@ class CosmicCompTracking(unittest.TestCase):
                     self.assertEqual(bump.cosmic_comp_move(), {"old": "1.8.0-1.fc43", "new": "1.8.0-2.fc43"})
 
 
+def never(*_):
+    raise AssertionError("not expected to be called")
+
+
+class Independence(unittest.TestCase):
+    def run_main(self, *argv):
+        with mock.patch.object(sys, "argv", ["bump.py", *argv]):
+            bump.main()
+
+    def test_the_kernel_path_never_looks_up_cosmic_comp(self):
+        stub = {"changed": False, "pins": {}, "new": {}, "images": {}, "locks": {}, "notes": []}
+        with mock.patch.object(bump, "cosmic_comp_move", never), mock.patch.object(bump, "cosmic_comp_nvrs", never), mock.patch.object(bump, "compute", return_value=stub), mock.patch.object(sys, "stdout"):
+            self.run_main("check")
+
+    def test_a_cosmic_comp_failure_stays_in_its_own_run(self):
+        with mock.patch.object(bump, "cosmic_comp_nvrs", side_effect=OSError("bodhi down")), mock.patch.object(bump, "compute", never):
+            with self.assertRaises(OSError):
+                self.run_main("cosmic-comp", "check")
+
+    def test_the_cosmic_comp_path_never_runs_the_kernel_tracking(self):
+        move = {"old": "1.8.0-1.fc43", "new": "1.8.0-2.fc43"}
+        with mock.patch.object(bump, "cosmic_comp_move", return_value=move), mock.patch.object(bump, "compute", never), mock.patch.object(bump, "fedora_kernels", never):
+            with mock.patch.object(sys, "stdout"):
+                self.run_main("cosmic-comp", "check")
+
+    def test_the_body_names_the_change_and_the_review(self):
+        body = bump.cosmic_comp_body({"old": "1.8.0-1.fc43", "new": "1.8.0-2.fc43"})
+        self.assertIn("1.8.0-2.fc43", body)
+        self.assertIn("merged", body)
+
+
 if __name__ == "__main__":
     unittest.main()

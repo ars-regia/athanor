@@ -4,6 +4,7 @@
     bump.py check   prints to stdout a JSON with the current pins, the new ones and the notes
     bump.py apply   rewrites pins.env, the FROM lines of the Containerfiles and the pins
                     table of KERNEL.md; prints the PR body (Markdown) to stdout
+    bump.py cosmic-comp check|apply   the cosmic-comp tracking alone (below), its own PR
     bump.py verify  verifies only the NVIDIA locks at their pins against the repositories and
                     exits non-zero naming each lock that is stale or gone; the workflow runs it
                     while a bump PR is open, when check and apply do not run
@@ -15,7 +16,8 @@ one. Without a pair the kernel stays where it is and a note says so. With the pa
 head commit of CachyOS/kernel-patches for the series and the commit of
 linux-cachyos/config in force at the date of the CachyOS release move as well.
 cosmic-comp (forge/specs/cosmic-comp): the newest stable F43 build on Bodhi against the spec's
-Version and fedora_release; a difference rewrites the spec and the archive pin, never auto-merges.
+Version and fedora_release; a difference rewrites the spec and the archive pin. It runs on its own
+(`cosmic-comp-bump.yml`, its own branch and PR, never auto-merged), apart from the kernel bump.
 Outside the kernel: the NVIDIA versions (open from the GitHub tags, legacy from RPM Fusion)
 within the pinned branch, and the digest of the base image of the Containerfiles, the system
 base quay.io base-atomic in system/Containerfile included. Every run also verifies the NVIDIA
@@ -420,10 +422,8 @@ def compute():
         digest = image_digest(*ref.rsplit(":", 1))
         if digest != pinned:
             images[ref] = {"old": pinned, "new": digest}
-    cosmic_comp = cosmic_comp_move()
     return {
-        "changed": bool(new or images or locks or cosmic_comp),
-        "cosmic_comp": cosmic_comp,
+        "changed": bool(new or images or locks),
         "pins": pins,
         "new": new,
         "images": images,
@@ -451,8 +451,6 @@ def apply(result):
                 f"FROM {ref}@{change['old']}", f"FROM {ref}@{change['new']}"
             )
         cf.write_text(content, newline="\n")
-    if result["cosmic_comp"]:
-        apply_cosmic_comp(result["cosmic_comp"])
     for branch, version in result["locks"].items():
         lock_py("generate", branch, "--version", version)
     md, n = re.subn(
@@ -479,23 +477,38 @@ def body(result):
         f"| `system/nvidia/locks/{branch}.lock` | | regenerated at `{version}` |"
         for branch, version in result["locks"].items()
     ]
-    if result["cosmic_comp"]:
-        move = result["cosmic_comp"]
-        lines += [
-            f"| `cosmic-comp` | `{move['old']}` | `{move['new']}` |",
-            "",
-            "## cosmic-comp",
-            "",
-            "Fedora's stable F43 build moved. Check that `forge/specs/cosmic-comp/SOURCES/*.patch` "
-            "still applies (the DAG build fails when it does not) and whether upstream has merged "
-            "the fix; if so, drop `Patch0`.",
-        ]
     if result["notes"]:
         lines += ["", "## Notes", ""] + [f"- {n}" for n in result["notes"]]
     return "\n".join(lines) + "\n"
 
 
+def cosmic_comp_body(move):
+    return (
+        "## Pins\n\n| package | before | after |\n| --- | --- | --- |\n"
+        f"| `cosmic-comp` | `{move['old']}` | `{move['new']}` |\n\n"
+        "Fedora's stable F43 build moved. This PR rewrites `forge/specs/cosmic-comp/cosmic-comp.spec` "
+        "and `SOURCES/sources.sha256`; the patch is untouched. Please check whether upstream "
+        "(pop-os/cosmic-comp) has merged the layer-surface focus fix: if so, drop `Patch0` and the "
+        "patch file. If the patch no longer applies, the DAG build fails (`%autosetup -p1`) and the "
+        "patch needs a refresh. Never auto-merged.\n"
+    )
+
+
+def cosmic_comp_main(action):
+    """`bump.py cosmic-comp check|apply`: independent of the kernel bump, and the only caller of
+    the cosmic-comp lookup, so a failure here never reaches the kernel path and the reverse."""
+    move = cosmic_comp_move()
+    if action == "check":
+        print(json.dumps({"changed": bool(move), "move": move}, indent=2))
+        return
+    if move:
+        apply_cosmic_comp(move)
+        sys.stdout.write(cosmic_comp_body(move))
+
+
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == "cosmic-comp" and sys.argv[2] in ("check", "apply"):
+        return cosmic_comp_main(sys.argv[2])
     if len(sys.argv) != 2 or sys.argv[1] not in ("check", "apply", "verify"):
         sys.exit(__doc__)
     if sys.argv[1] == "verify":
