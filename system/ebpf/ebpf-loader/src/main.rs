@@ -10,6 +10,8 @@ use log::{info, warn};
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 use std::time::Duration;
+use tokio::io::unix::AsyncFd;
+use tokio::io::Interest;
 use tokio::signal;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum)]
@@ -70,8 +72,26 @@ async fn main() -> Result<(), anyhow::Error> {
         "../../target/bpfel-unknown-none/release/ebpf-core"
     ))?;
 
-    if let Err(e) = EbpfLogger::init(&mut bpf) {
-        warn!("Failed to initialize eBPF logger: {}", e);
+    // The logger owns the AYA_LOGS map: dropping it closes the map and breaks program loading.
+    match EbpfLogger::init(&mut bpf) {
+        Ok(logger) => {
+            let mut logger = AsyncFd::with_interest(logger, Interest::READABLE)
+                .context("Failed to register the eBPF logger with the runtime")?;
+            tokio::spawn(async move {
+                loop {
+                    let mut guard = match logger.readable_mut().await {
+                        Ok(guard) => guard,
+                        Err(e) => {
+                            warn!("eBPF logger stopped: {}", e);
+                            break;
+                        }
+                    };
+                    guard.get_inner_mut().flush();
+                    guard.clear_ready();
+                }
+            });
+        }
+        Err(e) => warn!("Failed to initialize eBPF logger: {}", e),
     }
 
     // Initialize eBPF Firewall Maps
