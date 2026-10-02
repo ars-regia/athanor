@@ -46,8 +46,8 @@
           zlib openssl curl spdlog systemd fmt speechd ncurses
           # libpulseaudio: athanor-bar audio (libpulse-binding) links libpulse-mainloop-glib.so.0 by soname
           gtk4 pango cairo graphene gdk-pixbuf gtk4-layer-shell glib libpulseaudio
-          # compositor niri (smithay): wayland, gbm/drm/egl, xkbcommon, libseat, libinput, pipewire, libdisplay-info
-          wayland wayland-protocols libgbm libdrm libglvnd libxkbcommon seatd libinput pipewire libdisplay-info-target
+          # compositors niri and cosmic-comp (smithay): wayland, pixman, gbm/drm/egl, xkbcommon, libseat, libinput, pipewire, libdisplay-info
+          wayland wayland-protocols libgbm libdrm libglvnd libxkbcommon seatd libinput pipewire libdisplay-info-target pixman
         ];
         system-lib-closure = pkgs.lib.closePropagation (map pkgs.lib.getDev system-libs);
         system-dev = map pkgs.lib.getDev system-lib-closure;

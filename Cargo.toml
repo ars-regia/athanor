@@ -13,6 +13,7 @@ members = [
   "forge/specs/athanor-shelld/athanor-shelld-1.0.0",
   "forge/specs/athanor-bar/athanor-bar-1.0.0",
   "forge/specs/athanor-dock/athanor-dock-1.0.0",
+  "forge/specs/athanor-launcher/athanor-launcher-1.0.0",
   "forge/specs/athanor-sysmon-ebpf/athanor-sysmon-ebpf-1.0.0",
   "forge/specs/athanor-update/athanor-update-1.0.0",
   "forge/specs/athanor-update/athanor-update-notify-1.0.0",
@@ -32,6 +33,9 @@ members = [
   "system/athanor-i18n",
   "system/athanor-init-oracle",
   "system/athanor-layout",
+  "system/athanor-preview",
+  "system/athanor-preview-render",
+  "system/athanor-search",
   "system/athanor-unit",
   "system/athanor-mesh-bus",
   "system/athanor-net-unikernel",
@@ -81,7 +85,16 @@ glib = "0.22.9"
 relm4 = "0.11.0"
 bitflags = "2"
 gdk4-wayland = { version = "0.11", features = ["wayland_crate"] }
+gio = "0.22"
 gio-unix = "0.22"
+tracker-rs = { version = "0.8", features = ["v3_1"] }
+nucleo-matcher = "0.3"
+# The preview's decoder (doc_launcher.md, LA6, LA9): glycin runs image loaders in
+# bubblewrap; poppler renders the first page of a PDF. Linked only by
+# athanor-preview-render.
+glycin = "4"
+poppler-rs = "0.26"
+cairo-rs = "0.22"
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 wayland-scanner = "0.31"

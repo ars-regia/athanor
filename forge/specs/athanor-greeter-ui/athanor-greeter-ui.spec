@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-greeter-ui
 Version:        1.0.0
-Release:        3%{?dist}
+Release:        4%{?dist}
 Summary:        The Athanor greeter
 License:        MIT
 
@@ -43,6 +43,12 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-greeter
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-greeter-ui.mo
 
 %changelog
+* Thu Sep 24 2026 Athanor Forge <forge@athanor.os> - 1.0.0-4
+- Grant the Landlock ruleset WriteFile on the NVIDIA driver's control, modeset and
+  per-GPU nodes, one rule per node. The proprietary EGL stack opens them read-write;
+  denied, it ran the setuid nvidia-modprobe, which SELinux refuses under no_new_privs,
+  and the greeter rendered without the GPU on the -nvidia variants.
+
 * Sat Sep 19 2026 Athanor Forge <forge@athanor.os> - 1.0.0-3
 - The greeter is drawn on the Calmo tokens (doc_shell.md, SH5): the generated GTK4
   stylesheet of the variant replaces the inline sheet, in light, dark and their

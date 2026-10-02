@@ -105,6 +105,7 @@ jq -r .encoded_jit_config "$RUNTIME/response" > "$RUNTIME/jitconfig"
 rm "$RUNTIME/response"
 
 qemu_pid=''
+balloon_pid=''
 guest_running() { [[ $qemu_pid ]] && kill -0 "$qemu_pid" 2> /dev/null; }
 
 stop_guest() { # ACPI power-off, then termination if the guest has not complied in time
@@ -125,6 +126,11 @@ cleanup() {
   # Runs as the EXIT trap under set -e: every fallible command here is guarded, or a
   # network hiccup at the end of a successful job would report the job as failed.
   stop_guest
+  # The regulator exits by itself once QEMU closes its socket; this covers a guest that
+  # never came up.
+  if [[ $balloon_pid ]] && kill -0 "$balloon_pid" 2> /dev/null; then
+    kill "$balloon_pid" 2> /dev/null || echo "runner $name ($id): balloon regulator already gone" >&2
+  fi
   rm -f "$RUNTIME/jitconfig"
   # GitHub removes a just-in-time runner after its job; one whose guest stopped before
   # taking a job stays registered and is removed here. The API being unreachable at this
@@ -155,7 +161,9 @@ qemu-system-x86_64 \
   -machine q35,accel=kvm -cpu host -smp "$VM_CPUS" -m "$VM_MEMORY" \
   -nodefaults -display none -no-reboot -serial "file:$LOGS/console.log" \
   -qmp "unix:$RUNTIME/qmp.sock,server=on,wait=off" \
+  -qmp "unix:$RUNTIME/balloon.sock,server=on,wait=off" \
   -device virtio-rng-pci \
+  -device virtio-balloon-pci,free-page-reporting=on,deflate-on-oom=on \
   -drive "if=none,id=system,format=qcow2,snapshot=on,file=$STATE/golden.qcow2" \
   -device virtio-blk-pci,drive=system,bootindex=0 \
   -drive "if=none,id=cache,format=raw,discard=unmap,file=$STATE/cache.raw" \
@@ -165,6 +173,13 @@ qemu-system-x86_64 \
   -netdev passt,id=net0 -device virtio-net-pci,netdev=net0 \
   -fw_cfg "name=opt/io.systemd.credentials/jitconfig,file=$RUNTIME/jitconfig" &
 qemu_pid=$!
+
+# The balloon regulator (balloon.py) has a QMP socket of its own, so stop_guest never
+# waits on it. It is not part of the job: if it fails, the job goes on and the reason
+# is in the journal.
+VM_MEMORY=$VM_MEMORY BALLOON_FLOOR=$BALLOON_FLOOR HOST_RESERVE=$HOST_RESERVE \
+  python3 "$HERE/balloon.py" "$RUNTIME/balloon.sock" &
+balloon_pid=$!
 
 # The guest may power itself off (the runner service exits after its job); the host does
 # not rely on it and ends the guest once the registration is gone. A GitHub outage never

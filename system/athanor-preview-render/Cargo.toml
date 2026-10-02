@@ -1,0 +1,12 @@
+[package]
+name = "athanor-preview-render"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+description = "Decodes one untrusted image or PDF from standard input into a bitmap, inside a sandboxed unit"
+
+[dependencies]
+cairo-rs = { workspace = true }
+glib = { workspace = true }
+glycin = { workspace = true }
+poppler-rs = { workspace = true }

@@ -1,0 +1,17 @@
+module athanor_nvidia_modules_load 1.0;
+
+require {
+    type systemd_modules_load_t;
+    class capability sys_admin;
+    class capability2 perfmon;
+}
+
+# systemd-modules-load inserts the NVIDIA driver (nvidia, nvidia_modeset, nvidia_drm,
+# nvidia_uvm) from /usr/lib/modules-load.d/10-nvidia.conf, and the modules' init code
+# runs in its context and probes CAP_PERFMON and CAP_SYS_ADMIN with capable(). The Fedora
+# policy denies both to systemd_modules_load_t; the driver treats the refusal as "not
+# privileged" and loads normally, so the only effect of the denial is a dozen AVC records
+# at every boot that bury real ones. The capabilities stay denied: this silences the
+# audit record and grants nothing.
+dontaudit systemd_modules_load_t self:capability sys_admin;
+dontaudit systemd_modules_load_t self:capability2 perfmon;
