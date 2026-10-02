@@ -138,8 +138,8 @@ fn argv(kind: Kind, side: u32, unit: &str) -> Vec<String> {
 
 /// The longest frame the helper may write: the header and a full 1024 × 1024 bitmap.
 const MAX_FRAME: usize = 13 + MAX_SIDE as usize * MAX_SIDE as usize * 4;
-/// How much of the helper's standard error is logged.
-const STDERR_LOG: usize = 512;
+/// How much of the helper's standard error is kept for the log: the last bytes it wrote.
+const STDERR_KEEP: usize = 4096;
 
 /// Names the units of this process: `athanor-preview-<pid>-<n>`.
 static UNITS: AtomicU64 = AtomicU64::new(0);
@@ -233,10 +233,14 @@ async fn systemctl_stop(name: &str, budget: Duration) -> Result<bool, String> {
 }
 
 /// What the helper wrote, read through a fixed buffer: a helper that was subverted cannot
-/// make the launcher hold more than one frame of the largest size. A failed helper's
-/// standard error is logged, a bounded prefix of it and cleaned.
+/// make the launcher hold more than one frame of the largest size. Its standard error is
+/// drained meanwhile, so a helper that writes much there cannot block on a full pipe; a
+/// failed helper's is logged, the last STDERR_KEEP bytes of it and cleaned.
 async fn collect(process: &gio::Subprocess) -> Result<Vec<u8>, RenderError> {
     let stdout = process.stdout_pipe().ok_or(RenderError::Malformed("no output"))?;
+    let said = process
+        .stderr_pipe()
+        .map(|stderr| glib::MainContext::ref_thread_default().spawn_local(drain(stderr)));
     let (mut buffer, read, error) = stdout
         .read_all_future(vec![0_u8; MAX_FRAME + 1], glib::Priority::DEFAULT)
         .await
@@ -250,10 +254,9 @@ async fn collect(process: &gio::Subprocess) -> Result<Vec<u8>, RenderError> {
     buffer.truncate(read);
     process.wait_future().await.map_err(RenderError::Spawn)?;
     if !process.is_successful() {
-        if let Some(stderr) = process.stderr_pipe() {
-            if let Ok((bytes, read, _)) = stderr.read_all_future(vec![0_u8; STDERR_LOG], glib::Priority::DEFAULT).await {
-                let said = String::from_utf8_lossy(&bytes[..read.min(STDERR_LOG)]);
-                tracing::warn!("the decoder said: {}", line(&said, STDERR_LOG));
+        if let Some(handle) = said {
+            if let Ok(bytes) = handle.await {
+                tracing::warn!("the decoder said: {}", line(&String::from_utf8_lossy(&bytes), STDERR_KEEP));
             }
         }
         // -1: systemd-run itself was killed by a signal.
@@ -261,6 +264,29 @@ async fn collect(process: &gio::Subprocess) -> Result<Vec<u8>, RenderError> {
         return Err(RenderError::Failed(status));
     }
     Ok(buffer)
+}
+
+/// Reads `stderr` to its end and returns the last STDERR_KEEP bytes.
+async fn drain(stderr: gio::InputStream) -> Vec<u8> {
+    let mut kept = Vec::with_capacity(2 * STDERR_KEEP);
+    let mut chunk = vec![0_u8; STDERR_KEEP];
+    loop {
+        match stderr.read_future(chunk, glib::Priority::DEFAULT).await {
+            Ok((_, 0)) => break,
+            Ok((buffer, read)) => {
+                kept.extend_from_slice(&buffer[..read]);
+                if kept.len() > STDERR_KEEP {
+                    kept.drain(..kept.len() - STDERR_KEEP);
+                }
+                chunk = buffer;
+            }
+            Err((_, err)) => {
+                tracing::warn!("the decoder's standard error could not be read: {err}");
+                break;
+            }
+        }
+    }
+    kept
 }
 
 /// The size and pixels of an ATPV1 frame, or why it is refused.
@@ -305,6 +331,33 @@ mod tests {
             }
             assert!(argv.iter().any(|a| a.starts_with("TasksMax=")), "{kind:?} has no task cap");
         }
+    }
+
+    fn helper(script: &str) -> gio::Subprocess {
+        gio::Subprocess::newv(
+            &["sh", "-c", script].map(std::ffi::OsStr::new),
+            gio::SubprocessFlags::STDOUT_PIPE | gio::SubprocessFlags::STDERR_PIPE,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_helper_that_floods_its_standard_error_cannot_block() {
+        glib::MainContext::default().block_on(async {
+            // 1 MiB on standard error before the frame: far more than a pipe holds.
+            let flood = "head -c 1048576 /dev/zero | tr '\\0' x >&2";
+            let answer = glib::future_with_timeout(Duration::from_secs(10), collect(&helper(&format!("{flood}; printf frame"))))
+                .await
+                .expect("the read did not block");
+            assert_eq!(answer.unwrap(), b"frame");
+            let failed = glib::future_with_timeout(Duration::from_secs(10), collect(&helper(&format!("{flood}; printf end >&2; exit 3"))))
+                .await
+                .expect("the read did not block");
+            assert!(matches!(failed, Err(RenderError::Failed(3))));
+            let kept = drain(helper(&format!("{flood}; printf end >&2")).stderr_pipe().unwrap()).await;
+            assert_eq!(kept.len(), STDERR_KEEP);
+            assert!(kept.ends_with(b"xxend"), "the last bytes are kept");
+        });
     }
 
     #[test]
