@@ -247,6 +247,8 @@ impl Launcher {
         let weak = Rc::downgrade(self);
         self.list.connect_row_selected(move |_, _| {
             if let Some(launcher) = weak.upgrade() {
+                // The menu belongs to the row it opened on: Enter must never run its choice for another.
+                launcher.close_menu();
                 launcher.schedule_preview();
             }
         });
