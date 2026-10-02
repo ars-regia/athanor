@@ -1,4 +1,4 @@
-From cfa12e30d5899a74bef5526b8a7c1765460ffeab Mon Sep 17 00:00:00 2001
+From fa487678b806076b39a582b1a9f16d619e8cc619 Mon Sep 17 00:00:00 2001
 From: Ermete Architect <esenese@proton.me>
 Date: Fri, 2 Oct 2026 10:05:49 +0200
 Subject: [PATCH] shell/focus: Reconcile focus when a layer surface changes
@@ -24,11 +24,11 @@ mapped layer surface changes its keyboard interactivity, so the change
 takes effect at once rather than on the next throttled refresh.
 ---
  src/shell/focus/mod.rs             |  7 +++++--
- src/wayland/handlers/compositor.rs | 29 ++++++++++++++++++++++++++---
- 2 files changed, 31 insertions(+), 5 deletions(-)
+ src/wayland/handlers/compositor.rs | 32 +++++++++++++++++++++++++++---
+ 2 files changed, 34 insertions(+), 5 deletions(-)
 
 diff --git a/src/shell/focus/mod.rs b/src/shell/focus/mod.rs
-index f631372e6193..bfb0c17c65f0 100644
+index f631372..bfb0c17 100644
 --- a/src/shell/focus/mod.rs
 +++ b/src/shell/focus/mod.rs
 @@ -572,7 +572,8 @@ impl Common {
@@ -53,7 +53,7 @@ index f631372e6193..bfb0c17c65f0 100644
          KeyboardFocusTarget::Group(WindowGroup { node, .. }) => shell
              .workspaces
 diff --git a/src/wayland/handlers/compositor.rs b/src/wayland/handlers/compositor.rs
-index ed40448b1b87..e7809cc4160e 100644
+index ed40448..439b323 100644
 --- a/src/wayland/handlers/compositor.rs
 +++ b/src/wayland/handlers/compositor.rs
 @@ -23,7 +23,7 @@ use smithay::{
@@ -74,7 +74,7 @@ index ed40448b1b87..e7809cc4160e 100644
  
  fn toplevel_ensure_initial_configure(
      toplevel: &ToplevelSurface,
-@@ -369,14 +369,37 @@ impl CompositorHandler for State {
+@@ -369,14 +369,39 @@ impl CompositorHandler for State {
              .cloned();
  
          if let Some(output) = layer_output {
@@ -99,17 +99,30 @@ index ed40448b1b87..e7809cc4160e 100644
      }
  }
  
-+/// The keyboard interactivity a layer surface had at its previous commit.
++/// The keyboard interactivity a layer surface had at its previous commit. It starts from the
++/// state the surface maps with, so the first commit after the map compares against the real
++/// value.
 +struct LastKeyboardInteractivity(Cell<KeyboardInteractivity>);
 +
 +fn keyboard_interactivity_changed(layer: &LayerSurface) -> bool {
 +    let current = layer.cached_state().keyboard_interactivity;
 +    let last = layer
 +        .user_data()
-+        .get_or_insert(|| LastKeyboardInteractivity(Cell::new(KeyboardInteractivity::None)));
++        .get_or_insert(|| LastKeyboardInteractivity(Cell::new(current)));
 +    last.0.replace(current) != current
 +}
 +
  impl State {
      fn send_initial_configure_and_map(&mut self, surface: &WlSurface) -> bool {
          let mut shell = self.common.shell.write();
+@@ -426,6 +451,7 @@ impl State {
+         {
+             // compute initial dimensions by mapping
+             if let Some(target) = shell.map_layer(&layer_surface) {
++                keyboard_interactivity_changed(&layer_surface); // seeds the value it maps with
+                 let seat = shell.seats.last_active().clone();
+                 std::mem::drop(shell);
+                 Shell::set_focus(self, Some(&target), &seat, None, false);
+-- 
+2.55.0
+
