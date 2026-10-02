@@ -12,7 +12,6 @@ import bump  # noqa: E402
 
 SPEC = """%global fedora_release 1.fc43
 %global commit a55785993e8ef6aad38862cb1a9e1ccaad3c340d
-%global commitdatestring 2026-09-09 15:54:44 +0200
 
 Name:           cosmic-comp
 Version:        1.8.0
@@ -41,11 +40,10 @@ class CosmicCompTracking(unittest.TestCase):
         self.assertEqual(bump.cosmic_comp_pin(SPEC), "1.8.0-1.fc43")
 
     def test_a_bump_rewrites_the_spec_and_resets_the_suffix(self):
-        got = bump.cosmic_comp_spec(SPEC, "1.9.0-2.fc43", "b" * 40, "2026-10-01 10:00:00 +0000")
+        got = bump.cosmic_comp_spec(SPEC, "1.9.0-2.fc43", "b" * 40)
         self.assertEqual(bump.cosmic_comp_pin(got), "1.9.0-2.fc43")
         self.assertIn("Release:        %{fedora_release}.athanor1\n", got)
         self.assertIn("%global commit " + "b" * 40, got)
-        self.assertIn("%global commitdatestring 2026-10-01 10:00:00 +0000", got)
 
     def test_nothing_to_do_when_the_spec_already_has_the_newest(self):
         with mock.patch.object(bump, "cosmic_comp_nvrs", return_value=updates("cosmic-comp-1.8.0-1.fc43")):

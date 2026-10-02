@@ -222,7 +222,7 @@ def cosmic_comp_pin(spec):
     return f"{version.group(1)}-{release.group(1)}"
 
 
-def cosmic_comp_spec(spec, nvr, commit, date):
+def cosmic_comp_spec(spec, nvr, commit):
     """The spec rewritten for Fedora's build NVR: the Athanor suffix starts again at 1."""
     version, release = COSMIC_COMP_RE.match(f"cosmic-comp-{nvr}").groups()
     for pattern, value in (
@@ -230,7 +230,6 @@ def cosmic_comp_spec(spec, nvr, commit, date):
         (r"^(%global fedora_release ).*$", rf"\g<1>{release}.fc43"),
         (r"^(Release:\s*%\{fedora_release\}\.athanor).*$", r"\g<1>1"),
         (r"^(%global commit ).*$", rf"\g<1>{commit}"),
-        (r"^(%global commitdatestring ).*$", rf"\g<1>{date}"),
     ):
         spec, n = re.subn(pattern, value, spec, flags=re.M)
         if n != 1:
@@ -250,8 +249,7 @@ def apply_cosmic_comp(move):
     (%autosetup -p1) fails when it no longer applies, and a reviewer decides if upstream has it."""
     version = move["new"].split("-")[0]
     tag = github_commit(f"epoch-{version}")
-    date = tag["commit"]["committer"]["date"].replace("T", " ").replace("Z", " +0000")
-    COSMIC_COMP_SPEC.write_text(cosmic_comp_spec(COSMIC_COMP_SPEC.read_text(), move["new"], tag["sha"], date), newline="\n")
+    COSMIC_COMP_SPEC.write_text(cosmic_comp_spec(COSMIC_COMP_SPEC.read_text(), move["new"], tag["sha"]), newline="\n")
     archive = http(f"https://github.com/pop-os/cosmic-comp/archive/epoch-{version}/cosmic-comp-{version}.tar.gz")[1]
     (COSMIC_COMP_DIR / "SOURCES" / "sources.sha256").write_text(f"{hashlib.sha256(archive).hexdigest()}  cosmic-comp-{version}.tar.gz\n", newline="\n")
 

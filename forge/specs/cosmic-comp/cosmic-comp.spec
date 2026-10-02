@@ -3,9 +3,8 @@
 # Fedora's, so that 1.8.0-1.fc43.athanor1 sorts above 1.8.0-1.fc43 and below 1.8.0-2.fc43: the
 # Nix builder defines no %dist.
 %global fedora_release 1.fc43
-# Upstream's tag epoch-%{version}; the build metadata vergen reads, as Fedora's spec sets it.
+# The commit of upstream's tag epoch-%{version}: build.rs embeds it as GIT_HASH.
 %global commit a55785993e8ef6aad38862cb1a9e1ccaad3c340d
-%global commitdatestring 2026-09-09 15:54:44 +0200
 %global cosmic_minver 1.8.0
 
 Name:           cosmic-comp
@@ -22,8 +21,8 @@ Patch0:         0001-shell-focus-Reconcile-focus-when-a-layer-surface-cha.patch
 
 BuildRequires:  cargo rust
 
-Requires:       libseat
-Requires:       libwayland-server
+Requires:       libseat%{?_isa}
+Requires:       libwayland-server%{?_isa}
 Requires:       xorg-x11-server-Xwayland
 Requires:       cosmic-icon-theme >= %{cosmic_minver}
 
@@ -37,9 +36,15 @@ changes its keyboard interactivity. Athanor's launcher needs it.
 
 %build
 %set_build_flags
-export VERGEN_GIT_COMMIT_DATE="date --utc '%{commitdatestring}'"
-export VERGEN_GIT_SHA="%{commit}"
-export GIT_HASH="%{commit}"
+# build.rs embeds the output of `git rev-parse HEAD` and ignores GIT_HASH: inside an unrelated
+# checkout it would record that checkout's commit, outside one an empty string. A stub git
+# that prints the tag's commit makes the build independent of where it runs.
+mkdir -p .athanor-bin
+printf '#!/bin/sh\necho %{commit}\n' > .athanor-bin/git
+chmod +x .athanor-bin/git
+export PATH="$PWD/.athanor-bin:$PATH"
+# The release profile of Cargo.toml (fat LTO), not Fedora's rpm profile: the builder has no
+# cargo-rpm-macros (%cargo_build), and rpmbuild runs with --nodeps.
 cargo build --release --locked
 
 %install
