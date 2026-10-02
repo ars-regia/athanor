@@ -1,4 +1,0 @@
-# The snapshots of /var/home live in a subvolume of their own, so that a snapshot of
-# /var/home never contains the earlier ones. `v` creates a btrfs subvolume (a plain
-# directory on any other filesystem, which athanor-backup then refuses to use).
-v /var/home/.snapshots 0700 root root -

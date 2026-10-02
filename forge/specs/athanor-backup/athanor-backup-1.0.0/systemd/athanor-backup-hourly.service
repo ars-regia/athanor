@@ -1,12 +1,13 @@
 [Unit]
 Description=Athanor OS hourly snapshot of /var/home
 Documentation=man:btrfs-subvolume(8)
-# The snapshot directory is a btrfs subvolume created by tmpfiles.d (athanor-backup.conf).
-After=systemd-tmpfiles-setup.service
 RequiresMountsFor=/var/home
 
 [Service]
 Type=oneshot
+# The snapshot subvolume is created here, with full privileges and outside the mount
+# namespace below ("+"): the home root is read-only to every other command of this unit.
+ExecStartPre=+/usr/bin/athanor-backup init
 ExecStart=/usr/bin/athanor-backup create
 ExecStart=/usr/bin/athanor-backup prune
 CPUWeight=50

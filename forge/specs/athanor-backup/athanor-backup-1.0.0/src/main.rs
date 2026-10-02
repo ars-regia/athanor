@@ -2,7 +2,7 @@
 //! and restoring a file or directory from one into its owner's home.
 //!
 //! Every snapshot is the whole `/var/home` subvolume, taken read-only into the
-//! `/var/home/.snapshots` subvolume (root, 0700; created by tmpfiles.d), and named after
+//! `/var/home/.snapshots` subvolume (root, 0700; created by `init`), and named after
 //! its UTC creation time. A snapshot shares its blocks with the live home until files
 //! change, so it protects against deletion and overwriting, not against a failed disk.
 //! A restore never touches the live files: it copies from the snapshot into
@@ -15,9 +15,9 @@ use chrono::{NaiveDateTime, Utc};
 use nix::fcntl::{openat2, OFlag, OpenHow, ResolveFlag};
 use nix::sys::stat::fstatat;
 use std::ffi::{OsStr, OsString};
-use std::fs::{self, File};
+use std::fs::{self, File, Permissions};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, ExitCode};
 
@@ -30,7 +30,7 @@ const ID_FORMAT: &str = "%Y%m%dT%H%M%SZ";
 /// The inode number of the root directory of every btrfs subvolume.
 const BTRFS_SUBVOLUME_ROOT_INO: u64 = 256;
 
-const USAGE: &str = "usage: athanor-backup create | prune | list | restore <snapshot> <path>";
+const USAGE: &str = "usage: athanor-backup init | create | prune | list | restore <snapshot> <path>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -47,7 +47,7 @@ fn run(args: &[String]) -> Result<()> {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     if !matches!(
         args.as_slice(),
-        ["create" | "prune" | "list"] | ["restore", _, _]
+        ["init" | "create" | "prune" | "list"] | ["restore", _, _]
     ) {
         bail!("{USAGE}");
     }
@@ -58,12 +58,37 @@ fn run(args: &[String]) -> Result<()> {
         );
     }
     match args.as_slice() {
+        ["init"] => init(),
         ["create"] => create(),
         ["prune"] => prune(),
         ["list"] => list(),
         ["restore", id, path] => restore(id, Path::new(path)),
         _ => bail!("{USAGE}"),
     }
+}
+
+/// Creates the snapshot subvolume if it is missing, and makes it root's alone.
+///
+/// tmpfiles.d cannot do this: its `v` line creates a subvolume only when `/` is one
+/// itself, and the root of a composefs image is an overlay, so it would leave a plain
+/// directory that `create` refuses.
+fn init() -> Result<()> {
+    ensure_subvolume(Path::new(HOME_ROOT))?;
+    let dir = Path::new(SNAPSHOT_DIR);
+    match fs::symlink_metadata(dir) {
+        Ok(_) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            btrfs(&[
+                OsStr::new("subvolume"),
+                OsStr::new("create"),
+                dir.as_os_str(),
+            ])?;
+        }
+        Err(err) => return Err(err).with_context(|| format!("cannot inspect {SNAPSHOT_DIR}")),
+    }
+    ensure_subvolume(dir)?;
+    fs::set_permissions(dir, Permissions::from_mode(0o700))
+        .with_context(|| format!("cannot restrict {SNAPSHOT_DIR} to root"))
 }
 
 /// Takes a read-only snapshot of `/var/home`.
@@ -86,12 +111,8 @@ fn create() -> Result<()> {
 /// Deletes the snapshots [`retention::keep`] does not keep.
 fn prune() -> Result<()> {
     let snapshots = snapshots()?;
-    let times: Vec<_> = snapshots.iter().map(|(time, _)| *time).collect();
     let mut failed = Vec::new();
-    for ((_, id), keep) in snapshots.iter().zip(retention::keep(&times)) {
-        if keep {
-            continue;
-        }
+    for id in prunable(&snapshots, Utc::now().naive_utc()) {
         let path = Path::new(SNAPSHOT_DIR).join(id);
         match btrfs(&[
             OsStr::new("subvolume"),
@@ -101,7 +122,7 @@ fn prune() -> Result<()> {
             Ok(()) => println!("deleted {id}"),
             Err(err) => {
                 eprintln!("athanor-backup: {err:#}");
-                failed.push(id.as_str());
+                failed.push(id);
             }
         }
     }
@@ -109,6 +130,22 @@ fn prune() -> Result<()> {
         bail!("could not delete {}", failed.join(", "));
     }
     Ok(())
+}
+
+/// The names of the snapshots, given newest first, that a prune at `now` deletes.
+///
+/// A snapshot dated after `now` was taken while the clock ran ahead. It is neither
+/// deleted nor counted: counted, it would hold the newest hour, day and week of the
+/// retention for good and push the real snapshots out. Once the clock passes its date
+/// it is an ordinary snapshot again.
+fn prunable(snapshots: &[(NaiveDateTime, String)], now: NaiveDateTime) -> Vec<&str> {
+    let past: Vec<_> = snapshots.iter().filter(|(time, _)| *time <= now).collect();
+    let times: Vec<_> = past.iter().map(|(time, _)| *time).collect();
+    past.iter()
+        .zip(retention::keep(&times))
+        .filter(|(_, keep)| !keep)
+        .map(|((_, id), _)| id.as_str())
+        .collect()
 }
 
 fn list() -> Result<()> {
@@ -341,6 +378,23 @@ mod tests {
                 "{name} must not be a snapshot name"
             );
         }
+    }
+
+    #[test]
+    fn a_prune_deletes_the_older_snapshot_of_an_hour_and_ignores_future_ones() {
+        let snapshots: Vec<_> = [
+            "20270101T000000Z",
+            "20260924T081500Z",
+            "20260924T080000Z",
+        ]
+        .into_iter()
+        .map(|id| (parse_id(id).expect("valid name"), id.to_owned()))
+        .collect();
+        let now = parse_id("20260924T090000Z").expect("valid name");
+        assert_eq!(prunable(&snapshots, now), ["20260924T080000Z"]);
+        // Once the clock reaches its date it counts like any other and is still kept.
+        let later = parse_id("20270101T000000Z").expect("valid name");
+        assert_eq!(prunable(&snapshots, later), ["20260924T080000Z"]);
     }
 
     #[test]

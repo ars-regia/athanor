@@ -2,7 +2,7 @@
 %global crate_dir forge/specs/%{name}/%{name}-%{version}
 Name:           athanor-backup
 Version:        1.0.0
-Release:        5%{?dist}
+Release:        6%{?dist}
 Summary:        Hourly btrfs snapshots of /var/home with retention and restore
 
 License:        MIT
@@ -31,15 +31,20 @@ cargo build --release --locked -p %{name}
 install -D -m 0755 target/release/athanor-backup %{buildroot}/usr/bin/athanor-backup
 install -D -m 0644 %{crate_dir}/systemd/athanor-backup-hourly.timer %{buildroot}/usr/lib/systemd/system/athanor-backup-hourly.timer
 install -D -m 0644 %{crate_dir}/systemd/athanor-backup-hourly.service %{buildroot}/usr/lib/systemd/system/athanor-backup-hourly.service
-install -D -m 0644 %{crate_dir}/systemd/athanor-backup.tmpfiles %{buildroot}/usr/lib/tmpfiles.d/athanor-backup.conf
 
 %files
 /usr/bin/athanor-backup
 /usr/lib/systemd/system/athanor-backup-hourly.timer
 /usr/lib/systemd/system/athanor-backup-hourly.service
-/usr/lib/tmpfiles.d/athanor-backup.conf
 
 %changelog
+* Fri Oct 02 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
+- Create the snapshot subvolume from the hourly unit (`athanor-backup init`) instead
+  of tmpfiles.d: a `v` line yields a plain directory when / is not a btrfs subvolume,
+  which is the case on a composefs image, and every snapshot would have been refused.
+- Prune neither deletes nor counts a snapshot dated in the future, so one taken with
+  a wrong clock cannot hold the newest retention slots for good.
+
 * Thu Sep 24 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
 - Rewrite for btrfs, the filesystem the image installs: the bcachefs ioctls never
   applied, the daemon ran as root with ProtectHome=yes and snapshotted /root, its
