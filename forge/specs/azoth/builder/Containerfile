@@ -7,11 +7,12 @@
 # toolchain.lock: the tools of the build and the BuildRequires of the pinned spec, which
 # build.sh then only checks with `dnf builddep` with every repository disabled. The same
 # RPMs at every build, so the same pins give the same kernel. lock.sh generate rewrites
-# the lock when this base or the pinned SRPM change.
+# the lock when this base or the pinned SRPM change. Build context: forge/specs/azoth.
 FROM registry.fedoraproject.org/fedora:43@sha256:4d9424ff89c5e182c782d0419bf41b6e71d55f30d586ae3c60c837a52ae39c64
 
 # No weak dependencies and no cache: the image stays minimal.
 RUN printf 'install_weak_deps=False\nkeepcache=False\n' >> /etc/dnf/dnf.conf
 
-COPY lock.sh toolchain.lock /usr/local/share/azoth/
-RUN bash /usr/local/share/azoth/lock.sh install
+COPY lock.sh /usr/local/share/azoth/
+COPY builder/toolchain.lock /usr/local/share/azoth/toolchain.lock
+RUN bash /usr/local/share/azoth/lock.sh install /usr/local/share/azoth/toolchain.lock

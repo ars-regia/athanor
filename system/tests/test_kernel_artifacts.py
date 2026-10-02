@@ -737,7 +737,7 @@ class CheckPlan(Repo):
     def test_kernel_pin_files_match_the_bump_workflow(self):
         """The kernel group of kernel-bump.yml regenerates exactly KERNEL_PIN_FILES (O7, O8):
         its bump-pins artifact plus the files of the bump-prep artifact (the two manifests and
-        the toolchain lock), so the copy cannot drift from what check-plan trusts to recognize
+        the package locks), so the copy cannot drift from what check-plan trusts to recognize
         a pure pin bump. system/Containerfile is the system group's, in a PR of its own."""
         script = SCRIPT.read_text()
         nvidia_line = re.search(r"^NVIDIA_PIN_FILES=\(.*\)$", script, re.M).group(0)

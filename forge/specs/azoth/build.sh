@@ -113,8 +113,8 @@ if [[ $STAGE == manifest ]]; then
   exit 0
 fi
 
-step "toolchain (builder/toolchain.lock)"
-bash "$HERE/builder/lock.sh" check
+step "package locks (lock.sh check)"
+bash "$HERE/lock.sh" check builder
 
 step "hashes (SOURCES/sources.sha256)"
 (cd "$CACHE" && sha256sum --check --quiet --strict "$HERE/SOURCES/sources.sha256")
@@ -309,7 +309,7 @@ g diff --binary "$FEDORA" "$(g write-tree)" -- . ':!.github' > "$SRC/linux-kerne
 # this is a check, and a spec whose BuildRequires the lock does not cover stops here.
 step "BuildRequires of kernel.spec (builder/toolchain.lock)"
 dnf -y builddep --disablerepo='*' "${DEFINES[@]}" "$TOP/SPECS/kernel.spec" \
-  || die "BuildRequires outside builder/toolchain.lock: run builder/lock.sh generate"
+  || die "BuildRequires outside builder/toolchain.lock: run lock.sh generate"
 
 # --- config -------------------------------------------------------------------------
 

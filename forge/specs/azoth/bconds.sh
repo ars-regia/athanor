@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# The kernel.spec build conditions, sourced by build.sh and by builder/lock.sh: the same
+# The kernel.spec build conditions, sourced by build.sh and by lock.sh: the same
 # choices for dnf builddep (--define), for rpmbuild (--with/--without) and for the
 # BuildRequires the builder's toolchain lock resolves.
 # clang_lto stays on even with LTO off in kernel-local: it is the only bcond through

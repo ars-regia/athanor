@@ -60,8 +60,9 @@ Directory `forge/specs/azoth/` dopo il blocco:
 | `cmdline`                | riga di comando del kernel, firmata nella UKI (sezione 6)                                                                                                                                                                                                                        |
 | `boot.sh`, `boot/`       | la boot matrix (sezione 7, gate 3): ambiente QEMU/OVMF/shim pinnato come il builder, PID 1 dell'initramfs di prova con le asserzioni                                                                                                                                             |
 | `builder/Containerfile`  | ambiente Fedora 43 (esiste già), base pinnata per digest                                                                                                                                                                                                                         |
-| `builder/toolchain.lock` | gli RPM installati sopra la base del builder, per sha256: strumenti e BuildRequires dello spec pinnato (sezione 5)                                                                                                                                                               |
-| `builder/lock.sh`        | rigenera il lock (`generate`) e lo installa da koji nel Containerfile (`install`)                                                                                                                                                                                                |
+| `builder/toolchain.lock` | gli RPM installati sopra la base del builder, per sha256: strumenti e BuildRequires dello spec pinnato (sezione 5)                                                                                                                                                              |
+| `*/*.packages`, `*/*.lock` | per ogni stadio degli ambienti `boot/` e `nvidia/` (`boot/schbench`, `boot/toolchain`, `nvidia/toolchain`), i pacchetti e il loro lock per sha256 (sezione 5)                                                                                                                  |
+| `lock.sh`                | rigenera i lock (`generate`), li controlla (`check`) e li installa da koji nei Containerfile (`install`)                                                                                                                                                                        |
 | `bconds.sh`              | i bcond di kernel.spec, gli stessi per `dnf builddep`, `rpmbuild` e il lock                                                                                                                                                                                                      |
 | `build.sh`               | l'intera build, riproducibile in locale e in CI                                                                                                                                                                                                                                  |
 | `build-inputs.py`        | gli input che cambiano gli RPM come JSON: predicato dell'attestazione dei pin e chiave del riuso (sezione 7)                                                                                                                                                                     |
@@ -249,7 +250,7 @@ da kconfig. Non serve uno script Athanor.
 clang, lld e llvm di Fedora 43 dal Containerfile, con la base
 `registry.fedoraproject.org/fedora:43@sha256:…` pinnata per digest e aggiornata
 dal bot. Tutto ciò che il builder installa sopra la base è in
-`builder/toolchain.lock`, per nome di file e sha256: gli strumenti di `lock.sh`, le
+`builder/toolchain.lock`, per nome di file e sha256: gli strumenti di `builder/toolchain.packages`, le
 BuildRequires di kernel.spec con i bcond di `bconds.sh` e i pacchetti della base che
 aggiornano. `lock.sh install` li scarica da koji, che tiene ogni build (i mirror
 tengono solo l'ultima), ricuce l'header di firma che koji conserva in
@@ -257,11 +258,18 @@ tengono solo l'ultima), ricuce l'header di firma che koji conserva in
 installa con ogni repository spento; il lock fa parte degli input del riuso
 (`build-inputs.py`). La chiave è quella della release della base, qualunque sia la
 release del SRPM pinnato. Lo rigenera `lock.sh generate`, in un container nudo della
-base, solo quando cambiano la base, `FEDORA_KERNEL_NVR`, gli strumenti di `lock.sh` o
+base, solo quando cambiano la base, `FEDORA_KERNEL_NVR`, gli strumenti di `toolchain.packages` o
 `bconds.sh` (le righe di intestazione del lock); `generate --force` per portare
 avanti la toolchain a pin fermi. `build.sh` lo controlla con `lock.sh check` prima di
 ogni stadio tranne `manifest`: un lock che non corrisponde a quegli input, o un
-builder costruito da un altro lock, ferma la build. Senza lock la toolchain seguiva i repository del giorno: il 2026-10-01 il
+builder costruito da un altro lock, ferma la build. Lo stesso vale per gli ambienti
+`boot/` e `nvidia/`: ogni stadio dei loro Containerfile ha la sua lista di pacchetti
+`<stadio>.packages` e il suo lock `<stadio>.lock` (`boot/schbench`, `boot/toolchain`,
+`nvidia/toolchain`), senza SRPM né bcond nell'intestazione; `lock.sh check` li
+controlla tutti, quindi un lock di `boot/` o `nvidia/` vecchio ferma anche la build del
+kernel. I tre Containerfile si costruiscono con contesto `forge/specs/azoth`
+(`podman build -f <ambiente>/Containerfile forge/specs/azoth`), perché `lock.sh` è
+condiviso. Senza lock la toolchain seguiva i repository del giorno: il 2026-10-01 il
 job `repro` ha trovato `CONFIG_PAHOLE_VERSION` 130 nell'OCI pubblicato e 132 nella
 ricostruzione dello stesso pin. `LLVM=1` arriva dal bcond dello spec (`clang_make_opts`). Rust acceso come
 in Fedora: in 7.1 `RUST` dipende da `!RANDSTRUCT` e, con `DEBUG_INFO_BTF` acceso
@@ -426,12 +434,12 @@ dei pacchetti, mai auto-merge). Il gruppo kernel ha tre job:
    è un prep rosso, mai un'accettazione silenziosa), patch applicate,
    derivazione del config e gate di `kernel-local`. L'esito e le opzioni
    derivate (`listnewconfig` con i valori CachyOS) vanno nel corpo della PR,
-   verde o rosso. Prima del builder, `builder/lock.sh generate` riscrive il lock
-   della toolchain se la base del builder o il SRPM pinnato si sono spostati: una
-   PR di soli pin NVIDIA o CachyOS lo lascia com'è. Se prep si ferma con `refresh needed`, l'esito è `REFRESH`.
+   verde o rosso. Prima del builder, `lock.sh generate` riscrive i lock degli
+   ambienti i cui input si sono spostati (la base per tutti, il SRPM pinnato per il
+   builder): una PR di soli pin NVIDIA o CachyOS li lascia come sono. Se prep si ferma con `refresh needed`, l'esito è `REFRESH`.
 3. **pr** (runner GitHub-hosted, con il PAT `KERNEL_BUMP_TOKEN`: le PR aperte
    con il `GITHUB_TOKEN` non fanno partire i check): branch `bump/kernel-<data>`,
-   un commit con `pins.env`, i manifesti, i Containerfile, il lock della toolchain
+   un commit con `pins.env`, i manifesti, i Containerfile, i lock degli ambienti
    e `KERNEL.md`, PR
    verso il branch da cui il bot è partito, con nel corpo la tabella prima/dopo
    dei pin, le note, l'esito di prep e le opzioni derivate; con prep verde
@@ -679,7 +687,9 @@ task_struct`.
    (docs/architecture/doc_system_image.md).
 8. (2026-10-02) Toolchain del builder bloccata per NVR: `builder/toolchain.lock` fissa
    per sha256 ogni RPM sopra la base, e si rigenera con il SRPM pinnato o la base
-   (sezione 5), perché la stessa coppia di pin dia lo stesso kernel. Gli ambienti
-   `boot/` e `nvidia/` installano ancora dai repository del giorno.
+   (sezione 5), perché la stessa coppia di pin dia lo stesso kernel. (2026-10-03)
+   Bloccati allo stesso modo gli ambienti `boot/` e `nvidia/`, un lock per stadio. Resta
+   fuori il tarball di schbench, scaricato dall'archivio GitHub del commit pinnato ma
+   non controllato per hash.
 
 | `bump.py` | il bot di bump (sezione 8), in due gruppi: kernel (pin nuovi da Bodhi, CachyOS, NVIDIA e registro; riscrive `pins.env`, i `FROM` del kernel e `KERNEL.md`) e system (`system/Containerfile` e i lock NVIDIA ripubblicati) |

@@ -1,0 +1,11 @@
+# The tools of the kernel build; kernel.spec brings the rest through its BuildRequires,
+# which lock.sh resolves with the build conditions of bconds.sh into the same lock.
+# LLVM toolchain (clang, lld), RPM tools and the dnf5 builddep plugin, rust and bindgen
+# for CONFIG_RUST, dwarves (pahole) for the BTF, gnupg2 for the source signatures,
+# python3 for Fedora's merge.py, python3-koji to restitch the SRPM signature.
+rpm-build dnf5-plugins python3-koji
+clang lld llvm
+gcc gcc-c++ make flex bison bc patch diffutils findutils
+ncurses-devel elfutils-libelf-devel elfutils-devel openssl-devel openssl dwarves
+rust cargo rustfmt bindgen-cli
+tar cpio xz curl git gnupg2 python3
