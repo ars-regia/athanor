@@ -10,8 +10,8 @@ After=graphical-session-pre.target
 Wants=xdg-desktop-autostart.target
 Before=xdg-desktop-autostart.target
 
-# The desktop itself, pulled in from here rather than enabled by a preset: a user with
-# no state of their own gets the same desktop as everyone else. A target is ordered
+# COSMIC's own services are pulled in from here; our shell (athanor-bar, athanor-dock,
+# athanor-shelld) is enabled by user presets, so a user can mask it. A target is ordered
 # after the units it wants, so this one is active once the desktop units are up;
 # it is not ordered before graphical-session.target, which the units come after, as
 # that would be a cycle. athanor-desktop starts this target once the compositor has a
@@ -20,7 +20,5 @@ Before=xdg-desktop-autostart.target
 # and the desktop units below are ordered after it.
 Requires=athanor-desktop.service
 After=athanor-desktop.service
-# cosmic-panel.service is the notification daemon too: the panel and cosmic-notifications
-# share a socket pair, which only a common parent can give them, so one unit starts both.
-Wants=athanor-skel-sync.service cosmic-panel.service cosmic-bg.service
+Wants=athanor-skel-sync.service cosmic-bg.service
 Wants=cosmic-settings-daemon.service cosmic-osd.service

@@ -1,0 +1,3 @@
+# doc_bar.md, BR8: the shell starts with every user's session. A user opts out with
+# `systemctl --user mask athanor-bar.service`.
+enable athanor-bar.service

@@ -1,0 +1,635 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the athanor-bar package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: athanor-bar\n"
+"Report-Msgid-Bugs-To: forge@athanor.os\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=CHARSET\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: ../../../../system/athanor-apps/src/openers.rs:19
+msgid "Launcher"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/openers.rs:20
+msgid "Applications"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/openers.rs:21
+msgid "Workspaces"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:88
+msgid "Running applications"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:202
+#: ../../../../system/athanor-apps/src/row.rs:640
+#: ../../../../system/athanor-apps/src/row.rs:642 src/ui/notifications.rs:632
+msgid "Unknown application"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:218
+#, rust-format
+msgid "{app}: {title}"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:224
+#, rust-format
+msgid "{app} ({count} windows)"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:251
+msgid "Running"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:479
+msgid "Untitled window"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:487
+#, rust-format
+msgid "Minimise {title}"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:491 src/ui/notifications.rs:758
+#, rust-format
+msgid "Close {title}"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:518
+msgid "Open"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:520
+msgid "New Window"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:587
+#, rust-format
+msgid "{name} could not start"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:588
+msgid "The reason is in the system journal."
+msgstr ""
+
+#: src/ui/accessibility.rs:35
+msgid "Greyscale"
+msgstr ""
+
+#: src/ui/accessibility.rs:36
+msgid "Red-green (protanopia)"
+msgstr ""
+
+#: src/ui/accessibility.rs:37
+msgid "Green-red (deuteranopia)"
+msgstr ""
+
+#: src/ui/accessibility.rs:38
+msgid "Blue-yellow (tritanopia)"
+msgstr ""
+
+#: src/ui/accessibility.rs:39
+msgid "No colour filter"
+msgstr ""
+
+#: src/ui/accessibility.rs:159
+msgid "Accessibility"
+msgstr ""
+
+#: src/ui/accessibility.rs:160
+msgid "High contrast"
+msgstr ""
+
+#: src/ui/accessibility.rs:161
+msgid "Screen reader"
+msgstr ""
+
+#: src/ui/accessibility.rs:162
+msgid "Magnifier"
+msgstr ""
+
+#: src/ui/accessibility.rs:163
+msgid "Invert colours"
+msgstr ""
+
+#: src/ui/accessibility.rs:167
+msgid "Colour filter"
+msgstr ""
+
+#: src/ui/audio.rs:517
+#, rust-format
+msgid "{device}, in use"
+msgstr ""
+
+#: src/ui/audio.rs:558
+msgid "Sound"
+msgstr ""
+
+#: src/ui/audio.rs:562
+msgid "Output"
+msgstr ""
+
+#: src/ui/audio.rs:563
+msgid "Output volume"
+msgstr ""
+
+#: src/ui/audio.rs:564
+msgid "Mute output"
+msgstr ""
+
+#: src/ui/audio.rs:568
+msgid "Input"
+msgstr ""
+
+#: src/ui/audio.rs:569
+msgid "Input volume"
+msgstr ""
+
+#: src/ui/audio.rs:570
+msgid "Mute microphone"
+msgstr ""
+
+#: src/ui/audio.rs:581
+msgid "Previous track"
+msgstr ""
+
+#: src/ui/audio.rs:582 src/ui/audio.rs:693
+msgid "Pause"
+msgstr ""
+
+#: src/ui/audio.rs:583
+msgid "Next track"
+msgstr ""
+
+#: src/ui/audio.rs:695
+msgid "Play"
+msgstr ""
+
+#: src/ui/battery.rs:199
+#, rust-format
+msgid "{percent} %"
+msgstr ""
+
+#: src/ui/battery.rs:217
+#, rust-format
+msgid "{hours} h {minutes} min left"
+msgstr ""
+
+#: src/ui/battery.rs:220
+#, rust-format
+msgid "{hours} h {minutes} min until full"
+msgstr ""
+
+#: src/ui/battery.rs:222
+msgid "Charging"
+msgstr ""
+
+#: src/ui/battery.rs:223
+msgid "Fully charged"
+msgstr ""
+
+#: src/ui/battery.rs:230
+msgid "Power saver"
+msgstr ""
+
+#: src/ui/battery.rs:231
+msgid "Performance"
+msgstr ""
+
+#: src/ui/battery.rs:232
+msgid "Balanced"
+msgstr ""
+
+#: src/ui/battery.rs:259
+msgid "Battery"
+msgstr ""
+
+#: src/ui/battery.rs:269
+msgid "Power mode"
+msgstr ""
+
+#: src/ui/battery.rs:287
+msgid "Screen brightness"
+msgstr ""
+
+#: src/ui/bluetooth.rs:680 src/ui/bluetooth.rs:683
+msgid "Bluetooth"
+msgstr ""
+
+#: src/ui/bluetooth.rs:686
+msgid "Nearby devices"
+msgstr ""
+
+#: src/ui/bluetooth.rs:708 src/ui/network.rs:594 src/ui/power.rs:110
+#: src/ui/shield.rs:538
+msgid "Cancel"
+msgstr ""
+
+#: src/ui/bluetooth.rs:710
+msgid "Pair"
+msgstr ""
+
+#: src/ui/bluetooth.rs:841
+#, rust-format
+msgid "{device}, connected"
+msgstr ""
+
+#: src/ui/bluetooth.rs:878
+#, rust-format
+msgid "Pair with {device}?"
+msgstr ""
+
+#: src/ui/bluetooth.rs:881
+#, rust-format
+msgid "Pair only if {device} shows the same number."
+msgstr ""
+
+#: src/ui/bluetooth.rs:894
+#, rust-format
+msgid "Pairing with {device}"
+msgstr ""
+
+#: src/ui/bluetooth.rs:897
+#, rust-format
+msgid "Type this code on {device}, then press Enter there."
+msgstr ""
+
+#. TRANSLATORS: a g_date_time_format() pattern for the clock on the bar.
+#: src/ui/clock.rs:83
+msgid "%a %-d %b %H:%M"
+msgstr ""
+
+#. TRANSLATORS: a g_date_time_format() pattern, read aloud by screen readers.
+#: src/ui/clock.rs:85
+msgid "%A %-d %B %Y, %H:%M"
+msgstr ""
+
+#. TRANSLATORS: a g_date_time_format() pattern for the clock on the bar (12-hour clock).
+#: src/ui/clock.rs:90
+msgid "%a %-d %b %-I:%M %p"
+msgstr ""
+
+#. TRANSLATORS: a g_date_time_format() pattern, read aloud by screen readers (12-hour clock).
+#: src/ui/clock.rs:92
+msgid "%A %-d %B %Y, %-I:%M %p"
+msgstr ""
+
+#: src/ui/clock.rs:127
+msgid "Clock"
+msgstr ""
+
+#: src/ui/input.rs:41
+#, rust-format
+msgid "Input source: {name}"
+msgstr ""
+
+#: src/ui/input.rs:86
+msgid "Input source"
+msgstr ""
+
+#: src/ui/mod.rs:672
+msgid "Unpin from Bar"
+msgstr ""
+
+#: src/ui/mod.rs:674
+msgid "Pin to Bar"
+msgstr ""
+
+#: src/ui/network.rs:552 src/ui/network.rs:555
+msgid "Network"
+msgstr ""
+
+#: src/ui/network.rs:561
+msgid "Wi-Fi"
+msgstr ""
+
+#: src/ui/network.rs:570
+msgid "Airplane mode"
+msgstr ""
+
+#: src/ui/network.rs:587
+msgid "The password was not accepted. Try again."
+msgstr ""
+
+#: src/ui/network.rs:596
+msgid "Connect"
+msgstr ""
+
+#: src/ui/network.rs:710
+msgid "Wired: connected"
+msgstr ""
+
+#: src/ui/network.rs:711
+msgid "Wired: not connected"
+msgstr ""
+
+#: src/ui/network.rs:755
+#, rust-format
+msgid "{network}, connected"
+msgstr ""
+
+#: src/ui/network.rs:756
+#, rust-format
+msgid "{network}, connecting"
+msgstr ""
+
+#: src/ui/network.rs:757
+#, rust-format
+msgid "{network}, needs Settings"
+msgstr ""
+
+#: src/ui/network.rs:759
+#, rust-format
+msgid "{network}, secured"
+msgstr ""
+
+#: src/ui/network.rs:790
+#, rust-format
+msgid "Password for {network}"
+msgstr ""
+
+#: src/ui/notifications.rs:874
+#, rust-format
+msgid "Notifications, {count} waiting"
+msgstr ""
+
+#: src/ui/notifications.rs:879 src/ui/notifications.rs:912
+#: src/ui/notifications.rs:915
+msgid "Notifications"
+msgstr ""
+
+#: src/ui/notifications.rs:919
+msgid "Clear all"
+msgstr ""
+
+#: src/ui/notifications.rs:924
+msgid "No notifications"
+msgstr ""
+
+#: src/ui/notifications.rs:934
+msgid "Do not disturb"
+msgstr ""
+
+#: src/ui/popup.rs:29
+msgid "The action did not complete."
+msgstr ""
+
+#: src/ui/power.rs:39
+msgid "Lock"
+msgstr ""
+
+#: src/ui/power.rs:39
+msgid "Lock the screen?"
+msgstr ""
+
+#: src/ui/power.rs:40
+msgid "Log Out"
+msgstr ""
+
+#: src/ui/power.rs:40
+msgid "Log out now?"
+msgstr ""
+
+#: src/ui/power.rs:41
+msgid "Suspend"
+msgstr ""
+
+#: src/ui/power.rs:41
+msgid "Suspend now?"
+msgstr ""
+
+#: src/ui/power.rs:42
+msgid "Restart"
+msgstr ""
+
+#: src/ui/power.rs:42
+msgid "Restart now?"
+msgstr ""
+
+#: src/ui/power.rs:43
+msgid "Shut Down"
+msgstr ""
+
+#: src/ui/power.rs:43
+msgid "Shut down now?"
+msgstr ""
+
+#: src/ui/power.rs:103
+msgid "Power"
+msgstr ""
+
+#: src/ui/power.rs:149 src/ui/power.rs:155 src/ui/shield.rs:524
+#: src/ui/shield.rs:560
+msgid "Restart to update"
+msgstr ""
+
+#: src/ui/power.rs:154 src/ui/shield.rs:559
+msgid "Restart and install the update now?"
+msgstr ""
+
+#: src/ui/shield.rs:296
+msgid "System image verified"
+msgstr ""
+
+#: src/ui/shield.rs:297
+msgid "Not verified yet"
+msgstr ""
+
+#: src/ui/shield.rs:298
+msgid "Update refused"
+msgstr ""
+
+#: src/ui/shield.rs:304
+msgid "Signed with a key of the policy in force"
+msgstr ""
+
+#: src/ui/shield.rs:305
+msgid "Not verified: installed from media"
+msgstr ""
+
+#: src/ui/shield.rs:306
+msgid "Not verified: no signature"
+msgstr ""
+
+#: src/ui/shield.rs:307
+msgid "Not verified: its key is not in the policy"
+msgstr ""
+
+#: src/ui/shield.rs:308
+msgid "Not verified: fetched under a permissive policy"
+msgstr ""
+
+#: src/ui/shield.rs:309
+msgid "Not verified: the image is outside the policy's scope"
+msgstr ""
+
+#: src/ui/shield.rs:315
+msgid "Up to date"
+msgstr ""
+
+#: src/ui/shield.rs:316
+msgid "An update is available; it downloads at the next check"
+msgstr ""
+
+#: src/ui/shield.rs:317
+msgid "An update is ready; it installs when you restart"
+msgstr ""
+
+#: src/ui/shield.rs:318
+msgid "The update installs at the next restart"
+msgstr ""
+
+#: src/ui/shield.rs:319
+msgid "The last update was refused by the policy"
+msgstr ""
+
+#: src/ui/shield.rs:321
+msgid "You went back from the newest version; only a newer one is offered"
+msgstr ""
+
+#: src/ui/shield.rs:323
+msgid "This version is older than one this machine has run"
+msgstr ""
+
+#: src/ui/shield.rs:330
+msgid "The last check failed: network error"
+msgstr ""
+
+#: src/ui/shield.rs:331
+msgid "The last check failed: registry error"
+msgstr ""
+
+#: src/ui/shield.rs:332
+msgid "The last check failed: refused by the policy"
+msgstr ""
+
+#: src/ui/shield.rs:333
+msgid "The last check failed: storage error"
+msgstr ""
+
+#: src/ui/shield.rs:334
+msgid "The last check failed: internal error"
+msgstr ""
+
+#: src/ui/shield.rs:340
+msgid "No trust state yet: the first check has not run"
+msgstr ""
+
+#: src/ui/shield.rs:342
+msgid "The trust state file is not owned by the system and was ignored"
+msgstr ""
+
+#: src/ui/shield.rs:344
+msgid "The trust state file could not be read"
+msgstr ""
+
+#: src/ui/shield.rs:345 src/ui/shield.rs:359
+msgid "The update service did not answer"
+msgstr ""
+
+#: src/ui/shield.rs:351
+msgid "Not authorised"
+msgstr ""
+
+#: src/ui/shield.rs:352
+msgid "Another update request is running"
+msgstr ""
+
+#: src/ui/shield.rs:354
+msgid "Nothing is downloaded yet; the update downloads at the next check"
+msgstr ""
+
+#: src/ui/shield.rs:356
+msgid "There is no previous version to go back to"
+msgstr ""
+
+#: src/ui/shield.rs:357
+msgid "A program is blocking the restart; close it and try again"
+msgstr ""
+
+#: src/ui/shield.rs:358
+msgid "The request failed; the system journal says why"
+msgstr ""
+
+#: src/ui/shield.rs:420
+#, rust-format
+msgid "Version {version}"
+msgstr ""
+
+#: src/ui/shield.rs:425
+#, rust-format
+msgid "Built on {date}"
+msgstr ""
+
+#: src/ui/shield.rs:431
+#, rust-format
+msgid "Last checked on {date}"
+msgstr ""
+
+#: src/ui/shield.rs:432
+msgid "Never checked"
+msgstr ""
+
+#: src/ui/shield.rs:438
+#, rust-format
+msgid "Host: {host}"
+msgstr ""
+
+#: src/ui/shield.rs:442
+msgid "Signature policy in force"
+msgstr ""
+
+#: src/ui/shield.rs:444
+msgid "Signature policy not in force"
+msgstr ""
+
+#: src/ui/shield.rs:447
+msgid "The policy is the one Athanor ships"
+msgstr ""
+
+#: src/ui/shield.rs:449
+msgid "The policy was changed on this machine"
+msgstr ""
+
+#: src/ui/shield.rs:452
+msgid "Secure Boot on"
+msgstr ""
+
+#: src/ui/shield.rs:454
+msgid "Secure Boot off: this machine runs in the declared degraded mode"
+msgstr ""
+
+#: src/ui/shield.rs:526
+msgid "Go back to the previous version"
+msgstr ""
+
+#: src/ui/shield.rs:565
+msgid "Go back to the previous version and restart? This asks for an administrator's password."
+msgstr ""
+
+#: src/ui/shield.rs:566
+msgid "Go back"
+msgstr ""
+
+#: src/ui/tiling.rs:64
+msgid "Tiling"
+msgstr ""
+
+#: src/ui/tiling.rs:65
+msgid "Tile windows"
+msgstr ""
+
+#: src/ui/tray.rs:589
+msgid "System tray"
+msgstr ""

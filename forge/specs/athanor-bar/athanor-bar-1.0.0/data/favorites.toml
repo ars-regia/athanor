@@ -1,0 +1,9 @@
+# The favourites of a new user (doc_bar.md, BR7), used only when COSMIC has none to import.
+# An entry that is not installed is not shown.
+schema = 1
+favorites = [
+  "com.system76.CosmicFiles.desktop",
+  "com.system76.CosmicTerm.desktop",
+  "com.system76.CosmicEdit.desktop",
+  "com.system76.CosmicSettings.desktop",
+]

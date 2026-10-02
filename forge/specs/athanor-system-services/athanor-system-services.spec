@@ -1,16 +1,16 @@
 %global debug_package %{nil}
 Name:           athanor-system-services
 Version:        1.0.1
-Release:        23%{?dist}
+Release:        24%{?dist}
 Summary:        Athanor OS athanor-system-services
 License:        MIT
 URL:            https://github.com/hr-mes/athanor-forge
 BuildArch:      noarch
 Requires:       systemd
-# athanor-cosmic-panel, the notification socket pair's parent, is a Python script.
-Requires:       python3
-Requires:       cosmic-panel cosmic-applets cosmic-bg
-Requires:       cosmic-settings-daemon cosmic-notifications cosmic-osd
+Requires:       cosmic-bg
+Requires:       cosmic-settings-daemon cosmic-osd
+# The shell of the session since the switch of stage 2; the session is not usable without it.
+Requires:       athanor-bar athanor-dock athanor-shelld
 Requires:       wayland-utils
 
 %description
@@ -26,21 +26,22 @@ Provides the session target, the COSMIC desktop units it gathers, and skeleton s
 mkdir -p %{buildroot}/usr/share/athanor-system-services
 mkdir -p %{buildroot}/usr/lib/systemd/user
 cp -a %{_sourcedir}/usr/lib/systemd/user/* %{buildroot}/usr/lib/systemd/user/
-mkdir -p %{buildroot}/usr/bin
-install -m 0755 %{_sourcedir}/usr/bin/athanor-cosmic-panel %{buildroot}/usr/bin/athanor-cosmic-panel
 
 %files
 %dir /usr/share/athanor-system-services
 /usr/lib/systemd/user/athanor-session.target
 /usr/lib/systemd/user/athanor-desktop.service
 /usr/lib/systemd/user/athanor-skel-sync.service
-/usr/lib/systemd/user/cosmic-panel.service
 /usr/lib/systemd/user/cosmic-bg.service
 /usr/lib/systemd/user/cosmic-settings-daemon.service
 /usr/lib/systemd/user/cosmic-osd.service
-%attr(0755,root,root) /usr/bin/athanor-cosmic-panel
 
 %changelog
+* Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.1-24
+- Stage 2 switch: cosmic-panel, cosmic-applets and cosmic-notifications leave the session;
+  the bar, the dock and athanor-shelld take their place. The athanor-cosmic-panel wrapper
+  and cosmic-panel.service are gone, and with them the need for python3.
+
 * Fri Sep 18 2026 Athanor Forge <forge@athanor.os> - 1.0.1-23
 - Measure the notification daemon's failure window on CLOCK_BOOTTIME. time.monotonic()
   stops while the machine is suspended, so four exits, a laptop shut for the night and one

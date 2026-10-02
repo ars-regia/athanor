@@ -6,7 +6,10 @@ Requisite=athanor-desktop.service
 PartOf=graphical-session.target
 
 [Service]
-# See cosmic-panel.service for the GL client settings (W^X, mincore).
+# W^X cannot hold for a GL client: Mesa JIT-compiles shaders on the CPU wherever there
+# is no GPU driver (llvmpipe, the case of every VM); acceptance run 34524538068 saw every
+# start of a GL client segfault at the first JIT'd function with it on. mincore is the
+# one call Mesa's allocator adds to @system-service.
 MemoryDenyWriteExecute=no
 MemoryHigh=256M
 MemoryMax=384M

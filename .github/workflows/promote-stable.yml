@@ -1,0 +1,43 @@
+name: Promote a system image run to stable
+
+# Manual, by decision D1 of docs/architecture/doc_update_trust.md: users follow :stable,
+# :latest stays for testing. The logic is system/promote.sh; no signing key is involved.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Run id of the Orchestrator run whose three system images become stable"
+        required: true
+        type: string
+
+concurrency:
+  group: promote-stable
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  lint:
+    uses: ./.github/workflows/call-lint.yml
+
+  promote:
+    name: Point stable at the run
+    needs: [lint]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Log in to the registry
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          REGISTRY_HOST: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
+        run: echo "${GITHUB_TOKEN}" | skopeo login "${REGISTRY_HOST}" -u "${GITHUB_ACTOR}" --password-stdin
+      - name: Promote (system/promote.sh)
+        env:
+          RUN_ID: ${{ inputs.run_id }}
+          REGISTRY: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}
+        run: bash system/promote.sh "${RUN_ID}" | tee -a "${GITHUB_STEP_SUMMARY}"

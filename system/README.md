@@ -56,11 +56,10 @@ The `system/` directory hosts the core daemons managing system execution, hardwa
 
 In addition to core system daemons, `system/` hosts native Pure Rust subsystems replacing legacy C components:
 
-1. **`athanor-compositor` ([`system/athanor-compositor`](file:///var/home/athanor/GEMINI/athanor/system/athanor-compositor))**: Pure Rust Wayland Compositor powered by Smithay (DRM/KMS, Udev, EGL) with a dynamic window tiling engine.
-2. **`Systemd Monitor` ([`system/Systemd Monitor`](file:///var/home/athanor/GEMINI/athanor/system/Systemd Monitor))**: Asynchronous Tokio & Zbus systemd init supervisor that monitors unit lifecycle and auto-heals failing services.
-3. **`PipeWire/WirePlumber` ([`system/PipeWire/WirePlumber`](file:///var/home/athanor/GEMINI/athanor/system/PipeWire/WirePlumber))**: Pure Rust real-time PipeWire session manager and audio stream router.
-4. **`athanor-greeter` ([`system/athanor-greeter`](file:///var/home/athanor/GEMINI/athanor/system/athanor-greeter))**: Zero-Trust TPM 2.0 key release & hardware attestation display manager with `ZeroizeOnDrop` memory protection.
-5. **`xdg-desktop-portal-athanor` ([`forge/specs/athanor-xdg-desktop-portal-athanor`](file:///var/home/athanor/GEMINI/athanor/forge/specs/athanor-xdg-desktop-portal-athanor/xdg-desktop-portal-athanor-1.0.0))**: Native Rust Zbus 4.4 async desktop portal implementation for SLSA Level 4 Flatpak sandboxes.
+1. **`Systemd Monitor` ([`system/Systemd Monitor`](file:///var/home/athanor/GEMINI/athanor/system/Systemd Monitor))**: Asynchronous Tokio & Zbus systemd init supervisor that monitors unit lifecycle and auto-heals failing services.
+2. **`PipeWire/WirePlumber` ([`system/PipeWire/WirePlumber`](file:///var/home/athanor/GEMINI/athanor/system/PipeWire/WirePlumber))**: Pure Rust real-time PipeWire session manager and audio stream router.
+3. **`athanor-greeter` ([`system/athanor-greeter`](file:///var/home/athanor/GEMINI/athanor/system/athanor-greeter))**: Zero-Trust TPM 2.0 key release & hardware attestation display manager with `ZeroizeOnDrop` memory protection.
+4. **`xdg-desktop-portal-athanor` ([`forge/specs/athanor-xdg-desktop-portal-athanor`](file:///var/home/athanor/GEMINI/athanor/forge/specs/athanor-xdg-desktop-portal-athanor/xdg-desktop-portal-athanor-1.0.0))**: Native Rust Zbus 4.4 async desktop portal implementation for SLSA Level 4 Flatpak sandboxes.
 
 ---
 

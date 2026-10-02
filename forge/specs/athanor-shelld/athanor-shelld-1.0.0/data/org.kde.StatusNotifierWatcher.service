@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=org.kde.StatusNotifierWatcher
+Exec=/bin/false
+SystemdService=athanor-shelld.service

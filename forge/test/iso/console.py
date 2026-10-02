@@ -293,7 +293,10 @@ GREETER_PASSWORD_KEYS = tuple(GUEST_PASSWORD.decode())
 # about one by one: `systemctl is-active` given several names answers yes when any one
 # of them is, and a desktop with the panel crashed out of it is exactly the failure this
 # is for. The names that are down go into the answer, so a dead session says what died.
-SESSION_UNITS = b"athanor-session.target cosmic-panel.service cosmic-bg.service"
+SESSION_UNITS = (
+    b"athanor-session.target athanor-bar.service athanor-dock.service athanor-shelld.service"
+    b" cosmic-bg.service"
+)
 SESSION_PROBE = (
     b"for i in $(seq 60); do"
     b' s=$(loginctl list-sessions --no-legend 2>/dev/null | awk \'$3=="collaudo" && $4=="seat0"{print $1; exit}\');'
@@ -314,7 +317,8 @@ SESSION_DIAGNOSTICS = (
     b"loginctl list-sessions --no-pager",
     b"systemctl --user list-units --failed --no-pager",
     b"systemctl --user status athanor-session.target athanor-desktop.service"
-    b" cosmic-panel.service cosmic-bg.service --no-pager -l | head -60",
+    b" athanor-bar.service athanor-dock.service athanor-shelld.service cosmic-bg.service"
+    b" --no-pager -l | head -60",
     # The compositor's own words, and the greeter's before them, under the tags the
     # session scripts log them with.
     b"journalctl -b --no-pager -t athanor-session -t athanor-greeter --since '-300s'"

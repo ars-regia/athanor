@@ -93,11 +93,17 @@ A mismatch is a build failure with the exact values, never a warning.
 
 - **Hashes:** the SHA-256 of each RPM is recorded in a manifest, `system/nvidia/locks/<branch>.lock`, one per driver branch (`open`, `legacy`), and the build verifies it before installation. A branch can also lock companion packages whose version does not follow the driver's, such as negativo17's `nvidia-driver-selinux` that `nvidia-kmod-common` requires whenever `selinux-policy-targeted` is installed: they are locked at the newest release the repository publishes, under the same hash and repository rules.
 - **Signatures:** `gpgcheck` stays on, with the negativo17 and RPM Fusion keys vendored in the repository. Package signatures are checked. negativo17 does not sign its repository metadata, which the manifest compensates for.
+- **Mirror:** the vendor repositories keep only their newest builds, so every locked RPM is also kept in our OCI registry, in `$KERNEL_REGISTRY/athanor-nvidia-rpms`:
+  - `system/nvidia/mirror.sh` pushes each RPM as a blob whose digest is the SHA-256 the manifest records, so the manifest is the mirror's index. The tag is `<branch>-<version>-<manifest hash>`, so a relock never retags what an older manifest names. Nothing is pushed when the mirror already holds every locked RPM.
+  - The build (`lock.py fetch`) reads each RPM from the mirror anonymously, by digest, and from the manifest's URL when the mirror lacks it. The hash and signature checks are the same whichever source served the file.
+  - The package allows anonymous pulls, and the ghcr janitor never prunes it.
 - **Bumps:**
   - the bump bot regenerates the manifests whenever an `NVIDIA_*` pin moves, and on every run verifies each manifest against the repository metadata, regenerating it when the repository republishes the pinned version with other files or checksums;
   - `NVIDIA_OPEN_VERSION` moves only to a version that both `NVIDIA/open-gpu-kernel-modules` and negativo17 publish;
   - `NVIDIA_LEGACY_VERSION` moves to the newest version of its branch that RPM Fusion publishes;
-  - a bump that moves the system base or a manifest never merges by itself: System Image Check and a human review decide.
+  - a bump that moves the system base or a manifest never merges by itself: System Image Check and a human review decide;
+  - while a bump PR is open, the bot opens no other one, but it still verifies both manifests on every run (`bump.py verify`) and fails, naming the open PR, when one must be regenerated;
+  - every run mirrors both manifests, whether or not a bump PR is open.
 
 **S8. Build, publication and installation.**
 
@@ -123,10 +129,11 @@ A mismatch is a build failure with the exact values, never a warning.
 ## 4. Risks
 
 - **negativo17 has a single maintainer and keeps only a few versions.**
-  - The manifest makes a disappearance visible as a failing build.
-  - The fallback is to extract firmware and userspace from NVIDIA's `.run` of the pinned version ourselves. `nvidia.sh` already downloads it for the legacy branch.
+  - The mirror (S7) keeps every locked RPM, so a disappearance no longer breaks the build. It fails the bot's daily run instead, until the manifest is regenerated or the pin moves.
+  - A package negativo17 drops before the bot mirrors it is still lost. The bot mirrors on every daily run and right after it regenerates a manifest, which leaves a window of about one day.
+  - The last-resort fallback is to extract firmware and userspace from NVIDIA's `.run` of the pinned version ourselves. `nvidia.sh` already downloads it for the legacy branch.
 - **RPM Fusion keeps only the latest release.**
-  - `updates/43` publishes only the newest NVR of each package, so a pin that RPM Fusion has moved past fails the build until the pin is bumped. The bump bot verifies the lock on every daily run and moves the pin or regenerates the lock by pull request.
+  - `updates/43` publishes only the newest NVR of each package. The mirror (S7) keeps the pinned NVR building after RPM Fusion moves past it, and the bump bot verifies the lock on every daily run and moves the pin or regenerates the lock by pull request.
   - When 580 becomes a legacy series, RPM Fusion renames the packages (`xorg-x11-drv-nvidia-580xx*`). That needs a change to the package list in `lock.py`, not only a version bump.
 - **CI cost:** three image builds per cycle instead of one. The shared stages are cached layers, so only the GPU layer and the UKI assembly are paid three times.
 - **Flatpak applications** need the NVIDIA GL runtime extension matching the host driver version (`org.freedesktop.Platform.GL.nvidia-<version>`). flatpak installs it when the host driver is present; the hardware check covers it.
@@ -163,7 +170,12 @@ These defects were found on the same boot and each needs its own fix:
 2. **Once the variant is published:** `sudo rpm-ostree kargs --delete=modprobe.blacklist=nvidia,nvidia_drm,nvidia_modeset,nvidia_uvm,nvidia_peermem` and `sudo bootc switch ghcr.io/hr-mes/athanor-system-nvidia:latest`, then a reboot at the maintainer's choice.
 3. The checks of section 6, item 3.
 
-## 8. Changes owed by other documents
+## 8. Version and signatures
+
+- **Version.** `system/build-image.sh` labels every image with `org.opencontainers.image.version`, `<base major>.<UTC build date>.<serial>`, and `org.opencontainers.image.created`. The serial is the CI run number in the pipeline and `0` in a local build. Ordering uses the build time, never the version string (`doc_update_trust.md`, UT9).
+- **Signatures.** The three images carry two signatures. The keyless Sigstore signature and SBOM attestation (`forge/scripts/sign_attest.sh`) record provenance. The key-based signature, made by `system/sign-images.sh` in the `sign-system-images` job, is what machines verify: the policy rendered from the public keys under `system/keys` is in force in the image (`/etc/containers/policy.json` links to it), and the job verifies each signature through that policy before it reports success (`doc_update_trust.md`, UT2 and UT3).
+
+## 9. Changes owed by other documents
 
 - **`doc_kernel_build.md` section 10:** the variant names become `athanor-system-nvidia` and `athanor-system-nvidia-legacy`. The modules still come from `nvidia-kmod.yml`; the userspace and firmware come from S4 and S5. Section 13 records this decision.
 - **`doc_kernel_profile.md`:** "NVIDIA parameters and dracut configuration … apply only where an NVIDIA GPU is detected" becomes "… apply only in the NVIDIA image variants (doc_system_image.md, S4 and S5)". Section 14's note on `athanor-base-config` shipping NVIDIA configuration to every machine is resolved by S4.

@@ -27,8 +27,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      - name: Log in to the registry (the janitor reads the signature indexes)
+        env:
+          GH_TOKEN: ${{ secrets.FORGE_PAT }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          REGISTRY_HOST: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
+        run: echo "${GH_TOKEN}" | skopeo login "${REGISTRY_HOST}" -u "${GITHUB_ACTOR}" --password-stdin
+
       - name: Prune the container packages (clean_ghcr.sh)
         env:
           GH_TOKEN: ${{ secrets.FORGE_PAT }}
           OWNER: ${{ github.repository_owner }}
+          REGISTRY_HOST: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
         run: bash forge/scripts/clean_ghcr.sh "$OWNER"

@@ -1,0 +1,6 @@
+# The vendor layer of the Athanor layout (doc_shell.md, SH6). Replaced on update; an
+# administrator sets policy in /etc/athanor/layout/, a user in ~/.config/athanor/layout.toml.
+schema = 1
+
+[output."*"]
+preset = "float"

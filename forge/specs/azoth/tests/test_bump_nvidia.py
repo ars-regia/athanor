@@ -88,6 +88,31 @@ class NvidiaAvailability(unittest.TestCase):
         self.assertIn(AZOTH.parents[2] / "system" / "Containerfile", bump.CONTAINERFILES)
 
 
+
+class LockProblems(unittest.TestCase):
+    PINS = {"NVIDIA_OPEN_VERSION": "615.71.09", "NVIDIA_LEGACY_VERSION": "580.178.04"}
+
+    def test_matching_locks_have_no_problem(self):
+        self.assertEqual(bump.lock_problems(self.PINS, verify=lambda branch, version: "ok"), [])
+
+    def test_a_stale_lock_is_named_with_its_version(self):
+        states = {"open": "stale", "legacy": "ok"}
+        got = bump.lock_problems(self.PINS, verify=lambda branch, version: states[branch])
+        self.assertEqual(len(got), 1)
+        self.assertIn("NVIDIA open 615.71.09", got[0])
+        self.assertIn("regenerated", got[0])
+
+    def test_a_vanished_version_is_named_too(self):
+        got = bump.lock_problems(self.PINS, verify=lambda branch, version: "gone" if branch == "legacy" else "ok")
+        self.assertEqual(len(got), 1)
+        self.assertIn("NVIDIA legacy 580.178.04", got[0])
+        self.assertIn("no longer publishes", got[0])
+
+    def test_each_branch_is_verified_at_its_own_pin(self):
+        seen = []
+        bump.lock_problems(self.PINS, verify=lambda branch, version: seen.append((branch, version)) or "ok")
+        self.assertEqual(seen, [("open", "615.71.09"), ("legacy", "580.178.04")])
+
 class BaseImages(unittest.TestCase):
     def containerfiles(self, d, *digests):
         files = []

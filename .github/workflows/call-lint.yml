@@ -32,8 +32,8 @@ jobs:
           python3 -m venv /tmp/pykickstart
           /tmp/pykickstart/bin/pip install --quiet pykickstart==3.78
           echo /tmp/pykickstart/bin >> "$GITHUB_PATH"
-      - name: Structural checks (scripts/verify.py workflows, kickstart)
-        run: python3 scripts/verify.py workflows kickstart
+      - name: Structural checks (scripts/verify.py workflows, kickstart, boundary)
+        run: python3 scripts/verify.py workflows kickstart boundary
       - name: Kernel profile manifest and checker (kernel_profile.py check, unit tests)
         run: |
           set -euo pipefail
@@ -45,10 +45,8 @@ jobs:
           python3 -B -m unittest discover -s system/nvidia/tests -v
       - name: Build ordering scripts (unit tests against an offline registry)
         run: python3 -B -m unittest discover -s system/tests -v
-      - name: Session services (unit tests)
-        run: |
-          set -euo pipefail
-          python3 -B -m unittest discover -s forge/specs/athanor-system-services/tests -v
+      - name: Update and trust package (unit tests)
+        run: python3 -B -m unittest discover -s forge/specs/athanor-update/tests -v
       - name: Greeter session script (unit tests)
         run: python3 -B -m unittest discover -s forge/specs/athanor-system-config/tests -v
       # Run directly rather than through unittest discovery: this suite holds no

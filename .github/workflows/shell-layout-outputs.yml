@@ -1,0 +1,43 @@
+name: Shell layout, two outputs
+
+# The six two-output layout cases (doc_shell.md, SH13): cosmic-comp has one output in the
+# rig's nested route, so these run on vkms in a KVM guest, weekly. They do not gate a push.
+on:
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  two-outputs:
+    name: Layout cases on two vkms outputs in a KVM guest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      ATHANOR_REGISTRY: ghcr.io/${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: ./.github/actions/kvm
+      - name: Install QEMU and the seed tools
+        run: |
+          set -euo pipefail
+          bash forge/scripts/retry.sh sudo apt-get update \
+            -o Dir::Etc::SourceList=/etc/apt/sources.list.d/ubuntu.sources \
+            -o Dir::Etc::SourceParts=/nonexistent
+          sudo apt-get install --no-install-recommends -y qemu-system-x86 qemu-utils xorriso
+      - name: Rig image
+        run: bash forge/test/shell/rig.sh build-image
+      - name: Build and test the bar and check the DT_NEEDED order
+        run: bash forge/test/shell/rig.sh build-bar
+      - name: Build and test the dock and check the DT_NEEDED order
+        run: bash forge/test/shell/rig.sh build-dock
+      - name: Two-output layout cases (6) in the guest, against the goldens
+        run: bash forge/test/shell/kvm/guest.sh .scratch/layout-two-outputs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: layout-two-outputs
+          path: .scratch/layout-two-outputs

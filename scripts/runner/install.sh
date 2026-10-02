@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs the self-hosted runner on this host (scripts/runner/README.md): vm.sh,
+# Installs the self-hosted runner on this host (scripts/runner/README.md): vm.sh, balloon.py,
 # runner.env and README.md under /usr/local/libexec/athanor-runner, the unit under
 # /etc/systemd/system, the base image built by build-image.sh into the state directory
 # of the service, and the GitHub token, read from standard input and encrypted with
@@ -34,7 +34,7 @@ STATE=/var/lib/private/athanor-runner
 if systemctl is-active --quiet "$UNIT"; then systemctl stop "$UNIT"; fi
 
 install -d -m 0755 "$LIBEXEC"
-install -m 0755 "$HERE/vm.sh" "$LIBEXEC/vm.sh"
+install -m 0755 "$HERE/vm.sh" "$HERE/balloon.py" "$LIBEXEC/"
 install -m 0644 "$HERE/runner.env" "$HERE/README.md" "$LIBEXEC/"
 install -m 0644 "$HERE/$UNIT" "/etc/systemd/system/$UNIT"
 

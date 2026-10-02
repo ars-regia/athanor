@@ -3,7 +3,9 @@
 # system/Containerfile, in CI and locally, from the kernel and NVIDIA module digests that
 # system/kernel-artifacts.sh verified (docs/architecture/doc_build_ordering.md, O4): run its
 # resolve (or require-ready) first. Every image carries the digests it was built from as labels.
-# Usage: build-image.sh --gpu none|nvidia|nvidia-legacy --registry REG --tag TAG [--tag TAG]... [--push|--push-only]
+# Usage: build-image.sh --gpu none|nvidia|nvidia-legacy --registry REG --tag TAG [--tag TAG]... [--serial N] [--push|--push-only]
+#   --serial N   last field of the version label (doc_update_trust.md, UT9): the CI run number
+#                in the pipeline, 0 in a local build
 #   --push       build, then push every tag
 #   --push-only  push every tag of an image built earlier, without building
 # SECUREBOOT_SIGNING_KEY in the environment signs the UKI with the project key (release).
@@ -11,13 +13,13 @@
 # check, local rehearsal): such an image carries the label below and is never pushed.
 set -euo pipefail
 
-usage() { echo "usage: ${0##*/} --gpu none|nvidia|nvidia-legacy --registry REG --tag TAG [--tag TAG]... [--push|--push-only]" >&2; exit 2; }
-GPU='' REGISTRY='' MODE=build TAGS=()
+usage() { echo "usage: ${0##*/} --gpu none|nvidia|nvidia-legacy --registry REG --tag TAG [--tag TAG]... [--serial N] [--push|--push-only]" >&2; exit 2; }
+GPU='' REGISTRY='' MODE=build TAGS=() SERIAL=0
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --gpu | --registry | --tag)
+    --gpu | --registry | --tag | --serial)
       [[ $# -ge 2 && -n $2 && $2 != --* ]] || usage
-      case $1 in --gpu) GPU=$2 ;; --registry) REGISTRY=$2 ;; --tag) TAGS+=("$2") ;; esac
+      case $1 in --gpu) GPU=$2 ;; --registry) REGISTRY=$2 ;; --tag) TAGS+=("$2") ;; --serial) SERIAL=$2 ;; esac
       shift 2 ;;
     --push) MODE=push; shift ;;
     --push-only) MODE=push-only; shift ;;
@@ -30,7 +32,7 @@ case $GPU in
   nvidia-legacy) NAME=athanor-system-nvidia-legacy ;;
   *) usage ;;
 esac
-[[ -n $REGISTRY && ${#TAGS[@]} -gt 0 ]] || usage
+[[ -n $REGISTRY && ${#TAGS[@]} -gt 0 && $SERIAL =~ ^[0-9]+$ ]] || usage
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 IMAGE="$REGISTRY/$NAME"
@@ -61,8 +63,16 @@ pinned=$(bash "$ROOT/forge/specs/azoth/nvr.sh")
 [[ $nvr == "$pinned" ]] || { echo "${0##*/}: the kernel artifacts were resolved for ${nvr}, the pins give ${pinned}: run system/kernel-artifacts.sh resolve again" >&2; exit 2; }
 registry=$(artifact registry)
 kernel=$(artifact kernel_digest)
-args=(--layers --pull=newer --format docker --build-arg "AZOTH_NVR=$nvr" --build-arg "GPU=$GPU"
+args=(--layers --pull=newer --format docker --build-arg "AZOTH_NVR=$nvr" --build-arg "GPU=$GPU" --build-arg "IMAGE_REGISTRY=$REGISTRY"
   --build-arg "KERNEL_REGISTRY=$registry" --label "io.athanor.azoth.digest=$kernel")
+# Every published image has a version of its own and says when it was built (UT9). Machines
+# order images by `created`, never by the version string; bootc reports it as the
+# deployment's timestamp. SOURCE_DATE_EPOCH, when set, is the build time.
+now=${SOURCE_DATE_EPOCH:-$(date -u +%s)}
+fedora=$(sed -n 's/^ARG FEDORA_VERSION=//p' "$ROOT/system/Containerfile")
+[[ $fedora =~ ^[0-9]+$ ]] || { echo "${0##*/}: system/Containerfile declares no ARG FEDORA_VERSION=<major>" >&2; exit 2; }
+args+=(--label "org.opencontainers.image.version=$fedora.$(date -u -d "@$now" +%Y%m%d).$SERIAL"
+  --label "org.opencontainers.image.created=$(date -u -d "@$now" +%Y-%m-%dT%H:%M:%SZ)")
 case $GPU in
   nvidia) modules=$(artifact nvidia_open_digest); args+=(--build-arg "NVIDIA_OPEN_DIGEST=$modules" --label "io.athanor.azoth-nvidia.digest=$modules") ;;
   nvidia-legacy) modules=$(artifact nvidia_legacy_digest); args+=(--build-arg "NVIDIA_LEGACY_DIGEST=$modules" --label "io.athanor.azoth-nvidia.digest=$modules") ;;

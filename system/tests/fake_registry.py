@@ -22,6 +22,10 @@ Fixture keys:
   attestations  {"registry/repo@digest": [{"identity": "...", "predicate": {...}}]}
   configs       {"registry/repo@digest": {label: value}}
   raw           {"registry/repo:tag": manifest JSON}
+  sigstore_keys {"registry/repo@digest": path of the public key whose private half signed it}
+                `skopeo copy --policy` accepts the image only when that key is among the
+                keyPaths of the policy scope for the repository, and only when --registries.d
+                is passed (without it containers/image never looks for sigstore attachments)
   packages      {"package": [package versions as the GitHub API returns them]}
   user_packages ["package", ...]  the container packages of the owner
   runs          [{"databaseId": 1, "headBranch": "iso-v0"}]
@@ -39,7 +43,35 @@ def fail(message, code=1):
     return code
 
 
+def verify(args, fx):
+    """`skopeo copy --policy`: the source must carry a sigstore signature by a key of its scope."""
+    ref = args[-2].removeprefix("docker://")
+    with open(args[args.index("--policy") + 1]) as f:
+        policy = json.load(f)
+    rules = policy["transports"]["docker"].get(ref.split("@")[0], policy["default"])
+    keys = []
+    for rule in rules:
+        for path in rule.get("keyPaths", []):
+            with open(path) as f:
+                keys.append(f.read())
+    signer = fx.get("sigstore_keys", {}).get(ref)
+    if signer is None or "--registries.d" not in args:
+        return fail("FATA[0000] Source image rejected: A signature was required, but no signature exists")
+    with open(signer) as f:
+        if f.read() not in keys:
+            return fail("FATA[0000] Source image rejected: cryptographic signature verification failed: "
+                        "invalid signature when validating ASN.1 encoded signature")
+    if args[-1].startswith("dir:"):
+        os.mkdir(args[-1].removeprefix("dir:"))
+    return 0
+
+
 def skopeo(args, fx):
+    if "copy" in args:
+        if "--policy" in args:
+            return verify(args, fx)
+        # Recorded in FAKE_LOG by main(); the fixture is read-only, so nothing moves.
+        return fail("fake skopeo: copy failed", 1) if args[-1].removeprefix("docker://") in fx.get("errors", []) else 0
     ref = args[-1].removeprefix("docker://")
     if ref in fx.get("errors", []):
         return fail(f'time="2026-09-17T00:00:00Z" level=fatal msg="Error parsing image name \\"docker://{ref}\\": pinging container registry: dial tcp: i/o timeout"')

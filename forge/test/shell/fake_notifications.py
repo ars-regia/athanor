@@ -1,0 +1,230 @@
+#!/usr/bin/python3
+"""fake_notifications.py - athanor-shelld's notification side, faked for the rig
+(doc_bar.md BR1, BR4). The real daemon admits the private interface only from a process in
+athanor-bar.service, which a container without systemd cannot provide (plan ruling 10).
+
+It owns org.freedesktop.Notifications with Notify and CloseNotification, so a test sends a
+notification the way an application does, and serves os.athanor.Notifications1 with the
+wire signature the bar decodes. Its signals are broadcast, not unicast as the real
+daemon's: the bar subscribes by sender, so it cannot tell.
+
+It starts holding four notifications, all waiting for the user, so the captures show three
+popups and "+1 waiting". Every call that acts is appended to /out/$RIG_TAG-notifications.log:
+"Close <id> <reason>", "InvokeAction <id> <key> token|no-token", "SetDoNotDisturb True|False".
+"""
+
+import os
+import sys
+import time
+from pathlib import Path
+
+from gi.repository import Gio, GLib
+
+NAME = "org.freedesktop.Notifications"
+PUBLIC_PATH = "/org/freedesktop/Notifications"
+PRIVATE = "os.athanor.Notifications1"
+PRIVATE_PATH = "/os/athanor/Notifications1"
+WIRE = "(usssa(ss)ybbsssuuayuu)"
+WAITS = 0xFFFFFFFF
+DEFAULT_TIMEOUT_MS = 5000
+CRITICAL = 2
+LOG = Path("/out") / f"{os.environ.get('RIG_TAG', 'bar')}-notifications.log"
+
+NODE = Gio.DBusNodeInfo.new_for_xml(f"""
+<node>
+  <interface name="org.freedesktop.Notifications">
+    <method name="Notify">
+      <arg type="s" direction="in"/><arg type="u" direction="in"/><arg type="s" direction="in"/>
+      <arg type="s" direction="in"/><arg type="s" direction="in"/><arg type="as" direction="in"/>
+      <arg type="a{{sv}}" direction="in"/><arg type="i" direction="in"/>
+      <arg type="u" direction="out"/>
+    </method>
+    <method name="CloseNotification"><arg type="u" direction="in"/></method>
+  </interface>
+  <interface name="{PRIVATE}">
+    <method name="List">
+      <arg type="b" direction="out"/><arg type="a{WIRE}" direction="out"/>
+    </method>
+    <method name="Close"><arg type="u" direction="in"/><arg type="u" direction="in"/></method>
+    <method name="InvokeAction">
+      <arg type="u" direction="in"/><arg type="s" direction="in"/><arg type="s" direction="in"/>
+    </method>
+    <method name="SetDoNotDisturb"><arg type="b" direction="in"/></method>
+    <signal name="Added"><arg type="{WIRE}"/></signal>
+    <signal name="Replaced"><arg type="{WIRE}"/></signal>
+    <signal name="Closed"><arg type="u"/><arg type="u"/></signal>
+  </interface>
+</node>
+""")
+
+
+def now_ms():
+    return int(time.monotonic() * 1000)
+
+
+def log(line):
+    with LOG.open("a", encoding="utf-8") as out:
+        out.write(line + "\n")
+
+
+def timeout_ms(expire, urgency):
+    """athanor-shelld's store::timeout_ms."""
+    if urgency == CRITICAL or expire == 0:
+        return 0
+    return DEFAULT_TIMEOUT_MS if expire < 0 else expire
+
+
+class Daemon:
+    def __init__(self):
+        self.held = []
+        self.last_id = 0
+        self.dnd = False
+        self.bus = None
+
+    def left_ms(self, notice):
+        """athanor-shelld's store::popup_ms_left."""
+        if notice["urgency"] == CRITICAL:
+            return WAITS
+        if self.dnd:
+            return 0
+        if notice["timeout"] == 0:
+            return WAITS
+        left = notice["arrived"] + notice["timeout"] - now_ms()
+        return max(0, min(WAITS - 1, left))
+
+    def wire(self, n):
+        return (
+            n["id"], n["app"], n["summary"], n["body"], n["actions"], n["urgency"],
+            n["transient"], n["resident"], n["entry"], n["icon_name"], n["icon_file"],
+            n["width"], n["height"], n["rgba"], n["timeout"], self.left_ms(n),
+        )
+
+    def emit(self, member, value):
+        if self.bus is not None:
+            self.bus.emit_signal(None, PRIVATE_PATH, PRIVATE, member, value)
+
+    def find(self, id_):
+        return next((n for n in self.held if n["id"] == id_), None)
+
+    def add(self, app, summary, body="", actions=(), urgency=1, transient=False,
+            resident=False, entry="", icon="", image=None, expire=0, replaces=0):
+        """Notify's semantics: a known replaces_id keeps its id and moves last."""
+        old = self.find(replaces) if replaces else None
+        if old is not None:
+            self.held.remove(old)
+            id_ = replaces
+        else:
+            self.last_id += 1
+            id_ = self.last_id
+        width, height, rgba = image if image else (0, 0, b"")
+        notice = {
+            "id": id_, "app": app, "summary": summary, "body": body,
+            "actions": list(actions), "urgency": urgency, "transient": transient,
+            "resident": resident, "entry": entry,
+            "icon_name": "" if icon.startswith("/") else icon,
+            "icon_file": icon if icon.startswith("/") else "",
+            "width": width, "height": height, "rgba": rgba,
+            "timeout": timeout_ms(expire, urgency), "arrived": now_ms(),
+        }
+        self.held.append(notice)
+        member = "Replaced" if old is not None else "Added"
+        self.emit(member, GLib.Variant(f"({WIRE})", (self.wire(notice),)))
+        return id_
+
+    def close(self, id_, reason):
+        notice = self.find(id_)
+        if notice is None:
+            return False
+        self.held.remove(notice)
+        self.emit("Closed", GLib.Variant("(uu)", (id_, reason)))
+        return True
+
+    def notify(self, parameters):
+        app, replaces, icon, summary, body, actions, hints, expire = parameters.unpack()
+        image = hints.get("image-data")
+        return self.add(
+            app, summary, body,
+            actions=list(zip(actions[0::2], actions[1::2])),
+            urgency=int(hints.get("urgency", 1)),
+            transient=bool(hints.get("transient", False)),
+            resident=bool(hints.get("resident", False)),
+            entry=str(hints.get("desktop-entry", "")),
+            icon=str(hints.get("image-path", icon)),
+            image=(image[0], image[1], bytes(image[6])) if image else None,
+            expire=expire, replaces=replaces,
+        )
+
+    def on_call(self, _connection, _sender, _path, interface, method, parameters, invocation):
+        if interface == NAME and method == "Notify":
+            invocation.return_value(GLib.Variant("(u)", (self.notify(parameters),)))
+        elif interface == NAME and method == "CloseNotification":
+            (id_,) = parameters.unpack()
+            self.close(id_, 3)
+            invocation.return_value(None)
+        elif method == "List":
+            listed = [self.wire(n) for n in self.held]
+            invocation.return_value(GLib.Variant(f"(ba{WIRE})", (self.dnd, listed)))
+        elif method == "Close":
+            id_, reason = parameters.unpack()
+            log(f"Close {id_} {reason}")
+            if self.close(id_, reason):
+                invocation.return_value(None)
+            else:
+                invocation.return_dbus_error(
+                    "org.freedesktop.DBus.Error.InvalidArgs", f"no notification {id_}"
+                )
+        elif method == "InvokeAction":
+            id_, key, token = parameters.unpack()
+            log(f"InvokeAction {id_} {key} {'token' if token else 'no-token'}")
+            notice = self.find(id_)
+            if notice is None or all(k != key for k, _ in notice["actions"]):
+                invocation.return_dbus_error(
+                    "org.freedesktop.DBus.Error.InvalidArgs", f"no action {key} on {id_}"
+                )
+                return
+            if not notice["resident"]:
+                self.close(id_, 2)
+            invocation.return_value(None)
+        elif method == "SetDoNotDisturb":
+            (on,) = parameters.unpack()
+            log(f"SetDoNotDisturb {on}")
+            self.dnd = on
+            invocation.return_value(None)
+
+
+def fixture(daemon):
+    """Four notifications that wait for the user: the newest three show, one waits."""
+    daemon.add("Files", "Backup finished", "Your documents were copied.", icon="folder-symbolic")
+    daemon.add(
+        "Calendar", "Meeting in 10 minutes", "Room 4, second floor",
+        actions=[("default", "Open"), ("snooze", "Snooze"), ("open", "Open")],
+    )
+    daemon.add(
+        "Updates", "Update ready", "Restart to finish installing.", urgency=CRITICAL,
+        image=(16, 16, bytes([0x3B, 0x82, 0xF6, 0xFF]) * 256),
+    )
+    daemon.add("Files", "Download complete", "report.pdf", icon="folder-download-symbolic")
+
+
+def main():
+    LOG.write_text("", encoding="utf-8")
+    daemon = Daemon()
+    fixture(daemon)
+    bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    daemon.bus = bus
+    for path, interface in ((PUBLIC_PATH, NAME), (PRIVATE_PATH, PRIVATE)):
+        bus.register_object(path, NODE.lookup_interface(interface), daemon.on_call, None, None)
+    (owned,) = bus.call_sync(
+        "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
+        "RequestName", GLib.Variant("(su)", (NAME, 4)), GLib.VariantType("(u)"),
+        Gio.DBusCallFlags.NONE, -1, None,
+    ).unpack()
+    if owned != 1:
+        print(f"fake_notifications.py: RequestName answered {owned}", file=sys.stderr)
+        return 1
+    GLib.MainLoop().run()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

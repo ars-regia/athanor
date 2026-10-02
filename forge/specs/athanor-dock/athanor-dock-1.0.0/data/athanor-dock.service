@@ -1,0 +1,66 @@
+[Unit]
+Description=Athanor dock
+# Enabled for every user by /usr/lib/systemd/user-preset/80-athanor-dock.preset.
+After=graphical-session.target athanor-desktop.service
+Requisite=athanor-desktop.service
+PartOf=graphical-session.target
+# The dock counts its own failures and falls back to the vendor layout after five in ten
+# minutes (doc_shell.md, SH8); this is only the outer backstop.
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/athanor-dock
+ExecStopPost=/usr/bin/athanor-dock --record-exit
+TimeoutStartSec=20s
+Restart=on-failure
+RestartSec=1s
+RestartSteps=5
+RestartMaxDelaySec=60s
+Slice=session.slice
+# SH4: the layer surfaces are drawn with Cairo, on every GPU.
+Environment=GSK_RENDERER=cairo
+# GTK's and fontconfig's caches, inside the Landlock ruleset (BR1).
+Environment=XDG_CACHE_HOME=%C/athanor-dock
+CacheDirectory=athanor-dock
+# Budget 48 MB PSS at rest (doc_bar.md, section 5, item 17). MemoryHigh throttles well above
+# it; MemoryMax is the hard cap for an icon theme or a font cache loaded at once.
+MemoryHigh=72M
+MemoryMax=144M
+
+# The failure record must survive a stop, not just a restart: a give-up (SH8) must still be
+# one the next time the unit starts. Only the session ending clears it.
+# Under ProtectSystem=strict /run/user is read-only except the unit's own runtime
+# directories: "athanor" is also declared here because launch() creates %t/athanor/<random>
+# for the Wayland security context of a started application (athanor-compositor-client).
+# athanor-bar.service declares it too; both preserve it, so neither stop removes it.
+RuntimeDirectory=athanor-dock athanor
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+# The favourites file, ~/.config/athanor/favorites.toml (BR7), which pinning, unpinning and
+# reordering write. Under ProtectHome=read-only it is the only writable directory in the
+# home directory.
+ConfigurationDirectory=athanor
+
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+NoNewPrivileges=yes
+# No MemoryDenyWriteExecute: GTK's GL renderers and the Mesa drivers GTK loads map
+# executable memory. The renderer is Cairo, but GDK still probes GL at start.
+# @mount: glycin decodes every image in a bubblewrap sandbox, which mounts its own root.
+SystemCallFilter=@system-service @mount
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# Wayland, D-Bus and journald over Unix sockets; AF_NETLINK because bubblewrap brings up
+# the loopback interface of glycin's sandbox over rtnetlink.
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+
+[Install]
+WantedBy=athanor-session.target

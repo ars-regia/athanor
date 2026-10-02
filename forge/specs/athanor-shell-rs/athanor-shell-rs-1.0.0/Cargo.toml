@@ -32,7 +32,7 @@ hex = { workspace = true }
 arc-swap = "1.6"
 
 # Decoupled domain crates
-athanor-dock = { path = "../../athanor-dock/athanor-dock-1.0.0" }
+athanor-dock = { path = "../athanor-dock-0.7" }
 
 athanor-style = { path = "../athanor-style-0.7" }
 athanor-niri-ipc = { version = "0.1.0", path = "../../athanor-niri-ipc" }

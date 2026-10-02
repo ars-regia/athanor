@@ -1,0 +1,9 @@
+# Only the three system image repositories: two registries.d files that declare the same
+# scope are a hard error in containers/image, so no registry-wide or default scope here.
+docker:
+  @REGISTRY@/athanor-system:
+    use-sigstore-attachments: true
+  @REGISTRY@/athanor-system-nvidia:
+    use-sigstore-attachments: true
+  @REGISTRY@/athanor-system-nvidia-legacy:
+    use-sigstore-attachments: true

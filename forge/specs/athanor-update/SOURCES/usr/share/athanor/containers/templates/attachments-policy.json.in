@@ -1,0 +1,11 @@
+{
+  "default": [{"type": "reject"}],
+  "transports": {
+    "docker": {
+      "@REGISTRY@/athanor-system": [{"type": "insecureAcceptAnything"}],
+      "@REGISTRY@/athanor-system-nvidia": [{"type": "insecureAcceptAnything"}],
+      "@REGISTRY@/athanor-system-nvidia-legacy": [{"type": "insecureAcceptAnything"}]
+    },
+    "dir": {"": [{"type": "insecureAcceptAnything"}]}
+  }
+}
