@@ -185,6 +185,8 @@ RUN for pkg in cosmic-panel cosmic-applets cosmic-notifications athanor-layout-t
         test -L "/etc/systemd/user/athanor-session.target.wants/$unit.service" \
             || { echo "$unit.service is not enabled for every user" >&2; exit 1; }; \
     done && \
+    case $(rpm -q --qf '%{RELEASE}' cosmic-comp) in *.athanor*) ;; \
+        *) echo "cosmic-comp is not Athanor's build: $(rpm -q cosmic-comp)" >&2; exit 1;; esac && \
     for name in org.freedesktop.Notifications org.kde.StatusNotifierWatcher; do \
         owners=$(grep -lx "Name=$name" /usr/share/dbus-1/services/*.service); \
         test "$owners" = "/usr/share/dbus-1/services/$name.service" \

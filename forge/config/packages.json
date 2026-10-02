@@ -44,7 +44,8 @@
     "just",
     "kernel-forge",
     "ripgrep-native",
-    "athanor-semantic-db"
+    "athanor-semantic-db",
+    "cosmic-comp"
   ],
   "custom_tier0": [
     "stage0-bootstrap",
@@ -78,7 +79,8 @@
     "dart-sass",
     "keylime",
     "recovery",
-    "kernel-forge"
+    "kernel-forge",
+    "cosmic-comp"
   ],
   "custom_tier3": [
     "shell-rs",
@@ -134,7 +136,6 @@
     "libwayland-client"
   ],
   "upstream_desktop": [
-    "cosmic-comp",
     "cosmic-app-library",
     "cosmic-workspaces",
     "cosmic-bg",
