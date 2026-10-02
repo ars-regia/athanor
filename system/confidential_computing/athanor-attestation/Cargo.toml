@@ -12,7 +12,7 @@ env_logger = { workspace = true }
 nix = { workspace = true, features = ["fs", "ioctl"] }
 ring = "0.17"
 sha2 = { workspace = true }
-p384 = { version = "0.13", features = ["ecdsa"] }
+p384 = { version = "0.14", features = ["ecdsa"] }
 p256 = { version = "0.13", features = ["ecdsa"] }
 zeroize = { workspace = true, features = ["zeroize_derive"] }
 subtle = { workspace = true }
