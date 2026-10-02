@@ -1,7 +1,7 @@
-# Athanor's cosmic-comp: Fedora's package with one focus patch, same Name so that it replaces
+# Athanor's cosmic-comp: Fedora's package with two patches, same Name so that it replaces
 # Fedora's build instead of sitting beside it (like forge/specs/just). The release spells out
 # Fedora's, so that 1.8.0-1.fc43.athanor1 sorts above 1.8.0-1.fc43 and below 1.8.0-2.fc43: the
-# Nix builder defines no %dist.
+# Nix builder defines no %%dist.
 %global fedora_release 1.fc43
 # The commit of upstream's tag epoch-%{version}, embedded as GIT_HASH.
 %global commit a55785993e8ef6aad38862cb1a9e1ccaad3c340d
