@@ -78,72 +78,82 @@ fn target_for(code: char, fields: &Fields<'_>) -> Result<Option<String>, String>
 }
 
 /// The arguments of an `Exec` line, with its field codes expanded (Desktop Entry
-/// Specification, "The Exec key"), quoted as GLib's own launcher parses it. A target the
+/// Specification, "The Exec key") in GLib's order: each code is replaced in the raw line by
+/// its value, shell-quoted, and only then is the line split into words. A value therefore
+/// stays one word wherever its code stands, even inside a quoted `sh -c` body. A target the
 /// line has no code for is refused: the application would start without it. So is a target
-/// that would stand alone as an argument starting with `-`: the application would read it
-/// as an option.
+/// that stands alone as an argument starting with `-`: the application would read it as an
+/// option.
 pub(crate) fn expand(exec: &str, fields: &Fields<'_>) -> Result<Vec<String>, String> {
-    let words = glib::shell_parse_argv(exec).map_err(|err| err.to_string())?;
-    let mut argv = Vec::new();
-    let mut used = false;
-    for word in words {
-        let word = word
+    let quote = |value: &str| {
+        glib::shell_quote(value)
             .into_string()
-            .map_err(|_| "an argument is not UTF-8".to_owned())?;
-        match word.as_str() {
-            "%f" | "%F" | "%u" | "%U" => {
-                let code = word.chars().nth(1).unwrap_or('u');
+            .map_err(|_| "a quoted value is not UTF-8".to_owned())
+    };
+    let mut line = String::with_capacity(exec.len());
+    let mut used = false;
+    let mut chars = exec.char_indices();
+    while let Some((at, c)) = chars.next() {
+        if c != '%' {
+            line.push(c);
+            continue;
+        }
+        let Some((code_at, code)) = chars.next() else {
+            return Err("the Exec line ends with a lone %".to_owned());
+        };
+        match code {
+            '%' => line.push('%'),
+            'f' | 'F' | 'u' | 'U' => {
                 if let Some(arg) = target_for(code, fields)? {
-                    if arg.starts_with('-') {
-                        return Err("the file name would be read as an option".to_owned());
-                    }
-                    argv.push(arg);
+                    line.push_str(&quote(&arg)?);
                     used = true;
                 }
             }
-            // Deprecated codes, removed.
-            "%d" | "%D" | "%n" | "%N" | "%v" | "%m" => {}
-            "%i" => {
-                if let Some(icon) = fields.icon {
-                    argv.extend(["--icon".to_owned(), icon.to_owned()]);
+            'c' => line.push_str(&quote(fields.name)?),
+            'k' => {
+                if let Some(location) = fields.location {
+                    line.push_str(&quote(location)?);
                 }
             }
-            _ => argv.push(expand_word(&word, fields, &mut used)?),
+            // Two words, so only where the code is a word of its own.
+            'i' => {
+                let after = code_at + code.len_utf8();
+                let alone = exec[..at].chars().next_back().is_none_or(char::is_whitespace)
+                    && exec[after..].chars().next().is_none_or(char::is_whitespace);
+                if !alone {
+                    return Err("the field code %i is not valid inside a word".to_owned());
+                }
+                if let Some(icon) = fields.icon {
+                    line.push_str("--icon ");
+                    line.push_str(&quote(icon)?);
+                }
+            }
+            // Deprecated codes, removed.
+            'd' | 'D' | 'n' | 'N' | 'v' | 'm' => {}
+            code => return Err(format!("the field code %{code} is not valid here")),
         }
     }
-    if argv.is_empty() {
+    if line.trim().is_empty() {
         return Err("the Exec line names no program".to_owned());
     }
-    if fields.target.is_some() && !used {
-        return Err("the application does not take a file to open".to_owned());
+    let argv = glib::shell_parse_argv(&line)
+        .map_err(|err| err.to_string())?
+        .into_iter()
+        .map(|word| word.into_string().map_err(|_| "an argument is not UTF-8".to_owned()))
+        .collect::<Result<Vec<String>, String>>()?;
+    if let Some(target) = fields.target {
+        let values = [Some(target.uri), target.path];
+        if argv
+            .iter()
+            .any(|arg| arg.starts_with('-') && values.contains(&Some(arg.as_str())))
+        {
+            return Err("the file name would be read as an option".to_owned());
+        }
+        if !used {
+            return Err("the application does not take a file to open".to_owned());
+        }
     }
     Ok(argv)
-}
-
-fn expand_word(word: &str, fields: &Fields<'_>, used: &mut bool) -> Result<String, String> {
-    let mut out = String::with_capacity(word.len());
-    let mut chars = word.chars();
-    while let Some(c) = chars.next() {
-        if c != '%' {
-            out.push(c);
-            continue;
-        }
-        match chars.next() {
-            Some('%') => out.push('%'),
-            Some('c') => out.push_str(fields.name),
-            Some('k') => out.push_str(fields.location.unwrap_or_default()),
-            Some(code @ ('f' | 'F' | 'u' | 'U')) => {
-                if let Some(arg) = target_for(code, fields)? {
-                    out.push_str(&arg);
-                    *used = true;
-                }
-            }
-            Some('d' | 'D' | 'n' | 'N' | 'v' | 'm') => {}
-            Some(code) => return Err(format!("the field code %{code} is not valid here")),
-            None => return Err("the Exec line ends with a lone %".to_owned()),
-        }
-    }
-    Ok(out)
 }
 
 /// An absolute path for `program`, searched in the shell's `PATH`.
@@ -642,6 +652,45 @@ mod tests {
         assert!(expand("viewer %u", &file).is_err());
         // Inside a longer word it cannot be read as one.
         assert_eq!(expand("viewer --file=%f", &file).unwrap(), ["viewer", "--file=-rf"]);
+    }
+
+    #[test]
+    fn a_code_inside_a_shell_body_cannot_inject() {
+        let name = "/h/x$(id>/tmp/p).png";
+        let file = Fields {
+            target: Some(Target { uri: "file:///h/x%24(id%3E/tmp/p).png", path: Some(name) }),
+            ..FIELDS
+        };
+        let argv = expand(r#"sh -c "echo %f""#, &file).unwrap();
+        assert_eq!(argv, ["sh", "-c", "echo '/h/x$(id>/tmp/p).png'"]);
+        let out = std::process::Command::new(&argv[0]).args(&argv[1..]).output().unwrap();
+        assert_eq!(String::from_utf8(out.stdout).unwrap(), format!("{name}\n"), "sh printed the name literally");
+    }
+
+    #[test]
+    fn a_code_inside_a_word_keeps_the_word() {
+        let file = with("file:///h/a%20b.png", Some("/h/a b.png"));
+        assert_eq!(expand("viewer --file=%f", &file).unwrap(), ["viewer", "--file=/h/a b.png"]);
+    }
+
+    #[test]
+    fn a_url_list_code_gives_the_target() {
+        // One target per launch (doc_launcher.md, LA5): %U and %F give it as one argument.
+        let web = with("https://example.org/a b?q='x'", None);
+        assert_eq!(expand("browser %U --new", &web).unwrap(), ["browser", "https://example.org/a b?q='x'", "--new"]);
+        let file = with("file:///h/a%20b", Some("/h/a b"));
+        assert_eq!(expand("viewer %F %F", &file).unwrap(), ["viewer", "/h/a b", "/h/a b"]);
+    }
+
+    #[test]
+    fn a_quote_in_a_value_stays_in_it() {
+        let file = with("file:///h/it's.txt", Some("/h/it's.txt"));
+        assert_eq!(expand("viewer %f", &file).unwrap(), ["viewer", "/h/it's.txt"]);
+        let named = Fields { name: "Bob's \"Editor\"", ..FIELDS };
+        assert_eq!(expand("app --title=%c", &named).unwrap(), ["app", "--title=Bob's \"Editor\""]);
+        let argv = expand(r#"sh -c "echo %f""#, &file).unwrap();
+        let out = std::process::Command::new(&argv[0]).args(&argv[1..]).output().unwrap();
+        assert_eq!(String::from_utf8(out.stdout).unwrap(), "/h/it's.txt\n");
     }
 
     fn run(exec: &str) -> Result<Vec<String>, String> {
