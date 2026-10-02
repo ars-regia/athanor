@@ -8,6 +8,8 @@
 //! provider returns is bounded and cleaned before it reaches a row.
 
 use std::collections::{HashMap, HashSet};
+use std::io::Read;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -110,12 +112,21 @@ fn invalid(why: &str) -> glib::Error {
 }
 
 fn read(file: &Path, installed: &dyn Fn(&str) -> Option<String>) -> Result<(String, Option<Provider>), glib::Error> {
-    let meta = std::fs::metadata(file).map_err(|err| invalid(&err.to_string()))?;
+    // O_NONBLOCK: a FIFO named like a provider must not hang the discovery. What was opened
+    // is checked on the handle, never by the path, which may change in between.
+    let io = |err: std::io::Error| invalid(&err.to_string());
+    let opened = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK).open(file).map_err(io)?;
+    let meta = opened.metadata().map_err(io)?;
     if !meta.is_file() || meta.len() > MAX_INI_BYTES {
         return Err(invalid("not a regular file, or larger than 64 KiB"));
     }
+    let mut data = String::new();
+    opened.take(MAX_INI_BYTES + 1).read_to_string(&mut data).map_err(io)?;
+    if data.len() as u64 > MAX_INI_BYTES {
+        return Err(invalid("larger than 64 KiB"));
+    }
     let keys = glib::KeyFile::new();
-    keys.load_from_file(file, glib::KeyFileFlags::NONE)?;
+    keys.load_from_data(&data, glib::KeyFileFlags::NONE)?;
     let desktop_id = keys.string(GROUP, "DesktopId")?.to_string();
     if keys.integer(GROUP, "Version")? != 2
         || keys.boolean(GROUP, "DefaultDisabled").unwrap_or(false)
@@ -357,6 +368,17 @@ mod tests {
         assert_eq!(discover_with(std::slice::from_ref(&dir), &fixture_apps).len(), 1, "at the cap: all read");
         std::fs::write(dir.join("b.ini"), "not an ini").expect("write");
         assert!(discover_with(std::slice::from_ref(&dir), &fixture_apps).is_empty(), "past the cap: the last file is not read");
+        std::fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
+    fn a_fifo_in_a_provider_directory_is_skipped_without_blocking() {
+        let root = scratch("fifo");
+        write_ini(&root, "b.ini", "org.mozilla.firefox.desktop", "org.example.A", "");
+        let made = std::process::Command::new("mkfifo").arg(root.join("a.ini")).status().expect("mkfifo");
+        assert!(made.success());
+        // A blocking open of a FIFO with no writer would never return.
+        assert_eq!(discover_with(std::slice::from_ref(&root), &fixture_apps).len(), 1);
         std::fs::remove_dir_all(&root).expect("cleanup");
     }
 
