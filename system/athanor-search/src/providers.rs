@@ -33,6 +33,9 @@ const MAX_FIELD_CHARS: usize = 1024;
 /// A larger GetResultMetas reply is refused whole.
 const MAX_METAS_BYTES: usize = 64 * 1024;
 const MAX_DESKTOP_ID_BYTES: usize = 255;
+/// `.ini` files read per directory: discovery runs on every Show (LA2), so a directory
+/// flooded with files must not stall it. The rest are skipped with a warning.
+const MAX_INI_FILES: usize = 64;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Provider {
@@ -43,16 +46,15 @@ pub struct Provider {
     pub name: String,
 }
 
-/// `$XDG_DATA_HOME`, then every `XDG_DATA_DIRS` entry, each with the providers' suffix.
+/// Every `XDG_DATA_DIRS` entry with the providers' suffix. Not `$XDG_DATA_HOME`, as on GNOME
+/// Shell: a file the user's own processes can write must not register a D-Bus name to call
+/// with every query (LA2).
 pub fn dirs() -> Vec<PathBuf> {
-    suffixed(glib::user_data_dir(), glib::system_data_dirs())
+    suffixed(glib::system_data_dirs())
 }
 
-fn suffixed(home: PathBuf, system: Vec<PathBuf>) -> Vec<PathBuf> {
-    std::iter::once(home)
-        .chain(system)
-        .map(|dir| dir.join("gnome-shell/search-providers"))
-        .collect()
+fn suffixed(system: Vec<PathBuf>) -> Vec<PathBuf> {
+    system.into_iter().map(|dir| dir.join("gnome-shell/search-providers")).collect()
 }
 
 /// The providers of installed applications; the first file of a desktop id wins.
@@ -68,12 +70,23 @@ fn discover_with(dirs: &[PathBuf], installed: &dyn Fn(&str) -> Option<String>) -
     let mut providers = Vec::new();
     for dir in dirs {
         let Ok(entries) = std::fs::read_dir(dir) else { continue };
-        let mut files: Vec<_> = entries.filter_map(|entry| Some(entry.ok()?.path())).collect();
+        let mut files: Vec<_> = entries
+            .filter_map(|entry| Some(entry.ok()?.path()))
+            .filter(|f| f.extension().is_some_and(|e| e == "ini"))
+            .collect();
         files.sort();
-        for file in files.into_iter().filter(|f| f.extension().is_some_and(|e| e == "ini")) {
+        if files.len() > MAX_INI_FILES {
+            tracing::warn!(
+                "{} holds {} search providers: only the first {MAX_INI_FILES} are read",
+                text::line(&dir.display().to_string(), text::SUMMARY_CHARS),
+                files.len()
+            );
+            files.truncate(MAX_INI_FILES);
+        }
+        for file in files {
             match read(&file, installed) {
                 // Every .ini that parses claims its desktop id, disabled or not, so an
-                // override in a user directory switches a system provider off, as on GNOME.
+                // override in an earlier directory switches a later provider off, as on GNOME.
                 Ok((id, provider)) => {
                     if seen.insert(id) {
                         if let Some(provider) = provider.filter(|p| buses.insert((p.bus_name.clone(), p.object_path.clone()))) {
@@ -334,6 +347,20 @@ mod tests {
     }
 
     #[test]
+    fn a_directory_is_read_up_to_its_cap_of_files() {
+        let root = scratch("cap");
+        let dir = root.join("p");
+        write_ini(&dir, "z.ini", "org.mozilla.firefox.desktop", "org.example.A", "");
+        for n in 0..MAX_INI_FILES - 1 {
+            std::fs::write(dir.join(format!("a{n:03}.ini")), "not an ini").expect("write");
+        }
+        assert_eq!(discover_with(std::slice::from_ref(&dir), &fixture_apps).len(), 1, "at the cap: all read");
+        std::fs::write(dir.join("b.ini"), "not an ini").expect("write");
+        assert!(discover_with(std::slice::from_ref(&dir), &fixture_apps).is_empty(), "past the cap: the last file is not read");
+        std::fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
     fn providers_are_keyed_on_bus_name_and_path() {
         let root = scratch("bus");
         write_ini(&root, "a.ini", "org.mozilla.firefox.desktop", "org.example.Same", "");
@@ -385,9 +412,9 @@ mod tests {
     }
 
     #[test]
-    fn dirs_list_the_data_home_then_every_system_dir_with_the_suffix() {
-        let got = suffixed("/h".into(), vec!["/a".into(), "/b".into()]);
-        let want: Vec<PathBuf> = ["/h", "/a", "/b"].iter().map(|d| Path::new(d).join("gnome-shell/search-providers")).collect();
+    fn dirs_list_every_system_dir_with_the_suffix_and_not_the_data_home() {
+        let got = suffixed(vec!["/a".into(), "/b".into()]);
+        let want: Vec<PathBuf> = ["/a", "/b"].iter().map(|d| Path::new(d).join("gnome-shell/search-providers")).collect();
         assert_eq!(got, want);
         assert!(dirs().iter().all(|d| d.ends_with("gnome-shell/search-providers")));
     }

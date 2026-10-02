@@ -49,7 +49,7 @@ struct Inner {
     usage: RefCell<Rc<Usage>>,
     usage_path: PathBuf,
     files: Option<Rc<Files>>,
-    providers: Rc<Vec<Provider>>,
+    providers: RefCell<Rc<Vec<Provider>>>,
     /// The debounce and the slow sources of the current generation; aborting drops them.
     tasks: RefCell<Vec<glib::JoinHandle<()>>>,
     listener: Box<dyn Fn(&Rows)>,
@@ -77,7 +77,7 @@ impl Engine {
             usage: RefCell::new(Rc::new(Usage::load(&usage_path))),
             usage_path,
             files: files.map(Rc::new),
-            providers: Rc::new(providers),
+            providers: RefCell::new(Rc::new(providers)),
             tasks: RefCell::default(),
             listener: Box::new(listener),
         }))
@@ -89,6 +89,12 @@ impl Engine {
 
     pub fn set_windows(&self, windows: Vec<WindowEntry>) {
         self.0.windows.replace(Rc::new(windows));
+    }
+
+    /// Applications install and remove search providers during a session: the caller
+    /// discovers them again before a query session.
+    pub fn set_providers(&self, providers: Vec<Provider>) {
+        self.0.providers.replace(Rc::new(providers));
     }
 
     /// The library writes usage too (plan 3b): read it again before a query session.
@@ -225,7 +231,8 @@ impl Engine {
             });
         }
         let terms = provider_query(&text);
-        for provider in self.0.providers.iter().cloned() {
+        let providers = Rc::clone(&self.0.providers.borrow());
+        for provider in providers.iter().cloned() {
             let (weak, terms) = (self.weak(), terms.clone());
             self.spawn(async move {
                 let hits = providers::search(&provider, &terms).await;

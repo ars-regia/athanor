@@ -71,6 +71,8 @@ pub struct Launcher {
     watches: RefCell<Vec<gio::FileMonitor>>,
     /// A context singleton: it lives, and keeps its handler, only while held.
     apps_monitor: gio::AppInfoMonitor,
+    /// False after the crash loop gave up: no search provider is called then.
+    discover_providers: bool,
 }
 
 pub fn start(app: &gtk4::Application, options: &Options) -> Rc<Launcher> {
@@ -94,11 +96,8 @@ pub fn start(app: &gtk4::Application, options: &Options) -> Rc<Launcher> {
             None
         }
     };
-    let (files, search_providers) = if options.given_up {
-        (None, Vec::new())
-    } else {
-        (Some(Files::new()), providers::discover(&providers::dirs()))
-    };
+    // Search providers are discovered at each Show, not here.
+    let files = if options.given_up { None } else { Some(Files::new()) };
 
     let entry = gtk4::Entry::builder().placeholder_text(tr("Search")).hexpand(true).build();
     entry.add_css_class("launcher-query");
@@ -131,7 +130,7 @@ pub fn start(app: &gtk4::Application, options: &Options) -> Rc<Launcher> {
 
     let launcher = Rc::new_cyclic(|weak: &std::rc::Weak<Launcher>| {
         let weak = weak.clone();
-        let engine = Engine::new(options.usage_path.clone(), files, search_providers, move |rows| {
+        let engine = Engine::new(options.usage_path.clone(), files, Vec::new(), move |rows| {
             if let Some(launcher) = weak.upgrade() {
                 launcher.fill(&list::lines(rows));
             }
@@ -157,6 +156,7 @@ pub fn start(app: &gtk4::Application, options: &Options) -> Rc<Launcher> {
             selection: Cell::new(0),
             watches: RefCell::default(),
             apps_monitor: gio::AppInfoMonitor::get(),
+            discover_providers: !options.given_up,
         }
     });
     launcher.connect();
@@ -351,6 +351,11 @@ impl Launcher {
                 .collect(),
         );
         self.engine.reload_usage();
+        // A few small files: an application installed or removed since the last Show adds or
+        // drops its provider without a restart.
+        if self.discover_providers {
+            self.engine.set_providers(providers::discover(&providers::dirs()));
+        }
         self.content.set_height_request(place::panel_height(surface.monitor.geometry().height()));
         surface.show(self.content.upcast_ref());
         self.shown.replace(Some(surface.monitor.clone()));
