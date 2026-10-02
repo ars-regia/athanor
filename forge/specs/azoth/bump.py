@@ -14,6 +14,8 @@ on both sides. KERNEL_CHANNEL=stable takes the newest common series, lts the lon
 one. Without a pair the kernel stays where it is and a note says so. With the pair, the
 head commit of CachyOS/kernel-patches for the series and the commit of
 linux-cachyos/config in force at the date of the CachyOS release move as well.
+cosmic-comp (forge/specs/cosmic-comp): the newest stable F43 build on Bodhi against the spec's
+Version and fedora_release; a difference rewrites the spec and the archive pin, never auto-merges.
 Outside the kernel: the NVIDIA versions (open from the GitHub tags, legacy from RPM Fusion)
 within the pinned branch, and the digest of the base image of the Containerfiles, the system
 base quay.io base-atomic in system/Containerfile included. Every run also verifies the NVIDIA
@@ -22,6 +24,7 @@ pin moved or whose packages the repository republished. The kernel hash manifest
 them. Standard library only: it runs on the GitHub runner without installing anything.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -40,6 +43,9 @@ NVIDIA_LOCK = HERE.parents[2] / "system" / "nvidia" / "lock.py"
 LOCK_NOT_PUBLISHED = 3  # lock.py's exit code for a version the repository does not publish
 LOCK_STALE = 4  # lock.py verify: the repository publishes the version with other files or checksums
 KERNEL_MD = HERE / "KERNEL.md"
+COSMIC_COMP_DIR = HERE.parents[0] / "cosmic-comp"
+COSMIC_COMP_SPEC = COSMIC_COMP_DIR / "cosmic-comp.spec"
+COSMIC_COMP_RE = re.compile(r"^cosmic-comp-(\d+\.\d+\.\d+)-(\d+)\.fc43$")
 FEDORA_RELEASES = ("F43", "F44")  # in order of preference for the same patch level
 LTS_SERIES = "6.18"  # KERNEL_CHANNEL=lts: the longterm Fedora and CachyOS maintain
 KERNEL_RELEASES = "https://www.kernel.org/releases.json"
@@ -181,6 +187,75 @@ def head_commit(repo, path, until=None):
     if until:
         params["until"] = until
     return next(github(f"repos/{repo}/commits", **params))["sha"]
+
+
+# --- cosmic-comp --------------------------------------------------------------------------
+
+
+def cosmic_comp_nvrs():
+    """The Bodhi answer for the stable F43 builds of cosmic-comp."""
+    query = {"packages": "cosmic-comp", "releases": "F43", "status": "stable", "rows_per_page": 100}
+    return json.loads(http(f"{BODHI}?{urllib.parse.urlencode(query)}")[1])
+
+
+def cosmic_comp_newest(data):
+    """The newest `version-release.fc43` among the builds of a Bodhi answer."""
+    found = []
+    for update in data["updates"]:
+        for build in update["builds"]:
+            m = COSMIC_COMP_RE.match(build["nvr"])
+            if m:
+                found.append((vtuple(m.group(1)), int(m.group(2)), f"{m.group(1)}-{m.group(2)}.fc43"))
+    if not found:
+        sys.exit("cosmic-comp: Bodhi lists no stable F43 build")
+    return max(found)[2]
+
+
+def cosmic_comp_pin(spec):
+    """`version-release.fc43` of the spec: Fedora's build it is made from."""
+    version = re.search(r"^Version:\s*(\S+)$", spec, re.M)
+    release = re.search(r"^%global fedora_release (\S+)$", spec, re.M)
+    if not version or not release:
+        sys.exit("cosmic-comp.spec: Version or fedora_release not found")
+    return f"{version.group(1)}-{release.group(1)}"
+
+
+def cosmic_comp_spec(spec, nvr, commit, date):
+    """The spec rewritten for Fedora's build NVR: the Athanor suffix starts again at 1."""
+    version, release = COSMIC_COMP_RE.match(f"cosmic-comp-{nvr}").groups()
+    for pattern, value in (
+        (r"^(Version:\s*).*$", rf"\g<1>{version}"),
+        (r"^(%global fedora_release ).*$", rf"\g<1>{release}.fc43"),
+        (r"^(Release:\s*%\{fedora_release\}\.athanor).*$", r"\g<1>1"),
+        (r"^(%global commit ).*$", rf"\g<1>{commit}"),
+        (r"^(%global commitdatestring ).*$", rf"\g<1>{date}"),
+    ):
+        spec, n = re.subn(pattern, value, spec, flags=re.M)
+        if n != 1:
+            sys.exit(f"cosmic-comp.spec: {pattern} found {n} times")
+    return spec
+
+
+def cosmic_comp_move():
+    """{"old", "new"} when Bodhi's newest stable F43 build differs from the spec's, else None."""
+    old = cosmic_comp_pin(COSMIC_COMP_SPEC.read_text())
+    new = cosmic_comp_newest(cosmic_comp_nvrs())
+    return {"old": old, "new": new} if new != old else None
+
+
+def apply_cosmic_comp(move):
+    """Rewrites the spec and the pin of its archive. The patch is not touched: the DAG build
+    (%autosetup -p1) fails when it no longer applies, and a reviewer decides if upstream has it."""
+    version = move["new"].split("-")[0]
+    tag = github_commit(f"epoch-{version}")
+    date = tag["commit"]["committer"]["date"].replace("T", " ").replace("Z", " +0000")
+    COSMIC_COMP_SPEC.write_text(cosmic_comp_spec(COSMIC_COMP_SPEC.read_text(), move["new"], tag["sha"], date), newline="\n")
+    archive = http(f"https://github.com/pop-os/cosmic-comp/archive/epoch-{version}/cosmic-comp-{version}.tar.gz")[1]
+    (COSMIC_COMP_DIR / "SOURCES" / "sources.sha256").write_text(f"{hashlib.sha256(archive).hexdigest()}  cosmic-comp-{version}.tar.gz\n", newline="\n")
+
+
+def github_commit(ref):
+    return gh(f"https://api.github.com/repos/pop-os/cosmic-comp/commits/{ref}")[1]
 
 
 # --- NVIDIA and base image -----------------------------------------------------------
@@ -345,8 +420,10 @@ def compute():
         digest = image_digest(*ref.rsplit(":", 1))
         if digest != pinned:
             images[ref] = {"old": pinned, "new": digest}
+    cosmic_comp = cosmic_comp_move()
     return {
-        "changed": bool(new or images or locks),
+        "changed": bool(new or images or locks or cosmic_comp),
+        "cosmic_comp": cosmic_comp,
         "pins": pins,
         "new": new,
         "images": images,
@@ -374,6 +451,8 @@ def apply(result):
                 f"FROM {ref}@{change['old']}", f"FROM {ref}@{change['new']}"
             )
         cf.write_text(content, newline="\n")
+    if result["cosmic_comp"]:
+        apply_cosmic_comp(result["cosmic_comp"])
     for branch, version in result["locks"].items():
         lock_py("generate", branch, "--version", version)
     md, n = re.subn(
@@ -400,6 +479,17 @@ def body(result):
         f"| `system/nvidia/locks/{branch}.lock` | | regenerated at `{version}` |"
         for branch, version in result["locks"].items()
     ]
+    if result["cosmic_comp"]:
+        move = result["cosmic_comp"]
+        lines += [
+            f"| `cosmic-comp` | `{move['old']}` | `{move['new']}` |",
+            "",
+            "## cosmic-comp",
+            "",
+            "Fedora's stable F43 build moved. Check that `forge/specs/cosmic-comp/SOURCES/*.patch` "
+            "still applies (the DAG build fails when it does not) and whether upstream has merged "
+            "the fix; if so, drop `Patch0`.",
+        ]
     if result["notes"]:
         lines += ["", "## Notes", ""] + [f"- {n}" for n in result["notes"]]
     return "\n".join(lines) + "\n"

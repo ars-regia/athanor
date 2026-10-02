@@ -213,14 +213,15 @@ jobs:
       - name: Branch, commit, PR (auto-merge only on a green prep that leaves the system image alone)
         run: |
           set -euo pipefail
-          git add forge/specs/azoth system/Containerfile system/nvidia/locks
+          git add forge/specs/azoth forge/specs/cosmic-comp system/Containerfile system/nvidia/locks
           keys=$(git diff --cached -U0 -- forge/specs/azoth/pins.env | sed -n 's/^+\([A-Z_]\+\)=.*/\1/p')
           git diff --cached --quiet -- 'forge/specs/azoth/*/Containerfile' system/Containerfile || keys+=${keys:+$'\n'}"base image"
           git diff --cached --quiet -- system/nvidia/locks || keys+=${keys:+$'\n'}"NVIDIA locks"
+          git diff --cached --quiet -- forge/specs/cosmic-comp || keys+=${keys:+$'\n'}"cosmic-comp"
           # A new system base or NVIDIA lock changes the packages of the image: System Image
           # Check reports the difference and a person merges (doc_system_image.md, section 4).
           reviewed=false
-          git diff --cached --quiet -- system/Containerfile system/nvidia/locks || reviewed=true
+          git diff --cached --quiet -- system/Containerfile system/nvidia/locks forge/specs/cosmic-comp || reviewed=true
           title="chore(kernel): bump $(paste -sd, - <<< "$keys" | sed 's/,/, /g')"
           outcome=$(cat prep-outcome)
           [[ $outcome != REFRESH ]] || title+=" (patch refresh needed)"
@@ -232,7 +233,7 @@ jobs:
           git push -u origin "$branch"
           cat body.md prep.md > pr.md
           if [[ $reviewed == true ]]; then
-            printf '\n## Merge\n\nThis bump moves the system base image or an NVIDIA lock. System Image Check and a human review decide the merge: the package difference is in the summary of that check. No auto-merge.\n' >> pr.md
+            printf '\n## Merge\n\nThis bump moves the system base image, an NVIDIA lock or cosmic-comp. System Image Check and a human review decide the merge: the package difference is in the summary of that check. No auto-merge.\n' >> pr.md
           fi
           url=$(gh pr create --base "$GITHUB_REF_NAME" --head "$branch" --label kernel-bump --title "$title" --body-file pr.md)
           if [[ $reviewed == true ]]; then
