@@ -85,8 +85,11 @@ fn target_for(code: char, fields: &Fields<'_>) -> Result<Option<String>, String>
 /// literally. Inside a quoted section, single or double, or after a backslash, the
 /// specification leaves a code undefined and no quoting is right for every reader: the
 /// section may be the body of an inner `sh -c`, which parses it again. There the value goes
-/// in bare, and only when every character is alphanumeric or one of `/ . _ - + , : @ =`,
-/// which no shell reads as syntax; any other value refuses the launch.
+/// in bare, as GLib puts it. Only the target is untrusted: its value goes in bare only when
+/// every character is alphanumeric or one of `/ . _ - + , : @ =`, which no shell reads as
+/// syntax, and any other target refuses the launch. The entry's own values (`%c`, `%k`,
+/// `%i`) come from the author who wrote the line, so they go in as they are, and a line
+/// they leave unbalanced fails to parse.
 ///
 /// A target that starts with `-` is refused wherever its code stands: the application could
 /// read it as an option. A target the line has no code for is refused: the application would
@@ -126,14 +129,14 @@ pub(crate) fn expand(exec: &str, fields: &Fields<'_>) -> Result<Vec<String>, Str
                     if arg.starts_with('-') {
                         return Err("the file name would be read as an option".to_owned());
                     }
-                    insert(&mut line, &arg, quoted, "the file name")?;
+                    insert(&mut line, &arg, quoted, true)?;
                     used = true;
                 }
             }
-            'c' => insert(&mut line, fields.name, quoted, "the application's name")?,
+            'c' => insert(&mut line, fields.name, quoted, false)?,
             'k' => {
                 if let Some(location) = fields.location {
-                    insert(&mut line, location, quoted, "the entry's location")?;
+                    insert(&mut line, location, quoted, false)?;
                 }
             }
             // Two words, so only where the code is a word of its own.
@@ -146,7 +149,7 @@ pub(crate) fn expand(exec: &str, fields: &Fields<'_>) -> Result<Vec<String>, Str
                 }
                 if let Some(icon) = fields.icon {
                     line.push_str("--icon ");
-                    insert(&mut line, icon, quoted, "the icon")?;
+                    insert(&mut line, icon, quoted, false)?;
                 }
             }
             // Deprecated codes, removed.
@@ -176,8 +179,9 @@ enum Quoting {
 }
 
 /// Appends a field code's value to the raw `Exec` line: shell-quoted outside quotes, bare
-/// inside them when no character could be read as syntax, else refused (see `expand`).
-fn insert(line: &mut String, value: &str, quoted: bool, what: &str) -> Result<(), String> {
+/// inside them, where a `target` value is refused unless no character could be read as
+/// syntax (see `expand`).
+fn insert(line: &mut String, value: &str, quoted: bool, target: bool) -> Result<(), String> {
     if !quoted {
         let value = glib::shell_quote(value)
             .into_string()
@@ -185,8 +189,8 @@ fn insert(line: &mut String, value: &str, quoted: bool, what: &str) -> Result<()
         line.push_str(&value);
         return Ok(());
     }
-    if !value.chars().all(|c| c.is_alphanumeric() || "/._-+,:@=".contains(c)) {
-        return Err(format!("{what} cannot be passed safely to this application"));
+    if target && !value.chars().all(|c| c.is_alphanumeric() || "/._-+,:@=".contains(c)) {
+        return Err("the file name cannot be passed safely to this application".to_owned());
     }
     line.push_str(value);
     Ok(())
@@ -734,7 +738,8 @@ mod tests {
         // An escaped quote keeps the section open; a closed one ends it.
         assert!(expand(r#"sh -c "a \" %f""#, &hostile("/h/a b")).is_err());
         assert_eq!(expand(r#"sh -c "a" %f"#, &hostile("/h/a b")).unwrap(), ["sh", "-c", "a", "/h/a b"]);
-        assert!(expand(r#"app --title="%c""#, &FIELDS).is_err(), "the name holds a space");
+        // The entry's own values go in as they are.
+        assert_eq!(expand(r#"app --title "%c""#, &FIELDS).unwrap(), ["app", "--title", "Text Editor"]);
     }
 
     #[test]
