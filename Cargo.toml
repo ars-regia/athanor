@@ -113,7 +113,7 @@ zeroize = "1.8.1"
 subtle = "2.6.1"
 
 # eBPF / Kernel Instrumentation
-aya = "0.13.1"
+aya = "0.14.0"
 
 # System Utilities & CLI
 nix = "0.29.0"

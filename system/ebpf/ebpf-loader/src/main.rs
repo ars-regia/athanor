@@ -2,7 +2,7 @@
 
 use anyhow::Context;
 use aya::maps::{Array, HashMap};
-use aya::programs::{Xdp, XdpFlags};
+use aya::programs::{Xdp, XdpMode};
 use aya::{include_bytes_aligned, Ebpf};
 use aya_log::EbpfLogger;
 use clap::{Parser, ValueEnum};
@@ -113,11 +113,11 @@ async fn main() -> Result<(), anyhow::Error> {
     );
 
     // Attach XDP Program
-    let flags = match opt.mode {
-        XdpAttachMode::Auto => XdpFlags::default(),
-        XdpAttachMode::Skb => XdpFlags::SKB_MODE,
-        XdpAttachMode::Driver => XdpFlags::DRV_MODE,
-        XdpAttachMode::Hw => XdpFlags::HW_MODE,
+    let mode = match opt.mode {
+        XdpAttachMode::Auto => XdpMode::Default,
+        XdpAttachMode::Skb => XdpMode::Skb,
+        XdpAttachMode::Driver => XdpMode::Driver,
+        XdpAttachMode::Hw => XdpMode::Hardware,
     };
 
     let program: &mut Xdp = bpf
@@ -126,7 +126,7 @@ async fn main() -> Result<(), anyhow::Error> {
         .try_into()?;
     program.load()?;
     program
-        .attach(&opt.iface, flags)
+        .attach(&opt.iface, mode)
         .context(format!("Failed to attach XDP firewall to interface {}", opt.iface))?;
 
     info!("XDP Zero-Trust Firewall attached to {}!", opt.iface);
