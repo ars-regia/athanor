@@ -192,6 +192,9 @@ pub fn hit(calc: &Calc) -> Hit {
     }
 }
 
+/// The ECB's daily file is about 2 KiB; the user's copy is user-writable.
+const MAX_RATES_BYTES: u64 = 64 * 1024;
+
 /// The rates on disk: their date and the currencies they price, EUR being the base.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Rates {
@@ -208,8 +211,10 @@ impl Rates {
         ]
     }
 
+    /// The first file that reads, skipping a missing one and, with a warning, one larger
+    /// than `MAX_RATES_BYTES`.
     pub fn read(paths: &[PathBuf]) -> Option<Rates> {
-        let text = paths.iter().find_map(|path| std::fs::read_to_string(path).ok())?;
+        let text = paths.iter().find_map(|path| read_rates(path))?;
         let attribute = |name: &str| {
             let marker = format!("{name}='");
             text.match_indices(&marker)
@@ -231,6 +236,20 @@ impl Rates {
             .any(|word| self.codes.contains(word))
             || words.chars().any(|c| "€$£¥₹₩₽₺₪₫₴₦₱฿".contains(c))
     }
+}
+
+fn read_rates(path: &Path) -> Option<String> {
+    use std::io::Read;
+    let mut text = String::new();
+    std::fs::File::open(path).ok()?.take(MAX_RATES_BYTES + 1).read_to_string(&mut text).ok()?;
+    if text.len() as u64 > MAX_RATES_BYTES {
+        tracing::warn!(
+            "{} is larger than {MAX_RATES_BYTES} bytes and is ignored",
+            text::line(&path.display().to_string(), text::SUMMARY_CHARS)
+        );
+        return None;
+    }
+    Some(text)
 }
 
 #[cfg(test)]
@@ -330,13 +349,19 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("dir");
         let file = dir.join("eurofxref-daily.xml");
         std::fs::write(&file, "<Cube><Cube time='2025-07-28'><Cube currency='USD' rate='1.1'/><Cube currency='CHF' rate='0.9'/></Cube></Cube>").expect("write");
-        let rates = Rates::read(&[dir.join("absent.xml"), file]).expect("rates");
+        let rates = Rates::read(&[dir.join("absent.xml"), file.clone()]).expect("rates");
         assert_eq!(rates.date, "2025-07-28");
         assert!(rates.codes.contains("USD") && rates.codes.contains("EUR"));
         assert!(rates.involves(&Calc { expression: "100 USD".into(), result: "85,8 €".into() }));
         assert!(rates.involves(&Calc { expression: "10 CHF".into(), result: "11 CHF".into() }));
         assert!(!rates.involves(&Calc { expression: "2 + (2 × 3)".into(), result: "8".into() }));
         assert!(Rates::read(&[dir.join("absent.xml")]).is_none());
+        // Over the bound: ignored, and the next file is read.
+        let large = dir.join("large.xml");
+        let padding = " ".repeat(usize::try_from(MAX_RATES_BYTES).expect("small"));
+        std::fs::write(&large, format!("<Cube time='2099-01-01'><Cube currency='XXX' rate='1'/>{padding}")).expect("write");
+        assert_eq!(Rates::read(&[large.clone(), file]).expect("the next file").date, "2025-07-28");
+        assert!(Rates::read(&[large]).is_none());
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 }
