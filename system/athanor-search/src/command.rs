@@ -20,9 +20,39 @@ pub enum Refusal {
 }
 
 /// The line after `>`; `None` when the query does not start with it, which is the one test
-/// of command mode: a query that starts with `>` is a command, run or refused.
+/// of command mode: a query that starts with `>` is a command, run or refused. White space and
+/// invisible format characters before it do not count, so a pasted U+FEFF or U+200E cannot
+/// send a command to the web entry.
 fn line(query: &str) -> Option<&str> {
-    Some(query.trim_start().strip_prefix('>')?.trim())
+    Some(query.trim_start_matches(|c: char| c.is_whitespace() || is_format(c)).strip_prefix('>')?.trim())
+}
+
+/// Unicode general category Cf (format characters), as of Unicode 16.
+fn is_format(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{0600}'..='\u{0605}'
+            | '\u{061C}'
+            | '\u{06DD}'
+            | '\u{070F}'
+            | '\u{0890}'..='\u{0891}'
+            | '\u{08E2}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206F}'
+            | '\u{FEFF}'
+            | '\u{FFF9}'..='\u{FFFB}'
+            | '\u{110BD}'
+            | '\u{110CD}'
+            | '\u{13430}'..='\u{1343F}'
+            | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}'
+            | '\u{E0001}'
+            | '\u{E0020}'..='\u{E007F}'
+    )
 }
 
 fn argv(line: &str) -> Result<Vec<String>, Refusal> {
@@ -85,5 +115,14 @@ mod tests {
         assert_eq!(refusal("> ls\u{200B}"), Some(Refusal::Hidden));
         assert_eq!(refusal(&format!(">{}", "a".repeat(text::TITLE_CHARS + 1))), Some(Refusal::TooLong));
         assert!(hit("ls").is_none() && hit("x>").is_none(), "no prefix, no command");
+    }
+
+    #[test]
+    fn format_characters_before_the_prefix_do_not_hide_it() {
+        for query in ["\u{FEFF}>ls", "\u{200E}>ls", " \u{200B}\u{2060} >ls", "\u{E0001}>ls"] {
+            assert_eq!(parse(query), Some(vec!["ls".to_owned()]), "{query:?}");
+        }
+        assert_eq!(refusal("\u{FEFF}>\"unclosed"), Some(Refusal::Quoting));
+        assert!(hit("\u{FEFF}ls").is_none(), "no prefix, no command");
     }
 }
