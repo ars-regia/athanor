@@ -3,6 +3,9 @@
 //! changed. The file is a flat RON map of action names to command lines; comments in it
 //! are not kept when it is written again.
 //!
+//! A value the user chose is never overwritten: only an absent entry, the system file's value
+//! (the stock cosmic-launcher) or the command itself counts as ours to set.
+//!
 //! The read-modify-write takes no lock: a write by cosmic-settings between the read and the
 //! rename is lost, as cosmic-config's own writers would lose it. A copy that is a symbolic
 //! link is replaced by a regular file; the permissions of an existing copy are kept.
@@ -27,6 +30,8 @@ pub enum ShortcutError {
     Format { path: PathBuf, reason: String },
     #[error("neither XDG_CONFIG_HOME nor HOME is set")]
     NoConfig,
+    #[error("the command for {action} holds a control character other than a line feed")]
+    Command { action: String },
     #[error(transparent)]
     Io(#[from] io::Error),
 }
@@ -36,13 +41,42 @@ pub fn dir() -> Option<PathBuf> {
     cosmic_config::user_dir().map(|dir| cosmic_config::component(&dir, COMPONENT))
 }
 
-/// Binds `action` to `command` in the user's copy; `Ok(false)` when it already was.
-pub fn set_system_action(action: &str, command: &str) -> Result<bool, ShortcutError> {
-    let dir = dir().ok_or(ShortcutError::NoConfig)?;
-    set_in(&dir.join(KEY), action, command)
+/// What `set_system_action` found in the user's entry for the action, and did.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Binding {
+    /// The user's copy had no entry for the action: the command was added.
+    Added,
+    /// The entry held the system file's value: the command replaced it.
+    ReplacedDefault,
+    /// The entry already held the command: nothing was written.
+    Unchanged,
+    /// The user chose another command: it was left alone.
+    UserChoice,
 }
 
-fn set_in(path: &Path, action: &str, command: &str) -> Result<bool, ShortcutError> {
+/// Binds `action` to `command` in the user's copy, unless the user chose another command
+/// for it (see `Binding`).
+pub fn set_system_action(action: &str, command: &str) -> Result<Binding, ShortcutError> {
+    let dir = dir().ok_or(ShortcutError::NoConfig)?;
+    set_in(&dir.join(KEY), action, command, system_value(action).as_deref())
+}
+
+/// The action's value in the system file, which cosmic-comp lays beneath the user's copy.
+/// A system file that is absent or does not parse gives none: every user value then
+/// counts as the user's choice.
+fn system_value(action: &str) -> Option<String> {
+    let text = cosmic_config::key(&cosmic_config::system_dirs(), COMPONENT, KEY)?;
+    match parse(&text) {
+        Ok(entries) => entries.into_iter().find(|(name, _)| name == action).map(|(_, value)| value),
+        Err(reason) => {
+            tracing::warn!("the system's {KEY} of {COMPONENT} is not a map of actions to commands: {reason}");
+            None
+        }
+    }
+}
+
+/// `default` is the system file's value for the action.
+fn set_in(path: &Path, action: &str, command: &str, default: Option<&str>) -> Result<Binding, ShortcutError> {
     // The action is written as a bare name; anything else would corrupt the map.
     let mut scanner = Scanner { rest: action };
     if !matches!(scanner.ident(), Ok(name) if name == action) {
@@ -50,6 +84,10 @@ fn set_in(path: &Path, action: &str, command: &str) -> Result<bool, ShortcutErro
             path: path.to_owned(),
             reason: format!("{action:?} is not an action name"),
         });
+    }
+    // Only `\n` has an escape every reader of the file is known to accept.
+    if command.chars().any(|c| c.is_control() && c != '\n') {
+        return Err(ShortcutError::Command { action: action.to_owned() });
     }
     let mut text = String::new();
     match File::open(path) {
@@ -70,11 +108,18 @@ fn set_in(path: &Path, action: &str, command: &str) -> Result<bool, ShortcutErro
     } else {
         parse(&text).map_err(|reason| ShortcutError::Format { path: path.to_owned(), reason })?
     };
-    match entries.iter_mut().find(|(name, _)| name == action) {
-        Some((_, current)) if current == command => return Ok(false),
-        Some((_, current)) => command.clone_into(current),
-        None => entries.push((action.to_owned(), command.to_owned())),
-    }
+    let binding = match entries.iter_mut().find(|(name, _)| name == action) {
+        Some((_, current)) if current == command => return Ok(Binding::Unchanged),
+        Some((_, current)) if Some(current.as_str()) == default => {
+            command.clone_into(current);
+            Binding::ReplacedDefault
+        }
+        Some(_) => return Ok(Binding::UserChoice),
+        None => {
+            entries.push((action.to_owned(), command.to_owned()));
+            Binding::Added
+        }
+    };
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -87,7 +132,7 @@ fn set_in(path: &Path, action: &str, command: &str) -> Result<bool, ShortcutErro
             tracing::warn!(path = %path.display(), "the file's mode was not restored: {err}");
         }
     }
-    Ok(true)
+    Ok(binding)
 }
 
 fn render(entries: &[(String, String)]) -> String {
@@ -272,26 +317,61 @@ mod tests {
         assert!(parse("{ A: \"\\u41\" }").is_err());
     }
 
+    const STOCK: Option<&str> = Some("cosmic-launcher");
+
     #[test]
     fn an_absent_copy_gets_the_one_entry() {
         let path = scratch("absent");
-        assert!(set_in(&path, "Launcher", "gdbus call x").unwrap());
+        assert_eq!(set_in(&path, "Launcher", "gdbus call x", STOCK).unwrap(), Binding::Added);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\n    Launcher: \"gdbus call x\",\n}\n");
     }
 
     #[test]
-    fn the_user_entries_survive_and_a_second_call_writes_nothing() {
+    fn an_absent_entry_is_added_beside_the_others() {
+        let path = scratch("added");
+        std::fs::write(&path, "{\n    Terminal: \"foot\",\n}\n").unwrap();
+        assert_eq!(set_in(&path, "Launcher", "ours", STOCK).unwrap(), Binding::Added);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\n    Terminal: \"foot\",\n    Launcher: \"ours\",\n}\n");
+    }
+
+    #[test]
+    fn the_stock_value_is_replaced_and_a_second_call_writes_nothing() {
         let path = scratch("merge");
         std::fs::write(
             &path,
             "{\n    // mine\n    Terminal: \"foot\",\n    /* old */ Launcher: \"cosmic-launcher\"\n}",
         )
         .unwrap();
-        assert!(set_in(&path, "Launcher", "ours").unwrap());
+        assert_eq!(set_in(&path, "Launcher", "ours", STOCK).unwrap(), Binding::ReplacedDefault);
         let text = std::fs::read_to_string(&path).unwrap();
         assert_eq!(text, "{\n    Terminal: \"foot\",\n    Launcher: \"ours\",\n}\n");
-        assert!(!set_in(&path, "Launcher", "ours").unwrap());
+        assert_eq!(set_in(&path, "Launcher", "ours", STOCK).unwrap(), Binding::Unchanged);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    }
+
+    #[test]
+    fn a_value_the_user_chose_is_left_alone() {
+        let path = scratch("chosen");
+        let mine = "{\n    // mine\n    Launcher: \"my-launcher --fast\",\n}";
+        std::fs::write(&path, mine).unwrap();
+        assert_eq!(set_in(&path, "Launcher", "ours", STOCK).unwrap(), Binding::UserChoice);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), mine, "not even rewritten");
+        // With no readable system file, nothing the user wrote counts as the default.
+        let stock = "{ Launcher: \"cosmic-launcher\" }";
+        std::fs::write(&path, stock).unwrap();
+        assert_eq!(set_in(&path, "Launcher", "ours", None).unwrap(), Binding::UserChoice);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), stock);
+    }
+
+    #[test]
+    fn a_command_with_a_control_character_is_refused() {
+        let path = scratch("control");
+        for command in ["a\rb", "a\tb", "a\0b", "a\u{1b}[0m", "a\u{85}b"] {
+            assert!(matches!(set_in(&path, "Launcher", command, STOCK), Err(ShortcutError::Command { .. })), "{command:?}");
+        }
+        assert!(!path.exists(), "nothing was written");
+        assert_eq!(set_in(&path, "Launcher", "a\nb", STOCK).unwrap(), Binding::Added, "a line feed has its escape");
+        assert_eq!(parse(&std::fs::read_to_string(&path).unwrap()).unwrap(), [("Launcher".to_owned(), "a\nb".to_owned())]);
     }
 
     #[test]
@@ -299,7 +379,7 @@ mod tests {
         let path = scratch("foreign");
         let foreign = "{ Launcher: Some(\"x\") }";
         std::fs::write(&path, foreign).unwrap();
-        assert!(matches!(set_in(&path, "Launcher", "ours"), Err(ShortcutError::Format { .. })));
+        assert!(matches!(set_in(&path, "Launcher", "ours", STOCK), Err(ShortcutError::Format { .. })));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), foreign);
     }
 
@@ -307,14 +387,14 @@ mod tests {
     fn quotes_and_backslashes_round_trip() {
         let path = scratch("quotes");
         let command = r#"sh -c "echo \"a\\b\"""#;
-        set_in(&path, "Custom", command).unwrap();
+        set_in(&path, "Custom", command, None).unwrap();
         assert_eq!(parse(&std::fs::read_to_string(&path).unwrap()).unwrap(), [("Custom".to_owned(), command.to_owned())]);
     }
 
     #[test]
     fn an_action_that_is_not_a_name_is_refused() {
         let path = scratch("name");
-        assert!(matches!(set_in(&path, "A: \"x\", B", "c"), Err(ShortcutError::Format { .. })));
+        assert!(matches!(set_in(&path, "A: \"x\", B", "c", None), Err(ShortcutError::Format { .. })));
         assert!(!path.exists());
     }
 }

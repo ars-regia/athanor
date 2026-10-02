@@ -16,7 +16,7 @@ use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use athanor_compositor_client::shortcuts;
+use athanor_compositor_client::shortcuts::{self, Binding};
 use athanor_layout::loader;
 use athanor_unit::dirs::Dirs;
 use athanor_unit::{crash_loop, journal, sandbox};
@@ -120,9 +120,12 @@ fn main() -> glib::ExitCode {
         return glib::ExitCode::FAILURE;
     }
     i18n::init();
+    // Super is ours only where the user left it to the system (doc_launcher.md, LA8 and §6).
     match shortcuts::set_system_action("Launcher", bus::SHOW_COMMAND) {
-        Ok(true) => tracing::info!("Super now calls {}", bus::NAME),
-        Ok(false) => {}
+        Ok(Binding::Added) => tracing::info!("Super now calls {}; the user's shortcuts had no entry for it", bus::NAME),
+        Ok(Binding::ReplacedDefault) => tracing::info!("Super now calls {} instead of the system's default", bus::NAME),
+        Ok(Binding::Unchanged) => tracing::info!("Super already calls {}", bus::NAME),
+        Ok(Binding::UserChoice) => tracing::info!("Super keeps the command the user chose; it does not call {}", bus::NAME),
         Err(err) => tracing::warn!(error = %err, "Super is not bound to the launcher; it still opens from the bar"),
     }
 
