@@ -7,8 +7,15 @@
 # 2-5), starts what it opens behind a security context in its own unit (item 6), survives
 # localsearch stopped (item 7), shows hostile names as text and contains a decoder that
 # crashes or loops (item 8), stays within 80 MB PSS (item 10), survives hot-plug
-# without a restart (one empty window per output removal, kept for the process's life, as the
-# bar and the dock do; PSS bounded over three unplug cycles; Review Focus 4), and runs without files and providers after a crash loop (SH8).
+# without a restart (one window kept per output removal for the process's life, as the bar and
+# the dock do: a window that has shown keeps about 3.4 MB after its output leaves, so the 8 MB
+# PSS gate allows two such removals; Review Focus 4), keeps the keyboard focus right when it
+# toggles its layer surfaces (stage focus), and runs without files and providers after a crash loop (SH8).
+# Needs Athanor's cosmic-comp (the layer-surface focus patch, forge/specs/cosmic-comp) in the
+# guest. Before any stage the script checks the guest's /usr/bin/cosmic-comp: either the
+# installed package's release carries ".athanor" (a real image), or its sha256 equals
+# COSMIC_COMP_SHA256, which the operator passes for a scratch deploy (scripts/devvm/deploy.sh
+# of a locally built binary, which keeps Fedora's NVR). Otherwise the run stops at once.
 # Deploys the binaries from .scratch/shell-rig/bin (rig.sh build-launcher) and the units
 # and the activation file from forge/specs/athanor-launcher.
 # With no argument it runs every stage in order; with arguments, only those, in the order
@@ -28,7 +35,7 @@ DATA=$ROOT/forge/specs/athanor-launcher/athanor-launcher-1.0.0/data
 SHOTS=$ROOT/.scratch/launcher-acceptance
 PSS_LIMIT_KB=$((80 * 1024))
 SHOW_LIMIT_MS=150
-STAGES=(deploy activation search calc files windows launch localsearch hostile decoder memory hotplug crash-loop cleanup)
+STAGES=(deploy activation search calc files windows focus launch localsearch hostile decoder memory hotplug crash-loop cleanup)
 STAGE=
 CLEANED=0
 # Paths of the guest, expanded by its shell. What the guest keeps between runs and stages:
@@ -388,6 +395,10 @@ end_terms() {
         in_session "pkill -f \"[s]h $TERM_SCRIPT\""
     fi
 }
+write_term_script() {
+    # shellcheck disable=SC2016 # expanded by the guest's shell
+    printf '%s\n' '#!/bin/sh' "printf '\\033]0;%s\\007' \"\$1\"" 'head -c 4 > "$2"' 'exec sleep 600' | guest_put "$TERM_SCRIPT"
+}
 start_term() { # start_term TITLE OUT
     in_session "setsid -f cosmic-term -- sh $TERM_SCRIPT $1 $2 > /dev/null 2>&1"
 }
@@ -395,8 +406,7 @@ start_term() { # start_term TITLE OUT
 stage_windows() {
     local a=/tmp/athanor-launcher-acceptance-window-a b=/tmp/athanor-launcher-acceptance-window-b
     [[ $(unit is-active) == active ]] || fresh_start
-    # shellcheck disable=SC2016 # expanded by the guest's shell
-    printf '%s\n' '#!/bin/sh' "printf '\\033]0;%s\\007' \"\$1\"" 'head -c 4 > "$2"' 'exec sleep 600' | guest_put "$TERM_SCRIPT"
+    write_term_script
     end_terms
     in_session "rm -f $a $b"
     start_term acceptance-window $a
@@ -415,9 +425,46 @@ stage_windows() {
     [[ -z $(in_session "cat $b") ]] || fail "the window that held the focus received the keys: '$(in_session "cat $b")'"
     end_terms
     in_session "rm -f $a $b"
-    # Closing the focused window leaves cosmic-comp without a keyboard for the next launcher
-    # (reported): a new login.
-    relogin
+}
+
+require_patched_compositor() {
+    local release sha
+    release=$(guest_ssh "rpm -q --qf '%{RELEASE}' cosmic-comp") || fail "rpm -q cosmic-comp failed in the guest"
+    [[ $release == *.athanor* ]] && return 0
+    sha=$(guest_ssh "sha256sum /usr/bin/cosmic-comp | cut -d' ' -f1") || fail "cannot hash /usr/bin/cosmic-comp in the guest"
+    [[ -n ${COSMIC_COMP_SHA256:-} && $sha == "$COSMIC_COMP_SHA256" ]] && return 0
+    fail "the guest's cosmic-comp is not Athanor's patched build (release $release, sha256 $sha): deploy it, or pass its sha256 in COSMIC_COMP_SHA256"
+}
+
+# The two defects of cosmic-comp 1.8.0 that Athanor's patch fixes (the launcher keeps its layer
+# surfaces mapped and only switches keyboard_interactivity between None and Exclusive).
+stage_focus() {
+    local a=/tmp/athanor-launcher-acceptance-focus
+    [[ $(unit is-active) == active ]] || fresh_start
+    write_term_script
+    end_terms
+    # Check 1: no window left on the workspace, so the focus stack is empty.
+    in_session "rm -f $a"
+    start_term acceptance-focus $a
+    sleep 3
+    end_terms
+    sleep 3
+    open_launcher
+    type_keys '2+2*3'
+    wait_until 10 has_row "8, Calculation" ||
+        fail "compositor defect: with the last window closed, the shown launcher got no keys (cosmic-comp without the layer-surface focus patch): rows '$(rows | section 1 | tr '\n' '|')'"
+    close_launcher || fail "the launcher does not close"
+    # Check 2: Escape must give the keyboard back to the window, not leave it on the hidden surface.
+    start_term acceptance-focus $a
+    sleep 3
+    open_launcher
+    close_launcher || fail "the launcher does not close"
+    sleep 1
+    type_keys qqqq @enter
+    wait_until 8 in_session "test \"\$(cat $a)\" = qqqq" ||
+        fail "compositor defect: after Escape the keys went to the hidden launcher, not to the window (cosmic-comp without the layer-surface focus patch): '$(in_session "cat $a")'"
+    end_terms
+    in_session "rm -f $a"
 }
 
 app_units() {
@@ -473,9 +520,6 @@ stage_launch() {
     expected='https://duckduckgo.com/?q=xqzjv%20a%3Fb%26c%23d'
     wait_until 10 in_session "test -s $HTTPS_OUT" || fail "the fixture handler received nothing (the launcher resolved another browser?)"
     [[ $(in_session "cat $HTTPS_OUT") == "$expected" ]] || fail "the handler received '$(in_session "cat $HTTPS_OUT")', want '$expected'"
-    # Closing the focused window leaves cosmic-comp without a keyboard for the next
-    # launcher (reported): a new login.
-    relogin
 }
 
 stage_localsearch() {
@@ -894,8 +938,6 @@ stage_hotplug() {
     # one shown, may add no more than 8 MB.
     echo "hotplug: launcher PSS $pss0 kB at the start, $pss1 kB after two cycles, $pss2 kB after the shown one, $pss3 kB after the fourth unplug"
     ((pss3 - pss0 <= 8 * 1024)) || fail "PSS grew from $pss0 to $pss3 kB over the unplug cycles (limit 8192 kB)"
-    # Closing the focused window leaves cosmic-comp without a keyboard for the next launcher.
-    relogin
 }
 
 stage_crash-loop() {
@@ -910,9 +952,6 @@ stage_crash-loop() {
     fresh_start
     search quetzalcoatl "report.odt, File"
     close_launcher || fail "the launcher does not close"
-    # cosmic-comp 1.8 leaves the next launcher without a keyboard once one that was shown has
-    # ended (the same defect as the other relogins here): a new login, then the kills.
-    relogin
     fresh_start
     since=$(now)
     for round in 1 2 3 4 5; do
@@ -997,6 +1036,8 @@ run=("$@")
 for STAGE in "${run[@]}"; do
     [[ " ${STAGES[*]} " == *" $STAGE "* ]] || die "unknown stage '$STAGE': one of ${STAGES[*]}"
 done
+STAGE=precondition
+require_patched_compositor
 trap cleanup_on_exit EXIT
 for STAGE in "${run[@]}"; do
     "stage_$STAGE"
