@@ -79,25 +79,43 @@ fn target_for(code: char, fields: &Fields<'_>) -> Result<Option<String>, String>
 
 /// The arguments of an `Exec` line, with its field codes expanded (Desktop Entry
 /// Specification, "The Exec key") in GLib's order: each code is replaced in the raw line by
-/// its value, shell-quoted, and only then is the line split into words. A value therefore
-/// stays one word wherever its code stands, even inside a quoted `sh -c` body. A target the
-/// line has no code for is refused: the application would start without it. So is a target
-/// that stands alone as an argument starting with `-`: the application would read it as an
-/// option.
+/// its value, and only then is the line split into words.
+///
+/// A code outside quotes gets its value shell-quoted, so the value is one word, read
+/// literally. Inside a quoted section, single or double, or after a backslash, the
+/// specification leaves a code undefined and no quoting is right for every reader: the
+/// section may be the body of an inner `sh -c`, which parses it again. There the value goes
+/// in bare, and only when every character is alphanumeric or one of `/ . _ - + , : @ =`,
+/// which no shell reads as syntax; any other value refuses the launch.
+///
+/// A target that starts with `-` is refused wherever its code stands: the application could
+/// read it as an option. A target the line has no code for is refused: the application would
+/// start without it.
 pub(crate) fn expand(exec: &str, fields: &Fields<'_>) -> Result<Vec<String>, String> {
-    let quote = |value: &str| {
-        glib::shell_quote(value)
-            .into_string()
-            .map_err(|_| "a quoted value is not UTF-8".to_owned())
-    };
     let mut line = String::with_capacity(exec.len());
     let mut used = false;
-    let mut chars = exec.char_indices();
+    // The quoting `shell_parse_argv` will read, up to the current character.
+    let mut quoting = Quoting::None;
+    let mut escaped = false;
+    let mut chars = exec.char_indices().peekable();
     while let Some((at, c)) = chars.next() {
         if c != '%' {
             line.push(c);
+            if std::mem::take(&mut escaped) {
+                continue;
+            }
+            match (quoting, c) {
+                (Quoting::None, '\\') => escaped = true,
+                (Quoting::None, '\'') => quoting = Quoting::Single,
+                (Quoting::None, '"') => quoting = Quoting::Double,
+                (Quoting::Single, '\'') | (Quoting::Double, '"') => quoting = Quoting::None,
+                // Inside double quotes a backslash escapes only `"` and itself, for the quoting.
+                (Quoting::Double, '\\') => escaped = matches!(chars.peek(), Some((_, '"' | '\\'))),
+                _ => {}
+            }
             continue;
         }
+        let quoted = quoting != Quoting::None || std::mem::take(&mut escaped);
         let Some((code_at, code)) = chars.next() else {
             return Err("the Exec line ends with a lone %".to_owned());
         };
@@ -105,14 +123,17 @@ pub(crate) fn expand(exec: &str, fields: &Fields<'_>) -> Result<Vec<String>, Str
             '%' => line.push('%'),
             'f' | 'F' | 'u' | 'U' => {
                 if let Some(arg) = target_for(code, fields)? {
-                    line.push_str(&quote(&arg)?);
+                    if arg.starts_with('-') {
+                        return Err("the file name would be read as an option".to_owned());
+                    }
+                    insert(&mut line, &arg, quoted, "the file name")?;
                     used = true;
                 }
             }
-            'c' => line.push_str(&quote(fields.name)?),
+            'c' => insert(&mut line, fields.name, quoted, "the application's name")?,
             'k' => {
                 if let Some(location) = fields.location {
-                    line.push_str(&quote(location)?);
+                    insert(&mut line, location, quoted, "the entry's location")?;
                 }
             }
             // Two words, so only where the code is a word of its own.
@@ -125,7 +146,7 @@ pub(crate) fn expand(exec: &str, fields: &Fields<'_>) -> Result<Vec<String>, Str
                 }
                 if let Some(icon) = fields.icon {
                     line.push_str("--icon ");
-                    line.push_str(&quote(icon)?);
+                    insert(&mut line, icon, quoted, "the icon")?;
                 }
             }
             // Deprecated codes, removed.
@@ -141,19 +162,34 @@ pub(crate) fn expand(exec: &str, fields: &Fields<'_>) -> Result<Vec<String>, Str
         .into_iter()
         .map(|word| word.into_string().map_err(|_| "an argument is not UTF-8".to_owned()))
         .collect::<Result<Vec<String>, String>>()?;
-    if let Some(target) = fields.target {
-        let values = [Some(target.uri), target.path];
-        if argv
-            .iter()
-            .any(|arg| arg.starts_with('-') && values.contains(&Some(arg.as_str())))
-        {
-            return Err("the file name would be read as an option".to_owned());
-        }
-        if !used {
-            return Err("the application does not take a file to open".to_owned());
-        }
+    if fields.target.is_some() && !used {
+        return Err("the application does not take a file to open".to_owned());
     }
     Ok(argv)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Quoting {
+    None,
+    Single,
+    Double,
+}
+
+/// Appends a field code's value to the raw `Exec` line: shell-quoted outside quotes, bare
+/// inside them when no character could be read as syntax, else refused (see `expand`).
+fn insert(line: &mut String, value: &str, quoted: bool, what: &str) -> Result<(), String> {
+    if !quoted {
+        let value = glib::shell_quote(value)
+            .into_string()
+            .map_err(|_| "a quoted value is not UTF-8".to_owned())?;
+        line.push_str(&value);
+        return Ok(());
+    }
+    if !value.chars().all(|c| c.is_alphanumeric() || "/._-+,:@=".contains(c)) {
+        return Err(format!("{what} cannot be passed safely to this application"));
+    }
+    line.push_str(value);
+    Ok(())
 }
 
 /// An absolute path for `program`, searched in the shell's `PATH`.
@@ -650,21 +686,55 @@ mod tests {
         let file = with("-rf", Some("-rf"));
         assert!(expand("viewer %f", &file).is_err());
         assert!(expand("viewer %u", &file).is_err());
-        // Inside a longer word it cannot be read as one.
-        assert_eq!(expand("viewer --file=%f", &file).unwrap(), ["viewer", "--file=-rf"]);
+        // Wherever the code stands: inside a word, inside quotes.
+        assert!(expand("viewer --file=%f", &file).is_err());
+        assert!(expand(r#"viewer "%f""#, &file).is_err());
     }
 
     #[test]
-    fn a_code_inside_a_shell_body_cannot_inject() {
+    fn a_code_outside_quotes_cannot_inject() {
         let name = "/h/x$(id>/tmp/p).png";
         let file = Fields {
             target: Some(Target { uri: "file:///h/x%24(id%3E/tmp/p).png", path: Some(name) }),
             ..FIELDS
         };
-        let argv = expand(r#"sh -c "echo %f""#, &file).unwrap();
-        assert_eq!(argv, ["sh", "-c", "echo '/h/x$(id>/tmp/p).png'"]);
+        let argv = expand(r#"sh -c 'printf %%s "$1"' sh %f"#, &file).unwrap();
+        assert_eq!(argv, ["sh", "-c", r#"printf %s "$1""#, "sh", name]);
         let out = std::process::Command::new(&argv[0]).args(&argv[1..]).output().unwrap();
-        assert_eq!(String::from_utf8(out.stdout).unwrap(), format!("{name}\n"), "sh printed the name literally");
+        assert_eq!(String::from_utf8(out.stdout).unwrap(), name, "sh printed the name literally");
+        // The same name inside a quoted body is refused (residual-rereview.md, I1).
+        assert!(expand(r#"sh -c "echo %f""#, &file).is_err());
+    }
+
+    #[test]
+    fn a_code_inside_quotes_takes_only_a_plain_value() {
+        let hostile = |path: &'static str| Fields {
+            target: Some(Target { uri: "file:///h/hostile", path: Some(path) }),
+            ..FIELDS
+        };
+        for (exec, path) in [
+            (r#"sh -c "viewer '%f'""#, "/h/x;touch y.png"),
+            (r#"sh -c "viewer '%f'""#, "/h/x|touch y.png"),
+            (r#"sh -c "viewer '%f'""#, "/h/x\ntouch y.png"),
+            (r#"sh -c "viewer \"%f\"""#, "/h/x$(id>/tmp/p).png"),
+            (r#"sh -c 'viewer %f'"#, "/h/x;printf${IFS}PWN;.png"),
+            (r#"viewer "%f""#, r#"/h/a" "-rf"#),
+            (r#"viewer \%f"#, "/h/a b.png"),
+        ] {
+            let err = expand(exec, &hostile(path)).unwrap_err();
+            assert!(err.contains("cannot be passed safely"), "{exec} with {path:?}: {err}");
+        }
+        let plain = with("file:///h/Ünïcode-1_2+a,b:c@d=e.png", Some("/h/Ünïcode-1_2+a,b:c@d=e.png"));
+        assert_eq!(expand(r#"viewer "%f""#, &plain).unwrap(), ["viewer", "/h/Ünïcode-1_2+a,b:c@d=e.png"]);
+        assert_eq!(
+            expand(r#"sh -c "viewer %f""#, &plain).unwrap(),
+            ["sh", "-c", "viewer /h/Ünïcode-1_2+a,b:c@d=e.png"]
+        );
+        assert_eq!(expand(r#"sh -c 'viewer %f'"#, &plain).unwrap(), ["sh", "-c", "viewer /h/Ünïcode-1_2+a,b:c@d=e.png"]);
+        // An escaped quote keeps the section open; a closed one ends it.
+        assert!(expand(r#"sh -c "a \" %f""#, &hostile("/h/a b")).is_err());
+        assert_eq!(expand(r#"sh -c "a" %f"#, &hostile("/h/a b")).unwrap(), ["sh", "-c", "a", "/h/a b"]);
+        assert!(expand(r#"app --title="%c""#, &FIELDS).is_err(), "the name holds a space");
     }
 
     #[test]
@@ -688,9 +758,7 @@ mod tests {
         assert_eq!(expand("viewer %f", &file).unwrap(), ["viewer", "/h/it's.txt"]);
         let named = Fields { name: "Bob's \"Editor\"", ..FIELDS };
         assert_eq!(expand("app --title=%c", &named).unwrap(), ["app", "--title=Bob's \"Editor\""]);
-        let argv = expand(r#"sh -c "echo %f""#, &file).unwrap();
-        let out = std::process::Command::new(&argv[0]).args(&argv[1..]).output().unwrap();
-        assert_eq!(String::from_utf8(out.stdout).unwrap(), "/h/it's.txt\n");
+        assert!(expand(r#"sh -c "echo %f""#, &file).is_err(), "a quote inside quotes is refused");
     }
 
     fn run(exec: &str) -> Result<Vec<String>, String> {
