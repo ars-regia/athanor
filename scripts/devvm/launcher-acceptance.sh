@@ -6,8 +6,9 @@
 # Flatpak applications, the calculator with dated rates, files by content, windows (items
 # 2-5), starts what it opens behind a security context in its own unit (item 6), survives
 # localsearch stopped (item 7), shows hostile names as text and contains a decoder that
-# crashes or loops (item 8), stays within 80 MB PSS (item 10), never leaks or restarts on
-# hot-plug (Review Focus 4), and runs without files and providers after a crash loop (SH8).
+# crashes or loops (item 8), stays within 80 MB PSS (item 10), survives hot-plug
+# without a restart (one empty window per output removal, kept for the process's life, as the
+# bar and the dock do; PSS bounded over three unplug cycles; Review Focus 4), and runs without files and providers after a crash loop (SH8).
 # Deploys the binaries from .scratch/shell-rig/bin (rig.sh build-launcher) and the units
 # and the activation file from forge/specs/athanor-launcher.
 # With no argument it runs every stage in order; with arguments, only those, in the order
@@ -552,18 +553,33 @@ decoder_args() { # decoder_args image|pdf: the -p arguments of systemd-run
 }
 
 NIX_SOCKET=/nix/var/nix/daemon-socket/socket
-CONNECT_NIX="import socket; s = socket.socket(socket.AF_UNIX); s.connect('$NIX_SOCKET')"
+# Prints the errno name of a refused connection, or "connected".
+CONNECT_NIX="import errno, socket
+try:
+    socket.socket(socket.AF_UNIX).connect('$NIX_SOCKET')
+    print('connected')
+except OSError as error:
+    print(errno.errorcode[error.errno])"
 
-# From inside a decoder unit of either kind, the nix daemon is unreachable; the same
-# connection works outside it, so the check can fail.
+# Runs python3 -c CODE in a unit with the properties of a decoder KIND, as render.rs does.
+in_decoder_unit() { # in_decoder_unit KIND CODE
+    # shellcheck disable=SC2046,SC2086 # decoder_args builds quoted arguments for the guest's shell
+    in_session systemd-run --user --pipe --wait --collect --quiet $(decoder_args "$1") python3 -c "\"$2\"" 2> /dev/null
+}
+
+# From inside a decoder unit of either kind, the nix daemon is unreachable, and for the reason
+# the unit's properties give; the same connection works outside it, and a program that
+# connects nothing runs under the same properties, so the check can fail.
 check_nix_unreachable() {
-    local kind
-    in_session python3 -c "\"$CONNECT_NIX\"" || fail "the nix daemon socket does not accept a connection outside the decoder: no control for the check"
+    local kind got
+    [[ $(in_session python3 -c "\"$CONNECT_NIX\"") == connected ]] || fail "the nix daemon socket does not accept a connection outside the decoder: no control for the check"
     for kind in image pdf; do
-        # shellcheck disable=SC2046,SC2086 # decoder_args builds quoted arguments for the guest's shell
-        if in_session systemd-run --user --pipe --wait --collect --quiet $(decoder_args $kind) python3 -c "\"$CONNECT_NIX\"" 2> /dev/null; then
-            fail "the $kind decoder unit reaches the nix daemon socket"
-        fi
+        in_decoder_unit $kind pass || fail "the $kind decoder unit's properties do not let python3 -c pass run: the check below would pass for any reason"
+        got=$(in_decoder_unit $kind "$CONNECT_NIX")
+        case $kind in
+        pdf) [[ $got == EPERM ]] || fail "the pdf decoder unit's connection to the nix daemon gave '$got', want EPERM from SystemCallFilter=~@network-io" ;;
+        image) [[ $got == ENOENT || $got == EACCES ]] || fail "the image decoder unit's connection to the nix daemon gave '$got', want ENOENT or EACCES from InaccessiblePaths" ;;
+        esac
     done
 }
 
@@ -617,6 +633,33 @@ for number in range(1, 7):
         handle.write(PDF)
 
 
+def slow_pdf():
+    """A valid one-page PDF of 10^6 filled rectangles: poppler needs longer than the 250 ms
+    between two selections to draw it, so the preview's cancel has a decoder to stop."""
+    content = zlib.compress(b"".join(b"%d %d 3 3 re f\n" % (n % 500, n // 2000) for n in range(1_000_000)))
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 500 500] /Contents 4 0 R >>",
+        b"<< /Length %d /Filter /FlateDecode >>\nstream\n" % len(content) + content + b"\nendstream",
+    ]
+    out = b"%PDF-1.4\n"
+    offsets = []
+    for number, body in enumerate(objects, 1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % number + body + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    out += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+    return out + b"trailer\n<< /Root 1 0 R /Size %d >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
+
+
+SLOW = slow_pdf()
+for number in range(1, 7):
+    with open(os.path.join(folder, f"slowpdf-{number}.pdf"), "wb") as handle:
+        handle.write(SLOW)
+
+
 def chunk(kind, data):
     body = kind + data
     return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
@@ -658,6 +701,18 @@ decode_one() { # decode_one QUERY NAME KIND
     close_launcher || fail "the launcher does not close"
 }
 
+# The [Service] lines of a transient unit that decoder_args covers, sorted: what systemd-run
+# adds for --pipe, the command and the task cap (checked on its own) are left out.
+unit_properties() { sed -n '/^\[Service\]/,$p' | grep -vE '^(\[|ExecStart|TasksMax=|Standard|SendSIGKILL|RemainAfterExit)' | sort; }
+
+# The transient unit file of a unit started with decoder_args KIND, read before it ends.
+reference_unit_properties() { # reference_unit_properties KIND
+    # shellcheck disable=SC2046,SC2086 # decoder_args builds quoted arguments for the guest's shell
+    in_session "systemd-run --user --collect --quiet --unit=launcher-acceptance-ref-$1 $(decoder_args "$1") sleep 3 &&
+        cat /run/user/\$(id -u)/systemd/transient/launcher-acceptance-ref-$1.service" ||
+        fail "the reference unit for $1 did not start"
+}
+
 # Every decoder unit the sampler caught has the properties render.rs sets.
 check_live_units() { # check_live_units KIND
     local file found=0 cores expected
@@ -674,6 +729,12 @@ check_live_units() { # check_live_units KIND
         image) expected=$((32 + 4 * cores)) ;;
         esac
         grep -qx "TasksMax=$expected" <<< "$props" || fail "$1 unit: TasksMax is not $expected: $props"
+        # The whole property set: a reference unit made from decoder_args (the hand copy of
+        # render.rs) is read back by systemd, so both sides are in its own spelling.
+        local reference differences
+        reference=$(reference_unit_properties "$1")
+        differences=$(diff <(unit_properties <<< "$reference") <(unit_properties <<< "$props")) ||
+            fail "$1 unit: the live unit differs from decoder_args (< reference, > live): $differences"
     done
     ((found)) || fail "no live $1 decoder unit was caught by the sampler (5 ms): the properties were not read"
 }
@@ -685,6 +746,7 @@ stage_decoder() {
     write_decoder_fixtures
     wait_until 120 indexed hostile-png hostile-png.png || fail "localsearch does not list hostile-png.png"
     wait_until 120 indexed hostile-pdf-1 hostile-pdf-1.pdf || fail "localsearch does not list hostile-pdf-1.pdf"
+    wait_until 120 indexed slowpdf-5 slowpdf-5.pdf || fail "localsearch does not list slowpdf-5.pdf"
     wait_until 120 indexer_idle || fail "the indexer is not idle after 120 s"
     # The PDF kind first, then the image kind: the sampler's properties are checked after each.
     decode_one hostile-pdf-1 hostile-pdf-1.pdf pdf
@@ -692,13 +754,13 @@ stage_decoder() {
     decode_one hostile-png hostile-png.png image
     check_live_units image
     check_nix_unreachable
-    # Preview cancel, end to end: an arrow key held over five hostile PDFs, one selection every
+    # Preview cancel, end to end: an arrow key held over five slow PDFs, one selection every
     # 250 ms (longer than the preview's 100 ms delay), so each starts a decoder that the next
-    # selection cancels. One unit at a time; none left 6 s after the release.
+    # selection cancels while it still draws. One unit at a time; none left 6 s after the release.
     pid=$(unit show -p MainPID --value)
     since=$(now)
     start_sampler 24
-    search hostile-pdf "hostile-pdf-5.pdf, File" # the list shows five files per group
+    search slowpdf "slowpdf-5.pdf, File" # the list shows five files per group
     type_keys @up*8:0.05 # to the first file: a late answer leaves the selection on the Web row
     sleep 1
     type_keys @down*4:0.25
@@ -710,7 +772,12 @@ stage_decoder() {
     [[ $(unit show -p MainPID --value) == "$pid" ]] || fail "the launcher's MainPID changed during the held key"
     (($(decoder_journal "$since" | grep -c '^Started athanor-preview-') >= 3)) ||
         fail "the held key started fewer than 3 decoders: $(decoder_journal "$since" | tr '\n' '|')"
-    echo "decoder: held key, at most $(in_session cat "$SAMPLES.max") unit(s) at once, none left after 6 s"
+    # The cancelled decoders ended by stop, not by their own exit: the slow ones outlive the
+    # 250 ms between two selections, so the unit is stopped while it draws.
+    local stopped
+    stopped=$(decoder_journal "$since" | grep -c '^Stopped athanor-preview-')
+    ((stopped >= 2)) || fail "the held key stopped $stopped decoder units, want at least 2: $(decoder_journal "$since" | tr '\n' '|')"
+    echo "decoder: held key, $stopped units ended by stop; at most $(in_session cat "$SAMPLES.max") unit(s) at once, none left after 6 s"
     note_dconf "$since"
     close_launcher || fail "the launcher does not close"
 }
