@@ -60,7 +60,8 @@ I nomi di percorso seguono le stesse regole: 76 directory di crate, i file sotto
 
 - Le parole generiche: `kernel-build.yml`, `kernel-bump.yml`, `kernel-weekly.yml`,
   il job `Kernel gate` (è il check richiesto dalla protezione del branch), `forge`,
-  `system`, la label `kernel-bump`, il ramo `bump/kernel-<data>`.
+  `system`, le label `kernel-bump` e `system-bump`, i rami `bump/kernel-<data>` e
+  `bump/system-<data>`.
 - Tutto ciò che è upstream: Fedora, CachyOS, NVIDIA, Firecracker, i nomi dei bcond
   e dei config di `kernel.spec`.
 - La storia git. Nessun rewrite, nessun amend: la rinomina è commit nuovi.

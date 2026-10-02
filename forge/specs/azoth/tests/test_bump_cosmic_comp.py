@@ -73,8 +73,9 @@ class Independence(unittest.TestCase):
 
     def test_the_kernel_path_never_looks_up_cosmic_comp(self):
         stub = {"changed": False, "pins": {}, "new": {}, "images": {}, "locks": {}, "notes": []}
-        with mock.patch.object(bump, "cosmic_comp_move", never), mock.patch.object(bump, "cosmic_comp_nvrs", never), mock.patch.object(bump, "compute", return_value=stub), mock.patch.object(sys, "stdout"):
-            self.run_main("check")
+        for group in ("kernel", "system"):
+            with self.subTest(group=group), mock.patch.object(bump, "cosmic_comp_move", never), mock.patch.object(bump, "cosmic_comp_nvrs", never), mock.patch.object(bump, "compute", return_value=stub), mock.patch.object(sys, "stdout"):
+                self.run_main("check", "--group", group)
 
     def test_a_cosmic_comp_failure_stays_in_its_own_run(self):
         with mock.patch.object(bump, "cosmic_comp_nvrs", side_effect=OSError("bodhi down")), mock.patch.object(bump, "compute", never):

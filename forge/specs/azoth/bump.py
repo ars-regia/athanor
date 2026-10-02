@@ -1,14 +1,28 @@
 #!/usr/bin/env python3
 """The bump bot of the Athanor kernel (docs/architecture/doc_kernel_build.md, section 8).
 
-    bump.py check   prints to stdout a JSON with the current pins, the new ones and the notes
-    bump.py apply   rewrites pins.env, the FROM lines of the Containerfiles and the pins
-                    table of KERNEL.md; prints the PR body (Markdown) to stdout
-    bump.py cosmic-comp check|apply OUT_DIR   the cosmic-comp tracking alone (below), its own PR;
-                    apply writes OUT_DIR/title and OUT_DIR/body.md, and only when something moved
-    bump.py verify  verifies only the NVIDIA locks at their pins against the repositories and
-                    exits non-zero naming each lock that is stale or gone; the workflow runs it
-                    while a bump PR is open, when check and apply do not run
+    bump.py check --group kernel|system   prints to stdout a JSON with the current pins, the
+                                          new ones and the notes of that group
+    bump.py apply --group kernel|system   rewrites the files of that group; prints the PR body
+                                          (Markdown) to stdout
+    bump.py cosmic-comp check|apply OUT_DIR   the cosmic-comp tracking alone (below), its own
+                                          PR; apply writes OUT_DIR/title and OUT_DIR/body.md,
+                                          and only when something moved
+    bump.py verify                        verifies only the NVIDIA locks at their pins against
+                                          the repositories and exits non-zero naming each stale
+                                          lock (a version gone is a note); the workflow runs it while a
+                                          system bump PR is open, when check and apply do not
+
+Two groups, one pull request each, because they are verified differently
+(docs/architecture/doc_build_ordering.md, O7 and O8):
+
+  kernel   pins.env, the pins table of KERNEL.md, the FROM lines of the kernel's Containerfiles
+           (forge/specs/azoth/{builder,boot,nvidia}) and the NVIDIA lock of a branch whose pin
+           moves. Kernel Build proves it before azoth:<nvr> exists; System Image Check skips
+           the images of a pure pin bump.
+  system   the FROM lines of system/Containerfile and the NVIDIA locks the repository
+           republished at an unchanged version. System Image Check builds the three images
+           against the published kernel and reports the package difference a person reviews.
 
 Kernel pair (spec, section 2): for the X.Y series that both Fedora (stable, F43 then F44)
 and CachyOS (GitHub releases of CachyOS/linux) ship, the highest patch level X.Y.Z present
@@ -20,10 +34,11 @@ cosmic-comp (forge/specs/cosmic-comp): the newest stable F43 build on Bodhi agai
 Version and fedora_release; a difference rewrites the spec and the archive pin. It runs on its own
 (`cosmic-comp-bump.yml`, its own branch and PR, never auto-merged), apart from the kernel bump.
 Outside the kernel: the NVIDIA versions (open from the GitHub tags, legacy from RPM Fusion)
-within the pinned branch, and the digest of the base image of the Containerfiles, the system
-base quay.io base-atomic in system/Containerfile included. Every run also verifies the NVIDIA
-locks in system/nvidia/locks against the repository metadata and regenerates a lock whose
-pin moved or whose packages the repository republished. The kernel hash manifests are not here: `build.sh --stage manifest` and `nvidia.sh manifest` write
+within the pinned branch, and the digest of the base image of each group's Containerfiles.
+The system group verifies the NVIDIA locks in system/nvidia/locks against the repository
+metadata and regenerates a lock whose packages the repository republished; the kernel group
+regenerates the lock of a pin it moves. A ref pinned in both groups (fedora:43) may sit at
+two digests between the merges of the two pull requests: the groups build separately. The kernel hash manifests are not here: `build.sh --stage manifest` and `nvidia.sh manifest` write
 them. Standard library only: it runs on the GitHub runner without installing anything.
 """
 
@@ -39,9 +54,12 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 PINS = HERE / "pins.env"
-# The kernel's Containerfiles and the system image (docs/architecture/doc_system_image.md, S1):
-# every FROM pinned by digest moves in the same bump.
-CONTAINERFILES = [HERE / d / "Containerfile" for d in ("builder", "boot", "nvidia")] + [HERE.parents[2] / "system" / "Containerfile"]
+# The Containerfiles of each group (docs/architecture/doc_system_image.md, S1): every FROM
+# pinned by digest moves with the bump of its group.
+GROUP_CONTAINERFILES = {
+    "kernel": [HERE / d / "Containerfile" for d in ("builder", "boot", "nvidia")],
+    "system": [HERE.parents[2] / "system" / "Containerfile"],
+}
 NVIDIA_LOCK = HERE.parents[2] / "system" / "nvidia" / "lock.py"
 LOCK_NOT_PUBLISHED = 3  # lock.py's exit code for a version the repository does not publish
 LOCK_STALE = 4  # lock.py verify: the repository publishes the version with other files or checksums
@@ -311,27 +329,38 @@ def packaged_or_current(branch, candidate, current, notes, check=lock_check):
     return current
 
 
-def nvidia_version(branch, candidate, current, notes, check=lock_check, verify=lock_verify):
-    """(version, regenerate the lock) for one NVIDIA branch (doc_system_image.md, S7).
-
-    A newer candidate the repository packages moves the pin. Otherwise the current lock is
-    verified against the repository metadata on every run: a new release or new checksums
-    of the same version regenerate it, and a version the repository dropped with nothing
-    newer to move to stops the bot, because every image build would fail on that lock."""
+def nvidia_pin(branch, candidate, current, notes, check=lock_check):
+    """The version the kernel group pins for one NVIDIA branch (doc_system_image.md, S7): a
+    newer candidate the repository packages, else the current pin. A moved pin regenerates
+    its lock in the same pull request."""
     if vtuple(candidate) > vtuple(current):
-        version = packaged_or_current(branch, candidate, current, notes, check)
-        if version != current:
-            return version, True
+        return packaged_or_current(branch, candidate, current, notes, check)
+    return current
+
+
+def nvidia_relock(branch, current, notes, verify=lock_verify):
+    """True when the system group regenerates the lock of one NVIDIA branch at its current pin.
+
+    The lock is verified against the repository metadata on every run: a new release or new
+    checksums of the same version regenerate it. A version the repository dropped is only a
+    note: image builds take the locked packages from the mirror, the mirror step that follows
+    in the same job fails when the mirror lacks them, and moving the pin is the kernel group's
+    job, so it never holds back the system base."""
     state = verify(branch, current)
     if state == "gone":
-        sys.exit(f"NVIDIA {branch} {current}: the repository no longer publishes it and has no newer packaged version (candidate {candidate})")
+        notes.append(gone_note(branch, current))
     if state == "stale":
         notes.append(f"NVIDIA {branch} {current}: the repository republished the locked packages, the lock is regenerated")
-    return current, state == "stale"
+    return state == "stale"
 
 
-def lock_problems(pins, verify=lock_verify):
-    """One line per NVIDIA lock that no longer matches its repository at the pinned version."""
+def gone_note(branch, version):
+    return f"NVIDIA {branch} {version}: the repository no longer publishes it; image builds take the locked packages from the mirror (mirror.sh fails when it lacks them), and the kernel group moves the pin once a newer version is packaged"
+
+
+def lock_problems(pins, notes, verify=lock_verify):
+    """One line per NVIDIA lock that must be regenerated at the pinned version; a version the
+    repository dropped goes to notes (nvidia_relock)."""
     problems = []
     for branch in ("open", "legacy"):
         version = pins[f"NVIDIA_{branch.upper()}_VERSION"]
@@ -339,7 +368,7 @@ def lock_problems(pins, verify=lock_verify):
         if state == "stale":
             problems.append(f"NVIDIA {branch} {version}: the repository republished the locked packages, the lock must be regenerated")
         elif state == "gone":
-            problems.append(f"NVIDIA {branch} {version}: the repository no longer publishes it, the pin must move")
+            notes.append(gone_note(branch, version))
     return problems
 
 
@@ -357,11 +386,12 @@ def image_digest(image, tag):
     return digest
 
 
-def base_images():
-    """{"image:tag": pinned digest} from the FROM lines of the Containerfiles. One ref pinned
-    at two digests is an error: apply rewrites only the old digest it knows about."""
+def base_images(containerfiles):
+    """{"image:tag": pinned digest} from the FROM lines of one group's Containerfiles. One ref
+    pinned at two digests within a group is an error: apply rewrites only the old digest it
+    knows about. Across groups it is not: each group moves its own copy of the ref."""
     found = {}
-    for cf in CONTAINERFILES:
+    for cf in containerfiles:
         for m in FROM_RE.finditer(cf.read_text()):
             found.setdefault(f"{m.group(1)}:{m.group(2)}", {}).setdefault(m.group(3), []).append(str(cf))
     conflicts = [
@@ -377,9 +407,40 @@ def base_images():
 # --- check / apply ---------------------------------------------------------------------
 
 
-def compute():
+def compute(group):
     pins = read_pins()
     new, notes, locks = {}, [], {}
+    if group == "kernel":
+        kernel_pins(pins, new, notes, locks)
+    else:
+        for branch in ("open", "legacy"):
+            version = pins[f"NVIDIA_{branch.upper()}_VERSION"]
+            if nvidia_relock(branch, version, notes):
+                locks[branch] = version
+    images = {}
+    if new and all(key.startswith("NVIDIA_") for key in new):
+        # check-plan accepts NVIDIA pins only alone (modules-missing, doc_build_ordering.md
+        # O7): a new base of the kernel's Containerfiles waits for the next run.
+        notes.append("NVIDIA pins move in a pull request of their own: the base images of the kernel's Containerfiles wait for the next run")
+    else:
+        for ref, pinned in base_images(GROUP_CONTAINERFILES[group]).items():
+            digest = image_digest(*ref.rsplit(":", 1))
+            if digest != pinned:
+                images[ref] = {"old": pinned, "new": digest}
+    return {
+        "group": group,
+        "changed": bool(new or images or locks),
+        "pins": pins,
+        "new": new,
+        "images": images,
+        "locks": locks,
+        "notes": notes,
+    }
+
+
+def kernel_pins(pins, new, notes, locks):
+    """The kernel group's pins: the Fedora/CachyOS pair and the NVIDIA versions, into new;
+    the lock of each NVIDIA branch whose pin moves, into locks."""
     pair = kernel_pair(pins, notes)
     if pair:
         version, nvr, tag, published = pair
@@ -396,7 +457,7 @@ def compute():
         if patches != pins["CACHYOS_PATCHES_COMMIT"]:
             new["CACHYOS_PATCHES_COMMIT"] = patches
     # A series kernel.org no longer maintains gets no fixes: the bot fails instead of
-    # leaving the kernel there, and blocks the other bumps until a pair moves it.
+    # leaving the kernel there, and blocks the kernel group until a pair moves it.
     pinned = series(new.get("FEDORA_KERNEL_NVR", pins["FEDORA_KERNEL_NVR"]))
     maintained = maintained_series()
     if pinned not in maintained:
@@ -406,29 +467,14 @@ def compute():
             f"{'; '.join(notes) or 'no notes'})"
         )
     open_tag, open_commit = nvidia_open(pins["NVIDIA_OPEN_VERSION"])
-    open_version, regenerate = nvidia_version("open", open_tag, pins["NVIDIA_OPEN_VERSION"], notes)
+    open_version = nvidia_pin("open", open_tag, pins["NVIDIA_OPEN_VERSION"], notes)
     if open_version != pins["NVIDIA_OPEN_VERSION"]:
         new["NVIDIA_OPEN_VERSION"], new["NVIDIA_OPEN_COMMIT"] = open_version, open_commit
-    if regenerate:
         locks["open"] = open_version
-    legacy_version, regenerate = nvidia_version("legacy", nvidia_legacy(pins["NVIDIA_LEGACY_VERSION"]), pins["NVIDIA_LEGACY_VERSION"], notes)
+    legacy_version = nvidia_pin("legacy", nvidia_legacy(pins["NVIDIA_LEGACY_VERSION"]), pins["NVIDIA_LEGACY_VERSION"], notes)
     if legacy_version != pins["NVIDIA_LEGACY_VERSION"]:
         new["NVIDIA_LEGACY_VERSION"] = legacy_version
-    if regenerate:
         locks["legacy"] = legacy_version
-    images = {}
-    for ref, pinned in base_images().items():
-        digest = image_digest(*ref.rsplit(":", 1))
-        if digest != pinned:
-            images[ref] = {"old": pinned, "new": digest}
-    return {
-        "changed": bool(new or images or locks),
-        "pins": pins,
-        "new": new,
-        "images": images,
-        "locks": locks,
-        "notes": notes,
-    }
 
 
 def pins_table(pins):
@@ -437,13 +483,16 @@ def pins_table(pins):
 
 
 def apply(result):
-    text = PINS.read_text()
-    for key, value in result["new"].items():
-        text, n = re.subn(rf"^{key}=.*$", f"{key}={value}", text, flags=re.M)
-        if n != 1:
-            sys.exit(f"pins.env: {key} found {n} times")
-    PINS.write_text(text, newline="\n")
-    for cf in CONTAINERFILES:
+    """Rewrites the files of result's group, and only those."""
+    group = result["group"]
+    if result["new"]:
+        text = PINS.read_text()
+        for key, value in result["new"].items():
+            text, n = re.subn(rf"^{key}=.*$", f"{key}={value}", text, flags=re.M)
+            if n != 1:
+                sys.exit(f"pins.env: {key} found {n} times")
+        PINS.write_text(text, newline="\n")
+    for cf in GROUP_CONTAINERFILES[group]:
         content = cf.read_text()
         for ref, change in result["images"].items():
             content = content.replace(
@@ -452,6 +501,8 @@ def apply(result):
         cf.write_text(content, newline="\n")
     for branch, version in result["locks"].items():
         lock_py("generate", branch, "--version", version)
+    if group != "kernel":
+        return
     md, n = re.subn(
         r"<!-- pins:begin.*?<!-- pins:end -->",
         lambda _: pins_table(read_pins()),
@@ -517,20 +568,23 @@ def cosmic_comp_main(action, out_dir=None):
 
 
 def main():
-    if len(sys.argv) > 2 and sys.argv[1] == "cosmic-comp":
-        if sys.argv[2:] == ["check"] or (len(sys.argv) == 4 and sys.argv[2] == "apply"):
-            return cosmic_comp_main(*sys.argv[2:4])
+    args = sys.argv[1:]
+    if len(args) > 1 and args[0] == "cosmic-comp":
+        if args[1:] == ["check"] or (len(args) == 3 and args[1] == "apply"):
+            return cosmic_comp_main(*args[1:3])
         sys.exit(__doc__)
-    if len(sys.argv) != 2 or sys.argv[1] not in ("check", "apply", "verify"):
-        sys.exit(__doc__)
-    if sys.argv[1] == "verify":
-        problems = lock_problems(read_pins())
+    if args == ["verify"]:
+        notes = []
+        problems = lock_problems(read_pins(), notes)
+        print("\n".join(notes))
         if problems:
             sys.exit("\n".join(problems))
         print("NVIDIA locks: both match their repositories")
         return
-    result = compute()
-    if sys.argv[1] == "check":
+    if len(args) != 3 or args[0] not in ("check", "apply") or args[1] != "--group" or args[2] not in GROUP_CONTAINERFILES:
+        sys.exit(__doc__)
+    result = compute(args[2])
+    if args[0] == "check":
         print(json.dumps(result, indent=2))
         return
     apply(result)

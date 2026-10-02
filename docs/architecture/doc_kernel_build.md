@@ -374,9 +374,14 @@ ricompila. La prova del riuso è una firma verificata, non un tag.
 ## 8. Auto-manutenzione: il bot di bump
 
 Workflow `kernel-bump.yml`, giornaliero (`schedule` vale solo dal branch di
-default; a mano con `workflow_dispatch` su qualunque branch), in tre job:
+default; a mano con `workflow_dispatch` su qualunque branch). Due gruppi, una PR
+ciascuno, perché si verificano in modo diverso (`doc_build_ordering.md`, O7 e O8):
+il gruppo **kernel** (i job sotto) e il gruppo **system** (`system/Containerfile` e i
+lock NVIDIA ripubblicati alla stessa versione, etichetta `system-bump`: System Image
+Check costruisce le immagini col kernel pubblicato e una persona rivede la differenza
+dei pacchetti, mai auto-merge). Il gruppo kernel ha tre job:
 
-1. **check** (runner GitHub-hosted): `bump.py apply` legge `pins.env` e
+1. **kernel** (runner GitHub-hosted): `bump.py apply --group kernel` legge `pins.env` e
    interroga Bodhi (build `kernel` stable di F43, poi F44), le release GitHub di
    `CachyOS/linux`, `CachyOS/kernel-patches` (testa della directory della
    serie), `CachyOS/linux-cachyos` (il commit di `linux-cachyos/config` vigente
@@ -384,12 +389,13 @@ default; a mano con `workflow_dispatch` su qualunque branch), in tre job:
    kernel, non la testa di oggi, che può essere della serie dopo), i tag di
    `NVIDIA/open-gpu-kernel-modules` e l'indice di download NVIDIA (dentro il
    ramo pinnato, 610 e 580: un cambio di ramo è una PR umana), e il registro
-   Fedora per il digest dell'immagine base dei tre Containerfile. Coppia kernel
+   Fedora per il digest dell'immagine base dei tre Containerfile del kernel; un lock
+   NVIDIA si rigenera qui solo quando il suo pin si sposta. Coppia kernel
    come in sezione 2; senza coppia il kernel resta dov'è e una nota nel corpo
    della PR dice fin dove arrivano Fedora e CachyOS. Se nulla è cambiato esce;
    altrimenti riscrive `pins.env`, i `FROM` e la tabella dei pin di `KERNEL.md`
-   e li passa come artefatto. Una PR di bump aperta alla volta (etichetta
-   `kernel-bump`).
+   e li passa come artefatto. Una PR aperta alla volta per gruppo (etichetta
+   `kernel-bump`): una PR `system-bump` in attesa di revisione non ferma il kernel.
 2. **prep** (runner self-hosted, dove il builder e la cache già esistono): nel
    builder, `build.sh --stage manifest` e `nvidia.sh manifest` scaricano i
    sorgenti dei pin nuovi e riscrivono i due manifesti degli hash (il `.run`
@@ -647,4 +653,4 @@ task_struct`.
    Fusion) alla versione esatta dei moduli firmati, con gate e lock per hash
    (docs/architecture/doc_system_image.md).
 
-| `bump.py` | il bot di bump (sezione 8): pin nuovi da Bodhi, CachyOS, NVIDIA e registro; riscrive `pins.env`, i `FROM` e `KERNEL.md` |
+| `bump.py` | il bot di bump (sezione 8), in due gruppi: kernel (pin nuovi da Bodhi, CachyOS, NVIDIA e registro; riscrive `pins.env`, i `FROM` del kernel e `KERNEL.md`) e system (`system/Containerfile` e i lock NVIDIA ripubblicati) |

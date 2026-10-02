@@ -101,9 +101,11 @@ A mismatch is a build failure with the exact values, never a warning.
   - the bump bot regenerates the manifests whenever an `NVIDIA_*` pin moves, and on every run verifies each manifest against the repository metadata, regenerating it when the repository republishes the pinned version with other files or checksums;
   - `NVIDIA_OPEN_VERSION` moves only to a version that both `NVIDIA/open-gpu-kernel-modules` and negativo17 publish;
   - `NVIDIA_LEGACY_VERSION` moves to the newest version of its branch that RPM Fusion publishes;
+  - the bot works in two groups with one PR each (`doc_build_ordering.md`, O8): the kernel group (label `kernel-bump`) moves the pins and regenerates the manifest of a pin it moves; the system group (label `system-bump`) moves the system base and regenerates a manifest the repository republished at the pinned version;
   - a bump that moves the system base or a manifest never merges by itself: System Image Check and a human review decide;
-  - while a bump PR is open, the bot opens no other one, but it still verifies both manifests on every run (`bump.py verify`) and fails, naming the open PR, when one must be regenerated;
-  - every run mirrors both manifests, whether or not a bump PR is open.
+  - while a `system-bump` PR is open, the system group opens no other one, but it still verifies both manifests on every run (`bump.py verify`) and fails, naming the open PR, when one must be regenerated;
+  - a pinned version the repository no longer publishes is a note, not a failure: image builds take the locked packages from the mirror, and the kernel group moves the pin once a newer version is packaged;
+  - every run mirrors both manifests, whether or not a bump PR is open, and fails when the mirror lacks a locked RPM the repository no longer serves.
 
 **S8. Build, publication and installation.**
 
