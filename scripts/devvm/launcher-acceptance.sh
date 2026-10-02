@@ -421,7 +421,7 @@ new_units() { comm -13 <(printf '%s\n' "$1") <(app_units); }
 has_new_unit() { [[ -n $(new_units "$1") ]]; }
 
 stage_launch() {
-    local before launched seen main global environment display command expected
+    local before launched seen main global environment display expected
     [[ $(unit is-active) == active ]] || fresh_start
     printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=LauncherAcceptanceWaylandInfo' \
         "Exec=sh -c \"wayland-info > $GLOBALS; exec sleep 600\"" |
@@ -739,31 +739,60 @@ launcher_surfaces() { in_session python3 - < "$HERE/launcher_surfaces.py"; }
 surface_lines_are() { [[ $(launcher_surfaces | wc -l) == "$1" ]]; }
 # The surfaces of the launcher that are 1x1 with no child, and those that hold the panel.
 count_hidden() { launcher_surfaces | awk '$1 == "1x1" && $4 == 0 { n++ } END { print n + 0 }'; }
+# The line numbers (creation order of the windows) of the surfaces that hold the panel.
+panel_lines() { launcher_surfaces | awk '$1 != "1x1" && $4 > 0 { printf "%s%d", sep, NR; sep = " " }'; }
+launcher_pss() { in_session "awk '/^Pss:/ { print \$2 }' /proc/$(unit show -p MainPID --value)/smaps_rollup"; }
 count_panels() { launcher_surfaces | awk '$1 != "1x1" && $4 > 0 { n++ } END { print n + 0 }'; }
 
 # An output that comes and goes: the launcher keeps its process, shows on the output of the
 # activated window, keeps a 1x1 surface without input on the other, and never destroys a
 # departed output's surface (cosmic-comp 1.8.0 closes the connection of a client that does).
 stage_hotplug() {
-    local pid restarts a=/tmp/athanor-launcher-acceptance-window-a
+    local pid restarts a=/tmp/athanor-launcher-acceptance-window-a pss0 pss1 pss2 pss3 total
     guest_ssh "test -e $HEAD2" || fail "one head: start the dev VM with GPU_OUTPUTS=2 (devvm.env)"
     fresh_start # abandoned windows are counted below, so the process starts without any
     pid=$(unit show -p MainPID --value)
     restarts=$(unit show -p NRestarts --value)
     close_launcher || fail "the launcher does not close"
+    # One show first: what the first show loads (the panel, the icons, the renderer) is a cost
+    # per process, not per unplug.
+    open_launcher
+    close_launcher || fail "the launcher does not close"
+    sleep 5
+    pss0=$(launcher_pss)
+    # Two cycles with the launcher hidden: each leaves one empty window (Surface::abandon) and
+    # nothing else.
+    local cycle
+    for cycle in 1 2; do
+        second_head on
+        wait_until 20 surface_lines_are $((1 + cycle)) || fail "cycle $cycle, two outputs: $(launcher_surfaces | tr '\n' '|')"
+        second_head off
+        wait_until 20 surface_lines_are $((1 + cycle)) || fail "cycle $cycle, one output and abandoned windows: $(launcher_surfaces | tr '\n' '|')"
+    done
+    pss1=$(launcher_pss)
+    # The third cycle, with the launcher shown on the output that leaves.
     second_head on
-    wait_until 20 surface_lines_are 2 || fail "two outputs: $(launcher_surfaces | wc -l) launcher surfaces: $(launcher_surfaces | tr '\n' '|')"
-    # A window on the second output: opened, then moved there with the compositor's own
-    # shortcut (Super+Shift+Alt+Right moves the focused window to the output on the right).
+    wait_until 20 surface_lines_are 4 || fail "two outputs, two abandoned windows: $(launcher_surfaces | wc -l) launcher surfaces: $(launcher_surfaces | tr '\n' '|')"
     # shellcheck disable=SC2016 # expanded by the guest's shell
     printf '%s\n' '#!/bin/sh' "printf '\\033]0;%s\\007' \"\$1\"" 'head -c 4 > "$2"' 'exec sleep 600' | guest_put "$TERM_SCRIPT"
     start_term acceptance-hotplug $a
     sleep 3
-    type_keys @super+shift+alt+right
-    sleep 2
+    # The control: with the window on the first output the launcher shows on the first window.
     open_launcher
-    wait_until 10 eval "[[ \$(count_panels) == 1 && \$(count_hidden) == 1 ]]" ||
-        fail "with the window on the second output: $(launcher_surfaces | tr '\n' '|'): want one panel and one 1x1 surface without a child"
+    wait_until 10 eval "[[ \$(panel_lines) == 1 ]]" || fail "the window on the first output: the panel is on line '$(panel_lines)' of $(launcher_surfaces | tr '\n' '|'), want 1"
+    close_launcher || fail "the launcher does not close"
+    # Then a window on the second output: the pointer is moved across (a uinput relative mouse;
+    # an absolute one maps onto the first output only) and cosmic-comp maps the next window
+    # where the pointer is. The compositor's move shortcut does not reach the window from a
+    # uinput keyboard. The launcher follows the activated window to the newest surface, the one
+    # made for the second output; the surfaces come in the order the windows were created.
+    guest_ssh "sudo python3 - 3000" < "$HERE/pointer_move.py"
+    start_term acceptance-hotplug-second /tmp/athanor-launcher-acceptance-window-b
+    sleep 3
+    open_launcher
+    total=$(launcher_surfaces | wc -l)
+    wait_until 10 eval "[[ \$(panel_lines) == $total && \$(count_panels) == 1 ]]" ||
+        fail "with the window on the second output: the panel is on line '$(panel_lines)' of $(launcher_surfaces | tr '\n' '|'), want line $total alone"
     echo "hotplug: surfaces with the window on the second output: $(launcher_surfaces | tr '\n' '|')"
     "$HERE/screenshot.sh" "$SHOTS/hotplug-second-output.png" > /dev/null
     second_head off
@@ -771,28 +800,42 @@ stage_hotplug() {
     # The window of an output that left is emptied and kept, never destroyed (cosmic-comp closes
     # the connection of a client that destroys it): one live surface and one abandoned window
     # per output that left, which is the ceiling Surface::abandon declares.
-    wait_until 20 surface_lines_are 2 || fail "one output and one abandoned window: $(launcher_surfaces | tr '\n' '|')"
+    wait_until 20 surface_lines_are 4 || fail "one output and three abandoned windows: $(launcher_surfaces | tr '\n' '|')"
     [[ $(count_panels) == 0 ]] || fail "a surface still shows the panel after the output left: $(launcher_surfaces | tr '\n' '|')"
     [[ $(unit show -p MainPID --value) == "$pid" ]] || fail "MainPID changed from $pid when the output left"
+    sleep 5
+    pss2=$(launcher_pss)
     second_head on
-    wait_until 20 surface_lines_are 3 || fail "second_head on again (two outputs, one abandoned window): $(launcher_surfaces | tr '\n' '|')"
+    wait_until 20 surface_lines_are 5 || fail "second_head on again (two outputs, three abandoned windows): $(launcher_surfaces | tr '\n' '|')"
     [[ $(unit show -p MainPID --value) == "$pid" ]] || fail "MainPID changed from $pid when the output came back"
     [[ $(unit show -p NRestarts --value) == "$restarts" ]] || fail "NRestarts went from $restarts to $(unit show -p NRestarts --value)"
     unit_active || fail "not active after hotplug: $(unit show -p Result --value)"
     end_terms
-    in_session "rm -f $a"
+    in_session "rm -f $a /tmp/athanor-launcher-acceptance-window-b"
     second_head off
-    wait_until 20 surface_lines_are 3 || fail "one output at the end (two abandoned windows): $(launcher_surfaces | tr '\n' '|')"    # Closing the focused window leaves cosmic-comp without a keyboard for the next launcher.
+    wait_until 20 surface_lines_are 5 || fail "one output at the end (four abandoned windows): $(launcher_surfaces | tr '\n' '|')"
+    sleep 5
+    pss3=$(launcher_pss)
+    # Review Focus 4 is read as bounded per unplug, no growth per show: three cycles, the last
+    # one shown, may add no more than 8 MB.
+    echo "hotplug: launcher PSS $pss0 kB at the start, $pss1 kB after two cycles, $pss2 kB after the shown one, $pss3 kB after the fourth unplug"
+    ((pss3 - pss0 <= 8 * 1024)) || fail "PSS grew from $pss0 to $pss3 kB over the unplug cycles (limit 8192 kB)"
+    # Closing the focused window leaves cosmic-comp without a keyboard for the next launcher.
     relogin
 }
 
 stage_crash-loop() {
     # SIGKILL, not SIGSEGV: std's stack-overflow handler swallows a SIGSEGV sent by kill(2)
     # (see shelld-acceptance.sh). SH8 counts failures, not which signal caused them.
-    local since
-    since=$(now)
+    local since round pid
+    # The positive control: with the indexer running and the files stage's file indexed, a
+    # launcher that has not crashed finds it, so its absence after the give-up means something.
+    ensure_localsearch
+    wait_until 60 indexed quetzalcoatl report.odt || fail "localsearch does not find report.odt (the files stage's fixture)"
     fresh_start
-    local round pid
+    search quetzalcoatl "report.odt, File"
+    close_launcher || fail "the launcher does not close"
+    since=$(now)
     for round in 1 2 3 4 5; do
         pid=$(unit show -p MainPID --value)
         unit kill --kill-whom=main -s SIGKILL
