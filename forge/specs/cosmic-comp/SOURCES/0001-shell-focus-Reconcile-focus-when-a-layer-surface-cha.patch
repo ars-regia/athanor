@@ -1,7 +1,7 @@
-From fa487678b806076b39a582b1a9f16d619e8cc619 Mon Sep 17 00:00:00 2001
+From d63de2e4aee2fb3686f2373ef9c75e6d67d33917 Mon Sep 17 00:00:00 2001
 From: Ermete Architect <esenese@proton.me>
 Date: Fri, 2 Oct 2026 10:05:49 +0200
-Subject: [PATCH] shell/focus: Reconcile focus when a layer surface changes
+Subject: [PATCH 1/2] shell/focus: Reconcile focus when a layer surface changes
  keyboard interactivity
 
 A layer surface gets the keyboard focus only when it maps. A client that
@@ -23,9 +23,9 @@ invalid target. Run the focus fixup from the commit handler when a
 mapped layer surface changes its keyboard interactivity, so the change
 takes effect at once rather than on the next throttled refresh.
 ---
- src/shell/focus/mod.rs             |  7 +++++--
- src/wayland/handlers/compositor.rs | 32 +++++++++++++++++++++++++++---
- 2 files changed, 34 insertions(+), 5 deletions(-)
+ src/shell/focus/mod.rs             |  7 ++++--
+ src/wayland/handlers/compositor.rs | 36 ++++++++++++++++++++++++++----
+ 2 files changed, 37 insertions(+), 6 deletions(-)
 
 diff --git a/src/shell/focus/mod.rs b/src/shell/focus/mod.rs
 index f631372..bfb0c17 100644
@@ -53,7 +53,7 @@ index f631372..bfb0c17 100644
          KeyboardFocusTarget::Group(WindowGroup { node, .. }) => shell
              .workspaces
 diff --git a/src/wayland/handlers/compositor.rs b/src/wayland/handlers/compositor.rs
-index ed40448..439b323 100644
+index ed40448..c93a0c0 100644
 --- a/src/wayland/handlers/compositor.rs
 +++ b/src/wayland/handlers/compositor.rs
 @@ -23,7 +23,7 @@ use smithay::{
@@ -115,11 +115,15 @@ index ed40448..439b323 100644
  impl State {
      fn send_initial_configure_and_map(&mut self, surface: &WlSurface) -> bool {
          let mut shell = self.common.shell.write();
-@@ -426,6 +451,7 @@ impl State {
+@@ -425,7 +450,10 @@ impl State {
+             && !layer_surface_check_inital_configure(&layer_surface)
          {
              // compute initial dimensions by mapping
-             if let Some(target) = shell.map_layer(&layer_surface) {
-+                keyboard_interactivity_changed(&layer_surface); // seeds the value it maps with
+-            if let Some(target) = shell.map_layer(&layer_surface) {
++            let target = shell.map_layer(&layer_surface);
++            // Seed the interactivity the surface maps with, whether or not it takes focus.
++            keyboard_interactivity_changed(&layer_surface);
++            if let Some(target) = target {
                  let seat = shell.seats.last_active().clone();
                  std::mem::drop(shell);
                  Shell::set_focus(self, Some(&target), &seat, None, false);
