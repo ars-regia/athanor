@@ -47,7 +47,7 @@ pub fn forbid_core_dumps() -> Result<(), Box<dyn std::error::Error>> {
 /// The greeter runs inside the sandbox athanor-greeter-client builds, where $HOME and
 /// the runtime directory are private tmpfs mounts. This ruleset restates in-process what
 /// the greeter needs to write, so that the confinement survives a wrapper that lost a
-/// line: /tmp, the runtime directory, and the DRM nodes. It writes no configuration and
+/// line: /tmp, the runtime directory, and the GPU nodes. It writes no configuration and
 /// no state. Reads are left alone: fonts, icons and catalogs come from /usr.
 ///
 /// The ruleset is a hard requirement: a kernel without Landlock, or one that cannot
@@ -65,7 +65,7 @@ pub fn apply_landlock_sandbox() -> Result<(), Box<dyn std::error::Error>> {
 const DRM_DEVICE_DIR: &str = "/dev/dri";
 
 /// Every grant of the sandbox: /tmp and the runtime directory with the whole write set,
-/// and the DRM nodes with `WriteFile` alone. The greeter has no systemd unit -- it is
+/// and the GPU nodes with `WriteFile` alone. The greeter has no systemd unit -- it is
 /// confined by athanor-greeter-client and by this ruleset, and by nothing else.
 fn grants() -> Vec<(PathBuf, BitFlags<AccessFs>)> {
     let write_access = AccessFs::from_write(ABI::V1);
@@ -74,7 +74,39 @@ fn grants() -> Vec<(PathBuf, BitFlags<AccessFs>)> {
         .map(|path| (path, write_access))
         .collect();
     grants.push((PathBuf::from(DRM_DEVICE_DIR), AccessFs::WriteFile.into()));
+    grants.extend(
+        nvidia_device_nodes(Path::new("/dev"))
+            .into_iter()
+            .map(|node| (node, AccessFs::WriteFile.into())),
+    );
     grants
+}
+
+/// The NVIDIA driver's nodes in `dev`, the same set athanor-greeter-client binds: the
+/// control and modeset nodes and one numbered node per GPU. The proprietary EGL stack
+/// opens them read-write next to the DRM nodes; denied, it falls back to running the
+/// setuid nvidia-modprobe, which the sandbox refuses as well, and the greeter renders
+/// without the GPU. Each node is granted by itself rather than `/dev` as a whole, and
+/// the nvidia-uvm nodes stay out: they serve CUDA only.
+fn nvidia_device_nodes(dev: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dev) else {
+        return Vec::new();
+    };
+    let mut nodes: Vec<_> = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name())
+        .filter(|name| {
+            name.to_str().is_some_and(|name| match name {
+                "nvidiactl" | "nvidia-modeset" => true,
+                _ => name.strip_prefix("nvidia").is_some_and(|gpu| {
+                    !gpu.is_empty() && gpu.bytes().all(|byte| byte.is_ascii_digit())
+                }),
+            })
+        })
+        .map(|name| dev.join(name))
+        .collect();
+    nodes.sort();
+    nodes
 }
 
 /// Restricts the calling thread, and the threads it creates, to the write accesses
@@ -174,18 +206,42 @@ mod tests {
     }
 
     #[test]
-    fn drm_nodes_are_granted_write_file_and_nothing_else() {
-        let drm: Vec<_> = grants()
+    fn device_nodes_are_granted_write_file_and_nothing_else() {
+        let devices: Vec<_> = grants()
             .into_iter()
             .filter(|(path, _)| path.starts_with("/dev"))
             .collect();
+        assert_eq!(devices[0].0, PathBuf::from("/dev/dri"));
+        assert!(devices
+            .iter()
+            .all(|(_, access)| *access == BitFlags::from(AccessFs::WriteFile)));
+    }
+
+    #[test]
+    fn nvidia_grants_are_the_control_modeset_and_gpu_nodes_only() {
+        let (base, dev, _) = probe_dirs("nvidia-nodes");
+        for name in [
+            "nvidiactl",
+            "nvidia-modeset",
+            "nvidia0",
+            "nvidia12",
+            "nvidia-uvm",
+            "nvidia-uvm-tools",
+            "nvidia",
+            "nvidia0x",
+            "sda",
+        ] {
+            std::fs::write(dev.join(name), b"").expect("create the stand-in node");
+        }
+        let names: Vec<_> = nvidia_device_nodes(&dev)
+            .into_iter()
+            .map(|node| node.file_name().expect("node name").to_owned())
+            .collect();
         assert_eq!(
-            drm,
-            vec![(
-                PathBuf::from("/dev/dri"),
-                BitFlags::from(AccessFs::WriteFile)
-            )]
+            names,
+            ["nvidia-modeset", "nvidia0", "nvidia12", "nvidiactl"]
         );
+        std::fs::remove_dir_all(base).expect("cleanup");
     }
 
     #[test]
