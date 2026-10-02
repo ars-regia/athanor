@@ -120,12 +120,20 @@ fn main() -> glib::ExitCode {
         return glib::ExitCode::FAILURE;
     }
     i18n::init();
-    // Super is ours only where the user left it to the system (doc_launcher.md, LA8 and §6).
-    match shortcuts::set_system_action("Launcher", bus::SHOW_COMMAND) {
-        Ok(Binding::Added) => tracing::info!("Super now calls {}; the user's shortcuts had no entry for it", bus::NAME),
-        Ok(Binding::ReplacedDefault) => tracing::info!("Super now calls {} instead of the system's default", bus::NAME),
-        Ok(Binding::Unchanged) => tracing::info!("Super already calls {}", bus::NAME),
-        Ok(Binding::UserChoice) => tracing::info!("Super keeps the command the user chose; it does not call {}", bus::NAME),
+    // Super is ours only where the user left it to the system, and only at the first start
+    // with a state directory (doc_launcher.md, LA8 and §6): the marker sits beside the usage.
+    let bound = match (given_up, loader::state_home()) {
+        (false, Some(state)) => {
+            shortcuts::set_system_action_once("Launcher", bus::SHOW_COMMAND, &state.join("athanor/search/super-bound"))
+        }
+        _ => Ok(None),
+    };
+    match bound {
+        Ok(None) => tracing::info!("Super was bound once already, or there is no state directory: the shortcuts are not read"),
+        Ok(Some(Binding::Added)) => tracing::info!("Super now calls {}; the user's shortcuts had no entry for it", bus::NAME),
+        Ok(Some(Binding::ReplacedDefault)) => tracing::info!("Super now calls {} instead of the system's default", bus::NAME),
+        Ok(Some(Binding::Unchanged)) => tracing::info!("Super already calls {}", bus::NAME),
+        Ok(Some(Binding::UserChoice)) => tracing::info!("Super keeps the command the user chose; it does not call {}", bus::NAME),
         Err(err) => tracing::warn!(error = %err, "Super is not bound to the launcher; it still opens from the bar"),
     }
 

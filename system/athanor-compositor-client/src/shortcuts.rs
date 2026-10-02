@@ -4,7 +4,9 @@
 //! are not kept when it is written again.
 //!
 //! A value the user chose is never overwritten: only an absent entry, the system file's value
-//! (the stock cosmic-launcher) or the command itself counts as ours to set.
+//! (the stock cosmic-launcher) or the command itself counts as ours to set. The caller binds
+//! once per user (`set_system_action_once`): after the first try the entry is the user's,
+//! so removing it or choosing another value in COSMIC Settings gives the action back.
 //!
 //! The read-modify-write takes no lock: a write by cosmic-settings between the read and the
 //! rename is lost, as cosmic-config's own writers would lose it. A copy that is a symbolic
@@ -59,6 +61,26 @@ pub enum Binding {
 pub fn set_system_action(action: &str, command: &str) -> Result<Binding, ShortcutError> {
     let dir = dir().ok_or(ShortcutError::NoConfig)?;
     set_in(&dir.join(KEY), action, command, system_value(action).as_deref())
+}
+
+/// Binds as `set_system_action` does, once per user: when `marker` exists nothing is read or
+/// written and the result is `None`. Otherwise the marker is created after the binding,
+/// whatever it found; a binding that fails leaves no marker, so the next start tries again.
+pub fn set_system_action_once(action: &str, command: &str, marker: &Path) -> Result<Option<Binding>, ShortcutError> {
+    once(marker, || set_system_action(action, command))
+}
+
+fn once(marker: &Path, bind: impl FnOnce() -> Result<Binding, ShortcutError>) -> Result<Option<Binding>, ShortcutError> {
+    if marker.try_exists()? {
+        return Ok(None);
+    }
+    let binding = bind()?;
+    let created = marker.parent().map_or(Ok(()), fs::create_dir_all).and_then(|()| File::create(marker));
+    if let Err(err) = created {
+        // The binding stands; without the marker the next start checks the entry again.
+        tracing::warn!(marker = %marker.display(), "the marker of the one-time binding was not written: {err}");
+    }
+    Ok(Some(binding))
 }
 
 /// The action's value in the system file, which cosmic-comp lays beneath the user's copy.
@@ -361,6 +383,28 @@ mod tests {
         std::fs::write(&path, stock).unwrap();
         assert_eq!(set_in(&path, "Launcher", "ours", None).unwrap(), Binding::UserChoice);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), stock);
+    }
+
+    #[test]
+    fn the_binding_is_tried_once_per_user() {
+        let path = scratch("once");
+        let marker = path.with_file_name("state/super-bound");
+        let bind = || set_in(&path, "Launcher", "ours", STOCK);
+        assert_eq!(once(&marker, bind).unwrap(), Some(Binding::Added));
+        assert!(marker.exists());
+        // The user removes the entry: a second start leaves it removed.
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(once(&marker, bind).unwrap(), None);
+        assert!(!path.exists(), "nothing was written");
+        // A value the user chose also sets the marker, and a failed binding does not.
+        let other = path.with_file_name("other-marker");
+        std::fs::write(&path, "{ Launcher: \"mine\" }").unwrap();
+        assert_eq!(once(&other, bind).unwrap(), Some(Binding::UserChoice));
+        assert!(other.exists());
+        let failed = path.with_file_name("failed-marker");
+        std::fs::write(&path, "not a map").unwrap();
+        assert!(once(&failed, bind).is_err());
+        assert!(!failed.exists(), "the next start tries again");
     }
 
     #[test]

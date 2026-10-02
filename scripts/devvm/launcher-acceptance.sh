@@ -44,6 +44,8 @@ STATE_DIR='$HOME/.cache/launcher-acceptance'
 FIXTURES='$HOME/Documents/athanor-acceptance'
 APPS='$HOME/.local/share/applications'
 SHORTCUTS='$HOME/.config/cosmic/com.system76.CosmicSettings.Shortcuts/v1'
+# The launcher binds Super once per user and then leaves this marker (LA8).
+SUPER_MARKER='$HOME/.local/state/athanor/search/super-bound'
 # The launch stage's entries, and the files they write.
 LAUNCH_ID=os.athanor.LauncherAcceptanceWaylandInfo
 GLOBALS=/tmp/athanor-launcher-acceptance-globals
@@ -220,6 +222,13 @@ stage_deploy() {
     # The user's copy of system_actions is removed at cleanup only when it did not exist.
     if ! in_session "test -e $SHORTCUTS/system_actions"; then
         mark no-system-actions
+    fi
+    # Without the marker the activation's start is a first one, which binds Super; a marker
+    # this run creates is removed at cleanup.
+    if in_session "test -e $SUPER_MARKER"; then
+        in_session "rm $SUPER_MARKER"
+    else
+        mark no-super-marker
     fi
 }
 
@@ -1122,6 +1131,9 @@ stage_cleanup() {
     step "removing the fixture files" in_session "rm -f $APPS/$HTTPS_ID.desktop $HTTPS_OUT $APPS/$LAUNCH_ID.desktop $APPS/os.athanor.LauncherAcceptanceHostile.desktop $GLOBALS $SAMPLES.* $TERM_SCRIPT $SAMPLER"
     if marked no-system-actions; then
         step "removing the user's system_actions" in_session "rm -f $SHORTCUTS/system_actions $STATE_DIR/no-system-actions"
+    fi
+    if marked no-super-marker; then
+        step "removing the Super marker" in_session "rm -f $SUPER_MARKER $STATE_DIR/no-super-marker"
     fi
     if marked set-session-class; then
         step "stopping localsearch" in_session "systemctl --user stop localsearch-3.service"
