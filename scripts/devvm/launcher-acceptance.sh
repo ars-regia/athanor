@@ -223,9 +223,10 @@ stage_deploy() {
     if ! in_session "test -e $SHORTCUTS/system_actions"; then
         mark no-system-actions
     fi
-    # Without the marker the activation's start is a first one, which binds Super; a marker
-    # this run creates is removed at cleanup.
+    # Without the marker the activation's start is a first one, which binds Super; cleanup
+    # puts back a marker that was there and removes one this run created.
     if in_session "test -e $SUPER_MARKER"; then
+        mark super-marker
         in_session "rm $SUPER_MARKER"
     else
         mark no-super-marker
@@ -1134,6 +1135,9 @@ stage_cleanup() {
     fi
     if marked no-super-marker; then
         step "removing the Super marker" in_session "rm -f $SUPER_MARKER $STATE_DIR/no-super-marker"
+    fi
+    if marked super-marker; then
+        step "restoring the Super marker" in_session "mkdir -p \$(dirname $SUPER_MARKER) && touch $SUPER_MARKER && rm $STATE_DIR/super-marker"
     fi
     if marked set-session-class; then
         step "stopping localsearch" in_session "systemctl --user stop localsearch-3.service"
