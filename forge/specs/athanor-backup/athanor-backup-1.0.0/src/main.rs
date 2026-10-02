@@ -30,7 +30,8 @@ const ID_FORMAT: &str = "%Y%m%dT%H%M%SZ";
 /// The inode number of the root directory of every btrfs subvolume.
 const BTRFS_SUBVOLUME_ROOT_INO: u64 = 256;
 
-const USAGE: &str = "usage: athanor-backup init | create | prune | list | restore <snapshot> <path>";
+const USAGE: &str =
+    "usage: athanor-backup init | create | prune | list | restore <snapshot> <path>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -300,7 +301,7 @@ fn snapshots() -> Result<Vec<(NaiveDateTime, String)>> {
             }
         }
     }
-    snapshots.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+    snapshots.sort_unstable_by_key(|snapshot| std::cmp::Reverse(snapshot.0));
     Ok(snapshots)
 }
 
@@ -382,14 +383,10 @@ mod tests {
 
     #[test]
     fn a_prune_deletes_the_older_snapshot_of_an_hour_and_ignores_future_ones() {
-        let snapshots: Vec<_> = [
-            "20270101T000000Z",
-            "20260924T081500Z",
-            "20260924T080000Z",
-        ]
-        .into_iter()
-        .map(|id| (parse_id(id).expect("valid name"), id.to_owned()))
-        .collect();
+        let snapshots: Vec<_> = ["20270101T000000Z", "20260924T081500Z", "20260924T080000Z"]
+            .into_iter()
+            .map(|id| (parse_id(id).expect("valid name"), id.to_owned()))
+            .collect();
         let now = parse_id("20260924T090000Z").expect("valid name");
         assert_eq!(prunable(&snapshots, now), ["20260924T080000Z"]);
         // Once the clock reaches its date it counts like any other and is still kept.
