@@ -39,6 +39,8 @@ SHORTCUTS='$HOME/.config/cosmic/com.system76.CosmicSettings.Shortcuts/v1'
 # The launch stage's entries, and the files they write.
 LAUNCH_ID=os.athanor.LauncherAcceptanceWaylandInfo
 GLOBALS=/tmp/athanor-launcher-acceptance-globals
+HTTPS_ID=os.athanor.LauncherAcceptanceHttps
+HTTPS_OUT=/tmp/athanor-launcher-acceptance-https
 # Globals only the main socket offers: an application behind the context sees none of them
 # (the list compositor-acceptance.sh checks).
 PRIVILEGED=(zcosmic_toplevel_info_v1 zcosmic_toplevel_manager_v1 ext_workspace_manager_v1
@@ -447,20 +449,26 @@ stage_launch() {
     [[ $display =~ ^/run/user/[0-9]+/athanor/[0-9a-f]{32}/wayland$ ]] || fail "WAYLAND_DISPLAY '$display'"
     in_session systemctl --user stop "$launched"
 
-    # The web row hands the whole URL to the application the launcher resolves for https; the
-    # unit's command line is what that application received. (The launcher resolved Firefox
-    # although ~/.config/mimeapps.list named another handler: reported, not asserted.)
-    before=$(app_units)
+    # The web row hands the whole URL to the application the launcher resolves for https. A
+    # fixture handler, made the default, writes what it receives to a file: the bytes the
+    # browser would get. The user's own default comes back at cleanup.
+    if ! marked mimeapps-saved; then
+        guest_ssh "mkdir -p $STATE_DIR && { test -e \$HOME/.config/mimeapps.list && cp \$HOME/.config/mimeapps.list $STATE_DIR/mimeapps.orig || touch $STATE_DIR/mimeapps.none; }; touch $STATE_DIR/mimeapps-saved"
+    fi
+    printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=LauncherAcceptanceHttps' \
+        "Exec=sh -c 'printf %%s \"\$1\" > $HTTPS_OUT' sh %u" 'MimeType=x-scheme-handler/https;' |
+        guest_put "$APPS/$HTTPS_ID.desktop"
+    in_session "gio mime x-scheme-handler/https $HTTPS_ID.desktop > /dev/null" || fail "gio mime cannot set the fixture handler"
+    [[ $(in_session "gio mime x-scheme-handler/https") == *"$HTTPS_ID.desktop"* ]] ||
+        fail "the default for https is not the fixture: $(in_session "gio mime x-scheme-handler/https")"
+    in_session rm -f "$HTTPS_OUT"
     search 'xqzjv a?b&c#d' "xqzjv a?b&c#d, Web search"
     type_keys @enter
     expected='https://duckduckgo.com/?q=xqzjv%20a%3Fb%26c%23d'
-    wait_until 10 has_new_unit "$before" || fail "no application unit after Enter on the web row"
-    launched=$(new_units "$before")
-    command=$(in_session systemctl --user show -p ExecStart --value "$launched")
-    [[ $command == *"argv[]="*" $expected ;"* ]] || fail "the browser's command line lacks '$expected': $command"
+    wait_until 10 in_session "test -s $HTTPS_OUT" || fail "the fixture handler received nothing (the launcher resolved another browser?)"
+    [[ $(in_session "cat $HTTPS_OUT") == "$expected" ]] || fail "the handler received '$(in_session "cat $HTTPS_OUT")', want '$expected'"
     # Closing the focused window leaves cosmic-comp without a keyboard for the next
     # launcher (reported): a new login.
-    in_session systemctl --user stop "$launched"
     relogin
 }
 
@@ -836,7 +844,10 @@ stage_cleanup() {
     if in_session "test -d $FIXTURES"; then
         step "removing the fixtures" in_session "rm -r --one-file-system $FIXTURES"
     fi
-    step "removing the fixture files" in_session "rm -f $APPS/$LAUNCH_ID.desktop $APPS/os.athanor.LauncherAcceptanceHostile.desktop $GLOBALS $SAMPLES.* $TERM_SCRIPT $SAMPLER"
+    if marked mimeapps-saved; then
+        step "restoring the https default" in_session "if test -e $STATE_DIR/mimeapps.orig; then cp $STATE_DIR/mimeapps.orig \$HOME/.config/mimeapps.list; else rm -f \$HOME/.config/mimeapps.list; fi; rm -f $STATE_DIR/mimeapps.orig $STATE_DIR/mimeapps.none $STATE_DIR/mimeapps-saved"
+    fi
+    step "removing the fixture files" in_session "rm -f $APPS/$HTTPS_ID.desktop $HTTPS_OUT $APPS/$LAUNCH_ID.desktop $APPS/os.athanor.LauncherAcceptanceHostile.desktop $GLOBALS $SAMPLES.* $TERM_SCRIPT $SAMPLER"
     if marked no-system-actions; then
         step "removing the user's system_actions" in_session "rm -f $SHORTCUTS/system_actions $STATE_DIR/no-system-actions"
     fi
