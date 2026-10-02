@@ -430,7 +430,12 @@ stage_windows() {
 require_patched_compositor() {
     local release sha
     release=$(guest_ssh "rpm -q --qf '%{RELEASE}' cosmic-comp") || fail "rpm -q cosmic-comp failed in the guest"
-    [[ $release == *.athanor* ]] && return 0
+    if [[ $release == *.athanor* ]]; then
+        # The package is ours; a binary overlaid on it (deploy.sh) must still be the packaged one.
+        ! guest_ssh "rpm -V cosmic-comp" | grep -q ' /usr/bin/cosmic-comp$' ||
+            fail "the release is ours ($release) but /usr/bin/cosmic-comp differs from the package (rpm -V): a stock binary was deployed over it"
+        return 0
+    fi
     sha=$(guest_ssh "sha256sum /usr/bin/cosmic-comp | cut -d' ' -f1") || fail "cannot hash /usr/bin/cosmic-comp in the guest"
     [[ -n ${COSMIC_COMP_SHA256:-} && $sha == "$COSMIC_COMP_SHA256" ]] && return 0
     fail "the guest's cosmic-comp is not Athanor's patched build (release $release, sha256 $sha): deploy it, or pass its sha256 in COSMIC_COMP_SHA256"
@@ -448,6 +453,9 @@ stage_focus() {
     start_term acceptance-focus $a
     sleep 3
     end_terms
+    # The precondition: the terminal's window is gone, so the focus stack is empty. Without it
+    # the check would pass on a stock compositor.
+    wait_until 10 eval '! in_session "pgrep -x cosmic-term" > /dev/null' || fail "a terminal is still open: check 1 needs a workspace with no window"
     sleep 3
     open_launcher
     type_keys '2+2*3'
@@ -548,10 +556,8 @@ stage_localsearch() {
     in_session systemctl --user start localsearch-3.service || fail "systemctl --user start localsearch-3.service"
 }
 
-# A file whose name starts with the right-to-left override, and one of 2 GB.
-stage_hostile() {
-    [[ $(unit is-active) == active ]] || fresh_start
-    ensure_localsearch
+# The hostile entry and files of the hostile stage, which the memory stage reuses.
+write_hostile_fixtures() {
     # shellcheck disable=SC2016 # expanded by the guest's shell
     printf '%s\n' '[Desktop Entry]' 'Type=Application' $'Name=\xe2\x80\xaegnp.exe <b>bold</b>' 'Exec=true' |
         guest_put "$APPS/os.athanor.LauncherAcceptanceHostile.desktop"
@@ -567,6 +573,13 @@ with open(os.path.join(folder, "huge.txt"), "w", encoding="utf-8") as handle:
         handle.write("a line of the huge file " * 8 + "\n")
     handle.truncate(2 << 30)
 EOF
+}
+
+# A file whose name starts with the right-to-left override, and one of 2 GB.
+stage_hostile() {
+    [[ $(unit is-active) == active ]] || fresh_start
+    ensure_localsearch
+    write_hostile_fixtures
     wait_until 120 indexed fdp.exe fdp.exe || fail "localsearch does not list the file named with U+202E"
     # F13: the name is shown as text, with the override stripped (text::line).
     search gnp "gnp.exe <b>bold</b>, Application"
@@ -831,17 +844,74 @@ stage_decoder() {
     close_launcher || fail "the launcher does not close"
 }
 
-stage_memory() {
-    [[ $(unit is-active) == active ]] || fresh_start
+# Pss, Pss_Anon and Pss_File (kB) of the launcher, on one line.
+launcher_memory() {
+    in_session "awk '/^Pss:/ { p = \$2 } /^Pss_Anon:/ { a = \$2 } /^Pss_File:/ { f = \$2 } END { print p, a, f }' /proc/$(unit show -p MainPID --value)/smaps_rollup"
+}
+
+# One round of what the launcher is used for: a file with its preview, the hostile names,
+# one decoder of each kind, the window search and a calculation. Hidden at the end.
+memory_round() {
+    search quetzalcoatl "report.odt, File"
+    type_keys @up # a late file answer leaves the selection on the Web row
+    sleep 3
     close_launcher || fail "the launcher does not close"
-    # At rest: the launcher has drawn, and is hidden.
+    search gnp "gnp.exe <b>bold</b>, Application"
+    close_launcher || fail "the launcher does not close"
+    search fdp "fdp.exe, File"
+    close_launcher || fail "the launcher does not close"
+    search hostile-pdf-1 "hostile-pdf-1.pdf, File"
+    type_keys @up
+    sleep 4
+    close_launcher || fail "the launcher does not close"
+    search hostile-png "hostile-png.png, File"
+    type_keys @up
+    sleep 4
+    close_launcher || fail "the launcher does not close"
+    search acceptance-memory "acceptance-memory — COSMIC Terminal, Window"
+    close_launcher || fail "the launcher does not close"
+    search '2+2*3' "8, Calculation"
+    close_launcher || fail "the launcher does not close"
+}
+
+# Item 10 and its boundedness: the final PSS is within 80 MB, and three identical rounds after a
+# warm-up grow it by at most 2 MB in total, so what is measured is no leak, not how much the
+# process happened to do before. The stage starts its own process.
+MEMORY_ROUNDS=3
+MEMORY_GROWTH_KB=2048
+stage_memory() {
+    local round pss anon file first=0 last=0 out=/tmp/athanor-launcher-acceptance-memory
+    fresh_start
+    ensure_localsearch
+    write_report_odt
+    write_hostile_fixtures
+    write_decoder_fixtures
+    wait_until 120 indexed quetzalcoatl report.odt || fail "localsearch does not find report.odt"
+    wait_until 120 indexed fdp.exe fdp.exe || fail "localsearch does not list the file named with U+202E"
+    wait_until 120 indexed hostile-png hostile-png.png || fail "localsearch does not list hostile-png.png"
+    wait_until 120 indexed hostile-pdf-1 hostile-pdf-1.pdf || fail "localsearch does not list hostile-pdf-1.pdf"
+    wait_until 120 indexer_idle || fail "the indexer is not idle after 120 s"
+    write_term_script
+    end_terms
+    in_session "rm -f $out"
+    start_term acceptance-memory $out
+    sleep 3
+    memory_round # the warm-up: fonts, glyph atlases, the icon theme and the renderer load once
     sleep 10
-    local pid pss
-    pid=$(unit show -p MainPID --value)
-    pss=$(in_session "awk '/^Pss:/ { print \$2 }' /proc/$pid/smaps_rollup")
-    echo "memory: athanor-launcher PSS $pss kB"
-    [[ $pss =~ ^[0-9]+$ ]] || fail "Pss '$pss' from /proc/$pid/smaps_rollup"
-    ((pss <= PSS_LIMIT_KB)) || fail "PSS $pss kB is above $PSS_LIMIT_KB kB (item 10)"
+    for ((round = 1; round <= MEMORY_ROUNDS; round++)); do
+        memory_round
+        sleep 10
+        read -r pss anon file <<< "$(launcher_memory)"
+        [[ $pss =~ ^[0-9]+$ && $anon =~ ^[0-9]+$ && $file =~ ^[0-9]+$ ]] || fail "smaps_rollup after round $round: Pss '$pss', Pss_Anon '$anon', Pss_File '$file'"
+        echo "memory: round $round: Pss $pss kB (anon $anon kB, file $file kB)"
+        ((round > 1)) || first=$pss
+        last=$pss
+    done
+    end_terms
+    in_session "rm -f $out"
+    ((last <= PSS_LIMIT_KB)) || fail "PSS $last kB is above $PSS_LIMIT_KB kB after $MEMORY_ROUNDS rounds (item 10)"
+    ((last - first <= MEMORY_GROWTH_KB)) ||
+        fail "PSS grew from $first to $last kB between round 1 and round $MEMORY_ROUNDS (limit $MEMORY_GROWTH_KB kB): the launcher leaks"
 }
 
 HEAD2=/sys/class/drm/card1-Virtual-2/status
@@ -931,6 +1001,7 @@ stage_hotplug() {
     end_terms
     in_session "rm -f $a /tmp/athanor-launcher-acceptance-window-b"
     second_head off
+    wait_until 20 outputs_are 1 || fail "the compositor still lists two outputs at the end"
     wait_until 20 surface_lines_are 5 || fail "one output at the end (four abandoned windows): $(launcher_surfaces | tr '\n' '|')"
     sleep 5
     pss3=$(launcher_pss)
@@ -1036,8 +1107,11 @@ run=("$@")
 for STAGE in "${run[@]}"; do
     [[ " ${STAGES[*]} " == *" $STAGE "* ]] || die "unknown stage '$STAGE': one of ${STAGES[*]}"
 done
-STAGE=precondition
-require_patched_compositor
+# A lone cleanup must work on any guest, a stock one included.
+if [[ ${run[*]} != cleanup ]]; then
+    STAGE=precondition
+    require_patched_compositor
+fi
 trap cleanup_on_exit EXIT
 for STAGE in "${run[@]}"; do
     "stage_$STAGE"
