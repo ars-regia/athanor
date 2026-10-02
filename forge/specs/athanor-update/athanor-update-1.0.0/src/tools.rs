@@ -315,7 +315,7 @@ mod tests {
         "ostree":{"checksum":"b87dc9499ddc437d7bf39318ad5f7baff4d1ae62faa508f01d02605e678864e6","deploySerial":0,"stateroot":"default"}},
       "rollback":{"image":null,"incompatible":true,"downloadOnly":false}}}"#;
     const RPM_OSTREE_BOOTED: &str = r#"{"deployments":[{"booted":true,"staged":false,
-      "container-image-reference":"ostree-unverified-registry:ghcr.io/hr-mes/athanor-system-nvidia:latest",
+      "container-image-reference":"ostree-unverified-registry:ghcr.io/owner/athanor-system-nvidia:latest",
       "container-image-reference-digest":"sha256:b6a2b14800b8c6799d04c4adf870e806fb5b8b655cd8fa622e3b9618a985d61d",
       "version":"43.20261001.137","timestamp":1790852801,"base-timestamp":1790849302,"requested-packages":["nvidia-container-toolkit"]}]}"#;
 
@@ -323,7 +323,7 @@ mod tests {
     fn an_incompatible_booted_deployment_is_read_from_rpm_ostree() {
         let status = parse_status(INCOMPATIBLE, || parse_local(RPM_OSTREE_BOOTED)).expect("status");
         let booted = status.booted;
-        assert_eq!(booted.image, "ghcr.io/hr-mes/athanor-system-nvidia:latest");
+        assert_eq!(booted.image, "ghcr.io/owner/athanor-system-nvidia:latest");
         assert_eq!(booted.digest, "sha256:b6a2b14800b8c6799d04c4adf870e806fb5b8b655cd8fa622e3b9618a985d61d");
         assert_eq!((booted.version.as_str(), booted.build_time), ("43.20261001.137", 1_790_849_302), "the base image's time, not the layering's");
         assert!(booted.local_changes && !booted.enforcing && !booted.download_only);
