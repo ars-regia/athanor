@@ -39,7 +39,10 @@ def main():
         entry("org.athanor.Hostile.desktop", HOSTILE_NAME, HOSTILE_NAME)
     if "--frozen" in sys.argv:
         entry("org.athanor.Frozen.desktop", "Frozen Provider")
-        providers = DATA / "gnome-shell" / "search-providers"
+        # A system data directory of the scene's XDG_DATA_DIRS: the launcher reads providers
+        # from those alone, never from XDG_DATA_HOME (doc_launcher.md, LA2). The rig runs as
+        # root in a throwaway container.
+        providers = Path("/usr/local/share/gnome-shell/search-providers")
         providers.mkdir(parents=True, exist_ok=True)
         (providers / "org.athanor.Frozen.ini").write_text(
             "[Shell Search Provider]\nDesktopId=org.athanor.Frozen.desktop\n"

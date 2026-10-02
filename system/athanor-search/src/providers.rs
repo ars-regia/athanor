@@ -46,9 +46,9 @@ pub struct Provider {
     pub name: String,
 }
 
-/// Every `XDG_DATA_DIRS` entry with the providers' suffix. Not `$XDG_DATA_HOME`, as on GNOME
-/// Shell: a file the user's own processes can write must not register a D-Bus name to call
-/// with every query (LA2).
+/// Every `XDG_DATA_DIRS` entry with the providers' suffix, and not `$XDG_DATA_HOME`, as on
+/// GNOME Shell (LA2). `XDG_DATA_DIRS` still lists the user's Flatpak export tree, which the
+/// user's processes can write: the trust in a provider stays GNOME's (LA9).
 pub fn dirs() -> Vec<PathBuf> {
     suffixed(glib::system_data_dirs())
 }
