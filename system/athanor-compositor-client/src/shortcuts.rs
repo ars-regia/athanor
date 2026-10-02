@@ -160,10 +160,28 @@ fn set_in(path: &Path, action: &str, command: &str, default: Option<&str>) -> Re
 fn render(entries: &[(String, String)]) -> String {
     let mut out = String::from("{\n");
     for (name, command) in entries {
-        let escaped = command.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
-        out.push_str(&format!("    {name}: \"{escaped}\",\n"));
+        out.push_str(&format!("    {name}: \"{}\",\n", escape(command)));
     }
     out.push_str("}\n");
+    out
+}
+
+/// A command as a RON string body: every character the parser unescapes is escaped, so a
+/// value read from the file, control characters included, is written back unchanged.
+fn escape(command: &str) -> String {
+    let mut out = String::with_capacity(command.len());
+    for c in command.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            '\0' => out.push_str("\\0"),
+            c if c.is_control() => out.push_str(&format!("\\u{{{:x}}}", u32::from(c))),
+            c => out.push(c),
+        }
+    }
     out
 }
 
@@ -383,6 +401,17 @@ mod tests {
         std::fs::write(&path, stock).unwrap();
         assert_eq!(set_in(&path, "Launcher", "ours", None).unwrap(), Binding::UserChoice);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), stock);
+    }
+
+    #[test]
+    fn every_escape_survives_a_rewrite() {
+        let entries = vec![
+            ("Launcher".to_owned(), "ours".to_owned()),
+            ("Other".to_owned(), "a\\b \"q\" 'x'\n\t\r\0\u{1b}[0m\u{7f}\u{85}\u{9f} \u{e9}\u{1F600}".to_owned()),
+        ];
+        let text = render(&entries);
+        assert!(!text.contains(['\t', '\r', '\0', '\u{1b}', '\u{7f}', '\u{85}']), "no raw control character: {text:?}");
+        assert_eq!(parse(&text).unwrap(), entries);
     }
 
     #[test]
