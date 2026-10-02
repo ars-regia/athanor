@@ -821,9 +821,15 @@ stage_hotplug() {
     pid=$(unit show -p MainPID --value)
     restarts=$(unit show -p NRestarts --value)
     close_launcher || fail "the launcher does not close"
-    # One show first: what the first show loads (the panel, the icons, the renderer) is a cost
-    # per process, not per unplug.
+    # shellcheck disable=SC2016 # expanded by the guest's shell
+    printf '%s\n' '#!/bin/sh' "printf '\\033]0;%s\\007' \"\$1\"" 'head -c 4 > "$2"' 'exec sleep 600' | guest_put "$TERM_SCRIPT"
+    start_term acceptance-hotplug $a
+    sleep 3
+    # One show first, the control: with the window on the only output the launcher shows on
+    # the only window. What a first show loads (the panel, the icons, the renderer) is a cost
+    # per process, not per unplug, so it is in the baseline.
     open_launcher
+    [[ $(panel_lines) == 1 ]] || fail "the window on the only output: the panel is on line '$(panel_lines)' of $(launcher_surfaces | tr '\n' '|'), want 1"
     close_launcher || fail "the launcher does not close"
     sleep 5
     pss0=$(launcher_pss)
@@ -840,14 +846,6 @@ stage_hotplug() {
     # The third cycle, with the launcher shown on the output that leaves.
     second_head on
     wait_until 20 surface_lines_are 4 || fail "two outputs, two abandoned windows: $(launcher_surfaces | wc -l) launcher surfaces: $(launcher_surfaces | tr '\n' '|')"
-    # shellcheck disable=SC2016 # expanded by the guest's shell
-    printf '%s\n' '#!/bin/sh' "printf '\\033]0;%s\\007' \"\$1\"" 'head -c 4 > "$2"' 'exec sleep 600' | guest_put "$TERM_SCRIPT"
-    start_term acceptance-hotplug $a
-    sleep 3
-    # The control: with the window on the first output the launcher shows on the first window.
-    open_launcher
-    wait_until 10 eval "[[ \$(panel_lines) == 1 ]]" || fail "the window on the first output: the panel is on line '$(panel_lines)' of $(launcher_surfaces | tr '\n' '|'), want 1"
-    close_launcher || fail "the launcher does not close"
     # Then a window on the second output: the pointer is moved across (a uinput relative mouse;
     # an absolute one maps onto the first output only) and cosmic-comp maps the next window
     # where the pointer is. The compositor's move shortcut does not reach the window from a
