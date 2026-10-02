@@ -360,11 +360,16 @@ stage_calc() {
     close_launcher || fail "the launcher does not close"
 }
 
+# The document of the files stage, which the crash-loop stage finds before the kills too.
+write_report_odt() {
+    guest_ssh "mkdir -p $FIXTURES && cd \"\$(mktemp -d)\" && printf '%s' '<?xml version=\"1.0\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\"><office:body><office:text><text:p>quetzalcoatl</text:p></office:text></office:body></office:document-content>' > content.xml && rm -f $FIXTURES/report.odt && python3 -m zipfile -c $FIXTURES/report.odt content.xml" ||
+        fail "writing report.odt"
+}
+
 stage_files() {
     [[ $(unit is-active) == active ]] || fresh_start
     ensure_localsearch
-    guest_ssh "mkdir -p $FIXTURES && cd \"\$(mktemp -d)\" && printf '%s' '<?xml version=\"1.0\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\"><office:body><office:text><text:p>quetzalcoatl</text:p></office:text></office:body></office:document-content>' > content.xml && rm -f $FIXTURES/report.odt && python3 -m zipfile -c $FIXTURES/report.odt content.xml" ||
-        fail "writing report.odt"
+    write_report_odt
     # ~/Documents is indexed recursively by default: the miner picks the file up by itself.
     wait_until 120 indexed quetzalcoatl report.odt || fail "localsearch does not find the content of report.odt"
     wait_until 120 indexer_idle || fail "the indexer is not idle after 120 s"
@@ -896,10 +901,15 @@ stage_crash-loop() {
     # The positive control: with the indexer running and the files stage's file indexed, a
     # launcher that has not crashed finds it, so its absence after the give-up means something.
     ensure_localsearch
-    wait_until 60 indexed quetzalcoatl report.odt || fail "localsearch does not find report.odt (the files stage's fixture)"
+    write_report_odt
+    wait_until 120 indexed quetzalcoatl report.odt || fail "localsearch does not find report.odt"
     fresh_start
     search quetzalcoatl "report.odt, File"
     close_launcher || fail "the launcher does not close"
+    # cosmic-comp 1.8 leaves the next launcher without a keyboard once one that was shown has
+    # ended (the same defect as the other relogins here): a new login, then the kills.
+    relogin
+    fresh_start
     since=$(now)
     for round in 1 2 3 4 5; do
         pid=$(unit show -p MainPID --value)
