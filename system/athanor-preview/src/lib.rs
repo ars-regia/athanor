@@ -321,7 +321,7 @@ mod tests {
     fn only_a_themed_icon_is_shown() {
         let themed_icon: gio::Icon = gio::ThemedIcon::new("text-x-generic").upcast();
         assert!(themed(Some(themed_icon.clone())).equal(Some(&themed_icon)));
-        let file_icon: gio::Icon = gio::FileIcon::new(&gio::File::for_path("/tmp/x.png")).upcast();
+        let file_icon: gio::Icon = gio::FileIcon::new(&gio::File::for_path("/nonexistent/x.png")).upcast();
         assert!(themed(Some(file_icon)).is::<gio::ThemedIcon>());
         assert!(themed(None).is::<gio::ThemedIcon>());
     }

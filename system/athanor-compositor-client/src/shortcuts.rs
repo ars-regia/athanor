@@ -14,6 +14,8 @@ use std::path::{Path, PathBuf};
 
 use crate::cosmic_config;
 
+/// The prefix of the per-page desktop entries cosmic-settings ships.
+pub const SETTINGS_PAGE_PREFIX: &str = "com.system76.CosmicSettings.";
 const COMPONENT: &str = "com.system76.CosmicSettings.Shortcuts";
 const KEY: &str = "system_actions";
 /// The largest copy that is read; a real one holds a handful of lines.

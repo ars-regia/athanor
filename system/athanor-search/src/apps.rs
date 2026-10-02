@@ -9,9 +9,6 @@ use crate::item::{Action, Group, Hit};
 use crate::rank::Ranker;
 use crate::usage::Usage;
 
-/// The per-page entries cosmic-settings ships, until our Settings ships its own.
-const SETTINGS_PREFIX: &str = "com.system76.CosmicSettings.";
-
 /// Keywords read per entry: a desktop file is untrusted input.
 const MAX_KEYWORDS: usize = 64;
 
@@ -32,17 +29,18 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    pub fn read() -> Catalog {
-        Catalog::from_infos(gio::AppInfo::all())
+    /// `settings_prefix` is the id prefix of the per-page entries a settings application ships.
+    pub fn read(settings_prefix: &str) -> Catalog {
+        Catalog::from_infos(gio::AppInfo::all(), settings_prefix)
     }
 
-    pub fn from_infos(infos: impl IntoIterator<Item = gio::AppInfo>) -> Catalog {
+    pub fn from_infos(infos: impl IntoIterator<Item = gio::AppInfo>, settings_prefix: &str) -> Catalog {
         let mut catalog = Catalog::default();
         for info in infos {
             let Some(id) = info.id().map(|id| id.to_string()) else { continue };
             if info.should_show() {
                 catalog.apps.extend(entry(&info, id));
-            } else if id.starts_with(SETTINGS_PREFIX) {
+            } else if id.starts_with(settings_prefix) {
                 catalog.settings.extend(entry(&info, id));
             }
         }

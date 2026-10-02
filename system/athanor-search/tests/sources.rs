@@ -15,7 +15,7 @@ fn catalog() -> apps::Catalog {
         .expect("fixtures")
         .filter_map(|entry| gio_unix::DesktopAppInfo::from_filename(entry.ok()?.path()))
         .map(|info| info.upcast::<gio::AppInfo>());
-    apps::Catalog::from_infos(infos)
+    apps::Catalog::from_infos(infos, "org.example.Settings.")
 }
 
 fn titles(hits: &[athanor_search::item::Hit]) -> Vec<&str> {
@@ -29,7 +29,7 @@ fn applications_and_settings_pages_are_split_and_hidden_entries_dropped() {
     let settings: Vec<_> = catalog.settings.iter().map(|e| e.id.as_str()).collect();
     assert!(apps.contains(&"org.mozilla.firefox.desktop"));
     assert!(!apps.contains(&"hidden.desktop") && !settings.contains(&"hidden.desktop"));
-    assert_eq!(settings, ["com.system76.CosmicSettings.Wireless.desktop"]);
+    assert_eq!(settings, ["org.example.Settings.Wireless.desktop"]);
 }
 
 #[test]
@@ -72,7 +72,7 @@ fn usage_reorders_within_a_tier_and_a_learned_query_wins() {
 fn windows_are_found_by_title_and_application() {
     let open = [
         windows::WindowEntry { index: 0, title: "Relazione_Q3.odt — LibreOffice".into(), app_id: "libreoffice-writer".into(), app_name: Some("LibreOffice Writer".into()), icon: None },
-        windows::WindowEntry { index: 1, title: "~ : bash".into(), app_id: "com.system76.CosmicTerm".into(), app_name: Some("COSMIC Terminal".into()), icon: None },
+        windows::WindowEntry { index: 1, title: "~ : bash".into(), app_id: "org.example.Terminal".into(), app_name: Some("COSMIC Terminal".into()), icon: None },
     ];
     let hits = windows::search(&open, "relaz", &mut Ranker::new("relaz"), &Usage::default(), 0);
     assert_eq!(hits.len(), 1);

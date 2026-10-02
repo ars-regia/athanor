@@ -136,7 +136,7 @@ pub fn start(app: &gtk4::Application, options: &Options) -> Rc<Launcher> {
                 launcher.fill(&list::lines(rows));
             }
         });
-        engine.set_catalog(Catalog::read());
+        engine.set_catalog(Catalog::read(athanor_compositor_client::SETTINGS_PAGE_PREFIX));
         Launcher {
             app: app.clone(),
             display: display.clone(),
@@ -255,7 +255,7 @@ impl Launcher {
         let weak = Rc::downgrade(self);
         self.apps_monitor.connect_changed(move |_| {
             if let Some(launcher) = weak.upgrade() {
-                launcher.engine.set_catalog(Catalog::read());
+                launcher.engine.set_catalog(Catalog::read(athanor_compositor_client::SETTINGS_PAGE_PREFIX));
             }
         });
         let weak = Rc::downgrade(self);

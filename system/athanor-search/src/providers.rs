@@ -366,7 +366,7 @@ mod tests {
         assert!(icon_of(file).is_none());
         let named = |name: &str| icon_of(gio::ThemedIcon::new(name).serialize().expect("themed"));
         assert!(named("../../etc/x").is_none());
-        assert!(named("/tmp/x").is_none());
+        assert!(named("/nonexistent/x").is_none());
         assert!(named("org.gnome.Calculator-symbolic").is_some());
     }
 
