@@ -489,7 +489,11 @@ def cosmic_comp_body(move):
         "and `SOURCES/sources.sha256`; the patches are untouched. Please check whether upstream "
         "(pop-os/cosmic-comp) has merged the layer-surface focus fix (`Patch0`) or the `GIT_HASH` "
         "change to build.rs (`Patch1`): if so, drop that patch and its file. If a patch no longer "
-        "applies, the DAG build fails (`%autosetup -p1`) and it needs a refresh. Never auto-merged.\n"
+        "applies, the DAG build fails (`%autosetup -p1`) and it needs a refresh.\n\n"
+        "The spec builds upstream's release at Fedora's version, and its `License:` and `Requires:` "
+        "were copied from Fedora's spec, which the bump does not rewrite: diff Fedora's "
+        "`cosmic-comp.spec` between the two builds (src.fedoraproject.org/rpms/cosmic-comp) "
+        "and carry any License or Requires change. Never auto-merged.\n"
     )
 
 

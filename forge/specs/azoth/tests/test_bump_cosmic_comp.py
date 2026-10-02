@@ -91,6 +91,8 @@ class Independence(unittest.TestCase):
         body = bump.cosmic_comp_body({"old": "1.8.0-1.fc43", "new": "1.8.0-2.fc43"})
         self.assertIn("1.8.0-2.fc43", body)
         self.assertIn("merged", body)
+        self.assertIn("diff Fedora's", body)
+        self.assertIn("`License:` and `Requires:`", body)
 
     def test_apply_writes_the_title_and_the_body_only_when_something_moved(self):
         move = {"old": "1.8.0-1.fc43", "new": "1.8.0-2.fc43"}
