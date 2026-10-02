@@ -1,11 +1,11 @@
 Name:           mold
-Version:        2.36.0
+Version:        2.42.1
 Release:        1%{?dist}
 Summary:        Athanor OS Core Component - mold
 
 License:        GPLv3
 URL:            https://github.com/rui314/mold
-Source0:        https://github.com/rui314/mold/archive/refs/tags/v%{version}.tar.gz#/mold-%{version}.tar.gz
+Source0:        mold-2.42.1.tar.gz
 
 %description
 Core component implementation for mold.

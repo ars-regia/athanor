@@ -1,11 +1,11 @@
 Name:           athanor-tetragon
-Version:        1.3.0
-Release:        2%{?dist}
+Version:        1.7.1
+Release:        1%{?dist}
 Summary:        Cilium Tetragon eBPF Runtime Security
 
 License:        Apache-2.0
 URL:            https://github.com/cilium/tetragon
-Source0:        https://github.com/cilium/tetragon/releases/download/v%{version}/tetragon-v%{version}-amd64.tar.gz
+Source0:        tetragon-v1.7.1-amd64.tar.gz
 Source1:        tetragon.service
 Source2:        tetragon.yaml
 

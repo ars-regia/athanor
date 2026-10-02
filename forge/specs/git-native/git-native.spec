@@ -1,10 +1,10 @@
 Name:           git-native
-Version:        2.48.1
+Version:        2.56.0
 Release:        1%{?dist}
 Summary:        Assimilated Git Version Control System built natively from source for Athanor OS
 License:        GPL-2.0-only
 URL:            https://git-scm.com/
-Source0:        https://www.kernel.org/pub/software/scm/git/git-%{version}.tar.gz
+Source0:        git-2.56.0.tar.gz
 
 
 Provides:       git = %{version}-%{release}

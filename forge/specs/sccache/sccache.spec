@@ -1,11 +1,11 @@
 Name:           sccache
-Version:        0.9.1
+Version:        0.18.0
 Release:        1%{?dist}
 Summary:        Athanor OS Core Component - sccache
 
 License:        GPLv3
 URL:            https://github.com/mozilla/sccache
-Source0:        https://github.com/mozilla/sccache/archive/refs/tags/v%{version}.tar.gz#/sccache-%{version}.tar.gz
+Source0:        sccache-0.18.0.tar.gz
 
 %description
 Core component implementation for sccache.

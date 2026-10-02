@@ -1,12 +1,12 @@
 %global debug_package %{nil}
 
 Name:           ripgrep-native
-Version:        14.1.1
+Version:        15.2.0
 Release:        1%{?dist}
 Summary:        Assimilated Fast Line-Oriented Search Tool built natively from source for Athanor OS
 License:        Unlicense OR MIT
 URL:            https://github.com/BurntSushi/ripgrep
-Source0:        https://github.com/BurntSushi/ripgrep/archive/refs/tags/%{version}.tar.gz#/ripgrep-%{version}.tar.gz
+Source0:        ripgrep-15.2.0.tar.gz
 
 
 Provides:       ripgrep = %{version}-%{release}
