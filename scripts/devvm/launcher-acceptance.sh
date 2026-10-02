@@ -720,8 +720,10 @@ reference_unit_properties() { # reference_unit_properties KIND
 
 # Every decoder unit the sampler caught has the properties render.rs sets.
 check_live_units() { # check_live_units KIND
-    local file found=0 cores expected
+    local file found=0 cores expected reference differences
     cores=$(in_session nproc)
+    # Once per kind, before the loop: two live units of one kind must not collide on its fixed name.
+    reference=$(reference_unit_properties "$1")
     for file in $(in_session "ls $SAMPLES.athanor-preview-* 2> /dev/null"); do
         local props
         props=$(in_session cat "$file")
@@ -736,8 +738,6 @@ check_live_units() { # check_live_units KIND
         grep -qx "TasksMax=$expected" <<< "$props" || fail "$1 unit: TasksMax is not $expected: $props"
         # The whole property set: a reference unit made from decoder_args (the hand copy of
         # render.rs) is read back by systemd, so both sides are in its own spelling.
-        local reference differences
-        reference=$(reference_unit_properties "$1")
         differences=$(diff <(unit_properties <<< "$reference") <(unit_properties <<< "$props")) ||
             fail "$1 unit: the live unit differs from decoder_args (< reference, > live): $differences"
     done
@@ -771,7 +771,7 @@ stage_decoder() {
     type_keys @down*4:0.25
     sleep 1
     wait_until 25 sampler_done || fail "the sampler did not finish"
-    [[ $(in_session cat "$SAMPLES.max") -le 1 ]] || fail "$(in_session cat "$SAMPLES.max") decoder units were alive at once while the key was held"
+    [[ $(in_session cat "$SAMPLES.max") -eq 1 ]] || fail "$(in_session cat "$SAMPLES.max") decoder units were alive (want exactly 1) at once while the key was held"
     sleep 6
     units_alive || fail "a decoder unit is left 6 s after the release: $(in_session "systemctl --user list-units --all --no-legend --plain 'athanor-preview-*'")"
     [[ $(unit show -p MainPID --value) == "$pid" ]] || fail "the launcher's MainPID changed during the held key"
@@ -808,6 +808,8 @@ second_head() { # second_head on|off|detect
     guest_ssh "echo $1 | sudo tee $HEAD2 > /dev/null && sudo udevadm trigger --action=change /sys/class/drm/card1"
 }
 launcher_surfaces() { in_session python3 - < "$HERE/launcher_surfaces.py"; }
+# The compositor lists exactly N outputs: a removal has been processed.
+outputs_are() { [[ $(in_session "wayland-info | grep -c \"interface: 'wl_output'\"") == "$1" ]]; }
 surface_lines_are() { [[ $(launcher_surfaces | wc -l) == "$1" ]]; }
 # The surfaces of the launcher that are 1x1 with no child, and those that hold the panel.
 count_hidden() { launcher_surfaces | awk '$1 == "1x1" && $4 == 0 { n++ } END { print n + 0 }'; }
@@ -845,6 +847,7 @@ stage_hotplug() {
         second_head on
         wait_until 20 surface_lines_are $((1 + cycle)) || fail "cycle $cycle, two outputs: $(launcher_surfaces | tr '\n' '|')"
         second_head off
+        wait_until 20 outputs_are 1 || fail "cycle $cycle: the compositor still lists two outputs"
         wait_until 20 surface_lines_are $((1 + cycle)) || fail "cycle $cycle, one output and abandoned windows: $(launcher_surfaces | tr '\n' '|')"
     done
     pss1=$(launcher_pss)
@@ -866,6 +869,7 @@ stage_hotplug() {
     echo "hotplug: surfaces with the window on the second output: $(launcher_surfaces | tr '\n' '|')"
     "$HERE/screenshot.sh" "$SHOTS/hotplug-second-output.png" > /dev/null
     second_head off
+    wait_until 20 outputs_are 1 || fail "the compositor still lists two outputs after the last one left"
     wait_until 20 hidden || fail "the launcher is still shown after the output left: $(launcher_surfaces | tr '\n' '|')"
     # The window of an output that left is emptied and kept, never destroyed (cosmic-comp closes
     # the connection of a client that destroys it): one live surface and one abandoned window
@@ -926,6 +930,8 @@ stage_crash-loop() {
     if rows | section 1 | grep -q ', File$'; then
         fail "a File row after the give-up: $(rows | section 1 | tr '\n' '|')"
     fi
+    # The absence is the launcher's only if the indexer still finds the file right now.
+    indexed quetzalcoatl report.odt || fail "localsearch no longer finds report.odt: the absence of a File row proves nothing"
     close_launcher || fail "the launcher does not close"
     search '2+2*3' "8, Calculation"
     close_launcher || fail "the launcher does not close"

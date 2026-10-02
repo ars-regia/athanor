@@ -41,6 +41,12 @@ pub enum LaunchError {
     File(glib::Error),
 }
 
+/// The scheme GIO is asked for: what the text itself says, lower-cased. A text without one is
+/// refused here, because GIO would log a critical for an empty scheme.
+fn uri_scheme(uri: &str) -> Result<glib::GString, LaunchError> {
+    glib::Uri::peek_scheme(uri).ok_or_else(|| LaunchError::Missing(format!("a scheme in {uri}")))
+}
+
 /// What the field codes of an `Exec` line expand to.
 pub(crate) struct Fields<'a> {
     pub(crate) name: &'a str,
@@ -297,7 +303,7 @@ impl Client {
         } else {
             // From the text: GIO's own answer for an https URL is "http" (gvfs' web backend
             // serves both), which would pick the handler of the wrong scheme.
-            let scheme = glib::Uri::peek_scheme(uri).unwrap_or_default();
+            let scheme = uri_scheme(uri)?;
             gio::AppInfo::default_for_uri_scheme(&scheme)
                 .ok_or_else(|| LaunchError::Missing(format!("an application for {scheme}:")))?
         };
@@ -553,9 +559,12 @@ mod tests {
 
     #[test]
     fn an_https_url_is_looked_up_by_its_own_scheme() {
-        assert_eq!(glib::Uri::peek_scheme("https://duckduckgo.com/?q=a").as_deref(), Some("https"));
-        assert_eq!(glib::Uri::peek_scheme("HTTPS://example.org").as_deref(), Some("https"));
-        assert_eq!(glib::Uri::peek_scheme("not a uri"), None);
+        assert_eq!(uri_scheme("https://a.b/c?d#e").unwrap(), "https");
+        assert_eq!(uri_scheme("HTTPS://a.b").unwrap(), "https");
+        assert!(matches!(
+            uri_scheme("not a uri"),
+            Err(LaunchError::Missing(what)) if what.contains("not a uri")
+        ));
     }
 
     const FIELDS: Fields<'static> = Fields {

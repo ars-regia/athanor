@@ -83,7 +83,9 @@ impl Surface {
     }
 
     /// The output left: the window is emptied and kept, never destroyed (the bar's
-    /// `abandon`, for the same cosmic-comp 1.8 behaviour).
+    /// `abandon`, for the same cosmic-comp 1.8 behaviour). A window that has shown keeps its
+    /// renderer state, about 3.4 MB (measured: 23155 to 26613 kB PSS), because it is never
+    /// unrealized; the dev VM hotplug stage's 8 MB gate therefore allows two such removals.
     // ponytail: one empty window per output removal for the life of the process; destroy
     // it instead once cosmic-comp tolerates that.
     pub fn abandon(self) {
