@@ -156,9 +156,13 @@ impl Preview {
         self.set_icon(Some(&themed(info.icon())));
         Self::set(&self.title, &line(&info.name(), NAME_CHARS));
         Self::set(&self.body, &lines(&info.description().unwrap_or_default(), BODY_CHARS));
-        let Some(app_id) = info.string("X-Flatpak") else {
-            Self::set(&self.facts, &tr("System image"));
-            return;
+        let provenance = info.filename().map_or(origin::Provenance::User, |path| {
+            origin::provenance(&path, info.string("X-Flatpak").as_deref(), &glib::user_data_dir())
+        });
+        let app_id = match provenance {
+            origin::Provenance::Flatpak(app_id) => app_id,
+            origin::Provenance::Image => return Self::set(&self.facts, &tr("System image")),
+            origin::Provenance::User => return Self::set(&self.facts, &tr("Installed by you")),
         };
         let this = Rc::clone(self);
         glib::spawn_future_local(async move {
