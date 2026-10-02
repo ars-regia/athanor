@@ -1,0 +1,174 @@
+# Italian translations for athanor-launcher package.
+# Copyright (C) 2026 THE athanor-launcher'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the athanor-launcher package.
+# Automatically generated, 2026.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: athanor-launcher\n"
+"Report-Msgid-Bugs-To: forge@athanor.os\n"
+"Language: it\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: ../../../../system/athanor-preview/src/lib.rs:137
+#, rust-format
+msgid "Exchange rates of {date}"
+msgstr "Tassi di cambio del {date}"
+
+#: ../../../../system/athanor-preview/src/lib.rs:164
+msgid "System image"
+msgstr "Immagine di sistema"
+
+#: ../../../../system/athanor-preview/src/lib.rs:165
+msgid "Installed by you"
+msgstr "Installata da te"
+
+#: src/ui/actions.rs:117
+msgid "Actions"
+msgstr "Azioni"
+
+#: src/ui/actions.rs:243
+msgid "Switch to"
+msgstr "Passa alla finestra"
+
+#: src/ui/actions.rs:244
+msgid "Run in terminal"
+msgstr "Esegui nel terminale"
+
+#: src/ui/actions.rs:245
+msgid "Search the web"
+msgstr "Cerca sul web"
+
+#: src/ui/actions.rs:246
+msgid "Open"
+msgstr "Apri"
+
+#: src/ui/actions.rs:249
+#, rust-format
+msgid "Open with {app}"
+msgstr "Apri con {app}"
+
+#: src/ui/actions.rs:251
+msgid "Show in folder"
+msgstr "Mostra nella cartella"
+
+#: src/ui/actions.rs:252
+msgid "Copy path"
+msgstr "Copia percorso"
+
+#: src/ui/actions.rs:253
+msgid "Copy link"
+msgstr "Copia link"
+
+#: src/ui/actions.rs:254
+msgid "Copy name"
+msgstr "Copia nome"
+
+#: src/ui/actions.rs:255
+msgid "Copy title"
+msgstr "Copia titolo"
+
+#: src/ui/actions.rs:256
+msgid "Copy"
+msgstr "Copia"
+
+#: src/ui/actions.rs:269
+#, rust-format
+msgid "{name} could not be opened"
+msgstr "Impossibile aprire {name}"
+
+#: src/ui/mod.rs:102 src/ui/mod.rs:104
+msgid "Search"
+msgstr "Cerca"
+
+#: src/ui/mod.rs:107
+msgid "Results"
+msgstr "Risultati"
+
+#: src/ui/mod.rs:113
+msgid "Enter to open · Ctrl+Enter to show in folder · Ctrl+C to copy · Tab for actions · Esc to close"
+msgstr "Invio per aprire · Ctrl+Invio per mostrare nella cartella · Ctrl+C per copiare · Tab per le azioni · Esc per chiudere"
+
+#: src/ui/mod.rs:415
+#, rust-format
+msgid "Results: {count}"
+msgstr "Risultati: {count}"
+
+#: src/ui/rows.rs:15 src/ui/rows.rs:29
+msgid "Command"
+msgstr "Comando"
+
+#: src/ui/rows.rs:16
+msgid "Application"
+msgstr "Applicazione"
+
+#: src/ui/rows.rs:17
+msgid "Window"
+msgstr "Finestra"
+
+#: src/ui/rows.rs:18
+msgid "Calculation"
+msgstr "Calcolo"
+
+#: src/ui/rows.rs:19
+msgid "Settings page"
+msgstr "Pagina delle impostazioni"
+
+#: src/ui/rows.rs:20
+msgid "File"
+msgstr "File"
+
+#: src/ui/rows.rs:21
+msgid "Search result"
+msgstr "Risultato di ricerca"
+
+#: src/ui/rows.rs:22
+msgid "Web search"
+msgstr "Ricerca sul web"
+
+#: src/ui/rows.rs:30
+msgid "Applications"
+msgstr "Applicazioni"
+
+#: src/ui/rows.rs:31
+msgid "Windows"
+msgstr "Finestre"
+
+#: src/ui/rows.rs:32
+msgid "Calculator"
+msgstr "Calcolatrice"
+
+#: src/ui/rows.rs:33
+msgid "Settings"
+msgstr "Impostazioni"
+
+#: src/ui/rows.rs:34
+msgid "Files"
+msgstr "File"
+
+#: src/ui/rows.rs:35
+msgid "Web"
+msgstr "Web"
+
+#: src/ui/rows.rs:41
+msgid "Type a command after >"
+msgstr "Scrivi un comando dopo >"
+
+#: src/ui/rows.rs:42
+msgid "This command is too long to run"
+msgstr "Questo comando è troppo lungo per essere eseguito"
+
+#: src/ui/rows.rs:43
+msgid "This command holds hidden characters and is not run"
+msgstr "Questo comando contiene caratteri nascosti e non viene eseguito"
+
+#: src/ui/rows.rs:44
+msgid "This command has an unclosed quote or escape and is not run"
+msgstr "Questo comando ha virgolette o un escape non chiusi e non viene eseguito"
+
+#: src/ui/rows.rs:87
+msgid "Indexing files…"
+msgstr "Indicizzazione dei file…"

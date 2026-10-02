@@ -24,7 +24,14 @@
 # its own timeout. A child of the user manager belongs to no session, so as a user unit
 # the locker would never see a Lock signal and the idle lock would lock nothing.
 set -eu
-systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE
+# localsearch's unit starts only with XDG_SESSION_CLASS=user (ConditionEnvironment=), and
+# greetd hands the session no class: read it from logind and publish it with the rest.
+if [ -n "${XDG_SESSION_ID:-}" ] && class=$(loginctl show-session "$XDG_SESSION_ID" --property=Class --value); then
+	export XDG_SESSION_CLASS="$class"
+else
+	echo "athanor-desktop: cannot read the session class from logind; file search stays off" >&2
+fi
+systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XDG_SESSION_CLASS
 
 # Runs a session component again whenever it exits, as cosmic-session does, for as long
 # as the anchor process lives. The anchor is this process: its PID stays the same once

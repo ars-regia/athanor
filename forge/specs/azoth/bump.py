@@ -4,6 +4,8 @@
     bump.py check   prints to stdout a JSON with the current pins, the new ones and the notes
     bump.py apply   rewrites pins.env, the FROM lines of the Containerfiles and the pins
                     table of KERNEL.md; prints the PR body (Markdown) to stdout
+    bump.py cosmic-comp check|apply OUT_DIR   the cosmic-comp tracking alone (below), its own PR;
+                    apply writes OUT_DIR/title and OUT_DIR/body.md, and only when something moved
     bump.py verify  verifies only the NVIDIA locks at their pins against the repositories and
                     exits non-zero naming each lock that is stale or gone; the workflow runs it
                     while a bump PR is open, when check and apply do not run
@@ -14,6 +16,9 @@ on both sides. KERNEL_CHANNEL=stable takes the newest common series, lts the lon
 one. Without a pair the kernel stays where it is and a note says so. With the pair, the
 head commit of CachyOS/kernel-patches for the series and the commit of
 linux-cachyos/config in force at the date of the CachyOS release move as well.
+cosmic-comp (forge/specs/cosmic-comp): the newest stable F43 build on Bodhi against the spec's
+Version and fedora_release; a difference rewrites the spec and the archive pin. It runs on its own
+(`cosmic-comp-bump.yml`, its own branch and PR, never auto-merged), apart from the kernel bump.
 Outside the kernel: the NVIDIA versions (open from the GitHub tags, legacy from RPM Fusion)
 within the pinned branch, and the digest of the base image of the Containerfiles, the system
 base quay.io base-atomic in system/Containerfile included. Every run also verifies the NVIDIA
@@ -22,6 +27,7 @@ pin moved or whose packages the repository republished. The kernel hash manifest
 them. Standard library only: it runs on the GitHub runner without installing anything.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -40,6 +46,9 @@ NVIDIA_LOCK = HERE.parents[2] / "system" / "nvidia" / "lock.py"
 LOCK_NOT_PUBLISHED = 3  # lock.py's exit code for a version the repository does not publish
 LOCK_STALE = 4  # lock.py verify: the repository publishes the version with other files or checksums
 KERNEL_MD = HERE / "KERNEL.md"
+COSMIC_COMP_DIR = HERE.parents[0] / "cosmic-comp"
+COSMIC_COMP_SPEC = COSMIC_COMP_DIR / "cosmic-comp.spec"
+COSMIC_COMP_RE = re.compile(r"^cosmic-comp-(\d+\.\d+\.\d+)-(\d+)\.fc43$")
 FEDORA_RELEASES = ("F43", "F44")  # in order of preference for the same patch level
 LTS_SERIES = "6.18"  # KERNEL_CHANNEL=lts: the longterm Fedora and CachyOS maintain
 KERNEL_RELEASES = "https://www.kernel.org/releases.json"
@@ -181,6 +190,73 @@ def head_commit(repo, path, until=None):
     if until:
         params["until"] = until
     return next(github(f"repos/{repo}/commits", **params))["sha"]
+
+
+# --- cosmic-comp --------------------------------------------------------------------------
+
+
+def cosmic_comp_nvrs():
+    """The Bodhi answer for the stable F43 builds of cosmic-comp."""
+    query = {"packages": "cosmic-comp", "releases": "F43", "status": "stable", "rows_per_page": 100}
+    return json.loads(http(f"{BODHI}?{urllib.parse.urlencode(query)}")[1])
+
+
+def cosmic_comp_newest(data):
+    """The newest `version-release.fc43` among the builds of a Bodhi answer."""
+    found = []
+    for update in data["updates"]:
+        for build in update["builds"]:
+            m = COSMIC_COMP_RE.match(build["nvr"])
+            if m:
+                found.append((vtuple(m.group(1)), int(m.group(2)), f"{m.group(1)}-{m.group(2)}.fc43"))
+    if not found:
+        sys.exit("cosmic-comp: Bodhi lists no stable F43 build")
+    return max(found)[2]
+
+
+def cosmic_comp_pin(spec):
+    """`version-release.fc43` of the spec: Fedora's build it is made from."""
+    version = re.search(r"^Version:\s*(\S+)$", spec, re.M)
+    release = re.search(r"^%global fedora_release (\S+)$", spec, re.M)
+    if not version or not release:
+        sys.exit("cosmic-comp.spec: Version or fedora_release not found")
+    return f"{version.group(1)}-{release.group(1)}"
+
+
+def cosmic_comp_spec(spec, nvr, commit):
+    """The spec rewritten for Fedora's build NVR: the Athanor suffix starts again at 1."""
+    version, release = COSMIC_COMP_RE.match(f"cosmic-comp-{nvr}").groups()
+    for pattern, value in (
+        (r"^(Version:\s*).*$", rf"\g<1>{version}"),
+        (r"^(%global fedora_release ).*$", rf"\g<1>{release}.fc43"),
+        (r"^(Release:\s*%\{fedora_release\}\.athanor).*$", r"\g<1>1"),
+        (r"^(%global commit ).*$", rf"\g<1>{commit}"),
+    ):
+        spec, n = re.subn(pattern, value, spec, flags=re.M)
+        if n != 1:
+            sys.exit(f"cosmic-comp.spec: {pattern} found {n} times")
+    return spec
+
+
+def cosmic_comp_move():
+    """{"old", "new"} when Bodhi's newest stable F43 build differs from the spec's, else None."""
+    old = cosmic_comp_pin(COSMIC_COMP_SPEC.read_text())
+    new = cosmic_comp_newest(cosmic_comp_nvrs())
+    return {"old": old, "new": new} if new != old else None
+
+
+def apply_cosmic_comp(move):
+    """Rewrites the spec and the pin of its archive. The patch is not touched: the DAG build
+    (%autosetup -p1) fails when it no longer applies, and a reviewer decides if upstream has it."""
+    version = move["new"].split("-")[0]
+    tag = github_commit(f"epoch-{version}")
+    COSMIC_COMP_SPEC.write_text(cosmic_comp_spec(COSMIC_COMP_SPEC.read_text(), move["new"], tag["sha"]), newline="\n")
+    archive = http(f"https://github.com/pop-os/cosmic-comp/archive/epoch-{version}/cosmic-comp-{version}.tar.gz")[1]
+    (COSMIC_COMP_DIR / "SOURCES" / "sources.sha256").write_text(f"{hashlib.sha256(archive).hexdigest()}  cosmic-comp-{version}.tar.gz\n", newline="\n")
+
+
+def github_commit(ref):
+    return gh(f"https://api.github.com/repos/pop-os/cosmic-comp/commits/{ref}")[1]
 
 
 # --- NVIDIA and base image -----------------------------------------------------------
@@ -405,7 +481,46 @@ def body(result):
     return "\n".join(lines) + "\n"
 
 
+def cosmic_comp_body(move):
+    return (
+        "## Pins\n\n| package | before | after |\n| --- | --- | --- |\n"
+        f"| `cosmic-comp` | `{move['old']}` | `{move['new']}` |\n\n"
+        "Fedora's stable F43 build moved. This PR rewrites `forge/specs/cosmic-comp/cosmic-comp.spec` "
+        "and `SOURCES/sources.sha256`; the patches are untouched. Please check whether upstream "
+        "(pop-os/cosmic-comp) has merged the layer-surface focus fix (`Patch0`) or the `GIT_HASH` "
+        "change to build.rs (`Patch1`): if so, drop that patch and its file. If a patch no longer "
+        "applies, the DAG build fails (`%autosetup -p1`) and it needs a refresh.\n\n"
+        "The spec builds upstream's release at Fedora's version, and its `License:` and `Requires:` "
+        "were copied from Fedora's spec, which the bump does not rewrite: diff Fedora's "
+        "`cosmic-comp.spec` between the two builds (src.fedoraproject.org/rpms/cosmic-comp) "
+        "and carry any License or Requires change. Never auto-merged.\n"
+    )
+
+
+def cosmic_comp_title(move):
+    return f"chore(cosmic-comp): bump to {move['new']}"
+
+
+def cosmic_comp_main(action, out_dir=None):
+    """`bump.py cosmic-comp check|apply`: independent of the kernel bump, and the only caller of
+    the cosmic-comp lookup, so a failure here never reaches the kernel path and the reverse."""
+    move = cosmic_comp_move()
+    if action == "check":
+        print(json.dumps({"changed": bool(move), "move": move}, indent=2))
+        return
+    if move:
+        apply_cosmic_comp(move)
+        out = Path(out_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "title").write_text(cosmic_comp_title(move) + "\n", newline="\n")
+        (out / "body.md").write_text(cosmic_comp_body(move), newline="\n")
+
+
 def main():
+    if len(sys.argv) > 2 and sys.argv[1] == "cosmic-comp":
+        if sys.argv[2:] == ["check"] or (len(sys.argv) == 4 and sys.argv[2] == "apply"):
+            return cosmic_comp_main(*sys.argv[2:4])
+        sys.exit(__doc__)
     if len(sys.argv) != 2 or sys.argv[1] not in ("check", "apply", "verify"):
         sys.exit(__doc__)
     if sys.argv[1] == "verify":

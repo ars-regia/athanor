@@ -4,6 +4,7 @@
 //! sees only the types of [`model`].
 
 pub mod clock;
+mod capture;
 mod connection;
 mod cosmic_config;
 pub mod favorites;
@@ -12,11 +13,13 @@ mod launch;
 pub mod model;
 pub mod outputs;
 mod protocols;
+pub mod shortcuts;
 pub mod theme;
 mod unit;
 
 pub use connection::{Client, Error};
 pub use launch::{LaunchError, Opener};
+pub use shortcuts::SETTINGS_PAGE_PREFIX;
 pub use model::{
     Accessibility, Event, ScreenFilter, Tiling, Window, WindowId, WindowState, Workspace,
     WorkspaceId,

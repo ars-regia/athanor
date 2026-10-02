@@ -121,17 +121,21 @@ COPY forge/config/packages.json /usr/share/athanor/packages.json
 # UPSTREAM PACKAGES: the desktop (COSMIC), media, and CLI packages the manifest lists
 # under upstream_*. Today these are the official Fedora and RPM Fusion binaries,
 # installed here from the repositories the base image configures -- the same origin as
-# cosmic-comp and the rest the base already carries (Vendor: Fedora Project). Zero-trust
+# the rest the base already carries (Vendor: Fedora Project). Zero-trust
 # debt (2026-09-11 decision): they are to be rebuilt from source in the Athanor builder
 # and served from the tier repositories, as the custom packages are; until then Fedora's
 # GPG signatures are the provenance. The list is the single source of truth in
 # packages.json, so a package added there reaches the image. --allowerasing lets the
-# RPM Fusion ffmpeg replace the base image's ffmpeg-free.
+# RPM Fusion ffmpeg replace the base image's ffmpeg-free. --exclude=cosmic-comp hides
+# Fedora's build from this transaction, so neither --allowerasing nor a newer Fedora
+# release can replace Athanor's, installed above from the tier 2 repository; the installed
+# package still satisfies what the COSMIC packages require. The release assertion below
+# stays as the check.
 RUN --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
     dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs jq && \
     UPSTREAM=$(jq -r '(.upstream_core + .upstream_desktop + .upstream_media + .upstream_cli)[]' /usr/share/athanor/packages.json) && \
     echo "Installing upstream packages: $UPSTREAM" && \
-    dnf5 install -y --allowerasing --setopt=install_weak_deps=False --setopt=tsflags=nodocs $UPSTREAM
+    dnf5 install -y --allowerasing --exclude=cosmic-comp --setopt=install_weak_deps=False --setopt=tsflags=nodocs $UPSTREAM
 
 # FLATPAK MANIFEST: the applications are provisioned on the installed system, not at
 # build time. Extra-data apps such as Chrome run an apply_extra script under
@@ -185,6 +189,8 @@ RUN for pkg in cosmic-panel cosmic-applets cosmic-notifications athanor-layout-t
         test -L "/etc/systemd/user/athanor-session.target.wants/$unit.service" \
             || { echo "$unit.service is not enabled for every user" >&2; exit 1; }; \
     done && \
+    case $(rpm -q --qf '%{RELEASE}' cosmic-comp) in *.athanor*) ;; \
+        *) echo "cosmic-comp is not Athanor's build: $(rpm -q cosmic-comp)" >&2; exit 1;; esac && \
     for name in org.freedesktop.Notifications org.kde.StatusNotifierWatcher; do \
         owners=$(grep -lx "Name=$name" /usr/share/dbus-1/services/*.service); \
         test "$owners" = "/usr/share/dbus-1/services/$name.service" \
