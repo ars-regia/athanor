@@ -42,8 +42,11 @@ pub enum RenderError {
 
 /// The properties every decode has: nothing of the user's, nothing of /run (the system bus
 /// and every daemon socket live there; `$XDG_RUNTIME_DIR` too), no network, no swap.
-const COMMON: [&str; 12] = [
+const COMMON: [&str; 13] = [
     "ProtectHome=yes",
+    // ProtectHome covers /home, /root and /run/user; on ostree /home and /root are symlinks
+    // to these, which it does not follow. `-`: a system without them still decodes.
+    "InaccessiblePaths=-/var/home -/var/roothome",
     "ProtectSystem=strict",
     "NoNewPrivileges=yes",
     "PrivateNetwork=yes",
@@ -288,7 +291,14 @@ mod tests {
     fn both_kinds_hide_run_and_cap_memory_and_tasks() {
         for kind in [Kind::Image, Kind::Pdf] {
             let argv = argv(kind, 64, "athanor-preview-1-0");
-            for wanted in ["TemporaryFileSystem=/run", "MemorySwapMax=0", "MemoryMax=512M", "RuntimeMaxSec=5", "--unit=athanor-preview-1-0"] {
+            for wanted in [
+                "TemporaryFileSystem=/run",
+                "InaccessiblePaths=-/var/home -/var/roothome",
+                "MemorySwapMax=0",
+                "MemoryMax=512M",
+                "RuntimeMaxSec=5",
+                "--unit=athanor-preview-1-0",
+            ] {
                 assert!(argv.iter().any(|a| a == wanted), "{kind:?} lacks {wanted}");
             }
             assert!(argv.iter().any(|a| a.starts_with("TasksMax=")), "{kind:?} has no task cap");
