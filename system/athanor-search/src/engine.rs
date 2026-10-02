@@ -45,7 +45,8 @@ struct Inner {
     query: RefCell<String>,
     catalog: RefCell<Rc<Catalog>>,
     windows: RefCell<Rc<Vec<WindowEntry>>>,
-    usage: RefCell<Usage>,
+    /// Shared with a files search in flight; `record` copies it only then.
+    usage: RefCell<Rc<Usage>>,
     usage_path: PathBuf,
     files: Option<Rc<Files>>,
     providers: Rc<Vec<Provider>>,
@@ -73,7 +74,7 @@ impl Engine {
             query: RefCell::default(),
             catalog: RefCell::default(),
             windows: RefCell::default(),
-            usage: RefCell::new(Usage::load(&usage_path)),
+            usage: RefCell::new(Rc::new(Usage::load(&usage_path))),
             usage_path,
             files: files.map(Rc::new),
             providers: Rc::new(providers),
@@ -92,21 +93,21 @@ impl Engine {
 
     /// The library writes usage too (plan 3b): read it again before a query session.
     pub fn reload_usage(&self) {
-        self.0.usage.replace(Usage::load(&self.0.usage_path));
+        self.0.usage.replace(Rc::new(Usage::load(&self.0.usage_path)));
     }
 
     pub fn current(&self) -> String {
         self.0.query.borrow().clone()
     }
 
-    /// Records that the user chose `key` for the current query, and saves.
-    pub fn record(&self, key: &str) {
+    /// Records that the user chose `key` for `query`, and saves.
+    pub fn record(&self, query: &str, key: &str) {
         if key.is_empty() {
             return;
         }
-        let query = self.current();
         let mut usage = self.0.usage.borrow_mut();
-        usage.record(&query, key, now());
+        let usage = Rc::make_mut(&mut usage);
+        usage.record(query, key, now());
         if let Err(err) = usage.save(&self.0.usage_path) {
             tracing::warn!("usage was not saved to {}: {err}", self.0.usage_path.display());
         }
@@ -212,13 +213,9 @@ impl Engine {
         }
         if let Some(files) = self.0.files.clone() {
             let (weak, text) = (self.weak(), text.clone());
-            let usage_path = self.0.usage_path.clone();
+            let usage = Rc::clone(&self.0.usage.borrow());
             self.spawn(async move {
-                let usage_now = now();
-                let answer = {
-                    let usage = Usage::load(&usage_path);
-                    files.search(&text, &usage, usage_now).await
-                };
+                let answer = files.search(&text, &usage, now()).await;
                 let Some(engine) = Engine::upgrade(&weak) else { return };
                 if let Some(answer) = answer {
                     if engine.0.board.borrow_mut().set_indexing(generation, answer.indexing) {

@@ -30,7 +30,7 @@ struct Learned {
     at: u64,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Usage {
     version: u32,
     items: BTreeMap<String, Use>,

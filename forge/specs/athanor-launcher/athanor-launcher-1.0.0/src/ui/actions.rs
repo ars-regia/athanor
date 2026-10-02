@@ -32,13 +32,17 @@ impl Launcher {
         if !menu::choices(&hit.action).contains(&choice) && !matches!(choice, Choice::OpenWith(_)) {
             return;
         }
-        self.engine.record(&hit.key);
+        // Hiding clears the query: take it first. Usage counts what opened, not what was tried.
+        let query = self.engine.current();
         self.hide();
         let this = Rc::clone(self);
         glib::spawn_future_local(async move {
-            if let Err(err) = this.perform(&hit, &choice).await {
-                tracing::error!(title = %hit.title, error = %err, "the result could not be opened");
-                notify_failure(&hit.title).await;
+            match this.perform(&hit, &choice).await {
+                Ok(()) => this.engine.record(&query, &hit.key),
+                Err(err) => {
+                    tracing::error!(title = %hit.title, error = %err, "the result could not be opened");
+                    notify_failure(&hit.title).await;
+                }
             }
         });
     }
