@@ -116,6 +116,10 @@ jobs:
         with:
           name: bump-pins
 
+      - name: Toolchain lock for the new pins
+        # Resolved again only when the builder base or the pinned SRPM moved (builder/lock.sh).
+        run: bash forge/specs/azoth/builder/lock.sh generate
+
       - name: Build the kernel builder image
         env:
           BUILDAH_ISOLATION: chroot
@@ -182,6 +186,7 @@ jobs:
             prep-outcome
             forge/specs/azoth/SOURCES/sources.sha256
             forge/specs/azoth/nvidia/sources.sha256
+            forge/specs/azoth/builder/toolchain.lock
           if-no-files-found: error
 
   pr:
@@ -208,6 +213,7 @@ jobs:
           git add forge/specs/azoth system/nvidia/locks
           keys=$(git diff --cached -U0 -- forge/specs/azoth/pins.env | sed -n 's/^+\([A-Z_]\+\)=.*/\1/p')
           git diff --cached --quiet -- 'forge/specs/azoth/*/Containerfile' || keys+=${keys:+$'\n'}"builder base image"
+          git diff --cached --quiet -- forge/specs/azoth/builder/toolchain.lock || keys+=${keys:+$'\n'}"kernel toolchain"
           git diff --cached --quiet -- system/nvidia/locks || keys+=${keys:+$'\n'}"NVIDIA locks"
           # A new NVIDIA lock changes the packages of the image: a person merges
           # (doc_system_image.md, section 4).

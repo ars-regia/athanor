@@ -25,7 +25,8 @@ directory e come si usa.
 | `build-inputs.py` | gli input della build come JSON: predicato dell'attestazione dei pin e chiave del riuso in CI |
 | `bump.py` | il bot di bump, in due gruppi (`--group kernel\|system`): `check` (JSON delle modifiche) e `apply` (gruppo kernel: riscrive pins.env, i `FROM` dei Containerfile del kernel e la tabella dei pin qui sotto; gruppo system: i `FROM` di `system/Containerfile` e i lock NVIDIA ripubblicati; stampa il corpo della PR); `verify` controlla i lock NVIDIA |
 | `nvr.sh` | l'NVR del kernel derivato dai pin, lo stesso che rpmbuild produce e che i tag OCI usano |
-| `builder/Containerfile` | l'ambiente: Fedora pinnata per digest piu' la toolchain LLVM |
+| `builder/Containerfile`, `builder/toolchain.lock`, `builder/lock.sh` | l'ambiente: Fedora pinnata per digest piu' la toolchain LLVM e le BuildRequires dello spec, ogni RPM per sha256 nel lock; `lock.sh generate` lo riscrive quando cambiano la base, il SRPM pinnato, gli strumenti o i bcond (`--force`: anche a pin fermi), `lock.sh check` lo controlla in `build.sh` |
+| `bconds.sh` | i bcond di kernel.spec, gli stessi per `dnf builddep`, `rpmbuild` e il lock |
 | `boot.sh` | la boot matrix: dal kernel-core a quattro avvii QEMU con le asserzioni della spec |
 | `boot/Containerfile`, `boot/init` | l'ambiente della boot matrix (qemu, OVMF, shim, ukify, Firecracker, strumenti di benchmark) e il PID 1 dell'initramfs di prova |
 | `microvm/kernel-local`, `microvm/azoth-microvm.spec` | il kernel guest per le MicroVM (spec, sezione 9): frammento sopra x86_64_defconfig + kvm_guest.config e lo spec minimo che mette vmlinux, bzImage, config e release in `/usr/lib/athanor/microvm/` |
