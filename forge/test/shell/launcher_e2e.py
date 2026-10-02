@@ -19,6 +19,10 @@ and shown at start by ATHANOR_LAUNCHER_SHOW. Stages:
   "Results" list and the preview's region role and text (Review Important 1; the menu's
   "Actions" list cannot be reached, see the stage). atspi launcher counts 1 widget only, the entry: the lists and
   rows are not in atspi_check.py's INTERACTIVE set, and this stage checks them instead.
+- command: ">ls" is one Command row (the positive control of command-refused).
+- command-refused: '>"unclosed' does not parse. The only row says why, and no Web row or
+  header appears, not even after the debounce: a refused command never reaches the web
+  entry or any other source (final review, Important 1).
 - window-preview: hide and show, so the window that came after the start is listed, and
   wait for its row (the capture follows in scene.sh).
 """
@@ -191,6 +195,30 @@ def stage_tree(Atspi):
     # keyboard, and Atspi key synthesis does not reach a Wayland client).
 
 
+def label_texts(Atspi):
+    """The plain labels of the tree: headers and status rows are not list items."""
+    return [name for role, name, _ in tree(Atspi) if role == "label"]
+
+
+def stage_command(Atspi):
+    check("READY=1", wait_for(lambda: READY_FILE.exists(), 10), "no READY=1 on NOTIFY_SOCKET")
+    check("command row", wait_for(lambda: "ls, Command" in labels(Atspi), 5), str(labels(Atspi)))
+    time.sleep(2)  # past the debounce and the deadline
+    rows = labels(Atspi)
+    check("alone", not any(", Web" in row for row in rows), str(rows))
+
+
+def stage_command_refused(Atspi):
+    check("READY=1", wait_for(lambda: READY_FILE.exists(), 10), "no READY=1 on NOTIFY_SOCKET")
+    why = "This command has an unclosed quote or escape and is not run"
+    check("refusal row", wait_for(lambda: why in label_texts(Atspi), 5), str(label_texts(Atspi)))
+    time.sleep(2)  # past the debounce and the deadline
+    rows, texts = labels(Atspi), label_texts(Atspi)
+    check("no web row", not any(", Web" in row for row in rows), str(rows))
+    check("no Web header", "Web" not in texts, str(texts))
+    check("no command row", not any(row.endswith(", Command") for row in rows), str(rows))
+
+
 def stage_window_preview(Atspi):
     check("READY=1", wait_for(lambda: READY_FILE.exists(), 10), "no READY=1 on NOTIFY_SOCKET")
     time.sleep(2)  # bar_session.py opens the window at READY
@@ -207,6 +235,8 @@ STAGES = {
     "hostile": stage_hostile,
     "no-localsearch": stage_no_localsearch,
     "tree": stage_tree,
+    "command": stage_command,
+    "command-refused": stage_command_refused,
     "window-preview": stage_window_preview,
 }
 

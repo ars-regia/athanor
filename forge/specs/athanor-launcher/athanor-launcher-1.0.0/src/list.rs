@@ -1,7 +1,9 @@
 //! The rows of the list in the order they are shown: the top hit, then each group under its
-//! header, with the indexing row where the file group is or would be (LA3, LA10).
+//! header, with the indexing row where the file group is or would be (LA3, LA10). A refused
+//! command is the Command header and one row that says why, and nothing else.
 
 use athanor_search::board::Rows;
+use athanor_search::command::Refusal;
 use athanor_search::item::{Group, Hit};
 
 #[derive(Clone, Debug)]
@@ -11,13 +13,15 @@ pub enum Line {
     Header { group: Group, title: String },
     Hit(Hit),
     Indexing,
+    /// Not selectable: Enter does nothing on a refused command.
+    Refused(Refusal),
 }
 
 impl Line {
     pub fn hit(&self) -> Option<&Hit> {
         match self {
             Line::Top(hit) | Line::Hit(hit) => Some(hit),
-            Line::Header { .. } | Line::Indexing => None,
+            Line::Header { .. } | Line::Indexing | Line::Refused(_) => None,
         }
     }
 
@@ -29,6 +33,9 @@ impl Line {
 }
 
 pub fn lines(rows: &Rows) -> Vec<Line> {
+    if let Some(why) = rows.refused {
+        return vec![Line::Header { group: Group::Command, title: String::new() }, Line::Refused(why)];
+    }
     let mut lines: Vec<Line> = rows.top.iter().cloned().map(Line::Top).collect();
     let mut indexing = rows.indexing;
     for section in &rows.sections {
@@ -102,6 +109,7 @@ mod tests {
                 Section { group: Group::Providers, title: "Calculator".into(), hits: vec![hit(Group::Providers, "")] },
             ],
             indexing,
+            refused: None,
         }
     }
 
@@ -113,6 +121,7 @@ mod tests {
             Line::Header { .. } => "header",
             Line::Hit(_) => "hit",
             Line::Indexing => "indexing",
+            Line::Refused(_) => "refused",
         }).collect();
         assert_eq!(shape, ["top", "header", "hit", "header", "hit", "header", "hit"]);
         assert!(matches!(&lines[5], Line::Header { group: Group::Providers, title } if title == "Calculator"));
@@ -128,6 +137,17 @@ mod tests {
         assert!(matches!(without[3], Line::Indexing), "where the file group would be");
         let only = lines(&Rows { indexing: true, ..Rows::default() });
         assert!(matches!(only.as_slice(), [Line::Indexing]));
+    }
+
+    #[test]
+    fn a_refused_command_is_its_header_and_one_row_nothing_can_select() {
+        let refused = Rows { refused: Some(Refusal::Quoting), ..rows(true) };
+        let lines = lines(&refused);
+        assert!(matches!(
+            lines.as_slice(),
+            [Line::Header { group: Group::Command, .. }, Line::Refused(Refusal::Quoting)]
+        ));
+        assert_eq!(reselect(&lines, None), None, "Enter has nothing to run");
     }
 
     #[test]

@@ -4,6 +4,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
+use athanor_search::board::Rows;
+use athanor_search::command::Refusal;
 use athanor_search::engine::{Engine, DEBOUNCE};
 use athanor_search::item::Group;
 
@@ -91,7 +93,31 @@ fn an_over_long_command_line_is_never_run_cut() {
                 *record.borrow_mut() = rows.sections.iter().map(|s| s.group).collect();
             });
             engine.query(&format!("> {}", "a".repeat(300)));
-            assert!(!seen.borrow().contains(&Group::Command), "{:?}", seen.borrow());
+            assert!(seen.borrow().is_empty(), "no command and no other group: {:?}", seen.borrow());
+        })
+        .expect("a fresh context is free");
+}
+
+#[test]
+fn a_refused_command_reaches_no_other_source() {
+    let context = gio::glib::MainContext::new();
+    context
+        .with_thread_default(|| {
+            context.block_on(async {
+                let seen: Rc<RefCell<Vec<Rows>>> = Rc::default();
+                let record = seen.clone();
+                let engine = Engine::new(state("refused"), None, Vec::new(), move |rows| record.borrow_mut().push(rows.clone()));
+                for (query, why) in [(">\"unclosed", Refusal::Quoting), (">", Refusal::Empty), (">\u{200B}", Refusal::Hidden)] {
+                    seen.borrow_mut().clear();
+                    engine.query(query);
+                    // Past the debounce: the calculator, files and providers never start.
+                    gio::glib::timeout_future(DEBOUNCE + Duration::from_millis(50)).await;
+                    let seen = seen.borrow();
+                    assert_eq!(seen.len(), 1, "{query:?}: one answer, at once");
+                    assert!(seen[0].sections.is_empty() && seen[0].top.is_none(), "{query:?}: {:?}", seen[0].sections);
+                    assert_eq!(seen[0].refused, Some(why), "{query:?}");
+                }
+            })
         })
         .expect("a fresh context is free");
 }

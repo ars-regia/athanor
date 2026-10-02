@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use athanor_search::command::Refusal;
 use athanor_search::item::{Action, Group};
 use athanor_search::rank::Ranker;
 use athanor_search::usage::Usage;
@@ -99,7 +100,7 @@ fn the_command_prefix_parses_a_command_line() {
     assert_eq!(command::parse(">   "), None);
     assert_eq!(command::parse("> 'unterminated"), None);
     assert_eq!(command::parse("htop"), None);
-    assert_eq!(command::hit("> htop").map(|h| h.group), Some(Group::Command));
+    assert_eq!(command::hit("> htop").and_then(Result::ok).map(|h| h.group), Some(Group::Command));
 }
 
 #[test]
@@ -128,10 +129,11 @@ fn an_entry_whose_name_is_only_hidden_characters_is_skipped() {
 
 #[test]
 fn a_command_that_would_show_differently_from_what_runs_is_refused() {
-    assert!(command::hit("> echo a\u{200b}b").is_none());
-    assert!(command::hit("> echo \u{202e}gpj").is_none());
-    assert!(command::hit(&format!("> {}", "a".repeat(athanor_unit::text::TITLE_CHARS + 1))).is_none());
-    let shown = command::hit("> htop -d 5").expect("hit");
+    assert_eq!(command::hit("> echo a\u{200b}b").and_then(Result::err), Some(Refusal::Hidden));
+    assert_eq!(command::hit("> echo \u{202e}gpj").and_then(Result::err), Some(Refusal::Hidden));
+    let long = format!("> {}", "a".repeat(athanor_unit::text::TITLE_CHARS + 1));
+    assert_eq!(command::hit(&long).and_then(Result::err), Some(Refusal::TooLong));
+    let shown = command::hit("> htop -d 5").and_then(Result::ok).expect("hit");
     assert_eq!(shown.title, "htop -d 5");
 }
 
@@ -146,7 +148,7 @@ fn long_names_and_titles_are_bounded() {
 
 #[test]
 fn the_title_keeps_every_character_the_command_runs() {
-    let hit = command::hit(">>ls").expect("hit");
+    let hit = command::hit(">>ls").and_then(Result::ok).expect("hit");
     assert_eq!(hit.title, ">ls");
     assert_eq!(hit.action, Action::Command { argv: vec![">ls".into()] });
 }

@@ -18,137 +18,157 @@ msgstr ""
 msgid "Exchange rates of {date}"
 msgstr "Exchange rates of {date}"
 
-#: ../../../../system/athanor-preview/src/lib.rs:160
+#: ../../../../system/athanor-preview/src/lib.rs:164
 msgid "System image"
 msgstr "System image"
 
-#: src/ui/actions.rs:113
+#: ../../../../system/athanor-preview/src/lib.rs:165
+msgid "Installed by you"
+msgstr "Installed by you"
+
+#: src/ui/actions.rs:117
 msgid "Actions"
 msgstr "Actions"
 
-#: src/ui/actions.rs:210
+#: src/ui/actions.rs:243
 msgid "Switch to"
 msgstr "Switch to"
 
-#: src/ui/actions.rs:211
+#: src/ui/actions.rs:244
 msgid "Run in terminal"
 msgstr "Run in terminal"
 
-#: src/ui/actions.rs:212
+#: src/ui/actions.rs:245
 msgid "Search the web"
 msgstr "Search the web"
 
-#: src/ui/actions.rs:213
+#: src/ui/actions.rs:246
 msgid "Open"
 msgstr "Open"
 
-#: src/ui/actions.rs:216
+#: src/ui/actions.rs:249
 #, rust-format
 msgid "Open with {app}"
 msgstr "Open with {app}"
 
-#: src/ui/actions.rs:218
+#: src/ui/actions.rs:251
 msgid "Show in folder"
 msgstr "Show in folder"
 
-#: src/ui/actions.rs:219
+#: src/ui/actions.rs:252
 msgid "Copy path"
 msgstr "Copy path"
 
-#: src/ui/actions.rs:220
+#: src/ui/actions.rs:253
 msgid "Copy link"
 msgstr "Copy link"
 
-#: src/ui/actions.rs:221
+#: src/ui/actions.rs:254
 msgid "Copy name"
 msgstr "Copy name"
 
-#: src/ui/actions.rs:222
+#: src/ui/actions.rs:255
 msgid "Copy title"
 msgstr "Copy title"
 
-#: src/ui/actions.rs:223
+#: src/ui/actions.rs:256
 msgid "Copy"
 msgstr "Copy"
 
-#: src/ui/actions.rs:236
+#: src/ui/actions.rs:269
 #, rust-format
 msgid "{name} could not be opened"
 msgstr "{name} could not be opened"
 
-#: src/ui/mod.rs:103 src/ui/mod.rs:105
+#: src/ui/mod.rs:102 src/ui/mod.rs:104
 msgid "Search"
 msgstr "Search"
 
-#: src/ui/mod.rs:108
+#: src/ui/mod.rs:107
 msgid "Results"
 msgstr "Results"
 
-#: src/ui/mod.rs:114
+#: src/ui/mod.rs:113
 msgid "Enter to open · Ctrl+Enter to show in folder · Ctrl+C to copy · Tab for actions · Esc to close"
 msgstr "Enter to open · Ctrl+Enter to show in folder · Ctrl+C to copy · Tab for actions · Esc to close"
 
-#: src/ui/mod.rs:391
+#: src/ui/mod.rs:415
 #, rust-format
 msgid "Results: {count}"
 msgstr "Results: {count}"
 
-#: src/ui/rows.rs:14 src/ui/rows.rs:28
+#: src/ui/rows.rs:15 src/ui/rows.rs:29
 msgid "Command"
 msgstr "Command"
 
-#: src/ui/rows.rs:15
+#: src/ui/rows.rs:16
 msgid "Application"
 msgstr "Application"
 
-#: src/ui/rows.rs:16
+#: src/ui/rows.rs:17
 msgid "Window"
 msgstr "Window"
 
-#: src/ui/rows.rs:17
+#: src/ui/rows.rs:18
 msgid "Calculation"
 msgstr "Calculation"
 
-#: src/ui/rows.rs:18
+#: src/ui/rows.rs:19
 msgid "Settings page"
 msgstr "Settings page"
 
-#: src/ui/rows.rs:19
+#: src/ui/rows.rs:20
 msgid "File"
 msgstr "File"
 
-#: src/ui/rows.rs:20
+#: src/ui/rows.rs:21
 msgid "Search result"
 msgstr "Search result"
 
-#: src/ui/rows.rs:21
+#: src/ui/rows.rs:22
 msgid "Web search"
 msgstr "Web search"
 
-#: src/ui/rows.rs:29
+#: src/ui/rows.rs:30
 msgid "Applications"
 msgstr "Applications"
 
-#: src/ui/rows.rs:30
+#: src/ui/rows.rs:31
 msgid "Windows"
 msgstr "Windows"
 
-#: src/ui/rows.rs:31
+#: src/ui/rows.rs:32
 msgid "Calculator"
 msgstr "Calculator"
 
-#: src/ui/rows.rs:32
+#: src/ui/rows.rs:33
 msgid "Settings"
 msgstr "Settings"
 
-#: src/ui/rows.rs:33
+#: src/ui/rows.rs:34
 msgid "Files"
 msgstr "Files"
 
-#: src/ui/rows.rs:34
+#: src/ui/rows.rs:35
 msgid "Web"
 msgstr "Web"
 
-#: src/ui/rows.rs:78
+#: src/ui/rows.rs:41
+msgid "Type a command after >"
+msgstr "Type a command after >"
+
+#: src/ui/rows.rs:42
+msgid "This command is too long to run"
+msgstr "This command is too long to run"
+
+#: src/ui/rows.rs:43
+msgid "This command holds hidden characters and is not run"
+msgstr "This command holds hidden characters and is not run"
+
+#: src/ui/rows.rs:44
+msgid "This command has an unclosed quote or escape and is not run"
+msgstr "This command has an unclosed quote or escape and is not run"
+
+#: src/ui/rows.rs:87
 msgid "Indexing files…"
 msgstr "Indexing files…"

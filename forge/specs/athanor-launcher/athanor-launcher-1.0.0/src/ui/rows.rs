@@ -2,6 +2,7 @@
 //! as plain text; the accessible name is the title and the kind (LA5).
 
 use athanor_launcher::list::Line;
+use athanor_search::command::Refusal;
 use athanor_search::item::{Group, Hit};
 use gtk4::prelude::*;
 
@@ -32,6 +33,15 @@ fn header(group: Group, title: &str) -> String {
         Group::Settings => tr("Settings"),
         Group::Files => tr("Files"),
         Group::Web => tr("Web"),
+    }
+}
+
+fn refusal(why: Refusal) -> String {
+    match why {
+        Refusal::Empty => tr("Type a command after >"),
+        Refusal::TooLong => tr("This command is too long to run"),
+        Refusal::Hidden => tr("This command holds hidden characters and is not run"),
+        Refusal::Quoting => tr("This command has an unclosed quote or escape and is not run"),
     }
 }
 
@@ -75,5 +85,6 @@ pub fn row(line: &Line) -> gtk4::ListBoxRow {
         Line::Hit(hit) => hit_row(hit, false),
         Line::Header { group, title } => passive(&label(&header(*group, title), "section-title")),
         Line::Indexing => passive(&label(&tr("Indexing files…"), "section-title")),
+        Line::Refused(why) => passive(&label(&refusal(*why), "row-title")),
     }
 }

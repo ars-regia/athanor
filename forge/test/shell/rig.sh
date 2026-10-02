@@ -29,7 +29,7 @@
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
 #   rig.sh atspi <greeter|chooser|bar|bar-modules|dock|launcher>   every interactive widget has a role and a name
-#   rig.sh launcher-e2e     athanor-launcher in five scenes, confined: READY, calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch, accessible tree
+#   rig.sh launcher-e2e     athanor-launcher in seven scenes, confined: READY, calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch, accessible tree, a command and a refused one
 #   rig.sh launcher-window-preview   the window row's preview carries the window's thumbnail
 #   rig.sh chooser-e2e      press a preset in the chooser and wait until the bar and the dock draw it (run build-bar and build-dock first)
 #   rig.sh surface <greeter|layout (run build-bar and build-dock first)|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling|bar-popups|bar-notifications|bar-tray|bar-network|bar-bluetooth|bar-audio|bar-battery|bar-shield|dock|launcher (run build-launcher first)>  capture every case of a surface and compare with the goldens
@@ -523,12 +523,14 @@ compositor-e2e)
 launcher-e2e)
     # Every stage is its own scene: the fixtures differ, and each launcher starts fresh.
     require athanor-launcher build-launcher
-    for stage in e2e frozen-provider hostile no-localsearch tree; do
+    for stage in e2e frozen-provider hostile no-localsearch tree command command-refused; do
         query="cc window" fixtures=""
         case $stage in
         e2e) query="2+2*3" ;;
         frozen-provider) fixtures=--frozen ;;
         hostile) query=gnp fixtures=--hostile ;;
+        command) query=">ls" ;;
+        command-refused) query='>"unclosed' ;;
         esac
         # bar_session.py appends to the launcher log: a run must not count the last one's lines.
         rm -f "$out/launcher-$stage-athanor-launcher.log"

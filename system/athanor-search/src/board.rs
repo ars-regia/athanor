@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::command::Refusal;
 use crate::item::{Group, Hit};
 
 #[derive(Clone, Debug)]
@@ -20,6 +21,8 @@ pub struct Rows {
     pub sections: Vec<Section>,
     /// localsearch is indexing: one row says so (LA10).
     pub indexing: bool,
+    /// The query is a command that is not run: the only row says why.
+    pub refused: Option<Refusal>,
 }
 
 #[derive(Debug, Default)]
@@ -28,6 +31,7 @@ pub struct Board {
     /// Keyed by group, then by the source within it (a provider's bus name).
     sections: BTreeMap<(Group, String), Section>,
     indexing: bool,
+    refused: Option<Refusal>,
 }
 
 impl Board {
@@ -35,6 +39,7 @@ impl Board {
         self.generation = self.generation.wrapping_add(1);
         self.sections.clear();
         self.indexing = false;
+        self.refused = None;
         self.generation
     }
 
@@ -59,9 +64,21 @@ impl Board {
         true
     }
 
+    /// The query of `generation` is a command that is not run.
+    pub fn refuse(&mut self, generation: u64, why: Refusal) -> bool {
+        if generation != self.generation {
+            return false;
+        }
+        self.refused = Some(why);
+        true
+    }
+
     pub fn rows(&self) -> Rows {
+        if let Some(why) = self.refused {
+            return Rows { refused: Some(why), ..Rows::default() };
+        }
         if let Some(command) = self.sections.get(&(Group::Command, String::new())) {
-            return Rows { top: None, sections: vec![command.clone()], indexing: false };
+            return Rows { top: None, sections: vec![command.clone()], indexing: false, refused: None };
         }
         let mut sections: Vec<Section> = self
             .sections
@@ -78,7 +95,7 @@ impl Board {
             .collect();
         let top = leader(&sections).map(|at| sections[at].hits.remove(0));
         sections.retain(|section| !section.hits.is_empty());
-        Rows { top, sections, indexing: self.indexing }
+        Rows { top, sections, indexing: self.indexing, refused: None }
     }
 }
 
@@ -193,6 +210,21 @@ mod tests {
         let rows = board.rows();
         assert!(rows.top.is_none());
         assert_eq!(titles(&rows), [(Group::Command, vec!["htop".into()])]);
+    }
+
+    #[test]
+    fn a_refused_command_is_shown_alone() {
+        let mut board = Board::default();
+        let g = board.start();
+        board.put(g, Group::Web, "", "", vec![hit(Group::Web, ">\"x", Tier::Scattered, 0, false)]);
+        assert!(board.refuse(g, Refusal::Quoting));
+        let rows = board.rows();
+        assert!(rows.sections.is_empty() && rows.top.is_none());
+        assert_eq!(rows.refused, Some(Refusal::Quoting));
+        let next = board.start();
+        assert!(!board.refuse(g, Refusal::Empty), "a stale generation is refused");
+        assert!(board.rows().refused.is_none());
+        assert_ne!(g, next);
     }
 
     #[test]

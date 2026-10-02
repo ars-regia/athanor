@@ -139,9 +139,20 @@ impl Engine {
             self.notify();
             return;
         }
-        if let Some(hit) = command::hit(whole) {
-            self.put(generation, Group::Command, "", "", vec![hit]);
-            return;
+        // A query that starts with `>` is a command, whether it parses or not: a refused one
+        // must never fall through to the web entry or to a provider (LA2).
+        match command::hit(whole) {
+            Some(Ok(hit)) => {
+                self.put(generation, Group::Command, "", "", vec![hit]);
+                return;
+            }
+            Some(Err(why)) => {
+                if self.0.board.borrow_mut().refuse(generation, why) {
+                    self.notify();
+                }
+                return;
+            }
+            None => {}
         }
         let now = now();
         let mut ranker = Ranker::new(text);
