@@ -4,6 +4,10 @@
 Moves the pointer DX device units to the right through a throwaway uinput relative mouse, so
 that the compositor's pointer crosses onto the next output and the next window is mapped
 there. An absolute pointer (pointer_click.py) is mapped onto the first output only.
+
+The pointer is pinned to the top edge first. The second output is shorter than the first, so a
+pointer left lower down (QEMU's USB tablet moves it wherever the host's mouse crosses the gtk
+window) stops at the first output's right edge instead of crossing.
 """
 
 import fcntl
@@ -20,6 +24,8 @@ ABS_CNT, BUS_VIRTUAL = 64, 0x06
 # How long the compositor takes to add a new input device.
 SETTLE_S = 1.5
 STEP = 20
+# More than any output's height, after acceleration: the pointer ends on the top edge.
+TOP = -3000
 
 
 def emit(fd, kind, code, value):
@@ -35,6 +41,10 @@ def main():
     os.write(fd, struct.pack("80sHHHHi" + "i" * (4 * ABS_CNT), b"athanor-acceptance-rel", BUS_VIRTUAL, 0, 0, 1, 0, *zeros, *zeros, *zeros, *zeros))
     fcntl.ioctl(fd, UI_DEV_CREATE)
     time.sleep(SETTLE_S)
+    for _ in range(abs(TOP) // STEP):
+        emit(fd, EV_REL, REL_Y, -STEP)
+        emit(fd, EV_SYN, 0, 0)
+        time.sleep(0.005)
     for _ in range(abs(dx) // STEP):
         emit(fd, EV_REL, REL_X, STEP if dx > 0 else -STEP)
         emit(fd, EV_SYN, 0, 0)
