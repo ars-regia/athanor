@@ -48,6 +48,9 @@
           gtk4 pango cairo graphene gdk-pixbuf gtk4-layer-shell glib libpulseaudio
           # compositors niri and cosmic-comp (smithay): wayland, pixman, gbm/drm/egl, xkbcommon, libseat, libinput, pipewire, libdisplay-info
           wayland wayland-protocols libgbm libdrm libglvnd libxkbcommon seatd libinput pipewire libdisplay-info-target pixman
+          # athanor-launcher and athanor-preview-render: tinysparql (tracker-sys, the localsearch client),
+          # poppler-glib (the PDF decoder), libseccomp and fontconfig (glycin)
+          tinysparql poppler libseccomp fontconfig
         ];
         system-lib-closure = pkgs.lib.closePropagation (map pkgs.lib.getDev system-libs);
         system-dev = map pkgs.lib.getDev system-lib-closure;
