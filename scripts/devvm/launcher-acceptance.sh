@@ -428,15 +428,18 @@ stage_windows() {
 }
 
 require_patched_compositor() {
-    local release sha
+    local release sha recorded
     release=$(guest_ssh "rpm -q --qf '%{RELEASE}' cosmic-comp") || fail "rpm -q cosmic-comp failed in the guest"
+    sha=$(guest_ssh "sha256sum /usr/bin/cosmic-comp | cut -d' ' -f1") || fail "cannot hash /usr/bin/cosmic-comp in the guest"
     if [[ $release == *.athanor* ]]; then
         # The package is ours; a binary overlaid on it (deploy.sh) must still be the packaged one.
-        ! guest_ssh "rpm -V cosmic-comp" | grep -q ' /usr/bin/cosmic-comp$' ||
-            fail "the release is ours ($release) but /usr/bin/cosmic-comp differs from the package (rpm -V): a stock binary was deployed over it"
+        # The digest the package records, not rpm -V: ostree gives the files their own mtimes.
+        recorded=$(guest_ssh "rpm -q --qf '[%{FILEDIGESTS} %{FILENAMES}\\n]' cosmic-comp") || fail "cannot read the file digests of cosmic-comp"
+        recorded=$(awk '$2 == "/usr/bin/cosmic-comp" { print $1 }' <<< "$recorded")
+        [[ -n $recorded && $sha == "$recorded" ]] ||
+            fail "the release is ours ($release) but /usr/bin/cosmic-comp ($sha) is not the packaged file ($recorded): another binary was deployed over it"
         return 0
     fi
-    sha=$(guest_ssh "sha256sum /usr/bin/cosmic-comp | cut -d' ' -f1") || fail "cannot hash /usr/bin/cosmic-comp in the guest"
     [[ -n ${COSMIC_COMP_SHA256:-} && $sha == "$COSMIC_COMP_SHA256" ]] && return 0
     fail "the guest's cosmic-comp is not Athanor's patched build (release $release, sha256 $sha): deploy it, or pass its sha256 in COSMIC_COMP_SHA256"
 }
