@@ -698,10 +698,11 @@ for number in range(1, 7):
         handle.write(PDF)
 
 
-def slow_pdf():
-    """A valid one-page PDF of 10^6 filled rectangles: poppler needs longer than the 250 ms
-    between two selections to draw it, so the preview's cancel has a decoder to stop."""
-    content = zlib.compress(b"".join(b"%d %d 3 3 re f\n" % (n % 500, n // 2000) for n in range(1_000_000)))
+def valid_pdf(rectangles):
+    """A valid one-page PDF of filled rectangles. With 10^6 of them poppler needs longer than
+    the 250 ms between two selections to draw it, so the preview's cancel has a decoder to stop;
+    with a hundred it draws at once, which the memory rounds need."""
+    content = zlib.compress(b"".join(b"%d %d 3 3 re f\n" % (n % 500, n // 2000) for n in range(rectangles)))
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
@@ -719,7 +720,9 @@ def slow_pdf():
     return out + b"trailer\n<< /Root 1 0 R /Size %d >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
 
 
-SLOW = slow_pdf()
+with open(os.path.join(folder, "okpdf-1.pdf"), "wb") as handle:
+    handle.write(valid_pdf(100))
+SLOW = valid_pdf(1_000_000)
 for number in range(1, 7):
     with open(os.path.join(folder, f"slowpdf-{number}.pdf"), "wb") as handle:
         handle.write(SLOW)
@@ -738,6 +741,18 @@ png = (
 )
 with open(os.path.join(folder, "hostile-png.png"), "wb") as handle:
     handle.write(png)
+
+# A valid picture of 640x480 with a different value in every pixel row, which the decoder
+# turns into the preview's image.
+rows = b"".join(b"\x00" + bytes((x * 3 + y) % 256 for x in range(640 * 3)) for y in range(480))
+valid = (
+    b"\x89PNG\r\n\x1a\n"
+    + chunk(b"IHDR", struct.pack(">IIBBBBB", 640, 480, 8, 2, 0, 0, 0))
+    + chunk(b"IDAT", zlib.compress(rows))
+    + chunk(b"IEND", b"")
+)
+with open(os.path.join(folder, "okpng-1.png"), "wb") as handle:
+    handle.write(valid)
 EOF
 }
 
@@ -847,9 +862,21 @@ stage_decoder() {
     close_launcher || fail "the launcher does not close"
 }
 
-# Pss, Pss_Anon and Pss_File (kB) of the launcher, on one line.
+# Pss, Pss_Anon, Pss_File and Pss_Shmem (kB) of the launcher, on one line.
 launcher_memory() {
-    in_session "awk '/^Pss:/ { p = \$2 } /^Pss_Anon:/ { a = \$2 } /^Pss_File:/ { f = \$2 } END { print p, a, f }' /proc/$(unit show -p MainPID --value)/smaps_rollup"
+    in_session "awk '/^Pss:/ { p = \$2 } /^Pss_Anon:/ { a = \$2 } /^Pss_File:/ { f = \$2 } /^Pss_Shmem:/ { m = \$2 } END { print p, a, f, m }' /proc/$(unit show -p MainPID --value)/smaps_rollup"
+}
+
+# True when the preview shows a decoded picture: the file card's icon is 96 px high, a picture
+# at least 220.
+preview_picture_shown() { rows | section 4 | grep -E '^image: [0-9]+x[0-9]+$' | awk -Fx '{ if ($2 >= 200) found = 1 } END { exit !found }'; }
+
+# One successful decode: the file is selected and its picture is shown.
+preview_decoded() { # preview_decoded QUERY NAME
+    search "$1" "$2, File"
+    type_keys @up # a late file answer leaves the selection on the Web row
+    wait_until 20 preview_picture_shown || fail "$2: no decoded picture in the preview: $(rows | section 4 | tr '\n' '|')"
+    close_launcher || fail "the launcher does not close"
 }
 
 # One round of what the launcher is used for: a file with its preview, the hostile names,
@@ -873,17 +900,21 @@ memory_round() {
     close_launcher || fail "the launcher does not close"
     search acceptance-memory "acceptance-memory — COSMIC Terminal, Window"
     close_launcher || fail "the launcher does not close"
+    preview_decoded okpng-1 okpng-1.png
+    preview_decoded okpdf-1 okpdf-1.pdf
     search '2+2*3' "8, Calculation"
     close_launcher || fail "the launcher does not close"
 }
 
-# Item 10 and its boundedness: the final PSS is within 80 MB, and three identical rounds after a
-# warm-up grow it by at most 2 MB in total, so what is measured is no leak, not how much the
-# process happened to do before. The stage starts its own process.
+# Item 10 and its boundedness: the final PSS is within 80 MB, and the anonymous part (the heap,
+# the rows model, the pictures the launcher keeps) grows by at most 2 MB between the first and
+# the last of three identical rounds that follow a warm-up. The total is not gated for growth:
+# its shmem part, the surfaces' pixel buffers, moves with the GPU driver by several MB either
+# way. The stage starts its own process.
 MEMORY_ROUNDS=3
-MEMORY_GROWTH_KB=2048
+MEMORY_ANON_GROWTH_KB=2048
 stage_memory() {
-    local round pss anon file first=0 last=0 out=/tmp/athanor-launcher-acceptance-memory
+    local round pss anon file shmem first_anon=0 last_anon=0 last_pss=0 out=/tmp/athanor-launcher-acceptance-memory
     fresh_start
     ensure_localsearch
     write_report_odt
@@ -893,6 +924,8 @@ stage_memory() {
     wait_until 120 indexed fdp.exe fdp.exe || fail "localsearch does not list the file named with U+202E"
     wait_until 120 indexed hostile-png hostile-png.png || fail "localsearch does not list hostile-png.png"
     wait_until 120 indexed hostile-pdf-1 hostile-pdf-1.pdf || fail "localsearch does not list hostile-pdf-1.pdf"
+    wait_until 120 indexed okpng-1 okpng-1.png || fail "localsearch does not list okpng-1.png"
+    wait_until 120 indexed okpdf-1 okpdf-1.pdf || fail "localsearch does not list okpdf-1.pdf"
     wait_until 120 indexer_idle || fail "the indexer is not idle after 120 s"
     write_term_script
     end_terms
@@ -904,17 +937,19 @@ stage_memory() {
     for ((round = 1; round <= MEMORY_ROUNDS; round++)); do
         memory_round
         sleep 10
-        read -r pss anon file <<< "$(launcher_memory)"
-        [[ $pss =~ ^[0-9]+$ && $anon =~ ^[0-9]+$ && $file =~ ^[0-9]+$ ]] || fail "smaps_rollup after round $round: Pss '$pss', Pss_Anon '$anon', Pss_File '$file'"
-        echo "memory: round $round: Pss $pss kB (anon $anon kB, file $file kB)"
-        ((round > 1)) || first=$pss
-        last=$pss
+        read -r pss anon file shmem <<< "$(launcher_memory)"
+        [[ $pss =~ ^[0-9]+$ && $anon =~ ^[0-9]+$ && $file =~ ^[0-9]+$ && $shmem =~ ^[0-9]+$ ]] ||
+            fail "smaps_rollup after round $round: Pss '$pss', Pss_Anon '$anon', Pss_File '$file', Pss_Shmem '$shmem'"
+        echo "memory: round $round: Pss $pss kB (anon $anon kB, file $file kB, shmem $shmem kB)"
+        ((round > 1)) || first_anon=$anon
+        last_anon=$anon
+        last_pss=$pss
     done
     end_terms
     in_session "rm -f $out"
-    ((last <= PSS_LIMIT_KB)) || fail "PSS $last kB is above $PSS_LIMIT_KB kB after $MEMORY_ROUNDS rounds (item 10)"
-    ((last - first <= MEMORY_GROWTH_KB)) ||
-        fail "PSS grew from $first to $last kB between round 1 and round $MEMORY_ROUNDS (limit $MEMORY_GROWTH_KB kB): the launcher leaks"
+    ((last_pss <= PSS_LIMIT_KB)) || fail "PSS $last_pss kB is above $PSS_LIMIT_KB kB after $MEMORY_ROUNDS rounds (item 10)"
+    ((last_anon - first_anon <= MEMORY_ANON_GROWTH_KB)) ||
+        fail "Pss_Anon grew from $first_anon to $last_anon kB between round 1 and round $MEMORY_ROUNDS (limit $MEMORY_ANON_GROWTH_KB kB): the launcher leaks"
 }
 
 HEAD2=/sys/class/drm/card1-Virtual-2/status
