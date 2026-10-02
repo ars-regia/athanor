@@ -36,39 +36,16 @@ jobs:
         with:
           token: ${{ secrets.KERNEL_BUMP_TOKEN }}
 
-      - name: One open cosmic-comp bump PR at a time
-        id: open
-        run: |
-          set -euo pipefail
-          open=$(gh pr list --label cosmic-comp-bump --state open --json number --jq 'map("#\(.number)") | join(", ")')
-          [[ -z $open ]] || echo "cosmic-comp bump PR ${open} is open: nothing to do until it is closed" | tee -a "$GITHUB_STEP_SUMMARY"
-          echo "open=${open}" >> "$GITHUB_OUTPUT"
-
       - name: Run bump.py cosmic-comp apply
-        id: bump
-        if: ${{ steps.open.outputs.open == '' }}
-        run: |
-          set -euo pipefail
-          python3 forge/specs/azoth/bump.py cosmic-comp apply > body.md
-          changed=false
-          [[ -z $(git status --porcelain -- forge/specs/cosmic-comp) ]] || changed=true
-          echo "changed=${changed}" >> "$GITHUB_OUTPUT"
-          { echo "## cosmic-comp: $([[ $changed == true ]] && echo "new build" || echo "unchanged")"; echo; cat body.md; } >> "$GITHUB_STEP_SUMMARY"
+        run: python3 forge/specs/azoth/bump.py cosmic-comp apply "$RUNNER_TEMP/bump"
 
       - name: Branch, commit, PR (never auto-merged)
-        if: ${{ steps.bump.outputs.changed == 'true' }}
-        run: |
-          set -euo pipefail
-          git add forge/specs/cosmic-comp
-          spec=forge/specs/cosmic-comp/cosmic-comp.spec
-          nvr="$(sed -n 's/^Version:[[:space:]]*//p' "$spec")-$(sed -n 's/^%global fedora_release //p' "$spec")"
-          title="chore(cosmic-comp): bump to ${nvr}"
-          branch="bump/cosmic-comp-$(date -u +%Y%m%d-%H%M)"
-          git config user.name "athanor-bump"
-          git config user.email "kernel@athanor.os"
-          git checkout -b "$branch"
-          git commit -q -m "$title" -m "Opened by the bump bot (cosmic-comp-bump.yml)."
-          git push -u origin "$branch"
-          gh label create cosmic-comp-bump --force --description "Fedora cosmic-comp tracking" > /dev/null
-          url=$(gh pr create --base "$GITHUB_REF_NAME" --head "$branch" --label cosmic-comp-bump --title "$title" --body-file body.md)
-          echo "PR: ${url} (no auto-merge: the DAG build and a review decide)" | tee -a "$GITHUB_STEP_SUMMARY"
+        run: forge/specs/azoth/open_bump_pr.sh cosmic-comp-bump bump/cosmic-comp forge/specs/cosmic-comp "$RUNNER_TEMP/bump" "$GITHUB_REF_NAME"
+
+      - name: Upload what the bump wrote
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cosmic-comp-bump
+          path: ${{ runner.temp }}/bump
+          if-no-files-found: ignore

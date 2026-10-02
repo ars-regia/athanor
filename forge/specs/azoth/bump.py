@@ -4,7 +4,8 @@
     bump.py check   prints to stdout a JSON with the current pins, the new ones and the notes
     bump.py apply   rewrites pins.env, the FROM lines of the Containerfiles and the pins
                     table of KERNEL.md; prints the PR body (Markdown) to stdout
-    bump.py cosmic-comp check|apply   the cosmic-comp tracking alone (below), its own PR
+    bump.py cosmic-comp check|apply OUT_DIR   the cosmic-comp tracking alone (below), its own PR;
+                    apply writes OUT_DIR/title and OUT_DIR/body.md, and only when something moved
     bump.py verify  verifies only the NVIDIA locks at their pins against the repositories and
                     exits non-zero naming each lock that is stale or gone; the workflow runs it
                     while a bump PR is open, when check and apply do not run
@@ -485,14 +486,18 @@ def cosmic_comp_body(move):
         "## Pins\n\n| package | before | after |\n| --- | --- | --- |\n"
         f"| `cosmic-comp` | `{move['old']}` | `{move['new']}` |\n\n"
         "Fedora's stable F43 build moved. This PR rewrites `forge/specs/cosmic-comp/cosmic-comp.spec` "
-        "and `SOURCES/sources.sha256`; the patch is untouched. Please check whether upstream "
-        "(pop-os/cosmic-comp) has merged the layer-surface focus fix: if so, drop `Patch0` and the "
-        "patch file. If the patch no longer applies, the DAG build fails (`%autosetup -p1`) and the "
-        "patch needs a refresh. Never auto-merged.\n"
+        "and `SOURCES/sources.sha256`; the patches are untouched. Please check whether upstream "
+        "(pop-os/cosmic-comp) has merged the layer-surface focus fix (`Patch0`) or the `GIT_HASH` "
+        "change to build.rs (`Patch1`): if so, drop that patch and its file. If a patch no longer "
+        "applies, the DAG build fails (`%autosetup -p1`) and it needs a refresh. Never auto-merged.\n"
     )
 
 
-def cosmic_comp_main(action):
+def cosmic_comp_title(move):
+    return f"chore(cosmic-comp): bump to {move['new']}"
+
+
+def cosmic_comp_main(action, out_dir=None):
     """`bump.py cosmic-comp check|apply`: independent of the kernel bump, and the only caller of
     the cosmic-comp lookup, so a failure here never reaches the kernel path and the reverse."""
     move = cosmic_comp_move()
@@ -501,12 +506,17 @@ def cosmic_comp_main(action):
         return
     if move:
         apply_cosmic_comp(move)
-        sys.stdout.write(cosmic_comp_body(move))
+        out = Path(out_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "title").write_text(cosmic_comp_title(move) + "\n", newline="\n")
+        (out / "body.md").write_text(cosmic_comp_body(move), newline="\n")
 
 
 def main():
-    if len(sys.argv) == 3 and sys.argv[1] == "cosmic-comp" and sys.argv[2] in ("check", "apply"):
-        return cosmic_comp_main(sys.argv[2])
+    if len(sys.argv) > 2 and sys.argv[1] == "cosmic-comp":
+        if sys.argv[2:] == ["check"] or (len(sys.argv) == 4 and sys.argv[2] == "apply"):
+            return cosmic_comp_main(*sys.argv[2:4])
+        sys.exit(__doc__)
     if len(sys.argv) != 2 or sys.argv[1] not in ("check", "apply", "verify"):
         sys.exit(__doc__)
     if sys.argv[1] == "verify":

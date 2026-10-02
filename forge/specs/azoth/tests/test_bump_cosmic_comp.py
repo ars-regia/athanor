@@ -92,6 +92,23 @@ class Independence(unittest.TestCase):
         self.assertIn("1.8.0-2.fc43", body)
         self.assertIn("merged", body)
 
+    def test_apply_writes_the_title_and_the_body_only_when_something_moved(self):
+        move = {"old": "1.8.0-1.fc43", "new": "1.8.0-2.fc43"}
+        with tempfile.TemporaryDirectory() as tmp:
+            out = pathlib.Path(tmp) / "out"
+            with mock.patch.object(bump, "cosmic_comp_move", return_value=None), mock.patch.object(bump, "apply_cosmic_comp", never):
+                self.run_main("cosmic-comp", "apply", str(out))
+            self.assertFalse(out.exists())
+            with mock.patch.object(bump, "cosmic_comp_move", return_value=move), mock.patch.object(bump, "apply_cosmic_comp") as applied:
+                self.run_main("cosmic-comp", "apply", str(out))
+            applied.assert_called_once_with(move)
+            self.assertEqual((out / "title").read_text(), "chore(cosmic-comp): bump to 1.8.0-2.fc43\n")
+            self.assertEqual((out / "body.md").read_text(), bump.cosmic_comp_body(move))
+
+    def test_apply_without_an_output_directory_is_refused(self):
+        with self.assertRaises(SystemExit):
+            self.run_main("cosmic-comp", "apply")
+
 
 if __name__ == "__main__":
     unittest.main()
