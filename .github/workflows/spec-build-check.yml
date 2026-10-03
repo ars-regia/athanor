@@ -53,6 +53,11 @@ jobs:
     # no secrets.
     if: ${{ always() && github.head_ref == 'chore/update-specs-zero-trust' && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-24.04
+    # The job's own token reads the pull request and the Kernel Build runs; the PAT only merges.
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
     # It waits for the required checks (Kernel gate) before merging.
     timeout-minutes: 90
     steps:
@@ -62,9 +67,10 @@ jobs:
 
       - name: Merge a green spec update of the bot's shape (forge/scripts/bot_merge.py)
         env:
+          GH_TOKEN: ${{ github.token }}
           # A PAT: a merge made with the GITHUB_TOKEN triggers no push workflow, and the
           # Orchestrator must publish what merged.
-          GH_TOKEN: ${{ secrets.KERNEL_BUMP_TOKEN }}
+          MERGE_TOKEN: ${{ secrets.KERNEL_BUMP_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
           BUILD: ${{ needs.build.result }}
