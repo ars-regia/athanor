@@ -120,7 +120,7 @@ On a pure pin bump the variants are therefore built and gated only after the mer
 **O8. Bump PRs.**
 
 - **Pure kernel or NVIDIA pin bumps:** the kernel group; they keep auto-merge on a green prep.
-- **System base or lock bumps:** those that touch `system/Containerfile` or `system/nvidia/locks` stay without auto-merge. The reason is the package review of `doc_system_image.md` section 4, not ordering. The system group always does; a kernel PR does when an NVIDIA pin move regenerates its lock.
+- **System base or lock bumps:** the system group's PRs auto-merge once System Image Check is green and `forge/scripts/bot_automerge.sh` finds only new digests on existing `FROM` lines and new RPM lines in the locks; the package delta of that check records what changed (`doc_system_image.md` section 4). A kernel PR that regenerates a lock because an NVIDIA pin moved stays without auto-merge: a new driver version is reviewed by a person.
 - **One open PR per group:** an open `kernel-bump` PR holds only the kernel group and an open `system-bump` PR only the system group, so a base bump waiting for review never holds a kernel bump back, nor the reverse.
 - **Accepted overlap:** an NVIDIA pin move in an open kernel PR and a republished lock of the old version in the system group edit the same lock file; the second PR to merge conflicts on it, visibly, and a person closes it. It needs both events on the same day, so no code prevents it.
 
