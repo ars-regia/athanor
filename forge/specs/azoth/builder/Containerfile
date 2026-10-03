@@ -2,22 +2,17 @@
 #
 # The kernel is the Fedora package (kernel.spec from the SRPM pinned in ../pins.env)
 # rebuilt with clang on top of the CachyOS base: it needs dnf, the Fedora RPM macros and
-# the LLVM toolchain, which the Nix builder of the forge lacks. build.sh installs the
-# BuildRequires of the pinned spec with `dnf builddep`: only the base is here.
-# The image is pinned by digest: it is the only input the repository does not version.
+# the LLVM toolchain, which the Nix builder of the forge lacks.
+# The image is pinned by digest, and everything installed on top of it by sha256 in
+# toolchain.lock: the tools of the build and the BuildRequires of the pinned spec, which
+# build.sh then only checks with `dnf builddep` with every repository disabled. The same
+# RPMs at every build, so the same pins give the same kernel. lock.sh generate rewrites
+# the lock when this base or the pinned SRPM change. Build context: forge/specs/azoth.
 FROM registry.fedoraproject.org/fedora:43@sha256:15ecc6538eaf7d8a074e08880ce8769a0e2f43f70862a68c01f5fd2738f9a6f6
 
 # No weak dependencies and no cache: the image stays minimal.
 RUN printf 'install_weak_deps=False\nkeepcache=False\n' >> /etc/dnf/dnf.conf
 
-# LLVM toolchain (clang, lld), RPM tools and the dnf5 builddep plugin, rust and bindgen
-# for CONFIG_RUST, dwarves (pahole) for the BTF, gnupg2 for the source signatures,
-# python3 for Fedora's merge.py, python3-koji to restitch the SRPM signature.
-RUN dnf -y install \
-      rpm-build dnf5-plugins python3-koji \
-      clang lld llvm \
-      gcc gcc-c++ make flex bison bc patch diffutils findutils \
-      ncurses-devel elfutils-libelf-devel elfutils-devel openssl-devel openssl dwarves \
-      rust cargo rustfmt bindgen-cli \
-      tar cpio xz curl git gnupg2 python3 \
-    && dnf clean all
+COPY lock.sh /usr/local/share/azoth/
+COPY builder/toolchain.lock /usr/local/share/azoth/toolchain.lock
+RUN bash /usr/local/share/azoth/lock.sh install /usr/local/share/azoth/toolchain.lock

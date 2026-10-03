@@ -62,7 +62,7 @@ jobs:
       - name: Build the kernel builder image
         env:
           BUILDAH_ISOLATION: chroot
-        run: podman build -t localhost/azoth-builder forge/specs/azoth/builder
+        run: podman build -t localhost/azoth-builder -f forge/specs/azoth/builder/Containerfile forge/specs/azoth
 
       - name: Rebuild the pinned kernel with an empty cache (B)
         # Fresh cache: every source is downloaded and verified again, as on the first build.
@@ -131,7 +131,7 @@ jobs:
       - name: Build the kernel builder image
         env:
           BUILDAH_ISOLATION: chroot
-        run: podman build -t localhost/azoth-builder forge/specs/azoth/builder
+        run: podman build -t localhost/azoth-builder -f forge/specs/azoth/builder/Containerfile forge/specs/azoth
 
       - name: Run build.sh --variant
         env:
@@ -171,7 +171,7 @@ jobs:
       - name: Build the boot-matrix image
         env:
           BUILDAH_ISOLATION: chroot
-        run: podman build -t localhost/azoth-boot forge/specs/azoth/boot
+        run: podman build -t localhost/azoth-boot -f forge/specs/azoth/boot/Containerfile forge/specs/azoth
 
       - name: Published kernel
         run: |

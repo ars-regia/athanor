@@ -1,0 +1,2 @@
+# The stage that compiles schbench, so that gcc stays out of the boot image.
+gcc make tar
