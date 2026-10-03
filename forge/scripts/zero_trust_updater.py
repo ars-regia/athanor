@@ -105,7 +105,7 @@ def main(report, fetch=fetch_json, pin=pin_sources):
             )
             f.write("\n".join(rows) + "\n")
             f.write(
-                "\nSpec Build Check builds every changed spec. A green build arms auto-merge "
+                "\nSpec Build Check builds every changed spec. A green build merges this pull request "
                 "when the leftmost non-zero version component is unchanged; any other bump "
                 "waits for a review.\n"
             )

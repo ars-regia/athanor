@@ -153,23 +153,28 @@ jobs:
             if podman image exists "localhost/$name:check"; then podman rmi --force "localhost/$name:check"; fi
           done
 
-  automerge:
+  merge:
     needs: build
-    # Only the system bump bot's pull requests; bot_automerge.sh checks their shape. The script
-    # comes from the base branch, so a pull request cannot rewrite the rule that merges it.
-    if: ${{ startsWith(github.head_ref, 'bump/system-') && github.event.pull_request.head.repo.full_name == github.repository }}
+    # The system bump bot's pull requests only, whatever the build's outcome: forge/scripts/bot_merge.py
+    # merges a green one of the bot's shape at its head once the required checks pass, and
+    # reports why it leaves any other. The script is the base branch's copy; the workflow
+    # file, as for any same-repository pull_request, is the pull request's own, and forks get
+    # no secrets.
+    if: ${{ always() && startsWith(github.head_ref, 'bump/system-') && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    # It waits for the required checks (Kernel gate) before merging.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.base_ref }}
 
-      - name: Arm auto-merge on a green system bump (forge/scripts/bot_automerge.sh)
+      - name: Merge a green system bump of the bot's shape (forge/scripts/bot_merge.py)
         env:
           # A PAT: a merge made with the GITHUB_TOKEN triggers no push workflow, and the
-          # Orchestrator must publish the bumped images.
+          # Orchestrator must publish what merged.
           GH_TOKEN: ${{ secrets.KERNEL_BUMP_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
-        run: bash forge/scripts/bot_automerge.sh system "$PR" "$SHA"
+          BUILD: ${{ needs.build.result }}
+        run: python3 forge/scripts/bot_merge.py system "$PR" "$SHA" "$BUILD"

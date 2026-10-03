@@ -3,8 +3,8 @@ name: Spec Build Check
 # Pull requests that change forge specs build them the way the DAG does, without publishing:
 # forge/scripts/build_changed_specs.sh runs forge/scripts/build_spec.sh, the script of
 # call-dag-compile.yml, in the builder image for every changed spec. On a green build of the
-# spec bot's pull request, forge/scripts/bot_automerge.sh arms auto-merge when every bump keeps
-# its major version. The kernel (forge/specs/azoth) is Kernel Build's.
+# spec bot's pull request, forge/scripts/bot_merge.py merges it when every bump keeps its
+# major version. The kernel (forge/specs/azoth) is Kernel Build's.
 
 on:
   pull_request:
@@ -44,23 +44,28 @@ jobs:
           bash forge/scripts/retry.sh podman pull "$image"
           bash forge/scripts/build_changed_specs.sh HEAD^1 "$image"
 
-  automerge:
+  merge:
     needs: build
-    # Only the spec bot's pull requests; bot_automerge.sh checks their shape. The script comes
-    # from the base branch, so a pull request cannot rewrite the rule that merges it.
-    if: ${{ github.head_ref == 'chore/update-specs-zero-trust' && github.event.pull_request.head.repo.full_name == github.repository }}
+    # The spec bot's pull requests only, whatever the build's outcome: forge/scripts/bot_merge.py
+    # merges a green one of the bot's shape at its head once the required checks pass, and
+    # reports why it leaves any other. The script is the base branch's copy; the workflow
+    # file, as for any same-repository pull_request, is the pull request's own, and forks get
+    # no secrets.
+    if: ${{ always() && github.head_ref == 'chore/update-specs-zero-trust' && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    # It waits for the required checks (Kernel gate) before merging.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.base_ref }}
 
-      - name: Arm auto-merge on a green spec update (forge/scripts/bot_automerge.sh)
+      - name: Merge a green spec update of the bot's shape (forge/scripts/bot_merge.py)
         env:
           # A PAT: a merge made with the GITHUB_TOKEN triggers no push workflow, and the
-          # Orchestrator must publish the updated packages.
+          # Orchestrator must publish what merged.
           GH_TOKEN: ${{ secrets.KERNEL_BUMP_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
-        run: bash forge/scripts/bot_automerge.sh spec "$PR" "$SHA"
+          BUILD: ${{ needs.build.result }}
+        run: python3 forge/scripts/bot_merge.py spec "$PR" "$SHA" "$BUILD"

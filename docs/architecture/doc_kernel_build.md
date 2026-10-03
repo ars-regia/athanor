@@ -379,7 +379,7 @@ ciascuno, perché si verificano in modo diverso (`doc_build_ordering.md`, O7 e O
 il gruppo **kernel** (i job sotto) e il gruppo **system** (`system/Containerfile` e i
 lock NVIDIA ripubblicati alla stessa versione, etichetta `system-bump`: System Image
 Check costruisce le immagini col kernel pubblicato e, se è verde e la PR ha solo la
-forma del bot, `forge/scripts/bot_automerge.sh` arma l'auto-merge; la differenza dei
+forma del bot, `forge/scripts/bot_merge.py` la unisce dopo i check obbligatori; la differenza dei
 pacchetti resta nel riepilogo del check). Il gruppo kernel ha tre job:
 
 1. **kernel** (runner GitHub-hosted): `bump.py apply --group kernel` legge `pins.env` e

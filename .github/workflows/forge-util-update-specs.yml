@@ -48,20 +48,12 @@ jobs:
       - name: Install rpmspec
         run: sudo apt-get install -y --no-install-recommends rpm
 
-      # The pull request this opens is built by Spec Build Check, which arms auto-merge for a
-      # bump that keeps the leftmost non-zero version component (forge/scripts/bot_automerge.sh).
+      # The pull request this opens is built by Spec Build Check, which merges a bump that keeps
+      # the leftmost non-zero version component (forge/scripts/bot_merge.py).
       - name: Update the watched specs (forge/scripts/zero_trust_updater.py)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python3 scripts/zero_trust_updater.py out/spec-updates.md
-
-      # GitHub keeps auto-merge armed across the bot's pushes: off before the new head lands,
-      # Spec Build Check arms it again once that head is built.
-      - name: Turn off auto-merge on the open update pull request
-        if: hashFiles('forge/out/spec-updates.md') != ''
-        env:
-          GH_TOKEN: ${{ secrets.SPECS_UPDATE_TOKEN }}
-        run: bash scripts/bot_automerge.sh disarm chore/update-specs-zero-trust
 
       - name: Create Pull Request
         if: hashFiles('forge/out/spec-updates.md') != ''
