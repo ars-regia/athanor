@@ -1,5 +1,5 @@
 [
-  { "repo": "cilium/tetragon", "spec": "specs/athanor-tetragon/athanor-tetragon.spec", "tarball_format": "{repo_name}-{tag}-amd64.tar.gz" },
-  { "repo": "InioX/matugen", "spec": "specs/athanor-matugen/athanor-matugen.spec", "tarball_format": "{repo_name}-{version}.tar.gz" },
-  { "repo": "sentriz/cliphist", "spec": "specs/athanor-cliphist/athanor-cliphist.spec", "tarball_format": "{repo_name}-{version}.tar.gz" }
+  { "repo": "cilium/tetragon", "spec": "specs/athanor-tetragon/athanor-tetragon.spec" },
+  { "repo": "InioX/matugen", "spec": "specs/athanor-matugen/athanor-matugen.spec" },
+  { "repo": "sentriz/cliphist", "spec": "specs/athanor-cliphist/athanor-cliphist.spec" }
 ]

@@ -12,9 +12,10 @@ name: Kernel Bump
 # auto-merge; the check required by the branch protection is "Kernel gate" of Kernel Build.
 # system: `bump.py apply --group system` moves the FROM lines of system/Containerfile (the
 # quay.io base-atomic base) and regenerates an NVIDIA lock whose packages the repository
-# republished, then opens its PR (label system-bump), which never auto-merges: System Image
-# Check builds the images against the published kernel and a human reviews the package
-# difference. One open PR per group: an open kernel-bump PR holds the kernel group only, an
+# republished, then opens its PR (label system-bump): System Image Check builds the images
+# against the published kernel and, when they are green and the PR has only the bot's shape,
+# merges it once the required checks pass (forge/scripts/bot_merge.py). One open PR per group:
+# an open kernel-bump PR holds the kernel group only, an
 # open system-bump PR the system group only, which then just verifies the NVIDIA locks
 # (bump.py verify) and fails when one must be regenerated, instead of skipping. Every run,
 # whatever happened before, the system job mirrors the RPMs of both NVIDIA locks to
@@ -302,7 +303,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: bash system/nvidia/mirror-locks.sh
 
-      - name: Branch, commit, PR (never auto-merged)
+      - name: Branch, commit, PR (merged by System Image Check when green)
         if: ${{ steps.bump.outputs.changed == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.KERNEL_BUMP_TOKEN }}
@@ -321,7 +322,7 @@ jobs:
           git push -u origin "$branch"
           {
             cat body.md
-            printf '\n## Merge\n\nThis bump changes the packages of the system image. System Image Check builds the three images against the published kernel and a human review of the package difference in its summary decides the merge. No auto-merge.\n'
+            printf '\n## Merge\n\nThis bump changes the packages of the system image. System Image Check builds the three images against the published kernel; when they are green and the change has only the shape of this bot (new digests on existing FROM lines, new RPM lines in the locks), it merges this PR once the required checks pass (forge/scripts/bot_merge.py). The package difference is in its summary. Any other change waits for a person.\n'
           } > pr.md
           url=$(gh pr create --base "$GITHUB_REF_NAME" --head "$branch" --label system-bump --title "$title" --body-file pr.md)
-          echo "PR: ${url} (no auto-merge: System Image Check and a human review decide)" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "PR: ${url} (merged once System Image Check is green)" | tee -a "$GITHUB_STEP_SUMMARY"
