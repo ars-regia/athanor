@@ -380,7 +380,7 @@ nome solo da aspettare.
 mano con `workflow_dispatch`): job `repro` (gate 6, sezione 3) e job `bench`
 (gate 5) su `ubuntu-24.04` con KVM: `bench.sh` avvia il kernel pubblicato in
 QEMU (4 vCPU, 4 GiB) con un initramfs che porta hackbench (realtime-tests), schbench
-(dal sorgente, commit pinnato in `boot/Containerfile`), fio e netperf;
+(dal sorgente, commit e hash dell'archivio pinnati in `boot/Containerfile`), fio e netperf;
 `bench/init` esegue le prove (30 s ciascuna: hackbench a lavoro fisso, wakeup
 p99 e RPS p50 di schbench, IOPS di fio con `ioengine=null`, TCP_STREAM e TCP_RR
 di netperf su loopback) e stampa `K7 <metrica> <valore> <unità>`; i
@@ -688,8 +688,7 @@ task_struct`.
 8. (2026-10-02) Toolchain del builder bloccata per NVR: `builder/toolchain.lock` fissa
    per sha256 ogni RPM sopra la base, e si rigenera con il SRPM pinnato o la base
    (sezione 5), perché la stessa coppia di pin dia lo stesso kernel. (2026-10-03)
-   Bloccati allo stesso modo gli ambienti `boot/` e `nvidia/`, un lock per stadio. Resta
-   fuori il tarball di schbench, scaricato dall'archivio GitHub del commit pinnato ma
-   non controllato per hash.
+   Bloccati allo stesso modo gli ambienti `boot/` e `nvidia/`, un lock per stadio, e
+   l'archivio GitHub di schbench pinnato per sha256 come Firecracker.
 
 | `bump.py` | il bot di bump (sezione 8), in due gruppi: kernel (pin nuovi da Bodhi, CachyOS, NVIDIA e registro; riscrive `pins.env`, i `FROM` del kernel e `KERNEL.md`) e system (`system/Containerfile` e i lock NVIDIA ripubblicati) |
