@@ -88,7 +88,7 @@ RUN --mount=type=bind,from=ghcr.io/hr-mes/athanor-forge-tier1-repo:latest,source
     dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs compiler-rt keylime-tenant keylime-agent systemd-ukify systemd-boot-unsigned sbsigntools openssl tpm2-tools cryptsetup dracut && \
     if find /tmp/tier1-repo -name "*.rpm" 1> /dev/null 2>&1; then \
         echo "Tier 1: Installing Core User Services, DBus & Policies..." && \
-        RPM_LIST=$(find /tmp/tier1-repo -name "*.rpm" ! -name "*-devel-*" ! -name "*-doc-*" ! -name "*debuginfo*" ! -name "*debugsource*" ! -name "*astro-toolchain*" ! -name "*sccache*" ! -name "*buildah*" ! -name "*mold*" ! -name "*osbuild*" ! -name "*cargo-tools*") && \
+        RPM_LIST=$(find /tmp/tier1-repo -name "*.rpm" ! -name "*-devel-*" ! -name "*-doc-*" ! -name "*debuginfo*" ! -name "*debugsource*" ! -name "*astro-toolchain*" ! -name "*buildah*" ! -name "*osbuild*" ! -name "*cargo-tools*") && \
         if [ -n "$RPM_LIST" ]; then \
             dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs $RPM_LIST; \
         fi; \
@@ -99,7 +99,7 @@ RUN --mount=type=bind,from=ghcr.io/hr-mes/athanor-forge-tier2-repo:latest,source
     --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
     if find /tmp/tier2-repo -name "*.rpm" 1> /dev/null 2>&1; then \
         echo "Tier 2: Installing Design System & Static Assets..." && \
-        RPM_LIST=$(find /tmp/tier2-repo -name "*.rpm" ! -name "*-devel-*" ! -name "*-doc-*" ! -name "*debuginfo*" ! -name "*debugsource*" ! -name "*astro-toolchain*" ! -name "*sccache*" ! -name "*buildah*" ! -name "*mold*" ! -name "*osbuild*" ! -name "*cargo-tools*") && \
+        RPM_LIST=$(find /tmp/tier2-repo -name "*.rpm" ! -name "*-devel-*" ! -name "*-doc-*" ! -name "*debuginfo*" ! -name "*debugsource*" ! -name "*astro-toolchain*" ! -name "*buildah*" ! -name "*osbuild*" ! -name "*cargo-tools*") && \
         if [ -n "$RPM_LIST" ]; then \
             dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs $RPM_LIST; \
         fi; \
@@ -110,7 +110,7 @@ RUN --mount=type=bind,from=ghcr.io/hr-mes/athanor-forge-tier3-repo:latest,source
     --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
     if find /tmp/tier3-repo -name "*.rpm" 1> /dev/null 2>&1; then \
         echo "Tier 3: Installing Agile Rust Shell & Apps..." && \
-        RPM_LIST=$(find /tmp/tier3-repo -name "*.rpm" ! -name "*-devel-*" ! -name "*-doc-*" ! -name "*debuginfo*" ! -name "*debugsource*" ! -name "*astro-toolchain*" ! -name "*sccache*" ! -name "*buildah*" ! -name "*mold*" ! -name "*osbuild*" ! -name "*cargo-tools*") && \
+        RPM_LIST=$(find /tmp/tier3-repo -name "*.rpm" ! -name "*-devel-*" ! -name "*-doc-*" ! -name "*debuginfo*" ! -name "*debugsource*" ! -name "*astro-toolchain*" ! -name "*buildah*" ! -name "*osbuild*" ! -name "*cargo-tools*") && \
         if [ -n "$RPM_LIST" ]; then \
             dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs $RPM_LIST; \
         fi; \

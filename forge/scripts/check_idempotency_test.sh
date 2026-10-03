@@ -12,7 +12,8 @@
 # of them. Anonymous first, credentials only as a fallback, and a registry that does not
 # answer at all is an error rather than a silent rebuild.
 set -u
-h_present=c99e47feefeebd9cad8b8c7cb237230477811b2aa659be4b61a9d565ee3c00a1
+# A tag every kept package carries; the hash tags of a package change on each rebuild.
+h_present=latest
 h_absent=0000000000000000000000000000000000000000000000000000000000000000
 
 fail=0
@@ -26,7 +27,7 @@ check() { # check LABEL EXPECTED ACTUAL
 # an unwritable HOME fails in milliseconds and no request is ever made. That failure read
 # as "image absent" and rebuilt the whole graph.
 if [[ $(id -u) -ne 0 && ! -w ${HOME:-/root} ]]; then
-  if skopeo inspect --no-tags "docker://ghcr.io/hr-mes/athanor-forge-mold:${h_present}" > /dev/null 2>&1; then
+  if skopeo inspect --no-tags "docker://ghcr.io/hr-mes/athanor-forge-tetragon:${h_present}" > /dev/null 2>&1; then
     echo "  FAIL unwritable HOME: skopeo unexpectedly succeeded, the workaround is now moot"
     fail=1
   else
@@ -41,7 +42,7 @@ fi
 [[ -w ${HOME:-/root} ]] || { HOME=$(mktemp -d); export HOME; }
 
 probe() { # probe TAG TOKEN
-  local url="docker://ghcr.io/hr-mes/athanor-forge-mold:$1" token=$2
+  local url="docker://ghcr.io/hr-mes/athanor-forge-tetragon:$1" token=$2
   local status="" err rc
   for attempt in anonymous authenticated; do
     local args=("--no-tags")
