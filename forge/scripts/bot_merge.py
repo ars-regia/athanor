@@ -19,7 +19,9 @@ system — branch bump/system-* with label system-bump (kernel-bump.yml, system 
          the existing FROM lines, and lock entries whose URL is an RPM directly under the
          lock's own `# repository` line.
 
-Usage: bot_merge.py spec|system PR HEAD_SHA BUILD_RESULT   (GH_TOKEN: a token that may merge)
+Usage: bot_merge.py spec|system PR HEAD_SHA BUILD_RESULT
+       GH_TOKEN: reads the pull request and the Actions runs; MERGE_TOKEN: merges it (a PAT,
+       so that the merge triggers the push workflows)
 
 A pull request of another shape, or a build that is not `success`, is reported in the log and
 the job summary and the script exits 0. A failing gh call, a failing required check or a
@@ -37,8 +39,9 @@ NAME = r"[A-Za-z0-9._+-]+"
 HEX64 = r"[0-9a-f]{64}"
 SPEC_FILE = re.compile(rf"(?:{NAME}\.spec|SOURCES/sources\.sha256)")
 WATCH_FILE = "forge/upstream-watch.json"
-# The single check the branch protection requires (kernel-build.yml, job gate).
+# The single check the branch protection requires: job gate of kernel-build.yml.
 REQUIRED_CHECK = "Kernel gate"
+REQUIRED_WORKFLOW = "kernel-build.yml"
 SYSTEM_PATH = re.compile(rf"system/(Containerfile|nvidia/locks/{NAME}\.lock)")
 VERSION = re.compile(r"Version:[ \t]+(\d+(?:\.\d+)*)")
 RELEASE = re.compile(r"Release:[ \t]+\d+%\{\?dist\}")
@@ -55,9 +58,15 @@ class Refused(Exception):
     pass
 
 
-def run_gh(*args):
+def run_gh(*args, env=None):
     # stderr reaches the log: a refused merge or a failing call shows gh's own reason.
-    return subprocess.run(["gh", *args], check=True, stdout=subprocess.PIPE, text=True).stdout
+    return subprocess.run(
+        ["gh", *args], check=True, stdout=subprocess.PIPE, text=True, env=env
+    ).stdout
+
+
+def merge_gh(*args):
+    return run_gh(*args, env={**os.environ, "GH_TOKEN": os.environ["MERGE_TOKEN"]})
 
 
 def watched_dirs():
@@ -214,26 +223,33 @@ def report(pr, message):
 
 
 def wait_for_required_check(sha, gh, sleep=time.sleep, polls=160):
-    """Wait for the required check on SHA to complete green; any other end fails the run.
+    """Wait for the required check of the newest Kernel Build run on SHA to end green; any
+    other end fails the run.
 
-    Polled by name rather than with `gh pr checks --required --watch`: a check whose job is
-    not queued yet (the gate waits for the kernel jobs) is not reported at all, and gh would
-    end the watch on an empty list.
+    GitHub judges the required check by the newest run of its workflow: a green gate of an
+    earlier run on the same commit (a reopened pull request, a rerun) does not count while a
+    newer run has not reported its own, and the merge is refused. So the script follows the
+    newest run of the workflow, not any check run of that name, and reads the gate job of its
+    latest attempt once the run completes.
     """
     repo = os.environ["GITHUB_REPOSITORY"]
-    query = f"repos/{repo}/commits/{sha}/check-runs?check_name={REQUIRED_CHECK.replace(' ', '%20')}"
+    runs_query = f"repos/{repo}/actions/workflows/{REQUIRED_WORKFLOW}/runs?head_sha={sha}&event=pull_request"
     for _ in range(polls):
-        runs = json.loads(gh("api", query))["check_runs"]
+        runs = json.loads(gh("api", runs_query))["workflow_runs"]
         latest = max(runs, key=lambda r: r["id"]) if runs else None
         if latest and latest["status"] == "completed":
-            if latest["conclusion"] != "success":
-                sys.exit(f"bot_merge: {REQUIRED_CHECK} ended {latest['conclusion']} on {sha}: not merged")
+            jobs = json.loads(
+                gh("api", f"repos/{repo}/actions/runs/{latest['id']}/jobs?per_page=100")
+            )["jobs"]
+            gate = next((j["conclusion"] for j in jobs if j["name"] == REQUIRED_CHECK), "missing")
+            if gate != "success":
+                sys.exit(f"bot_merge: {REQUIRED_CHECK} of run {latest['id']} is {gate} on {sha}: not merged")
             return
         sleep(30)
     sys.exit(f"bot_merge: {REQUIRED_CHECK} did not complete on {sha} in time: not merged")
 
 
-def main(kind, pr, sha, build, gh=run_gh):
+def main(kind, pr, sha, build, gh=run_gh, merge=merge_gh):
     try:
         if build != "success":
             raise Refused(f"build is {build}")
@@ -242,7 +258,7 @@ def main(kind, pr, sha, build, gh=run_gh):
         report(pr, f"stays for a person: {reason}")
         return 0
     wait_for_required_check(sha, gh)
-    gh("pr", "merge", pr, "--squash", "--match-head-commit", sha)
+    merge("pr", "merge", pr, "--squash", "--match-head-commit", sha)
     report(pr, f"merged at {sha} ({kind} bot, the change has the bot's shape)")
     return 0
 
