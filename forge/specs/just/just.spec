@@ -1,11 +1,11 @@
 Name:           just
 %global debug_package %{nil}
-Version:        1.39.0
+Version:        1.58.0
 Release:        1%{?dist}
 Summary:        Just a command runner - handy way to save and run project-specific commands
 License:        CC0-1.0
 URL:            https://github.com/casey/just
-Source0:        https://github.com/casey/just/archive/refs/tags/%{version}.tar.gz#/just-%{version}.tar.gz
+Source0:        just-1.58.0.tar.gz
 
 
 BuildRequires:  cargo
