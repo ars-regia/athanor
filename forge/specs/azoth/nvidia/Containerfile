@@ -6,7 +6,7 @@
 # it does not touch the builder's Containerfile (which is an input of the kernel reuse).
 # The packages are toolchain.packages, installed by sha256 from toolchain.lock with every
 # repository disabled (../lock.sh). Build context: forge/specs/azoth.
-FROM registry.fedoraproject.org/fedora:43@sha256:4d9424ff89c5e182c782d0419bf41b6e71d55f30d586ae3c60c837a52ae39c64
+FROM registry.fedoraproject.org/fedora:43@sha256:15ecc6538eaf7d8a074e08880ce8769a0e2f43f70862a68c01f5fd2738f9a6f6
 
 RUN printf 'install_weak_deps=False\nkeepcache=False\n' >> /etc/dnf/dnf.conf
 
