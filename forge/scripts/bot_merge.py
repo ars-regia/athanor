@@ -9,8 +9,8 @@ at HEAD_SHA, so a push after the check makes the merge fail instead of landing u
 Nothing stays armed: a pull request the script does not merge waits for a person.
 
 spec   — branch chore/update-specs-zero-trust (forge-util-update-specs.yml); only modified
-         *.spec and SOURCES/sources.sha256 under forge/specs/<package>/ (azoth and
-         athanor-telemetry, which Spec Build Check does not build, excluded); only Version
+         *.spec and SOURCES/sources.sha256 of the packages forge/upstream-watch.json lists
+         (read from the checkout, the base branch); only Version
          lines (numeric), Release lines (N%{?dist}) and manifest entries; every Version keeps
          its leftmost non-zero component (1.6.0 -> 1.7.1 merges, 1.9 -> 2.0 and 0.3 -> 0.4 do
          not).
@@ -31,12 +31,14 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 NAME = r"[A-Za-z0-9._+-]+"
 HEX64 = r"[0-9a-f]{64}"
-SPEC_PATH = re.compile(
-    rf"forge/specs/(?!azoth/|athanor-telemetry/){NAME}/({NAME}\.spec|SOURCES/sources\.sha256)"
-)
+SPEC_FILE = re.compile(rf"(?:{NAME}\.spec|SOURCES/sources\.sha256)")
+WATCH_FILE = "forge/upstream-watch.json"
+# The single check the branch protection requires (kernel-build.yml, job gate).
+REQUIRED_CHECK = "Kernel gate"
 SYSTEM_PATH = re.compile(rf"system/(Containerfile|nvidia/locks/{NAME}\.lock)")
 VERSION = re.compile(r"Version:[ \t]+(\d+(?:\.\d+)*)")
 RELEASE = re.compile(r"Release:[ \t]+\d+%\{\?dist\}")
@@ -54,9 +56,14 @@ class Refused(Exception):
 
 
 def run_gh(*args):
-    return subprocess.run(
-        ["gh", *args], check=True, capture_output=True, text=True
-    ).stdout
+    # stderr reaches the log: a refused merge or a failing call shows gh's own reason.
+    return subprocess.run(["gh", *args], check=True, stdout=subprocess.PIPE, text=True).stdout
+
+
+def watched_dirs():
+    """forge/specs/<package>/ of every spec the updater watches: the only specs it bumps."""
+    with open(WATCH_FILE) as f:
+        return {"forge/" + os.path.dirname(item["spec"]) + "/" for item in json.load(f)}
 
 
 def same_major(old, new):
@@ -145,7 +152,7 @@ def check(kind, pr, sha, gh):
             "view",
             pr,
             "--json",
-            "state,headRefName,headRefOid,isCrossRepository,labels",
+            "state,headRefName,headRefOid,isCrossRepository,labels,changedFiles",
         )
     )
     if view["state"] != "OPEN":
@@ -167,7 +174,15 @@ def check(kind, pr, sha, gh):
     files = [json.loads(line) for line in out.splitlines() if line]
     if not files:
         raise Refused("changes no file")
-    path = SPEC_PATH if kind == "spec" else SYSTEM_PATH
+    if len(files) != view["changedFiles"]:
+        raise Refused(f"the API listed {len(files)} of {view['changedFiles']} changed files")
+    if kind == "spec":
+        dirs = watched_dirs()
+        def allowed(name):
+            d = next((d for d in dirs if name.startswith(d)), None)
+            return d is not None and SPEC_FILE.fullmatch(name[len(d):]) is not None
+    else:
+        allowed = SYSTEM_PATH.fullmatch
 
     def contents(name):
         return gh(
@@ -182,7 +197,7 @@ def check(kind, pr, sha, gh):
             raise Refused(
                 f"{f['filename']}: status {f['status']}, the bot only modifies files"
             )
-        if not path.fullmatch(f["filename"]):
+        if not allowed(f["filename"]):
             raise Refused(f"touches {f['filename']}, outside what the bot changes")
         if kind == "spec":
             check_spec(f)
@@ -198,6 +213,26 @@ def report(pr, message):
             s.write(line + "\n")
 
 
+def wait_for_required_check(sha, gh, sleep=time.sleep, polls=160):
+    """Wait for the required check on SHA to complete green; any other end fails the run.
+
+    Polled by name rather than with `gh pr checks --required --watch`: a check whose job is
+    not queued yet (the gate waits for the kernel jobs) is not reported at all, and gh would
+    end the watch on an empty list.
+    """
+    repo = os.environ["GITHUB_REPOSITORY"]
+    query = f"repos/{repo}/commits/{sha}/check-runs?check_name={REQUIRED_CHECK.replace(' ', '%20')}"
+    for _ in range(polls):
+        runs = json.loads(gh("api", query))["check_runs"]
+        latest = max(runs, key=lambda r: r["id"]) if runs else None
+        if latest and latest["status"] == "completed":
+            if latest["conclusion"] != "success":
+                sys.exit(f"bot_merge: {REQUIRED_CHECK} ended {latest['conclusion']} on {sha}: not merged")
+            return
+        sleep(30)
+    sys.exit(f"bot_merge: {REQUIRED_CHECK} did not complete on {sha} in time: not merged")
+
+
 def main(kind, pr, sha, build, gh=run_gh):
     try:
         if build != "success":
@@ -206,8 +241,7 @@ def main(kind, pr, sha, build, gh=run_gh):
     except Refused as reason:
         report(pr, f"stays for a person: {reason}")
         return 0
-    # Exits non-zero when a required check fails: the job goes red and a person looks.
-    gh("pr", "checks", pr, "--required", "--watch", "--fail-fast", "--interval", "30")
+    wait_for_required_check(sha, gh)
     gh("pr", "merge", pr, "--squash", "--match-head-commit", sha)
     report(pr, f"merged at {sha} ({kind} bot, the change has the bot's shape)")
     return 0

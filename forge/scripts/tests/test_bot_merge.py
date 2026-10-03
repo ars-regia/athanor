@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import tempfile
 import unittest
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "bot_merge.py"
@@ -65,6 +66,16 @@ class BotMergeTest(unittest.TestCase):
     def setUp(self):
         os.environ["GITHUB_REPOSITORY"] = "owner/repo"
         os.environ.pop("GITHUB_STEP_SUMMARY", None)
+        self.cwd = os.getcwd()
+        root = pathlib.Path(tempfile.mkdtemp())
+        (root / "forge").mkdir()
+        watch = [{"repo": "demo/demo", "spec": "specs/athanor-demo/athanor-demo.spec"}]
+        (root / bot.WATCH_FILE).write_text(json.dumps(watch))
+        os.chdir(root)
+        self.gate = [{"id": 1, "status": "completed", "conclusion": "success"}]
+
+    def tearDown(self):
+        os.chdir(self.cwd)
 
     def run_bot(
         self, kind, files, branch, labels=(), build="success", lock=LOCK, **view
@@ -75,6 +86,7 @@ class BotMergeTest(unittest.TestCase):
             headRefOid=SHA,
             isCrossRepository=False,
             labels=[{"name": l} for l in labels],
+            changedFiles=len(files),
         )
         data.update(view)
         self.calls = []
@@ -83,11 +95,13 @@ class BotMergeTest(unittest.TestCase):
             self.calls.append(args)
             if args[:2] == ("pr", "view"):
                 return json.dumps(data)
-            if args[0] == "api" and args[2].endswith("/files"):
+            if args[0] == "api" and "/files" in " ".join(args):
                 return "".join(json.dumps(f) + "\n" for f in files)
+            if args[0] == "api" and "/check-runs?check_name=Kernel%20gate" in args[1]:
+                return json.dumps({"check_runs": self.gate})
             if args[0] == "api":
                 return lock
-            if args[:2] in (("pr", "checks"), ("pr", "merge")):
+            if args[:2] == ("pr", "merge"):
                 return ""
             raise AssertionError(args)
 
@@ -114,8 +128,9 @@ class BotMergeTest(unittest.TestCase):
         self.assertEqual(
             self.spec(), [("pr", "merge", "7", "--squash", "--match-head-commit", SHA)]
         )
-        names = [c[:2] for c in self.calls]
-        self.assertLess(names.index(("pr", "checks")), names.index(("pr", "merge")))
+        gate = next(i for i, c in enumerate(self.calls) if "check-runs" in c[1])
+        self.assertLess(gate, self.calls.index(self.calls[-1]))
+        self.assertEqual(self.calls[-1][:2], ("pr", "merge"))
 
     def test_spec_major_bump_stays(self):
         for old, new in (("1.9.0", "2.0.0"), ("0.3.1", "0.4.0"), ("0.0.3", "0.0.4")):
@@ -172,7 +187,7 @@ class BotMergeTest(unittest.TestCase):
         self.assertEqual(
             self.spec(
                 files=[
-                    dict(SPEC_FILES[0], filename="forge/specs/athanor-telemetry/t.spec")
+                    dict(SPEC_FILES[0], filename="forge/specs/athanor-gatekeeper-rs/athanor-gatekeeper-rs.spec")
                 ]
             ),
             [],
@@ -234,6 +249,24 @@ class BotMergeTest(unittest.TestCase):
         self.assertEqual(
             self.system(files=self.with_line(SYSTEM_FILES, 1, "+# version 620.1")), []
         )
+
+    def test_file_list_shorter_than_the_pull_request_stays(self):
+        self.assertEqual(self.spec(changedFiles=3001), [])
+
+    def test_red_gate_fails_without_merging(self):
+        self.gate = [{"id": 1, "status": "completed", "conclusion": "success"}, {"id": 2, "status": "completed", "conclusion": "failure"}]
+        with self.assertRaises(SystemExit):
+            self.spec()
+        self.assertFalse([c for c in self.calls if c[:2] == ("pr", "merge")])
+
+    def test_gate_not_reported_yet_is_awaited(self):
+        answers = [[], [{"id": 1, "status": "queued", "conclusion": None}], self.gate]
+        gh = lambda *args: json.dumps({"check_runs": answers.pop(0)})
+        slept = []
+        bot.wait_for_required_check(SHA, gh, sleep=slept.append)
+        self.assertEqual(len(slept), 2)
+        with self.assertRaises(SystemExit):
+            bot.wait_for_required_check(SHA, lambda *a: json.dumps({"check_runs": []}), sleep=slept.append, polls=3)
 
 
 if __name__ == "__main__":
