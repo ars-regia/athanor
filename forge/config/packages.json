@@ -1,7 +1,6 @@
 {
   "custom_packages": [
     "stage0-bootstrap",
-    "starship",
     "bat",
     "selinux",
     "base-config",
@@ -13,7 +12,6 @@
     "system-tweaks",
     "kernel-profile",
     "matugen",
-    "bibata",
     "calmo",
     "dart-sass",
     "shell-rs",
@@ -36,14 +34,10 @@
     "syft",
     "bpf-linker",
     "astro-toolchain",
-    "sccache",
-    "mold",
     "keylime",
     "recovery",
     "cargo-tools",
-    "just",
     "kernel-forge",
-    "ripgrep-native",
     "athanor-semantic-db",
     "cosmic-comp"
   ],
@@ -58,22 +52,16 @@
     "syft",
     "bpf-linker",
     "astro-toolchain",
-    "sccache",
-    "mold",
-    "cargo-tools",
-    "just"
+    "cargo-tools"
   ],
   "custom_tier1": [
-    "starship",
     "bat",
     "cliphist",
     "ide-bootstrap",
     "system-tweaks",
-    "kernel-profile",
-    "ripgrep-native"
+    "kernel-profile"
   ],
   "custom_tier2": [
-    "bibata",
     "calmo",
     "matugen",
     "dart-sass",
@@ -185,13 +173,16 @@
     "mesa-vulkan-drivers"
   ],
   "upstream_cli": [
+    "bash-color-prompt",
     "btop",
     "eza",
     "fd-find",
     "inotify-tools",
+    "just",
     "nushell",
     "parallel",
     "playerctl",
+    "ripgrep",
     "rsync",
     "sqlite",
     "unzip",
