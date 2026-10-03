@@ -39,6 +39,16 @@ host itself.
 - The GitHub token is a service credential encrypted with the host key and the TPM2
   (`/etc/credstore.encrypted/athanor-runner.github-token`), used only to create and
   remove runner registrations.
+- A suspended host freezes the guest and GitHub cancels its job (2026-10-03: the desktop
+  suspended on idle in the middle of a Kernel Weekly repro). While the registration
+  reports `busy`, `vm.sh` holds a logind sleep inhibitor (`systemd-inhibit --what=sleep
+  --mode=block`), released when the job ends or `vm.sh` exits. An idle guest holds none,
+  so the host still suspends when no job runs. The service runs outside any login
+  session, where logind asks for an administrator password for this action:
+  `50-athanor-runner-inhibit.rules` allows it to the dynamic user `athanor-runner` alone.
+  A block inhibitor stops an idle suspend and makes a user's suspend ask for an
+  administrator password; it does not stop a closed lid or a root `systemctl suspend -i`.
+  A refused inhibitor is logged as a warning on every poll.
 - Pull requests from forks never reach the runner: the self-hosted jobs of
   `kernel-build.yml` skip them, and the repository requires approval for every outside
   contributor.
@@ -67,6 +77,7 @@ token (after `gh auth refresh` or a new PAT) needs `install.sh` again as well.
 ```sh
 sudo systemctl disable --now athanor-runner.service
 sudo rm -rf /etc/systemd/system/athanor-runner.service /usr/local/libexec/athanor-runner \
+  /etc/polkit-1/rules.d/50-athanor-runner-inhibit.rules \
   /etc/credstore.encrypted/athanor-runner.github-token /var/lib/private/athanor-runner \
   /var/log/private/athanor-runner
 sudo systemctl daemon-reload
