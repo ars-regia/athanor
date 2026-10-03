@@ -4,7 +4,7 @@
 # kernel-devel tree extracted from the RPM, kmod for modinfo, openssl and sign-file for
 # the signing. No rust, pahole or koji: a smaller and faster image than the builder, and
 # it does not touch the builder's Containerfile (which is an input of the kernel reuse).
-FROM registry.fedoraproject.org/fedora:43@sha256:15ecc6538eaf7d8a074e08880ce8769a0e2f43f70862a68c01f5fd2738f9a6f6
+FROM registry.fedoraproject.org/fedora:43@sha256:a60334b24af6818e9ccf199d188b5ddef1c3d7f549470b560d9b744c78c2c58b
 
 RUN printf 'install_weak_deps=False\nkeepcache=False\n' >> /etc/dnf/dnf.conf
 

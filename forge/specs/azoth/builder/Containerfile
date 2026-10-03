@@ -5,7 +5,7 @@
 # the LLVM toolchain, which the Nix builder of the forge lacks. build.sh installs the
 # BuildRequires of the pinned spec with `dnf builddep`: only the base is here.
 # The image is pinned by digest: it is the only input the repository does not version.
-FROM registry.fedoraproject.org/fedora:43@sha256:15ecc6538eaf7d8a074e08880ce8769a0e2f43f70862a68c01f5fd2738f9a6f6
+FROM registry.fedoraproject.org/fedora:43@sha256:a60334b24af6818e9ccf199d188b5ddef1c3d7f549470b560d9b744c78c2c58b
 
 # No weak dependencies and no cache: the image stays minimal.
 RUN printf 'install_weak_deps=False\nkeepcache=False\n' >> /etc/dnf/dnf.conf
