@@ -736,9 +736,9 @@ class CheckPlan(Repo):
 
     def test_kernel_pin_files_match_the_bump_workflow(self):
         """The kernel group of kernel-bump.yml regenerates exactly KERNEL_PIN_FILES (O7, O8):
-        its bump-pins artifact plus the two manifest `cp` targets, so the copy cannot drift
-        from what check-plan trusts to recognize a pure pin bump. system/Containerfile is the
-        system group's, in a PR of its own."""
+        its bump-pins artifact plus the files of the bump-prep artifact (the two manifests and
+        the package locks), so the copy cannot drift from what check-plan trusts to recognize
+        a pure pin bump. system/Containerfile is the system group's, in a PR of its own."""
         script = SCRIPT.read_text()
         nvidia_line = re.search(r"^NVIDIA_PIN_FILES=\(.*\)$", script, re.M).group(0)
         kernel_line = re.search(r"^KERNEL_PIN_FILES=\(.*\)$", script, re.M).group(0)
@@ -749,8 +749,9 @@ class CheckPlan(Repo):
         text = (ROOT / ".github/workflows/kernel-bump.yml").read_text()
         block = re.search(r"name: bump-pins\n(?:.*\n)*?          path: \|\n((?:            .*\n)+)", text).group(1)
         check_paths = {line.strip() for line in block.splitlines()} - {"body.md"}
-        cp_targets = set(re.findall(r"^\s*cp \S+ (\S+)$", text, re.M))
-        self.assertEqual(check_paths | cp_targets, kernel_pin_files)
+        block = re.search(r"name: bump-prep\n(?:.*\n)*?          path: \|\n((?:            .*\n)+)", text).group(1)
+        prep_paths = {line.strip() for line in block.splitlines()} - {"prep.md", "prep.log", "prep-outcome"}
+        self.assertEqual(check_paths | prep_paths, kernel_pin_files)
 
 
 if __name__ == "__main__":

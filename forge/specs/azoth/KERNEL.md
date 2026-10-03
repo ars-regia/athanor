@@ -25,7 +25,9 @@ directory e come si usa.
 | `build-inputs.py` | gli input della build come JSON: predicato dell'attestazione dei pin e chiave del riuso in CI |
 | `bump.py` | il bot di bump, in due gruppi (`--group kernel\|system`): `check` (JSON delle modifiche) e `apply` (gruppo kernel: riscrive pins.env, i `FROM` dei Containerfile del kernel e la tabella dei pin qui sotto; gruppo system: i `FROM` di `system/Containerfile` e i lock NVIDIA ripubblicati; stampa il corpo della PR); `verify` controlla i lock NVIDIA |
 | `nvr.sh` | l'NVR del kernel derivato dai pin, lo stesso che rpmbuild produce e che i tag OCI usano |
-| `builder/Containerfile` | l'ambiente: Fedora pinnata per digest piu' la toolchain LLVM |
+| `builder/Containerfile`, `builder/toolchain.packages`, `builder/toolchain.lock` | l'ambiente: Fedora pinnata per digest piu' la toolchain LLVM e le BuildRequires dello spec, ogni RPM per sha256 nel lock |
+| `lock.sh`, `boot/*.packages`, `boot/*.lock`, `nvidia/toolchain.*` | i lock degli ambienti, uno per stadio di Containerfile: `lock.sh generate` riscrive quelli i cui input sono cambiati (base, lista dei pacchetti, e per il builder SRPM pinnato e bcond; `--force`: anche a input fermi), `lock.sh check` li controlla tutti in `build.sh` |
+| `bconds.sh` | i bcond di kernel.spec, gli stessi per `dnf builddep`, `rpmbuild` e il lock |
 | `boot.sh` | la boot matrix: dal kernel-core a quattro avvii QEMU con le asserzioni della spec |
 | `boot/Containerfile`, `boot/init` | l'ambiente della boot matrix (qemu, OVMF, shim, ukify, Firecracker, strumenti di benchmark) e il PID 1 dell'initramfs di prova |
 | `microvm/kernel-local`, `microvm/azoth-microvm.spec` | il kernel guest per le MicroVM (spec, sezione 9): frammento sopra x86_64_defconfig + kvm_guest.config e lo spec minimo che mette vmlinux, bzImage, config e release in `/usr/lib/athanor/microvm/` |
@@ -52,7 +54,7 @@ directory e come si usa.
 ## Uso locale
 
 ```sh
-podman build -t localhost/azoth-builder forge/specs/azoth/builder
+podman build -t localhost/azoth-builder -f forge/specs/azoth/builder/Containerfile forge/specs/azoth
 mkdir -p "$HOME/.cache/azoth" out
 podman run --rm -v "$PWD:/forge" -v "$HOME/.cache/azoth:/var/cache/azoth" \
   -w /forge localhost/azoth-builder \
@@ -81,7 +83,7 @@ Le copie da rivedere finiscono in `out/refreshed/`, da copiare sotto
 ## Boot matrix
 
 ```sh
-podman build -t localhost/azoth-boot forge/specs/azoth/boot
+podman build -t localhost/azoth-boot -f forge/specs/azoth/boot/Containerfile forge/specs/azoth
 podman run --rm --device /dev/kvm -v "$PWD:/forge" -w /forge localhost/azoth-boot bash forge/specs/azoth/boot.sh --rpms /forge/out --out /forge/boot-out
 ```
 
@@ -127,7 +129,7 @@ l'initramfs: i numeri misurerebbero l'emulatore.
 ## Moduli NVIDIA
 
 ```sh
-podman build -t localhost/azoth-nvidia forge/specs/azoth/nvidia
+podman build -t localhost/azoth-nvidia -f forge/specs/azoth/nvidia/Containerfile forge/specs/azoth
 podman run --rm -v "$PWD:/forge" -v "$HOME/.cache/azoth:/var/cache/azoth" \
   -w /forge localhost/azoth-nvidia \
   bash forge/specs/azoth/nvidia.sh build --driver open --devel /forge/out/devel --out /forge/nvidia-out

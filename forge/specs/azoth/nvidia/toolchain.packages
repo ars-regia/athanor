@@ -1,0 +1,4 @@
+# The LLVM toolchain the kernel is compiled with (kCFI), Kbuild from the kernel-devel tree
+# extracted from the RPM, kmod for modinfo, openssl and sign-file for the signing.
+clang lld llvm make gcc elfutils-libelf-devel
+rpm cpio curl git kmod openssl findutils diffutils python3
