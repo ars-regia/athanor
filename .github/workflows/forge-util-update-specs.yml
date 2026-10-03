@@ -44,20 +44,35 @@ jobs:
         with:
           token: ${{ secrets.SPECS_UPDATE_TOKEN }}
 
-      - name: "🛡️ Zero-Trust Autonomous Dependency Injector"
+      # fetch_sources.sh --pin expands the Source URLs with rpmspec.
+      - name: Install rpmspec
+        run: sudo apt-get install -y --no-install-recommends rpm
+
+      # The pull request this opens is built by Spec Build Check, which arms auto-merge for a
+      # bump that keeps the leftmost non-zero version component (forge/scripts/bot_automerge.sh).
+      - name: Update the watched specs (forge/scripts/zero_trust_updater.py)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "=== 🤖 Starting Python Zero-Trust Updater ==="
-          python3 scripts/zero_trust_updater.py
+        run: python3 scripts/zero_trust_updater.py out/spec-updates.md
+
+      # GitHub keeps auto-merge armed across the bot's pushes: off before the new head lands,
+      # Spec Build Check arms it again once that head is built.
+      - name: Turn off auto-merge on the open update pull request
+        if: hashFiles('forge/out/spec-updates.md') != ''
+        env:
+          GH_TOKEN: ${{ secrets.SPECS_UPDATE_TOKEN }}
+        run: bash scripts/bot_automerge.sh disarm chore/update-specs-zero-trust
 
       - name: Create Pull Request
-        if: env.updates == 'true'
+        if: hashFiles('forge/out/spec-updates.md') != ''
         uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
         with:
           token: ${{ secrets.SPECS_UPDATE_TOKEN }}
-          commit-message: "chore(deps): auto-update spec versions and vendor offline tarballs (Zero-Trust)"
-          title: "chore(deps): auto-update specs & vendor dependencies"
+          commit-message: "chore(forge): update the watched specs to their latest upstream releases"
+          title: "chore(forge): update the watched specs to their latest upstream releases"
+          body-path: forge/out/spec-updates.md
+          # The report stays out of the commit: the bot changes specs and their manifests only.
+          add-paths: forge/specs/**
           branch: "chore/update-specs-zero-trust"
           base: ${{ github.ref_name }}
           delete-branch: true
