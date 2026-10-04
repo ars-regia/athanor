@@ -161,3 +161,59 @@ impl AttestationVerifier {
         Err(anyhow!("Cryptographic verification failed: Signature does not match remote public key"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use p256::ecdsa::signature::Signer;
+    use p384::pkcs8::{EncodePublicKey, LineEnding};
+
+    const MESSAGE: &[u8] = b"launch measurement";
+
+    fn verifier() -> AttestationVerifier {
+        AttestationVerifier::new(AttestationConfig::default())
+    }
+
+    fn p384_fixture() -> (Vec<u8>, String) {
+        let key = p384::ecdsa::SigningKey::from_slice(&[0x17; 48]).unwrap();
+        let signature: P384Signature = key.sign(MESSAGE);
+        let pem = key.verifying_key().to_public_key_pem(LineEnding::LF).unwrap();
+        (signature.to_bytes().to_vec(), pem)
+    }
+
+    fn p256_fixture() -> (Vec<u8>, String) {
+        let key = p256::ecdsa::SigningKey::from_slice(&[0x29; 32]).unwrap();
+        let signature: P256Signature = key.sign(MESSAGE);
+        let pem = key.verifying_key().to_public_key_pem(LineEnding::LF).unwrap();
+        (signature.to_bytes().to_vec(), pem)
+    }
+
+    #[test]
+    fn a_p384_signature_verifies_against_its_pem_key() {
+        let (signature, pem) = p384_fixture();
+        verifier().verify_signature_p384_or_p256(MESSAGE, &signature, pem.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn a_p256_signature_verifies_against_its_pem_key() {
+        let (signature, pem) = p256_fixture();
+        verifier().verify_signature_p384_or_p256(MESSAGE, &signature, pem.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn a_signature_over_another_message_is_rejected() {
+        for (signature, pem) in [p384_fixture(), p256_fixture()] {
+            assert!(verifier()
+                .verify_signature_p384_or_p256(b"another measurement", &signature, pem.as_bytes())
+                .is_err());
+        }
+    }
+
+    #[test]
+    fn a_signature_is_rejected_against_a_key_of_the_other_curve() {
+        let (p384_signature, p384_pem) = p384_fixture();
+        let (p256_signature, p256_pem) = p256_fixture();
+        assert!(verifier().verify_signature_p384_or_p256(MESSAGE, &p384_signature, p256_pem.as_bytes()).is_err());
+        assert!(verifier().verify_signature_p384_or_p256(MESSAGE, &p256_signature, p384_pem.as_bytes()).is_err());
+    }
+}
