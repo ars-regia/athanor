@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-sysmon-ebpf
 Version:        1.0.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        eBPF System Monitoring & Telemetry Daemon for Athanor OS
 
 License:        GPL-2.0-or-later
@@ -34,6 +34,9 @@ install -m 0755 target/release/%{name} %{buildroot}/usr/bin/%{name}
 /usr/bin/%{name}
 
 %changelog
+* Fri Oct 02 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
+- Move to aya 0.14: wait for perf events on the buffer file descriptor instead of polling it
+
 * Wed Aug 05 2026 Athanor Forge <forge@athanor.os> - 1.0.0-1
 - Initial release of athanor-sysmon-ebpf spec
 
