@@ -317,6 +317,7 @@ dependencies = [
  "athanor-compositor-client",
  "athanor-i18n",
  "athanor-layout",
+ "athanor-services",
  "athanor-style",
  "athanor-trust-state",
  "athanor-unit",
@@ -327,6 +328,7 @@ dependencies = [
  "libc",
  "libpulse-binding",
  "libpulse-glib-binding",
+ "tokio",
  "tracing",
 ]
 

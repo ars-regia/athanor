@@ -157,6 +157,13 @@ pub fn get_i32(props: &Props, name: &str) -> Option<i32> {
     }
 }
 
+pub fn get_i64(props: &Props, name: &str) -> Option<i64> {
+    match value(props, name)? {
+        Value::I64(number) => Some(*number),
+        _ => None,
+    }
+}
+
 pub fn get_u64(props: &Props, name: &str) -> Option<u64> {
     match value(props, name)? {
         Value::U64(number) => Some(*number),
