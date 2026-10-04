@@ -162,7 +162,7 @@ impl<'de, T: Deserialize<'de> + Type> Visitor<'de> for HintVisitor<T> {
 }
 
 /// A desktop file id (`org.gnome.Nautilus`), without the `.desktop` suffix.
-fn is_desktop_id(id: &str) -> bool {
+pub(crate) fn is_desktop_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 255
         && !id.starts_with('.')

@@ -67,7 +67,7 @@ fn admits_path(cgroup: &str, unit: &str) -> bool {
 }
 
 /// A `.slice`, or the `user@<uid>.service` systemd gives the user manager itself.
-fn is_slice_or_user_manager(component: &str) -> bool {
+pub(crate) fn is_slice_or_user_manager(component: &str) -> bool {
     component.ends_with(".slice")
         || component
             .strip_prefix("user@")
