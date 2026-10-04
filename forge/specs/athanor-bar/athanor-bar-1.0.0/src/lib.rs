@@ -3,7 +3,6 @@
 //! BlueZ, the sound server and UPower, and the trust shield. The binary draws it.
 
 pub mod audio;
-pub mod bluetooth;
 pub mod clock;
 pub mod dbusmenu;
 pub mod keyboard;

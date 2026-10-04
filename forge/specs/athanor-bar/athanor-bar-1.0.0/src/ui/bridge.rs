@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use athanor_services::Buses;
 use gtk4::glib;
 use tokio::runtime::Handle;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 
 thread_local! {
     static RUNTIME: RefCell<Option<(Handle, Buses)>> = const { RefCell::new(None) };
@@ -37,6 +37,16 @@ pub fn follow<T: Clone + 'static>(mut rx: watch::Receiver<T>, apply: impl Fn(&T)
             if rx.changed().await.is_err() {
                 return;
             }
+        }
+    });
+}
+
+/// Hands each item of the model's channel to `handle` on the main context, until the model
+/// ends.
+pub fn drain<T: 'static>(mut rx: mpsc::Receiver<T>, handle: impl Fn(T) + 'static) {
+    glib::spawn_future_local(async move {
+        while let Some(item) = rx.recv().await {
+            handle(item);
         }
     });
 }

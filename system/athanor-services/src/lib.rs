@@ -9,6 +9,7 @@
 //! aborting at run time.
 
 pub mod battery;
+pub mod bluetooth;
 pub mod mirror;
 pub mod props;
 pub mod runtime;
