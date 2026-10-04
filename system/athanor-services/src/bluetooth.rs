@@ -583,6 +583,9 @@ async fn run(
     // The value of `Pairable` last asked of BlueZ and not yet seen to change anything: asked
     // again only after the mirror changes, so a BlueZ that refuses is not asked in a loop.
     let mut pairable_tried: Option<bool> = None;
+    // The running Pair was cancelled by the model at the person's request: its failure is
+    // no refusal.
+    let mut cancelled = false;
     let mut exit = ExitGuard {
         handle: handle.clone(),
         connection: connection.clone(),
@@ -609,6 +612,7 @@ async fn run(
                             _ => false,
                         };
                         if ends_it {
+                            cancelled = true;
                             handle.spawn(cancel_pairing(connection.clone(), device));
                         }
                     }
@@ -632,7 +636,8 @@ async fn run(
                     None => std::future::pending().await,
                 }
             }, if running.is_some() => {
-                let counts = running.take().is_some_and(|(job, _)| job.counts());
+                let counts = running.take().is_some_and(|(job, _)| job.counts() && !(job.is_pair() && cancelled));
+                cancelled = false;
                 if let Err(err) = result {
                     tracing::warn!(error = %err, "BlueZ refused or did not answer");
                     if counts {
@@ -1528,7 +1533,10 @@ mod tests {
             log.calls.iter().any(|call| call == &format!("CancelPairing {PHONE}"))
         })
         .await;
-        wait_for(&mut rig.states, |state| !state.powered).await;
+        // The switch-off runs after the cancelled Pair returned: that Pair is the person's own
+        // doing, not a refusal.
+        let state = wait_for(&mut rig.states, |state| !state.powered).await;
+        assert_eq!(state.refused, 0);
     }
 
     #[tokio::test(flavor = "current_thread")]
