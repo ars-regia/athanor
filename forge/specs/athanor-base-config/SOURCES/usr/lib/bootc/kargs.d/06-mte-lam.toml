@@ -1,6 +1,0 @@
-# Athanor OS Memory Hardware Protections (ARM MTE & Intel LAM)
-kargs = [
-    "arm64.mte=on",
-    "lam=on"
-]
-match-architectures = ["x86_64", "aarch64"]
