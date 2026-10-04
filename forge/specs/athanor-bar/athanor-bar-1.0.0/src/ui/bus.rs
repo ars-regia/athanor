@@ -35,7 +35,7 @@ pub fn call(
     )
 }
 
-/// Runs a call the person asked for. A failure is logged as by [`spawn`], then `failed` runs:
+/// Runs a call the person asked for. A failure is logged as by [`refused`], then `failed` runs:
 /// the module shows its service's state again, since no change arrives that would put a
 /// switch or a slider back, and says in the popover that the action did not complete.
 pub fn act(

@@ -23,8 +23,9 @@ use tokio::runtime::Handle;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::timeout;
 use zbus::message::Header;
+use zbus::proxy::MethodFlags;
 use zbus::zvariant::{Array, ObjectPath, Value};
-use zbus::{Connection, DBusError, Message};
+use zbus::{Connection, DBusError, Message, Proxy};
 
 use crate::mirror::{self, Snapshot, Source, TIMEOUT};
 use crate::props::{self, Objects, Props};
@@ -54,6 +55,8 @@ pub const REPLY_TIMEOUT: Duration = Duration::from_secs(120);
 /// A call that waits for the person: a connection polkit asks about. `AddAndActivate` and
 /// `ActivateConnection` return when the activation has started, not when it has finished, so
 /// this bounds a stalled NetworkManager and nothing else.
+/// Every call to NetworkManager (but the agent's own) allows interactive authorisation, so
+/// polkit can ask: a refused prompt is a refusal, not a silent failure.
 const INTERACTIVE_TIMEOUT: Duration = Duration::from_secs(120);
 /// What the shell has not taken yet: a request is refused rather than queued behind one.
 const PROMPTS: usize = 4;
@@ -520,8 +523,7 @@ pub fn secrets_reply(password: &str) -> Option<BTreeMap<String, Props>> {
     )]))
 }
 
-/// What the person can ask of NetworkManager.
-#[derive(Debug)]
+/// What the person can ask of NetworkManager. `Debug` never prints a password.
 pub enum NetworkCommand {
     /// The Wi-Fi radio.
     Wireless(bool),
@@ -542,6 +544,32 @@ pub enum NetworkCommand {
     Deactivate(String),
     /// The settings of a saved connection, read now; `None` when they cannot be read.
     Details(String, oneshot::Sender<Option<ConnectionInfo>>),
+}
+
+impl std::fmt::Debug for NetworkCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Wireless(on) => f.debug_tuple("Wireless").field(on).finish(),
+            Self::Airplane(on) => f.debug_tuple("Airplane").field(on).finish(),
+            Self::Join { network, password } => f
+                .debug_struct("Join")
+                .field("network", network)
+                .field("password", &password.as_ref().map(|_| "<redacted>"))
+                .finish(),
+            Self::Activate {
+                connection,
+                device,
+                specific,
+            } => f
+                .debug_struct("Activate")
+                .field("connection", connection)
+                .field("device", device)
+                .field("specific", specific)
+                .finish(),
+            Self::Deactivate(active) => f.debug_tuple("Deactivate").field(active).finish(),
+            Self::Details(path, _) => f.debug_tuple("Details").field(path).finish(),
+        }
+    }
 }
 
 /// What NetworkManager asks the shell, through the agent: a password for the page
@@ -1059,9 +1087,12 @@ async fn read_info(connection: &Connection, owner: &str, path: &str) -> Option<C
 impl Context {
     async fn set_manager(&self, property: &str, on: bool) -> zbus::Result<()> {
         let args = (NM, property, Value::from(on));
-        let call =
-            self.connection
-                .call_method(Some(NM), NM_PATH, Some(props::PROPERTIES), "Set", &args);
+        let call = async {
+            Proxy::new(&self.connection, NM, NM_PATH, props::PROPERTIES)
+                .await?
+                .call_with_flags::<_, _, ()>("Set", MethodFlags::AllowInteractiveAuth.into(), &args)
+                .await
+        };
         no_answer(timeout(TIMEOUT, call).await).map(|_| ())
     }
 }
@@ -1074,7 +1105,6 @@ async fn execute(context: Context, job: Job) -> zbus::Result<()> {
 }
 
 async fn command_of(context: &Context, command: NetworkCommand) -> zbus::Result<()> {
-    let manager = |method: &'static str| (Some(NM), NM_PATH, Some(NM), method);
     match command {
         NetworkCommand::Wireless(on) => context.set_manager("WirelessEnabled", on).await,
         NetworkCommand::Airplane(on) => {
@@ -1089,10 +1119,16 @@ async fn command_of(context: &Context, command: NetworkCommand) -> zbus::Result<
                 .ok_or_else(|| failure("no Wi-Fi device"))?;
             let args = add_and_activate(&network, password.as_deref(), device)
                 .ok_or_else(|| failure("not an object path"))?;
-            let (destination, path, interface, method) = manager("AddAndActivateConnection");
-            let call = context
-                .connection
-                .call_method(destination, path, interface, method, &args);
+            let call = async {
+                Proxy::new(&context.connection, NM, NM_PATH, NM)
+                    .await?
+                    .call_with_flags::<_, _, ()>(
+                        "AddAndActivateConnection",
+                        MethodFlags::AllowInteractiveAuth.into(),
+                        &args,
+                    )
+                    .await
+            };
             no_answer(timeout(INTERACTIVE_TIMEOUT, call).await).map(|_| ())
         }
         NetworkCommand::Activate {
@@ -1102,18 +1138,30 @@ async fn command_of(context: &Context, command: NetworkCommand) -> zbus::Result<
         } => {
             let args = activate(&connection, &device, &specific)
                 .ok_or_else(|| failure("not an object path"))?;
-            let (destination, path, interface, method) = manager("ActivateConnection");
-            let call = context
-                .connection
-                .call_method(destination, path, interface, method, &args);
+            let call = async {
+                Proxy::new(&context.connection, NM, NM_PATH, NM)
+                    .await?
+                    .call_with_flags::<_, _, ()>(
+                        "ActivateConnection",
+                        MethodFlags::AllowInteractiveAuth.into(),
+                        &args,
+                    )
+                    .await
+            };
             no_answer(timeout(INTERACTIVE_TIMEOUT, call).await).map(|_| ())
         }
         NetworkCommand::Deactivate(active) => {
             let args = deactivate(&active).ok_or_else(|| failure("not an object path"))?;
-            let (destination, path, interface, method) = manager("DeactivateConnection");
-            let call = context
-                .connection
-                .call_method(destination, path, interface, method, &args);
+            let call = async {
+                Proxy::new(&context.connection, NM, NM_PATH, NM)
+                    .await?
+                    .call_with_flags::<_, _, ()>(
+                        "DeactivateConnection",
+                        MethodFlags::AllowInteractiveAuth.into(),
+                        &args,
+                    )
+                    .await
+            };
             no_answer(timeout(INTERACTIVE_TIMEOUT, call).await).map(|_| ())
         }
         NetworkCommand::Details(path, reply) => {
@@ -1608,12 +1656,30 @@ mod tests {
         joined: Vec<(Vec<u8>, Option<String>, Option<String>)>,
         /// `DeactivateConnection` is refused.
         refuse_deactivate: bool,
+        /// Methods and property sets that came with the interactive-authorisation flag.
+        interactive: Vec<String>,
+        /// ... and those that came without.
+        plain: Vec<String>,
     }
 
     type Shared = Arc<Mutex<Log>>;
 
     fn note(log: &Shared, line: String) {
         log.lock().unwrap().calls.push(line);
+    }
+
+    fn flag(log: &Shared, header: &Header<'_>, what: &str) {
+        let interactive = header
+            .primary()
+            .flags()
+            .contains(zbus::message::Flags::AllowInteractiveAuth);
+        let mut log = log.lock().unwrap();
+        if interactive {
+            &mut log.interactive
+        } else {
+            &mut log.plain
+        }
+        .push(what.to_owned());
     }
 
     struct FakeManager {
@@ -1629,7 +1695,9 @@ mod tests {
             connection: HashMap<String, HashMap<String, OwnedValue>>,
             device: ObjectPath<'_>,
             specific: ObjectPath<'_>,
+            #[zbus(header)] header: Header<'_>,
         ) -> (OwnedObjectPath, OwnedObjectPath) {
+            flag(&self.log, &header, "AddAndActivateConnection");
             let wireless = connection.get("802-11-wireless");
             let security = connection.get(SECURITY_SETTING);
             let text = |props: Option<&HashMap<String, OwnedValue>>, key: &str| {
@@ -1657,14 +1725,21 @@ mod tests {
             connection: ObjectPath<'_>,
             device: ObjectPath<'_>,
             specific: ObjectPath<'_>,
+            #[zbus(header)] header: Header<'_>,
         ) -> OwnedObjectPath {
+            flag(&self.log, &header, "ActivateConnection");
             note(
                 &self.log,
                 format!("ActivateConnection {connection} {device} {specific}"),
             );
             OwnedObjectPath::try_from(ACTIVE_PATH).expect("path")
         }
-        fn deactivate_connection(&self, active: ObjectPath<'_>) -> zbus::fdo::Result<()> {
+        fn deactivate_connection(
+            &self,
+            active: ObjectPath<'_>,
+            #[zbus(header)] header: Header<'_>,
+        ) -> zbus::fdo::Result<()> {
+            flag(&self.log, &header, "DeactivateConnection");
             note(&self.log, format!("DeactivateConnection {active}"));
             if self.log.lock().unwrap().refuse_deactivate {
                 return Err(zbus::fdo::Error::Failed("refused".into()));
@@ -1676,7 +1751,10 @@ mod tests {
             self.wireless
         }
         #[zbus(property)]
-        fn set_wireless_enabled(&mut self, on: bool) {
+        fn set_wireless_enabled(&mut self, on: bool, #[zbus(header)] header: Option<Header<'_>>) {
+            if let Some(header) = header {
+                flag(&self.log, &header, "WirelessEnabled");
+            }
             note(&self.log, format!("WirelessEnabled {on}"));
             self.wireless = on;
         }
@@ -2148,6 +2226,63 @@ mod tests {
                 format!("DeactivateConnection {ACTIVE_PATH}"),
             ]
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn every_call_to_networkmanager_allows_interactive_authorization() {
+        let mut rig = rig(REPLY_TIMEOUT).await;
+        let state = wait_for(&mut rig.states, |state| state.wifi.is_some()).await;
+        let lab = state.wifi.unwrap().networks[0].clone();
+        rig.commands
+            .send(NetworkCommand::Join {
+                network: lab,
+                password: None,
+            })
+            .unwrap();
+        rig.commands
+            .send(NetworkCommand::Activate {
+                connection: SAVED.into(),
+                device: WLAN.into(),
+                specific: AP_HOME.into(),
+            })
+            .unwrap();
+        rig.commands
+            .send(NetworkCommand::Deactivate(ACTIVE_PATH.into()))
+            .unwrap();
+        rig.commands.send(NetworkCommand::Wireless(false)).unwrap();
+        until(&rig.log, |log| log.interactive.len() + log.plain.len() >= 4).await;
+        let log = rig.log.lock().unwrap();
+        assert!(log.plain.is_empty(), "without the flag: {:?}", log.plain);
+        assert_eq!(
+            log.interactive,
+            [
+                "AddAndActivateConnection",
+                "ActivateConnection",
+                "DeactivateConnection",
+                "WirelessEnabled"
+            ]
+        );
+    }
+
+    #[test]
+    fn debug_of_a_command_never_shows_the_password() {
+        let network = Network {
+            ssid: b"Lab".to_vec(),
+            label: "Lab".into(),
+            strength: 50,
+            security: Security::Personal { sae: false },
+            access_point: AP_LAB.into(),
+            link: Link::Idle,
+            active: None,
+            saved: None,
+        };
+        let command = NetworkCommand::Join {
+            network,
+            password: Some("hunter2".into()),
+        };
+        let shown = format!("{command:?}");
+        assert!(!shown.contains("hunter2"), "{shown}");
+        assert!(shown.contains("Lab"));
     }
 
     #[tokio::test(flavor = "current_thread")]
