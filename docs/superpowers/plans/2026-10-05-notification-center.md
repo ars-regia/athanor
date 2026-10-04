@@ -17,7 +17,7 @@ The code read on 2026-10-05 contradicts three details of the approved spec. Each
 1. **Paths, for Landlock.** `athanor-shelld` writes beneath one state directory today (`sandbox::restrict(read, write)`, `system/athanor-unit/src/sandbox.rs:31`), `$XDG_STATE_HOME/athanor/shelld`. Writing `$XDG_STATE_HOME/athanor/notifications.json` by a rename, and `$XDG_CONFIG_HOME/athanor/notifications.conf`, would need write access to the whole `athanor` directories, which hold the other components' state and configuration. The plan uses:
    - history: `$XDG_STATE_HOME/athanor/shelld/notifications.json`;
    - settings: `$XDG_CONFIG_HOME/athanor/notifications/notifications.conf`;
-   - rules: `$XDG_CONFIG_HOME/athanor/notifications/apps/<application id>.conf` and `apps/other.conf`.
+   - rules: `$XDG_CONFIG_HOME/athanor/notifications/apps/<application id>.conf`, and `other.conf` beside `notifications.conf` for applications without a proven identity, so that an application whose id is `other` cannot take their place.
 2. **The fullscreen trigger is observed by the bar.** `athanor-compositor-client` connects through a `gdk::Display` (`src/connection.rs:135`), so linking it would bring GTK into the headless daemon (SH4) and give it a Wayland connection it does not have today. The bar already holds that client: it reports `ReportFullscreen(b available, b active)` to the daemon, a method of NC8 admitted for `athanor-bar` only. While no bar is connected the trigger is unavailable, as NC6 already says for a trigger the session cannot observe.
 3. **Opening the center on a row.** The summary popup (NC6) and the popup's "Reply" (NC12) open the center, which `ToggleNotifications()` cannot do without closing an open one. They use CC2's `Show(page)` with the page ids `notifications` and `notifications:<id>`, the second focusing that row's reply field. No new method.
 
@@ -61,7 +61,7 @@ The implementation branch is `notification-center`, from `control-center` at the
 | 0 Spec amendments                            | approval of this plan  | A     |
 | 1 Identity                                   | —                      | A     |
 | 2 Rules and settings                         | —                      | A     |
-| 3 History                                    | 1                      | B     |
+| 3 History                                    | 1, 2                   | B     |
 | 4 Do not disturb                             | 2                      | B     |
 | 5 Policy, interface and wire                 | 1–4, CC plan Task 1    | C     |
 | 6 Fullscreen reported by the bar             | 5                      | D     |
@@ -118,7 +118,7 @@ Written below as `cargo test -p athanor-shelld`, with the same environment.
   - `#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)] pub enum Identity { App(String), Other }`
   - `pub fn from_cgroup(cgroup: &str) -> Identity`
   - `pub fn of_pid(proc_root: &Path, pid: u32) -> Identity` — a read error is `Other`, logged at debug.
-  - `impl Identity { pub fn key(&self) -> &str }` — the application id, or `"other"` (the rules file name, Task 2).
+  - `impl Identity { pub fn key(&self) -> &str }` — the application id, or `""` for `Other`, as on the bus and the wire.
 
 Rules of `from_cgroup`, from systemd's desktop-environment convention, where `-` inside a name part is escaped `\x2d`, so splitting on `-` is unambiguous:
 
@@ -243,13 +243,17 @@ impl Rules {
     pub fn settings(&mut self) -> Settings;
     pub fn set_rule(&mut self, app: &str, key: &str, value: &str) -> Result<(), RuleError>;
     pub fn set_setting(&mut self, key: &str, value: &str) -> Result<(), RuleError>;
-    pub fn invalidate(&mut self, file_name: &OsStr) -> Option<String>; // the app key that changed
+    /// `relative` is a path under the configuration directory, as `watch` sends it.
+    pub fn invalidate(&mut self, relative: &Path) -> Option<Changed>;
 }
+#[derive(Debug, PartialEq, Eq)]
+pub enum Changed { Rule(String /* "" = Other */), Settings }
+#[derive(Debug)]
 pub enum RuleError { BadApp, BadKey, BadValue, Io(std::io::Error) }
-pub async fn watch(dir: PathBuf, changed: tokio::sync::mpsc::Sender<OsString>) -> std::io::Result<()>;
+pub async fn watch(dir: PathBuf, changed: tokio::sync::mpsc::Sender<PathBuf>) -> std::io::Result<()>;
 ```
 
-File format: `key=value` lines; blank lines and lines starting with `#` ignored; whitespace around key and value trimmed. Values: booleans `true`/`false`; `lock_screen` `all`/`name`/`none`; `timeout` a whole number of seconds 1–3600 or `app`; `retention` `1`, `7`, `30` or `forever`; `popup_corner` `bar`, `top-start`, `top-end`, `bottom-start`, `bottom-end`; `schedule` `HH:MM-HH:MM` (start may be after end: the window crosses midnight; equal start and end is invalid); `schedule_days` a comma list of `mon`…`sun`, at least one. `bypass_dnd` in `other.conf` is parsed and ignored by the policy (Task 5). Writes go to a temporary file in the same directory and a rename; the other lines of the file are kept in their order; mode 0600. `set_rule` refuses an `app` that fails `is_desktop_id` and is not `other`, so no path leaves `apps/`. `watch` uses `nix::sys::inotify` on `apps/` and on the settings directory (`IN_CLOSE_WRITE | IN_MOVED_TO | IN_DELETE`) through `tokio::io::unix::AsyncFd`, and sends each changed file name.
+File format: `key=value` lines; blank lines and lines starting with `#` ignored; whitespace around key and value trimmed. Values: booleans `true`/`false`; `lock_screen` `all`/`name`/`none`; `timeout` a whole number of seconds 1–3600 or `app`; `retention` `1`, `7`, `30` or `forever`; `popup_corner` `bar`, `top-start`, `top-end`, `bottom-start`, `bottom-end`; `schedule` `HH:MM-HH:MM` (start may be after end: the window crosses midnight; equal start and end is invalid); `schedule_days` a comma list of `mon`…`sun`, at least one. `bypass_dnd` in `other.conf` is parsed and ignored by the policy (Task 5). Writes go to a temporary file in the same directory and a rename; the other lines of the file are kept in their order; mode 0600. `set_rule("", …)` writes `other.conf`; any other `app` that fails `is_desktop_id` is refused, so no path leaves `apps/`. `set_setting` writes `notifications.conf`. `watch` uses `nix::sys::inotify` on the configuration directory and on its `apps/` (`IN_CLOSE_WRITE | IN_MOVED_TO | IN_DELETE`) through `tokio::io::unix::AsyncFd`, and sends each changed path relative to the configuration directory: `notifications.conf`, `other.conf` or `apps/<id>.conf`. Each file is read when first needed and cached until `invalidate`.
 
 - [ ] **Step 1: Write the failing tests** in `src/rules.rs`:
 
@@ -303,12 +307,17 @@ fn set_rule_keeps_other_lines_and_refuses_paths() {
     let mode = std::os::unix::fs::PermissionsExt::mode(
         &std::fs::metadata(dir.join("apps/org.example.Chat.conf")).expect("meta").permissions());
     assert_eq!(mode & 0o777, 0o600);
-    for app in ["../../.bashrc", "a/b", "", ".hidden"] {
+    for app in ["../../.bashrc", "a/b", ".hidden", "other.conf/../../x"] {
         assert!(matches!(rules.set_rule(app, "allowed", "false"), Err(RuleError::BadApp)), "{app}");
     }
     assert!(matches!(rules.set_rule("org.example.Chat", "colour", "red"), Err(RuleError::BadKey)));
     assert!(matches!(rules.set_rule("org.example.Chat", "allowed", "maybe"), Err(RuleError::BadValue)));
     assert_eq!(std::fs::read_dir(&dir).expect("ls").count(), 1, "nothing written outside apps/");
+    rules.set_rule("", "popups", "false").expect("other");
+    assert_eq!(std::fs::read_to_string(dir.join("other.conf")).expect("read"), "popups=false\n");
+    rules.set_rule("other", "popups", "true").expect("an application named other");
+    assert!(dir.join("apps/other.conf").exists());
+    assert!(!rules.rule(&Identity::Other).popups, "Other's rule is not the application's");
     std::fs::remove_dir_all(dir).expect("cleanup");
 }
 
@@ -323,8 +332,9 @@ async fn a_file_changed_on_disk_is_read_again() {
     tokio::spawn(watch(dir.clone(), tx));
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     std::fs::write(dir.join("apps/org.example.Chat.conf"), "allowed=false\n").expect("write");
-    let name = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await.expect("event").expect("name");
-    assert_eq!(rules.invalidate(&name).as_deref(), Some("org.example.Chat"));
+    let path = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await.expect("event").expect("path");
+    assert_eq!(path, Path::new("apps/org.example.Chat.conf"));
+    assert_eq!(rules.invalidate(&path), Some(Changed::Rule("org.example.Chat".into())));
     assert!(!rules.rule(&chat).allowed);
     std::fs::remove_dir_all(dir).expect("cleanup");
 }
@@ -389,7 +399,7 @@ fn temp(name: &str) -> PathBuf {
 }
 
 fn held(store: &mut Store, summary: &str, transient: bool, time: i64) -> u32 {
-    let mut content = crate::store::tests::content(summary);
+    let mut content = crate::store::tests::content(summary, Urgency::Normal, 5_000);
     content.transient = transient;
     store.notify(content, 0, 0, time, Identity::App("org.example.Chat".into()), ":1.7".into()).notification.id
 }
@@ -398,10 +408,10 @@ fn held(store: &mut Store, summary: &str, transient: bool, time: i64) -> u32 {
 fn a_saved_history_reads_back_without_transients_or_images() {
     let dir = temp("roundtrip");
     let path = dir.join("notifications.json");
-    let mut store = Store::new();
+    let mut store = Store::new(false);
     held(&mut store, "kept", false, 100);
     held(&mut store, "transient", true, 101);
-    let mut pixels = crate::store::tests::content("picture");
+    let mut pixels = crate::store::tests::content("picture", Urgency::Normal, 5_000);
     pixels.visual = Visual::Pixels(crate::image::tests::one_pixel());
     store.notify(pixels, 0, 0, 102, Identity::Other, ":1.8".into());
     save(&path, &store, "bus-a").expect("save");
@@ -417,7 +427,7 @@ fn a_saved_history_reads_back_without_transients_or_images() {
 
 #[test]
 fn ids_continue_above_the_highest_restored() {
-    let mut store = Store::new();
+    let mut store = Store::new(false);
     store.restore(vec![crate::store::tests::notification(41), crate::store::tests::notification(7)]);
     let next = held(&mut store, "new", false, 0);
     assert_eq!(next, 42);
@@ -425,7 +435,7 @@ fn ids_continue_above_the_highest_restored() {
 
 #[test]
 fn retention_by_age_and_by_count() {
-    let mut store = Store::new();
+    let mut store = Store::new(false);
     let day = 86_400;
     held(&mut store, "old", false, 0);
     held(&mut store, "recent", false, 7 * day);
@@ -463,7 +473,7 @@ fn another_version_reads_with_defaults() {
 #[test]
 fn a_failed_write_keeps_the_store_and_warns_once() {
     let dir = temp("readonly");
-    let mut store = Store::new();
+    let mut store = Store::new(false);
     held(&mut store, "kept", false, 0);
     let path = dir.join("missing-dir/notifications.json");
     assert!(save(&path, &store, "bus").is_err());
@@ -489,7 +499,7 @@ fn writes_are_coalesced_to_one_every_two_seconds() {
 }
 ```
 
-`store::tests` gains `pub(crate) fn content(summary: &str) -> Content` and `notification(id: u32) -> Notification` if not present; `image::tests` gains `pub(crate) fn one_pixel() -> Image`.
+`store::tests` already has `pub(crate) fn content(summary: &str, urgency: Urgency, timeout_ms: u32) -> Content`; it gains `pub(crate) fn notification(id: u32) -> Notification` (identity `Other`, sender `""`, time 0). `image`'s `mod tests` becomes `pub(crate) mod tests` and gains `pub(crate) fn one_pixel() -> Image`. `Store::new` keeps its `dnd: bool` argument until Task 5 removes it.
 
 - [ ] **Step 2:** Run `cargo test -p athanor-shelld history` — Expected: FAIL to compile.
 - [ ] **Step 3:** Implement `history.rs` and the store changes; adapt the store's existing tests to the new `notify` arguments (same assertions).
@@ -651,7 +661,26 @@ fn the_next_wake_is_the_next_edge_capped_at_an_hour() {
 }
 ```
 
-In `src/clock.rs`, one test: `local_now()` agrees with `chrono::Local::now()` on minute and weekday when run outside a minute boundary (`chrono` as a dev-dependency only).
+These replace `the_switch_round_trips_and_off_twice_is_fine`, whose "absent file means off" still holds. In `src/clock.rs`, with `chrono` as a dev-dependency only:
+
+```rust
+#[test]
+fn local_time_agrees_with_chrono() {
+    use chrono::{Datelike, Timelike};
+    let reading = |t: chrono::DateTime<chrono::Local>| Local {
+        minute: (t.hour() * 60 + t.minute()) as u16,
+        weekday: t.weekday().num_days_from_monday() as u8,
+    };
+    let before = reading(chrono::Local::now());
+    let (now, ours) = local_now();
+    let after = reading(chrono::Local::now());
+    assert!(
+        [(before.minute, before.weekday), (after.minute, after.weekday)].contains(&(ours.minute, ours.weekday)),
+        "a minute boundary may fall between the readings, never outside them"
+    );
+    assert!((now - chrono::Local::now().timestamp()).abs() <= 1);
+}
+```
 
 - [ ] **Step 2:** Run `cargo test -p athanor-shelld dnd clock` — Expected: FAIL to compile.
 - [ ] **Step 3:** Implement `dnd.rs` and `clock.rs`.
@@ -683,8 +712,9 @@ pub struct Facts<'a> { pub identity: &'a Identity, pub rule: &'a Rule, pub setti
 pub struct Decision { pub keep: bool, pub list: bool, pub popup: bool, pub sound: bool, pub timeout_ms: u32 }
 pub fn decide(facts: &Facts) -> Decision;
 // sender.rs
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Caller { Bar, ControlCenter }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)] // Caller
+pub fn admits(caller: Caller, method: &str) -> bool;  // the table below
 pub struct Admitted { .. } // a boxed Fn(&str /* unique name */, u32 /* pid */) -> Option<Caller> + Send + Sync
 impl Admitted {
     pub fn from_proc_root(proc_root: impl Into<PathBuf>) -> Admitted; // the production rule, by the pid's cgroup
@@ -694,7 +724,6 @@ impl Admitted {
 // server.rs
 pub struct Config { pub state_dir: PathBuf, pub config_dir: PathBuf, pub proc_root: PathBuf,
                     pub admitted: Admitted }
-pub fn admits(caller: Caller, method: &str) -> bool;  // NC8, plus ReportFullscreen for Bar
 ```
 
 Rules of `decide`: the rule is the application's for `App`, `other.conf`'s for `Other`, and `bypass_dnd` counts only for `App`. `allowed = false`: nothing kept, listed, shown or played. Otherwise `keep = !transient`; `list = true`; `popup = rule.popups && !rate_limited && (!dnd_on || critical || bypass)`; `sound = settings.sound && rule.sound && !suppress_sound && !rate_limited && (!dnd_on || critical || bypass)`; `timeout_ms` is 0 for critical, else the rule's seconds, else the application's `expire_timeout` when it is above 0, else 0 when it is 0, else `timeout_low_s` or `timeout_normal_s` by urgency.
@@ -724,6 +753,8 @@ The private interface `os.athanor.Notifications1` (NC8), every method checked wi
 The wire, `athanor_services::notifications::wire::WireNotification` (zvariant `Type`), fields in this order: `id u`, `app_id s` (`""` = Other), `app_name s`, `summary s`, `body s` (plain text), `body_spans a(sus)` (text, style bits b=1 i=2 u=4, href `""` = none; Task 5 sends one plain span), `actions a(ss)`, `actions_available b`, `urgency y`, `transient b`, `resident b`, `read b`, `time x`, `desktop_entry s`, `icon_name s`, `icon_file s`, `image_width u`, `image_height u`, `image_rgba ay`, `timeout_ms u`, `popup_ms_left u`, `popup b`, `value i` (-1 = none), `reply b`, `reply_placeholder s`. The bar's `notices.rs` mirrors it field by field, and both crates keep the test `the_fields_keep_their_order` over the same table of values.
 
 Notify, in order: decode (`content`), identity (Task 1, through `GetConnectionCredentials` of the sender), rule and settings (Task 2), do not disturb (Task 4), `decide`; when `allowed = false` return a fresh id and keep nothing; else store with the decision, mark the coalescer, emit to the destinations. A popup hidden by do not disturb calls `Dnd::missed_one`. When `evaluate` returns `Some(n)` the daemon sends itself a transient notification "{n} notifications while do not disturb was on" (`athanor_i18n::tr`, plural form) with a `default` action whose invocation calls `os.athanor.ControlCenter1.Show("notifications")` on the session bus. On start: `load` the history with the bus's `GetId`, `prune`, then serve; on `SIGTERM` the history is written before exit.
+
+The store's `dnd` field, `Store::dnd`, `Store::set_dnd` and the `dnd` argument of `Store::new` and `popup_ms_left` go: do not disturb lives in `dnd::Dnd` and reaches the store as `Decision::popup`.
 
 Paths (amendment 1): state `$XDG_STATE_HOME/athanor/shelld/` (history and switch), config `$XDG_CONFIG_HOME/athanor/notifications/` with `apps/`, both created before Landlock, both writable; `sandbox::restrict` takes `write: &[&Path]`. Run `codegraph_impact` on `restrict` first: its only caller outside `athanor-update-notify` (which has its own copy) is `athanor-shelld`.
 
@@ -867,8 +898,8 @@ async fn each_method_admits_the_units_of_the_table() {
     row!("DoNotDisturb", (), true, true);
     row!("SetDoNotDisturb", (false,), true, true);
     row!("SetDoNotDisturbUntil", (false, 0i64), true, true);
-    row!("Rules", ("other",), false, true);
-    row!("SetRule", ("other", "popups", "true"), false, true);
+    row!("Rules", ("",), false, true);
+    row!("SetRule", ("", "popups", "true"), false, true);
     row!("Settings", (), true, true);
     row!("SetSetting", ("sound", "true"), false, false);
     row!("ReportFullscreen", (true, false), true, false);
@@ -1182,7 +1213,7 @@ Contents (NC11): the header with the do-not-disturb switch and its words, the me
 
 - Produces: `pub fn parse(body: &str) -> (String /* plain */, Vec<(String, u32, String)>)`; `pango_markup` escapes every text with `&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;` and wraps it in `<b>`, `<i>`, `<u>` and `<a href="…">` from the style bits and href it was given, never from the sender's text.
 
-`parse` keeps `<b>`, `<i>`, `<u>` and `<a href="…">` (nesting allowed; a closing tag closes that tag and every tag opened inside it; tags still open at the end are closed); an `href` is kept only when it starts with `https:`, `http:` or `mailto:` (case-insensitive scheme), else the link keeps its text and loses its target; `<img …>` and `<img …/>` vanish with their attributes; any other tag stays as literal text; the entities `&amp; &lt; &gt; &quot; &apos;` and numeric `&#…;` decode, any other `&…;` stays literal. The plain form joins the span texts. The label's `activate-link` handler opens the URI with `gtk4::UriLauncher` on an explicit click or Enter only, and the link's tooltip shows the address.
+`parse` keeps `<b>`, `<i>`, `<u>` and `<a href="…">` (nesting allowed; a closing tag closes that tag and every tag opened inside it; tags still open at the end are closed); an `href` is kept only when it starts with `https:`, `http:` or `mailto:` (case-insensitive scheme), else the link keeps its text and loses its target; `<img …>` and `<img …/>` vanish with their attributes; any other tag stays as literal text; the entities `&amp; &lt; &gt; &quot; &apos;` and numeric `&#…;` decode, any other `&…;` stays literal; decoded text then passes `athanor_unit::text`'s stripping of control and bidirectional characters, so `&#x202E;` cannot reorder the line. The plain form joins the span texts. The label's `activate-link` handler opens the URI with `gtk4::UriLauncher` on an explicit click or Enter only, and the link's tooltip shows the address.
 
 - [ ] **Step 1:** Tests in `markup.rs`:
 
@@ -1200,6 +1231,11 @@ fn only_the_allowed_tags_survive() {
 fn schemes_are_checked_whatever_their_case() {
     assert_eq!(parse("<a href=\"JavaScript:alert(1)\">x</a>").1, [("x".into(), 0, String::new())]);
     assert_eq!(parse("<a href=\"MAILTO:a@b\">m</a>").1, [("m".into(), 0, "MAILTO:a@b".into())]);
+}
+
+#[test]
+fn an_entity_cannot_bring_back_a_stripped_character() {
+    assert_eq!(parse("a&#x202E;b&#7;c&#65;").0, "abcA");
 }
 
 #[test]
@@ -1256,7 +1292,7 @@ And in `wire.rs`: `pango_markup(&[("<x> & \"y\"".into(), 1, "https://a/?b=1&c=2"
 
 **Interfaces:**
 
-- Produces: `pub fn resolve(data_dirs: &[PathBuf], theme: &str, name: &str) -> Option<PathBuf>` (freedesktop Sound Theme: `<dir>/sounds/<theme>/stereo/<name>.{oga,ogg,wav}`, then the theme's `Inherits=` from `index.theme`, then `freedesktop`; a name with `/` or starting with `.` is refused); `pub fn name_for(urgency: Urgency, sound_name: Option<&str>) -> &str` (`message-new-instant`, `dialog-warning` for critical, the hint when it resolves); `pub fn play(path: &Path)` with the body Task 15 chose, never blocking `Notify` (spawned on the runtime), a failure logged once.
+- Produces: `pub fn resolve(data_dirs: &[PathBuf], theme: &str, name: &str) -> Option<PathBuf>` (freedesktop Sound Theme: `<dir>/sounds/<theme>/stereo/<name>.{oga,ogg,wav}`, then the theme's `Inherits=` from `index.theme`, then `freedesktop`; a name with `/` or starting with `.` is refused); `pub fn name_for<'a>(urgency: Urgency, sound_name: Option<&'a str>) -> &'a str` (`message-new-instant`, `dialog-warning` for critical, the hint when it resolves); `pub fn play(path: &Path)` with the body Task 15 chose, never blocking `Notify` (spawned on the runtime), a failure logged once.
 
 - [ ] **Step 1:** Tests for `resolve` (a fake theme tree with inheritance; `../x` refused; `.wav` found when `.oga` is absent) and `name_for`. The `sound-file` hint is never read: a test that a `Notify` with `sound-file=/etc/shadow` resolves to the theme's sound.
 - [ ] **Step 2:** Run `cargo test -p athanor-shelld sound` — Expected: FAIL.
