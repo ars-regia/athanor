@@ -33,17 +33,25 @@ Status: **revision 1, draft of 2026-10-04, awaiting the maintainer's review.** I
 - **A separate program.** Building the panel inside the bar was rejected: it breaks SH4's one process per surface, it loads every model and page into the bar's 64 MB budget, and a crash of one would take the other. COSMIC's applets were rejected by SH3.
 - **Two libraries, an exception to BR1's rule against new library crates,** for the reason LA1 gives: two programs share the code and no existing crate holds it. The modules move out of the bar unchanged in behaviour; the bar's tests and its measurement must stay identical across the move.
 - **Each process holds its own models.** The bar and the control center each subscribe to NetworkManager, BlueZ and the rest. The cost is a second set of D-Bus subscriptions. Serving the models from the bar to the panel was rejected because it would tie their crashes together again.
+- **One NetworkManager secret agent.** The bar keeps the agent it registers today (`os.athanor.Bar`), because it always runs. A network joined from the control center carries the password the user typed in the connection it creates, so no agent is asked; NetworkManager's own later requests, such as a changed password on reconnect, are answered by the bar.
 - **Resident and hidden,** as LA1: a cold GTK4 start does not meet ST5's 100 ms. It owns `os.athanor.ControlCenter1` with the methods `Show(page)` and `Toggle()`, and a D-Bus activation file with `SystemdService=`, as LA8. `page` is empty for the panel or the id of a detail page (CC5).
 - **Renderer:** Cairo, as the other resident surfaces (SH4, LA1).
-- **Landlock at start,** as BR1: read access to `/proc` for the system page (CC4) and to the icon and theme directories, write access only to its own state and to `/dev/rfkill` (CC8). No network socket: the panel opens none (CC8, media artwork).
+- **Landlock at start,** as BR1: read access to `/proc` for the system page (CC4) and to the icon and theme directories, write access only to its own state and to `/dev/rfkill` (CC8). Landlock's network rules deny it any TCP connection (CC8, media artwork).
 - **Crashes.** Both units follow SH8's policy, as the bar does. When the control center restarts it reads every state back from its services; it holds none of its own except the open page, which is lost.
 
-**CC3. The models and GLib.** The models keep no GTK type, as SH4 requires, but four of them use GLib's D-Bus. Two ways, decided by the maintainer (section 4, doubt 1):
+**CC3. The models speak D-Bus through zbus, off the interface thread.** The models move to `zbus`, the D-Bus library `athanor-shelld` already uses, and run on their own thread; GTK only draws.
 
-- **A. Keep `gio` in `athanor-services`.** The move is mechanical and GTK4 is the only toolkit in the plan. The crates depend on GLib, not on GTK.
-- **B. Move the models to `zbus`,** as `athanor-shelld` uses. The crates then depend on no toolkit at all, but the four modules are rewritten and their asynchronous code must be driven from GTK's main loop.
-
-The recommendation is A now, and B only when a second toolkit becomes a real prospect: GTK4 is the toolkit of SH4.
+- **What the bar does today.** Four of its models call D-Bus through GLib's `gio`, building and reading each message as a `Variant` with a format string checked only at run time: 46 uses in `network.rs`, 29 in `bluetooth.rs`, 3 in `audio.rs`, 2 in `battery.rs`. They run on GTK's main loop, so a large reply, such as the access-point list of a busy street, is decoded on the thread that draws.
+- **What the move buys, for every surface after this one.** `athanor-services` will be read by the bar, the control center, the notification center, Settings, the session lock and anything headless, such as a low-battery notice in `athanor-shelld`. With `zbus`:
+  - each service is a typed proxy declared once (`#[proxy]`), so a wrong signature fails at one decoding point, and in tests, not in a `Variant` lookup somewhere in a module;
+  - the shell has one D-Bus stack instead of two;
+  - the crate has no toolkit dependency at all, which is what SH4 asks of logic, and a headless program can link it without GLib;
+  - a model is tested against an in-process peer-to-peer server built with `zbus` itself, without a bus daemon or `python3-dbusmock`, in milliseconds;
+  - a service that hangs, or a reply that is slow to decode, never holds a frame of the interface (ST5).
+- **The thread.** The workspace builds `zbus` with its `tokio` feature, so `zbus` must run inside a Tokio runtime. Each GTK process builds one single-threaded runtime on a thread of its own in `main`, before GTK starts, and every model takes that runtime's `Handle` as an argument: no model calls `Handle::current()`, so code running outside the runtime does not compile instead of aborting at run time, the failure of `ermete-shell-rs` on `main`. Models publish their state on `tokio::sync::watch` channels and take commands on `tokio::sync::mpsc`; both work from any executor, so the interface awaits them from GLib's main context with no extra crate.
+- **The price.** The four modules are rewritten, not moved, and the bar is enabled by default: the rewrite proceeds one model per change, each behind the bar's unchanged tests and its memory measurement (CC14, step 1). A Tokio runtime and a second D-Bus connection per GTK process cost memory, measured in step 1 against the bar's 64 MB.
+- **Rejected: keeping `gio` in `athanor-services`.** The move would be mechanical, and GTK4 stays the toolkit. But it would fix the GLib dependency and the run-time `Variant` checks into the crate every later surface depends on, and the price of leaving grows with each one.
+- **Scope.** The rule covers the models of system services. `gio` stays where GTK itself needs it (the application object, the file chooser), and in `athanor-search` and the compositor client until they are next changed.
 
 **CC4. The panel's contents.** The panel itself is F-cc-01 and its customisation F-cc-02 (CC6). From top to bottom; a tile or slider whose service or hardware is absent is not shown (BR3).
 
@@ -67,7 +75,7 @@ The recommendation is A now, and B only when a second toolkit becomes a real pro
 | Bluetooth | devices with connect and disconnect, pairing, forget; discoverable; battery of connected devices                                                                                                                                             | F-cc-19, 20, 23             |
 | Audio     | output and input devices, ports; per-application volume; volume above 100% (an opt-in, up to 150%)                                                                                                                                           | F-cc-26 to 29               |
 | Display   | one brightness slider per external monitor (DDC, CC8); night-light schedule; display mode (mirror, extend, external only) and casting                                                                                                        | F-cc-33, 35, 43             |
-| Battery   | health (capacity against design) and the charge limit                                                                                                                                                                                        | F-cc-38                     |
+| Battery   | health (capacity against design, charge cycles) and the charge limit, on or off: UPower 1.91 turns it on at the thresholds it reports (`ChargeStartThreshold`, `ChargeEndThreshold`), which come from the firmware or the hardware database, and offers no way to set them                                                                                                                                                                                        | F-cc-38                     |
 | Devices   | removable drives with mount and unmount; print queue and printer status                                                                                                                                                                      | F-cc-47, 48                 |
 | System    | background applications with a stop button; resource graphs; encrypted vaults                                                                                                                                                                | F-cc-45, 49, 50             |
 
@@ -79,7 +87,7 @@ The recommendation is A now, and B only when a second toolkit becomes a real pro
 
 **CC7. Do not disturb.**
 
-- **The state grows from a boolean** to `{ on, until, schedule }`: `until` is an optional end time, `schedule` an optional daily window in local time. The file written by today's `dnd.rs` is read as `{ on }`. The control center offers on, off, one hour, and until tomorrow morning; the schedule is set by the notification center's specification, which needs no new format.
+- **The state grows from a boolean** to `{ on, until, schedule }`: `until` is an optional end time, `schedule` an optional daily window in local time. The file written by today's `dnd.rs` is read as `{ on }`. The control center offers on, off, one hour, and until 08:00 local time; the schedule is set by the notification center's specification, which needs no new format.
 - **`athanor-shelld` admits the control center.** Its sender check accepts `athanor-bar.service` and `athanor-control-center.service`, and stays informative as BR1 states. The private interface gains a read of the state and a signal when it changes, unicast to the admitted units like its other signals.
 
 **CC8. No privilege in the panel.** Every control goes through a service the image already runs, under that service's own authorization. No setuid program, no new system unit, no polkit rule written by this document.
@@ -104,7 +112,7 @@ The recommendation is A now, and B only when a second toolkit becomes a real pro
 | Casting                                                                  | a network-display application (spike S5)                                                          | its own portal request                                                                         |
 | Removable drives                                                         | UDisks2                                                                                           | its polkit actions                                                                             |
 | Print queue                                                              | CUPS on its local socket; the panel cancels only the user's jobs                                  | CUPS                                                                                           |
-| Background applications                                                  | the `app-athanor-*.service` units of BR2 that own no window, stopped through the user's systemd   | the user's systemd                                                                             |
+| Background applications                                                  | the `app-athanor-*.service` units of BR2 with no window whose `app_id` matches the unit's desktop id or the desktop file's `StartupWMClass`; stopped through the user's systemd   | the user's systemd                                                                             |
 | Resource graphs, uptime                                                  | `/proc`                                                                                           | read only                                                                                      |
 | User card                                                                | AccountsService                                                                                   | read only                                                                                      |
 | Media                                                                    | MPRIS                                                                                             | the session                                                                                    |
@@ -112,18 +120,18 @@ The recommendation is A now, and B only when a second toolkit becomes a real pro
 - **Artwork.** The panel shows `file:` and `data:` artwork and does not fetch `https:` artwork, because it opens no network socket. Players that publish only remote artwork show their icon instead (doubt 6).
 - **The 802.1X form** picks certificate files through the file-chooser portal, not through a filesystem rule of its own.
 
-**CC9. Opening and closing.** The bar's button and a shortcut call `Toggle()`. The panel closes on an outside click, on Escape and on the loss of focus, as the shield's sheet does (BR6), and the notification popups stay hidden while it is open.
+**CC9. Opening and closing.** The bar's button and a shortcut call `Toggle()`. The panel closes on an outside click, on Escape and on the loss of focus, as the shield's sheet does (BR6), and the notification popups stay hidden while it is open. It opens on the focused output, under the bar's button, or above it when the bar is at the bottom.
 
 - **The shortcut:** Super+A belongs to the application library (`doc_launcher.md`). The proposal is Super+C, written once per user at the first start in the way LA8 writes Super, and never again (doubt 2). Super+N and Super+V are kept for the notification center and the clipboard page.
 
 **CC10. The clipboard history, confined.** F-cc-56 stays in the register in this form; if spike S3 fails, it returns to the maintainer as an exclusion.
 
 - **`athanor-clipd` captures, nobody else stores.** A headless user unit holds the history and reads the selection through the compositor's data-control protocol. No other process of the shell asks for that protocol.
-- **Memory only.** The history is never written to disk and is gone at logout and on a restart of the unit. At most 50 entries; text, and images up to 4 MiB; an entry expires after 24 hours.
+- **Memory only.** The history is never written to disk and is gone at logout and on a restart of the unit. At most 50 entries and 8 MiB in all, the oldest dropped first; text, and images up to 4 MiB each; an entry expires after 24 hours.
 - **Secrets are skipped.** An offer carrying the MIME type `x-kde-passwordManagerHint` with the value `secret`, which password managers set, is not recorded.
 - **Read only by the shell.** `athanor-clipd` answers a private interface, `os.athanor.Clipboard1` (list, copy an entry back to the selection, delete, clear), only from `athanor-control-center.service`, with the informative cgroup check of BR1.
 - **Off by default.** The tile turns it on; turning it off clears the history. Super+V opens the control center on the clipboard page.
-- **Landlock:** no filesystem write and no network; budget 16 MB PSS (doubt 5).
+- **Landlock:** no filesystem write and no network; budget 24 MB PSS with a full history (doubt 5).
 
 **CC11. Exclusions.** Decided by the maintainer on 2026-10-04 and written into the register (section 3):
 
@@ -141,7 +149,7 @@ The recommendation is A now, and B only when a second toolkit becomes a real pro
 **CC12. Third-party tiles, declarative.** A tile for a service such as Tailscale or WARP is a descriptor, never code.
 
 - **Installed with the image only:** `/usr/share/athanor/control-center/tiles/*.toml`. The user's directories are not read.
-- **A descriptor names** an id, a label, an icon name, and one target: a systemd unit (system or user), whose active state the tile shows and which it starts and stops through systemd's D-Bus interface under systemd's polkit actions.
+- **A descriptor names** an id, a label, an icon name, and one target: a systemd unit (system or user), whose active state the tile shows and which it starts and stops through systemd's D-Bus interface under systemd's polkit actions. A system unit asks for the administrator's password, as `org.freedesktop.systemd1.manage-units` requires by default; this document writes no rule to skip it. Services that are switched by a command of their own rather than by a unit, such as `tailscale up`, are not covered (doubt 9).
 - **An invalid descriptor is skipped** with an entry at warning priority; the others load.
 
 **CC13. Tests.**
@@ -149,12 +157,14 @@ The recommendation is A now, and B only when a second toolkit becomes a real pro
 - **Surface cases.** Each scene runs SH13's matrix of 12 cases. There are 11 scenes, 132 cases: the panel with every tile its fixtures provide; the panel in edit mode; the seven detail pages; the clipboard page; the panel with no optional hardware.
 - **Fixtures.** Those of BR9, plus `python3-dbusmock` templates for ModemManager, iio-sensor-proxy, UDisks2 and AccountsService, and a test MPRIS player. The plan confirms that Fedora 43 ships each template.
 - **Without a display.** Unit tests for the tile file and its rejection rules, the descriptor parser, the do-not-disturb state and its migration from the boolean, the clipboard's limits, expiry and secret rule, and the sender checks of `athanor-shelld` and `athanor-clipd`.
+- **The models** are tested against in-process `zbus` servers (CC3): every state each service can report, a service that disappears and returns, and a reply that never comes.
+- **Accessibility** (ST7): every tile and slider is reached with Tab and the arrow keys, carries an accessible name and state, and the panel is announced when it opens.
 - **The bar's tests** run unchanged before and after the move to the shared crates.
 - **Scenarios** of ST6 cover each tile's on, off and failure states, and opening every page from the bar and from the panel.
 
 **CC14. Construction.** Each step merges on its own. The panel stays disabled by default until the last.
 
-1. **Foundations, with no change to what the bar does.** `athanor-services` and `athanor-controls` extracted from the bar; the program skeleton with the bar's button and the shortcut; the tile file; the do-not-disturb state and the admission in `athanor-shelld`.
+1. **Foundations, with no change to what the bar does.** `athanor-services` and `athanor-controls` extracted from the bar, each model rewritten on `zbus` (CC3) in a change of its own, with the bar's tests and memory measurement compared before and after; the program skeleton with the bar's button and the shortcut; the tile file; the do-not-disturb state and the admission in `athanor-shelld`.
 2. **The panel with what exists:** the 11 `have` entries, full media controls, the Settings button.
 3. **What existing services already offer:** customisable tiles, dark mode, keyboard backlight, battery health and charge limit, the rest of the network, Bluetooth and audio pages, removable drives, print queue, background applications, resource graphs, the user's card, third-party tiles.
 4. **What needs a spike first** (section 4): night light, keep awake, screen recording, casting and display mode, rotation lock, on-screen keyboard, external monitors, the clipboard history.
@@ -170,7 +180,7 @@ Applied with the approval of this document.
 
 ## 4. Open doubts
 
-1. **GLib or zbus in the models** (CC3): recommendation A, the maintainer decides.
+1. **The models on `zbus`** (CC3): the maintainer confirms the choice and its price, a rewrite of four modules of the bar.
 2. **The shortcut** (CC9): Super+C is proposed; the maintainer decides.
 3. **The spikes**, each a short probe on the image as shipped, run before step 4 of CC14. A spike that fails sends its entry back to the maintainer, to be designed again or excluded with a written reason.
    - S1. Night light on cosmic-comp 1.8: whether it offers gamma control to a client or a night-light setting of its own.
@@ -180,10 +190,11 @@ Applied with the approval of this document.
    - S5. Casting to a network display, with gnome-network-displays as a Flatpak as the candidate; display mode through output management.
    - S6. Rotation lock with iio-sensor-proxy and cosmic-comp, and which on-screen keyboard works with cosmic-comp's input-method and virtual-keyboard protocols.
 4. **Screen recording** needs an application in the image; which one is a decision of `doc_software.md`'s catalogue.
-5. **Memory budgets** are proposals: `athanor-control-center` at most 64 MB PSS at rest with the panel hidden, `athanor-clipd` at most 16 MB with a full history. The first measurement confirms or corrects them.
+5. **Memory budgets** are proposals: `athanor-control-center` at most 64 MB PSS at rest with the panel hidden, `athanor-clipd` at most 24 MB with a full history. The first measurement confirms or corrects them.
 6. **Remote artwork** (CC8): players that publish only `https:` artwork show no cover. Fetching it would need a network rule for the panel or a fetching service; neither is designed here.
 7. **Encrypted vaults** (F-cc-49) touch cryptography and need a specification of their own. Until one is approved the entry stays `missing` and blocks the gate, unless the maintainer excludes it.
 8. **The dbusmock templates** of CC13 are assumed present in Fedora 43; the plan confirms them.
+9. **Third-party services without a unit** (CC12): a descriptor could name a command instead, but a command from a descriptor runs code the panel did not ship; it is left out until a real service needs it.
 
 ## 5. Acceptance
 
@@ -199,3 +210,4 @@ On a fresh install in the dev VM and on the reference laptop:
 8. Do not disturb set for one hour ends by itself after an hour, also across a restart of `athanor-shelld`.
 9. The bar's tests and its memory measurement are unchanged after the move to `athanor-services` and `athanor-controls`.
 10. The 132 surface cases pass, and the surface passes the gate of `doc_shell_standard.md` (ST2) before it is enabled by preset.
+11. With NetworkManager answering after 10 s (a delayed fixture), the panel still opens within 100 ms and the Wi-Fi tile shows that it is waiting.
