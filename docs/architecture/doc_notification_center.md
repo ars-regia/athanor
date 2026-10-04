@@ -32,7 +32,7 @@ Status: **revision 1, approved by the maintainer on 2026-10-04.** The maintainer
 
 **NC3. The history.**
 
-- **Where.** `$XDG_STATE_HOME/athanor/notifications.json`, mode 0600, written to a temporary file and renamed. Writes are coalesced to at most one every 2 seconds, plus one when the daemon stops. "Clear all" and the clearing of a group write at once.
+- **Where.** `$XDG_STATE_HOME/athanor/shelld/notifications.json`, mode 0600, beneath the one state directory the daemon's Landlock policy lets it write, written to a temporary file and renamed. Writes are coalesced to at most one every 2 seconds, plus one when the daemon stops. "Clear all" and the clearing of a group write at once.
 - **What is kept.** Every notification except those with the `transient` hint. Each entry has:
   - its id;
   - its application identity (NC4);
@@ -58,7 +58,7 @@ Status: **revision 1, approved by the maintainer on 2026-10-04.** The maintainer
 
 The `desktop-entry` hint and `app_name` are declared by the sender and may lie. A notification whose identity is proven is grouped, iconed and ruled by that identity. A notification without a proven identity goes to the group "Other applications", named by its `app_name` as plain text, and follows the shared rule of that group. A rule that grants a privilege (`bypass_dnd`) never applies to it.
 
-**NC5. Per-application rules.** One file per application, `$XDG_CONFIG_HOME/athanor/notifications.d/<application id>.conf`, plus `other.conf` for the shared group, in the `key=value` lines of `dnd.rs`'s file, so no new format.
+**NC5. Per-application rules.** One file per application, `$XDG_CONFIG_HOME/athanor/notifications/apps/<application id>.conf`, plus `$XDG_CONFIG_HOME/athanor/notifications/other.conf` for the shared group (applications without a proven identity), so that an application whose id is `other` cannot take its place, in the `key=value` lines of `dnd.rs`'s file, so no new format.
 
 | Key           | Values                                           | Default |
 | ------------- | ------------------------------------------------ | ------- |
@@ -69,7 +69,7 @@ The `desktop-entry` hint and `app_name` are declared by the sender and may lie. 
 | `sound`       | `true`, `false`                                  | `true`  |
 | `timeout`     | seconds, or `app` (the application's own)        | `app`   |
 
-- **Global settings** live in `$XDG_CONFIG_HOME/athanor/notifications.conf`, in the same format:
+- **Global settings** live in `$XDG_CONFIG_HOME/athanor/notifications/notifications.conf`, in the same format:
   - `retention`: NC3;
   - `sound`: the global switch;
   - `popup_corner`: one of four corners, `bar` by default;
@@ -84,14 +84,14 @@ The `desktop-entry` hint and `app_name` are declared by the sender and may lie. 
 
 1. **manual:** the switch, until `until` when one is set (one hour, until 08:00, CC7);
 2. **schedule:** a daily window in local time, which may cross midnight, on the chosen days of the week (every day by default);
-3. **fullscreen:** a window that is fullscreen and activated on any output, read through `athanor-compositor-client`;
+3. **fullscreen:** a window that is fullscreen and activated on any output, observed by the bar, which already holds `athanor-compositor-client`, and reported to the daemon through `ReportFullscreen` (NC8); the headless daemon does not link that client, which connects through a `gdk::Display` (SH4). While no bar is connected the trigger is unavailable;
 4. **screen sharing:** a screen-capture session open in the portal backend of `doc_portal.md`.
 
 Rules of the state:
 
 - **Each trigger can be turned off** in Settings.
 - **A trigger the session cannot observe is published as unavailable,** with one journal line, and Settings shows it so. This covers fullscreen when cosmic-comp withholds the protocol, and screen sharing until `doc_portal.md` delivers its signal. It never appears active while doing nothing.
-- **A manual action wins until the next automatic change.** Turned off at 23:00 inside a 22:00–07:00 window, do not disturb stays off until 07:00. Turned off during a fullscreen video, it stays off until the video ends.
+- **A manual action wins until the next automatic change.** A manual "on", with or without `until`, holds until `until` or until the switch is turned off; automatic changes do not end it, or a fullscreen video ending would cancel "one hour". A manual "off" while an automatic source is active holds until the set of active automatic sources changes. Turned off at 23:00 inside a 22:00–07:00 window, do not disturb stays off until 07:00. Turned off during a fullscreen video, it stays off until the video ends.
 - **The end of do not disturb** shows one summary popup, "N notifications while do not disturb was on", which opens the center (F-notif-19). It never replays the missed popups.
 - **The clock.**
   - The state is evaluated again when the wall clock is set: a `timerfd` with `TFD_TIMER_CANCEL_ON_SET`.
@@ -113,9 +113,11 @@ Rules of the state:
 | `List`, `Close`, `InvokeAction`, `Reply`, `MarkRead`                           |      yes      |                yes                |    no    |
 | `ClearAll`, `ClearGroup`, `History`                                            |      no       |                yes                |    no    |
 | `DoNotDisturb`, `SetDoNotDisturb`, `SetDoNotDisturbUntil`                      |      yes      |                yes                |   yes    |
+| `ReportFullscreen(b available, b active)`                                      |      yes      |                no                 |    no    |
 | `Rules(app)`, `SetRule(app, key, value)`, `Settings`, `SetSetting(key, value)` |      no       | yes (`allowed` and `popups` only) |   yes    |
 
-- **Signals.** `added`, `replaced`, `closed`, `read`, `DoNotDisturbChanged(on, reason, until)` and `RulesChanged(app)` go to each admitted unit connected.
+- **Signals.** `added`, `replaced`, `closed`, `read`, `DoNotDisturbChanged(on, reason, until)` and `RulesChanged(app)` go to each admitted unit connected. `ReportFullscreen` is a method, admitted for `athanor-bar` only: the bar reports whether it can observe the fullscreen state and whether a window is fullscreen and activated.
+- **`List` and `History`.** `List` returns the unread notifications (the bar's popups and its count); `History` returns all of them.
 - **Settings' unit name** is fixed by Settings' specification. Until then Settings is not admitted, and the rules change only through the center's mute and the files.
 
 **NC9. The public interface.**
@@ -181,7 +183,7 @@ Rules of the state:
 - **Popup content.**
   - With `private_popups` on, a popup shows only the application's name and icon.
   - Popups gain markup, progress and a "Reply" button.
-- **Reply from a popup.** The popup surface still never takes the keyboard focus (BR4), so "Reply" opens the center with that row's reply field focused.
+- **Reply from a popup.** The popup surface still never takes the keyboard focus (BR4), so "Reply" opens the center with that row's reply field focused, through CC2's `Show(page)` with the page id `notifications:<id>`; `ToggleNotifications()` cannot open the center on a row without closing an open one. The summary popup (NC6) uses `Show("notifications")`.
 - **Rate limit.** An application that sends more than 20 notifications in 10 seconds loses popups and sound until it slows down. Its notifications still enter the history, with one journal line.
 - **The bar no longer** shows its notification list popover or its calendar popover (NC1).
 

@@ -60,7 +60,7 @@ The numbers are reasoned proposals, not measurements: 100 ms is the classic limi
 
 **What `athanor-shelld` keeps across a crash.** The notification history of `doc_notification_center.md` (NC3) survives a crash of the daemon and a reboot, so that recovery holds for it as for the bar and the dock.
 
-- It writes the history to `$XDG_STATE_HOME/athanor/notifications.json`, mode 0600, by a write to a temporary file and a rename, at most once every 2 seconds and when it stops: each notification with its id, its fields, its read state, and the unique bus name of its sender. A crash loses at most the last 2 seconds of changes.
+- It writes the history to `$XDG_STATE_HOME/athanor/shelld/notifications.json`, mode 0600, by a write to a temporary file and a rename, at most once every 2 seconds and when it stops: each notification with its id, its fields, its read state, and the unique bus name of its sender. A crash loses at most the last 2 seconds of changes.
 - At start it reads the file whatever the boot. A file that does not parse is renamed `notifications.json.corrupt` and the event logged at warning; the daemon starts empty.
 - New ids continue above the highest restored one, so a client's later `CloseNotification` finds its notification. `ActionInvoked` reaches a sender that is still connected; one that has gone loses it, which the notification specification already allows.
 
