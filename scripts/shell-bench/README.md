@@ -56,3 +56,17 @@ maintainer (ST10).
 
 Every change the bench makes on the machine (environment, layout file, stopped
 units) is undone when a stage ends, including when it fails.
+
+## Installing a build on the machine
+
+```
+python3 scripts/shell-bench/deploy.py --host athanor-ref [--built DIR] athanor-bar [athanor-dock athanor-shelld]
+```
+
+Builds the named crates in release mode in the shell rig's build stage
+(`forge/test/shell/rig.sh cargo build --release --locked -j 4 -p <crate>`), or takes
+already built binaries from `--built DIR`. It copies each binary, unit and D-Bus
+activation file to the paths the crate's spec installs them at, makes `/usr` writable for
+this boot with `sudo -n bootc usr-overlay` (skipped when it already is), reloads the user
+manager, restarts the crate's unit and prints the commit installed. A reboot returns the
+machine to its image. It refuses to run while `soak.py` or `bench.py` runs on this host.
