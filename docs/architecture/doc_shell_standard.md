@@ -89,7 +89,7 @@ The numbers are reasoned proposals, not measurements: 100 ms is the classic limi
 
 - **The machine** runs Athanor from the image as shipped, with no layered package. It is a test machine, not a workstation. It carries this configuration for the bench, recorded in `docs/shell-bench/machine.md`, and nothing else:
   - SSH with a key only;
-  - a `sudo` rule without a password, limited to the commands the bench runs as root: the throwaway `uinput` devices, `bootc usr-overlay`, the installation of the change's packages, and `rtcwake` for the soak's suspend;
+  - a `sudo` rule without a password, limited to the commands the bench runs as root: the throwaway `uinput` devices, `bootc usr-overlay`, the installation of the change's packages, and the soak's suspend (`rtcwake -m no` to arm the wake alarm, then a suspend through logind);
   - automatic login of the bench's user, so that after the disk's passphrase the session starts with no second step;
   - COSMIC's screen-off and suspend set to never, and mains power.
 
