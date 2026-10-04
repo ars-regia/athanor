@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
-"""Locks for the third-party NVIDIA driver packages of the system image variants
-(docs/architecture/doc_system_image.md, S4, S5 and S7).
+"""Locks for the third-party NVIDIA packages of the system image variants
+(docs/architecture/doc_system_image.md, S4, S5 and S7): the driver of the open and legacy
+branches, and NVIDIA's container toolkit (the container-toolkit set) both variants ship.
 
-  lock.py generate open|legacy --version V   resolve the branch's packages at exactly V in its
-                                             repository and write locks/<branch>.lock with the
-                                             SHA-256 of each downloaded RPM
-  lock.py fetch open|legacy --out DIR        download the locked RPMs and verify each SHA-256;
-                                             prints the lock's version
-  lock.py check open|legacy --version V      exit 0 if the repository publishes the branch at V
-  lock.py latest open|legacy --major M       print the newest version M.* of the branch's primary
-                                             package in the repository metadata
-  lock.py verify open|legacy --version V     compare locks/<branch>.lock, which must be at V, with
-                                             the repository metadata, without downloading RPMs
-  lock.py mirrored open|legacy               print the mirror reference of locks/<branch>.lock and
-                                             exit 0 if the mirror holds every locked RPM
+  lock.py generate SET --version V   resolve the set's packages at exactly V in its
+                                    repository and write locks/<SET>.lock with the SHA-256 of
+                                    each downloaded RPM, checked against the metadata first
+  lock.py fetch SET --out DIR        download the locked RPMs and verify each SHA-256;
+                                    prints the lock's version
+  lock.py check SET --version V      exit 0 if the repository publishes the set at V
+  lock.py latest SET --major M       print the newest version M.* of the set's primary
+                                    package in the repository metadata
+  lock.py verify SET --version V     compare locks/<SET>.lock, which must be at V, with the
+                                    repository metadata; RPMs are downloaded only from a
+                                    repository whose metadata gives another checksum than SHA-256
+  lock.py mirrored SET               print the mirror reference of locks/<SET>.lock and exit 0
+                                    if the mirror holds every locked RPM
+
+SET is open, legacy or container-toolkit (BRANCHES).
 
 The mirror (doc_system_image.md, S7) is the OCI repository $KERNEL_REGISTRY/athanor-nvidia-rpms
 (default ghcr.io/<owner>): mirror.sh pushes each locked RPM as a blob, so its digest is the
@@ -25,8 +29,10 @@ Exit codes: 0 success, 3 the requested version is not published, 4 (verify) the 
 publishes V with other files or checksums than the lock, 5 (mirrored) the mirror lacks a locked
 RPM, 1 any other error (network, metadata, lock file), 2 usage.
 
-GPG signatures are verified by build-rpms.sh with rpmkeys and the keys in keys/: the lock
-covers what the unsigned repository metadata of negativo17 cannot.
+Locks always record SHA-256, the mirror's blob digest; a repository whose metadata gives
+SHA-512 (NVIDIA's) is checked by SHA-512 when the lock is written. GPG signatures are verified
+by build-rpms.sh with rpmkeys and the keys in keys/: the lock covers what the unsigned
+repository metadata of negativo17 cannot.
 """
 
 import argparse
@@ -53,6 +59,8 @@ NOT_PUBLISHED = 3
 STALE = 4
 NOT_MIRRORED = 5
 MIRROR = "athanor-nvidia-rpms"
+# The repository metadata checksums a lock can be generated from, with their names in messages.
+CHECKSUMS = {"sha256": "SHA-256", "sha512": "SHA-512"}
 BRANCHES = {
     "open": {
         "primary": "nvidia-driver",
@@ -71,6 +79,18 @@ BRANCHES = {
             "nvidia-modprobe", "nvidia-persistenced", "nvidia-settings", "xorg-x11-drv-nvidia",
             "xorg-x11-drv-nvidia-cuda", "xorg-x11-drv-nvidia-cuda-libs", "xorg-x11-drv-nvidia-libs",
             "xorg-x11-drv-nvidia-power",
+        ],
+        "companions": [],
+    },
+    # CDI specs and the OCI hook for GPU containers (S4). NVIDIA's repository, not Fedora's
+    # golang-github-nvidia-container-toolkit, which lags the security fixes. Not a kernel input:
+    # its version lives in the lock alone, not in pins.env.
+    "container-toolkit": {
+        "primary": "nvidia-container-toolkit",
+        "baseurl": "https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64/",
+        "packages": [
+            "libnvidia-container-tools", "libnvidia-container1", "nvidia-container-toolkit",
+            "nvidia-container-toolkit-base",
         ],
         "companions": [],
     },
@@ -290,12 +310,14 @@ def select(primary_xml, names, version, companions=()):
         ver = attribute(pkg, f"{COMMON}version", "ver", name)
         if pkg.findtext(f"{COMMON}arch") not in ARCHES or (name in names and ver != version):
             continue
-        if attribute(pkg, f"{COMMON}checksum", "type", name) != "sha256":
-            raise LockError(f"{name}: checksum type {pkg.find(f'{COMMON}checksum').get('type')}, sha256 required")
-        sha = pkg.findtext(f"{COMMON}checksum")
-        if not sha:
+        checksum = attribute(pkg, f"{COMMON}checksum", "type", name)
+        if checksum not in CHECKSUMS:
+            raise LockError(f"{name}: checksum type {checksum}, {' or '.join(CHECKSUMS)} required")
+        digest = pkg.findtext(f"{COMMON}checksum")
+        if not digest:
             raise LockError(f"{name}: empty checksum in the repository metadata")
-        entry = {"name": name, "href": attribute(pkg, f"{COMMON}location", "href", name), "sha256": sha}
+        entry = {"name": name, "href": attribute(pkg, f"{COMMON}location", "href", name),
+                 "checksum": checksum, "digest": digest}
         epoch = pkg.find(f"{COMMON}version").get("epoch") or "0"
         if not epoch.isascii() or not epoch.isdigit():
             raise LockError(f"{name}: epoch {epoch!r} in the repository metadata is not a number")
@@ -376,6 +398,15 @@ def resolve(branch, version, download):
                   BRANCHES[branch]["companions"])
 
 
+def downloaded_sha256(entry, url, download):
+    """The SHA-256 of the RPM at `url`, once its bytes match the metadata's checksum."""
+    data = download(url)
+    got = hashlib.new(entry["checksum"], data).hexdigest()
+    if got != entry["digest"]:
+        raise LockError(f"{url}: downloaded {CHECKSUMS[entry['checksum']]} {got} differs from the repository metadata {entry['digest']}")
+    return hashlib.sha256(data).hexdigest()
+
+
 def load_lock(locks, branch):
     """The entries of locks/<branch>.lock, refused unless it belongs to the branch's repository."""
     path = locks / f"{branch}.lock"
@@ -415,7 +446,10 @@ def main(argv=None, download=http_get, mirror=None):
             if version != args.version:
                 raise LockError(f"{path}: lock at {version}, {args.version} expected")
             base = BRANCHES[args.branch]["baseurl"]
-            published = {(e["sha256"], base + e["href"]) for e in resolve(args.branch, version, download)}
+            published = {
+                (e["digest"] if e["checksum"] == "sha256" else downloaded_sha256(e, base + e["href"], download), base + e["href"])
+                for e in resolve(args.branch, version, download)
+            }
             if published != set(entries):
                 changed = sorted(url for _, url in published.symmetric_difference(entries))
                 print(f"lock.py: {path} differs from the repository metadata at {version}: {', '.join(changed)}", file=sys.stderr)
@@ -426,10 +460,7 @@ def main(argv=None, download=http_get, mirror=None):
             entries = []
             for entry in resolve(args.branch, args.version, download):
                 url = base + entry["href"]
-                sha = hashlib.sha256(download(url)).hexdigest()
-                if sha != entry["sha256"]:
-                    raise LockError(f"{url}: downloaded SHA-256 {sha} differs from the repository metadata {entry['sha256']}")
-                entries.append((sha, url))
+                entries.append((downloaded_sha256(entry, url, download), url))
             write_lock(args.locks / f"{args.branch}.lock", args.branch, args.version, base, entries)
             return 0
         mirror = mirror or Mirror(mirror_repository())

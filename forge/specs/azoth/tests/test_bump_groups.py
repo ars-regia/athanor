@@ -67,6 +67,7 @@ class BumpGroups(unittest.TestCase):
             ),
             "maintained_series": lambda: {"7.2", "6.18"},
             "nvidia_open": lambda current: (current, "0" * 40),
+            "toolkit_version": lambda: "1.20.1",
             "image_digest": lambda image, tag: NEW,
         }
         for name, value in patches.items():
@@ -77,7 +78,7 @@ class BumpGroups(unittest.TestCase):
     def lock_py(self, command, branch, *rest, allowed=(0,)):
         code, stdout = 0, ""
         if command == "latest":
-            stdout = "580.190.01\n"
+            stdout = "1.20.1\n" if branch == "container-toolkit" else "580.190.01\n"
         elif command == "verify" and branch == "open":
             code = bump.LOCK_STALE
         elif command == "generate":

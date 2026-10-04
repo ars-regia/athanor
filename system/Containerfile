@@ -16,7 +16,7 @@ FROM ${KERNEL_REGISTRY}/azoth-nvidia@${NVIDIA_OPEN_DIGEST} AS nvidia-modules-ope
 FROM ${KERNEL_REGISTRY}/azoth-nvidia@${NVIDIA_LEGACY_DIGEST} AS nvidia-modules-legacy
 
 # The vendor RPMs of both NVIDIA branches, verified by hash and GPG, with the shim and the
-# configuration package (system/nvidia/build-rpms.sh). A throwaway stage: rpm-build never
+# configuration package, and NVIDIA's container toolkit (system/nvidia/build-rpms.sh). A throwaway stage: rpm-build never
 # reaches an image. KERNEL_REGISTRY locates the mirror of the locked RPMs (lock.py).
 FROM registry.fedoraproject.org/fedora:43@sha256:a60334b24af6818e9ccf199d188b5ddef1c3d7f549470b560d9b744c78c2c58b AS nvidia-rpms
 ARG KERNEL_REGISTRY
@@ -199,7 +199,8 @@ RUN for pkg in cosmic-panel cosmic-applets cosmic-notifications athanor-layout-t
 
 # GPU stages (S2-S5): the signed modules of the kernel NVR with the locked vendor packages of
 # the same version, the shim and athanor-nvidia-config. libva-nvidia-driver (VA-API on NVDEC)
-# only makes sense with the NVIDIA driver.
+# only makes sense with the NVIDIA driver, and so does the locked container toolkit (S4), which
+# gives containers the GPU through CDI.
 FROM system AS gpu-none
 
 # The modules must land in the directory of the pinned kernel: hardening deletes every other
@@ -209,8 +210,10 @@ ARG AZOTH_NVR
 COPY --from=nvidia-modules-open /lib/modules/ /usr/lib/modules/
 RUN test -f "/usr/lib/modules/${AZOTH_NVR}.x86_64/extra/nvidia/nvidia.ko"
 RUN --mount=type=bind,from=nvidia-rpms,source=/out/open,target=/tmp/nvidia-rpms \
+    --mount=type=bind,from=nvidia-rpms,source=/out/container-toolkit,target=/tmp/container-toolkit \
     --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
-    dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs /tmp/nvidia-rpms/*.rpm libva-nvidia-driver && \
+    dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs /tmp/nvidia-rpms/*.rpm \
+        /tmp/container-toolkit/*.rpm libva-nvidia-driver && \
     systemctl preset-all
 
 FROM system AS gpu-nvidia-legacy
@@ -218,8 +221,10 @@ ARG AZOTH_NVR
 COPY --from=nvidia-modules-legacy /lib/modules/ /usr/lib/modules/
 RUN test -f "/usr/lib/modules/${AZOTH_NVR}.x86_64/extra/nvidia/nvidia.ko"
 RUN --mount=type=bind,from=nvidia-rpms,source=/out/legacy,target=/tmp/nvidia-rpms \
+    --mount=type=bind,from=nvidia-rpms,source=/out/container-toolkit,target=/tmp/container-toolkit \
     --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
-    dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs /tmp/nvidia-rpms/*.rpm libva-nvidia-driver && \
+    dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs /tmp/nvidia-rpms/*.rpm \
+        /tmp/container-toolkit/*.rpm libva-nvidia-driver && \
     systemctl preset-all
 
 FROM gpu-${GPU} AS final

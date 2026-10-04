@@ -61,6 +61,7 @@ GROUP_CONTAINERFILES = {
     "system": [HERE.parents[2] / "system" / "Containerfile"],
 }
 NVIDIA_LOCK = HERE.parents[2] / "system" / "nvidia" / "lock.py"
+TOOLKIT_LOCK = NVIDIA_LOCK.parent / "locks" / "container-toolkit.lock"
 LOCK_NOT_PUBLISHED = 3  # lock.py's exit code for a version the repository does not publish
 LOCK_STALE = 4  # lock.py verify: the repository publishes the version with other files or checksums
 KERNEL_MD = HERE / "KERNEL.md"
@@ -302,6 +303,20 @@ def nvidia_legacy(current):
     return lock_py("latest", "legacy", "--major", current.split(".")[0]).stdout.strip()
 
 
+def toolkit_version(lock=TOOLKIT_LOCK):
+    """The locked version of NVIDIA's container toolkit: not a kernel input, so its lock is its
+    only pin (doc_system_image.md, S7)."""
+    for line in lock.read_text().splitlines():
+        if line.startswith("# version "):
+            return line.split(" ", 2)[2]
+    sys.exit(f"{lock}: no version line")
+
+
+def nvidia_toolkit(current):
+    """The highest version of the locked major that NVIDIA's container toolkit repository publishes."""
+    return lock_py("latest", "container-toolkit", "--major", current.split(".")[0]).stdout.strip()
+
+
 def lock_py(*args, allowed=(0,)):
     """Run system/nvidia/lock.py; an exit code outside `allowed` aborts the bot with its stderr."""
     done = subprocess.run([sys.executable, "-B", str(NVIDIA_LOCK), *args], capture_output=True, text=True)
@@ -330,7 +345,7 @@ def packaged_or_current(branch, candidate, current, notes, check=lock_check):
 
 
 def nvidia_pin(branch, candidate, current, notes, check=lock_check):
-    """The version the kernel group pins for one NVIDIA branch (doc_system_image.md, S7): a
+    """The version the bot pins for one NVIDIA branch (doc_system_image.md, S7): a
     newer candidate the repository packages, else the current pin. A moved pin regenerates
     its lock in the same pull request."""
     if vtuple(candidate) > vtuple(current):
@@ -344,8 +359,8 @@ def nvidia_relock(branch, current, notes, verify=lock_verify):
     The lock is verified against the repository metadata on every run: a new release or new
     checksums of the same version regenerate it. A version the repository dropped is only a
     note: image builds take the locked packages from the mirror, the mirror step that follows
-    in the same job fails when the mirror lacks them, and moving the pin is the kernel group's
-    job, so it never holds back the system base."""
+    in the same job fails when the mirror lacks them, and moving a driver pin is the kernel
+    group's job, so it never holds back the system base."""
     state = verify(branch, current)
     if state == "gone":
         notes.append(gone_note(branch, current))
@@ -355,15 +370,15 @@ def nvidia_relock(branch, current, notes, verify=lock_verify):
 
 
 def gone_note(branch, version):
-    return f"NVIDIA {branch} {version}: the repository no longer publishes it; image builds take the locked packages from the mirror (mirror.sh fails when it lacks them), and the kernel group moves the pin once a newer version is packaged"
+    return f"NVIDIA {branch} {version}: the repository no longer publishes it; image builds take the locked packages from the mirror (mirror.sh fails when it lacks them), and the bot moves the pin once a newer version is packaged"
 
 
-def lock_problems(pins, notes, verify=lock_verify):
+def lock_problems(pins, toolkit, notes, verify=lock_verify):
     """One line per NVIDIA lock that must be regenerated at the pinned version; a version the
-    repository dropped goes to notes (nvidia_relock)."""
+    repository dropped goes to notes (nvidia_relock). `toolkit` is the container toolkit's
+    version, which has no pin outside its lock."""
     problems = []
-    for branch in ("open", "legacy"):
-        version = pins[f"NVIDIA_{branch.upper()}_VERSION"]
+    for branch, version in (("open", pins["NVIDIA_OPEN_VERSION"]), ("legacy", pins["NVIDIA_LEGACY_VERSION"]), ("container-toolkit", toolkit)):
         state = verify(branch, version)
         if state == "stale":
             problems.append(f"NVIDIA {branch} {version}: the repository republished the locked packages, the lock must be regenerated")
@@ -417,6 +432,13 @@ def compute(group):
             version = pins[f"NVIDIA_{branch.upper()}_VERSION"]
             if nvidia_relock(branch, version, notes):
                 locks[branch] = version
+        # The container toolkit is not a kernel input: its version moves here, with the system
+        # base. A moved version changes the lock's `# version` line, which bot_merge.py refuses,
+        # so that pull request waits for a person.
+        toolkit = toolkit_version()
+        toolkit_next = nvidia_pin("container-toolkit", nvidia_toolkit(toolkit), toolkit, notes)
+        if toolkit_next != toolkit or nvidia_relock("container-toolkit", toolkit, notes):
+            locks["container-toolkit"] = toolkit_next
     images = {}
     if new and all(key.startswith("NVIDIA_") for key in new):
         # check-plan accepts NVIDIA pins only alone (modules-missing, doc_build_ordering.md
@@ -575,11 +597,11 @@ def main():
         sys.exit(__doc__)
     if args == ["verify"]:
         notes = []
-        problems = lock_problems(read_pins(), notes)
+        problems = lock_problems(read_pins(), toolkit_version(), notes)
         print("\n".join(notes))
         if problems:
             sys.exit("\n".join(problems))
-        print("NVIDIA locks: both match their repositories")
+        print("NVIDIA locks: every lock matches its repository")
         return
     if len(args) != 3 or args[0] not in ("check", "apply") or args[1] != "--group" or args[2] not in GROUP_CONTAINERFILES:
         sys.exit(__doc__)

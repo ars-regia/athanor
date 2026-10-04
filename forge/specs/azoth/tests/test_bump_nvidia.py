@@ -82,6 +82,22 @@ class NvidiaAvailability(unittest.TestCase):
             self.assertEqual(bump.nvidia_legacy("580.178.04"), "580.190.01")
         self.assertEqual(run.call_args.args[0][-4:], ["latest", "legacy", "--major", "580"])
 
+    def test_toolkit_candidate_comes_from_nvidia_repository(self):
+        done = subprocess.CompletedProcess([], 0, stdout="1.20.2\n", stderr="")
+        with mock.patch.object(bump.subprocess, "run", return_value=done) as run:
+            self.assertEqual(bump.nvidia_toolkit("1.20.1"), "1.20.2")
+        self.assertEqual(run.call_args.args[0][-4:], ["latest", "container-toolkit", "--major", "1"])
+
+    def test_toolkit_version_is_read_from_its_lock(self):
+        self.assertEqual(bump.TOOLKIT_LOCK.name, "container-toolkit.lock")
+        with tempfile.TemporaryDirectory() as d:
+            lock = pathlib.Path(d) / "container-toolkit.lock"
+            lock.write_text("# branch container-toolkit\n# version 1.20.1\n# repository https://x/\n")
+            self.assertEqual(bump.toolkit_version(lock), "1.20.1")
+            lock.write_text("# branch container-toolkit\n")
+            with self.assertRaises(SystemExit):
+                bump.toolkit_version(lock)
+
     def test_system_containerfile_is_tracked_by_the_system_group(self):
         self.assertEqual(bump.GROUP_CONTAINERFILES["system"], [AZOTH.parents[2] / "system" / "Containerfile"])
 
@@ -91,18 +107,18 @@ class LockProblems(unittest.TestCase):
     PINS = {"NVIDIA_OPEN_VERSION": "615.71.09", "NVIDIA_LEGACY_VERSION": "580.178.04"}
 
     def test_matching_locks_have_no_problem(self):
-        self.assertEqual(bump.lock_problems(self.PINS, [], verify=lambda branch, version: "ok"), [])
+        self.assertEqual(bump.lock_problems(self.PINS, "1.20.1", [], verify=lambda branch, version: "ok"), [])
 
     def test_a_stale_lock_is_named_with_its_version(self):
-        states = {"open": "stale", "legacy": "ok"}
-        got = bump.lock_problems(self.PINS, [], verify=lambda branch, version: states[branch])
+        states = {"open": "stale", "legacy": "ok", "container-toolkit": "ok"}
+        got = bump.lock_problems(self.PINS, "1.20.1", [], verify=lambda branch, version: states[branch])
         self.assertEqual(len(got), 1)
         self.assertIn("NVIDIA open 615.71.09", got[0])
         self.assertIn("regenerated", got[0])
 
     def test_a_vanished_version_is_named_too(self):
         notes = []
-        got = bump.lock_problems(self.PINS, notes, verify=lambda branch, version: "gone" if branch == "legacy" else "ok")
+        got = bump.lock_problems(self.PINS, "1.20.1", notes, verify=lambda branch, version: "gone" if branch == "legacy" else "ok")
         self.assertEqual(got, [])
         self.assertEqual(len(notes), 1)
         self.assertIn("NVIDIA legacy 580.178.04", notes[0])
@@ -110,8 +126,37 @@ class LockProblems(unittest.TestCase):
 
     def test_each_branch_is_verified_at_its_own_pin(self):
         seen = []
-        bump.lock_problems(self.PINS, [], verify=lambda branch, version: seen.append((branch, version)) or "ok")
-        self.assertEqual(seen, [("open", "615.71.09"), ("legacy", "580.178.04")])
+        bump.lock_problems(self.PINS, "1.20.1", [], verify=lambda branch, version: seen.append((branch, version)) or "ok")
+        self.assertEqual(seen, [("open", "615.71.09"), ("legacy", "580.178.04"), ("container-toolkit", "1.20.1")])
+
+class ToolkitInSystemGroup(unittest.TestCase):
+    """The container toolkit moves with the system group, never with the kernel group."""
+
+    def compute(self, candidate, state="ok"):
+        pins = {"NVIDIA_OPEN_VERSION": "615.71.09", "NVIDIA_LEGACY_VERSION": "580.178.04"}
+        codes = {"ok": 0, "stale": bump.LOCK_STALE}
+
+        def lock(action, branch):
+            # check: every candidate is packaged; verify: only the toolkit's state varies.
+            code = codes[state] if action == "verify" and branch == "container-toolkit" else 0
+            return subprocess.CompletedProcess([], code, stdout="", stderr="")
+
+        with mock.patch.object(bump, "read_pins", return_value=pins), \
+                mock.patch.object(bump, "toolkit_version", return_value="1.20.1"), \
+                mock.patch.object(bump, "nvidia_toolkit", return_value=candidate), \
+                mock.patch.object(bump, "lock_py", side_effect=lambda action, branch, *rest, allowed=(0,): lock(action, branch)), \
+                mock.patch.object(bump, "base_images", return_value={}):
+            return bump.compute("system")["locks"]
+
+    def test_a_newer_packaged_version_moves_the_lock(self):
+        self.assertEqual(self.compute("1.20.2"), {"container-toolkit": "1.20.2"})
+
+    def test_a_republished_current_version_regenerates_the_lock(self):
+        self.assertEqual(self.compute("1.20.1", state="stale"), {"container-toolkit": "1.20.1"})
+
+    def test_a_matching_lock_stays(self):
+        self.assertEqual(self.compute("1.20.1"), {})
+
 
 class BaseImages(unittest.TestCase):
     def containerfiles(self, d, *digests):
