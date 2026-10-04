@@ -283,7 +283,7 @@ The bar's power and session actions (`ui/power.rs`, `ui/logind.rs`) and the GIO 
 
 ---
 
-### Task 10: shelld — do-not-disturb state and admission
+### Task 10: shelld — do-not-disturb state and admission (superseded by `docs/superpowers/plans/2026-10-05-notification-center.md`, Tasks 4 and 5)
 
 **Files:** Modify `forge/specs/athanor-shelld/athanor-shelld-1.0.0/src/dnd.rs`, `sender.rs`, `notifications.rs`, `store.rs`.
 
