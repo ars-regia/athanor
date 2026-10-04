@@ -36,6 +36,7 @@ members = [
   "system/athanor-preview",
   "system/athanor-preview-render",
   "system/athanor-search",
+  "system/athanor-services",
   "system/athanor-unit",
   "system/athanor-mesh-bus",
   "system/athanor-net-unikernel",

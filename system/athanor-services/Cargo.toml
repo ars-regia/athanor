@@ -1,0 +1,18 @@
+[package]
+name = "athanor-services"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+description = "The shell's models of system services: D-Bus mirrors on zbus, off the interface thread, with no toolkit dependency"
+authors = ["Athanor Forge <forge@athanor.os>"]
+
+[features]
+# The private-bus helpers of this crate's tests, for the tests of the crates that build on it.
+testbus = []
+
+[dependencies]
+# StreamExt over zbus's signal streams, as athanor-shelld uses it.
+futures-util = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+zbus = { workspace = true }
