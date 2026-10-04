@@ -1,6 +1,6 @@
 # Athanor control center
 
-Status: **revision 1, draft of 2026-10-04, awaiting the maintainer's review.** It is the specification that `doc_shell_standard.md`, section 4, step 5 requires: one panel of quick controls opened from the bar, built on the services the bar already holds. It designs the programs and crates, the panel's contents, the detail pages it shares with the bar, the do-not-disturb state, the privileges of each control, the clipboard history and third-party tiles in their confined forms, the tests and the order of construction.
+Status: **revision 2, approved by the maintainer on 2026-10-04.** It is the specification that `doc_shell_standard.md`, section 4, step 5 requires: one panel of quick controls opened from the bar, built on the services the bar already holds. It designs the programs and crates, the panel's contents, the detail pages it shares with the bar, the do-not-disturb state, the privileges of each control, the clipboard history and third-party tiles in their confined forms, the tests and the order of construction.
 
 ## 1. Context
 
@@ -123,7 +123,7 @@ Status: **revision 1, draft of 2026-10-04, awaiting the maintainer's review.** I
 
 **CC9. Opening and closing.** The bar's button and a shortcut call `Toggle()`. The panel closes on an outside click, on Escape and on the loss of focus, as the shield's sheet does (BR6), and the notification popups stay hidden while it is open. It opens on the focused output, under the bar's button, or above it when the bar is at the bottom.
 
-- **The shortcut:** Super+A belongs to the application library (`doc_launcher.md`). The proposal is Super+C, written once per user at the first start in the way LA8 writes Super, and never again (doubt 2). Super+N and Super+V are kept for the notification center and the clipboard page.
+- **The shortcut:** Super+A belongs to the application library (`doc_launcher.md`). Super+C opens the control center, decided by the maintainer on 2026-10-04; it is written once per user at the first start in the way LA8 writes Super, and never again. Super+N and Super+V are kept for the notification center and the clipboard page.
 
 **CC10. The clipboard history, confined.** F-cc-56 stays in the register in this form; if spike S3 fails, it returns to the maintainer as an exclusion.
 
@@ -163,11 +163,11 @@ Status: **revision 1, draft of 2026-10-04, awaiting the maintainer's review.** I
 - **The bar's tests** run unchanged before and after the move to the shared crates.
 - **Scenarios** of ST6 cover each tile's on, off and failure states, and opening every page from the bar and from the panel.
 
-**CC14. Construction.** Each step merges on its own. The panel stays disabled by default until the last.
+**CC14. Construction.** Each step merges on its own. The panel stays disabled by default until the last. From step 2 on, each build is installed on the reference laptop and judged by the maintainer on screen before it merges; the logic's tests run on every change, and the surface cases, the measurement and the aesthetic signature run at step 5, as the maintainer decided on 2026-10-04.
 
 1. **Foundations, with no change to what the bar does.** `athanor-services` and `athanor-controls` extracted from the bar, each model rewritten on `zbus` (CC3) in a change of its own, with the bar's tests and memory measurement compared before and after; the program skeleton with the bar's button and the shortcut; the tile file; the do-not-disturb state and the admission in `athanor-shelld`.
-2. **The panel with what exists:** the 11 `have` entries, full media controls, the Settings button.
-3. **What existing services already offer:** customisable tiles, dark mode, keyboard backlight, battery health and charge limit, the rest of the network, Bluetooth and audio pages, removable drives, print queue, background applications, resource graphs, the user's card, third-party tiles.
+2. **The first panel the maintainer sees:** the Wi-Fi, Bluetooth and airplane-mode tiles, output and input volume, display brightness, power profile, do not disturb, dark mode, full media controls, the battery level and the Settings button, with the detail pages the bar already has.
+3. **What existing services already offer:** customisable tiles, keyboard backlight, battery health and charge limit, the rest of the network, Bluetooth and audio pages, removable drives, print queue, background applications, resource graphs, the user's card, third-party tiles.
 4. **What needs a spike or another specification first:** night light, keep awake, casting and display mode, rotation lock, on-screen keyboard, external monitors, the clipboard history (section 4); screenshot, colour picker and screen recording, after the portal of `doc_portal.md`.
 5. **The gate of the standard:** measurement on the reference laptop, scenarios, accessibility and languages, the maintainer's aesthetic signature. Only then is `athanor-control-center.service` enabled by preset.
 
@@ -181,8 +181,8 @@ Applied with the approval of this document.
 
 ## 4. Open doubts
 
-1. **The models on `zbus`** (CC3): the maintainer confirms the choice and its price, a rewrite of four modules of the bar.
-2. **The shortcut** (CC9): Super+C is proposed; the maintainer decides.
+1. **The models on `zbus`** (CC3): confirmed by the maintainer on 2026-10-04, before the panel, at the price of a rewrite of four modules of the bar.
+2. **The shortcut** (CC9): Super+C, decided on 2026-10-04.
 3. **The spikes**, each a short probe on the image as shipped, run before step 4 of CC14. A spike that fails sends its entry back to the maintainer, to be designed again or excluded with a written reason.
    - S1. Night light on cosmic-comp 1.8: whether it offers gamma control to a client or a night-light setting of its own.
    - S2. Keep awake: whether cosmic-comp's idle handling honours a logind idle inhibitor, or needs the Wayland idle-inhibit protocol, which binds to a visible surface.
