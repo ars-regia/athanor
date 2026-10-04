@@ -1,6 +1,6 @@
 name: System Image Check
 
-# Pull requests that change the system images build them on the self-hosted runner, with the
+# Pull requests that change the system images build them on a GitHub runner, with the
 # UKI signed by a throwaway key and without pushing, and report the package delta of the
 # default image against the published athanor-system (docs/architecture/doc_system_image.md,
 # S2, S8, section 4). The gates of system/nvidia/gate.sh run inside the builds. Which images
@@ -78,34 +78,15 @@ jobs:
 
   build:
     needs: kernel-artifacts
-    # The self-hosted runner executes only code of this repository: a pull request from a
-    # fork never reaches it.
-    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
-    # A KVM guest created per job, whose podman storage lives on the cache disk that persists
-    # across jobs (scripts/runner/runner.env): builds pull with --pull=newer, and the last
-    # step removes the images of this job.
-    runs-on: self-hosted
+    # On a GitHub runner: the single self-hosted runner is kept for compiling the kernel.
+    # The three images build in turn in one job, as the Orchestrator's dag-system-image does.
+    runs-on: ubuntu-24.04
     timeout-minutes: 300
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Reclaim what earlier jobs left on the cache disk
-        # The podman storage lives on the cache disk, which outlives this guest, so the
-        # leftovers of earlier jobs pile up there: images, and the containers buildah
-        # leaves behind, which podman calls external and which hold those images. They are
-        # cleared here, before this job builds anything, because at this point nothing in
-        # the storage belongs to a build in flight and a failure is a real problem.
-        env:
-          TMPDIR: ${{ runner.temp }}
-        run: |
-          set -euo pipefail
-          # The containers buildah leaves behind are external to podman: they hold images
-          # and `system prune --external` walks away from the ones an interrupted build
-          # left locked, so they are removed by name before the images are pruned.
-          mapfile -t stale < <(podman ps --all --external --format '{{.ID}}')
-          [[ ${#stale[@]} -eq 0 ]] || podman rm --force "${stale[@]}"
-          podman system prune --force --all
-          df -h /var/lib/runner/cache
+      - name: Maximize build space
+        uses: ublue-os/remove-unwanted-software@cc0becac701cf642c8f0a6613bbdaf5dc36b259e # v9
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
@@ -119,19 +100,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
-          TMPDIR: ${{ runner.temp }}
         run: |
           set -euo pipefail
           echo "${GITHUB_TOKEN}" | podman login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
 
       - name: Build the planned images (throwaway UKI key)
-        # The runner guest's system disk is small, and podman stages downloads and build copies
-        # in TMPDIR (default /var/tmp); TMPDIR points to the job's temp directory on the scratch disk.
         # Which GPUs to build, none, one or all three, follows the kernel artifacts of this pull
         # request's pins (system/kernel-artifacts.sh check-plan, O7): an empty list is a pure
         # kernel pin bump, and the loop below then builds nothing.
-        env:
-          TMPDIR: ${{ runner.temp }}
         run: |
           set -euo pipefail
           gpus=$(bash system/kernel-artifacts.sh get check_gpus)
@@ -143,24 +119,10 @@ jobs:
         if: ${{ needs.kernel-artifacts.outputs.check_delta == 'true' }}
         env:
           OWNER: ${{ github.repository_owner }}
-          TMPDIR: ${{ runner.temp }}
         # tee: the job summary cannot be read through the REST API, the log can (gh run view --log).
         run: |
           set -euo pipefail
           bash system/package-delta.sh "ghcr.io/${OWNER,,}/athanor-system:latest" localhost/athanor-system:check | tee -a "$GITHUB_STEP_SUMMARY"
-
-      - name: Remove the images of this job
-        if: always()
-        env:
-          TMPDIR: ${{ runner.temp }}
-        run: |
-          set -euo pipefail
-          # Only what this job tagged: the storage keeps the rest until the next job prunes
-          # it on the way in, because a build that is still running holds images no prune
-          # can take, and this step must not end a green check with a housekeeping error.
-          for name in athanor-system athanor-system-nvidia athanor-system-nvidia-legacy; do
-            if podman image exists "localhost/$name:check"; then podman rmi --force "localhost/$name:check"; fi
-          done
 
   merge:
     needs: build
