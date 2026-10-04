@@ -41,10 +41,12 @@ RuntimeDirectoryPreserve=yes
 # manager creates both before it builds the sandbox: with ProtectHome=read-only the daemon
 # could not create them on a first start, and a path that does not exist is dropped from
 # ReadWritePaths. ConfigurationDirectory only creates; it does not make the directory
-# writable, so ReadWritePaths does, for these two directories and nothing else under $HOME.
+# writable, so ReadWritePaths does (%E is $XDG_CONFIG_HOME as the manager sees it, the root
+# ConfigurationDirectory uses); StateDirectory is writable by itself. The daemon takes both
+# paths from $STATE_DIRECTORY and $CONFIGURATION_DIRECTORY, so they cannot disagree.
 StateDirectory=athanor/shelld
 ConfigurationDirectory=athanor/notifications
-ReadWritePaths=%h/.local/state/athanor/shelld %h/.config/athanor/notifications
+ReadWritePaths=%E/athanor/notifications
 
 ProtectSystem=strict
 ProtectHome=read-only

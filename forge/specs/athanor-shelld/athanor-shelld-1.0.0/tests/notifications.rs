@@ -831,3 +831,37 @@ async fn ending_do_not_disturb_posts_a_summary_whose_default_action_opens_the_ce
     assert_eq!(pages.recv().await.as_deref(), Some("notifications"));
     drop(daemon);
 }
+
+#[tokio::test]
+async fn the_summary_that_fills_the_store_closes_the_notification_it_evicts() {
+    let bus = Bus::start("summary-evicts");
+    let (_daemon, bar, _center, app) = units(&bus, APP_CGROUP).await;
+    let bar_proxy = private(&bar).await;
+    let mut closed = bar_proxy.receive_signal("Closed").await.expect("subscribe");
+    let _: Vec<WireNotification> = bar_proxy.call("List", &()).await.expect("List");
+    bar_proxy
+        .call::<_, _, ()>("SetDoNotDisturb", &(true,))
+        .await
+        .expect("on");
+    let public = public(&app).await;
+    let first = notify(&public, 0, "oldest", "", &[], HashMap::new()).await;
+    for n in 1..CAPACITY {
+        notify(&public, 0, &n.to_string(), "", &[], HashMap::new()).await;
+    }
+    bar_proxy
+        .call::<_, _, ()>("SetDoNotDisturb", &(false,))
+        .await
+        .expect("off");
+    let (id, reason): (u32, u32) = closed
+        .next()
+        .await
+        .expect("signal")
+        .body()
+        .deserialize()
+        .expect("args");
+    assert_eq!(
+        (id, reason),
+        (first, 1),
+        "the summary evicted the oldest, and said so"
+    );
+}

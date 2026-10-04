@@ -5,7 +5,7 @@ Release:        2%{?dist}
 Summary:        The Athanor shell's daemon: desktop notifications and the tray watcher
 License:        MIT
 
-BuildRequires:  rust cargo gcc pkgconf-pkg-config
+BuildRequires:  rust cargo gcc pkgconf-pkg-config gettext
 
 %description
 Owns org.freedesktop.Notifications (Desktop Notifications 1.2) and
@@ -20,6 +20,12 @@ preset, and activated by the bus when a client calls one of its names first.
 %set_build_flags
 cargo build --release --locked -p %{name}
 
+for catalog in forge/specs/athanor-shelld/athanor-shelld-1.0.0/po/*.po; do
+    lang=$(basename "$catalog" .po)
+    mkdir -p "locale-build/$lang/LC_MESSAGES"
+    msgfmt --check --output-file="locale-build/$lang/LC_MESSAGES/athanor-shelld.mo" "$catalog"
+done
+
 %install
 install -D -m 0755 target/release/athanor-shelld %{buildroot}/usr/bin/athanor-shelld
 install -D -m 0644 forge/specs/athanor-shelld/athanor-shelld-1.0.0/data/athanor-shelld.service \
@@ -31,12 +37,18 @@ for name in org.freedesktop.Notifications org.kde.StatusNotifierWatcher; do
         "%{buildroot}/usr/share/dbus-1/services/$name.service"
 done
 
+mkdir -p %{buildroot}/usr/share/locale
+cp -a locale-build/. %{buildroot}/usr/share/locale/
+rm -rf locale-build
+
 %files
 /usr/bin/athanor-shelld
 /usr/lib/systemd/user/athanor-shelld.service
 /usr/lib/systemd/user-preset/80-athanor-shelld.preset
 /usr/share/dbus-1/services/org.freedesktop.Notifications.service
 /usr/share/dbus-1/services/org.kde.StatusNotifierWatcher.service
+%lang(it) /usr/share/locale/it/LC_MESSAGES/athanor-shelld.mo
+%lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-shelld.mo
 
 %changelog
 * Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2

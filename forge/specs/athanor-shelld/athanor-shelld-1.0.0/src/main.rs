@@ -150,17 +150,28 @@ fn xdg_absolute(value: Option<OsString>) -> Option<PathBuf> {
 /// `$XDG_CONFIG_HOME/athanor/notifications` for the rules and the settings, and the crash-loop
 /// record in the unit's runtime directory.
 fn dirs() -> Option<(PathBuf, PathBuf, PathBuf)> {
-    let state = xdg_absolute(env::var_os("XDG_STATE_HOME"))
-        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state")))
-        .filter(|dir| dir.is_absolute())?
-        .join("athanor/shelld");
-    let config = xdg_absolute(env::var_os("XDG_CONFIG_HOME"))
-        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
-        .filter(|dir| dir.is_absolute())?
-        .join("athanor/notifications");
-    let runtime = xdg_absolute(env::var_os("RUNTIME_DIRECTORY")).or_else(|| {
-        xdg_absolute(env::var_os("XDG_RUNTIME_DIR")).map(|dir| dir.join("athanor-shelld"))
+    resolve_dirs(|name| env::var_os(name))
+}
+
+/// `$STATE_DIRECTORY` and `$CONFIGURATION_DIRECTORY` first: they are the directories the unit
+/// created and made writable (`StateDirectory=`, `ConfigurationDirectory=`), whatever the
+/// user's XDG variables say. Outside a unit the XDG variables, then `$HOME`, decide.
+fn resolve_dirs(var: impl Fn(&str) -> Option<OsString>) -> Option<(PathBuf, PathBuf, PathBuf)> {
+    let home = || var("HOME").map(PathBuf::from);
+    let state = xdg_absolute(var("STATE_DIRECTORY")).or_else(|| {
+        xdg_absolute(var("XDG_STATE_HOME"))
+            .or_else(|| home().map(|home| home.join(".local/state")))
+            .filter(|dir| dir.is_absolute())
+            .map(|dir| dir.join("athanor/shelld"))
     })?;
+    let config = xdg_absolute(var("CONFIGURATION_DIRECTORY")).or_else(|| {
+        xdg_absolute(var("XDG_CONFIG_HOME"))
+            .or_else(|| home().map(|home| home.join(".config")))
+            .filter(|dir| dir.is_absolute())
+            .map(|dir| dir.join("athanor/notifications"))
+    })?;
+    let runtime = xdg_absolute(var("RUNTIME_DIRECTORY"))
+        .or_else(|| xdg_absolute(var("XDG_RUNTIME_DIR")).map(|dir| dir.join("athanor-shelld")))?;
     Some((state, config, runtime.join("failures")))
 }
 
@@ -176,6 +187,46 @@ mod tests {
         assert_eq!(
             xdg_absolute(Some(OsString::from("/absolute/path"))),
             Some(PathBuf::from("/absolute/path"))
+        );
+    }
+
+    #[test]
+    fn the_directories_of_the_unit_win_over_the_xdg_variables() {
+        let env = |pairs: &'static [(&str, &str)]| {
+            move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| OsString::from(value))
+            }
+        };
+        let xdg = &[
+            ("XDG_STATE_HOME", "/x/state"),
+            ("XDG_CONFIG_HOME", "/x/config"),
+            ("XDG_RUNTIME_DIR", "/run/u"),
+        ];
+        let (state, config, _) = resolve_dirs(env(xdg)).expect("xdg");
+        assert_eq!(
+            (state, config),
+            (
+                PathBuf::from("/x/state/athanor/shelld"),
+                PathBuf::from("/x/config/athanor/notifications")
+            )
+        );
+        let unit = &[
+            ("STATE_DIRECTORY", "/u/state/athanor/shelld"),
+            ("CONFIGURATION_DIRECTORY", "/u/config/athanor/notifications"),
+            ("XDG_STATE_HOME", "/x/state"),
+            ("XDG_CONFIG_HOME", "/x/config"),
+            ("XDG_RUNTIME_DIR", "/run/u"),
+        ];
+        let (state, config, _) = resolve_dirs(env(unit)).expect("unit");
+        assert_eq!(
+            (state, config),
+            (
+                PathBuf::from("/u/state/athanor/shelld"),
+                PathBuf::from("/u/config/athanor/notifications")
+            )
         );
     }
 }

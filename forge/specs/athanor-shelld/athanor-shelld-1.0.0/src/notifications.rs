@@ -480,6 +480,23 @@ pub async fn settle(conn: &Connection, state: &Shared, settled: Settled) {
     }
 }
 
+/// What a stored notification sets off: a `Closed` for each one it pushed out of a full store
+/// (the notification itself is already held), then `Added` or `Replaced` to the units.
+async fn announce(conn: &Connection, state: &Shared, outcome: &Outcome, wire: &WireNotification) {
+    for id in &outcome.evicted {
+        emit_closed(conn, state, *id, Reason::Expired).await;
+    }
+    let replaced = outcome.replaced;
+    each_destination(conn, state, "a notification", |emitter| async move {
+        if replaced {
+            Private::replaced(&emitter, wire).await
+        } else {
+            Private::added(&emitter, wire).await
+        }
+    })
+    .await;
+}
+
 /// "{n} notifications while do not disturb was on", transient, whose `default` action opens
 /// the control center on the notifications (NC6). Sent through the daemon's own connection:
 /// it is the sender, so its action is unavailable only when the daemon is gone.
@@ -493,7 +510,7 @@ async fn post_summary(conn: &Connection, state: &Shared, missed: u32) {
         u64::from(missed),
     )
     .replace("{n}", &missed.to_string());
-    let wire = {
+    let (outcome, wire) = {
         let mut state = lock(state);
         let seconds = state.rules.settings().timeout_normal_s;
         let content = Content {
@@ -512,13 +529,11 @@ async fn post_summary(conn: &Connection, state: &Shared, missed: u32) {
         let outcome = state
             .store
             .notify(content, 0, now, unix_now(), Identity::Other, own, true);
-        from_notification(&outcome.notification, now)
+        state.dirty.notify_one();
+        let wire = from_notification(&outcome.notification, now);
+        (outcome, wire)
     };
-    let wire = &wire;
-    each_destination(conn, state, "the summary", |emitter| async move {
-        Private::added(&emitter, wire).await
-    })
-    .await;
+    announce(conn, state, &outcome, &wire).await;
 }
 
 pub struct Notifications {
@@ -584,19 +599,9 @@ impl Notifications {
             Arrival::Refused(id) => return id,
             Arrival::Kept(kept) => *kept,
         };
-        for id in &outcome.evicted {
-            emit_closed(conn, &self.state, *id, Reason::Expired).await;
-        }
-        let (wire_ref, replaced) = (&wire, outcome.replaced);
-        each_destination(conn, &self.state, "a notification", |emitter| async move {
-            if replaced {
-                Private::replaced(&emitter, wire_ref).await
-            } else {
-                Private::added(&emitter, wire_ref).await
-            }
-        })
-        .await;
-        wire.id
+        let id = wire.id;
+        announce(conn, &self.state, &outcome, &wire).await;
+        id
     }
 
     async fn close_notification(

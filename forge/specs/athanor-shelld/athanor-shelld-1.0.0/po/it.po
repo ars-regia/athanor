@@ -1,0 +1,20 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: athanor-shelld\n"
+"Report-Msgid-Bugs-To: forge@athanor.os\n"
+"Language: it\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: src/notifications.rs:508
+#, rust-format
+msgid "{n} notification while do not disturb was on"
+msgid_plural "{n} notifications while do not disturb was on"
+msgstr[0] "{n} notifica mentre era attivo non disturbare"
+msgstr[1] "{n} notifiche mentre era attivo non disturbare"
+
+#: src/notifications.rs:520
+msgid "Show"
+msgstr "Mostra"
