@@ -98,7 +98,7 @@ They are the first tasks of the plan, and each gives an answer, not code we keep
 
 ## 4. Order of work
 
-1. **The spikes and the skeleton of the bench:** the container, input, capture, and the timing instrumentation in `athanor-bar` and `athanor-dock`.
+1. **The spikes and the skeleton of the bench:** the connection to the reference machine, input, capture, and the timing instrumentation in `athanor-bar` and `athanor-dock`.
 2. **Register version 1:** research over every reference, with sources; the maintainer approves and freezes it.
 3. **The measurement of today's bar and dock.** What fails becomes a list of defects, repaired first (ST2), starting with the dock's auto-hide and its scenarios (ST6), and the restart delay of the three units (ST5).
 4. **`doc_visual_language.md`:** drafts beside the references, the maintainer's approval, the rules of ST8.
