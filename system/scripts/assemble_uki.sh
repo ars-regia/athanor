@@ -113,7 +113,27 @@ if [ -z "$STUB_PATH" ]; then
 fi
 
 UKIFY_BIN=$(command -v ukify || find /usr/lib/systemd /usr/bin -name "ukify" 2>/dev/null | sort -V | head -n 1 || echo "ukify")
-CMDLINE_STR="quiet splash fastboot intel_iommu=on efi=disable_early_pci_dma rootflags=noatime slab_nomerge randomize_kstack_offset=on vsyscall=none debugfs=off module.sig_enforce=1 lockdown=integrity init_on_free=1"
+# The UKI carries the command line the image declares in /usr/lib/bootc/kargs.d, the
+# arguments bootc gives its own boot entries: the base command line of
+# athanor-kernel-profile and, on the GPU variants, the NVIDIA one
+# (docs/architecture/doc_kernel_profile.md, section 6). Files apply in name order, as bootc
+# applies them, and only those matching this architecture.
+CMDLINE_STR=$(python3 - /usr/lib/bootc/kargs.d "$(uname -m)" <<'PY'
+import pathlib
+import sys
+import tomllib
+
+directory, architecture = pathlib.Path(sys.argv[1]), sys.argv[2]
+arguments = []
+for path in sorted(directory.glob("*.toml")):
+    document = tomllib.loads(path.read_text())
+    if architecture in document.get("match-architectures", [architecture]):
+        arguments += document["kargs"]
+if not arguments:
+    sys.exit(f"no kernel arguments for {architecture} in {directory}")
+print(" ".join(arguments))
+PY
+)
 
 if command -v "$UKIFY_BIN" >/dev/null 2>&1 || [ -f "$UKIFY_BIN" ]; then
     "$UKIFY_BIN" build \

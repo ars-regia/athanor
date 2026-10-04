@@ -66,10 +66,6 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 /usr/lib/systemd/journald.conf.d/*
 /usr/lib/fedora-release
 /usr/lib/os-release
-/usr/lib/bootc/kargs.d/02-hardening.toml
-/usr/lib/bootc/kargs.d/03-ima-evm.toml
-/usr/lib/bootc/kargs.d/04-confidential-compute.toml
-/usr/lib/bootc/kargs.d/05-dma-protection.toml
 /etc/grub.d/01_athanor_grub_auth
 /usr/lib/dracut/dracut.conf.d/*
 /usr/lib/systemd/system-preset/*
@@ -80,12 +76,13 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 /usr/share/polkit-1/rules.d/*
 
 %changelog
-* Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 43.0.0-11
-- Drop the kernel arguments that contradict doc_kernel_profile.md: `oops=panic` (D19: the first
-  oops would panic before oops_limit is consulted), `pti=on` (forces page table isolation on CPUs
-  that are not affected by Meltdown), and `amd_iommu=on`, `lam=on` and `arm64.mte=on`, which are
-  not parameters of those drivers or of x86. Remove kargs.d/06-mte-lam.toml, which held the last
-  two. `intel_iommu=on` and `efi=disable_early_pci_dma` stay until the build carries them (P4b).
+* Thu Oct 01 2026 Athanor Forge <forge@athanor.os> - 43.0.0-11
+- Drop kargs.d 02-06: the base kernel command line now comes from athanor-kernel-profile,
+  generated from profile.toml (doc_kernel_profile.md, section 6). Removed with them:
+  wrong or invalid parameters (pti=on, amd_iommu=on, lam=on, arm64.mte=on), oops=panic
+  (D19), parameters that only restate kernel defaults, and the capability-specific
+  mem_encrypt, kvm_amd.sev and kvm_intel.tdx, which belong to roles.
+
 * Thu Sep 24 2026 Athanor Forge <forge@athanor.os> - 43.0.0-10
 - Drop the override of bootc-fetch-apply-updates.service: it called `bootc upgrade --stage`,
   a flag bootc 1.16 does not have. The stock timer stays disabled by athanor-update's preset.

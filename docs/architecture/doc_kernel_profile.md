@@ -323,6 +323,14 @@ section 14 and `forge/specs/azoth/cmdline` change as follows:
   `arm64.mte=on` (not x86 parameters);
 - capability-specific, never global: `mem_encrypt=on`, `kvm_amd.sev=1`, `kvm_intel.tdx=1`.
 
+The `[base.cmdline]` table of `profile.toml` is the single source of the base command line:
+`kernel_profile.py` generates from it the `kargs.d/10-athanor-kernel-profile.toml` file of
+`athanor-kernel-profile` and `forge/specs/azoth/cmdline`, `check` fails when either differs
+from the manifest, and `athanor-profile-check` compares the parameters with `/proc/cmdline`.
+The UKI takes its command line from the image's `kargs.d`, and the kickstart adds none.
+The defaults that make the dropped parameters redundant are declared as locked kconfig
+settings.
+
 NVIDIA parameters and dracut configuration move out of the base: they apply only in the NVIDIA image variants (doc_system_image.md, S4 and S5). `ima_policy=tcb` is removed in P4b, when the policy of D46 replaces it; IMA measurement follows D23 with the
 key and policy rules of D46.
 
@@ -927,13 +935,12 @@ Found on the running system and in the repository (2026-09-14):
   updates automatically and the preset line naming the non-existent `bootc-fetch-apply.timer`
   are removed; `athanor-update` disables `bootc-fetch-apply-updates.timer` and ships a
   `--download-only` timer that follows section 8 (`doc_shell.md`, SH11; `doc_update_trust.md`, UT1).
-- **Command line sources:** `kargs.d` 02–06, `system/athanor-install.ks`,
-  `system/scripts/assemble_uki.sh`, `forge/specs/athanor-secure-boot/SOURCES/usr/libexec/athanor-secure-boot-measure.sh`
-  (`iommu=pt`, `oops=panic`,
-  `pti=on`, `zswap.enabled=1`, `splash`, `fastboot`, `rootflags=noatime`, ...) and
-  `forge/specs/azoth/cmdline`, which the boot matrix uses with `zswap.enabled=1`,
-  `lockdown=` and `preempt=full`: all aligned to section 6 (P3; the boot matrix command
-  line in P2).
+- **Command line sources** (done): `kargs.d` 02–06, `system/athanor-install.ks`,
+  `system/scripts/assemble_uki.sh`, `forge/build/build_uki.sh` and
+  `forge/specs/azoth/cmdline` carried `iommu=pt`, `oops=panic`, `pti=on`,
+  `zswap.enabled=1`, `preempt=full`, `splash`, `fastboot`, `rootflags=noatime` and more.
+  `kargs.d` 02–06 and `build_uki.sh` are removed, the kickstart no longer appends a command
+  line, and the UKI and the boot matrix take theirs from `profile.toml` (section 6).
 - **Sysctl and memory** (P3): `99-bore.conf` forces BBRv1 and CFS tunables that fail
   under EEVDF; `99-azoth-sysfs.conf` enables KSM; the machine has no swap at all;
   `kernel.yama.ptrace_scope` is 0, and `oops=panic` sets `kernel.panic_on_oops=1` on the
