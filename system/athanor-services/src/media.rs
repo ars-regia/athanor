@@ -11,9 +11,12 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::OsString;
 use std::future::Future;
+use std::io::Read;
 use std::os::unix::ffi::OsStringExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use athanor_unit::text::{line, NAME_CHARS};
@@ -43,7 +46,7 @@ pub const MAX_PLAYERS: usize = 16;
 pub const MAX_ART_BYTES: usize = 1 << 20;
 /// The longest path a `file:` URI may name, as `PATH_MAX`.
 const MAX_PATH_BYTES: usize = 4096;
-/// How long the model waits for the file system to say what an artwork path is.
+/// How long the model waits for the file system to open and read an artwork file.
 const STAT_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -52,20 +55,17 @@ pub struct Track {
     pub artist: Option<String>,
 }
 
-/// A player's cover. The model has checked it, but a reader opens it later: it opens with
-/// `O_NONBLOCK` and checks again, since the file may have been replaced in between.
+/// A player's cover: the image's bytes, at most [`MAX_ART_BYTES`], read by the model from a
+/// `file:` URI's regular file or decoded from a `data:` URI. Shared, so a state is cloned and
+/// compared without copying up to 1 MiB per player.
 #[derive(Clone, PartialEq, Eq)]
 pub enum Art {
-    /// A regular file named by a `file:` URI.
-    File(PathBuf),
-    /// The decoded bytes of a `data:` URI, at most [`MAX_ART_BYTES`].
-    Data(Vec<u8>),
+    Data(Arc<[u8]>),
 }
 
 impl std::fmt::Debug for Art {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Art::File(path) => f.debug_tuple("File").field(path).finish(),
             Art::Data(bytes) => write!(f, "Data({} bytes)", bytes.len()),
         }
     }
@@ -246,20 +246,44 @@ fn data_uri(rest: &str) -> Option<Vec<u8>> {
     base64(payload).filter(|bytes| !bytes.is_empty() && bytes.len() <= MAX_ART_BYTES)
 }
 
-/// The cover a player's `mpris:artUrl` names (CC8). `file:` is a regular file only: a FIFO or
-/// a device would hang whoever opens it. `https:` and anything else is `None`, since the panel
-/// may open no network connection.
+/// `O_NONBLOCK` of Linux on the architectures Athanor builds for (x86-64, aarch64): opening a
+/// FIFO then returns at once instead of waiting for a writer. `O_CLOEXEC` is std's default.
+const O_NONBLOCK: i32 = 0o4000;
+
+/// The bytes of the regular file at `path`, at most [`MAX_ART_BYTES`]. The file is opened
+/// once without blocking and judged by `fstat` of the open descriptor, so a path swapped for a
+/// FIFO or a device after any earlier look cannot hang the model, and a symlink to one is
+/// refused too. At most one byte more than the limit is read, so a file that grows is
+/// refused instead of read whole.
+fn read_art_file(path: &std::path::Path) -> Option<Vec<u8>> {
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(O_NONBLOCK)
+        .open(path)
+        .ok()?;
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() || usize::try_from(metadata.size()).ok()? > MAX_ART_BYTES {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    file.by_ref()
+        .take(MAX_ART_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    (bytes.len() <= MAX_ART_BYTES).then_some(bytes)
+}
+
+/// The cover a player's `mpris:artUrl` names (CC8). `file:` is read here, by a blocking task
+/// bounded by [`STAT_TIMEOUT`]; `https:` and anything else is `None`, since the panel may open
+/// no network connection.
 async fn resolve_art(url: &str) -> Option<Art> {
     if let Some(rest) = url.strip_prefix("data:") {
-        return data_uri(rest).map(Art::Data);
+        return data_uri(rest).map(|bytes| Art::Data(bytes.into()));
     }
     let path = file_path(url)?;
-    // `metadata` follows a symlink, so a link to a device is a device.
-    let metadata = timeout(STAT_TIMEOUT, tokio::fs::metadata(&path))
-        .await
-        .ok()?
-        .ok()?;
-    metadata.is_file().then_some(Art::File(path))
+    let read = tokio::task::spawn_blocking(move || read_art_file(&path));
+    let bytes = timeout(STAT_TIMEOUT, read).await.ok()?.ok()??;
+    Some(Art::Data(bytes.into()))
 }
 
 /// Starts the model on `handle`'s runtime. The receiver ends when the model does: without the
@@ -323,13 +347,13 @@ fn follow(
     connection: &Connection,
     followed: &mut BTreeMap<String, Followed>,
     name: &str,
-) {
+) -> bool {
     if followed.contains_key(name) {
-        return;
+        return false;
     }
     if followed.len() >= MAX_PLAYERS {
         tracing::warn!(name, "too many media players; this one is not followed");
-        return;
+        return true;
     }
     let mirror = mirror::spawn(
         handle,
@@ -338,6 +362,32 @@ fn follow(
         Source::Fixed(vec![(MPRIS_PATH, MPRIS_ROOT), (MPRIS_PATH, MPRIS_PLAYER)]),
     );
     followed.insert(name.to_owned(), Followed { mirror, art: None });
+    false
+}
+
+/// Follows the players `ListNames` shows, as many as the cap allows. Returns whether one was
+/// turned away at the cap, so the model lists again when a followed player leaves.
+async fn follow_listed(
+    dbus: &DBusProxy<'_>,
+    handle: &Handle,
+    connection: &Connection,
+    followed: &mut BTreeMap<String, Followed>,
+) -> bool {
+    let mut turned_away = false;
+    match timeout(TIMEOUT, dbus.list_names()).await {
+        Ok(Ok(names)) => {
+            for name in names.iter().filter(|name| is_player(name)) {
+                turned_away |= follow(handle, connection, followed, name);
+            }
+        }
+        // Listed all the same: a player that appears later is followed, and the controls
+        // need not wait for a listing that is not coming.
+        Ok(Err(err)) => {
+            tracing::warn!(error = %err, "ListNames failed; players are followed as they appear")
+        }
+        Err(_) => tracing::warn!("ListNames did not answer; players are followed as they appear"),
+    }
+    turned_away
 }
 
 async fn run(
@@ -365,19 +415,7 @@ async fn run(
         }
     };
     let mut followed: BTreeMap<String, Followed> = BTreeMap::new();
-    match timeout(TIMEOUT, dbus.list_names()).await {
-        Ok(Ok(names)) => {
-            for name in names.iter().filter(|name| is_player(name)) {
-                follow(handle, &connection, &mut followed, name);
-            }
-        }
-        // Listed all the same: a player that appears later is followed, and the controls
-        // need not wait for a listing that is not coming.
-        Ok(Err(err)) => {
-            tracing::warn!(error = %err, "ListNames failed; players are followed as they appear")
-        }
-        Err(_) => tracing::warn!("ListNames did not answer; players are followed as they appear"),
-    }
+    let mut turned_away = follow_listed(&dbus, handle, &connection, &mut followed).await;
     let mut chosen: Option<String> = None;
     let mut refused = 0;
     let mut last = read_state(&mut followed, &mut chosen, refused).await;
@@ -388,16 +426,17 @@ async fn run(
     let mut running: Option<Running> = None;
     loop {
         let mut relevant = true;
+        let mut freed = false;
         tokio::select! {
             change = owners.next() => {
                 let Some(change) = change else { return };
                 match change.args() {
                     Ok(args) if is_player(args.name().as_str()) => {
                         if args.new_owner().is_some() {
-                            follow(handle, &connection, &mut followed, args.name().as_str());
+                            turned_away |= follow(handle, &connection, &mut followed, args.name().as_str());
                         } else {
                             // Dropping the mirror's receiver ends it.
-                            followed.remove(args.name().as_str());
+                            freed = followed.remove(args.name().as_str()).is_some();
                         }
                     }
                     _ => relevant = false,
@@ -405,7 +444,7 @@ async fn run(
             }
             (name, alive) = any_changed(&mut followed) => {
                 if !alive {
-                    followed.remove(&name);
+                    freed = followed.remove(&name).is_some();
                 }
             }
             command = commands.recv() => match command {
@@ -439,6 +478,10 @@ async fn run(
                     refused += 1;
                 }
             }
+        }
+        // A name turned away at the cap is followed once a slot is free.
+        if freed && turned_away {
+            turned_away = follow_listed(&dbus, handle, &connection, &mut followed).await;
         }
         if running.is_none() {
             running = waiting.pop_front().map(|(player, command)| {
@@ -706,8 +749,19 @@ mod tests {
         let uri = |path: &std::path::Path| format!("file://{}", path.display());
         assert_eq!(
             resolve_art(&uri(&file)).await,
-            Some(Art::File(file.clone()))
+            Some(Art::Data(b"png".to_vec().into()))
         );
+        let at_cap = dir.join("cap.png");
+        std::fs::write(&at_cap, vec![7u8; MAX_ART_BYTES]).unwrap();
+        let over = dir.join("over.png");
+        std::fs::write(&over, vec![7u8; MAX_ART_BYTES + 1]).unwrap();
+        assert!(matches!(
+            resolve_art(&uri(&at_cap)).await,
+            Some(Art::Data(bytes)) if bytes.len() == MAX_ART_BYTES
+        ));
+        assert_eq!(resolve_art(&uri(&over)).await, None, "over the size limit");
+        // The reader itself, as the model calls it: a FIFO is refused without blocking.
+        assert_eq!(read_art_file(&fifo), None);
         assert_eq!(
             resolve_art(&uri(&fifo)).await,
             None,
@@ -723,11 +777,11 @@ mod tests {
         assert_eq!(resolve_art("http://example.org/cover.png").await, None);
         assert_eq!(
             resolve_art("data:image/png;base64,cG5n").await,
-            Some(Art::Data(b"png".to_vec()))
+            Some(Art::Data(b"png".to_vec().into()))
         );
         assert_eq!(
             resolve_art("data:image/png;base64,cA==").await,
-            Some(Art::Data(b"p".to_vec()))
+            Some(Art::Data(b"p".to_vec().into()))
         );
         assert_eq!(resolve_art("data:image/png;base64,c*Bn").await, None);
         assert_eq!(resolve_art("data:image/png,png").await, None, "not base64");
@@ -1034,7 +1088,10 @@ mod tests {
             state.players.len() == 2 && state.players.iter().all(|p| p.track.is_some())
         })
         .await;
-        assert_eq!(state.players[0].art, Some(Art::File(cover)));
+        assert_eq!(
+            state.players[0].art,
+            Some(Art::Data(b"png".to_vec().into()))
+        );
         assert_eq!(state.players[1].art, None);
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1145,6 +1202,56 @@ mod tests {
         wait_for(&mut rig.states, |state| state.players.len() == MAX_PLAYERS).await;
         tokio::time::sleep(Duration::from_millis(300)).await;
         assert_eq!(rig.states.borrow().players.len(), MAX_PLAYERS);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_player_turned_away_at_the_cap_is_followed_when_one_leaves() {
+        let mut rig = rig().await;
+        let mut servers = Vec::new();
+        for index in 0..MAX_PLAYERS {
+            let suffix = format!("p{index:02}");
+            servers.push(serve_player(&rig.bus, &suffix, fake(&suffix, &rig.log)).await);
+        }
+        wait_for(&mut rig.states, |state| state.players.len() == MAX_PLAYERS).await;
+        let late = serve_player(&rig.bus, "z", fake("z", &rig.log)).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(!names(&rig.states.borrow()).contains(&"org.mpris.MediaPlayer2.z"));
+        let gone = servers.remove(0);
+        gone.release_name(format!("{PREFIX}p00")).await.unwrap();
+        wait_for(&mut rig.states, |state| {
+            state
+                .players
+                .iter()
+                .any(|p| p.bus_name == format!("{PREFIX}z"))
+        })
+        .await;
+        drop(late);
+    }
+
+    #[test]
+    fn a_cloned_state_shares_the_artwork_bytes() {
+        let state = MediaState {
+            players: vec![Player {
+                bus_name: "org.mpris.MediaPlayer2.a".into(),
+                identity: "a".into(),
+                track: None,
+                playing: false,
+                can_next: false,
+                can_previous: false,
+                can_seek: false,
+                position_us: None,
+                length_us: None,
+                art: Some(Art::Data(vec![1, 2, 3].into())),
+            }],
+            ..MediaState::default()
+        };
+        let copy = state.clone();
+        let (Some(Art::Data(a)), Some(Art::Data(b))) =
+            (&state.players[0].art, &copy.players[0].art)
+        else {
+            panic!("artwork");
+        };
+        assert!(std::sync::Arc::ptr_eq(a, b));
     }
 
     #[tokio::test(flavor = "current_thread")]
