@@ -14,7 +14,16 @@ name: System Image Check
 on:
   pull_request:
     paths:
-      - system/**
+      # What the image build reads from system/: the Containerfile and the trees it copies,
+      # and the scripts this workflow runs. The crates under system/ reach the image as
+      # RPMs built after the merge, so a change to their sources cannot change this check.
+      - system/Containerfile
+      - system/nvidia/**
+      - system/scripts/**
+      - system/keys/**
+      - system/build-image.sh
+      - system/kernel-artifacts.sh
+      - system/package-delta.sh
       - forge/config/packages.json
       # The check installs the athanor-base-config RPM published in tier0:latest, not the spec
       # of the pull request.
