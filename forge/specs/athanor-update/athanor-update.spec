@@ -11,6 +11,7 @@ License:        MIT
 URL:            https://github.com/hr-mes/athanor
 
 BuildRequires:  rust cargo gcc systemd-rpm-macros
+BuildRequires:  dbus-daemon
 Requires:       bootc skopeo ostree systemd polkit containers-common
 
 %description
