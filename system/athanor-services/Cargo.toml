@@ -14,6 +14,7 @@ testbus = []
 # StreamExt over zbus's signal streams, as athanor-shelld uses it.
 futures-util = { workspace = true }
 athanor-unit = { path = "../athanor-unit" }
+libc = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 zbus = { workspace = true }

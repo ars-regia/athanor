@@ -246,10 +246,6 @@ fn data_uri(rest: &str) -> Option<Vec<u8>> {
     base64(payload).filter(|bytes| !bytes.is_empty() && bytes.len() <= MAX_ART_BYTES)
 }
 
-/// `O_NONBLOCK` of Linux on the architectures Athanor builds for (x86-64, aarch64): opening a
-/// FIFO then returns at once instead of waiting for a writer. `O_CLOEXEC` is std's default.
-const O_NONBLOCK: i32 = 0o4000;
-
 /// The bytes of the regular file at `path`, at most [`MAX_ART_BYTES`]. The file is opened
 /// once without blocking and judged by `fstat` of the open descriptor, so a path swapped for a
 /// FIFO or a device after any earlier look cannot hang the model, and a symlink to one is
@@ -258,7 +254,7 @@ const O_NONBLOCK: i32 = 0o4000;
 fn read_art_file(path: &std::path::Path) -> Option<Vec<u8>> {
     let mut file = std::fs::OpenOptions::new()
         .read(true)
-        .custom_flags(O_NONBLOCK)
+        .custom_flags(libc::O_NONBLOCK)
         .open(path)
         .ok()?;
     let metadata = file.metadata().ok()?;
