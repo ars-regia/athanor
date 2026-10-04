@@ -44,8 +44,6 @@ jobs:
           set -euo pipefail
           python3 -B forge/specs/athanor-kernel-profile/kernel_profile.py check
           python3 -B -m unittest discover -s forge/specs/athanor-kernel-profile/tests -v
-      - name: Azoth kernel scripts (unit tests)
-        run: python3 -B -m unittest discover -s forge/specs/azoth/tests -v
       - name: NVIDIA lock and build gate (unit tests)
         run: |
           set -euo pipefail

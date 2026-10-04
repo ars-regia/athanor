@@ -215,7 +215,6 @@ delta, e resta corto:
 | Opzione                                               | Valore | Perché                                                                                                                                 |
 | ----------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `SCHED_BORE`                                          | y      | patch CachyOS, responsività desktop                                                                                                    |
-| `SECURITY_LANDLOCK`, `MEMCG`                          | y      | già in Fedora; dichiarati perché `check_delta` fermi la build se un bump li perde. Il boot verifica che Landlock sia nella lista LSM attiva e `memory` tra i controller |
 | `CC_OPTIMIZE_FOR_PERFORMANCE`                         | y      | `-O2`: la base CachyOS accende `-O3`, ma due A/B di K7 non gli hanno trovato vantaggi (sezione 13, punto 2); `variants/o3` lo rimisura |
 | `LTO_NONE`                                            | y      | ThinLTO spento: con `DEBUG_INFO_BTF`, `RUST` richiede `!LTO`; il bcond `clang_lto` resta per il toolchain (sezione 5)                  |
 | `RUST`                                                | y      | come Fedora: la porta ai driver che nascono in Rust; con kCFI seleziona `CFI_ICALL_NORMALIZE_INTEGERS`                                 |
