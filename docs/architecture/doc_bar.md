@@ -20,13 +20,13 @@ Status: **revision 1, approved by the maintainer on 2026-09-25.** It is the spec
 
 | Program | Unit | Role |
 |---|---|---|
-| `athanor-shelld` | `athanor-shelld.service` | headless, no GTK. Owns `org.freedesktop.Notifications` and `org.kde.StatusNotifierWatcher`; holds the notifications, their expiry and the do-not-disturb state |
-| `athanor-bar` | `athanor-bar.service` | the bar: every module, the notification popups and list, the shield, the tray host |
+| `athanor-shelld` | `athanor-shelld.service` | headless, no GTK. Owns `org.freedesktop.Notifications` and `org.kde.StatusNotifierWatcher`; holds the notifications, their expiry and history, the per-application rules, the do-not-disturb state and the sound (`doc_notification_center.md`, NC2) |
+| `athanor-bar` | `athanor-bar.service` | the bar: every module, the notification popups, the shield, the tray host |
 | `athanor-dock` | `athanor-dock.service` | the dock |
 
-- **The daemon speaks to the session; the bar draws.** A crash of the bar takes no D-Bus name away from applications. The bar reaches the tray through the standard watcher interface, registered as a host. It reaches the notifications through a private interface, `os.athanor.Notifications1`: one signal per notification added, replaced or closed, and four methods: list, close, invoke an action, set do-not-disturb.
-- **The private interface answers one unit.** `athanor-shelld` accepts calls on `os.athanor.Notifications1` only from a sender whose process belongs to the cgroup of `athanor-bar.service`, read from the connection's credentials. A process running as the user can replace that unit, so the check is informative, as the shield is (SH12): it stops a confused or careless client, not an attacker who already runs as the user.
-- **Crashes.** When the bar restarts it lists the notifications and draws them again; those that arrived meanwhile wait in the daemon. When the daemon restarts it restores the unread notifications (`doc_shell_standard.md`, ST5); the read history is lost, both names come back, and tray items register again, as the StatusNotifier specification requires when the watcher reappears. Both units follow the policy of SH8: five failures within ten minutes on `CLOCK_BOOTTIME`, then an entry at err priority.
+- **The daemon speaks to the session; the bar draws.** A crash of the bar takes no D-Bus name away from applications. The bar reaches the tray through the standard watcher interface, registered as a host. It reaches the notifications through a private interface, `os.athanor.Notifications1`, whose methods and signals `doc_notification_center.md` lists (NC8).
+- **The private interface answers named units.** `athanor-shelld` accepts a call on `os.athanor.Notifications1` only from a sender whose process belongs to the cgroup of a unit that method admits, `athanor-bar.service` or `athanor-control-center.service` (`doc_notification_center.md`, NC8), read from the connection's credentials. A process running as the user can replace that unit, so the check is informative, as the shield is (SH12): it stops a confused or careless client, not an attacker who already runs as the user.
+- **Crashes.** When the bar restarts it lists the notifications and draws them again; those that arrived meanwhile wait in the daemon. When the daemon restarts it restores the history (`doc_notification_center.md`, NC3; `doc_shell_standard.md`, ST5), both names come back, and tray items register again, as the StatusNotifier specification requires when the watcher reappears. Both units follow the policy of SH8: five failures within ten minutes on `CLOCK_BOOTTIME`, then an entry at err priority.
 - **Activation.** Until the switch `athanor-shelld` installed no D-Bus activation file: the bar's unit started it (`Wants=`), so the daemon never took `org.freedesktop.Notifications` while cosmic-notifications restarted. Since the switch it ships activation files for `org.freedesktop.Notifications` and `org.kde.StatusNotifierWatcher`, and its preset starts it with the session.
 - **Landlock.** `athanor-shelld`, `athanor-bar` and `athanor-dock` restrict themselves with Landlock at start, as the greeter and the notifier do. The bar reads more untrusted input than any other process of the shell: network names, tray menus, notification text.
 - **Shared code.** The programs link `athanor-compositor-client` (windows, workspaces, outputs, actions, and the launch of applications of BR2), `athanor-layout` (schema, loader, presets, and the favourites of BR7), `athanor-style` and `athanor-trust-state`. Inside each crate the logic of every module lives in Rust modules with no GTK type, tested without a display, so the shim stays replaceable (SH4). No new library crate is created until two programs share code that no existing crate holds.
@@ -62,7 +62,7 @@ Status: **revision 1, approved by the maintainer on 2026-09-25.** It is the spec
 | Battery | UPower; the power-profiles interface (`tuned-ppd`); logind's `SetBrightness` | percentage, time left, power profile, screen brightness; nothing goes through COSMIC's settings daemon |
 | Power | logind; `athanor-session.target` | lock (`loginctl lock-session`, which cosmic-greeter answers until stage 4), log out (stopping `athanor-session.target`), suspend, restart, shut down, each with a confirmation. When an update is downloaded, "Restart to update" stands beside "Restart"; it is the same request as SH11 |
 | Input source | the compositor client | the active keyboard layout and the switch between the configured ones, through the keyboard-layout protocol package 2a supplies |
-| Clock | the system clock, formatted for the locale, in 12 or 24 hours as COSMIC's clock setting says (`military_time`), else as the locale's time format | time and date; a calendar in its popover. It refreshes on resume from suspend and when the time zone changes |
+| Clock | the system clock, formatted for the locale, in 12 or 24 hours as COSMIC's clock setting says (`military_time`), else as the locale's time format | time and date; a click opens the notification center, which holds the calendar (`doc_notification_center.md`, NC1). It refreshes on resume from suspend and when the time zone changes |
 | Notifications | `athanor-shelld` | BR4 |
 | Tray | `athanor-shelld` and the host in the bar | BR5 |
 | Shield | `athanor-trust-state` | BR6 |
@@ -75,21 +75,20 @@ Status: **revision 1, approved by the maintainer on 2026-09-25.** It is the spec
 
 **BR4. Notifications.** `athanor-shelld` implements the Desktop Notifications specification 1.2.
 
-- **Capabilities:** `actions`, `body`, `icon-static`, `persistence`. It does not advertise `body-markup`, `body-hyperlinks` or `sound`.
-- **Every string is untrusted input.** The rule of SH12 applies: plain text only, never markup, truncated, and stripped of control and bidirectional characters.
+- **Capabilities:** `actions`, `body`, `body-hyperlinks`, `body-markup`, `icon-static`, `inline-reply`, `persistence`, `sound` (`doc_notification_center.md`, NC9).
+- **Every string is untrusted input:** truncated, and stripped of control and bidirectional characters. Every string is plain text, except that the body keeps the markup `doc_notification_center.md` allows (NC10).
 - **Images.** `image-data` is accepted only when its width, height, rowstride and channel count agree with its length and stay within stated bounds, then scaled down. `image-path` is accepted only as a local file or an icon name, never a remote URL.
 - **Life of a notification.**
-  - A popup stays for the timeout the application asks for, 5 seconds when it asks for none. The pointer over the popup pauses the countdown; the bar owns that pause.
+  - A popup stays for the timeout of the application's rule, else the timeout the application asks for, else the timeout of its urgency, 5 seconds by default (`doc_notification_center.md`, NC5). The pointer over the popup pauses the countdown; the bar owns that pause.
   - A `critical` notification stays until the user closes it.
-  - When its popup ends, a notification moves to the list. A notification with the `transient` hint is closed as expired instead.
-  - The list holds at most 100 notifications; the oldest leaves first.
-- **Do not disturb** hides every popup except `critical` ones; the list still receives them. The switch persists under `$XDG_STATE_HOME/athanor/`. It holds only the switch, never a notification.
+  - When its popup ends, a notification stays in the history (`doc_notification_center.md`, NC3). A notification with the `transient` hint is closed as expired instead.
+- **Do not disturb** is `doc_notification_center.md`, NC6: it hides every popup except `critical` ones and those of applications allowed to bypass it; the history still receives them. The manual switch persists under `$XDG_STATE_HOME/athanor/`; the schedule and the triggers are settings (NC5).
 - **Actions.** A click passes an `xdg_activation_v1` token, obtained from the bar's surface with the click's serial. The daemon emits `ActivationToken`, then `ActionInvoked`, so the application can raise its own window.
-- **The popups** are drawn by the bar on one layer-shell surface in the top layer, at the end corner next to the panel: at the top when the panel is at the top, at the bottom when it is at the bottom, on the output of the active workspace.
+- **The popups** are drawn by the bar on one layer-shell surface in the top layer, or the overlay layer when fullscreen windows do not turn do not disturb on, at the corner the user chose (`doc_notification_center.md`, NC12), by default the end corner next to the panel: at the top when the panel is at the top, at the bottom when it is at the bottom, on the output of the active workspace.
   - At most three are visible; the newest is nearest to the panel, and the rest are counted on the notifications button.
-  - The surface never takes the keyboard focus, so it never takes it from the active window; from the keyboard, actions are reached from the list.
+  - The surface never takes the keyboard focus, so it never takes it from the active window; from the keyboard, actions are reached from the notification center.
   - Each popup has the accessible role `alert`, so Orca reads it.
-- **The list** is a popover of the bar: notifications grouped by application, each with its actions and close, a "clear all" control and the do-not-disturb switch.
+- **The list** is the notification center (`doc_notification_center.md`), a panel of `athanor-control-center`. The bar's notifications button opens it and counts the unread notifications.
 
 **BR5. The tray.**
 

@@ -58,13 +58,11 @@ Two gaps let the shipped state happen:
 
 The numbers are reasoned proposals, not measurements: 100 ms is the classic limit under which an action reads as instantaneous, and 50 ms leaves room inside it. The first run of the bench (section 4, step 3) shows whether one is unrealistic on the floor; changing it is a revision (ST10). One threshold already fails by construction: the units of `athanor-bar`, `athanor-dock` and `athanor-shelld` wait `RestartSec=1s` before a restart, so recovery cannot happen within 1 s; that is a defect of the units, repaired in section 4, step 3, not a reason to relax the threshold.
 
-**What `athanor-shelld` keeps across a crash.** The unread notifications survive a crash of the daemon, so that recovery holds for it as for the bar and the dock.
+**What `athanor-shelld` keeps across a crash.** The notification history of `doc_notification_center.md` (NC3) survives a crash of the daemon and a reboot, so that recovery holds for it as for the bar and the dock.
 
-- At every change it writes them to `$XDG_STATE_HOME/athanor/notifications.json`, mode 0600, by a write to a temporary file and a rename: each with its id, its fields as the list shows them, its expiry, and the unique bus name of its sender.
-- It removes the file when it stops cleanly, which is what a logout does, so only a crash leaves it behind.
-- At start it reads the file only if it was written in the same boot (`/proc/sys/kernel/random/boot_id`), so a power loss does not carry old notifications into a new session. A file that does not parse is removed and the event logged at warning; the daemon starts empty.
+- It writes the history to `$XDG_STATE_HOME/athanor/notifications.json`, mode 0600, by a write to a temporary file and a rename, at most once every 2 seconds and when it stops: each notification with its id, its fields, its read state, and the unique bus name of its sender. A crash loses at most the last 2 seconds of changes.
+- At start it reads the file whatever the boot. A file that does not parse is renamed `notifications.json.corrupt` and the event logged at warning; the daemon starts empty.
 - New ids continue above the highest restored one, so a client's later `CloseNotification` finds its notification. `ActionInvoked` reaches a sender that is still connected; one that has gone loses it, which the notification specification already allows.
-- The read history is still lost on a crash; only the unread notifications are kept.
 
 **ST6. Behaviour is specified by scenarios.**
 

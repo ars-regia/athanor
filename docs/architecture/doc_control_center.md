@@ -28,14 +28,14 @@ Status: **revision 2, approved by the maintainer on 2026-10-04.** It is the spec
 | ------------------------------------ | -------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | `system/athanor-services`            | none, a library                  | the models: network, Bluetooth, audio, battery, power profile, brightness, media players; no GTK type |
 | `system/athanor-controls`            | none, a library                  | the GTK4 widgets of the detail pages and of the panel's tiles, used by the bar and the control center |
-| `forge/specs/athanor-control-center` | `athanor-control-center.service` | the panel                                                                                             |
+| `forge/specs/athanor-control-center` | `athanor-control-center.service` | two panels: the control center and the notification center (`doc_notification_center.md`, NC1)                                  |
 | `forge/specs/athanor-clipd`          | `athanor-clipd.service`          | the clipboard history (CC10); headless, no GTK                                                        |
 
 - **A separate program.** Building the panel inside the bar was rejected: it breaks SH4's one process per surface, it loads every model and page into the bar's 64 MB budget, and a crash of one would take the other. COSMIC's applets were rejected by SH3.
 - **Two libraries, an exception to BR1's rule against new library crates,** for the reason LA1 gives: two programs share the code and no existing crate holds it. The modules move out of the bar unchanged in behaviour; the bar's tests and its measurement must stay identical across the move.
 - **Each process holds its own models.** The bar and the control center each subscribe to NetworkManager, BlueZ and the rest. The cost is a second set of D-Bus subscriptions. Serving the models from the bar to the panel was rejected because it would tie their crashes together again.
 - **One NetworkManager secret agent.** The bar keeps the agent it registers today (`os.athanor.Bar`), because it always runs. A network joined from the control center carries the password the user typed in the connection it creates, so no agent is asked; NetworkManager's own later requests, such as a changed password on reconnect, are answered by the bar.
-- **Resident and hidden,** as LA1: a cold GTK4 start does not meet ST5's 100 ms. It owns `os.athanor.ControlCenter1` with the methods `Show(page)` and `Toggle()`, and a D-Bus activation file with `SystemdService=`, as LA8. `page` is empty for the panel or the id of a detail page (CC5).
+- **Resident and hidden,** as LA1: a cold GTK4 start does not meet ST5's 100 ms. It owns `os.athanor.ControlCenter1` with the methods `Show(page)`, `Toggle()` and `ToggleNotifications()` (`doc_notification_center.md`, NC1), and a D-Bus activation file with `SystemdService=`, as LA8. `page` is empty for the panel or the id of a detail page (CC5).
 - **Renderer:** Cairo, as the other resident surfaces (SH4, LA1).
 - **Landlock at start,** as BR1: read access to `/proc` for the system page (CC4) and to the icon and theme directories, write access only to its own state and to `/dev/rfkill` (CC8). Landlock's network rules deny it any TCP connection (CC8, media artwork).
 - **Crashes.** Both units follow SH8's policy, as the bar does. When the control center restarts it reads every state back from its services; it holds none of its own except the open page, which is lost.
@@ -88,7 +88,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-04.** It is the spec
 
 **CC7. Do not disturb.**
 
-- **The state grows from a boolean** to `{ on, until, schedule }`: `until` is an optional end time, `schedule` an optional daily window in local time. The file written by today's `dnd.rs` is read as `{ on }`. The control center offers on, off, one hour, and until 08:00 local time; the schedule is set by the notification center's specification, which needs no new format.
+- **The state grows from a boolean** to `{ on, until, schedule }`: `until` is an optional end time, `schedule` an optional daily window in local time. The file written by today's `dnd.rs` is read as `{ on }`. The control center offers on, off, one hour, and until 08:00 local time; the schedule and the automatic triggers are `doc_notification_center.md`, NC6, with no new format.
 - **`athanor-shelld` admits the control center.** Its sender check accepts `athanor-bar.service` and `athanor-control-center.service`, and stays informative as BR1 states. The private interface gains a read of the state and a signal when it changes, unicast to the admitted units like its other signals.
 
 **CC8. No privilege in the panel.** Every control goes through a service the image already runs, under that service's own authorization. No setuid program, no new system unit, no polkit rule written by this document.
@@ -121,9 +121,9 @@ Status: **revision 2, approved by the maintainer on 2026-10-04.** It is the spec
 - **Artwork.** The panel shows `file:` and `data:` artwork and does not fetch `https:` artwork, because it opens no network socket. Players that publish only remote artwork show their icon instead (doubt 6).
 - **The 802.1X form** picks certificate files through the file-chooser portal, not through a filesystem rule of its own.
 
-**CC9. Opening and closing.** The bar's button and a shortcut call `Toggle()`. The panel closes on an outside click, on Escape and on the loss of focus, as the shield's sheet does (BR6), and the notification popups stay hidden while it is open. It opens on the focused output, under the bar's button, or above it when the bar is at the bottom.
+**CC9. Opening and closing.** The bar's button and a shortcut call `Toggle()`. The panel closes on an outside click, on Escape and on the loss of focus, as the shield's sheet does (BR6), and the notification popups stay hidden while it or the notification center is open (the property `Open`, `doc_notification_center.md`, NC1). It opens on the focused output, under the bar's button, or above it when the bar is at the bottom.
 
-- **The shortcut:** Super+A belongs to the application library (`doc_launcher.md`). Super+C opens the control center, decided by the maintainer on 2026-10-04; it is written once per user at the first start in the way LA8 writes Super, and never again. Super+N and Super+V are kept for the notification center and the clipboard page.
+- **The shortcut:** Super+A belongs to the application library (`doc_launcher.md`). Super+C opens the control center, decided by the maintainer on 2026-10-04; it is written once per user at the first start in the way LA8 writes Super, and never again. Super+N opens the notification center and is written as Super+C is (`doc_notification_center.md`, NC1); Super+V is kept for the clipboard page.
 
 **CC10. The clipboard history, confined.** F-cc-56 stays in the register in this form; if spike S3 fails, it returns to the maintainer as an exclusion.
 
