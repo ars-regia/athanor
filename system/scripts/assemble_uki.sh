@@ -107,6 +107,18 @@ chmod 0400 "$KEY_FILE" # Strictly restrictive read-only permissions for key owne
 cp "$CRT_SRC" "$CRT_FILE"
 chmod 0644 "$CRT_FILE"
 
+# GRUB boots this vmlinuz through shim, not the UKI below, and shim accepts it only with a
+# signature it trusts. The kernel package ships it signed with pesign's test certificate,
+# which nothing trusts: that signature is replaced with the project's Secure Boot key, the
+# certificate a machine enrolls as its MOK. The build fails if the result does not verify.
+VMLINUZ="/usr/lib/modules/${QUALIFIED_KERNEL}/vmlinuz"
+if sbverify --list "$VMLINUZ" | grep -q '^signature'; then
+    sbattach --remove "$VMLINUZ"
+fi
+sbsign --key "$KEY_FILE" --cert "$CRT_FILE" --output "${VMLINUZ}.signed" "$VMLINUZ"
+mv -f "${VMLINUZ}.signed" "$VMLINUZ"
+sbverify --cert "$CRT_FILE" "$VMLINUZ"
+
 STUB_PATH=$(find /usr/lib/systemd/boot/efi/ /usr/lib/systemd/ /usr/share/systemd/ -name "linuxx64.efi.stub" -o -name "systemd-stub.efi" 2>/dev/null | sort -V | head -n 1 || true)
 if [ -z "$STUB_PATH" ]; then
     STUB_PATH="/usr/lib/systemd/boot/efi/linuxx64.efi.stub"
