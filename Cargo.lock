@@ -789,6 +789,7 @@ dependencies = [
 name = "athanor-services"
 version = "1.0.0"
 dependencies = [
+ "athanor-unit",
  "futures-util",
  "tokio",
  "tracing",
