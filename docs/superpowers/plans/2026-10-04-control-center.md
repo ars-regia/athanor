@@ -43,16 +43,16 @@
 | 4 Network and secret agent                    | 1             | B              |
 | 5 MPRIS                                       | 1             | C              |
 | 6 Audio on the threaded main loop             | 1             | C              |
-| 7 Login actions; remove the GIO mirror        | 2–6           | D              |
-| 8 Bar measurement and e2e, before/after       | 7             | D              |
+| 7 Deploy builds to the reference laptop       | —             | A              |
+| 8 Bar measurement and e2e, before/after       | 2–7           | D              |
 | 9 `athanor-controls`                          | 8             | E              |
 | 10 shelld: do-not-disturb state and admission | —             | B or C         |
 | 11 `athanor-control-center` skeleton          | 1             | C              |
 | 12 `control-center.toml`                      | —             | B or C         |
 | 13 The first panel                            | 9, 10, 11, 12 | F              |
-| 14 Package, preset, laptop deploy             | 13            | F              |
+| 14 Package and preset                         | 13            | F              |
 
-At most three agents at a time, each in its own worktree branched from `control-center` at the task's BASE; each task merges back into `control-center` before a task that depends on it starts.
+At most two agents at a time, each in its own worktree branched from `control-center` at the task's BASE, all building into one `CARGO_TARGET_DIR=/var/tmp/athanor-target-cc` with `-j 4`, so builds queue on cargo's lock and the desktop keeps its CPU budget (runner at most 8 threads, local work at most 4); each task merges back into `control-center` before a task that depends on it starts.
 
 ---
 
@@ -74,17 +74,18 @@ At most three agents at a time, each in its own worktree branched from `control-
 
 Behaviour of `mirror::spawn`, ported from `forge/specs/athanor-bar/athanor-bar-1.0.0/src/ui/bus.rs` (`Mirror`, lines 94–328):
 
-- On a bus connection (`conn.unique_name().is_some()`), watch `NameOwnerChanged` for `name` through `zbus::fdo::DBusProxy`; on a peer-to-peer connection treat the peer as always present with owner `None`.
+- Watch `NameOwnerChanged` for `name` through `zbus::fdo::DBusProxy`. The mirror always runs on a bus; there is no peer-to-peer branch in it.
+- Calls carry a 5 s timeout: a load that never answers leaves `objects` empty with the owner known, logs once at warning level, and is retried at the next owner change.
 - When the owner appears: load (`GetManagedObjects` at the root, or `GetAll` per fixed pair), bump `generation`, publish. When it vanishes: clear `objects`, `owner = None`, bump, publish.
 - Signals `PropertiesChanged`, `InterfacesAdded`, `InterfacesRemoved` from the current owner only (match rule with `sender = name`, then compare the message's sender with the owner) update `objects` and publish. Updates within 16 ms coalesce into one publish (`watch::Sender::send_modify` after a `tokio::time::sleep` debounce on the first change).
 - Every decode goes through `OwnedValue::try_from` / `zvariant::Value::downcast_ref`; a wrong type drops that property only.
 
-- [ ] **Step 1: Write the failing tests** in `src/mirror.rs` (`#[cfg(test)]`), using `testbus::pair()` which returns a peer-to-peer `(server, client)` pair of `zbus::Connection` over `tokio::net::UnixStream::pair()` (`connection::Builder::unix_stream(a).server(guid)?.p2p()`, and `Builder::unix_stream(b).p2p()`). The server serves `org.freedesktop.DBus.ObjectManager` at `/root` and a test interface `os.athanor.Test1` with properties `Name: s` and `Level: u`.
+- [ ] **Step 1: Write the failing tests** in `src/mirror.rs` (`#[cfg(test)]`), using `testbus::start(name)`, which starts a private `dbus-daemon` as `forge/specs/athanor-shelld/athanor-shelld-1.0.0/tests/common/mod.rs` does (`Bus::start`) and returns `(bus, server, client)`: the server connection owns `name`. Pure decoding is tested with no bus at all. The server serves `org.freedesktop.DBus.ObjectManager` at `/root` and a test interface `os.athanor.Test1` with properties `Name: s` and `Level: u`.
 
 ```rust
 #[tokio::test(flavor = "current_thread")]
 async fn managed_objects_are_loaded_and_follow_signals() {
-    let (server, client) = testbus::pair().await;
+    let (_bus, server, client) = testbus::start("os.athanor.Test").await;
     testbus::add_object(&server, "/root/a", "Alpha", 10).await;
     let mut rx = spawn(&Handle::current(), client, "os.athanor.Test", Source::Managed("/root"));
     let snap = testbus::wait_for(&mut rx, |s| s.objects.contains_key("/root/a")).await;
@@ -100,13 +101,15 @@ async fn managed_objects_are_loaded_and_follow_signals() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_property_of_the_wrong_type_is_absent_not_fatal() {
-    let (server, client) = testbus::pair().await;
+    let (_bus, server, client) = testbus::start("os.athanor.Test").await;
     testbus::add_object_raw(&server, "/root/b", "Level", zvariant::Value::from("not a u32")).await;
     let mut rx = spawn(&Handle::current(), client, "os.athanor.Test", Source::Managed("/root"));
     let snap = testbus::wait_for(&mut rx, |s| s.objects.contains_key("/root/b")).await;
     assert_eq!(props::get_u32(&snap.objects["/root/b"]["os.athanor.Test1"], "Level"), None);
 }
 ```
+
+Two more in `src/mirror.rs`: `the_owner_leaves_and_returns` (the server connection is dropped: `objects` empties and `owner` is `None`; a new server takes the name: the objects load again) and `a_load_that_never_answers_does_not_stall` (the server's `GetManagedObjects` awaits forever: after the timeout the snapshot has the owner and no objects, and a second mirror on another name still publishes).
 
 In `src/props.rs`, one test per getter with a right and a wrong type. In `src/runtime.rs`:
 
@@ -236,20 +239,24 @@ Rules: brightness is set through logind `org.freedesktop.login1.Session.SetBrigh
 
 ---
 
-### Task 7: Login actions; remove the GIO mirror
+### Task 7: Deploy builds to the reference laptop
 
-**Files:** Create `system/athanor-services/src/session.rs`; modify `ui/power.rs`, `ui/logind.rs`; delete `ui/bus.rs`'s `Mirror`, `Source`, and every `bus::call` user; delete the bar's moved model files and the `props.rs` copy.
+Runs first, beside Task 1: every later build is installed with it (CC14).
+
+**Files:** Create `scripts/shell-bench/deploy.py` (Python, like the rest of `scripts/shell-bench/`, reusing `machine.Machine`).
 
 **Interfaces:**
 
-- Produces: `SessionCommand::{Lock, Suspend, Reboot, PowerOff, LogOut}` and `SessionState { offered: Vec<Action> }` from today's `power.rs` (`can_method`, `manager_method`, `offered`).
-- After this task, `grep -rn 'gio::DBus\|glib::Variant' forge/specs/athanor-bar/athanor-bar-1.0.0/src` lists only the `gio` uses GTK itself needs (application, file chooser) and the compositor client, as CC3's scope allows.
+- Produces: `python3 scripts/shell-bench/deploy.py --host athanor-ref <crate>...` — builds the named crates in release mode in the podman builder the bar's spec uses (`cargo build --release --locked -j 4 -p <crate>`), copies each binary, unit and D-Bus activation file to the laptop, makes `/usr` writable for this boot only with `sudo -n bootc usr-overlay` (skipped when already writable), installs them, runs `systemctl --user daemon-reload` and restarts the crate's unit, and prints the commit installed. A reboot returns the laptop to its image. Refuses to run while `soak.py` or `bench.py` is running on the host (a lock file in the laptop's `/run/user/<uid>/shell-bench.lock`, which both take).
+- Consumes: `machine.Machine.run`, `machine.Machine.systemctl`.
 
-- [ ] **Step 1:** Port `power.rs` tests (from line 60).
-- [ ] **Step 2:** `cargo test -p athanor-services session` — Expected: FAIL to compile.
-- [ ] **Step 3:** Implement and delete the GIO mirror.
-- [ ] **Step 4:** `cargo test -p athanor-services && cargo test -p athanor-bar && cargo clippy -p athanor-services -p athanor-bar -- -D warnings` — Expected: PASS.
-- [ ] **Step 5:** Commit `refactor(bar): drop the GIO mirror; every model now lives in athanor-services`.
+- [ ] **Step 1:** Test in `scripts/shell-bench/tests/test_deploy.py`: `plan(crate, built_dir)` returns the `(source, destination)` pairs for `athanor-bar` (binary to `/usr/bin/athanor-bar`, unit to `/usr/lib/systemd/user/athanor-bar.service`) and refuses an unknown crate.
+- [ ] **Step 2:** `python3 -B -m unittest discover -s scripts/shell-bench/tests` — Expected: FAIL (`deploy` not found).
+- [ ] **Step 3:** Implement `deploy.py` and the lock in `soak.py` and `bench.py`.
+- [ ] **Step 4:** Same command — Expected: PASS. Then `python3 scripts/shell-bench/deploy.py --host athanor-ref athanor-bar` on today's bar — Expected: the bar restarts and `systemctl --user show -p ExecMainStartTimestamp athanor-bar` on the laptop moves.
+- [ ] **Step 5:** Commit `feat(shell-bench): install a build on the reference laptop for the maintainer to judge`.
+
+The bar's power and session actions (`ui/power.rs`, `ui/logind.rs`) and the GIO `Mirror` stay: CC3 covers the four models, and `Mirror` still serves the notifications, the shield and the tray, which move when they are next changed.
 
 ---
 
@@ -258,7 +265,7 @@ Rules: brightness is set through logind `org.freedesktop.login1.Session.SetBrigh
 **Files:** none changed unless a check fails.
 
 - [ ] **Step 1:** Run the bar's e2e in the rig: `forge/test/shell/rig.sh` with `bar_e2e.py` and `bar_modules_e2e.py` (the commands in `forge/test/shell/README` or the rig script's usage). Expected: the same passes as on BASE of Task 2.
-- [ ] **Step 2:** Install the branch's bar on the reference laptop (Task 14's `deploy.sh bar`) and run `python3 scripts/shell-bench/bench.py --host athanor-ref --stages memory,idle,response --commit <sha> --out /var/tmp/cc-bench/<sha>`. Expected: `athanor-bar` PSS ≤ 64 MB; record the delta from 30.0 MB in the ledger; response p95 ≤ 100 ms.
+- [ ] **Step 2:** Install the branch's bar on the reference laptop (Task 7's `deploy.py --host athanor-ref athanor-bar`) and run `python3 scripts/shell-bench/bench.py --host athanor-ref --stages memory,idle,response --commit <sha> --out /var/tmp/cc-bench/<sha>`. Expected: `athanor-bar` PSS ≤ 64 MB; record the delta from 30.0 MB in the ledger; response p95 ≤ 100 ms.
 - [ ] **Step 3:** The maintainer looks at the bar on the laptop: every popover behaves as before.
 
 ---
@@ -287,6 +294,7 @@ Rules: brightness is set through logind `org.freedesktop.login1.Session.SetBrigh
   - `sender::Admitted` replacing `BarUnit`: `Admitted::from_proc(&["athanor-bar.service", "athanor-control-center.service"])`, `admits(pid) -> Option<&str>` returning the unit. `admits_path` unchanged.
   - Private interface additions: `DoNotDisturb() -> (b on, x until)` (until `0` = none; records the caller's unique name as that unit's destination), `SetDoNotDisturbUntil(b on, x until)`, signal `DoNotDisturbChanged(b, x)` unicast to every recorded destination. `SetDoNotDisturb(b)` stays and means `until = None`. Notification signals stay unicast to the bar's destination only.
   - A Tokio timer turns DND off at `until`, re-armed after a start.
+  - `schedule` (CC7) is not built here: the notification center's specification sets it. The file is `key=value` lines, so it arrives as one more key with no migration.
 - [ ] **Step 1:** Tests: legacy file reads as on; past `until` reads off and removes the file; `admits` returns the control center's unit for a cgroup ending `athanor-control-center.service` and `None` for `app-foo.service`; a DND set by the control center emits `DoNotDisturbChanged` to the bar's destination too — an integration test in `tests/` on the private `dbus-daemon` that `tests/common/mod.rs` already starts (`Bus::start`, `BAR_CGROUP`; add a `CONTROL_CENTER_CGROUP` beside it).
 - [ ] **Step 2:** `cargo test -p athanor-shelld` — Expected: FAIL.
 - [ ] **Step 3:** Implement.
@@ -301,9 +309,10 @@ Rules: brightness is set through logind `org.freedesktop.login1.Session.SetBrigh
 
 **Interfaces:**
 
-- Consumes: `athanor-launcher`'s pattern — `src/bus.rs:13-55` (`Show`, name loss), `src/surface.rs:73` (resident hidden window), `src/main.rs:90-104` (`shortcuts::set_system_action_once`).
-- Produces: `os.athanor.ControlCenter1` at `/os/athanor/ControlCenter1` with `Show(s page)` and `Toggle()`; Super+C written once with the state file `state/athanor/control-center/super-c-bound`; the window on the focused output, anchored under the bar's button (above it when the bar is at the bottom), closing on outside click, Escape and focus loss (CC9). Landlock as CC2. Unit `Type=notify`, `MemoryHigh=96M`, the sandbox lines of `athanor-bar.service`.
-- [ ] Steps: test first for the pure parts (page id parsing, the anchor computation for top and bottom bars, Landlock ruleset construction) → fail → implement → `cargo test -p athanor-control-center` PASS → commit `feat(control-center): add the resident panel, its D-Bus name, Super+C and the bar's button`.
+- Consumes: `athanor-launcher`'s pattern — `src/bus.rs:13-55` (`Show`, name loss), `src/surface.rs:73` (resident hidden window), `src/main.rs:90-104` (the once-per-user marker).
+- Super+C is a key binding, not a COSMIC system action, and `athanor-compositor-client/src/shortcuts.rs` writes only `system_actions`. Add `set_custom_binding_once(modifiers: &[&str], key: &str, command: &str, marker: &Path)` beside `set_system_action_once`, writing COSMIC's `custom` key of `com.system76.CosmicSettings.Shortcuts` and leaving an existing binding of that key combination alone (logged, marker written). The command is `busctl --user call os.athanor.ControlCenter1 /os/athanor/ControlCenter1 os.athanor.ControlCenter1 Toggle`. Run `codegraph_impact` on `shortcuts.rs` first.
+- Produces: `os.athanor.ControlCenter1` at `/os/athanor/ControlCenter1` with `Show(s page)` and `Toggle()`; Super+C written once with the state file `state/athanor/control-center/super-c-bound`; the window on the focused output, anchored under the bar's button (above it when the bar is at the bottom), closing on outside click, Escape and focus loss (CC9). A property `Open: b` with `PropertiesChanged`; the bar's `ui/notifications.rs` follows it and keeps its popups hidden while it is true (CC9). Landlock as CC2. Unit `Type=notify`, `MemoryHigh=96M`, the sandbox lines of `athanor-bar.service`.
+- [ ] Steps: test first for the pure parts (page id parsing, the anchor computation for top and bottom bars, Landlock ruleset construction, the `custom` binding writer on an empty file, on a file with another binding, and on a file already binding Super+C) → fail → implement → `cargo test -p athanor-control-center` PASS → commit `feat(control-center): add the resident panel, its D-Bus name, Super+C and the bar's button`.
 
 ---
 
@@ -322,15 +331,15 @@ Rules: brightness is set through logind `org.freedesktop.login1.Session.SetBrigh
 Contents (CC14 step 2): Wi-Fi, Bluetooth and airplane-mode tiles; output and input volume; display brightness; power profile; do not disturb (on, off, one hour, until 08:00); dark mode; full media controls; battery level; Settings button opening `cosmic-settings`; each tile with an arrow opens its `athanor-controls` page on a stack with a back button. A tile whose service or hardware is absent is not built (BR3). Airplane mode soft-blocks every radio through `/dev/rfkill` (`struct rfkill_event`, `RFKILL_OP_CHANGE_ALL`), absent when the device is.
 
 - [ ] Steps: pure tests first (rfkill event encoding, the DND menu's `until` for "one hour" and "until 08:00" across midnight, tile presence from a `Services` snapshot); fail; implement; `cargo test -p athanor-control-center` PASS; commit `feat(control-center): the first panel`.
-- [ ] Accessibility (ST7) in the same task: every tile and slider reachable with Tab and arrows, with an accessible name and state.
+- [ ] Accessibility (ST7) in the same task: every tile and slider reachable with Tab and arrows, with an accessible name and state, and the panel announced when it opens.
 
 ---
 
-### Task 14: Package, preset, laptop deploy
+### Task 14: Package and preset
 
-**Files:** `forge/specs/athanor-control-center/athanor-control-center.spec` (from `athanor-bar.spec`: `cargo build --release --locked -p %{name}`, `%check` with `check_shim_link_order.py`); `scripts/shell-bench/deploy.sh` (new): builds the named crates in the podman builder, copies the binaries and units into a `bootc usr-overlay` on `--host`, restarts the user units, prints the commit installed. A reboot returns the laptop to its image.
+**Files:** `forge/specs/athanor-control-center/athanor-control-center.spec` (from `athanor-bar.spec`: `cargo build --release --locked -p %{name}`, `%check` with `check_shim_link_order.py`), the preset with `disable`, and the image's package list.
 
-- [ ] Steps: `bash -n scripts/shell-bench/deploy.sh && shellcheck scripts/shell-bench/deploy.sh`; `python3 scripts/verify.py shipped`; deploy to `athanor-ref`; the maintainer opens the panel with the bar's button and with Super+C and judges it. Commit `build(control-center): package the panel and deploy builds to the reference laptop`.
+- [ ] Steps: `python3 scripts/verify.py shipped` and `python3 scripts/verify.py specs` — Expected: no new failure; deploy with Task 7's script; the maintainer opens the panel with the bar's button and with Super+C and judges it. Commit `build(control-center): package the panel, disabled by preset`.
 
 ---
 
