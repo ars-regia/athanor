@@ -5,12 +5,13 @@ athanor-bar.service, which a container without systemd cannot provide (plan ruli
 
 It owns org.freedesktop.Notifications with Notify and CloseNotification, so a test sends a
 notification the way an application does, and serves os.athanor.Notifications1 with the
-wire signature the bar decodes. Its signals are broadcast, not unicast as the real
+wire signature the bar decodes (athanor-services' notifications::wire). Its signals are broadcast, not unicast as the real
 daemon's: the bar subscribes by sender, so it cannot tell.
 
 It starts holding four notifications, all waiting for the user, so the captures show three
 popups and "+1 waiting". Every call that acts is appended to /out/$RIG_TAG-notifications.log:
 "Close <id> <reason>", "InvokeAction <id> <key> token|no-token", "SetDoNotDisturb True|False".
+SetDoNotDisturb also emits DoNotDisturbChanged, as the real daemon does for every change.
 """
 
 import os
@@ -24,7 +25,7 @@ NAME = "org.freedesktop.Notifications"
 PUBLIC_PATH = "/org/freedesktop/Notifications"
 PRIVATE = "os.athanor.Notifications1"
 PRIVATE_PATH = "/os/athanor/Notifications1"
-WIRE = "(usssa(ss)ybbsssuuayuu)"
+WIRE = "(ussssa(sus)a(ss)bybbbxsssuuayuubibs)"
 WAITS = 0xFFFFFFFF
 DEFAULT_TIMEOUT_MS = 5000
 CRITICAL = 2
@@ -42,8 +43,10 @@ NODE = Gio.DBusNodeInfo.new_for_xml(f"""
     <method name="CloseNotification"><arg type="u" direction="in"/></method>
   </interface>
   <interface name="{PRIVATE}">
-    <method name="List">
-      <arg type="b" direction="out"/><arg type="a{WIRE}" direction="out"/>
+    <method name="List"><arg type="a{WIRE}" direction="out"/></method>
+    <method name="DoNotDisturb">
+      <arg type="b" direction="out"/><arg type="s" direction="out"/>
+      <arg type="x" direction="out"/><arg type="as" direction="out"/>
     </method>
     <method name="Close"><arg type="u" direction="in"/><arg type="u" direction="in"/></method>
     <method name="InvokeAction">
@@ -53,6 +56,9 @@ NODE = Gio.DBusNodeInfo.new_for_xml(f"""
     <signal name="Added"><arg type="{WIRE}"/></signal>
     <signal name="Replaced"><arg type="{WIRE}"/></signal>
     <signal name="Closed"><arg type="u"/><arg type="u"/></signal>
+    <signal name="DoNotDisturbChanged">
+      <arg type="b"/><arg type="s"/><arg type="x"/>
+    </signal>
   </interface>
 </node>
 """)
@@ -93,10 +99,13 @@ class Daemon:
         return max(0, min(WAITS - 1, left))
 
     def wire(self, n):
+        left = self.left_ms(n)
         return (
-            n["id"], n["app"], n["summary"], n["body"], n["actions"], n["urgency"],
-            n["transient"], n["resident"], n["entry"], n["icon_name"], n["icon_file"],
-            n["width"], n["height"], n["rgba"], n["timeout"], self.left_ms(n),
+            n["id"], "", n["app"], n["summary"], n["body"],
+            [(n["body"], 0, "")] if n["body"] else [], n["actions"], True, n["urgency"],
+            n["transient"], n["resident"], False, 0, n["entry"], n["icon_name"],
+            n["icon_file"], n["width"], n["height"], n["rgba"], n["timeout"], left,
+            left > 0, -1, False, "",
         )
 
     def emit(self, member, value):
@@ -163,7 +172,11 @@ class Daemon:
             invocation.return_value(None)
         elif method == "List":
             listed = [self.wire(n) for n in self.held]
-            invocation.return_value(GLib.Variant(f"(ba{WIRE})", (self.dnd, listed)))
+            invocation.return_value(GLib.Variant(f"(a{WIRE})", (listed,)))
+        elif method == "DoNotDisturb":
+            invocation.return_value(
+                GLib.Variant("(bsxas)", (self.dnd, "manual" if self.dnd else "", 0, []))
+            )
         elif method == "Close":
             id_, reason = parameters.unpack()
             log(f"Close {id_} {reason}")
@@ -189,6 +202,10 @@ class Daemon:
             (on,) = parameters.unpack()
             log(f"SetDoNotDisturb {on}")
             self.dnd = on
+            self.emit(
+                "DoNotDisturbChanged",
+                GLib.Variant("(bsx)", (on, "manual" if on else "", 0)),
+            )
             invocation.return_value(None)
 
 

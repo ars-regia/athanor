@@ -138,7 +138,7 @@ def main():
     notify(bus, "two\nlines", "<b>bold</b>\u202eevil\x07", {})
 
     try:
-        call(bus, PRIVATE, "List", None, "(ba(usssa(ss)ybbsssuuayuu))")
+        call(bus, PRIVATE, "List", None, "(a(ussssa(sus)a(ss)bybbbxsssuuayuubibs))")
         check(
             "private refused",
             False,

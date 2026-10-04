@@ -9,6 +9,7 @@
 //! aborting at run time.
 
 pub mod mirror;
+pub mod notifications;
 pub mod props;
 pub mod runtime;
 #[cfg(any(test, feature = "testbus"))]
@@ -41,7 +42,11 @@ mod tests {
     #[test]
     fn no_model_looks_up_the_ambient_runtime() {
         let mut files = Vec::new();
-        sources(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut files).expect("src");
+        sources(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut files,
+        )
+        .expect("src");
         assert!(files.len() >= 3, "the scan found the crate's sources");
         for (file, text) in files {
             // Tests may use the runtime they run on; only the code before them is a model.

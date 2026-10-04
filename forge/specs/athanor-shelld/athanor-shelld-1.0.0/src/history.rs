@@ -205,8 +205,11 @@ pub fn load(path: &Path, bus_id: &str) -> Vec<Notification> {
     restored
 }
 
-/// Writes the history without its transient entries. The parent directory must exist.
+/// Writes the history without its transient entries, creating the directory if it is missing.
 pub fn save(path: &Path, store: &Store, bus_id: &str) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
     let file = File {
         version: VERSION,
         bus_id: bus_id.to_owned(),
@@ -275,6 +278,7 @@ mod tests {
                 time,
                 Identity::App("org.example.Chat".into()),
                 ":1.7".into(),
+                true,
             )
             .notification
             .id
@@ -284,12 +288,12 @@ mod tests {
     fn a_saved_history_reads_back_without_transients_or_images() {
         let dir = temp("roundtrip");
         let path = dir.join("notifications.json");
-        let mut store = Store::new(false);
+        let mut store = Store::new();
         held(&mut store, "kept", false, 100);
         held(&mut store, "transient", true, 101);
         let mut pixels = content("picture", Urgency::Normal, 5_000);
         pixels.visual = Visual::Pixels(crate::image::tests::one_pixel());
-        store.notify(pixels, 0, 0, 102, Identity::Other, ":1.8".into());
+        store.notify(pixels, 0, 0, 102, Identity::Other, ":1.8".into(), true);
         save(&path, &store, "bus-a").expect("save");
         let mode = std::fs::metadata(&path).expect("meta").permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
@@ -310,8 +314,17 @@ mod tests {
     }
 
     #[test]
+    fn save_creates_a_missing_state_directory() {
+        let dir = temp("mkdir").join("not/yet");
+        let path = dir.join("notifications.json");
+        save(&path, &Store::new(), "bus").expect("save");
+        assert!(path.is_file());
+        std::fs::remove_dir_all(dir.ancestors().nth(2).expect("root")).expect("cleanup");
+    }
+
+    #[test]
     fn ids_continue_above_the_highest_restored() {
-        let mut store = Store::new(false);
+        let mut store = Store::new();
         store.restore(vec![notification(41), notification(7)]);
         let next = held(&mut store, "new", false, 0);
         assert_eq!(next, 42);
@@ -319,7 +332,7 @@ mod tests {
 
     #[test]
     fn retention_by_age_and_by_count() {
-        let mut store = Store::new(false);
+        let mut store = Store::new();
         let day = 86_400;
         held(&mut store, "old", false, 0);
         held(&mut store, "recent", false, 7 * day);
@@ -363,9 +376,11 @@ mod tests {
     #[test]
     fn a_failed_write_keeps_the_store_and_warns_once() {
         let dir = temp("readonly");
-        let mut store = Store::new(false);
+        let mut store = Store::new();
         held(&mut store, "kept", false, 0);
-        let path = dir.join("missing-dir/notifications.json");
+        // A directory that cannot be created: its parent is a file.
+        std::fs::write(dir.join("file"), "").expect("file");
+        let path = dir.join("file/notifications.json");
         assert!(save(&path, &store, "bus").is_err());
         assert_eq!(store.iter().count(), 1);
         let mut coalescer = Coalescer::new();
@@ -405,16 +420,14 @@ mod tests {
     fn a_restored_critical_does_not_pop_up_and_keeps_its_timeout() {
         let dir = temp("popup");
         let path = dir.join("notifications.json");
-        let mut store = Store::new(false);
+        let mut store = Store::new();
         let mut critical = content("c", Urgency::Critical, 0);
         critical.timeout_ms = 0;
-        store.notify(critical, 0, 0, 1, Identity::Other, String::new());
+        store.notify(critical, 0, 0, 1, Identity::Other, String::new(), true);
         held(&mut store, "n", false, 2);
         save(&path, &store, "bus").expect("save");
         let back = load(&path, "bus");
-        assert!(back
-            .iter()
-            .all(|n| crate::store::popup_ms_left(n, 0, false) == 0));
+        assert!(back.iter().all(|n| crate::store::popup_ms_left(n, 0) == 0));
         assert_eq!(
             back.iter()
                 .map(|n| n.content.timeout_ms)
@@ -453,7 +466,7 @@ mod tests {
     fn an_unknown_bus_empties_every_sender() {
         let dir = temp("nobus");
         let path = dir.join("notifications.json");
-        let mut store = Store::new(false);
+        let mut store = Store::new();
         held(&mut store, "x", false, 0);
         save(&path, &store, "").expect("save");
         assert!(load(&path, "").iter().all(|n| n.sender.is_empty()));

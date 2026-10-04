@@ -1,6 +1,6 @@
 //! Landlock at start, as the greeter and the notifier do: first prove the process is
 //! single-threaded, then restrict. A headless unit names the trees it reads and the one
-//! directory it writes (`restrict`). A GTK program cannot name what it reads (icon themes,
+//! directories it writes (`restrict`). A GTK program cannot name what it reads (icon themes,
 //! fonts, the GL driver, glycin's loaders), so it restricts writes only (`restrict_writes`).
 //! Connecting to a bus socket is not a filesystem access Landlock mediates.
 //! A program that has no business on the network also calls `deny_tcp`.
@@ -26,9 +26,10 @@ pub fn ensure_single_threaded() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Read-only beneath each of `read` that exists, read-write beneath `write`, nothing else.
-/// A kernel that cannot enforce the ruleset is an error, not a best effort.
-pub fn restrict(read: &[&Path], write: &Path) -> Result<(), Box<dyn Error>> {
+/// Read-only beneath each of `read` that exists, read-write beneath each of `write`, nothing
+/// else. A `write` directory that is missing is an error: a unit creates its own before it
+/// restricts. A kernel that cannot enforce the ruleset is an error, not a best effort.
+pub fn restrict(read: &[&Path], write: &[&Path]) -> Result<(), Box<dyn Error>> {
     let all = AccessFs::from_all(ABI::V1);
     let mut ruleset = Ruleset::default()
         .set_compatibility(CompatLevel::HardRequirement)
@@ -40,7 +41,9 @@ pub fn restrict(read: &[&Path], write: &Path) -> Result<(), Box<dyn Error>> {
             AccessFs::from_read(ABI::V1),
         ))?;
     }
-    ruleset = ruleset.add_rule(PathBeneath::new(PathFd::new(write)?, all))?;
+    for path in write {
+        ruleset = ruleset.add_rule(PathBeneath::new(PathFd::new(path)?, all))?;
+    }
     ruleset.restrict_self()?;
     Ok(())
 }
@@ -116,18 +119,20 @@ mod tests {
     fn reads_outside_the_grants_and_writes_outside_the_write_directory_are_denied() {
         let base =
             std::env::temp_dir().join(format!("athanor-unit-landlock-{}", std::process::id()));
-        let (readable, writable, hidden) = (
+        let (readable, writable, also_writable, hidden) = (
             base.join("readable"),
             base.join("writable"),
+            base.join("also-writable"),
             base.join("hidden"),
         );
-        for dir in [&readable, &writable, &hidden] {
+        for dir in [&readable, &writable, &also_writable, &hidden] {
             std::fs::create_dir_all(dir).expect("mkdir");
             std::fs::write(dir.join("file"), b"x").expect("write");
         }
         // Landlock confines the calling thread and its children: the test binary stays free.
         std::thread::spawn(move || {
-            restrict(&[&readable], &writable).expect("Landlock must be enforced, not skipped");
+            restrict(&[&readable], &[&writable, &also_writable])
+                .expect("Landlock must be enforced, not skipped");
             assert!(std::fs::read(readable.join("file")).is_ok());
             assert_eq!(
                 std::fs::write(readable.join("new"), b"x")
@@ -136,6 +141,7 @@ mod tests {
                 std::io::ErrorKind::PermissionDenied
             );
             assert!(std::fs::write(writable.join("new"), b"x").is_ok());
+            assert!(std::fs::write(also_writable.join("new"), b"x").is_ok());
             assert_eq!(
                 std::fs::read(hidden.join("file"))
                     .expect_err("not granted")

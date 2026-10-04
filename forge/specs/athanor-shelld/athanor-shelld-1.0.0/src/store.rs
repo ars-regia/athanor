@@ -89,20 +89,18 @@ pub struct Outcome {
 pub struct Store {
     held: VecDeque<Notification>,
     last_id: u32,
-    dnd: bool,
 }
 
 impl Store {
     #[must_use]
-    pub fn new(dnd: bool) -> Store {
-        Store {
-            dnd,
-            ..Store::default()
-        }
+    pub fn new() -> Store {
+        Store::default()
     }
 
     /// A replaced notification keeps its id, arrives again (its popup restarts) and becomes
-    /// the newest. An unknown `replaces_id` gets a new id, as the specification says.
+    /// the newest. An unknown `replaces_id` gets a new id, as the specification says. `popup`
+    /// is the policy's word on whether it shows at all.
+    #[allow(clippy::too_many_arguments)] // one arrival, as the policy and the bus describe it
     pub fn notify(
         &mut self,
         content: Content,
@@ -111,6 +109,7 @@ impl Store {
         time: i64,
         identity: Identity,
         sender: String,
+        popup: bool,
     ) -> Outcome {
         let replaced = replaces_id != 0 && self.remove(replaces_id).is_some();
         let id = if replaced {
@@ -121,7 +120,7 @@ impl Store {
         let notification = Notification {
             id,
             arrived_ms: now_ms,
-            popup: true,
+            popup,
             time,
             identity,
             sender,
@@ -214,18 +213,15 @@ impl Store {
         self.held.iter()
     }
 
-    #[must_use]
-    pub fn dnd(&self) -> bool {
-        self.dnd
-    }
-
-    pub fn set_dnd(&mut self, on: bool) {
-        self.dnd = on;
-    }
-
     fn remove(&mut self, id: u32) -> Option<Notification> {
         let at = self.held.iter().position(|held| held.id == id)?;
         self.held.remove(at)
+    }
+
+    /// An id no held notification has, for an arrival the policy refuses to keep: the
+    /// application still gets an answer, and the next arrival continues above it.
+    pub fn fresh_id(&mut self) -> u32 {
+        self.next_id()
     }
 
     /// The id after the last one given, skipping 0 and ids still held. At most CAPACITY ids
@@ -252,19 +248,17 @@ pub fn timeout_ms(expire_timeout: i32, urgency: Urgency) -> u32 {
 }
 
 /// What remains of the popup at `now_ms`: `u32::MAX` while it waits for the user, 0 once it
-/// has ended and the notification lives in the list only. Do not disturb ends every popup
-/// but a critical one's (BR4). The bar owns the pause under the pointer, not this count.
+/// has ended and the notification lives in the list only. Whether do not disturb hides the
+/// popup was decided when the notification arrived (`Notification::popup`). The bar owns the
+/// pause under the pointer, not this count.
 #[must_use]
-pub fn popup_ms_left(notification: &Notification, now_ms: u64, dnd: bool) -> u32 {
+pub fn popup_ms_left(notification: &Notification, now_ms: u64) -> u32 {
     let content = &notification.content;
     if !notification.popup {
         return 0;
     }
     if content.urgency == Urgency::Critical {
         return u32::MAX;
-    }
-    if dnd {
-        return 0;
     }
     if content.timeout_ms == 0 {
         return u32::MAX;
@@ -307,7 +301,7 @@ pub(crate) mod tests {
 
     #[test]
     fn ids_start_at_one_and_a_replace_keeps_the_id_and_moves_it_last() {
-        let mut store = Store::new(false);
+        let mut store = Store::new();
         let first = store
             .notify(
                 content("a", Urgency::Normal, 5000),
@@ -316,6 +310,7 @@ pub(crate) mod tests {
                 0,
                 Identity::Other,
                 String::new(),
+                true,
             )
             .notification
             .id;
@@ -327,6 +322,7 @@ pub(crate) mod tests {
                 0,
                 Identity::Other,
                 String::new(),
+                true,
             )
             .notification
             .id;
@@ -338,6 +334,7 @@ pub(crate) mod tests {
             0,
             Identity::Other,
             String::new(),
+            true,
         );
         assert!(again.replaced);
         assert_eq!(again.notification.id, first);
@@ -349,6 +346,7 @@ pub(crate) mod tests {
             0,
             Identity::Other,
             String::new(),
+            true,
         );
         assert!(!unknown.replaced);
         assert_eq!(unknown.notification.id, 3);
@@ -356,7 +354,7 @@ pub(crate) mod tests {
 
     #[test]
     fn the_next_past_capacity_pushes_out_the_oldest() {
-        let mut store = Store::new(false);
+        let mut store = Store::new();
         for n in 0..CAPACITY {
             assert!(store
                 .notify(
@@ -365,7 +363,8 @@ pub(crate) mod tests {
                     0,
                     0,
                     Identity::Other,
-                    String::new()
+                    String::new(),
+                    true,
                 )
                 .evicted
                 .is_empty());
@@ -377,6 +376,7 @@ pub(crate) mod tests {
             0,
             Identity::Other,
             String::new(),
+            true,
         );
         assert_eq!(outcome.evicted, [1]);
         assert_eq!(store.iter().count(), CAPACITY);
@@ -384,7 +384,7 @@ pub(crate) mod tests {
 
     #[test]
     fn ids_wrap_past_zero_and_skip_ids_still_held() {
-        let mut store = Store::new(false);
+        let mut store = Store::new();
         store.last_id = u32::MAX - 1;
         let held = store
             .notify(
@@ -394,6 +394,7 @@ pub(crate) mod tests {
                 0,
                 Identity::Other,
                 String::new(),
+                true,
             )
             .notification
             .id;
@@ -407,7 +408,8 @@ pub(crate) mod tests {
                     0,
                     0,
                     Identity::Other,
-                    String::new()
+                    String::new(),
+                    true,
                 )
                 .notification
                 .id,
@@ -430,7 +432,7 @@ pub(crate) mod tests {
             let mut restored = notification(1);
             restored.popup = false;
             restored.content = content("x", urgency, timeout_ms);
-            assert_eq!(popup_ms_left(&restored, 0, false), 0, "{urgency:?}");
+            assert_eq!(popup_ms_left(&restored, 0), 0, "{urgency:?}");
         }
     }
 
@@ -447,34 +449,31 @@ pub(crate) mod tests {
             content: content("x", urgency, timeout_ms),
         };
         assert_eq!(
-            popup_ms_left(&at(1000, Urgency::Normal, 5000), 3000, false),
+            popup_ms_left(&at(1000, Urgency::Normal, 5000), 3000),
             3000,
             "sent while no bar ran"
         );
         assert_eq!(
-            popup_ms_left(&at(1000, Urgency::Normal, 5000), 9000, false),
+            popup_ms_left(&at(1000, Urgency::Normal, 5000), 9000),
             0,
             "old: list only"
         );
         assert_eq!(
-            popup_ms_left(&at(0, Urgency::Normal, 0), 99_000, false),
+            popup_ms_left(&at(0, Urgency::Normal, 0), 99_000),
             u32::MAX,
             "expire timeout 0"
         );
         assert_eq!(
-            popup_ms_left(&at(0, Urgency::Critical, 0), 99_000, true),
+            popup_ms_left(&at(0, Urgency::Critical, 0), 99_000),
             u32::MAX,
-            "critical under DND"
+            "critical waits"
         );
+        let mut hidden = at(0, Urgency::Normal, 0);
+        hidden.popup = false;
         assert_eq!(
-            popup_ms_left(&at(1000, Urgency::Normal, 5000), 1000, true),
+            popup_ms_left(&hidden, 0),
             0,
-            "DND ends the popup"
-        );
-        assert_eq!(
-            popup_ms_left(&at(0, Urgency::Normal, 0), 0, true),
-            0,
-            "DND ends a sticky popup too"
+            "a popup the policy hid ends at once, sticky or not"
         );
     }
 }

@@ -10,33 +10,34 @@ use std::path::{Component, Path};
 
 use athanor_unit::text::{self, BODY_CHARS, NAME_CHARS, SUMMARY_CHARS};
 
-/// One notification on the private interface, as `athanor-shelld`'s `wire.rs` sends it.
-/// The bar does not link that crate (zbus, tokio): this literal and
-/// `the_sixteen_fields_keep_their_order` below, which athanor-shelld's `wire.rs` mirrors
-/// with the same table of values, pin the field order.
-pub const WIRE_SIGNATURE: &str = "(usssa(ss)ybbsssuuayuu)";
+/// One notification on the private interface, as `athanor-shelld`'s `wire.rs` sends it
+/// (`athanor_services::notifications::wire`). The bar does not link that crate: this literal
+/// and `the_fields_keep_their_order` below, which that module mirrors with the same table
+/// of values, pin the field order. Twenty-five fields are more than a glib tuple type
+/// converts (`FromVariant` stops at sixteen), so each is read by its index.
+pub const WIRE_SIGNATURE: &str = "(ussssa(sus)a(ss)bybbbxsssuuayuubibs)";
 
-/// id, app_name, summary, body, actions (key, label), urgency, transient, resident,
-/// desktop_entry, icon_name, icon_file, image_width, image_height, image_rgba (straight
-/// RGBA), timeout_ms, popup_ms_left.
-pub type Wire = (
-    u32,
-    String,
-    String,
-    String,
-    Vec<(String, String)>,
-    u8,
-    bool,
-    bool,
-    String,
-    String,
-    String,
-    u32,
-    u32,
-    Vec<u8>,
-    u32,
-    u32,
-);
+/// The index of each field the bar reads: id, app_name, summary, body, actions, urgency,
+/// transient, resident, desktop_entry, icon_name, icon_file, image_width, image_height,
+/// image_rgba, popup_ms_left. The others (app_id, body_spans, actions_available, read, time,
+/// timeout_ms, popup, value, reply, reply_placeholder) are for the control center.
+mod field {
+    pub const ID: usize = 0;
+    pub const APP_NAME: usize = 2;
+    pub const SUMMARY: usize = 3;
+    pub const BODY: usize = 4;
+    pub const ACTIONS: usize = 6;
+    pub const URGENCY: usize = 8;
+    pub const TRANSIENT: usize = 9;
+    pub const RESIDENT: usize = 10;
+    pub const DESKTOP_ENTRY: usize = 13;
+    pub const ICON_NAME: usize = 14;
+    pub const ICON_FILE: usize = 15;
+    pub const IMAGE_WIDTH: usize = 16;
+    pub const IMAGE_HEIGHT: usize = 17;
+    pub const IMAGE_RGBA: usize = 18;
+    pub const POPUP_MS_LEFT: usize = 20;
+}
 
 /// `popup_ms_left` of a popup that shows until the user closes it.
 pub const WAITS: u32 = u32::MAX;
@@ -115,24 +116,25 @@ impl Notice {
     /// bound are dropped, not the notification.
     #[must_use]
     pub fn decode(value: &glib::Variant) -> Option<Notice> {
-        let (
-            id,
-            app_name,
-            summary,
-            body,
-            actions,
-            urgency,
-            transient,
-            resident,
-            desktop_entry,
-            icon_name,
-            icon_file,
-            image_width,
-            image_height,
-            image_rgba,
-            _timeout_ms,
-            popup_ms_left,
-        ) = value.get::<Wire>()?;
+        if value.type_().as_str() != WIRE_SIGNATURE {
+            return None;
+        }
+        let get = |index: usize| value.try_child_value(index);
+        let id = get(field::ID)?.get::<u32>()?;
+        let app_name = get(field::APP_NAME)?.get::<String>()?;
+        let summary = get(field::SUMMARY)?.get::<String>()?;
+        let body = get(field::BODY)?.get::<String>()?;
+        let actions = get(field::ACTIONS)?.get::<Vec<(String, String)>>()?;
+        let urgency = get(field::URGENCY)?.get::<u8>()?;
+        let transient = get(field::TRANSIENT)?.get::<bool>()?;
+        let resident = get(field::RESIDENT)?.get::<bool>()?;
+        let desktop_entry = get(field::DESKTOP_ENTRY)?.get::<String>()?;
+        let icon_name = get(field::ICON_NAME)?.get::<String>()?;
+        let icon_file = get(field::ICON_FILE)?.get::<String>()?;
+        let image_width = get(field::IMAGE_WIDTH)?.get::<u32>()?;
+        let image_height = get(field::IMAGE_HEIGHT)?.get::<u32>()?;
+        let image_rgba = get(field::IMAGE_RGBA)?.get::<Vec<u8>>()?;
+        let popup_ms_left = get(field::POPUP_MS_LEFT)?.get::<u32>()?;
         if id == 0 {
             return None;
         }
@@ -352,67 +354,99 @@ mod tests {
 
     use super::*;
 
-    fn wire(id: u32) -> Wire {
-        (
-            id,
-            "Files".into(),
-            "Copied".into(),
-            "Two files".into(),
-            Vec::new(),
-            1,
-            false,
-            false,
-            String::new(),
-            String::new(),
-            String::new(),
-            0,
-            0,
-            Vec::new(),
-            5000,
-            5000,
-        )
+    /// The twenty-five fields of the wire, in order, as the daemon sends them.
+    struct Wire(Vec<glib::Variant>);
+
+    impl Wire {
+        fn variant(&self) -> glib::Variant {
+            glib::Variant::tuple_from_iter(self.0.iter().cloned())
+        }
+
+        fn set(&mut self, index: usize, value: impl ToVariant) {
+            self.0[index] = value.to_variant();
+        }
     }
 
-    fn decode(wire: Wire) -> Notice {
-        Notice::decode(&wire.to_variant()).expect("a valid wire value")
+    fn wire(id: u32) -> Wire {
+        Wire(vec![
+            id.to_variant(),
+            "org.example.Files".to_variant(),
+            "Files".to_variant(),
+            "Copied".to_variant(),
+            "Two files".to_variant(),
+            Vec::<(String, u32, String)>::new().to_variant(),
+            Vec::<(String, String)>::new().to_variant(),
+            true.to_variant(),
+            1u8.to_variant(),
+            false.to_variant(),
+            false.to_variant(),
+            false.to_variant(),
+            0i64.to_variant(),
+            "".to_variant(),
+            "".to_variant(),
+            "".to_variant(),
+            0u32.to_variant(),
+            0u32.to_variant(),
+            Vec::<u8>::new().to_variant(),
+            5000u32.to_variant(),
+            5000u32.to_variant(),
+            true.to_variant(),
+            (-1i32).to_variant(),
+            false.to_variant(),
+            "".to_variant(),
+        ])
+    }
+
+    fn decode(wire: &Wire) -> Notice {
+        Notice::decode(&wire.variant()).expect("a valid wire value")
     }
 
     fn notice(id: u32, app: &str) -> Notice {
         let mut wire = wire(id);
-        wire.1 = app.into();
-        decode(wire)
+        wire.set(2, app);
+        decode(&wire)
     }
 
     #[test]
     fn the_wire_type_is_the_daemons() {
-        let value = wire(7).to_variant();
+        let value = wire(7).variant();
         assert_eq!(value.type_().as_str(), WIRE_SIGNATURE);
         assert_eq!(Notice::decode(&value).map(|notice| notice.id), Some(7));
     }
 
-    /// The same table of values as athanor-shelld's `wire.rs` test of this name: each field
+    /// The same table of values as athanor-services' `wire.rs` test of this name: each field
     /// lands in its own place, so a swap of two fields of one type fails here or there.
     #[test]
-    fn the_sixteen_fields_keep_their_order() {
-        let table: Wire = (
-            1,
-            "app".into(),
-            "summary".into(),
-            "body".into(),
-            vec![("key".into(), "label".into())],
-            2,
-            true,
-            false,
-            "entry".into(),
-            "name".into(),
-            "/file".into(),
-            3,
-            4,
-            vec![5; 48],
-            6,
-            7,
-        );
-        let notice = decode(table.clone());
+    fn the_fields_keep_their_order() {
+        let table = Wire(vec![
+            1u32.to_variant(),
+            "org.example.Chat".to_variant(),
+            "app".to_variant(),
+            "summary".to_variant(),
+            "body".to_variant(),
+            vec![("span".to_owned(), 5u32, "https://example.org".to_owned())].to_variant(),
+            vec![("key".to_owned(), "label".to_owned())].to_variant(),
+            true.to_variant(),
+            2u8.to_variant(),
+            true.to_variant(),
+            false.to_variant(),
+            true.to_variant(),
+            (-8i64).to_variant(),
+            "entry".to_variant(),
+            "name".to_variant(),
+            "/file".to_variant(),
+            3u32.to_variant(),
+            4u32.to_variant(),
+            vec![5u8; 48].to_variant(),
+            6u32.to_variant(),
+            7u32.to_variant(),
+            true.to_variant(),
+            (-1i32).to_variant(),
+            true.to_variant(),
+            "placeholder".to_variant(),
+        ]);
+        assert_eq!(table.variant().type_().as_str(), WIRE_SIGNATURE);
+        let notice = decode(&table);
         assert_eq!(
             (
                 notice.id,
@@ -442,28 +476,28 @@ mod tests {
                 rgba: vec![5; 48]
             }
         );
-        // timeout_ms (6) is not kept: a swap with popup_ms_left shows here as 6.
+        // timeout_ms (19) is not kept: a swap with popup_ms_left shows here as 6.
         assert_eq!(notice.popup_ms_left, 7);
         let mut table = table;
-        table.13 = Vec::new();
-        assert_eq!(decode(table.clone()).picture, Picture::File("/file".into()));
-        table.10 = String::new();
-        assert_eq!(decode(table).picture, Picture::Name("name".into()));
+        table.set(18, Vec::<u8>::new());
+        assert_eq!(decode(&table).picture, Picture::File("/file".into()));
+        table.set(15, "");
+        assert_eq!(decode(&table).picture, Picture::Name("name".into()));
     }
 
     #[test]
     fn a_wrong_type_or_the_id_zero_is_refused() {
         assert!(Notice::decode(&(1u32, "x").to_variant()).is_none());
-        assert!(Notice::decode(&wire(0).to_variant()).is_none());
+        assert!(Notice::decode(&wire(0).variant()).is_none());
     }
 
     #[test]
     fn text_is_cleaned_and_bounded() {
         let mut wire = wire(1);
-        wire.1 = "Files\u{202E}\n".into();
-        wire.2 = "s".repeat(1000);
-        wire.3 = "a\u{0007}b\nc<b>d</b>".into();
-        let notice = decode(wire);
+        wire.set(2, "Files\u{202E}\n");
+        wire.set(3, "s".repeat(1000));
+        wire.set(4, "a\u{0007}b\nc<b>d</b>");
+        let notice = decode(&wire);
         assert_eq!(notice.app_name, "Files");
         assert_eq!(notice.summary.chars().count(), SUMMARY_CHARS);
         assert_eq!(notice.body, "ab\nc<b>d</b>", "markup stays text");
@@ -472,16 +506,17 @@ mod tests {
     #[test]
     fn actions_are_bounded_and_default_is_not_a_button() {
         let mut wire = wire(1);
-        wire.4 = vec![
+        let mut actions: Vec<(String, String)> = vec![
             ("default".into(), "Open".into()),
             (String::new(), "Empty key".into()),
             ("k\n".into(), "Control in key".into()),
             ("x".repeat(65), "Long key".into()),
             ("blank".into(), "\u{202E}".into()),
         ];
-        wire.4
+        actions
             .extend((0..20).map(|n| (format!("a{n}"), format!("Action {n}"))));
-        let notice = decode(wire);
+        wire.set(6, actions);
+        let notice = decode(&wire);
         assert!(notice.has_default);
         assert_eq!(notice.actions.len(), MAX_ACTIONS);
         assert_eq!(notice.actions.first().map(|a| a.key.as_str()), Some("a0"));
@@ -490,36 +525,36 @@ mod tests {
     #[test]
     fn pixels_win_only_when_their_size_matches() {
         let mut wire = wire(1);
-        wire.9 = "folder".into();
-        wire.11 = 2;
-        wire.12 = 2;
-        wire.13 = vec![0; 16];
+        wire.set(14, "folder");
+        wire.set(16, 2u32);
+        wire.set(17, 2u32);
+        wire.set(18, vec![0u8; 16]);
         assert!(matches!(
-            decode(wire.clone()).picture,
+            decode(&wire).picture,
             Picture::Pixels {
                 width: 2,
                 height: 2,
                 ..
             }
         ));
-        wire.13 = vec![0; 15];
-        assert_eq!(decode(wire.clone()).picture, Picture::Name("folder".into()));
-        wire.11 = 97;
-        wire.12 = 1;
-        wire.13 = vec![0; 97 * 4];
-        assert_eq!(decode(wire.clone()).picture, Picture::Name("folder".into()));
-        wire.11 = u32::MAX;
-        wire.12 = u32::MAX;
-        assert_eq!(decode(wire).picture, Picture::Name("folder".into()));
+        wire.set(18, vec![0u8; 15]);
+        assert_eq!(decode(&wire).picture, Picture::Name("folder".into()));
+        wire.set(16, 97u32);
+        wire.set(17, 1u32);
+        wire.set(18, vec![0u8; 97 * 4]);
+        assert_eq!(decode(&wire).picture, Picture::Name("folder".into()));
+        wire.set(16, u32::MAX);
+        wire.set(17, u32::MAX);
+        assert_eq!(decode(&wire).picture, Picture::Name("folder".into()));
     }
 
     #[test]
     fn a_file_comes_before_a_name() {
         let mut wire = wire(1);
-        wire.9 = "folder".into();
-        wire.10 = "/usr/share/pixmaps/a.png".into();
+        wire.set(14, "folder");
+        wire.set(15, "/usr/share/pixmaps/a.png");
         assert_eq!(
-            decode(wire).picture,
+            decode(&wire).picture,
             Picture::File("/usr/share/pixmaps/a.png".into())
         );
     }
@@ -547,13 +582,13 @@ mod tests {
             assert!(!is_icon_name(bad), "{bad:?}");
         }
         let mut wire = wire(1);
-        wire.8 = "org.gnome.Nautilus".into();
+        wire.set(13, "org.gnome.Nautilus");
         assert_eq!(
-            decode(wire.clone()).desktop_entry.as_deref(),
+            decode(&wire).desktop_entry.as_deref(),
             Some("org.gnome.Nautilus")
         );
-        wire.8 = "../x".into();
-        assert_eq!(decode(wire).desktop_entry, None);
+        wire.set(13, "../x");
+        assert_eq!(decode(&wire).desktop_entry, None);
     }
 
     fn png(width: u32, height: u32) -> Vec<u8> {
@@ -634,12 +669,12 @@ mod tests {
     #[test]
     fn the_desktop_entry_groups_before_the_name() {
         let mut first = wire(1);
-        first.1 = "Files".into();
-        first.8 = "org.gnome.Nautilus".into();
+        first.set(2, "Files");
+        first.set(13, "org.gnome.Nautilus");
         let mut second = wire(2);
-        second.1 = "Nautilus".into();
-        second.8 = "org.gnome.Nautilus".into();
-        let list = [decode(first), decode(second)];
+        second.set(2, "Nautilus");
+        second.set(13, "org.gnome.Nautilus");
+        let list = [decode(&first), decode(&second)];
         assert_eq!(groups(&list).len(), 1);
     }
 

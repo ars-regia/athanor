@@ -3,11 +3,13 @@ mod common;
 use std::collections::HashMap;
 use std::time::Duration;
 
+use athanor_shelld::sender::{Admitted, Caller};
 use athanor_shelld::server::{NOTIFICATIONS_NAME, NOTIFICATIONS_PATH, PRIVATE_PATH};
 use athanor_shelld::store::CAPACITY;
 use athanor_shelld::wire::WireNotification;
-use common::{Bus, APP_CGROUP, BAR_CGROUP};
+use common::{Bus, APP_CGROUP, BAR_CGROUP, SESSION_CGROUP};
 use futures_util::StreamExt;
+use std::fs;
 use zbus::{Connection, Proxy};
 use zvariant::Value;
 
@@ -48,6 +50,259 @@ async fn notify(
         )
         .await
         .expect("Notify")
+}
+
+/// The daemon, then the bar, the control center and an application, connected before it.
+async fn units(bus: &Bus, cgroup: &str) -> (Connection, Connection, Connection, Connection) {
+    let (bar, center, app) = (bus.client().await, bus.client().await, bus.client().await);
+    let daemon = bus
+        .daemon_for(
+            cgroup,
+            &[(&bar, Caller::Bar), (&center, Caller::ControlCenter)],
+        )
+        .await;
+    (daemon, bar, center, app)
+}
+
+async fn admitted<B>(conn: &Connection, method: &str, body: &B) -> bool
+where
+    B: serde::Serialize + zvariant::DynamicType,
+{
+    match private(conn).await.call_method(method, body).await {
+        Ok(_) => true,
+        Err(err) => !err.to_string().contains("AccessDenied"),
+    }
+}
+
+#[tokio::test]
+async fn each_method_admits_the_units_of_the_table() {
+    let bus = Bus::start("admit");
+    let (_daemon, bar, center, app) = units(&bus, APP_CGROUP).await;
+    macro_rules! row {
+        ($method:literal, $body:expr, $bar:literal, $center:literal) => {
+            assert_eq!(
+                admitted(&bar, $method, &$body).await,
+                $bar,
+                "bar {}",
+                $method
+            );
+            assert_eq!(
+                admitted(&center, $method, &$body).await,
+                $center,
+                "center {}",
+                $method
+            );
+            assert!(
+                !admitted(&app, $method, &$body).await,
+                "application {}",
+                $method
+            );
+        };
+    }
+    row!("List", (), true, true);
+    row!("History", (), false, true);
+    row!("Close", (1u32, 2u32), true, true);
+    row!("InvokeAction", (1u32, "default", ""), true, true);
+    row!("Reply", (1u32, "hi"), true, true);
+    row!("MarkRead", (vec![1u32],), true, true);
+    row!("ClearAll", (), false, true);
+    row!("ClearGroup", ("",), false, true);
+    row!("DoNotDisturb", (), true, true);
+    row!("SetDoNotDisturb", (false,), true, true);
+    row!("SetDoNotDisturbUntil", (false, 0i64), true, true);
+    row!("Rules", ("",), false, true);
+    row!("SetRule", ("", "popups", "true"), false, true);
+    row!("Settings", (), true, true);
+    row!("SetSetting", ("sound", "true"), false, false);
+    row!("ReportFullscreen", (true, false), true, false);
+}
+
+#[tokio::test]
+async fn signals_reach_only_admitted_units() {
+    let bus = Bus::start("unicast");
+    let (_daemon, bar, center, app) = units(&bus, APP_CGROUP).await;
+    let mut admitted_streams = Vec::new();
+    for conn in [&bar, &center] {
+        let proxy = private(conn).await;
+        admitted_streams.push(proxy.receive_signal("Added").await.expect("subscribe"));
+        let _: Vec<WireNotification> = proxy.call("List", &()).await.expect("List");
+    }
+    let mut to_app = private(&app)
+        .await
+        .receive_signal("Added")
+        .await
+        .expect("subscribe");
+    let id = notify(&public(&app).await, 0, "s", "", &[], HashMap::new()).await;
+    for stream in &mut admitted_streams {
+        let (wire,): (WireNotification,) = stream
+            .next()
+            .await
+            .expect("signal")
+            .body()
+            .deserialize()
+            .expect("wire");
+        assert_eq!(wire.id, id);
+    }
+    assert!(
+        tokio::time::timeout(Duration::from_millis(300), to_app.next())
+            .await
+            .is_err(),
+        "a unicast signal never reaches an unadmitted connection"
+    );
+}
+
+#[tokio::test]
+async fn the_control_center_may_mute_but_not_grant_bypass() {
+    let bus = Bus::start("mute");
+    let (_daemon, bar, center, _app) = units(&bus, APP_CGROUP).await;
+    let bar_proxy = private(&bar).await;
+    let mut changed = bar_proxy
+        .receive_signal("RulesChanged")
+        .await
+        .expect("subscribe");
+    let _: Vec<WireNotification> = bar_proxy.call("List", &()).await.expect("List");
+    let center_proxy = private(&center).await;
+    center_proxy
+        .call::<_, _, ()>("SetRule", &("org.example.Chat", "allowed", "false"))
+        .await
+        .expect("mute");
+    let (app,): (String,) = changed
+        .next()
+        .await
+        .expect("signal")
+        .body()
+        .deserialize()
+        .expect("app");
+    assert_eq!(app, "org.example.Chat");
+    let err = center_proxy
+        .call::<_, _, ()>("SetRule", &("org.example.Chat", "bypass_dnd", "true"))
+        .await
+        .expect_err("refused");
+    assert!(err.to_string().contains("AccessDenied"), "{err}");
+    let rules: HashMap<String, String> = center_proxy
+        .call("Rules", &("org.example.Chat",))
+        .await
+        .expect("Rules");
+    assert_eq!(rules.get("allowed").map(String::as_str), Some("false"));
+    assert_eq!(rules.get("bypass_dnd").map(String::as_str), Some("false"));
+}
+
+#[tokio::test]
+async fn the_history_survives_a_restart_of_the_daemon() {
+    let bus = Bus::start("restart");
+    let (_daemon, _bar, center, app) = units(&bus, APP_CGROUP).await;
+    let sender = public(&app).await;
+    let kept = notify(&sender, 0, "kept", "", &["default", "Open"], HashMap::new()).await;
+    notify(
+        &sender,
+        0,
+        "gone",
+        "",
+        &[],
+        HashMap::from([("transient", Value::from(true))]),
+    )
+    .await;
+    private(&center)
+        .await
+        .call::<_, _, ()>("MarkRead", &(vec![kept],))
+        .await
+        .expect("MarkRead");
+    let file = bus.dir.join("state/notifications.json");
+    common::wait_for_file(&file, "\"read\":true").await;
+
+    // A second bus and daemon on a copy of the file: a restart, and a new bus as after a reboot.
+    let second = Bus::start("restart-second");
+    fs::create_dir_all(second.dir.join("state")).expect("mkdir");
+    fs::copy(&file, second.dir.join("state/notifications.json")).expect("copy");
+    let (_daemon2, _bar2, center2, app2) = units(&second, APP_CGROUP).await;
+    let history: Vec<WireNotification> = private(&center2)
+        .await
+        .call("History", &())
+        .await
+        .expect("History");
+    let seen: Vec<_> = history
+        .iter()
+        .map(|n| (n.id, n.summary.as_str(), n.read, n.actions_available))
+        .collect();
+    assert_eq!(
+        seen,
+        [(kept, "kept", true, false)],
+        "on another bus the actions are unavailable"
+    );
+    let next = notify(&public(&app2).await, 0, "next", "", &[], HashMap::new()).await;
+    assert!(next > kept);
+}
+
+#[tokio::test]
+async fn a_spoofed_desktop_entry_lands_in_other_and_does_not_pass_dnd() {
+    let bus = Bus::start("spoof");
+    fs::create_dir_all(bus.dir.join("config/apps")).expect("mkdir");
+    fs::write(
+        bus.dir.join("config/apps/org.example.Chat.conf"),
+        "bypass_dnd=true\n",
+    )
+    .expect("rule");
+    let (_daemon, bar, _center, app) = units(&bus, SESSION_CGROUP).await;
+    let bar_proxy = private(&bar).await;
+    let mut added = bar_proxy.receive_signal("Added").await.expect("subscribe");
+    let _: Vec<WireNotification> = bar_proxy.call("List", &()).await.expect("List");
+    bar_proxy
+        .call::<_, _, ()>("SetDoNotDisturb", &(true,))
+        .await
+        .expect("dnd");
+    let hints = HashMap::from([("desktop-entry", Value::from("org.example.Chat"))]);
+    notify(&public(&app).await, 0, "s", "", &[], hints).await;
+    let (wire,): (WireNotification,) = added
+        .next()
+        .await
+        .expect("signal")
+        .body()
+        .deserialize()
+        .expect("wire");
+    assert_eq!(
+        (
+            wire.app_id.as_str(),
+            wire.desktop_entry.as_str(),
+            wire.popup
+        ),
+        ("", "org.example.Chat", false)
+    );
+}
+
+#[tokio::test]
+async fn do_not_disturb_changed_reaches_both_units_with_its_reason() {
+    let bus = Bus::start("dnd-changed");
+    let (_daemon, bar, center, _app) = units(&bus, APP_CGROUP).await;
+    let mut streams = Vec::new();
+    for conn in [&bar, &center] {
+        let proxy = private(conn).await;
+        streams.push(
+            proxy
+                .receive_signal("DoNotDisturbChanged")
+                .await
+                .expect("subscribe"),
+        );
+        let _: Vec<WireNotification> = proxy.call("List", &()).await.expect("List");
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs() as i64;
+    private(&center)
+        .await
+        .call::<_, _, ()>("SetDoNotDisturbUntil", &(true, now + 3600))
+        .await
+        .expect("set");
+    for stream in &mut streams {
+        let got: (bool, String, i64) = stream
+            .next()
+            .await
+            .expect("signal")
+            .body()
+            .deserialize()
+            .expect("args");
+        assert_eq!(got, (true, "manual".to_owned(), now + 3600));
+    }
 }
 
 #[tokio::test]
@@ -114,7 +369,7 @@ async fn the_private_interface_refuses_a_process_outside_the_bar() {
     let _daemon = bus.daemon(APP_CGROUP).await;
     let proxy = private(&bus.client().await).await;
     let err = proxy
-        .call::<_, _, (bool, Vec<WireNotification>)>("List", &())
+        .call::<_, _, Vec<WireNotification>>("List", &())
         .await
         .expect_err("refused");
     assert!(err.to_string().contains("AccessDenied"), "{err}");
@@ -153,7 +408,7 @@ async fn the_bar_lists_clean_text_and_hears_added_replaced_closed() {
     // The bar lists on start (BR1): only after that is its unique name the private signals'
     // destination.
     private
-        .call::<_, _, (bool, Vec<WireNotification>)>("List", &())
+        .call::<_, _, Vec<WireNotification>>("List", &())
         .await
         .expect("List");
     let mut added = private.receive_signal("Added").await.expect("subscribe");
@@ -188,8 +443,11 @@ async fn the_bar_lists_clean_text_and_hears_added_replaced_closed() {
         .deserialize()
         .expect("wire");
     assert_eq!((again.id, again.summary.as_str()), (id, "again"));
-    let (dnd, listed): (bool, Vec<WireNotification>) =
-        private.call("List", &()).await.expect("List");
+    let listed: Vec<WireNotification> = private.call("List", &()).await.expect("List");
+    let (dnd, ..): (bool, String, i64, Vec<String>) = private
+        .call("DoNotDisturb", &())
+        .await
+        .expect("DoNotDisturb");
     assert!(!dnd);
     assert_eq!(listed.iter().map(|n| n.id).collect::<Vec<_>>(), [id]);
     private
@@ -215,12 +473,12 @@ async fn the_bar_lists_clean_text_and_hears_added_replaced_closed() {
 
 #[tokio::test]
 async fn private_signals_reach_only_the_bar_that_listed() {
-    let bus = Bus::start("unicast");
+    let bus = Bus::start("unicast-eavesdrop");
     let _daemon = bus.daemon(BAR_CGROUP).await;
     let client = bus.client().await;
     let (public, private) = (public(&client).await, private(&client).await);
     private
-        .call::<_, _, (bool, Vec<WireNotification>)>("List", &())
+        .call::<_, _, Vec<WireNotification>>("List", &())
         .await
         .expect("List");
     let mut added = private.receive_signal("Added").await.expect("subscribe");
@@ -281,7 +539,7 @@ async fn no_private_signal_is_sent_before_any_bar_has_listed() {
     );
     // The notification itself is unaffected: it is still held.
     private
-        .call::<_, _, (bool, Vec<WireNotification>)>("List", &())
+        .call::<_, _, Vec<WireNotification>>("List", &())
         .await
         .expect("List");
 }
@@ -342,7 +600,7 @@ async fn an_action_sends_the_token_first_then_closes_unless_resident() {
         .call::<_, _, ()>("InvokeAction", &(resident, "default", ""))
         .await
         .expect("invoke");
-    let (_, listed): (bool, Vec<WireNotification>) = private.call("List", &()).await.expect("List");
+    let listed: Vec<WireNotification> = private.call("List", &()).await.expect("List");
     assert!(
         listed.iter().any(|n| n.id == resident),
         "a resident notification stays"
@@ -381,9 +639,12 @@ async fn do_not_disturb_persists_and_ends_popups_but_critical() {
         HashMap::from([("urgency", Value::U8(2))]),
     )
     .await;
-    let (dnd, listed): (bool, Vec<WireNotification>) =
-        private.call("List", &()).await.expect("List");
-    assert!(dnd);
+    let listed: Vec<WireNotification> = private.call("List", &()).await.expect("List");
+    let (dnd, reason, ..): (bool, String, i64, Vec<String>) = private
+        .call("DoNotDisturb", &())
+        .await
+        .expect("DoNotDisturb");
+    assert_eq!((dnd, reason.as_str()), (true, "manual"));
     let left = |id| {
         listed
             .iter()
@@ -395,7 +656,7 @@ async fn do_not_disturb_persists_and_ends_popups_but_critical() {
 }
 
 #[tokio::test]
-async fn the_list_keeps_the_newest_hundred_and_says_so() {
+async fn the_list_keeps_the_newest_five_hundred_and_says_so() {
     let bus = Bus::start("capacity");
     let _daemon = bus.daemon(BAR_CGROUP).await;
     let client = bus.client().await;
@@ -416,7 +677,7 @@ async fn the_list_keeps_the_newest_hundred_and_says_so() {
         .deserialize()
         .expect("args");
     assert_eq!((id, reason), (first, 1));
-    let (_, listed): (bool, Vec<WireNotification>) = private.call("List", &()).await.expect("List");
+    let listed: Vec<WireNotification> = private.call("List", &()).await.expect("List");
     assert_eq!(listed.len(), CAPACITY);
 }
 
@@ -474,7 +735,7 @@ async fn images_are_scaled_and_bad_ones_dropped_without_failing_the_call() {
         HashMap::from([("x-huge", Value::new(vec![0u8; 256 * 1024]))]),
     )
     .await;
-    let (_, listed): (bool, Vec<WireNotification>) = private.call("List", &()).await.expect("List");
+    let listed: Vec<WireNotification> = private.call("List", &()).await.expect("List");
     let get = |id| listed.iter().find(|n| n.id == id).expect("listed");
     assert_eq!((get(a).image_width, get(a).image_height), (96, 48));
     assert_eq!(
@@ -496,7 +757,9 @@ async fn a_second_daemon_on_the_same_bus_fails_to_start() {
         bus.builder(),
         athanor_shelld::server::Config {
             state_dir: bus.dir.join("state"),
-            bar: athanor_shelld::sender::BarUnit::from_proc(),
+            config_dir: bus.dir.join("config"),
+            proc_root: bus.dir.join("proc"),
+            admitted: Admitted::from_proc_root(bus.dir.join("proc")),
         },
     )
     .await;
@@ -504,4 +767,67 @@ async fn a_second_daemon_on_the_same_bus_fails_to_start() {
         second.is_err(),
         "the name is taken: the start must fail, not queue"
     );
+}
+
+#[tokio::test]
+async fn ending_do_not_disturb_posts_a_summary_whose_default_action_opens_the_center() {
+    let bus = Bus::start("summary");
+    let (daemon, bar, _center, app) = units(&bus, APP_CGROUP).await;
+    let bar_proxy = private(&bar).await;
+    let mut added = bar_proxy.receive_signal("Added").await.expect("subscribe");
+    let _: Vec<WireNotification> = bar_proxy.call("List", &()).await.expect("List");
+    bar_proxy
+        .call::<_, _, ()>("SetDoNotDisturb", &(true,))
+        .await
+        .expect("on");
+    notify(&public(&app).await, 0, "hidden", "", &[], HashMap::new()).await;
+    let (hidden,): (WireNotification,) = added
+        .next()
+        .await
+        .expect("signal")
+        .body()
+        .deserialize()
+        .expect("wire");
+    assert!(!hidden.popup);
+    // The control center's name, taken by a test double that records the call.
+    struct Center(tokio::sync::mpsc::UnboundedSender<String>);
+    #[zbus::interface(name = "os.athanor.ControlCenter1")]
+    impl Center {
+        fn show(&self, page: &str) {
+            self.0.send(page.to_owned()).ok();
+        }
+    }
+    let (tx, mut pages) = tokio::sync::mpsc::unbounded_channel();
+    let _center = zbus::connection::Builder::address(bus.address.as_str())
+        .expect("address")
+        .serve_at("/os/athanor/ControlCenter1", Center(tx))
+        .expect("serve")
+        .name("os.athanor.ControlCenter1")
+        .expect("name")
+        .build()
+        .await
+        .expect("center");
+    bar_proxy
+        .call::<_, _, ()>("SetDoNotDisturb", &(false,))
+        .await
+        .expect("off");
+    let (summary,): (WireNotification,) = added
+        .next()
+        .await
+        .expect("signal")
+        .body()
+        .deserialize()
+        .expect("wire");
+    assert_eq!(
+        summary.summary,
+        "1 notification while do not disturb was on"
+    );
+    assert!(summary.transient && summary.popup);
+    assert_eq!(summary.actions[0].0, "default");
+    bar_proxy
+        .call::<_, _, ()>("InvokeAction", &(summary.id, "default", ""))
+        .await
+        .expect("invoke");
+    assert_eq!(pages.recv().await.as_deref(), Some("notifications"));
+    drop(daemon);
 }

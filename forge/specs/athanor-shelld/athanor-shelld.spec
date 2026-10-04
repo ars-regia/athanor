@@ -9,8 +9,8 @@ BuildRequires:  rust cargo gcc pkgconf-pkg-config
 
 %description
 Owns org.freedesktop.Notifications (Desktop Notifications 1.2) and
-org.kde.StatusNotifierWatcher for the session, and serves the bar the private interface
-os.athanor.Notifications1, answering only athanor-bar.service. Headless, confined with
+org.kde.StatusNotifierWatcher for the session, and serves the bar and the control center the private interface
+os.athanor.Notifications1, answering only athanor-bar.service and athanor-control-center.service, method by method. Headless, confined with
 Landlock, and stopped after five failures in ten minutes. Enabled for every user by a user
 preset, and activated by the bus when a client calls one of its names first.
 

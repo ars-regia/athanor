@@ -2,18 +2,21 @@
 
 #![allow(dead_code)] // each test file uses part of it
 
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::{env, fs, process};
 
-use athanor_shelld::sender::{BarUnit, BAR_UNIT};
+use athanor_shelld::sender::{Admitted, Caller};
 use athanor_shelld::server::{self, Config};
 use zbus::connection::Builder;
 use zbus::Connection;
 
 pub const BAR_CGROUP: &str =
     "/user.slice/user-1000.slice/user@1000.service/app.slice/athanor-bar.service";
+/// A sender in no application unit: a login session scope.
+pub const SESSION_CGROUP: &str = "/user.slice/user-1000.slice/session-2.scope";
 pub const APP_CGROUP: &str =
     "/user.slice/user-1000.slice/user@1000.service/app.slice/app-athanor-foo@0123.service";
 
@@ -66,21 +69,68 @@ impl Bus {
         self.builder().build().await.expect("client")
     }
 
-    /// A daemon that sees this test process in `cgroup`, with its state under the bus directory.
+    /// A daemon that sees this test process in `cgroup`, with its state under the bus directory,
+    /// and that admits the callers of the private interface by the pid's cgroup.
     pub async fn daemon(&self, cgroup: &str) -> Connection {
         let proc_root = fake_proc(&self.dir, cgroup);
-        let state_dir = self.dir.join("state");
-        fs::create_dir_all(&state_dir).expect("state dir");
+        let (state_dir, config_dir) = (self.dir.join("state"), self.dir.join("config"));
+        for dir in [&state_dir, &config_dir] {
+            fs::create_dir_all(dir).expect("mkdir");
+        }
         server::start(
             self.builder(),
             Config {
                 state_dir,
-                bar: BarUnit::with_proc_root(BAR_UNIT, proc_root),
+                config_dir,
+                admitted: Admitted::from_proc_root(&proc_root),
+                proc_root,
             },
         )
         .await
         .expect("daemon")
+        .connection
     }
+
+    /// A daemon that admits `callers` by unique name and sees every sender in `cgroup`.
+    pub async fn daemon_for(&self, cgroup: &str, callers: &[(&Connection, Caller)]) -> Connection {
+        let proc_root = fake_proc(&self.dir, cgroup);
+        let names: HashMap<String, Caller> = callers
+            .iter()
+            .map(|(conn, caller)| {
+                (
+                    conn.unique_name().expect("unique name").to_string(),
+                    *caller,
+                )
+            })
+            .collect();
+        let (state_dir, config_dir) = (self.dir.join("state"), self.dir.join("config"));
+        for dir in [&state_dir, &config_dir] {
+            fs::create_dir_all(dir).expect("mkdir");
+        }
+        server::start(
+            self.builder(),
+            Config {
+                state_dir,
+                config_dir,
+                proc_root,
+                admitted: Admitted::from_fn(move |name, _pid| names.get(name).copied()),
+            },
+        )
+        .await
+        .expect("daemon")
+        .connection
+    }
+}
+
+/// Waits up to 5 s for `path` to contain `needle`.
+pub async fn wait_for_file(path: &Path, needle: &str) {
+    for _ in 0..100 {
+        if fs::read_to_string(path).is_ok_and(|text| text.contains(needle)) {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("{} never contained {needle}", path.display());
 }
 
 impl Drop for Bus {

@@ -198,7 +198,7 @@ impl Service {
                 return;
             }
         };
-        let Some((dnd, list)) = decode_list(&reply) else {
+        let Some(list) = decode_list(&reply) else {
             tracing::error!(
                 reply_type = reply.type_().as_str(),
                 "athanor-shelld answered List with an unexpected type; notifications stay hidden"
@@ -206,7 +206,6 @@ impl Service {
             self.stop(State::Absent);
             return;
         };
-        self.dnd.set(dnd);
         self.popups.borrow_mut().clear();
         let count = list.len();
         // Held and Live before any popup is placed: a transient notice whose popup cannot
@@ -225,6 +224,7 @@ impl Service {
         }
         self.ensure_ticking();
         self.changed();
+        self.read_dnd();
         if self.pending_open.replace(false) {
             let bar = self.bar.clone();
             // After this turn of the main loop, so the button is allocated when it opens.
@@ -272,6 +272,12 @@ impl Service {
             "Closed" => match parameters.get::<(u32, u32)>() {
                 Some((id, _reason)) => self.closed(id),
                 None => tracing::warn!("athanor-shelld sent Closed with an unexpected type"),
+            },
+            "DoNotDisturbChanged" => match parameters.get::<(bool, String, i64)>() {
+                Some((on, _reason, _until)) => self.apply_dnd(on),
+                None => tracing::warn!(
+                    "athanor-shelld sent DoNotDisturbChanged with an unexpected type"
+                ),
             },
             _ => {}
         }
@@ -432,16 +438,62 @@ impl Service {
         self.call("InvokeAction", (id, key, token).to_variant());
     }
 
-    /// The daemon sends no signal for do not disturb, so the bar takes the new state only
-    /// once the daemon accepted it; a refused call leaves the switch as the daemon has it.
+    /// The daemon answers with `DoNotDisturbChanged` to every change, and the bar takes the
+    /// state the same way for its own: once the daemon accepted it, so that a refused call
+    /// leaves the switch as the daemon has it.
     fn set_dnd(&self, on: bool) {
         self.call_then("SetDoNotDisturb", (on,).to_variant(), move |service| {
-            service.dnd.set(on);
-            if on {
-                let ended = service.popups.borrow_mut().end_non_critical();
-                service.ended(&ended);
+            service.apply_dnd(on);
+        });
+    }
+
+    /// The do-not-disturb state the daemon reports: the switch, and the popups it ends.
+    fn apply_dnd(&self, on: bool) {
+        self.dnd.set(on);
+        if on {
+            let ended = self.popups.borrow_mut().end_non_critical();
+            self.ended(&ended);
+        }
+        self.changed();
+    }
+
+    /// Asks the daemon whether do not disturb is on: after each list, since the list no
+    /// longer carries it and a change made while no bar ran sent it no signal.
+    fn read_dnd(&self) {
+        let Some((connection, owner)) = self.peer.borrow().clone() else {
+            return;
+        };
+        let (me, generation) = (self.me.clone(), self.generation.get());
+        glib::spawn_future_local(async move {
+            let reply = connection
+                .call_future(
+                    Some(&owner),
+                    PATH,
+                    INTERFACE,
+                    "DoNotDisturb",
+                    None,
+                    None,
+                    gio::DBusCallFlags::NONE,
+                    TIMEOUT_MS,
+                )
+                .await;
+            let Some(service) = me
+                .upgrade()
+                .filter(|service| service.generation.get() == generation)
+            else {
+                return;
+            };
+            match reply
+                .as_ref()
+                .ok()
+                .filter(|reply| reply.type_().as_str() == "(bsxas)")
+                .and_then(|reply| reply.try_child_value(0)?.get::<bool>())
+            {
+                Some(on) => service.apply_dnd(on),
+                None => tracing::warn!(
+                    "athanor-shelld did not report do not disturb; the switch stays as it was"
+                ),
             }
-            service.changed();
         });
     }
 
@@ -613,18 +665,18 @@ fn target_monitor(bar: &Bar, monitors: &[gdk::Monitor]) -> Option<gdk::Monitor> 
     target_output(activated.as_deref(), &connectors).and_then(|index| monitors.get(index).cloned())
 }
 
-fn decode_list(reply: &glib::Variant) -> Option<(bool, Vec<Notice>)> {
-    if reply.type_().as_str() != format!("(ba{WIRE_SIGNATURE})") {
+fn decode_list(reply: &glib::Variant) -> Option<Vec<Notice>> {
+    if reply.type_().as_str() != format!("(a{WIRE_SIGNATURE})") {
         return None;
     }
-    let dnd = reply.try_child_value(0)?.get::<bool>()?;
-    let list = reply.try_child_value(1)?;
+    let list = reply.try_child_value(0)?;
     let count = list.n_children();
-    let notices = (count.saturating_sub(notices::CAPACITY)..count)
-        .filter_map(|index| list.try_child_value(index))
-        .filter_map(|value| Notice::decode(&value))
-        .collect();
-    Some((dnd, notices))
+    Some(
+        (count.saturating_sub(notices::CAPACITY)..count)
+            .filter_map(|index| list.try_child_value(index))
+            .filter_map(|value| Notice::decode(&value))
+            .collect(),
+    )
 }
 
 pub(super) fn app_name(notice: &Notice) -> String {

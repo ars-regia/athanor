@@ -93,7 +93,8 @@ def notify(summary, *, expire=0, hints=None, icon="", actions=()):
 
 def daemon_dnd(on):
     """Sets do not disturb on the fake daemon itself, whose private interface checks no
-    caller; the bar reads the new state at its next List."""
+    caller. The fake emits DoNotDisturbChanged, so a running bar follows at once, and a bar
+    that starts later reads the state with DoNotDisturb."""
     session = Gio.bus_get_sync(Gio.BusType.SESSION, None)
     session.call_sync(
         "org.freedesktop.Notifications",

@@ -198,9 +198,10 @@ impl Dnd {
         (dnd, odd)
     }
 
-    /// Keep the switch; nothing to keep removes the file.
-    pub fn save(&self, dir: &Path) -> io::Result<()> {
-        let path = dir.join(FILE);
+    /// The file's text: what [`Dnd::save`] writes, and what a caller compares to know that
+    /// the state kept on disk is no longer the state held.
+    #[must_use]
+    pub fn render(&self) -> String {
         let mut out = String::new();
         if let Some(until) = self.manual_on {
             out.push_str("on=true\n");
@@ -212,6 +213,13 @@ impl Dnd {
             let names: Vec<_> = set.iter().map(|reason| reason.as_str()).collect();
             out.push_str(&format!("off_override={}\n", names.join(",")));
         }
+        out
+    }
+
+    /// Keep the switch; nothing to keep removes the file.
+    pub fn save(&self, dir: &Path) -> io::Result<()> {
+        let path = dir.join(FILE);
+        let out = self.render();
         if out.is_empty() {
             return match fs::remove_file(path) {
                 Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -347,20 +355,6 @@ fn read(path: &Path) -> io::Result<String> {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "file too large"));
     }
     String::from_utf8(bytes).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
-}
-
-// ponytail: Task 5 replaces these two with a `Dnd` held by the daemon's state; they keep the
-// old caller (`server::start`, `set_do_not_disturb`) compiling as a plain on/off switch.
-pub fn load(dir: &Path) -> io::Result<bool> {
-    Dnd::load(dir).map(|dnd| dnd.manual_on.is_some())
-}
-
-pub fn save(dir: &Path, on: bool) -> io::Result<()> {
-    Dnd {
-        manual_on: on.then_some(None),
-        ..Dnd::default()
-    }
-    .save(dir)
 }
 
 #[cfg(test)]

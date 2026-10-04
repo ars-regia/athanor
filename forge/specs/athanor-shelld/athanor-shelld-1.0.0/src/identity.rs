@@ -55,7 +55,11 @@ pub fn from_cgroup(cgroup: &str) -> Identity {
     // at least one component must precede it; anything below it is still that application.
     for (depth, component) in rest.split('/').enumerate() {
         if is_app_unit(component) {
-            return if depth == 0 { Identity::Other } else { unit_id(component) };
+            return if depth == 0 {
+                Identity::Other
+            } else {
+                unit_id(component)
+            };
         }
         if !is_slice_or_user_manager(component) {
             return Identity::Other;
@@ -110,11 +114,17 @@ mod tests {
     #[test]
     fn units_and_scopes_name_the_application() {
         for (last, expected) in [
-            ("app-org.gnome.Calculator@1a2b.service", app("org.gnome.Calculator")),
+            (
+                "app-org.gnome.Calculator@1a2b.service",
+                app("org.gnome.Calculator"),
+            ),
             ("app-cosmic-firefox@1a.service", app("firefox")),
             ("app-firefox-1234.scope", app("firefox")),
             ("app-cosmic-firefox-1234.scope", app("firefox")),
-            ("app-flatpak-org.mozilla.firefox-98765.scope", app("org.mozilla.firefox")),
+            (
+                "app-flatpak-org.mozilla.firefox-98765.scope",
+                app("org.mozilla.firefox"),
+            ),
             ("app-gnome-code\\x2doss-77.scope", app("code-oss")),
         ] {
             assert_eq!(from_cgroup(&format!("{APPS}{last}\n")), expected, "{last}");
@@ -146,7 +156,8 @@ mod tests {
 
     #[test]
     fn a_process_that_has_gone_is_other() {
-        let root = std::env::temp_dir().join(format!("athanor-shelld-identity-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("athanor-shelld-identity-{}", std::process::id()));
         std::fs::create_dir_all(&root).expect("mkdir");
         assert_eq!(of_pid(&root, 4_000_000), Identity::Other);
         std::fs::remove_dir_all(root).expect("cleanup");

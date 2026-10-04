@@ -135,6 +135,89 @@ pub const SETTING_KEYS: [&str; 11] = [
     "trigger_screen_sharing",
 ];
 
+impl Rule {
+    /// Every key of [`RULE_KEYS`] with its value as the file writes it.
+    #[must_use]
+    pub fn pairs(&self) -> HashMap<String, String> {
+        let lock_screen = match self.lock_screen {
+            LockScreen::All => "all",
+            LockScreen::Name => "name",
+            LockScreen::None => "none",
+        };
+        let timeout = match self.timeout {
+            Timeout::App => "app".to_owned(),
+            Timeout::Seconds(seconds) => seconds.to_string(),
+        };
+        [
+            ("allowed", self.allowed.to_string()),
+            ("popups", self.popups.to_string()),
+            ("bypass_dnd", self.bypass_dnd.to_string()),
+            ("lock_screen", lock_screen.to_owned()),
+            ("sound", self.sound.to_string()),
+            ("timeout", timeout),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_owned(), value))
+        .collect()
+    }
+}
+
+impl Settings {
+    /// Every key of [`SETTING_KEYS`] with its value as the file writes it; `schedule` and
+    /// `schedule_days` are empty while there is no window.
+    #[must_use]
+    pub fn pairs(&self) -> HashMap<String, String> {
+        const DAYS: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+        let retention = match self.retention {
+            Retention::Days(days) => days.to_string(),
+            Retention::UntilCleared => "forever".to_owned(),
+        };
+        let corner = match self.popup_corner {
+            Corner::Bar => "bar",
+            Corner::TopStart => "top-start",
+            Corner::TopEnd => "top-end",
+            Corner::BottomStart => "bottom-start",
+            Corner::BottomEnd => "bottom-end",
+        };
+        let (schedule, schedule_days) = match &self.schedule {
+            Some(window) => (
+                format!(
+                    "{:02}:{:02}-{:02}:{:02}",
+                    window.start_min / 60,
+                    window.start_min % 60,
+                    window.end_min / 60,
+                    window.end_min % 60
+                ),
+                DAYS.iter()
+                    .zip(window.days)
+                    .filter_map(|(name, chosen)| chosen.then_some(*name))
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ),
+            None => (String::new(), String::new()),
+        };
+        [
+            ("retention", retention),
+            ("sound", self.sound.to_string()),
+            ("popup_corner", corner.to_owned()),
+            ("private_popups", self.private_popups.to_string()),
+            ("timeout_low", self.timeout_low_s.to_string()),
+            ("timeout_normal", self.timeout_normal_s.to_string()),
+            ("schedule", schedule),
+            ("schedule_days", schedule_days),
+            ("trigger_schedule", self.trigger_schedule.to_string()),
+            ("trigger_fullscreen", self.trigger_fullscreen.to_string()),
+            (
+                "trigger_screen_sharing",
+                self.trigger_screen_sharing.to_string(),
+            ),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_owned(), value))
+        .collect()
+    }
+}
+
 const MAX_WARNINGS: usize = 16;
 
 /// Keep the first warnings and one line for the rest: a junk file must not cost a journal flood.
@@ -768,5 +851,23 @@ mod tests {
         let junk = "colour=red\n".repeat(10_000);
         assert!(parse_rule(&junk).1.len() <= 17);
         assert!(parse_settings(&junk).1.len() <= 17);
+    }
+
+    #[test]
+    fn the_pairs_cover_every_key_and_parse_back_to_the_same_value() {
+        let (rule, _) = parse_rule("timeout=12\nlock_screen=all\nbypass_dnd=true\n");
+        let pairs = rule.pairs();
+        assert_eq!(pairs.len(), RULE_KEYS.len());
+        let text: String = pairs.iter().map(|(k, v)| format!("{k}={v}\n")).collect();
+        assert_eq!(parse_rule(&text), (rule, Vec::new()));
+        let (settings, _) =
+            parse_settings("retention=forever\nschedule=22:00-07:30\nschedule_days=mon,sun\npopup_corner=top-end\n");
+        let pairs = settings.pairs();
+        assert_eq!(pairs.len(), SETTING_KEYS.len());
+        let text: String = pairs.iter().map(|(k, v)| format!("{k}={v}\n")).collect();
+        let (again, warnings) = parse_settings(&text);
+        assert_eq!(again, settings);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(Settings::default().pairs()["schedule"], "");
     }
 }

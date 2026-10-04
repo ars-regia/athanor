@@ -36,8 +36,15 @@ MemoryMax=192M
 # when the bar's unit (2b.2) starts it after a full stop. Only the session ending clears it.
 RuntimeDirectory=athanor-shelld
 RuntimeDirectoryPreserve=yes
-# The do-not-disturb switch, in $XDG_STATE_HOME/athanor/shelld.
-StateDirectory=athanor
+# The do-not-disturb state and the history in ~/.local/state/athanor/shelld, the rules and the
+# settings in ~/.config/athanor/notifications (doc_notification_center.md, NC3, NC4). The
+# manager creates both before it builds the sandbox: with ProtectHome=read-only the daemon
+# could not create them on a first start, and a path that does not exist is dropped from
+# ReadWritePaths. ConfigurationDirectory only creates; it does not make the directory
+# writable, so ReadWritePaths does, for these two directories and nothing else under $HOME.
+StateDirectory=athanor/shelld
+ConfigurationDirectory=athanor/notifications
+ReadWritePaths=%h/.local/state/athanor/shelld %h/.config/athanor/notifications
 
 ProtectSystem=strict
 ProtectHome=read-only

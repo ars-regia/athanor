@@ -1,28 +1,40 @@
-//! The two notification interfaces (doc_bar.md BR1, BR4): the specification's, open to
-//! every application, and the bar's, which answers athanor-bar.service only. Both live on
-//! one connection and share one store.
+//! The two notification interfaces (doc_bar.md BR1, BR4; doc_notification_center.md NC8): the
+//! specification's, open to every application, and the private one, which answers
+//! athanor-bar.service and athanor-control-center.service method by method. Both live on one
+//! connection and share one state: the store, the rules, the do-not-disturb state and the
+//! destinations of the private signals.
 
+use std::collections::BTreeSet;
 use std::fmt;
-use std::path::PathBuf;
+use std::future::Future;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
+use futures_util::{FutureExt, StreamExt};
 use serde::de::{IgnoredAny, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
+use tokio::sync::{watch, Notify};
 use zbus::fdo::{self, DBusProxy};
 use zbus::message::Header;
-use zbus::names::OwnedUniqueName;
+use zbus::names::{BusName, OwnedUniqueName, UniqueName};
 use zbus::object_server::SignalEmitter;
 use zbus::{interface, Connection};
 use zvariant::{Signature, Type};
 
-use crate::dnd;
-use crate::hints::Hints;
+use crate::clock;
+use crate::dnd::{self, Dnd, Effective, Observed, Trigger};
+use crate::hints::{is_desktop_id, Hints};
+use crate::history::{self, Coalescer};
+use crate::i18n::{tr, tr_n};
 use crate::icon;
-use crate::sender::BarUnit;
+use crate::identity::{self, Identity};
+use crate::policy::{decide, Facts};
+use crate::rules::{RuleError, Rules};
+use crate::sender::{admits, Admitted, Caller};
 use crate::server::{NOTIFICATIONS_PATH, PRIVATE_PATH};
-use crate::store::{self, Content, Reason, Store, Urgency, Visual};
-use crate::wire::WireNotification;
+use crate::store::{self, Content, Outcome, Reason, Store, Urgency, Visual};
+use crate::wire::{from_notification, WireNotification};
 use athanor_unit::text;
 
 pub const CAPABILITIES: [&str; 4] = ["actions", "body", "icon-static", "persistence"];
@@ -30,38 +42,270 @@ pub const MAX_ACTIONS: usize = 8;
 pub const ACTION_KEY_BYTES: usize = 64;
 pub const TOKEN_CHARS: usize = 256;
 
+const HISTORY_FILE: &str = "notifications.json";
+const CONTROL_CENTER_NAME: &str = "os.athanor.ControlCenter1";
+const CONTROL_CENTER_PATH: &str = "/os/athanor/ControlCenter1";
+/// The control center's `Show` page of the notification panel.
+const CONTROL_CENTER_PAGE: &str = "notifications";
+
 pub struct State {
     pub store: Store,
     started: Instant,
     state_dir: PathBuf,
-    /// The unique name of the last caller `List` admitted (BR1): the bar's own connection,
-    /// which the private interface's signals are unicast to. `None` — no bar has listed yet —
-    /// means they go nowhere: this content is never for a wider audience than that.
-    bar_destination: Option<OwnedUniqueName>,
+    proc_root: PathBuf,
+    rules: Rules,
+    dnd: Dnd,
+    /// What the do-not-disturb file holds, to save only a state that changed.
+    dnd_saved: String,
+    effective: Effective,
+    fullscreen: Trigger,
+    /// The triggers the journal has already said are unavailable (NC6): once, not on every
+    /// evaluation.
+    unavailable_logged: BTreeSet<dnd::Reason>,
+    /// The unique name each admitted unit last called from: where its signals go.
+    destinations: Vec<(Caller, OwnedUniqueName)>,
+    coalescer: Coalescer,
+    dirty: Arc<Notify>,
+    wake: watch::Sender<u64>,
+    bus_id: String,
+}
+
+/// What an evaluation of the do-not-disturb state leaves to announce.
+#[derive(Debug, Default)]
+pub struct Settled {
+    /// (on, reason, until) when the state the units see changed.
+    changed: Option<(bool, String, i64)>,
+    /// How many popups the state that just ended hid.
+    summary: Option<u32>,
+}
+
+/// What `Notify` came to.
+enum Arrival {
+    /// The rule mutes the application: nothing is kept; the application gets this id.
+    Refused(u32),
+    Kept(Box<(Outcome, WireNotification)>),
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
 impl State {
-    pub fn new(store: Store, state_dir: PathBuf) -> State {
-        State {
-            store,
+    pub fn new(
+        state_dir: PathBuf,
+        config_dir: PathBuf,
+        proc_root: PathBuf,
+        dnd: Dnd,
+        wake: watch::Sender<u64>,
+        dirty: Arc<Notify>,
+    ) -> State {
+        let mut state = State {
+            store: Store::new(),
             started: Instant::now(),
             state_dir,
-            bar_destination: None,
-        }
+            proc_root,
+            rules: Rules::new(config_dir),
+            dnd_saved: dnd.render(),
+            dnd,
+            effective: Effective {
+                on: false,
+                reason: None,
+                until: None,
+                unavailable: Vec::new(),
+            },
+            fullscreen: Trigger::Unavailable,
+            unavailable_logged: BTreeSet::new(),
+            destinations: Vec::new(),
+            coalescer: Coalescer::new(),
+            dirty,
+            wake,
+            bus_id: String::new(),
+        };
+        state.evaluate();
+        state
     }
 
     fn now_ms(&self) -> u64 {
         u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX)
+    }
+
+    pub fn history_path(&self) -> PathBuf {
+        self.state_dir.join(HISTORY_FILE)
+    }
+
+    fn observed(&self) -> Observed {
+        let (now, local) = clock::local_now();
+        Observed {
+            now,
+            local,
+            fullscreen: self.fullscreen,
+            // ponytail: no source for screen sharing until doc_portal.md delivers its signal
+            // (NC6): published as unavailable, never as active.
+            sharing: Trigger::Unavailable,
+        }
+    }
+
+    /// The do-not-disturb state now, from the clock, the settings and the triggers. Keeps what
+    /// changed on disk (an expiry or a cleared override reaches the file only here), arms the
+    /// clock's next wake, and says what the units must hear.
+    pub fn evaluate(&mut self) -> Settled {
+        let settings = self.rules.settings();
+        let observed = self.observed();
+        let (effective, summary) = self.dnd.evaluate(&observed, &settings);
+        for reason in &effective.unavailable {
+            if self.unavailable_logged.insert(*reason) {
+                tracing::warn!(
+                    trigger = reason.as_str(),
+                    "this do-not-disturb trigger cannot be observed and stays off"
+                );
+            }
+        }
+        self.unavailable_logged
+            .retain(|reason| effective.unavailable.contains(reason));
+        let text = self.dnd.render();
+        if text != self.dnd_saved {
+            match self.dnd.save(&self.state_dir) {
+                Ok(()) => self.dnd_saved = text,
+                Err(err) => tracing::warn!(%err, "cannot keep the do-not-disturb state"),
+            }
+        }
+        self.wake
+            .send_replace(dnd::next_wake(&observed, &settings, effective.until));
+        let seen = |e: &Effective| (e.on, e.reason, e.until);
+        let changed = (seen(&effective) != seen(&self.effective)).then(|| {
+            (
+                effective.on,
+                effective.reason.map_or("", dnd::Reason::as_str).to_owned(),
+                effective.until.unwrap_or(0),
+            )
+        });
+        self.effective = effective;
+        Settled { changed, summary }
+    }
+
+    /// The switch by hand, evaluated at once so that a popup missed right after it is counted
+    /// in the state that has begun, not wiped by it.
+    pub fn set_manual(&mut self, on: bool, until: Option<i64>) -> Settled {
+        let settings = self.rules.settings();
+        let observed = self.observed();
+        self.dnd.set_manual(on, until, &observed, &settings);
+        self.evaluate()
+    }
+
+    pub fn report_fullscreen(&mut self, available: bool, active: bool) -> Settled {
+        self.fullscreen = match (available, active) {
+            (false, _) => Trigger::Unavailable,
+            (true, true) => Trigger::Active,
+            (true, false) => Trigger::Inactive,
+        };
+        self.evaluate()
+    }
+
+    fn record(&mut self, caller: Caller, name: OwnedUniqueName) {
+        self.destinations.retain(|(known, _)| *known != caller);
+        self.destinations.push((caller, name));
+    }
+
+    /// A bus name lost its owner: the senders it carried and the units that called from it.
+    fn name_lost(&mut self, name: &str) -> Settled {
+        if !self.store.sender_gone(name).is_empty() {
+            self.dirty.notify_one();
+        }
+        let bar_gone = self
+            .destinations
+            .iter()
+            .any(|(caller, known)| *caller == Caller::Bar && known.as_str() == name);
+        self.destinations
+            .retain(|(_, known)| known.as_str() != name);
+        if bar_gone {
+            // Nobody observes fullscreen any more (NC6).
+            return self.report_fullscreen(false, false);
+        }
+        Settled::default()
+    }
+
+    /// `Notify`, after the sender has been identified: the rule, the settings, do not
+    /// disturb and the policy decide what happens to it.
+    fn arrive(
+        &mut self,
+        mut content: Content,
+        replaces_id: u32,
+        expire_timeout: i32,
+        identity: Identity,
+        sender: String,
+    ) -> Arrival {
+        let rule = self.rules.rule(&identity);
+        let settings = self.rules.settings();
+        let decision = decide(&Facts {
+            identity: &identity,
+            rule: &rule,
+            settings: &settings,
+            dnd_on: self.effective.on,
+            urgency: content.urgency,
+            transient: content.transient,
+            expire_timeout,
+            // ponytail: the `suppress-sound` hint and the rate limit arrive with the sound
+            // (NC7) and the rate limit (NC12).
+            suppress_sound: false,
+            rate_limited: false,
+        });
+        if !decision.list {
+            return Arrival::Refused(self.store.fresh_id());
+        }
+        if self.effective.on && rule.popups && !decision.popup {
+            self.dnd.missed_one();
+        }
+        content.timeout_ms = decision.timeout_ms;
+        let now = self.now_ms();
+        let outcome = self.store.notify(
+            content,
+            replaces_id,
+            now,
+            unix_now(),
+            identity,
+            sender,
+            decision.popup,
+        );
+        self.dirty.notify_one();
+        let wire = from_notification(&outcome.notification, now);
+        Arrival::Kept(Box::new((outcome, wire)))
     }
 }
 
 pub type Shared = Arc<Mutex<State>>;
 
 /// A poisoned lock means a panic, and panic = "abort" means there is none: take the guard.
-fn lock(state: &Shared) -> MutexGuard<'_, State> {
+pub(crate) fn lock(state: &Shared) -> MutexGuard<'_, State> {
     state
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Keeps the history on disk: the file as the state holds it now.
+pub fn write_history(state: &Shared) {
+    let mut state = lock(state);
+    let result = history::save(&state.history_path(), &state.store, &state.bus_id);
+    if state.coalescer.written(Instant::now(), result.is_ok()) {
+        if let Err(err) = &result {
+            tracing::warn!(%err, "cannot write the notification history; keeping it in memory");
+        }
+    }
+}
+
+/// Writes the history after each change, at most one write every two seconds.
+pub async fn history_writer(state: Shared, dirty: Arc<Notify>) {
+    loop {
+        dirty.notified().await;
+        let delay = lock(&state).coalescer.changed(Instant::now());
+        if let Some(delay) = delay {
+            tokio::time::sleep(delay).await;
+        }
+        // What changed during the wait is part of this write.
+        dirty.notified().now_or_never();
+        write_history(&state);
+    }
 }
 
 /// The arguments of `Notify`, made safe (BR4). The picture is, in the specification's order:
@@ -150,24 +394,53 @@ impl<'de> Visitor<'de> for ActionsVisitor {
     }
 }
 
-/// The bar's destination for the private interface's signals: the unique name of the last
-/// caller `List` admitted, unicast so no other client sharing the bus ever sees this content
-/// (`os.athanor.Notifications1`'s security boundary). `None` while no bar has listed yet —
-/// nothing is sent, rather than broadcasting it.
-async fn bar_emitter(
-    state: &Shared,
-    conn: &Connection,
-) -> zbus::Result<Option<SignalEmitter<'static>>> {
-    let Some(destination) = lock(state).bar_destination.clone() else {
-        return Ok(None);
-    };
-    Ok(Some(
-        SignalEmitter::new(conn, PRIVATE_PATH)?.set_destination(destination.into()),
-    ))
+/// The pid the bus reports for `sender`, from `GetConnectionCredentials`: never a hint the
+/// sender wrote, and never a pid kept from before (pids are reused).
+async fn credentials_pid(conn: &Connection, sender: &UniqueName<'_>) -> fdo::Result<u32> {
+    let credentials = DBusProxy::new(conn)
+        .await?
+        .get_connection_credentials(sender.clone().into())
+        .await?;
+    credentials
+        .process_id()
+        .ok_or_else(|| fdo::Error::AccessDenied("the bus gave no process id for the caller".into()))
+}
+
+/// The signal emitters of the private interface, one per unit that has called.
+fn emitters(state: &Shared, conn: &Connection) -> Vec<SignalEmitter<'static>> {
+    let names: Vec<OwnedUniqueName> = lock(state)
+        .destinations
+        .iter()
+        .map(|(_, name)| name.clone())
+        .collect();
+    names
+        .into_iter()
+        .filter_map(|name| match SignalEmitter::new(conn, PRIVATE_PATH) {
+            Ok(emitter) => Some(emitter.set_destination(BusName::from(name))),
+            Err(err) => {
+                tracing::warn!(error = %err, "cannot address a private signal");
+                None
+            }
+        })
+        .collect()
+}
+
+/// Sends one private signal to each unit that has called, unicast, never broadcast. Each
+/// send is independent: a failure towards one is logged and never skips another.
+async fn each_destination<F, Fut>(conn: &Connection, state: &Shared, what: &str, send: F)
+where
+    F: Fn(SignalEmitter<'static>) -> Fut,
+    Fut: Future<Output = zbus::Result<()>>,
+{
+    for emitter in emitters(state, conn) {
+        if let Err(err) = send(emitter).await {
+            tracing::warn!(error = %err, "cannot tell a unit about {what}");
+        }
+    }
 }
 
 /// Tells both sides a notification closed: applications listen on the specification's
-/// object, the bar on its own, unicast. The two signals are sent independently — a failure
+/// object, the units on the private one, unicast. The two are sent independently — a failure
 /// sending one must never skip the other — and each failure is logged on its own; the store
 /// has already changed regardless.
 async fn emit_closed(conn: &Connection, state: &Shared, id: u32, reason: Reason) {
@@ -183,16 +456,69 @@ async fn emit_closed(conn: &Connection, state: &Shared, id: u32, reason: Reason)
     if let Err(err) = public {
         tracing::warn!(id, error = %err, "cannot tell applications a notification closed");
     }
-    let private = async {
-        match bar_emitter(state, conn).await? {
-            Some(emitter) => Private::closed(&emitter, id, reason as u32).await,
-            None => Ok(()),
-        }
-    }
+    each_destination(
+        conn,
+        state,
+        "a notification that closed",
+        |emitter| async move { Private::closed(&emitter, id, reason as u32).await },
+    )
     .await;
-    if let Err(err) = private {
-        tracing::warn!(id, error = %err, "cannot tell the bar a notification closed");
+}
+
+/// Announces an evaluation of do not disturb: a change to the units, and the summary of a
+/// state that ended with popups missed, as a notification of the daemon's own.
+pub async fn settle(conn: &Connection, state: &Shared, settled: Settled) {
+    if let Some((on, reason, until)) = settled.changed {
+        let reason = reason.as_str();
+        each_destination(conn, state, "do not disturb", |emitter| async move {
+            Private::do_not_disturb_changed(&emitter, on, reason, until).await
+        })
+        .await;
     }
+    if let Some(missed) = settled.summary {
+        post_summary(conn, state, missed).await;
+    }
+}
+
+/// "{n} notifications while do not disturb was on", transient, whose `default` action opens
+/// the control center on the notifications (NC6). Sent through the daemon's own connection:
+/// it is the sender, so its action is unavailable only when the daemon is gone.
+async fn post_summary(conn: &Connection, state: &Shared, missed: u32) {
+    let Some(own) = conn.unique_name().map(ToString::to_string) else {
+        return;
+    };
+    let summary = tr_n(
+        "{n} notification while do not disturb was on",
+        "{n} notifications while do not disturb was on",
+        u64::from(missed),
+    )
+    .replace("{n}", &missed.to_string());
+    let wire = {
+        let mut state = lock(state);
+        let seconds = state.rules.settings().timeout_normal_s;
+        let content = Content {
+            app_name: "Athanor".to_owned(),
+            summary,
+            body: String::new(),
+            actions: vec![("default".to_owned(), tr("Show"))],
+            urgency: Urgency::Normal,
+            transient: true,
+            resident: false,
+            desktop_entry: None,
+            visual: Visual::None,
+            timeout_ms: seconds.saturating_mul(1000),
+        };
+        let now = state.now_ms();
+        let outcome = state
+            .store
+            .notify(content, 0, now, unix_now(), Identity::Other, own, true);
+        from_notification(&outcome.notification, now)
+    };
+    let wire = &wire;
+    each_destination(conn, state, "the summary", |emitter| async move {
+        Private::added(&emitter, wire).await
+    })
+    .await;
 }
 
 pub struct Notifications {
@@ -225,6 +551,7 @@ impl Notifications {
         actions: Actions<'_>,
         hints: Hints,
         expire_timeout: i32,
+        #[zbus(header)] header: Header<'_>,
         #[zbus(connection)] conn: &Connection,
     ) -> u32 {
         let content = content(
@@ -236,37 +563,39 @@ impl Notifications {
             hints,
             expire_timeout,
         );
-        let (outcome, wire) = {
-            let mut state = lock(&self.state);
-            let now = state.now_ms();
-            let time = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
-            let outcome = state.store.notify(
-                content,
-                replaces_id,
-                now,
-                time,
-                crate::identity::Identity::Other,
-                String::new(),
-            );
-            let wire = WireNotification::new(&outcome.notification, now, state.store.dnd());
-            (outcome, wire)
+        // The sender's application, from its cgroup: the pid is the bus's word for it.
+        let sender = header.sender().map(ToString::to_string).unwrap_or_default();
+        let identity = match header.sender() {
+            Some(name) => match credentials_pid(conn, name).await {
+                Ok(pid) => {
+                    let proc_root = lock(&self.state).proc_root.clone();
+                    identity::of_pid(&proc_root, pid)
+                }
+                Err(err) => {
+                    tracing::warn!(error = %err, "cannot identify the sender");
+                    Identity::Other
+                }
+            },
+            None => Identity::Other,
+        };
+        let arrival =
+            lock(&self.state).arrive(content, replaces_id, expire_timeout, identity, sender);
+        let (outcome, wire) = match arrival {
+            Arrival::Refused(id) => return id,
+            Arrival::Kept(kept) => *kept,
         };
         for id in &outcome.evicted {
             emit_closed(conn, &self.state, *id, Reason::Expired).await;
         }
-        let result = async {
-            match bar_emitter(&self.state, conn).await? {
-                Some(emitter) if outcome.replaced => Private::replaced(&emitter, &wire).await,
-                Some(emitter) => Private::added(&emitter, &wire).await,
-                None => Ok(()),
+        let (wire_ref, replaced) = (&wire, outcome.replaced);
+        each_destination(conn, &self.state, "a notification", |emitter| async move {
+            if replaced {
+                Private::replaced(&emitter, wire_ref).await
+            } else {
+                Private::added(&emitter, wire_ref).await
             }
-        }
+        })
         .await;
-        if let Err(err) = result {
-            tracing::warn!(id = wire.id, error = %err, "cannot tell the bar about a notification");
-        }
         wire.id
     }
 
@@ -275,7 +604,14 @@ impl Notifications {
         id: u32,
         #[zbus(connection)] conn: &Connection,
     ) -> fdo::Result<()> {
-        let closed = lock(&self.state).store.close(id);
+        let closed = {
+            let mut state = lock(&self.state);
+            let closed = state.store.close(id);
+            if closed.is_some() {
+                state.dirty.notify_one();
+            }
+            closed
+        };
         if closed.is_none() {
             return Err(fdo::Error::InvalidArgs(format!("no notification {id}")));
         }
@@ -307,56 +643,88 @@ impl Notifications {
 
 pub struct Private {
     pub state: Shared,
-    pub bar: BarUnit,
+    pub admitted: Admitted,
+}
+
+fn rule_error(err: RuleError) -> fdo::Error {
+    match err {
+        RuleError::BadApp => fdo::Error::InvalidArgs("not an application id".into()),
+        RuleError::BadKey => fdo::Error::InvalidArgs("no such key".into()),
+        RuleError::BadValue => fdo::Error::InvalidArgs("not a value of that key".into()),
+        RuleError::Io(err) => fdo::Error::IOError(format!("cannot write the file: {err}")),
+    }
+}
+
+fn identity_of(app: &str) -> fdo::Result<Identity> {
+    if app.is_empty() {
+        Ok(Identity::Other)
+    } else if is_desktop_id(app) {
+        Ok(Identity::App(app.to_owned()))
+    } else {
+        Err(fdo::Error::InvalidArgs(format!(
+            "{app:?} is not an application id"
+        )))
+    }
 }
 
 impl Private {
-    /// The caller's unique name, once admitted: `list` records it as the private signals'
-    /// destination.
-    async fn admit(&self, header: &Header<'_>, conn: &Connection) -> fdo::Result<OwnedUniqueName> {
+    /// Which unit is calling `method`, and whether the table admits it. Admitting a call is
+    /// also what records the caller's unique name as its unit's destination: the bar lists on
+    /// start and on restart, so this is where its name is (re)recorded. The bus's
+    /// `NameOwnerChanged` forgets it.
+    async fn admit(
+        &self,
+        header: &Header<'_>,
+        conn: &Connection,
+        method: &str,
+    ) -> fdo::Result<Caller> {
         let sender = header
             .sender()
             .ok_or_else(|| fdo::Error::AccessDenied("a call with no sender".into()))?;
-        let credentials = DBusProxy::new(conn)
-            .await?
-            .get_connection_credentials(sender.clone().into())
-            .await?;
-        let pid = credentials.process_id().ok_or_else(|| {
-            fdo::Error::AccessDenied("the bus gave no process id for the caller".into())
-        })?;
-        if self.bar.admits(pid) {
-            Ok(sender.to_owned().into())
-        } else {
-            Err(fdo::Error::AccessDenied(format!(
-                "only {} may call this interface",
-                self.bar.unit()
-            )))
-        }
+        let pid = credentials_pid(conn, sender).await?;
+        let caller = self
+            .admitted
+            .caller(sender.as_str(), pid)
+            .filter(|caller| admits(*caller, method))
+            .ok_or_else(|| fdo::Error::AccessDenied(format!("{method} is not for this caller")))?;
+        lock(&self.state).record(caller, sender.to_owned().into());
+        Ok(caller)
     }
 }
 
 #[interface(name = "os.athanor.Notifications1")]
 impl Private {
-    /// The do-not-disturb switch, and every notification held, oldest first. Admitting this
-    /// call is also what makes the caller the private signals' destination (BR1): the bar
-    /// lists on start and on restart, so this is where its unique name is (re)recorded.
+    /// The unread notifications, oldest first.
     async fn list(
         &self,
         #[zbus(header)] header: Header<'_>,
         #[zbus(connection)] conn: &Connection,
-    ) -> fdo::Result<(bool, Vec<WireNotification>)> {
-        let sender = self.admit(&header, conn).await?;
-        let mut state = lock(&self.state);
-        state.bar_destination = Some(sender);
-        let (now, dnd) = (state.now_ms(), state.store.dnd());
-        Ok((
-            dnd,
-            state
-                .store
-                .iter()
-                .map(|n| WireNotification::new(n, now, dnd))
-                .collect(),
-        ))
+    ) -> fdo::Result<Vec<WireNotification>> {
+        self.admit(&header, conn, "List").await?;
+        let state = lock(&self.state);
+        let now = state.now_ms();
+        Ok(state
+            .store
+            .iter()
+            .filter(|held| !held.read)
+            .map(|held| from_notification(held, now))
+            .collect())
+    }
+
+    /// Every notification held, oldest first.
+    async fn history(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &Connection,
+    ) -> fdo::Result<Vec<WireNotification>> {
+        self.admit(&header, conn, "History").await?;
+        let state = lock(&self.state);
+        let now = state.now_ms();
+        Ok(state
+            .store
+            .iter()
+            .map(|held| from_notification(held, now))
+            .collect())
     }
 
     /// `reason` is 1 (the popup of a transient notification ended) or 2 (the user closed it).
@@ -367,7 +735,7 @@ impl Private {
         #[zbus(header)] header: Header<'_>,
         #[zbus(connection)] conn: &Connection,
     ) -> fdo::Result<()> {
-        self.admit(&header, conn).await?;
+        self.admit(&header, conn, "Close").await?;
         let reason = match reason {
             1 => Reason::Expired,
             2 => Reason::Dismissed,
@@ -377,15 +745,20 @@ impl Private {
                 )))
             }
         };
-        if lock(&self.state).store.close(id).is_none() {
-            return Err(fdo::Error::InvalidArgs(format!("no notification {id}")));
+        {
+            let mut state = lock(&self.state);
+            if state.store.close(id).is_none() {
+                return Err(fdo::Error::InvalidArgs(format!("no notification {id}")));
+            }
+            state.dirty.notify_one();
         }
         emit_closed(conn, &self.state, id, reason).await;
         Ok(())
     }
 
-    /// The token comes from the bar's surface and the click's serial (BR4). It is sent before
-    /// the action, so the application can raise its window with it.
+    /// The token comes from the caller's surface and the click's serial (BR4). It is sent
+    /// before the action, so the application can raise its window with it. An action of the
+    /// daemon's own notification is the daemon's to carry out.
     async fn invoke_action(
         &self,
         id: u32,
@@ -394,8 +767,9 @@ impl Private {
         #[zbus(header)] header: Header<'_>,
         #[zbus(connection)] conn: &Connection,
     ) -> fdo::Result<()> {
-        self.admit(&header, conn).await?;
-        let resident = {
+        self.admit(&header, conn, "InvokeAction").await?;
+        let own = conn.unique_name().map(ToString::to_string);
+        let (resident, internal) = {
             let state = lock(&self.state);
             let held = state
                 .store
@@ -411,18 +785,150 @@ impl Private {
                     "notification {id} has no action {action_key:?}"
                 )));
             }
-            held.content.resident
+            if held.sender.is_empty() {
+                return Err(fdo::Error::InvalidArgs(format!(
+                    "the sender of notification {id} is gone"
+                )));
+            }
+            (held.content.resident, Some(&held.sender) == own.as_ref())
         };
-        let public = SignalEmitter::new(conn, NOTIFICATIONS_PATH)?;
-        let token = text::line(activation_token, TOKEN_CHARS);
-        if !token.is_empty() {
-            Notifications::activation_token(&public, id, &token).await?;
+        if internal {
+            if action_key == "default" {
+                conn.call_method(
+                    Some(CONTROL_CENTER_NAME),
+                    CONTROL_CENTER_PATH,
+                    Some(CONTROL_CENTER_NAME),
+                    "Show",
+                    &(CONTROL_CENTER_PAGE,),
+                )
+                .await
+                .map_err(|err| {
+                    fdo::Error::Failed(format!("cannot open the control center: {err}"))
+                })?;
+            }
+        } else {
+            let public = SignalEmitter::new(conn, NOTIFICATIONS_PATH)?;
+            let token = text::line(activation_token, TOKEN_CHARS);
+            if !token.is_empty() {
+                Notifications::activation_token(&public, id, &token).await?;
+            }
+            Notifications::action_invoked(&public, id, action_key).await?;
         }
-        Notifications::action_invoked(&public, id, action_key).await?;
-        if !resident && lock(&self.state).store.close(id).is_some() {
+        let closed = {
+            let mut state = lock(&self.state);
+            let closed = !resident && state.store.close(id).is_some();
+            if closed {
+                state.dirty.notify_one();
+            }
+            closed
+        };
+        if closed {
             emit_closed(conn, &self.state, id, Reason::Dismissed).await;
         }
         Ok(())
+    }
+
+    /// An inline reply comes with NC9.
+    async fn reply(
+        &self,
+        id: u32,
+        _text: &str,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &Connection,
+    ) -> fdo::Result<()> {
+        self.admit(&header, conn, "Reply").await?;
+        Err(fdo::Error::NotSupported(format!(
+            "notification {id} cannot take a reply yet"
+        )))
+    }
+
+    async fn mark_read(
+        &self,
+        ids: Vec<u32>,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &Connection,
+    ) -> fdo::Result<()> {
+        self.admit(&header, conn, "MarkRead").await?;
+        let changed = {
+            let mut state = lock(&self.state);
+            let changed = state.store.mark_read(&ids);
+            if !changed.is_empty() {
+                state.dirty.notify_one();
+            }
+            changed
+        };
+        if !changed.is_empty() {
+            let changed = &changed;
+            each_destination(
+                conn,
+                &self.state,
+                "read notifications",
+                |emitter| async move { Private::read(&emitter, changed).await },
+            )
+            .await;
+        }
+        Ok(())
+    }
+
+    async fn clear_all(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &Connection,
+    ) -> fdo::Result<()> {
+        self.admit(&header, conn, "ClearAll").await?;
+        let cleared = {
+            let mut state = lock(&self.state);
+            let cleared = state.store.clear_all();
+            state.dirty.notify_one();
+            cleared
+        };
+        for id in cleared {
+            emit_closed(conn, &self.state, id, Reason::Dismissed).await;
+        }
+        Ok(())
+    }
+
+    /// `app` is the application id, `""` for Other.
+    async fn clear_group(
+        &self,
+        app: &str,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &Connection,
+    ) -> fdo::Result<()> {
+        self.admit(&header, conn, "ClearGroup").await?;
+        let identity = identity_of(app)?;
+        let cleared = {
+            let mut state = lock(&self.state);
+            let cleared = state.store.clear_group(&identity);
+            state.dirty.notify_one();
+            cleared
+        };
+        for id in cleared {
+            emit_closed(conn, &self.state, id, Reason::Dismissed).await;
+        }
+        Ok(())
+    }
+
+    /// `(on, reason, until, unavailable)`: `reason` is `""` when off, `until` 0 when there is
+    /// none, `unavailable` the triggers the session cannot observe.
+    async fn do_not_disturb(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &Connection,
+    ) -> fdo::Result<(bool, String, i64, Vec<String>)> {
+        self.admit(&header, conn, "DoNotDisturb").await?;
+        let state = lock(&self.state);
+        let effective = &state.effective;
+        Ok((
+            effective.on,
+            effective.reason.map_or("", dnd::Reason::as_str).to_owned(),
+            effective.until.unwrap_or(0),
+            effective
+                .unavailable
+                .iter()
+                .map(|reason| reason.as_str().to_owned())
+                .collect(),
+        ))
     }
 
     async fn set_do_not_disturb(
@@ -431,12 +937,97 @@ impl Private {
         #[zbus(header)] header: Header<'_>,
         #[zbus(connection)] conn: &Connection,
     ) -> fdo::Result<()> {
-        self.admit(&header, conn).await?;
-        let mut state = lock(&self.state);
-        dnd::save(&state.state_dir, on)
-            .map_err(|err| fdo::Error::IOError(format!("cannot keep the switch: {err}")))?;
-        state.store.set_dnd(on);
+        self.admit(&header, conn, "SetDoNotDisturb").await?;
+        let settled = lock(&self.state).set_manual(on, None);
+        settle(conn, &self.state, settled).await;
         Ok(())
+    }
+
+    /// `until` is unix seconds; 0 means no end.
+    async fn set_do_not_disturb_until(
+        &self,
+        on: bool,
+        until: i64,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &Connection,
+    ) -> fdo::Result<()> {
+        self.admit(&header, conn, "SetDoNotDisturbUntil").await?;
+        let settled = lock(&self.state).set_manual(on, (until > 0).then_some(until));
+        settle(conn, &self.state, settled).await;
+        Ok(())
+    }
+
+    /// Whether the bar can observe fullscreen windows, and whether one is fullscreen and
+    /// activated (NC6).
+    async fn report_fullscreen(
+        &self,
+        available: bool,
+        active: bool,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &Connection,
+    ) -> fdo::Result<()> {
+        self.admit(&header, conn, "ReportFullscreen").await?;
+        let settled = lock(&self.state).report_fullscreen(available, active);
+        settle(conn, &self.state, settled).await;
+        Ok(())
+    }
+
+    async fn rules(
+        &self,
+        app: &str,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &Connection,
+    ) -> fdo::Result<std::collections::HashMap<String, String>> {
+        self.admit(&header, conn, "Rules").await?;
+        let identity = identity_of(app)?;
+        Ok(lock(&self.state).rules.rule(&identity).pairs())
+    }
+
+    /// The control center sets `allowed` and `popups` only: a mute is its to give, a bypass
+    /// of do not disturb is not.
+    async fn set_rule(
+        &self,
+        app: &str,
+        key: &str,
+        value: &str,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &Connection,
+    ) -> fdo::Result<()> {
+        let caller = self.admit(&header, conn, "SetRule").await?;
+        if caller == Caller::ControlCenter && !matches!(key, "allowed" | "popups") {
+            return Err(fdo::Error::AccessDenied(format!(
+                "the control center may set allowed and popups, not {key}"
+            )));
+        }
+        // The change reaches the units through the watch on the files, as an edit by hand does.
+        lock(&self.state)
+            .rules
+            .set_rule(app, key, value)
+            .map_err(rule_error)
+    }
+
+    async fn settings(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &Connection,
+    ) -> fdo::Result<std::collections::HashMap<String, String>> {
+        self.admit(&header, conn, "Settings").await?;
+        Ok(lock(&self.state).rules.settings().pairs())
+    }
+
+    /// Nobody is admitted yet: the Settings application comes with its specification.
+    async fn set_setting(
+        &self,
+        key: &str,
+        value: &str,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &Connection,
+    ) -> fdo::Result<()> {
+        self.admit(&header, conn, "SetSetting").await?;
+        lock(&self.state)
+            .rules
+            .set_setting(key, value)
+            .map_err(rule_error)
     }
 
     #[zbus(signal)]
@@ -453,6 +1044,111 @@ impl Private {
 
     #[zbus(signal)]
     pub async fn closed(emitter: &SignalEmitter<'_>, id: u32, reason: u32) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    pub async fn read(emitter: &SignalEmitter<'_>, ids: &[u32]) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    pub async fn do_not_disturb_changed(
+        emitter: &SignalEmitter<'_>,
+        on: bool,
+        reason: &str,
+        until: i64,
+    ) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    pub async fn rules_changed(emitter: &SignalEmitter<'_>, app: &str) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    pub async fn settings_changed(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
+}
+
+/// What a file of the rules or the settings did, once the watch saw it change: the units
+/// hear it, and the settings may change do not disturb.
+pub async fn rules_changed(conn: &Connection, state: &Shared, relative: &Path) {
+    let changed = lock(state).rules.invalidate(relative);
+    match changed {
+        Some(crate::rules::Changed::Rule(app)) => {
+            let app = app.as_str();
+            each_destination(conn, state, "a changed rule", |emitter| async move {
+                Private::rules_changed(&emitter, app).await
+            })
+            .await;
+        }
+        Some(crate::rules::Changed::Settings) => {
+            each_destination(conn, state, "changed settings", |emitter| async move {
+                Private::settings_changed(&emitter).await
+            })
+            .await;
+            let settled = lock(state).evaluate();
+            settle(conn, state, settled).await;
+        }
+        None => {}
+    }
+}
+
+/// A bus name lost its owner: what it carried goes, and so may a trigger.
+pub async fn name_lost(conn: &Connection, state: &Shared, name: &str) {
+    let settled = lock(state).name_lost(name);
+    settle(conn, state, settled).await;
+}
+
+/// The history from the file, pruned by the retention, on this bus: a sender kept from the
+/// last run that no longer has an owner is emptied, because no `NameOwnerChanged` fired
+/// while the daemon was down.
+pub async fn restore(conn: &Connection, state: &Shared) -> zbus::Result<()> {
+    let bus = DBusProxy::new(conn).await?;
+    let bus_id = bus.get_id().await?.to_string();
+    let senders: BTreeSet<String> = {
+        let mut state = lock(state);
+        state.bus_id = bus_id.clone();
+        let restored = history::load(&state.history_path(), &bus_id);
+        state.store.restore(restored);
+        let retention = state.rules.settings().retention;
+        if !state.store.prune(unix_now(), retention).is_empty() {
+            state.dirty.notify_one();
+        }
+        state
+            .store
+            .iter()
+            .filter(|held| !held.sender.is_empty())
+            .map(|held| held.sender.clone())
+            .collect()
+    };
+    for sender in senders {
+        let owned = match BusName::try_from(sender.as_str()) {
+            Ok(name) => bus.name_has_owner(name).await?,
+            Err(_) => false,
+        };
+        if !owned {
+            let mut state = lock(state);
+            state.store.sender_gone(&sender);
+            state.dirty.notify_one();
+        }
+    }
+    Ok(())
+}
+
+/// Follows the owners of the bus names: a name that vanishes takes its notifications' actions
+/// and its unit's destination with it.
+pub async fn follow_owners(conn: &Connection, state: Shared) -> zbus::Result<()> {
+    let mut changes = DBusProxy::new(conn)
+        .await?
+        .receive_name_owner_changed()
+        .await?;
+    let conn = conn.clone();
+    tokio::spawn(async move {
+        while let Some(change) = changes.next().await {
+            let Ok(args) = change.args() else {
+                tracing::warn!("cannot parse a NameOwnerChanged signal");
+                continue;
+            };
+            if args.new_owner().is_none() {
+                name_lost(&conn, &state, args.name().as_str()).await;
+            }
+        }
+    });
+    Ok(())
 }
 
 #[cfg(test)]

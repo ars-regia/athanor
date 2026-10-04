@@ -7,13 +7,14 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use athanor_shelld::sender::BarUnit;
+use athanor_shelld::i18n;
+use athanor_shelld::sender::Admitted;
 use athanor_shelld::server::{self, Config};
 use athanor_unit::{crash_loop, journal, notify, sandbox};
 
 fn main() -> ExitCode {
     journal::init();
-    let Some((state_dir, failures)) = dirs() else {
+    let Some((state_dir, config_dir, failures)) = dirs() else {
         tracing::error!("no absolute XDG_STATE_HOME or HOME, or no absolute XDG_RUNTIME_DIR");
         return ExitCode::FAILURE;
     };
@@ -59,16 +60,21 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     }
-    if let Err(err) = std::fs::create_dir_all(&state_dir) {
-        tracing::error!(error = %err, dir = %state_dir.display(), "cannot create the state directory");
-        return ExitCode::FAILURE;
+    // Both before Landlock, which allows writing to directories that exist: the state, and the
+    // rules and the settings with their `apps/` (NC3, NC4).
+    for dir in [&state_dir, &config_dir.join("apps")] {
+        if let Err(err) = std::fs::create_dir_all(dir) {
+            tracing::error!(error = %err, dir = %dir.display(), "cannot create a directory");
+            return ExitCode::FAILURE;
+        }
     }
+    i18n::init();
     // Before any thread exists: the runtime below starts none, but zbus and tokio must be
     // confined from their first instruction. /proc for the callers' cgroups (BR1).
     let confined = sandbox::ensure_single_threaded().and_then(|()| {
         sandbox::restrict(
             &[Path::new("/usr"), Path::new("/etc"), Path::new("/proc")],
-            &state_dir,
+            &[&state_dir, &config_dir],
         )
     });
     if let Err(err) = confined {
@@ -85,10 +91,10 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    runtime.block_on(serve(state_dir))
+    runtime.block_on(serve(state_dir, config_dir))
 }
 
-async fn serve(state_dir: PathBuf) -> ExitCode {
+async fn serve(state_dir: PathBuf, config_dir: PathBuf) -> ExitCode {
     let builder = match zbus::connection::Builder::session() {
         Ok(builder) => builder,
         Err(err) => {
@@ -96,16 +102,19 @@ async fn serve(state_dir: PathBuf) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let _connection = match server::start(
+    let proc_root = PathBuf::from("/proc");
+    let daemon = match server::start(
         builder,
         Config {
             state_dir,
-            bar: BarUnit::from_proc(),
+            config_dir,
+            admitted: Admitted::from_proc_root(&proc_root),
+            proc_root,
         },
     )
     .await
     {
-        Ok(connection) => connection,
+        Ok(daemon) => daemon,
         Err(err) => {
             tracing::error!(error = %err, "cannot serve the notifications and the tray watcher");
             return ExitCode::FAILURE;
@@ -116,7 +125,18 @@ async fn serve(state_dir: PathBuf) -> ExitCode {
         return ExitCode::FAILURE;
     }
     tracing::info!("serving org.freedesktop.Notifications and org.kde.StatusNotifierWatcher");
-    std::future::pending::<ExitCode>().await
+    // The history is written before the exit that systemd asks for (NC3).
+    match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+        Ok(mut term) => {
+            term.recv().await;
+            daemon.flush();
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            tracing::error!(error = %err, "cannot listen for SIGTERM");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// `None` if `value` is unset, empty, or relative: the XDG Base Directory spec says a relative
@@ -126,17 +146,22 @@ fn xdg_absolute(value: Option<OsString>) -> Option<PathBuf> {
     value.map(PathBuf::from).filter(|dir| dir.is_absolute())
 }
 
-/// `$XDG_STATE_HOME/athanor/shelld` for the do-not-disturb switch, and the crash-loop record
-/// in the unit's runtime directory.
-fn dirs() -> Option<(PathBuf, PathBuf)> {
+/// `$XDG_STATE_HOME/athanor/shelld` for the do-not-disturb state and the history,
+/// `$XDG_CONFIG_HOME/athanor/notifications` for the rules and the settings, and the crash-loop
+/// record in the unit's runtime directory.
+fn dirs() -> Option<(PathBuf, PathBuf, PathBuf)> {
     let state = xdg_absolute(env::var_os("XDG_STATE_HOME"))
         .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state")))
         .filter(|dir| dir.is_absolute())?
         .join("athanor/shelld");
+    let config = xdg_absolute(env::var_os("XDG_CONFIG_HOME"))
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
+        .filter(|dir| dir.is_absolute())?
+        .join("athanor/notifications");
     let runtime = xdg_absolute(env::var_os("RUNTIME_DIRECTORY")).or_else(|| {
         xdg_absolute(env::var_os("XDG_RUNTIME_DIR")).map(|dir| dir.join("athanor-shelld"))
     })?;
-    Some((state, runtime.join("failures")))
+    Some((state, config, runtime.join("failures")))
 }
 
 #[cfg(test)]
