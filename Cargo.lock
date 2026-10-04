@@ -788,15 +788,19 @@ name = "athanor-services"
 version = "1.0.0"
 dependencies = [
  "futures-util",
+ "serde",
  "tokio",
  "tracing",
  "zbus",
+ "zvariant",
 ]
 
 [[package]]
 name = "athanor-shelld"
 version = "1.0.0"
 dependencies = [
+ "athanor-i18n",
+ "athanor-services",
  "athanor-unit",
  "chrono",
  "futures-util",
