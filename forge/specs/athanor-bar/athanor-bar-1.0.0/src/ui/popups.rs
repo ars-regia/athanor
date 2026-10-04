@@ -38,6 +38,7 @@ impl Window {
     pub(super) fn new(bar: &Rc<Bar>, monitor: &gdk::Monitor) -> Window {
         let window = gtk4::ApplicationWindow::new(&bar.app);
         window.init_layer_shell();
+        athanor_apps::timing::watch_layer(&window, "bar-popups");
         if let Err(reason) = layer_guard::require_layer_surface(&window) {
             tracing::error!(
                 "athanor-bar: the notification popups are not a layer surface: {reason}"

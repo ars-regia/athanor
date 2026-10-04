@@ -111,6 +111,7 @@ impl Surface {
     /// A layer surface on `monitor`, not on screen until `place` gives it an edge.
     pub fn new(dock: &Rc<Dock>, monitor: &gdk::Monitor) -> Surface {
         let window = gtk4::ApplicationWindow::new(&dock.app);
+        athanor_apps::timing::watch_layer(&window, "dock");
         window.init_layer_shell();
         if let Err(reason) = layer_guard::require_layer_surface(&window) {
             tracing::error!("athanor-dock: not a layer surface: {reason}");

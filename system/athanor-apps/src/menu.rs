@@ -26,6 +26,7 @@ pub fn attach_popover(
     popover.add_css_class("athanor-bar-popover");
     popover.set_parent(button);
     popover.set_position(position);
+    crate::timing::watch(popover, "popover");
     let expanded = |button: &gtk4::Button, open: bool| {
         button.update_state(&[State::Expanded(Some(open))]);
     };
