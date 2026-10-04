@@ -799,6 +799,7 @@ version = "1.0.0"
 dependencies = [
  "athanor-unit",
  "futures-util",
+ "nix 0.29.0",
  "serde",
  "tokio",
  "tracing",
