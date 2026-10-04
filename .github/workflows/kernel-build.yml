@@ -246,8 +246,7 @@ jobs:
     # The NVIDIA modules (spec, section 7, gate 4) against this kernel: the freshly
     # built kernel-devel artifact, or the published image when the kernel is reused.
     needs: [inputs, build]
-    # nvidia-build.yml runs on the self-hosted runner: the same fork guard as build.
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (inputs.stage || 'build') == 'build' && needs.inputs.result == 'success' && (needs.build.result == 'success' || needs.inputs.outputs.reuse == 'true') }}
+    if: ${{ !cancelled() && (inputs.stage || 'build') == 'build' && needs.inputs.result == 'success' && (needs.build.result == 'success' || needs.inputs.outputs.reuse == 'true') }}
     permissions:
       contents: read
       packages: read
