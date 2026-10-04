@@ -269,9 +269,12 @@ pub fn spawn(
     handle: &Handle,
     buses: Buses,
     backlight_dir: PathBuf,
-) -> (watch::Receiver<BatteryState>, mpsc::Sender<BatteryCommand>) {
+) -> (
+    watch::Receiver<BatteryState>,
+    mpsc::UnboundedSender<BatteryCommand>,
+) {
     let (state, rx) = watch::channel(BatteryState::default());
-    let (commands, command_rx) = mpsc::channel(8);
+    let (commands, command_rx) = mpsc::unbounded_channel();
     let model = handle.clone();
     handle.spawn(async move {
         let connection = match buses.connection(Bus::System).await {
@@ -291,7 +294,7 @@ async fn run(
     connection: Connection,
     backlight_dir: PathBuf,
     state: watch::Sender<BatteryState>,
-    mut commands: mpsc::Receiver<BatteryCommand>,
+    mut commands: mpsc::UnboundedReceiver<BatteryCommand>,
 ) {
     let mut upower = mirror::spawn(
         handle,
@@ -306,7 +309,7 @@ async fn run(
         Source::Fixed(vec![(PROFILES_PATH, PROFILES)]),
     );
     let mut refused = 0;
-    // Commands wait here while one runs, so the channel is read at once and never fills; a
+    // Commands wait here while one runs, so the channel is read at once; a
     // new brightness replaces a waiting one, so a drag of the slider ends on its last level
     // and logind is not asked for every step.
     let mut waiting: VecDeque<BatteryCommand> = VecDeque::new();
@@ -326,7 +329,12 @@ async fn run(
                 }
                 None => return,
             },
-            result = async { running.as_mut().expect("guarded").await }, if running.is_some() => {
+            result = async {
+                match running.as_mut() {
+                    Some(call) => call.await,
+                    None => std::future::pending().await,
+                }
+            }, if running.is_some() => {
                 running = None;
                 if let Err(err) = result {
                     tracing::warn!(error = %err, "a system service refused or did not answer");
@@ -673,7 +681,6 @@ mod tests {
         wait_for(&mut rx, |state| state.profiles.is_some()).await;
         commands
             .send(BatteryCommand::SetProfile("performance".into()))
-            .await
             .unwrap();
         let state = wait_for(&mut rx, |state| {
             state
@@ -685,7 +692,6 @@ mod tests {
         assert_eq!(state.refused, 0);
         commands
             .send(BatteryCommand::SetProfile("turbo".into()))
-            .await
             .unwrap();
         let state = wait_for(&mut rx, |state| state.refused == 1).await;
         assert_eq!(state.profiles.unwrap().active, "performance");
@@ -739,7 +745,6 @@ mod tests {
                     device: "intel_backlight".into(),
                     raw,
                 })
-                .await
                 .unwrap();
         }
         let last = || levels.lock().unwrap().last().copied();

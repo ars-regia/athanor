@@ -30,7 +30,7 @@ fn service() -> Option<Rc<Service>> {
 struct Service {
     bar: Weak<Bar>,
     /// `None` without the runtime of the models; the module is then hidden.
-    commands: Option<mpsc::Sender<BatteryCommand>>,
+    commands: Option<mpsc::UnboundedSender<BatteryCommand>>,
     /// The model's last state, which `bridge::follow` keeps current.
     state: RefCell<BatteryState>,
     /// How many commands the model had counted as refused when the views last showed it.
@@ -117,10 +117,11 @@ impl Service {
         let Some(commands) = &self.commands else {
             return;
         };
-        if let Err(err) = commands.try_send(command) {
+        if let Err(err) = commands.send(command) {
             tracing::warn!(error = %err, "the battery model did not take a command");
-            // The model coalesces what it is given, so this is a model that has ended: say
-            // the action did not complete, as for a refusal.
+            // The channel is unbounded and the model coalesces what it reads, so a send
+            // fails only when the model has ended: say the action did not complete, as for
+            // a refusal.
             self.show_all();
             for view in self.views() {
                 view.popup.failed();
