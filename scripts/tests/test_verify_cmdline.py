@@ -12,13 +12,9 @@ spec = importlib.util.spec_from_file_location("verify", ROOT / "scripts" / "veri
 verify = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(verify)
 
-SITES = [
-    "forge/specs/azoth/cmdline",
-    "forge/specs/athanor-base-config/SOURCES/usr/lib/bootc/kargs.d",
-    "system/scripts/assemble_uki.sh",
-    "forge/build/build_uki.sh",
-    "system/athanor-install.ks",
-]
+KARGS = "forge/specs/athanor-kernel-profile/SOURCES/usr/lib/bootc/kargs.d/10-athanor-kernel-profile.toml"
+NVIDIA_KARGS = "system/nvidia/athanor-nvidia-config/SOURCES/usr/lib/bootc/kargs.d/01-nvidia.toml"
+SITES = ["forge/specs/azoth/cmdline", KARGS, NVIDIA_KARGS]
 
 
 class Cmdline(unittest.TestCase):
@@ -52,9 +48,8 @@ class Cmdline(unittest.TestCase):
     def test_a_parameter_the_decisions_reject_is_named_where_it_is_found(self):
         cases = [
             ("forge/specs/azoth/cmdline", "vsyscall=none", "vsyscall=none zswap.enabled=1", "zswap.enabled=1", "D15"),
-            ("system/scripts/assemble_uki.sh", "quiet splash", "iommu=pt quiet splash", "iommu=pt", "D16"),
-            ("forge/build/build_uki.sh", "quiet splash", "oops=panic quiet splash", "oops=panic", "D19"),
-            ("system/athanor-install.ks", "quiet splash", "pti=on quiet splash", "pti=on", "Meltdown"),
+            (KARGS, '"vsyscall=none",', '"vsyscall=none",\n    "oops=panic",', "oops=panic", "D19"),
+            (NVIDIA_KARGS, '"nvidia-drm.modeset=1",', '"nvidia-drm.modeset=1", "iommu=pt",', "iommu=pt", "D16"),
         ]
         for site, old, new, parameter, why in cases:
             with self.subTest(site=site):
@@ -62,10 +57,6 @@ class Cmdline(unittest.TestCase):
                 found = self.problems()
                 self.assertTrue(any(site in p and parameter in p and why in p for p in found), found)
                 self.edit(site, new, old)
-
-    def test_a_kargs_file_is_read(self):
-        self.edit("forge/specs/athanor-base-config/SOURCES/usr/lib/bootc/kargs.d/02-hardening.toml", '"slab_nomerge",', '"slab_nomerge",\n    "oops=panic",')
-        self.assertTrue(any("02-hardening.toml" in p and "oops=panic" in p for p in self.problems()))
 
     def test_every_zswap_parameter_is_rejected(self):
         self.edit("forge/specs/azoth/cmdline", "vsyscall=none", "vsyscall=none zswap.compressor=zstd")
@@ -76,8 +67,8 @@ class Cmdline(unittest.TestCase):
         self.assertEqual(self.problems(), [])
 
     def test_a_site_whose_line_cannot_be_read_is_reported(self):
-        self.edit("system/scripts/assemble_uki.sh", "CMDLINE_STR=", "OTHER_NAME=")
-        self.assertTrue(any("assemble_uki.sh" in p and "cannot read" in p for p in self.problems()))
+        self.edit(NVIDIA_KARGS, "kargs =", "arguments =")
+        self.assertTrue(any("01-nvidia.toml" in p and "cannot read" in p for p in self.problems()))
         (self.root / "forge/specs/azoth/cmdline").unlink()
         self.assertTrue(any("azoth/cmdline" in p and "cannot read" in p for p in self.problems()))
 

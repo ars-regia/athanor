@@ -606,8 +606,9 @@ def check_panics():
 # --------------------------------------------------------------------------- #
 
 # Parameters the kernel profile decided against (docs/architecture/doc_kernel_profile.md,
-# "Command line"). A name ending in a dot is a prefix. The command line is written in
-# five places; this keeps a contradicting parameter from coming back to any of them.
+# "Command line"). A name ending in a dot is a prefix. profile.toml is the single source of
+# the base command line and kernel_profile.py check holds its generated files to it; this
+# keeps a contradicting parameter out of the manifest and of the variant files beside it.
 REJECTED_PARAMETERS = {
     "iommu=pt": "identity mapping for every device, against D16 (lazy translation, strict for untrusted ports)",
     "oops=panic": "the first oops panics before oops_limit is consulted, against D19",
@@ -618,12 +619,12 @@ REJECTED_PARAMETERS = {
     "arm64.mte=on": "not an x86 parameter",
 }
 
-KARGS_DIR = "forge/specs/athanor-base-config/SOURCES/usr/lib/bootc/kargs.d"
-# (file, pattern of the line holding the command line): group 1 is the parameters.
-CMDLINE_LINES = [
-    ("system/scripts/assemble_uki.sh", r'^CMDLINE_STR="([^"]*)"'),
-    ("forge/build/build_uki.sh", r'^CMDLINE="\$\{CMDLINE:-([^}]*)\}"'),
-    ("system/athanor-install.ks", r'^bootloader --append="([^"]*)"'),
+# The files that carry the kernel command line: the boot line of azoth and every kargs.d
+# file the image ships (the base one generated from profile.toml, the NVIDIA variants').
+CMDLINE_FILE = "forge/specs/azoth/cmdline"
+KARGS_FILES = [
+    "forge/specs/athanor-kernel-profile/SOURCES/usr/lib/bootc/kargs.d/10-athanor-kernel-profile.toml",
+    "system/nvidia/athanor-nvidia-config/SOURCES/usr/lib/bootc/kargs.d/01-nvidia.toml",
 ]
 
 
@@ -636,17 +637,12 @@ def cmdline_problems(root=None):
     def read_site(relative, extract):
         try:
             found[relative] = extract(read(root / relative))
-        except (OSError, ValueError, AttributeError, tomllib.TOMLDecodeError) as err:
+        except (OSError, ValueError, KeyError, tomllib.TOMLDecodeError) as err:
             problems.append(f"{relative}: cannot read the command line ({err})")
 
-    read_site("forge/specs/azoth/cmdline", str.split)
-    for relative, pattern in CMDLINE_LINES:
-        read_site(relative, lambda text, pattern=pattern: re.search(pattern, text, re.M).group(1).split())
-    kargs = root / KARGS_DIR
-    for path in sorted(kargs.glob("*.toml")) if kargs.is_dir() else []:
-        read_site(str(path.relative_to(root)), lambda text: tomllib.loads(text)["kargs"])
-    if not kargs.is_dir():
-        problems.append(f"{KARGS_DIR}: missing")
+    read_site(CMDLINE_FILE, str.split)
+    for relative in KARGS_FILES:
+        read_site(relative, lambda text: tomllib.loads(text)["kargs"])
 
     for site, parameters in found.items():
         for parameter in parameters:
