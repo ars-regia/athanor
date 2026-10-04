@@ -1,20 +1,30 @@
 name: Kernel Bump
 
-# The kernel bump bot (forge/specs/azoth/bump.py, spec section 8).
-# check: on a GitHub runner, bump.py compares the pins with Bodhi, the CachyOS releases,
-# the NVIDIA tags and the Fedora registry; it also moves the system base (quay.io base-atomic
-# in system/Containerfile) and verifies each NVIDIA lock against its repository metadata,
-# regenerating it when the packages changed; when nothing changed it stops here. prep: on
-# the self-hosted runner, inside the builder, regenerates the hash manifests for the new
-# pins and runs `build.sh --stage prep` (signatures, patches, config gate): the outcome
-# goes into the PR, green or red. pr: opens the PR with the regenerated files and, only
-# when prep is green, enables its auto-merge; the check required by the branch protection
-# is "Kernel gate" of Kernel Build. A bump that moves system/Containerfile or an NVIDIA lock
-# never auto-merges: System Image Check and a human review decide. One open bump PR at a time:
-# while one is open, check only verifies the NVIDIA locks (bump.py verify) and fails when one
-# must be regenerated, instead of skipping. Every run, whatever happened before, mirrors the
-# RPMs of both NVIDIA locks to $KERNEL_REGISTRY/athanor-nvidia-rpms (system/nvidia/mirror.sh,
-# doc_system_image.md S7), so an image build outlives the vendor repositories. `schedule` only works from
+# The kernel bump bot (forge/specs/azoth/bump.py, spec section 8). Two groups, one pull
+# request each, because they are verified differently (doc_build_ordering.md, O7 and O8):
+# kernel: on a GitHub runner, `bump.py apply --group kernel` compares the pins with Bodhi,
+# the CachyOS releases, the NVIDIA tags and the Fedora registry, moves the FROM lines of the
+# kernel's Containerfiles and regenerates the NVIDIA lock of a pin it moves; when nothing
+# changed it stops here. prep: on the self-hosted runner, inside the builder, regenerates the
+# hash manifests for the new pins and runs `build.sh --stage prep` (signatures, patches,
+# config gate): the outcome goes into the PR, green or red. pr: opens the PR (label
+# kernel-bump) and, only when prep is green and no NVIDIA lock moved, enables its
+# auto-merge; the check required by the branch protection is "Kernel gate" of Kernel Build.
+# system: `bump.py apply --group system` moves the FROM lines of system/Containerfile (the
+# quay.io base-atomic base) and regenerates an NVIDIA lock whose packages the repository
+# republished, then opens its PR (label system-bump): System Image Check builds the images
+# against the published kernel and, when they are green and the PR has only the bot's shape,
+# merges it once the required checks pass (forge/scripts/bot_merge.py). One open PR per group:
+# an open kernel-bump PR holds the kernel group only, an
+# open system-bump PR the system group only, which then just verifies the NVIDIA locks
+# (bump.py verify) and fails when one must be regenerated, instead of skipping. Every run,
+# whatever happened before, the system job mirrors the RPMs of both NVIDIA locks to
+# $KERNEL_REGISTRY/athanor-nvidia-rpms (system/nvidia/mirror.sh, doc_system_image.md S7), so an
+# image build outlives the vendor repositories; the kernel job mirrors a lock it regenerated.
+# The two groups may pin fedora:43 at different digests until both PRs merge. A rare
+# overlap is accepted: an NVIDIA pin move in an open kernel PR and a republished lock of the
+# old version in the system group edit the same lock, and the second PR to merge conflicts
+# on it, visibly. `schedule` only works from
 # the default branch; by hand on any branch; and on a push of this file: a change to the
 # bot exercises it right away, and that is how GitHub registers the workflow outside the
 # default branch, where workflow_dispatch alone does not make it runnable.
@@ -36,9 +46,9 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  kernel:
     runs-on: ubuntu-24.04
-    # Regenerating both NVIDIA locks downloads about 650 MB of RPMs, and mirroring them as much.
+    # Regenerating an NVIDIA lock downloads about 325 MB of RPMs, and mirroring them as much.
     timeout-minutes: 45
     permissions:
       contents: read
@@ -51,36 +61,25 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
-      - name: One open bump PR at a time
+      - name: One open kernel bump PR at a time
         id: open
         run: |
           set -euo pipefail
           open=$(gh pr list --label kernel-bump --state open --json number --jq 'map("#\(.number)") | join(", ")')
-          [[ -z $open ]] || echo "bump PR ${open} is open: only the NVIDIA locks are verified until it is closed" | tee -a "$GITHUB_STEP_SUMMARY"
+          [[ -z $open ]] || echo "kernel bump PR ${open} is open: the kernel group waits until it is closed" | tee -a "$GITHUB_STEP_SUMMARY"
           echo "open=${open}" >> "$GITHUB_OUTPUT"
 
-      - name: Verify the NVIDIA locks while a bump PR is open
-        if: ${{ steps.open.outputs.open != '' }}
-        env:
-          OPEN_PR: ${{ steps.open.outputs.open }}
-        run: |
-          set -euo pipefail
-          if ! python3 forge/specs/azoth/bump.py verify; then
-            echo "::error::an NVIDIA lock must be regenerated and the bot opens no PR while ${OPEN_PR} is open: merge or close ${OPEN_PR}"
-            exit 1
-          fi
-
-      - name: Run bump.py apply
+      - name: Run bump.py apply --group kernel
         id: bump
         if: ${{ steps.open.outputs.open == '' }}
         run: |
           set -euo pipefail
-          python3 forge/specs/azoth/bump.py apply > body.md
+          python3 forge/specs/azoth/bump.py apply --group kernel > body.md
           changed=false
-          [[ -z $(git status --porcelain -- forge/specs/azoth system/Containerfile system/nvidia/locks) ]] || changed=true
+          [[ -z $(git status --porcelain -- forge/specs/azoth system/nvidia/locks) ]] || changed=true
           echo "changed=${changed}" >> "$GITHUB_OUTPUT"
-          { echo "## bump: $([[ $changed == true ]] && echo "new pins" || echo "pins unchanged")"; echo; cat body.md; } >> "$GITHUB_STEP_SUMMARY"
-          git status --short -- forge/specs/azoth system/Containerfile system/nvidia/locks
+          { echo "## kernel bump: $([[ $changed == true ]] && echo "new pins" || echo "pins unchanged")"; echo; cat body.md; } >> "$GITHUB_STEP_SUMMARY"
+          git status --short -- forge/specs/azoth system/nvidia/locks
 
       - if: ${{ steps.bump.outputs.changed == 'true' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -93,29 +92,22 @@ jobs:
             forge/specs/azoth/builder/Containerfile
             forge/specs/azoth/boot/Containerfile
             forge/specs/azoth/nvidia/Containerfile
-            system/Containerfile
             system/nvidia/locks/open.lock
             system/nvidia/locks/legacy.lock
           if-no-files-found: error
 
-      - if: ${{ !cancelled() }}
+      - if: ${{ steps.bump.outputs.changed == 'true' }}
         uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1
         with:
           version: 1.3.1
 
       - name: Mirror the RPMs of the NVIDIA locks
-        if: ${{ !cancelled() }}
-        run: |
-          set -euo pipefail
-          registry=${KERNEL_REGISTRY:-ghcr.io/${GITHUB_REPOSITORY_OWNER,,}}
-          oras login "${registry%%/*}" -u "${GITHUB_ACTOR}" --password-stdin <<< "${GH_TOKEN}"
-          bash system/nvidia/mirror.sh open
-          bash system/nvidia/mirror.sh legacy
-          bash system/nvidia/mirror.sh container-toolkit
+        if: ${{ steps.bump.outputs.changed == 'true' }}
+        run: bash system/nvidia/mirror-locks.sh
 
   prep:
-    needs: check
-    if: ${{ needs.check.outputs.changed == 'true' }}
+    needs: kernel
+    if: ${{ needs.kernel.outputs.changed == 'true' }}
     runs-on: self-hosted
     timeout-minutes: 90
     steps:
@@ -125,10 +117,14 @@ jobs:
         with:
           name: bump-pins
 
+      - name: Toolchain lock for the new pins
+        # Each lock resolved again only when its inputs moved: base, package list, pinned SRPM (lock.sh).
+        run: bash forge/specs/azoth/lock.sh generate
+
       - name: Build the kernel builder image
         env:
           BUILDAH_ISOLATION: chroot
-        run: podman build -t localhost/azoth-builder forge/specs/azoth/builder
+        run: podman build -t localhost/azoth-builder -f forge/specs/azoth/builder/Containerfile forge/specs/azoth
 
       - name: Manifests for the new pins
         run: |
@@ -191,11 +187,15 @@ jobs:
             prep-outcome
             forge/specs/azoth/SOURCES/sources.sha256
             forge/specs/azoth/nvidia/sources.sha256
+            forge/specs/azoth/builder/toolchain.lock
+            forge/specs/azoth/boot/schbench.lock
+            forge/specs/azoth/boot/toolchain.lock
+            forge/specs/azoth/nvidia/toolchain.lock
           if-no-files-found: error
 
   pr:
-    needs: [check, prep]
-    if: ${{ needs.check.outputs.changed == 'true' }}
+    needs: [kernel, prep]
+    if: ${{ needs.kernel.outputs.changed == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
@@ -211,17 +211,18 @@ jobs:
           pattern: bump-*
           merge-multiple: true
 
-      - name: Branch, commit, PR (auto-merge only on a green prep that leaves the system image alone)
+      - name: Branch, commit, PR (auto-merge only on a green prep that moves no NVIDIA lock)
         run: |
           set -euo pipefail
-          git add forge/specs/azoth system/Containerfile system/nvidia/locks
+          git add forge/specs/azoth system/nvidia/locks
           keys=$(git diff --cached -U0 -- forge/specs/azoth/pins.env | sed -n 's/^+\([A-Z_]\+\)=.*/\1/p')
-          git diff --cached --quiet -- 'forge/specs/azoth/*/Containerfile' system/Containerfile || keys+=${keys:+$'\n'}"base image"
+          git diff --cached --quiet -- 'forge/specs/azoth/*/Containerfile' || keys+=${keys:+$'\n'}"builder base image"
+          git diff --cached --quiet -- 'forge/specs/azoth/*/*.lock' || keys+=${keys:+$'\n'}"kernel package locks"
           git diff --cached --quiet -- system/nvidia/locks || keys+=${keys:+$'\n'}"NVIDIA locks"
-          # A new system base or NVIDIA lock changes the packages of the image: System Image
-          # Check reports the difference and a person merges (doc_system_image.md, section 4).
+          # A new NVIDIA lock changes the packages of the image: a person merges
+          # (doc_system_image.md, section 4).
           reviewed=false
-          git diff --cached --quiet -- system/Containerfile system/nvidia/locks || reviewed=true
+          git diff --cached --quiet -- system/nvidia/locks || reviewed=true
           title="chore(kernel): bump $(paste -sd, - <<< "$keys" | sed 's/,/, /g')"
           outcome=$(cat prep-outcome)
           [[ $outcome != REFRESH ]] || title+=" (patch refresh needed)"
@@ -233,14 +234,95 @@ jobs:
           git push -u origin "$branch"
           cat body.md prep.md > pr.md
           if [[ $reviewed == true ]]; then
-            printf '\n## Merge\n\nThis bump moves the system base image or an NVIDIA lock. System Image Check and a human review decide the merge: the package difference is in the summary of that check. No auto-merge.\n' >> pr.md
+            printf '\n## Merge\n\nThis bump moves an NVIDIA pin and its lock. Kernel Build and a human review decide the merge. No auto-merge.\n' >> pr.md
           fi
           url=$(gh pr create --base "$GITHUB_REF_NAME" --head "$branch" --label kernel-bump --title "$title" --body-file pr.md)
           if [[ $reviewed == true ]]; then
-            echo "PR: ${url} (system base or NVIDIA lock moved: no auto-merge, System Image Check and a human review decide)" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "PR: ${url} (NVIDIA lock moved: no auto-merge, a human review decides)" | tee -a "$GITHUB_STEP_SUMMARY"
           elif [[ $outcome == ok ]]; then
             gh pr merge --auto --squash "$url"
             echo "PR: ${url} (auto-merge once the Kernel gate check is green)" | tee -a "$GITHUB_STEP_SUMMARY"
           else
             echo "PR: ${url} (prep ${outcome}: no auto-merge, a person merges after fixing it)" | tee -a "$GITHUB_STEP_SUMMARY"
           fi
+
+  system:
+    runs-on: ubuntu-24.04
+    # Regenerating both NVIDIA locks downloads about 650 MB of RPMs, and mirroring them as much.
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          # A PAT: PRs opened with the GITHUB_TOKEN do not trigger the checks.
+          token: ${{ secrets.KERNEL_BUMP_TOKEN }}
+
+      - name: One open system bump PR at a time
+        id: open
+        run: |
+          set -euo pipefail
+          open=$(gh pr list --label system-bump --state open --json number --jq 'map("#\(.number)") | join(", ")')
+          [[ -z $open ]] || echo "system bump PR ${open} is open: only the NVIDIA locks are verified until it is closed" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "open=${open}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the NVIDIA locks while a system bump PR is open
+        if: ${{ steps.open.outputs.open != '' }}
+        env:
+          OPEN_PR: ${{ steps.open.outputs.open }}
+        run: |
+          set -euo pipefail
+          if ! python3 forge/specs/azoth/bump.py verify; then
+            echo "::error::an NVIDIA lock must be regenerated and the bot opens no system PR while ${OPEN_PR} is open: merge or close ${OPEN_PR}"
+            exit 1
+          fi
+
+      - name: Run bump.py apply --group system
+        id: bump
+        if: ${{ steps.open.outputs.open == '' }}
+        run: |
+          set -euo pipefail
+          python3 forge/specs/azoth/bump.py apply --group system > body.md
+          changed=false
+          [[ -z $(git status --porcelain -- system/Containerfile system/nvidia/locks) ]] || changed=true
+          echo "changed=${changed}" >> "$GITHUB_OUTPUT"
+          { echo "## system bump: $([[ $changed == true ]] && echo "new base or locks" || echo "unchanged")"; echo; cat body.md; } >> "$GITHUB_STEP_SUMMARY"
+          git status --short -- system/Containerfile system/nvidia/locks
+
+      - if: ${{ !cancelled() }}
+        uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1
+        with:
+          version: 1.3.1
+
+      # Before the PR: System Image Check on it builds the images from the mirror.
+      - name: Mirror the RPMs of the NVIDIA locks
+        if: ${{ !cancelled() }}
+        run: bash system/nvidia/mirror-locks.sh
+
+      - name: Branch, commit, PR (merged by System Image Check when green)
+        if: ${{ steps.bump.outputs.changed == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.KERNEL_BUMP_TOKEN }}
+        run: |
+          set -euo pipefail
+          git add system/Containerfile system/nvidia/locks
+          keys=''
+          git diff --cached --quiet -- system/Containerfile || keys="system base image"
+          git diff --cached --quiet -- system/nvidia/locks || keys+=${keys:+, }"NVIDIA locks"
+          title="chore(system): bump ${keys}"
+          branch="bump/system-$(date -u +%Y%m%d-%H%M)"
+          git config user.name "athanor-bump"
+          git config user.email "kernel@athanor.os"
+          git checkout -b "$branch"
+          git commit -q -m "$title" -m "Opened by the bump bot (kernel-bump.yml, system group)."
+          git push -u origin "$branch"
+          {
+            cat body.md
+            printf '\n## Merge\n\nThis bump changes the packages of the system image. System Image Check builds the three images against the published kernel; when they are green and the change has only the shape of this bot (new digests on existing FROM lines, new RPM lines in the locks), it merges this PR once the required checks pass (forge/scripts/bot_merge.py). The package difference is in its summary. Any other change waits for a person.\n'
+          } > pr.md
+          url=$(gh pr create --base "$GITHUB_REF_NAME" --head "$branch" --label system-bump --title "$title" --body-file pr.md)
+          echo "PR: ${url} (merged once System Image Check is green)" | tee -a "$GITHUB_STEP_SUMMARY"

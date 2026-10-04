@@ -7,7 +7,11 @@
 # Sostituisce `spectool -g -R`: non esiste in nixpkgs e non verifica nulla.
 # Dipendenze: rpmspec, curl, sha256sum (tutte nel builder).
 #
-# Uso: fetch_sources.sh <spec-dir> <sourcedir>
+# Uso: fetch_sources.sh [--pin] <spec-dir> <sourcedir>
+#
+# --pin downloads every remote source again and rewrites the manifest from what it
+# downloaded: the spec updater runs it after it moves Version, so the new hashes come
+# from the same URL and file-name rules the build verifies against.
 #
 # Convenzioni:
 #   - URL con frammento `#/nome.tar.gz` (stile Fedora): il file locale prende
@@ -21,8 +25,13 @@
 # =============================================================================
 set -euo pipefail
 
-SPEC_DIR="${1:?uso: fetch_sources.sh <spec-dir> <sourcedir>}"
-SOURCE_DIR="${2:?uso: fetch_sources.sh <spec-dir> <sourcedir>}"
+pin=false
+if [[ ${1:-} == --pin ]]; then
+  pin=true
+  shift
+fi
+SPEC_DIR="${1:?uso: fetch_sources.sh [--pin] <spec-dir> <sourcedir>}"
+SOURCE_DIR="${2:?uso: fetch_sources.sh [--pin] <spec-dir> <sourcedir>}"
 MANIFEST="$SPEC_DIR/SOURCES/sources.sha256"
 
 spec=$(find "$SPEC_DIR" -maxdepth 1 -name '*.spec' | head -n 1)
@@ -39,7 +48,11 @@ if [[ ${#remote[@]} -eq 0 ]]; then
   echo "fetch_sources: nessuna sorgente remota in $(basename "$spec")"
   exit 0
 fi
-if [[ ! -f "$MANIFEST" ]]; then
+if [[ $pin == true ]]; then
+  mkdir -p "$(dirname "$MANIFEST")"
+  pinned=$(mktemp)
+  trap 'rm -f "$pinned"' EXIT
+elif [[ ! -f "$MANIFEST" ]]; then
   echo "fetch_sources: $(basename "$spec") dichiara sorgenti remote ma manca $MANIFEST" >&2
   exit 1
 fi
@@ -56,6 +69,13 @@ for entry in "${remote[@]}"; do
   if [[ -z "$file" || "$file" == */* || "$file" == .* ]]; then
     echo "fetch_sources: nome file non valido derivato da $entry: '$file'" >&2
     exit 1
+  fi
+
+  if [[ $pin == true ]]; then
+    echo "fetch_sources: scarico $file da $url"
+    curl -fsSL --retry 3 --retry-delay 5 -o "$SOURCE_DIR/$file" "$url"
+    (cd "$SOURCE_DIR" && sha256sum -- "$file") >> "$pinned"
+    continue
   fi
 
   expected=$(awk -v f="$file" '$2 == f { print $1 }' "$MANIFEST")
@@ -75,3 +95,10 @@ for entry in "${remote[@]}"; do
   fi
   echo "fetch_sources: $file verificato"
 done
+
+if [[ $pin == true ]]; then
+  mv "$pinned" "$MANIFEST"
+  chmod 644 "$MANIFEST"
+  trap - EXIT
+  echo "fetch_sources: $MANIFEST riscritto"
+fi

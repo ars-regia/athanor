@@ -12,6 +12,10 @@
 # Reaching the GitHub API is never allowed to end a running job: a DNS blip, a reset
 # connection or a 5xx/429 is retried with backoff, and only a definitive 404 (the
 # registration is actually gone) powers the guest off. See registration_status().
+#
+# While the runner reports a job (busy in the registration), vm.sh holds a logind sleep
+# inhibitor: a host that suspends freezes the guest and GitHub cancels the job. An idle
+# guest waiting for a job holds none, so the host still suspends when nothing runs.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -105,6 +109,9 @@ jq -r .encoded_jit_config "$RUNTIME/response" > "$RUNTIME/jitconfig"
 rm "$RUNTIME/response"
 
 qemu_pid=''
+balloon_pid=''
+inhibit_fd=''
+inhibit_pid=''
 guest_running() { [[ $qemu_pid ]] && kill -0 "$qemu_pid" 2> /dev/null; }
 
 stop_guest() { # ACPI power-off, then termination if the guest has not complied in time
@@ -121,10 +128,39 @@ stop_guest() { # ACPI power-off, then termination if the guest has not complied 
   fi
 }
 
+hold_sleep_inhibitor() { # hold_sleep_inhibitor true|false: the inhibitor lives as long as
+  # systemd-inhibit's child (cat) has its stdin open, and that is a file descriptor of this
+  # shell: closing it releases the lock. If vm.sh dies, the lock goes with the last process
+  # holding that descriptor, at most one poll later (a running `sleep` inherits it). Never
+  # fatal: a refused inhibitor (no polkit rule, 50-athanor-runner-inhibit.rules) only
+  # loses the lock, and the job goes on; it is reported and requested again every poll.
+  if [[ -n $inhibit_fd ]] && ! kill -0 "$inhibit_pid" 2> /dev/null; then
+    echo "warning: runner $name ($id): sleep inhibitor refused or lost, see systemd-inhibit in the journal" >&2
+    exec {inhibit_fd}>&-
+    inhibit_fd=''
+  fi
+  if [[ $1 == true && -z $inhibit_fd ]]; then
+    exec {inhibit_fd}> >(exec systemd-inhibit --what=sleep --mode=block --who=athanor-runner \
+      --why="GitHub Actions job on runner $name" cat > /dev/null)
+    inhibit_pid=$!
+    echo "runner $name ($id): job running, sleep inhibitor requested"
+  elif [[ $1 == false && -n $inhibit_fd ]]; then
+    exec {inhibit_fd}>&-
+    inhibit_fd=''
+    echo "runner $name ($id): no job running, sleep allowed"
+  fi
+}
+
 cleanup() {
   # Runs as the EXIT trap under set -e: every fallible command here is guarded, or a
   # network hiccup at the end of a successful job would report the job as failed.
   stop_guest
+  hold_sleep_inhibitor false
+  # The regulator exits by itself once QEMU closes its socket; this covers a guest that
+  # never came up.
+  if [[ $balloon_pid ]] && kill -0 "$balloon_pid" 2> /dev/null; then
+    kill "$balloon_pid" 2> /dev/null || echo "runner $name ($id): balloon regulator already gone" >&2
+  fi
   rm -f "$RUNTIME/jitconfig"
   # GitHub removes a just-in-time runner after its job; one whose guest stopped before
   # taking a job stays registered and is removed here. The API being unreachable at this
@@ -155,7 +191,9 @@ qemu-system-x86_64 \
   -machine q35,accel=kvm -cpu host -smp "$VM_CPUS" -m "$VM_MEMORY" \
   -nodefaults -display none -no-reboot -serial "file:$LOGS/console.log" \
   -qmp "unix:$RUNTIME/qmp.sock,server=on,wait=off" \
+  -qmp "unix:$RUNTIME/balloon.sock,server=on,wait=off" \
   -device virtio-rng-pci \
+  -device virtio-balloon-pci,free-page-reporting=on,deflate-on-oom=on \
   -drive "if=none,id=system,format=qcow2,snapshot=on,file=$STATE/golden.qcow2" \
   -device virtio-blk-pci,drive=system,bootindex=0 \
   -drive "if=none,id=cache,format=raw,discard=unmap,file=$STATE/cache.raw" \
@@ -165,6 +203,13 @@ qemu-system-x86_64 \
   -netdev passt,id=net0 -device virtio-net-pci,netdev=net0 \
   -fw_cfg "name=opt/io.systemd.credentials/jitconfig,file=$RUNTIME/jitconfig" &
 qemu_pid=$!
+
+# The balloon regulator (balloon.py) has a QMP socket of its own, so stop_guest never
+# waits on it. It is not part of the job: if it fails, the job goes on and the reason
+# is in the journal.
+VM_MEMORY=$VM_MEMORY BALLOON_FLOOR=$BALLOON_FLOOR HOST_RESERVE=$HOST_RESERVE \
+  python3 "$HERE/balloon.py" "$RUNTIME/balloon.sock" &
+balloon_pid=$!
 
 # The guest may power itself off (the runner service exits after its job); the host does
 # not rely on it and ends the guest once the registration is gone. A GitHub outage never
@@ -180,9 +225,12 @@ while guest_running; do
     404)
       echo "runner $name ($id): job finished, registration removed by GitHub; powering the guest off"
       stop_guest
+      hold_sleep_inhibitor false
       break ;;
     200)
-      unreachable_since='' ;;
+      unreachable_since=''
+      # A malformed answer counts as busy: holding the lock a poll too long is harmless.
+      hold_sleep_inhibitor "$(jq -r 'if .busy == false then "false" else "true" end' "$RUNTIME/response" 2> /dev/null || echo true)" ;;
     *)
       if [[ -z $unreachable_since ]]; then
         unreachable_since=$SECONDS

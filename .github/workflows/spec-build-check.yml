@@ -1,0 +1,77 @@
+name: Spec Build Check
+
+# Pull requests that change forge specs build them the way the DAG does, without publishing:
+# forge/scripts/build_changed_specs.sh runs forge/scripts/build_spec.sh, the script of
+# call-dag-compile.yml, in the builder image for every changed spec. On a green build of the
+# spec bot's pull request, forge/scripts/bot_merge.py merges it when every bump keeps its
+# major version. The kernel (forge/specs/azoth) is Kernel Build's.
+
+on:
+  pull_request:
+    paths:
+      - forge/specs/**
+      - "!forge/specs/azoth/**"
+      - forge/config/rpmmacros
+      - forge/scripts/build_spec.sh
+      - forge/scripts/build_changed_specs.sh
+      - forge/scripts/fetch_sources.sh
+      - .github/workflows/spec-build-check.yml
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: spec-build-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      REGISTRY: ghcr.io/${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # The merge commit and its first parent, the base: the changed specs are the diff.
+          fetch-depth: 2
+
+      - name: Build the changed specs (forge/scripts/build_changed_specs.sh)
+        run: |
+          set -euo pipefail
+          image="${REGISTRY,,}/athanor-builder:latest"
+          bash forge/scripts/retry.sh podman pull "$image"
+          bash forge/scripts/build_changed_specs.sh HEAD^1 "$image"
+
+  merge:
+    needs: build
+    # The spec bot's pull requests only, whatever the build's outcome: forge/scripts/bot_merge.py
+    # merges a green one of the bot's shape at its head once the required checks pass, and
+    # reports why it leaves any other. The script is the base branch's copy; the workflow
+    # file, as for any same-repository pull_request, is the pull request's own, and forks get
+    # no secrets.
+    if: ${{ always() && github.head_ref == 'chore/update-specs-zero-trust' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-24.04
+    # The job's own token reads the pull request and the Kernel Build runs; the PAT only merges.
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    # It waits for the required checks (Kernel gate) before merging.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.base_ref }}
+
+      - name: Merge a green spec update of the bot's shape (forge/scripts/bot_merge.py)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # A PAT: a merge made with the GITHUB_TOKEN triggers no push workflow, and the
+          # Orchestrator must publish what merged.
+          MERGE_TOKEN: ${{ secrets.KERNEL_BUMP_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          BUILD: ${{ needs.build.result }}
+        run: python3 forge/scripts/bot_merge.py spec "$PR" "$SHA" "$BUILD"

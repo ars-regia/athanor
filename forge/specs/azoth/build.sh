@@ -81,15 +81,8 @@ patch_file() { echo "${CACHYOS_PATCHES_COMMIT:0:12}-${1##*/}"; }
 mapfile -t FEDORA_WINS < <(grep -vE '^\s*(#|$)' "$HERE/fedora-wins.list")
 [[ -z $(printf '%s\n' "${PATCHES[@]##*/}" | sort | uniq -d) ]] || die "patches.list: duplicate file names"
 
-# The same choices for dnf builddep (--define) and for rpmbuild (--with/--without).
-# clang_lto stays on even with LTO off in kernel-local: it is the only bcond through
-# which kernel.spec passes HOSTCC=clang CC=clang LLVM=1 to process_configs.sh; without it
-# the config would be evaluated with gcc and kCFI would vanish.
-WITH=(toolchain_clang clang_lto)
-WITHOUT=(debug tools perf libperf bpftool ynl selftests doc)
-BCONDS=() DEFINES=()
-for x in "${WITH[@]}"; do BCONDS+=(--with "$x"); DEFINES+=(--define "_with_$x 1"); done
-for x in "${WITHOUT[@]}"; do BCONDS+=(--without "$x"); DEFINES+=(--define "_without_$x 1"); done
+# shellcheck source=bconds.sh
+source "$HERE/bconds.sh"
 MAKE_OPTS=(HOSTCC=clang CC=clang LLVM=1 LLVM_IAS=1)      # %{clang_make_opts} of kernel.spec
 
 # --- sources ------------------------------------------------------------------------
@@ -119,6 +112,9 @@ if [[ $STAGE == manifest ]]; then
   echo "manifest of ${#files[@]} files in $OUT/sources.sha256"
   exit 0
 fi
+
+step "package locks (lock.sh check)"
+bash "$HERE/lock.sh" check builder
 
 step "hashes (SOURCES/sources.sha256)"
 (cd "$CACHE" && sha256sum --check --quiet --strict "$HERE/SOURCES/sources.sha256")
@@ -309,8 +305,11 @@ g diff --binary "$FEDORA" "$(g write-tree)" -- . ':!.github' > "$SRC/linux-kerne
 # (rust-src, bindgen, pahole), otherwise RUST_IS_AVAILABLE and the options depending on
 # it change between the pre-pass and the Fedora gate. After the patches: a patch that does
 # not apply stops prep in seconds, and the refresh stage, which ends there, needs no toolchain.
-step "BuildRequires of kernel.spec"
-dnf -y builddep "${DEFINES[@]}" "$TOP/SPECS/kernel.spec"
+# The builder installed them from builder/toolchain.lock: with every repository disabled
+# this is a check, and a spec whose BuildRequires the lock does not cover stops here.
+step "BuildRequires of kernel.spec (builder/toolchain.lock)"
+dnf -y builddep --disablerepo='*' "${DEFINES[@]}" "$TOP/SPECS/kernel.spec" \
+  || die "BuildRequires outside builder/toolchain.lock: run lock.sh generate"
 
 # --- config -------------------------------------------------------------------------
 

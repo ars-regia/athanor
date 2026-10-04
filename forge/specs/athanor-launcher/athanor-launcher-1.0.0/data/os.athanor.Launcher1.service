@@ -1,0 +1,6 @@
+# doc_launcher.md, LA8: a call to os.athanor.Launcher1 starts the launcher's unit when it is
+# down, so Super works from the first press. The bus never runs the program itself.
+[D-BUS Service]
+Name=os.athanor.Launcher1
+Exec=/bin/false
+SystemdService=athanor-launcher.service

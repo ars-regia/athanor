@@ -61,7 +61,7 @@ What the platform gives us today:
 |---|---|---|---|
 | cosmic-panel, cosmic-applets | panel, dock, the tray's `org.kde.StatusNotifierWatcher` (in `cosmic-applet-status-area`), network, Bluetooth, audio, battery, power, input source | 2, gone since the switch (PR #83) | our bar (2b) and our dock (2c) |
 | cosmic-notifications | notification daemon, a child of the panel's wrapper on an inherited socket pair until the switch | 2, gone since the switch (PR #83) | `athanor-shelld`, the notification server, with the bar |
-| cosmic-launcher, cosmic-app-library | launcher, application library | 3, or 2 if P4 finds they need the panel | our launcher |
+| cosmic-launcher, cosmic-app-library, pop-launcher | launcher, application library, the launcher's search backend | 3 (P4 found they work without the panel) | our launcher and application library (`doc_launcher.md`) |
 | cosmic-greeter as locker | session lock | 4 | our lock, on the greeter's authentication code |
 | cosmic-osd | on-screen display and the session's only polkit agent | 4, or 5 if it can run without its agent | our polkit agent (4) and on-screen display (5) |
 | cosmic-settings, cosmic-randr | Settings application, output configuration | 6 | our Settings; `athanor-settings-rs` is not revived, only mined |
