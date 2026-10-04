@@ -76,3 +76,59 @@ the spikes do not fix them.
    about (910, 1054). The bar's extents match its screenshot. The surface origin from
    Task 3's geometry line settles it; until then the bench must not take the dock's
    extents at face value (Task 5).
+
+## Q3: presentation time
+
+**Question.** Whether GTK's frame clock on the reference machine gets real presentation
+times from cosmic-comp (`wp_presentation`), on `CLOCK_MONOTONIC`, so that a frame line can
+be set against the input's `t_ns`.
+
+**Run.** The dock of this branch (Task 3's timing lines) restarted with
+`ATHANOR_SHELL_BENCH=1 WAYLAND_DEBUG=1`; then `machine/inject.py` right-clicked the
+dock's first application button (COSMIC Files) ten times, each menu closed by a click on
+the desktop (Escape does not close it, see Q2), and the dock's frame lines were read from
+the journal.
+
+**Answer.**
+
+- `wp_presentation` announces `clock_id(1)`, `CLOCK_MONOTONIC`, the clock `inject.py`
+  stamps its input with.
+- All 79 frame lines carry a non-zero `presented_us`, different from `predicted_us` in
+  79 of 79.
+- From each right-click to the next presented frame of the `popover` surface: 71.8, 35.1,
+  15.5, 11.8, 9.1, 22.2, 35.3, 15.1, 12.4, 9.3 ms. All are within the plausible 5-200 ms.
+- `refresh_us` is 16667 on every line: the panel runs at 60 Hz (`machine.md`).
+- The dock's surface line puts it at (764, 1020), 392x60, on a 1920x1080 output. This
+  settles finding 3 of Q2: the Files button's accessible centre (160, 44) maps to
+  (924, 1064), but the icon is drawn at about (910, 1054). The accessibility extents count
+  the dock's inner margin (18, 14) twice.
+
+**Passed.**
+
+## Q4: overlay
+
+**Question.** Whether the bar and dock packages of a branch can be put on the reference
+machine's transient `/usr` overlay (`bootc usr-overlay`) and run without SELinux or IMA
+refusals, and whether a reboot discards them.
+
+**Run.** The two RPMs of this branch built in `athanor-builder` with
+`forge/scripts/build_spec.sh`, as the DAG builds them. Then on the machine:
+`bootc usr-overlay`, `rpm -Uvh --replacepkgs`, a restart of both units, the units' warnings
+and `ausearch -m AVC,INTEGRITY_DATA,INTEGRITY_RULE -ts recent`. Finally a reboot.
+
+**Answer.**
+
+- Before the reboot:
+  - both units are `active`;
+  - the units log no warning;
+  - `ausearch` reports `<no matches>`;
+  - `rpm -V` is clean;
+  - the installed binaries carry the timing code (the NVR is the image's, 1.0.0-4, so
+    the binary is what tells them apart).
+- After the reboot:
+  - `rpm -q` gives the image's packages again;
+  - the binaries no longer carry the timing code;
+  - `/usr` lies on the read-only composefs root (`findmnt -T /usr`: `overlay ro`) and
+    refuses a write, even as root.
+
+**Passed.**
