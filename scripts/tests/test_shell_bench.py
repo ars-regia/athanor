@@ -283,8 +283,22 @@ class Restore(unittest.TestCase):
         with self.assertRaises(ZeroDivisionError):
             with bench.instrumented(Fake(), settle_s=0):
                 1 / 0
-        self.assertEqual(calls[-2:], [("unset-environment", "ATHANOR_SHELL_BENCH"),
+        self.assertEqual(calls[-3:], [("unset-environment", "ATHANOR_SHELL_BENCH"),
+                                      ("reset-failed", "athanor-bar", "athanor-dock"),
                                       ("restart", "athanor-bar", "athanor-dock")])
+
+    def test_the_bench_restarts_do_not_spend_the_start_limit(self):
+        # The units give up after 10 starts in 10 minutes (SH8); a run of several stages
+        # restarts them more often than that.
+        calls = []
+
+        class Fake:
+            def systemctl(self, *args):
+                calls.append(args)
+                return b""
+
+        bench.restart(Fake(), "athanor-dock")
+        self.assertEqual(calls, [("reset-failed", "athanor-dock"), ("restart", "athanor-dock")])
 
 
 class Report(unittest.TestCase):
@@ -292,6 +306,11 @@ class Report(unittest.TestCase):
         text = bench.report({"date": "d", "commit": "c", "scenarios": {
             "dock-autohide/rest": {"pass": False, "register": None, "detail": "nothing drawn"}}})
         self.assertIn("| scenarios | dock-autohide/rest | nothing drawn | ST6 | **no** |", text)
+
+
+class Growth(unittest.TestCase):
+    def test_growth_is_relative(self):
+        self.assertAlmostEqual(analysis.growth(1000, 1100), 0.10)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,1 @@
+# Journal lines at err or worse the soak accepts: `<unit> <regex>`, one per line, each with a reason approved by the maintainer (ST10).
