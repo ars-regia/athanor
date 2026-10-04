@@ -36,7 +36,7 @@ Two gaps let the shipped state happen:
 - **The register is versioned.** Version 1 is written in section 4, step 2, and frozen when the maintainer approves it. A feature a reference adds later goes into the next version and does not move a gate already under way.
 - **Exclusions are written decisions.** An entry is left out only by the maintainer, with the reason in the register. Expected reasons: it contradicts the zero-trust model (for example, a clipboard history any application can read), or it exists only on a compositor we do not run (end-4's and Caelestia's Hyprland-only features).
 
-**ST4. The reference machine is a modest laptop.** The thresholds hold on the floor, so that they hold everywhere: an x86-64-v3 CPU five to six years old (an 8th-generation Intel Core or a Ryzen 2000 mobile part), integrated graphics, 8 GB of memory, a 1080p panel at 60 Hz, at scale 1.0 and 1.5. The maintainer owns such a machine; its exact model is recorded here when it is set up (section 6). The maintainer's desktop remains a second verification target and never sets a threshold (the rule that Athanor is designed for every machine, not for the maintainer's).
+**ST4. The reference machine is a modest laptop.** The thresholds hold on the floor, so that they hold everywhere: an x86-64-v3 CPU five to six years old (an 8th-generation Intel Core or a Ryzen 2000 mobile part), integrated graphics, 8 GB of memory, a 1080p panel at 60 Hz, at scale 1.0 and 1.5. The machine is the maintainer's Xiaomi Mi Notebook Pro 15.6": an Intel Core i7-8550U (8th generation, four cores, x86-64-v3), 8 GB of memory, Intel UHD Graphics 620, a 15.6" 1080p panel. This model is commonly sold with a discrete GeForce MX150 as well; if this unit has one, the bench leaves it idle and the integrated GPU drives the panel, because the floor is integrated graphics. The machine runs the default image, not the `-nvidia` variant. The maintainer's desktop remains a second verification target and never sets a threshold (the rule that Athanor is designed for every machine, not for the maintainer's).
 
 **ST5. Thresholds.** Every number is measured on the reference machine with the image as shipped. A percentile is taken over at least 50 repetitions of the action.
 
@@ -112,7 +112,7 @@ Each runs before the plan and gives an answer, not code we keep. A spike that fa
 
 ## 6. Open doubts
 
-1. **The reference machine's model** (CPU, GPU, memory, panel) is not yet recorded. It is written into ST4 when the machine is set up, before section 4, step 1, is accepted. If it departs from the floor of ST4, the thresholds are reviewed first.
+1. **The reference machine's graphics and panel are not verified yet.** ST4 records the model from the maintainer; whether this unit carries the GeForce MX150, and the panel's refresh rate, are read on the machine (`lspci`, the panel's EDID) when it is set up, before section 4, step 1, is accepted.
 2. **The thresholds are not measured yet.** Section 4, step 3, gives the first numbers on the floor.
 3. **The spikes of section 3** may change ST9.
 4. **The soak's allow list** starts empty. On the maintainer's desktop the bar logs, every hour, `the trust state is not trusted err=Missing`; whether that is a defect or an expected state is settled when the bench first runs.
