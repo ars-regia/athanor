@@ -791,6 +791,7 @@ version = "1.0.0"
 dependencies = [
  "athanor-unit",
  "futures-util",
+ "libc",
  "tokio",
  "tracing",
  "zbus",
