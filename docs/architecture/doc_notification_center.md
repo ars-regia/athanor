@@ -1,6 +1,6 @@
 # Athanor notification center
 
-Status: **revision 1, 2026-10-04, awaiting the maintainer's review.** The maintainer took its decisions in conversation on 2026-10-04: the center is a second panel of the control center's program (NC1), `athanor-shelld` holds every notification fact (NC2), the history survives a reboot for a period the user chooses, seven days by default (NC3), automatic do not disturb by schedule, fullscreen and screen sharing (NC6), per-application settings including sound and timeout (NC5), sound on for every application by default (NC7), markup, progress and inline reply (NC9, NC10), a month calendar without events (NC11), and the classification of every register entry (section 3). It is the specification `doc_shell_standard.md`, section 4, step 6 requires for notifications and the calendar.
+Status: **revision 1, approved by the maintainer on 2026-10-04.** The maintainer took its decisions in conversation on 2026-10-04: the center is a second panel of the control center's program (NC1), `athanor-shelld` holds every notification fact (NC2), the history survives a reboot for a period the user chooses, seven days by default (NC3), automatic do not disturb by schedule, fullscreen and screen sharing (NC6), per-application settings including sound and timeout (NC5), sound on for every application by default (NC7), markup, progress and inline reply (NC9, NC10), a month calendar without events (NC11), and the classification of every register entry (section 3). It is the specification `doc_shell_standard.md`, section 4, step 6 requires for notifications and the calendar.
 
 ## 1. Context
 
@@ -295,7 +295,7 @@ On a fresh install in the dev VM and on the reference laptop:
 3. `notifications.json` has mode 0600, holds no image and no reply text, and is emptied on disk by "Clear all".
 4. A process outside `athanor-bar` and `athanor-control-center` is refused by `os.athanor.Notifications1`, and the bar is refused `SetRule` and `ClearAll`.
 5. A notification from a process with no application unit, carrying another application's `desktop-entry`, lands in "Other applications" and does not pass do not disturb even when that application has `bypass_dnd=true`.
-6. With a schedule of 22:00–07:00, do not disturb turns on at 22:00 and off at 07:00, also across a suspend over 07:00. Turned off at 23:00, it stays off until 07:00. At its end one summary popup appears.
+6. With a schedule of 22:00–07:00, do not disturb turns on at 22:00 and off at 07:00, also across a suspend over 07:00, and at 07:00 one summary popup appears. On another night, turned off by hand at 23:00, it stays off until 07:00.
 7. A fullscreen video turns do not disturb on with the reason "fullscreen"; ending it turns it off.
 8. A body with `<b>`, `<a href="https://…">` and `<a href="file:///…">` shows bold text and one link; the `file:` link is plain text; `<img>` is dropped.
 9. A reply typed in the center reaches the sender through `NotificationReplied` and is absent from the history file.
