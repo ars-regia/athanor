@@ -247,12 +247,12 @@ Runs first, beside Task 1: every later build is installed with it (CC14).
 
 **Interfaces:**
 
-- Produces: `python3 scripts/shell-bench/deploy.py --host athanor-ref <crate>...` — builds the named crates in release mode in the podman builder the bar's spec uses (`cargo build --release --locked -j 4 -p <crate>`), copies each binary, unit and D-Bus activation file to the laptop, makes `/usr` writable for this boot only with `sudo -n bootc usr-overlay` (skipped when already writable), installs them, runs `systemctl --user daemon-reload` and restarts the crate's unit, and prints the commit installed. A reboot returns the laptop to its image. Refuses to run while `soak.py` or `bench.py` is running on the host (a lock file in the laptop's `/run/user/<uid>/shell-bench.lock`, which both take).
+- Produces: `python3 scripts/shell-bench/deploy.py --host athanor-ref <crate>...` — builds the named crates in release mode in the podman builder the bar's spec uses (`cargo build --release --locked -j 4 -p <crate>`), copies each binary, unit and D-Bus activation file to the laptop, makes `/usr` writable for this boot only with `sudo -n bootc usr-overlay` (skipped when already writable), installs them, runs `systemctl --user daemon-reload` and restarts the crate's unit, and prints the commit installed. A reboot returns the laptop to its image. Refuses to run while `soak.py` or `bench.py` is running on this host (`pgrep -f`), so it never touches a measurement; neither script changes.
 - Consumes: `machine.Machine.run`, `machine.Machine.systemctl`.
 
 - [ ] **Step 1:** Test in `scripts/shell-bench/tests/test_deploy.py`: `plan(crate, built_dir)` returns the `(source, destination)` pairs for `athanor-bar` (binary to `/usr/bin/athanor-bar`, unit to `/usr/lib/systemd/user/athanor-bar.service`) and refuses an unknown crate.
 - [ ] **Step 2:** `python3 -B -m unittest discover -s scripts/shell-bench/tests` — Expected: FAIL (`deploy` not found).
-- [ ] **Step 3:** Implement `deploy.py` and the lock in `soak.py` and `bench.py`.
+- [ ] **Step 3:** Implement `deploy.py`.
 - [ ] **Step 4:** Same command — Expected: PASS. Then `python3 scripts/shell-bench/deploy.py --host athanor-ref athanor-bar` on today's bar — Expected: the bar restarts and `systemctl --user show -p ExecMainStartTimestamp athanor-bar` on the laptop moves.
 - [ ] **Step 5:** Commit `feat(shell-bench): install a build on the reference laptop for the maintainer to judge`.
 
