@@ -2,7 +2,7 @@
 
 use anyhow::Context;
 use aya::maps::{Array, HashMap};
-use aya::programs::{Xdp, XdpFlags};
+use aya::programs::{Xdp, XdpMode};
 use aya::{include_bytes_aligned, Ebpf};
 use aya_log::EbpfLogger;
 use clap::{Parser, ValueEnum};
@@ -10,6 +10,8 @@ use log::{info, warn};
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 use std::time::Duration;
+use tokio::io::unix::AsyncFd;
+use tokio::io::Interest;
 use tokio::signal;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum)]
@@ -70,8 +72,26 @@ async fn main() -> Result<(), anyhow::Error> {
         "../../target/bpfel-unknown-none/release/ebpf-core"
     ))?;
 
-    if let Err(e) = EbpfLogger::init(&mut bpf) {
-        warn!("Failed to initialize eBPF logger: {}", e);
+    // The logger owns the AYA_LOGS map: dropping it closes the map and breaks program loading.
+    match EbpfLogger::init(&mut bpf) {
+        Ok(logger) => {
+            let mut logger = AsyncFd::with_interest(logger, Interest::READABLE)
+                .context("Failed to register the eBPF logger with the runtime")?;
+            tokio::spawn(async move {
+                loop {
+                    let mut guard = match logger.readable_mut().await {
+                        Ok(guard) => guard,
+                        Err(e) => {
+                            warn!("eBPF logger stopped: {}", e);
+                            break;
+                        }
+                    };
+                    guard.get_inner_mut().flush();
+                    guard.clear_ready();
+                }
+            });
+        }
+        Err(e) => warn!("Failed to initialize eBPF logger: {}", e),
     }
 
     // Initialize eBPF Firewall Maps
@@ -113,11 +133,11 @@ async fn main() -> Result<(), anyhow::Error> {
     );
 
     // Attach XDP Program
-    let flags = match opt.mode {
-        XdpAttachMode::Auto => XdpFlags::default(),
-        XdpAttachMode::Skb => XdpFlags::SKB_MODE,
-        XdpAttachMode::Driver => XdpFlags::DRV_MODE,
-        XdpAttachMode::Hw => XdpFlags::HW_MODE,
+    let mode = match opt.mode {
+        XdpAttachMode::Auto => XdpMode::Default,
+        XdpAttachMode::Skb => XdpMode::Skb,
+        XdpAttachMode::Driver => XdpMode::Driver,
+        XdpAttachMode::Hw => XdpMode::Hardware,
     };
 
     let program: &mut Xdp = bpf
@@ -126,7 +146,7 @@ async fn main() -> Result<(), anyhow::Error> {
         .try_into()?;
     program.load()?;
     program
-        .attach(&opt.iface, flags)
+        .attach(&opt.iface, mode)
         .context(format!("Failed to attach XDP firewall to interface {}", opt.iface))?;
 
     info!("XDP Zero-Trust Firewall attached to {}!", opt.iface);

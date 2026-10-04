@@ -7,10 +7,11 @@
 use anyhow::{anyhow, Context, Result};
 use aya::programs::extension::{Extension, ExtensionLinkId};
 use aya::programs::kprobe::{KProbe, KProbeLinkId};
-use aya::programs::uprobe::{UProbe, UProbeLinkId};
+use aya::programs::uprobe::{UProbe, UProbeLinkId, UProbeScope};
 use aya::programs::ProgramFd;
 use aya::Ebpf;
 use std::collections::HashMap;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
@@ -249,9 +250,20 @@ impl BpfTrampolineInjector {
                             .try_into()
                             .context("Failed to cast eBPF program to UProbe")?;
 
+                        // As with perf_event_open(2): no pid is every process, 0 is the caller.
+                        let scope = match *pid {
+                            None => UProbeScope::AllProcesses,
+                            Some(0) => UProbeScope::CallingProcess,
+                            Some(pid) => u32::try_from(pid)
+                                .ok()
+                                .and_then(NonZeroU32::new)
+                                .map(UProbeScope::OneProcess)
+                                .ok_or_else(|| anyhow!("Invalid UProbe target pid {pid}"))?,
+                        };
+
                         program.load().context("Failed to load UProbe program into kernel")?;
                         let link_id = program
-                            .attach(Some(symbol), 0, target_binary, *pid)
+                            .attach(symbol.as_str(), target_binary, scope)
                             .context(format!(
                                 "Failed to attach UProbe to binary '{}' symbol '{}'",
                                 target_binary, symbol
