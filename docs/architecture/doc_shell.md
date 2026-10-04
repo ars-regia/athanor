@@ -40,7 +40,7 @@ What the platform gives us today:
 - **Stage 1** (implemented): a real design system, the update experience and the trust state, on top of COSMIC. Section 3 records it.
 - **Stage 2:** our bar and our dock, on a compositor client that holds every dependency on COSMIC (SH2). The session shield is born inside our bar.
 - **Later stages,** in this order unless a stage's own spec argues otherwise: 3, the launcher and the application library; 4, the password prompts, session lock and polkit agent together, because both reuse the greeter's authentication code and both are the trusted path; 5, the on-screen display, unless it already left with its agent in stage 4; 6, Settings; 7, the workspace overview; 8, the headless daemons: settings daemon, idle, wallpaper. Visible surfaces come first.
-- **The rule for replacing a surface:** ours is usable by an average user and better than COSMIC's at the moment of the switch. Until then ours is enabled by hand and the image keeps COSMIC's. Tray, fractional scaling, screen-reader roles and i18n are requirements of every surface, not extras.
+- **The rule for replacing a surface:** ours passes `doc_shell_standard.md`. Until then ours is enabled by hand and the image keeps COSMIC's. Tray, fractional scaling, screen-reader roles and i18n are requirements of every surface, not extras.
 - **No facades.** A control that does nothing, or a reading with no source, is a defect.
 
 **SH2. cosmic-comp stays; the dependency has an exit.** We do not write a compositor.
@@ -213,6 +213,8 @@ Three packages in this order, then one switch. Each package has its own implemen
 - **One switch, at the end of 2c,** when the bar and the dock pass SH1's rule on the dev VM and on the maintainer's desktop. cosmic-panel, cosmic-applets and cosmic-notifications then leave the image, together with the unit and the wrapper `athanor-system-services` ships for them and its dependencies on them, the translator and the cosmic-panel module of `athanor-layout`. cosmic-launcher and cosmic-app-library stay until stage 3 if P4 shows that they work without the panel; otherwise the launcher of stage 3 comes before the switch. Done by PR #83: P4 showed that both open without the panel, so they stay.
 
 Out of stage 2: our launcher, lock, polkit agent, on-screen display, Settings and overview; the headless daemons; the `split` preset; named outputs; releasing a held digest; a screen reader at the greeter; any compositor patch.
+
+**The control center** comes before the rest of stage 3 (`doc_shell_standard.md`, section 4, step 5): its own specification, built on the services the bar already holds, then its implementation and its gate.
 
 ### Later stages
 
