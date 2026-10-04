@@ -1,6 +1,6 @@
 # Athanor shell standard
 
-Status: **revision 1, 2026-10-04, awaiting the maintainer's approval.** The maintainer took its decisions in conversation on 2026-10-04: the standard comes before any new surface (ST2), the feature register is the union of every reference (ST3), the floor is a modest laptop (ST4), the thresholds of ST5, aesthetics judged by rules plus the maintainer's signature (ST8), and every measurement taken on one physical reference machine (ST9). Section 3 lists four spikes that open the plan; revision 1 replaced the container first proposed for the bench with the tooling of `scripts/devvm/`, which already does what the container was for; section 6 lists what is still open.
+Status: **revision 2, 2026-10-04, awaiting the maintainer's approval.** The maintainer took its decisions in conversation on 2026-10-04: the standard comes before any new surface (ST2), the feature register is the union of every reference (ST3), the floor is a modest laptop (ST4), the thresholds of ST5, aesthetics judged by rules plus the maintainer's signature (ST8), and every measurement taken on one physical reference machine (ST9). Section 3 lists four spikes that open the plan; revision 1 replaced the container first proposed for the bench with the tooling of `scripts/devvm/`, which already does what the container was for; section 6 lists what is still open. Revision 2 follows the first run of the plan (the spikes, the bench, register version 1): `athanor-shelld` keeps the unread notifications across a crash, the maintainer's choice (ST5); the configuration the reference machine carries for the bench is listed (ST9); the bench is split between every merge and the gates (ST9); each requirement of ST7 names its check; sections 1 and 6 record what the run settled.
 
 The document amends `doc_shell.md` (revision 5), SH1, and refers to `doc_bar.md` (revision 1), BR7 and section 5. Section 5 lists the changes.
 
@@ -8,9 +8,14 @@ The document amends `doc_shell.md` (revision 5), SH1, and refers to `doc_bar.md`
 
 Stage 2 of `doc_shell.md` replaced cosmic-panel with our bar, our dock and `athanor-shelld` (PR #83). On 2026-10-04 the maintainer found the result below expectations, on the desktop and in daily use:
 
-- **The dock's auto-hide is broken.** Started with `dock = "auto-hide"`, the dock disappears and does not come back when the pointer rests on the bottom edge. Switched from visible to auto-hide while running, it stays. When it tries to hide, the surface widens to the whole edge and the dock slides to its start instead of giving way to the strip. The state machine (`athanor_dock::autohide`) is correct on reading; the fault is in how the surface changes shape, and has not been reproduced yet.
+- **The dock's auto-hide is broken.** Started with `dock = "auto-hide"`, the dock disappears and does not come back when the pointer rests on the bottom edge. Switched from visible to auto-hide while running, it stays. When it tries to hide, the surface widens to the whole edge and the dock slides to its start instead of giving way to the strip. The state machine (`athanor_dock::autohide`) is correct on reading; the fault is in how the surface changes shape. The scenarios of ST6 reproduced it on the reference machine: under auto-hide the dock is not hidden and is drawn at the start of the bottom edge.
 - **The bar is weak** in looks and in usefulness, measured against macOS, Windows and the better Linux shells.
 - **There is no control center.** A benchmark of the same day found the bar's ten separate popovers where every major desktop offers one panel of toggles and sliders, and found that screen brightness and the power profile live in the battery module, which hides on a machine without a battery.
+
+Running the bench found two more defects of the shipped shell:
+
+- **An expired notification popup stayed on screen.** The soak found it; it is repaired.
+- **Opening a popover of the bar while one of the dock is open, or the reverse, ends the other program.** cosmic-comp refuses the second grab (`NotTheTopmostPopup`) and raises a protocol error on the first client, which exits and is restarted by systemd (`docs/shell-bench/spikes.md`, findings outside the spikes).
 
 The maintainer set the goal in these terms: the shell, bar, dock and everything else, is the interface of our environment, and in functionality, performance, stability, quality and aesthetics it must stand level with macOS, Windows and all of Linux.
 
@@ -21,7 +26,7 @@ Two gaps let the shipped state happen:
 
 ## 2. Decisions
 
-**ST1. Scope.** The standard covers every surface of the shell that a user sees or touches: the bar, the dock, the control center, notifications and the calendar, the launcher and the application library, the on-screen display, the session lock and the authentication dialogs, Settings, the workspace overview, and the greeter. Applications (Software, the file manager and the rest) are out of scope and will get a standard of their own.
+**ST1. Scope.** The standard covers every surface of the shell that a user sees or touches: the bar, the dock, the control center, notifications and the calendar, the launcher and the application library, the on-screen display, the session lock and the authentication dialogs, Settings, the workspace overview, and the greeter. Applications (Software, the file manager and the rest) are out of scope and will get a standard of their own. If `doc_compositor.md` is approved, window management joins this list (its CO2).
 
 **ST2. The standard is a gate, defects first.**
 
@@ -44,14 +49,22 @@ Two gaps let the shipped state happen:
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Response, in place | A control that changes in place (a toggle, a slider, a button's pressed state) shows the change on screen within **50 ms** of the input event, at the 95th percentile                                                                                                                                                                                 |
 | Response, opening  | A popover, a panel or a window of the shell (the control center, the calendar, the launcher, the notification list) presents its first complete frame within **100 ms** of the input event, at the 95th percentile. The launcher updates its results within 100 ms of each key                                                                        |
-| Smoothness         | During every animation (opening, closing, the dock's reveal and hide, a workspace change), at least **99%** of frames are presented at their target refresh, and no frame is presented later than **two** refresh intervals after the previous one                                                                                                    |
+| Smoothness         | During every animation (opening, closing, the dock's reveal and hide, a workspace change), over at least 50 runs of each animation, at least **99%** of its frames are presented at their target refresh, and no frame is presented later than **two** refresh intervals after the previous one                                                                                                    |
 | Start              | Bar and dock present their first frame within **1.5 s** of the start of the compositor's process at login                                                                                                                                                                                                                                             |
 | Idle               | With no input and the screen on, the shell's processes together use less than **0.1%** of one CPU, averaged over 10 minutes                                                                                                                                                                                                                           |
-| Memory             | The budgets of `doc_bar.md`, section 5, item 17, stand: `athanor-bar` 64 MB PSS, `athanor-dock` 48 MB, `athanor-shelld` 16 MB. Each new surface gets its budget in its own specification. No process grows by more than **10%** over the soak of the next row                                                                                         |
+| Memory             | The budgets of `doc_bar.md`, section 5, item 17, stand: `athanor-bar` 64 MB PSS, `athanor-dock` 48 MB, `athanor-shelld` 16 MB. Each new surface gets its budget in its own specification. No process grows by more than **10%** over the soak of the next row, measured from its size after the first 30 minutes, which the soak takes as warm-up                                                                                         |
 | Stability          | A soak of **24 hours** on the reference machine, driven by a script that opens and closes every surface, sends bursts of notifications, switches theme, and suspends and resumes: no crash, no restart by systemd, and no journal line at priority `err` or above from a shell unit other than those listed, with a reason, in the bench's allow list |
-| Recovery           | A shell process killed with `SIGKILL` presents its surface again within **1 s**, in the same state: favourites, layout, unread notifications and settings. A popover open at the time of the kill does not reopen                                                                                                                                     |
+| Recovery           | A shell process killed with `SIGKILL` presents its surface again within **1 s**, in the same state: favourites, layout, unread notifications and settings. A popover open at the time of the kill does not reopen. `athanor-shelld` is no exception: it keeps its unread notifications for this, as below                                                                                                                                    |
 
 The numbers are reasoned proposals, not measurements: 100 ms is the classic limit under which an action reads as instantaneous, and 50 ms leaves room inside it. The first run of the bench (section 4, step 3) shows whether one is unrealistic on the floor; changing it is a revision (ST10). One threshold already fails by construction: the units of `athanor-bar`, `athanor-dock` and `athanor-shelld` wait `RestartSec=1s` before a restart, so recovery cannot happen within 1 s; that is a defect of the units, repaired in section 4, step 3, not a reason to relax the threshold.
+
+**What `athanor-shelld` keeps across a crash.** The unread notifications survive a crash of the daemon, so that recovery holds for it as for the bar and the dock.
+
+- At every change it writes them to `$XDG_STATE_HOME/athanor/notifications.json`, mode 0600, by a write to a temporary file and a rename: each with its id, its fields as the list shows them, its expiry, and the unique bus name of its sender.
+- It removes the file when it stops cleanly, which is what a logout does, so only a crash leaves it behind.
+- At start it reads the file only if it was written in the same boot (`/proc/sys/kernel/random/boot_id`), so a power loss does not carry old notifications into a new session. A file that does not parse is removed and the event logged at warning; the daemon starts empty.
+- New ids continue above the highest restored one, so a client's later `CloseNotification` finds its notification. `ActionInvoked` reaches a sender that is still connected; one that has gone loses it, which the notification specification already allows.
+- The read history is still lost on a crash; only the unread notifications are kept.
 
 **ST6. Behaviour is specified by scenarios.**
 
@@ -59,13 +72,12 @@ The numbers are reasoned proposals, not measurements: 100 ms is the classic limi
 - Scenarios live in the repository beside the bench (ST9).
 - The dock's auto-hide is the first example, and the scenarios that would have caught its defect: under auto-hide, when the pointer leaves the dock, within 1.2 s only the strip is drawn; when the pointer rests on the edge, within 0.3 s the dock is drawn at its place, centred; after a context menu opens and closes and the pointer leaves, the dock hides again; switching from visible to auto-hide while running hides the dock exactly as starting in auto-hide does.
 
-**ST7. Accessibility and languages are part of the gate.** Requirements of every surface, not extras (SH1):
+**ST7. Accessibility and languages are part of the gate.** Requirements of every surface, not extras (SH1), each with the check that verifies it:
 
-- Every control is reachable and operable from the keyboard alone, with a visible focus.
-- Every control exposes a name and a role in the AT-SPI tree, which is what Orca reads.
-- No text is truncated in German; the layout mirrors under a right-to-left locale; scales 1.0, 1.25, 1.5 and 2.0 render without overlap or blur.
-- The light, dark and high-contrast themes are complete.
-- No control without a source (SH1: no facades).
+- **Every control is reachable and operable from the keyboard alone, with a visible focus.** A scenario per surface moves the focus with Tab and the arrow keys over every control and activates each, reading the focus from AT-SPI and the focus ring from a screenshot.
+- **Every control exposes a name and a role in the AT-SPI tree,** which is what Orca reads. The bench walks each surface's tree and fails a control with an empty name, a generic role, or extents outside the place where the control is drawn (the dock's extents fail this today, spike Q2).
+- **No text is truncated in German; the layout mirrors under a right-to-left locale; scales 1.0, 1.25, 1.5 and 2.0 render without overlap or blur; the light, dark and high-contrast themes are complete.** The rig's surface cases (`doc_bar.md` BR9, `doc_shell.md` SH13) render scales 1.0 and 1.5, light and dark, English, German and a right-to-left pseudo-locale. At each gate the bench renders the rest on the reference machine: scales 1.25 and 2.0, and the high-contrast theme. Truncation is measured, not judged: under the timing variable of ST9 each program logs every label whose text GTK ellipsized, and an ellipsized label fails unless the surface's specification allows ellipsis there.
+- **No control without a source** (SH1: no facades). The surface's specification names the source of each control, and its review checks it.
 
 **ST8. Aesthetics: rules plus the maintainer's signature.**
 
@@ -75,13 +87,19 @@ The numbers are reasoned proposals, not measurements: 100 ms is the classic limi
 
 **ST9. The bench runs on the reference machine.**
 
-- **The machine** runs Athanor from the image as shipped, with no layered package and no persistent change for the bench. It is reached over SSH with a key only. It is a test machine, not a workstation.
+- **The machine** runs Athanor from the image as shipped, with no layered package. It is a test machine, not a workstation. It carries this configuration for the bench, recorded in `docs/shell-bench/machine.md`, and nothing else:
+  - SSH with a key only;
+  - a `sudo` rule without a password, limited to the commands the bench runs as root: the throwaway `uinput` devices, `bootc usr-overlay`, the installation of the change's packages, and `rtcwake` for the soak's suspend;
+  - automatic login of the bench's user, so that after the disk's passphrase the session starts with no second step;
+  - COSMIC's screen-off and suspend set to never, and mains power.
+
+  Any other change to the machine is a revision of this document (ST10).
 - **The bench** lives in `scripts/shell-bench/`, with its scenarios, and reuses the tooling of `scripts/devvm/`, pointed at the reference machine instead of the VM: its helpers are streamed over SSH to the machine's own `python3` and run there, so nothing is installed on the machine. Input comes from a throwaway `uinput` pointer and keyboard, created as root through `sudo`, which the compositor reads like real devices through libinput (`scripts/devvm/pointer_click.py`); screenshots from `grim` against the session's compositor (`scripts/devvm/screenshot.sh`); the accessibility tree from AT-SPI, which is what Orca reads (`scripts/devvm/dock_press.py`); test notifications over the session bus. Suspend in the soak also goes through `sudo`.
 - **Timing comes from inside our programs.** When an environment variable asks for it, each shell process logs the time of each input event and the presentation time of the frame that shows its effect, from GTK's frame clock, as lines of JSON. Without the variable the code path is inert. The bench sets it with `systemctl --user set-environment`, restarts the units, and unsets it when it ends. This is the only way to measure the time from a click to the screen without a camera; spike Q3 confirms that GTK4 gives a real presentation time.
 - **A change not yet merged** reaches the machine as the packages its branch builds, installed on a transient overlay of `/usr` (`bootc usr-overlay`), which a reboot discards. A gate is always measured on a published image, never on an overlay. Spike Q4 confirms that packages on the overlay run under the image's integrity and SELinux policy.
 - **Memory and CPU come from the kernel:** PSS from `smaps_rollup` and CPU time from `/proc/<pid>/stat`.
 - **Results go into the repository,** under `docs/shell-bench/<date>-<commit>/`: the numbers as JSON, a report, and the aesthetic board with its signature (ST8).
-- **When it runs.** The continuous integration gains nothing from this standard: the checks it runs today, the 180 surface cases and the memory measurement of `doc_bar.md` BR9, stay as they are. In exchange, the bench runs on the reference machine before every merge that touches a shell surface, not only before a release, so that a defect like the dock's is found before the merge rather than on a desktop. The maintainer chose this knowing that a defect is found later than a check on each pull request would find it.
+- **When it runs.** The continuous integration gains nothing from this standard: the checks it runs today, the 180 surface cases and the memory measurement of `doc_bar.md` BR9, stay as they are. In exchange, the bench runs on the reference machine before every merge that touches a shell surface, not only before a release, so that a defect like the dock's is found before the merge rather than on a desktop. Before such a merge it runs the stages that need no one, on the change's packages over the published image: response, idle, memory, recovery and the scenarios. At a gate it runs everything, on the published image: also the start, which needs the maintainer to restart the machine, type the disk's passphrase and wait for the login, the 24-hour soak, the renders of ST7 and the aesthetic board of ST8. The maintainer chose this knowing that a defect is found later than a check on each pull request would find it.
 
 **ST10. Changing the standard.** Thresholds, the reference machine, the list of references and the allow list of the soak change only by a revision of this document approved by the maintainer. The register changes by a new version (ST3).
 
@@ -100,7 +118,7 @@ They are the first tasks of the plan, and each gives an answer, not code we keep
 
 1. **The spikes and the skeleton of the bench:** the connection to the reference machine, input, capture, and the timing instrumentation in `athanor-bar` and `athanor-dock`.
 2. **Register version 1:** research over every reference, with sources; the maintainer approves and freezes it.
-3. **The measurement of today's bar and dock.** What fails becomes a list of defects, repaired first (ST2), starting with the dock's auto-hide and its scenarios (ST6), and the restart delay of the three units (ST5).
+3. **The measurement of today's bar and dock.** What fails becomes a list of defects, repaired first (ST2), starting with the dock's auto-hide and its scenarios (ST6), the restart delay of the three units (ST5), the notifications `athanor-shelld` keeps across a crash (ST5), and the popover that ends the other program (section 1).
 4. **`doc_visual_language.md`:** drafts beside the references, the maintainer's approval, the rules of ST8.
 5. **The control center:** its specification, built on the services the bar already holds, then its implementation and its gate.
 6. **The other surfaces, in the order of the register:** notifications and the calendar revised, the launcher (built in PR #91, not enabled), the session lock and the authentication dialogs, the on-screen display, Settings, the overview. This keeps the order of SH1's later stages and inserts the control center before them.
@@ -110,14 +128,17 @@ They are the first tasks of the plan, and each gives an answer, not code we keep
 - **`doc_shell.md`, SH1.** "The rule for replacing a surface: ours is usable by an average user and better than COSMIC's at the moment of the switch" becomes "ours passes `doc_shell_standard.md`". The rest of SH1 stands.
 - **`doc_shell.md`, section 3.** The control center enters the stages before stage 3 continues (section 4, step 5).
 - **`doc_bar.md`, BR7.** The dock's auto-hide gains the scenarios of ST6.
+- **`doc_bar.md`, section 2, crashes.** "When the daemon restarts the history is lost" becomes "When the daemon restarts it restores the unread notifications (`doc_shell_standard.md`, ST5); the read history is lost".
 - **`doc_bar.md`, section 5, item 17.** Its budgets are the budgets of ST5; nothing changes in it.
 
 ## 6. Open doubts
 
-1. **The reference machine's graphics and panel are not verified yet.** ST4 records the model from the maintainer; whether this unit carries the GeForce MX150, and the panel's refresh rate, are read on the machine (`lspci`, the panel's EDID) when it is set up, before section 4, step 1, is accepted.
-2. **The thresholds are not measured yet.** Section 4, step 3, gives the first numbers on the floor.
-3. **The spikes of section 3** may change ST9.
-4. **The soak's allow list** starts empty. On the maintainer's desktop the bar logs, every hour, `the trust state is not trusted err=Missing`; whether that is a defect or an expected state is settled when the bench first runs.
+1. **The thresholds are not measured yet.** Section 4, step 3, gives the first numbers on the floor.
+2. **The soak's allow list** starts empty. On the maintainer's desktop the bar logs, every hour, `the trust state is not trusted err=Missing`; a 30-minute soak on the reference machine logged no line at `err`, and the first 24-hour soak settles whether that line is a defect or an expected state.
+3. **Where the popover defect lies.** cosmic-comp refuses a grab when the topmost popup belongs to another client and then ends that client; whether our programs should close their popover first or cosmic-comp should not end the client is settled by the repair, upstream if the fault is there.
+4. **The machine's `sudo` rule is wider than ST9 allows.** It grants every command without a password; narrowing it to the list of ST9 is part of section 4, step 3.
+
+Settled by the first run of the plan: the reference machine's graphics and panel (`docs/shell-bench/machine.md`: the unit carries the GeForce MX150, which drives no output; the panel runs at 60 Hz), and the four spikes of section 3, which passed without changing ST9 (`docs/shell-bench/spikes.md`).
 
 ## 7. Acceptance
 
