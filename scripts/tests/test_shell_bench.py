@@ -8,6 +8,7 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "shell-bench"))
 import analysis  # noqa: E402
+import bench  # noqa: E402
 
 MS = 1_000_000
 
@@ -264,6 +265,26 @@ class Verdict(unittest.TestCase):
     def test_limits(self):
         self.assertTrue(analysis.verdict(49.9, 50)["pass"])
         self.assertFalse(analysis.verdict(0.98, 0.99, at_least=True)["pass"])
+
+
+
+class Restore(unittest.TestCase):
+    def test_a_raising_stage_still_unsets_the_variable(self):
+        calls = []
+
+        class Fake:
+            def systemctl(self, *args):
+                calls.append(args)
+                return b""
+
+            def wall(self):
+                return 0
+
+        with self.assertRaises(ZeroDivisionError):
+            with bench.instrumented(Fake(), settle_s=0):
+                1 / 0
+        self.assertEqual(calls[-2:], [("unset-environment", "ATHANOR_SHELL_BENCH"),
+                                      ("restart", "athanor-bar", "athanor-dock")])
 
 
 if __name__ == "__main__":
