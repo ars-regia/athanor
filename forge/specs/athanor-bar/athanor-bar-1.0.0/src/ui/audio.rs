@@ -16,6 +16,7 @@ use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use athanor_bar::audio::{self, Device};
+use athanor_services::media::MediaCommand;
 use gtk4::accessible::Property;
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -124,11 +125,14 @@ impl Service {
         });
         SERVICE.with(|cell| cell.replace(Some(service.clone())));
         let weak = Rc::downgrade(&service);
-        service.media.replace(Some(Media::new(move || {
-            if let Some(service) = weak.upgrade() {
-                service.show_all();
-            }
-        })));
+        service.media.replace(Some(Media::new(
+            move || {
+                if let Some(service) = weak.upgrade() {
+                    service.show_all();
+                }
+            },
+            action_failed,
+        )));
         service.connect();
         service
     }
@@ -406,9 +410,9 @@ impl Service {
         });
     }
 
-    fn media(&self, method: &'static str) {
+    fn media(&self, command: MediaCommand) {
         if let Some(media) = self.media.borrow().as_ref() {
-            media.command(method, action_failed);
+            media.command(command);
         }
     }
 }
@@ -650,14 +654,14 @@ impl View {
                 glib::Propagation::Proceed
             });
         }
-        for (button, method) in [
-            (&self.previous, "Previous"),
-            (&self.play, "PlayPause"),
-            (&self.next, "Next"),
+        for (button, command) in [
+            (&self.previous, MediaCommand::Previous),
+            (&self.play, MediaCommand::PlayPause),
+            (&self.next, MediaCommand::Next),
         ] {
             button.connect_clicked(move |_| {
                 if let Some(service) = service() {
-                    service.media(method);
+                    service.media(command.clone());
                 }
             });
         }

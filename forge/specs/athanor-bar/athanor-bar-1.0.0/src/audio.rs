@@ -1,17 +1,12 @@
 //! The audio module's arithmetic (doc_bar.md, BR3): volumes between the sound server's scale
-//! and a percentage, the icons, device labels, and the MPRIS metadata of the media controls.
-//! Descriptions and track titles come from other processes: they are sanitised here.
+//! and a percentage, the icons and device labels. Descriptions come from other processes:
+//! they are sanitised here.
 
 use athanor_unit::text::{line, NAME_CHARS};
-
-use crate::props::{self, Props};
 
 /// The sound server's 100 %, `PA_VOLUME_NORM`.
 pub const NORMAL: u32 = 0x10000;
 pub const MAX_DEVICES: usize = 16;
-pub const MPRIS_PREFIX: &str = "org.mpris.MediaPlayer2.";
-pub const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
-pub const MPRIS_PLAYER: &str = "org.mpris.MediaPlayer2.Player";
 
 /// A volume as a percentage. Above 100 % the slider shows 100 %: the bar does not amplify.
 pub fn percent(raw: u32) -> f64 {
@@ -70,39 +65,9 @@ pub fn chosen(devices: &[Device], default: Option<&str>) -> Option<usize> {
         .or_else(|| (!devices.is_empty()).then_some(0))
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Track {
-    pub title: String,
-    pub artist: Option<String>,
-}
-
-/// The track from a player's `Metadata`; `None` without a title.
-pub fn track(player: &Props) -> Option<Track> {
-    let metadata = props::value::<Props>(player, "Metadata")?;
-    let title = props::value::<String>(&metadata, "xesam:title")
-        .map(|title| line(&title, NAME_CHARS))
-        .filter(|title| !title.trim().is_empty())?;
-    let artist = props::value::<Vec<String>>(&metadata, "xesam:artist")
-        .map(|artists| line(&artists.join(", "), NAME_CHARS))
-        .filter(|artist| !artist.trim().is_empty());
-    Some(Track { title, artist })
-}
-
-/// A well-known name of an MPRIS player.
-pub fn is_player(name: &str) -> bool {
-    name.strip_prefix(MPRIS_PREFIX)
-        .is_some_and(|rest| !rest.is_empty())
-}
-
-pub fn playing(player: &Props) -> bool {
-    props::value::<String>(player, "PlaybackStatus").as_deref() == Some("Playing")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use glib::prelude::*;
-    use glib::{Variant, VariantTy};
 
     #[test]
     fn volumes_round_trip_and_are_bounded() {
@@ -145,31 +110,5 @@ mod tests {
             "Speakers"
         );
         assert_eq!(device_label(Some(" "), "sink.0"), "sink.0");
-    }
-
-    #[test]
-    fn the_track_is_sanitised_and_needs_a_title() {
-        let player = |metadata: &str| -> Props {
-            let v = Variant::parse(Some(VariantTy::new("a{sv}").unwrap()), metadata).unwrap();
-            Props::from([
-                ("Metadata".into(), v),
-                ("PlaybackStatus".into(), "Playing".to_variant()),
-            ])
-        };
-        let full =
-            player("{'xesam:title': <'Night\u{202e} Drive'>, 'xesam:artist': <['Calmo', 'Duo']>}");
-        assert_eq!(
-            track(&full),
-            Some(Track {
-                title: "Night Drive".into(),
-                artist: Some("Calmo, Duo".into())
-            })
-        );
-        assert!(playing(&full));
-        assert_eq!(track(&player("{'xesam:artist': <['Calmo']>}")), None);
-        assert_eq!(track(&player("{'xesam:title': <42>}")), None);
-        assert!(is_player("org.mpris.MediaPlayer2.athanor"));
-        assert!(!is_player("org.mpris.MediaPlayer2."));
-        assert!(!is_player("org.example.Player"));
     }
 }
