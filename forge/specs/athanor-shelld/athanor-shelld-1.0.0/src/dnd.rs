@@ -140,7 +140,15 @@ impl Dnd {
     /// daemon. A hand-set end that has passed is dropped and the file rewritten.
     pub fn load(dir: &Path) -> io::Result<Dnd> {
         let mut dnd = match read(&dir.join(FILE)) {
-            Ok(text) => Dnd::parse(&text),
+            Ok(text) => {
+                let (dnd, odd) = Dnd::parse(&text);
+                if odd {
+                    warn!(
+                        "do-not-disturb switch has lines that are not understood, they are ignored"
+                    );
+                }
+                dnd
+            }
             Err(err) if err.kind() == io::ErrorKind::NotFound => Dnd::default(),
             Err(err) => {
                 warn!(%err, "do-not-disturb switch unreadable, treating it as off");
@@ -158,27 +166,36 @@ impl Dnd {
         Ok(dnd)
     }
 
-    fn parse(text: &str) -> Dnd {
+    /// The state in `text`, and whether any line was not understood. An `until` that does not
+    /// parse makes the whole switch off: a hand-set end must never become no end.
+    fn parse(text: &str) -> (Dnd, bool) {
         let (mut on, mut until, mut off_override) = (false, None, BTreeSet::new());
-        for line in text.lines().map(str::trim) {
+        let (mut odd, mut bad_end) = (false, false);
+        for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
             match line.split_once('=') {
                 None if line == "on" => on = true,
                 Some(("on", value)) => on = value.trim() == "true",
-                Some(("until", value)) => until = value.trim().parse().ok(),
+                Some(("until", value)) => match value.trim().parse() {
+                    Ok(end) => until = Some(end),
+                    Err(_) => bad_end = true,
+                },
                 Some(("off_override", value)) => {
                     off_override = value
                         .split(',')
                         .filter_map(|name| Reason::parse(name.trim()))
                         .collect();
                 }
-                _ => {}
+                _ => odd = true,
             }
         }
-        Dnd {
+        odd |= bad_end;
+        on &= !bad_end;
+        let dnd = Dnd {
             manual_on: on.then_some(until),
             off_override: (!off_override.is_empty()).then_some(off_override),
             ..Dnd::default()
-        }
+        };
+        (dnd, odd)
     }
 
     /// Keep the switch; nothing to keep removes the file.
@@ -294,15 +311,17 @@ impl Dnd {
 }
 
 /// Seconds until the next edge of the window or `until`, capped at one hour (a DST change is
-/// then corrected at the next wake-up), never zero. The wake lands at the edge minute or a
-/// few seconds into it, never before.
+/// then corrected at the next wake-up), never zero. `Local` has whole minutes only, so the
+/// seconds already into the minute come from `now` (local offsets are whole minutes): the
+/// wake lands on the edge, not up to a minute after it.
 #[must_use]
 pub fn next_wake(observed: &Observed, settings: &Settings, until: Option<i64>) -> u64 {
     let mut wake = CAP_S;
     if let (true, Some(window)) = (settings.trigger_schedule, &settings.schedule) {
         for edge in [window.start_min, window.end_min] {
             let ahead = (u64::from(edge) + 1440 - u64::from(observed.local.minute)) % 1440;
-            wake = wake.min(if ahead == 0 { 1440 } else { ahead } * 60);
+            let ahead = if ahead == 0 { 1440 } else { ahead } * 60;
+            wake = wake.min(ahead.saturating_sub(observed.now.rem_euclid(60) as u64));
         }
     }
     if let Some(until) = until.filter(|&until| until > observed.now) {
@@ -629,5 +648,26 @@ mod tests {
             "already expired"
         );
         assert_eq!(next_wake(&at(0, 12, 0, 100), &settings, Some(50)), 3_600);
+    }
+
+    #[test]
+    fn a_malformed_end_reads_as_off_and_an_unknown_line_is_reported() {
+        let (dnd, odd) = Dnd::parse("on=true\nuntil=soon\n");
+        assert!(dnd.manual_on.is_none(), "never on with no end by mistake");
+        assert!(odd);
+        let (dnd, odd) = Dnd::parse("on=true\nbogus\nmore bogus\n");
+        assert!(dnd.manual_on.is_some() && odd);
+        let (dnd, odd) = Dnd::parse("on\n");
+        assert!(dnd.manual_on.is_some() && !odd);
+        let (_, odd) = Dnd::parse("on=true\nuntil=5\noff_override=schedule\n\n");
+        assert!(!odd);
+    }
+
+    #[test]
+    fn the_wake_counts_the_seconds_already_into_the_minute() {
+        // 21:59:59: the edge is one second away, not sixty.
+        assert_eq!(next_wake(&at(0, 21, 59, 59), &night(), None), 1);
+        assert_eq!(next_wake(&at(0, 21, 59, 60 * 7 + 30), &night(), None), 30);
+        assert_eq!(next_wake(&at(0, 21, 30, -31), &night(), None), 1_800 - 29);
     }
 }

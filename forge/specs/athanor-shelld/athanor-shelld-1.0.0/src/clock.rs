@@ -74,9 +74,12 @@ impl AsRawFd for Timer {
     }
 }
 
+/// A day: far beyond any wake the daemon asks for, far below overflowing the clock.
+const MAX_WAKE_S: u64 = 86_400;
+
 fn arm(timer: &TimerFd, seconds: u64) -> Result<(), Errno> {
     let at = nix::time::clock_gettime(nix::time::ClockId::CLOCK_REALTIME)?
-        + TimeSpec::new(seconds.max(1).min(i64::MAX as u64 / 2) as i64, 0);
+        + TimeSpec::new(seconds.clamp(1, MAX_WAKE_S) as i64, 0);
     timer.set(
         Expiration::OneShot(at),
         TimerSetTimeFlags::TFD_TIMER_ABSTIME | TimerSetTimeFlags::TFD_TIMER_CANCEL_ON_SET,
@@ -268,5 +271,13 @@ mod tests {
         let fired = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv()).await;
         assert_eq!(fired, Ok(Some(())));
         task.abort();
+    }
+
+    #[test]
+    fn an_absurd_wake_arms_without_panicking() {
+        let timer =
+            TimerFd::new(ClockId::CLOCK_REALTIME, TimerFlags::TFD_CLOEXEC).expect("timerfd");
+        assert_eq!(arm(&timer, u64::MAX), Ok(()));
+        assert_eq!(arm(&timer, 0), Ok(()));
     }
 }
