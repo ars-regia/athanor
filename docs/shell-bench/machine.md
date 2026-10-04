@@ -11,4 +11,4 @@ The reference laptop of the shell standard (`doc_shell_standard.md`, ST4 and ST9
 - Kernel: `7.2.8-100.azoth.fc43.x86_64`.
 - Power: on mains (`ADP0` online).
 - Idle: COSMIC screen-off and suspend set to `None` in `~/.config/cosmic/com.system76.CosmicIdle/v1/` for the bench.
-- Refresh rate: see Task 4 (`refresh_us` from the frame timings).
+- Refresh rate: 60 Hz (`refresh_us` 16667 in every frame line of spike Q3).
