@@ -220,7 +220,8 @@ impl Client {
     }
 
     /// Whether the compositor describes its windows (COSMIC's toplevel extension): without
-    /// it `windows` stays empty whatever is on screen.
+    /// it `windows` stays empty whatever is on screen. Fixed at connect: the globals are bound
+    /// once.
     pub fn toplevel_info_available(&self) -> bool {
         self.inner.state.borrow().globals.toplevel_info.is_some()
     }

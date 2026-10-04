@@ -8,7 +8,7 @@ use std::collections::{HashMap, VecDeque};
 use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
-use athanor_bar::fullscreen::fullscreen_active;
+use athanor_bar::fullscreen::report;
 use athanor_bar::notices::{self, Held, Notice, Picture, WIRE_SIGNATURE};
 use athanor_bar::order::Module;
 use athanor_bar::popups::{target_output, Popups};
@@ -383,6 +383,17 @@ impl Service {
         args: glib::Variant,
         done: impl FnOnce(&Service) + 'static,
     ) {
+        self.call_with(method, args, done, |_| {});
+    }
+
+    /// `call_then`, and `failed` when the daemon refused or did not answer.
+    fn call_with(
+        &self,
+        method: &'static str,
+        args: glib::Variant,
+        done: impl FnOnce(&Service) + 'static,
+        failed: impl FnOnce(&Service) + 'static,
+    ) {
         if self.state.get() != State::Live {
             return;
         }
@@ -413,6 +424,7 @@ impl Service {
                 Ok(_) => done(&service),
                 Err(err) => {
                     tracing::warn!(error = %err, method, "athanor-shelld did not accept the call");
+                    failed(&service);
                     service.changed();
                 }
             }
@@ -508,18 +520,29 @@ impl Service {
     /// the last report to this owner. A compositor that withholds the toplevel list is
     /// reported once as unobservable.
     pub(super) fn report_fullscreen(&self) {
-        let value = match self.bar.upgrade() {
-            Some(bar) => match bar.client().filter(|c| c.toplevel_info_available()) {
-                Some(client) => (true, fullscreen_active(&client.windows())),
-                None => (false, false),
-            },
-            None => return,
+        let Some(bar) = self.bar.upgrade() else {
+            return;
         };
+        let client = bar.client();
+        let value = report(
+            client.is_some_and(|c| c.toplevel_info_available()),
+            client
+                .map(|c| c.windows())
+                .unwrap_or_default()
+                .into_iter()
+                .map(|window| window.state),
+        );
         if self.state.get() != State::Live || self.fullscreen.get() == Some(value) {
             return;
         }
         self.fullscreen.set(Some(value));
-        self.call("ReportFullscreen", value.to_variant());
+        // A refused call forgets the value, so the next window event sends it again.
+        self.call_with(
+            "ReportFullscreen",
+            value.to_variant(),
+            |_| {},
+            |service| service.fullscreen.set(None),
+        );
     }
 
     fn clear_all(&self) {
