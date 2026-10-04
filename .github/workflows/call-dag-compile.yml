@@ -136,38 +136,13 @@ jobs:
                 cp result/RPMS/*.rpm RPMS/
               else
             echo "📦 Compiling Custom Spec: $SPEC_DIR"
-            podman run -i --rm \
-              -e PKG_NAME="${PKG_NAME}" \
+            podman run --rm \
               -e SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE}" \
               -v ${{ github.workspace }}:/workspace \
               -v ${{ github.workspace }}/.sccache:/root/.cache/sccache \
               -w /workspace/forge \
               ghcr.io/hr-mes/athanor-builder:${{ inputs.builder_hash }} \
-              bash <<'EOF'
-              mkdir -p /tmp; chmod 1777 /tmp; mkdir -p ~; cp config/rpmmacros ~/.rpmmacros
-              mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-              PKG_CLEAN=$(echo "$PKG_NAME" | tr -cd '[:alnum:]-')
-              SPEC_DIR=""
-              if [ -d "specs/athanor-${PKG_CLEAN}" ]; then SPEC_DIR="specs/athanor-${PKG_CLEAN}"; elif [ -d "specs/${PKG_CLEAN}" ]; then SPEC_DIR="specs/${PKG_CLEAN}"; fi
-            
-              if [ -d "$SPEC_DIR/SOURCES" ]; then 
-                cp -a "$SPEC_DIR"/SOURCES/. ~/rpmbuild/SOURCES/
-              fi
-            
-              bash scripts/fetch_sources.sh "$SPEC_DIR" ~/rpmbuild/SOURCES
-              # Una spec senza Source compila il checkout in place (rpmbuild --build-in-place):
-              # rpm 4.20 esegue %build in BUILD/<nome>-<ver>-build e con --build-in-place quella
-              # directory è un symlink al workspace, così `cargo build` e i percorsi relativi
-              # alla radice del repo funzionano. Le spec con Source seguono il percorso
-              # ordinario, %prep incluso.
-              if [ -n "$(rpmspec -q --srpm --qf '[%{SOURCE} ]' "$SPEC_DIR"/*.spec)" ]; then
-                rpmbuild -bb --nodeps "$SPEC_DIR"/*.spec
-              else
-                (cd /workspace && rpmbuild -bb --nodeps --build-in-place "/workspace/forge/$SPEC_DIR"/*.spec)
-              fi
-              mkdir -p /workspace/forge/RPMS
-              cp ~/rpmbuild/RPMS/*/*.rpm /workspace/forge/RPMS/
-          EOF
+              bash scripts/build_spec.sh "$SPEC_DIR"
               fi
           else
             echo "❌ [MARTIAL LAW FATAL] Attempted to build upstream package ${PKG_NAME} without local spec! Dynamic downloads are strictly forbidden!"
@@ -344,38 +319,13 @@ jobs:
                 cp result/RPMS/*.rpm RPMS/
               else
             echo "📦 Compiling Custom Spec: $SPEC_DIR"
-            podman run -i --rm \
-              -e PKG_NAME="${PKG_NAME}" \
+            podman run --rm \
               -e SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE}" \
               -v ${{ github.workspace }}:/workspace \
               -v ${{ github.workspace }}/.sccache:/root/.cache/sccache \
               -w /workspace/forge \
               ghcr.io/hr-mes/athanor-builder:${{ inputs.builder_hash }} \
-              bash <<'EOF'
-              mkdir -p /tmp; chmod 1777 /tmp; mkdir -p ~; cp config/rpmmacros ~/.rpmmacros
-              mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-              PKG_CLEAN=$(echo "$PKG_NAME" | tr -cd '[:alnum:]-')
-              SPEC_DIR=""
-              if [ -d "specs/athanor-${PKG_CLEAN}" ]; then SPEC_DIR="specs/athanor-${PKG_CLEAN}"; elif [ -d "specs/${PKG_CLEAN}" ]; then SPEC_DIR="specs/${PKG_CLEAN}"; fi
-            
-              if [ -d "$SPEC_DIR/SOURCES" ]; then 
-                cp -a "$SPEC_DIR"/SOURCES/. ~/rpmbuild/SOURCES/
-              fi
-            
-              bash scripts/fetch_sources.sh "$SPEC_DIR" ~/rpmbuild/SOURCES
-              # Una spec senza Source compila il checkout in place (rpmbuild --build-in-place):
-              # rpm 4.20 esegue %build in BUILD/<nome>-<ver>-build e con --build-in-place quella
-              # directory è un symlink al workspace, così `cargo build` e i percorsi relativi
-              # alla radice del repo funzionano. Le spec con Source seguono il percorso
-              # ordinario, %prep incluso.
-              if [ -n "$(rpmspec -q --srpm --qf '[%{SOURCE} ]' "$SPEC_DIR"/*.spec)" ]; then
-                rpmbuild -bb --nodeps "$SPEC_DIR"/*.spec
-              else
-                (cd /workspace && rpmbuild -bb --nodeps --build-in-place "/workspace/forge/$SPEC_DIR"/*.spec)
-              fi
-              mkdir -p /workspace/forge/RPMS
-              cp ~/rpmbuild/RPMS/*/*.rpm /workspace/forge/RPMS/
-          EOF
+              bash scripts/build_spec.sh "$SPEC_DIR"
               fi
           else
             echo "❌ [MARTIAL LAW FATAL] Attempted to build upstream package ${PKG_NAME} without local spec! Dynamic downloads are strictly forbidden!"
@@ -550,38 +500,13 @@ jobs:
                 cp result/RPMS/*.rpm RPMS/
               else
             echo "📦 Compiling Custom Spec: $SPEC_DIR"
-            podman run -i --rm \
-              -e PKG_NAME="${PKG_NAME}" \
+            podman run --rm \
               -e SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE}" \
               -v ${{ github.workspace }}:/workspace \
               -v ${{ github.workspace }}/.sccache:/root/.cache/sccache \
               -w /workspace/forge \
               ghcr.io/hr-mes/athanor-builder:${{ inputs.builder_hash }} \
-              bash <<'EOF'
-              mkdir -p /tmp; chmod 1777 /tmp; mkdir -p ~; cp config/rpmmacros ~/.rpmmacros
-              mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-              PKG_CLEAN=$(echo "$PKG_NAME" | tr -cd '[:alnum:]-')
-              SPEC_DIR=""
-              if [ -d "specs/athanor-${PKG_CLEAN}" ]; then SPEC_DIR="specs/athanor-${PKG_CLEAN}"; elif [ -d "specs/${PKG_CLEAN}" ]; then SPEC_DIR="specs/${PKG_CLEAN}"; fi
-            
-              if [ -d "$SPEC_DIR/SOURCES" ]; then 
-                cp -a "$SPEC_DIR"/SOURCES/. ~/rpmbuild/SOURCES/
-              fi
-            
-              bash scripts/fetch_sources.sh "$SPEC_DIR" ~/rpmbuild/SOURCES
-              # Una spec senza Source compila il checkout in place (rpmbuild --build-in-place):
-              # rpm 4.20 esegue %build in BUILD/<nome>-<ver>-build e con --build-in-place quella
-              # directory è un symlink al workspace, così `cargo build` e i percorsi relativi
-              # alla radice del repo funzionano. Le spec con Source seguono il percorso
-              # ordinario, %prep incluso.
-              if [ -n "$(rpmspec -q --srpm --qf '[%{SOURCE} ]' "$SPEC_DIR"/*.spec)" ]; then
-                rpmbuild -bb --nodeps "$SPEC_DIR"/*.spec
-              else
-                (cd /workspace && rpmbuild -bb --nodeps --build-in-place "/workspace/forge/$SPEC_DIR"/*.spec)
-              fi
-              mkdir -p /workspace/forge/RPMS
-              cp ~/rpmbuild/RPMS/*/*.rpm /workspace/forge/RPMS/
-          EOF
+              bash scripts/build_spec.sh "$SPEC_DIR"
               fi
           else
             echo "❌ [MARTIAL LAW FATAL] Attempted to build upstream package ${PKG_NAME} without local spec! Dynamic downloads are strictly forbidden!"

@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:47.fc43}
+Release:        %{?autorelease}%{!?autorelease:48.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        MIT
 URL:            https://github.com/hr-mes/athanor-forge
@@ -91,6 +91,10 @@ mkdir -p /etc/yum.repos.d
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Fri Oct 02 2026 Athanor Forge <forge@athanor.os> - 1.0.0-48
+- athanor-desktop publishes XDG_SESSION_CLASS, read from logind, to the user manager:
+  localsearch's unit requires it and never started.
+
 * Fri Oct 02 2026 Athanor Forge <forge@athanor.os> - 1.0.0-47
 - Bind /sys into the greeter's sandbox by the device-tree directories (block, bus,
   class, dev, devices), the set Flatpak exposes, instead of whole. The recursive bind

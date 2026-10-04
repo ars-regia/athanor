@@ -1,0 +1,17 @@
+[package]
+name = "athanor-preview"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+description = "The launcher's preview pane; untrusted files are decoded by athanor-preview-render"
+
+[dependencies]
+athanor-i18n = { path = "../athanor-i18n" }
+athanor-search = { path = "../athanor-search" }
+athanor-unit = { path = "../athanor-unit" }
+gio-unix = { workspace = true }
+glib = { workspace = true }
+gtk4 = { workspace = true }
+libc = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

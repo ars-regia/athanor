@@ -1,7 +1,6 @@
 {
   "custom_packages": [
     "stage0-bootstrap",
-    "starship",
     "bat",
     "selinux",
     "base-config",
@@ -13,7 +12,6 @@
     "system-tweaks",
     "kernel-profile",
     "matugen",
-    "bibata",
     "calmo",
     "dart-sass",
     "shell-rs",
@@ -22,6 +20,7 @@
     "shelld",
     "bar",
     "dock",
+    "launcher",
     "doctor",
     "cliphist",
     "backup",
@@ -35,15 +34,12 @@
     "syft",
     "bpf-linker",
     "astro-toolchain",
-    "sccache",
-    "mold",
     "keylime",
     "recovery",
     "cargo-tools",
-    "just",
     "kernel-forge",
-    "ripgrep-native",
-    "athanor-semantic-db"
+    "athanor-semantic-db",
+    "cosmic-comp"
   ],
   "custom_tier0": [
     "stage0-bootstrap",
@@ -56,28 +52,23 @@
     "syft",
     "bpf-linker",
     "astro-toolchain",
-    "sccache",
-    "mold",
-    "cargo-tools",
-    "just"
+    "cargo-tools"
   ],
   "custom_tier1": [
-    "starship",
     "bat",
     "cliphist",
     "ide-bootstrap",
     "system-tweaks",
-    "kernel-profile",
-    "ripgrep-native"
+    "kernel-profile"
   ],
   "custom_tier2": [
-    "bibata",
     "calmo",
     "matugen",
     "dart-sass",
     "keylime",
     "recovery",
-    "kernel-forge"
+    "kernel-forge",
+    "cosmic-comp"
   ],
   "custom_tier3": [
     "shell-rs",
@@ -86,6 +77,7 @@
     "shelld",
     "bar",
     "dock",
+    "launcher",
     "doctor",
     "system-services",
     "desktop-ui",
@@ -132,7 +124,6 @@
     "libwayland-client"
   ],
   "upstream_desktop": [
-    "cosmic-comp",
     "cosmic-app-library",
     "cosmic-workspaces",
     "cosmic-bg",
@@ -182,13 +173,16 @@
     "mesa-vulkan-drivers"
   ],
   "upstream_cli": [
+    "bash-color-prompt",
     "btop",
     "eza",
     "fd-find",
     "inotify-tools",
+    "just",
     "nushell",
     "parallel",
     "playerctl",
+    "ripgrep",
     "rsync",
     "sqlite",
     "unzip",

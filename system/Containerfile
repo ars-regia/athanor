@@ -16,9 +16,9 @@ FROM ${KERNEL_REGISTRY}/azoth-nvidia@${NVIDIA_OPEN_DIGEST} AS nvidia-modules-ope
 FROM ${KERNEL_REGISTRY}/azoth-nvidia@${NVIDIA_LEGACY_DIGEST} AS nvidia-modules-legacy
 
 # The vendor RPMs of both NVIDIA branches, verified by hash and GPG, with the shim and the
-# configuration package (system/nvidia/build-rpms.sh). A throwaway stage: rpm-build never
+# configuration package, and NVIDIA's container toolkit (system/nvidia/build-rpms.sh). A throwaway stage: rpm-build never
 # reaches an image. KERNEL_REGISTRY locates the mirror of the locked RPMs (lock.py).
-FROM registry.fedoraproject.org/fedora:43@sha256:4d9424ff89c5e182c782d0419bf41b6e71d55f30d586ae3c60c837a52ae39c64 AS nvidia-rpms
+FROM registry.fedoraproject.org/fedora:43@sha256:a60334b24af6818e9ccf199d188b5ddef1c3d7f549470b560d9b744c78c2c58b AS nvidia-rpms
 ARG KERNEL_REGISTRY
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 COPY forge/specs/azoth/pins.env /src/forge/specs/azoth/pins.env
@@ -28,7 +28,7 @@ RUN dnf5 install -y --setopt=install_weak_deps=False rpm-build python3 && \
 
 # Fedora's atomic desktop base (S1): the bootc base of Silverblue and Kinoite, pinned by
 # digest and moved by the bump bot.
-FROM quay.io/fedora-ostree-desktops/base-atomic:43@sha256:ead5f8bc4032ea4bc2f61d60f3101d6cc90f6c87bb405345a3d18b8b1651cd70 AS system
+FROM quay.io/fedora-ostree-desktops/base-atomic:43@sha256:881bfc9c6574cae6ba9d934e72bf7d721879d4f0d5bc7e46706fa317dea3d741 AS system
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG FEDORA_VERSION=43
 ENV FEDORA_VERSION=$FEDORA_VERSION
@@ -88,7 +88,7 @@ RUN --mount=type=bind,from=ghcr.io/hr-mes/athanor-forge-tier1-repo:latest,source
     dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs compiler-rt keylime-tenant keylime-agent systemd-ukify systemd-boot-unsigned sbsigntools openssl tpm2-tools cryptsetup dracut && \
     if find /tmp/tier1-repo -name "*.rpm" 1> /dev/null 2>&1; then \
         echo "Tier 1: Installing Core User Services, DBus & Policies..." && \
-        RPM_LIST=$(find /tmp/tier1-repo -name "*.rpm" ! -name "*-devel-*" ! -name "*-doc-*" ! -name "*debuginfo*" ! -name "*debugsource*" ! -name "*astro-toolchain*" ! -name "*sccache*" ! -name "*buildah*" ! -name "*mold*" ! -name "*osbuild*" ! -name "*cargo-tools*") && \
+        RPM_LIST=$(find /tmp/tier1-repo -name "*.rpm" ! -name "*-devel-*" ! -name "*-doc-*" ! -name "*debuginfo*" ! -name "*debugsource*" ! -name "*astro-toolchain*" ! -name "*buildah*" ! -name "*osbuild*" ! -name "*cargo-tools*") && \
         if [ -n "$RPM_LIST" ]; then \
             dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs $RPM_LIST; \
         fi; \
@@ -99,7 +99,7 @@ RUN --mount=type=bind,from=ghcr.io/hr-mes/athanor-forge-tier2-repo:latest,source
     --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
     if find /tmp/tier2-repo -name "*.rpm" 1> /dev/null 2>&1; then \
         echo "Tier 2: Installing Design System & Static Assets..." && \
-        RPM_LIST=$(find /tmp/tier2-repo -name "*.rpm" ! -name "*-devel-*" ! -name "*-doc-*" ! -name "*debuginfo*" ! -name "*debugsource*" ! -name "*astro-toolchain*" ! -name "*sccache*" ! -name "*buildah*" ! -name "*mold*" ! -name "*osbuild*" ! -name "*cargo-tools*") && \
+        RPM_LIST=$(find /tmp/tier2-repo -name "*.rpm" ! -name "*-devel-*" ! -name "*-doc-*" ! -name "*debuginfo*" ! -name "*debugsource*" ! -name "*astro-toolchain*" ! -name "*buildah*" ! -name "*osbuild*" ! -name "*cargo-tools*") && \
         if [ -n "$RPM_LIST" ]; then \
             dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs $RPM_LIST; \
         fi; \
@@ -110,7 +110,7 @@ RUN --mount=type=bind,from=ghcr.io/hr-mes/athanor-forge-tier3-repo:latest,source
     --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
     if find /tmp/tier3-repo -name "*.rpm" 1> /dev/null 2>&1; then \
         echo "Tier 3: Installing Agile Rust Shell & Apps..." && \
-        RPM_LIST=$(find /tmp/tier3-repo -name "*.rpm" ! -name "*-devel-*" ! -name "*-doc-*" ! -name "*debuginfo*" ! -name "*debugsource*" ! -name "*astro-toolchain*" ! -name "*sccache*" ! -name "*buildah*" ! -name "*mold*" ! -name "*osbuild*" ! -name "*cargo-tools*") && \
+        RPM_LIST=$(find /tmp/tier3-repo -name "*.rpm" ! -name "*-devel-*" ! -name "*-doc-*" ! -name "*debuginfo*" ! -name "*debugsource*" ! -name "*astro-toolchain*" ! -name "*buildah*" ! -name "*osbuild*" ! -name "*cargo-tools*") && \
         if [ -n "$RPM_LIST" ]; then \
             dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs $RPM_LIST; \
         fi; \
@@ -121,17 +121,21 @@ COPY forge/config/packages.json /usr/share/athanor/packages.json
 # UPSTREAM PACKAGES: the desktop (COSMIC), media, and CLI packages the manifest lists
 # under upstream_*. Today these are the official Fedora and RPM Fusion binaries,
 # installed here from the repositories the base image configures -- the same origin as
-# cosmic-comp and the rest the base already carries (Vendor: Fedora Project). Zero-trust
+# the rest the base already carries (Vendor: Fedora Project). Zero-trust
 # debt (2026-09-11 decision): they are to be rebuilt from source in the Athanor builder
 # and served from the tier repositories, as the custom packages are; until then Fedora's
 # GPG signatures are the provenance. The list is the single source of truth in
 # packages.json, so a package added there reaches the image. --allowerasing lets the
-# RPM Fusion ffmpeg replace the base image's ffmpeg-free.
+# RPM Fusion ffmpeg replace the base image's ffmpeg-free. --exclude=cosmic-comp hides
+# Fedora's build from this transaction, so neither --allowerasing nor a newer Fedora
+# release can replace Athanor's, installed above from the tier 2 repository; the installed
+# package still satisfies what the COSMIC packages require. The release assertion below
+# stays as the check.
 RUN --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
     dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs jq && \
     UPSTREAM=$(jq -r '(.upstream_core + .upstream_desktop + .upstream_media + .upstream_cli)[]' /usr/share/athanor/packages.json) && \
     echo "Installing upstream packages: $UPSTREAM" && \
-    dnf5 install -y --allowerasing --setopt=install_weak_deps=False --setopt=tsflags=nodocs $UPSTREAM
+    dnf5 install -y --allowerasing --exclude=cosmic-comp --setopt=install_weak_deps=False --setopt=tsflags=nodocs $UPSTREAM
 
 # FLATPAK MANIFEST: the applications are provisioned on the installed system, not at
 # build time. Extra-data apps such as Chrome run an apply_extra script under
@@ -185,6 +189,8 @@ RUN for pkg in cosmic-panel cosmic-applets cosmic-notifications athanor-layout-t
         test -L "/etc/systemd/user/athanor-session.target.wants/$unit.service" \
             || { echo "$unit.service is not enabled for every user" >&2; exit 1; }; \
     done && \
+    case $(rpm -q --qf '%{RELEASE}' cosmic-comp) in *.athanor*) ;; \
+        *) echo "cosmic-comp is not Athanor's build: $(rpm -q cosmic-comp)" >&2; exit 1;; esac && \
     for name in org.freedesktop.Notifications org.kde.StatusNotifierWatcher; do \
         owners=$(grep -lx "Name=$name" /usr/share/dbus-1/services/*.service); \
         test "$owners" = "/usr/share/dbus-1/services/$name.service" \
@@ -193,7 +199,8 @@ RUN for pkg in cosmic-panel cosmic-applets cosmic-notifications athanor-layout-t
 
 # GPU stages (S2-S5): the signed modules of the kernel NVR with the locked vendor packages of
 # the same version, the shim and athanor-nvidia-config. libva-nvidia-driver (VA-API on NVDEC)
-# only makes sense with the NVIDIA driver.
+# only makes sense with the NVIDIA driver, and so does the locked container toolkit (S4), which
+# gives containers the GPU through CDI.
 FROM system AS gpu-none
 
 # The modules must land in the directory of the pinned kernel: hardening deletes every other
@@ -203,8 +210,10 @@ ARG AZOTH_NVR
 COPY --from=nvidia-modules-open /lib/modules/ /usr/lib/modules/
 RUN test -f "/usr/lib/modules/${AZOTH_NVR}.x86_64/extra/nvidia/nvidia.ko"
 RUN --mount=type=bind,from=nvidia-rpms,source=/out/open,target=/tmp/nvidia-rpms \
+    --mount=type=bind,from=nvidia-rpms,source=/out/container-toolkit,target=/tmp/container-toolkit \
     --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
-    dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs /tmp/nvidia-rpms/*.rpm libva-nvidia-driver && \
+    dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs /tmp/nvidia-rpms/*.rpm \
+        /tmp/container-toolkit/*.rpm libva-nvidia-driver && \
     systemctl preset-all
 
 FROM system AS gpu-nvidia-legacy
@@ -212,8 +221,10 @@ ARG AZOTH_NVR
 COPY --from=nvidia-modules-legacy /lib/modules/ /usr/lib/modules/
 RUN test -f "/usr/lib/modules/${AZOTH_NVR}.x86_64/extra/nvidia/nvidia.ko"
 RUN --mount=type=bind,from=nvidia-rpms,source=/out/legacy,target=/tmp/nvidia-rpms \
+    --mount=type=bind,from=nvidia-rpms,source=/out/container-toolkit,target=/tmp/container-toolkit \
     --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
-    dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs /tmp/nvidia-rpms/*.rpm libva-nvidia-driver && \
+    dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs /tmp/nvidia-rpms/*.rpm \
+        /tmp/container-toolkit/*.rpm libva-nvidia-driver && \
     systemctl preset-all
 
 FROM gpu-${GPU} AS final

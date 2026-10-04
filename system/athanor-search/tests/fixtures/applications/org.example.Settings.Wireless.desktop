@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Wi-Fi
+Keywords=COSMIC;WiFi;Wi-Fi;Network;Connection;
+Exec=sh cosmic-settings wireless
+Icon=preferences-wireless
+NoDisplay=true
