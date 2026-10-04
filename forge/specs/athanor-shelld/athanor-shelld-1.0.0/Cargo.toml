@@ -9,6 +9,7 @@ authors = ["Athanor Forge <forge@athanor.os>"]
 [dependencies]
 athanor-unit = { path = "../../../../system/athanor-unit" }
 futures-util = { workspace = true }
+nix = { workspace = true, features = ["inotify"] }
 serde = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

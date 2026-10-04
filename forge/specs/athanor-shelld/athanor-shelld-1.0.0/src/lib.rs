@@ -8,6 +8,7 @@ pub mod icon;
 pub mod identity;
 pub mod image;
 pub mod notifications;
+pub mod rules;
 pub mod sender;
 pub mod server;
 pub mod store;
