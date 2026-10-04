@@ -3,18 +3,21 @@
 //! Serde reads what it knows and defaults the rest, so another version of the file loads.
 
 use std::collections::HashSet;
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::io::{self, Read};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use nix::errno::Errno;
+use nix::fcntl::OFlag;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use crate::icon::{self, Icon};
 use crate::identity::Identity;
 use crate::rules::write_atomic;
-use crate::store::{Content, Notification, Store, Urgency, Visual, CAPACITY};
+use crate::store::{Content, Notification, Store, Urgency, Visual, CAPACITY, DEFAULT_TIMEOUT_MS};
 
 const VERSION: u32 = 1;
 /// CAPACITY entries of bounded fields fit well within this; more is not our file.
@@ -59,10 +62,16 @@ struct Entry {
     desktop_entry: Option<String>,
     #[serde(default)]
     icon_name: String,
+    #[serde(default = "default_timeout")]
+    timeout_ms: u32,
 }
 
 fn other() -> Identity {
     Identity::Other
+}
+
+fn default_timeout() -> u32 {
+    DEFAULT_TIMEOUT_MS
 }
 
 fn normal() -> u8 {
@@ -89,6 +98,7 @@ impl Entry {
                 Visual::Icon(Icon::Name(name)) => name.clone(),
                 _ => String::new(),
             },
+            timeout_ms: c.timeout_ms,
         }
     }
 
@@ -100,6 +110,7 @@ impl Entry {
         Notification {
             id: self.id,
             arrived_ms: 0,
+            popup: false,
             time: self.time,
             identity: self.identity,
             sender: self.sender,
@@ -114,31 +125,53 @@ impl Entry {
                 resident: self.resident,
                 desktop_entry: self.desktop_entry,
                 visual,
-                // No popup replays: a 1 ms timeout has ended by the time anyone asks.
-                timeout_ms: 1,
+                timeout_ms: self.timeout_ms,
             },
         }
     }
 }
 
-fn parse(path: &Path) -> io::Result<File> {
-    let mut bytes = Vec::new();
-    fs::File::open(path)?
-        .take(READ_LIMIT + 1)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > READ_LIMIT {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "file too large"));
-    }
-    serde_json::from_slice(&bytes).map_err(io::Error::from)
+fn invalid(why: &'static str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, why)
 }
 
-/// The saved history, oldest first. A missing file is an empty history; one that does not
-/// parse is renamed `<name>.corrupt` and is an empty history too.
+/// `InvalidData` means the file is not a history (set it aside); any other error is the
+/// system's (leave it alone). Opened without following a link and without blocking on a FIFO.
+fn parse(path: &Path) -> io::Result<File> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags((OFlag::O_NOFOLLOW | OFlag::O_NONBLOCK).bits())
+        .open(path)
+        .map_err(|err| {
+            if err.raw_os_error() == Some(Errno::ELOOP as i32) {
+                invalid("a link, not a file")
+            } else {
+                err
+            }
+        })?;
+    if !file.metadata()?.is_file() {
+        return Err(invalid("not a regular file"));
+    }
+    let mut bytes = Vec::new();
+    file.take(READ_LIMIT + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > READ_LIMIT {
+        return Err(invalid("file too large"));
+    }
+    serde_json::from_slice(&bytes).map_err(|_| invalid("not a notification history"))
+}
+
+/// The saved history, oldest first. A missing file is an empty history; one that is not a
+/// history (does not parse, is too large, is no regular file) is renamed `<name>.corrupt` and
+/// is an empty history too. Any other read error leaves the file in place, with a warning.
 #[must_use]
 pub fn load(path: &Path, bus_id: &str) -> Vec<Notification> {
     let file = match parse(path) {
         Ok(file) => file,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Vec::new(),
+        Err(err) if err.kind() != io::ErrorKind::InvalidData => {
+            warn!(path = %path.display(), %err, "notification history unreadable, starting empty");
+            return Vec::new();
+        }
         Err(err) => {
             let mut corrupt = path.as_os_str().to_owned();
             corrupt.push(".corrupt");
@@ -154,7 +187,7 @@ pub fn load(path: &Path, bus_id: &str) -> Vec<Notification> {
         }
     };
     // Unique names restart with a new bus: `:1.42` would name another program.
-    let same_bus = file.bus_id == bus_id;
+    let same_bus = !bus_id.is_empty() && file.bus_id == bus_id;
     let mut seen = HashSet::new();
     let mut restored: Vec<Notification> = file
         .notifications
@@ -366,5 +399,64 @@ mod tests {
             Some(Duration::from_millis(1100))
         );
         assert_eq!(coalescer.changed(start + Duration::from_secs(3)), None);
+    }
+
+    #[test]
+    fn a_restored_critical_does_not_pop_up_and_keeps_its_timeout() {
+        let dir = temp("popup");
+        let path = dir.join("notifications.json");
+        let mut store = Store::new(false);
+        let mut critical = content("c", Urgency::Critical, 0);
+        critical.timeout_ms = 0;
+        store.notify(critical, 0, 0, 1, Identity::Other, String::new());
+        held(&mut store, "n", false, 2);
+        save(&path, &store, "bus").expect("save");
+        let back = load(&path, "bus");
+        assert!(back
+            .iter()
+            .all(|n| crate::store::popup_ms_left(n, 0, false) == 0));
+        assert_eq!(
+            back.iter()
+                .map(|n| n.content.timeout_ms)
+                .collect::<Vec<_>>(),
+            [0, 5_000]
+        );
+        std::fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    #[test]
+    fn a_fifo_or_directory_is_set_aside_without_blocking() {
+        let dir = temp("kinds");
+        let path = dir.join("notifications.json");
+        nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRWXU).expect("mkfifo");
+        assert!(load(&path, "bus").is_empty());
+        assert!(dir.join("notifications.json.corrupt").exists());
+        assert!(!path.exists());
+        std::fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    #[test]
+    fn an_unreadable_file_is_left_in_place() {
+        let dir = temp("denied");
+        let path = dir.join("notifications.json");
+        std::fs::write(&path, "{}").expect("write");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).expect("chmod");
+        if std::fs::File::open(&path).is_err() {
+            assert!(load(&path, "bus").is_empty());
+            assert!(path.exists());
+            assert!(!dir.join("notifications.json.corrupt").exists());
+        }
+        std::fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    #[test]
+    fn an_unknown_bus_empties_every_sender() {
+        let dir = temp("nobus");
+        let path = dir.join("notifications.json");
+        let mut store = Store::new(false);
+        held(&mut store, "x", false, 0);
+        save(&path, &store, "").expect("save");
+        assert!(load(&path, "").iter().all(|n| n.sender.is_empty()));
+        std::fs::remove_dir_all(dir).expect("cleanup");
     }
 }

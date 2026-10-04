@@ -160,6 +160,7 @@ mod tests {
             &Notification {
                 id: 7,
                 arrived_ms: 0,
+                popup: true,
                 time: 0,
                 identity: crate::identity::Identity::Other,
                 sender: String::new(),

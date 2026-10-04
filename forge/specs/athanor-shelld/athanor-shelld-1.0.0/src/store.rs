@@ -65,6 +65,8 @@ pub struct Content {
 pub struct Notification {
     pub id: u32,
     pub arrived_ms: u64,
+    /// False for a restored notification: it lives in the list only, never as a popup.
+    pub popup: bool,
     /// Unix seconds.
     pub time: i64,
     pub identity: Identity,
@@ -119,6 +121,7 @@ impl Store {
         let notification = Notification {
             id,
             arrived_ms: now_ms,
+            popup: true,
             time,
             identity,
             sender,
@@ -254,6 +257,9 @@ pub fn timeout_ms(expire_timeout: i32, urgency: Urgency) -> u32 {
 #[must_use]
 pub fn popup_ms_left(notification: &Notification, now_ms: u64, dnd: bool) -> u32 {
     let content = &notification.content;
+    if !notification.popup {
+        return 0;
+    }
     if content.urgency == Urgency::Critical {
         return u32::MAX;
     }
@@ -290,6 +296,7 @@ pub(crate) mod tests {
         Notification {
             id,
             arrived_ms: 0,
+            popup: true,
             time: 0,
             identity: Identity::Other,
             sender: String::new(),
@@ -418,10 +425,21 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_restored_notification_never_pops_up() {
+        for (urgency, timeout_ms) in [(Urgency::Critical, 0), (Urgency::Normal, 0)] {
+            let mut restored = notification(1);
+            restored.popup = false;
+            restored.content = content("x", urgency, timeout_ms);
+            assert_eq!(popup_ms_left(&restored, 0, false), 0, "{urgency:?}");
+        }
+    }
+
+    #[test]
     fn popup_time_survives_a_bar_restart_only_within_the_timeout() {
         let at = |arrived_ms, urgency, timeout_ms| Notification {
             id: 1,
             arrived_ms,
+            popup: true,
             time: 0,
             identity: Identity::Other,
             sender: String::new(),
