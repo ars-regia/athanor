@@ -102,14 +102,16 @@ def _of(frames, unit, surface):
     return sorted((f for f in frames if f.unit == unit and f.surface == surface), key=lambda f: f.presented_ns)
 
 
-def responses_ms(times_ns, frames, unit, surface):
+def responses_ms(times_ns, frames, unit, surface, inputs_ns=()):
     """Per input time, milliseconds to the first frame of the surface presented after it;
-    None when none came within NO_FRAME_S."""
+    None when none came within NO_FRAME_S or before the next of inputs_ns, every input the
+    bench sent: a frame after the next input may be that input's."""
     shown = _of(frames, unit, surface)
     out = []
     for t in times_ns:
+        deadline = min([t + NO_FRAME_S * 1e9] + [n for n in inputs_ns if n > t])
         first = next((f.presented_ns for f in shown if f.presented_ns > t), None)
-        out.append(None if first is None or first - t > NO_FRAME_S * 1e9 else (first - t) / 1e6)
+        out.append(None if first is None or first > deadline else (first - t) / 1e6)
     return out
 
 

@@ -53,8 +53,10 @@ class Machine:
     def wall(self):
         return int(self.run("date +%s"))
 
-    def journal(self, since, units=UNITS):
-        flags = " ".join(f"-u {unit}" for unit in units)
+    def journal(self, since, units=UNITS, this_boot=False):
+        """Entries since a wall-clock time; this_boot leaves out earlier boots, whose
+        CLOCK_MONOTONIC times would mix with this boot's."""
+        flags = " ".join(f"-u {unit}" for unit in units) + (" -b 0" if this_boot else "")
         out = self.session(f"journalctl --user {flags} --since @{since} -o json --no-pager")
         return [json.loads(line) for line in out.splitlines() if line.strip()]
 

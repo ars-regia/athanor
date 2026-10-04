@@ -5,6 +5,7 @@ import math
 import pathlib
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "shell-bench"))
 import analysis  # noqa: E402
@@ -183,6 +184,14 @@ class Response(unittest.TestCase):
             analysis.responses_ms([100 * MS], frames, "athanor-bar", "popover"), [None]
         )
 
+    def test_a_frame_after_the_next_input_is_a_miss(self):
+        # A missed opening must not borrow the frame the following click caused.
+        frames = [frame("athanor-bar", "popover", 900)]
+        self.assertEqual(
+            analysis.responses_ms([100 * MS], frames, "athanor-bar", "popover",
+                                  inputs_ns=[100 * MS, 800 * MS]), [None]
+        )
+
     def test_a_miss_is_infinitely_slow_in_the_percentile(self):
         self.assertEqual(analysis.percentile([10.0] * 49 + [None], 95), 10.0)
         self.assertEqual(analysis.percentile([10.0] * 45 + [None] * 5, 95), math.inf)
@@ -299,6 +308,46 @@ class Restore(unittest.TestCase):
 
         bench.restart(Fake(), "athanor-dock")
         self.assertEqual(calls, [("reset-failed", "athanor-dock"), ("restart", "athanor-dock")])
+
+
+class Start(unittest.TestCase):
+    def test_this_boot_only_and_the_variable_cleared_on_the_way_out(self):
+        calls = []
+
+        class Fake:
+            def run(self, cmd):
+                if cmd.startswith("getconf"):
+                    return b"100"
+                if cmd.startswith("pgrep"):
+                    return b"42"
+                if cmd.startswith("cat /proc"):
+                    return b"42 (cosmic-comp) " + b" ".join([b"0"] * 19) + b" 500"
+                if cmd.startswith("python3"):
+                    return b"9000000000 4000000000"
+                return b""
+
+            def journal(self, since, **kw):
+                calls.append(("journal", since, kw))
+                return []
+
+            def systemctl(self, *args):
+                calls.append(args)
+                return b""
+
+        with mock.patch("builtins.input"), mock.patch.object(bench.time, "sleep"):
+            bench.stage_start(Fake(), None)
+        self.assertEqual(calls[0], ("journal", 0, {"this_boot": True}))
+        self.assertEqual(calls[-3:], [("unset-environment", "ATHANOR_SHELL_BENCH"),
+                                      ("reset-failed", "athanor-bar", "athanor-dock"),
+                                      ("restart", "athanor-bar", "athanor-dock")])
+
+    def test_the_journal_of_this_boot_alone(self):
+        import machine
+        seen = []
+        m = machine.Machine.__new__(machine.Machine)
+        m.session = lambda cmd: seen.append(cmd) or b""
+        m.journal(0, this_boot=True)
+        self.assertIn(" -b 0 ", seen[0])
 
 
 class Report(unittest.TestCase):

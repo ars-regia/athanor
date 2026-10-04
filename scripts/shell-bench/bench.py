@@ -106,8 +106,9 @@ def stage_response(m, args):
             frames, _ = analysis.parse_journal(m.journal(since))
             presses = [ns for op, ns in injected if op.startswith("press")]
             releases = [ns for op, ns in injected if op.startswith("release")]
-            in_place = analysis.responses_ms(presses, frames, t.unit, t.surface)
-            opening = analysis.responses_ms(releases, frames, t.unit, "popover")
+            sent = [ns for _, ns in injected]
+            in_place = analysis.responses_ms(presses, frames, t.unit, t.surface, sent)
+            opening = analysis.responses_ms(releases, frames, t.unit, "popover", sent)
             on_time, worst, measured = analysis.smoothness(
                 frames, [(r, r + OPEN_MS * 10**6) for r in releases], t.unit, "popover")
             results[f"{t.unit}/{t.name}"] = {
@@ -185,7 +186,8 @@ def stage_recovery(m, args):
 
 def stage_start(m, args):
     """From cosmic-comp's start to the first frame of the bar and the dock, at a real login.
-    The variable reaches the session through environment.d, removed again at the end."""
+    The variable reaches the session through environment.d; on the way out the file goes,
+    and so does the variable the user manager read from it at login."""
     conf = "~/.config/environment.d/90-athanor-shell-bench.conf"
     m.run(f"mkdir -p ~/.config/environment.d && echo ATHANOR_SHELL_BENCH=1 > {conf}")
     try:
@@ -197,7 +199,7 @@ def stage_start(m, args):
         boot, mono = (int(v) for v in m.run(
             "python3 -c 'import time; print(time.clock_gettime_ns(time.CLOCK_BOOTTIME), time.clock_gettime_ns(time.CLOCK_MONOTONIC))'").split())
         started = start_ticks * 10**9 // hz - (boot - mono)
-        frames, _ = analysis.parse_journal(m.journal(0))
+        frames, _ = analysis.parse_journal(m.journal(0, this_boot=True))
         out = {}
         for unit, surface in SURFACES.items():
             first = [f.presented_ns for f in frames if f.unit == unit and f.surface == surface and f.presented_ns > started]
@@ -205,6 +207,8 @@ def stage_start(m, args):
         return out
     finally:
         m.run(f"rm -f {conf}")
+        m.systemctl("unset-environment", "ATHANOR_SHELL_BENCH")
+        restart(m, *GTK_UNITS)
 
 
 def stage_scenarios(m, args):
