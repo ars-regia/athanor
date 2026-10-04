@@ -566,7 +566,7 @@ return thunk ai thunk del C++ di DisplayPort in `nvidia-modeset.o`, e il RM
 ha code di funzione irraggiungibili. `nvidia.sh sign` firma con `scripts/sign-file` del
 kernel-devel e l'hash di `CONFIG_MODULE_SIG_HASH`, e rilegge il firmatario con
 `modinfo`. Il workflow `nvidia-kmod.yml`: `build` (matrice dei due rami, runner
-self-hosted, kernel-devel dall'immagine pubblicata per l'NVR di `nvr.sh`),
+GitHub, kernel-devel dall'immagine pubblicata per l'NVR di `nvr.sh`),
 `sign` (runner GitHub, environment `signing`: vede solo i `.ko` e la chiave,
 montata in sola lettura per la durata del comando), `boot` (la catena della
 firma end-to-end in QEMU, gate 4 della sezione 7), `publish` (un'immagine
