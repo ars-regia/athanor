@@ -239,7 +239,17 @@ impl Notifications {
         let (outcome, wire) = {
             let mut state = lock(&self.state);
             let now = state.now_ms();
-            let outcome = state.store.notify(content, replaces_id, now);
+            let time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+            let outcome = state.store.notify(
+                content,
+                replaces_id,
+                now,
+                time,
+                crate::identity::Identity::Other,
+                String::new(),
+            );
             let wire = WireNotification::new(&outcome.notification, now, state.store.dnd());
             (outcome, wire)
         };

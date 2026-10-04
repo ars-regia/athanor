@@ -11,6 +11,7 @@ athanor-unit = { path = "../../../../system/athanor-unit" }
 futures-util = { workspace = true }
 nix = { workspace = true, features = ["fs", "inotify"] }
 serde = { workspace = true }
+serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 zbus = { workspace = true }

@@ -160,6 +160,10 @@ mod tests {
             &Notification {
                 id: 7,
                 arrived_ms: 0,
+                time: 0,
+                identity: crate::identity::Identity::Other,
+                sender: String::new(),
+                read: false,
                 content: body,
             },
             0,

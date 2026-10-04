@@ -4,9 +4,11 @@
 use std::collections::VecDeque;
 
 use crate::icon::Icon;
+use crate::identity::Identity;
 use crate::image::Image;
+use crate::rules::Retention;
 
-pub const CAPACITY: usize = 100;
+pub const CAPACITY: usize = 500;
 pub const DEFAULT_TIMEOUT_MS: u32 = 5_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,6 +65,12 @@ pub struct Content {
 pub struct Notification {
     pub id: u32,
     pub arrived_ms: u64,
+    /// Unix seconds.
+    pub time: i64,
+    pub identity: Identity,
+    /// The sender's unique bus name; empty once it is gone or the bus is another one.
+    pub sender: String,
+    pub read: bool,
     pub content: Content,
 }
 
@@ -93,7 +101,15 @@ impl Store {
 
     /// A replaced notification keeps its id, arrives again (its popup restarts) and becomes
     /// the newest. An unknown `replaces_id` gets a new id, as the specification says.
-    pub fn notify(&mut self, content: Content, replaces_id: u32, now_ms: u64) -> Outcome {
+    pub fn notify(
+        &mut self,
+        content: Content,
+        replaces_id: u32,
+        now_ms: u64,
+        time: i64,
+        identity: Identity,
+        sender: String,
+    ) -> Outcome {
         let replaced = replaces_id != 0 && self.remove(replaces_id).is_some();
         let id = if replaced {
             replaces_id
@@ -103,6 +119,10 @@ impl Store {
         let notification = Notification {
             id,
             arrived_ms: now_ms,
+            time,
+            identity,
+            sender,
+            read: false,
             content,
         };
         self.held.push_back(notification.clone());
@@ -113,6 +133,69 @@ impl Store {
             replaced,
             evicted,
         }
+    }
+
+    /// Replaces the held notifications with `restored` (oldest first, the newest CAPACITY
+    /// kept); ids continue above the highest.
+    pub fn restore(&mut self, restored: Vec<Notification>) {
+        let skip = restored.len().saturating_sub(CAPACITY);
+        self.held = restored.into_iter().skip(skip).collect();
+        self.last_id = self.held.iter().map(|n| n.id).max().unwrap_or(0);
+    }
+
+    /// Drops what `retention` no longer keeps at unix time `now`; the ids dropped.
+    pub fn prune(&mut self, now: i64, retention: Retention) -> Vec<u32> {
+        match retention {
+            Retention::UntilCleared => Vec::new(),
+            Retention::Days(days) => {
+                let cutoff = now.saturating_sub(i64::from(days) * 86_400);
+                self.drain_where(|n| n.time < cutoff)
+            }
+        }
+    }
+
+    /// Marks read; the ids that changed.
+    pub fn mark_read(&mut self, ids: &[u32]) -> Vec<u32> {
+        let mut changed = Vec::new();
+        for held in &mut self.held {
+            if !held.read && ids.contains(&held.id) {
+                held.read = true;
+                changed.push(held.id);
+            }
+        }
+        changed
+    }
+
+    pub fn clear_all(&mut self) -> Vec<u32> {
+        self.drain_where(|_| true)
+    }
+
+    pub fn clear_group(&mut self, identity: &Identity) -> Vec<u32> {
+        self.drain_where(|n| n.identity == *identity)
+    }
+
+    /// Forgets the unique name `name`; the ids that carried it.
+    pub fn sender_gone(&mut self, name: &str) -> Vec<u32> {
+        let mut changed = Vec::new();
+        for held in &mut self.held {
+            if !name.is_empty() && held.sender == name {
+                held.sender.clear();
+                changed.push(held.id);
+            }
+        }
+        changed
+    }
+
+    fn drain_where(&mut self, mut gone: impl FnMut(&Notification) -> bool) -> Vec<u32> {
+        let mut ids = Vec::new();
+        self.held.retain(|n| {
+            let drop = gone(n);
+            if drop {
+                ids.push(n.id);
+            }
+            !drop
+        });
+        ids
     }
 
     pub fn close(&mut self, id: u32) -> Option<Notification> {
@@ -203,37 +286,91 @@ pub(crate) mod tests {
         }
     }
 
+    pub(crate) fn notification(id: u32) -> Notification {
+        Notification {
+            id,
+            arrived_ms: 0,
+            time: 0,
+            identity: Identity::Other,
+            sender: String::new(),
+            read: false,
+            content: content("restored", Urgency::Normal, 5_000),
+        }
+    }
+
     #[test]
     fn ids_start_at_one_and_a_replace_keeps_the_id_and_moves_it_last() {
         let mut store = Store::new(false);
         let first = store
-            .notify(content("a", Urgency::Normal, 5000), 0, 0)
+            .notify(
+                content("a", Urgency::Normal, 5000),
+                0,
+                0,
+                0,
+                Identity::Other,
+                String::new(),
+            )
             .notification
             .id;
         let second = store
-            .notify(content("b", Urgency::Normal, 5000), 0, 0)
+            .notify(
+                content("b", Urgency::Normal, 5000),
+                0,
+                0,
+                0,
+                Identity::Other,
+                String::new(),
+            )
             .notification
             .id;
         assert_eq!((first, second), (1, 2));
-        let again = store.notify(content("a2", Urgency::Normal, 5000), first, 10);
+        let again = store.notify(
+            content("a2", Urgency::Normal, 5000),
+            first,
+            10,
+            0,
+            Identity::Other,
+            String::new(),
+        );
         assert!(again.replaced);
         assert_eq!(again.notification.id, first);
         assert_eq!(store.iter().map(|n| n.id).collect::<Vec<_>>(), [2, 1]);
-        let unknown = store.notify(content("c", Urgency::Normal, 5000), 999, 0);
+        let unknown = store.notify(
+            content("c", Urgency::Normal, 5000),
+            999,
+            0,
+            0,
+            Identity::Other,
+            String::new(),
+        );
         assert!(!unknown.replaced);
         assert_eq!(unknown.notification.id, 3);
     }
 
     #[test]
-    fn the_hundred_and_first_pushes_out_the_oldest() {
+    fn the_next_past_capacity_pushes_out_the_oldest() {
         let mut store = Store::new(false);
         for n in 0..CAPACITY {
             assert!(store
-                .notify(content(&n.to_string(), Urgency::Low, 1), 0, 0)
+                .notify(
+                    content(&n.to_string(), Urgency::Low, 1),
+                    0,
+                    0,
+                    0,
+                    Identity::Other,
+                    String::new()
+                )
                 .evicted
                 .is_empty());
         }
-        let outcome = store.notify(content("new", Urgency::Low, 1), 0, 0);
+        let outcome = store.notify(
+            content("new", Urgency::Low, 1),
+            0,
+            0,
+            0,
+            Identity::Other,
+            String::new(),
+        );
         assert_eq!(outcome.evicted, [1]);
         assert_eq!(store.iter().count(), CAPACITY);
     }
@@ -243,14 +380,28 @@ pub(crate) mod tests {
         let mut store = Store::new(false);
         store.last_id = u32::MAX - 1;
         let held = store
-            .notify(content("x", Urgency::Low, 1), 0, 0)
+            .notify(
+                content("x", Urgency::Low, 1),
+                0,
+                0,
+                0,
+                Identity::Other,
+                String::new(),
+            )
             .notification
             .id;
         assert_eq!(held, u32::MAX);
         store.last_id = u32::MAX - 1;
         assert_eq!(
             store
-                .notify(content("y", Urgency::Low, 1), 0, 0)
+                .notify(
+                    content("y", Urgency::Low, 1),
+                    0,
+                    0,
+                    0,
+                    Identity::Other,
+                    String::new()
+                )
                 .notification
                 .id,
             1,
@@ -271,6 +422,10 @@ pub(crate) mod tests {
         let at = |arrived_ms, urgency, timeout_ms| Notification {
             id: 1,
             arrived_ms,
+            time: 0,
+            identity: Identity::Other,
+            sender: String::new(),
+            read: false,
             content: content("x", urgency, timeout_ms),
         };
         assert_eq!(

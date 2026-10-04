@@ -107,8 +107,16 @@ fn span(t: usize, target: usize, source: usize) -> (usize, usize) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    pub(crate) fn one_pixel() -> Image {
+        Image {
+            width: 1,
+            height: 1,
+            rgba: vec![1, 2, 3, 4],
+        }
+    }
 
     fn raw(
         width: i32,

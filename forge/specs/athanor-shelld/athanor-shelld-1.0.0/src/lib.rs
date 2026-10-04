@@ -4,6 +4,7 @@
 
 pub mod dnd;
 pub mod hints;
+pub mod history;
 pub mod icon;
 pub mod identity;
 pub mod image;

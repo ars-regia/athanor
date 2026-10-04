@@ -451,7 +451,7 @@ fn report(path: &Path, warnings: &[String]) {
 /// Set `key` in the file at `path`, keeping its other lines, through a temporary file in the
 /// same directory and a rename.
 fn update(path: &Path, key: &str, value: &str) -> io::Result<()> {
-    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+    let Some(parent) = path.parent() else {
         return Err(io::ErrorKind::InvalidInput.into());
     };
     fs::create_dir_all(parent)?;
@@ -475,6 +475,15 @@ fn update(path: &Path, key: &str, value: &str) -> io::Result<()> {
         out.push_str(&new);
         out.push('\n');
     }
+    write_atomic(path, out.as_bytes())
+}
+
+/// Write `contents` to `path` (mode 0600) through a temporary file in the same directory and a
+/// rename; the parent must exist.
+pub(crate) fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+        return Err(io::ErrorKind::InvalidInput.into());
+    };
     // Unique, exclusive and never followed: a planted link cannot redirect the write. The name
     // does not end in `.conf`, so the watch ignores it. A link at the final name is replaced by
     // the rename, never written through.
@@ -492,7 +501,7 @@ fn update(path: &Path, key: &str, value: &str) -> io::Result<()> {
         .mode(0o600)
         .open(&tmp)
         .and_then(|mut file| {
-            file.write_all(out.as_bytes())
+            file.write_all(contents)
                 .and_then(|()| file.sync_all())
                 .and_then(|()| fs::rename(&tmp, path))
         });
