@@ -143,6 +143,13 @@ pub fn get_str<'a>(props: &'a Props, name: &str) -> Option<&'a str> {
     }
 }
 
+pub fn get_u8(props: &Props, name: &str) -> Option<u8> {
+    match value(props, name)? {
+        Value::U8(number) => Some(*number),
+        _ => None,
+    }
+}
+
 pub fn get_u32(props: &Props, name: &str) -> Option<u32> {
     match value(props, name)? {
         Value::U32(number) => Some(*number),

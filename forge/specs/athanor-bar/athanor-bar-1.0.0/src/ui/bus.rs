@@ -12,10 +12,7 @@ use gtk4::prelude::*;
 use gtk4::{gio, glib};
 
 pub const TIMEOUT_MS: i32 = 5000;
-/// A call that waits for the person: a pairing, or a connection polkit asks about.
-pub const INTERACTIVE_TIMEOUT_MS: i32 = 120_000;
 const PROPERTIES: &str = "org.freedesktop.DBus.Properties";
-const OBJECT_MANAGER: &str = "org.freedesktop.DBus.ObjectManager";
 
 pub fn call(
     connection: &gio::DBusConnection,
@@ -36,39 +33,6 @@ pub fn call(
         gio::DBusCallFlags::ALLOW_INTERACTIVE_AUTHORIZATION,
         timeout,
     )
-}
-
-pub fn set_property(
-    connection: &gio::DBusConnection,
-    name: &str,
-    path: &str,
-    interface: &str,
-    property: &str,
-    value: glib::Variant,
-) -> impl Future<Output = Result<glib::Variant, glib::Error>> + 'static {
-    let args = (interface, property, value).to_variant();
-    call(
-        connection,
-        name,
-        path,
-        PROPERTIES,
-        "Set",
-        Some(&args),
-        TIMEOUT_MS,
-    )
-}
-
-/// Runs a call the bar makes on its own, whose reply nobody reads; a failure is logged with
-/// the action's name only. The arguments are never logged: one of them may be a password.
-pub fn spawn(
-    action: &'static str,
-    future: impl Future<Output = Result<glib::Variant, glib::Error>> + 'static,
-) {
-    glib::spawn_future_local(async move {
-        if let Err(err) = future.await {
-            refused(action, &err);
-        }
-    });
 }
 
 /// Runs a call the person asked for. A failure is logged as by [`spawn`], then `failed` runs:
@@ -93,9 +57,6 @@ fn refused(action: &str, err: &glib::Error) {
 
 /// What the mirror loads.
 pub enum Source {
-    /// `GetManagedObjects` at this path, then `InterfacesAdded`, `InterfacesRemoved` and
-    /// `PropertiesChanged`.
-    Managed(&'static str),
     /// `GetAll` of each (path, interface), then `PropertiesChanged`.
     Fixed(Vec<(&'static str, &'static str)>),
 }
@@ -177,21 +138,9 @@ impl Mirror {
         self.objects.borrow()
     }
 
-    pub fn owner(&self) -> Option<String> {
-        self.owner.borrow().clone()
-    }
-
-    pub fn generation(&self) -> u64 {
-        self.generation.get()
-    }
-
     /// Whether `sender` is the service's current unique name.
     pub fn is_owner(&self, sender: &str) -> bool {
         self.owner.borrow().as_deref() == Some(sender)
-    }
-
-    pub fn connection(&self) -> &gio::DBusConnection {
-        &self.connection
     }
 
     fn signal(self: &Rc<Self>, signal: &gio::DBusSignalRef<'_>) {
@@ -231,37 +180,18 @@ impl Mirror {
     /// this generation belongs to.
     fn load(self: &Rc<Self>, owner: &str) {
         let generation = self.generation.get();
-        let requests: Vec<(&'static str, Option<&'static str>)> = match &self.source {
-            Source::Managed(root) => vec![(*root, None)],
-            Source::Fixed(list) => list
-                .iter()
-                .map(|(path, interface)| (*path, Some(*interface)))
-                .collect(),
-        };
-        for (path, interface) in requests {
-            let reply = match interface {
-                None => call(
-                    &self.connection,
-                    owner,
-                    path,
-                    OBJECT_MANAGER,
-                    "GetManagedObjects",
-                    None,
-                    TIMEOUT_MS,
-                ),
-                Some(interface) => {
-                    let args = (interface,).to_variant();
-                    call(
-                        &self.connection,
-                        owner,
-                        path,
-                        PROPERTIES,
-                        "GetAll",
-                        Some(&args),
-                        TIMEOUT_MS,
-                    )
-                }
-            };
+        let Source::Fixed(list) = &self.source;
+        for &(path, interface) in list {
+            let args = (interface,).to_variant();
+            let reply = call(
+                &self.connection,
+                owner,
+                path,
+                PROPERTIES,
+                "GetAll",
+                Some(&args),
+                TIMEOUT_MS,
+            );
             let weak = Rc::downgrade(self);
             glib::spawn_future_local(async move {
                 let reply = reply.await;
@@ -276,28 +206,18 @@ impl Mirror {
                         return;
                     }
                 };
-                match interface {
-                    None => match props::managed_objects(&reply) {
-                        Some(objects) => {
-                            mirror.objects.replace(objects);
-                        }
-                        None => {
-                            tracing::error!(name = %mirror.name, "GetManagedObjects answered with an unexpected type")
-                        }
-                    },
-                    Some(interface) => match props::get_all(&reply) {
-                        Some(values) => {
-                            mirror
-                                .objects
-                                .borrow_mut()
-                                .entry(path.to_owned())
-                                .or_default()
-                                .insert(interface.to_owned(), values);
-                        }
-                        None => {
-                            tracing::error!(name = %mirror.name, path, "GetAll answered with an unexpected type")
-                        }
-                    },
+                match props::get_all(&reply) {
+                    Some(values) => {
+                        mirror
+                            .objects
+                            .borrow_mut()
+                            .entry(path.to_owned())
+                            .or_default()
+                            .insert(interface.to_owned(), values);
+                    }
+                    None => {
+                        tracing::error!(name = %mirror.name, path, "GetAll answered with an unexpected type")
+                    }
                 }
                 mirror.schedule();
             });

@@ -6,7 +6,6 @@ pub mod audio;
 pub mod clock;
 pub mod dbusmenu;
 pub mod keyboard;
-pub mod network;
 pub mod notices;
 pub mod order;
 pub mod popups;

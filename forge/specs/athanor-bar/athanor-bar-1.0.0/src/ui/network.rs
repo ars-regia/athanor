@@ -1,56 +1,29 @@
 //! The network module (doc_bar.md, BR3): the wired state, the Wi-Fi list, joining with a
-//! password, VPN and airplane mode, over NetworkManager on the system bus. One service per
-//! process mirrors NetworkManager and is its secret agent; each surface has a view.
+//! password, VPN and airplane mode. The model in athanor-services mirrors NetworkManager and
+//! is its secret agent; this side draws its state, sends it the person's commands and shows
+//! the password pages it asks for. One service per process; each surface has a view.
 //!
-//! The secret agent (`/org/freedesktop/NetworkManager/SecretAgent`, `os.athanor.Bar`)
-//! answers only the current owner of `org.freedesktop.NetworkManager`, one request at a
-//! time, and only for a Wi-Fi personal password the person types. The password goes from
-//! the entry into the reply and nowhere else: it is never logged, never stored by the bar,
-//! and the entry is cleared as the reply leaves.
+//! A password goes from the entry into the model's reply and nowhere else: it is never
+//! logged, never stored by the bar, and the entry is cleared as the reply leaves.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, BTreeSet};
 use std::rc::{Rc, Weak};
 
-use athanor_bar::network::{
-    self, ConnectionInfo, Link, Network, NetworkState, PasswordPrompt, SecretsRequest, Security,
-    Vpn, Wifi,
+use athanor_services::network::{
+    self, Link, Network, NetworkCommand, NetworkState, PasswordPage, PasswordPrompt, Security, Vpn,
+    Wifi,
 };
 use gtk4::accessible::{Property, Relation};
 use gtk4::prelude::*;
-use gtk4::{gio, glib, pango};
+use gtk4::{glib, pango};
+use tokio::sync::{mpsc, oneshot};
 
-use super::bus::{self, Mirror, Source};
+use super::bridge;
 use super::popup::{switch_row, Popup};
 use super::{Bar, Changed, ModuleUi};
 use crate::i18n::{tr, tr_with};
 
-const ERROR: &str = "org.freedesktop.NetworkManager.SecretAgent.";
 const MAX_LIST_HEIGHT: i32 = 320;
-const AGENT_XML: &str = r#"<node>
-  <interface name="org.freedesktop.NetworkManager.SecretAgent">
-    <method name="GetSecrets">
-      <arg name="connection" type="a{sa{sv}}" direction="in"/>
-      <arg name="connection_path" type="o" direction="in"/>
-      <arg name="setting_name" type="s" direction="in"/>
-      <arg name="hints" type="as" direction="in"/>
-      <arg name="flags" type="u" direction="in"/>
-      <arg name="secrets" type="a{sa{sv}}" direction="out"/>
-    </method>
-    <method name="CancelGetSecrets">
-      <arg name="connection_path" type="o" direction="in"/>
-      <arg name="setting_name" type="s" direction="in"/>
-    </method>
-    <method name="SaveSecrets">
-      <arg name="connection" type="a{sa{sv}}" direction="in"/>
-      <arg name="connection_path" type="o" direction="in"/>
-    </method>
-    <method name="DeleteSecrets">
-      <arg name="connection" type="a{sa{sv}}" direction="in"/>
-      <arg name="connection_path" type="o" direction="in"/>
-    </method>
-  </interface>
-</node>"#;
 
 thread_local! {
     static SERVICE: RefCell<Option<Rc<Service>>> = const { RefCell::new(None) };
@@ -60,43 +33,33 @@ fn service() -> Option<Rc<Service>> {
     SERVICE.with(|cell| cell.borrow().clone())
 }
 
-/// For [`bus::act`]: an action the person took did not complete.
-fn action_failed() {
-    if let Some(service) = service() {
-        service.failed();
-    }
-}
-
-fn error(name: &str) -> String {
-    format!("{ERROR}{name}")
-}
-
 /// What the password page answers.
 enum Ask {
     /// A network with no saved profile: the password goes into `AddAndActivateConnection`.
-    Join { network: Network, device: String },
-    /// NetworkManager's `GetSecrets`, answered through the pending invocation.
+    Join { network: Network },
+    /// NetworkManager's `GetSecrets`, answered through the pending reply.
     Secrets,
 }
 
+/// A request of NetworkManager the person has not answered.
 struct Pending {
-    request: SecretsRequest,
-    invocation: gio::DBusMethodInvocation,
+    reply: oneshot::Sender<Option<String>>,
     view: Weak<View>,
 }
 
 struct Service {
     bar: Weak<Bar>,
-    mirror: RefCell<Option<Rc<Mirror>>>,
-    /// The mirror's generation the caches and the registration belong to.
-    seen: Cell<u64>,
-    connections: RefCell<BTreeMap<String, ConnectionInfo>>,
-    fetching: RefCell<BTreeSet<String>>,
+    /// `None` without the runtime of the models; the module is then hidden.
+    commands: Option<mpsc::UnboundedSender<NetworkCommand>>,
+    /// The model's last state, which `bridge::follow` keeps current.
     state: RefCell<Option<NetworkState>>,
+    /// How many commands the model had counted as refused when the views last showed it.
+    refused: Cell<u32>,
     views: RefCell<Vec<Weak<View>>>,
     last_opened: RefCell<Weak<View>>,
     pending: RefCell<Option<Pending>>,
-    agent: RefCell<Option<gio::RegistrationId>>,
+    /// Which request `pending` holds, so a withdrawal of an older one closes nothing.
+    serial: Cell<u64>,
 }
 
 impl Service {
@@ -104,82 +67,41 @@ impl Service {
         if let Some(service) = service() {
             return service;
         }
+        let model = bridge::runtime().map(|(handle, buses)| network::spawn(&handle, buses));
+        let (models, commands) = match model {
+            Some((states, commands, prompts)) => (Some((states, prompts)), Some(commands)),
+            None => {
+                tracing::warn!("no runtime for the models; the network module is hidden");
+                (None, None)
+            }
+        };
         let service = Rc::new(Service {
             bar: Rc::downgrade(bar),
-            mirror: RefCell::new(None),
-            seen: Cell::new(0),
-            connections: RefCell::new(BTreeMap::new()),
-            fetching: RefCell::new(BTreeSet::new()),
+            commands,
             state: RefCell::new(None),
+            refused: Cell::new(0),
             views: RefCell::new(Vec::new()),
             last_opened: RefCell::new(Weak::new()),
             pending: RefCell::new(None),
-            agent: RefCell::new(None),
+            serial: Cell::new(0),
         });
         SERVICE.with(|cell| cell.replace(Some(service.clone())));
-        service.start();
-        service
-    }
-
-    fn start(self: &Rc<Self>) {
-        let weak = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let connection = match gio::bus_get_future(gio::BusType::System).await {
-                Ok(connection) => connection,
-                Err(err) => {
-                    tracing::warn!(error = %err, "no system bus; the network module is hidden");
-                    return;
+        if let Some((states, prompts)) = models {
+            // Weak, as the other modules hold the service: the thread-local owns it.
+            let weak = Rc::downgrade(&service);
+            bridge::follow(states, move |state| {
+                if let Some(service) = weak.upgrade() {
+                    service.changed(state.clone());
                 }
-            };
-            let Some(service) = weak.upgrade() else {
-                return;
-            };
-            service.register_agent(&connection);
-            let notify = weak.clone();
-            let mirror = Mirror::new(
-                &connection,
-                network::NM,
-                Source::Managed(network::NM_ROOT),
-                move || {
-                    if let Some(service) = notify.upgrade() {
-                        service.changed();
-                    }
-                },
-            );
-            service.mirror.replace(Some(mirror));
-        });
-    }
-
-    fn register_agent(self: &Rc<Self>, connection: &gio::DBusConnection) {
-        let interface = gio::DBusNodeInfo::for_xml(AGENT_XML)
-            .ok()
-            .and_then(|node| node.lookup_interface(network::AGENT_IFACE));
-        let Some(interface) = interface else {
-            tracing::error!("the secret agent's interface does not parse; joining a saved network that needs a password will fail");
-            return;
-        };
-        let weak = Rc::downgrade(self);
-        let registered = connection
-            .register_object(network::AGENT_PATH, &interface)
-            .method_call(
-                move |_, sender, _, _, method, params, invocation| match weak.upgrade() {
-                    Some(service) => service.agent_call(sender, method, &params, invocation),
-                    None => invocation.return_dbus_error(&error("NoSecrets"), "the agent is gone"),
-                },
-            )
-            .build();
-        match registered {
-            Ok(id) => {
-                self.agent.replace(Some(id));
-            }
-            Err(err) => {
-                tracing::error!(error = %err, "cannot export the NetworkManager secret agent")
-            }
+            });
+            let weak = Rc::downgrade(&service);
+            bridge::drain(prompts, move |prompt| {
+                if let Some(service) = weak.upgrade() {
+                    service.prompt(prompt);
+                }
+            });
         }
-    }
-
-    fn mirror(&self) -> Option<Rc<Mirror>> {
-        self.mirror.borrow().clone()
+        service
     }
 
     fn views(&self) -> Vec<Rc<View>> {
@@ -188,187 +110,70 @@ impl Service {
         views.iter().filter_map(Weak::upgrade).collect()
     }
 
-    /// The mirror changed: a new owner registers the agent again, then the state is
-    /// recomputed and pushed into the views when it differs.
-    fn changed(self: &Rc<Self>) {
-        let Some(mirror) = self.mirror() else { return };
-        let generation = mirror.generation();
-        if self.seen.replace(generation) != generation {
-            self.connections.borrow_mut().clear();
-            self.fetching.borrow_mut().clear();
-            self.cancel_pending("AgentCanceled");
-            if let Some(owner) = mirror.owner() {
-                let args = (network::AGENT_ID,).to_variant();
-                bus::spawn(
-                    "register the NetworkManager secret agent",
-                    bus::call(
-                        mirror.connection(),
-                        &owner,
-                        network::AGENT_MANAGER_PATH,
-                        network::AGENT_MANAGER,
-                        "Register",
-                        Some(&args),
-                        bus::TIMEOUT_MS,
-                    ),
-                );
+    /// The model published a state: the views show it, and an action it counts as refused
+    /// is said in the open popover.
+    fn changed(&self, state: Option<NetworkState>) {
+        let failed = state
+            .as_ref()
+            .is_some_and(|state| self.refused.replace(state.refused) != state.refused);
+        self.state.replace(state);
+        let state = self.state.borrow();
+        for view in self.views() {
+            view.show(state.as_ref());
+            if failed {
+                view.popup.failed();
             }
         }
-        self.fetch_connections(&mirror);
-        let state = network::state(&mirror.objects(), &self.connections.borrow());
-        if *self.state.borrow() == state {
-            return;
-        }
-        if state.is_none() {
-            self.cancel_pending("AgentCanceled");
-        }
-        self.state.replace(state);
-        for view in self.views() {
-            view.show(self.state.borrow().as_ref());
-        }
+        drop(state);
         if let Some(bar) = self.bar.upgrade() {
             bar.fit_groups();
         }
     }
 
-    /// The settings of each saved profile, read once: they tell a saved network from a new
-    /// one, and name the VPNs.
-    // ponytail: read once per profile; follow Settings.Connection's Updated signal if renamed
-    // profiles must show their new name without a restart of NetworkManager.
-    fn fetch_connections(self: &Rc<Self>, mirror: &Rc<Mirror>) {
-        let Some(owner) = mirror.owner() else { return };
-        let paths: Vec<String> = mirror
-            .objects()
-            .iter()
-            .filter(|(_, interfaces)| interfaces.contains_key(network::SETTINGS_CONNECTION))
-            .map(|(path, _)| path.clone())
-            .collect();
-        self.connections
-            .borrow_mut()
-            .retain(|path, _| paths.contains(path));
-        self.fetching
-            .borrow_mut()
-            .retain(|path| paths.contains(path));
-        let generation = mirror.generation();
-        for path in paths {
-            if self.connections.borrow().contains_key(&path)
-                || !self.fetching.borrow_mut().insert(path.clone())
-            {
-                continue;
-            }
-            let reply = bus::call(
-                mirror.connection(),
-                &owner,
-                &path,
-                network::SETTINGS_CONNECTION,
-                "GetSettings",
-                None,
-                bus::TIMEOUT_MS,
-            );
-            let weak = Rc::downgrade(self);
-            glib::spawn_future_local(async move {
-                let reply = reply.await;
-                let Some(service) = weak.upgrade() else {
-                    return;
-                };
-                if service.seen.get() != generation {
-                    return;
-                }
-                match reply.as_ref().ok().and_then(network::connection_info) {
-                    Some(info) => {
-                        service.fetching.borrow_mut().remove(&path);
-                        service.connections.borrow_mut().insert(path, info);
-                        service.changed();
-                    }
-                    // It stays in `fetching`, so every change of the mirror does not ask again
-                    // (a profile of another user answers PermissionDenied each time): it is read
-                    // again only when NetworkManager restarts or the profile comes back.
-                    None => tracing::warn!(
-                        path,
-                        "a NetworkManager profile has unreadable settings; it is not listed"
-                    ),
-                }
-            });
+    fn send(&self, command: NetworkCommand) {
+        if let Some(commands) = &self.commands {
+            // The model has ended when the send fails: the module shows its last state.
+            commands.send(command).ok();
         }
     }
 
-    fn agent_call(
-        self: &Rc<Self>,
-        sender: Option<&str>,
-        method: &str,
-        params: &glib::Variant,
-        invocation: gio::DBusMethodInvocation,
-    ) {
-        let from_owner = self
-            .mirror()
-            .is_some_and(|mirror| sender.is_some_and(|sender| mirror.is_owner(sender)));
-        if !from_owner {
-            tracing::warn!(
-                method,
-                sender = sender.unwrap_or(""),
-                "a secret agent call from a process that is not NetworkManager was refused"
-            );
-            invocation.return_dbus_error(
-                &error("PermissionDenied"),
-                "only NetworkManager may call this agent",
-            );
-            return;
-        }
-        match method {
-            "GetSecrets" => self.get_secrets(params, invocation),
-            "CancelGetSecrets" => {
-                if let Some((connection, setting)) = network::cancel_request(params) {
-                    let matches = self.pending.borrow().as_ref().is_some_and(|pending| {
-                        pending.request.connection == connection
-                            && pending.request.setting == setting
-                    });
-                    if matches {
-                        self.cancel_pending("AgentCanceled");
-                    }
-                }
-                invocation.return_value(None);
-            }
-            // Nothing is ever stored here, so there is nothing to delete; and nothing is saved.
-            "DeleteSecrets" => invocation.return_value(None),
-            "SaveSecrets" => {
-                invocation.return_dbus_error(&error("Failed"), "this agent keeps no secrets")
-            }
-            _ => invocation
-                .return_dbus_error("org.freedesktop.DBus.Error.UnknownMethod", "unknown method"),
-        }
-    }
-
-    fn get_secrets(self: &Rc<Self>, params: &glib::Variant, invocation: gio::DBusMethodInvocation) {
-        let Some(request) = network::secrets_request(params) else {
-            invocation.return_dbus_error(&error("InvalidConnection"), "the request cannot be read");
-            return;
-        };
-        let Some(prompt) = request.prompt() else {
-            invocation.return_dbus_error(
-                &error("NoSecrets"),
-                "this agent answers only Wi-Fi personal passwords",
-            );
-            return;
-        };
+    /// NetworkManager asks for a password: shows the page, unless the bar cannot.
+    fn prompt(self: &Rc<Self>, prompt: PasswordPrompt) {
+        let PasswordPrompt {
+            request,
+            reply,
+            withdrawn,
+        } = prompt;
+        // Dropping `reply` answers NoSecrets.
+        let Some(page) = request.prompt() else { return };
         if self.pending.borrow().is_some() {
-            invocation.return_dbus_error(&error("NoSecrets"), "another request is open");
             return;
         }
         let Some(view) = self.prompt_view() else {
-            invocation.return_dbus_error(&error("NoSecrets"), "the bar shows no network module");
             return;
         };
         // The page may hold the password of a network the user is joining: replacing it would
         // drop that join and send what they are typing as another network's password.
         if view.asking.borrow().is_some() {
-            invocation.return_dbus_error(&error("NoSecrets"), "the password page is in use");
             return;
         }
+        let serial = self.serial.get() + 1;
+        self.serial.set(serial);
         self.pending.replace(Some(Pending {
-            request,
-            invocation,
+            reply,
             view: Rc::downgrade(&view),
         }));
-        view.ask(Ask::Secrets, &prompt);
+        view.ask(Ask::Secrets, &page);
+        // The model withdraws the request when NetworkManager cancels it or leaves, or when no
+        // one answers in time; a request that was answered ends this wait with an error.
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            if withdrawn.await.is_ok() {
+                if let Some(service) = weak.upgrade() {
+                    service.withdraw(serial);
+                }
+            }
+        });
     }
 
     /// The view a prompt shows on: the one whose popover opened last, else the first shown.
@@ -381,100 +186,48 @@ impl Service {
             .or_else(|| self.views().into_iter().find(usable))
     }
 
-    /// Answers the pending request: the password, or `UserCanceled`.
+    /// Answers the pending request: the password, or a cancel.
     fn answer(&self, password: Option<&str>) {
         let Some(pending) = self.pending.take() else {
             return;
         };
-        match password {
-            Some(password) => pending
-                .invocation
-                .return_value(Some(&network::secrets_reply(password))),
-            None => pending
-                .invocation
-                .return_dbus_error(&error("UserCanceled"), "the person canceled"),
-        }
+        // The model has stopped waiting when the send fails.
+        pending.reply.send(password.map(str::to_owned)).ok();
     }
 
-    fn cancel_pending(&self, name: &str) {
+    /// The model no longer waits for request `serial`: closes its page.
+    fn withdraw(&self, serial: u64) {
+        if self.serial.get() != serial {
+            return;
+        }
         let Some(pending) = self.pending.take() else {
             return;
         };
-        pending
-            .invocation
-            .return_dbus_error(&error(name), "the request was withdrawn");
         if let Some(view) = pending.view.upgrade() {
             view.close_prompt();
         }
     }
 
-    /// An action the person took failed: every view shows the mirrored state again, which
-    /// puts a switch back, and the open popover says so.
-    fn failed(&self) {
-        let state = self.state.borrow();
-        for view in self.views() {
-            view.show(state.as_ref());
-            view.popup.failed();
-        }
-    }
-
-    fn manager_call(&self, method: &'static str, args: Option<glib::Variant>) {
-        let (Some(mirror), Some(args)) = (self.mirror(), args) else {
-            return;
-        };
-        bus::act(
-            method,
-            bus::call(
-                mirror.connection(),
-                network::NM,
-                network::NM_PATH,
-                network::NM,
-                method,
-                Some(&args),
-                bus::INTERACTIVE_TIMEOUT_MS,
-            ),
-            action_failed,
-        );
-    }
-
-    fn set_manager(&self, values: &[(&'static str, bool)]) {
-        let Some(mirror) = self.mirror() else { return };
-        for (property, value) in values {
-            bus::act(
-                property,
-                bus::set_property(
-                    mirror.connection(),
-                    network::NM,
-                    network::NM_PATH,
-                    network::NM,
-                    property,
-                    value.to_variant(),
-                ),
-                action_failed,
-            );
-        }
-    }
-
     fn pressed(&self, view: &Rc<View>, network: &Network, device: &str) {
         if let Some(active) = &network.active {
-            self.manager_call("DeactivateConnection", network::deactivate(active));
+            self.send(NetworkCommand::Deactivate(active.clone()));
         } else if let Some(saved) = &network.saved {
-            self.manager_call(
-                "ActivateConnection",
-                network::activate(saved, device, &network.access_point),
-            );
+            self.send(NetworkCommand::Activate {
+                connection: saved.clone(),
+                device: device.to_owned(),
+                specific: network.access_point.clone(),
+            });
         } else {
             match network.security {
-                Security::Open => self.manager_call(
-                    "AddAndActivateConnection",
-                    network::add_and_activate(network, None, device),
-                ),
+                Security::Open => self.send(NetworkCommand::Join {
+                    network: network.clone(),
+                    password: None,
+                }),
                 Security::Personal { .. } => view.ask(
                     Ask::Join {
                         network: network.clone(),
-                        device: device.to_owned(),
                     },
-                    &PasswordPrompt {
+                    &PasswordPage {
                         label: network.label.clone(),
                         security: network.security,
                         retry: false,
@@ -487,13 +240,12 @@ impl Service {
 
     fn switch_vpn(&self, vpn: &Vpn, on: bool) {
         match (&vpn.active, on) {
-            (None, true) => self.manager_call(
-                "ActivateConnection",
-                network::activate(&vpn.connection, "/", "/"),
-            ),
-            (Some(active), false) => {
-                self.manager_call("DeactivateConnection", network::deactivate(active))
-            }
+            (None, true) => self.send(NetworkCommand::Activate {
+                connection: vpn.connection.clone(),
+                device: "/".to_owned(),
+                specific: "/".to_owned(),
+            }),
+            (Some(active), false) => self.send(NetworkCommand::Deactivate(active.clone())),
             _ => {}
         }
     }
@@ -545,7 +297,13 @@ impl NetworkRows {
                 .iter()
                 .map(|network| {
                     let icon = network::signal_icon(network.strength);
-                    (icon, Network { strength: 0, ..network.clone() })
+                    (
+                        icon,
+                        Network {
+                            strength: 0,
+                            ..network.clone()
+                        },
+                    )
                 })
                 .collect(),
         }
@@ -656,7 +414,7 @@ impl View {
         self.wifi.connect_state_set(move |_, on| {
             if weak.upgrade().is_some_and(|view| !view.updating.get()) {
                 if let Some(service) = service() {
-                    service.set_manager(&[("WirelessEnabled", on)]);
+                    service.send(NetworkCommand::Wireless(on));
                 }
             }
             glib::Propagation::Proceed
@@ -665,7 +423,7 @@ impl View {
         self.airplane.connect_state_set(move |_, on| {
             if weak.upgrade().is_some_and(|view| !view.updating.get()) {
                 if let Some(service) = service() {
-                    service.set_manager(&[("WirelessEnabled", !on), ("WwanEnabled", !on)]);
+                    service.send(NetworkCommand::Airplane(on));
                 }
             }
             glib::Propagation::Proceed
@@ -795,7 +553,7 @@ impl View {
     }
 
     /// Shows the password page, opening the popover when it is closed.
-    fn ask(self: &Rc<Self>, ask: Ask, prompt: &PasswordPrompt) {
+    fn ask(self: &Rc<Self>, ask: Ask, prompt: &PasswordPage) {
         self.asking.replace(Some(ask));
         self.security.set(prompt.security);
         self.title
@@ -824,10 +582,10 @@ impl View {
         self.stack.set_visible_child_name("list");
         if let Some(service) = service() {
             match ask {
-                Ask::Join { network, device } => service.manager_call(
-                    "AddAndActivateConnection",
-                    network::add_and_activate(&network, Some(password.as_str()), &device),
-                ),
+                Ask::Join { network } => service.send(NetworkCommand::Join {
+                    network,
+                    password: Some(password.to_string()),
+                }),
                 Ask::Secrets => service.answer(Some(password.as_str())),
             }
         }
