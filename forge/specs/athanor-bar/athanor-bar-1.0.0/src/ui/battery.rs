@@ -119,6 +119,12 @@ impl Service {
         };
         if let Err(err) = commands.try_send(command) {
             tracing::warn!(error = %err, "the battery model did not take a command");
+            // The model coalesces what it is given, so this is a model that has ended: say
+            // the action did not complete, as for a refusal.
+            self.show_all();
+            for view in self.views() {
+                view.popup.failed();
+            }
         }
     }
 

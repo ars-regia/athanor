@@ -3,8 +3,11 @@
 //! logind, so the process needs no write access to sysfs and no group. The model follows
 //! UPower and the profiles daemon through two mirrors and publishes a [`BatteryState`].
 
+use std::collections::VecDeque;
 use std::fs;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 
 use tokio::runtime::Handle;
 use tokio::sync::{mpsc, watch};
@@ -303,6 +306,11 @@ async fn run(
         Source::Fixed(vec![(PROFILES_PATH, PROFILES)]),
     );
     let mut refused = 0;
+    // Commands wait here while one runs, so the channel is read at once and never fills; a
+    // new brightness replaces a waiting one, so a drag of the slider ends on its last level
+    // and logind is not asked for every step.
+    let mut waiting: VecDeque<BatteryCommand> = VecDeque::new();
+    let mut running: Option<Running> = None;
     loop {
         // A mirror ends only after it has emptied itself, so its last state is published too.
         let mut alive = true;
@@ -311,13 +319,25 @@ async fn run(
             changed = daemon.changed() => alive = changed.is_ok(),
             command = commands.recv() => match command {
                 Some(command) => {
-                    if let Err(err) = execute(&connection, &command).await {
-                        tracing::warn!(error = %err, "a system service refused or did not answer");
-                        refused += 1;
+                    if matches!(command, BatteryCommand::SetBrightness { .. }) {
+                        waiting.retain(|queued| !matches!(queued, BatteryCommand::SetBrightness { .. }));
                     }
+                    waiting.push_back(command);
                 }
                 None => return,
             },
+            result = async { running.as_mut().expect("guarded").await }, if running.is_some() => {
+                running = None;
+                if let Err(err) = result {
+                    tracing::warn!(error = %err, "a system service refused or did not answer");
+                    refused += 1;
+                }
+            }
+        }
+        if running.is_none() {
+            running = waiting
+                .pop_front()
+                .map(|command| Box::pin(execute(connection.clone(), command)) as Running);
         }
         // Read again after every wake, a refused command included: the backlight is not
         // signalled, and a reader that sees `refused` change puts its controls back.
@@ -347,13 +367,16 @@ fn current<T>(
     decode(props::lookup(&mirror.borrow().objects, path, interface)?)
 }
 
+/// A command being carried out.
+type Running = Pin<Box<dyn Future<Output = zbus::Result<()>> + Send>>;
+
 /// Every call allows interactive authorisation, so polkit can ask.
-async fn execute(connection: &Connection, command: &BatteryCommand) -> zbus::Result<()> {
+async fn execute(connection: Connection, command: BatteryCommand) -> zbus::Result<()> {
     let interactive = MethodFlags::AllowInteractiveAuth.into();
     let call = async {
-        match command {
+        match &command {
             BatteryCommand::SetProfile(profile) => {
-                let proxy = Proxy::new(connection, PROFILES, PROFILES_PATH, PROPERTIES).await?;
+                let proxy = Proxy::new(&connection, PROFILES, PROFILES_PATH, PROPERTIES).await?;
                 proxy
                     .call_with_flags::<_, _, ()>(
                         "Set",
@@ -363,7 +386,7 @@ async fn execute(connection: &Connection, command: &BatteryCommand) -> zbus::Res
                     .await
             }
             BatteryCommand::SetBrightness { device, raw } => {
-                let proxy = Proxy::new(connection, LOGIN1, SESSION_PATH, SESSION).await?;
+                let proxy = Proxy::new(&connection, LOGIN1, SESSION_PATH, SESSION).await?;
                 proxy
                     .call_with_flags::<_, _, ()>(
                         "SetBrightness",
@@ -383,6 +406,8 @@ async fn execute(connection: &Connection, command: &BatteryCommand) -> zbus::Res
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     use tokio::runtime::Handle;
     use zbus::zvariant::{OwnedValue, Value};
@@ -664,5 +689,68 @@ mod tests {
             .unwrap();
         let state = wait_for(&mut rx, |state| state.refused == 1).await;
         assert_eq!(state.profiles.unwrap().active, "performance");
+    }
+
+    /// logind's session, which answers the first `SetBrightness` late and records every level.
+    struct FakeSession {
+        levels: Arc<Mutex<Vec<u32>>>,
+    }
+
+    #[zbus::interface(name = "org.freedesktop.login1.Session")]
+    impl FakeSession {
+        async fn set_brightness(&self, _class: String, _name: String, level: u32) {
+            let first = {
+                let mut levels = self.levels.lock().unwrap();
+                levels.push(level);
+                levels.len() == 1
+            };
+            if first {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_drag_of_the_slider_ends_on_its_last_position() {
+        let bus = TestBus::start();
+        let levels = Arc::new(Mutex::new(Vec::new()));
+        let _logind = bus
+            .builder()
+            .serve_at(
+                SESSION_PATH,
+                FakeSession {
+                    levels: levels.clone(),
+                },
+            )
+            .expect("session")
+            .name(LOGIN1)
+            .expect("name")
+            .build()
+            .await
+            .expect("logind");
+        let (_rx, commands) = spawn(
+            &Handle::current(),
+            Buses::with(bus.client().await),
+            PathBuf::from("/nonexistent"),
+        );
+        for raw in 1..=40 {
+            commands
+                .send(BatteryCommand::SetBrightness {
+                    device: "intel_backlight".into(),
+                    raw,
+                })
+                .await
+                .unwrap();
+        }
+        let last = || levels.lock().unwrap().last().copied();
+        tokio::time::timeout(testbus::WAIT, async {
+            while last() != Some(40) {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("the last position reached logind");
+        let calls = levels.lock().unwrap().len();
+        assert!(calls < 40, "{calls} calls for 40 positions");
     }
 }
