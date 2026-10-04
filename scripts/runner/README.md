@@ -1,7 +1,8 @@
 # Self-hosted runner
 
-The `self-hosted` jobs of the kernel workflows (`kernel-build.yml`, `nvidia-build.yml`,
-`kernel-weekly.yml`, `kernel-bump.yml`) run on this runner. The repository is public
+The `self-hosted` jobs of the kernel workflows (`kernel-build.yml`, `kernel-weekly.yml`,
+`kernel-bump.yml`) run on this runner, which is kept for the kernel: the NVIDIA modules and
+the system image checks run on GitHub runners. The repository is public
 and a runner executes workflow code, so it lives in an ephemeral KVM guest, never on the
 host itself.
 

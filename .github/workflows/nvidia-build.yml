@@ -1,7 +1,7 @@
 name: NVIDIA kmod build
 
 # The NVIDIA kernel modules (forge/specs/azoth/nvidia.sh, spec section 10) against a
-# kernel-devel, on the self-hosted runner with the kernel toolchain. Reusable workflow:
+# kernel-devel, on a GitHub runner with the kernel toolchain image. Reusable workflow:
 # Kernel Build calls it for the gate on PRs and pushes (the kernel-devel of the freshly
 # built artifact, or of the published image when the kernel is reused) and NVIDIA kmod
 # calls it for the signing and publication chain. A published kernel-devel is pulled by
@@ -31,7 +31,8 @@ permissions:
 
 jobs:
   build:
-    runs-on: self-hosted
+    # A GitHub runner: the single self-hosted runner is kept for compiling the kernel.
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: read
@@ -57,9 +58,8 @@ jobs:
 
       - name: Kernel-devel from the published image, by digest
         # The caller resolved the digest with system/kernel-artifacts.sh. Login with the job
-        # token: the package is public, but the podman of a self-hosted runner may hold stale
-        # ghcr credentials in auth.json, and ghcr answers 403 to the anonymous token. Logout
-        # at the end of the step, so none are left.
+        # token: the package is public, but ghcr answers 403 to the anonymous token. Logout
+        # at the end of the step, so no credentials are left.
         if: ${{ inputs.devel-artifact == '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
