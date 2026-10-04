@@ -798,9 +798,12 @@ name = "athanor-shelld"
 version = "1.0.0"
 dependencies = [
  "athanor-unit",
+ "chrono",
  "futures-util",
+ "libc",
  "nix 0.29.0",
  "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "zbus",
