@@ -154,8 +154,14 @@ fn main() -> glib::ExitCode {
     .chain(high_contrast_dirs.iter().map(PathBuf::as_path))
     .chain(first_session_dirs.iter().map(PathBuf::as_path))
     .collect();
+    // Connections: the runtime directory (the compositor, the accessibility bus, the sound
+    // server) and both buses (logind, NetworkManager, BlueZ, UPower on the system bus).
+    let buses = [sandbox::session_bus(), sandbox::system_bus()];
+    let connect: Vec<&Path> = std::iter::once(dirs.runtime.as_path())
+        .chain(buses.iter().flatten().map(PathBuf::as_path))
+        .collect();
     let confined = sandbox::ensure_single_threaded()
-        .and_then(|()| sandbox::restrict_writes(&write, &[Path::new("/dev/dri")]));
+        .and_then(|()| sandbox::restrict_writes(&write, &[Path::new("/dev/dri")], &connect));
     if let Err(err) = confined {
         tracing::error!(error = %err, "cannot confine the bar with Landlock; refusing to run unconfined");
         return glib::ExitCode::FAILURE;

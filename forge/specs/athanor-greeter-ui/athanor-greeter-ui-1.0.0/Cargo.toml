@@ -9,6 +9,7 @@ description = "The Athanor greeter: one surface, one binary, the process that re
 [dependencies]
 athanor-i18n = { path = "../../../../system/athanor-i18n" }
 athanor-style = { path = "../../../../system/athanor-style" }
+athanor-unit = { path = "../../../../system/athanor-unit" }
 gtk4 = { workspace = true }
 gtk4-layer-shell = { workspace = true }
 glib = { workspace = true }

@@ -497,6 +497,7 @@ version = "1.0.0"
 dependencies = [
  "athanor-i18n",
  "athanor-style",
+ "athanor-unit",
  "glib",
  "greetd_ipc",
  "gtk4",
@@ -570,8 +571,8 @@ dependencies = [
  "athanor-i18n",
  "athanor-layout",
  "athanor-style",
+ "athanor-unit",
  "gtk4",
- "landlock",
  "tracing",
  "tracing-subscriber",
 ]
@@ -816,9 +817,9 @@ name = "athanor-update-notify"
 version = "1.0.0"
 dependencies = [
  "athanor-trust-state",
+ "athanor-unit",
  "chrono",
  "futures-util",
- "landlock",
  "tokio",
  "tracing",
  "tracing-subscriber",

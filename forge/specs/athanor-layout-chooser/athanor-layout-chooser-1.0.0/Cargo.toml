@@ -12,6 +12,6 @@ athanor-i18n = { path = "../../../../system/athanor-i18n" }
 athanor-layout = { path = "../../../../system/athanor-layout" }
 athanor-style = { path = "../../../../system/athanor-style" }
 gtk4 = { workspace = true }
-landlock = { workspace = true }
+athanor-unit = { path = "../../../../system/athanor-unit" }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }

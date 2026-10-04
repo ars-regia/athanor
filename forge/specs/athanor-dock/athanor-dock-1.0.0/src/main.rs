@@ -107,8 +107,14 @@ fn main() -> glib::ExitCode {
         favorites_dir.as_path(),
         Path::new("/tmp"),
     ];
+    // Connections: the runtime directory (the compositor, the accessibility bus) and the
+    // session bus.
+    let session_bus = sandbox::session_bus();
+    let connect: Vec<&Path> = std::iter::once(dirs.runtime.as_path())
+        .chain(session_bus.iter().map(PathBuf::as_path))
+        .collect();
     let confined = sandbox::ensure_single_threaded()
-        .and_then(|()| sandbox::restrict_writes(&write, &[Path::new("/dev/dri")]));
+        .and_then(|()| sandbox::restrict_writes(&write, &[Path::new("/dev/dri")], &connect));
     if let Err(err) = confined {
         tracing::error!(error = %err, "cannot confine the dock with Landlock; refusing to run unconfined");
         return glib::ExitCode::FAILURE;

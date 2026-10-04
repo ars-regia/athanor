@@ -64,11 +64,14 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     // Before any thread exists: the runtime below starts none, but zbus and tokio must be
-    // confined from their first instruction. /proc for the callers' cgroups (BR1).
+    // confined from their first instruction. /proc for the callers' cgroups (BR1); the
+    // session bus is the one socket it connects to.
+    let session_bus = sandbox::session_bus();
     let confined = sandbox::ensure_single_threaded().and_then(|()| {
         sandbox::restrict(
             &[Path::new("/usr"), Path::new("/etc"), Path::new("/proc")],
             &state_dir,
+            &session_bus.iter().map(PathBuf::as_path).collect::<Vec<_>>(),
         )
     });
     if let Err(err) = confined {

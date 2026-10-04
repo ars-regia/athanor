@@ -8,7 +8,7 @@ mod text;
 use futures_util::StreamExt as _;
 use notices::{Notice, Notices, Request, Sent};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 use zbus::zvariant::Value;
@@ -113,7 +113,12 @@ fn main() -> ExitCode {
     // The sandbox comes first, while the process has one thread; the runtime is single-threaded too.
     let confined = sandbox::state_dir().and_then(|dir| {
         sandbox::ensure_single_threaded()?;
-        sandbox::restrict(&[Path::new("/usr"), Path::new("/run/athanor-update")], &dir)?;
+        let buses: Vec<_> = [sandbox::session_bus(), sandbox::system_bus()].into_iter().flatten().collect();
+        sandbox::restrict(
+            &[Path::new("/usr"), Path::new("/run/athanor-update")],
+            &dir,
+            &buses.iter().map(PathBuf::as_path).collect::<Vec<_>>(),
+        )?;
         Ok(dir)
     });
     let state_dir = match confined {
