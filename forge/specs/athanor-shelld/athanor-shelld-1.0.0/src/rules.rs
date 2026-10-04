@@ -7,12 +7,14 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::os::fd::{AsFd, AsRawFd, RawFd};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use nix::errno::Errno;
+use nix::fcntl::OFlag;
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
 use tokio::io::unix::AsyncFd;
 use tokio::sync::mpsc::Sender;
@@ -133,6 +135,17 @@ pub const SETTING_KEYS: [&str; 11] = [
     "trigger_screen_sharing",
 ];
 
+const MAX_WARNINGS: usize = 16;
+
+/// Keep the first warnings and one line for the rest: a junk file must not cost a journal flood.
+fn note(warnings: &mut Vec<String>, message: String) {
+    match warnings.len().cmp(&MAX_WARNINGS) {
+        std::cmp::Ordering::Less => warnings.push(message),
+        std::cmp::Ordering::Equal => warnings.push("further warnings suppressed".to_owned()),
+        std::cmp::Ordering::Greater => {}
+    }
+}
+
 fn boolean(value: &str) -> Option<bool> {
     match value {
         "true" => Some(true),
@@ -191,7 +204,7 @@ pub fn parse_rule(text: &str) -> (Rule, Vec<String>) {
         let (key, value) = match line {
             Ok(pair) => pair,
             Err(bad) => {
-                warnings.push(format!("no `=` in `{bad}`"));
+                note(&mut warnings, format!("no `=` in `{bad}`"));
                 continue;
             }
         };
@@ -213,12 +226,12 @@ pub fn parse_rule(text: &str) -> (Rule, Vec<String>) {
             }
             .map(|t| rule.timeout = t),
             _ => {
-                warnings.push(format!("unknown key `{key}`"));
+                note(&mut warnings, format!("unknown key `{key}`"));
                 continue;
             }
         };
         if ok.is_none() {
-            warnings.push(format!("bad value `{value}` for `{key}`"));
+            note(&mut warnings, format!("bad value `{value}` for `{key}`"));
         }
     }
     (rule, warnings)
@@ -232,7 +245,7 @@ pub fn parse_settings(text: &str) -> (Settings, Vec<String>) {
         let (key, value) = match line {
             Ok(pair) => pair,
             Err(bad) => {
-                warnings.push(format!("no `=` in `{bad}`"));
+                note(&mut warnings, format!("no `=` in `{bad}`"));
                 continue;
             }
         };
@@ -262,12 +275,12 @@ pub fn parse_settings(text: &str) -> (Settings, Vec<String>) {
             "trigger_fullscreen" => boolean(value).map(|b| settings.trigger_fullscreen = b),
             "trigger_screen_sharing" => boolean(value).map(|b| settings.trigger_screen_sharing = b),
             _ => {
-                warnings.push(format!("unknown key `{key}`"));
+                note(&mut warnings, format!("unknown key `{key}`"));
                 continue;
             }
         };
         if ok.is_none() {
-            warnings.push(format!("bad value `{value}` for `{key}`"));
+            note(&mut warnings, format!("bad value `{value}` for `{key}`"));
         }
     }
     // Days alone do not make a window; a window without days is every day.
@@ -400,21 +413,33 @@ impl Rules {
     }
 }
 
+const READ_LIMIT: usize = 64 * 1024;
+
 fn one_line(value: &str) -> bool {
     !value.contains(['\n', '\r'])
 }
 
-/// A missing or unreadable file is every default.
-fn read(path: &Path) -> String {
-    match fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(err) => {
-            if err.kind() != io::ErrorKind::NotFound {
-                warn!(path = %path.display(), %err, "notification rules unreadable, using defaults");
-            }
-            String::new()
-        }
+/// A missing file is every default; a file over the limit or not UTF-8 is an error.
+fn read_text(path: &Path) -> io::Result<String> {
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(String::new()),
+        Err(err) => return Err(err),
+    };
+    let mut bytes = Vec::new();
+    file.take(READ_LIMIT as u64 + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > READ_LIMIT {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "file too large"));
     }
+    String::from_utf8(bytes).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+}
+
+/// For reading rules: any failure is every default, with one warning.
+fn read(path: &Path) -> String {
+    read_text(path).unwrap_or_else(|err| {
+        warn!(path = %path.display(), %err, "notification rules unreadable, using defaults");
+        String::new()
+    })
 }
 
 fn report(path: &Path, warnings: &[String]) {
@@ -433,7 +458,8 @@ fn update(path: &Path, key: &str, value: &str) -> io::Result<()> {
     let new = format!("{key}={value}");
     let mut out = String::new();
     let mut done = false;
-    for line in read(path).lines() {
+    let current = read_text(path)?;
+    for line in current.lines() {
         if line.split_once('=').map(|(k, _)| k.trim()) == Some(key) {
             if done {
                 continue; // a repeated key: the first line took the new value
@@ -449,19 +475,27 @@ fn update(path: &Path, key: &str, value: &str) -> io::Result<()> {
         out.push_str(&new);
         out.push('\n');
     }
-    // The temporary name does not end in `.conf`, so the watch ignores it.
-    let tmp = parent.join(format!(".{}.tmp", name.to_string_lossy()));
+    // Unique, exclusive and never followed: a planted link cannot redirect the write. The name
+    // does not end in `.conf`, so the watch ignores it. A link at the final name is replaced by
+    // the rename, never written through.
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+    let tmp = parent.join(format!(
+        ".{}.{}.{}.tmp",
+        name.to_string_lossy(),
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
     let written = OpenOptions::new()
         .write(true)
-        .create(true)
-        .truncate(true)
+        .create_new(true)
+        .custom_flags(OFlag::O_NOFOLLOW.bits())
         .mode(0o600)
         .open(&tmp)
         .and_then(|mut file| {
             file.write_all(out.as_bytes())
                 .and_then(|()| file.sync_all())
-        })
-        .and_then(|()| fs::rename(&tmp, path));
+                .and_then(|()| fs::rename(&tmp, path))
+        });
     if written.is_err() {
         fs::remove_file(&tmp).ok(); // best effort: the write error is what matters
     }
@@ -517,75 +551,117 @@ pub async fn watch(dir: PathBuf, changed: Sender<PathBuf>) -> io::Result<()> {
         }
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
-    use crate::identity::Identity;
 
     #[test]
     fn an_empty_file_is_every_default() {
         assert_eq!(parse_rule(""), (Rule::default(), vec![]));
         assert_eq!(parse_settings(""), (Settings::default(), vec![]));
     }
-    
+
     #[test]
     fn a_bad_line_costs_only_its_key() {
-        let (rule, warnings) = parse_rule("allowed=false\npopups=maybe\ncolour=red\n# note\n\nsound = false\n");
+        let (rule, warnings) =
+            parse_rule("allowed=false\npopups=maybe\ncolour=red\n# note\n\nsound = false\n");
         assert!(!rule.allowed);
         assert!(rule.popups, "a value that does not parse takes the default");
         assert!(!rule.sound, "whitespace is trimmed");
         assert_eq!(warnings.len(), 2, "{warnings:?}");
     }
-    
+
     #[test]
     fn timeouts_and_lock_screen_parse() {
         assert_eq!(parse_rule("timeout=12").0.timeout, Timeout::Seconds(12));
         assert_eq!(parse_rule("timeout=app").0.timeout, Timeout::App);
         assert_eq!(parse_rule("timeout=0").0.timeout, Timeout::App);
         assert_eq!(parse_rule("timeout=99999").0.timeout, Timeout::App);
-        assert_eq!(parse_rule("lock_screen=none").0.lock_screen, LockScreen::None);
+        assert_eq!(
+            parse_rule("lock_screen=none").0.lock_screen,
+            LockScreen::None
+        );
     }
-    
+
     #[test]
     fn a_schedule_crosses_midnight_on_chosen_days() {
-        let (s, w) = parse_settings("schedule=22:00-07:00\nschedule_days=mon,fri\nretention=forever\n");
+        let (s, w) =
+            parse_settings("schedule=22:00-07:00\nschedule_days=mon,fri\nretention=forever\n");
         assert!(w.is_empty(), "{w:?}");
         let window = s.schedule.expect("window");
         assert_eq!((window.start_min, window.end_min), (22 * 60, 7 * 60));
         assert_eq!(window.days, [true, false, false, false, true, false, false]);
         assert_eq!(s.retention, Retention::UntilCleared);
-        for bad in ["schedule=07:00-07:00", "schedule=25:00-07:00", "schedule=7-8", "schedule_days="] {
+        for bad in [
+            "schedule=07:00-07:00",
+            "schedule=25:00-07:00",
+            "schedule=7-8",
+            "schedule_days=",
+        ] {
             assert_eq!(parse_settings(bad).1.len(), 1, "{bad}");
         }
     }
-    
+
     #[test]
     fn set_rule_keeps_other_lines_and_refuses_paths() {
         let dir = std::env::temp_dir().join(format!("athanor-shelld-rules-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("apps")).expect("mkdir");
-        std::fs::write(dir.join("apps/org.example.Chat.conf"), "# mine\nsound=false\n").expect("seed");
+        std::fs::write(
+            dir.join("apps/org.example.Chat.conf"),
+            "# mine\nsound=false\n",
+        )
+        .expect("seed");
         let mut rules = Rules::new(dir.clone());
-        rules.set_rule("org.example.Chat", "allowed", "false").expect("set");
+        rules
+            .set_rule("org.example.Chat", "allowed", "false")
+            .expect("set");
         let text = std::fs::read_to_string(dir.join("apps/org.example.Chat.conf")).expect("read");
         assert_eq!(text, "# mine\nsound=false\nallowed=false\n");
         let mode = std::os::unix::fs::PermissionsExt::mode(
-            &std::fs::metadata(dir.join("apps/org.example.Chat.conf")).expect("meta").permissions());
+            &std::fs::metadata(dir.join("apps/org.example.Chat.conf"))
+                .expect("meta")
+                .permissions(),
+        );
         assert_eq!(mode & 0o777, 0o600);
         for app in ["../../.bashrc", "a/b", ".hidden", "other.conf/../../x"] {
-            assert!(matches!(rules.set_rule(app, "allowed", "false"), Err(RuleError::BadApp)), "{app}");
+            assert!(
+                matches!(
+                    rules.set_rule(app, "allowed", "false"),
+                    Err(RuleError::BadApp)
+                ),
+                "{app}"
+            );
         }
-        assert!(matches!(rules.set_rule("org.example.Chat", "colour", "red"), Err(RuleError::BadKey)));
-        assert!(matches!(rules.set_rule("org.example.Chat", "allowed", "maybe"), Err(RuleError::BadValue)));
-        assert_eq!(std::fs::read_dir(&dir).expect("ls").count(), 1, "nothing written outside apps/");
+        assert!(matches!(
+            rules.set_rule("org.example.Chat", "colour", "red"),
+            Err(RuleError::BadKey)
+        ));
+        assert!(matches!(
+            rules.set_rule("org.example.Chat", "allowed", "maybe"),
+            Err(RuleError::BadValue)
+        ));
+        assert_eq!(
+            std::fs::read_dir(&dir).expect("ls").count(),
+            1,
+            "nothing written outside apps/"
+        );
         rules.set_rule("", "popups", "false").expect("other");
-        assert_eq!(std::fs::read_to_string(dir.join("other.conf")).expect("read"), "popups=false\n");
-        rules.set_rule("other", "popups", "true").expect("an application named other");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("other.conf")).expect("read"),
+            "popups=false\n"
+        );
+        rules
+            .set_rule("other", "popups", "true")
+            .expect("an application named other");
         assert!(dir.join("apps/other.conf").exists());
-        assert!(!rules.rule(&Identity::Other).popups, "Other's rule is not the application's");
+        assert!(
+            !rules.rule(&Identity::Other).popups,
+            "Other's rule is not the application's"
+        );
         std::fs::remove_dir_all(dir).expect("cleanup");
     }
-    
+
     #[tokio::test(flavor = "current_thread")]
     async fn a_file_changed_on_disk_is_read_again() {
         let dir = std::env::temp_dir().join(format!("athanor-shelld-watch-{}", std::process::id()));
@@ -597,10 +673,91 @@ mod tests {
         tokio::spawn(watch(dir.clone(), tx));
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         std::fs::write(dir.join("apps/org.example.Chat.conf"), "allowed=false\n").expect("write");
-        let path = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await.expect("event").expect("path");
+        let path = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("event")
+            .expect("path");
         assert_eq!(path, Path::new("apps/org.example.Chat.conf"));
-        assert_eq!(rules.invalidate(&path), Some(Changed::Rule("org.example.Chat".into())));
+        assert_eq!(
+            rules.invalidate(&path),
+            Some(Changed::Rule("org.example.Chat".into()))
+        );
         assert!(!rules.rule(&chat).allowed);
         std::fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("athanor-shelld-{name}-{}", std::process::id()));
+        fs::remove_dir_all(&dir).ok();
+        fs::create_dir_all(dir.join("apps")).expect("mkdir");
+        dir
+    }
+
+    #[test]
+    fn planted_links_are_never_written_through() {
+        use std::os::unix::fs::symlink;
+        let dir = scratch("links");
+        let victim = dir.join("victim");
+        fs::write(&victim, "precious\n").expect("victim");
+        symlink(&victim, dir.join("apps/.org.example.Chat.conf.tmp")).expect("old temp name");
+        symlink(&victim, dir.join("apps/org.example.Chat.conf")).expect("final name");
+        let mut rules = Rules::new(dir.clone());
+        rules
+            .set_rule("org.example.Chat", "allowed", "false")
+            .expect("set");
+        assert_eq!(fs::read_to_string(&victim).expect("victim"), "precious\n");
+        let target = dir.join("apps/org.example.Chat.conf");
+        assert!(!fs::symlink_metadata(&target)
+            .expect("meta")
+            .file_type()
+            .is_symlink());
+        assert!(fs::read_to_string(&target)
+            .expect("read")
+            .contains("allowed=false\n"));
+        fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    #[test]
+    fn an_unreadable_file_is_refused_not_overwritten() {
+        let dir = scratch("invalid");
+        let file = dir.join("apps/org.example.Chat.conf");
+        let bytes = b"# mine\nsound=false\n\xff";
+        fs::write(&file, bytes).expect("seed");
+        let mut rules = Rules::new(dir.clone());
+        assert!(matches!(
+            rules.set_rule("org.example.Chat", "allowed", "false"),
+            Err(RuleError::Io(_))
+        ));
+        assert_eq!(fs::read(&file).expect("read"), bytes);
+        fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    #[test]
+    fn a_file_over_the_limit_is_defaults_and_one_warning() {
+        let dir = scratch("big");
+        let file = dir.join("apps/org.example.Chat.conf");
+        let text = format!("allowed=false\n{}", "# padding\n".repeat(8000));
+        assert!(text.len() > READ_LIMIT);
+        fs::write(&file, &text).expect("seed");
+        assert!(read_text(&file).is_err());
+        let mut rules = Rules::new(dir.clone());
+        assert!(
+            rules
+                .rule(&Identity::App("org.example.Chat".into()))
+                .allowed
+        );
+        assert!(matches!(
+            rules.set_rule("org.example.Chat", "popups", "false"),
+            Err(RuleError::Io(_))
+        ));
+        fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    #[test]
+    fn warnings_are_capped() {
+        let junk = "colour=red\n".repeat(10_000);
+        assert!(parse_rule(&junk).1.len() <= 17);
+        assert!(parse_settings(&junk).1.len() <= 17);
     }
 }
