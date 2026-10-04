@@ -1,7 +1,8 @@
 #!/usr/bin/python3
 """cc_window.py N - one GTK window with the app id org.athanor.CcWindowN and the title
 cc-window-N: a subject the compositor client can find, act on and close.
-SIGUSR1 retitles every window with the text of /tmp/cc-window-N.title."""
+SIGUSR1 retitles every window with the text of /tmp/cc-window-N.title.
+SIGUSR2 toggles fullscreen on every window."""
 
 import signal
 import sys
@@ -29,6 +30,16 @@ def retitle():
     return GLib.SOURCE_CONTINUE
 
 
+def toggle_fullscreen():
+    for window in app.get_windows():
+        if window.is_fullscreen():
+            window.unfullscreen()
+        else:
+            window.fullscreen()
+    return GLib.SOURCE_CONTINUE
+
+
 GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, retitle)
+GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR2, toggle_fullscreen)
 app.connect("activate", present)
 sys.exit(app.run([]))

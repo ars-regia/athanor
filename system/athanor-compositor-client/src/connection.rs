@@ -219,6 +219,12 @@ impl Client {
         self.inner.state.borrow().keyboard_group
     }
 
+    /// Whether the compositor describes its windows (COSMIC's toplevel extension): without
+    /// it `windows` stays empty whatever is on screen.
+    pub fn toplevel_info_available(&self) -> bool {
+        self.inner.state.borrow().globals.toplevel_info.is_some()
+    }
+
     /// `None` when the compositor offers no accessibility protocol.
     pub fn accessibility(&self) -> Option<Accessibility> {
         let state = self.inner.state.borrow();

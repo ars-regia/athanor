@@ -9,6 +9,7 @@ check and exits 1 if any fails.
 import os
 import re
 import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -287,6 +288,37 @@ def main():
     if switches:
         switches[0].do_action(0)
     check("do not disturb turns off", wait_for(logged("SetDoNotDisturb False"), 3))
+
+    check("the list closes before the fullscreen window", toggle_list(app, Atspi, False))
+    check(
+        "the bar reports no fullscreen window after the list",
+        wait_for(logged("ReportFullscreen True False"), 3),
+    )
+    window = subprocess.Popen(
+        [sys.executable, str(Path(__file__).resolve().parent / "cc_window.py"), "1"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(2)
+        window.send_signal(signal.SIGUSR2)
+        check(
+            "a fullscreen window with the focus is reported",
+            wait_for(logged("ReportFullscreen True True"), 5),
+        )
+        window.send_signal(signal.SIGUSR2)
+        check(
+            "leaving fullscreen is reported",
+            wait_for(
+                lambda: log.read_text(encoding="utf-8")
+                .splitlines()[-1:] == ["ReportFullscreen True False"],
+                5,
+            ),
+        )
+    finally:
+        window.terminate()
+        window.wait()
+    check("the list opens again for clear all", toggle_list(app, Atspi, True))
 
     check("clear all", press(app, Atspi, "Clear all"))
     check(

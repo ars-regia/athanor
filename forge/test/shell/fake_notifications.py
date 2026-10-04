@@ -53,6 +53,7 @@ NODE = Gio.DBusNodeInfo.new_for_xml(f"""
       <arg type="u" direction="in"/><arg type="s" direction="in"/><arg type="s" direction="in"/>
     </method>
     <method name="SetDoNotDisturb"><arg type="b" direction="in"/></method>
+    <method name="ReportFullscreen"><arg type="b" direction="in"/><arg type="b" direction="in"/></method>
     <signal name="Added"><arg type="{WIRE}"/></signal>
     <signal name="Replaced"><arg type="{WIRE}"/></signal>
     <signal name="Closed"><arg type="u"/><arg type="u"/></signal>
@@ -197,6 +198,10 @@ class Daemon:
                 return
             if not notice["resident"]:
                 self.close(id_, 2)
+            invocation.return_value(None)
+        elif method == "ReportFullscreen":
+            available, active = parameters.unpack()
+            log(f"ReportFullscreen {available} {active}")
             invocation.return_value(None)
         elif method == "SetDoNotDisturb":
             (on,) = parameters.unpack()

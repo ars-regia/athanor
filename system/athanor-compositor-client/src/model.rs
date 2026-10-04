@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 /// A window for as long as it exists. Never reused within one [`crate::Client`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct WindowId(pub(crate) u64);
 
 /// A workspace for as long as it exists. Never reused within one [`crate::Client`].
@@ -39,7 +39,7 @@ impl WindowState {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Window {
     pub id: WindowId,
     pub app_id: String,

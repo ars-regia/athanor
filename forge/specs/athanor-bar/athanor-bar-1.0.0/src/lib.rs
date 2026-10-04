@@ -7,6 +7,7 @@ pub mod battery;
 pub mod bluetooth;
 pub mod clock;
 pub mod dbusmenu;
+pub mod fullscreen;
 pub mod keyboard;
 pub mod network;
 pub mod notices;

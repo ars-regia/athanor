@@ -8,6 +8,7 @@ use std::collections::{HashMap, VecDeque};
 use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
+use athanor_bar::fullscreen::fullscreen_active;
 use athanor_bar::notices::{self, Held, Notice, Picture, WIRE_SIGNATURE};
 use athanor_bar::order::Module;
 use athanor_bar::popups::{target_output, Popups};
@@ -64,6 +65,9 @@ pub struct Service {
     held: RefCell<Held>,
     popups: RefCell<Popups>,
     dnd: Cell<bool>,
+    /// The last `(available, active)` sent to the daemon; `None` until the first send for
+    /// this owner.
+    fullscreen: Cell<Option<(bool, bool)>>,
     ticking: Cell<bool>,
     last_tick: Cell<Option<Instant>>,
     /// `ATHANOR_BAR_OPEN=notifications` came before the list: open once it is live.
@@ -109,6 +113,7 @@ impl Service {
                 held: RefCell::new(Held::default()),
                 popups: RefCell::new(Popups::default()),
                 dnd: Cell::new(false),
+                fullscreen: Cell::new(None),
                 ticking: Cell::new(false),
                 last_tick: Cell::new(None),
                 pending_open: Cell::new(false),
@@ -225,6 +230,8 @@ impl Service {
         self.ensure_ticking();
         self.changed();
         self.read_dnd();
+        self.fullscreen.set(None);
+        self.report_fullscreen();
         if self.pending_open.replace(false) {
             let bar = self.bar.clone();
             // After this turn of the main loop, so the button is allocated when it opens.
@@ -497,6 +504,24 @@ impl Service {
         });
     }
 
+    /// Tells the daemon whether a fullscreen window has the focus, when that changed since
+    /// the last report to this owner. A compositor that withholds the toplevel list is
+    /// reported once as unobservable.
+    pub(super) fn report_fullscreen(&self) {
+        let value = match self.bar.upgrade() {
+            Some(bar) => match bar.client().filter(|c| c.toplevel_info_available()) {
+                Some(client) => (true, fullscreen_active(&client.windows())),
+                None => (false, false),
+            },
+            None => return,
+        };
+        if self.state.get() != State::Live || self.fullscreen.get() == Some(value) {
+            return;
+        }
+        self.fullscreen.set(Some(value));
+        self.call("ReportFullscreen", value.to_variant());
+    }
+
     fn clear_all(&self) {
         let ids: Vec<u32> = self
             .held
@@ -520,6 +545,7 @@ impl Service {
 
     fn reset(&self) {
         self.generation.set(self.generation.get().wrapping_add(1));
+        self.fullscreen.set(None);
         self.retried.set(false);
         self.subscription.take();
         self.peer.take();

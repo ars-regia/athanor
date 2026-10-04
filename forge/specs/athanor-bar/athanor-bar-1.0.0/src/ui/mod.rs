@@ -582,6 +582,9 @@ impl Bar {
             let weak = Rc::downgrade(self);
             client.connect_events(move |_, event| {
                 if let Some(bar) = weak.upgrade() {
+                    if matches!(changed_by(event), Changed::Windows) {
+                        bar.notifications.report_fullscreen();
+                    }
                     bar.refresh(changed_by(event));
                 }
             });
