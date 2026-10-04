@@ -137,7 +137,7 @@ Athanor OS anchors its core capabilities around 4 specialized system services:
 
 ### 2.6 Native Pure-Rust Core Subsystems
 
-Athanor OS implements 4 native **Pure Rust** system daemons:
+Athanor OS implements 3 native **Pure Rust** system daemons:
 
 1. **`Systemd Monitor`** ([`system/Systemd Monitor`](./Systemd Monitor))  
    Systemd State Monitor & Health Recovery daemon. Actively listens to systemd DBus to monitor critical service states.
@@ -145,8 +145,6 @@ Athanor OS implements 4 native **Pure Rust** system daemons:
    Replaced custom incomplete audio buses with the industry-standard PipeWire and WirePlumber for secure and flawless DSP audio routing.
 3. **`athanor-greeter`** ([`system/athanor-greeter`](./athanor-greeter))  
    Display Manager featuring TPM 2.0 PCR hardware attestation. Implements `ZeroizeOnDrop` wrappers for immediate credential zeroing in RAM.
-4. **`xdg-desktop-portal-athanor`** ([`forge/...`](../forge/specs/athanor-xdg-desktop-portal-athanor/xdg-desktop-portal-athanor-1.0.0))  
-   Strict Fail-Closed Zero-Trust Portal. Flatpak permissions are unconditionally denied if the security prompt fails. VM isolation verified via cryptographic DBus, not spoofable string names.
 
 ---
 

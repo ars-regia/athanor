@@ -25,7 +25,6 @@
     "cliphist",
     "backup",
     "update",
-    "xdg-desktop-portal-athanor",
     "secure-boot",
     "lvfs-rs",
     "tetragon",
@@ -84,7 +83,6 @@
     "system-config",
     "backup",
     "update",
-    "xdg-desktop-portal-athanor",
     "lvfs-rs",
     "qa",
     "athanor-semantic-db"

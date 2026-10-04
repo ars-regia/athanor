@@ -1,7 +1,6 @@
 # The frozen workspace of the old shell (doc_shell.md, SH4; decision of 2026-09-19).
 # athanor-shell-rs is not ported to GTK 0.11: it stays here at GTK 0.7 with its own lock
-# file and is mined for the code worth keeping until it is empty, then deleted. It still
-# ships, because xdg-desktop-portal-athanor runs its file chooser and privacy prompt.
+# file and is mined for the code worth keeping until it is empty, then deleted.
 # The dependency table is the root's as of the freeze. Do not bump it.
 [workspace]
 members = [

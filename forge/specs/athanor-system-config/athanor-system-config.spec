@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:48.fc43}
+Release:        %{?autorelease}%{!?autorelease:49.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        MIT
 URL:            https://github.com/hr-mes/athanor-forge
@@ -17,7 +17,8 @@ Requires: cosmic-greeter cosmic-idle
 # Core UI andDaemons
 Requires: athanor-greeter-ui
 Requires: athanor-calmo
-Requires: xdg-desktop-portal-athanor
+# athanor-portals.conf routes the portal interfaces to these two backends.
+Requires: xdg-desktop-portal-gtk gnome-keyring
 # The eBPF monitor and the cloud agent are integrations the configuration is ready
 # for, not prerequisites of the configuration itself: weak dependencies.
 Recommends: athanor-sysmon-ebpf athanor-cloud-rs
@@ -83,6 +84,7 @@ mkdir -p /etc/yum.repos.d
 /usr/lib/systemd/system-preset/80-athanor-display-manager.preset
 /usr/lib/systemd/system-preset/80-athanor-system.preset
 /usr/lib/tmpfiles.d/10-athanor-greetd.conf
+/usr/share/xdg-desktop-portal/athanor-portals.conf
 /usr/share/athanor-system-config/greetd.toml
 /usr/share/athanor-system-config/usbguard-daemon.conf
 /usr/share/athanor-system-config/athanor-forge.repo
@@ -91,6 +93,14 @@ mkdir -p /etc/yum.repos.d
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Sun Oct 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-49
+- Route the session's portal interfaces by name in athanor-portals.conf: the
+  file chooser to the GTK backend, secrets to gnome-keyring, and no backend for
+  screen capture. Drop the dependency on xdg-desktop-portal-athanor, whose
+  ScreenCast returned a fixed PipeWire node and whose SaveFile returned a fixed
+  path; Athanor's own portal is designed in doc_portal.md. Require the two backends
+  the file names.
+
 * Fri Oct 02 2026 Athanor Forge <forge@athanor.os> - 1.0.0-48
 - athanor-desktop publishes XDG_SESSION_CLASS, read from logind, to the user manager:
   localsearch's unit requires it and never started.

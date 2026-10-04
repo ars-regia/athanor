@@ -17,7 +17,6 @@ members = [
   "forge/specs/athanor-sysmon-ebpf/athanor-sysmon-ebpf-1.0.0",
   "forge/specs/athanor-update/athanor-update-1.0.0",
   "forge/specs/athanor-update/athanor-update-notify-1.0.0",
-  "forge/specs/athanor-xdg-desktop-portal-athanor/xdg-desktop-portal-athanor-1.0.0",
   "forge/specs/athanor-niri-ipc",
   "system/confidential_computing/athanor-attestation",
   "system/ebpf/ebpf-core",
