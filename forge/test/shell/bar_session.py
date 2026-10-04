@@ -402,6 +402,11 @@ def main():
         DBUS_SYSTEM_BUS_ADDRESS=f"unix:path={SYSTEM_BUS}",
         NOTIFY_SOCKET=NOTIFY_SOCKET,
     )
+    if args.client == "athanor-launcher":
+        # Not under the frozen clock: the launcher confines itself with Landlock, and a
+        # libfaketime preloaded into the qalc it starts cannot open its semaphore under
+        # /dev/shm, so qalc hangs. The launcher shows no clock.
+        env = {k: v for k, v in env.items() if k != "LD_PRELOAD" and not k.startswith("FAKETIME")}
     if args.fixtures:
         env["ATHANOR_BAR_BACKLIGHT_DIR"] = str(system_fixtures.BACKLIGHT_DIR)
     running = {"bar": start_bar(args.client, env, args.log), "shelld": shelld}

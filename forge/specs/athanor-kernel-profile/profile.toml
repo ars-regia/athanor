@@ -5,7 +5,9 @@
 # and writes the effective profiles to SOURCES/usr/share/athanor/kernel-profile.
 #
 # Block P1 declares the settings of the profile that are already in force on the image;
-# later blocks extend the manifest as they deliver the rest.
+# later blocks extend the manifest as they deliver the rest. The [base.cmdline] table is
+# the only source of the base kernel command line: kernel_profile.py generates from it the
+# kargs.d file of this package and forge/specs/azoth/cmdline, used by the boot matrix.
 schema = 1
 
 # One kernel binary for every role (D1): a build option is never a role setting, so
@@ -31,6 +33,13 @@ CONFIG_SHUFFLE_PAGE_ALLOCATOR = { value = "y", decision = "section 5", locked = 
 CONFIG_DRM_PANIC = { value = "y", decision = "section 11", locked = true }
 CONFIG_BTRFS_FS = { value = "y", decision = "D17", locked = true }
 CONFIG_EROFS_FS = { value = "y", decision = "section 5", locked = true }
+# Defaults that make command line parameters redundant (section 6): slab_nomerge,
+# randomize_kstack_offset=on, init_on_alloc=1, ima_hash=sha256 and mitigations=auto.
+CONFIG_SLAB_MERGE_DEFAULT = { value = "n", decision = "section 6", locked = true }
+CONFIG_RANDOMIZE_KSTACK_OFFSET_DEFAULT = { value = "y", decision = "section 6", locked = true }
+CONFIG_INIT_ON_ALLOC_DEFAULT_ON = { value = "y", decision = "section 6", locked = true }
+CONFIG_IMA_DEFAULT_HASH_SHA256 = { value = "y", decision = "section 6", locked = true }
+CONFIG_CPU_MITIGATIONS = { value = "y", decision = "section 6", locked = true }
 
 [base.sysctl]
 "kernel.kptr_restrict" = { value = "2", decision = "D47", locked = true }
@@ -42,6 +51,23 @@ CONFIG_EROFS_FS = { value = "y", decision = "section 5", locked = true }
 lockdown = { value = "integrity", decision = "section 5", locked = true }
 # LSMs that must be active; others (capability, ima, evm) may be present as well.
 lsm = { value = ["lockdown", "yama", "selinux", "bpf", "landlock", "ipe"], decision = "section 5" }
+
+# The base kernel command line (section 6). module.sig_enforce is not here because
+# CONFIG_MODULE_SIG_FORCE already enforces it; lockdown, init_on_free, vsyscall and debugfs
+# stay until block P2 builds them in; intel_iommu and efi until block P4b builds them in
+# with the compatibility profile of D45; ima_policy until P4b replaces it with the policy
+# of D46. Capability-specific parameters (mem_encrypt, kvm_amd.sev, kvm_intel.tdx) belong
+# to roles (block P5), never to the base.
+[base.cmdline]
+"page_alloc.shuffle" = { value = "1", decision = "section 6", locked = true }
+amd_pstate = { value = "active", decision = "section 6" }
+lockdown = { value = "integrity", decision = "section 6", locked = true }
+init_on_free = { value = "1", decision = "section 6", locked = true }
+vsyscall = { value = "none", decision = "section 6", locked = true }
+debugfs = { value = "off", decision = "section 6", locked = true }
+intel_iommu = { value = "on", decision = "D16", locked = true }
+efi = { value = "disable_early_pci_dma", decision = "section 6", locked = true }
+ima_policy = { value = "tcb", decision = "D23", locked = true }
 
 # Shared by desktop and laptop (D18); settings arrive with block P5.
 [fragments.interactive]

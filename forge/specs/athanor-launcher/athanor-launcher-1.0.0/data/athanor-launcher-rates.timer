@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh the currency rates of the launcher's calculator once a day
+Documentation=https://github.com/hr-mes/athanor/blob/iso-v0/docs/architecture/doc_launcher.md
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

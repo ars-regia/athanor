@@ -1,0 +1,10 @@
+// Lets athanor-runner.service hold a sleep inhibitor while a job runs (vm.sh,
+// hold_sleep_inhibitor). The service runs as its dynamic user, outside any login session,
+// where logind's default for this action is auth_admin_keep: a password no one can type.
+// Only this action, only that user: delay inhibitors, shutdown and the other logind
+// actions keep their defaults.
+polkit.addRule(function (action, subject) {
+  if (action.id == "org.freedesktop.login1.inhibit-block-sleep" && subject.user == "athanor-runner") {
+    return polkit.Result.YES;
+  }
+});

@@ -6,12 +6,12 @@
 # the mirror already holds every locked RPM. The RPMs come from `lock.py fetch`, verified by
 # hash; a file neither the mirror nor the vendor repository still has fails the run.
 #
-# Usage: mirror.sh open|legacy. Needs oras, logged in to the registry with push rights, and
+# Usage: mirror.sh open|legacy|container-toolkit. Needs oras, logged in to the registry with push rights, and
 # KERNEL_REGISTRY as system/kernel-artifacts.sh resolves it. The package must allow anonymous
 # pulls: the image build reads it without credentials, and the check after the push does too.
 set -euo pipefail
 
-branch=${1:?usage: mirror.sh open|legacy}
+branch=${1:?usage: mirror.sh open|legacy|container-toolkit}
 NV=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 die() {
     echo "mirror.sh: $*" >&2

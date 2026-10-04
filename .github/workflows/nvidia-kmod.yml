@@ -116,7 +116,7 @@ jobs:
       - name: Build the nvidia image
         env:
           BUILDAH_ISOLATION: chroot
-        run: podman build -t localhost/azoth-nvidia forge/specs/azoth/nvidia
+        run: podman build -t localhost/azoth-nvidia -f forge/specs/azoth/nvidia/Containerfile forge/specs/azoth
 
       - name: Kernel-devel from the published image, by digest
         # Only for scripts/sign-file, which nvidia.sh extracts from the RPM.
@@ -225,7 +225,7 @@ jobs:
       - name: Build the boot-matrix image
         env:
           BUILDAH_ISOLATION: chroot
-        run: podman build -t localhost/azoth-boot forge/specs/azoth/boot
+        run: podman build -t localhost/azoth-boot -f forge/specs/azoth/boot/Containerfile forge/specs/azoth
 
       - name: Run boot.sh with the signed modules
         # Every case: the trust in the module signing key is compiled into the kernel, so

@@ -46,7 +46,7 @@ jobs:
       - name: Build the nvidia image
         env:
           BUILDAH_ISOLATION: chroot
-        run: podman build -t localhost/azoth-nvidia forge/specs/azoth/nvidia
+        run: podman build -t localhost/azoth-nvidia -f forge/specs/azoth/nvidia/Containerfile forge/specs/azoth
 
       - name: Kernel-devel from the artifact
         if: ${{ inputs.devel-artifact != '' }}

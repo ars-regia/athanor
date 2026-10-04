@@ -31,18 +31,23 @@ RUN mkdir -p /run/user/1000 && chmod 700 /run/user/1000
 
 # The fixtures of the system modules (doc_bar.md, BR9): python3-dbusmock for NetworkManager,
 # BlueZ, UPower and the power profiles, and PipeWire with its PulseAudio server for the audio
-# module. libpulse-mainloop-glib is what athanor-bar links for audio.
+# module. libpulse-mainloop-glib is what athanor-bar links for audio. The launcher
+# (doc_launcher.md) adds qalculate (calculator), localsearch and tinysparql (files) and
+# poppler-glib (PDF previews); the build stage gets the headers of the last two.
 FROM ${RIG_BASE} AS rig
 RUN dnf5 -y install --setopt=install_weak_deps=False \
       python3-dbusmock pipewire wireplumber pipewire-pulseaudio pipewire-utils \
       pulseaudio-utils pulseaudio-libs-glib2 \
+      qalculate localsearch tinysparql poppler-glib \
   && dnf5 clean all
 
 # The build stage compiles our GTK crates against the same GTK the rig runs.
 FROM rig AS build
+# glycin (athanor-preview-render) links libseccomp and fontconfig.
 RUN dnf5 -y install --setopt=install_weak_deps=False \
       rust cargo clippy gcc gcc-c++ clang-devel pkgconf-pkg-config \
       gtk4-devel glib2-devel gtk4-layer-shell-devel \
       speech-dispatcher-devel upower-devel pam-devel tpm2-tss-devel systemd-devel \
-      pulseaudio-libs-devel \
+      pulseaudio-libs-devel tinysparql-devel poppler-glib-devel \
+      libseccomp-devel fontconfig-devel \
   && dnf5 clean all

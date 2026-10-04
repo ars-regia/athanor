@@ -1,0 +1,70 @@
+[Unit]
+Description=Athanor launcher
+Documentation=https://github.com/hr-mes/athanor/blob/iso-v0/docs/architecture/doc_launcher.md
+# Enabled by hand until the switch (doc_launcher.md, LA12): systemctl --user enable --now
+# athanor-launcher. The session bus also starts it through os.athanor.Launcher1 (LA8).
+After=graphical-session.target athanor-desktop.service
+Requisite=athanor-desktop.service
+PartOf=graphical-session.target
+# The calculator's exchange rates (Task 6) matter only while the launcher runs.
+Wants=athanor-launcher-rates.timer
+# The launcher counts its own failures and runs without files, providers and usage after
+# five in ten minutes (doc_shell.md, SH8); this is only the outer backstop.
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+[Service]
+Type=notify
+BusName=os.athanor.Launcher1
+ExecStart=/usr/bin/athanor-launcher
+ExecStopPost=/usr/bin/athanor-launcher --record-exit
+TimeoutStartSec=20s
+Restart=on-failure
+RestartSec=1s
+RestartSteps=5
+RestartMaxDelaySec=60s
+Slice=session.slice
+# SH4: always-on surfaces are drawn with Cairo, on every GPU.
+Environment=GSK_RENDERER=cairo
+Environment=XDG_CACHE_HOME=%C/athanor-launcher
+CacheDirectory=athanor-launcher
+# Budget 80 MB PSS at rest (doc_launcher.md, open doubt 4). MemoryHigh throttles well above
+# it; MemoryMax is the hard cap for an icon theme loaded at once.
+MemoryHigh=128M
+MemoryMax=256M
+
+# Same as the bar: the failure record survives a stop, and "athanor" holds the launch
+# sockets of BR2 under ProtectSystem=strict.
+RuntimeDirectory=athanor-launcher athanor
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+# ~/.local/state/athanor/search/usage.json (LA3).
+StateDirectory=athanor/search
+# cosmic-comp's shortcuts, where Super is bound to Show once per user (LA8). The unit must
+# grant it under ProtectHome=read-only for that one write, made before the launcher's
+# Landlock ruleset, which then closes the directory for the rest of the run.
+ConfigurationDirectory=cosmic/com.system76.CosmicSettings.Shortcuts/v1
+
+ProtectSystem=strict
+# Read-only: the preview reads files (LA9).
+ProtectHome=read-only
+PrivateTmp=yes
+NoNewPrivileges=yes
+# No @mount: the Landlock ruleset denies mount(2), so glycin's bubblewrap cannot run in this
+# process (doc_launcher.md, LA9); the preview decodes in a transient unit instead.
+SystemCallFilter=@system-service
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# Wayland, D-Bus and journald over Unix sockets, for the launcher and the qalc, flatpak and
+# systemd-run it starts. glycin's bubblewrap runs in the decoder's own transient unit, with
+# its own address families, so no netlink here. No AF_INET: the launcher never reaches the
+# network (LA9), and Landlock says so again.
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=athanor-session.target

@@ -1,0 +1,181 @@
+use std::path::PathBuf;
+
+use athanor_search::command::Refusal;
+use athanor_search::item::{Action, Group};
+use athanor_search::rank::Ranker;
+use athanor_search::usage::Usage;
+use athanor_search::{apps, command, web, windows};
+use gio::prelude::*;
+
+fn fixtures() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/applications")
+}
+
+fn catalog() -> apps::Catalog {
+    let infos = std::fs::read_dir(fixtures())
+        .expect("fixtures")
+        .filter_map(|entry| gio_unix::DesktopAppInfo::from_filename(entry.ok()?.path()))
+        .map(|info| info.upcast::<gio::AppInfo>());
+    apps::Catalog::from_infos(infos, "org.example.Settings.")
+}
+
+fn titles(hits: &[athanor_search::item::Hit]) -> Vec<&str> {
+    hits.iter().map(|hit| hit.title.as_str()).collect()
+}
+
+#[test]
+fn applications_and_settings_pages_are_split_and_hidden_entries_dropped() {
+    let catalog = catalog();
+    let apps: Vec<_> = catalog.apps.iter().map(|e| e.id.as_str()).collect();
+    let settings: Vec<_> = catalog.settings.iter().map(|e| e.id.as_str()).collect();
+    assert!(apps.contains(&"org.mozilla.firefox.desktop"));
+    assert!(!apps.contains(&"hidden.desktop") && !settings.contains(&"hidden.desktop"));
+    assert_eq!(settings, ["org.example.Settings.Wireless.desktop"]);
+}
+
+#[test]
+fn an_application_is_found_by_its_generic_name_and_keywords() {
+    let catalog = catalog();
+    let usage = Usage::default();
+    for query in ["browser", "www", "firefox"] {
+        let hits = apps::search(&catalog.apps, Group::Apps, query, &mut Ranker::new(query), &usage, 0);
+        assert_eq!(titles(&hits), ["Firefox"], "{query}");
+        assert_eq!(hits[0].action, Action::Launch { desktop_id: "org.mozilla.firefox.desktop".into() });
+        assert_eq!(hits[0].key, "app:org.mozilla.firefox.desktop");
+    }
+}
+
+#[test]
+fn a_settings_page_is_found_by_a_keyword() {
+    let catalog = catalog();
+    let hits = apps::search(&catalog.settings, Group::Settings, "network", &mut Ranker::new("network"), &Usage::default(), 0);
+    assert_eq!(titles(&hits), ["Wi-Fi"]);
+    assert_eq!(hits[0].group, Group::Settings);
+}
+
+#[test]
+fn a_name_with_a_bidirectional_override_is_shown_without_it() {
+    let catalog = catalog();
+    let evil = catalog.apps.iter().find(|e| e.id == "bidi.desktop").expect("fixture");
+    assert!(!evil.name.contains('\u{202e}'), "{:?}", evil.name);
+}
+
+#[test]
+fn usage_reorders_within_a_tier_and_a_learned_query_wins() {
+    let catalog = catalog();
+    let mut usage = Usage::default();
+    usage.record("w", "app:org.mozilla.firefox.desktop", 0);
+    let hits = apps::search(&catalog.apps, Group::Apps, "w", &mut Ranker::new("w"), &usage, 0);
+    assert!(hits.iter().any(|h| h.learned && h.title == "Firefox"));
+}
+
+#[test]
+fn windows_are_found_by_title_and_application() {
+    let open = [
+        windows::WindowEntry { index: 0, title: "Relazione_Q3.odt — LibreOffice".into(), app_id: "libreoffice-writer".into(), app_name: Some("LibreOffice Writer".into()), icon: None },
+        windows::WindowEntry { index: 1, title: "~ : bash".into(), app_id: "org.example.Terminal".into(), app_name: Some("COSMIC Terminal".into()), icon: None },
+    ];
+    let hits = windows::search(&open, "relaz", &mut Ranker::new("relaz"), &Usage::default(), 0);
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].action, Action::Window { index: 0 });
+    let hits = windows::search(&open, "terminal", &mut Ranker::new("terminal"), &Usage::default(), 0);
+    assert_eq!(hits[0].action, Action::Window { index: 1 });
+}
+
+#[test]
+fn a_window_row_carries_the_icon_of_its_entry() {
+    let icon: gio::Icon = gio::ThemedIcon::new("org.example.Editor").upcast();
+    let entry = |icon| windows::WindowEntry { index: 0, title: "notes".into(), app_id: "org.example.Editor".into(), app_name: None, icon };
+    let hits = windows::search(&[entry(Some(icon.clone()))], "notes", &mut Ranker::new("notes"), &Usage::default(), 0);
+    assert_eq!(hits[0].icon.as_ref().map(|i| i.equal(Some(&icon))), Some(true));
+    let hits = windows::search(&[entry(None)], "notes", &mut Ranker::new("notes"), &Usage::default(), 0);
+    assert!(hits[0].icon.is_none());
+}
+
+#[test]
+fn the_command_prefix_parses_a_command_line() {
+    assert_eq!(command::parse("> htop -d 5"), Some(vec!["htop".into(), "-d".into(), "5".into()]));
+    assert_eq!(command::parse(">'my tool' \"a b\""), Some(vec!["my tool".into(), "a b".into()]));
+    assert_eq!(command::parse(">"), None);
+    assert_eq!(command::parse(">   "), None);
+    assert_eq!(command::parse("> 'unterminated"), None);
+    assert_eq!(command::parse("htop"), None);
+    assert_eq!(command::hit("> htop").and_then(Result::ok).map(|h| h.group), Some(Group::Command));
+}
+
+#[test]
+fn the_web_entry_percent_encodes_the_whole_query() {
+    let hit = web::hit("a b&c=d/é?#").expect("hit");
+    assert_eq!(hit.group, Group::Web);
+    assert_eq!(
+        hit.action,
+        Action::Web { url: format!("{}a%20b%26c%3Dd%2F%C3%A9%3F%23", web::ENGINE) }
+    );
+    assert!(web::hit("   ").is_none());
+}
+
+#[test]
+fn an_entry_read_by_path_keeps_its_file_name_as_id() {
+    let path = fixtures().join("org.mozilla.firefox.desktop");
+    let info = gio_unix::DesktopAppInfo::from_filename(path).expect("fixture");
+    assert_eq!(info.id().as_deref(), Some("org.mozilla.firefox.desktop"));
+}
+
+#[test]
+fn an_entry_whose_name_is_only_hidden_characters_is_skipped() {
+    let catalog = catalog();
+    assert!(catalog.apps.iter().all(|e| e.id != "blank.desktop"));
+}
+
+#[test]
+fn a_command_that_would_show_differently_from_what_runs_is_refused() {
+    assert_eq!(command::hit("> echo a\u{200b}b").and_then(Result::err), Some(Refusal::Hidden));
+    assert_eq!(command::hit("> echo \u{202e}gpj").and_then(Result::err), Some(Refusal::Hidden));
+    let long = format!("> {}", "a".repeat(athanor_unit::text::TITLE_CHARS + 1));
+    assert_eq!(command::hit(&long).and_then(Result::err), Some(Refusal::TooLong));
+    let shown = command::hit("> htop -d 5").and_then(Result::ok).expect("hit");
+    assert_eq!(shown.title, "htop -d 5");
+}
+
+#[test]
+fn long_names_and_titles_are_bounded() {
+    let open = [windows::WindowEntry { index: 0, title: "t".repeat(10_000), app_id: "a".repeat(10_000), app_name: None, icon: None }];
+    let hits = windows::search(&open, "t", &mut Ranker::new("t"), &Usage::default(), 0);
+    assert!(hits[0].title.chars().count() <= athanor_unit::text::TITLE_CHARS);
+    assert!(hits[0].subtitle.chars().count() <= athanor_unit::text::NAME_CHARS);
+    assert!(hits[0].key.chars().count() <= "window:".len() + athanor_unit::text::NAME_CHARS);
+}
+
+#[test]
+fn the_title_keeps_every_character_the_command_runs() {
+    let hit = command::hit(">>ls").and_then(Result::ok).expect("hit");
+    assert_eq!(hit.title, ">ls");
+    assert_eq!(hit.action, Action::Command { argv: vec![">ls".into()] });
+}
+
+fn on_own_context<T>(future: impl std::future::Future<Output = T>) -> T {
+    let context = gio::glib::MainContext::new();
+    context
+        .with_thread_default(|| context.block_on(future))
+        .expect("a fresh context is free")
+}
+
+#[test]
+fn qalc_answers_and_refuses() {
+    if gio::glib::find_program_in_path("qalc").is_none() {
+        assert!(std::env::var_os("ATHANOR_REQUIRE_QALC").is_none(), "qalc is required here");
+        eprintln!("qalc is not installed here; the rig runs this test");
+        return;
+    }
+    let calc = on_own_context(athanor_search::calc::evaluate("2+2*3")).expect("an answer");
+    assert_eq!(calc.result, "8");
+    assert!(on_own_context(athanor_search::calc::evaluate("-f /etc/passwd")).is_none());
+    // No query stays on disk: the history is /dev/null and nothing else holds the text.
+    let config = athanor_search::calc::config_home().expect("prepared");
+    let history = config.join("qalculate/qalc.history");
+    assert_eq!(std::fs::read_link(&history).expect("a symlink"), std::path::Path::new("/dev/null"));
+    for entry in std::fs::read_dir(config.join("qalculate")).expect("dir") {
+        let text = std::fs::read_to_string(entry.expect("entry").path()).unwrap_or_default();
+        assert!(!text.contains("2+2*3"));
+    }
+}

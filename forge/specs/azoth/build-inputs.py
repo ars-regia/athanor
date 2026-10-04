@@ -4,8 +4,8 @@ section 3 step 8 and section 7): the predicate of the pins attestation that publ
 attaches to the images, and the key with which the inputs job recognises a kernel
 already built from these identical inputs. Only what changes the RPMs goes in: pins,
 source manifest, config delta, patches, the certificates compiled in (keys/modules,
-keys/revoked), merge rules, the guest kernel (fragment and spec), build.sh and the
-environment. Not cmdline, boot/, retention.sh or the workflow:
+keys/revoked), merge rules, the guest kernel (fragment and spec), build.sh with its
+build conditions and the environment (builder base, Containerfile, toolchain lock). Not cmdline, boot/, retention.sh or the workflow:
 changing them must not rebuild anything."""
 
 import hashlib
@@ -51,8 +51,10 @@ print(
                 for name in ("kernel-local", "azoth-microvm.spec")
             },
             "build_sh_sha256": sha("build.sh"),
+            "bconds_sha256": sha("bconds.sh"),
             "builder_base": base,
             "containerfile_sha256": sha("builder/Containerfile"),
+            "toolchain_lock_sha256": sha("builder/toolchain.lock"),
         },
         indent=2,
     )
