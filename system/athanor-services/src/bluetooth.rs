@@ -569,8 +569,7 @@ async fn run(
         shared: shared.clone(),
         timeout: reply_timeout,
     };
-    // Left served when the model ends: that is the end of the process, and BlueZ drops the
-    // agent with the connection.
+    // The exit guard below removes it when the model ends.
     if let Err(err) = connection.object_server().at(AGENT_PATH, agent).await {
         tracing::error!(error = %err, "cannot export the Bluetooth agent; pairing will fail");
     }
@@ -581,13 +580,38 @@ async fn run(
     let mut was_powered = false;
     let mut had_adapter = false;
     let mut discovery = false;
+    // The value of `Pairable` last asked of BlueZ and not yet seen to change anything: asked
+    // again only after the mirror changes, so a BlueZ that refuses is not asked in a loop.
+    let mut pairable_tried: Option<bool> = None;
+    let mut exit = ExitGuard {
+        handle: handle.clone(),
+        connection: connection.clone(),
+        shared: shared.clone(),
+        adapter: None,
+    };
     loop {
         // The mirror ends only after it has emptied itself, so its last state is published too.
         let mut alive = true;
         tokio::select! {
-            changed = bluez.changed() => alive = changed.is_ok(),
+            changed = bluez.changed() => {
+                alive = changed.is_ok();
+                pairable_tried = None;
+            }
             command = commands.recv() => match command {
                 Some(command) => {
+                    // A pairing waits for the person for minutes: whatever would queue
+                    // behind it and ends it anyway cancels it, outside the queue.
+                    let paired_now = running.as_ref().is_some_and(|(job, _)| job.is_pair());
+                    if let Some(device) = shared.pairing().filter(|_| paired_now) {
+                        let ends_it = match &command {
+                            BluetoothCommand::Power(on) => !on,
+                            BluetoothCommand::Disconnect(other) | BluetoothCommand::Forget(other) => *other == device,
+                            _ => false,
+                        };
+                        if ends_it {
+                            handle.spawn(cancel_pairing(connection.clone(), device));
+                        }
+                    }
                     let job = Job::Command(command);
                     let busy = waiting.iter().chain(running.iter().map(|(job, _)| job)).any(Job::is_pair);
                     match &job {
@@ -640,6 +664,7 @@ async fn run(
             shared.withdraw();
         }
         had_adapter = current.is_some();
+        exit.adapter = current.as_ref().map(|state| state.adapter.clone());
         // bluetoothd stops discovery when the adapter powers off: start it again when the
         // adapter comes back on under an open popover.
         let powered = current.as_ref().is_some_and(|state| state.powered);
@@ -654,10 +679,12 @@ async fn run(
         // true), and when registering the agent or another process turned it on.
         if running.is_none() && waiting.is_empty() {
             let wanted = shared.pairing().is_some();
-            if current
-                .as_ref()
-                .is_some_and(|state| state.pairable != wanted)
+            if pairable_tried != Some(wanted)
+                && current
+                    .as_ref()
+                    .is_some_and(|state| state.pairable != wanted)
             {
+                pairable_tried = Some(wanted);
                 if !wanted {
                     tracing::info!("the Bluetooth adapter is bondable with no pairing from the shell; turning it off");
                 }
@@ -684,6 +711,48 @@ async fn run(
         if !alive {
             return;
         }
+    }
+}
+
+/// Best effort: a pairing BlueZ cannot cancel ends at its own timeout.
+async fn cancel_pairing(connection: Connection, device: String) {
+    let call = async {
+        let proxy = Proxy::new(&connection, BLUEZ, device.as_str(), DEVICE).await?;
+        no_answer(timeout(TIMEOUT, proxy.call_method("CancelPairing", &())).await)
+    };
+    if let Err(err) = call.await {
+        tracing::warn!(error = %err, "BlueZ did not cancel the pairing");
+    }
+}
+
+/// However `run` ends, the agent stops answering and the adapter stops bonding: a pairing
+/// future dropped half way would otherwise leave `pairing` set, the agent served and
+/// `Pairable` true, and the agent would accept the device's authorisation requests.
+struct ExitGuard {
+    handle: Handle,
+    connection: Connection,
+    shared: Arc<Shared>,
+    adapter: Option<String>,
+}
+
+impl Drop for ExitGuard {
+    fn drop(&mut self) {
+        self.shared.set_pairing(None);
+        let connection = self.connection.clone();
+        let adapter = self.adapter.take();
+        self.handle.spawn(async move {
+            // Nothing to remove when the agent never was served.
+            connection.object_server().remove::<Agent, _>(AGENT_PATH).await.ok();
+            let Some(adapter) = adapter else { return };
+            let set = async {
+                let proxy = Proxy::new(&connection, BLUEZ, adapter.as_str(), PROPERTIES).await?;
+                let body = (ADAPTER, "Pairable", Value::from(false));
+                no_answer(timeout(TIMEOUT, proxy.call_method("Set", &body)).await)
+            };
+            if let Err(err) = set.await {
+                tracing::warn!(error = %err, "the Bluetooth adapter could not be made unbondable on exit");
+            }
+        });
     }
 }
 
@@ -1022,6 +1091,12 @@ mod tests {
         calls: Vec<String>,
         /// The error name, or `ok`, that BlueZ got for each request it made of the agent.
         agent_results: Vec<String>,
+        /// The adapter starts bondable, and refuses to change `Pairable`.
+        start_pairable: bool,
+        refuse_pairable: bool,
+        /// `Pair` of a device waits for `CancelPairing` instead of asking the agent.
+        hold_pair: bool,
+        cancel: Arc<tokio::sync::Notify>,
     }
 
     type Shared = Arc<Mutex<Log>>;
@@ -1065,9 +1140,13 @@ mod tests {
             self.pairable
         }
         #[zbus(property)]
-        fn set_pairable(&mut self, on: bool) {
+        fn set_pairable(&mut self, on: bool) -> zbus::fdo::Result<()> {
             note(&self.log, format!("Pairable {on}"));
+            if self.log.lock().unwrap().refuse_pairable {
+                return Err(zbus::fdo::Error::Failed("refused".into()));
+            }
             self.pairable = on;
+            Ok(())
         }
         #[zbus(property)]
         fn discoverable(&self) -> bool {
@@ -1096,9 +1175,22 @@ mod tests {
         fn disconnect(&self) {
             note(&self.log, format!("Disconnect {}", self.path));
         }
+        fn cancel_pairing(&self) {
+            note(&self.log, format!("CancelPairing {}", self.path));
+            let cancel = self.log.lock().unwrap().cancel.clone();
+            cancel.notify_one();
+        }
         /// Asks the agent to confirm 123456, as BlueZ does, and fails when it is refused.
         async fn pair(&self, #[zbus(connection)] connection: &Connection) -> zbus::fdo::Result<()> {
-            let registered = self.log.lock().unwrap().registered.clone();
+            let (registered, hold, cancel) = {
+                let log = self.log.lock().unwrap();
+                (log.registered.clone(), log.hold_pair, log.cancel.clone())
+            };
+            if hold {
+                note(&self.log, format!("Pair started {}", self.path));
+                cancel.notified().await;
+                return Err(zbus::fdo::Error::Failed("canceled".into()));
+            }
             let Some((agent, path, _)) = registered else {
                 return Err(zbus::fdo::Error::Failed("no agent".into()));
             };
@@ -1190,7 +1282,7 @@ mod tests {
                 ADAPTER_PATH,
                 FakeAdapter {
                     powered: true,
-                    pairable: false,
+                    pairable: log.lock().unwrap().start_pairable,
                     discoverable: false,
                     log: log.clone(),
                 },
@@ -1247,8 +1339,13 @@ mod tests {
     }
 
     async fn rig(reply_timeout: Duration) -> Rig {
+        rig_with(reply_timeout, |_| {}).await
+    }
+
+    async fn rig_with(reply_timeout: Duration, setup: impl FnOnce(&mut Log)) -> Rig {
         let bus = TestBus::start();
         let log = Shared::default();
+        setup(&mut log.lock().unwrap());
         let bluez = serve(&bus, &log).await;
         let client = bus.client().await;
         let (states, commands, requests) = start(
@@ -1277,18 +1374,19 @@ mod tests {
             .expect("the model is running")
     }
 
-    /// The error name of a call to the agent of `rig`'s model from `caller`.
-    async fn agent_error(rig: &Rig, caller: &Connection, device: &str) -> String {
-        let name = rig.client.unique_name().expect("unique name").to_string();
+    /// The error name of `method` called on the agent of `rig`'s model from `caller`, `ok`
+    /// when it answers, about `device`.
+    async fn agent_call(client: &Connection, caller: &Connection, method: &str, device: &str) -> String {
+        let name = client.unique_name().expect("unique name").to_string();
         let proxy = Proxy::new(caller, name, AGENT_PATH, AGENT_IFACE)
             .await
             .expect("proxy");
-        let result = proxy
-            .call_method(
-                "RequestConfirmation",
-                &(ObjectPath::try_from(device).expect("path"), 1u32),
-            )
-            .await;
+        let path = ObjectPath::try_from(device).expect("path");
+        let result = match method {
+            "RequestConfirmation" => proxy.call_method(method, &(path, 1u32)).await,
+            "AuthorizeService" => proxy.call_method(method, &(path, "uuid")).await,
+            _ => proxy.call_method(method, &()).await,
+        };
         match result {
             Ok(_) => "ok".to_owned(),
             Err(zbus::Error::MethodError(name, _, _)) => name.to_string(),
@@ -1362,18 +1460,122 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn a_call_from_a_process_that_is_not_bluez_is_rejected() {
-        let rig = rig(REPLY_TIMEOUT).await;
+    async fn a_call_from_a_process_that_is_not_bluez_is_rejected_and_ends_nothing() {
+        let mut rig = rig(REPLY_TIMEOUT).await;
+        rig.commands.send(BluetoothCommand::Pair(PHONE.into())).unwrap();
+        let PairingRequest::Confirm { reply, .. } = next_request(&mut rig.requests).await else {
+            panic!("a confirmation is asked");
+        };
+        // The pairing of PHONE runs, so only the sender can be what rejects these.
         let stranger = rig._bus.client().await;
+        for method in ["RequestConfirmation", "AuthorizeService", "Cancel"] {
+            assert_eq!(
+                agent_call(&rig.client, &stranger, method, PHONE).await,
+                "org.bluez.Error.Rejected",
+                "{method}"
+            );
+        }
+        assert!(
+            rig.requests.try_recv().is_err(),
+            "the pending confirmation was not withdrawn"
+        );
+        reply.send(PairingReply::Accept).unwrap();
+        until(&rig.log, |log| {
+            log.calls.iter().any(|call| call == &format!("Connect {PHONE}"))
+        })
+        .await;
+        assert_eq!(rig.log.lock().unwrap().agent_results, ["ok"]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_request_for_a_device_that_is_not_being_paired_is_rejected() {
+        let rig = rig(REPLY_TIMEOUT).await;
         assert_eq!(
-            agent_error(&rig, &stranger, PHONE).await,
+            agent_call(&rig.client, &rig.bluez, "RequestConfirmation", HEADSET).await,
             "org.bluez.Error.Rejected"
         );
-        // Even with the right device, whose pairing is not running either.
-        assert_eq!(
-            agent_error(&rig, &rig.bluez, HEADSET).await,
-            "org.bluez.Error.Rejected"
-        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_refused_pairable_is_tried_once_not_in_a_loop() {
+        let rig = rig_with(REPLY_TIMEOUT, |log| {
+            log.start_pairable = true;
+            log.refuse_pairable = true;
+        })
+        .await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let attempts = rig
+            .log
+            .lock()
+            .unwrap()
+            .calls
+            .iter()
+            .filter(|call| *call == "Pairable false")
+            .count();
+        assert_eq!(attempts, 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn turning_the_adapter_off_cancels_the_pairing_that_would_hold_the_queue() {
+        let mut rig = rig_with(REPLY_TIMEOUT, |log| log.hold_pair = true).await;
+        rig.commands.send(BluetoothCommand::Pair(PHONE.into())).unwrap();
+        until(&rig.log, |log| {
+            log.calls.iter().any(|call| call == &format!("Pair started {PHONE}"))
+        })
+        .await;
+        rig.commands.send(BluetoothCommand::Power(false)).unwrap();
+        until(&rig.log, |log| {
+            log.calls.iter().any(|call| call == &format!("CancelPairing {PHONE}"))
+        })
+        .await;
+        wait_for(&mut rig.states, |state| !state.powered).await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn forgetting_the_device_being_paired_cancels_the_pairing() {
+        let rig = rig_with(REPLY_TIMEOUT, |log| log.hold_pair = true).await;
+        rig.commands.send(BluetoothCommand::Pair(PHONE.into())).unwrap();
+        until(&rig.log, |log| {
+            log.calls.iter().any(|call| call == &format!("Pair started {PHONE}"))
+        })
+        .await;
+        rig.commands.send(BluetoothCommand::Forget(PHONE.into())).unwrap();
+        until(&rig.log, |log| {
+            log.calls.iter().any(|call| call == &format!("CancelPairing {PHONE}"))
+        })
+        .await;
+        until(&rig.log, |log| {
+            log.calls.iter().any(|call| call == &format!("RemoveDevice {PHONE}"))
+        })
+        .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_model_that_ends_during_a_pairing_leaves_no_agent_and_no_bondable_adapter() {
+        let rig = rig_with(REPLY_TIMEOUT, |log| log.hold_pair = true).await;
+        rig.commands.send(BluetoothCommand::Pair(PHONE.into())).unwrap();
+        until(&rig.log, |log| {
+            log.calls.iter().any(|call| call == &format!("Pair started {PHONE}"))
+        })
+        .await;
+        drop(rig.commands);
+        until(&rig.log, |log| {
+            let mut pairable = log.calls.iter().filter(|call| call.starts_with("Pairable"));
+            pairable.next().is_some() && pairable.any(|call| call == "Pairable false")
+        })
+        .await;
+        let gone = tokio::time::timeout(testbus::WAIT, async {
+            loop {
+                let seen = agent_call(&rig.client, &rig.bluez, "AuthorizeService", PHONE).await;
+                if seen != "ok" && seen != "org.bluez.Error.Rejected" {
+                    return seen;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the agent is no longer served");
+        assert!(gone.contains("Unknown"), "{gone}");
     }
 
     #[tokio::test(flavor = "current_thread")]
