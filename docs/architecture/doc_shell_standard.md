@@ -1,6 +1,6 @@
 # Athanor shell standard
 
-Status: **revision 1, 2026-10-04, awaiting the maintainer's approval.** The maintainer took its decisions in conversation on 2026-10-04: the standard comes before any new surface (ST2), the feature register is the union of every reference (ST3), the floor is a modest laptop (ST4), the thresholds of ST5, aesthetics judged by rules plus the maintainer's signature (ST8), and every measurement taken on one physical reference machine (ST9). Section 3 lists three spikes that must run before the plan; section 6 lists what is still open.
+Status: **revision 1, 2026-10-04, awaiting the maintainer's approval.** The maintainer took its decisions in conversation on 2026-10-04: the standard comes before any new surface (ST2), the feature register is the union of every reference (ST3), the floor is a modest laptop (ST4), the thresholds of ST5, aesthetics judged by rules plus the maintainer's signature (ST8), and every measurement taken on one physical reference machine (ST9). Section 3 lists four spikes that open the plan; section 6 lists what is still open.
 
 The document amends `doc_shell.md` (revision 5), SH1, and refers to `doc_bar.md` (revision 1), BR7 and section 5. Section 5 lists the changes.
 
@@ -25,7 +25,7 @@ Two gaps let the shipped state happen:
 
 **ST2. The standard is a gate, defects first.**
 
-- A surface is enabled by default only when it passes every dimension of ST5 to ST8 on the reference machine (ST4), and the maintainer has signed its aesthetic review (ST8).
+- A surface is enabled by default only when it has every entry of the register that names it (ST3) and passes ST5 to ST8 on the reference machine (ST4), and the maintainer has signed its aesthetic review (ST8).
 - A surface already enabled by default that fails the standard is repaired before any other shell work. Defects come first, missing features after: the bar and the dock are measured as soon as the bench works (section 4, step 3), and what they fail becomes the next work.
 - A failing measurement is never relaxed inside the change that fails it. A threshold changes only by a revision of this document approved by the maintainer (ST10).
 
@@ -38,7 +38,7 @@ Two gaps let the shipped state happen:
 
 **ST4. The reference machine is a modest laptop.** The thresholds hold on the floor, so that they hold everywhere: an x86-64-v3 CPU five to six years old (an 8th-generation Intel Core or a Ryzen 2000 mobile part), integrated graphics, 8 GB of memory, a 1080p panel at 60 Hz, at scale 1.0 and 1.5. The machine is the maintainer's Xiaomi Mi Notebook Pro 15.6": an Intel Core i7-8550U (8th generation, four cores, x86-64-v3), 8 GB of memory, Intel UHD Graphics 620, a 15.6" 1080p panel. This model is commonly sold with a discrete GeForce MX150 as well; if this unit has one, the bench leaves it idle and the integrated GPU drives the panel, because the floor is integrated graphics. The machine runs the default image, not the `-nvidia` variant. The maintainer's desktop remains a second verification target and never sets a threshold (the rule that Athanor is designed for every machine, not for the maintainer's).
 
-**ST5. Thresholds.** Every number is measured on the reference machine with the image as shipped. A percentile is taken over at least 50 repetitions of the action.
+**ST5. Thresholds.** Every number is measured on the reference machine: on the image as shipped for a gate, and for a change not yet merged on that image with the change's packages over it (ST9). A percentile is taken over at least 50 repetitions of the action.
 
 | Dimension          | Threshold                                                                                                                                                                                                                                                                                                                                             |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -51,7 +51,7 @@ Two gaps let the shipped state happen:
 | Stability          | A soak of **24 hours** on the reference machine, driven by a script that opens and closes every surface, sends bursts of notifications, switches theme, and suspends and resumes: no crash, no restart by systemd, and no journal line at priority `err` or above from a shell unit other than those listed, with a reason, in the bench's allow list |
 | Recovery           | A shell process killed with `SIGKILL` presents its surface again within **1 s**, in the same state: favourites, layout, unread notifications and settings. A popover open at the time of the kill does not reopen                                                                                                                                     |
 
-The numbers are reasoned proposals, not measurements: 100 ms is the classic limit under which an action reads as instantaneous, and 50 ms leaves room inside it. The first run of the bench (section 4, step 3) shows whether one is unrealistic on the floor; changing it is a revision (ST10).
+The numbers are reasoned proposals, not measurements: 100 ms is the classic limit under which an action reads as instantaneous, and 50 ms leaves room inside it. The first run of the bench (section 4, step 3) shows whether one is unrealistic on the floor; changing it is a revision (ST10). One threshold already fails by construction: the units of `athanor-bar`, `athanor-dock` and `athanor-shelld` wait `RestartSec=1s` before a restart, so recovery cannot happen within 1 s; that is a defect of the units, repaired in section 4, step 3, not a reason to relax the threshold.
 
 **ST6. Behaviour is specified by scenarios.**
 
@@ -70,14 +70,15 @@ The numbers are reasoned proposals, not measurements: 100 ms is the classic limi
 **ST8. Aesthetics: rules plus the maintainer's signature.**
 
 - **A visual language specification,** `doc_visual_language.md`, comes before any new surface (section 4, step 4). The maintainer approves its direction once, on drafts placed beside the references.
-- **It turns the direction into rules:** the spacing grid, the corner radii, the durations and curves of motion, the materials, the type scale, and contrast of at least 4.5:1 for text and 3:1 for controls and their states (WCAG 2.2 AA). The bench checks on every screenshot what can be measured: contrast, alignment to the grid, the durations of motion.
+- **It turns the direction into rules:** the spacing grid, the corner radii, the durations and curves of motion, the materials, the type scale, and contrast of at least 4.5:1 for text and 3:1 for controls and their states (WCAG 2.2 AA). The bench checks what can be measured: contrast and alignment to the grid on every screenshot, and the durations of motion from the frame timings.
 - **At each gate,** the bench renders a board that places our surfaces beside the same surfaces of macOS, Windows 11 and GNOME. The maintainer reviews it and signs it; the signature is recorded with the results. Screenshots of the references are third-party works: they are kept outside the repository and the board links them locally.
 
 **ST9. The bench runs on the reference machine.**
 
-- **The machine** runs Athanor from the image as shipped, with no layered package and no change for the bench. It is reached over SSH with a key only. It is a test machine, not a workstation.
+- **The machine** runs Athanor from the image as shipped, with no layered package and no persistent change for the bench. It is reached over SSH with a key only. It is a test machine, not a workstation.
 - **The bench** lives in `scripts/shell-bench/`, with its scenarios, and runs inside a container whose definition is in the repository and whose base is pinned by digest. Nothing is installed on the machine. The container receives exactly three things: `/dev/uinput`, to create a virtual pointer and keyboard, which the compositor reads like real devices through libinput; the Wayland socket, for screenshots; and the session bus, to read the AT-SPI tree and to send test notifications. Suspend in the soak needs root on the machine and goes through `sudo`; spike Q2 settles whether `/dev/uinput` does too.
-- **Timing comes from inside our programs.** When an environment variable asks for it, each shell process logs the time of each input event and the presentation time of the frame that shows its effect, from GTK's frame clock, as lines of JSON. Without the variable the code path is inert. This is the only way to measure the time from a click to the screen without a camera; spike Q3 confirms that GTK4 gives a real presentation time.
+- **Timing comes from inside our programs.** When an environment variable asks for it, each shell process logs the time of each input event and the presentation time of the frame that shows its effect, from GTK's frame clock, as lines of JSON. Without the variable the code path is inert. The bench sets it with `systemctl --user set-environment`, restarts the units, and unsets it when it ends. This is the only way to measure the time from a click to the screen without a camera; spike Q3 confirms that GTK4 gives a real presentation time.
+- **A change not yet merged** reaches the machine as the packages its branch builds, installed on a transient overlay of `/usr` (`bootc usr-overlay`), which a reboot discards. A gate is always measured on a published image, never on an overlay. Spike Q4 confirms that packages on the overlay run under the image's integrity and SELinux policy.
 - **Memory and CPU come from the kernel:** PSS from `smaps_rollup` and CPU time from `/proc/<pid>/stat`.
 - **Results go into the repository,** under `docs/shell-bench/<date>-<commit>/`: the numbers as JSON, a report, and the aesthetic board with its signature (ST8).
 - **When it runs.** The continuous integration gains nothing from this standard: the checks it runs today, the 180 surface cases and the memory measurement of `doc_bar.md` BR9, stay as they are. In exchange, the bench runs on the reference machine before every merge that touches a shell surface, not only before a release, so that a defect like the dock's is found before the merge rather than on a desktop. The maintainer chose this knowing that a defect is found later than a check on each pull request would find it.
@@ -86,19 +87,20 @@ The numbers are reasoned proposals, not measurements: 100 ms is the classic limi
 
 ## 3. Spikes
 
-Each runs before the plan and gives an answer, not code we keep. A spike that fails changes ST9, and the maintainer hears it before the plan is written.
+They are the first tasks of the plan, and each gives an answer, not code we keep. A spike that fails stops the plan: ST9 is revised and the maintainer approves the revision before the plan continues.
 
 | #   | Spike                                                                                                                                                                                              | Settles                                        |
 | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
 | Q1  | Which capture protocol cosmic-comp offers to a client of ours (it refuses `grim`, which asks for `wlr-screencopy`): `ext-image-copy-capture-v1` on the main socket, a portal, or none              | how the bench takes screenshots                |
 | Q2  | Whether a virtual pointer and keyboard created through `/dev/uinput` from inside a container move cosmic-comp's pointer and type into a surface, and whether a rootless container suffices         | how the bench gives input                      |
 | Q3  | Whether GTK4's frame clock, under cosmic-comp, gives each frame a presentation time taken from the compositor's feedback rather than an estimate, and how it relates to an input event's timestamp | how the bench measures response and smoothness |
+| Q4  | Whether packages of the shell built from a branch, installed with `bootc usr-overlay` on the reference machine, run under the image's integrity policy and SELinux labels, restart cleanly as user units, and are gone after a reboot | how a change not yet merged is measured |
 
 ## 4. Order of work
 
 1. **The spikes and the skeleton of the bench:** the container, input, capture, and the timing instrumentation in `athanor-bar` and `athanor-dock`.
 2. **Register version 1:** research over every reference, with sources; the maintainer approves and freezes it.
-3. **The measurement of today's bar and dock.** What fails becomes a list of defects, repaired first (ST2), starting with the dock's auto-hide and its scenarios (ST6).
+3. **The measurement of today's bar and dock.** What fails becomes a list of defects, repaired first (ST2), starting with the dock's auto-hide and its scenarios (ST6), and the restart delay of the three units (ST5).
 4. **`doc_visual_language.md`:** drafts beside the references, the maintainer's approval, the rules of ST8.
 5. **The control center:** its specification, built on the services the bar already holds, then its implementation and its gate.
 6. **The other surfaces, in the order of the register:** notifications and the calendar revised, the launcher (built in PR #91, not enabled), the session lock and the authentication dialogs, the on-screen display, Settings, the overview. This keeps the order of SH1's later stages and inserts the control center before them.
