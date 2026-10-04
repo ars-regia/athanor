@@ -167,6 +167,11 @@ def pss_kb(smaps_rollup):
 _PPM = re.compile(rb"P6\s+(\d+)\s+(\d+)\s+255\s")
 
 
+def growth(first, last):
+    """Relative growth from `first` to `last`."""
+    return (last - first) / first
+
+
 def read_ppm(data):
     """(width, height, pixels) of a binary PPM as `grim -t ppm` writes it."""
     match = _PPM.match(data)

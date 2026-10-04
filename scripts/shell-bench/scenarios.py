@@ -33,7 +33,7 @@ def run(m):
     try:
         with bench.instrumented(m) as since:
             _write_layout(m, "visible")
-            m.systemctl("restart", "athanor-dock")
+            bench.restart(m, "athanor-dock")
             time.sleep(3)
             # An application button: its context menu is the one the last scenario opens.
             dock = next(t for t in bench.locate(m, since) if t.unit == "athanor-dock" and t.popup)
@@ -45,7 +45,7 @@ def run(m):
             m.systemctl("stop", "athanor-dock")
             bench.inject(m, w, h, [f"move {centre[0]} {centre[1]}", "wait 300"])
             reference = m.screenshot()
-            m.systemctl("start", "athanor-dock")
+            bench.restart(m, "athanor-dock")
             time.sleep(3)
 
             def hidden():
@@ -93,5 +93,5 @@ def run(m):
             m.run(f"printf %s {shlex.quote(original.decode())} > {LAYOUT}")
         else:
             m.run(f"rm -f {LAYOUT}")
-        m.systemctl("restart", "athanor-dock")
+        bench.restart(m, "athanor-dock")
     return results

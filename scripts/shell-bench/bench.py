@@ -34,18 +34,26 @@ OPEN_MS = 700
 STAGES = ("facts", "response", "idle", "memory", "recovery", "start", "scenarios")
 
 
+def restart(m, *units):
+    """A restart of the bench's own. The units give up after 10 starts in 10 minutes (SH8),
+    which a run of several stages exceeds: reset-failed first, so that the limit counts
+    only the starts the bench did not ask for."""
+    m.systemctl("reset-failed", *units)
+    m.systemctl("restart", *units)
+
+
 @contextlib.contextmanager
 def instrumented(m, settle_s=3):
     """The bar and the dock restarted with frame timing on; off again on the way out."""
     since = m.wall()
     m.systemctl("set-environment", "ATHANOR_SHELL_BENCH=1")
     try:
-        m.systemctl("restart", *GTK_UNITS)
+        restart(m, *GTK_UNITS)
         time.sleep(settle_s)
         yield since
     finally:
         m.systemctl("unset-environment", "ATHANOR_SHELL_BENCH")
-        m.systemctl("restart", *GTK_UNITS)
+        restart(m, *GTK_UNITS)
 
 
 def inject(m, width, height, ops):
