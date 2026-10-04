@@ -16,6 +16,7 @@ Status: **revision 1, draft of 2026-10-04, awaiting the maintainer's review.** I
   - `athanor-shelld` admits calls on `os.athanor.Notifications1` only from `athanor-bar.service` (`sender.rs:8`, checked in `notifications.rs:306`), and keeps do-not-disturb as one boolean (`dnd.rs`).
   - In cosmic-comp's default shortcuts Super+A opens the application library, which `doc_launcher.md` keeps; Super+C, Super+N and Super+V are free.
   - On the maintainer's desktop: UPower 1.91.3 with the polkit action `org.freedesktop.UPower.enable-charging-limit`, power-profiles-daemon 0.30, ddcutil 2.2.1, and no `/dev/rfkill` (no radio). On the reference laptop `/dev/rfkill` carries an ACL entry giving the session user read and write.
+  - The portal backend the image ships, `xdg-desktop-portal-athanor`, answers `ScreenCast` and `FileChooser` for the session (`XDG_CURRENT_DESKTOP=Athanor:COSMIC`, no `portals.conf`), and both are placeholders: `ScreenCast.Start` returns the fixed PipeWire node 42 (`portal.rs`), and `SaveFile` returns the fixed path `/home/athanor/Downloads/output_file.dat`. No backend offers `Screenshot`.
 
 ## 2. Decisions
 
@@ -106,8 +107,8 @@ Status: **revision 1, draft of 2026-10-04, awaiting the maintainer's review.** I
 | Keep awake                                                               | an idle inhibitor held by `athanor-shelld`, so a restart of the panel does not drop it (spike S2) | the session                                                                                    |
 | Dark mode                                                                | the COSMIC theme mode the compositor client follows (`theme.rs`)                                  | the user's configuration                                                                       |
 | Night light                                                              | cosmic-comp, through the protocol or setting spike S1 finds                                       | the session                                                                                    |
-| Screenshot, colour picker                                                | the desktop portal's `Screenshot` and `PickColor`                                                 | the portal's own confirmation                                                                  |
-| Screen recording                                                         | the recording application the image ships (doubt 4), launched as BR2                              | the application's own portal request                                                           |
+| Screenshot, colour picker | the `Screenshot` and `PickColor` methods of Athanor's own portal backend (`doc_portal.md`) | the portal's confirmation |
+| Screen recording | `athanor-recorder`, the recorder integrated in the shell (`doc_portal.md`), capturing through the portal's `ScreenCast` | the portal's choice of source, and the recording indicator in the bar |
 | Display mode                                                             | output management, through `athanor-compositor-client`                                            | the main socket, as the bar holds it                                                           |
 | Casting                                                                  | a network-display application (spike S5)                                                          | its own portal request                                                                         |
 | Removable drives                                                         | UDisks2                                                                                           | its polkit actions                                                                             |
@@ -167,7 +168,7 @@ Status: **revision 1, draft of 2026-10-04, awaiting the maintainer's review.** I
 1. **Foundations, with no change to what the bar does.** `athanor-services` and `athanor-controls` extracted from the bar, each model rewritten on `zbus` (CC3) in a change of its own, with the bar's tests and memory measurement compared before and after; the program skeleton with the bar's button and the shortcut; the tile file; the do-not-disturb state and the admission in `athanor-shelld`.
 2. **The panel with what exists:** the 11 `have` entries, full media controls, the Settings button.
 3. **What existing services already offer:** customisable tiles, dark mode, keyboard backlight, battery health and charge limit, the rest of the network, Bluetooth and audio pages, removable drives, print queue, background applications, resource graphs, the user's card, third-party tiles.
-4. **What needs a spike first** (section 4): night light, keep awake, screen recording, casting and display mode, rotation lock, on-screen keyboard, external monitors, the clipboard history.
+4. **What needs a spike or another specification first:** night light, keep awake, casting and display mode, rotation lock, on-screen keyboard, external monitors, the clipboard history (section 4); screenshot, colour picker and screen recording, after the portal of `doc_portal.md`.
 5. **The gate of the standard:** measurement on the reference laptop, scenarios, accessibility and languages, the maintainer's aesthetic signature. Only then is `athanor-control-center.service` enabled by preset.
 
 ## 3. Changes to other documents
@@ -189,7 +190,7 @@ Applied with the approval of this document.
    - S4. External monitors: DDC/CI from Rust without linking ddcutil (GPL-2.0-or-later), and a udev rule that limits access to the I2C buses of display connectors.
    - S5. Casting to a network display, with gnome-network-displays as a Flatpak as the candidate; display mode through output management.
    - S6. Rotation lock with iio-sensor-proxy and cosmic-comp, and which on-screen keyboard works with cosmic-comp's input-method and virtual-keyboard protocols.
-4. **Screen recording** needs an application in the image; which one is a decision of `doc_software.md`'s catalogue.
+4. **Screen capture waits for `doc_portal.md`.** The maintainer decided on 2026-10-04: Athanor writes its own, real portal backend, and an integrated recorder, as macOS, Windows and GNOME have. That specification designs the backend, the screenshot and recording surfaces and the recording indicator; the three tiles of this document wait for it.
 5. **Memory budgets** are proposals: `athanor-control-center` at most 64 MB PSS at rest with the panel hidden, `athanor-clipd` at most 24 MB with a full history. The first measurement confirms or corrects them.
 6. **Remote artwork** (CC8): players that publish only `https:` artwork show no cover. Fetching it would need a network rule for the panel or a fetching service; neither is designed here.
 7. **Encrypted vaults** (F-cc-49) touch cryptography and need a specification of their own. Until one is approved the entry stays `missing` and blocks the gate, unless the maintainer excludes it.
