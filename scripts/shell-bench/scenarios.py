@@ -66,7 +66,7 @@ def run(m):
                 frames, _ = analysis.parse_journal(m.journal(since))
                 in_time = analysis.settled([t], frames, "athanor-dock", "dock", limit, HORIZON)[0]
                 ok, detail = state()
-                results[f"dock-autohide/{name}"] = {"pass": in_time and ok, "register": None,
+                results[f"dock-autohide/{name}"] = {"pass": in_time and ok, "register": "F-dock-27",
                                                     "detail": f"settled in time: {in_time}; {detail}"}
 
             # Switching from visible to auto-hide while running hides the dock as a start in auto-hide does.
@@ -76,7 +76,7 @@ def run(m):
             frames, _ = analysis.parse_journal(m.journal(since))
             in_time = analysis.settled([t0], frames, "athanor-dock", "dock", HIDE_LIMIT, HORIZON)[0]
             ok, detail = hidden()
-            results["dock-autohide/switch"] = {"pass": in_time and ok, "register": None,
+            results["dock-autohide/switch"] = {"pass": in_time and ok, "register": "F-dock-27",
                                                "detail": f"settled in time: {in_time}; {detail}"}
             edge = f"move {w // 2} {h - 1}"
             # Resting on the edge reveals the dock at its place, centred, within 0.3 s.
