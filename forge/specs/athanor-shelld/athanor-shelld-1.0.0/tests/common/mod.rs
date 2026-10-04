@@ -27,9 +27,23 @@ impl Bus {
     pub fn start(name: &str) -> Bus {
         let dir = env::temp_dir().join(format!("athanor-shelld-{name}-{}", process::id()));
         fs::create_dir_all(&dir).expect("mkdir");
+        // A configuration of its own: `--session` reads the host's, which on a system running
+        // dbus-broker has no <listen> element, and dbus-daemon refuses to start without one.
+        let config = dir.join("bus.conf");
+        fs::write(
+            &config,
+            format!(
+                "<busconfig><type>session</type><listen>unix:path={}</listen>\
+                 <policy context=\"default\"><allow send_destination=\"*\"/>\
+                 <allow receive_sender=\"*\"/><allow own=\"*\"/>\
+                 </policy></busconfig>",
+                dir.join("bus").display()
+            ),
+        )
+        .expect("bus.conf");
         let mut daemon = Command::new("dbus-daemon")
-            .args(["--session", "--nofork", "--nopidfile", "--print-address"])
-            .arg(format!("--address=unix:path={}", dir.join("bus").display()))
+            .args(["--nofork", "--nopidfile", "--print-address"])
+            .arg(format!("--config-file={}", config.display()))
             .stdout(Stdio::piped())
             .spawn()
             .expect("dbus-daemon");
