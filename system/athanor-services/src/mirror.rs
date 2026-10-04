@@ -6,6 +6,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::future::join_all;
@@ -51,13 +52,14 @@ pub struct Snapshot {
 pub fn spawn(
     handle: &Handle,
     connection: Connection,
-    name: &'static str,
+    name: impl Into<Arc<str>>,
     source: Source,
 ) -> watch::Receiver<Snapshot> {
+    let name = name.into();
     let (tx, rx) = watch::channel(Snapshot::default());
     handle.spawn(async move {
-        if let Err(err) = run(connection, name, source, &tx).await {
-            tracing::error!(error = %err, name, "the mirror of the service stopped; it is shown as absent");
+        if let Err(err) = run(connection, name.clone(), source, &tx).await {
+            tracing::error!(error = %err, name = &*name, "the mirror of the service stopped; it is shown as absent");
         }
         // Whatever ended the mirror, its objects are no longer kept current.
         tx.send_modify(|snapshot| {
@@ -71,26 +73,26 @@ pub fn spawn(
 
 async fn run(
     connection: Connection,
-    name: &'static str,
+    name: Arc<str>,
     source: Source,
     tx: &watch::Sender<Snapshot>,
 ) -> zbus::Result<()> {
     // Subscribe before asking for the owner, so no change falls between the two.
     let dbus = DBusProxy::new(&connection).await?;
     let mut owners = dbus
-        .receive_name_owner_changed_with_args(&[(0, name)])
+        .receive_name_owner_changed_with_args(&[(0, &*name)])
         .await?;
     // The bus delivers only the owner's signals; zbus cannot match a well-known sender on its
     // side, so a connection shared by several mirrors hands each of them every mirrored
     // service's signals, and `Mirror::signal` keeps the owner's.
     let rule = MatchRule::builder()
         .msg_type(Type::Signal)
-        .sender(name)?
+        .sender(&*name)?
         .build();
     let mut signals = MessageStream::for_match_rule(rule, &connection, None).await?;
     let mut mirror = Mirror {
         connection,
-        name,
+        name: name.clone(),
         source,
         tx,
         owner: None,
@@ -98,7 +100,7 @@ async fn run(
         buffered: Vec::new(),
         publish_at: None,
     };
-    match dbus.get_name_owner(BusName::try_from(name)?).await {
+    match dbus.get_name_owner(BusName::try_from(&*name)?).await {
         Ok(owner) => mirror.owner_changed(Some(owner.to_string())),
         Err(fdo::Error::NameHasNoOwner(_)) => {}
         Err(err) => return Err(err.into()),
@@ -109,13 +111,13 @@ async fn run(
                 let Some(change) = change else { return Ok(()) };
                 match change.args() {
                     Ok(args) => mirror.owner_changed(args.new_owner().as_ref().map(|owner| owner.to_string())),
-                    Err(err) => tracing::warn!(error = %err, name, "NameOwnerChanged had an unexpected type"),
+                    Err(err) => tracing::warn!(error = %err, name = &*name, "NameOwnerChanged had an unexpected type"),
                 }
             }
             message = signals.next() => {
                 match message {
                     Some(Ok(message)) => mirror.signal(&message),
-                    Some(Err(err)) => tracing::warn!(error = %err, name, "a signal could not be read"),
+                    Some(Err(err)) => tracing::warn!(error = %err, name = &*name, "a signal could not be read"),
                     None => return Ok(()),
                 }
             }
@@ -142,7 +144,7 @@ enum Event {
 
 struct Mirror<'a> {
     connection: Connection,
-    name: &'static str,
+    name: Arc<str>,
     source: Source,
     tx: &'a watch::Sender<Snapshot>,
     /// The owner the mirror follows, published or with its load in flight.
@@ -164,11 +166,11 @@ impl Mirror<'_> {
             return;
         }
         if owner.is_none() {
-            tracing::info!(name = self.name, "the service left the bus");
+            tracing::info!(name = &*self.name, "the service left the bus");
         }
         self.load = owner
             .as_ref()
-            .map(|owner| load(&self.connection, self.name, owner, &self.source));
+            .map(|owner| load(&self.connection, &self.name, owner, &self.source));
         self.buffered.clear();
         self.publish_at = None;
         self.owner.clone_from(&owner);
@@ -239,7 +241,7 @@ impl Mirror<'_> {
 
 /// Loads the objects from `owner`, the unique name, so every reply comes from the instance
 /// this generation belongs to. The calls run together, each bounded by [`TIMEOUT`].
-fn load(connection: &Connection, name: &'static str, owner: &str, source: &Source) -> Load {
+fn load(connection: &Connection, name: &str, owner: &str, source: &Source) -> Load {
     let requests: Vec<(&'static str, Option<&'static str>)> = match source {
         Source::Managed(root) => vec![(*root, None)],
         Source::Fixed(list) => list
@@ -247,18 +249,18 @@ fn load(connection: &Connection, name: &'static str, owner: &str, source: &Sourc
             .map(|(path, interface)| (*path, Some(*interface)))
             .collect(),
     };
-    let (connection, owner) = (connection.clone(), owner.to_owned());
+    let (connection, owner, name) = (connection.clone(), owner.to_owned(), name.to_owned());
     Box::pin(async move {
         let calls = requests
             .into_iter()
-            .map(|(path, interface)| call(&connection, name, &owner, path, interface));
+            .map(|(path, interface)| call(&connection, &name, &owner, path, interface));
         join_all(calls).await.into_iter().flatten().collect()
     })
 }
 
 async fn call(
     connection: &Connection,
-    name: &'static str,
+    name: &str,
     owner: &str,
     path: &'static str,
     interface: Option<&'static str>,

@@ -10,6 +10,7 @@
 
 pub mod battery;
 pub mod bluetooth;
+pub mod media;
 pub mod mirror;
 pub mod network;
 pub mod props;
