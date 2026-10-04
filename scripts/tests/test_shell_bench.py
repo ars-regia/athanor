@@ -287,5 +287,12 @@ class Restore(unittest.TestCase):
                                       ("restart", "athanor-bar", "athanor-dock")])
 
 
+class Report(unittest.TestCase):
+    def test_a_scenario_is_reported_with_its_detail(self):
+        text = bench.report({"date": "d", "commit": "c", "scenarios": {
+            "dock-autohide/rest": {"pass": False, "register": None, "detail": "nothing drawn"}}})
+        self.assertIn("| scenarios | dock-autohide/rest | nothing drawn | ST6 | **no** |", text)
+
+
 if __name__ == "__main__":
     unittest.main()

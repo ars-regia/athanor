@@ -211,9 +211,11 @@ def report(results):
 
     def walk(stage, prefix, node):
         if isinstance(node, dict) and "pass" in node:
-            value = node["value"]
+            # A measure carries a value and its limit; a scenario its detail, judged by ST6.
+            value = node["value"] if "value" in node else node["detail"]
+            limit = node.get("limit", "ST6")
             shown = "not measured" if value is None else f"{value:.4g}" if isinstance(value, float) else value
-            lines.append(f"| {stage} | {prefix} | {shown} | {node['limit']} | {'yes' if node['pass'] else '**no**'} |")
+            lines.append(f"| {stage} | {prefix} | {shown} | {limit} | {'yes' if node['pass'] else '**no**'} |")
         elif isinstance(node, dict):
             for key, child in node.items():
                 walk(stage, f"{prefix}/{key}" if prefix else key, child)
