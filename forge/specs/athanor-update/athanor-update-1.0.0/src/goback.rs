@@ -66,9 +66,23 @@ mod tests {
         fn start(name: &str) -> Bus {
             let dir = env::temp_dir().join(format!("athanor-update-{name}-{}", process::id()));
             fs::create_dir_all(&dir).expect("mkdir");
+            // A configuration of our own: `--session` reads the distribution's session.conf,
+            // and Nix's carries no <listen> element, so the daemon refuses to start there. The
+            // policy is session.conf's: everything may be sent, received and owned.
+            let config = dir.join("bus.conf");
+            fs::write(
+                &config,
+                format!(
+                    "<busconfig><type>session</type><listen>unix:path={}</listen>\
+                     <policy context=\"default\"><allow send_destination=\"*\" eavesdrop=\"true\"/>\
+                     <allow eavesdrop=\"true\"/><allow own=\"*\"/></policy></busconfig>",
+                    dir.join("bus").display()
+                ),
+            )
+            .expect("bus.conf");
             let mut daemon = Command::new("dbus-daemon")
-                .args(["--session", "--nofork", "--nopidfile", "--print-address"])
-                .arg(format!("--address=unix:path={}", dir.join("bus").display()))
+                .args(["--nofork", "--nopidfile", "--print-address"])
+                .arg(format!("--config-file={}", config.display()))
                 .stdout(Stdio::piped())
                 .spawn()
                 .expect("dbus-daemon");
@@ -76,6 +90,7 @@ mod tests {
             BufReader::new(daemon.stdout.take().expect("stdout"))
                 .read_line(&mut address)
                 .expect("address");
+            assert!(!address.trim().is_empty(), "dbus-daemon printed no address");
             Bus { daemon, address: address.trim().to_owned(), dir }
         }
 
