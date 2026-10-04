@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Installs the self-hosted runner on this host (scripts/runner/README.md): vm.sh,
+# Installs the self-hosted runner on this host (scripts/runner/README.md): vm.sh, balloon.py,
 # runner.env and README.md under /usr/local/libexec/athanor-runner, the unit under
-# /etc/systemd/system, the base image built by build-image.sh into the state directory
+# /etc/systemd/system, the polkit rule that lets the service inhibit sleep during a job
+# under /etc/polkit-1/rules.d, the base image built by build-image.sh into the state directory
 # of the service, and the GitHub token, read from standard input and encrypted with
 # systemd-creds (host key and TPM2) into /etc/credstore.encrypted. The token is never
 # written in clear and never appears on a command line. Stops a running runner first:
@@ -34,9 +35,12 @@ STATE=/var/lib/private/athanor-runner
 if systemctl is-active --quiet "$UNIT"; then systemctl stop "$UNIT"; fi
 
 install -d -m 0755 "$LIBEXEC"
-install -m 0755 "$HERE/vm.sh" "$LIBEXEC/vm.sh"
+install -m 0755 "$HERE/vm.sh" "$HERE/balloon.py" "$LIBEXEC/"
 install -m 0644 "$HERE/runner.env" "$HERE/README.md" "$LIBEXEC/"
 install -m 0644 "$HERE/$UNIT" "/etc/systemd/system/$UNIT"
+# -D: creates rules.d only where polkit is missing, never changes the mode of the existing one.
+install -D -m 0644 "$HERE/50-athanor-runner-inhibit.rules" \
+  /etc/polkit-1/rules.d/50-athanor-runner-inhibit.rules
 
 install -d -m 0700 /etc/credstore.encrypted
 systemd-creds encrypt --with-key=host+tpm2 --name=github-token - "$CREDENTIAL"

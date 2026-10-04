@@ -37,59 +37,163 @@ pub enum LaunchError {
     NoAnswer(&'static str),
     #[error("{unit} did not start: its start job ended with \"{result}\"")]
     Start { unit: String, result: String },
+    #[error("the file cannot be read: {0}")]
+    File(glib::Error),
 }
 
-/// What the field codes of an `Exec` line expand to. No file or URL is ever passed.
+/// The scheme GIO is asked for: what the text itself says, lower-cased. A text without one is
+/// refused here, because GIO would log a critical for an empty scheme.
+fn uri_scheme(uri: &str) -> Result<glib::GString, LaunchError> {
+    glib::Uri::peek_scheme(uri).ok_or_else(|| LaunchError::Missing(format!("a scheme in {uri}")))
+}
+
+/// What the field codes of an `Exec` line expand to.
 pub(crate) struct Fields<'a> {
     pub(crate) name: &'a str,
     pub(crate) icon: Option<&'a str>,
     pub(crate) location: Option<&'a str>,
+    /// The one file or URL to open (doc_launcher.md, LA5); none when the application
+    /// only starts.
+    pub(crate) target: Option<Target<'a>>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct Target<'a> {
+    pub(crate) uri: &'a str,
+    /// The local path of `uri`; `None` when it is remote.
+    pub(crate) path: Option<&'a str>,
+}
+
+/// What a file or URL code becomes: the target as a path (`%f`, `%F`) or as a URI (`%u`,
+/// `%U`), or nothing when there is no target.
+fn target_for(code: char, fields: &Fields<'_>) -> Result<Option<String>, String> {
+    let Some(target) = fields.target else { return Ok(None) };
+    match code {
+        'f' | 'F' => target
+            .path
+            .map(|path| Some(path.to_owned()))
+            .ok_or_else(|| "the application opens local files only".to_owned()),
+        _ => Ok(Some(target.uri.to_owned())),
+    }
 }
 
 /// The arguments of an `Exec` line, with its field codes expanded (Desktop Entry
-/// Specification, "The Exec key"), quoted as GLib's own launcher parses it.
+/// Specification, "The Exec key") in GLib's order: each code is replaced in the raw line by
+/// its value, and only then is the line split into words.
+///
+/// A code outside quotes gets its value shell-quoted, so the value is one word, read
+/// literally. Inside a quoted section, single or double, or after a backslash, the
+/// specification leaves a code undefined and no quoting is right for every reader: the
+/// section may be the body of an inner `sh -c`, which parses it again. There the value goes
+/// in bare, as GLib puts it. Only the target is untrusted: its value goes in bare only when
+/// every character is alphanumeric or one of `/ . _ - + , : @ =`, which no shell reads as
+/// syntax, and any other target refuses the launch. The entry's own values (`%c`, `%k`,
+/// `%i`) come from the author who wrote the line, so they go in as they are, and a line
+/// they leave unbalanced fails to parse.
+///
+/// A target that starts with `-` is refused wherever its code stands: the application could
+/// read it as an option. A target the line has no code for is refused: the application would
+/// start without it.
 pub(crate) fn expand(exec: &str, fields: &Fields<'_>) -> Result<Vec<String>, String> {
-    let words = glib::shell_parse_argv(exec).map_err(|err| err.to_string())?;
-    let mut argv = Vec::new();
-    for word in words {
-        let word = word
-            .into_string()
-            .map_err(|_| "an argument is not UTF-8".to_owned())?;
-        match word.as_str() {
-            // Files and URLs: none. %d %D %n %N %v %m: deprecated, removed.
-            "%f" | "%F" | "%u" | "%U" | "%d" | "%D" | "%n" | "%N" | "%v" | "%m" => {}
-            "%i" => {
-                if let Some(icon) = fields.icon {
-                    argv.extend(["--icon".to_owned(), icon.to_owned()]);
+    let mut line = String::with_capacity(exec.len());
+    let mut used = false;
+    // The quoting `shell_parse_argv` will read, up to the current character.
+    let mut quoting = Quoting::None;
+    let mut escaped = false;
+    let mut chars = exec.char_indices().peekable();
+    while let Some((at, c)) = chars.next() {
+        if c != '%' {
+            line.push(c);
+            if std::mem::take(&mut escaped) {
+                continue;
+            }
+            match (quoting, c) {
+                (Quoting::None, '\\') => escaped = true,
+                (Quoting::None, '\'') => quoting = Quoting::Single,
+                (Quoting::None, '"') => quoting = Quoting::Double,
+                (Quoting::Single, '\'') | (Quoting::Double, '"') => quoting = Quoting::None,
+                // Inside double quotes a backslash escapes only `"` and itself, for the quoting.
+                (Quoting::Double, '\\') => escaped = matches!(chars.peek(), Some((_, '"' | '\\'))),
+                _ => {}
+            }
+            continue;
+        }
+        let quoted = quoting != Quoting::None || std::mem::take(&mut escaped);
+        let Some((code_at, code)) = chars.next() else {
+            return Err("the Exec line ends with a lone %".to_owned());
+        };
+        match code {
+            '%' => line.push('%'),
+            'f' | 'F' | 'u' | 'U' => {
+                if let Some(arg) = target_for(code, fields)? {
+                    if arg.starts_with('-') {
+                        return Err("the file name would be read as an option".to_owned());
+                    }
+                    insert(&mut line, &arg, quoted, true)?;
+                    used = true;
                 }
             }
-            _ => argv.push(expand_word(&word, fields)?),
+            'c' => insert(&mut line, fields.name, quoted, false)?,
+            'k' => {
+                if let Some(location) = fields.location {
+                    insert(&mut line, location, quoted, false)?;
+                }
+            }
+            // Two words, so only where the code is a word of its own.
+            'i' => {
+                let after = code_at + code.len_utf8();
+                let alone = exec[..at].chars().next_back().is_none_or(char::is_whitespace)
+                    && exec[after..].chars().next().is_none_or(char::is_whitespace);
+                if !alone {
+                    return Err("the field code %i is not valid inside a word".to_owned());
+                }
+                if let Some(icon) = fields.icon {
+                    line.push_str("--icon ");
+                    insert(&mut line, icon, quoted, false)?;
+                }
+            }
+            // Deprecated codes, removed.
+            'd' | 'D' | 'n' | 'N' | 'v' | 'm' => {}
+            code => return Err(format!("the field code %{code} is not valid here")),
         }
     }
-    if argv.is_empty() {
+    if line.trim().is_empty() {
         return Err("the Exec line names no program".to_owned());
+    }
+    let argv = glib::shell_parse_argv(&line)
+        .map_err(|err| err.to_string())?
+        .into_iter()
+        .map(|word| word.into_string().map_err(|_| "an argument is not UTF-8".to_owned()))
+        .collect::<Result<Vec<String>, String>>()?;
+    if fields.target.is_some() && !used {
+        return Err("the application does not take a file to open".to_owned());
     }
     Ok(argv)
 }
 
-fn expand_word(word: &str, fields: &Fields<'_>) -> Result<String, String> {
-    let mut out = String::with_capacity(word.len());
-    let mut chars = word.chars();
-    while let Some(c) = chars.next() {
-        if c != '%' {
-            out.push(c);
-            continue;
-        }
-        match chars.next() {
-            Some('%') => out.push('%'),
-            Some('c') => out.push_str(fields.name),
-            Some('k') => out.push_str(fields.location.unwrap_or_default()),
-            Some('f' | 'F' | 'u' | 'U' | 'd' | 'D' | 'n' | 'N' | 'v' | 'm') => {}
-            Some(code) => return Err(format!("the field code %{code} is not valid here")),
-            None => return Err("the Exec line ends with a lone %".to_owned()),
-        }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Quoting {
+    None,
+    Single,
+    Double,
+}
+
+/// Appends a field code's value to the raw `Exec` line: shell-quoted outside quotes, bare
+/// inside them, where a `target` value is refused unless no character could be read as
+/// syntax (see `expand`).
+fn insert(line: &mut String, value: &str, quoted: bool, target: bool) -> Result<(), String> {
+    if !quoted {
+        let value = glib::shell_quote(value)
+            .into_string()
+            .map_err(|_| "a quoted value is not UTF-8".to_owned())?;
+        line.push_str(&value);
+        return Ok(());
     }
-    Ok(out)
+    if target && !value.chars().all(|c| c.is_alphanumeric() || "/._-+,:@=".contains(c)) {
+        return Err("the file name cannot be passed safely to this application".to_owned());
+    }
+    line.push_str(value);
+    Ok(())
 }
 
 /// An absolute path for `program`, searched in the shell's `PATH`.
@@ -97,6 +201,23 @@ fn resolve(program: &str) -> Result<String, LaunchError> {
     glib::find_program_in_path(program)
         .and_then(|path| path.into_os_string().into_string().ok())
         .ok_or_else(|| LaunchError::Missing(program.to_owned()))
+}
+
+/// `<runtime>/athanor`, created private when missing. It must be a real directory, not a
+/// symbolic link: the sockets and capture buffers of the shell's programs live in it.
+pub(crate) fn runtime_subdir(runtime: &std::path::Path) -> io::Result<PathBuf> {
+    let parent = runtime.join("athanor");
+    DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&parent)?;
+    if !fs::symlink_metadata(&parent)?.is_dir() {
+        return Err(io::Error::new(
+            ErrorKind::NotADirectory,
+            format!("{} is not a directory", parent.display()),
+        ));
+    }
+    Ok(parent)
 }
 
 /// `<runtime>/athanor/<random>`, the directory of an application's socket. `athanor` is
@@ -113,21 +234,29 @@ fn socket_dir(runtime: Option<OsString>, random: &str) -> Result<PathBuf, Launch
                 "XDG_RUNTIME_DIR is not set to an absolute path",
             )
         })?;
-    let parent = runtime.join("athanor");
-    DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(&parent)?;
-    if !fs::symlink_metadata(&parent)?.is_dir() {
-        return Err(io::Error::new(
-            ErrorKind::NotADirectory,
-            format!("{} is not a directory", parent.display()),
-        )
-        .into());
-    }
+    let parent = runtime_subdir(&runtime)?;
     let dir = parent.join(random);
     DirBuilder::new().mode(0o700).create(&dir)?;
     Ok(dir)
+}
+
+/// `uri` in GIO's canonical form and its local path, or `None` when it has no scheme.
+fn canonical(uri: &str) -> Option<(String, Option<PathBuf>)> {
+    let file = gio::File::for_uri(uri);
+    file.uri_scheme()?;
+    Some((file.uri().to_string(), file.path()))
+}
+
+/// The desktop id the security context and the unit of a typed command carry.
+const COMMAND_ID: &str = "os.athanor.Command.desktop";
+
+/// What a launch starts, whether from a desktop entry or a typed command.
+struct Start<'a> {
+    id: &'a str,
+    name: &'a str,
+    /// For the activation token; none for a command.
+    info: Option<&'a gio::AppInfo>,
+    working_directory: String,
 }
 
 impl Client {
@@ -135,9 +264,19 @@ impl Client {
     /// behind a security context, and returns the unit's name. When the context cannot be
     /// created the application does not start (BR2.6).
     pub async fn launch(&self, app: &gio_unix::DesktopAppInfo) -> Result<String, LaunchError> {
+        self.launch_with(app, None).await
+    }
+
+    /// As [`Client::launch`], handing `app` one file or URL as its `Exec` line takes it.
+    pub async fn launch_with(
+        &self,
+        app: &gio_unix::DesktopAppInfo,
+        uri: Option<&str>,
+    ) -> Result<String, LaunchError> {
         self.live()?;
+        let name = app.name();
         let entry = |reason: &str| LaunchError::Entry {
-            app: app.name().to_string(),
+            app: name.to_string(),
             reason: reason.to_owned(),
         };
         let id = app.id().ok_or_else(|| entry("it has no desktop id"))?;
@@ -150,28 +289,123 @@ impl Client {
         let location = app
             .filename()
             .and_then(|path| path.into_os_string().into_string().ok());
-        let name = app.name();
+        // A target is a URI with a scheme, in GIO's canonical form: a bare string such as
+        // `+cmd` is not one, and the application would read it as an option.
+        let canonical = match uri {
+            Some(uri) => Some(canonical(uri).ok_or_else(|| entry("the target is not a URI"))?),
+            None => None,
+        };
+        let path = canonical
+            .as_ref()
+            .and_then(|(_, path)| path.clone())
+            .and_then(|path| path.into_os_string().into_string().ok());
         let fields = Fields {
             name: &name,
             icon: icon.as_deref(),
             location: location.as_deref(),
+            target: canonical.as_ref().map(|(uri, _)| Target {
+                uri,
+                path: path.as_deref(),
+            }),
         };
         let mut argv = expand(&exec, &fields).map_err(|reason| entry(&reason))?;
         if app.boolean("Terminal") {
-            argv.insert(0, TERMINAL.to_owned());
+            argv.splice(0..0, [TERMINAL.to_owned(), "--".to_owned()]);
         }
+        let working_directory = app
+            .string("Path")
+            .filter(|path| path.starts_with('/'))
+            .map_or_else(|| "~".to_owned(), |path| path.to_string());
+        let start = Start {
+            id: &id,
+            name: &name,
+            info: Some(app.upcast_ref()),
+            working_directory,
+        };
+        self.start(&start, argv).await
+    }
+
+    /// Opens a file or a URL with the user's default application for it, started like any
+    /// other (BR2). A local file is typed by its content, as the file manager types it.
+    pub async fn open_uri(&self, uri: &str) -> Result<String, LaunchError> {
+        // Not a URI GIO can name, and an argument an application could read as an option.
+        if uri.starts_with('-') {
+            return Err(LaunchError::Entry {
+                app: "the file or URL".to_owned(),
+                reason: "its name would be read as an option".to_owned(),
+            });
+        }
+        let file = gio::File::for_uri(uri);
+        let app = if file.is_native() {
+            let info = file
+                .query_info_future(
+                    gio::FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
+                    gio::FileQueryInfoFlags::NONE,
+                    glib::Priority::DEFAULT,
+                )
+                .await
+                .map_err(LaunchError::File)?;
+            let kind = info
+                .content_type()
+                .ok_or_else(|| LaunchError::Missing(format!("a type for {uri}")))?;
+            gio::AppInfo::default_for_type(&kind, false)
+                .ok_or_else(|| LaunchError::Missing(format!("an application for {kind}")))?
+        } else {
+            // From the text: GIO's own answer for an https URL is "http" (gvfs' web backend
+            // serves both), which would pick the handler of the wrong scheme.
+            let scheme = uri_scheme(uri)?;
+            gio::AppInfo::default_for_uri_scheme(&scheme)
+                .ok_or_else(|| LaunchError::Missing(format!("an application for {scheme}:")))?
+        };
+        let app = app
+            .downcast::<gio_unix::DesktopAppInfo>()
+            .map_err(|app| LaunchError::Missing(format!("a desktop entry for {}", app.name())))?;
+        self.launch_with(&app, Some(uri)).await
+    }
+
+    /// Runs a command line in the user's default terminal, in a unit and behind a
+    /// security context of its own like an application (doc_launcher.md, LA5). `argv` is
+    /// the user's own command, run exactly as given, after `--` so the terminal launcher
+    /// takes none of it as an option; a first word starting with `-` is refused as well.
+    pub async fn launch_command(&self, argv: &[String]) -> Result<String, LaunchError> {
+        self.live()?;
+        let command = |reason: &str| LaunchError::Entry {
+            app: "the command".to_owned(),
+            reason: reason.to_owned(),
+        };
+        let Some(name) = argv.first().filter(|name| !name.is_empty()) else {
+            return Err(command("it is empty"));
+        };
+        if name.starts_with('-') {
+            return Err(command("its program name would be read as an option"));
+        }
+        let start = Start {
+            id: COMMAND_ID,
+            name,
+            info: None,
+            working_directory: "~".to_owned(),
+        };
+        let argv = [vec![TERMINAL.to_owned(), "--".to_owned()], argv.to_vec()].concat();
+        self.start(&start, argv).await
+    }
+
+    async fn start(&self, start: &Start<'_>, argv: Vec<String>) -> Result<String, LaunchError> {
+        let entry = |reason: &str| LaunchError::Entry {
+            app: start.name.to_owned(),
+            reason: reason.to_owned(),
+        };
         let (program, arguments) = argv
             .split_first()
             .ok_or_else(|| entry("the Exec line names no program"))?;
         let argv = [vec![resolve(program)?], arguments.to_vec()].concat();
 
         let random = unit::random();
-        let unit_name =
-            unit::app_unit_name(&id, &random).ok_or_else(|| entry("its desktop id is too long"))?;
+        let unit_name = unit::app_unit_name(start.id, &random)
+            .ok_or_else(|| entry("its desktop id is too long"))?;
         let runtime_directory = format!("athanor/{random}");
         let dir = socket_dir(std::env::var_os("XDG_RUNTIME_DIR"), &random)?;
         let result = self
-            .start_in_context(app, &id, argv, unit_name, runtime_directory, &dir)
+            .start_in_context(start, argv, unit_name, runtime_directory, &dir)
             .await;
         if result.is_err() {
             // systemd removes it too when the unit it started stops.
@@ -187,8 +421,7 @@ impl Client {
 
     async fn start_in_context(
         &self,
-        app: &gio_unix::DesktopAppInfo,
-        id: &str,
+        start: &Start<'_>,
         argv: Vec<String>,
         unit_name: String,
         runtime_directory: String,
@@ -203,25 +436,21 @@ impl Client {
         self.create_context(
             listener.as_fd(),
             close_read.as_fd(),
-            unit::app_id(id),
+            unit::app_id(start.id),
             &unit_name,
         )?;
 
         let mut environment = vec![format!("WAYLAND_DISPLAY={}", socket.display())];
-        if let Some(token) = self.activation_token(Some(app.upcast_ref())) {
+        if let Some(token) = self.activation_token(start.info) {
             environment.push(format!("XDG_ACTIVATION_TOKEN={token}"));
             environment.push(format!("DESKTOP_STARTUP_ID={token}"));
         }
-        let working_directory = app
-            .string("Path")
-            .filter(|path| path.starts_with('/'))
-            .map_or_else(|| "~".to_owned(), |path| path.to_string());
         let unit = Unit {
             name: unit_name,
-            description: app.name().to_string(),
+            description: start.name.to_owned(),
             argv,
             environment,
-            working_directory,
+            working_directory: start.working_directory.clone(),
             runtime_directory: Some(runtime_directory),
         };
         unit.start(Some(close_write.into())).await?;
@@ -378,11 +607,164 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn an_https_url_is_looked_up_by_its_own_scheme() {
+        assert_eq!(uri_scheme("https://a.b/c?d#e").unwrap(), "https");
+        assert_eq!(uri_scheme("HTTPS://a.b").unwrap(), "https");
+        assert!(matches!(
+            uri_scheme("not a uri"),
+            Err(LaunchError::Missing(what)) if what.contains("not a uri")
+        ));
+    }
+
     const FIELDS: Fields<'static> = Fields {
         name: "Text Editor",
         icon: Some("org.gnome.TextEditor"),
         location: Some("/usr/share/applications/org.gnome.TextEditor.desktop"),
+        target: None,
     };
+
+    fn with(uri: &'static str, path: Option<&'static str>) -> Fields<'static> {
+        Fields {
+            target: Some(Target { uri, path }),
+            ..FIELDS
+        }
+    }
+
+    #[test]
+    fn a_target_goes_where_the_exec_line_asks() {
+        let file = with("file:///h/a%20b.png", Some("/h/a b.png"));
+        assert_eq!(expand("viewer %f", &file).unwrap(), ["viewer", "/h/a b.png"]);
+        assert_eq!(expand("viewer %F", &file).unwrap(), ["viewer", "/h/a b.png"]);
+        assert_eq!(
+            expand("browser %U", &file).unwrap(),
+            ["browser", "file:///h/a%20b.png"]
+        );
+        assert_eq!(
+            expand("app --open=%u", &file).unwrap(),
+            ["app", "--open=file:///h/a%20b.png"]
+        );
+        let web = with("https://example.org/?q=a", None);
+        assert_eq!(
+            expand("firefox %u", &web).unwrap(),
+            ["firefox", "https://example.org/?q=a"]
+        );
+    }
+
+    #[test]
+    fn a_remote_target_needs_a_url_code() {
+        let web = with("https://example.org/", None);
+        assert!(expand("viewer %f", &web).is_err());
+    }
+
+    #[test]
+    fn a_target_with_nowhere_to_go_is_refused() {
+        let file = with("file:///h/a.txt", Some("/h/a.txt"));
+        assert!(
+            expand("app", &file).is_err(),
+            "the application would start without the file"
+        );
+        assert!(expand("app %i", &file).is_err());
+    }
+
+    #[test]
+    fn a_target_never_becomes_two_arguments() {
+        let file = with("file:///h/x;%20touch%20y", Some("/h/x; touch y"));
+        assert_eq!(
+            expand("viewer %f", &file).unwrap(),
+            ["viewer", "/h/x; touch y"]
+        );
+    }
+
+    #[test]
+    fn a_target_without_a_scheme_is_refused() {
+        assert!(canonical("+cmd").is_none());
+        assert!(canonical("-rf").is_none());
+        let (uri, path) = canonical("file:///h/a%20b").unwrap();
+        assert_eq!(uri, "file:///h/a%20b");
+        assert_eq!(path.unwrap(), PathBuf::from("/h/a b"));
+    }
+
+    #[test]
+    fn a_target_is_never_an_option() {
+        let file = with("-rf", Some("-rf"));
+        assert!(expand("viewer %f", &file).is_err());
+        assert!(expand("viewer %u", &file).is_err());
+        // Wherever the code stands: inside a word, inside quotes.
+        assert!(expand("viewer --file=%f", &file).is_err());
+        assert!(expand(r#"viewer "%f""#, &file).is_err());
+    }
+
+    #[test]
+    fn a_code_outside_quotes_cannot_inject() {
+        let name = "/h/x$(id>/tmp/p).png";
+        let file = Fields {
+            target: Some(Target { uri: "file:///h/x%24(id%3E/tmp/p).png", path: Some(name) }),
+            ..FIELDS
+        };
+        let argv = expand(r#"sh -c 'printf %%s "$1"' sh %f"#, &file).unwrap();
+        assert_eq!(argv, ["sh", "-c", r#"printf %s "$1""#, "sh", name]);
+        let out = std::process::Command::new(&argv[0]).args(&argv[1..]).output().unwrap();
+        assert_eq!(String::from_utf8(out.stdout).unwrap(), name, "sh printed the name literally");
+        // The same name inside a quoted body is refused (residual-rereview.md, I1).
+        assert!(expand(r#"sh -c "echo %f""#, &file).is_err());
+    }
+
+    #[test]
+    fn a_code_inside_quotes_takes_only_a_plain_value() {
+        let hostile = |path: &'static str| Fields {
+            target: Some(Target { uri: "file:///h/hostile", path: Some(path) }),
+            ..FIELDS
+        };
+        for (exec, path) in [
+            (r#"sh -c "viewer '%f'""#, "/h/x;touch y.png"),
+            (r#"sh -c "viewer '%f'""#, "/h/x|touch y.png"),
+            (r#"sh -c "viewer '%f'""#, "/h/x\ntouch y.png"),
+            (r#"sh -c "viewer \"%f\"""#, "/h/x$(id>/tmp/p).png"),
+            (r#"sh -c 'viewer %f'"#, "/h/x;printf${IFS}PWN;.png"),
+            (r#"viewer "%f""#, r#"/h/a" "-rf"#),
+            (r#"viewer \%f"#, "/h/a b.png"),
+        ] {
+            let err = expand(exec, &hostile(path)).unwrap_err();
+            assert!(err.contains("cannot be passed safely"), "{exec} with {path:?}: {err}");
+        }
+        let plain = with("file:///h/Ünïcode-1_2+a,b:c@d=e.png", Some("/h/Ünïcode-1_2+a,b:c@d=e.png"));
+        assert_eq!(expand(r#"viewer "%f""#, &plain).unwrap(), ["viewer", "/h/Ünïcode-1_2+a,b:c@d=e.png"]);
+        assert_eq!(
+            expand(r#"sh -c "viewer %f""#, &plain).unwrap(),
+            ["sh", "-c", "viewer /h/Ünïcode-1_2+a,b:c@d=e.png"]
+        );
+        assert_eq!(expand(r#"sh -c 'viewer %f'"#, &plain).unwrap(), ["sh", "-c", "viewer /h/Ünïcode-1_2+a,b:c@d=e.png"]);
+        // An escaped quote keeps the section open; a closed one ends it.
+        assert!(expand(r#"sh -c "a \" %f""#, &hostile("/h/a b")).is_err());
+        assert_eq!(expand(r#"sh -c "a" %f"#, &hostile("/h/a b")).unwrap(), ["sh", "-c", "a", "/h/a b"]);
+        // The entry's own values go in as they are.
+        assert_eq!(expand(r#"app --title "%c""#, &FIELDS).unwrap(), ["app", "--title", "Text Editor"]);
+    }
+
+    #[test]
+    fn a_code_inside_a_word_keeps_the_word() {
+        let file = with("file:///h/a%20b.png", Some("/h/a b.png"));
+        assert_eq!(expand("viewer --file=%f", &file).unwrap(), ["viewer", "--file=/h/a b.png"]);
+    }
+
+    #[test]
+    fn a_url_list_code_gives_the_target() {
+        // One target per launch (doc_launcher.md, LA5): %U and %F give it as one argument.
+        let web = with("https://example.org/a b?q='x'", None);
+        assert_eq!(expand("browser %U --new", &web).unwrap(), ["browser", "https://example.org/a b?q='x'", "--new"]);
+        let file = with("file:///h/a%20b", Some("/h/a b"));
+        assert_eq!(expand("viewer %F %F", &file).unwrap(), ["viewer", "/h/a b", "/h/a b"]);
+    }
+
+    #[test]
+    fn a_quote_in_a_value_stays_in_it() {
+        let file = with("file:///h/it's.txt", Some("/h/it's.txt"));
+        assert_eq!(expand("viewer %f", &file).unwrap(), ["viewer", "/h/it's.txt"]);
+        let named = Fields { name: "Bob's \"Editor\"", ..FIELDS };
+        assert_eq!(expand("app --title=%c", &named).unwrap(), ["app", "--title=Bob's \"Editor\""]);
+        assert!(expand(r#"sh -c "echo %f""#, &file).is_err(), "a quote inside quotes is refused");
+    }
 
     fn run(exec: &str) -> Result<Vec<String>, String> {
         expand(exec, &FIELDS)

@@ -24,17 +24,38 @@ host itself.
   unreachable across many polls, `vm.sh` only logs a warning and leaves the guest
   running — its own `RuntimeMaxSec` (8 h in the unit) is the backstop, since killing a
   running job over a network blip is worse than a late shutdown.
+- The guest's memory is lent, not reserved. An image build fills the guest with page
+  cache, and QEMU does not give those pages back by itself: on 2026-09-28 the host ran
+  out of memory twice and its OOM killer ended the job by killing QEMU. The guest now has
+  a virtio balloon with free page reporting (what the guest frees returns to the host)
+  and deflate-on-oom (the guest takes pages back rather than OOM itself), and
+  `balloon.py`, started by `vm.sh` on a QMP socket of its own, steers it: every 2 s it
+  sizes the guest so that the host keeps `HOST_RESERVE` available, never below
+  `BALLOON_FLOOR` nor above `VM_MEMORY`. Under pressure the guest drops its cache first;
+  once the host has room it grows back. The regulator is not part of the job: if it
+  fails, the job goes on and the reason is in the journal (lines start with `balloon:`).
 - Two extra disks: `cache.raw` persists across jobs (podman storage, `~/.cache/azoth`),
   `scratch.raw` is recreated empty before every job (the work directory).
 - The GitHub token is a service credential encrypted with the host key and the TPM2
   (`/etc/credstore.encrypted/athanor-runner.github-token`), used only to create and
   remove runner registrations.
+- A suspended host freezes the guest and GitHub cancels its job (2026-10-03: the desktop
+  suspended on idle in the middle of a Kernel Weekly repro). While the registration
+  reports `busy`, `vm.sh` holds a logind sleep inhibitor (`systemd-inhibit --what=sleep
+  --mode=block`), released when the job ends or `vm.sh` exits. An idle guest holds none,
+  so the host still suspends when no job runs. The service runs outside any login
+  session, where logind asks for an administrator password for this action:
+  `50-athanor-runner-inhibit.rules` allows it to the dynamic user `athanor-runner` alone.
+  A block inhibitor stops an idle suspend and makes a user's suspend ask for an
+  administrator password; it does not stop a closed lid or a root `systemctl suspend -i`.
+  A refused inhibitor is logged as a warning on every poll.
 - Pull requests from forks never reach the runner: the self-hosted jobs of
   `kernel-build.yml` skip them, and the repository requires approval for every outside
   contributor.
 
 Pins and sizing are in `runner.env`: Fedora Cloud Base and actions/runner by SHA-256,
-12 vCPUs and 16 GB, CPU and I/O weights that leave the desktop responsive.
+12 vCPUs and up to 16 GB (at least 6 GB, keeping 3 GB available on the host), CPU and
+I/O weights that leave the desktop responsive.
 
 ## Install
 
@@ -56,6 +77,7 @@ token (after `gh auth refresh` or a new PAT) needs `install.sh` again as well.
 ```sh
 sudo systemctl disable --now athanor-runner.service
 sudo rm -rf /etc/systemd/system/athanor-runner.service /usr/local/libexec/athanor-runner \
+  /etc/polkit-1/rules.d/50-athanor-runner-inhibit.rules \
   /etc/credstore.encrypted/athanor-runner.github-token /var/lib/private/athanor-runner \
   /var/log/private/athanor-runner
 sudo systemctl daemon-reload

@@ -1,25 +1,37 @@
 [Unit]
-Description=Athanor OS Hourly Bcachefs Home Snapshot Trigger
-Documentation=https://github.com/hr-mes/athanor-forge
+Description=Athanor OS hourly snapshot of /var/home
+Documentation=man:btrfs-subvolume(8)
+RequiresMountsFor=/var/home
 
 [Service]
-MemoryDenyWriteExecute=true
+Type=oneshot
+# The snapshot subvolume is created here, with full privileges and outside the mount
+# namespace below ("+"): the home root is read-only to every other command of this unit.
+ExecStartPre=+/usr/bin/athanor-backup init
+ExecStart=/usr/bin/athanor-backup create
+ExecStart=/usr/bin/athanor-backup prune
 CPUWeight=50
+IOWeight=50
 MemoryHigh=48M
 MemoryMax=64M
-Type=oneshot
-ExecStart=/usr/bin/busctl call org.athanor.Backup1 /org/athanor/Backup1 org.athanor.Backup1 CreateSnapshot s "Istantanea oraria automatica"
 
-# Extreme Sandboxing
+# Snapshotting needs CAP_FOWNER on the source subvolume, deleting one CAP_SYS_ADMIN.
+# The live homes stay read-only: only the snapshot subvolume is writable.
+CapabilityBoundingSet=CAP_FOWNER CAP_SYS_ADMIN
 ProtectSystem=strict
-ProtectHome=yes
+ReadWritePaths=/var/home/.snapshots
 PrivateTmp=true
+PrivateNetwork=true
 NoNewPrivileges=yes
 SystemCallFilter=@system-service
+SystemCallArchitectures=native
+MemoryDenyWriteExecute=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectKernelLogs=true
 ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
 RestrictRealtime=true
 RestrictSUIDSGID=true
 LockPersonality=true

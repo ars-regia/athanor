@@ -56,6 +56,9 @@ SURFACES = {
     },
     # doc_bar.md, BR9: the dock (2c), vertical beside a bottom panel.
     "dock": {"variants": ("light", "dark"), "scales": ("1.0", "1.5")},
+    # doc_launcher.md, LA11: the launcher with a query and its preview (plan 3a); the
+    # library's 12 cases come with plan 3b.
+    "launcher": {"variants": ("light", "dark"), "scales": ("1.0", "1.5")},
 }
 
 # SH7: factory knobs per preset; "-" is "no dock knob" (the bar).

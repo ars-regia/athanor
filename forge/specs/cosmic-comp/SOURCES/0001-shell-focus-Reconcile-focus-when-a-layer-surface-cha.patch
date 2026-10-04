@@ -1,0 +1,132 @@
+From d63de2e4aee2fb3686f2373ef9c75e6d67d33917 Mon Sep 17 00:00:00 2001
+From: Ermete Architect <esenese@proton.me>
+Date: Fri, 2 Oct 2026 10:05:49 +0200
+Subject: [PATCH 1/2] shell/focus: Reconcile focus when a layer surface changes
+ keyboard interactivity
+
+A layer surface gets the keyboard focus only when it maps. A client that
+keeps its surface mapped and toggles keyboard_interactivity instead, such
+as a launcher that switches between none and exclusive on show and hide,
+runs into two gaps in the focus fixup:
+
+- With no focused window and an empty focus stack, refresh_focus treats
+  the missing focus as valid and never looks for an exclusive layer
+  surface, so a surface that has just become exclusive gets no keys.
+- focus_target_is_valid accepts a layer surface as long as it is in the
+  layer map, so a surface that has set its interactivity back to none
+  keeps the keyboard focus, and the window below gets no keys until it
+  is clicked.
+
+Fall through to the fixup when an exclusive layer surface exists, and
+treat a layer surface that can no longer receive keyboard focus as an
+invalid target. Run the focus fixup from the commit handler when a
+mapped layer surface changes its keyboard interactivity, so the change
+takes effect at once rather than on the next throttled refresh.
+---
+ src/shell/focus/mod.rs             |  7 ++++--
+ src/wayland/handlers/compositor.rs | 36 ++++++++++++++++++++++++++----
+ 2 files changed, 37 insertions(+), 6 deletions(-)
+
+diff --git a/src/shell/focus/mod.rs b/src/shell/focus/mod.rs
+index f631372..bfb0c17 100644
+--- a/src/shell/focus/mod.rs
++++ b/src/shell/focus/mod.rs
+@@ -572,7 +572,8 @@ impl Common {
+                 let workspace = shell.active_space(&output).unwrap();
+                 let focus_stack = workspace.focus_stack.get(seat);
+ 
+-                if focus_stack.last().is_none() {
++                // An exclusive layer surface takes the focus, even with no window to fall back to.
++                if focus_stack.last().is_none() && exclusive_layer_surface_layer(&shell).is_none() {
+                     continue; // Focus is valid
+                 } else {
+                     trace!("No previous window, focus fixup");
+@@ -678,7 +679,9 @@ fn focus_target_is_valid(
+             is_sticky || is_in_focus_stack
+         }
+         KeyboardFocusTarget::LayerSurface(layer) => {
+-            layer_map_for_output(output).layers().any(|l| l == &layer)
++            // A surface that set its keyboard interactivity back to none gives up the focus.
++            layer.can_receive_keyboard_focus()
++                && layer_map_for_output(output).layers().any(|l| l == &layer)
+         }
+         KeyboardFocusTarget::Group(WindowGroup { node, .. }) => shell
+             .workspaces
+diff --git a/src/wayland/handlers/compositor.rs b/src/wayland/handlers/compositor.rs
+index ed40448..c93a0c0 100644
+--- a/src/wayland/handlers/compositor.rs
++++ b/src/wayland/handlers/compositor.rs
+@@ -23,7 +23,7 @@ use smithay::{
+         drm_syncobj::DrmSyncobjCachedState,
+         seat::WaylandFocus,
+         shell::{
+-            wlr_layer::LayerSurfaceAttributes,
++            wlr_layer::{KeyboardInteractivity, LayerSurfaceAttributes},
+             xdg::{
+                 ToplevelSurface, XdgPopupSurfaceRoleAttributes, XdgToplevelSurfaceRoleAttributes,
+             },
+@@ -31,7 +31,7 @@ use smithay::{
+     },
+     xwayland::XWaylandClientData,
+ };
+-use std::{collections::VecDeque, sync::Mutex, time::Duration};
++use std::{cell::Cell, collections::VecDeque, sync::Mutex, time::Duration};
+ 
+ fn toplevel_ensure_initial_configure(
+     toplevel: &ToplevelSurface,
+@@ -369,14 +369,39 @@ impl CompositorHandler for State {
+             .cloned();
+ 
+         if let Some(output) = layer_output {
+-            let changed = layer_map_for_output(&output).arrange();
++            let mut map = layer_map_for_output(&output);
++            let changed = map.arrange();
++            let interactivity_changed = map
++                .layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
++                .is_some_and(keyboard_interactivity_changed);
++            std::mem::drop(map);
+             if changed {
+                 shell.workspaces.recalculate();
+             }
++            // Only mapping a layer surface gives it the keyboard focus. Reconcile the focus
++            // now, so a mapped surface that becomes exclusive gets the keys at once, and one
++            // that becomes non-interactive hands them back.
++            if interactivity_changed {
++                std::mem::drop(shell);
++                Common::refresh_focus(self);
++            }
+         }
+     }
+ }
+ 
++/// The keyboard interactivity a layer surface had at its previous commit. It starts from the
++/// state the surface maps with, so the first commit after the map compares against the real
++/// value.
++struct LastKeyboardInteractivity(Cell<KeyboardInteractivity>);
++
++fn keyboard_interactivity_changed(layer: &LayerSurface) -> bool {
++    let current = layer.cached_state().keyboard_interactivity;
++    let last = layer
++        .user_data()
++        .get_or_insert(|| LastKeyboardInteractivity(Cell::new(current)));
++    last.0.replace(current) != current
++}
++
+ impl State {
+     fn send_initial_configure_and_map(&mut self, surface: &WlSurface) -> bool {
+         let mut shell = self.common.shell.write();
+@@ -425,7 +450,10 @@ impl State {
+             && !layer_surface_check_inital_configure(&layer_surface)
+         {
+             // compute initial dimensions by mapping
+-            if let Some(target) = shell.map_layer(&layer_surface) {
++            let target = shell.map_layer(&layer_surface);
++            // Seed the interactivity the surface maps with, whether or not it takes focus.
++            keyboard_interactivity_changed(&layer_surface);
++            if let Some(target) = target {
+                 let seat = shell.seats.last_active().clone();
+                 std::mem::drop(shell);
+                 Shell::set_focus(self, Some(&target), &seat, None, false);
+-- 
+2.55.0
+

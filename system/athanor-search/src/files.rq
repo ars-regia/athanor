@@ -1,0 +1,15 @@
+# Files by name (a substring, any case) or by content (localsearch's full-text index),
+# newest first. ~name and ~match are the query as typed.
+SELECT DISTINCT ?url ?name ?snippet ?modified WHERE {
+  {
+    ?file a nfo:FileDataObject ; nie:url ?url ; nfo:fileName ?name .
+    FILTER (CONTAINS(LCASE(?name), LCASE(~name)))
+  } UNION {
+    ?content fts:match ~match ; nie:isStoredAs ?file .
+    ?file nie:url ?url ; nfo:fileName ?name .
+    BIND (fts:snippet(?content, '', '', '…', 12) AS ?snippet)
+  }
+  OPTIONAL { ?file nfo:fileLastModified ?modified }
+}
+ORDER BY DESC(?modified)
+LIMIT 40

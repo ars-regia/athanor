@@ -7,19 +7,20 @@ use std::path::PathBuf;
 
 /// `$XDG_CONFIG_HOME/cosmic`, then `<dir>/cosmic` for every directory in `XDG_DATA_DIRS`.
 pub(crate) fn dirs() -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-    dirs.extend(user_dir());
+    user_dir().into_iter().chain(system_dirs()).collect()
+}
+
+/// `<dir>/cosmic` for every directory in `XDG_DATA_DIRS`: the defaults the packages ship.
+pub(crate) fn system_dirs() -> Vec<PathBuf> {
     let data = env::var("XDG_DATA_DIRS")
         .ok()
         .filter(|dirs| !dirs.is_empty());
     let data = data.as_deref().unwrap_or("/usr/local/share:/usr/share");
-    dirs.extend(
-        data.split(':')
-            .map(PathBuf::from)
-            .filter(|dir| dir.is_absolute())
-            .map(|dir| dir.join("cosmic")),
-    );
-    dirs
+    data.split(':')
+        .map(PathBuf::from)
+        .filter(|dir| dir.is_absolute())
+        .map(|dir| dir.join("cosmic"))
+        .collect()
 }
 
 /// `$XDG_CONFIG_HOME/cosmic`, the only directory whose keys change while a session runs.

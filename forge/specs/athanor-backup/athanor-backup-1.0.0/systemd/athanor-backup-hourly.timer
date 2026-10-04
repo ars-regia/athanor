@@ -1,6 +1,6 @@
 [Unit]
-Description=Athanor OS Hourly Bcachefs Home Snapshot Timer
-Documentation=https://github.com/hr-mes/athanor-forge
+Description=Athanor OS hourly snapshot of /var/home
+Documentation=man:btrfs-subvolume(8)
 
 [Timer]
 OnCalendar=hourly

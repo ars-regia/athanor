@@ -60,6 +60,10 @@ Directory `forge/specs/azoth/` dopo il blocco:
 | `cmdline`                | riga di comando del kernel, firmata nella UKI (sezione 6)                                                                                                                                                                                                                        |
 | `boot.sh`, `boot/`       | la boot matrix (sezione 7, gate 3): ambiente QEMU/OVMF/shim pinnato come il builder, PID 1 dell'initramfs di prova con le asserzioni                                                                                                                                             |
 | `builder/Containerfile`  | ambiente Fedora 43 (esiste già), base pinnata per digest                                                                                                                                                                                                                         |
+| `builder/toolchain.lock` | gli RPM installati sopra la base del builder, per sha256: strumenti e BuildRequires dello spec pinnato (sezione 5)                                                                                                                                                              |
+| `*/*.packages`, `*/*.lock` | per ogni stadio degli ambienti `boot/` e `nvidia/` (`boot/schbench`, `boot/toolchain`, `nvidia/toolchain`), i pacchetti e il loro lock per sha256 (sezione 5)                                                                                                                  |
+| `lock.sh`                | rigenera i lock (`generate`), li controlla (`check`) e li installa da koji nei Containerfile (`install`)                                                                                                                                                                        |
+| `bconds.sh`              | i bcond di kernel.spec, gli stessi per `dnf builddep`, `rpmbuild` e il lock                                                                                                                                                                                                      |
 | `build.sh`               | l'intera build, riproducibile in locale e in CI                                                                                                                                                                                                                                  |
 | `build-inputs.py`        | gli input che cambiano gli RPM come JSON: predicato dell'attestazione dei pin e chiave del riuso (sezione 7)                                                                                                                                                                     |
 | `keys/`                  | profili e generatore delle chiavi di firma (`profiles/`, `generate.sh`); certificati pubblici della chiave Secure Boot (`secureboot/`), della chiave dei moduli (`modules/`) e delle chiavi ritirate (`revoked/`) (sezione 6); le chiavi private sono nell'environment `signing` |
@@ -128,10 +132,12 @@ identica in locale. Passi, tutti senza rete tranne i download verificati:
    PGP del tarball CachyOS e di quello vanilla contro le chiavi vendorizzate,
    firma RPM del SRPM ricucito;
 2. scrive `~/.rpmmacros` con `%_topdir` e `%buildid .azoth`; `rpm -i` del SRPM;
-   `dnf builddep -y SPECS/kernel.spec` con gli stessi bcond di rpmbuild, dopo le
-   patch (passo 3) e prima della derivazione del config, che deve vedere la
-   toolchain vera (rust-src, bindgen, pahole: `RUST_IS_AVAILABLE` e le opzioni che
-   ne dipendono): una patch che non entra ferma prep in pochi secondi;
+   `dnf builddep -y SPECS/kernel.spec` con gli stessi bcond di rpmbuild e ogni
+   repository spento, dopo le patch (passo 3) e prima della derivazione del config,
+   che deve vedere la toolchain vera (rust-src, bindgen, pahole: `RUST_IS_AVAILABLE`
+   e le opzioni che ne dipendono): le BuildRequires le ha già installate il builder
+   dal lock (sezione 5), quindi è un controllo, e uno spec che chiede altro ferma
+   prep; una patch che non entra ferma prep in pochi secondi;
 3. genera `linux-kernel-test.patch`: repo git temporaneo con tre commit (vanilla,
    CachyOS, vanilla + patch Red Hat), `git merge-tree --write-tree` dei due rami
    sopra il vanilla, `patches.list`, `patches/` e `patches/redhat/` applicate
@@ -161,7 +167,8 @@ ynl --without selftests --without doc`: patch e `process_configs.sh -w -n -c`.
    `KBUILD_BUILD_HOST=forge`, `KBUILD_BUILD_TIMESTAMP` derivato. Un job
    settimanale (`kernel-weekly.yml`, job `repro`) ricostruisce lo stesso pin
    con cache vuota e builder ricostruito (sul runner self-hosted: un secondo
-   runner quando ci sarà) e confronta con l'OCI pubblicato `config`,
+   runner quando ci sarà), con la stessa toolchain perché il builder installa
+   solo il lock (sezione 5), e confronta con l'OCI pubblicato `config`,
    `System.map`, `vmlinux` sezione per sezione e i moduli senza la firma
    (`repro.py`): la chiave che firma moduli e immagine nasce in ogni build,
    quindi firma dei `.ko` e certificato in `.init.data` sono attesi; ogni altra
@@ -182,7 +189,8 @@ ynl --without selftests --without doc`: patch e `process_configs.sh -w -n -c`.
     dello stesso NVR. Ogni immagine: firma cosign
     keyless (identità OIDC del workflow), SBOM SPDX da syft come attestazione
     `spdxjson`, attestazione custom con i pin (pins.env, hash di manifest, delta,
-    patches.list e Containerfile, immagine base del builder); la principale ha
+    patches.list e Containerfile, immagine base del builder, lock della toolchain);
+    la principale ha
     anche la provenance SLSA di GitHub (`actions/attest-build-provenance`, commit e
     workflow) nello store attestazioni di GitHub, non nel registro, verificabile
     con `gh attestation verify`. Il gate K2 è il `cosign
@@ -241,7 +249,29 @@ da kconfig. Non serve uno script Athanor.
 
 clang, lld e llvm di Fedora 43 dal Containerfile, con la base
 `registry.fedoraproject.org/fedora:43@sha256:…` pinnata per digest e aggiornata
-dal bot. `LLVM=1` arriva dal bcond dello spec (`clang_make_opts`). Rust acceso come
+dal bot. Tutto ciò che il builder installa sopra la base è in
+`builder/toolchain.lock`, per nome di file e sha256: gli strumenti di `builder/toolchain.packages`, le
+BuildRequires di kernel.spec con i bcond di `bconds.sh` e i pacchetti della base che
+aggiornano. `lock.sh install` li scarica da koji, che tiene ogni build (i mirror
+tengono solo l'ultima), ricuce l'header di firma che koji conserva in
+`data/sigcache` come per il SRPM, controlla sha256 e firma della chiave Fedora e li
+installa con ogni repository spento; il lock fa parte degli input del riuso
+(`build-inputs.py`). La chiave è quella della release della base, qualunque sia la
+release del SRPM pinnato. Lo rigenera `lock.sh generate`, in un container nudo della
+base, solo quando cambiano la base, `FEDORA_KERNEL_NVR`, gli strumenti di `toolchain.packages` o
+`bconds.sh` (le righe di intestazione del lock); `generate --force` per portare
+avanti la toolchain a pin fermi. `build.sh` lo controlla con `lock.sh check` prima di
+ogni stadio tranne `manifest`: un lock che non corrisponde a quegli input, o un
+builder costruito da un altro lock, ferma la build. Lo stesso vale per gli ambienti
+`boot/` e `nvidia/`: ogni stadio dei loro Containerfile ha la sua lista di pacchetti
+`<stadio>.packages` e il suo lock `<stadio>.lock` (`boot/schbench`, `boot/toolchain`,
+`nvidia/toolchain`), senza SRPM né bcond nell'intestazione; `lock.sh check` li
+controlla tutti, quindi un lock di `boot/` o `nvidia/` vecchio ferma anche la build del
+kernel. I tre Containerfile si costruiscono con contesto `forge/specs/azoth`
+(`podman build -f <ambiente>/Containerfile forge/specs/azoth`), perché `lock.sh` è
+condiviso. Senza lock la toolchain seguiva i repository del giorno: il 2026-10-01 il
+job `repro` ha trovato `CONFIG_PAHOLE_VERSION` 130 nell'OCI pubblicato e 132 nella
+ricostruzione dello stesso pin. `LLVM=1` arriva dal bcond dello spec (`clang_make_opts`). Rust acceso come
 in Fedora: in 7.1 `RUST` dipende da `!RANDSTRUCT` e, con `DEBUG_INFO_BTF` acceso
 (l'eBPF di Athanor non può rinunciarvi), da `!LTO`, perché pahole non regge i DWARF
 fusi da LTO con unità Rust. Quindi ThinLTO e `RANDSTRUCT` restano spenti nel delta,
@@ -288,9 +318,10 @@ patchano i Makefile per forzarlo.
 - **Primo avvio**: arruolamento guidato del certificato Secure Boot
   (`mokutil --import`), unica interazione richiesta per avere Secure Boot acceso
   su un PC qualsiasi; i moduli non ne dipendono.
-- **`cmdline`** committata: `lockdown=integrity mitigations=auto init_on_alloc=1
-randomize_kstack_offset=on page_alloc.shuffle=1 vsyscall=none preempt=full
-amd_pstate=active zswap.enabled=1`. Niente `iommu=pt`, niente `mitigations=off`.
+- **`cmdline`** generata da `forge/specs/athanor-kernel-profile/profile.toml`
+  (tabella `[base.cmdline]`, `doc_kernel_profile.md` sezione 6) insieme al file
+  `kargs.d` dell'immagine: la matrice di avvio prova la stessa riga che l'immagine
+  installa. Niente `iommu=pt`, niente `mitigations=off`.
 - **Rootfs**: dm-verity con roothash firmato da una chiave del progetto nel
   keyring secondario (non quella Secure Boot, che non vi entra),
   fs-verity per composefs, TPM 2.0 per LUKS (`systemd-cryptenroll`) con fallback
@@ -350,7 +381,7 @@ nome solo da aspettare.
 mano con `workflow_dispatch`): job `repro` (gate 6, sezione 3) e job `bench`
 (gate 5) su `ubuntu-24.04` con KVM: `bench.sh` avvia il kernel pubblicato in
 QEMU (4 vCPU, 4 GiB) con un initramfs che porta hackbench (realtime-tests), schbench
-(dal sorgente, commit pinnato in `boot/Containerfile`), fio e netperf;
+(dal sorgente, commit e hash dell'archivio pinnati in `boot/Containerfile`), fio e netperf;
 `bench/init` esegue le prove (30 s ciascuna: hackbench a lavoro fisso, wakeup
 p99 e RPS p50 di schbench, IOPS di fio con `ioengine=null`, TCP_STREAM e TCP_RR
 di netperf su loopback) e stampa `K7 <metrica> <valore> <unità>`; i
@@ -374,9 +405,15 @@ ricompila. La prova del riuso è una firma verificata, non un tag.
 ## 8. Auto-manutenzione: il bot di bump
 
 Workflow `kernel-bump.yml`, giornaliero (`schedule` vale solo dal branch di
-default; a mano con `workflow_dispatch` su qualunque branch), in tre job:
+default; a mano con `workflow_dispatch` su qualunque branch). Due gruppi, una PR
+ciascuno, perché si verificano in modo diverso (`doc_build_ordering.md`, O7 e O8):
+il gruppo **kernel** (i job sotto) e il gruppo **system** (`system/Containerfile` e i
+lock NVIDIA ripubblicati alla stessa versione, etichetta `system-bump`: System Image
+Check costruisce le immagini col kernel pubblicato e, se è verde e la PR ha solo la
+forma del bot, `forge/scripts/bot_merge.py` la unisce dopo i check obbligatori; la differenza dei
+pacchetti resta nel riepilogo del check). Il gruppo kernel ha tre job:
 
-1. **check** (runner GitHub-hosted): `bump.py apply` legge `pins.env` e
+1. **kernel** (runner GitHub-hosted): `bump.py apply --group kernel` legge `pins.env` e
    interroga Bodhi (build `kernel` stable di F43, poi F44), le release GitHub di
    `CachyOS/linux`, `CachyOS/kernel-patches` (testa della directory della
    serie), `CachyOS/linux-cachyos` (il commit di `linux-cachyos/config` vigente
@@ -384,12 +421,13 @@ default; a mano con `workflow_dispatch` su qualunque branch), in tre job:
    kernel, non la testa di oggi, che può essere della serie dopo), i tag di
    `NVIDIA/open-gpu-kernel-modules` e l'indice di download NVIDIA (dentro il
    ramo pinnato, 610 e 580: un cambio di ramo è una PR umana), e il registro
-   Fedora per il digest dell'immagine base dei tre Containerfile. Coppia kernel
+   Fedora per il digest dell'immagine base dei tre Containerfile del kernel; un lock
+   NVIDIA si rigenera qui solo quando il suo pin si sposta. Coppia kernel
    come in sezione 2; senza coppia il kernel resta dov'è e una nota nel corpo
    della PR dice fin dove arrivano Fedora e CachyOS. Se nulla è cambiato esce;
    altrimenti riscrive `pins.env`, i `FROM` e la tabella dei pin di `KERNEL.md`
-   e li passa come artefatto. Una PR di bump aperta alla volta (etichetta
-   `kernel-bump`).
+   e li passa come artefatto. Una PR aperta alla volta per gruppo (etichetta
+   `kernel-bump`): una PR `system-bump` in attesa di revisione non ferma il kernel.
 2. **prep** (runner self-hosted, dove il builder e la cache già esistono): nel
    builder, `build.sh --stage manifest` e `nvidia.sh manifest` scaricano i
    sorgenti dei pin nuovi e riscrivono i due manifesti degli hash (il `.run`
@@ -398,10 +436,13 @@ default; a mano con `workflow_dispatch` su qualunque branch), in tre job:
    è un prep rosso, mai un'accettazione silenziosa), patch applicate,
    derivazione del config e gate di `kernel-local`. L'esito e le opzioni
    derivate (`listnewconfig` con i valori CachyOS) vanno nel corpo della PR,
-   verde o rosso. Se prep si ferma con `refresh needed`, l'esito è `REFRESH`.
+   verde o rosso. Prima del builder, `lock.sh generate` riscrive i lock degli
+   ambienti i cui input si sono spostati (la base per tutti, il SRPM pinnato per il
+   builder): una PR di soli pin NVIDIA o CachyOS li lascia come sono. Se prep si ferma con `refresh needed`, l'esito è `REFRESH`.
 3. **pr** (runner GitHub-hosted, con il PAT `KERNEL_BUMP_TOKEN`: le PR aperte
    con il `GITHUB_TOKEN` non fanno partire i check): branch `bump/kernel-<data>`,
-   un commit con `pins.env`, i manifesti, i Containerfile e `KERNEL.md`, PR
+   un commit con `pins.env`, i manifesti, i Containerfile, i lock degli ambienti
+   e `KERNEL.md`, PR
    verso il branch da cui il bot è partito, con nel corpo la tabella prima/dopo
    dei pin, le note, l'esito di prep e le opzioni derivate; con prep verde
    (`ok`) `gh pr merge --auto --squash`, con prep rosso (`FAIL` o `REFRESH`)
@@ -646,5 +687,10 @@ task_struct`.
    `athanor-system-nvidia` (pacchetti negativo17) e `athanor-system-nvidia-legacy` (RPM
    Fusion) alla versione esatta dei moduli firmati, con gate e lock per hash
    (docs/architecture/doc_system_image.md).
+8. (2026-10-02) Toolchain del builder bloccata per NVR: `builder/toolchain.lock` fissa
+   per sha256 ogni RPM sopra la base, e si rigenera con il SRPM pinnato o la base
+   (sezione 5), perché la stessa coppia di pin dia lo stesso kernel. (2026-10-03)
+   Bloccati allo stesso modo gli ambienti `boot/` e `nvidia/`, un lock per stadio, e
+   l'archivio GitHub di schbench pinnato per sha256 come Firecracker.
 
-| `bump.py` | il bot di bump (sezione 8): pin nuovi da Bodhi, CachyOS, NVIDIA e registro; riscrive `pins.env`, i `FROM` e `KERNEL.md` |
+| `bump.py` | il bot di bump (sezione 8), in due gruppi: kernel (pin nuovi da Bodhi, CachyOS, NVIDIA e registro; riscrive `pins.env`, i `FROM` del kernel e `KERNEL.md`) e system (`system/Containerfile` e i lock NVIDIA ripubblicati) |

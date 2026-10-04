@@ -53,12 +53,10 @@ clean-ghcr owner="hr-mes":
     set -euo pipefail
     bash scripts/clean_ghcr.sh "{{ owner }}"
 
-# Auto-updates RPM spec versions from upstream GitHub releases
+# Moves the watched specs to their latest upstream releases (what the nightly workflow runs)
 [group('CI/CD Pipeline')]
 update-specs:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    bash scripts/update_specs.sh
+    python3 scripts/zero_trust_updater.py out/spec-updates.md
 
 # Fetches upstream kernel SRPM, applies CachyOS BORE patches, computes NVIDIA shield ceiling, and merges Kconfig tuning
 [group('Kernel Build')]

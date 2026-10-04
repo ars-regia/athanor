@@ -23,7 +23,7 @@ use gdk4_wayland::prelude::*;
 use gtk4::{gdk, gio, glib};
 use wayland_client::backend::{ObjectId, WaylandError};
 use wayland_client::globals::{registry_queue_init, GlobalList, GlobalListContents};
-use wayland_client::protocol::{wl_keyboard, wl_output, wl_registry, wl_seat};
+use wayland_client::protocol::{wl_keyboard, wl_output, wl_registry, wl_seat, wl_shm};
 use wayland_client::{
     event_created_child, Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum,
 };
@@ -31,6 +31,8 @@ use wayland_protocols::ext::foreign_toplevel_list::v1::client::{
     ext_foreign_toplevel_handle_v1::{self, ExtForeignToplevelHandleV1},
     ext_foreign_toplevel_list_v1::{self, ExtForeignToplevelListV1},
 };
+use wayland_protocols::ext::image_capture_source::v1::client::ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1;
+use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1;
 use wayland_protocols::ext::workspace::v1::client::{
     ext_workspace_group_handle_v1::{self, ExtWorkspaceGroupHandleV1},
     ext_workspace_handle_v1::{self, ExtWorkspaceHandleV1},
@@ -82,28 +84,30 @@ pub enum Error {
     InvalidArgument(&'static str),
     #[error("the display was closed")]
     Closed,
+    #[error("the window's picture was not taken: {0}")]
+    Capture(&'static str),
 }
 
 /// Ids are handed out in creation order across every client of the process, so an id is
 /// never reused. The protocol's object ids are, which is why they are not ours.
-fn fresh() -> u64 {
+pub(crate) fn fresh() -> u64 {
     static NEXT: AtomicU64 = AtomicU64::new(1);
     NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
 /// The shell's view of the compositor. Every call happens on the GTK main thread.
 pub struct Client {
-    inner: Rc<Inner>,
+    pub(crate) inner: Rc<Inner>,
 }
 
 type Handler = Box<dyn FnMut(&Client, &Event)>;
 
-struct Inner {
+pub(crate) struct Inner {
     display: gdk::Display,
     connection: Connection,
-    qh: QueueHandle<State>,
+    pub(crate) qh: QueueHandle<State>,
     queue: RefCell<EventQueue<State>>,
-    state: RefCell<State>,
+    pub(crate) state: RefCell<State>,
     handler: RefCell<Option<Handler>>,
     delivering: Cell<bool>,
     /// A failure met while looking at the queue outside `pump`, reported by the next `pump`.
@@ -398,7 +402,7 @@ impl Client {
         self.flush()
     }
 
-    fn flush(&self) -> Result<(), Error> {
+    pub(crate) fn flush(&self) -> Result<(), Error> {
         self.inner.flush()
     }
 }
@@ -663,7 +667,7 @@ fn active_state(enabled: bool) -> ActiveState {
 }
 
 #[derive(Default)]
-struct Globals {
+pub(crate) struct Globals {
     toplevel_info: Option<ZcosmicToplevelInfoV1>,
     toplevel_manager: Option<ZcosmicToplevelManagerV1>,
     workspace_manager: Option<ExtWorkspaceManagerV1>,
@@ -672,10 +676,13 @@ struct Globals {
     keyboard_layouts: Option<ZcosmicKeyboardLayoutManagerV1>,
     a11y: Option<CosmicA11yManagerV1>,
     security_context: Option<WpSecurityContextManagerV1>,
+    pub(crate) shm: Option<wl_shm::WlShm>,
+    pub(crate) capture_sources: Option<ExtForeignToplevelImageCaptureSourceManagerV1>,
+    pub(crate) image_copy: Option<ExtImageCopyCaptureManagerV1>,
 }
 
-struct Toplevel {
-    ext: ExtForeignToplevelHandleV1,
+pub(crate) struct Toplevel {
+    pub(crate) ext: ExtForeignToplevelHandleV1,
     cosmic: Option<ZcosmicToplevelHandleV1>,
 }
 
@@ -686,9 +693,9 @@ struct WorkspaceHandles {
 
 #[derive(Default)]
 pub(crate) struct State {
-    globals: Globals,
+    pub(crate) globals: Globals,
     windows: Table<WindowId, Window>,
-    toplevels: HashMap<WindowId, Toplevel>,
+    pub(crate) toplevels: HashMap<WindowId, Toplevel>,
     workspaces: Table<WorkspaceId, Workspace>,
     workspace_handles: HashMap<WorkspaceId, WorkspaceHandles>,
     /// Each group's outputs, in the order they entered, GDK's objects included.
@@ -703,6 +710,8 @@ pub(crate) struct State {
     keyboard_group: u32,
     accessibility: Accessibility,
     events: Vec<Event>,
+    /// The window pictures in flight, by call.
+    pub(crate) captures: HashMap<u64, crate::capture::Pending>,
 }
 
 fn bind<I>(
@@ -741,6 +750,9 @@ impl State {
             // Version 3 deprecates the screen filter events of version 2.
             a11y: bind(globals, qh, 2..=2),
             security_context: bind(globals, qh, 1..=1),
+            shm: bind(globals, qh, 1..=1),
+            capture_sources: bind(globals, qh, 1..=1),
+            image_copy: bind(globals, qh, 1..=1),
             seat: bind(globals, qh, 1..=7),
             workspace_manager: bind(globals, qh, 1..=1),
         };
@@ -1050,6 +1062,14 @@ impl Dispatch<ExtForeignToplevelHandleV1, WindowId> for State {
                 }
             }
             ext_foreign_toplevel_handle_v1::Event::Closed => {
+                // A capture ends before the handle it was made from does.
+                state.captures.retain(|_, capture| {
+                    if capture.window != *id {
+                        return true;
+                    }
+                    capture.wake();
+                    false
+                });
                 if let Some(toplevel) = state.toplevels.remove(id) {
                     if let Some(cosmic) = toplevel.cosmic {
                         cosmic.destroy();

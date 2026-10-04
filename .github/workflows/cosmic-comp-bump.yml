@@ -1,0 +1,51 @@
+name: cosmic-comp Bump
+
+# Tracks Fedora's stable F43 build of cosmic-comp (forge/specs/cosmic-comp, bump.py cosmic-comp).
+# Independent of the kernel bump: its own workflow, branch and PR, so a held cosmic-comp PR
+# never blocks a kernel bump (EOL ones included) and a lookup failure here never stops it.
+# The PR is never auto-merged and has no prep job: the DAG build is the gate (%autosetup -p1
+# fails when the patch no longer applies) and a reviewer checks whether upstream merged it.
+# `schedule` only works from the default branch; by hand on any branch; and on a push of this
+# file, which is also how GitHub registers the workflow outside the default branch.
+
+on:
+  schedule:
+    - cron: "43 5 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main, iso-v0]
+    paths:
+      - .github/workflows/cosmic-comp-bump.yml
+
+concurrency:
+  group: cosmic-comp-bump
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      # A PAT: PRs opened with the GITHUB_TOKEN do not trigger the checks.
+      GH_TOKEN: ${{ secrets.KERNEL_BUMP_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          token: ${{ secrets.KERNEL_BUMP_TOKEN }}
+
+      - name: Run bump.py cosmic-comp apply
+        run: python3 forge/specs/azoth/bump.py cosmic-comp apply "$RUNNER_TEMP/bump"
+
+      - name: Branch, commit, PR (never auto-merged)
+        run: forge/specs/azoth/open_bump_pr.sh cosmic-comp-bump bump/cosmic-comp forge/specs/cosmic-comp "$RUNNER_TEMP/bump" "$GITHUB_REF_NAME"
+
+      - name: Upload what the bump wrote
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cosmic-comp-bump
+          path: ${{ runner.temp }}/bump
+          if-no-files-found: ignore

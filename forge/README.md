@@ -26,21 +26,18 @@ Every single package or tool has its own independent CI/CD build job producing a
 | `athanor-ananicy` | `athanor-ananicy` | Process priority & low-latency scheduling daemon |
 | `athanor-base-config` | `athanor-base-config` | Core filesystem hierarchy, RPM Fusion repos, sysusers |
 | `athanor-bat` | `athanor-bat` | Syntax-highlighting inspection utility |
-| `athanor-bibata` | `athanor-bibata` | Bibata Modern HiDPI cursor theme |
 | `athanor-cliphist` | `athanor-cliphist` | Wayland clipboard history daemon |
 | `athanor-daemon-rs` | `athanor-daemon-rs` | Pure Rust D-Bus system monitoring daemon |
 | `athanor-dart-sass` | `athanor-dart-sass` | Sass compiler for GTK4 stylesheet generation |
 | `athanor-desktop-ui` | `athanor-desktop-ui` | Wayland Niri session wrappers and startup scripts |
 | `athanor-doctor` | `athanor-doctor` | Rust CLI diagnostics & hardware validation tool |
 | `athanor-ide-bootstrap` | `athanor-ide-bootstrap` | Developer toolchain bootstrap & IDE configurations |
-| `just` | `just` | Autarchic command runner compiled in Rust with `-O3 -march=x86-64-v3` & mold |
 | `kani-verifier` | `kani-verifier` | Kani Rust Formal Verification Engine compiled natively (`kani-driver`, `cargo-kani`) |
 | `athanor-matugen` | `athanor-matugen` | Material You dynamic wallpaper color palette generator |
 | `athanor-nix-support` | `athanor-nix-support` | Multi-user Nix package manager integration |
 | `athanor-selinux` | `athanor-selinux` | Compiled `.pp` SELinux policies for `bootupd` and `scx` |
 | `athanor-settings-rs` | `athanor-settings-rs` | Native Rust GTK4 System Settings application |
 | `athanor-shell-rs` | `athanor-shell-rs` | Native Rust GTK4 Topbar, Control Center & **Big Tech Login Greeter** |
-| `athanor-starship` | `athanor-starship` | Universal cross-shell prompt |
 | `athanor-store-rs` | `athanor-store-rs` | Native Rust GTK4 Flatpak & System App Store |
 | `athanor-system-config` | `athanor-system-config` | udev rules, presets, `/etc/greetd/config.toml` (Cage Kiosk) |
 | `athanor-system-services` | `athanor-system-services` | Systemd service units & timers |
@@ -65,7 +62,6 @@ La Forgia di Athanor OS non scarica mai binari di build da repository esterni di
 
 ### 1. 🛡️ Toolchain Assimilata (Tier 0 Self-Hosted)
 - **`kani-verifier`**: Motore di verifica formale e *bounded model checking* per il codice Rust dell'OS. Genera `kani-driver` e `cargo-kani` per validare le proprietà di sicurezza della memoria senza dipendenze da binari esterni.
-- **`just`**: Task runner nativo Rust compilato in Forge con `-O3`, `-march=x86-64-v3`, `-fuse-ld=mold` e ThinLTO per l'orchestrazione deterministica dei workflow.
 - **`uki-tools`**: Pacchetto di firma e assemblaggio UKI (Unified Kernel Image) che unifica `sbsigntools` (`sbsign`, `sbverify`, `sbattach`, `sbkeysync`, `sbvarsign`) e `systemd-ukify` (`ukify`). Garantisce l'autonomia totale nelle procedure di Secure Boot.
 
 ### 🏗️ Workflow Multi-Stage: Il Builder Pesante produce l'OS Leggero

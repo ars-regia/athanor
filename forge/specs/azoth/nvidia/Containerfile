@@ -4,11 +4,12 @@
 # kernel-devel tree extracted from the RPM, kmod for modinfo, openssl and sign-file for
 # the signing. No rust, pahole or koji: a smaller and faster image than the builder, and
 # it does not touch the builder's Containerfile (which is an input of the kernel reuse).
-FROM registry.fedoraproject.org/fedora:43@sha256:4d9424ff89c5e182c782d0419bf41b6e71d55f30d586ae3c60c837a52ae39c64
+# The packages are toolchain.packages, installed by sha256 from toolchain.lock with every
+# repository disabled (../lock.sh). Build context: forge/specs/azoth.
+FROM registry.fedoraproject.org/fedora:43@sha256:a60334b24af6818e9ccf199d188b5ddef1c3d7f549470b560d9b744c78c2c58b
 
 RUN printf 'install_weak_deps=False\nkeepcache=False\n' >> /etc/dnf/dnf.conf
 
-RUN dnf -y install \
-      clang lld llvm make gcc elfutils-libelf-devel \
-      rpm cpio curl git kmod openssl findutils diffutils python3 \
-    && dnf clean all
+COPY lock.sh /usr/local/share/azoth/
+COPY nvidia/toolchain.lock /usr/local/share/azoth/toolchain.lock
+RUN bash /usr/local/share/azoth/lock.sh install /usr/local/share/azoth/toolchain.lock

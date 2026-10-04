@@ -123,7 +123,7 @@ class Gate(unittest.TestCase):
 
     def test_clean_default_image_passes(self):
         self.touch("usr/lib/modules/7.2.5-100.azoth.fc43.x86_64/vmlinuz")
-        self.touch("usr/lib/bootc/kargs.d/02-hardening.toml", 'kargs = ["slab_nomerge"]')
+        self.touch("usr/lib/bootc/kargs.d/10-athanor-kernel-profile.toml", 'kargs = ["page_alloc.shuffle=1"]')
         self.touch("usr/lib/modprobe.d/dist-blacklist.conf", "blacklist nvidiafb\n")
         self.touch("usr/lib/modules/7.2.5-100.azoth.fc43.x86_64/kernel/drivers/video/fbdev/nvidia/nvidiafb.ko.xz")
         self.touch("etc/yum.repos.d/rpmfusion.repo", "[rpmfusion-nonfree]\nexclude=*nvidia* *nvrm* *cuda*\n")

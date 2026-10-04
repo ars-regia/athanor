@@ -3,28 +3,17 @@ name = "athanor-backup"
 version = "1.0.0"
 edition = "2021"
 authors = ["Athanor Forge <forge@athanor.os>"]
-description = "Instant Bcachefs Home Snapshot Manager & Time Machine GUI for Athanor OS"
+description = "Hourly read-only btrfs snapshots of /var/home, with retention and non-destructive restore"
 license = "MIT"
 
 [[bin]]
-name = "athanor-backup-daemon"
-path = "src/daemon.rs"
-
+name = "athanor-backup"
+path = "src/main.rs"
 
 [dependencies]
-dirs = "5.0"
-glib = { workspace = true }
-zbus = { workspace = true, features = ["tokio"] }
-athanor-bus-api = { path = "../../../../system/athanor-bus-api" }
-tokio = { workspace = true, features = ["full"] }
-libc = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
-tracing = { workspace = true }
-chrono = "0.4"
-
-
-
+anyhow = { workspace = true }
+chrono = { workspace = true }
+nix = { workspace = true, features = ["fs", "user"] }
 
 [profile.release]
 lto = "thin"

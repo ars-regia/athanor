@@ -13,6 +13,10 @@ on:
       - "forge/specs/athanor-shelld/**"
       - "forge/specs/athanor-bar/**"
       - "forge/specs/athanor-dock/**"
+      - "system/athanor-search/**"
+      - "system/athanor-preview/**"
+      - "system/athanor-preview-render/**"
+      - "forge/specs/athanor-launcher/**"
       - "system/athanor-apps/**"
       - "system/athanor-unit/**"
       - "system/athanor-trust-state/**"
@@ -29,6 +33,10 @@ on:
       - "forge/specs/athanor-shelld/**"
       - "forge/specs/athanor-bar/**"
       - "forge/specs/athanor-dock/**"
+      - "system/athanor-search/**"
+      - "system/athanor-preview/**"
+      - "system/athanor-preview-render/**"
+      - "forge/specs/athanor-launcher/**"
       - "system/athanor-apps/**"
       - "system/athanor-unit/**"
       - "system/athanor-trust-state/**"
@@ -282,3 +290,32 @@ jobs:
           path: |
             .scratch/shell-rig/*.log
             .scratch/shell-rig/dock-*.png
+
+  launcher:
+    name: Launcher build, layer-surface guard, end to end, accessibility and surface cases
+    needs: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rig image
+        run: bash forge/test/shell/rig.sh build-image
+      - name: Build the launcher and its decoder, with the qalc test required
+        run: bash forge/test/shell/rig.sh build-launcher
+      - name: Layer-surface guard
+        run: bash forge/test/shell/rig.sh layer-guard launcher
+      - name: End to end (calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch)
+        run: bash forge/test/shell/rig.sh launcher-e2e
+      - name: Accessibility tree of the launcher
+        run: bash forge/test/shell/rig.sh atspi launcher
+      - name: Launcher surface cases (12) against the goldens
+        run: bash forge/test/shell/rig.sh surface launcher
+      - name: Window preview against its golden
+        run: bash forge/test/shell/rig.sh launcher-window-preview
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: shell-rig-launcher
+          path: |
+            .scratch/shell-rig/*.log
+            .scratch/shell-rig/launcher-*.png

@@ -18,11 +18,11 @@ COMMON = 'xmlns="http://linux.duke.edu/metadata/common" xmlns:rpm="http://linux.
 OPEN = lock.BRANCHES["open"]["baseurl"]
 
 
-def package(name, epoch, ver, rel, arch, href, sha):
+def package(name, epoch, ver, rel, arch, href, sha, checksum="sha256"):
     return (
         f'<package type="rpm"><name>{name}</name><arch>{arch}</arch>'
         f'<version epoch="{epoch}" ver="{ver}" rel="{rel}"/>'
-        f'<checksum type="sha256" pkgid="YES">{sha}</checksum>'
+        f'<checksum type="{checksum}" pkgid="YES">{sha}</checksum>'
         f'<location href="{href}"/></package>'
     )
 
@@ -56,7 +56,7 @@ class Select(unittest.TestCase):
         )
         got = lock.select(xml, ["nvidia-driver", "nvidia-kmod-common"], "610.57.04")
         self.assertEqual(
-            [(e["name"], e["href"], e["sha256"]) for e in got],
+            [(e["name"], e["href"], e["digest"]) for e in got],
             [
                 ("nvidia-driver", "nvidia-driver-610.57.04-1.fc43.x86_64.rpm", "a" * 64),
                 ("nvidia-kmod-common", "nvidia-kmod-common-610.57.04-1.fc43.noarch.rpm", "c" * 64),
@@ -80,7 +80,7 @@ class Select(unittest.TestCase):
             package("nvidia-driver", 3, "615.71.09", "1.fc43", "x86_64", "c.rpm", "c" * 64),
         )
         got = lock.select(xml, ["nvidia-driver"], "610.57.04")
-        self.assertEqual([(e["href"], e["sha256"]) for e in got], [("a.rpm", "a" * 64)])
+        self.assertEqual([(e["href"], e["digest"]) for e in got], [("a.rpm", "a" * 64)])
 
     def test_one_release_twice_is_ambiguous(self):
         xml = primary(
@@ -140,7 +140,7 @@ class Select(unittest.TestCase):
 
     def test_non_sha256_checksum_is_refused(self):
         xml = primary(package("nvidia-driver", 3, "610.57.04", "1.fc43", "x86_64", "a.rpm", "a" * 40).replace('type="sha256"', 'type="sha1"'))
-        with self.assertRaisesRegex(lock.LockError, "checksum type sha1, sha256 required"):
+        with self.assertRaisesRegex(lock.LockError, "checksum type sha1, sha256 or sha512 required"):
             lock.select(xml, ["nvidia-driver"], "610.57.04")
 
     def test_repomd_primary_without_location_is_refused(self):
@@ -161,7 +161,7 @@ class Companions(unittest.TestCase):
         )
         got = lock.select(xml, ["nvidia-kmod-common"], "610.57.04", companions=["nvidia-driver-selinux"])
         self.assertEqual(
-            [(e["name"], e["href"], e["sha256"]) for e in got],
+            [(e["name"], e["href"], e["digest"]) for e in got],
             [("nvidia-driver-selinux", "s-10.rpm", "c" * 64), ("nvidia-kmod-common", "k.rpm", "a" * 64)],
         )
 
@@ -180,7 +180,7 @@ class Companions(unittest.TestCase):
 
     def test_companion_with_non_sha256_checksum_is_refused(self):
         xml = primary(package("nvidia-driver-selinux", 0, "0.1", "2.fc43", "noarch", "a.rpm", "a" * 40).replace('type="sha256"', 'type="sha1"'))
-        with self.assertRaisesRegex(lock.LockError, "nvidia-driver-selinux: checksum type sha1, sha256 required"):
+        with self.assertRaisesRegex(lock.LockError, "nvidia-driver-selinux: checksum type sha1, sha256 or sha512 required"):
             lock.select(xml, [], "610.57.04", companions=["nvidia-driver-selinux"])
 
     def test_companion_with_non_numeric_epoch_is_refused(self):
@@ -424,10 +424,57 @@ class Latest(unittest.TestCase):
         self.assertIn("--major", err)
 
 
+class Sha512(unittest.TestCase):
+    """NVIDIA's container toolkit repository gives SHA-512 in its metadata."""
+
+    TOOLKIT = lock.BRANCHES["container-toolkit"]
+
+    def repo(self, rpms):
+        xml = primary(*[
+            package(n, 0, "1.20.1", "1", "x86_64", f"{n}.rpm", hashlib.sha512(rpms[n]).hexdigest(), "sha512")
+            for n in self.TOOLKIT["packages"]
+        ])
+        files = {
+            self.TOOLKIT["baseurl"] + "repodata/repomd.xml": b'<repomd xmlns="http://linux.duke.edu/metadata/repo"><data type="primary"><location href="repodata/p.xml.gz"/></data></repomd>',
+            self.TOOLKIT["baseurl"] + "repodata/p.xml.gz": gzip.compress(xml),
+        }
+        return lambda url: files.get(url) or rpms[url.rsplit("/", 1)[1].removesuffix(".rpm")]
+
+    def test_a_sha512_repository_is_locked_by_sha256(self):
+        rpms = {n: n.encode() for n in self.TOOLKIT["packages"]}
+        with tempfile.TemporaryDirectory() as d:
+            code, _, _ = run(["generate", "container-toolkit", "--version", "1.20.1", "--locks", d], self.repo(rpms))
+            self.assertEqual(code, 0)
+            _, version, _, entries = lock.read_lock(pathlib.Path(d) / "container-toolkit.lock")
+            self.assertEqual(version, "1.20.1")
+            self.assertEqual(sorted(entries), sorted(
+                (hashlib.sha256(rpms[n]).hexdigest(), f"{self.TOOLKIT['baseurl']}{n}.rpm") for n in self.TOOLKIT["packages"]
+            ))
+            code, _, _ = run(["verify", "container-toolkit", "--version", "1.20.1", "--locks", d], self.repo(rpms))
+            self.assertEqual(code, 0)
+            # Same SHA-512 in the metadata, other bytes behind it: verify downloads and notices.
+            swapped = dict(rpms, **{"nvidia-container-toolkit": b"other"})
+            published = self.repo(rpms)
+            code, _, err = run(["verify", "container-toolkit", "--version", "1.20.1", "--locks", d],
+                               lambda url: swapped["nvidia-container-toolkit"] if url.endswith("/nvidia-container-toolkit.rpm") else published(url))
+            self.assertEqual(code, 1)
+            self.assertIn("SHA-512", err)
+
+    def test_a_sha512_mismatch_keeps_no_lock(self):
+        rpms = {n: n.encode() for n in self.TOOLKIT["packages"]}
+        published = self.repo(rpms)
+        with tempfile.TemporaryDirectory() as d:
+            code, _, err = run(["generate", "container-toolkit", "--version", "1.20.1", "--locks", d],
+                               lambda url: b"tampered" if url.endswith("/libnvidia-container1.rpm") else published(url))
+            self.assertEqual(code, 1)
+            self.assertIn("libnvidia-container1.rpm: downloaded SHA-512", err)
+            self.assertFalse((pathlib.Path(d) / "container-toolkit.lock").exists())
+
+
 class Verify(unittest.TestCase):
     def verify(self, download, version="580.178.04"):
         with tempfile.TemporaryDirectory() as d:
-            entries = [(e["sha256"], LEGACY + e["href"]) for e in lock.select(primary(*legacy_family("580.178.04", 1, "a" * 64)), lock.BRANCHES["legacy"]["packages"], "580.178.04")]
+            entries = [(e["digest"], LEGACY + e["href"]) for e in lock.select(primary(*legacy_family("580.178.04", 1, "a" * 64)), lock.BRANCHES["legacy"]["packages"], "580.178.04")]
             lock.write_lock(pathlib.Path(d) / "legacy.lock", "legacy", "580.178.04", LEGACY, entries)
             return run(["verify", "legacy", "--version", version, "--locks", d], download)
 
