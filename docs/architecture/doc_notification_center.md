@@ -90,9 +90,9 @@ The `desktop-entry` hint and `app_name` are declared by the sender and may lie. 
 Rules of the state:
 
 - **Each trigger can be turned off** in Settings.
-- **A trigger the session cannot observe is published as unavailable,** with one journal line, and Settings shows it so. This covers fullscreen when cosmic-comp withholds the protocol, and screen sharing until `doc_portal.md` delivers its signal. It never appears active while doing nothing.
+- **A trigger the session cannot observe is published as unavailable,** with one journal line, and Settings shows it so. This covers fullscreen when cosmic-comp withholds the protocol or no bar is connected, and screen sharing until `doc_portal.md` delivers its signal. It never appears active while doing nothing.
 - **A manual action wins until the next automatic change.** A manual "on", with or without `until`, holds until `until` or until the switch is turned off; automatic changes do not end it, or a fullscreen video ending would cancel "one hour". A manual "off" while an automatic source is active holds until the set of active automatic sources changes. Turned off at 23:00 inside a 22:00–07:00 window, do not disturb stays off until 07:00. Turned off during a fullscreen video, it stays off until the video ends.
-- **The end of do not disturb** shows one summary popup, "N notifications while do not disturb was on", which opens the center (F-notif-19). It never replays the missed popups.
+- **The end of do not disturb** shows one summary popup, "N notifications while do not disturb was on", which opens the center with `Show("notifications")` (NC12, F-notif-19). It never replays the missed popups.
 - **The clock.**
   - The state is evaluated again when the wall clock is set: a `timerfd` with `TFD_TIMER_CANCEL_ON_SET`.
   - It is evaluated again on resume from suspend: logind's `PrepareForSleep(false)`.
@@ -272,7 +272,7 @@ Applied with the approval of this document.
     - the popups follow NC12.
 - **`doc_shell_standard.md`, ST5,** "What `athanor-shelld` keeps across a crash": the file is NC3's history. It is read whatever the boot, and a file that does not parse is renamed rather than removed.
 - **`doc_control_center.md`:**
-  - CC2: the program has two panels, and `os.athanor.ControlCenter1` gains `ToggleNotifications()`.
+  - CC2: the program has two panels, and `os.athanor.ControlCenter1` gains `ToggleNotifications()`, and `Show(page)` also accepts `notifications` (the notification panel) and `notifications:<id>` (that row, its reply field focused).
   - CC7: the schedule and triggers are NC6.
   - CC9: `Open` covers both panels, and Super+N is written as Super+C is.
 
