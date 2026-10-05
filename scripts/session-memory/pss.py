@@ -37,8 +37,8 @@ def collect(uid=None, root="/sys/fs/cgroup", proc="/proc"):
             continue
         try:
             pids = procs.read_text().split()
-        except FileNotFoundError:
-            continue  # a transient scope ended after the walk found it
+        except OSError:
+            continue  # a transient scope ended after the walk found it (ENOENT or ENODEV)
         for pid in pids:
             try:
                 comm = (proc / pid / "comm").read_text().strip()
