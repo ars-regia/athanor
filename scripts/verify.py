@@ -98,6 +98,130 @@ def rel(p):
 # 1. workflow — il difetto che ha spento il CI il 2026-08-31
 # --------------------------------------------------------------------------- #
 
+# The secrets that sign what a machine trusts. D43 (docs/architecture/doc_kernel_profile.md,
+# section 12, item 1): they reach only sign-only jobs, which run in the `signing` environment,
+# use no action beyond checkout and the artifact transfer, and build nothing beyond the locked
+# tool images below. RPM_GPG_KEY is not listed yet: build-repo signs the tier repositories with
+# it inside the builder container, and moving that signature to a sign-only job is its own change.
+SIGNING_SECRETS = (
+    "SECUREBOOT_SIGNING_KEY",
+    "MODULE_SIGNING_KEY",
+    "COSIGN_PRIVATE_KEY",
+    "COSIGN_PASSWORD",
+    "MOK_PRIVATE_KEY",
+)
+SIGN_ONLY_ACTIONS = (
+    "actions/checkout",
+    "actions/download-artifact",
+    "actions/upload-artifact",
+)
+# Digest-pinned bases that install only RPMs locked by sha256 (forge/specs/azoth/lock.sh).
+SIGN_ONLY_IMAGES = (
+    "forge/specs/azoth/nvidia/Containerfile",
+    "forge/specs/azoth/sign/Containerfile",
+)
+# ponytail: reads the workflow text only; a script called from a sign-only job is trusted to be
+# what its name says. Any script whose name says "build" counts as a build.
+BUILD_COMMAND = re.compile(
+    r"\b(podman build|buildah|docker build|cargo|rpmbuild|mock|nix|make|just|dnf5?|npm|pip3?)\b"
+    r"|\S*build\S*\.sh\b"
+)
+
+
+def workflow_jobs(text):
+    """{job id: (first line number, lines)} of a workflow written with two-space indentation."""
+    jobs, current, inside = {}, None, False
+    for number, line in enumerate(text.split("\n"), 1):
+        if re.match(r"^jobs:\s*$", line):
+            inside = True
+            continue
+        if not inside:
+            continue
+        if line and not line[0].isspace() and not line.startswith("#"):
+            break
+        m = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
+        if m:
+            current = m.group(1)
+            jobs[current] = (number, [])
+        elif current:
+            jobs[current][1].append(line)
+    return jobs
+
+
+def run_commands(lines):
+    """The shell text of every `run:` of a job, comments dropped."""
+    commands, i = [], 0
+    while i < len(lines):
+        m = re.match(r"^(\s*)(?:- )?run:\s*(.*)$", lines[i])
+        i += 1
+        if not m:
+            continue
+        indent = len(m.group(1))
+        if m.group(2) and m.group(2)[0] not in "|>":
+            commands.append(m.group(2))
+            continue
+        while i < len(lines) and (
+            not lines[i].strip() or len(lines[i]) - len(lines[i].lstrip()) > indent
+        ):
+            commands.append(lines[i].strip())
+            i += 1
+    return [c for c in commands if c and not c.startswith("#")]
+
+
+def signing_secret_problems(root=None):
+    root = root or ROOT
+    problems = []
+    names = "|".join(SIGNING_SECRETS)
+    reference = re.compile(rf"\bsecrets\.({names})\b")
+    for wf in sorted((root / ".github/workflows").glob("*.y*ml")):
+        text = read(wf)
+        code = "\n".join(
+            line for line in text.split("\n") if not line.lstrip().startswith("#")
+        )
+        if re.search(r"toJSON\(\s*secrets\s*\)|\bsecrets\[", code):
+            problems.append(
+                f"{wf.name}: reads the secrets as a whole (toJSON(secrets) or secrets[...]): "
+                f"name each secret a job needs"
+            )
+        env = re.search(r"^env:\s*\n((?:[ \t]+.*\n?|\s*\n)*)", code, re.M)
+        if env and reference.search(env.group(1)):
+            problems.append(
+                f"{wf.name}: a signing secret in the workflow-level env reaches every job"
+            )
+        for job, (line, lines) in workflow_jobs(text).items():
+            body = "\n".join(
+                entry for entry in lines if not entry.lstrip().startswith("#")
+            )
+            used = sorted(set(reference.findall(body)))
+            # A job that calls a reusable workflow passes the secrets on; the called workflow's
+            # own jobs are checked where they use them.
+            if not used or re.search(r"^    uses:", body, re.M):
+                continue
+            where = f"{wf.name}:{line} job {job} receives {', '.join(used)}"
+            if not re.search(
+                r"^    environment:\s*(signing\s*$|\n\s+name:\s*signing\s*$)",
+                body,
+                re.M,
+            ):
+                problems.append(f"{where} outside the signing environment")
+            for action in re.findall(r"^\s+(?:- )?uses:\s*([^@\s]+)", body, re.M):
+                if action not in SIGN_ONLY_ACTIONS:
+                    problems.append(
+                        f"{where} and runs the action {action}: a sign-only job uses checkout "
+                        f"and the artifact transfer only"
+                    )
+            for command in run_commands(lines):
+                built = re.search(r"podman build .*-f\s+(\S+)", command)
+                if built and built.group(1) in SIGN_ONLY_IMAGES:
+                    continue
+                if BUILD_COMMAND.search(command):
+                    problems.append(
+                        f"{where} and builds (`{command[:60]}`): sign the artifact of an "
+                        f"unprivileged build instead"
+                    )
+    return problems
+
+
 @check("workflows", "I workflow GitHub sono validi e non esfiltrano log")
 def check_workflows():
     r = Result()
@@ -138,6 +262,10 @@ def check_workflows():
             for host in ("webhook.site", "dpaste.com", "pastebin.com", "transfer.sh", "0x0.st"):
                 if host in line:
                     r.fail(f"{wf.name}:{i+1} log inviati a un servizio esterno ({host})")
+
+    # 1e. signing secrets only in sign-only jobs (D43)
+    for problem in signing_secret_problems():
+        r.fail(problem)
 
     # 1d. actionlint, se disponibile
     try:
