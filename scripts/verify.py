@@ -454,9 +454,9 @@ def image_policy_problems(root=None):
     return problems
 
 
-# Packages the image no longer ships (maintainer decision A2-10, issue #149). `foot` still
-# arrives as a dependency of athanor-shell-rs until that package leaves (doc_software.md,
-# decision 7), so only the manifest and the Containerfile are checked, never RPM Requires.
+# Packages the image no longer ships (maintainer decision A2-10, issue #149). The check
+# reads what the image would contain: the manifest, every install and enable in the
+# Containerfile and the kickstart, the preset files, and the Requires of shipped specs.
 REMOVED_PACKAGES = {
     "antigravity", "astro-toolchain", "cargo-tools", "ide-bootstrap", "qa",
     "cosmic-term", "cosmic-files", "cosmic-edit", "cosmic-store", "cosmic-player",
@@ -464,58 +464,99 @@ REMOVED_PACKAGES = {
     "virt-manager", "qemu-kvm", "qemu-img", "compiler-rt",
 }
 REMOVED_PACKAGES |= {f"athanor-{n}" for n in ("antigravity", "astro-toolchain", "cargo-tools", "ide-bootstrap", "qa")}
-# Units and authselect features the image must not enable: accounts stay classic.
-REMOVED_UNITS = {"systemd-homed", "systemd-homed.service", "with-systemd-homed"}
-# Files that enable units: the image build, the installer and the preset files.
+# Units and authselect features the image must not enable: accounts stay classic. Keylime
+# stays installed and disabled until a verifier exists for its agent to report to.
+REMOVED_UNITS = {"systemd-homed", "systemd-homed.service", "systemd-homed-activate.service", "with-systemd-homed"}
+KEYLIME_UNITS = {"keylime_agent", "keylime_agent.service", "keylime-agent", "keylime-agent.service"}
+# Known debt, one entry per (spec, package): athanor-shell-rs runs foot from its legacy
+# search and leaves with doc_portal.md (doc_software.md, decision 7). Delete the entry then.
+REQUIRES_DEBT = {("athanor-shell-rs", "foot")}
+INSTALLERS = {"dnf5", "dnf", "yum", "microdnf", "rpm-ostree"}
+# Files that enable units: the image build and the installer; preset files are added by glob.
 ENABLERS = ["system/Containerfile", "system/athanor-install.ks"]
 
 
+def commands(text):
+    """The commands of a script: continuations joined, comments dropped, split on && ; | and
+    on the closing of a conditional, each as a list of words."""
+    text = re.sub(r"\\\n", " ", text)
+    for line in text.split("\n"):
+        if re.match(r"\s*#", line):
+            continue
+        for part in re.split(r"&&|\|\||[;|]", line):
+            words = part.split()
+            if words:
+                yield words
+
+
+def enabled_units(words):
+    """The units, features or packages-to-be a command enables, or an empty list."""
+    if "systemctl" in words:
+        rest = words[words.index("systemctl") + 1:]
+        if "enable" in rest:
+            return [w for w in rest[rest.index("enable") + 1:] if not w.startswith("-")]
+    if "authselect" in words and "enable-feature" in words:
+        return words[words.index("enable-feature") + 1:]
+    if words[0] == "services" or words[0].startswith("--enabled"):
+        return [u for w in words for flag in [w.partition("--enabled=")] if flag[1] for u in flag[2].split(",")]
+    if words[0] == "enable":  # a preset line
+        return words[1:]
+    return []
+
+
+def installed_packages(words):
+    for i, w in enumerate(words):
+        if w in INSTALLERS and "install" in words[i + 1:]:
+            return [x for x in words[words.index("install", i) + 1:] if not x.startswith("-")]
+    return []
+
+
+def spec_requires(spec_text):
+    for line in spec_text.split("\n"):
+        m = re.match(r"Requires(?:\([^)]*\))?:\s*(.*)", line)
+        if m:
+            yield from re.findall(r"[A-Za-z0-9._+-]+", re.sub(r"[<>=]+\s*\S+", "", m.group(1)))
+
+
 def removed_name_problems(root=None):
-    """No removed package in packages.json or in a Containerfile install, no removed unit enabled."""
+    """What the image would contain: no removed package, no removed or Keylime unit enabled."""
     root = root or ROOT
     problems = []
     manifest = root / "forge/config/packages.json"
+    dag = set()
     if manifest.exists():
-        for key, names in json.loads(read(manifest)).items():
-            if isinstance(names, list):
-                problems += [f"forge/config/packages.json: {key} lists the removed package {n}"
-                             for n in names if n in REMOVED_PACKAGES]
-    containerfile = root / "system/Containerfile"
-    if containerfile.exists():
-        # Join the continuation lines so a package on a later line of the same command is seen.
-        for stmt in re.sub(r"\\\n", " ", read(containerfile)).split("\n"):
-            if re.search(r"\bdnf5 install\b", stmt):
-                words = set(re.findall(r"[A-Za-z0-9._+-]+", stmt))
-                problems += [f"system/Containerfile: installs the removed package {n}"
-                             for n in sorted(words & REMOVED_PACKAGES)]
-    for name in ENABLERS:
-        f = root / name
-        if f.exists():
-            for no, line in enumerate(read(f).split("\n"), 1):
-                if re.match(r"\s*#", line):
-                    continue
-                if re.search(r"\b(enable|enable-feature|--enabled)\b|^services\b", line):
-                    problems += [f"{name}:{no}: enables {u}, which the image no longer ships"
-                                 for u in sorted(set(re.findall(r"[A-Za-z0-9._-]+", line)) & REMOVED_UNITS)]
-    return problems
-
-
-def keylime_problems(root=None):
-    """Keylime stays installed and disabled: no verifier is configured, so the agent must not run."""
-    root = root or ROOT
-    problems = []
+        def walk_lists(node, key):
+            if isinstance(node, list):
+                yield key, node
+            elif isinstance(node, dict):
+                for k, v in node.items():
+                    yield from walk_lists(v, k)
+        data = json.loads(read(manifest))
+        dag = set(data.get("custom_packages", []))
+        for key, names in walk_lists(data, ""):
+            problems += [f"forge/config/packages.json: {key} lists the removed package {n}"
+                         for n in names if n in REMOVED_PACKAGES]
     files = [root / n for n in ENABLERS]
     files += sorted(root.glob("forge/specs/**/*.preset")) + sorted(root.glob("system/**/*.preset"))
     for f in files:
         if not f.exists():
             continue
-        for no, line in enumerate(read(f).split("\n"), 1):
-            if re.match(r"\s*#", line) or "keylime" not in line:
-                continue
-            if re.search(r"^\s*enable\b|\benable(-now)?\b|--enabled", line):
-                problems.append(f"{rel(f)}:{no}: enables the Keylime agent, and no verifier is configured "
-                                f"for it to report to")
+        for words in commands(read(f)):
+            problems += [f"{rel(f)}: installs the removed package {n}" for n in installed_packages(words) if n in REMOVED_PACKAGES]
+            problems += [f"{rel(f)}: enables {u}, which the image no longer ships" for u in enabled_units(words) if u in REMOVED_UNITS]
+            problems += [f"{rel(f)}: enables the Keylime agent, and no verifier is configured for it to report to"
+                         for u in enabled_units(words) if u in KEYLIME_UNITS]
+    for spec in sorted(root.glob("forge/specs/*/*.spec")):
+        name = spec.stem
+        if name not in dag and name.removeprefix("athanor-") not in dag:
+            continue
+        problems += [f"{rel(spec)}: Requires the removed package {n}" for n in sorted(set(spec_requires(read(spec))))
+                     if n in REMOVED_PACKAGES and (name, n) not in REQUIRES_DEBT]
     return problems
+
+
+def keylime_problems(root=None):
+    return [p for p in removed_name_problems(root) if "Keylime" in p]
 
 
 @check("shipped", "Ogni crate del workspace è impacchettato, o è dichiarato sperimentale")
@@ -585,7 +626,7 @@ def check_shipped():
         r.fail(problem)
     for problem in image_policy_problems():
         r.fail(problem)
-    for problem in removed_name_problems() + keylime_problems():
+    for problem in removed_name_problems():
         r.fail(problem)
 
     return r
@@ -604,14 +645,15 @@ FORBIDDEN_DOCS = ("doc_core_daemons.md", "doc_forge_development_guide.md",
 def forbidden_doc_problems(root=None):
     root = root or ROOT
     problems = [f"{rel(p)}: removed document, delete it"
-                for p in sorted((root / "docs").rglob("*.md")) if p.name in FORBIDDEN_DOCS]
+                for p in walk(root, ".md") if p.name in FORBIDDEN_DOCS]
     for t in [rel(p) for p in walk(root / "docs", ".md")] + ["README.md", "system/README.md", "system/ARCHITECTURE.md"]:
         f = root / t
         if not f.exists():
             continue
-        for m in re.finditer(r"\[([^\]]*)\]\(([^)]+)\)", read(f)):
-            if Path(m.group(2).split("#")[0]).name in FORBIDDEN_DOCS:
-                problems.append(f"{t}: links the removed document {m.group(2)}")
+        for m in re.finditer(r"\[[^\]]*\]\(([^)]+)\)|href=[\"']([^\"']+)[\"']", read(f)):
+            target = m.group(1) or m.group(2)
+            if Path(target.split("#")[0]).name in FORBIDDEN_DOCS:
+                problems.append(f"{t}: links the removed document {target}")
     return problems
 
 

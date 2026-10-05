@@ -65,55 +65,82 @@ class CosmicDefaultsTest(unittest.TestCase):
             self.assertEqual(len(problems), 2)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class RemovedNamesTest(unittest.TestCase):
-    def tree(self, tmp, files):
-        root = pathlib.Path(tmp)
-        for name, text in files.items():
-            (root / name).parent.mkdir(parents=True, exist_ok=True)
-            (root / name).write_text(text)
-        return root
+    def problems(self, files):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            for name, text in files.items():
+                (root / name).parent.mkdir(parents=True, exist_ok=True)
+                (root / name).write_text(text)
+            return verify.removed_name_problems(root)
 
     def test_a_clean_tree_has_no_problem(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = self.tree(tmp, {
-                "forge/config/packages.json": '{"upstream_core": ["nix"]}',
-                "system/Containerfile": "RUN dnf5 install -y keylime-agent\nRUN ! systemctl is-enabled keylime_agent.service\n",
-            })
-            self.assertEqual(verify.removed_name_problems(root), [])
-            self.assertEqual(verify.keylime_problems(root), [])
+        self.assertEqual(self.problems({
+            "forge/config/packages.json": '{"upstream_core": ["nix"]}',
+            "system/Containerfile": ("RUN dnf5 install -y keylime-agent \\\n    nix\n"
+                                     "RUN systemctl enable tetragon.service && systemctl preset-all && systemctl disable systemd-homed.service\n"
+                                     "RUN ! systemctl is-enabled --quiet keylime_agent.service\n"
+                                     'RPM_LIST=$(find /x ! -name "*astro-toolchain*")\n'),
+            "forge/specs/x/a.preset": "disable systemd-homed.service\n# enable keylime_agent\n",
+        }), [])
 
-    def test_a_removed_package_in_the_manifest_or_an_install_is_a_problem(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = self.tree(tmp, {
-                "forge/config/packages.json": '{"upstream_desktop": ["cosmic-files"], "custom_tier0": ["antigravity"]}',
-                "system/Containerfile": "RUN dnf5 install -y \\\n    nix compiler-rt\n",
-            })
-            self.assertEqual(len(verify.removed_name_problems(root)), 3)
+    def test_a_removed_package_in_the_manifest_is_a_problem_at_any_depth(self):
+        self.assertEqual(len(self.problems({
+            "forge/config/packages.json": '{"upstream_desktop": ["cosmic-files"], "custom_tier0": ["antigravity"], "x": {"y": ["foot"]}}',
+        })), 3)
 
-    def test_homed_enabled_is_a_problem(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = self.tree(tmp, {
-                "system/Containerfile": "RUN authselect enable-feature with-systemd-homed\nRUN systemctl enable systemd-homed.service\n",
-                "system/athanor-install.ks": "services --enabled=sshd,systemd-homed\n",
-            })
-            self.assertEqual(len(verify.removed_name_problems(root)), 3)
+    def test_every_install_form_is_read(self):
+        for line in ("RUN dnf5 install -y \\\n    nix compiler-rt", "RUN dnf5 -y install compiler-rt",
+                     "RUN dnf install -y compiler-rt", "RUN rpm-ostree install compiler-rt",
+                     "RUN true && dnf5 install -y --allowerasing compiler-rt"):
+            with self.subTest(line=line):
+                self.assertEqual(len(self.problems({"system/Containerfile": line + "\n"})), 1)
+
+    def test_homed_enabled_is_a_problem_in_every_place(self):
+        self.assertEqual(len(self.problems({
+            "system/Containerfile": "RUN authselect enable-feature with-systemd-homed\nRUN systemctl enable \\\n    tetragon.service systemd-homed.service\n",
+            "system/athanor-install.ks": "services --enabled=sshd,systemd-homed\n",
+            "forge/specs/x/a.preset": "enable systemd-homed-activate.service\n",
+        })), 4)
+
+    def test_disabling_is_not_a_problem(self):
+        self.assertEqual(self.problems({
+            "system/Containerfile": "RUN systemctl disable systemd-homed.service systemd-homed-activate.service\n",
+            "forge/specs/x/a.preset": "disable systemd-homed.service\n",
+        }), [])
 
     def test_enabling_keylime_is_a_problem(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = self.tree(tmp, {
-                "system/Containerfile": "RUN systemctl enable keylime_agent.service\n",
-                "forge/specs/x/a.preset": "enable keylime_agent.service\n# enable keylime_agent\ndisable keylime_agent.service\n",
-            })
+            root = pathlib.Path(tmp)
+            (root / "system").mkdir()
+            (root / "system/Containerfile").write_text("RUN systemctl enable keylime_agent.service\n")
+            (root / "system/x.preset").write_text("enable keylime_agent.service\n# enable keylime_agent\ndisable keylime_agent.service\n")
             self.assertEqual(len(verify.keylime_problems(root)), 2)
+
+    def test_a_shipped_spec_must_not_require_a_removed_package(self):
+        files = {
+            "forge/config/packages.json": '{"custom_packages": ["desktop-ui", "shell-rs"]}',
+            "forge/specs/athanor-desktop-ui/athanor-desktop-ui.spec": "Requires: nautilus foot\nRequires(post): qemu-img >= 1\n",
+            "forge/specs/athanor-other/athanor-other.spec": "Requires: foot\n",
+            "forge/specs/athanor-shell-rs/athanor-shell-rs.spec": "Requires: gtk4 foot\n",
+        }
+        found = self.problems(files)
+        self.assertEqual(len(found), 2, found)
+        self.assertTrue(all("desktop-ui" in p for p in found))
 
     def test_a_removed_document_or_a_link_to_it_is_a_problem(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = self.tree(tmp, {
+            root = pathlib.Path(tmp)
+            for name, text in {
                 "docs/architecture/doc_core_daemons.md": "x",
+                "system/doc_forge_development_guide.md": "x",
                 "README.md": "[a](docs/architecture/doc_forge_development_guide.md)",
-            })
-            self.assertEqual(len(verify.forbidden_doc_problems(root)), 2)
+                "system/README.md": '<a href="../docs/architecture/doc_core_daemons.md">x</a>',
+            }.items():
+                (root / name).parent.mkdir(parents=True, exist_ok=True)
+                (root / name).write_text(text)
+            self.assertEqual(len(verify.forbidden_doc_problems(root)), 4)
+
+
+if __name__ == "__main__":
+    unittest.main()
