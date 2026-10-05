@@ -27,7 +27,6 @@
     "update",
     "xdg-desktop-portal-athanor",
     "secure-boot",
-    "lvfs-rs",
     "tetragon",
     "qa",
     "antigravity",
@@ -38,7 +37,6 @@
     "recovery",
     "cargo-tools",
     "kernel-forge",
-    "athanor-semantic-db",
     "cosmic-comp"
   ],
   "custom_tier0": [
@@ -85,9 +83,7 @@
     "backup",
     "update",
     "xdg-desktop-portal-athanor",
-    "lvfs-rs",
-    "qa",
-    "athanor-semantic-db"
+    "qa"
   ],
   "cachyos_addons": [],
   "upstream_core": [
@@ -95,7 +91,6 @@
     "nix-daemon",
     "busybox",
     "brightnessctl",
-    "bcachefs-tools",
     "dbus-tools",
     "dconf",
     "distribution-gpg-keys",

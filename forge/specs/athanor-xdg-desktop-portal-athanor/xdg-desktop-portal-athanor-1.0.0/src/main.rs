@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::future::pending;
 use tracing::info;
 
+mod caller;
 mod portal;
 
 #[tokio::main]
@@ -15,10 +16,6 @@ async fn main() -> Result<()> {
     // Export D-Bus interface for XDG Desktop Portal
     let _conn = zbus::connection::Builder::session()?
         .name("org.freedesktop.impl.portal.desktop.athanor")?
-        .serve_at("/org/freedesktop/portal/desktop", portal::ScreenCastPortal)?
-        .serve_at("/org/freedesktop/portal/desktop", portal::CameraPortal)?
-        .serve_at("/org/freedesktop/portal/desktop", portal::LocationPortal)?
-        .serve_at("/org/freedesktop/portal/desktop", portal::MicrophonePortal)?
         .serve_at("/org/freedesktop/portal/desktop", portal::FileChooserPortal)?
         .build()
         .await?;

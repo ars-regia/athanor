@@ -3,13 +3,11 @@ members = [
   "forge/specs/athanor-backup/athanor-backup-1.0.0",
   "forge/specs/athanor-cloud-rs/athanor-cloud-rs-1.0.0",
   "forge/specs/athanor-doctor/athanor-doctor-1.0.0",
-  "forge/specs/athanor-gatekeeper-rs/athanor-gatekeeper-rs-1.0.0",
   "forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0",
   "forge/specs/athanor-layout-chooser/athanor-layout-chooser-1.0.0",
   "forge/specs/athanor-lvfs-rs/athanor-lvfs-rs-1.0.0",
   "forge/specs/athanor-mdm-rs/athanor-mdm-rs-1.0.0",
   "forge/specs/athanor-mesh-sync/athanor-mesh-sync-1.0.0",
-  "forge/specs/athanor-recovery/athanor-recovery-1.0.0",
   "forge/specs/athanor-shelld/athanor-shelld-1.0.0",
   "forge/specs/athanor-bar/athanor-bar-1.0.0",
   "forge/specs/athanor-dock/athanor-dock-1.0.0",
@@ -42,19 +40,20 @@ members = [
   "system/athanor-store",
   "system/athanor-telemetry",
   "system/athanor-trust-state",
-  "system/athanor-updater-rs",
 ]
 
 # Out of this workspace since 2026-09-19 (doc_shell.md, SH4): gtk4-sys declares
 # links = "gtk-4", so every GTK crate of one workspace moves together. The old shell and
 # its dock are frozen at GTK 0.7 in forge/specs/athanor-shell-rs/, a workspace of their
 # own; the other four ship nothing and are built by nothing until they are redesigned.
+# The recovery kiosk joined them on 2026-09-30: what athanor-recovery ships is now a text
+# console (doc_recovery.md), and the kiosk's source stays where it was, to be mined when a
+# graphical recovery is built on the polkit agent of stage 4.
 exclude = [
   "tests/fuzz",
   "forge/tools/calmo-cosmic-theme",
   "forge/specs/athanor-shell-rs",
-  "forge/specs/athanor-daemon-rs/athanor-daemon-rs-0.2.1",
-  "forge/specs/athanor-settings-rs/athanor-settings-rs-1.0.0",
+  "forge/specs/athanor-recovery/athanor-recovery-1.0.0",
   "forge/specs/athanor-store-rs/athanor-store-rs-1.0.0",
   "system/athanor-oobe",
 ]
