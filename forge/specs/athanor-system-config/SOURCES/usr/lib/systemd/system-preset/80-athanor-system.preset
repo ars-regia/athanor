@@ -6,7 +6,6 @@ enable greetd.service
 enable firewalld.service
 enable nix-daemon.socket
 enable fstrim.timer
-enable athanor-timewarp.timer
 enable athanor-backup-hourly.timer
 enable usbguard.service
 enable boltd.service

@@ -239,7 +239,7 @@ impl SimpleComponent for RecoveryModel {
                         set_halign: gtk4::Align::Fill,
 
                         gtk4::Label {
-                            set_markup: "<b>Stato FileSystem:</b> Bcachefs / OSTree Immutable Mount",
+                            set_markup: "<b>Stato FileSystem:</b> OSTree Immutable Mount",
                             set_halign: gtk4::Align::Start,
                         },
                         gtk4::Label {
@@ -447,64 +447,6 @@ impl SimpleComponent for RecoveryModel {
     }
 }
 
-#[repr(C)]
-#[derive(Debug, Copy, Clone, Default)]
-struct bch_ioctl_subvolume {
-    flags: u32,
-    dirfd: i32,
-    mode: u16,
-    padding: u16,
-    dst_ptr: u64,
-    src_ptr: u64,
-}
-
-const BCH_IOCTL_SUBVOLUME_CREATE: u64 = 0x40186210;
-
-#[allow(unsafe_code)]
-fn native_bcachefs_snapshot(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
-    use std::ffi::CString;
-    use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::io::AsRawFd;
-
-    if let Some(parent) = dst.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-
-    let src_file = std::fs::File::open(src)?;
-    let dst_parent = dst.parent().unwrap_or_else(|| std::path::Path::new("."));
-    let dst_parent_file = std::fs::File::open(dst_parent)?;
-
-    let dst_name = dst.file_name().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid destination path")
-    })?;
-    let c_dst_name = CString::new(dst_name.as_bytes()).map_err(|e| {
-        std::io::Error::new(std::io::ErrorKind::InvalidInput, e)
-    })?;
-
-    let mut arg = bch_ioctl_subvolume {
-        flags: 0,
-        dirfd: dst_parent_file.as_raw_fd(),
-        mode: 0o755,
-        padding: 0,
-        dst_ptr: c_dst_name.as_ptr() as u64,
-        src_ptr: src_file.as_raw_fd() as u64,
-    };
-
-    // SAFETY: The syscall relies on valid filesystem paths and architecture-specific reboot flags, guaranteed by the kernel.
-    let res = unsafe {
-        libc::ioctl(src_file.as_raw_fd(), BCH_IOCTL_SUBVOLUME_CREATE as _, &mut arg)
-    };
-
-    if res == 0 {
-        Ok(())
-    } else {
-        if dst.is_dir() {
-            return Ok(());
-        }
-        std::fs::create_dir_all(dst)
-    }
-}
-
 async fn execute_rollback_async(sender: &ComponentSender<RecoveryModel>) -> Result<String, String> {
     sender.input(RecoveryMsg::UpdateProgress(
         "Verifica deployment OSTree / rpm-ostree in corso...".to_string(),
@@ -544,40 +486,20 @@ async fn execute_rollback_async(sender: &ComponentSender<RecoveryModel>) -> Resu
         Ok(out) => {
             let err = String::from_utf8_lossy(&out.stderr).to_string();
             warn!(
-                "rpm-ostree rollback non riuscito (code {:?}: {}). Tento fallback su Bcachefs...",
+                "rpm-ostree rollback non riuscito (code {:?}: {}). Nessun fallback disponibile.",
                 out.status.code(),
                 err
             );
         }
         Err(e) => {
             warn!(
-                "Impossibile eseguire rpm-ostree: {}. Tento fallback su Bcachefs...",
+                "Impossibile eseguire rpm-ostree: {}. Nessun fallback disponibile.",
                 e
             );
         }
     }
 
-    sender.input(RecoveryMsg::UpdateProgress(
-        "Tentativo di ripristino snapshot Bcachefs subvolume...".to_string(),
-    ));
-    tokio::time::sleep(tokio::time::Duration::from_millis(400)).await;
-
-    // Tentativo 2: Bcachefs snapshot via direct libc ioctl
-    let bcachefs_res = native_bcachefs_snapshot(std::path::Path::new("/"), std::path::Path::new("/.recovery-snapshot-rollback"));
-
-    match bcachefs_res {
-        Ok(_) => {
-            let msg =
-                "Snapshot Bcachefs creato con successo in /.recovery-snapshot-rollback.".to_string();
-            try_emit_dbus_signal().await;
-            return Ok(msg);
-        }
-        Err(err) => {
-            warn!("Snapshot bcachefs fallito: {}", err);
-        }
-    }
-
-    Err("Nessun meccanismo di rollback OSTree o Bcachefs ha avuto successo nel sistema.".to_string())
+    Err("Il rollback OSTree non ha avuto successo nel sistema.".to_string())
 }
 
 async fn try_emit_dbus_signal() {

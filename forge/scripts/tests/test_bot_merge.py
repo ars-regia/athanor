@@ -200,7 +200,7 @@ class BotMergeTest(unittest.TestCase):
         self.assertEqual(
             self.spec(
                 files=[
-                    dict(SPEC_FILES[0], filename="forge/specs/athanor-gatekeeper-rs/athanor-gatekeeper-rs.spec")
+                    dict(SPEC_FILES[0], filename="forge/specs/athanor-backup/athanor-backup.spec")
                 ]
             ),
             [],
