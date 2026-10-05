@@ -139,13 +139,15 @@ The goal: the project can be continued by someone other than the maintainer, and
 
 The `signing` environment has required reviewers (D43). The keyless signature of CI needs no key and no succession.
 
-**Who signs `:stable` in the maintainer's absence. OPEN: the maintainer decides; no person is named here.** `:stable` moves only through the manual workflow `promote-stable.yml` (D1), which holds no signing key: it points `stable` at a digest the image signing job already signed. The signing key is held by the `signing` environment, whose reviewers are the maintainer today. The options:
+**Who signs `:stable` in the maintainer's absence. Decided 2026-10-06 by the maintainer (#170): a human always approves; a bot is an additional required check, never the approver.** `:stable` moves only through the manual workflow `promote-stable.yml` (D1), which holds no signing key: it points `stable` at a digest the image signing job already signed. The signing key is held by the `signing` environment, whose reviewers are the maintainer today. The options:
 
 1. **A second named reviewer for the `signing` environment and a second GitHub account with write access.** Cheapest; the project continues only while that person is trusted with the key's use, not its content.
 2. **A sealed copy of the offline kit with a named custodian**, opened only on the maintainer's death or loss of access (a lawyer, a second maintainer, or a threshold split of the kit). Covers the case where GitHub access is lost too.
 3. **No succession for the key: stop signing.** The last `:stable` stays valid until its expiry (below), then machines show the notice and stay on the last good deployment. It needs no trust in a third party, but ends updates.
 
-Whichever is chosen, the new holder generates a new key pair (UT3 rotation, with the recovery command of UT2 written and tested first) rather than receiving the old private key, so the old key can be retired after one release.
+The decision: the `signing` environment gets a deployment protection rule run by a bot, required in addition to a human reviewer. The bot passes only when the run's CI is green, its provenance is the release branch's build run (`promote.sh`'s checks), and the kernel it carries is signed by `kernel-build.yml`. Its pass never replaces the approval: without a second named human reviewer (option 1, still to be named), signing stops in the maintainer's absence and option 3 applies. A bot as the sole approver was rejected: whoever compromises the protected branch or the bot would obtain signed images.
+
+Whichever option names a person, the new holder generates a new key pair (UT3 rotation, with the recovery command of UT2 written and tested first) rather than receiving the old private key, so the old key can be retired after one release.
 
 **Expiry of the stable manifest. Proposed, not decided.** A machine that has not seen a `:stable` promotion for a bounded time must say so (a notice in the updates view, with a reason from the closed list of the trust state) instead of showing "up to date" indefinitely. Proposed bound: 180 days since the build time of the newest promoted digest, longer than the 90-day move to a new Fedora (`README.md`, support window) so a late release does not raise a false alarm. This is the image-side counterpart of the manifest expiry and minimum version that `doc_kernel_profile.md` D41 asks of update manifests; neither is implemented yet. The number and the wording are the maintainer's to confirm.
 
