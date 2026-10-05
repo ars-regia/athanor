@@ -3,7 +3,6 @@ members = [
   "forge/specs/athanor-backup/athanor-backup-1.0.0",
   "forge/specs/athanor-cloud-rs/athanor-cloud-rs-1.0.0",
   "forge/specs/athanor-doctor/athanor-doctor-1.0.0",
-  "forge/specs/athanor-gatekeeper-rs/athanor-gatekeeper-rs-1.0.0",
   "forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0",
   "forge/specs/athanor-layout-chooser/athanor-layout-chooser-1.0.0",
   "forge/specs/athanor-lvfs-rs/athanor-lvfs-rs-1.0.0",
@@ -41,7 +40,6 @@ members = [
   "system/athanor-store",
   "system/athanor-telemetry",
   "system/athanor-trust-state",
-  "system/athanor-updater-rs",
 ]
 
 # Out of this workspace since 2026-09-19 (doc_shell.md, SH4): gtk4-sys declares
@@ -56,8 +54,6 @@ exclude = [
   "forge/tools/calmo-cosmic-theme",
   "forge/specs/athanor-shell-rs",
   "forge/specs/athanor-recovery/athanor-recovery-1.0.0",
-  "forge/specs/athanor-daemon-rs/athanor-daemon-rs-0.2.1",
-  "forge/specs/athanor-settings-rs/athanor-settings-rs-1.0.0",
   "forge/specs/athanor-store-rs/athanor-store-rs-1.0.0",
   "system/athanor-oobe",
 ]

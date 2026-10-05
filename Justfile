@@ -35,11 +35,10 @@ rpms package="":
         just forge/fetch-repo-rpms; \
     fi
 
-# Prepares and builds Chimera Kernel
+# Builds the Azoth kernel
 [group('Pipeline')]
-kernel mode="full":
-    just forge/kernel-prepare "{{ mode }}"
-    just forge/kernel-build-local
+kernel stage="build":
+    just forge/kernel-build "{{ stage }}"
 
 # Builds System bootc container image
 [group('Pipeline')]
@@ -97,18 +96,13 @@ fuzz component="all" time="60":
 
 # Runs AWS Kani formal verification proofs on Rust spec targets
 [group('QA & Security')]
-verify component="athanor-gatekeeper-rs":
+verify component:
     just forge/verify "{{ component }}"
 
 # Validates NVIDIA kernel module loading and GPU device nodes
 [group('QA & Security')]
 test-nvidia:
     just forge/test-nvidia-modules
-
-# Builds and injects kernel livepatch modules
-[group('QA & Security')]
-livepatch-inject:
-    just forge/livepatch-inject
 
 # Runs documentation sync via OpenWiki
 [group('Documentation')]
