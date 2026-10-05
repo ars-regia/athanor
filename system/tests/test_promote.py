@@ -47,6 +47,21 @@ def evidence_checks():
     return module.CHECKS
 
 
+def build_run(**override):
+    """The Orchestrator run that built the images, as GET /repos/{owner}/{repo}/actions/runs/{id} has it."""
+    return {
+        "path": ".github/workflows/athanor-forge-orchestrator.yml",
+        "head_branch": "iso-v0",
+        "head_sha": REVISION,
+        "event": "push",
+        "status": "completed",
+        "conclusion": "success",
+        "repository": {"full_name": "hr-mes/athanor"},
+        "head_repository": {"full_name": "hr-mes/athanor"},
+        **override,
+    }
+
+
 def predicate(run="412", result="pass", hours_ago=30, **override):
     """The acceptance evidence as forge/test/iso/evidence.py writes it for the published run."""
     finished = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
@@ -90,9 +105,11 @@ class Published(Tool):
         revision=REVISION,
         fx=None,
         base=1,
+        build=None,
     ):
         """attestations: [(identity, predicate)] on every image of the run (default: one trusted pass).
-        base: the run's digests are digest(base), digest(base + 1), digest(base + 2)."""
+        base: the run's digests are digest(base), digest(base + 1), digest(base + 2).
+        build: the run's record in the GitHub API (default: build_run())."""
         if attestations is None:
             images = {name: digest(base + i) for i, name in enumerate(NAMES)}
             attestations = [(TRUSTED, predicate(run=run, images=images))]
@@ -102,7 +119,9 @@ class Published(Tool):
             "raw": {},
             "sigstore_keys": {},
             "attestations": {},
+            "build_runs": {},
         }
+        fx["build_runs"][run] = build_run() if build is None else build
         for i, name in enumerate(NAMES):
             new, old = digest(base + i), digest(0xA + i)
             fx["tags"][f"{REG}/{name}:{run}"] = new
@@ -237,10 +256,46 @@ class Promote(Published):
                 )
 
     def test_a_run_tag_that_does_not_exist_is_not_eligible(self):
-        self.published()
+        fx = self.published()
+        fx["build_runs"]["413"] = build_run()
+        self.registry(fx)
         r, copies = self.promote(run="413")
         self.assertEqual(r.returncode, 4, r.stderr)
         self.assertIn("has no image tagged 413", r.stderr)
+        self.assertEqual(copies, [])
+
+    def test_images_not_built_by_the_orchestrator_on_a_trusted_branch_are_refused(self):
+        # Passing evidence, signed by the trusted identity, for images whose build run is not a
+        # successful Orchestrator run of a trusted branch of this repository: acceptance tests
+        # whatever ISO it is given, so its pass says nothing about where the images came from.
+        for field, value in (
+            ("head_branch", "feature"),
+            ("path", ".github/workflows/call-system-image.yml"),
+            ("event", "pull_request"),
+            ("conclusion", "failure"),
+            ("status", "in_progress"),
+            ("repository", {"full_name": "someone/athanor"}),
+            ("head_repository", {"full_name": "someone/athanor"}),
+            ("head_sha", "not-a-commit"),
+        ):
+            with self.subTest(field=field):
+                self.ineligible(
+                    "is not a successful Orchestrator run of a trusted branch",
+                    build=build_run(**{field: value}),
+                )
+
+    def test_images_from_another_commit_than_the_build_run_are_refused(self):
+        self.ineligible(
+            "not from run 412's commit " + "d" * 40, build=build_run(head_sha="d" * 40)
+        )
+
+    def test_a_run_unknown_to_github_is_refused(self):
+        fx = self.published()
+        del fx["build_runs"]["412"]
+        self.registry(fx)
+        r, copies = self.promote()
+        self.assertEqual(r.returncode, 4, r.stderr)
+        self.assertIn("is not a workflow run of hr-mes/athanor", r.stderr)
         self.assertEqual(copies, [])
 
     def test_an_image_without_its_commit_cannot_be_bound_to_evidence(self):

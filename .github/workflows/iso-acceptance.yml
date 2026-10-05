@@ -13,7 +13,12 @@ name: ISO Acceptance
 # RELEASE_BRANCH, default iso-v0) for a push, a schedule or a dispatch, never for a pull
 # request, and holds the only OIDC token of the workflow; the job that boots the system
 # under test has none. promote.sh checks the same from the certificate and the predicate.
-# The# run itself is short. On a runner with KVM the install takes about eight minutes and the
+# The evidence says the images work, not where they came from: a dispatch may name any
+# published ISO, a branch build's included. promote.sh takes the images' origin from
+# GitHub's record of the build run instead (an Orchestrator run of a trusted branch of this
+# repository, completed with success, at the commit the images carry).
+#
+# The run itself is short. On a runner with KVM the install takes about eight minutes and the
 # job about twelve, because the console ends the run as soon as it has an answer rather
 # than waiting out a clock. What it produces is meant to be looked at: the console log,
 # the verdict, and a screenshot every thirty seconds of both the installer and the first

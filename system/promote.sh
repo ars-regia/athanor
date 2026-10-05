@@ -3,6 +3,12 @@
 # (docs/architecture/doc_update_trust.md, D1). Users follow :stable; :latest is the tested build
 # of the default branch. The signature is by digest, so it carries: nothing is signed here and
 # no private key is needed. Nothing moves unless all three images pass every check:
+#   - build provenance: RUN_ID is, by the GitHub API, a run of this repository's
+#     athanor-forge-orchestrator.yml on a trusted branch, triggered by a push, a schedule or a
+#     dispatch, completed with success, and every image's revision label is that run's head
+#     commit. The run tag alone proves nothing: any branch build pushes one, and the
+#     acceptance test installs whatever ISO it is given, so its evidence says the images
+#     work, not where they came from;
 #   - acceptance evidence: a cosign attestation on that exact digest, made keyless by
 #     .github/workflows/iso-acceptance.yml running on a trusted branch (PROMOTE_TRUSTED_REFS,
 #     default iso-v0). Its predicate (forge/test/iso/evidence.py) must say "pass" with every
@@ -31,8 +37,9 @@
 # Environment: REGISTRY (default ghcr.io/<GITHUB_REPOSITORY_OWNER>); PROMOTE_KEYS_DIR
 #              (default system/keys); PROMOTE_DWELL_HOURS (default 0); PROMOTE_TRUSTED_REFS
 #              (default iso-v0); PROMOTE_EVIDENCE_OUT (optional: where to write the verified
-#              predicate); GITHUB_SERVER_URL and GITHUB_REPOSITORY name the signing workflow;
-#              skopeo logged in, cosign on PATH.
+#              predicate); GITHUB_SERVER_URL and GITHUB_REPOSITORY name the signing workflow
+#              and the build run's repository; skopeo logged in, cosign on PATH, gh
+#              authenticated (actions: read).
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -90,6 +97,7 @@ accepted() { # accepted REPOSITORY NAME DIGEST: writes the newest valid predicat
   local revision status=0
   revision=$(label "$1" "$3" org.opencontainers.image.revision)
   [[ $revision =~ ^[0-9a-f]{40}$ ]] || ineligible "$1@$3 has no org.opencontainers.image.revision label: no evidence can be bound to it"
+  [[ $revision == "$build_sha" ]] || ineligible "$1@$3 was built from $revision, not from run $run's commit $build_sha"
   # The identity is the workflow file and the branch it ran from; the repository extension
   # rules out another repository calling iso-acceptance.yml as a reusable workflow.
   cosign verify-attestation --type custom --certificate-identity-regexp "$IDENTITY" \
@@ -129,6 +137,23 @@ accepted() { # accepted REPOSITORY NAME DIGEST: writes the newest valid predicat
     || { echo "${0##*/}: $1@$3: malformed acceptance attestation" >&2; exit 1; }
   [[ -s $work/$2.json ]] || ineligible "$1@$3 has no passing acceptance evidence for run $run at commit $revision"
 }
+
+# The build run, from GitHub's own record of it: workflow file, branch, trigger, repository
+# and outcome are GitHub's, not anything a job of the run wrote.
+if ! build=$(gh api "/repos/$repo/actions/runs/$run" 2> "$err"); then
+  grep -q 'Not Found' "$err" && ineligible "run $run is not a workflow run of $repo"
+  cat "$err" >&2
+  exit 1
+fi
+jq -e --arg repo "$repo" --args '
+  .repository.full_name == $repo and .head_repository.full_name == $repo
+  and .path == ".github/workflows/athanor-forge-orchestrator.yml"
+  and (.head_branch | IN($ARGS.positional[])) and (.event | IN("push", "schedule", "workflow_dispatch"))
+  and .status == "completed" and .conclusion == "success"
+  and (.head_sha | test("^[0-9a-f]{40}$"))' "${trusted[@]}" <<< "$build" > /dev/null \
+  || ineligible "run $run is not a successful Orchestrator run of a trusted branch of $repo: $(jq -c \
+    '{path, head_branch, event, status, conclusion, repository: .head_repository.full_name}' <<< "$build")"
+build_sha=$(jq -r .head_sha <<< "$build")
 
 declare -A has_stable=() digests=()
 now=$(date -u +%s)

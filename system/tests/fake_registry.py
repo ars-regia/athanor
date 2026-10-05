@@ -29,6 +29,7 @@ Fixture keys:
   packages      {"package": [package versions as the GitHub API returns them]}
   user_packages ["package", ...]  the container packages of the owner
   runs          [{"databaseId": 1, "headBranch": "iso-v0"}]
+  build_runs    {"run id": the run as GET /repos/{owner}/{repo}/actions/runs/{id} returns it}
 """
 
 import base64
@@ -130,6 +131,12 @@ def gh(args, fx):
         if "DELETE" in args:
             return 0
         path = next(a for a in args[1:] if a.startswith("/"))
+        match = re.fullmatch(r"/repos/[^/]+/[^/]+/actions/runs/([0-9]+)", path)
+        if match:
+            if match.group(1) not in fx.get("build_runs", {}):
+                return fail("gh: Not Found (HTTP 404)")
+            print(json.dumps(fx["build_runs"][match.group(1)]))
+            return 0
         if path.startswith("/users/") and path.split("?")[0].endswith("/packages"):
             print(json.dumps([{"name": name} for name in fx.get("user_packages", [])]))
             return 0
