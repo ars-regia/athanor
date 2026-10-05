@@ -8,6 +8,7 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::{env, fs, process};
 
@@ -19,6 +20,7 @@ use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Value};
 use zbus::Connection;
 
 use crate::mirror::Snapshot;
+use crate::notifications::wire::WireNotification;
 use crate::props::Objects;
 
 /// The interface of the test service's objects.
@@ -279,3 +281,161 @@ fn copy(objects: &Objects) -> Objects {
         })
         .collect()
 }
+
+/// What a test sets and reads of the fake notification daemon.
+#[derive(Default)]
+pub struct FakeState {
+    /// What `History` answers, oldest first.
+    pub history: Vec<WireNotification>,
+    /// How long `History` holds its answer back, after it has read `history`.
+    pub delay: Duration,
+    /// What `DoNotDisturb` answers: (on, reason, until, unavailable).
+    pub dnd: (bool, String, i64, Vec<String>),
+    /// Every call but `History` and `DoNotDisturb`, as `Method(args)`.
+    pub calls: Vec<String>,
+    /// Whether the commands fail.
+    pub refuse: bool,
+}
+
+/// A fake `os.athanor.Notifications1`, served at the daemon's path by a connection that
+/// owns `org.freedesktop.Notifications`.
+pub struct FakeNotifications {
+    pub connection: Connection,
+    pub state: Arc<Mutex<FakeState>>,
+}
+
+struct FakePrivate(Arc<Mutex<FakeState>>);
+
+impl FakePrivate {
+    fn record(&self, call: String) -> zbus::fdo::Result<()> {
+        let mut state = self.0.lock().expect("fake state");
+        state.calls.push(call);
+        if state.refuse {
+            return Err(zbus::fdo::Error::Failed("refused".into()));
+        }
+        Ok(())
+    }
+}
+
+#[zbus::interface(name = "os.athanor.Notifications1")]
+impl FakePrivate {
+    async fn history(&self) -> Vec<WireNotification> {
+        let (history, delay) = {
+            let state = self.0.lock().expect("fake state");
+            (state.history.clone(), state.delay)
+        };
+        tokio::time::sleep(delay).await;
+        history
+    }
+
+    async fn do_not_disturb(&self) -> (bool, String, i64, Vec<String>) {
+        self.0.lock().expect("fake state").dnd.clone()
+    }
+
+    fn close(&self, id: u32, reason: u32) -> zbus::fdo::Result<()> {
+        self.record(format!("Close({id},{reason})"))
+    }
+
+    fn invoke_action(&self, id: u32, key: &str, token: &str) -> zbus::fdo::Result<()> {
+        self.record(format!("InvokeAction({id},{key},{token})"))
+    }
+
+    fn reply(&self, id: u32, text: &str) -> zbus::fdo::Result<()> {
+        self.record(format!("Reply({id},{text})"))
+    }
+
+    fn mark_read(&self, ids: Vec<u32>) -> zbus::fdo::Result<()> {
+        self.record(format!("MarkRead({ids:?})"))
+    }
+
+    fn clear_all(&self) -> zbus::fdo::Result<()> {
+        self.record("ClearAll".into())
+    }
+
+    fn clear_group(&self, app: &str) -> zbus::fdo::Result<()> {
+        self.record(format!("ClearGroup({app})"))
+    }
+
+    fn set_do_not_disturb(&self, on: bool) -> zbus::fdo::Result<()> {
+        self.record(format!("SetDoNotDisturb({on})"))
+    }
+
+    fn set_do_not_disturb_until(&self, on: bool, until: i64) -> zbus::fdo::Result<()> {
+        self.record(format!("SetDoNotDisturbUntil({on},{until})"))
+    }
+
+    fn set_rule(&self, app: &str, key: &str, value: &str) -> zbus::fdo::Result<()> {
+        self.record(format!("SetRule({app},{key},{value})"))
+    }
+}
+
+/// A notification with the given id and summary, and nothing else.
+pub fn notification(id: u32, summary: &str) -> WireNotification {
+    WireNotification {
+        id,
+        app_id: String::new(),
+        app_name: String::new(),
+        summary: summary.to_owned(),
+        body: String::new(),
+        body_spans: Vec::new(),
+        actions: Vec::new(),
+        actions_available: false,
+        urgency: 1,
+        transient: false,
+        resident: false,
+        read: false,
+        time: 0,
+        desktop_entry: String::new(),
+        icon_name: String::new(),
+        icon_file: String::new(),
+        image_width: 0,
+        image_height: 0,
+        image_rgba: Vec::new(),
+        timeout_ms: 0,
+        popup_ms_left: 0,
+        popup: false,
+        value: -1,
+        reply: false,
+        reply_placeholder: String::new(),
+    }
+}
+
+/// A new connection that owns `org.freedesktop.Notifications` and serves the private
+/// interface with `history`.
+pub async fn serve_notifications(
+    bus: &TestBus,
+    history: Vec<WireNotification>,
+) -> FakeNotifications {
+    let state = Arc::new(Mutex::new(FakeState {
+        history,
+        ..FakeState::default()
+    }));
+    let server = bus
+        .builder()
+        .serve_at(NOTIFICATIONS_PATH, FakePrivate(state.clone()))
+        .expect("fake notifications")
+        .name("org.freedesktop.Notifications")
+        .expect("name")
+        .build();
+    FakeNotifications {
+        connection: connect("notification daemon", server).await,
+        state,
+    }
+}
+
+/// Emits the signal `member` of the private interface from `server`; `body` is its arguments
+/// as a tuple.
+pub async fn emit_private(
+    server: &Connection,
+    member: &str,
+    body: &(impl serde::Serialize + zbus::zvariant::DynamicType),
+) {
+    SignalEmitter::new(server, NOTIFICATIONS_PATH)
+        .expect("emitter")
+        .emit("os.athanor.Notifications1", member, body)
+        .await
+        .expect("signal");
+}
+
+/// The path of the private interface.
+pub const NOTIFICATIONS_PATH: &str = "/os/athanor/Notifications1";
