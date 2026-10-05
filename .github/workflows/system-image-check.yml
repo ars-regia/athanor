@@ -28,7 +28,6 @@ on:
       # The check installs the athanor-base-config RPM published in tier0:latest, not the spec
       # of the pull request.
       - forge/specs/athanor-base-config/**
-      - forge/specs/athanor-secure-boot/SOURCES/**
       - forge/specs/azoth/pins.env
       - forge/specs/azoth/nvr.sh
       - forge/scripts/retry.sh

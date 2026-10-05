@@ -146,11 +146,6 @@ RUN dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs fla
 COPY system/scripts/ /scripts/
 
 
-# TPM 2.0 PCR Sealing Provisioning Service & Script for LUKS /var/home
-COPY forge/specs/athanor-secure-boot/SOURCES/usr/libexec/athanor-tpm-luks-seal.sh /usr/libexec/athanor-tpm-luks-seal.sh
-COPY forge/specs/athanor-secure-boot/SOURCES/usr/lib/systemd/system/athanor-tpm-luks-seal.service /usr/lib/systemd/system/athanor-tpm-luks-seal.service
-RUN chmod +x /usr/libexec/athanor-tpm-luks-seal.sh
-
 # Custom SELinux policy modules. athanor-selinux installs its CIL modules under
 # /usr/share/selinux/packages, but a .cil placed there is not active until it is loaded
 # into the policy store with `semodule -i`; there is no OSTree-safe %post to do it (the
@@ -178,7 +173,7 @@ RUN /usr/libexec/athanor-update/render-policy --registry "${IMAGE_REGISTRY}" --k
 
 # Declarative Systemd presets & sysusers
 RUN authselect enable-feature with-systemd-homed && \
-    systemctl enable tetragon.service systemd-sysext.service systemd-homed.service athanor-tpm-rollback-check.service athanor-tpm-rollback-update.service athanor-tpm-luks-seal.service && systemd-sysusers && systemctl preset-all && systemctl --global preset-all
+    systemctl enable tetragon.service systemd-sysext.service systemd-homed.service && systemd-sysusers && systemctl preset-all && systemctl --global preset-all
 
 # Stage 2 switch (doc_shell.md, section 8, item 2): the COSMIC shell is gone, our shell is
 # enabled for every user, and each bus name it owns has exactly one activation file.

@@ -591,6 +591,19 @@ PCR 14 plus the signed PCR 11 policy (initrd phase, UKI profile 0), never PCR 12
 changes do not require resealing; in degraded mode TPM plus PIN, or a passphrase. A
 recovery key is always enrolled.
 
+**Key lifecycle.** Where each secret lives, who uses it, and how it is rotated and revoked.
+"Open" marks what no decision fixes yet, with the issue that tracks it. The PCR policy key
+is never the Secure Boot key: a compromise of one must not give the other (D43).
+
+| Key | Where it lives | Who uses it | Rotation | Revocation |
+| --- | --- | --- | --- | --- |
+| Secure Boot signing key (`SECUREBOOT_SIGNING_KEY`) | secret of the `signing` environment (D43); certificate `keys/secureboot/athanor-secureboot.pem` in the repository, enrolled as a MOK; an encrypted copy outside GitHub | the sign-only CI job, for systemd-boot, UKIs and role addons; shim, through MokList, to verify them | new key and certificate, a new MOK enrolment confirmed by the owner, UKIs re-signed; keys older than the fallback version are retired with the UKIs they signed | `keys/revoked/` for compiled-in certificates of later kernels; MokListX hashes confirmed by the owner for older UKIs (D41); a rotation of this key; custody and environment protection rules: open (#131) |
+| Module signing key (`MODULE_SIGNING_KEY`) | secret of the `signing` environment; certificate compiled into Azoth; encrypted copy outside GitHub | the sign-only CI job, for external modules (NVIDIA); the kernel, through the builtin certificate | a new certificate needs a new kernel; modules are re-signed in the same release | `keys/revoked/` for the old certificate from the kernels built after the revocation; the old kernel keeps trusting it (D41) |
+| Cosign key | secret of the `signing` environment; public key shipped in `/usr` and named by `policy.json` | the sign-only CI job, for the image and its sigstore attachments; every machine that pulls an image, through `policy.json` (`sigstoreSigned`) | new key pair, new public key delivered by an image the old key signed; rotation procedure and the signing root outside GitHub's OIDC: open (#141) | removal of the old public key from the next image; a machine that never updated cannot learn it: open (#141) |
+| PCR policy key (new, P4b) | secret of the `signing` environment, a key of its own, not the Secure Boot key; public key in the TPM keyslot policy | the sign-only CI job (`ukify --sign-initrd-pcrs`, PCR 11, UKI profile 0 only); the TPM, to release the keyslot | rotation invalidates every TPM keyslot; the guided reseal (D42) enrols only the key of the newest installed UKI, on the first boot of profile 0 of a UKI signed with it | only the newest PCR policy key is enrolled, so a UKI with an older key never unlocks the disk; custody and environment: open (#131, P4b) |
+| LUKS recovery passphrase | the user's head and the user's own storage; the keyslot is in the LUKS header; never in the repository, the image or CI | the user, when the TPM keyslot does not release (unforeseen PCR change, degraded mode) | by the user, with `homectl` or `cryptsetup`; the guided reseal does not rotate it | the user removes the keyslot; always enrolled (D42), so it is never revoked by Athanor; its enrolment flow in the installer: open (#145) |
+| TPM-sealed LUKS key | a keyslot in the LUKS header of the home, sealed by the TPM of the machine through `systemd-pcrlock` (PCR 7 and 14) and the signed PCR 11 policy; the TPM secret never leaves the machine | `systemd-cryptsetup` in the initrd, in attested mode only; nothing seals or reseals it without the user's action | resealed by the guided reseal when the pcrlock policy changes (firmware, db, dbx, shim, MokList) or the PCR policy key rotates; mechanism designed in P4b: open | never applied automatically (D42); the keyslot is wiped and enrolment is offered again when attested mode no longer holds or db, dbx or SbatLevel revoke less than at the last seal; the offer in the installer: open (#145) |
+
 **Attestation** (restricted area): admission of a mesh host requires its identity, a
 verified TPM quote and with the dm-verity option, the active IPE class derived from PCR 11 and the PCR 12 event log (D38, section 10).
 Keylime's example measured-boot policy considers PCRs 0–9 and 14 only, so a dedicated
@@ -950,18 +963,20 @@ Found on the running system and in the repository (2026-09-14):
   `athanor-tetragon` and a Fedora 41 `bore-sysctl` package are installed.
 - **Units** (P3): `athanor-journal-seal.service` fails on every boot because Fedora's
   systemd lacks forward-secure sealing: the unit, `Seal=yes` in `99-immutable.conf` and
-  its preset line leave the image. `system/Containerfile` enables `tetragon.service`, `athanor-tpm-luks-seal.service`,
-  `athanor-tpm-rollback-check.service` and `athanor-tpm-rollback-update.service`,
-  and `preset-all` disables them again. Shipped disabled and reviewed in a dedicated
-  session before P6: `athanor-secure-boot`, `athanor-lvfs-rs`, `athanor-backup`,
-  `athanor-recovery`, the TPM rollback units and `athanor-tpm-luks-seal.service`.
+  its preset line leave the image. `system/Containerfile` enables `tetragon.service`, and `preset-all` disables it again.
+  `athanor-tpm-luks-seal.service` and the two `athanor-tpm-rollback-*` units, which the
+  Containerfile also enabled, were removed (issue #148, decision A2-10), and `verify.py shipped`
+  fails if any of them is shipped again. Shipped disabled and reviewed in a dedicated
+  session before P6: `athanor-secure-boot`, `athanor-lvfs-rs`, `athanor-backup` and
+  `athanor-recovery`.
   `athanor-gatekeeper-rs`, `athanor-daemon` and `athanor-store-rs` were removed from the
   image on 2026-09-17 pending redesign; the Gatekeeper and attestation are restricted areas.
 - **Snapshots** (P3): `athanor-timewarp` targets bcachefs, which left mainline in Linux
   6.18, and misdetects `/var/home` as tmpfs; `athanor-backup-hourly` fails because
   `athanor-backup` is disabled. Both are ported to btrfs subvolume snapshots.
-- **LUKS script** (P4b): `athanor-tpm-luks-seal.sh` has a syntax error (`|| {` after `fi`)
-  and binds LUKS to PCRs 0, 2, 7 and 11: it is replaced by the LUKS policy of D42.
+- **LUKS script** (P4b): `athanor-tpm-luks-seal.sh` had a syntax error (`|| {` after `fi`)
+  and bound LUKS to PCRs 0, 2, 7 and 11. It is removed (issue #148); the LUKS policy of D42
+  replaces it, and nothing in the image enrols the TPM until that mechanism exists.
 - **Boot ordering** (P3): udev reports unknown groups (`disk`, `kvm`, `render`, `audio`,
   `lp` and others) and tmpfiles cannot apply the journal ACLs early in boot.
 - **Desktop** (P3): `cosmic-panel.service`, shipped by `athanor-system-services`, sets
