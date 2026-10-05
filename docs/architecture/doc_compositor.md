@@ -48,6 +48,11 @@ preference, by cosmic-comp as it is, by its configuration through `athanor-compo
   changelog of the spec names why it exists.
 - Each patch that changes behaviour is proposed upstream first. Its changelog line carries the
   link to the upstream pull request or issue, or says why it is not proposed.
+- The patches the specifications of 2026-10-05 add, each proposed upstream first unless said otherwise:
+  - the three-finger swipe that opens the overview (`doc_overview.md` decision 4);
+  - a reduced-motion switch for the workspace slide, mirrored from `enable-animations`, which only turns the slide on and off and leaves its 200 ms duration alone (`doc_overview.md` decision 5; `doc_accessibility.md` AX9);
+  - the trusted path for credential prompts, our own patch with no upstream proposal by the maintainer's decision (`doc_lock_and_prompts.md` D10, LP13);
+  - a third for the overview, a neutral layer namespace on the overlay or top layer, only if spike S3 of `doc_overview.md` fails (decision 1).
 - Each cosmic-comp release is rebased in its own pull request. A patch that upstream merged is
   dropped in that pull request.
 - Security policy (which client gets which privileged protocol, a trusted path for credential
