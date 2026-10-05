@@ -56,7 +56,7 @@ Two gaps let the shipped state happen:
 | Stability          | A soak of **24 hours** on the reference machine, driven by a script that opens and closes every surface, sends bursts of notifications, switches theme, and suspends and resumes: no crash, no restart by systemd, and no journal line at priority `err` or above from a shell unit other than those listed, with a reason, in the bench's allow list |
 | Recovery           | A shell process killed with `SIGKILL` presents its surface again within **1 s**, in the same state: favourites, layout, unread notifications and settings. A popover open at the time of the kill does not reopen. `athanor-shelld` is no exception: it keeps its unread notifications for this, as below                                                                                                                                    |
 
-The numbers are reasoned proposals, not measurements: 100 ms is the classic limit under which an action reads as instantaneous, and 50 ms leaves room inside it. The first run of the bench (section 4, step 3) shows whether one is unrealistic on the floor; changing it is a revision (ST10). One threshold already fails by construction: the units of `athanor-bar`, `athanor-dock` and `athanor-shelld` wait `RestartSec=1s` before a restart, so recovery cannot happen within 1 s; that is a defect of the units, repaired in section 4, step 3, not a reason to relax the threshold.
+The numbers are reasoned proposals, not measurements: 100 ms is the classic limit under which an action reads as instantaneous, and 50 ms leaves room inside it. The first run of the bench (section 4, step 3) shows whether one is unrealistic on the floor; changing it is a revision (ST10). One threshold already fails by construction: the units of `athanor-bar`, `athanor-dock` and `athanor-shelld` wait `RestartSec=1s` before a restart, so recovery cannot happen within 1 s; that is a defect of the units, repaired in section 4, step 3, not a reason to relax the threshold. *Amended 2026-10-06 (maintainer decision A2-20, #156):* the restart settings of every session unit, their crash classes and the session's start order are owned by `doc_session.md` (SN4, SN6); a surface's unit takes its class's values from there, and recovery within 1 s is the requirement those values must meet.
 
 **What `athanor-shelld` keeps across a crash.** The unread notifications survive a crash of the daemon, so that recovery holds for it as for the bar and the dock.
 
@@ -130,6 +130,7 @@ They are the first tasks of the plan, and each gives an answer, not code we keep
 - **`doc_bar.md`, BR7.** The dock's auto-hide gains the scenarios of ST6.
 - **`doc_bar.md`, section 2, crashes.** "When the daemon restarts the history is lost" becomes "When the daemon restarts it restores the unread notifications (`doc_shell_standard.md`, ST5); the read history is lost".
 - **`doc_bar.md`, section 5, item 17.** Its budgets are the budgets of ST5; nothing changes in it.
+- **`doc_session.md`.** *Amended 2026-10-06 (maintainer decision A2-20, #156):* unit restart settings and the session's start and stop order are that document's (SN4 to SN6); this standard keeps the thresholds they must meet.
 
 ## 6. Open doubts
 
