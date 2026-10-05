@@ -10,7 +10,7 @@ The three spikes of section 3 ran on 2026-09-18 (`.superpowers/spike-p1-applet.m
 
 The document replaces `doc_shell_ui.md` and amends `doc_platform_experience.md`, section 3. Section 6 lists the changes other documents take.
 
-SH3 was amended on 2026-10-06 by maintainer decisions A2-14 and A2-24 (#159): the scope budget, COSMIC's applications, and cosmic-launcher kept until the Alt+Tab switcher of `doc_overview.md` exists.
+SH3 was amended on 2026-10-06: the scope budget (maintainer decision A2-14, #159); cosmic-launcher kept until the Alt+Tab switcher of `doc_overview.md` exists (maintainer decision A2-24, #159); and COSMIC's applications no longer called content, as `doc_software.md` revision 3, decision 7, ruled on 2026-10-05.
 
 ## 1. Context
 
