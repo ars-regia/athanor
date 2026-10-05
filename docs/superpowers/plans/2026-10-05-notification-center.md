@@ -1281,6 +1281,23 @@ And in `wire.rs`: `pango_markup(&[("<x> & \"y\"".into(), 1, "https://a/?b=1&c=2"
 - [ ] **Step 2:** Write the table into this task with a recommendation and give it to the maintainer, who chooses. Task 16 starts only after that choice.
 - [ ] **Step 3:** Commit `docs(shell): record the sound playback spike and the maintainer's choice`.
 
+**Spike result (2026-10-05, reference laptop, Fedora 43 image, PipeWire 1.4.11 with pipewire-pulse, idle, `message-new-instant.oga` 1.03 s, 100 plays 1 s apart, stream volume -30 dB, default sink untouched).** Each candidate ran as one process that stays alive across the 100 plays. "Added PSS" is `Pss` from `/proc/<pid>/smaps_rollup` after the last play minus before the first play, with the player already initialised (context created, PipeWire thread connected); the figure in brackets is against process start. Latency is the time from the call to the stream node reaching `Running` in the PipeWire registry, observed by a separate monitor process on the same monotonic clock. Raw numbers: `/var/tmp/sound-spike/raw/` on the desktop, report in `.superpowers/sdd/2026-10-05-notification-center/task-15-report.md`.
+
+| | (a) libcanberra, pulse backend, FFI | (b) `pw-play` child process | (c) `pipewire` crate + `lewton` |
+|---|---|---|---|
+| Added PSS of the daemon | +836 KB (+2207 KB); +525 KB creep between play 1 and 100 | +16 KB; child is 3.2 MB PSS for about 1.1 s per play, then gone | +881 KB (+1603 KB); +340 KB creep between play 1 and 100 |
+| Latency to first buffer, median (p95, first play) | 20.3 ms (21.7, 87.8) | 24.9 ms (28.2, 29.3) | 22.2 ms (26.3, 88.2); 26.3 ms median in-process, of which decoding 10 ms |
+| CPU in the daemon process over 100 plays | 1.18 s | 0.09 s, plus 2.70 s in the 100 children | 2.80 s |
+| CPU added in pipewire / pipewire-pulse / wireplumber | 1.23 s / 1.28 s / 3.57 s | 1.00 s / 0.10 s / 3.11 s | 3.84 s / 0.30 s / 2.00 s |
+| New long-lived processes | none; 1 extra thread (libpulse mainloop) | none; one short-lived child per play | none; 3 extra threads (PipeWire loop and data loop) |
+| New dependencies | libcanberra (+ libpulse, libvorbisfile, libtdb, libltdl), all already in the image; no crate (about 20 lines of FFI) | none: `pw-play` (pipewire-utils) is in the image; `std::process` | crates `pipewire` 0.9, `libspa`, `libspa-sys`, `pipewire-sys`, `lewton`, `ogg` plus transitive (about 25 at run time; `libc`, `nix`, `thiserror`, `bitflags` are probably in the workspace already); build needs `pipewire-devel` and clang (bindgen); `libpipewire-0.3` is in the image |
+
+**Recommendation: (b) `pw-play`.** It costs the daemon nothing resident (+16 KB against +0.8 to +0.9 MB), adds no crate, no C binding and no `unsafe`, and its 25 ms latency is imperceptible for a notification sound; the transient 3.2 MB and 27 ms CPU per play are paid only when a sound plays and are returned at once. It has the least code to keep (a `Command` and its exit status, so a failure is logged once from the status), and it is the only candidate whose cost does not grow with the number of plays inside the daemon. Choose (a) only if the daemon should look sounds up by event name through libcanberra (theme lookup, caching) and accept a libpulse thread, +0.8 MB and a +0.5 MB creep per 100 plays. Choose (c) only if a child per sound is refused; it has the highest CPU (decoding every time, a stream per play, the highest server-side load) and the largest dependency surface.
+
+**Caveats.** (1) The creep of (a) and (c) was seen over 100 plays only and was not followed to a plateau. (2) Per-play CPU of (b) is the children's CPU; its 3.2 MB is the whole `pw-play` process, much of it shared libraries. (3) The first play after idle costs about 88 ms for (a) and (c) (the sink wakes); for (b) the first play is 29 ms (no such outlier seen). (4) Task 16 must let the daemon's sandbox exec `pw-play` and reach the PipeWire socket if (b) is chosen. (5) Sound is resolved to a path in all three runs; libcanberra would also accept an event id, which was not measured. (6) The `Running` state is a proxy for the first buffer: the stream's own first-buffer callback in (c) arrives within a few ms of it.
+
+**Maintainer's choice (2026-10-05): (b) `pw-play`.** Task 16 spawns `pw-play` per sound; the daemon's sandbox allows executing it and reaching the PipeWire socket.
+
 ---
 
 ### Task 16: Sound
