@@ -73,12 +73,9 @@ mkdir -p /etc/yum.repos.d
 %attr(0755,root,root) /usr/bin/athanor-greeter-session
 %attr(0755,root,root) /usr/bin/athanor-usbguard-hook
 %attr(0755,root,root) /usr/bin/athanor-uki-enroll
-%attr(0755,root,root) /usr/libexec/athanor-snapshot-trigger.sh
 %attr(0755,root,root) /usr/libexec/athanor-greeter-client
 %dir /usr/lib/systemd/system/greetd.service.d
 /usr/lib/systemd/system/greetd.service.d/10-athanor-wantedby.conf
-/usr/lib/systemd/system/athanor-timewarp.service
-/usr/lib/systemd/system/athanor-timewarp.timer
 /usr/lib/systemd/system-preset/80-athanor-display-manager.preset
 /usr/lib/systemd/system-preset/80-athanor-system.preset
 /usr/lib/tmpfiles.d/10-athanor-greetd.conf
