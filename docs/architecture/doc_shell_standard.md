@@ -66,6 +66,43 @@ The numbers are reasoned proposals, not measurements: 100 ms is the classic limi
 - New ids continue above the highest restored one, so a client's later `CloseNotification` finds its notification. `ActionInvoked` reaches a sender that is still connected; one that has gone loses it, which the notification specification already allows.
 - The read history is still lost on a crash; only the unread notifications are kept.
 
+**Whole-session memory budget** (maintainer decision A2-20 (#158)). The per-program rows above bound each process; nothing bounded their sum. The specifications of this branch declare the following ceilings for the processes that are resident in a session, each a proposal that its own first measurement confirms or corrects:
+
+| Process                          | Ceiling (PSS) | Declared in                                                   |
+| -------------------------------- | ------------- | ------------------------------------------------------------- |
+| `athanor-bar`                    | 64 MB         | `doc_bar.md`, section 5, item 17 (and the Memory row above)   |
+| `athanor-dock`                   | 48 MB         | `doc_bar.md`, section 5, item 17                              |
+| `athanor-shelld`                 | 16 MB         | `doc_bar.md`, section 5, item 17                              |
+| `athanor-launcher`               | 80 MB         | `doc_launcher.md`, section 4, item 4                          |
+| `athanor-library`                | 64 MB         | `doc_launcher.md`, section 4, item 4 (open until plan 3b)     |
+| `athanor-osd`                    | 32 MB         | `doc_osd.md`, section 2 (Memory) and section 4, item 2 (OD13) |
+| `athanor-overview`, hidden       | 64 MB         | `doc_overview.md`, section 4, item 5                          |
+| `athanor-lock`, no surface       | 80 MB         | `doc_lock_and_prompts.md`, LP15                               |
+| polkit agent                     | 64 MB         | `doc_lock_and_prompts.md`, LP15                               |
+| `athanor-settings`, no window    | 40 MB         | `doc_settings.md`, SE5                                        |
+| `athanor-a11y`                   | 16 MB         | `doc_accessibility.md`, section 4, item 8                     |
+| `athanor-a11y-gate`              | 16 MB         | `doc_accessibility.md`, section 4, item 8                     |
+| **Sum of the declared ceilings** | **584 MB**    | 12 processes                                                  |
+
+Two further ceilings are declared in specifications that are not yet merged into this branch, and are listed apart until they are: `athanor-control-center` 64 MB (`doc_control_center.md`, CC2 and section 4, item 5) and `athanor-clipd` 24 MB (same item), both on branch `control-center-spec`. With them the sum is 672 MB for 14 processes. **Pending** means the figures are not yet part of this document's sum; they join it when that specification merges.
+
+The sum is an upper bound of the declared ceilings, not an expectation: processes sit below their ceilings at rest, and the shared pages that PSS divides between processes are counted once in the total. Processes that have no ceiling in any specification (the compositor and its panel, idle and portal daemons, the input method, the screen reader when it runs) add to it. The issue's "about 800 MB for about 19 processes" is the sum plus those, as an estimate.
+
+The measurement is the sum of `Pss` over every process in the user's session slice (`user@<uid>.service` and the session scope), read from `/proc/<pid>/smaps_rollup`, taken after login on the reference VM once the session has settled, and compared with one whole-session budget. A CI job takes it (`scripts/session-memory/`, workflow `session-memory.yml`) and uploads a JSON report with the sum and a line per process. The budget lives in `scripts/session-memory/budget.json`; while that file carries no figure the job reports the sum and does not fail, and says so in its output. Once a figure is present the job fails when the sum exceeds it.
+
+> **Proposal, awaiting the maintainer:** a whole-session budget of **900 MB PSS** on the reference VM, that is the 672 MB of declared ceilings (pending ones included) plus about 230 MB for the processes that declare none. It is a first figure, to be replaced by the first measured sum; it enters `budget.json` only when the maintainer sets it.
+
+**One process for the hidden GTK surfaces: evaluation** (maintainer decision A2-20 (#158)). The control center, the notification popups, the on-screen display and the overview are GTK surfaces that stay hidden most of the time, in separate processes. Merging them into one process would share one GTK and GLib baseline: the launcher measured about 16 MB of anonymous memory per GTK process (`doc_launcher.md`, section 6), so the saving is in the order of 15 MB for each process that disappears, 30 to 45 MB for three, an estimate and not a measurement.
+
+| For a merge                                                            | Against a merge                                                                                                                                                                                                                                 |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| One GTK baseline instead of three or four: 30 to 45 MB less (estimate) | One crash ends every surface in it; the recovery threshold (1 s, same state) then applies to all of them at once                                                                                                                                |
+| One start and one D-Bus connection fewer per surface at login          | Confinement is per process: the control center has no filesystem write and no network, the overview needs the compositor's privileged protocols, the on-screen display neither; one process would carry the union of the privileges             |
+| One place for the theme and the accessibility tree                     | The privileged protocols are granted per security context and per launch directory (`doc_bar.md`, BR2); a merged process widens one grant to every surface                                                                                      |
+| Fewer units to order and to monitor                                    | A leak in one surface is no longer attributable by `smaps_rollup`, so the 10% growth rule of the Memory row loses its meaning for it; the cold-start races the surfaces already show are shared                                                  |
+
+> **Proposal, awaiting the maintainer:** do not merge now. The saving is small against a 900 MB budget, and the cost is paid in isolation, the property the zero-trust rules exist for. Revisit if the measured sum exceeds the budget, and then merge only the two surfaces with no privileged protocol and the same confinement (the on-screen display and the notification popups) before any other.
+
 **ST6. Behaviour is specified by scenarios.**
 
 - Every entry of the register has at least one scenario: an input made with a real pointer or keyboard, then the expected state and the expected screen, each with a time limit. The scenario names the register entry it covers.
