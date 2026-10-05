@@ -198,7 +198,7 @@ EOF
           # e %{_localstatedir} finirebbero sotto /nix/store dentro i pacchetti (visto su
           # athanor-daemon-rs: dbus service e polkit policy installati lì). I pacchetti
           # sono per Fedora: prefix /usr, lib64, /var. Le macro derivate (_bindir, _libdir,
-          # _mandir, …) discendono da queste nel file macros di rpm.
+          # _mandir, …) discendono da queste nel file macros di rpm. __isa dà %{_isa} = (x86-64).
           builder-rpm-macros-target =
             let
               macros = {
@@ -207,6 +207,9 @@ EOF
                 _lib = "lib64";
                 _localstatedir = "/var";
                 _docdir = "%{_datadir}/doc";
+                # Fedora's platform macros define %__isa; nixpkgs' rpm ships none, so
+                # %{?_isa} expanded to nothing and rpm added no name(x86-64) provides.
+                __isa = "x86-64";
               };
               body = pkgs.lib.concatStringsSep "
 "

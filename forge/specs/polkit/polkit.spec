@@ -105,6 +105,7 @@ export PKG_CONFIG_SYSTEMD_TMPFILES_DIR=%{_tmpfilesdir}
 meson setup build \
        --prefix=%{_prefix} --libdir=%{_libdir} --sysconfdir=%{_sysconfdir} \
        --localstatedir=%{_localstatedir} --buildtype=plain --wrap-mode=nodownload \
+       -D b_pie=true \
        -D systemdsystemunitdir=%{_unitdir} \
        -D authfw=pam \
        -D examples=false \
@@ -122,7 +123,35 @@ install -Dpm 0644 %{SOURCE2} %{buildroot}/usr/lib/systemd/system-preset/80-athan
 
 rm -f %{buildroot}%{_libdir}/*.la
 
+# Fedora's brp-strip, which the builder's rpm does not run: without it the binaries carry the
+# DWARF and the /nix/store paths of the builder.
+for f in $(find %{buildroot} -type f); do
+    if [ "$(head -c4 "$f" | tail -c3)" = ELF ]; then
+        llvm-strip --strip-unneeded "$f"
+    fi
+done
+
 %find_lang polkit-1
+
+%check
+# Asserts on what is shipped what forge/config/rpmmacros promises and Fedora's setuid pkexec
+# carries: RELRO with BIND_NOW (-z now), the stack protector (__stack_chk_fail), FORTIFY_SOURCE
+# (*_chk imports), PIE (ET_DYN), and no builder paths from the DWARF.
+fail=0
+fortified=0
+for f in %{buildroot}%{_bindir}/pkexec \
+         %{buildroot}%{_prefix}/lib/polkit-1/polkitd \
+         %{buildroot}%{_prefix}/lib/polkit-1/polkit-agent-helper-1; do
+    dyn=$(eu-readelf -d "$f")
+    syms=$(eu-readelf --dyn-syms "$f")
+    grep -q 'BIND_NOW' <<<"$dyn" || { echo "$f: no BIND_NOW (-z now)"; fail=1; }
+    grep -q '__stack_chk_fail' <<<"$syms" || { echo "$f: no stack protector"; fail=1; }
+    grep -q 'Type: *DYN' <<<"$(eu-readelf -h "$f")" || { echo "$f: not PIE"; fail=1; }
+    grep -q '_chk\b' <<<"$syms" && fortified=1
+    ! grep -aq '/nix/store' "$f" || { echo "$f: carries /nix/store paths"; fail=1; }
+done
+[ "$fortified" = 1 ] || { echo "no _FORTIFY_SOURCE (*_chk) import in any binary"; fail=1; }
+exit $fail
 
 %post
 # polkit.service has no [Install] section and is started on demand; the preset enables
