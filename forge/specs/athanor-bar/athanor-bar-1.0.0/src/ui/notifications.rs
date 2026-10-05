@@ -8,6 +8,7 @@ use std::collections::{HashMap, VecDeque};
 use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
+use athanor_bar::control_center;
 use athanor_bar::notices::{self, Held, Notice, Picture, WIRE_SIGNATURE};
 use athanor_bar::order::Module;
 use athanor_bar::popups::{target_output, Popups};
@@ -73,6 +74,13 @@ pub struct Service {
     windows: RefCell<Vec<Window>>,
     /// The output each visible popup was put on.
     placed: RefCell<HashMap<u32, gdk::Monitor>>,
+    /// The control center's `Open` (CC9): false while it has no owner. The popups stay
+    /// hidden while it is true.
+    control_center_open: Cell<bool>,
+    control_center_subscription: RefCell<Option<gio::SignalSubscription>>,
+    /// Bumped on every owner change of the control center: a `GetAll` reply from a previous
+    /// owner is dropped.
+    control_center_generation: Cell<u64>,
 }
 
 impl Service {
@@ -97,6 +105,22 @@ impl Service {
                     }
                 },
             );
+            let (cc_appeared, cc_vanished) = (me.clone(), me.clone());
+            let _control_center = gio::bus_watch_name(
+                gio::BusType::Session,
+                control_center::NAME,
+                gio::BusNameWatcherFlags::NONE,
+                move |connection, _, owner| {
+                    if let Some(service) = cc_appeared.upgrade() {
+                        service.control_center_appeared(connection, owner);
+                    }
+                },
+                move |_, _| {
+                    if let Some(service) = cc_vanished.upgrade() {
+                        service.control_center_vanished();
+                    }
+                },
+            );
             Service {
                 bar: bar.clone(),
                 me: me.clone(),
@@ -114,8 +138,80 @@ impl Service {
                 pending_open: Cell::new(false),
                 windows: RefCell::new(Vec::new()),
                 placed: RefCell::new(HashMap::new()),
+                control_center_open: Cell::new(false),
+                control_center_subscription: RefCell::new(None),
+                control_center_generation: Cell::new(0),
             }
         })
+    }
+
+    /// The control center owns its name: follow `Open`. The signal is subscribed before
+    /// `GetAll` is asked, so no change falls between them.
+    fn control_center_appeared(&self, connection: gio::DBusConnection, owner: &str) {
+        let generation = self.control_center_generation.get().wrapping_add(1);
+        self.control_center_generation.set(generation);
+        let me = self.me.clone();
+        let subscription = connection.subscribe_to_signal(
+            Some(owner),
+            Some("org.freedesktop.DBus.Properties"),
+            Some("PropertiesChanged"),
+            Some(control_center::PATH),
+            None,
+            gio::DBusSignalFlags::NONE,
+            move |signal| {
+                if let (Some(service), Some(open)) = (
+                    me.upgrade(),
+                    control_center::open_in_change(signal.parameters),
+                ) {
+                    service.set_control_center_open(open);
+                }
+            },
+        );
+        self.control_center_subscription.replace(Some(subscription));
+        let me = self.me.clone();
+        let owner = owner.to_owned();
+        glib::spawn_future_local(async move {
+            let reply = super::bus::call(
+                &connection,
+                &owner,
+                control_center::PATH,
+                "org.freedesktop.DBus.Properties",
+                "GetAll",
+                Some(&(control_center::NAME,).to_variant()),
+                super::bus::TIMEOUT_MS,
+            )
+            .await;
+            let Some(service) = me
+                .upgrade()
+                .filter(|service| service.control_center_generation.get() == generation)
+            else {
+                return;
+            };
+            match reply {
+                Ok(reply) => {
+                    if let Some(open) = control_center::open_in_get_all(&reply) {
+                        service.set_control_center_open(open);
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(error = %err, "cannot read Open of the control center; the popups follow its signals")
+                }
+            }
+        });
+    }
+
+    /// Nobody owns the name: nothing is open.
+    fn control_center_vanished(&self) {
+        self.control_center_generation
+            .set(self.control_center_generation.get().wrapping_add(1));
+        self.control_center_subscription.take();
+        self.set_control_center_open(false);
+    }
+
+    fn set_control_center_open(&self, open: bool) {
+        if self.control_center_open.replace(open) != open {
+            self.redraw_popups();
+        }
     }
 
     /// A daemon owns the name: subscribe to its private signals first, so none is lost
@@ -351,10 +447,11 @@ impl Service {
         }
     }
 
-    /// While a popover of the bar is open the popups are hidden, and their time stands
+    /// While a popover of the bar or the control center is open the popups are hidden, and their time stands
     /// still (BR6 "Stacking", ruling 3); the pointer over them pauses it too (ruling 4).
     fn paused(&self) -> bool {
-        self.windows.borrow().iter().any(Window::pointer_inside)
+        self.control_center_open.get()
+            || self.windows.borrow().iter().any(Window::pointer_inside)
             || self.bar.upgrade().is_some_and(|bar| bar.popover_is_open())
     }
 
@@ -498,7 +595,7 @@ impl Service {
         let (Some(bar), Some(me)) = (self.bar.upgrade(), self.me.upgrade()) else {
             return;
         };
-        let visible = if self.live() {
+        let visible = if self.live() && !self.control_center_open.get() {
             self.popups.borrow().visible()
         } else {
             Vec::new()

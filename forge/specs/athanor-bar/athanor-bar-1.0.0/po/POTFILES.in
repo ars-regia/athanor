@@ -12,6 +12,7 @@ src/ui/audio.rs
 src/ui/battery.rs
 src/ui/bluetooth.rs
 src/ui/clock.rs
+src/ui/control_center.rs
 src/ui/input.rs
 src/ui/logind.rs
 src/ui/mod.rs

@@ -20,11 +20,12 @@ pub enum Module {
     Battery,
     Notifications,
     Power,
+    ControlCenter,
     Shield,
 }
 
 impl Module {
-    pub const ALL: [Module; 16] = [
+    pub const ALL: [Module; 17] = [
         Module::Launcher,
         Module::AppLibrary,
         Module::Workspaces,
@@ -40,6 +41,7 @@ impl Module {
         Module::Battery,
         Module::Notifications,
         Module::Power,
+        Module::ControlCenter,
         Module::Shield,
     ];
 
@@ -60,6 +62,7 @@ impl Module {
             Module::Battery => "battery",
             Module::Notifications => "notifications",
             Module::Power => "power",
+            Module::ControlCenter => "control-center",
             Module::Shield => "shield",
         }
     }
@@ -91,18 +94,23 @@ pub struct Groups {
     pub end: Vec<Module>,
 }
 
-/// The table of BR7. The shield is last at the end in every preset (SH9.1).
+/// The table of BR7. The control center's button (CC1) is the last of the status row, and the
+/// shield is last at the end in every preset (SH9.1).
 pub fn groups(preset: Preset) -> Groups {
     match preset {
         Preset::Float | Preset::Minimal => Groups {
             start: vec![Module::Workspaces, Module::AppLibrary],
             centre: vec![Module::Clock],
-            end: [&STATUS[..], &[Module::Shield]].concat(),
+            end: [&STATUS[..], &[Module::ControlCenter, Module::Shield]].concat(),
         },
         Preset::Bar => Groups {
             start: vec![Module::Launcher, Module::AppLibrary, Module::RunningApps],
             centre: Vec::new(),
-            end: [&STATUS[..], &[Module::Clock, Module::Shield]].concat(),
+            end: [
+                &STATUS[..],
+                &[Module::Clock, Module::ControlCenter, Module::Shield],
+            ]
+            .concat(),
         },
     }
 }
@@ -161,6 +169,7 @@ mod tests {
                     Battery,
                     Notifications,
                     Power,
+                    ControlCenter,
                     Shield
                 ]
             );
@@ -173,7 +182,7 @@ mod tests {
         assert_eq!(groups.start, [Launcher, AppLibrary, RunningApps]);
         assert!(groups.centre.is_empty());
         assert_eq!(&groups.end[..10], &STATUS[..]);
-        assert_eq!(&groups.end[10..], [Clock, Shield]);
+        assert_eq!(&groups.end[10..], [Clock, ControlCenter, Shield]);
     }
 
     #[test]
@@ -205,7 +214,7 @@ mod tests {
         assert_eq!(row.centre, [Clock]);
         assert_eq!(row.right, [AppLibrary, Workspaces]);
         let bar = visual(Preset::Bar, true);
-        assert_eq!(&bar.left[..2], [Shield, Clock]);
+        assert_eq!(&bar.left[..3], [Shield, ControlCenter, Clock]);
         assert_eq!(bar.right, [RunningApps, AppLibrary, Launcher]);
     }
 

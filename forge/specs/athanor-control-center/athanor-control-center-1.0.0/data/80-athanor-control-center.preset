@@ -1,0 +1,3 @@
+# Not enabled for any user: the package is not in the image yet (doc_control_center.md, CC2).
+# The bus starts the unit when the bar's button or Super+C calls it.
+disable athanor-control-center.service

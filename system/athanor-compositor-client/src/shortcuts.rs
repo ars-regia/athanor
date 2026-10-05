@@ -83,6 +83,167 @@ fn once(marker: &Path, bind: impl FnOnce() -> Result<Binding, ShortcutError>) ->
     Ok(Some(binding))
 }
 
+/// The user's copy of COSMIC's `custom` key: key bindings to actions, in the shape of the
+/// shipped `defaults` (RON map of `(modifiers: [..], key: ".."): Action`).
+const CUSTOM_KEY: &str = "custom";
+
+/// Binds `modifiers` + `key` to `Spawn(command)` in the user's `custom` copy, once per user:
+/// as `set_system_action_once`, `marker` ends the attempts. A combination that already has
+/// an action is the user's and is left alone (`Binding::UserChoice`, or `Unchanged` when it
+/// already spawns `command`).
+pub fn set_custom_binding_once(
+    modifiers: &[&str],
+    key: &str,
+    command: &str,
+    marker: &Path,
+) -> Result<Option<Binding>, ShortcutError> {
+    once(marker, || {
+        let dir = dir().ok_or(ShortcutError::NoConfig)?;
+        bind_custom(&dir.join(CUSTOM_KEY), modifiers, key, command)
+    })
+}
+
+fn bind_custom(path: &Path, modifiers: &[&str], key: &str, command: &str) -> Result<Binding, ShortcutError> {
+    let format = |reason: String| ShortcutError::Format { path: path.to_owned(), reason };
+    let name = |word: &str| !word.is_empty() && word.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if !name(key) || !modifiers.iter().all(|modifier| name(modifier)) {
+        return Err(format(format!("{modifiers:?} + {key:?} is not a key combination")));
+    }
+    if command.chars().any(|c| c.is_control() && c != '\n') {
+        return Err(ShortcutError::Command { action: format!("{key} (custom)") });
+    }
+    let text = read_copy(path)?;
+    let action = format!("Spawn(\"{}\")", escape(command));
+    let wanted: std::collections::BTreeSet<&str> = modifiers.iter().copied().collect();
+    let head = if text.trim().is_empty() {
+        "{".to_owned()
+    } else {
+        let bare = strip_comments(&text);
+        for (found, found_key, found_action) in bindings(&bare).map_err(format)? {
+            if found_key.as_deref() == Some(key) && found.iter().map(String::as_str).collect::<std::collections::BTreeSet<_>>() == wanted {
+                return Ok(if found_action == action { Binding::Unchanged } else { Binding::UserChoice });
+            }
+        }
+        let end = text.trim_end().strip_suffix('}').ok_or_else(|| format("it does not end with '}'".to_owned()))?.trim_end();
+        if strip_comments(end).trim_end() != end {
+            return Err(format("a comment ends the map; the binding cannot be added after it".to_owned()));
+        }
+        end.to_owned()
+    };
+    let comma = if head.ends_with(['{', ',']) { "" } else { "," };
+    let list = modifiers.join(", ");
+    let entry = format!("(modifiers: [{list}], key: \"{key}\"): {action}");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    athanor_layout::atomic::write_atomically(path, &format!("{head}{comma}\n    {entry},\n}}\n"))?;
+    Ok(Binding::Added)
+}
+
+/// `text` with every `//` and `/* */` comment blanked out, strings left as they are.
+fn strip_comments(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    let mut in_string = false;
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => {
+                in_string = !in_string;
+                out.push(c);
+            }
+            '\\' if in_string => {
+                out.push(c);
+                out.extend(chars.next());
+            }
+            '/' if !in_string && chars.peek() == Some(&'/') => {
+                while chars.peek().is_some_and(|c| *c != '\n') {
+                    chars.next();
+                }
+            }
+            '/' if !in_string && chars.peek() == Some(&'*') => {
+                chars.next();
+                let mut last = ' ';
+                for c in chars.by_ref() {
+                    if last == '*' && c == '/' {
+                        break;
+                    }
+                    last = c;
+                }
+                out.push(' ');
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// The index of the first `stop` in `s` outside strings and brackets (`s.len()` when none).
+fn top_level(s: &str, stop: char) -> usize {
+    let (mut depth, mut in_string, mut escaped) = (0usize, false, false);
+    for (at, c) in s.char_indices() {
+        if in_string {
+            match (escaped, c) {
+                (true, _) => escaped = false,
+                (false, '\\') => escaped = true,
+                (false, '"') => in_string = false,
+                _ => {}
+            }
+        } else if c == stop && depth == 0 {
+            return at;
+        } else {
+            match c {
+                '"' => in_string = true,
+                '(' | '[' | '{' => depth += 1,
+                ')' | ']' | '}' => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+    }
+    s.len()
+}
+
+/// The modifiers, the key and the action's text of one entry.
+type Entry = (Vec<String>, Option<String>, String);
+
+/// The entries of a `custom` map, comments already stripped. Only the shape is read; the
+/// action is never interpreted.
+fn bindings(bare: &str) -> Result<Vec<Entry>, String> {
+    let mut body = bare
+        .trim()
+        .strip_prefix('{')
+        .and_then(|rest| rest.strip_suffix('}'))
+        .ok_or("it is not a map")?
+        .trim();
+    let mut found = Vec::new();
+    while !body.is_empty() {
+        let tuple = body.strip_prefix('(').ok_or("an entry does not start with '('")?;
+        let close = top_level(tuple, ')');
+        let fields = tuple.get(..close).ok_or("an entry is cut short")?;
+        let rest = tuple.get(close + 1..).ok_or("an entry is cut short")?.trim_start();
+        let rest = rest.strip_prefix(':').ok_or("an entry has no ':' after its key combination")?;
+        let end = top_level(rest, ',');
+        let action = rest.get(..end).ok_or("an entry is cut short")?.trim().to_owned();
+        let (mut modifiers, mut key) = (Vec::new(), None);
+        let mut fields = fields;
+        while !fields.trim().is_empty() {
+            let end = top_level(fields, ',');
+            let (label, value) = fields.get(..end).unwrap_or_default().split_once(':').ok_or("a field has no ':'")?;
+            match label.trim() {
+                "modifiers" => {
+                    let list = value.trim().strip_prefix('[').and_then(|v| v.strip_suffix(']')).ok_or("modifiers is not a list")?;
+                    modifiers = list.split(',').map(str::trim).filter(|m| !m.is_empty()).map(str::to_owned).collect();
+                }
+                "key" => key = Some(value.trim().trim_matches('"').to_owned()),
+                other => return Err(format!("a field named {other:?}")),
+            }
+            fields = fields.get(end + 1..).unwrap_or_default();
+        }
+        found.push((modifiers, key, action));
+        body = rest.get(end + 1..).unwrap_or_default().trim_start();
+    }
+    Ok(found)
+}
+
 /// The action's value in the system file, which cosmic-comp lays beneath the user's copy.
 /// A system file that is absent or does not parse gives none: every user value then
 /// counts as the user's choice.
@@ -95,6 +256,25 @@ fn system_value(action: &str) -> Option<String> {
             None
         }
     }
+}
+
+/// The user's copy as text; an absent copy is empty.
+fn read_copy(path: &Path) -> Result<String, ShortcutError> {
+    let mut text = String::new();
+    match File::open(path) {
+        Ok(file) => {
+            file.take(MAX_BYTES + 1).read_to_string(&mut text)?;
+            if text.len() as u64 > MAX_BYTES {
+                return Err(ShortcutError::Format {
+                    path: path.to_owned(),
+                    reason: "it is too large".to_owned(),
+                });
+            }
+        }
+        Err(err) if err.kind() == ErrorKind::NotFound => {}
+        Err(err) => return Err(err.into()),
+    }
+    Ok(text)
 }
 
 /// `default` is the system file's value for the action.
@@ -111,20 +291,7 @@ fn set_in(path: &Path, action: &str, command: &str, default: Option<&str>) -> Re
     if command.chars().any(|c| c.is_control() && c != '\n') {
         return Err(ShortcutError::Command { action: action.to_owned() });
     }
-    let mut text = String::new();
-    match File::open(path) {
-        Ok(file) => {
-            file.take(MAX_BYTES + 1).read_to_string(&mut text)?;
-            if text.len() as u64 > MAX_BYTES {
-                return Err(ShortcutError::Format {
-                    path: path.to_owned(),
-                    reason: "it is too large".to_owned(),
-                });
-            }
-        }
-        Err(err) if err.kind() == ErrorKind::NotFound => {}
-        Err(err) => return Err(err.into()),
-    }
+    let text = read_copy(path)?;
     let mut entries = if text.trim().is_empty() {
         Vec::new()
     } else {
@@ -469,5 +636,81 @@ mod tests {
         let path = scratch("name");
         assert!(matches!(set_in(&path, "A: \"x\", B", "c", None), Err(ShortcutError::Format { .. })));
         assert!(!path.exists());
+    }
+
+    /// Verbatim lines of `/usr/share/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults`
+    /// as shipped in the rig image (Fedora cosmic-settings-daemon), the file COSMIC's `custom`
+    /// key has the same type as. `Spawn` is the variant cosmic-comp carries for a command; the
+    /// rig ships no file that uses it, so its line is the one written here.
+    const REAL_SAMPLE: &str = "{\n    (modifiers: [Super, Alt], key: \"Escape\"): Terminate,\n    (modifiers: [Super], key: \"t\"): System(Terminal),\n    (modifiers: [Super]): System(Launcher),\n    (modifiers: [Alt], key: \"Tab\"): System(WindowSwitcher),\n}\n";
+    const CC: &str = "busctl --user call os.athanor.ControlCenter1 /os/athanor/ControlCenter1 os.athanor.ControlCenter1 Toggle";
+
+    #[test]
+    fn a_custom_binding_on_an_empty_copy_writes_the_one_entry() {
+        let path = scratch("custom-empty");
+        assert_eq!(bind_custom(&path, &["Super"], "c", CC).unwrap(), Binding::Added);
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(text, format!("{{\n    (modifiers: [Super], key: \"c\"): Spawn(\"{CC}\"),\n}}\n"));
+        assert_eq!(bind_custom(&path, &["Super"], "c", CC).unwrap(), Binding::Unchanged);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    }
+
+    #[test]
+    fn a_custom_binding_is_added_beside_real_ones_and_keeps_them_byte_for_byte() {
+        let path = scratch("custom-other");
+        std::fs::write(&path, REAL_SAMPLE).unwrap();
+        assert_eq!(bind_custom(&path, &["Super"], "c", CC).unwrap(), Binding::Added);
+        let text = std::fs::read_to_string(&path).unwrap();
+        let kept = REAL_SAMPLE.trim_end().trim_end_matches('}');
+        assert_eq!(text, format!("{kept}    (modifiers: [Super], key: \"c\"): Spawn(\"{CC}\"),\n}}\n"));
+        // The same file without a trailing comma on its last entry.
+        std::fs::write(&path, "{ (modifiers: [Super], key: \"t\"): System(Terminal) }").unwrap();
+        assert_eq!(bind_custom(&path, &["Super"], "c", CC).unwrap(), Binding::Added);
+        assert!(text_parses_with_both(&path));
+    }
+
+    fn text_parses_with_both(path: &Path) -> bool {
+        let text = std::fs::read_to_string(path).unwrap();
+        text.contains("System(Terminal),") && text.contains("key: \"c\"")
+    }
+
+    #[test]
+    fn a_combination_that_already_has_an_action_is_the_users() {
+        let path = scratch("custom-taken");
+        // Modifier order and spacing do not matter; a comment mentioning it does not count.
+        let mine = "{\n    // (modifiers: [Super], key: \"c\"): Nothing,\n    (modifiers:[ Alt ,Super ], key:\"c\"): Disable,\n    (modifiers: [Super], key: \"c\"): Spawn(\"mine\")\n}";
+        std::fs::write(&path, mine).unwrap();
+        assert_eq!(bind_custom(&path, &["Super"], "c", CC).unwrap(), Binding::UserChoice);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), mine, "not rewritten");
+        assert_eq!(bind_custom(&path, &["Super"], "c", "mine").unwrap(), Binding::Unchanged);
+        // Alt+Super+c is another combination than Super+c.
+        std::fs::write(&path, "{ (modifiers: [Alt, Super], key: \"c\"): Disable }").unwrap();
+        assert_eq!(bind_custom(&path, &["Super"], "c", CC).unwrap(), Binding::Added);
+    }
+
+    #[test]
+    fn a_custom_binding_refuses_what_it_cannot_write_safely() {
+        let path = scratch("custom-refuse");
+        assert!(matches!(bind_custom(&path, &["Super"], "c", "a\tb"), Err(ShortcutError::Command { .. })));
+        assert!(matches!(bind_custom(&path, &["Su\"per"], "c", CC), Err(ShortcutError::Format { .. })));
+        assert!(matches!(bind_custom(&path, &["Super"], "c\"", CC), Err(ShortcutError::Format { .. })));
+        std::fs::write(&path, "not a map").unwrap();
+        assert!(matches!(bind_custom(&path, &["Super"], "c", CC), Err(ShortcutError::Format { .. })));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "not a map");
+    }
+
+    #[test]
+    fn the_custom_binding_is_tried_once_per_user() {
+        let path = scratch("custom-once");
+        let marker = path.with_file_name("state/super-c-bound");
+        assert_eq!(set_in_custom(&path, &marker), Some(Binding::Added));
+        assert!(marker.exists());
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(set_in_custom(&path, &marker), None);
+        assert!(!path.exists());
+    }
+
+    fn set_in_custom(path: &Path, marker: &Path) -> Option<Binding> {
+        once(marker, || bind_custom(path, &["Super"], "c", CC)).unwrap()
     }
 }

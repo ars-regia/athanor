@@ -129,8 +129,8 @@ This closes open doubt 4 of `doc_shell.md`.
 
 | Preset | Start | Centre | End |
 |---|---|---|---|
-| `float` | workspaces, application library | clock | input source, accessibility, tray, tiling, audio, Bluetooth, network, battery, notifications, power, shield |
-| `bar` | launcher, application library, running applications | none | the same status modules, then clock, shield |
+| `float` | workspaces, application library | clock | input source, accessibility, tray, tiling, audio, Bluetooth, network, battery, notifications, power, control center, shield |
+| `bar` | launcher, application library, running applications | none | the same status modules, then clock, control center, shield |
 | `minimal` | workspaces, application library | clock | as in `float` |
 
 - **Right-to-left text.** GTK mirrors start and end. The vertical dock mirrors with them: the left edge of SH7 is the start edge, the right edge under right-to-left text.
