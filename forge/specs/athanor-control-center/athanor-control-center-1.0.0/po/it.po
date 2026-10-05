@@ -17,11 +17,11 @@ msgstr "{device}, in uso"
 msgid "Output"
 msgstr "Uscita"
 
-#: ../../../../system/athanor-controls/src/audio.rs:268 src/panel/mod.rs:416
+#: ../../../../system/athanor-controls/src/audio.rs:268 src/panel/mod.rs:419
 msgid "Output volume"
 msgstr "Volume di uscita"
 
-#: ../../../../system/athanor-controls/src/audio.rs:269 src/panel/mod.rs:424
+#: ../../../../system/athanor-controls/src/audio.rs:269 src/panel/mod.rs:427
 msgid "Mute output"
 msgstr "Silenzia l'uscita"
 
@@ -29,11 +29,11 @@ msgstr "Silenzia l'uscita"
 msgid "Input"
 msgstr "Ingresso"
 
-#: ../../../../system/athanor-controls/src/audio.rs:274 src/panel/mod.rs:436
+#: ../../../../system/athanor-controls/src/audio.rs:274 src/panel/mod.rs:439
 msgid "Input volume"
 msgstr "Volume di ingresso"
 
-#: ../../../../system/athanor-controls/src/audio.rs:275 src/panel/mod.rs:444
+#: ../../../../system/athanor-controls/src/audio.rs:275 src/panel/mod.rs:447
 msgid "Mute microphone"
 msgstr "Silenzia il microfono"
 
@@ -42,7 +42,7 @@ msgid "Previous track"
 msgstr "Brano precedente"
 
 #: ../../../../system/athanor-controls/src/audio.rs:287
-#: ../../../../system/athanor-controls/src/audio.rs:397 src/panel/media.rs:225
+#: ../../../../system/athanor-controls/src/audio.rs:397 src/panel/media.rs:228
 msgid "Pause"
 msgstr "Pausa"
 
@@ -51,7 +51,7 @@ msgid "Next track"
 msgstr "Brano successivo"
 
 #: ../../../../system/athanor-controls/src/audio.rs:399 src/panel/media.rs:71
-#: src/panel/media.rs:227
+#: src/panel/media.rs:230
 msgid "Play"
 msgstr "Riproduci"
 
@@ -78,19 +78,19 @@ msgstr "In carica"
 msgid "Fully charged"
 msgstr "Carica completa"
 
-#: ../../../../system/athanor-controls/src/battery.rs:157 src/panel/mod.rs:303
+#: ../../../../system/athanor-controls/src/battery.rs:157 src/panel/mod.rs:300
 msgid "Power saver"
 msgstr "Risparmio energetico"
 
-#: ../../../../system/athanor-controls/src/battery.rs:158 src/panel/mod.rs:304
+#: ../../../../system/athanor-controls/src/battery.rs:158 src/panel/mod.rs:301
 msgid "Performance"
 msgstr "Prestazioni"
 
-#: ../../../../system/athanor-controls/src/battery.rs:159 src/panel/mod.rs:305
+#: ../../../../system/athanor-controls/src/battery.rs:159 src/panel/mod.rs:302
 msgid "Balanced"
 msgstr "Bilanciato"
 
-#: ../../../../system/athanor-controls/src/battery.rs:188 src/panel/mod.rs:391
+#: ../../../../system/athanor-controls/src/battery.rs:188 src/panel/mod.rs:394
 msgid "Power mode"
 msgstr "Modalità di alimentazione"
 
@@ -98,45 +98,45 @@ msgstr "Modalità di alimentazione"
 msgid "Screen brightness"
 msgstr "Luminosità dello schermo"
 
-#: ../../../../system/athanor-controls/src/bluetooth.rs:271
-#: src/panel/mod.rs:275 src/panel/mod.rs:349
+#: ../../../../system/athanor-controls/src/bluetooth.rs:279
+#: src/panel/mod.rs:275 src/panel/mod.rs:346
 msgid "Bluetooth"
 msgstr "Bluetooth"
 
-#: ../../../../system/athanor-controls/src/bluetooth.rs:274
+#: ../../../../system/athanor-controls/src/bluetooth.rs:282
 msgid "Nearby devices"
 msgstr "Dispositivi vicini"
 
-#: ../../../../system/athanor-controls/src/bluetooth.rs:296
+#: ../../../../system/athanor-controls/src/bluetooth.rs:304
 #: ../../../../system/athanor-controls/src/network.rs:346
 msgid "Cancel"
 msgstr "Annulla"
 
-#: ../../../../system/athanor-controls/src/bluetooth.rs:298
+#: ../../../../system/athanor-controls/src/bluetooth.rs:306
 msgid "Pair"
 msgstr "Associa"
 
-#: ../../../../system/athanor-controls/src/bluetooth.rs:430
+#: ../../../../system/athanor-controls/src/bluetooth.rs:443
 #, rust-format
 msgid "{device}, connected"
 msgstr "{device}, connesso"
 
-#: ../../../../system/athanor-controls/src/bluetooth.rs:463
+#: ../../../../system/athanor-controls/src/bluetooth.rs:476
 #, rust-format
 msgid "Pair with {device}?"
 msgstr "Associare {device}?"
 
-#: ../../../../system/athanor-controls/src/bluetooth.rs:466
+#: ../../../../system/athanor-controls/src/bluetooth.rs:479
 #, rust-format
 msgid "Pair only if {device} shows the same number."
 msgstr "Associa solo se {device} mostra lo stesso numero."
 
-#: ../../../../system/athanor-controls/src/bluetooth.rs:479
+#: ../../../../system/athanor-controls/src/bluetooth.rs:492
 #, rust-format
 msgid "Pairing with {device}"
 msgstr "Associazione con {device}"
 
-#: ../../../../system/athanor-controls/src/bluetooth.rs:482
+#: ../../../../system/athanor-controls/src/bluetooth.rs:495
 #, rust-format
 msgid "Type this code on {device}, then press Enter there."
 msgstr "Digita questo codice su {device}, poi premi Invio."
@@ -145,11 +145,11 @@ msgstr "Digita questo codice su {device}, poi premi Invio."
 msgid "Network"
 msgstr "Rete"
 
-#: ../../../../system/athanor-controls/src/network.rs:313 src/panel/mod.rs:342
+#: ../../../../system/athanor-controls/src/network.rs:313 src/panel/mod.rs:339
 msgid "Wi-Fi"
 msgstr "Wi-Fi"
 
-#: ../../../../system/athanor-controls/src/network.rs:322 src/panel/mod.rs:357
+#: ../../../../system/athanor-controls/src/network.rs:322 src/panel/mod.rs:356
 msgid "Airplane mode"
 msgstr "Modalità aereo"
 
@@ -198,11 +198,11 @@ msgstr "Password per {network}"
 msgid "The action did not complete."
 msgstr "L'azione non è stata completata."
 
-#: src/panel/footer.rs:26 src/panel/footer.rs:27
+#: src/panel/footer.rs:27 src/panel/footer.rs:28
 msgid "Settings"
 msgstr "Impostazioni"
 
-#: src/panel/footer.rs:46
+#: src/panel/footer.rs:47
 #, rust-format
 msgid "{percent}%"
 msgstr "{percent}%"
@@ -224,11 +224,15 @@ msgstr "Lettore multimediale"
 msgid "Seek"
 msgstr "Posizione"
 
-#: src/panel/media.rs:91
+#: src/panel/media.rs:92
 msgid "Media"
 msgstr "Contenuti multimediali"
 
-#: src/panel/mod.rs:169
+#: src/panel/mod.rs:146 src/panel/mod.rs:490
+msgid "Control center"
+msgstr "Centro di controllo"
+
+#: src/panel/mod.rs:170
 msgid "Back"
 msgstr "Indietro"
 
@@ -236,57 +240,50 @@ msgstr "Indietro"
 msgid "Off"
 msgstr "Disattivato"
 
-#: src/panel/mod.rs:269
 #
+#: src/panel/mod.rs:269
 msgid "On"
 msgstr "Attivato"
 
-#: src/panel/mod.rs:276 src/panel/mod.rs:414
+#: src/panel/mod.rs:276 src/panel/mod.rs:417
 msgid "Sound"
 msgstr "Audio"
 
 #: src/panel/mod.rs:277
-msgid "Display"
-msgstr "Schermo"
-
-#: src/panel/mod.rs:278
 msgid "Power"
 msgstr "Alimentazione"
 
-#: src/panel/mod.rs:279
-msgid "Devices"
-msgstr "Dispositivi"
-
-#: src/panel/mod.rs:280
-#
-msgid "System"
-msgstr "Sistema"
-
-#: src/panel/mod.rs:287
+#: src/panel/mod.rs:284
 #, rust-format
 msgid "The {name} page is not available yet."
 msgstr "La pagina {name} non è ancora disponibile."
 
-#: src/panel/mod.rs:372
 #
+#: src/panel/mod.rs:375
 msgid "Dark mode"
 msgstr "Modalità scura"
 
-#: src/panel/mod.rs:455
 #
+#: src/panel/mod.rs:458
 msgid "Brightness"
 msgstr "Luminosità"
 
-#: src/panel/mod.rs:485
-msgid "Control center"
-msgstr "Centro di controllo"
-
-#: src/panel/mod.rs:547
 #
+#: src/panel/mod.rs:552
 msgid "Connecting"
 msgstr "Connessione in corso"
 
-#: src/panel/sliders.rs:64 src/panel/tile.rs:53
+#: src/panel/sliders.rs:67 src/panel/tile.rs:54
 #, rust-format
 msgid "Open the {name} page"
 msgstr "Apri la pagina {name}"
+
+#~ msgid "Display"
+#~ msgstr "Schermo"
+
+#~ msgid "Devices"
+#~ msgstr "Dispositivi"
+
+#
+#~ msgid "System"
+#~ msgstr "Sistema"

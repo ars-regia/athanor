@@ -4,6 +4,7 @@
 use gtk4::accessible::Property;
 use gtk4::prelude::*;
 
+use super::a11y;
 use crate::i18n::tr_with;
 
 pub struct Tile {
@@ -41,7 +42,7 @@ impl Tile {
         let button = gtk4::ToggleButton::new();
         button.set_child(Some(&content));
         button.set_hexpand(true);
-        button.update_property(&[Property::Label(title)]);
+        a11y::name(&button, title);
         // Not `toggled`: a state the models report sets the button without a press.
         button.connect_clicked(move |button| on_press(button.is_active()));
         let root = gtk4::Box::new(gtk4::Orientation::Horizontal, 2);
@@ -49,11 +50,11 @@ impl Tile {
         root.append(&button);
         if let Some(open) = page {
             let arrow = gtk4::Button::from_icon_name("go-next-symbolic");
-            arrow.update_property(&[Property::Label(&tr_with(
+            a11y::name(&arrow, &tr_with(
                 "Open the {name} page",
                 "name",
                 title,
-            ))]);
+            ));
             arrow.connect_clicked(move |_| open());
             root.append(&arrow);
         }
@@ -71,9 +72,8 @@ impl Tile {
         self.button.set_active(active);
         self.subtitle.set_text(subtitle);
         self.icon.set_icon_name(Some(icon));
-        self.button.update_property(&[
-            Property::Label(&self.title),
-            Property::Description(subtitle),
-        ]);
+        a11y::name(&self.button, &self.title);
+        self.button
+            .update_property(&[Property::Description(subtitle)]);
     }
 }

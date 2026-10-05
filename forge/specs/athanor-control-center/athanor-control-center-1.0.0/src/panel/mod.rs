@@ -3,6 +3,7 @@
 //! A tile or slider whose service or hardware is absent is not shown (BR3), decided by
 //! `crate::tiles::present` on every state change.
 
+mod a11y;
 mod airplane;
 mod footer;
 mod media;
@@ -19,7 +20,6 @@ use athanor_services::battery::{BatteryCommand, BatteryState};
 use athanor_services::bluetooth::{BluetoothCommand, BluetoothState};
 use athanor_services::media::{MediaCommand, MediaState};
 use athanor_services::network::{Link, NetworkCommand, NetworkState};
-use gtk4::accessible::Property;
 use gtk4::prelude::*;
 
 pub use airplane::{open as open_rfkill, Rfkill};
@@ -103,10 +103,6 @@ impl Panel {
         for page in Page::ALL {
             panel.stack.add_named(&panel.frame(page), Some(page.id()));
         }
-        if let Some(services) = &services {
-            // The bar owns the default agent; this process takes pairings it starts itself.
-            services.register_bluetooth_guest_agent();
-        }
         if let Some((_, device)) = &panel.main.airplane {
             let weak = panel.me.clone();
             device.watch(move || {
@@ -171,7 +167,7 @@ impl Panel {
     /// The page's frame: a header with the back button, and the page, built when first shown.
     fn frame(&self, page: Page) -> gtk4::Box {
         let back = gtk4::Button::from_icon_name("go-previous-symbolic");
-        back.update_property(&[Property::Label(&tr("Back"))]);
+        a11y::name(&back, &tr("Back"));
         let weak = self.me.clone();
         back.connect_clicked(move |_| {
             if let Some(panel) = weak.upgrade() {
@@ -224,7 +220,7 @@ impl Panel {
                 (page.widget(), Box::new(page))
             }
             Page::Bluetooth => {
-                let page = bluetooth::Page::new(services, self.host(Page::Bluetooth));
+                let page = bluetooth::Page::without_pairing(services, self.host(Page::Bluetooth));
                 (page.widget(), Box::new(page))
             }
             Page::Audio => {
@@ -235,7 +231,6 @@ impl Panel {
                 let page = battery::Page::new(services);
                 (page.widget(), Box::new(page))
             }
-            Page::Display | Page::Devices | Page::System => return placeholder(page),
         };
         self.pages.borrow_mut().push(keep);
         widget
@@ -279,10 +274,7 @@ fn page_title(page: Page) -> String {
         Page::Network => tr("Network"),
         Page::Bluetooth => tr("Bluetooth"),
         Page::Audio => tr("Sound"),
-        Page::Display => tr("Display"),
         Page::Battery => tr("Power"),
-        Page::Devices => tr("Devices"),
-        Page::System => tr("System"),
     }
 }
 
@@ -356,15 +348,21 @@ impl Main {
             move |on| send!(tx, BluetoothCommand::Power(on)),
             open(Page::Bluetooth),
         );
-        let airplane = rfkill.map(|device| {
+        // A device that reports no radio has nothing to block: no tile.
+        let airplane = rfkill.filter(|device| device.has_radios()).map(|device| {
             let held = device.clone();
+            let weak = me.clone();
             let tile = Tile::new(
                 &tr("Airplane mode"),
                 "airplane-mode-symbolic",
                 move |on| {
-                    // The tile follows the kernel's report, not the press.
+                    // The tile follows the kernel's report, not the press: after a refused write
+                    // it goes back to what the radios are.
                     if let Err(err) = held.set_blocked(on) {
                         tracing::warn!(error = %err, "the radios were not blocked");
+                    }
+                    if let Some(panel) = weak.upgrade() {
+                        panel.refresh();
                     }
                 },
                 None,
@@ -487,7 +485,9 @@ impl Main {
 
         let root = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
         root.add_css_class("control-center-panel");
-        root.update_property(&[Property::Label(&tr("Control center"))]);
+        // A group carries a label; a plain box does not.
+        root.set_accessible_role(gtk4::AccessibleRole::Group);
+        a11y::name(&root, &tr("Control center"));
         let tiles_grid = gtk4::Grid::new();
         tiles_grid.set_row_spacing(8);
         tiles_grid.set_column_spacing(8);

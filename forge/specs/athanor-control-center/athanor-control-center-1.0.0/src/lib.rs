@@ -14,21 +14,15 @@ pub enum Page {
     Network,
     Bluetooth,
     Audio,
-    Display,
     Battery,
-    Devices,
-    System,
 }
 
 impl Page {
-    pub const ALL: [Page; 7] = [
+    pub const ALL: [Page; 4] = [
         Page::Network,
         Page::Bluetooth,
         Page::Audio,
-        Page::Display,
         Page::Battery,
-        Page::Devices,
-        Page::System,
     ];
 
     pub fn id(self) -> &'static str {
@@ -36,10 +30,7 @@ impl Page {
             Page::Network => "network",
             Page::Bluetooth => "bluetooth",
             Page::Audio => "audio",
-            Page::Display => "display",
             Page::Battery => "battery",
-            Page::Devices => "devices",
-            Page::System => "system",
         }
     }
 }
@@ -159,6 +150,10 @@ mod tests {
         }
         assert!(parse_page("Network").is_err(), "ids are lower case");
         assert!(parse_page("wifi").is_err());
+        // Pages that are not built are not shown as empty ones.
+        for unbuilt in ["display", "devices", "system"] {
+            assert!(parse_page(unbuilt).is_err(), "{unbuilt}");
+        }
         assert!(parse_page(" ").is_err());
     }
 

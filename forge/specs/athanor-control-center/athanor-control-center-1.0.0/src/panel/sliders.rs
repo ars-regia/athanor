@@ -4,9 +4,9 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use gtk4::accessible::Property;
 use gtk4::prelude::*;
 
+use super::a11y;
 use crate::i18n::tr_with;
 
 /// A label and what the control does: the mute button's, or the arrow's.
@@ -35,7 +35,7 @@ impl Slider {
         let scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 0.0, 100.0, 1.0);
         scale.set_hexpand(true);
         scale.set_draw_value(false);
-        scale.update_property(&[Property::Label(name)]);
+        a11y::name(&scale, name);
         let guard = syncing.clone();
         scale.connect_value_changed(move |scale| {
             if !guard.get() {
@@ -50,7 +50,7 @@ impl Slider {
             Some((label, on_mute)) => {
                 let button = gtk4::ToggleButton::new();
                 button.set_child(Some(&image));
-                button.update_property(&[Property::Label(label)]);
+                a11y::name(&button, label);
                 button.connect_clicked(move |button| on_mute(button.is_active()));
                 row.append(&button);
                 Some(button)
@@ -63,11 +63,11 @@ impl Slider {
         row.append(&scale);
         if let Some((label, open)) = page {
             let arrow = gtk4::Button::from_icon_name("go-next-symbolic");
-            arrow.update_property(&[Property::Label(&tr_with(
+            a11y::name(&arrow, &tr_with(
                 "Open the {name} page",
                 "name",
                 label,
-            ))]);
+            ));
             arrow.connect_clicked(move |_| open());
             row.append(&arrow);
         }

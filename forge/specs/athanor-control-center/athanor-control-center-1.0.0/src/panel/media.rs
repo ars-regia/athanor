@@ -8,10 +8,10 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use athanor_services::media::{Art, MediaCommand, MediaState, Player};
-use gtk4::accessible::Property;
 use gtk4::prelude::*;
 use gtk4::{gdk, glib};
 
+use super::a11y;
 use crate::i18n::tr;
 
 const ART_SIZE: i32 = 64;
@@ -42,7 +42,7 @@ pub struct MediaView {
 
 fn button(icon: &str, label: &str) -> gtk4::Button {
     let button = gtk4::Button::from_icon_name(icon);
-    button.update_property(&[Property::Label(label)]);
+    a11y::name(&button, label);
     button
 }
 
@@ -55,7 +55,7 @@ impl MediaView {
         art.set_valign(gtk4::Align::Start);
         art.add_css_class("control-center-art");
         // The picture is decoration: the track's text says what plays.
-        art.update_property(&[Property::Label(&tr("Cover"))]);
+        a11y::name(&art, &tr("Cover"));
         let title = gtk4::Label::new(None);
         title.set_xalign(0.0);
         title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
@@ -66,14 +66,14 @@ impl MediaView {
         artist.add_css_class("caption");
         let names = gtk4::StringList::new(&[]);
         let chooser = gtk4::DropDown::new(Some(names.clone()), gtk4::Expression::NONE);
-        chooser.update_property(&[Property::Label(&tr("Media player"))]);
+        a11y::name(&chooser, &tr("Media player"));
         let previous = button("media-skip-backward-symbolic", &tr("Previous track"));
         let play = button("media-playback-start-symbolic", &tr("Play"));
         let next = button("media-skip-forward-symbolic", &tr("Next track"));
         let seek = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 0.0, 1.0, 1.0);
         seek.set_draw_value(false);
         seek.set_hexpand(true);
-        seek.update_property(&[Property::Label(&tr("Seek"))]);
+        a11y::name(&seek, &tr("Seek"));
         let controls = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
         controls.append(&previous);
         controls.append(&play);
@@ -88,7 +88,8 @@ impl MediaView {
         top.append(&text);
         let root = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
         root.add_css_class("control-center-media");
-        root.update_property(&[Property::Label(&tr("Media"))]);
+        root.set_accessible_role(gtk4::AccessibleRole::Group);
+        a11y::name(&root, &tr("Media"));
         root.append(&top);
         root.append(&seek);
         root.append(&chooser);
@@ -154,12 +155,13 @@ impl MediaView {
     }
 
     /// Seeks to `seconds` into the track, as an offset from where the player is.
-    fn seek_to(&self, seconds: f64) {
+    pub(super) fn seek_to(&self, seconds: f64) {
         let Some(position) = self.position_us() else {
             return;
         };
         let target = (seconds * 1_000_000.0).round() as i64;
-        self.send(MediaCommand::Seek(target - position));
+        // Every number here is a player's: saturated, never overflowed.
+        self.send(MediaCommand::Seek(target.saturating_sub(position)));
         self.anchor.set(Some((Instant::now(), target)));
     }
 
@@ -170,8 +172,9 @@ impl MediaView {
         } else {
             0
         };
-        let end = self.length_us.get().unwrap_or(i64::MAX);
-        Some((position + moved).clamp(0, end))
+        // `end` is never below 0 and `clamp` would panic on an inverted range.
+        let end = self.length_us.get().unwrap_or(i64::MAX).max(0);
+        Some(position.saturating_add(moved).clamp(0, end))
     }
 
     /// Draws the position the player is at now; the timer calls it every second while the
@@ -227,7 +230,7 @@ impl MediaView {
             ("media-playback-start-symbolic", tr("Play"))
         };
         self.play.set_icon_name(icon);
-        self.play.update_property(&[Property::Label(&label)]);
+        a11y::name(&self.play, &label);
         self.show_art(player);
         self.show_position(player);
         self.show_players(state);

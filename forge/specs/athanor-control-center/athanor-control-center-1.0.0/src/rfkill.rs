@@ -83,6 +83,10 @@ impl Radios {
         }
     }
 
+    pub fn count(&self) -> usize {
+        self.0.len()
+    }
+
     /// Airplane mode is on when there is a radio and none of them can transmit.
     pub fn airplane(&self) -> bool {
         !self.0.is_empty() && self.0.values().all(|(soft, hard)| *soft || *hard)

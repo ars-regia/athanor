@@ -211,16 +211,17 @@ fn player() -> Player {
 
 /// A regular file standing for /dev/rfkill: it holds one radio the kernel announced, and
 /// takes what the tile writes.
-fn fake_rfkill() -> (Rc<Rfkill>, PathBuf) {
+fn fake_rfkill(radios: usize) -> (Rc<Rfkill>, PathBuf) {
     let path = std::env::temp_dir().join(format!("athanor-rfkill-{}", std::process::id()));
-    let add = Event {
-        idx: 0,
+    let add = |idx| Event {
+        idx,
         kind: 1,
         op: rfkill::OP_ADD,
         soft: false,
         hard: false,
     };
-    std::fs::write(&path, add.encode()).expect("the fake rfkill is written");
+    let events: Vec<u8> = (0..radios as u32).flat_map(|idx| add(idx).encode()).collect();
+    std::fs::write(&path, events).expect("the fake rfkill is written");
     let file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -267,7 +268,7 @@ fn interactive(root: &gtk4::Widget) -> Vec<gtk4::Widget> {
 }
 
 fn the_tiles(mut rig: Rig) -> Rig {
-    let (rfkill, path) = fake_rfkill();
+    let (rfkill, path) = fake_rfkill(1);
     let panel = Panel::new(Some(rig.services.clone()), Some(rfkill), hooks());
     let window = gtk4::Window::new();
     window.set_child(Some(&panel.widget()));
@@ -295,14 +296,17 @@ fn the_tiles(mut rig: Rig) -> Rig {
     // A tile is a toggle with an accessible name and the pressed state.
     let wifi = tile(&root, "Wi-Fi");
     assert!(wifi.is_active());
-    assert!(gtk4::test_accessible_has_property(&wifi, gtk4::AccessibleProperty::Label));
+    assert!(a11y::is_named(&wifi, "Wi-Fi"));
+    assert!(!a11y::is_named(&wifi, "Bluetooth"), "a wrong name is not accepted");
     assert!(gtk4::test_accessible_has_state(&wifi, gtk4::AccessibleState::Pressed));
     wifi.emit_clicked();
     settle();
+    assert!(!wifi.is_active(), "the pressed state follows the press");
+    assert!(gtk4::test_accessible_has_state(&wifi, gtk4::AccessibleState::Pressed));
     assert!(matches!(rig.network_commands.try_recv(), Ok(NetworkCommand::Wireless(false))));
-    // The panel registers a guest agent, never the network agent, and sends no other command.
+    // The panel registers no agent, for NetworkManager or for BlueZ, and sends no other command.
     assert!(rig.network_commands.try_recv().is_err(), "no RegisterAgent for NetworkManager");
-    assert!(matches!(rig.bluetooth_commands.try_recv(), Ok(BluetoothCommand::RegisterGuestAgent)));
+    assert!(rig.bluetooth_commands.try_recv().is_err(), "no agent for BlueZ");
     tile(&root, "Bluetooth").emit_clicked();
     settle();
     assert!(matches!(rig.bluetooth_commands.try_recv(), Ok(BluetoothCommand::Power(false))));
@@ -326,8 +330,8 @@ fn the_tiles(mut rig: Rig) -> Rig {
         .filter_map(|widget| widget.downcast::<gtk4::Scale>().ok())
         .collect();
     assert_eq!(scales.len(), 3, "output, input and brightness");
-    for scale in &scales {
-        assert!(gtk4::test_accessible_has_property(scale, gtk4::AccessibleProperty::Label));
+    for (scale, name) in scales.iter().zip(["Output volume", "Input volume", "Brightness"]) {
+        assert!(a11y::is_named(scale, name), "the scale of {name}");
     }
     assert_eq!(scales[0].value(), 40.0, "the model's state is drawn");
     scales[0].set_value(55.0);
@@ -348,13 +352,42 @@ fn the_tiles(mut rig: Rig) -> Rig {
         .filter_map(|widget| widget.downcast::<gtk4::Button>().ok())
         .find(|button| button.icon_name().as_deref() == Some("go-previous-symbolic"))
         .expect("a page has a Back button");
-    assert!(gtk4::test_accessible_has_property(&back, gtk4::AccessibleProperty::Label));
+    assert!(a11y::is_named(&back, "Back"));
     back.emit_clicked();
     settle();
     assert_eq!(panel.stack.visible_child_name().as_deref(), Some(PANEL));
 
+    // The Bluetooth page does not pair yet: with a device nearby and a discovery running, it
+    // offers no "Nearby devices", asks BlueZ for no discovery, and so has nothing to pair.
+    rig.bluetooth
+        .send(Some(BluetoothState {
+            powered: true,
+            discovering: true,
+            nearby: vec![athanor_services::bluetooth::Device {
+                path: "/dev9".to_owned(),
+                label: "Unpaired speaker".to_owned(),
+                icon: "audio-headset-symbolic",
+                paired: false,
+                connected: false,
+            }],
+            ..bluetooth_state()
+        }))
+        .unwrap();
+    settle();
+    arrows(&root)[1].emit_clicked();
+    settle();
+    assert_eq!(panel.stack.visible_child_name().as_deref(), Some("bluetooth"));
+    assert!(!says(&root, "Nearby devices") && !says(&root, "Unpaired speaker"));
+    assert!(!says(&root, "Pair"), "no pairing entry");
+    while let Ok(command) = rig.bluetooth_commands.try_recv() {
+        assert!(!matches!(command, BluetoothCommand::Discovery(_) | BluetoothCommand::Pair(_)));
+    }
+    panel.show(None);
+    settle();
+
     // The panel has a name, and a state it announces when it opens.
-    assert!(gtk4::test_accessible_has_property(&panel.main.root, gtk4::AccessibleProperty::Label));
+    assert_eq!(panel.main.root.accessible_role(), gtk4::AccessibleRole::Group);
+    assert!(a11y::is_named(&panel.main.root, "Control center"));
 
     // Everything the person can use is reached with Tab.
     let order = tab_order(&window);
@@ -375,6 +408,16 @@ fn the_media(mut rig: Rig) -> Rig {
     settle();
     assert!(!says(&root, "A song"), "no player, no media section");
     assert!(!says(&root, "Airplane mode"), "no /dev/rfkill, no airplane tile");
+    // A device that reports no radio is no airplane tile either.
+    let (empty, empty_path) = fake_rfkill(0);
+    let bare = Panel::new(Some(rig.services.clone()), Some(empty), hooks());
+    let bare_window = gtk4::Window::new();
+    bare_window.set_child(Some(&bare.widget()));
+    bare_window.present();
+    settle();
+    assert!(!says(&bare.widget(), "Airplane mode"), "no radio, no airplane tile");
+    bare_window.destroy();
+    std::fs::remove_file(&empty_path).ok();
 
     rig.media
         .send(MediaState {
@@ -393,14 +436,36 @@ fn the_media(mut rig: Rig) -> Rig {
             .find(|button| button.icon_name().as_deref() == Some(icon))
             .unwrap_or_else(|| panic!("no {icon} button"))
     };
-    for icon in ["media-skip-backward-symbolic", "media-playback-pause-symbolic", "media-skip-forward-symbolic"] {
-        assert!(gtk4::test_accessible_has_property(&button(icon), gtk4::AccessibleProperty::Label));
+    for (icon, name) in [
+        ("media-skip-backward-symbolic", "Previous track"),
+        ("media-playback-pause-symbolic", "Pause"),
+        ("media-skip-forward-symbolic", "Next track"),
+    ] {
+        assert!(a11y::is_named(&button(icon), name), "{icon} is {name}");
     }
     button("media-playback-pause-symbolic").emit_clicked();
     button("media-skip-forward-symbolic").emit_clicked();
     settle();
     assert!(matches!(rig.media_commands.try_recv(), Ok(MediaCommand::PlayPause)));
     assert!(matches!(rig.media_commands.try_recv(), Ok(MediaCommand::Next)));
+    // What a player controls cannot panic the panel: a negative length, a position at the end
+    // of the integers, a seek to the far ends.
+    let mut hostile = player();
+    hostile.length_us = Some(-5);
+    hostile.position_us = Some(i64::MAX);
+    rig.media
+        .send(MediaState {
+            players: vec![hostile],
+            current: Some(0),
+            refused: 0,
+            settled: true,
+        })
+        .unwrap();
+    settle();
+    panel.main.media.seek_to(1e30);
+    panel.main.media.seek_to(-1e30);
+    panel.main.media.set_shown(true);
+    settle();
     // A cover that cannot be decoded is the icon, not a hole.
     assert!(panel.main.media.art.paintable().is_some());
     window.destroy();

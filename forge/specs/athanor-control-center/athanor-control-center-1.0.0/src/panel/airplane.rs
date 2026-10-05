@@ -96,6 +96,10 @@ impl Rfkill {
         any
     }
 
+    pub fn has_radios(&self) -> bool {
+        self.radios.borrow().count() > 0
+    }
+
     pub fn airplane(&self) -> bool {
         self.radios.borrow().airplane()
     }
