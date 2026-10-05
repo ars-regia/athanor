@@ -190,15 +190,31 @@ class PromoteAuto(Published):
         self.runs(
             "412", **{"412": {"attestations": [(TRUSTED, predicate(hours_ago=1))]}}
         )
-        r, stable = self.auto(SECURITY_REASON="CVE-2026-0001 in openssl")
+        r, stable = self.auto(SECURITY_REASON="CVE-2026-0001,GHSA-2c8m-xq3v-p9wf")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(len(stable), 3)
         record = json.loads(self.record.read_text())
         self.assertEqual(
             (record["mode"], record["dwell_hours"], record["reason"]),
-            ("security", 0, "CVE-2026-0001 in openssl"),
+            ("security", 0, "CVE-2026-0001,GHSA-2c8m-xq3v-p9wf"),
         )
         self.assertEqual(record["evidence"]["run_id"], "412")
+
+    def test_a_security_reason_must_name_advisories(self):
+        self.runs("412")
+        for reason in (
+            "CVE-2026-0001 in openssl",
+            "urgent",
+            "CVE-2026-0001;rm",
+            "CVE-26-1",
+            "GHSA-aaaa-bbbb-cccc",
+            "CVE-2026-0001,",
+        ):
+            with self.subTest(reason=reason):
+                r, stable = self.auto(SECURITY_REASON=reason)
+                self.assertEqual(r.returncode, 2, r.stdout)
+                self.assertIn("SECURITY_REASON must be advisory ids", r.stderr)
+                self.assertEqual(stable, [])
 
     def test_a_manual_run_needs_passing_evidence(self):
         self.runs(

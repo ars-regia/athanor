@@ -11,7 +11,11 @@
 #              broken (no acceptance attestation, no build signature) and this fails;
 #   manual     RUN_ID set: that run, with no dwell time; the maintainer's override;
 #   security   SECURITY_REASON set (with or without RUN_ID): no dwell time, and the reason is
-#              recorded. The out-of-band path for a critical fix (48 h freshness target).
+#              recorded. The out-of-band path for a critical fix (48 h freshness target). The
+#              reason is one or more advisory ids, comma-separated: CVE, GHSA, RUSTSEC or
+#              FEDORA. Free text is refused, so the record names what was fixed.
+# promote-stable.yml lets the manual and security modes run only after a reviewer approved
+# the stable-override environment (system/require-review.sh).
 # This script only picks a candidate, from the GitHub run list. It trusts nothing it reads
 # there: promote.sh decides, from the acceptance attestation on each image digest, signed by
 # iso-acceptance.yml on a trusted branch, and from the signature machines verify.
@@ -34,6 +38,11 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 run=${RUN_ID:-} reason=${SECURITY_REASON:-} limit=${PROMOTE_CANDIDATES:-20}
 [[ -z $run || $run =~ ^[0-9]+$ ]] || {
     echo "${0##*/}: RUN_ID must be a run id" >&2
+    exit 2
+}
+advisory='(CVE-[0-9]{4}-[0-9]{4,}|GHSA(-[23456789cfghjmpqrvwx]{4}){3}|RUSTSEC-[0-9]{4}-[0-9]{4}|FEDORA-[0-9]{4}-[0-9a-f]{10})'
+[[ -z $reason || $reason =~ ^$advisory(,$advisory)*$ ]] || {
+    echo "${0##*/}: SECURITY_REASON must be advisory ids (CVE-, GHSA-, RUSTSEC- or FEDORA-), comma-separated: '$reason'" >&2
     exit 2
 }
 [[ $limit =~ ^[0-9]+$ ]] || {
