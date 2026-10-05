@@ -61,11 +61,11 @@ Kept as Calmo stood, the shell would wear indigo beside blue applications, Inter
 
   GSettings notifies every change, and GTK already reads it.
 
-- **One function applies them,** in `athanor-style`, called by every writer: Settings, and the control center's quick toggles. It writes, in this order:
+- **One function applies them,** in `athanor-style`, called by every writer: Settings, the control center's quick toggles and first run's `apply-handoff` (`doc_first_run.md`). It writes, in this order:
   1. our schema;
   2. the matching GNOME keys, so that an application without the portal, and xdg-desktop-portal-gtk until our backend exists, see the same state: `color-scheme` (`default` for light, `prefer-dark` for dark) and `accent-color` (the fixed accent, or the preset nearest the computed one) in `org.gnome.desktop.interface`, and `high-contrast` in `org.gnome.desktop.a11y.interface`;
   3. the few keys of `CosmicTheme` that cosmic-comp reads for window borders and indicators, through `athanor-compositor-client`, the only crate allowed to know COSMIC (SH2). Which keys these are is spike VL-S1.
-- **The GNOME keys are mirrors.** A change written to them by another tool is not read back; our schema wins at the next apply.
+- **The GNOME keys are mirrors.** A change written to them by another tool is not read back; our schema wins at the next apply. Two keys are not mirrors but vendor defaults: `icon-theme` (`'Adwaita'`) and `button-layout` (`':minimize,maximize,close'`) are shipped as GSettings defaults by `athanor-system-config` and reset once by `athanor-sessiond` (`doc_session_daemons.md` SD16); the apply function does not write them.
 - **The shell reads our schema,** no longer `CosmicTheme` (SH5, stage 1), and redraws on its change notification.
 - **The greeter** runs before any user session and uses the factory accent and the light variant, as SH5 already states.
 
@@ -91,7 +91,7 @@ Kept as Calmo stood, the shell would wear indigo beside blue applications, Inter
   | `title-4` | 118 % | 700    | the title of a page inside a panel                   |
   | `title-3` | 136 % | 700    | notification center and launcher headers             |
   | `title-1` | 181 % | 800    | first run headings                                   |
-  | `display` | 500 % | 300    | the clock of the lock screen and of the greeter only |
+  | `display` | 500 % | 300    | the clock of the lock screen and of the greeter, and the numerals that identify monitors (`doc_osd.md` OD19) |
 
   `display` is the shell's only step of its own; it keeps Calmo's 74 px clock at the default size.
 
@@ -113,15 +113,15 @@ Kept as Calmo stood, the shell would wear indigo beside blue applications, Inter
 - **The mark** (the seal) appears in four places: the greeter, the lock screen, first run, and the system's About page. It is never decoration elsewhere.
 - **The shield in the bar.** The mark with the trust badge (SH12) moves its permanent place to the control center: a first row, "System verified", that opens the sheet of BR6. The bar shows the shield only when there is something to know: not verified, update refused, the update service not answering, an update ready to apply. Because the bar's shield can now be absent, its absence proves nothing; the control center's row is always present. `doc_bar.md` and `doc_control_center.md` carry the behaviour (section 3); this document fixes the visual rule.
 - **The hearth wallpaper** stays the default: concentric discs rising from a corner, coloured by the accent. It ships prebuilt for the nine presets, light and dark, eighteen images made by `png.py` from the tokens, so that it follows the user's fixed accent. A wallpaper service of our own (`doc_shell.md`, stage 8) may later draw it at run time instead.
-- **Icons:** the shell's symbolic icons come from adwaita-icon-theme (49.0), the set the applications use. `cosmic-icon-theme` leaves the image once no shell surface names an icon of its own; the plan counts the names in use and maps each. Our own symbolic icons stay limited to the seal and its states. Applications keep their own icons.
+- **Icons:** the shell's symbolic icons come from adwaita-icon-theme (49.0), the set the applications use. `cosmic-icon-theme` leaves the image once no shell surface names an icon of its own; until `cosmic-settings-daemon` leaves (stage 8) it writes `icon-theme` `'Cosmic'` at every start, against these icons, and the vendor default of VL4 with the one-time reset of `doc_session_daemons.md` SD16 covers it; the plan counts the names in use and maps each. Our own symbolic icons stay limited to the seal and its states. Applications keep their own icons.
 
 **VL9. Motion and depth.**
 
-- **Three durations:** 100 ms for hover and press; 200 ms for popovers, panels and the on-screen display appearing and leaving; 300 ms for large changes: the launcher, the control center, the switch between workspaces.
+- **Three durations:** 100 ms for hover and press; 200 ms for popovers, panels, the on-screen display and the end-of-session dialogs appearing and leaving, and for the workspace slide, which keeps the compositor's own 200 ms with `EaseInOutCubic` (ruling of 2026-10-05; the reduced-motion patch of `doc_overview.md` only adds an on/off switch); 300 ms for large changes: the launcher and the control center.
 - **One curve:** libadwaita's `cubic-bezier(0.25, 0.46, 0.45, 0.94)`, so that the shell and the applications move alike. No bounce, no spring.
-- **Reduced motion is GNOME's `enable-animations`.** When it is off, every duration of the shell is zero and states change at once. No intermediate "fades only" level is invented: no application would understand it.
+- **Reduced motion is GNOME's `enable-animations`.** When it is off, every duration of the shell is zero and states change at once. No intermediate "fades only" level is invented: no application would understand it. The compositor's workspace slide follows the same setting through a cosmic-comp patch (`doc_overview.md`, `doc_accessibility.md` AX9).
 - **Surfaces are opaque:** no blur, no translucency. libadwaita's surfaces are opaque, and an opaque surface keeps contrast measurable on any wallpaper.
-- **Three shadow levels,** Calmo's near, panel and float. The float shadow is reserved for what stands above windows: popovers, the control center, the notification center, the launcher, and the bar and the dock when they float. Windows carry libadwaita's own shadow.
+- **Three shadow levels,** Calmo's near, panel and float. The float shadow is reserved for what stands above windows: popovers, the control center, the notification center, the launcher, the on-screen display and the end-of-session dialogs (`doc_osd.md`), and the bar and the dock when they float. Windows carry libadwaita's own shadow.
 
 **VL10. The tokens file after this document.** `tokens.toml` changes as follows; every other value stays.
 
@@ -168,8 +168,8 @@ Kept as Calmo stood, the shell would wear indigo beside blue applications, Inter
   - Depth: the bar and the dock carry the float shadow when they float.
 - **`doc_bar.md`, BR6 and BR7:** the shield is shown in the bar only in the states of VL8; the bar's geometry follows VL7. A revision 2 of `doc_bar.md` carries it.
 - **`doc_control_center.md`, CC4:** a first row, "System verified", always present, opens the shield's sheet.
-- **`doc_portal.md`** (to be written): the Settings backend serves the values of VL5.
-- **`doc_accessibility.md`** (to be written): high contrast, large text and reduced motion are the preferences of VL4, VL6 and VL9; it owns their exposure in the session and their tests with assistive technologies.
+- **`doc_portal.md`:** the Settings backend serves the values of VL5.
+- **`doc_accessibility.md`:** high contrast, large text and reduced motion are the preferences of VL4, VL6 and VL9; it owns their exposure in the session and their tests with assistive technologies.
 
 ## 4. Open doubts
 
