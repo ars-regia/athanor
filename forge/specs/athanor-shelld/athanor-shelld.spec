@@ -6,6 +6,9 @@ Summary:        The Athanor shell's daemon: desktop notifications and the tray w
 License:        MIT
 
 BuildRequires:  rust cargo gcc pkgconf-pkg-config gettext
+# pw-play plays the notification sound (NC7); the theme is where it finds it.
+Requires:       pipewire-utils
+Recommends:     sound-theme-freedesktop
 
 %description
 Owns org.freedesktop.Notifications (Desktop Notifications 1.2) and

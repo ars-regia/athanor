@@ -143,6 +143,13 @@ impl State {
         state
     }
 
+    /// Plays the sound for `urgency`, the hinted name first.
+    fn sound_of(&self, urgency: Urgency, hint: Option<&str>) {
+        if let Some(file) = self.player.sound_for(urgency, hint) {
+            self.player.play(&file, urgency == Urgency::Critical);
+        }
+    }
+
     fn now_ms(&self) -> u64 {
         u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX)
     }
@@ -286,9 +293,7 @@ impl State {
             decision.popup,
         );
         if decision.sound {
-            if let Some(file) = self.player.sound_for(urgency, sound.name.as_deref()) {
-                self.player.play(&file);
-            }
+            self.sound_of(urgency, sound.name.as_deref());
         }
         self.dirty.notify_one();
         let wire = from_notification(&outcome.notification, now);
@@ -519,6 +524,30 @@ async fn announce(conn: &Connection, state: &Shared, outcome: &Outcome, wire: &W
     .await;
 }
 
+/// Keeps a notification the daemon sends itself, and sounds it when it is critical: the one
+/// place both of its senders share, since `arrive` is only for what applications send.
+fn keep_own(
+    state: &Shared,
+    own: String,
+    content: impl FnOnce(u32) -> Content,
+) -> (Outcome, WireNotification) {
+    let mut state = lock(state);
+    let content = content(state.rules.settings().timeout_normal_s);
+    // Only a critical one sounds: the do-not-disturb summary is a popup that opens the center
+    // when the user comes back, and NC7 gives no sound to it. Critical passes do not disturb,
+    // and the global switch still silences it.
+    if content.urgency == Urgency::Critical && state.rules.settings().sound {
+        state.sound_of(content.urgency, None);
+    }
+    let now = state.now_ms();
+    let outcome = state
+        .store
+        .notify(content, 0, now, unix_now(), Identity::Other, own, true);
+    state.dirty.notify_one();
+    let wire = from_notification(&outcome.notification, now);
+    (outcome, wire)
+}
+
 /// Stores a notification the daemon sends itself and announces it to the units. Sent through
 /// the daemon's own connection: it is the sender, so its actions are unavailable only when
 /// the daemon is gone (`invoke_action` carries them out).
@@ -526,17 +555,7 @@ async fn post_own(conn: &Connection, state: &Shared, content: impl FnOnce(u32) -
     let Some(own) = conn.unique_name().map(ToString::to_string) else {
         return;
     };
-    let (outcome, wire) = {
-        let mut state = lock(state);
-        let content = content(state.rules.settings().timeout_normal_s);
-        let now = state.now_ms();
-        let outcome = state
-            .store
-            .notify(content, 0, now, unix_now(), Identity::Other, own, true);
-        state.dirty.notify_one();
-        let wire = from_notification(&outcome.notification, now);
-        (outcome, wire)
-    };
+    let (outcome, wire) = keep_own(state, own, content);
     announce(conn, state, &outcome, &wire).await;
 }
 
@@ -1276,6 +1295,7 @@ pub async fn follow_owners(conn: &Connection, state: Shared) -> zbus::Result<()>
 mod tests {
     use super::*;
     use crate::icon::Icon;
+    use std::time::Duration;
 
     #[test]
     fn bad_action_keys_are_dropped_and_labels_cleaned() {
@@ -1341,5 +1361,73 @@ mod tests {
         assert_eq!(&actions.0[..2], ["k0", "v"]);
         let made = content("app", "", "s", "b", &actions.0, Hints::default(), -1);
         assert_eq!(made.actions.len(), MAX_ACTIONS);
+    }
+
+    fn silent_state(dir: &std::path::Path, player: Player) -> Shared {
+        let dnd = crate::dnd::Dnd::load(dir).expect("dnd");
+        let (wake, _keep) = tokio::sync::watch::channel(0);
+        Arc::new(Mutex::new(State::new(
+            dir.join("state"),
+            dir.join("config"),
+            dir.join("proc"),
+            dnd,
+            wake,
+            Arc::new(Notify::new()),
+            player,
+        )))
+    }
+
+    #[tokio::test]
+    async fn the_daemons_own_critical_notification_sounds_once_and_a_normal_one_does_not() {
+        let dir = std::env::temp_dir().join(format!("athanor-own-sound-{}", std::process::id()));
+        let stereo = dir.join("data/sounds/freedesktop/stereo");
+        std::fs::create_dir_all(&stereo).expect("theme");
+        for name in ["message-new-instant", "dialog-warning"] {
+            std::fs::write(stereo.join(format!("{name}.oga")), "").expect("sound");
+        }
+        let log = dir.join("played");
+        let program = dir.join("fake-pw-play");
+        std::fs::write(
+            &program,
+            format!("#!/bin/sh\necho \"$@\" >> {}\n", log.display()),
+        )
+        .expect("program");
+        std::fs::set_permissions(
+            &program,
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .expect("chmod");
+        let state = silent_state(&dir, Player::with_program(vec![dir.join("data")], program));
+        let normal = |_| {
+            own_content(
+                "Summary".into(),
+                String::new(),
+                "default",
+                Urgency::Normal,
+                0,
+            )
+        };
+        keep_own(&state, "own".into(), normal);
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert!(!log.exists(), "the do-not-disturb summary stays silent");
+        keep_own(&state, "own".into(), |_| {
+            own_content(
+                "Battery low".into(),
+                String::new(),
+                BATTERY_ACTION,
+                Urgency::Critical,
+                0,
+            )
+        });
+        for _ in 0..30 {
+            if log.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        let played = std::fs::read_to_string(&log).expect("one play");
+        assert_eq!(played.lines().count(), 1);
+        assert!(played.contains("dialog-warning.oga"), "{played}");
+        std::fs::remove_dir_all(dir).expect("cleanup");
     }
 }

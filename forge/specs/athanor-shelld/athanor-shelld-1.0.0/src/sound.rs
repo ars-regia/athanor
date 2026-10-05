@@ -2,8 +2,8 @@
 //! file under the data directories, played by one short `pw-play` process (spike N1).
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use tokio::process::Command;
@@ -50,13 +50,16 @@ pub fn name_for(urgency: Urgency, sound_name: Option<&str>) -> &str {
 /// The file for `name` in `theme`, then in the themes it inherits, then in `freedesktop`.
 #[must_use]
 pub fn resolve(data_dirs: &[PathBuf], theme: &str, name: &str) -> Option<PathBuf> {
-    if !is_plain(name) {
+    if !is_plain(name) || !is_plain(theme) {
         return None;
     }
     let mut chain = vec![theme.to_owned()];
     let mut next = 0;
     while next < chain.len() && chain.len() < MAX_THEMES {
         for parent in inherits(data_dirs, &chain[next].clone()) {
+            if chain.len() >= MAX_THEMES {
+                break;
+            }
             if is_plain(&parent) && !chain.contains(&parent) {
                 chain.push(parent);
             }
@@ -107,13 +110,46 @@ pub fn sound_for(data_dirs: &[PathBuf], urgency: Urgency, hint: Option<&str>) ->
         .or_else(|| resolve(data_dirs, THEME, name_for(urgency, None)))
 }
 
-/// Plays one sound at a time: a sound requested while another still plays is dropped.
+/// The task that plays, and what it plays.
+struct Playing {
+    id: u64,
+    critical: bool,
+    task: tokio::task::AbortHandle,
+}
+
+/// Frees the slot when the playing task ends, however it ends: an aborted task never reaches
+/// the end of its body. A newer sound's slot is not this one's to free.
+struct Release {
+    slot: Arc<Mutex<Option<Playing>>>,
+    id: u64,
+}
+
+impl Drop for Release {
+    fn drop(&mut self) {
+        let mut slot = lock(&self.slot);
+        if slot.as_ref().is_some_and(|playing| playing.id == self.id) {
+            *slot = None;
+        }
+    }
+}
+
+/// A poisoned lock means a panic, and panic = "abort" means there is none: take the guard.
+fn lock(slot: &Mutex<Option<Playing>>) -> MutexGuard<'_, Option<Playing>> {
+    slot.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Plays one sound at a time: a sound requested while another still plays is dropped, unless
+/// it is critical and the one playing is not, which it cuts.
 #[derive(Clone)]
 pub struct Player {
     /// The data directories whose `sounds/` hold the theme.
     dirs: Vec<PathBuf>,
     program: PathBuf,
-    busy: Arc<AtomicBool>,
+    /// The sound playing, if any.
+    slot: Arc<Mutex<Option<Playing>>>,
     warned: Arc<AtomicBool>,
 }
 
@@ -137,7 +173,7 @@ impl Player {
         Player {
             dirs,
             program: program.into(),
-            busy: Arc::default(),
+            slot: Arc::default(),
             warned: Arc::default(),
         }
     }
@@ -149,12 +185,18 @@ impl Player {
     }
 
     /// Plays `path` with `pw-play`, on the runtime; `Notify` never waits for it.
-    pub fn play(&self, path: &Path) {
+    pub fn play(&self, path: &Path, critical: bool) {
         let mut command = Command::new(&self.program);
         command
             .args(["--media-role", "Notification", "--"])
             .arg(path);
-        self.run(command, PLAY_LIMIT);
+        self.run(command, PLAY_LIMIT, critical);
+    }
+
+    /// Whether a sound is playing now.
+    #[must_use]
+    pub fn playing(&self) -> bool {
+        lock(&self.slot).is_some()
     }
 
     /// A failure is logged the first time only: a missing player would otherwise fill the
@@ -165,11 +207,15 @@ impl Player {
         }
     }
 
-    /// Starts `command` unless a sound is playing. The child is killed after `limit` and
-    /// reaped either way; a spawn failure is logged once for the process.
-    pub fn run(&self, mut command: Command, limit: Duration) -> bool {
-        if self.busy.swap(true, Ordering::AcqRel) {
-            return false;
+    /// Starts `command` unless a sound is playing, except that a critical sound cuts one that
+    /// is not. The child is killed after `limit` and reaped either way; a spawn failure is
+    /// logged once for the process.
+    pub fn run(&self, mut command: Command, limit: Duration, critical: bool) -> bool {
+        let mut slot = lock(&self.slot);
+        if let Some(playing) = slot.as_ref() {
+            if !critical || playing.critical {
+                return false;
+            }
         }
         // The three standard streams are inherited, not opened on /dev/null: the daemon's
         // Landlock ruleset grants no access to /dev, and the player's own errors reach the
@@ -178,13 +224,24 @@ impl Player {
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(err) => {
-                self.busy.store(false, Ordering::Release);
                 self.warn_once(&err);
                 return false;
             }
         };
-        let (busy, player) = (Arc::clone(&self.busy), self.clone());
-        tokio::spawn(async move {
+        if let Some(cut) = slot.take() {
+            // The task's drop kills its child, and its guard finds the slot no longer its own.
+            cut.task.abort();
+        }
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let (release, player) = (
+            Release {
+                slot: Arc::clone(&self.slot),
+                id,
+            },
+            self.clone(),
+        );
+        let task = tokio::spawn(async move {
+            let _release = release;
             match tokio::time::timeout(limit, child.wait()).await {
                 Ok(Ok(status)) if !status.success() => player.warn_once(&status),
                 Ok(_) => {}
@@ -194,7 +251,11 @@ impl Player {
                     player.warn_once(&"the player did not finish in time");
                 }
             }
-            busy.store(false, Ordering::Release);
+        });
+        *slot = Some(Playing {
+            id,
+            critical,
+            task: task.abort_handle(),
         });
         true
     }
@@ -248,11 +309,31 @@ mod tests {
     }
 
     #[test]
-    fn a_loop_of_inherits_ends() {
+    fn a_loop_of_inherits_ends_and_an_escaping_parent_is_not_followed() {
         let dir = tree("loop");
         put(&dir, "a", "index.theme", "Inherits=b\n");
         put(&dir, "b", "index.theme", "Inherits=a,../x\n");
+        // What following `../x` would reach: <dir>/x/stereo/none.oga.
+        fs::create_dir_all(dir.join("x/stereo")).expect("mkdir");
+        fs::write(dir.join("x/stereo/none.oga"), "").expect("write");
         assert_eq!(resolve(std::slice::from_ref(&dir), "a", "none"), None);
+        fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    #[test]
+    fn more_inherited_themes_than_the_cap_are_not_all_followed() {
+        let dir = tree("cap");
+        let list: Vec<String> = (0..40).map(|n| format!("t{n}")).collect();
+        put(
+            &dir,
+            "a",
+            "index.theme",
+            &format!("Inherits={}\n", list.join(",")),
+        );
+        put(&dir, "t30", "stereo/deep.oga", "");
+        assert_eq!(resolve(std::slice::from_ref(&dir), "a", "deep"), None);
+        put(&dir, "t3", "stereo/near.oga", "");
+        assert!(resolve(std::slice::from_ref(&dir), "a", "near").is_some());
         fs::remove_dir_all(dir).expect("cleanup");
     }
 
@@ -274,19 +355,32 @@ mod tests {
         fs::remove_dir_all(dir).expect("cleanup");
     }
 
+    /// Puts a real file at the path each escaping name would reach, so a missing guard finds it.
     #[test]
-    fn a_name_that_leaves_the_theme_is_refused() {
+    fn a_name_or_theme_that_leaves_the_sounds_directory_is_refused() {
         let dir = tree("refuse");
         put(&dir, THEME, "stereo/x.oga", "");
-        fs::write(dir.join("sounds/freedesktop/outside.oga"), "").expect("write");
+        let stereo = dir.join("sounds/freedesktop/stereo");
+        for target in [
+            "sounds/freedesktop/outside.oga",
+            "sounds/freedesktop/freedesktop/stereo/x.oga",
+            "sounds/freedesktop/stereo/.x.oga",
+            "sounds/freedesktop/stereo/a/b.oga",
+            "sounds/freedesktop/stereo/.oga",
+            "x/stereo/x.oga",
+        ] {
+            let path = dir.join(target);
+            fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+            fs::write(path, "").expect("write");
+        }
+        assert!(stereo.join("x.oga").is_file());
         let dirs = [dir.clone()];
         for name in ["../outside", "../freedesktop/stereo/x", ".x", "a/b", ""] {
             assert_eq!(resolve(&dirs, THEME, name), None, "{name}");
         }
-        assert_eq!(
-            resolve(&dirs, "../x", "x"),
-            Some(dir.join("sounds/freedesktop/stereo/x.oga"))
-        );
+        // A theme `../x` would reach <dir>/x/stereo/x.oga.
+        assert_eq!(resolve(&dirs, "../x", "x"), None);
+        assert_eq!(resolve(&dirs, "", "x"), None);
         fs::remove_dir_all(dir).expect("cleanup");
     }
 
@@ -328,9 +422,9 @@ mod tests {
         let dir = tree("busy");
         let log = dir.join("log");
         let player = Player::default();
-        assert!(player.run(marker(&log), Duration::from_secs(5)));
+        assert!(player.run(marker(&log), Duration::from_secs(5), false));
         for _ in 0..5 {
-            assert!(!player.run(marker(&log), Duration::from_secs(5)));
+            assert!(!player.run(marker(&log), Duration::from_secs(5), false));
         }
         tokio::time::sleep(Duration::from_millis(900)).await;
         assert_eq!(
@@ -339,10 +433,63 @@ mod tests {
             "one process ran, none queued"
         );
         assert!(
-            player.run(marker(&log), Duration::from_secs(5)),
+            player.run(marker(&log), Duration::from_secs(5), false),
             "free again"
         );
         fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    fn hang() -> Command {
+        let mut command = Command::new("sleep");
+        command.arg("30");
+        command
+    }
+
+    #[tokio::test]
+    async fn a_critical_sound_cuts_a_normal_one_and_the_slot_stays_held() {
+        let dir = tree("preempt");
+        let log = dir.join("log");
+        let player = Player::default();
+        assert!(player.run(hang(), Duration::from_secs(30), false));
+        assert!(
+            player.run(marker(&log), Duration::from_secs(5), true),
+            "preempts"
+        );
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(
+            player.playing(),
+            "the aborted task must not free the new sound's slot"
+        );
+        assert!(
+            !player.run(marker(&log), Duration::from_secs(5), false),
+            "normal dropped"
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_eq!(fs::read_to_string(&log).expect("log"), "x\n");
+        assert!(!player.playing());
+        fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn a_normal_or_critical_sound_during_a_critical_one_is_dropped() {
+        let player = Player::default();
+        assert!(player.run(hang(), Duration::from_secs(30), true));
+        assert!(!player.run(hang(), Duration::from_secs(30), false));
+        assert!(!player.run(hang(), Duration::from_secs(30), true));
+        assert!(player.playing());
+    }
+
+    #[tokio::test]
+    async fn the_slot_is_free_after_a_preemption_ends() {
+        let player = Player::default();
+        assert!(player.run(hang(), Duration::from_secs(30), false));
+        assert!(player.run(hang(), Duration::from_millis(100), true));
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(
+            !player.playing(),
+            "released after the critical sound's own end"
+        );
+        assert!(player.run(hang(), Duration::from_millis(100), false));
     }
 
     #[tokio::test]
@@ -350,9 +497,9 @@ mod tests {
         let player = Player::default();
         let mut hang = Command::new("sleep");
         hang.arg("30");
-        assert!(player.run(hang, Duration::from_millis(100)));
+        assert!(player.run(hang, Duration::from_millis(100), false));
         tokio::time::sleep(Duration::from_millis(400)).await;
-        assert!(!player.busy.load(Ordering::Acquire), "reaped and released");
+        assert!(!player.playing(), "reaped and released");
     }
 
     #[tokio::test]
@@ -360,17 +507,21 @@ mod tests {
         let player = Player::default();
         let mut fail = Command::new("sh");
         fail.args(["-c", "exit 3"]);
-        assert!(player.run(fail, Duration::from_secs(5)));
+        assert!(player.run(fail, Duration::from_secs(5), false));
         tokio::time::sleep(Duration::from_millis(300)).await;
-        assert!(!player.busy.load(Ordering::Acquire));
+        assert!(!player.playing());
         assert!(player.warned.load(Ordering::Acquire));
     }
 
     #[tokio::test]
     async fn a_missing_player_is_not_a_crash_and_frees_the_slot() {
         let player = Player::default();
-        assert!(!player.run(Command::new("/nonexistent/pw-play"), Duration::from_secs(1)));
-        assert!(!player.busy.load(Ordering::Acquire));
+        assert!(!player.run(
+            Command::new("/nonexistent/pw-play"),
+            Duration::from_secs(1),
+            false
+        ));
+        assert!(!player.playing());
         assert!(player.warned.load(Ordering::Acquire));
     }
 }
