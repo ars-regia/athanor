@@ -1,0 +1,3 @@
+# rpm2cpio (rpm) and cpio to extract vmlinuz from the kernel-core RPM, sbsign and sbverify
+# to replace its signature and check the result.
+rpm cpio sbsigntools

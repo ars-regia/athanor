@@ -84,11 +84,6 @@ check-idempotency package registry="ghcr.io" owner="hr-mes" image_name="" base_d
 audit:
     just forge/audit
 
-# Audits and enforces strict 0700/0400 permissions on Secure Boot & UKI signing keys
-[group('QA & Security')]
-secureboot-key-audit:
-    just system/secureboot-key-audit
-
 # Runs cargo-fuzz fuzzing suite on Rust spec targets
 [group('QA & Security')]
 fuzz component="all" time="60":

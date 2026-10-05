@@ -15,7 +15,7 @@ on:
         description: "Passphrase for GPG key"
         required: false
       SECUREBOOT_SIGNING_KEY:
-        description: "Secure Boot private key (PEM) that signs the UKI and its PCR policy; supplied by the signing environment"
+        description: "Secure Boot private key (PEM) that signs the vmlinuz GRUB boots through shim, in the sign-kernel job only; supplied by the signing environment"
         required: false
       COSIGN_PRIVATE_KEY:
         description: "Private key that signs the system images for the update service (system/keys); supplied by the signing environment"
@@ -240,13 +240,52 @@ jobs:
             chown -R 1001:1001 . || chown -R 1000:1000 . || true
           fi
 
+  sign-kernel:
+    name: 🔏 Secure Boot signature of the kernel
+    # The only job that receives SECUREBOOT_SIGNING_KEY (D43). It builds nothing and runs
+    # no third-party action beside the key: checkout, registry login and
+    # system/sign-kernel.sh, which pulls azoth by the digest in kernel-artifacts, signs its
+    # vmlinuz in the locked forge/specs/azoth/sign image with the network off and verifies
+    # it against the committed certificate. The image build receives only the result.
+    needs: [lint]
+    runs-on: ubuntu-24.04
+    environment: signing
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Kernel artifacts verified by the Orchestrator
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: kernel-artifacts
+          path: kernel-artifacts
+      - name: 🔑 Login to the registry
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          registry=$(bash system/kernel-artifacts.sh get registry)
+          echo "${GITHUB_TOKEN}" | podman login "${registry%%/*}" -u "${GITHUB_ACTOR}" --password-stdin
+      - name: 🔏 Sign the kernel, then verify it against the certificate (system/sign-kernel.sh)
+        env:
+          SECUREBOOT_SIGNING_KEY: ${{ secrets.SECUREBOOT_SIGNING_KEY }}
+        run: bash system/sign-kernel.sh --out signed-kernel
+      - name: 📎 Hand the signed kernel to the image build
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: signed-kernel
+          path: signed-kernel/
+          if-no-files-found: error
+
   dag-system-image:
     name: 💿 System Image & Disk Build
-    needs: [build-repo]
+    # No signing key reaches this job (D43): the kernel arrives signed from sign-kernel, and
+    # the image build checks it against the committed certificate.
+    needs: [build-repo, sign-kernel]
     runs-on: ubuntu-24.04
-    # The signing environment holds SECUREBOOT_SIGNING_KEY, the Secure Boot key that
-    # signs the UKI and its PCR policy (forge/specs/azoth/KERNEL.md).
-    environment: signing
     timeout-minutes: 180
     permissions:
       contents: write
@@ -266,6 +305,11 @@ jobs:
         with:
           name: kernel-artifacts
           path: kernel-artifacts
+      - name: Kernel signed by the sign-kernel job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: signed-kernel
+          path: signed-kernel
       - name: ❄️ Install Nix (Bedrock Cache & Security Tools)
         uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
         with:
@@ -283,18 +327,15 @@ jobs:
         # The Containerfile pulls its base and the tier repository images and installs
         # Fedora packages with dnf5, so the build needs the network; the build context
         # is the repository root, where its COPY sources live. build-image.sh builds the
-        # default, NVIDIA and NVIDIA-legacy images in turn, all three signed with the same
-        # Secure Boot key, so one job and one approval covers the whole cycle (S8). Nothing
-        # is pushed until all three have built.
+        # default, NVIDIA and NVIDIA-legacy images in turn, all three from the same signed
+        # kernel. Nothing is pushed until all three have built.
         env:
           RUN_ID: ${{ github.run_id }}
           RUN_NUMBER: ${{ github.run_number }}
-          SECUREBOOT_SIGNING_KEY: ${{ secrets.SECUREBOOT_SIGNING_KEY }}
         run: |
           set -euo pipefail
-          [[ -n ${SECUREBOOT_SIGNING_KEY:-} ]] || { echo "SECUREBOOT_SIGNING_KEY is not available to this job: check the signing environment" >&2; exit 1; }
           for gpu in none nvidia nvidia-legacy; do
-            bash system/build-image.sh --gpu "$gpu" --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" --tag "${DEFAULT_TAG}" --serial "${RUN_NUMBER}"
+            bash system/build-image.sh --gpu "$gpu" --signed-kernel signed-kernel --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" --tag "${DEFAULT_TAG}" --serial "${RUN_NUMBER}"
           done
           df -h
 

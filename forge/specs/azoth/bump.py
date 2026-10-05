@@ -17,7 +17,7 @@ Two groups, one pull request each, because they are verified differently
 (docs/architecture/doc_build_ordering.md, O7 and O8):
 
   kernel   pins.env, the pins table of KERNEL.md, the FROM lines of the kernel's Containerfiles
-           (forge/specs/azoth/{builder,boot,nvidia}) and the NVIDIA lock of a branch whose pin
+           (forge/specs/azoth/{builder,boot,nvidia,sign}) and the NVIDIA lock of a branch whose pin
            moves. Kernel Build proves it before azoth:<nvr> exists; System Image Check skips
            the images of a pure pin bump.
   system   the FROM lines of system/Containerfile and the NVIDIA locks the repository
@@ -57,7 +57,7 @@ PINS = HERE / "pins.env"
 # The Containerfiles of each group (docs/architecture/doc_system_image.md, S1): every FROM
 # pinned by digest moves with the bump of its group.
 GROUP_CONTAINERFILES = {
-    "kernel": [HERE / d / "Containerfile" for d in ("builder", "boot", "nvidia")],
+    "kernel": [HERE / d / "Containerfile" for d in ("builder", "boot", "nvidia", "sign")],
     "system": [HERE.parents[2] / "system" / "Containerfile"],
 }
 NVIDIA_LOCK = HERE.parents[2] / "system" / "nvidia" / "lock.py"

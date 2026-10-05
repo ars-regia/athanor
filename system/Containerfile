@@ -2,7 +2,8 @@
 # selected by the GPU build argument: none (athanor-system), nvidia (athanor-system-nvidia)
 # and nvidia-legacy (athanor-system-nvidia-legacy). Everything up to the `system` stage is
 # shared; the GPU stages add the signed NVIDIA modules of the Azoth kernel with the locked
-# vendor packages; the final stage gates, assembles the UKI and lints. system/build-image.sh
+# vendor packages; the final stage gates, installs the kernel signed outside the build, builds
+# the initramfs and lints. system/build-image.sh
 # passes AZOTH_NVR, the registry and the module digests from the file system/kernel-artifacts.sh
 # wrote (docs/architecture/doc_build_ordering.md, O4, O9). A stage the target does not use is
 # never pulled, so the default image builds without module digests.
@@ -243,11 +244,19 @@ RUN bash /scripts/nvidia-gate.sh "${GPU}" /scripts/pins.env /
 # file; this is only the last word.
 RUN systemctl preset NetworkManager-wait-online.service
 
-# Initramfs & Unified Kernel Image (UKI) generation
-RUN --mount=type=secret,id=uki_key,required=false \
-    --mount=type=secret,id=uki_cert,required=false \
-    --mount=type=secret,id=uki_crt,required=false \
-    /bin/bash /scripts/assemble_uki.sh
+# The kernel GRUB boots through shim, signed outside this build (doc_kernel_profile.md, D43):
+# system/sign-kernel.sh signs it in a sign-only job and system/build-image.sh passes it,
+# with the certificate to check it against, as the build context `signed-kernel`. No key
+# reaches the build. install_signed_kernel.py verifies the signature and that the signed file
+# is the kernel tier 0 installed, then puts it in place. The digest argument ties the bind
+# mount to this step's cache: a different signed kernel is a different step, never a cached one.
+ARG AZOTH_NVR
+ARG SIGNED_VMLINUZ_SHA256
+RUN --mount=type=bind,from=signed-kernel,target=/run/signed-kernel \
+    echo "${SIGNED_VMLINUZ_SHA256}  /run/signed-kernel/vmlinuz" | sha256sum --check --strict && \
+    python3 /scripts/install_signed_kernel.py /run/signed-kernel "${AZOTH_NVR}.x86_64"
+
+RUN /bin/bash /scripts/build_initramfs.sh "${AZOTH_NVR}.x86_64"
 
 # Hardening & OSTree cleanup. glibc-all-langpacks stays: glibc requires a langpack
 # provider and it is the one the base image ships. The runtime directories are
@@ -260,7 +269,7 @@ RUN dnf5 remove -y --no-autoremove \
         nodejs-docs python3-botocore kernel-debug kernel-debug-core kernel-debug-modules kernel-debug-modules-core kernel-debug-modules-extra && \
     for d in /usr/lib/modules/*; do if [ -d "$d" ] && [ ! -e "$d/vmlinuz" ] && [ ! -L "$d/vmlinuz" ]; then rm -rf "$d"; fi; done && \
     rm -f /etc/machine-id && touch /etc/machine-id && \
-    rm -rf /scripts /etc/pki/secureboot/private /etc/pki/uki/*.key && \
+    rm -rf /scripts && \
     dnf5 clean all && \
     rm -rf /var/lib/dnf5/* /var/tmp/* /var/log/* && \
     for p in /tmp/* /run/* /etc/NetworkManager/system-connections/*; do \

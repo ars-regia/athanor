@@ -33,7 +33,7 @@ if [[ "${IMAGE_NAME}" == *"ghcr.io"* ]] && [[ "${IMAGE_TAG}" == "latest" ]]; the
 fi
 
 # Tool checks
-if ! command -v podman &>/dev/null; then
+if ! command -v podman &> /dev/null; then
     echo "❌ Error: 'podman' is required but not installed or not in PATH." >&2
     exit 1
 fi
@@ -41,7 +41,7 @@ fi
 # Detect network availability to select pull policy
 PULL_FLAG="--pull=newer"
 echo "🌐 Checking network connectivity for container base images..."
-if ! ping -c 1 -w 2 8.8.8.8 &>/dev/null && ! ping -c 1 -w 2 1.1.1.1 &>/dev/null; then
+if ! ping -c 1 -w 2 8.8.8.8 &> /dev/null && ! ping -c 1 -w 2 1.1.1.1 &> /dev/null; then
     echo "🔌 Network offline detected. Switching podman pull policy to '--pull=never'."
     PULL_FLAG="--pull=never"
 else
@@ -50,37 +50,18 @@ fi
 
 # Gather Git metadata if available
 BUILD_ARGS=()
-if command -v git &>/dev/null && git rev-parse --is-inside-work-tree &>/dev/null; then
-    SHA_SHORT=$(git rev-parse --short HEAD 2>/dev/null || echo "offline-local")
+if command -v git &> /dev/null && git rev-parse --is-inside-work-tree &> /dev/null; then
+    SHA_SHORT=$(git rev-parse --short HEAD 2> /dev/null || echo "offline-local")
     BUILD_ARGS+=("--build-arg" "SHA_HEAD_SHORT=${SHA_SHORT}")
 fi
 
-# Secure Boot key isolation & restrictive permissions check (chmod 0400)
-SECRET_ARGS=()
-if [ -d "/etc/pki/secureboot/private" ]; then
-    chmod 0700 /etc/pki/secureboot/private
-fi
-for keyfile in /etc/pki/secureboot/private/*.key /etc/pki/uki/*.key /run/secrets/*.key; do
-    if [ -f "$keyfile" ]; then
-        chmod 0400 "$keyfile"
-    fi
-done
-
-if [ -f "/etc/pki/secureboot/private/uki-signing.key" ]; then
-    SECRET_ARGS+=("--secret" "id=uki_key,src=/etc/pki/secureboot/private/uki-signing.key")
-elif [ -f "/etc/pki/uki/uki-signing.key" ]; then
-    SECRET_ARGS+=("--secret" "id=uki_key,src=/etc/pki/uki/uki-signing.key")
-fi
-if [ -f "/etc/pki/uki/uki-signing.crt" ]; then
-    SECRET_ARGS+=("--secret" "id=uki_crt,src=/etc/pki/uki/uki-signing.crt")
-fi
-
+# No signing key reaches an image build (doc_kernel_profile.md, D43): the kernel is signed
+# by system/sign-kernel.sh, outside the build.
 BUILD_DATE=$(date -u +%Y-%m-%d\T%H:%M:%SZ)
 
-echo "🏗️  Starting local podman build with isolated Secure Boot signing enclave..."
+echo "🏗️  Starting local podman build..."
 podman build \
     ${PULL_FLAG} \
-    "${SECRET_ARGS[@]}" \
     --tag "${FULL_IMAGE_REF}" \
     --label "org.opencontainers.image.created=${BUILD_DATE}" \
     --label "org.opencontainers.image.title=athanor-system-offline" \
