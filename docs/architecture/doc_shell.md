@@ -10,6 +10,8 @@ The three spikes of section 3 ran on 2026-09-18 (`.superpowers/spike-p1-applet.m
 
 The document replaces `doc_shell_ui.md` and amends `doc_platform_experience.md`, section 3. Section 6 lists the changes other documents take.
 
+SH3 was amended on 2026-10-06 by maintainer decisions A2-14 and A2-24 (#159): the scope budget, COSMIC's applications, and cosmic-launcher kept until the Alt+Tab switcher of `doc_overview.md` exists.
+
 ## 1. Context
 
 Since 2026-09-11 the desktop is Fedora's COSMIC 1.8 on cosmic-comp: panel, dock, launcher, settings, notifications. `athanor-shell-rs` survived only as the greeter (on 2026-09-18; since stage 1a the greeter is `athanor-greeter-ui`). The maintainer wants a proprietary shell back, evolved rather than restored, because the graphical environment is what an average user judges the system by.
@@ -61,7 +63,7 @@ What the platform gives us today:
 |---|---|---|---|
 | cosmic-panel, cosmic-applets | panel, dock, the tray's `org.kde.StatusNotifierWatcher` (in `cosmic-applet-status-area`), network, Bluetooth, audio, battery, power, input source | 2, gone since the switch (PR #83) | our bar (2b) and our dock (2c) |
 | cosmic-notifications | notification daemon, a child of the panel's wrapper on an inherited socket pair until the switch | 2, gone since the switch (PR #83) | `athanor-shelld`, the notification server, with the bar |
-| cosmic-launcher, cosmic-app-library, pop-launcher | launcher, application library, the launcher's search backend | 3 (P4 found they work without the panel) | our launcher and application library (`doc_launcher.md`) |
+| cosmic-launcher, cosmic-app-library, pop-launcher | launcher, application library, the launcher's search backend; cosmic-launcher also serves Alt+Tab | 3 (P4 found they work without the panel); cosmic-launcher only together with a window switcher on Alt+Tab (amended 2026-10-06, A2-24, #159) | our launcher and application library (`doc_launcher.md`); the Alt+Tab switcher of `doc_overview.md` (section 7 there) |
 | cosmic-greeter as locker | session lock | 4 | our lock, on the greeter's authentication code |
 | cosmic-osd | on-screen display, end-of-session dialogs and the session's only polkit agent | 4, in one step | our polkit agent and `athanor-osd` (`doc_lock_and_prompts.md`, `doc_osd.md`) |
 | cosmic-settings, cosmic-randr | Settings application, output configuration | 6 | our Settings (`doc_settings.md`); `athanor-settings-rs` is not revived, only mined |
@@ -70,7 +72,14 @@ What the platform gives us today:
 
 The table is the end state and its order, not a calendar. A component leaves only when its replacement passes SH1's rule; until then the image keeps it.
 
-COSMIC applications (`cosmic-files`, `cosmic-term`, `cosmic-edit`, `cosmic-store`) are content, not dependencies. They read `CosmicTheme`, so the design system writes it (SH5).
+**Scope budget** (amended 2026-10-06, maintainer decision A2-14, #159). Athanor builds only what it differentiates on. Every new component of Athanor's own, whether a program, a daemon, a library or a patch series, that does what an upstream project already does carries two things in its specification before its first plan is written:
+
+1. a written "why not upstream": the upstream candidates weighed, each with the reason it falls short, checked against the upstream project as it is on the day of writing;
+2. a maintenance owner, named by the maintainer.
+
+A component without both is not planned. The rule first applied on 2026-10-06: the own disk utility gave way to GNOME Disks (`doc_disks.md` section 7); the own file manager is limited to the chooser's view library until 1.0, with Nautilus as the file manager of 1.0 (`doc_files.md` section 7); Software carries a written comparison with Bazaar (`doc_software.md` section 9).
+
+COSMIC's applications (`cosmic-files`, `cosmic-term`, `cosmic-edit`, `cosmic-store`) no longer stay as content (amended 2026-10-06; ruled 2026-10-05 in `doc_software.md` decision 7): each gives way to the default application that decision names for its use, with the amendments of `doc_software.md` section 9. Until they leave the image, they read `CosmicTheme`, which the design system writes (SH5).
 
 **SH4. GTK4, with the shim kept replaceable.**
 
