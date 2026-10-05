@@ -65,6 +65,10 @@ PRUNE = {"target", ".git", "repo-cache", ".cache", "node_modules",
          "experimental"}
 
 
+# Units that sealed LUKS to the TPM or bumped its rollback counter on their own (D42, issue #148).
+AUTO_TPM_UNITS = ("athanor-tpm-luks-seal", "athanor-tpm-rollback-check", "athanor-tpm-rollback-update")
+
+
 def walk(base, suffix):
     """os.walk con potatura: rglob su questo repo entra in target/ (decine di
     migliaia di file) e su un filesystem montato ci mette minuti."""
@@ -418,20 +422,27 @@ def update_trust_problems(root=None):
             for owner in literal_owners(read(literal)):
                 problems.append(f"{rel(literal)}: literal registry owner {owner}; "
                                 f"the registry comes from the build's variables")
-    # D2: the Secure Boot daemon is retired, the TPM files of its package are not.
-    secure_boot = root / "forge/specs/athanor-secure-boot"
-    for source in walk(secure_boot, ".rs"):
+    # D2: the Secure Boot daemon is retired. D42 (issue #148): nothing in the image seals LUKS to
+    # the TPM or increments a rollback counter by itself, so none of these units may be shipped.
+    for source in walk(root / "forge/specs/athanor-secure-boot", ".rs"):
         if "org.athanor.SecureBoot" in read(source):
             problems.append(f"{rel(source)}: serves org.athanor.SecureBoot, a name no bus policy lets it own (retired by D2)")
-    if (secure_boot / "athanor-secure-boot.spec").exists():
+    for spec in walk(root / "forge/specs", ".spec"):
         # The changelog may name what was retired: only what the spec installs counts.
-        text = read(secure_boot / "athanor-secure-boot.spec").split("%changelog", 1)[0]
+        text = read(spec).split("%changelog", 1)[0]
         if "athanor-secure-boot.service" in text:
-            problems.append("athanor-secure-boot.spec: still ships athanor-secure-boot.service (retired by D2)")
-        for kept in ("athanor-tpm-luks-seal.sh", "athanor-tpm-luks-seal.service", "athanor-tpm-rollback-check.service",
-                     "athanor-tpm-rollback-update.service", "10-rollback-check.conf"):
-            if kept not in text or not list(walk(secure_boot / "SOURCES", kept)):
-                problems.append(f"athanor-secure-boot: {kept} must stay; system/Containerfile and the rollback check use it")
+            problems.append(f"{rel(spec)}: still ships athanor-secure-boot.service (retired by D2)")
+        for unit in AUTO_TPM_UNITS:
+            if unit in text:
+                problems.append(f"{rel(spec)}: ships {unit}, which seals or counts without the user's action (D42)")
+    for tree in ("forge", "system"):
+        for found in walk(root / tree, ""):
+            if found.is_file() and any(found.name.startswith(unit) for unit in AUTO_TPM_UNITS):
+                problems.append(f"{rel(found)}: {found.name} is shipped; D42 forbids auto-sealing and the rollback-counter units")
+    for name in ("system/Containerfile", "system/athanor-install.ks"):
+        installer = root / name
+        if installer.exists() and any(unit in read(installer) for unit in AUTO_TPM_UNITS):
+            problems.append(f"{name}: names one of {', '.join(AUTO_TPM_UNITS)} (D42)")
     return problems
 
 
@@ -573,6 +584,33 @@ def register_count_problems(text):
     return problems
 
 
+FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
+CODE_SPAN = re.compile(r"(`+)(?!`).*?(?<!`)\1(?!`)", re.S)
+LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
+
+
+def markdown_links(text):
+    """(label, target) of every inline link outside code. Fenced blocks (``` or ~~~, closed
+    only by a run of the same character at least as long) and code spans are examples, not
+    links: a fence left open runs to the end of the file, as CommonMark has it."""
+    prose, fence = [], None
+    for line in text.splitlines():
+        m = FENCE.match(line)
+        if fence is None:
+            if m:
+                fence = m.group(1)
+            else:
+                prose.append(line)
+        elif m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) \
+                and not line.strip().lstrip(fence[0]):
+            fence = None
+            prose.append("")
+    # A code span never crosses a paragraph, so a stray backtick stays in its own.
+    paragraphs = "\n".join(prose).split("\n\n")
+    plain = "\n\n".join(CODE_SPAN.sub(" ", para) for para in paragraphs)
+    return [(m.group(1), m.group(2)) for m in LINK.finditer(plain)]
+
+
 @check("docs", "I link nella documentazione risolvono e sono portabili")
 def check_docs():
     r = Result()
@@ -585,15 +623,15 @@ def check_docs():
         if not f.exists():
             continue
         base = f.parent
-        for m in re.finditer(r"\[([^\]]*)\]\(([^)]+)\)", read(f)):
-            link = m.group(2).split("#")[0].strip()
+        for label, target in markdown_links(read(f)):
+            link = target.split("#")[0].strip()
             if not link or link.startswith(("http://", "https://", "mailto:")):
                 continue
             if link.startswith("file://"):
                 r.fail(f"{t}: link assoluto della macchina di sviluppo -> {link[:70]}")
                 continue
             if not (base / link).exists():
-                r.fail(f"{t}: link rotto [{m.group(1)[:30]}] -> {link}")
+                r.fail(f"{t}: link rotto [{label[:30]}] -> {link}")
     register = ROOT / REGISTER
     if register.exists():
         for problem in register_count_problems(read(register)):

@@ -8,7 +8,7 @@ Revision 3 records the maintainer's decision on microphone consent, the first of
 
 The decision, in the maintainer's words translated: a light local AI of this kind is wanted: a tool-call model (Needle), wake word and voice activity detection, speech recognition, embeddings, speech synthesis, and possibly Laya.
 
-The document does not change the objective of `NEXT.md` (an ISO that boots and shows the greeter) or the order of `doc_shell.md`. Its spikes need no shell. Its packages render inside surfaces that stage 2 and later stages deliver, and wait for them.
+The document does not change the objective of the GitHub milestone `iso-v0` (an ISO that boots and shows the greeter) or the order of `doc_shell.md`. Its spikes need no shell. Its packages render inside surfaces that stage 2 and later stages deliver, and wait for them.
 
 ## 1. Context
 
@@ -17,9 +17,9 @@ The document does not change the objective of `NEXT.md` (an ISO that boots and s
 **What exists, and what it is worth.**
 
 - `athanor-ai-daemon` is outside the workspace and is built by nothing. Its weights loader allocates zero-filled quantized tensors and reports the model as loaded; its DRM lease returns "unimplemented"; its answer to a query is a formatted string. It carries `.expect` calls and direct dependency versions (`candle-core`, `vulkano`, `openvino`). It is not a base to build on.
-- `athanor-ui-agent` is a Python daemon that asks Ollama and `llama3.2:1b` for widgets and writes `widgets.json` for `athanor-shell-rs`, which is frozen (`doc_shell.md`, SH4).
+- `athanor-ui-agent`, deleted on 2026-10-05, was a Python daemon that asked Ollama and `llama3.2:1b` for widgets and wrote `widgets.json` for `athanor-shell-rs`, which is frozen (`doc_shell.md`, SH4).
 - `athanor-semantic-db` is a stub: its spec installs a script that prints one line. It is listed in `custom_packages` and `custom_tier3` of `forge/config/packages.json`, so it ships. That is a facade in the image (`doc_shell.md`, SH1).
-- `athanor-ai-daemon` and `athanor-ui-agent` are in no tier list, so neither ships.
+- `athanor-ai-daemon` is in no tier list, so it does not ship; neither did `athanor-ui-agent`.
 
 **What the audit of 2026-09-30 found that this document depends on.** Each item is a prerequisite in package A0 (section 3).
 
@@ -79,7 +79,7 @@ The registry is a closed list in the repository, generated into Needle's schemas
 | `read` | changes nothing | open a settings page, show the layout |
 | `reversible` | changes the session and can be undone at once | layout preset and knobs, do-not-disturb, volume, tiling |
 | `confirm` | needs an on-screen confirmation drawn by the bar | power actions, closing windows in bulk |
-| `forbidden` | never registered | anything that maps to an `os.athanor.*` polkit action, updates and rollback, the Gatekeeper, attestation, credentials, mesh keys |
+| `forbidden` | never registered | anything that maps to an `os.athanor.*` polkit action, updates and rollback, execution control (IPE), attestation, credentials, mesh keys |
 
 Rules that hold for every tool:
 
@@ -108,7 +108,7 @@ Rules that hold for every tool:
 
 - It stays out until spike N4 shows, on a labelled sample of real Athanor notifications, that it beats a rule baseline by a margin the plan of the package states.
 - If admitted, it runs as an ONNX export inside `athanor-inference`, not as a Python process, with the multilingual checkpoint for Italian.
-- It decides nothing about the Gatekeeper, polkit, attestation, updates or the trust state (`doc_shell.md`, SH12).
+- It decides nothing about execution control (IPE), polkit, attestation, updates or the trust state (`doc_shell.md`, SH12).
 
 **AI10. Budgets and hardware.**
 
@@ -117,7 +117,7 @@ Rules that hold for every tool:
 - The budget must hold with no swap, which is the state today. If D15 (zram) lands, the budget may relax; it is never planned on it.
 - Version 1 runs on the CPU and needs no GPU or NPU. Offload is a later specification, and this document retires the "0 % CPU" claim of `athanor-ai-daemon`.
 
-**AI11. The residues go.** The proposal, for the maintainer to approve because it retires code: `athanor-ai-daemon` and `athanor-ui-agent` are deleted when the first package of this document ships; `athanor-semantic-db` leaves `forge/config/packages.json` now, and returns as a real package with AI8.
+**AI11. The residues go.** The proposal, for the maintainer to approve because it retires code: `athanor-ai-daemon` is deleted when the first package of this document ships (`athanor-ui-agent` was deleted on 2026-10-05); `athanor-semantic-db` leaves `forge/config/packages.json` now, and returns as a real package with AI8.
 
 ## 3. Stages
 
@@ -174,7 +174,7 @@ N1 to N3 run on the maintainer's own machine, the environment that reaches Huggi
 2. **Which embedding model,** and whether Needle's head is enough (N1).
 3. **The wake word.** A custom phrase needs a trained model; who trains it, on what data, and whether the user can change it.
 4. **Voice confirmation.** AI5 forbids it outright. A user who cannot press a key needs another answer, for example a spoken passphrase that is not a recording, and that is not designed here.
-5. **A Gatekeeper compartment** for `athanor-inference` (AI3).
+5. **Confinement beyond AI3** for `athanor-inference`: whether the hardened user unit and Landlock of AI3 suffice, or a stronger compartment is needed.
 6. **A user-supplied model,** for people who want their own language. Excluded from version 1 because the manifest would then hold unsigned weights.
 7. **A generative model.** If a use case appears, it needs its own specification. For sizing: a 2B model adds about 3 to 5 GB, a 4B about 6 to 8 GB, a 9B about 8 to 12 GB, so it lifts the recommended memory to 16 GiB from the 4B class up. These figures are estimates.
 8. **A remote model on an attested mesh host** (`doc_kernel_profile.md`, D38), for thin machines. Not designed here.
@@ -186,11 +186,11 @@ N1 to N3 run on the maintainer's own machine, the environment that reaches Huggi
 - `doc_shell.md`: a pointer in the list of later stages; nothing else.
 - `doc_bar.md`: the microphone module (the indicator of every capture, the mute, the voice-control switch) joins the audio group of BR3, and the extraction offers join BR4. Both are written in the plan of A1 and A3, not before, and not while the bar's own plans are moving.
 - `forge/config/packages.json`: `athanor-semantic-db` leaves `custom_packages` and `custom_tier0` (AI11).
-- `forge/specs/athanor-ai-daemon` and `forge/specs/athanor-ui-agent`: deleted at the first package (AI11), by the maintainer's decision.
+- `forge/specs/athanor-ai-daemon`: deleted at the first package (AI11), by the maintainer's decision. `forge/specs/athanor-ui-agent` was deleted on 2026-10-05.
 - `scripts/verify.py`: two checks, the licence of every manifest entry (AI4) and the absence of `forbidden` actions in the registry (AI5).
 - `forge/specs/athanor-xdg-desktop-portal-athanor`, `forge/specs/athanor-shelld`, `forge/specs/azoth/kernel-local` and `athanor-kernel-profile`: the changes of A0. Each is a fix of a defect the audit found, and none waits for the rest of this document.
 - The audit's other findings (the DAG that rebuilds every node, the tier repositories consumed by tag, the `kernel-build.yml` identity that accepts any branch, the shipped command line that contradicts D15 and D16) are outside this document and are reported to the maintainer separately.
-- `NEXT.md`: unchanged.
+- The milestone `iso-v0`: unchanged.
 
 ## 8. Acceptance
 
