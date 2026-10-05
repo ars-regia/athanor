@@ -27,6 +27,7 @@ ATTESTED_OTHER_NVR = subprocess.run(
     input=f"FEDORA_KERNEL_NVR={OTHER_FEDORA_KERNEL_NVR}\n", capture_output=True, text=True, check=True,
 ).stdout.strip()  # the NVR nvr.sh derives from it, i.e. what attested_nvr() must report
 assert ATTESTED_OTHER_NVR != NVR, "OTHER_FEDORA_KERNEL_NVR must derive an NVR other than the real one"
+INPUTS = json.loads(subprocess.run(["python3", str(ROOT / "forge/specs/azoth/build-inputs.py")], capture_output=True, text=True, check=True).stdout)
 MODULE = {"open": "sha256:" + "3" * 64, "legacy": "sha256:" + "4" * 64}
 KERNEL_BUILD = "https://github.com/hr-mes/athanor/.github/workflows/kernel-build.yml@refs/heads/iso-v0"
 KMOD = "https://github.com/hr-mes/athanor/.github/workflows/nvidia-kmod.yml@refs/heads/iso-v0"
@@ -47,7 +48,8 @@ def published(branches=("open", "legacy")):
     fx = {
         "tags": {f"{REG}/azoth:{NVR}": KERNEL, f"{REG}/azoth-devel:{NVR}": DEVEL},
         "signatures": {f"{REG}/azoth@{KERNEL}": KERNEL_BUILD, f"{REG}/azoth-devel@{DEVEL}": KERNEL_BUILD},
-        "attestations": {},
+        # The pins attestation the workflow attaches to the kernel: the inputs of the build.
+        "attestations": {f"{REG}/azoth@{KERNEL}": [{"identity": KERNEL_BUILD, "predicate": INPUTS}]},
         "errors": [],
     }
     for branch in branches:
@@ -293,6 +295,8 @@ class Resolve(Tool):
         fx = published()
         del fx["tags"][f"{REG}/azoth:{NVR}"]
         fx["configs"] = {f"{REG}/azoth@{KERNEL}": {"org.opencontainers.image.version": OTHER_NVR}}
+        # The kernel of the older NVR has no attestation of the current pins: the label decides.
+        fx["attestations"] = {}
         self.registry(fx)
         r = self.run_script("resolve", "--expect-kernel-digest", KERNEL)
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -752,6 +756,160 @@ class CheckPlan(Repo):
         block = re.search(r"name: bump-prep\n(?:.*\n)*?          path: \|\n((?:            .*\n)+)", text).group(1)
         prep_paths = {line.strip() for line in block.splitlines()} - {"prep.md", "prep.log", "prep-outcome"}
         self.assertEqual(check_paths | prep_paths, kernel_pin_files)
+
+
+def signed_by(ref_name, workflow="kernel-build.yml"):
+    return f"https://github.com/hr-mes/athanor/.github/workflows/{workflow}@{ref_name}"
+
+
+class TrustedRefs(Tool):
+    """Only the workflows of the trusted refs may publish a kernel or the NVIDIA modules. Any
+    other branch can be dispatched by whoever can write to the repository, and its signature is
+    as valid as the trusted one's, so the ref is part of the identity that is trusted."""
+
+    def resolve_with(self, fx, trusted=None):
+        self.registry(fx)
+        if trusted is not None:
+            self.env["KERNEL_TRUSTED_REFS"] = trusted
+        return self.run_script("resolve")
+
+    def kernel_signed_by(self, identity):
+        fx = published()
+        fx["signatures"][f"{REG}/azoth@{KERNEL}"] = identity
+        fx["signatures"][f"{REG}/azoth-devel@{DEVEL}"] = identity
+        fx["attestations"][f"{REG}/azoth@{KERNEL}"] = [{"identity": identity, "predicate": INPUTS}]
+        return fx
+
+    def test_iso_v0_and_main_are_trusted_by_default(self):
+        for ref in ("refs/heads/iso-v0", "refs/heads/main"):
+            r = self.resolve_with(self.kernel_signed_by(signed_by(ref)))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(self.state_file()["state"], "ready", ref)
+
+    def test_a_kernel_published_from_another_branch_is_not_ready(self):
+        r = self.resolve_with(self.kernel_signed_by(signed_by("refs/heads/claude/other")))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.state_file()["state"], "kernel-missing")
+        # The operator is told which identity signed it, since "missing" alone would mislead.
+        self.assertIn("refs/heads/claude/other", r.stderr)
+
+    def test_a_pull_request_or_a_tag_is_not_a_trusted_ref(self):
+        for ref in ("refs/pull/7/merge", "refs/tags/v1"):
+            self.resolve_with(self.kernel_signed_by(signed_by(ref)))
+            self.assertEqual(self.state_file()["state"], "kernel-missing", ref)
+
+    def test_the_ref_is_matched_exactly(self):
+        for ref in ("refs/heads/iso-v0-evil", "refs/heads/iso-v0/x", "refs/heads/xiso-v0", "refs/heads/iso-v01"):
+            self.resolve_with(self.kernel_signed_by(signed_by(ref)))
+            self.assertEqual(self.state_file()["state"], "kernel-missing", ref)
+
+    def test_another_workflow_on_a_trusted_ref_is_not_the_kernel_build(self):
+        self.resolve_with(self.kernel_signed_by(signed_by("refs/heads/iso-v0", workflow="other.yml")))
+        self.assertEqual(self.state_file()["state"], "kernel-missing")
+
+    def test_the_trusted_refs_can_be_widened_by_name(self):
+        fx = self.kernel_signed_by(signed_by("refs/heads/claude/other"))
+        r = self.resolve_with(fx, trusted="iso-v0 claude/other")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.state_file()["state"], "ready")
+
+    def test_a_dot_in_a_trusted_name_is_a_dot_and_not_a_wildcard(self):
+        r = self.resolve_with(self.kernel_signed_by(signed_by("refs/heads/releaseX1")), trusted="iso-v0 release.1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.state_file()["state"], "kernel-missing")
+        r = self.resolve_with(self.kernel_signed_by(signed_by("refs/heads/release.1")), trusted="iso-v0 release.1")
+        self.assertEqual(self.state_file()["state"], "ready")
+
+    def test_a_name_with_a_metacharacter_is_refused(self):
+        for trusted in ("iso-v0;true", "iso-v0|.*", "a b(c", "iso-v0\\", "*"):
+            r = self.resolve_with(published(), trusted=trusted)
+            self.assertEqual(r.returncode, 1, trusted)
+            self.assertIn("KERNEL_TRUSTED_REFS", r.stderr)
+
+    def test_the_modules_follow_the_same_rule(self):
+        fx = published()
+        for branch in ("open", "legacy"):
+            ref = f"{REG}/azoth-nvidia@{MODULE[branch]}"
+            other = signed_by("refs/heads/claude/other", workflow="nvidia-kmod.yml")
+            fx["signatures"][ref] = other
+            fx["attestations"][ref] = [{"identity": other, "predicate": predicate(branch)}]
+        r = self.resolve_with(fx)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.state_file()["state"], "modules-missing")
+
+
+class KernelInputs(Tool):
+    """A signed kernel is ready only when a verified attestation carries exactly the inputs of
+    this checkout, as the workflow's own reuse check requires. Signed by a trusted ref is not
+    enough: the NVR is the same after a patch changes, and the tag would point at the old build."""
+
+    def with_attestation(self, predicate_or_none, identity=KERNEL_BUILD):
+        fx = published()
+        ref = f"{REG}/azoth@{KERNEL}"
+        fx["attestations"][ref] = [] if predicate_or_none is None else [{"identity": identity, "predicate": predicate_or_none}]
+        self.registry(fx)
+
+    def test_the_inputs_of_this_checkout_make_it_ready(self):
+        self.registry(published())
+        self.assertEqual(self.run_script("resolve").returncode, 0)
+        self.assertEqual(self.state_file()["state"], "ready")
+
+    def test_a_kernel_with_no_attestation_is_missing(self):
+        self.with_attestation(None)
+        self.assertEqual(self.run_script("resolve").returncode, 0)
+        self.assertEqual(self.state_file()["state"], "kernel-missing")
+
+    def test_a_kernel_built_from_other_inputs_is_missing(self):
+        for change in (lambda i: i["patches_sha256"].update({"0001-x.patch": "0" * 64}),
+                       lambda i: i["pins"].update({"FEDORA_KERNEL_NVR": "7.0.0-1.fc43"}),
+                       lambda i: i.update({"build_sh_sha256": "1" * 64}),
+                       lambda i: i.update({"builder_base": "registry.example/other@sha256:" + "2" * 64})):
+            other = json.loads(json.dumps(INPUTS))
+            change(other)
+            self.with_attestation(other)
+            self.assertEqual(self.run_script("resolve").returncode, 0)
+            self.assertEqual(self.state_file()["state"], "kernel-missing")
+
+    def test_any_verified_entry_with_the_inputs_is_enough(self):
+        fx = published()
+        stale = json.loads(json.dumps(INPUTS))
+        stale["build_sh_sha256"] = "1" * 64
+        fx["attestations"][f"{REG}/azoth@{KERNEL}"] = [
+            {"identity": KERNEL_BUILD, "predicate": stale},
+            {"identity": KERNEL_BUILD, "predicate": INPUTS},
+        ]
+        self.registry(fx)
+        self.assertEqual(self.run_script("resolve").returncode, 0)
+        self.assertEqual(self.state_file()["state"], "ready")
+
+    def test_the_key_order_of_the_predicate_does_not_matter(self):
+        self.with_attestation(dict(reversed(list(INPUTS.items()))))
+        self.assertEqual(self.run_script("resolve").returncode, 0)
+        self.assertEqual(self.state_file()["state"], "ready")
+
+    def test_an_attestation_of_an_untrusted_ref_does_not_count(self):
+        self.with_attestation(INPUTS, identity=signed_by("refs/heads/claude/other"))
+        self.assertEqual(self.run_script("resolve").returncode, 0)
+        self.assertEqual(self.state_file()["state"], "kernel-missing")
+
+    def test_a_caller_that_resolved_the_kernel_is_told_it_was_republished_with_other_inputs(self):
+        other = json.loads(json.dumps(INPUTS))
+        other["build_sh_sha256"] = "1" * 64
+        self.with_attestation(other)
+        r = self.run_script("resolve", "--expect-kernel-digest", KERNEL)
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("other inputs", r.stderr)
+        self.assertIsNone(self.state_file())
+
+    def test_a_failure_to_read_the_inputs_is_an_error_and_never_ready(self):
+        bin_dir = self.dir / "bin"
+        (bin_dir / "python3").write_text("#!/bin/sh\necho 'build-inputs: broken' >&2\nexit 3\n")
+        (bin_dir / "python3").chmod(0o755)
+        self.registry(published())
+        r = self.run_script("resolve")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("build-inputs", r.stderr)
+        self.assertIsNone(self.state_file())
 
 
 if __name__ == "__main__":

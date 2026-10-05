@@ -1,8 +1,10 @@
 //! `athanor-update`: checks for, downloads and applies system image updates, and publishes
 //! the trust state (docs/architecture/doc_update_trust.md). One binary, run by four units:
 //! `check` by the timer, `check --offline` at boot, `serve` by D-Bus activation, `migrate`
-//! once per machine. `recover-key` is the administrator's command of UT2.
+//! once per machine. `recover-key` is the administrator's command of UT2, and `go-back` the
+//! administrator's way to `GoBack()` from a console.
 mod check;
+mod goback;
 mod migrate;
 mod policy;
 mod recover;
@@ -36,6 +38,8 @@ enum Command {
     Serve,
     /// Move this machine onto the signed reference, once.
     Migrate,
+    /// Go back to the previous system version and restart: `sudo athanor-update go-back`.
+    GoBack,
     /// Move this machine to a new image signing key (see RECOVERY.md).
     RecoverKey {
         #[command(subcommand)]
@@ -111,6 +115,29 @@ fn main() -> ExitCode {
                     ExitCode::SUCCESS
                 }
                 Err(failure) => failed("the migration", failure.code),
+            }
+        }
+        Command::GoBack => {
+            let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                Ok(runtime) => runtime,
+                Err(err) => {
+                    eprintln!("athanor-update: cannot start the runtime: {err}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let outcome = runtime.block_on(async {
+                let system = zbus::Connection::system().await.map_err(|err| format!("cannot reach the system bus: {err}"))?;
+                goback::run(&system).await
+            });
+            match outcome {
+                Ok(message) => {
+                    println!("{message}");
+                    ExitCode::SUCCESS
+                }
+                Err(message) => {
+                    eprintln!("athanor-update: {message}");
+                    ExitCode::FAILURE
+                }
             }
         }
         Command::RecoverKey { step } => {

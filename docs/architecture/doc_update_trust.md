@@ -87,6 +87,7 @@ What is available: `skopeo` 1.22 and `bootc` 1.16 are in the image; `bootc upgra
 - **The held digest is needed and cannot come from bootc:** after a rollback, `bootc upgrade --check` says "No changes" while `--download-only` stages the digest the user just left.
 - `GoBack()` targets the immediately previous deployment only and logs the caller's uid at notice.
 - **One read beside the two requests.** `State()` takes no argument, asks no polkit and is open to every user. It reads the state file of UT7 with `athanor-trust-state`, requiring root as the owner, and returns the validated document re-serialised, so a caller never receives bytes the parser refused. A missing file is `os.athanor.Update1.Error.NoState`, a file not owned by root or writable by others is `Error.Untrusted`, and an unparsable one is `Error.Unreadable`. The call counts as activity for the idle exit and nothing more.
+- **A console client.** `athanor-update go-back` calls `GoBack()` for an administrator at a text console, which is where a machine whose desktop does not start leaves the person. Run through `sudo`, the caller is root, whom polkit authorises without asking (`check_authorization_sync`: uid 0 is always authorised unless the call asks to always check), and the uid logged at notice is 0; from any other user it needs an authentication agent, which a console has none of, and the command tells the person to use `sudo`.
 - **Held digest:** `/var/lib/athanor-update/held` names the digest the user left. The check skips it and offers only a newer one. No request releases it.
 
 **UT7. One state file, written atomically.** *(constraint 6)*
@@ -125,7 +126,7 @@ What is available: `skopeo` 1.22 and `bootc` 1.16 are in the image; `bootc upgra
 - **D2. `athanor-secure-boot` leaves the image.** It cannot own its bus name, so it has never answered a call, and UT8 replaces its one reading. **Recommended.** Nothing in the repository calls that name. Retiring means the binary, its unit and its bus name leave; the TPM sealing script and unit, the rollback check and the `systemd-pcrphase-sysinit` drop-in stay, and so does the `SOURCES` tree, which `system/Containerfile` reads directly. Which of those the image enables today is checked before the change. The alternative is a bus policy file and a review of what the service claims to attest.
 - **D3. Who generates and holds the cosign key:** the maintainer, offline, as with the Secure Boot and module keys. The agent never sees the private key.
 
-Found on the way and out of scope: `athanor-backup`, which ships, guards its methods with `org.athanor.backup.*` actions that no `.policy` file declares, so polkit denies every call, and `verify.py polkit` does not look at the `org.athanor.*` namespace.
+Found on the way and since resolved: `athanor-backup` guarded its methods with `org.athanor.backup.*` actions that no `.policy` file declared, so polkit denied every call. It is now a root command with no D-Bus interface and no polkit action (commit `e66ad6d9`). `verify.py polkit` still does not look at the `org.athanor.*` namespace.
 
 ## 5. Changes to other documents
 
