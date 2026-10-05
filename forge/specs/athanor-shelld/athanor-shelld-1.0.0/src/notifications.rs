@@ -32,6 +32,7 @@ use crate::i18n::{tr, tr_n};
 use crate::icon;
 use crate::identity::{self, Identity};
 use crate::policy::{decide, Facts};
+use crate::rate::RateLimit;
 use crate::rules::{RuleError, Rules};
 use crate::sender::{admits, Admitted, Caller};
 use crate::server::{NOTIFICATIONS_PATH, PRIVATE_PATH};
@@ -89,6 +90,8 @@ pub struct State {
     bus_id: String,
     /// Finds and plays the sound of a notification (NC7).
     player: Player,
+    /// NC12: who sends too many.
+    rate: RateLimit,
 }
 
 /// What an evaluation of the do-not-disturb state leaves to announce.
@@ -161,6 +164,7 @@ impl State {
             wake,
             bus_id: String::new(),
             player,
+            rate: RateLimit::new(),
         };
         state.evaluate();
         state
@@ -285,6 +289,22 @@ impl State {
     ) -> Arrival {
         let rule = self.rules.rule(&identity);
         let settings = self.rules.settings();
+        let now = self.now_ms();
+        // A replace that changes only the progress (NC9) updates the notification in place:
+        // the popup keeps what it had and nothing sounds. It is no new notification, so it
+        // does not count against the rate limit either.
+        let in_place = self
+            .store
+            .replaceable(replaces_id, &identity, &sender)
+            .filter(|held| progress_only(&held.content, &content))
+            .is_some();
+        // The key is the application; without a proven one the sender's connection, which
+        // the sender cannot rotate the way it can `app_name`.
+        let rate_limited = !in_place
+            && !match &identity {
+                Identity::App(id) => self.rate.admit(id, now),
+                Identity::Other => self.rate.admit(&sender, now),
+            };
         let decision = decide(&Facts {
             identity: &identity,
             rule: &rule,
@@ -293,23 +313,15 @@ impl State {
             urgency: content.urgency,
             transient: content.transient,
             expire_timeout,
-            // ponytail: the rate limit arrives with NC12.
             suppress_sound: sound.suppress,
-            rate_limited: false,
+            rate_limited,
         });
         if !decision.list {
             return Arrival::Refused(self.store.fresh_id());
         }
         content.timeout_ms = decision.timeout_ms;
         let urgency = content.urgency;
-        let (now, popup) = (self.now_ms(), decision.popup);
-        // A replace that changes only the progress (NC9) updates the notification in place:
-        // the popup keeps what it had and nothing sounds.
-        let in_place = self
-            .store
-            .replaceable(replaces_id, &identity, &sender)
-            .filter(|held| progress_only(&held.content, &content))
-            .is_some();
+        let popup = decision.popup;
         if !in_place && self.effective.on && rule.popups && !decision.popup {
             self.dnd.missed_one();
         }

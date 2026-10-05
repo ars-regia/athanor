@@ -2,6 +2,11 @@
 //! panel, the others wait their turn. No clock and no GTK: the caller passes the
 //! time that elapsed, and pauses a countdown by not calling `tick`.
 
+use std::collections::HashMap;
+
+use athanor_layout::preset::PanelEdge;
+use gtk4_layer_shell::Edge;
+
 use crate::notices::WAITS;
 
 pub const VISIBLE: usize = 3;
@@ -115,6 +120,92 @@ pub fn target_output(activated: Option<&[String]>, outputs: &[String]) -> Option
     Some(focused.unwrap_or(0))
 }
 
+/// Where the popups sit (NC5, `popup_corner`). `Bar` follows the panel's edge, at the end side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Corner {
+    #[default]
+    Bar,
+    TopStart,
+    TopEnd,
+    BottomStart,
+    BottomEnd,
+}
+
+/// What the popups take from the daemon's `Settings` (NC12).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Look {
+    pub corner: Corner,
+    /// Popups show only the application's name and icon.
+    pub private: bool,
+    /// While true the popups stay on the top layer, below fullscreen windows: the do not
+    /// disturb trigger already silences them there.
+    pub trigger_fullscreen: bool,
+}
+
+impl Default for Look {
+    fn default() -> Self {
+        Look {
+            corner: Corner::Bar,
+            private: false,
+            trigger_fullscreen: true,
+        }
+    }
+}
+
+impl Look {
+    /// From the daemon's `Settings` reply; a missing or unreadable key keeps its default.
+    #[must_use]
+    pub fn from_settings(pairs: &HashMap<String, String>) -> Look {
+        let default = Look::default();
+        let flag = |key: &str, fallback: bool| match pairs.get(key).map(String::as_str) {
+            Some("true") => true,
+            Some("false") => false,
+            _ => fallback,
+        };
+        Look {
+            corner: match pairs.get("popup_corner").map(String::as_str) {
+                Some("top-start") => Corner::TopStart,
+                Some("top-end") => Corner::TopEnd,
+                Some("bottom-start") => Corner::BottomStart,
+                Some("bottom-end") => Corner::BottomEnd,
+                _ => default.corner,
+            },
+            private: flag("private_popups", default.private),
+            trigger_fullscreen: flag("trigger_fullscreen", default.trigger_fullscreen),
+        }
+    }
+}
+
+/// The vertical and the horizontal edge the popups are anchored to. Left and right swap in a
+/// right-to-left locale, as the bar's own end side does.
+#[must_use]
+pub fn corner_edges(corner: Corner, panel_edge: PanelEdge, rtl: bool) -> (Edge, Edge) {
+    let (start, end) = if rtl {
+        (Edge::Right, Edge::Left)
+    } else {
+        (Edge::Left, Edge::Right)
+    };
+    let panel = match panel_edge {
+        PanelEdge::Top => Edge::Top,
+        PanelEdge::Bottom => Edge::Bottom,
+    };
+    match corner {
+        Corner::Bar => (panel, end),
+        Corner::TopStart => (Edge::Top, start),
+        Corner::TopEnd => (Edge::Top, end),
+        Corner::BottomStart => (Edge::Bottom, start),
+        Corner::BottomEnd => (Edge::Bottom, end),
+    }
+}
+
+/// What a private popup shows (NC12): the application's name and nothing of the notification.
+/// The first is the text on the card, the second its accessible name, which must not carry the
+/// summary either.
+#[must_use]
+pub fn private_card(app_name: &str) -> (String, String) {
+    (app_name.to_owned(), app_name.to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,5 +310,55 @@ mod tests {
         popups.show(3, 4000, false);
         assert_eq!(popups.end_non_critical(), [1, 3]);
         assert_eq!(popups.visible(), [2]);
+    }
+
+    #[test]
+    fn the_five_corners_anchor_two_edges_and_mirror_in_rtl() {
+        use Corner::*;
+        let edges = |corner, panel, rtl| corner_edges(corner, panel, rtl);
+        assert_eq!(edges(Bar, PanelEdge::Top, false), (Edge::Top, Edge::Right));
+        assert_eq!(edges(Bar, PanelEdge::Bottom, false), (Edge::Bottom, Edge::Right));
+        assert_eq!(edges(Bar, PanelEdge::Top, true), (Edge::Top, Edge::Left));
+        // The four named corners ignore the panel.
+        for panel in [PanelEdge::Top, PanelEdge::Bottom] {
+            assert_eq!(edges(TopStart, panel, false), (Edge::Top, Edge::Left));
+            assert_eq!(edges(TopEnd, panel, false), (Edge::Top, Edge::Right));
+            assert_eq!(edges(BottomStart, panel, false), (Edge::Bottom, Edge::Left));
+            assert_eq!(edges(BottomEnd, panel, false), (Edge::Bottom, Edge::Right));
+            assert_eq!(edges(TopStart, panel, true), (Edge::Top, Edge::Right));
+            assert_eq!(edges(BottomEnd, panel, true), (Edge::Bottom, Edge::Left));
+        }
+    }
+
+    #[test]
+    fn a_private_card_carries_only_the_name() {
+        let (shown, accessible) = private_card("Mail");
+        assert_eq!((shown.as_str(), accessible.as_str()), ("Mail", "Mail"));
+    }
+
+    #[test]
+    fn the_look_reads_the_settings_and_keeps_defaults_for_what_it_cannot_read() {
+        let pairs = |list: &[(&str, &str)]| {
+            list.iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect::<HashMap<_, _>>()
+        };
+        assert_eq!(Look::from_settings(&HashMap::new()), Look::default());
+        assert_eq!(
+            Look::from_settings(&pairs(&[
+                ("popup_corner", "bottom-start"),
+                ("private_popups", "true"),
+                ("trigger_fullscreen", "false"),
+            ])),
+            Look {
+                corner: Corner::BottomStart,
+                private: true,
+                trigger_fullscreen: false
+            }
+        );
+        assert_eq!(
+            Look::from_settings(&pairs(&[("popup_corner", "middle"), ("private_popups", "yes")])),
+            Look::default()
+        );
     }
 }

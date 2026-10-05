@@ -13,7 +13,7 @@ use athanor_bar::badge;
 use athanor_bar::control_center;
 use athanor_bar::fullscreen::report;
 use athanor_bar::notices::{self, Held, Notice, Picture, Unread, WIRE_SIGNATURE};
-use athanor_bar::popups::{target_output, Popups};
+use athanor_bar::popups::{private_card, target_output, Look, Popups};
 use gtk4::accessible::Property;
 use gtk4::prelude::*;
 use gtk4::{gdk, gio, glib, pango};
@@ -67,6 +67,8 @@ pub struct Service {
     unread: RefCell<Unread>,
     popups: RefCell<Popups>,
     dnd: Cell<bool>,
+    /// What the daemon's settings say about the popups (NC12); the defaults until it answers.
+    look: Cell<Look>,
     /// The last `(available, active)` sent to the daemon; `None` until the first send for
     /// this owner.
     fullscreen: Cell<Option<(bool, bool)>>,
@@ -137,6 +139,7 @@ impl Service {
                 unread: RefCell::new(Unread::default()),
                 popups: RefCell::new(Popups::default()),
                 dnd: Cell::new(false),
+                look: Cell::new(Look::default()),
                 fullscreen: Cell::new(None),
                 ticking: Cell::new(false),
                 last_tick: Cell::new(None),
@@ -328,6 +331,7 @@ impl Service {
         self.ensure_ticking();
         self.changed();
         self.read_dnd();
+        self.read_settings();
         self.fullscreen.set(None);
         self.report_fullscreen();
     }
@@ -380,6 +384,7 @@ impl Service {
                     "athanor-shelld sent DoNotDisturbChanged with an unexpected type"
                 ),
             },
+            "SettingsChanged" => self.read_settings(),
             _ => {}
         }
     }
@@ -597,6 +602,48 @@ impl Service {
         });
     }
 
+    /// Asks the daemon for its settings: after each list, since a change made while no bar ran
+    /// sent no signal, and on `SettingsChanged`. The bar keeps only what it draws with.
+    fn read_settings(&self) {
+        let Some((connection, owner)) = self.peer.borrow().clone() else {
+            return;
+        };
+        let (me, generation) = (self.me.clone(), self.generation.get());
+        glib::spawn_future_local(async move {
+            let reply = connection
+                .call_future(
+                    Some(&owner),
+                    PATH,
+                    INTERFACE,
+                    "Settings",
+                    None,
+                    None,
+                    gio::DBusCallFlags::NONE,
+                    TIMEOUT_MS,
+                )
+                .await;
+            let Some(service) = me
+                .upgrade()
+                .filter(|service| service.generation.get() == generation)
+            else {
+                return;
+            };
+            match reply
+                .as_ref()
+                .ok()
+                .and_then(|reply| reply.try_child_value(0)?.get::<HashMap<String, String>>())
+            {
+                Some(pairs) => {
+                    service.look.set(Look::from_settings(&pairs));
+                    service.redraw_popups();
+                }
+                None => tracing::warn!(
+                    "athanor-shelld did not report its settings; the popups keep their look"
+                ),
+            }
+        });
+    }
+
     /// Tells the daemon whether a fullscreen window has the focus, when that changed since
     /// the last report to this owner. A compositor that withholds the toplevel list is
     /// reported once as unobservable.
@@ -701,15 +748,15 @@ impl Service {
                 })
                 .collect()
         };
-        let mut windows = self.windows.borrow_mut();
+        let (mut windows, look) = (self.windows.borrow_mut(), self.look.get());
         for (monitor, shown) in plan {
             match windows.iter().find(|window| window.on(&monitor)) {
                 Some(window) if shown.is_empty() => window.hide(),
-                Some(window) => window.show(&bar, &me, &shown),
+                Some(window) => window.show(&bar, &me, &shown, look),
                 None if shown.is_empty() => {}
                 None => {
                     let window = Window::new(&bar, &monitor);
-                    window.show(&bar, &me, &shown);
+                    window.show(&bar, &me, &shown, look);
                     windows.push(window);
                 }
             }
@@ -838,18 +885,74 @@ fn picture(notice: &Notice) -> gtk4::Image {
         Picture::Name(name) if has_icon(name) => Some(gtk4::Image::from_icon_name(name)),
         Picture::Name(_) | Picture::None => None,
     }
-    .or_else(|| {
-        notice
-            .desktop_entry
-            .as_deref()
-            .and_then(|entry| gio_unix::DesktopAppInfo::new(&format!("{entry}.desktop")))
-            .and_then(|info| info.icon())
-            .map(|icon| gtk4::Image::from_gicon(&icon))
-    })
+    .or_else(|| application_icon(notice))
     .unwrap_or_else(|| gtk4::Image::from_icon_name(FALLBACK_ICON));
     image.set_pixel_size(PICTURE_PX);
     image.set_valign(gtk4::Align::Start);
     image
+}
+
+/// The icon of the application's desktop entry.
+fn application_icon(notice: &Notice) -> Option<gtk4::Image> {
+    notice
+        .desktop_entry
+        .as_deref()
+        .and_then(|entry| gio_unix::DesktopAppInfo::new(&format!("{entry}.desktop")))
+        .and_then(|info| info.icon())
+        .map(|icon| gtk4::Image::from_gicon(&icon))
+}
+
+/// A private popup (NC12): the application's name and icon, nothing the notification says.
+/// The image is the application's own icon, never the notification's picture, which can be its
+/// content; there is no body, progress, action or reply, and the accessible names carry the
+/// name only.
+fn private_popup(service: &Rc<Service>, notice: &Notice) -> gtk4::Box {
+    let card = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
+        .spacing(8)
+        .accessible_role(gtk4::AccessibleRole::Alert)
+        .build();
+    card.add_css_class("notification-card");
+    if notice.critical() {
+        card.add_css_class("critical");
+    }
+    card.set_size_request(CARD_WIDTH, -1);
+    let (shown, accessible) = private_card(&app_name(notice));
+    card.update_property(&[Property::Label(&accessible)]);
+    let name = text_label(&shown, 1);
+    name.add_css_class("bar-popover-title");
+    name.set_hexpand(true);
+    let icon = application_icon(notice)
+        .unwrap_or_else(|| gtk4::Image::from_icon_name(FALLBACK_ICON));
+    icon.set_pixel_size(PICTURE_PX);
+    icon.set_valign(gtk4::Align::Start);
+    let id = notice.id;
+    let read = gtk4::GestureClick::new();
+    let weak = Rc::downgrade(service);
+    read.connect_released(move |_, _, _, _| {
+        if let Some(service) = weak.upgrade() {
+            service.mark_read(id);
+        }
+    });
+    card.add_controller(read);
+    let close = gtk4::Button::from_icon_name("window-close-symbolic");
+    close.add_css_class("flat");
+    close.set_valign(gtk4::Align::Start);
+    let close_name = tr_with("Close {title}", "title", &accessible);
+    close.set_tooltip_text(Some(&close_name));
+    close.update_property(&[Property::Label(&close_name)]);
+    let weak = Rc::downgrade(service);
+    close.connect_clicked(move |_| {
+        if let Some(service) = weak.upgrade() {
+            service.dismiss(id);
+        }
+    });
+    let top = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
+    top.append(&icon);
+    top.append(&name);
+    top.append(&close);
+    card.append(&top);
+    card
 }
 
 fn text_label(text: &str, lines: i32) -> gtk4::Label {
@@ -907,7 +1010,10 @@ pub(super) fn progress(value: u8) -> gtk4::ProgressBar {
 
 /// One notification as a popup. It is an `alert`, so a screen reader reads it (BR4); its
 /// name is the summary. A click on it marks it read.
-pub(super) fn card(service: &Rc<Service>, notice: &Notice) -> gtk4::Box {
+pub(super) fn card(service: &Rc<Service>, notice: &Notice, private: bool) -> gtk4::Box {
+    if private {
+        return private_popup(service, notice);
+    }
     let card = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Vertical)
         .spacing(8)

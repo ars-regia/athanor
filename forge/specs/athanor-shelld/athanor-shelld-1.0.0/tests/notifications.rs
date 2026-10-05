@@ -1211,3 +1211,57 @@ async fn a_reply_goes_to_the_connection_that_sent_the_last_progress_update() {
         .expect("args");
     assert_eq!((got, text.as_str()), (id, "to the new process"));
 }
+
+#[tokio::test]
+async fn the_twenty_first_notification_of_a_burst_is_listed_without_a_popup() {
+    let bus = Bus::start("rate");
+    let (daemon, bar, center, app) = units(&bus, APP_CGROUP).await;
+    let _daemon = daemon;
+    let (public, private) = (public(&app).await, private(&bar).await);
+    private
+        .call::<_, _, Vec<WireNotification>>("List", &())
+        .await
+        .expect("List");
+    let mut added = private.receive_signal("Added").await.expect("subscribe");
+    for n in 0..21 {
+        notify(&public, 0, &format!("burst {n}"), "", &[], HashMap::new()).await;
+    }
+    let mut popups = Vec::new();
+    for _ in 0..21 {
+        let wire: WireNotification = added.next().await.expect("Added").body().deserialize().expect("wire");
+        popups.push(wire.popup);
+    }
+    assert!(popups[..20].iter().all(|p| *p), "the first twenty pop up");
+    assert!(!popups[20], "the twenty-first does not");
+    let history: Vec<WireNotification> = self::private(&center)
+        .await
+        .call("History", &())
+        .await
+        .expect("History");
+    assert_eq!(history.len(), 21, "all of them are listed");
+}
+
+#[tokio::test]
+async fn progress_updates_do_not_count_against_the_limit() {
+    let bus = Bus::start("rate-progress");
+    let (daemon, bar, _center, app) = units(&bus, APP_CGROUP).await;
+    let _daemon = daemon;
+    let (public, private) = (public(&app).await, private(&bar).await);
+    private
+        .call::<_, _, Vec<WireNotification>>("List", &())
+        .await
+        .expect("List");
+    let mut added = private.receive_signal("Added").await.expect("subscribe");
+    let with = |value: i32| HashMap::from([("value", Value::I32(value))]);
+    let id = notify(&public, 0, "copy", "", &[], with(0)).await;
+    for value in 1..=30 {
+        notify(&public, id, "copy", "", &[], with(value)).await;
+    }
+    notify(&public, 0, "next", "", &[], HashMap::new()).await;
+    let mut last = true;
+    for _ in 0..2 {
+        let wire: WireNotification = added.next().await.expect("Added").body().deserialize().expect("wire");
+        last = wire.popup;
+    }
+    assert!(last, "thirty progress updates left the budget alone");
+}

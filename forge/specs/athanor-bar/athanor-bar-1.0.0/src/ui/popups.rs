@@ -1,6 +1,6 @@
-//! The notification popups (doc_bar.md BR4): one layer surface per output, at the end corner
-//! on the panel's side, above windows, never taking the keyboard focus (ruling 14). The
-//! newest popup sits nearest the panel.
+//! The notification popups (doc_bar.md BR4, NC12): one layer surface per output, at the corner
+//! the settings name (by default the end corner on the panel's side), above windows, never
+//! taking the keyboard focus (ruling 14). The newest popup sits nearest the anchored edge.
 //!
 //! Once mapped, the surface stays mapped for the life of the process: cosmic-comp 1.8.0
 //! drops the Wayland connection of a gtk4-layer-shell client that destroys a mapped layer
@@ -15,7 +15,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use athanor_bar::notices::Notice;
-use athanor_layout::preset::PanelEdge;
+use athanor_bar::popups::{corner_edges, Look};
 use gtk4::prelude::*;
 use gtk4::{cairo, gdk};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
@@ -70,33 +70,34 @@ impl Window {
         }
     }
 
-    /// Shows `notices`, newest first, at the end corner of the panel's side.
-    pub(super) fn show(&self, bar: &Bar, service: &Rc<Service>, notices: &[Notice]) {
-        let panel = bar.layout().panel();
-        let (edge, far) = match panel {
-            PanelEdge::Top => (Edge::Top, Edge::Bottom),
-            PanelEdge::Bottom => (Edge::Bottom, Edge::Top),
-        };
-        let (end, start) = if i18n::is_rtl() {
-            (Edge::Left, Edge::Right)
+    /// Shows `notices`, newest first, at the corner `look` names (the end corner of the
+    /// panel's side by default), on the overlay layer unless the fullscreen trigger is on.
+    pub(super) fn show(&self, bar: &Bar, service: &Rc<Service>, notices: &[Notice], look: Look) {
+        let (edge, end) = corner_edges(look.corner, bar.layout().panel(), i18n::is_rtl());
+        for side in [Edge::Top, Edge::Bottom, Edge::Left, Edge::Right] {
+            let taken = side == edge || side == end;
+            self.window.set_anchor(side, taken);
+            self.window.set_margin(side, if taken { MARGIN } else { 0 });
+        }
+        // The layer is set only when it changes: a protocol too old to move a mapped
+        // surface would make gtk4-layer-shell remap it (see the module's documentation).
+        let layer = if look.trigger_fullscreen {
+            Layer::Top
         } else {
-            (Edge::Right, Edge::Left)
+            Layer::Overlay
         };
-        self.window.set_anchor(edge, true);
-        self.window.set_anchor(far, false);
-        self.window.set_anchor(end, true);
-        self.window.set_anchor(start, false);
-        self.window.set_margin(edge, MARGIN);
-        self.window.set_margin(end, MARGIN);
+        if self.window.layer() != layer {
+            self.window.set_layer(layer);
+        }
         while let Some(child) = self.cards.first_child() {
             self.cards.remove(&child);
         }
         let mut ordered: Vec<&Notice> = notices.iter().collect();
-        if panel == PanelEdge::Bottom {
+        if edge == Edge::Bottom {
             ordered.reverse();
         }
         for notice in ordered {
-            self.cards.append(&card(service, notice));
+            self.cards.append(&card(service, notice, look.private));
         }
         self.window.present();
         self.set_input(true);

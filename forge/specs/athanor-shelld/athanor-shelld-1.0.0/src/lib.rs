@@ -14,6 +14,7 @@ pub mod image;
 pub mod markup;
 pub mod notifications;
 pub mod policy;
+pub mod rate;
 pub mod rules;
 pub mod sender;
 pub mod server;

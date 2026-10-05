@@ -12,7 +12,7 @@ It starts holding four unread notifications, so the captures show three popups a
 button counts four. `List` answers the unread ones, as the real daemon's does, and MarkRead
 marks them read and emits Read. Every call that acts is appended to
 /out/$RIG_TAG-notifications.log: "Close <id> <reason>", "InvokeAction <id> <key>
-token|no-token", "MarkRead <id>...", "SetDoNotDisturb True|False".
+token|no-token", "MarkRead <id>...", "SetDoNotDisturb True|False", "SetSetting <key> <value>".
 SetDoNotDisturb also emits DoNotDisturbChanged, as the real daemon does for every change.
 """
 
@@ -56,11 +56,14 @@ NODE = Gio.DBusNodeInfo.new_for_xml(f"""
     </method>
     <method name="SetDoNotDisturb"><arg type="b" direction="in"/></method>
     <method name="MarkRead"><arg type="au" direction="in"/></method>
+    <method name="Settings"><arg type="a{{ss}}" direction="out"/></method>
+    <method name="SetSetting"><arg type="s" direction="in"/><arg type="s" direction="in"/></method>
     <method name="ReportFullscreen"><arg type="b" direction="in"/><arg type="b" direction="in"/></method>
     <signal name="Added"><arg type="{WIRE}"/></signal>
     <signal name="Replaced"><arg type="{WIRE}"/></signal>
     <signal name="Closed"><arg type="u"/><arg type="u"/></signal>
     <signal name="Read"><arg type="au"/></signal>
+    <signal name="SettingsChanged"/>
     <signal name="DoNotDisturbChanged">
       <arg type="b"/><arg type="s"/><arg type="x"/>
     </signal>
@@ -103,6 +106,8 @@ class Daemon:
         self.held = []
         self.last_id = 0
         self.dnd = False
+        # The daemon's defaults (athanor-shelld rules.rs); the test changes them with SetSetting.
+        self.settings = {"popup_corner": "bar", "private_popups": "false", "trigger_fullscreen": "true"}
         self.bus = None
 
     def left_ms(self, notice):
@@ -219,6 +224,16 @@ class Daemon:
                 return
             if not notice["resident"]:
                 self.close(id_, 2)
+            invocation.return_value(None)
+        elif method == "Settings":
+            invocation.return_value(GLib.Variant("(a{ss})", (self.settings,)))
+        elif method == "SetSetting":
+            # The real daemon admits nobody to SetSetting yet; the fake lets the test change a
+            # setting and emits SettingsChanged as the daemon does.
+            key, value = parameters.unpack()
+            log(f"SetSetting {key} {value}")
+            self.settings[key] = value
+            self.emit("SettingsChanged", None)
             invocation.return_value(None)
         elif method == "ReportFullscreen":
             available, active = parameters.unpack()

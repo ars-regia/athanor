@@ -274,6 +274,13 @@ def daemon_unread():
     return [(row[0], row[9]) for row in listed]
 
 
+def daemon_unread_rows():
+    (listed,) = daemon_call(
+        "List", None, "(a(ussssa(sus)a(ss)bybbbxsssuuayuubibsss))"
+    ).unpack()
+    return listed
+
+
 def daemon_unread_safe():
     """`daemon_unread`, empty while the daemon is not on the bus."""
     try:
@@ -566,6 +573,29 @@ def main():
         "ToggleNotifications", None, None, Gio.DBusCallFlags.NONE, -1, None,
     )
     close_notification(chat)
+
+    # NC12: with private popups a popup shows the application's name and nothing the
+    # notification says, by its text and by its accessible name.
+    daemon_call("SetSetting", GLib.Variant("(ss)", ("private_popups", "true")))
+    secret = notify("Secret subject", body="Secret body", actions=["act", "Act"])
+    check(
+        "a private popup is named by the application only",
+        wait_for(lambda: "e2e" in (alerts(app, Atspi) or []), 3),
+        repr(alerts(app, Atspi)),
+    )
+    check(
+        "a private popup carries no summary, no body and no action, in any node",
+        not any(
+            "Secret" in name or name == "Act"
+            for _, name, _, _ in walk(app, Atspi)
+        ),
+    )
+    check(
+        "the center's history still holds the whole notification",
+        any(row[0] == secret for row in daemon_unread_rows()),
+    )
+    close_notification(secret)
+    daemon_call("SetSetting", GLib.Variant("(ss)", ("private_popups", "false")))
 
     transient = notify(
         "Transient", expire=1000, hints={"transient": GLib.Variant("b", True)}
