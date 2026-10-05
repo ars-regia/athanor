@@ -37,7 +37,7 @@ RECORD = textwrap.dedent("""\
             log.write(json.dumps({
                 "args": args,
                 "env": sorted(k for k in os.environ if k.startswith("SECUREBOOT")),
-                "key": any(runtime.glob("sign-kernel.*/key")),
+                "key": any(runtime.glob("sign-*/key")),
             }) + "\\n")
     """)
 

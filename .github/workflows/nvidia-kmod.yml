@@ -92,6 +92,19 @@ jobs:
       registry: ${{ needs.artifacts.outputs.registry }}
 
   sign:
+    # The only job that receives MODULE_SIGNING_KEY (D43): checkout, the unsigned modules of
+    # build, cosign from its pinned release, the locked nvidia image, registry login and
+    # system/sign-nvidia-modules.sh. The sign-file that runs beside the key comes from
+    # azoth-devel, which the script resolves and verifies itself (signed by kernel-build.yml on a
+    # trusted branch) instead of taking its digest from the workflow input or the artifacts of
+    # the run, which another job could have written.
+    #
+    # The workflow can be dispatched from any branch, so the key is used only on the branches
+    # that publish (the default kernel-artifacts.sh KERNEL_TRUSTED_REFS); from any other ref this
+    # job, and with it boot and publish, is skipped. The signing environment must also carry
+    # deployment branch rules for these branches and required reviewers, a repository setting
+    # the maintainer owns.
+    if: github.ref == 'refs/heads/iso-v0' || github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -108,38 +121,40 @@ jobs:
           path: out
           merge-multiple: true
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: nvidia-kernel-artifacts
-          path: kernel-artifacts
+      - name: Install cosign (pinned release, checksum-verified)
+        run: |
+          set -euo pipefail
+          bash forge/scripts/install-cosign.sh "$RUNNER_TEMP/cosign"
+          echo "$RUNNER_TEMP/cosign" >> "$GITHUB_PATH"
 
       - name: Build the nvidia image
         env:
           BUILDAH_ISOLATION: chroot
         run: podman build -t localhost/azoth-nvidia -f forge/specs/azoth/nvidia/Containerfile forge/specs/azoth
 
-      - name: Kernel-devel from the published image, by digest
-        # Only for scripts/sign-file, which nvidia.sh extracts from the RPM.
+      - name: 🔑 Login to the registry
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          registry=$(bash system/kernel-artifacts.sh get registry)
-          devel=$(bash system/kernel-artifacts.sh get devel_digest)
-          host=${registry%%/*}
-          echo "${GH_TOKEN}" | podman login "$host" -u "${GITHUB_ACTOR}" --password-stdin
-          trap 'podman logout "$host"' EXIT
-          ctr=$(podman create "${registry}/azoth-devel@${devel}" /kernel-devel)
-          mkdir -p devel && podman cp "${ctr}:/." devel/ && podman rm "$ctr" > /dev/null
+          registry=$(bash system/kernel-artifacts.sh registry)
+          echo "${GH_TOKEN}" | podman login "${registry%%/*}" -u "${GITHUB_ACTOR}" --password-stdin
+
+      - name: Keep an unsigned copy for the negative sample
+        run: mkdir -p mok && cp -a out/open mok/open
+
+      - name: Sign with the module signing key (system/sign-nvidia-modules.sh)
+        env:
+          MODULE_SIGNING_KEY: ${{ secrets.MODULE_SIGNING_KEY }}
+        run: bash system/sign-nvidia-modules.sh --modules out --devel devel
 
       - name: Sign a copy with an enrolled-MOK-shaped key
         # The negative sample of the boot job: nvidia.ko of the open branch signed by an
         # ephemeral key with the Secure Boot profile, whose certificate boot.sh enrols in
         # MokList. The kernel must refuse it: a Secure Boot key never authorises a module.
+        # The sign-file is the verified one sign-nvidia-modules.sh extracted to devel/.
         run: |
           set -euo pipefail
-          mkdir -p mok
-          cp -a out/open mok/open
           openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
             -config forge/specs/azoth/keys/profiles/secureboot.cnf -subj '/CN=Athanor OS K3 test MOK/' \
             -keyout "$RUNNER_TEMP/test-mok.key" -out mok/test-mok.pem 2> /dev/null
@@ -155,25 +170,6 @@ jobs:
           name: nvidia-mok-signed
           path: mok/
           if-no-files-found: error
-
-      - name: Sign with the module signing key
-        # The key lives in a 0600 file in the runner's tmp for the duration of the
-        # command, mounted read-only in the container; the public certificate is in the
-        # repository and compiled into the kernel (kernel-local).
-        env:
-          MODULE_SIGNING_KEY: ${{ secrets.MODULE_SIGNING_KEY }}
-        run: |
-          set -euo pipefail
-          [[ -n ${MODULE_SIGNING_KEY:-} ]] || { echo "MODULE_SIGNING_KEY is not available to this job: check the signing environment" >&2; exit 1; }
-          umask 077
-          printf '%s\n' "$MODULE_SIGNING_KEY" > "$RUNNER_TEMP/module.key"
-          trap 'rm -f "$RUNNER_TEMP/module.key"' EXIT
-          podman run --rm \
-            -v "$GITHUB_WORKSPACE:/forge" \
-            -v "$RUNNER_TEMP/module.key:/run/module.key:ro" \
-            -w /forge localhost/azoth-nvidia \
-            bash forge/specs/azoth/nvidia.sh sign --key /run/module.key \
-              --cert forge/specs/azoth/keys/modules/athanor-modules.pem --devel /forge/devel --out /forge/out
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
