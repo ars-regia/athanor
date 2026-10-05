@@ -1,11 +1,13 @@
-//! `os.athanor.ControlCenter1` (CC2, CC9): `Show(page)` and `Toggle()`, and the property `Open`
-//! the bar follows to hide its notification popups while the panel is shown. The bar's button
-//! and Super+C call `Toggle`; the bus starts the unit when it is down.
+//! `os.athanor.ControlCenter1` (CC2, CC9, NC1): `Show(page)`, `Toggle()` and
+//! `ToggleNotifications()`, and the property `Open` the bar follows to hide its notification
+//! popups while either panel is shown. The bar's button and Super+C call `Toggle`, Super+N
+//! calls `ToggleNotifications`; the bus starts the unit when it is down.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use athanor_control_center::Panel;
 use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -16,9 +18,14 @@ pub const PATH: &str = "/os/athanor/ControlCenter1";
 pub const TOGGLE_COMMAND: &str =
     "busctl --user call os.athanor.ControlCenter1 /os/athanor/ControlCenter1 os.athanor.ControlCenter1 Toggle";
 
+/// What Super+N runs, the same way.
+pub const TOGGLE_NOTIFICATIONS_COMMAND: &str =
+    "busctl --user call os.athanor.ControlCenter1 /os/athanor/ControlCenter1 os.athanor.ControlCenter1 ToggleNotifications";
+
 const XML: &str = r#"<node><interface name="os.athanor.ControlCenter1">
 <method name="Show"><arg type="s" name="page" direction="in"/></method>
 <method name="Toggle"/>
+<method name="ToggleNotifications"/>
 <property name="Open" type="b" access="read"/>
 </interface></node>"#;
 
@@ -58,7 +65,7 @@ impl Bus {
 pub fn own(
     bus: Rc<Bus>,
     on_show: impl Fn(&str) -> Result<(), String> + 'static,
-    on_toggle: impl Fn() + 'static,
+    on_toggle: impl Fn(Panel) + 'static,
     on_ready: impl FnOnce() + 'static,
 ) -> gio::OwnerId {
     let (on_show, on_toggle) = (Rc::new(on_show), Rc::new(on_toggle));
@@ -91,8 +98,12 @@ pub fn own(
                                 "Show takes a string",
                             ),
                         },
-                        "Toggle" => {
-                            on_toggle();
+                        "Toggle" | "ToggleNotifications" => {
+                            on_toggle(if method == "Toggle" {
+                                Panel::Controls
+                            } else {
+                                Panel::Notifications
+                            });
                             invocation.return_value(None);
                         }
                         other => invocation.return_dbus_error(

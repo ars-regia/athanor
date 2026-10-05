@@ -84,6 +84,26 @@ fn main() -> glib::ExitCode {
             tracing::warn!(error = %err, "Super+C is not bound to the control center; it still opens from the bar")
         }
     }
+    // Super+N, the notification center's, the same way (NC1).
+    match shortcuts::set_custom_binding_once(
+        &["Super"],
+        "n",
+        bus::TOGGLE_NOTIFICATIONS_COMMAND,
+        &state.join("super-n-bound"),
+    ) {
+        Ok(None) => tracing::info!("Super+N was bound once already"),
+        Ok(Some(Binding::Added)) => tracing::info!("Super+N now calls {}", bus::NAME),
+        Ok(Some(Binding::Unchanged)) => tracing::info!("Super+N already calls {}", bus::NAME),
+        Ok(Some(Binding::UserChoice | Binding::ReplacedDefault)) => {
+            tracing::info!(
+                "Super+N keeps the action the user chose; it does not call {}",
+                bus::NAME
+            );
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "Super+N is not bound to the notification center; it still opens from the bar")
+        }
+    }
     // Before GTK starts a thread. Reads stay open (CC2); writes only where `grants` says.
     let granted = grants(&dirs, &state);
     let write: Vec<&std::path::Path> = granted
@@ -121,9 +141,9 @@ fn main() -> glib::ExitCode {
                 Some(center) => center.show_page(page),
                 None => Err("the control center is closing".to_owned()),
             },
-            move || {
+            move |panel| {
                 if let Some(center) = toggled.upgrade() {
-                    center.toggle();
+                    center.toggle(panel);
                 }
             },
             || {

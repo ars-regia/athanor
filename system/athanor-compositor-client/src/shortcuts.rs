@@ -743,6 +743,29 @@ mod tests {
         assert!(!path.exists());
     }
 
+    const NC: &str = "busctl --user call os.athanor.ControlCenter1 /os/athanor/ControlCenter1 os.athanor.ControlCenter1 ToggleNotifications";
+
+    #[test]
+    fn super_n_is_added_beside_super_c_and_tried_once_per_user() {
+        let path = scratch("custom-super-n");
+        let marker = path.with_file_name("state/super-n-bound");
+        assert_eq!(set_in_custom(&path, &marker.with_file_name("super-c-bound")), Some(Binding::Added));
+        let once_n = || once(&marker, || bind_custom(&path, &["Super"], "n", NC)).unwrap();
+        assert_eq!(once_n(), Some(Binding::Added));
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            text,
+            format!("{{\n    (modifiers: [Super], key: \"c\"): Spawn(\"{CC}\"),\n    (modifiers: [Super], key: \"n\"): Spawn(\"{NC}\"),\n}}\n")
+        );
+        assert!(marker.exists());
+        assert_eq!(once_n(), None, "the marker ends the attempts");
+        assert_eq!(bind_custom(&path, &["Super"], "n", NC).unwrap(), Binding::Unchanged);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+        // A user's own Super+N is kept.
+        std::fs::write(&path, "{ (modifiers: [Super], key: \"n\"): Spawn(\"mine\") }").unwrap();
+        assert_eq!(bind_custom(&path, &["Super"], "n", NC).unwrap(), Binding::UserChoice);
+    }
+
     fn set_in_custom(path: &Path, marker: &Path) -> Option<Binding> {
         once(marker, || bind_custom(path, &["Super"], "c", CC)).unwrap()
     }

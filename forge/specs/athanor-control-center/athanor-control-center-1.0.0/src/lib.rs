@@ -54,6 +54,49 @@ pub fn parse_page(id: &str) -> Result<Option<Page>, String> {
         .ok_or_else(|| format!("{id:?} is not a page of the control center"))
 }
 
+/// What `Show(id)` names: the control center's panel or one of its pages, or the notification
+/// panel, optionally for one notification (NC1; the reply field of that one takes focus).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    Controls(Option<Page>),
+    Notifications(Option<u32>),
+}
+
+/// The argument of `Show`: `notifications`, `notifications:<id>`, or what `parse_page` takes.
+/// A malformed notification id is refused like an unknown page.
+pub fn parse_target(id: &str) -> Result<Target, String> {
+    match id.strip_prefix("notifications") {
+        Some("") => Ok(Target::Notifications(None)),
+        Some(rest) => rest
+            .strip_prefix(':')
+            .and_then(|number| number.parse().ok())
+            .map(|number| Target::Notifications(Some(number)))
+            .ok_or_else(|| format!("{id:?} is not a notification id")),
+        None => parse_page(id).map(Target::Controls),
+    }
+}
+
+/// The two panels of the one surface; at most one is shown (NC1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Panel {
+    Controls,
+    Notifications,
+}
+
+/// What `Toggle` and `ToggleNotifications` do: open the asked panel, switch to it from the
+/// other, or close it when it is the one shown.
+pub fn toggle(current: Option<Panel>, asked: Panel) -> Option<Panel> {
+    (current != Some(asked)).then_some(asked)
+}
+
+/// The notification panel's width in logical pixels (NC11).
+pub const NOTIFICATIONS_WIDTH: i32 = 400;
+
+/// Its height: the content's, at most 80% of the output's, past which it scrolls (NC11).
+pub fn notifications_height(content: i32, output: i32) -> i32 {
+    content.min(output * 4 / 5)
+}
+
 /// Which end of an axis the panel sits at.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Side {
@@ -137,6 +180,42 @@ mod tests {
         assert!(parse_page("Network").is_err(), "ids are lower case");
         assert!(parse_page("wifi").is_err());
         assert!(parse_page(" ").is_err());
+    }
+
+    #[test]
+    fn a_target_is_a_page_or_the_notification_panel() {
+        assert_eq!(parse_target(""), Ok(Target::Controls(None)));
+        assert_eq!(
+            parse_target("network"),
+            Ok(Target::Controls(Some(Page::Network)))
+        );
+        assert_eq!(parse_target("notifications"), Ok(Target::Notifications(None)));
+        assert_eq!(
+            parse_target("notifications:42"),
+            Ok(Target::Notifications(Some(42)))
+        );
+        for bad in ["notifications:x", "notifications:", "notifications:-1", "Notifications", "notifications:4294967296", "wifi"] {
+            assert!(parse_target(bad).is_err(), "{bad:?} is refused");
+        }
+    }
+
+    #[test]
+    fn a_toggle_opens_switches_or_closes() {
+        use Panel::{Controls, Notifications};
+        assert_eq!(toggle(None, Controls), Some(Controls));
+        assert_eq!(toggle(None, Notifications), Some(Notifications));
+        assert_eq!(toggle(Some(Controls), Notifications), Some(Notifications));
+        assert_eq!(toggle(Some(Notifications), Controls), Some(Controls));
+        assert_eq!(toggle(Some(Controls), Controls), None);
+        assert_eq!(toggle(Some(Notifications), Notifications), None);
+    }
+
+    #[test]
+    fn the_notification_panel_is_at_most_four_fifths_of_the_output() {
+        assert_eq!(notifications_height(300, 1080), 300);
+        assert_eq!(notifications_height(2000, 1080), 864);
+        assert_eq!(notifications_height(864, 1080), 864);
+        assert_eq!(notifications_height(5, 0), 0);
     }
 
     #[test]

@@ -5,7 +5,10 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use athanor_compositor_client::{outputs, theme, Client};
-use athanor_control_center::{anchor, focused_output, parse_page, Page, Side, GAP};
+use athanor_control_center::{
+    anchor, focused_output, notifications_height, parse_target, toggle, Page, Panel, Side, Target,
+    GAP, NOTIFICATIONS_WIDTH,
+};
 use athanor_layout::loader::{Paths, Source};
 use athanor_style::calmo;
 use gtk4::prelude::*;
@@ -22,6 +25,10 @@ const CSS: &str = "
 
 /// The stack child that is the panel itself.
 const PANEL: &str = "panel";
+/// The stack child of the notification center (NC1), a placeholder until its content exists.
+const NOTIFICATIONS: &str = "notifications";
+/// The control panel's width; the notification panel's is `NOTIFICATIONS_WIDTH`.
+const CONTROLS_WIDTH: i32 = 360;
 
 pub struct ControlCenter {
     app: gtk4::Application,
@@ -32,6 +39,8 @@ pub struct ControlCenter {
     surfaces: RefCell<Vec<Surface>>,
     /// The monitor of the surface the panel is shown on.
     shown: RefCell<Option<gdk::Monitor>>,
+    /// Which of the two panels is shown; `Some` exactly when `shown` is.
+    panel: Cell<Option<Panel>>,
     /// The surface has had the keyboard since the panel was shown, so losing it now is a
     /// loss of focus and not the keyboard not having arrived yet.
     focused: Cell<bool>,
@@ -67,12 +76,16 @@ pub fn start(app: &gtk4::Application, bus: Rc<Bus>, layout: Source) -> Rc<Contro
     };
     let stack = gtk4::Stack::new();
     stack.add_named(&gtk4::Label::new(Some(PANEL)), Some(PANEL));
+    let placeholder = gtk4::Label::new(None);
+    placeholder.set_accessible_role(gtk4::AccessibleRole::Group);
+    placeholder.update_property(&[gtk4::accessible::Property::Label("Notifications")]);
+    stack.add_named(&placeholder, Some(NOTIFICATIONS));
     for page in Page::ALL {
         stack.add_named(&gtk4::Label::new(Some(page.id())), Some(page.id()));
     }
     let content = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Vertical)
-        .width_request(360)
+        .width_request(CONTROLS_WIDTH)
         .build();
     content.add_css_class("control-center");
     content.add_css_class("background");
@@ -85,6 +98,7 @@ pub fn start(app: &gtk4::Application, bus: Rc<Bus>, layout: Source) -> Rc<Contro
         bus,
         surfaces: RefCell::default(),
         shown: RefCell::default(),
+        panel: Cell::new(None),
         focused: Cell::new(false),
         content,
         stack,
@@ -133,6 +147,7 @@ impl ControlCenter {
         for leftover in old {
             if self.shown.borrow().as_ref() == Some(&leftover.monitor) {
                 self.shown.replace(None);
+                self.panel.set(None);
                 self.focused.set(false);
                 self.bus.set_open(false);
             }
@@ -190,25 +205,36 @@ impl ControlCenter {
         surface
     }
 
-    pub fn toggle(self: &Rc<Self>) {
-        if self.shown.borrow().is_some() {
-            self.hide();
-        } else {
-            self.show(None);
+    /// Opens the asked panel, switches to it from the other, or closes it (NC1).
+    pub fn toggle(self: &Rc<Self>, asked: Panel) {
+        match toggle(self.panel.get(), asked) {
+            None => self.hide(),
+            Some(Panel::Controls) => self.show(Target::Controls(None)),
+            Some(Panel::Notifications) => self.show(Target::Notifications(None)),
         }
     }
 
     /// Shows the panel, or the page `id` names; a shown panel moves to that page.
     pub fn show_page(self: &Rc<Self>, id: &str) -> Result<(), String> {
-        let page = parse_page(id)?;
-        self.show(page);
+        self.show(parse_target(id)?);
         Ok(())
     }
 
-    fn show(self: &Rc<Self>, page: Option<Page>) {
-        self.stack
-            .set_visible_child_name(page.map_or(PANEL, Page::id));
-        if self.shown.borrow().is_some() {
+    fn show(self: &Rc<Self>, target: Target) {
+        // ponytail: the notification id is only validated; Task 14 focuses its reply field.
+        let (panel, child, width) = match target {
+            Target::Controls(page) => (Panel::Controls, page.map_or(PANEL, Page::id), CONTROLS_WIDTH),
+            Target::Notifications(_) => (Panel::Notifications, NOTIFICATIONS, NOTIFICATIONS_WIDTH),
+        };
+        self.stack.set_visible_child_name(child);
+        self.content.set_width_request(width);
+        // Both panels share the one surface and the one anchor (the bar's end edge), so
+        // switching moves nothing but the size.
+        self.content.set_height_request(-1);
+        if let (Panel::Notifications, Some(monitor)) = (panel, self.shown.borrow().as_ref()) {
+            self.limit_height(monitor);
+        }
+        if self.panel.replace(Some(panel)).is_some() {
             return;
         }
         let windows = self
@@ -241,15 +267,29 @@ impl ControlCenter {
         self.content.set_margin_start(GAP);
         self.content.set_margin_end(GAP);
         self.focused.set(false);
+        if panel == Panel::Notifications {
+            self.limit_height(&surface.monitor);
+        }
         self.shown.replace(Some(surface.monitor.clone()));
         surface.show(self.content.upcast_ref());
         self.bus.set_open(true);
+    }
+
+    /// The notification panel is as tall as its content, at most 80% of the output (NC11).
+    fn limit_height(&self, monitor: &gdk::Monitor) {
+        let natural = self
+            .content
+            .measure(gtk4::Orientation::Vertical, NOTIFICATIONS_WIDTH)
+            .1;
+        self.content
+            .set_height_request(notifications_height(natural, monitor.geometry().height()));
     }
 
     pub fn hide(&self) {
         let Some(monitor) = self.shown.take() else {
             return;
         };
+        self.panel.set(None);
         self.focused.set(false);
         if let Some(surface) = self
             .surfaces
