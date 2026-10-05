@@ -1,15 +1,31 @@
 name: Promote a system image run to stable
 
-# Manual, by decision D1 of docs/architecture/doc_update_trust.md: users follow :stable,
-# :latest stays for testing. The logic is system/promote.sh; no signing key is involved.
+# Decision D1 of docs/architecture/doc_update_trust.md: users follow :stable, :latest is the
+# tested build of the default branch. The logic is system/promote-auto.sh, which chooses the
+# run, and system/promote.sh, which refuses any digest without passing acceptance evidence or
+# a signature machines verify; no signing key is involved here.
+#   - On schedule: the newest accepted run older than the dwell time (repository variable
+#     PROMOTE_DWELL_HOURS, default 24), when it is newer than :stable.
+#   - By hand with a run id: that run, without the dwell time (the maintainer's override).
+#   - By hand with a security reason: no dwell time, and the reason is kept in the
+#     promotion record (the out-of-band path for a critical fix).
+# Disabling this workflow stops automatic promotion; :stable then moves only by hand.
 
 on:
+  schedule:
+    - cron: "40 */6 * * *"
   workflow_dispatch:
     inputs:
       run_id:
-        description: "Run id of the Orchestrator run whose three system images become stable"
-        required: true
+        description: "Run id of the Orchestrator run whose three system images become stable; empty for the newest accepted run"
+        required: false
         type: string
+        default: ""
+      security_reason:
+        description: "Out-of-band security fix: why the dwell time is skipped (advisory, CVE). Empty for a normal promotion"
+        required: false
+        type: string
+        default: ""
 
 concurrency:
   group: promote-stable
@@ -18,6 +34,7 @@ concurrency:
 permissions:
   contents: read
   packages: write
+  actions: read
 
 jobs:
   lint:
@@ -36,8 +53,25 @@ jobs:
           GITHUB_ACTOR: ${{ github.actor }}
           REGISTRY_HOST: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
         run: echo "${GITHUB_TOKEN}" | skopeo login "${REGISTRY_HOST}" -u "${GITHUB_ACTOR}" --password-stdin
-      - name: Promote (system/promote.sh)
+      - name: Download the acceptance evidence
+        # Every unexpired acceptance-* artifact of the repository (iso-acceptance.yml).
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash system/fetch-evidence.sh evidence
+      - name: Promote (system/promote-auto.sh)
         env:
           RUN_ID: ${{ inputs.run_id }}
+          SECURITY_REASON: ${{ inputs.security_reason }}
+          PROMOTE_DWELL_HOURS: ${{ vars.PROMOTE_DWELL_HOURS || '24' }}
           REGISTRY: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}
-        run: bash system/promote.sh "${RUN_ID}" | tee -a "${GITHUB_STEP_SUMMARY}"
+        run: |
+          set -euo pipefail
+          bash system/promote-auto.sh evidence promotion/promotion-record.json | tee -a "${GITHUB_STEP_SUMMARY}"
+      - name: Keep the promotion record
+        if: hashFiles('promotion/promotion-record.json') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: promotion-${{ github.run_id }}
+          path: promotion/promotion-record.json
+          if-no-files-found: error
+          retention-days: 400
