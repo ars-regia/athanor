@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """bar_session.py [--client NAME] [--hang METHOD] [--window] [--pinnable] [--notifications] [--tray]
-[--respawn] [--fixtures [--discovering]] [--trust-state NAME] [--beside PROGRAM]... [--log] - athanor-bar in the rig, as its unit runs it: a private system bus with a
+[--respawn] [--real-control-center] [--show PAGE] [--fixtures [--discovering]] [--trust-state NAME] [--beside PROGRAM]... [--log] - athanor-bar in the rig, as its unit runs it: a private system bus with a
 fake logind on it, NOTIFY_SOCKET for Type=notify, and with --window one test window for the running
 applications. --pinnable installs a desktop entry for the test window's app id, so the bar offers to
 pin it. It is scene.sh's client and exits with the bar's status.
@@ -30,7 +30,10 @@ the real daemon admits only athanor-bar.service) and fake_control_center.py (the
 bar's notifications button and clock call). --tray starts the real athanor-shelld as
 the tray watcher, with its log in /out/$RIG_TAG-shelld.log and its pid in
 /tmp/athanor-shelld.pid, then tray_item.py, and starts the bar once both items are
-registered. --respawn starts the bar again when it is killed with SIGKILL, and rewrites
+registered. --real-control-center leaves os.athanor.ControlCenter1 to the real program, which is then the
+--client (athanor-control-center), and --show PAGE calls its Show(PAGE) once it is READY.
+RIG_NC_FIXTURE=unavailable starts no notification daemon at all (fake_notifications.py's
+other values pick what it holds). --respawn starts the bar again when it is killed with SIGKILL, and rewrites
 /tmp/athanor-bar.pid; athanor-shelld is always started again after a SIGKILL.
 
 --fixtures starts system_fixtures.py's services before the bar (NetworkManager, BlueZ, UPower
@@ -274,6 +277,8 @@ def parse(argv):
     parser.add_argument("--notifications", action="store_true")
     parser.add_argument("--tray", action="store_true")
     parser.add_argument("--respawn", action="store_true")
+    parser.add_argument("--real-control-center", action="store_true")
+    parser.add_argument("--show", metavar="PAGE")
     parser.add_argument("--fixtures", action="store_true")
     parser.add_argument("--trust-state", metavar="NAME", default="verified", choices=trust_state.NAMES)
     parser.add_argument("--discovering", action="store_true")
@@ -349,18 +354,20 @@ def main():
         else []
     )
     if args.notifications:
-        helpers.append(subprocess.Popen(["python3", f"{HERE}/fake_notifications.py"]))
-        wait_until(
-            lambda: has_owner(session, "org.freedesktop.Notifications"),
-            "fake_notifications.py did not own org.freedesktop.Notifications",
-            10,
-        )
-        helpers.append(subprocess.Popen(["python3", f"{HERE}/fake_control_center.py"]))
-        wait_until(
-            lambda: has_owner(session, "os.athanor.ControlCenter1"),
-            "fake_control_center.py did not own os.athanor.ControlCenter1",
-            10,
-        )
+        if os.environ.get("RIG_NC_FIXTURE") != "unavailable":
+            helpers.append(subprocess.Popen(["python3", f"{HERE}/fake_notifications.py"]))
+            wait_until(
+                lambda: has_owner(session, "org.freedesktop.Notifications"),
+                "fake_notifications.py did not own org.freedesktop.Notifications",
+                10,
+            )
+        if not args.real_control_center:
+            helpers.append(subprocess.Popen(["python3", f"{HERE}/fake_control_center.py"]))
+            wait_until(
+                lambda: has_owner(session, "os.athanor.ControlCenter1"),
+                "fake_control_center.py did not own os.athanor.ControlCenter1",
+                10,
+            )
         helpers.append(subprocess.Popen(["python3", f"{HERE}/fake_portal.py"]))
         wait_until(
             lambda: has_owner(session, "org.freedesktop.portal.Desktop"),
@@ -384,6 +391,7 @@ def main():
     notify.bind(NOTIFY_SOCKET)
     window_started = False
     beside_started = False
+    shown = False
 
     # The test window starts only once the bar is on screen: cosmic-comp places a new
     # window inside the area the bar's exclusive zone leaves, so a window mapped before
@@ -391,12 +399,19 @@ def main():
     # starts once: a respawned bar sends READY=1 again. The --beside programs follow the
     # same rule, and do not get the notify socket, so READY_FILE stays the bar's.
     def on_notify(_fd, _condition):
-        nonlocal window_started, beside_started
+        nonlocal window_started, beside_started, shown
         if "READY=1" in notify.recv(4096).decode("utf-8", "replace").split("\n"):
             READY_FILE.write_text("READY=1\n", encoding="utf-8")
             if args.window and not window_started:
                 window_started = True
                 subprocess.Popen(["python3", WINDOW, "1"])
+            if args.show and not shown:
+                shown = True
+                session.call_sync(
+                    "os.athanor.ControlCenter1", "/os/athanor/ControlCenter1",
+                    "os.athanor.ControlCenter1", "Show", GLib.Variant("(s)", (args.show,)),
+                    None, Gio.DBusCallFlags.NONE, 10_000, None,
+                )
             if not beside_started:
                 beside_started = True
                 beside_env = {k: v for k, v in env.items() if k != "NOTIFY_SOCKET"}

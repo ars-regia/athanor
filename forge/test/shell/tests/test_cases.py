@@ -19,6 +19,17 @@ class CasesTest(unittest.TestCase):
         )
         self.assertEqual({c.catalog for c in found}, {"-", "de.mo", "rtl.mo"})
 
+    def test_the_notification_center_has_four_scenes_of_twelve_cases(self):
+        found = cases.surface_cases("notification-center")
+        self.assertEqual(len(found), 48)
+        self.assertEqual(len({c.tag for c in found}), 48)
+        self.assertEqual({c.scene for c in found}, {"500", "empty", "unavailable", "popups"})
+        for case in found:
+            self.assertRegex(
+                case.tag,
+                r"^notification-center-(500|empty|unavailable|popups)-(light|dark)-(1\.0|1\.5)-(en|de|rtl)$",
+            )
+
     def test_tags_are_file_names(self):
         for case in cases.surface_cases("greeter"):
             self.assertRegex(

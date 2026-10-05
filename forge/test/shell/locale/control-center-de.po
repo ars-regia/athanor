@@ -1,0 +1,123 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: athanor-control-center test catalog\n"
+"Report-Msgid-Bugs-To: forge@athanor.os\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Notifications"
+msgstr "Benachrichtigungen"
+
+msgid "Clear all"
+msgstr "Alle löschen"
+
+msgid "Do not disturb"
+msgstr "Bitte nicht stören"
+
+msgid "Do not disturb options"
+msgstr "Optionen für Bitte nicht stören"
+
+msgid "For one hour"
+msgstr "Für eine Stunde"
+
+msgid "Until 08:00"
+msgstr "Bis 08:00"
+
+msgid "Edit schedule"
+msgstr "Zeitplan bearbeiten"
+
+msgid "No notifications"
+msgstr "Keine Benachrichtigungen"
+
+msgid "Notifications unavailable"
+msgstr "Benachrichtigungen nicht verfügbar"
+
+msgid "Other applications"
+msgstr "Andere Anwendungen"
+
+msgid "Options for {app}"
+msgstr "Optionen für {app}"
+
+msgid "Show less"
+msgstr "Weniger anzeigen"
+
+msgid "Show {n} more"
+msgstr "{n} weitere anzeigen"
+
+msgid "Mute {app}? It will send no notification at all."
+msgstr "{app} stummschalten? Es sendet dann gar keine Benachrichtigung mehr."
+
+msgid "Cancel"
+msgstr "Abbrechen"
+
+msgid "Mute"
+msgstr "Stummschalten"
+
+msgid "Mute this application"
+msgstr "Diese Anwendung stummschalten"
+
+msgid "Show in the list only"
+msgstr "Nur in der Liste anzeigen"
+
+msgid "Notification settings"
+msgstr "Benachrichtigungseinstellungen"
+
+msgid "Unknown application"
+msgstr "Unbekannte Anwendung"
+
+msgid "Close {title}"
+msgstr "{title} schließen"
+
+msgid "Show the whole text"
+msgstr "Ganzen Text anzeigen"
+
+msgid "More"
+msgstr "Mehr"
+
+msgid "Progress"
+msgstr "Fortschritt"
+
+msgid "Write a reply"
+msgstr "Antwort schreiben"
+
+msgid "Send"
+msgstr "Senden"
+
+msgid "now"
+msgstr "jetzt"
+
+msgid "{n} min"
+msgstr "{n} Min."
+
+msgid "{n} h"
+msgstr "{n} Std."
+
+msgid "Yesterday"
+msgstr "Gestern"
+
+msgid "Off"
+msgstr "Aus"
+
+msgid "On until {time}"
+msgstr "An bis {time}"
+
+msgid "On"
+msgstr "An"
+
+msgid "schedule"
+msgstr "Zeitplan"
+
+msgid "fullscreen"
+msgstr "Vollbild"
+
+msgid "screen sharing"
+msgstr "Bildschirmfreigabe"
+
+msgid "Notification center, no unread"
+msgstr "Benachrichtigungszentrale, nichts ungelesen"
+
+msgid "Notification center, {n} unread"
+msgstr "Benachrichtigungszentrale, {n} ungelesen"

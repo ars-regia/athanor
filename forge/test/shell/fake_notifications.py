@@ -14,8 +14,20 @@ marks them read and emits Read. Every call that acts is appended to
 /out/$RIG_TAG-notifications.log: "Close <id> <reason>", "InvokeAction <id> <key>
 token|no-token", "MarkRead <id>...", "SetDoNotDisturb True|False", "SetSetting <key> <value>".
 SetDoNotDisturb also emits DoNotDisturbChanged, as the real daemon does for every change.
+
+The control center's side of the interface is served too: History (every notification, read
+or not), ClearAll, ClearGroup, Reply, SetDoNotDisturbUntil and SetRule, each logged the same
+way ("ClearAll", "ClearGroup <app id>", "Reply <id> <text>", "SetDoNotDisturb <on> until
+<unix>", "SetRule <app id> <key> <value>"). The held list and do not disturb are kept in
+/tmp/athanor-fake-notifications.json, as the real daemon keeps its store, when RIG_NC_PERSIST
+is set: a daemon the test kills and starts again then comes back with the same list.
+
+RIG_NC_FIXTURE picks what it starts with: "bar" (the default: four unread), "many" (500 held
+notifications from five applications, the newest 20 unread), "empty" and "popups" (markup,
+progress and a reply entry). A daemon that finds the state file ignores the fixture.
 """
 
+import json
 import os
 import sys
 import time
@@ -31,6 +43,7 @@ WIRE = "(ussssa(sus)a(ss)bybbbxsssuuayuubibsss)"
 WAITS = 0xFFFFFFFF
 DEFAULT_TIMEOUT_MS = 5000
 CRITICAL = 2
+STATE = Path("/tmp/athanor-fake-notifications.json")
 LOG = Path("/out") / f"{os.environ.get('RIG_TAG', 'bar')}-notifications.log"
 
 NODE = Gio.DBusNodeInfo.new_for_xml(f"""
@@ -49,6 +62,14 @@ NODE = Gio.DBusNodeInfo.new_for_xml(f"""
     <method name="DoNotDisturb">
       <arg type="b" direction="out"/><arg type="s" direction="out"/>
       <arg type="x" direction="out"/><arg type="as" direction="out"/>
+    </method>
+    <method name="History"><arg type="a{WIRE}" direction="out"/></method>
+    <method name="ClearAll"/>
+    <method name="ClearGroup"><arg type="s" direction="in"/></method>
+    <method name="Reply"><arg type="u" direction="in"/><arg type="s" direction="in"/></method>
+    <method name="SetDoNotDisturbUntil"><arg type="b" direction="in"/><arg type="x" direction="in"/></method>
+    <method name="SetRule">
+      <arg type="s" direction="in"/><arg type="s" direction="in"/><arg type="s" direction="in"/>
     </method>
     <method name="Close"><arg type="u" direction="in"/><arg type="u" direction="in"/></method>
     <method name="InvokeAction">
@@ -106,6 +127,7 @@ class Daemon:
         self.held = []
         self.last_id = 0
         self.dnd = False
+        self.until = 0
         # The daemon's defaults (athanor-shelld rules.rs); the test changes them with SetSetting.
         self.settings = {"popup_corner": "bar", "private_popups": "false", "trigger_fullscreen": "true"}
         # A test makes `Settings` fail with SetSetting fail true.
@@ -126,8 +148,8 @@ class Daemon:
     def wire(self, n):
         left = self.left_ms(n)
         return (
-            n["id"], "", n["app"], n["summary"], *body_wire(n["body"]), n["actions"], True, n["urgency"],
-            n["transient"], n["resident"], n["read"], 0, n["entry"], n["icon_name"],
+            n["id"], n["app_id"], n["app"], n["summary"], *body_wire(n["body"]), n["actions"], True, n["urgency"],
+            n["transient"], n["resident"], n["read"], n["time"], n["entry"], n["icon_name"],
             n["icon_file"], n["width"], n["height"], n["rgba"], n["timeout"], left,
             left > 0, n["value"], n["reply"], "", "", "",
         )
@@ -140,7 +162,8 @@ class Daemon:
         return next((n for n in self.held if n["id"] == id_), None)
 
     def add(self, app, summary, body="", actions=(), urgency=1, transient=False,
-            resident=False, entry="", icon="", image=None, expire=0, replaces=0, value=-1):
+            resident=False, entry="", icon="", image=None, expire=0, replaces=0, value=-1,
+            app_id="", age=0, read=False):
         """Notify's semantics: a known replaces_id keeps its id and moves last."""
         old = self.find(replaces) if replaces else None
         if old is not None:
@@ -151,13 +174,14 @@ class Daemon:
             id_ = self.last_id
         width, height, rgba = image if image else (0, 0, b"")
         notice = {
-            "id": id_, "app": app, "summary": summary, "body": body,
+            "id": id_, "app_id": app_id, "app": app, "summary": summary, "body": body,
             "actions": list(actions), "urgency": urgency, "transient": transient,
             "resident": resident, "entry": entry,
             "icon_name": "" if icon.startswith("/") else icon,
             "icon_file": icon if icon.startswith("/") else "",
             "width": width, "height": height, "rgba": rgba,
-            "timeout": timeout_ms(expire, urgency), "arrived": now_ms(), "read": False,
+            "timeout": timeout_ms(expire, urgency), "arrived": now_ms(), "read": read,
+            "time": int(time.time()) - age,
             "value": value,
             # KDE's inline reply: the action key is the declaration (athanor-shelld).
             "reply": any(key == "inline-reply" for key, _ in actions),
@@ -185,6 +209,9 @@ class Daemon:
             transient=bool(hints.get("transient", False)),
             resident=bool(hints.get("resident", False)),
             entry=str(hints.get("desktop-entry", "")),
+            # The real daemon proves the application's identity from its connection; a test
+            # that needs a group of its own names one with this hint.
+            app_id=str(hints.get("x-rig-app-id", "")),
             icon=str(hints.get("image-path", icon)),
             image=(image[0], image[1], bytes(image[6])) if image else None,
             expire=expire, replaces=replaces,
@@ -192,7 +219,36 @@ class Daemon:
             value=hints["value"] if 0 <= hints.get("value", -1) <= 100 else -1,
         )
 
-    def on_call(self, _connection, _sender, _path, interface, method, parameters, invocation):
+    def on_call(self, *args):
+        self.handle(*args)
+        self.save()
+
+    def save(self):
+        """The store, as the real daemon keeps it: a daemon started again finds it."""
+        if not os.environ.get("RIG_NC_PERSIST"):
+            return
+        held = [{**n, "rgba": n["rgba"].hex()} for n in self.held]
+        state = {"held": held, "last_id": self.last_id, "dnd": self.dnd, "until": self.until}
+        STATE.write_text(json.dumps(state), encoding="utf-8")
+
+    def load(self):
+        """True when a state file was there and is now the held list."""
+        if not os.environ.get("RIG_NC_PERSIST") or not STATE.exists():
+            return False
+        state = json.loads(STATE.read_text(encoding="utf-8"))
+        self.held = [
+            {**n, "rgba": bytes.fromhex(n["rgba"]), "actions": [tuple(a) for a in n["actions"]]}
+            for n in state["held"]
+        ]
+        self.last_id, self.dnd, self.until = state["last_id"], state["dnd"], state["until"]
+        return True
+
+    def clear(self, app_id=None):
+        for notice in list(self.held):
+            if app_id is None or notice["app_id"] == app_id:
+                self.close(notice["id"], 2)
+
+    def handle(self, _connection, _sender, _path, interface, method, parameters, invocation):
         if interface == NAME and method == "Notify":
             invocation.return_value(GLib.Variant("(u)", (self.notify(parameters),)))
         elif interface == NAME and method == "CloseNotification":
@@ -204,8 +260,40 @@ class Daemon:
             invocation.return_value(GLib.Variant(f"(a{WIRE})", (listed,)))
         elif method == "DoNotDisturb":
             invocation.return_value(
-                GLib.Variant("(bsxas)", (self.dnd, "manual" if self.dnd else "", 0, []))
+                GLib.Variant("(bsxas)", (self.dnd, "manual" if self.dnd else "", self.until, []))
             )
+        elif method == "History":
+            invocation.return_value(
+                GLib.Variant(f"(a{WIRE})", ([self.wire(n) for n in self.held],))
+            )
+        elif method == "ClearAll":
+            log("ClearAll")
+            self.clear()
+            invocation.return_value(None)
+        elif method == "ClearGroup":
+            (app_id,) = parameters.unpack()
+            log(f"ClearGroup {app_id}")
+            self.clear(app_id)
+            invocation.return_value(None)
+        elif method == "Reply":
+            id_, text = parameters.unpack()
+            log(f"Reply {id_} {text}")
+            if self.find(id_) is None:
+                invocation.return_dbus_error(
+                    "org.freedesktop.DBus.Error.InvalidArgs", f"no notification {id_}"
+                )
+                return
+            invocation.return_value(None)
+        elif method == "SetDoNotDisturbUntil":
+            on, until = parameters.unpack()
+            log(f"SetDoNotDisturb {on} until {until}")
+            self.dnd, self.until = on, until
+            self.emit("DoNotDisturbChanged", GLib.Variant("(bsx)", (on, "manual" if on else "", until)))
+            invocation.return_value(None)
+        elif method == "SetRule":
+            app_id, key, value = parameters.unpack()
+            log(f"SetRule {app_id} {key} {value}")
+            invocation.return_value(None)
         elif method == "Close":
             id_, reason = parameters.unpack()
             log(f"Close {id_} {reason}")
@@ -259,7 +347,7 @@ class Daemon:
         elif method == "SetDoNotDisturb":
             (on,) = parameters.unpack()
             log(f"SetDoNotDisturb {on}")
-            self.dnd = on
+            self.dnd, self.until = on, 0
             self.emit(
                 "DoNotDisturbChanged",
                 GLib.Variant("(bsx)", (on, "manual" if on else "", 0)),
@@ -281,10 +369,44 @@ def fixture(daemon):
     daemon.add("Files", "Download complete", "report.pdf", icon="folder-download-symbolic")
 
 
+# The applications of the "many" fixture: desktop entries the rig has, and one it has not.
+APPS = [
+    ("com.system76.CosmicSettings", "Settings"),
+    ("com.system76.CosmicFiles", "Files"),
+    ("com.system76.CosmicTerm", "Terminal"),
+    ("org.example.Chat", "Chat"),
+    ("", "Backup"),
+]
+
+
+def fixture_many(daemon):
+    """500 held notifications, oldest first, spread over five applications; the newest 20 are
+    unread. Ages run from seconds to days, so every band of the relative time shows."""
+    for index in range(500):
+        app_id, app = APPS[index % len(APPS)]
+        daemon.add(
+            app, f"{app} message {index + 1}", f"Body of notification {index + 1}.",
+            app_id=app_id, age=(500 - index) * 600, read=index < 480,
+        )
+
+
+def fixture_popups(daemon):
+    """What the popups can carry besides plain text: markup with a link, progress, and the
+    sender's own reply entry."""
+    daemon.add("Mail", "Rich text", RICH_BODY)
+    daemon.add("Files", "Copying archive.tar", "3 of 8 files", value=40)
+    daemon.add("Chat", "Anna", "Are you there?", actions=[("inline-reply", "Answer")])
+
+
+FIXTURES = {"bar": fixture, "many": fixture_many, "empty": lambda daemon: None, "popups": fixture_popups}
+
+
 def main():
     LOG.write_text("", encoding="utf-8")
     daemon = Daemon()
-    fixture(daemon)
+    if not daemon.load():
+        FIXTURES[os.environ.get("RIG_NC_FIXTURE", "bar")](daemon)
+        daemon.save()
     bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
     daemon.bus = bus
     for path, interface in ((PUBLIC_PATH, NAME), (PRIVATE_PATH, PRIVATE)):
