@@ -5,7 +5,6 @@
     "selinux",
     "base-config",
     "desktop-ui",
-    "ide-bootstrap",
     "system-services",
     "nix-support",
     "system-config",
@@ -28,14 +27,10 @@
     "xdg-desktop-portal-athanor",
     "secure-boot",
     "tetragon",
-    "qa",
-    "antigravity",
     "syft",
     "bpf-linker",
-    "astro-toolchain",
     "keylime",
     "recovery",
-    "cargo-tools",
     "kernel-forge",
     "cosmic-comp"
   ],
@@ -46,16 +41,12 @@
     "nix-support",
     "secure-boot",
     "tetragon",
-    "antigravity",
     "syft",
-    "bpf-linker",
-    "astro-toolchain",
-    "cargo-tools"
+    "bpf-linker"
   ],
   "custom_tier1": [
     "bat",
     "cliphist",
-    "ide-bootstrap",
     "system-tweaks",
     "kernel-profile"
   ],
@@ -82,8 +73,7 @@
     "system-config",
     "backup",
     "update",
-    "xdg-desktop-portal-athanor",
-    "qa"
+    "xdg-desktop-portal-athanor"
   ],
   "cachyos_addons": [],
   "upstream_core": [
@@ -111,11 +101,8 @@
     "mokutil",
     "nftables",
     "power-profiles-daemon",
-    "qemu-img",
-    "qemu-kvm",
     "squashfuse",
     "upower",
-    "virt-manager",
     "libwayland-client"
   ],
   "upstream_desktop": [
@@ -131,13 +118,8 @@
     "cosmic-idle",
     "cosmic-greeter",
     "cosmic-icon-theme",
-    "cosmic-term",
-    "cosmic-files",
-    "cosmic-edit",
-    "cosmic-store",
     "adw-gtk3-theme",
     "fontawesome-fonts-all",
-    "foot",
     "gtk4-layer-shell",
     "pulseaudio-libs-glib2",
     "gtk-layer-shell",
@@ -146,11 +128,6 @@
     "qt5-qtwayland",
     "qt6-qtwayland",
     "rsms-inter-fonts",
-    "swaybg",
-    "swaylock",
-    "Thunar",
-    "thunar-archive-plugin",
-    "thunar-volman",
     "usbguard",
     "bolt",
     "wayland-utils",

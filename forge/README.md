@@ -31,7 +31,6 @@ Every single package or tool has its own independent CI/CD build job producing a
 | `athanor-dart-sass` | `athanor-dart-sass` | Sass compiler for GTK4 stylesheet generation |
 | `athanor-desktop-ui` | `athanor-desktop-ui` | Wayland Niri session wrappers and startup scripts |
 | `athanor-doctor` | `athanor-doctor` | Rust CLI diagnostics & hardware validation tool |
-| `athanor-ide-bootstrap` | `athanor-ide-bootstrap` | Developer toolchain bootstrap & IDE configurations |
 | `kani-verifier` | `kani-verifier` | Kani Rust Formal Verification Engine compiled natively (`kani-driver`, `cargo-kani`) |
 | `athanor-matugen` | `athanor-matugen` | Material You dynamic wallpaper color palette generator |
 | `athanor-nix-support` | `athanor-nix-support` | Multi-user Nix package manager integration |
