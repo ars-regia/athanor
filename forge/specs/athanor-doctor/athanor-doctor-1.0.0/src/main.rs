@@ -6,7 +6,6 @@ use zbus::{connection::Builder, interface, object_server::SignalEmitter};
 #[derive(Serialize, Deserialize, Default, Debug)]
 struct HealthReport {
     nvme: Option<String>,
-    bcachefs: Option<String>,
 }
 
 struct SystemHealth;
@@ -25,14 +24,6 @@ async fn get_nvme_health() -> Option<String> {
         Some(format!("NVMe Sysfs Stat: {}", stat.trim()))
     } else if let Ok(status) = tokio::fs::read_to_string("/sys/class/nvme/nvme0/device/status").await {
         Some(format!("NVMe Status: {}", status.trim()))
-    } else {
-        Some("NOT DETECTED".to_string())
-    }
-}
-
-async fn get_bcachefs_health() -> Option<String> {
-    if tokio::fs::metadata("/sys/fs/bcachefs").await.is_ok() {
-        Some("Bcachefs filesystem active & operational".to_string())
     } else {
         Some("NOT DETECTED".to_string())
     }
@@ -57,9 +48,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         interval.tick().await;
 
         let nvme = get_nvme_health().await;
-        let bcachefs = get_bcachefs_health().await;
 
-        let report = HealthReport { nvme, bcachefs };
+        let report = HealthReport { nvme };
 
         if let Ok(json) = serde_json::to_string(&report) {
             if let Err(e) = SystemHealth::system_health_update(&context, &json).await {

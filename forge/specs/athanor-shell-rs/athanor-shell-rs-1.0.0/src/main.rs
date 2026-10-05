@@ -43,8 +43,6 @@ struct Args {
     #[arg(long)]
     powermenu: bool,
     #[arg(long)]
-    gatekeeper_prompt: Option<String>,
-    #[arg(long)]
     privacy_prompt: Option<String>,
     #[arg(long)]
     overview: bool,
@@ -138,18 +136,6 @@ fn main() -> glib::ExitCode {
         app.connect_activate(move |app| {
             crate::theme::init_css();
             crate::ui::file_chooser::build_ui(app);
-        });
-        return app.run_with_args(&Vec::<String>::new());
-    }
-
-    if let Some(app_path) = args.gatekeeper_prompt {
-        let app = Application::builder()
-            .application_id("os.athanor.GatekeeperPrompt")
-            .build();
-        let path_clone = app_path.clone();
-        app.connect_activate(move |app| {
-            crate::theme::init_css();
-            crate::ui::gatekeeper_prompt::build_ui(app, &path_clone);
         });
         return app.run_with_args(&Vec::<String>::new());
     }
