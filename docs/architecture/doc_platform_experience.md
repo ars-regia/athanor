@@ -60,5 +60,5 @@ L'anello di congiunzione tra l'utente avanzato e la documentazione del sistema Ã
 Il codice in `system/portal/` genera un sito web statico compresso ad altissime prestazioni. Utilizza `Pagefind` per offrire una barra di ricerca istantanea (Zero-JS) che indicizza tutta l'architettura dell'OS, i log di sistema e i comandi utili.
 
 ### Ricerca e Documentazione (Zero-JS e Zero-AI)
-L'aspetto più avanzato del portale è la sua staticità estrema. Invece di affidarsi a instabili demoni di traduzione AI (ormai rimossi dall'OS) o pesanti framework JavaScript, il portale utilizza **Astro.js e Pagefind**. L'indicizzazione e la traduzione dei documenti avvengono in fase di build statica, permettendo una ricerca fulminea e a zero overhead sulla macchina locale.
+L'aspetto piÃ¹ avanzato del portale Ã¨ la sua staticitÃ  estrema. Invece di affidarsi a instabili demoni di traduzione AI (ormai rimossi dall'OS) o pesanti framework JavaScript, il portale utilizza **Astro.js e Pagefind**. L'indicizzazione e la traduzione dei documenti avvengono in fase di build statica, permettendo una ricerca fulminea e a zero overhead sulla macchina locale.
 
