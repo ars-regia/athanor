@@ -35,11 +35,12 @@ use crate::policy::{decide, Facts};
 use crate::rules::{RuleError, Rules};
 use crate::sender::{admits, Admitted, Caller};
 use crate::server::{NOTIFICATIONS_PATH, PRIVATE_PATH};
+use crate::sound::Player;
 use crate::store::{self, Content, Outcome, Reason, Store, Urgency, Visual};
 use crate::wire::{from_notification, WireNotification};
 use athanor_unit::text;
 
-pub const CAPABILITIES: [&str; 4] = ["actions", "body", "icon-static", "persistence"];
+pub const CAPABILITIES: [&str; 5] = ["actions", "body", "icon-static", "persistence", "sound"];
 pub const MAX_ACTIONS: usize = 8;
 pub const ACTION_KEY_BYTES: usize = 64;
 pub const TOKEN_CHARS: usize = 256;
@@ -73,6 +74,8 @@ pub struct State {
     dirty: Arc<Notify>,
     wake: watch::Sender<u64>,
     bus_id: String,
+    /// Finds and plays the sound of a notification (NC7).
+    player: Player,
 }
 
 /// What an evaluation of the do-not-disturb state leaves to announce.
@@ -82,6 +85,12 @@ pub struct Settled {
     changed: Option<(bool, String, i64)>,
     /// How many popups the state that just ended hid.
     summary: Option<u32>,
+}
+
+/// What the hints of a `Notify` say about its sound.
+struct Heard {
+    name: Option<String>,
+    suppress: bool,
 }
 
 /// What `Notify` came to.
@@ -105,6 +114,7 @@ impl State {
         dnd: Dnd,
         wake: watch::Sender<u64>,
         dirty: Arc<Notify>,
+        player: Player,
     ) -> State {
         let mut state = State {
             store: Store::new(),
@@ -127,6 +137,7 @@ impl State {
             dirty,
             wake,
             bus_id: String::new(),
+            player,
         };
         state.evaluate();
         state
@@ -240,6 +251,7 @@ impl State {
         expire_timeout: i32,
         identity: Identity,
         sender: String,
+        sound: &Heard,
     ) -> Arrival {
         let rule = self.rules.rule(&identity);
         let settings = self.rules.settings();
@@ -251,9 +263,8 @@ impl State {
             urgency: content.urgency,
             transient: content.transient,
             expire_timeout,
-            // ponytail: the `suppress-sound` hint and the rate limit arrive with the sound
-            // (NC7) and the rate limit (NC12).
-            suppress_sound: false,
+            // ponytail: the rate limit arrives with NC12.
+            suppress_sound: sound.suppress,
             rate_limited: false,
         });
         if !decision.list {
@@ -263,6 +274,7 @@ impl State {
             self.dnd.missed_one();
         }
         content.timeout_ms = decision.timeout_ms;
+        let urgency = content.urgency;
         let now = self.now_ms();
         let outcome = self.store.notify(
             content,
@@ -273,6 +285,11 @@ impl State {
             sender,
             decision.popup,
         );
+        if decision.sound {
+            if let Some(file) = self.player.sound_for(urgency, sound.name.as_deref()) {
+                self.player.play(&file);
+            }
+        }
         self.dirty.notify_one();
         let wire = from_notification(&outcome.notification, now);
         Arrival::Kept(Box::new((outcome, wire)))
@@ -641,6 +658,10 @@ impl Notifications {
         #[zbus(header)] header: Header<'_>,
         #[zbus(connection)] conn: &Connection,
     ) -> u32 {
+        let sound = Heard {
+            name: hints.sound_name.clone(),
+            suppress: hints.suppress_sound,
+        };
         let content = content(
             app_name,
             app_icon,
@@ -665,8 +686,14 @@ impl Notifications {
             },
             None => Identity::Other,
         };
-        let arrival =
-            lock(&self.state).arrive(content, replaces_id, expire_timeout, identity, sender);
+        let arrival = lock(&self.state).arrive(
+            content,
+            replaces_id,
+            expire_timeout,
+            identity,
+            sender,
+            &sound,
+        );
         let (outcome, wire) = match arrival {
             Arrival::Refused(id) => return id,
             Arrival::Kept(kept) => *kept,

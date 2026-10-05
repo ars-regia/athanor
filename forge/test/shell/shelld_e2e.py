@@ -15,12 +15,15 @@ become one, through the fake-cgroup harness in tests/notifications.rs
 images_are_scaled_and_bad_ones_dropped_without_failing_the_call).
 """
 
+import json
 import os
 import signal
 import subprocess
 import sys
 import tempfile
 import time
+import wave
+from pathlib import Path
 
 from gi.repository import Gio, GLib
 
@@ -106,9 +109,63 @@ def notify(bus, summary, body, hints, actions=()):
     return call(bus, NOTIFY, "Notify", args, "(u)").unpack()[0]
 
 
+def sound_setup():
+    """PipeWire, and a sound under /usr/share, the only data directory the daemon may read
+    (the rig image has no theme of its own). Up before the daemon: every notification the
+    other checks send plays this sound. Returns what sound_teardown undoes."""
+    theme = Path("/usr/share/sounds/freedesktop/stereo")
+    created = not theme.exists()
+    theme.mkdir(parents=True, exist_ok=True)
+    sound = theme / "message-new-instant.wav"
+    with wave.open(str(sound), "wb") as out:
+        out.setnchannels(2)
+        out.setsampwidth(2)
+        out.setframerate(48000)
+        out.writeframes(b"\0" * 4 * 48000 * 2)
+    server = subprocess.Popen(["pipewire"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    socket = Path(os.environ["XDG_RUNTIME_DIR"], "pipewire-0")
+    wait_for(socket.is_socket, 10)
+    return server, sound, theme if created else None
+
+
+def sound_teardown(server, sound, created):
+    server.terminate()
+    server.wait()
+    sound.unlink()
+    if created:
+        created.rmdir()
+
+
+def sound_check(bus):
+    """NC7: a notification makes the daemon, under its own Landlock ruleset, exec pw-play,
+    which reaches the PipeWire socket and reads its client configuration: the stream shows
+    in the registry with the Notification role."""
+    notify(bus, "sound", "", {})
+
+    def streams():
+        dump = subprocess.run(["pw-dump"], capture_output=True, text=True, check=False)
+        try:
+            nodes = json.loads(dump.stdout)
+        except ValueError:
+            return []
+        return [
+            node
+            for node in nodes
+            if node.get("type") == "PipeWire:Interface:Node"
+            and node.get("info", {}).get("props", {}).get("media.role") == "Notification"
+        ]
+
+    check(
+        "sound plays through pw-play under Landlock",
+        wait_for(lambda: bool(streams()), 5),
+        "no Notification stream reached PipeWire",
+    )
+
+
 def main():
     bus = Gio.bus_get_sync(Gio.BusType.SESSION)
     state = tempfile.mkdtemp(prefix="shelld-e2e-")
+    sound = sound_setup()
     daemon = start(state)
     names = ("org.freedesktop.Notifications", "org.kde.StatusNotifierWatcher")
     check(
@@ -119,7 +176,9 @@ def main():
 
     caps = call(bus, NOTIFY, "GetCapabilities", None, "(as)").unpack()[0]
     check(
-        "capabilities", caps == ["actions", "body", "icon-static", "persistence"], caps
+        "capabilities",
+        caps == ["actions", "body", "icon-static", "persistence", "sound"],
+        caps,
     )
 
     # A non-bar connection's AddMatch on the private interface: it must hear nothing, ever
@@ -229,6 +288,8 @@ def main():
         lines[:3],
     )
 
+    sound_check(bus)
+
     time.sleep(1)
     rollup = open(f"/proc/{daemon.pid}/smaps_rollup").read()
     pss = next(
@@ -251,6 +312,7 @@ def main():
     )
     daemon.terminate()
     daemon.wait()
+    sound_teardown(*sound)
     return 1 if failures else 0
 
 

@@ -16,6 +16,7 @@ pub mod policy;
 pub mod rules;
 pub mod sender;
 pub mod server;
+pub mod sound;
 pub mod store;
 pub mod watcher;
 pub mod wire;

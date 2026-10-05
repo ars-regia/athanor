@@ -12,11 +12,18 @@ use zvariant::{OwnedValue, Signature, Type};
 use crate::icon::{self, Icon};
 use crate::image::{self, Image, Raw};
 
+/// A theme name is short; the rest of a longer one is never looked up.
+const SOUND_NAME_CHARS: usize = 128;
+
 #[derive(Debug, Default, PartialEq)]
 pub struct Hints {
     pub urgency: Option<u8>,
     pub transient: bool,
     pub resident: bool,
+    /// `sound-name`, a name in the sound theme. There is no field for `sound-file`: the
+    /// hint is skipped like any other, so no path an application names is ever opened (NC7).
+    pub sound_name: Option<String>,
+    pub suppress_sound: bool,
     pub desktop_entry: Option<String>,
     /// From `image-data`, else `image_data` (1.1), else `icon_data` (1.0).
     pub image: Option<Image>,
@@ -55,6 +62,15 @@ impl<'de> Visitor<'de> for HintsVisitor {
                 "urgency" => hints.urgency = map.next_value::<Hint<u8>>()?.0,
                 "transient" => hints.transient = map.next_value::<Hint<bool>>()?.0.unwrap_or(false),
                 "resident" => hints.resident = map.next_value::<Hint<bool>>()?.0.unwrap_or(false),
+                "sound-name" => {
+                    hints.sound_name = map
+                        .next_value::<Hint<&str>>()?
+                        .0
+                        .map(|name| name.chars().take(SOUND_NAME_CHARS).collect());
+                }
+                "suppress-sound" => {
+                    hints.suppress_sound = map.next_value::<Hint<bool>>()?.0.unwrap_or(false);
+                }
                 "desktop-entry" => {
                     hints.desktop_entry = map
                         .next_value::<Hint<&str>>()?
@@ -200,6 +216,22 @@ mod tests {
         assert_eq!(hints.desktop_entry.as_deref(), Some("org.gnome.Nautilus"));
         assert_eq!(hints.image_path, Some(Icon::File("/a.png".into())));
         assert_eq!(hints.image.map(|i| (i.width, i.height)), Some((2, 2)));
+    }
+
+    #[test]
+    fn the_sound_name_and_suppress_sound_are_read_and_sound_file_is_not() {
+        let hints = decode(HashMap::from([
+            ("sound-name", Value::from("bell")),
+            ("suppress-sound", Value::Bool(true)),
+            ("sound-file", Value::from("/etc/hostname")),
+        ]));
+        assert_eq!(hints.sound_name.as_deref(), Some("bell"));
+        assert!(hints.suppress_sound);
+        let file_only = decode(HashMap::from([(
+            "sound-file",
+            Value::from("/etc/hostname"),
+        )]));
+        assert_eq!(file_only, Hints::default(), "sound-file leaves no trace");
     }
 
     #[test]

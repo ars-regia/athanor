@@ -10,6 +10,7 @@ use std::{env, fs, process};
 
 use athanor_shelld::sender::{Admitted, Caller};
 use athanor_shelld::server::{self, Config};
+use athanor_shelld::sound::Player;
 use zbus::connection::Builder;
 use zbus::Connection;
 
@@ -84,6 +85,29 @@ impl Bus {
                 config_dir,
                 admitted: Admitted::from_proc_root(&proc_root),
                 proc_root,
+                player: Player::default(),
+            },
+        )
+        .await
+        .expect("daemon")
+        .connection
+    }
+
+    /// `daemon`, with `player` for the sounds.
+    pub async fn daemon_sounding(&self, cgroup: &str, player: Player) -> Connection {
+        let proc_root = fake_proc(&self.dir, cgroup);
+        let (state_dir, config_dir) = (self.dir.join("state"), self.dir.join("config"));
+        for dir in [&state_dir, &config_dir] {
+            fs::create_dir_all(dir).expect("mkdir");
+        }
+        server::start(
+            self.builder(),
+            Config {
+                state_dir,
+                config_dir,
+                admitted: Admitted::from_proc_root(&proc_root),
+                proc_root,
+                player,
             },
         )
         .await
@@ -114,6 +138,7 @@ impl Bus {
                 config_dir,
                 proc_root,
                 admitted: Admitted::from_fn(move |name, _pid| names.get(name).copied()),
+                player: Player::default(),
             },
         )
         .await

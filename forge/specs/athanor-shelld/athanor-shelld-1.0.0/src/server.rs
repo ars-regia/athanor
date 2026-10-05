@@ -14,6 +14,7 @@ use zbus::Connection;
 use crate::battery::LowBattery;
 use crate::notifications::{Notifications, Private, Shared, State};
 use crate::sender::Admitted;
+use crate::sound::Player;
 use crate::watcher::{self, Watcher};
 use crate::{clock, dnd, notifications, rules};
 
@@ -32,6 +33,8 @@ pub struct Config {
     pub proc_root: PathBuf,
     /// Which unit a caller of the private interface is.
     pub admitted: Admitted,
+    /// Finds and plays the sound of a notification.
+    pub player: Player,
 }
 
 /// What the daemon keeps running: the connection, and the state to write on the way out.
@@ -60,6 +63,7 @@ pub async fn start(builder: Builder<'_>, config: Config) -> zbus::Result<Daemon>
         dnd,
         wake_tx,
         Arc::clone(&dirty),
+        config.player,
     )));
     let conn = builder
         .serve_at(

@@ -1,6 +1,7 @@
 mod common;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use athanor_shelld::sender::{Admitted, Caller};
@@ -311,7 +312,10 @@ async fn capabilities_and_server_information_are_the_specifications() {
     let _daemon = bus.daemon(APP_CGROUP).await;
     let proxy = public(&bus.client().await).await;
     let caps: Vec<String> = proxy.call("GetCapabilities", &()).await.expect("caps");
-    assert_eq!(caps, ["actions", "body", "icon-static", "persistence"]);
+    assert_eq!(
+        caps,
+        ["actions", "body", "icon-static", "persistence", "sound"]
+    );
     let info: (String, String, String, String) =
         proxy.call("GetServerInformation", &()).await.expect("info");
     assert_eq!(
@@ -760,6 +764,7 @@ async fn a_second_daemon_on_the_same_bus_fails_to_start() {
             config_dir: bus.dir.join("config"),
             proc_root: bus.dir.join("proc"),
             admitted: Admitted::from_proc_root(bus.dir.join("proc")),
+            player: athanor_shelld::sound::Player::default(),
         },
     )
     .await;
@@ -863,5 +868,97 @@ async fn the_summary_that_fills_the_store_closes_the_notification_it_evicts() {
         (id, reason),
         (first, 1),
         "the summary evicted the oldest, and said so"
+    );
+}
+
+/// A theme with the two sounds of NC7 and a stand-in for `pw-play` that logs its arguments.
+fn sound_rig(bus: &Bus) -> (PathBuf, athanor_shelld::sound::Player) {
+    use std::os::unix::fs::PermissionsExt;
+    let stereo = bus.dir.join("data/sounds/freedesktop/stereo");
+    std::fs::create_dir_all(&stereo).expect("theme");
+    for name in ["message-new-instant", "dialog-warning", "bell"] {
+        std::fs::write(stereo.join(format!("{name}.oga")), "").expect("sound");
+    }
+    let log = bus.dir.join("played");
+    let program = bus.dir.join("fake-pw-play");
+    std::fs::write(
+        &program,
+        format!("#!/bin/sh\necho \"$@\" >> {}\n", log.display()),
+    )
+    .expect("program");
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    (
+        log,
+        athanor_shelld::sound::Player::with_program(vec![bus.dir.join("data")], program),
+    )
+}
+
+async fn played(log: &std::path::Path, lines: usize) -> String {
+    for _ in 0..50 {
+        let text = std::fs::read_to_string(log).unwrap_or_default();
+        if text.lines().count() >= lines {
+            return text;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    std::fs::read_to_string(log).unwrap_or_default()
+}
+
+#[tokio::test]
+async fn a_notification_plays_the_themes_sound_and_never_the_sound_file_it_names() {
+    let bus = Bus::start("sound");
+    let (log, player) = sound_rig(&bus);
+    let _daemon = bus.daemon_sounding(APP_CGROUP, player).await;
+    let proxy = public(&bus.client().await).await;
+    notify(
+        &proxy,
+        0,
+        "s",
+        "",
+        &[],
+        HashMap::from([("sound-file", Value::from("/etc/hostname"))]),
+    )
+    .await;
+    let text = played(&log, 1).await;
+    assert_eq!(
+        text.trim(),
+        format!(
+            "--media-role Notification -- {}",
+            bus.dir
+                .join("data/sounds/freedesktop/stereo/message-new-instant.oga")
+                .display()
+        )
+    );
+    // The hinted name when the theme has it, the urgency's own when it does not.
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    notify(
+        &proxy,
+        0,
+        "s",
+        "",
+        &[],
+        HashMap::from([("sound-name", Value::from("bell"))]),
+    )
+    .await;
+    assert!(played(&log, 2)
+        .await
+        .lines()
+        .nth(1)
+        .is_some_and(|l| l.ends_with("bell.oga")));
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    notify(
+        &proxy,
+        0,
+        "s",
+        "",
+        &[],
+        HashMap::from([("suppress-sound", Value::Bool(true))]),
+    )
+    .await;
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    assert_eq!(
+        played(&log, 3).await.lines().count(),
+        2,
+        "suppress-sound is honoured"
     );
 }

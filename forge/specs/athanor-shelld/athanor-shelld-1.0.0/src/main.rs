@@ -110,6 +110,7 @@ async fn serve(state_dir: PathBuf, config_dir: PathBuf) -> ExitCode {
             config_dir,
             admitted: Admitted::from_proc_root(&proc_root),
             proc_root,
+            player: athanor_shelld::sound::Player::new(athanor_shelld::sound::data_dirs()),
         },
     )
     .await
