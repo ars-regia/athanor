@@ -17,7 +17,7 @@ Requires: slurp
 Requires: wl-clipboard
 Requires: brightnessctl
 Requires: playerctl
-Requires:       athanor-shell-rs wireplumber nautilus ptyxis gnome-text-editor firefox
+Requires:       athanor-shell-rs wireplumber nautilus ptyxis gnome-text-editor gnome-disk-utility firefox
 
 %description
 Provides the unified Desktop UI configuration for Athanor OS.
