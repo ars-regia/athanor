@@ -99,7 +99,10 @@ class NvidiaAvailability(unittest.TestCase):
                 bump.toolkit_version(lock)
 
     def test_system_containerfile_is_tracked_by_the_system_group(self):
-        self.assertEqual(bump.GROUP_CONTAINERFILES["system"], [AZOTH.parents[2] / "system" / "Containerfile"])
+        self.assertEqual(
+            bump.GROUP_CONTAINERFILES["system"],
+            [AZOTH.parents[2] / "system" / "Containerfile", AZOTH.parents[2] / "system" / "disk_config" / "bib.Containerfile"],
+        )
 
 
 

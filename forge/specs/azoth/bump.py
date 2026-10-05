@@ -58,7 +58,7 @@ PINS = HERE / "pins.env"
 # pinned by digest moves with the bump of its group.
 GROUP_CONTAINERFILES = {
     "kernel": [HERE / d / "Containerfile" for d in ("builder", "boot", "nvidia")],
-    "system": [HERE.parents[2] / "system" / "Containerfile"],
+    "system": [HERE.parents[2] / "system" / "Containerfile", HERE.parents[2] / "system" / "disk_config" / "bib.Containerfile"],
 }
 NVIDIA_LOCK = HERE.parents[2] / "system" / "nvidia" / "lock.py"
 TOOLKIT_LOCK = NVIDIA_LOCK.parent / "locks" / "container-toolkit.lock"

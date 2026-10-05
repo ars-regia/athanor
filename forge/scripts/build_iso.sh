@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# build_iso.sh IMAGE OUTPUT_DIR: installer ISO of a bootc image, built with
+# build_iso.sh IMAGE OUTPUT_DIR [TARGET]: installer ISO of a bootc image, built with
 # bootc-image-builder.
+#   TARGET  the reference the installed system follows (e.g. <registry>/athanor-system:stable):
+#           IMAGE is embedded under that name, so the installer switches the system to it.
+#           Default: IMAGE itself.
+# The builder is the one pinned in system/disk_config/bib.Containerfile (BIB_IMAGE overrides).
 #
 # Not the osbuild/bootc-image-builder-action: the builder looks for the installer
 # package list as <ID>-<VERSION_ID>.yaml, where ID comes from the os-release of the
@@ -13,10 +17,12 @@
 # whatever is mounted at /config.toml. Its output belongs to root, hence the --chown.
 set -euo pipefail
 
-[[ $# -eq 2 ]] || { echo "usage: build_iso.sh IMAGE OUTPUT_DIR" >&2; exit 2; }
-image=$1 output=$2
+[[ $# -eq 2 || $# -eq 3 ]] || { echo "usage: build_iso.sh IMAGE OUTPUT_DIR [TARGET]" >&2; exit 2; }
+image=$1 output=$2 target=${3:-$1}
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-builder=${BIB_IMAGE:-quay.io/centos-bootc/bootc-image-builder:latest}
+pinned=$(sed -n 's/^FROM \(\S*@sha256:[0-9a-f]\{64\}\) AS bootc-image-builder$/\1/p' "${repo}/system/disk_config/bib.Containerfile")
+builder=${BIB_IMAGE:-$pinned}
+[[ -n $builder ]] || { echo "no pinned bootc-image-builder in system/disk_config/bib.Containerfile" >&2; exit 2; }
 config="${repo}/system/disk_config/iso.toml"
 defs="${repo}/system/disk_config/defs"
 
@@ -57,6 +63,7 @@ sudo rm -rf /var/lib/containers/storage
 retry="${repo}/forge/scripts/retry.sh"
 sudo bash "$retry" podman pull "$builder"
 sudo bash "$retry" podman pull "$image"
+[[ $target == "$image" ]] || sudo podman tag "$image" "$target"
 
 # --rootfs: the builder formats the installed root with ext4, xfs or btrfs; the image
 # installs btrfs.
@@ -71,4 +78,4 @@ sudo podman run --rm --privileged --security-opt label=type:unconfined_t \
     --use-librepo=True \
     --chown "$(id -u):$(id -g)" \
     --output /output \
-    "$image"
+    "$target"
