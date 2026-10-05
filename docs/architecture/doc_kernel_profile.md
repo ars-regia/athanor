@@ -589,7 +589,9 @@ with layers), IMA log (D23).
 **LUKS** (D42): in attested mode, TPM 2.0 policy through `systemd-pcrlock` on PCR 7 and
 PCR 14 plus the signed PCR 11 policy (initrd phase, UKI profile 0), never PCR 12, so role
 changes do not require resealing; in degraded mode TPM plus PIN, or a passphrase. A
-recovery key is always enrolled.
+recovery key is always enrolled. Amended 2026-10-06 (maintainer decision A2-9, #151): this
+document is tier 3, root and the image, of `doc_threat_model.md`; sections 9 and 10 say
+what changed.
 
 **Attestation** (restricted area): admission of a mesh host requires its identity, a
 verified TPM quote and with the dm-verity option, the active IPE class derived from PCR 11 and the PCR 12 event log (D38, section 10).
@@ -597,6 +599,9 @@ Keylime's example measured-boot policy considers PCRs 0–9 and 14 only, so a de
 policy covers PCR 11 and the command line events of the allowed role sets in PCR 12. The
 attestation code in the repository today returns fixed results and quotes the wrong PCRs;
 it is replaced, with the maintainer's approval, before any mesh admission depends on it.
+Amended 2026-10-06 (maintainer decision A2-9, #151): attestation is outside the threat
+model of 1.0 (`doc_threat_model.md`, TM7), and `athanor-attestation` moves to
+`experimental/` pending the maintainer's decision, because its path is restricted.
 
 ## 10. Execution integrity and security primitives
 
@@ -727,7 +732,10 @@ domain through SELinux; services also set `RestrictNamespaces=`.
   IPE does not see; `ptrace_scope=1` still allows root and a process's ancestors.
 - Code running as the user persists through autostart entries, `systemd --user` units and
   shell startup files; a Flatpak application with home access can write those files and
-  leave its sandbox.
+  leave its sandbox. Amended 2026-10-06 (maintainer decision A2-9, #151): unconfined user
+  code is the user (`doc_threat_model.md`, TM1); an application of the broker's `confined`
+  class cannot write those paths (TM3, `doc_session_daemons.md` SD8); the Flatpak case
+  remains, stated in TM4.
 - Unconfined user code can create user namespaces and reach kernel code gated by
   in-namespace capabilities, such as `nf_tables`.
 - An unconfined root is not bounded by SELinux under Fedora's targeted policy (D44), keeps
