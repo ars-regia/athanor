@@ -866,21 +866,26 @@ fn text_label(text: &str, lines: i32) -> gtk4::Label {
 }
 
 /// The body as the daemon's spans, rendered to Pango only by `pango_markup`: the label never
-/// sees the sender's text as markup. A link opens through the OpenURI portal on a click or
-/// Enter (`activate-link`), never on hover or focus; GTK's tooltip shows its address.
+/// sees the sender's text as markup. A link opens on a click or Enter (`activate-link`), never on
+/// hover or focus; the tooltip shows its address.
 fn show_spans(label: &gtk4::Label, spans: &[(String, u32, String)]) {
     if spans.is_empty() {
         return;
     }
     label.set_use_markup(true);
     label.set_markup(&athanor_services::notifications::wire::pango_markup(spans));
-    label.connect_activate_link(|label, uri| {
-        let window = label.root().and_downcast::<gtk4::Window>();
-        gtk4::UriLauncher::new(uri).launch(window.as_ref(), gio::Cancellable::NONE, |result| {
-            if let Err(err) = result {
-                tracing::warn!(error = %err, "cannot open a link of a notification");
-            }
-        });
+    label.connect_activate_link(|_, uri| {
+        // No parent window: GTK would export a layer surface through the compositor, which
+        // refuses it and disconnects the client.
+        gtk4::UriLauncher::new(uri).launch(
+            None::<&gtk4::Window>,
+            gio::Cancellable::NONE,
+            |result| {
+                if let Err(err) = result {
+                    tracing::warn!(error = %err, "cannot open a link of a notification");
+                }
+            },
+        );
         glib::Propagation::Stop
     });
 }

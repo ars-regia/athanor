@@ -361,6 +361,12 @@ def main():
             "fake_control_center.py did not own os.athanor.ControlCenter1",
             10,
         )
+        helpers.append(subprocess.Popen(["python3", f"{HERE}/fake_portal.py"]))
+        wait_until(
+            lambda: has_owner(session, "org.freedesktop.portal.Desktop"),
+            "fake_portal.py did not own org.freedesktop.portal.Desktop",
+            10,
+        )
     shelld = None
     if args.tray:
         shelld = start_shelld()

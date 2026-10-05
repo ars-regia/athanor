@@ -165,6 +165,14 @@ fn entity(s: &str) -> Option<(char, usize)> {
         "apos" => '\'',
         _ => {
             let digits = name.strip_prefix('#')?;
+            // `+65` parses as a number, but is not an entity.
+            if !digits
+                .trim_start_matches(['x', 'X'])
+                .chars()
+                .all(|c| c.is_ascii_hexdigit())
+            {
+                return None;
+            }
             let code = match digits.strip_prefix(['x', 'X']) {
                 Some(hex) => u32::from_str_radix(hex, 16).ok()?,
                 None => digits.parse().ok()?,
@@ -219,5 +227,45 @@ mod tests {
                 ("c".into(), 0, String::new())
             ]
         );
+    }
+
+    #[test]
+    fn hrefs_take_either_quote_and_any_case_of_the_name() {
+        assert_eq!(
+            parse("<a href='https://a/b'>x</a>").1,
+            [("x".into(), 0, "https://a/b".into())]
+        );
+        assert_eq!(
+            parse("<a HREF=\"http://a\">x</a>").1,
+            [("x".into(), 0, "http://a".into())]
+        );
+        assert_eq!(
+            parse("<a href=https://a>x</a>").1,
+            [("x".into(), 0, String::new())]
+        );
+    }
+
+    #[test]
+    fn a_missing_or_stray_close_tag_is_harmless() {
+        assert_eq!(
+            parse("<a href=\"https://a\">x").1,
+            [("x".into(), 0, "https://a".into())]
+        );
+        assert_eq!(parse("a</a>b").0, "ab");
+    }
+
+    #[test]
+    fn a_bad_numeric_entity_stays_literal() {
+        for body in [
+            "&#x110000;",
+            "&#xD800;",
+            "&#+65;",
+            "&#-65;",
+            "&#99999999999999999999;",
+            "&#x;",
+            "&#;",
+        ] {
+            assert_eq!(parse(body).0, body, "{body}");
+        }
     }
 }

@@ -27,10 +27,6 @@ RestartSec=100ms
 Slice=session.slice
 # SH4: the layer surfaces are drawn with Cairo, on every GPU.
 Environment=GSK_RENDERER=cairo
-# A link in a notification opens through the OpenURI portal over D-Bus: GTK uses it outside a
-# Flatpak only with this, and without it GTK would run the handler itself, which the
-# confinement forbids.
-Environment=GTK_USE_PORTAL=1
 # GTK's and fontconfig's caches, inside the Landlock ruleset (BR1).
 Environment=XDG_CACHE_HOME=%C/athanor-bar
 CacheDirectory=athanor-bar

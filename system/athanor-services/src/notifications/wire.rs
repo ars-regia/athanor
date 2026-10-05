@@ -74,10 +74,16 @@ fn escape(text: &str, out: &mut String) {
 pub fn pango_markup(spans: &[(String, u32, String)]) -> String {
     let mut out = String::new();
     for (text, style, href) in spans {
-        let link = is_safe_href(href);
+        let href = athanor_unit::text::line(href, 2048);
+        let link = is_safe_href(&href);
         if link {
             out.push_str("<a href=\"");
-            escape(href, &mut out);
+            escape(&href, &mut out);
+            // The tooltip: GTK reads `title` as markup, so the address is escaped twice.
+            out.push_str("\" title=\"");
+            let mut once = String::new();
+            escape(&href, &mut once);
+            escape(&once, &mut out);
             out.push_str("\">");
         }
         let tags = [(1, 'b'), (2, 'i'), (4, 'u')].map(|(bit, tag)| (style & bit != 0, tag));
@@ -109,10 +115,14 @@ mod tests {
     fn markup_comes_from_the_spans_alone() {
         assert_eq!(
             pango_markup(&[("<x> & \"y\"".into(), 1, "https://a/?b=1&c=2".into())]),
-            "<a href=\"https://a/?b=1&amp;c=2\"><b>&lt;x&gt; &amp; &quot;y&quot;</b></a>"
+            "<a href=\"https://a/?b=1&amp;c=2\" title=\"https://a/?b=1&amp;amp;c=2\"><b>&lt;x&gt; &amp; &quot;y&quot;</b></a>"
         );
         assert_eq!(pango_markup(&[("x".into(), 0, "file:///etc".into())]), "x");
         assert_eq!(pango_markup(&[("a\u{202E}b".into(), 0, String::new())]), "ab");
+        assert_eq!(
+            pango_markup(&[("t".into(), 0, "https://a/\u{202E}b".into())]),
+            "<a href=\"https://a/b\" title=\"https://a/b\">t</a>"
+        );
     }
 
     fn table() -> WireNotification {

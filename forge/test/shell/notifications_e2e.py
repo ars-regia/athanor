@@ -44,6 +44,7 @@ BADGE = re.compile(r"^\d+\+?$")
 UNREAD = re.compile(r"^Notifications, (\d+) unread$")
 # The layer surface's margin from the end edge (athanor-bar's ui/popups.rs MARGIN).
 POPUP_MARGIN = 8
+NESTED_OFFSET = 13
 FIFO = "/tmp/athanor-notification-fifo.png"
 LONG = "x" * 100_000
 
@@ -79,6 +80,20 @@ def body_links(app, Atspi, summary):
         return found
     except (GLib.Error, StopIteration):
         return None
+
+
+def link_box(popup, Atspi):
+    """The extents, in window coordinates, of the first character of the popup's one link."""
+    for node in walk_nodes(popup, Atspi):
+        text = node.get_text_iface()
+        hypertext = node.get_hypertext_iface()
+        if text is None or hypertext is None or Atspi.Hypertext.get_n_links(hypertext) != 1:
+            continue
+        # PyGObject hands get_link back as an Accessible without start_index: the link is the
+        # "x" of "B x f".
+        start = Atspi.Text.get_text(text, 0, -1).index("x")
+        return Atspi.Text.get_character_extents(text, start, Atspi.CoordType.WINDOW)
+    return None
 
 
 def never(seen, seconds):
@@ -129,12 +144,13 @@ def unread(app, Atspi):
     return None
 
 
-def click(app, Atspi, name, done):
+def click(app, Atspi, name, done, target=None):
     """Clicks the popup called `name` with a virtual pointer until `done()` holds: a click
     on the card is no AT-SPI action, so the way a user clicks it is the only one. GTK
     reports a card's position inside its window, and the layer surface's own place on the
     output is the compositor's, so the column comes from the surface being anchored to the
-    end corner and the row is the card's own, below the panel and the popup margin."""
+    end corner and the row is the card's own, below the panel and the popup margin. With
+    `target`, the click lands on the box that function makes of the popup's node instead."""
     node = next(
         (
             node
@@ -145,7 +161,9 @@ def click(app, Atspi, name, done):
     )
     if node is None:
         return False
-    box = node.get_extents(Atspi.CoordType.WINDOW)
+    box = node.get_extents(Atspi.CoordType.WINDOW) if target is None else target(node)
+    if box is None:
+        return False
     window = node
     while window.get_parent() is not None and window.get_parent().get_role_name() != "application":
         window = window.get_parent()
@@ -158,17 +176,25 @@ def click(app, Atspi, name, done):
         if frame is not None and frame != window
     )
     width, height = output_size()
-    x = width - POPUP_MARGIN - shell.width + box.x + box.width // 2
-    y = panel + POPUP_MARGIN + box.y + box.height // 2
+    # AT-SPI places a widget inside a card NESTED_OFFSET px up and left of where GTK draws it
+    # (measured on a screenshot of this rig: the card itself is exact).
+    nested = 0 if target is None else NESTED_OFFSET
+    x = width - POPUP_MARGIN - shell.width + box.x + box.width // 2 + nested
+    y = panel + POPUP_MARGIN + box.y + box.height // 2 + nested
     pointer = VirtualPointer(sway_display(), width, height)
     try:
         # A click that lands before the card's surface took the pointer is lost: try again.
         for _ in range(3):
             pointer.move(x, y)
+            # A label finds the link under the pointer from motion events, not at the press.
+            time.sleep(0.5)
             pointer.click()
             if wait_for(done, 0.6):
                 return True
     finally:
+        if target is not None:
+            # A pointer left over a popup would pause its countdown (ruling 4).
+            pointer.move(0, height // 2)
         pointer.close()
     return False
 
@@ -419,11 +445,37 @@ def main():
     )
 
     # Item 8 (NC10): the body is its spans, a safe link is one link, a file: link is not.
-    rich = notify("Rich body", body=RICH_BODY)
+    rich = notify("Rich body", body=RICH_BODY, actions=["default", "Open"])
     check(
         "a body with markup reads as B x f with exactly one link (item 8)",
         wait_for(lambda: ("B x f", 1) in (body_links(app, Atspi, "Rich body") or []), 5),
         repr(body_links(app, Atspi, "Rich body")),
+    )
+    portal = Path("/out") / f"{os.environ['RIG_TAG']}-portal.log"
+    check(
+        "nothing opens before a click (hover and focus do not follow a link)",
+        "OpenURI" not in portal.read_text(encoding="utf-8"),
+    )
+    check(
+        "a click on the link opens its address through the portal",
+        click(
+            app,
+            Atspi,
+            "Rich body",
+            lambda: "OpenURI https://x.org" in portal.read_text(encoding="utf-8").splitlines(),
+            target=lambda popup: link_box(popup, Atspi),
+        ),
+        repr(portal.read_text(encoding="utf-8")),
+    )
+    time.sleep(1)
+    check("the bar survives the click (no protocol error)", alive(pid))
+    check(
+        "a click on a link does not also invoke the default action",
+        not any(
+            line.startswith(f"InvokeAction {rich} default")
+            for line in log.read_text(encoding="utf-8").splitlines()
+        ),
+        log.read_text(encoding="utf-8"),
     )
     close_notification(rich)
 
