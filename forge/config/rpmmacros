@@ -30,7 +30,7 @@
 # -fno-math-errno -fno-trapping-math: Math iper-veloce (Clear Linux)
 # -pipe: Minore latenza I/O durante la compilazione
 
-%_optflags -O3 -march=x86-64-v3 -mlam=u48 -mtune=generic -pipe -fno-semantic-interposition -falign-functions=32 -fno-math-errno -fno-trapping-math -mprefer-vector-width=256 -fPIC -Wp,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer
+%_optflags -O3 -march=x86-64-v3 -mlam=u48 -mtune=generic -pipe -fno-semantic-interposition -falign-functions=32 -fno-math-errno -fno-trapping-math -mprefer-vector-width=256 -fPIC -Wp,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS -fasynchronous-unwind-tables -fstack-protector-strong -fstack-clash-protection -fcf-protection -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer
 
 # LTO CFlags (fat-lto-objects to prevent cross-language link issues in Rust/C like niri libspa)
 %_lto_cflags -flto=auto -ffat-lto-objects -fno-semantic-interposition
@@ -41,6 +41,16 @@
 # -Wl,--sort-common: Ottimizza il layout della memoria
 # -fuse-ld=mold: Linker di nuova generazione (MOLD), iper-parallelo
 %_ldflags -Wl,-O2 -Wl,--as-needed -Wl,--sort-common -Wl,-z,now -Wl,-z,relro -Wl,--icf=all -Wl,--gc-sections -fuse-ld=mold
+
+# The builder's rpm is nixpkgs' own, without redhat-rpm-config, so it never reads Fedora's
+# %_optflags and %_ldflags: its %set_build_flags expands %build_cflags -> %optflags (the rpmrc
+# default "-O2 -g", which a user macro cannot override) and an empty %build_ldflags. Bind the
+# build_* macros here, so %set_build_flags, %configure and every spec routed through them get
+# the flags above, hardening included. LTO stays out: only %__global_* add it.
+%build_cflags %{_optflags}
+%build_cxxflags %{_optflags}
+%build_fflags %{_optflags} %{?_fmoddir:-I%{_fmoddir}}
+%build_ldflags %{_ldflags}
 
 # Sovrascrive le direttive globali Fedora appendendo l'LTO solo se abilitato
 %__global_compiler_flags %{_optflags} %{?_lto_cflags}
