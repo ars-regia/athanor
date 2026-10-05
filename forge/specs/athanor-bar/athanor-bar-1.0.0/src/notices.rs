@@ -94,7 +94,7 @@ fn clean_spans(spans: Vec<(String, u32, String)>) -> Vec<(String, u32, String)> 
         let span = text::lines(&span, left);
         left -= span.chars().count();
         if !span.is_empty() {
-            kept.push((span, style & 7, text::line(&href, 2048)));
+            kept.push((span, style & 7, text::line(&href, BODY_CHARS)));
         }
     }
     kept

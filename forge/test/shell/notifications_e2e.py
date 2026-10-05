@@ -44,6 +44,11 @@ BADGE = re.compile(r"^\d+\+?$")
 UNREAD = re.compile(r"^Notifications, (\d+) unread$")
 # The layer surface's margin from the end edge (athanor-bar's ui/popups.rs MARGIN).
 POPUP_MARGIN = 8
+# AT-SPI reports a widget inside a notification card this many px up and left of where GTK
+# draws it. Measured, not derived, on a screenshot of this rig (a card with 16 px padding and a
+# 1 px border, in a 360 px wide layer surface); a change of the card's CSS, of GTK or of the
+# popup layout moves it. The link test then fails on its own, loudly: the click lands beside the
+# link, nothing reaches the portal and the check says so.
 NESTED_OFFSET = 13
 FIFO = "/tmp/athanor-notification-fifo.png"
 LONG = "x" * 100_000
@@ -144,7 +149,7 @@ def unread(app, Atspi):
     return None
 
 
-def click(app, Atspi, name, done, target=None):
+def click(app, Atspi, name, done, target=None, hovered=None):
     """Clicks the popup called `name` with a virtual pointer until `done()` holds: a click
     on the card is no AT-SPI action, so the way a user clicks it is the only one. GTK
     reports a card's position inside its window, and the layer surface's own place on the
@@ -188,6 +193,10 @@ def click(app, Atspi, name, done, target=None):
             pointer.move(x, y)
             # A label finds the link under the pointer from motion events, not at the press.
             time.sleep(0.5)
+            if hovered is not None:
+                # Rest on the target before pressing: hover must not follow a link.
+                time.sleep(1)
+                hovered()
             pointer.click()
             if wait_for(done, 0.6):
                 return True
@@ -452,10 +461,7 @@ def main():
         repr(body_links(app, Atspi, "Rich body")),
     )
     portal = Path("/out") / f"{os.environ['RIG_TAG']}-portal.log"
-    check(
-        "nothing opens before a click (hover and focus do not follow a link)",
-        "OpenURI" not in portal.read_text(encoding="utf-8"),
-    )
+    opened_on_hover = []
     check(
         "a click on the link opens its address through the portal",
         click(
@@ -464,8 +470,14 @@ def main():
             "Rich body",
             lambda: "OpenURI https://x.org" in portal.read_text(encoding="utf-8").splitlines(),
             target=lambda popup: link_box(popup, Atspi),
+            hovered=lambda: opened_on_hover.append(portal.read_text(encoding="utf-8")),
         ),
         repr(portal.read_text(encoding="utf-8")),
+    )
+    check(
+        "resting the pointer on the link, before any click, opens nothing",
+        bool(opened_on_hover) and not any(opened_on_hover),
+        repr(opened_on_hover),
     )
     time.sleep(1)
     check("the bar survives the click (no protocol error)", alive(pid))

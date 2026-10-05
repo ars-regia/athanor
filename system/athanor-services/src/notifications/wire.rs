@@ -74,7 +74,7 @@ fn escape(text: &str, out: &mut String) {
 pub fn pango_markup(spans: &[(String, u32, String)]) -> String {
     let mut out = String::new();
     for (text, style, href) in spans {
-        let href = athanor_unit::text::line(href, 2048);
+        let href = athanor_unit::text::line(href, athanor_unit::text::BODY_CHARS);
         let link = is_safe_href(&href);
         if link {
             out.push_str("<a href=\"");
@@ -122,6 +122,16 @@ mod tests {
         assert_eq!(
             pango_markup(&[("t".into(), 0, "https://a/\u{202E}b".into())]),
             "<a href=\"https://a/b\" title=\"https://a/b\">t</a>"
+        );
+    }
+
+    #[test]
+    fn a_hostile_link_target_is_escaped_in_both_attributes() {
+        // Once in `href`, twice in `title`, which GTK reads as markup.
+        assert_eq!(
+            pango_markup(&[("t".into(), 0, "https://a/\"><b>&amp;lt;'x".into())]),
+            "<a href=\"https://a/&quot;&gt;&lt;b&gt;&amp;amp;lt;&apos;x\" \
+             title=\"https://a/&amp;quot;&amp;gt;&amp;lt;b&amp;gt;&amp;amp;amp;lt;&amp;apos;x\">t</a>"
         );
     }
 
