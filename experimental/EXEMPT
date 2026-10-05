@@ -21,15 +21,6 @@ athanor-greeter
 # signatures against a caller-supplied key; cosmic-store covers the store until it is
 # redesigned.
 #
-# Out of the workspace since 2026-09-19, and athanor-settings-rs "signed" its CRDT writes
-# with a Dilithium key generated for each write and passed a Cloudflare API token to curl
-# on the command line; cosmic-settings covers settings until the application is
-# redesigned.
-#
-# Out of the workspace since 2026-09-19, and athanor-daemon-rs was D-Bus-activated on the
-# session bus, outside its hardened system unit, and claimed os.athanor.Bedrock and the
-# athanor portal name there; nothing in the COSMIC session uses it.
-#
 # The GTK 0.7 dock library of athanor-shell-rs lives in that program's frozen workspace,
 # at forge/specs/athanor-shell-rs/athanor-dock-0.7, since 2026-09-29; the name
 # athanor-dock and forge/specs/athanor-dock belong to the dock of package 2c.
