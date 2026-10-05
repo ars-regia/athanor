@@ -172,6 +172,14 @@ class SigningSecrets(unittest.TestCase):
             [],
         )
 
+    def test_the_kernel_is_signed_from_the_publishing_branches_only(self):
+        workflow = ROOT / ".github/workflows/call-system-image.yml"
+        _, lines = verify.workflow_jobs(verify.read(workflow))["sign-kernel"]
+        self.assertIn(
+            "    if: github.ref == 'refs/heads/iso-v0' || github.ref == 'refs/heads/main'",
+            lines,
+        )
+
     def test_a_comment_is_not_a_reference(self):
         job = "  build:\n    runs-on: ubuntu-24.04\n    steps:\n      # secrets.SECUREBOOT_SIGNING_KEY is not here\n      - run: make\n"
         self.assertEqual(self.problems(job), [])

@@ -251,6 +251,14 @@ jobs:
     # from this checkout. It signs that vmlinuz in the locked forge/specs/azoth/sign image with
     # the network off and verifies it against the committed certificate. The image build
     # receives only the result.
+    #
+    # The Orchestrator can be dispatched from any branch, so the project key is used only on
+    # the branches that publish (the default kernel-artifacts.sh KERNEL_TRUSTED_REFS): from any
+    # other ref this job, and with it the image build and sign-system-images, is skipped. The
+    # condition is not the whole guard: the signing environment must also carry deployment
+    # branch rules for these branches and required reviewers, a repository setting the
+    # maintainer owns.
+    if: github.ref == 'refs/heads/iso-v0' || github.ref == 'refs/heads/main'
     needs: [lint]
     runs-on: ubuntu-24.04
     environment: signing
