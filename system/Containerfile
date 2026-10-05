@@ -191,6 +191,10 @@ RUN for pkg in cosmic-panel cosmic-applets cosmic-notifications athanor-layout-t
     done && \
     case $(rpm -q --qf '%{RELEASE}' cosmic-comp) in *.athanor*) ;; \
         *) echo "cosmic-comp is not Athanor's build: $(rpm -q cosmic-comp)" >&2; exit 1;; esac && \
+    case $(rpm -q --qf '%{VERSION}-%{RELEASE}' polkit) in 127-*.athanor*) ;; \
+        *) echo "polkit is not Athanor's 127 build: $(rpm -q polkit)" >&2; exit 1;; esac && \
+    ! test -u /usr/lib/polkit-1/polkit-agent-helper-1 && \
+    systemctl is-enabled --quiet polkit-agent-helper.socket && \
     for name in org.freedesktop.Notifications org.kde.StatusNotifierWatcher; do \
         owners=$(grep -lx "Name=$name" /usr/share/dbus-1/services/*.service); \
         test "$owners" = "/usr/share/dbus-1/services/$name.service" \
