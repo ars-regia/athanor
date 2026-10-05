@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Guided enrolment of the Athanor Secure Boot certificate as a Machine Owner Key
+# (docs/architecture/doc_kernel_profile.md, section 4). GRUB boots the Azoth vmlinuz through
+# shim, and shim accepts it with Secure Boot on only once this certificate is in MokList.
+#
+# The script files the enrolment request with `mokutil --import` and explains the next boot.
+# mokutil asks for a one-time password on the terminal and MokManager asks for it again at
+# the next boot: the person types it both times, nothing here supplies or stores it, so a
+# request cannot be filed or confirmed without someone at the keyboard of the machine.
+#
+# Usage: athanor-secureboot-enroll [--status]   (as root, for example through sudo)
+#   --status   report the Secure Boot state and whether the certificate is enrolled, change nothing
+set -euo pipefail
+
+CERT=/usr/share/athanor/secureboot/athanor-secureboot.der
+
+die() {
+    echo "athanor-secureboot-enroll: $*" >&2
+    exit 1
+}
+[[ $# -eq 0 || ($# -eq 1 && $1 == --status) ]] || {
+    echo "usage: athanor-secureboot-enroll [--status]" >&2
+    exit 2
+}
+[[ -d /sys/firmware/efi ]] || die "this machine did not boot through UEFI: Secure Boot and MOK do not apply"
+[[ -r $CERT ]] || die "$CERT is missing from the image"
+
+sb_state=$(mokutil --sb-state 2> /dev/null) || die "mokutil cannot read the Secure Boot state"
+# The answer of --test-key is its output: its exit status does not tell enrolled from not
+# enrolled, so it is read through a process substitution and the text decides; an answer
+# that matches none of the three below stops the script.
+test_key=$(cat < <(mokutil --test-key "$CERT" 2> /dev/null))
+case $test_key in
+*"is already enrolled"*) enrolment=enrolled ;;
+*"already in the enrollment request"*) enrolment=requested ;;
+*"is not enrolled"*) enrolment=absent ;;
+*) die "mokutil --test-key gave an unexpected answer: $test_key" ;;
+esac
+
+echo "Secure Boot: ${sb_state#SecureBoot }"
+case $enrolment in
+enrolled) echo "Athanor certificate: enrolled as a Machine Owner Key" ;;
+requested) echo "Athanor certificate: enrolment requested, to be confirmed in MokManager at the next boot" ;;
+absent) echo "Athanor certificate: not enrolled" ;;
+esac
+[[ $# -eq 0 && $enrolment == absent ]] || exit 0
+
+[[ $EUID -eq 0 ]] || die "filing the enrolment request needs root: run it again with sudo"
+echo
+echo "mokutil now asks for a one-time password, twice. Choose one you can type at the next"
+echo "boot: MokManager runs before the keyboard layout is loaded and reads a US layout."
+mokutil --import "$CERT"
+
+cat << 'EOF'
+
+The enrolment request is filed. To complete it:
+  1. Restart the computer. Before Athanor starts, a blue screen titled "Perform MOK
+     management" appears and waits ten seconds: press any key.
+  2. Choose "Enroll MOK", then "Continue", then "Yes".
+  3. Type the one-time password you just chose, then choose "Reboot".
+  4. If Secure Boot is off in the firmware settings, turn it on now: Athanor boots with
+     Secure Boot on from here.
+If the blue screen times out, nothing is enrolled: run athanor-secureboot-enroll again.
+EOF

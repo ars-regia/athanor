@@ -19,7 +19,10 @@ lang en_US.UTF-8
 # deployment it installs, so the kickstart adds none of its own. Every module must be
 # signed (CONFIG_MODULE_SIG_FORCE, lockdown=integrity): the NVIDIA ones by the project
 # module signing key compiled into Azoth. Secure Boot also needs the project Secure Boot
-# certificate enrolled as a MOK at first boot.
+# certificate enrolled as a MOK: after the first boot, `sudo athanor-secureboot-enroll`
+# files the request, and the person confirms it in MokManager at the next boot with a
+# password they type both times. The kickstart files no request, since that would mean
+# scripting the password.
 
 # The bootc image is the identity of the system, not a user choice. Pin it to the
 # release being shipped rather than :latest, which on a non-default branch may resolve

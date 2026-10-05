@@ -256,6 +256,11 @@ RUN --mount=type=bind,from=signed-kernel,target=/run/signed-kernel \
     echo "${SIGNED_VMLINUZ_SHA256}  /run/signed-kernel/vmlinuz" | sha256sum --check --strict && \
     python3 /scripts/install_signed_kernel.py /run/signed-kernel "${AZOTH_NVR}.x86_64"
 
+# The certificate a machine enrolls as its MOK so that shim accepts that kernel, and the
+# guided step that offers it (doc_kernel_profile.md, section 4).
+COPY forge/specs/azoth/keys/secureboot/athanor-secureboot.der /usr/share/athanor/secureboot/athanor-secureboot.der
+COPY system/secureboot/athanor-secureboot-enroll /usr/bin/athanor-secureboot-enroll
+
 RUN /bin/bash /scripts/build_initramfs.sh "${AZOTH_NVR}.x86_64"
 
 # Hardening & OSTree cleanup. glibc-all-langpacks stays: glibc requires a langpack
