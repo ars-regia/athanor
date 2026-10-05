@@ -1,6 +1,6 @@
 # Athanor visual language
 
-Status: **revision 1, 2026-10-05, awaiting the maintainer's review of the written text.** The maintainer took its decisions in conversation on 2026-10-05: Calmo aligned to libadwaita rather than a new identity; direction B, "Calmo tinto", chosen on drafts of three directions (A "Continuo", B "Calmo tinto", C "Ardesia") drawn on the bar, the dock, the control center and a libadwaita window, light and dark; two accent modes, fixed and from the wallpaper; purple as the factory accent; the system font and libadwaita's relative type scale for the shell; and the shield shown in the bar only when it has something to say. It is the specification that `doc_shell_standard.md` ST8 requires before any new surface. Section 3 lists what it changes in other documents.
+Status: **revision 1, 2026-10-05, awaiting the maintainer's review of the written text.** The maintainer took its decisions in conversation on 2026-10-05: Calmo aligned to libadwaita rather than a new identity; direction B, "Calmo tinto", chosen on drafts of three directions (A "Continuo", B "Calmo tinto", C "Ardesia") drawn on the bar, the dock, the control center and a libadwaita window, light and dark; two accent modes, fixed and from the wallpaper; purple as the factory accent; the system font and libadwaita's relative type scale for the shell; and the shield shown in the bar only when it has something to say, a decision reversed on 2026-10-06 by maintainer decision A2-24 (#159): the shield is always visible at the end of the bar (VL8 as amended). It is the specification that `doc_shell_standard.md` ST8 requires before any new surface. Section 3 lists what it changes in other documents.
 
 ## 1. Context
 
@@ -111,7 +111,7 @@ Kept as Calmo stood, the shell would wear indigo beside blue applications, Inter
 **VL8. Identity: the mark and the hearth.**
 
 - **The mark** (the seal) appears in four places: the greeter, the lock screen, first run, and the system's About page. It is never decoration elsewhere.
-- **The shield in the bar.** The mark with the trust badge (SH12) moves its permanent place to the control center: a first row, "System verified", that opens the sheet of BR6. The bar shows the shield only when there is something to know: not verified, update refused, the update service not answering, an update ready to apply. Because the bar's shield can now be absent, its absence proves nothing; the control center's row is always present. `doc_bar.md` and `doc_control_center.md` carry the behaviour (section 3); this document fixes the visual rule.
+- **The shield in the bar** (amended 2026-10-06, maintainer decision A2-24, #159). The mark with the trust badge (SH12) stays where `doc_bar.md` BR6 and `doc_shell.md` SH9.1 put it: always visible, the last module at the end of the bar in every preset, in every state, the verified one included. BR6 wins over the earlier text of this bullet, which showed the shield only when there was something to know and moved its permanent place to the control center: an indicator that can be absent proves nothing by its absence, and the bar's shield is the one trust signal no layout can remove. The badge's states and the sheet it opens stay those of BR6; this document fixes only their visual rule (the mark, the tokens of VL3 and the geometry of VL7). Whether the control center also carries a "System verified" row is for `doc_control_center.md` to decide; it is no longer a stand-in for the bar's shield.
 - **The hearth wallpaper** stays the default: concentric discs rising from a corner, coloured by the accent. It ships prebuilt for the nine presets, light and dark, eighteen images made by `png.py` from the tokens, so that it follows the user's fixed accent. A wallpaper service of our own (`doc_shell.md`, stage 8) may later draw it at run time instead.
 - **Icons:** the shell's symbolic icons come from adwaita-icon-theme (49.0), the set the applications use. `cosmic-icon-theme` leaves the image once no shell surface names an icon of its own; until `cosmic-settings-daemon` leaves (stage 8) it writes `icon-theme` `'Cosmic'` at every start, against these icons, and the vendor default of VL4 with the one-time reset of `doc_session_daemons.md` SD16 covers it; the plan counts the names in use and maps each. Our own symbolic icons stay limited to the seal and its states. Applications keep their own icons.
 
@@ -166,8 +166,8 @@ Kept as Calmo stood, the shell would wear indigo beside blue applications, Inter
   - The hearth follows the nine fixed accents.
   - `cosmic-icon-theme` gives way to adwaita-icon-theme.
   - Depth: the bar and the dock carry the float shadow when they float.
-- **`doc_bar.md`, BR6 and BR7:** the shield is shown in the bar only in the states of VL8; the bar's geometry follows VL7. A revision 2 of `doc_bar.md` carries it.
-- **`doc_control_center.md`, CC4:** a first row, "System verified", always present, opens the shield's sheet.
+- **`doc_bar.md`, BR7:** the bar's geometry follows VL7. A revision 2 of `doc_bar.md` carries it. BR6 is unchanged: since 2026-10-06 (A2-24, #159) the shield stays always visible at the end of the bar.
+- **`doc_control_center.md`, CC4:** a first row, "System verified", that opens the shield's sheet, if that document keeps it; since 2026-10-06 (A2-24, #159) it no longer replaces the bar's shield.
 - **`doc_portal.md`:** the Settings backend serves the values of VL5.
 - **`doc_accessibility.md`:** high contrast, large text and reduced motion are the preferences of VL4, VL6 and VL9; it owns their exposure in the session and their tests with assistive technologies.
 
@@ -191,5 +191,5 @@ Kept as Calmo stood, the shell would wear indigo beside blue applications, Inter
   - With `text-scaling-factor` at 1.25 the shell's text grows like the applications'.
   - With `enable-animations` off no surface animates.
   - The bar and the dock float 6 px from the edges with the radii of VL7.
-  - The shield is absent from the bar on a verified system and present in the four states of VL8; the control center's row is present in every state.
+  - The shield is present at the end of the bar in every state, a verified system included (VL8 as amended on 2026-10-06; BR6).
   - The comparison board of VL11 is signed.
