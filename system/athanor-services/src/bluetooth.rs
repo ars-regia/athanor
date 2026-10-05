@@ -251,6 +251,9 @@ struct Shared {
     busy: AtomicBool,
     /// The model is a guest (`RegisterGuestAgent`): it never writes the adapter's `Pairable`.
     guest: AtomicBool,
+    /// The model was told it owns the default agent (`RegisterAgent`): only then does it own
+    /// the adapter's `Pairable`, also on exit.
+    owner: AtomicBool,
     /// The shell was sent a page and has not been told to close it.
     shown: AtomicBool,
     requests: mpsc::Sender<PairingRequest>,
@@ -575,6 +578,7 @@ async fn run(
         cancel: Notify::new(),
         busy: AtomicBool::new(false),
         guest: AtomicBool::new(false),
+        owner: AtomicBool::new(false),
         shown: AtomicBool::new(false),
         requests,
     });
@@ -618,7 +622,10 @@ async fn run(
                 pairable_tried = None;
             }
             command = commands.recv() => match command {
-                Some(BluetoothCommand::RegisterAgent) => registering = true,
+                Some(BluetoothCommand::RegisterAgent) => {
+                    shared.owner.store(true, Ordering::SeqCst);
+                    registering = true;
+                }
                 Some(BluetoothCommand::RegisterGuestAgent) => {
                     shared.guest.store(true, Ordering::SeqCst);
                     registering = true;
@@ -776,7 +783,9 @@ impl Drop for ExitGuard {
     fn drop(&mut self) {
         self.shared.set_pairing(None);
         let connection = self.connection.clone();
-        let guest = self.shared.guest.load(Ordering::SeqCst);
+        // A model that registered no agent, or a guest, leaves `Pairable` to the bar.
+        let guest = self.shared.guest.load(Ordering::SeqCst)
+            || !self.shared.owner.load(Ordering::SeqCst);
         let adapter = self.adapter.take();
         self.handle.spawn(async move {
             // Nothing to remove when the agent never was served.
@@ -1504,6 +1513,20 @@ mod tests {
         let log = rig.log.lock().unwrap();
         assert!(
             !log.calls.iter().any(|call| call == "RequestDefaultAgent"),
+            "{:?}",
+            log.calls
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_model_that_registered_no_agent_leaves_pairable_alone_on_exit() {
+        let rig = started(REPLY_TIMEOUT, |log| log.start_pairable = true, false).await;
+        let log = rig.log.clone();
+        drop(rig.commands);
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let log = log.lock().unwrap();
+        assert!(
+            !log.calls.iter().any(|call| call.starts_with("Pairable")),
             "{:?}",
             log.calls
         );
