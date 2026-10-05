@@ -35,11 +35,10 @@ rootpw --lock
 # default zone firewalld ships already refuses unsolicited inbound traffic, and
 # `--service=ssh` is what opens the single port Athanor wants reachable.
 firewall --enabled --service=ssh
-services --enabled=sshd,systemd-homed
+services --enabled=sshd
 
 # Disk layout is the installer's choice: no clearpart/part/autopart here, so Anaconda
-# opens its partitioning screen. systemd-homed encrypts the user's home (LUKS2), and
-# athanor-tpm-luks-seal.service seals it to the TPM at first boot.
+# opens its partitioning screen. Accounts are classic: systemd-homed is not enabled.
 
 reboot
 
