@@ -61,12 +61,12 @@ def check(name, ok, detail=""):
     return ok
 
 
-def wait_for(check_now, seconds):
+def wait_for(check_now, seconds, interval=0.2):
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         if check_now():
             return True
-        time.sleep(0.2)
+        time.sleep(interval)
     return check_now()
 
 

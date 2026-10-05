@@ -54,11 +54,9 @@ class RowNameTest(unittest.TestCase):
         self.assertEqual(len(found), 1)
         self.assertIn("'Hello'", found[0])
 
-    def test_any_application_matches_a_name_with_one_but_not_without(self):
-        row = [(None, "Hello", "Body", "5 min")]
-        self.assertEqual(check.row_name_problems(["COSMIC Settings, Hello, Body, 5 min"], row), [])
-        self.assertEqual(len(check.row_name_problems(["Hello, Body, 5 min"], row)), 1)
-        self.assertEqual(len(check.row_name_problems(["Other, Hello, Body, 6 min"], row)), 1)
+    def test_a_row_named_after_another_application_is_reported(self):
+        found = check.row_name_problems(["Other, Hello, Body, 5 min"], [("Mail", "Hello", "Body", "5 min")])
+        self.assertEqual(len(found), 1)
 
 
 if __name__ == "__main__":

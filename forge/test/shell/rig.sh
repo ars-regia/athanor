@@ -34,7 +34,7 @@
 #   rig.sh launcher-window-preview   the window row's preview carries the window's thumbnail
 #   rig.sh chooser-e2e      press a preset in the chooser and wait until the bar and the dock draw it (run build-bar and build-dock first)
 #   rig.sh surface <greeter|layout (run build-bar and build-dock first)|chooser|bar|bar-power|bar-input|bar-accessibility|bar-tiling|bar-popups|bar-tray|bar-network|bar-bluetooth|bar-audio|bar-battery|bar-shield|dock|launcher (run build-launcher first)|notification-center (run build-control-center and build-bar first)>  capture every case of a surface and compare with the goldens
-#   rig.sh candidates <surface>   capture a surface that has no golden yet into $ATHANOR_RIG_CANDIDATES (default /var/tmp/athanor-nc-candidates)/<surface>, for the maintainer to judge; nothing enters golden/
+#   rig.sh candidates <surface>   capture a surface that has no golden yet into $ATHANOR_RIG_CANDIDATES (default /var/tmp/athanor-candidates)/<surface>, for the maintainer to judge; nothing enters golden/
 #   rig.sh control-center-e2e  athanor-control-center against a fake of athanor-shelld's private interface: the panel's rows and their names, the reply focus, the do not disturb switch, recovery of the daemon (run build-control-center first)
 #   rig.sh update-goldens <name>   replace the goldens with a fresh capture, deliberately
 set -euo pipefail
@@ -263,10 +263,11 @@ capture_notification_center() {
     while IFS=$'\t' read -r tag variant scale locale catalog scene; do
         tags+=("$tag")
         seed_bar "$out/seed-$tag" float top visible "$variant"
-        # The popups are the bar's; the three panel scenes are the control center's.
+        # The popups are the bar's; the three panel scenes are the control center's, with the bar
+        # beside it so that the panel's place under the bar shows.
         domain=control-center fixture=$scene
         session=(python3 /repo/forge/test/shell/bar_session.py --client athanor-control-center
-            --notifications --real-control-center --show notifications --log)
+            --notifications --real-control-center --show notifications --beside athanor-bar --log)
         case "$scene" in
         500) fixture=many ;;
         popups)
@@ -446,7 +447,7 @@ build-control-center)
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$local_image:build" \
         bash -c 'cargo clippy --locked -p athanor-services -p athanor-control-center --all-targets -- -D warnings \
-                 && cargo test --locked -p athanor-services -p athanor-control-center --bins --lib \
+                 && cargo test --locked -p athanor-services \
                  && forge/test/shell/with-display.sh cargo test --locked -p athanor-control-center --bins \
                  && cargo build --release --locked -p athanor-control-center \
                  && install -m 0755 /out/target/release/athanor-control-center /out/bin/ \
@@ -794,7 +795,7 @@ surface | update-goldens | candidates)
     if [ "$1" = candidates ]; then
         # Images nobody has judged yet stay out of git: the maintainer looks at them here and
         # promotes the ones that are right with update-goldens, which captures them again.
-        candidates=${ATHANOR_RIG_CANDIDATES:-/var/tmp/athanor-nc-candidates}/$surface
+        candidates=${ATHANOR_RIG_CANDIDATES:-/var/tmp/athanor-candidates}/$surface
         mkdir -p "$candidates"
         for tag in "${tags[@]}"; do
             cp "$out/$tag.png" "$candidates/$tag.png"

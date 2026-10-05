@@ -31,7 +31,7 @@ from gi.repository import Gio, GLib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from atspi_check import find_application, row_name_problems, walk  # noqa: E402
-from bar_e2e import check, failures, labelled, wait_for  # noqa: E402
+from bar_e2e import check, failures, labelled, press, wait_for  # noqa: E402
 from fake_notifications import APPS  # noqa: E402
 from notifications_e2e import daemon_dnd, daemon_pids, notify, sway_display, walk_nodes  # noqa: E402
 
@@ -40,7 +40,7 @@ REPLY = "Write a reply"
 UNAVAILABLE = "Notifications unavailable"
 # What a row's name ends with: its time.
 TIMED = re.compile(r", (now|\d+ min|\d+ h)$")
-RECOVERY_SECONDS = 1.0
+RECOVERY_SECONDS = 1.0  # from the moment the name is owned again
 
 
 def session():
@@ -54,6 +54,20 @@ def show(page):
         "os.athanor.ControlCenter1",
         "Show",
         GLib.Variant("(s)", (page,)),
+        None,
+        Gio.DBusCallFlags.NONE,
+        10_000,
+        None,
+    )
+
+
+def toggle_notifications():
+    session().call_sync(
+        "os.athanor.ControlCenter1",
+        "/os/athanor/ControlCenter1",
+        "os.athanor.ControlCenter1",
+        "ToggleNotifications",
+        None,
         None,
         Gio.DBusCallFlags.NONE,
         10_000,
@@ -141,21 +155,29 @@ def focused_reply(app, Atspi, summaries):
     return None
 
 
+def application_name(app_id, app):
+    """What the panel calls the sender: the desktop entry's name, else the raw desktop id,
+    else the name the sender gave."""
+    try:
+        # PyGObject raises where GLib returns NULL for an entry that is not installed.
+        return Gio.DesktopAppInfo.new(f"{app_id}.desktop").get_name()
+    except TypeError:
+        return app_id or app
+
+
 def newest_of_each_application():
     """The row of the newest notification of each application in fake_notifications.py's "many"
-    fixture, as (application or None, summary, body, time): notification 500 is the newest
-    and each is ten minutes older than the next. The application is named when the sender is
-    its own proof (no desktop id), and any name will do when a desktop entry names it."""
+    fixture, as (application, summary, body, time): notification 500 is the newest and each
+    is ten minutes older than the next."""
     found = []
     for id_ in range(500 - len(APPS) + 1, 501):
         app_id, app = APPS[(id_ - 1) % len(APPS)]
-        minutes = (501 - id_) * 10
         found.append(
             (
-                app if not app_id else None,
+                application_name(app_id, app),
                 f"{app} message {id_}",
                 f"Body of notification {id_}.",
-                f"{minutes} min",
+                f"{(501 - id_) * 10} min",
             )
         )
     return found
@@ -265,14 +287,20 @@ def main():
             lambda: len([n for n in names(app, Atspi) or [] if n == REPLY]) >= 2, 5
         ),
     )
+    # The rig's cosmic-comp is Fedora's stock one, which lacks our forge/specs/cosmic-comp
+    # patch 0001-shell-focus-Reconcile-focus... for Exclusive layer surfaces: it gives the
+    # window the keyboard, and so a widget its FOCUSED state, only after a click.
+    take_keyboard()
     check(
-        "no reply entry has the keyboard before it is asked",
+        "a shown panel puts the keyboard in no reply entry of itself",
         focused_reply(app, Atspi, summaries) is None,
     )
-    take_keyboard()
+    # The bar's Reply starts from a hidden panel.
+    toggle_notifications()
     show(f"notifications:{first}")
+    take_keyboard()
     check(
-        "Show(notifications:<id>) puts the keyboard in that row's reply entry",
+        "Show(notifications:<id>) from hidden puts the keyboard in that row's reply entry",
         wait_for(lambda: focused_reply(app, Atspi, summaries) == "Reply one", 3),
         repr(focused_reply(app, Atspi, summaries)),
     )
@@ -292,8 +320,12 @@ def main():
     for pid in daemon_pids():
         os.kill(pid, signal.SIGKILL)
     check(
-        "with the daemon killed the panel says it is unavailable",
-        wait_for(lambda: UNAVAILABLE in (names(app, Atspi) or []), 5),
+        "with the daemon killed the panel says it is unavailable and lists no row",
+        wait_for(
+            lambda: UNAVAILABLE in (names(app, Atspi) or []) and rows(app, Atspi) == [],
+            5,
+        ),
+        f"{rows(app, Atspi)}",
     )
     successor = subprocess.Popen(
         [sys.executable, str(Path(__file__).resolve().parent / "fake_notifications.py")]
@@ -304,22 +336,32 @@ def main():
             time.sleep(0.02)
         back = time.monotonic()
         check("the daemon is back on the bus", daemon_owned())
-        same = wait_for(
-            lambda: (
-                rows(app, Atspi) == before_rows and unread(app, Atspi) == before_unread
-            ),
-            RECOVERY_SECONDS,
-        )
+
+        def recovered():
+            found = names(app, Atspi)
+            return (
+                found is not None
+                and UNAVAILABLE not in found
+                and rows(app, Atspi) == before_rows
+                and unread(app, Atspi) == before_unread
+            )
+
+        same = wait_for(recovered, RECOVERY_SECONDS, 0.05)
         took = time.monotonic() - back
         print(f"panel recovered {took:.2f} s after the daemon's return")
         check(
-            f"within {RECOVERY_SECONDS:.0f} s of its return the panel shows the same list and unread count (item 13)",
-            same and took <= RECOVERY_SECONDS + 0.25,
+            f"within {RECOVERY_SECONDS:.0f} s of its return the panel shows the same list and unread count, and no longer says unavailable (item 13)",
+            same and took <= RECOVERY_SECONDS,
             f"{rows(app, Atspi)} against {before_rows}, {unread(app, Atspi)} against {before_unread}, {took:.2f} s",
         )
+        # The list is the successor's own answer, not what the panel kept from before.
+        check("it came from a History call to the successor", logged("History")())
+        # Clear all, last: it empties the store.
+        check("the panel has a Clear all button", press(app, Atspi, "Clear all"))
+        check("Clear all asks the daemon to clear", wait_for(logged("ClearAll"), 3))
         check(
-            "the unavailable message is gone",
-            UNAVAILABLE not in (names(app, Atspi) or []),
+            "and the panel then lists no notification",
+            wait_for(lambda: "No notifications" in (names(app, Atspi) or []), 3),
         )
     finally:
         successor.terminate()

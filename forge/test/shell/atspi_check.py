@@ -37,15 +37,10 @@ def row_name(app, summary, body, time):
 
 def row_name_problems(names, rows):
     """`names`: every accessible name of the tree. `rows`: [(app, summary, body, time)] that
-    the panel shows; an `app` of None is any application name (a desktop entry's name is not
-    this test's to know), but never none at all. One problem per row without a name."""
+    the panel shows. One problem per row without a name."""
     found = []
     for app, summary, body, time in rows:
-        if app is None:
-            tail = ", " + row_name("", summary, body, time)
-            named = any(name.endswith(tail) and len(name) > len(tail) for name in names)
-        else:
-            named = row_name(app, summary, body, time) in names
+        named = row_name(app, summary, body, time) in names
         if not named:
             found.append(
                 f"no row is named after its application, summary, body and time: "

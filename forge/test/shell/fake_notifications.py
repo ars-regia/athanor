@@ -15,10 +15,8 @@ marks them read and emits Read. Every call that acts is appended to
 token|no-token", "MarkRead <id>...", "SetDoNotDisturb True|False", "SetSetting <key> <value>".
 SetDoNotDisturb also emits DoNotDisturbChanged, as the real daemon does for every change.
 
-The control center's side of the interface is served too: History (every notification, read
-or not), ClearAll, ClearGroup, Reply, SetDoNotDisturbUntil and SetRule, each logged the same
-way ("ClearAll", "ClearGroup <app id>", "Reply <id> <text>", "SetDoNotDisturb <on> until
-<unix>", "SetRule <app id> <key> <value>"). The held list and do not disturb are kept in
+The control center's side of the interface is served too, as far as the checks go: History
+(every notification, read or not; logged as "History") and ClearAll (logged as "ClearAll"). The held list and do not disturb are kept in
 /tmp/athanor-fake-notifications.json, as the real daemon keeps its store, when RIG_NC_PERSIST
 is set: a daemon the test kills and starts again then comes back with the same list.
 
@@ -65,12 +63,6 @@ NODE = Gio.DBusNodeInfo.new_for_xml(f"""
     </method>
     <method name="History"><arg type="a{WIRE}" direction="out"/></method>
     <method name="ClearAll"/>
-    <method name="ClearGroup"><arg type="s" direction="in"/></method>
-    <method name="Reply"><arg type="u" direction="in"/><arg type="s" direction="in"/></method>
-    <method name="SetDoNotDisturbUntil"><arg type="b" direction="in"/><arg type="x" direction="in"/></method>
-    <method name="SetRule">
-      <arg type="s" direction="in"/><arg type="s" direction="in"/><arg type="s" direction="in"/>
-    </method>
     <method name="Close"><arg type="u" direction="in"/><arg type="u" direction="in"/></method>
     <method name="InvokeAction">
       <arg type="u" direction="in"/><arg type="s" direction="in"/><arg type="s" direction="in"/>
@@ -243,10 +235,9 @@ class Daemon:
         self.last_id, self.dnd, self.until = state["last_id"], state["dnd"], state["until"]
         return True
 
-    def clear(self, app_id=None):
+    def clear(self):
         for notice in list(self.held):
-            if app_id is None or notice["app_id"] == app_id:
-                self.close(notice["id"], 2)
+            self.close(notice["id"], 2)
 
     def handle(self, _connection, _sender, _path, interface, method, parameters, invocation):
         if interface == NAME and method == "Notify":
@@ -263,36 +254,13 @@ class Daemon:
                 GLib.Variant("(bsxas)", (self.dnd, "manual" if self.dnd else "", self.until, []))
             )
         elif method == "History":
+            log("History")
             invocation.return_value(
                 GLib.Variant(f"(a{WIRE})", ([self.wire(n) for n in self.held],))
             )
         elif method == "ClearAll":
             log("ClearAll")
             self.clear()
-            invocation.return_value(None)
-        elif method == "ClearGroup":
-            (app_id,) = parameters.unpack()
-            log(f"ClearGroup {app_id}")
-            self.clear(app_id)
-            invocation.return_value(None)
-        elif method == "Reply":
-            id_, text = parameters.unpack()
-            log(f"Reply {id_} {text}")
-            if self.find(id_) is None:
-                invocation.return_dbus_error(
-                    "org.freedesktop.DBus.Error.InvalidArgs", f"no notification {id_}"
-                )
-                return
-            invocation.return_value(None)
-        elif method == "SetDoNotDisturbUntil":
-            on, until = parameters.unpack()
-            log(f"SetDoNotDisturb {on} until {until}")
-            self.dnd, self.until = on, until
-            self.emit("DoNotDisturbChanged", GLib.Variant("(bsx)", (on, "manual" if on else "", until)))
-            invocation.return_value(None)
-        elif method == "SetRule":
-            app_id, key, value = parameters.unpack()
-            log(f"SetRule {app_id} {key} {value}")
             invocation.return_value(None)
         elif method == "Close":
             id_, reason = parameters.unpack()
@@ -369,7 +337,8 @@ def fixture(daemon):
     daemon.add("Files", "Download complete", "report.pdf", icon="folder-download-symbolic")
 
 
-# The applications of the "many" fixture: desktop entries the rig has, and one it has not.
+# The applications of the "many" fixture. bar_session.py installs a desktop entry for each id but
+# org.example.Chat, the one deliberate stranger, whose heading is its raw id.
 APPS = [
     ("com.system76.CosmicSettings", "Settings"),
     ("com.system76.CosmicFiles", "Files"),

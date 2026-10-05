@@ -298,6 +298,19 @@ def main():
         (applications / "org.athanor.CcWindow1.desktop").write_text(
             DESKTOP_ENTRY, encoding="utf-8"
         )
+    if os.environ.get("RIG_NC_FIXTURE") == "many":
+        # The fixture's applications, so that the headings are real names; the stock COSMIC
+        # entries the rig may or may not have are shadowed, not relied on.
+        from fake_notifications import APPS
+
+        applications = Path(os.environ["XDG_DATA_HOME"]) / "applications"
+        applications.mkdir(parents=True, exist_ok=True)
+        for app_id, name in APPS:
+            if app_id and app_id != "org.example.Chat":
+                (applications / f"{app_id}.desktop").write_text(
+                    f"[Desktop Entry]\nType=Application\nName={name}\nExec=true\n",
+                    encoding="utf-8",
+                )
     config = Path(f"{SYSTEM_BUS}.conf")
     config.write_text(BUS_CONFIG, encoding="utf-8")
     daemon = subprocess.Popen(
