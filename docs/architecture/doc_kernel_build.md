@@ -299,7 +299,11 @@ patchano i Makefile per forzarlo.
   runner: conta dove si usa, e chi ne ha la custodia.
 - **Chiave Secure Boot**: firma la UKI e la sua policy PCR (`ukify
 --pcr-private-key`; è la chiave pubblica con cui `athanor-tpm-luks-seal.sh`
-  sigilla LUKS). Profilo `keys/profiles/secureboot.cnf`: non CA, `codeSigning`.
+  sigilla LUKS). Fino alla 1.1, senza UKI, firma il `vmlinuz` del `kernel-core`
+  Azoth che shim e GRUB avviano: lo firma il job sign-only `sign-kernel`
+  (`system/sign-kernel.sh`, immagine di strumenti bloccata `sign/`), e la build
+  dell'immagine riceve il kernel firmato come artefatto e ne verifica soltanto la
+  firma contro il certificato (D43). Profilo `keys/profiles/secureboot.cnf`: non CA, `codeSigning`.
   Secret `SECUREBOOT_SIGNING_KEY`, certificato
   `keys/secureboot/athanor-secureboot.pem` (`.der` per `mokutil --import`). Non
   essendo una CA, anche arruolata resta fuori dal keyring machine
@@ -312,12 +316,14 @@ patchano i Makefile per forzarlo.
   uno di loro è rifiutato anche dove quella MOK fosse ancora arruolata. Il primo
   è la MOK unica del 2026-09-04 ("Ermete OS Secure Boot MOK"), che firmava UKI e
   moduli, ritirata il 2026-09-13.
-- **UKI**: kernel, initrd, `cmdline` e microcode early in un'unica immagine
+- **UKI** (dalla 1.1, con P4b; l'immagine 1.0 non ne installa copie in
+  `/boot/efi`): kernel, initrd, `cmdline` e microcode early in un'unica immagine
   firmata con la chiave Secure Boot dietro lo shim Fedora; la produce la fase
   system-image, perché l'initrd dipende dall'immagine, non dal kernel. Lo spec
   Fedora fornisce già le stringhe SBAT (`kernel.sbat`, `uki.sbat`).
 - **Primo avvio**: arruolamento guidato del certificato Secure Boot
-  (`mokutil --import`), unica interazione richiesta per avere Secure Boot acceso
+  (`sudo athanor-secureboot-enroll`, che chiama `mokutil --import`; la password
+  la sceglie l'utente al prompt e la conferma in MokManager), unica interazione richiesta per avere Secure Boot acceso
   su un PC qualsiasi; i moduli non ne dipendono.
 - **`cmdline`** generata da `forge/specs/athanor-kernel-profile/profile.toml`
   (tabella `[base.cmdline]`, `doc_kernel_profile.md` sezione 6) insieme al file

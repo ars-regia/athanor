@@ -566,7 +566,7 @@ release (D25).
 
 | Key | Signs | Trusted by | Custody (D43) |
 | --- | --- | --- | --- |
-| Secure Boot (`SECUREBOOT_SIGNING_KEY`) | systemd-boot (shim's second stage), UKIs and their profiles, role addons | shim via MokList | shared, own environment with required reviewers |
+| Secure Boot (`SECUREBOOT_SIGNING_KEY`) | systemd-boot (shim's second stage), UKIs and their profiles, role addons; until the UKI (1.1), the Azoth `vmlinuz` booted by shim and GRUB (section 14) | shim via MokList | shared, own environment with required reviewers |
 | PCR policy (new, P4b) | signed PCR 11 policies of UKI profile 0 (initrd phase) | TPM keyslots enrolled with its public key | shared |
 | Module signing (`MODULE_SIGNING_KEY`) | external kernel modules (NVIDIA) | kernel, builtin certificate | shared |
 | Integrity (new, P4b) | update manifests; with the dm-verity option, image root hashes and IPE policies; the IMA certificate if D46 enables `IMA_LOAD_X509` | kernel, builtin certificate; the update service | shared |
@@ -922,9 +922,21 @@ Found on the running system and in the repository (2026-09-14):
   floods the journal with `VRR_ENABLED` warnings under nouveau.
 - **Kernel series:** Azoth is pinned to 7.1.8 while 7.1 is end of life; the bump bot,
   scheduled daily from the default branch `iso-v0` (first scheduled run pending), moves it to 7.2 (D37).
-- **CI signing:** the Secure Boot key is used in the same job as the image build and
-  third-party actions, and the `signing` environment, which had no required reviewers, requires the
-  maintainer's approval since 2026-09-14 (D43; immediate item of section 15).
+- **CI signing** (done for the Secure Boot key): the Secure Boot key was used in the same job as
+  the image build and third-party actions; the `signing` environment, which had no required
+  reviewers, requires the maintainer's approval since 2026-09-14 (D43; immediate item of
+  section 15). Since issue #131 the sign-only job `sign-kernel` of `call-system-image.yml`
+  signs the Azoth `vmlinuz` (`system/sign-kernel.sh`, in the locked tool image
+  `forge/specs/azoth/sign/`), the image build receives the signed kernel as an artifact and only
+  verifies it against the certificate, and `scripts/verify.py workflows` fails when a signing
+  secret reaches a job that is not sign-only. `RPM_GPG_KEY`, which signs the tier repositories
+  inside `build-repo`, is not covered yet.
+- **Boot path until 1.1** (issue #145): firmware → shim → GRUB → `vmlinuz` of the Azoth
+  `kernel-core`, signed with the Secure Boot key and trusted through MokList; the UKI, its
+  copies under `/boot/efi` and the PCR policy key return with P4b in 1.1. The certificate is
+  enrolled by the owner with `sudo athanor-secureboot-enroll` (`mokutil --import`, the password
+  chosen at the prompt and confirmed in MokManager), and the ISO acceptance test has a Secure
+  Boot case on OVMF with the certificate in MokList.
 - **Base configuration** (P3): `ermete-base-config` came with the former `ermete-base-nvidia`
   base and duplicated `10-ermete.conf` (scx_loader), `99-ermete-slim-boot.conf`,
   `99-Ermete-Base.preset`, `10-ermete-hw-groups.conf`, `kargs.d/01-nvidia.toml` and a
