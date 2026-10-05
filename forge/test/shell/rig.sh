@@ -12,7 +12,7 @@
 #   rig.sh build-layout     clippy, tests and release build of athanor-layout, the chooser and athanor-unit into <out>/bin
 #   rig.sh build-compositor-client  clippy, tests and release build of cc-probe into <out>/bin
 #   rig.sh build-shelld     clippy, tests and release build of athanor-shelld into <out>/bin
-#   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps) into <out>/bin, with the DT_NEEDED check
+#   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps; athanor-controls, whose tests need a display) into <out>/bin, with the DT_NEEDED check
 #   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout)
 #   rig.sh build-dock       clippy, tests and release build of athanor-dock (and athanor-apps) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-launcher   clippy, tests (qalc required) and release build of athanor-launcher and athanor-preview-render into <out>/bin, with the DT_NEEDED check
@@ -389,8 +389,9 @@ build-bar)
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$local_image:build" \
-        bash -c 'cargo clippy --locked -p athanor-apps -p athanor-bar --all-targets -- -D warnings \
+        bash -c 'cargo clippy --locked -p athanor-apps -p athanor-controls -p athanor-bar --all-targets -- -D warnings \
                  && cargo test --locked -p athanor-apps -p athanor-bar \
+                 && forge/test/shell/with-display.sh cargo test --locked -p athanor-controls \
                  && cargo build --release --locked -p athanor-bar \
                  && install -m 0755 /out/target/release/athanor-bar /out/bin/ \
                  && python3 -B forge/scripts/check_shim_link_order.py /out/bin/athanor-bar'

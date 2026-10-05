@@ -17,6 +17,7 @@ use athanor_compositor_client::theme;
 use athanor_layout::favorites;
 use athanor_layout::loader::{self, Paths, Source, VENDOR_DIR};
 use athanor_layout::user::write_target;
+use athanor_services::battery::BACKLIGHT_ROOT;
 use athanor_services::Runtime;
 use athanor_unit::dirs::Dirs;
 use athanor_unit::{crash_loop, journal, sandbox};
@@ -24,6 +25,13 @@ use gtk4::prelude::*;
 use gtk4::{glib, Application};
 
 const APP_ID: &str = "os.athanor.Bar";
+
+/// Where the battery page reads the backlight. The rig points the bar at a fake sysfs
+/// directory; the level still goes through logind, which checks the device itself.
+fn backlight_root() -> PathBuf {
+    env::var_os("ATHANOR_BAR_BACKLIGHT_DIR")
+        .map_or_else(|| PathBuf::from(BACKLIGHT_ROOT), PathBuf::from)
+}
 
 fn main() -> glib::ExitCode {
     journal::init();
@@ -165,7 +173,9 @@ fn main() -> glib::ExitCode {
     // athanor-services decode the services' replies here, off the interface thread. Without
     // it the modules that read a service are hidden, and the rest of the bar runs.
     match Runtime::start() {
-        Ok(runtime) => ui::bridge::install(runtime.handle().clone()),
+        Ok(runtime) => {
+            athanor_controls::bridge::install(runtime.handle().clone(), backlight_root())
+        }
         Err(err) => tracing::error!(error = %err, "cannot start the runtime of the models"),
     }
     i18n::init();

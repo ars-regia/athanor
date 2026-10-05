@@ -26,7 +26,7 @@ msgstr "Applicazioni in esecuzione"
 
 #: ../../../../system/athanor-apps/src/row.rs:202
 #: ../../../../system/athanor-apps/src/row.rs:640
-#: ../../../../system/athanor-apps/src/row.rs:642 src/ui/notifications.rs:632
+#: ../../../../system/athanor-apps/src/row.rs:642 src/ui/notifications.rs:729
 msgid "Unknown application"
 msgstr "Applicazione sconosciuta"
 
@@ -53,7 +53,7 @@ msgstr "Finestra senza titolo"
 msgid "Minimise {title}"
 msgstr "Riduci a icona {title}"
 
-#: ../../../../system/athanor-apps/src/row.rs:491 src/ui/notifications.rs:758
+#: ../../../../system/athanor-apps/src/row.rs:491 src/ui/notifications.rs:855
 #, rust-format
 msgid "Close {title}"
 msgstr "Chiudi {title}"
@@ -74,6 +74,196 @@ msgstr "Impossibile avviare {name}"
 #: ../../../../system/athanor-apps/src/row.rs:588
 msgid "The reason is in the system journal."
 msgstr "Il motivo è nel registro di sistema."
+
+#: ../../../../system/athanor-controls/src/audio.rs:225
+#, rust-format
+msgid "{device}, in use"
+msgstr "{device}, in uso"
+
+#: ../../../../system/athanor-controls/src/audio.rs:267
+msgid "Output"
+msgstr "Uscita"
+
+#: ../../../../system/athanor-controls/src/audio.rs:268
+msgid "Output volume"
+msgstr "Volume di uscita"
+
+#: ../../../../system/athanor-controls/src/audio.rs:269
+msgid "Mute output"
+msgstr "Silenzia l'uscita"
+
+#: ../../../../system/athanor-controls/src/audio.rs:273
+msgid "Input"
+msgstr "Ingresso"
+
+#: ../../../../system/athanor-controls/src/audio.rs:274
+msgid "Input volume"
+msgstr "Volume di ingresso"
+
+#: ../../../../system/athanor-controls/src/audio.rs:275
+msgid "Mute microphone"
+msgstr "Silenzia il microfono"
+
+#: ../../../../system/athanor-controls/src/audio.rs:286
+msgid "Previous track"
+msgstr "Brano precedente"
+
+#: ../../../../system/athanor-controls/src/audio.rs:287
+#: ../../../../system/athanor-controls/src/audio.rs:397
+msgid "Pause"
+msgstr "Pausa"
+
+#: ../../../../system/athanor-controls/src/audio.rs:288
+msgid "Next track"
+msgstr "Brano successivo"
+
+#: ../../../../system/athanor-controls/src/audio.rs:399
+msgid "Play"
+msgstr "Riproduci"
+
+#: ../../../../system/athanor-controls/src/battery.rs:126
+#, rust-format
+msgid "{percent} %"
+msgstr "{percent}%"
+
+#: ../../../../system/athanor-controls/src/battery.rs:144
+#, rust-format
+msgid "{hours} h {minutes} min left"
+msgstr "{hours} h {minutes} min rimanenti"
+
+#: ../../../../system/athanor-controls/src/battery.rs:147
+#, rust-format
+msgid "{hours} h {minutes} min until full"
+msgstr "{hours} h {minutes} min alla carica completa"
+
+#: ../../../../system/athanor-controls/src/battery.rs:149
+msgid "Charging"
+msgstr "In carica"
+
+#: ../../../../system/athanor-controls/src/battery.rs:150
+msgid "Fully charged"
+msgstr "Carica completa"
+
+#: ../../../../system/athanor-controls/src/battery.rs:157
+msgid "Power saver"
+msgstr "Risparmio energetico"
+
+#: ../../../../system/athanor-controls/src/battery.rs:158
+msgid "Performance"
+msgstr "Prestazioni"
+
+#: ../../../../system/athanor-controls/src/battery.rs:159
+msgid "Balanced"
+msgstr "Bilanciato"
+
+#: ../../../../system/athanor-controls/src/battery.rs:188
+msgid "Power mode"
+msgstr "Modalità di alimentazione"
+
+#: ../../../../system/athanor-controls/src/battery.rs:206
+msgid "Screen brightness"
+msgstr "Luminosità dello schermo"
+
+#: ../../../../system/athanor-controls/src/bluetooth.rs:271
+#: src/ui/bluetooth.rs:42
+msgid "Bluetooth"
+msgstr "Bluetooth"
+
+#: ../../../../system/athanor-controls/src/bluetooth.rs:274
+msgid "Nearby devices"
+msgstr "Dispositivi vicini"
+
+#: ../../../../system/athanor-controls/src/bluetooth.rs:296
+#: ../../../../system/athanor-controls/src/network.rs:346 src/ui/power.rs:110
+#: src/ui/shield.rs:539
+msgid "Cancel"
+msgstr "Annulla"
+
+#: ../../../../system/athanor-controls/src/bluetooth.rs:298
+msgid "Pair"
+msgstr "Associa"
+
+#: ../../../../system/athanor-controls/src/bluetooth.rs:430
+#, rust-format
+msgid "{device}, connected"
+msgstr "{device}, connesso"
+
+#: ../../../../system/athanor-controls/src/bluetooth.rs:463
+#, rust-format
+msgid "Pair with {device}?"
+msgstr "Associare {device}?"
+
+#: ../../../../system/athanor-controls/src/bluetooth.rs:466
+#, rust-format
+msgid "Pair only if {device} shows the same number."
+msgstr "Associa solo se {device} mostra lo stesso numero."
+
+#: ../../../../system/athanor-controls/src/bluetooth.rs:479
+#, rust-format
+msgid "Pairing with {device}"
+msgstr "Associazione con {device}"
+
+#: ../../../../system/athanor-controls/src/bluetooth.rs:482
+#, rust-format
+msgid "Type this code on {device}, then press Enter there."
+msgstr "Digita questo codice su {device}, poi premi Invio."
+
+#: ../../../../system/athanor-controls/src/network.rs:307 src/ui/network.rs:42
+msgid "Network"
+msgstr "Rete"
+
+#: ../../../../system/athanor-controls/src/network.rs:313
+msgid "Wi-Fi"
+msgstr "Wi-Fi"
+
+#: ../../../../system/athanor-controls/src/network.rs:322
+msgid "Airplane mode"
+msgstr "Modalità aereo"
+
+#: ../../../../system/athanor-controls/src/network.rs:339
+msgid "The password was not accepted. Try again."
+msgstr "La password non è stata accettata. Riprova."
+
+#: ../../../../system/athanor-controls/src/network.rs:348
+msgid "Connect"
+msgstr "Connetti"
+
+#: ../../../../system/athanor-controls/src/network.rs:465
+msgid "Wired: connected"
+msgstr "Cablata: connessa"
+
+#: ../../../../system/athanor-controls/src/network.rs:466
+msgid "Wired: not connected"
+msgstr "Cablata: non connessa"
+
+#: ../../../../system/athanor-controls/src/network.rs:504
+#, rust-format
+msgid "{network}, connected"
+msgstr "{network}, connessa"
+
+#: ../../../../system/athanor-controls/src/network.rs:505
+#, rust-format
+msgid "{network}, connecting"
+msgstr "{network}, connessione in corso"
+
+#: ../../../../system/athanor-controls/src/network.rs:506
+#, rust-format
+msgid "{network}, needs Settings"
+msgstr "{network}, richiede Impostazioni"
+
+#: ../../../../system/athanor-controls/src/network.rs:508
+#, rust-format
+msgid "{network}, secured"
+msgstr "{network}, protetta"
+
+#: ../../../../system/athanor-controls/src/network.rs:539
+#, rust-format
+msgid "Password for {network}"
+msgstr "Password per {network}"
+
+#: ../../../../system/athanor-controls/src/widgets.rs:51
+msgid "The action did not complete."
+msgstr "L'azione non è stata completata."
 
 #: src/ui/accessibility.rs:35
 msgid "Greyscale"
@@ -119,143 +309,13 @@ msgstr "Inverti i colori"
 msgid "Colour filter"
 msgstr "Filtro colore"
 
-#: src/ui/audio.rs:517
-#, rust-format
-msgid "{device}, in use"
-msgstr "{device}, in uso"
-
-#: src/ui/audio.rs:558
+#: src/ui/audio.rs:44
 msgid "Sound"
 msgstr "Audio"
 
-#: src/ui/audio.rs:562
-msgid "Output"
-msgstr "Uscita"
-
-#: src/ui/audio.rs:563
-msgid "Output volume"
-msgstr "Volume di uscita"
-
-#: src/ui/audio.rs:564
-msgid "Mute output"
-msgstr "Silenzia l'uscita"
-
-#: src/ui/audio.rs:568
-msgid "Input"
-msgstr "Ingresso"
-
-#: src/ui/audio.rs:569
-msgid "Input volume"
-msgstr "Volume di ingresso"
-
-#: src/ui/audio.rs:570
-msgid "Mute microphone"
-msgstr "Silenzia il microfono"
-
-#: src/ui/audio.rs:581
-msgid "Previous track"
-msgstr "Brano precedente"
-
-#: src/ui/audio.rs:582 src/ui/audio.rs:693
-msgid "Pause"
-msgstr "Pausa"
-
-#: src/ui/audio.rs:583
-msgid "Next track"
-msgstr "Brano successivo"
-
-#: src/ui/audio.rs:695
-msgid "Play"
-msgstr "Riproduci"
-
-#: src/ui/battery.rs:199
-#, rust-format
-msgid "{percent} %"
-msgstr "{percent}%"
-
-#: src/ui/battery.rs:217
-#, rust-format
-msgid "{hours} h {minutes} min left"
-msgstr "{hours} h {minutes} min rimanenti"
-
-#: src/ui/battery.rs:220
-#, rust-format
-msgid "{hours} h {minutes} min until full"
-msgstr "{hours} h {minutes} min alla carica completa"
-
-#: src/ui/battery.rs:222
-msgid "Charging"
-msgstr "In carica"
-
-#: src/ui/battery.rs:223
-msgid "Fully charged"
-msgstr "Carica completa"
-
-#: src/ui/battery.rs:230
-msgid "Power saver"
-msgstr "Risparmio energetico"
-
-#: src/ui/battery.rs:231
-msgid "Performance"
-msgstr "Prestazioni"
-
-#: src/ui/battery.rs:232
-msgid "Balanced"
-msgstr "Bilanciato"
-
-#: src/ui/battery.rs:259
+#: src/ui/battery.rs:46
 msgid "Battery"
 msgstr "Batteria"
-
-#: src/ui/battery.rs:269
-msgid "Power mode"
-msgstr "Modalità di alimentazione"
-
-#: src/ui/battery.rs:287
-msgid "Screen brightness"
-msgstr "Luminosità dello schermo"
-
-#: src/ui/bluetooth.rs:680 src/ui/bluetooth.rs:683
-msgid "Bluetooth"
-msgstr "Bluetooth"
-
-#: src/ui/bluetooth.rs:686
-msgid "Nearby devices"
-msgstr "Dispositivi vicini"
-
-#: src/ui/bluetooth.rs:708 src/ui/network.rs:606 src/ui/power.rs:110
-#: src/ui/shield.rs:539
-msgid "Cancel"
-msgstr "Annulla"
-
-#: src/ui/bluetooth.rs:710
-msgid "Pair"
-msgstr "Associa"
-
-#: src/ui/bluetooth.rs:841
-#, rust-format
-msgid "{device}, connected"
-msgstr "{device}, connesso"
-
-#: src/ui/bluetooth.rs:878
-#, rust-format
-msgid "Pair with {device}?"
-msgstr "Associare {device}?"
-
-#: src/ui/bluetooth.rs:881
-#, rust-format
-msgid "Pair only if {device} shows the same number."
-msgstr "Associa solo se {device} mostra lo stesso numero."
-
-#: src/ui/bluetooth.rs:894
-#, rust-format
-msgid "Pairing with {device}"
-msgstr "Associazione con {device}"
-
-#: src/ui/bluetooth.rs:897
-#, rust-format
-msgid "Type this code on {device}, then press Enter there."
-msgstr "Digita questo codice su {device}, poi premi Invio."
 
 #. TRANSLATORS: a g_date_time_format() pattern for the clock on the bar.
 #: src/ui/clock.rs:83
@@ -294,92 +354,35 @@ msgstr "Sorgente di input: {name}"
 msgid "Input source"
 msgstr "Sorgente di input"
 
-#: src/ui/mod.rs:682
+#: src/ui/mod.rs:684
 msgid "Unpin from Bar"
 msgstr "Rimuovi dalla barra"
 
-#: src/ui/mod.rs:684
+#: src/ui/mod.rs:686
 msgid "Pin to Bar"
 msgstr "Aggiungi alla barra"
 
-#: src/ui/network.rs:564 src/ui/network.rs:567
-msgid "Network"
-msgstr "Rete"
-
-#: src/ui/network.rs:573
-msgid "Wi-Fi"
-msgstr "Wi-Fi"
-
-#: src/ui/network.rs:582
-msgid "Airplane mode"
-msgstr "Modalità aereo"
-
-#: src/ui/network.rs:599
-msgid "The password was not accepted. Try again."
-msgstr "La password non è stata accettata. Riprova."
-
-#: src/ui/network.rs:608
-msgid "Connect"
-msgstr "Connetti"
-
-#: src/ui/network.rs:722
-msgid "Wired: connected"
-msgstr "Cablata: connessa"
-
-#: src/ui/network.rs:723
-msgid "Wired: not connected"
-msgstr "Cablata: non connessa"
-
-#: src/ui/network.rs:767
-#, rust-format
-msgid "{network}, connected"
-msgstr "{network}, connessa"
-
-#: src/ui/network.rs:768
-#, rust-format
-msgid "{network}, connecting"
-msgstr "{network}, connessione in corso"
-
-#: src/ui/network.rs:769
-#, rust-format
-msgid "{network}, needs Settings"
-msgstr "{network}, richiede Impostazioni"
-
-#: src/ui/network.rs:771
-#, rust-format
-msgid "{network}, secured"
-msgstr "{network}, protetta"
-
-#: src/ui/network.rs:802
-#, rust-format
-msgid "Password for {network}"
-msgstr "Password per {network}"
-
-#: src/ui/notifications.rs:874
+#: src/ui/notifications.rs:971
 #, rust-format
 msgid "Notifications, {count} waiting"
 msgstr "Notifiche, {count} in attesa"
 
-#: src/ui/notifications.rs:879 src/ui/notifications.rs:912
-#: src/ui/notifications.rs:915
+#: src/ui/notifications.rs:976 src/ui/notifications.rs:1009
+#: src/ui/notifications.rs:1012
 msgid "Notifications"
 msgstr "Notifiche"
 
-#: src/ui/notifications.rs:919
+#: src/ui/notifications.rs:1016
 msgid "Clear all"
 msgstr "Cancella tutto"
 
-#: src/ui/notifications.rs:924
+#: src/ui/notifications.rs:1021
 msgid "No notifications"
 msgstr "Nessuna notifica"
 
-#: src/ui/notifications.rs:934
+#: src/ui/notifications.rs:1031
 msgid "Do not disturb"
 msgstr "Non disturbare"
-
-#: src/ui/popup.rs:29
-msgid "The action did not complete."
-msgstr "L'azione non è stata completata."
 
 #: src/ui/power.rs:39
 msgid "Lock"

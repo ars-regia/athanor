@@ -4,18 +4,18 @@
 
 use std::rc::Rc;
 
+pub use athanor_controls::widgets::{expose_choose_action, switch_row};
+use athanor_controls::Host;
 use athanor_layout::preset::PanelEdge;
 use gtk4::accessible::Property;
 use gtk4::prelude::*;
 
 use super::Bar;
-use crate::i18n::tr;
 
+#[derive(Clone)]
 pub struct Popup {
     pub button: gtk4::Button,
     pub popover: gtk4::Popover,
-    /// Under the content set by [`Popup::set_content`]: an action did not complete.
-    note: gtk4::Label,
 }
 
 impl Popup {
@@ -26,17 +26,6 @@ impl Popup {
         button.set_tooltip_text(Some(name));
         button.update_property(&[Property::Label(name)]);
         let popover = attach(bar, &button);
-        let note = gtk4::Label::new(Some(&tr("The action did not complete.")));
-        note.add_css_class("bar-popover-note");
-        note.set_wrap(true);
-        note.set_xalign(0.0);
-        note.set_visible(false);
-        let hidden = note.downgrade();
-        popover.connect_closed(move |_| {
-            if let Some(note) = hidden.upgrade() {
-                note.set_visible(false);
-            }
-        });
         let weak_bar = Rc::downgrade(bar);
         let toggled = popover.clone();
         button.connect_clicked(move |_| {
@@ -47,56 +36,38 @@ impl Popup {
                 toggled.popup();
             }
         });
-        Popup {
-            button,
-            popover,
-            note,
-        }
+        Popup { button, popover }
     }
 
-    /// The popover's content, with the failure note under it.
-    pub fn set_content(&self, content: &impl IsA<gtk4::Widget>) {
-        let column = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
-        column.append(content);
-        column.append(&self.note);
-        self.popover.set_child(Some(&column));
+    /// What a page in this popover asks of it: to open, to close, and whether its button is
+    /// on screen.
+    pub fn host(&self, bar: &Rc<Bar>) -> Host {
+        let (popup, weak_bar) = (self.clone(), Rc::downgrade(bar));
+        let popover = self.popover.clone();
+        let button = self.button.clone();
+        Host::new(
+            move || {
+                if !popup.popover.is_visible() {
+                    if let Some(bar) = weak_bar.upgrade() {
+                        popup.open(&bar);
+                    }
+                }
+            },
+            move || popover.popdown(),
+            move || button.is_mapped(),
+        )
     }
 
-    /// An action the person took in the open popover did not complete: the note shows until
-    /// the popover closes, and assistive technologies announce it. A closed popover shows
-    /// nothing, and would show a stale note at its next opening.
-    pub fn failed(&self) {
-        if !self.popover.is_visible() {
-            return;
-        }
-        self.note.set_visible(true);
-        self.note.announce(
-            &self.note.text(),
-            gtk4::AccessibleAnnouncementPriority::Medium,
-        );
+    /// The module has nothing to show: its popover closes and its button leaves.
+    pub fn hide(&self) {
+        self.popover.popdown();
+        self.button.set_visible(false);
     }
 
     pub fn open(&self, bar: &Rc<Bar>) {
         bar.popover_opened(&self.popover);
         self.popover.popup();
     }
-}
-
-/// A labelled switch, as a row of popover content: the label and the switch, with the
-/// switch's `LabelledBy` relation set to it.
-pub fn switch_row(text: &str) -> (gtk4::Box, gtk4::Switch) {
-    let label = gtk4::Label::new(Some(text));
-    label.set_xalign(0.0);
-    label.set_hexpand(true);
-    let switch = gtk4::Switch::new();
-    switch.set_valign(gtk4::Align::Center);
-    switch.update_relation(&[gtk4::accessible::Relation::LabelledBy(
-        &[label.upcast_ref()],
-    )]);
-    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
-    row.append(&label);
-    row.append(&switch);
-    (row, switch)
 }
 
 /// A popover for `button`, attached by [`attach_popover`].
@@ -133,21 +104,4 @@ pub fn towards_inside(bar: &Bar) -> gtk4::PositionType {
         PanelEdge::Top => gtk4::PositionType::Bottom,
         PanelEdge::Bottom => gtk4::PositionType::Top,
     }
-}
-
-/// GTK 4.20 gives a check button no AT-SPI action: its accessible lists only the widget's own
-/// parameterless actions. Without one, an assistive technology that acts through AT-SPI
-/// (voice control, switch access, the rig) cannot choose a radio item. `radio.choose`
-/// selects this item, as a click would, so its `toggled` handler runs.
-pub fn expose_choose_action(button: &gtk4::CheckButton) {
-    let choose = gtk4::gio::SimpleAction::new("choose", None);
-    let weak = button.downgrade();
-    choose.connect_activate(move |_, _| {
-        if let Some(button) = weak.upgrade() {
-            button.set_active(true);
-        }
-    });
-    let group = gtk4::gio::SimpleActionGroup::new();
-    group.add_action(&choose);
-    button.insert_action_group("radio", Some(&group));
 }

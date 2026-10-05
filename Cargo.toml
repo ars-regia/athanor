@@ -12,6 +12,7 @@ members = [
   "forge/specs/athanor-recovery/athanor-recovery-1.0.0",
   "forge/specs/athanor-shelld/athanor-shelld-1.0.0",
   "forge/specs/athanor-bar/athanor-bar-1.0.0",
+  "system/athanor-controls",
   "forge/specs/athanor-dock/athanor-dock-1.0.0",
   "forge/specs/athanor-launcher/athanor-launcher-1.0.0",
   "forge/specs/athanor-control-center/athanor-control-center-1.0.0",

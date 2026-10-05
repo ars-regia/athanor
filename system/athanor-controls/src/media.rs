@@ -5,10 +5,10 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use athanor_services::media::{self, MediaCommand, MediaState, Track};
-use tokio::sync::mpsc;
+use athanor_services::media::{MediaCommand, MediaState, Track};
+use tokio::sync::{mpsc, watch};
 
-use super::bridge;
+use crate::bridge;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct NowPlaying {
@@ -19,45 +19,38 @@ pub struct NowPlaying {
 }
 
 pub struct Media {
-    /// The model's last state, which `bridge::follow` keeps current. Without a runtime there
-    /// is no model and nothing to wait for, so it starts settled.
+    /// The model's last state, which `bridge::follow` keeps current.
     state: RefCell<MediaState>,
     refused: Cell<u32>,
-    commands: Option<mpsc::UnboundedSender<MediaCommand>>,
+    commands: mpsc::UnboundedSender<MediaCommand>,
 }
 
 impl Media {
     /// `notify` runs when the state changed; `failed` when a player refused a command or did
     /// not answer.
-    pub fn new(notify: impl Fn() + 'static, failed: impl Fn() + 'static) -> Rc<Media> {
-        let model = bridge::runtime().map(|(handle, buses)| media::spawn(&handle, buses));
-        let (states, commands) = match model {
-            Some((states, commands)) => (Some(states), Some(commands)),
-            None => {
-                tracing::warn!("no runtime for the models; the media controls are hidden");
-                (None, None)
-            }
-        };
+    pub fn new(
+        (states, commands): (
+            watch::Receiver<MediaState>,
+            mpsc::UnboundedSender<MediaCommand>,
+        ),
+        notify: impl Fn() + 'static,
+        failed: impl Fn() + 'static,
+    ) -> Rc<Media> {
         let media = Rc::new(Media {
-            state: RefCell::new(MediaState {
-                settled: states.is_none(),
-                ..MediaState::default()
-            }),
+            state: RefCell::new(MediaState::default()),
             refused: Cell::new(0),
             commands,
         });
-        if let Some(states) = states {
-            let weak = Rc::downgrade(&media);
-            bridge::follow(states, move |state| {
-                let Some(media) = weak.upgrade() else { return };
-                let refused = media.refused.replace(state.refused) != state.refused;
-                media.state.replace(state.clone());
-                notify();
-                if refused {
-                    failed();
-                }
-            });
-        }
+        let weak = Rc::downgrade(&media);
+        bridge::follow(states, move |state| {
+            let Some(media) = weak.upgrade() else { return };
+            let refused = media.refused.replace(state.refused) != state.refused;
+            media.state.replace(state.clone());
+            notify();
+            if refused {
+                failed();
+            }
+        });
         media
     }
 
@@ -81,10 +74,8 @@ impl Media {
     /// Hands `command` to the model, which carries it out on the followed player; the `failed`
     /// of [`Media::new`] runs if the player refuses it or does not answer.
     pub fn command(&self, command: MediaCommand) {
-        if let Some(commands) = &self.commands {
-            if commands.send(command).is_err() {
-                tracing::debug!("the media model ended; the command is dropped");
-            }
+        if self.commands.send(command).is_err() {
+            tracing::debug!("the media model ended; the command is dropped");
         }
     }
 }
