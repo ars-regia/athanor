@@ -155,6 +155,8 @@ pub fn grants(dirs: &Dirs, state: &Path) -> Grants {
     Grants {
         write: vec![
             state.to_path_buf(),
+            // The parent of the launch sockets (BR2.2), as the bar's ruleset has it.
+            dirs.runtime.join("athanor"),
             dirs.unit_runtime.clone(),
             dirs.runtime.join("dconf"),
             dirs.cache.clone(),
@@ -283,6 +285,7 @@ mod tests {
             paths(&grants.write),
             [
                 "/home/u/.local/state/athanor/control-center",
+                "/run/user/1000/athanor",
                 "/run/user/1000/athanor-control-center",
                 "/run/user/1000/dconf",
                 "/home/u/.cache",

@@ -106,7 +106,7 @@ msgstr "Altro"
 
 #: src/notifications/text.rs:12
 msgid "now"
-msgstr "ora"
+msgstr "adesso"
 
 #: src/notifications/text.rs:13
 #, rust-format

@@ -5,6 +5,7 @@
 
 pub mod crash_loop;
 pub mod dirs;
+pub mod icon;
 pub mod journal;
 pub mod notify;
 pub mod sandbox;

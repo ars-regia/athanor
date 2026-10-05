@@ -105,6 +105,17 @@ fn main() -> glib::ExitCode {
             tracing::warn!(error = %err, "Super+N is not bound to the notification center; it still opens from the bar")
         }
     }
+    // The parent of the launch sockets (BR2.2), made the way launch() makes it, so the
+    // ruleset can grant it.
+    let launch_dir = dirs.runtime.join("athanor");
+    if let Err(err) = std::os::unix::fs::DirBuilderExt::mode(
+        std::fs::DirBuilder::new().recursive(true),
+        0o700,
+    )
+    .create(&launch_dir)
+    {
+        tracing::warn!(error = %err, dir = %launch_dir.display(), "cannot create the directory of the launch sockets");
+    }
     // Before GTK starts a thread. Reads stay open (CC2); writes only where `grants` says.
     let granted = grants(&dirs, &state);
     let write: Vec<&std::path::Path> = granted

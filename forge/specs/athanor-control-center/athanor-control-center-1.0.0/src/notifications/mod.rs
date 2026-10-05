@@ -23,7 +23,7 @@ use tokio::runtime::Handle;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::i18n::{tr, tr_with};
-use group::{groups, shown_rows, unread_to_mark, Group};
+use group::{app_title, groups, next_focus, row_of, shown_rows, unread_to_mark, Group};
 use header::{drawer, item, Header, SETTINGS};
 
 const BLANK: &str = "blank";
@@ -46,6 +46,11 @@ pub struct Panel {
     /// The groups whose rows are all shown, and the rows whose whole text is.
     expanded: RefCell<HashSet<String>>,
     open_bodies: RefCell<HashSet<u32>>,
+    /// The drawers that are open, by widget name: the group menus, their Mute question and
+    /// the "More" of a row.
+    open_drawers: RefCell<HashSet<String>>,
+    /// The rows shown by the last drawing, in display order.
+    listed: RefCell<Vec<u32>>,
     /// The ids already asked to be marked read since the panel opened.
     asked: RefCell<HashSet<u32>>,
     shown: Cell<bool>,
@@ -141,6 +146,8 @@ impl Panel {
             calendar,
             expanded: RefCell::default(),
             open_bodies: RefCell::default(),
+            open_drawers: RefCell::default(),
+            listed: RefCell::default(),
             asked: RefCell::default(),
             shown: Cell::new(false),
             resized: RefCell::default(),
@@ -158,6 +165,7 @@ impl Panel {
     pub fn opened(self: &Rc<Self>) {
         self.shown.set(true);
         self.asked.borrow_mut().clear();
+        calendar::refresh(&self.calendar);
         calendar::show_today(&self.calendar);
         self.render();
         let unread = self.unread();
@@ -259,15 +267,17 @@ impl Panel {
         }
     }
 
-    /// Draws the list again from the model. The row or the group button that had the
-    /// keyboard has it again afterwards, and the list keeps its scroll.
+    /// Draws the list again from the model. The control that had the keyboard has it again
+    /// afterwards, or the next row when its row is gone, and the list keeps its scroll.
     fn render(self: &Rc<Self>) {
+        // Only a name set on purpose is a name to find again: GTK names the rest by class.
         let focus = self
             .root
             .root()
             .and_then(|root| root.focus())
             .filter(|widget| widget.is_ancestor(&self.list))
-            .map(|widget| widget.widget_name());
+            .filter(|widget| widget.widget_name() != widget.type_().name())
+            .map(|widget| widget.widget_name().to_string());
         let scroll = self.scroller.vadjustment().value();
         while let Some(child) = self.list.first_child() {
             self.list.remove(&child);
@@ -286,8 +296,25 @@ impl Panel {
             (true, true, false) => LIST,
         };
         self.stack.set_visible_child_name(page);
+        let order: Vec<u32> = all
+            .iter()
+            .flat_map(|group| shown_rows(group, expanded.contains(&group.app_id)).iter().copied())
+            .collect();
+        let before = self.listed.replace(order.clone());
         if let Some(name) = focus {
-            if let Some(widget) = find_named(self.list.upcast_ref(), &name) {
+            let mut wanted = vec![name.clone()];
+            if let Some(row) = row_of(&name) {
+                match next_focus(&before, &order, row) {
+                    // The row stays: its control, else the row itself.
+                    Some(kept) if kept == row => wanted.push(row::name_of(row)),
+                    Some(next) => wanted = vec![row::name_of(next)],
+                    None => wanted.clear(),
+                }
+            }
+            if let Some(widget) = wanted
+                .iter()
+                .find_map(|name| find_named(self.list.upcast_ref(), name))
+            {
                 widget.grab_focus();
             }
         }
@@ -295,6 +322,8 @@ impl Panel {
         glib::idle_add_local_once(move || scroller.vadjustment().set_value(scroll));
         let marked = unread_to_mark(&state.entries, &all, &expanded, &self.asked.borrow());
         drop(state);
+        let words = text::announcement(self.unread());
+        self.root.update_property(&[Property::Label(&words)]);
         if !marked.is_empty() {
             self.asked.borrow_mut().extend(marked.iter().copied());
             self.send(NotificationsCommand::MarkRead(marked));
@@ -310,17 +339,20 @@ impl Panel {
         now: i64,
     ) -> gtk4::Box {
         let weak = Rc::downgrade(self);
+        // What the sender says about itself names a group only when it has no proven
+        // identity; a proven one is named by its desktop entry, or by the id (NC2).
         let name = if group.app_id.is_empty() {
             tr("Other applications")
         } else {
-            group
+            let declared = group
                 .rows
                 .first()
                 .and_then(|id| state.entries.iter().find(|n| n.id == *id))
-                .map(|n| n.app_name.clone())
-                .filter(|name| !name.is_empty())
+                .map_or("", |n| n.app_name.as_str());
+            app_title(&group.app_id, declared, desktop_name(&group.app_id).as_deref())
                 .unwrap_or_else(|| group.app_id.clone())
         };
+        let key = |part: &str| format!("g{}:{part}", group.app_id);
         let heading = gtk4::Label::new(Some(&name));
         heading.add_css_class("nc-heading");
         heading.set_xalign(0.0);
@@ -329,6 +361,9 @@ impl Panel {
         let bar = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
         bar.append(&heading);
         let (menu_toggle, menu, entries) = drawer(&tr_with("Options for {app}", "app", &name));
+        watch_reveal(&menu, &weak);
+        menu_toggle.set_widget_name(&key("menu"));
+        self.track(&menu_toggle, key("menu"));
         let collapsible = group.rows.len() > shown_rows(group, false).len();
         if collapsible {
             let words = if expanded {
@@ -338,7 +373,7 @@ impl Panel {
             };
             let toggle = gtk4::Button::with_label(&words);
             toggle.add_css_class("flat");
-            toggle.set_widget_name(&format!("g{}", group.app_id));
+            toggle.set_widget_name(&key("toggle"));
             toggle.update_state(&[State::Expanded(Some(expanded))]);
             let (panel, app) = (weak.clone(), group.app_id.clone());
             toggle.connect_clicked(move |_| {
@@ -357,18 +392,29 @@ impl Panel {
         bar.append(&menu_toggle);
 
         // "Mute this application" asks first, in the drawer, with the choices swapped for
-        // the question.
+        // the question. Both the drawer and the question stay as they are across a rebuild.
         let choices = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
         let confirm = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
         let pages = gtk4::Stack::new();
         pages.add_named(&choices, Some("choices"));
         pages.add_named(&confirm, Some("confirm"));
-        let question = gtk4::Label::new(Some(&tr_with("Mute {app}? It will send no notification at all.", "app", &name)));
+        if self.is_open(&key("mute")) {
+            pages.set_visible_child_name("confirm");
+        }
+        let question = gtk4::Label::new(Some(&tr_with(
+            "Mute {app}? It will send no notification at all.",
+            "app",
+            &name,
+        )));
         question.set_wrap(true);
         question.set_xalign(0.0);
         let cancel = gtk4::Button::with_label(&tr("Cancel"));
+        cancel.set_widget_name(&key("cancel"));
+        cancel.update_relation(&[Relation::DescribedBy(&[question.upcast_ref()])]);
         let mute = gtk4::Button::with_label(&tr("Mute"));
+        mute.set_widget_name(&key("confirm"));
         mute.add_css_class("destructive-action");
+        mute.update_relation(&[Relation::DescribedBy(&[question.upcast_ref()])]);
         let buttons = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
         buttons.set_halign(gtk4::Align::End);
         buttons.append(&cancel);
@@ -376,31 +422,42 @@ impl Panel {
         confirm.append(&question);
         confirm.append(&buttons);
         entries.append(&pages);
-        let (pages_ask, cancel_focus) = (pages.downgrade(), cancel.downgrade());
-        choices.append(&item(&tr("Mute this application"), move || {
-            if let (Some(pages), Some(cancel)) = (pages_ask.upgrade(), cancel_focus.upgrade()) {
+        let (pages_ask, cancel_focus, panel) = (pages.downgrade(), cancel.downgrade(), weak.clone());
+        let mute_key = key("mute");
+        let ask = item(&tr("Mute this application"), move || {
+            if let (Some(pages), Some(cancel), Some(panel)) =
+                (pages_ask.upgrade(), cancel_focus.upgrade(), panel.upgrade())
+            {
+                panel.remember(&mute_key, true);
                 pages.set_visible_child_name("confirm");
                 cancel.grab_focus();
             }
-        }));
+        });
+        ask.set_widget_name(&key("mute"));
+        choices.append(&ask);
         let (panel, app, toggle) = (weak.clone(), group.app_id.clone(), menu_toggle.downgrade());
-        choices.append(&item(&tr("Show in the list only"), move || {
+        let list_only = item(&tr("Show in the list only"), move || {
             if let Some(panel) = panel.upgrade() {
                 panel.send(NotificationsCommand::ListOnly(app.clone()));
             }
             if let Some(toggle) = toggle.upgrade() {
                 toggle.set_active(false);
             }
-        }));
+        });
+        list_only.set_widget_name(&key("listonly"));
+        choices.append(&list_only);
         let panel = weak.clone();
-        choices.append(&item(&tr("Notification settings"), move || {
+        let settings = item(&tr("Notification settings"), move || {
             if let Some(panel) = panel.upgrade() {
                 panel.open_app(SETTINGS);
             }
-        }));
-        let pages_cancel = pages.downgrade();
+        });
+        settings.set_widget_name(&key("settings"));
+        choices.append(&settings);
+        let (pages_cancel, panel, mute_key) = (pages.downgrade(), weak.clone(), key("mute"));
         cancel.connect_clicked(move |_| {
-            if let Some(pages) = pages_cancel.upgrade() {
+            if let (Some(pages), Some(panel)) = (pages_cancel.upgrade(), panel.upgrade()) {
+                panel.remember(&mute_key, false);
                 pages.set_visible_child_name("choices");
             }
         });
@@ -413,9 +470,10 @@ impl Panel {
                 toggle.set_active(false);
             }
         });
-        let reset = pages.downgrade();
+        let (reset, panel, mute_key) = (pages.downgrade(), weak.clone(), key("mute"));
         menu_toggle.connect_toggled(move |toggle| {
-            if let (false, Some(pages)) = (toggle.is_active(), reset.upgrade()) {
+            if let (false, Some(pages), Some(panel)) = (toggle.is_active(), reset.upgrade(), panel.upgrade()) {
+                panel.remember(&mute_key, false);
                 pages.set_visible_child_name("choices");
             }
         });
@@ -436,6 +494,44 @@ impl Panel {
         }
         widget
     }
+
+    /// The drawer opened by `toggle` is kept open, or closed, when the list is drawn again.
+    pub(super) fn track(self: &Rc<Self>, toggle: &gtk4::ToggleButton, key: String) {
+        toggle.set_active(self.is_open(&key));
+        let panel = Rc::downgrade(self);
+        toggle.connect_toggled(move |toggle| {
+            if let Some(panel) = panel.upgrade() {
+                panel.remember(&key, toggle.is_active());
+            }
+        });
+    }
+
+    fn is_open(&self, key: &str) -> bool {
+        self.open_drawers.borrow().contains(key)
+    }
+
+    fn remember(&self, key: &str, open: bool) {
+        if open {
+            self.open_drawers.borrow_mut().insert(key.to_owned());
+        } else {
+            self.open_drawers.borrow_mut().remove(key);
+        }
+    }
+}
+
+/// Sizes the surface again when a drawer opens or closes, since the panel's height follows
+/// its content (NC11).
+pub(super) fn watch_reveal(revealer: &gtk4::Revealer, panel: &Weak<Panel>) {
+    for property in ["reveal-child", "child-revealed"] {
+        let panel = panel.clone();
+        revealer.connect_notify_local(Some(property), move |_, _| notify_resized(&panel));
+    }
+}
+
+/// The display name of the desktop entry of a proven application.
+fn desktop_name(app_id: &str) -> Option<String> {
+    gio_unix::DesktopAppInfo::new(&format!("{app_id}.desktop"))
+        .map(|info| info.display_name().to_string())
 }
 
 fn notify_resized(panel: &Weak<Panel>) {

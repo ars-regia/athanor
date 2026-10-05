@@ -10,5 +10,7 @@ authors = ["Athanor Forge <forge@athanor.os>"]
 landlock = { workspace = true }
 # clock_gettime(CLOCK_BOOTTIME) for the crash-loop window.
 nix = { workspace = true, features = ["time"] }
+# O_NONBLOCK for picture files a peer names: a FIFO must not hang the reader.
+libc = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }

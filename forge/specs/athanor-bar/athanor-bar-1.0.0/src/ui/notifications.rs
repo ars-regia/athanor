@@ -863,7 +863,7 @@ fn picture(notice: &Notice) -> gtk4::Image {
             height,
             rgba,
         } => texture(*width, *height, rgba).map(from_texture),
-        Picture::File(path) => notices::read_icon_file(path)
+        Picture::File(path) => athanor_unit::icon::read_icon_file(path)
             .and_then(|bytes| gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)).ok())
             .map(from_texture),
         Picture::Name(name) if has_icon(name) => Some(gtk4::Image::from_icon_name(name)),

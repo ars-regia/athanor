@@ -2,7 +2,8 @@
 //! and "Clear all". The menus are drawers inside the panel and not popovers: a popover is a
 //! surface of its own, and the panel closes when its own surface loses the keyboard (CC9).
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::time::Duration;
 use std::rc::{Rc, Weak};
 
 use athanor_services::notifications::{Dnd, NotificationsCommand};
@@ -11,13 +12,15 @@ use gtk4::prelude::*;
 use gtk4::glib;
 
 use super::text::{dnd_words, next_at};
-use super::Panel;
+use super::{watch_reveal, Panel};
 use crate::i18n::tr;
 
 /// The Settings entry "Edit schedule" and every "Notification settings" open.
 pub const SETTINGS: &str = "com.system76.CosmicSettings.desktop";
 const ONE_HOUR: i64 = 3600;
 const MORNING: i32 = 8;
+/// How long a change of the switch has to come back from the daemon.
+const SETTLE: Duration = Duration::from_secs(2);
 
 /// A toggle that shows `content` right under itself, for a menu that stays inside the surface.
 pub fn drawer(name: &str) -> (gtk4::ToggleButton, gtk4::Revealer, gtk4::Box) {
@@ -29,6 +32,9 @@ pub fn drawer(name: &str) -> (gtk4::ToggleButton, gtk4::Revealer, gtk4::Box) {
     toggle.update_state(&[State::Expanded(Some(false))]);
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
     let revealer = gtk4::Revealer::new();
+    // No animation: the panel's height follows the content at once. (The type `None` keeps a
+    // closed drawer's full height, so the slide stays and only its duration goes.)
+    revealer.set_transition_duration(0);
     revealer.set_child(Some(&content));
     toggle
         .bind_property("active", &revealer, "reveal-child")
@@ -58,6 +64,8 @@ pub struct Header {
     clear: gtk4::Button,
     /// The switch is being set from the model, not by the user.
     updating: Cell<bool>,
+    /// What the model last said, to put the switch back on when a change did not come back.
+    last: RefCell<Option<(Dnd, bool, bool)>>,
 }
 
 impl Header {
@@ -87,6 +95,7 @@ impl Header {
             Relation::DescribedBy(&[words.upcast_ref()]),
         ]);
         let (toggle, revealer, menu) = drawer(&tr("Do not disturb options"));
+        watch_reveal(&revealer, panel);
         let dnd = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
         dnd.append(&text);
         dnd.append(&switch);
@@ -123,6 +132,7 @@ impl Header {
             words,
             clear,
             updating: Cell::new(false),
+            last: RefCell::default(),
         });
         let (weak_header, weak_panel) = (Rc::downgrade(&header), panel.clone());
         header.switch.connect_state_set(move |_, on| {
@@ -135,6 +145,14 @@ impl Header {
             // The switch takes its state from the model, once the daemon accepted the change,
             // so a refused call leaves it as the daemon has it.
             panel.send(NotificationsCommand::SetDnd { on, until: None });
+            // When the daemon refuses, or there is no model, no state comes back: the
+            // switch returns to what the model says.
+            let again = Rc::downgrade(&header);
+            glib::timeout_add_local_once(SETTLE, move || {
+                if let Some(header) = again.upgrade() {
+                    header.show_last();
+                }
+            });
             glib::Propagation::Stop
         });
         let weak_panel = panel.clone();
@@ -146,7 +164,15 @@ impl Header {
         header
     }
 
+    fn show_last(&self) {
+        let last = self.last.borrow().clone();
+        if let Some((dnd, available, any)) = last {
+            self.update(&dnd, available, any);
+        }
+    }
+
     pub fn update(&self, dnd: &Dnd, available: bool, any: bool) {
+        self.last.replace(Some((dnd.clone(), available, any)));
         self.updating.set(true);
         self.switch.set_active(dnd.on);
         self.switch.set_state(dnd.on);

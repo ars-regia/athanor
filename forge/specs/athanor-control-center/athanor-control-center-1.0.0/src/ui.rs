@@ -214,11 +214,12 @@ impl ControlCenter {
         surface.window.add_controller(keys);
         // The output's size changes the most the notification panel may take.
         let weak = Rc::downgrade(self);
-        monitor.connect_notify_local(Some("geometry"), move |_, _| {
+        let geometry = monitor.connect_notify_local(Some("geometry"), move |_, _| {
             if let Some(center) = weak.upgrade() {
                 center.relimit();
             }
         });
+        surface.geometry.replace(Some(geometry));
         // The loss of focus closes it too, once the surface has had the keyboard.
         let weak = Rc::downgrade(self);
         let monitor = monitor.clone();

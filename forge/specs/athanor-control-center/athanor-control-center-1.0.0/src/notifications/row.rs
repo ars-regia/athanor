@@ -8,9 +8,10 @@ use gtk4::accessible::{Property, State};
 use gtk4::prelude::*;
 use gtk4::{gdk, glib, pango};
 
+use super::group::{app_title, clickable};
 use super::header::drawer;
 use super::text::{accessible_name, relative_time};
-use super::Panel;
+use super::{desktop_name, watch_reveal, Panel};
 use crate::i18n::{tr, tr_with};
 
 const PICTURE_PX: i32 = 32;
@@ -53,7 +54,7 @@ fn texture(width: u32, height: u32, rgba: &[u8]) -> Option<gdk::Texture> {
     Some(gdk::MemoryTexture::new(w, h, gdk::MemoryFormat::R8g8b8a8, &bytes, stride).upcast())
 }
 
-/// The image data, else the icon name, else the application's icon, else a generic one.
+/// The image data, else the file, else the icon name, else the application's icon, else a generic one.
 fn picture(n: &WireNotification) -> gtk4::Image {
     let themed = |name: &str| {
         gdk::Display::default()
@@ -61,6 +62,12 @@ fn picture(n: &WireNotification) -> gtk4::Image {
     };
     let image = texture(n.image_width, n.image_height, &n.image_rgba)
         .map(|texture| gtk4::Image::from_paintable(Some(&texture)))
+        .or_else(|| {
+            // The bar's guards: an absolute clean path to a small regular PNG, or nothing.
+            athanor_unit::icon::read_icon_file(&n.icon_file)
+                .and_then(|bytes| gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)).ok())
+                .map(|texture| gtk4::Image::from_paintable(Some(&texture)))
+        })
         .or_else(|| {
             (!n.icon_name.is_empty() && themed(&n.icon_name))
                 .then(|| gtk4::Image::from_icon_name(&n.icon_name))
@@ -76,12 +83,12 @@ fn picture(n: &WireNotification) -> gtk4::Image {
     image
 }
 
+/// The application's name: its desktop entry's or its id when its identity is proven, and
+/// only otherwise what the sender calls itself.
 fn app_label(n: &WireNotification) -> String {
-    if n.app_name.is_empty() {
-        tr("Unknown application")
-    } else {
-        n.app_name.clone()
-    }
+    let desktop = desktop_name(&n.app_id).filter(|_| !n.app_id.is_empty());
+    app_title(&n.app_id, &n.app_name, desktop.as_deref())
+        .unwrap_or_else(|| tr("Unknown application"))
 }
 
 /// A click on an action, or on the row for `default`: the daemon calls the sender back while
@@ -144,6 +151,7 @@ pub fn build(panel: &Rc<Panel>, n: &WireNotification, now: i64, show_app: bool) 
     let close = gtk4::Button::from_icon_name("window-close-symbolic");
     close.add_css_class("flat");
     close.set_valign(gtk4::Align::Start);
+    close.set_widget_name(&format!("{}:close", name_of(id)));
     let close_name = tr_with("Close {title}", "title", &title);
     close.set_tooltip_text(Some(&close_name));
     close.update_property(&[Property::Label(&close_name)]);
@@ -170,6 +178,7 @@ pub fn build(panel: &Rc<Panel>, n: &WireNotification, now: i64, show_app: bool) 
             more.set_icon_name(if open { "pan-up-symbolic" } else { "pan-down-symbolic" });
             more.add_css_class("flat");
             more.set_valign(gtk4::Align::Start);
+            more.set_widget_name(&format!("{}:body", name_of(id)));
             let name = tr("Show the whole text");
             more.set_tooltip_text(Some(&name));
             more.update_property(&[Property::Label(&name)]);
@@ -199,6 +208,7 @@ pub fn build(panel: &Rc<Panel>, n: &WireNotification, now: i64, show_app: bool) 
     if !actions.is_empty() {
         let button = |key: &str, text: &str| {
             let button = gtk4::Button::with_label(text);
+            button.set_widget_name(&format!("{}:a:{key}", name_of(id)));
             if !n.actions_available {
                 // Shown insensitive, yet a click opens the application: a button that is
                 // really insensitive would take the click and do nothing.
@@ -222,6 +232,9 @@ pub fn build(panel: &Rc<Panel>, n: &WireNotification, now: i64, show_app: bool) 
         if actions.len() > VISIBLE_ACTIONS {
             let (toggle, revealer, rest) = drawer(&tr("More"));
             toggle.set_label(&tr("More"));
+            toggle.set_widget_name(&format!("{}:more", name_of(id)));
+            panel.track(&toggle, format!("{}:more", name_of(id)));
+            watch_reveal(&revealer, &weak);
             for (key, text) in actions.iter().skip(VISIBLE_ACTIONS) {
                 rest.append(&button(key, text));
             }
@@ -230,15 +243,19 @@ pub fn build(panel: &Rc<Panel>, n: &WireNotification, now: i64, show_app: bool) 
         }
     }
 
-    // A click on the row is the `default` action.
-    let click = gtk4::GestureClick::new();
-    let (panel_click, n_click) = (weak.clone(), n.clone());
-    click.connect_released(move |_, _, _, _| {
-        if let Some(panel) = panel_click.upgrade() {
-            activate(&panel, &n_click, "default");
-        }
-    });
-    card.add_controller(click);
+    // A click on the row is the `default` action, when that does anything.
+    let has_default = n.actions.iter().any(|(key, _)| key == "default");
+    let can_activate = clickable(n.actions_available, has_default, &n.app_id);
+    if can_activate {
+        let click = gtk4::GestureClick::new();
+        let (panel_click, n_click) = (weak.clone(), n.clone());
+        click.connect_released(move |_, _, _, _| {
+            if let Some(panel) = panel_click.upgrade() {
+                activate(&panel, &n_click, "default");
+            }
+        });
+        card.add_controller(click);
+    }
     // Enter does the same, Delete closes the row.
     let keys = gtk4::EventControllerKey::new();
     let (panel_keys, n_keys) = (weak.clone(), n.clone());
@@ -247,7 +264,9 @@ pub fn build(panel: &Rc<Panel>, n: &WireNotification, now: i64, show_app: bool) 
             return glib::Propagation::Proceed;
         };
         match key {
-            gdk::Key::Return | gdk::Key::KP_Enter => activate(&panel, &n_keys, "default"),
+            gdk::Key::Return | gdk::Key::KP_Enter if can_activate => {
+                activate(&panel, &n_keys, "default");
+            }
             gdk::Key::Delete | gdk::Key::KP_Delete => panel.send(NotificationsCommand::Close(id)),
             _ => return glib::Propagation::Proceed,
         }

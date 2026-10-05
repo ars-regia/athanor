@@ -3,8 +3,10 @@
 //! with no child, no input and no keyboard; shown, an overlay over the whole output that
 //! takes the keyboard.
 
+use std::cell::RefCell;
+
 use gtk4::prelude::*;
-use gtk4::{cairo, gdk};
+use gtk4::{cairo, gdk, glib};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use crate::layer_guard;
@@ -15,6 +17,8 @@ pub struct Surface {
     pub window: gtk4::ApplicationWindow,
     /// Kept only while this very monitor object is listed (see athanor-bar's ui/mod.rs).
     pub monitor: gdk::Monitor,
+    /// The handler on the monitor's size, disconnected when the surface is abandoned.
+    pub geometry: RefCell<Option<glib::SignalHandlerId>>,
 }
 
 /// No input at all: a hidden surface takes no click and no touch.
@@ -45,6 +49,7 @@ impl Surface {
         let surface = Surface {
             window,
             monitor: monitor.clone(),
+            geometry: RefCell::default(),
         };
         // The input region belongs to the GdkSurface, which exists once the window is
         // realized; before that, `window.surface()` is None and the call would do nothing.
@@ -92,6 +97,9 @@ impl Surface {
     // ponytail: one empty window per output removal for the life of the process; destroy
     // it instead once cosmic-comp tolerates that.
     pub fn abandon(self) {
+        if let Some(id) = self.geometry.take() {
+            self.monitor.disconnect(id);
+        }
         self.window.set_child(None::<&gtk4::Widget>);
     }
 }
