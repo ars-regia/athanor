@@ -112,16 +112,27 @@ A mismatch is a build failure with the exact values, never a warning.
 
 - **Build and publication:**
   - `call-system-image.yml` builds the default image, then the two variants from the shared stages;
-  - each image is pushed, signed and SBOM-attested like `athanor-system` today;
+  - each image is rechunked (S9), pushed, signed and SBOM-attested like `athanor-system` today;
+  - every build pushes the run tag; only the release branch (repository variable `RELEASE_BRANCH`, default `iso-v0`) also moves `:latest`, and only `system/promote.sh` moves `:stable` (`doc_update_trust.md`, D1);
   - the signing job serves all three images, so a cycle needs one approval of the `signing` environment. The plan verifies that GitHub groups the waiting jobs into one review.
 - **Installation:**
-  - the installer ISO stays single and installs `athanor-system`;
-  - a machine with NVIDIA hardware moves to its variant with `bootc switch ghcr.io/hr-mes/athanor-system-nvidia:latest`, or `-nvidia-legacy`;
+  - the installer ISO stays single and installs `athanor-system:stable`: `forge/scripts/build_iso.sh` embeds the run's image under that name, so the installed system follows the promoted channel;
+  - a machine with NVIDIA hardware moves to its variant with `bootc switch ghcr.io/hr-mes/athanor-system-nvidia:stable`, or `-nvidia-legacy`;
   - detecting the GPU in the installer and choosing the image there is future work.
 - **Acceptance:**
   - ISO acceptance keeps installing the default image in a VM without GPU;
   - the variants are gated by S6 and by build-time checks that the GSP firmware, `10_nvidia.json`, `nvidia-drm_gbm.so` and the Vulkan ICD are present;
-  - a release of `athanor-system-nvidia` also requires the hardware check of section 6.
+  - a release of `athanor-system-nvidia` also requires the hardware check of section 6;
+  - `:stable` moves the three images together on the default image's acceptance: the variants' evidence is that they were built in the same run, from the same commit, as the image that installed and started.
+
+**S9. Rechunked layers.** The Containerfile leaves one layer per `RUN`, and a change in an early `RUN` rewrites every later layer, so an update downloaded a large share of the image whatever had changed. `system/publish-images.sh`, run by `call-system-image.yml` before the push, rechunks each image with `rpm-ostree compose build-chunked-oci --bootc` (`system/rechunk-image.sh`), run from the image itself:
+
+- layers are grouped by package, and seeded with the previous `:latest`, so a package that did not change keeps its layer digest even when the set of packages changes;
+- the initramfs and the UKI, which belong to no package and change with every kernel or dracut input, form a component of their own; the kernel packages have their own layers;
+- `SOURCE_DATE_EPOCH` is the commit time; the image's own build time stays the run's, which ordering needs (UT5);
+- `system/layer-delta.sh` compares the layer digests of two references with `skopeo` and reports what a machine on the old one downloads; the build writes it into the run summary for every image.
+
+Measured on two consecutive local builds of `athanor-system` (2026-10-06): 65 layers, 3 changed, 155.3 MiB downloaded of 2866 MiB (5.4 %). The rechunk of one image took about four minutes on four CPUs.
 
 ## 3. What this replaces
 
@@ -170,12 +181,13 @@ These defects were found on the same boot and each needs its own fix:
 ## 7. Migration of the maintainer's desktop
 
 1. **Now, to use the desktop:** the temporary kernel argument `modprobe.blacklist=nvidia,nvidia_drm,nvidia_modeset,nvidia_uvm,nvidia_peermem` hands both GPUs back to `nouveau`.
-2. **Once the variant is published:** `sudo rpm-ostree kargs --delete=modprobe.blacklist=nvidia,nvidia_drm,nvidia_modeset,nvidia_uvm,nvidia_peermem` and `sudo bootc switch ghcr.io/hr-mes/athanor-system-nvidia:latest`, then a reboot at the maintainer's choice.
+2. **Once the variant is published:** `sudo rpm-ostree kargs --delete=modprobe.blacklist=nvidia,nvidia_drm,nvidia_modeset,nvidia_uvm,nvidia_peermem` and `sudo bootc switch ghcr.io/hr-mes/athanor-system-nvidia:stable`, then a reboot at the maintainer's choice.
 3. The checks of section 6, item 3.
 
 ## 8. Version and signatures
 
 - **Version.** `system/build-image.sh` labels every image with `org.opencontainers.image.version`, `<base major>.<UTC build date>.<serial>`, and `org.opencontainers.image.created`. The serial is the CI run number in the pipeline and `0` in a local build. Ordering uses the build time, never the version string (`doc_update_trust.md`, UT9).
+- **Provenance.** Every image carries the commit it was built from in `org.opencontainers.image.revision`, which acceptance evidence is bound to. The NEVRA of every installed package is kept per run as the `nevra-<run>` build artefact. The ISO carries the run, the commit and the digest of each image as labels. `bootc-image-builder` is pinned by digest in `system/disk_config/bib.Containerfile` and moved by the system group of `bump.py`.
 - **Signatures.** The three images carry two signatures. The keyless Sigstore signature and SBOM attestation (`forge/scripts/sign_attest.sh`) record provenance. The key-based signature, made by `system/sign-images.sh` in the `sign-system-images` job, is what machines verify: the policy rendered from the public keys under `system/keys` is in force in the image (`/etc/containers/policy.json` links to it), and the job verifies each signature through that policy before it reports success (`doc_update_trust.md`, UT2 and UT3).
 
 ## 9. Changes owed by other documents
