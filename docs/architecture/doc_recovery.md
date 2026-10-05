@@ -2,6 +2,8 @@
 
 Status: **revision 1, 2026-09-30, awaiting the maintainer's approval.** The maintainer chose option A of section 3 on 2026-09-30, and option B for later. The console it describes is implemented on the branch of this revision; what was and was not run is in section 5.
 
+**Amendment of 2026-10-06** (maintainer decision A2-8 of 2026-10-05, specification audit 2, #150): greenboot is the one automatic fallback, owned by this document, enabled by preset and ordered before R1 (R5). Revision 1's text is otherwise unchanged.
+
 ## 1. Context
 
 When the desktop does not start, greetd fails and systemd stops restarting it after three failures in a minute (`StartLimitBurst=3`, `StartLimitIntervalSec=60s`). The package `athanor-recovery` hooks that failure with `OnFailure=athanor-recovery.target`. Until 2026-09-30 the target started a graphical kiosk, `athanor-recovery-ui`, on cosmic-comp, whose button ran `rpm-ostree rollback`.
@@ -25,6 +27,13 @@ The kiosk could not do what it offered, and read in the code (not run) it failed
 
 **R4. The kiosk is frozen, not deleted.** Its source stays in `forge/specs/athanor-recovery/athanor-recovery-1.0.0`, out of the workspace (`exclude`, as `athanor-settings-rs` and the others) and out of the image. The package ships no binary and no `athanor-recovery` user; a machine that already has the user keeps it. `athanor-style` still carries a legacy glass theme "kept only because athanor-recovery still loads it"; with the kiosk out of the workspace nothing loads it, and it can go.
 
+**R5. Greenboot is the automatic fallback, owned here, and acts before R1** (amendment of 2026-10-06, maintainer decision A2-8 of 2026-10-05, #150). Release 1.0 boots bootc on the ostree backend through GRUB (`doc_kernel_profile.md`, D6 as amended on 2026-10-06), and greenboot, with GRUB's boot counter, is its one automatic fallback: a deployment whose required health checks fail returns to the previous deployment. Before this amendment three mechanisms touched the same failure and none owned it: the systemd-boot counting of `doc_kernel_profile.md` section 8, which does not exist on this path; R1; and greenboot itself, shipped in `upstream_core` (`forge/config/packages.json:105-106`) with the required check `/etc/greenboot/check/required.d/10-greetd-running.sh` of `athanor-system-config`, and named by no specification.
+
+- **This document owns greenboot:** its packages, its required checks and its configuration.
+- **Enabled by preset.** The image enables greenboot through a preset file it ships, instead of relying on Fedora's presets; no preset or `systemctl enable` for greenboot exists in the repository today.
+- **Ordered before R1.** GRUB's counter and greenboot's return to the previous deployment act first; R1's console starts only after greenboot has used its tries, when the deployment it returned to fails as well. Both react to the same signal, a greeter that does not run, so without the order they would act against each other: one restarts into the previous version, the other stays and shows a console.
+- A return made by greenboot does not go through `GoBack()`, so nothing holds the digest it left (`doc_update_trust.md`, UT6); how the update service learns of that return is not specified yet.
+
 ## 3. Options that were weighed
 
 | | Option | Outcome |
@@ -43,6 +52,8 @@ Run: the tests above; `agetty --show-issue` in a pseudo-terminal with the shippe
 
 Not run, because it needs a machine: greetd failing three times and the target starting the getty (greetd declares `Conflicts=getty@tty1.service`, and the order of the two stops and starts was reasoned, not seen); `sudo athanor-update go-back` against the real service, `bootc rollback` and the restart; that a member of `wheel` can read `journalctl -b -u greetd`; the appearance of the message on a real console.
 
+Not run for R5 (added on 2026-10-06): nothing. Greenboot's activation on the shipped image, its order against R1, and a return to the previous deployment are all unverified.
+
 ## 6. Acceptance, on the dev VM
 
 1. Make the greeter fail three times in a minute. `tty1` shows a login and, above it, the message in both languages.
@@ -50,3 +61,5 @@ Not run, because it needs a machine: greetd failing three times and the target s
 3. With no previous deployment it answers "there is no previous version to go back to" and changes nothing.
 4. `athanor-update go-back` as an ordinary user, without `sudo`, is refused and says to use `sudo`.
 5. A normal boot shows the plain banner and no message, and `/run/athanor-recovery` does not exist.
+6. Added on 2026-10-06 (R5): greenboot is enabled by the image's own preset file.
+7. Added on 2026-10-06 (R5): with a deliberately broken new deployment whose greeter does not start, greenboot returns to the previous deployment before `tty1` shows the recovery console; the console appears only when the previous deployment fails as well.
