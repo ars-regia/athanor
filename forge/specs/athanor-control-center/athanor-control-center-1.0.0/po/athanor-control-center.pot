@@ -1,0 +1,165 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the athanor-control-center package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: athanor-control-center\n"
+"Report-Msgid-Bugs-To: forge@athanor.os\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=CHARSET\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: src/notifications/header.rs:65
+msgid "Notifications"
+msgstr ""
+
+#: src/notifications/header.rs:69
+msgid "Clear all"
+msgstr ""
+
+#: src/notifications/header.rs:74
+msgid "Do not disturb"
+msgstr ""
+
+#: src/notifications/header.rs:89
+msgid "Do not disturb options"
+msgstr ""
+
+#: src/notifications/header.rs:106
+msgid "For one hour"
+msgstr ""
+
+#: src/notifications/header.rs:107
+msgid "Until 08:00"
+msgstr ""
+
+#: src/notifications/header.rs:109
+msgid "Edit schedule"
+msgstr ""
+
+#: src/notifications/mod.rs:112
+msgid "No notifications"
+msgstr ""
+
+#: src/notifications/mod.rs:113
+msgid "Notifications unavailable"
+msgstr ""
+
+#: src/notifications/mod.rs:294
+msgid "Other applications"
+msgstr ""
+
+#: src/notifications/mod.rs:311
+#, rust-format
+msgid "Options for {app}"
+msgstr ""
+
+#: src/notifications/mod.rs:315
+msgid "Show less"
+msgstr ""
+
+#: src/notifications/mod.rs:317
+#, rust-format
+msgid "Show {n} more"
+msgstr ""
+
+#: src/notifications/mod.rs:346
+#, rust-format
+msgid "Mute {app}? It will send no notification at all."
+msgstr ""
+
+#: src/notifications/mod.rs:349
+msgid "Cancel"
+msgstr ""
+
+#: src/notifications/mod.rs:350
+msgid "Mute"
+msgstr ""
+
+#: src/notifications/mod.rs:360
+msgid "Mute this application"
+msgstr ""
+
+#: src/notifications/mod.rs:367
+msgid "Show in the list only"
+msgstr ""
+
+#: src/notifications/mod.rs:376
+msgid "Notification settings"
+msgstr ""
+
+#: src/notifications/row.rs:81
+msgid "Unknown application"
+msgstr ""
+
+#: src/notifications/row.rs:147
+#, rust-format
+msgid "Close {title}"
+msgstr ""
+
+#: src/notifications/row.rs:173
+msgid "Show the whole text"
+msgstr ""
+
+#: src/notifications/row.rs:223 src/notifications/row.rs:224
+msgid "More"
+msgstr ""
+
+#: src/notifications/text.rs:12
+msgid "now"
+msgstr ""
+
+#: src/notifications/text.rs:13
+#, rust-format
+msgid "{n} min"
+msgstr ""
+
+#: src/notifications/text.rs:14
+#, rust-format
+msgid "{n} h"
+msgstr ""
+
+#: src/notifications/text.rs:17
+msgid "Yesterday"
+msgstr ""
+
+#: src/notifications/text.rs:27
+msgid "Off"
+msgstr ""
+
+#: src/notifications/text.rs:30
+#, rust-format
+msgid "On until {time}"
+msgstr ""
+
+#: src/notifications/text.rs:31
+msgid "On"
+msgstr ""
+
+#: src/notifications/text.rs:34
+msgid "schedule"
+msgstr ""
+
+#: src/notifications/text.rs:35
+msgid "fullscreen"
+msgstr ""
+
+#: src/notifications/text.rs:36
+msgid "screen sharing"
+msgstr ""
+
+#: src/notifications/text.rs:58
+msgid "Notification center, no unread"
+msgstr ""
+
+#: src/notifications/text.rs:59
+#, rust-format
+msgid "Notification center, {n} unread"
+msgstr ""

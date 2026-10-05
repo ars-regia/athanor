@@ -1,5 +1,6 @@
-//! The panel on the surface of the focused output, placed against the bar (CC9). The pages
-//! are placeholders: a label per page id, until the later tasks fill them.
+//! The panel on the surface of the focused output, placed against the bar (CC9). The control
+//! pages are placeholders, a label per page id, until the later tasks fill them; the
+//! notification panel is the real one.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -10,22 +11,30 @@ use athanor_control_center::{
     GAP, NOTIFICATIONS_WIDTH,
 };
 use athanor_layout::loader::{Paths, Source};
+use athanor_services::Buses;
 use athanor_style::calmo;
 use gtk4::prelude::*;
 use gtk4::{gdk, glib};
+use tokio::runtime::Handle;
 
 use crate::bus::Bus;
 use crate::i18n::is_rtl;
+use crate::notifications;
 use crate::surface::Surface;
 
 const CSS: &str = "
 .control-center-surface { background: transparent; }
 .control-center { border-radius: 16px; padding: 12px; }
+.control-center .notification-card { padding: 10px; border-radius: 14px; box-shadow: none; }
+.control-center .nc-heading { font-weight: bold; }
+.control-center .nc-dim { opacity: 0.7; }
+.control-center .nc-read .notification-title { font-weight: normal; }
+.control-center .nc-unavailable { opacity: 0.5; }
 ";
 
 /// The stack child that is the panel itself.
 const PANEL: &str = "panel";
-/// The stack child of the notification center (NC1), a placeholder until its content exists.
+/// The stack child of the notification center (NC1).
 const NOTIFICATIONS: &str = "notifications";
 /// The control panel's width; the notification panel's is `NOTIFICATIONS_WIDTH`.
 const CONTROLS_WIDTH: i32 = 360;
@@ -33,7 +42,7 @@ const CONTROLS_WIDTH: i32 = 360;
 pub struct ControlCenter {
     app: gtk4::Application,
     display: gdk::Display,
-    client: Option<Client>,
+    client: Option<Rc<Client>>,
     layout: Source,
     bus: Rc<Bus>,
     surfaces: RefCell<Vec<Surface>>,
@@ -46,10 +55,18 @@ pub struct ControlCenter {
     focused: Cell<bool>,
     content: gtk4::Box,
     stack: gtk4::Stack,
+    notifications: Rc<notifications::Panel>,
     watches: RefCell<Vec<gtk4::gio::FileMonitor>>,
 }
 
-pub fn start(app: &gtk4::Application, bus: Rc<Bus>, layout: Source) -> Rc<ControlCenter> {
+/// `services` is the runtime the models of athanor-services run on; without it the
+/// notification panel says it is unavailable.
+pub fn start(
+    app: &gtk4::Application,
+    bus: Rc<Bus>,
+    layout: Source,
+    services: Option<(Handle, Buses)>,
+) -> Rc<ControlCenter> {
     let Some(display) = gdk::Display::default() else {
         tracing::error!("athanor-control-center: no display");
         std::process::exit(1);
@@ -68,7 +85,7 @@ pub fn start(app: &gtk4::Application, bus: Rc<Bus>, layout: Source) -> Rc<Contro
         gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
     let client = match Client::connect(&display) {
-        Ok(client) => Some(client),
+        Ok(client) => Some(Rc::new(client)),
         Err(err) => {
             tracing::error!(error = %err, "no compositor client; the panel opens on the first output");
             None
@@ -76,10 +93,8 @@ pub fn start(app: &gtk4::Application, bus: Rc<Bus>, layout: Source) -> Rc<Contro
     };
     let stack = gtk4::Stack::new();
     stack.add_named(&gtk4::Label::new(Some(PANEL)), Some(PANEL));
-    let placeholder = gtk4::Label::new(None);
-    placeholder.set_accessible_role(gtk4::AccessibleRole::Group);
-    placeholder.update_property(&[gtk4::accessible::Property::Label("Notifications")]);
-    stack.add_named(&placeholder, Some(NOTIFICATIONS));
+    let notifications = notifications::new(services, client.clone());
+    stack.add_named(&notifications.root, Some(NOTIFICATIONS));
     for page in Page::ALL {
         stack.add_named(&gtk4::Label::new(Some(page.id())), Some(page.id()));
     }
@@ -102,7 +117,15 @@ pub fn start(app: &gtk4::Application, bus: Rc<Bus>, layout: Source) -> Rc<Contro
         focused: Cell::new(false),
         content,
         stack,
+        notifications,
         watches: RefCell::default(),
+    });
+    // The panel is as tall as its content: it asks again when the content changes.
+    let weak = Rc::downgrade(&center);
+    center.notifications.connect_resized(move || {
+        if let Some(center) = weak.upgrade() {
+            center.relimit();
+        }
     });
     let weak = Rc::downgrade(&center);
     outputs::watch(&display, move |_| {
@@ -148,6 +171,7 @@ impl ControlCenter {
             if self.shown.borrow().as_ref() == Some(&leftover.monitor) {
                 self.shown.replace(None);
                 self.panel.set(None);
+                self.notifications.closed();
                 self.focused.set(false);
                 self.bus.set_open(false);
             }
@@ -188,6 +212,13 @@ impl ControlCenter {
             _ => glib::Propagation::Proceed,
         });
         surface.window.add_controller(keys);
+        // The output's size changes the most the notification panel may take.
+        let weak = Rc::downgrade(self);
+        monitor.connect_notify_local(Some("geometry"), move |_, _| {
+            if let Some(center) = weak.upgrade() {
+                center.relimit();
+            }
+        });
         // The loss of focus closes it too, once the surface has had the keyboard.
         let weak = Rc::downgrade(self);
         let monitor = monitor.clone();
@@ -231,6 +262,13 @@ impl ControlCenter {
         // Both panels share the one surface and the one anchor (the bar's end edge), so
         // switching moves nothing but the size.
         self.content.set_height_request(-1);
+        match panel {
+            Panel::Notifications if self.panel.get() != Some(Panel::Notifications) => {
+                self.notifications.opened()
+            }
+            Panel::Notifications => {}
+            Panel::Controls => self.notifications.closed(),
+        }
         if let (Panel::Notifications, Some(monitor)) = (panel, self.shown.borrow().as_ref()) {
             self.limit_height(monitor);
         }
@@ -240,7 +278,7 @@ impl ControlCenter {
         let windows = self
             .client
             .as_ref()
-            .map(Client::windows)
+            .map(|client| client.windows())
             .unwrap_or_default();
         let surfaces = self.surfaces.borrow();
         let connectors: Vec<Option<String>> = surfaces
@@ -276,13 +314,30 @@ impl ControlCenter {
     }
 
     /// The notification panel is as tall as its content, at most 80% of the output (NC11).
+    /// A minimum height does not cap a natural one, so what exceeds the cap is taken from the
+    /// list, which scrolls. The measure includes the margins, which the request does not.
     fn limit_height(&self, monitor: &gdk::Monitor) {
+        let margins = 2 * GAP;
+        self.notifications.cap_list(0);
+        self.content.set_height_request(-1);
         let natural = self
             .content
-            .measure(gtk4::Orientation::Vertical, NOTIFICATIONS_WIDTH)
-            .1;
-        self.content
-            .set_height_request(notifications_height(natural, monitor.geometry().height()));
+            .measure(gtk4::Orientation::Vertical, NOTIFICATIONS_WIDTH + margins)
+            .1
+            - margins;
+        let height = notifications_height(natural, monitor.geometry().height());
+        self.notifications.cap_list(natural - height);
+        self.content.set_height_request(height);
+    }
+
+    /// Sizes the shown notification panel again, after its content or the output changed.
+    fn relimit(&self) {
+        if self.panel.get() != Some(Panel::Notifications) {
+            return;
+        }
+        if let Some(monitor) = self.shown.borrow().as_ref() {
+            self.limit_height(monitor);
+        }
     }
 
     pub fn hide(&self) {
@@ -290,6 +345,7 @@ impl ControlCenter {
             return;
         };
         self.panel.set(None);
+        self.notifications.closed();
         self.focused.set(false);
         if let Some(surface) = self
             .surfaces

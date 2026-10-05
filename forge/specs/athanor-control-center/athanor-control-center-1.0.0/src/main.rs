@@ -6,6 +6,7 @@
 mod bus;
 mod i18n;
 mod layer_guard;
+mod notifications;
 mod surface;
 mod ui;
 
@@ -123,6 +124,17 @@ fn main() -> glib::ExitCode {
         tracing::error!(error = %err, "cannot confine the control center with Landlock; refusing to run unconfined");
         return glib::ExitCode::FAILURE;
     }
+    // After the confinement, as the bar does: the models run on a thread of their own.
+    let services = match athanor_services::Runtime::start() {
+        Ok(runtime) => {
+            let handle = runtime.handle().clone();
+            Some((handle.clone(), athanor_services::Buses::new(handle)))
+        }
+        Err(err) => {
+            tracing::error!(error = %err, "cannot start the runtime of the models; the notification panel is unavailable");
+            None
+        }
+    };
     i18n::init();
 
     let app = Application::builder().application_id(APP_ID).build();
@@ -133,7 +145,7 @@ fn main() -> glib::ExitCode {
             return;
         }
         let bus = Rc::new(bus::Bus::default());
-        let center = ui::start(app, bus.clone(), layout.clone());
+        let center = ui::start(app, bus.clone(), layout.clone(), services.clone());
         let (shown, toggled) = (Rc::downgrade(&center), Rc::downgrade(&center));
         let owner = bus::own(
             bus,

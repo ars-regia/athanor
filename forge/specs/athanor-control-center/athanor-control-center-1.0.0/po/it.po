@@ -1,0 +1,157 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: athanor-control-center\n"
+"Report-Msgid-Bugs-To: forge@athanor.os\n"
+"Language: it\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: src/notifications/header.rs:65
+msgid "Notifications"
+msgstr "Notifiche"
+
+#: src/notifications/header.rs:69
+msgid "Clear all"
+msgstr "Cancella tutto"
+
+#: src/notifications/header.rs:74
+msgid "Do not disturb"
+msgstr "Non disturbare"
+
+#: src/notifications/header.rs:89
+msgid "Do not disturb options"
+msgstr "Opzioni di Non disturbare"
+
+#: src/notifications/header.rs:106
+msgid "For one hour"
+msgstr "Per un'ora"
+
+#: src/notifications/header.rs:107
+msgid "Until 08:00"
+msgstr "Fino alle 08:00"
+
+#: src/notifications/header.rs:109
+msgid "Edit schedule"
+msgstr "Modifica pianificazione"
+
+#: src/notifications/mod.rs:112
+msgid "No notifications"
+msgstr "Nessuna notifica"
+
+#: src/notifications/mod.rs:113
+msgid "Notifications unavailable"
+msgstr "Notifiche non disponibili"
+
+#: src/notifications/mod.rs:294
+msgid "Other applications"
+msgstr "Altre applicazioni"
+
+#: src/notifications/mod.rs:311
+#, rust-format
+msgid "Options for {app}"
+msgstr "Opzioni per {app}"
+
+#: src/notifications/mod.rs:315
+msgid "Show less"
+msgstr "Mostra meno"
+
+#: src/notifications/mod.rs:317
+#, rust-format
+msgid "Show {n} more"
+msgstr "Mostra altre {n}"
+
+#: src/notifications/mod.rs:346
+#, rust-format
+msgid "Mute {app}? It will send no notification at all."
+msgstr "Silenziare {app}? Non invierà più alcuna notifica."
+
+#: src/notifications/mod.rs:349
+msgid "Cancel"
+msgstr "Annulla"
+
+#: src/notifications/mod.rs:350
+msgid "Mute"
+msgstr "Silenzia"
+
+#: src/notifications/mod.rs:360
+msgid "Mute this application"
+msgstr "Silenzia questa applicazione"
+
+#: src/notifications/mod.rs:367
+msgid "Show in the list only"
+msgstr "Mostra solo nell'elenco"
+
+#: src/notifications/mod.rs:376
+msgid "Notification settings"
+msgstr "Impostazioni delle notifiche"
+
+#: src/notifications/row.rs:81
+msgid "Unknown application"
+msgstr "Applicazione sconosciuta"
+
+#: src/notifications/row.rs:147
+#, rust-format
+msgid "Close {title}"
+msgstr "Chiudi {title}"
+
+#: src/notifications/row.rs:173
+msgid "Show the whole text"
+msgstr "Mostra tutto il testo"
+
+#: src/notifications/row.rs:223 src/notifications/row.rs:224
+msgid "More"
+msgstr "Altro"
+
+#: src/notifications/text.rs:12
+msgid "now"
+msgstr "ora"
+
+#: src/notifications/text.rs:13
+#, rust-format
+msgid "{n} min"
+msgstr "{n} min"
+
+#: src/notifications/text.rs:14
+#, rust-format
+msgid "{n} h"
+msgstr "{n} h"
+
+#: src/notifications/text.rs:17
+msgid "Yesterday"
+msgstr "Ieri"
+
+#: src/notifications/text.rs:27
+msgid "Off"
+msgstr "Disattivato"
+
+#: src/notifications/text.rs:30
+#, rust-format
+msgid "On until {time}"
+msgstr "Attivo fino alle {time}"
+
+#: src/notifications/text.rs:31
+msgid "On"
+msgstr "Attivo"
+
+#: src/notifications/text.rs:34
+msgid "schedule"
+msgstr "pianificazione"
+
+#: src/notifications/text.rs:35
+msgid "fullscreen"
+msgstr "schermo intero"
+
+#: src/notifications/text.rs:36
+msgid "screen sharing"
+msgstr "condivisione dello schermo"
+
+#: src/notifications/text.rs:58
+msgid "Notification center, no unread"
+msgstr "Centro notifiche, nessuna da leggere"
+
+#: src/notifications/text.rs:59
+#, rust-format
+msgid "Notification center, {n} unread"
+msgstr "Centro notifiche, {n} da leggere"

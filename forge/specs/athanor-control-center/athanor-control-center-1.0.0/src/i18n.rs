@@ -1,6 +1,5 @@
 //! The control center's catalog for the life of the process, read by athanor-i18n as the
-//! launcher and the bar do. No catalog ships yet (the pages are placeholders), so it speaks
-//! English; the language still gives the text direction.
+//! launcher and the bar do.
 
 use std::sync::OnceLock;
 
@@ -20,6 +19,20 @@ pub fn init() {
     }
 }
 
+fn catalog() -> &'static Catalog {
+    CATALOG.get_or_init(Catalog::empty)
+}
+
+pub fn tr(msgid: &str) -> String {
+    catalog().tr(msgid).to_string()
+}
+
+/// The translation of `msgid` with `{key}` replaced by `value`. Translators move the
+/// placeholder freely; a value is never part of a message id.
+pub fn tr_with(msgid: &str, key: &str, value: &str) -> String {
+    catalog().tr(msgid).replace(&format!("{{{key}}}"), value)
+}
+
 pub fn is_rtl() -> bool {
-    CATALOG.get_or_init(Catalog::empty).is_rtl()
+    catalog().is_rtl()
 }
