@@ -1135,12 +1135,9 @@ impl Private {
         #[zbus(connection)] conn: &Connection,
     ) -> fdo::Result<()> {
         self.admit(&header, conn, "ClearAll").await?;
-        let cleared = {
-            let mut state = lock(&self.state);
-            let cleared = state.store.clear_all();
-            state.dirty.notify_one();
-            cleared
-        };
+        let cleared = lock(&self.state).store.clear_all();
+        // At once, not coalesced: a crash within two seconds must not bring the rows back (NC3).
+        write_history(&self.state);
         for id in cleared {
             emit_closed(conn, &self.state, id, Reason::Dismissed).await;
         }
@@ -1156,12 +1153,8 @@ impl Private {
     ) -> fdo::Result<()> {
         self.admit(&header, conn, "ClearGroup").await?;
         let identity = identity_of(app)?;
-        let cleared = {
-            let mut state = lock(&self.state);
-            let cleared = state.store.clear_group(&identity);
-            state.dirty.notify_one();
-            cleared
-        };
+        let cleared = lock(&self.state).store.clear_group(&identity);
+        write_history(&self.state);
         for id in cleared {
             emit_closed(conn, &self.state, id, Reason::Dismissed).await;
         }

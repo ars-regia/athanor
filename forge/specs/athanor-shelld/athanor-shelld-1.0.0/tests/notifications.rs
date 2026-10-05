@@ -1265,6 +1265,35 @@ async fn progress_updates_do_not_count_against_the_limit() {
     }
     assert!(last, "thirty progress updates left the budget alone");
 }
+/// Clears with `method` right after a write, inside the coalescing window: the file must
+/// already show it when the call returns.
+async fn clearing_writes_at_once(name: &str, method: &str, body: &(impl serde::Serialize + zvariant::DynamicType)) {
+    let bus = Bus::start(name);
+    let (_daemon, _bar, center, app) = units(&bus, APP_CGROUP).await;
+    let a = public(&app).await;
+    let file = bus.dir.join("state/notifications.json");
+    notify(&a, 0, "one", "", &[], HashMap::new()).await;
+    common::wait_for_file(&file, "\"one\"").await;
+    notify(&a, 0, "two", "", &[], HashMap::new()).await;
+    private(&center)
+        .await
+        .call::<_, _, ()>(method, body)
+        .await
+        .expect(method);
+    let text = fs::read_to_string(&file).expect("history");
+    assert!(!text.contains("\"one\"") && !text.contains("\"two\""), "{text}");
+}
+
+#[tokio::test]
+async fn clear_all_reaches_the_disk_before_it_returns() {
+    clearing_writes_at_once("clear-all-write", "ClearAll", &()).await;
+}
+
+#[tokio::test]
+async fn clear_group_reaches_the_disk_before_it_returns() {
+    clearing_writes_at_once("clear-group-write", "ClearGroup", &("foo",)).await;
+}
+
 
 #[tokio::test]
 async fn another_sender_cannot_close_a_notification_and_learns_nothing() {
