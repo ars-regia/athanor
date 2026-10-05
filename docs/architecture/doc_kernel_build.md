@@ -357,8 +357,12 @@ Ogni PR di bump e ogni cambio in `forge/specs/azoth/**` passa:
    580 compilano con `nvidia.sh` contro il `kernel-devel` appena costruito, o
    pubblicato per l'NVR dei pin quando il kernel è riusato, con la toolchain del
    kernel; ogni `.ko` deve portare il vermagic del kernel e i tipi kCFI. Poi, sui
-   push, `nvidia-kmod.yml`, avviato da Kernel Build a valle della pubblicazione
-   (`workflow_run` vale solo dal branch di default): il job `sign` li firma con la
+   push, il job `orchestrator` di Kernel Build avvia l'Orchestrator sullo stesso
+   commit (`sha`, `force_image`) quando ha pubblicato un kernel nuovo o quando
+   `system/kernel-artifacts.sh` non risponde `ready`; l'Orchestrator chiama il
+   workflow riusabile `nvidia-kmod.yml` quando lo stato è `modules-missing`
+   (`doc_build_ordering.md`, O1-O4). Lì il job `artifacts` risolve il kernel per
+   digest e chiude con una nota se i moduli ci sono già (O5); il job `sign` li firma con la
    chiave dei moduli del progetto e firma una copia con una MOK effimera dal
    profilo Secure Boot; il job `boot` (`boot.sh --mok --insmod`, tutti e quattro
    i casi) arruola quella MOK e nel guest carica il `nvidia.ko` firmato di ogni
@@ -455,8 +459,9 @@ l'unico richiesto dalla protezione del branch. Con prep verde e il check verde
 la PR va in merge da sola; con prep rosso, o con il check rosso, resta aperta
 con il log del gate fallito. È l'unico momento in cui serve una persona, e sa
 già dove guardare. Al merge il push fa partire
-Kernel Build, che pubblica il kernel e alla fine avvia `nvidia-kmod.yml` per
-firma, boot e pubblicazione dei moduli. Il cambio di release Fedora della rootfs
+Kernel Build, che pubblica il kernel e avvia l'Orchestrator: questo chiama
+`nvidia-kmod.yml` per firma, boot e pubblicazione dei moduli e poi costruisce le
+immagini (`doc_build_ordering.md`, O1). Il cambio di release Fedora della rootfs
 (43→44) e il cambio di `KERNEL_CHANNEL` restano PR umane.
 
 **Patch da rinfrescare** (decisione del maintainer, 2026-09-14). Una patch di
@@ -520,8 +525,8 @@ riuso (`build-inputs.py`).
 
 AMD e Intel sono in-tree (`amdgpu`, `radeon`, `i915`, `xe`) con `linux-firmware`
 spacchettato per vendor nell'immagine: nessun lavoro nel kernel oltre a non
-toglierli. NVIDIA, in un workflow proprio (`nvidia-kmod.yml`) che parte dopo il
-kernel:
+toglierli. NVIDIA, nel workflow riusabile `nvidia-kmod.yml`, che l'Orchestrator
+chiama dopo il kernel (`doc_build_ordering.md`, O1):
 
 | Livello         | GPU                              | Meccanismo                                                                                                                                |
 | --------------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
@@ -529,7 +534,10 @@ kernel:
 | `nvidia-open`   | Turing 2018+                     | moduli aperti 610.x compilati nel container Fedora contro `kernel-devel`, clang e kCFI coerenti, firmati con la chiave dei moduli         |
 | `nvidia-legacy` | Maxwell, Pascal, Volta 2014–2018 | ramo 580, stesso meccanismo; la parte RM è il blob gcc di NVIDIA, senza kCFI né return thunk: rischio noto, verificabile solo su hardware |
 
-Pubblicazione `azoth-nvidia:<kernel-nvr>-<driver>`; le immagini
+Pubblicazione `azoth-nvidia:<nvr>-k<digest>-open-<versione>` e
+`azoth-nvidia:<nvr>-k<digest>-legacy-<versione>`, dove `<digest>` sono le prime 12
+cifre esadecimali del digest di `azoth:<nvr>`: un kernel ripubblicato con lo stesso
+NVR prende tag nuovi (`doc_build_ordering.md`, O2). Le immagini
 `athanor-system-nvidia` e `athanor-system-nvidia-legacy` le consumano insieme al firmware e
 allo userspace NVIDIA della stessa versione, bloccati per hash in
 `system/nvidia/locks/` (docs/architecture/doc_system_image.md, S4-S7). L'immagine
@@ -566,8 +574,9 @@ NVIDIA e non dei flag: clang non estende kCFI alle chiamate virtuali né i
 return thunk ai thunk del C++ di DisplayPort in `nvidia-modeset.o`, e il RM
 ha code di funzione irraggiungibili. `nvidia.sh sign` firma con `scripts/sign-file` del
 kernel-devel e l'hash di `CONFIG_MODULE_SIG_HASH`, e rilegge il firmatario con
-`modinfo`. Il workflow `nvidia-kmod.yml`: `build` (matrice dei due rami, runner
-GitHub, kernel-devel dall'immagine pubblicata per l'NVR di `nvr.sh`),
+`modinfo`. Il workflow `nvidia-kmod.yml`: `artifacts` (`system/kernel-artifacts.sh`
+risolve il kernel dei pin e i tag dei moduli; se non mancano, il run finisce lì),
+`build` (matrice dei due rami, runner GitHub, `azoth-devel` per digest),
 `sign` (runner GitHub, environment `signing`: vede solo i `.ko` e la chiave,
 montata in sola lettura per la durata del comando), `boot` (la catena della
 firma end-to-end in QEMU, gate 4 della sezione 7), `publish` (un'immagine

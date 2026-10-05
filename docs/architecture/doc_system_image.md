@@ -14,7 +14,7 @@ On 2026-09-16 the maintainer's desktop switched to `athanor-system:latest`, whic
 - **Why it was hidden until now:** the kernel rejected `nvidia` because of the key, and `nouveau` drove both GPUs.
 - **Why acceptance did not catch it:** the ISO acceptance VM has no GPU.
 
-The base `ghcr.io/hr-mes/ermete-base-nvidia:latest` was built on 2026-07-05 (`org.opencontainers.image.version=latest.20260705`) from `patapem/ermete-base-nvidia`, a repository that no longer resolves.
+The base the image used until S1, `ghcr.io/hr-mes/ermete-base-nvidia:latest`, was built on 2026-07-05 (`org.opencontainers.image.version=latest.20260705`) from `patapem/ermete-base-nvidia`, a repository that no longer resolves.
 
 - **Contents:** 1392 packages. Its `/usr/share/rpm-ostree/treefile.json` is the treefile of Fedora's atomic desktop base.
 - **Additions on top of that base:**
@@ -141,7 +141,7 @@ A mismatch is a build failure with the exact values, never a warning.
 - **CI cost:** three image builds per cycle instead of one. The shared stages are cached layers, so only the GPU layer and the UKI assembly are paid three times.
 - **Flatpak applications** need the NVIDIA GL runtime extension matching the host driver version (`org.freedesktop.Platform.GL.nvidia-<version>`). flatpak installs it when the host driver is present; the hardware check covers it.
 - **Content drift of the base:** the digest pin plus a reviewed bump PR, with the package difference reported in the PR body.
-- **Package sets differ from today.** base-atomic is not identical to `ermete-base-nvidia`. The first implementation task compares the two package sets in CI and lists every package the image loses or gains for review.
+- **Package sets differed from the old base.** base-atomic is not identical to `ermete-base-nvidia`. The first implementation task compared the two package sets in CI and listed every package the image lost or gained for review.
 
 ## 5. Out of scope
 
