@@ -92,6 +92,25 @@ pub struct State {
     player: Player,
     /// NC12: who sends too many.
     rate: RateLimit,
+    /// When the history is pruned, and by which clock.
+    calendar: Calendar,
+}
+
+/// The clock the retention follows: unix time, and how often the history is pruned. A test
+/// drives it; the daemon's is the wall clock, hourly (retention is counted in days).
+#[derive(Clone)]
+pub struct Calendar {
+    pub now: Arc<dyn Fn() -> i64 + Send + Sync>,
+    pub every: std::time::Duration,
+}
+
+impl Default for Calendar {
+    fn default() -> Calendar {
+        Calendar {
+            now: Arc::new(unix_now),
+            every: std::time::Duration::from_secs(3_600),
+        }
+    }
 }
 
 /// What an evaluation of the do-not-disturb state leaves to announce.
@@ -165,9 +184,17 @@ impl State {
             bus_id: String::new(),
             player,
             rate: RateLimit::new(),
+            calendar: Calendar::default(),
         };
         state.evaluate();
         state
+    }
+
+    /// The same state, with the retention following `calendar`.
+    #[must_use]
+    pub fn with_calendar(mut self, calendar: Calendar) -> State {
+        self.calendar = calendar;
+        self
     }
 
     /// Plays the sound for `urgency`, the hinted name first.
@@ -1334,8 +1361,39 @@ pub async fn rules_changed(conn: &Connection, state: &Shared, relative: &Path) {
             .await;
             let settled = lock(state).evaluate();
             settle(conn, state, settled).await;
+            prune_expired(conn, state).await;
         }
         None => {}
+    }
+}
+
+/// Drops what the retention no longer keeps (NC3): the units hear each close, the history is
+/// written. Run when the retention changes and on the calendar's period, so that a desktop
+/// that only suspends keeps it too.
+pub async fn prune_expired(conn: &Connection, state: &Shared) {
+    let pruned = {
+        let mut state = lock(state);
+        let now = (state.calendar.now)();
+        let retention = state.rules.settings().retention;
+        state.store.prune(now, retention)
+    };
+    if pruned.is_empty() {
+        return;
+    }
+    lock(state).dirty.notify_one();
+    for id in pruned {
+        emit_closed(conn, state, id, Reason::Expired).await;
+    }
+}
+
+/// [`prune_expired`] each period of the calendar, the first one a period from now (the start
+/// has pruned already).
+pub async fn prune_periodically(conn: Connection, state: Shared) {
+    let every = lock(&state).calendar.every;
+    let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + every, every);
+    loop {
+        tick.tick().await;
+        prune_expired(&conn, &state).await;
     }
 }
 

@@ -2,6 +2,8 @@ mod common;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use athanor_shelld::sender::{Admitted, Caller};
@@ -775,6 +777,7 @@ async fn a_second_daemon_on_the_same_bus_fails_to_start() {
             proc_root: bus.dir.join("proc"),
             admitted: Admitted::from_proc_root(bus.dir.join("proc")),
             player: athanor_shelld::sound::Player::default(),
+            calendar: athanor_shelld::notifications::Calendar::default(),
         },
     )
     .await;
@@ -1265,35 +1268,6 @@ async fn progress_updates_do_not_count_against_the_limit() {
     }
     assert!(last, "thirty progress updates left the budget alone");
 }
-/// Clears with `method` right after a write, inside the coalescing window: the file must
-/// already show it when the call returns.
-async fn clearing_writes_at_once(name: &str, method: &str, body: &(impl serde::Serialize + zvariant::DynamicType)) {
-    let bus = Bus::start(name);
-    let (_daemon, _bar, center, app) = units(&bus, APP_CGROUP).await;
-    let a = public(&app).await;
-    let file = bus.dir.join("state/notifications.json");
-    notify(&a, 0, "one", "", &[], HashMap::new()).await;
-    common::wait_for_file(&file, "\"one\"").await;
-    notify(&a, 0, "two", "", &[], HashMap::new()).await;
-    private(&center)
-        .await
-        .call::<_, _, ()>(method, body)
-        .await
-        .expect(method);
-    let text = fs::read_to_string(&file).expect("history");
-    assert!(!text.contains("\"one\"") && !text.contains("\"two\""), "{text}");
-}
-
-#[tokio::test]
-async fn clear_all_reaches_the_disk_before_it_returns() {
-    clearing_writes_at_once("clear-all-write", "ClearAll", &()).await;
-}
-
-#[tokio::test]
-async fn clear_group_reaches_the_disk_before_it_returns() {
-    clearing_writes_at_once("clear-group-write", "ClearGroup", &("foo",)).await;
-}
-
 
 #[tokio::test]
 async fn another_sender_cannot_close_a_notification_and_learns_nothing() {
@@ -1325,3 +1299,105 @@ async fn another_sender_cannot_close_a_notification_and_learns_nothing() {
         .expect("A closes its own");
 }
 
+/// Clears with `method` right after a write, inside the coalescing window: the file must
+/// already show it when the call returns.
+async fn clearing_writes_at_once(name: &str, method: &str, body: &(impl serde::Serialize + zvariant::DynamicType)) {
+    let bus = Bus::start(name);
+    let (_daemon, _bar, center, app) = units(&bus, APP_CGROUP).await;
+    let a = public(&app).await;
+    let file = bus.dir.join("state/notifications.json");
+    notify(&a, 0, "one", "", &[], HashMap::new()).await;
+    common::wait_for_file(&file, "\"one\"").await;
+    notify(&a, 0, "two", "", &[], HashMap::new()).await;
+    private(&center)
+        .await
+        .call::<_, _, ()>(method, body)
+        .await
+        .expect(method);
+    let text = fs::read_to_string(&file).expect("history");
+    assert!(!text.contains("\"one\"") && !text.contains("\"two\""), "{text}");
+}
+
+#[tokio::test]
+async fn clear_all_reaches_the_disk_before_it_returns() {
+    clearing_writes_at_once("clear-all-write", "ClearAll", &()).await;
+}
+
+#[tokio::test]
+async fn clear_group_reaches_the_disk_before_it_returns() {
+    clearing_writes_at_once("clear-group-write", "ClearGroup", &("foo",)).await;
+}
+
+/// A daemon whose retention follows a clock the test sets: the offset, in seconds, from now.
+async fn retained(
+    bus: &Bus,
+    every: Duration,
+) -> (Connection, Connection, Connection, Arc<AtomicI64>) {
+    let (bar, center, app) = (bus.client().await, bus.client().await, bus.client().await);
+    let offset = Arc::new(AtomicI64::new(0));
+    let clock = Arc::clone(&offset);
+    let now = Arc::new(move || {
+        let real = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time")
+            .as_secs() as i64;
+        real + clock.load(Ordering::Relaxed)
+    });
+    let daemon = bus
+        .daemon_timed(
+            APP_CGROUP,
+            &[(&bar, Caller::Bar), (&center, Caller::ControlCenter)],
+            athanor_shelld::notifications::Calendar { now, every },
+        )
+        .await;
+    let _ = &app;
+    (daemon, center, app, offset)
+}
+
+async fn listed(center: &Connection) -> Vec<u32> {
+    let all: Vec<WireNotification> = private(center).await.call("List", &()).await.expect("List");
+    all.iter().map(|n| n.id).collect()
+}
+
+#[tokio::test]
+async fn a_change_of_the_retention_prunes_at_once() {
+    let bus = Bus::start("retention-setting");
+    let (_daemon, center, app, offset) = retained(&bus, Duration::from_secs(3_600)).await;
+    let id = notify(&public(&app).await, 0, "old", "", &[], HashMap::new()).await;
+    offset.store(2 * 86_400, Ordering::Relaxed);
+    assert_eq!(listed(&center).await, [id], "seven days keep two-day-old rows");
+    let file = bus.dir.join("config/notifications.conf");
+    // The watch is armed a moment after the daemon starts: write until it has seen one.
+    for _ in 0..50 {
+        fs::write(&file, "retention=1\n").expect("settings");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        if listed(&center).await.is_empty() {
+            return;
+        }
+    }
+    panic!("the new retention did not prune");
+}
+
+#[tokio::test]
+async fn time_passing_prunes_without_a_restart() {
+    let bus = Bus::start("retention-timer");
+    let (_daemon, center, app, offset) = retained(&bus, Duration::from_millis(50)).await;
+    let public = public(&app).await;
+    let mut closed = public
+        .receive_signal("NotificationClosed")
+        .await
+        .expect("subscribe");
+    let id = notify(&public, 0, "old", "", &[], HashMap::new()).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(listed(&center).await, [id], "nothing is old yet");
+    offset.store(8 * 86_400, Ordering::Relaxed);
+    let (gone, _): (u32, u32) = tokio::time::timeout(Duration::from_secs(5), closed.next())
+        .await
+        .expect("closed in time")
+        .expect("signal")
+        .body()
+        .deserialize()
+        .expect("args");
+    assert_eq!(gone, id);
+    assert!(listed(&center).await.is_empty());
+}

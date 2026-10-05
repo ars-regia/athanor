@@ -9,6 +9,7 @@ use std::process::{Child, Command, Stdio};
 use std::{env, fs, process};
 
 use athanor_shelld::sender::{Admitted, Caller};
+use athanor_shelld::notifications::Calendar;
 use athanor_shelld::server::{self, Config};
 use athanor_shelld::sound::Player;
 use zbus::connection::Builder;
@@ -86,6 +87,7 @@ impl Bus {
                 admitted: Admitted::from_proc_root(&proc_root),
                 proc_root,
                 player: Player::default(),
+                calendar: Calendar::default(),
             },
         )
         .await
@@ -108,6 +110,7 @@ impl Bus {
                 admitted: Admitted::from_proc_root(&proc_root),
                 proc_root,
                 player,
+                calendar: Calendar::default(),
             },
         )
         .await
@@ -117,6 +120,16 @@ impl Bus {
 
     /// A daemon that admits `callers` by unique name and sees every sender in `cgroup`.
     pub async fn daemon_for(&self, cgroup: &str, callers: &[(&Connection, Caller)]) -> Connection {
+        self.daemon_timed(cgroup, callers, Calendar::default()).await
+    }
+
+    /// `daemon_for`, with the retention following `calendar`.
+    pub async fn daemon_timed(
+        &self,
+        cgroup: &str,
+        callers: &[(&Connection, Caller)],
+        calendar: Calendar,
+    ) -> Connection {
         let proc_root = fake_proc(&self.dir, cgroup);
         let names: HashMap<String, Caller> = callers
             .iter()
@@ -139,6 +152,7 @@ impl Bus {
                 proc_root,
                 admitted: Admitted::from_fn(move |name, _pid| names.get(name).copied()),
                 player: Player::default(),
+                calendar,
             },
         )
         .await

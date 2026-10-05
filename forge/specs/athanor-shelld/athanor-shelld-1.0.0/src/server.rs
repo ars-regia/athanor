@@ -12,7 +12,7 @@ use zbus::fdo::RequestNameFlags;
 use zbus::Connection;
 
 use crate::battery::LowBattery;
-use crate::notifications::{Notifications, Private, Shared, State};
+use crate::notifications::{Calendar, Notifications, Private, Shared, State};
 use crate::sender::Admitted;
 use crate::sound::Player;
 use crate::watcher::{self, Watcher};
@@ -35,6 +35,8 @@ pub struct Config {
     pub admitted: Admitted,
     /// Finds and plays the sound of a notification.
     pub player: Player,
+    /// The clock the retention follows.
+    pub calendar: Calendar,
 }
 
 /// What the daemon keeps running: the connection, and the state to write on the way out.
@@ -64,7 +66,8 @@ pub async fn start(builder: Builder<'_>, config: Config) -> zbus::Result<Daemon>
         wake_tx,
         Arc::clone(&dirty),
         config.player,
-    )));
+    )
+    .with_calendar(config.calendar)));
     let conn = builder
         .serve_at(
             NOTIFICATIONS_PATH,
@@ -88,6 +91,7 @@ pub async fn start(builder: Builder<'_>, config: Config) -> zbus::Result<Daemon>
     spawn_clock(&conn, &state, wake_rx);
     spawn_battery(&conn, &state);
     spawn_rules(&conn, &state, config.config_dir);
+    tokio::spawn(notifications::prune_periodically(conn.clone(), Arc::clone(&state)));
     tokio::spawn(notifications::history_writer(Arc::clone(&state), dirty));
     for name in [NOTIFICATIONS_NAME, WATCHER_NAME] {
         conn.request_name_with_flags(name, RequestNameFlags::DoNotQueue.into())
