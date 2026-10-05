@@ -487,7 +487,7 @@ impl Main {
         root.add_css_class("control-center-panel");
         // A group carries a label; a plain box does not.
         root.set_accessible_role(gtk4::AccessibleRole::Group);
-        a11y::name(&root, &tr("Control center"));
+        a11y::label(&root, &tr("Control center"));
         let tiles_grid = gtk4::Grid::new();
         tiles_grid.set_row_spacing(8);
         tiles_grid.set_column_spacing(8);

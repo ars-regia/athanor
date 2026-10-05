@@ -47,7 +47,7 @@ impl Footer {
             let text = tr_with("{percent}%", "percent", &format!("{:.0}", battery.percent));
             self.icon.set_icon_name(Some(battery::icon(battery)));
             self.level.set_text(&text);
-            a11y::name(&self.battery, &tr_with("Battery {level}", "level", &text));
+            a11y::label(&self.battery, &tr_with("Battery {level}", "level", &text));
         }
     }
 }

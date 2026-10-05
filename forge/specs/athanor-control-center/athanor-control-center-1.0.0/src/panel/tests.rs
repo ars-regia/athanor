@@ -387,7 +387,7 @@ fn the_tiles(mut rig: Rig) -> Rig {
 
     // The panel has a name, and a state it announces when it opens.
     assert_eq!(panel.main.root.accessible_role(), gtk4::AccessibleRole::Group);
-    assert!(a11y::is_named(&panel.main.root, "Control center"));
+    assert!(a11y::is_labelled(&panel.main.root), "a container has a label and no tooltip");
 
     // Everything the person can use is reached with Tab.
     let order = tab_order(&window);

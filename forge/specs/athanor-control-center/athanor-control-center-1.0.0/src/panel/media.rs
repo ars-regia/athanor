@@ -55,7 +55,7 @@ impl MediaView {
         art.set_valign(gtk4::Align::Start);
         art.add_css_class("control-center-art");
         // The picture is decoration: the track's text says what plays.
-        a11y::name(&art, &tr("Cover"));
+        a11y::label(&art, &tr("Cover"));
         let title = gtk4::Label::new(None);
         title.set_xalign(0.0);
         title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
@@ -89,7 +89,7 @@ impl MediaView {
         let root = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
         root.add_css_class("control-center-media");
         root.set_accessible_role(gtk4::AccessibleRole::Group);
-        a11y::name(&root, &tr("Media"));
+        a11y::label(&root, &tr("Media"));
         root.append(&top);
         root.append(&seek);
         root.append(&chooser);
