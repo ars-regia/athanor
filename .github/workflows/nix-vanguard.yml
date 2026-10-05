@@ -2,9 +2,9 @@ name: Athanor Nix Vanguard (Phase 3)
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main", "iso-v0"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main", "iso-v0"]
 
 jobs:
   nix-build:

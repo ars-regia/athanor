@@ -2,9 +2,13 @@ name: Rust Security & FFI Audit
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, iso-v0, develop]
   pull_request:
-    branches: [main, develop]
+    branches: [main, iso-v0, develop]
+  # A new advisory against an unchanged lockfile shows up only on a run: weekly, as the
+  # freshness target of docs/architecture/doc_update_trust.md (D1) asks.
+  schedule:
+    - cron: "30 4 * * 1"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
