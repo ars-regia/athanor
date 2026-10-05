@@ -54,6 +54,10 @@ pub struct Panel {
     /// What is typed in each reply entry, kept while the list is drawn again (NC9). It is the
     /// entry's own text and goes nowhere else; it is dropped with its row.
     drafts: RefCell<HashMap<u32, String>>,
+    /// The replies sent and not yet known to have failed: a refusal puts the text back.
+    unsent: RefCell<HashMap<u32, String>>,
+    /// Rows whose last reply the daemon refused.
+    failed: RefCell<HashSet<u32>>,
     /// The ids already asked to be marked read since the panel opened.
     asked: RefCell<HashSet<u32>>,
     shown: Cell<bool>,
@@ -152,6 +156,8 @@ impl Panel {
             open_drawers: RefCell::default(),
             listed: RefCell::default(),
             drafts: RefCell::default(),
+            unsent: RefCell::default(),
+            failed: RefCell::default(),
             asked: RefCell::default(),
             shown: Cell::new(false),
             resized: RefCell::default(),
@@ -205,6 +211,19 @@ impl Panel {
         self.drafts.borrow().get(&id).cloned()
     }
 
+    /// Whether the daemon refused the last reply of row `id`.
+    pub(super) fn reply_failed(&self, id: u32) -> bool {
+        self.failed.borrow().contains(&id)
+    }
+
+    /// Sends a reply and keeps its text until the daemon has had its say: a refusal (the
+    /// application left) brings it back into the entry instead of losing it.
+    pub(super) fn send_reply(&self, id: u32, text: String) {
+        self.failed.borrow_mut().remove(&id);
+        self.unsent.borrow_mut().insert(id, text.clone());
+        self.send(NotificationsCommand::Reply { id, text });
+    }
+
     pub(super) fn set_draft(&self, id: u32, text: &str) {
         let mut drafts = self.drafts.borrow_mut();
         if text.is_empty() {
@@ -251,9 +270,17 @@ impl Panel {
             state.available,
             state.entries.iter().any(|n| !n.transient),
         );
-        self.drafts
-            .borrow_mut()
-            .retain(|id, _| state.entries.iter().any(|n| n.id == *id));
+        let listed = |id: &u32| state.entries.iter().any(|n| n.id == *id);
+        self.drafts.borrow_mut().retain(|id, _| listed(id));
+        self.failed.borrow_mut().retain(listed);
+        if state.refused != self.state.borrow().refused {
+            let mut unsent = self.unsent.borrow_mut();
+            for (id, text) in unsent.drain().filter(|(id, _)| listed(id)) {
+                self.drafts.borrow_mut().insert(id, text);
+                self.failed.borrow_mut().insert(id);
+            }
+        }
+        self.unsent.borrow_mut().retain(|id, _| listed(id));
         self.state.replace(state);
         if self.shown.get() {
             self.render();

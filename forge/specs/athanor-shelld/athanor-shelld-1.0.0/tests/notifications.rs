@@ -973,6 +973,15 @@ async fn a_notification_plays_the_themes_sound_and_never_the_sound_file_it_names
     );
 }
 
+fn assert_invalid_args(result: zbus::Result<()>, why: &str) {
+    match result {
+        Err(zbus::Error::MethodError(name, _, _)) => {
+            assert_eq!(name.as_str(), "org.freedesktop.DBus.Error.InvalidArgs", "{why}");
+        }
+        other => panic!("{why}: expected InvalidArgs, got {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn a_reply_reaches_the_sending_application_only_and_is_never_kept() {
     let bus = Bus::start("reply");
@@ -992,12 +1001,13 @@ async fn a_reply_reaches_the_sending_application_only_and_is_never_kept() {
         .await
         .expect("match rule");
     let plain = notify(&app_public, 0, "plain", "", &[], HashMap::new()).await;
-    assert!(
-        center_private
-            .call::<_, _, ()>("Reply", &(plain, "x"))
-            .await
-            .is_err(),
-        "no inline-reply action declared"
+    assert_invalid_args(
+        center_private.call::<_, _, ()>("Reply", &(plain, "x")).await,
+        "no inline-reply action declared",
+    );
+    assert_invalid_args(
+        center_private.call::<_, _, ()>("Reply", &(9999u32, "x")).await,
+        "no such notification",
     );
     let id = notify(
         &app_public,
@@ -1024,7 +1034,8 @@ async fn a_reply_reaches_the_sending_application_only_and_is_never_kept() {
     // A resident notification stays; a closing one is announced to everyone, so the
     // eavesdropper hears nothing before it.
     let history = bus.dir.join("state/notifications.json");
-    common::wait_for_file(&history, "chat").await;
+    let listed: Vec<WireNotification> = center_private.call("List", &()).await.expect("List");
+    assert!(listed.iter().any(|n| n.id == id), "a resident notification stays after a reply");
     let notice = notify(&app_public, 0, "t", "", &[], HashMap::new()).await;
     center_private
         .call::<_, _, ()>("Close", &(notice, 2u32))
@@ -1075,4 +1086,93 @@ async fn a_replace_that_changes_only_the_value_does_not_pop_up_or_play() {
     let done: WireNotification = replaced.next().await.expect("Replaced").body().deserialize().expect("wire");
     assert!(done.popup, "a changed text pops up again");
     assert_eq!(played(&log, 2).await.lines().count(), 2);
+}
+
+#[tokio::test]
+async fn a_reply_closes_a_notification_that_is_not_resident_and_fails_when_the_sender_left() {
+    let bus = Bus::start("reply-outcomes");
+    let (_daemon, _bar, center, app) = units(&bus, APP_CGROUP).await;
+    let (app_public, center_private) = (public(&app).await, private(&center).await);
+    let mut closed = app_public
+        .receive_signal("NotificationClosed")
+        .await
+        .expect("subscribe");
+    let id = notify(&app_public, 0, "chat", "", &["inline-reply", "Answer"], HashMap::new()).await;
+    center_private
+        .call::<_, _, ()>("Reply", &(id, "hi"))
+        .await
+        .expect("Reply");
+    let (got, reason): (u32, u32) = closed
+        .next()
+        .await
+        .expect("NotificationClosed")
+        .body()
+        .deserialize()
+        .expect("args");
+    assert_eq!((got, reason), (id, 2), "dismissed by the reply");
+
+    let leaver = bus.client().await;
+    let kept = notify(
+        &public(&leaver).await,
+        0,
+        "gone",
+        "",
+        &["inline-reply", "Answer"],
+        HashMap::from([("resident", Value::Bool(true))]),
+    )
+    .await;
+    drop(leaver);
+    // The daemon forgets the sender on NameOwnerChanged: ask until it has.
+    let mut outcome = Ok(());
+    for _ in 0..50 {
+        outcome = center_private.call::<_, _, ()>("Reply", &(kept, "late")).await;
+        if outcome.is_err() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_invalid_args(outcome, "the sender is gone");
+}
+
+#[tokio::test]
+async fn only_the_sending_application_replaces_a_notification() {
+    let bus = Bus::start("replace-owner");
+    let (_daemon, _bar, _center, app) = units(&bus, APP_CGROUP).await;
+    let second = bus.client().await;
+    let (a, b) = (public(&app).await, public(&second).await);
+    let id = notify(&a, 0, "mine", "", &["inline-reply", "Answer"], HashMap::new()).await;
+    assert_eq!(
+        notify(&b, id, "mine again", "", &[], HashMap::new()).await,
+        id,
+        "the same application from a new connection still replaces"
+    );
+    // Unidentified senders are told apart by their connection: B cannot take A's row.
+    let other = Bus::start("replace-owner-other");
+    let (_daemon, _bar, center, app) = units(&other, SESSION_CGROUP).await;
+    let second = other.client().await;
+    let (a, b) = (public(&app).await, public(&second).await);
+    let mine = notify(&a, 0, "mine", "", &["inline-reply", "Answer"], HashMap::new()).await;
+    let theirs = notify(&b, mine, "taken", "", &[], HashMap::new()).await;
+    assert_ne!(theirs, mine);
+    let listed: Vec<WireNotification> = private(&center).await.call("List", &()).await.expect("List");
+    let held = listed.iter().find(|n| n.id == mine).expect("A's row stays");
+    assert_eq!((held.summary.as_str(), held.reply), ("mine", true));
+}
+
+#[tokio::test]
+async fn a_value_only_replace_keeps_the_read_state() {
+    let bus = Bus::start("progress-read");
+    let (_daemon, _bar, center, app) = units(&bus, APP_CGROUP).await;
+    let (public, private) = (public(&app).await, private(&center).await);
+    private
+        .call::<_, _, Vec<WireNotification>>("List", &())
+        .await
+        .expect("List");
+    let mut replaced = private.receive_signal("Replaced").await.expect("subscribe");
+    let with = |value: i32| HashMap::from([("value", Value::I32(value))]);
+    let id = notify(&public, 0, "copy", "", &[], with(10)).await;
+    private.call::<_, _, ()>("MarkRead", &(vec![id],)).await.expect("MarkRead");
+    notify(&public, id, "copy", "", &[], with(20)).await;
+    let update: WireNotification = replaced.next().await.expect("Replaced").body().deserialize().expect("wire");
+    assert_eq!((update.value, update.read), (20, true));
 }

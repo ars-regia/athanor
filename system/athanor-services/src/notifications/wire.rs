@@ -37,7 +37,8 @@ pub struct WireNotification {
     pub timeout_ms: u32,
     /// `u32::MAX` while the popup waits for the user, 0 once it has ended.
     pub popup_ms_left: u32,
-    /// The notification is to be shown as a popup.
+    /// This arrival's decision: the notification is to be shown as a popup now. A replace
+    /// that changes only `value` reports false while the store keeps the held popup state.
     pub popup: bool,
     /// Progress, 0 to 100; -1 for none.
     pub value: i32,

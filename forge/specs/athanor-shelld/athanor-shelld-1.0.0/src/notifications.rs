@@ -302,35 +302,39 @@ impl State {
         }
         content.timeout_ms = decision.timeout_ms;
         let urgency = content.urgency;
-        let mut now = self.now_ms();
-        let (mut popup, mut sound_off) = (decision.popup, false);
+        let (now, popup) = (self.now_ms(), decision.popup);
         // A replace that changes only the progress (NC9) updates the notification in place:
         // the popup keeps what it had and nothing sounds.
-        let progress_only = replaces_id != 0
-            && self
-                .store
-                .get(replaces_id)
-                .filter(|held| progress_only(&held.content, &content))
-                .map(|held| {
-                    now = held.arrived_ms;
-                    popup = held.popup;
-                })
-                .is_some();
-        if progress_only {
-            sound_off = true;
-        } else if self.effective.on && rule.popups && !decision.popup {
+        let in_place = self
+            .store
+            .replaceable(replaces_id, &identity, &sender)
+            .filter(|held| progress_only(&held.content, &content))
+            .is_some();
+        if !in_place && self.effective.on && rule.popups && !decision.popup {
             self.dnd.missed_one();
         }
-        let outcome = self
-            .store
-            .notify(content, replaces_id, now, unix_now(), identity, sender, popup);
-        if decision.sound && !sound_off {
+        let outcome = if in_place {
+            // Nothing but the progress changed: the row, its time, read state and popup stay.
+            let notification = self.store.set_value(replaces_id, content.value);
+            notification.map(|notification| Outcome {
+                notification,
+                replaced: true,
+                evicted: Vec::new(),
+            })
+        } else {
+            None
+        };
+        let outcome = outcome.unwrap_or_else(|| {
+            self.store
+                .notify(content, replaces_id, now, unix_now(), identity, sender, popup)
+        });
+        if decision.sound && !in_place {
             self.sound_of(urgency, sound.name.as_deref());
         }
         self.dirty.notify_one();
         let mut wire = from_notification(&outcome.notification, self.now_ms());
-        if progress_only {
-            // The decision recorded for this arrival: no new popup.
+        if in_place {
+            // This arrival's decision: no new popup, whatever the held one is.
             wire.popup = false;
         }
         Arrival::Kept(Box::new((outcome, wire)))

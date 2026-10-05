@@ -47,7 +47,7 @@ pub enum Visual {
 
 /// What an inline reply (NC9) shows: the entry's placeholder, its button's text and icon
 /// name. The reply's own text is never held.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reply {
     pub placeholder: String,
     pub submit_text: String,
@@ -124,7 +124,8 @@ impl Store {
         sender: String,
         popup: bool,
     ) -> Outcome {
-        let replaced = replaces_id != 0 && self.remove(replaces_id).is_some();
+        let replaced = self.replaceable(replaces_id, &identity, &sender).is_some()
+            && self.remove(replaces_id).is_some();
         let id = if replaced {
             replaces_id
         } else {
@@ -220,6 +221,28 @@ impl Store {
     #[must_use]
     pub fn get(&self, id: u32) -> Option<&Notification> {
         self.held.iter().find(|held| held.id == id)
+    }
+
+    /// Changes only the progress of a held notification (NC9): it keeps its place, its time,
+    /// its read state and its popup.
+    pub fn set_value(&mut self, id: u32, value: Option<u8>) -> Option<Notification> {
+        let held = self.held.iter_mut().find(|held| held.id == id)?;
+        held.content.value = value;
+        Some(held.clone())
+    }
+
+    /// The held notification `replaces_id` names, if `identity` sent it: a replace is the
+    /// sender's own (else one application could take over another's reply). The application
+    /// is the cgroup's, so a new process of it may replace; an unidentified sender is told
+    /// apart by its connection.
+    #[must_use]
+    pub fn replaceable(&self, replaces_id: u32, identity: &Identity, sender: &str) -> Option<&Notification> {
+        if replaces_id == 0 {
+            return None;
+        }
+        self.get(replaces_id).filter(|held| {
+            held.identity == *identity && (*identity != Identity::Other || held.sender == sender)
+        })
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Notification> {
@@ -365,6 +388,63 @@ pub(crate) mod tests {
         );
         assert!(!unknown.replaced);
         assert_eq!(unknown.notification.id, 3);
+    }
+
+    #[test]
+    fn only_the_same_application_replaces_a_notification() {
+        let (a, b) = (Identity::App("a".into()), Identity::App("b".into()));
+        let mut store = Store::new();
+        let put = |store: &mut Store, replaces, identity: &Identity, sender: &str| {
+            store.notify(
+                content("x", Urgency::Normal, 5000),
+                replaces,
+                0,
+                0,
+                identity.clone(),
+                sender.into(),
+                true,
+            )
+        };
+        let mine = put(&mut store, 0, &a, ":1.1").notification.id;
+        // The same application from a new connection replaces; another application does not.
+        let again = put(&mut store, mine, &a, ":1.9");
+        assert!(again.replaced && again.notification.id == mine);
+        let stolen = put(&mut store, mine, &b, ":1.2");
+        assert!(!stolen.replaced && stolen.notification.id != mine);
+        assert_eq!(store.get(mine).map(|n| n.sender.as_str()), Some(":1.9"));
+        // Unidentified senders are told apart by their connection.
+        let other = put(&mut store, 0, &Identity::Other, ":1.3").notification.id;
+        assert!(!put(&mut store, other, &Identity::Other, ":1.4").replaced);
+        assert!(put(&mut store, other, &Identity::Other, ":1.3").replaced);
+    }
+
+    #[test]
+    fn a_new_value_changes_the_notification_in_place() {
+        let mut store = Store::new();
+        let mut ids = Vec::new();
+        for n in 0..3 {
+            ids.push(
+                store
+                    .notify(
+                        content("p", Urgency::Normal, 5000),
+                        0,
+                        7 + n,
+                        100,
+                        Identity::Other,
+                        String::new(),
+                        true,
+                    )
+                    .notification
+                    .id,
+            );
+        }
+        store.mark_read(&[ids[0]]);
+        let updated = store.set_value(ids[0], Some(60)).expect("held");
+        assert_eq!(updated.content.value, Some(60));
+        assert!(updated.read && updated.popup);
+        assert_eq!((updated.arrived_ms, updated.time), (7, 100));
+        assert_eq!(store.iter().map(|n| n.id).collect::<Vec<_>>(), ids);
+        assert!(store.set_value(999, Some(1)).is_none());
     }
 
     #[test]

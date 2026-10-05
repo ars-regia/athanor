@@ -387,6 +387,10 @@ fn reply_row(panel: &Rc<Panel>, n: &WireNotification) -> gtk4::Box {
     if let Some(draft) = panel.draft(id) {
         entry.set_text(&draft);
     }
+    if panel.reply_failed(id) {
+        // The application did not take the reply: the text is back, marked.
+        entry.add_css_class("error");
+    }
     let weak = Rc::downgrade(panel);
     entry.connect_changed({
         let weak = weak.clone();
@@ -425,7 +429,7 @@ fn reply_row(panel: &Rc<Panel>, n: &WireNotification) -> gtk4::Box {
                 return;
             }
             entry.set_text("");
-            panel.send(NotificationsCommand::Reply { id, text: reply });
+            panel.send_reply(id, reply);
         }
     };
     let on_enter = submit.clone();
