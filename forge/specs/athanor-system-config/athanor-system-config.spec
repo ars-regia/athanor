@@ -23,7 +23,6 @@ Requires: xdg-desktop-portal-athanor
 Recommends: athanor-sysmon-ebpf athanor-cloud-rs
 Requires: usbguard bolt
 
-Requires:       bcachefs-tools
 %description
 Provides athanor-system-config for Athanor OS.
 

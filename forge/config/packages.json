@@ -92,7 +92,6 @@
     "nix-daemon",
     "busybox",
     "brightnessctl",
-    "bcachefs-tools",
     "dbus-tools",
     "dconf",
     "distribution-gpg-keys",
