@@ -242,7 +242,7 @@ Each runs before the plan it gates and produces an answer, not code we keep.
 - **The Background portal has no backend today** (SW4). Until one ships, Software cannot list what runs in the background right now, and says so.
 - **Two snapshot timers are enabled,** `athanor-timewarp.timer` and `athanor-backup-hourly.timer` (`80-athanor-system.preset:9-10`), and the second fails by construction (section 1.2). Open question 2 must name one "Backup" feature, not two.
 - **Scope.** Four packages for one maintainer. The brake is the same as the shell's: each package ships alone and enabled by hand, and `cosmic-store` stays until SWa passes SH1's rule.
-- **Archives are parsed unconfined while Nautilus is the interim file manager.** It extracts through libarchive in its own process, with all of the user's rights (decision 7); the risk ends when Athanor's file manager ships.
+- **Archives are parsed unconfined while Nautilus is the interim file manager.** It extracts through libarchive in its own process, with all of the user's rights (decision 7); the risk would end if Athanor's file manager replaced Nautilus after 1.0, which is intended, pending the maintainer (`doc_files.md` section 7).
 - **A new file manager can lose data.** A move across filesystems, a copy interrupted halfway and a name conflict are where file managers lose files; `doc_files.md` makes each an acceptance case before the file manager replaces Nautilus.
 - **GNOME Disks is GTK3** while it is the interim disk utility: it ignores the accent and looks unlike the other defaults (decision 7).
 - **A disk utility destroys data by design.** Formatting the wrong disk cannot be undone; `doc_disks.md` makes the choice of the target disk and its confirmation acceptance cases, tested on virtual disks, before the utility replaces GNOME Disks.
@@ -377,7 +377,7 @@ Maintainer decisions A2-14, A2-15 and A2-24 (#159), from specification audit 2 o
 
 ### 9.1 Disks: GNOME Disks for good
 
-The Disks row of decision 7 now reads: **GNOME Disks**, Fedora RPM `gnome-disk-utility`, replacing nothing. Athanor does not write its own disk utility (`doc_disks.md` section 7); GParted stays out because its whole interface runs as root through `pkexec` (#159; maintainer decision A2-16, #155).
+The Disks row of decision 7 now reads: **GNOME Disks**, Fedora RPM `gnome-disk-utility`, replacing nothing. Athanor does not write its own disk utility (`doc_disks.md` section 7); GParted stays out because its whole interface runs as root through `pkexec` (maintainer decision A2-16 (#155); #159 repeats it).
 
 - GNOME Disks 46.1 (GTK3 with libhandy) remains a **declared exception** to the third and fifth criteria until the GTK4 port is released and reaches Fedora. Upstream on 2026-10-06: tag `51.beta` (2026-07-30), no `51.0`, work item 505 open (`https://gitlab.gnome.org/GNOME/gnome-disk-utility/-/work_items/505`). The GTK4 release with GNOME 52 is audit 2's estimate.
 - **Channel.** As decision 7 sets for every RPM default, GNOME Disks ships as a `Requires` of `athanor-desktop-ui`, beside `nautilus`, `ptyxis` and `gnome-text-editor`; `packages.json` gains nothing. Today nothing requires it and the base image does not carry it; the image change lands with PR #169.
