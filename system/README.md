@@ -1,7 +1,7 @@
 <div align="center">
   <h1>Athanor OS — System Services Architecture & OCI Layering Strategy</h1>
   <p><b>An immutable, cloud-native, rolling-release desktop operating system runtime engine.</b></p>
-  <p>📚 <b><a href="../docs/architecture/doc_kernel_layer.md">Kernel Layer & Boot</a></b> | <b><a href="../docs/architecture/doc_core_daemons.md">Core Daemons & Security</a></b> | <b><a href="ARCHITECTURE.md">System Architecture</a></b></p>
+  <p>📚 <b><a href="../docs/architecture/doc_kernel_profile.md">Kernel and Platform Profile</a></b> | <b><a href="../docs/architecture/doc_core_daemons.md">Core Daemons & Security</a></b> | <b><a href="../docs/architecture/doc_system_image.md">System Image</a></b></p>
 </div>
 
 ---

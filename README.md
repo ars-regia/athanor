@@ -20,18 +20,14 @@
 
 ### 📚 Deep-Dive Technical Documentation
 Explore the detailed architectural specifications (generated and maintained by our AI swarm):
-- [**Kernel Layer & Boot Sequence**](docs/architecture/doc_kernel_layer.md)
 - [**Core Daemons, Security & IPC**](docs/architecture/doc_core_daemons.md)
 - [**Desktop Shell: Direction, Layout Model, Stage 1**](docs/architecture/doc_shell.md)
-- [**Athanor Cloud Mesh & Sync**](docs/architecture/doc_cloud_mesh.md)
 - [**Build System & CI/CD Pipeline**](docs/architecture/doc_build_system.md)
 - [**Athanor OS v3.0 Singularity Architecture**](docs/architecture/athanor_singularity_architecture_v3.md)
 - [**System Subsystem Architecture**](system/README.md)
 
 ### Quick Chapters
 1. [The Athanor Paradigm: Beyond Big-Tech](#1-the-athanor-paradigm-beyond-big-tech)
-## Architecture
-For the full system architecture, please see the [Architecture Document](system/ARCHITECTURE.md).
 
 
 ---

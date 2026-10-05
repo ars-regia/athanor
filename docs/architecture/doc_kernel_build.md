@@ -4,10 +4,10 @@ Stato: **approvata il 2026-09-03** (serie `stable` 7.x, `-O2` dal 2026-09-05, de
 come OCI separato con retention di due versioni; dal 2026-09-04 Rust acceso,
 ThinLTO e `RANDSTRUCT` spenti, sezione 13). Sostituisce il
 README "Testo Sacro" di `forge/specs/azoth/` e lo script
-`prepare-chimera.sh`. Il livello funzionale del kernel (eBPF, KVM, Gatekeeper) è
-descritto in [doc_kernel_layer.md](doc_kernel_layer.md): questo documento dice
-**come il kernel viene costruito, pinnato, firmato e mantenuto**, e quali garanzie
-deve dare a quel livello.
+`prepare-chimera.sh`. Il profilo del kernel e della piattaforma (configurazione, riga di
+comando, ruoli, integrità) è definito in [doc_kernel_profile.md](doc_kernel_profile.md):
+questo documento dice **come il kernel viene costruito, pinnato, firmato e mantenuto**,
+e quali garanzie deve dare a quel profilo.
 
 Decisioni già prese con il maintainer:
 

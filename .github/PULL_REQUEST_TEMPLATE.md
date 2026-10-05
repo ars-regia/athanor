@@ -20,5 +20,5 @@
 ## Checklist:
 - [ ] My code follows the style guidelines of Athanor OS.
 - [ ] I have performed a self-review of my own code.
-- [ ] I have updated `ARCHITECTURE.md` if necessary.
+- [ ] I have updated the affected documents under `docs/architecture/`.
 - [ ] My commits are signed.
