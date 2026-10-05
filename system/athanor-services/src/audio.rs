@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::mpsc::{self as events, RecvTimeoutError};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use athanor_unit::text::{line, NAME_CHARS};
 use libpulse_binding::callbacks::ListResult;
@@ -27,8 +27,6 @@ use tokio::sync::{mpsc, watch};
 /// The sound server's 100 %, `PA_VOLUME_NORM`.
 pub const NORMAL: u32 = 0x10000;
 pub const MAX_DEVICES: usize = 16;
-const FIRST_RETRY: Duration = Duration::from_secs(1);
-const LAST_RETRY: Duration = Duration::from_secs(30);
 
 /// A volume as a percentage. Above 100 % the slider shows 100 %: the bar does not amplify.
 pub fn percent(raw: u32) -> f64 {
@@ -123,13 +121,7 @@ pub enum AudioCommand {
     },
 }
 
-/// The wait before reconnection number `attempt`, counted from 0: one second, doubling to
-/// thirty.
-pub fn backoff(attempt: u32) -> Duration {
-    FIRST_RETRY
-        .checked_mul(1u32.checked_shl(attempt).unwrap_or(u32::MAX))
-        .map_or(LAST_RETRY, |delay| delay.min(LAST_RETRY))
-}
+pub use crate::runtime::backoff;
 
 /// What wakes the audio thread.
 enum Event {

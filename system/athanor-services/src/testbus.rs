@@ -295,6 +295,15 @@ pub struct FakeState {
     pub calls: Vec<String>,
     /// Whether the commands fail.
     pub refuse: bool,
+    /// The unique name of the last caller of `History`: where the signals go, as shelld's go
+    /// to the callers it has admitted.
+    pub caller: Option<String>,
+    /// How many calls of `History` have arrived.
+    pub history_calls: u32,
+    /// How many of the next calls of `History` fail.
+    pub fail_history: u32,
+    /// Whether `History` answers AccessDenied, as shelld does a caller it does not admit.
+    pub deny_history: bool,
 }
 
 /// A fake `os.athanor.Notifications1`, served at the daemon's path by a connection that
@@ -319,13 +328,25 @@ impl FakePrivate {
 
 #[zbus::interface(name = "os.athanor.Notifications1")]
 impl FakePrivate {
-    async fn history(&self) -> Vec<WireNotification> {
+    async fn history(
+        &self,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<Vec<WireNotification>> {
         let (history, delay) = {
-            let state = self.0.lock().expect("fake state");
+            let mut state = self.0.lock().expect("fake state");
+            state.history_calls += 1;
+            state.caller = header.sender().map(|sender| sender.to_string());
+            if state.deny_history {
+                return Err(zbus::fdo::Error::AccessDenied("not admitted".into()));
+            }
+            if state.fail_history > 0 {
+                state.fail_history -= 1;
+                return Err(zbus::fdo::Error::Failed("not now".into()));
+            }
             (state.history.clone(), state.delay)
         };
         tokio::time::sleep(delay).await;
-        history
+        Ok(history)
     }
 
     async fn do_not_disturb(&self) -> (bool, String, i64, Vec<String>) {
@@ -423,15 +444,40 @@ pub async fn serve_notifications(
     }
 }
 
-/// Emits the signal `member` of the private interface from `server`; `body` is its arguments
-/// as a tuple.
-pub async fn emit_private(
+/// Emits the signal `member` of the private interface from `server`, to nobody in
+/// particular; `body` is its arguments as a tuple.
+pub async fn emit_broadcast(
     server: &Connection,
     member: &str,
     body: &(impl serde::Serialize + zbus::zvariant::DynamicType),
 ) {
     SignalEmitter::new(server, NOTIFICATIONS_PATH)
         .expect("emitter")
+        .emit("os.athanor.Notifications1", member, body)
+        .await
+        .expect("signal");
+}
+
+/// Emits the signal `member` the way shelld does: to the caller of `History`, and to no one
+/// else. Waits for that call first, as shelld has no one to send to before it.
+pub async fn emit_private(
+    fake: &FakeNotifications,
+    member: &str,
+    body: &(impl serde::Serialize + zbus::zvariant::DynamicType),
+) {
+    let caller = tokio::time::timeout(WAIT, async {
+        loop {
+            if let Some(caller) = fake.state.lock().expect("fake state").caller.clone() {
+                return caller;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the model called History");
+    SignalEmitter::new(&fake.connection, NOTIFICATIONS_PATH)
+        .expect("emitter")
+        .set_destination(zbus::names::BusName::try_from(caller).expect("unique name"))
         .emit("os.athanor.Notifications1", member, body)
         .await
         .expect("signal");

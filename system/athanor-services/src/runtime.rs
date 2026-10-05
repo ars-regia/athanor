@@ -6,10 +6,22 @@
 use std::io;
 use std::sync::{mpsc, Arc};
 use std::thread;
+use std::time::Duration;
 
 use tokio::runtime::{Builder, Handle};
 use tokio::sync::OnceCell;
 use zbus::Connection;
+
+const FIRST_RETRY: Duration = Duration::from_secs(1);
+const LAST_RETRY: Duration = Duration::from_secs(30);
+
+/// The wait before retry number `attempt`, counted from 0: one second, doubling to thirty. A
+/// model that lost its service waits this long, and only while the service is unhealthy.
+pub fn backoff(attempt: u32) -> Duration {
+    FIRST_RETRY
+        .checked_mul(1u32.checked_shl(attempt).unwrap_or(u32::MAX))
+        .map_or(LAST_RETRY, |delay| delay.min(LAST_RETRY))
+}
 
 /// A single-threaded Tokio runtime on a thread of its own, for the life of the process.
 pub struct Runtime {

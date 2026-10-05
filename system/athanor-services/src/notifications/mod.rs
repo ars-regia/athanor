@@ -12,14 +12,14 @@ use std::pin::Pin;
 use futures_util::StreamExt;
 use tokio::runtime::Handle;
 use tokio::sync::{mpsc, watch};
-use tokio::time::timeout;
+use tokio::time::{sleep_until, timeout, Instant};
 use zbus::fdo::{self, DBusProxy};
 use zbus::message::Type;
 use zbus::names::BusName;
 use zbus::{Connection, MatchRule, Message, MessageStream};
 
 use crate::mirror::TIMEOUT;
-use crate::runtime::{Bus, Buses};
+use crate::runtime::{backoff, Bus, Buses};
 use wire::WireNotification;
 
 /// The name the notification daemon owns; its owner is the one the model follows.
@@ -148,19 +148,16 @@ impl Signal {
         Some(signal)
     }
 
-    /// Every signal sets or removes by id, so one that the history already holds changes
-    /// nothing a second time.
+    /// Every signal sets or removes by id, and one that the history already holds lands where
+    /// the daemon put it, so a replay in order gives the daemon's order.
     fn apply(self, state: &mut NotificationsState) {
         match self {
+            // The daemon moves a replaced notification to the end, as the newest.
             Signal::Added(note) | Signal::Replaced(note) => {
-                match state.entries.iter_mut().find(|held| held.id == note.id) {
-                    Some(held) => *held = note,
-                    None => {
-                        state.entries.push(note);
-                        let extra = state.entries.len().saturating_sub(MAX_ENTRIES);
-                        state.entries.drain(..extra);
-                    }
-                }
+                state.entries.retain(|held| held.id != note.id);
+                state.entries.push(note);
+                let extra = state.entries.len().saturating_sub(MAX_ENTRIES);
+                state.entries.drain(..extra);
             }
             Signal::Closed(id) => state.entries.retain(|held| held.id != id),
             Signal::Read(ids) => state
@@ -255,6 +252,9 @@ async fn run(
     let mut buffered: Option<Vec<Signal>> = None;
     let mut waiting: VecDeque<NotificationsCommand> = VecDeque::new();
     let mut running: Option<Running> = None;
+    // The load is tried again while the owner stays, after `backoff(attempt)`.
+    let mut attempt = 0u32;
+    let mut retry_at: Option<Instant> = None;
     match dbus.get_name_owner(BusName::try_from(NAME)?).await {
         Ok(name) => owner = Some(name.to_string()),
         Err(fdo::Error::NameHasNoOwner(_)) => view.settled = true,
@@ -286,6 +286,8 @@ async fn run(
                         ..NotificationsState::default()
                     };
                     waiting.clear();
+                    attempt = 0;
+                    retry_at = None;
                     buffered = new.as_ref().map(|_| Vec::new());
                     running = new.as_ref().map(|name| load(&connection, name));
                     owner = new;
@@ -321,6 +323,13 @@ async fn run(
                     view.refused = view.refused.wrapping_add(1);
                 }
             }
+            () = until(retry_at) => {
+                retry_at = None;
+                if let (Some(name), None) = (&owner, &running) {
+                    buffered = Some(Vec::new());
+                    running = Some(load(&connection, name));
+                }
+            }
             done = async {
                 match running.as_mut() {
                     Some(call) => call.await,
@@ -335,16 +344,22 @@ async fn run(
                         view.dnd = dnd;
                         view.available = true;
                         view.settled = true;
+                        attempt = 0;
                         for signal in buffered.take().unwrap_or_default() {
                             signal.apply(&mut view);
                         }
                     }
                     Done::Load(Err(err)) => {
-                        // Not asked again until the daemon restarts, so a daemon that refuses
-                        // is not asked in a loop.
-                        tracing::warn!(error = %err, "the notification daemon did not load; it is shown as unavailable until it restarts");
                         buffered = None;
                         view.settled = true;
+                        if admission_refused(&err) {
+                            // The daemon will not admit this process: asking again changes nothing.
+                            tracing::warn!(error = %err, "the notification daemon does not admit this process; it is shown as unavailable");
+                        } else {
+                            tracing::warn!(error = %err, "the notification daemon did not load; trying again");
+                            retry_at = Some(Instant::now() + backoff(attempt));
+                            attempt = attempt.saturating_add(1);
+                        }
                     }
                     Done::Command(Err(err)) => {
                         tracing::warn!(error = %err, "the notification daemon refused or did not answer");
@@ -370,6 +385,25 @@ async fn run(
             }
             changed
         });
+    }
+}
+
+/// Whether the daemon refused to admit the caller, as it does a process that is not the bar
+/// or the control center.
+fn admission_refused(err: &zbus::Error) -> bool {
+    match err {
+        zbus::Error::MethodError(name, ..) => {
+            name.as_str() == "org.freedesktop.DBus.Error.AccessDenied"
+        }
+        zbus::Error::FDO(err) => matches!(**err, fdo::Error::AccessDenied(_)),
+        _ => false,
+    }
+}
+
+async fn until(at: Option<Instant>) {
+    match at {
+        Some(at) => sleep_until(at).await,
+        None => std::future::pending().await,
     }
 }
 
@@ -448,6 +482,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::runtime::backoff;
     use crate::testbus::{self, FakeNotifications, TestBus};
 
     struct Rig {
@@ -492,8 +527,8 @@ mod tests {
         ]
     }
 
-    async fn added(server: &Connection, id: u32) {
-        testbus::emit_private(server, "Added", &(testbus::notification(id, "new"),)).await;
+    async fn added(fake: &FakeNotifications, id: u32) {
+        testbus::emit_private(fake, "Added", &(testbus::notification(id, "new"),)).await;
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -503,24 +538,27 @@ mod tests {
         assert_eq!(ids(&state), [1, 2]);
         assert!(state.settled);
 
-        added(&rig.fake.connection, 3).await;
+        added(&rig.fake, 3).await;
         wait_for(&mut rig.states, |s| ids(s) == [1, 2, 3]).await;
 
         let mut replaced = testbus::notification(2, "changed");
         replaced.read = true;
-        testbus::emit_private(&rig.fake.connection, "Replaced", &(replaced,)).await;
-        let state = wait_for(&mut rig.states, |s| s.entries[1].summary == "changed").await;
-        assert_eq!(ids(&state), [1, 2, 3]);
+        testbus::emit_private(&rig.fake, "Replaced", &(replaced,)).await;
+        let state = wait_for(&mut rig.states, |s| {
+            s.entries.last().is_some_and(|e| e.summary == "changed")
+        })
+        .await;
+        assert_eq!(ids(&state), [1, 3, 2]);
 
-        testbus::emit_private(&rig.fake.connection, "Read", &(vec![1u32, 3],)).await;
+        testbus::emit_private(&rig.fake, "Read", &(vec![1u32, 3],)).await;
         let state = wait_for(&mut rig.states, |s| s.entries[0].read).await;
-        assert!(state.entries[2].read);
+        assert!(state.entries[1].read);
 
-        testbus::emit_private(&rig.fake.connection, "Closed", &(1u32, 2u32)).await;
-        wait_for(&mut rig.states, |s| ids(s) == [2, 3]).await;
+        testbus::emit_private(&rig.fake, "Closed", &(1u32, 2u32)).await;
+        wait_for(&mut rig.states, |s| ids(s) == [3, 2]).await;
 
         testbus::emit_private(
-            &rig.fake.connection,
+            &rig.fake,
             "DoNotDisturbChanged",
             &(true, "fullscreen", 77i64),
         )
@@ -582,8 +620,8 @@ mod tests {
         let (mut states, _commands) = spawn(&Handle::current(), Buses::with(bus.client().await));
         // The fake read its history before the signal and answers 200 ms after it.
         tokio::time::sleep(Duration::from_millis(80)).await;
-        testbus::emit_private(&fake.connection, "Closed", &(1u32, 2u32)).await;
-        added(&fake.connection, 3).await;
+        testbus::emit_private(&fake, "Closed", &(1u32, 2u32)).await;
+        added(&fake, 3).await;
         let state = wait_for(&mut states, |s| s.available).await;
         assert_eq!(ids(&state), [2, 3]);
     }
@@ -593,9 +631,9 @@ mod tests {
         let mut rig = rig(two()).await;
         wait_for(&mut rig.states, |s| s.available).await;
         let other = rig.bus.client().await;
-        added(&other, 7).await;
+        testbus::emit_broadcast(&other, "Added", &(testbus::notification(7, "new"),)).await;
         // The daemon's own signal after it: once that is applied, the other has been seen.
-        added(&rig.fake.connection, 3).await;
+        added(&rig.fake, 3).await;
         let state = wait_for(&mut rig.states, |s| s.entries.len() == 3).await;
         assert_eq!(ids(&state), [1, 2, 3]);
     }
@@ -671,5 +709,44 @@ mod tests {
             text: "secret reply".into(),
         };
         assert!(!format!("{reply:?}").contains("secret"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_replace_replayed_after_a_stale_history_keeps_the_newest_last() {
+        let bus = TestBus::start();
+        let fake = testbus::serve_notifications(&bus, two()).await;
+        fake.state.lock().expect("state").delay = Duration::from_millis(200);
+        let (mut states, _commands) = spawn(&Handle::current(), Buses::with(bus.client().await));
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        // The history ends [1, 2]; the daemon replaced 1, then added 3.
+        testbus::emit_private(&fake, "Replaced", &(testbus::notification(1, "again"),)).await;
+        added(&fake, 3).await;
+        let state = wait_for(&mut states, |s| s.available).await;
+        assert_eq!(ids(&state), [2, 1, 3]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_failed_load_is_tried_again() {
+        let bus = TestBus::start();
+        let fake = testbus::serve_notifications(&bus, two()).await;
+        fake.state.lock().expect("state").fail_history = 1;
+        let (mut states, _commands) = spawn(&Handle::current(), Buses::with(bus.client().await));
+        let failed = wait_for(&mut states, |s| s.settled).await;
+        assert!(!failed.available);
+        let state = wait_for(&mut states, |s| s.available).await;
+        assert_eq!(ids(&state), [1, 2]);
+        assert_eq!(fake.state.lock().expect("state").history_calls, 2);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_refusal_of_admission_is_not_tried_again() {
+        let bus = TestBus::start();
+        let fake = testbus::serve_notifications(&bus, two()).await;
+        fake.state.lock().expect("state").deny_history = true;
+        let (mut states, _commands) = spawn(&Handle::current(), Buses::with(bus.client().await));
+        wait_for(&mut states, |s| s.settled).await;
+        tokio::time::sleep(backoff(0) + Duration::from_millis(700)).await;
+        assert_eq!(fake.state.lock().expect("state").history_calls, 1);
+        assert!(!states.borrow().available);
     }
 }
