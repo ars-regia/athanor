@@ -531,6 +531,48 @@ def check_shipped():
 # 6. documentazione — i link devono risolvere e non essere assoluti
 # --------------------------------------------------------------------------- #
 
+REGISTER = "docs/architecture/shell-features.md"
+REGISTER_STATUSES = ("have", "partial", "missing", "excluded (proposed)")
+
+
+def register_count_problems(text):
+    """Where the Counts section of the shell feature register differs from its rows: each
+    `## <surface>` table of `| F-... |` rows against the `### <surface>` table under Counts."""
+    rows, stated = {}, {}
+    surface, in_counts = None, False
+    for line in text.split("\n"):
+        if line.startswith("## "):
+            surface, in_counts = line[3:].strip(), line.strip() == "## Counts"
+            continue
+        if in_counts and line.startswith("### "):
+            surface = line[4:].strip()
+            stated[surface] = {}
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if in_counts and surface in stated and len(cells) == 2 and cells[1].isdigit():
+            stated[surface][cells[0]] = int(cells[1])
+        elif not in_counts and surface and cells[0].startswith("F-") and len(cells) >= 5:
+            rows.setdefault(surface, []).append((cells[0], cells[3]))
+
+    problems = []
+    for surface, entries in rows.items():
+        for entry, status in entries:
+            if status not in REGISTER_STATUSES:
+                problems.append(f"{REGISTER}: {entry} has the unknown status '{status}'")
+        if surface not in stated:
+            problems.append(f"{REGISTER}: surface '{surface}' has no table under Counts")
+            continue
+        actual = {s: sum(1 for _, st in entries if st == s) for s in REGISTER_STATUSES}
+        actual["total"] = len(entries)
+        for status, n in actual.items():
+            if stated[surface].get(status) != n:
+                problems.append(f"{REGISTER}: Counts of '{surface}' say {status} "
+                                f"{stated[surface].get(status)}, the rows give {n}")
+    for surface in stated.keys() - rows.keys():
+        problems.append(f"{REGISTER}: Counts name '{surface}', which has no rows")
+    return problems
+
+
 @check("docs", "I link nella documentazione risolvono e sono portabili")
 def check_docs():
     r = Result()
@@ -552,6 +594,10 @@ def check_docs():
                 continue
             if not (base / link).exists():
                 r.fail(f"{t}: link rotto [{m.group(1)[:30]}] -> {link}")
+    register = ROOT / REGISTER
+    if register.exists():
+        for problem in register_count_problems(read(register)):
+            r.fail(problem)
     return r
 
 
