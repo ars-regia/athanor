@@ -234,6 +234,8 @@ fn bindings(bare: &str) -> Result<Vec<Entry>, String> {
                     modifiers = list.split(',').map(str::trim).filter(|m| !m.is_empty()).map(str::to_owned).collect();
                 }
                 "key" => key = Some(value.trim().trim_matches('"').to_owned()),
+                // Real fields of COSMIC's Binding; neither names the key this writer compares.
+                "keycode" | "description" => {}
                 other => return Err(format!("a field named {other:?}")),
             }
             fields = fields.get(end + 1..).unwrap_or_default();
@@ -686,6 +688,37 @@ mod tests {
         // Alt+Super+c is another combination than Super+c.
         std::fs::write(&path, "{ (modifiers: [Alt, Super], key: \"c\"): Disable }").unwrap();
         assert_eq!(bind_custom(&path, &["Super"], "c", CC).unwrap(), Binding::Added);
+    }
+
+    #[test]
+    fn a_binding_with_a_description_or_a_key_code_is_kept_and_super_c_is_added() {
+        for (name, other) in [
+            ("desc", "{\n    (modifiers: [Super], key: \"t\", description: Some(\"Term, inal: (x)\")): Spawn(\"foot\"),\n}\n"),
+            ("code", "{\n    (modifiers: [Super], keycode: Some(54), description: None): Spawn(\"foot\"),\n}\n"),
+        ] {
+            let path = scratch(&format!("custom-{name}"));
+            std::fs::write(&path, other).unwrap();
+            assert_eq!(bind_custom(&path, &["Super"], "c", CC).unwrap(), Binding::Added);
+            let text = std::fs::read_to_string(&path).unwrap();
+            let kept = other.trim_end().trim_end_matches('}');
+            assert_eq!(text, format!("{kept}    (modifiers: [Super], key: \"c\"): Spawn(\"{CC}\"),\n}}\n"));
+            assert_eq!(bind_custom(&path, &["Super"], "c", CC).unwrap(), Binding::Unchanged);
+            // A described binding of Super+C itself is still the user's.
+            std::fs::write(&path, "{ (modifiers: [Super], key: \"c\", description: Some(\"Mine\")): Spawn(\"x\") }").unwrap();
+            assert_eq!(bind_custom(&path, &["Super"], "c", CC).unwrap(), Binding::UserChoice);
+        }
+    }
+
+    #[test]
+    fn once_marks_a_file_with_a_described_binding() {
+        let dir = scratch("custom-once-desc");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("custom");
+        std::fs::write(&file, "{ (modifiers: [Super], key: \"t\", description: Some(\"Term\")): Spawn(\"foot\") }").unwrap();
+        let marker = dir.join("marker");
+        let done = once(&marker, || bind_custom(&file, &["Super"], "c", CC)).unwrap();
+        assert_eq!(done, Some(Binding::Added));
+        assert!(marker.exists());
     }
 
     #[test]
