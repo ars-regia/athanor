@@ -64,7 +64,7 @@
       {
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
-            rust-toolchain just jq python3 pkg-config openssl bcachefs-tools
+            rust-toolchain just jq python3 pkg-config openssl
           ];
           shellHook = ''
             echo "========================================================"
