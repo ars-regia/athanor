@@ -5,6 +5,7 @@
 //! It knows no toolkit.
 
 pub mod atomic;
+pub mod control_center;
 pub mod document;
 pub mod favorites;
 pub mod first_session;
