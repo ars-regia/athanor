@@ -18,14 +18,16 @@ use std::path::Path;
 
 use toml::{Table, Value};
 
-use crate::document::CURRENT_SCHEMA;
 use crate::loader::{self, Paths};
 use crate::preset::Preset;
+
+/// The schema of this file, its own and not the layout document's.
+const SCHEMA: i64 = 1;
 
 pub const FILE_NAME: &str = "control-center.toml";
 
 /// A tile of the toggles grid. The set is closed; the identifiers are permanent.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TileId {
     DarkMode,
     NightLight,
@@ -38,6 +40,11 @@ pub enum TileId {
     ColorPicker,
     RotationLock,
     OnScreenKeyboard,
+    /// A third-party tile (CC12), written `ext:<descriptor id>`. Whether the descriptor is
+    /// installed is the panel's question at render time; the file is not rejected for it.
+    /// CC12 does not constrain a descriptor id, so it is reverse-DNS-like: 1 to 255
+    /// characters of `[A-Za-z0-9._-]`.
+    External(String),
 }
 
 impl TileId {
@@ -55,8 +62,8 @@ impl TileId {
         TileId::OnScreenKeyboard,
     ];
 
-    pub fn id(self) -> &'static str {
-        match self {
+    pub fn id(&self) -> String {
+        let fixed = match self {
             TileId::DarkMode => "dark-mode",
             TileId::NightLight => "night-light",
             TileId::DoNotDisturb => "do-not-disturb",
@@ -68,16 +75,25 @@ impl TileId {
             TileId::ColorPicker => "color-picker",
             TileId::RotationLock => "rotation-lock",
             TileId::OnScreenKeyboard => "on-screen-keyboard",
-        }
+            TileId::External(descriptor) => return format!("ext:{descriptor}"),
+        };
+        fixed.to_string()
     }
 
     pub fn from_id(id: &str) -> Option<TileId> {
+        if let Some(descriptor) = id.strip_prefix("ext:") {
+            let valid = (1..=255).contains(&descriptor.len())
+                && descriptor
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'));
+            return valid.then(|| TileId::External(descriptor.to_string()));
+        }
         TileId::ALL.into_iter().find(|tile| tile.id() == id)
     }
 }
 
 /// One tile of the grid: which, and how many cells wide (one or two).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tile {
     pub id: TileId,
     pub cells: u8,
@@ -128,7 +144,7 @@ impl fmt::Display for TilesError {
             TilesError::Malformed(err) => write!(f, "the file is malformed: {err}"),
             TilesError::NewerSchema(schema) => write!(
                 f,
-                "schema {schema} is newer than this build reads ({CURRENT_SCHEMA})"
+                "schema {schema} is newer than this build reads ({SCHEMA})"
             ),
             TilesError::UnknownKey(key) => write!(f, "unknown key {key}"),
             TilesError::UnknownTile(id) => write!(f, "unknown tile {id}"),
@@ -146,10 +162,10 @@ pub fn parse(text: &str) -> Result<Tiles, TilesError> {
         .parse()
         .map_err(|err: toml::de::Error| TilesError::Malformed(err.message().to_string()))?;
     match table.remove("schema") {
-        Some(Value::Integer(schema)) if schema > CURRENT_SCHEMA => {
+        Some(Value::Integer(schema)) if schema > SCHEMA => {
             return Err(TilesError::NewerSchema(schema))
         }
-        Some(Value::Integer(1)) => {}
+        Some(Value::Integer(SCHEMA)) => {}
         Some(Value::Integer(other)) => {
             return Err(TilesError::Malformed(format!(
                 "schema {other} was never shipped"
@@ -188,7 +204,7 @@ pub fn parse(text: &str) -> Result<Tiles, TilesError> {
             _ => return Err(TilesError::Malformed("a tile has no string id".into())),
         };
         let tile = TileId::from_id(&id).ok_or_else(|| TilesError::UnknownTile(id.clone()))?;
-        if !seen.insert(tile) {
+        if !seen.insert(tile.clone()) {
             return Err(TilesError::DuplicateTile(id));
         }
         let cells = match entry.remove("size") {
@@ -262,7 +278,7 @@ mod tests {
         paths.user_file.with_file_name(FILE_NAME)
     }
 
-    fn ids(tiles: &Tiles) -> Vec<&'static str> {
+    fn ids(tiles: &Tiles) -> Vec<String> {
         tiles.0.iter().map(|tile| tile.id.id()).collect()
     }
 
@@ -306,6 +322,28 @@ mod tests {
         );
         assert_eq!(parse("schema = 2\n"), Err(TilesError::NewerSchema(2)));
         assert_eq!(load(&paths), Tiles::preset_default(Preset::Float));
+    }
+
+    #[test]
+    fn a_third_party_tile_keeps_its_position_and_a_bad_one_rejects_the_file() {
+        let file = |id: &str| {
+            format!("schema = 1\n[[tile]]\nid = \"dark-mode\"\n[[tile]]\nid = \"{id}\"\n")
+        };
+        let tiles = parse(&file("ext:com.tailscale.tile-1")).expect("valid");
+        assert_eq!(ids(&tiles), ["dark-mode", "ext:com.tailscale.tile-1"]);
+        for bad in [
+            "ext:",
+            "ext:a b",
+            "ext:a/b",
+            "ext:\u{e9}",
+            "ext",
+            "tailscale",
+        ] {
+            assert!(parse(&file(bad)).is_err(), "{bad} must be rejected");
+        }
+        assert!(parse(&file(&format!("ext:{}", "a".repeat(256)))).is_err());
+        let dup = "schema = 1\n[[tile]]\nid = \"ext:x\"\n[[tile]]\nid = \"ext:x\"\n";
+        assert!(matches!(parse(dup), Err(TilesError::DuplicateTile(_))));
     }
 
     #[test]
