@@ -246,7 +246,7 @@ Statuses in the Athanor column:
 | F-launcher-03 | Ranking that learns from usage | [macOS](https://support.apple.com/guide/mac-help/spotlight-mchlp1008/mac), [DMS](https://github.com/AvengeMedia/DankMaterialShell/blob/v1.6.2/quickshell/Modules/Settings/LauncherTab.qml), [Noctalia](https://github.com/noctalia-dev/noctalia/blob/v5.2.1/docs/user/launcher/index.mdx) | have | system/athanor-search/src/usage.rs |
 | F-launcher-04 | Search of open windows | [COSMIC](https://github.com/pop-os/launcher/tree/master/plugins/src), [DMS](https://github.com/AvengeMedia/DankMaterialShell/blob/v1.6.2/quickshell/Modals/DankLauncherV2/Controller.qml), [Noctalia](https://github.com/noctalia-dev/noctalia/blob/v5.2.1/docs/user/launcher/index.mdx) | have | system/athanor-search/src/windows.rs |
 | F-launcher-05 | Search of files and folders | [macOS](https://support.apple.com/guide/mac-help/spotlight-mchlp1008/mac), [Windows 11](https://support.microsoft.com/en-us/windows/experience/personalization/customize-the-taskbar-in-windows), [GNOME](https://gitlab.gnome.org/GNOME/gnome-shell/-/blob/main/js/ui/remoteSearch.js), [Plasma](https://invent.kde.org/plasma/plasma-workspace/-/tree/master/runners), [COSMIC](https://github.com/pop-os/launcher/tree/master/plugins/src), [DMS](https://github.com/AvengeMedia/DankMaterialShell/blob/v1.6.2/quickshell/Modals/DankLauncherV2) | have | system/athanor-search/src/files.rs (localsearch) |
-| F-launcher-06 | File content search with preview | [macOS](https://support.apple.com/guide/mac-help/spotlight-mchlp1008/mac), [Plasma](https://invent.kde.org/plasma/plasma-workspace/-/tree/master/runners) | missing | not verified: preview widget is in system/athanor-preview, launcher wiring not checked |
+| F-launcher-06 | File content search with preview | [macOS](https://support.apple.com/guide/mac-help/spotlight-mchlp1008/mac), [Plasma](https://invent.kde.org/plasma/plasma-workspace/-/tree/master/runners) | have | system/athanor-search/src/files.rs:1 (localsearch match by content, with the excerpt); preview pane forge/specs/athanor-launcher/athanor-launcher-1.0.0/src/ui/mod.rs:109 |
 | F-launcher-07 | Calculator | [macOS](https://support.apple.com/guide/mac-help/spotlight-mchlp1008/mac), [Plasma](https://invent.kde.org/plasma/plasma-workspace/-/tree/master/runners), [COSMIC](https://github.com/pop-os/launcher/tree/master/plugins/src), [DMS](https://github.com/AvengeMedia/DankMaterialShell/blob/v1.6.2/quickshell/Services/AppSearchService.qml), [Noctalia](https://github.com/noctalia-dev/noctalia/blob/v5.2.1/docs/user/launcher/index.mdx), [Caelestia](https://github.com/caelestia-dots/shell/blob/v2.5.0/README.md), [end-4](https://github.com/end-4/dots-hyprland/blob/2026.05.11/dots/.config/quickshell/ii/services/LauncherSearch.qml) | have | system/athanor-search/src/calc.rs (qalc) |
 | F-launcher-08 | Unit and currency conversion | [macOS](https://support.apple.com/guide/mac-help/spotlight-mchlp1008/mac), [Plasma](https://invent.kde.org/plasma/plasma-workspace/-/tree/master/runners), [COSMIC](https://github.com/pop-os/launcher/tree/master/plugins/src), [Noctalia](https://github.com/noctalia-dev/noctalia/blob/v5.2.1/docs/user/launcher/index.mdx) | have | system/athanor-search/src/calc.rs (qalc) |
 | F-launcher-09 | Search of Settings pages | [Windows 11](https://support.microsoft.com/en-us/windows/experience/personalization/customize-the-taskbar-in-windows), [GNOME](https://gitlab.gnome.org/GNOME/gnome-shell/-/blob/main/js/ui/remoteSearch.js), [DMS](https://github.com/AvengeMedia/DankMaterialShell/blob/v1.6.2/quickshell/Services/AppSearchService.qml), [Noctalia](https://github.com/noctalia-dev/noctalia/blob/v5.2.1/docs/user/launcher/index.mdx) | have | settings source of doc_launcher.md LA2 |
@@ -441,8 +441,8 @@ Statuses in the Athanor column:
 
 | Status | Entries |
 |---|---|
-| have | 19 |
-| partial | 5 |
+| have | 18 |
+| partial | 6 |
 | missing | 22 |
 | excluded (proposed) | 2 |
 | total | 48 |
@@ -481,9 +481,9 @@ Statuses in the Athanor column:
 
 | Status | Entries |
 |---|---|
-| have | 17 |
+| have | 18 |
 | partial | 1 |
-| missing | 17 |
+| missing | 16 |
 | excluded (proposed) | 2 |
 | total | 37 |
 
@@ -491,10 +491,10 @@ Statuses in the Athanor column:
 
 | Status | Entries |
 |---|---|
-| have | 9 |
+| have | 8 |
 | partial | 0 |
-| missing | 10 |
-| excluded (proposed) | 0 |
+| missing | 2 |
+| excluded (proposed) | 9 |
 | total | 19 |
 
 ### Session lock and authentication dialogs
@@ -503,8 +503,8 @@ Statuses in the Athanor column:
 |---|---|
 | have | 9 |
 | partial | 3 |
-| missing | 20 |
-| excluded (proposed) | 1 |
+| missing | 18 |
+| excluded (proposed) | 3 |
 | total | 33 |
 
 ### Settings
@@ -513,18 +513,18 @@ Statuses in the Athanor column:
 |---|---|
 | have | 16 |
 | partial | 2 |
-| missing | 16 |
-| excluded (proposed) | 2 |
+| missing | 8 |
+| excluded (proposed) | 10 |
 | total | 36 |
 
 ### Workspace overview
 
 | Status | Entries |
 |---|---|
-| have | 10 |
-| partial | 0 |
-| missing | 7 |
-| excluded (proposed) | 4 |
+| have | 9 |
+| partial | 1 |
+| missing | 4 |
+| excluded (proposed) | 7 |
 | total | 21 |
 
 ### Greeter
