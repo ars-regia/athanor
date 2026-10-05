@@ -11,7 +11,7 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
   - `doc_bar.md`: the bar's Workspaces module and the dock's workspaces button open cosmic-workspaces "until stage 7" (`doc_bar.md:71`). Popups go on the output of the active workspace (BR4). Launches follow BR2.
   - `doc_visual_language.md`: VL7 sets radii and the grid. VL9 sets motion: 300 ms for large changes including the switch between workspaces, one curve, and zero duration when `enable-animations` is off; surfaces are opaque. `doc_accessibility.md` AX9: with reduced motion nothing slides.
   - `doc_compositor.md` (revision 1, awaiting approval): no compositor of our own (CO1). Window-management features enter through the register (CO2). Patches stay few, are proposed upstream first, and each has an exit (CO3).
-  - `doc_osd.md` excludes F-osd-12, the workspace-change indicator: "the overview specification (wave 3) owns workspace feedback" (`doc_osd.md:171`). `doc_settings.md:165` leaves hot corners to this document.
+  - `doc_osd.md` excludes F-osd-12, the workspace-change indicator: "the overview specification (`doc_overview.md`) owns workspace feedback" (`doc_osd.md:171`). `doc_settings.md:165` leaves hot corners to this document.
 - **What runs today** (cosmic-workspaces 1.8.0-1.fc43, source tag `epoch-1.8.0`, crate 1.0.12, GPL-3.0-only, iced and libcosmic; read 2026-10-05):
   - **Surfaces.** One layer surface per output on the `top` layer, namespace `cosmic-workspace-overview`, exclusive keyboard (`src/main.rs:263-265`). The surfaces are destroyed on hide (`:321-364`).
   - **Contents.** Live window thumbnails only for the active workspaces, and a live thumbnail of every workspace (`:372-385`). Both are captured through cctk with dmabuf buffers allocated through GBM and a Vulkan instance (`src/backend/wayland/vulkan.rs:24`).
@@ -251,7 +251,7 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
 
 **OV17. Retiring cosmic-workspaces.** In one change at the switch (OV19, step 5):
 
-- remove `cosmic-workspaces` from `forge/config/packages.json:128`;
+- remove `cosmic-workspaces` from `forge/config/packages.json:126`;
 - point `Opener::Workspaces` at `os.athanor.Overview1.Show` (`launch.rs:466-509`; the bar's module and the dock at `athanor-dock-1.0.0/src/ui/surface.rs:267` follow without change);
 - set the `WorkspaceOverview` entry of the `system_actions` file under `/usr/share/athanor/cosmic-defaults` (LN9's bullet "The `system_actions` file", the single owner by the ruling of 2026-10-05) to a `gdbus call` of `os.athanor.Overview1.Toggle`, written as LA8 writes the launcher's;
 - update `scripts/devvm/compositor-acceptance.sh:160`, which opens cosmic-workspaces;
