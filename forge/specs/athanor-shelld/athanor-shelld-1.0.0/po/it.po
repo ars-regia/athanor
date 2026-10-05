@@ -8,13 +8,26 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: src/notifications.rs:508
+#: src/notifications.rs:537
+msgid "Show"
+msgstr "Mostra"
+
+#: src/notifications.rs:551
 #, rust-format
 msgid "{n} notification while do not disturb was on"
 msgid_plural "{n} notifications while do not disturb was on"
 msgstr[0] "{n} notifica mentre era attivo non disturbare"
 msgstr[1] "{n} notifiche mentre era attivo non disturbare"
 
-#: src/notifications.rs:520
-msgid "Show"
-msgstr "Mostra"
+#: src/notifications.rs:577
+msgid "Battery low"
+msgstr "Batteria in esaurimento"
+
+#: src/notifications.rs:578
+msgid "Battery critically low"
+msgstr "Batteria quasi scarica"
+
+#: src/notifications.rs:582
+#, rust-format
+msgid "{hours} h {minutes} min remaining"
+msgstr "{hours} h {minutes} min rimanenti"

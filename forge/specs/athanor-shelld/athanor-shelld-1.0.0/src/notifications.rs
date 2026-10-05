@@ -8,6 +8,7 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
@@ -22,6 +23,7 @@ use zbus::object_server::SignalEmitter;
 use zbus::{interface, Connection};
 use zvariant::{Signature, Type};
 
+use crate::battery::Level;
 use crate::clock;
 use crate::dnd::{self, Dnd, Effective, Observed, Trigger};
 use crate::hints::{is_desktop_id, Hints};
@@ -47,6 +49,9 @@ const CONTROL_CENTER_NAME: &str = "os.athanor.ControlCenter1";
 const CONTROL_CENTER_PATH: &str = "/os/athanor/ControlCenter1";
 /// The control center's `Show` page of the notification panel.
 const CONTROL_CENTER_PAGE: &str = "notifications";
+/// The action of the low-battery warning, and the control center's page for it (CC5).
+const BATTERY_ACTION: &str = "battery";
+const BATTERY_PAGE: &str = "battery";
 
 pub struct State {
     pub store: Store,
@@ -497,34 +502,16 @@ async fn announce(conn: &Connection, state: &Shared, outcome: &Outcome, wire: &W
     .await;
 }
 
-/// "{n} notifications while do not disturb was on", transient, whose `default` action opens
-/// the control center on the notifications (NC6). Sent through the daemon's own connection:
-/// it is the sender, so its action is unavailable only when the daemon is gone.
-async fn post_summary(conn: &Connection, state: &Shared, missed: u32) {
+/// Stores a notification the daemon sends itself and announces it to the units. Sent through
+/// the daemon's own connection: it is the sender, so its actions are unavailable only when
+/// the daemon is gone (`invoke_action` carries them out).
+async fn post_own(conn: &Connection, state: &Shared, content: impl FnOnce(u32) -> Content) {
     let Some(own) = conn.unique_name().map(ToString::to_string) else {
         return;
     };
-    let summary = tr_n(
-        "{n} notification while do not disturb was on",
-        "{n} notifications while do not disturb was on",
-        u64::from(missed),
-    )
-    .replace("{n}", &missed.to_string());
     let (outcome, wire) = {
         let mut state = lock(state);
-        let seconds = state.rules.settings().timeout_normal_s;
-        let content = Content {
-            app_name: "Athanor".to_owned(),
-            summary,
-            body: String::new(),
-            actions: vec![("default".to_owned(), tr("Show"))],
-            urgency: Urgency::Normal,
-            transient: true,
-            resident: false,
-            desktop_entry: None,
-            visual: Visual::None,
-            timeout_ms: seconds.saturating_mul(1000),
-        };
+        let content = content(state.rules.settings().timeout_normal_s);
         let now = state.now_ms();
         let outcome = state
             .store
@@ -534,6 +521,91 @@ async fn post_summary(conn: &Connection, state: &Shared, missed: u32) {
         (outcome, wire)
     };
     announce(conn, state, &outcome, &wire).await;
+}
+
+fn own_content(
+    summary: String,
+    body: String,
+    action: &str,
+    urgency: Urgency,
+    timeout_ms: u32,
+) -> Content {
+    Content {
+        app_name: "Athanor".to_owned(),
+        summary,
+        body,
+        actions: vec![(action.to_owned(), tr("Show"))],
+        urgency,
+        transient: urgency != Urgency::Critical,
+        resident: false,
+        desktop_entry: None,
+        visual: Visual::None,
+        timeout_ms,
+    }
+}
+
+/// "{n} notifications while do not disturb was on", transient, whose `default` action opens
+/// the control center on the notifications (NC6).
+async fn post_summary(conn: &Connection, state: &Shared, missed: u32) {
+    let summary = tr_n(
+        "{n} notification while do not disturb was on",
+        "{n} notifications while do not disturb was on",
+        u64::from(missed),
+    )
+    .replace("{n}", &missed.to_string());
+    post_own(conn, state, |seconds| {
+        own_content(
+            summary,
+            String::new(),
+            "default",
+            Urgency::Normal,
+            seconds.saturating_mul(1000),
+        )
+    })
+    .await;
+}
+
+/// The low-battery warning: critical, so it stays until dismissed, with the time UPower
+/// gives (only when it gives one) and a `battery` action that opens the control center there.
+pub async fn post_low_battery(
+    conn: &Connection,
+    state: &Shared,
+    level: Level,
+    seconds: Option<u64>,
+) {
+    let summary = match level {
+        Level::Low => tr("Battery low"),
+        Level::Critical => tr("Battery critically low"),
+    };
+    let body = seconds.filter(|&s| s > 0).map_or_else(String::new, |s| {
+        let (hours, minutes) = athanor_services::battery::hours_minutes(s);
+        tr("{hours} h {minutes} min remaining")
+            .replace("{hours}", &hours.to_string())
+            .replace("{minutes}", &minutes.to_string())
+    });
+    post_own(conn, state, |_| {
+        own_content(summary, body, BATTERY_ACTION, Urgency::Critical, 0)
+    })
+    .await;
+}
+
+static ABSENT_LOGGED: AtomicBool = AtomicBool::new(false);
+
+/// Whether the call failed because no process owns the name and the bus cannot start one.
+fn control_center_absent(err: &zbus::Error) -> bool {
+    matches!(
+        err,
+        zbus::Error::MethodError(name, _, _)
+            if matches!(
+                name.as_str(),
+                "org.freedesktop.DBus.Error.ServiceUnknown"
+                    | "org.freedesktop.DBus.Error.NameHasNoOwner"
+            )
+    ) || matches!(
+        err,
+        zbus::Error::FDO(inner)
+            if matches!(**inner, fdo::Error::ServiceUnknown(_) | fdo::Error::NameHasNoOwner(_))
+    )
 }
 
 pub struct Notifications {
@@ -798,18 +870,35 @@ impl Private {
             (held.content.resident, Some(&held.sender) == own.as_ref())
         };
         if internal {
-            if action_key == "default" {
-                conn.call_method(
-                    Some(CONTROL_CENTER_NAME),
-                    CONTROL_CENTER_PATH,
-                    Some(CONTROL_CENTER_NAME),
-                    "Show",
-                    &(CONTROL_CENTER_PAGE,),
-                )
-                .await
-                .map_err(|err| {
-                    fdo::Error::Failed(format!("cannot open the control center: {err}"))
-                })?;
+            let page = match action_key {
+                "default" => Some(CONTROL_CENTER_PAGE),
+                BATTERY_ACTION => Some(BATTERY_PAGE),
+                _ => None,
+            };
+            if let Some(page) = page {
+                let shown = conn
+                    .call_method(
+                        Some(CONTROL_CENTER_NAME),
+                        CONTROL_CENTER_PATH,
+                        Some(CONTROL_CENTER_NAME),
+                        "Show",
+                        &(page,),
+                    )
+                    .await;
+                match shown {
+                    Err(err) if action_key == BATTERY_ACTION && control_center_absent(&err) => {
+                        // Not installed on most machines yet: said once, nothing more to do.
+                        if !ABSENT_LOGGED.swap(true, Ordering::Relaxed) {
+                            tracing::info!("the control center is not installed; the battery action does nothing");
+                        }
+                    }
+                    Err(err) => {
+                        return Err(fdo::Error::Failed(format!(
+                            "cannot open the control center: {err}"
+                        )));
+                    }
+                    Ok(_) => {}
+                }
             }
         } else {
             let public = SignalEmitter::new(conn, NOTIFICATIONS_PATH)?;

@@ -8,7 +8,7 @@ authors = ["Athanor Forge <forge@athanor.os>"]
 
 [dependencies]
 athanor-i18n = { path = "../../../../system/athanor-i18n" }
-athanor-services = { path = "../../../../system/athanor-services" }
+athanor-services = { path = "../../../../system/athanor-services", default-features = false }
 athanor-unit = { path = "../../../../system/athanor-unit" }
 futures-util = { workspace = true }
 nix = { workspace = true, features = ["fs", "inotify", "time"] }

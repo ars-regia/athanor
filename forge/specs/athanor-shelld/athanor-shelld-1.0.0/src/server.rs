@@ -11,6 +11,7 @@ use zbus::connection::Builder;
 use zbus::fdo::RequestNameFlags;
 use zbus::Connection;
 
+use crate::battery::LowBattery;
 use crate::notifications::{Notifications, Private, Shared, State};
 use crate::sender::Admitted;
 use crate::watcher::{self, Watcher};
@@ -81,6 +82,7 @@ pub async fn start(builder: Builder<'_>, config: Config) -> zbus::Result<Daemon>
     notifications::follow_owners(&conn, Arc::clone(&state)).await?;
     watcher::follow_owners(&conn).await?;
     spawn_clock(&conn, &state, wake_rx);
+    spawn_battery(&conn, &state);
     spawn_rules(&conn, &state, config.config_dir);
     tokio::spawn(notifications::history_writer(Arc::clone(&state), dirty));
     for name in [NOTIFICATIONS_NAME, WATCHER_NAME] {
@@ -103,6 +105,30 @@ fn spawn_clock(conn: &Connection, state: &Shared, wake: watch::Receiver<u64>) {
         while rx.recv().await.is_some() {
             let settled = notifications::lock(&state).evaluate();
             notifications::settle(&conn, &state, settled).await;
+        }
+    });
+}
+
+/// Warns once per discharge when UPower says the battery is low. Without the system bus, or
+/// when Landlock hides `/sys/class/backlight`, the model stays quiet: the backlight is not
+/// read here and an empty battery warns of nothing.
+fn spawn_battery(conn: &Connection, state: &Shared) {
+    let (mut battery, commands) = athanor_services::battery::spawn(
+        &tokio::runtime::Handle::current(),
+        athanor_services::Buses::new(tokio::runtime::Handle::current()),
+        PathBuf::from(athanor_services::battery::BACKLIGHT_ROOT),
+    );
+    let (conn, state) = (conn.clone(), Arc::clone(state));
+    tokio::spawn(async move {
+        // The model ends when its command channel closes: the sender lives as long as we read.
+        let _commands = commands;
+        let mut low = LowBattery::new();
+        while battery.changed().await.is_ok() {
+            let reading = battery.borrow_and_update().battery;
+            if let Some(level) = low.observe(reading.as_ref()) {
+                let seconds = reading.and_then(|b| b.seconds);
+                notifications::post_low_battery(&conn, &state, level, seconds).await;
+            }
         }
     });
 }

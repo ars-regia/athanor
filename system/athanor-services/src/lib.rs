@@ -8,6 +8,7 @@
 //! for an ambient one, so code running outside the runtime fails to compile instead of
 //! aborting at run time.
 
+#[cfg(feature = "audio")]
 pub mod audio;
 pub mod battery;
 pub mod bluetooth;

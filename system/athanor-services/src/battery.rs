@@ -51,6 +51,9 @@ pub struct Battery {
     /// Until empty while discharging, until full while charging; `None` when UPower does
     /// not know yet.
     pub seconds: Option<u64>,
+    /// UPower's own judgement of the charge (`WarningLevel`: 3 low, 4 critical, 5 action),
+    /// which accounts for the machine's capacity and discharge rate; `None` when absent.
+    pub warning_level: Option<u32>,
 }
 
 /// The display device's battery; `None` when it is not a present battery, and then the
@@ -83,6 +86,7 @@ pub fn battery(props: &Props) -> Option<Battery> {
         percent,
         charge,
         seconds,
+        warning_level: props::get_u32(props, "WarningLevel"),
     })
 }
 
@@ -459,7 +463,8 @@ mod tests {
             Some(Battery {
                 percent: 72.0,
                 charge: Charge::Discharging,
-                seconds: Some(12300)
+                seconds: Some(12300),
+                warning_level: None
             })
         );
         assert_eq!(
@@ -581,6 +586,10 @@ mod tests {
         fn state(&self) -> u32 {
             2
         }
+        #[zbus(property)]
+        fn warning_level(&self) -> u32 {
+            3
+        }
     }
 
     /// The power profiles daemon, with a writable `ActiveProfile` that refuses `turbo`.
@@ -665,6 +674,7 @@ mod tests {
             (battery.percent, battery.charge),
             (55.0, Charge::Discharging)
         );
+        assert_eq!(battery.warning_level, Some(3));
         assert_eq!(state.profiles.unwrap().active, "balanced");
         assert_eq!(state.backlight, None);
     }

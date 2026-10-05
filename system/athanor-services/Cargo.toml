@@ -7,6 +7,10 @@ description = "The shell's models of system services: D-Bus mirrors on zbus, off
 authors = ["Athanor Forge <forge@athanor.os>"]
 
 [features]
+default = ["audio"]
+# The audio model, on libpulse. A headless program that reads no audio (athanor-shelld) turns
+# it off and links no libpulse.
+audio = ["dep:libpulse-binding"]
 # The private-bus helpers of this crate's tests, for the tests of the crates that build on it.
 testbus = []
 
@@ -16,7 +20,7 @@ futures-util = { workspace = true }
 athanor-unit = { path = "../athanor-unit" }
 libc = { workspace = true }
 # The PulseAudio protocol that pipewire-pulse serves, on libpulse's threaded main loop.
-libpulse-binding = { workspace = true }
+libpulse-binding = { workspace = true, optional = true }
 serde = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
