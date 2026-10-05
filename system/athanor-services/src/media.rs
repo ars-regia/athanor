@@ -156,9 +156,12 @@ pub fn playing(player: &Props) -> bool {
 
 fn length_us(player: &Props) -> Option<i64> {
     let metadata = metadata(player)?;
-    props::get_i64(&metadata, "mpris:length").or_else(|| {
-        props::get_u64(&metadata, "mpris:length").and_then(|length| i64::try_from(length).ok())
-    })
+    props::get_i64(&metadata, "mpris:length")
+        .or_else(|| {
+            props::get_u64(&metadata, "mpris:length")
+                .and_then(|length| i64::try_from(length).ok())
+        })
+        .filter(|length| *length > 0)
 }
 
 /// A player from its two interfaces' properties and its checked cover.
@@ -177,7 +180,7 @@ fn read_player(bus_name: &str, player: &Props, root: &Props, art: Option<Art>) -
         can_next: flag("CanGoNext"),
         can_previous: flag("CanGoPrevious"),
         can_seek: flag("CanSeek"),
-        position_us: props::get_i64(player, "Position"),
+        position_us: props::get_i64(player, "Position").filter(|position| *position >= 0),
         length_us: length_us(player),
         art,
     }
@@ -703,6 +706,23 @@ mod tests {
         assert_eq!(length(Value::from(5_000_000u64)), Some(5_000_000));
         assert_eq!(length(Value::from(u64::MAX)), None);
         assert_eq!(length(Value::from("5")), None);
+        // A length that is not positive says nothing: a player controls it, and a reader that
+        // clamps a position to it would otherwise be asked for an inverted range.
+        assert_eq!(length(Value::from(0i64)), None);
+        assert_eq!(length(Value::from(-1i64)), None);
+        assert_eq!(length(Value::from(i64::MIN)), None);
+    }
+
+    #[test]
+    fn a_negative_position_says_nothing() {
+        let position = |value: i64| {
+            let player = props(vec![("Position", owned(Value::from(value)))]);
+            read_player("org.mpris.MediaPlayer2.x", &player, &Props::new(), None).position_us
+        };
+        assert_eq!(position(1_500_000), Some(1_500_000));
+        assert_eq!(position(0), Some(0));
+        assert_eq!(position(-1), None);
+        assert_eq!(position(i64::MIN), None);
     }
 
     #[test]
