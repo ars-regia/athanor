@@ -138,6 +138,7 @@ jobs:
             iso-test/serial.log
             iso-test/phases.txt
             iso-test/verdict.md
+            iso-test/memory.json
           # A job that failed before the VM started has nothing to upload, and the empty
           # upload should not be a second error on top of the real one.
           if-no-files-found: ignore

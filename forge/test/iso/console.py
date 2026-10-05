@@ -46,6 +46,8 @@ import subprocess
 import sys
 import time
 
+from memory_case import MEMORY_PROBE, MEMORY_PROBE_WAIT
+
 # Marker -> phase name. Order matters only for reporting; each is written once. Colour
 # escapes are stripped before matching: systemd wraps unit names in them on the console,
 # so "[  OK  ] Started greetd.service - Greeter daemon." arrives as
@@ -467,6 +469,8 @@ def main() -> int:
     def open_settings() -> None:
         """Start Settings inside the desktop session and ask the guest whether its
         window came up and stayed. The picture is taken when the answer arrives."""
+        # The session's memory is read first, so that Settings is not part of it.
+        ask(MEMORY_PROBE, MEMORY_PROBE_WAIT)
         ask(SETTINGS_PROBE, SETTINGS_PROBE_WAIT)
         note("settings-asked")
 
