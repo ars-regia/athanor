@@ -41,7 +41,6 @@ members = [
   "system/athanor-store",
   "system/athanor-telemetry",
   "system/athanor-trust-state",
-  "system/athanor-updater-rs",
 ]
 
 # Out of this workspace since 2026-09-19 (doc_shell.md, SH4): gtk4-sys declares
