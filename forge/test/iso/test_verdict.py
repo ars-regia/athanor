@@ -83,7 +83,7 @@ def test_secure_boot_case_requires_secure_boot_enabled(tmp: pathlib.Path) -> Non
     code, report = verdict(tmp, COMPLETE_RUN + [("secureboot-enabled", 396)], 0, "secure-boot")
     assert code == 0, report
     assert "secure boot: secureboot-enabled (required: secureboot-enabled)" in report, report
-    for answer in ([("secureboot-disabled", 396)], []):
+    for answer in ([("secureboot-disabled", 396)], [("secureboot-not-enforced", 396)], []):
         code, report = verdict(tmp, COMPLETE_RUN + answer, 0, "secure-boot")
         assert code == 1, f"{answer}: a Secure Boot case without Secure Boot must fail"
         assert "**FAIL**" in report, report
@@ -101,12 +101,17 @@ def test_secureboot_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
     work = tmp / "sbprobe"
     shutil.rmtree(work, ignore_errors=True)
     (work / "bin").mkdir(parents=True)
-    (work / "bin" / "mokutil").write_text('#!/bin/sh\necho "SecureBoot $FAKE_SB"\n')
+    (work / "bin" / "mokutil").write_text('#!/bin/sh\nprintf "%b\\n" "$FAKE_SB"\n')
     (work / "bin" / "athanor-secureboot-enroll").write_text("#!/bin/sh\necho status\n")
     for tool in ("mokutil", "athanor-secureboot-enroll"):
         (work / "bin" / tool).chmod(0o755)
     (work / "probe.sh").write_bytes(console.SECUREBOOT_PROBE + b"\n")
-    for state, expected in (("enabled", "SECUREBOOT_ENABLED"), ("disabled", "SECUREBOOT_DISABLED")):
+    for state, expected in (
+        ("SecureBoot enabled", "SECUREBOOT_ENABLED"),
+        ("SecureBoot disabled", "SECUREBOOT_DISABLED"),
+        # Firmware on, shim validation off: not an enforced Secure Boot.
+        ("SecureBoot enabled\\nSecureBoot validation is disabled in shim", "SECUREBOOT_NOT_ENFORCED"),
+    ):
         proc = subprocess.run(
             ["sh", str(work / "probe.sh")],
             capture_output=True,

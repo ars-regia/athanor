@@ -68,7 +68,7 @@ KARG_SIGNALS = ("karg-compress-ok", "karg-compress-not-applicable")
 # nothing about first boot no matter how long it is left going.
 FAILURE_SIGNALS = ("panic", "emergency", "reinstall-loop")
 # The guest's answer to SECUREBOOT_PROBE in console.py.
-SECUREBOOT_SIGNALS = ("secureboot-enabled", "secureboot-disabled")
+SECUREBOOT_SIGNALS = ("secureboot-enabled", "secureboot-not-enforced", "secureboot-disabled")
 
 
 def main() -> int:

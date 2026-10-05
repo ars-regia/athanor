@@ -77,6 +77,7 @@ MARKERS = (
     # reports. Only the Secure Boot case of the test requires ENABLED (verdict.py).
     (b"SECUREBOOT_ENABLED", "secureboot-enabled"),
     (b"SECUREBOOT_DISABLED", "secureboot-disabled"),
+    (b"SECUREBOOT_NOT_ENFORCED", "secureboot-not-enforced"),
     # The guest's own answer to GREETER_PROBE below: a greeter session that is still
     # there, with the shell inside it, after it has had time to die.
     (b"GREETER_ALIVE", "greeter-alive"),
@@ -291,9 +292,12 @@ KARG_PROBE_WAIT = 5.0
 # job against the Athanor certificate in MokList. athanor-secureboot-enroll --status follows
 # the answer, so the console log also shows the guided enrolment helper reading the same
 # state on the installed system. printf assembles the marker, as in the other probes.
+# ENABLED only for the exact answer: with MokSBState set mokutil adds "SecureBoot validation
+# is disabled in shim" below "SecureBoot enabled", and shim then checks nothing it loads.
 SECUREBOOT_PROBE = (
     b"case $(mokutil --sb-state 2>/dev/null) in"
-    b" 'SecureBoot enabled'*) printf 'SECUREBOOT_%s\\n' ENABLED;;"
+    b" *'validation is disabled'*) printf 'SECUREBOOT_%s\\n' NOT_ENFORCED;;"
+    b" 'SecureBoot enabled') printf 'SECUREBOOT_%s\\n' ENABLED;;"
     b" *) printf 'SECUREBOOT_%s\\n' DISABLED;;"
     b" esac; athanor-secureboot-enroll --status"
 )

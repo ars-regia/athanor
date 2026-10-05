@@ -17,7 +17,7 @@ STUB = textwrap.dedent("""\
     #!/usr/bin/env bash
     echo "$*" >> "$STUB_LOG"
     case $1 in
-    --sb-state) echo "SecureBoot disabled" ;;
+    --sb-state) printf '%b\\n' "${STUB_SB_STATE:-SecureBoot disabled}" ;;
     --test-key) echo "$2 $STUB_TEST_KEY"; exit "${STUB_TEST_RC:-0}" ;;
     --import) exit 0 ;;
     esac
@@ -47,13 +47,14 @@ class Enroll(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_enroll(self, answer, *args, rc=0):
+    def run_enroll(self, answer, *args, rc=0, sb_state="SecureBoot disabled"):
         env = dict(
             os.environ,
             PATH=f"{self.dir / 'bin'}:{os.environ['PATH']}",
             STUB_LOG=str(self.log),
             STUB_TEST_KEY=answer,
             STUB_TEST_RC=str(rc),
+            STUB_SB_STATE=sb_state,
         )
         return subprocess.run(
             ["bash", str(self.script), *args], env=env, capture_output=True, text=True
@@ -67,6 +68,24 @@ class Enroll(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Athanor certificate: not enrolled", result.stdout)
         self.assertFalse(any(c.startswith("--import") for c in self.calls()))
+
+    def test_the_secure_boot_state_is_matched_exactly(self):
+        for answer, expected in (
+            ("SecureBoot enabled", "Secure Boot: enabled\n"),
+            ("SecureBoot disabled", "Secure Boot: disabled\n"),
+            # Firmware on, shim off: "enabled" must not be read into this answer.
+            (
+                "SecureBoot enabled\\nSecureBoot validation is disabled in shim",
+                "Secure Boot: not enforced",
+            ),
+        ):
+            with self.subTest(answer=answer):
+                result = self.run_enroll("is not enrolled", "--status", sb_state=answer)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(expected, result.stdout)
+        result = self.run_enroll("is not enrolled", "--status", sb_state="EFI variables are not supported")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("unexpected answer", result.stderr)
 
     def test_an_enrolled_certificate_is_not_requested_again(self):
         # mokutil exits 1 for an enrolled key on some versions: the text decides, not the status.

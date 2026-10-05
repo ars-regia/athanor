@@ -26,6 +26,14 @@ die() {
 [[ -r $CERT ]] || die "$CERT is missing from the image"
 
 sb_state=$(mokutil --sb-state 2> /dev/null) || die "mokutil cannot read the Secure Boot state"
+# mokutil adds "SecureBoot validation is disabled in shim" below "SecureBoot enabled" when
+# MokSBState is set: the firmware enforces, shim does not, so nothing it loads is checked.
+case $sb_state in
+*"validation is disabled"*) secure_boot="not enforced: on in the firmware, but shim's validation is disabled (turn it back on with sudo mokutil --enable-validation)" ;;
+"SecureBoot enabled") secure_boot=enabled ;;
+"SecureBoot disabled") secure_boot=disabled ;;
+*) die "mokutil --sb-state gave an unexpected answer: $sb_state" ;;
+esac
 # The answer of --test-key is its output: its exit status does not tell enrolled from not
 # enrolled, so it is read through a process substitution and the text decides; an answer
 # that matches none of the three below stops the script.
@@ -37,7 +45,7 @@ case $test_key in
 *) die "mokutil --test-key gave an unexpected answer: $test_key" ;;
 esac
 
-echo "Secure Boot: ${sb_state#SecureBoot }"
+echo "Secure Boot: $secure_boot"
 case $enrolment in
 enrolled) echo "Athanor certificate: enrolled as a Machine Owner Key" ;;
 requested) echo "Athanor certificate: enrolment requested, to be confirmed in MokManager at the next boot" ;;
