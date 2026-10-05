@@ -614,6 +614,10 @@ fn vpn_row(vpn: &Vpn) -> gtk4::Box {
 }
 
 /// The network page: one per surface, over the one service of the process.
+///
+/// Keep the `Page` alive as long as its widget is on screen. The service holds only a weak
+/// reference to the page's view, so a dropped `Page` leaves a widget that silently stops
+/// updating.
 pub struct Page {
     view: Rc<View>,
 }

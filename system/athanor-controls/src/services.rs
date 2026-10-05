@@ -14,6 +14,7 @@ use tokio::sync::{mpsc, watch};
 
 /// Each model as its `spawn` returns it: the state it publishes and the queue of commands it
 /// takes. A send fails only when the model has ended.
+#[derive(Clone)]
 pub struct Services {
     pub battery: (
         watch::Receiver<BatteryState>,
@@ -43,23 +44,13 @@ pub struct Services {
     pub pairing_requests: Rc<RefCell<Option<mpsc::Receiver<PairingRequest>>>>,
 }
 
-impl Clone for Services {
-    fn clone(&self) -> Services {
-        Services {
-            battery: self.battery.clone(),
-            network: self.network.clone(),
-            bluetooth: self.bluetooth.clone(),
-            audio: self.audio.clone(),
-            media: self.media.clone(),
-            backlight_root: self.backlight_root.clone(),
-            password_prompts: self.password_prompts.clone(),
-            pairing_requests: self.pairing_requests.clone(),
-        }
-    }
-}
-
 impl Services {
     /// Starts every model on `handle`'s runtime, sharing the one set of bus connections.
+    ///
+    /// This registers no agent: NetworkManager takes one secret agent and BlueZ one default
+    /// pairing agent per session, and those belong to the bar (doc_control_center.md). A
+    /// surface that reuses the pages calls `start` alone and its pages work, but a password
+    /// or a pairing it starts is then answered by the bar's agent when the bar runs.
     pub fn start(handle: &Handle, buses: &Buses, backlight_root: PathBuf) -> Services {
         let battery = battery::spawn(handle, buses.clone(), backlight_root.clone());
         let (network_state, network_commands, prompts) = network::spawn(handle, buses.clone());
@@ -75,5 +66,16 @@ impl Services {
             password_prompts: Rc::new(RefCell::new(Some(prompts))),
             pairing_requests: Rc::new(RefCell::new(Some(requests))),
         }
+    }
+
+    /// Registers the NetworkManager secret agent. Only the bar calls this.
+    pub fn register_network_agent(&self) {
+        // A send fails only when the model has ended, and then there is nothing to register.
+        self.network.1.send(NetworkCommand::RegisterAgent).ok();
+    }
+
+    /// Registers the BlueZ pairing agent as the default. Only the bar calls this.
+    pub fn register_bluetooth_agent(&self) {
+        self.bluetooth.1.send(BluetoothCommand::RegisterAgent).ok();
     }
 }

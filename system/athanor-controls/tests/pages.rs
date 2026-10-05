@@ -121,9 +121,16 @@ fn find<W: IsA<gtk4::Widget>>(root: &gtk4::Widget, pick: impl Fn(&W) -> bool) ->
     None
 }
 
+/// The row that says `text`, and that tells assistive technologies its name as well: what a
+/// screen reader says does not come from the visible label.
 fn row_with(root: &gtk4::Widget, text: &str) -> gtk4::Button {
-    find::<gtk4::Button>(root, |button| has(button.upcast_ref(), text))
-        .unwrap_or_else(|| panic!("no row says {text:?}"))
+    let row = find::<gtk4::Button>(root, |button| has(button.upcast_ref(), text))
+        .unwrap_or_else(|| panic!("no row says {text:?}"));
+    assert!(
+        gtk4::test_accessible_has_property(&row, gtk4::AccessibleProperty::Label),
+        "the row {text:?} has no accessible name"
+    );
+    row
 }
 
 fn battery_page(rig: &mut Rig) {
@@ -169,6 +176,10 @@ fn battery_page(rig: &mut Rig) {
         button.label().as_deref() == Some("Performance")
     })
     .expect("the Performance radio");
+    assert!(
+        gtk4::test_accessible_has_property(&performance, gtk4::AccessibleProperty::Label),
+        "the Performance radio has no accessible name"
+    );
     performance.set_active(true);
     match rig.battery_commands.try_recv() {
         Ok(BatteryCommand::SetProfile(profile)) => assert_eq!(profile, "performance"),
@@ -218,6 +229,11 @@ fn network_page(rig: &mut Rig) {
     for text in ["Network", "Wired: connected", "Wi-Fi", "Airplane mode"] {
         assert!(has(&root, text), "the network page lacks {text:?}");
     }
+    let airplane = find::<gtk4::Switch>(&root, |_| true).expect("a switch row");
+    assert!(
+        gtk4::test_accessible_has_relation(&airplane, gtk4::AccessibleRelation::LabelledBy),
+        "the switch is not labelled by its row"
+    );
     // A secured network without a saved profile asks for its password, on the surface.
     row_with(&root, "Cafe, secured").emit_clicked();
     assert_eq!(opened.get(), 1, "the page asked its surface to show");

@@ -5,19 +5,32 @@
 # scene.sh is the one that adds cosmic-comp and a capture.
 set -euo pipefail
 
-export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/1000}
+# A directory of its own: whatever compositor the caller has stays out of reach, and the
+# socket this script waits for is its own.
+XDG_RUNTIME_DIR=$(mktemp -d)
+export XDG_RUNTIME_DIR
 export WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 WLR_HEADLESS_OUTPUTS=1
-# The accessibility bus needs a session bus, which this display does not bring.
-export GTK_A11Y=none ATHANOR_REQUIRE_DISPLAY=1
+# The test accessibility backend needs no bus, and records the names and relations that the
+# page tests read back.
+export GTK_A11Y=test ATHANOR_REQUIRE_DISPLAY=1
 
-log=$(mktemp)
+log=$XDG_RUNTIME_DIR/sway.log
 # An empty configuration: sway.conf starts the scene's session, which a test does not want.
 sway -c /dev/null &> "$log" &
 sway_pid=$!
 stop_sway() {
     if kill -0 "$sway_pid" 2> /dev/null; then
         kill "$sway_pid"
+        wait "$sway_pid" || echo "with-display.sh: sway ended with status $?" >&2
     fi
+    # What the compositor and this script left in the directory, one file at a time.
+    local leftover
+    for leftover in "$XDG_RUNTIME_DIR"/* "$XDG_RUNTIME_DIR"/.[!.]*; do
+        if [ -e "$leftover" ] || [ -S "$leftover" ]; then
+            rm -f -- "$leftover"
+        fi
+    done
+    rmdir "$XDG_RUNTIME_DIR"
 }
 trap stop_sway EXIT
 

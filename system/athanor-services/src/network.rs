@@ -525,6 +525,11 @@ pub fn secrets_reply(password: &str) -> Option<BTreeMap<String, Props>> {
 
 /// What the person can ask of NetworkManager. `Debug` never prints a password.
 pub enum NetworkCommand {
+    /// Registers the model's secret agent with NetworkManager, now and again with every new
+    /// owner of it. NetworkManager takes one agent per user session, so the process that
+    /// owns the prompts sends this and no other: a model that never gets it registers nothing
+    /// and is never asked for a password.
+    RegisterAgent,
     /// The Wi-Fi radio.
     Wireless(bool),
     /// Airplane mode: the Wi-Fi and the mobile radios together. Beyond the plan's commands,
@@ -549,6 +554,7 @@ pub enum NetworkCommand {
 impl std::fmt::Debug for NetworkCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::RegisterAgent => f.write_str("RegisterAgent"),
             Self::Wireless(on) => f.debug_tuple("Wireless").field(on).finish(),
             Self::Airplane(on) => f.debug_tuple("Airplane").field(on).finish(),
             Self::Join { network, password } => f
@@ -909,12 +915,16 @@ async fn run(
     let mut running: Option<(bool, Running)> = None;
     let mut refused = 0;
     let mut seen = 0;
+    // Whether `RegisterAgent` came, and the generation of the owner the agent was queued for.
+    let mut registering = false;
+    let mut registered_for: Option<u64> = None;
     loop {
         // The mirror ends only after it has emptied itself, so its last state is published too.
         let mut alive = true;
         tokio::select! {
             changed = nm.changed() => alive = changed.is_ok(),
             command = commands.recv() => match command {
+                Some(NetworkCommand::RegisterAgent) => registering = true,
                 Some(command) => waiting.push_back(Job::Command(command)),
                 None => return,
             },
@@ -962,7 +972,11 @@ async fn run(
             connections.clear();
             asked.clear();
             waiting.retain(|job| !matches!(job, Job::Register(_)));
+            registered_for = None;
+        }
+        if registering && registered_for != Some(seen) {
             if let Some(owner) = &owner {
+                registered_for = Some(seen);
                 waiting.push_back(Job::Register(owner.clone()));
             }
         }
@@ -1106,6 +1120,8 @@ async fn execute(context: Context, job: Job) -> zbus::Result<()> {
 
 async fn command_of(context: &Context, command: NetworkCommand) -> zbus::Result<()> {
     match command {
+        // Taken by the model's loop, which never queues it.
+        NetworkCommand::RegisterAgent => Ok(()),
         NetworkCommand::Wireless(on) => context.set_manager("WirelessEnabled", on).await,
         NetworkCommand::Airplane(on) => {
             let wireless = context.set_manager("WirelessEnabled", !on).await;
@@ -2004,6 +2020,12 @@ mod tests {
     }
 
     async fn rig(reply_timeout: Duration) -> Rig {
+        let rig = started(reply_timeout, true).await;
+        until(&rig.log, |log| !log.registered.is_empty()).await;
+        rig
+    }
+
+    async fn started(reply_timeout: Duration, register: bool) -> Rig {
         let bus = TestBus::start();
         let log = Shared::default();
         let nm = serve(&bus, &log).await;
@@ -2013,6 +2035,9 @@ mod tests {
             Buses::with(client.clone()),
             reply_timeout,
         );
+        if register {
+            commands.send(NetworkCommand::RegisterAgent).unwrap();
+        }
         let mut rig = Rig {
             bus,
             nm,
@@ -2029,7 +2054,6 @@ mod tests {
                 .is_some_and(|wifi| !wifi.networks.is_empty())
         })
         .await;
-        until(&rig.log, |log| !log.registered.is_empty()).await;
         rig
     }
 
@@ -2121,6 +2145,13 @@ mod tests {
         assert_eq!(labels, ["Lab", "Home"], "the strongest first");
         assert_eq!(wifi.networks[1].saved.as_deref(), Some(SAVED));
         assert_eq!(wifi.networks[0].security, Security::Personal { sae: false });
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_model_that_was_not_asked_registers_no_agent() {
+        let rig = started(REPLY_TIMEOUT, false).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(rig.log.lock().unwrap().registered.is_empty());
     }
 
     #[tokio::test(flavor = "current_thread")]

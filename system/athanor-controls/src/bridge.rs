@@ -63,7 +63,7 @@ pub fn follow<T: Clone + 'static>(mut rx: watch::Receiver<T>, apply: impl Fn(&T)
 
 /// Hands each item of the model's channel to `handle` on the main context, until the model
 /// ends.
-pub fn drain<T: 'static>(mut rx: mpsc::Receiver<T>, handle: impl Fn(T) + 'static) {
+pub(crate) fn drain<T: 'static>(mut rx: mpsc::Receiver<T>, handle: impl Fn(T) + 'static) {
     glib::spawn_future_local(async move {
         while let Some(item) = rx.recv().await {
             handle(item);

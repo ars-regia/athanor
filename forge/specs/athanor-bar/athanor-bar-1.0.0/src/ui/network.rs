@@ -43,6 +43,8 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     popup.button.set_visible(false);
     let pending_open = Rc::new(Cell::new(false));
     let page = bridge::services().map(|services| {
+        // The bar owns the one agent of the session (doc_control_center.md).
+        services.register_network_agent();
         let page = Page::new(&services, popup.host(bar));
         popup.popover.set_child(Some(&page.widget()));
         let (popup, weak_bar, pending) = (popup.clone(), Rc::downgrade(bar), pending_open.clone());

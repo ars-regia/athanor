@@ -191,6 +191,10 @@ pub fn device_label(objects: &Objects, path: &str) -> Option<String> {
 /// What the person can ask of BlueZ.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BluetoothCommand {
+    /// Registers the model's pairing agent with BlueZ as the default, now and again with every
+    /// new owner of it. BlueZ lets one agent be the default, so the process that owns the
+    /// pairing requests sends this and no other: a model that never gets it registers nothing.
+    RegisterAgent,
     Power(bool),
     /// Other devices may find this adapter.
     Discoverable(bool),
@@ -578,6 +582,9 @@ async fn run(
     let mut running: Option<(Job, Running)> = None;
     let mut seen = 0;
     let mut was_powered = false;
+    // Whether `RegisterAgent` came, and the generation of the owner the agent was queued for.
+    let mut registering = false;
+    let mut registered_for: Option<u64> = None;
     let mut had_adapter = false;
     let mut discovery = false;
     // The value of `Pairable` last asked of BlueZ and not yet seen to change anything: asked
@@ -601,6 +608,7 @@ async fn run(
                 pairable_tried = None;
             }
             command = commands.recv() => match command {
+                Some(BluetoothCommand::RegisterAgent) => registering = true,
                 Some(command) => {
                     // A pairing waits for the person for minutes: whatever would queue
                     // behind it and ends it anyway cancels it, outside the queue.
@@ -661,7 +669,11 @@ async fn run(
             shared.set_pairing(None);
             was_powered = false;
             waiting.retain(|job| !matches!(job, Job::Register(_) | Job::Pairable(_)));
+            registered_for = None;
+        }
+        if registering && registered_for != Some(seen) {
             if let Some(owner) = owner {
+                registered_for = Some(seen);
                 waiting.push_back(Job::Register(owner));
             }
         }
@@ -823,6 +835,8 @@ async fn execute(context: Context, job: Job) -> zbus::Result<()> {
 
 async fn command_of(context: &Context, command: BluetoothCommand) -> zbus::Result<()> {
     match command {
+        // Taken by the model's loop, which never queues it.
+        BluetoothCommand::RegisterAgent => Ok(()),
         BluetoothCommand::Power(on) => context.set_adapter("Powered", on).await,
         BluetoothCommand::Discoverable(on) => context.set_adapter("Discoverable", on).await,
         BluetoothCommand::Discovery(on) => {
@@ -1348,6 +1362,12 @@ mod tests {
     }
 
     async fn rig_with(reply_timeout: Duration, setup: impl FnOnce(&mut Log)) -> Rig {
+        let rig = started(reply_timeout, setup, true).await;
+        until(&rig.log, |log| log.registered.is_some()).await;
+        rig
+    }
+
+    async fn started(reply_timeout: Duration, setup: impl FnOnce(&mut Log), register: bool) -> Rig {
         let bus = TestBus::start();
         let log = Shared::default();
         setup(&mut log.lock().unwrap());
@@ -1358,6 +1378,9 @@ mod tests {
             Buses::with(client.clone()),
             reply_timeout,
         );
+        if register {
+            commands.send(BluetoothCommand::RegisterAgent).unwrap();
+        }
         let mut rig = Rig {
             _bus: bus,
             bluez,
@@ -1368,7 +1391,6 @@ mod tests {
             requests,
         };
         wait_for(&mut rig.states, |_| true).await;
-        until(&rig.log, |log| log.registered.is_some()).await;
         rig
     }
 
@@ -1381,7 +1403,12 @@ mod tests {
 
     /// The error name of `method` called on the agent of `rig`'s model from `caller`, `ok`
     /// when it answers, about `device`.
-    async fn agent_call(client: &Connection, caller: &Connection, method: &str, device: &str) -> String {
+    async fn agent_call(
+        client: &Connection,
+        caller: &Connection,
+        method: &str,
+        device: &str,
+    ) -> String {
         let name = client.unique_name().expect("unique name").to_string();
         let proxy = Proxy::new(caller, name, AGENT_PATH, AGENT_IFACE)
             .await
@@ -1409,6 +1436,13 @@ mod tests {
         assert_eq!(state.paired[0].label, "Headset");
         assert!(state.paired[0].connected);
         assert_eq!(state.refused, 0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_model_that_was_not_asked_registers_no_agent() {
+        let rig = started(REPLY_TIMEOUT, |_| {}, false).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(rig.log.lock().unwrap().registered.is_none());
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -1467,7 +1501,9 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn a_call_from_a_process_that_is_not_bluez_is_rejected_and_ends_nothing() {
         let mut rig = rig(REPLY_TIMEOUT).await;
-        rig.commands.send(BluetoothCommand::Pair(PHONE.into())).unwrap();
+        rig.commands
+            .send(BluetoothCommand::Pair(PHONE.into()))
+            .unwrap();
         let PairingRequest::Confirm { reply, .. } = next_request(&mut rig.requests).await else {
             panic!("a confirmation is asked");
         };
@@ -1486,7 +1522,9 @@ mod tests {
         );
         reply.send(PairingReply::Accept).unwrap();
         until(&rig.log, |log| {
-            log.calls.iter().any(|call| call == &format!("Connect {PHONE}"))
+            log.calls
+                .iter()
+                .any(|call| call == &format!("Connect {PHONE}"))
         })
         .await;
         assert_eq!(rig.log.lock().unwrap().agent_results, ["ok"]);
@@ -1523,14 +1561,20 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn turning_the_adapter_off_cancels_the_pairing_that_would_hold_the_queue() {
         let mut rig = rig_with(REPLY_TIMEOUT, |log| log.hold_pair = true).await;
-        rig.commands.send(BluetoothCommand::Pair(PHONE.into())).unwrap();
+        rig.commands
+            .send(BluetoothCommand::Pair(PHONE.into()))
+            .unwrap();
         until(&rig.log, |log| {
-            log.calls.iter().any(|call| call == &format!("Pair started {PHONE}"))
+            log.calls
+                .iter()
+                .any(|call| call == &format!("Pair started {PHONE}"))
         })
         .await;
         rig.commands.send(BluetoothCommand::Power(false)).unwrap();
         until(&rig.log, |log| {
-            log.calls.iter().any(|call| call == &format!("CancelPairing {PHONE}"))
+            log.calls
+                .iter()
+                .any(|call| call == &format!("CancelPairing {PHONE}"))
         })
         .await;
         // The switch-off runs after the cancelled Pair returned: that Pair is the person's own
@@ -1542,18 +1586,28 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn forgetting_the_device_being_paired_cancels_the_pairing() {
         let rig = rig_with(REPLY_TIMEOUT, |log| log.hold_pair = true).await;
-        rig.commands.send(BluetoothCommand::Pair(PHONE.into())).unwrap();
+        rig.commands
+            .send(BluetoothCommand::Pair(PHONE.into()))
+            .unwrap();
         until(&rig.log, |log| {
-            log.calls.iter().any(|call| call == &format!("Pair started {PHONE}"))
+            log.calls
+                .iter()
+                .any(|call| call == &format!("Pair started {PHONE}"))
         })
         .await;
-        rig.commands.send(BluetoothCommand::Forget(PHONE.into())).unwrap();
+        rig.commands
+            .send(BluetoothCommand::Forget(PHONE.into()))
+            .unwrap();
         until(&rig.log, |log| {
-            log.calls.iter().any(|call| call == &format!("CancelPairing {PHONE}"))
+            log.calls
+                .iter()
+                .any(|call| call == &format!("CancelPairing {PHONE}"))
         })
         .await;
         until(&rig.log, |log| {
-            log.calls.iter().any(|call| call == &format!("RemoveDevice {PHONE}"))
+            log.calls
+                .iter()
+                .any(|call| call == &format!("RemoveDevice {PHONE}"))
         })
         .await;
     }
@@ -1561,9 +1615,13 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn a_model_that_ends_during_a_pairing_leaves_no_agent_and_no_bondable_adapter() {
         let rig = rig_with(REPLY_TIMEOUT, |log| log.hold_pair = true).await;
-        rig.commands.send(BluetoothCommand::Pair(PHONE.into())).unwrap();
+        rig.commands
+            .send(BluetoothCommand::Pair(PHONE.into()))
+            .unwrap();
         until(&rig.log, |log| {
-            log.calls.iter().any(|call| call == &format!("Pair started {PHONE}"))
+            log.calls
+                .iter()
+                .any(|call| call == &format!("Pair started {PHONE}"))
         })
         .await;
         drop(rig.commands);

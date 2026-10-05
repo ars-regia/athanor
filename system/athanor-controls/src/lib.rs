@@ -10,7 +10,7 @@ pub mod battery;
 pub mod bluetooth;
 pub mod bridge;
 pub mod i18n;
-pub mod media;
+mod media;
 pub mod network;
 pub mod widgets;
 
