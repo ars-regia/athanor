@@ -14,7 +14,7 @@ use std::rc::{Rc, Weak};
 
 use athanor_compositor_client::Client;
 use athanor_control_center::NOTIFICATIONS_WIDTH;
-use athanor_services::notifications::{self, NotificationsCommand, NotificationsState};
+use athanor_services::notifications::{self, NotificationsCommand, NotificationsState, Replied};
 use athanor_services::Buses;
 use gtk4::accessible::{Property, Relation, State};
 use gtk4::prelude::*;
@@ -62,6 +62,24 @@ pub struct Panel {
     asked: RefCell<HashSet<u32>>,
     shown: Cell<bool>,
     resized: RefCell<Option<Box<dyn Fn()>>>,
+}
+
+/// A reply's outcome: its pending text is done with either way. A refused one puts the text
+/// back as the draft, marked, unless the row is gone or the person has typed something new.
+fn settle_reply(
+    unsent: &mut HashMap<u32, String>,
+    drafts: &mut HashMap<u32, String>,
+    failed: &mut HashSet<u32>,
+    outcome: Replied,
+    listed: bool,
+) {
+    let text = unsent.remove(&outcome.id);
+    if let (false, true, Some(text)) = (outcome.ok, listed, text) {
+        if drafts.get(&outcome.id).is_none_or(String::is_empty) {
+            drafts.insert(outcome.id, text);
+            failed.insert(outcome.id);
+        }
+    }
 }
 
 /// Starts the notifications model on `runtime` and the panel that follows it. Without a
@@ -273,12 +291,14 @@ impl Panel {
         let listed = |id: &u32| state.entries.iter().any(|n| n.id == *id);
         self.drafts.borrow_mut().retain(|id, _| listed(id));
         self.failed.borrow_mut().retain(listed);
-        if state.refused != self.state.borrow().refused {
-            let mut unsent = self.unsent.borrow_mut();
-            for (id, text) in unsent.drain().filter(|(id, _)| listed(id)) {
-                self.drafts.borrow_mut().insert(id, text);
-                self.failed.borrow_mut().insert(id);
-            }
+        if let Some(outcome) = state.replied.filter(|_| state.replied != self.state.borrow().replied) {
+            settle_reply(
+                &mut self.unsent.borrow_mut(),
+                &mut self.drafts.borrow_mut(),
+                &mut self.failed.borrow_mut(),
+                outcome,
+                listed(&outcome.id),
+            );
         }
         self.unsent.borrow_mut().retain(|id, _| listed(id));
         self.state.replace(state);
@@ -627,4 +647,47 @@ fn find_named(widget: &gtk4::Widget, name: &str) -> Option<gtk4::Widget> {
         child = current.next_sibling();
     }
     None
+}
+
+#[cfg(test)]
+mod reply_tests {
+    use super::*;
+
+    fn outcome(id: u32, ok: bool) -> Replied {
+        Replied { seq: 0, id, ok }
+    }
+
+    fn pending() -> (HashMap<u32, String>, HashMap<u32, String>, HashSet<u32>) {
+        let unsent = HashMap::from([(1, "one".to_owned()), (2, "two".to_owned())]);
+        (unsent, HashMap::new(), HashSet::new())
+    }
+
+    #[test]
+    fn a_refusal_restores_only_its_own_row() {
+        let (mut unsent, mut drafts, mut failed) = pending();
+        settle_reply(&mut unsent, &mut drafts, &mut failed, outcome(1, false), true);
+        assert_eq!(drafts, HashMap::from([(1, "one".to_owned())]));
+        assert_eq!(failed, HashSet::from([1]));
+        assert_eq!(unsent.get(&2).map(String::as_str), Some("two"));
+    }
+
+    #[test]
+    fn a_success_drops_the_text_and_restores_nothing() {
+        let (mut unsent, mut drafts, mut failed) = pending();
+        settle_reply(&mut unsent, &mut drafts, &mut failed, outcome(1, true), true);
+        assert!(drafts.is_empty() && failed.is_empty() && !unsent.contains_key(&1));
+        // A later refusal of another row cannot bring row 1's text back.
+        settle_reply(&mut unsent, &mut drafts, &mut failed, outcome(2, false), true);
+        assert_eq!(drafts, HashMap::from([(2, "two".to_owned())]));
+    }
+
+    #[test]
+    fn a_newer_draft_or_a_departed_row_is_left_alone() {
+        let (mut unsent, mut drafts, mut failed) = pending();
+        drafts.insert(1, "newer".to_owned());
+        settle_reply(&mut unsent, &mut drafts, &mut failed, outcome(1, false), true);
+        settle_reply(&mut unsent, &mut drafts, &mut failed, outcome(2, false), false);
+        assert_eq!(drafts, HashMap::from([(1, "newer".to_owned())]));
+        assert!(failed.is_empty() && unsent.is_empty());
+    }
 }

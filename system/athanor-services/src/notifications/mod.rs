@@ -57,6 +57,24 @@ pub struct NotificationsState {
     /// Counts the commands the daemon refused or did not answer, so that a reader that sees
     /// it change knows its last action did not complete.
     pub refused: u32,
+    /// How the last reply ended, by notification id. Never the text.
+    pub replied: Option<Replied>,
+}
+
+/// The outcome of one `Reply`; `seq` changes with every outcome, so that a reader sees two
+/// in a row for the same id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Replied {
+    pub seq: u32,
+    pub id: u32,
+    pub ok: bool,
+}
+
+impl NotificationsState {
+    fn note_reply(&mut self, id: u32, ok: bool) {
+        let seq = self.replied.map_or(0, |last| last.seq.wrapping_add(1));
+        self.replied = Some(Replied { seq, id, ok });
+    }
 }
 
 /// The notifications' text is the person's: it stays out of the logs.
@@ -69,6 +87,7 @@ impl fmt::Debug for NotificationsState {
             .field("generation", &self.generation)
             .field("settled", &self.settled)
             .field("refused", &self.refused)
+            .field("replied", &self.replied)
             .finish()
     }
 }
@@ -177,7 +196,8 @@ impl Signal {
 /// What a call in flight comes back with.
 enum Done {
     Load(zbus::Result<(Vec<WireNotification>, Dnd)>),
-    Command(zbus::Result<()>),
+    /// The id a `Reply` was for, and how the call ended.
+    Command(Option<u32>, zbus::Result<()>),
 }
 
 type Running = Pin<Box<dyn Future<Output = Done> + Send>>;
@@ -221,6 +241,7 @@ impl Drop for ExitGuard {
                 generation: state.generation.wrapping_add(1),
                 settled: true,
                 refused: state.refused,
+                replied: state.replied,
                 ..NotificationsState::default()
             };
         });
@@ -283,6 +304,7 @@ async fn run(
                         generation: view.generation.wrapping_add(1),
                         settled: new.is_none(),
                         refused: view.refused,
+                        replied: view.replied,
                         ..NotificationsState::default()
                     };
                     waiting.clear();
@@ -321,6 +343,9 @@ async fn run(
                 } else {
                     tracing::warn!(?command, "the notification daemon is not there to take a command");
                     view.refused = view.refused.wrapping_add(1);
+                    if let NotificationsCommand::Reply { id, .. } = command {
+                        view.note_reply(id, false);
+                    }
                 }
             }
             () = until(retry_at) => {
@@ -361,11 +386,18 @@ async fn run(
                             attempt = attempt.saturating_add(1);
                         }
                     }
-                    Done::Command(Err(err)) => {
+                    Done::Command(reply, Err(err)) => {
                         tracing::warn!(error = %err, "the notification daemon refused or did not answer");
                         view.refused = view.refused.wrapping_add(1);
+                        if let Some(id) = reply {
+                            view.note_reply(id, false);
+                        }
                     }
-                    Done::Command(Ok(())) => {}
+                    Done::Command(reply, Ok(())) => {
+                        if let Some(id) = reply {
+                            view.note_reply(id, true);
+                        }
+                    }
                 }
             }
         }
@@ -451,6 +483,10 @@ async fn command_call(
     command: NotificationsCommand,
 ) -> Done {
     let (c, o) = (&connection, owner.as_str());
+    let reply = match command {
+        NotificationsCommand::Reply { id, .. } => Some(id),
+        _ => None,
+    };
     let sent = match command {
         // 2: the user closed it.
         NotificationsCommand::Close(id) => call(c, o, "Close", &(id, 2u32)).await,
@@ -474,7 +510,7 @@ async fn command_call(
             call(c, o, "SetRule", &(app, "popups", "false")).await
         }
     };
-    Done::Command(sent.map(|_| ()))
+    Done::Command(reply, sent.map(|_| ()))
 }
 
 #[cfg(test)]
@@ -695,6 +731,28 @@ mod tests {
         send(NotificationsCommand::ClearAll);
         let state = wait_for(&mut rig.states, |s| s.refused == 1).await;
         assert_eq!(state.entries.len(), 2);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_reply_reports_its_own_outcome_by_id() {
+        let mut rig = rig(two()).await;
+        wait_for(&mut rig.states, |s| s.available).await;
+        let fake = rig.fake.state.clone();
+        let reply = |id| NotificationsCommand::Reply { id, text: "hush".into() };
+        rig.commands.send(reply(2)).expect("model runs");
+        let state = wait_for(&mut rig.states, |s| s.replied.is_some()).await;
+        let first = state.replied.expect("outcome");
+        assert_eq!((first.id, first.ok), (2, true));
+        fake.lock().expect("state").refuse = true;
+        rig.commands.send(reply(1)).expect("model runs");
+        let state = wait_for(&mut rig.states, |s| s.replied.is_some_and(|r| r.seq != first.seq)).await;
+        let last = state.replied.expect("outcome");
+        assert_eq!((last.id, last.ok), (1, false));
+        assert!(!format!("{state:?}").contains("hush"));
+        // A command that is no reply names no id.
+        rig.commands.send(NotificationsCommand::ClearAll).expect("model runs");
+        let state = wait_for(&mut rig.states, |s| s.refused == 2).await;
+        assert_eq!(state.replied, Some(last));
     }
 
     #[test]

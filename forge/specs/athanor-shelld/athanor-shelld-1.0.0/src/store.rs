@@ -225,9 +225,11 @@ impl Store {
 
     /// Changes only the progress of a held notification (NC9): it keeps its place, its time,
     /// its read state and its popup.
-    pub fn set_value(&mut self, id: u32, value: Option<u8>) -> Option<Notification> {
+    /// `sender` is the connection that sent the update: replies go to it from now on.
+    pub fn set_value(&mut self, id: u32, value: Option<u8>, sender: String) -> Option<Notification> {
         let held = self.held.iter_mut().find(|held| held.id == id)?;
         held.content.value = value;
+        held.sender = sender;
         Some(held.clone())
     }
 
@@ -439,12 +441,13 @@ pub(crate) mod tests {
             );
         }
         store.mark_read(&[ids[0]]);
-        let updated = store.set_value(ids[0], Some(60)).expect("held");
+        let updated = store.set_value(ids[0], Some(60), ":1.7".into()).expect("held");
         assert_eq!(updated.content.value, Some(60));
         assert!(updated.read && updated.popup);
+        assert_eq!(updated.sender, ":1.7", "a new process of the application is who answers now");
         assert_eq!((updated.arrived_ms, updated.time), (7, 100));
         assert_eq!(store.iter().map(|n| n.id).collect::<Vec<_>>(), ids);
-        assert!(store.set_value(999, Some(1)).is_none());
+        assert!(store.set_value(999, Some(1), String::new()).is_none());
     }
 
     #[test]

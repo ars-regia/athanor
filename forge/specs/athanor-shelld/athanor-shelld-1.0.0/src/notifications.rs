@@ -315,7 +315,7 @@ impl State {
         }
         let outcome = if in_place {
             // Nothing but the progress changed: the row, its time, read state and popup stay.
-            let notification = self.store.set_value(replaces_id, content.value);
+            let notification = self.store.set_value(replaces_id, content.value, sender.clone());
             notification.map(|notification| Outcome {
                 notification,
                 replaced: true,

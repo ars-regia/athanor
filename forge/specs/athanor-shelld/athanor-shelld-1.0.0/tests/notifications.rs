@@ -1176,3 +1176,38 @@ async fn a_value_only_replace_keeps_the_read_state() {
     let update: WireNotification = replaced.next().await.expect("Replaced").body().deserialize().expect("wire");
     assert_eq!((update.value, update.read), (20, true));
 }
+
+#[tokio::test]
+async fn a_reply_goes_to_the_connection_that_sent_the_last_progress_update() {
+    let bus = Bus::start("progress-sender");
+    let (_daemon, _bar, center, app) = units(&bus, APP_CGROUP).await;
+    let second = bus.client().await;
+    let (first_public, second_public) = (public(&app).await, public(&second).await);
+    let mut heard = second_public
+        .receive_signal("NotificationReplied")
+        .await
+        .expect("subscribe");
+    let with = |value: i32| HashMap::from([("value", Value::I32(value))]);
+    let hints = |value: i32| {
+        let mut hints = with(value);
+        hints.insert("resident", Value::Bool(true));
+        hints
+    };
+    let id = notify(&first_public, 0, "copy", "", &["inline-reply", "Answer"], hints(10)).await;
+    // The same application, from a new process, reports the progress.
+    notify(&second_public, id, "copy", "", &["inline-reply", "Answer"], hints(50)).await;
+    drop(app);
+    private(&center)
+        .await
+        .call::<_, _, ()>("Reply", &(id, "to the new process"))
+        .await
+        .expect("Reply");
+    let (got, text): (u32, String) = heard
+        .next()
+        .await
+        .expect("NotificationReplied")
+        .body()
+        .deserialize()
+        .expect("args");
+    assert_eq!((got, text.as_str()), (id, "to the new process"));
+}
