@@ -3,7 +3,7 @@ Name:           athanor-nvidia-config
 Version:        1.0.0
 Release:        1%{?dist}
 Summary:        Athanor configuration for the NVIDIA image variants
-License:        MIT
+License:        GPL-3.0-or-later
 URL:            https://github.com/hr-mes/athanor
 BuildArch:      noarch
 Requires:       azoth-nvidia-kmod

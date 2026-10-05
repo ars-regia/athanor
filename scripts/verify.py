@@ -866,6 +866,8 @@ UPSTREAM_SPECS = {
     "athanor-matugen", "athanor-rosenpass", "athanor-syft", "athanor-tetragon",
     "athanor-cliphist", "azoth-microvm", "bat", "cosmic-comp",
 }
+# Crates whose manifests agents may not edit without the maintainer's approval.
+PROTECTED_CRATES = {"system/confidential_computing/athanor-attestation/Cargo.toml"}
 SPDX_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]*\+?$")
 # Identifiers deprecated by SPDX, or not identifiers at all (GPLv3, GPL-3.0, ...).
 SPDX_DEPRECATED = re.compile(r"^(A?L?GPL-\d(\.\d)?\+?|GPLv\d.*|LGPLv\d.*|GPL|LGPL)$")
@@ -914,8 +916,12 @@ def licence_problems(root=None):
                 continue
             lic = pkg.get("license")
             if lic != OWN_LICENCE:
-                out.append(f"{rel(f)}: license = {lic!r}, expected {OWN_LICENCE!r}")
-    for f in sorted(walk(root / "forge/specs", ".spec")):
+                note = " (change awaits maintainer approval: protected crate)" \
+                    if rel(f) in PROTECTED_CRATES else ""
+                out.append(f"{rel(f)}: license = {lic!r}, expected {OWN_LICENCE!r}{note}")
+    specs = subprocess.run(["git", "-C", str(root), "ls-files", "*.spec"],
+                           capture_output=True, text=True, check=True).stdout.split()
+    for f in sorted(root / s for s in specs):
         m = re.search(r"^License:\s*(.*?)\s*$", read(f), re.M)
         if not m:
             out.append(f"{rel(f)}: no License: field")
