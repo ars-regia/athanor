@@ -35,14 +35,11 @@ cp -a %{_sourcedir}/usr/lib/systemd/user/* %{buildroot}/usr/lib/systemd/user/
 /usr/lib/systemd/user/cosmic-bg.service
 /usr/lib/systemd/user/cosmic-settings-daemon.service
 /usr/lib/systemd/user/cosmic-osd.service
-/usr/lib/systemd/user/cosmic-osd.service.d/10-polkit-agent-helper.conf
 
 %changelog
 * Mon Oct 05 2026 Athanor Forge <forge@athanor.os> - 1.0.1-25
-- cosmic-osd: interim drop-in lets the setuid polkit-agent-helper-1 run (NoNewPrivileges,
-  RestrictSUIDSGID and the seccomp options that imply it), so password prompts work again
-  until polkit 127 with polkit-agent-helper.socket reaches the base. cosmic-settings-daemon:
-  ReadWritePaths=%%t so the varlink bind under ProtectSystem=strict no longer panics (#144).
+- cosmic-settings-daemon: ReadWritePaths=%%t so the varlink bind under ProtectSystem=strict
+  no longer panics and the volume keys work again (#144).
 * Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.1-24
 - Stage 2 switch: cosmic-panel, cosmic-applets and cosmic-notifications leave the session;
   the bar, the dock and athanor-shelld take their place. The athanor-cosmic-panel wrapper
