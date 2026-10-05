@@ -6,7 +6,9 @@ loops that check every statement against kernel v7.2, systemd v258–v262, shim,
 Fedora targeted SELinux policy and the running system. The maintainer approved the policy
 decisions introduced by the verifications on 2026-09-14 and chose the firmware policy of
 D48 on the same day. The specification passed gate P0 on 2026-09-14, with the mechanism of
-the guided reseal (D42) left open for P4b.
+the guided reseal (D42) left open for P4b. Amended 2026-10-06 (maintainer decision A2-9, #151): this
+document is tier 3, root and the image, of `doc_threat_model.md`; sections 9 and 10 say
+what changed.
 
 This document is the definitive profile of the Athanor kernel and of the platform layer
 that makes its guarantees real: what the kernel is, how it boots, how its integrity is
@@ -589,9 +591,7 @@ with layers), IMA log (D23).
 **LUKS** (D42): in attested mode, TPM 2.0 policy through `systemd-pcrlock` on PCR 7 and
 PCR 14 plus the signed PCR 11 policy (initrd phase, UKI profile 0), never PCR 12, so role
 changes do not require resealing; in degraded mode TPM plus PIN, or a passphrase. A
-recovery key is always enrolled. Amended 2026-10-06 (maintainer decision A2-9, #151): this
-document is tier 3, root and the image, of `doc_threat_model.md`; sections 9 and 10 say
-what changed.
+recovery key is always enrolled.
 
 **Attestation** (restricted area): admission of a mesh host requires its identity, a
 verified TPM quote and with the dm-verity option, the active IPE class derived from PCR 11 and the PCR 12 event log (D38, section 10).
