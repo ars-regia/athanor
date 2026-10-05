@@ -1,34 +1,49 @@
 #!/usr/bin/env bash
-# Builds every forge spec that changed since BASE, each with build_spec.sh in the builder image,
-# the way the DAG builds it. Spec Build Check runs it on a pull request; it runs locally too.
+# Builds every forge spec that changed since BASE and that the DAG builds, each with
+# build_spec.sh in the builder image, the way the DAG builds it. Spec Build Check runs it on a
+# pull request; it runs locally too.
 #
-# Usage: build_changed_specs.sh BASE BUILDER_IMAGE
+# Usage: build_changed_specs.sh [--dry-run] BASE [BUILDER_IMAGE]
 #
-# Skipped: forge/specs/azoth (Kernel Build builds the kernel), athanor-telemetry (the DAG builds
-# it with Nix, not rpmbuild), and directories the change deleted or that hold no .spec.
+# The DAG builds the custom_packages of forge/config/packages.json (dag_orchestrator.py
+# --list-spec-dirs), so that list decides what is built here. Every other changed directory is
+# named and skipped: the kernel (Kernel Build builds it), Nix-built packages, specs the DAG does
+# not list, and directories the change deleted or that hold no .spec.
+# --dry-run prints what would be built and skipped, and needs no BUILDER_IMAGE.
 set -euo pipefail
 
-BASE=${1:?usage: build_changed_specs.sh BASE BUILDER_IMAGE}
-IMAGE=${2:?usage: build_changed_specs.sh BASE BUILDER_IMAGE}
+dry_run=0
+if [[ ${1:-} == --dry-run ]]; then
+    dry_run=1
+    shift
+fi
+BASE=${1:?usage: build_changed_specs.sh [--dry-run] BASE [BUILDER_IMAGE]}
+if ((dry_run)); then IMAGE=${2:-}; else IMAGE=${2:?usage: build_changed_specs.sh [--dry-run] BASE BUILDER_IMAGE}; fi
 root=$(git rev-parse --show-toplevel)
 
 mapfile -t dirs < <(git -C "$root" diff --name-only "$BASE"...HEAD -- forge/specs | cut -d/ -f1-3 | sort -u)
+mapfile -t dag_dirs < <(cd "$root/forge" && python3 scripts/dag_orchestrator.py --list-spec-dirs | sed 's|^|forge/|')
 
 built=0
+skipped=0
 for dir in "${dirs[@]}"; do
-    case $dir in
-    forge/specs/azoth | forge/specs/athanor-telemetry)
-        echo "build_changed_specs: $dir is built by its own workflow, skipped"
-        continue
-        ;;
-    esac
-    if ! compgen -G "$root/$dir/*.spec" > /dev/null; then
-        echo "build_changed_specs: $dir holds no spec after the change, skipped"
+    if ! printf '%s\n' "${dag_dirs[@]}" | grep -qxF "$dir"; then
+        echo "build_changed_specs: $dir is not built by the DAG, skipped"
+        skipped=$((skipped + 1))
         continue
     fi
-    echo "build_changed_specs: building $dir"
-    podman run --rm -v "$root:/workspace" -w /workspace/forge "$IMAGE" \
-        bash scripts/build_spec.sh "${dir#forge/}"
+    if ! compgen -G "$root/$dir/*.spec" > /dev/null; then
+        echo "build_changed_specs: $dir holds no spec after the change, skipped"
+        skipped=$((skipped + 1))
+        continue
+    fi
+    if ((dry_run)); then
+        echo "build_changed_specs: would build $dir"
+    else
+        echo "build_changed_specs: building $dir"
+        podman run --rm -v "$root:/workspace" -w /workspace/forge "$IMAGE" \
+            bash scripts/build_spec.sh "${dir#forge/}"
+    fi
     built=$((built + 1))
 done
-echo "build_changed_specs: built $built spec(s)"
+echo "build_changed_specs: built $built spec(s), skipped $skipped"
