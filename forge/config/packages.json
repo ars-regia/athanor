@@ -37,7 +37,6 @@
     "recovery",
     "cargo-tools",
     "kernel-forge",
-    "athanor-semantic-db",
     "cosmic-comp"
   ],
   "custom_tier0": [
