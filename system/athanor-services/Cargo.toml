@@ -15,6 +15,8 @@ testbus = []
 futures-util = { workspace = true }
 athanor-unit = { path = "../athanor-unit" }
 libc = { workspace = true }
+# The PulseAudio protocol that pipewire-pulse serves, on libpulse's threaded main loop.
+libpulse-binding = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 zbus = { workspace = true }

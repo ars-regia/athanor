@@ -1,60 +1,28 @@
 //! The audio module (doc_bar.md, BR3): output and input volume, mute, the device in use,
-//! and the media controls. The sound server is reached through libpulse on the bar's GLib
-//! main loop; `pipewire-pulse` serves it. A lost server hides the module, and the bar
-//! reconnects with a backoff from 500 ms to 8 s.
-//!
-//! Two rules keep libpulse from aborting the bar:
-//! - a libpulse callback only stages data and schedules an idle callback: `connect()` calls
-//!   the state callback while the context is borrowed, and the other callbacks run inside
-//!   libpulse's dispatch;
-//! - every call on the context goes through `with_ready`: libpulse-binding asserts on the
-//!   null operation a context in any other state returns.
+//! and the media controls. The sound server is reached by the model in athanor-services, which
+//! keeps libpulse on a thread of its own: nothing here calls it, and the main loop only applies
+//! the state the model publishes. A lost server hides the module until it returns.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::rc::{Rc, Weak};
-use std::time::Duration;
 
-use athanor_bar::audio::{self, Device};
+use athanor_services::audio::{self, AudioCommand, AudioState, Device};
 use athanor_services::media::MediaCommand;
 use gtk4::accessible::Property;
 use gtk4::glib;
 use gtk4::prelude::*;
-use libpulse_binding::callbacks::ListResult;
-use libpulse_binding::context::subscribe::{Facility, InterestMaskSet};
-use libpulse_binding::context::{Context, FlagSet, State};
-use libpulse_binding::proplist::{properties, Proplist};
-use libpulse_binding::volume::{ChannelVolumes, Volume};
-use libpulse_glib_binding::Mainloop;
+use tokio::sync::mpsc;
 
+use super::bridge;
 use super::mpris::{Media, NowPlaying};
 use super::popup::{switch_row, Popup};
 use super::{Bar, Changed, ModuleUi};
 use crate::i18n::{tr, tr_with};
 
-const FIRST_RETRY_MS: u64 = 500;
-const LAST_RETRY_MS: u64 = 8000;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
     Output,
     Input,
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
-struct Snapshot {
-    outputs: Vec<Device>,
-    inputs: Vec<Device>,
-    default_output: Option<String>,
-    default_input: Option<String>,
-}
-
-/// What the four introspection calls of one refresh gather.
-#[derive(Default)]
-struct Gathering {
-    snapshot: Snapshot,
-    volumes: HashMap<(Kind, String), ChannelVolumes>,
-    remaining: u8,
 }
 
 thread_local! {
@@ -65,7 +33,7 @@ fn service() -> Option<Rc<Service>> {
     SERVICE.with(|cell| cell.borrow().clone())
 }
 
-/// An action the person took did not complete: the views show the last snapshot again, which
+/// An action the person took did not complete: the views show the last state again, which
 /// puts a slider or a switch back, and the open popover says so.
 fn action_failed() {
     if let Some(service) = service() {
@@ -76,28 +44,14 @@ fn action_failed() {
     }
 }
 
-/// The completion of a libpulse operation the person asked for. It runs inside a libpulse
-/// callback, so a failure is handled on the main loop.
-fn completion() -> Box<dyn FnMut(bool)> {
-    Box::new(|ok| {
-        if !ok {
-            tracing::warn!("the sound server refused an action");
-            glib::idle_add_local_once(action_failed);
-        }
-    })
-}
-
 struct Service {
     bar: Weak<Bar>,
-    // Fields drop in declaration order: the context, which runs on the main loop, goes first.
-    context: RefCell<Option<Context>>,
-    mainloop: Option<Mainloop>,
-    retry_ms: Cell<u64>,
-    gathering: RefCell<Option<Gathering>>,
-    /// An event arrived during a refresh: refresh again once it ends.
-    stale: Cell<bool>,
-    snapshot: RefCell<Option<Snapshot>>,
-    volumes: RefCell<HashMap<(Kind, String), ChannelVolumes>>,
+    /// The model's last state, which `bridge::follow` keeps current.
+    state: RefCell<AudioState>,
+    /// How many commands the model had counted as refused when the views last showed it.
+    refused: Cell<u32>,
+    /// `None` without a runtime: there is no model, and the module stays hidden.
+    commands: Option<mpsc::UnboundedSender<AudioCommand>>,
     media: RefCell<Option<Rc<Media>>>,
     views: RefCell<Vec<Weak<View>>>,
 }
@@ -107,19 +61,19 @@ impl Service {
         if let Some(service) = service() {
             return service;
         }
-        let mainloop = Mainloop::new(None);
-        if mainloop.is_none() {
-            tracing::error!("libpulse has no GLib main loop; the audio module is hidden");
-        }
+        let model = bridge::runtime().map(|(handle, _)| audio::spawn(&handle));
+        let (states, commands) = match model {
+            Some((states, commands)) => (Some(states), Some(commands)),
+            None => {
+                tracing::warn!("no runtime for the models; the audio module is hidden");
+                (None, None)
+            }
+        };
         let service = Rc::new(Service {
             bar: Rc::downgrade(bar),
-            context: RefCell::new(None),
-            mainloop,
-            retry_ms: Cell::new(FIRST_RETRY_MS),
-            gathering: RefCell::new(None),
-            stale: Cell::new(false),
-            snapshot: RefCell::new(None),
-            volumes: RefCell::new(HashMap::new()),
+            state: RefCell::new(AudioState::default()),
+            refused: Cell::new(0),
+            commands,
             media: RefCell::new(None),
             views: RefCell::new(Vec::new()),
         });
@@ -133,234 +87,33 @@ impl Service {
             },
             action_failed,
         )));
-        service.connect();
+        if let Some(states) = states {
+            // Weak, as the other modules hold the service: the thread-local owns it.
+            let weak = Rc::downgrade(&service);
+            bridge::follow(states, move |state| {
+                let Some(service) = weak.upgrade() else {
+                    return;
+                };
+                let failed = service.refused.replace(state.refused) != state.refused;
+                if *service.state.borrow() != *state {
+                    service.state.replace(state.clone());
+                    service.show_all();
+                }
+                if failed {
+                    action_failed();
+                }
+            });
+        }
         service
-    }
-
-    fn connect(self: &Rc<Self>) {
-        let Some(mainloop) = self.mainloop.as_ref() else {
-            return;
-        };
-        let Some(mut proplist) = Proplist::new() else {
-            self.retry();
-            return;
-        };
-        if proplist
-            .set_str(properties::APPLICATION_NAME, "athanor-bar")
-            .is_err()
-            || proplist
-                .set_str(properties::APPLICATION_ID, "os.athanor.Bar")
-                .is_err()
-        {
-            tracing::error!("libpulse refused the bar's properties");
-        }
-        let Some(mut context) = Context::new_with_proplist(mainloop, "athanor-bar", &proplist)
-        else {
-            self.retry();
-            return;
-        };
-        let weak = Rc::downgrade(self);
-        context.set_state_callback(Some(Box::new(move || {
-            let weak = weak.clone();
-            glib::idle_add_local_once(move || {
-                if let Some(service) = weak.upgrade() {
-                    service.state_changed();
-                }
-            });
-        })));
-        let weak = Rc::downgrade(self);
-        context.set_subscribe_callback(Some(Box::new(move |facility, _, _| {
-            if matches!(
-                facility,
-                Some(Facility::Sink | Facility::Source | Facility::Server)
-            ) {
-                let weak = weak.clone();
-                glib::idle_add_local_once(move || {
-                    if let Some(service) = weak.upgrade() {
-                        service.refresh();
-                    }
-                });
-            }
-        })));
-        // No autospawn: the session starts the sound server, never the bar.
-        if let Err(err) = context.connect(None, FlagSet::NOAUTOSPAWN, None) {
-            tracing::info!(error = %err, "no sound server yet");
-            self.retry();
-            return;
-        }
-        self.context.replace(Some(context));
-    }
-
-    fn retry(self: &Rc<Self>) {
-        let delay = self.retry_ms.get();
-        self.retry_ms.set((delay * 2).min(LAST_RETRY_MS));
-        let weak = Rc::downgrade(self);
-        glib::timeout_add_local_once(Duration::from_millis(delay), move || {
-            if let Some(service) = weak.upgrade() {
-                service.connect();
-            }
-        });
-    }
-
-    fn state_changed(self: &Rc<Self>) {
-        let state = self.context.borrow().as_ref().map(Context::get_state);
-        match state {
-            Some(State::Ready) => {
-                self.retry_ms.set(FIRST_RETRY_MS);
-                self.with_ready(|context| {
-                    context.subscribe(
-                        InterestMaskSet::SINK | InterestMaskSet::SOURCE | InterestMaskSet::SERVER,
-                        |_| {},
-                    );
-                });
-                self.refresh();
-            }
-            Some(State::Failed | State::Terminated) => {
-                tracing::info!(
-                    "the sound server went away; the audio module is hidden until it returns"
-                );
-                if let Some(mut context) = self.context.take() {
-                    context.set_state_callback(None);
-                    context.set_subscribe_callback(None);
-                    context.disconnect();
-                }
-                self.gathering.replace(None);
-                self.stale.set(false);
-                self.volumes.borrow_mut().clear();
-                self.publish(None);
-                self.retry();
-            }
-            _ => {}
-        }
-    }
-
-    /// Runs `action` on a ready context, and never on one in any other state.
-    fn with_ready(&self, action: impl FnOnce(&mut Context)) {
-        let mut context = self.context.borrow_mut();
-        if let Some(context) = context
-            .as_mut()
-            .filter(|context| context.get_state() == State::Ready)
-        {
-            action(context);
-        }
-    }
-
-    /// Reads the default sink and source, the sinks and the sources; events during a
-    /// refresh coalesce into one more. The defaults come through the special names, whose
-    /// callbacks turn an error or a timeout into `ListResult::Error` (rule 3).
-    fn refresh(self: &Rc<Self>) {
-        if self.gathering.borrow().is_some() {
-            self.stale.set(true);
-            return;
-        }
-        self.gathering.replace(Some(Gathering {
-            remaining: 4,
-            ..Gathering::default()
-        }));
-        let mut started = false;
-        self.with_ready(|context| {
-            let introspect = context.introspect();
-            let weak = Rc::downgrade(self);
-            introspect.get_sink_info_by_name("@DEFAULT_SINK@", move |result| match result {
-                ListResult::Item(info) => {
-                    let output = info.name.as_deref().map(str::to_owned);
-                    stage(&weak, |gathering| {
-                        gathering.snapshot.default_output = output
-                    });
-                }
-                ListResult::End | ListResult::Error => finish(&weak),
-            });
-            let weak = Rc::downgrade(self);
-            introspect.get_source_info_by_name("@DEFAULT_SOURCE@", move |result| match result {
-                ListResult::Item(info) => {
-                    let input = info.name.as_deref().map(str::to_owned);
-                    stage(&weak, |gathering| gathering.snapshot.default_input = input);
-                }
-                ListResult::End | ListResult::Error => finish(&weak),
-            });
-            let weak = Rc::downgrade(self);
-            introspect.get_sink_info_list(move |result| match result {
-                ListResult::Item(info) => {
-                    if let Some(name) = info.name.as_deref() {
-                        let device =
-                            device(name, info.description.as_deref(), &info.volume, info.mute);
-                        let volume = info.volume;
-                        stage(&weak, |gathering| {
-                            if gathering.snapshot.outputs.len() < audio::MAX_DEVICES {
-                                gathering
-                                    .volumes
-                                    .insert((Kind::Output, device.name.clone()), volume);
-                                gathering.snapshot.outputs.push(device);
-                            }
-                        });
-                    }
-                }
-                ListResult::End | ListResult::Error => finish(&weak),
-            });
-            let weak = Rc::downgrade(self);
-            introspect.get_source_info_list(move |result| match result {
-                // A monitor is a sink's loopback, not a microphone.
-                ListResult::Item(info) if info.monitor_of_sink.is_none() => {
-                    if let Some(name) = info.name.as_deref() {
-                        let device =
-                            device(name, info.description.as_deref(), &info.volume, info.mute);
-                        let volume = info.volume;
-                        stage(&weak, |gathering| {
-                            if gathering.snapshot.inputs.len() < audio::MAX_DEVICES {
-                                gathering
-                                    .volumes
-                                    .insert((Kind::Input, device.name.clone()), volume);
-                                gathering.snapshot.inputs.push(device);
-                            }
-                        });
-                    }
-                }
-                ListResult::Item(_) => {}
-                ListResult::End | ListResult::Error => finish(&weak),
-            });
-            started = true;
-        });
-        if !started {
-            self.gathering.replace(None);
-        }
-    }
-
-    /// One of the four calls ended: the last one publishes, on an idle callback.
-    fn finished_one(self: &Rc<Self>) {
-        let done = match self.gathering.borrow_mut().as_mut() {
-            Some(gathering) => {
-                gathering.remaining = gathering.remaining.saturating_sub(1);
-                gathering.remaining == 0
-            }
-            None => false,
-        };
-        if !done {
-            return;
-        }
-        let Some(gathering) = self.gathering.take() else {
-            return;
-        };
-        self.volumes.replace(gathering.volumes);
-        self.publish(Some(gathering.snapshot));
-        if self.stale.replace(false) {
-            self.refresh();
-        }
-    }
-
-    fn publish(&self, snapshot: Option<Snapshot>) {
-        let snapshot =
-            snapshot.filter(|snapshot| !snapshot.outputs.is_empty() || !snapshot.inputs.is_empty());
-        if *self.snapshot.borrow() == snapshot {
-            return;
-        }
-        self.snapshot.replace(snapshot);
-        self.show_all();
     }
 
     fn show_all(&self) {
         let now = self.media.borrow().as_ref().and_then(|media| media.now());
+        let state = self.state.borrow();
+        // No device at all hides the module.
+        let shown = (!state.outputs.is_empty() || !state.inputs.is_empty()).then_some(&*state);
         for view in self.views() {
-            view.show(self.snapshot.borrow().as_ref(), now.as_ref());
+            view.show(shown, now.as_ref());
         }
         if let Some(bar) = self.bar.upgrade() {
             bar.fit_groups();
@@ -373,40 +126,35 @@ impl Service {
         views.iter().filter_map(Weak::upgrade).collect()
     }
 
-    fn set_volume(&self, kind: Kind, name: &str, percent: f64) {
-        let Some(mut volume) = self.volumes.borrow().get(&(kind, name.to_owned())).copied() else {
-            return;
-        };
-        // `scale` keeps the balance between channels; an invalid volume would make libpulse
-        // return a null operation.
-        if !volume.is_valid() || volume.scale(Volume(audio::raw(percent))).is_none() {
-            return;
+    fn command(&self, command: AudioCommand) {
+        if let Some(commands) = &self.commands {
+            if commands.send(command).is_err() {
+                tracing::debug!("the audio model ended; the command is dropped");
+            }
         }
-        self.with_ready(|context| {
-            let mut introspect = context.introspect();
-            match kind {
-                Kind::Output => introspect.set_sink_volume_by_name(name, &volume, Some(completion())),
-                Kind::Input => introspect.set_source_volume_by_name(name, &volume, Some(completion())),
-            };
+    }
+
+    fn set_volume(&self, kind: Kind, name: &str, percent: f64) {
+        self.command(AudioCommand::Volume {
+            sink: kind == Kind::Output,
+            name: name.to_owned(),
+            // Clamped, so the cast cannot truncate; NaN is 0.
+            percent: percent.clamp(0.0, 100.0).round() as u32,
         });
     }
 
     fn set_mute(&self, kind: Kind, name: &str, muted: bool) {
-        self.with_ready(|context| {
-            let mut introspect = context.introspect();
-            match kind {
-                Kind::Output => introspect.set_sink_mute_by_name(name, muted, Some(completion())),
-                Kind::Input => introspect.set_source_mute_by_name(name, muted, Some(completion())),
-            };
+        self.command(AudioCommand::Mute {
+            sink: kind == Kind::Output,
+            name: name.to_owned(),
+            on: muted,
         });
     }
 
     fn set_default(&self, kind: Kind, name: &str) {
-        self.with_ready(|context| {
-            match kind {
-                Kind::Output => context.set_default_sink(name, completion()),
-                Kind::Input => context.set_default_source(name, completion()),
-            };
+        self.command(AudioCommand::Default {
+            sink: kind == Kind::Output,
+            name: name.to_owned(),
         });
     }
 
@@ -415,34 +163,6 @@ impl Service {
             media.command(command);
         }
     }
-}
-
-fn device(name: &str, description: Option<&str>, volume: &ChannelVolumes, muted: bool) -> Device {
-    Device {
-        name: name.to_owned(),
-        label: audio::device_label(description, name),
-        percent: audio::percent(volume.max().0),
-        muted,
-    }
-}
-
-/// Inside a libpulse callback: writes into the gathering, which no other code borrows then.
-fn stage(weak: &Weak<Service>, write: impl FnOnce(&mut Gathering)) {
-    if let Some(service) = weak.upgrade() {
-        if let Some(gathering) = service.gathering.borrow_mut().as_mut() {
-            write(gathering);
-        }
-    }
-}
-
-/// Inside a libpulse callback: the rest runs on the main loop.
-fn finish(weak: &Weak<Service>) {
-    let weak = weak.clone();
-    glib::idle_add_local_once(move || {
-        if let Some(service) = weak.upgrade() {
-            service.finished_one();
-        }
-    });
 }
 
 /// One direction: a volume slider, a mute switch, and the devices when there are several.
@@ -667,7 +387,7 @@ impl View {
         }
     }
 
-    fn show(self: &Rc<Self>, snapshot: Option<&Snapshot>, now: Option<&NowPlaying>) {
+    fn show(self: &Rc<Self>, snapshot: Option<&AudioState>, now: Option<&NowPlaying>) {
         let Some(snapshot) = snapshot else {
             self.popup.popover.popdown();
             self.popup.button.set_visible(false);
@@ -755,11 +475,6 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     let service = Service::get(bar);
     let view = View::new(bar);
     service.views.borrow_mut().push(Rc::downgrade(&view));
-    let now = service
-        .media
-        .borrow()
-        .as_ref()
-        .and_then(|media| media.now());
-    view.show(service.snapshot.borrow().as_ref(), now.as_ref());
+    service.show_all();
     Some(Box::new(AudioUi { view }))
 }
