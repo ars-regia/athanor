@@ -313,7 +313,8 @@ impl Portal {
         value: &Value<'_>,
     ) -> zbus::Result<()>;
 
-    #[zbus(property)]
+    // The specification names it in lower case; zbus would export "Version".
+    #[zbus(property, name = "version")]
     fn version(&self) -> u32 {
         1
     }
@@ -360,6 +361,81 @@ mod tests {
     #[test]
     fn a_maybe_value_does_not_cross() {
         assert!(to_value(&Some(1u32).to_variant()).is_none());
+    }
+
+    /// The interface is written by hand (PT2 asks for zbus-xmlgen output); this holds it to
+    /// xdg-desktop-portal's own definition, vendored unmodified from tag 1.20.4: every method,
+    /// signal and property, with the type and direction of each argument.
+    #[test]
+    fn the_interface_matches_the_upstream_definition() {
+        let upstream = members(include_str!(
+            "../interfaces/org.freedesktop.impl.portal.Settings.xml"
+        ));
+        let mut ours = String::new();
+        zbus::object_server::Interface::introspect_to_writer(
+            &Portal::new(Arc::default()),
+            &mut ours,
+            0,
+        );
+        assert_eq!(
+            upstream.len(),
+            4,
+            "ReadAll, Read, SettingChanged, version: {upstream:?}"
+        );
+        assert_eq!(members(&ours), upstream, "{ours}");
+    }
+
+    type Member = (String, String, Vec<(String, String)>);
+
+    /// `(kind, name, [(type, direction or access)])` of each member in introspection XML.
+    /// Signal arguments are compared without a direction: upstream writes "out", zbus nothing.
+    fn members(xml: &str) -> std::collections::BTreeSet<Member> {
+        let mut text = xml.to_owned();
+        while let Some(start) = text.find("<!--") {
+            let end = text[start..]
+                .find("-->")
+                .map_or(text.len(), |at| start + at + 3);
+            text.replace_range(start..end, "");
+        }
+        let attr = |tag: &str, key: &str| {
+            let needle = format!(" {key}=\"");
+            tag.find(&needle)
+                .map(|at| &tag[at + needle.len()..])
+                .and_then(|rest| rest.split('"').next())
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let mut found = std::collections::BTreeSet::new();
+        let mut open: Option<Member> = None;
+        for tag in text.split('<').skip(1).filter_map(|t| t.split('>').next()) {
+            match tag.split_whitespace().next().unwrap_or_default() {
+                kind @ ("method" | "signal") => {
+                    open = Some((kind.to_owned(), attr(tag, "name"), Vec::new()));
+                    if tag.ends_with('/') {
+                        found.extend(open.take());
+                    }
+                }
+                "/method" | "/signal" => found.extend(open.take()),
+                "arg" => {
+                    if let Some((kind, _, args)) = open.as_mut() {
+                        let direction = match kind.as_str() {
+                            "signal" => String::new(),
+                            _ => attr(tag, "direction"),
+                        };
+                        args.push((attr(tag, "type"), direction));
+                    }
+                }
+                "property" => {
+                    found.insert((
+                        "property".to_owned(),
+                        attr(tag, "name"),
+                        vec![(attr(tag, "type"), attr(tag, "access"))],
+                    ));
+                }
+                _ => {}
+            }
+        }
+        found
     }
 
     /// The whole GLib side, on GSettings' memory backend and the GNOME schemas the build
