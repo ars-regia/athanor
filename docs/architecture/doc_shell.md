@@ -39,7 +39,7 @@ What the platform gives us today:
 
 - **Stage 1** (implemented): a real design system, the update experience and the trust state, on top of COSMIC. Section 3 records it.
 - **Stage 2:** our bar and our dock, on a compositor client that holds every dependency on COSMIC (SH2). The session shield is born inside our bar.
-- **Later stages,** in this order unless a stage's own spec argues otherwise: 3, the launcher and the application library; 4, the password prompts, session lock and polkit agent together, because both reuse the greeter's authentication code and both are the trusted path; 5, the on-screen display, unless it already left with its agent in stage 4; 6, Settings; 7, the workspace overview; 8, the headless daemons: settings daemon, idle, wallpaper. Visible surfaces come first.
+- **Later stages,** in this order unless a stage's own spec argues otherwise: 3, the launcher and the application library; 4, the password prompts, session lock, polkit agent, on-screen display and end-of-session dialogs together, with cosmic-osd leaving in one step, because the lock and the agent both reuse the greeter's authentication code and both are the trusted path; 5, struck: the on-screen display left in stage 4 (`doc_osd.md` D7); 6, Settings; 7, the workspace overview; 8, the headless daemons: the launch broker, idle, wallpaper and the session services that replace the settings daemon. Visible surfaces come first.
 - **The rule for replacing a surface:** ours passes `doc_shell_standard.md`. Until then ours is enabled by hand and the image keeps COSMIC's. Tray, fractional scaling, screen-reader roles and i18n are requirements of every surface, not extras.
 - **No facades.** A control that does nothing, or a reading with no source, is a defect.
 
@@ -52,7 +52,7 @@ What the platform gives us today:
 - **Standard protocols are used anywhere:** `ext-workspace-v1`, `ext-foreign-toplevel-list-v1`, `ext-image-copy-capture-v1`, `ext-session-lock-v1`, `ext-idle-notify-v1`, and `wlr-layer-shell` through the shim (SH4). They survive a change of compositor, and where one covers a need the compositor client uses it too.
 - **Exceptions, by path.** `forge/tools/calmo-cosmic-theme` generates, by hand when the tokens or the libcosmic revision change, the committed default `CosmicTheme` that COSMIC applications read (SH3, SH5); the build fails when that output is stale. Until the switch of stage 2, the bridge of package 1c: `forge/specs/athanor-layout-translator`, and `system/athanor-layout/src/cosmic.rs` and `apply.rs`, which leave with it (SH7).
 - **The boundary is checked.** `scripts/verify.py` fails when a crate other than these names a dependency `libcosmic` or `cosmic-*`, or when Rust source outside them names a `com.system76` configuration. The check covers Rust only; the Python token generator under `system/athanor-style/calmo/` also writes COSMIC defaults, which are content for COSMIC applications. `system/athanor-style/src/cosmic_theme.rs` failed it until package 2a moved it into the compositor client, in the change that added the check; the check passes. The boundary is a failing check, not a review comment.
-- **Security features only a compositor can give** (authenticated privileged clients, a trusted path for credential prompts, compositor-drawn trust decorations) are proposed upstream first. If upstream declines, they become a small isolated patch set built in the forge and rebased per release.
+- **Security features only a compositor can give** (authenticated privileged clients, a trusted path for credential prompts, compositor-drawn trust decorations) are proposed upstream first. If upstream declines, they become a small isolated patch set built in the forge and rebased per release. The trusted path for credential prompts is the exception: by the maintainer's decision of 2026-10-05 it is our own cosmic-comp patch in `forge/specs/cosmic-comp`, with no upstream proposal (`doc_lock_and_prompts.md` D10, LP13); authenticated privileged clients and compositor-drawn trust decorations other than the prompt's keep this rule.
 - **A fork is reconsidered only when** System76 abandons or relicenses cosmic-comp, or a security requirement we cannot drop is declined and the patch set stops being maintainable, or the project has more maintainers. A fork starts from cosmic-comp, never from zero.
 
 **SH3. Of COSMIC only cosmic-comp stays.** The shell owns pixels and plumbing; cosmic-comp owns the screen and the input.
@@ -63,10 +63,10 @@ What the platform gives us today:
 | cosmic-notifications | notification daemon, a child of the panel's wrapper on an inherited socket pair until the switch | 2, gone since the switch (PR #83) | `athanor-shelld`, the notification server, with the bar |
 | cosmic-launcher, cosmic-app-library, pop-launcher | launcher, application library, the launcher's search backend | 3 (P4 found they work without the panel) | our launcher and application library (`doc_launcher.md`) |
 | cosmic-greeter as locker | session lock | 4 | our lock, on the greeter's authentication code |
-| cosmic-osd | on-screen display and the session's only polkit agent | 4, or 5 if it can run without its agent | our polkit agent (4) and on-screen display (5) |
-| cosmic-settings, cosmic-randr | Settings application, output configuration | 6 | our Settings; `athanor-settings-rs` is not revived, only mined |
-| cosmic-workspaces | overview | 7 | our overview |
-| cosmic-settings-daemon, cosmic-idle, cosmic-bg | configuration bus and media keys; `org.freedesktop.ScreenSaver` and idle policy; wallpaper | 8 | our daemons |
+| cosmic-osd | on-screen display, end-of-session dialogs and the session's only polkit agent | 4, in one step | our polkit agent and `athanor-osd` (`doc_lock_and_prompts.md`, `doc_osd.md`) |
+| cosmic-settings, cosmic-randr | Settings application, output configuration | 6 | our Settings (`doc_settings.md`); `athanor-settings-rs` is not revived, only mined |
+| cosmic-workspaces | overview | 7 | our overview (`doc_overview.md`) |
+| cosmic-settings-daemon, cosmic-idle, cosmic-bg | configuration bus (the media keys leave in stage 4, with `athanor-osd`); `org.freedesktop.ScreenSaver` and idle policy; wallpaper | 8 | `athanor-idle`, `athanor-wallpaper` and `athanor-sessiond`; the launch broker `athanor-broker` is a new component of stage 8 (`doc_session_daemons.md`) |
 
 The table is the end state and its order, not a calendar. A component leaves only when its replacement passes SH1's rule; until then the image keeps it.
 
@@ -89,7 +89,7 @@ COSMIC applications (`cosmic-files`, `cosmic-term`, `cosmic-edit`, `cosmic-store
 - **Calmo is the default, not a migration.** COSMIC's RPMs own the files under `/usr/share/cosmic/`, so our defaults cannot be packaged at those paths. The plan of 1a picks the mechanism: an overlay directory ahead of `/usr/share` in `XDG_DATA_DIRS` if cosmic-config honours it, otherwise a build step after the COSMIC RPMs, checked by `verify.py shipped`. A user whose `~/.config/cosmic` already holds a theme keeps it.
 - **Factory accent:** indigo, hue 231 and saturation 62 % in the HSL tokens (`#2e44c2` on light, `#8898f7` on dark). The user changes the accent; trust colours (verified, attention, blocked) are fixed and never derived from the accent.
 - **Stage 1 has one accent control, COSMIC's.** GTK inherits nothing from COSMIC: on the maintainer's desktop COSMIC is dark while GTK's colour scheme says `default`, and a GTK surface comes up light (spike P1). Our surfaces therefore read `CosmicTheme` themselves, for the mode and for the accent, and compute the on-accent text colour against WCAG AA at run time. The greeter uses the factory accent. A curated palette arrives with a Settings surface of our own, not before.
-- **Contrast is validated:** every text/background pair of the tokens meets WCAG AA in four variants, light and dark, each normal and high-contrast, checked in CI. Our surfaces follow COSMIC's high-contrast flag. Every animation has a disabled path that follows the reduced-motion setting.
+- **Contrast is validated:** every text/background pair of the tokens meets WCAG AA in four variants, light and dark, each normal and high-contrast, checked in CI. Our surfaces follow `org.athanor.desktop.appearance`, as `doc_visual_language.md` also requires. Every animation has a disabled path that follows the reduced-motion setting.
 - **The identity lives in form, not in colour,** because the colour is the user's. Two signatures carry it:
   - **The mark is the seal.** The Athanor mark is reserved for the trust shield (SH12) and appears nowhere else in the shell; the launcher uses a neutral glyph.
   - **The hearth wallpaper.** The default wallpaper is a set of concentric discs rising from a corner. Stage 1 ships it as two images, light and dark, in the factory accent. It follows the user's accent only when the accent comes from a curated palette, because each hue is then an image built ahead of time.
@@ -127,7 +127,7 @@ COSMIC applications (`cosmic-files`, `cosmic-term`, `cosmic-edit`, `cosmic-store
 - **Reading:** the shell reads every schema version it ever shipped and migrates in memory. A preset or key removed in a later version maps to a named successor in a migration table shipped with the schema.
 - **Rejecting:** an unknown key, a newer `schema`, or a malformed file rejects the whole user document. The shell then applies the nearest preset it knows and logs at error priority. A rollback to an older `/usr` therefore degrades, and a later upgrade restores.
 - **Writing:** the shell writes the user document only when the user changes the layout, at the current schema. It never rewrites it on its own. When the rejected document has a newer schema, the chooser asks before saving and keeps the old file as `layout.toml.<schema>`.
-- **Crash-loop protection:** five failures within ten minutes on `CLOCK_BOOTTIME`, the policy `/usr/bin/athanor-cosmic-panel` applied until the switch, then the vendor layout. The shell is never lost.
+- **Crash-loop protection:** five failures within ten minutes on `CLOCK_BOOTTIME`, the policy `/usr/bin/athanor-cosmic-panel` applied until the switch, then the vendor layout. The shell is never lost. The protection does not apply to `athanor-lock.service`, which restarts without limit (`doc_lock_and_prompts.md` LP10).
 
 **SH9. Invariants, never configurable.**
 
@@ -174,14 +174,14 @@ COSMIC applications (`cosmic-files`, `cosmic-term`, `cosmic-edit`, `cosmic-store
 **SH13. Tests.**
 
 - **Layouts** are captured left-to-right in English with a fixed clock and an empty tray. The three presets at their factory knobs run outputs {1, 2} × scale {1.0, 1.5}: 12 cases. The other 11 layouts of SH7 run once at one output and scale 1.0. On one output taller than wide, at scale 1.0, the three presets at their factory knobs run once more, and so does `float` with the panel at the bottom, which stacks the dock above the panel: 27 layout cases. Until the switch of stage 2 they capture cosmic-panel; after it, our bar and dock, with the same 14 layouts and the same `layout.toml`.
-- **Our own surfaces** run scale {1.0, 1.5} × theme {light, dark} × text {English, German for length, a right-to-left pseudo-locale}: 12 cases each. In stage 1 they are the greeter, with its seal from package 1d, and the chooser: 24 surface cases. The shield's 12 cases move to the bar; the bar and the dock add theirs in `doc_bar.md`. Italian and English are the shipped locales.
+- **Our own surfaces** run scale {1.0, 1.5} × theme {light, dark} × text {English, German for length, a right-to-left pseudo-locale}: 12 cases each. In stage 1 they are the greeter, with its seal from package 1d, and the chooser: 24 surface cases. The shield's 12 cases move to the bar; the bar and the dock add theirs in `doc_bar.md`. Italian and English are the shipped locales. The rig gains the clock cases of LN17 and the font case of LN13 (`doc_languages.md`).
 - **Where they run** (spike P3): in a rootless `fedora:43` container on the hosted `ubuntu-24.04` runner, with no GPU: a headless sway on pixman, cosmic-comp with its winit backend on llvmpipe, `cosmic-randr` for size and scale (an output taller than wide is set as a portrait size, not as a transform: only the shape matters, SH7), cosmic-panel, and `grim` over `ext-image-copy-capture-v1`. A scene costs 8 seconds and 1 GiB, and two independent runs are byte-identical.
 - **Two outputs are not reachable there:** cosmic-comp has no headless backend and Smithay's winit backend has one output. The 6 two-output cases run as a scheduled job on the KVM runner. They do not gate a push, and they are not dropped: they are the ones that catch a per-output regression in the panel. A `vkms` device on the hosted runner may replace the KVM job; nobody has tried it.
 - **What makes a golden reproducible:** isolated `XDG_*` directories per case, a frozen wall clock with a live monotonic clock, `TZ=UTC`, `LC_ALL` per case, a fixed set of running clients, the runner label `ubuntu-24.04` and the container pinned by digest. A case passes when at most a stated number of pixels differ from its golden image; the plan states the number.
 - **There is no input in that environment,** so a surface is captured by starting it in the state under test. A surface with a sheet or a popover, such as the bar's shield, starts with it open.
 - **What a golden cannot show:** the nested route has no dmabuf, no pointer, no hotplug, and reports a physical size of 0 × 0 mm. It proves layout and drawing, not behaviour on a real screen.
 - Each surface has an automated accessibility check: every interactive widget exposes a role and a name in the AT-SPI tree.
-- All strings go through gettext from the first commit.
+- All strings go through gettext from the first commit: read through `athanor-i18n` in the shell and the greeter, and through `gettext-rs` and glibc's gettext in our libadwaita applications (`doc_languages.md` LN1).
 
 ## 3. Stages
 
@@ -218,7 +218,7 @@ Out of stage 2: our launcher, lock, polkit agent, on-screen display, Settings an
 
 ### Later stages
 
-Stages 3 to 8 follow SH1 and SH3, each with its own spec. Stage 4 first checks whether cosmic-osd can run without its polkit agent, because a session holds one agent: if it cannot, the on-screen display comes forward from stage 5 into stage 4.
+Stages 3 to 8 follow SH1 and SH3, each with its own spec. Stage 4's check of whether cosmic-osd can run without its polkit agent is replaced by the joint retirement of `doc_osd.md` OD15 (D7): cosmic-osd leaves in stage 4 with `athanor-osd` and our polkit agent, without a patch.
 
 ### Spikes
 
@@ -249,7 +249,7 @@ P4 replaces the two spikes revision 4 reserved for stage 2: the security-context
 2. **Where the verification runs.** `skopeo standalone-verify`, `cosign verify` with the key, or the pull itself under the policy: `doc_update_trust.md` picks one and says what it needs offline.
 3. **The metered state** is "unknown" on many networks, so SH11 downloads there. A user on an unmarked tethered phone pays for it; the rule errs towards being up to date.
 4. **The sheet's behaviour** is designed in `doc_bar.md`: dismissal on an outside click or on focus loss, its stacking against the panel's own popups, which it drew over in the spike, and its place when the panel is at the bottom.
-5. **Hiding COSMIC Settings pages** that configure a panel we later remove may need a patch. It is a problem of stage 6, when Settings becomes ours.
+5. **Hiding COSMIC Settings pages** that configure a panel we later remove may need a patch. It is a problem of stage 6, when Settings becomes ours. Answered by `doc_settings.md` SE23: no COSMIC page is hidden or patched.
 6. **The greeter holds the real Wayland socket,** with capture and clipboard privilege. Per-surface confinement needs the compositor work of SH2. P4 measures what every client on that socket can do.
 7. **A screen reader at the greeter** needs an accessibility bus, Orca and audio for the `greetd` user. Stage 1 delivers the roles and names; the plumbing is a later requirement of "for everyone", not a wish.
 8. **Inter** is a proposal from the mockups, not yet seen on real hardware at fractional scale.
