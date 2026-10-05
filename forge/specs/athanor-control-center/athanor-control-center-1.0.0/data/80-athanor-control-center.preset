@@ -1,3 +1,4 @@
-# Not enabled for any user: the package is not in the image yet (doc_control_center.md, CC2).
+# Not enabled for any user, on purpose (doc_control_center.md, CC2): the panel is resident but
+# starts on demand.
 # The bus starts the unit when the bar's button or Super+C calls it.
 disable athanor-control-center.service

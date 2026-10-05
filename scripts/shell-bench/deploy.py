@@ -20,11 +20,15 @@ MEASURING = r"shell-bench/(soak|bench)\.py"
 
 
 # Per crate: the data files and where the spec's %install puts them. The binary always goes
-# to /usr/bin/<crate>; a later crate (athanor-control-center) is one more entry.
+# to /usr/bin/<crate>.
 CRATES = {
     "athanor-bar": {"/usr/lib/systemd/user/athanor-bar.service": "athanor-bar.service"},
     "athanor-dock": {
         "/usr/lib/systemd/user/athanor-dock.service": "athanor-dock.service"
+    },
+    "athanor-control-center": {
+        "/usr/lib/systemd/user/athanor-control-center.service": "athanor-control-center.service",
+        "/usr/share/dbus-1/services/os.athanor.ControlCenter1.service": "os.athanor.ControlCenter1.service",
     },
     "athanor-shelld": {
         "/usr/lib/systemd/user/athanor-shelld.service": "athanor-shelld.service",

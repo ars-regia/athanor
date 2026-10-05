@@ -14,8 +14,8 @@ through os.athanor.ControlCenter1: placed against the bar on the focused output,
 outside click, Escape or the loss of focus. It holds the Wi-Fi, Bluetooth, airplane mode, dark
 mode and power mode tiles, the volume and brightness sliders, the media controls and the
 battery level, and opens the pages of athanor-controls from the tiles' arrows. Confined with
-Landlock (no writes outside its directories, no TCP). Enabled by hand until the package
-joins the image.
+Landlock (no writes outside its directories, no TCP). Disabled by its user preset: the session
+bus starts it on the first call.
 
 %prep
 
@@ -59,3 +59,4 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-control
 - First release (doc_control_center.md, plan Task 11): the resident panel on pinned layer
   surfaces, shown and hidden by os.athanor.ControlCenter1.Show and Toggle, bound to Super+C at
   start and opened by the bar's button; placeholder pages; Landlock with no TCP.
+- Joins the image (tier 3), disabled by its user preset and started by bus activation.
