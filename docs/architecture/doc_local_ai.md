@@ -79,7 +79,7 @@ The registry is a closed list in the repository, generated into Needle's schemas
 | `read` | changes nothing | open a settings page, show the layout |
 | `reversible` | changes the session and can be undone at once | layout preset and knobs, do-not-disturb, volume, tiling |
 | `confirm` | needs an on-screen confirmation drawn by the bar | power actions, closing windows in bulk |
-| `forbidden` | never registered | anything that maps to an `os.athanor.*` polkit action, updates and rollback, the Gatekeeper, attestation, credentials, mesh keys |
+| `forbidden` | never registered | anything that maps to an `os.athanor.*` polkit action, updates and rollback, execution control (IPE), attestation, credentials, mesh keys |
 
 Rules that hold for every tool:
 
@@ -108,7 +108,7 @@ Rules that hold for every tool:
 
 - It stays out until spike N4 shows, on a labelled sample of real Athanor notifications, that it beats a rule baseline by a margin the plan of the package states.
 - If admitted, it runs as an ONNX export inside `athanor-inference`, not as a Python process, with the multilingual checkpoint for Italian.
-- It decides nothing about the Gatekeeper, polkit, attestation, updates or the trust state (`doc_shell.md`, SH12).
+- It decides nothing about execution control (IPE), polkit, attestation, updates or the trust state (`doc_shell.md`, SH12).
 
 **AI10. Budgets and hardware.**
 
@@ -174,7 +174,7 @@ N1 to N3 run on the maintainer's own machine, the environment that reaches Huggi
 2. **Which embedding model,** and whether Needle's head is enough (N1).
 3. **The wake word.** A custom phrase needs a trained model; who trains it, on what data, and whether the user can change it.
 4. **Voice confirmation.** AI5 forbids it outright. A user who cannot press a key needs another answer, for example a spoken passphrase that is not a recording, and that is not designed here.
-5. **A Gatekeeper compartment** for `athanor-inference` (AI3).
+5. **Confinement beyond AI3** for `athanor-inference`: whether the hardened user unit and Landlock of AI3 suffice, or a stronger compartment is needed.
 6. **A user-supplied model,** for people who want their own language. Excluded from version 1 because the manifest would then hold unsigned weights.
 7. **A generative model.** If a use case appears, it needs its own specification. For sizing: a 2B model adds about 3 to 5 GB, a 4B about 6 to 8 GB, a 9B about 8 to 12 GB, so it lifts the recommended memory to 16 GiB from the 4B class up. These figures are estimates.
 8. **A remote model on an attested mesh host** (`doc_kernel_profile.md`, D38), for thin machines. Not designed here.
