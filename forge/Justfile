@@ -58,23 +58,17 @@ clean-ghcr owner="hr-mes":
 update-specs:
     python3 scripts/zero_trust_updater.py out/spec-updates.md
 
-# Fetches upstream kernel SRPM, applies CachyOS BORE patches, computes NVIDIA shield ceiling, and merges Kconfig tuning
+# Builds the Azoth kernel in its builder container, as CI does (specs/azoth/KERNEL.md); stage is one of manifest|prep|refresh|microvm|build
 [group('Kernel Build')]
-kernel-prepare mode="full":
+kernel-build stage="build":
     #!/usr/bin/env bash
     set -euo pipefail
-    if [ "{{ mode }}" = "meta" ]; then
-        bash specs/azoth/prepare-chimera.sh --meta
-    else
-        bash specs/azoth/prepare-chimera.sh
-    fi
-
-# Runs containerized local build of Chimera kernel with Clang/ThinLTO inside a privileged Fedora 43 OCI container
-[group('Kernel Build')]
-kernel-build-local:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    bash specs/azoth/build-local.sh
+    root=$(git rev-parse --show-toplevel)
+    mkdir -p "$HOME/.cache/azoth" "$root/out"
+    podman build -t localhost/azoth-builder -f specs/azoth/builder/Containerfile specs/azoth
+    podman run --rm -v "$root:/forge" -v "$HOME/.cache/azoth:/var/cache/azoth" \
+        -w /forge localhost/azoth-builder \
+        bash forge/specs/azoth/build.sh --stage "{{ stage }}" --out /forge/out
 
 # Builds kpatch kernel livepatch module and packages it into an RPM
 [group('Kernel Build')]

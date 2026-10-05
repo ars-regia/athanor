@@ -35,11 +35,10 @@ rpms package="":
         just forge/fetch-repo-rpms; \
     fi
 
-# Prepares and builds Chimera Kernel
+# Builds the Azoth kernel
 [group('Pipeline')]
-kernel mode="full":
-    just forge/kernel-prepare "{{ mode }}"
-    just forge/kernel-build-local
+kernel stage="build":
+    just forge/kernel-build "{{ stage }}"
 
 # Builds System bootc container image
 [group('Pipeline')]
