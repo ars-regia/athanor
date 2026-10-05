@@ -465,6 +465,9 @@ def main():
 
 if __name__ == "__main__":
     if sys.argv[1:] == ["--list-spec-dirs"]:
-        print("\n".join(custom_spec_dirs(load_package_manifest())))
+        spec_dirs = custom_spec_dirs(load_package_manifest())
+        if not spec_dirs:
+            sys.exit(f"dag_orchestrator: no custom_packages in {CONFIG_PATH}")
+        print("\n".join(spec_dirs))
     else:
         main()

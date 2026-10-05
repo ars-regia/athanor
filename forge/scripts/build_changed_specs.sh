@@ -21,13 +21,18 @@ BASE=${1:?usage: build_changed_specs.sh [--dry-run] BASE [BUILDER_IMAGE]}
 if ((dry_run)); then IMAGE=${2:-}; else IMAGE=${2:?usage: build_changed_specs.sh [--dry-run] BASE BUILDER_IMAGE}; fi
 root=$(git rev-parse --show-toplevel)
 
-mapfile -t dirs < <(git -C "$root" diff --name-only "$BASE"...HEAD -- forge/specs | cut -d/ -f1-3 | sort -u)
-mapfile -t dag_dirs < <(cd "$root/forge" && python3 scripts/dag_orchestrator.py --list-spec-dirs | sed 's|^|forge/|')
+changed=$(git -C "$root" diff --name-only "$BASE"...HEAD -- forge/specs)
+dag_out=$(cd "$root/forge" && python3 scripts/dag_orchestrator.py --list-spec-dirs)
+[[ -n $dag_out ]] || { echo "build_changed_specs: the DAG lists no spec directory" >&2; exit 1; }
+
+declare -A in_dag=()
+while IFS= read -r line; do in_dag["forge/$line"]=1; done <<< "$dag_out"
+mapfile -t dirs < <(cut -d/ -f1-3 <<< "$changed" | sort -u | sed '/^$/d')
 
 built=0
 skipped=0
 for dir in "${dirs[@]}"; do
-    if ! printf '%s\n' "${dag_dirs[@]}" | grep -qxF "$dir"; then
+    if [[ -z ${in_dag[$dir]:-} ]]; then
         echo "build_changed_specs: $dir is not built by the DAG, skipped"
         skipped=$((skipped + 1))
         continue
