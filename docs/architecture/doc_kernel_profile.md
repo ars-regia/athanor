@@ -6,7 +6,7 @@ loops that check every statement against kernel v7.2, systemd v258–v262, shim,
 Fedora targeted SELinux policy and the running system. The maintainer approved the policy
 decisions introduced by the verifications on 2026-09-14 and chose the firmware policy of
 D48 on the same day. The specification passed gate P0 on 2026-09-14, with the mechanism of
-the guided reseal (D42) left open for P4b. Amended 2026-10-06 (maintainer decision A2-9, #151): this
+the guided reseal (D42) left open for P4b. Amended 2026-10-06 (maintainer decision A2-9 (#151)): this
 document is tier 3, root and the image, of `doc_threat_model.md`; sections 9 and 10 say
 what changed.
 
@@ -599,9 +599,10 @@ Keylime's example measured-boot policy considers PCRs 0–9 and 14 only, so a de
 policy covers PCR 11 and the command line events of the allowed role sets in PCR 12. The
 attestation code in the repository today returns fixed results and quotes the wrong PCRs;
 it is replaced, with the maintainer's approval, before any mesh admission depends on it.
-Amended 2026-10-06 (maintainer decision A2-9, #151): attestation is outside the threat
-model of 1.0 (`doc_threat_model.md`, TM7), and `athanor-attestation` moves to
-`experimental/` pending the maintainer's decision, because its path is restricted.
+Amended 2026-10-06 (maintainer decision A2-9 (#151)): attestation is outside the threat
+model of 1.0 (`doc_threat_model.md`, TM7). Moving `athanor-attestation` to
+`experimental/` is proposed in #151 and is not part of A2-9; it awaits the maintainer,
+because its path is restricted.
 
 ## 10. Execution integrity and security primitives
 
@@ -732,7 +733,7 @@ domain through SELinux; services also set `RestrictNamespaces=`.
   IPE does not see; `ptrace_scope=1` still allows root and a process's ancestors.
 - Code running as the user persists through autostart entries, `systemd --user` units and
   shell startup files; a Flatpak application with home access can write those files and
-  leave its sandbox. Amended 2026-10-06 (maintainer decision A2-9, #151): unconfined user
+  leave its sandbox. Amended 2026-10-06 (maintainer decision A2-9 (#151)): unconfined user
   code is the user (`doc_threat_model.md`, TM1); an application of the broker's `confined`
   class cannot write those paths (TM3, `doc_session_daemons.md` SD8); the Flatpak case
   remains, stated in TM4.
