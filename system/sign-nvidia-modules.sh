@@ -14,6 +14,10 @@
 #   --modules  the unsigned modules (OUT of nvidia.sh build), signed in place
 #   --devel    where the verified azoth-devel content is extracted; left for the caller, which
 #              signs its negative sample with the same sign-file
+# NVIDIA_MANIFEST_OPEN and NVIDIA_MANIFEST_LEGACY carry the sha256sum lines of the modules each
+# branch of the build produced (paths relative to the modules DIR), as nvidia-build.yml reports
+# them in its job outputs, which no other job can write: the script signs nothing unless the
+# .ko files under DIR are exactly those, with those hashes.
 #
 # The key in MODULE_SIGNING_KEY leaves the environment before the first child process starts and
 # is kept in a shell variable no child inherits. It reaches a file only after the kernel-devel is
@@ -53,6 +57,29 @@ trap 'rm -rf "$keys" "$verified"' EXIT
 modules=$(cd "$MODULES" && pwd)
 mkdir -p "$DEVEL"
 devel=$(cd "$DEVEL" && pwd)
+die() {
+    echo "${0##*/}: $*" >&2
+    exit 1
+}
+
+# The modules signed are exactly those the build reported, by path and hash: another artifact
+# of the run, a module added or replaced after the build, or one missing, stops the signing.
+manifest=$verified/modules.sha256
+for driver in open legacy; do
+    var=NVIDIA_MANIFEST_${driver^^}
+    [[ -n ${!var:-} ]] || die "$var is empty: the build reported no module of the $driver branch"
+    while IFS= read -r line; do
+        [[ $line =~ ^[0-9a-f]{64}\ \ $driver/[A-Za-z0-9._/-]+\.ko$ && $line != *..* ]] ||
+            die "$var: '$line' is not the hash and path of a module of the $driver branch"
+        echo "$line"
+    done <<< "${!var}"
+done > "$manifest"
+[[ -z $(find "$modules" -name '*.ko' ! -type f) ]] || die "a module in $modules is not a regular file"
+if ! diff <(cut -c67- "$manifest" | sort) <(cd "$modules" && find . -name '*.ko' -printf '%P\n' | sort) >&2; then
+    die "the modules in $modules are not those the build reported (< reported, > found)"
+fi
+(cd "$modules" && sha256sum --check --strict --quiet "$manifest") ||
+    die "a module in $modules differs from the one the build reported"
 
 artifact() { KERNEL_ARTIFACTS_DIR=$verified bash "$root/system/kernel-artifacts.sh" "$@"; }
 artifact resolve

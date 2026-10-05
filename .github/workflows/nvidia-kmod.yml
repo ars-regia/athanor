@@ -115,11 +115,17 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
+      # The two artifacts the build matrix uploads, by name: never a pattern, which would take
+      # in any other artifact of the run that matches it.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          pattern: nvidia-*-unsigned
+          name: nvidia-open-unsigned
           path: out
-          merge-multiple: true
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: nvidia-legacy-unsigned
+          path: out
 
       - name: Install cosign (pinned release, checksum-verified)
         run: |
@@ -145,6 +151,9 @@ jobs:
 
       - name: Sign with the module signing key (system/sign-nvidia-modules.sh)
         env:
+          # What the build reported, by path and hash: the script signs nothing else.
+          NVIDIA_MANIFEST_OPEN: ${{ needs.build.outputs.manifest-open }}
+          NVIDIA_MANIFEST_LEGACY: ${{ needs.build.outputs.manifest-legacy }}
           MODULE_SIGNING_KEY: ${{ secrets.MODULE_SIGNING_KEY }}
         run: bash system/sign-nvidia-modules.sh --modules out --devel devel
 

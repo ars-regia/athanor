@@ -25,6 +25,14 @@ on:
         description: "registry system/kernel-artifacts.sh resolved devel-digest against (get registry), required when devel-artifact is empty"
         type: string
         default: ""
+    outputs:
+      # The sha256sum lines of the modules each branch built, paths relative to the artifact
+      # root. A job output, which no other job of the run can write, unlike an artifact: the
+      # sign job of nvidia-kmod.yml signs nothing that is not listed here with this hash.
+      manifest-open:
+        value: ${{ jobs.build.outputs.manifest-open }}
+      manifest-legacy:
+        value: ${{ jobs.build.outputs.manifest-legacy }}
 
 permissions:
   contents: read
@@ -41,6 +49,11 @@ jobs:
       fail-fast: false
       matrix:
         driver: [open, legacy]
+    # One output name per branch: each leg sets only its own, and an output a leg leaves empty
+    # does not overwrite the other leg's value.
+    outputs:
+      manifest-open: ${{ steps.manifest.outputs.manifest-open }}
+      manifest-legacy: ${{ steps.manifest.outputs.manifest-legacy }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
@@ -85,6 +98,16 @@ jobs:
             -v "$HOME/.cache/azoth:/var/cache/azoth" \
             -w /forge localhost/azoth-nvidia \
             bash forge/specs/azoth/nvidia.sh build --driver "${{ matrix.driver }}" --devel /forge/devel --out /forge/out
+
+      - name: Manifest of the modules built
+        id: manifest
+        env:
+          DRIVER: ${{ matrix.driver }}
+        run: |
+          set -euo pipefail
+          manifest=$(cd out && find "$DRIVER" -name '*.ko' -type f | sort | xargs -r sha256sum)
+          [[ -n $manifest ]] || { echo "no module under out/$DRIVER" >&2; exit 1; }
+          printf 'manifest-%s<<MANIFEST\n%s\nMANIFEST\n' "$DRIVER" "$manifest" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
