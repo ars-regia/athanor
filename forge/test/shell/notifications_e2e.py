@@ -101,6 +101,24 @@ def link_box(popup, Atspi):
     return None
 
 
+def progress_values(app, Atspi, summary):
+    """The accessible values of the progress bars inside the popup named `summary`, or None
+    when it is not there."""
+    try:
+        popup = next(
+            node
+            for node in walk_nodes(app, Atspi)
+            if node.get_role_name() in ALERT_ROLES and node.get_name() == summary
+        )
+        return [
+            Atspi.Value.get_current_value(node.get_value_iface())
+            for node in walk_nodes(popup, Atspi)
+            if node.get_role_name() == "progress bar"
+        ]
+    except (GLib.Error, StopIteration):
+        return None
+
+
 def never(seen, seconds):
     """True when `seen` stays false for `seconds`."""
     deadline = time.monotonic() + seconds
@@ -251,7 +269,7 @@ def daemon_call(method, parameters=None, reply=None):
 def daemon_unread():
     """The ids the fake daemon lists as unread, with whether each is transient."""
     (listed,) = daemon_call(
-        "List", None, "(a(ussssa(sus)a(ss)bybbbxsssuuayuubibs))"
+        "List", None, "(a(ussssa(sus)a(ss)bybbbxsssuuayuubibsss))"
     ).unpack()
     return [(row[0], row[9]) for row in listed]
 
@@ -490,6 +508,64 @@ def main():
         log.read_text(encoding="utf-8"),
     )
     close_notification(rich)
+
+    # NC9: progress is a bar whose accessible value is the percentage, a value outside 0 to
+    # 100 is no bar, and the popup's "Reply" opens the center on that row (BR4).
+    copying = notify("Copying files", hints={"value": GLib.Variant("i", 40)})
+    check(
+        "a popup with a value shows a progress bar at its percentage (NC9)",
+        wait_for(lambda: progress_values(app, Atspi, "Copying files") == [40.0], 5),
+        repr(progress_values(app, Atspi, "Copying files")),
+    )
+    session = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    session.call_sync(
+        "org.freedesktop.Notifications", "/org/freedesktop/Notifications",
+        "org.freedesktop.Notifications", "Notify",
+        GLib.Variant(
+            "(susssasa{sv}i)",
+            ("e2e", copying, "", "Copying files", "", [], {"value": GLib.Variant("i", 75)}, 0),
+        ),
+        GLib.VariantType("(u)"), Gio.DBusCallFlags.NONE, -1, None,
+    )
+    check(
+        "a replace with a new value updates the bar in place",
+        wait_for(lambda: progress_values(app, Atspi, "Copying files") == [75.0], 5),
+        repr(progress_values(app, Atspi, "Copying files")),
+    )
+    close_notification(copying)
+    overshoot = notify("Overshoot", hints={"value": GLib.Variant("i", 150)})
+    check(
+        "a value of 150 shows no bar",
+        wait_for(shows("Overshoot"), 3) and progress_values(app, Atspi, "Overshoot") == [],
+        repr(progress_values(app, Atspi, "Overshoot")),
+    )
+    close_notification(overshoot)
+    chat = notify("Chat message", actions=["inline-reply", "Answer"])
+    check("a popup that takes a reply shows its button", wait_for(shows("Chat message"), 3))
+    check(
+        "the reply button is the inline-reply action's label, and not a second action button",
+        bool(buttons(app, Atspi, "Answer")) and not buttons(app, Atspi, "inline-reply"),
+    )
+    shown_before = len(cc_calls())
+    check("a click on Reply is pressed", press(app, Atspi, "Answer"))
+    check(
+        "Reply opens the center on that row's reply field (BR4)",
+        wait_for(lambda: f"Show notifications:{chat}" in cc_calls()[shown_before:], 3),
+        repr(cc_calls()),
+    )
+    check(
+        "Reply does not invoke the action on the daemon",
+        not any(
+            line.startswith(f"InvokeAction {chat}")
+            for line in log.read_text(encoding="utf-8").splitlines()
+        ),
+    )
+    # The fake panel is open now: close it again, as the toggles below expect.
+    session.call_sync(
+        "os.athanor.ControlCenter1", "/os/athanor/ControlCenter1", "os.athanor.ControlCenter1",
+        "ToggleNotifications", None, None, Gio.DBusCallFlags.NONE, -1, None,
+    )
+    close_notification(chat)
 
     transient = notify(
         "Transient", expire=1000, hints={"transient": GLib.Variant("b", True)}

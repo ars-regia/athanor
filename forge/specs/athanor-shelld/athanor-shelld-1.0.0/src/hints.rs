@@ -15,6 +15,13 @@ use crate::image::{self, Image, Raw};
 /// A theme name is short; the rest of a longer one is never looked up.
 const SOUND_NAME_CHARS: usize = 128;
 
+/// A reply hint's text is short; the rest of a longer one is never kept.
+const REPLY_HINT_CHARS: usize = 256;
+
+fn bounded(text: &str) -> String {
+    text.chars().take(REPLY_HINT_CHARS).collect()
+}
+
 #[derive(Debug, Default, PartialEq)]
 pub struct Hints {
     pub urgency: Option<u8>,
@@ -24,6 +31,12 @@ pub struct Hints {
     /// hint is skipped like any other, so no path an application names is ever opened (NC7).
     pub sound_name: Option<String>,
     pub suppress_sound: bool,
+    /// `value`: the progress, 0 to 100; anything else is no value (NC9).
+    pub value: Option<u8>,
+    /// KDE's inline reply hints (NC9), plain text; the icon is a theme name, never a file.
+    pub reply_placeholder: Option<String>,
+    pub reply_submit_text: Option<String>,
+    pub reply_submit_icon: Option<String>,
     pub desktop_entry: Option<String>,
     /// From `image-data`, else `image_data` (1.1), else `icon_data` (1.0).
     pub image: Option<Image>,
@@ -70,6 +83,29 @@ impl<'de> Visitor<'de> for HintsVisitor {
                 }
                 "suppress-sound" => {
                     hints.suppress_sound = map.next_value::<Hint<bool>>()?.0.unwrap_or(false);
+                }
+                "value" => {
+                    hints.value = map
+                        .next_value::<Hint<i32>>()?
+                        .0
+                        .and_then(|value| u8::try_from(value).ok())
+                        .filter(|value| *value <= 100);
+                }
+                "x-kde-reply-placeholder-text" => {
+                    hints.reply_placeholder = map.next_value::<Hint<&str>>()?.0.map(bounded);
+                }
+                "x-kde-reply-submit-button-text" => {
+                    hints.reply_submit_text = map.next_value::<Hint<&str>>()?.0.map(bounded);
+                }
+                "x-kde-reply-submit-button-icon-name" => {
+                    hints.reply_submit_icon = map
+                        .next_value::<Hint<&str>>()?
+                        .0
+                        .and_then(icon::parse)
+                        .and_then(|icon| match icon {
+                            Icon::Name(name) => Some(name),
+                            Icon::File(_) => None,
+                        });
                 }
                 "desktop-entry" => {
                     hints.desktop_entry = map
@@ -232,6 +268,34 @@ mod tests {
             Value::from("/etc/hostname"),
         )]));
         assert_eq!(file_only, Hints::default(), "sound-file leaves no trace");
+    }
+
+    #[test]
+    fn progress_and_the_reply_hints_are_read() {
+        let hints = decode(HashMap::from([
+            ("value", Value::I32(42)),
+            ("x-kde-reply-placeholder-text", Value::from("Say it")),
+            ("x-kde-reply-submit-button-text", Value::from("Send")),
+            ("x-kde-reply-submit-button-icon-name", Value::from("mail-send")),
+        ]));
+        assert_eq!(hints.value, Some(42));
+        assert_eq!(hints.reply_placeholder.as_deref(), Some("Say it"));
+        assert_eq!(hints.reply_submit_text.as_deref(), Some("Send"));
+        assert_eq!(hints.reply_submit_icon.as_deref(), Some("mail-send"));
+    }
+
+    #[test]
+    fn a_value_outside_zero_to_a_hundred_and_a_path_as_an_icon_are_ignored() {
+        for value in [150, -1, i32::MAX] {
+            assert_eq!(decode(HashMap::from([("value", Value::I32(value))])).value, None);
+        }
+        assert_eq!(decode(HashMap::from([("value", Value::I32(0))])).value, Some(0));
+        assert_eq!(decode(HashMap::from([("value", Value::I32(100))])).value, Some(100));
+        let hints = decode(HashMap::from([(
+            "x-kde-reply-submit-button-icon-name",
+            Value::from("/etc/passwd"),
+        )]));
+        assert_eq!(hints.reply_submit_icon, None, "an icon name, never a path");
     }
 
     #[test]

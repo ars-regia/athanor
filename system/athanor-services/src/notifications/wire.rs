@@ -43,6 +43,9 @@ pub struct WireNotification {
     pub value: i32,
     pub reply: bool,
     pub reply_placeholder: String,
+    /// The reply button's text and its icon name; `""` for the default.
+    pub reply_submit: String,
+    pub reply_icon: String,
 }
 
 /// Whether a link target may be opened: only `https:`, `http:` and `mailto:`, in any case.
@@ -162,6 +165,8 @@ mod tests {
             value: -1,
             reply: true,
             reply_placeholder: "placeholder".into(),
+            reply_submit: "send".into(),
+            reply_icon: "mail-send".into(),
         }
     }
 
@@ -169,7 +174,7 @@ mod tests {
     fn the_signature_is_the_one_the_readers_decode() {
         assert_eq!(
             WireNotification::SIGNATURE.to_string(),
-            "(ussssa(sus)a(ss)bybbbxsssuuayuubibs)"
+            "(ussssa(sus)a(ss)bybbbxsssuuayuubibsss)"
         );
     }
 
@@ -210,6 +215,8 @@ mod tests {
             (-1i32).into(),
             true.into(),
             "placeholder".into(),
+            "send".into(),
+            "mail-send".into(),
         ];
         assert_eq!(fields.len(), expected.len());
         for (at, (got, want)) in fields.iter().zip(&expected).enumerate() {

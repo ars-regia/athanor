@@ -9,7 +9,7 @@ mod row;
 mod text;
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::{Rc, Weak};
 
 use athanor_compositor_client::Client;
@@ -51,6 +51,9 @@ pub struct Panel {
     open_drawers: RefCell<HashSet<String>>,
     /// The rows shown by the last drawing, in display order.
     listed: RefCell<Vec<u32>>,
+    /// What is typed in each reply entry, kept while the list is drawn again (NC9). It is the
+    /// entry's own text and goes nowhere else; it is dropped with its row.
+    drafts: RefCell<HashMap<u32, String>>,
     /// The ids already asked to be marked read since the panel opened.
     asked: RefCell<HashSet<u32>>,
     shown: Cell<bool>,
@@ -148,6 +151,7 @@ impl Panel {
             open_bodies: RefCell::default(),
             open_drawers: RefCell::default(),
             listed: RefCell::default(),
+            drafts: RefCell::default(),
             asked: RefCell::default(),
             shown: Cell::new(false),
             resized: RefCell::default(),
@@ -197,6 +201,46 @@ impl Panel {
         self.shown.set(false);
     }
 
+    pub(super) fn draft(&self, id: u32) -> Option<String> {
+        self.drafts.borrow().get(&id).cloned()
+    }
+
+    pub(super) fn set_draft(&self, id: u32, text: &str) {
+        let mut drafts = self.drafts.borrow_mut();
+        if text.is_empty() {
+            drafts.remove(&id);
+        } else {
+            drafts.insert(id, text.to_owned());
+        }
+    }
+
+    /// The keyboard goes to the reply entry of row `id` (BR4: a popup never takes it, so its
+    /// "Reply" opens the panel here). A row that is not listed leaves the panel as it is; a
+    /// row hidden under its group's "Show more" opens the group.
+    pub fn focus_reply(self: &Rc<Self>, id: u32) {
+        let hidden = {
+            let state = self.state.borrow();
+            groups(&state.entries)
+                .into_iter()
+                .find(|group| group.rows.contains(&id))
+                .filter(|group| !shown_rows(group, false).contains(&id))
+                .map(|group| group.app_id)
+        };
+        if let Some(app) = hidden {
+            self.expanded.borrow_mut().insert(app);
+            self.render();
+        }
+        // Once the surface is mapped, or there is no window yet to hold the focus.
+        let panel = Rc::downgrade(self);
+        glib::idle_add_local_once(move || {
+            let Some(panel) = panel.upgrade() else { return };
+            let name = format!("{}:reply", row::name_of(id));
+            if let Some(entry) = find_named(panel.list.upcast_ref(), &name) {
+                entry.grab_focus();
+            }
+        });
+    }
+
     fn unread(&self) -> usize {
         self.state.borrow().entries.iter().filter(|n| !n.read && !n.transient).count()
     }
@@ -207,6 +251,9 @@ impl Panel {
             state.available,
             state.entries.iter().any(|n| !n.transient),
         );
+        self.drafts
+            .borrow_mut()
+            .retain(|id, _| state.entries.iter().any(|n| n.id == *id));
         self.state.replace(state);
         if self.shown.get() {
             self.render();

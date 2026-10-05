@@ -177,7 +177,7 @@ def main():
     caps = call(bus, NOTIFY, "GetCapabilities", None, "(as)").unpack()[0]
     check(
         "capabilities",
-        caps == ["actions", "body", "body-hyperlinks", "body-markup", "icon-static", "persistence", "sound"],
+        caps == ["actions", "body", "body-hyperlinks", "body-markup", "icon-static", "inline-reply", "persistence", "sound"],
         caps,
     )
 
@@ -197,7 +197,7 @@ def main():
     notify(bus, "two\nlines", "<b>bold</b>\u202eevil\x07", {})
 
     try:
-        call(bus, PRIVATE, "List", None, "(a(ussssa(sus)a(ss)bybbbxsssuuayuubibs))")
+        call(bus, PRIVATE, "List", None, "(a(ussssa(sus)a(ss)bybbbxsssuuayuubibsss))")
         check(
             "private refused",
             False,

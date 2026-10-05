@@ -18,7 +18,7 @@ use gtk4::accessible::Property;
 use gtk4::prelude::*;
 use gtk4::{gdk, gio, glib, pango};
 
-use super::control_center::toggle_notifications;
+use super::control_center::{show_notification, toggle_notifications};
 use super::popups::Window;
 use super::{Bar, Changed, ModuleUi};
 use crate::i18n::{tr, tr_n, tr_with};
@@ -890,6 +890,21 @@ fn show_spans(label: &gtk4::Label, spans: &[(String, u32, String)]) {
     });
 }
 
+/// The progress of a notification, as a bar whose accessible value is the percentage (NC9).
+pub(super) fn progress(value: u8) -> gtk4::ProgressBar {
+    let bar = gtk4::ProgressBar::new();
+    bar.set_fraction(f64::from(value) / 100.0);
+    let name = tr("Progress");
+    bar.update_property(&[
+        Property::Label(&name),
+        Property::ValueMin(0.0),
+        Property::ValueMax(100.0),
+        Property::ValueNow(f64::from(value)),
+        Property::ValueText(&format!("{value}%")),
+    ]);
+    bar
+}
+
 /// One notification as a popup. It is an `alert`, so a screen reader reads it (BR4); its
 /// name is the summary. A click on it marks it read.
 pub(super) fn card(service: &Rc<Service>, notice: &Notice) -> gtk4::Box {
@@ -962,9 +977,19 @@ pub(super) fn card(service: &Rc<Service>, notice: &Notice) -> gtk4::Box {
     top.append(&close);
     card.append(&top);
 
-    if !notice.actions.is_empty() {
+    if let Some(value) = notice.value {
+        card.append(&progress(value));
+    }
+    if !notice.actions.is_empty() || notice.reply.is_some() {
         let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
         row.set_halign(gtk4::Align::End);
+        if let Some(label) = &notice.reply {
+            let label = if label.is_empty() { tr("Reply") } else { label.clone() };
+            let button = gtk4::Button::with_label(&label);
+            button.add_css_class("bar-row");
+            button.connect_clicked(move |_| show_notification(id));
+            row.append(&button);
+        }
         for action in &notice.actions {
             let button = gtk4::Button::with_label(&action.label);
             button.add_css_class("bar-row");

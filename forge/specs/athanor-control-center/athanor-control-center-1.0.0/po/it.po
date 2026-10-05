@@ -8,101 +8,113 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: src/notifications/header.rs:65
+#: src/notifications/header.rs:73
 msgid "Notifications"
 msgstr "Notifiche"
 
-#: src/notifications/header.rs:69
+#: src/notifications/header.rs:77
 msgid "Clear all"
 msgstr "Cancella tutto"
 
-#: src/notifications/header.rs:74
+#: src/notifications/header.rs:82
 msgid "Do not disturb"
 msgstr "Non disturbare"
 
-#: src/notifications/header.rs:89
+#: src/notifications/header.rs:97
 msgid "Do not disturb options"
 msgstr "Opzioni di Non disturbare"
 
-#: src/notifications/header.rs:106
+#: src/notifications/header.rs:115
 msgid "For one hour"
 msgstr "Per un'ora"
 
-#: src/notifications/header.rs:107
+#: src/notifications/header.rs:116
 msgid "Until 08:00"
 msgstr "Fino alle 08:00"
 
-#: src/notifications/header.rs:109
+#: src/notifications/header.rs:118
 msgid "Edit schedule"
 msgstr "Modifica pianificazione"
 
-#: src/notifications/mod.rs:112
+#: src/notifications/mod.rs:114
 msgid "No notifications"
 msgstr "Nessuna notifica"
 
-#: src/notifications/mod.rs:113
+#: src/notifications/mod.rs:115
 msgid "Notifications unavailable"
 msgstr "Notifiche non disponibili"
 
-#: src/notifications/mod.rs:294
+#: src/notifications/mod.rs:392
 msgid "Other applications"
 msgstr "Altre applicazioni"
 
-#: src/notifications/mod.rs:311
+#: src/notifications/mod.rs:410
 #, rust-format
 msgid "Options for {app}"
 msgstr "Opzioni per {app}"
 
-#: src/notifications/mod.rs:315
+#: src/notifications/mod.rs:417
 msgid "Show less"
 msgstr "Mostra meno"
 
-#: src/notifications/mod.rs:317
+#: src/notifications/mod.rs:419
 #, rust-format
 msgid "Show {n} more"
 msgstr "Mostra altre {n}"
 
-#: src/notifications/mod.rs:346
+#: src/notifications/mod.rs:452
 #, rust-format
 msgid "Mute {app}? It will send no notification at all."
 msgstr "Silenziare {app}? Non invierà più alcuna notifica."
 
-#: src/notifications/mod.rs:349
+#: src/notifications/mod.rs:458
 msgid "Cancel"
 msgstr "Annulla"
 
-#: src/notifications/mod.rs:350
+#: src/notifications/mod.rs:461
 msgid "Mute"
 msgstr "Silenzia"
 
-#: src/notifications/mod.rs:360
+#: src/notifications/mod.rs:474
 msgid "Mute this application"
 msgstr "Silenzia questa applicazione"
 
-#: src/notifications/mod.rs:367
+#: src/notifications/mod.rs:486
 msgid "Show in the list only"
 msgstr "Mostra solo nell'elenco"
 
-#: src/notifications/mod.rs:376
+#: src/notifications/mod.rs:497
 msgid "Notification settings"
 msgstr "Impostazioni delle notifiche"
 
-#: src/notifications/row.rs:81
+#: src/notifications/row.rs:124
 msgid "Unknown application"
 msgstr "Applicazione sconosciuta"
 
-#: src/notifications/row.rs:147
+#: src/notifications/row.rs:188
 #, rust-format
 msgid "Close {title}"
 msgstr "Chiudi {title}"
 
-#: src/notifications/row.rs:173
+#: src/notifications/row.rs:216
 msgid "Show the whole text"
 msgstr "Mostra tutto il testo"
 
-#: src/notifications/row.rs:223 src/notifications/row.rs:224
+#: src/notifications/row.rs:271 src/notifications/row.rs:272
 msgid "More"
 msgstr "Altro"
+
+#: src/notifications/row.rs:357
+msgid "Progress"
+msgstr "Avanzamento"
+
+#: src/notifications/row.rs:376
+msgid "Write a reply"
+msgstr "Scrivi una risposta"
+
+#: src/notifications/row.rs:404
+msgid "Send"
+msgstr "Invia"
 
 #: src/notifications/text.rs:12
 msgid "now"

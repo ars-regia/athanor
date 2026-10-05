@@ -53,7 +53,7 @@ msgstr "Finestra senza titolo"
 msgid "Minimise {title}"
 msgstr "Riduci a icona {title}"
 
-#: ../../../../system/athanor-apps/src/row.rs:491 src/ui/notifications.rs:921
+#: ../../../../system/athanor-apps/src/row.rs:491 src/ui/notifications.rs:964
 #, rust-format
 msgid "Close {title}"
 msgstr "Chiudi {title}"
@@ -75,7 +75,7 @@ msgstr "Impossibile avviare {name}"
 msgid "The reason is in the system journal."
 msgstr "Il motivo è nel registro di sistema."
 
-#: src/badge.rs:25 src/ui/notifications.rs:1008
+#: src/badge.rs:25 src/ui/notifications.rs:1061
 msgid "Notifications"
 msgstr "Notifiche"
 
@@ -292,7 +292,7 @@ msgstr "%A %-d %B %Y, %-I:%M %p"
 msgid "Clock"
 msgstr "Orologio"
 
-#: src/ui/control_center.rs:50
+#: src/ui/control_center.rs:57
 msgid "Control center"
 msgstr "Centro di controllo"
 
@@ -365,6 +365,14 @@ msgstr "{network}, protetta"
 #, rust-format
 msgid "Password for {network}"
 msgstr "Password per {network}"
+
+#: src/ui/notifications.rs:897
+msgid "Progress"
+msgstr "Avanzamento"
+
+#: src/ui/notifications.rs:987
+msgid "Reply"
+msgstr "Rispondi"
 
 #: src/ui/popup.rs:29
 msgid "The action did not complete."

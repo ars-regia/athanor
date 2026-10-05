@@ -36,22 +36,27 @@ use crate::rules::{RuleError, Rules};
 use crate::sender::{admits, Admitted, Caller};
 use crate::server::{NOTIFICATIONS_PATH, PRIVATE_PATH};
 use crate::sound::Player;
-use crate::store::{self, Content, Outcome, Reason, Store, Urgency, Visual};
+use crate::store::{self, Content, Outcome, Reason, Reply, Store, Urgency, Visual};
 use crate::wire::{from_notification, WireNotification};
 use athanor_unit::text;
 
-pub const CAPABILITIES: [&str; 7] = [
+pub const CAPABILITIES: [&str; 8] = [
     "actions",
     "body",
     "body-hyperlinks",
     "body-markup",
     "icon-static",
+    "inline-reply",
     "persistence",
     "sound",
 ];
 pub const MAX_ACTIONS: usize = 8;
 pub const ACTION_KEY_BYTES: usize = 64;
 pub const TOKEN_CHARS: usize = 256;
+/// The action key of KDE's inline reply (NC9).
+pub const REPLY_ACTION: &str = "inline-reply";
+/// A reply is a message, not a document.
+pub const REPLY_CHARS: usize = 4096;
 
 const HISTORY_FILE: &str = "notifications.json";
 const CONTROL_CENTER_NAME: &str = "os.athanor.ControlCenter1";
@@ -93,6 +98,16 @@ pub struct Settled {
     changed: Option<(bool, String, i64)>,
     /// How many popups the state that just ended hid.
     summary: Option<u32>,
+}
+
+/// Whether `new` is `held` with another progress and nothing else changed.
+fn progress_only(held: &Content, new: &Content) -> bool {
+    held.value != new.value
+        && *held
+            == Content {
+                value: held.value,
+                ..new.clone()
+            }
 }
 
 /// What the hints of a `Notify` say about its sound.
@@ -285,26 +300,39 @@ impl State {
         if !decision.list {
             return Arrival::Refused(self.store.fresh_id());
         }
-        if self.effective.on && rule.popups && !decision.popup {
-            self.dnd.missed_one();
-        }
         content.timeout_ms = decision.timeout_ms;
         let urgency = content.urgency;
-        let now = self.now_ms();
-        let outcome = self.store.notify(
-            content,
-            replaces_id,
-            now,
-            unix_now(),
-            identity,
-            sender,
-            decision.popup,
-        );
-        if decision.sound {
+        let mut now = self.now_ms();
+        let (mut popup, mut sound_off) = (decision.popup, false);
+        // A replace that changes only the progress (NC9) updates the notification in place:
+        // the popup keeps what it had and nothing sounds.
+        let progress_only = replaces_id != 0
+            && self
+                .store
+                .get(replaces_id)
+                .filter(|held| progress_only(&held.content, &content))
+                .map(|held| {
+                    now = held.arrived_ms;
+                    popup = held.popup;
+                })
+                .is_some();
+        if progress_only {
+            sound_off = true;
+        } else if self.effective.on && rule.popups && !decision.popup {
+            self.dnd.missed_one();
+        }
+        let outcome = self
+            .store
+            .notify(content, replaces_id, now, unix_now(), identity, sender, popup);
+        if decision.sound && !sound_off {
             self.sound_of(urgency, sound.name.as_deref());
         }
         self.dirty.notify_one();
-        let wire = from_notification(&outcome.notification, now);
+        let mut wire = from_notification(&outcome.notification, self.now_ms());
+        if progress_only {
+            // The decision recorded for this arrival: no new popup.
+            wire.popup = false;
+        }
         Arrival::Kept(Box::new((outcome, wire)))
     }
 }
@@ -364,24 +392,43 @@ pub fn content(
         (None, Some(named)) => Visual::Icon(named),
         (None, None) => Visual::None,
     };
+    let actions: Vec<(String, String)> = actions
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .filter(|pair| is_action_key(pair[0]))
+        .take(MAX_ACTIONS)
+        .map(|pair| (pair[0].to_owned(), text::line(pair[1], text::NAME_CHARS)))
+        .collect();
+    // The hints are plain text, bounded like the other strings; they matter only when the
+    // sender declared the action that opens the reply (NC9).
+    let reply = actions
+        .iter()
+        .any(|(key, _)| key == REPLY_ACTION)
+        .then(|| Reply {
+            placeholder: text::line(
+                hints.reply_placeholder.as_deref().unwrap_or_default(),
+                text::NAME_CHARS,
+            ),
+            submit_text: text::line(
+                hints.reply_submit_text.as_deref().unwrap_or_default(),
+                text::NAME_CHARS,
+            ),
+            submit_icon: hints.reply_submit_icon.unwrap_or_default(),
+        });
     Content {
         app_name: text::line(app_name, text::NAME_CHARS),
         summary: text::line(summary, text::SUMMARY_CHARS),
         body: text::lines(body, text::BODY_CHARS),
-        actions: actions
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .filter(|pair| is_action_key(pair[0]))
-            .take(MAX_ACTIONS)
-            .map(|pair| (pair[0].to_owned(), text::line(pair[1], text::NAME_CHARS)))
-            .collect(),
+        actions,
         urgency,
         transient: hints.transient,
         resident: hints.resident,
         desktop_entry: hints.desktop_entry,
         visual,
         timeout_ms: store::timeout_ms(expire_timeout, urgency),
+        value: hints.value,
+        reply,
     }
 }
 
@@ -585,6 +632,8 @@ fn own_content(
         desktop_entry: None,
         visual: Visual::None,
         timeout_ms,
+        value: None,
+        reply: None,
     }
 }
 
@@ -762,6 +811,14 @@ impl Notifications {
         emitter: &SignalEmitter<'_>,
         id: u32,
         action_key: &str,
+    ) -> zbus::Result<()>;
+
+    /// KDE's inline reply: sent to the notification's sender only (a targeted signal).
+    #[zbus(signal)]
+    pub async fn notification_replied(
+        emitter: &SignalEmitter<'_>,
+        id: u32,
+        text: &str,
     ) -> zbus::Result<()>;
 
     #[zbus(signal)]
@@ -976,18 +1033,47 @@ impl Private {
         Ok(())
     }
 
-    /// An inline reply comes with NC9.
+    /// An inline reply (NC9): the text goes to the sending application, as a signal addressed
+    /// to it alone, and nowhere else: not the store, not the history, not the log.
     async fn reply(
         &self,
         id: u32,
-        _text: &str,
+        text: &str,
         #[zbus(header)] header: Header<'_>,
         #[zbus(connection)] conn: &Connection,
     ) -> fdo::Result<()> {
         self.admit(&header, conn, "Reply").await?;
-        Err(fdo::Error::NotSupported(format!(
-            "notification {id} cannot take a reply yet"
-        )))
+        let (sender, resident) = {
+            let state = lock(&self.state);
+            let held = state
+                .store
+                .get(id)
+                .ok_or_else(|| fdo::Error::InvalidArgs(format!("no notification {id}")))?;
+            if held.content.reply.is_none() {
+                return Err(fdo::Error::InvalidArgs(format!(
+                    "notification {id} declared no {REPLY_ACTION} action"
+                )));
+            }
+            let sender = OwnedUniqueName::try_from(held.sender.as_str()).map_err(|_| {
+                fdo::Error::InvalidArgs(format!("the sender of notification {id} is gone"))
+            })?;
+            (sender, held.content.resident)
+        };
+        let public = SignalEmitter::new(conn, NOTIFICATIONS_PATH)?
+            .set_destination(BusName::from(sender));
+        Notifications::notification_replied(&public, id, &text::lines(text, REPLY_CHARS)).await?;
+        let closed = {
+            let mut state = lock(&self.state);
+            let closed = !resident && state.store.close(id).is_some();
+            if closed {
+                state.dirty.notify_one();
+            }
+            closed
+        };
+        if closed {
+            emit_closed(conn, &self.state, id, Reason::Dismissed).await;
+        }
+        Ok(())
     }
 
     async fn mark_read(

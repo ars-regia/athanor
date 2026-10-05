@@ -320,6 +320,7 @@ async fn capabilities_and_server_information_are_the_specifications() {
             "body-hyperlinks",
             "body-markup",
             "icon-static",
+            "inline-reply",
             "persistence",
             "sound"
         ]
@@ -970,4 +971,108 @@ async fn a_notification_plays_the_themes_sound_and_never_the_sound_file_it_names
         2,
         "suppress-sound is honoured"
     );
+}
+
+#[tokio::test]
+async fn a_reply_reaches_the_sending_application_only_and_is_never_kept() {
+    let bus = Bus::start("reply");
+    let (_daemon, _bar, center, app) = units(&bus, APP_CGROUP).await;
+    let third = bus.client().await;
+    let (app_public, center_private) = (public(&app).await, private(&center).await);
+    let mut mine = app_public
+        .receive_signal("NotificationReplied")
+        .await
+        .expect("subscribe");
+    let rule = zbus::MatchRule::builder()
+        .msg_type(zbus::message::Type::Signal)
+        .path(NOTIFICATIONS_PATH)
+        .expect("path")
+        .build();
+    let mut eavesdropper = zbus::MessageStream::for_match_rule(rule, &third, None)
+        .await
+        .expect("match rule");
+    let plain = notify(&app_public, 0, "plain", "", &[], HashMap::new()).await;
+    assert!(
+        center_private
+            .call::<_, _, ()>("Reply", &(plain, "x"))
+            .await
+            .is_err(),
+        "no inline-reply action declared"
+    );
+    let id = notify(
+        &app_public,
+        0,
+        "chat",
+        "",
+        &["inline-reply", "Answer"],
+        HashMap::from([("resident", Value::Bool(true))]),
+    )
+    .await;
+    let secret = "zq-reply-text-9f3";
+    center_private
+        .call::<_, _, ()>("Reply", &(id, secret))
+        .await
+        .expect("Reply");
+    let (got, text): (u32, String) = mine
+        .next()
+        .await
+        .expect("NotificationReplied")
+        .body()
+        .deserialize()
+        .expect("args");
+    assert_eq!((got, text.as_str()), (id, secret));
+    // A resident notification stays; a closing one is announced to everyone, so the
+    // eavesdropper hears nothing before it.
+    let history = bus.dir.join("state/notifications.json");
+    common::wait_for_file(&history, "chat").await;
+    let notice = notify(&app_public, 0, "t", "", &[], HashMap::new()).await;
+    center_private
+        .call::<_, _, ()>("Close", &(notice, 2u32))
+        .await
+        .expect("Close");
+    let first = eavesdropper.next().await.expect("message").expect("ok");
+    assert_ne!(
+        first.header().member().map(|m| m.to_string()).as_deref(),
+        Some("NotificationReplied"),
+        "the reply is targeted"
+    );
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert!(!fs::read_to_string(&history).expect("history").contains(secret));
+}
+
+#[tokio::test]
+async fn a_replace_that_changes_only_the_value_does_not_pop_up_or_play() {
+    let bus = Bus::start("progress");
+    let (log, player) = sound_rig(&bus);
+    let _daemon = bus.daemon_sounding(BAR_CGROUP, player).await;
+    let client = bus.client().await;
+    let (public, private) = (public(&client).await, private(&client).await);
+    private
+        .call::<_, _, Vec<WireNotification>>("List", &())
+        .await
+        .expect("List");
+    let mut added = private.receive_signal("Added").await.expect("subscribe");
+    let mut replaced = private.receive_signal("Replaced").await.expect("subscribe");
+    let with = |value: i32| HashMap::from([("value", Value::I32(value))]);
+    let id = notify(&public, 0, "copy", "", &[], with(10)).await;
+    let first: WireNotification = added.next().await.expect("Added").body().deserialize().expect("wire");
+    assert_eq!((first.value, first.popup), (10, true));
+    assert_eq!(played(&log, 1).await.lines().count(), 1);
+
+    notify(&public, id, "copy", "", &[], with(40)).await;
+    let update: WireNotification = replaced.next().await.expect("Replaced").body().deserialize().expect("wire");
+    assert_eq!((update.id, update.value, update.popup), (id, 40, false));
+    assert!(update.popup_ms_left > 0, "the popup that shows keeps its time");
+
+    notify(&public, id, "copy", "", &[], with(500)).await;
+    let ignored: WireNotification = replaced.next().await.expect("Replaced").body().deserialize().expect("wire");
+    assert_eq!(ignored.value, -1, "a value outside 0 to 100 is no value");
+
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert_eq!(played(&log, 1).await.lines().count(), 1, "the update played nothing");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    notify(&public, id, "copy done", "", &[], with(100)).await;
+    let done: WireNotification = replaced.next().await.expect("Replaced").body().deserialize().expect("wire");
+    assert!(done.popup, "a changed text pops up again");
+    assert_eq!(played(&log, 2).await.lines().count(), 2);
 }

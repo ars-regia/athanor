@@ -418,6 +418,8 @@ pub fn notification(id: u32, summary: &str) -> WireNotification {
         value: -1,
         reply: false,
         reply_placeholder: String::new(),
+        reply_submit: String::new(),
+        reply_icon: String::new(),
     }
 }
 

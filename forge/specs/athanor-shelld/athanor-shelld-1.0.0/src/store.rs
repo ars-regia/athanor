@@ -45,6 +45,15 @@ pub enum Visual {
     Icon(Icon),
 }
 
+/// What an inline reply (NC9) shows: the entry's placeholder, its button's text and icon
+/// name. The reply's own text is never held.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Reply {
+    pub placeholder: String,
+    pub submit_text: String,
+    pub submit_icon: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Content {
     pub app_name: String,
@@ -59,6 +68,10 @@ pub struct Content {
     pub visual: Visual,
     /// How long the popup shows; 0 until the user closes it.
     pub timeout_ms: u32,
+    /// Progress, 0 to 100 (NC9).
+    pub value: Option<u8>,
+    /// `Some` when the sender declared the `inline-reply` action.
+    pub reply: Option<Reply>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -283,6 +296,8 @@ pub(crate) mod tests {
             desktop_entry: None,
             visual: Visual::None,
             timeout_ms,
+            value: None,
+            reply: None,
         }
     }
 

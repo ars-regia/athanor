@@ -45,9 +45,11 @@ pub fn from_notification(notification: &Notification, now_ms: u64) -> WireNotifi
         timeout_ms: content.timeout_ms,
         popup_ms_left: store::popup_ms_left(notification, now_ms),
         popup: notification.popup,
-        value: -1,
-        reply: false,
-        reply_placeholder: String::new(),
+        value: content.value.map_or(-1, i32::from),
+        reply: content.reply.is_some(),
+        reply_placeholder: content.reply.as_ref().map(|r| r.placeholder.clone()).unwrap_or_default(),
+        reply_submit: content.reply.as_ref().map(|r| r.submit_text.clone()).unwrap_or_default(),
+        reply_icon: content.reply.as_ref().map(|r| r.submit_icon.clone()).unwrap_or_default(),
     }
 }
 

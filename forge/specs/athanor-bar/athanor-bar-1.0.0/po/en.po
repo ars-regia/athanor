@@ -53,7 +53,7 @@ msgstr "Untitled window"
 msgid "Minimise {title}"
 msgstr "Minimise {title}"
 
-#: ../../../../system/athanor-apps/src/row.rs:491 src/ui/notifications.rs:921
+#: ../../../../system/athanor-apps/src/row.rs:491 src/ui/notifications.rs:964
 #, rust-format
 msgid "Close {title}"
 msgstr "Close {title}"
@@ -75,7 +75,7 @@ msgstr "{name} could not start"
 msgid "The reason is in the system journal."
 msgstr "The reason is in the system journal."
 
-#: src/badge.rs:25 src/ui/notifications.rs:1008
+#: src/badge.rs:25 src/ui/notifications.rs:1061
 msgid "Notifications"
 msgstr "Notifications"
 
@@ -292,7 +292,7 @@ msgstr "%A %-d %B %Y, %-I:%M %p"
 msgid "Clock"
 msgstr "Clock"
 
-#: src/ui/control_center.rs:50
+#: src/ui/control_center.rs:57
 msgid "Control center"
 msgstr "Control center"
 
@@ -365,6 +365,14 @@ msgstr "{network}, secured"
 #, rust-format
 msgid "Password for {network}"
 msgstr "Password for {network}"
+
+#: src/ui/notifications.rs:897
+msgid "Progress"
+msgstr "Progress"
+
+#: src/ui/notifications.rs:987
+msgid "Reply"
+msgstr "Reply"
 
 #: src/ui/popup.rs:29
 msgid "The action did not complete."

@@ -62,7 +62,7 @@ msgstr ""
 msgid "Minimise {title}"
 msgstr ""
 
-#: ../../../../system/athanor-apps/src/row.rs:491 src/ui/notifications.rs:921
+#: ../../../../system/athanor-apps/src/row.rs:491 src/ui/notifications.rs:964
 #, rust-format
 msgid "Close {title}"
 msgstr ""
@@ -84,7 +84,7 @@ msgstr ""
 msgid "The reason is in the system journal."
 msgstr ""
 
-#: src/badge.rs:25 src/ui/notifications.rs:1008
+#: src/badge.rs:25 src/ui/notifications.rs:1061
 msgid "Notifications"
 msgstr ""
 
@@ -301,7 +301,7 @@ msgstr ""
 msgid "Clock"
 msgstr ""
 
-#: src/ui/control_center.rs:50
+#: src/ui/control_center.rs:57
 msgid "Control center"
 msgstr ""
 
@@ -373,6 +373,14 @@ msgstr ""
 #: src/ui/network.rs:560
 #, rust-format
 msgid "Password for {network}"
+msgstr ""
+
+#: src/ui/notifications.rs:897
+msgid "Progress"
+msgstr ""
+
+#: src/ui/notifications.rs:987
+msgid "Reply"
 msgstr ""
 
 #: src/ui/popup.rs:29

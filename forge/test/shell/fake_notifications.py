@@ -27,7 +27,7 @@ NAME = "org.freedesktop.Notifications"
 PUBLIC_PATH = "/org/freedesktop/Notifications"
 PRIVATE = "os.athanor.Notifications1"
 PRIVATE_PATH = "/os/athanor/Notifications1"
-WIRE = "(ussssa(sus)a(ss)bybbbxsssuuayuubibs)"
+WIRE = "(ussssa(sus)a(ss)bybbbxsssuuayuubibsss)"
 WAITS = 0xFFFFFFFF
 DEFAULT_TIMEOUT_MS = 5000
 CRITICAL = 2
@@ -122,7 +122,7 @@ class Daemon:
             n["id"], "", n["app"], n["summary"], *body_wire(n["body"]), n["actions"], True, n["urgency"],
             n["transient"], n["resident"], n["read"], 0, n["entry"], n["icon_name"],
             n["icon_file"], n["width"], n["height"], n["rgba"], n["timeout"], left,
-            left > 0, -1, False, "",
+            left > 0, n["value"], n["reply"], "", "", "",
         )
 
     def emit(self, member, value):
@@ -133,7 +133,7 @@ class Daemon:
         return next((n for n in self.held if n["id"] == id_), None)
 
     def add(self, app, summary, body="", actions=(), urgency=1, transient=False,
-            resident=False, entry="", icon="", image=None, expire=0, replaces=0):
+            resident=False, entry="", icon="", image=None, expire=0, replaces=0, value=-1):
         """Notify's semantics: a known replaces_id keeps its id and moves last."""
         old = self.find(replaces) if replaces else None
         if old is not None:
@@ -151,6 +151,9 @@ class Daemon:
             "icon_file": icon if icon.startswith("/") else "",
             "width": width, "height": height, "rgba": rgba,
             "timeout": timeout_ms(expire, urgency), "arrived": now_ms(), "read": False,
+            "value": value,
+            # KDE's inline reply: the action key is the declaration (athanor-shelld).
+            "reply": any(key == "inline-reply" for key, _ in actions),
         }
         self.held.append(notice)
         member = "Replaced" if old is not None else "Added"
@@ -178,6 +181,8 @@ class Daemon:
             icon=str(hints.get("image-path", icon)),
             image=(image[0], image[1], bytes(image[6])) if image else None,
             expire=expire, replaces=replaces,
+            # athanor-shelld ignores a value outside 0 to 100.
+            value=hints["value"] if 0 <= hints.get("value", -1) <= 100 else -1,
         )
 
     def on_call(self, _connection, _sender, _path, interface, method, parameters, invocation):

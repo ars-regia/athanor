@@ -248,12 +248,15 @@ impl ControlCenter {
 
     /// Shows the panel, or the page `id` names; a shown panel moves to that page.
     pub fn show_page(self: &Rc<Self>, id: &str) -> Result<(), String> {
-        self.show(parse_target(id)?);
+        let target = parse_target(id)?;
+        self.show(target);
+        if let Target::Notifications(Some(row)) = target {
+            self.notifications.focus_reply(row);
+        }
         Ok(())
     }
 
     fn show(self: &Rc<Self>, target: Target) {
-        // ponytail: the notification id is only validated; Task 14 focuses its reply field.
         let (panel, child, width) = match target {
             Target::Controls(page) => (Panel::Controls, page.map_or(PANEL, Page::id), CONTROLS_WIDTH),
             Target::Notifications(_) => (Panel::Notifications, NOTIFICATIONS, NOTIFICATIONS_WIDTH),

@@ -9,14 +9,14 @@ use athanor_unit::text::{self, BODY_CHARS, NAME_CHARS, SUMMARY_CHARS};
 /// One notification on the private interface, as `athanor-shelld`'s `wire.rs` sends it
 /// (`athanor_services::notifications::wire`). The bar does not link that crate: this literal
 /// and `the_fields_keep_their_order` below, which that module mirrors with the same table
-/// of values, pin the field order. Twenty-five fields are more than a glib tuple type
+/// of values, pin the field order. Twenty-seven fields are more than a glib tuple type
 /// converts (`FromVariant` stops at sixteen), so each is read by its index.
-pub const WIRE_SIGNATURE: &str = "(ussssa(sus)a(ss)bybbbxsssuuayuubibs)";
+pub const WIRE_SIGNATURE: &str = "(ussssa(sus)a(ss)bybbbxsssuuayuubibsss)";
 
 /// The index of each field the bar reads: id, app_name, summary, body, body_spans, actions, urgency,
 /// transient, resident, desktop_entry, icon_name, icon_file, image_width, image_height,
-/// image_rgba, popup_ms_left. The others (app_id, actions_available, read, time,
-/// timeout_ms, popup, value, reply, reply_placeholder) are for the control center.
+/// image_rgba, actions_available, popup_ms_left, value, reply. The others (app_id, read, time,
+/// timeout_ms, popup, reply_placeholder, reply_submit, reply_icon) are for the control center.
 mod field {
     pub const ID: usize = 0;
     pub const APP_NAME: usize = 2;
@@ -33,7 +33,10 @@ mod field {
     pub const IMAGE_WIDTH: usize = 16;
     pub const IMAGE_HEIGHT: usize = 17;
     pub const IMAGE_RGBA: usize = 18;
+    pub const ACTIONS_AVAILABLE: usize = 7;
     pub const POPUP_MS_LEFT: usize = 20;
+    pub const VALUE: usize = 22;
+    pub const REPLY: usize = 23;
 }
 
 /// `popup_ms_left` of a popup that shows until the user closes it.
@@ -42,6 +45,8 @@ pub const WAITS: u32 = u32::MAX;
 /// count is not bound by it (`Unread`).
 pub const CAPACITY: usize = 100;
 pub const MAX_ACTIONS: usize = 8;
+/// KDE's inline reply action key (NC9).
+pub const REPLY_ACTION: &str = "inline-reply";
 const MAX_PIXELS_SIDE: u32 = 96;
 const MAX_ACTION_KEY: usize = 64;
 const MAX_ICON_NAME: usize = 128;
@@ -119,6 +124,11 @@ pub struct Notice {
     pub picture: Picture,
     /// `WAITS` until the user closes it, 0 for the list only, else the time left.
     pub popup_ms_left: u32,
+    /// The progress, 0 to 100 (NC9).
+    pub value: Option<u8>,
+    /// The label of the "Reply" button: the sender's `inline-reply` action, or `""` when it
+    /// gave none. `None` when the sender cannot take a reply.
+    pub reply: Option<String>,
 }
 
 impl Notice {
@@ -147,13 +157,22 @@ impl Notice {
         let image_height = get(field::IMAGE_HEIGHT)?.get::<u32>()?;
         let image_rgba = get(field::IMAGE_RGBA)?.get::<Vec<u8>>()?;
         let popup_ms_left = get(field::POPUP_MS_LEFT)?.get::<u32>()?;
+        let value = get(field::VALUE)?.get::<i32>()?;
+        let reply = get(field::REPLY)?.get::<bool>()?;
+        let available = get(field::ACTIONS_AVAILABLE)?.get::<bool>()?;
         if id == 0 {
             return None;
         }
         let mut has_default = false;
+        let mut reply_label = None;
         let mut kept = Vec::new();
         for (key, label) in actions {
             if !is_action_key(&key) {
+                continue;
+            }
+            // The reply button is not an action to invoke: it opens the center on the row.
+            if key == REPLY_ACTION {
+                reply_label = Some(text::line(&label, NAME_CHARS));
                 continue;
             }
             if key == "default" {
@@ -179,6 +198,8 @@ impl Notice {
             desktop_entry: Some(desktop_entry).filter(|entry| is_desktop_entry(entry)),
             picture: picture(image_width, image_height, image_rgba, icon_file, icon_name),
             popup_ms_left,
+            value: u8::try_from(value).ok().filter(|value| *value <= 100),
+            reply: reply_label.filter(|_| reply && available),
         })
     }
 
@@ -328,7 +349,7 @@ mod tests {
 
     use super::*;
 
-    /// The twenty-five fields of the wire, in order, as the daemon sends them.
+    /// The twenty-seven fields of the wire, in order, as the daemon sends them.
     struct Wire(Vec<glib::Variant>);
 
     impl Wire {
@@ -367,6 +388,8 @@ mod tests {
             true.to_variant(),
             (-1i32).to_variant(),
             false.to_variant(),
+            "".to_variant(),
+            "".to_variant(),
             "".to_variant(),
         ])
     }
@@ -418,6 +441,8 @@ mod tests {
             (-1i32).to_variant(),
             true.to_variant(),
             "placeholder".to_variant(),
+            "send".to_variant(),
+            "mail-send".to_variant(),
         ]);
         assert_eq!(table.variant().type_().as_str(), WIRE_SIGNATURE);
         let notice = decode(&table);
@@ -456,11 +481,36 @@ mod tests {
         );
         // timeout_ms (19) is not kept: a swap with popup_ms_left shows here as 6.
         assert_eq!(notice.popup_ms_left, 7);
+        // value (22) and reply (23) land in their own places.
+        assert_eq!((notice.value, notice.reply.as_deref()), (None, None));
         let mut table = table;
         table.set(18, Vec::<u8>::new());
         assert_eq!(decode(&table).picture, Picture::File("/file".into()));
         table.set(15, "");
         assert_eq!(decode(&table).picture, Picture::Name("name".into()));
+    }
+
+    #[test]
+    fn progress_and_the_reply_button_are_read_and_bounded() {
+        let mut w = wire(1);
+        w.set(22, 42i32);
+        w.set(23, true);
+        w.set(
+            6,
+            vec![
+                ("inline-reply".to_owned(), "Answer".to_owned()),
+                ("open".to_owned(), "Open".to_owned()),
+            ],
+        );
+        let notice = decode(&w);
+        assert_eq!((notice.value, notice.reply.as_deref()), (Some(42), Some("Answer")));
+        assert_eq!(notice.actions.len(), 1, "the reply is not an ordinary action");
+        w.set(22, 101i32);
+        assert_eq!(decode(&w).value, None);
+        w.set(22, -1i32);
+        assert_eq!(decode(&w).value, None);
+        w.set(7, false);
+        assert_eq!(decode(&w).reply, None, "a sender that is gone cannot take a reply");
     }
 
     #[test]

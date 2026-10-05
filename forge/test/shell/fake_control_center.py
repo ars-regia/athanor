@@ -3,10 +3,10 @@
 (doc_control_center.md, CC9). The real program draws a panel; the bar only calls it and
 follows its property, and that is all this serves.
 
-It owns os.athanor.ControlCenter1 at /os/athanor/ControlCenter1 with Toggle() and
-ToggleNotifications(), and the read-only property Open: each call flips it and emits
+It owns os.athanor.ControlCenter1 at /os/athanor/ControlCenter1 with Toggle(),
+ToggleNotifications() and Show(page), and the read-only property Open: each call flips it and emits
 PropertiesChanged, as the real program does when its panel opens or closes. Every call is
-appended to /out/$RIG_TAG-control-center.log: "Toggle" or "ToggleNotifications".
+appended to /out/$RIG_TAG-control-center.log: "Toggle", "ToggleNotifications" or "Show <page>".
 """
 
 import os
@@ -24,6 +24,7 @@ NODE = Gio.DBusNodeInfo.new_for_xml(f"""
   <interface name="{NAME}">
     <method name="Toggle"/>
     <method name="ToggleNotifications"/>
+    <method name="Show"><arg type="s" direction="in"/></method>
     <property name="Open" type="b" access="read"/>
   </interface>
 </node>
@@ -35,10 +36,12 @@ class Panel:
         self.open = False
         self.bus = None
 
-    def on_call(self, _connection, _sender, _path, _interface, method, _parameters, invocation):
+    def on_call(self, _connection, _sender, _path, _interface, method, parameters, invocation):
         with LOG.open("a", encoding="utf-8") as out:
-            out.write(method + "\n")
-        self.open = not self.open
+            # Show names its page: "Show notifications:7".
+            out.write(" ".join([method, *map(str, parameters.unpack())]) + "\n")
+        # Show opens the panel (or leaves it open); the others flip it.
+        self.open = True if method == "Show" else not self.open
         self.bus.emit_signal(
             None,
             PATH,

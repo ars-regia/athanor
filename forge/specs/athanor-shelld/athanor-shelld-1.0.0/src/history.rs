@@ -126,6 +126,9 @@ impl Entry {
                 desktop_entry: self.desktop_entry,
                 visual,
                 timeout_ms: self.timeout_ms,
+                // Neither a progress nor a reply outlives the application that drew it.
+                value: None,
+                reply: None,
             },
         }
     }

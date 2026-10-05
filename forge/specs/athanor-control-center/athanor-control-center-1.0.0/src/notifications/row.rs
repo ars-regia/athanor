@@ -4,6 +4,7 @@ use std::rc::{Rc, Weak};
 
 use athanor_services::notifications::wire::WireNotification;
 use athanor_services::notifications::NotificationsCommand;
+use athanor_unit::text;
 use gtk4::accessible::{Property, State};
 use gtk4::prelude::*;
 use gtk4::{gdk, gio, glib, pango};
@@ -22,6 +23,12 @@ const LONG_BODY: usize = 60;
 const VISIBLE_ACTIONS: usize = 3;
 /// A touch swipe faster than this (px/s), and mostly horizontal, closes the row.
 const SWIPE_SPEED: f64 = 500.0;
+/// KDE's inline reply action key (NC9): its label names the button that sends the reply.
+const REPLY_ACTION: &str = "inline-reply";
+/// The reply's strings are short; the daemon bounded them, and this is the second bound.
+const REPLY_LABEL_CHARS: usize = 64;
+/// What the daemon passes on to the application.
+const MAX_REPLY_CHARS: i32 = 4096;
 
 /// The widget name of the row of notification `id`, which keeps the keyboard focus across a
 /// rebuild of the list.
@@ -231,7 +238,11 @@ pub fn build(panel: &Rc<Panel>, n: &WireNotification, now: i64, show_app: bool) 
     top.append(&close);
     card.append(&top);
 
-    let actions: Vec<&(String, String)> = n.actions.iter().filter(|(key, _)| key != "default").collect();
+    let actions: Vec<&(String, String)> = n
+        .actions
+        .iter()
+        .filter(|(key, _)| key != "default" && key != REPLY_ACTION)
+        .collect();
     if !actions.is_empty() {
         let button = |key: &str, text: &str| {
             let button = gtk4::Button::with_label(text);
@@ -270,6 +281,13 @@ pub fn build(panel: &Rc<Panel>, n: &WireNotification, now: i64, show_app: bool) 
         }
     }
 
+    if progress_shown(n) {
+        card.append(&progress(n));
+    }
+    if n.reply && n.actions_available {
+        card.append(&reply_row(panel, n));
+    }
+
     // A click on the row is the `default` action, when that does anything.
     let has_default = n.actions.iter().any(|(key, _)| key == "default");
     let can_activate = clickable(n.actions_available, has_default, &n.app_id);
@@ -286,10 +304,14 @@ pub fn build(panel: &Rc<Panel>, n: &WireNotification, now: i64, show_app: bool) 
     // Enter does the same, Delete closes the row.
     let keys = gtk4::EventControllerKey::new();
     let (panel_keys, n_keys) = (weak.clone(), n.clone());
-    keys.connect_key_pressed(move |_, key, _, _| {
+    keys.connect_key_pressed(move |controller, key, _, _| {
         let Some(panel) = panel_keys.upgrade() else {
             return glib::Propagation::Proceed;
         };
+        // The reply entry has its own Delete and Enter.
+        if typing(controller) {
+            return glib::Propagation::Proceed;
+        }
         match key {
             gdk::Key::Return | gdk::Key::KP_Enter if can_activate => {
                 activate(&panel, &n_keys, "default");
@@ -312,4 +334,114 @@ pub fn build(panel: &Rc<Panel>, n: &WireNotification, now: i64, show_app: bool) 
     });
     card.add_controller(swipe);
     card
+}
+
+/// The keyboard is in a text entry of the row.
+fn typing(controller: &gtk4::EventControllerKey) -> bool {
+    controller
+        .widget()
+        .and_then(|widget| widget.root())
+        .and_then(|root| root.focus())
+        .is_some_and(|focus| focus.is::<gtk4::Text>())
+}
+
+fn progress_shown(n: &WireNotification) -> bool {
+    (0..=100).contains(&n.value)
+}
+
+/// The progress of a notification; its accessible value is the percentage (NC9).
+fn progress(n: &WireNotification) -> gtk4::ProgressBar {
+    let bar = gtk4::ProgressBar::new();
+    bar.set_fraction(f64::from(n.value) / 100.0);
+    bar.update_property(&[
+        Property::Label(&tr("Progress")),
+        Property::ValueMin(0.0),
+        Property::ValueMax(100.0),
+        Property::ValueNow(f64::from(n.value)),
+        Property::ValueText(&format!("{}%", n.value)),
+    ]);
+    bar
+}
+
+/// The reply entry and its button (NC9). Every string is plain text: `set_text` and
+/// `set_placeholder_text`, never markup. The text is sent to the daemon and kept nowhere else
+/// than in the entry, and in the panel's draft while the list is drawn again.
+fn reply_row(panel: &Rc<Panel>, n: &WireNotification) -> gtk4::Box {
+    let id = n.id;
+    let name = format!("{}:reply", name_of(id));
+    let entry = gtk4::Entry::new();
+    entry.set_hexpand(true);
+    entry.set_max_length(MAX_REPLY_CHARS);
+    let placeholder = match text::line(&n.reply_placeholder, REPLY_LABEL_CHARS) {
+        words if words.is_empty() => tr("Write a reply"),
+        words => words,
+    };
+    entry.set_placeholder_text(Some(&placeholder));
+    entry.update_property(&[Property::Label(&placeholder)]);
+    entry.set_widget_name(&name);
+    // The focus lands on the text inside the entry: it carries the name too, so a redraw of
+    // the list finds it again.
+    if let Some(inner) = entry.delegate().and_then(|inner| inner.dynamic_cast::<gtk4::Widget>().ok()) {
+        inner.set_widget_name(&name);
+    }
+    if let Some(draft) = panel.draft(id) {
+        entry.set_text(&draft);
+    }
+    let weak = Rc::downgrade(panel);
+    entry.connect_changed({
+        let weak = weak.clone();
+        move |entry| {
+            if let Some(panel) = weak.upgrade() {
+                panel.set_draft(id, &entry.text());
+            }
+        }
+    });
+
+    let label = [n.reply_submit.as_str(), reply_label(n)]
+        .into_iter()
+        .map(|words| text::line(words, REPLY_LABEL_CHARS))
+        .find(|words| !words.is_empty())
+        .unwrap_or_else(|| tr("Send"));
+    let themed = !n.reply_icon.is_empty()
+        && gdk::Display::default()
+            .is_some_and(|display| gtk4::IconTheme::for_display(&display).has_icon(&n.reply_icon));
+    let send = if themed {
+        let button = gtk4::Button::from_icon_name(&n.reply_icon);
+        button.set_tooltip_text(Some(&label));
+        button.update_property(&[Property::Label(&label)]);
+        button
+    } else {
+        gtk4::Button::with_label(&label)
+    };
+    send.set_widget_name(&format!("{}:send", name_of(id)));
+    let submit = {
+        let entry = entry.downgrade();
+        move || {
+            let (Some(panel), Some(entry)) = (weak.upgrade(), entry.upgrade()) else {
+                return;
+            };
+            let reply = entry.text().to_string();
+            if reply.trim().is_empty() {
+                return;
+            }
+            entry.set_text("");
+            panel.send(NotificationsCommand::Reply { id, text: reply });
+        }
+    };
+    let on_enter = submit.clone();
+    entry.connect_activate(move |_| on_enter());
+    send.connect_clicked(move |_| submit());
+
+    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    row.append(&entry);
+    row.append(&send);
+    row
+}
+
+/// The label of the sender's `inline-reply` action, `""` when it gave none.
+fn reply_label(n: &WireNotification) -> &str {
+    n.actions
+        .iter()
+        .find(|(key, _)| key == REPLY_ACTION)
+        .map_or("", |(_, label)| label.as_str())
 }

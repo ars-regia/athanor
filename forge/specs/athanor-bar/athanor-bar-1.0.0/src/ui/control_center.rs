@@ -14,13 +14,14 @@ use super::bus::{call, TIMEOUT_MS};
 use super::{Bar, Changed, ModuleUi};
 use crate::i18n::tr;
 
-/// Calls `method` on the control center. The bus starts the program when it is down; a call
-/// that fails, for the name unknown or any other reason, is logged.
-fn call_center(method: &'static str) {
+/// Calls `method` on the control center, with `args` when it takes any. The bus starts the
+/// program when it is down; a call that fails, for the name unknown or any other reason, is
+/// logged.
+fn call_center(method: &'static str, args: Option<glib::Variant>) {
     glib::spawn_future_local(async move {
         let result = async {
             let bus = gio::bus_get_future(gio::BusType::Session).await?;
-            call(&bus, NAME, PATH, NAME, method, None, TIMEOUT_MS).await
+            call(&bus, NAME, PATH, NAME, method, args.as_ref(), TIMEOUT_MS).await
         }
         .await;
         if let Err(err) = result {
@@ -31,7 +32,13 @@ fn call_center(method: &'static str) {
 
 /// Asks the control center to show or hide its notification center.
 pub(super) fn toggle_notifications() {
-    call_center("ToggleNotifications");
+    call_center("ToggleNotifications", None);
+}
+
+/// Opens the notification center on the row of notification `id`, its reply entry focused: a
+/// popup never takes the keyboard (BR4), so the reply is typed there.
+pub(super) fn show_notification(id: u32) {
+    call_center("Show", Some((format!("notifications:{id}"),).to_variant()));
 }
 
 struct ControlCenterUi {
@@ -53,7 +60,7 @@ pub fn new(_bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     button.set_tooltip_text(Some(&name));
     button.update_property(&[Property::Label(&name)]);
     button.set_visible(false);
-    button.connect_clicked(|_| call_center("Toggle"));
+    button.connect_clicked(|_| call_center("Toggle", None));
     let shown = button.downgrade();
     glib::spawn_future_local(async move {
         let activatable = async {
