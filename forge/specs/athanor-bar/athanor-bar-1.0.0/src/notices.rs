@@ -3,7 +3,6 @@
 //! same, so the text is cleaned and the pictures are bounded again here, and nothing here
 //! can panic on what the peer sends (BR9, "Without a display").
 
-
 use athanor_unit::icon::is_icon_file;
 use athanor_unit::text::{self, BODY_CHARS, NAME_CHARS, SUMMARY_CHARS};
 
@@ -38,7 +37,8 @@ mod field {
 
 /// `popup_ms_left` of a popup that shows until the user closes it.
 pub const WAITS: u32 = u32::MAX;
-/// The daemon's own bound on the notifications it holds.
+/// How many notifications the bar keeps to show: the popups and their actions. The unread
+/// count is not bound by it (`Unread`).
 pub const CAPACITY: usize = 100;
 pub const MAX_ACTIONS: usize = 8;
 const MAX_PIXELS_SIDE: u32 = 96;
@@ -219,24 +219,6 @@ pub fn is_icon_name(name: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'+'))
 }
 
-/// The list's groups (BR4): the group of the newest notification first, and the newest
-/// first inside each group. `notices` is oldest first, as `List` sends it.
-#[must_use]
-pub fn groups(notices: &[Notice]) -> Vec<Vec<&Notice>> {
-    let mut groups: Vec<Vec<&Notice>> = Vec::new();
-    for notice in notices.iter().rev() {
-        let key = notice.group_key();
-        match groups
-            .iter_mut()
-            .find(|group| group.first().is_some_and(|first| first.group_key() == key))
-        {
-            Some(group) => group.push(notice),
-            None => groups.push(vec![notice]),
-        }
-    }
-    groups
-}
-
 /// The notifications the bar holds, oldest first, as the daemon does.
 #[derive(Debug, Default)]
 pub struct Held {
@@ -273,6 +255,49 @@ impl Held {
     #[must_use]
     pub fn all(&self) -> &[Notice] {
         &self.notices
+    }
+}
+
+/// The ids of the notifications that await reading. Apart from `Held`, which keeps only
+/// `CAPACITY` of them: the daemon keeps more, and the badge counts all of them. A transient
+/// notification never reaches the notification center, so it is never unread.
+#[derive(Debug, Default)]
+pub struct Unread {
+    ids: std::collections::HashSet<u32>,
+}
+
+impl Unread {
+    /// The unread list `List` returned: it replaces what was counted.
+    pub fn replace_all(&mut self, notices: &[Notice]) {
+        self.ids = notices
+            .iter()
+            .filter(|notice| !notice.transient)
+            .map(|notice| notice.id)
+            .collect();
+    }
+
+    /// A new or replaced notification.
+    pub fn arrived(&mut self, notice: &Notice) {
+        if notice.transient {
+            self.ids.remove(&notice.id);
+        } else {
+            self.ids.insert(notice.id);
+        }
+    }
+
+    /// Read or closed, on any side.
+    pub fn leave(&mut self, id: u32) {
+        self.ids.remove(&id);
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.ids.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty()
     }
 }
 
@@ -442,8 +467,7 @@ mod tests {
             ("x".repeat(65), "Long key".into()),
             ("blank".into(), "\u{202E}".into()),
         ];
-        actions
-            .extend((0..20).map(|n| (format!("a{n}"), format!("Action {n}"))));
+        actions.extend((0..20).map(|n| (format!("a{n}"), format!("Action {n}"))));
         wire.set(6, actions);
         let notice = decode(&wire);
         assert!(notice.has_default);
@@ -506,25 +530,31 @@ mod tests {
     }
 
     #[test]
-    fn groups_put_the_newest_first() {
-        let list = [notice(1, "Files"), notice(2, "Mail"), notice(3, "Files")];
-        let ids: Vec<Vec<u32>> = groups(&list)
-            .iter()
-            .map(|group| group.iter().map(|notice| notice.id).collect())
-            .collect();
-        assert_eq!(ids, [vec![3, 1], vec![2]]);
+    fn the_unread_count_is_not_bound_by_what_is_held() {
+        let list: Vec<Notice> = (1..=150).map(|id| notice(id, "Files")).collect();
+        let mut unread = Unread::default();
+        unread.replace_all(&list);
+        assert_eq!(unread.len(), 150);
+        unread.leave(7);
+        assert_eq!(unread.len(), 149);
+        unread.leave(7);
+        assert_eq!(
+            unread.len(),
+            149,
+            "a second Read of the same id counts nothing"
+        );
+        unread.arrived(&notice(151, "Mail"));
+        assert_eq!(unread.len(), 150);
     }
 
     #[test]
-    fn the_desktop_entry_groups_before_the_name() {
-        let mut first = wire(1);
-        first.set(2, "Files");
-        first.set(13, "org.gnome.Nautilus");
-        let mut second = wire(2);
-        second.set(2, "Nautilus");
-        second.set(13, "org.gnome.Nautilus");
-        let list = [decode(&first), decode(&second)];
-        assert_eq!(groups(&list).len(), 1);
+    fn a_transient_notice_is_never_unread() {
+        let mut wire = wire(1);
+        wire.set(field::TRANSIENT, true);
+        let mut unread = Unread::default();
+        unread.arrived(&notice(2, "Files"));
+        unread.arrived(&decode(&wire));
+        assert_eq!(unread.len(), 1);
     }
 
     #[test]

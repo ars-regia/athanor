@@ -1,5 +1,5 @@
 //! Which notification popups show (doc_bar.md BR4): at most three, the newest nearest the
-//! panel, the others counted as "+N waiting". No clock and no GTK: the caller passes the
+//! panel, the others wait their turn. No clock and no GTK: the caller passes the
 //! time that elapsed, and pauses a countdown by not calling `tick`.
 
 use crate::notices::WAITS;
@@ -87,11 +87,6 @@ impl Popups {
             .collect()
     }
 
-    #[must_use]
-    pub fn waiting(&self) -> usize {
-        self.live.len().saturating_sub(VISIBLE)
-    }
-
     /// Some popup still has a countdown: the caller keeps its timer.
     #[must_use]
     pub fn counting(&self) -> bool {
@@ -160,7 +155,6 @@ mod tests {
             assert!(popups.show(id, WAITS, false));
         }
         assert_eq!(popups.visible(), [5, 4, 3]);
-        assert_eq!(popups.waiting(), 2);
         assert!(popups.remove(5));
         assert_eq!(popups.visible(), [4, 3, 2], "a waiting one takes the place");
     }
@@ -212,9 +206,9 @@ mod tests {
         for id in 2..=4 {
             popups.show(id, WAITS, false);
         }
-        assert_eq!(popups.waiting(), 1);
+        assert_eq!(popups.visible(), [4, 3, 2]);
         assert_eq!(popups.tick(500), [1]);
-        assert_eq!(popups.waiting(), 0);
+        assert_eq!(popups.visible(), [4, 3, 2]);
     }
 
     #[test]

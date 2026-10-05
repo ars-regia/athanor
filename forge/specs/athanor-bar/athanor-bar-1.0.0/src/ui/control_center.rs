@@ -14,29 +14,24 @@ use super::bus::{call, TIMEOUT_MS};
 use super::{Bar, Changed, ModuleUi};
 use crate::i18n::tr;
 
-/// Asks the control center to show or hide its notification center. The bus starts the
-/// program when it is down; a call that fails, for the name unknown or any other reason, is
-/// logged.
-pub(super) fn toggle_notifications() {
-    glib::spawn_future_local(async {
+/// Calls `method` on the control center. The bus starts the program when it is down; a call
+/// that fails, for the name unknown or any other reason, is logged.
+fn call_center(method: &'static str) {
+    glib::spawn_future_local(async move {
         let result = async {
             let bus = gio::bus_get_future(gio::BusType::Session).await?;
-            call(
-                &bus,
-                NAME,
-                PATH,
-                NAME,
-                "ToggleNotifications",
-                None,
-                TIMEOUT_MS,
-            )
-            .await
+            call(&bus, NAME, PATH, NAME, method, None, TIMEOUT_MS).await
         }
         .await;
         if let Err(err) = result {
-            tracing::error!(error = %err, "the control center did not toggle its notification center");
+            tracing::error!(method, error = %err, "the control center call failed");
         }
     });
+}
+
+/// Asks the control center to show or hide its notification center.
+pub(super) fn toggle_notifications() {
+    call_center("ToggleNotifications");
 }
 
 struct ControlCenterUi {
@@ -58,18 +53,7 @@ pub fn new(_bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     button.set_tooltip_text(Some(&name));
     button.update_property(&[Property::Label(&name)]);
     button.set_visible(false);
-    button.connect_clicked(|_| {
-        glib::spawn_future_local(async {
-            let result = async {
-                let bus = gio::bus_get_future(gio::BusType::Session).await?;
-                call(&bus, NAME, PATH, NAME, "Toggle", None, TIMEOUT_MS).await
-            }
-            .await;
-            if let Err(err) = result {
-                tracing::error!(error = %err, "the control center did not toggle");
-            }
-        });
-    });
+    button.connect_clicked(|_| call_center("Toggle"));
     let shown = button.downgrade();
     glib::spawn_future_local(async move {
         let activatable = async {

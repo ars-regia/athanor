@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # update.sh - regenerates the template from the sources and merges it into every
 # catalog. Needs GNU gettext 0.24 or later (xgettext --language=Rust); the rig's build
-# image has 0.25. Run after adding or changing a tr()/tr_with() call.
+# image has 0.25. Run after adding or changing a tr()/tr_with()/tr_n() call.
 set -euo pipefail
 here=$(dirname "${BASH_SOURCE[0]}")
 crate=$here/..
-xgettext --language=Rust --keyword=tr --keyword=tr_with --keyword=translate --from-code=UTF-8 --add-comments=TRANSLATORS \
+xgettext --language=Rust --keyword=tr --keyword=tr_with --keyword=tr_n:1,2 --from-code=UTF-8 --add-comments=TRANSLATORS \
 	--package-name=athanor-bar --msgid-bugs-address=forge@athanor.os --no-wrap --sort-by-file \
 	--directory="$crate" --files-from="$here/POTFILES.in" --output="$here/athanor-bar.pot"
 # The creation date would make every run a diff.

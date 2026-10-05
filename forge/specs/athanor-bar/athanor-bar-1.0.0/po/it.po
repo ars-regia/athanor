@@ -26,7 +26,7 @@ msgstr "Applicazioni in esecuzione"
 
 #: ../../../../system/athanor-apps/src/row.rs:202
 #: ../../../../system/athanor-apps/src/row.rs:640
-#: ../../../../system/athanor-apps/src/row.rs:642 src/ui/notifications.rs:794
+#: ../../../../system/athanor-apps/src/row.rs:642 src/ui/notifications.rs:799
 msgid "Unknown application"
 msgstr "Applicazione sconosciuta"
 
@@ -53,7 +53,7 @@ msgstr "Finestra senza titolo"
 msgid "Minimise {title}"
 msgstr "Riduci a icona {title}"
 
-#: ../../../../system/athanor-apps/src/row.rs:491 src/ui/notifications.rs:916
+#: ../../../../system/athanor-apps/src/row.rs:491 src/ui/notifications.rs:921
 #, rust-format
 msgid "Close {title}"
 msgstr "Chiudi {title}"
@@ -75,18 +75,16 @@ msgstr "Impossibile avviare {name}"
 msgid "The reason is in the system journal."
 msgstr "Il motivo è nel registro di sistema."
 
-#: src/badge.rs:21 src/ui/notifications.rs:1003
+#: src/badge.rs:25 src/ui/notifications.rs:1008
 msgid "Notifications"
 msgstr "Notifiche"
 
-#: src/badge.rs:22
-msgid "Notifications, 1 unread"
-msgstr "Notifiche, una non letta"
-
-#: src/badge.rs:23
+#: src/badge.rs:27
 #, rust-format
 msgid "Notifications, {count} unread"
-msgstr "Notifiche, {count} non lette"
+msgid_plural "Notifications, {count} unread"
+msgstr[0] "Notifiche, {count} non letta"
+msgstr[1] "Notifiche, {count} non lette"
 
 #: src/ui/accessibility.rs:35
 msgid "Greyscale"
@@ -294,7 +292,7 @@ msgstr "%A %-d %B %Y, %-I:%M %p"
 msgid "Clock"
 msgstr "Orologio"
 
-#: src/ui/control_center.rs:55
+#: src/ui/control_center.rs:50
 msgid "Control center"
 msgstr "Centro di controllo"
 

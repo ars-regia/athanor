@@ -9,10 +9,10 @@ use std::collections::{HashMap, VecDeque};
 use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
+use athanor_bar::badge;
 use athanor_bar::control_center;
 use athanor_bar::fullscreen::report;
-use athanor_bar::badge;
-use athanor_bar::notices::{self, Held, Notice, Picture, WIRE_SIGNATURE};
+use athanor_bar::notices::{self, Held, Notice, Picture, Unread, WIRE_SIGNATURE};
 use athanor_bar::popups::{target_output, Popups};
 use gtk4::accessible::Property;
 use gtk4::prelude::*;
@@ -21,7 +21,7 @@ use gtk4::{gdk, gio, glib, pango};
 use super::control_center::toggle_notifications;
 use super::popups::Window;
 use super::{Bar, Changed, ModuleUi};
-use crate::i18n::{tr, tr_with};
+use crate::i18n::{tr, tr_n, tr_with};
 
 const NAME: &str = "org.freedesktop.Notifications";
 const PATH: &str = "/os/athanor/Notifications1";
@@ -64,6 +64,7 @@ pub struct Service {
     retried: Cell<bool>,
     early: RefCell<VecDeque<(String, glib::Variant)>>,
     held: RefCell<Held>,
+    unread: RefCell<Unread>,
     popups: RefCell<Popups>,
     dnd: Cell<bool>,
     /// The last `(available, active)` sent to the daemon; `None` until the first send for
@@ -133,6 +134,7 @@ impl Service {
                 retried: Cell::new(false),
                 early: RefCell::new(VecDeque::new()),
                 held: RefCell::new(Held::default()),
+                unread: RefCell::new(Unread::default()),
                 popups: RefCell::new(Popups::default()),
                 dnd: Cell::new(false),
                 fullscreen: Cell::new(None),
@@ -305,14 +307,17 @@ impl Service {
             return;
         };
         self.popups.borrow_mut().clear();
+        // Every unread notification is counted; only the newest `CAPACITY` are kept to show.
+        self.unread.borrow_mut().replace_all(&list);
+        let list = &list[list.len().saturating_sub(notices::CAPACITY)..];
         let count = list.len();
         // Held and Live before any popup is placed: a transient notice whose popup cannot
         // show (do not disturb, or its time ran out while no bar ran) is closed at once
         // (ruling 6), `close` reaches the daemon only in Live, and its removal from `held`
         // must not be undone by a later `replace_all`.
-        self.held.borrow_mut().replace_all(list.clone());
+        self.held.borrow_mut().replace_all(list.to_vec());
         self.state.set(State::Live);
-        for notice in &list {
+        for notice in list {
             self.place(notice);
         }
         tracing::info!("listed {count} notifications from athanor-shelld");
@@ -380,6 +385,7 @@ impl Service {
     }
 
     fn arrived(&self, notice: Notice) {
+        self.unread.borrow_mut().arrived(&notice);
         self.place(&notice);
         let evicted = self.held.borrow_mut().arrived(notice);
         for id in evicted {
@@ -414,6 +420,7 @@ impl Service {
     }
 
     fn closed(&self, id: u32) {
+        self.unread.borrow_mut().leave(id);
         self.held.borrow_mut().closed(id);
         self.popups.borrow_mut().remove(id);
     }
@@ -526,6 +533,9 @@ impl Service {
     /// An action button, or a click on the text for "default". The token lets the
     /// application raise its window (BR4, "Actions"); without one the call still goes.
     pub(super) fn invoke(&self, id: u32, key: &str) {
+        // Using an action reads the notification (NC11); the button takes the click, so the
+        // card's own gesture never sees it.
+        self.mark_read(id);
         let token = self
             .bar
             .upgrade()
@@ -631,6 +641,7 @@ impl Service {
         self.peer.take();
         self.early.borrow_mut().clear();
         self.held.borrow_mut().replace_all(Vec::new());
+        self.unread.borrow_mut().replace_all(&[]);
         self.popups.borrow_mut().clear();
     }
 
@@ -744,18 +755,12 @@ impl Service {
     }
 
     /// How many notifications await reading: the daemon's unread list, less the transient
-    /// ones, which never reach the notification center (BR4).
+    /// ones, which never reach the notification center (BR4). Not bound by `CAPACITY`.
     pub(super) fn unread(&self) -> usize {
-        self.held
-            .borrow()
-            .all()
-            .iter()
-            .filter(|notice| !notice.transient)
-            .count()
+        self.unread.borrow().len()
     }
 }
 
-/// The `List` reply: do not disturb, and the last `CAPACITY` notifications, oldest first.
 /// The output new popups go to: the one the activated window is on. With no window
 /// activated, or no compositor client, the first output is the fallback (BR4).
 fn target_monitor(bar: &Bar, monitors: &[gdk::Monitor]) -> Option<gdk::Monitor> {
@@ -775,14 +780,14 @@ fn target_monitor(bar: &Bar, monitors: &[gdk::Monitor]) -> Option<gdk::Monitor> 
     target_output(activated.as_deref(), &connectors).and_then(|index| monitors.get(index).cloned())
 }
 
+/// The `List` reply: every unread notification the daemon holds, oldest first.
 fn decode_list(reply: &glib::Variant) -> Option<Vec<Notice>> {
     if reply.type_().as_str() != format!("(a{WIRE_SIGNATURE})") {
         return None;
     }
     let list = reply.try_child_value(0)?;
-    let count = list.n_children();
     Some(
-        (count.saturating_sub(notices::CAPACITY)..count)
+        (0..list.n_children())
             .filter_map(|index| list.try_child_value(index))
             .filter_map(|value| Notice::decode(&value))
             .collect(),
@@ -978,7 +983,7 @@ impl ModuleUi for NotificationsUi {
         let text = badge::badge_text(unread);
         self.badge.set_visible(text.is_some());
         self.badge.set_text(text.as_deref().unwrap_or_default());
-        let name = badge::accessible_name(unread, &tr);
+        let name = badge::accessible_name(unread, &tr, &tr_n);
         self.button.set_tooltip_text(Some(&name));
         self.button.update_property(&[Property::Label(&name)]);
     }

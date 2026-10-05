@@ -39,6 +39,7 @@ from bar_e2e import (  # noqa: E402
 # GTK exports AccessibleRole::Alert as ATSPI_ROLE_NOTIFICATION; older AT-SPI names it alert.
 ALERT_ROLES = {"notification", "alert"}
 CLOCK = re.compile(r"^\w+ \d+ \w+ \d{4}, ")
+BADGE = re.compile(r"^\d+\+?$")
 UNREAD = re.compile(r"^Notifications, (\d+) unread$")
 # The layer surface's margin from the end edge (athanor-bar's ui/popups.rs MARGIN).
 POPUP_MARGIN = 8
@@ -86,6 +87,18 @@ def toggles_center(app, Atspi, opener):
     )
 
 
+def badge_labels(app, Atspi):
+    """The texts of the showing labels that are a count: the badge, when there is one."""
+    try:
+        return [
+            name
+            for role, name, shown, _ in walk(app, Atspi)
+            if role == "label" and shown and BADGE.match(name)
+        ]
+    except GLib.Error:
+        return None
+
+
 def unread(app, Atspi):
     """The number the notifications button says are unread, 0 for its plain name."""
     for button in buttons_matching(app, Atspi, re.compile(r"^Notifications")):
@@ -99,7 +112,7 @@ def click(app, Atspi, name, done):
     on the card is no AT-SPI action, so the way a user clicks it is the only one. GTK
     reports a card's position inside its window, and the layer surface's own place on the
     output is the compositor's, so the column comes from the surface being anchored to the
-    end corner and the row is searched down from under the panel."""
+    end corner and the row is the card's own, below the panel and the popup margin."""
     node = next(
         (
             node
@@ -124,9 +137,11 @@ def click(app, Atspi, name, done):
     )
     width, height = output_size()
     x = width - POPUP_MARGIN - shell.width + box.x + box.width // 2
+    y = panel + POPUP_MARGIN + box.y + box.height // 2
     pointer = VirtualPointer(sway_display(), width, height)
     try:
-        for y in range(panel + POPUP_MARGIN + box.y + box.height // 2, 400, box.height // 2):
+        # A click that lands before the card's surface took the pointer is lost: try again.
+        for _ in range(3):
             pointer.move(x, y)
             pointer.click()
             if wait_for(done, 0.6):
@@ -182,6 +197,32 @@ def daemon_unread():
         "List", None, "(a(ussssa(sus)a(ss)bybbbxsssuuayuubibs))"
     ).unpack()
     return [(row[0], row[9]) for row in listed]
+
+
+def daemon_unread_safe():
+    """`daemon_unread`, empty while the daemon is not on the bus."""
+    try:
+        return daemon_unread()
+    except GLib.Error:
+        return []
+
+
+def daemon_pids():
+    """The processes of fake_notifications.py."""
+    return [
+        int(entry.name)
+        for entry in Path("/proc").iterdir()
+        if entry.name.isdigit()
+        and entry.name != str(os.getpid())
+        and b"fake_notifications.py" in _cmdline(entry)
+    ]
+
+
+def _cmdline(entry):
+    try:
+        return (entry / "cmdline").read_bytes()
+    except OSError:
+        return b""
 
 
 def daemon_mark_read(ids):
@@ -317,6 +358,10 @@ def main():
         "the action reaches the daemon with its key",
         wait_for(logged("InvokeAction 2 snooze token"), 3),
     )
+    check(
+        "using an action marks the notification read (NC11)",
+        wait_for(logged("MarkRead 2"), 3),
+    )
 
     # Hostile input the daemon would already have cleaned: the bar checks it again (BR9).
     os.mkfifo(FIFO)
@@ -440,7 +485,9 @@ def main():
     daemon_mark_read(id_ for id_, _ in daemon_unread())
     check(
         "with nothing unread the button has its plain name and no badge",
-        wait_for(lambda: buttons(app, Atspi, "Notifications"), 3),
+        wait_for(lambda: buttons(app, Atspi, "Notifications"), 3)
+        and wait_for(lambda: badge_labels(app, Atspi) == [], 3),
+        repr(badge_labels(app, Atspi)),
     )
     first = notify("Unread one")
     second = notify("Unread two")
@@ -451,7 +498,9 @@ def main():
     daemon_mark_read([first, second])
     check(
         "the badge is 0 after MarkRead",
-        wait_for(lambda: buttons(app, Atspi, "Notifications"), 3) and not badge("2")(),
+        wait_for(lambda: buttons(app, Atspi, "Notifications"), 3)
+        and wait_for(lambda: badge_labels(app, Atspi) == [], 3),
+        repr(badge_labels(app, Atspi)),
     )
     check("a read popup leaves the screen", wait_for(lambda: not shows("Unread one")(), 3))
     clicked = notify("Click to read")
@@ -501,6 +550,26 @@ def main():
             f"{unread(app, Atspi)} against {daemon_unread()}",
         )
     daemon_dnd(False)
+
+    # The daemon restarts: the bar lists again and the badge is the new daemon's count.
+    if app is not None:
+        for old in daemon_pids():
+            os.kill(old, signal.SIGKILL)
+        successor = subprocess.Popen(
+            [sys.executable, str(Path(__file__).resolve().parent / "fake_notifications.py")]
+        )
+        try:
+            check(
+                "the badge shows the restarted daemon's unread count",
+                wait_for(lambda: unread(app, Atspi) == len(daemon_unread_safe()) > 0, 10)
+                and wait_for(
+                    lambda: badge_labels(app, Atspi) == [str(len(daemon_unread_safe()))], 3
+                ),
+                f"{unread(app, Atspi)} against {daemon_unread_safe()}, {badge_labels(app, Atspi)}",
+            )
+        finally:
+            successor.terminate()
+            successor.wait()
 
     text = client_log.read_text(encoding="utf-8")
     # athanor_unit::journal starts each line with its syslog priority: <3> is an error.

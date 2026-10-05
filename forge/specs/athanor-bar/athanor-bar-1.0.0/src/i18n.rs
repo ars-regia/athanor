@@ -31,6 +31,11 @@ pub fn tr(msgid: &str) -> String {
     catalog().tr(msgid).to_string()
 }
 
+/// The form of a message that agrees with `n`, by the plural rule of the catalog.
+pub fn tr_n(msgid: &str, msgid_plural: &str, n: u64) -> String {
+    catalog().tr_n(msgid, msgid_plural, n).to_string()
+}
+
 /// The translation of `msgid` with `{key}` replaced by `value`. Translators move the
 /// placeholder freely; a value is never part of a message id.
 pub fn tr_with(msgid: &str, key: &str, value: &str) -> String {

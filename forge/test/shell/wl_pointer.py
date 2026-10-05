@@ -27,6 +27,8 @@ class VirtualPointer:
     def __init__(self, display, width, height):
         runtime = os.environ["XDG_RUNTIME_DIR"]
         self.sock = socket.socket(socket.AF_UNIX)
+        # A compositor that stops answering fails the check instead of hanging the rig.
+        self.sock.settimeout(5)
         self.sock.connect(f"{runtime}/{display}")
         self.extent = (width, height)
         self.buffer = b""

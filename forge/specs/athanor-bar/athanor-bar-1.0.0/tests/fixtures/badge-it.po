@@ -1,0 +1,13 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: it\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Notifications"
+msgstr "Notifiche"
+
+msgid "Notifications, {count} unread"
+msgid_plural "Notifications, {count} unread"
+msgstr[0] "Notifiche, {count} non letta"
+msgstr[1] "Notifiche, {count} non lette"

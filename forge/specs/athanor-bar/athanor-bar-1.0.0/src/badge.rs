@@ -13,14 +13,22 @@ pub fn badge_text(unread: usize) -> Option<String> {
     }
 }
 
-/// The accessible name of the button. `translate` turns a message id into the language of
-/// the session; `{count}` in the plural message is replaced by the number. The singular is
-/// a message of its own, because languages differ in how they agree it (it, "1 non letta").
-pub fn accessible_name(unread: usize, translate: &dyn Fn(&str) -> String) -> String {
+/// The accessible name of the button. `tr` and `tr_n` are the catalog of the session;
+/// `{count}` in the plural message is replaced by the number, and the catalog's own plural
+/// rule picks the form (Italian "non letta" for one, "non lette" for the others).
+pub fn accessible_name(
+    unread: usize,
+    tr: &dyn Fn(&str) -> String,
+    tr_n: &dyn Fn(&str, &str, u64) -> String,
+) -> String {
     match unread {
-        0 => translate("Notifications"),
-        1 => translate("Notifications, 1 unread"),
-        n => translate("Notifications, {count} unread").replace("{count}", &n.to_string()),
+        0 => tr("Notifications"),
+        n => tr_n(
+            "Notifications, {count} unread",
+            "Notifications, {count} unread",
+            u64::try_from(n).unwrap_or(u64::MAX),
+        )
+        .replace("{count}", &n.to_string()),
     }
 }
 
@@ -28,8 +36,16 @@ pub fn accessible_name(unread: usize, translate: &dyn Fn(&str) -> String) -> Str
 mod tests {
     use super::*;
 
-    fn identity(msgid: &str) -> String {
-        msgid.to_owned()
+    use athanor_i18n::Catalog;
+
+    const IT: &[u8] = include_bytes!("../tests/fixtures/badge-it.mo");
+
+    fn name(catalog: &Catalog, unread: usize) -> String {
+        accessible_name(
+            unread,
+            &|msgid| catalog.tr(msgid).to_owned(),
+            &|msgid, plural, n| catalog.tr_n(msgid, plural, n).to_owned(),
+        )
     }
 
     #[test]
@@ -42,21 +58,19 @@ mod tests {
     }
 
     #[test]
-    fn the_name_counts_the_unread() {
-        assert_eq!(accessible_name(0, &identity), "Notifications");
-        assert_eq!(accessible_name(1, &identity), "Notifications, 1 unread");
-        assert_eq!(accessible_name(3, &identity), "Notifications, 3 unread");
+    fn untranslated_the_name_counts_the_unread() {
+        let english = Catalog::empty();
+        assert_eq!(name(&english, 0), "Notifications");
+        assert_eq!(name(&english, 1), "Notifications, 1 unread");
+        assert_eq!(name(&english, 3), "Notifications, 3 unread");
     }
 
     #[test]
-    fn the_name_goes_through_the_translation() {
-        let it = |msgid: &str| match msgid {
-            "Notifications" => "Notifiche".to_owned(),
-            "Notifications, 1 unread" => "Notifiche, una non letta".to_owned(),
-            "Notifications, {count} unread" => "Notifiche, {count} non lette".to_owned(),
-            other => other.to_owned(),
-        };
-        assert_eq!(accessible_name(1, &it), "Notifiche, una non letta");
-        assert_eq!(accessible_name(3, &it), "Notifiche, 3 non lette");
+    fn the_name_follows_the_catalogs_plural_rule() {
+        let it = Catalog::parse(IT).expect("the fixture is msgfmt output");
+        assert_eq!(name(&it, 0), "Notifiche");
+        assert_eq!(name(&it, 1), "Notifiche, 1 non letta");
+        assert_eq!(name(&it, 3), "Notifiche, 3 non lette");
+        assert_eq!(name(&it, 150), "Notifiche, 150 non lette");
     }
 }

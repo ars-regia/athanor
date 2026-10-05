@@ -158,17 +158,11 @@ msgstr "Fenster kacheln"
 msgid "Notifications"
 msgstr "Benachrichtigungen"
 
-msgid "Notifications, {count} waiting"
-msgstr "Benachrichtigungen, {count} wartend"
-
-msgid "Do not disturb"
-msgstr "Nicht stören"
-
-msgid "Clear all"
-msgstr "Alle löschen"
-
-msgid "No notifications"
-msgstr "Keine Benachrichtigungen"
+#, rust-format
+msgid "Notifications, {count} unread"
+msgid_plural "Notifications, {count} unread"
+msgstr[0] "Benachrichtigungen, {count} ungelesen"
+msgstr[1] "Benachrichtigungen, {count} ungelesen"
 
 msgid "System tray"
 msgstr "Infobereich"

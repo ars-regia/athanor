@@ -62,7 +62,7 @@ Status: **revision 1, approved by the maintainer on 2026-09-25.** It is the spec
 | Battery | UPower; the power-profiles interface (`tuned-ppd`); logind's `SetBrightness` | percentage, time left, power profile, screen brightness; nothing goes through COSMIC's settings daemon |
 | Power | logind; `athanor-session.target` | lock (`loginctl lock-session`, which cosmic-greeter answers until stage 4), log out (stopping `athanor-session.target`), suspend, restart, shut down, each with a confirmation. When an update is downloaded, "Restart to update" stands beside "Restart"; it is the same request as SH11 |
 | Input source | the compositor client | the active keyboard layout and the switch between the configured ones, through the keyboard-layout protocol package 2a supplies |
-| Clock | the system clock, formatted for the locale, in 12 or 24 hours as COSMIC's clock setting says (`military_time`), else as the locale's time format | time and date; a calendar in its popover. It refreshes on resume from suspend and when the time zone changes |
+| Clock | the system clock, formatted for the locale, in 12 or 24 hours as COSMIC's clock setting says (`military_time`), else as the locale's time format | time and date; a click opens the notification center of athanor-control-center. It refreshes on resume from suspend and when the time zone changes |
 | Notifications | `athanor-shelld` | BR4 |
 | Tray | `athanor-shelld` and the host in the bar | BR5 |
 | Shield | `athanor-trust-state` | BR6 |
@@ -89,7 +89,7 @@ Status: **revision 1, approved by the maintainer on 2026-09-25.** It is the spec
   - At most three are visible; the newest is nearest to the panel, and the rest are counted on the notifications button.
   - The surface never takes the keyboard focus, so it never takes it from the active window; from the keyboard, actions are reached from the list.
   - Each popup has the accessible role `alert`, so Orca reads it.
-- **The list** is a popover of the bar: notifications grouped by application, each with its actions and close, a "clear all" control and the do-not-disturb switch.
+- **The list** is the notification center of athanor-control-center, which the notifications button and the clock open (`ToggleNotifications` on `os.athanor.ControlCenter1`): notifications grouped by application, each with its actions and close, a "clear all" control and the do-not-disturb switch. The bar keeps the popups and the button with its unread badge.
 
 **BR5. The tray.**
 
@@ -147,11 +147,11 @@ The notifier of UT11 announces a digest once and never again in a later session,
 
 **BR9. Tests.**
 
-- **Surface cases.** Every scene runs the matrix of SH13: scale {1.0, 1.5} × theme {light, dark} × text {English, German, a right-to-left pseudo-locale}, 12 cases. As SH13 requires, a scene with a popover starts with it open. There are 15 scenes, 180 cases:
+- **Surface cases.** Every scene runs the matrix of SH13: scale {1.0, 1.5} × theme {light, dark} × text {English, German, a right-to-left pseudo-locale}, 12 cases. As SH13 requires, a scene with a popover starts with it open. There are 13 scenes, 156 cases:
   - the bar with no popover open;
   - the shield's sheet, which carries the shield's 12 cases of `doc_shell.md` SH13;
-  - the notification list, and the notification popups;
-  - the popovers of network, Bluetooth, audio, battery, power, input source, calendar, the tray menu, accessibility and tiling;
+  - the notification popups;
+  - the popovers of network, Bluetooth, audio, battery, power, input source, the tray menu, accessibility and tiling;
   - the dock.
 
   At the 8 seconds per scene measured in spike P3 that is about 24 minutes in series, an estimate; the workflow splits them into parallel jobs.
@@ -191,4 +191,4 @@ Items 1 to 7 of `doc_shell.md`, section 8, stand unchanged. After the switch, on
 15. On hardware that has them, the network module joins a Wi-Fi network with a password, and the Bluetooth module pairs a device with a PIN confirmation.
 16. A key the policy layer marks mandatory holds in the bar even when `layout.toml` says otherwise.
 17. At rest, with every module loaded, measured in the rig: `athanor-bar` at most 64 MB PSS, `athanor-dock` at most 48 MB, `athanor-shelld` at most 16 MB. These are the memory budgets of `doc_shell_standard.md`, ST5.
-18. The 180 surface cases of BR9 pass in CI.
+18. The 156 surface cases of BR9 pass in CI.
