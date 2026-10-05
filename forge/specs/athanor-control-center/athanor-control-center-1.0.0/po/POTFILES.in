@@ -1,0 +1,10 @@
+src/panel/footer.rs
+src/panel/media.rs
+src/panel/mod.rs
+src/panel/sliders.rs
+src/panel/tile.rs
+../../../../system/athanor-controls/src/audio.rs
+../../../../system/athanor-controls/src/battery.rs
+../../../../system/athanor-controls/src/bluetooth.rs
+../../../../system/athanor-controls/src/network.rs
+../../../../system/athanor-controls/src/widgets.rs

@@ -13,6 +13,7 @@
 #   rig.sh build-compositor-client  clippy, tests and release build of cc-probe into <out>/bin
 #   rig.sh build-shelld     clippy, tests and release build of athanor-shelld into <out>/bin
 #   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps; athanor-controls, whose tests need a display) into <out>/bin, with the DT_NEEDED check
+#   rig.sh build-control-center   clippy, tests (the panel's on a display) and release build of athanor-control-center (with athanor-services and athanor-controls) into <out>/bin, with the DT_NEEDED check
 #   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout)
 #   rig.sh build-dock       clippy, tests and release build of athanor-dock (and athanor-apps) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-launcher   clippy, tests (qalc required) and release build of athanor-launcher and athanor-preview-render into <out>/bin, with the DT_NEEDED check
@@ -395,6 +396,18 @@ build-bar)
                  && cargo build --release --locked -p athanor-bar \
                  && install -m 0755 /out/target/release/athanor-bar /out/bin/ \
                  && python3 -B forge/scripts/check_shim_link_order.py /out/bin/athanor-bar'
+    ;;
+build-control-center)
+    mkdir -p "$out/bin" "$out/target"
+    podman run --rm --memory 6g --security-opt label=disable \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -e CARGO_TARGET_DIR=/out/target -w /repo "$local_image:build" \
+        bash -c 'cargo clippy --locked -p athanor-services -p athanor-controls -p athanor-control-center --all-targets -- -D warnings \
+                 && cargo test --locked -p athanor-services -p athanor-control-center --bins --lib \
+                 && forge/test/shell/with-display.sh cargo test --locked -p athanor-control-center --bins \
+                 && cargo build --release --locked -p athanor-control-center \
+                 && install -m 0755 /out/target/release/athanor-control-center /out/bin/ \
+                 && python3 -B forge/scripts/check_shim_link_order.py /out/bin/athanor-control-center'
     ;;
 build-dock)
     mkdir -p "$out/bin" "$out/target"

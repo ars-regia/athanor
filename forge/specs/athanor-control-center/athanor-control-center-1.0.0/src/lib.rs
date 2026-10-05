@@ -5,6 +5,9 @@ use std::path::{Path, PathBuf};
 use athanor_layout::preset::PanelEdge;
 use athanor_unit::dirs::Dirs;
 
+pub mod rfkill;
+pub mod tiles;
+
 /// The detail pages of CC5; the panel itself is the empty page id.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
@@ -97,30 +100,50 @@ pub fn focused_output(activated: Option<&[String]>, outputs: &[Option<String>]) 
         .unwrap_or(0)
 }
 
-/// The write grants of the Landlock ruleset (CC2). Reads stay open, which covers `/proc` for
-/// the system page and the icon and theme directories; TCP is denied separately.
+/// The write grants of the Landlock ruleset (CC2). Reads are never restricted (a GTK program
+/// cannot name what it reads, `sandbox::restrict_writes`), which covers `/proc` for the
+/// system page, the icon and theme directories, and the artwork files a player names; TCP is
+/// denied separately, which keeps `https:` artwork out.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Grants {
-    /// Directories written below: the control center's own state, and what GTK writes at
-    /// start (the bar's list: its runtime directory, dconf, the cache, `/tmp`).
+    /// Directories written below: the control center's own state, what GTK writes at start
+    /// (the bar's list: its runtime directory, dconf, the cache, `/tmp`), the launch sockets,
+    /// and the directory
+    /// of the COSMIC theme mode that the dark-mode tile writes.
     pub write: Vec<PathBuf>,
     /// Device nodes opened for writing.
     pub devices: Vec<PathBuf>,
 }
 
-pub fn grants(dirs: &Dirs, state: &Path) -> Grants {
-    Grants {
-        write: vec![
-            state.to_path_buf(),
-            dirs.unit_runtime.clone(),
-            dirs.runtime.join("dconf"),
-            dirs.cache.clone(),
-            PathBuf::from("/tmp"),
-        ],
-        // /dev/rfkill is CC8's; /dev/dri is what GDK opens at start, as the bar's ruleset says.
-        devices: vec![PathBuf::from("/dev/rfkill"), PathBuf::from("/dev/dri")],
+/// `theme_mode_dir` is the user's `com.system76.CosmicTheme.Mode/v1`; `rfkill` is whether
+/// `/dev/rfkill` exists, since Landlock refuses to add a rule for a path that does not.
+pub fn grants(dirs: &Dirs, state: &Path, theme_mode_dir: Option<&Path>, rfkill: bool) -> Grants {
+    let mut write = vec![
+        state.to_path_buf(),
+        dirs.unit_runtime.clone(),
+        dirs.runtime.join("dconf"),
+        launch_dir(dirs),
+        dirs.cache.clone(),
+        PathBuf::from("/tmp"),
+    ];
+    write.extend(theme_mode_dir.map(Path::to_path_buf));
+    // /dev/rfkill is CC8's; /dev/dri is what GDK opens at start, as the bar's ruleset says.
+    let mut devices = Vec::new();
+    if rfkill {
+        devices.push(PathBuf::from(RFKILL));
     }
+    devices.push(PathBuf::from("/dev/dri"));
+    Grants { write, devices }
 }
+
+/// The parent of the launch sockets of BR2.2, where `Client::launch` makes one per application:
+/// the Settings button writes there.
+pub fn launch_dir(dirs: &Dirs) -> PathBuf {
+    dirs.runtime.join("athanor")
+}
+
+/// The kernel's rfkill device.
+pub const RFKILL: &str = "/dev/rfkill";
 
 #[cfg(test)]
 mod tests {
@@ -191,23 +214,28 @@ mod tests {
         .expect("absolute HOME and XDG_RUNTIME_DIR")
     }
 
+    fn paths(list: &[PathBuf]) -> Vec<String> {
+        list.iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+    }
+
+    const MODE: &str = "/home/u/.config/cosmic/com.system76.CosmicTheme.Mode/v1";
+
     #[test]
-    fn the_ruleset_grants_the_state_what_gtk_writes_and_two_devices() {
+    fn the_ruleset_grants_the_state_the_theme_mode_what_gtk_writes_and_two_devices() {
         let state = Path::new("/home/u/.local/state/athanor/control-center");
-        let grants = grants(&dirs(), state);
-        let paths = |list: &[PathBuf]| {
-            list.iter()
-                .map(|path| path.display().to_string())
-                .collect::<Vec<_>>()
-        };
+        let grants = grants(&dirs(), state, Some(Path::new(MODE)), true);
         assert_eq!(
             paths(&grants.write),
             [
                 "/home/u/.local/state/athanor/control-center",
                 "/run/user/1000/athanor-control-center",
                 "/run/user/1000/dconf",
+                "/run/user/1000/athanor",
                 "/home/u/.cache",
-                "/tmp"
+                "/tmp",
+                MODE
             ]
         );
         assert_eq!(paths(&grants.devices), ["/dev/rfkill", "/dev/dri"]);
@@ -215,9 +243,17 @@ mod tests {
             !grants
                 .write
                 .iter()
-                .any(|path| path.starts_with("/home/u/.config")),
-            "no write to the configuration"
+                .any(|path| path.starts_with("/home/u/.config") && path != Path::new(MODE)),
+            "no write to the configuration but the theme mode"
         );
+    }
+
+    #[test]
+    fn a_machine_without_rfkill_is_granted_no_rfkill_device() {
+        let state = Path::new("/home/u/.local/state/athanor/control-center");
+        let grants = grants(&dirs(), state, None, false);
+        assert_eq!(paths(&grants.devices), ["/dev/dri"]);
+        assert_eq!(grants.write.len(), 6, "no theme directory to grant either");
     }
 
     /// The ruleset the grants build is enforceable and confines a thread: a write outside the

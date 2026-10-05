@@ -13,6 +13,7 @@ use gtk4::{gdk, glib};
 
 use crate::bus::Bus;
 use crate::i18n::is_rtl;
+use crate::panel::{Hooks, Panel};
 use crate::surface::Surface;
 
 const CSS: &str = "
@@ -20,13 +21,11 @@ const CSS: &str = "
 .control-center { border-radius: 16px; padding: 12px; }
 ";
 
-/// The stack child that is the panel itself.
-const PANEL: &str = "panel";
 
 pub struct ControlCenter {
     app: gtk4::Application,
     display: gdk::Display,
-    client: Option<Client>,
+    client: Option<Rc<Client>>,
     layout: Source,
     bus: Rc<Bus>,
     surfaces: RefCell<Vec<Surface>>,
@@ -36,11 +35,16 @@ pub struct ControlCenter {
     /// loss of focus and not the keyboard not having arrived yet.
     focused: Cell<bool>,
     content: gtk4::Box,
-    stack: gtk4::Stack,
+    panel: Rc<Panel>,
     watches: RefCell<Vec<gtk4::gio::FileMonitor>>,
 }
 
-pub fn start(app: &gtk4::Application, bus: Rc<Bus>, layout: Source) -> Rc<ControlCenter> {
+pub fn start(
+    app: &gtk4::Application,
+    bus: Rc<Bus>,
+    layout: Source,
+    rfkill: Option<Rc<crate::panel::Rfkill>>,
+) -> Rc<ControlCenter> {
     let Some(display) = gdk::Display::default() else {
         tracing::error!("athanor-control-center: no display");
         std::process::exit(1);
@@ -59,24 +63,21 @@ pub fn start(app: &gtk4::Application, bus: Rc<Bus>, layout: Source) -> Rc<Contro
         gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
     let client = match Client::connect(&display) {
-        Ok(client) => Some(client),
+        Ok(client) => Some(Rc::new(client)),
         Err(err) => {
             tracing::error!(error = %err, "no compositor client; the panel opens on the first output");
             None
         }
     };
-    let stack = gtk4::Stack::new();
-    stack.add_named(&gtk4::Label::new(Some(PANEL)), Some(PANEL));
-    for page in Page::ALL {
-        stack.add_named(&gtk4::Label::new(Some(page.id())), Some(page.id()));
-    }
+    let panel = Panel::new(athanor_controls::bridge::services(), rfkill, hooks(client.clone()));
+    panel.set_dark(cosmic.is_dark);
     let content = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Vertical)
         .width_request(360)
         .build();
     content.add_css_class("control-center");
     content.add_css_class("background");
-    content.append(&stack);
+    content.append(&panel.widget());
     let center = Rc::new(ControlCenter {
         app: app.clone(),
         display: display.clone(),
@@ -87,7 +88,7 @@ pub fn start(app: &gtk4::Application, bus: Rc<Bus>, layout: Source) -> Rc<Contro
         shown: RefCell::default(),
         focused: Cell::new(false),
         content,
-        stack,
+        panel,
         watches: RefCell::default(),
     });
     let weak = Rc::downgrade(&center);
@@ -97,13 +98,23 @@ pub fn start(app: &gtk4::Application, bus: Rc<Bus>, layout: Source) -> Rc<Contro
         }
     });
     let watched = display.clone();
+    let weak = Rc::downgrade(&center);
     center
         .watches
         .borrow_mut()
         .extend(theme::watch(move |cosmic| {
             calmo::load(&watched, cosmic.variant());
             theme::load_accent(&watched, &cosmic);
+            if let Some(center) = weak.upgrade() {
+                center.panel.set_dark(cosmic.is_dark);
+            }
         }));
+    let weak = Rc::downgrade(&center);
+    center.panel.set_closer(move || {
+        if let Some(center) = weak.upgrade() {
+            center.hide();
+        }
+    });
     center.sync_surfaces();
     center
 }
@@ -183,6 +194,9 @@ impl ControlCenter {
             }
             if window.is_active() {
                 center.focused.set(true);
+                // Exclusive keyboard mode never reports a loss of focus, so once the surface
+                // has the keyboard it asks for it on demand instead (CC9).
+                crate::surface::relax_to_on_demand(window);
             } else if center.focused.get() {
                 center.hide();
             }
@@ -206,14 +220,13 @@ impl ControlCenter {
     }
 
     fn show(self: &Rc<Self>, page: Option<Page>) {
-        self.stack
-            .set_visible_child_name(page.map_or(PANEL, Page::id));
+        self.panel.show(page);
         if self.shown.borrow().is_some() {
             return;
         }
         let windows = self
             .client
-            .as_ref()
+            .as_deref()
             .map(Client::windows)
             .unwrap_or_default();
         let surfaces = self.surfaces.borrow();
@@ -243,6 +256,10 @@ impl ControlCenter {
         self.focused.set(false);
         self.shown.replace(Some(surface.monitor.clone()));
         surface.show(self.content.upcast_ref());
+        self.panel.set_shown(true);
+        if page.is_none() {
+            self.panel.focus_first();
+        }
         self.bus.set_open(true);
     }
 
@@ -251,6 +268,7 @@ impl ControlCenter {
             return;
         };
         self.focused.set(false);
+        self.panel.set_shown(false);
         if let Some(surface) = self
             .surfaces
             .borrow()
@@ -267,3 +285,28 @@ impl ControlCenter {
 pub fn live_layout(config: &std::path::Path) -> Source {
     Source::Live(Paths::for_config_home(config))
 }
+
+/// What the panel asks of the program: Settings through the compositor client, and the
+/// theme mode written where cosmic-settings writes it.
+fn hooks(client: Option<Rc<Client>>) -> Hooks {
+    Hooks {
+        open_settings: Box::new(move || {
+            let Some(client) = client.clone() else {
+                tracing::warn!("no compositor client; Settings is not opened");
+                return;
+            };
+            let Some(app) = gio_unix::DesktopAppInfo::new(SETTINGS) else {
+                tracing::warn!("{SETTINGS} is not installed");
+                return;
+            };
+            glib::spawn_future_local(async move {
+                if let Err(err) = client.launch(&app).await {
+                    tracing::warn!(error = %err, "Settings did not start");
+                }
+            });
+        }),
+        set_dark: Box::new(theme::set_dark),
+    }
+}
+
+const SETTINGS: &str = "com.system76.CosmicSettings.desktop";

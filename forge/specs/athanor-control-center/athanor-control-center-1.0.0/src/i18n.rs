@@ -1,6 +1,6 @@
 //! The control center's catalog for the life of the process, read by athanor-i18n as the
-//! launcher and the bar do. No catalog ships yet (the pages are placeholders), so it speaks
-//! English; the language still gives the text direction.
+//! launcher and the bar do. The pages of athanor-controls speak through it as well: its
+//! `POTFILES.in` lists their sources.
 
 use std::sync::OnceLock;
 
@@ -18,8 +18,24 @@ pub fn init() {
     if CATALOG.set(catalog).is_err() {
         tracing::warn!("the translations were already loaded; the second load is ignored");
     }
+    // The pages of athanor-controls speak through the same catalog.
+    athanor_controls::i18n::set_catalog(catalog_ref());
+}
+
+fn catalog_ref() -> &'static Catalog {
+    CATALOG.get_or_init(Catalog::empty)
 }
 
 pub fn is_rtl() -> bool {
-    CATALOG.get_or_init(Catalog::empty).is_rtl()
+    catalog_ref().is_rtl()
+}
+
+pub fn tr(msgid: &str) -> String {
+    catalog_ref().tr(msgid).to_string()
+}
+
+/// The translation of `msgid` with `{key}` replaced by `value`. Translators move the
+/// placeholder freely; a value is never part of a message id.
+pub fn tr_with(msgid: &str, key: &str, value: &str) -> String {
+    tr(msgid).replace(&format!("{{{key}}}"), value)
 }

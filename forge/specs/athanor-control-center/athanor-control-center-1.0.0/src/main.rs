@@ -6,15 +6,22 @@
 mod bus;
 mod i18n;
 mod layer_guard;
+mod panel;
 mod surface;
 mod ui;
 
 use std::cell::RefCell;
 use std::env;
+use std::fs::DirBuilder;
+use std::os::unix::fs::DirBuilderExt;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use athanor_compositor_client::shortcuts::{self, Binding};
-use athanor_control_center::grants;
+use athanor_compositor_client::theme;
+use athanor_services::battery::BACKLIGHT_ROOT;
+use athanor_services::Runtime;
+use athanor_control_center::{grants, launch_dir, RFKILL};
 use athanor_layout::loader;
 use athanor_unit::dirs::Dirs;
 use athanor_unit::{crash_loop, journal, sandbox};
@@ -25,6 +32,12 @@ const APP_ID: &str = "os.athanor.ControlCenter";
 
 /// The panel and the bus name it owns, kept for the life of the app.
 type Running = (Rc<ui::ControlCenter>, gtk4::gio::OwnerId);
+
+/// The bar's `ATHANOR_BAR_BACKLIGHT_DIR` for the rig, else sysfs.
+fn backlight_root() -> PathBuf {
+    env::var_os("ATHANOR_CONTROL_CENTER_BACKLIGHT_DIR")
+        .map_or_else(|| PathBuf::from(BACKLIGHT_ROOT), PathBuf::from)
+}
 
 fn main() -> glib::ExitCode {
     journal::init();
@@ -85,7 +98,19 @@ fn main() -> glib::ExitCode {
         }
     }
     // Before GTK starts a thread. Reads stay open (CC2); writes only where `grants` says.
-    let granted = grants(&dirs, &state);
+    let launch = launch_dir(&dirs);
+    if let Err(err) = DirBuilder::new().recursive(true).mode(0o700).create(&launch) {
+        tracing::warn!(error = %err, dir = %launch.display(), "cannot create the directory of the launch sockets");
+    }
+    // The unit's ConfigurationDirectory= creates it; a run outside it needs it here.
+    let mode_dir = theme::mode_dir();
+    if let Some(dir) = &mode_dir {
+        if let Err(err) = std::fs::create_dir_all(dir) {
+            tracing::warn!(error = %err, dir = %dir.display(), "cannot create the theme mode directory");
+        }
+    }
+    let rfkill_present = Path::new(RFKILL).exists();
+    let granted = grants(&dirs, &state, mode_dir.as_deref(), rfkill_present);
     let write: Vec<&std::path::Path> = granted
         .write
         .iter()
@@ -103,6 +128,12 @@ fn main() -> glib::ExitCode {
         tracing::error!(error = %err, "cannot confine the control center with Landlock; refusing to run unconfined");
         return glib::ExitCode::FAILURE;
     }
+    // After the confinement, which needs a single thread, and before GTK: the models decode
+    // the services' replies on this runtime. Without it the tiles that need one are not built.
+    match Runtime::start() {
+        Ok(runtime) => athanor_controls::bridge::install(runtime.handle().clone(), backlight_root()),
+        Err(err) => tracing::error!(error = %err, "cannot start the runtime of the models"),
+    }
     i18n::init();
 
     let app = Application::builder().application_id(APP_ID).build();
@@ -113,7 +144,7 @@ fn main() -> glib::ExitCode {
             return;
         }
         let bus = Rc::new(bus::Bus::default());
-        let center = ui::start(app, bus.clone(), layout.clone());
+        let center = ui::start(app, bus.clone(), layout.clone(), panel::open_rfkill());
         let (shown, toggled) = (Rc::downgrade(&center), Rc::downgrade(&center));
         let owner = bus::own(
             bus,

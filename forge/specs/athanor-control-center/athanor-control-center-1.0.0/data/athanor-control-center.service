@@ -39,8 +39,9 @@ RuntimeDirectoryPreserve=yes
 StateDirectory=athanor/control-center
 # cosmic-comp's shortcuts, where Super+C is bound once per user (CC9). The unit must grant
 # it under ProtectHome=read-only for that one write, made before the Landlock ruleset, which
-# then closes the directory for the rest of the run.
-ConfigurationDirectory=cosmic/com.system76.CosmicSettings.Shortcuts/v1
+# then closes the directory for the rest of the run. The theme mode is the dark mode tile's
+# `is_dark`; it is written while the run lasts, so Landlock grants it.
+ConfigurationDirectory=cosmic/com.system76.CosmicSettings.Shortcuts/v1 cosmic/com.system76.CosmicTheme.Mode/v1
 
 ProtectSystem=strict
 ProtectHome=read-only

@@ -95,3 +95,9 @@ impl Surface {
         self.window.set_child(None::<&gtk4::Widget>);
     }
 }
+
+/// Called once the surface has the keyboard: under `Exclusive` the compositor never reports
+/// that focus left, so the panel could not close on it (CC9). The focus it holds stays.
+pub fn relax_to_on_demand(window: &gtk4::ApplicationWindow) {
+    window.set_keyboard_mode(KeyboardMode::OnDemand);
+}
