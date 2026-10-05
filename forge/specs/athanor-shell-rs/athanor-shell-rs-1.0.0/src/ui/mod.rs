@@ -19,7 +19,6 @@ pub mod quicklook;
 pub mod forge_widget;
 
 pub use crate::wayland::popup as popup_manager;
-pub use prompts::gatekeeper as gatekeeper_prompt;
 pub use prompts::privacy as privacy_prompt;
 pub use prompts::file_chooser;
 pub use quicklook::*;
