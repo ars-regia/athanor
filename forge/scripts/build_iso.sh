@@ -58,8 +58,8 @@ retry="${repo}/forge/scripts/retry.sh"
 sudo bash "$retry" podman pull "$builder"
 sudo bash "$retry" podman pull "$image"
 
-# --rootfs: the builder formats the installed root with ext4, xfs or btrfs and knows no
-# other type, so btrfs stands in for the bcachefs root the design targets.
+# --rootfs: the builder formats the installed root with ext4, xfs or btrfs; the image
+# installs btrfs.
 sudo podman run --rm --privileged --security-opt label=type:unconfined_t \
   -v /var/lib/containers/storage:/var/lib/containers/storage \
   -v "${config}:/config.toml:ro" \

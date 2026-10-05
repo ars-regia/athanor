@@ -238,7 +238,7 @@ impl SchedExtController {
         // 1. PID Protection Check (PID 1 / Kernel Idle protection)
         if PROTECTED_PIDS.contains(&policy.pid) {
             let msg = format!(
-                "⛔ [AI Confinement Violation] Refused to modify scheduling metrics for critical system PID {}. PID 1 / Gatekeeper protection active.",
+                "⛔ [AI Confinement Violation] Refused to modify scheduling metrics for protected PID {} (init or idle).",
                 policy.pid
             );
             warn!("{}", msg);

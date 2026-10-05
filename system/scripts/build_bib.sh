@@ -17,7 +17,7 @@ sudo podman run --rm -it --privileged --pull=newer --net=host \
   -v "$(pwd)/${config}:/config.toml:ro" \
   -v "$BUILDTMP:/output" \
   -v /var/lib/containers/storage:/var/lib/containers/storage \
-  "${BIB_IMAGE}" --type "${TYPE}" --use-librepo=True --rootfs=bcachefs --config /config.toml \
+  "${BIB_IMAGE}" --type "${TYPE}" --use-librepo=True --rootfs=btrfs --config /config.toml \
   "${TARGET_IMAGE}:${TAG}"
 
 if [[ "${TYPE}" == "qcow2" ]]; then

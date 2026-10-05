@@ -1,8 +1,0 @@
-[Unit]
-Description=Bcachefs Root with ZSTD Compression and Deduplication
-
-[Mount]
-What=/dev/disk/by-label/athanor_root
-Where=/sysroot
-Type=bcachefs
-Options=compression=zstd,background_compression=zstd,data_replicas=1,metadata_replicas=2
