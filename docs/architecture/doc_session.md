@@ -49,22 +49,23 @@ Status: **revision 1, draft, awaiting review (2026-10-06).** It is the specifica
 
 **SN2. The environment.**
 
+- **Set for the user manager by environment.d,** before it starts any unit: `XDG_CURRENT_DESKTOP=Athanor:COSMIC` from `/usr/lib/environment.d/50-athanor-desktop.conf` (`forge/specs/athanor-system-config/SOURCES/usr/lib/environment.d/50-athanor-desktop.conf:7`, branch `a2/portal-step1`, #157), so that a portal activated before the import already finds the desktop name and chooses `athanor-portals.conf`; and `XDG_DATA_DIRS` from `60-athanor-cosmic-defaults.conf` (below). The drop-in and `athanor-session` carry the same value and change together (SN10).
 - **Exported by `athanor-session`,** before it execs cosmic-comp, in this order:
   1. `XDG_CURRENT_DESKTOP` (SN10) and `XDG_SESSION_TYPE=wayland`, as today;
   2. `XDG_DATA_DIRS` with Athanor's defaults first, as today, because cosmic-comp is a child of this script and not of the user manager; the user manager gets the same value from `/usr/lib/environment.d/60-athanor-cosmic-defaults.conf` (`forge/specs/athanor-calmo/SOURCES/usr/lib/environment.d/60-athanor-cosmic-defaults.conf`);
   3. after `athanor-first-run apply-handoff` (LN7), `LANG` and `LANGUAGE` from AccountsService (LN6) and the `LC_*` variables of the region (LN7);
   4. `XCURSOR_SIZE` and `XCURSOR_THEME` from the GNOME keys (AX9).
-- **The import list.** `athanor-desktop` imports into the user manager exactly: `WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XDG_SESSION_CLASS LANG LANGUAGE LC_NUMERIC LC_TIME LC_MONETARY LC_PAPER LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT XCURSOR_SIZE XCURSOR_THEME`. A variable the session did not set is not imported, so an unset `LANGUAGE` leaves the manager's value alone.
-- **Never imported:** `XDG_DATA_DIRS` (environment.d covers the manager), `XDG_SESSION_ID` (units find their session through logind, LP2), `XDG_ACTIVATION_TOKEN` (one per launch, BR2), `DBUS_SESSION_BUS_ADDRESS` (the manager's own).
-- **Removed at the end.** The readiness gate gains `ExecStop=` that runs `systemctl --user unset-environment` over the same list, so a unit started after the logout and before the next login never inherits a dead display. The list lives in one file read by both `athanor-desktop` and the gate, so the two never diverge.
-  - Needs: LN6, LN7, AX9.
+- **The import list.** `athanor-desktop` imports into the user manager exactly: `WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XDG_SESSION_CLASS LANG LANGUAGE LC_NUMERIC LC_TIME LC_MONETARY LC_PAPER LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT XCURSOR_SIZE XCURSOR_THEME` and, while the input method is enabled, `XMODIFIERS QT_IM_MODULES QT_IM_MODULE`, which `athanor-session` then exports (LN11). A variable the session did not set is not imported, so an unset `LANGUAGE` leaves the manager's value alone.
+- **Never imported** *(Proposal, awaiting the maintainer.)* `XDG_DATA_DIRS` (environment.d covers the manager), `XDG_SESSION_ID` (units find their session through logind, LP2), `XDG_ACTIVATION_TOKEN` (one per launch, BR2), `DBUS_SESSION_BUS_ADDRESS` (the manager's own).
+- **Removed at the end.** The readiness gate gains `ExecStop=` that runs `systemctl --user unset-environment` over the same list except `XDG_CURRENT_DESKTOP`, whose value is static and comes from environment.d as well (unsetting it would leave a portal activated between two sessions without a desktop name), so a unit started after the logout and before the next login never inherits a dead display. The list lives in one file read by both `athanor-desktop` and the gate, so the two never diverge.
+  - Needs: LN6, LN7, LN11, AX9.
 
 **SN3. One binding rule.**
 
 - **`PartOf=graphical-session.target`** for every user unit Athanor ships for the session, the readiness gate included, and for every application unit the broker creates. This is the convention of systemd.special(7) ("Such services should have `PartOf=graphical-session.target`") and of the upstream units the session runs, such as `xdg-desktop-portal.service`, so one rule covers ours and theirs and one stop transaction stops them all. `athanor-session.target` keeps `BindsTo=graphical-session.target`, so the session stops when either target does.
 - **`WantedBy=athanor-session.target`** in `[Install]`, enabled by a user preset, for every unit the session starts eagerly. A D-Bus-activated unit (`athanor-osd`, the portal backend) has no `[Install]` section.
 - **Every unit that connects to the compositor** has `After=` and `Requisite=athanor-desktop.service`, as the bar, the dock and the launcher do today. A headless unit (shelld, sessiond, broker) has neither, so D-Bus activation works before the gate.
-- **Rejected: `PartOf=athanor-session.target`.** It stops our units in a transaction of their own, before `graphical-session.target` becomes unneeded and stops the upstream ones, so no `After=` edge between an application of ours and the portal frontend would order their stops. The only unit that writes it, LP2's, is not built yet.
+- **Rejected: `PartOf=athanor-session.target`.** *(Proposal, awaiting the maintainer.)* The logout is a stop job on `athanor-session.target` (section 1), and a unit `PartOf=` that target stops in that job's transaction. `graphical-session.target` stops later, in a transaction of its own, once nothing needs it (`StopWhenUnneeded=yes`), and that transaction stops every unit `PartOf=graphical-session.target`, upstream ones such as `xdg-desktop-portal.service` included. `After=` orders stops only inside one transaction, so a unit bound to `athanor-session.target` always stops before every unit bound to `graphical-session.target`, whatever its edges say. Bound as LP2 writes it, the lock and the agent would stop before the applications and the portal frontend, the reverse of SN5. With one binding every unit stops in the second transaction and SN5's edges hold. This reverses LP2's text; the lock and the agent are not built yet, so no shipped unit changes.
 
 **SN4. The start order.** Each edge is an `After=`; a `Wants=` is named where the edge must also pull the unit in.
 
@@ -74,34 +75,37 @@ Status: **revision 1, draft, awaiting review (2026-10-06).** It is the specifica
 | `athanor-bar` after `athanor-shelld` (and wants it) | the bar reads notifications from shelld (BR1) | today (`athanor-bar.service:5-6`) |
 | shell surfaces (bar, dock, launcher, `athanor-osd`, Settings, overview, control center) after `athanor-lock` and `athanor-polkit-agent` | a surface that asks for authorisation finds the agent and its `SystemPrompter` registered (LP11, LP12); at the stop, the guards outlive the surfaces (SN5) | each guard's enabling step (LP18 steps 3 and 5) |
 | `orca.service` after `athanor-a11y-gate.service`, and wants it, in Orca's Athanor drop-in | the reader reaches the accessibility bus only through the gate (AX5) | the gate's step (AX18 step 6) |
-| application units after `xdg-desktop-portal.service`, `athanor-polkit-agent.service` and `athanor-lock.service` | the portal frontend is up before an application asks it, and outlives it at the stop; the same for the agent and the lock | the broker (SD22 step 6) |
-| autostart after `athanor-session.target` is active | today through `Before=xdg-desktop-autostart.target` (`athanor-session.target:10-11`); from the broker on, SD10 launches the entries once the target is active, and the broker is wanted by the target, so it is up first | today, then SD10 |
+| application units after `athanor-broker.service`, `xdg-desktop-portal.service`, `athanor-polkit-agent.service` and `athanor-lock.service` | the broker that creates the unit, the portal frontend, the agent and the lock are up before an application asks them, and outlive it at the stop (SN5) | the broker (SD22 step 6) |
+| autostart after `athanor-session.target` | today through `Before=xdg-desktop-autostart.target` (`athanor-session.target:10-11`), whose units systemd's generator writes | today |
+| `athanor-autostart.service` after `athanor-broker.service` (and requiring it) and after `athanor-session.target` | from SD22 step 6 the broker launches the entries (SD10). *(Proposal, awaiting the maintainer.)* A oneshot with `RemainAfterExit=yes`, wanted by `athanor-session.target` and `PartOf=graphical-session.target`, asks the broker once to run them: the broker is a guard and restarts, and a restart must not run autostart again. A target adds no implicit `After=` on a unit already ordered after it, so the oneshot runs once the rest of the session is up. SD10 says "once the session target is up" without naming the mechanism | SD22 step 6 |
 
 - **The guards are ready when they serve.** `athanor-lock`, `athanor-polkit-agent`, `athanor-idle`, `athanor-broker` and `athanor-a11y-gate` are `Type=notify` or `Type=dbus` and report ready only once they lock, are registered with polkit, hold their timers, own their name or listen, so an `After=` edge to them means what it says.
 - **The start threshold of ST5 holds** with these edges: the bar now waits for two more units. If it does not hold on the reference machine, the edge is kept and the guard's start is made faster; ST5 is not relaxed (ST2).
-  - Needs: LP2, LP11, AX5, SD8.
+  - Needs: LP2, LP11, AX5, SD8, SD10.
 
-**SN5. The stop order.** systemd stops in the reverse of the start order, so SN4 gives the order of a logout:
+**SN5. The stop order.** Every session unit stops in the transaction of `graphical-session.target` (SN3), and inside it systemd stops a unit before the units it is ordered after. The edges of SN4 therefore give a partial order, and only that order is guaranteed:
 
-1. application units, while the portal frontend, the agent and the lock still run;
-2. the shell surfaces;
-3. the headless services: `athanor-shelld` after the bar (it follows shelld at the start), sessiond, the broker, the wallpaper;
-4. the guards: the lock and the polkit agent last of ours, so a session that ends while locked never shows its content;
-5. the readiness gate, which unsets the imported environment (SN2).
+- an application unit stops before the broker, the portal frontend, the polkit agent and the lock, which are still there while it saves its work;
+- a shell surface stops before the lock and the polkit agent, so a session that ends while locked never shows its content; the bar stops before `athanor-shelld`;
+- every unit that connects to the compositor stops before the readiness gate, which unsets the imported environment (SN2);
+- `athanor-autostart.service` stops before the broker; Orca stops before the a11y gate.
+
+Units with no edge between them (an application and the bar, the wallpaper and sessiond, the guards among themselves) stop in parallel. An edge is added here only when a stop needs a unit that would otherwise be gone.
 
 The stop of each unit is bounded by the manager's default stop timeout. An application that does not exit within it is killed; this is the declared cost of ending a session.
 
-**SN6. Crash classes.** Every session unit belongs to one class, and its unit file says which in a comment that cites this rule.
+**SN6. Crash classes.** Every session unit Athanor builds belongs to one class, and its unit file says which in a comment that cites this rule. The exceptions are named after the table.
 
 | Class | Members | Policy | Never |
 |---|---|---|---|
-| **Guards** | `athanor-lock`, `athanor-idle`, `athanor-polkit-agent` (with the `SystemPrompter`), `athanor-broker`; and, by this document, `athanor-sessiond` and `athanor-a11y-gate` | `Restart=always`, `RestartSec=100ms`, `RestartSteps=5`, `RestartMaxDelaySec=30s`, `StartLimitIntervalSec=0`; a degraded mode while down (SN7) | given up; a guard restarts for as long as the session lasts |
+| **Guards** | `athanor-lock`, `athanor-idle`, `athanor-polkit-agent` (with the `SystemPrompter`), `athanor-broker` (A2-20, #156); `athanor-sessiond` and `athanor-a11y-gate` (maintainer decision 2026-10-06 (#156)) | `Restart=always`, `RestartSec=100ms`, `RestartSteps=5`, `RestartMaxDelaySec=30s`, `StartLimitIntervalSec=0`; after 60 s of healthy run the program sends `RESTART_RESET=1` (below); a degraded mode while down (SN7) | given up; a guard restarts for as long as the session lasts |
 | **Surfaces and their services** | `athanor-bar`, `athanor-dock`, `athanor-shelld`, `athanor-launcher`, `athanor-osd`, Settings, the overview, the control center, `athanor-wallpaper`, `athanor-update-notify`, `athanor-a11y` (the watcher) | `Restart=on-failure`, `RestartSec=100ms`, `StartLimitBurst=10` over `StartLimitIntervalSec=600`; the program's own SH8 counter decides its degraded state after five failures in ten minutes on `CLOCK_BOOTTIME` | a second, different counter |
 | **Activated helpers** | the portal backend `xdg-desktop-portal-athanor` | no `Restart=`: the next D-Bus call activates it again; systemd's default start limit cuts a tight loop and expires, so a later call succeeds | a give-up that lasts the session |
 | **Session steps** | `athanor-desktop.service`, `athanor-skel-sync.service` | oneshot, no restart; the gate's failure fails the target and so the login, which greetd reports | a restart |
 
-- **Why sessiond and the gate are guards.** sessiond reports every other crash (SN8) and holds the USBGuard notice; a reporter that gives up hides every later failure. The gate fails closed (AX5): while it is down no screen reader reaches the bus, which for a blind user is a session that cannot be used. Both are additions to the four guards of A2-20 (#156), for the maintainer to confirm (section 4, question 8).
-- **The lock** keeps LP10's 100 ms first restart; the back-off only lengthens a loop. A single `SIGKILL` after a healthy run must restart within 100 ms (ST5), which depends on systemd returning to the first step (section 4, question 2).
+- **Why sessiond and the gate are guards** (maintainer decision 2026-10-06 (#156)). sessiond reports every other crash (SN8) and holds the USBGuard notice; a reporter that gives up hides every later failure. The gate fails closed (AX5): while it is down no screen reader reaches the bus, which for a blind user is a session that cannot be used.
+- **The back-off resets only on request.** In systemd 258 the restart counter that `RestartSteps=` reads is flushed only by a start that is not an automatic restart (`src/core/service.c:2988-2990`, tag `v258`), by `reset-failed` (`:5262`), or by the notification `RESTART_RESET=1`, new in 258 (`:4981-4988`; `man/sd_notify.xml:379-387`). It is not reset by a healthy run, as `athanor-bar.service:20-22` already notes for the surfaces. A guard that crash-looped once would otherwise wait 30 s at every later crash of the session, and ST5's 1 s recovery would fail. So every guard sends `RESTART_RESET=1` through `sd_notify` once it has run for 60 s since its last start, the healthy-run threshold of `athanor-desktop:41-45`; a guard of `Type=dbus` sets `NotifyAccess=main` for it. The lock's first restart stays at 100 ms (LP10).
+- **Exceptions.** COSMIC's units are named below. `athanor-launcher.service` keeps `RestartSec=1s` with `RestartSteps=5` and `RestartMaxDelaySec=60s` (`athanor-launcher.service:23-25`) until SN13 step 1 puts it on its class's values. `athanor-ime.service` (LN11) runs `ibus-daemon`, which has no failure counter of its own: it takes the surfaces' unit values without the SH8 counter, and sessiond's notice comes at its start limit (SN8).
 - **COSMIC's units and children** keep their policies until they leave (SD22, OD15): `RestartSec=2s` in the three units, and `athanor-desktop`'s supervisor, which already never gives up, for cosmic-greeter and cosmic-idle.
 
 **SN7. Degraded modes of the guards, and the idle daemon's inhibitors.**
@@ -115,7 +119,7 @@ The stop of each unit is bounded by the manager's default stop timeout. An appli
 | sessiond | a blocked USB device stays blocked; inserted drives queue in udisks; no crash notice is shown until it is back, and it then reports what the manager recorded meanwhile (SN8) |
 | a11y gate | readers cannot connect; Orca is restarted after the gate (SN4) |
 
-- **No guard locks the session because it failed.** A crash loop with a 30 s ceiling would lock the user out every 30 s. The notice of SN8 tells the user instead.
+- **No guard locks the session because it failed.** *(Proposal, awaiting the maintainer.)* A crash loop with a 30 s ceiling would lock the user out every 30 s. The notice of SN8 tells the user instead.
 - **The idle daemon keeps its inhibitors across a crash** (A2-20, #156), as `athanor-shelld` keeps its unread notifications (ST5):
   - At every change it writes its table to `$XDG_RUNTIME_DIR/athanor-idle/inhibitors.json`, mode 0600, through a temporary file and a rename: for each inhibitor its cookie, the unique bus name of its owner, its application id, its kind (idle or suspend only) and its reason. The directory is the unit's `RuntimeDirectory=` with `RuntimeDirectoryPreserve=yes`, so it survives a restart and leaves with `$XDG_RUNTIME_DIR` at the end of the login.
   - At start it restores each entry whose owner still has its unique name on the bus (`NameHasOwner`); unique names are never reused on a bus, so a present name is the same client. Other entries are dropped, each with one journal line at info. New cookies continue above the highest restored one, so an `UnInhibit` after the restart finds its inhibitor.
@@ -124,9 +128,9 @@ The stop of each unit is bounded by the manager's default stop timeout. An appli
 
 **SN8. Crash notices and local reports** (A2-24, #156). Core dumps stay off; `athanor-sessiond` tells the user and keeps a report the user can attach to "Report a problem" (A2-19, #161).
 
-- **The source is the user manager,** not files the units write: sessiond subscribes to the manager and reads, for each unit of the table in SN6, the service properties `Result`, `NRestarts`, `ExecMainCode`, `ExecMainStatus` and `InvocationID`. A failure is a run whose `Result` is not `success`. Rejected: reading the SH8 records of each unit's runtime directory, which only the programs with a counter write.
-- **The notice,** through `org.freedesktop.Notifications`, at most one per unit per session: at the first failure of a guard; at the fifth failure in ten minutes of a surface or service (SH8's point); when an activated helper reaches its start limit. It names the component in the user's words ("The screen lock stopped unexpectedly and was restarted") and offers "Report a problem".
-- **The report.** For every failure sessiond writes `$XDG_STATE_HOME/athanor/crash-reports/<UTC time>-<unit>.txt`, mode 0600, through a temporary file and a rename: the unit, the image version from `/usr/lib/os-release`, the time, `Result`, the exit code or signal, `NRestarts`, and the last 50 journal lines of the failed invocation (`_SYSTEMD_INVOCATION_ID`). It keeps the 20 most recent reports and deletes older ones. Nothing is sent anywhere: the "Report a problem" flow shows the report to the user, who decides whether to attach it.
+- **The source is the user manager,** not files the units write. sessiond subscribes to the manager and, for each unit of the table in SN6, takes `Result`, `NRestarts`, `ExecMainCode`, `ExecMainStatus` and `InvocationID` from the `PropertiesChanged` signal sent when the unit enters `SubState=auto-restart` or `failed`: the next run overwrites them within `RestartSec=`, so they are captured from the signal, never read afterwards. A failure is a run whose `Result` is not `success`. If a signal is lost or coalesced, the manager's own journal entries for the failure (`UNIT_RESULT`, `EXIT_CODE`, `EXIT_STATUS` and the invocation id) are the record sessiond reads instead (section 4, question 2). Rejected: reading the SH8 records of each unit's runtime directory, which only the programs with a counter write.
+- **The notice,** *(Proposal, awaiting the maintainer.)* through `org.freedesktop.Notifications`, at most one per unit per session: at the first failure of a guard; at the fifth failure in ten minutes of a surface or service (SH8's point); when an activated helper reaches its start limit. It names the component in the user's words ("The screen lock stopped unexpectedly and was restarted") and offers "Report a problem".
+- **The report.** *(Proposal, awaiting the maintainer.)* For every failure sessiond writes `$XDG_STATE_HOME/athanor/crash-reports/<UTC time>-<unit>.txt`, mode 0600, through a temporary file and a rename: the unit, the image version from `/usr/lib/os-release`, the time, `Result`, the exit code or signal, `NRestarts`, and the last 50 journal lines of the failed invocation (`_SYSTEMD_INVOCATION_ID`). It keeps the 20 most recent reports and deletes older ones. Nothing is sent anywhere: the "Report a problem" flow shows the report to the user, who decides whether to attach it.
 - **sessiond's confinement** (SD17) gains one write directory, `$XDG_STATE_HOME/athanor/crash-reports`, and read access to the user's journal.
   - Needs: SD1.
 
@@ -134,7 +138,7 @@ The stop of each unit is bounded by the manager's default stop timeout. An appli
 
 - Needs: LP2, SD4.
 
-**SN10. `XDG_CURRENT_DESKTOP`.** `Athanor:COSMIC` until SD22 step 8 retires cosmic-settings-daemon, then `Athanor`. The suffix is kept until then because COSMIC components and desktop entries with `OnlyShowIn=COSMIC` read it. The portal's configuration does not depend on it once `athanor-portals.conf` ships (#157), since xdg-desktop-portal reads the file of the first desktop name that has one. The change is made in the same step as the retirement, after the check of section 4, question 5.
+**SN10. `XDG_CURRENT_DESKTOP`.** `Athanor:COSMIC` until SD22 step 8 retires cosmic-settings-daemon, then `Athanor`, in `athanor-session` and `50-athanor-desktop.conf` together (SN2). The suffix is kept until then because COSMIC components and desktop entries with `OnlyShowIn=COSMIC` read it. The portal's configuration does not depend on it once `athanor-portals.conf` ships (#157), since xdg-desktop-portal reads the file of the first desktop name that has one. The change is made in the same step as the retirement, after the check of section 4, question 5.
 
 - Needs: SD22.
 
@@ -164,8 +168,8 @@ The stop of each unit is bounded by the manager's default stop timeout. An appli
 Applied in this revision, each marked as amended on 2026-10-06 by maintainer decision A2-20 (#156):
 
 - `doc_session_daemons.md`: SD8 (the application unit's binding and edges come from SN3 and SN4), SD17 (the units' binding, ordering and restart come from SN3, SN4 and SN6; sessiond's write directory of SN8) and SD18 (guards are never given up; the idle daemon restores its inhibitors, SN7).
-- `doc_lock_and_prompts.md`: LP2 (`PartOf=graphical-session.target` instead of `athanor-session.target`) and LP10 (the lock's restart is the guard class of SN6, with its first restart at 100 ms).
-- `doc_shell_standard.md` ST5: unit restart settings and the session's start order belong to this document.
+- `doc_lock_and_prompts.md`: LP2 (a note that SN3 proposes `PartOf=graphical-session.target` instead of `athanor-session.target`, awaiting the maintainer) and LP10 (the lock's restart settings are the guard class of SN6, with its first restart at 100 ms).
+- `doc_shell_standard.md` ST5: unit restart settings and the session's start order belong to this document; the stale `RestartSec=1s` sentence is corrected.
 
 To be applied by each specification at its next revision, citing this document:
 
@@ -174,7 +178,7 @@ To be applied by each specification at its next revision, citing this document:
 - `doc_portal.md` PT3: the backend is an activated helper, without `Restart=on-failure`.
 - `doc_settings.md` SE5: `RestartSec=100ms`, the class value.
 - `doc_accessibility.md` AX3 and AX4: the gate is a guard; Orca's drop-in gains the edge of SN4.
-- `doc_languages.md` LN6: the import list is SN2's.
+- `doc_languages.md` LN6 and LN11: the import list is SN2's; `athanor-ime.service` is an exception of SN6.
 - Every specification with prose dependencies, starting with SD22: its "Needs" become lines of SN11.
 
 ## 4. Open questions
@@ -182,14 +186,16 @@ To be applied by each specification at its next revision, citing this document:
 Each is answered on the acceptance VM or the reference laptop before the step that depends on it.
 
 1. Whether `systemctl --user start --wait` (`athanor-desktop:104`) returns when cosmic-comp dies without a logout, and so whether the target stops; today the next login's `athanor-session:13` clears what is left.
-2. Whether systemd 258 returns a unit with `RestartSteps=` to its first delay after a healthy run, or only after a manual start. If only after a manual start, a guard that once crash-looped restarts with the long delay for the rest of the session, and ST5's 1 s fails for it; the guard class then needs another mechanism.
+2. Whether the user manager's `PropertiesChanged` signal for `SubState=auto-restart` reaches sessiond with the failed run's values at `RestartSec=100ms`, or is coalesced with the next start; the journal fallback of SN8 covers the second case.
 3. What polkitd answers a caller when the session has no registered agent.
 4. Which unit serves the Secret Service once oo7-daemon replaces gnome-keyring (A2-7, #151), and whether application units need an `After=` edge to it for a save at logout.
 5. Whether cosmic-comp, or any package that stays after SD22 step 8, reads `COSMIC` in `XDG_CURRENT_DESKTOP`.
 6. Whether `athanor-sessiond`, under SD17's confinement, can read the user's own journal on the image (journald's file permissions); without it the report carries no journal lines.
 7. Whether user units receive `LANG` today from the system locale through the user manager, which decides whether a user without a language of their own needs the import at all.
-8. Whether the maintainer confirms `athanor-sessiond` and `athanor-a11y-gate` as guards beyond A2-20's four.
+8. Settled by maintainer decision 2026-10-06 (#156): `athanor-sessiond` and `athanor-a11y-gate` are guards.
 9. Whether the bar's start, ordered after the lock and the agent, still meets ST5's 1.5 s on the reference machine.
+
+**Proposals awaiting the maintainer,** marked where they stand: the list of variables never imported (SN2); the reversal of LP2's binding (SN3); `athanor-autostart.service` (SN4); that no guard locks the session when it fails (SN7); the notice's rule, and the report's path, mode, 50 journal lines and 20 kept files (SN8).
 
 ## 5. Acceptance
 
@@ -197,8 +203,8 @@ The specification stands when, on the acceptance VM:
 
 1. after login, every unit Athanor ships for the session reports `PartOf=graphical-session.target` (`systemctl --user show -p PartOf`), and the check of SN12 passes on the image;
 2. after a logout, while the user manager still runs, no unit of ours is active, `athanor-desktop.service` is inactive, and `systemctl --user show-environment` holds none of SN2's list;
-3. the journal of a logout with one application running shows the application stopped before the bar and the bar before the lock and the agent (SN5);
-4. ten `SIGKILL`s in a row of each guard leave it active, never `failed`, with no delay above 30 s, and the eleventh `SIGKILL` after a healthy minute is followed by a restart within 1 s;
+3. the journal of a logout with one application running shows the application stopped before the broker, the portal frontend, the agent and the lock, and the bar stopped before `athanor-shelld`, the lock and the agent (SN5);
+4. ten `SIGKILL`s in a row of each guard leave it active, never `failed`, with no delay above 30 s, and, after the guard has run for more than 60 s, the eleventh `SIGKILL` is followed by a restart within 1 s (`RESTART_RESET=1`, SN6);
 5. an `org.freedesktop.ScreenSaver` inhibitor held by a test client survives a `SIGKILL` of `athanor-idle`, and the client's `UnInhibit` afterwards succeeds;
 6. a bar killed with `SIGSEGV` produces one notice and one report under `$XDG_STATE_HOME/athanor/crash-reports/`, mode 0600, and no core dump (`coredumpctl list` is empty);
 7. `python3 scripts/verify.py docs` builds the graph of SN11 without a dependency problem.
