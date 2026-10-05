@@ -454,6 +454,70 @@ def image_policy_problems(root=None):
     return problems
 
 
+# Packages the image no longer ships (maintainer decision A2-10, issue #149). `foot` still
+# arrives as a dependency of athanor-shell-rs until that package leaves (doc_software.md,
+# decision 7), so only the manifest and the Containerfile are checked, never RPM Requires.
+REMOVED_PACKAGES = {
+    "antigravity", "astro-toolchain", "cargo-tools", "ide-bootstrap", "qa",
+    "cosmic-term", "cosmic-files", "cosmic-edit", "cosmic-store", "cosmic-player",
+    "foot", "swaybg", "swaylock", "Thunar", "thunar-archive-plugin", "thunar-volman",
+    "virt-manager", "qemu-kvm", "qemu-img", "compiler-rt",
+}
+REMOVED_PACKAGES |= {f"athanor-{n}" for n in ("antigravity", "astro-toolchain", "cargo-tools", "ide-bootstrap", "qa")}
+# Units and authselect features the image must not enable: accounts stay classic.
+REMOVED_UNITS = {"systemd-homed", "systemd-homed.service", "with-systemd-homed"}
+# Files that enable units: the image build, the installer and the preset files.
+ENABLERS = ["system/Containerfile", "system/athanor-install.ks"]
+
+
+def removed_name_problems(root=None):
+    """No removed package in packages.json or in a Containerfile install, no removed unit enabled."""
+    root = root or ROOT
+    problems = []
+    manifest = root / "forge/config/packages.json"
+    if manifest.exists():
+        for key, names in json.loads(read(manifest)).items():
+            if isinstance(names, list):
+                problems += [f"forge/config/packages.json: {key} lists the removed package {n}"
+                             for n in names if n in REMOVED_PACKAGES]
+    containerfile = root / "system/Containerfile"
+    if containerfile.exists():
+        # Join the continuation lines so a package on a later line of the same command is seen.
+        for stmt in re.sub(r"\\\n", " ", read(containerfile)).split("\n"):
+            if re.search(r"\bdnf5 install\b", stmt):
+                words = set(re.findall(r"[A-Za-z0-9._+-]+", stmt))
+                problems += [f"system/Containerfile: installs the removed package {n}"
+                             for n in sorted(words & REMOVED_PACKAGES)]
+    for name in ENABLERS:
+        f = root / name
+        if f.exists():
+            for no, line in enumerate(read(f).split("\n"), 1):
+                if re.match(r"\s*#", line):
+                    continue
+                if re.search(r"\b(enable|enable-feature|--enabled)\b|^services\b", line):
+                    problems += [f"{name}:{no}: enables {u}, which the image no longer ships"
+                                 for u in sorted(set(re.findall(r"[A-Za-z0-9._-]+", line)) & REMOVED_UNITS)]
+    return problems
+
+
+def keylime_problems(root=None):
+    """Keylime stays installed and disabled: no verifier is configured, so the agent must not run."""
+    root = root or ROOT
+    problems = []
+    files = [root / n for n in ENABLERS]
+    files += sorted(root.glob("forge/specs/**/*.preset")) + sorted(root.glob("system/**/*.preset"))
+    for f in files:
+        if not f.exists():
+            continue
+        for no, line in enumerate(read(f).split("\n"), 1):
+            if re.match(r"\s*#", line) or "keylime" not in line:
+                continue
+            if re.search(r"^\s*enable\b|\benable(-now)?\b|--enabled", line):
+                problems.append(f"{rel(f)}:{no}: enables the Keylime agent, and no verifier is configured "
+                                f"for it to report to")
+    return problems
+
+
 @check("shipped", "Ogni crate del workspace è impacchettato, o è dichiarato sperimentale")
 def check_shipped():
     r = Result()
@@ -521,6 +585,8 @@ def check_shipped():
         r.fail(problem)
     for problem in image_policy_problems():
         r.fail(problem)
+    for problem in removed_name_problems() + keylime_problems():
+        r.fail(problem)
 
     return r
 
@@ -529,9 +595,31 @@ def check_shipped():
 # 6. documentazione — i link devono risolvere e non essere assoluti
 # --------------------------------------------------------------------------- #
 
+# Documents removed on purpose (issue #149); neither the file nor a link to it may come back,
+# for instance through a merge of an old branch.
+FORBIDDEN_DOCS = ("doc_core_daemons.md", "doc_forge_development_guide.md",
+                  "doc_telemetry.md", "athanor-telemetry.md", "athanor_telemetry.md")
+
+
+def forbidden_doc_problems(root=None):
+    root = root or ROOT
+    problems = [f"{rel(p)}: removed document, delete it"
+                for p in sorted((root / "docs").rglob("*.md")) if p.name in FORBIDDEN_DOCS]
+    for t in [rel(p) for p in walk(root / "docs", ".md")] + ["README.md", "system/README.md", "system/ARCHITECTURE.md"]:
+        f = root / t
+        if not f.exists():
+            continue
+        for m in re.finditer(r"\[([^\]]*)\]\(([^)]+)\)", read(f)):
+            if Path(m.group(2).split("#")[0]).name in FORBIDDEN_DOCS:
+                problems.append(f"{t}: links the removed document {m.group(2)}")
+    return problems
+
+
 @check("docs", "I link nella documentazione risolvono e sono portabili")
 def check_docs():
     r = Result()
+    for problem in forbidden_doc_problems():
+        r.fail(problem)
     targets = ["README.md", "system/README.md", "system/ARCHITECTURE.md",
                "ANALISI_2026-09-02.md", "PIANO_RIPARTENZA.md", "CLAUDE.md", "ROADMAP.md"]
     targets += [rel(p) for p in walk(ROOT / "docs", ".md")]

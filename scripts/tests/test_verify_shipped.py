@@ -67,3 +67,53 @@ class CosmicDefaultsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RemovedNamesTest(unittest.TestCase):
+    def tree(self, tmp, files):
+        root = pathlib.Path(tmp)
+        for name, text in files.items():
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            (root / name).write_text(text)
+        return root
+
+    def test_a_clean_tree_has_no_problem(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.tree(tmp, {
+                "forge/config/packages.json": '{"upstream_core": ["nix"]}',
+                "system/Containerfile": "RUN dnf5 install -y keylime-agent\nRUN ! systemctl is-enabled keylime_agent.service\n",
+            })
+            self.assertEqual(verify.removed_name_problems(root), [])
+            self.assertEqual(verify.keylime_problems(root), [])
+
+    def test_a_removed_package_in_the_manifest_or_an_install_is_a_problem(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.tree(tmp, {
+                "forge/config/packages.json": '{"upstream_desktop": ["cosmic-files"], "custom_tier0": ["antigravity"]}',
+                "system/Containerfile": "RUN dnf5 install -y \\\n    nix compiler-rt\n",
+            })
+            self.assertEqual(len(verify.removed_name_problems(root)), 3)
+
+    def test_homed_enabled_is_a_problem(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.tree(tmp, {
+                "system/Containerfile": "RUN authselect enable-feature with-systemd-homed\nRUN systemctl enable systemd-homed.service\n",
+                "system/athanor-install.ks": "services --enabled=sshd,systemd-homed\n",
+            })
+            self.assertEqual(len(verify.removed_name_problems(root)), 3)
+
+    def test_enabling_keylime_is_a_problem(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.tree(tmp, {
+                "system/Containerfile": "RUN systemctl enable keylime_agent.service\n",
+                "forge/specs/x/a.preset": "enable keylime_agent.service\n# enable keylime_agent\ndisable keylime_agent.service\n",
+            })
+            self.assertEqual(len(verify.keylime_problems(root)), 2)
+
+    def test_a_removed_document_or_a_link_to_it_is_a_problem(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.tree(tmp, {
+                "docs/architecture/doc_core_daemons.md": "x",
+                "README.md": "[a](docs/architecture/doc_forge_development_guide.md)",
+            })
+            self.assertEqual(len(verify.forbidden_doc_problems(root)), 2)
