@@ -104,11 +104,6 @@ verify component="athanor-gatekeeper-rs":
 test-nvidia:
     just forge/test-nvidia-modules
 
-# Builds and injects kernel livepatch modules
-[group('QA & Security')]
-livepatch-inject:
-    just forge/livepatch-inject
-
 # Runs documentation sync via OpenWiki
 [group('Documentation')]
 openwiki-sync:

@@ -70,25 +70,6 @@ kernel-build stage="build":
         -w /forge localhost/azoth-builder \
         bash forge/specs/azoth/build.sh --stage "{{ stage }}" --out /forge/out
 
-# Builds kpatch kernel livepatch module and packages it into an RPM
-[group('Kernel Build')]
-livepatch-build:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ -f specs/athanor-livepatch/athanor-livepatch.spec ]; then
-        rpmbuild -ba specs/athanor-livepatch/athanor-livepatch.spec
-    else
-        echo "Error: specs/athanor-livepatch/athanor-livepatch.spec not found" >&2
-        exit 1
-    fi
-
-# Inject livepatch kernel modules without reboot
-[group('Kernel Build')]
-livepatch-inject:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    bash specs/athanor-livepatch/athanor-livepatch-injector.sh
-
 # Runs Rust Clippy policies, Cargo Vet cryptographic supply-chain audit, and Cargo Deny security check
 [group('QA & Validation')]
 audit:
