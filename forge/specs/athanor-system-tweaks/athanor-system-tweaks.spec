@@ -56,13 +56,15 @@ cp -a %{_sourcedir}/usr/lib/NetworkManager/conf.d/50-athanor-hostname.conf %{bui
   wins over DHCP DNS, DNSSEC=allow-downgrade. The file moves to
   /usr/lib/systemd/resolved.conf.d/50-athanor-dns.conf so an administrator
   overrides it with a later-sorting drop-in in /etc/systemd/resolved.conf.d/.
-- NetworkManager pushes link DNS to systemd-resolved (dns=systemd-resolved) with
-  per-link DNS over TLS opportunistic, so the connectivity check still detects
-  captive portals under strict global DNS over TLS.
+- NetworkManager pushes link DNS to systemd-resolved (dns=systemd-resolved). With
+  "~." link and VPN DNS servers serve only their own domains (a VPN uses a
+  route-only search domain or a negative dns-priority). Strict DNS over TLS needs
+  a correct clock. NetworkManager's connectivity check cannot detect a captive
+  portal that blocks port 853; see 50-athanor-hostname.conf.
 - Wi-Fi uses wifi.cloned-mac-address=stable-ssid. Ethernet keeps its hardware MAC
   address; a random wired address cut the Hyper-V test VM off the network.
 - NetworkManager no longer sends or accepts a hostname over DHCP
-  (dhcp-send-hostname=false for IPv4 and IPv6, hostname-mode=none); the system
+  (dhcp-send-hostname=0 for IPv4 and IPv6, hostname-mode=none); the system
   uses DEFAULT_HOSTNAME from os-release until the user names the device.
 
 * Thu Sep 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
