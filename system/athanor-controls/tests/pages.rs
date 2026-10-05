@@ -234,6 +234,10 @@ fn network_page(rig: &mut Rig) {
         gtk4::test_accessible_has_relation(&airplane, gtk4::AccessibleRelation::LabelledBy),
         "the switch is not labelled by its row"
     );
+    // A surface with its own airplane control gets the page without the switch.
+    let bare = network::Page::without_airplane(&rig.services, Host::new(|| (), || (), || true));
+    assert!(has(&bare.widget(), "Wi-Fi"));
+    assert!(!has(&bare.widget(), "Airplane mode"), "the panel's page kept its own switch");
     // A secured network without a saved profile asks for its password, on the surface.
     row_with(&root, "Cafe, secured").emit_clicked();
     assert_eq!(opened.get(), 1, "the page asked its surface to show");

@@ -303,7 +303,7 @@ fn clear(container: &gtk4::Box) {
 }
 
 impl View {
-    fn new(host: Host) -> Rc<View> {
+    fn new(host: Host, airplane_switch: bool) -> Rc<View> {
         let heading = gtk4::Label::new(Some(&tr("Network")));
         heading.add_css_class("bar-popover-title");
         heading.set_xalign(0.0);
@@ -327,9 +327,11 @@ impl View {
             wifi_row.upcast_ref(),
             scroller.upcast_ref(),
             vpns.upcast_ref(),
-            airplane_row.upcast_ref(),
         ] {
             list.append(widget);
+        }
+        if airplane_switch {
+            list.append(&airplane_row);
         }
 
         let title = gtk4::Label::new(None);
@@ -624,8 +626,18 @@ pub struct Page {
 
 impl Page {
     pub fn new(services: &Services, host: Host) -> Page {
+        Page::build(services, host, true)
+    }
+
+    /// The page of a surface that has its own airplane control: this switch only turns off
+    /// Wi-Fi and mobile data through NetworkManager, where a panel's tile blocks every radio.
+    pub fn without_airplane(services: &Services, host: Host) -> Page {
+        Page::build(services, host, false)
+    }
+
+    fn build(services: &Services, host: Host, airplane_switch: bool) -> Page {
         let service = Service::get(services);
-        let view = View::new(host);
+        let view = View::new(host, airplane_switch);
         service.views.borrow_mut().push(Rc::downgrade(&view));
         view.show(service.state.borrow().as_ref());
         Page { view }

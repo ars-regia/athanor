@@ -216,7 +216,7 @@ impl Panel {
         };
         let (widget, keep): (gtk4::Widget, Box<dyn Any>) = match page {
             Page::Network => {
-                let page = network::Page::new(services, self.host(Page::Network));
+                let page = network::Page::without_airplane(services, self.host(Page::Network));
                 (page.widget(), Box::new(page))
             }
             Page::Bluetooth => {
