@@ -34,7 +34,6 @@ GitHub milestone `iso-v0`.
 - [Desktop shell](docs/architecture/doc_shell.md), [bar and dock](docs/architecture/doc_bar.md),
   [launcher](docs/architecture/doc_launcher.md)
 - [Software](docs/architecture/doc_software.md)
-- [Gatekeeper and its polkit actions](docs/architecture/doc_core_daemons.md)
 - [Forge](forge/README.md) and [system image assembly](system/README.md)
 
 ## Contributing and security
