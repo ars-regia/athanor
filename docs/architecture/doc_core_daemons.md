@@ -60,6 +60,7 @@ Both daemons are engineered in **Pure Rust**, leveraging the `mimalloc` high-per
    - **BlueZ Integration**: Interoperates with BlueZ (`org.bluez`) on `/org/bluez/hci0` via `PropertiesProxy` and `ObjectManagerProxy` to enumerate paired/connected Bluetooth peripherals.
 
 5. **`portal.rs` & `portal_screencast.rs` (Strict Fail-Closed XDG Desktop Portal)**:
+   - **Withdrawn.** This portal section is withdrawn in favour of `doc_portal.md`: the package drops the bus name `org.freedesktop.impl.portal.desktop.athanor` and the modules `portal.rs` and `portal_screencast.rs`, so that it can never contest Athanor's backend. The description below is kept as history.
    - **Zero-Trust Fail-Closed Policy**: If permission prompts fail, or if Micro-VM DBus authentication cannot be established via `org.athanor.Hypervisor`, the portal enforces a strict `return false` (denial by default). String-based application ID spoofing is architecturally rejected.
    - **`org.freedesktop.impl.portal.Settings`**: Exposes desktop theme tokens read reactively from `watch::Receiver<AppearanceDomainState>`.
    - **`org.freedesktop.impl.portal.ScreenCast`**: Rejects mocked or insecure `/dev/null` PipeWire stream passing. Acknowledges missing features explicitly via DBus Errors instead of presenting a fake success surface.
