@@ -254,10 +254,14 @@ jobs:
       id-token: write
     steps:
       - name: ⚙️ Prepare environment
+        # :latest is the newest build of the release branch (repository variable
+        # RELEASE_BRANCH, default iso-v0): any other branch publishes its run tag only.
+        env:
+          RELEASE_BRANCH: ${{ vars.RELEASE_BRANCH || 'iso-v0' }}
         run: |
           set -euo pipefail
           echo "IMAGE_REGISTRY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "${GITHUB_ENV}"
-          echo "DEFAULT_TAG=latest" >> "${GITHUB_ENV}"
+          if [[ $GITHUB_REF == "refs/heads/${RELEASE_BRANCH}" ]]; then echo "DEFAULT_TAG=latest"; else echo "DEFAULT_TAG="; fi >> "${GITHUB_ENV}"
       - name: 📥 Checkout Repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Kernel artifacts verified by the Orchestrator
@@ -294,18 +298,31 @@ jobs:
           set -euo pipefail
           [[ -n ${SECUREBOOT_SIGNING_KEY:-} ]] || { echo "SECUREBOOT_SIGNING_KEY is not available to this job: check the signing environment" >&2; exit 1; }
           for gpu in none nvidia nvidia-legacy; do
-            bash system/build-image.sh --gpu "$gpu" --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" --tag "${DEFAULT_TAG}" --serial "${RUN_NUMBER}"
+            bash system/build-image.sh --gpu "$gpu" --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" --serial "${RUN_NUMBER}"
           done
           df -h
 
-      - name: 📤 Push OS Images
+      - name: 📤 Rechunk and push OS Images
+        # S9: system/publish-images.sh records each image's package NEVRAs, rechunks it into
+        # package-grouped layers seeded with the previous :latest, writes what a machine on
+        # that build downloads, and pushes. The commit time is the chunker's
+        # SOURCE_DATE_EPOCH: the image's own build time stays the run's (UT5).
         env:
           RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
-          for gpu in none nvidia nvidia-legacy; do
-            bash system/build-image.sh --gpu "$gpu" --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" --tag "${DEFAULT_TAG}" --push-only
-          done
+          tags=(--tag "${RUN_ID}")
+          [[ -z $DEFAULT_TAG ]] || tags+=(--tag "${DEFAULT_TAG}")
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) bash system/publish-images.sh --registry "${IMAGE_REGISTRY}" "${tags[@]}" --out artifacts
+          cat artifacts/layer-delta.md >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: 📦 Keep the package lists
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nevra-${{ github.run_id }}
+          path: artifacts/nevra/
+          if-no-files-found: error
+          retention-days: 90
 
       - name: 🧾 Record the pushed digests for the signing job
         env:
@@ -345,7 +362,7 @@ jobs:
         run: |
           set -euo pipefail
           for name in athanor-system-nvidia athanor-system-nvidia-legacy; do
-            podman rmi "${IMAGE_REGISTRY}/${name}:${RUN_ID}" "${IMAGE_REGISTRY}/${name}:${DEFAULT_TAG}"
+            podman rmi "${IMAGE_REGISTRY}/${name}:${RUN_ID}"
           done
           df -h
 
@@ -357,13 +374,17 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
-          bash forge/scripts/build_iso.sh "${IMAGE_REGISTRY}/athanor-system:${RUN_ID}" ./output
+          # The ISO embeds the pushed (chunked) image under the :stable name, so an installed
+          # system follows the promoted channel (doc_update_trust.md, D1).
+          bash forge/scripts/build_iso.sh "${IMAGE_REGISTRY}/athanor-system:${RUN_ID}" ./output "${IMAGE_REGISTRY}/athanor-system:stable"
           ls -laR ./output
 
       - name: 📀 Publish the ISO
         # As an OCI image, the way kernel-build.yml publishes the kernel artifacts: the
         # ISO carries the whole system image and is far past the 2 GB an Actions
-        # artifact takes. :latest only from main, again as the kernel does.
+        # artifact takes. :latest only from the release branch, as for the images. The
+        # labels name the run, the commit and the digest of each system image as pushed:
+        # forge/test/iso/evidence.py binds the acceptance evidence to them.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
@@ -378,10 +399,14 @@ jobs:
           [[ -n $iso ]] || { echo "the ISO build produced no .iso under ./output" >&2; exit 1; }
           echo "${GITHUB_TOKEN}" | podman login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
           image="${IMAGE_REGISTRY}/athanor-iso"
+          labels=(--label "io.athanor.run-id=${RUN_ID}" --label "org.opencontainers.image.revision=${GITHUB_SHA}")
+          while read -r repository _ digest; do
+            labels+=(--label "io.athanor.image-digest.${repository##*/}=${digest}")
+          done < artifacts/image-digests.txt
           # podman, not buildah: this job builds and pushes the system image with it, so
           # it is certainly on the runner. A Containerfile on stdin keeps the context to
           # the ISO alone.
-          podman build --format docker -t "${image}:${RUN_ID}" \
+          podman build --format docker -t "${image}:${RUN_ID}" "${labels[@]}" \
             --annotation "org.opencontainers.image.revision=${GITHUB_SHA}" \
             --annotation "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
             -f - "$(dirname "$iso")" <<CONTAINERFILE
@@ -391,7 +416,7 @@ jobs:
           COPY $(basename "$iso") /athanor-${RUN_ID}.iso
           CONTAINERFILE
           bash forge/scripts/retry.sh podman push "${image}:${RUN_ID}"
-          if [[ $GITHUB_REF == refs/heads/main ]]; then
+          if [[ -n $DEFAULT_TAG ]]; then
             podman tag "${image}:${RUN_ID}" "${image}:latest"
             bash forge/scripts/retry.sh podman push "${image}:latest"
           fi
