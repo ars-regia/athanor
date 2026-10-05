@@ -237,6 +237,9 @@ type OnShown = Box<dyn Fn(Option<&BluetoothState>)>;
 
 struct View {
     host: Host,
+    /// The page offers to find and pair new devices: nearby devices, and the discovery that
+    /// lists them. Without it the page connects, disconnects and shows the paired ones only.
+    pairing: bool,
     failure: Failure,
     /// Runs after the view shows a state, for the surface's own button.
     on_shown: RefCell<Option<OnShown>>,
@@ -260,6 +263,11 @@ struct View {
     shown: RefCell<(Vec<Device>, Vec<Device>)>,
 }
 
+/// Whether the view behind `weak` offers pairing; a view that is gone does not.
+fn view_pairs(weak: &Weak<View>) -> bool {
+    weak.upgrade().is_some_and(|view| view.pairing)
+}
+
 fn clear(container: &gtk4::Box) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
@@ -267,7 +275,7 @@ fn clear(container: &gtk4::Box) {
 }
 
 impl View {
-    fn new(host: Host) -> Rc<View> {
+    fn new(host: Host, pairing: bool) -> Rc<View> {
         let (power_row, power) = switch_row(&tr("Bluetooth"));
         power_row.add_css_class("bar-popover-title");
         let paired = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
@@ -326,6 +334,7 @@ impl View {
             stack,
             power,
             paired,
+            pairing,
             nearby_title,
             nearby,
             title,
@@ -370,7 +379,9 @@ impl View {
             }
             if let Some(service) = service() {
                 service.last_opened.replace(weak.clone());
-                service.popover_toggled(true);
+                if view_pairs(&weak) {
+                    service.popover_toggled(true);
+                }
             }
         });
         let weak = Rc::downgrade(self);
@@ -383,7 +394,9 @@ impl View {
                 view.stack.set_visible_child_name("list");
             }
             if let Some(service) = service() {
-                service.popover_toggled(false);
+                if view_pairs(&weak) {
+                    service.popover_toggled(false);
+                }
             }
         });
     }
@@ -414,15 +427,15 @@ impl View {
         }
         if changed.1 {
             clear(&self.nearby);
-            for device in &state.nearby {
+            for device in state.nearby.iter().filter(|_| self.pairing) {
                 self.nearby.append(&self.device_row(device));
             }
             self.shown.borrow_mut().1 = state.nearby.clone();
         }
         self.paired.set_visible(state.powered);
-        self.nearby_title
-            .set_visible(state.powered && state.discovering);
-        self.nearby.set_visible(state.powered && state.discovering);
+        let finding = self.pairing && state.powered && state.discovering;
+        self.nearby_title.set_visible(finding);
+        self.nearby.set_visible(finding);
     }
 
     fn device_row(self: &Rc<Self>, device: &Device) -> gtk4::Button {
@@ -513,7 +526,7 @@ impl Drop for View {
         }
         // A surface that leaves with its page on screen may never hide it: count it closed,
         // or discovery would run on with nothing to show it.
-        if self.counted.get() {
+        if self.counted.get() && self.pairing {
             service.popover_toggled(false);
         }
     }
@@ -530,8 +543,19 @@ pub struct Page {
 
 impl Page {
     pub fn new(services: &Services, host: Host) -> Page {
+        Page::build(services, host, true)
+    }
+
+    /// The page of a surface that does not pair: the paired devices to connect, disconnect and
+    /// switch, no nearby list and no discovery. A pairing needs a bondable adapter and an agent,
+    /// which only the bar's process has.
+    pub fn without_pairing(services: &Services, host: Host) -> Page {
+        Page::build(services, host, false)
+    }
+
+    fn build(services: &Services, host: Host, pairing: bool) -> Page {
         let service = Service::get(services);
-        let view = View::new(host);
+        let view = View::new(host, pairing);
         service.views.borrow_mut().push(Rc::downgrade(&view));
         view.show(service.state.borrow().as_ref());
         Page { view }
