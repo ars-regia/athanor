@@ -10,7 +10,7 @@ expect.
 
 ## Response times
 
-These are targets for a single maintainer, not guarantees.
+Proposed targets, pending maintainer confirmation. They are not a commitment until the maintainer confirms them.
 
 | Step | Target |
 | --- | --- |
@@ -36,7 +36,7 @@ Athanor's configuration makes it worse):
 - vulnerabilities in unmodified Fedora, COSMIC, Linux, NVIDIA or Flatpak
   packages;
 - code the user runs outside confinement: the threat model treats it as the user
-  (maintainer decision A2-9);
+  (maintainer decision A2-9, #151);
 - machines outside the supported audience (see `README.md`).
 
 ## Supported versions

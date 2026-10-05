@@ -41,5 +41,3 @@
 /.github/workflows/promote-stable.yml @hr-mes
 # Policy files
 /CLAUDE.md @hr-mes
-/.github/CODEOWNERS @hr-mes
-/.github/SECURITY.md @hr-mes
