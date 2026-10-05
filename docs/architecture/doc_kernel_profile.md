@@ -985,7 +985,7 @@ Found on the running system and in the repository (2026-09-14):
 
 ## 15. Implementation blocks
 
-A new block group P in `NEXT.md` (Italian heading `BLOCCO P`); no block of the P sequence starts before
+Block group P is tracked as issues in the GitHub milestone `iso-v0`; no block of the P sequence starts before
 the gate of the previous P block is green; the immediate items are independent, and S1 is
 outside that sequence: it starts after P0, runs alongside P1–P4a, and P4b waits for it.
 

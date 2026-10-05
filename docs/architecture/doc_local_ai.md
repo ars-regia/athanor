@@ -8,7 +8,7 @@ Revision 3 records the maintainer's decision on microphone consent, the first of
 
 The decision, in the maintainer's words translated: a light local AI of this kind is wanted: a tool-call model (Needle), wake word and voice activity detection, speech recognition, embeddings, speech synthesis, and possibly Laya.
 
-The document does not change the objective of `NEXT.md` (an ISO that boots and shows the greeter) or the order of `doc_shell.md`. Its spikes need no shell. Its packages render inside surfaces that stage 2 and later stages deliver, and wait for them.
+The document does not change the objective of the GitHub milestone `iso-v0` (an ISO that boots and shows the greeter) or the order of `doc_shell.md`. Its spikes need no shell. Its packages render inside surfaces that stage 2 and later stages deliver, and wait for them.
 
 ## 1. Context
 
@@ -190,7 +190,7 @@ N1 to N3 run on the maintainer's own machine, the environment that reaches Huggi
 - `scripts/verify.py`: two checks, the licence of every manifest entry (AI4) and the absence of `forbidden` actions in the registry (AI5).
 - `forge/specs/athanor-xdg-desktop-portal-athanor`, `forge/specs/athanor-shelld`, `forge/specs/azoth/kernel-local` and `athanor-kernel-profile`: the changes of A0. Each is a fix of a defect the audit found, and none waits for the rest of this document.
 - The audit's other findings (the DAG that rebuilds every node, the tier repositories consumed by tag, the `kernel-build.yml` identity that accepts any branch, the shipped command line that contradicts D15 and D16) are outside this document and are reported to the maintainer separately.
-- `NEXT.md`: unchanged.
+- The milestone `iso-v0`: unchanged.
 
 ## 8. Acceptance
 

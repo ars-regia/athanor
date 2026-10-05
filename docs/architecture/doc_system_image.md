@@ -182,4 +182,3 @@ These defects were found on the same boot and each needs its own fix:
 
 - **`doc_kernel_build.md` section 10:** the variant names become `athanor-system-nvidia` and `athanor-system-nvidia-legacy`. The modules still come from `nvidia-kmod.yml`; the userspace and firmware come from S4 and S5. Section 13 records this decision.
 - **`doc_kernel_profile.md`:** "NVIDIA parameters and dracut configuration … apply only where an NVIDIA GPU is detected" becomes "… apply only in the NVIDIA image variants (doc_system_image.md, S4 and S5)". Section 14's note on `athanor-base-config` shipping NVIDIA configuration to every machine is resolved by S4.
-- **`NEXT.md`:** the references to `ermete-base-nvidia` are replaced.

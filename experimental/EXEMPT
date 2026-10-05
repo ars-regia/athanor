@@ -1,4 +1,4 @@
-# iso-v0: crate fuori dalla build di boot (NEXT.md BLOCCO 2). Tornano nel DAG con la v1.
+# iso-v0: crate fuori dalla build di boot (DAG ridotto del 2026-09-03, 5fbc9304). Tornano nel DAG con la v1.
 # Un nome per riga; letto da scripts/verify.py (check "shipped").
 athanor-mesh-bus
 athanor-cluster-mesh
