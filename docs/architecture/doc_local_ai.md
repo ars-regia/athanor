@@ -17,9 +17,9 @@ The document does not change the objective of the GitHub milestone `iso-v0` (an 
 **What exists, and what it is worth.**
 
 - `athanor-ai-daemon` is outside the workspace and is built by nothing. Its weights loader allocates zero-filled quantized tensors and reports the model as loaded; its DRM lease returns "unimplemented"; its answer to a query is a formatted string. It carries `.expect` calls and direct dependency versions (`candle-core`, `vulkano`, `openvino`). It is not a base to build on.
-- `athanor-ui-agent` is a Python daemon that asks Ollama and `llama3.2:1b` for widgets and writes `widgets.json` for `athanor-shell-rs`, which is frozen (`doc_shell.md`, SH4).
+- `athanor-ui-agent`, deleted on 2026-10-05, was a Python daemon that asked Ollama and `llama3.2:1b` for widgets and wrote `widgets.json` for `athanor-shell-rs`, which is frozen (`doc_shell.md`, SH4).
 - `athanor-semantic-db` is a stub: its spec installs a script that prints one line. It is listed in `custom_packages` and `custom_tier3` of `forge/config/packages.json`, so it ships. That is a facade in the image (`doc_shell.md`, SH1).
-- `athanor-ai-daemon` and `athanor-ui-agent` are in no tier list, so neither ships.
+- `athanor-ai-daemon` is in no tier list, so it does not ship; neither did `athanor-ui-agent`.
 
 **What the audit of 2026-09-30 found that this document depends on.** Each item is a prerequisite in package A0 (section 3).
 
@@ -117,7 +117,7 @@ Rules that hold for every tool:
 - The budget must hold with no swap, which is the state today. If D15 (zram) lands, the budget may relax; it is never planned on it.
 - Version 1 runs on the CPU and needs no GPU or NPU. Offload is a later specification, and this document retires the "0 % CPU" claim of `athanor-ai-daemon`.
 
-**AI11. The residues go.** The proposal, for the maintainer to approve because it retires code: `athanor-ai-daemon` and `athanor-ui-agent` are deleted when the first package of this document ships; `athanor-semantic-db` leaves `forge/config/packages.json` now, and returns as a real package with AI8.
+**AI11. The residues go.** The proposal, for the maintainer to approve because it retires code: `athanor-ai-daemon` is deleted when the first package of this document ships (`athanor-ui-agent` was deleted on 2026-10-05); `athanor-semantic-db` leaves `forge/config/packages.json` now, and returns as a real package with AI8.
 
 ## 3. Stages
 
@@ -186,7 +186,7 @@ N1 to N3 run on the maintainer's own machine, the environment that reaches Huggi
 - `doc_shell.md`: a pointer in the list of later stages; nothing else.
 - `doc_bar.md`: the microphone module (the indicator of every capture, the mute, the voice-control switch) joins the audio group of BR3, and the extraction offers join BR4. Both are written in the plan of A1 and A3, not before, and not while the bar's own plans are moving.
 - `forge/config/packages.json`: `athanor-semantic-db` leaves `custom_packages` and `custom_tier0` (AI11).
-- `forge/specs/athanor-ai-daemon` and `forge/specs/athanor-ui-agent`: deleted at the first package (AI11), by the maintainer's decision.
+- `forge/specs/athanor-ai-daemon`: deleted at the first package (AI11), by the maintainer's decision. `forge/specs/athanor-ui-agent` was deleted on 2026-10-05.
 - `scripts/verify.py`: two checks, the licence of every manifest entry (AI4) and the absence of `forbidden` actions in the registry (AI5).
 - `forge/specs/athanor-xdg-desktop-portal-athanor`, `forge/specs/athanor-shelld`, `forge/specs/azoth/kernel-local` and `athanor-kernel-profile`: the changes of A0. Each is a fix of a defect the audit found, and none waits for the rest of this document.
 - The audit's other findings (the DAG that rebuilds every node, the tier repositories consumed by tag, the `kernel-build.yml` identity that accepts any branch, the shipped command line that contradicts D15 and D16) are outside this document and are reported to the maintainer separately.

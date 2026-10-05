@@ -64,7 +64,7 @@ What the platform gives us today:
 | cosmic-launcher, cosmic-app-library, pop-launcher | launcher, application library, the launcher's search backend | 3 (P4 found they work without the panel) | our launcher and application library (`doc_launcher.md`) |
 | cosmic-greeter as locker | session lock | 4 | our lock, on the greeter's authentication code |
 | cosmic-osd | on-screen display and the session's only polkit agent | 4, or 5 if it can run without its agent | our polkit agent (4) and on-screen display (5) |
-| cosmic-settings, cosmic-randr | Settings application, output configuration | 6 | our Settings; `athanor-settings-rs` is not revived, only mined |
+| cosmic-settings, cosmic-randr | Settings application, output configuration | 6 | our Settings; `athanor-settings-rs` was deleted on 2026-10-05 |
 | cosmic-workspaces | overview | 7 | our overview |
 | cosmic-settings-daemon, cosmic-idle, cosmic-bg | configuration bus and media keys; `org.freedesktop.ScreenSaver` and idle policy; wallpaper | 8 | our daemons |
 
