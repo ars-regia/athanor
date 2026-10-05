@@ -584,9 +584,18 @@ def main():
         ),
     )
     close_notification(secret)
-    # A setting the bar cannot read fails closed: the popups turn private.
-    daemon_call("SetSetting", GLib.Variant("(ss)", ("fail", "true")))
+    # A setting the bar cannot read fails closed: the popups turn private. Private popups
+    # go off first, and a popup that names its summary proves the bar has them off: had they
+    # stayed on, the popup below would be private whether or not the read failed.
     daemon_call("SetSetting", GLib.Variant("(ss)", ("private_popups", "false")))
+    plain = notify("Plain by setting", body="Plain body")
+    check(
+        "with private popups off a popup shows its summary",
+        wait_for(shows("Plain by setting"), 3),
+        repr(alerts(app, Atspi)),
+    )
+    close_notification(plain)
+    daemon_call("SetSetting", GLib.Variant("(ss)", ("fail", "true")))
     unread_settings = notify("Hidden by default", body="Hidden body")
     check(
         "when the settings cannot be read a popup shows the application's name only",
