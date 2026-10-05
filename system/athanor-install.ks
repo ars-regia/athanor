@@ -43,18 +43,6 @@ services --enabled=sshd,systemd-homed
 reboot
 
 %post --erroronfail
-# The one piece of provisioning that is the system's, not the user's: the TPM 2.0
-# monotonic counter (NV index 0x01800001). Enrolling the LUKS home to the TPM is not done
-# here or at first boot: it is offered to the user (D42).
-if command -v tpm2_getcap >/dev/null 2>&1 && tpm2_getcap properties-fixed | grep -q "TPM2_PT_TOTAL_COMMANDS"; then
-    echo "Initialising the TPM2 monotonic counter at NV index 0x01800001..."
-    tpm2_nvundefine 0x01800001 -C o 2>/dev/null || true
-    tpm2_nvdefine 0x01800001 -C o -s 8 -a "ownerread|ownerwrite|authread|authwrite|nt=counter"
-    tpm2_nvincrement 0x01800001 -C o
-fi
-%end
-
-%post --erroronfail
 set -eu
 # Anaconda writes a / line into /etc/fstab (subvol=root,compress=zstd:1,...,ro). On a
 # composefs root that line can only fail: systemd-remount-fs.service tries to apply its
