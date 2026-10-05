@@ -58,9 +58,11 @@ cp -a %{_sourcedir}/usr/lib/NetworkManager/conf.d/50-athanor-hostname.conf %{bui
   overrides it with a later-sorting drop-in in /etc/systemd/resolved.conf.d/.
 - NetworkManager pushes link DNS to systemd-resolved (dns=systemd-resolved). With
   "~." link and VPN DNS servers serve only their own domains (a VPN uses a
-  route-only search domain or a negative dns-priority). Strict DNS over TLS needs
+  route-only search domain or a negative dns-priority). DNS over TLS stays strict for that
+  server, so it needs DoT with a valid certificate or connection.dns-over-tls set
+  to opportunistic/no on the VPN profile (untested on a real VPN). Strict DNS over TLS needs
   a correct clock. NetworkManager's connectivity check cannot detect a captive
-  portal that blocks port 853; see 50-athanor-hostname.conf.
+  portal that blocks port 853 (tracked in #168); see 50-athanor-hostname.conf.
 - Wi-Fi uses wifi.cloned-mac-address=stable-ssid. Ethernet keeps its hardware MAC
   address; a random wired address cut the Hyper-V test VM off the network.
 - NetworkManager no longer sends or accepts a hostname over DHCP
