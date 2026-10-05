@@ -49,8 +49,10 @@ impl Services {
     ///
     /// This registers no agent: NetworkManager takes one secret agent and BlueZ one default
     /// pairing agent per session, and those belong to the bar (doc_control_center.md). A
-    /// surface that reuses the pages calls `start` alone and its pages work, but a password
-    /// or a pairing it starts is then answered by the bar's agent when the bar runs.
+    /// surface that reuses the pages calls `start` alone and its pages work. A Bluetooth
+    /// pairing it starts needs an agent of its own: [`Services::register_bluetooth_guest_agent`],
+    /// to which BlueZ routes the pairings that surface's process starts. A NetworkManager
+    /// password is answered by the bar's agent when the bar runs.
     pub fn start(handle: &Handle, buses: &Buses, backlight_root: PathBuf) -> Services {
         let battery = battery::spawn(handle, buses.clone(), backlight_root.clone());
         let (network_state, network_commands, prompts) = network::spawn(handle, buses.clone());
@@ -77,5 +79,15 @@ impl Services {
     /// Registers the BlueZ pairing agent as the default. Only the bar calls this.
     pub fn register_bluetooth_agent(&self) {
         self.bluetooth.1.send(BluetoothCommand::RegisterAgent).ok();
+    }
+
+    /// Registers the BlueZ pairing agent without asking to be the default, and leaves the
+    /// adapter's `Pairable` alone. For a surface other than the bar: BlueZ routes a pairing to
+    /// the agent of the process that started it.
+    pub fn register_bluetooth_guest_agent(&self) {
+        self.bluetooth
+            .1
+            .send(BluetoothCommand::RegisterGuestAgent)
+            .ok();
     }
 }

@@ -195,6 +195,13 @@ pub enum BluetoothCommand {
     /// new owner of it. BlueZ lets one agent be the default, so the process that owns the
     /// pairing requests sends this and no other: a model that never gets it registers nothing.
     RegisterAgent,
+    /// Registers the model's pairing agent with BlueZ without asking to be the default, for a
+    /// second process that pairs devices the person picked in its own surface. BlueZ routes
+    /// the pairing of a device to the agent of the process that called `Pair`, so the default
+    /// agent stays the bar's. A model that got this command never writes the adapter's
+    /// `Pairable`: that stays with the process that owns the default agent, and an outgoing
+    /// `Pair` does not need it.
+    RegisterGuestAgent,
     Power(bool),
     /// Other devices may find this adapter.
     Discoverable(bool),
@@ -242,6 +249,8 @@ struct Shared {
     cancel: Notify,
     /// A request is waiting for the person.
     busy: AtomicBool,
+    /// The model is a guest (`RegisterGuestAgent`): it never writes the adapter's `Pairable`.
+    guest: AtomicBool,
     /// The shell was sent a page and has not been told to close it.
     shown: AtomicBool,
     requests: mpsc::Sender<PairingRequest>,
@@ -534,8 +543,8 @@ enum Job {
     Command(BluetoothCommand),
     /// Sets the adapter's `Pairable`, so that it is on only while the shell pairs.
     Pairable(bool),
-    /// `RegisterAgent` and `RequestDefaultAgent`, to this unique name.
-    Register(String),
+    /// `RegisterAgent` and, for the default agent, `RequestDefaultAgent`, to this unique name.
+    Register(String, bool),
 }
 
 impl Job {
@@ -565,6 +574,7 @@ async fn run(
         pairing: Mutex::new(None),
         cancel: Notify::new(),
         busy: AtomicBool::new(false),
+        guest: AtomicBool::new(false),
         shown: AtomicBool::new(false),
         requests,
     });
@@ -609,6 +619,10 @@ async fn run(
             }
             command = commands.recv() => match command {
                 Some(BluetoothCommand::RegisterAgent) => registering = true,
+                Some(BluetoothCommand::RegisterGuestAgent) => {
+                    shared.guest.store(true, Ordering::SeqCst);
+                    registering = true;
+                }
                 Some(command) => {
                     // A pairing waits for the person for minutes: whatever would queue
                     // behind it and ends it anyway cancels it, outside the queue.
@@ -668,13 +682,13 @@ async fn run(
             shared.withdraw();
             shared.set_pairing(None);
             was_powered = false;
-            waiting.retain(|job| !matches!(job, Job::Register(_) | Job::Pairable(_)));
+            waiting.retain(|job| !matches!(job, Job::Register(..) | Job::Pairable(_)));
             registered_for = None;
         }
         if registering && registered_for != Some(seen) {
             if let Some(owner) = owner {
                 registered_for = Some(seen);
-                waiting.push_back(Job::Register(owner));
+                waiting.push_back(Job::Register(owner, !shared.guest.load(Ordering::SeqCst)));
             }
         }
         if had_adapter && current.is_none() {
@@ -694,7 +708,13 @@ async fn run(
         // Runs after every wake with nothing queued: at the start, when an adapter appears,
         // when BlueZ comes back under a new owner (a bar that died during a pairing left it
         // true), and when registering the agent or another process turned it on.
-        if running.is_none() && waiting.is_empty() {
+        // Only a model that was told it owns the default agent keeps the adapter closed: one that
+        // was not told yet, or is a guest, leaves `Pairable` to the bar.
+        if running.is_none()
+            && waiting.is_empty()
+            && registering
+            && !shared.guest.load(Ordering::SeqCst)
+        {
             let wanted = shared.pairing().is_some();
             if pairable_tried != Some(wanted)
                 && current
@@ -756,11 +776,12 @@ impl Drop for ExitGuard {
     fn drop(&mut self) {
         self.shared.set_pairing(None);
         let connection = self.connection.clone();
+        let guest = self.shared.guest.load(Ordering::SeqCst);
         let adapter = self.adapter.take();
         self.handle.spawn(async move {
             // Nothing to remove when the agent never was served.
             connection.object_server().remove::<Agent, _>(AGENT_PATH).await.ok();
-            let Some(adapter) = adapter else { return };
+            let Some(adapter) = adapter.filter(|_| !guest) else { return };
             let set = async {
                 let proxy = Proxy::new(&connection, BLUEZ, adapter.as_str(), PROPERTIES).await?;
                 let body = (ADAPTER, "Pairable", Value::from(false));
@@ -829,14 +850,14 @@ async fn execute(context: Context, job: Job) -> zbus::Result<()> {
     match job {
         Job::Command(command) => command_of(&context, command).await,
         Job::Pairable(on) => context.set_adapter("Pairable", on).await,
-        Job::Register(owner) => register(&context.connection, &owner).await,
+        Job::Register(owner, default) => register(&context.connection, &owner, default).await,
     }
 }
 
 async fn command_of(context: &Context, command: BluetoothCommand) -> zbus::Result<()> {
     match command {
         // Taken by the model's loop, which never queues it.
-        BluetoothCommand::RegisterAgent => Ok(()),
+        BluetoothCommand::RegisterAgent | BluetoothCommand::RegisterGuestAgent => Ok(()),
         BluetoothCommand::Power(on) => context.set_adapter("Powered", on).await,
         BluetoothCommand::Discoverable(on) => context.set_adapter("Discoverable", on).await,
         BluetoothCommand::Discovery(on) => {
@@ -874,14 +895,20 @@ async fn command_of(context: &Context, command: BluetoothCommand) -> zbus::Resul
 async fn pair(context: &Context, device: &str) -> zbus::Result<()> {
     context.adapter()?;
     context.shared.set_pairing(Some(device.to_owned()));
-    let paired = match context.set_adapter("Pairable", true).await {
+    let guest = context.shared.guest.load(Ordering::SeqCst);
+    let opened = if guest {
+        Ok(())
+    } else {
+        context.set_adapter("Pairable", true).await
+    };
+    let paired = match opened {
         Ok(()) => context.call(device, DEVICE, "Pair", PAIR_TIMEOUT).await,
         Err(err) => Err(err),
     };
     // Every way out of the pairing ends here: success, failure, Cancel, a declined page, BlueZ
     // leaving (the call fails). A new owner of BlueZ may have cleared `pairing` and let
     // another pairing start: that one is left alone.
-    if context.shared.finish_pairing(device) {
+    if context.shared.finish_pairing(device) && !guest {
         if let Err(err) = context.set_adapter("Pairable", false).await {
             tracing::warn!(error = %err, "the Bluetooth adapter could not be made unbondable again");
         }
@@ -893,8 +920,8 @@ async fn pair(context: &Context, device: &str) -> zbus::Result<()> {
     context.call(device, DEVICE, "Connect", TIMEOUT).await
 }
 
-/// `RegisterAgent`, then `RequestDefaultAgent`, to this owner.
-async fn register(connection: &Connection, owner: &str) -> zbus::Result<()> {
+/// `RegisterAgent`, then `RequestDefaultAgent` when `default`, to this owner.
+async fn register(connection: &Connection, owner: &str, default: bool) -> zbus::Result<()> {
     let proxy = Proxy::new(connection, owner, AGENT_MANAGER_PATH, AGENT_MANAGER).await?;
     let path = ObjectPath::try_from(AGENT_PATH)?;
     no_answer(
@@ -904,6 +931,9 @@ async fn register(connection: &Connection, owner: &str) -> zbus::Result<()> {
         )
         .await,
     )?;
+    if !default {
+        return Ok(());
+    }
     no_answer(timeout(TIMEOUT, proxy.call_method("RequestDefaultAgent", &(&path,))).await)
         .map(|_| ())
 }
@@ -1461,6 +1491,53 @@ mod tests {
             log.calls.iter().any(|call| call == "RequestDefaultAgent")
         })
         .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_guest_agent_registers_but_never_asks_to_be_the_default() {
+        let rig = started(REPLY_TIMEOUT, |_| {}, false).await;
+        rig.commands
+            .send(BluetoothCommand::RegisterGuestAgent)
+            .unwrap();
+        until(&rig.log, |log| log.registered.is_some()).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let log = rig.log.lock().unwrap();
+        assert!(
+            !log.calls.iter().any(|call| call == "RequestDefaultAgent"),
+            "{:?}",
+            log.calls
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_guest_never_writes_pairable_not_even_to_pair() {
+        // The adapter starts bondable: a default-agent model would turn it off at once.
+        let mut rig = started(REPLY_TIMEOUT, |log| log.start_pairable = true, false).await;
+        rig.commands
+            .send(BluetoothCommand::RegisterGuestAgent)
+            .unwrap();
+        until(&rig.log, |log| log.registered.is_some()).await;
+        rig.commands
+            .send(BluetoothCommand::Pair(PHONE.into()))
+            .unwrap();
+        let PairingRequest::Confirm { reply, .. } = next_request(&mut rig.requests).await else {
+            panic!("a confirmation is asked");
+        };
+        reply.send(PairingReply::Accept).unwrap();
+        until(&rig.log, |log| {
+            log.calls
+                .iter()
+                .any(|call| call == &format!("Connect {PHONE}"))
+        })
+        .await;
+        let log = rig.log.lock().unwrap();
+        assert!(
+            !log.calls.iter().any(|call| call.starts_with("Pairable")),
+            "{:?}",
+            log.calls
+        );
+        assert!(!log.calls.iter().any(|call| call == "RequestDefaultAgent"));
+        assert_eq!(log.agent_results, ["ok"]);
     }
 
     #[tokio::test(flavor = "current_thread")]
