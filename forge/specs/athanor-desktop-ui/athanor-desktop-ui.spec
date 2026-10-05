@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-desktop-ui
 Version:        1.0.0
-Release:        10%{?dist}
+Release:        11%{?dist}
 Summary:        Athanor OS Desktop UI configurations
 License:        MIT
 URL:            https://github.com/hr-mes/athanor-forge
@@ -12,13 +12,12 @@ Obsoletes:      athanor-ags-config < 1.0.1-3
 
 Requires: cliphist
 Requires: ddcutil
-Requires: foot
 Requires: grim
 Requires: slurp
 Requires: wl-clipboard
 Requires: brightnessctl
 Requires: playerctl
-Requires:       athanor-shell-rs wireplumber nautilus firefox
+Requires:       athanor-shell-rs wireplumber nautilus ptyxis gnome-text-editor firefox
 
 %description
 Provides the unified Desktop UI configuration for Athanor OS.
@@ -42,6 +41,11 @@ cp -p %{_sourcedir}/etc/udev/rules.d/99-ddcutil-i2c.rules %{buildroot}/usr/lib/u
 /usr/lib/udev/rules.d/99-ddcutil-i2c.rules
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-11
+- Drop foot: nothing in this package runs it. The default applications are the RPM
+  defaults of doc_software.md decision 7: Nautilus (interim), Ptyxis and GNOME Text Editor
+  replace cosmic-files, cosmic-term and cosmic-edit, which leave the image.
+
 * Thu Sep 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
 - Drop the athanor-settings-rs dependency: the application leaves the image and
   cosmic-settings takes its place.
