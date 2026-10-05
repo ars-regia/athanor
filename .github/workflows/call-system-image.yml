@@ -243,10 +243,14 @@ jobs:
   sign-kernel:
     name: 🔏 Secure Boot signature of the kernel
     # The only job that receives SECUREBOOT_SIGNING_KEY (D43). It builds nothing and runs
-    # no third-party action beside the key: checkout, registry login and
-    # system/sign-kernel.sh, which pulls azoth by the digest in kernel-artifacts, signs its
-    # vmlinuz in the locked forge/specs/azoth/sign image with the network off and verifies
-    # it against the committed certificate. The image build receives only the result.
+    # no third-party action beside the key: checkout, cosign from its pinned release, registry
+    # login and system/sign-kernel.sh. The job takes no kernel from the artifacts of the run,
+    # which another job could have written: sign-kernel.sh resolves azoth itself, in the
+    # registry of vars.KERNEL_REGISTRY (empty: ghcr.io/<owner>), and accepts only a digest that
+    # cosign verifies as signed by kernel-build.yml on a trusted branch and attested as built
+    # from this checkout. It signs that vmlinuz in the locked forge/specs/azoth/sign image with
+    # the network off and verifies it against the committed certificate. The image build
+    # receives only the result.
     needs: [lint]
     runs-on: ubuntu-24.04
     environment: signing
@@ -256,23 +260,25 @@ jobs:
       packages: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Kernel artifacts verified by the Orchestrator
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: kernel-artifacts
-          path: kernel-artifacts
+      - name: Install cosign (pinned release, checksum-verified)
+        run: |
+          set -euo pipefail
+          bash forge/scripts/install-cosign.sh "$RUNNER_TEMP/cosign"
+          echo "$RUNNER_TEMP/cosign" >> "$GITHUB_PATH"
       - name: 🔑 Login to the registry
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
+          KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
         run: |
           set -euo pipefail
-          registry=$(bash system/kernel-artifacts.sh get registry)
+          registry=$(bash system/kernel-artifacts.sh registry)
           echo "${GITHUB_TOKEN}" | podman login "${registry%%/*}" -u "${GITHUB_ACTOR}" --password-stdin
       - name: 🔏 Sign the kernel, then verify it against the certificate (system/sign-kernel.sh)
         env:
           # The locked sign image builds as the NVIDIA sign job builds its own (nvidia-kmod.yml).
           BUILDAH_ISOLATION: chroot
+          KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
           SECUREBOOT_SIGNING_KEY: ${{ secrets.SECUREBOOT_SIGNING_KEY }}
         run: bash system/sign-kernel.sh --out signed-kernel
       - name: 📎 Hand the signed kernel to the image build
