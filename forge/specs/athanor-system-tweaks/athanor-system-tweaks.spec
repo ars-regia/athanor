@@ -22,7 +22,7 @@ mkdir -p %{buildroot}/usr/lib/environment.d
 mkdir -p %{buildroot}/usr/share/pipewire/pipewire.conf.d
 mkdir -p %{buildroot}/etc/NetworkManager/conf.d
 mkdir -p %{buildroot}/usr/lib/NetworkManager/conf.d
-mkdir -p %{buildroot}/etc/systemd/resolved.conf.d
+mkdir -p %{buildroot}/usr/lib/systemd/resolved.conf.d
 mkdir -p %{buildroot}/usr/share/polkit-1/rules.d
 mkdir -p %{buildroot}/usr/lib/sysctl.d
 mkdir -p %{buildroot}/usr/lib/tmpfiles.d
@@ -33,7 +33,7 @@ cp -a %{_sourcedir}/usr/lib/sysctl.d/99-bore.conf %{buildroot}/usr/lib/sysctl.d/
 cp -a %{_sourcedir}/usr/lib/sysctl.d/99-network-security.conf %{buildroot}/usr/lib/sysctl.d/
 cp -a %{_sourcedir}/usr/lib/tmpfiles.d/99-azoth-sysfs.conf %{buildroot}/usr/lib/tmpfiles.d/
 cp -a %{_sourcedir}/etc/NetworkManager/conf.d/99-mac-randomization.conf %{buildroot}/etc/NetworkManager/conf.d/
-cp -a %{_sourcedir}/etc/systemd/resolved.conf.d/99-dns-tls.conf %{buildroot}/etc/systemd/resolved.conf.d/
+cp -a %{_sourcedir}/usr/lib/systemd/resolved.conf.d/50-athanor-dns.conf %{buildroot}/usr/lib/systemd/resolved.conf.d/
 cp -a %{_sourcedir}/usr/lib/NetworkManager/conf.d/50-athanor-hostname.conf %{buildroot}/usr/lib/NetworkManager/conf.d/
 
 %post
@@ -41,7 +41,7 @@ cp -a %{_sourcedir}/usr/lib/NetworkManager/conf.d/50-athanor-hostname.conf %{bui
 %files
 %dir /usr/share/athanor-system-tweaks
 %config(noreplace) /etc/NetworkManager/conf.d/99-mac-randomization.conf
-%config(noreplace) /etc/systemd/resolved.conf.d/99-dns-tls.conf
+/usr/lib/systemd/resolved.conf.d/50-athanor-dns.conf
 /usr/lib/environment.d/10-athanor-wayland.conf
 /usr/share/pipewire/pipewire.conf.d/10-low-latency.conf
 /usr/share/polkit-1/rules.d/10-athanor-wheel-admin.rules
@@ -51,12 +51,19 @@ cp -a %{_sourcedir}/usr/lib/NetworkManager/conf.d/50-athanor-hostname.conf %{bui
 /usr/lib/NetworkManager/conf.d/50-athanor-hostname.conf
 %changelog
 * Mon Oct 05 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
-- DNS-over-TLS becomes opportunistic. Strict mode resolved nothing on networks
-  that block port 853.
-- Ethernet keeps its hardware MAC address. A random wired address cut the
-  Hyper-V test VM off the network; Wi-Fi stays random per connection.
-- NetworkManager no longer sets the hostname from DHCP; the system uses
-  DEFAULT_HOSTNAME from os-release until the user names the device.
+- DNS: strict DNS over TLS to Quad9 (9.9.9.9, 149.112.112.112, 2620:fe::fe,
+  2620:fe::9, TLS name dns.quad9.net), routing domain "~." so the global resolver
+  wins over DHCP DNS, DNSSEC=allow-downgrade. The file moves to
+  /usr/lib/systemd/resolved.conf.d/50-athanor-dns.conf so an administrator
+  overrides it with a later-sorting drop-in in /etc/systemd/resolved.conf.d/.
+- NetworkManager pushes link DNS to systemd-resolved (dns=systemd-resolved) with
+  per-link DNS over TLS opportunistic, so the connectivity check still detects
+  captive portals under strict global DNS over TLS.
+- Wi-Fi uses wifi.cloned-mac-address=stable-ssid. Ethernet keeps its hardware MAC
+  address; a random wired address cut the Hyper-V test VM off the network.
+- NetworkManager no longer sends or accepts a hostname over DHCP
+  (dhcp-send-hostname=false for IPv4 and IPv6, hostname-mode=none); the system
+  uses DEFAULT_HOSTNAME from os-release until the user names the device.
 
 * Thu Sep 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
 - Stop setting net.ipv4.tcp_congestion_control = bbr in 99-bore.conf. Azoth builds
