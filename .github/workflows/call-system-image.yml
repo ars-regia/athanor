@@ -271,6 +271,8 @@ jobs:
           echo "${GITHUB_TOKEN}" | podman login "${registry%%/*}" -u "${GITHUB_ACTOR}" --password-stdin
       - name: 🔏 Sign the kernel, then verify it against the certificate (system/sign-kernel.sh)
         env:
+          # The locked sign image builds as the NVIDIA sign job builds its own (nvidia-kmod.yml).
+          BUILDAH_ISOLATION: chroot
           SECUREBOOT_SIGNING_KEY: ${{ secrets.SECUREBOOT_SIGNING_KEY }}
         run: bash system/sign-kernel.sh --out signed-kernel
       - name: 📎 Hand the signed kernel to the image build
