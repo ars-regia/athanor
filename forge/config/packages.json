@@ -36,7 +36,8 @@
     "recovery",
     "cargo-tools",
     "kernel-forge",
-    "cosmic-comp"
+    "cosmic-comp",
+    "polkit"
   ],
   "custom_tier0": [
     "stage0-bootstrap",
@@ -56,7 +57,8 @@
     "cliphist",
     "ide-bootstrap",
     "system-tweaks",
-    "kernel-profile"
+    "kernel-profile",
+    "polkit"
   ],
   "custom_tier2": [
     "calmo",
