@@ -88,7 +88,7 @@ fuzz component="all" time="60":
 
 # Runs AWS Kani formal verification proof harnesses on Rust spec targets
 [group('QA & Validation')]
-verify component="athanor-gatekeeper-rs":
+verify component:
     #!/usr/bin/env bash
     set -euo pipefail
     LD_LIBRARY_PATH=/usr/lib64:/lib64:${LD_LIBRARY_PATH:-} PATH=/home/athanor/.cargo/bin:$PATH cargo kani --package "{{ component }}"

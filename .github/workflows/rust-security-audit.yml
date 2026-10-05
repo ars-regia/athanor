@@ -130,101 +130,6 @@ jobs:
             chown -R 1001:1001 . || chown -R 1000:1000 . || true
           fi
 
-  kani-verification:
-    name: ???? Kani Formal Verification (${{ matrix.module }} - Shard ${{ matrix.shard }})
-    runs-on: ubuntu-24.04
-    container:
-      image: ghcr.io/hr-mes/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
-    timeout-minutes: 20
-    env:
-      RUSTC_WRAPPER: sccache
-      SCCACHE_DIR: /tmp/sccache
-      CARGO_NET_RETRY: 10
-      LIBCLANG_PATH: /usr/lib/llvm-18/lib
-    strategy:
-      fail-fast: false
-      max-parallel: 20
-      matrix:
-        include:
-          - module: security-ct-eq
-            shard: 1
-            dir: forge/specs/athanor-gatekeeper-rs/athanor-gatekeeper-rs-1.0.0
-            harness: proof_constant_time_eq_no_panic
-          - module: security-auth-token
-            shard: 2
-            dir: forge/specs/athanor-gatekeeper-rs/athanor-gatekeeper-rs-1.0.0
-            harness: proof_verify_auth_token_no_panic
-          - module: security-fanotify-bounds
-            shard: 3
-            dir: forge/specs/athanor-gatekeeper-rs/athanor-gatekeeper-rs-1.0.0
-            harness: proof_parse_next_fanotify_offset_bounds_safety
-          - module: security-rate-limit
-            shard: 4
-            dir: forge/specs/athanor-gatekeeper-rs/athanor-gatekeeper-rs-1.0.0
-            harness: proof_evaluate_execution_rate_limit_no_overflow
-          - module: security-key-perms
-            shard: 5
-            dir: forge/specs/athanor-gatekeeper-rs/athanor-gatekeeper-rs-1.0.0
-            harness: proof_verify_key_permissions
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - name: ??? Install Kani Binaries
-        run: |
-          set -euo pipefail
-          if ! command -v cargo-kani >/dev/null 2>&1; then
-            cargo install --locked kani-verifier
-          fi
-
-      - name: ??? Restore sccache Cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: /tmp/sccache
-          key: sccache-kani-${{ matrix.module }}-${{ matrix.shard }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            sccache-kani-${{ matrix.module }}-${{ matrix.shard }}-
-
-      - name: Extreme Rust Cache (Kani Proof Artifacts)
-        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
-        with:
-          shared-key: "kani-${{ matrix.module }}-${{ matrix.shard }}"
-          cache-on-failure: "true"
-
-      - name: ?????? Resilient Kani Setup (Bypass GitHub 503)
-        run: |
-          set -euo pipefail
-          for _ in {1..5}; do if cargo kani setup; then break; fi; sleep 2; done
-
-      - name: Run Mathematical Proofs (${{ matrix.module }})
-        run: |
-          set -euo pipefail
-          cd ${{ matrix.dir }}
-          if [ -n "${{ matrix.harness }}" ]; then
-            cargo kani --harness "${{ matrix.harness }}"
-          else
-            cargo kani
-          fi
-
-      - name: ???? Upload Formal Verification Artifacts (ZSTD Compressed)
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: kani-proof-shard-${{ matrix.shard }}-${{ matrix.module }}
-          path: ${{ matrix.dir }}/target/**/*.sarif
-          if-no-files-found: ignore
-          compression-level: 1
-
-      - name: ???? Fix Workspace Permissions (GH Actions Cleanup)
-        if: always()
-        run: |
-          set -euo pipefail
-          if command -v sudo >/dev/null 2>&1; then
-            sudo chown -R 1001:1001 . || sudo chown -R 1000:1000 . || true
-          else
-            chown -R 1001:1001 . || chown -R 1000:1000 . || true
-          fi
-
   kani-targeted-verify:
     name: 🛡️🔍 Kani Formal Mathematical Verification
     continue-on-error: true
@@ -301,10 +206,6 @@ jobs:
             component: ebpf
             dir: system/ebpf/ebpf-core
             cmd: RUSTC_WRAPPER="" RUSTFLAGS="" cargo build --target bpfel-unknown-none -Z build-std=core --release
-          - target_name: gatekeeper-baremetal
-            component: gatekeeper
-            dir: forge/specs/athanor-gatekeeper-rs/athanor-gatekeeper-rs-1.0.0
-            cmd: cargo build --release
           - target_name: attestation-baremetal
             component: attestation
             dir: system/confidential_computing/athanor-attestation

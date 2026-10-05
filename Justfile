@@ -96,7 +96,7 @@ fuzz component="all" time="60":
 
 # Runs AWS Kani formal verification proofs on Rust spec targets
 [group('QA & Security')]
-verify component="athanor-gatekeeper-rs":
+verify component:
     just forge/verify "{{ component }}"
 
 # Validates NVIDIA kernel module loading and GPU device nodes

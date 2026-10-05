@@ -1,5 +1,3 @@
 [cargo-vet]
 version = "0.10"
 
-[policy.athanor-gatekeeper-rs]
-audit-as-crates-io = false

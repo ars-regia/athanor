@@ -3,7 +3,6 @@ members = [
   "forge/specs/athanor-backup/athanor-backup-1.0.0",
   "forge/specs/athanor-cloud-rs/athanor-cloud-rs-1.0.0",
   "forge/specs/athanor-doctor/athanor-doctor-1.0.0",
-  "forge/specs/athanor-gatekeeper-rs/athanor-gatekeeper-rs-1.0.0",
   "forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0",
   "forge/specs/athanor-layout-chooser/athanor-layout-chooser-1.0.0",
   "forge/specs/athanor-lvfs-rs/athanor-lvfs-rs-1.0.0",
