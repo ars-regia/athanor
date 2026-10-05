@@ -529,7 +529,7 @@ def check_shipped():
 # 6. documentazione — i link devono risolvere e non essere assoluti
 # --------------------------------------------------------------------------- #
 
-REQUIREMENT_HEAD = re.compile(r"^\*\*([A-Z]{1,3}\d+[a-z]?)\.")
+REQUIREMENT_HEAD = re.compile(r"^\s*(?:[-*]\s+)?\*\*([A-Z]{1,3}\d+[a-z]?)\.")
 NEEDS_LINE = re.compile(r"^\s*(?:[-*]\s+|\d+\.\s+)?Needs:\s*(.*)$")
 REQUIREMENT_ID = re.compile(r"[A-Z]{1,3}\d+[a-z]?")
 
@@ -537,15 +537,25 @@ REQUIREMENT_ID = re.compile(r"[A-Z]{1,3}\d+[a-z]?")
 def needs_graph(root=None):
     """The cross-specification dependency graph of docs/architecture/doc_session.md, SN11.
 
-    A line `Needs: A1, B2.` belongs to the nearest requirement head (`**A1.`) above it in the
-    same file. Returns (problems, graph), graph mapping each requirement to the set it needs."""
+    A line `Needs: A1, B2.` belongs to the nearest requirement head (`**A1.` or `- **A1.`) above
+    it in the same section: a Markdown heading ends a requirement, so a Needs line below one and
+    before the next requirement is a problem, not silently attributed. Fenced code blocks are
+    skipped. Returns (problems, graph), graph mapping each requirement to the set it needs."""
     root = root or ROOT
     files = sorted((root / "docs" / "architecture").glob("*.md"))
     defined, needs, problems = {}, {}, []
     for f in files:
         name = f.relative_to(root)
-        current = None
+        current, fenced = None, False
         for number, line in enumerate(read(f).splitlines(), 1):
+            if line.lstrip().startswith(("```", "~~~")):
+                fenced = not fenced
+                continue
+            if fenced:
+                continue
+            if line.startswith("#"):
+                current = None
+                continue
             head = REQUIREMENT_HEAD.match(line)
             if head:
                 current = head.group(1)
