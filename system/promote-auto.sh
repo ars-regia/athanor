@@ -1,41 +1,42 @@
 #!/usr/bin/env bash
-# Chooses the run promote-stable.yml promotes and hands it to system/promote.sh with its
-# acceptance evidence (docs/architecture/doc_update_trust.md, D1). Three modes:
-#   scheduled  no RUN_ID: the newest run whose evidence says "pass" and is older than the
-#              dwell time (PROMOTE_DWELL_HOURS, default 24), if it is newer than :stable;
-#              nothing to promote is a success;
+# Chooses the run promote-stable.yml promotes and hands it to system/promote.sh
+# (docs/architecture/doc_update_trust.md, D1). Three modes:
+#   scheduled  no RUN_ID: the newest Orchestrator run on a trusted branch that promote.sh
+#              accepts with the dwell time (PROMOTE_DWELL_HOURS, default 24); a run that is
+#              not eligible yet (no passing evidence, inside the dwell time) gives way to the
+#              next older one, and a run not newer than :stable ends the search: nothing to
+#              promote is a success;
 #   manual     RUN_ID set: that run, with no dwell time; the maintainer's override;
 #   security   SECURITY_REASON set (with or without RUN_ID): no dwell time, and the reason is
 #              recorded. The out-of-band path for a critical fix (48 h freshness target).
-# Every mode still goes through promote.sh, so no run reaches :stable without passing
-# evidence for its exact digests and a signature machines verify.
+# This script only picks a candidate, from the GitHub run list. It trusts nothing it reads
+# there: promote.sh decides, from the acceptance attestation on each image digest, signed by
+# iso-acceptance.yml on a trusted branch, and from the signature machines verify.
 #
-# Usage: promote-auto.sh EVIDENCE_DIR RECORD
-#   EVIDENCE_DIR  acceptance-<run>.json files, at any depth (one per acceptance artifact)
-#   RECORD        the promotion record written when a run is promoted (JSON)
-# Environment: RUN_ID, SECURITY_REASON, PROMOTE_DWELL_HOURS; REGISTRY as promote.sh.
+# Usage: promote-auto.sh RECORD
+#   RECORD  the promotion record written when a run is promoted (JSON): the mode, the reason,
+#           the dwell time and the acceptance evidence promote.sh verified
+# Environment: RUN_ID, SECURITY_REASON, PROMOTE_DWELL_HOURS, PROMOTE_TRUSTED_REFS (default
+#              iso-v0), PROMOTE_CANDIDATES (runs looked at, default 20), GITHUB_REPOSITORY;
+#              REGISTRY as promote.sh; gh authenticated.
 set -euo pipefail
 shopt -s inherit_errexit
 
-[[ $# -eq 2 && -d $1 ]] || {
-    echo "usage: ${0##*/} EVIDENCE_DIR RECORD" >&2
+[[ $# -eq 1 ]] || {
+    echo "usage: ${0##*/} RECORD" >&2
     exit 2
 }
-dir=$1 record=$2
+record=$1
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-run=${RUN_ID:-} reason=${SECURITY_REASON:-}
-owner=${GITHUB_REPOSITORY_OWNER:-}
-REGISTRY=${REGISTRY:-${owner:+ghcr.io/${owner,,}}}
-[[ -n $REGISTRY ]] || {
-    echo "${0##*/}: set REGISTRY or GITHUB_REPOSITORY_OWNER" >&2
-    exit 2
-}
-export REGISTRY
+run=${RUN_ID:-} reason=${SECURITY_REASON:-} limit=${PROMOTE_CANDIDATES:-20}
 [[ -z $run || $run =~ ^[0-9]+$ ]] || {
     echo "${0##*/}: RUN_ID must be a run id" >&2
     exit 2
 }
-
+[[ $limit =~ ^[0-9]+$ ]] || {
+    echo "${0##*/}: PROMOTE_CANDIDATES must be a number" >&2
+    exit 2
+}
 if [[ -n $reason ]]; then
     mode=security dwell=0
 elif [[ -n $run ]]; then
@@ -47,66 +48,49 @@ fi
     echo "${0##*/}: PROMOTE_DWELL_HOURS must be a whole number of hours" >&2
     exit 2
 }
+work=$(mktemp -d)
+trap 'rm -r "$work"' EXIT
 
-# One line per passing evidence file: run, finished_at in seconds, path; newest run first, and
-# for a run tested more than once its latest pass first.
-passing() {
-    find "$dir" -type f -name 'acceptance-*.json' -print0 |
-        xargs -0 -r jq -r 'select(.schema == 1 and .result == "pass" and (.run_id | test("^[0-9]+$")))
-          | "\(.run_id) \(.finished_at | fromdateiso8601) \(input_filename)"' |
-        sort -k1,1nr -k2,2nr
+candidates() { # the Orchestrator runs of the trusted branches, newest first
+    local branch
+    read -ra branches <<< "${PROMOTE_TRUSTED_REFS:-iso-v0}"
+    for branch in "${branches[@]}"; do
+        gh run list --repo "${GITHUB_REPOSITORY:?}" --workflow athanor-forge-orchestrator.yml \
+            --branch "$branch" --limit "$limit" --json databaseId | jq -r '.[].databaseId'
+    done | sort -rnu
 }
 
-created() { # created REF -> seconds since the epoch, from org.opencontainers.image.created
-    date -u -d "$(skopeo inspect --config "docker://$1" | jq -r '.config.Labels["org.opencontainers.image.created"]')" +%s
+promote() { # promote RUN -> promote.sh's exit status
+    PROMOTE_DWELL_HOURS=$dwell PROMOTE_EVIDENCE_OUT=$work/evidence.json bash "$root/system/promote.sh" "$1"
 }
 
-evidence=
-now=$(date -u +%s)
-while read -r candidate finished path; do
-    if [[ -n $run ]]; then
-        [[ $candidate == "$run" ]] || continue
-    elif ((now - finished < dwell * 3600)); then
-        echo "run $candidate passed acceptance less than ${dwell} h ago: waiting"
-        continue
-    fi
-    evidence=$path
-    run=$candidate
-    break
-done < <(passing)
-
-if [[ -z $evidence ]]; then
-    if [[ $mode == scheduled ]]; then
-        echo "nothing to promote: no accepted run is past the ${dwell} h dwell time"
-        exit 0
-    fi
-    echo "${0##*/}: no passing acceptance evidence for run ${run} under $dir" >&2
-    exit 1
-fi
-
-if [[ $mode == scheduled ]]; then
-    # The scheduled run is quiet when :stable is already this run or newer; promote.sh would
-    # refuse the second case, which is an error only when someone asked for it.
-    system=$REGISTRY/athanor-system
-    candidate_digest=$(jq -r '.images["athanor-system"]' "$evidence")
-    err=$(mktemp)
-    trap 'rm -f "$err"' EXIT
-    if stable=$(skopeo inspect --format '{{.Digest}}' "docker://$system:stable" 2> "$err"); then
-        if [[ $stable == "$candidate_digest" ]] ||
-            (($(created "$system@$candidate_digest") <= $(created "$system@$stable"))); then
+status=0
+if [[ -n $run ]]; then
+    promote "$run" || exit
+else
+    mapfile -t runs < <(candidates)
+    for run in "${runs[@]}"; do
+        status=0
+        promote "$run" || status=$?
+        case $status in
+        0) break ;;
+        3)
             echo "nothing to promote: :stable already holds run $run or a newer one"
             exit 0
-        fi
-    elif ! grep -q 'manifest unknown' "$err"; then
-        cat "$err" >&2
-        exit 1
+            ;;
+        4) echo "run $run is not eligible, trying the one before" ;;
+        *) exit "$status" ;;
+        esac
+    done
+    if [[ $status -ne 0 || ${#runs[@]} -eq 0 ]]; then
+        echo "nothing to promote: no run among the last $limit passed acceptance ${dwell} h ago or more"
+        exit 0
     fi
 fi
 
-echo "promoting run $run ($mode, dwell ${dwell} h) with $evidence"
-PROMOTE_DWELL_HOURS=$dwell bash "$root/system/promote.sh" "$run" "$evidence"
 mkdir -p "$(dirname "$record")"
 jq -n --arg run "$run" --arg mode "$mode" --arg reason "$reason" --argjson dwell "$dwell" \
-    --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --slurpfile evidence "$evidence" \
+    --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --slurpfile evidence "$work/evidence.json" \
     '{schema: 1, run_id: $run, mode: $mode, reason: (if $reason == "" then null else $reason end),
       dwell_hours: $dwell, promoted_at: $at, evidence: $evidence[0]}' > "$record"
+echo "promoted run $run ($mode, dwell ${dwell} h)"

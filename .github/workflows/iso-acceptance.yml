@@ -5,10 +5,15 @@ name: ISO Acceptance
 # followed. It answers the one question the build cannot: not whether an ISO was
 # produced, but whether it installs a system that starts and can be logged into.
 #
-# The Orchestrator calls it after every system image build on the default branch, because
+# The Orchestrator calls it after every system image build on the release branch, because
 # its verdict is the acceptance evidence that system/promote.sh requires before :stable may
 # move (docs/architecture/doc_update_trust.md, D1); it also runs weekly and on request. The
-# run itself is short. On a runner with KVM the install takes about eight minutes and the
+# evidence counts only as a keyless cosign attestation on each image digest, made by the
+# attest job below, which runs only on the release branch (repository variable
+# RELEASE_BRANCH, default iso-v0) for a push, a schedule or a dispatch, never for a pull
+# request, and holds the only OIDC token of the workflow; the job that boots the system
+# under test has none. promote.sh checks the same from the certificate and the predicate.
+# The# run itself is short. On a runner with KVM the install takes about eight minutes and the
 # job about twelve, because the console ends the run as soon as it has an answer rather
 # than waiting out a clock. What it produces is meant to be looked at: the console log,
 # the verdict, and a screenshot every thirty seconds of both the installer and the first
@@ -145,19 +150,17 @@ jobs:
         if: always() && hashFiles('iso-test/verdict.md') != ''
         run: cat ./iso-test/verdict.md >> "${GITHUB_STEP_SUMMARY}"
 
-      # The acceptance evidence, pass or fail, for system/promote.sh and promote-stable.yml.
+      # The acceptance evidence, pass or fail, kept as a record and handed to the attest job.
       # A failure here (an ISO without the labels) fails the job: no evidence, no promotion.
       - name: 🧾 Write the acceptance evidence
         if: always() && hashFiles('iso-labels.json') != ''
-        env:
-          ACCEPTANCE_RUN_ID: ${{ github.run_id }}
-        run: python3 forge/test/iso/evidence.py ./iso-test iso-labels.json "${ACCEPTANCE_RUN_ID}" ./evidence
+        run: python3 forge/test/iso/evidence.py ./iso-test iso-labels.json ./evidence
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always() && hashFiles('evidence/acceptance-*.json') != ''
         with:
-          # acceptance-*: the pattern promote-stable.yml downloads. The attempt keeps a rerun
-          # from colliding with the evidence of the first attempt.
+          # A record for people and the input of the attest job; promotion never reads it. The
+          # attempt keeps a rerun from colliding with the evidence of the first attempt.
           name: acceptance-${{ github.run_id }}-${{ github.run_attempt }}
           path: evidence/acceptance-*.json
           if-no-files-found: error
@@ -176,3 +179,37 @@ jobs:
           # upload should not be a second error on top of the real one.
           if-no-files-found: ignore
           retention-days: 30
+
+  attest:
+    name: Attest the acceptance evidence
+    needs: [install]
+    # Only a passing run (the install job fails otherwise) of the release branch, started by a
+    # push, a schedule or a dispatch on it. A called run carries the caller's event and ref,
+    # so the Orchestrator's runs qualify on the same terms.
+    if: >-
+      github.ref == format('refs/heads/{0}', vars.RELEASE_BRANCH || 'iso-v0')
+      && contains(fromJSON('["push", "schedule", "workflow_dispatch"]'), github.event_name)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    env:
+      REGISTRY_HOST: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
+      REGISTRY: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+      # The artifact of this run's install job, by its exact name: no other run's file.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: acceptance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence
+      - name: Log in to the registry
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: cosign login "${REGISTRY_HOST}" -u "${GITHUB_ACTOR}" -p "${GITHUB_TOKEN}"
+      - name: Attest (forge/test/iso/attest.sh)
+        run: bash forge/test/iso/attest.sh evidence/acceptance-*.json

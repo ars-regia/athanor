@@ -2,14 +2,19 @@ name: Promote a system image run to stable
 
 # Decision D1 of docs/architecture/doc_update_trust.md: users follow :stable, :latest is the
 # tested build of the default branch. The logic is system/promote-auto.sh, which chooses the
-# run, and system/promote.sh, which refuses any digest without passing acceptance evidence or
-# a signature machines verify; no signing key is involved here.
-#   - On schedule: the newest accepted run older than the dwell time (repository variable
-#     PROMOTE_DWELL_HOURS, default 24), when it is newer than :stable.
+# run, and system/promote.sh, which refuses any digest without a signature machines verify or
+# without passing acceptance evidence: a cosign attestation on that digest, made keyless by
+# iso-acceptance.yml on the release branch, matching the run, the digest and the commit. No
+# artifact or file this job downloads is trusted, and no signing key is involved here.
+#   - On schedule: the newest accepted Orchestrator run of the release branch older than the
+#     dwell time (repository variable PROMOTE_DWELL_HOURS, default 24), when it is newer than
+#     :stable.
 #   - By hand with a run id: that run, without the dwell time (the maintainer's override).
 #   - By hand with a security reason: no dwell time, and the reason is kept in the
 #     promotion record (the out-of-band path for a critical fix).
 # Disabling this workflow stops automatic promotion; :stable then moves only by hand.
+# It runs only on the release branch (repository variable RELEASE_BRANCH, default iso-v0), so
+# the scripts that decide are the reviewed ones.
 
 on:
   schedule:
@@ -43,30 +48,29 @@ jobs:
   promote:
     name: Point stable at the run
     needs: [lint]
+    if: github.ref_name == (vars.RELEASE_BRANCH || 'iso-v0')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
       - name: Log in to the registry
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
           REGISTRY_HOST: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
         run: echo "${GITHUB_TOKEN}" | skopeo login "${REGISTRY_HOST}" -u "${GITHUB_ACTOR}" --password-stdin
-      - name: Download the acceptance evidence
-        # Every unexpired acceptance-* artifact of the repository (iso-acceptance.yml).
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash system/fetch-evidence.sh evidence
       - name: Promote (system/promote-auto.sh)
         env:
           RUN_ID: ${{ inputs.run_id }}
           SECURITY_REASON: ${{ inputs.security_reason }}
           PROMOTE_DWELL_HOURS: ${{ vars.PROMOTE_DWELL_HOURS || '24' }}
+          PROMOTE_TRUSTED_REFS: ${{ vars.RELEASE_BRANCH || 'iso-v0' }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REGISTRY: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}
         run: |
           set -euo pipefail
-          bash system/promote-auto.sh evidence promotion/promotion-record.json | tee -a "${GITHUB_STEP_SUMMARY}"
+          bash system/promote-auto.sh promotion/promotion-record.json | tee -a "${GITHUB_STEP_SUMMARY}"
       - name: Keep the promotion record
         if: hashFiles('promotion/promotion-record.json') != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

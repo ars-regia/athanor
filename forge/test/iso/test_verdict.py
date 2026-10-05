@@ -29,6 +29,8 @@ import time
 import zlib
 
 HERE = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+from evidence import CHECKS as EVIDENCE_CHECKS  # noqa: E402
 
 
 def verdict(tmp: pathlib.Path, phases, qemu_status=0):
@@ -662,32 +664,71 @@ def test_karg_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
 
 LABELS = {
     "io.athanor.run-id": "412",
+    "org.opencontainers.image.revision": "c" * 40,
     "io.athanor.image-digest.athanor-system": "sha256:" + "a" * 64,
     "io.athanor.image-digest.athanor-system-nvidia": "sha256:" + "b" * 64,
+    "io.athanor.image-digest.athanor-system-nvidia-legacy": "sha256:" + "d" * 64,
+}
+ACTIONS = {
+    "GITHUB_REPOSITORY": "hr-mes/athanor",
+    "GITHUB_RUN_ID": "900",
+    "GITHUB_RUN_ATTEMPT": "1",
+    "GITHUB_REF": "refs/heads/iso-v0",
+    "GITHUB_EVENT_NAME": "schedule",
+    "GITHUB_SHA": "e" * 40,
+    "GITHUB_WORKFLOW_REF": "hr-mes/athanor/.github/workflows/athanor-forge-orchestrator.yml@refs/heads/iso-v0",
 }
 
 
-def evidence(tmp: pathlib.Path, labels, verdict_dir):
+def evidence(tmp: pathlib.Path, labels, verdict_dir, actions=ACTIONS):
     labels_file = tmp / "labels.json"
     labels_file.write_text(json.dumps(labels))
     out = tmp / "evidence"
     shutil.rmtree(out, ignore_errors=True)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
     proc = subprocess.run(
-        [sys.executable, str(HERE / "evidence.py"), str(verdict_dir), str(labels_file), "900", str(out)],
+        [sys.executable, str(HERE / "evidence.py"), str(verdict_dir), str(labels_file), str(out)],
         capture_output=True,
         text=True,
+        env={**env, **actions},
     )
     path = out / "acceptance-412.json"
     return proc.returncode, json.loads(path.read_text()) if path.exists() else None
 
 
-def test_evidence_names_the_digests_and_the_verdict(tmp: pathlib.Path) -> None:
+def rewrite_verdict(tmp: pathlib.Path, change) -> pathlib.Path:
+    """A passing verdict.json, edited: what a check that broke or a partial run would leave."""
+    test_pass(tmp)
+    path = tmp / "run" / "verdict.json"
+    doc = json.loads(path.read_text())
+    change(doc)
+    path.write_text(json.dumps(doc))
+    return tmp / "run"
+
+
+def test_evidence_binds_the_digests_the_commit_and_the_run(tmp: pathlib.Path) -> None:
     test_pass(tmp)
     code, doc = evidence(tmp, LABELS, tmp / "run")
     assert code == 0, "a labelled ISO must yield evidence"
-    assert doc["result"] == "pass" and doc["run_id"] == "412" and doc["acceptance_run_id"] == "900"
-    assert doc["images"]["athanor-system-nvidia"] == "sha256:" + "b" * 64
-    assert doc["tests"]["settings"] is True and doc["schema"] == 1
+    assert (doc["schema"], doc["kind"], doc["result"], doc["run_id"]) == (1, "athanor-acceptance", "pass", "412")
+    assert doc["revision"] == "c" * 40 and doc["tested_image"] == "athanor-system"
+    assert doc["images"] == {
+        "athanor-system": "sha256:" + "a" * 64,
+        "athanor-system-nvidia": "sha256:" + "b" * 64,
+        "athanor-system-nvidia-legacy": "sha256:" + "d" * 64,
+    }
+    assert set(doc["tests"]) == set(EVIDENCE_CHECKS) and all(doc["tests"].values())
+    assert doc["acceptance"] == {
+        "repository": "hr-mes/athanor", "run_id": "900", "run_attempt": "1", "ref": "refs/heads/iso-v0",
+        "event": "schedule", "sha": "e" * 40,
+        "workflow_ref": "hr-mes/athanor/.github/workflows/athanor-forge-orchestrator.yml@refs/heads/iso-v0",
+    }
+
+
+def test_evidence_checks_are_the_verdict_checks(tmp: pathlib.Path) -> None:
+    test_pass(tmp)
+    written = json.loads((tmp / "run" / "verdict.json").read_text())["checks"]
+    assert tuple(written) == EVIDENCE_CHECKS, "evidence.py must require exactly the checks verdict.py writes"
 
 
 def test_evidence_of_a_failed_run_says_fail(tmp: pathlib.Path) -> None:
@@ -701,13 +742,84 @@ def test_evidence_without_a_verdict_says_fail(tmp: pathlib.Path) -> None:
     empty = tmp / "never-started"
     empty.mkdir(exist_ok=True)
     code, doc = evidence(tmp, LABELS, empty)
-    assert code == 0 and doc["result"] == "fail", "a run that left no verdict is a failure"
+    assert code == 0 and doc["result"] == "fail" and doc["tests"] == {}, "a run that left no verdict is a failure"
 
 
-def test_evidence_needs_the_iso_labels(tmp: pathlib.Path) -> None:
+def test_evidence_of_a_partial_pass_says_fail(tmp: pathlib.Path) -> None:
+    # "pass" with a check missing, a check false, a check that is truthy but not true, or an
+    # extra check nobody asked for: none of them may attest more than was verified.
+    def drop(doc):
+        del doc["checks"]["settings"]
+
+    def falsify(doc):
+        doc["checks"]["karg"] = False
+
+    def truthy(doc):
+        doc["checks"]["greeter"] = "yes"
+
+    def extra(doc):
+        doc["checks"]["something-else"] = True
+
+    for change in (drop, falsify, truthy, extra):
+        code, doc = evidence(tmp, LABELS, rewrite_verdict(tmp, change))
+        assert code == 0 and doc["result"] == "fail", f"{change.__name__}: a partial pass must be a fail"
+        assert "something-else" not in doc["tests"], "the evidence attests only the known checks"
+
+
+def test_evidence_needs_every_label_well_formed(tmp: pathlib.Path) -> None:
     test_pass(tmp)
-    code, doc = evidence(tmp, {"org.opencontainers.image.version": "412"}, tmp / "run")
-    assert code == 1 and doc is None, "an unlabelled ISO cannot name the digests it installed"
+    cases = {
+        "no labels": {"org.opencontainers.image.version": "412"},
+        "a tag for a run": {**LABELS, "io.athanor.run-id": "latest"},
+        "a short commit": {**LABELS, "org.opencontainers.image.revision": "c" * 12},
+        "a tag for a digest": {**LABELS, "io.athanor.image-digest.athanor-system": "latest"},
+        "an uppercase digest": {**LABELS, "io.athanor.image-digest.athanor-system": "sha256:" + "A" * 64},
+        "a missing variant": {k: v for k, v in LABELS.items() if not k.endswith("nvidia-legacy")},
+        "an unknown image": {**LABELS, "io.athanor.image-digest.athanor-other": "sha256:" + "f" * 64},
+    }
+    for name, labels in cases.items():
+        code, doc = evidence(tmp, labels, tmp / "run")
+        assert code == 1 and doc is None, f"{name}: evidence must not be written"
+
+
+def test_evidence_needs_the_actions_context(tmp: pathlib.Path) -> None:
+    test_pass(tmp)
+    for variable in ACTIONS:
+        code, doc = evidence(tmp, LABELS, tmp / "run", {k: v for k, v in ACTIONS.items() if k != variable})
+        assert code == 1 and doc is None, f"without {variable} the evidence cannot say where it came from"
+    code, doc = evidence(tmp, LABELS, tmp / "run", {**ACTIONS, "GITHUB_SHA": "not-a-commit"})
+    assert code == 1 and doc is None, "a malformed commit is not a commit"
+
+
+def attest(tmp: pathlib.Path, evidence_file: pathlib.Path):
+    """attest.sh with a cosign that records its arguments."""
+    bin_dir = tmp / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    log = tmp / "cosign.log"
+    log.unlink(missing_ok=True)
+    fake = bin_dir / "cosign"
+    fake.write_text(f'#!/bin/sh\necho "$*" >> {log}\n')
+    fake.chmod(0o755)
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "REGISTRY": "registry.example/owner", "RETRY_ATTEMPTS": "1"}
+    proc = subprocess.run(["bash", str(HERE / "attest.sh"), str(evidence_file)], capture_output=True, text=True, env=env)
+    return proc.returncode, log.read_text().splitlines() if log.exists() else []
+
+
+def test_attest_signs_every_digest_of_passing_evidence_only(tmp: pathlib.Path) -> None:
+    test_pass(tmp)
+    code, _ = evidence(tmp, LABELS, tmp / "run")
+    path = tmp / "evidence" / "acceptance-412.json"
+    code, calls = attest(tmp, path)
+    assert code == 0, "passing evidence must be attested"
+    expected = {f"registry.example/owner/{k.removeprefix('io.athanor.image-digest.')}@{v}"
+                for k, v in LABELS.items() if k.startswith("io.athanor.image-digest.")}
+    assert {c.split()[-1] for c in calls} == expected, calls
+    assert all(c.startswith(f"attest --yes --type custom --predicate {path} ") for c in calls), calls
+    for change in ({"result": "fail"}, {"images": {"athanor-system": "latest"}}):
+        forged = tmp / "forged.json"
+        forged.write_text(json.dumps({**json.loads(path.read_text()), **change}))
+        code, calls = attest(tmp, forged)
+        assert code == 1 and calls == [], f"{change}: must not be attested"
 
 
 def main() -> int:
@@ -733,10 +845,14 @@ def main() -> int:
             test_console_boots_our_kickstart,
             test_installed_systems_own_grub_is_not_a_loop,
             test_console_logs_in_opens_settings_and_stops,
-            test_evidence_names_the_digests_and_the_verdict,
+            test_evidence_binds_the_digests_the_commit_and_the_run,
+            test_evidence_checks_are_the_verdict_checks,
             test_evidence_of_a_failed_run_says_fail,
             test_evidence_without_a_verdict_says_fail,
-            test_evidence_needs_the_iso_labels,
+            test_evidence_of_a_partial_pass_says_fail,
+            test_evidence_needs_every_label_well_formed,
+            test_evidence_needs_the_actions_context,
+            test_attest_signs_every_digest_of_passing_evidence_only,
         ):
             test(tmp)
             print(f"  ok  {test.__name__}")
