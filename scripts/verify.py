@@ -901,6 +901,63 @@ def check_registry():
     return r
 
 
+# Golden rules 2 and 3 of docs/architecture/doc_forge_development_guide.md.
+SPEC_SECTION = re.compile(
+    r"^%(package|description|prep|generate_buildrequires|conf|build|install|check|clean|files|"
+    r"changelog|pre|post|preun|postun|pretrans|posttrans|preuntrans|postuntrans|verify|"
+    r"(?:trans)?filetrigger(?:in|un|postun)|trigger(?:prein|in|un|postun))\b")
+SCRIPTLETS = {"pre", "post", "preun", "postun", "pretrans", "posttrans", "preuntrans",
+              "postuntrans", "verify", "triggerprein", "triggerin", "triggerun", "triggerpostun",
+              "filetriggerin", "filetriggerun", "filetriggerpostun", "transfiletriggerin",
+              "transfiletriggerun", "transfiletriggerpostun"}
+# /usr and /etc, spelled out or through the macros that expand below them.
+IMAGE_PATH = (r"(?:/usr|/etc)\b|%\{?_(?:sysconfdir|prefix|exec_prefix|bindir|sbindir|libdir|"
+              r"libexecdir|datadir|datarootdir|includedir|mandir|docdir|unitdir|userunitdir|"
+              r"presetdir|userpresetdir|tmpfilesdir|sysusersdir|udevrulesdir|modprobedir|"
+              r"sysctldir|environmentdir)\b")
+MUTATION = re.compile(r"(?:^|[\s;&|(])(?:cp|mv|install|chmod|chown|chgrp|ln|rm|mkdir|touch|tee|"
+                      r"truncate|rsync|sed\s+-i\S*)\s[^;&|]*?(?:" + IMAGE_PATH + r")"
+                      r"|>>?\s*(?:" + IMAGE_PATH + r")")
+WEAKENING = re.compile(r"\b(?:repo_)?gpgcheck\s*=\s*(?:0|false|no)\b|--nogpgcheck\b"
+                       r"|%undefine\s+_(?:fortify_source|hardened_build)\b"
+                       r"|%(?:define|global)\s+_(?:fortify_level|hardened_build)\s+0\b"
+                       r"|-U_FORTIFY_SOURCE\b|-D_FORTIFY_SOURCE=0\b|-fno-stack-protector\b"
+                       r"|-fcf-protection=none\b|-z\s*(?:norelro|execstack)\b|-no-pie\b|-fno-PIE\b")
+
+
+def forge_rule_problems(root):
+    """Rule 2: no scriptlet writes under /usr or /etc, which belong to the image (%install and
+    tmpfiles do). Rule 3: no spec turns off a signature check or a hardening flag."""
+    root = Path(root)
+    problems = []
+    for path in sorted(root.glob("forge/specs/*/*.spec")):
+        relative = path.relative_to(root).as_posix()
+        section = None
+        for i, line in enumerate(read(path).split("\n"), 1):
+            header = SPEC_SECTION.match(line)
+            if header:
+                section = header.group(1)
+            if section == "changelog":
+                break
+            if header or line.lstrip().startswith("#"):
+                continue
+            if section in SCRIPTLETS and MUTATION.search(line):
+                problems.append(f"{relative}:{i}: rule 2, %{section} writes under /usr or /etc: "
+                                f"install the file in %install or create it with tmpfiles.d")
+            if WEAKENING.search(line):
+                problems.append(f"{relative}:{i}: rule 3, turns off a signature check or a "
+                                f"hardening flag")
+    return problems
+
+
+@check("forge-rules", "Specs keep golden rules 2 and 3 of the forge guide")
+def check_forge_rules():
+    r = Result()
+    for problem in forge_rule_problems(ROOT):
+        r.fail(problem)
+    return r
+
+
 # --------------------------------------------------------------------------- #
 # runner
 # --------------------------------------------------------------------------- #

@@ -139,13 +139,10 @@ jobs:
                 cp result/RPMS/*.rpm RPMS/
               else
             echo "📦 Compiling Custom Spec: $SPEC_DIR"
-            podman run --rm \
+            # Fetch with network, then build with --network=none (forge golden rule 4).
+            bash scripts/run_spec_build.sh "${BUILDER_IMAGE,,}" "$SPEC_DIR" \
               -e SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE}" \
-              -v ${{ github.workspace }}:/workspace \
-              -v ${{ github.workspace }}/.sccache:/root/.cache/sccache \
-              -w /workspace/forge \
-              "${BUILDER_IMAGE,,}" \
-              bash scripts/build_spec.sh "$SPEC_DIR"
+              -v ${{ github.workspace }}/.sccache:/root/.cache/sccache
               fi
           else
             echo "❌ [MARTIAL LAW FATAL] Attempted to build upstream package ${PKG_NAME} without local spec! Dynamic downloads are strictly forbidden!"
@@ -322,13 +319,10 @@ jobs:
                 cp result/RPMS/*.rpm RPMS/
               else
             echo "📦 Compiling Custom Spec: $SPEC_DIR"
-            podman run --rm \
+            # Fetch with network, then build with --network=none (forge golden rule 4).
+            bash scripts/run_spec_build.sh "${BUILDER_IMAGE,,}" "$SPEC_DIR" \
               -e SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE}" \
-              -v ${{ github.workspace }}:/workspace \
-              -v ${{ github.workspace }}/.sccache:/root/.cache/sccache \
-              -w /workspace/forge \
-              "${BUILDER_IMAGE,,}" \
-              bash scripts/build_spec.sh "$SPEC_DIR"
+              -v ${{ github.workspace }}/.sccache:/root/.cache/sccache
               fi
           else
             echo "❌ [MARTIAL LAW FATAL] Attempted to build upstream package ${PKG_NAME} without local spec! Dynamic downloads are strictly forbidden!"
@@ -503,13 +497,10 @@ jobs:
                 cp result/RPMS/*.rpm RPMS/
               else
             echo "📦 Compiling Custom Spec: $SPEC_DIR"
-            podman run --rm \
+            # Fetch with network, then build with --network=none (forge golden rule 4).
+            bash scripts/run_spec_build.sh "${BUILDER_IMAGE,,}" "$SPEC_DIR" \
               -e SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE}" \
-              -v ${{ github.workspace }}:/workspace \
-              -v ${{ github.workspace }}/.sccache:/root/.cache/sccache \
-              -w /workspace/forge \
-              "${BUILDER_IMAGE,,}" \
-              bash scripts/build_spec.sh "$SPEC_DIR"
+              -v ${{ github.workspace }}/.sccache:/root/.cache/sccache
               fi
           else
             echo "❌ [MARTIAL LAW FATAL] Attempted to build upstream package ${PKG_NAME} without local spec! Dynamic downloads are strictly forbidden!"
