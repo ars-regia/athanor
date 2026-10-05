@@ -168,36 +168,94 @@ def run_commands(lines):
     return [c for c in commands if c and not c.startswith("#")]
 
 
+def passed_secrets(lines, names):
+    """The names under which a job that calls a reusable workflow passes on the secrets in
+    NAMES: every one of them for `secrets: inherit`, the new name of each explicit entry."""
+    passed = set()
+    for i, entry in enumerate(lines):
+        m = re.match(r"^    secrets:\s*(\S*)\s*$", entry)
+        if not m:
+            continue
+        if m.group(1).lower() == "inherit":
+            return set(names)
+        for inner in lines[i + 1 :]:
+            if inner.strip() and len(inner) - len(inner.lstrip()) <= 4:
+                break
+            given = re.match(
+                r"^\s+([A-Za-z0-9_-]+):\s*\$\{\{\s*secrets\.([A-Za-z0-9_]+)\s*\}\}",
+                inner,
+            )
+            if given and given.group(2).upper() in names:
+                passed.add(given.group(1).upper())
+    return passed
+
+
 def signing_secret_problems(root=None):
     root = root or ROOT
     problems = []
-    names = "|".join(SIGNING_SECRETS)
-    reference = re.compile(rf"\bsecrets\.({names})\b")
-    for wf in sorted((root / ".github/workflows").glob("*.y*ml")):
-        text = read(wf)
+    workflows = {
+        wf.name: read(wf) for wf in sorted((root / ".github/workflows").glob("*.y*ml"))
+    }
+    # The names a signing secret goes by in each workflow: its own (GitHub matches secret
+    # names without regard to case, so every comparison is upper case), plus the name a caller
+    # passes it under to a local reusable workflow, followed until no new name appears.
+    aliases = {name: {s.upper() for s in SIGNING_SECRETS} for name in workflows}
+    changed = True
+    while changed:
+        changed = False
+        for name, text in workflows.items():
+            for lines in (lines for _, lines in workflow_jobs(text).values()):
+                called = re.search(
+                    r"^    uses:\s*\./\.github/workflows/(\S+)", "\n".join(lines), re.M
+                )
+                if not called or called.group(1) not in workflows:
+                    continue
+                new = passed_secrets(lines, aliases[name]) - aliases[called.group(1)]
+                if new:
+                    aliases[called.group(1)] |= new
+                    changed = True
+    for name, text in workflows.items():
+        reference = re.compile(
+            rf"\bsecrets\.({'|'.join(sorted(aliases[name]))})\b", re.IGNORECASE
+        )
         code = "\n".join(
             line for line in text.split("\n") if not line.lstrip().startswith("#")
         )
         if re.search(r"toJSON\(\s*secrets\s*\)|\bsecrets\[", code):
             problems.append(
-                f"{wf.name}: reads the secrets as a whole (toJSON(secrets) or secrets[...]): "
+                f"{name}: reads the secrets as a whole (toJSON(secrets) or secrets[...]): "
                 f"name each secret a job needs"
             )
         env = re.search(r"^env:\s*\n((?:[ \t]+.*\n?|\s*\n)*)", code, re.M)
         if env and reference.search(env.group(1)):
             problems.append(
-                f"{wf.name}: a signing secret in the workflow-level env reaches every job"
+                f"{name}: a signing secret in the workflow-level env reaches every job"
             )
         for job, (line, lines) in workflow_jobs(text).items():
             body = "\n".join(
                 entry for entry in lines if not entry.lstrip().startswith("#")
             )
-            used = sorted(set(reference.findall(body)))
-            # A job that calls a reusable workflow passes the secrets on; the called workflow's
-            # own jobs are checked where they use them.
-            if not used or re.search(r"^    uses:", body, re.M):
+            used = sorted({found.upper() for found in reference.findall(body)})
+            called = re.search(r"^    uses:\s*(\S+)", body, re.M)
+            if called:
+                # A local reusable workflow is followed above, under the names it receives. An
+                # external one is code outside this repository: no signing secret goes there.
+                if called.group(1).startswith("./"):
+                    continue
+                if re.search(r"^    secrets:\s*inherit\s*$", body, re.M | re.I):
+                    problems.append(
+                        f"{name}:{line} job {job} passes every secret, the signing keys "
+                        f"included, to the external workflow {called.group(1)} (secrets: inherit)"
+                    )
+                elif used:
+                    problems.append(
+                        f"{name}:{line} job {job} passes {', '.join(used)} to the external "
+                        f"workflow {called.group(1)}"
+                    )
                 continue
-            where = f"{wf.name}:{line} job {job} receives {', '.join(used)}"
+            if not used:
+                continue
+            where = f"{name}:{line} job {job} receives {', '.join(used)}"
             if not re.search(
                 r"^    environment:\s*(signing\s*$|\n\s+name:\s*signing\s*$)",
                 body,

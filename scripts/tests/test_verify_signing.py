@@ -114,6 +114,64 @@ class SigningSecrets(unittest.TestCase):
         )
         self.assertTrue(any("as a whole" in p for p in problems))
 
+    def test_secret_names_are_matched_without_regard_to_case(self):
+        problems = self.problems(
+            SIGN_JOB.replace(
+                "secrets.SECUREBOOT_SIGNING_KEY", "secrets.secureboot_Signing_Key"
+            ).replace("    environment: signing\n", "")
+        )
+        self.assertEqual(len(problems), 1)
+        self.assertIn(
+            "SECUREBOOT_SIGNING_KEY outside the signing environment", problems[0]
+        )
+
+    def called(self, called_jobs, secrets):
+        (self.root / ".github/workflows/called.yml").write_text(
+            "name: called\non: workflow_call\njobs:\n" + called_jobs
+        )
+        return self.problems(
+            "  caller:\n    uses: ./.github/workflows/called.yml\n    secrets:"
+            + secrets
+        )
+
+    def test_a_renamed_secret_is_followed_into_a_local_workflow(self):
+        build = (
+            "  build:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: make\n"
+            "        env:\n          KEY: ${{ secrets.SB }}\n"
+        )
+        renamed = "\n      SB: ${{ secrets.SECUREBOOT_SIGNING_KEY }}\n"
+        problems = self.called(build, renamed)
+        self.assertTrue(problems, "the renamed key reaches a build job")
+        self.assertTrue(
+            all("called.yml" in p and "receives SB" in p for p in problems), problems
+        )
+        sign = SIGN_JOB.replace("secrets.SECUREBOOT_SIGNING_KEY", "secrets.sb")
+        self.assertEqual(self.called(sign, renamed), [])
+        # Another secret under the same new name carries no key.
+        self.assertEqual(
+            self.called(build, "\n      SB: ${{ secrets.GITHUB_TOKEN }}\n"), []
+        )
+
+    def test_secrets_to_an_external_workflow(self):
+        external = (
+            "  caller:\n    uses: someone/else/.github/workflows/x.yml"
+            "@0123456789abcdef0123456789abcdef01234567\n"
+        )
+        problems = self.problems(external + "    secrets: inherit\n")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("secrets: inherit", problems[0])
+        problems = self.problems(
+            external + "    secrets:\n      K: ${{ secrets.MODULE_SIGNING_KEY }}\n"
+        )
+        self.assertEqual(len(problems), 1)
+        self.assertIn("passes MODULE_SIGNING_KEY to the external workflow", problems[0])
+        self.assertEqual(
+            self.problems(
+                external + "    secrets:\n      T: ${{ secrets.GITHUB_TOKEN }}\n"
+            ),
+            [],
+        )
+
     def test_a_comment_is_not_a_reference(self):
         job = "  build:\n    runs-on: ubuntu-24.04\n    steps:\n      # secrets.SECUREBOOT_SIGNING_KEY is not here\n      - run: make\n"
         self.assertEqual(self.problems(job), [])
