@@ -13,9 +13,11 @@ name: Promote a system image run to stable
 #   - By hand with a run id: that run, without the dwell time (the maintainer's override).
 #   - By hand with a security reason: no dwell time, and the advisory ids (CVE, GHSA, RUSTSEC,
 #     FEDORA) are kept in the promotion record (the out-of-band path for a critical fix).
-# Both dwell-skipping paths wait for a reviewer of the stable-override environment, which must
-# require one (system/require-review.sh fails otherwise): write access alone dispatches them but
-# does not approve them. Maintainer settings, doc_update_trust.md D1.
+# Both dwell-skipping paths wait for a reviewer of the stable-override environment, and
+# system/require-review.sh then requires that environment to demand review and this run to
+# carry an approval from a person with write access other than the one who dispatched it:
+# write access alone dispatches an override but does not approve it. Maintainer settings,
+# doc_update_trust.md D1.
 # Disabling this workflow stops automatic promotion; :stable then moves only by hand.
 # It promotes only from the release branch (repository variable RELEASE_BRANCH, default
 # iso-v0), so the scripts that decide are the reviewed ones. A run on any other branch, the
@@ -69,8 +71,10 @@ jobs:
     name: Point stable at the run
     needs: [lint, override]
     # The override job is skipped exactly when both inputs are empty: then the dwell time holds.
+    # A failed, cancelled or rejected override skips this job; !cancelled(), not always(), so a
+    # cancelled workflow does not promote either.
     if: >-
-      always() && needs.lint.result == 'success'
+      !cancelled() && needs.lint.result == 'success'
       && (needs.override.result == 'success'
           || (needs.override.result == 'skipped' && inputs.run_id == '' && inputs.security_reason == ''))
     runs-on: ubuntu-24.04

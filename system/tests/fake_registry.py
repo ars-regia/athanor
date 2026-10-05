@@ -23,6 +23,9 @@ Fixture keys:
                 GitHub extensions of the certificate, checked against
                 --certificate-github-workflow-sha and --certificate-github-workflow-repository
   runs_error    stderr of a failing `gh run list` (an outage, an expired token)
+  approvals     what GET /repos/{owner}/{repo}/actions/runs/{run}/approvals returns; approvals_error
+                makes it fail
+  permissions   {"login": "admin" | "write" | "read" | "none"}: the collaborator permission endpoint
   environments  {"name": the environment as GET /repos/{owner}/{repo}/environments/{name} returns it}
   attestations  {"registry/repo@digest": [{"identity": "...", "predicate": {...}}]}
   configs       {"registry/repo@digest": {label: value}}
@@ -144,6 +147,21 @@ def gh(args, fx):
         if "DELETE" in args:
             return 0
         path = next(a for a in args[1:] if a.startswith("/"))
+        match = re.fullmatch(r"/repos/[^/]+/[^/]+/actions/runs/[0-9]+/approvals", path)
+        if match:
+            if fx.get("approvals_error"):
+                return fail(fx["approvals_error"])
+            print(json.dumps(fx.get("approvals", [])))
+            return 0
+        match = re.fullmatch(r"/repos/[^/]+/[^/]+/collaborators/([^/]+)/permission", path)
+        if match:
+            permission = fx.get("permissions", {}).get(match.group(1))
+            if permission is None:
+                return fail("gh: Not Found (HTTP 404)")
+            body = {"permission": permission, "user": {"login": match.group(1)}}
+            jq = args[args.index("--jq") + 1] if "--jq" in args else None
+            print(body["permission"] if jq == ".permission" else json.dumps(body))
+            return 0
         match = re.fullmatch(r"/repos/[^/]+/[^/]+/environments/([^/]+)", path)
         if match:
             if match.group(1) not in fx.get("environments", {}):
