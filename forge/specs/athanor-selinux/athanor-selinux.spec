@@ -1,13 +1,13 @@
 %global debug_package %{nil}
 Name:           athanor-selinux
 Version:        1.0
-Release:        6%{?dist}
+Release:        7%{?dist}
 Summary:        Custom SELinux policies for Athanor OS
 License:        MIT
 URL:            https://github.com/hr-mes/athanor-forge
 Source0:        bootupd_lsblk.te
 Source1:        athanor_scx.te
-Source2:        athanor_nix_daemon.te
+Source2:        athanor_nix_daemon.cil
 Source3:        athanor_nvidia_modules_load.te
 
 BuildArch:      noarch
@@ -15,8 +15,9 @@ BuildRequires:  checkpolicy
 
 %description
 Custom SELinux Type Enforcement policies for Athanor OS.
-Includes mitigations for bootupd, the scx eBPF schedulers, the Nix daemon socket,
-and the NVIDIA driver's capability probes at module load.
+Includes mitigations for bootupd, the scx eBPF schedulers and the NVIDIA driver's
+capability probes at module load, and the Nix policy: types for the store, its
+state and the daemon socket, a confined nix-daemon domain and a builder domain.
 
 %prep
 %setup -q -c -T
@@ -26,7 +27,9 @@ cp %{SOURCE0} %{SOURCE1} %{SOURCE2} %{SOURCE3} .
 # checkmodule compiles each .te into a CIL module (the require block resolves
 # against the base policy when the module is installed). CIL needs no
 # semodule_package step: `semodule -i module.cil` loads it as it is.
-for module in bootupd_lsblk athanor_scx athanor_nix_daemon athanor_nvidia_modules_load; do
+# athanor_nix_daemon is written in CIL directly, because it declares file
+# contexts, which a .te compiled by checkmodule cannot carry.
+for module in bootupd_lsblk athanor_scx athanor_nvidia_modules_load; do
   checkmodule -M -m -C -o "${module}.cil" "${module}.te"
 done
 
@@ -43,6 +46,21 @@ install -D -m 0644 athanor_nvidia_modules_load.cil %{buildroot}%{_datadir}/selin
 %{_datadir}/selinux/packages/athanor_nvidia_modules_load.cil
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0-7
+- Replace athanor_nix_daemon with a real Nix policy, written in CIL (#154,
+  decisions A2-13 and A2-16). nix_store_t, nix_var_t and nix_socket_t label
+  /var/nix and its /nix bind mount (both spellings carry file contexts) and the
+  daemon's cache in /var/cache/nix. /usr/bin/nix, the target of the nix-daemon
+  link, is nix_daemon_exec_t, and systemd starts the daemon in nix_daemon_t: a
+  confined domain with the capabilities of the store owner and of the sandbox
+  set-up, the store, HTTP(S) substituters and read access to /proc and to
+  symbolic links for the collector's roots. Store programs the daemon executes
+  (builders) run in nix_build_t, after the sandbox has set no_new_privs, through
+  an explicit nnp_transition; the domain is broad on files, devices and the
+  network, like Fedora's rpm_script_t, without any SELinux administration or
+  kernel module attribute. The rule letting init_t create the socket as
+  default_t is gone: the socket directory is nix_socket_t.
+
 * Thu Sep 24 2026 Athanor Forge <forge@athanor.os> - 1.0-6
 - Add athanor_nvidia_modules_load: dontaudit the CAP_PERFMON and CAP_SYS_ADMIN
   probes the NVIDIA modules' init code makes in systemd-modules-load's context.
