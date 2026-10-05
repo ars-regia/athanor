@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rinomina Ermete OS in Athanor e il kernel in Azoth (docs/architecture/doc_naming.md).
+"""Rinomina Ermete OS in Athanor e il kernel in Azoth (eseguita il 2026-09-05, commit 02bf9c05).
 
     rename.py [--root DIR] [--dry-run] [--skip-tools] [--cargo CMD] [--actionlint CMD]
 

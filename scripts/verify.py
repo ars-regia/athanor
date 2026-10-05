@@ -529,6 +529,33 @@ def check_shipped():
 # 6. documentazione — i link devono risolvere e non essere assoluti
 # --------------------------------------------------------------------------- #
 
+FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
+CODE_SPAN = re.compile(r"(`+)(?!`).*?(?<!`)\1(?!`)", re.S)
+LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
+
+
+def markdown_links(text):
+    """(label, target) of every inline link outside code. Fenced blocks (``` or ~~~, closed
+    only by a run of the same character at least as long) and code spans are examples, not
+    links: a fence left open runs to the end of the file, as CommonMark has it."""
+    prose, fence = [], None
+    for line in text.splitlines():
+        m = FENCE.match(line)
+        if fence is None:
+            if m:
+                fence = m.group(1)
+            else:
+                prose.append(line)
+        elif m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) \
+                and not line.strip().lstrip(fence[0]):
+            fence = None
+            prose.append("")
+    # A code span never crosses a paragraph, so a stray backtick stays in its own.
+    paragraphs = "\n".join(prose).split("\n\n")
+    plain = "\n\n".join(CODE_SPAN.sub(" ", para) for para in paragraphs)
+    return [(m.group(1), m.group(2)) for m in LINK.finditer(plain)]
+
+
 @check("docs", "I link nella documentazione risolvono e sono portabili")
 def check_docs():
     r = Result()
@@ -541,15 +568,15 @@ def check_docs():
         if not f.exists():
             continue
         base = f.parent
-        for m in re.finditer(r"\[([^\]]*)\]\(([^)]+)\)", read(f)):
-            link = m.group(2).split("#")[0].strip()
+        for label, target in markdown_links(read(f)):
+            link = target.split("#")[0].strip()
             if not link or link.startswith(("http://", "https://", "mailto:")):
                 continue
             if link.startswith("file://"):
                 r.fail(f"{t}: link assoluto della macchina di sviluppo -> {link[:70]}")
                 continue
             if not (base / link).exists():
-                r.fail(f"{t}: link rotto [{m.group(1)[:30]}] -> {link}")
+                r.fail(f"{t}: link rotto [{label[:30]}] -> {link}")
     return r
 
 

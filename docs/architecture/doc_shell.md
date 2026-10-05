@@ -64,7 +64,7 @@ What the platform gives us today:
 | cosmic-launcher, cosmic-app-library, pop-launcher | launcher, application library, the launcher's search backend | 3 (P4 found they work without the panel) | our launcher and application library (`doc_launcher.md`) |
 | cosmic-greeter as locker | session lock | 4 | our lock, on the greeter's authentication code |
 | cosmic-osd | on-screen display and the session's only polkit agent | 4, or 5 if it can run without its agent | our polkit agent (4) and on-screen display (5) |
-| cosmic-settings, cosmic-randr | Settings application, output configuration | 6 | our Settings; `athanor-settings-rs` is not revived, only mined |
+| cosmic-settings, cosmic-randr | Settings application, output configuration | 6 | our Settings; `athanor-settings-rs` was deleted on 2026-10-05 |
 | cosmic-workspaces | overview | 7 | our overview |
 | cosmic-settings-daemon, cosmic-idle, cosmic-bg | configuration bus and media keys; `org.freedesktop.ScreenSaver` and idle policy; wallpaper | 8 | our daemons |
 
@@ -261,7 +261,7 @@ P4 replaces the two spikes revision 4 reserved for stage 2: the security-context
 - `doc_update_trust.md` is a new document (SH12).
 - `doc_platform_experience.md`, section 3, names "the native GTK4/Relm4 panel and the horizontal strip of `Niri`". It takes a pointer to this document.
 - `doc_kernel_profile.md`, the note on the existing override that "stages updates automatically": it takes a pointer to SH11, which removes that override.
-- `NEXT.md` takes stage 1 as a block with the gate of section 7, and stage 2 as a second block with the gate of section 8.
+- The GitHub milestone `iso-v0` takes stage 1 as an issue with the gate of section 7, and stage 2 as a second issue with the gate of section 8.
 - `doc_bar.md` is a new document, written after spike P4 (section 3).
 - `CLAUDE.md`, "Desktop GTK4/Wayland": unchanged.
 
