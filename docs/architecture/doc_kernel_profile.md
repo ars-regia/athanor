@@ -714,7 +714,8 @@ SELinux policy exposes `user_namespace create`, so creation is restricted per sy
 domain through SELinux; services also set `RestrictNamespaces=`.
 
 **Network:** per-service `IPAddressAllow=`/`IPAddressDeny=`, `RestrictNetworkInterfaces=`,
-`SocketBindAllow=`, and host nftables. Tetragon leaves the image.
+`SocketBindAllow=`, and host nftables. Tetragon leaves the image. Superseded by maintainer
+decision A2-10b (#153): Tetragon stays and does real work, see `doc_tetragon.md`.
 
 **Residual risks, stated:**
 
