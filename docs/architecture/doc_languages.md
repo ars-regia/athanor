@@ -86,7 +86,7 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
 - **Locale data on the image** (checked on 2026-10-05, glibc 2.42-16.fc43).
   - `glibc-all-langpacks` is installed with an installed size of 237,950,035 bytes. `localedef --list-archive` lists 887 locales.
   - `system/Containerfile:252` keeps glibc-all-langpacks deliberately.
-  - `forge/config/packages.json:106-107` also install `glibc-langpack-en` (5,992,542 bytes) and `glibc-langpack-it` (3,720,981 bytes). These duplicate data that all-langpacks already ships.
+  - `forge/config/packages.json:104-105` also install `glibc-langpack-en` (5,992,542 bytes) and `glibc-langpack-it` (3,720,981 bytes). These duplicate data that all-langpacks already ships.
   - `/usr/share/locale` holds 699 language directories (335 MB), because Fedora keeps translations inside the main packages (`%_install_langs` is `all`).
   - composefs is enabled (`/usr/lib/ostree/prepare-root.conf`), so the two identical locale archives (`locale-archive` and `locale-archive.real`, 233,242,544 bytes each, same sha256) are stored once.
 - **Fonts** (checked on 2026-10-05).
@@ -178,7 +178,7 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
 - The system locale (`/etc/locale.conf`) and the system keyboard (`/etc/vconsole.conf`, `X11Layout` and related properties) are written only through `org.freedesktop.locale1`: `SetLocale`, `SetVConsoleKeyboard` and `SetX11Keyboard` with `convert` set to true.
 - localed's own polkit actions (`org.freedesktop.locale1.set-locale` and `set-keyboard`) authorise the calls, and both require an administrator's authorisation, kept for the polkit session (`auth_admin_keep`, localed's own default in `/usr/share/polkit-1/actions/org.freedesktop.locale1.policy`).
 - **The rule that keeps that default.** Two COSMIC rules grant both actions to local, active members of `wheel` or `sudo` without authentication (section 1). Athanor ships `40-athanor-locale1.rules` to override them:
-  - **File:** `/usr/share/polkit-1/rules.d/40-athanor-locale1.rules`, in the package `athanor-base-config`, which already installs `/usr/share/polkit-1/rules.d/*` (`forge/specs/athanor-base-config/athanor-base-config.spec:81`).
+  - **File:** `/usr/share/polkit-1/rules.d/40-athanor-locale1.rules`, in the package `athanor-base-config`, which already installs `/usr/share/polkit-1/rules.d/*` (`forge/specs/athanor-base-config/athanor-base-config.spec:76`).
   - **Content:** one `polkit.addRule` that returns `polkit.Result.AUTH_ADMIN_KEEP` when `action.id` is `org.freedesktop.locale1.set-locale` or `org.freedesktop.locale1.set-keyboard`, for every subject, and returns nothing for any other action.
   - **Order:** polkit processes the rules files of `/etc/polkit-1/rules.d` and `/usr/share/polkit-1/rules.d` in lexical order of their basename and stops at the first rule that returns a result (polkit(8), polkit 126-6.fc43.2, read 2026-10-05). `40-athanor-locale1.rules` sorts after `10-athanor-wheel-admin.rules`, which makes `wheel` the administrators, and before `50-default.rules`, `cosmic-settings-daemon.rules` and `cosmic-settings.rules`.
   - **Effect:** a member of `wheel` changes the system locale or keyboard after typing their own password. cosmic-settings-daemon's push of a user's layout to localed (LN9) is refused without a prompt, because it calls `SetX11Keyboard` with `interactive` false (`src/locale.rs:70-77`, tag `epoch-1.8.0`), and the refusal is only logged by the daemon.
@@ -332,7 +332,7 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
 
 - The XDG Settings portal serves `clock-format` among the `org.gnome.desktop.interface` keys, so that Flatpak clocks agree with the bar. `doc_portal.md` owns that list.
 
-**LN16. The interface first run needs.** First run (wave 2) sets language, region and keyboard in this order, with the calls of LN15, and nothing else:
+**LN16. The interface first run needs.** First run (`doc_first_run.md`) sets language, region and keyboard in this order, with the calls of LN15, and nothing else:
 
 1. **System language and keyboard,** before any user exists: `SetLocale` and `SetX11Keyboard` with convert true. First run runs as the user that `doc_first_run.md` defines and holds localed's polkit actions through a rule of its own that sorts before `40-athanor-locale1.rules` (LN5). Choosing a language switches first run's own text at once: it reloads its catalog with the new `LANGUAGE`, which `athanor-i18n` supports after LN2.
 2. **The first user's** `Languages` (the same as the system's unless changed), region (empty unless changed), and `xkb_config`, which `athanor-shelld` seeds at the first login (LN9), so first run does not write it.
@@ -408,7 +408,7 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
 
 ## 3. Changes to other documents
 
-Applied with the approval of this document. Line numbers are those of the tree at `visual-language-spec` (c0ad0e90), of `doc_software.md` revision 3 (PR #117), and of the wave 1 drafts as of 2026-10-05.
+Applied with the approval of this document. Line numbers into code are those of the tree as merged with iso-v0 (99a68285), checked on 2026-10-05; those into `doc_software.md` are of revision 3 as merged (PR #117), and those into the other desktop specifications are of their text on 2026-10-05.
 
 - **`doc_shell.md`.**
   - SH13's "Italian and English are the shipped locales" (`doc_shell.md:177`) stays. Its rig gains the clock cases of LN17 and the font case of LN13.
@@ -426,18 +426,18 @@ Applied with the approval of this document. Line numbers are those of the tree a
   - F-greeter-09 (`shell-features.md:423`): `partial` until LN19 step 4, then `have`.
   - F-greeter-15 (`shell-features.md:429`): owned by `doc_accessibility.md` (`athanor-osk`). No input method runs in the greeter (LN10), so the slot rule of LN12 does not apply there.
   - The exclusions of LN18 are added as rows with their reasons.
-- **`doc_osd.md`** (wave 1 draft, the keyboard-layout row at `doc_osd.md:91`): subscribes to the compositor client's `KeyboardLayout` event and shows the layout's short and full name (LN9).
-- **`doc_lock_and_prompts.md`** (wave 1 draft):
+- **`doc_osd.md`** (the keyboard-layout row at `doc_osd.md:91`): subscribes to the compositor client's `KeyboardLayout` event and shows the layout's short and full name (LN9).
+- **`doc_lock_and_prompts.md`**:
   - shows and switches the layout through the compositor client (LN9);
   - its acceptance (section 5, `doc_lock_and_prompts.md:228`) adds the case of cosmic-comp#2702: "with an IBus engine enabled and holding the keyboard grab, the lock screen receives every key, the password included, and the input method none" (LN12). Its spike L2 (`doc_lock_and_prompts.md:220`) and S2 here run the same check;
   - the lock screen, like the greeter, offers no input method.
-- **`doc_accessibility.md`** (wave 1 draft, AX12 at `doc_accessibility.md:133-138`, decision 5 at `doc_accessibility.md:252`): states the slot rule of LN12. `athanor-osk` and IBus compete for the single input-method slot per seat (cosmic-osk#44); while an engine is enabled, IBus holds the slot and `athanor-osk` types through `zwp_virtual_keyboard_v1` only. The accessibility spike on the on-screen keyboard and S9 here cover it together.
-- **`doc_portal.md`** (wave 2): the Settings backend serves `org.gnome.desktop.interface clock-format` (LN15).
-- **`doc_settings.md`** (wave 2):
+- **`doc_accessibility.md`** (AX12 at `doc_accessibility.md:133-138`, decision 5 at `doc_accessibility.md:252`): states the slot rule of LN12. `athanor-osk` and IBus compete for the single input-method slot per seat (cosmic-osk#44); while an engine is enabled, IBus holds the slot and `athanor-osk` types through `zwp_virtual_keyboard_v1` only. The accessibility spike on the on-screen keyboard and S9 here cover it together.
+- **`doc_portal.md`**: the Settings backend serves `org.gnome.desktop.interface clock-format` (LN15).
+- **`doc_settings.md`**:
   - the Language and Region, Keyboard and Input-method pages use only the stores and interfaces of LN15, and say that a language or region change takes effect at the next login;
   - the language list is `athanor_i18n::offered_languages()`, with the "complete" and "partial" marks of LN4;
   - Settings reads its own catalogs through `gettext-rs` (LN1).
-- **`doc_first_run.md`** (wave 2):
+- **`doc_first_run.md`**:
   - uses the interface of LN16;
   - the polkit rule that lets first run call `SetLocale` and `SetX11Keyboard` sorts before `40-athanor-locale1.rules` and names first run's own subject (LN5). It is a polkit change the maintainer approves.
 - **`doc_software.md`** (revision 3):
@@ -445,10 +445,10 @@ Applied with the approval of this document. Line numbers are those of the tree a
   - SW14's "gettext from the first commit" (`doc_software.md:196`) gains "through `gettext-rs` with glibc's gettext (`doc_languages.md`, LN1)";
   - Software applies the Chromium input-method override (LN11);
   - Software extends Flatpak's `extra-languages` if spike S3 requires it (LN14).
-- **`forge/specs/athanor-base-config/`:** adds `SOURCES/usr/share/polkit-1/rules.d/40-athanor-locale1.rules`, installed by the existing `/usr/share/polkit-1/rules.d/*` line (`athanor-base-config.spec:81`) (LN5, LN19 step 3).
+- **`forge/specs/athanor-base-config/`:** adds `SOURCES/usr/share/polkit-1/rules.d/40-athanor-locale1.rules`, installed by the existing `/usr/share/polkit-1/rules.d/*` line (`athanor-base-config.spec:76`) (LN5, LN19 step 3).
 - **`forge/test/shell/Containerfile:17`:** adds `adwaita-sans-fonts`, `adwaita-mono-fonts`, `google-noto-sans-hebrew-fonts` and `google-noto-sans-cjk-vf-fonts` (LN13).
-- **`forge/config/packages.json`:** removes `glibc-langpack-en` and `glibc-langpack-it` (`packages.json:106-107`), and adds `hunspell-it` (LN4). `ibus-wayland` and `ibus-panel` are added at LN19 step 5.
-- Amendments received, from the ruling of 2026-10-05s of 2026-10-05: LN7 gains the first-run hand-off step (`doc_first_run.md` FR15); the `system_actions` file of LN9 is defined here as the single owner of that file.
+- **`forge/config/packages.json`:** removes `glibc-langpack-en` and `glibc-langpack-it` (`packages.json:104-105`), and adds `hunspell-it` (LN4). `ibus-wayland` and `ibus-panel` are added at LN19 step 5.
+- Amendments received, from the maintainer's rulings of 2026-10-05: LN7 gains the first-run hand-off step (`doc_first_run.md` FR15); the `system_actions` file of LN9 is defined here as the single owner of that file.
 
 ## 4. Open doubts
 
