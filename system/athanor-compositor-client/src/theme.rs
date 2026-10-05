@@ -120,6 +120,32 @@ pub fn set_high_contrast(enabled: bool) -> io::Result<()> {
     set_high_contrast_in(&user, enabled)
 }
 
+/// The `v1` directory of `is_dark` under the user's `cosmic` configuration directory; `None`
+/// without a home directory.
+pub fn mode_dir() -> Option<PathBuf> {
+    cosmic_config::user_dir().map(|user| cosmic_config::component(&user, MODE))
+}
+
+/// Writes `is_dark` under `cosmic_dir`, the key cosmic-settings writes when the person
+/// chooses light or dark; cosmic-comp and every libcosmic program follow it.
+pub fn set_dark_in(cosmic_dir: &Path, dark: bool) -> io::Result<()> {
+    let dir = cosmic_config::component(cosmic_dir, MODE);
+    std::fs::create_dir_all(&dir)?;
+    write_atomically(&dir.join("is_dark"), &dark.to_string())
+}
+
+/// Writes the user's own `is_dark`. `NotFound` when there is no home directory to resolve
+/// the user's `cosmic` configuration directory in.
+pub fn set_dark(dark: bool) -> io::Result<()> {
+    let user = cosmic_config::user_dir().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "no home directory for the user's cosmic configuration",
+        )
+    })?;
+    set_dark_in(&user, dark)
+}
+
 fn parse_bool(text: &str) -> Option<bool> {
     text.trim().parse().ok()
 }
@@ -406,5 +432,20 @@ mod tests {
         assert!(read_from(dirs).is_high_contrast, "light mode");
         set_high_contrast_in(&dir, false).expect("write");
         assert!(!read_from(dirs).is_high_contrast);
+    }
+
+    #[test]
+    fn the_mode_the_panel_writes_is_the_mode_read_back() {
+        let user = cosmic_dir("set-dark");
+        let system = cosmic_dir("set-dark-system");
+        put(&system, MODE, "is_dark", "true");
+        set_dark_in(&user, false).expect("write");
+        assert!(!read_from(&[user.clone(), system.clone()]).is_dark);
+        assert_eq!(
+            fs::read_to_string(user.join(MODE).join("v1").join("is_dark")).expect("key"),
+            "false"
+        );
+        set_dark_in(&user, true).expect("write");
+        assert!(read_from(&[user, system]).is_dark);
     }
 }
