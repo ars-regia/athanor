@@ -8,9 +8,11 @@ notification the way an application does, and serves os.athanor.Notifications1 w
 wire signature the bar decodes (athanor-services' notifications::wire). Its signals are broadcast, not unicast as the real
 daemon's: the bar subscribes by sender, so it cannot tell.
 
-It starts holding four notifications, all waiting for the user, so the captures show three
-popups and "+1 waiting". Every call that acts is appended to /out/$RIG_TAG-notifications.log:
-"Close <id> <reason>", "InvokeAction <id> <key> token|no-token", "SetDoNotDisturb True|False".
+It starts holding four unread notifications, so the captures show three popups and the
+button counts four. `List` answers the unread ones, as the real daemon's does, and MarkRead
+marks them read and emits Read. Every call that acts is appended to
+/out/$RIG_TAG-notifications.log: "Close <id> <reason>", "InvokeAction <id> <key>
+token|no-token", "MarkRead <id>...", "SetDoNotDisturb True|False".
 SetDoNotDisturb also emits DoNotDisturbChanged, as the real daemon does for every change.
 """
 
@@ -53,10 +55,12 @@ NODE = Gio.DBusNodeInfo.new_for_xml(f"""
       <arg type="u" direction="in"/><arg type="s" direction="in"/><arg type="s" direction="in"/>
     </method>
     <method name="SetDoNotDisturb"><arg type="b" direction="in"/></method>
+    <method name="MarkRead"><arg type="au" direction="in"/></method>
     <method name="ReportFullscreen"><arg type="b" direction="in"/><arg type="b" direction="in"/></method>
     <signal name="Added"><arg type="{WIRE}"/></signal>
     <signal name="Replaced"><arg type="{WIRE}"/></signal>
     <signal name="Closed"><arg type="u"/><arg type="u"/></signal>
+    <signal name="Read"><arg type="au"/></signal>
     <signal name="DoNotDisturbChanged">
       <arg type="b"/><arg type="s"/><arg type="x"/>
     </signal>
@@ -104,7 +108,7 @@ class Daemon:
         return (
             n["id"], "", n["app"], n["summary"], n["body"],
             [(n["body"], 0, "")] if n["body"] else [], n["actions"], True, n["urgency"],
-            n["transient"], n["resident"], False, 0, n["entry"], n["icon_name"],
+            n["transient"], n["resident"], n["read"], 0, n["entry"], n["icon_name"],
             n["icon_file"], n["width"], n["height"], n["rgba"], n["timeout"], left,
             left > 0, -1, False, "",
         )
@@ -134,7 +138,7 @@ class Daemon:
             "icon_name": "" if icon.startswith("/") else icon,
             "icon_file": icon if icon.startswith("/") else "",
             "width": width, "height": height, "rgba": rgba,
-            "timeout": timeout_ms(expire, urgency), "arrived": now_ms(),
+            "timeout": timeout_ms(expire, urgency), "arrived": now_ms(), "read": False,
         }
         self.held.append(notice)
         member = "Replaced" if old is not None else "Added"
@@ -172,7 +176,7 @@ class Daemon:
             self.close(id_, 3)
             invocation.return_value(None)
         elif method == "List":
-            listed = [self.wire(n) for n in self.held]
+            listed = [self.wire(n) for n in self.held if not n["read"]]
             invocation.return_value(GLib.Variant(f"(a{WIRE})", (listed,)))
         elif method == "DoNotDisturb":
             invocation.return_value(
@@ -202,6 +206,16 @@ class Daemon:
         elif method == "ReportFullscreen":
             available, active = parameters.unpack()
             log(f"ReportFullscreen {available} {active}")
+            invocation.return_value(None)
+        elif method == "MarkRead":
+            (ids,) = parameters.unpack()
+            log("MarkRead " + " ".join(str(id_) for id_ in ids))
+            changed = [n["id"] for n in self.held if n["id"] in ids and not n["read"]]
+            for notice in self.held:
+                if notice["id"] in changed:
+                    notice["read"] = True
+            if changed:
+                self.emit("Read", GLib.Variant("(au)", (changed,)))
             invocation.return_value(None)
         elif method == "SetDoNotDisturb":
             (on,) = parameters.unpack()

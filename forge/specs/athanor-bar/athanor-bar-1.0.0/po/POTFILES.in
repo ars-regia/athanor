@@ -1,3 +1,4 @@
+src/badge.rs
 src/clock.rs
 src/i18n.rs
 src/keyboard.rs

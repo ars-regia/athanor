@@ -5,7 +5,7 @@
 set -euo pipefail
 here=$(dirname "${BASH_SOURCE[0]}")
 crate=$here/..
-xgettext --language=Rust --keyword=tr --keyword=tr_with --from-code=UTF-8 --add-comments=TRANSLATORS \
+xgettext --language=Rust --keyword=tr --keyword=tr_with --keyword=translate --from-code=UTF-8 --add-comments=TRANSLATORS \
 	--package-name=athanor-bar --msgid-bugs-address=forge@athanor.os --no-wrap --sort-by-file \
 	--directory="$crate" --files-from="$here/POTFILES.in" --output="$here/athanor-bar.pot"
 # The creation date would make every run a diff.

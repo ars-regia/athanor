@@ -20,7 +20,7 @@ use gtk4::prelude::*;
 use gtk4::{cairo, gdk};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
-use super::notifications::{card, Place, Service};
+use super::notifications::{card, Service};
 use super::Bar;
 use crate::{i18n, layer_guard};
 
@@ -96,7 +96,7 @@ impl Window {
             ordered.reverse();
         }
         for notice in ordered {
-            self.cards.append(&card(service, notice, Place::Popup));
+            self.cards.append(&card(service, notice));
         }
         self.window.present();
         self.set_input(true);

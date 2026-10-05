@@ -1,4 +1,4 @@
-//! The clock and its calendar (doc_bar.md, BR3). Every tick reads the zone and the wall
+//! The clock (doc_bar.md, BR3); a click opens the notification center, which holds the calendar. Every tick reads the zone and the wall
 //! clock again: nothing is counted, so a resume or a clock that jumps shows at once.
 
 use std::cell::{Cell, RefCell};
@@ -14,7 +14,7 @@ use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
 
-use super::popup::Popup;
+use super::control_center::toggle_notifications;
 use super::{Bar, Changed, ModuleUi};
 use crate::i18n::tr;
 
@@ -22,7 +22,7 @@ use crate::i18n::tr;
 type Zone = Rc<RefCell<Option<(Option<String>, glib::TimeZone)>>>;
 
 struct ClockUi {
-    popup: Popup,
+    button: gtk4::Button,
     label: gtk4::Label,
     zone: Zone,
     /// The last tick could not read or format the time: logged once, not every second.
@@ -70,7 +70,7 @@ fn current_zone(zone: &Zone) -> glib::TimeZone {
 
 impl ModuleUi for ClockUi {
     fn widget(&self) -> gtk4::Widget {
-        self.popup.button.clone().upcast()
+        self.button.clone().upcast()
     }
 
     fn refresh(&self, _bar: &Rc<Bar>, changed: Changed) {
@@ -111,35 +111,32 @@ impl ModuleUi for ClockUi {
         };
         if self.label.text() != short {
             self.label.set_text(&short);
-            self.popup.button.set_tooltip_text(Some(&long));
-            self.popup.button.update_property(&[Property::Label(&long)]);
+            self.button.set_tooltip_text(Some(&long));
+            self.button.update_property(&[Property::Label(&long)]);
         }
     }
 
-    fn open(&self, bar: &Rc<Bar>) {
-        self.popup.open(bar);
+    fn open(&self, _bar: &Rc<Bar>) {
+        toggle_notifications();
     }
 }
 
-pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
+pub fn new(_bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     let label = gtk4::Label::new(None);
     label.add_css_class("bar-clock");
-    let popup = Popup::new(bar, &label, &tr("Clock"));
-    let calendar = gtk4::Calendar::new();
-    popup.popover.set_child(Some(&calendar));
+    let button = gtk4::Button::new();
+    button.set_child(Some(&label));
+    button.add_css_class("bar-button");
+    let name = tr("Clock");
+    button.set_tooltip_text(Some(&name));
+    button.update_property(&[Property::Label(&name)]);
+    button.connect_clicked(|_| toggle_notifications());
     let zone: Zone = Rc::new(RefCell::new(None));
-    let shown_zone = zone.clone();
-    // The calendar opens on today, even when it was left on another month.
-    popup.popover.connect_show(move |_| {
-        if let Ok(now) = glib::DateTime::now(&current_zone(&shown_zone)) {
-            calendar.select_day(&now);
-        }
-    });
     let hours24 = Rc::new(Cell::new(read_hours24()));
     let watched = hours24.clone();
     let watch = cosmic_clock::watch(move || watched.set(read_hours24()));
     Some(Box::new(ClockUi {
-        popup,
+        button,
         label,
         zone,
         failed: Cell::new(false),

@@ -71,11 +71,9 @@ class CasesTest(unittest.TestCase):
         "bar",
         "bar-power",
         "bar-input",
-        "bar-calendar",
         "bar-accessibility",
         "bar-tiling",
         "bar-popups",
-        "bar-notifications",
         "bar-tray",
         "bar-network",
         "bar-bluetooth",
@@ -88,7 +86,7 @@ class CasesTest(unittest.TestCase):
         found = [
             case for surface in self.BAR_SCENES for case in cases.surface_cases(surface)
         ]
-        self.assertEqual(len(self.BAR_SCENES), 14)
+        self.assertEqual(len(self.BAR_SCENES), 12)
         self.assertEqual(len(found), 12 * len(self.BAR_SCENES))
         self.assertEqual(len({c.tag for c in found}), len(found))
 
@@ -100,12 +98,12 @@ class CasesTest(unittest.TestCase):
                 )
 
 
-    def test_br9_has_fifteen_scenes_and_180_cases(self):
+    def test_br9_has_thirteen_scenes_and_156_cases(self):
         scenes = self.BAR_SCENES + ("dock",)
         found = [case for surface in scenes for case in cases.surface_cases(surface)]
-        self.assertEqual(len(scenes), 15)
-        self.assertEqual(len(found), 180)
-        self.assertEqual(len({c.tag for c in found}), 180)
+        self.assertEqual(len(scenes), 13)
+        self.assertEqual(len(found), 156)
+        self.assertEqual(len({c.tag for c in found}), 156)
 
     def test_the_dock_has_the_twelve_cases_of_br9(self):
         found = cases.surface_cases("dock")

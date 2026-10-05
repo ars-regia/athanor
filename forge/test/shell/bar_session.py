@@ -26,7 +26,8 @@ the private bus admits every user for that.
 the dock's rig session runs athanor-dock through it, with every other flag unchanged.
 
 --notifications starts fake_notifications.py (athanor-shelld's private interface, faked:
-the real daemon admits only athanor-bar.service). --tray starts the real athanor-shelld as
+the real daemon admits only athanor-bar.service) and fake_control_center.py (the program the
+bar's notifications button and clock call). --tray starts the real athanor-shelld as
 the tray watcher, with its log in /out/$RIG_TAG-shelld.log and its pid in
 /tmp/athanor-shelld.pid, then tray_item.py, and starts the bar once both items are
 registered. --respawn starts the bar again when it is killed with SIGKILL, and rewrites
@@ -352,6 +353,12 @@ def main():
         wait_until(
             lambda: has_owner(session, "org.freedesktop.Notifications"),
             "fake_notifications.py did not own org.freedesktop.Notifications",
+            10,
+        )
+        helpers.append(subprocess.Popen(["python3", f"{HERE}/fake_control_center.py"]))
+        wait_until(
+            lambda: has_owner(session, "os.athanor.ControlCenter1"),
+            "fake_control_center.py did not own os.athanor.ControlCenter1",
             10,
         )
     shelld = None

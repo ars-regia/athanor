@@ -2,6 +2,7 @@
 //! each preset holds, what logind offers, the time zone, and the state of NetworkManager,
 //! BlueZ and UPower, and the trust shield. The binary draws it.
 
+pub mod badge;
 pub mod clock;
 pub mod control_center;
 pub mod dbusmenu;

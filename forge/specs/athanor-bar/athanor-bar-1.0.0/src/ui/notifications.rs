@@ -1,7 +1,8 @@
 //! The notifications module (doc_bar.md BR3, BR4): the service that talks to
-//! athanor-shelld's private interface, the card every notification is drawn as, and the
-//! list popover with "Clear all" and do not disturb. One service per bar (`Bar::notifications`):
-//! the button on every surface reads it, so two outputs never mean two `List` calls.
+//! athanor-shelld's private interface, the card every popup is drawn as, and the button
+//! that shows the unread count and opens the notification center of athanor-control-center.
+//! One service per bar (`Bar::notifications`): the button on every surface reads it, so two
+//! outputs never mean two `List` calls.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
@@ -10,14 +11,14 @@ use std::time::{Duration, Instant};
 
 use athanor_bar::control_center;
 use athanor_bar::fullscreen::report;
+use athanor_bar::badge;
 use athanor_bar::notices::{self, Held, Notice, Picture, WIRE_SIGNATURE};
-use athanor_bar::order::Module;
 use athanor_bar::popups::{target_output, Popups};
-use gtk4::accessible::{Property, Relation};
+use gtk4::accessible::Property;
 use gtk4::prelude::*;
 use gtk4::{gdk, gio, glib, pango};
 
-use super::popup::{switch_row, Popup};
+use super::control_center::toggle_notifications;
 use super::popups::Window;
 use super::{Bar, Changed, ModuleUi};
 use crate::i18n::{tr, tr_with};
@@ -37,7 +38,6 @@ const DISMISSED: u32 = 2;
 const PICTURE_PX: i32 = 32;
 const CARD_WIDTH: i32 = 360;
 const TEXT_CHARS: i32 = 36;
-const LIST_HEIGHT: i32 = 480;
 const FALLBACK_ICON: &str = "dialog-information-symbolic";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,8 +71,6 @@ pub struct Service {
     fullscreen: Cell<Option<(bool, bool)>>,
     ticking: Cell<bool>,
     last_tick: Cell<Option<Instant>>,
-    /// `ATHANOR_BAR_OPEN=notifications` came before the list: open once it is live.
-    pending_open: Cell<bool>,
     /// One popups window per output, made when that output first shows a popup, then only
     /// emptied, never moved (see `super::popups`).
     windows: RefCell<Vec<Window>>,
@@ -140,7 +138,6 @@ impl Service {
                 fullscreen: Cell::new(None),
                 ticking: Cell::new(false),
                 last_tick: Cell::new(None),
-                pending_open: Cell::new(false),
                 windows: RefCell::new(Vec::new()),
                 placed: RefCell::new(HashMap::new()),
                 control_center_open: Cell::new(false),
@@ -328,15 +325,6 @@ impl Service {
         self.read_dnd();
         self.fullscreen.set(None);
         self.report_fullscreen();
-        if self.pending_open.replace(false) {
-            let bar = self.bar.clone();
-            // After this turn of the main loop, so the button is allocated when it opens.
-            glib::idle_add_local_once(move || {
-                if let Some(bar) = bar.upgrade() {
-                    bar.open_module(Module::Notifications);
-                }
-            });
-        }
     }
 
     fn signal(&self, name: &str, parameters: &glib::Variant) {
@@ -375,6 +363,11 @@ impl Service {
             "Closed" => match parameters.get::<(u32, u32)>() {
                 Some((id, _reason)) => self.closed(id),
                 None => tracing::warn!("athanor-shelld sent Closed with an unexpected type"),
+            },
+            "Read" => match parameters.get::<(Vec<u32>,)>() {
+                // A notification read anywhere leaves the unread list and its popup.
+                Some((ids,)) => ids.into_iter().for_each(|id| self.closed(id)),
+                None => tracing::warn!("athanor-shelld sent Read with an unexpected type"),
             },
             "DoNotDisturbChanged" => match parameters.get::<(bool, String, i64)>() {
                 Some((on, _reason, _until)) => self.apply_dnd(on),
@@ -469,21 +462,11 @@ impl Service {
     }
 
     fn call(&self, method: &'static str, args: glib::Variant) {
-        self.call_then(method, args, |_| {});
+        self.call_with(method, args, |_| {}, |_| {});
     }
 
-    /// `call`, then `done` once the daemon accepted it, unless the daemon changed since. A
-    /// refused call redraws, so a switch shows the service's state, not the refused wish.
-    fn call_then(
-        &self,
-        method: &'static str,
-        args: glib::Variant,
-        done: impl FnOnce(&Service) + 'static,
-    ) {
-        self.call_with(method, args, done, |_| {});
-    }
-
-    /// `call_then`, and `failed` when the daemon refused or did not answer.
+    /// `call`, then `done` once the daemon accepted it, unless the daemon changed since, and
+    /// `failed` when it refused or did not answer. A refused call redraws.
     fn call_with(
         &self,
         method: &'static str,
@@ -552,15 +535,6 @@ impl Service {
             })
             .unwrap_or_default();
         self.call("InvokeAction", (id, key, token).to_variant());
-    }
-
-    /// The daemon answers with `DoNotDisturbChanged` to every change, and the bar takes the
-    /// state the same way for its own: once the daemon accepted it, so that a refused call
-    /// leaves the switch as the daemon has it.
-    fn set_dnd(&self, on: bool) {
-        self.call_then("SetDoNotDisturb", (on,).to_variant(), move |service| {
-            service.apply_dnd(on);
-        });
     }
 
     /// The do-not-disturb state the daemon reports: the switch, and the popups it ends.
@@ -640,20 +614,6 @@ impl Service {
             |_| {},
             |service| service.fullscreen.set(None),
         );
-    }
-
-    fn clear_all(&self) {
-        let ids: Vec<u32> = self
-            .held
-            .borrow()
-            .all()
-            .iter()
-            .map(|notice| notice.id)
-            .collect();
-        for id in ids {
-            self.close(id, DISMISSED);
-        }
-        self.changed();
     }
 
     fn vanished(&self) {
@@ -777,17 +737,21 @@ impl Service {
         self.dnd.get()
     }
 
-    /// Every notification held, oldest first. At most `notices::CAPACITY`.
-    pub(super) fn notices(&self) -> Vec<Notice> {
-        self.held.borrow().all().to_vec()
+    /// Marks `id` read. The daemon answers with `Read`, which takes it off the unread list
+    /// and off the screen.
+    pub(super) fn mark_read(&self, id: u32) {
+        self.call("MarkRead", (vec![id],).to_variant());
     }
 
-    pub(super) fn waiting(&self) -> usize {
-        self.popups.borrow().waiting()
-    }
-
-    pub(super) fn open_when_listed(&self) {
-        self.pending_open.set(true);
+    /// How many notifications await reading: the daemon's unread list, less the transient
+    /// ones, which never reach the notification center (BR4).
+    pub(super) fn unread(&self) -> usize {
+        self.held
+            .borrow()
+            .all()
+            .iter()
+            .filter(|notice| !notice.transient)
+            .count()
     }
 }
 
@@ -883,12 +847,6 @@ fn picture(notice: &Notice) -> gtk4::Image {
     image
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Place {
-    Popup,
-    List,
-}
-
 fn text_label(text: &str, lines: i32) -> gtk4::Label {
     // A plain label: `use-markup` stays false, so markup in the text shows as text (SH12).
     let label = gtk4::Label::new(Some(text));
@@ -901,17 +859,13 @@ fn text_label(text: &str, lines: i32) -> gtk4::Label {
     label
 }
 
-/// One notification. A popup is an `alert`, so a screen reader reads it (BR4); in the list
-/// it is a group. Its name is the summary.
-pub(super) fn card(service: &Rc<Service>, notice: &Notice, place: Place) -> gtk4::Box {
-    let role = match place {
-        Place::Popup => gtk4::AccessibleRole::Alert,
-        Place::List => gtk4::AccessibleRole::Group,
-    };
+/// One notification as a popup. It is an `alert`, so a screen reader reads it (BR4); its
+/// name is the summary. A click on it marks it read.
+pub(super) fn card(service: &Rc<Service>, notice: &Notice) -> gtk4::Box {
     let card = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Vertical)
         .spacing(8)
-        .accessible_role(role)
+        .accessible_role(gtk4::AccessibleRole::Alert)
         .build();
     card.add_css_class("notification-card");
     if notice.critical() {
@@ -927,11 +881,9 @@ pub(super) fn card(service: &Rc<Service>, notice: &Notice, place: Place) -> gtk4
 
     let text = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
     text.set_hexpand(true);
-    if place == Place::Popup {
-        let app = text_label(&app_name(notice), 1);
-        app.add_css_class("bar-popover-note");
-        text.append(&app);
-    }
+    let app = text_label(&app_name(notice), 1);
+    app.add_css_class("bar-popover-note");
+    text.append(&app);
     let summary = text_label(&title, 2);
     summary.add_css_class("bar-popover-title");
     text.append(&summary);
@@ -939,6 +891,14 @@ pub(super) fn card(service: &Rc<Service>, notice: &Notice, place: Place) -> gtk4
         text.append(&text_label(&notice.body, 4));
     }
     let id = notice.id;
+    let read = gtk4::GestureClick::new();
+    let weak = Rc::downgrade(service);
+    read.connect_released(move |_, _, _, _| {
+        if let Some(service) = weak.upgrade() {
+            service.mark_read(id);
+        }
+    });
+    card.add_controller(read);
     if notice.has_default {
         let click = gtk4::GestureClick::new();
         let weak = Rc::downgrade(service);
@@ -988,113 +948,43 @@ pub(super) fn card(service: &Rc<Service>, notice: &Notice, place: Place) -> gtk4
     card
 }
 
-struct Inner {
-    popup: Popup,
+struct NotificationsUi {
+    button: gtk4::Button,
     image: gtk4::Image,
     badge: gtk4::Label,
-    empty: gtk4::Label,
-    scroller: gtk4::ScrolledWindow,
-    groups: gtk4::Box,
-    clear: gtk4::Button,
-    dnd: gtk4::Switch,
-    /// The switch is being set from the service, not by the user.
-    updating: Cell<bool>,
-}
-
-/// The list, built only while the popover shows: a hundred cards on every surface all the
-/// time would cost memory for nothing (item 17).
-fn fill(inner: &Inner, service: &Rc<Service>) {
-    while let Some(child) = inner.groups.first_child() {
-        inner.groups.remove(&child);
-    }
-    // A transient notification never reaches the list (BR4).
-    let listed: Vec<Notice> = service
-        .notices()
-        .into_iter()
-        .filter(|notice| !notice.transient)
-        .collect();
-    inner.empty.set_visible(listed.is_empty());
-    inner.scroller.set_visible(!listed.is_empty());
-    inner.clear.set_sensitive(!listed.is_empty());
-    for group in notices::groups(&listed) {
-        let Some(first) = group.first() else {
-            continue;
-        };
-        let heading = gtk4::Label::new(Some(&app_name(first)));
-        heading.add_css_class("bar-popover-note");
-        heading.set_xalign(0.0);
-        let group_box = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(6)
-            .accessible_role(gtk4::AccessibleRole::Group)
-            .build();
-        group_box.update_relation(&[Relation::LabelledBy(&[heading.upcast_ref()])]);
-        group_box.append(&heading);
-        for notice in group {
-            group_box.append(&card(service, notice, Place::List));
-        }
-        inner.groups.append(&group_box);
-    }
-}
-
-struct NotificationsUi {
-    inner: Rc<Inner>,
     service: Rc<Service>,
 }
 
 impl ModuleUi for NotificationsUi {
     fn widget(&self) -> gtk4::Widget {
-        self.inner.popup.button.clone().upcast()
+        self.button.clone().upcast()
     }
 
     fn refresh(&self, _bar: &Rc<Bar>, changed: Changed) {
         if changed != Changed::Notifications {
             return;
         }
-        let inner = &self.inner;
         let live = self.service.live();
-        inner.popup.button.set_visible(live);
+        self.button.set_visible(live);
         if !live {
-            inner.popup.popover.popdown();
             return;
         }
-        let dnd = self.service.dnd();
-        inner.image.set_icon_name(Some(if dnd {
+        self.image.set_icon_name(Some(if self.service.dnd() {
             "notifications-disabled-symbolic"
         } else {
             "preferences-system-notifications-symbolic"
         }));
-        let waiting = self.service.waiting();
-        inner.badge.set_visible(waiting > 0);
-        inner.badge.set_text(&format!("+{waiting}"));
-        let name = if waiting > 0 {
-            tr_with(
-                "Notifications, {count} waiting",
-                "count",
-                &waiting.to_string(),
-            )
-        } else {
-            tr("Notifications")
-        };
-        inner.popup.button.set_tooltip_text(Some(&name));
-        inner
-            .popup
-            .button
-            .update_property(&[Property::Label(&name)]);
-        inner.updating.set(true);
-        inner.dnd.set_active(dnd);
-        inner.updating.set(false);
-        if inner.popup.popover.is_visible() {
-            fill(inner, &self.service);
-        }
+        let unread = self.service.unread();
+        let text = badge::badge_text(unread);
+        self.badge.set_visible(text.is_some());
+        self.badge.set_text(text.as_deref().unwrap_or_default());
+        let name = badge::accessible_name(unread, &tr);
+        self.button.set_tooltip_text(Some(&name));
+        self.button.update_property(&[Property::Label(&name)]);
     }
 
-    fn open(&self, bar: &Rc<Bar>) {
-        if self.service.live() {
-            self.inner.popup.open(bar);
-        } else {
-            self.service.open_when_listed();
-        }
+    fn open(&self, _bar: &Rc<Bar>) {
+        toggle_notifications();
     }
 }
 
@@ -1107,80 +997,18 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     let face = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
     face.append(&image);
     face.append(&badge);
-    let popup = Popup::new(bar, &face, &tr("Notifications"));
-    popup.button.set_visible(false);
-
-    let title = gtk4::Label::new(Some(&tr("Notifications")));
-    title.add_css_class("bar-popover-title");
-    title.set_xalign(0.0);
-    title.set_hexpand(true);
-    let clear = gtk4::Button::with_label(&tr("Clear all"));
-    clear.add_css_class("flat");
-    let header = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    header.append(&title);
-    header.append(&clear);
-    let empty = gtk4::Label::new(Some(&tr("No notifications")));
-    empty.add_css_class("bar-popover-note");
-    let groups = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
-    let scroller = gtk4::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk4::PolicyType::Never)
-        .propagate_natural_height(true)
-        .max_content_height(LIST_HEIGHT)
-        .min_content_width(CARD_WIDTH)
-        .child(&groups)
-        .build();
-    let (dnd_row, dnd) = switch_row(&tr("Do not disturb"));
-    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
-    content.append(&header);
-    content.append(&empty);
-    content.append(&scroller);
-    content.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
-    content.append(&dnd_row);
-    popup.popover.set_child(Some(&content));
-
-    let inner = Rc::new(Inner {
-        popup,
+    let button = gtk4::Button::new();
+    button.set_child(Some(&face));
+    button.add_css_class("bar-button");
+    let name = tr("Notifications");
+    button.set_tooltip_text(Some(&name));
+    button.update_property(&[Property::Label(&name)]);
+    button.set_visible(false);
+    button.connect_clicked(|_| toggle_notifications());
+    Some(Box::new(NotificationsUi {
+        button,
         image,
         badge,
-        empty,
-        scroller,
-        groups,
-        clear,
-        dnd,
-        updating: Cell::new(false),
-    });
-    let (weak_inner, weak_service) = (Rc::downgrade(&inner), Rc::downgrade(&service));
-    inner.popup.popover.connect_show(move |_| {
-        if let (Some(inner), Some(service)) = (weak_inner.upgrade(), weak_service.upgrade()) {
-            fill(&inner, &service);
-        }
-    });
-    let weak_inner = Rc::downgrade(&inner);
-    inner.popup.popover.connect_closed(move |_| {
-        // The cards go with the popover: the list costs nothing while it is closed.
-        if let Some(inner) = weak_inner.upgrade() {
-            while let Some(child) = inner.groups.first_child() {
-                inner.groups.remove(&child);
-            }
-        }
-    });
-    let weak_service = Rc::downgrade(&service);
-    inner.clear.connect_clicked(move |_| {
-        if let Some(service) = weak_service.upgrade() {
-            service.clear_all();
-        }
-    });
-    let (weak_inner, weak_service) = (Rc::downgrade(&inner), Rc::downgrade(&service));
-    inner.dnd.connect_state_set(move |_, on| {
-        if weak_inner
-            .upgrade()
-            .is_some_and(|inner| !inner.updating.get())
-        {
-            if let Some(service) = weak_service.upgrade() {
-                service.set_dnd(on);
-            }
-        }
-        glib::Propagation::Proceed
-    });
-    Some(Box::new(NotificationsUi { inner, service }))
+        service,
+    }))
 }

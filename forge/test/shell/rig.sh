@@ -32,7 +32,7 @@
 #   rig.sh launcher-e2e     athanor-launcher in seven scenes, confined: READY, calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch, accessible tree, a command and a refused one
 #   rig.sh launcher-window-preview   the window row's preview carries the window's thumbnail
 #   rig.sh chooser-e2e      press a preset in the chooser and wait until the bar and the dock draw it (run build-bar and build-dock first)
-#   rig.sh surface <greeter|layout (run build-bar and build-dock first)|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling|bar-popups|bar-notifications|bar-tray|bar-network|bar-bluetooth|bar-audio|bar-battery|bar-shield|dock|launcher (run build-launcher first)>  capture every case of a surface and compare with the goldens
+#   rig.sh surface <greeter|layout (run build-bar and build-dock first)|chooser|bar|bar-power|bar-input|bar-accessibility|bar-tiling|bar-popups|bar-tray|bar-network|bar-bluetooth|bar-audio|bar-battery|bar-shield|dock|launcher (run build-launcher first)>  capture every case of a surface and compare with the goldens
 #   rig.sh update-goldens <name>   replace the goldens with a fresh capture, deliberately
 set -euo pipefail
 
@@ -195,11 +195,9 @@ capture_bar() { # capture_bar <surface>
     bar) preset=bar panel=bottom dock=- session+=(--window) ;;
     bar-power) open=power ;;
     bar-input) open=input-source ;;
-    bar-calendar) open=clock ;;
     bar-accessibility) open=accessibility ;;
     bar-tiling) open=tiling ;;
     bar-popups) session+=(--notifications) ;;
-    bar-notifications) open=notifications session+=(--notifications) ;;
     bar-tray)
         require athanor-shelld build-shelld
         open=tray session+=(--tray)
@@ -709,7 +707,7 @@ surface | update-goldens)
     greeter) capture_greeter ;;
     layout) capture_layout ;;
     chooser) capture_chooser ;;
-    bar | bar-power | bar-input | bar-calendar | bar-accessibility | bar-tiling | bar-popups | bar-notifications | bar-tray | bar-network | bar-bluetooth | bar-audio | bar-battery | bar-shield) capture_bar "$surface" ;;
+    bar | bar-power | bar-input | bar-accessibility | bar-tiling | bar-popups | bar-tray | bar-network | bar-bluetooth | bar-audio | bar-battery | bar-shield) capture_bar "$surface" ;;
     dock) capture_dock ;;
     launcher) capture_launcher ;;
     *)

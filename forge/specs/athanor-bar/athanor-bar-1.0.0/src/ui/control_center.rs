@@ -14,6 +14,31 @@ use super::bus::{call, TIMEOUT_MS};
 use super::{Bar, Changed, ModuleUi};
 use crate::i18n::tr;
 
+/// Asks the control center to show or hide its notification center. The bus starts the
+/// program when it is down; a call that fails, for the name unknown or any other reason, is
+/// logged.
+pub(super) fn toggle_notifications() {
+    glib::spawn_future_local(async {
+        let result = async {
+            let bus = gio::bus_get_future(gio::BusType::Session).await?;
+            call(
+                &bus,
+                NAME,
+                PATH,
+                NAME,
+                "ToggleNotifications",
+                None,
+                TIMEOUT_MS,
+            )
+            .await
+        }
+        .await;
+        if let Err(err) = result {
+            tracing::error!(error = %err, "the control center did not toggle its notification center");
+        }
+    });
+}
+
 struct ControlCenterUi {
     button: gtk4::Button,
 }

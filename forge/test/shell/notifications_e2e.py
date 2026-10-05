@@ -1,11 +1,14 @@
 #!/usr/bin/python3
 """notifications_e2e.py - package 2b.3's notifications in a scene (doc_bar.md BR4, BR9,
-items 9, 10, 17): the bar against fake_notifications.py, driven through AT-SPI the way
-a user drives it and through Notify the way an application does. Runs as scene.sh's
+items 9, 10, 17): the bar against fake_notifications.py and fake_control_center.py, driven
+through AT-SPI the way a user drives it and through Notify the way an application does. The
+list and the calendar are the control center's: the bar's button and clock call
+ToggleNotifications, and the button counts the unread. Runs as scene.sh's
 RIG_HOLD, with bar_session.py --notifications --respawn as the client. Prints one line per
 check and exits 1 if any fails.
 """
 
+import json
 import os
 import re
 import signal
@@ -17,6 +20,7 @@ from pathlib import Path
 from gi.repository import Gio, GLib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from wl_pointer import VirtualPointer  # noqa: E402
 from atspi_check import find_application, problems, walk  # noqa: E402
 from bar_e2e import (  # noqa: E402
     PID_FILE,
@@ -27,7 +31,6 @@ from bar_e2e import (  # noqa: E402
     buttons_matching,
     check,
     failures,
-    labelled,
     press,
     pss_kb,
     wait_for,
@@ -35,6 +38,10 @@ from bar_e2e import (  # noqa: E402
 
 # GTK exports AccessibleRole::Alert as ATSPI_ROLE_NOTIFICATION; older AT-SPI names it alert.
 ALERT_ROLES = {"notification", "alert"}
+CLOCK = re.compile(r"^\w+ \d+ \w+ \d{4}, ")
+UNREAD = re.compile(r"^Notifications, (\d+) unread$")
+# The layer surface's margin from the end edge (athanor-bar's ui/popups.rs MARGIN).
+POPUP_MARGIN = 8
 FIFO = "/tmp/athanor-notification-fifo.png"
 LONG = "x" * 100_000
 
@@ -61,16 +68,124 @@ def never(seen, seconds):
     return not seen()
 
 
-def toggle_list(app, Atspi, open_):
-    """Presses the notification button, then waits until the list is `open_`. GTK clicks a
-    button activated through AT-SPI only once its 250 ms press animation ends, so the press
-    returning says nothing yet about the popover."""
-    opener = buttons_matching(app, Atspi, re.compile(r"^Notifications"))
+def cc_calls():
+    """The calls fake_control_center.py logged, oldest first."""
+    path = Path("/out") / f"{os.environ['RIG_TAG']}-control-center.log"
+    return path.read_text(encoding="utf-8").splitlines()
+
+
+def toggles_center(app, Atspi, opener):
+    """Presses `opener`, a button, and waits until the control center logged one more
+    ToggleNotifications. GTK clicks a button activated through AT-SPI only once its 250 ms
+    press animation ends, so the press returning says nothing yet about the call."""
+    before = cc_calls().count("ToggleNotifications")
     return (
         bool(opener)
         and press(app, Atspi, opener[0].get_name())
-        and wait_for(lambda: bool(buttons(app, Atspi, "Clear all")) == open_, 3)
+        and wait_for(lambda: cc_calls().count("ToggleNotifications") == before + 1, 3)
     )
+
+
+def unread(app, Atspi):
+    """The number the notifications button says are unread, 0 for its plain name."""
+    for button in buttons_matching(app, Atspi, re.compile(r"^Notifications")):
+        found = UNREAD.match(button.get_name())
+        return int(found.group(1)) if found else 0
+    return None
+
+
+def click(app, Atspi, name, done):
+    """Clicks the popup called `name` with a virtual pointer until `done()` holds: a click
+    on the card is no AT-SPI action, so the way a user clicks it is the only one. GTK
+    reports a card's position inside its window, and the layer surface's own place on the
+    output is the compositor's, so the column comes from the surface being anchored to the
+    end corner and the row is searched down from under the panel."""
+    node = next(
+        (
+            node
+            for node in walk_nodes(app, Atspi)
+            if node.get_role_name() in ALERT_ROLES and node.get_name() == name
+        ),
+        None,
+    )
+    if node is None:
+        return False
+    box = node.get_extents(Atspi.CoordType.WINDOW)
+    window = node
+    while window.get_parent() is not None and window.get_parent().get_role_name() != "application":
+        window = window.get_parent()
+    shell = window.get_extents(Atspi.CoordType.WINDOW)
+    # The popups sit under the panel (a float panel keeps its own margin out of the way), and
+    # a click on the panel would open a popover that hides them: start below its frame.
+    panel = max(
+        frame.get_extents(Atspi.CoordType.WINDOW).height
+        for frame in (app.get_child_at_index(i) for i in range(app.get_child_count()))
+        if frame is not None and frame != window
+    )
+    width, height = output_size()
+    x = width - POPUP_MARGIN - shell.width + box.x + box.width // 2
+    pointer = VirtualPointer(sway_display(), width, height)
+    try:
+        for y in range(panel + POPUP_MARGIN + box.y + box.height // 2, 400, box.height // 2):
+            pointer.move(x, y)
+            pointer.click()
+            if wait_for(done, 0.6):
+                return True
+    finally:
+        pointer.close()
+    return False
+
+
+def output_size():
+    outputs = json.loads(
+        subprocess.run(
+            ["swaymsg", "-t", "get_outputs", "-r"], check=True, capture_output=True
+        ).stdout
+    )
+    return outputs[0]["rect"]["width"], outputs[0]["rect"]["height"]
+
+
+def sway_display():
+    """The Wayland socket of the headless sway, the oldest of the scene (scene.sh)."""
+    runtime = Path(os.environ["XDG_RUNTIME_DIR"])
+    return min(runtime.glob("wayland-[0-9]"), key=lambda path: path.stat().st_mtime).name
+
+
+def walk_nodes(accessible, Atspi):
+    """Every accessible below `accessible`, itself included."""
+    found = [accessible]
+    for index in range(accessible.get_child_count()):
+        child = accessible.get_child_at_index(index)
+        if child is not None:
+            found.extend(walk_nodes(child, Atspi))
+    return found
+
+
+def daemon_call(method, parameters=None, reply=None):
+    session = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    return session.call_sync(
+        "org.freedesktop.Notifications",
+        "/os/athanor/Notifications1",
+        "os.athanor.Notifications1",
+        method,
+        parameters,
+        GLib.VariantType(reply) if reply else None,
+        Gio.DBusCallFlags.NONE,
+        -1,
+        None,
+    )
+
+
+def daemon_unread():
+    """The ids the fake daemon lists as unread, with whether each is transient."""
+    (listed,) = daemon_call(
+        "List", None, "(a(ussssa(sus)a(ss)bybbbxsssuuayuubibs))"
+    ).unpack()
+    return [(row[0], row[9]) for row in listed]
+
+
+def daemon_mark_read(ids):
+    daemon_call("MarkRead", GLib.Variant("(au)", (list(ids),)))
 
 
 def notify(summary, *, expire=0, hints=None, icon="", actions=()):
@@ -152,15 +267,17 @@ def main():
     def shows(name):
         return lambda: name in (alerts(app, Atspi) or [])
 
-    def in_list(name):
-        """A showing node named `name`: with the list open the popups are hidden, so it is
-        a card of the list."""
+    def notifications_button():
+        return buttons_matching(app, Atspi, re.compile(r"^Notifications"))
+
+    def badge(text):
+        """A showing label of the notifications button with exactly `text`."""
 
         def seen():
             try:
                 return any(
-                    node_name == name and shown
-                    for _, node_name, shown, _ in walk(app, Atspi)
+                    role == "label" and name == text and shown
+                    for role, name, shown, _ in walk(app, Atspi)
                 )
             except GLib.Error:
                 return False
@@ -180,9 +297,10 @@ def main():
         repr(alerts(app, Atspi)),
     )
     check(
-        "the button says how many wait",
-        wait_for(lambda: buttons(app, Atspi, "Notifications, 1 waiting"), 3),
+        "the button says how many are unread (F-bar-08)",
+        wait_for(lambda: buttons(app, Atspi, "Notifications, 4 unread"), 3),
     )
+    check("the badge shows the count", wait_for(badge("4"), 3))
     check("the newest shows", shows("Download complete")())
     check("a waiting one does not show yet", not shows("Backup finished")())
 
@@ -242,18 +360,27 @@ def main():
         wait_for(logged(f"Close {transient} 1"), 5),
     )
 
-    check("the list opens", toggle_list(app, Atspi, True))
-    notify("While the list is open")
     check(
-        "no popup shows over an open popover (BR6)",
-        never(shows("While the list is open"), 2),
+        "the button calls ToggleNotifications",
+        toggles_center(app, Atspi, notifications_button()),
+        repr(cc_calls()),
     )
-    check("the list closes", toggle_list(app, Atspi, False))
+    notify("While the control center is open")
     check(
-        "the popup shows once the popover closed",
-        wait_for(shows("While the list is open"), 3),
+        "no popup shows over the open control center (BR6, CC9)",
+        never(shows("While the control center is open"), 2),
+    )
+    check(
+        "the clock calls ToggleNotifications",
+        toggles_center(app, Atspi, buttons_matching(app, Atspi, CLOCK)),
+        repr(cc_calls()),
+    )
+    check(
+        "the popup shows once the control center closed",
+        wait_for(shows("While the control center is open"), 3),
     )
 
+    before = unread(app, Atspi)
     short = notify("Short-lived", expire=1000)
     check("a popup with a timeout shows", wait_for(shows("Short-lived"), 3))
     check("its popup ends", wait_for(lambda: not shows("Short-lived")(), 5))
@@ -261,37 +388,28 @@ def main():
         "an ended popup does not close the notification",
         not logged(f"Close {short} 1")() and not logged(f"Close {short} 2")(),
     )
-    check("the list opens again", toggle_list(app, Atspi, True))
     check(
-        "the ended notification is in the list",
-        wait_for(lambda: buttons(app, Atspi, "Close Short-lived"), 3),
+        "the ended notification stays unread",
+        wait_for(lambda: unread(app, Atspi) == before + 1, 3),
+        f"{before} then {unread(app, Atspi)}",
     )
     nodes = [(role, name, shown) for role, name, shown, _ in walk(app, Atspi)]
     check(
-        "every interactive widget of the open list has a name (BR9)",
+        "every interactive widget of the bar has a name (BR9)",
         not problems(nodes, 7),
         repr(problems(nodes, 7)),
     )
 
-    switches = labelled(app, Atspi, "check box", "Do not disturb")
-    check("the do not disturb switch shows", bool(switches))
-    if switches:
-        switches[0].do_action(0)
-    check("do not disturb reaches the daemon", wait_for(logged("SetDoNotDisturb True"), 3))
-    check("the list closes for the next step", toggle_list(app, Atspi, False))
+    # Do not disturb is the control center's switch now: the daemon is told, the bar follows.
+    daemon_dnd(True)
     notify("Quiet")
     check("do not disturb holds back a normal popup", never(shows("Quiet"), 2))
     notify("Loud", hints={"urgency": GLib.Variant("y", 2)})
     check("a critical popup shows under do not disturb", wait_for(shows("Loud"), 3))
-    check("the list opens for the switch", toggle_list(app, Atspi, True))
-    switches = labelled(app, Atspi, "check box", "Do not disturb")
-    if switches:
-        switches[0].do_action(0)
-    check("do not disturb turns off", wait_for(logged("SetDoNotDisturb False"), 3))
+    daemon_dnd(False)
 
-    check("the list closes before the fullscreen window", toggle_list(app, Atspi, False))
     check(
-        "the bar reports no fullscreen window after the list",
+        "the bar reports no fullscreen window",
         wait_for(logged("ReportFullscreen True False"), 3),
     )
     window = subprocess.Popen(
@@ -318,20 +436,35 @@ def main():
     finally:
         window.terminate()
         window.wait()
-    check("the list opens again for clear all", toggle_list(app, Atspi, True))
-
-    check("clear all", press(app, Atspi, "Clear all"))
+    # F-bar-08: the badge follows the daemon's unread list, and a click on a popup reads it.
+    daemon_mark_read(id_ for id_, _ in daemon_unread())
     check(
-        "the list is empty afterwards",
-        wait_for(
-            lambda: any(
-                name == "No notifications" and shown
-                for _, name, shown, _ in walk(app, Atspi)
-            ),
-            3,
-        ),
+        "with nothing unread the button has its plain name and no badge",
+        wait_for(lambda: buttons(app, Atspi, "Notifications"), 3),
     )
-    check("the list closes before the restart", toggle_list(app, Atspi, False))
+    first = notify("Unread one")
+    second = notify("Unread two")
+    check(
+        "the badge shows 2 after two Notify",
+        wait_for(badge("2"), 3) and wait_for(lambda: buttons(app, Atspi, "Notifications, 2 unread"), 3),
+    )
+    daemon_mark_read([first, second])
+    check(
+        "the badge is 0 after MarkRead",
+        wait_for(lambda: buttons(app, Atspi, "Notifications"), 3) and not badge("2")(),
+    )
+    check("a read popup leaves the screen", wait_for(lambda: not shows("Unread one")(), 3))
+    clicked = notify("Click to read")
+    check("the popup to click shows", wait_for(shows("Click to read"), 3))
+    check(
+        "a click on a popup marks it read",
+        click(app, Atspi, "Click to read", logged(f"MarkRead {clicked}")),
+    )
+    check("and it leaves the screen", wait_for(lambda: not shows("Click to read")(), 3))
+    check(
+        "and the button counts none unread",
+        wait_for(lambda: buttons(app, Atspi, "Notifications"), 3),
+    )
 
     # Item 9, the rig's half: the bar restarts and fetches the list again.
     os.kill(pid, signal.SIGKILL)
@@ -362,12 +495,11 @@ def main():
         wait_for(logged(f"Close {quiet} 1"), 5),
     )
     if app is not None:
-        check("the list opens after the second restart", toggle_list(app, Atspi, True))
         check(
-            "the closed transient notification has no card in the list",
-            never(in_list("Transient while away"), 2),
+            "the closed transient notification is not counted as unread",
+            wait_for(lambda: unread(app, Atspi) == len(daemon_unread()), 3),
+            f"{unread(app, Atspi)} against {daemon_unread()}",
         )
-        check("the list closes at the end", toggle_list(app, Atspi, False))
     daemon_dnd(False)
 
     text = client_log.read_text(encoding="utf-8")

@@ -1,12 +1,14 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        6%{?dist}
+Release:        7%{?dist}
 Summary:        The Athanor bar
 License:        MIT
 
 BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gtk4-layer-shell-devel pulseaudio-libs-devel binutils python3 gettext
 Requires:       gtk4 gtk4-layer-shell athanor-calmo athanor-shelld
+# The notifications button and the clock open the notification center that lives there.
+Requires:       athanor-control-center
 # The shield asks os.athanor.Update1.State(), which athanor-update serves from 1.0.0-2; the
 # local-changes reason it may publish exists from 1.0.0-4.
 Requires:       athanor-update >= 1.0.0-4
@@ -70,6 +72,11 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
+* Mon Oct 05 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
+- The notification list and the calendar leave the bar: the notifications button and the clock
+  open the notification center of athanor-control-center (ToggleNotifications). The button
+  shows the number of unread notifications, and a click on a popup marks it read.
+
 * Mon Oct 05 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
 - The control center's button, last of the status row and shown only while os.athanor.ControlCenter1
   is installed; the notification popups stay hidden while the control center is open.

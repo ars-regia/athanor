@@ -31,9 +31,9 @@ LOCALES = {
 SURFACES = {
     "greeter": {"variants": ("light", "dark"), "scales": ("1.0", "1.5")},
     "chooser": {"variants": ("light", "dark"), "scales": ("1.0", "1.5")},
-    # doc_bar.md, BR9: the bar, and the popovers of power, input source, calendar,
-    # accessibility and tiling; the notification popups, the notification list and a
-    # tray menu (2b.3); the popovers of network, Bluetooth, audio and battery (2b.4); and
+    # doc_bar.md, BR9: the bar, and the popovers of power, input source, accessibility and
+    # tiling; the notification popups and a tray menu (2b.3); the notification center
+    # and the calendar are the control center's; the popovers of network, Bluetooth, audio and battery (2b.4); and
     # the shield's sheet (2b.5).
     **{
         surface: {"variants": ("light", "dark"), "scales": ("1.0", "1.5")}
@@ -41,11 +41,9 @@ SURFACES = {
             "bar",
             "bar-power",
             "bar-input",
-            "bar-calendar",
             "bar-accessibility",
             "bar-tiling",
             "bar-popups",
-            "bar-notifications",
             "bar-tray",
             "bar-network",
             "bar-bluetooth",
