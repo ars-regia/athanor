@@ -82,20 +82,20 @@ class Drill(unittest.TestCase):
             (out / "report.md").read_text(),
         )
 
-    def test_empty_patch_set_is_reported_and_clean(self):
+    def declare(self, *names):
+        """Make the spec declare these patches as Patch0, Patch1, ..."""
+        lines = [f"Patch{i}:         {n}" for i, n in enumerate(names)]
+        self.spec.write_text(SPEC + "\n".join(lines) + "\n")
+
+    def test_a_spec_that_declares_no_patches_is_a_clean_empty_set(self):
         status, report, text = self.run_drill()
-        self.assertEqual(
-            (status, report["tag"], report["patches"]), (0, "epoch-1.9.0", [])
-        )
-        self.assertIn("empty", text)
+        self.assertEqual((status, report["tag"], report["patches"]), (0, "epoch-1.9.0", []))
+        self.assertIn("declares no patches", text)
 
     def test_reports_which_patches_apply(self):
-        (self.patches / "0001-keeps.patch").write_text(
-            "--- a/a.txt\n+++ b/a.txt\n@@ -1,3 +1,4 @@\n one\n TWO\n three\n+four\n"
-        )
-        (self.patches / "0002-conflicts.patch").write_text(
-            "--- a/a.txt\n+++ b/a.txt\n@@ -1,3 +1,3 @@\n one\n-two\n+2\n three\n"
-        )
+        (self.patches / "0001-keeps.patch").write_text("--- a/a.txt\n+++ b/a.txt\n@@ -1,3 +1,4 @@\n one\n TWO\n three\n+four\n")
+        (self.patches / "0002-conflicts.patch").write_text("--- a/a.txt\n+++ b/a.txt\n@@ -1,3 +1,3 @@\n one\n-two\n+2\n three\n")
+        self.declare("0001-keeps.patch", "0002-conflicts.patch")
         status, report, text = self.run_drill()
         self.assertEqual(status, 1)
         self.assertEqual(
@@ -103,6 +103,27 @@ class Drill(unittest.TestCase):
             [("0001-keeps.patch", True), ("0002-conflicts.patch", False)],
         )
         self.assertIn("| `0002-conflicts.patch` | no |", text)
+
+    def test_patches_apply_in_spec_index_order_each_on_top_of_the_last(self):
+        # The second patch edits the line the first adds, and its file name sorts first:
+        # in name order it would fail, in index order both apply.
+        (self.patches / "z-first.patch").write_text("--- a/a.txt\n+++ b/a.txt\n@@ -1,3 +1,4 @@\n one\n TWO\n three\n+four\n")
+        (self.patches / "a-second.patch").write_text("--- a/a.txt\n+++ b/a.txt\n@@ -2,3 +2,3 @@\n TWO\n three\n-four\n+FOUR\n")
+        self.declare("z-first.patch", "a-second.patch")
+        status, report, _ = self.run_drill()
+        self.assertEqual(status, 0)
+        self.assertEqual([p["patch"] for p in report["patches"]], ["z-first.patch", "a-second.patch"])
+        self.assertTrue(all(p["applies"] for p in report["patches"]))
+
+    def test_a_missing_spec_patch_directory_or_declared_file_is_an_error(self):
+        out = str(self.tmp / "out")
+        with self.assertRaises(SystemExit):
+            rebase.main([out, "--spec", str(self.tmp / "none.spec"), "--patches", str(self.patches), "--repo", str(self.upstream)])
+        with self.assertRaises(SystemExit):
+            rebase.main([out, "--spec", str(self.spec), "--patches", str(self.tmp / "none"), "--repo", str(self.upstream)])
+        self.declare("0001-absent.patch")
+        with self.assertRaises(SystemExit):
+            self.run_drill()
 
 
 if __name__ == "__main__":

@@ -6,10 +6,12 @@ Usage: rebase.py OUT_DIR [--spec FILE] [--patches DIR] [--repo URL] [--tag TAG]
 Reads the pinned version from forge/specs/cosmic-comp/cosmic-comp.spec, lists upstream's
 `epoch-X.Y.Z` tags, picks the newest stable one (the pinned one when nothing is newer, which
 still proves the set applies), checks that tag out and applies the patches of
-forge/specs/cosmic-comp/SOURCES in file-name order, as the spec's %autosetup does: each patch
-on top of those before it. A patch that fails is reported and left out; the rest are still
-tried. Writes OUT_DIR/report.json and OUT_DIR/report.md. Exits 1 when a patch does not apply,
-0 when all apply or the set is empty (doc_compositor.md, CO3).
+forge/specs/cosmic-comp/SOURCES that the spec declares, in the order of its `PatchN:` lines,
+as %autosetup does: each patch on top of those before it. A patch that fails is reported and
+left out; the rest are still tried. Writes OUT_DIR/report.json and OUT_DIR/report.md.
+Exits 1 when a patch does not apply; 0 when all apply, or when the spec declares no patches
+(said so in the report). A missing spec, patch directory or declared patch file is an error
+(exit 1 with a message), never an empty set (doc_compositor.md, CO3).
 """
 
 import argparse
@@ -40,6 +42,22 @@ def pinned_version(spec_text):
     if not m:
         sys.exit("cosmic-comp.spec: Version not found")
     return f"epoch-{m.group(1)}"
+
+
+def spec_patches(spec_text, patches_dir):
+    """The patches the spec declares, in `PatchN:` index order, which is the order
+    %autosetup applies them in. An error when a declared file is not in the directory."""
+    declared = sorted(
+        (int(m.group(1)), m.group(2))
+        for m in re.finditer(r"^Patch(\d+):\s+(\S+)\s*$", spec_text, re.M)
+    )
+    paths = [patches_dir / name for _, name in declared]
+    missing = [p.name for p in paths if not p.is_file()]
+    if missing:
+        sys.exit(
+            f"declared in the spec but absent from {patches_dir}: {', '.join(missing)}"
+        )
+    return paths
 
 
 def select_tag(tags, pinned):
@@ -89,7 +107,10 @@ def apply_patches(src, patches):
 def render(tag, pinned, newer, rows):
     head = f"cosmic-comp rebase drill: {len(rows)} patch(es) on `{tag}` (pinned `{pinned}`, {'a newer tag' if newer else 'no newer tag upstream'})"
     if not rows:
-        return head + "\n\nThe patch set is empty: there is nothing to rebase.\n"
+        return (
+            head
+            + "\n\nThe spec declares no patches: the set is empty and there is nothing to rebase.\n"
+        )
     lines = [head, "", "| Patch | Applies |", "| --- | --- |"]
     lines += [f"| `{r['patch']}` | {'yes' if r['applies'] else 'no'} |" for r in rows]
     for r in rows:
@@ -107,12 +128,19 @@ def main(argv):
     ap.add_argument("--tag", help="try this tag instead of the newest one")
     args = ap.parse_args(argv)
 
-    pinned = pinned_version(args.spec.read_text())
+    # A missing spec or patch directory is an error, not an empty set: the drill would
+    # otherwise report a green "nothing to rebase" for a repository it could not read.
+    if not args.spec.is_file():
+        sys.exit(f"spec not found: {args.spec}")
+    if not args.patches.is_dir():
+        sys.exit(f"patch directory not found: {args.patches}")
+    spec_text = args.spec.read_text()
+    pinned = pinned_version(spec_text)
     if args.tag:
         tag, newer = args.tag, version_of(args.tag) > version_of(pinned)
     else:
         tag, newer = select_tag(remote_tags(args.repo), pinned)
-    patches = sorted(args.patches.glob("*.patch"))
+    patches = spec_patches(spec_text, args.patches)
 
     with tempfile.TemporaryDirectory() as tmp:
         src = pathlib.Path(tmp) / "src"
