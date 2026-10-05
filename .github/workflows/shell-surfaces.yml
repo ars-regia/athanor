@@ -12,6 +12,8 @@ on:
       - "system/athanor-i18n/**"
       - "forge/specs/athanor-shelld/**"
       - "forge/specs/athanor-bar/**"
+      - "forge/specs/athanor-control-center/**"
+      - "system/athanor-services/**"
       - "forge/specs/athanor-dock/**"
       - "system/athanor-search/**"
       - "system/athanor-preview/**"
@@ -32,6 +34,8 @@ on:
       - "system/athanor-i18n/**"
       - "forge/specs/athanor-shelld/**"
       - "forge/specs/athanor-bar/**"
+      - "forge/specs/athanor-control-center/**"
+      - "system/athanor-services/**"
       - "forge/specs/athanor-dock/**"
       - "system/athanor-search/**"
       - "system/athanor-preview/**"
@@ -200,6 +204,27 @@ jobs:
             .scratch/shell-rig/notifications-e2e.png
             .scratch/shell-rig/shield-e2e.png
             .scratch/shell-rig/tray-e2e.png
+
+  control-center:
+    name: Control center, build and notification panel end to end
+    needs: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rig image
+        run: bash forge/test/shell/rig.sh build-image
+      - name: Build and test the control center and check the DT_NEEDED order
+        run: bash forge/test/shell/rig.sh build-control-center
+      - name: The notification panel against a fake daemon
+        run: bash forge/test/shell/rig.sh control-center-e2e
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: shell-rig-control-center
+          path: |
+            .scratch/shell-rig/*.log
+            .scratch/shell-rig/control-center-e2e.png
 
   bar-scenes:
     name: Bar scene ${{ matrix.scene }} (12 cases) against the goldens
