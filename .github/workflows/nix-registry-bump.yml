@@ -1,0 +1,50 @@
+name: nixpkgs Registry Bump
+
+# Moves the nixpkgs pin of the system flake registry (forge/specs/athanor-nix-support/bump.py):
+# the head of the pinned release branch, and every six months the next release branch, from
+# the 15th of the month after its release. Its own workflow, branch and PR, like the
+# cosmic-comp bump; the PR is never auto-merged. `schedule` only works from the default
+# branch; by hand on any branch; and on a push of this file, which is also how GitHub
+# registers the workflow outside the default branch.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+  push:
+    branches: [main, iso-v0]
+    paths:
+      - .github/workflows/nix-registry-bump.yml
+
+concurrency:
+  group: nix-registry-bump
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # A PAT: PRs opened with the GITHUB_TOKEN do not trigger the checks.
+      GH_TOKEN: ${{ secrets.KERNEL_BUMP_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          token: ${{ secrets.KERNEL_BUMP_TOKEN }}
+
+      - name: Run bump.py apply
+        run: python3 forge/specs/athanor-nix-support/bump.py apply "$RUNNER_TEMP/bump"
+
+      - name: Branch, commit, PR (never auto-merged)
+        run: forge/specs/azoth/open_bump_pr.sh nix-registry-bump bump/nixpkgs forge/specs/athanor-nix-support "$RUNNER_TEMP/bump" "$GITHUB_REF_NAME"
+
+      - name: Upload what the bump wrote
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nix-registry-bump
+          path: ${{ runner.temp }}/bump
+          if-no-files-found: ignore
