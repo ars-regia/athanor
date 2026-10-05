@@ -38,7 +38,7 @@ firewall --enabled --service=ssh
 services --enabled=sshd
 
 # Disk layout is the installer's choice: no clearpart/part/autopart here, so Anaconda
-# opens its partitioning screen. Accounts are classic: systemd-homed is not enabled.
+# opens its partitioning screen. Accounts are classic: the image disables systemd-homed by preset.
 
 reboot
 

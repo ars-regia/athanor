@@ -183,6 +183,10 @@ RUN systemctl enable tetragon.service systemd-sysext.service athanor-tpm-rollbac
 # (scripts/verify.py shipped forbids enabling it in the sources; this is the image check).
 RUN ! systemctl is-enabled --quiet keylime_agent.service
 
+# Accounts are classic: Fedora's 90-systemd.preset enables homed, and
+# 80-athanor-system.preset disables it before preset-all reads that file.
+RUN ! systemctl is-enabled --quiet systemd-homed.service
+
 # Stage 2 switch (doc_shell.md, section 8, item 2): the COSMIC shell is gone, our shell is
 # enabled for every user, and each bus name it owns has exactly one activation file.
 RUN for pkg in cosmic-panel cosmic-applets cosmic-notifications athanor-layout-translator; do \

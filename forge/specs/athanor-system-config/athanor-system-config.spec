@@ -87,6 +87,11 @@ mkdir -p /etc/yum.repos.d
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-49
+- 80-athanor-system.preset disables systemd-homed.service and
+  systemd-homed-activate.service: Fedora's 90-systemd.preset enables them and preset-all
+  applied it. Accounts stay classic.
+
 * Fri Oct 02 2026 Athanor Forge <forge@athanor.os> - 1.0.0-48
 - athanor-desktop publishes XDG_SESSION_CLASS, read from logind, to the user manager:
   localsearch's unit requires it and never started.
