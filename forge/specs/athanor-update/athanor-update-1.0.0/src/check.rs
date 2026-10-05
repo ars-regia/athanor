@@ -39,6 +39,10 @@ fn deployment(deployed: &Deployed) -> Deployment {
 /// Why the booted image is, or is not, verified. Never a stored answer: the stored
 /// signature object is verified again, against the keys the shipped policy names today.
 fn reason<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, booted: &Deployed) -> Reason {
+    if booted.local_changes {
+        // What runs is the image plus local packages: no signature covers that tree.
+        return Reason::LocalChanges;
+    }
     if !policy.info.shipped {
         return Reason::PolicyNotInForce;
     }
@@ -85,9 +89,10 @@ fn offerable(store: &Store, booted: &Deployed, digest: &str, build_time: i64) ->
 
 /// True when a download would be verified: the booted origin makes bootc apply the host
 /// policy, and that policy demands a signature for the repository the machine follows.
-/// The policy need not be the shipped one: the recovery of UT2 installs a local one.
+/// The policy need not be the shipped one: the recovery of UT2 installs a local one. A
+/// deployment with local changes is never upgraded: bootc refuses it.
 fn enforced(policy: &InForce, booted: &Deployed) -> bool {
-    booted.enforcing && policy.scopes.contains_key(sigobj::repository_of(&booted.image))
+    booted.enforcing && !booted.local_changes && policy.scopes.contains_key(sigobj::repository_of(&booted.image))
 }
 
 fn online_update<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &mut Status) -> (UpdateState, Option<Failure>) {
@@ -195,7 +200,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn deployed(digest: &str, build_time: i64) -> Deployed {
-        Deployed { image: format!("{REPO}:stable"), digest: digest.into(), version: format!("43.{build_time}"), build_time, enforcing: true, download_only: false }
+        Deployed { image: format!("{REPO}:stable"), digest: digest.into(), version: format!("43.{build_time}"), build_time, enforcing: true, download_only: false, local_changes: false }
     }
 
     /// bootc, skopeo, ostree and NetworkManager as one scripted object that records its calls.
@@ -458,6 +463,19 @@ pub(crate) mod tests {
         let state = run(&machine.ctx(&tools, 5000), false).expect("check");
         assert_eq!((state.verified.reason, state.policy.shipped), (Reason::PolicyNotInForce, false));
         assert!(!tools.called("download"), "a permissive policy downloads nothing");
+    }
+
+    #[test]
+    fn a_deployment_with_local_changes_is_published_unverified() {
+        let machine = Machine::new("local-changes", &["real/k1.pub"]);
+        machine.store_signature(SIGNED, "real");
+        // Migrated first, layered afterwards: the origin still enforces the policy.
+        let tools = Fake::booted(Deployed { local_changes: true, ..deployed(SIGNED, 1000) }).offering(&digest(2), 2000);
+        let state = run(&machine.ctx(&tools, 5000), false).expect("check");
+        assert_eq!((state.verified.value, state.verified.reason), (false, Reason::LocalChanges));
+        assert_eq!((state.update, state.last_error), (UpdateState::None, ErrorCode::None));
+        assert_eq!(state.booted.digest, SIGNED);
+        assert!(tools.calls.borrow().is_empty(), "bootc refuses to upgrade it, so nothing is asked: {:?}", tools.calls.borrow());
     }
 
     #[test]

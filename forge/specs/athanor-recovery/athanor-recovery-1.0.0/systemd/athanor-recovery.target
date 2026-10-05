@@ -1,5 +1,0 @@
-[Unit]
-Description=Athanor OS Emergency Recovery Mode Target
-Documentation=https://github.com/hr-mes/athanor-forge
-Requires=athanor-recovery.service
-AllowIsolate=yes

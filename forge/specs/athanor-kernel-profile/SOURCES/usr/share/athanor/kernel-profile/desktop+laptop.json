@@ -6,6 +6,44 @@
   ],
   "schema": 1,
   "settings": {
+    "cmdline": {
+      "amd_pstate": {
+        "decision": "section 6",
+        "value": "active"
+      },
+      "debugfs": {
+        "decision": "section 6",
+        "value": "off"
+      },
+      "efi": {
+        "decision": "section 6",
+        "value": "disable_early_pci_dma"
+      },
+      "ima_policy": {
+        "decision": "D23",
+        "value": "tcb"
+      },
+      "init_on_free": {
+        "decision": "section 6",
+        "value": "1"
+      },
+      "intel_iommu": {
+        "decision": "D16",
+        "value": "on"
+      },
+      "lockdown": {
+        "decision": "section 6",
+        "value": "integrity"
+      },
+      "page_alloc.shuffle": {
+        "decision": "section 6",
+        "value": "1"
+      },
+      "vsyscall": {
+        "decision": "section 6",
+        "value": "none"
+      }
+    },
     "kconfig": {
       "CONFIG_BPF_LSM": {
         "decision": "section 5",
@@ -17,6 +55,10 @@
       },
       "CONFIG_CFI": {
         "decision": "section 5",
+        "value": "y"
+      },
+      "CONFIG_CPU_MITIGATIONS": {
+        "decision": "section 6",
         "value": "y"
       },
       "CONFIG_DEFAULT_TCP_CONG": {
@@ -43,6 +85,14 @@
         "decision": "section 5",
         "value": "y"
       },
+      "CONFIG_IMA_DEFAULT_HASH_SHA256": {
+        "decision": "section 6",
+        "value": "y"
+      },
+      "CONFIG_INIT_ON_ALLOC_DEFAULT_ON": {
+        "decision": "section 6",
+        "value": "y"
+      },
       "CONFIG_INTEGRITY_CA_MACHINE_KEYRING_MAX": {
         "decision": "D40",
         "value": "y"
@@ -61,6 +111,10 @@
       },
       "CONFIG_PREEMPT_LAZY": {
         "decision": "D13",
+        "value": "y"
+      },
+      "CONFIG_RANDOMIZE_KSTACK_OFFSET_DEFAULT": {
+        "decision": "section 6",
         "value": "y"
       },
       "CONFIG_RUST": {
@@ -82,6 +136,10 @@
       "CONFIG_SHUFFLE_PAGE_ALLOCATOR": {
         "decision": "section 5",
         "value": "y"
+      },
+      "CONFIG_SLAB_MERGE_DEFAULT": {
+        "decision": "section 6",
+        "value": "n"
       },
       "CONFIG_X86_64_VERSION": {
         "decision": "D14",

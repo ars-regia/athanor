@@ -39,7 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize core components
     let mut tracer = BpfExecTracer::new().await;
     let ai_bridge = AiDaemonBridge::new().await;
-    let sched_controller = Arc::new(SchedExtController::new().await.unwrap());
+    let sched_controller = Arc::new(SchedExtController::new().await?);
     let cgroup_mgr = CgroupManager::new();
 
     // Register DBus interface for remote AI_SCHED_MAP manipulation

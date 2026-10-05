@@ -557,9 +557,16 @@ def check_docs():
 # 7. panic — il budget attuale è 1 unwrap in 60k righe. Difendilo.
 # --------------------------------------------------------------------------- #
 
-# Valori misurati sul repo il 2026-09-02. Sono un cricchetto: si abbassano,
+# Valori misurati sul repo il 2026-09-30, senza tests/, benches/ ed examples/. Sono un cricchetto: si abbassano,
 # non si alzano. Se un controllo fallisce qui, propaga con `?`.
-BUDGET = {".unwrap()": 0, ".expect(": 2, "panic!(": 2}
+BUDGET = {".unwrap()": 0, ".expect(": 2, "panic!(": 1}
+
+
+def is_test_file(p):
+    """Integration tests, benchmarks and examples are not code that runs in a daemon:
+    a panic there fails a test, it does not end a service."""
+    parts = Path(rel(p)).parts
+    return any(d in parts for d in ("tests", "benches", "examples")) or Path(p).name == "tests.rs"
 
 
 @check("panics", "Il budget di panic in codice non di test non cresce")
@@ -569,6 +576,8 @@ def check_panics():
     where = {k: [] for k in BUDGET}
 
     for p in rust_files():
+        if is_test_file(p):
+            continue
         txt = read(p)
         cut = txt.find("#[cfg(test)]")
         if cut > 0:
@@ -589,6 +598,65 @@ def check_panics():
         elif counts[k] < budget:
             r.note(f"{k}: {counts[k]} (budget {budget}) — abbassa il budget in scripts/verify.py")
 
+    return r
+
+
+# --------------------------------------------------------------------------- #
+# 7b. riga di comando del kernel — le decisioni di doc_kernel_profile.md
+# --------------------------------------------------------------------------- #
+
+# Parameters the kernel profile decided against (docs/architecture/doc_kernel_profile.md,
+# "Command line"). A name ending in a dot is a prefix. profile.toml is the single source of
+# the base command line and kernel_profile.py check holds its generated files to it; this
+# keeps a contradicting parameter out of the manifest and of the variant files beside it.
+REJECTED_PARAMETERS = {
+    "iommu=pt": "identity mapping for every device, against D16 (lazy translation, strict for untrusted ports)",
+    "oops=panic": "the first oops panics before oops_limit is consulted, against D19",
+    "zswap.": "swap is on zram and zswap is off, against D15",
+    "pti=on": "forces page table isolation on CPUs not affected by Meltdown",
+    "amd_iommu=on": "not a parameter of the amd_iommu driver, which logs it as unknown",
+    "lam=on": "not an x86 parameter",
+    "arm64.mte=on": "not an x86 parameter",
+}
+
+# The files that carry the kernel command line: the boot line of azoth and every kargs.d
+# file the image ships (the base one generated from profile.toml, the NVIDIA variants').
+CMDLINE_FILE = "forge/specs/azoth/cmdline"
+KARGS_FILES = [
+    "forge/specs/athanor-kernel-profile/SOURCES/usr/lib/bootc/kargs.d/10-athanor-kernel-profile.toml",
+    "system/nvidia/athanor-nvidia-config/SOURCES/usr/lib/bootc/kargs.d/01-nvidia.toml",
+]
+
+
+def cmdline_problems(root=None):
+    """No place that writes the kernel command line carries a parameter the profile rejects."""
+    root = root or ROOT
+    problems = []
+    found = {}
+
+    def read_site(relative, extract):
+        try:
+            found[relative] = extract(read(root / relative))
+        except (OSError, ValueError, KeyError, tomllib.TOMLDecodeError) as err:
+            problems.append(f"{relative}: cannot read the command line ({err})")
+
+    read_site(CMDLINE_FILE, str.split)
+    for relative in KARGS_FILES:
+        read_site(relative, lambda text: tomllib.loads(text)["kargs"])
+
+    for site, parameters in found.items():
+        for parameter in parameters:
+            for rejected, why in REJECTED_PARAMETERS.items():
+                if parameter == rejected or (rejected.endswith(".") and parameter.startswith(rejected)):
+                    problems.append(f"{site}: {parameter} -> {why}")
+    return problems
+
+
+@check("cmdline", "La riga di comando del kernel non contraddice le decisioni del profilo")
+def check_cmdline():
+    r = Result()
+    for problem in cmdline_problems():
+        r.fail(problem)
     return r
 
 

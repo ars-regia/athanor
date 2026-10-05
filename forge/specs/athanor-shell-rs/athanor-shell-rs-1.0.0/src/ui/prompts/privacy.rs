@@ -1,6 +1,15 @@
 use gtk4::prelude::*;
-use gtk4::{Align, Application, ApplicationWindow, Box as GtkBox, Button, Image, Label, Orientation};
+use gtk4::{gdk, glib, Align, Application, ApplicationWindow, Box as GtkBox, Button, Image, Label, Orientation};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
+
+/// The exit status of the Allow button, and of nothing else. The portal reads it and grants
+/// only on this status: a closed window, a crash, or a second instance that forwarded its
+/// request all end with 0 or a signal, and are denials. It must equal `GRANTED_EXIT_CODE`
+/// in `xdg-desktop-portal-athanor` (`src/prompt.rs`); the two programs are in different
+/// workspaces and cannot share the constant.
+const EXIT_GRANTED: i32 = 100;
+/// The exit status of a refusal: the Deny button, Escape, or the window being closed.
+const EXIT_DENIED: i32 = 1;
 
 pub fn build_ui(app: &Application, request_info: &str) {
     let window = ApplicationWindow::builder()
@@ -82,7 +91,7 @@ pub fn build_ui(app: &Application, request_info: &str) {
         .build();
         
     btn_cancel.connect_clicked(move |_btn| {
-        std::process::exit(1);
+        std::process::exit(EXIT_DENIED);
     });
 
     let btn_approve = Button::builder()
@@ -91,7 +100,7 @@ pub fn build_ui(app: &Application, request_info: &str) {
         .build();
 
     btn_approve.connect_clicked(move |_btn| {
-        std::process::exit(0);
+        std::process::exit(EXIT_GRANTED);
     });
 
     hbox.append(&btn_cancel);
@@ -99,6 +108,19 @@ pub fn build_ui(app: &Application, request_info: &str) {
     vbox.append(&hbox);
 
     window.set_child(Some(&vbox));
+
+    // Closing the window, by any means, is a refusal. Without this the application quits
+    // with status 0 when its last window closes.
+    window.connect_close_request(|_| std::process::exit(EXIT_DENIED));
+
+    let keys = gtk4::EventControllerKey::new();
+    keys.connect_key_pressed(|_, key, _, _| {
+        if key == gdk::Key::Escape {
+            std::process::exit(EXIT_DENIED);
+        }
+        glib::Propagation::Proceed
+    });
+    window.add_controller(keys);
 
     window.present();
 }

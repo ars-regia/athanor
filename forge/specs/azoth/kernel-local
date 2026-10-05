@@ -73,3 +73,12 @@ CONFIG_KMALLOC_PARTITION_RANDOM=y
 CONFIG_EROFS_FS=y
 CONFIG_IKCONFIG=y
 CONFIG_IKCONFIG_PROC=y
+
+# What Fedora already sets and Athanor depends on, said here so that build.sh (check_delta)
+# stops the build if a Fedora bump drops one, instead of a kernel that boots without it.
+# Landlock is how applications confine themselves (athanor-sandbox, doc_kernel_profile.md,
+# section 9); the memory controller is what MemoryMax= and the memory budget of the local
+# inference are made of. That Landlock is also in the active LSM list, and the controller
+# available, is checked at boot (boot/init).
+CONFIG_SECURITY_LANDLOCK=y
+CONFIG_MEMCG=y

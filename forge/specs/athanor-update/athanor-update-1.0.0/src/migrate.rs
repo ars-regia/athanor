@@ -26,6 +26,10 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>) -> Result<Outcome, Failure> {
         return Ok(Outcome::Done);
     }
     let status = ctx.tools.status()?;
+    if status.booted.local_changes {
+        // bootc switch refuses a deployment with local packages; the next boot tries again.
+        return Ok(Outcome::Waiting("local-changes"));
+    }
     if status.booted.enforcing {
         ctx.store.set_migrated().map_err(storage)?;
         return Ok(Outcome::Done);
@@ -102,6 +106,14 @@ mod tests {
         std::fs::remove_file(&machine.policy.etc_registries).expect("unlink");
         let tools = Fake::booted(from_media(1000)).offering(SIGNED, 1000);
         assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Waiting("policy-not-in-force")));
+        assert!(tools.calls.borrow().is_empty() && !machine.store.migrated());
+    }
+
+    #[test]
+    fn a_machine_with_local_changes_waits() {
+        let machine = Machine::new("migrate-local", &["real/k1.pub"]);
+        let tools = Fake::booted(Deployed { local_changes: true, ..from_media(1000) }).offering(SIGNED, 1000);
+        assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Waiting("local-changes")));
         assert!(tools.calls.borrow().is_empty() && !machine.store.migrated());
     }
 

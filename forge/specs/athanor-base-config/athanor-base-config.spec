@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-base-config
 Version:        43.0.0
-Release:        10%{?dist}
+Release:        11%{?dist}
 Summary:        Athanor OS Base Configuration (Systemd, Branding, GPG)
 
 License:        MIT
@@ -66,11 +66,6 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 /usr/lib/systemd/journald.conf.d/*
 /usr/lib/fedora-release
 /usr/lib/os-release
-/usr/lib/bootc/kargs.d/02-hardening.toml
-/usr/lib/bootc/kargs.d/03-ima-evm.toml
-/usr/lib/bootc/kargs.d/04-confidential-compute.toml
-/usr/lib/bootc/kargs.d/05-dma-protection.toml
-/usr/lib/bootc/kargs.d/06-mte-lam.toml
 /etc/grub.d/01_athanor_grub_auth
 /usr/lib/dracut/dracut.conf.d/*
 /usr/lib/systemd/system-preset/*
@@ -81,6 +76,13 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 /usr/share/polkit-1/rules.d/*
 
 %changelog
+* Thu Oct 01 2026 Athanor Forge <forge@athanor.os> - 43.0.0-11
+- Drop kargs.d 02-06: the base kernel command line now comes from athanor-kernel-profile,
+  generated from profile.toml (doc_kernel_profile.md, section 6). Removed with them:
+  wrong or invalid parameters (pti=on, amd_iommu=on, lam=on, arm64.mte=on), oops=panic
+  (D19), parameters that only restate kernel defaults, and the capability-specific
+  mem_encrypt, kvm_amd.sev and kvm_intel.tdx, which belong to roles.
+
 * Thu Sep 24 2026 Athanor Forge <forge@athanor.os> - 43.0.0-10
 - Drop the override of bootc-fetch-apply-updates.service: it called `bootc upgrade --stage`,
   a flag bootc 1.16 does not have. The stock timer stays disabled by athanor-update's preset.
