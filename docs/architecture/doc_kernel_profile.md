@@ -6,7 +6,12 @@ loops that check every statement against kernel v7.2, systemd v258–v262, shim,
 Fedora targeted SELinux policy and the running system. The maintainer approved the policy
 decisions introduced by the verifications on 2026-09-14 and chose the firmware policy of
 D48 on the same day. The specification passed gate P0 on 2026-09-14, with the mechanism of
-the guided reseal (D42) left open for P4b.
+the guided reseal (D42) left open for P4b. Revision 16 (2026-10-05) amends D23 with the
+udisks exception and records the removal of the Gatekeeper (section 10).
+
+Implementation status (2026-10-05): of the blocks of section 15, only P1 is built
+(`athanor-kernel-profile`: `profile.toml` and `athanor-profile-check`). P2 to P7 and the
+spike S1 have not started.
 
 This document is the definitive profile of the Athanor kernel and of the platform layer
 that makes its guarantees real: what the kernel is, how it boots, how its integrity is
@@ -52,10 +57,9 @@ self-hosted KVM runner. Section 15 turns the rest into gated blocks.
 - Roles: desktop, laptop, mesh; a machine may hold several. The mesh is personal: it
   joins the devices of one owner, and it comes after release 1.0 (D26, D38).
 - Areas that require explicit maintainer approval before any code change remain so:
-  the Gatekeeper (`forge/specs/athanor-gatekeeper-rs`), attestation
-  (`system/confidential_computing/athanor-attestation`) and
+  attestation (`system/confidential_computing/athanor-attestation`) and
   `system/athanor-bus-api/src/polkit.rs`. This document fixes requirements and kernel
-  primitives for them, not their code.
+  primitives for them, not their code. The Gatekeeper was removed on 2026-10-05.
 
 **Terms.** *Image*: the signed operating system (`/usr` and its UKI) of one version.
 *Slot*: A/B storage for an image (dm-verity option of D6 only). *Keyslot*: a LUKS2 key slot, unrelated to image slots. *Role*: a runtime profile
@@ -97,7 +101,7 @@ release or block that delivers it, or the S1 outcome it depends on.
 | D20 | SELinux `DEVELOP` and `BOOTPARAM` are switched off only after zero AVC denials in Athanor domains in acceptance; denials from Fedora packages are triaged and documented, and none may affect boot, login or security. Recovery from a denial that breaks the system after boot is the previous image in the boot menu, not `enforcing=0` | a gate that does not depend on upstream policy bugs, and a recovery path that survives the switch | final |
 | D21 | Role addons are built and signed in CI, shipped inside the image and published with it in the same signed source, and installed per UKI in `<uki>.efi.extra.d/` (named without the boot-counting suffix) on the partition that holds the UKI, before the UKI itself | the stub reads global addons only from the volume of the loaded UKI, and a global addon without `.uname` would be used by every UKI, so a fallback boot would run the previous image with the new image's parameters; no second distribution channel | final; revisited with D9 if S1 selects bootc |
 | D22 | Hosting of the delta chunk store | chosen from measured delta sizes, chunk counts and expected traffic | after 1.0 |
-| D23 | Desktop class: no `noexec` on user-writable locations; code in the home runs and is measured by IMA. Protection against downloaded executables is a quarantine prompt in the launcher and file manager, based on the `user.xdg.origin.url` attribute, specified in the desktop specification after 1.0 | `noexec` on `/tmp`, removable media or `~/Downloads` is bypassed by passing the file to an interpreter and breaks `go test`, Java native libraries, PyInstaller and .NET single-file apps, Steam libraries on external drives and AppImages; a prompt outside the kernel is bypassable from a terminal, which is a stated residual risk | final |
+| D23 | Desktop class: no `noexec` on user-writable locations; code in the home runs and is measured by IMA. Protection against downloaded executables is a quarantine prompt in the launcher and file manager, based on the `user.xdg.origin.url` attribute, specified in the desktop specification after 1.0. Exception (maintainer decision, 2026-10-05, `doc_disks.md` DK20 B): removable media and drives mounted by udisks carry `noexec` by default, with a per-mount "Allow running programs" choice; the home and `/tmp` stay without `noexec` | `noexec` on `/tmp`, removable media or `~/Downloads` is bypassed by passing the file to an interpreter and breaks `go test`, Java native libraries, PyInstaller and .NET single-file apps, Steam libraries on external drives and AppImages; a prompt outside the kernel is bypassable from a terminal, which is a stated residual risk | final |
 | D24 | SELinux denies `execmem`, and `execmod` on files of the image, to system domains and to Athanor services, each of which runs in its own declared domain and never in `unconfined_service_t`; exceptions are declared; user applications stay in `unconfined_t` as in Fedora. For a Fedora policy module that grants `execmem`, the module is patched or disabled, recorded per module | restricting user domains would break Electron, Java, .NET, Python ctypes and emulators, not only browsers; a local CIL `deny` rule could remove Fedora's grants but would tie Athanor to Fedora's internal type names | final |
 | D25 | The Fedora 45 rebase starts on the beta as soon as P3 is green; the image that reinstalls the maintainer's desktop is built only on the final release (target 2026-10-20); any block that needs a systemd 262 feature waits for systemd 262 final in Fedora 45 updates | problems surface early, production waits for supported releases | final |
 | D26 | The mesh is personal: its members are the devices of one owner. It provides a private network between them, synchronisation and backup, compute sharing and remote applications; it is not an update channel | the purposes the maintainer set; updates keep one signed source and one verification path | final; delivery after 1.0 (D38) |
@@ -684,16 +688,19 @@ with AND, so alternatives take separate rules.
 - **Root boundary** (D44): the Azoth patch makes `enforce` one-way once enforcing, and
   class-ordered versions prevent activating a weaker signed policy.
 
-**Gatekeeper** (restricted area): leaves the blocking path (`FAN_OPEN_EXEC_PERM`), where a
-hung daemon blocks the system and a dead one disables protection; it may remain an audit
-consumer. Its new specification is written separately and approved before any change.
+**Gatekeeper** (removed on 2026-10-05): its blocking path (`FAN_OPEN_EXEC_PERM`) let a
+hung daemon block the system and a dead one disable protection. Execution control is IPE,
+Landlock and the quarantine prompt of D23; an audit consumer, if ever wanted, starts from
+a new specification.
 No custom BPF LSM is written. `RestrictFileSystemAccess=` is a per-service second layer
 (section 8, prerequisites).
 
 **Application self-confinement:** Landlock (ABI 10 on Linux 7.2, negotiated best-effort)
-is a platform rule; Athanor applications declare filesystem, network and IPC access
-through a shared crate `athanor-sandbox` over the `landlock` crate. Services also use
-systemd sandboxing.
+is a platform rule. Athanor programs confine themselves at start through the `sandbox`
+module of `system/athanor-unit` (`src/sandbox.rs`), over the `landlock` crate: a
+headless unit names the trees it reads and the one directory it writes, a GTK program
+restricts writes only, and a program with no business on the network also denies TCP.
+Services also use systemd sandboxing.
 
 **eBPF without root:** unprivileged BPF stays off. Services receive BPF tokens with
 `PrivateBPF=yes`, `PrivateUsers=` (a token cannot be created in the initial user
@@ -882,8 +889,8 @@ There is no kdump.
    domain calling `mprotect(PROT_EXEC)` on anonymous memory, or mapping a verified file `MAP_PRIVATE`
    with `PROT_WRITE|PROT_EXEC`, or re-enabling `PROT_EXEC` on a private mapping of a
    verified file after writing it, is denied (D24); a service outside the `athanor-io-uring`
-   group cannot create an io_uring instance; an application built with `athanor-sandbox`
-   is refused access outside its declaration; an XDP
+   group cannot create an io_uring instance; an application confined through `athanor-unit`'s
+   `sandbox` module is refused access outside its declaration; an XDP
    program of a delegated service cannot attach to a host interface; with the mesh class
    policy, execution outside the image and anonymous executable memory are denied, while
    the initrd still reaches switch-root after activation and the host shuts down cleanly; with a role set that has no class policy, and with a
@@ -946,8 +953,9 @@ Found on the running system and in the repository (2026-09-14):
   `kernel.yama.ptrace_scope` is 0, and `oops=panic` sets `kernel.panic_on_oops=1` on the
   desktop (D47, D19).
 - **Image content** (P3): `kernel-devel` and `kernel-headers` 6.18 from another vendor,
-  `kernel-uki-virt` with addons unused by the boot path, `bcachefs-tools`,
-  `athanor-tetragon` and a Fedora 41 `bore-sysctl` package are installed.
+  `kernel-uki-virt` with addons unused by the boot path, `athanor-tetragon` and a
+  Fedora 41 `bore-sysctl` package are installed; `bcachefs-tools` left the image on
+  2026-10-05.
 - **Units** (P3): `athanor-journal-seal.service` fails on every boot because Fedora's
   systemd lacks forward-secure sealing: the unit, `Seal=yes` in `99-immutable.conf` and
   its preset line leave the image. `system/Containerfile` enables `tetragon.service`, `athanor-tpm-luks-seal.service`,
@@ -956,7 +964,8 @@ Found on the running system and in the repository (2026-09-14):
   session before P6: `athanor-secure-boot`, `athanor-lvfs-rs`, `athanor-backup`,
   `athanor-recovery`, the TPM rollback units and `athanor-tpm-luks-seal.service`.
   `athanor-gatekeeper-rs`, `athanor-daemon` and `athanor-store-rs` were removed from the
-  image on 2026-09-17 pending redesign; the Gatekeeper and attestation are restricted areas.
+  image on 2026-09-17 pending redesign; the Gatekeeper was removed from the repository on
+  2026-10-05, and attestation is a restricted area.
 - **Snapshots** (P3): `athanor-timewarp` targets bcachefs, which left mainline in Linux
   6.18, and misdetects `/var/home` as tmpfs; `athanor-backup-hourly` fails because
   `athanor-backup` is disabled. Both are ported to btrfs subvolume snapshots.
@@ -974,8 +983,8 @@ Found on the running system and in the repository (2026-09-14):
   exchange, and `athanor-hypervisor-daemon`, also excluded, derives attestation from the
   existence of device files. They are removed or made to fail explicitly (D38).
 - **Retirements** (P3): `athanor-ebpf-sched` (embeds a `candle` AI model) is retired as a scheduler.
-  `.github/workflows/live-patching.yml` builds kernel live patches, which section 5 removes
-  (`LIVEPATCH`); it leaves the repository.
+  `.github/workflows/live-patching.yml`, which built kernel live patches that section 5
+  removes (`LIVEPATCH`), left the repository on 2026-10-05.
 - **Userland flags** (after 1.0, with the Forge pipeline review): `forge/config/rpmmacros`
   includes `-mlam=u48`, an Intel-only feature, for every CPU vendor.
 - **Maintainer machine** (at the reinstallation): Secure Boot is disabled; MokList holds
@@ -1007,7 +1016,7 @@ outside that sequence: it starts after P0, runs alongside P1–P4a, and P4b wait
 | P4a | rebase on Fedora 45, starting on the beta as soon as P3 is green (D25) | full DAG, image and acceptance green; the reinstall image waits for the final release |
 | P4b | the release 1.0 update chain on the mechanism chosen by S1: shim and systemd-boot installation and updates, UKIs with both profiles, verified images (with dm-verity, the root hash signature verified by the kernel; with bootc, the sealed composefs digest), boot counting, update manifests, full-image updates with confirmation before the new default, `/etc` per D39, generic minimal initramfs with `athanor-cpu-check`, installer checks (x86-64-v3, UEFI, shim authority), ESP or XBOOTLDR, integrity, PCR policy and update keys (generated offline by the maintainer), and, if dm-verity is chosen, `DM_VERITY=y` and the compiled IPE boot policy, LUKS per D42 with the pcrlock policy file unit and the guided reseal mechanism, IMA per D46, the systemd-stub of D49 | section 12 items 2, 3 and 4 parts marked P4b and item 5 without its P5 and P6 parts, green in a VM with Secure Boot and swtpm; D46's signed IMA policy, `IMA_LOAD_X509` and `IMA_READ_POLICY` decided; waits for systemd 262 final in Fedora 45 updates (D25) |
 | P5 | roles and their addons per UKI, generator, composition and precedence, `athanor-role`, `IA32_EMULATION_DEFAULT_DISABLED` with the interactive addons | validator over every combination; section 12 items 2, 3, 4 and 5 parts marked P5; acceptance desktop and laptop |
-| P6 | with the dm-verity option: IPE desktop class enforced through the class policy activation unit (section 10), the `user-modules` variant, firmware per D48, class-ordered policy versions, the one-way `enforce` patch (D44), the mesh class policy built and tested; with bootc: the module and firmware measures S1 decides. For both: the D20 gate and SELinux `DEVELOP`/`BOOTPARAM` off; SELinux `execmem` restrictions (D24); BPF token delegation, io_uring group, `athanor-sandbox` crate | section 12 items 3 (AVC) and 6 and the parts of items 4 and 5 marked P6 green, item 6 in the variant of the mechanism chosen by S1 |
+| P6 | with the dm-verity option: IPE desktop class enforced through the class policy activation unit (section 10), the `user-modules` variant, firmware per D48, class-ordered policy versions, the one-way `enforce` patch (D44), the mesh class policy built and tested; with bootc: the module and firmware measures S1 decides. For both: the D20 gate and SELinux `DEVELOP`/`BOOTPARAM` off; SELinux `execmem` restrictions (D24); BPF token delegation, io_uring group, Landlock self-confinement through `athanor-unit` | section 12 items 3 (AVC) and 6 and the parts of items 4 and 5 marked P6 green, item 6 in the variant of the mechanism chosen by S1 |
 | P7 | benchmarks, AutoFDO, closing the provisional decisions | no decision left provisional; report |
 | 1.0 | release gate | the immediate items, S1 and P1–P7 green; the maintainer's hardware matrix run, with untested hardware recorded |
 
