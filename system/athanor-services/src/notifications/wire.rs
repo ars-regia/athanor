@@ -45,10 +45,75 @@ pub struct WireNotification {
     pub reply_placeholder: String,
 }
 
+/// Whether a link target may be opened: only `https:`, `http:` and `mailto:`, in any case.
+#[must_use]
+pub fn is_safe_href(href: &str) -> bool {
+    ["https:", "http:", "mailto:"].iter().any(|scheme| {
+        href.get(..scheme.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(scheme))
+    })
+}
+
+fn escape(text: &str, out: &mut String) {
+    for c in text.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            c => out.push(c),
+        }
+    }
+}
+
+/// Pango markup of body spans, built only from the spans: every text is escaped, and the tags
+/// come from the style bits and from a link target with a safe scheme (a peer is checked
+/// again), never from the text.
+#[must_use]
+pub fn pango_markup(spans: &[(String, u32, String)]) -> String {
+    let mut out = String::new();
+    for (text, style, href) in spans {
+        let link = is_safe_href(href);
+        if link {
+            out.push_str("<a href=\"");
+            escape(href, &mut out);
+            out.push_str("\">");
+        }
+        let tags = [(1, 'b'), (2, 'i'), (4, 'u')].map(|(bit, tag)| (style & bit != 0, tag));
+        for (on, tag) in tags {
+            if on {
+                out.push_str(&format!("<{tag}>"));
+            }
+        }
+        // A peer's text is cleaned again: no control or bidirectional character reaches Pango.
+        escape(&athanor_unit::text::lines(text, usize::MAX), &mut out);
+        for (on, tag) in tags.into_iter().rev() {
+            if on {
+                out.push_str(&format!("</{tag}>"));
+            }
+        }
+        if link {
+            out.push_str("</a>");
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use zvariant::{serialized::Context, Structure, Value, LE};
+
+    #[test]
+    fn markup_comes_from_the_spans_alone() {
+        assert_eq!(
+            pango_markup(&[("<x> & \"y\"".into(), 1, "https://a/?b=1&c=2".into())]),
+            "<a href=\"https://a/?b=1&amp;c=2\"><b>&lt;x&gt; &amp; &quot;y&quot;</b></a>"
+        );
+        assert_eq!(pango_markup(&[("x".into(), 0, "file:///etc".into())]), "x");
+        assert_eq!(pango_markup(&[("a\u{202E}b".into(), 0, String::new())]), "ab");
+    }
 
     fn table() -> WireNotification {
         WireNotification {

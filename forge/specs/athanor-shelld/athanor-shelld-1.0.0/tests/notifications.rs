@@ -314,7 +314,15 @@ async fn capabilities_and_server_information_are_the_specifications() {
     let caps: Vec<String> = proxy.call("GetCapabilities", &()).await.expect("caps");
     assert_eq!(
         caps,
-        ["actions", "body", "icon-static", "persistence", "sound"]
+        [
+            "actions",
+            "body",
+            "body-hyperlinks",
+            "body-markup",
+            "icon-static",
+            "persistence",
+            "sound"
+        ]
     );
     let info: (String, String, String, String) =
         proxy.call("GetServerInformation", &()).await.expect("info");
@@ -436,8 +444,9 @@ async fn the_bar_lists_clean_text_and_hears_added_replaced_closed() {
         .expect("wire");
     assert_eq!(
         (first.id, first.summary.as_str(), first.body.as_str()),
-        (id, "twolines", "<b>hi</b>x")
+        (id, "twolines", "hix")
     );
+    assert_eq!(first.body_spans[0], ("hi".to_owned(), 1, String::new()));
     notify(&public, id, "again", "", &[], HashMap::new()).await;
     let again: WireNotification = replaced
         .next()

@@ -11,6 +11,7 @@ pub mod i18n;
 pub mod icon;
 pub mod identity;
 pub mod image;
+pub mod markup;
 pub mod notifications;
 pub mod policy;
 pub mod rules;

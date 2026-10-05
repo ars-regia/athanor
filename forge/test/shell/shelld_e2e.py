@@ -177,7 +177,7 @@ def main():
     caps = call(bus, NOTIFY, "GetCapabilities", None, "(as)").unpack()[0]
     check(
         "capabilities",
-        caps == ["actions", "body", "icon-static", "persistence", "sound"],
+        caps == ["actions", "body", "body-hyperlinks", "body-markup", "icon-static", "persistence", "sound"],
         caps,
     )
 

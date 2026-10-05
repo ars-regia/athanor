@@ -22,6 +22,7 @@ from gi.repository import Gio, GLib
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wl_pointer import VirtualPointer  # noqa: E402
 from atspi_check import find_application, problems, walk  # noqa: E402
+from fake_notifications import RICH_BODY  # noqa: E402
 from bar_e2e import (  # noqa: E402
     PID_FILE,
     PSS_LIMIT_KB,
@@ -56,6 +57,27 @@ def alerts(app, Atspi):
             if shown and role in ALERT_ROLES
         ]
     except GLib.Error:
+        return None
+
+
+def body_links(app, Atspi, summary):
+    """(text, link count) of every text node inside the popup named `summary`."""
+    try:
+        popup = next(
+            node
+            for node in walk_nodes(app, Atspi)
+            if node.get_role_name() in ALERT_ROLES and node.get_name() == summary
+        )
+        found = []
+        for node in walk_nodes(popup, Atspi):
+            text = node.get_text_iface()
+            hypertext = node.get_hypertext_iface()
+            if text is not None and hypertext is not None:
+                found.append(
+                    (Atspi.Text.get_text(text, 0, -1), Atspi.Hypertext.get_n_links(hypertext))
+                )
+        return found
+    except (GLib.Error, StopIteration):
         return None
 
 
@@ -229,7 +251,7 @@ def daemon_mark_read(ids):
     daemon_call("MarkRead", GLib.Variant("(au)", (list(ids),)))
 
 
-def notify(summary, *, expire=0, hints=None, icon="", actions=()):
+def notify(summary, *, body="", expire=0, hints=None, icon="", actions=()):
     session = Gio.bus_get_sync(Gio.BusType.SESSION, None)
     (id_,) = session.call_sync(
         "org.freedesktop.Notifications",
@@ -238,7 +260,7 @@ def notify(summary, *, expire=0, hints=None, icon="", actions=()):
         "Notify",
         GLib.Variant(
             "(susssasa{sv}i)",
-            ("e2e", 0, icon, summary, "", list(actions), hints or {}, expire),
+            ("e2e", 0, icon, summary, body, list(actions), hints or {}, expire),
         ),
         GLib.VariantType("(u)"),
         Gio.DBusCallFlags.NONE,
@@ -395,6 +417,15 @@ def main():
         "a notification closed by its application leaves the screen",
         wait_for(lambda: not shows("<b>bold</b> & <i>markup</i>")(), 3),
     )
+
+    # Item 8 (NC10): the body is its spans, a safe link is one link, a file: link is not.
+    rich = notify("Rich body", body=RICH_BODY)
+    check(
+        "a body with markup reads as B x f with exactly one link (item 8)",
+        wait_for(lambda: ("B x f", 1) in (body_links(app, Atspi, "Rich body") or []), 5),
+        repr(body_links(app, Atspi, "Rich body")),
+    )
+    close_notification(rich)
 
     transient = notify(
         "Transient", expire=1000, hints={"transient": GLib.Variant("b", True)}

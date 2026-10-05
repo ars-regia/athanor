@@ -69,6 +69,19 @@ NODE = Gio.DBusNodeInfo.new_for_xml(f"""
 """)
 
 
+# What the real daemon's parser makes of RICH_BODY (athanor-shelld markup.rs): the plain text
+# and the spans, one of them a link. Any other body is one plain span.
+RICH_BODY = '<b>B</b> <a href="https://x.org">x</a> <a href="file:///etc">f</a><img src="/x"/>'
+RICH_SPANS = [("B", 1, ""), (" ", 0, ""), ("x", 0, "https://x.org"), (" ", 0, ""), ("f", 0, "")]
+
+
+def body_wire(body):
+    """The body and body_spans fields."""
+    if body == RICH_BODY:
+        return "B x f", RICH_SPANS
+    return body, [(body, 0, "")] if body else []
+
+
 def now_ms():
     return int(time.monotonic() * 1000)
 
@@ -106,8 +119,7 @@ class Daemon:
     def wire(self, n):
         left = self.left_ms(n)
         return (
-            n["id"], "", n["app"], n["summary"], n["body"],
-            [(n["body"], 0, "")] if n["body"] else [], n["actions"], True, n["urgency"],
+            n["id"], "", n["app"], n["summary"], *body_wire(n["body"]), n["actions"], True, n["urgency"],
             n["transient"], n["resident"], n["read"], 0, n["entry"], n["icon_name"],
             n["icon_file"], n["width"], n["height"], n["rgba"], n["timeout"], left,
             left > 0, -1, False, "",

@@ -853,7 +853,8 @@ fn picture(notice: &Notice) -> gtk4::Image {
 }
 
 fn text_label(text: &str, lines: i32) -> gtk4::Label {
-    // A plain label: `use-markup` stays false, so markup in the text shows as text (SH12).
+    // A plain label: `use-markup` stays false, so markup in the text shows as text (SH12);
+    // only `show_spans` turns it on, for the body.
     let label = gtk4::Label::new(Some(text));
     label.set_xalign(0.0);
     label.set_wrap(true);
@@ -862,6 +863,26 @@ fn text_label(text: &str, lines: i32) -> gtk4::Label {
     label.set_lines(lines);
     label.set_ellipsize(pango::EllipsizeMode::End);
     label
+}
+
+/// The body as the daemon's spans, rendered to Pango only by `pango_markup`: the label never
+/// sees the sender's text as markup. A link opens through the OpenURI portal on a click or
+/// Enter (`activate-link`), never on hover or focus; GTK's tooltip shows its address.
+fn show_spans(label: &gtk4::Label, spans: &[(String, u32, String)]) {
+    if spans.is_empty() {
+        return;
+    }
+    label.set_use_markup(true);
+    label.set_markup(&athanor_services::notifications::wire::pango_markup(spans));
+    label.connect_activate_link(|label, uri| {
+        let window = label.root().and_downcast::<gtk4::Window>();
+        gtk4::UriLauncher::new(uri).launch(window.as_ref(), gio::Cancellable::NONE, |result| {
+            if let Err(err) = result {
+                tracing::warn!(error = %err, "cannot open a link of a notification");
+            }
+        });
+        glib::Propagation::Stop
+    });
 }
 
 /// One notification as a popup. It is an `alert`, so a screen reader reads it (BR4); its
@@ -893,7 +914,9 @@ pub(super) fn card(service: &Rc<Service>, notice: &Notice) -> gtk4::Box {
     summary.add_css_class("bar-popover-title");
     text.append(&summary);
     if !notice.body.is_empty() {
-        text.append(&text_label(&notice.body, 4));
+        let body = text_label(&notice.body, 4);
+        show_spans(&body, &notice.body_spans);
+        text.append(&body);
     }
     let id = notice.id;
     let read = gtk4::GestureClick::new();

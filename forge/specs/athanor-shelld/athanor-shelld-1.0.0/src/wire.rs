@@ -5,6 +5,7 @@
 pub use athanor_services::notifications::wire::*;
 
 use crate::icon::Icon;
+use crate::markup;
 use crate::store::{self, Notification, Visual};
 
 #[must_use]
@@ -19,18 +20,14 @@ pub fn from_notification(notification: &Notification, now_ms: u64) -> WireNotifi
         Visual::Pixels(image) => (image.width, image.height, image.rgba.clone()),
         _ => (0, 0, Vec::new()),
     };
+    let (body, body_spans) = markup::parse(&content.body);
     WireNotification {
         id: notification.id,
         app_id: notification.identity.key().to_owned(),
         app_name: content.app_name.clone(),
         summary: content.summary.clone(),
-        body: content.body.clone(),
-        // One plain span: markup and links come with the richer notification (NC10).
-        body_spans: if content.body.is_empty() {
-            Vec::new()
-        } else {
-            vec![(content.body.clone(), 0, String::new())]
-        },
+        body,
+        body_spans,
         actions: content.actions.clone(),
         // A sender that is gone, or was on another bus, cannot be told of an action.
         actions_available: !notification.sender.is_empty(),
@@ -111,5 +108,14 @@ mod tests {
         assert!(!wire.actions_available);
         assert_eq!(wire.body_spans, [("text".to_owned(), 0, String::new())]);
         assert_eq!((wire.value, wire.reply), (-1, false));
+    }
+
+    #[test]
+    fn the_body_goes_out_as_plain_text_and_spans() {
+        let mut held = crate::store::tests::notification(1);
+        held.content.body = "<b>B</b> <i>x</i>".into();
+        let wire = from_notification(&held, 0);
+        assert_eq!(wire.body, "B x");
+        assert_eq!(wire.body_spans[0], ("B".to_owned(), 1, String::new()));
     }
 }

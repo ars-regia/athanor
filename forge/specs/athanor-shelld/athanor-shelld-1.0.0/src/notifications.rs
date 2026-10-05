@@ -40,7 +40,15 @@ use crate::store::{self, Content, Outcome, Reason, Store, Urgency, Visual};
 use crate::wire::{from_notification, WireNotification};
 use athanor_unit::text;
 
-pub const CAPABILITIES: [&str; 5] = ["actions", "body", "icon-static", "persistence", "sound"];
+pub const CAPABILITIES: [&str; 7] = [
+    "actions",
+    "body",
+    "body-hyperlinks",
+    "body-markup",
+    "icon-static",
+    "persistence",
+    "sound",
+];
 pub const MAX_ACTIONS: usize = 8;
 pub const ACTION_KEY_BYTES: usize = 64;
 pub const TOKEN_CHARS: usize = 256;

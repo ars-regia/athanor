@@ -13,15 +13,16 @@ use athanor_unit::text::{self, BODY_CHARS, NAME_CHARS, SUMMARY_CHARS};
 /// converts (`FromVariant` stops at sixteen), so each is read by its index.
 pub const WIRE_SIGNATURE: &str = "(ussssa(sus)a(ss)bybbbxsssuuayuubibs)";
 
-/// The index of each field the bar reads: id, app_name, summary, body, actions, urgency,
+/// The index of each field the bar reads: id, app_name, summary, body, body_spans, actions, urgency,
 /// transient, resident, desktop_entry, icon_name, icon_file, image_width, image_height,
-/// image_rgba, popup_ms_left. The others (app_id, body_spans, actions_available, read, time,
+/// image_rgba, popup_ms_left. The others (app_id, actions_available, read, time,
 /// timeout_ms, popup, value, reply, reply_placeholder) are for the control center.
 mod field {
     pub const ID: usize = 0;
     pub const APP_NAME: usize = 2;
     pub const SUMMARY: usize = 3;
     pub const BODY: usize = 4;
+    pub const BODY_SPANS: usize = 5;
     pub const ACTIONS: usize = 6;
     pub const URGENCY: usize = 8;
     pub const TRANSIENT: usize = 9;
@@ -84,12 +85,29 @@ pub struct Action {
     pub label: String,
 }
 
+/// The daemon's spans cleaned again, and bounded like the body: a peer's text never reaches
+/// Pango except as an escaped span (`pango_markup` also checks each link's scheme).
+fn clean_spans(spans: Vec<(String, u32, String)>) -> Vec<(String, u32, String)> {
+    let mut left = BODY_CHARS;
+    let mut kept = Vec::new();
+    for (span, style, href) in spans {
+        let span = text::lines(&span, left);
+        left -= span.chars().count();
+        if !span.is_empty() {
+            kept.push((span, style & 7, text::line(&href, 2048)));
+        }
+    }
+    kept
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Notice {
     pub id: u32,
     pub app_name: String,
     pub summary: String,
     pub body: String,
+    /// The body's styled spans, as the daemon parsed them: the only form it is shown in.
+    pub body_spans: Vec<(String, u32, String)>,
     /// The buttons, without "default".
     pub actions: Vec<Action>,
     /// The application offers a "default" action: a click on the text invokes it.
@@ -117,6 +135,7 @@ impl Notice {
         let app_name = get(field::APP_NAME)?.get::<String>()?;
         let summary = get(field::SUMMARY)?.get::<String>()?;
         let body = get(field::BODY)?.get::<String>()?;
+        let body_spans = get(field::BODY_SPANS)?.get::<Vec<(String, u32, String)>>()?;
         let actions = get(field::ACTIONS)?.get::<Vec<(String, String)>>()?;
         let urgency = get(field::URGENCY)?.get::<u8>()?;
         let transient = get(field::TRANSIENT)?.get::<bool>()?;
@@ -151,6 +170,7 @@ impl Notice {
             app_name: text::line(&app_name, NAME_CHARS),
             summary: text::line(&summary, SUMMARY_CHARS),
             body: text::lines(&body, BODY_CHARS),
+            body_spans: clean_spans(body_spans),
             actions: kept,
             has_default,
             urgency: Urgency::from_byte(urgency),
@@ -429,6 +449,10 @@ mod tests {
                 height: 4,
                 rgba: vec![5; 48]
             }
+        );
+        assert_eq!(
+            notice.body_spans,
+            [("span".to_owned(), 5, "https://example.org".to_owned())]
         );
         // timeout_ms (19) is not kept: a swap with popup_ms_left shows here as 6.
         assert_eq!(notice.popup_ms_left, 7);

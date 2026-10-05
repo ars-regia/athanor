@@ -6,7 +6,7 @@ use athanor_services::notifications::wire::WireNotification;
 use athanor_services::notifications::NotificationsCommand;
 use gtk4::accessible::{Property, State};
 use gtk4::prelude::*;
-use gtk4::{gdk, glib, pango};
+use gtk4::{gdk, gio, glib, pango};
 
 use super::group::{app_title, clickable};
 use super::header::drawer;
@@ -30,7 +30,8 @@ pub fn name_of(id: u32) -> String {
 }
 
 fn label(text: &str, lines: i32) -> gtk4::Label {
-    // A plain label: `use-markup` stays false, so markup in the text shows as text (SH12).
+    // A plain label: `use-markup` stays false, so markup in the text shows as text (SH12);
+    // only `show_spans` turns it on, for the body.
     let label = gtk4::Label::new(Some(text));
     label.set_xalign(0.0);
     label.set_wrap(true);
@@ -39,6 +40,26 @@ fn label(text: &str, lines: i32) -> gtk4::Label {
     label.set_lines(lines);
     label.set_ellipsize(pango::EllipsizeMode::End);
     label
+}
+
+/// The body as the daemon's spans, rendered to Pango only by `pango_markup`: the label never
+/// sees the sender's text as markup. A link opens through the OpenURI portal on a click or
+/// Enter (`activate-link`), never on hover or focus; GTK's tooltip shows its address.
+fn show_spans(label: &gtk4::Label, spans: &[(String, u32, String)]) {
+    if spans.is_empty() {
+        return;
+    }
+    label.set_use_markup(true);
+    label.set_markup(&athanor_services::notifications::wire::pango_markup(spans));
+    label.connect_activate_link(|label, uri| {
+        let window = label.root().and_downcast::<gtk4::Window>();
+        gtk4::UriLauncher::new(uri).launch(window.as_ref(), gio::Cancellable::NONE, |result| {
+            if let Err(err) = result {
+                tracing::warn!(error = %err, "cannot open a link of a notification");
+            }
+        });
+        glib::Propagation::Stop
+    });
 }
 
 /// A texture from straight RGBA; `None` for a zero side or a length that does not match,
@@ -169,6 +190,7 @@ pub fn build(panel: &Rc<Panel>, n: &WireNotification, now: i64, show_app: bool) 
     let open = panel.body_open(id);
     if !n.body.is_empty() {
         let body = label(&n.body, if open { -1 } else { 2 });
+        show_spans(&body, &n.body_spans);
         body.set_ellipsize(if open { pango::EllipsizeMode::None } else { pango::EllipsizeMode::End });
         body.add_css_class("notification-body");
         text.append(&body);
