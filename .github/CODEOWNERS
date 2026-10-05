@@ -1,19 +1,45 @@
-# Code Owners for Athanor OS
+# Code owners for Athanor.
+#
+# The last matching pattern wins, so the protected paths come last. The owner is
+# the GitHub account that owns the repository (checked with
+# `gh repo view hr-mes/athanor --json owner`). Review by a code owner is only
+# enforced once the branch protection rule "Require review from Code Owners" is on.
 
-* @hr-mes-architect
+* @hr-mes
 
-# Core OS & Kernel
-/system/athanor-ebpf-sched/ @hr-mes-architect
-/system/athanor-hypervisor-daemon/ @hr-mes-architect
-/forge/specs/kernel/ @hr-mes-architect
+# Core OS and kernel
+/system/athanor-ebpf-sched/ @hr-mes
+/system/athanor-hypervisor-daemon/ @hr-mes
+/forge/specs/azoth/ @hr-mes
 
-# Post-Quantum Mesh
-/system/athanor-mesh-bus/ @hr-mes-architect
+# Mesh
+/system/athanor-mesh-bus/ @hr-mes
 
-# Wayland & UI
-/system/athanor-greeter/ @hr-mes-architect
+# Wayland and UI
+/system/athanor-greeter/ @hr-mes
 
-# CI/CD
-/.github/ @hr-mes-architect
-/forge/ @hr-mes-architect
-/system/Containerfile @hr-mes-architect
+# CI/CD and packaging
+/.github/ @hr-mes
+/forge/ @hr-mes
+
+# Protected paths: the maintainer reviews every change (see CLAUDE.md, "Limiti inviolabili").
+# Authorisation (polkit subject checks)
+/system/athanor-bus-api/src/polkit.rs @hr-mes
+# Attestation
+/system/confidential_computing/athanor-attestation/ @hr-mes
+# Image definition: PAM and authselect configuration live here
+/system/Containerfile @hr-mes
+# Signing, promotion and the keys' public halves
+/system/keys/ @hr-mes
+/system/sign-images.sh @hr-mes
+/system/promote.sh @hr-mes
+/system/build-image.sh @hr-mes
+/forge/scripts/sign_attest.sh @hr-mes
+/.github/workflows/call-system-image.yml @hr-mes
+/.github/workflows/athanor-forge-orchestrator.yml @hr-mes
+/.github/workflows/nvidia-kmod.yml @hr-mes
+/.github/workflows/promote-stable.yml @hr-mes
+# Policy files
+/CLAUDE.md @hr-mes
+/.github/CODEOWNERS @hr-mes
+/.github/SECURITY.md @hr-mes
