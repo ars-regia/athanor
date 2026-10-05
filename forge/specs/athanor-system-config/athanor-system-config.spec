@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:48.fc43}
+Release:        %{?autorelease}%{!?autorelease:49.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        MIT
 URL:            https://github.com/hr-mes/athanor-forge
