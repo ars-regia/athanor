@@ -1,15 +1,15 @@
 # Athanor accessibility
 
-Status: revision 1 draft, 2026-10-05: the maintainer's decisions applied; text not yet reviewed. It designs the accessibility of the whole desktop session: the screen reader and the bus it reads, keyboard operation and focus on every shell surface, high contrast, large text, cursor size and reduced motion, the magnifier and colour filters, keyboard aids, the on-screen keyboard, accessibility at the greeter and the lock screen, the quick menus, the tests and the order of construction. It defines the preferences and where they are stored; the Settings pages that show them belong to the Settings specification (wave 2).
+Status: revision 1 draft, 2026-10-05: the maintainer's decisions applied; text not yet reviewed. It designs the accessibility of the whole desktop session: the screen reader and the bus it reads, keyboard operation and focus on every shell surface, high contrast, large text, cursor size and reduced motion, the magnifier and colour filters, keyboard aids, the on-screen keyboard, accessibility at the greeter and the lock screen, the quick menus, the tests and the order of construction. It defines the preferences and where they are stored; the Settings pages that show them belong to the Settings specification (`doc_settings.md`).
 
 ## 1. Context
 
 - **What binds this document.**
   - `doc_shell_standard.md`: the gate (ST2), the register (ST3), accessibility and languages (ST7: every control reached from the keyboard with a visible focus, a scenario that reads the focus from AT-SPI and the ring from a screenshot, name and role in AT-SPI with extents checked, German truncation, right-to-left, scales 1.0 to 2.0, light, dark and high contrast complete, no control without a source), contrast (ST8), the bench on the reference laptop (ST9, `scripts/shell-bench/`, input through uinput, screenshots through grim, the tree through AT-SPI).
   - `doc_shell.md`: of COSMIC only cosmic-comp stays (SH3); GTK4 with AT-SPI working, one process per surface, logic in crates with no GTK type (SH4); contrast in four variants and a reduced-motion path for every animation (SH5); one AT-SPI check per surface in the test matrix (SH13).
-  - `doc_visual_language.md` (wave 1, parallel): the appearance preferences live in GSettings `org.athanor.desktop.appearance`; one function in `athanor-style` applies them and mirrors them to the GNOME keys (`color-scheme`, `accent-color`, `high-contrast`) and, through `athanor-compositor-client`, to the CosmicTheme keys; four variants (light, dark, light high contrast, dark high contrast); text at 4.5:1 and controls at 3:1 checked in CI; the accent corrected to 3:1 against every surface; type that follows `text-scaling-factor`; motion durations of 100, 200 and 300 ms, all zero when GNOME `enable-animations` is false.
+  - `doc_visual_language.md`: the appearance preferences live in GSettings `org.athanor.desktop.appearance`; one function in `athanor-style` applies them and mirrors them to the GNOME keys (`color-scheme`, `accent-color`, `high-contrast`) and, through `athanor-compositor-client`, to the CosmicTheme keys; four variants (light, dark, light high contrast, dark high contrast); text at 4.5:1 and controls at 3:1 checked in CI; the accent corrected to 3:1 against every surface; type that follows `text-scaling-factor`; motion durations of 100, 200 and 300 ms, all zero when GNOME `enable-animations` is false.
   - `doc_bar.md` (BR3: the accessibility module; popups never take keyboard focus; a sheet closes on Escape and on focus loss), `doc_control_center.md` (CC4 tiles, CC9 Super+C, CC13 tests, spike S6 on the on-screen keyboard), `doc_launcher.md` (layer-surface keyboard focus through Athanor's cosmic-comp patch 0001; LA8 `system_actions`), `doc_notification_center.md` (NC11 keyboard rules; NC7 and spike N1 on sound playback).
-  - The OSD and the lock screen and password prompts are specified in parallel (wave 1); the portal Settings backend (`doc_portal.md`) and Settings are wave 2. Where this document needs one of them it writes the interface and names the owner.
+  - The OSD and the lock screen and password prompts are specified in `doc_osd.md` and `doc_lock_and_prompts.md`; the portal Settings backend in `doc_portal.md`, and Settings in `doc_settings.md`. Where this document needs one of them it writes the interface and names the owner.
 - **The register** (`shell-features.md`) holds the accessibility entries F-bar-14 (accessibility menu in the bar, recorded `have`), F-dock-43 (dock operable from the keyboard, `partial`), F-cc-52 (on-screen keyboard switch, `missing`), F-osd-18 (sticky, slow and bounce key notices, `missing`), F-lock-19 (on-screen keyboard on the lock screen, `missing`), F-lock-20 (accessibility menu on the lock screen, `missing`), F-greeter-12 (accessibility options on the greeter, `partial`, high contrast only), F-greeter-15 (on-screen keyboard on the greeter, `missing`) and F-settings-14 (`have` through cosmic-settings).
 - **Facts verified on 2026-10-05**.
   - Installed on the maintainer's desktop (`rpm -q`): orca 49.7-1.fc43, at-spi2-core 2.58.9, gtk4 4.20.4, libadwaita 1.8.8, speech-dispatcher 0.12.1 with the espeak-ng module, espeak-ng 1.51.1, brltty 6.8, xdg-dbus-proxy 0.1.8, flatpak 1.16.6, greetd 0.10.3, pipewire 1.4.11, gsettings-desktop-schemas 49.1, libxkbcommon 1.11.0, cosmic-comp 1.8.0-1.fc43.athanor1, cosmic-settings-daemon 1.8.0. Not installed: cosmic-session, gnome-settings-daemon, any on-screen keyboard. Orca is not listed in `forge/config/packages.json`; whether the base image carries it or the desktop layered it is unverified.
@@ -216,7 +216,7 @@ Status: revision 1 draft, 2026-10-05: the maintainer's decisions applied; text n
 
 ## 3. Changes to other documents
 
-Applied with the approval of this document. Line numbers are those of the tree on branch `visual-language-spec` and of the wave-1 drafts at revision 0, read on 2026-10-05.
+Applied with the approval of this document. Line numbers into code are those of the tree as merged with iso-v0 (99a68285), checked on 2026-10-05; those into the other desktop specifications are of their revision 0.
 
 - `shell-features.md`:
   - `:43` F-bar-14 from `have` to `partial`: the screen-reader switch starts nothing (section 1).
@@ -246,18 +246,18 @@ Applied with the approval of this document. Line numbers are those of the tree o
   - `:192` (spike S6): its on-screen-keyboard half becomes "`athanor-osk` on `zwp_virtual_keyboard_v1` with IBus enabled, and on the input-method slot with no input method enabled (pop-os/cosmic-osk#44)", run together with spike S1 of `doc_languages.md`.
 - `doc_notification_center.md` (branch `notification-center-spec`):
   - `:143` (NC11): a critical notification is announced at assertive priority (AX6); the announcement on opening (`:174`) is unchanged.
-- `doc_osd.md` (wave-1 draft):
+- `doc_osd.md`:
   - `:67` (OD4): `os.athanor.Osd1` gains the method that shows a keyboard-aid notice, called by `athanor-a11y` (AX11); `:169` (F-osd-18) changes from "excluded here" to that method.
   - `:64`: the `ScreenReader` system action is rebound by the `system_actions` entry of AX3.
-- `doc_lock_and_prompts.md` (wave-1 draft):
+- `doc_lock_and_prompts.md`:
   - `:89` (LP6) and `:171` (its register row): the interfaces it asks for are the keys of AX2, read and written with GSettings, and the embedded `athanor-keyboard` widget (AX12, AX13).
   - `:110` (LP9): the fingerprint state lines are announced at polite priority, in the lock and in the polkit agent (lock decision D8).
   - `:124` (LP11) and `:134` (LP12): the agent's dialog and the keyring prompt are covered by the password-field check of AX4; LP17 (`:187`) gains it.
-- `doc_languages.md` (wave-1 draft): `:277` and `:393` are met by AX12 (no input-method slot while an input method is enabled); spike S1 (`:451`) runs with `athanor-osk` beside the framework under test.
-- `doc_portal.md` (wave 2): serve the keys listed in AX2.
-- The Settings specification (wave 2): one Accessibility page writing the keys of AX2 and the `accessibility_zoom` settings, with the note on cursor size of AX9. The readers files of AX5 are not a user setting and have no page.
+- `doc_languages.md`: `:277` and `:393` are met by AX12 (no input-method slot while an input method is enabled); spike S1 (`:451`) runs with `athanor-osk` beside the framework under test.
+- `doc_portal.md`: serve the keys listed in AX2.
+- The Settings specification (`doc_settings.md`): one Accessibility page writing the keys of AX2 and the `accessibility_zoom` settings, with the note on cursor size of AX9. The readers files of AX5 are not a user setting and have no page.
 - `doc_launcher.md`: none; AX7 relies on its patch 0001.
-- Amendments received, from the ruling of 2026-10-05s of 2026-10-05 on `doc_overview.md` and `doc_session_daemons.md`: AX3's `ScreenReader` entry moves to the `system_actions` file of `doc_languages.md` LN9 (`doc_overview.md` section 3); AX5's last bullet is limited to shell units (SD8); AX9's reduced motion reaches the workspace switch (OV19 step 4); AX19, mono audio, is new (SD15); AX13 gains the first-run user as a third pre-login place and the greeter's seeding from the hand-off (`doc_first_run.md` FR15, FR16).
+- Amendments received, from the maintainer's rulings of 2026-10-05 on `doc_overview.md` and `doc_session_daemons.md`: AX3's `ScreenReader` entry moves to the `system_actions` file of `doc_languages.md` LN9 (`doc_overview.md` section 3); AX5's last bullet is limited to shell units (SD8); AX9's reduced motion reaches the workspace switch (OV19 step 4); AX19, mono audio, is new (SD15); AX13 gains the first-run user as a third pre-login place and the greeter's seeding from the hand-off (`doc_first_run.md` FR15, FR16).
 
 ## 4. Open doubts
 
