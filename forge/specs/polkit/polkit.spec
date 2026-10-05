@@ -16,6 +16,7 @@
 #   - no -devel and -docs subpackages and no man pages or gtk-doc: the tier install leaves
 #     -devel out, and polkit-docs requires polkit-devel; the builder has neither xsltproc
 #     nor gtk-doc. The image carries no polkit-devel;
+#   - the ldconfig scriptlets are spelled out, as the builder has no %%ldconfig_scriptlets;
 #   - explicit meson commands instead of %%meson, which the builder does not define, as
 #     forge/specs/athanor-ananicy does for cmake;
 #   - Source0 is pinned in SOURCES/sources.sha256, and the Release carries .athanor1 so
@@ -97,9 +98,14 @@ Libraries files for polkit.
 
 %build
 %set_build_flags
+# systemd.pc names the sysusers.d and tmpfiles.d directories; in the builder it is the Nix
+# one, which points into /nix/store. pkgconf takes PKG_CONFIG_<PACKAGE>_<VARIABLE> first.
+export PKG_CONFIG_SYSTEMD_SYSUSERS_DIR=%{_sysusersdir}
+export PKG_CONFIG_SYSTEMD_TMPFILES_DIR=%{_tmpfilesdir}
 meson setup build \
        --prefix=%{_prefix} --libdir=%{_libdir} --sysconfdir=%{_sysconfdir} \
        --localstatedir=%{_localstatedir} --buildtype=plain --wrap-mode=nodownload \
+       -D systemdsystemunitdir=%{_unitdir} \
        -D authfw=pam \
        -D examples=false \
        -D gtk_doc=false \
@@ -166,7 +172,8 @@ rm -f %{buildroot}%{_libdir}/*.la
 %exclude %{_includedir}
 %exclude %{_datadir}/gettext
 
-%ldconfig_scriptlets libs
+%post libs -p /sbin/ldconfig
+%postun libs -p /sbin/ldconfig
 
 %files libs
 %{_libdir}/lib*.so.*
