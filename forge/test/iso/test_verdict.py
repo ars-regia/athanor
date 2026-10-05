@@ -30,14 +30,14 @@ import zlib
 HERE = pathlib.Path(__file__).resolve().parent
 
 
-def verdict(tmp: pathlib.Path, phases, qemu_status=0):
+def verdict(tmp: pathlib.Path, phases, qemu_status=0, *extra):
     out = tmp / "run"
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)
     (out / "phases.txt").write_text("".join(f"{n} {t}\n" for n, t in phases))
     (out / "serial.log").write_bytes(b"console output\n")
     proc = subprocess.run(
-        [sys.executable, str(HERE / "verdict.py"), str(out), "900", str(qemu_status)],
+        [sys.executable, str(HERE / "verdict.py"), str(out), "900", str(qemu_status), *extra],
         capture_output=True,
         text=True,
     )
@@ -64,6 +64,56 @@ def test_pass(tmp: pathlib.Path) -> None:
     assert "first boot to greeter: 300s" in report, report
     assert "greeter to session: 60s" in report, report
     assert "session to settings: 40s" in report, report
+
+
+COMPLETE_RUN = [
+    ("installed", 100),
+    ("kickstart-done", 110),
+    ("profile-ok", 390),
+    ("karg-compress-ok", 395),
+    ("greeter-alive", 400),
+    ("session-alive", 460),
+    ("settings-alive", 500),
+]
+
+
+def test_secure_boot_case_requires_secure_boot_enabled(tmp: pathlib.Path) -> None:
+    """The Secure Boot case passes only on the guest's own report that it booted with
+    Secure Boot on; the default case reports the state and is not decided by it."""
+    code, report = verdict(tmp, COMPLETE_RUN + [("secureboot-enabled", 396)], 0, "secure-boot")
+    assert code == 0, report
+    assert "secure boot: secureboot-enabled (required: secureboot-enabled)" in report, report
+    for answer in ([("secureboot-disabled", 396)], []):
+        code, report = verdict(tmp, COMPLETE_RUN + answer, 0, "secure-boot")
+        assert code == 1, f"{answer}: a Secure Boot case without Secure Boot must fail"
+        assert "**FAIL**" in report, report
+    code, report = verdict(tmp, COMPLETE_RUN + [("secureboot-disabled", 396)])
+    assert code == 0, report
+    assert "secure boot: secureboot-disabled" in report, report
+
+
+def test_secureboot_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
+    """SECUREBOOT_PROBE as the guest's shell runs it, against a mokutil that answers
+    either way: the marker comes from printf, never from the echo of the typed line."""
+    sys.path.insert(0, str(HERE))
+    import console
+
+    work = tmp / "sbprobe"
+    shutil.rmtree(work, ignore_errors=True)
+    (work / "bin").mkdir(parents=True)
+    (work / "bin" / "mokutil").write_text('#!/bin/sh\necho "SecureBoot $FAKE_SB"\n')
+    (work / "bin" / "athanor-secureboot-enroll").write_text("#!/bin/sh\necho status\n")
+    for tool in ("mokutil", "athanor-secureboot-enroll"):
+        (work / "bin" / tool).chmod(0o755)
+    (work / "probe.sh").write_bytes(console.SECUREBOOT_PROBE + b"\n")
+    for state, expected in (("enabled", "SECUREBOOT_ENABLED"), ("disabled", "SECUREBOOT_DISABLED")):
+        proc = subprocess.run(
+            ["sh", str(work / "probe.sh")],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PATH": f"{work / 'bin'}:{os.environ['PATH']}", "FAKE_SB": state},
+        )
+        assert proc.stdout.splitlines() == [expected, "status"], proc.stdout
 
 
 def test_session_without_settings_fails(tmp: pathlib.Path) -> None:
@@ -548,6 +598,9 @@ def test_console_logs_in_opens_settings_and_stops(tmp: pathlib.Path) -> None:
         if b"KARG_%s" not in typed:
             typed += typed_until(conn, b"KARG_%s", 20)
         conn.sendall(b"KARG_OK btrfs\r\n")
+        if b"SECUREBOOT_%s" not in typed:
+            typed += typed_until(conn, b"SECUREBOOT_%s", 20)
+        conn.sendall(b"SECUREBOOT_ENABLED\r\n")
         if b"GREETER_%s" not in typed:
             typed_until(conn, b"GREETER_%s", 20)
         conn.sendall(b"GREETER_ALIVE c5\r\n")
@@ -583,6 +636,7 @@ def test_console_logs_in_opens_settings_and_stops(tmp: pathlib.Path) -> None:
     for expected in (
         "profile-ok",
         "karg-compress-ok",
+        "secureboot-enabled",
         "greeter-alive",
         "login-sent",
         "session-alive",
@@ -672,6 +726,8 @@ def main() -> int:
             test_karg_unreadable_fails,
             test_karg_not_applicable_passes,
             test_karg_probe_answers_from_the_guest,
+            test_secure_boot_case_requires_secure_boot_enabled,
+            test_secureboot_probe_answers_from_the_guest,
             test_greetd_starting_is_not_a_greeter,
             test_installed_but_no_greeter,
             test_text_login_is_not_a_greeter,

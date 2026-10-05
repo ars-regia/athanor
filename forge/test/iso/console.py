@@ -73,6 +73,10 @@ MARKERS = (
     (b"KARG_MISSING", "karg-compress-missing"),
     (b"KARG_NOTBTRFS", "karg-compress-not-applicable"),
     (b"KARG_UNREADABLE", "karg-compress-unreadable"),
+    # The guest's own answer to SECUREBOOT_PROBE below: the Secure Boot state its firmware
+    # reports. Only the Secure Boot case of the test requires ENABLED (verdict.py).
+    (b"SECUREBOOT_ENABLED", "secureboot-enabled"),
+    (b"SECUREBOOT_DISABLED", "secureboot-disabled"),
     # The guest's own answer to GREETER_PROBE below: a greeter session that is still
     # there, with the shell inside it, after it has had time to die.
     (b"GREETER_ALIVE", "greeter-alive"),
@@ -282,6 +286,20 @@ KARG_PROBE = (
 # Two file reads, and a margin for the command line printed when the argument is missing.
 KARG_PROBE_WAIT = 5.0
 
+# Ask the guest whether it booted with Secure Boot on (doc_kernel_profile.md, section 4):
+# in the Secure Boot case shim has then accepted the Azoth vmlinuz signed by the sign-kernel
+# job against the Athanor certificate in MokList. athanor-secureboot-enroll --status follows
+# the answer, so the console log also shows the guided enrolment helper reading the same
+# state on the installed system. printf assembles the marker, as in the other probes.
+SECUREBOOT_PROBE = (
+    b"case $(mokutil --sb-state 2>/dev/null) in"
+    b" 'SecureBoot enabled'*) printf 'SECUREBOOT_%s\\n' ENABLED;;"
+    b" *) printf 'SECUREBOOT_%s\\n' DISABLED;;"
+    b" esac; athanor-secureboot-enroll --status"
+)
+# Two EFI variable reads, twice.
+SECUREBOOT_PROBE_WAIT = 5.0
+
 # The password as QEMU's `sendkey` wants it, one key per command. QEMU names a letter key
 # by the letter, and letters are all the password has.
 GREETER_PASSWORD_KEYS = tuple(GUEST_PASSWORD.decode())
@@ -452,6 +470,8 @@ def main() -> int:
         note("profile-asked")
         ask(KARG_PROBE, KARG_PROBE_WAIT)
         note("karg-asked")
+        ask(SECUREBOOT_PROBE, SECUREBOOT_PROBE_WAIT)
+        note("secureboot-asked")
         ask(GREETER_PROBE, GREETER_PROBE_WAIT)
         note("greeter-asked")
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Turns what the run recorded into a pass or a fail, and into something readable.
 
-Usage: verdict.py OUTPUT_DIR GREETER_WAIT QEMU_STATUS
+Usage: verdict.py OUTPUT_DIR GREETER_WAIT QEMU_STATUS [secure-boot]
 
 Reads phases.txt, written by console.py, and the console log beside it. Prints a report
 on stdout, writes the same report to OUTPUT_DIR/verdict.md for the job summary, and
@@ -22,6 +22,11 @@ says which part broke:
                    desktop session is alive and steady, panel and wallpaper included
   settings         the settings application, started inside that session, is still
                    running twenty seconds later
+
+With `secure-boot` (the Secure Boot case, run_iso_test.sh with SECURE_BOOT_FIRMWARE) an
+eighth: the installed system reports Secure Boot enabled, so shim accepted the signed
+Azoth kernel against the Athanor certificate in MokList. Without it the state is reported
+and decides nothing.
 
 The greeter is recognised from the console rather than from a screenshot, because a
 screenshot cannot tell a drawn greeter from a wallpaper. The screenshots are still kept
@@ -62,12 +67,18 @@ KARG_SIGNALS = ("karg-compress-ok", "karg-compress-not-applicable")
 # booted the installer again instead of the system it had just written, so the run says
 # nothing about first boot no matter how long it is left going.
 FAILURE_SIGNALS = ("panic", "emergency", "reinstall-loop")
+# The guest's answer to SECUREBOOT_PROBE in console.py.
+SECUREBOOT_SIGNALS = ("secureboot-enabled", "secureboot-disabled")
 
 
 def main() -> int:
     out = pathlib.Path(sys.argv[1])
     greeter_wait = int(sys.argv[2])
     qemu_status = int(sys.argv[3])
+    if sys.argv[4:] not in ([], ["secure-boot"]):
+        print("usage: verdict.py OUTPUT_DIR GREETER_WAIT QEMU_STATUS [secure-boot]", file=sys.stderr)
+        return 2
+    secure_boot_required = sys.argv[4:] == ["secure-boot"]
 
     phase_file = out / "phases.txt"
     phases: dict[str, int] = {}
@@ -88,6 +99,7 @@ def main() -> int:
     greeter = next((s for s in GREETER_SIGNALS if s in phases), None)
     session = next((s for s in SESSION_SIGNALS if s in phases), None)
     settings = next((s for s in SETTINGS_SIGNALS if s in phases), None)
+    secure_boot = next((s for s in SECUREBOOT_SIGNALS if s in phases), None)
     failures = [s for s in FAILURE_SIGNALS if s in phases]
 
     lines = ["## ISO acceptance test", ""]
@@ -100,6 +112,10 @@ def main() -> int:
     lines.append(f"- greeter reached: {greeter if greeter else 'NO'}")
     lines.append(f"- session started: {session if session else 'NO'}")
     lines.append(f"- settings opened: {settings if settings else 'NO'}")
+    lines.append(
+        f"- secure boot: {secure_boot if secure_boot else 'NO ANSWER'}"
+        f"{' (required: secureboot-enabled)' if secure_boot_required else ''}"
+    )
     if failures:
         lines.append(f"- guest failures seen: {', '.join(failures)}")
     lines.append(f"- console log: {log_bytes} bytes")
@@ -128,6 +144,7 @@ def main() -> int:
         and session is not None
         and settings is not None
         and not failures
+        and (not secure_boot_required or secure_boot == "secureboot-enabled")
     )
     lines.insert(1, f"**{'PASS' if ok else 'FAIL'}**")
     report = "\n".join(lines) + "\n"

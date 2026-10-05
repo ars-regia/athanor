@@ -48,6 +48,14 @@ jobs:
     needs: [lint]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    # uefi: the runner's OVMF, Secure Boot off. secure-boot: Fedora's Secure Boot OVMF with
+    # the Athanor certificate in MokList (forge/test/iso/secureboot-firmware.sh); the run
+    # passes only if the installed system reports Secure Boot enabled, so shim accepted
+    # the kernel the sign-kernel job signed.
+    strategy:
+      fail-fast: false
+      matrix:
+        firmware: [uefi, secure-boot]
     permissions:
       contents: read
       packages: read
@@ -109,6 +117,15 @@ jobs:
           echo "ISO_PATH=${iso}" >> "${GITHUB_ENV}"
           echo "installing $(basename "$iso"), $(du -h "$iso" | cut -f1)"
 
+      - name: 🔐 Secure Boot firmware with the Athanor certificate enrolled
+        if: matrix.firmware == 'secure-boot'
+        env:
+          BUILDAH_ISOLATION: chroot
+        run: |
+          set -euo pipefail
+          bash forge/test/iso/secureboot-firmware.sh secureboot-firmware
+          echo "SECURE_BOOT_FIRMWARE=${GITHUB_WORKSPACE}/secureboot-firmware" >> "${GITHUB_ENV}"
+
       - name: 🖥️ Install unattended and restart into the system
         env:
           TIMEOUT: "1500"
@@ -132,7 +149,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: iso-acceptance-${{ github.run_id }}
+          name: iso-acceptance-${{ matrix.firmware }}-${{ github.run_id }}
           path: |
             iso-test/*.png
             iso-test/serial.log

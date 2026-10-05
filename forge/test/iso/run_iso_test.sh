@@ -20,12 +20,21 @@
 # not only asserted on.
 set -euo pipefail
 
-[[ $# -eq 2 ]] || { echo "usage: run_iso_test.sh ISO OUTPUT_DIR" >&2; exit 2; }
+[[ $# -eq 2 ]] || {
+    echo "usage: run_iso_test.sh ISO OUTPUT_DIR" >&2
+    exit 2
+}
 iso=$1 output=$2
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-[[ -f $iso ]] || { echo "ISO not found: $iso" >&2; exit 2; }
-[[ -f "${here}/collaudo.ks" ]] || { echo "collaudo.ks missing next to this script" >&2; exit 2; }
+[[ -f $iso ]] || {
+    echo "ISO not found: $iso" >&2
+    exit 2
+}
+[[ -f "${here}/collaudo.ks" ]] || {
+    echo "collaudo.ks missing next to this script" >&2
+    exit 2
+}
 
 # Space for the installed system plus room for btrfs to breathe. The image is ~6 GiB.
 DISK_GIB=${DISK_GIB:-30}
@@ -50,9 +59,27 @@ vars="${output}/OVMF_VARS.fd"
 # are tried rather than one being assumed, and the 4M pair is preferred because it is what
 # a current Ubuntu runner actually has. The plain names come second so a Fedora host, or
 # an older Ubuntu, still works.
+#
+# SECURE_BOOT_FIRMWARE=DIR runs the Secure Boot case instead: DIR holds the firmware
+# secureboot-firmware.sh wrote, Secure Boot on and the Athanor certificate in MokList, and
+# the verdict then also requires the installed system to report Secure Boot enabled.
 ovmf_code=''
 ovmf_vars=''
+machine=q35,i8042=off
+secure_boot=()
+if [[ -n ${SECURE_BOOT_FIRMWARE:-} ]]; then
+    ovmf_code=$SECURE_BOOT_FIRMWARE/OVMF_CODE.secboot.fd
+    ovmf_vars=$SECURE_BOOT_FIRMWARE/OVMF_VARS.secboot.fd
+    [[ -f $ovmf_code && -f $ovmf_vars ]] || {
+        echo "SECURE_BOOT_FIRMWARE=${SECURE_BOOT_FIRMWARE}: run secureboot-firmware.sh into it first" >&2
+        exit 2
+    }
+    # The Secure Boot build of OVMF keeps its variables in SMM, out of reach of the guest.
+    machine=q35,smm=on,i8042=off
+    secure_boot=(-global 'driver=cfi.pflash01,property=secure,value=on')
+fi
 for dir in /usr/share/OVMF /usr/share/edk2/ovmf /usr/share/ovmf; do
+    [[ -z $ovmf_code ]] || break
     for suffix in _4M ''; do
         candidate_code="${dir}/OVMF_CODE${suffix}.fd"
         candidate_vars="${dir}/OVMF_VARS${suffix}.fd"
@@ -111,7 +138,10 @@ console_pid=$!
 # run is about twelve minutes: at two-minute spacing a greeter that appears and then
 # crashes can fall between two frames entirely.
 (
-    for _ in $(seq 120); do [[ -S $monitor ]] && break; sleep 1; done
+    for _ in $(seq 120); do
+        [[ -S $monitor ]] && break
+        sleep 1
+    done
     i=0
     while [[ -S $monitor ]]; do
         sleep "${SHOT_EVERY:-30}"
@@ -142,7 +172,7 @@ shots_pid=$!
 # type into while this test stayed green.
 set +e
 timeout "$TIMEOUT" qemu-system-x86_64 \
-    -machine q35,i8042=off -accel "$accel" -cpu max -smp "${VCPUS:-4}" -m "${MEMORY_MIB:-6144}" \
+    -machine "$machine" "${secure_boot[@]}" -accel "$accel" -cpu max -smp "${VCPUS:-4}" -m "${MEMORY_MIB:-6144}" \
     -device qemu-xhci -device usb-kbd \
     -drive "if=pflash,format=raw,readonly=on,file=${ovmf_code}" \
     -drive "if=pflash,format=raw,file=${vars}" \
@@ -166,7 +196,10 @@ wait "$console_pid" 2> /dev/null
 if kill -0 "$qemu_pid" 2> /dev/null; then
     kill "$qemu_pid" 2> /dev/null
     # Give it a moment to close its files before the verdict reads them.
-    for _ in $(seq 10); do kill -0 "$qemu_pid" 2> /dev/null || break; sleep 1; done
+    for _ in $(seq 10); do
+        kill -0 "$qemu_pid" 2> /dev/null || break
+        sleep 1
+    done
     kill -9 "$qemu_pid" 2> /dev/null
 fi
 wait "$qemu_pid" 2> /dev/null
@@ -175,4 +208,4 @@ set -e
 
 kill "$shots_pid" 2> /dev/null || true
 
-python3 "${here}/verdict.py" "$output" "$GREETER_WAIT" "$qemu_status"
+python3 "${here}/verdict.py" "$output" "$GREETER_WAIT" "$qemu_status" ${SECURE_BOOT_FIRMWARE:+secure-boot}
