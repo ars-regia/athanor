@@ -54,7 +54,9 @@ install -D -m 0644 %{crate_dir}/athanor-portals.conf %{buildroot}%{_datadir}/xdg
   GNOME colour-scheme, accent-color and high-contrast keys, or the computed accent of the
   wallpaper mode, and the GNOME namespaces whole, with SettingChanged for every change.
 - athanor-portals.conf chooses every backend with default=none (PT1): FileChooser, Access
-  and Inhibit on gtk, ScreenCast off, Secret on gnome-keyring. athanor.portal loses UseIn.
+  and Inhibit on gtk; Secret on gnome-keyring; ScreenCast, Screenshot and Background off
+  until this backend implements them, since no installed backend does. athanor.portal
+  loses UseIn.
 - The athanor-shell-rs file chooser leaves, with its Requires, the MicroVM path and its
   fabricated virtio-fs tunnel, and the unconditional writable flag (PT14). Papers and every
   other application open and save through the gtk chooser.
