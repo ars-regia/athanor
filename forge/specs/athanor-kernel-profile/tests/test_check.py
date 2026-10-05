@@ -144,9 +144,30 @@ class Checker(unittest.TestCase):
         self.system.config([f"{name}={s['value']}" for name, s in settings["kconfig"].items()])
         for name, s in settings["sysctl"].items():
             self.system.sysctl(name, s["value"])
+        arguments = " ".join(f"{name}={s['value']}" for name, s in settings["cmdline"].items())
+        self.system.write("proc/cmdline", f"BOOT_IMAGE=/vmlinuz root=UUID=1 {arguments} rw\n")
         code, text = run(self.system.root, PROFILES)
         self.assertEqual(code, 0, text)
-        self.assertIn("base: 25/25 settings hold", text)
+        self.assertIn("base: 39/39 settings hold", text)
+
+    def test_cmdline_drift_is_reported(self) -> None:
+        self.system.write("proc/cmdline", "BOOT_IMAGE=/vmlinuz lockdown=none vsyscall=none rw\n")
+        profile(
+            self.profiles,
+            "base",
+            {"cmdline": {"lockdown": "integrity", "vsyscall": "none", "init_on_free": "1"}},
+        )
+        code, text = run(self.system.root, self.profiles)
+        self.assertEqual(code, 1, text)
+        self.assertIn("DRIFT cmdline.lockdown: expected 'integrity', found 'none'", text)
+        self.assertIn("DRIFT cmdline.init_on_free: expected '1', found None", text)
+        self.assertIn("base: 1/3 settings hold", text)
+
+    def test_cmdline_repeated_parameter_keeps_its_last_value(self) -> None:
+        self.system.write("proc/cmdline", "debugfs=on quiet debugfs=off\n")
+        profile(self.profiles, "base", {"cmdline": {"debugfs": "off"}})
+        code, text = run(self.system.root, self.profiles)
+        self.assertEqual(code, 0, text)
 
     def test_malformed_profile_cannot_be_checked(self) -> None:
         """Profiles with wrong shapes (null settings, leaf strings) are unreadable."""
@@ -168,7 +189,7 @@ class Checker(unittest.TestCase):
             self.assertIn("cannot check the profile", text)
 
     def test_unknown_setting_kind_cannot_be_checked(self) -> None:
-        doc = {"schema": 1, "combination": "base", "roles": [], "settings": {"cmdline": {"x": {"value": "1", "decision": "t"}}}}
+        doc = {"schema": 1, "combination": "base", "roles": [], "settings": {"firmware": {"x": {"value": "1", "decision": "t"}}}}
         (self.profiles / "base.json").parent.mkdir(parents=True, exist_ok=True)
         (self.profiles / "base.json").write_text(json.dumps(doc))
         code, text = run(self.system.root, self.profiles)

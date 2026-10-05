@@ -9,6 +9,7 @@ exec > /dev/console 2>&1 < /dev/console
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
 mount -t securityfs securityfs /sys/kernel/security
+mount -t cgroup2 cgroup2 /sys/fs/cgroup
 [ -d /sys/firmware/efi/efivars ] && mount -t efivarfs efivarfs /sys/firmware/efi/efivars
 
 uname_expected='' sb='' insmod_list='' certs_list=''
@@ -41,6 +42,17 @@ bbr() { # the default must be CachyOS's BBR v3, which registers as "bbr3"
   v=$(cat /proc/sys/net/ipv4/tcp_congestion_control)
   echo "current: $v; available: $(cat /proc/sys/net/ipv4/tcp_available_congestion_control)"; [ "$v" = bbr3 ]
 }
+# The files the two checks below read: variables so that tests/test_boot_init.py can point them elsewhere.
+lsm_list=${K3_LSM_LIST:-/sys/kernel/security/lsm}
+cgroup_controllers=${K3_CGROUP_CONTROLLERS:-/sys/fs/cgroup/cgroup.controllers}
+landlock() { # compiled in is not enough: it must be in the active LSM list, as no lsm= is given
+  echo "lsm: $(cat "$lsm_list")"
+  tr ',' '\n' < "$lsm_list" | grep -qx landlock
+}
+memcg() { # the memory controller is what MemoryMax= and the memory budgets are made of
+  echo "controllers: $(cat "$cgroup_controllers")"
+  tr ' ' '\n' < "$cgroup_controllers" | grep -qx memory
+}
 ima() { # securityfs files always have size 0: look at the content
   grep -q . /sys/kernel/security/ima/ascii_runtime_measurements
 }
@@ -70,6 +82,8 @@ check sched_ext   test -d /sys/kernel/sched_ext
 check ima         ima
 check lockdown    grep -q '\[integrity\]' /sys/kernel/security/lockdown
 check bbr         bbr
+check landlock    landlock
+check memcg       memcg
 check taint       test "$(cat /proc/sys/kernel/tainted)" = 0
 # Only the splat signatures: the hw-vuln warnings (e.g. SRSO on AMD in a VM) contain
 # "WARNING:" but are not kernel errors; a real WARN reads "WARNING: CPU: N PID: ...".
