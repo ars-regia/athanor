@@ -298,8 +298,8 @@ patchano i Makefile per forzarlo.
   ai branch `main` e `iso-v0`. Un secret non è più sicuro per essere nato sul
   runner: conta dove si usa, e chi ne ha la custodia.
 - **Chiave Secure Boot**: firma la UKI e la sua policy PCR (`ukify
---pcr-private-key`; è la chiave pubblica con cui un keyslot TPM di LUKS
-  si lega alla policy PCR 11; la chiave di policy PCR separata di D43 è aperta, P4b). Profilo `keys/profiles/secureboot.cnf`: non CA, `codeSigning`.
+--pcr-private-key`; oggi la firma la chiave Secure Boot; la chiave di policy PCR separata di D43 è aperta, P4b).
+  L'immagine non crea alcun keyslot TPM: l'unico percorso è `athanor-uki-enroll`, lanciato dall'utente. Profilo `keys/profiles/secureboot.cnf`: non CA, `codeSigning`.
   Secret `SECUREBOOT_SIGNING_KEY`, certificato
   `keys/secureboot/athanor-secureboot.pem` (`.der` per `mokutil --import`). Non
   essendo una CA, anche arruolata resta fuori dal keyring machine

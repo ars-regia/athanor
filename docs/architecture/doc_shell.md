@@ -167,7 +167,7 @@ COSMIC applications (`cosmic-files`, `cosmic-term`, `cosmic-edit`, `cosmic-store
 4. Existing installs move from `ostree-unverified-registry:` to a signed reference by an explicit, tested step.
 5. The helper is a root D-Bus service with two methods and no arguments, apply and go back, one polkit action each in the `os.athanor.*` namespace, the subject taken from the bus sender through `athanor_bus_api::polkit`. Apply takes logind's defaults for a reboot (SH11); going back is `auth_admin` for every subject. Every new unit is hardened, and the user-side processes restrict themselves with Landlock at start, as the greeter does.
 6. The state directory is declared in `tmpfiles.d` with owner and mode, apart from the directory that holds the released disk key.
-7. "Secure Boot on" means `SecureBoot=1`, `SetupMode=0`, shim validation not disabled and kernel lockdown active, each published separately. The shipped `athanor-secure-boot` daemon cannot own its bus name today; `doc_update_trust.md`, D2, retires it and keeps the TPM files its package also ships.
+7. "Secure Boot on" means `SecureBoot=1`, `SetupMode=0`, shim validation not disabled and kernel lockdown active, each published separately. The `athanor-secure-boot` daemon could not own its bus name; `doc_update_trust.md`, D2, retired it and its package is gone.
 8. Registry retention never removes an image, or the signature of an image, that a supported machine may still boot, download or go back to. `forge/scripts/clean_ghcr.sh` keeps two tagged versions per package today and counts signatures as versions.
 9. Every published image carries a version label of its own. Today two builds a day apart are both `43.20260916.0`, and SH11 names the running version to the user.
 

@@ -1,8 +1,8 @@
 # Kickstart for Athanor OS bare-metal, interactive install.
 #
 # This kickstart is public: it must not carry any one person's account, password or
-# disk. It sets what defines the system -- the bootc image, the hardened boot line,
-# the TPM monotonic counter -- and leaves what belongs to the person -- keyboard,
+# disk. It sets what defines the system -- the bootc image and the hardened boot line --
+# and leaves what belongs to the person -- keyboard,
 # time zone, disk layout and the user account -- to Anaconda's interactive screens.
 #
 # Anaconda goes interactive for exactly the directives that are absent here: with no
