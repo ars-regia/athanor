@@ -1,18 +1,46 @@
 # Security Policy
 
-Athanor OS treats security as its highest priority. The system is designed around Zero-Trust enclaves and Post-Quantum Cryptography.
+## Reporting a vulnerability
 
-## Supported Versions
-| Version | Supported          |
-| ------- | ------------------ |
-| 1.x     | :white_check_mark: |
-| < 1.0   | :x:                |
+Report privately through GitHub security advisories:
+<https://github.com/hr-mes/athanor/security/advisories/new>.
+Do not open a public issue or pull request for a vulnerability. Include the
+affected component and image version, the steps to reproduce, and the impact you
+expect.
 
-## Reporting a Vulnerability
+## Response times
 
-If you discover a vulnerability in Athanor OS (e.g., in `athanor-ebpf-sched`, `athanor-mesh-bus`, or `athanor-hypervisor-daemon`), **DO NOT** open a public issue.
+These are targets for a single maintainer, not guarantees.
 
-Instead, please email **security@athanor.org** with a detailed description and steps to reproduce. Our Security Response Team (SRT) will acknowledge your report within 24 hours.
+| Step | Target |
+| --- | --- |
+| Acknowledge the report | 7 days |
+| First assessment (accepted, needs information, or out of scope) | 14 days |
+| Fix or mitigation in a signed `:stable` image, for an accepted report | 90 days; sooner for a key compromise or remote code execution |
+| Public advisory | with the fix, or at 90 days at the latest, in agreement with the reporter |
 
-### Bug Bounty
-We offer bug bounties for verified remote code execution (RCE) or hypervisor escape vulnerabilities that bypass our KVM/SEV-SNP enclaves.
+## Scope
+
+In scope: code, configuration and pipelines in this repository, and what they
+ship in the image:
+
+- the update and trust chain (`athanor-update`, the container signature policy,
+  `:stable` promotion, the Secure Boot, module and image signing keys' use);
+- the Azoth kernel configuration and patches carried by Athanor;
+- the confinement, authorisation (polkit) and attestation code;
+- the build and release workflows.
+
+Out of scope, and better reported to the upstream project (tell us too if
+Athanor's configuration makes it worse):
+
+- vulnerabilities in unmodified Fedora, COSMIC, Linux, NVIDIA or Flatpak
+  packages;
+- code the user runs outside confinement: the threat model treats it as the user
+  (maintainer decision A2-9);
+- machines outside the supported audience (see `README.md`).
+
+## Supported versions
+
+Athanor has no numbered release yet. The supported version is the current
+`:stable` image. Security updates are provided while Fedora supports the base
+release; see "Audience and support window" in `README.md`.
