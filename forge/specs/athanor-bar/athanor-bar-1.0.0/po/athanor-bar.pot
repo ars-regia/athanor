@@ -231,8 +231,8 @@ msgstr ""
 msgid "Nearby devices"
 msgstr ""
 
-#: src/ui/bluetooth.rs:708 src/ui/network.rs:594 src/ui/power.rs:110
-#: src/ui/shield.rs:538
+#: src/ui/bluetooth.rs:708 src/ui/network.rs:606 src/ui/power.rs:110
+#: src/ui/shield.rs:539
 msgid "Cancel"
 msgstr ""
 
@@ -298,63 +298,63 @@ msgstr ""
 msgid "Input source"
 msgstr ""
 
-#: src/ui/mod.rs:672
+#: src/ui/mod.rs:682
 msgid "Unpin from Bar"
 msgstr ""
 
-#: src/ui/mod.rs:674
+#: src/ui/mod.rs:684
 msgid "Pin to Bar"
 msgstr ""
 
-#: src/ui/network.rs:552 src/ui/network.rs:555
+#: src/ui/network.rs:564 src/ui/network.rs:567
 msgid "Network"
 msgstr ""
 
-#: src/ui/network.rs:561
+#: src/ui/network.rs:573
 msgid "Wi-Fi"
 msgstr ""
 
-#: src/ui/network.rs:570
+#: src/ui/network.rs:582
 msgid "Airplane mode"
 msgstr ""
 
-#: src/ui/network.rs:587
+#: src/ui/network.rs:599
 msgid "The password was not accepted. Try again."
 msgstr ""
 
-#: src/ui/network.rs:596
+#: src/ui/network.rs:608
 msgid "Connect"
 msgstr ""
 
-#: src/ui/network.rs:710
+#: src/ui/network.rs:722
 msgid "Wired: connected"
 msgstr ""
 
-#: src/ui/network.rs:711
+#: src/ui/network.rs:723
 msgid "Wired: not connected"
 msgstr ""
 
-#: src/ui/network.rs:755
+#: src/ui/network.rs:767
 #, rust-format
 msgid "{network}, connected"
 msgstr ""
 
-#: src/ui/network.rs:756
+#: src/ui/network.rs:768
 #, rust-format
 msgid "{network}, connecting"
 msgstr ""
 
-#: src/ui/network.rs:757
+#: src/ui/network.rs:769
 #, rust-format
 msgid "{network}, needs Settings"
 msgstr ""
 
-#: src/ui/network.rs:759
+#: src/ui/network.rs:771
 #, rust-format
 msgid "{network}, secured"
 msgstr ""
 
-#: src/ui/network.rs:790
+#: src/ui/network.rs:802
 #, rust-format
 msgid "Password for {network}"
 msgstr ""
@@ -429,12 +429,12 @@ msgstr ""
 msgid "Power"
 msgstr ""
 
-#: src/ui/power.rs:149 src/ui/power.rs:155 src/ui/shield.rs:524
-#: src/ui/shield.rs:560
+#: src/ui/power.rs:149 src/ui/power.rs:155 src/ui/shield.rs:525
+#: src/ui/shield.rs:561
 msgid "Restart to update"
 msgstr ""
 
-#: src/ui/power.rs:154 src/ui/shield.rs:559
+#: src/ui/power.rs:154 src/ui/shield.rs:560
 msgid "Restart and install the update now?"
 msgstr ""
 
@@ -474,151 +474,155 @@ msgstr ""
 msgid "Not verified: the image is outside the policy's scope"
 msgstr ""
 
-#: src/ui/shield.rs:315
-msgid "Up to date"
+#: src/ui/shield.rs:310
+msgid "Not verified: the system was changed on this machine"
 msgstr ""
 
 #: src/ui/shield.rs:316
-msgid "An update is available; it downloads at the next check"
+msgid "Up to date"
 msgstr ""
 
 #: src/ui/shield.rs:317
-msgid "An update is ready; it installs when you restart"
+msgid "An update is available; it downloads at the next check"
 msgstr ""
 
 #: src/ui/shield.rs:318
-msgid "The update installs at the next restart"
+msgid "An update is ready; it installs when you restart"
 msgstr ""
 
 #: src/ui/shield.rs:319
+msgid "The update installs at the next restart"
+msgstr ""
+
+#: src/ui/shield.rs:320
 msgid "The last update was refused by the policy"
 msgstr ""
 
-#: src/ui/shield.rs:321
+#: src/ui/shield.rs:322
 msgid "You went back from the newest version; only a newer one is offered"
 msgstr ""
 
-#: src/ui/shield.rs:323
+#: src/ui/shield.rs:324
 msgid "This version is older than one this machine has run"
 msgstr ""
 
-#: src/ui/shield.rs:330
+#: src/ui/shield.rs:331
 msgid "The last check failed: network error"
 msgstr ""
 
-#: src/ui/shield.rs:331
+#: src/ui/shield.rs:332
 msgid "The last check failed: registry error"
 msgstr ""
 
-#: src/ui/shield.rs:332
+#: src/ui/shield.rs:333
 msgid "The last check failed: refused by the policy"
 msgstr ""
 
-#: src/ui/shield.rs:333
+#: src/ui/shield.rs:334
 msgid "The last check failed: storage error"
 msgstr ""
 
-#: src/ui/shield.rs:334
+#: src/ui/shield.rs:335
 msgid "The last check failed: internal error"
 msgstr ""
 
-#: src/ui/shield.rs:340
+#: src/ui/shield.rs:341
 msgid "No trust state yet: the first check has not run"
 msgstr ""
 
-#: src/ui/shield.rs:342
+#: src/ui/shield.rs:343
 msgid "The trust state file is not owned by the system and was ignored"
 msgstr ""
 
-#: src/ui/shield.rs:344
+#: src/ui/shield.rs:345
 msgid "The trust state file could not be read"
 msgstr ""
 
-#: src/ui/shield.rs:345 src/ui/shield.rs:359
+#: src/ui/shield.rs:346 src/ui/shield.rs:360
 msgid "The update service did not answer"
 msgstr ""
 
-#: src/ui/shield.rs:351
+#: src/ui/shield.rs:352
 msgid "Not authorised"
 msgstr ""
 
-#: src/ui/shield.rs:352
+#: src/ui/shield.rs:353
 msgid "Another update request is running"
 msgstr ""
 
-#: src/ui/shield.rs:354
+#: src/ui/shield.rs:355
 msgid "Nothing is downloaded yet; the update downloads at the next check"
 msgstr ""
 
-#: src/ui/shield.rs:356
+#: src/ui/shield.rs:357
 msgid "There is no previous version to go back to"
 msgstr ""
 
-#: src/ui/shield.rs:357
+#: src/ui/shield.rs:358
 msgid "A program is blocking the restart; close it and try again"
 msgstr ""
 
-#: src/ui/shield.rs:358
+#: src/ui/shield.rs:359
 msgid "The request failed; the system journal says why"
 msgstr ""
 
-#: src/ui/shield.rs:420
+#: src/ui/shield.rs:421
 #, rust-format
 msgid "Version {version}"
 msgstr ""
 
-#: src/ui/shield.rs:425
+#: src/ui/shield.rs:426
 #, rust-format
 msgid "Built on {date}"
 msgstr ""
 
-#: src/ui/shield.rs:431
+#: src/ui/shield.rs:432
 #, rust-format
 msgid "Last checked on {date}"
 msgstr ""
 
-#: src/ui/shield.rs:432
+#: src/ui/shield.rs:433
 msgid "Never checked"
 msgstr ""
 
-#: src/ui/shield.rs:438
+#: src/ui/shield.rs:439
 #, rust-format
 msgid "Host: {host}"
 msgstr ""
 
-#: src/ui/shield.rs:442
+#: src/ui/shield.rs:443
 msgid "Signature policy in force"
 msgstr ""
 
-#: src/ui/shield.rs:444
+#: src/ui/shield.rs:445
 msgid "Signature policy not in force"
 msgstr ""
 
-#: src/ui/shield.rs:447
+#: src/ui/shield.rs:448
 msgid "The policy is the one Athanor ships"
 msgstr ""
 
-#: src/ui/shield.rs:449
+#: src/ui/shield.rs:450
 msgid "The policy was changed on this machine"
 msgstr ""
 
-#: src/ui/shield.rs:452
+#: src/ui/shield.rs:453
 msgid "Secure Boot on"
 msgstr ""
 
-#: src/ui/shield.rs:454
+#: src/ui/shield.rs:455
 msgid "Secure Boot off: this machine runs in the declared degraded mode"
 msgstr ""
 
-#: src/ui/shield.rs:526
+#: src/ui/shield.rs:527
 msgid "Go back to the previous version"
 msgstr ""
 
-#: src/ui/shield.rs:565
+#: src/ui/shield.rs:566
 msgid "Go back to the previous version and restart? This asks for an administrator's password."
 msgstr ""
 
-#: src/ui/shield.rs:566
+#: src/ui/shield.rs:567
 msgid "Go back"
 msgstr ""
 

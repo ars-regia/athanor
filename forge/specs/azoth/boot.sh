@@ -48,8 +48,9 @@ mapfile -t CORE < <(find "$RPMS" -name 'kernel-core-*.rpm')
 [[ ${#CORE[@]} -eq 1 ]] || die "expected exactly one kernel-core-*.rpm in $RPMS, found ${#CORE[@]}"
 KVER=$(rpm -qp --qf '%{VERSION}-%{RELEASE}.%{ARCH}' "${CORE[0]}")
 CMDLINE=$(< "$HERE/cmdline")
-# Test only: serial console, immediate reboot on panic (with -no-reboot QEMU exits), an
-# IMA policy that measures something, and the parameters read by boot/init.
+# The base command line is the image's (generated from athanor-kernel-profile/profile.toml,
+# ima_policy=tcb included, so IMA measures something). Test only: serial console, immediate
+# reboot on panic (with -no-reboot QEMU exits) and the parameters read by boot/init.
 # The certificates the kernel must have compiled in (kernel-local), by subject key
 # identifier, the id the kernel logs them with: the module signing one and the revoked.
 skid() { openssl x509 -in "$1" -noout -ext subjectKeyIdentifier | tail -n 1 | tr -d ' :' | tr 'A-F' 'a-f'; }
@@ -57,7 +58,7 @@ K3_CERTS=''
 for cert in "$HERE"/keys/modules/*.pem "$HERE"/keys/revoked/*.pem; do
   K3_CERTS+="${K3_CERTS:+,}$(skid "$cert")"
 done
-TEST_CMDLINE="$CMDLINE console=ttyS0,115200 panic=-1 ima_policy=tcb k3.uname=$KVER k3.certs=$K3_CERTS"
+TEST_CMDLINE="$CMDLINE console=ttyS0,115200 panic=-1 k3.uname=$KVER k3.certs=$K3_CERTS"
 
 WORK=$(mktemp -d)
 mkdir -p "$OUT"

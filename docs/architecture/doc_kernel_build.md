@@ -215,6 +215,7 @@ delta, e resta corto:
 | Opzione                                               | Valore | Perché                                                                                                                                 |
 | ----------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `SCHED_BORE`                                          | y      | patch CachyOS, responsività desktop                                                                                                    |
+| `SECURITY_LANDLOCK`, `MEMCG`                          | y      | già in Fedora; dichiarati perché `check_delta` fermi la build se un bump li perde. Il boot verifica che Landlock sia nella lista LSM attiva e `memory` tra i controller |
 | `CC_OPTIMIZE_FOR_PERFORMANCE`                         | y      | `-O2`: la base CachyOS accende `-O3`, ma due A/B di K7 non gli hanno trovato vantaggi (sezione 13, punto 2); `variants/o3` lo rimisura |
 | `LTO_NONE`                                            | y      | ThinLTO spento: con `DEBUG_INFO_BTF`, `RUST` richiede `!LTO`; il bcond `clang_lto` resta per il toolchain (sezione 5)                  |
 | `RUST`                                                | y      | come Fedora: la porta ai driver che nascono in Rust; con kCFI seleziona `CFI_ICALL_NORMALIZE_INTEGERS`                                 |
@@ -318,9 +319,10 @@ patchano i Makefile per forzarlo.
 - **Primo avvio**: arruolamento guidato del certificato Secure Boot
   (`mokutil --import`), unica interazione richiesta per avere Secure Boot acceso
   su un PC qualsiasi; i moduli non ne dipendono.
-- **`cmdline`** committata: `lockdown=integrity mitigations=auto init_on_alloc=1
-randomize_kstack_offset=on page_alloc.shuffle=1 vsyscall=none preempt=full
-amd_pstate=active zswap.enabled=1`. Niente `iommu=pt`, niente `mitigations=off`.
+- **`cmdline`** generata da `forge/specs/athanor-kernel-profile/profile.toml`
+  (tabella `[base.cmdline]`, `doc_kernel_profile.md` sezione 6) insieme al file
+  `kargs.d` dell'immagine: la matrice di avvio prova la stessa riga che l'immagine
+  installa. Niente `iommu=pt`, niente `mitigations=off`.
 - **Rootfs**: dm-verity con roothash firmato da una chiave del progetto nel
   keyring secondario (non quella Secure Boot, che non vi entra),
   fs-verity per composefs, TPM 2.0 per LUKS (`systemd-cryptenroll`) con fallback
@@ -565,7 +567,7 @@ return thunk ai thunk del C++ di DisplayPort in `nvidia-modeset.o`, e il RM
 ha code di funzione irraggiungibili. `nvidia.sh sign` firma con `scripts/sign-file` del
 kernel-devel e l'hash di `CONFIG_MODULE_SIG_HASH`, e rilegge il firmatario con
 `modinfo`. Il workflow `nvidia-kmod.yml`: `build` (matrice dei due rami, runner
-self-hosted, kernel-devel dall'immagine pubblicata per l'NVR di `nvr.sh`),
+GitHub, kernel-devel dall'immagine pubblicata per l'NVR di `nvr.sh`),
 `sign` (runner GitHub, environment `signing`: vede solo i `.ko` e la chiave,
 montata in sola lettura per la durata del comando), `boot` (la catena della
 firma end-to-end in QEMU, gate 4 della sezione 7), `publish` (un'immagine

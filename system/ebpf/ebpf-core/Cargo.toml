@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-aya-ebpf = "0.1.0"
-aya-log-ebpf = { version = "0.1.0", default-features = false }
+aya-ebpf = "0.2.1"
+aya-log-ebpf = { version = "0.2.0", default-features = false }
 network-types = "0.0.5"
 num_enum = { version = "0.7.6", default-features = false }
 

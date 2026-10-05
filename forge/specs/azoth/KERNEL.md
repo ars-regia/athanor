@@ -17,7 +17,7 @@ directory e come si usa.
 | `patches/` | patch di Athanor, in formato git, applicate dopo quelle di CachyOS |
 | `patches/redhat/` | patch di Athanor al codice della patch Red Hat: solo sull'albero Fedora, mai su Kconfig |
 | `fedora-wins.list` | percorsi in cui un conflitto tra base CachyOS e patch Red Hat si risolve con l'albero Fedora |
-| `cmdline` | la riga di comando del kernel che la UKI firma (spec, sezione 6) |
+| `cmdline` | la riga di comando base usata dalla matrice di avvio, generata da `athanor-kernel-profile/profile.toml` (`kernel_profile.py generate`); non modificarla a mano |
 | `build.sh` | dai pin agli RPM: stadi `manifest` (scarica i sorgenti dei pin e scrive il loro manifesto), `prep` (sorgenti, patch, gate dei config), `refresh` (propone le copie rinfrescate delle patch di CachyOS che non entrano senza fuzz), `microvm` (prep e il solo kernel guest) e `build` (entrambi i kernel); `--variant NOME` per una variante di `variants/` |
 | `variants/` | frammenti che sovrascrivono righe di `kernel-local` per il confronto A/B del benchmark (`o3`: -O3 al posto di -O2); buildid `.azoth.NOME`, mai pubblicati |
 | `repro.py` | la riproducibilita': due build dello stesso pin a confronto (config, System.map, vmlinux per sezioni, moduli senza firma) |
@@ -45,7 +45,7 @@ directory e come si usa.
 | `KERNEL_CHANNEL` | `stable` |
 | `CACHYOS_RELEASE` | `cachyos-7.2.8-1` |
 | `CACHYOS_CONFIG_COMMIT` | `6676e72b85eb9e30d079a8c3dcdf93aedd1e8226` |
-| `CACHYOS_PATCHES_COMMIT` | `227a7d1a2a402274e3fd6455aacb101e5dec4ed2` |
+| `CACHYOS_PATCHES_COMMIT` | `17bb0bb818d283d0dc6e0280a2e9d5b95e66808b` |
 | `NVIDIA_OPEN_VERSION` | `615.71.09` |
 | `NVIDIA_OPEN_COMMIT` | `61dcc93722ecb418bb5f2e00923f05b4b8051dd1` |
 | `NVIDIA_LEGACY_VERSION` | `580.178.04` |

@@ -1,8 +1,9 @@
 use aya::programs::TracePoint;
 use aya::Ebpf;
-use aya::maps::perf::PerfEventArray;
+use aya::maps::perf::{PerfEvent, PerfEventArray};
 use aya::util::online_cpus;
-use bytes::BytesMut;
+use tokio::io::unix::AsyncFd;
+use tokio::io::Interest;
 use tokio::signal;
 use tokio::task;
 use tracing::{info, warn};
@@ -27,21 +28,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(events_map) = bpf.map_mut("EVENTS") {
         let mut perf_array = PerfEventArray::try_from(events_map)?;
         for cpu_id in online_cpus().map_err(|(s, e)| format!("{s}: {e}"))? {
-            let mut buf = perf_array.open(cpu_id, None)?;
+            let mut buf = AsyncFd::with_interest(perf_array.open(cpu_id, None)?, Interest::READABLE)?;
             task::spawn(async move {
-                let mut buffers = (0..10).map(|_| BytesMut::with_capacity(1024)).collect::<Vec<_>>();
                 loop {
-                    match buf.read_events(&mut buffers) {
-                        Ok(events) => {
-                            for b in buffers.iter_mut().take(events.read) {
-                                info!("Received event from kernel on CPU {} ({} bytes)", cpu_id, b.len());
-                            }
-                        }
+                    let mut guard = match buf.readable_mut().await {
+                        Ok(guard) => guard,
                         Err(e) => {
-                            warn!("Error reading perf events on CPU {}: {}", cpu_id, e);
+                            warn!("Error waiting for perf events on CPU {}: {}", cpu_id, e);
                             break;
                         }
-                    }
+                    };
+                    guard.get_inner_mut().for_each(|event| match event {
+                        PerfEvent::Sample { head, tail } => {
+                            info!("Received event from kernel on CPU {} ({} bytes)", cpu_id, head.len() + tail.len());
+                        }
+                        PerfEvent::Lost { count } => {
+                            warn!("Lost {} events from kernel on CPU {}", count, cpu_id);
+                        }
+                    });
+                    guard.clear_ready();
                 }
             });
         }

@@ -25,6 +25,9 @@ pub struct Deployed {
     pub enforcing: bool,
     /// Staged and locked against finalization (`bootc upgrade --download-only`).
     pub download_only: bool,
+    /// bootc calls the deployment incompatible: packages were layered, removed or replaced
+    /// with rpm-ostree, so bootc neither describes it as an image nor upgrades it.
+    pub local_changes: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,6 +106,8 @@ struct BootcEntry {
     image: Option<BootcImage>,
     #[serde(default)]
     download_only: bool,
+    #[serde(default)]
+    incompatible: bool,
 }
 
 #[derive(Deserialize)]
@@ -129,14 +134,66 @@ fn deployed(entry: BootcEntry) -> Option<Deployed> {
         version: image.version.unwrap_or_default(),
         build_time: image.timestamp.as_deref().and_then(unix_time).unwrap_or(0),
         download_only: entry.download_only,
+        local_changes: false,
     })
 }
 
 /// Parses `bootc status --format json`. `None` when the host is not booted from an image.
+/// bootc reports an incompatible booted deployment without its image, so `local` is asked for
+/// it; an incompatible staged or rollback deployment is left out, as bootc cannot act on it.
 #[must_use]
-pub fn parse_status(json: &str) -> Option<Status> {
+pub fn parse_status(json: &str, local: impl FnOnce() -> Option<Deployed>) -> Option<Status> {
     let host = serde_json::from_str::<BootcStatus>(json).ok()?.status;
-    Some(Status { booted: deployed(host.booted?)?, staged: host.staged.and_then(deployed), rollback: host.rollback.and_then(deployed) })
+    let booted = host.booted?;
+    let booted = if booted.incompatible { local()? } else { deployed(booted)? };
+    Some(Status { booted, staged: host.staged.and_then(deployed), rollback: host.rollback.and_then(deployed) })
+}
+
+#[derive(Deserialize)]
+struct RpmOstreeStatus {
+    deployments: Vec<RpmOstreeDeployment>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+struct RpmOstreeDeployment {
+    #[serde(default)]
+    booted: bool,
+    container_image_reference: Option<String>,
+    container_image_reference_digest: Option<String>,
+    version: Option<String>,
+    /// The base image's commit time, which is its `org.opencontainers.image.created`; the
+    /// deployment's own `timestamp` is when the packages were layered on this machine.
+    base_timestamp: Option<i64>,
+}
+
+/// The image a container reference of rpm-ostree names, without its transport:
+/// `ostree-unverified-registry:IMG`, `ostree-image-signed:docker://IMG` or
+/// `ostree-remote-registry:REMOTE:IMG`.
+fn image_of(reference: &str) -> Option<&str> {
+    let (scheme, rest) = reference.split_once(':')?;
+    let rest = if scheme.starts_with("ostree-remote-") { rest.split_once(':')?.1 } else { rest };
+    let image = rest.strip_prefix("docker://").or_else(|| rest.strip_prefix("registry:")).unwrap_or(rest);
+    Some(image).filter(|image| !image.is_empty())
+}
+
+/// Parses `rpm-ostree status --json --booted` into the booted deployment, for a deployment
+/// bootc calls incompatible. Its digest is the base image's: what runs is that image plus the
+/// local changes, which is why it is never verified.
+#[must_use]
+pub fn parse_local(json: &str) -> Option<Deployed> {
+    let status = serde_json::from_str::<RpmOstreeStatus>(json).ok()?;
+    let booted = status.deployments.into_iter().find(|deployment| deployment.booted)?;
+    let reference = booted.container_image_reference?;
+    Some(Deployed {
+        image: image_of(&reference)?.to_owned(),
+        digest: booted.container_image_reference_digest?,
+        version: booted.version.unwrap_or_default(),
+        build_time: booted.base_timestamp.unwrap_or(0),
+        enforcing: reference.starts_with("ostree-image-signed:"),
+        download_only: false,
+        local_changes: true,
+    })
 }
 
 /// The real programs, at their absolute paths in the image.
@@ -145,6 +202,7 @@ pub struct System;
 const BOOTC: &str = "/usr/bin/bootc";
 const SKOPEO: &str = "/usr/bin/skopeo";
 const OSTREE: &str = "/usr/bin/ostree";
+const RPM_OSTREE: &str = "/usr/bin/rpm-ostree";
 const BUSCTL: &str = "/usr/bin/busctl";
 pub const ATTACHMENTS_POLICY: &str = "/usr/share/athanor/containers/attachments-policy.json";
 
@@ -164,7 +222,9 @@ fn run(program: &str, args: &[&str], host: Option<String>) -> Result<String, Fai
 impl Tools for System {
     fn status(&self) -> Result<Status, Failure> {
         let json = run(BOOTC, &["status", "--format", "json"], None)?;
-        parse_status(&json).ok_or(Failure { code: ErrorCode::Internal, host: None })
+        let mut failure = None;
+        let status = parse_status(&json, || run(RPM_OSTREE, &["status", "--json", "--booted"], None).map_err(|err| failure = Some(err)).ok().and_then(|json| parse_local(&json)));
+        status.ok_or_else(|| failure.unwrap_or(Failure { code: ErrorCode::Internal, host: None }))
     }
 
     fn candidate(&self, image: &str) -> Result<Candidate, Failure> {
@@ -232,7 +292,7 @@ mod tests {
 
     #[test]
     fn the_status_gives_the_lock_the_build_time_and_the_enforcement() {
-        let status = parse_status(STAGED).expect("status");
+        let status = parse_status(STAGED, || None).expect("status");
         assert_eq!(status.booted.build_time, 1_789_034_400);
         assert!(status.booted.enforcing && !status.booted.download_only);
         let staged = status.staged.expect("staged");
@@ -245,8 +305,47 @@ mod tests {
 
     #[test]
     fn a_host_not_booted_from_an_image_has_no_status() {
-        assert_eq!(parse_status(r#"{"status":{"booted":null,"staged":null,"rollback":null}}"#), None);
-        assert_eq!(parse_status("not json"), None);
+        assert_eq!(parse_status(r#"{"status":{"booted":null,"staged":null,"rollback":null}}"#, || None), None);
+        assert_eq!(parse_status("not json", || None), None);
+    }
+
+    /// The desktop of 2026-10-01 with nvidia-container-toolkit layered, reduced to the members read.
+    const INCOMPATIBLE: &str = r#"{"apiVersion":"org.containers.bootc/v1","kind":"BootcHost","status":{"staged":null,
+      "booted":{"image":null,"cachedUpdate":null,"incompatible":true,"pinned":false,"downloadOnly":false,"store":"ostreeContainer",
+        "ostree":{"checksum":"b87dc9499ddc437d7bf39318ad5f7baff4d1ae62faa508f01d02605e678864e6","deploySerial":0,"stateroot":"default"}},
+      "rollback":{"image":null,"incompatible":true,"downloadOnly":false}}}"#;
+    const RPM_OSTREE_BOOTED: &str = r#"{"deployments":[{"booted":true,"staged":false,
+      "container-image-reference":"ostree-unverified-registry:ghcr.io/owner/athanor-system-nvidia:latest",
+      "container-image-reference-digest":"sha256:b6a2b14800b8c6799d04c4adf870e806fb5b8b655cd8fa622e3b9618a985d61d",
+      "version":"43.20261001.137","timestamp":1790852801,"base-timestamp":1790849302,"requested-packages":["nvidia-container-toolkit"]}]}"#;
+
+    #[test]
+    fn an_incompatible_booted_deployment_is_read_from_rpm_ostree() {
+        let status = parse_status(INCOMPATIBLE, || parse_local(RPM_OSTREE_BOOTED)).expect("status");
+        let booted = status.booted;
+        assert_eq!(booted.image, "ghcr.io/owner/athanor-system-nvidia:latest");
+        assert_eq!(booted.digest, "sha256:b6a2b14800b8c6799d04c4adf870e806fb5b8b655cd8fa622e3b9618a985d61d");
+        assert_eq!((booted.version.as_str(), booted.build_time), ("43.20261001.137", 1_790_849_302), "the base image's time, not the layering's");
+        assert!(booted.local_changes && !booted.enforcing && !booted.download_only);
+        assert_eq!((status.staged, status.rollback), (None, None));
+        assert_eq!(parse_status(INCOMPATIBLE, || None), None, "no description of the booted deployment, no status");
+    }
+
+    #[test]
+    fn the_transport_of_an_rpm_ostree_reference_is_dropped() {
+        for (reference, image) in [
+            ("ostree-unverified-registry:ghcr.io/o/a:latest", Some("ghcr.io/o/a:latest")),
+            ("ostree-image-signed:docker://ghcr.io/o/a:stable", Some("ghcr.io/o/a:stable")),
+            ("ostree-unverified-image:registry:ghcr.io/o/a:stable", Some("ghcr.io/o/a:stable")),
+            ("ostree-remote-registry:fedora:quay.io/f/b:43", Some("quay.io/f/b:43")),
+            ("ostree-unverified-registry:", None),
+            ("nonsense", None),
+        ] {
+            assert_eq!(image_of(reference), image, "{reference}");
+        }
+        let signed = RPM_OSTREE_BOOTED.replace("ostree-unverified-registry:", "ostree-image-signed:docker://");
+        assert!(parse_local(&signed).expect("local").enforcing);
+        assert_eq!(parse_local(r#"{"deployments":[{"booted":false}]}"#), None);
     }
 
     #[test]
