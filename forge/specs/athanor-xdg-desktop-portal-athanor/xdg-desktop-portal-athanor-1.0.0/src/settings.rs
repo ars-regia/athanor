@@ -55,7 +55,11 @@ pub struct Change {
 
 /// Opens the served schemas and Athanor's on the calling thread's main context, fills the
 /// store and follows every change. The returned objects must live as long as the watch.
-pub fn watch(changes: UnboundedSender<Change>) -> (Arc<RwLock<Store>>, Vec<gio::Settings>) {
+/// `backend` is where the values live; `None` is the default one, dconf in a session.
+pub fn watch(
+    changes: UnboundedSender<Change>,
+    backend: Option<&gio::SettingsBackend>,
+) -> (Arc<RwLock<Store>>, Vec<gio::Settings>) {
     let watcher = Rc::new(Watcher {
         store: Arc::new(RwLock::new(Store::new())),
         athanor: RefCell::new(BTreeMap::new()),
@@ -63,7 +67,7 @@ pub fn watch(changes: UnboundedSender<Change>) -> (Arc<RwLock<Store>>, Vec<gio::
     });
     let mut opened = Vec::new();
     for id in GNOME_SCHEMAS.into_iter().chain([ATHANOR]) {
-        let Some(settings) = open(id) else {
+        let Some(settings) = open(id, backend) else {
             tracing::info!(schema = id, "not installed; not served");
             continue;
         };
@@ -85,13 +89,9 @@ pub fn watch(changes: UnboundedSender<Change>) -> (Arc<RwLock<Store>>, Vec<gio::
     (Arc::clone(&watcher.store), opened)
 }
 
-fn open(id: &str) -> Option<gio::Settings> {
+fn open(id: &str, backend: Option<&gio::SettingsBackend>) -> Option<gio::Settings> {
     let schema = gio::SettingsSchemaSource::default()?.lookup(id, true)?;
-    Some(gio::Settings::new_full(
-        &schema,
-        None::<&gio::SettingsBackend>,
-        None,
-    ))
+    Some(gio::Settings::new_full(&schema, backend, None))
 }
 
 fn read_all(settings: &gio::Settings) -> BTreeMap<String, Variant> {
@@ -442,23 +442,25 @@ mod tests {
     /// machine has installed (gsettings-desktop-schemas).
     #[test]
     fn a_gsettings_write_reaches_the_store_and_the_derived_keys_once() {
-        // The only test that touches GSettings or the environment it reads.
-        std::env::set_var("GSETTINGS_BACKEND", "memory");
+        // A backend of the test's own, passed in: setting GSETTINGS_BACKEND would write
+        // the environment while other tests' threads read it.
+        let backend = gio::memory_settings_backend_new();
+        let schema = |id: &str| open(id, Some(&backend)).expect(id);
         let context = glib::MainContext::new();
         context
             .with_thread_default(|| {
                 let (sender, mut received) = tokio::sync::mpsc::unbounded_channel();
-                let (store, _watched) = watch(sender);
+                let (store, _watched) = watch(sender, Some(&backend));
                 let appearance = |key: &str| store.read().unwrap()[APPEARANCE][key].clone();
                 assert_eq!(appearance("color-scheme"), 0u32.to_variant());
                 assert_eq!(appearance("contrast"), 0u32.to_variant());
                 // The start fills the store; it announces nothing.
                 while received.try_recv().is_ok() {}
 
-                let writer = gio::Settings::new(INTERFACE);
+                let writer = schema(INTERFACE);
                 writer.set_string("color-scheme", "prefer-dark").unwrap();
                 writer.set_string("accent-color", "teal").unwrap();
-                gio::Settings::new(A11Y_INTERFACE)
+                schema(A11Y_INTERFACE)
                     .set_boolean("high-contrast", true)
                     .unwrap();
                 while context.iteration(false) {}

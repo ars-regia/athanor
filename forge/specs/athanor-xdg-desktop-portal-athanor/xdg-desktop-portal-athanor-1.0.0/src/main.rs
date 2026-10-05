@@ -48,7 +48,7 @@ fn main() -> ExitCode {
     }
 
     let (changes, received) = tokio::sync::mpsc::unbounded_channel();
-    let (store, _watched) = settings::watch(changes);
+    let (store, _watched) = settings::watch(changes, None);
     std::thread::spawn(move || {
         if let Err(err) = serve(store, received) {
             tracing::error!(error = %err, "the portal's D-Bus service ended");
