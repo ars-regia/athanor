@@ -84,8 +84,7 @@
     "backup",
     "update",
     "xdg-desktop-portal-athanor",
-    "qa",
-    "athanor-semantic-db"
+    "qa"
   ],
   "cachyos_addons": [],
   "upstream_core": [
