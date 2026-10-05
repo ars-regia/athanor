@@ -2,7 +2,6 @@
 paths:
   - "**/polkit*.rs"
   - "**/*.policy"
-  - "**/*gatekeeper*/**"
   - "**/*attestation*/**"
   - "**/*bus-api*/**"
   - "**/*mesh*/**"
@@ -12,7 +11,7 @@ paths:
 
 # Sicurezza — percorsi critici
 
-<!-- I glob sono scritti per FUNZIONE (`*gatekeeper*`, `*attestation*`, `*bus-api*`)
+<!-- I glob sono scritti per FUNZIONE (`*attestation*`, `*bus-api*`, `*mesh*`)
      e non per nome di prodotto. La rinomina Ermete -> Athanor del 5 settembre 2026
      aveva gia' spezzato cinque glob su sei scritti con il prefisso vecchio: la
      regola restava nel repository, sembrava configurata, e non si caricava piu'
@@ -33,7 +32,7 @@ fermati e dillo.
 ## Zero-trust
 
 - Nessun daemon o applicazione fuori da un compartimento o da una MicroVM `crosvm`.
-- Il Gatekeeper non si aggira. Se un percorso richiede di saltarlo, il percorso è sbagliato.
+- La policy IPE, il confinamento Landlock e i compartimenti non si aggirano. Se un percorso richiede di saltarli, il percorso è sbagliato.
 - Mai `chmod 777`, mai permessi allargati "per far funzionare la cosa".
 
 ## Polkit
