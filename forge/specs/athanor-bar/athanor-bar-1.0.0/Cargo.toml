@@ -11,6 +11,7 @@ athanor-apps = { path = "../../../../system/athanor-apps" }
 athanor-compositor-client = { path = "../../../../system/athanor-compositor-client" }
 athanor-i18n = { path = "../../../../system/athanor-i18n" }
 athanor-layout = { path = "../../../../system/athanor-layout" }
+athanor-services = { path = "../../../../system/athanor-services" }
 athanor-style = { path = "../../../../system/athanor-style" }
 athanor-trust-state = { path = "../../../../system/athanor-trust-state" }
 athanor-unit = { path = "../../../../system/athanor-unit" }
@@ -19,10 +20,8 @@ gio-unix = { workspace = true }
 glib = { workspace = true, features = ["v2_68"] }
 gtk4 = { workspace = true }
 gtk4-layer-shell = { workspace = true }
-# The audio module (doc_bar.md, BR3): the PulseAudio protocol that pipewire-pulse serves, on
-# the bar's GLib main loop.
-libpulse-binding = { workspace = true }
-libpulse-glib-binding = { workspace = true }
 # O_NONBLOCK for picture files a peer names: a FIFO must not hang the bar.
 libc = { workspace = true }
+# The channels the models of athanor-services publish on, awaited from the GLib main loop.
+tokio = { workspace = true, features = ["sync"] }
 tracing = { workspace = true }

@@ -7,6 +7,7 @@ mod accessibility;
 mod audio;
 mod battery;
 mod bluetooth;
+pub mod bridge;
 mod bus;
 mod clock;
 mod input;

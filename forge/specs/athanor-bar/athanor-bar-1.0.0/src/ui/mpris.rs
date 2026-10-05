@@ -1,18 +1,14 @@
 //! The media controls' player (doc_bar.md, BR3): the first MPRIS player on the session bus,
-//! by name, mirrored while it owns its name. A player that appears or leaves makes the
-//! choice again.
+//! by name, followed by the model in athanor-services while it owns its name. A player that
+//! appears or leaves makes the choice again.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use athanor_bar::audio::{self, Track};
-use athanor_bar::props;
-use gtk4::{gio, glib};
+use athanor_services::media::{self, MediaCommand, MediaState, Track};
+use tokio::sync::mpsc;
 
-use super::bus::{self, Mirror, Source};
-
-const DBUS: &str = "org.freedesktop.DBus";
-const DBUS_PATH: &str = "/org/freedesktop/DBus";
+use super::bridge;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct NowPlaying {
@@ -23,153 +19,72 @@ pub struct NowPlaying {
 }
 
 pub struct Media {
-    session: RefCell<Option<gio::DBusConnection>>,
-    player: RefCell<Option<(String, Rc<Mirror>)>>,
-    /// The session bus's names have been listed once: `player` is the choice, not a guess.
-    listed: Cell<bool>,
-    notify: Rc<dyn Fn()>,
-    subscription: RefCell<Option<gio::SignalSubscription>>,
+    /// The model's last state, which `bridge::follow` keeps current. Without a runtime there
+    /// is no model and nothing to wait for, so it starts settled.
+    state: RefCell<MediaState>,
+    refused: Cell<u32>,
+    commands: Option<mpsc::UnboundedSender<MediaCommand>>,
 }
 
 impl Media {
-    pub fn new(notify: impl Fn() + 'static) -> Rc<Media> {
+    /// `notify` runs when the state changed; `failed` when a player refused a command or did
+    /// not answer.
+    pub fn new(notify: impl Fn() + 'static, failed: impl Fn() + 'static) -> Rc<Media> {
+        let model = bridge::runtime().map(|(handle, buses)| media::spawn(&handle, buses));
+        let (states, commands) = match model {
+            Some((states, commands)) => (Some(states), Some(commands)),
+            None => {
+                tracing::warn!("no runtime for the models; the media controls are hidden");
+                (None, None)
+            }
+        };
         let media = Rc::new(Media {
-            session: RefCell::new(None),
-            player: RefCell::new(None),
-            listed: Cell::new(false),
-            notify: Rc::new(notify),
-            subscription: RefCell::new(None),
+            state: RefCell::new(MediaState {
+                settled: states.is_none(),
+                ..MediaState::default()
+            }),
+            refused: Cell::new(0),
+            commands,
         });
-        let weak = Rc::downgrade(&media);
-        glib::spawn_future_local(async move {
-            let session = match gio::bus_get_future(gio::BusType::Session).await {
-                Ok(session) => session,
-                Err(err) => {
-                    tracing::warn!(error = %err, "no session bus; the media controls are hidden");
-                    return;
+        if let Some(states) = states {
+            let weak = Rc::downgrade(&media);
+            bridge::follow(states, move |state| {
+                let Some(media) = weak.upgrade() else { return };
+                let refused = media.refused.replace(state.refused) != state.refused;
+                media.state.replace(state.clone());
+                notify();
+                if refused {
+                    failed();
                 }
-            };
-            let Some(media) = weak.upgrade() else { return };
-            let watcher = Rc::downgrade(&media);
-            let subscription = session.subscribe_to_signal(
-                Some(DBUS),
-                Some(DBUS),
-                Some("NameOwnerChanged"),
-                Some(DBUS_PATH),
-                None,
-                gio::DBusSignalFlags::NONE,
-                move |signal| {
-                    let player = signal
-                        .parameters
-                        .try_child_value(0)
-                        .and_then(|name| name.str().map(audio::is_player))
-                        .unwrap_or(false);
-                    if let (true, Some(media)) = (player, watcher.upgrade()) {
-                        media.choose();
-                    }
-                },
-            );
-            media.subscription.replace(Some(subscription));
-            media.session.replace(Some(session));
-            media.choose();
-        });
+            });
+        }
         media
     }
 
-    /// Follows the first player by name; the choice is stable while players come and go.
-    fn choose(self: &Rc<Self>) {
-        let Some(session) = self.session.borrow().clone() else {
-            return;
-        };
-        let weak = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let reply = bus::call(
-                &session,
-                DBUS,
-                DBUS_PATH,
-                DBUS,
-                "ListNames",
-                None,
-                bus::TIMEOUT_MS,
-            )
-            .await;
-            let Some(media) = weak.upgrade() else { return };
-            let names = reply
-                .ok()
-                .filter(|reply| props::has_type(reply, "(as)"))
-                .and_then(|reply| reply.try_child_value(0))
-                .and_then(|names| names.get::<Vec<String>>());
-            let Some(names) = names else {
-                tracing::warn!("ListNames failed; the media controls keep their player");
-                return;
-            };
-            let first = names
-                .into_iter()
-                .filter(|name| audio::is_player(name))
-                .min();
-            let first_listing = !media.listed.replace(true);
-            let current = media.player.borrow().as_ref().map(|(name, _)| name.clone());
-            if first == current && !first_listing {
-                return;
-            }
-            if first == current {
-                (media.notify)();
-                return;
-            }
-            let player = first.map(|name| {
-                let notify = media.notify.clone();
-                let mirror = Mirror::new(
-                    &session,
-                    &name,
-                    Source::Fixed(vec![(audio::MPRIS_PATH, audio::MPRIS_PLAYER)]),
-                    move || notify(),
-                );
-                (name, mirror)
-            });
-            media.player.replace(player);
-            (media.notify)();
-        });
-    }
-
     /// Whether the media controls show what they will keep showing: the players were
-    /// listed, and the followed one, if any, has answered with its track.
+    /// listed, and the followed one, if any, has answered with its properties.
     pub fn settled(&self) -> bool {
-        self.listed.get() && (self.player.borrow().is_none() || self.now().is_some())
+        self.state.borrow().settled
     }
 
     pub fn now(&self) -> Option<NowPlaying> {
-        let player = self.player.borrow();
-        let (_, mirror) = player.as_ref()?;
-        let objects = mirror.objects();
-        let props = props::lookup(&objects, audio::MPRIS_PATH, audio::MPRIS_PLAYER)?;
+        let state = self.state.borrow();
+        let player = state.current_player()?;
         Some(NowPlaying {
-            track: audio::track(props)?,
-            playing: audio::playing(props),
-            can_next: props::value::<bool>(props, "CanGoNext").unwrap_or(false),
-            can_previous: props::value::<bool>(props, "CanGoPrevious").unwrap_or(false),
+            track: player.track.clone()?,
+            playing: player.playing,
+            can_next: player.can_next,
+            can_previous: player.can_previous,
         })
     }
 
-    /// `PlayPause`, `Next` or `Previous` to the followed player; `failed` runs if the player
-    /// refuses it or does not answer.
-    pub fn command(&self, method: &'static str, failed: impl FnOnce() + 'static) {
-        let session = self.session.borrow().clone();
-        let player = self.player.borrow();
-        let (Some(session), Some((name, _))) = (session, player.as_ref()) else {
-            return;
-        };
-        bus::act(
-            method,
-            bus::call(
-                &session,
-                name,
-                audio::MPRIS_PATH,
-                audio::MPRIS_PLAYER,
-                method,
-                None,
-                bus::TIMEOUT_MS,
-            ),
-            failed,
-        );
+    /// Hands `command` to the model, which carries it out on the followed player; the `failed`
+    /// of [`Media::new`] runs if the player refuses it or does not answer.
+    pub fn command(&self, command: MediaCommand) {
+        if let Some(commands) = &self.commands {
+            if commands.send(command).is_err() {
+                tracing::debug!("the media model ended; the command is dropped");
+            }
+        }
     }
 }

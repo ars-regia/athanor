@@ -7,21 +7,17 @@ use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 
-use athanor_bar::battery::{self, Backlight, Battery, Charge};
-use athanor_bar::props;
+use athanor_services::battery::{
+    self, BatteryCommand, BatteryState, Charge, Profiles, BACKLIGHT_ROOT,
+};
 use gtk4::accessible::{Property, Relation};
 use gtk4::prelude::*;
-use gtk4::{gio, glib};
+use tokio::sync::mpsc;
 
-use super::bus::{self, Mirror, Source};
+use super::bridge;
 use super::popup::{expose_choose_action, Popup};
 use super::{Bar, Changed, ModuleUi};
 use crate::i18n::{tr, tr_with};
-
-const LOGIN1: &str = "org.freedesktop.login1";
-/// logind resolves `auto` to the caller's session.
-const SESSION_PATH: &str = "/org/freedesktop/login1/session/auto";
-const SESSION: &str = "org.freedesktop.login1.Session";
 
 thread_local! {
     static SERVICE: RefCell<Option<Rc<Service>>> = const { RefCell::new(None) };
@@ -31,29 +27,14 @@ fn service() -> Option<Rc<Service>> {
     SERVICE.with(|cell| cell.borrow().clone())
 }
 
-/// For [`bus::act`]: an action the person took did not complete. The views show the
-/// services' state again, which puts a radio or the slider back, and the open popover says so.
-fn action_failed() {
-    if let Some(service) = service() {
-        service.show_all();
-        for view in service.views() {
-            view.popup.failed();
-        }
-    }
-}
-
-/// What one view shows.
-struct Status {
-    battery: Option<Battery>,
-    profiles: Option<(Vec<&'static str>, String)>,
-    backlight: Option<Backlight>,
-}
-
 struct Service {
     bar: Weak<Bar>,
-    connection: RefCell<Option<gio::DBusConnection>>,
-    upower: RefCell<Option<Rc<Mirror>>>,
-    profiles: RefCell<Option<Rc<Mirror>>>,
+    /// `None` without the runtime of the models; the module is then hidden.
+    commands: Option<mpsc::UnboundedSender<BatteryCommand>>,
+    /// The model's last state, which `bridge::follow` keeps current.
+    state: RefCell<BatteryState>,
+    /// How many commands the model had counted as refused when the views last showed it.
+    refused: Cell<u32>,
     backlight_root: PathBuf,
     views: RefCell<Vec<Weak<View>>>,
 }
@@ -66,75 +47,58 @@ impl Service {
         // The rig points the bar at a fake sysfs directory; the level still goes through
         // logind, which checks the device itself.
         let backlight_root = std::env::var_os("ATHANOR_BAR_BACKLIGHT_DIR")
-            .map_or_else(|| PathBuf::from(battery::BACKLIGHT_ROOT), PathBuf::from);
+            .map_or_else(|| PathBuf::from(BACKLIGHT_ROOT), PathBuf::from);
+        let model = bridge::runtime()
+            .map(|(handle, buses)| battery::spawn(&handle, buses, backlight_root.clone()));
+        let (states, commands) = match model {
+            Some((states, commands)) => (Some(states), Some(commands)),
+            None => {
+                tracing::warn!("no runtime for the models; the battery module is hidden");
+                (None, None)
+            }
+        };
         let service = Rc::new(Service {
             bar: Rc::downgrade(bar),
-            connection: RefCell::new(None),
-            upower: RefCell::new(None),
-            profiles: RefCell::new(None),
+            commands,
+            state: RefCell::new(BatteryState::default()),
+            refused: Cell::new(0),
             backlight_root,
             views: RefCell::new(Vec::new()),
         });
         SERVICE.with(|cell| cell.replace(Some(service.clone())));
-        let weak = Rc::downgrade(&service);
-        glib::spawn_future_local(async move {
-            let connection = match gio::bus_get_future(gio::BusType::System).await {
-                Ok(connection) => connection,
-                Err(err) => {
-                    tracing::warn!(error = %err, "no system bus; the battery module is hidden");
+        if let Some(states) = states {
+            // Weak, as the other modules hold the service: the thread-local owns it.
+            let weak = Rc::downgrade(&service);
+            bridge::follow(states, move |state| {
+                let Some(service) = weak.upgrade() else {
                     return;
-                }
-            };
-            let Some(service) = weak.upgrade() else {
-                return;
-            };
-            // The mirrors hold no strong reference to the service: they find it in the
-            // thread-local, as the other modules do. The path names the function, which the
-            // local `service` bindings shadow.
-            let notify = || {
-                || {
-                    if let Some(service) = self::service() {
-                        service.show_all();
+                };
+                let failed = service.refused.replace(state.refused) != state.refused;
+                service.state.replace(state.clone());
+                // The views show the state again, which puts a radio or the slider back, and
+                // the open popover says the action did not complete.
+                service.show_all();
+                if failed {
+                    for view in service.views() {
+                        view.popup.failed();
                     }
                 }
-            };
-            service.upower.replace(Some(Mirror::new(
-                &connection,
-                battery::UPOWER,
-                Source::Fixed(vec![(battery::DISPLAY_DEVICE, battery::DEVICE_IFACE)]),
-                notify(),
-            )));
-            service.profiles.replace(Some(Mirror::new(
-                &connection,
-                battery::PROFILES,
-                Source::Fixed(vec![(battery::PROFILES_PATH, battery::PROFILES)]),
-                notify(),
-            )));
-            service.connection.replace(Some(connection));
-        });
+            });
+        }
         service
     }
 
-    fn status(&self) -> Status {
-        let battery = self.upower.borrow().as_ref().and_then(|mirror| {
-            let objects = mirror.objects();
-            props::lookup(&objects, battery::DISPLAY_DEVICE, battery::DEVICE_IFACE)
-                .and_then(battery::battery)
-        });
-        let profiles = self.profiles.borrow().as_ref().and_then(|mirror| {
-            let objects = mirror.objects();
-            props::lookup(&objects, battery::PROFILES_PATH, battery::PROFILES)
-                .and_then(battery::profiles)
-        });
-        Status {
-            battery,
-            profiles,
+    /// The state with the backlight read again: the brightness keys change it without a
+    /// signal, so a popover reads it when it opens.
+    fn fresh_status(&self) -> BatteryState {
+        BatteryState {
             backlight: battery::read_backlight(&self.backlight_root),
+            ..self.state.borrow().clone()
         }
     }
 
     fn show_all(&self) {
-        let status = self.status();
+        let status = self.state.borrow().clone();
         for view in self.views() {
             view.show(&status);
         }
@@ -149,47 +113,34 @@ impl Service {
         views.iter().filter_map(Weak::upgrade).collect()
     }
 
-    fn set_profile(&self, profile: &'static str) {
-        let Some(connection) = self.connection.borrow().clone() else {
+    fn send(&self, command: BatteryCommand) {
+        let Some(commands) = &self.commands else {
             return;
         };
-        bus::act(
-            "set the power profile",
-            bus::set_property(
-                &connection,
-                battery::PROFILES,
-                battery::PROFILES_PATH,
-                battery::PROFILES,
-                "ActiveProfile",
-                profile.to_variant(),
-            ),
-            action_failed,
-        );
+        if let Err(err) = commands.send(command) {
+            tracing::warn!(error = %err, "the battery model did not take a command");
+            // The channel is unbounded and the model coalesces what it reads, so a send
+            // fails only when the model has ended: say the action did not complete, as for
+            // a refusal.
+            self.show_all();
+            for view in self.views() {
+                view.popup.failed();
+            }
+        }
+    }
+
+    fn set_profile(&self, profile: &'static str) {
+        self.send(BatteryCommand::SetProfile(profile.to_owned()));
     }
 
     fn set_brightness(&self, percent: f64) {
-        let Some(connection) = self.connection.borrow().clone() else {
+        let Some(backlight) = self.state.borrow().backlight.clone() else {
             return;
         };
-        // Read again: the level the slider scales is the device's, which may have changed
-        // through the brightness keys since the popover opened.
-        let Some(backlight) = battery::read_backlight(&self.backlight_root) else {
-            return;
-        };
-        let args = ("backlight", backlight.name.as_str(), backlight.raw(percent)).to_variant();
-        bus::act(
-            "set the screen brightness",
-            bus::call(
-                &connection,
-                LOGIN1,
-                SESSION_PATH,
-                SESSION,
-                "SetBrightness",
-                Some(&args),
-                bus::TIMEOUT_MS,
-            ),
-            action_failed,
-        );
+        self.send(BatteryCommand::SetBrightness {
+            raw: backlight.raw(percent),
+            device: backlight.name,
+        });
     }
 }
 
@@ -211,7 +162,7 @@ fn duration(text: &str, seconds: u64) -> String {
 }
 
 /// The line under the charge: the time left, the time until full, or the state.
-fn note(battery: &Battery) -> Option<String> {
+fn note(battery: &battery::Battery) -> Option<String> {
     match (battery.charge, battery.seconds) {
         (Charge::Discharging, Some(seconds)) => {
             Some(duration(&tr("{hours} h {minutes} min left"), seconds))
@@ -345,12 +296,12 @@ impl View {
         let weak = Rc::downgrade(self);
         self.popup.popover.connect_show(move |_| {
             if let (Some(view), Some(service)) = (weak.upgrade(), service()) {
-                view.show(&service.status());
+                view.show(&service.fresh_status());
             }
         });
     }
 
-    fn show(self: &Rc<Self>, status: &Status) {
+    fn show(self: &Rc<Self>, status: &BatteryState) {
         let Some(battery) = status.battery else {
             self.popup.popover.popdown();
             self.popup.button.set_visible(false);
@@ -374,7 +325,7 @@ impl View {
             .update_property(&[Property::Description(&description)]);
 
         self.profiles_section.set_visible(status.profiles.is_some());
-        if let Some((offered, active)) = &status.profiles {
+        if let Some(Profiles { offered, active }) = &status.profiles {
             for (name, button) in &self.profiles {
                 button.set_visible(offered.contains(name));
                 if *name == active.as_str() {
@@ -422,6 +373,7 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     let service = Service::get(bar);
     let view = View::new(bar);
     service.views.borrow_mut().push(Rc::downgrade(&view));
-    view.show(&service.status());
+    let status = service.state.borrow().clone();
+    view.show(&status);
     Some(Box::new(BatteryUi { view }))
 }

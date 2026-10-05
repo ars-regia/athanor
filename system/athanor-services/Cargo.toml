@@ -13,6 +13,10 @@ testbus = []
 [dependencies]
 # StreamExt over zbus's signal streams, as athanor-shelld uses it.
 futures-util = { workspace = true }
+athanor-unit = { path = "../athanor-unit" }
+libc = { workspace = true }
+# The PulseAudio protocol that pipewire-pulse serves, on libpulse's threaded main loop.
+libpulse-binding = { workspace = true }
 serde = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

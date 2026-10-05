@@ -8,7 +8,12 @@
 //! for an ambient one, so code running outside the runtime fails to compile instead of
 //! aborting at run time.
 
+pub mod audio;
+pub mod battery;
+pub mod bluetooth;
+pub mod media;
 pub mod mirror;
+pub mod network;
 pub mod notifications;
 pub mod props;
 pub mod runtime;
