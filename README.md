@@ -30,6 +30,13 @@ Explore the detailed architectural specifications (generated and maintained by o
 
 ### Quick Chapters
 1. [The Athanor Paradigm: Beyond Big-Tech](#1-the-athanor-paradigm-beyond-big-tech)
+## Audience and support window
+
+- **Audience:** desktops and laptops with UEFI and an x86-64-v3 CPU (Haswell and Zen 1 or newer). Older machines, and low-power ones such as the Intel N5100 class, are not supported.
+- **Base:** Athanor follows the current Fedora release and moves to the next one within 90 days of its release.
+- **Security updates:** provided while Fedora supports the base release (Fedora 45: until 2027-11-24, per the [Fedora schedule](https://fedorapeople.org/groups/schedule/f-45/f-45-key-tasks.html); Fedora may move that date).
+- **Reporting vulnerabilities:** see [SECURITY.md](.github/SECURITY.md). **Contributing:** see [CONTRIBUTING.md](.github/CONTRIBUTING.md).
+
 ## Architecture
 For the full system architecture, please see the [Architecture Document](system/ARCHITECTURE.md).
 
