@@ -41,16 +41,36 @@ class ServicesTest(unittest.TestCase):
     def test_a_commented_setting_does_not_count(self):
         self.assertEqual(len(problems({PATH: UNIT + "#NoNewPrivileges=yes\n"})), 1)
 
-    def test_a_capability_bound_passes_and_the_empty_bound_drops_everything(self):
-        for value in ("", "CAP_NET_ADMIN", "~CAP_SYS_ADMIN"):
-            with self.subTest(value=value):
-                self.assertEqual(
-                    problems({PATH: UNIT + f"CapabilityBoundingSet={value}\n"}), []
-                )
+    def test_an_allow_list_bound_passes_and_the_empty_bound_drops_everything(self):
+        for lines in (
+            [""],
+            ["CAP_NET_ADMIN"],
+            ["CAP_NET_ADMIN CAP_CHOWN", "~CAP_CHOWN"],
+            ["", "~CAP_SYS_ADMIN"],
+        ):
+            with self.subTest(lines=lines):
+                text = UNIT + "".join(f"CapabilityBoundingSet={v}\n" for v in lines)
+                self.assertEqual(problems({PATH: text}), [])
+
+    def test_a_deny_list_bound_fails_even_when_it_removes_cap_sys_admin(self):
+        for lines in (
+            ["~CAP_SYS_ADMIN"],
+            ["~CAP_SYS_MODULE CAP_SYS_BOOT CAP_SYS_RAWIO CAP_NET_ADMIN"],
+            ["~CAP_SYS_ADMIN", "CAP_SYS_ADMIN"],
+        ):
+            with self.subTest(lines=lines):
+                text = UNIT + "".join(f"CapabilityBoundingSet={v}\n" for v in lines)
+                self.assertEqual(len(problems({PATH: text})), 1)
+        deny_with_nnp = (
+            UNIT + "CapabilityBoundingSet=~CAP_SYS_ADMIN\nNoNewPrivileges=yes\n"
+        )
+        self.assertEqual(problems({PATH: deny_with_nnp}), [])
 
     def test_a_bound_reset_to_the_full_set_fails(self):
-        text = UNIT + "CapabilityBoundingSet=\nCapabilityBoundingSet=~\n"
-        self.assertEqual(len(problems({PATH: text})), 1)
+        for lines in (["", "~"], ["~", "CAP_NET_ADMIN"]):
+            with self.subTest(lines=lines):
+                text = UNIT + "".join(f"CapabilityBoundingSet={v}\n" for v in lines)
+                self.assertEqual(len(problems({PATH: text})), 1)
 
     def test_a_drop_in_completes_its_unit_and_the_last_assignment_wins(self):
         dropin = "pkg/SOURCES/usr/lib/systemd/system/x.service.d/10-a.conf"
@@ -71,13 +91,57 @@ class ServicesTest(unittest.TestCase):
             1,
         )
 
-    def test_a_drop_in_on_an_upstream_unit_counts_only_when_it_replaces_exec_start(
-        self,
-    ):
+    def test_a_drop_in_on_an_upstream_unit_counts_only_when_it_adds_a_command(self):
         dropin = "pkg/SOURCES/usr/lib/systemd/system/greetd.service.d/10.conf"
         self.assertEqual(problems({dropin: "[Service]\nEnvironment=A=1\n"}), [])
-        replaced = "[Service]\nExecStart=\nExecStart=/usr/bin/other\n"
-        self.assertEqual(len(problems({dropin: replaced})), 1)
+        for command in (
+            "ExecStart=\nExecStart=/usr/bin/other\n",
+            "ExecStartPre=/usr/bin/check\n",
+            "ExecStopPost=/usr/bin/clean\n",
+        ):
+            with self.subTest(command=command):
+                found = problems({dropin: "[Service]\n" + command})
+                self.assertEqual(len(found), 1)
+                self.assertIn("greetd.service.d", found[0])
+                hardened = "[Service]\n" + command + "NoNewPrivileges=yes\n"
+                self.assertEqual(problems({dropin: hardened}), [])
+
+    def test_the_top_level_service_d_applies_to_every_unit(self):
+        top = "pkg/SOURCES/usr/lib/systemd/system/service.d/10-nnp.conf"
+        self.assertEqual(
+            problems({PATH: UNIT, top: "[Service]\nNoNewPrivileges=yes\n"}), []
+        )
+        found = problems({top: "[Service]\nExecStartPre=/usr/bin/x\n"})
+        self.assertEqual(len(found), 1)
+        self.assertIn("service.d", found[0])
+
+    def test_a_dash_prefix_drop_in_applies_to_the_units_it_prefixes(self):
+        unit = "pkg/SOURCES/usr/lib/systemd/system/foo-bar.service"
+        prefix = "pkg/SOURCES/usr/lib/systemd/system/foo-.service.d/10.conf"
+        nnp = "[Service]\nNoNewPrivileges=yes\n"
+        self.assertEqual(problems({unit: UNIT, prefix: nnp}), [])
+        other = "pkg/SOURCES/usr/lib/systemd/system/foobar.service"
+        self.assertEqual(len(problems({other: UNIT, prefix: nnp})), 1)
+
+    def test_a_template_drop_in_applies_to_its_instances(self):
+        instance = "pkg/SOURCES/usr/lib/systemd/system/foo@main.service"
+        template = "pkg/SOURCES/usr/lib/systemd/system/foo@.service.d/10.conf"
+        nnp = "[Service]\nNoNewPrivileges=yes\n"
+        self.assertEqual(problems({instance: UNIT, template: nnp}), [])
+        found = problems({template: "[Service]\nExecStartPre=/usr/bin/x\n"})
+        self.assertEqual(len(found), 1)
+
+    def test_a_more_specific_drop_in_replaces_a_same_named_one(self):
+        top = "pkg/SOURCES/usr/lib/systemd/system/service.d/10-nnp.conf"
+        own = "pkg/SOURCES/usr/lib/systemd/system/x.service.d/10-nnp.conf"
+        found = problems(
+            {
+                PATH: UNIT,
+                top: "[Service]\nNoNewPrivileges=yes\n",
+                own: "[Service]\nNoNewPrivileges=no\n",
+            }
+        )
+        self.assertEqual(len(found), 1)
 
     def test_masks_and_dbus_activation_files_are_not_services(self):
         dbus = "[D-BUS Service]\nName=org.example.X\nExec=/usr/bin/x\n"

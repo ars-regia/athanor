@@ -854,10 +854,10 @@ def check_boundary():
 
 
 # --------------------------------------------------------------------------- #
-# 11. services — every shipped service sets NoNewPrivileges or a capability bound
+# 11. services — every shipped service sets NoNewPrivileges or a capability allow-list
 # --------------------------------------------------------------------------- #
 
-# docs/architecture/doc_threat_model.md, TM8 (maintainer decision A2-9, issue #151). Each entry
+# docs/architecture/doc_threat_model.md, TM8 (maintainer decision A2-9 (#151)). Each entry
 # names a unit that does not meet the rule and why; an entry that no longer matches a failing
 # unit fails the check, so the list cannot outlive its reasons.
 SERVICE_EXEMPT = {
@@ -868,6 +868,16 @@ SERVICE_EXEMPT = {
 }
 
 TRUE_VALUES = {"1", "yes", "true", "on"}
+# Settings that make a drop-in run a command of ours in the unit it extends.
+EXEC_KEYS = {
+    "ExecCondition",
+    "ExecStartPre",
+    "ExecStart",
+    "ExecStartPost",
+    "ExecReload",
+    "ExecStop",
+    "ExecStopPost",
+}
 # A heredoc: its opening line (whose `> file` names the target, before or after `<<`), its
 # delimiter, and the body up to the delimiter's own line.
 HEREDOC = re.compile(
@@ -891,19 +901,45 @@ def unit_directives(text):
 
 
 def is_hardened(directives):
-    """True if the merged directives end with NoNewPrivileges= true or a bounded capability set
-    (systemd.exec(5): an empty CapabilityBoundingSet= is the empty set, "~" alone the full one,
-    and a positive list after a reset to full is merged into it by OR)."""
-    no_new_privileges, bound = False, None
+    """True if the merged directives end with NoNewPrivileges= true, or with a capability
+    bounding set that is an explicit allow-list.
+
+    The bound follows systemd.exec(5): the first list sets it, a later list is merged by OR,
+    a `~` list is removed by AND NOT, an empty assignment is the empty set and `~` alone the
+    full one. Only an allow-list counts as a bound: a deny-list (`~CAP_X ...`) keeps every
+    capability it does not name, CAP_SYS_MODULE or CAP_SYS_ADMIN among them unless it lists
+    them, so it fails unless NoNewPrivileges= is also set."""
+    no_new_privileges, allow, caps = False, None, set()
     for key, value in directives:
         if key == "NoNewPrivileges":
             no_new_privileges = value.lower() in TRUE_VALUES
         elif key == "CapabilityBoundingSet":
-            if value == "~":
-                bound = "full"
-            elif value == "" or value.startswith("~") or bound != "full":
-                bound = "bounded"
-    return no_new_privileges or bound == "bounded"
+            named = set(value.lstrip("~").split())
+            if not value or value == "~":
+                allow, caps = not value, set()
+            elif value.startswith("~"):
+                caps = caps - named if allow else caps | named
+                allow = bool(allow)
+            elif allow is False:
+                caps -= named
+            else:
+                allow, caps = True, caps | named
+    return no_new_privileges or allow is True
+
+
+def dropin_dirs(unit):
+    """The drop-in directories that apply to a service, least specific first (systemd.unit(5)):
+    `service.d`, each dash prefix (`foo-.service.d` for `foo-bar.service`), the template's
+    (`foo@.service.d` for `foo@x.service`) and the unit's own."""
+    stem = unit[: -len(".service")]
+    parts = stem.split("-")
+    dirs = ["service.d"]
+    dirs += ["-".join(parts[:i]) + "-.service.d" for i in range(1, len(parts))]
+    template, at, instance = stem.partition("@")
+    if at and instance:
+        dirs.append(f"{template}@.service.d")
+    dirs.append(f"{unit}.d")
+    return dirs
 
 
 def service_units(files):
@@ -932,34 +968,48 @@ def service_units(files):
 
 
 def service_problems(files):
-    """Units among {relative path: text} that set neither NoNewPrivileges= nor a capability
-    bound, after their drop-ins (`<unit>.d/*.conf`) are merged in name order."""
+    """Services among {relative path: text} that set neither NoNewPrivileges= nor an allow-list
+    capability bound, after every drop-in that applies to them (dropin_dirs) is merged in file
+    name order, a file in a more specific directory replacing one of the same name.
+
+    A drop-in directory that is not the own directory of a unit in `files` (an upstream unit, a
+    dash prefix, a template, `service.d`) counts as a service of its own when it adds a command
+    (EXEC_KEYS): that command is ours, and the upstream unit's own settings are not visible."""
     dropins = {}
-    for path in sorted(files, key=lambda p: Path(p).name):
+    for path in files:
         parent = Path(path).parent.name
-        if path.endswith(".conf") and parent.endswith(".service.d"):
-            dropins.setdefault(parent[:-2], []).append(path)
+        if path.endswith(".conf") and (
+            parent == "service.d" or parent.endswith(".service.d")
+        ):
+            dropins.setdefault(parent, []).append(path)
+
+    def merged(unit):
+        chosen = {}
+        for d in dropin_dirs(unit):
+            for p in dropins.get(d, []):
+                chosen[Path(p).name] = p
+        return [chosen[name] for name in sorted(chosen)]
 
     units = service_units(files)
-    shipped = {unit for unit, _ in units.values()}
-    # A drop-in that replaces ExecStart= of an upstream unit makes the service ours.
-    for unit, paths in dropins.items():
-        if unit not in shipped and any(
-            key == "ExecStart" for p in paths for key, _ in unit_directives(files[p])
+    own = {f"{unit}.d" for unit, _ in units.values()}
+    for d, paths in dropins.items():
+        if d not in own and any(
+            key in EXEC_KEYS for p in paths for key, _ in unit_directives(files[p])
         ):
-            units[paths[0]] = (unit, "")
+            unit = d[:-2] if d != "service.d" else ".service"
+            units[str(Path(sorted(paths)[0]).parent)] = (unit, "")
 
     failing = set()
     for ident, (unit, text) in units.items():
         directives = unit_directives(text)
-        for p in dropins.get(unit, []):
+        for p in merged(unit):
             directives += unit_directives(files[p])
         if not is_hardened(directives):
             failing.add(ident)
 
     problems = [
-        f"{ident}: sets neither NoNewPrivileges=yes nor CapabilityBoundingSet= "
-        f"(doc_threat_model.md, TM8)"
+        f"{ident}: sets neither NoNewPrivileges=yes nor an allow-list "
+        f"CapabilityBoundingSet= (doc_threat_model.md, TM8)"
         for ident in sorted(failing - SERVICE_EXEMPT.keys())
     ]
     problems += [
@@ -970,11 +1020,11 @@ def service_problems(files):
     return problems
 
 
-@check("services", "Every shipped service sets NoNewPrivileges or a capability bound")
+@check("services", "Every shipped service sets NoNewPrivileges or a capability allow-list")
 def check_services():
     r = Result()
     listed = subprocess.run(
-        ["git", "ls-files", "-z", "--", "*.service", "*.service.d/*.conf", "*.spec"],
+        ["git", "ls-files", "-z", "--", "*.service", "*service.d/*.conf", "*.spec"],
         cwd=ROOT,
         capture_output=True,
         text=True,
