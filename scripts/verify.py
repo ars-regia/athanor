@@ -854,6 +854,147 @@ def check_boundary():
 
 
 # --------------------------------------------------------------------------- #
+# 11. services — every shipped service sets NoNewPrivileges or a capability bound
+# --------------------------------------------------------------------------- #
+
+# docs/architecture/doc_threat_model.md, TM8 (maintainer decision A2-9, issue #151). Each entry
+# names a unit that does not meet the rule and why; an entry that no longer matches a failing
+# unit fails the check, so the list cannot outlive its reasons.
+SERVICE_EXEMPT = {
+    "forge/specs/athanor-rosenpass/athanor-rosenpass.spec:rosenpass.service": (
+        "athanor-rosenpass is in no forge/config/packages.json list, so no image ships it; "
+        "the unit is fixed or deleted with the package, not hardened untested"
+    ),
+}
+
+TRUE_VALUES = {"1", "yes", "true", "on"}
+# A heredoc: its opening line (whose `> file` names the target, before or after `<<`), its
+# delimiter, and the body up to the delimiter's own line.
+HEREDOC = re.compile(
+    r"^([^\n]*<<-?[ \t]*['\"]?(\w+)['\"]?[^\n]*)\n(.*?)^[ \t]*\2[ \t]*$", re.M | re.S
+)
+
+
+def unit_directives(text):
+    """(key, value) of every assignment in the [Service] section of a unit or drop-in."""
+    section, found = None, []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line[0] in "#;":
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1]
+        elif section == "Service" and "=" in line:
+            key, value = line.split("=", 1)
+            found.append((key.strip(), value.strip()))
+    return found
+
+
+def is_hardened(directives):
+    """True if the merged directives end with NoNewPrivileges= true or a bounded capability set
+    (systemd.exec(5): an empty CapabilityBoundingSet= is the empty set, "~" alone the full one,
+    and a positive list after a reset to full is merged into it by OR)."""
+    no_new_privileges, bound = False, None
+    for key, value in directives:
+        if key == "NoNewPrivileges":
+            no_new_privileges = value.lower() in TRUE_VALUES
+        elif key == "CapabilityBoundingSet":
+            if value == "~":
+                bound = "full"
+            elif value == "" or value.startswith("~") or bound != "full":
+                bound = "bounded"
+    return no_new_privileges or bound == "bounded"
+
+
+def service_units(files):
+    """{id: (unit name, text)} for every systemd service unit among {relative path: text}:
+    unit files, and units a package specification writes through a heredoc. Empty unit files
+    (masks) and D-Bus activation files are not units that run anything."""
+    units = {}
+    for path, text in files.items():
+        name = Path(path).name
+        if path.endswith(".spec"):
+            for m in HEREDOC.finditer(text):
+                if "[Service]" in m.group(3):
+                    target = re.search(r">\s*(\S+\.service)\b", m.group(1))
+                    unit = (
+                        Path(target.group(1)).name
+                        if target
+                        else f"heredoc-{m.group(2)}"
+                    )
+                    unit = unit.replace("%{name}", Path(path).stem)
+                    units[f"{path}:{unit}"] = (unit, m.group(3))
+        elif (
+            name.endswith(".service") and text.strip() and "[D-BUS Service]" not in text
+        ):
+            units[path] = (name, text)
+    return units
+
+
+def service_problems(files):
+    """Units among {relative path: text} that set neither NoNewPrivileges= nor a capability
+    bound, after their drop-ins (`<unit>.d/*.conf`) are merged in name order."""
+    dropins = {}
+    for path in sorted(files, key=lambda p: Path(p).name):
+        parent = Path(path).parent.name
+        if path.endswith(".conf") and parent.endswith(".service.d"):
+            dropins.setdefault(parent[:-2], []).append(path)
+
+    units = service_units(files)
+    shipped = {unit for unit, _ in units.values()}
+    # A drop-in that replaces ExecStart= of an upstream unit makes the service ours.
+    for unit, paths in dropins.items():
+        if unit not in shipped and any(
+            key == "ExecStart" for p in paths for key, _ in unit_directives(files[p])
+        ):
+            units[paths[0]] = (unit, "")
+
+    failing = set()
+    for ident, (unit, text) in units.items():
+        directives = unit_directives(text)
+        for p in dropins.get(unit, []):
+            directives += unit_directives(files[p])
+        if not is_hardened(directives):
+            failing.add(ident)
+
+    problems = [
+        f"{ident}: sets neither NoNewPrivileges=yes nor CapabilityBoundingSet= "
+        f"(doc_threat_model.md, TM8)"
+        for ident in sorted(failing - SERVICE_EXEMPT.keys())
+    ]
+    problems += [
+        f"{ident}: exempt in SERVICE_EXEMPT but meets the rule or no longer exists; "
+        f"remove the entry"
+        for ident in sorted(SERVICE_EXEMPT.keys() - failing)
+    ]
+    return problems
+
+
+@check("services", "Every shipped service sets NoNewPrivileges or a capability bound")
+def check_services():
+    r = Result()
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", "--", "*.service", "*.service.d/*.conf", "*.spec"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if listed.returncode != 0:
+        r.fail(f"git ls-files failed: {listed.stderr.strip()}")
+        return r
+    files = {
+        p: read(ROOT / p)
+        for p in listed.stdout.split("\0")
+        if p and (ROOT / p).is_file()
+    }
+    for problem in service_problems(files):
+        r.fail(problem)
+    for ident, why in SERVICE_EXEMPT.items():
+        r.note(f"exempt: {ident}: {why}")
+    return r
+
+
+# --------------------------------------------------------------------------- #
 # runner
 # --------------------------------------------------------------------------- #
 
