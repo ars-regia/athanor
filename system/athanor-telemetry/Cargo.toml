@@ -1,6 +1,7 @@
 [package]
 name = "athanor-telemetry"
 version = "1.0.0"
+license = "GPL-3.0-or-later"
 edition = "2021"
 description = "Athanor OS AI Predictive Telemetry & Log-Aggregator Self-Healing Daemon"
 authors = ["Predictive Telemetry Architect <telemetry@athanor.os>"]

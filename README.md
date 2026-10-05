@@ -34,5 +34,12 @@ Explore the detailed architectural specifications (generated and maintained by o
 For the full system architecture, please see the [Architecture Document](system/ARCHITECTURE.md).
 
 
+## Licence
+
+Athanor's own code is licensed under the GNU General Public License, version 3 or
+(at your option) any later version (`GPL-3.0-or-later`); see [LICENSE](LICENSE).
+Packages that Athanor only redistributes, such as the patched `cosmic-comp`
+(GPL-3.0-only), keep the licence of their upstream.
+
 ---
 *Athanor OS - Immutable, Zero-Trust, Asynchronous.*

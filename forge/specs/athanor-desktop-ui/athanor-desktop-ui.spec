@@ -3,7 +3,7 @@ Name:           athanor-desktop-ui
 Version:        1.0.0
 Release:        10%{?dist}
 Summary:        Athanor OS Desktop UI configurations
-License:        MIT
+License:        GPL-3.0-or-later
 URL:            https://github.com/hr-mes/athanor-forge
 BuildArch:      noarch
 

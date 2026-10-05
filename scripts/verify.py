@@ -854,6 +854,93 @@ def check_boundary():
 
 
 # --------------------------------------------------------------------------- #
+# licence: one licence for our own code (maintainer decision A2-3, 2026-10-05)
+# --------------------------------------------------------------------------- #
+
+OWN_LICENCE = "GPL-3.0-or-later"
+# Specs that package somebody else's software: they declare upstream's licence,
+# which only has to be a well-formed SPDX expression. Every other spec and every
+# Cargo.toml in the repository is our own code and must say OWN_LICENCE.
+UPSTREAM_SPECS = {
+    "ananicy-cpp", "athanor-bpf-linker", "athanor-cosign", "athanor-dart-sass",
+    "athanor-matugen", "athanor-rosenpass", "athanor-syft", "athanor-tetragon",
+    "athanor-cliphist", "azoth-microvm", "bat", "cosmic-comp",
+}
+SPDX_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]*\+?$")
+# Identifiers deprecated by SPDX, or not identifiers at all (GPLv3, GPL-3.0, ...).
+SPDX_DEPRECATED = re.compile(r"^(A?L?GPL-\d(\.\d)?\+?|GPLv\d.*|LGPLv\d.*|GPL|LGPL)$")
+
+
+def spdx_problem(expr):
+    """Why `expr` is not a valid SPDX licence expression, or None."""
+    tokens = re.findall(r"\(|\)|[^\s()]+", expr)
+    if not tokens:
+        return "empty"
+    depth, expect_id = 0, True
+    for tok in tokens:
+        if tok == "(":
+            if not expect_id:
+                return "unexpected '('"
+            depth += 1
+        elif tok == ")":
+            depth -= 1
+            if expect_id or depth < 0:
+                return "unbalanced ')'"
+        elif expect_id:
+            if not SPDX_ID.match(tok) or SPDX_DEPRECATED.match(tok):
+                return f"'{tok}' is not an SPDX identifier"
+            expect_id = False
+        elif tok in ("AND", "OR", "WITH"):
+            expect_id = True
+        else:
+            return f"expected AND/OR/WITH, found '{tok}'"
+    if expect_id or depth:
+        return "incomplete expression"
+    return None
+
+
+def licence_problems(root=None):
+    root = Path(root or ROOT)
+    out = []
+    for d in RS_DIRS:
+        for f in walk(root / d, "Cargo.toml"):
+            if f.name != "Cargo.toml":
+                continue
+            try:
+                pkg = tomllib.loads(read(f)).get("package")
+            except tomllib.TOMLDecodeError:
+                continue
+            if pkg is None:
+                continue
+            lic = pkg.get("license")
+            if lic != OWN_LICENCE:
+                out.append(f"{rel(f)}: license = {lic!r}, expected {OWN_LICENCE!r}")
+    for f in sorted(walk(root / "forge/specs", ".spec")):
+        m = re.search(r"^License:\s*(.*?)\s*$", read(f), re.M)
+        if not m:
+            out.append(f"{rel(f)}: no License: field")
+            continue
+        lic = m.group(1)
+        if f.stem in UPSTREAM_SPECS:
+            why = spdx_problem(lic)
+            if why:
+                out.append(f"{rel(f)}: License: {lic} ({why})")
+        elif lic != OWN_LICENCE:
+            out.append(f"{rel(f)}: License: {lic}, expected {OWN_LICENCE}")
+    if not (root / "LICENSE").is_file():
+        out.append("LICENSE: missing at the repository root")
+    return out
+
+
+@check("licence", "own crates and specs declare GPL-3.0-or-later, upstream specs a valid SPDX expression")
+def check_licence():
+    r = Result()
+    for problem in licence_problems():
+        r.fail(problem)
+    return r
+
+
+# --------------------------------------------------------------------------- #
 # runner
 # --------------------------------------------------------------------------- #
 
