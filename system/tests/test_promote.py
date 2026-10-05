@@ -421,12 +421,12 @@ class Promote(Published):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(len(copies), 9)
 
-    def test_evidence_younger_than_the_dwell_time_is_not_eligible(self):
-        self.ineligible(
-            "less than 24 h ago",
-            attestations=[(TRUSTED, predicate(hours_ago=2))],
-            dwell=24,
-        )
+    def test_evidence_younger_than_the_dwell_time_waits(self):
+        self.published(attestations=[(TRUSTED, predicate(hours_ago=2))])
+        r, copies = self.promote(dwell=24)
+        self.assertEqual(r.returncode, 5, r.stderr)
+        self.assertIn("less than 24 h ago", r.stderr)
+        self.assertEqual(copies, [])
 
     def test_an_image_the_trusted_build_did_not_sign_is_refused(self):
         # The :RUN tag moved to another image (or the build never signed): passing evidence on

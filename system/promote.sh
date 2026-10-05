@@ -37,9 +37,9 @@
 # Every check runs for all three images before any tag moves.
 # Exit status: 0 promoted; 1 refused or failed (a signature machines
 # would reject, a registry error); 2 usage; 3 the run is not newer than the current stable;
-# 4 the run is not eligible yet or at all (no image tagged with the run, not built by the
-# trusted workflow, no passing acceptance evidence for it, or evidence younger than the dwell
-# time). promote-auto.sh tells them apart.
+# 4 the run is not eligible (no image tagged with the run, not built by the trusted workflow,
+# no passing acceptance evidence for it); 5 the run passed acceptance less than the dwell time
+# ago: eligible later. promote-auto.sh tells them apart.
 # Environment: REGISTRY (default ghcr.io/<GITHUB_REPOSITORY_OWNER>); PROMOTE_KEYS_DIR
 #              (default system/keys); PROMOTE_DWELL_HOURS (default 0); PROMOTE_TRUSTED_REFS
 #              (default iso-v0); PROMOTE_EVIDENCE_OUT (optional: where to write the verified
@@ -192,7 +192,7 @@ for name in "${IMAGES[@]}"; do
   built "$repository" "$digest"
   accepted "$repository" "$name" "$digest"
   finished=$(date -u -d "$(jq -r .finished_at "$work/$name.json")" +%s)
-  (( now - finished >= dwell_hours * 3600 )) || ineligible "run $run passed acceptance less than ${dwell_hours} h ago"
+  (( now - finished >= dwell_hours * 3600 )) || { echo "${0##*/}: run $run passed acceptance less than ${dwell_hours} h ago" >&2; exit 5; }
   skopeo inspect --raw "docker://$repository:sha256-${digest#sha256:}.sig" \
     | jq -e --arg type "$SIMPLE_SIGNING" '.layers | any(.mediaType == $type)' > /dev/null \
     || { echo "${0##*/}: $repository@$digest has no signature a machine can verify (sha256-<hex>.sig)" >&2; exit 1; }

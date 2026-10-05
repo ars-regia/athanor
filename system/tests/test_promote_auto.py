@@ -27,7 +27,7 @@ class PromoteAuto(Published):
 
     def runs(self, *runs, **published):
         """Runs listed by gh newest last, each with its own digests; published: run -> kwargs."""
-        fx = None
+        fx = None if runs else self.published()
         for i, run in enumerate(runs):
             fx = self.published(
                 run=run, base=1 + 3 * i, fx=fx, **published.get(run, {})
@@ -78,9 +78,52 @@ class PromoteAuto(Published):
         )
         r, stable = self.auto()
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("nothing to promote", r.stdout)
+        self.assertIn("nothing to promote yet: run 412", r.stdout)
         self.assertEqual(stable, [])
         self.assertFalse(self.record.exists())
+
+    def test_a_run_waiting_for_the_dwell_time_keeps_a_broken_older_one_quiet(self):
+        # 413 waits out the dwell time; 412 has no evidence. Waiting is the reason: success.
+        self.runs(
+            "412",
+            "413",
+            **{
+                "412": {"attestations": []},
+                "413": {
+                    "attestations": [
+                        (
+                            TRUSTED,
+                            predicate(
+                                run="413",
+                                hours_ago=3,
+                                images={n: digest(4 + i) for i, n in enumerate(NAMES)},
+                            ),
+                        )
+                    ],
+                    "run_created": "2026-09-16T10:00:00Z",
+                },
+            },
+        )
+        r, stable = self.auto()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("nothing to promote yet: run 413", r.stdout)
+        self.assertEqual(stable, [])
+
+    def test_a_failed_run_listing_fails(self):
+        self.runs("412")
+        fx = json.loads((self.dir / "registry.json").read_text())
+        fx["runs_error"] = "HTTP 401: Bad credentials (https://api.github.com/graphql)"
+        self.registry(fx)
+        r, stable = self.auto()
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("cannot list the Orchestrator runs", r.stderr)
+        self.assertEqual(stable, [])
+
+    def test_no_run_listed_is_nothing_to_promote(self):
+        self.runs()
+        r, stable = self.auto()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("no Orchestrator run on iso-v0", r.stdout)
 
     def test_the_schedule_falls_back_to_an_older_accepted_run(self):
         # 413 is newer but failed; 412 passed and is past the dwell time.
@@ -108,15 +151,24 @@ class PromoteAuto(Published):
         )
 
     def test_forged_evidence_never_reaches_stable(self):
-        # Evidence signed from a branch or a fork, however good it looks, makes no run eligible.
+        # Evidence signed from a branch or a fork, however good it looks, makes no run eligible;
+        # every run ineligible and none waiting is a broken chain, which fails loudly.
         for identity in (OTHER_BRANCH, FORK):
             with self.subTest(identity=identity):
                 (self.dir / "calls.log").unlink(missing_ok=True)
                 self.runs("412", **{"412": {"attestations": [(identity, predicate())]}})
                 r, stable = self.auto()
-                self.assertEqual(r.returncode, 0, r.stderr)
-                self.assertIn("nothing to promote", r.stdout)
+                self.assertEqual(r.returncode, 1, r.stdout)
+                self.assertIn("none of the last 1 Orchestrator runs is eligible", r.stderr)
                 self.assertEqual(stable, [])
+                self.assertFalse(self.record.exists())
+
+    def test_a_run_without_the_build_signature_fails_the_schedule(self):
+        self.runs("412", **{"412": {"signed_by": False}})
+        r, stable = self.auto()
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("was not signed by call-system-image.yml", r.stderr)
+        self.assertEqual(stable, [])
 
     def test_the_schedule_is_quiet_when_stable_already_holds_the_run(self):
         self.runs("412", **{"412": {"run_created": "2026-09-01T10:00:00Z"}})
