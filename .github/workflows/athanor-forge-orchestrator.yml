@@ -237,4 +237,4 @@ jobs:
     with:
       iso_tag: ${{ github.run_id }}
       skip_lint: true
-    secrets: inherit
+    # No secrets: iso-acceptance.yml uses only GITHUB_TOKEN, which a called workflow always gets.
