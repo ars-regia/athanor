@@ -1,6 +1,6 @@
 //! athanor-control-center: the panel of doc_control_center.md. athanor-control-center.service
 //! runs it, and the session bus starts that unit when `os.athanor.ControlCenter1` is called
-//! (CC2). `--record-exit` is the unit's ExecStopPost: it counts a failed run towards the
+//! (CC2). `--bind-shortcut` is the login oneshot that binds Super+C and exits. `--record-exit` is the unit's ExecStopPost: it counts a failed run towards the
 //! crash-loop limit (doc_shell.md SH8).
 
 mod bus;
@@ -21,7 +21,7 @@ use athanor_compositor_client::shortcuts::{self, Binding};
 use athanor_compositor_client::theme;
 use athanor_services::battery::BACKLIGHT_ROOT;
 use athanor_services::Runtime;
-use athanor_control_center::{grants, launch_dir, RFKILL};
+use athanor_control_center::{grants, launch_dir, parse_mode, Mode, RFKILL};
 use athanor_layout::loader;
 use athanor_unit::dirs::Dirs;
 use athanor_unit::{crash_loop, journal, sandbox};
@@ -39,6 +39,32 @@ fn backlight_root() -> PathBuf {
         .map_or_else(|| PathBuf::from(BACKLIGHT_ROOT), PathBuf::from)
 }
 
+/// Super+C is ours only where the user left it free, and only once per user (CC9): the marker
+/// sits in the state directory. The login oneshot calls it; the panel calls it too, before
+/// its ruleset, which leaves cosmic-comp's shortcuts read-only, and the marker makes that a
+/// no-op.
+fn bind_shortcut(state: &Path) {
+    match shortcuts::set_custom_binding_once(
+        &["Super"],
+        "c",
+        bus::TOGGLE_COMMAND,
+        &state.join("super-c-bound"),
+    ) {
+        Ok(None) => tracing::info!("Super+C was bound once already"),
+        Ok(Some(Binding::Added)) => tracing::info!("Super+C now calls {}", bus::NAME),
+        Ok(Some(Binding::Unchanged)) => tracing::info!("Super+C already calls {}", bus::NAME),
+        Ok(Some(Binding::UserChoice | Binding::ReplacedDefault)) => {
+            tracing::info!(
+                "Super+C keeps the action the user chose; it does not call {}",
+                bus::NAME
+            );
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "Super+C is not bound to the control center; it still opens from the bar")
+        }
+    }
+}
+
 fn main() -> glib::ExitCode {
     journal::init();
     let Some(dirs) = Dirs::from_vars("athanor-control-center", |name| env::var_os(name)) else {
@@ -52,7 +78,20 @@ fn main() -> glib::ExitCode {
             return glib::ExitCode::FAILURE;
         }
     };
-    if env::args().nth(1).as_deref() == Some("--record-exit") {
+    let mode = parse_mode(env::args().nth(1).as_deref());
+    if mode == Mode::BindShortcut {
+        // The login oneshot (CC9): no crash-loop record, no GTK, no bus name.
+        let Some(state) = loader::state_home().map(|home| home.join("athanor/control-center")) else {
+            tracing::error!("no state directory to keep the Super+C marker in");
+            return glib::ExitCode::FAILURE;
+        };
+        if let Err(err) = std::fs::create_dir_all(&state) {
+            tracing::warn!(error = %err, dir = %state.display(), "cannot create the state directory");
+        }
+        bind_shortcut(&state);
+        return glib::ExitCode::SUCCESS;
+    }
+    if mode == Mode::RecordExit {
         let result = env::var("SERVICE_RESULT").ok();
         return match crash_loop::record_exit(&dirs.failures, now, result.as_deref()) {
             Ok(()) => glib::ExitCode::SUCCESS,
@@ -74,29 +113,7 @@ fn main() -> glib::ExitCode {
     if let Err(err) = std::fs::create_dir_all(&state) {
         tracing::warn!(error = %err, dir = %state.display(), "cannot create the state directory");
     }
-    // Super+C is ours only where the user left it free, and only at the first start (CC9):
-    // the marker sits in the state directory. It runs before the ruleset, which leaves
-    // cosmic-comp's shortcuts read-only. A failing crash-loop gives up nothing here: the
-    // panel has no input from outside the image.
-    match shortcuts::set_custom_binding_once(
-        &["Super"],
-        "c",
-        bus::TOGGLE_COMMAND,
-        &state.join("super-c-bound"),
-    ) {
-        Ok(None) => tracing::info!("Super+C was bound once already"),
-        Ok(Some(Binding::Added)) => tracing::info!("Super+C now calls {}", bus::NAME),
-        Ok(Some(Binding::Unchanged)) => tracing::info!("Super+C already calls {}", bus::NAME),
-        Ok(Some(Binding::UserChoice | Binding::ReplacedDefault)) => {
-            tracing::info!(
-                "Super+C keeps the action the user chose; it does not call {}",
-                bus::NAME
-            );
-        }
-        Err(err) => {
-            tracing::warn!(error = %err, "Super+C is not bound to the control center; it still opens from the bar")
-        }
-    }
+    bind_shortcut(&state);
     // Before GTK starts a thread. Reads stay open (CC2); writes only where `grants` says.
     let launch = launch_dir(&dirs);
     if let Err(err) = DirBuilder::new().recursive(true).mode(0o700).create(&launch) {

@@ -133,6 +133,25 @@ pub fn launch_dir(dirs: &Dirs) -> PathBuf {
     dirs.runtime.join("athanor")
 }
 
+/// What the first argument of the command line asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    /// The panel itself.
+    Panel,
+    /// The unit's ExecStopPost: count a failed run.
+    RecordExit,
+    /// The login oneshot: bind Super+C and exit, before GTK and before the bus name (CC9).
+    BindShortcut,
+}
+
+pub fn parse_mode(first: Option<&str>) -> Mode {
+    match first {
+        Some("--record-exit") => Mode::RecordExit,
+        Some("--bind-shortcut") => Mode::BindShortcut,
+        _ => Mode::Panel,
+    }
+}
+
 /// The kernel's rfkill device.
 pub const RFKILL: &str = "/dev/rfkill";
 
@@ -141,6 +160,14 @@ mod tests {
     use super::*;
     use athanor_unit::sandbox;
     use std::ffi::OsString;
+
+    #[test]
+    fn the_flags_select_their_mode() {
+        assert_eq!(parse_mode(None), Mode::Panel);
+        assert_eq!(parse_mode(Some("--bind-shortcut")), Mode::BindShortcut);
+        assert_eq!(parse_mode(Some("--record-exit")), Mode::RecordExit);
+        assert_eq!(parse_mode(Some("--other")), Mode::Panel);
+    }
 
     #[test]
     fn a_page_id_is_empty_a_page_or_refused() {

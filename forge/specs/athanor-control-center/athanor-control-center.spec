@@ -33,6 +33,8 @@ done
 install -D -m 0755 target/release/athanor-control-center %{buildroot}/usr/bin/athanor-control-center
 install -D -m 0644 forge/specs/athanor-control-center/athanor-control-center-1.0.0/data/athanor-control-center.service \
     %{buildroot}/usr/lib/systemd/user/athanor-control-center.service
+install -D -m 0644 forge/specs/athanor-control-center/athanor-control-center-1.0.0/data/athanor-control-center-shortcut.service \
+    %{buildroot}/usr/lib/systemd/user/athanor-control-center-shortcut.service
 install -D -m 0644 forge/specs/athanor-control-center/athanor-control-center-1.0.0/data/os.athanor.ControlCenter1.service \
     %{buildroot}/usr/share/dbus-1/services/os.athanor.ControlCenter1.service
 install -D -m 0644 forge/specs/athanor-control-center/athanor-control-center-1.0.0/data/80-athanor-control-center.preset \
@@ -49,6 +51,7 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-control
 %files
 /usr/bin/athanor-control-center
 /usr/lib/systemd/user/athanor-control-center.service
+/usr/lib/systemd/user/athanor-control-center-shortcut.service
 /usr/lib/systemd/user-preset/80-athanor-control-center.preset
 /usr/share/dbus-1/services/os.athanor.ControlCenter1.service
 %lang(it) /usr/share/locale/it/LC_MESSAGES/athanor-control-center.mo
@@ -58,5 +61,5 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-control
 * Mon Oct 05 2026 Athanor Forge <forge@athanor.os> - 1.0.0-1
 - First release (doc_control_center.md, plan Task 11): the resident panel on pinned layer
   surfaces, shown and hidden by os.athanor.ControlCenter1.Show and Toggle, bound to Super+C at
-  start and opened by the bar's button; placeholder pages; Landlock with no TCP.
+  login by a oneshot unit and opened by the bar's button; placeholder pages; Landlock with no TCP.
 - Joins the image (tier 3), disabled by its user preset and started by bus activation.

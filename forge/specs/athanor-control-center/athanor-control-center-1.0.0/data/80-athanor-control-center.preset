@@ -2,3 +2,5 @@
 # starts on demand.
 # The bus starts the unit when the bar's button or Super+C calls it.
 disable athanor-control-center.service
+# The login oneshot that binds Super+C once per user (CC9) is enabled.
+enable athanor-control-center-shortcut.service

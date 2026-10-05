@@ -28,6 +28,7 @@ CRATES = {
     },
     "athanor-control-center": {
         "/usr/lib/systemd/user/athanor-control-center.service": "athanor-control-center.service",
+        "/usr/lib/systemd/user/athanor-control-center-shortcut.service": "athanor-control-center-shortcut.service",
         "/usr/share/dbus-1/services/os.athanor.ControlCenter1.service": "os.athanor.ControlCenter1.service",
     },
     "athanor-shelld": {
