@@ -40,6 +40,10 @@ on:
         default: false
   schedule:
     - cron: "0 4 * * *"
+    # Weekly forced image build (docs/architecture/doc_update_trust.md, D1 cadence): the
+    # upstream packages in the images move without any change here, so a week without a
+    # commit still produces a fresh build, an acceptance run and a :stable candidate.
+    - cron: "0 5 * * 0"
 
 env:
   REGISTRY: ghcr.io
@@ -210,10 +214,27 @@ jobs:
     # inputs.force_image is compared against both the boolean and the string form: a
     # gh workflow run -f sends "true"/"false" as a string, which GitHub Actions does not
     # coerce to the declared boolean type, so a bare `|| inputs.force_image` would treat a
-    # future explicit "false" as truthy (any non-empty string is truthy).
+    # future explicit "false" as truthy (any non-empty string is truthy). The weekly schedule
+    # forces them too.
     needs: [orchestrator-brain, dag-compile, build-builder, kernel-artifacts, kernel-artifacts-final]
-    if: ${{ !cancelled() && needs.orchestrator-brain.result == 'success' && needs.kernel-artifacts-final.result == 'success' && needs.build-builder.result == 'success' && (needs.dag-compile.result == 'success' || needs.dag-compile.result == 'skipped') && (needs.orchestrator-brain.outputs.has_changes == 'true' || needs.kernel-artifacts.outputs.state != 'ready' || inputs.force_image == true || inputs.force_image == 'true') }}
+    if: ${{ !cancelled() && needs.orchestrator-brain.result == 'success' && needs.kernel-artifacts-final.result == 'success' && needs.build-builder.result == 'success' && (needs.dag-compile.result == 'success' || needs.dag-compile.result == 'skipped') && (needs.orchestrator-brain.outputs.has_changes == 'true' || needs.kernel-artifacts.outputs.state != 'ready' || inputs.force_image == true || inputs.force_image == 'true' || github.event.schedule == '0 5 * * 0') }}
     uses: ./.github/workflows/call-system-image.yml
     with:
       builder_content_hash: ${{ needs.build-builder.outputs.content_hash }}
+    secrets: inherit
+
+  acceptance:
+    # Every image build of the release branch (repository variable RELEASE_BRANCH, default
+    # iso-v0) installs its own ISO: the attestation this writes on each image digest is what
+    # promote-stable.yml needs to move :stable (docs/architecture/doc_update_trust.md, D1).
+    needs: [system-image]
+    if: ${{ needs.system-image.result == 'success' && github.ref == format('refs/heads/{0}', vars.RELEASE_BRANCH || 'iso-v0') }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    uses: ./.github/workflows/iso-acceptance.yml
+    with:
+      iso_tag: ${{ github.run_id }}
+      skip_lint: true
     secrets: inherit

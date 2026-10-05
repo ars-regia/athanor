@@ -1,10 +1,11 @@
 name: Promote a system image run to stable
 
 # Decision D1 of docs/architecture/doc_update_trust.md: users follow :stable, :latest is the
-# tested build of the default branch. The logic is system/promote-auto.sh, which chooses the
+# newest, untested build of the release branch. The logic is system/promote-auto.sh, which chooses the
 # run, and system/promote.sh, which refuses any digest without a signature machines verify or
 # without passing acceptance evidence: a cosign attestation on that digest, made keyless by
-# iso-acceptance.yml on the release branch, matching the run, the digest and the commit. No
+# iso-acceptance.yml on the release branch, matching the run, the digest and the commit, or
+# whose build run is not a successful Orchestrator run of the release branch. No
 # artifact or file this job downloads is trusted, and no signing key is involved here.
 #   - On schedule: the newest accepted Orchestrator run of the release branch older than the
 #     dwell time (repository variable PROMOTE_DWELL_HOURS, default 24), when it is newer than

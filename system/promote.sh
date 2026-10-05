@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Points the `stable` tag of the three system images at the digests of one pipeline run
-# (docs/architecture/doc_update_trust.md, D1). Users follow :stable; :latest is the tested build
-# of the default branch. The signature is by digest, so it carries: nothing is signed here and
+# (docs/architecture/doc_update_trust.md, D1). Users follow :stable; :latest is the newest,
+# untested build of the release branch. The signature is by digest, so it carries: nothing is signed here and
 # no private key is needed. Nothing moves unless all three images pass every check:
 #   - build provenance: RUN_ID is, by the GitHub API, a run of this repository's
 #     athanor-forge-orchestrator.yml on a trusted branch, triggered by a push, a schedule or a
