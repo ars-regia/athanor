@@ -1,6 +1,6 @@
 # Athanor workspace overview
 
-Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text not yet reviewed.** This document specifies stage 7 of `doc_shell.md` (SH1, SH3): Athanor's own window and workspace overview, which replaces cosmic-workspaces. It covers the program and its use of the compositor client, the surfaces, contents and thumbnails, pointer and keyboard use, opening and closing (Super+W, the bar, the dock, a three-finger gesture and a hot corner that is off by default), feedback when the workspace changes, the confinement, the tests and the order of construction. The maintainer's seven decisions of 2026-10-05 are in section 6.
+Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text not yet reviewed. Amended on 2026-10-06 by maintainer decision A2-24 (#159): this document owns the window switcher on Alt+Tab (section 7).** This document specifies stage 7 of `doc_shell.md` (SH1, SH3): Athanor's own window and workspace overview, which replaces cosmic-workspaces. It covers the program and its use of the compositor client, the surfaces, contents and thumbnails, pointer and keyboard use, opening and closing (Super+W, the bar, the dock, a three-finger gesture and a hot corner that is off by default), feedback when the workspace changes, the confinement, the tests and the order of construction. The maintainer's seven decisions of 2026-10-05 are in section 6.
 
 ## 1. Context
 
@@ -52,7 +52,7 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
 **OV1. One overview, replacing cosmic-workspaces.** On every output it shows that output's workspaces as a strip, and the windows of the selected workspace as a grid of thumbnails. This is the model of macOS Mission Control and GNOME's overview.
 
 - **Super stays with the launcher** (LA8). The overview opens with Super+W, the `XF86LaunchA` key, the bar's Workspaces module, the dock's workspaces button, a three-finger swipe (OV13, decision 4) and the hot corner when the user turns it on (OV10, OV14).
-- **The window switcher on Alt+Tab is not part of the overview.** It belongs to the launcher's plan 3c (LA12; F-overview-10).
+- **The window switcher on Alt+Tab is owned by this document** (amended 2026-10-06, maintainer decision A2-24, #159; section 7). It is a surface of its own, not the overview's grid; F-overview-10. Its design comes in a later revision of this document.
 
 **OV2. Programs and crates.**
 
@@ -231,7 +231,7 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
 **OV15. Register entries this document does not build.** Section 3 records each in the register.
 
 - F-overview-07, renaming workspaces: excluded in release 1. cosmic-comp 1.8.0 neither advertises nor handles Rename (decision 7). The overview offers the action only on a workspace whose capabilities include Rename (OV3), so it appears when upstream adds it.
-- F-overview-10, Alt+Tab: owned by the launcher's plan 3c (LA12). It is not built here.
+- F-overview-10, Alt+Tab: owned by this document since 2026-10-06 (A2-24, #159; section 7), designed in a later revision. Not built in release 1 of the overview.
 - F-overview-14, Stage Manager: excluded. It is a window-management model of its own, which CO2 would bring in as a register entry of the Window management surface. Nothing in cosmic-comp supports it.
 - F-overview-15, snap layouts and tiling zones: moved to the Window management surface that `doc_compositor.md` CO2 proposes. It is a compositor feature, not an overview feature.
 - F-overview-16, Activities: excluded. It would add a second axis of separation over workspaces with no compositor support. Separate workspaces per output already cover the common use.
@@ -334,7 +334,7 @@ Applied with the approval of this document.
   - F-overview-13 goes to `have` at step 3.
   - F-overview-07, 14 and 16 become `excluded`, with the reasons of OV15.
   - F-overview-15 moves to Window management (CO2).
-  - F-overview-10 names the launcher's plan 3c as owner.
+  - F-overview-10 names this document as owner (section 7).
   - F-overview-18 to 21 become `excluded`.
   - Every `cosmic-workspaces` source becomes `athanor-overview` at the switch.
 - **`doc_visual_language.md` VL9** (ruling of 2026-10-05, on the PR #119 branch): the workspace slide takes the compositor's 200 ms with `EaseInOutCubic`, not 300 ms; the patch of decision 5 only adds the on/off switch.
@@ -402,3 +402,13 @@ Taken by the maintainer on 2026-10-05. Each followed the recommendation of revis
 5. **Does reduced motion reach the workspace slide?** (OV13) Choice: a cosmic-comp patch adding an on/off key, written by the compositor client from `enable-animations`, proposed upstream first; the duration stays the compositor's 200 ms and VL9 is amended to it. Reason: reduced motion is an accessibility need and the workspace slide is the motion users meet most often.
 6. **Is there a hot corner?** (OV14) Choice: drawn by the shell, one 1×1 overlay surface per output, off by default, switched on Settings' Desktop page. Reason: it meets F-overview-11 without a patch; off by default avoids accidental openings for new users.
 7. **Can workspaces be renamed?** (OV15) Choice: excluded in release 1; the action shows only when the compositor advertises Rename. Reason: cosmic-comp 1.8.0 neither advertises nor handles it, the capability check brings the feature with upstream at no cost, and CO3 keeps window-management patches for entries that matter more.
+
+## 7. Amendment of 2026-10-06: the window switcher on Alt+Tab
+
+Maintainer decision A2-24 (#159), from specification audit 2 of 2026-10-05. It overrides sections 1 to 6 where they disagree.
+
+- **The gap it closes.** Section 2 handed Alt+Tab to the launcher's plan 3c, and `doc_launcher.md` LA12 handed it back to plan 3c as well, so no document designed it. cosmic-launcher serves Alt+Tab today: cosmic-comp's `WindowSwitcher` action runs `cosmic-launcher alt-tab` (LA12).
+- **Ownership.** This document owns the window switcher on Alt+Tab (F-overview-10). It switches between windows, which is the overview's domain, and it reads the same toplevel and workspace state the overview reads through the compositor client (OV2, OV3), so it adds no new source of truth.
+- **Until it exists, cosmic-launcher stays.** LA12's switch may remove cosmic-app-library and pop-launcher with the launcher's own programs, but `cosmic-launcher` leaves the image only in the same change that binds Alt+Tab to the switcher of this document. Removing it earlier leaves Alt+Tab doing nothing. `doc_shell.md` SH3 carries the same condition in its table.
+- **What is not decided here.** The switcher's layout, its keys (Alt+Tab, Alt+Shift+Tab and any others), whether it spans workspaces and outputs, its accessible names and its reduced-motion behaviour come in a later revision of this document, which states its "why not upstream" under the scope budget of `doc_shell.md` SH3 (cosmic-launcher's own switcher is the upstream candidate) and is reviewed like any revision. Release 1 of the overview (OV1 to OV19) does not build it.
+- **Changes owed to other documents:** `doc_launcher.md` LA12 and its "Left for plan 3c" line name this document as the owner of the window switcher, and plan 3c keeps only the switch of the launcher's own programs; `shell-features.md` names this document as the owner of F-overview-10 (the bullet of section 3 above).
