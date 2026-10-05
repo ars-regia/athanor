@@ -1,34 +1,42 @@
-<div align="center">
-  <br />
-  <img src="https://raw.githubusercontent.com/hr-mes/athanor/main/.github/logo.png" alt="Athanor OS Logo" width="150"/>
-  <h1>🌋 Athanor OS - The Ultimate Cloud-Native Desktop</h1>
-  <h3>The Immutable OS, Zero-Trust, Asynchronous Operating Systems.</h3>
-  <br />
-  
-  [![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen?style=for-the-badge&logo=githubactions)](#)
-  [![SLSA Level 4](https://img.shields.io/badge/SLSA-Level_4-purple?style=for-the-badge&logo=slsa)](#)
-  [![Rust](https://img.shields.io/badge/Rust-1.80+-orange?style=for-the-badge&logo=rust)](#)
-  [![GTK4](https://img.shields.io/badge/GTK-4.14_Vulkan-blue?style=for-the-badge&logo=gtk)](#)
-  [![Memory](https://img.shields.io/badge/Allocator-Mimalloc-yellow?style=for-the-badge)](#)
-  [![Architecture](https://img.shields.io/badge/Architecture-x86__64%20%7C%20ARM64-lightgrey?style=for-the-badge)](#)
-  [![PQC](https://img.shields.io/badge/PQC-Dilithium5%20%7C%20ML--KEM-red?style=for-the-badge)](#)
-</div>
+# Athanor
 
-<hr />
+Athanor is an immutable desktop operating system delivered as a bootc image. The image is
+built on Fedora's `base-atomic:43`, carries its own kernel, Azoth (the Fedora kernel with
+CachyOS patches, built with clang), and a desktop shell written in Rust and GTK4 on the
+cosmic-comp compositor. Packages are compiled for x86-64-v3.
 
-## 📖 Encyclopedic Architectural Index
+## Status
 
-### 📚 Deep-Dive Technical Documentation
-Explore the detailed architectural specifications (generated and maintained by our AI swarm):
-- [**Core Daemons, Security & IPC**](docs/architecture/doc_core_daemons.md)
-- [**Desktop Shell: Direction, Layout Model, Stage 1**](docs/architecture/doc_shell.md)
-- [**Build System & CI/CD Pipeline**](docs/architecture/doc_build_system.md)
-- [**Athanor OS v3.0 Singularity Architecture**](docs/architecture/athanor_singularity_architecture_v3.md)
-- [**System Subsystem Architecture**](system/README.md)
+Athanor is in development and has no release. Work happens on the branch `iso-v0`, whose
+goal is an installation image that boots and shows the greeter. Open work is tracked in the
+GitHub milestone `iso-v0`.
 
-### Quick Chapters
-1. [The Athanor Paradigm: Beyond Big-Tech](#1-the-athanor-paradigm-beyond-big-tech)
+## Supply chain
 
+- **System images** are signed with the project key (`system/sign-images.sh`); an installed
+  machine verifies that signature through the policy shipped in the image
+  ([doc_update_trust.md](docs/architecture/doc_update_trust.md)). They also carry a keyless
+  cosign signature and an SPDX SBOM attestation.
+- **Package images** carry a keyless cosign signature and an SPDX SBOM attestation
+  (`forge/scripts/sign_attest.sh`).
+- **Kernel artefacts** carry a keyless cosign signature, an SPDX SBOM, an attestation of
+  the build pins and SLSA build provenance (`.github/workflows/kernel-build.yml`). They are
+  the only artefacts with build provenance today.
 
----
-*Athanor OS - Immutable, Zero-Trust, Asynchronous.*
+## Documentation
+
+- [Kernel and platform profile](docs/architecture/doc_kernel_profile.md)
+- [Kernel build](docs/architecture/doc_kernel_build.md) and
+  [build ordering](docs/architecture/doc_build_ordering.md)
+- [System image](docs/architecture/doc_system_image.md)
+- [Update trust](docs/architecture/doc_update_trust.md) and
+  [recovery](docs/architecture/doc_recovery.md)
+- [Desktop shell](docs/architecture/doc_shell.md), [bar and dock](docs/architecture/doc_bar.md),
+  [launcher](docs/architecture/doc_launcher.md)
+- [Software](docs/architecture/doc_software.md)
+- [Gatekeeper and its polkit actions](docs/architecture/doc_core_daemons.md)
+- [Forge](forge/README.md) and [system image assembly](system/README.md)
+
+## Contributing and security
+
+See [CONTRIBUTING](.github/CONTRIBUTING.md) and the [security policy](.github/SECURITY.md).
