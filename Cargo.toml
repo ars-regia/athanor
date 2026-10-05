@@ -32,6 +32,7 @@ members = [
   "system/athanor-init-oracle",
   "system/athanor-layout",
   "system/athanor-preview",
+  "system/athanor-portal",
   "system/athanor-preview-render",
   "system/athanor-search",
   "system/athanor-unit",

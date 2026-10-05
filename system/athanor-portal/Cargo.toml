@@ -1,0 +1,9 @@
+[package]
+name = "athanor-portal"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+description = "The decisions of Athanor's desktop portal backend that tests reach without a display (doc_portal.md, PT2)"
+authors = ["Athanor Forge <forge@athanor.os>"]
+
+[dependencies]

@@ -706,6 +706,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-portal"
+version = "1.0.0"
+
+[[package]]
 name = "athanor-preview"
 version = "1.0.0"
 dependencies = [
@@ -7334,12 +7338,12 @@ dependencies = [
 name = "xdg-desktop-portal-athanor"
 version = "1.0.0"
 dependencies = [
- "anyhow",
- "serde",
- "serde_json",
+ "athanor-portal",
+ "athanor-unit",
+ "gio",
+ "glib",
  "tokio",
  "tracing",
- "tracing-subscriber",
  "zbus",
 ]
 
