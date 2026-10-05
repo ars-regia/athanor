@@ -1,0 +1,7 @@
+# doc_control_center.md, CC2: a call to os.athanor.ControlCenter1 starts the control center's
+# unit when it is down, so the bar's button and Super+C work from the first press. The bus
+# never runs the program itself.
+[D-BUS Service]
+Name=os.athanor.ControlCenter1
+Exec=/bin/false
+SystemdService=athanor-control-center.service

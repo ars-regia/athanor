@@ -10,6 +10,7 @@ mod bluetooth;
 pub mod bridge;
 mod bus;
 mod clock;
+mod control_center;
 mod input;
 mod logind;
 mod menu;
@@ -257,6 +258,7 @@ fn build(module: Module, bar: &Rc<Bar>, connector: Option<&str>) -> Option<Box<d
         Module::Shield => shield::new(bar),
         Module::Audio => audio::new(bar),
         Module::Battery => battery::new(bar),
+        Module::ControlCenter => control_center::new(bar),
     }
 }
 

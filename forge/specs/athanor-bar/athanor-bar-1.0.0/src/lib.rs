@@ -3,6 +3,7 @@
 //! BlueZ and UPower, and the trust shield. The binary draws it.
 
 pub mod clock;
+pub mod control_center;
 pub mod dbusmenu;
 pub mod fullscreen;
 pub mod keyboard;

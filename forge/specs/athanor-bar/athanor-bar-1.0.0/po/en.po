@@ -281,6 +281,10 @@ msgstr "%A %-d %B %Y, %-I:%M %p"
 msgid "Clock"
 msgstr "Clock"
 
+#: src/ui/control_center.rs:30
+msgid "Control center"
+msgstr "Control center"
+
 #: src/ui/input.rs:41
 #, rust-format
 msgid "Input source: {name}"

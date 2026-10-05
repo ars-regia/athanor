@@ -14,6 +14,7 @@ members = [
   "forge/specs/athanor-bar/athanor-bar-1.0.0",
   "forge/specs/athanor-dock/athanor-dock-1.0.0",
   "forge/specs/athanor-launcher/athanor-launcher-1.0.0",
+  "forge/specs/athanor-control-center/athanor-control-center-1.0.0",
   "forge/specs/athanor-sysmon-ebpf/athanor-sysmon-ebpf-1.0.0",
   "forge/specs/athanor-update/athanor-update-1.0.0",
   "forge/specs/athanor-update/athanor-update-notify-1.0.0",
