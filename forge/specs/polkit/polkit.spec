@@ -139,17 +139,21 @@ done
 # (*_chk imports), PIE (ET_DYN), and no builder paths from the DWARF.
 fail=0
 fortified=0
+protected=0
 for f in %{buildroot}%{_bindir}/pkexec \
          %{buildroot}%{_prefix}/lib/polkit-1/polkitd \
          %{buildroot}%{_prefix}/lib/polkit-1/polkit-agent-helper-1; do
     dyn=$(eu-readelf -d "$f")
     syms=$(eu-readelf --dyn-syms "$f")
     grep -q 'BIND_NOW' <<<"$dyn" || { echo "$f: no BIND_NOW (-z now)"; fail=1; }
-    grep -q '__stack_chk_fail' <<<"$syms" || { echo "$f: no stack protector"; fail=1; }
+    grep -q '__stack_chk_fail' <<<"$syms" && protected=1
     grep -q 'Type: *DYN' <<<"$(eu-readelf -h "$f")" || { echo "$f: not PIE"; fail=1; }
     grep -q '_chk\b' <<<"$syms" && fortified=1
     ! grep -aq '/nix/store' "$f" || { echo "$f: carries /nix/store paths"; fail=1; }
 done
+# -fstack-protector-strong instruments only functions with arrays or address-taken locals, so a
+# small binary may legitimately import neither; the flags are proven applied when any binary does.
+[ "$protected" = 1 ] || { echo "no stack protector (__stack_chk_fail) import in any binary"; fail=1; }
 [ "$fortified" = 1 ] || { echo "no _FORTIFY_SOURCE (*_chk) import in any binary"; fail=1; }
 exit $fail
 
