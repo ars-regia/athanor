@@ -5,8 +5,9 @@ name: ISO Acceptance
 # followed. It answers the one question the build cannot: not whether an ISO was
 # produced, but whether it installs a system that starts and can be logged into.
 #
-# It is deliberately not part of every orchestrator run: the build already takes half an
-# hour and this adds a full install on top of it, so it runs weekly and on request. The
+# The Orchestrator calls it after every system image build on the default branch, because
+# its verdict is the acceptance evidence that system/promote.sh requires before :stable may
+# move (docs/architecture/doc_update_trust.md, D1); it also runs weekly and on request. The
 # run itself is short. On a runner with KVM the install takes about eight minutes and the
 # job about twelve, because the console ends the run as soon as it has an answer rather
 # than waiting out a clock. What it produces is meant to be looked at: the console log,
@@ -27,6 +28,16 @@ on:
         description: "tag of athanor-iso to install: a run id, `latest`, or `newest` to resolve the most recent published one"
         type: string
         default: newest
+  workflow_call:
+    inputs:
+      iso_tag:
+        description: "tag of athanor-iso to install: the run id of the build that published it"
+        type: string
+        required: true
+      skip_lint:
+        description: "the caller has already run the lint workflow on this commit"
+        type: boolean
+        default: false
   push:
     branches: [main, iso-v0]
     paths:
@@ -42,17 +53,20 @@ permissions:
 
 jobs:
   lint:
+    if: ${{ !inputs.skip_lint }}
     uses: ./.github/workflows/call-lint.yml
 
   install:
     needs: [lint]
+    if: ${{ !cancelled() && (needs.lint.result == 'success' || needs.lint.result == 'skipped') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       contents: read
       packages: read
     env:
-      ISO_IMAGE: ghcr.io/${{ github.repository_owner }}/athanor-iso
+      REGISTRY_HOST: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
+      ISO_IMAGE: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}/athanor-iso
       ISO_TAG: ${{ inputs.iso_tag || 'newest' }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -80,7 +94,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          echo "${GITHUB_TOKEN}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+          echo "${GITHUB_TOKEN}" | podman login "${REGISTRY_HOST}" -u "${{ github.actor }}" --password-stdin
 
           # `latest` is published only from main, so on a working branch it names nothing
           # and the pull fails with "manifest unknown". `newest` asks the registry for
@@ -100,6 +114,8 @@ jobs:
           # The ISO ships inside a scratch image with one file in it, so a container of
           # that image is the only thing to unpack.
           podman pull "${ISO_IMAGE}:${ISO_TAG}"
+          # The run and the system image digests the ISO was built from, for the evidence.
+          podman image inspect --format '{{json .Labels}}' "${ISO_IMAGE}:${ISO_TAG}" > iso-labels.json
           ctr=$(podman create "${ISO_IMAGE}:${ISO_TAG}" /bin/true)
           mkdir -p iso
           podman cp "${ctr}:/." iso/
@@ -128,6 +144,24 @@ jobs:
       - name: 📋 Report
         if: always() && hashFiles('iso-test/verdict.md') != ''
         run: cat ./iso-test/verdict.md >> "${GITHUB_STEP_SUMMARY}"
+
+      # The acceptance evidence, pass or fail, for system/promote.sh and promote-stable.yml.
+      # A failure here (an ISO without the labels) fails the job: no evidence, no promotion.
+      - name: 🧾 Write the acceptance evidence
+        if: always() && hashFiles('iso-labels.json') != ''
+        env:
+          ACCEPTANCE_RUN_ID: ${{ github.run_id }}
+        run: python3 forge/test/iso/evidence.py ./iso-test iso-labels.json "${ACCEPTANCE_RUN_ID}" ./evidence
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always() && hashFiles('evidence/acceptance-*.json') != ''
+        with:
+          # acceptance-*: the pattern promote-stable.yml downloads. The attempt keeps a rerun
+          # from colliding with the evidence of the first attempt.
+          name: acceptance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/acceptance-*.json
+          if-no-files-found: error
+          retention-days: 90
 
       - uses: actions/upload-artifact@v4
         if: always()

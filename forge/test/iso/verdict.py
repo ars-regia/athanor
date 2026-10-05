@@ -30,6 +30,7 @@ picture says it started *correctly*, and the second question is not one this scr
 answer.
 """
 
+import json
 import pathlib
 import sys
 
@@ -133,6 +134,19 @@ def main() -> int:
     report = "\n".join(lines) + "\n"
 
     (out / "verdict.md").write_text(report)
+    # The same verdict for a program: forge/test/iso/evidence.py turns it into the acceptance
+    # evidence that system/promote.sh requires.
+    checks = {
+        "installed": installed,
+        "kickstart-done": kickstart_done,
+        "profile": profile is not None,
+        "karg": karg is not None,
+        "greeter": greeter is not None,
+        "session": session is not None,
+        "settings": settings is not None,
+        "no-guest-failure": not failures,
+    }
+    (out / "verdict.json").write_text(json.dumps({"pass": ok, "checks": checks}, indent=2) + "\n")
     print(report)
     return 0 if ok else 1
 

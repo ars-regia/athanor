@@ -15,6 +15,7 @@ markers it recognises across chunk boundaries, when it stops, and the PNG conver
 checked on the pixels rather than on the file existing.
 """
 
+import json
 import os
 import pathlib
 import shutil
@@ -659,6 +660,56 @@ def test_karg_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
             assert cmdline in proc.stdout, "a missing karg must print the command line"
 
 
+LABELS = {
+    "io.athanor.run-id": "412",
+    "io.athanor.image-digest.athanor-system": "sha256:" + "a" * 64,
+    "io.athanor.image-digest.athanor-system-nvidia": "sha256:" + "b" * 64,
+}
+
+
+def evidence(tmp: pathlib.Path, labels, verdict_dir):
+    labels_file = tmp / "labels.json"
+    labels_file.write_text(json.dumps(labels))
+    out = tmp / "evidence"
+    shutil.rmtree(out, ignore_errors=True)
+    proc = subprocess.run(
+        [sys.executable, str(HERE / "evidence.py"), str(verdict_dir), str(labels_file), "900", str(out)],
+        capture_output=True,
+        text=True,
+    )
+    path = out / "acceptance-412.json"
+    return proc.returncode, json.loads(path.read_text()) if path.exists() else None
+
+
+def test_evidence_names_the_digests_and_the_verdict(tmp: pathlib.Path) -> None:
+    test_pass(tmp)
+    code, doc = evidence(tmp, LABELS, tmp / "run")
+    assert code == 0, "a labelled ISO must yield evidence"
+    assert doc["result"] == "pass" and doc["run_id"] == "412" and doc["acceptance_run_id"] == "900"
+    assert doc["images"]["athanor-system-nvidia"] == "sha256:" + "b" * 64
+    assert doc["tests"]["settings"] is True and doc["schema"] == 1
+
+
+def test_evidence_of_a_failed_run_says_fail(tmp: pathlib.Path) -> None:
+    verdict(tmp, [("installed", 100), ("greeter-alive", 400)])
+    code, doc = evidence(tmp, LABELS, tmp / "run")
+    assert code == 0 and doc["result"] == "fail", "a failed verdict must be recorded as a failure"
+    assert doc["tests"]["session"] is False
+
+
+def test_evidence_without_a_verdict_says_fail(tmp: pathlib.Path) -> None:
+    empty = tmp / "never-started"
+    empty.mkdir(exist_ok=True)
+    code, doc = evidence(tmp, LABELS, empty)
+    assert code == 0 and doc["result"] == "fail", "a run that left no verdict is a failure"
+
+
+def test_evidence_needs_the_iso_labels(tmp: pathlib.Path) -> None:
+    test_pass(tmp)
+    code, doc = evidence(tmp, {"org.opencontainers.image.version": "412"}, tmp / "run")
+    assert code == 1 and doc is None, "an unlabelled ISO cannot name the digests it installed"
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as name:
         tmp = pathlib.Path(name)
@@ -682,6 +733,10 @@ def main() -> int:
             test_console_boots_our_kickstart,
             test_installed_systems_own_grub_is_not_a_loop,
             test_console_logs_in_opens_settings_and_stops,
+            test_evidence_names_the_digests_and_the_verdict,
+            test_evidence_of_a_failed_run_says_fail,
+            test_evidence_without_a_verdict_says_fail,
+            test_evidence_needs_the_iso_labels,
         ):
             test(tmp)
             print(f"  ok  {test.__name__}")
