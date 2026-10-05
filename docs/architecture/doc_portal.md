@@ -238,7 +238,7 @@ Applied with the approval of this document. Requests met, by the rule that made 
 - `doc_first_run.md` (FR12, section 3): declined. Location is the frontend's own implementation (no backend of Athanor's), so this document has no mechanism for `org.gnome.system.location enabled`; spike F4 of that document decides whether the frontend reads the key.
 - `doc_settings.md`: the privacy page lists and revokes the grants of the frontend's permission store, in tables `screenshot`, `background`, `inhibit`, `screencast`, and the camera and location tables. This document owns no permission of its own (PT6).
 - `OpenURI`, spike S8 of `doc_session_daemons.md`: whether the applications that the frontend's `OpenURI` starts pass through the launch broker is settled by that spike. The owner of any change is this document.
-- Amendments received, from the ruling of 2026-10-05s of 2026-10-05: PT3's declared limit, ended for `confined` applications (`doc_session_daemons.md` SD9); PT11's Suspend flag, which takes the suspend-only path (SD5, portal decision 5); the shortcuts file, which is LN9's (`doc_overview.md` section 3).
+- Amendments received, from the maintainer's rulings of 2026-10-05: PT3's declared limit, ended for `confined` applications (`doc_session_daemons.md` SD9); PT11's Suspend flag, which takes the suspend-only path (SD5, portal decision 5); the shortcuts file, which is LN9's (`doc_overview.md` section 3).
 
 ## 4. Open doubts
 

@@ -322,7 +322,7 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
 - `doc_shell.md:252` (open doubt 5): answered by SE23; no COSMIC page is hidden or patched.
 - `shell-features.md` (`:344-383`): F-settings-24, 25, 26, 27, 28, 29, 30, 33, 34 marked `excluded` with SE24's reasons (decision 8); F-settings-01 to 21 and 31, 32 point to this document, and those `have` through cosmic-settings say "replaced by `doc_settings.md` at stage 6".
 - Code changes at the retirement step, listed in SE23: `forge/config/packages.json:132-133`, `forge/specs/athanor-bar/athanor-bar-1.0.0/data/favorites.toml:8`, `scripts/devvm/shield-acceptance.sh:140-144`, `forge/test/shell/rig.sh:334-336`, `forge/specs/athanor-system-config/athanor-system-config.spec:208`; and at step 1 the workspace `exclude` entry `Cargo.toml:60`.
-- Amendments received, from the ruling of 2026-10-05s of 2026-10-05: SE11 and SE13 name the schemas of `doc_session_daemons.md` SD3; the USB devices text is the section of SD13; the startup-applications exclusion of SE24 ends (SD10); SE14 gains the hot-corner switch and the workspace settings the overview reads (`doc_overview.md` OV14, OV3).
+- Amendments received, from the maintainer's rulings of 2026-10-05: SE11 and SE13 name the schemas of `doc_session_daemons.md` SD3; the USB devices text is the section of SD13; the startup-applications exclusion of SE24 ends (SD10); SE14 gains the hot-corner switch and the workspace settings the overview reads (`doc_overview.md` OV14, OV3).
 
 ## 4. Open doubts
 
