@@ -30,11 +30,13 @@ Explore the detailed architectural specifications (generated and maintained by o
 
 ### Quick Chapters
 1. [The Athanor Paradigm: Beyond Big-Tech](#1-the-athanor-paradigm-beyond-big-tech)
+
 ## Audience and support window
 
-- **Audience:** desktops and laptops with UEFI and an x86-64-v3 CPU (Haswell and Zen 1 or newer). Older machines, and low-power ones such as the Intel N5100 class, are not supported.
+- **Audience:** desktops and laptops with UEFI and a CPU that has the x86-64-v3 instruction set: AVX2, BMI1, BMI2, FMA, MOVBE, F16C and LZCNT. Machines without AVX2, such as Celeron and Pentium parts of the Intel N5100 class, are excluded.
 - **Base:** Athanor follows the current Fedora release and moves to the next one within 90 days of its release.
-- **Security updates:** provided while Fedora supports the base release (Fedora 45: until 2027-11-24, per the [Fedora schedule](https://fedorapeople.org/groups/schedule/f-45/f-45-key-tasks.html); Fedora may move that date).
+- **Today:** the image is built on Fedora 43, with security updates until 2026-12-09. The move to Fedora 45 (security updates until 2027-11-24) follows the 90-day rule. Both dates come from the Fedora schedule ([F43](https://fedorapeople.org/groups/schedule/f-43/f-43-key-tasks.html), [F45](https://fedorapeople.org/groups/schedule/f-45/f-45-key-tasks.html)) and Fedora may move them.
+- **Security updates:** provided while Fedora supports the base release.
 - **Reporting vulnerabilities:** see [SECURITY.md](.github/SECURITY.md). **Contributing:** see [CONTRIBUTING.md](.github/CONTRIBUTING.md).
 
 ## Architecture
