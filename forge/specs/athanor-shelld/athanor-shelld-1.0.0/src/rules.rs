@@ -20,6 +20,8 @@ use tokio::io::unix::AsyncFd;
 use tokio::sync::mpsc::Sender;
 use tracing::warn;
 
+use athanor_services::notifications::Corner;
+
 use crate::hints::is_desktop_id;
 use crate::identity::Identity;
 
@@ -63,15 +65,6 @@ impl Default for Rule {
 pub enum Retention {
     Days(u32),
     UntilCleared,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Corner {
-    Bar,
-    TopStart,
-    TopEnd,
-    BottomStart,
-    BottomEnd,
 }
 
 /// Minutes since midnight; `start_min > end_min` crosses midnight. `days` is Monday first.
@@ -172,13 +165,7 @@ impl Settings {
             Retention::Days(days) => days.to_string(),
             Retention::UntilCleared => "forever".to_owned(),
         };
-        let corner = match self.popup_corner {
-            Corner::Bar => "bar",
-            Corner::TopStart => "top-start",
-            Corner::TopEnd => "top-end",
-            Corner::BottomStart => "bottom-start",
-            Corner::BottomEnd => "bottom-end",
-        };
+        let corner = self.popup_corner.as_str();
         let (schedule, schedule_days) = match &self.schedule {
             Some(window) => (
                 format!(
@@ -340,15 +327,10 @@ pub fn parse_settings(text: &str) -> (Settings, Vec<String>) {
             }
             .map(|r| settings.retention = r),
             "sound" => boolean(value).map(|b| settings.sound = b),
-            "popup_corner" => match value {
-                "bar" => Some(Corner::Bar),
-                "top-start" => Some(Corner::TopStart),
-                "top-end" => Some(Corner::TopEnd),
-                "bottom-start" => Some(Corner::BottomStart),
-                "bottom-end" => Some(Corner::BottomEnd),
-                _ => None,
-            }
-            .map(|c| settings.popup_corner = c),
+            "popup_corner" => value
+                .parse()
+                .ok()
+                .map(|c| settings.popup_corner = c),
             "private_popups" => boolean(value).map(|b| settings.private_popups = b),
             "timeout_low" => seconds(value).map(|s| settings.timeout_low_s = s),
             "timeout_normal" => seconds(value).map(|s| settings.timeout_normal_s = s),

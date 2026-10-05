@@ -4,6 +4,63 @@
 
 pub mod wire;
 
+/// Where the notification popups sit (`popup_corner`, NC5). `Bar` follows the panel's edge,
+/// at the end side; the others name a corner, "start" being the left in a left-to-right locale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Corner {
+    #[default]
+    Bar,
+    TopStart,
+    TopEnd,
+    BottomStart,
+    BottomEnd,
+}
+
+impl Corner {
+    /// The value as the settings file and the daemon's `Settings` write it.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Corner::Bar => "bar",
+            Corner::TopStart => "top-start",
+            Corner::TopEnd => "top-end",
+            Corner::BottomStart => "bottom-start",
+            Corner::BottomEnd => "bottom-end",
+        }
+    }
+}
+
+impl std::str::FromStr for Corner {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Corner, ()> {
+        [
+            Corner::Bar,
+            Corner::TopStart,
+            Corner::TopEnd,
+            Corner::BottomStart,
+            Corner::BottomEnd,
+        ]
+        .into_iter()
+        .find(|corner| corner.as_str() == value)
+        .ok_or(())
+    }
+}
+
+#[cfg(test)]
+mod corner_tests {
+    use super::Corner;
+
+    #[test]
+    fn every_corner_round_trips_and_nothing_else_parses() {
+        for text in ["bar", "top-start", "top-end", "bottom-start", "bottom-end"] {
+            assert_eq!(text.parse::<Corner>().map(Corner::as_str), Ok(text));
+        }
+        assert!("middle".parse::<Corner>().is_err());
+        assert!("Bar".parse::<Corner>().is_err());
+    }
+}
+
 use std::collections::VecDeque;
 use std::fmt;
 use std::future::Future;

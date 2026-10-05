@@ -5,9 +5,10 @@
 use std::collections::HashMap;
 
 use athanor_layout::preset::PanelEdge;
+use athanor_services::notifications::Corner;
 use gtk4_layer_shell::Edge;
 
-use crate::notices::WAITS;
+use crate::notices::{Notice, WAITS};
 
 pub const VISIBLE: usize = 3;
 
@@ -120,17 +121,6 @@ pub fn target_output(activated: Option<&[String]>, outputs: &[String]) -> Option
     Some(focused.unwrap_or(0))
 }
 
-/// Where the popups sit (NC5, `popup_corner`). `Bar` follows the panel's edge, at the end side.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Corner {
-    #[default]
-    Bar,
-    TopStart,
-    TopEnd,
-    BottomStart,
-    BottomEnd,
-}
-
 /// What the popups take from the daemon's `Settings` (NC12).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Look {
@@ -163,17 +153,41 @@ impl Look {
             _ => fallback,
         };
         Look {
-            corner: match pairs.get("popup_corner").map(String::as_str) {
-                Some("top-start") => Corner::TopStart,
-                Some("top-end") => Corner::TopEnd,
-                Some("bottom-start") => Corner::BottomStart,
-                Some("bottom-end") => Corner::BottomEnd,
-                _ => default.corner,
-            },
+            corner: pairs
+                .get("popup_corner")
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.corner),
             private: flag("private_popups", default.private),
             trigger_fullscreen: flag("trigger_fullscreen", default.trigger_fullscreen),
         }
     }
+}
+
+impl Look {
+    /// The look after asking the daemon for its settings. An answer is read as it is. No
+    /// answer fails closed: the popups turn private, so that a setting the bar could not
+    /// learn never shows what the person asked to hide. The corner and the layer stay as
+    /// they were.
+    #[must_use]
+    pub fn answered(reply: Option<&HashMap<String, String>>, before: Option<Look>) -> Look {
+        match reply {
+            Some(pairs) => Look::from_settings(pairs),
+            None => Look {
+                private: true,
+                ..before.unwrap_or_default()
+            },
+        }
+    }
+}
+
+/// Whether the popups go on the overlay layer, above fullscreen windows (NC12). They do when
+/// the fullscreen trigger is off, and when a shown popup is one do not disturb lets through:
+/// a critical one, or any popup while it is on (the daemon shows none but those, and the
+/// bar's list does not say which application bypasses it). Under a fullscreen window the
+/// person would not see them otherwise.
+#[must_use]
+pub fn above_fullscreen(trigger_fullscreen: bool, dnd: bool, shown: &[Notice]) -> bool {
+    !trigger_fullscreen || (!shown.is_empty() && dnd) || shown.iter().any(Notice::critical)
 }
 
 /// The vertical and the horizontal edge the popups are anchored to. Left and right swap in a
@@ -198,17 +212,24 @@ pub fn corner_edges(corner: Corner, panel_edge: PanelEdge, rtl: bool) -> (Edge, 
     }
 }
 
-/// What a private popup shows (NC12): the application's name and nothing of the notification.
-/// The first is the text on the card, the second its accessible name, which must not carry the
-/// summary either.
+/// What a private popup takes from its notification (NC12): the application's name, which is
+/// both the text on the card and its accessible name, and the desktop entry its icon comes
+/// from. Nothing else of the notification reaches the popup: not the summary, the body, the
+/// picture, the actions, the progress or the reply.
 #[must_use]
-pub fn private_card(app_name: &str) -> (String, String) {
-    (app_name.to_owned(), app_name.to_owned())
+pub fn private_card(notice: &Notice, unknown: &str) -> (String, Option<String>) {
+    let name = if notice.app_name.is_empty() {
+        unknown
+    } else {
+        &notice.app_name
+    };
+    (name.to_owned(), notice.desktop_entry.clone())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::notices::{Action, Picture, Urgency};
 
     #[test]
     fn target_output_follows_the_activated_window() {
@@ -330,10 +351,72 @@ mod tests {
         }
     }
 
+    fn notice_with(urgency: Urgency) -> Notice {
+        Notice {
+            id: 7,
+            app_name: "Mail".into(),
+            summary: "Secret summary".into(),
+            body: "Secret body".into(),
+            body_spans: vec![("Secret body".into(), 0, String::new())],
+            actions: vec![Action {
+                key: "open".into(),
+                label: "Secret action".into(),
+            }],
+            has_default: true,
+            urgency,
+            transient: false,
+            resident: false,
+            desktop_entry: Some("org.example.Mail".into()),
+            picture: Picture::Name("secret-picture".into()),
+            popup_ms_left: 5000,
+            value: Some(50),
+            reply: Some("Secret reply".into()),
+        }
+    }
+
     #[test]
-    fn a_private_card_carries_only_the_name() {
-        let (shown, accessible) = private_card("Mail");
-        assert_eq!((shown.as_str(), accessible.as_str()), ("Mail", "Mail"));
+    fn a_private_card_carries_only_the_name_and_the_icon_source() {
+        let notice = notice_with(Urgency::Normal);
+        assert_eq!(
+            private_card(&notice, "Unknown"),
+            ("Mail".to_owned(), Some("org.example.Mail".to_owned()))
+        );
+        let nameless = Notice {
+            app_name: String::new(),
+            desktop_entry: None,
+            ..notice
+        };
+        assert_eq!(private_card(&nameless, "Unknown"), ("Unknown".to_owned(), None));
+    }
+
+    #[test]
+    fn no_answer_fails_closed_and_keeps_the_corner() {
+        let before = Look {
+            corner: Corner::TopEnd,
+            private: false,
+            trigger_fullscreen: false,
+        };
+        assert_eq!(
+            Look::answered(None, Some(before)),
+            Look {
+                private: true,
+                ..before
+            }
+        );
+        assert!(Look::answered(None, None).private);
+        let pairs = HashMap::from([("private_popups".to_owned(), "false".to_owned())]);
+        assert!(!Look::answered(Some(&pairs), Some(before)).private);
+    }
+
+    #[test]
+    fn the_overlay_is_for_the_trigger_off_or_a_popup_dnd_lets_through() {
+        let plain = notice_with(Urgency::Normal);
+        let critical = notice_with(Urgency::Critical);
+        assert!(!above_fullscreen(true, false, std::slice::from_ref(&plain)));
+        assert!(above_fullscreen(false, false, std::slice::from_ref(&plain)));
+        assert!(above_fullscreen(true, false, &[plain.clone(), critical]));
+        assert!(above_fullscreen(true, true, &[plain]));
+        assert!(!above_fullscreen(true, true, &[]), "nothing shown, nothing to lift");
     }
 
     #[test]

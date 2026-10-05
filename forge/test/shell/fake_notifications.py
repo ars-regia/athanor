@@ -108,6 +108,8 @@ class Daemon:
         self.dnd = False
         # The daemon's defaults (athanor-shelld rules.rs); the test changes them with SetSetting.
         self.settings = {"popup_corner": "bar", "private_popups": "false", "trigger_fullscreen": "true"}
+        # A test makes `Settings` fail with SetSetting fail true.
+        self.fail_settings = False
         self.bus = None
 
     def left_ms(self, notice):
@@ -225,6 +227,8 @@ class Daemon:
             if not notice["resident"]:
                 self.close(id_, 2)
             invocation.return_value(None)
+        elif method == "Settings" and self.fail_settings:
+            invocation.return_dbus_error("org.freedesktop.DBus.Error.Failed", "settings unavailable")
         elif method == "Settings":
             invocation.return_value(GLib.Variant("(a{ss})", (self.settings,)))
         elif method == "SetSetting":
@@ -232,7 +236,10 @@ class Daemon:
             # setting and emits SettingsChanged as the daemon does.
             key, value = parameters.unpack()
             log(f"SetSetting {key} {value}")
-            self.settings[key] = value
+            if key == "fail":
+                self.fail_settings = value == "true"
+            else:
+                self.settings[key] = value
             self.emit("SettingsChanged", None)
             invocation.return_value(None)
         elif method == "ReportFullscreen":

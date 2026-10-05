@@ -67,8 +67,10 @@ pub struct Service {
     unread: RefCell<Unread>,
     popups: RefCell<Popups>,
     dnd: Cell<bool>,
-    /// What the daemon's settings say about the popups (NC12); the defaults until it answers.
-    look: Cell<Look>,
+    /// What the daemon's settings say about the popups (NC12). `None` until this owner has
+    /// answered `Settings`: no popup is drawn before, so that none shows its content while
+    /// the setting that may hide it is unknown.
+    look: Cell<Option<Look>>,
     /// The last `(available, active)` sent to the daemon; `None` until the first send for
     /// this owner.
     fullscreen: Cell<Option<(bool, bool)>>,
@@ -139,7 +141,7 @@ impl Service {
                 unread: RefCell::new(Unread::default()),
                 popups: RefCell::new(Popups::default()),
                 dnd: Cell::new(false),
-                look: Cell::new(Look::default()),
+                look: Cell::new(None),
                 fullscreen: Cell::new(None),
                 ticking: Cell::new(false),
                 last_tick: Cell::new(None),
@@ -628,19 +630,19 @@ impl Service {
             else {
                 return;
             };
-            match reply
+            let pairs = reply
                 .as_ref()
                 .ok()
-                .and_then(|reply| reply.try_child_value(0)?.get::<HashMap<String, String>>())
-            {
-                Some(pairs) => {
-                    service.look.set(Look::from_settings(&pairs));
-                    service.redraw_popups();
-                }
-                None => tracing::warn!(
-                    "athanor-shelld did not report its settings; the popups keep their look"
-                ),
+                .and_then(|reply| reply.try_child_value(0)?.get::<HashMap<String, String>>());
+            if pairs.is_none() {
+                tracing::warn!(
+                    "athanor-shelld did not report its settings; the popups show the application's name only"
+                );
             }
+            service
+                .look
+                .set(Some(Look::answered(pairs.as_ref(), service.look.get())));
+            service.redraw_popups();
         });
     }
 
@@ -683,6 +685,7 @@ impl Service {
     fn reset(&self) {
         self.generation.set(self.generation.get().wrapping_add(1));
         self.fullscreen.set(None);
+        self.look.set(None);
         self.retried.set(false);
         self.subscription.take();
         self.peer.take();
@@ -714,7 +717,10 @@ impl Service {
         let (Some(bar), Some(me)) = (self.bar.upgrade(), self.me.upgrade()) else {
             return;
         };
-        let visible = if self.live() && !self.control_center_open.get() {
+        // Nothing is drawn until the settings are known (see `look`); the windows still empty.
+        let known = self.look.get();
+        let look = known.unwrap_or_default();
+        let visible = if known.is_some() && self.live() && !self.control_center_open.get() {
             self.popups.borrow().visible()
         } else {
             Vec::new()
@@ -748,15 +754,15 @@ impl Service {
                 })
                 .collect()
         };
-        let (mut windows, look) = (self.windows.borrow_mut(), self.look.get());
+        let mut windows = self.windows.borrow_mut();
         for (monitor, shown) in plan {
             match windows.iter().find(|window| window.on(&monitor)) {
                 Some(window) if shown.is_empty() => window.hide(),
-                Some(window) => window.show(&bar, &me, &shown, look),
+                Some(window) => window.show(&bar, &me, &shown, look, self.dnd.get()),
                 None if shown.is_empty() => {}
                 None => {
                     let window = Window::new(&bar, &monitor);
-                    window.show(&bar, &me, &shown, look);
+                    window.show(&bar, &me, &shown, look, self.dnd.get());
                     windows.push(window);
                 }
             }
@@ -885,7 +891,7 @@ fn picture(notice: &Notice) -> gtk4::Image {
         Picture::Name(name) if has_icon(name) => Some(gtk4::Image::from_icon_name(name)),
         Picture::Name(_) | Picture::None => None,
     }
-    .or_else(|| application_icon(notice))
+    .or_else(|| application_icon(notice.desktop_entry.as_deref()))
     .unwrap_or_else(|| gtk4::Image::from_icon_name(FALLBACK_ICON));
     image.set_pixel_size(PICTURE_PX);
     image.set_valign(gtk4::Align::Start);
@@ -893,10 +899,8 @@ fn picture(notice: &Notice) -> gtk4::Image {
 }
 
 /// The icon of the application's desktop entry.
-fn application_icon(notice: &Notice) -> Option<gtk4::Image> {
-    notice
-        .desktop_entry
-        .as_deref()
+fn application_icon(entry: Option<&str>) -> Option<gtk4::Image> {
+    entry
         .and_then(|entry| gio_unix::DesktopAppInfo::new(&format!("{entry}.desktop")))
         .and_then(|info| info.icon())
         .map(|icon| gtk4::Image::from_gicon(&icon))
@@ -917,12 +921,13 @@ fn private_popup(service: &Rc<Service>, notice: &Notice) -> gtk4::Box {
         card.add_css_class("critical");
     }
     card.set_size_request(CARD_WIDTH, -1);
-    let (shown, accessible) = private_card(&app_name(notice));
+    let (shown, entry) = private_card(notice, &tr("Unknown application"));
+    let accessible = shown.clone();
     card.update_property(&[Property::Label(&accessible)]);
     let name = text_label(&shown, 1);
     name.add_css_class("bar-popover-title");
     name.set_hexpand(true);
-    let icon = application_icon(notice)
+    let icon = application_icon(entry.as_deref())
         .unwrap_or_else(|| gtk4::Image::from_icon_name(FALLBACK_ICON));
     icon.set_pixel_size(PICTURE_PX);
     icon.set_valign(gtk4::Align::Start);

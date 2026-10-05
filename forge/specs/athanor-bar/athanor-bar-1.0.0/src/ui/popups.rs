@@ -15,7 +15,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use athanor_bar::notices::Notice;
-use athanor_bar::popups::{corner_edges, Look};
+use athanor_bar::popups::{above_fullscreen, corner_edges, Look};
 use gtk4::prelude::*;
 use gtk4::{cairo, gdk};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
@@ -71,8 +71,8 @@ impl Window {
     }
 
     /// Shows `notices`, newest first, at the corner `look` names (the end corner of the
-    /// panel's side by default), on the overlay layer unless the fullscreen trigger is on.
-    pub(super) fn show(&self, bar: &Bar, service: &Rc<Service>, notices: &[Notice], look: Look) {
+    /// panel's side by default), on the overlay layer when `above_fullscreen` says so.
+    pub(super) fn show(&self, bar: &Bar, service: &Rc<Service>, notices: &[Notice], look: Look, dnd: bool) {
         let (edge, end) = corner_edges(look.corner, bar.layout().panel(), i18n::is_rtl());
         for side in [Edge::Top, Edge::Bottom, Edge::Left, Edge::Right] {
             let taken = side == edge || side == end;
@@ -81,10 +81,10 @@ impl Window {
         }
         // The layer is set only when it changes: a protocol too old to move a mapped
         // surface would make gtk4-layer-shell remap it (see the module's documentation).
-        let layer = if look.trigger_fullscreen {
-            Layer::Top
-        } else {
+        let layer = if above_fullscreen(look.trigger_fullscreen, dnd, notices) {
             Layer::Overlay
+        } else {
+            Layer::Top
         };
         if self.window.layer() != layer {
             self.window.set_layer(layer);

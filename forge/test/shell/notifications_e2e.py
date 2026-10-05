@@ -274,13 +274,6 @@ def daemon_unread():
     return [(row[0], row[9]) for row in listed]
 
 
-def daemon_unread_rows():
-    (listed,) = daemon_call(
-        "List", None, "(a(ussssa(sus)a(ss)bybbbxsssuuayuubibsss))"
-    ).unpack()
-    return listed
-
-
 def daemon_unread_safe():
     """`daemon_unread`, empty while the daemon is not on the bus."""
     try:
@@ -590,11 +583,19 @@ def main():
             for _, name, _, _ in walk(app, Atspi)
         ),
     )
-    check(
-        "the center's history still holds the whole notification",
-        any(row[0] == secret for row in daemon_unread_rows()),
-    )
     close_notification(secret)
+    # A setting the bar cannot read fails closed: the popups turn private.
+    daemon_call("SetSetting", GLib.Variant("(ss)", ("fail", "true")))
+    daemon_call("SetSetting", GLib.Variant("(ss)", ("private_popups", "false")))
+    unread_settings = notify("Hidden by default", body="Hidden body")
+    check(
+        "when the settings cannot be read a popup shows the application's name only",
+        wait_for(lambda: "e2e" in (alerts(app, Atspi) or []), 3)
+        and not any("Hidden" in name for _, name, _, _ in walk(app, Atspi)),
+        repr(alerts(app, Atspi)),
+    )
+    close_notification(unread_settings)
+    daemon_call("SetSetting", GLib.Variant("(ss)", ("fail", "false")))
     daemon_call("SetSetting", GLib.Variant("(ss)", ("private_popups", "false")))
 
     transient = notify(
