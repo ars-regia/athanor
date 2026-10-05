@@ -21,9 +21,9 @@ if ! command -v flatpak &>/dev/null; then
 fi
 
 echo "[Athanor Flatpak] Configuring Flathub remote..."
-flatpak remote-add --if-not-exists --system flathub https://dl.flathub.org/repo/flathub.flatpakrepo || true
+flatpak remote-add --if-not-exists --system flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
-FLATPAKS=$(jq -r '.flatpaks[]?' "$MANIFEST" 2>/dev/null || true)
+FLATPAKS=$(jq -r '.flatpaks[]?' "$MANIFEST")
 
 if [ -z "$FLATPAKS" ]; then
     echo "[Athanor Flatpak] No flatpaks configured in manifest."
