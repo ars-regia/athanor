@@ -281,6 +281,41 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
 5. **Password and passphrase:** the change of the system disk passphrase (decision 3), in its own change; `athanor-passwd@` and the password row (decision 4), in its own change, once the maintainer has approved its implementation plan.
 6. **The gate of the standard and the retirement:** measurement on the reference laptop, scenarios, accessibility and languages, the aesthetic signature; then the retirement change of SE23.
 
+**SE27. Report a problem** (A2-19, #161; with `doc_kernel_profile.md` D34). Athanor learns that an update broke a machine without collecting telemetry: the machine prepares a report, the user reads it, edits it and submits it. Nothing is sent by Athanor.
+
+- **Two entry points, one program.**
+  - The command `athanor-report-problem`, installed by the package that ships `athanor-profile-check` (`forge/specs/athanor-kernel-profile`; the owner is an open question, section 4).
+  - A row "Report a problem" on the About page (SE22), and the "Report a problem" button of the crash notice of `doc_session.md` SN8. Settings does not build the report itself: it starts the command as a transient user unit and shows what the command wrote, so SE6's write and read lists gain nothing.
+  - The command's unit has no network (`PrivateNetwork=yes`, `RestrictAddressFamilies=AF_UNIX`), read access to `/proc`, `/sys`, `/usr/lib/os-release` and the crash-report directory, and write access to `$XDG_STATE_HOME/athanor/reports` only.
+- **What goes in.** Exactly these fields, in this order, and nothing else; a field that cannot be read is written as `unavailable`, never guessed.
+  1. From `/usr/lib/os-release`: `NAME`, `VERSION_ID` and the image build identifier (`BUILD_ID` or `IMAGE_VERSION`, whichever the image sets; the exact key is checked at the first step).
+  2. The kernel release (`uname -r`) and the active role names (as `athanor-profile-check` reads them from `athanor.role=`).
+  3. The output of `athanor-profile-check` run without `--quiet`: its exit status, each `DRIFT <kind>.<name>: expected <repr>, found <repr>` line, and the closing `athanor-profile-check: <combination>: <held>/<total> settings hold` line (`athanor-profile-check:171-172`). When it exits 2 (profile unreadable) its stderr line goes in instead. Whatever the checker reports later (the mode and reasons of `doc_kernel_profile.md`) joins this output unchanged; the report adds no field of its own for them.
+  4. Optional: the crash report the user picked (below), whole.
+  5. A free-text description, empty at first, that only the user writes.
+  - Not collected: the journal beyond the crash report's own 50 lines, hardware inventories, the list of installed packages, network configuration, accounts, any file of the user. The report is a function of the sources above; another source needs an amendment to this entry.
+- **Redaction.** It runs once over the whole draft, before the user sees it, on exact values read from the machine plus patterns.
+  - User name (the caller's login name) becomes `<user>`.
+  - Host name (static, pretty and transient) becomes `<host>`.
+  - Any path under the caller's home (`$HOME`, resolved and unresolved) becomes `~/...`; `/run/user/<uid>` becomes `/run/user/<uid-redacted>`.
+  - Serial numbers: the DMI serials (`/sys/class/dmi/id/*serial*`, `product_uuid`, `board_asset_tag`) by value, and any `key=value` or `key: value` whose key contains `serial` or `uuid`, become `<serial>`.
+  - MAC addresses, by the pattern of six colon- or hyphen-separated byte pairs, become `<mac>`.
+  - The redaction is best effort and says so on screen: it lists how many values it replaced per class, and the user is the last reviewer. A value the patterns cannot know (a name inside a free-form journal message) is the reason the user reads the draft before it leaves.
+- **What the user does.** The draft is shown whole, in a text view in Settings or as a file for the command (`--edit` opens `$VISUAL` or `$EDITOR`). The user can edit any line and delete any block, including the crash report; the draft after the user's edits is exactly what is encoded. There are three actions, each taken by the user: open the issue in the browser, save the draft as a file, or copy it to the clipboard. The draft is also written, mode 0600, to `$XDG_STATE_HOME/athanor/reports/<UTC time>.txt` before anything is offered, and the 20 most recent are kept.
+- **Size.** GitHub's documentation for creating an issue from a URL states that a URL "that exceeds the server limit" returns `414 URI Too Long` and gives no number (`docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/creating-an-issue`, section on URL queries, read 2026-10-06). **The limit is therefore unverified.** The design does not depend on its value:
+  - the percent-encoded URL has a budget of 6000 bytes, a conservative figure of ours (unverified), to be measured at step 1 against the live server and then fixed in the program as a constant;
+  - when the encoded draft exceeds it, the body keeps the fields of items 1 to 3 and ends with the line "The full report is too long for this form: attach the saved report", naming the saved file by its name (not its path, which is under the home); the user is shown the shorter text that goes to the browser;
+  - the saved file is always available to attach by dragging it into the issue, and the command offers to copy the full draft to the clipboard. The fallback needs no URL at all.
+- **Mechanism.** The command opens `https://github.com/<repo>/issues/new?title=<>&body=<>&labels=<>` (`title`, `body`, `labels` and `template` are the parameters GitHub documents for this URL; a label is applied only if the submitter may add labels) through `org.freedesktop.portal.OpenURI.OpenURI` on the session bus, which hands it to the user's browser.
+  - `<repo>` is never written in code. The base is the `BUG_REPORT_URL` of `/usr/lib/os-release` (`forge/specs/athanor-base-config/SOURCES/usr/lib/os-release:16`, today `https://github.com/hr-mes/athanor/issues`) with `/new` appended; the image build sets it from the build variable that names the repository, so a fork's image points to the fork. The command accepts the value only if it is an `https` URL on `github.com` with two path segments followed by `issues`; otherwise it saves the draft and tells the user why it did not open a browser.
+  - The title is `Problem report: <combination>, <held>/<total> settings hold` or, with no profile result, `Problem report: <NAME> <VERSION_ID>`; the user may edit it in the browser.
+  - The URI is opened only after the user's action above; the command has no option that opens it on its own.
+- **Templates.** The repository has no `.github/ISSUE_TEMPLATE` (checked at `da940ab8`: `.github` holds `PULL_REQUEST_TEMPLATE.md` and no issue template), so `body` is used as is. A minimal issue form `.github/ISSUE_TEMPLATE/problem-report.yml` is proposed as an open question (section 4) and not created by this entry. Whether an issue form ignores `body` (forms are filled by field identifiers) is unverified; if it does, the command would pass the report in the form's one text field instead.
+- **No network without the user's action.** The command and Settings make no request of their own: the unit has no network, and the only exit is the OpenURI call after the user's action. The browser's request to github.com is the user's. Acceptance items 20 and 22 verify it.
+- **Crash reports.** The report of item 4 is the file `doc_session.md` SN8 specifies: `$XDG_STATE_HOME/athanor/crash-reports/<UTC time>-<unit>.txt`, mode 0600, written by `athanor-sessiond` (unit, image version, time, `Result`, exit code or signal, `NRestarts` and the last 50 journal lines of the failed invocation; the 20 most recent kept). SN8's report is a proposal awaiting the maintainer and is not merged: the crash report is optional input here, and this entry follows SN8's path and content if they change. The command takes the report the notice named (`--crash-report <file>`, passed by the notice's button), else lists the available ones and lets the user choose, else goes on without. Its journal lines pass through the redaction above and the user sees them.
+- **Dependencies.** `doc_session.md` SN8 (#156) for item 4; without it the command works with items 1 to 3 and 5.
+- **Needs:** SE22 (About), SN8, `doc_kernel_profile.md` D34 and `athanor-profile-check`.
+
 ## 3. Changes to other documents
 
 **Requirements of those six specifications, met here.**
@@ -335,6 +370,10 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
 7. **SE-S7. AccountsService `SetLanguages`'s authorisation** is `doc_languages.md`'s spike S8; SE19 follows its result.
 8. **`MemoryDenyWriteExecute`** with GTK's renderers on the reference laptop's Mesa: set to yes if the window renders with it at step 1.
 
+9. **SE-S9. The URL budget.** GitHub documents a `414 URI Too Long` for an over-long new-issue URL and no number (SE27). Measure the live limit at step 1 of SE26 and fix the constant; until then 6000 encoded bytes is our unverified estimate.
+10. **SE-S10. Issue forms and `body`.** Whether an issue form ignores `body` (SE27 says so, unverified). Matters if the maintainer adds `.github/ISSUE_TEMPLATE/problem-report.yml`.
+11. **SE-S11. Questions for the maintainer on SE27.** (a) Which package owns `athanor-report-problem`: `athanor-kernel-profile`, beside the checker, or Settings' own package. (b) Whether `labels=` names a label (`problem-report`), which must then exist in the repository. (c) Whether filesystem and boot-entry UUIDs, beyond the DMI ones, are also redacted. (d) Whether the repository adds a minimal issue form `.github/ISSUE_TEMPLATE/problem-report.yml` so the issue has a fixed shape. (e) Whether the 20 kept drafts of `$XDG_STATE_HOME/athanor/reports` are the right retention.
+
 ## 5. Acceptance
 
 On a fresh install in the dev VM and on the reference laptop athanor-ref. **CI** marks what runs in the rig on every change; **ref** marks what the maintainer judges on the reference laptop.
@@ -358,6 +397,11 @@ On a fresh install in the dev VM and on the reference laptop athanor-ref. **CI**
 17. **ref** The memory budget of SE5 holds: measured idle and with each page open in turn.
 18. **ref** Changing the system disk passphrase asks an administrator, the new passphrase unlocks the disk at the next boot, and the TPM unlock still works where it was enrolled.
 19. **CI** `athanor-passwd@` refuses a caller outside `athanor-settings.service`'s cgroup and a wrong current password, and changes the password of the peer's own user only.
+
+20. **CI** `athanor-report-problem --no-open` run in a transient unit with `PrivateNetwork=yes` exits 0 and writes a draft containing the fields of SE27 in order; with `athanor-profile-check` faked to exit 1, the `DRIFT` lines are in it; no `AF_INET` or `AF_INET6` socket is created (`RestrictAddressFamilies=AF_UNIX` makes one fail).
+21. **CI** A fixture machine with a known user name, host name, home path, DMI serial and MAC address yields a draft containing none of them, and the redaction counts are shown. A fixture over-budget draft yields a URL of at most the constant of SE-S9 whose body ends with the "attach the saved report" line, and a saved file with the whole draft.
+22. **CI** With a stub of `org.freedesktop.portal.OpenURI` on the session bus, the command calls it zero times until the confirming action and exactly once after it, with a URI that starts with the image's `BUG_REPORT_URL` plus `/new?`; with `BUG_REPORT_URL` set to a non-GitHub host it calls it zero times and says why.
+23. **ref** On the acceptance VM `athanor-report-problem` produces a draft the user opens in the browser: the new-issue page opens on github.com prefilled with the shown text. The journal shows no connection made by the command or by Settings; the request to github.com is the browser's, after the user's action.
 
 ## 6. Decisions taken
 
