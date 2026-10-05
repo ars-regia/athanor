@@ -26,6 +26,8 @@ Invece di chiedere password complesse a ogni avvio, Athanor OS sfrutta il chip T
 L'impatto iniziale dell'utente con Athanor OS è gestito dal demone `athanor-greeter`, scritto in Rust nativo.
 
 ### Il Primo Avvio (OOBE)
+> **Superseded** by `doc_first_run.md` (2026-10-05). First run is not part of the greeter, generates no mesh key and signs in to no service (FR19). The text below is kept as history.
+
 Al primo boot di una macchina vergine, il Greeter non mostra un generico desktop vuoto. Lancia un flusso isolato e blindato per:
 1. Creare l'account utente amministratore (in un ambiente in cui le password sono gestite con primitive di *Zeroing* in RAM tramite `ZeroizeOnDrop` per prevenire dump della memoria).
 2. Generare la coppia di chiavi ellittiche **X25519** che fungeranno da identità crittografica inviolabile per il Mesh.

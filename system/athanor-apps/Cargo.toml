@@ -13,4 +13,5 @@ athanor-layout = { path = "../athanor-layout" }
 athanor-unit = { path = "../athanor-unit" }
 gio-unix = { workspace = true }
 gtk4 = { workspace = true }
+gtk4-layer-shell = { workspace = true }
 tracing = { workspace = true }

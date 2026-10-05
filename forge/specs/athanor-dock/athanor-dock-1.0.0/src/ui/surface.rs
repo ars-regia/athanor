@@ -9,7 +9,7 @@ use std::rc::Rc;
 use athanor_apps::openers;
 use athanor_apps::row::Row;
 use athanor_compositor_client::Opener;
-use athanor_dock::autohide::{AutoHide, Event, Timer, STRIP_PX};
+use athanor_dock::autohide::{input_region, AutoHide, Event, Rect, Timer, STRIP_PX};
 use athanor_dock::placement::{Anchor, Placement};
 use gtk4::accessible::Property;
 use gtk4::prelude::*;
@@ -23,8 +23,8 @@ use crate::layer_guard;
 /// The auto-hide state of one surface and its one timer.
 struct Hider {
     window: gtk4::ApplicationWindow,
-    edge: Edge,
     stack: gtk4::Stack,
+    edge: Anchor,
     state: RefCell<AutoHide>,
     timer: RefCell<Option<glib::SourceId>>,
 }
@@ -52,15 +52,46 @@ impl Hider {
         self.show(shown);
     }
 
-    /// Hidden, the surface is anchored to both ends of its edge, so the strip spans the
-    /// whole edge and the pointer finds it anywhere along it; shown, it holds the island
-    /// alone, centred. The anchors change in place: the layer surface is never recreated.
+    /// Hidden, the strip is drawn; shown, the island. The surface keeps its anchors and its
+    /// size: changing them in place left cosmic-comp showing the old buffer at the new origin.
     fn show(&self, shown: bool) {
         self.stack
             .set_visible_child_name(if shown { "island" } else { "strip" });
-        for side in across(self.edge) {
-            self.window.set_anchor(side, !shown);
+        self.limit_input();
+    }
+
+    /// Limits the input region (`autohide::input_region`). Called again after every
+    /// layout, because the island's bounds change as applications come and go.
+    fn limit_input(&self) {
+        let Some(surface) = self.window.surface() else {
+            return;
+        };
+        let whole = Rect { x: 0, y: 0, w: self.window.width(), h: self.window.height() };
+        let island = if self.state.borrow().shown() {
+            let Some(bounds) = self
+                .stack
+                .child_by_name("island")
+                .and_then(|island| island.compute_bounds(&self.window))
+            else {
+                return;
+            };
+            Some(Rect {
+                x: bounds.x().floor() as i32,
+                y: bounds.y().floor() as i32,
+                w: bounds.width().ceil() as i32,
+                h: bounds.height().ceil() as i32,
+            })
+        } else {
+            None
+        };
+        let region = gtk4::cairo::Region::create();
+        for r in input_region(self.edge, whole, island) {
+            if let Err(err) = region.union_rectangle(&gtk4::cairo::RectangleInt::new(r.x, r.y, r.w, r.h)) {
+                tracing::warn!(error = %err, "cannot build the dock's input region");
+                return;
+            }
         }
+        surface.set_input_region(Some(&region));
     }
 
     fn cancel(&self) {
@@ -111,6 +142,7 @@ impl Surface {
     /// A layer surface on `monitor`, not on screen until `place` gives it an edge.
     pub fn new(dock: &Rc<Dock>, monitor: &gdk::Monitor) -> Surface {
         let window = gtk4::ApplicationWindow::new(&dock.app);
+        athanor_apps::timing::watch_layer(&window, "dock");
         window.init_layer_shell();
         if let Err(reason) = layer_guard::require_layer_surface(&window) {
             tracing::error!("athanor-dock: not a layer surface: {reason}");
@@ -120,7 +152,10 @@ impl Surface {
         window.set_layer(Layer::Top);
         window.set_monitor(Some(monitor));
         window.set_keyboard_mode(KeyboardMode::OnDemand);
-        window.set_resizable(false);
+        // Not `set_resizable(false)`: GTK would keep its own width and never take the one
+        // cosmic-comp configures for a surface anchored to both ends of its edge. The
+        // smallest default lets the content's own size win, as in the bar.
+        window.set_default_size(1, 1);
         for class in ["athanor-surface", "athanor-dock"] {
             window.add_css_class(class);
         }
@@ -146,6 +181,18 @@ impl Surface {
             if let Some(dock) = weak.upgrade() {
                 tracing::info!("an output left; the dock surfaces are rebuilt");
                 dock.schedule();
+            }
+        });
+        let layout = hider.clone();
+        window.connect_realize(move |window| {
+            if let Some(clock) = window.frame_clock() {
+                let layout = layout.clone();
+                clock.connect_layout(move |_| {
+                    let current = layout.borrow().clone();
+                    if let Some(hider) = current {
+                        hider.limit_input();
+                    }
+                });
             }
         });
         Surface {
@@ -191,7 +238,16 @@ impl Surface {
             Anchor::Right => (Edge::Right, "edge-right", gtk4::PositionType::Left),
         };
         for anchor in [Edge::Top, Edge::Bottom, Edge::Left, Edge::Right] {
-            self.window.set_anchor(anchor, anchor == edge);
+            // Under auto-hide the surface spans its whole edge for its whole life, so the
+            // strip is found anywhere along it and nothing is resized when it hides or shows.
+            let across = placement.auto_hide && across(edge).contains(&anchor);
+            self.window.set_anchor(anchor, anchor == edge || across);
+        }
+        if !placement.auto_hide {
+            // A dock that stays shown takes input on its whole surface again.
+            if let Some(surface) = self.window.surface() {
+                surface.set_input_region(None);
+            }
         }
         self.window.add_css_class(class);
         if placement.auto_hide {
@@ -220,25 +276,54 @@ impl Surface {
         if let Some(button) = openers::button(dock, Opener::AppLibrary) {
             island.append(&button);
         }
-        // The strip is STRIP_PX deep; hidden, the surface stretches it along the whole edge.
-        let strip = gtk4::Box::new(orientation, 0);
+        // The strip is STRIP_PX deep and lies on the edge, along the whole surface. It paints
+        // a cleared frame: an empty, transparent child gives GTK no render node, so it never
+        // attaches a buffer, the surface is never mapped and the pointer never finds the strip.
+        let strip = gtk4::DrawingArea::builder()
+            .accessible_role(gtk4::AccessibleRole::Presentation)
+            .build();
         strip.add_css_class("dock-strip");
+        strip.set_draw_func(|_, cr, _, _| {
+            cr.set_operator(gtk4::cairo::Operator::Clear);
+            if let Err(err) = cr.paint() {
+                tracing::warn!(error = %err, "cannot clear the dock's auto-hide strip");
+            }
+        });
+        // The window's own crossings miss a return after a menu: GTK keeps the pointer
+        // inside the window when the popover closes (see `hold`), so the compositor's next
+        // enter is a crossing within the window and the window sees none. The strip still
+        // sees the pointer arrive on it, and arriving there always means the pointer is in.
+        let arrived = gtk4::EventControllerMotion::new();
+        let over = self.hider.clone();
+        arrived.connect_enter(move |_, _, _| feed(&over, Event::PointerIn));
+        strip.add_controller(arrived);
         if vertical {
             strip.set_size_request(STRIP_PX, -1);
         } else {
             strip.set_size_request(-1, STRIP_PX);
         }
+        if vertical {
+            island.set_valign(gtk4::Align::Center);
+            strip.set_halign(if edge == Edge::Left {
+                gtk4::Align::Start
+            } else {
+                gtk4::Align::End
+            });
+        } else {
+            island.set_halign(gtk4::Align::Center);
+            strip.set_valign(gtk4::Align::End);
+        }
         let stack = gtk4::Stack::new();
-        stack.set_hhomogeneous(!vertical);
-        stack.set_vhomogeneous(vertical);
+        stack.set_hhomogeneous(true);
+        stack.set_vhomogeneous(true);
         stack.add_named(&island, Some("island"));
         stack.add_named(&strip, Some("strip"));
         stack.set_visible_child_name("island");
         if placement.auto_hide {
             let hider = Rc::new(Hider {
                 window: self.window.clone(),
-                edge,
                 stack: stack.clone(),
+                edge: placement.anchor,
                 state: RefCell::new(AutoHide::default()),
                 timer: RefCell::new(None),
             });
@@ -257,7 +342,25 @@ impl Surface {
     }
 
     pub fn hold(&self, held: bool) {
+        // A closing popover makes GTK synthesize an enter on this window wherever the
+        // pointer is, and no leave follows: the compositor already sent it during the
+        // grab. GDK's pointer surface is the truth, so the release starts from it.
+        if !held && !self.pointer_over() {
+            feed(&self.hider, Event::PointerOut);
+        }
         feed(&self.hider, Event::Held(held));
+    }
+
+    /// Whether the pointer is over this surface, as the compositor last told GDK.
+    fn pointer_over(&self) -> bool {
+        let Some(mine) = self.window.surface() else {
+            return false;
+        };
+        WidgetExt::display(&self.window)
+            .default_seat()
+            .and_then(|seat| seat.pointer())
+            .and_then(|pointer| pointer.surface_at_position().0)
+            .is_some_and(|under| under == mine)
     }
 
     pub fn placed(&self) -> bool {
