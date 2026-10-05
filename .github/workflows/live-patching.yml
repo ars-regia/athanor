@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     container:
-      image: ghcr.io/hr-mes/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
+      image: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

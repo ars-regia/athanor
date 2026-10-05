@@ -41,6 +41,10 @@ ARG TETRAGON_VERSION=v1.3.0
 # The registry here is a literal, not ${KERNEL_REGISTRY}: an ARG in a RUN --mount=...,from=
 # value made buildah 5.8.4 SIGSEGV at commit (exit 134), taking down all three images. Only
 # the two FROM ...@digest lines above tolerate the ARG; do not reapply it here.
+# This covers all four tier mounts below and is the single hard-coded registry owner the
+# pipeline keeps (re-audit decision 12, 2026-10-05): a fork that publishes elsewhere edits
+# these four lines. Everywhere else the owner comes from REGISTRY_HOST and the repository
+# owner, and `scripts/verify.py registry` enforces it.
 RUN --mount=type=bind,from=ghcr.io/hr-mes/athanor-forge-tier0-repo:latest,source=/,target=/tmp/tier0-repo \
     --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
     base_kernel=$(rpm -qa kernel kernel-core 'kernel-modules*' 'kernel-uki-virt*') && \

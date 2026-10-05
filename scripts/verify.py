@@ -414,8 +414,10 @@ def update_trust_problems(root=None):
     if override.exists():
         problems.append(f"{rel(override)}: calls `bootc upgrade --stage`, a flag bootc 1.16 does not have")
     for literal in walk(root / "forge/specs/athanor-update", ""):
-        if literal.is_file() and "target" not in literal.parts and "vectors" not in literal.parts and "ghcr.io/hr-mes" in read(literal):
-            problems.append(f"{rel(literal)}: literal ghcr.io/hr-mes; the registry comes from the build's variables")
+        if literal.is_file() and "target" not in literal.parts and "vectors" not in literal.parts:
+            for owner in literal_owners(read(literal)):
+                problems.append(f"{rel(literal)}: literal registry owner {owner}; "
+                                f"the registry comes from the build's variables")
     # D2: the Secure Boot daemon is retired, the TPM files of its package are not.
     secure_boot = root / "forge/specs/athanor-secure-boot"
     for source in walk(secure_boot, ".rs"):
@@ -849,6 +851,52 @@ def boundary_problems(root):
 def check_boundary():
     r = Result()
     for problem in boundary_problems(ROOT):
+        r.fail(problem)
+    return r
+
+
+# Placeholders the unit tests use for an owner: they name no real registry namespace.
+PLACEHOLDER_OWNERS = {"owner", "o"}
+# Where the pipeline names its images. system/Containerfile is outside on purpose: its tier
+# mounts are the one literal decision 12 of the 2026-10-05 re-audit keeps (see the comment there).
+REGISTRY_DIRS = (".github/workflows", "scripts", "forge/scripts")
+REGISTRY_FILES = ("Justfile", "forge/Justfile", "system/Justfile")
+# The file types that name images: workflows, scripts, recipes and container builds.
+REGISTRY_SUFFIXES = {".yml", ".yaml", ".sh", ".py", ".just"}
+REGISTRY_NAMES = {"Justfile", "Containerfile"}
+
+
+def literal_owners(text):
+    """The hard-coded ghcr.io owners in text: ghcr.io/ followed by a name, not by a variable."""
+    found = re.findall(r"ghcr\.io/([A-Za-z0-9][A-Za-z0-9_.-]*)", text)
+    return [f"ghcr.io/{o}" for o in dict.fromkeys(found) if o not in PLACEHOLDER_OWNERS]
+
+
+def registry_problems(root):
+    """Every image the pipeline names comes from REGISTRY_HOST and the repository owner, each
+    with a default, never from a literal owner (standing rule of 2026-09-10)."""
+    root = Path(root)
+    paths = [root / f for f in REGISTRY_FILES]
+    for base in REGISTRY_DIRS:
+        paths += walk(root / base, "")
+    problems = []
+    for path in sorted(paths):
+        relative = path.relative_to(root)
+        # Unit test fixtures need a literal owner to prove the check reports one.
+        if (not path.is_file() or relative.parts[:2] == ("scripts", "tests")
+                or (path.suffix not in REGISTRY_SUFFIXES and path.name not in REGISTRY_NAMES)):
+            continue
+        for i, line in enumerate(read(path).split("\n"), 1):
+            for owner in literal_owners(line):
+                problems.append(f"{relative.as_posix()}:{i}: literal registry owner {owner}; use "
+                                f"REGISTRY_HOST and the repository owner, each with a default")
+    return problems
+
+
+@check("registry", "Images come from REGISTRY_HOST and the repository owner, never a literal owner")
+def check_registry():
+    r = Result()
+    for problem in registry_problems(ROOT):
         r.fail(problem)
     return r
 

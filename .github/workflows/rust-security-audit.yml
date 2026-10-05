@@ -19,7 +19,7 @@ jobs:
     name: Enforce Safety & Cargo Vet Audit
     runs-on: ubuntu-24.04
     container:
-      image: ghcr.io/hr-mes/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
+      image: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
     timeout-minutes: 20
     env:
       RUSTC_WRAPPER: sccache
@@ -134,7 +134,7 @@ jobs:
     name: ???? Kani Formal Verification (${{ matrix.module }} - Shard ${{ matrix.shard }})
     runs-on: ubuntu-24.04
     container:
-      image: ghcr.io/hr-mes/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
+      image: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
     timeout-minutes: 20
     env:
       RUSTC_WRAPPER: sccache
@@ -231,7 +231,7 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     container:
-      image: ghcr.io/hr-mes/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
+      image: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
     timeout-minutes: 20
     env:
       CARGO_NET_RETRY: 10
@@ -285,7 +285,7 @@ jobs:
     name: ??? eBPF & Bare-Metal Build Verification (${{ matrix.target_name }})
     runs-on: ubuntu-24.04
     container:
-      image: ghcr.io/hr-mes/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
+      image: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
     timeout-minutes: 20
     env:
       RUSTC_WRAPPER: sccache

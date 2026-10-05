@@ -71,8 +71,8 @@ class UpdateTrust(unittest.TestCase):
         self.assertTrue(any("--stage" in p for p in found))
 
     def test_a_literal_registry_owner_is_reported(self):
-        self.edit(f"{TEMPLATES}/athanor.yaml.in", "  @REGISTRY@/athanor-system:\n", "  ghcr.io/hr-mes/athanor-system:\n")
-        self.assertTrue(any("literal ghcr.io/hr-mes" in p for p in self.problems()))
+        self.edit(f"{TEMPLATES}/athanor.yaml.in", "  @REGISTRY@/athanor-system:\n", "  ghcr.io/someone/athanor-system:\n")
+        self.assertTrue(any("literal registry owner ghcr.io/someone" in p for p in self.problems()))
 
     def test_a_package_may_build_more_than_one_crate(self):
         built = verify.crates_built_by_specs()
