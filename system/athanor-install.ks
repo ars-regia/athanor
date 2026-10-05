@@ -21,11 +21,16 @@ lang en_US.UTF-8
 # module signing key compiled into Azoth. Secure Boot also needs the project Secure Boot
 # certificate enrolled as a MOK at first boot.
 
-# The bootc image is the identity of the system, not a user choice. :stable is the channel
-# users follow: system/promote.sh moves it only to a build that passed the installer
-# acceptance test (docs/architecture/doc_update_trust.md, D1). :latest is the untested
-# newest build, for testing only.
-ostreecontainer --url=ghcr.io/hr-mes/athanor-system:stable --transport=registry
+# No ostreecontainer here: the installation source is the image the ISO embeds, never a
+# registry pull. bootc-image-builder writes that part of the kickstart itself and includes
+# this file for "everything else" (osbuild/images, pkg/manifest/anaconda_installer_iso_tree.go,
+# bootcInstallerKickstartStages): `ostreecontainer --transport=oci` from the payload on the
+# media, then a %post `bootc switch --mutate-in-place --transport registry <ref>`, which
+# records the ref without fetching it. forge/scripts/build_iso.sh builds from the candidate
+# image tagged locally as <registry>/athanor-system:stable, so the machine installs exactly
+# the build the ISO acceptance test installed and follows :stable from its first update
+# (docs/architecture/doc_update_trust.md, D1). An install therefore works before any
+# promotion, and this file names no registry.
 
 # The root account stays locked: administration is through the wheel user Anaconda
 # creates. No user is declared here, so Anaconda asks the installer to create one.
