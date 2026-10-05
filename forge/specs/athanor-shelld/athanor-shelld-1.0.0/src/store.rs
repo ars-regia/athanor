@@ -247,6 +247,13 @@ impl Store {
         })
     }
 
+    /// Closes `id` when `identity` and `sender` own it, by the rule of [`Store::replaceable`];
+    /// otherwise as if there were no such id.
+    pub fn close_owned(&mut self, id: u32, identity: &Identity, sender: &str) -> Option<Notification> {
+        self.replaceable(id, identity, sender)?;
+        self.remove(id)
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &Notification> {
         self.held.iter()
     }
@@ -418,6 +425,35 @@ pub(crate) mod tests {
         let other = put(&mut store, 0, &Identity::Other, ":1.3").notification.id;
         assert!(!put(&mut store, other, &Identity::Other, ":1.4").replaced);
         assert!(put(&mut store, other, &Identity::Other, ":1.3").replaced);
+    }
+
+    #[test]
+    fn only_the_owner_closes_a_notification() {
+        let (a, b) = (Identity::App("a".into()), Identity::App("b".into()));
+        let mut store = Store::new();
+        let put = |store: &mut Store, identity: &Identity, sender: &str| {
+            store
+                .notify(
+                    content("x", Urgency::Normal, 5000),
+                    0,
+                    0,
+                    0,
+                    identity.clone(),
+                    sender.into(),
+                    true,
+                )
+                .notification
+                .id
+        };
+        let mine = put(&mut store, &a, ":1.1");
+        assert!(store.close_owned(mine, &b, ":1.1").is_none());
+        assert!(store.get(mine).is_some());
+        assert!(store.close_owned(mine, &a, ":1.9").is_some());
+        let other = put(&mut store, &Identity::Other, ":1.3");
+        assert!(store.close_owned(other, &Identity::Other, ":1.4").is_none());
+        assert!(store.get(other).is_some());
+        assert!(store.close_owned(other, &Identity::Other, ":1.3").is_some());
+        assert!(store.close_owned(other, &Identity::Other, ":1.3").is_none());
     }
 
     #[test]

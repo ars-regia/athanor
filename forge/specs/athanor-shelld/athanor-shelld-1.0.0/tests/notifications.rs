@@ -1265,3 +1265,34 @@ async fn progress_updates_do_not_count_against_the_limit() {
     }
     assert!(last, "thirty progress updates left the budget alone");
 }
+
+#[tokio::test]
+async fn another_sender_cannot_close_a_notification_and_learns_nothing() {
+    let bus = Bus::start("close-owner");
+    let (_daemon, _bar, center, app) = units(&bus, SESSION_CGROUP).await;
+    let second = bus.client().await;
+    let (a, b) = (public(&app).await, public(&second).await);
+    let mine = notify(&a, 0, "mine", "", &[], HashMap::new()).await;
+    let denied = b
+        .call::<_, _, ()>("CloseNotification", &(mine,))
+        .await
+        .expect_err("not B's to close");
+    let unknown = b
+        .call::<_, _, ()>("CloseNotification", &(mine + 100,))
+        .await
+        .expect_err("unknown id");
+    assert_eq!(
+        denied.to_string(),
+        unknown.to_string().replace(&(mine + 100).to_string(), &mine.to_string()),
+        "a held id answers as an unknown one"
+    );
+    let listed: Vec<WireNotification> = private(&center).await.call("List", &()).await.expect("List");
+    assert_eq!(listed.iter().filter(|n| n.id == mine).count(), 1, "the row stays");
+    let file = bus.dir.join("state/notifications.json");
+    common::wait_for_file(&file, "\"mine\"").await;
+    assert!(fs::read_to_string(&file).expect("history").contains("\"mine\""));
+    a.call::<_, _, ()>("CloseNotification", &(mine,))
+        .await
+        .expect("A closes its own");
+}
+

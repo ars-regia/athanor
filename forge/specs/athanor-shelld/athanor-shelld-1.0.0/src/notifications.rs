@@ -355,6 +355,26 @@ impl State {
 
 pub type Shared = Arc<Mutex<State>>;
 
+/// The caller's unique name and its application, from its cgroup: the pid is the bus's word
+/// for it.
+async fn caller_of(conn: &Connection, state: &Shared, header: &Header<'_>) -> (String, Identity) {
+    let sender = header.sender().map(ToString::to_string).unwrap_or_default();
+    let identity = match header.sender() {
+        Some(name) => match credentials_pid(conn, name).await {
+            Ok(pid) => {
+                let proc_root = lock(state).proc_root.clone();
+                identity::of_pid(&proc_root, pid)
+            }
+            Err(err) => {
+                tracing::warn!(error = %err, "cannot identify the sender");
+                Identity::Other
+            }
+        },
+        None => Identity::Other,
+    };
+    (sender, identity)
+}
+
 /// A poisoned lock means a panic, and panic = "abort" means there is none: take the guard.
 pub(crate) fn lock(state: &Shared) -> MutexGuard<'_, State> {
     state
@@ -763,21 +783,7 @@ impl Notifications {
             hints,
             expire_timeout,
         );
-        // The sender's application, from its cgroup: the pid is the bus's word for it.
-        let sender = header.sender().map(ToString::to_string).unwrap_or_default();
-        let identity = match header.sender() {
-            Some(name) => match credentials_pid(conn, name).await {
-                Ok(pid) => {
-                    let proc_root = lock(&self.state).proc_root.clone();
-                    identity::of_pid(&proc_root, pid)
-                }
-                Err(err) => {
-                    tracing::warn!(error = %err, "cannot identify the sender");
-                    Identity::Other
-                }
-            },
-            None => Identity::Other,
-        };
+        let (sender, identity) = caller_of(conn, &self.state, &header).await;
         let arrival = lock(&self.state).arrive(
             content,
             replaces_id,
@@ -798,11 +804,14 @@ impl Notifications {
     async fn close_notification(
         &self,
         id: u32,
+        #[zbus(header)] header: Header<'_>,
         #[zbus(connection)] conn: &Connection,
     ) -> fdo::Result<()> {
+        // Only the sender's own: a row that is another's answers as an unknown id.
+        let (sender, identity) = caller_of(conn, &self.state, &header).await;
         let closed = {
             let mut state = lock(&self.state);
-            let closed = state.store.close(id);
+            let closed = state.store.close_owned(id, &identity, &sender);
             if closed.is_some() {
                 state.dirty.notify_one();
             }
