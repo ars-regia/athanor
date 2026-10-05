@@ -2,8 +2,9 @@
 
 console.py sends MEMORY_PROBE once the desktop session is up. The guest has no checkout, so
 the command carries scripts/session-memory/pss.py itself, compressed and encoded, and runs it
-with the guest's own python3. The `PSS_REPORT` line it prints lands in serial.log, which
-scripts/session-memory/report.py turns into memory.json after the run.
+with the guest's own python3. The framed block it prints (twice, with a byte count and a
+checksum, see pss.py) lands in serial.log, which scripts/session-memory/report.py verifies
+and turns into memory.json after the run.
 """
 
 import base64
