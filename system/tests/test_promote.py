@@ -32,6 +32,12 @@ TRUSTED = f"{WORKFLOWS}/iso-acceptance.yml@refs/heads/iso-v0"
 OTHER_BRANCH = f"{WORKFLOWS}/iso-acceptance.yml@refs/heads/feature"
 OTHER_WORKFLOW = f"{WORKFLOWS}/kernel-build.yml@refs/heads/iso-v0"
 FORK = "https://github.com/someone/athanor/.github/workflows/iso-acceptance.yml@refs/heads/iso-v0"
+BUILDER = f"{WORKFLOWS}/call-system-image.yml@refs/heads/iso-v0"
+
+
+def built(identity=BUILDER, sha=REVISION, repository="hr-mes/athanor"):
+    """The keyless signature call-system-image.yml leaves on each image digest it pushed."""
+    return {"identity": identity, "sha": sha, "repository": repository}
 
 
 def digest(n):
@@ -75,6 +81,7 @@ def predicate(run="412", result="pass", hours_ago=30, **override):
         "result": result,
         "images": {name: digest(i + 1) for i, name in enumerate(NAMES)},
         "tested_image": "athanor-system",
+        "iso": "sha256:" + "9" * 64,
         "tests": {name: True for name in evidence_checks()},
         "finished_at": finished.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "acceptance": {
@@ -106,10 +113,12 @@ class Published(Tool):
         fx=None,
         base=1,
         build=None,
+        signed_by=None,
     ):
         """attestations: [(identity, predicate)] on every image of the run (default: one trusted pass).
         base: the run's digests are digest(base), digest(base + 1), digest(base + 2).
-        build: the run's record in the GitHub API (default: build_run())."""
+        build: the run's record in the GitHub API (default: build_run()).
+        signed_by: the keyless build signature on every digest (default: built(); False for none)."""
         if attestations is None:
             images = {name: digest(base + i) for i, name in enumerate(NAMES)}
             attestations = [(TRUSTED, predicate(run=run, images=images))]
@@ -120,6 +129,7 @@ class Published(Tool):
             "sigstore_keys": {},
             "attestations": {},
             "build_runs": {},
+            "signatures": {},
         }
         fx["build_runs"][run] = build_run() if build is None else build
         for i, name in enumerate(NAMES):
@@ -131,6 +141,8 @@ class Published(Tool):
             fx["configs"][f"{REG}/{name}@{new}"] = labels
             fx["raw"][f"{REG}/{name}:sha256-{new[7:]}.sig"] = signature
             fx["sigstore_keys"][f"{REG}/{name}@{new}"] = str(signer)
+            if signed_by is not False:
+                fx["signatures"][f"{REG}/{name}@{new}"] = signed_by or built()
             fx["attestations"][f"{REG}/{name}@{new}"] = [
                 {"identity": who, "predicate": p} for who, p in attestations
             ]
@@ -286,7 +298,9 @@ class Promote(Published):
 
     def test_images_from_another_commit_than_the_build_run_are_refused(self):
         self.ineligible(
-            "not from run 412's commit " + "d" * 40, build=build_run(head_sha="d" * 40)
+            "not from run 412's commit " + "d" * 40,
+            build=build_run(head_sha="d" * 40),
+            signed_by=built(sha="d" * 40),
         )
 
     def test_a_run_unknown_to_github_is_refused(self):
@@ -367,6 +381,8 @@ class Promote(Published):
             "a short commit": predicate(acceptance={**context, "sha": "e" * 12}),
             "no acceptance context": predicate(acceptance=None),
             "a malformed time": predicate(finished_at="yesterday"),
+            "no ISO digest": predicate(iso=None),
+            "an ISO tag": predicate(iso="latest"),
         }
         for name, doc in cases.items():
             with self.subTest(name):
@@ -411,6 +427,20 @@ class Promote(Published):
             attestations=[(TRUSTED, predicate(hours_ago=2))],
             dwell=24,
         )
+
+    def test_an_image_the_trusted_build_did_not_sign_is_refused(self):
+        # The :RUN tag moved to another image (or the build never signed): passing evidence on
+        # that digest does not make it the run's image. Signed by a branch build, by another
+        # workflow, in another repository or at another commit: the same.
+        for signed_by in (
+            False,
+            built(identity=f"{WORKFLOWS}/call-system-image.yml@refs/heads/feature"),
+            built(identity=f"{WORKFLOWS}/iso-acceptance.yml@refs/heads/iso-v0"),
+            built(repository="someone/athanor"),
+            built(sha="d" * 40),
+        ):
+            with self.subTest(signed_by=signed_by):
+                self.ineligible("was not signed by call-system-image.yml", signed_by=signed_by)
 
     def test_evidence_older_than_the_dwell_time_is_promoted(self):
         self.published(attestations=[(TRUSTED, predicate(hours_ago=25))])

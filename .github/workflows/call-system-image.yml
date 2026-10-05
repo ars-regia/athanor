@@ -252,6 +252,8 @@ jobs:
       contents: write
       packages: write
       id-token: write
+    env:
+      REGISTRY_HOST: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
     steps:
       - name: ⚙️ Prepare environment
         # :latest is the newest build of the release branch (repository variable
@@ -260,7 +262,7 @@ jobs:
           RELEASE_BRANCH: ${{ vars.RELEASE_BRANCH || 'iso-v0' }}
         run: |
           set -euo pipefail
-          echo "IMAGE_REGISTRY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "${GITHUB_ENV}"
+          echo "IMAGE_REGISTRY=${REGISTRY_HOST}/${GITHUB_REPOSITORY_OWNER,,}" >> "${GITHUB_ENV}"
           if [[ $GITHUB_REF == "refs/heads/${RELEASE_BRANCH}" ]]; then echo "DEFAULT_TAG=latest"; else echo "DEFAULT_TAG="; fi >> "${GITHUB_ENV}"
       - name: 📥 Checkout Repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -276,13 +278,13 @@ jobs:
           extra_nix_config: "experimental-features = nix-command flakes"
       - name: 🧹 Maximize build space
         uses: ublue-os/remove-unwanted-software@cc0becac701cf642c8f0a6613bbdaf5dc36b259e # v9
-      - name: 🔑 Login to GHCR
+      - name: 🔑 Login to the registry
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
-          echo "${GITHUB_TOKEN}" | podman login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+          echo "${GITHUB_TOKEN}" | podman login "${REGISTRY_HOST}" -u "${GITHUB_ACTOR}" --password-stdin
       - name: 🐳 Build OS Images
         # The Containerfile pulls its base and the tier repository images and installs
         # Fedora packages with dnf5, so the build needs the network; the build context
@@ -380,51 +382,25 @@ jobs:
           ls -laR ./output
 
       - name: 📀 Publish the ISO
-        # As an OCI image, the way kernel-build.yml publishes the kernel artifacts: the
-        # ISO carries the whole system image and is far past the 2 GB an Actions
-        # artifact takes. :latest only from the release branch, as for the images. The
-        # labels name the run, the commit and the digest of each system image as pushed:
-        # forge/test/iso/evidence.py binds the acceptance evidence to them.
+        # system/publish-iso.sh: an OCI image labelled with the run, the commit and the pushed
+        # digest of each system image, signed keyless; :latest only from the release branch,
+        # as for the images. forge/test/iso/attest.sh requires that signature.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
           RUN_ID: ${{ github.run_id }}
           GITHUB_SHA: ${{ github.sha }}
-          GITHUB_REF: ${{ github.ref }}
           GITHUB_SERVER_URL: ${{ github.server_url }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
-          iso=$(find ./output -name '*.iso' -type f | head -n 1)
-          [[ -n $iso ]] || { echo "the ISO build produced no .iso under ./output" >&2; exit 1; }
-          echo "${GITHUB_TOKEN}" | podman login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-          image="${IMAGE_REGISTRY}/athanor-iso"
-          labels=(--label "io.athanor.run-id=${RUN_ID}" --label "org.opencontainers.image.revision=${GITHUB_SHA}")
-          while read -r repository _ digest; do
-            labels+=(--label "io.athanor.image-digest.${repository##*/}=${digest}")
-          done < artifacts/image-digests.txt
-          # podman, not buildah: this job builds and pushes the system image with it, so
-          # it is certainly on the runner. A Containerfile on stdin keeps the context to
-          # the ISO alone.
-          podman build --format docker -t "${image}:${RUN_ID}" "${labels[@]}" \
-            --annotation "org.opencontainers.image.revision=${GITHUB_SHA}" \
-            --annotation "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
-            -f - "$(dirname "$iso")" <<CONTAINERFILE
-          FROM scratch
-          LABEL org.opencontainers.image.title="Athanor installer ISO"
-          LABEL org.opencontainers.image.version="${RUN_ID}"
-          COPY $(basename "$iso") /athanor-${RUN_ID}.iso
-          CONTAINERFILE
-          bash forge/scripts/retry.sh podman push "${image}:${RUN_ID}"
-          if [[ -n $DEFAULT_TAG ]]; then
-            podman tag "${image}:${RUN_ID}" "${image}:latest"
-            bash forge/scripts/retry.sh podman push "${image}:latest"
-          fi
-          {
-            echo "### Installer ISO"
-            echo
-            echo "\`${image}:${RUN_ID}\`, $(du -h "$iso" | cut -f1)"
-          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "${GITHUB_TOKEN}" | podman login "${REGISTRY_HOST}" -u "${GITHUB_ACTOR}" --password-stdin
+          nix run nixpkgs#cosign -- login "${REGISTRY_HOST}" -u "${GITHUB_ACTOR}" -p "${GITHUB_TOKEN}"
+          tags=()
+          [[ -z $DEFAULT_TAG ]] || tags+=(--tag "${DEFAULT_TAG}")
+          nix shell nixpkgs#cosign -c bash system/publish-iso.sh --registry "${IMAGE_REGISTRY}" --run "${RUN_ID}" \
+            --revision "${GITHUB_SHA}" --source "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --digests artifacts/image-digests.txt "${tags[@]}" ./output >> "${GITHUB_STEP_SUMMARY}"
 
       - name: 🧹 Fix Workspace Permissions (GH Actions Cleanup)
         if: always()

@@ -8,8 +8,11 @@ matches the promotion target field by field (docs/architecture/doc_update_trust.
 
 It attests exactly what was verified and nothing looser:
   - the run, the commit and the digests come from the labels the build put on the ISO image
-    (call-system-image.yml, "Publish the ISO"): the images the ISO installed, as pushed, never
-    what a tag points at later. All three images must be named, by sha256 digest;
+    (system/publish-iso.sh): the images the ISO installed, as pushed, never what a tag points
+    at later. All three images must be named, by sha256 digest;
+  - the ISO image itself, by the digest the install job pulled (ISO_DIGEST): attest.sh attests
+    only when that digest carries the build's keyless signature, which is what makes the
+    labels above the build's word and not the word of whoever last moved the ISO tag;
   - "pass" only when the verdict passed and every check in CHECKS is present and true. A
     missing, extra or false check, or a run that left no verdict (the virtual machine never
     started), is a "fail", recorded rather than skipped;
@@ -19,8 +22,9 @@ It attests exactly what was verified and nothing looser:
 The images the test did not boot (the NVIDIA variants: hosted runners have no NVIDIA GPU) are
 attested as built from the same run and commit as the one it did, which tested_image names.
 
-Usage: evidence.py VERDICT_DIR ISO_LABELS OUT_DIR
+Usage: evidence.py VERDICT_DIR ISO_LABELS ISO_DIGEST OUT_DIR
   ISO_LABELS  the ISO image's labels as JSON (podman image inspect --format '{{json .Labels}}')
+  ISO_DIGEST  the manifest digest of that ISO image (sha256:<hex>)
 Environment: GITHUB_REPOSITORY, GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT, GITHUB_REF,
              GITHUB_EVENT_NAME, GITHUB_SHA, GITHUB_WORKFLOW_REF (set by GitHub Actions).
 """
@@ -75,8 +79,16 @@ def label(labels: dict, key: str, pattern: str) -> str:
 
 
 def evidence(
-    verdict_dir: pathlib.Path, labels: dict, env: dict, now: datetime.datetime
+    verdict_dir: pathlib.Path,
+    labels: dict,
+    iso: str,
+    env: dict,
+    now: datetime.datetime,
 ) -> dict:
+    if not DIGEST.fullmatch(iso):
+        raise ValueError(
+            f"the ISO image digest is malformed ({iso!r}): the evidence cannot name what it tested"
+        )
     run = label(labels, RUN_LABEL, r"[0-9]+")
     revision = label(labels, REVISION_LABEL, r"[0-9a-f]{40}")
     images = {
@@ -115,6 +127,7 @@ def evidence(
         "result": "pass" if passed else "fail",
         "images": images,
         "tested_image": TESTED_IMAGE,
+        "iso": iso,
         # Only the checks this run recorded, each as recorded: a missing one is absent, never true.
         "tests": {name: checks[name] is True for name in CHECKS if name in checks},
         "finished_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -123,15 +136,16 @@ def evidence(
 
 
 def main() -> int:
-    if len(sys.argv) != 4:
+    if len(sys.argv) != 5:
         print(__doc__, file=sys.stderr)
         return 2
-    verdict_dir, labels_file, out_dir = sys.argv[1:]
+    verdict_dir, labels_file, iso, out_dir = sys.argv[1:]
     labels = json.loads(pathlib.Path(labels_file).read_text()) or {}
     try:
         doc = evidence(
             pathlib.Path(verdict_dir),
             labels,
+            iso,
             dict(os.environ),
             datetime.datetime.now(datetime.timezone.utc),
         )

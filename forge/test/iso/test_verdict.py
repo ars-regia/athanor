@@ -680,14 +680,17 @@ ACTIONS = {
 }
 
 
-def evidence(tmp: pathlib.Path, labels, verdict_dir, actions=ACTIONS):
+ISO = "sha256:" + "9" * 64
+
+
+def evidence(tmp: pathlib.Path, labels, verdict_dir, actions=ACTIONS, iso=ISO):
     labels_file = tmp / "labels.json"
     labels_file.write_text(json.dumps(labels))
     out = tmp / "evidence"
     shutil.rmtree(out, ignore_errors=True)
     env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
     proc = subprocess.run(
-        [sys.executable, str(HERE / "evidence.py"), str(verdict_dir), str(labels_file), str(out)],
+        [sys.executable, str(HERE / "evidence.py"), str(verdict_dir), str(labels_file), iso, str(out)],
         capture_output=True,
         text=True,
         env={**env, **actions},
@@ -712,6 +715,7 @@ def test_evidence_binds_the_digests_the_commit_and_the_run(tmp: pathlib.Path) ->
     assert code == 0, "a labelled ISO must yield evidence"
     assert (doc["schema"], doc["kind"], doc["result"], doc["run_id"]) == (1, "athanor-acceptance", "pass", "412")
     assert doc["revision"] == "c" * 40 and doc["tested_image"] == "athanor-system"
+    assert doc["iso"] == ISO, "the evidence names the ISO image it tested"
     assert doc["images"] == {
         "athanor-system": "sha256:" + "a" * 64,
         "athanor-system-nvidia": "sha256:" + "b" * 64,
@@ -780,6 +784,9 @@ def test_evidence_needs_every_label_well_formed(tmp: pathlib.Path) -> None:
     for name, labels in cases.items():
         code, doc = evidence(tmp, labels, tmp / "run")
         assert code == 1 and doc is None, f"{name}: evidence must not be written"
+    for iso in ("", "latest", "sha256:" + "9" * 12):
+        code, doc = evidence(tmp, LABELS, tmp / "run", iso=iso)
+        assert code == 1 and doc is None, f"ISO digest {iso!r}: evidence must not be written"
 
 
 def test_evidence_needs_the_actions_context(tmp: pathlib.Path) -> None:
@@ -791,16 +798,37 @@ def test_evidence_needs_the_actions_context(tmp: pathlib.Path) -> None:
     assert code == 1 and doc is None, "a malformed commit is not a commit"
 
 
-def attest(tmp: pathlib.Path, evidence_file: pathlib.Path):
-    """attest.sh with a cosign that records its arguments."""
+BUILDER = "https://github.com/hr-mes/athanor/.github/workflows/call-system-image.yml@refs/heads/iso-v0"
+
+
+def attest(tmp: pathlib.Path, evidence_file: pathlib.Path, signed=(BUILDER, "hr-mes/athanor", "c" * 40)):
+    """attest.sh with a cosign that records its arguments; `verify` checks the flags against
+    the certificate of the ISO's keyless signature, signed = (SAN, repository, commit) or None."""
     bin_dir = tmp / "bin"
     bin_dir.mkdir(exist_ok=True)
     log = tmp / "cosign.log"
     log.unlink(missing_ok=True)
     fake = bin_dir / "cosign"
-    fake.write_text(f'#!/bin/sh\necho "$*" >> {log}\n')
+    fake.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, re, sys\n"
+        f"open({str(log)!r}, 'a').write(' '.join(sys.argv[1:]) + '\\n')\n"
+        f"cert = json.loads({json.dumps(json.dumps(signed))})\n"
+        "a = sys.argv[1:]\n"
+        "if a[0] != 'verify': sys.exit(0)\n"
+        "flag = lambda f: a[a.index(f) + 1]\n"
+        "ok = (cert is not None and a[-1] == 'registry.example/owner/athanor-iso@' + 'sha256:' + '9' * 64\n"
+        "      and re.search(flag('--certificate-identity-regexp'), cert[0])\n"
+        "      and flag('--certificate-github-workflow-repository') == cert[1]\n"
+        "      and flag('--certificate-github-workflow-sha') == cert[2])\n"
+        "sys.exit(0 if ok else 10)\n"
+    )
     fake.chmod(0o755)
-    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "REGISTRY": "registry.example/owner", "RETRY_ATTEMPTS": "1"}
+    env = {
+        **{k: v for k, v in os.environ.items() if not k.startswith("GITHUB_") and k != "RELEASE_BRANCH"},
+        "PATH": f"{bin_dir}:{os.environ['PATH']}", "REGISTRY": "registry.example/owner", "RETRY_ATTEMPTS": "1",
+        "GITHUB_SERVER_URL": "https://github.com", "GITHUB_REPOSITORY": "hr-mes/athanor",
+    }
     proc = subprocess.run(["bash", str(HERE / "attest.sh"), str(evidence_file)], capture_output=True, text=True, env=env)
     return proc.returncode, log.read_text().splitlines() if log.exists() else []
 
@@ -813,6 +841,8 @@ def test_attest_signs_every_digest_of_passing_evidence_only(tmp: pathlib.Path) -
     assert code == 0, "passing evidence must be attested"
     expected = {f"registry.example/owner/{k.removeprefix('io.athanor.image-digest.')}@{v}"
                 for k, v in LABELS.items() if k.startswith("io.athanor.image-digest.")}
+    assert calls[0].startswith("verify ") and calls[0].endswith("registry.example/owner/athanor-iso@" + ISO), calls
+    calls = calls[1:]
     assert {c.split()[-1] for c in calls} == expected, calls
     assert all(c.startswith(f"attest --yes --type custom --predicate {path} ") for c in calls), calls
     for change in ({"result": "fail"}, {"images": {"athanor-system": "latest"}}):
@@ -820,6 +850,28 @@ def test_attest_signs_every_digest_of_passing_evidence_only(tmp: pathlib.Path) -
         forged.write_text(json.dumps({**json.loads(path.read_text()), **change}))
         code, calls = attest(tmp, forged)
         assert code == 1 and calls == [], f"{change}: must not be attested"
+
+
+def test_attest_needs_the_build_signature_on_the_tested_iso(tmp: pathlib.Path) -> None:
+    # An ISO tag moved to an image the trusted build did not sign: its labels may name real
+    # digests, but nothing says the run installed them. Unsigned, signed by a branch build, by
+    # another workflow, in another repository or at another commit: nothing is attested.
+    test_pass(tmp)
+    evidence(tmp, LABELS, tmp / "run")
+    path = tmp / "evidence" / "acceptance-412.json"
+    for signed in (
+        None,
+        (BUILDER.replace("iso-v0", "feature"), "hr-mes/athanor", "c" * 40),
+        (BUILDER.replace("call-system-image", "iso-acceptance"), "hr-mes/athanor", "c" * 40),
+        (BUILDER, "someone/athanor", "c" * 40),
+        (BUILDER, "hr-mes/athanor", "d" * 40),
+    ):
+        code, calls = attest(tmp, path, signed)
+        assert code == 1 and not any(c.startswith("attest ") for c in calls), f"{signed}: must not be attested"
+    no_iso = tmp / "no-iso.json"
+    no_iso.write_text(json.dumps({k: v for k, v in json.loads(path.read_text()).items() if k != "iso"}))
+    code, calls = attest(tmp, no_iso)
+    assert code == 1 and calls == [], "evidence without the ISO digest must not be attested"
 
 
 def main() -> int:
@@ -853,6 +905,7 @@ def main() -> int:
             test_evidence_needs_every_label_well_formed,
             test_evidence_needs_the_actions_context,
             test_attest_signs_every_digest_of_passing_evidence_only,
+            test_attest_needs_the_build_signature_on_the_tested_iso,
         ):
             test(tmp)
             print(f"  ok  {test.__name__}")

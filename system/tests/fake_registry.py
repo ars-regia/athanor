@@ -18,7 +18,12 @@ Fixture keys:
                 `cosign verify-attestation`: unlike `errors`, `skopeo inspect` and
                 `cosign verify` on the same ref still succeed, so a test can pin an outage to
                 the attestation check alone
-  signatures    {"registry/repo@digest": "signing workflow identity"}
+  signatures    {"registry/repo@digest": "signing workflow identity"}, or
+                {"registry/repo@digest": {"identity": ..., "sha": ..., "repository": ...}}: the
+                GitHub extensions of the certificate, checked against
+                --certificate-github-workflow-sha and --certificate-github-workflow-repository
+  runs_error    stderr of a failing `gh run list` (an outage, an expired token)
+  environments  {"name": the environment as GET /repos/{owner}/{repo}/environments/{name} returns it}
   attestations  {"registry/repo@digest": [{"identity": "...", "predicate": {...}}]}
   configs       {"registry/repo@digest": {label: value}}
   raw           {"registry/repo:tag": manifest JSON}
@@ -102,11 +107,17 @@ def cosign(args, fx):
         return fail("Error: no matching signatures: rekor lookup: 502 Bad Gateway\nerror during command execution: no matching signatures: rekor lookup: 502 Bad Gateway")
     regex = args[args.index("--certificate-identity-regexp") + 1]
     if args[0] == "verify":
-        identity = fx.get("signatures", {}).get(ref)
-        if identity is None:
+        entry = fx.get("signatures", {}).get(ref)
+        if entry is None:
             return fail("Error: no signatures found\nerror during command execution: no signatures found", 10)
+        entry = entry if isinstance(entry, dict) else {"identity": entry}
+        identity = entry["identity"]
         if not re.search(regex, identity):
             return fail(f'Error: no matching signatures: failed to verify certificate identity: no matching CertificateIdentity found, last error: expected SAN value to match regex "{regex}", got "{identity}"')
+        for flag, field, name in (("--certificate-github-workflow-sha", "sha", "SHA"),
+                                  ("--certificate-github-workflow-repository", "repository", "Repository")):
+            if flag in args and entry.get(field) != args[args.index(flag) + 1]:
+                return fail(f"Error: no matching signatures: expected GitHub Workflow {name} not found in certificate")
         return 0
     if args[0] == "verify-attestation":
         if ref in fx.get("attestation_errors", []):
@@ -125,12 +136,20 @@ def cosign(args, fx):
 
 def gh(args, fx):
     if args[:2] == ["run", "list"]:
+        if fx.get("runs_error"):
+            return fail(fx["runs_error"])
         print(json.dumps(fx.get("runs", [])))
         return 0
     if args[0] == "api":
         if "DELETE" in args:
             return 0
         path = next(a for a in args[1:] if a.startswith("/"))
+        match = re.fullmatch(r"/repos/[^/]+/[^/]+/environments/([^/]+)", path)
+        if match:
+            if match.group(1) not in fx.get("environments", {}):
+                return fail("gh: Not Found (HTTP 404)")
+            print(json.dumps(fx["environments"][match.group(1)]))
+            return 0
         match = re.fullmatch(r"/repos/[^/]+/[^/]+/actions/runs/([0-9]+)", path)
         if match:
             if match.group(1) not in fx.get("build_runs", {}):

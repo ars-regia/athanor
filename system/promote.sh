@@ -9,6 +9,11 @@
 #     commit. The run tag alone proves nothing: any branch build pushes one, and the
 #     acceptance test installs whatever ISO it is given, so its evidence says the images
 #     work, not where they came from;
+#   - build signature: each digest carries a keyless cosign signature made by
+#     call-system-image.yml on a trusted branch of this repository, at that run's head commit
+#     (the GitHub Workflow SHA of the certificate). The :RUN tag is only where the digest is
+#     looked up: whatever it points at must be an image the trusted build signed at that
+#     commit, so moving the tag to another image makes the run ineligible;
 #   - acceptance evidence: a cosign attestation on that exact digest, made keyless by
 #     .github/workflows/iso-acceptance.yml running on a trusted branch (PROMOTE_TRUSTED_REFS,
 #     default iso-v0). Its predicate (forge/test/iso/evidence.py) must say "pass" with every
@@ -32,8 +37,9 @@
 # Every check runs for all three images before any tag moves.
 # Exit status: 0 promoted; 1 refused or failed (a signature machines
 # would reject, a registry error); 2 usage; 3 the run is not newer than the current stable;
-# 4 the run is not eligible yet or at all (no image tagged with the run, no passing acceptance
-# evidence for it, or evidence younger than the dwell time). promote-auto.sh tells them apart.
+# 4 the run is not eligible yet or at all (no image tagged with the run, not built by the
+# trusted workflow, no passing acceptance evidence for it, or evidence younger than the dwell
+# time). promote-auto.sh tells them apart.
 # Environment: REGISTRY (default ghcr.io/<GITHUB_REPOSITORY_OWNER>); PROMOTE_KEYS_DIR
 #              (default system/keys); PROMOTE_DWELL_HOURS (default 0); PROMOTE_TRUSTED_REFS
 #              (default iso-v0); PROMOTE_EVIDENCE_OUT (optional: where to write the verified
@@ -62,10 +68,15 @@ done
 workflows="$server/$repo/.github/workflows"
 # Owner, repository and host names hold no regex metacharacter other than the dot.
 IDENTITY="^${workflows//./\\.}/iso-acceptance\\.yml@refs/heads/(${refs})\$"
+BUILD_IDENTITY="^${workflows//./\\.}/call-system-image\\.yml@refs/heads/(${refs})\$"
 ISSUER=https://token.actions.githubusercontent.com
 # cosign's verdicts for a missing or foreign attestation; anything else is an error (as in
 # system/kernel-artifacts.sh, which explains the anchoring).
-UNVERIFIED='no signatures found|no matching signatures: *$|no matching attestations: *$|no matching CertificateIdentity'
+# A certificate whose GitHub extensions (repository, commit) differ from the expected ones is a
+# foreign signature too, not an outage. The identity mismatch reads "no matching
+# CertificateIdentity" from the sigstore-go verifier and "none of the expected identities
+# matched" from cosign's own (pkg/cosign/verify.go, CheckCertificatePolicy): both count.
+UNVERIFIED='no signatures found|no matching signatures: *$|no matching attestations: *$|no matching CertificateIdentity|none of the expected identities matched|expected GitHub Workflow [A-Za-z]+ not found in certificate'
 IMAGES=(athanor-system athanor-system-nvidia athanor-system-nvidia-legacy)
 # The checks forge/test/iso/verdict.py records and forge/test/iso/evidence.py requires
 # (system/tests/test_promote.py keeps the lists equal): evidence naming fewer is a partial pass.
@@ -93,6 +104,19 @@ created() { # created REPOSITORY DIGEST -> seconds since the epoch
 
 ineligible() { echo "${0##*/}: $*" >&2; exit 4; }
 
+built() { # built REPOSITORY DIGEST: the trusted build signed it, keyless, at the run's commit
+  local status=0
+  cosign verify --certificate-identity-regexp "$BUILD_IDENTITY" --certificate-oidc-issuer "$ISSUER" \
+    --certificate-github-workflow-repository "$repo" --certificate-github-workflow-sha "$build_sha" \
+    "$1@$2" > /dev/null 2> "$err" || status=$?
+  if [[ $status -ne 0 ]]; then
+    grep -qE "$UNVERIFIED" "$err" \
+      && ineligible "$1@$2 was not signed by call-system-image.yml on refs/heads/(${refs}) at commit $build_sha: not an image run $run built"
+    cat "$err" >&2
+    exit 1
+  fi
+}
+
 accepted() { # accepted REPOSITORY NAME DIGEST: writes the newest valid predicate to $work/NAME.json
   local revision status=0
   revision=$(label "$1" "$3" org.opencontainers.image.revision)
@@ -118,7 +142,7 @@ accepted() { # accepted REPOSITORY NAME DIGEST: writes the newest valid predicat
     [ .[] | (.payload | @base64d | fromjson | .predicate.Data | try fromjson catch null)
       | select(type == "object" and .schema == 1 and .kind == "athanor-acceptance"
           and .run_id == $run and .revision == $revision and .result == "pass"
-          and .tested_image == "athanor-system"
+          and .tested_image == "athanor-system" and (.iso | sha256)
           and (.images | type) == "object" and (.images | keys) == $images
           and all(.images[]; sha256) and .images[$name] == $digest
           and (.tests | type) == "object" and (.tests | keys) == ($checks | sort)
@@ -165,6 +189,7 @@ for name in "${IMAGES[@]}"; do
     exit 1
   fi
   digests[$name]=$digest
+  built "$repository" "$digest"
   accepted "$repository" "$name" "$digest"
   finished=$(date -u -d "$(jq -r .finished_at "$work/$name.json")" +%s)
   (( now - finished >= dwell_hours * 3600 )) || ineligible "run $run passed acceptance less than ${dwell_hours} h ago"

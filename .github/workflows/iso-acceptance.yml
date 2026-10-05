@@ -124,8 +124,10 @@ jobs:
           # The ISO ships inside a scratch image with one file in it, so a container of
           # that image is the only thing to unpack.
           podman pull "${ISO_IMAGE}:${ISO_TAG}"
-          # The run and the system image digests the ISO was built from, for the evidence.
+          # The run and the system image digests the ISO was built from, and the digest of the
+          # ISO image itself, for the evidence: attest.sh checks the build signed that digest.
           podman image inspect --format '{{json .Labels}}' "${ISO_IMAGE}:${ISO_TAG}" > iso-labels.json
+          podman image inspect --format '{{.Digest}}' "${ISO_IMAGE}:${ISO_TAG}" > iso-digest.txt
           ctr=$(podman create "${ISO_IMAGE}:${ISO_TAG}" /bin/true)
           mkdir -p iso
           podman cp "${ctr}:/." iso/
@@ -159,7 +161,7 @@ jobs:
       # A failure here (an ISO without the labels) fails the job: no evidence, no promotion.
       - name: 🧾 Write the acceptance evidence
         if: always() && hashFiles('iso-labels.json') != ''
-        run: python3 forge/test/iso/evidence.py ./iso-test iso-labels.json ./evidence
+        run: python3 forge/test/iso/evidence.py ./iso-test iso-labels.json "$(< iso-digest.txt)" ./evidence
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always() && hashFiles('evidence/acceptance-*.json') != ''
@@ -203,6 +205,7 @@ jobs:
     env:
       REGISTRY_HOST: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
       REGISTRY: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}
+      RELEASE_BRANCH: ${{ vars.RELEASE_BRANCH || 'iso-v0' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
