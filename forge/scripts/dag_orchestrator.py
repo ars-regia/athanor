@@ -121,6 +121,25 @@ def package_hash(spec_dir):
     return hasher.hexdigest()[:16]
 
 
+# Packages the DAG leaves to dedicated workflows (Kernel Build builds the kernel).
+EXTERNAL_PACKAGES = {"kernel", "kernel-forge"}
+
+
+def spec_dir(pkg):
+    """The spec directory of a custom package: specs/athanor-<pkg>, else specs/<pkg>."""
+    prefixed = os.path.join(SPECS_DIR, f"athanor-{pkg}")
+    return prefixed if os.path.exists(prefixed) else os.path.join(SPECS_DIR, pkg)
+
+
+def list_spec_dirs(manifest):
+    """The spec directories of the custom packages the DAG compiles, relative to forge/
+    (specs/<name>, as run_spec_build.sh takes them), sorted."""
+    return sorted(
+        os.path.join("specs", os.path.basename(spec_dir(pkg)))
+        for pkg in set(manifest.get("custom_packages", [])) - EXTERNAL_PACKAGES
+    )
+
+
 def parse_spec_dependencies(spec_path):
     """Extracts BuildRequires and Requires from a .spec file."""
     build_requires = set()
@@ -171,10 +190,7 @@ def build_dag(manifest):
     all_custom = set(custom_pkgs)
     all_upstream = set(upstream_core + upstream_desktop + upstream_media + upstream_cli)
     
-    # Exclude external packages handled by dedicated workflows (e.g., self-hosted kernel)
-    external_pkgs = {"kernel", "kernel-forge"}
-    
-    all_nodes = (all_custom | all_upstream | set(flatpaks)) - external_pkgs
+    all_nodes = (all_custom | all_upstream | set(flatpaks)) - EXTERNAL_PACKAGES
     
     graph = defaultdict(set)       # node -> set of nodes depending on node (outgoing edges)
     in_degree = defaultdict(int)   # node -> number of prerequisites
@@ -214,12 +230,10 @@ def build_dag(manifest):
     for pkg in all_custom:
         if pkg not in all_nodes:
             continue
-        spec_dir = os.path.join(SPECS_DIR, f"athanor-{pkg}")
-        if not os.path.exists(spec_dir):
-            spec_dir = os.path.join(SPECS_DIR, pkg)
-        spec_files = glob.glob(os.path.join(spec_dir, "*.spec"))
+        pkg_dir = spec_dir(pkg)
+        spec_files = glob.glob(os.path.join(pkg_dir, "*.spec"))
         
-        hash_val = package_hash(spec_dir)
+        hash_val = package_hash(pkg_dir)
         node_hashes[pkg] = hash_val
         
         if spec_files:
@@ -368,6 +382,12 @@ def partition_dag_levels(dirty_nodes, graph, prereqs, node_types):
     return level_0, level_1, level_2, flatpaks
 
 def main():
+    if sys.argv[1:] == ["--list-spec-dirs"]:
+        # Spec Build Check (forge/scripts/select_check_specs.py) rebuilds these when a change
+        # reaches every spec build; nothing is evaluated or cached.
+        print("\n".join(list_spec_dirs(load_package_manifest())))
+        return
+
     print("🧠 Forge DAG Architect initializing... (Local File Cache Enabled)")
     
     manifest = load_package_manifest()

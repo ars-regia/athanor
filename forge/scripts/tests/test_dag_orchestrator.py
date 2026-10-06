@@ -63,5 +63,24 @@ class PathDependenciesTest(unittest.TestCase):
         self.assertEqual(dag.path_dependencies(str(workspace)), [str(self.root / "system/unit")])
 
 
+class ListSpecDirsTest(unittest.TestCase):
+    def test_custom_packages_resolve_to_their_spec_directories_without_the_kernel(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        specs = pathlib.Path(tmp.name)
+        (specs / "athanor-bar").mkdir()
+        (specs / "bat").mkdir()
+        original = dag.SPECS_DIR
+        dag.SPECS_DIR = str(specs)
+        self.addCleanup(setattr, dag, "SPECS_DIR", original)
+        manifest = {
+            "custom_packages": ["bat", "bar", "kernel-forge"],
+            "upstream_core": ["vim"],
+        }
+        self.assertEqual(
+            dag.list_spec_dirs(manifest), ["specs/athanor-bar", "specs/bat"]
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
