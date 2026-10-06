@@ -86,7 +86,8 @@ class SignKernel(unittest.TestCase):
             data += b"\0" * (-len(data) % 4)
 
         for name, content in files.items():
-            entry(f"./{name}", content.encode(), 0o100644)
+            body = content if isinstance(content, bytes) else content.encode()
+            entry(f"./{name}", body, 0o100644)
         entry("TRAILER!!!", b"", 0)
         pathlib.Path(path).write_bytes(data)
 
@@ -153,14 +154,78 @@ class SignKernel(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("found 2", result.stderr)
 
-    def modules(self, signer, hash_name="sha512"):
+    def modinfo(self, signer="Athanor test modules"):
+        """modinfo: the vermagic a module names in its first line (else KVER's), and SIGNER."""
+        self.stub(
+            "modinfo",
+            f'if [[ $2 == vermagic ]]; then v=$(head -n 1 "$3"); [[ $v == vermagic=* ]] && echo "${{v#vermagic=}}" || echo "{KVER} SMP preempt mod_unload"; '
+            f'else echo "{signer}"; fi\n',
+        )
+
+    def nvidia_tree(self, root, branches=("open", "legacy")):
+        """The tree nvidia.sh build writes under --out, one module set per branch."""
+        for branch in branches:
+            nvidia = root / branch / "lib/modules" / KVER / "extra/nvidia"
+            nvidia.mkdir(parents=True)
+            for name in ("nvidia", "nvidia-drm", "nvidia-modeset", "nvidia-uvm"):
+                (nvidia / f"{name}.ko").write_text("ko")
+            (root / branch / "kver").write_text(f"{KVER}\n")
+            (root / branch / "version").write_text("580.95.05\n")
+            (root / f"{branch}-build.log").write_text("log\n")
+        return root
+
+    def check_modules(self, root):
+        return self.run_script("check-modules", "--kver", KVER, "--dir", root)
+
+    def test_check_modules_accepts_the_tree_of_nvidia_sh(self):
+        self.modinfo()
+        result = self.check_modules(self.nvidia_tree(self.tmp / "out"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("8 modules of", result.stdout)
+
+    def test_check_modules_refuses_anything_outside_the_allow_list(self):
+        self.modinfo()
+        nvidia = f"open/lib/modules/{KVER}/extra/nvidia"
+        cases = {
+            "another module": (f"{nvidia}/evil.ko", "ko"),
+            "a module of another kernel": ("open/lib/modules/6.1.0-1.fc43.x86_64/extra/nvidia/nvidia.ko", "ko"),
+            "a module outside extra/nvidia": (f"open/lib/modules/{KVER}/kernel/nvidia.ko", "ko"),
+            "a script beside the modules": ("open/run.sh", "echo"),
+            "a third branch": (f"beta/lib/modules/{KVER}/extra/nvidia/nvidia.ko", "ko"),
+            "a vermagic of another kernel": (f"{nvidia}/nvidia-peermem.ko", "vermagic=6.1.0-1.fc43.x86_64 SMP\n"),
+            "a kver of another kernel": ("legacy/kver", "6.1.0-1.fc43.x86_64\n"),
+        }
+        for case, (path, content) in cases.items():
+            with self.subTest(case):
+                root = self.nvidia_tree(pathlib.Path(tempfile.mkdtemp(dir=self.tmp)))
+                (root / path).parent.mkdir(parents=True, exist_ok=True)
+                (root / path).write_text(content)
+                result = self.check_modules(root)
+                self.assertNotEqual(result.returncode, 0, case)
+                self.assertIn("sign-kernel:", result.stderr)
+
+    def test_check_modules_refuses_a_symlink_and_a_branch_without_nvidia_ko(self):
+        self.modinfo()
+        nvidia = pathlib.Path(f"open/lib/modules/{KVER}/extra/nvidia")
+        root = self.nvidia_tree(self.tmp / "link")
+        (root / nvidia / "nvidia-uvm.ko").unlink()
+        (root / nvidia / "nvidia-uvm.ko").symlink_to("/etc/passwd")
+        result = self.check_modules(root)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("is a symlink", result.stderr)
+        root = self.nvidia_tree(self.tmp / "missing")
+        (root / nvidia / "nvidia.ko").unlink()
+        result = self.check_modules(root)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("nvidia.ko is missing", result.stderr)
+
+    def modules(self, signer, hash_name="sha512", tree=None):
         key, crt = cert(self.tmp, "Athanor test modules")
-        ko = self.tmp / "signed/open/lib/modules" / KVER / "extra/nvidia/nvidia.ko"
-        ko.parent.mkdir(parents=True)
-        ko.write_text("ko")
+        signed = tree or self.nvidia_tree(self.tmp / "signed", branches=("open",))
+        ko = signed / "open/lib/modules" / KVER / "extra/nvidia/nvidia.ko"
         (self.tmp / "hash").write_text(f"{hash_name}\n")
         self.stub("sign-file", 'printf "%s|%s|%s" "$1" "${2##*/}" "${3##*/}" >> "$4"\n')
-        self.stub("modinfo", f'echo "{signer}"\n')
+        self.modinfo(signer)
         result = self.run_script(
             "modules",
             "--key",
@@ -169,8 +234,10 @@ class SignKernel(unittest.TestCase):
             crt,
             "--hash",
             self.tmp / "hash",
+            "--kver",
+            KVER,
             "--dir",
-            self.tmp / "signed",
+            signed,
             env={"SIGN_FILE": str(self.bin / "sign-file")},
         )
         return result, ko
@@ -190,6 +257,15 @@ class SignKernel(unittest.TestCase):
             'signer "Someone else", expected "Athanor test modules"', result.stderr
         )
 
+    def test_modules_signs_nothing_outside_the_allow_list(self):
+        tree = self.nvidia_tree(self.tmp / "signed", branches=("open",))
+        (tree / "open/payload.ko").write_text("ko")
+        result, ko = self.modules("Athanor test modules", tree=tree)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("open/payload.ko", result.stderr)
+        self.assertEqual(ko.read_text(), "ko")
+        self.assertEqual((tree / "open/payload.ko").read_text(), "ko")
+
     def test_modules_refuses_a_hash_outside_the_kernel_list(self):
         result, ko = self.modules("Athanor test modules", hash_name="md5")
         self.assertNotEqual(result.returncode, 0)
@@ -207,6 +283,8 @@ class SignKernel(unittest.TestCase):
             crt,
             "--hash",
             self.tmp / "hash",
+            "--kver",
+            KVER,
             "--dir",
             self.tmp / "empty",
             env={"SIGN_FILE": "/bin/false"},
@@ -237,13 +315,34 @@ class SignKernel(unittest.TestCase):
         )
         self.assertIn("CN=Athanor test Secure Boot", listing)
         self.assertEqual((signed / "kver").read_text(), f"{KVER}\n")
-        verified = self.run_script("verify", "--cert", crt, "--dir", signed)
+        self.stub("rpm2cpio", 'cat "$1"\n')
+        rpm = pathlib.Path(HOST_VMLINUZ[-1]).read_bytes()
+        kernel = self.tmp / "kernel"
+        kernel.mkdir()
+        self.archive(kernel / f"kernel-core-{KVER}.rpm", {f"lib/modules/{KVER}/vmlinuz": rpm})
+        verified = self.run_script("verify", "--cert", crt, "--dir", signed, "--kernel", kernel)
         self.assertEqual(verified.returncode, 0, verified.stderr)
 
         _, other = cert(self.tmp, "Another key")
-        refused = self.run_script("verify", "--cert", other, "--dir", signed)
+        refused = self.run_script("verify", "--cert", other, "--dir", signed, "--kernel", kernel)
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn("does not verify", refused.stderr)
+
+        # A vmlinuz signed with the right key that is not the RPM's: one byte in the middle.
+        middle = len(rpm) // 2
+        self.archive(
+            kernel / f"kernel-core-{KVER}.rpm",
+            {f"lib/modules/{KVER}/vmlinuz": rpm[:middle] + bytes([rpm[middle] ^ 1]) + rpm[middle + 1 :]},
+        )
+        refused = self.run_script("verify", "--cert", crt, "--dir", signed, "--kernel", kernel)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("without its signature is not", refused.stderr)
+
+        (signed / "kver").write_text("6.1.0-1.fc43.x86_64\n")
+        self.archive(kernel / f"kernel-core-{KVER}.rpm", {f"lib/modules/{KVER}/vmlinuz": rpm})
+        refused = self.run_script("verify", "--cert", crt, "--dir", signed, "--kernel", kernel)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("the kernel-core RPM is", refused.stderr)
 
     @unittest.skipUnless(
         shutil.which("sbverify") and HOST_VMLINUZ,
@@ -252,7 +351,7 @@ class SignKernel(unittest.TestCase):
     def test_verify_refuses_a_vmlinuz_with_a_foreign_signature(self):
         _, crt = cert(self.tmp, "Athanor test Secure Boot")
         shutil.copy(HOST_VMLINUZ[-1], self.tmp / "vmlinuz")
-        result = self.run_script("verify", "--cert", crt, "--dir", self.tmp)
+        result = self.run_script("verify", "--cert", crt, "--dir", self.tmp, "--kernel", self.tmp)
         self.assertNotEqual(result.returncode, 0)
 
 

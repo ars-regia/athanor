@@ -14,6 +14,7 @@ on:
       - forge/specs/azoth/signer/toolchain.lock
       - forge/specs/azoth/signer/publish.sh
       - forge/specs/azoth/lock.sh
+      - forge/specs/azoth/sign-kernel.sh
       - .github/workflows/azoth-signer.yml
   workflow_dispatch:
 

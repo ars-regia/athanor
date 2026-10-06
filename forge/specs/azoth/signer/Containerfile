@@ -3,7 +3,9 @@
 # the digest in signer/image.digest and never builds it: next to the Secure Boot and module
 # keys run only Fedora's sbsigntools, openssl, kmod (modinfo) and the sign-file of Fedora's
 # kernel-devel, never a binary this project compiled. The packages are toolchain.packages,
-# installed by sha256 from toolchain.lock with every repository disabled (../lock.sh).
+# installed by sha256 from toolchain.lock with every repository disabled (../lock.sh). The
+# script that drives them, ../sign-kernel.sh, is part of the image, so the digest pins it too
+# and signer/run.sh mounts no part of the checkout.
 # Build context: forge/specs/azoth. Published by .github/workflows/azoth-signer.yml.
 FROM registry.fedoraproject.org/fedora:43@sha256:a60334b24af6818e9ccf199d188b5ddef1c3d7f549470b560d9b744c78c2c58b
 
@@ -12,3 +14,4 @@ RUN printf 'install_weak_deps=False\nkeepcache=False\n' >> /etc/dnf/dnf.conf
 COPY lock.sh /usr/local/share/azoth/
 COPY signer/toolchain.lock /usr/local/share/azoth/toolchain.lock
 RUN bash /usr/local/share/azoth/lock.sh install /usr/local/share/azoth/toolchain.lock
+COPY sign-kernel.sh /usr/local/bin/sign-kernel.sh

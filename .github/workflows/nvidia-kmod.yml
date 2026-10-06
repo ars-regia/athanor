@@ -57,6 +57,7 @@ jobs:
     timeout-minutes: 15
     outputs:
       state: ${{ steps.artifacts.outputs.state }}
+      kernel_digest: ${{ steps.artifacts.outputs.kernel_digest }}
       devel_digest: ${{ steps.artifacts.outputs.devel_digest }}
       registry: ${{ steps.artifacts.outputs.registry }}
     steps:
@@ -71,7 +72,7 @@ jobs:
         run: |
           set -euo pipefail
           bash system/kernel-artifacts.sh resolve --expect-kernel-digest "$KERNEL_DIGEST"
-          grep -E '^(state|devel_digest|registry)=' kernel-artifacts/kernel-artifacts.env >> "$GITHUB_OUTPUT"
+          grep -E '^(state|kernel_digest|devel_digest|registry)=' kernel-artifacts/kernel-artifacts.env >> "$GITHUB_OUTPUT"
 
       - name: Nothing to build
         if: ${{ steps.artifacts.outputs.state != 'modules-missing' }}
@@ -98,7 +99,7 @@ jobs:
       registry: ${{ needs.artifacts.outputs.registry }}
 
   prepare:
-    # Everything the signer needs that is not a key, outside the signing environment.
+    # The negative sample of the boot job, outside the signing environment.
     needs: [artifacts, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -113,21 +114,11 @@ jobs:
           name: nvidia-open-unsigned
           path: out
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: nvidia-kernel-artifacts
-          path: kernel-artifacts
-
-      - name: Unsigned vmlinuz and the MOK-signed negative sample (signer/run.sh prepare)
+      - name: The MOK-signed negative sample (signer/run.sh prepare)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KERNEL_DIGEST: ${{ needs.artifacts.outputs.kernel_digest }}
         run: bash forge/specs/azoth/signer/run.sh prepare
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: azoth-kernel-unsigned
-          path: kernel-unsigned/
-          if-no-files-found: error
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -136,7 +127,9 @@ jobs:
           if-no-files-found: error
 
   sign:
-    needs: prepare
+    # Signs only what it derives itself: the kernel from the registry, verified by cosign in the
+    # key-less step below, and the modules of the build job once they pass the allow-list.
+    needs: [artifacts, prepare]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -152,15 +145,11 @@ jobs:
           path: out
           merge-multiple: true
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: azoth-kernel-unsigned
-          path: kernel-unsigned
-
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: nvidia-kernel-artifacts
-          path: kernel-artifacts
+      - name: Derive and verify what is signed, without a key (signer/run.sh inputs)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KERNEL_DIGEST: ${{ needs.artifacts.outputs.kernel_digest }}
+        run: bash forge/specs/azoth/signer/run.sh inputs
 
       - name: Sign the modules and vmlinuz (signer/run.sh sign)
         # The public certificates are in the repository: the module one is compiled into the
