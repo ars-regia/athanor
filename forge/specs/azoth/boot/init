@@ -115,6 +115,9 @@ memcg() { # the memory controller is what MemoryMax= and the memory budgets are 
 ima() { # securityfs files always have size 0: look at the content
   grep -q . /sys/kernel/security/ima/ascii_runtime_measurements
 }
+# kmod's insmod, which loads the module once (boot.sh); a variable so that
+# tests/test_boot_init.py can point it elsewhere.
+insmod=${K3_INSMOD_BIN:-/usr/sbin/insmod}
 insmod_expect() { # insmod_expect FILE ERRNO: insmod must end with the expected errno (or 0)
   case $2 in
     0) want='' ;;
@@ -122,7 +125,7 @@ insmod_expect() { # insmod_expect FILE ERRNO: insmod must end with the expected 
     EKEYREJECTED) want='Key was rejected by service' ;;
     *) echo "unknown errno: $2"; return 1 ;;
   esac
-  out=$(insmod "/modules/$1" 2>&1); rc=$?
+  out=$("$insmod" "${K3_MODULES:-/modules}/$1" 2>&1); rc=$?
   echo "insmod $1: rc=$rc ${out:+($out)}; expected $2"
   if [ "$want" ]; then [ $rc -ne 0 ] && echo "$out" | grep -qF "$want"; else [ $rc -eq 0 ]; fi
 }
