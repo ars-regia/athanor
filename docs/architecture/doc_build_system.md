@@ -87,6 +87,17 @@ package, so the levels order the jobs but no build consumes the output of anothe
    build scripts and the builder identity (`flake.nix`, `flake.lock`, `forge/builder/`). It
    asks the registry whether `athanor-forge-<package>:hash-<hash>` exists. If it does, the
    job stops there.
+
+   The declared-input check is a tripwire for literal paths, not a proof of completeness.
+   It reads the spec text (outside comments and `%description`) and fails when a repo-rooted
+   path that exists is not declared. It does not see: paths assembled from shell variables
+   or macros at build time; relative `../` paths; files a script reads on its own (a
+   `build.rs` or `include_str!` that reaches outside the crate and its path dependencies, a
+   generator reading a neighbouring directory); and anything inside a declared directory
+   that points elsewhere, since a declared directory vouches for everything under it. The
+   telemetry package builds through `nix build`, so only `flake.nix` and `flake.lock` cover
+   it. A build that reads more than it declares keeps its tag when that input changes: the
+   author of the spec is the one who closes the gap, by declaring the path.
 2. **Build.** `forge/scripts/run_spec_build.sh` runs `build_spec.sh` twice in the builder
    image, sharing its home directory through a podman volume. The `fetch` stage has the
    network: it downloads the `Source` files and verifies them against
