@@ -1,6 +1,6 @@
 [Unit]
 Description=Athanor OS desktop session
-Documentation=https://github.com/hr-mes/athanor-forge
+Documentation=https://github.com/hr-mes/athanor
 
 # The session manager's target: it stands and falls with graphical-session.target and
 # comes up after the pre target; XDG autostart entries run once it is up.
