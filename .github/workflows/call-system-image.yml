@@ -424,6 +424,11 @@ jobs:
     needs: [dag-system-image]
     runs-on: ubuntu-24.04
     environment: signing
+    # An explicit bash shell runs every step with -o pipefail, so a signing failure piped
+    # into tee fails the job instead of passing with the summary of a failed run.
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 60
     permissions:
       contents: read
