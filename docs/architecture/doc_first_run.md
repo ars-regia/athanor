@@ -2,7 +2,7 @@
 
 Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text not yet reviewed.** It specifies what a person meets the first time an installed Athanor machine starts: the session that runs before any account exists, its screens (language, keyboard, network, time zone, privacy and updates, appearance, the account), accessibility from the first frame, what the program may change as root and how each change is authorised, how the choices reach the person's first session, the tests and the order of construction. It does not design the installer's disk screens, the Settings application's pages, or the internals of the preferences other specifications own; where it needs one of them it names the interface and the owner. The maintainer's decisions of 2026-10-05 are in section 6 with their reasons; the rules state the choices taken.
 
-**Amendment of 2026-10-06** (maintainer decisions A2-5 and A2-22 of 2026-10-05, specification audit 2, #150): security updates apply at the next shutdown or restart the person starts (section 1, FR12, decision 4), and the installer of release 1.0 is Anaconda with its web interface (section 1, spike F2). The earlier text is kept and marked where it is amended.
+**Amendment of 2026-10-06** (maintainer decisions A2-5 and A2-22 of 2026-10-05, specification audit 2, #150): security updates apply at the next shutdown or restart the person starts (section 1, FR12, decision 4), and the installer of release 1.0 is Anaconda with its web interface (section 1, spike F2). The earlier text is kept and marked where it is amended. *Amended on 2026-10-06 (A2-27, #131, #145):* when the machine boots with Secure Boot and the project certificate is not enrolled, a first-run page prepares the MOK enrolment: it shows a one-time password that the system generates, and the owner types it in MokManager at the next boot; the `mokutil` command line stays available. The page changes no disk. `athanor-tpm-luks-seal` is disabled until 1.1, and 1.0 unlocks with the passphrase.
 
 ## 1. Context
 
@@ -302,7 +302,7 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
 | Setting the clock by hand                                               | only with network time off, in Settings                                                                                                      |
 | Third-party repository choice                                           | the image's remotes are decided by `doc_software.md` decision 6                                                                              |
 | Telemetry, crash reporting and their switches                           | Athanor has neither; the prototype's switches did nothing                                                                                    |
-| Disk encryption and TPM enrolment                                       | the installer's (and `athanor-tpm-luks-seal.service`'s); first run changes no disk                                                           |
+| Disk encryption and TPM enrolment                                       | the installer's; `athanor-tpm-luks-seal.service` is disabled until 1.1 and 1.0 unlocks with the passphrase (A2-27, #131, #145); first run changes no disk                                                           |
 | systemd-homed accounts                                                  | decision 2                                                                                                                                   |
 
 **FR20. Tests.**
@@ -384,6 +384,7 @@ In the dev VM installed from a kickstart that declares no user, and on the refer
 11. Every screen fits 1024 × 600 logical pixels in German and in the right-to-left pseudo-locale, and the whole sequence is completed with the keyboard alone (CI surface cases, then on the laptop).
 12. The Privacy screen lists exactly the contacts the image makes; the contacts test fails when a contact is added to the image without the file (CI).
 13. No file under `/etc` is changed by first run except through localed, timedated, NetworkManager and AccountsService: a comparison of `/etc` before and after, in the VM, shows only `locale.conf`, `vconsole.conf`, `X11/xorg.conf.d/00-keyboard.conf`, `localtime`, the connection file, `passwd`, `shadow`, `group`, `gshadow`, `subuid`, `subgid` and AccountsService's own files.
+14. Added on 2026-10-06 (A2-27): on a Secure Boot machine without the project certificate enrolled, the MOK page shows a one-time password the system generated, different on every run, and queues the enrolment; on a machine with the certificate already enrolled, or with Secure Boot off, the page is not shown.
 
 ## 6. Decisions taken
 

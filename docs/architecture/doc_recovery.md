@@ -32,13 +32,13 @@ The kiosk could not do what it offered, and read in the code (not run) it failed
 - **This document owns greenboot** (#150: "greenboot, owned by `doc_recovery.md`"). The scope of that ownership, its packages, its required checks and its configuration, is proposed here and awaits the maintainer.
 - **Enabled by preset** (#150: "enabled by preset"). The image enables greenboot through a preset file it ships, instead of relying on Fedora's presets; no preset or `systemctl enable` for greenboot exists in the repository today.
 - **Ordered before R1** (#150: "ordered before R1"). GRUB's counter and greenboot's return to the previous deployment act first; R1's console starts only after greenboot has used its tries, when the deployment it returned to fails as well. Both react to the same signal, a greeter that does not run, so without the order they would act against each other: one restarts into the previous version, the other stays and shows a console.
-- A return made by greenboot does not go through `GoBack()`, so nothing holds the digest it left (`doc_update_trust.md`, UT6); how the update service learns of that return is not specified yet.
+- A return made by greenboot does not go through `GoBack()`, so nothing holds the digest it left (`doc_update_trust.md`, UT6); the update service learns of it from the mark on the bad deployment and holds the digest (A2-26, #150, below).
 
-Open questions on R5, awaiting the maintainer (raised by the audit of this amendment, 2026-10-06):
+Questions on R5 raised by the audit of this amendment (2026-10-06); the second and third are decided by maintainer decision A2-26 (#150), the first stays open:
 
 - **Nothing yet makes the order hold.** R1 fires during the failing boot, on greetd's third failure within a minute (`StartLimitBurst=3`, `StartLimitIntervalSec=60s`); greenboot spends a try of GRUB's counter only through a reboot after its required checks fail. On a deployment whose greeter does not start, R1's console can therefore appear before greenboot has acted. Which mechanism makes "ordered before R1" true is not specified.
-- **Greenboot reboots by itself.** As shipped, greenboot reboots the machine when its required checks fail, and returns to the previous deployment when the tries are spent, without the user. That conflicts with the rule that nothing reboots by itself (`doc_shell.md` SH11; `doc_update_trust.md` UT13). Whether a failed boot is an exception to that rule, or greenboot's reboot is turned off, is open.
-- **A rolled-back digest is downloaded again.** Since nothing holds the digest greenboot left, the next update check downloads it again, and a security-class digest would apply again at the next shutdown (UT13). Whether a greenboot return holds the digest as `GoBack()` does is open.
+- **Greenboot reboots by itself.** As shipped, greenboot reboots the machine when its required checks fail, and returns to the previous deployment when the tries are spent, without the user. That conflicts with the rule that nothing reboots by itself (`doc_shell.md` SH11; `doc_update_trust.md` UT13). **Decided (A2-26, #150): greenboot's automatic reboot is turned off.** A failed health check marks the deployment bad and nothing reboots; the session shows a notice that the next boot returns to the previous version, and the user restarts when ready. D31 stands.
+- **A rolled-back digest is downloaded again.** Since nothing holds the digest greenboot left, the next update check downloads it again, and a security-class digest would apply again at the next shutdown (UT13). **Decided (A2-26, #150): the update service holds the bad digest,** as `GoBack()` does (`doc_update_trust.md`, UT6).
 
 ## 3. Options that were weighed
 
@@ -69,3 +69,6 @@ Not run for R5 (added on 2026-10-06): nothing. Greenboot's activation on the shi
 5. A normal boot shows the plain banner and no message, and `/run/athanor-recovery` does not exist.
 6. Added on 2026-10-06 (R5): greenboot is enabled by the image's own preset file.
 7. Added on 2026-10-06 (R5): with a deliberately broken new deployment whose greeter does not start, greenboot returns to the previous deployment before `tty1` shows the recovery console; the console appears only when the previous deployment fails as well. This case is written against the first open question of R5 and can pass only once the mechanism that orders the two is specified.
+8. Added on 2026-10-06 (R5, A2-26): with a deployment whose required health check fails, nothing reboots by itself and the deployment is marked bad.
+9. Added on 2026-10-06 (R5, A2-26): the session of that boot shows the notice that the next boot returns to the previous version; after the user restarts, the previous version runs.
+10. Added on 2026-10-06 (R5, A2-26): the next three update checks do not download the digest of the bad deployment.
