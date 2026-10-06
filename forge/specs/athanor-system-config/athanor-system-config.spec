@@ -87,7 +87,7 @@ mkdir -p /etc/usbguard
 %changelog
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-52
 - Drop /usr/share/athanor-system-config/athanor-forge.repo. It pointed at a GitHub
-  Pages DNF channel that ADR-0076 removed, and nothing installed it into
+  Pages DNF channel that ADR-0076 retires, and nothing installed it into
   /etc/yum.repos.d: packages reach a machine only inside the signed system image.
 
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-51
