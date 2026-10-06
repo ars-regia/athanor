@@ -1004,13 +1004,6 @@ item = "section 4"
 purpose = "Package names an image loses and gains against another, for a base change review"
 
 [[component]]
-path = "system/portal"
-kind = "site"
-area = "docs"
-status = "missing"
-purpose = "Astro Starlight documentation website"
-
-[[component]]
 path = "system/promote.sh"
 kind = "script tool"
 area = "signing-update"
