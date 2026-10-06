@@ -253,6 +253,12 @@ jobs:
       packages: write
       id-token: write
     steps:
+      - name: 🔑 Require the Secure Boot key
+        # First, so a missing secret fails in seconds instead of after the system stage build.
+        env:
+          SECUREBOOT_SIGNING_KEY: ${{ secrets.SECUREBOOT_SIGNING_KEY }}
+        run: |
+          [[ -n ${SECUREBOOT_SIGNING_KEY:-} ]] || { echo "SECUREBOOT_SIGNING_KEY is not available to this job: check the signing environment" >&2; exit 1; }
       - name: ⚙️ Prepare environment
         run: |
           set -euo pipefail
@@ -298,12 +304,21 @@ jobs:
           SECUREBOOT_SIGNING_KEY: ${{ secrets.SECUREBOOT_SIGNING_KEY }}
         run: |
           set -euo pipefail
-          [[ -n ${SECUREBOOT_SIGNING_KEY:-} ]] || { echo "SECUREBOOT_SIGNING_KEY is not available to this job: check the signing environment" >&2; exit 1; }
           for gpu in none nvidia nvidia-legacy; do
             bash system/build-image.sh --gpu "$gpu" --system-image "$(<artifacts/system-image.iid)" --registry "${IMAGE_REGISTRY}" \
               --tag "${RUN_ID}" --tag "${DEFAULT_TAG}" --serial "${RUN_NUMBER}"
           done
           df -h
+
+      - name: 🧩 Check that the images share the system layers
+        # The acceptance of UD40: each image starts with every layer of the system image.
+        # Read from local storage before the push, so a failure publishes no tag.
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          bash system/shared-layers.sh --system "$(<artifacts/system-image.iid)" --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" \
+            | tee -a "${GITHUB_STEP_SUMMARY}"
 
       - name: 📤 Push OS Images
         env:
@@ -313,15 +328,6 @@ jobs:
           for gpu in none nvidia nvidia-legacy; do
             bash system/build-image.sh --gpu "$gpu" --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" --tag "${DEFAULT_TAG}" --push-only
           done
-
-      - name: 🧩 Check that the pushed images share the system layers
-        # The acceptance of UD40: each pushed image starts with every layer of the system image.
-        env:
-          RUN_ID: ${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          bash system/shared-layers.sh --system "$(<artifacts/system-image.iid)" --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" \
-            | tee -a "${GITHUB_STEP_SUMMARY}"
 
       - name: 🧾 Record the pushed digests for the signing job
         env:
