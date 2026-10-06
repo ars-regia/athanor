@@ -1,5 +1,7 @@
 # Stage 2 Switch Implementation Plan
 
+**Status (2026-10-06):** Tasks 0-15 are merged (the checkboxes below were not ticked). Open: Task 16, the post-image lanes. Remove this plan when Task 16 closes.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. The maintainer chose **native** execution and one whole-package review at the end.
 
 **Goal:**

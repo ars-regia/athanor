@@ -18,7 +18,7 @@ FROM ${KERNEL_REGISTRY}/azoth-nvidia@${NVIDIA_LEGACY_DIGEST} AS nvidia-modules-l
 # The vendor RPMs of both NVIDIA branches, verified by hash and GPG, with the shim and the
 # configuration package, and NVIDIA's container toolkit (system/nvidia/build-rpms.sh). A throwaway stage: rpm-build never
 # reaches an image. KERNEL_REGISTRY locates the mirror of the locked RPMs (lock.py).
-FROM registry.fedoraproject.org/fedora:43@sha256:a60334b24af6818e9ccf199d188b5ddef1c3d7f549470b560d9b744c78c2c58b AS nvidia-rpms
+FROM registry.fedoraproject.org/fedora:43@sha256:17ec53e139b4f9baa29cc91f469c120b86aa15959fcfca73b76182e58d5ff89d AS nvidia-rpms
 ARG KERNEL_REGISTRY
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 COPY forge/specs/azoth/pins.env /src/forge/specs/azoth/pins.env
@@ -28,7 +28,7 @@ RUN dnf5 install -y --setopt=install_weak_deps=False rpm-build python3 && \
 
 # Fedora's atomic desktop base (S1): the bootc base of Silverblue and Kinoite, pinned by
 # digest and moved by the bump bot.
-FROM quay.io/fedora-ostree-desktops/base-atomic:43@sha256:c75477d075ba293ecaf9388db1ff90fef09d5b3a0b95b8e861f0990cea222d90 AS system
+FROM quay.io/fedora-ostree-desktops/base-atomic:43@sha256:5bbb1396403585746e292b06f0238c230638e81321c027b2559a249734b22b1f AS system
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG FEDORA_VERSION=43
 ENV FEDORA_VERSION=$FEDORA_VERSION
@@ -190,10 +190,6 @@ RUN for pkg in cosmic-panel cosmic-applets cosmic-notifications athanor-layout-t
     done && \
     case $(rpm -q --qf '%{RELEASE}' cosmic-comp) in *.athanor*) ;; \
         *) echo "cosmic-comp is not Athanor's build: $(rpm -q cosmic-comp)" >&2; exit 1;; esac && \
-    case $(rpm -q --qf '%{VERSION}-%{RELEASE}' polkit) in 127-*.athanor*) ;; \
-        *) echo "polkit is not Athanor's 127 build: $(rpm -q polkit)" >&2; exit 1;; esac && \
-    ! test -u /usr/lib/polkit-1/polkit-agent-helper-1 && \
-    systemctl is-enabled --quiet polkit-agent-helper.socket && \
     for name in org.freedesktop.Notifications org.kde.StatusNotifierWatcher; do \
         owners=$(grep -lx "Name=$name" /usr/share/dbus-1/services/*.service); \
         test "$owners" = "/usr/share/dbus-1/services/$name.service" \

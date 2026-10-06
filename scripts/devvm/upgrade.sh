@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # upgrade.sh: switches the guest to the newest published system image and reboots into
 # it. `bootc upgrade` cannot do this here: create.sh installs from an ISO whose kickstart
-# pins `ostreecontainer` to the run-id tag it was built with (system/athanor-install.ks),
+# pins `ostreecontainer` to the run-id tag it was built with (the osbuild-base.ks that bootc-image-builder generates and scripts/devvm/devvm.ks includes),
 # and upgrade only re-pulls that same tag, never a newer one. This runs the equivalent
 # `bootc switch` to `:latest` instead, the way the dev VM verification reports did by hand.
 set -euo pipefail

@@ -1,10 +1,10 @@
 %global debug_package %{nil}
 Name:           athanor-system-services
 Version:        1.0.1
-Release:        25%{?dist}
+Release:        27%{?dist}
 Summary:        Athanor OS athanor-system-services
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor-forge
+URL:            https://github.com/hr-mes/athanor
 BuildArch:      noarch
 Requires:       systemd
 Requires:       cosmic-bg
@@ -37,9 +37,13 @@ cp -a %{_sourcedir}/usr/lib/systemd/user/* %{buildroot}/usr/lib/systemd/user/
 /usr/lib/systemd/user/cosmic-osd.service
 
 %changelog
-* Mon Oct 05 2026 Athanor Forge <forge@athanor.os> - 1.0.1-25
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.1-27
 - cosmic-settings-daemon: ReadWritePaths=%%t so the varlink bind under ProtectSystem=strict
   no longer panics and the volume keys work again (#144).
+
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.1-25
+- Point URL and unit Documentation= at the project repository
+
 * Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.1-24
 - Stage 2 switch: cosmic-panel, cosmic-applets and cosmic-notifications leave the session;
   the bar, the dock and athanor-shelld take their place. The athanor-cosmic-panel wrapper

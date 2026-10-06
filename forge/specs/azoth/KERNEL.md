@@ -41,10 +41,10 @@ directory e come si usa.
 <!-- pins:begin (table written by bump.py apply) -->
 | pin | value |
 | --- | --- |
-| `FEDORA_KERNEL_NVR` | `7.2.8-100.fc43` |
+| `FEDORA_KERNEL_NVR` | `7.2.9-100.fc43` |
 | `FEDORA_KEY_FPR` | `c6e7f081cf80e13146676e88829b606631645531` |
 | `KERNEL_CHANNEL` | `stable` |
-| `CACHYOS_RELEASE` | `cachyos-7.2.8-1` |
+| `CACHYOS_RELEASE` | `cachyos-7.2.9-2` |
 | `CACHYOS_CONFIG_COMMIT` | `6676e72b85eb9e30d079a8c3dcdf93aedd1e8226` |
 | `CACHYOS_PATCHES_COMMIT` | `17bb0bb818d283d0dc6e0280a2e9d5b95e66808b` |
 | `NVIDIA_OPEN_VERSION` | `615.71.09` |
@@ -148,7 +148,7 @@ progetto (workflow `.github/workflows/nvidia-kmod.yml`, che poi li carica in QEM
 
 ## Pubblicazione
 
-Ogni push su `main` o `iso-v0` che tocca questa directory costruisce e pubblica tre
+Ogni push su `main` o `iso-v0` che tocca questa directory costruisce e pubblica quattro
 OCI con i soli RPM dentro, tag `<nvr>` (quello che stampa `bash nvr.sh`):
 
 | Immagine | Contenuto |
@@ -157,7 +157,7 @@ OCI con i soli RPM dentro, tag `<nvr>` (quello che stampa `bash nvr.sh`):
 | `ghcr.io/hr-mes/azoth-devel` | kernel-devel, per i kmod esterni (NVIDIA, fase K4) |
 | `ghcr.io/hr-mes/azoth:<nvr>-microvm` | azoth-microvm: vmlinux, bzImage, config e release del kernel guest (sezione 9) |
 | `ghcr.io/hr-mes/azoth-debuginfo` | debuginfo, restano le due versioni piu' recenti |
-| `ghcr.io/hr-mes/azoth-nvidia` | i `.ko` NVIDIA firmati, tag `<nvr>-open` e `<nvr>-legacy` (workflow `nvidia-kmod.yml`) |
+| `ghcr.io/hr-mes/azoth-nvidia` | i `.ko` NVIDIA firmati, tag `<nvr>-k<12 cifre esadecimali del digest del kernel>-<branch>-<versione>` (pubblicata da `nvidia-kmod.yml`, non da Kernel Build) |
 
 Ognuna e' firmata con cosign keyless dall'identita' del workflow, porta un SBOM SPDX
 e un'attestazione custom con i pin (`pins.json`: pins.env, hash del manifest, del
@@ -175,7 +175,7 @@ gh attestation verify "oci://ghcr.io/hr-mes/azoth:$(bash nvr.sh)" --repo hr-mes/
 
 Il bot (`kernel-bump.yml`, spec sezione 8) apre ogni giorno, dal branch di default, una
 PR con i pin nuovi, i manifesti rigenerati, l'esito di `prep` e le opzioni derivate, e
-le mette l'auto-merge sul check `Kernel gate` di Kernel Build. A mano, nella stessa
+le mette l'auto-merge sul check `Kernel gate` di Kernel Build, ma solo se `prep` e' verde e nessun lock NVIDIA si muove: altrimenti la fonde una persona. A mano, nella stessa
 sequenza:
 
 1. `python3 bump.py check --group kernel` mostra cosa muoverebbe;

@@ -1,7 +1,7 @@
 Name:           athanor-rosenpass
 %global debug_package %{nil}
 Version:        0.2.1
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Post-Quantum WireGuard Key Exchange (La Via Purista)
 License:        MIT OR Apache-2.0
 URL:            https://github.com/rosenpass/rosenpass
@@ -15,7 +15,8 @@ BuildRequires:  cmake
 
 %description
 Rosenpass is a post-quantum key exchange protocol for WireGuard.
-Compiled natively in Athanor Forge for the Zero-Trust Mesh Network.
+Built from the upstream source release for the Athanor mesh network. Not part of the
+shipped image.
 
 %prep
 %autosetup -n rosenpass-%{version}
@@ -52,5 +53,8 @@ install -Dm644 rosenpass.service %{buildroot}/usr/lib/systemd/system/rosenpass.s
 /usr/lib/systemd/system/rosenpass.service
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 0.2.1-2
+- Reword the %description; the package is not shipped
+
 * Thu Aug 20 2026 Athanor Forge <forge@athanor.os> - 0.2.1-1
 - Integrazione PQC "La Via Purista" nello Swarm di Athanor OS

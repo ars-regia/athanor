@@ -70,7 +70,7 @@ done
 # are installed as Fedora/RPM Fusion binaries directly in system/Containerfile. When the
 # zero-trust rebuild-from-source lands (2026-09-11 decision), each will get a spec and a
 # tier image, and its name moves into the custom_tier* lists above -- not back here as a
-# rolling image. UPSTREAM_CORE/DESKTOP/MEDIA/CLI stay read for the manifest below.
+# rolling image.
 
 TIER2_IMAGES=()
 for pkg in "${CUSTOM_TIER2[@]}"; do
