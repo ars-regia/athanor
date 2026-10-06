@@ -1,4 +1,4 @@
-"""Tests the selection of forge/scripts/build_changed_specs.sh: a changed spec directory is
+"""Tests the selection of forge/scripts/build_changed_specs.sh (select_check_specs.py): a changed spec directory is
 built only when the DAG builds it (python3 -B -m unittest discover -s forge/scripts/tests -v)."""
 
 import json
@@ -17,7 +17,7 @@ class SelectionTest(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.root = pathlib.Path(tmp.name)
         (self.root / "forge/scripts").mkdir(parents=True)
-        for name in ("build_changed_specs.sh", "dag_orchestrator.py"):
+        for name in ("build_changed_specs.sh", "dag_orchestrator.py", "select_check_specs.py"):
             shutil.copy(SCRIPTS / name, self.root / "forge/scripts" / name)
         (self.root / "forge/config").mkdir()
         (self.root / "forge/config/packages.json").write_text(
@@ -89,7 +89,7 @@ class SelectionTest(unittest.TestCase):
     def test_nothing_changed_builds_nothing(self):
         self.commit_change("README", "x")
         out = self.run_script("HEAD^1").stdout
-        self.assertIn("built 0 spec(s), skipped 0", out)
+        self.assertIn("0 spec(s) selected, 0 skipped", out)
 
     def test_only_dag_specs_are_built(self):
         out = self.run_script("HEAD^1").stdout
@@ -97,7 +97,7 @@ class SelectionTest(unittest.TestCase):
         self.assertIn("would build forge/specs/plain\n", out)
         self.assertIn("forge/specs/athanor-dead is not built by the DAG", out)
         self.assertIn("forge/specs/athanor-empty is not built by the DAG", out)
-        self.assertIn("built 2 spec(s), skipped 2", out)
+        self.assertIn("2 spec(s) selected, 2 skipped", out)
 
 
 if __name__ == "__main__":
