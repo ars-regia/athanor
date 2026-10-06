@@ -3,9 +3,10 @@
 ## Supported versions
 
 Athanor has no numbered release yet. The supported version is the current system image
-built from the default branch `iso-v0`; it rolls until 1.0, and no other branch or older
-image receives security fixes. There is no `:stable` tag today: `doc_update_trust.md`
-(D1) designs one for later. Security updates are provided while Fedora supports the base
+built from the default branch `iso-v0`, and no other branch or older image receives
+security fixes. Decision A2-4 (`docs/decisions/0039-delivery-repairs-before-1-0.md`)
+creates an evidence-gated `:stable` tag before 1.0; once it is published, `:stable` is the
+supported channel. Security updates are provided while Fedora supports the base
 release; see "Audience and support window" in `README.md`.
 
 ## Reporting a vulnerability
