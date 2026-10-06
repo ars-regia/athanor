@@ -169,6 +169,10 @@ SIGN_ONLY_FORBIDDEN = re.compile(
     r"|\bcargo\s+(?:build|install|run)\b|\bnix\s+(?:build|run|shell|develop|profile)\b"
     r"|\bapt(?:-get)?\s+install\b|\bdnf5?\s+install\b|\bpip3?\s+install\b"
     r"|\bbuild-image\.sh\b|\bbuild_iso\.sh\b|\bnvidia\.sh\s+build\b|\blocalhost/")
+# The only commands a step holding a signing secret may run, whole: the sign scripts (D43).
+SIGN_SCRIPTS = re.compile(
+    r"^run: bash (?:forge/specs/azoth/signer/run\.sh sign"
+    r'|system/sign-images\.sh [\w./-]+ \| tee -a "\$\{GITHUB_STEP_SUMMARY\}")$')
 
 
 def workflow_jobs(text):
@@ -245,6 +249,30 @@ def signing_problems(root):
                 m = SIGN_ONLY_FORBIDDEN.search(line)
                 if m:
                     problems.append(f"{wf.name}:{n}: signing job {job} builds or installs: {m.group(0)} (D43)")
+            if signing.get("secrets"):
+                problems += secret_steps(wf.name, job, code, secrets)
+    return problems
+
+
+def secret_steps(name, job, code, secrets):
+    """A signing secret reaches one step, and that step runs one sign script and nothing else."""
+    problems, steps, current = [], [], None
+    for n, line in code:
+        if re.match(r"^      - ", line):
+            current = []
+            steps.append(current)
+        if current is None:
+            if secrets.search(line):
+                problems.append(f"{name}:{n}: signing job {job} exposes a signing secret to every step (D43)")
+        else:
+            current.append((n, line))
+    for step in steps:
+        if not any(secrets.search(line) for _, line in step):
+            continue
+        runs = [(n, line.strip()) for n, line in step if re.match(r"^\s+(?:- )?run:", line)]
+        if len(runs) != 1 or not SIGN_SCRIPTS.match(runs[0][1]):
+            problems.append(f"{name}:{step[0][0]}: signing job {job} hands a signing secret to a step that "
+                            "does not run only a sign script (D43)")
     return problems
 
 

