@@ -453,17 +453,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "athanor-doctor"
-version = "1.0.0"
-dependencies = [
- "libc",
- "serde",
- "serde_json",
- "tokio",
- "zbus",
-]
-
-[[package]]
 name = "athanor-ebpf-sched"
 version = "0.1.0"
 dependencies = [

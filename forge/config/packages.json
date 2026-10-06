@@ -1,6 +1,5 @@
 {
   "custom_packages": [
-    "stage0-bootstrap",
     "bat",
     "selinux",
     "base-config",
@@ -19,27 +18,21 @@
     "bar",
     "dock",
     "launcher",
-    "doctor",
     "cliphist",
     "backup",
     "update",
     "xdg-desktop-portal-athanor",
     "tetragon",
-    "syft",
-    "bpf-linker",
     "keylime",
     "recovery",
     "kernel-forge",
     "cosmic-comp"
   ],
   "custom_tier0": [
-    "stage0-bootstrap",
     "base-config",
     "selinux",
     "nix-support",
-    "tetragon",
-    "syft",
-    "bpf-linker"
+    "tetragon"
   ],
   "custom_tier1": [
     "bat",
@@ -63,7 +56,6 @@
     "bar",
     "dock",
     "launcher",
-    "doctor",
     "system-services",
     "desktop-ui",
     "system-config",
