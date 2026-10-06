@@ -20,9 +20,9 @@ lang en_US.UTF-8
 # module signing key compiled into Azoth. Secure Boot also needs the project Secure Boot
 # certificate enrolled as a MOK at first boot.
 
-# The bootc image is the identity of the system, not a user choice. Pin it to the
-# release being shipped rather than :latest, which on a non-default branch may resolve
-# to a different or older build.
+# The bootc image is the identity of the system, not a user choice. This kickstart
+# follows :latest; an installation that needs a fixed build replaces the tag with a
+# run-id tag of the image.
 ostreecontainer --url=ghcr.io/hr-mes/athanor-system:latest --transport=registry
 
 # The root account stays locked: administration is through the wheel user Anaconda
