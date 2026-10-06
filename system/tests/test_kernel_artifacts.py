@@ -86,8 +86,8 @@ class Tool(unittest.TestCase):
     def registry(self, fx):
         (self.dir / "registry.json").write_text(json.dumps(fx))
 
-    def run_script(self, *args, cwd=None):
-        return subprocess.run(["bash", str(SCRIPT), *args], capture_output=True, text=True, env=self.env, cwd=cwd or self.dir)
+    def run_script(self, *args, cwd=None, script=SCRIPT):
+        return subprocess.run(["bash", str(script), *args], capture_output=True, text=True, env=self.env, cwd=cwd or self.dir)
 
     def state_file(self):
         path = self.artifacts / "kernel-artifacts.env"
@@ -114,6 +114,39 @@ class Resolve(Tool):
         self.assertEqual(got["nvidia_open_digest"], MODULE["open"])
         self.assertNotIn("nvidia_legacy_digest", got)
         self.assertEqual(got["nvidia_legacy_tag"], tag("legacy"))
+
+    def test_never_published_module_package_is_modules_missing(self):
+        # ghcr.io denies the bearer token for a package that does not exist yet (azoth-nvidia
+        # before the first NVIDIA build under an owner), instead of answering manifest unknown.
+        fx = published(branches=())
+        fx["unpublished"] = [f"{REG}/azoth-nvidia"]
+        self.registry(fx)
+        r = self.run_script("resolve")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        got = self.state_file()
+        self.assertEqual(got["state"], "modules-missing")
+        self.assertEqual(got["nvidia_open_tag"], tag("open"))
+        self.assertNotIn("nvidia_open_digest", got)
+        self.assertIn(f"{REG}/azoth-nvidia: denied", r.stderr)
+
+    def test_never_published_kernel_package_is_kernel_missing(self):
+        fx = published()
+        fx["unpublished"] = [f"{REG}/azoth"]
+        self.registry(fx)
+        r = self.run_script("resolve")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.state_file(), {"state": "kernel-missing", "nvr": NVR, "registry": REG})
+
+    def test_publish_refuses_a_tag_the_anonymous_resolve_could_not_see(self):
+        # A private azoth-nvidia: the anonymous resolve did not see the legacy tag, the
+        # logged-in publish does. It must stop before building or pushing anything.
+        self.registry(published(branches=("open",)))
+        self.assertEqual(self.run_script("resolve").returncode, 0)
+        self.registry(published())
+        r = self.run_script(str(self.dir / "signed"), script=ROOT / "forge/specs/azoth/nvidia-publish.sh")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn(f"already holds {MODULE['legacy']}", r.stderr)
+        self.assertIn("refusing to overwrite", r.stderr)
 
     def test_absent_kernel_is_kernel_missing(self):
         fx = published()

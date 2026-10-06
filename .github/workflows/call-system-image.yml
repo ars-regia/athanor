@@ -45,6 +45,12 @@ jobs:
         with:
           name: kernel-artifacts
           path: kernel-artifacts
+      - name: Package hashes verified by the Orchestrator
+        # fetch_repo_rpms.sh pulls every package image by its hash tag from this file.
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: dag-hashes
+          path: forge/dag-state
       - name: ❄️ Install Nix (Bedrock Cache)
         uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
         with:
@@ -418,6 +424,11 @@ jobs:
     needs: [dag-system-image]
     runs-on: ubuntu-24.04
     environment: signing
+    # An explicit bash shell runs every step with -o pipefail, so a signing failure piped
+    # into tee fails the job instead of passing with the summary of a failed run.
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 60
     permissions:
       contents: read
