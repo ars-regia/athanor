@@ -28,13 +28,13 @@ Secret values are never read, stored or written (GHS8). Variable values are not 
 
 Run from the repository root. `--repo OWNER/NAME` defaults to the repository of the current checkout (`gh repo view`). `--dir` defaults to `.github/settings`.
 
-Every command first reads `repos/{r}` and stops with exit code 2 and "insufficient rights" unless `permissions.admin` is true: without the admin role GitHub answers 404 on the admin endpoints, which would otherwise read as "off". A 404 counts as "off" only where GitHub documents it so: `vulnerability-alerts` and `pages`. Any other API failure (403, 404, 5xx) and any missing, unreadable or malformed settings file also exit 2, before the first write.
+Every command first reads `repos/{r}` and stops with exit code 2 and "insufficient rights" unless `permissions.admin` is true: without the admin role GitHub answers 404 on the admin endpoints, which would otherwise read as "off". A 404 counts as "off" only where GitHub documents it so: `vulnerability-alerts` and `pages`. Any other API failure (403, 404, 5xx), an answer that is not JSON, a missing `gh`, and a settings file that is missing, unreadable, not JSON or lacks a key of its area also exit 2 with a message, before the first write.
 
 | Command | Effect | Exit code |
 | --- | --- | --- |
 | `python3 scripts/github-settings/ghsettings.py export` | Writes the live state to the seven files | 0, or 2 on an error |
 | `python3 scripts/github-settings/ghsettings.py diff` | Prints a unified diff per area, files on the minus side, live state on the plus side | 0 when equal, 1 on a difference, 2 on an error |
-| `python3 scripts/github-settings/ghsettings.py apply` | Prints the plan: first one line per API call (`METHOD path body`, prefixed `DESTRUCTIVE` for a deletion, with the ruleset, branch or label name in brackets), then one `MANUAL:` line per step only a human can take. Calls nothing that writes | 0, or 2 on an error |
+| `python3 scripts/github-settings/ghsettings.py apply` | Prints the plan: first one line per API call (`METHOD path body`, prefixed `DESTRUCTIVE` for a deletion, followed by the ruleset, branch, label or Pages note in parentheses), then one `MANUAL:` line per step only a human can take. Calls nothing that writes | 0, or 2 on an error |
 | `python3 scripts/github-settings/ghsettings.py apply --yes` | Prints the same plan, calls and `MANUAL:` lines, then runs the calls in order. Refuses the whole plan, with nothing written, when it holds a `DESTRUCTIVE` call | 0, or 2 on an error or a refused plan |
 | `python3 scripts/github-settings/ghsettings.py apply --yes --allow-destructive` | As `--yes`, and also runs the `DESTRUCTIVE` calls | 0, or 2 on an error |
 

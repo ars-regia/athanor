@@ -75,15 +75,57 @@ class SettingsError(Exception):
 # ruleset, a label, the Pages site) and runs only with --allow-destructive.
 Call = namedtuple("Call", "method path body destructive note", defaults=(False, ""))
 
-# The JSON type each settings file must hold.
-FILE_TYPES = {
-    "repository": dict,
-    "branch-protection": dict,
-    "rulesets": dict,
-    "environments": dict,
-    "labels": list,
-    "pages": (dict, type(None)),
-    "actions": dict,
+# The keys each settings file must hold, checked when the file is loaded:
+# (JSON type, keys of the top object, keys of each entry of the object or list).
+RULESET_KEYS = ("target", "enforcement", "conditions", "rules", "bypass_actors")
+PAGES_KEYS = ("build_type", "cname", "https_enforced", "source")
+SHAPES = {
+    "repository": (
+        dict,
+        REPO_FIELDS
+        + (
+            "topics",
+            "security_and_analysis",
+            "vulnerability_alerts",
+            "private_vulnerability_reporting",
+        ),
+        None,
+    ),
+    # An entry may also be {} or null: the protection of that branch is removed.
+    "branch-protection": (
+        dict,
+        None,
+        PROTECTION_FLAGS
+        + ("required_status_checks", "required_pull_request_reviews", "restrictions"),
+    ),
+    "rulesets": (dict, None, RULESET_KEYS),
+    "environments": (
+        dict,
+        None,
+        (
+            "can_admins_bypass",
+            "deployment_branch_policy",
+            "prevent_self_review",
+            "reviewers",
+            "wait_timer",
+            "secrets",
+            "variables",
+        ),
+    ),
+    "labels": (list, None, ("name", "color", "description")),
+    "pages": ((dict, type(None)), PAGES_KEYS, None),
+    "actions": (
+        dict,
+        (
+            "permissions",
+            "selected_actions",
+            "workflow_permissions",
+            "fork_pr_contributor_approval",
+            "secrets",
+            "variables",
+        ),
+        None,
+    ),
 }
 
 
@@ -94,18 +136,28 @@ def gh(path, method="GET", body=None, paginate=False):
         cmd += ["--paginate", "--slurp"]
     if body is not None:
         cmd += ["--input", "-"]
-    run = subprocess.run(
-        cmd,
-        input=None if body is None else json.dumps(body),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        run = subprocess.run(
+            cmd,
+            input=None if body is None else json.dumps(body),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError as error:
+        raise GhError(
+            "the gh command is not on PATH; install the GitHub CLI"
+        ) from error
     if run.returncode != 0:
         if "(HTTP 404)" in run.stderr:
             raise NotFound(path)
         raise GhError(f"gh api --method {method} {path}: {run.stderr.strip()}")
-    return json.loads(run.stdout) if run.stdout.strip() else None
+    try:
+        return json.loads(run.stdout) if run.stdout.strip() else None
+    except json.JSONDecodeError as error:
+        raise GhError(
+            f"gh api --method {method} {path}: the answer is not valid JSON: {error}"
+        ) from error
 
 
 def get(path, paginate=False) -> Any:
@@ -241,16 +293,7 @@ def _live_rulesets(repo):
         r = get(f"repos/{repo}/rulesets/{item['id']}")
         out[r["name"]] = (
             r["id"],
-            {
-                k: r.get(k)
-                for k in (
-                    "target",
-                    "enforcement",
-                    "conditions",
-                    "rules",
-                    "bypass_actors",
-                )
-            },
+            {k: r.get(k) for k in RULESET_KEYS},
         )
     return out
 
@@ -325,7 +368,7 @@ def export_pages(repo):
         p = get(f"repos/{repo}/pages")
     except NotFound:  # documented: 404 when the repository has no Pages site
         return None
-    return {k: p.get(k) for k in ("build_type", "cname", "https_enforced", "source")}
+    return {k: p.get(k) for k in PAGES_KEYS}
 
 
 def export_actions(repo):
@@ -689,11 +732,28 @@ def load(directory, area):
         raise SettingsError(f"cannot read {path}: {error.strerror or error}") from error
     except json.JSONDecodeError as error:
         raise SettingsError(f"{path} is not valid JSON: {error}") from error
-    if not isinstance(data, FILE_TYPES[area]):
+    kind, top_keys, entry_keys = SHAPES[area]
+    if not isinstance(data, kind):
         raise SettingsError(
             f"{path} holds a JSON {type(data).__name__}, not the shape this area expects"
         )
+    if data is not None and top_keys:
+        _require(str(path), data, top_keys)
+    if entry_keys and data is not None:
+        entries = data.items() if isinstance(data, dict) else enumerate(data)
+        for name, entry in entries:
+            if area == "branch-protection" and not entry:
+                continue
+            _require(f"{path} entry {name}", entry, entry_keys)
     return data
+
+
+def _require(where, obj, keys):
+    if not isinstance(obj, dict):
+        raise SettingsError(f"{where} must be a JSON object")
+    missing = sorted(set(keys) - obj.keys())
+    if missing:
+        raise SettingsError(f"{where} lacks the key(s): {', '.join(missing)}")
 
 
 def cmd_export(repo, directory, _args):
@@ -812,6 +872,12 @@ def main(argv=None):
         return {"export": cmd_export, "diff": cmd_diff, "apply": cmd_apply}[
             args.command
         ](repo, args.dir, args)
+    except FileNotFoundError as error:  # `gh repo view` when gh is missing
+        print(
+            f"ghsettings: {error.filename} is not on PATH; install the GitHub CLI",
+            file=sys.stderr,
+        )
+        return 2
     except (GhError, NotFound, SettingsError, subprocess.CalledProcessError) as error:
         print(f"ghsettings: {error}", file=sys.stderr)
         return 2

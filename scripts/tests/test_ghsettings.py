@@ -15,7 +15,8 @@ REPO = "acme/os"
 
 # The stub answers GET from $STUB_STATE, keyed by path without its query string,
 # with the page wrapped in a list under --slurp; an unknown GET is a 404, and an
-# answer {"__status__": N} fails with HTTP N the way gh does. Every call, with its
+# answer {"__status__": N} fails with HTTP N the way gh does, and {"__raw__": text}
+# prints text as it is. Every call, with its
 # stdin, is appended to $STUB_LOG; a write answers an empty body.
 STUB_GH = f"""#!{sys.executable}
 import json, os, sys
@@ -35,6 +36,9 @@ answer = state[key]
 if isinstance(answer, dict) and "__status__" in answer:
     sys.stderr.write("gh: Request failed (HTTP %d)\\n" % answer["__status__"])
     sys.exit(1)
+if isinstance(answer, dict) and "__raw__" in answer:
+    print(answer["__raw__"])
+    sys.exit(0)
 print(json.dumps([answer] if "--slurp" in args else answer))
 """
 
@@ -179,20 +183,19 @@ class GhSettings(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_script(self, *args):
+    def run_script(self, *args, env=None, repo=True):
         self.log.write_text("")
         return subprocess.run(
             [
                 sys.executable,
                 "-B",
                 str(SCRIPT),
-                "--repo",
-                REPO,
+                *(["--repo", REPO] if repo else []),
                 "--dir",
                 str(self.dir),
                 *args,
             ],
-            env=self.env,
+            env=env or self.env,
             capture_output=True,
             text=True,
             check=False,
@@ -311,9 +314,7 @@ class GhSettings(unittest.TestCase):
         )
         result = self.run_script("apply", "--yes")
         self.assertEqual(result.returncode, 0, result.stderr)
-        writes = [
-            (c[0], c[1], json.loads(c[2])) for c in self.calls() if c[0] != "GET"
-        ]
+        writes = [(c[0], c[1], json.loads(c[2])) for c in self.calls() if c[0] != "GET"]
         self.assertEqual(
             writes,
             [
@@ -403,6 +404,44 @@ class GhSettings(unittest.TestCase):
         result = self.run_script("apply")
         self.assertEqual(result.returncode, 2)
         self.assertIn("cannot read", result.stderr)
+
+    def test_invalid_json_from_gh_exits_2(self):
+        self.set_live(f"{R}/actions/permissions", {"__raw__": "<html>not json"})
+        result = self.run_script("diff")
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("is not valid JSON", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_a_missing_gh_exits_2(self):
+        empty = pathlib.Path(self.tmp.name) / "empty"
+        empty.mkdir()
+        env = {**self.env, "PATH": str(empty)}
+        for repo in (True, False):
+            with self.subTest(repo_given=repo):
+                result = self.run_script("diff", env=env, repo=repo)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn("not on PATH", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+
+    def test_a_file_of_the_wrong_shape_exits_2_naming_the_key(self):
+        (self.dir / "repository.json").write_text("{}")
+        for command in (["diff"], ["apply", "--yes"]):
+            with self.subTest(command=command):
+                result = self.run_script(*command)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn(
+                    "repository.json lacks the key(s): allow_auto_merge", result.stderr
+                )
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual({c[0] for c in self.calls()}, {"GET"})
+        self.run_script("export")
+        self.edit("environments", lambda d: d["signing"].pop("wait_timer"))
+        result = self.run_script("apply")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(
+            "environments.json entry signing lacks the key(s): wait_timer",
+            result.stderr,
+        )
 
 
 if __name__ == "__main__":
