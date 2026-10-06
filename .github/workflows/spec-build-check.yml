@@ -1,11 +1,16 @@
 name: Spec Build Check
 
-# Pull requests that change forge specs build them the way the DAG does, without publishing:
-# forge/scripts/build_changed_specs.sh runs forge/scripts/run_spec_build.sh, the script of
-# call-dag-compile.yml, in the builder image for every changed spec (fetch with network,
-# build without). On a green build of the
-# spec bot's pull request, forge/scripts/bot_merge.py merges it when every bump keeps its
-# major version. The kernel (forge/specs/azoth) is Kernel Build's.
+# Pull requests that change forge specs, or what every spec build goes through, build the specs
+# the way the DAG does, without publishing. forge/scripts/select_check_specs.py picks them: the
+# changed spec directories, or every spec of the DAG when the change touches the builder image's
+# inputs (flake.nix, flake.lock, forge/builder), forge/config/rpmmacros, build_spec.sh,
+# run_spec_build.sh or fetch_sources.sh. A change to the builder's inputs is built in a builder
+# image made from the pull request (forge/scripts/builder_image.sh, handed to the build jobs as
+# a one-day workflow artifact, never pushed); any other in the published athanor-builder:latest.
+# Each spec builds in its own job with forge/scripts/run_spec_build.sh, the script of
+# call-dag-compile.yml (fetch with network, build without). On a green build of the spec bot's
+# pull request, forge/scripts/bot_merge.py merges it when every bump keeps its major version.
+# The kernel (forge/specs/azoth) is Kernel Build's.
 
 on:
   pull_request:
@@ -13,10 +18,14 @@ on:
       - forge/specs/**
       - "!forge/specs/azoth/**"
       - forge/config/rpmmacros
+      - forge/builder/**
+      - flake.nix
+      - flake.lock
       - forge/scripts/build_spec.sh
       - forge/scripts/run_spec_build.sh
-      - forge/scripts/build_changed_specs.sh
       - forge/scripts/fetch_sources.sh
+      - forge/scripts/select_check_specs.py
+      - forge/scripts/builder_image.sh
       - .github/workflows/spec-build-check.yml
 
 permissions:
@@ -28,26 +37,86 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  select:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      builder: ${{ steps.select.outputs.builder }}
+      specs: ${{ steps.select.outputs.specs }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # The merge commit and its first parent, the base: the change is the diff.
+          fetch-depth: 2
+
+      - name: Select the specs and the builder (forge/scripts/select_check_specs.py)
+        id: select
+        run: |
+          set -euo pipefail
+          python3 forge/scripts/select_check_specs.py HEAD^1 "$RUNNER_TEMP/spec-check"
+          echo "builder=$(< "$RUNNER_TEMP/spec-check/builder")" >> "$GITHUB_OUTPUT"
+          echo "specs=$(< "$RUNNER_TEMP/spec-check/specs.json")" >> "$GITHUB_OUTPUT"
+
+  builder:
+    needs: select
+    if: needs.select.outputs.builder == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
+        with:
+          extra_nix_config: "experimental-features = nix-command flakes"
+
+      - name: Build the builder image of the pull request (forge/scripts/builder_image.sh)
+        run: |
+          mkdir -p "$RUNNER_TEMP/spec-check"
+          bash forge/scripts/builder_image.sh build "$RUNNER_TEMP/spec-check/athanor-builder.tar.gz"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: athanor-builder-image
+          path: ${{ runner.temp }}/spec-check/athanor-builder.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+          # A gzip archive already.
+          compression-level: 0
+
   build:
+    needs: [select, builder]
+    # The builder job is skipped when the change leaves the builder's inputs alone.
+    if: >-
+      ${{ !cancelled() && needs.select.result == 'success' && needs.select.outputs.specs != '[]'
+      && (needs.builder.result == 'success' || needs.builder.result == 'skipped') }}
+    name: build (${{ matrix.spec }})
     runs-on: ubuntu-24.04
     timeout-minutes: 180
+    strategy:
+      # Every spec reports its own result: one failure does not cancel the others.
+      fail-fast: false
+      matrix:
+        spec: ${{ fromJSON(needs.select.outputs.specs) }}
     env:
       REGISTRY: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          # The merge commit and its first parent, the base: the changed specs are the diff.
-          fetch-depth: 2
 
-      - name: Build the changed specs (forge/scripts/build_changed_specs.sh)
+      - if: needs.builder.result == 'success'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
+        with:
+          name: athanor-builder-image
+          path: ${{ runner.temp }}/spec-check
+
+      - name: Build ${{ matrix.spec }} (forge/scripts/run_spec_build.sh)
+        env:
+          SPEC: ${{ matrix.spec }}
         run: |
           set -euo pipefail
-          image="${REGISTRY,,}/athanor-builder:latest"
-          bash forge/scripts/retry.sh podman pull "$image"
-          bash forge/scripts/build_changed_specs.sh HEAD^1 "$image"
+          image=$(bash forge/scripts/builder_image.sh resolve "$RUNNER_TEMP/spec-check/athanor-builder.tar.gz" "${REGISTRY,,}/athanor-builder:latest")
+          bash forge/scripts/run_spec_build.sh "$image" "$SPEC"
 
   merge:
-    needs: build
+    needs: [select, build]
     # The spec bot's pull requests only, whatever the build's outcome: forge/scripts/bot_merge.py
     # merges a green one of the bot's shape at its head once the required checks pass, and
     # reports why it leaves any other. The script is the base branch's copy; the workflow
@@ -75,5 +144,6 @@ jobs:
           MERGE_TOKEN: ${{ secrets.KERNEL_BUMP_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
-          BUILD: ${{ needs.build.result }}
+          # A change that selects no spec builds nothing and passes, as the single build job did.
+          BUILD: ${{ needs.select.result == 'success' && needs.select.outputs.specs == '[]' && 'success' || needs.build.result }}
         run: python3 forge/scripts/bot_merge.py spec "$PR" "$SHA" "$BUILD"
