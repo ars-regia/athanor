@@ -6,12 +6,13 @@ paths:
   - "**/*bus-api*/**"
   - "**/*mesh*/**"
   - "**/*cloud-rs/**"
+  - "**/*gatekeeper*/**"
   - "system/confidential_computing/**"
 ---
 
 # Sicurezza — percorsi critici
 
-<!-- I glob sono scritti per FUNZIONE (`*attestation*`, `*bus-api*`, `*mesh*`)
+<!-- I glob sono scritti per FUNZIONE (`*attestation*`, `*bus-api*`, `*mesh*`, `*gatekeeper*`)
      e non per nome di prodotto. La rinomina Ermete -> Athanor del 5 settembre 2026
      aveva gia' spezzato cinque glob su sei scritti con il prefisso vecchio: la
      regola restava nel repository, sembrava configurata, e non si caricava piu'
