@@ -50,22 +50,26 @@ else
 fi
 
 if [[ -n "$DIR" && -d "$DIR" ]]; then
-  # Captured before the hash: a scan that fails (a path dependency that does not exist)
+  # Captured before the hash: an input list that fails (a path dependency that does not exist)
   # must stop here, not leave a partial hash behind.
-  PATH_DEPENDENCIES=""
+  INPUTS=""
   if [[ "$PACKAGE" != "builder" ]]; then
-    PATH_DEPENDENCIES=$(python3 "$(dirname "${BASH_SOURCE[0]}")/dag_orchestrator.py" --path-dependencies "$DIR")
+    INPUTS=$(python3 "$(dirname "${BASH_SOURCE[0]}")/dag_orchestrator.py" --inputs "$PACKAGE")
   fi
   # Hash SHA-256 deterministico dei path relativi e dei contenuti
   CONTENT_HASH=$({
     find "$DIR" -type f -print0 | sort -z | xargs -0 sha256sum
-    # The crates of a package build from their Cargo path dependencies outside the spec
-    # directory, so those sources belong to its hash (one implementation, shared with the
-    # orchestrator: dag_orchestrator.py --path-dependencies).
-    while IFS= read -r dependency; do
-      [[ -n "$dependency" ]] || continue
-      find "$dependency" -type f -not -path '*/target/*' -print0 | sort -z | xargs -0 sha256sum
-    done <<< "$PATH_DEPENDENCIES"
+    # What the build reads besides the spec directory (dag_orchestrator.py --inputs, the one
+    # list the orchestrator and the job share): Cargo path dependencies, declared repo
+    # paths, the workspace manifest and lock, the build scripts, the builder identity.
+    while IFS= read -r input; do
+      [[ -n "$input" ]] || continue
+      if [[ -d "$input" ]]; then
+        find "$input" -type f -not -path '*/target/*' -print0 | sort -z | xargs -0 sha256sum
+      else
+        sha256sum "$input"
+      fi
+    done <<< "$INPUTS"
     if [[ -f "config/rpmmacros" ]]; then
       echo -n "config/rpmmacros"
       cat "config/rpmmacros"

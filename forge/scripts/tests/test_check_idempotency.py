@@ -84,6 +84,21 @@ class PackageHashTest(unittest.TestCase):
         (self.root / "system/unrelated/lib.rs").write_text("// v2\n")
         self.assertEqual(before, self.dock_hash())
 
+    def test_workspace_lock_build_scripts_and_declared_inputs_are_inputs(self):
+        (self.forge / "specs/athanor-dock/dock.spec").write_text(
+            "# repo-input: system/unrelated\nName: athanor-dock\n%build\ncargo build\n"
+        )
+        (self.root / "Cargo.lock").write_text("v1\n")
+        (self.forge / "scripts").mkdir()
+        (self.forge / "scripts/build_spec.sh").write_text("v1\n")
+        before = self.dock_hash()
+        for path in ("Cargo.lock", "forge/scripts/build_spec.sh", "system/unrelated/lib.rs"):
+            original = (self.root / path).read_text()
+            (self.root / path).write_text("changed\n")
+            self.assertNotEqual(before, self.dock_hash(), path)
+            (self.root / path).write_text(original)
+            self.assertEqual(before, self.dock_hash(), path)
+
     def test_the_hash_does_not_depend_on_the_locale(self):
         spec = self.forge / "specs/athanor-dock"
         (spec / "a-b.txt").write_text("1\n")

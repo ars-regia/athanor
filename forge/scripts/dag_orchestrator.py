@@ -86,6 +86,107 @@ def path_dependencies(spec_dir):
     return sorted(found)
 
 
+# Repo files every package build runs, whatever the package: the stages of build_spec.sh and
+# the check an in-place Rust build calls, plus the builder's identity (the Nix flake carries
+# rustc and rpm; forge/builder/ is what Spec Build Check also treats as a builder input).
+# Paths are relative to the forge directory, the working directory of the jobs.
+BUILD_INPUTS = (
+    "scripts/build_spec.sh",
+    "scripts/run_spec_build.sh",
+    "scripts/fetch_sources.sh",
+    "scripts/check_shim_link_order.py",
+    "builder",
+    "../flake.nix",
+    "../flake.lock",
+)
+# What `cargo build` of an in-place spec reads from the workspace root.
+WORKSPACE_INPUTS = ("../Cargo.toml", "../Cargo.lock", "../.cargo/config.toml")
+REPO_ROOTS = ("system", "forge", "docs", "experimental", "supply-chain", "scripts")
+REPO_REFERENCE = re.compile(
+    r"(?<![\w./%{}$-])(?:/forge/)?((?:" + "|".join(REPO_ROOTS) + r")/[^\s\"'`;)\\]*)"
+)
+DECLARATION = re.compile(r"^#\s*repo-input:\s*(\S+)\s*$")
+
+
+def spec_lines(spec_dir):
+    """The lines of the spec files under spec_dir, comments included."""
+    for path in sorted(glob.glob(os.path.join(spec_dir, "*.spec"))):
+        with open(path) as f:
+            yield from f.read().splitlines()
+
+
+def declared_inputs(spec_dir):
+    """The repo paths a spec declares as inputs with `# repo-input: <path>` lines, relative
+    to the repository root."""
+    return sorted(
+        m.group(1).rstrip("/")
+        for m in map(DECLARATION.match, spec_lines(spec_dir))
+        if m
+    )
+
+
+def builds_in_place(spec_dir):
+    """Whether the spec builds the checkout (no Source), as build_spec.sh's in_place does."""
+    return not any(re.match(r"Source\d*:", line) for line in spec_lines(spec_dir))
+
+
+def uses_cargo(spec_dir):
+    return any(re.match(r"\s*cargo\s", line) for line in spec_lines(spec_dir))
+
+
+def repo_relative(path):
+    """path, relative to the forge working directory, as a path relative to the repo root."""
+    return os.path.relpath(os.path.realpath(path), os.path.realpath(".."))
+
+
+def package_inputs(pkg):
+    """Every repo path whose content decides what the build of pkg produces, relative to
+    the forge directory: its spec directory, the path dependencies of its crates, the repo
+    paths the spec declares, the workspace manifest and lock of an in-place cargo build,
+    and the build scripts and builder identity every build shares."""
+    spec_dir = spec_dir_for(pkg)
+    inputs = {spec_dir, *path_dependencies(spec_dir), *filter(os.path.exists, BUILD_INPUTS)}
+    for declared in declared_inputs(spec_dir):
+        target = os.path.join("..", declared)
+        if not os.path.exists(target):
+            sys.exit(f"dag_orchestrator: {spec_dir} declares repo-input {declared}, which does not exist")
+        inputs.add(target)
+    if builds_in_place(spec_dir) and uses_cargo(spec_dir):
+        inputs.update(path for path in WORKSPACE_INPUTS if os.path.exists(path))
+    return sorted(os.path.relpath(p) for p in inputs)
+
+
+def undeclared_repo_references(pkg):
+    """Repo paths the spec text names that none of package_inputs covers. A reference is a
+    repository-rooted path (system/..., forge/..., or /forge/system/... as the old specs
+    spell it) that exists in the tree; it is covered when it lies inside an input or inside
+    the spec's own directory (or is a parent of it, as `forge/specs/%{name}` truncates to). The
+    %description prose is skipped. Generated paths that do not exist are not references.
+    Limits: only literal paths are seen, not ones a script or a shell variable builds, and
+    a declared directory vouches for everything under it."""
+    spec_dir = spec_dir_for(pkg)
+    covered = [repo_relative(p) for p in package_inputs(pkg)]
+    own = repo_relative(spec_dir)
+    missing = set()
+    prose = False
+    for line in spec_lines(spec_dir):
+        if re.match(r"%[a-z]", line):
+            prose = line.startswith("%description")
+        if prose or line.lstrip().startswith("#"):
+            continue
+        for match in REPO_REFERENCE.finditer(line):
+            ref = match.group(1)
+            ref = re.split(r"[*%$]", ref)[0].rstrip("/")
+            if not ref or not os.path.exists(os.path.join("..", ref)):
+                continue
+            if ref == own or ref.startswith(own + "/") or own.startswith(ref + "/") or any(
+                ref == c or ref.startswith(c + "/") for c in covered
+            ):
+                continue
+            missing.add(ref)
+    return sorted(missing)
+
+
 def parse_spec_dependencies(spec_path):
     """Extracts BuildRequires and Requires from a .spec file."""
     build_requires = set()
@@ -385,11 +486,10 @@ def main():
             f.write(f"has_changes={has_changes}\n")
 
 if __name__ == "__main__":
-    if sys.argv[1:2] == ["--path-dependencies"] and len(sys.argv) == 3:
-        # One line per directory, relative to the working directory so that the hash
+    if sys.argv[1:2] == ["--inputs"] and len(sys.argv) == 3:
+        # One path per line, relative to the working directory so that the hash
         # check_idempotency.sh builds from them does not depend on where the checkout is.
-        for directory in path_dependencies(sys.argv[2]):
-            print(os.path.relpath(directory))
+        print("\n".join(package_inputs(sys.argv[2])))
     elif sys.argv[1:] == ["--list-spec-dirs"]:
         spec_dirs = custom_spec_dirs(load_package_manifest())
         if not spec_dirs:
