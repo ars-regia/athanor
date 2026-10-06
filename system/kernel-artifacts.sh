@@ -27,7 +27,8 @@
 #                                       against (the same $REGISTRY resolve writes to the file);
 #                                       no network call, so a caller can compose an image
 #                                       reference before resolve has ever run
-#   digest REF                          the digest of REF, empty when the tag does not exist
+#   digest REF                          the digest of REF, empty when the tag does not exist or
+#                                       the registry denies its package (never published)
 #   signed REF kernel|modules           signed or unsigned, by the workflow that publishes it
 #   predicates REF modules              the custom predicates of REF, one JSON per line, or
 #                                       unverified
