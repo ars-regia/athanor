@@ -101,8 +101,16 @@ package, so the levels order the jobs but no build consumes the output of anothe
 The flatpak job only probes Flathub for the application's metadata; it builds nothing.
 
 Pull requests do not run the DAG. Spec Build Check (`spec-build-check.yml`) builds each
-changed spec with `forge/scripts/build_changed_specs.sh`, through the same
-`run_spec_build.sh`, and publishes nothing.
+changed spec in its own job, through the same `run_spec_build.sh`, and publishes nothing.
+`forge/scripts/select_check_specs.py` selects the specs: a change to what every spec build
+goes through (the builder's inputs `flake.nix`, `flake.lock` and `forge/builder/`,
+`forge/config/rpmmacros`, `build_spec.sh`, `run_spec_build.sh`, `fetch_sources.sh`)
+rebuilds every spec of the DAG (`dag_orchestrator.py --list-spec-dirs`). Only the DAG's specs
+are built: any other changed directory (the kernel, Nix-built packages, unlisted or deleted
+specs) is named in the log and skipped. A change to the
+builder's inputs runs in a builder image built from the pull request
+(`forge/scripts/builder_image.sh`), handed to the build jobs as a one-day workflow
+artifact and never pushed; any other change runs in the published `athanor-builder:latest`.
 
 ## 6. Tier repositories and the system image
 
@@ -138,7 +146,7 @@ the kernel artifact jobs (doc_build_ordering.md), `dag-compile` (section 5) and
 | Task | Command |
 |---|---|
 | Build one spec as CI does | `bash forge/scripts/run_spec_build.sh <builder image> specs/<package>` (RPMs in `forge/RPMS/`) |
-| Build every spec changed since a base | `bash forge/scripts/build_changed_specs.sh <base> <builder image>` |
+| Build what Spec Build Check builds for the change since a base, one spec after the other | `bash forge/scripts/build_changed_specs.sh <base> <builder image>` |
 | A system image with unmerged RPMs, for the development VM | `scripts/devvm/local-image.sh` |
 | The system image alone | `system/build-image.sh` |
 | The system image without CI | `forge/scripts/build-offline.sh [image] [tag]` |
