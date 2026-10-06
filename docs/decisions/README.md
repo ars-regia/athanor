@@ -110,9 +110,9 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-5 | 0040 | [Security-class updates apply at the next shutdown](0040-security-updates-at-next-shutdown.md) | accepted | update |
 | A2-6 | 0041 | [Trusted path built on cosmic-comp PR #1441](0041-trusted-path-on-cosmic-comp.md) | accepted | security, shell |
 | A2-7 | 0042 | [SystemPrompter reuses the oo7 secret exchange](0042-system-prompter-reuses-oo7.md) | accepted | security, shell |
-| A2-8 | 0043 | [bootc in two steps (D6 closed)](0043-bootc-in-two-steps.md) | accepted | update, kernel, security |
+| A2-8 | 0043 | [bootc in two steps (D6 closed)](0043-bootc-in-two-steps.md) | amended by ADR-0076 | update, kernel, security |
 | A2-9 | 0044 | [Three-tier threat model](0044-three-tier-threat-model.md) | accepted | security, docs |
-| A2-10 | 0045 | [Cleanup of dead packages, documents and units](0045-cleanup-of-dead-components.md) | accepted | packages, docs |
+| A2-10 | 0045 | [Cleanup of dead packages, documents and units](0045-cleanup-of-dead-components.md) | amended by ADR-0073 | packages, docs |
 | A2-11 | 0046 | [DNS model: strict DNS over TLS](0046-dns-strict-dot.md) | accepted | network, security |
 | A2-12 | 0047 | [Fleet identity and transport](0047-fleet-transport-and-identity.md) | accepted | fleet, network |
 | A2-10b | 0048 | [Tetragon made real](0048-tetragon-made-real.md) | accepted | security, kernel |
@@ -128,7 +128,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-21 | 0058 | [Network privacy remainder of #143](0058-network-privacy-remainder.md) | accepted | network, security |
 | A2-22 | 0059 | [Installer for 1.0: Anaconda web UI](0059-installer-anaconda-web-ui.md) | accepted | installer |
 | A2-23 | 0060 | [authselect without nullok](0060-authselect-without-nullok.md) | accepted | security |
-| A2-24 | 0061 | [Desktop minor decisions](0061-desktop-minor-decisions.md) | accepted | shell |
+| A2-24 | 0061 | [Desktop minor decisions](0061-desktop-minor-decisions.md) | amended by ADR-0077 | shell |
 | A2-25 | 0062 | [Governance targets confirmed](0062-governance-targets-confirmed.md) | accepted | security, process |
 | A2-26 | 0063 | [Update policy](0063-update-policy.md) | accepted | update |
 | A2-27 | 0064 | [Signing approvals and MOK enrolment](0064-signing-approvals-and-mok-enrolment.md) | amended by A2-35 | signing, installer |
@@ -138,5 +138,10 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-31 | 0068 | [Session memory budget and prompter timing](0068-session-budget-and-prompter-timing.md) | accepted | session, security |
 | A2-32 | 0069 | [Tetragon specification decisions](0069-tetragon-policy-decisions.md) | accepted | security, kernel |
 | A2-33 | 0070 | [Report-a-problem packaging](0070-report-a-problem-packaging.md) | accepted | shell, ci |
-| A2-34 | 0071 | [Documentation and team model](0071-documentation-and-team-model.md) | accepted | docs, process, ci |
+| A2-34 | 0071 | [Documentation and team model](0071-documentation-and-team-model.md) | amended by ADR-0074 | docs, process, ci |
 | A2-35 | 0072 | [MOK enrolment page in the installer](0072-mok-enrolment-in-installer.md) | accepted | signing, installer |
+| ADR-0073 | 0073 | [Retire components without a product role](0073-component-verdicts.md) | accepted | platform, security, build-ci |
+| ADR-0074 | 0074 | [Agent and contributor model](0074-agent-and-contributor-model.md) | accepted | docs, process |
+| ADR-0075 | 0075 | [Engineering gates](0075-engineering-gates.md) | accepted | build-ci, security |
+| ADR-0076 | 0076 | [Platform scope for 1.0](0076-platform-scope-for-1-0.md) | accepted | platform, security, build-ci, docs |
+| ADR-0077 | 0077 | [Desktop decisions from Audit 3](0077-desktop-decisions.md) | accepted | shell, apps, security |
