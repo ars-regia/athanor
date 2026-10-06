@@ -16,9 +16,9 @@
   [doc_ci.md](doc_ci.md) (CI1-CI24), the secrets inventory
   [secrets.md](../operations/secrets.md), the settings record
   [github-settings.md](../operations/github-settings.md).
-- **Binding decisions:** [ADR-0078](../decisions/0078-pipeline-architecture.md) (this
-  architecture and the two signing environments), [ADR-0079](../decisions/0079-cra-compliance-posture.md)
-  (CRA posture, support period, archive), [ADR-0080](../decisions/0080-update-control.md)
+- **Binding decisions:** [ADR-0080](../decisions/0080-pipeline-architecture.md) (this
+  architecture and the two signing environments), [ADR-0081](../decisions/0081-cra-compliance-posture.md)
+  (CRA posture, support period, archive), [ADR-0082](../decisions/0082-update-control.md)
   (update control), [ADR-0075](../decisions/0075-engineering-gates.md) (`just check`),
   [ADR-0076](../decisions/0076-platform-scope-for-1-0.md), [A2-4](../decisions/0039-delivery-repairs-before-1-0.md),
   [A2-27](../decisions/0064-signing-approvals-and-mok-enrolment.md).
@@ -43,7 +43,7 @@ against convenience.
 | 2  | Every claim about an artifact is an **in-toto attestation** bound to its digest; the acceptance outcome is a **Verification Summary Attestation** (VSA).  | in-toto attestation framework, https://github.com/in-toto/attestation; SLSA VSA, https://slsa.dev/spec/v1.0/verification_summary                                                                                                                                                                                          |
 | 3  | The secure-development practices are traceable to **NIST SSDF** (SP 800-218): PO.3.2, PO.5.1, PS.2, PS.3, PW.4, PW.7, PW.8, RV.1.1.                     | https://csrc.nist.gov/pubs/sp/800/218/final                                                                                                                                                                                                                                                                                     |
 | 4  | Repository and workflow hygiene meet the **OpenSSF Scorecard** checks (Token-Permissions, Pinned-Dependencies, Branch-Protection, Code-Review, Dangerous-Workflow, SAST, Signed-Releases, Vulnerabilities, Security-Policy). | https://github.com/ossf/scorecard/blob/main/docs/checks.md; GitHub hardening guide, https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions |
-| 5  | The product meets **CRA Annex I** Parts I and II as a manufacturer would, with the obligations that apply from 2027-12-11 (ADR-0079).                    | Regulation (EU) 2024/2847, https://eur-lex.europa.eu/eli/reg/2024/2847/oj                                                                                                                                                                                                                                                       |
+| 5  | The product meets **CRA Annex I** Parts I and II as a manufacturer would, with the obligations that apply from 2027-12-11 (ADR-0081).                    | Regulation (EU) 2024/2847, https://eur-lex.europa.eu/eli/reg/2024/2847/oj                                                                                                                                                                                                                                                       |
 | 6  | **GitHub as glue.** Logic lives in scripts under the repository; a workflow checks out, calls them and uploads their output. A `run:` block holds at most about five lines. | Standing rule of 2026-09-10 (CLAUDE.md)                                                                                                                                                                                                                                                                                         |
 | 7  | **One gate, run locally and in CI.** `just check` is the gate a contributor runs and the gate a pull request must pass (ADR-0075).                       | SSDF PW.7, PW.8                                                                                                                                                                                                                                                                                                                 |
 | 8  | **File contracts between stages.** Stages exchange typed files in a known directory, never only `$GITHUB_OUTPUT` or an artifact name.                   | Standing rule of 2026-09-10                                                                                                                                                                                                                                                                                                     |
@@ -62,11 +62,11 @@ These are the maintainer's, and this document does not reopen them.
    `verify.py workflows` enforces it. `MOK_PRIVATE_KEY` is retired. Agents later push with
    their own GitHub App identity, so that `prevent_self_review` can be switched on.
 2. **No compiler cache for the kernel** (PR #250).
-3. **CRA: comply now, at manufacturer level** (ADR-0079). Support period of five years for
+3. **CRA: comply now, at manufacturer level** (ADR-0081). Support period of five years for
    the product line, with the Fedora base rebased forward and the end date published.
    Digests promoted to `:stable` are never deleted. A signed evidence bundle per release is
    attached to a GitHub Release, with no off-GitHub copy for now. Updates are automatic by
-   default, with a time-limited postpone and an opt-out with a warning (ADR-0080, amends
+   default, with a time-limited postpone and an opt-out with a warning (ADR-0082, amends
    A2-26 and A2-5). Full wipe follows 1.0; ADR-0076 stands and the gap is documented.
 4. **Product priorities (2026-10-06):** update delivery first; the pipeline is the
    product; x86-64-v3 only.
@@ -383,7 +383,7 @@ kernel), so there is one `latest` rule, not four; `:stable`, `:stable-previous`,
 `:stable-<YYYYMMDD>` only by `promote.sh`. `verify.py workflows` enforces the writer of
 each (UD1 acceptance).
 
-Retention, by ADR-0079 (this amends the 90-day figure of UT10 and UD8):
+Retention, by ADR-0081 (this amends the 90-day figure of UT10 and UD8):
 
 | What                                                                 | Kept                                                         |
 | -------------------------------------------------------------------- | ------------------------------------------------------------ |
@@ -398,7 +398,7 @@ The janitor (`forge/scripts/clean_ghcr.sh`, weekly in `maintenance.yml`) always 
 dry run first and refuses to delete anything the table keeps.
 
 **The support period** is five years for the product line from the date it is placed on
-the market, with the Fedora base rebased forward within the line (ADR-0079, amends
+the market, with the Fedora base rebased forward within the line (ADR-0081, amends
 A2-17). The end date is published in `SECURITY.md`, in the release notes and as
 `SUPPORT_END` in `/usr/lib/os-release`.
 
@@ -407,7 +407,7 @@ A2-17). The end date is published in `SECURITY.md`, in the release notes and as
 Items marked [LAWYER] need legal confirmation before they are relied on; the CRA review
 of 2026-10-07 found that Athanor, distributed free of charge by a natural person, is
 probably outside the CRA today [LAWYER], and the maintainer chose to meet the
-manufacturer's obligations anyway (ADR-0079).
+manufacturer's obligations anyway (ADR-0081).
 
 **PL36. Classification is recorded.** An operating system is an important product of
 class I (Annex III, item 11). Each variant is a product. The conformity route for free
@@ -442,13 +442,13 @@ history and the GitHub Releases provide.
 
 **PL41. Security updates are separate and free.** The security class of UT13 is the CRA's
 security update (Art. 13(8), (9); Annex I Part II(8)); it is never bundled behind a
-feature confirmation, and update control follows ADR-0080: automatic by default, a
+feature confirmation, and update control follows ADR-0082: automatic by default, a
 postpone limited in time, an opt-out in Settings with a warning (Annex I Part I(2)(c)).
 
 **PL42. The evidence bundle.** Each promotion publishes a GitHub Release named after the
 version (UT9), with the SBOMs, provenance, VSA, scan report, VEX, `promotion.json` and
 the acceptance evidence, plus a `bundle.sha256` file signed in `signing-images` by the
-signing step of the release it belongs to. ADR-0079 accepts GitHub as the only store for
+signing step of the release it belongs to. ADR-0081 accepts GitHub as the only store for
 now.
 
 Known gaps, documented in `docs/compliance/` rather than hidden: full wipe (LUKS
@@ -585,7 +585,7 @@ hand-copied.
 | slsa-github-generator                         | `actions/attest-build-provenance` in reusable workflows reaches Build L3 with a maintained action                                                                         |
 | A compiler cache for the kernel               | decided against (PR #250)                                                                                                                                                |
 | `paths:` filters on required workflows        | a filtered required workflow stays pending; PL3's change detection replaces them                                                                                         |
-| An evidence copy outside GitHub               | ADR-0079: GitHub Releases are the archive for now; revisited when the support period starts                                                                              |
+| An evidence copy outside GitHub               | ADR-0081: GitHub Releases are the archive for now; revisited when the support period starts                                                                              |
 | Signing RPMs                                  | RPMs reach a machine only inside the signed image, whose tier digests are verified (UD44, decision 6 of doc_update_delivery.md)                                          |
 
 ## 12. The plan in blocks
@@ -610,7 +610,7 @@ step only the maintainer can take.
 | | **[M][LAWYER]** e-mail channel, coordinating CSIRT, the declaration template | | | | |
 | **PB8** | Scanning, VEX, advisories | `scripts/vuln/scan.sh`, `security/vex/`, CSAF provider on Pages, CodeQL in `maintenance.yml` | a candidate with an unresolved critical finding is refused by `policy_check.py`; the daily rescan of `:stable` runs green or alerts; one CSAF document validates against the CSAF 2.0 schema | PB5 | 3 (estimate) |
 | **PB9** | Retention and the evidence archive | `forge/scripts/clean_ghcr.sh`, `promote.yml` (GitHub Release), UT10 and UD8 text | the janitor dry run deletes nothing the table of section 5 keeps; the first promotion has a GitHub Release with the bundle and a verifying `bundle.sha256` signature | PB5 | 2 (estimate) |
-| **PB10** | Update control (ADR-0080) | `athanor-update`, Settings, doc_update_trust.md (UT13) | dev-VM harness: a security update applies at the next shutdown by default; postpone holds it until its limit, then it applies; the opt-out stops automatic application, shows the warning, and still notifies | PB5 | 3 (estimate) |
+| **PB10** | Update control (ADR-0082) | `athanor-update`, Settings, doc_update_trust.md (UT13) | dev-VM harness: a security update applies at the next shutdown by default; postpone holds it until its limit, then it applies; the opt-out stops automatic application, shows the warning, and still notifies | PB5 | 3 (estimate) |
 | **PB11** | Performance | `pr.yml` selections, the bar job, timeouts, concurrency, caches, NVIDIA modules once | the section 7.2 targets measured by `scripts/ci/run_stats.py` over five runs per path | PB1 | 3 (estimate) |
 | **PB12** | Topology consolidation | the 24 workflows to the 12 of section 3, `bots.yml`, `maintenance.yml`, `dag_orchestrator.py` (PL48), doc_ci.md, `docs/operations/ci-runbook.md` | `ls .github/workflows` matches section 3; `python3 scripts/verify.py` green with the checks of section 10; a release run with a dirty package at graph depth 3 or more builds it in the single matrix | PB3, PB11 | 5 (estimate) |
 
@@ -623,7 +623,7 @@ step only the maintainer can take.
 | PQ3  | Where do kernel builds of pull requests run? | Same-repository pull requests on the ephemeral self-hosted guest with a pull-request-only cache volume; forks never on self-hosted. |
 | PQ4  | Who signs the security class of a release? Today a security-class promotion goes through `promote.sh` in a signing environment (doc_update_delivery.md, decision 3), which can make three approvals in a cycle. | Set the class when the release is dispatched with its advisory ids, and sign it in `signing-images` with the images; `promote.yml` then holds no key. |
 | PQ5  | Review on the maintainer's own pull requests | Maintainer as a recorded ruleset bypass actor; agent and bot pull requests require a code-owner review; `prevent_self_review` on once agents push as their App. |
-| PQ6  | Length of the postpone (ADR-0080) | One postpone per update, up to seven days, then the update applies at the next shutdown. |
+| PQ6  | Length of the postpone (ADR-0082) | One postpone per update, up to seven days, then the update applies at the next shutdown. |
 | PQ7  | What is the "product line" whose five years run, and from when? | Each major version (1.x), from the date 1.0 is placed on the market; `SUPPORT_END` set from it. |
 | PQ8  | The CVD contact besides GitHub private reporting | A project e-mail alias owned by the maintainer, named in `SECURITY.md` [LAWYER for the CSIRT]. |
 | PQ9  | Are the SBOMs public? | Yes, in the evidence bundle: the product is open source and publication costs nothing. |
@@ -637,6 +637,6 @@ step only the maintainer can take.
   become generated in PB12.
 - doc_update_delivery.md: UD8's 90-day figure and UT10 follow section 5; UD5's promotion
   gains the policy check of PL30.
-- doc_update_trust.md: UT13 follows ADR-0080 (postpone and opt-out).
+- doc_update_trust.md: UT13 follows ADR-0082 (postpone and opt-out).
 - `docs/operations/secrets.md`: the two environments and the App replace the personal
   tokens and `signing`.

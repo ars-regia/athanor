@@ -2,7 +2,7 @@
 id: A2-27
 title: "Signing approvals and MOK enrolment"
 date: 2026-10-06
-status: amended by A2-35, ADR-0078
+status: amended by A2-35, ADR-0080
 issues: [131, 145]
 areas: [signing, installer]
 ---

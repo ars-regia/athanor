@@ -1,5 +1,5 @@
 ---
-id: ADR-0078
+id: ADR-0080
 title: "Pipeline architecture"
 date: 2026-10-07
 status: accepted
@@ -7,7 +7,7 @@ issues: []
 areas: [build, signing, security]
 ---
 
-# 0078. Pipeline architecture
+# 0080. Pipeline architecture
 
 ## Context
 

@@ -1,5 +1,5 @@
 ---
-id: ADR-0079
+id: ADR-0081
 title: "CRA compliance posture"
 date: 2026-10-07
 status: accepted
@@ -7,7 +7,7 @@ issues: []
 areas: [security, update, product]
 ---
 
-# 0079. CRA compliance posture
+# 0081. CRA compliance posture
 
 ## Context
 

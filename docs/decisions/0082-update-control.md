@@ -1,5 +1,5 @@
 ---
-id: ADR-0080
+id: ADR-0082
 title: "Update control: postpone and opt-out"
 date: 2026-10-07
 status: accepted
@@ -7,7 +7,7 @@ issues: []
 areas: [update, security]
 ---
 
-# 0080. Update control: postpone and opt-out
+# 0082. Update control: postpone and opt-out
 
 ## Context
 
