@@ -56,6 +56,13 @@ if [[ -n "$DIR" && -d "$DIR" ]]; then
   if [[ "$PACKAGE" != "builder" ]]; then
     INPUTS=$(python3 "$(dirname "${BASH_SOURCE[0]}")/dag_orchestrator.py" --inputs "$PACKAGE")
   fi
+  # The one thing a package build takes from packages.json is where the package is listed
+  # (its tier): not the other packages' entries, which would rebuild every package on any
+  # edit, and not at all for the builder (UD42).
+  ENTRY=""
+  if [[ "$PACKAGE" != "builder" && -f "config/packages.json" ]]; then
+    ENTRY=$(jq -c --arg p "$PACKAGE" '[to_entries[] | select((.value | type) == "array" and (.value | index($p) != null)) | .key]' config/packages.json)
+  fi
   # Hash SHA-256 deterministico dei path relativi e dei contenuti
   CONTENT_HASH=$({
     find "$DIR" -type f -print0 | sort -z | xargs -0 sha256sum
@@ -82,11 +89,8 @@ if [[ -n "$DIR" && -d "$DIR" ]]; then
       echo -n "builder/rpmfusion-custom.repo"
       cat "builder/rpmfusion-custom.repo"
     fi
-    if [[ "$PACKAGE" != "builder" && -f "config/packages.json" ]]; then
-      # Not part of the builder's hash: the image is built by flake.nix, which never reads
-      # the package lists, so editing them must not rebuild it (UD42).
-      echo -n "config/packages.json"
-      cat "config/packages.json"
+    if [[ -n "$ENTRY" ]]; then
+      echo -n "packages.json:${ENTRY}"
     fi
     if [[ "$PACKAGE" == "builder" ]]; then
       # L'immagine builder è definita dal flake: senza queste righe una modifica a

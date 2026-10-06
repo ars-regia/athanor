@@ -1,6 +1,7 @@
 """UD42: the builder hash covers the builder's inputs only
 (python3 -B -m unittest discover -s forge/scripts/tests -v)."""
 
+import json
 import os
 import pathlib
 import shutil
@@ -98,6 +99,21 @@ class PackageHashTest(unittest.TestCase):
             self.assertNotEqual(before, self.dock_hash(), path)
             (self.root / path).write_text(original)
             self.assertEqual(before, self.dock_hash(), path)
+
+    def test_only_the_packages_own_packages_json_entry_is_an_input(self):
+        packages = self.forge / "config/packages.json"
+        packages.write_text(json.dumps(
+            {"custom_packages": ["dock"], "custom_tier1": ["dock"], "upstream_cli": ["bat"]}
+        ))
+        before = self.dock_hash()
+        packages.write_text(json.dumps(
+            {"custom_packages": ["dock"], "custom_tier1": ["dock"], "upstream_cli": ["bat", "fd"]}
+        ))
+        self.assertEqual(before, self.dock_hash())
+        packages.write_text(json.dumps(
+            {"custom_packages": ["dock"], "custom_tier2": ["dock"], "upstream_cli": ["bat"]}
+        ))
+        self.assertNotEqual(before, self.dock_hash())
 
     def test_the_hash_does_not_depend_on_the_locale(self):
         spec = self.forge / "specs/athanor-dock"

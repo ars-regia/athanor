@@ -78,12 +78,15 @@ package, so the levels order the jobs but no build consumes the output of anothe
 
 `call-dag-compile.yml` runs one matrix job per package and level:
 
-1. **Idempotency.** `check_idempotency.sh` hashes the spec directory, `config/rpmmacros`
-   and `config/packages.json`, and asks the registry whether
-   `athanor-forge-<package>:hash-<hash>` exists. If it does, the job stops there. The hash also covers the Cargo path dependencies of the
-   package's crates (`dag_orchestrator.py --path-dependencies`), so a change confined to a
-   shared crate under `system/` rebuilds its consumers, and the registry is read through
-   `registry_probe.sh` only.
+1. **Idempotency.** `check_idempotency.sh` hashes the spec directory, `config/rpmmacros`,
+   the package's entry in `config/packages.json` (the lists that name it) and every other
+   input `dag_orchestrator.py --inputs` reports: the Cargo path dependencies of its crates,
+   the repo paths the spec declares with `# repo-input: <path>` (a unit test fails when a
+   spec names a repo path it did not declare; it sees literal paths only), the workspace
+   `Cargo.toml`, `Cargo.lock` and `.cargo/config.toml` for an in-place cargo build, the
+   build scripts and the builder identity (`flake.nix`, `flake.lock`, `forge/builder/`). It
+   asks the registry whether `athanor-forge-<package>:hash-<hash>` exists. If it does, the
+   job stops there.
 2. **Build.** `forge/scripts/run_spec_build.sh` runs `build_spec.sh` twice in the builder
    image, sharing its home directory through a podman volume. The `fetch` stage has the
    network: it downloads the `Source` files and verifies them against
