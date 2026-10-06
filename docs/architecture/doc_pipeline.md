@@ -362,10 +362,12 @@ the rollback and freeze protection of TUF without a TUF repository (section 11).
 
 ### 4.9 Install path and machines
 
-**PL32. The ISO is signed and names its image by digest.** The `SHA256SUMS` of every ISO is
-signed in `signing-images` (PQ2) and published beside it; the kickstart installs the
-promoted digest through the signed transport (UD2), and the installer carries the policy
-of UT3 (UD22).
+**PL32. The ISO is signed and names its image by digest.** The ISO is built after the
+images are signed, so its `SHA256SUMS` is signed keylessly (Sigstore) by the stage that
+built it, with build provenance beside it, and published with the ISO: no key and no
+approval, and a user verifies it with `cosign verify-blob` against that exact workflow
+identity (PQ2). The kickstart installs the promoted digest through the signed transport
+(UD2), and the installer carries the policy of UT3 (UD22).
 
 **PL33. Every machine verifies before it switches** (UD11, UD23): signature through the
 shipped policy, and from 1.0 the promotion attestation of PL31.
@@ -447,9 +449,10 @@ postpone limited in time, an opt-out in Settings with a warning (Annex I Part I(
 
 **PL42. The evidence bundle.** Each promotion publishes a GitHub Release named after the
 version (UT9), with the SBOMs, provenance, VSA, scan report, VEX, `promotion.json` and
-the acceptance evidence, plus a `bundle.sha256` file signed in `signing-images` by the
-signing step of the release it belongs to. ADR-0081 accepts GitHub as the only store for
-now.
+the acceptance evidence, plus a `bundle.sha256` file that `promote.yml` signs keylessly (Sigstore, the workflow
+identity), since the bundle exists only at promotion, long after the release's signing
+jobs ended; promotion therefore holds no key. ADR-0081 accepts GitHub as the only store
+for now.
 
 Known gaps, documented in `docs/compliance/` rather than hidden: full wipe (LUKS
 crypto-erase) after 1.0 (ADR-0076), the harmonised standards still in draft (ETSI EN
@@ -619,7 +622,7 @@ step only the maintainer can take.
 | #    | Question | Recommendation |
 | ---- | -------- | -------------- |
 | PQ1  | Does `main` keep a release role, now that `iso-v0` is the default branch? | Keep it protected by the same ruleset and frozen, since D43 allows it to deploy; decide its future with the 1.0 branch model. |
-| PQ2  | How is the ISO signed? | Sign `SHA256SUMS` with the image cosign key in the `signing-images` job: no extra approval, offline verification with the published key. |
+| PQ2  | How is the ISO signed? | Keylessly, by the stage that builds it (PL32): the ISO is built after the images are signed, so signing it with the cosign key would need a second `signing-images` job and a third approval. A key-based signature for offline verification is reconsidered if users ask for it. |
 | PQ3  | Where do kernel builds of pull requests run? | Same-repository pull requests on the ephemeral self-hosted guest with a pull-request-only cache volume; forks never on self-hosted. |
 | PQ4  | Who signs the security class of a release? Today a security-class promotion goes through `promote.sh` in a signing environment (doc_update_delivery.md, decision 3), which can make three approvals in a cycle. | Set the class when the release is dispatched with its advisory ids, and sign it in `signing-images` with the images; `promote.yml` then holds no key. |
 | PQ5  | Review on the maintainer's own pull requests | Maintainer as a recorded ruleset bypass actor; agent and bot pull requests require a code-owner review; `prevent_self_review` on once agents push as their App. |
