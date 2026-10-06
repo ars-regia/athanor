@@ -93,7 +93,7 @@ Since then the files have moved ahead of GitHub (2026-10-07, ADR-0064): the two 
 | Only `iso-v0` is protected: required check `Kernel gate` (not strict), no review, `enforce_admins` off, force push and deletion off | `branch-protection.json` (now also `main`, section 7) |
 | No repository ruleset | `rulesets.json` |
 | Environment `signing`: reviewer `hr-mes`, branches `iso-v0` and `main`, admin bypass on, four secrets | `environments.json` until 2026-10-07 (now section 7) |
-| Environment `github-pages`: branches `gh-pages` and `main` | `environments.json` |
+| Environment `github-pages`: branches `gh-pages` and `main`; no workflow deploys to it since the DNF channel was removed (ADR-0076, decision 2) | `environments.json` |
 | Environment `delete`: no rule, no secret | `environments.json` |
 | Pages: legacy build from `main:/docs`; `gh api repos/ars-regia/athanor/pages` reports `"status": "errored"` (status is volatile, not stored) | `pages.json` |
 | Actions: all actions allowed, SHA pinning not required, default token read-only, Actions cannot approve pull requests, approval required for all external contributors | `actions.json` |
@@ -107,7 +107,7 @@ Each one is a change to a file followed by `apply`; none has been made.
 | Description `ermete-os` | Set the Athanor description in `repository.json` |
 | Dependabot alerts off | Set `vulnerability_alerts` to `true` |
 | Environment `delete` has no rule and no secret, and no workflow names it (`grep -rn "environment:" .github/workflows` finds only `signing-kernel` and `signing-images`) | Delete it by hand and re-export |
-| Pages builds `main:/docs` and errors, while [call-system-image.yml](../../.github/workflows/call-system-image.yml) line 180 publishes to a `gh-pages` branch | Decide the Pages source (`gh-pages`, or off) and set `pages.json` |
+| Pages builds `main:/docs` and errors, and nothing publishes to the `gh-pages` branch since the DNF channel was removed (ADR-0076, decision 2) | Turn Pages off in `pages.json`, then delete the `gh-pages` branch and the `github-pages` environment by hand and re-export |
 | `enforce_admins` is off on `iso-v0` and `main`: the admin may push past the required check | Decide whether the single admin should be bound by the branch protection, as the signing environments already bind them (section 7) |
 | No scheduled drift check | A workflow running `diff` needs an admin token as a secret; decide whether drift detection is worth that token |
 

@@ -217,8 +217,5 @@ jobs:
     uses: ./.github/workflows/call-system-image.yml
     with:
       builder_content_hash: ${{ needs.build-builder.outputs.content_hash }}
-    # Only the repository secrets build-repo reads. COSIGN_* are not passed: the job that
-    # signs reads them from its own `environment:` (D43, UT2).
-    secrets:
-      RPM_GPG_KEY: ${{ secrets.RPM_GPG_KEY }}
-      RPM_GPG_PASSPHRASE: ${{ secrets.RPM_GPG_PASSPHRASE }}
+    # No secret is passed: the job that signs reads COSIGN_* from its own `environment:`
+    # (D43, UT2).

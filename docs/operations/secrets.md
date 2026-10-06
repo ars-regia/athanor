@@ -4,8 +4,8 @@
 | --- | --- |
 | Purpose | Inventory of every secret, variable and environment the pipeline uses, how to make each one again from zero, and who holds the keys |
 | Owner | Maintainer |
-| Status | Revision 1, 2026-10-06; section 4 added 2026-10-07. Sections 1, 3 and 4 are facts. Section 2 and every line marked _(Proposal)_ await the maintainer |
-| Depends on | `doc_kernel_build.md` section 6 (key design), `doc_kernel_profile.md` D43 and section 9 (custody, key table), `doc_update_trust.md` UT2, UT3 (image key), decisions A2-27, A2-33, A2-35 |
+| Status | Revision 1, 2026-10-06; section 4 added 2026-10-07; SEC5, SEC6 and RL2 removed on 2026-10-07 with RPM signing (ADR-0076, decision 2). Sections 1, 3 and 4 are facts. Section 2 and every line marked _(Proposal)_ await the maintainer |
+| Depends on | `doc_kernel_build.md` section 6 (key design), `doc_kernel_profile.md` D43 and section 9 (custody, key table), `doc_update_trust.md` UT2, UT3 (image key), decisions A2-27, A2-35, ADR-0076 |
 | Defines | SEC1-SEC12 (secrets), VAR1-VAR5 (variables), ENV1-ENV5 (environments), KC1-KC6 (custody), RL1-RL8 (recovery) |
 | Facts checked with | `git grep` on `origin/iso-v0` at `bd1f0e4a`; `gh secret list`, `gh variable list`, `gh api repos/ars-regia/athanor/environments` and its `secrets`, `variables` and `deployment-branch-policies` endpoints, names only; the branches of open PRs #115 (`sign-vmlinuz`), #180 (`a2/delivery`) and #185 (`a2/rpm-sign-job`) |
 
@@ -24,8 +24,6 @@ Workflow references are `file:line` under `.github/workflows/` at `bd1f0e4a`.
 | SEC2 | `MODULE_SIGNING_KEY` | environment `signing-kernel` | X.509 private key, RSA 4096, PEM, unencrypted | `nvidia-kmod.yml` `sign` (:130, environment :139) through `forge/specs/azoth/signer/run.sh sign`, as SEC1; `sign-kernel.sh modules` signs the NVIDIA modules | `forge/specs/azoth/keys/modules/athanor-modules.pem`, compiled into Azoth (`kernel-local:42`, `CONFIG_SYSTEM_TRUSTED_KEYS`) |
 | SEC3 | `COSIGN_PRIVATE_KEY` | environment `signing-images` | cosign key pair, ECDSA P-256, private half encrypted with SEC4 | `call-system-image.yml` `sign-system-images` (:427, environment :433) through `system/sign-images.sh:26-41`; the key-based image signature of UT2 | `system/keys/athanor-image-1.pub`, rendered into the image policy (UT3) |
 | SEC4 | `COSIGN_PASSWORD` | environment `signing-images` | passphrase of SEC3 | as SEC3 (:453) | none |
-| SEC5 | `RPM_GPG_KEY` | **missing on GitHub** | OpenPGP secret key, ASCII-armoured, sign-only | `call-system-image.yml` `build-repo` (:31, no environment; :58, :157). PR #185 moves it to the sign-only job `sign-repo` (`forge/scripts/tier_repos.sh sign`), decision A2-33; that branch predates the split and names `signing`, which becomes `signing-images` so a release cycle keeps at most two approvals (ADR-0064) | none committed. On PR #185 `tier_repos.sh:97` exports it at signing time to `RPM-GPG-KEY-athanor`, published with the tier repositories (`:167-168`) |
-| SEC6 | `RPM_GPG_PASSPHRASE` | **missing on GitHub** | passphrase of SEC5, optional | as SEC5 (:59, :158) | none |
 | SEC7 | `KERNEL_BUMP_TOKEN` | repository | personal access token | `kernel-bump.yml` `pr` (:203, :207) and `system` (:263, :309); `cosmic-comp-bump.yml` `bump` (:33, :37); `nix-registry-bump.yml` `bump` (:46); as `MERGE_TOKEN` in `spec-build-check.yml` `merge` (:144) and `system-image-check.yml` `merge` (:152) for `forge/scripts/bot_merge.py`. A token, not `GITHUB_TOKEN`, because pull requests opened with `GITHUB_TOKEN` start no checks (`doc_kernel_build.md:447`) | none |
 | SEC8 | `SPECS_UPDATE_TOKEN` | repository | personal access token | `forge-util-update-specs.yml` `update-specs` (:32, :45, :62): pushes `chore/update-specs-zero-trust` and opens its pull request | none |
 | SEC9 | `FORGE_PAT` | repository | personal access token (classic) | `forge-ghcr-cleanup.yml` `cleanup-janitor` (:32, :39) through `forge/scripts/clean_ghcr.sh`, which deletes container package versions | none |
@@ -52,7 +50,7 @@ No repository variable is set (`gh variable list` is empty), so every default be
 | ENV1 | `signing-kernel` | SEC1, SEC2 | required reviewer `hr-mes`, self-review allowed (`prevent_self_review` false, see `github-settings.md` section 7), no administrator bypass; deployment branches `iso-v0` and `main`, both protected (required check `Kernel gate`, no force push, no deletion) | `nvidia-kmod.yml:139` (`sign`, the sign-kernel job). `scripts/verify.py workflows` fails a signing secret outside a job of the environment that holds it in `environments.json`, a signing job that builds or uses an action other than checkout and artifact transfer, a step that hands a signing secret to anything but a sign script, and a signing environment with administrator bypass or a deployment branch that `branch-protection.json` does not protect (D43) |
 | ENV2 | `stable-override` | none | **missing on GitHub** | PR #180 only (`promote-stable.yml`, checked by `system/require-review.sh`); `doc_update_trust.md` on that branch asks for required reviewers, the release branch only and no administrator bypass |
 | ENV3 | `delete` | none | none; created 2026-08-08 | nothing |
-| ENV4 | `github-pages` | none | deployment branches `gh-pages` and `main` | no workflow names it |
+| ENV4 | `github-pages` | none | deployment branches `gh-pages` and `main` | no workflow names it; it served the DNF channel, removed by ADR-0076 decision 2, and the maintainer deletes it with the `gh-pages` branch |
 | ENV5 | `signing-images` | SEC3, SEC4 | required reviewer `hr-mes`, self-review allowed (`prevent_self_review` false, see `github-settings.md` section 7), no administrator bypass; deployment branches `iso-v0` and `main`, both protected (required check `Kernel gate`, no force push, no deletion) | `call-system-image.yml:433` (`sign-system-images`); PR #185 adds `sign-repo` and SEC5, SEC6 |
 
 ### 1.3 Drift between code and GitHub
@@ -60,7 +58,6 @@ No repository variable is set (`gh variable list` is empty), so every default be
 | Direction | Item | Effect | Action |
 | --- | --- | --- | --- |
 | files ahead of GitHub | ENV1, ENV5, protection of `main` | the split and the protection exist only in `.github/settings`; GitHub still has `signing` with every key, and the workflows name the new environments, so a signing job fails to find its keys until they move | the bootstrap of section 4 |
-| used, missing | SEC5, SEC6 | `call-system-image.yml` signs only when `RPM_GPG_KEY` is set: the tier repositories are published unsigned | create the key (SEC5 below) in environment `signing-images` when PR #185 merges, not as a repository secret, so it never reaches `build-repo` |
 | used, missing | ENV2 | PR #180's override path fails by design until the environment exists | create it when PR #180 merges |
 | present, unused | ENV3 | none | delete it, or say what it is for |
 | other | SEC9 | `forge-ghcr-cleanup.yml` fails on every run (37173567085, 36288233693, 35483291172) | outside this runbook |
@@ -133,23 +130,6 @@ leaves one release after the first image signed with n+1. There is no revocation
 compromise, recovery is out of band (`forge/specs/athanor-update/RECOVERY.md`,
 `athanor-update recover-key`), see KC5.
 
-**SEC5 and SEC6, RPM signing key.** `tier_repos.sh` (PR #185, :93-97) accepts exactly one secret
-key and an optional passphrase. The repository fixes no algorithm or identity. _(Proposal)_
-RSA 4096, sign-only, two years:
-
-```bash
-# preamble of section 1.4 first
-export GNUPGHOME=${KEYDIR:?}/gnupg; mkdir -p -m 700 "$GNUPGHOME"
-gpg --quick-gen-key "Athanor Package Signing Key" rsa4096 sign 2y   # pinentry asks the passphrase: RPM_GPG_PASSPHRASE
-gpg --armor --export-secret-keys "Athanor Package Signing Key" > "${KEYDIR:?}/rpm.key"
-gh secret set RPM_GPG_KEY --env signing-images --repo "$REPO" < "${KEYDIR:?}/rpm.key"
-gh secret set RPM_GPG_PASSPHRASE --env signing-images --repo "$REPO"
-```
-
-Rotation: replace the secret. No machine checks this key today (`git grep RPM-GPG-KEY-athanor`
-finds no repository file that names it), so nothing else changes. Once machines check it, the
-new public key must ship in an image before the first package it signs.
-
 **SEC7, SEC8, SEC9, SEC12, tokens.** A token is made again in the GitHub settings of the account
 that owns it, then stored with `gh secret set NAME --repo "$REPO"` (SEC12: piped into `sudo
 scripts/runner/install.sh --image <golden image>`, `scripts/runner/README.md:65-74`). A rotation
@@ -191,7 +171,6 @@ read back, so the backup of KC2 is the only copy that can be restored.
 | Id | Lost | Can it be made again? | What the loss forces |
 | --- | --- | --- | --- |
 | RL1 | SEC7, SEC8, SEC9, SEC12 | yes, in the GitHub settings | nothing beyond the failed runs |
-| RL2 | SEC5, SEC6 | yes | nothing today; once machines check the key, a new public key ships in an image first |
 | RL3 | SEC2 | yes | a kernel rebuild (section 1.4); no machine action |
 | RL4 | SEC1 | a new key, never the old one | every machine with Secure Boot on re-enrols, with someone at the console for MokManager. Images signed with the old key keep booting where it is enrolled. Machines with Secure Boot off need nothing |
 | RL5 | SEC3 or SEC4 | a new key, never the old one | the new key cannot reach machines in an image signed with the old one (UT3 needs the old key), so every installed machine stops accepting updates. Each one is recovered out of band: `athanor-update recover-key` (`RECOVERY.md`) or a reinstall from a new ISO. This is the costliest loss |

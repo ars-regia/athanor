@@ -63,7 +63,7 @@ CI2 also runs inside CI3, CI4 and CI5, so one Orchestrator run lints four times 
 | `KERNEL_REGISTRY/azoth-signer` | CI25 | `<12 hex of a sha256 over the Containerfile, the lock, lock.sh and sign-kernel.sh>`: the sign toolchain (sbsigntools, sign-file) and `sign-kernel.sh`, run by the digest committed in `forge/specs/azoth/signer/image.digest` |
 | `KERNEL_REGISTRY/athanor-nvidia-rpms` | CI9 `system` | the locked NVIDIA RPMs (`system/nvidia/mirror.sh`) |
 
-The DNF channel on GitHub Pages (branch `gh-pages`) is deployed only on `main` (`call-system-image.yml:149`).
+The tier repositories are published as OCI images only; there is no DNF channel on GitHub Pages (ADR-0076, decision 2).
 
 ### 1.4 What a pull request runs
 
@@ -122,8 +122,8 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 ### CI5 Call System Image
 
 - **File:** `call-system-image.yml`. **Purpose:** aggregates the tier repositories, builds the three system images and the ISO, signs them keyless and with the update key.
-- **Triggers:** `workflow_call` (CI1). **Input:** `builder_content_hash`. **Outputs:** tier repository images, system images, ISO image, `gh-pages` on `main`; artifact `image-digests`.
-- **Secrets:** `RPM_GPG_KEY`, `RPM_GPG_PASSPHRASE` (optional), `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD`, `GITHUB_TOKEN`.
+- **Triggers:** `workflow_call` (CI1). **Input:** `builder_content_hash`. **Outputs:** tier repository images, system images, ISO image; artifact `image-digests`.
+- **Secrets:** `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD`, `GITHUB_TOKEN`.
 - **Environment:** `signing-images` on `sign-system-images` only: one maintainer approval per run (D43). `dag-system-image` holds no key; the vmlinuz arrives signed, from `azoth-boot` by digest.
 - **Runner:** hosted. **Concurrency:** caller's.
 - **Scripts:** `scripts/fetch_repo_rpms.sh` (in `forge/`), `system/build-image.sh`, `system/shared-layers.sh`, `system/image-digests.sh`, `system/sign-images.sh`, `forge/scripts/sbom_rootfs.sh`, `sign_attest.sh`, `build_iso.sh`, `retry.sh`.
@@ -330,7 +330,6 @@ Every name below is described in the secrets inventory, `docs/operations/secrets
 | `SECUREBOOT_SIGNING_KEY` | secret | environment `signing-kernel` | CI6 |
 | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | secret | environment `signing-images` | CI5 |
 | `MODULE_SIGNING_KEY` | secret | environment `signing-kernel` | CI6 |
-| `RPM_GPG_KEY`, `RPM_GPG_PASSPHRASE` | secret | **nowhere**: the RPMs and tier repositories are not GPG-signed (`call-system-image.yml:94,123`) | CI5 |
 | `REGISTRY_HOST` | variable, default `ghcr.io` | not set | CI1, CI3, CI4, CI11, CI14, CI21-CI23 |
 | `KERNEL_REGISTRY` | variable, default `ghcr.io/<owner>` | not set | CI1, CI6, CI8, CI9, CI13, CI25 |
 | `BUILDER_STABLE_TAG` | variable, default `latest` | not set | CI21-CI23 |
@@ -341,7 +340,6 @@ Environments (`gh api repos/ars-regia/athanor/environments`):
 |---|---|---|
 | `signing-kernel` | required reviewer `hr-mes`, no administrator bypass; branches `iso-v0`, `main`, both protected | CI6 (`sign`) |
 | `signing-images` | as `signing-kernel` | CI5 (`sign-system-images`) |
-| `github-pages` | custom branch policy | no workflow (GitHub Pages) |
 | `delete` | none | no workflow |
 
 ## 6. Proposals
