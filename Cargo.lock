@@ -296,6 +296,7 @@ dependencies = [
  "athanor-unit",
  "gio-unix",
  "gtk4",
+ "gtk4-layer-shell",
  "tracing",
 ]
 
@@ -704,6 +705,10 @@ dependencies = [
  "tokio",
  "tracing",
 ]
+
+[[package]]
+name = "athanor-portal"
+version = "1.0.0"
 
 [[package]]
 name = "athanor-preview"
@@ -7334,12 +7339,12 @@ dependencies = [
 name = "xdg-desktop-portal-athanor"
 version = "1.0.0"
 dependencies = [
- "anyhow",
- "serde",
- "serde_json",
+ "athanor-portal",
+ "athanor-unit",
+ "gio",
+ "glib",
  "tokio",
  "tracing",
- "tracing-subscriber",
  "zbus",
 ]
 

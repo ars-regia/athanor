@@ -38,6 +38,7 @@ impl Window {
     pub(super) fn new(bar: &Rc<Bar>, monitor: &gdk::Monitor) -> Window {
         let window = gtk4::ApplicationWindow::new(&bar.app);
         window.init_layer_shell();
+        athanor_apps::timing::watch_layer(&window, "bar-popups");
         if let Err(reason) = layer_guard::require_layer_surface(&window) {
             tracing::error!(
                 "athanor-bar: the notification popups are not a layer surface: {reason}"
@@ -107,6 +108,22 @@ impl Window {
         while let Some(child) = self.cards.first_child() {
             self.cards.remove(&child);
         }
+        // A window with nothing to draw yields no render node, GTK commits no frame, and the
+        // compositor keeps showing the last one: the ended card stayed on screen. A cleared
+        // pixel makes GTK commit a transparent frame.
+        let blank = gtk4::DrawingArea::builder()
+            .content_width(1)
+            .content_height(1)
+            .can_target(false)
+            .accessible_role(gtk4::AccessibleRole::Presentation)
+            .build();
+        blank.set_draw_func(|_, cr, _, _| {
+            cr.set_operator(cairo::Operator::Clear);
+            if let Err(err) = cr.paint() {
+                tracing::warn!(error = %err, "cannot clear the empty notification popups");
+            }
+        });
+        self.cards.append(&blank);
         self.set_input(false);
         // A surface that stops taking input may never see the pointer's `leave`.
         self.inside.set(false);

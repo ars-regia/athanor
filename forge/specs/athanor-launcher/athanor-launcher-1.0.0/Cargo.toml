@@ -2,7 +2,7 @@
 name = "athanor-launcher"
 version = "1.0.0"
 edition = "2021"
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "The Athanor launcher: search, preview and launch from one layer-shell surface (doc_launcher.md)"
 authors = ["Athanor Forge <forge@athanor.os>"]
 

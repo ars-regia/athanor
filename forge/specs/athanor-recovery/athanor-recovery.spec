@@ -5,7 +5,7 @@ Version:        1.0.0
 Release:        6%{?dist}
 Summary:        Text console shown when the desktop does not start
 
-License:        MIT
+License:        GPL-3.0-or-later
 BuildArch:      noarch
 
 Requires:       systemd util-linux greetd athanor-update

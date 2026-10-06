@@ -2,7 +2,7 @@
 name = "athanor-i18n"
 version = "1.0.0"
 edition = "2021"
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "Reads gettext .mo catalogs in pure Rust: no C, no process-global locale state"
 
 [dependencies]

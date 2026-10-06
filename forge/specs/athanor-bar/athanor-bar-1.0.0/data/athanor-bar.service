@@ -17,9 +17,13 @@ ExecStart=/usr/bin/athanor-bar
 ExecStopPost=/usr/bin/athanor-bar --record-exit
 TimeoutStartSec=20s
 Restart=on-failure
-RestartSec=1s
-RestartSteps=5
-RestartMaxDelaySec=60s
+# Every restart comes at once, so a crash costs under a second (doc_shell_standard.md, ST5,
+# recovery). No RestartSteps: systemd keeps counting restarts for the whole session, so the
+# third crash of a day would wait seconds. After five failures in ten minutes the program
+# falls back or gives up (SH8), which ends a crash loop the user's configuration causes; a
+# loop with any other cause reaches StartLimitBurst above within seconds rather than minutes
+# and leaves the unit failed until the next login.
+RestartSec=100ms
 Slice=session.slice
 # SH4: the layer surfaces are drawn with Cairo, on every GPU.
 Environment=GSK_RENDERER=cairo

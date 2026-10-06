@@ -1,0 +1,66 @@
+{
+  "delete": {
+    "can_admins_bypass": true,
+    "deployment_branch_policy": null,
+    "prevent_self_review": false,
+    "reviewers": [],
+    "secrets": [],
+    "variables": [],
+    "wait_timer": 0
+  },
+  "github-pages": {
+    "can_admins_bypass": true,
+    "deployment_branch_policy": {
+      "custom_branch_policies": true,
+      "policies": [
+        {
+          "name": "gh-pages",
+          "type": "branch"
+        },
+        {
+          "name": "main",
+          "type": "branch"
+        }
+      ],
+      "protected_branches": false
+    },
+    "prevent_self_review": false,
+    "reviewers": [],
+    "secrets": [],
+    "variables": [],
+    "wait_timer": 0
+  },
+  "signing": {
+    "can_admins_bypass": true,
+    "deployment_branch_policy": {
+      "custom_branch_policies": true,
+      "policies": [
+        {
+          "name": "iso-v0",
+          "type": "branch"
+        },
+        {
+          "name": "main",
+          "type": "branch"
+        }
+      ],
+      "protected_branches": false
+    },
+    "prevent_self_review": false,
+    "reviewers": [
+      {
+        "name": "hr-mes",
+        "type": "User"
+      }
+    ],
+    "secrets": [
+      "COSIGN_PASSWORD",
+      "COSIGN_PRIVATE_KEY",
+      "MODULE_SIGNING_KEY",
+      "MOK_PRIVATE_KEY",
+      "SECUREBOOT_SIGNING_KEY"
+    ],
+    "variables": [],
+    "wait_timer": 0
+  }
+}

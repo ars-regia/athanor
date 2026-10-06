@@ -1,65 +1,130 @@
-# Athanor Forge: Guida allo Sviluppo e all'Integrazione Pacchetti
+# Athanor Forge: package development guide
 
-Questa guida è destinata a ingegneri, sviluppatori e Agenti IA che necessitano di integrare nuovi pacchetti, demoni o configurazioni all'interno di Athanor OS.
-
-In Athanor OS, l'aggiunta di un software **non avviene mai a runtime** (es. scaricando un eseguibile). Tutto deve passare attraverso l'infrastruttura **Athanor Forge**, che gestisce la compilazione distribuita, l'hashing e l'assemblaggio OCI (bootc/OSTree) in modo immutabile e Zero-Trust.
-
----
-
-## 1. Architettura della Forge e DAG Orchestrator
-
-La compilazione non è sequenziale. È orchestrata dal **DAG Orchestrator** (`forge/scripts/dag_orchestrator.py`), che analizza le dipendenze dei file `.spec` e le esegue in parallelo.
-Per scalare su build-farm, l'orchestratore utilizza **Redis** (o un fallback locale su disco) per memorizzare in cache gli hash dei layer OCI e saltare le ricompilazioni inutili.
-
-### Flusso di Aggiunta di un Pacchetto:
-1. **Creazione dello Spec:** Creare la cartella `forge/specs/<nome-pacchetto>/` contenente il file `.spec` (standard RPM) e l'eventuale cartella `SOURCES/`. I file di supporto tracciati (unità systemd, configurazioni) vanno in `SOURCES/` e si dichiarano come `SourceN`; i tarball upstream **non** si committano (`*.gz` è ignorato): la spec dichiara l'URL e `SOURCES/sources.sha256` ne fissa il checksum.
-2. **Definizione nel Manifest:** Aggiungere il pacchetto al manifest JSON (se applicabile, in `forge/config/packages.json`).
-3. **Trigger della Pipeline:** L'orchestrazione (innescata da GitHub Actions o in locale tramite `./forge/scripts/build-offline.sh`) valuterà il DAG, capirà dove si posiziona il tuo pacchetto, spawnerà un micro-container OCI (Podman/Buildah), compilerà l'RPM ed esporterà l'artefatto in `~/.rpmbuild/RPMS/`.
+This guide is for engineers and agents who add packages, daemons or configuration to
+Athanor OS. Software reaches the image only through the forge: as an RPM built from a
+spec, as a Fedora package listed in the manifest, or as a Flatpak provisioned on the
+installed system. Nothing is downloaded or installed at run time. How the pipeline runs
+is described in [doc_build_system.md](doc_build_system.md).
 
 ---
 
-## 2. Le 4 Regole d'Oro Zero-Trust (Pena: Fallimento della Build)
+## 1. Adding a package
 
-Per mantenere l'integrità del sistema, ogni `.spec` o `Containerfile` deve sottostare a regole brutali. Qualsiasi violazione verrà bloccata dall'Inquisitore CI (Vitreol).
-
-### ❌ Regola 1: Divieto di Download Dinamici (No `curl | sh`)
-Non è MAI permesso eseguire `curl`, `wget` o `git clone` all'interno delle fasi `%prep`, `%build` o `%install` del `.spec`, né disabilitare la verifica SSL (`http.sslVerify=false`).
-**Soluzione:** Tutti i sorgenti devono essere dichiarati come `Source0`, `Source1`, ecc. nell'intestazione del `.spec`, con l'URL upstream (frammento `#/nome.tar.gz` in stile Fedora se il nome dell'archivio differisce). Prima di `rpmbuild`, `forge/scripts/fetch_sources.sh` scarica ciò che manca e verifica ogni file contro `SOURCES/sources.sha256` (formato di `sha256sum`): una voce assente nel manifest, un checksum diverso o un download fallito fermano la build.
-
-### ❌ Regola 2: Nessuna Mutazione di `/usr` o `/etc` a Runtime (`%post`)
-Non è permesso utilizzare lo scriptlet `%post` o script di provisioning eseguiti al boot per fare copie `cp` o `chmod` in `/usr` o in `/etc`. Questo distrugge l'immutabilità OCI (OSTree).
-**Soluzione:** Ogni file di configurazione, binario o demone systemd DEVE essere copiato nei percorsi giusti *esclusivamente* durante la fase `%install` dello `.spec`. Per file dinamici, usare `systemd-tmpfiles`.
-
-### ❌ Regola 3: Zero Disabilitazione di Sicurezza
-Vietato impostare `repo_gpgcheck=0`. Vietato usare la macro `%undefine _fortify_source`. Athanor OS compila tutto con flag di hardenizzazione estremi (LTO, -O3, ASLR, CFI). Disabilitarli è vietato.
-
-### ❌ Regola 4: Nessun Accesso di Rete in Compilazione
-Il container OCI in cui avviene il `rpmbuild` viene istanziato con `bwrap --unshare-net` (o equivalenti podman). Qualsiasi pacchetto linguistico (NPM, Cargo, Pip) che tenta di scaricare dipendenze durante il `%build` fallirà.
-**Soluzione:** Usare tool di *vendoring* (es. `cargo vendor`, `npm shrinkwrap`) o dichiarare i registry offline nei sorgenti `SourceX`.
-
----
-
-## 3. Aggiungere un nuovo Demone Rust (Es. `athanor-example-daemon`)
-
-Se sei un agente incaricato di scrivere un nuovo demone per l'OS, segui questa checklist:
-1. Sviluppa il codice in `system/athanor-example-daemon/` assicurandoti di non usare blocchi `unsafe` senza estrema giustificazione.
-2. Crea `forge/specs/athanor-example-daemon/athanor-example-daemon.spec`.
-3. Nel `.spec`, definisci il pacchetto **senza** `Source0`: il crate vive nel workspace e il DAG compila il checkout in place (`rpmbuild --build-in-place`, scelto automaticamente per le spec senza `Source`), con la radice del repo come directory corrente di `%build` e `%install`. Le spec che dichiarano `Source` seguono invece il percorso ordinario, `%prep` incluso.
-4. In `%build`, `cargo build --release --locked -p <nome-crate>`; i file di dati del crate si riferiscono tramite `%global crate_dir <percorso del crate dalla radice>`.
-5. In `%install`, installa l'eseguibile in `/usr/libexec/` o `/usr/bin/` e il file `athanor-example-daemon.service` in `/usr/lib/systemd/system/`.
-6. Nel `%post`, esegui solo `systemctl preset athanor-example-daemon.service` (mai systemctl start).
+1. **Spec.** Create `forge/specs/<package>/` with the `.spec` file and, when needed, a
+   `SOURCES/` directory. Tracked support files (systemd units, configuration) live in
+   `SOURCES/` and are declared as `SourceN`. Upstream archives are never committed
+   (`*.gz` is ignored): the spec declares the upstream URL, with a Fedora-style
+   `#/name.tar.gz` fragment when the archive name differs, and `SOURCES/sources.sha256`
+   pins its checksum. `bash forge/scripts/fetch_sources.sh --pin <spec-dir> <sourcedir>`
+   writes the manifest from a fresh download.
+2. **Tier registration.** Add the package to `custom_packages` in `forge/config/packages.json` **and** to exactly one of
+   `custom_tier0` to `custom_tier3`, under the name the DAG resolves: `<name>` for
+   `forge/specs/athanor-<name>/`, the directory name otherwise. The tier decides the order of the build jobs and the
+   tier repository that ships the RPM into the image: tier 0 for the hardware and kernel
+   foundation, tier 1 for core user services, tier 2 for the design system and static
+   assets, tier 3 for the shell and its applications (the `TIER` sections of
+   `system/Containerfile`). A package in `custom_packages` without a tier is built and
+   never installed; `python3 scripts/verify.py shipped` fails on that and on the reverse.
+3. **Workspace crates.** A crate added to the root `Cargo.toml` workspace must be packaged
+   by a spec or listed in `experimental/EXEMPT`; `verify.py shipped` checks this as well.
+4. **Build and merge.** Build the spec locally (section 4). A pull request that touches it
+   runs Spec Build Check, which builds it the way the DAG does; after the merge the
+   orchestrator builds, signs and publishes it, and the next system image installs it.
 
 ---
 
-## 4. Test Locali prima del Commit
+## 2. The four golden rules
 
-Prima di inviare una modifica a Athanor, un agente o sviluppatore deve validare:
+Every spec follows these rules. Each one names the mechanism that enforces it.
+
+### Rule 1: no dynamic downloads
+
+No `curl`, `wget` or `git clone` in `%prep`, `%build` or `%install`, and no disabled TLS
+verification (`http.sslVerify=false`). Every remote input is a `SourceN` or `PatchN`
+with its URL, and its checksum is in `SOURCES/sources.sha256`.
+
+**Enforced by** `forge/scripts/fetch_sources.sh`, which downloads the remote sources
+before the build and stops it on a missing manifest entry, a checksum mismatch or a failed
+download; and by the build stage of `forge/scripts/run_spec_build.sh`, which runs with
+`--network=none`, so a download inside the spec fails the build.
+
+### Rule 2: no mutation of `/usr` or `/etc` from a scriptlet
+
+No `%pre`, `%post`, trigger or boot-time provisioning script copies, moves, creates,
+links or changes the mode or owner of anything under `/usr` or `/etc`, spelled out or
+through a path macro such as `%{_sysconfdir}`. Those trees belong to the image, and a
+scriptlet that edits them escapes the image's content and signature.
+
+**Solution:** install every file in `%install`; create run-time state with
+`systemd-tmpfiles` (`tmpfiles.d`), users and groups with `sysusers.d`, and enable units
+with a preset file under `/usr/lib/systemd/system-preset/` and the `%systemd_post` macros.
+
+**Enforced by** `python3 scripts/verify.py forge-rules`. The check is not yet part of the
+lint workflow: `athanor-system-config` still edits `/etc/group` and creates two
+directories under `/etc` in its `%post`, and the check reports those three lines.
+
+### Rule 3: no disabled security
+
+No `repo_gpgcheck=0` or `gpgcheck=0`, no `--nogpgcheck`, no `%undefine _fortify_source`
+or `_hardened_build`, and no flag that removes a hardening default
+(`-U_FORTIFY_SOURCE`, `-D_FORTIFY_SOURCE=0`, `-fno-stack-protector`,
+`-fcf-protection=none`, `-z norelro`, `-z execstack`, `-no-pie`, `-fno-PIE`).
+`forge/config/rpmmacros` sets the forge's flags, among them `_FORTIFY_SOURCE=3`,
+`_GLIBCXX_ASSERTIONS`, `-fstack-clash-protection`, `-fcf-protection`, `-z now` and
+`-z relro`; a spec does not weaken them.
+
+**Enforced by** `python3 scripts/verify.py forge-rules`, with the same status as rule 2.
+
+### Rule 4: no network during the build
+
+The build itself runs without network. `forge/scripts/run_spec_build.sh` first runs
+`build_spec.sh fetch` with network, which downloads the `Source` files, the crates of
+every `Cargo.lock` the build uses and the modules of every `go.mod` in the unpacked
+sources, into the builder's home directory. It then runs `build_spec.sh build` from that
+directory with `--network=none`, `CARGO_NET_OFFLINE=true` and `GOPROXY=off`.
+
+**Solution:** build Rust with `--locked` and Go against its `go.sum`. Any other package
+manager (npm, pip) has no fetch step: vendor its dependencies into a `SourceN` archive.
+
+**Enforced by** `--network=none` on the build container, in the DAG
+(`call-dag-compile.yml`) and in Spec Build Check alike.
+
+---
+
+## 3. Adding a Rust daemon (example: `athanor-example-daemon`)
+
+1. Write the crate in `system/athanor-example-daemon/` and add it to the members of the
+   root `Cargo.toml`. No `unsafe` block without a documented reason.
+2. Create `forge/specs/athanor-example-daemon/athanor-example-daemon.spec` and register
+   the package in a tier (section 1).
+3. Declare **no** `Source0`: the crate lives in the workspace, and a spec without `Source`
+   builds the checkout in place (`rpmbuild --build-in-place`, chosen automatically), with
+   the repository root as the working directory of `%build` and `%install`. Specs that
+   declare a `Source` take the ordinary path, `%prep` included.
+4. In `%build`, run `cargo build --release --locked -p <crate>`; refer to the crate's data
+   files through `%global crate_dir <path of the crate from the repository root>`.
+5. In `%install`, install the binary in `/usr/libexec/` or `/usr/bin/`, the unit in
+   `/usr/lib/systemd/system/` and its preset in `/usr/lib/systemd/system-preset/`.
+6. In `%post`, `%preun` and `%postun`, use only the `%systemd_post`, `%systemd_preun` and
+   `%systemd_postun` macros: never start a unit from a scriptlet.
+
+---
+
+## 4. Local checks before a commit
+
 ```bash
-# 1. Verifica statica della memoria (Agente Rust Paranoia)
-cargo clippy --workspace --all-features -- -D warnings
-cargo kani
+# Rust lints, as forge/Justfile's audit recipe runs them
+cargo clippy --all-targets --all-features -- -D clippy::undocumented_unsafe_blocks \
+  -D clippy::multiple_unsafe_ops_per_block -D warnings
+# Kani proof harnesses, for a crate that has them
+cargo kani --package <crate>
 
-# 2. Compilazione OCI isolata per testare il pacchetto
-./forge/scripts/build-offline.sh <nome-pacchetto>
+# Structural checks: packaging, specs and golden rules 2 and 3
+python3 scripts/verify.py shipped specs forge-rules
+
+# Build the package as CI does: fetch with network, then build without
+bash forge/scripts/run_spec_build.sh <registry>/<owner>/athanor-builder:latest specs/<package>
 ```
-Se il build passa in locale senza richiedere rete, è pronto per essere assorbito dal Kernel Immutabile.
+
+The RPMs land in `forge/RPMS/`. A build that passes there without network is the build
+the DAG runs.

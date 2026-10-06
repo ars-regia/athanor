@@ -18,7 +18,7 @@ FROM ${KERNEL_REGISTRY}/azoth-nvidia@${NVIDIA_LEGACY_DIGEST} AS nvidia-modules-l
 # The vendor RPMs of both NVIDIA branches, verified by hash and GPG, with the shim and the
 # configuration package, and NVIDIA's container toolkit (system/nvidia/build-rpms.sh). A throwaway stage: rpm-build never
 # reaches an image. KERNEL_REGISTRY locates the mirror of the locked RPMs (lock.py).
-FROM registry.fedoraproject.org/fedora:43@sha256:a60334b24af6818e9ccf199d188b5ddef1c3d7f549470b560d9b744c78c2c58b AS nvidia-rpms
+FROM registry.fedoraproject.org/fedora:43@sha256:17ec53e139b4f9baa29cc91f469c120b86aa15959fcfca73b76182e58d5ff89d AS nvidia-rpms
 ARG KERNEL_REGISTRY
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 COPY forge/specs/azoth/pins.env /src/forge/specs/azoth/pins.env
@@ -28,7 +28,7 @@ RUN dnf5 install -y --setopt=install_weak_deps=False rpm-build python3 && \
 
 # Fedora's atomic desktop base (S1): the bootc base of Silverblue and Kinoite, pinned by
 # digest and moved by the bump bot.
-FROM quay.io/fedora-ostree-desktops/base-atomic:43@sha256:c75477d075ba293ecaf9388db1ff90fef09d5b3a0b95b8e861f0990cea222d90 AS system
+FROM quay.io/fedora-ostree-desktops/base-atomic:43@sha256:5bbb1396403585746e292b06f0238c230638e81321c027b2559a249734b22b1f AS system
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG FEDORA_VERSION=43
 ENV FEDORA_VERSION=$FEDORA_VERSION
@@ -41,6 +41,10 @@ ARG TETRAGON_VERSION=v1.3.0
 # The registry here is a literal, not ${KERNEL_REGISTRY}: an ARG in a RUN --mount=...,from=
 # value made buildah 5.8.4 SIGSEGV at commit (exit 134), taking down all three images. Only
 # the two FROM ...@digest lines above tolerate the ARG; do not reapply it here.
+# This covers all four tier mounts below and is the single hard-coded registry owner the
+# pipeline keeps (re-audit decision 12, 2026-10-05): a fork that publishes elsewhere edits
+# these four lines. Everywhere else the owner comes from REGISTRY_HOST and the repository
+# owner, and `scripts/verify.py registry` enforces it.
 RUN --mount=type=bind,from=ghcr.io/hr-mes/athanor-forge-tier0-repo:latest,source=/,target=/tmp/tier0-repo \
     --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
     base_kernel=$(rpm -qa kernel kernel-core 'kernel-modules*' 'kernel-uki-virt*') && \
@@ -146,18 +150,13 @@ RUN dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs fla
 COPY system/scripts/ /scripts/
 
 
-# TPM 2.0 PCR Sealing Provisioning Service & Script for LUKS /var/home
-COPY forge/specs/athanor-secure-boot/SOURCES/usr/libexec/athanor-tpm-luks-seal.sh /usr/libexec/athanor-tpm-luks-seal.sh
-COPY forge/specs/athanor-secure-boot/SOURCES/usr/lib/systemd/system/athanor-tpm-luks-seal.service /usr/lib/systemd/system/athanor-tpm-luks-seal.service
-RUN chmod +x /usr/libexec/athanor-tpm-luks-seal.sh
-
 # Custom SELinux policy modules. athanor-selinux installs its CIL modules under
 # /usr/share/selinux/packages, but a .cil placed there is not active until it is loaded
 # into the policy store with `semodule -i`; there is no OSTree-safe %post to do it (the
 # scriptlet was purged for immutability), so the modules were dead files. Load them at
 # build time here, which writes them into /etc/selinux/targeted and bakes them into the
-# image. This activates athanor_nix_daemon (lets PID1 open the Nix daemon socket under
-# enforcing) and athanor_scx, which had never been loaded.
+# image. This activates athanor_nix_daemon (the Nix store, socket and daemon types and
+# their file contexts) and athanor_scx, which had never been loaded.
 RUN if ls /usr/share/selinux/packages/*.cil >/dev/null 2>&1; then \
         echo "Loading custom SELinux policy modules..." && \
         semodule -i /usr/share/selinux/packages/*.cil; \
@@ -178,7 +177,7 @@ RUN /usr/libexec/athanor-update/render-policy --registry "${IMAGE_REGISTRY}" --k
 
 # Declarative Systemd presets & sysusers
 RUN authselect enable-feature with-systemd-homed && \
-    systemctl enable tetragon.service systemd-sysext.service systemd-homed.service athanor-tpm-rollback-check.service athanor-tpm-rollback-update.service athanor-tpm-luks-seal.service && systemd-sysusers && systemctl preset-all && systemctl --global preset-all
+    systemctl enable tetragon.service systemd-sysext.service systemd-homed.service && systemd-sysusers && systemctl preset-all && systemctl --global preset-all
 
 # No account authenticates with an empty password (#152). The base image's "local" authselect
 # profile ships nullok on pam_unix; the feature removes it from every generated stack.
