@@ -200,5 +200,8 @@ class SigningTest(unittest.TestCase):
         )
 
 
+    def test_the_repository_passes(self):
+        self.assertEqual(verify.signing_problems(verify.ROOT), [])
+
 if __name__ == "__main__":
     unittest.main()

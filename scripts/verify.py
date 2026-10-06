@@ -143,6 +143,10 @@ def check_workflows():
                 if host in line:
                     r.fail(f"{wf.name}:{i+1} log inviati a un servizio esterno ({host})")
 
+    # 1e. D43: signing keys only in sign-only jobs
+    for problem in signing_problems(ROOT):
+        r.fail(problem)
+
     # 1d. actionlint, se disponibile
     try:
         p = subprocess.run(["actionlint", "-no-color", "-oneline"], cwd=ROOT,
