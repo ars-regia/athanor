@@ -27,18 +27,24 @@ Before this revision each specification wrote its own adversary paragraph, and t
 | Path                                                          | Why it is a persistence path                                                                                |
 | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `~/.config/systemd`                                           | user units and drop-ins, including drop-ins on the lock, the agent and the bar                              |
-| `~/.local/share/systemd`                                      | the user manager's second unit directory (`$XDG_DATA_HOME/systemd/user`); proposed, awaiting the maintainer |
+| `~/.local/share/systemd`                                      | the user manager's second unit directory (`$XDG_DATA_HOME/systemd/user`); A2-29 (#151)                      |
 | `~/.config/autostart`                                         | XDG autostart entries, started at every login (SD10)                                                        |
 | `~/.config/environment.d`                                     | environment of the user manager, so of every unit (`LD_PRELOAD`, `PATH`)                                    |
 | `~/.bash_profile`, `~/.bash_login`, `~/.profile`, `~/.bashrc` | shell start-up files                                                                                        |
-| `~/.bashrc.d`                                                 | the image's `/etc/skel/.bashrc` sources every file in it; proposed, awaiting the maintainer                 |
+| `~/.bashrc.d`                                                 | the image's `/etc/skel/.bashrc` sources every file in it; A2-29 (#151)                                      |
 | `~/.local/share/applications`                                 | desktop entries the launcher and `xdg-open` run                                                             |
 | `~/.local/share/nautilus/scripts`                             | scripts the file manager offers to run                                                                      |
-| `~/.config/cosmic`                                            | the compositor's configuration, whose shortcuts run commands; proposed, awaiting the maintainer             |
+| `~/.config/cosmic`                                            | the compositor's configuration, whose shortcuts run commands; A2-29 (#151)                                  |
+| `~/.local/bin`, `~/bin`                                       | first on `PATH` in the image's `~/.bashrc`: a file there replaces a command the user types; A2-29 (#151)    |
+| `~/.local/share/dbus-1/services`                              | the session bus's user activation directory; A2-29 (#151)                                                   |
+| `~/.local/share/flatpak/overrides`                            | Flatpak's user overrides, which widen another application's permissions; A2-29 (#151)                       |
+| `~/.gitconfig`                                                | `core.hooksPath` and `core.fsmonitor` run a program at the user's next git command; A2-29 (#151)            |
+| `~/.ssh/config`                                               | `ProxyCommand` runs at the user's next `ssh`; A2-29 (#151)                                                  |
+| `~/.config/mimeapps.list`                                     | chooses the program `xdg-open` and the file manager run for a file type; A2-29 (#151)                       |
 
-- **Three rows are proposals.** `~/.local/share/systemd`, `~/.bashrc.d` and `~/.config/cosmic` are not in the list of issue #151 and await the maintainer. They stay in the table until the maintainer decides, so SD8's `ReadOnlyPaths=` (`doc_session_daemons.md`) is specified with them; dropping one is a one-line change here.
+- **Rows beyond the issue's list.** `~/.local/share/systemd`, `~/.bashrc.d` and `~/.config/cosmic`, and the candidates of former open doubt T2, are not in the list of issue #151. The maintainer added them on 2026-10-06 (A2-29 (#151)); SD8's `ReadOnlyPaths=` (`doc_session_daemons.md`) covers them.
 - **The list is a deny-list and needs upkeep.** A new program that runs code from a file in the home adds its path here, in the same change that ships the program. This is the accepted cost of not building a filesystem sandbox (SD21).
-- **A path must exist to be protected.** `ReadOnlyPaths=` binds only paths present when the unit starts, and the `-` prefix that tolerates an absent path leaves it creatable by the application. The broker creates the listed directories before each launch; how an absent start-up file is protected is open doubt T1.
+- **A path must exist to be protected.** `ReadOnlyPaths=` binds only paths present when the unit starts, and the `-` prefix that tolerates an absent path leaves it creatable by the application. The broker creates the listed directories before each launch; an absent start-up file (`~/.bash_login`, `~/.profile`, `~/.gitconfig`, `~/.ssh/config`, `~/.config/mimeapps.list` and the like) is protected by a bind of an empty read-only file over its path in the unit, so the application can neither create it nor write it, and nothing is created in the home (A2-29 (#151)).
 - **Stated residual risk:** dconf. Every GTK application that stores a preference needs `ca.desrt.dconf`, and dconf has no per-key access control, so a confined application can change any user setting, among them `org.athanor.desktop.idle` (SD9).
 
 **TM4. Where tier 2 leaks, stated.** A Flatpak application granted home or host filesystem access can write the persistence paths and leave its sandbox (`doc_kernel_profile.md` section 10, residual risks); Software shows that permission (`doc_software.md` SW3). An RPM application in the `unconfined` class is tier 1 by policy. The default browser moves to Flatpak (maintainer decision A2-15 (#159)), which takes the program most exposed to hostile input out of the RPM class.
@@ -67,10 +73,10 @@ Owed at each document's next revision: `doc_shell.md` SH12 and `doc_bar.md` BR1 
 
 ## 5. Open doubts
 
-1. **T1. Absent start-up files.** `ReadOnlyPaths=` cannot protect a file that does not exist; bash reads the first of `~/.bash_profile`, `~/.bash_login` and `~/.profile` that exists, and the image's skeleton ships only `~/.bash_profile`. Options: the broker creates empty files, or the unit binds an empty read-only file over each absent path. Decided with SD22 step 6.
-2. **T2. Further candidates for TM3,** not yet decided: `~/.local/bin` and `~/bin`, which the image's `~/.bashrc` puts first on `PATH`, so a file there replaces a command the user types; `~/.local/share/dbus-1/services`, the session bus's user activation directory; Flatpak's user overrides under `~/.local/share/flatpak/overrides`, which widen another application's permissions; `~/.gitconfig`, whose `core.hooksPath` and `core.fsmonitor` run a program at the user's next git command; `~/.ssh/config`, whose `ProxyCommand` runs at the next `ssh`; `~/.config/mimeapps.list`, which chooses the program `xdg-open` and the file manager run for a file type.
+1. **T1. Absent start-up files.** Decided 2026-10-06 (A2-29 (#151)): the unit binds an empty read-only file over each absent path (TM3).
+2. **T2. Further candidates for TM3.** Decided 2026-10-06 (A2-29 (#151)): all of them are rows of TM3.
 3. **T3. The polkit model.** Which actions Athanor adds or overrides and their result for the active session have no single owner (audit 2, security and trust, finding 15). Whether that table belongs here is for the maintainer.
-4. **T4. Windows the trusted-path border does not mark.** cosmic-comp#1441 borders floating windows only, so a confined application can imitate a prompt with a fullscreen or tiled window (TM6). Options: extend the indicator to every window state, proposed upstream with #1441, or state the gap as residual risk. For the maintainer (`doc_lock_and_prompts.md` L13).
+4. **T4. Windows the trusted-path border does not mark.** cosmic-comp#1441 borders floating windows only, so a confined application can imitate a prompt with a fullscreen or tiled window (TM6). Decided 2026-10-06 (A2-31): the extension of the indicator to every window state is proposed upstream with #1441; until it lands, the gap is a stated residual risk of TM6 (`doc_lock_and_prompts.md` L13).
 
 ## 6. Acceptance
 

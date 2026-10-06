@@ -87,7 +87,7 @@ invece di cambiare directory.
 ## Limiti inviolabili
 
 - **Modello di minaccia a tre livelli** (`docs/architecture/doc_threat_model.md`): il codice dell'utente non confinato è l'utente; le applicazioni confinate (Flatpak e classe `confined` del broker) sono non fidate e non scrivono i percorsi di persistenza; root e l'immagine sono di `doc_kernel_profile.md`. Una spec dichiara contro quale livello vale ogni sua garanzia.
-- **Ogni servizio systemd spedito dal repository imposta `NoNewPrivileges=yes` o `CapabilityBoundingSet=`**, scritto in chiaro (non dedotto da `DynamicUser=` o simili); lo verifica `python3 scripts/verify.py services`. Un'eccezione va nella lista `SERVICE_EXEMPT` con il motivo. Mai `chmod 777`, mai root diretto.
+- **Ogni servizio systemd spedito dal repository imposta `NoNewPrivileges=yes` o `CapabilityBoundingSet=` (allow-list)**, scritto in chiaro (non dedotto da `DynamicUser=` o simili); lo verifica `python3 scripts/verify.py services`. Un'eccezione va nella lista `SERVICE_EXEMPT` con il motivo. Mai `chmod 777`, mai root diretto.
 - **Niente finte implementazioni nella sicurezza**: crittografia, validazione dei token e hash devono essere reali. Un placeholder in un percorso di sicurezza è un bug, non una bozza.
 - **`panic = "abort"` su dev e release**: un panic non è recuperabile, termina il processo. Nei daemon questo significa perdita di servizio.
 - Modifiche a `system/athanor-bus-api/src/polkit.rs`, al Gatekeeper (`forge/specs/athanor-gatekeeper-rs`) o all'attestazione (`system/confidential_computing/athanor-attestation`): fermati e chiedi prima di editare.
