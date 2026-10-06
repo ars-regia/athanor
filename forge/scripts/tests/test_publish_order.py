@@ -24,6 +24,25 @@ class PublishOrderTest(unittest.TestCase):
             signing = next(i for i, name in enumerate(names) if name.startswith("Sign & Attest"))
             self.assertGreater(pushes[0], signing, job.splitlines()[0])
 
+    def test_the_signed_digest_is_the_one_that_gets_the_hash_tag(self):
+        text = WORKFLOW.read_text()
+        jobs = re.split(r"\n  (?=dag-build-[a-z0-9-]+:\n)", text)[1:]
+        for job in jobs:
+            steps = job.split("\n      - name: ")[1:]
+            by_name = {step.splitlines()[0]: step for step in steps}
+            publish = next((v for k, v in by_name.items() if k.startswith("Publish Micro-Container")), None)
+            if publish is None:
+                continue
+            title = job.splitlines()[0]
+            self.assertIn("--digestfile", publish, title)
+            for name in ("Generate SBOM", "Sign & Attest"):
+                step = next(v for k, v in by_name.items() if k.startswith(name))
+                self.assertNotIn(":latest", step, f"{title}: {name} must use the digest")
+                self.assertIn("image.digest", step, f"{title}: {name}")
+            last = next(v for k, v in by_name.items() if k.startswith("Publish the hash tag"))
+            self.assertIn("tag_signed_image.sh", last, title)
+            self.assertNotIn("buildah push", last, title)
+
 
 if __name__ == "__main__":
     unittest.main()
