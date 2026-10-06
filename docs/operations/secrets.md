@@ -20,9 +20,9 @@ Workflow references are `file:line` under `.github/workflows/` at `bd1f0e4a`.
 
 | Id | Name | Scope | Material | Used by (workflow, job) | Public half in the repository |
 | --- | --- | --- | --- | --- | --- |
-| SEC1 | `SECUREBOOT_SIGNING_KEY` | environment `signing` | X.509 private key, RSA 4096, PEM, unencrypted | `call-system-image.yml` `dag-system-image` (:243, environment :249, secret :292), handed to the image build as the podman secret `uki_key` (`system/build-image.sh:85`); signs the UKI and its PCR policy. PR #115 moves it to a new sign-only job `sign-kernel` (`system/sign-kernel.sh`, signs the vmlinuz) and takes the environment off `dag-system-image` | `forge/specs/azoth/keys/secureboot/athanor-secureboot.pem` and `.der` (the form `mokutil --import` takes) |
-| SEC2 | `MODULE_SIGNING_KEY` | environment `signing` | X.509 private key, RSA 4096, PEM, unencrypted | `nvidia-kmod.yml` `sign` (:94, environment :101, secret :164); signs the NVIDIA modules. PR #115 moves the step into `system/sign-nvidia-modules.sh` | `forge/specs/azoth/keys/modules/athanor-modules.pem`, compiled into Azoth (`kernel-local:42`, `CONFIG_SYSTEM_TRUSTED_KEYS`) |
-| SEC3 | `COSIGN_PRIVATE_KEY` | environment `signing` | cosign key pair, ECDSA P-256, private half encrypted with SEC4 | `call-system-image.yml` `sign-system-images` (:414, environment :420, secret :439) through `system/sign-images.sh:26-41`; the key-based image signature of UT2 | `system/keys/athanor-image-1.pub`, rendered into the image policy (UT3) |
+| SEC1 | `SECUREBOOT_SIGNING_KEY` | environment `signing` | X.509 private key, RSA 4096, PEM, unencrypted | `nvidia-kmod.yml` `sign` (:138, environment :145), the sign-kernel job of D43, through `forge/specs/azoth/signer/run.sh sign`: written to a 0600 file for the one command, mounted read-only into the signer image run by digest without network, `sign-kernel.sh vmlinuz` signs the kernel's vmlinuz (`azoth-boot`). No image build sees it; 1.0 has no UKI (A2-8) | `forge/specs/azoth/keys/secureboot/athanor-secureboot.pem` and `.der` (the form `mokutil --import` takes) |
+| SEC2 | `MODULE_SIGNING_KEY` | environment `signing` | X.509 private key, RSA 4096, PEM, unencrypted | `nvidia-kmod.yml` `sign` (:138, environment :145) through `forge/specs/azoth/signer/run.sh sign`, as SEC1; `sign-kernel.sh modules` signs the NVIDIA modules | `forge/specs/azoth/keys/modules/athanor-modules.pem`, compiled into Azoth (`kernel-local:42`, `CONFIG_SYSTEM_TRUSTED_KEYS`) |
+| SEC3 | `COSIGN_PRIVATE_KEY` | environment `signing` | cosign key pair, ECDSA P-256, private half encrypted with SEC4 | `call-system-image.yml` `sign-system-images` (:425, environment :431) through `system/sign-images.sh:26-41`; the key-based image signature of UT2 | `system/keys/athanor-image-1.pub`, rendered into the image policy (UT3) |
 | SEC4 | `COSIGN_PASSWORD` | environment `signing` | passphrase of SEC3 | as SEC3 (:440) | none |
 | SEC5 | `RPM_GPG_KEY` | **missing on GitHub** | OpenPGP secret key, ASCII-armoured, sign-only | `call-system-image.yml` `build-repo` (:31, no environment; :58, :157). PR #185 moves it to the sign-only job `sign-repo` in environment `signing` (`forge/scripts/tier_repos.sh sign`), decision A2-33 | none committed. On PR #185 `tier_repos.sh:97` exports it at signing time to `RPM-GPG-KEY-athanor`, published with the tier repositories (`:167-168`) |
 | SEC6 | `RPM_GPG_PASSPHRASE` | **missing on GitHub** | passphrase of SEC5, optional | as SEC5 (:59, :158) | none |
@@ -50,7 +50,7 @@ No repository variable is set (`gh variable list` is empty), so every default be
 
 | Id | Environment | Secrets | Protection (GitHub API, 2026-10-06) | Referenced by |
 | --- | --- | --- | --- | --- |
-| ENV1 | `signing` | SEC1, SEC2, SEC3, SEC4, SEC11 | required reviewer `hr-mes`, self-review allowed; deployment branches `iso-v0` and `main` | `call-system-image.yml:249,442`, `nvidia-kmod.yml:101`; PR #115 adds `sign-kernel`, PR #185 adds `sign-repo` |
+| ENV1 | `signing` | SEC1, SEC2, SEC3, SEC4, SEC11 | required reviewer `hr-mes`, self-review allowed; deployment branches `iso-v0` and `main` | `call-system-image.yml:431` (`sign-system-images`), `nvidia-kmod.yml:145` (`sign`, the sign-kernel job); PR #185 adds `sign-repo`. `scripts/verify.py workflows` fails a signing secret outside this environment, a signing job that builds or uses an action other than checkout and artifact transfer, and a step that hands a signing secret to anything but a sign script (D43) |
 | ENV2 | `stable-override` | none | **missing on GitHub** | PR #180 only (`promote-stable.yml`, checked by `system/require-review.sh`); `doc_update_trust.md` on that branch asks for required reviewers, the release branch only and no administrator bypass |
 | ENV3 | `delete` | none | none; created 2026-08-08 | nothing |
 | ENV4 | `github-pages` | none | deployment branches `gh-pages` and `main` | no workflow names it |
@@ -99,7 +99,7 @@ Consequences of a rotation:
 
 - Every machine with Secure Boot on trusts the old certificate through MokList. It must enrol the new one (`mokutil --import athanor-secureboot.der`, then MokManager at the console at the next boot) **before** it boots an image signed with the new key, or shim refuses that boot.
 - The installer enrols the certificate of the image it installs (A2-35), so new installations need nothing.
-- The repository holds one Secure Boot certificate (`system/build-image.sh:85` names it). A staged rotation, where release N ships the new certificate for enrolment and release N+1 is the first one it signs, needs a change there first. _(Proposal)_
+- The repository holds one Secure Boot certificate (`forge/specs/azoth/signer/run.sh` signs and verifies against it, `nvidia-publish.sh` attests its hash and `system/kernel-artifacts.sh` checks that hash). A staged rotation, where release N ships the new certificate for enrolment and release N+1 is the first one it signs, needs a change there first. _(Proposal)_
 - Disk unlock is not affected at 1.0: TPM sealing is disabled until 1.1 (A2-27). From P4b the PCR policy key decides it (`doc_kernel_profile.md` section 9).
 
 **SEC2, module signing key.** Parameters: `profiles/modules.cnf` (CN "Athanor Kernel Module
@@ -170,7 +170,9 @@ _(Proposal)_ `KERNEL_BUMP_TOKEN` now serves six workflows, not only the kernel; 
 
 Today: one maintainer holds every key, with an offline backup held by the key custodian;
 `signing` has one required reviewer, who may approve their own runs. Decision A2-27 keeps two approvals per release cycle (`sign-kernel`, then
-`sign-system-images`). Everything below is a proposal.
+`sign-system-images`). `sign-kernel` is the `sign` job of `nvidia-kmod.yml`, which runs only
+when a kernel or NVIDIA change leaves the signed modules or vmlinuz missing; any other cycle
+asks for `sign-system-images` alone. Everything below is a proposal.
 
 | Id | Proposal |
 | --- | --- |

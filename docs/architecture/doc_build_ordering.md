@@ -61,8 +61,8 @@ and the same with `-legacy-<NVIDIA_LEGACY_VERSION>`. A republished kernel with t
 **O3. One script decides.** `system/kernel-artifacts.sh` resolves the inputs of the current pins and writes a file in a known directory.
 
 - **Contents of the file:** `state=ready`, `state=modules-missing` or `state=kernel-missing`, followed by the verified digests:
-  - `ready`: the kernel and both module tags exist, are signed, and carry an attestation matching the pins and the kernel digest;
-  - `modules-missing`: the kernel is signed, but a module tag is missing or has no valid signature or attestation;
+  - `ready`: the kernel, both module tags and the signed vmlinuz (`azoth-boot:<nvr>-k<12 hex of the kernel digest>`, `boot_digest`) exist, are signed by NVIDIA kmod, and carry an attestation matching the pins (for `azoth-boot`, the sha256 of the committed Secure Boot certificate) and the kernel digest;
+  - `modules-missing`: the kernel is signed, but a module tag or the signed vmlinuz is missing or has no valid signature or attestation. NVIDIA kmod produces both, in its one sign-kernel job (D43);
   - `kernel-missing`: `azoth:<nvr>` does not exist for the pinned NVR.
 - **Exit status:** 0 for all three states. Non-zero only for an error (registry, Rekor, network, malformed data), and the calling job then fails.
 - **Retries:** registry and Rekor calls go through `retry.sh`. A persistent outage is a red run, never a skip.
@@ -76,7 +76,8 @@ and the same with `-legacy-<NVIDIA_LEGACY_VERSION>`. A republished kernel with t
 3. **`kernel-artifacts-final`:** runs the script again and requires `ready`; any other state fails the run. It is the single source of the digests that later jobs use. A job cannot run twice, hence a separate job.
 4. **`build-repo`, then `dag-system-image`:**
    - tier 0 pulls `azoth@<digest>`;
-   - `system/build-image.sh` passes the module digests as build arguments;
+   - the system stage replaces its vmlinuz with the one of `azoth-boot@<boot_digest>`, signed for Secure Boot; `dag-system-image` holds no key and runs outside the `signing` environment (D43);
+   - `system/build-image.sh` passes the module and `azoth-boot` digests as build arguments;
    - everything comes from the file of step 3, so the image is built from exactly what was verified.
 
 **When the image jobs run:** when the brain's `has_changes` is true, or when step 1 did not answer `ready`, or when the dispatch sets the input `force_image`. Kernel Build always sets it.
