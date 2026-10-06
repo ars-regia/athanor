@@ -4,7 +4,7 @@
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Purpose    | How a built and signed system image becomes the `stable` channel, how every machine reaches it with its signature verified, how the update gets smaller and lighter, and what the pipeline must change to produce it efficiently and from pinned inputs                           |
 | Owner      | the maintainer (`@hr-mes`)                                                                                                                                                                                                                                                        |
-| Status     | draft, rev 1, 2026-10-06, awaiting maintainer review. Nothing here is built before the maintainer approves it                                                                                                                                                                     |
+| Status     | draft, rev 2, 2026-10-06: the six open questions of rev 1 are decided (section 15); awaiting the maintainer's approval. Nothing here is built before it                                                                                                                                                                     |
 | Depends on | [doc_update_trust.md](doc_update_trust.md) (UT1 to UT13), [doc_ci.md](doc_ci.md) (CI1, CI11, CI12), [doc_system_image.md](doc_system_image.md), [doc_kernel_build.md](doc_kernel_build.md), [transfer-to-organisation.md](../operations/transfer-to-organisation.md) (TO1 to TO8) |
 | Defines    | UD1 to UD44                                                                                                                                                                                                                                                                       |
 
@@ -16,7 +16,7 @@ Binding decisions: [A2-4](../decisions/0039-delivery-repairs-before-1-0.md), [A2
 
 The first five priorities of the pipeline audit of 2026-10-06, in order:
 
-1. **Delivery works.** The `stable` channel exists, is promoted by digest from a signed run with evidence, every machine follows it, and machines move from `ghcr.io/hr-mes` to `ghcr.io/ars-regia` without a hand-typed command per machine.
+1. **Delivery works.** The `stable` channel exists, is promoted by digest from a signed run with evidence, every machine follows it, and the maintainer's two machines move from `ghcr.io/hr-mes` to `ghcr.io/ars-regia` with the digest verified.
 2. **An upgrade test in CI.** The previous release is upgraded to the candidate, rebooted, checked, and rolled back, and the result is a required promotion gate.
 3. **Machines verify signatures.** The policy of UT3 is in force on every machine, the publication order makes an unsigned image unreachable, and key rotation cannot strand a machine.
 4. **Lighter updates.** Reproducible builds, rechunked images, a recorded download size per upgrade, and soft reboots where the kernel does not change.
@@ -81,11 +81,11 @@ Acceptance: `python3 scripts/verify.py workflows` gains a check that no workflow
 - `upgrade-acceptance` (UD18) for the default variant;
 - `signature` (UD25) for all three variants.
 
-An evidence file is JSON written by the gate's script: `{"gate", "digest", "run_id", "verdict", "workflow_run_url", "finished_at"}`. The workflow downloads the files into `artifacts/evidence/`; `promote.sh` reads only that directory (portable pipeline rule). The variants without their own runtime evidence follow open question 2. Acceptance: `system/tests/test_promote.sh` asserts a refusal for a missing file, a `fail` verdict, and a digest mismatch.
+An evidence file is JSON written by the gate's script: `{"gate", "digest", "run_id", "verdict", "workflow_run_url", "finished_at"}`. The workflow downloads the files into `artifacts/evidence/`; `promote.sh` reads only that directory (portable pipeline rule). The NVIDIA variants, which the hosted virtual GPU cannot test, also need a `hardware` evidence file for the same digest: a maintainer machine on `:latest` writes it with one command (`athanor-update report-evidence`, a test-mode verb) after a session has started on that digest. Without it, the default variant promotes alone (decision 2 of section 15). Acceptance: `system/tests/test_promote.sh` asserts a refusal for a missing file, a `fail` verdict, and a digest mismatch.
 
-**UD5. Promotion is automatic after the evidence and a dwell; `promote.sh` by hand is the override** (A2-4). A scheduled job of `promote-stable.yml` _(Proposal: hourly)_ selects the newest run whose evidence is complete and whose last evidence file is older than the dwell _(Proposal: 24 hours; open question 1)_, and that is newer than `:stable` by build time (the existing refusal). A newer run with complete evidence restarts the dwell. The manual dispatch keeps its `run_id` input and the same evidence checks; it may shorten the dwell, never skip the evidence. Acceptance: a dry-run mode (`promote.sh --plan`) prints the run it would promote; the job summary records it on each scheduled run.
+**UD5. Promotion is automatic after the evidence and a dwell; `promote.sh` by hand is the override** (A2-4). A scheduled job of `promote-stable.yml` _(Proposal: hourly)_ selects the newest run whose evidence is complete and whose last evidence file is older than the dwell of 24 hours (decision 1 of section 15), and that is newer than `:stable` by build time (the existing refusal). A newer run with complete evidence restarts the dwell. The manual dispatch keeps its `run_id` input and the same evidence checks; it may shorten the dwell, never skip the evidence. Acceptance: a dry-run mode (`promote.sh --plan`) prints the run it would promote; the job summary records it on each scheduled run.
 
-**UD6. Promotion records what it did.** Each promotion writes `artifacts/promotion.json` (`run_id`, the three digests, the previous `:stable` digests, the evidence files' SHA-256, the trigger: `schedule` or `dispatch`) and attaches it to the promoted digests as a keyless cosign attestation, the public record. The security class of UT13 is a field of a key-signed attestation; who signs it, and when, is open question 3 and binds A2-26 and A2-27. Until it is decided, every promotion is of the feature class, which is UT13's reading of an image without a verified class field. Acceptance: `cosign verify-attestation` with the workflow identity of `promote-stable.yml` passes on the promoted digests.
+**UD6. Promotion records what it did.** Each promotion writes `artifacts/promotion.json` (`run_id`, the three digests, the previous `:stable` digests, the evidence files' SHA-256, the trigger: `schedule` or `dispatch`) and attaches it to the promoted digests as a keyless cosign attestation, the public record. The security class of UT13 is a field of a key-signed attestation (decision 3 of section 15): an automatic promotion is always of the feature class and uses no key, which is UT13's reading of an image without a verified class field; a security-class promotion goes through the manual `promote.sh` in the `signing` environment, which signs that attestation. Acceptance: `cosign verify-attestation` with the workflow identity of `promote-stable.yml` passes on the promoted digests.
 
 **UD7. Promotion never moves a machine backwards and never strands one on a key.** Beyond the existing build-time refusal, `promote.sh` refuses a digest whose key-based signature verifies only with a key that the current `:stable` image does not carry in its `keyPaths` (UT3 rotation: key _n+1_ must ship in a promoted image signed with _n_ before an image signed with _n+1_ is promoted). Acceptance: `system/tests/test_promote.sh` with two test keys covers both orders.
 
@@ -99,31 +99,22 @@ An evidence file is JSON written by the gate's script: `{"gate", "digest", "run_
 
 ## 5. The namespace move (priority 1)
 
-TO6 asks the maintainer to run `sudo bootc switch ghcr.io/ars-regia/athanor-system:latest` on each machine. That leaves the signature unverified for the first hop, follows `:latest`, and scales only to machines the maintainer can reach. It is replaced by the mechanism below; TO6 becomes its fallback (section 13).
+Athanor runs on two machines, both the maintainer's: the desktop and the laptop `athanor-ref` (maintainer, 2026-10-06). Both are within reach, so the move from `ghcr.io/hr-mes` to `ghcr.io/ars-regia` is a verified step on each machine, not a mechanism in the client. A client mechanism (a file naming the canonical repository, a signed bridge image left under the old namespace) is designed only if the repository moves again after machines outside the maintainer's reach exist.
 
-**UD11. The image names its canonical repository; the client derives its target from that file, not from the booted reference.** The build renders `/usr/share/athanor/update/channel.json` from the same variables as the policy (UT3):
+**UD11. Each machine moves by digest, verified before the switch.** After TO5 has republished the images under `ars-regia`, on each machine:
 
-```json
-{
-  "channel": "stable",
-  "repository": "ghcr.io/ars-regia/athanor-system-nvidia",
-  "previous": ["ghcr.io/hr-mes/athanor-system-nvidia"]
-}
-```
+1. read the digest of `ghcr.io/ars-regia/<image>:latest` for the machine's variant (`:stable` once it exists);
+2. verify it out of band through the new image's rendered policy: `skopeo copy --policy <rendered policy of the new image> docker://<repo>@<digest> dir:<tmp>`;
+3. run `sudo bootc switch <repo>@<digest>`. The booted policy names only `hr-mes`, so it cannot enforce this one switch; step 2 is the check, and the switch by digest installs exactly the verified image;
+4. after the reboot the new image's policy is in force, and UT4's migration moves the machine to `ostree-image-signed:docker://<repo>:stable` once `:stable` exists.
 
-`migrate.rs` targets `<repository>:<channel>` from the file. It runs when the booted reference is unverified (today's case) or when the booted repository is listed in `previous`. Its stamp stores the target reference instead of being empty, and the unit's condition becomes "the stamp is absent or names another target", so a machine migrated once migrates again after the repository moves. `check.rs` treats a repository in `previous` as in scope for the badge until the move completes. `verify.py shipped` checks that the file exists, parses, and that its repository matches a `sigstoreSigned` scope of the shipped policy. Acceptance: `cargo test -p athanor-update` covers the three cases (unverified, previous, canonical); `python3 scripts/verify.py shipped`.
+Acceptance: on each machine `bootc status --format=json` names an `ars-regia` reference and, once `:stable` exists, the shield reads verified.
 
-**UD12. The policy carries both namespaces while `previous` is not empty.** The render script emits three `sigstoreSigned` scopes per repository of `channel.json` (canonical and previous), with the same `keyPaths`; its assertion becomes "three per namespace". Scopes for `previous` leave in the first image promoted after every reachable machine has moved (open question 4). Acceptance: `verify.py shipped` counts the scopes against `channel.json`.
+**UD12. The policy names only the canonical namespace.** The rendered policy keeps its three `sigstoreSigned` scopes under the registry owner the build derives (#230); no `hr-mes` scope is added. Acceptance: `python3 scripts/verify.py shipped` and UD22.
 
-**UD13. Machines still on `ghcr.io/hr-mes` reach the bridge by their own code.** A machine running an image built before UD11 targets `ghcr.io/hr-mes/<image>:stable`, verified by its own policy, which knows only `hr-mes`. The **bridge** is one promoted `ars-regia` digest (built with UD11 and UD12) copied by digest to `ghcr.io/hr-mes/<image>:stable` for each variant, with a key-based signature whose identity is the `hr-mes` reference (`skopeo copy --preserve-digests --sign-by-sigstore-private-key`, as `sign-images.sh` does). Such a machine then:
+**UD13. The client keeps UT4's target.** `migrate.rs` keeps targeting `<booted repository>:stable`; after UD11 the booted repository is the `ars-regia` one. Acceptance: `cargo test -p athanor-update` (exists).
 
-1. migrates to the `hr-mes` bridge with the signature enforced by its old policy;
-2. boots the bridge, whose `channel.json` lists `hr-mes` as previous;
-3. switches to `ghcr.io/ars-regia/<image>:stable` with `--enforce-container-sigpolicy`; when the digests are equal, nothing is downloaded _(to verify on the dev VM)_.
-
-The bridge script is `system/bridge-namespace.sh` _(new)_; who runs it is open question 4. It ends with the same verification as UT2: `skopeo copy --policy` of the bridge digest through the **old** image's rendered policy. The bridge digest is kept indefinitely (TO7 keeps `hr-mes`), so a machine that comes back online after months still finds it. The transfer to `ars-regia` took place on 2026-10-06, before section 4 is built: `:stable` is created under `ars-regia` first and the bridge is the first `hr-mes:stable`, so no machine migrates twice. Acceptance: dev-VM harness stage `rotate-namespace` _(new)_: a guest booted from an image with only `hr-mes` scopes and an unverified reference ends on `ostree-image-signed:docker://<ars-regia repo>:stable`, with the verified badge, without a command typed in the guest; it then upgrades once more under enforcement.
-
-**UD14. The organisation rename stays blocked until the move is observed** (TO8, unchanged). Evidence: every machine the maintainer controls reports `.verified.state == "verified"` on an `ars-regia` reference, and the bridge has been published for at least the dwell of UD5.
+**UD14. The organisation rename stays blocked until the move is observed** (TO8, unchanged). Evidence: the desktop and the laptop both report `.verified.state == "verified"` on an `ars-regia` reference.
 
 ### 5.1 The maintainer's desktop and the layering rule
 
@@ -131,7 +122,7 @@ The bridge script is `system/bridge-namespace.sh` _(new)_; who runs it is open q
 
 1. `sudo rpm-ostree uninstall nvidia-container-toolkit`. The image already ships the toolkit in its NVIDIA stage; `nvidia-ctk cdi list` after the reboot shows the GPUs _(to verify)_.
 2. Reboot. `bootc status --format=json` shows a non-null `.status.booted.image`, and `rpm-ostree status --json --booted` shows no `requested-packages`, `requested-local-packages` or overrides.
-3. The migration of UT4 runs once a target exists (the bridge of UD13 or `hr-mes:stable`). Fallback when neither exists and the desktop must move: verify the digest out of band (`skopeo copy --policy <the new image's rendered policy> docker://<repo>@<digest> dir:...`), then `sudo bootc switch --enforce-container-sigpolicy <repo>@<digest>`. The switch is by digest, so the verified digest is the one installed; the migration then moves the machine to the channel tag at the next boot.
+3. The desktop moves to `ars-regia` with UD11.
 
 Acceptance: `bootc status --format=json | jq -e '.status.booted.image != null'` and the shield reads verified after step 3.
 
@@ -203,7 +194,7 @@ A reproducible build is the precondition for small updates: a layer whose bytes 
 
 Acceptance: `python3 scripts/verify.py paths` _(extended)_ fails on any `FROM`, `--mount=...from=` or `podman run` image in `system/` and `forge/scripts/` without `@sha256:`, except the RA-12 tier stages, which must take their digest from the lock.
 
-**UD29. Timestamps come from the commit.** `build-image.sh` exports `SOURCE_DATE_EPOCH` as the commit time of `HEAD` and passes `--source-date-epoch "$SOURCE_DATE_EPOCH" --rewrite-timestamp` to `podman build` (podman 5.8.4 documents both). `org.opencontainers.image.created` becomes the commit time. A rebuild of the same commit is therefore not newer, and `promote.sh` refuses it, which is correct when every input is pinned: a change reaches machines through a commit, a bump pull request included. The serial of UT9's version label changes from the run number to the commit count of `HEAD` _(Proposal; open question 5)_. Acceptance: two builds of the same commit report the same `created` and version labels.
+**UD29. Timestamps come from the commit.** `build-image.sh` exports `SOURCE_DATE_EPOCH` as the commit time of `HEAD` and passes `--source-date-epoch "$SOURCE_DATE_EPOCH" --rewrite-timestamp` to `podman build` (podman 5.8.4 documents both). `org.opencontainers.image.created` becomes the commit time. A rebuild of the same commit is therefore not newer, and `promote.sh` refuses it, which is correct when every input is pinned: a change reaches machines through a commit, a bump pull request included. The serial of UT9's version label changes from the run number to the commit count of `HEAD` (decision 5 of section 15). Acceptance: two builds of the same commit report the same `created` and version labels.
 
 **UD30. The UKI and initramfs stay deterministic.** `assemble_uki.sh` keeps `dracut --reproducible` and runs under the same `SOURCE_DATE_EPOCH`. Any signature in the boot chain that embeds a time is listed in UD31's exceptions with the reason. Acceptance: UD31.
 
@@ -275,7 +266,7 @@ The download saving is bounded at about 820 MB, or 11% (stage-5 measurement), wh
 
 **UD43. Every external image the pipeline runs is pinned, and bumps arrive as pull requests.** `bootc-image-builder` is pinned by digest in `build_iso.sh`. The existing Nix registry bump workflow is extended, or a sibling is added, to open a pull request when a pinned image or the flake moves. The `flatpak` job, a no-op that ends in `|| true`, is removed. Acceptance: UD28's `verify.py paths` check; `grep -n '|| true' .github/workflows/call-system-image.yml` finds nothing.
 
-**UD44. Tier repository images are signed, and the system build verifies them before use.** `publish_tier` pushes `:<run_id>` and `hash-<hash>`, records the digest in `config/tier-digests.json` (UD28), and signs keyless by digest. The system image job verifies each tier digest with `cosign verify` against the workflow identity before building. RPM signing is removed _(Proposal; open question 6)_: the dead `RPM_GPG_KEY` branches go away, because RPMs reach a machine only inside the signed image, ADR-0076 removed the DNF channel, and a signature that is silently skipped protects nothing. Acceptance: the system image job fails when a tier digest's signature does not verify (tested once with a tampered digest on a branch).
+**UD44. Tier repository images are signed, and the system build verifies them before use.** `publish_tier` pushes `:<run_id>` and `hash-<hash>`, records the digest in `config/tier-digests.json` (UD28), and signs keyless by digest. The system image job verifies each tier digest with `cosign verify` against the workflow identity before building. RPM signing is removed (decision 6 of section 15): the dead `RPM_GPG_KEY` branches go away, because RPMs reach a machine only inside the signed image, ADR-0076 removed the DNF channel, and a signature that is silently skipped protects nothing. Acceptance: the system image job fails when a tier digest's signature does not verify (tested once with a tampered digest on a branch).
 
 ### 10.1 Kernel builds: measure before moving
 
@@ -290,11 +281,11 @@ Each phase ends at a gate. The next phase does not start until the gate is green
 | **P0. Repairs**                                    | UD9, UD15 steps 1 and 2, UD24, UD25, UD3, UD43 (builder pin)     | one orchestrator run with `:latest` written after the signature job; `test_promote.sh` green; the desktop shows a non-null image and no layered packages; the migrate unit shows 0 restarts in an hour on a VM without `:stable` | no more failed-unit noise; the desktop updates again                                               |
 | **P1. Evidence**                                   | UD17, UD18, UD19, UD21, UD4 (evidence files)                     | two consecutive orchestrator runs with green ISO and upgrade acceptance on their own digests                                                                                                                                     | nothing                                                                                            |
 | **P2. `stable` exists**                            | UD1, UD2, UD5, UD6, UD7, UD8, UD10, UD16, UD20, UD22, UD23, UD27 | `:stable` created by `promote.sh` with evidence, then one automatic promotion; a dev VM installed from the ISO follows `:stable` signed                                                                                          | machines move once to `stable`, one download, and the shield turns verified                        |
-| **P3. Namespace** (after TO5, the republication) | UD11, UD12, UD13, UD14                                           | the dev-VM stage `rotate-namespace` is green; every maintainer machine is verified on an `ars-regia` reference                                                                                                                   | one more switch, normally with nothing downloaded                                                  |
+| **P3. Namespace** (after TO5, the republication) | UD11, UD12, UD13, UD14 | the desktop and the laptop are verified on an `ars-regia` reference | one switch per machine, done by the maintainer |
 | **P4. Lighter**                                    | UD28 to UD39                                                     | five candidates with `upgrade-bytes.json`; the weekly reproducibility check green or with named exceptions; a soft reboot observed on the dev VM                                                                                 | one full download (UD33), then smaller updates; "Restart the desktop" when the kernel is unchanged |
 | **P5. Pipeline**                                   | UD40, UD41, UD42, UD44, section 10.1                             | a documentation-only commit schedules zero matrix jobs; variants share the `system` layers; tier signatures are verified in the system build; the ccache hit rate is recorded for five builds                                    | nothing                                                                                            |
 
-The transfer to `ars-regia` took place on 2026-10-06, so P2 creates `:stable` under `ars-regia` and P3's bridge is the first `hr-mes:stable` (UD13). Spike S1 (soft reboot, UD35 to UD37) runs on the dev VM at the start of P4.
+The transfer to `ars-regia` took place on 2026-10-06, so P2 creates `:stable` under `ars-regia` only; no `hr-mes:stable` is ever published. Spike S1 (soft reboot, UD35 to UD37) runs on the dev VM at the start of P4.
 
 ## 12. Interfaces and failure behaviour
 
@@ -303,18 +294,17 @@ The transfer to `ars-regia` took place on 2026-10-06, so P2 creates `:stable` un
 | `image-digests.txt` (`REPOSITORY TAG DIGEST`) | build job                   | missing or malformed: signing and tagging refuse (exists)                                                                       |
 | `artifacts/evidence/<gate>.json`              | each gate's script          | absent, `fail`, or another digest: `promote.sh` refuses, names the gate, exits non-zero                                         |
 | `artifacts/promotion.json`                    | `promote.sh`                | a write failure after the copy fails the job; `:stable` is re-read and reported                                                 |
-| `/usr/share/athanor/update/channel.json`      | image build (render script) | missing or unparsable: the client keeps UT4's behaviour (target from the booted repository) and publishes `policy-not-in-force` |
 | `config/tier-digests.json`                    | DAG publish                 | a digest without a verifying signature: the system build fails                                                                  |
 | `artifacts/metrics/*.json`                    | gates                       | reported, never a gate until the maintainer sets a target                                                                       |
 | state file `apply_kind`                       | `athanor-update`            | absent (older client): the notifier says "Restart to update"                                                                    |
 
-A failed promotion leaves `:stable` where it was: the copy to `:stable` is the last write. A bridge that fails its own verification is deleted by digest before the script exits non-zero.
+A failed promotion leaves `:stable` where it was: the copy to `:stable` is the last write.
 
 ## 13. Changes to other documents
 
-- `doc_update_trust.md`: UT4 gains the target from `channel.json` and the re-run on a target change (UD11). UT7 gains `apply_kind` (UD37). UT9's serial is set by open question 5. UT10 keeps the promoted ISOs and `:stable-<date>` (UD8). Acceptance items for UD13, UD16 and UD35 are added.
+- `doc_update_trust.md`: UT7 gains `apply_kind` (UD37). UT9's serial becomes the commit count of `HEAD` (decision 5). UT10 keeps the promoted ISOs and `:stable-<date>` (UD8). Acceptance items for UD16 and UD35 are added.
 - `doc_ci.md`: the release path becomes CI1 build → sign → tag `latest` → CI12 ISO and upgrade acceptance on the run → CI11 automatic promotion after the dwell, with manual override.
-- `transfer-to-organisation.md`: TO6 becomes the fallback of UD15 step 3 (by digest, verified, never `:latest`); TO8 cites UD14.
+- `transfer-to-organisation.md`: TO6 becomes UD11 (by digest, verified out of band, never `:latest`); TO8 cites UD14.
 - `doc_kernel_build.md`: item 9 gains the hit-rate record of section 10.1.
 - `docs/operations/`: the desktop recovery (UD15) and the layering rule (UD16).
 
@@ -322,21 +312,19 @@ A failed promotion leaves `:stable` where it was: the copy to `:stable` is the l
 
 | Risk                                                                                    | Effect                                         | Mitigation                                                                                                 |
 | --------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| The `ars-regia` workflows cannot write `ghcr.io/hr-mes` packages (TO1.3, _(to verify)_) | the bridge cannot be published from CI         | open question 4: the maintainer runs `bridge-namespace.sh` once with the offline kit; fallback UD15 step 3 |
 | Hosted runner disk or time is too small for the upgrade test                            | P1 cannot close                                | UD21's free-space record; the qcow2 is sparse; the ISO is deleted after install                            |
-| Automatic promotion ships a regression the virtual GPU cannot show (NVIDIA)             | NVIDIA machines break after the dwell          | open question 2; one-step `GoBack()`; greenboot holds a bad deployment (UT13)                              |
+| Automatic promotion ships a regression the virtual GPU cannot show (NVIDIA)             | NVIDIA machines break after the dwell          | the `hardware` evidence of UD4; one-step `GoBack()`; greenboot holds a bad deployment (UT13)                              |
 | Rechunking drops xattrs, SELinux labels or labels                                       | an image that boots wrong or loses its version | UD22 and both acceptances run on the rechunked image; UD32's label check                                   |
 | The first rechunked release costs every machine a full download                         | metered users and slow links                   | UD33's notice; UT12 defers on metered connections                                                          |
 | A soft reboot pairs old kernel modules with new userspace                               | no GPU after the update                        | UD36's module-tree comparison                                                                              |
 | Pinning live packages slows security fixes                                              | a fix waits for a bump pull request            | the bump bot runs daily; a security fix can be promoted through the manual override after its evidence     |
-| The bridge digest is old by the time a machine reaches it                               | a machine boots an old image for one cycle     | the bridge machine switches to the current `ars-regia:stable` on its next migration run                    |
 | Key compromise                                                                          | unchanged from UT2: not recoverable remotely   | unchanged                                                                                                  |
 
-## 15. Open questions for the maintainer
+## 15. Decisions of the maintainer (2026-10-06)
 
-1. **How long is the dwell before automatic promotion?** Recommendation: 24 hours from the last evidence file, restarted by a newer complete candidate. The maintainer's own machines on `:latest` get a day of use before anyone else.
-2. **What gate do the NVIDIA variants need?** A2-4 requires acceptance evidence, and the hosted virtual GPU cannot load NVIDIA modules. Recommendation: the NVIDIA variants promote only with a `hardware` evidence file. A maintainer machine on `:latest` writes it with one command (`athanor-update report-evidence`, a test-mode verb) after a session starts on that digest. Without it, the default variant promotes alone.
-3. **Who signs the promotion attestation that carries the security class (A2-26), given two approvals per release cycle (A2-27)?** A key-signed attestation in an automatic job would need the `signing` environment, which is a third approval per cycle or a key outside its single job. Recommendation: automatic promotion is always feature class and needs no key. A security-class promotion goes through the manual `promote.sh` override in the `signing` environment, which signs the attestation. That approval is needed only when a release answers an advisory.
-4. **Who publishes the bridge to `ghcr.io/hr-mes`, and when do the `hr-mes` scopes leave the policy?** Recommendation: the maintainer runs `system/bridge-namespace.sh` once, with the key from the offline kit and a token scoped to `hr-mes` packages. The script ends with the old policy's verification, and no cross-owner token enters the `signing` environment. The scopes leave in the first image promoted after the bridge's dwell, once every maintainer machine is verified on `ars-regia`; the bridge image keeps its own policy for machines that reach it later.
-5. **What is the version serial under reproducible builds?** UT9's run-number serial makes two builds of the same commit differ. Recommendation: the commit count of `HEAD`, so the label is a function of the source.
-6. **Should RPM signing be removed or done?** Recommendation: remove it (UD44). Its only consumer is the system build, which verifies the signed tier image digest; a user receives only the signed system image.
+1. **Dwell before automatic promotion: 24 hours** from the last evidence file, restarted by a newer complete candidate. The maintainer's machines on `:latest` use a release for a day before anyone else (UD5).
+2. **The NVIDIA variants promote only with `hardware` evidence** written by a maintainer machine on `:latest` after a session has started on that digest; without it the default variant promotes alone (UD4).
+3. **Automatic promotion is always of the feature class and uses no key.** A security-class promotion goes through the manual `promote.sh` in the `signing` environment, which signs the attestation; that approval is needed only when a release answers an advisory (UD6, A2-26, A2-27).
+4. **No bridge.** Athanor runs only on the maintainer's desktop and laptop, so each moves to `ars-regia` by the verified manual step of UD11, and the policy never carries `hr-mes` scopes (UD11 to UD14).
+5. **The version serial is the commit count of `HEAD`**, so the label is a function of the source (UD29).
+6. **RPM signing is removed** (UD44): RPMs reach a machine only inside the signed image, which verifies the signed tier digests.
