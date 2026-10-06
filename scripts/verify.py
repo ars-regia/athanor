@@ -23,6 +23,11 @@ import sys
 import tomllib
 from pathlib import Path
 
+try:
+    import yaml  # PyYAML, for the D43 lint, which fails closed without it
+except ImportError:
+    yaml = None
+
 ROOT = Path(__file__).resolve().parent.parent
 RS_DIRS = ["system", "forge/specs"]
 
@@ -163,9 +168,20 @@ def check_workflows():
     return r
 
 
+# D43 lint. A regression guard, not a security boundary: it keeps a reviewed workflow from
+# drifting into handing a signing key to a build or to a third-party action, and fails closed on
+# a workflow it cannot read. What protects the keys is the environment protection on GitHub
+# (required reviewer, deployment branches) and the review of every workflow change.
+
 # The actions a sign-only job may use, pinned by a full commit SHA (D43).
 SIGN_ONLY_ACTIONS = re.compile(
     r"^actions/(?:checkout|download-artifact|upload-artifact)@[0-9a-f]{40}$")
+# The inputs of those actions a sign-only job may not set: another ref or repository to check
+# out, another run's or repository's artifacts to download (D43).
+SIGN_ONLY_INPUTS = {
+    "actions/checkout": {"ref", "repository"},
+    "actions/download-artifact": {"run-id", "repository", "github-token"},
+}
 # What builds, installs or runs a locally built image. A sign-only job receives built
 # artefacts and runs no build step: a compromised build must not be able to sign (D43).
 SIGN_ONLY_FORBIDDEN = re.compile(
@@ -175,108 +191,154 @@ SIGN_ONLY_FORBIDDEN = re.compile(
     r"|\bbuild-image\.sh\b|\bbuild_iso\.sh\b|\bnvidia\.sh\s+build\b|\blocalhost/")
 # The only commands a step holding a signing secret may run, whole: the sign scripts (D43).
 SIGN_SCRIPTS = re.compile(
-    r"^run: bash (?:forge/specs/azoth/signer/run\.sh sign"
+    r"^bash (?:forge/specs/azoth/signer/run\.sh sign"
     r'|system/sign-images\.sh [\w./-]+ \| tee -a "\$\{GITHUB_STEP_SUMMARY\}")$')
+EXPRESSION = re.compile(r"\$\{\{(.*?)\}\}", re.S)
+# Contexts are case-insensitive: secrets.cosign_private_key reads COSIGN_PRIVATE_KEY.
+SECRET_NAME = re.compile(r"\bsecrets\s*\.\s*([A-Za-z_][A-Za-z0-9_-]*)", re.I)
+SECRETS_WORD = re.compile(r"\bsecrets\b", re.I)
+ENVIRONMENTS_JSON = ".github/settings/environments.json"
 
 
-def workflow_jobs(text):
-    """The jobs of a workflow as (id, first line number, lines), from the two-space layout
-    every workflow of this repository uses: verify.py reads YAML without a YAML parser."""
-    lines = text.split("\n")
-    jobs, current, inside = [], None, False
-    for number, line in enumerate(lines, 1):
-        if re.match(r"^jobs:\s*$", line):
-            inside = True
-            continue
-        if inside and re.match(r"^\S", line):
-            inside = False
-        if not inside:
-            continue
-        m = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
-        if m:
-            current = (m.group(1), number, [])
-            jobs.append(current)
-        elif current is not None:
-            current[2].append((number, line))
-    return jobs
+def yaml_strings(node, path=()):
+    """Every string of a parsed YAML node, with the keys and indexes that lead to it."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield from yaml_strings(value, path + (key,))
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            yield from yaml_strings(value, path + (index,))
+    elif isinstance(node, str):
+        yield path, node
 
 
-def job_environment(lines):
-    """The environment name a job declares, or None."""
-    for i, (_, line) in enumerate(lines):
-        m = re.match(r"^    environment:\s*(\S*)\s*$", line)
-        if not m:
-            continue
-        if m.group(1):
-            return m.group(1).strip("'\"")
-        for _, nxt in lines[i + 1:]:
-            n = re.match(r"^      name:\s*(\S+)", nxt)
-            if n:
-                return n.group(1).strip("'\"")
-            if re.match(r"^    \S", nxt):
-                break
-    return None
+def secret_references(text):
+    """The secrets the expressions of text name as secrets.NAME, upper-cased, and whether any
+    of them reads secrets another way (secrets['X'], secrets[format(...)], toJSON(secrets))."""
+    names, dynamic = set(), False
+    for expression in EXPRESSION.findall(text):
+        named = SECRET_NAME.findall(expression)
+        names |= {name.upper() for name in named}
+        dynamic |= len(SECRETS_WORD.findall(expression)) > len(named)
+    return names, dynamic
+
+
+def job_environment(job):
+    """The environment name a parsed job declares, as a string or as a mapping, or None."""
+    environment = job.get("environment")
+    if isinstance(environment, dict):
+        environment = environment.get("name")
+    return environment.strip() if isinstance(environment, str) else None
+
+
+def signing_environments(root):
+    """{secret: environment} for the environments named signing* in environments.json, the one
+    place that says which environment holds which key, and the problems of those environments."""
+    environments = json.loads(read(Path(root) / ENVIRONMENTS_JSON))
+    signing = {name: env for name, env in environments.items() if name.startswith("signing")}
+    if not signing:
+        return {}, [f"{ENVIRONMENTS_JSON}: no signing environment (D43)"]
+    holders, problems = {}, []
+    for name, env in sorted(signing.items()):
+        if not env.get("reviewers"):
+            problems.append(f"{ENVIRONMENTS_JSON}: the {name} environment has no required reviewer (D43)")
+        for secret in env.get("secrets", []):
+            if secret in holders:
+                problems.append(f"{ENVIRONMENTS_JSON}: {secret} is in {holders[secret]} and in {name}: "
+                                "each key has one environment (D43)")
+            holders.setdefault(secret, name)
+    return holders, problems
 
 
 def signing_problems(root):
-    """D43 (doc_kernel_profile.md, section 12 item 1): a secret of the `signing` environment is
-    read only by jobs of that environment; such a job uses no action but checkout,
-    download-artifact and upload-artifact pinned by SHA, calls no reusable workflow, and builds,
-    installs or runs no locally built image; the environment has a required reviewer."""
+    """D43 (doc_ci.md; doc_kernel_profile.md, section 12 item 1): a signing secret is read only
+    in the env of a step that runs nothing but a sign script, in a job of the environment that
+    holds it; a job of a signing environment uses no action but checkout, download-artifact and
+    upload-artifact pinned by SHA and pointed at this run and repository, calls no reusable
+    workflow, runs no container and builds, installs or runs no locally built image; no secret
+    is read other than by name, and no caller inherits secrets into a workflow with a signing
+    job; each signing environment has a required reviewer."""
     root = Path(root)
-    settings = root / ".github/settings/environments.json"
-    environments = json.loads(read(settings))
-    signing = environments.get("signing")
-    if signing is None:
-        return [f"{settings.relative_to(root).as_posix()}: no signing environment (D43)"]
-    problems = []
-    if not signing.get("reviewers"):
-        problems.append(f"{settings.relative_to(root).as_posix()}: "
-                        "the signing environment has no required reviewer (D43)")
-    secrets = re.compile(r"\bsecrets\.(" + "|".join(map(re.escape, signing.get("secrets", []))) + r")\b")
+    holders, problems = signing_environments(root)
+    if yaml is None:
+        return problems + ["scripts/verify.py: PyYAML is missing, so the D43 lint cannot read the "
+                           "workflows (pip install pyyaml)"]
+    signing = {name for name in json.loads(read(root / ENVIRONMENTS_JSON)) if name.startswith("signing")}
+    workflows = {}
     for wf in sorted((root / ".github/workflows").glob("*.y*ml")):
-        for job, _, lines in workflow_jobs(read(wf)):
-            code = [(n, line) for n, line in lines if not line.lstrip().startswith("#")]
-            environment = job_environment(code)
-            if signing.get("secrets"):
-                read_secrets = sorted({m for _, line in code for m in secrets.findall(line)})
-                for secret in read_secrets if environment != "signing" else ():
-                    problems.append(f"{wf.name}: job {job} reads {secret} without environment: signing (D43)")
-            if environment != "signing":
-                continue
-            for _, line in code:
-                m = re.match(r"^\s*(?:- )?uses:\s*(\S+)", line)
-                if m and not SIGN_ONLY_ACTIONS.match(m.group(1)):
-                    problems.append(f"{wf.name}: signing job {job} uses {m.group(1)}: only checkout, "
-                                    "download-artifact and upload-artifact pinned by SHA (D43)")
-            for n, line in code:
-                m = SIGN_ONLY_FORBIDDEN.search(line)
-                if m:
-                    problems.append(f"{wf.name}:{n}: signing job {job} builds or installs: {m.group(0)} (D43)")
-            if signing.get("secrets"):
-                problems += secret_steps(wf.name, job, code, secrets)
+        try:
+            doc = yaml.safe_load(read(wf))
+        except yaml.YAMLError as error:
+            problems.append(f"{wf.name}: not YAML the D43 lint can read: {str(error).splitlines()[0]}")
+            continue
+        jobs = doc.get("jobs") if isinstance(doc, dict) else None
+        if not isinstance(jobs, dict) or not jobs or not all(isinstance(job, dict) for job in jobs.values()):
+            problems.append(f"{wf.name}: no mapping of jobs the D43 lint can read")
+            continue
+        workflows[wf.name] = doc
+    with_signing_job = {name for name, doc in workflows.items()
+                        if any(job_environment(job) in signing for job in doc["jobs"].values())}
+    for name, doc in workflows.items():
+        problems += workflow_signing_problems(name, doc["jobs"], holders, signing, with_signing_job, set(workflows))
+        for path, text in yaml_strings(doc):
+            names, dynamic = secret_references(text)
+            if dynamic:
+                problems.append(f"{name}: {'.'.join(map(str, path))} reads secrets other than as "
+                                "secrets.NAME, which hides the secret it reads (D43)")
+            if names & holders.keys() and path[:1] != ("jobs",):
+                for secret in sorted(names & holders.keys()):
+                    problems.append(f"{name}: {secret} at the workflow level ({path[0]}), where every job "
+                                    "reads it (D43)")
     return problems
 
 
-def secret_steps(name, job, code, secrets):
-    """A signing secret reaches one step, and that step runs one sign script and nothing else."""
-    problems, steps, current = [], [], None
-    for n, line in code:
-        if re.match(r"^      - ", line):
-            current = []
-            steps.append(current)
-        if current is None:
-            if secrets.search(line):
-                problems.append(f"{name}:{n}: signing job {job} exposes a signing secret to every step (D43)")
-        else:
-            current.append((n, line))
-    for step in steps:
-        if not any(secrets.search(line) for _, line in step):
+def workflow_signing_problems(name, jobs, holders, signing, with_signing_job, readable):
+    """The D43 problems of the jobs of one workflow (see signing_problems)."""
+    problems = []
+    for job_id, job in jobs.items():
+        environment = job_environment(job)
+        steps = job.get("steps") if isinstance(job.get("steps"), list) else []
+        for path, text in yaml_strings(job):
+            for secret in sorted(secret_references(text)[0] & holders.keys()):
+                if environment != holders[secret]:
+                    problems.append(f"{name}: job {job_id} reads {secret} without environment: "
+                                    f"{holders[secret]}, which holds it (D43)")
+                elif path[:1] != ("steps",) or path[2:3] != ("env",) or len(path) != 4:
+                    problems.append(f"{name}: job {job_id} reads {secret} in {'.'.join(map(str, path))}, "
+                                    "not in the env of the step that signs (D43)")
+                else:
+                    step = steps[path[1]]
+                    run = step.get("run")
+                    if "uses" in step or not isinstance(run, str) or not SIGN_SCRIPTS.match(run.strip()):
+                        problems.append(f"{name}: job {job_id} step {path[1] + 1} hands {secret} to a step "
+                                        "that does not run only a sign script (D43)")
+        if job.get("secrets") == "inherit":
+            called = str(job.get("uses", ""))
+            local = called.removeprefix("./.github/workflows/")
+            if local == called or local in with_signing_job or local not in readable:
+                problems.append(f"{name}: job {job_id} inherits every secret into {called}, which has a "
+                                "signing job or cannot be read: pass the secrets it needs by name (D43)")
+        if environment not in signing:
             continue
-        runs = [(n, line.strip()) for n, line in step if re.match(r"^\s+(?:- )?run:", line)]
-        if len(runs) != 1 or not SIGN_SCRIPTS.match(runs[0][1]):
-            problems.append(f"{name}:{step[0][0]}: signing job {job} hands a signing secret to a step that "
-                            "does not run only a sign script (D43)")
+        uses = [job["uses"]] if "uses" in job else []
+        uses += [step["uses"] for step in steps if isinstance(step, dict) and "uses" in step]
+        for action in uses:
+            if not SIGN_ONLY_ACTIONS.match(str(action)):
+                problems.append(f"{name}: signing job {job_id} uses {action}: only checkout, "
+                                "download-artifact and upload-artifact pinned by SHA (D43)")
+        for step in steps:
+            action = str(step.get("uses", "")).split("@")[0] if isinstance(step, dict) else ""
+            for key in sorted(SIGN_ONLY_INPUTS.get(action, set()) & set(step.get("with") or {})):
+                problems.append(f"{name}: signing job {job_id} sets {key} on {action}: it signs only this "
+                                "run's artifacts of this repository (D43)")
+        for key in ("container", "services"):
+            if key in job:
+                problems.append(f"{name}: signing job {job_id} runs a {key} beside the key (D43)")
+        for path, text in yaml_strings(job):
+            match = SIGN_ONLY_FORBIDDEN.search(text)
+            if match:
+                problems.append(f"{name}: signing job {job_id} builds or installs: {match.group(0)} "
+                                f"({'.'.join(map(str, path))}) (D43)")
     return problems
 
 
