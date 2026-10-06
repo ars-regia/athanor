@@ -1165,6 +1165,47 @@ def check_licence():
     return r
 
 
+CI_DOC = "docs/architecture/doc_ci.md"
+# A workflow file name, bare or under .github/workflows/; not the tail of another path such as
+# .github/actions/kvm/action.yml.
+WORKFLOW_NAME = re.compile(r"(?<![\w./-])(?:\.github/workflows/)?([\w-][\w.-]*\.ya?ml)\b")
+SECRET_OR_VAR = re.compile(r"\b(?:secrets|vars)\.([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def ci_problems(root):
+    """doc_ci.md describes every workflow and names every secret and variable they read, and
+    names no workflow that does not exist."""
+    root = Path(root)
+    doc = root / CI_DOC
+    if not doc.is_file():
+        return [f"{CI_DOC}: missing"]
+    text = read(doc)
+    workflows = sorted(p for p in (root / ".github/workflows").glob("*.y*ml")
+                       if p.suffix in (".yml", ".yaml"))
+    present = {p.name for p in workflows}
+    named = set(WORKFLOW_NAME.findall(text))
+    problems = [f".github/workflows/{name}: not described in {CI_DOC}"
+                for name in sorted(present - named)]
+    problems += [f"{CI_DOC}: names {name}, which is not in .github/workflows"
+                 for name in sorted(named - present)]
+    for path in workflows:
+        seen = set()
+        for i, line in enumerate(read(path).split("\n"), 1):
+            for name in SECRET_OR_VAR.findall(line):
+                if name not in seen and not re.search(rf"\b{name}\b", text):
+                    seen.add(name)
+                    problems.append(f"{path.relative_to(root).as_posix()}:{i}: {name} is not named in {CI_DOC}")
+    return problems
+
+
+@check("ci", "every workflow, secret and variable is described in docs/architecture/doc_ci.md")
+def check_ci():
+    r = Result()
+    for problem in ci_problems(ROOT):
+        r.fail(problem)
+    return r
+
+
 # --------------------------------------------------------------------------- #
 # runner
 # --------------------------------------------------------------------------- #

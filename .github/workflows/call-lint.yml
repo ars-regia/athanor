@@ -37,8 +37,8 @@ jobs:
           python3 -m venv /tmp/pykickstart
           /tmp/pykickstart/bin/pip install --quiet pykickstart==3.78
           echo /tmp/pykickstart/bin >> "$GITHUB_PATH"
-      - name: Structural checks (scripts/verify.py workflows, kickstart, boundary, cmdline, registry, licence)
-        run: python3 scripts/verify.py workflows kickstart boundary cmdline registry licence
+      - name: Structural checks (scripts/verify.py workflows, kickstart, boundary, cmdline, registry, licence, ci)
+        run: python3 scripts/verify.py workflows kickstart boundary cmdline registry licence ci
       - name: Kernel profile manifest and checker (kernel_profile.py check, unit tests)
         run: |
           set -euo pipefail
