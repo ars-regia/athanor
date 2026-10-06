@@ -57,7 +57,7 @@ COMPILED = [(re.compile(p), r) for p, r in RULES]
 
 # Sezione 3: cosa non si tocca. I percorsi sono relativi alla radice, in forma posix.
 EXCLUDED_PREFIXES = ("docs/architecture/graph-vaults/",)
-EXCLUDED_FILES = {"scripts/rename.py", "docs/architecture/doc_naming.md"}
+EXCLUDED_FILES = {"scripts/rename.py"}
 EXCLUDED_ROOT_GLOBS = ("fix_*.py", "ab_test*.py")
 MANUAL_SUFFIXES = (".pem", ".der")
 BINARY_SUFFIXES = (
