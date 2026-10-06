@@ -1,6 +1,6 @@
 [Unit]
 Description=Check for, verify and download an Athanor system image update
-Documentation=https://github.com/hr-mes/athanor/blob/iso-v0/docs/architecture/doc_update_trust.md
+Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_update_trust.md
 After=network-online.target athanor-update-migrate.service
 Wants=network-online.target
 

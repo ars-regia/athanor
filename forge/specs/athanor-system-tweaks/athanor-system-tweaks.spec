@@ -4,7 +4,7 @@ Version:        1.0.0
 Release:        7%{?dist}
 Summary:        Athanor OS athanor-system-tweaks
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor
+URL:            https://github.com/ars-regia/athanor
 BuildArch:      noarch
 
 %description

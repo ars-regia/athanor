@@ -34,6 +34,13 @@ for driver in open legacy; do
     echo "- \`${image}:${tag}\`: already published, signed and attested, not overwritten" | tee -a "$OUT/summary.md"
     continue
   fi
+  # resolve reads the registry anonymously and takes a denied package for one never
+  # published; this run is logged in, so a tag it can see here exists but is not public.
+  existing=$(artifact digest "${image}:${tag}")
+  if [[ -n $existing ]]; then
+    echo "${image}:${tag} already holds ${existing}, which the anonymous resolve did not see: make the package public; refusing to overwrite it" >&2
+    exit 1
+  fi
   version=$(artifact get "nvidia_${driver}_version")
   built=$(cat "$SIGNED/$driver/version")
   kver=$(cat "$SIGNED/$driver/kver")

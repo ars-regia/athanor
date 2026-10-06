@@ -8,7 +8,7 @@ Release:        5%{?dist}
 Summary:        Athanor system image updates and trust state
 
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor
+URL:            https://github.com/ars-regia/athanor
 
 BuildRequires:  rust cargo gcc systemd-rpm-macros
 BuildRequires:  dbus-daemon
