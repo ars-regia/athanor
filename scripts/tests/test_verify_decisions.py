@@ -99,6 +99,21 @@ class DecisionProblemsTest(unittest.TestCase):
         self.assertTrue(any("does not list 0002-b.md" in p for p in problems))
         self.assertTrue(any("0003-c.md, which does not exist" in p for p in problems))
 
+    def test_record_without_front_matter(self):
+        root = self.repo({"0001-a.md": ("A2-1", "accepted")})
+        (root / "docs/decisions/0001-a.md").write_text("# T\n")
+        self.assertTrue(any("no front matter" in p for p in verify.decision_problems(root)))
+
+    def test_index_status_mismatch(self):
+        root = self.repo({"0001-a.md": ("A2-1", "amended by A2-1")},
+                         index=row("A2-1", "0001", "0001-a.md"))
+        self.assertTrue(any("index status of A2-1" in p for p in verify.decision_problems(root)))
+
+    def test_index_title_mismatch(self):
+        root = self.repo({"0001-a.md": ("A2-1", "accepted")},
+                         index=row("A2-1", "0001", "0001-a.md").replace("[T]", "[Other]"))
+        self.assertTrue(any("index title of A2-1" in p for p in verify.decision_problems(root)))
+
     def test_the_repository_records_pass(self):
         self.assertEqual(verify.decision_problems(), [])
 

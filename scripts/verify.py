@@ -1207,14 +1207,14 @@ def decision_problems(root=None):
         if id_ in records:
             out.append(f"{name}: id {id_} already used by {records[id_][0]}")
         elif id_:
-            records[id_] = (name, fm.get("status", ""))
+            records[id_] = (name, fm.get("status", ""), fm.get("title", "").strip('"'))
         status = fm.get("status")
         if status and not DECISION_STATUS.match(status):
             out.append(f"{name}: status '{status}' is not accepted, superseded by <id> or amended by <id>")
         for h in ("Context", "Decision", "Consequences"):
             if f"\n## {h}\n" not in read(f):
                 out.append(f"{name}: missing section '## {h}'")
-    for id_, (name, status) in records.items():
+    for id_, (name, status, _) in records.items():
         for target in re.findall(DECISION_ID, status.partition(" by ")[2]):
             if target not in records:
                 out.append(f"{name}: status points to {target}, which has no record")
@@ -1222,17 +1222,22 @@ def decision_problems(root=None):
     if not readme.is_file():
         out.append("docs/decisions/README.md: missing")
         return out
-    listed = re.findall(r"^\| ([^|\s]+) \| (\d{4}) \| \[[^\]]*\]\(([^)]+)\) \|",
-                        read(readme), re.M)
-    index_files = [n for _, _, n in listed]
+    listed = re.findall(
+        r"^\| ([^|\s]+) \| (\d{4}) \| \[([^\]]*)\]\(([^)]+)\) \| ([^|]*?) \|",
+        read(readme), re.M)
+    index_files = [row[3] for row in listed]
     for f in files:
         if f.name not in index_files:
             out.append(f"README.md: index does not list {f.name}")
-    for id_, num, n in listed:
+    for id_, num, title, n, status in listed:
         if not (folder / n).is_file():
             out.append(f"README.md: index lists {n}, which does not exist")
         elif id_ not in records or records[id_][0] != n:
             out.append(f"README.md: index row {id_} does not match {n}")
+        elif title != records[id_][2]:
+            out.append(f"README.md: index title of {id_} differs from {n}")
+        elif status != records[id_][1]:
+            out.append(f"README.md: index status of {id_} differs from {n}")
         elif not n.startswith(num + "-"):
             out.append(f"README.md: index number {num} does not match {n}")
     if len(index_files) != len(set(index_files)):

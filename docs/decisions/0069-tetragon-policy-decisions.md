@@ -1,7 +1,7 @@
 ---
 id: A2-32
 title: "Tetragon specification decisions"
-date: 2026-10-05
+date: 2026-10-06
 status: accepted
 issues: [153]
 areas: [security, kernel]
@@ -11,11 +11,11 @@ areas: [security, kernel]
 
 ## Context
 
-Recorded in the maintainer decision log, section 'Audit 2 decisions (2026-10-05, maintainer)'. Source: audit2/SYNTHESIS.md.
+Recorded in the maintainer decision log, section 'Audit 2 decisions (2026-10-05, maintainer)'. Source: audit2/SYNTHESIS.md. Log annotation: Tetragon #153.
 
 ## Decision
 
-- (2026-10-06, Tetragon #153): Q1 observe only at 1.0 (TG4 deny for tier 2 via BPF LSM after rev. 2 noise measurement)
+- Q1 observe only at 1.0 (TG4 deny for tier 2 via BPF LSM after rev. 2 noise measurement)
 - Q2 aggregated notice, off in developer mode
 - Q3 add /var/tmp/ and /run/user/ to TG4
 - Q4 notice for non-root module requests only

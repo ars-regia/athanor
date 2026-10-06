@@ -1,7 +1,7 @@
 ---
 id: A2-28
 title: "Bazaar waits for the Fedora 45 base"
-date: 2026-10-05
+date: 2026-10-06
 status: accepted
 issues: []
 areas: [packages, shell]
@@ -11,11 +11,11 @@ areas: [packages, shell]
 
 ## Context
 
-Recorded in the maintainer decision log, section 'Audit 2 decisions (2026-10-05, maintainer)'. Source: audit2/SYNTHESIS.md.
+Recorded in the maintainer decision log, section 'Audit 2 decisions (2026-10-05, maintainer)'. Source: audit2/SYNTHESIS.md. Log annotation: apps-scope.
 
 ## Decision
 
-(2026-10-06, apps-scope): Bazaar (option b: Bazaar for apps + an Athanor page for background, features, developer mode) waits for the Fedora 45 base; no Flathub build, no old tag.
+Bazaar (option b: Bazaar for apps + an Athanor page for background, features, developer mode) waits for the Fedora 45 base; no Flathub build, no old tag.
 
 ## Consequences
 

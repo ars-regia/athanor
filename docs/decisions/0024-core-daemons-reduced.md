@@ -2,7 +2,7 @@
 id: RA-8
 title: "doc_core_daemons reduced to the Gatekeeper"
 date: 2026-10-05
-status: amended by RA-18
+status: superseded by RA-18
 issues: []
 areas: [security, docs]
 ---

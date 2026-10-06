@@ -1,7 +1,7 @@
 ---
 id: A2-30
 title: "Offline help with Yelp"
-date: 2026-10-05
+date: 2026-10-06
 status: accepted
 issues: []
 areas: [docs, shell]
@@ -11,11 +11,11 @@ areas: [docs, shell]
 
 ## Context
 
-Recorded in the maintainer decision log, section 'Audit 2 decisions (2026-10-05, maintainer)'. Source: audit2/SYNTHESIS.md.
+Recorded in the maintainer decision log, section 'Audit 2 decisions (2026-10-05, maintainer)'. Source: audit2/SYNTHESIS.md. Log annotation: apps-scope.
 
 ## Decision
 
-(2026-10-06, apps-scope): offline help = Yelp 49.2 (GTK4) with Athanor Mallard pages in English and Italian, no gnome-user-docs; footprint to be measured.
+offline help = Yelp 49.2 (GTK4) with Athanor Mallard pages in English and Italian, no gnome-user-docs; footprint to be measured.
 
 ## Consequences
 

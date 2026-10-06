@@ -1,7 +1,7 @@
 ---
 id: A2-27
 title: "Signing approvals and MOK enrolment"
-date: 2026-10-05
+date: 2026-10-06
 status: amended by A2-35
 issues: [131, 145]
 areas: [signing, installer]
@@ -11,11 +11,11 @@ areas: [signing, installer]
 
 ## Context
 
-Recorded in the maintainer decision log, section 'Audit 2 decisions (2026-10-05, maintainer)'. Source: audit2/SYNTHESIS.md.
+Recorded in the maintainer decision log, section 'Audit 2 decisions (2026-10-05, maintainer)'. Source: audit2/SYNTHESIS.md. Log annotation: signing #131/#145.
 
 ## Decision
 
-(2026-10-06, signing #131/#145): two approvals per release cycle stay (sign-kernel, then sign-system-images). MOK enrolment offered on a first-run page that prepares it with a system-generated one-time password shown to the user (CLI stays). athanor-tpm-luks-seal disabled until 1.1 (UKI + signed PCR 11 policy); 1.0 unlocks with the passphrase.
+two approvals per release cycle stay (sign-kernel, then sign-system-images). MOK enrolment offered on a first-run page that prepares it with a system-generated one-time password shown to the user (CLI stays). athanor-tpm-luks-seal disabled until 1.1 (UKI + signed PCR 11 policy); 1.0 unlocks with the passphrase.
 
 ## Consequences
 

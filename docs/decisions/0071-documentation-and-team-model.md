@@ -1,7 +1,7 @@
 ---
 id: A2-34
 title: "Documentation and team model"
-date: 2026-10-05
+date: 2026-10-06
 status: accepted
 issues: []
 areas: [docs, process, ci]
@@ -11,11 +11,11 @@ areas: [docs, process, ci]
 
 ## Context
 
-Recorded in the maintainer decision log, section 'Audit 2 decisions (2026-10-05, maintainer)'. Source: audit2/SYNTHESIS.md.
+Recorded in the maintainer decision log, section 'Audit 2 decisions (2026-10-05, maintainer)'. Source: audit2/SYNTHESIS.md. Log annotation: documentation and team model.
 
 ## Decision
 
-(2026-10-06, documentation and team model): every aspect of Athanor is described in the repository, for maintenance, rebuild from zero and development by a team of 5-10 people using Claude Code. Specs live with the code: shell-specs is merged into the product branch and retired. Decisions become one ADR file each under docs/decisions/, keeping the A2-n ids. The project part of the Claude Code configuration (agents, hooks, gate, rules, project skills) is versioned in .claude/; machine-specific rules stay in ~/.claude/rules. GitHub settings are JSON files applied and checked by a gh api script. Coverage is enforced by verify.py. Phases 0-4 with a gate each.
+every aspect of Athanor is described in the repository, for maintenance, rebuild from zero and development by a team of 5-10 people using Claude Code. Specs live with the code: shell-specs is merged into the product branch and retired. Decisions become one ADR file each under docs/decisions/, keeping the A2-n ids. The project part of the Claude Code configuration (agents, hooks, gate, rules, project skills) is versioned in .claude/; machine-specific rules stay in ~/.claude/rules. GitHub settings are JSON files applied and checked by a gh api script. Coverage is enforced by verify.py. Phases 0-4 with a gate each.
 
 ## Consequences
 

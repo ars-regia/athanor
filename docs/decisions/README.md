@@ -91,7 +91,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | RA-5 | 0021 | [Old crates deleted](0021-old-crates-deleted.md) | accepted | shell, ci |
 | RA-6 | 0022 | [athanor-updater-rs deleted](0022-updater-crate-deleted.md) | accepted | update |
 | RA-7 | 0023 | [Cleanup of workflow, recipes, packages and bcachefs](0023-cleanup-four-items.md) | accepted | ci, packages |
-| RA-8 | 0024 | [doc_core_daemons reduced to the Gatekeeper](0024-core-daemons-reduced.md) | amended by RA-18 | security, docs |
+| RA-8 | 0024 | [doc_core_daemons reduced to the Gatekeeper](0024-core-daemons-reduced.md) | superseded by RA-18 | security, docs |
 | RA-9 | 0025 | [noexec exception for udisks mounts](0025-noexec-exception-for-udisks.md) | accepted | kernel, storage |
 | RA-10 | 0026 | [Settings Firmware page uses fwupd directly](0026-settings-firmware-via-fwupd.md) | accepted | settings, update |
 | RA-11 | 0027 | [Kernel :latest follows the default branch](0027-kernel-latest-follows-default-branch.md) | accepted | kernel, ci |
