@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-store-rs
 Version:        1.0.0
-Release:        3%{?dist}
+Release:        4%{?dist}
 Summary:        Athanor OS Universal App Store Daemon
 
 
@@ -92,6 +92,9 @@ EOF
 %{_datadir}/polkit-1/actions/os.athanor.store.policy
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-4
+- Point the polkit vendor_url at the project repository.
+
 * Thu Jul 16 2026 Athanor <athanor@athanor.os> - 1.0.0-1
 - Initial release
 

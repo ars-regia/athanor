@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-lvfs-rs
 Version:        1.0.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Athanor OS Firmware Automation Daemon
 
 License:        GPL-3.0-or-later
@@ -94,6 +94,9 @@ EOF
 %{_datadir}/polkit-1/actions/os.athanor.lvfs.policy
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
+- Point the polkit vendor_url at the project repository.
+
 * Thu Jul 16 2026 Athanor <athanor@athanor.os> - 1.0.0-1
 - Initial release
 

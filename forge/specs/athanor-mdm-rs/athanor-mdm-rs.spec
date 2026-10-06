@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-mdm-rs
 Version:        1.0.0
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        Athanor OS Mobile Device Management
 
 License:        GPL-3.0-or-later
@@ -90,6 +90,10 @@ EOF
 %{_datadir}/polkit-1/actions/os.athanor.mdm.policy
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-3
+- Require authentication on every device wipe (auth_admin, no cached grant).
+- Point the polkit vendor_url at the project repository.
+
 * Thu Jul 16 2026 Athanor <athanor@athanor.os> - 1.0.0-1
 - Initial release
 
