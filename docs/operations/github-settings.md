@@ -28,12 +28,15 @@ Secret values are never read, stored or written (GHS8). Variable values are not 
 
 Run from the repository root. `--repo OWNER/NAME` defaults to the repository of the current checkout (`gh repo view`). `--dir` defaults to `.github/settings`.
 
+Every command first reads `repos/{r}` and stops with exit code 2 and "insufficient rights" unless `permissions.admin` is true: without the admin role GitHub answers 404 on the admin endpoints, which would otherwise read as "off". A 404 counts as "off" only where GitHub documents it so: `vulnerability-alerts` and `pages`. Any other API failure (403, 404, 5xx) and any missing, unreadable or malformed settings file also exit 2, before the first write.
+
 | Command | Effect | Exit code |
 | --- | --- | --- |
-| `python3 scripts/github-settings/ghsettings.py export` | Writes the live state to the seven files | 0, or 2 on an API error |
-| `python3 scripts/github-settings/ghsettings.py diff` | Prints a unified diff per area, files on the minus side, live state on the plus side | 0 when equal, 1 on a difference, 2 on an API error |
-| `python3 scripts/github-settings/ghsettings.py apply` | Prints the plan: one line per API call (`METHOD path body`) and one `MANUAL:` line per step only a human can take. Calls nothing that writes | 0 |
-| `python3 scripts/github-settings/ghsettings.py apply --yes` | Prints the plan, then runs its calls in order, then prints the `MANUAL:` steps | 0, or 2 on an API error |
+| `python3 scripts/github-settings/ghsettings.py export` | Writes the live state to the seven files | 0, or 2 on an error |
+| `python3 scripts/github-settings/ghsettings.py diff` | Prints a unified diff per area, files on the minus side, live state on the plus side | 0 when equal, 1 on a difference, 2 on an error |
+| `python3 scripts/github-settings/ghsettings.py apply` | Prints the plan: first one line per API call (`METHOD path body`, prefixed `DESTRUCTIVE` for a deletion, with the ruleset, branch or label name in brackets), then one `MANUAL:` line per step only a human can take. Calls nothing that writes | 0, or 2 on an error |
+| `python3 scripts/github-settings/ghsettings.py apply --yes` | Prints the same plan, calls and `MANUAL:` lines, then runs the calls in order. Refuses the whole plan, with nothing written, when it holds a `DESTRUCTIVE` call | 0, or 2 on an error or a refused plan |
+| `python3 scripts/github-settings/ghsettings.py apply --yes --allow-destructive` | As `--yes`, and also runs the `DESTRUCTIVE` calls | 0, or 2 on an error |
 
 GHS9 `apply` is idempotent: it compares the live state with the files first, so a second run plans no call. After `apply --yes`, run `diff` to confirm.
 
@@ -42,14 +45,14 @@ GHS9 `apply` is idempotent: it compares the live state with the files first, so 
 | Area | Calls |
 | --- | --- |
 | Repository | `PATCH repos/{r}` with the changed fields only; `PUT repos/{r}/topics`; `PUT` or `DELETE` on `vulnerability-alerts` and `private-vulnerability-reporting` |
-| Branch protection | `PUT .../branches/{b}/protection`; `POST` or `DELETE .../required_signatures`; `DELETE` the protection of a branch the file does not list |
-| Rulesets | `POST` a new ruleset, `PUT` a changed one, `DELETE` one the file does not list |
+| Branch protection | `PUT .../branches/{b}/protection`; `POST` or `DELETE .../required_signatures`; DESTRUCTIVE `DELETE` of the protection of a branch the file does not list or lists as `{}` or `null` |
+| Rulesets | `POST` a new ruleset, `PUT` a changed one, DESTRUCTIVE `DELETE` of one the file does not list |
 | Environments | `PUT repos/{r}/environments/{e}`; `POST` and `DELETE` deployment branch policies |
-| Labels | `POST` a new label, `PATCH` a changed one, `DELETE` one the file does not list |
-| Pages | `POST` to enable, `PUT` to change, `DELETE` when the file holds `null` |
+| Labels | `POST` a new label, `PATCH` a changed one, DESTRUCTIVE `DELETE` of one the file does not list |
+| Pages | `POST` to enable, `PUT` to change, DESTRUCTIVE `DELETE` when the file holds `null` |
 | Actions | `PUT` on `permissions`, `selected-actions`, `workflow` and `fork-pr-contributor-approval` |
 
-Deleting a label removes it from every issue and pull request. Read the plan before `--yes`.
+Deleting a label removes it from every issue and pull request; deleting a protection or a ruleset opens the branch. Read the plan before `--yes`, and the `DESTRUCTIVE` lines before `--allow-destructive`.
 
 The tests run against a stub `gh` on `PATH`: `python3 -B -m unittest discover -s scripts/tests -p test_ghsettings.py -v`.
 

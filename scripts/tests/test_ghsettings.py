@@ -14,8 +14,9 @@ SCRIPT = ROOT / "scripts" / "github-settings" / "ghsettings.py"
 REPO = "acme/os"
 
 # The stub answers GET from $STUB_STATE, keyed by path without its query string,
-# with the page wrapped in a list under --slurp; an unknown GET is a 404. Every
-# call, with its stdin, is appended to $STUB_LOG; a write answers an empty body.
+# with the page wrapped in a list under --slurp; an unknown GET is a 404, and an
+# answer {"__status__": N} fails with HTTP N the way gh does. Every call, with its
+# stdin, is appended to $STUB_LOG; a write answers an empty body.
 STUB_GH = f"""#!{sys.executable}
 import json, os, sys
 args = sys.argv[1:]
@@ -31,6 +32,9 @@ if key not in state:
     sys.stderr.write("gh: Not Found (HTTP 404)\\n")
     sys.exit(1)
 answer = state[key]
+if isinstance(answer, dict) and "__status__" in answer:
+    sys.stderr.write("gh: Request failed (HTTP %d)\\n" % answer["__status__"])
+    sys.exit(1)
 print(json.dumps([answer] if "--slurp" in args else answer))
 """
 
@@ -61,6 +65,7 @@ LIVE = {
         "topics": [],
         "id": 1,
         "updated_at": "now",
+        "permissions": {"admin": True, "push": True},
         "security_and_analysis": {"secret_scanning": {"status": "enabled"}},
     },
     f"{R}/private-vulnerability-reporting": {"enabled": True},
@@ -75,7 +80,17 @@ LIVE = {
         "enforce_admins": {"enabled": False},
         "allow_force_pushes": {"enabled": False},
     },
-    f"{R}/rulesets": [],
+    f"{R}/rulesets": [{"id": 5, "name": "protect-main", "source_type": "Repository"}],
+    f"{R}/rulesets/5": {
+        "id": 5,
+        "name": "protect-main",
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+        "rules": [{"type": "deletion"}],
+        "bypass_actors": [],
+        "created_at": "now",
+    },
     f"{R}/environments": {
         "total_count": 1,
         "environments": [
@@ -288,12 +303,106 @@ class GhSettings(unittest.TestCase):
                 secrets=["COSIGN_PASSWORD", "COSIGN_PRIVATE_KEY"]
             ),
         )
-        self.edit("labels", lambda d: d.clear())
+        self.edit(
+            "labels",
+            lambda d: d.append(
+                {"name": "area:shell", "color": "ffffff", "description": ""}
+            ),
+        )
         result = self.run_script("apply", "--yes")
         self.assertEqual(result.returncode, 0, result.stderr)
-        writes = [c for c in self.calls() if c[0] != "GET"]
-        self.assertEqual(writes, [["DELETE", f"{R}/labels/area%3Akernel", ""]])
+        writes = [
+            (c[0], c[1], json.loads(c[2])) for c in self.calls() if c[0] != "GET"
+        ]
+        self.assertEqual(
+            writes,
+            [
+                (
+                    "POST",
+                    f"{R}/labels",
+                    {"color": "ffffff", "description": "", "name": "area:shell"},
+                )
+            ],
+        )
         self.assertIn("MANUAL: set secret COSIGN_PASSWORD", result.stdout)
+
+    def test_destructive_calls_are_marked_and_need_their_own_flag(self):
+        self.edit("rulesets", lambda d: d.clear())
+        self.edit("branch-protection", lambda d: d.update(main={}))
+        self.edit("labels", lambda d: d.clear())
+        result = self.run_script("apply", "--yes")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(
+            f"DESTRUCTIVE DELETE {R}/rulesets/5  (ruleset protect-main)", result.stdout
+        )
+        self.assertIn(
+            f"DESTRUCTIVE DELETE {R}/branches/main/protection  (branch main: protection removed)",
+            result.stdout,
+        )
+        self.assertIn(f"DESTRUCTIVE DELETE {R}/labels/area%3Akernel", result.stdout)
+        self.assertIn("--allow-destructive", result.stderr)
+        self.assertEqual({c[0] for c in self.calls()}, {"GET"}, "nothing is applied")
+        result = self.run_script("apply", "--yes", "--allow-destructive")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            sorted(c[1] for c in self.calls() if c[0] == "DELETE"),
+            [
+                f"{R}/branches/main/protection",
+                f"{R}/labels/area%3Akernel",
+                f"{R}/rulesets/5",
+            ],
+        )
+
+    def set_live(self, path, answer):
+        state = json.loads(self.state.read_text())
+        state[path] = answer
+        self.state.write_text(json.dumps(state))
+
+    def test_a_failing_gh_exits_2_and_apply_writes_nothing(self):
+        self.edit(
+            "labels",
+            lambda d: d.append(
+                {"name": "area:shell", "color": "ffffff", "description": ""}
+            ),
+        )
+        for status in (403, 500):
+            with self.subTest(status=status):
+                self.set_live(f"{R}/actions/permissions", {"__status__": status})
+                result = self.run_script("diff")
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn(f"HTTP {status}", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                result = self.run_script("apply", "--yes")
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertEqual(
+                    {c[0] for c in self.calls()}, {"GET"}, "it stops before any write"
+                )
+
+    def test_a_token_without_admin_rights_exits_2(self):
+        live = dict(LIVE[R], permissions={"admin": False, "push": True})
+        self.set_live(R, live)
+        for command in (["diff"], ["export"], ["apply", "--yes"]):
+            with self.subTest(command=command):
+                result = self.run_script(*command)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("insufficient rights", result.stderr)
+                self.assertEqual(self.calls(), [["GET", R, ""]], "nothing else is read")
+
+    def test_a_malformed_or_missing_file_exits_2(self):
+        (self.dir / "labels.json").write_text("{")
+        for command in (["diff"], ["apply", "--yes"]):
+            with self.subTest(command=command):
+                result = self.run_script(*command)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("labels.json is not valid JSON", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual({c[0] for c in self.calls()}, {"GET"})
+        (self.dir / "labels.json").write_text("{}")
+        self.assertIn("not the shape", self.run_script("diff").stderr)
+        (self.dir / "labels.json").unlink()
+        result = self.run_script("apply")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("cannot read", result.stderr)
 
 
 if __name__ == "__main__":

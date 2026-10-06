@@ -16,6 +16,8 @@ import pathlib
 import subprocess
 import sys
 import urllib.parse
+from collections import namedtuple
+from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 DEFAULT_DIR = ROOT / ".github" / "settings"
@@ -65,6 +67,26 @@ class GhError(Exception):
     pass
 
 
+class SettingsError(Exception):
+    pass
+
+
+# One API call of a plan. A destructive call deletes something (a protection, a
+# ruleset, a label, the Pages site) and runs only with --allow-destructive.
+Call = namedtuple("Call", "method path body destructive note", defaults=(False, ""))
+
+# The JSON type each settings file must hold.
+FILE_TYPES = {
+    "repository": dict,
+    "branch-protection": dict,
+    "rulesets": dict,
+    "environments": dict,
+    "labels": list,
+    "pages": (dict, type(None)),
+    "actions": dict,
+}
+
+
 def gh(path, method="GET", body=None, paginate=False):
     """One `gh api` call; JSON in and out. A 404 raises NotFound."""
     cmd = ["gh", "api", "--method", method, path]
@@ -86,10 +108,18 @@ def gh(path, method="GET", body=None, paginate=False):
     return json.loads(run.stdout) if run.stdout.strip() else None
 
 
+def get(path, paginate=False) -> Any:
+    """A GET that must answer a JSON body: an empty answer is an error, not a None."""
+    answer = gh(path, paginate=paginate)
+    if answer is None:
+        raise GhError(f"gh api {path}: empty response where JSON was expected")
+    return answer
+
+
 def gh_list(path, key=None):
     """All items of a paginated list endpoint; `key` names the array of an object page."""
     sep = "&" if "?" in path else "?"
-    pages = gh(f"{path}{sep}per_page=100", paginate=True)
+    pages = get(f"{path}{sep}per_page=100", paginate=True)
     return [item for page in pages for item in (page[key] if key else page)]
 
 
@@ -97,7 +127,9 @@ def q(name):
     return urllib.parse.quote(name, safe="")
 
 
-def exists(path):
+def enabled_unless_404(path):
+    """For an endpoint whose documented answer is 204 when on and 404 when off
+    (Dependabot alerts). Any other failure is an error."""
     try:
         gh(path)
         return True
@@ -105,20 +137,37 @@ def exists(path):
         return False
 
 
+def check_rights(repo):
+    """Every area is read from admin endpoints. Without the admin role GitHub hides
+    them or answers 404, which must never be read as "off"."""
+    try:
+        permissions = get(f"repos/{repo}").get("permissions") or {}
+    except NotFound as error:
+        raise GhError(
+            f"repository {repo} not found or not visible to this token"
+        ) from error
+    if permissions.get("admin") is not True:
+        raise GhError(
+            f"insufficient rights: the token is not admin on {repo} (permissions.admin is not true)"
+        )
+
+
 # Export: the live state of each area, normalised (sorted, no ids, URLs, timestamps or counts).
 
 
 def export_repository(repo):
-    r = gh(f"repos/{repo}")
-    out = {k: r.get(k) for k in REPO_FIELDS}
+    r = get(f"repos/{repo}")
+    out: dict[str, Any] = {k: r.get(k) for k in REPO_FIELDS}
     out["description"] = r.get("description") or ""
     out["homepage"] = r.get("homepage") or ""
     out["topics"] = sorted(r.get("topics") or [])
     out["security_and_analysis"] = {
         k: v["status"] for k, v in (r.get("security_and_analysis") or {}).items()
     }
-    out["vulnerability_alerts"] = exists(f"repos/{repo}/vulnerability-alerts")
-    out["private_vulnerability_reporting"] = gh(
+    out["vulnerability_alerts"] = enabled_unless_404(
+        f"repos/{repo}/vulnerability-alerts"
+    )
+    out["private_vulnerability_reporting"] = get(
         f"repos/{repo}/private-vulnerability-reporting"
     )["enabled"]
     return out
@@ -135,7 +184,9 @@ def _actors(a):
 
 
 def _protection(p):
-    out = {k: bool((p.get(k) or {}).get("enabled", False)) for k in PROTECTION_FLAGS}
+    out: dict[str, Any] = {
+        k: bool((p.get(k) or {}).get("enabled", False)) for k in PROTECTION_FLAGS
+    }
     checks = p.get("required_status_checks")
     out["required_status_checks"] = (
         None
@@ -179,7 +230,7 @@ def _protection(p):
 def export_branch_protection(repo):
     names = [b["name"] for b in gh_list(f"repos/{repo}/branches?protected=true")]
     return {
-        n: _protection(gh(f"repos/{repo}/branches/{q(n)}/protection")) for n in names
+        n: _protection(get(f"repos/{repo}/branches/{q(n)}/protection")) for n in names
     }
 
 
@@ -187,7 +238,7 @@ def _live_rulesets(repo):
     """{name: (id, normalised)} of the rulesets this repository owns."""
     out = {}
     for item in gh_list(f"repos/{repo}/rulesets?includes_parents=false"):
-        r = gh(f"repos/{repo}/rulesets/{item['id']}")
+        r = get(f"repos/{repo}/rulesets/{item['id']}")
         out[r["name"]] = (
             r["id"],
             {
@@ -271,18 +322,18 @@ def export_labels(repo):
 
 def export_pages(repo):
     try:
-        p = gh(f"repos/{repo}/pages")
-    except NotFound:
+        p = get(f"repos/{repo}/pages")
+    except NotFound:  # documented: 404 when the repository has no Pages site
         return None
     return {k: p.get(k) for k in ("build_type", "cname", "https_enforced", "source")}
 
 
 def export_actions(repo):
     base = f"repos/{repo}/actions"
-    perm = gh(f"{base}/permissions")
+    perm = get(f"{base}/permissions")
     selected = None
     if perm.get("allowed_actions") == "selected":
-        s = gh(f"{base}/permissions/selected-actions")
+        s = get(f"{base}/permissions/selected-actions")
         selected = {**s, "patterns_allowed": sorted(s.get("patterns_allowed", []))}
     return {
         "permissions": {
@@ -290,8 +341,8 @@ def export_actions(repo):
             for k in ("enabled", "allowed_actions", "sha_pinning_required")
         },
         "selected_actions": selected,
-        "workflow_permissions": gh(f"{base}/permissions/workflow"),
-        "fork_pr_contributor_approval": gh(
+        "workflow_permissions": get(f"{base}/permissions/workflow"),
+        "fork_pr_contributor_approval": get(
             f"{base}/permissions/fork-pr-contributor-approval"
         )["approval_policy"],
         "secrets": _names(f"{base}/secrets", "secrets"),
@@ -353,6 +404,14 @@ def plan_branch_protection(repo, have, want):
     for name, p in want.items():
         base = f"repos/{repo}/branches/{q(name)}/protection"
         old = have.get(name)
+        if not p:
+            if old is not None:
+                calls.append(
+                    Call(
+                        "DELETE", base, None, True, f"branch {name}: protection removed"
+                    )
+                )
+            continue
         if old is None or _protection_body(old) != _protection_body(p):
             calls.append(("PUT", base, _protection_body(p)))
         if (old or {}).get("required_signatures", False) != p["required_signatures"]:
@@ -364,7 +423,13 @@ def plan_branch_protection(repo, have, want):
                 )
             )
     calls += [
-        ("DELETE", f"repos/{repo}/branches/{q(n)}/protection", None)
+        Call(
+            "DELETE",
+            f"repos/{repo}/branches/{q(n)}/protection",
+            None,
+            True,
+            f"branch {n}: protection removed",
+        )
         for n in have
         if n not in want
     ]
@@ -376,17 +441,27 @@ def plan_rulesets(repo, have, want):
     calls = []
     for name, body in want.items():
         if name not in live:
-            calls.append(("POST", f"repos/{repo}/rulesets", {"name": name, **body}))
+            calls.append(
+                Call(
+                    "POST",
+                    f"repos/{repo}/rulesets",
+                    {"name": name, **body},
+                    False,
+                    f"ruleset {name}",
+                )
+            )
         elif live[name][1] != body:
             calls.append(
-                (
+                Call(
                     "PUT",
                     f"repos/{repo}/rulesets/{live[name][0]}",
                     {"name": name, **body},
+                    False,
+                    f"ruleset {name}",
                 )
             )
     calls += [
-        ("DELETE", f"repos/{repo}/rulesets/{rid}", None)
+        Call("DELETE", f"repos/{repo}/rulesets/{rid}", None, True, f"ruleset {name}")
         for name, (rid, _) in live.items()
         if name not in want
     ]
@@ -395,8 +470,8 @@ def plan_rulesets(repo, have, want):
 
 def _reviewer_id(repo, reviewer):
     if reviewer["type"] == "Team":
-        return gh(f"orgs/{repo.split('/')[0]}/teams/{q(reviewer['name'])}")["id"]
-    return gh(f"users/{q(reviewer['name'])}")["id"]
+        return get(f"orgs/{repo.split('/')[0]}/teams/{q(reviewer['name'])}")["id"]
+    return get(f"users/{q(reviewer['name'])}")["id"]
 
 
 def _names_steps(scope, kind, have, want):
@@ -515,7 +590,15 @@ def plan_labels(repo, have, want):
         if n in old and old[n] != l
     ]
     calls += [
-        ("DELETE", f"repos/{repo}/labels/{q(n)}", None) for n in old if n not in new
+        Call(
+            "DELETE",
+            f"repos/{repo}/labels/{q(n)}",
+            None,
+            True,
+            f"label {n}: removed from every issue and pull request",
+        )
+        for n in old
+        if n not in new
     ]
     return calls, []
 
@@ -523,7 +606,11 @@ def plan_labels(repo, have, want):
 def plan_pages(repo, have, want):
     path = f"repos/{repo}/pages"
     if want is None:
-        return ([("DELETE", path, None)] if have is not None else []), []
+        return (
+            [Call("DELETE", path, None, True, "Pages site unpublished")]
+            if have is not None
+            else []
+        ), []
     calls = []
     if have is None:
         calls.append(
@@ -595,7 +682,18 @@ def dump(data):
 
 
 def load(directory, area):
-    return json.loads((directory / f"{area}.json").read_text())
+    path = directory / f"{area}.json"
+    try:
+        data = json.loads(path.read_text())
+    except OSError as error:
+        raise SettingsError(f"cannot read {path}: {error.strerror or error}") from error
+    except json.JSONDecodeError as error:
+        raise SettingsError(f"{path} is not valid JSON: {error}") from error
+    if not isinstance(data, FILE_TYPES[area]):
+        raise SettingsError(
+            f"{path} holds a JSON {type(data).__name__}, not the shape this area expects"
+        )
+    return data
 
 
 def cmd_export(repo, directory, _args):
@@ -611,7 +709,7 @@ def cmd_diff(repo, directory, _args):
     for area, (export, _) in AREAS.items():
         live = dump(export(repo))
         path = directory / f"{area}.json"
-        wanted = dump(load(directory, area)) if path.exists() else ""
+        wanted = dump(load(directory, area))
         if live != wanted:
             differs = True
             sys.stdout.writelines(
@@ -631,32 +729,48 @@ def cmd_diff(repo, directory, _args):
 
 
 def cmd_apply(repo, directory, args):
+    # Every file is read and the whole plan built before the first write, so an
+    # unreadable file or a failing read stops the run with nothing changed.
+    desired = {area: load(directory, area) for area in AREAS}
     calls, manual = [], []
     for area, (export, plan) in AREAS.items():
-        c, m = plan(repo, export(repo), load(directory, area))
-        calls += c
+        c, m = plan(repo, export(repo), desired[area])
+        calls += [x if isinstance(x, Call) else Call(*x) for x in c]
         manual += m
-    for method, path, body in calls:
+    for c in calls:
         print(
-            f"{method} {path}"
-            + ("" if body is None else f" {json.dumps(body, sort_keys=True)}")
+            ("DESTRUCTIVE " if c.destructive else "")
+            + f"{c.method} {c.path}"
+            + ("" if c.body is None else f" {json.dumps(c.body, sort_keys=True)}")
+            + (f"  ({c.note})" if c.note else "")
         )
     if not calls:
         print("nothing to change through the API")
     for step in manual:
         print(f"MANUAL: {step}")
-    if calls and not args.yes:
+    if not calls:
+        return 0
+    if not args.yes:
         print("plan only: rerun with --yes to apply it")
         return 0
-    for method, path, body in calls:
-        gh(path, method, body)
-    if calls:
-        print(f"applied {len(calls)} call(s); run diff to confirm")
+    destructive = sum(c.destructive for c in calls)
+    if destructive and not args.allow_destructive:
+        print(
+            f"ghsettings: the plan holds {destructive} DESTRUCTIVE call(s); nothing was applied. "
+            "Rerun with --yes --allow-destructive to apply them",
+            file=sys.stderr,
+        )
+        return 2
+    for c in calls:
+        gh(c.path, c.method, c.body)
+    print(f"applied {len(calls)} call(s); run diff to confirm")
     return 0
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        description="GitHub repository settings as code: export, diff and apply through `gh api`."
+    )
     parser.add_argument(
         "--repo", help="OWNER/NAME (default: the repository of the current checkout)"
     )
@@ -670,6 +784,11 @@ def main(argv=None):
         "apply", help="print the plan; with --yes, make the live state match the files"
     )
     apply.add_argument("--yes", action="store_true", help="run the plan")
+    apply.add_argument(
+        "--allow-destructive",
+        action="store_true",
+        help="with --yes, also run the DESTRUCTIVE calls (protection, ruleset, label or Pages deletion)",
+    )
     args = parser.parse_args(argv)
     try:
         repo = (
@@ -689,10 +808,11 @@ def main(argv=None):
                 check=True,
             ).stdout.strip()
         )
+        check_rights(repo)
         return {"export": cmd_export, "diff": cmd_diff, "apply": cmd_apply}[
             args.command
         ](repo, args.dir, args)
-    except (GhError, NotFound, subprocess.CalledProcessError) as error:
+    except (GhError, NotFound, SettingsError, subprocess.CalledProcessError) as error:
         print(f"ghsettings: {error}", file=sys.stderr)
         return 2
 
