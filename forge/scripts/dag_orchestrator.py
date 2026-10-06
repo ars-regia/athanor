@@ -147,13 +147,6 @@ def parse_spec_dependencies(spec_path):
                         
     return build_requires, requires
 
-def load_package_manifest():
-    """Loads packages.json single source of truth."""
-    if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH, "r") as f:
-            return json.load(f)
-    return {}
-
 # Packages that dedicated workflows build, outside the DAG.
 EXTERNAL_PACKAGES = {"kernel", "kernel-forge"}
 
@@ -164,6 +157,34 @@ def spec_dir_for(pkg):
     if not os.path.exists(spec_dir):
         spec_dir = os.path.join(SPECS_DIR, pkg)
     return spec_dir
+
+
+def load_package_manifest():
+    """Loads packages.json single source of truth.
+
+    Fails when a custom package, other than an external one, has no spec directory: such an
+    entry is built by nothing, and would otherwise surface only as a late build failure.
+    """
+    if not os.path.exists(CONFIG_PATH):
+        return {}
+    with open(CONFIG_PATH, "r") as f:
+        manifest = json.load(f)
+    listed = {
+        pkg
+        for key, pkgs in manifest.items()
+        if key.startswith("custom_")
+        for pkg in pkgs
+    }
+    missing = sorted(
+        pkg for pkg in listed - EXTERNAL_PACKAGES if not os.path.isdir(spec_dir_for(pkg))
+    )
+    if missing:
+        sys.exit(
+            f"dag_orchestrator: {CONFIG_PATH} lists custom packages with no spec directory "
+            f"under {SPECS_DIR}/: {', '.join(missing)}. Remove them from the custom_* lists "
+            f"or restore their specs."
+        )
+    return manifest
 
 
 def custom_spec_dirs(manifest):
