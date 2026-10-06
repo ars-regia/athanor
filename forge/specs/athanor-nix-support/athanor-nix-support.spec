@@ -1,10 +1,10 @@
 %global debug_package %{nil}
 Name:           athanor-nix-support
 Version:        1.0.0
-Release:        8%{?dist}
+Release:        9%{?dist}
 Summary:        Athanor OS athanor-nix-support
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor-forge
+URL:            https://github.com/hr-mes/athanor
 BuildArch:      noarch
 
 # The Fedora Nix packages provide the binary, the store, the daemon and its systemd
@@ -78,6 +78,10 @@ ln -s ../athanor-nix-gc.timer %{buildroot}/usr/lib/systemd/system/timers.target.
 /usr/share/athanor/nix/registry.json
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-9
+- Point URL at the project repository
+- Point unit Documentation= at the project repository
+
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-8
 - Nix base configuration (#154, decisions A2-13 and A2-16; doc_software.md, SW9 and
   SW10). Fedora's nix-core owns /etc/nix/nix.conf, so no file of this package shares a

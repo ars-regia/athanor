@@ -1,6 +1,6 @@
 [Unit]
 Description=Athanor OS AI Predictive Telemetry & Log Aggregator Daemon
-Documentation=https://github.com/hr-mes/athanor-forge
+Documentation=https://github.com/hr-mes/athanor
 After=network-online.target dbus.service
 Requires=dbus.service
 

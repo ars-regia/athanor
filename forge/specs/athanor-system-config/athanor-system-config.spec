@@ -2,10 +2,10 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:49.fc43}
+Release:        %{?autorelease}%{!?autorelease:50.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor-forge
+URL:            https://github.com/hr-mes/athanor
 BuildArch:      noarch
 
 Requires: cosmic-comp greetd greenboot systemd-ukify nodejs
@@ -88,6 +88,9 @@ mkdir -p /etc/yum.repos.d
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-50
+- Point URL at the project repository.
+
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-49
 - Set XDG_CURRENT_DESKTOP=Athanor:COSMIC for the user manager through
   /usr/lib/environment.d/50-athanor-desktop.conf. athanor-desktop published it only

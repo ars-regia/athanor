@@ -2,17 +2,19 @@
 Name:           athanor-mdm-rs
 Version:        1.0.0
 Release:        3%{?dist}
-Summary:        Athanor OS Mobile Device Management
+Summary:        Athanor OS Device Policy Daemon
 
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor-forge
+URL:            https://github.com/hr-mes/athanor
 Requires:       polkit cryptsetup systemd
 
 
 BuildRequires:  rust cargo systemd-rpm-macros pkgconf-pkg-config openssl-devel
 
 %description
-Athanor OS MDM Daemon for Anti-Theft tracking and cryptographic Remote Wipe.
+Athanor OS MDM Daemon. Applies pushed device policies (USB storage lock and forced
+VPN) through a polkit-gated D-Bus interface. It does not track devices and exposes no
+remote wipe action.
 
 %prep
 # Stub prep
@@ -91,8 +93,9 @@ EOF
 
 %changelog
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-3
-- Require authentication on every device wipe (auth_admin, no cached grant).
-- Point the polkit vendor_url at the project repository.
+- Point URL and the polkit vendor_url at the project repository
+- Correct Summary and %description: the daemon applies USB and VPN policies only
+- Require authentication on every device wipe (auth_admin, no cached grant)
 
 * Thu Jul 16 2026 Athanor <athanor@athanor.os> - 1.0.0-1
 - Initial release
