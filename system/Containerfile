@@ -179,6 +179,12 @@ RUN /usr/libexec/athanor-update/render-policy --registry "${IMAGE_REGISTRY}" --k
 RUN authselect enable-feature with-systemd-homed && \
     systemctl enable tetragon.service systemd-sysext.service systemd-homed.service && systemd-sysusers && systemctl preset-all && systemctl --global preset-all
 
+# No account authenticates with an empty password (#152). The base image's "local" authselect
+# profile ships nullok on pam_unix; the feature removes it from every generated stack.
+RUN authselect enable-feature without-nullok && \
+    test -s /etc/pam.d/system-auth && test -s /etc/pam.d/password-auth && \
+    ! grep -n nullok /etc/pam.d/system-auth /etc/pam.d/password-auth
+
 # Stage 2 switch (doc_shell.md, section 8, item 2): the COSMIC shell is gone, our shell is
 # enabled for every user, and each bus name it owns has exactly one activation file.
 RUN for pkg in cosmic-panel cosmic-applets cosmic-notifications athanor-layout-translator; do \

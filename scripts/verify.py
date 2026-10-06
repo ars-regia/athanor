@@ -826,6 +826,30 @@ def check_cmdline():
     return r
 
 
+PAM_CONTAINERFILE = "system/Containerfile"
+NULLOK_GUARD = re.compile(r"^RUN authselect enable-feature without-nullok\b", re.MULTILINE)
+
+
+def nullok_problems(root=None):
+    """The image build drops nullok from every authselect stack (decision A2-23)."""
+    root = root or ROOT
+    try:
+        text = read(root / PAM_CONTAINERFILE)
+    except OSError as err:
+        return [f"{PAM_CONTAINERFILE}: cannot read ({err})"]
+    if not NULLOK_GUARD.search(text):
+        return [f"{PAM_CONTAINERFILE}: no 'RUN authselect enable-feature without-nullok' step (A2-23)"]
+    return []
+
+
+@check("pam", "No account authenticates with an empty password (A2-23)")
+def check_pam():
+    r = Result()
+    for problem in nullok_problems():
+        r.fail(problem)
+    return r
+
+
 # --------------------------------------------------------------------------- #
 # 8. polkit, il lato codice — il subject deve essere il CHIAMANTE
 # --------------------------------------------------------------------------- #
