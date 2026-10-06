@@ -455,6 +455,7 @@ impl Bar {
     fn surface(self: &Rc<Self>, monitor: &gdk::Monitor, layout: Layout) -> Surface {
         let connector = monitor.connector().map(|name| name.to_string());
         let window = gtk4::ApplicationWindow::new(&self.app);
+        athanor_apps::timing::watch_layer(&window, "bar");
         window.init_layer_shell();
         if let Err(reason) = layer_guard::require_layer_surface(&window) {
             tracing::error!("athanor-bar: not a layer surface: {reason}");

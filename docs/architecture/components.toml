@@ -38,13 +38,6 @@ item = "section 1"
 purpose = "Rust workspace: members, exclusions, shared profile with panic = abort"
 
 [[component]]
-path = "Dockerfile.clippy"
-kind = "image"
-area = "build-ci"
-status = "missing"
-purpose = "Ubuntu image for a local clippy run; written by run_ubuntu.sh, used by nothing else"
-
-[[component]]
 path = "Justfile"
 kind = "config"
 area = "build-ci"
@@ -361,7 +354,6 @@ area = "shell"
 status = "specified"
 spec = "doc_settings.md"
 item = "SE23"
-branch = "shell-specs"
 purpose = "The layout chooser (os.athanor.Layout); retired when the Settings Desktop page lands"
 
 [[component]]
@@ -540,7 +532,6 @@ area = "security"
 status = "specified"
 spec = "doc_tetragon.md"
 item = "TG1"
-branch = "shell-specs"
 purpose = "Cilium Tetragon with Athanor's tracing policies; shipped"
 
 [[component]]
@@ -559,7 +550,6 @@ area = "shell"
 status = "specified"
 spec = "doc_portal.md"
 item = "PT1"
-branch = "shell-specs"
 purpose = "Athanor's xdg-desktop-portal backend and the session's choice of backends"
 
 [[component]]
@@ -585,7 +575,6 @@ area = "shell"
 status = "specified"
 spec = "doc_compositor.md"
 item = "CO3"
-branch = "shell-specs"
 purpose = "cosmic-comp with Athanor's patches; the one COSMIC component that stays"
 
 [[component]]
@@ -628,27 +617,12 @@ status = "missing"
 purpose = "Upstream releases the update bot watches"
 
 [[component]]
-path = "run_clippy.sh"
-kind = "script tool"
-area = "build-ci"
-status = "missing"
-purpose = "One-line local clippy run in the builder image"
-
-[[component]]
-path = "run_ubuntu.sh"
-kind = "script tool"
-area = "build-ci"
-status = "missing"
-purpose = "WSL-era helper that writes Dockerfile.clippy"
-
-[[component]]
 path = "scripts/cosmic-comp-rebase"
 kind = "script tool"
 area = "shell"
 status = "specified"
 spec = "doc_compositor.md"
 item = "CO3"
-branch = "shell-specs"
 purpose = "Rebases Athanor's cosmic-comp patches on a new upstream tag"
 
 [[component]]
@@ -668,14 +642,20 @@ item = "SH13"
 purpose = "Development VM and the acceptance scripts of the shell programs"
 
 [[component]]
+path = "scripts/github-settings"
+kind = "script tool"
+area = "build-ci"
+status = "specified"
+spec = "../operations/github-settings.md"
+item = "whole document"
+purpose = "GitHub repository settings as code: export, diff and apply .github/settings"
+
+[[component]]
 path = "scripts/rename.py"
 kind = "script tool"
 area = "docs"
-status = "specified"
-spec = "doc_naming.md"
-item = "section 5"
-branch = "shell-specs"
-purpose = "The Ermete to Athanor rename tool"
+status = "missing"
+purpose = "The Ermete to Athanor rename tool; its specification doc_naming.md was deleted in cc66b328"
 
 [[component]]
 path = "scripts/runner"
@@ -691,8 +671,16 @@ area = "shell"
 status = "specified"
 spec = "doc_shell_standard.md"
 item = "ST5"
-branch = "shell-specs"
 purpose = "Measures the session's memory against the budget of the shell standard"
+
+[[component]]
+path = "scripts/shell-bench"
+kind = "script tool"
+area = "shell"
+status = "specified"
+spec = "doc_shell_standard.md"
+item = "ST9"
+purpose = "Measures the bar, the dock and athanor-shelld on the reference machine against ST5 and ST6"
 
 [[component]]
 path = "scripts/tests"
@@ -707,13 +695,6 @@ kind = "script tool"
 area = "build-ci"
 status = "missing"
 purpose = "Structural checks of the repository: workflows, polkit, paths, shipped, docs, coverage and more"
-
-[[component]]
-path = "setup_wsl.sh"
-kind = "script tool"
-area = "build-ci"
-status = "missing"
-purpose = "WSL-era rustup installer"
 
 [[component]]
 path = "supply-chain"
@@ -810,7 +791,6 @@ area = "shell"
 status = "specified"
 spec = "doc_languages.md"
 item = "LN2"
-branch = "shell-specs"
 purpose = "Pure-Rust gettext catalog reader shared by the shell programs"
 
 [[component]]
@@ -858,7 +838,6 @@ area = "shell"
 status = "specified"
 spec = "doc_first_run.md"
 item = "FR1"
-branch = "shell-specs"
 purpose = "First-run wizard prototype, not packaged; FR1 retires it"
 
 [[component]]
@@ -868,7 +847,6 @@ area = "shell"
 status = "specified"
 spec = "doc_portal.md"
 item = "PT2"
-branch = "shell-specs"
 purpose = "The portal backend's decisions that tests reach without a display"
 
 [[component]]
@@ -971,7 +949,6 @@ area = "platform"
 status = "specified"
 spec = "doc_first_run.md"
 item = "FR21"
-branch = "shell-specs"
 purpose = "bootc-image-builder configuration of the ISO and of the raw disk image"
 
 [[component]]
@@ -1073,17 +1050,3 @@ status = "specified"
 spec = "doc_build_system.md"
 item = "section 6"
 purpose = "Unit tests of the image build, signing, promotion, kernel artifacts and registry clean-up scripts"
-
-[[component]]
-path = "test.rs"
-kind = "script tool"
-area = "build-ci"
-status = "missing"
-purpose = "A seven-line Rust scratch file at the root"
-
-[[component]]
-path = "uv-install.ps1"
-kind = "script tool"
-area = "build-ci"
-status = "missing"
-purpose = "Vendored PowerShell installer of uv from the WSL era"

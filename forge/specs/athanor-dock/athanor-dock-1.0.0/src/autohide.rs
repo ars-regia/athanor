@@ -5,6 +5,8 @@
 
 use std::time::Duration;
 
+use crate::placement::Anchor;
+
 /// The pointer rests this long on the strip before the dock shows: a pass on the way to
 /// something else never shows it.
 pub const REVEAL_DELAY: Duration = Duration::from_millis(200);
@@ -88,6 +90,38 @@ impl AutoHide {
         self.phase = phase;
         timer
     }
+}
+
+/// A rectangle in surface coordinates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Rect {
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+}
+
+/// The input region of a surface on `edge` under auto-hide. Hidden, the strip along the
+/// edge; shown (`island` is its bounds), the strip and the island stretched down to the
+/// edge, so the pointer that revealed the dock stays inside it wherever it rests on the
+/// edge, and reaches the island without leaving. The rest of the surface lets the pointer
+/// through to the windows below.
+pub fn input_region(edge: Anchor, surface: Rect, island: Option<Rect>) -> Vec<Rect> {
+    let Rect { x, y, w, h } = surface;
+    let strip = match edge {
+        Anchor::Bottom => Rect { x, y: y + h - STRIP_PX, w, h: STRIP_PX },
+        Anchor::Left => Rect { x, y, w: STRIP_PX, h },
+        Anchor::Right => Rect { x: x + w - STRIP_PX, y, w: STRIP_PX, h },
+    };
+    let mut region = vec![strip];
+    if let Some(i) = island {
+        region.push(match edge {
+            Anchor::Bottom => Rect { h: y + h - i.y, ..i },
+            Anchor::Left => Rect { x, w: i.x + i.w - x, ..i },
+            Anchor::Right => Rect { w: x + w - i.x, ..i },
+        });
+    }
+    region
 }
 
 #[cfg(test)]
@@ -195,5 +229,29 @@ mod tests {
         assert_eq!(state.phase(), Phase::Revealing);
         assert_eq!(state.feed(Event::PointerOut), Timer::Cancel);
         assert_eq!(state.phase(), Phase::Hidden);
+    }
+    const SURFACE: Rect = Rect { x: 0, y: 0, w: 1920, h: 60 };
+    const ISLAND: Rect = Rect { x: 782, y: 14, w: 356, h: 40 };
+
+    #[test]
+    fn hidden_only_the_strip_on_the_edge_takes_input() {
+        assert_eq!(input_region(Anchor::Bottom, SURFACE, None), vec![Rect { x: 0, y: 56, w: 1920, h: 4 }]);
+        let tall = Rect { x: 0, y: 0, w: 60, h: 1080 };
+        assert_eq!(input_region(Anchor::Left, tall, None), vec![Rect { x: 0, y: 0, w: 4, h: 1080 }]);
+        assert_eq!(input_region(Anchor::Right, tall, None), vec![Rect { x: 56, y: 0, w: 4, h: 1080 }]);
+    }
+
+    #[test]
+    fn shown_the_strip_and_the_island_down_to_the_edge_take_input() {
+        // The pointer that revealed the dock rests on the edge below the island: if the
+        // region left it out, the dock would hide under the pointer and show again.
+        assert_eq!(
+            input_region(Anchor::Bottom, SURFACE, Some(ISLAND)),
+            vec![Rect { x: 0, y: 56, w: 1920, h: 4 }, Rect { x: 782, y: 14, w: 356, h: 46 }]
+        );
+        let tall = Rect { x: 0, y: 0, w: 60, h: 1080 };
+        let island = Rect { x: 14, y: 400, w: 40, h: 280 };
+        assert_eq!(input_region(Anchor::Left, tall, Some(island))[1], Rect { x: 0, y: 400, w: 54, h: 280 });
+        assert_eq!(input_region(Anchor::Right, tall, Some(island))[1], Rect { x: 14, y: 400, w: 46, h: 280 });
     }
 }
