@@ -61,6 +61,22 @@ class PathDependenciesTest(unittest.TestCase):
         self.assertEqual(dag.path_dependencies(str(workspace)), [str(self.root / "system/unit")])
 
 
+class ContentHashTest(unittest.TestCase):
+    def test_the_hash_scripts_own_error_reaches_the_raised_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            forge = pathlib.Path(tmp) / "forge"
+            (forge / "specs/athanor-dock").mkdir(parents=True)
+            (forge / "config").mkdir()
+            (forge / "specs/athanor-dock/dock.spec").write_text(
+                "# repo-input: system/does-not-exist\nName: athanor-dock\n"
+            )
+            with mock.patch.object(dag, "FORGE_DIR", str(forge)), mock.patch.object(
+                dag, "SPECS_DIR", str(forge / "specs")
+            ):
+                with self.assertRaisesRegex(RuntimeError, "does-not-exist"):
+                    dag.content_hash("dock")
+
+
 class RegistryStateTest(unittest.TestCase):
     """UD41: a custom package is dirty when the registry lacks its hash tag. The registry is
     a stub skopeo on PATH, so the whole chain runs: check_idempotency.sh --hash-only,

@@ -339,11 +339,13 @@ def build_dag(manifest):
 
 def content_hash(pkg):
     """The content hash check_idempotency.sh gives a package: the tag its image carries."""
-    out = subprocess.run(
+    result = subprocess.run(
         ["bash", os.path.join(SCRIPTS_DIR, "check_idempotency.sh"), "--package", pkg, "--hash-only"],
-        cwd=FORGE_DIR, capture_output=True, text=True, check=True,
-    ).stdout
-    return out.strip().removeprefix("CONTENT_HASH=")
+        cwd=FORGE_DIR, capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"content hash of {pkg} failed (exit {result.returncode}):\n{result.stderr.strip()}")
+    return result.stdout.strip().removeprefix("CONTENT_HASH=")
 
 
 def image_exists(ref):
