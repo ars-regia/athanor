@@ -105,7 +105,9 @@ changed spec in its own job, through the same `run_spec_build.sh`, and publishes
 `forge/scripts/select_check_specs.py` selects the specs: a change to what every spec build
 goes through (the builder's inputs `flake.nix`, `flake.lock` and `forge/builder/`,
 `forge/config/rpmmacros`, `build_spec.sh`, `run_spec_build.sh`, `fetch_sources.sh`)
-rebuilds every spec of the DAG (`dag_orchestrator.py --list-spec-dirs`). A change to the
+rebuilds every spec of the DAG (`dag_orchestrator.py --list-spec-dirs`). Only the DAG's specs
+are built: any other changed directory (the kernel, Nix-built packages, unlisted or deleted
+specs) is named in the log and skipped. A change to the
 builder's inputs runs in a builder image built from the pull request
 (`forge/scripts/builder_image.sh`), handed to the build jobs as a one-day workflow
 artifact and never pushed; any other change runs in the published `athanor-builder:latest`.

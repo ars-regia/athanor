@@ -3,7 +3,7 @@ Version:        1.0.0
 Release:        1%{?dist}
 Summary:        Athanor OS Core Component - athanor-semantic-db
 
-License:        GPLv3
+License:        GPL-3.0-or-later
 URL:            https://github.com/hr-mes/athanor
 
 %description

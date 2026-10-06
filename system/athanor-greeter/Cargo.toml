@@ -1,6 +1,7 @@
 [package]
 name = "athanor-greeter"
 version = "0.1.0"
+license = "GPL-3.0-or-later"
 edition = "2021"
 description = "Athanor OS Zero-Trust Greeter and Key Release Manager replacing greetd"
 authors = ["Greeter Security Architect <security@athanor.os>"]

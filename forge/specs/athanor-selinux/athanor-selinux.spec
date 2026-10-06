@@ -3,7 +3,7 @@ Name:           athanor-selinux
 Version:        1.0
 Release:        6%{?dist}
 Summary:        Custom SELinux policies for Athanor OS
-License:        MIT
+License:        GPL-3.0-or-later
 URL:            https://github.com/hr-mes/athanor-forge
 Source0:        bootupd_lsblk.te
 Source1:        athanor_scx.te

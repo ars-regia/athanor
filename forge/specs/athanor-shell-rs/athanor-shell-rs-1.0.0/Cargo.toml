@@ -1,6 +1,7 @@
 [package]
 name = "athanor-shell-rs"
 version = "1.0.0"
+license = "GPL-3.0-or-later"
 edition = "2021"
 authors = ["Athanor Forge <forge@athanor.os>"]
 description = "Pure Rust native shell for Athanor OS"

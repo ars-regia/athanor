@@ -95,7 +95,7 @@ priority: "extra"
 maintainer: "Athanor OS"
 description: "Athanor Telemetry Daemon"
 vendor: "Athanor OS"
-license: "MIT"
+license: "GPL-3.0-or-later"
 contents:
   - src: "$src/bin/athanor-telemetry"
     dst: "/usr/bin/athanor-telemetry"

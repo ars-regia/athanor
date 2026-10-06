@@ -1,6 +1,7 @@
 [package]
 name = "athanor-mesh-bus"
 version = "1.0.0"
+license = "GPL-3.0-or-later"
 edition = "2021"
 description = "Athanor OS Zero-Trust Post-Quantum Cryptography WireGuard P2P Mesh Bus Daemon"
 authors = ["athanor-mesh-pqc-architect"]
