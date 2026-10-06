@@ -40,7 +40,7 @@ Obsoletes:      system-release < 43
 %description
 This package provides the foundational configuration for Athanor Base: os-release
 and the fedora-release identity, Dracut configuration, systemd presets, units and
-tmpfiles, sshd, coredump and journald drop-ins, GRUB authentication, SELinux mode,
+tmpfiles, sshd, coredump and journald drop-ins, SELinux mode,
 Plymouth branding, Polkit rules, repository definitions and GPG keys.
 
 %prep
