@@ -6,7 +6,7 @@
 <!-- If it fixes an open issue, please link to the issue here. -->
 
 ## Security & Verification
-- [ ] This PR does not introduce `unwrap()` or `expect()` in daemon code (see CONTRIBUTING.md).
+- [ ] This PR does not introduce `unwrap()` or `expect()`.
 - [ ] `just lint` and `python3 scripts/verify.py` pass locally.
 - [ ] Input data is strictly sanitized against bash injection.
 
@@ -20,3 +20,4 @@
 - [ ] My code follows the style guidelines of Athanor.
 - [ ] I have performed a self-review of my own code.
 - [ ] I have updated the affected documents under `docs/architecture/`.
+- [ ] My commits are signed.
