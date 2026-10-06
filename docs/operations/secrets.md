@@ -26,7 +26,7 @@ Workflow references are `file:line` under `.github/workflows/` at `bd1f0e4a`.
 | SEC4 | `COSIGN_PASSWORD` | environment `signing` | passphrase of SEC3 | as SEC3 (:440) | none |
 | SEC5 | `RPM_GPG_KEY` | **missing on GitHub** | OpenPGP secret key, ASCII-armoured, sign-only | `call-system-image.yml` `build-repo` (:31, no environment; :58, :157). PR #185 moves it to the sign-only job `sign-repo` in environment `signing` (`forge/scripts/tier_repos.sh sign`), decision A2-33 | none committed. On PR #185 `tier_repos.sh:97` exports it at signing time to `RPM-GPG-KEY-athanor`, published with the tier repositories (`:167-168`) |
 | SEC6 | `RPM_GPG_PASSPHRASE` | **missing on GitHub** | passphrase of SEC5, optional | as SEC5 (:59, :158) | none |
-| SEC7 | `KERNEL_BUMP_TOKEN` | repository | personal access token | `kernel-bump.yml` `pr` (:203, :207) and `system` (:263, :309); `cosmic-comp-bump.yml` `bump` (:33, :37); `nix-registry-bump.yml` `bump` (:46); as `MERGE_TOKEN` in `spec-build-check.yml` `merge` (:144) and `system-image-check.yml` `merge` (:152) for `forge/scripts/bot_merge.py`. A token, not `GITHUB_TOKEN`, because pull requests opened with `GITHUB_TOKEN` start no checks (`doc_kernel_build.md:447`) | none |
+| SEC7 | `KERNEL_BUMP_TOKEN` | repository | personal access token | `kernel-bump.yml` `pr` (:203, :207) and `system` (:263, :309); `cosmic-comp-bump.yml` `bump` (:33, :37); `nix-registry-bump.yml` `bump` (:46); as `MERGE_TOKEN` in `spec-build-check.yml` `merge` (:156) and `system-image-check.yml` `merge` (:152) for `forge/scripts/bot_merge.py`. A token, not `GITHUB_TOKEN`, because pull requests opened with `GITHUB_TOKEN` start no checks (`doc_kernel_build.md:447`) | none |
 | SEC8 | `SPECS_UPDATE_TOKEN` | repository | personal access token | `forge-util-update-specs.yml` `update-specs` (:32, :45, :62): pushes `chore/update-specs-zero-trust` and opens its pull request | none |
 | SEC9 | `FORGE_PAT` | repository | personal access token (classic) | `forge-ghcr-cleanup.yml` `cleanup-janitor` (:32, :39) through `forge/scripts/clean_ghcr.sh`, which deletes container package versions | none |
 | SEC10 | `GITHUB_TOKEN` | automatic, per job | GitHub App installation token | most workflows; its scopes are each workflow's `permissions:` block | none |
@@ -42,7 +42,7 @@ No repository variable is set (`gh variable list` is empty), so every default be
 
 | Id | Name | Default | Used by |
 | --- | --- | --- | --- |
-| VAR1 | `REGISTRY_HOST` | `ghcr.io` | orchestrator (:46), `call-build-builder.yml:12`, `call-dag-compile.yml:35-36`, `forge-ghcr-cleanup.yml:34,41`, `fuzzing.yml:36`, `promote-stable.yml:37,42`, `rust-security-audit.yml:22,139,193`, `spec-build-check.yml:100` |
+| VAR1 | `REGISTRY_HOST` | `ghcr.io` | orchestrator (:46), `call-build-builder.yml:12`, `call-dag-compile.yml:35-36`, `forge-ghcr-cleanup.yml:34,41`, `fuzzing.yml:36`, `promote-stable.yml:37,42`, `rust-security-audit.yml:22,139,193`, `spec-build-check.yml:93` |
 | VAR2 | `KERNEL_REGISTRY` | `ghcr.io/<owner>` (`system/kernel-artifacts.sh:56`) | orchestrator (:135, :186), `kernel-build.yml:54`, `kernel-bump.yml:60,258`, `nvidia-kmod.yml:46`, `system-image-check.yml:53` |
 | VAR3 | `BUILDER_STABLE_TAG` | `latest` | `forge-ghcr-cleanup.yml:25`, `fuzzing.yml:36`, `rust-security-audit.yml:22,139,193` |
 | VAR4 | `RELEASE_BRANCH` | `iso-v0` | PR #180 only: orchestrator, `call-system-image.yml`, `iso-acceptance.yml`, `promote-stable.yml` |
