@@ -87,7 +87,7 @@ invece di cambiare directory.
 - **Zero-trust**: nessun daemon o applicazione fuori da un compartimento o da una MicroVM. Mai `chmod 777`, mai root diretto, mai aggirare la policy IPE, il confinamento Landlock o i compartimenti.
 - **Niente finte implementazioni nella sicurezza**: crittografia, validazione dei token e hash devono essere reali. Un placeholder in un percorso di sicurezza è un bug, non una bozza.
 - **`panic = "abort"` su dev e release**: un panic non è recuperabile, termina il processo. Nei daemon questo significa perdita di servizio.
-- Modifiche a `system/athanor-bus-api/src/polkit.rs` o all'attestazione (`system/confidential_computing/athanor-attestation`): fermati e chiedi prima di editare.
+- Modifiche a `system/athanor-bus-api/src/polkit.rs`: fermati e chiedi prima di editare.
 
 ## Protocollo scratch
 

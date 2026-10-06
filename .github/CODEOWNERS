@@ -3,7 +3,6 @@
 * @hr-mes-architect
 
 # Core OS & Kernel
-/system/athanor-ebpf-sched/ @hr-mes-architect
 /forge/specs/kernel/ @hr-mes-architect
 
 # CI/CD

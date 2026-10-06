@@ -89,8 +89,7 @@ package, so the levels order the jobs but no build consumes the output of anothe
    `go.mod` pin. The `build` stage runs `rpmbuild` with `--network=none`,
    `CARGO_NET_OFFLINE=true` and `GOPROXY=off`. Specs without `Source` build the checkout
    in place (`rpmbuild --build-in-place`). Rust compiles through sccache, cached per
-   package. `athanor-telemetry` is the exception: it builds with
-   `nix build .#athanor-telemetry-rpm`.
+   package.
 3. **Publication.** The RPMs go into a `FROM scratch` image,
    `<registry>/<owner>/athanor-forge-<package>`, tagged `:latest` and `:<hash>`, with the
    hash in the `tier.content.sha256` label. The registry host is the `REGISTRY_HOST`

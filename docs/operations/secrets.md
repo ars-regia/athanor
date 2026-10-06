@@ -64,7 +64,6 @@ No repository variable is set (`gh variable list` is empty), so every default be
 | present, unused | SEC11 | a retired private key still sits in `signing` | delete it after the hardware check of `doc_system_image.md` section 6, step 3 (`modinfo -F signer nvidia` names the module signing key): `gh secret delete MOK_PRIVATE_KEY --env signing --repo "$REPO"`. Whether that check has passed is not recorded in the repository |
 | present, unused | ENV3 | none | delete it, or say what it is for |
 | other | SEC9 | `forge-ghcr-cleanup.yml` fails on every run (37173567085, 36288233693, 35483291172) | outside this runbook; `clean_ghcr.sh:63,73` also call `/users/<owner>/...`, which an organisation owner does not answer |
-| other | `system/cosign.pub` | an old public key (2026-07-24, blob `ef686642`), not the image key (`athanor-image-1.pub`, blob `48cdddb2`). `system/athanor-store/src/main.rs:39` reads `/etc/athanor/keys/cosign.pub`, and `git grep` finds nothing that installs that file | maintainer to decide: retire it or make the store use the image key |
 
 ### 1.4 Generation, rotation and holders
 
