@@ -42,6 +42,8 @@ ENVIRONMENTS = {
     "signing-kernel": signing_environment("SECUREBOOT_SIGNING_KEY"),
     "github-pages": {"reviewers": [], "secrets": []},
 }
+# The repository secrets, which every job can read: none of them signs.
+REPOSITORY_SECRETS = ["KERNEL_BUMP_TOKEN"]
 
 SIGN_JOB = f"""\
   sign:
@@ -80,7 +82,7 @@ def workflow(*jobs):
 
 
 class SigningTest(unittest.TestCase):
-    def problems(self, workflows, environments=ENVIRONMENTS):
+    def problems(self, workflows, environments=ENVIRONMENTS, repository=REPOSITORY_SECRETS):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             (root / ".github/settings").mkdir(parents=True)
@@ -90,6 +92,9 @@ class SigningTest(unittest.TestCase):
             )
             (root / ".github/settings/branch-protection.json").write_text(
                 json.dumps(BRANCH_PROTECTION)
+            )
+            (root / ".github/settings/actions.json").write_text(
+                json.dumps({"secrets": repository})
             )
             for name, text in workflows.items():
                 (root / ".github/workflows" / name).write_text(text)
@@ -340,12 +345,12 @@ class SigningTest(unittest.TestCase):
         )
 
     def test_a_missing_signing_environment_fails(self):
-        self.assertEqual(
+        self.assertIn(
+            ".github/settings/environments.json: no signing environment (D43)",
             self.problems(
                 {"k.yml": workflow(SIGN_JOB)},
                 {"github-pages": ENVIRONMENTS["github-pages"]},
             ),
-            [".github/settings/environments.json: no signing environment (D43)"],
         )
 
     def test_rule_4_a_signing_secret_in_the_other_signing_environment_fails(self):
@@ -395,6 +400,36 @@ class SigningTest(unittest.TestCase):
                 problems = self.problems({"k.yml": workflow(SIGN_JOB)}, environments)
                 self.assertEqual(len(problems), 1, problems)
                 self.assertIn(f"the signing-kernel environment deploys from {where}", problems[0])
+
+    def test_rule_6_a_secret_no_settings_file_declares_fails(self):
+        """Every secret a workflow reads is in environments.json (an environment holds it) or in
+        actions.json (a repository secret, which signs nothing); GITHUB_TOKEN is GitHub's own."""
+        build = BUILD_JOB.replace(
+            "      - run: podman build",
+            "      - env:\n          A: ${{ secrets.GITHUB_TOKEN }}\n"
+            "          B: ${{ secrets.KERNEL_BUMP_TOKEN }}\n"
+            "          C: ${{ secrets.RPM_GPG_KEY }}\n"
+            "          D: ${{ secrets.rpm_gpg_key }}\n        run: podman build",
+        )
+        self.assertEqual(
+            self.problems({"k.yml": workflow(build, SIGN_JOB)}),
+            [
+                "k.yml: reads RPM_GPG_KEY, which neither .github/settings/environments.json nor "
+                ".github/settings/actions.json declares (D43)"
+            ],
+        )
+
+    def test_rule_6_a_repository_secret_held_by_a_signing_environment_fails(self):
+        self.assertEqual(
+            self.problems(
+                {"k.yml": workflow(SIGN_JOB)},
+                repository=["KERNEL_BUMP_TOKEN", "SECUREBOOT_SIGNING_KEY"],
+            ),
+            [
+                ".github/settings/actions.json: SECUREBOOT_SIGNING_KEY is a repository secret, which "
+                "every job reads, and signing-kernel holds it (D43)"
+            ],
+        )
 
     def test_without_pyyaml_the_lint_fails_closed(self):
         saved, verify.yaml = verify.yaml, None

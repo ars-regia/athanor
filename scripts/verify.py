@@ -199,6 +199,10 @@ SECRET_NAME = re.compile(r"\bsecrets\s*\.\s*([A-Za-z_][A-Za-z0-9_-]*)", re.I)
 SECRETS_WORD = re.compile(r"\bsecrets\b", re.I)
 ENVIRONMENTS_JSON = ".github/settings/environments.json"
 BRANCH_PROTECTION_JSON = ".github/settings/branch-protection.json"
+# Its "secrets" are the repository secrets, which every job can read: none of them signs.
+ACTIONS_JSON = ".github/settings/actions.json"
+# The secret GitHub gives every run; nobody stores it.
+BUILTIN_SECRETS = {"GITHUB_TOKEN"}
 
 
 def yaml_strings(node, path=()):
@@ -295,13 +299,22 @@ def signing_problems(root):
     workflow, runs no container and builds, installs or runs no locally built image; no secret
     is read other than by name, and no caller inherits secrets into a workflow with a signing
     job; each signing environment has a required reviewer, no administrator bypass, and deploys
-    only from protected branches."""
+    only from protected branches. Every secret read is declared in the settings: held by an
+    environment of environments.json, or a repository secret of actions.json that no signing
+    environment holds."""
     root = Path(root)
     holders, problems = signing_environments(root)
     if yaml is None:
         return problems + ["scripts/verify.py: PyYAML is missing, so the D43 lint cannot read the "
                            "workflows (pip install pyyaml)"]
-    signing = {name for name in json.loads(read(root / ENVIRONMENTS_JSON)) if name.startswith("signing")}
+    environments = json.loads(read(root / ENVIRONMENTS_JSON))
+    signing = {name for name in environments if name.startswith("signing")}
+    repository = set(json.loads(read(root / ACTIONS_JSON)).get("secrets") or [])
+    for secret in sorted(repository & holders.keys()):
+        problems.append(f"{ACTIONS_JSON}: {secret} is a repository secret, which every job reads, "
+                        f"and {holders[secret]} holds it (D43)")
+    declared = repository | BUILTIN_SECRETS | {
+        secret for env in environments.values() for secret in env.get("secrets") or []}
     workflows = {}
     for wf in sorted((root / ".github/workflows").glob("*.y*ml")):
         try:
@@ -318,8 +331,10 @@ def signing_problems(root):
                         if any(job_environment(job) in signing for job in doc["jobs"].values())}
     for name, doc in workflows.items():
         problems += workflow_signing_problems(name, doc["jobs"], holders, signing, with_signing_job, set(workflows))
+        undeclared = set()
         for path, text in yaml_strings(doc):
             names, dynamic = secret_references(text)
+            undeclared |= names - declared
             if dynamic:
                 problems.append(f"{name}: {'.'.join(map(str, path))} reads secrets other than as "
                                 "secrets.NAME, which hides the secret it reads (D43)")
@@ -327,6 +342,9 @@ def signing_problems(root):
                 for secret in sorted(names & holders.keys()):
                     problems.append(f"{name}: {secret} at the workflow level ({path[0]}), where every job "
                                     "reads it (D43)")
+        for secret in sorted(undeclared):
+            problems.append(f"{name}: reads {secret}, which neither {ENVIRONMENTS_JSON} nor {ACTIONS_JSON} "
+                            "declares (D43)")
     return problems
 
 
