@@ -45,9 +45,7 @@ secondi di verifica locale.
   fallback di `chown` in `call-build-builder.yml` e `call-dag-compile.yml`) sono
   debito noto da risolvere, non un modello da copiare.
 - Un commit per problema, non un commit che sistema tutto.
-- Un workflow che costruisce o pubblica un'immagine ha un job `lint` che gira per
-  primo; non tutti i workflow esistenti lo hanno ancora: aggiungilo a quelli che
-  tocchi.
+- Ogni workflow del percorso ISO ha un job `lint` che gira per primo.
 
 ## Justfile
 
