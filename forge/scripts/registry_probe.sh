@@ -24,7 +24,7 @@ fi
 err=$(mktemp)
 trap 'rm -f "$err"' EXIT
 
-if skopeo inspect --no-tags --format '{{.Digest}}' "docker://${1,,}" > /dev/null 2> "$err"; then
+if skopeo --command-timeout 30s inspect --no-tags --format '{{.Digest}}' "docker://${1,,}" > /dev/null 2> "$err"; then
   echo present
 elif grep -qi 'manifest unknown\|name unknown' "$err"; then
   echo absent

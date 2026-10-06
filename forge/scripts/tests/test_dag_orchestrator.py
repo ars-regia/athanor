@@ -146,6 +146,28 @@ class RegistryStateTest(unittest.TestCase):
         self.assertGreater(peak, 1)
         self.assertLessEqual(peak, dag.PROBE_WORKERS)
 
+    def test_the_first_failure_in_completion_order_ends_the_run(self):
+        release = threading.Event()
+        self.addCleanup(release.set)
+        started = []
+
+        def exists(ref):
+            started.append(ref)
+            if "athanor-forge-bad:" in ref:
+                raise RuntimeError("registry down")
+            release.wait(5)  # slower than the failure: it must not be waited for
+            return True
+
+        # The failing node is submitted after the slow ones and ahead of the pending queue.
+        hashes = {f"slow{i}": "0" * 64 for i in range(7)}
+        hashes["bad"] = "0" * 64
+        hashes.update({f"late{i}": "0" * 64 for i in range(30)})
+        begin = time.monotonic()
+        with self.assertRaisesRegex(RuntimeError, "registry down"):
+            dag.evaluate_dirty_nodes(hashes, exists=exists)
+        self.assertLess(time.monotonic() - begin, 2)
+        self.assertLessEqual(len(started), dag.PROBE_WORKERS + 1)  # pending lookups cancelled
+
     def test_lookup_asks_for_the_hash_tag_of_the_node_image(self):
         self.answer(0)
         refs = []

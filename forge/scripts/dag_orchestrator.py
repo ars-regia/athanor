@@ -12,7 +12,7 @@ import glob
 import re
 import json
 import subprocess
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import tomllib
 from collections import defaultdict, deque
 
@@ -376,8 +376,9 @@ def image_ref(node, hash_):
     return f"{registry}/{owner}/athanor-forge-{node}:hash-{hash_}"
 
 
-# Registry lookups in flight at once. Each is one skopeo inspect; retry.sh may hold one for
-# about four minutes, so sequential lookups of ~40 packages could not fit a job.
+# Registry lookups in flight at once. Each is one skopeo inspect under retry.sh, which may
+# hold one for ~6 minutes (see the brain's timeout-minutes), so sequential lookups of the
+# 35 custom packages could not fit a job.
 PROBE_WORKERS = 8
 
 
@@ -388,13 +389,15 @@ def evaluate_dirty_nodes(hashes, exists=image_exists):
     not dirty its dependents. Upstream packages are never built here and flatpaks publish
     nothing: neither is ever dirty.
     """
-    with ThreadPoolExecutor(max_workers=PROBE_WORKERS) as pool:
-        futures = {node: pool.submit(exists, image_ref(node, hash_)) for node, hash_ in hashes.items()}
-        try:
-            return {node for node, future in futures.items() if not future.result()}
-        finally:
-            # The first failed lookup ends the run: do not start the rest.
-            pool.shutdown(wait=False, cancel_futures=True)
+    pool = ThreadPoolExecutor(max_workers=PROBE_WORKERS)
+    futures = {pool.submit(exists, image_ref(node, hash_)): node for node, hash_ in hashes.items()}
+    try:
+        # In completion order: a failure is raised as soon as it happens, not when its turn
+        # comes behind slower lookups.
+        return {futures[f] for f in as_completed(futures) if not f.result()}
+    finally:
+        # Whatever ended the loop, lookups not yet started are dropped.
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 def write_hashes(hashes):
