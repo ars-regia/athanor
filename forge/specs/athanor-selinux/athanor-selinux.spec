@@ -56,9 +56,12 @@ install -D -m 0644 athanor_nvidia_modules_load.cil %{buildroot}%{_datadir}/selin
   set-up, the store, HTTP(S) substituters and read access to /proc and to
   symbolic links for the collector's roots. Store programs the daemon executes
   (builders) run in nix_build_t, after the sandbox has set no_new_privs, through
-  an explicit nnp_transition; the domain is broad on files, devices and the
-  network, like Fedora's rpm_script_t, without any SELinux administration or
-  kernel module attribute. The rule letting init_t create the socket as
+  an explicit nnp_transition. nix_build_t carries no unconfined attribute: it
+  manages the store and the build directory, executes /bin/sh and the other
+  binaries the sandbox binds in (bin_t and shell_exec_t, entered from the daemon
+  by a type transition), and may connect out only to HTTP(S), proxy, git, ssh
+  and DNS ports and listen on unprivileged loopback ports. It cannot load kernel
+  modules, start or stop units, or relabel files. The rule letting init_t create the socket as
   default_t is gone: the socket directory is nix_socket_t.
 
 * Thu Sep 24 2026 Athanor Forge <forge@athanor.os> - 1.0-6
