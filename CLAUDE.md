@@ -4,9 +4,7 @@ OS immutabile, zero-trust, cloud-native. Workspace Rust.
 Desktop GTK4/Wayland, nervo eBPF in ring-0, mesh post-quantistica, rootfs immutabile.
 Il kernel e' **Azoth** (`forge/specs/azoth`).
 
-**Rinomina eseguita.** Il progetto si chiamava Ermete OS fino al 5 settembre 2026
-(commit 02bf9c05). Su `iso-v0` non resta nessun crate `ermete-*`: quei nomi sono
-storia, presenti solo su `main`. Non rinominare nulla di tua iniziativa.
+**Rinomina.** Fino al 2026-09-05 il progetto si chiamava Ermete OS (02bf9c05): il nome vecchio resta solo nella storia, in un certificato revocato e in molti pacchetti ghcr `ermete-*`. Non rinominare nulla di tua iniziativa.
 
 <!-- Le convenzioni per area stanno in .claude/rules/ con `paths:`: entrano in
      contesto solo quando apri i file corrispondenti. Qui solo ciò che serve sempre. -->
@@ -21,16 +19,16 @@ storia, presenti solo su `main`. Non rinominare nulla di tua iniziativa.
      ogni settimana e invecchiano in silenzio. Per la struttura reale usa il grafo
      (`codegraph_explore`), non una lista scritta a mano. -->
 - `scripts/verify.py` — verificatore del progetto: workflow, polkit, percorsi, file spediti, documentazione
+- `.claude/` — configurazione Claude Code condivisa: permessi, trappole per area in `rules/`, setup consigliato in `.claude/README.md`
 
 **Mai entrare in `docs/architecture/graph-vaults/`**: sono 2958 file generati dal
 grafo. Interrogali con `/graphify query`, non aprirli.
 
 ## Stato corrente
 
-Branch `iso-v0`. Obiettivo: **un'ISO che si avvia e mostra il greeter**, non la 1.0.
-Il piano operativo è la milestone GitHub "iso-v0" (`gh issue list --milestone iso-v0`),
-una issue per blocco con il suo gate: non passare al blocco successivo finché il gate
-non è verde.
+Branch di default `iso-v0`. Le decisioni e il loro perché sono ADR in `docs/decisions/`
+(un `id` stabile nel front matter); il piano di lavoro aperto è la issue #162. Lo stato non si
+scrive qui: si legge da lì.
 
 Il working tree ha centinaia di file modificati non committati. **Verificalo
 sempre con `git status` prima di qualunque operazione git distruttiva.**
@@ -81,6 +79,11 @@ invece di cambiare directory.
   variable with a default. Prefer a standard mechanism (OCI, cosign with a key, a file
   on disk) over one that exists only on GitHub. Applies to new code and to any file
   touched anyway; no refactoring for its own sake. *(2026-09-10)*
+- **Everything lives in the repository.** Every aspect of Athanor is described in the
+  repository: specs live with the code, decisions are ADRs in `docs/decisions/`, and the
+  project's Claude Code configuration is versioned in `.claude/`. Project knowledge never
+  lives only in personal memory: a trap found while working becomes one line in
+  `.claude/rules/<area>.md`. *(2026-10-06, A2-34)*
 
 ## Limiti inviolabili
 
