@@ -73,7 +73,8 @@ Branch protection on `iso-v0` requires one check: `Kernel gate` (`gh api repos/h
 | System Image Check | CI13 | the image inputs change | no | the three images build with a throwaway UKI key; package delta; merges `bump/system-*` PRs |
 | Spec Build Check | CI14 | a forge spec changes | no | changed specs build as the DAG builds them; merges the spec bot's PR |
 | Shell surfaces | CI15 | a shell crate or `forge/test/shell/**` changes | no | rig tests of the greeter, layout, compositor client, shelld, bar, dock, launcher; also CI2 |
-| Fuzzing, Rust Security & FFI Audit, Nix Vanguard | CI23, CI22, CI24 | only PRs based on `main` | no | see section 3 |
+| Rust Security & FFI Audit | CI22 | every PR to `iso-v0` | no | clippy, the shell workspace compile check, cargo-deny (`deny.toml`) |
+| Fuzzing, Nix Vanguard | CI23, CI24 | only PRs based on `main` | no | see section 3 |
 
 CI2 (actionlint, `scripts/verify.py`, the unit test suites) has no trigger of its own: on a PR it runs through CI8, which runs on every pull request and whose `Kernel gate` requires it, and through CI15.
 
@@ -262,11 +263,11 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 
 ### CI22 Rust Security & FFI Audit
 
-- **File:** `rust-security-audit.yml`. **Purpose:** clippy, cargo vet and cargo deny, Kani on two crates, eBPF and bare-metal builds.
-- **Triggers:** push and `pull_request` on `main`, `develop` only. **Outputs:** artifacts `debug-logs`, `baremetal-artifact-<target>`.
+- **File:** `rust-security-audit.yml`. **Purpose:** clippy over the root workspace, a compile check of the frozen shell workspace, and cargo-deny (licences, advisories, bans, sources, one policy in `deny.toml`) over both lockfiles. There is no cargo-vet, Kani or eBPF job (ADR-0075).
+- **Triggers:** push and `pull_request` on `iso-v0`. **Outputs:** artifact `security-audit-logs`.
 - **Secrets, variables:** `REGISTRY_HOST`, `BUILDER_STABLE_TAG`. **Environment:** none. **Runner:** hosted, inside the `athanor-builder` container. **Concurrency:** `<workflow>-<ref>`, cancels in progress.
-- **Scripts:** none.
-- **Health:** red, CB1.
+- **Scripts:** `scripts/ci/security-audit.sh`.
+- **Health:** red until the builder image carrying the CB1 fix is published, then expected to fail only on the open dependency advisories.
 
 ### CI23 Rust Security & Buffer Overflow Fuzzing
 
@@ -288,7 +289,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 
 | Id | Workflow | Cause | Evidence |
 |---|---|---|---|
-| CB1 | CI22 | Every job runs in the Nix `athanor-builder` container, where the runner's `node24` cannot load `libstdc++.so.6`, so `actions/checkout` and every JavaScript action fail. The workflow does not run on `iso-v0` at all (`rust-security-audit.yml:5,7`). | Run 37436972597 (2026-10-06): `/__e/node24/bin/node: error while loading shared libraries: libstdc++.so.6`. Runs 33735152030, 33735141194, 33735127883, 33735106788 (2026-09-03) failed. Last success 31723735366 (2026-08-13). |
+| CB1 | CI22 | Every job runs in the Nix `athanor-builder` container, where the runner's `node24` cannot load `libstdc++.so.6`, so `actions/checkout` and every JavaScript action fail. The nixpkgs `ld.so` of the image searched neither `/lib/x86_64-linux-gnu` nor `/usr/lib64`, where `builder-fhs-compat` links `libstdc++.so.6`, and `LD_LIBRARY_PATH` did not name them. Fixed in `flake.nix` by adding `/lib/x86_64-linux-gnu` to `LD_LIBRARY_PATH`; it takes effect when the builder image is rebuilt. | Run 37436972597 (2026-10-06): `/__e/node24/bin/node: error while loading shared libraries: libstdc++.so.6`. Runs 33735152030, 33735141194, 33735127883, 33735106788 (2026-09-03) failed. Last success 31723735366 (2026-08-13). |
 | CB2 | CI21 | Same container cause. The rewritten `forge/scripts/clean_ghcr.sh` has never pruned in CI. The job has a 10-minute limit (`forge-ghcr-cleanup.yml:23`) against a backlog nobody has measured since. | Run 37173567085 (2026-10-04): same `libstdc++.so.6` error. Every run since 31918663684 (2026-08-16) failed; last success 31590170415 (2026-08-12). |
 | CB3 | CI23 | Same container cause, and the fuzz targets are gone: `tests/fuzz` was deleted in `0c4e012f` (2026-08-14), yet the job runs `cd tests/fuzz` (`fuzzing.yml:91`). The schedule fires on the default branch, `iso-v0`. | Runs 37190403649, 36306818604, 35498243254 (iso-v0) and 34745872130, 34018916505 (main) failed; 37190403649 shows the `libstdc++.so.6` error. Last success 31924793226 (2026-08-16). |
 | CB4 | CI24 | Green, but not reproducible: `cachix/install-nix-action@v25` is a tag, not a commit (`nix-vanguard.yml:19`); `nixos-unstable` floats (`:21`). It builds `pkgs.just` (`flake.nix:77`), nothing of Athanor, and runs only for `main` (`:5,7`). | Runs 37436972430, 33735156990, 33735143255, 33735130648, 33735112511 success. |

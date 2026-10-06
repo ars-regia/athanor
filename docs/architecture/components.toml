@@ -697,13 +697,6 @@ status = "missing"
 purpose = "Structural checks of the repository: workflows, polkit, paths, shipped, docs, coverage and more"
 
 [[component]]
-path = "supply-chain"
-kind = "config"
-area = "security"
-status = "missing"
-purpose = "cargo-vet audits and imports, Trivy ignore list"
-
-[[component]]
 path = "system/Containerfile"
 kind = "image"
 area = "build-ci"

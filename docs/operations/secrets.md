@@ -42,9 +42,9 @@ No repository variable is set (`gh variable list` is empty), so every default be
 
 | Id | Name | Default | Used by |
 | --- | --- | --- | --- |
-| VAR1 | `REGISTRY_HOST` | `ghcr.io` | orchestrator (:46), `call-build-builder.yml:12`, `call-dag-compile.yml:35-36`, `forge-ghcr-cleanup.yml:34,41`, `fuzzing.yml:36`, `promote-stable.yml:37,42`, `rust-security-audit.yml:22,139,193`, `spec-build-check.yml:100` |
+| VAR1 | `REGISTRY_HOST` | `ghcr.io` | orchestrator (:46), `call-build-builder.yml:12`, `call-dag-compile.yml:35-36`, `forge-ghcr-cleanup.yml:34,41`, `fuzzing.yml:36`, `promote-stable.yml:37,42`, `rust-security-audit.yml:21`, `spec-build-check.yml:100` |
 | VAR2 | `KERNEL_REGISTRY` | `ghcr.io/<owner>` (`system/kernel-artifacts.sh:56`) | orchestrator (:135, :186), `kernel-build.yml:54`, `kernel-bump.yml:60,258`, `nvidia-kmod.yml:46`, `system-image-check.yml:53` |
-| VAR3 | `BUILDER_STABLE_TAG` | `latest` | `forge-ghcr-cleanup.yml:25`, `fuzzing.yml:36`, `rust-security-audit.yml:22,139,193` |
+| VAR3 | `BUILDER_STABLE_TAG` | `latest` | `forge-ghcr-cleanup.yml:25`, `fuzzing.yml:36`, `rust-security-audit.yml:21` |
 | VAR4 | `RELEASE_BRANCH` | `iso-v0` | PR #180 only: orchestrator, `call-system-image.yml`, `iso-acceptance.yml`, `promote-stable.yml` |
 | VAR5 | `PROMOTE_DWELL_HOURS` | `24` | PR #180 only: `promote-stable.yml` |
 
