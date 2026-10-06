@@ -1,6 +1,7 @@
 """Unit tests of system/kernel-artifacts.sh against an offline registry
 (python3 -B -m unittest discover -s system/tests -v)."""
 
+import hashlib
 import json
 import os
 import pathlib
@@ -29,6 +30,8 @@ ATTESTED_OTHER_NVR = subprocess.run(
 assert ATTESTED_OTHER_NVR != NVR, "OTHER_FEDORA_KERNEL_NVR must derive an NVR other than the real one"
 INPUTS = json.loads(subprocess.run(["python3", str(ROOT / "forge/specs/azoth/build-inputs.py")], capture_output=True, text=True, check=True).stdout)
 MODULE = {"open": "sha256:" + "3" * 64, "legacy": "sha256:" + "4" * 64}
+BOOT = "sha256:" + "5" * 64
+SECUREBOOT_CERT = hashlib.sha256((ROOT / "forge/specs/azoth/keys/secureboot/athanor-secureboot.pem").read_bytes()).hexdigest()
 KERNEL_BUILD = "https://github.com/ars-regia/athanor/.github/workflows/kernel-build.yml@refs/heads/iso-v0"
 KMOD = "https://github.com/ars-regia/athanor/.github/workflows/nvidia-kmod.yml@refs/heads/iso-v0"
 
@@ -43,8 +46,17 @@ def predicate(branch, kernel=KERNEL):
             "pins": {k: v for k, v in PINS.items() if k.startswith("NVIDIA_")}}
 
 
-def published(branches=("open", "legacy")):
-    """A registry holding the signed kernel of the pins and the attested modules of BRANCHES."""
+def boot_tag(kernel=KERNEL):
+    return f"{NVR}-k{kernel[7:19]}"
+
+
+def boot_predicate(kernel=KERNEL, cert=SECUREBOOT_CERT):
+    return {"boot": "vmlinuz", "kver": f"{NVR}.x86_64", "kernel_digest": kernel, "secureboot_cert": cert}
+
+
+def published(branches=("open", "legacy"), boot=True):
+    """A registry holding the signed kernel of the pins, the attested modules of BRANCHES and,
+    with BOOT, its attested signed vmlinuz."""
     fx = {
         "tags": {f"{REG}/azoth:{NVR}": KERNEL, f"{REG}/azoth-devel:{NVR}": DEVEL},
         "signatures": {f"{REG}/azoth@{KERNEL}": KERNEL_BUILD, f"{REG}/azoth-devel@{DEVEL}": KERNEL_BUILD},
@@ -57,6 +69,11 @@ def published(branches=("open", "legacy")):
         fx["tags"][f"{REG}/azoth-nvidia:{tag(branch)}"] = MODULE[branch]
         fx["signatures"][ref] = KMOD
         fx["attestations"][ref] = [{"identity": KMOD, "predicate": predicate(branch)}]
+    if boot:
+        ref = f"{REG}/azoth-boot@{BOOT}"
+        fx["tags"][f"{REG}/azoth-boot:{boot_tag()}"] = BOOT
+        fx["signatures"][ref] = KMOD
+        fx["attestations"][ref] = [{"identity": KMOD, "predicate": boot_predicate()}]
     return fx
 
 
@@ -104,6 +121,50 @@ class Resolve(Tool):
         self.assertEqual((got["kernel_digest"], got["devel_digest"]), (KERNEL, DEVEL))
         self.assertEqual((got["nvidia_open_digest"], got["nvidia_legacy_digest"]), (MODULE["open"], MODULE["legacy"]))
         self.assertEqual(got["nvidia_open_tag"], f"{NVR}-k{'1' * 12}-open-{PINS['NVIDIA_OPEN_VERSION']}")
+
+    def test_ready_records_the_signed_vmlinuz(self):
+        self.registry(published())
+        r = self.run_script("resolve")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        got = self.state_file()
+        self.assertEqual((got["state"], got["boot_tag"], got["boot_digest"]), ("ready", boot_tag(), BOOT))
+
+    def test_missing_signed_vmlinuz_is_modules_missing(self):
+        self.registry(published(boot=False))
+        r = self.run_script("resolve")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        got = self.state_file()
+        self.assertEqual(got["state"], "modules-missing")
+        self.assertEqual(got["boot_tag"], boot_tag())
+        self.assertNotIn("boot_digest", got)
+        self.assertEqual((got["nvidia_open_digest"], got["nvidia_legacy_digest"]), (MODULE["open"], MODULE["legacy"]))
+
+    def test_signed_vmlinuz_that_does_not_match_is_modules_missing(self):
+        for case, identity, attested in (
+            ("signed by Kernel Build, not NVIDIA kmod", KERNEL_BUILD, boot_predicate()),
+            ("attested for another kernel", KMOD, boot_predicate(kernel=OTHER_KERNEL)),
+            ("signed with a rotated certificate", KMOD, boot_predicate(cert="0" * 64)),
+            ("attested as something else", KMOD, dict(boot_predicate(), boot="initramfs")),
+        ):
+            with self.subTest(case):
+                fx = published()
+                ref = f"{REG}/azoth-boot@{BOOT}"
+                fx["signatures"][ref] = identity
+                fx["attestations"][ref] = [{"identity": identity, "predicate": attested}]
+                self.registry(fx)
+                r = self.run_script("resolve")
+                self.assertEqual(r.returncode, 0, r.stderr)
+                got = self.state_file()
+                self.assertEqual(got["state"], "modules-missing")
+                self.assertNotIn("boot_digest", got)
+
+    def test_signed_vmlinuz_registry_error_fails(self):
+        fx = published()
+        fx["errors"].append(f"{REG}/azoth-boot:{boot_tag()}")
+        self.registry(fx)
+        r = self.run_script("resolve")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIsNone(self.state_file())
 
     def test_missing_module_tag_is_modules_missing(self):
         self.registry(published(branches=("open",)))
@@ -748,10 +809,17 @@ class CheckPlan(Repo):
         self.assertIn("own pull request", r.stderr)
 
     def test_nvidia_pin_bump_builds_the_default_image(self):
-        self.state("modules-missing", kernel_digest=KERNEL)
+        self.state("modules-missing", kernel_digest=KERNEL, boot_digest=BOOT)
         r = self.plan({**self.pin_change(NVIDIA_OPEN_VERSION=NVIDIA_OPEN_BUMP), "system/nvidia/locks/open.lock": "l\n"})
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual((self.state_file()["check_gpus"], self.state_file()["check_delta"]), ("none", "true"))
+
+    def test_nvidia_pin_bump_without_the_signed_vmlinuz_fails(self):
+        # Even the default image copies the signed vmlinuz in: without it nothing can be built.
+        self.state("modules-missing", kernel_digest=KERNEL)
+        r = self.plan({**self.pin_change(NVIDIA_OPEN_VERSION=NVIDIA_OPEN_BUMP), "system/nvidia/locks/open.lock": "l\n"})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("signed vmlinuz", r.stderr)
 
     def test_missing_modules_with_unchanged_pins_fail(self):
         self.state("modules-missing", kernel_digest=KERNEL)

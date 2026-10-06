@@ -4,7 +4,11 @@
 # the build ordering runs this script and reads its file; none repeats its decisions.
 #
 #   resolve [--expect-kernel-digest D]  write kernel-artifacts.env: state=ready, modules-missing
-#                                       or kernel-missing, then the verified digests. Exit 0 for
+#                                       or kernel-missing, then the verified digests. The signed
+#                                       kernel artefacts NVIDIA kmod publishes are the two module
+#                                       branches and azoth-boot (vmlinuz signed for Secure Boot
+#                                       by the certificate committed in keys/secureboot):
+#                                       modules-missing when any of them is. Exit 0 for
 #                                       the three states; 1 on a registry, Rekor, network or data
 #                                       error, or when azoth:<nvr> is still D's own NVR but no
 #                                       longer resolves to D (republished or withdrawn since). D
@@ -53,6 +57,7 @@ ROOT=$(dirname "$HERE")
 DIR=${KERNEL_ARTIFACTS_DIR:-$ROOT/kernel-artifacts}
 FILE=$DIR/kernel-artifacts.env
 PINS=$ROOT/forge/specs/azoth/pins.env
+SECUREBOOT_CERT=$ROOT/forge/specs/azoth/keys/secureboot/athanor-secureboot.pem
 owner=${GITHUB_REPOSITORY_OWNER:-ars-regia}
 REGISTRY=${KERNEL_REGISTRY:-ghcr.io/${owner,,}}
 ISSUER=https://token.actions.githubusercontent.com
@@ -195,6 +200,21 @@ module_verdict() { # module_verdict REF BRANCH KERNEL_DIGEST DEVEL_DIGEST: verif
     then "verified" else "unverified" end' <<< "$predicates"
 }
 
+boot_verdict() { # boot_verdict REF KERNEL_DIGEST: verified when REF is signed by NVIDIA kmod and
+                  # attested as the vmlinuz of KERNEL_DIGEST signed with the Secure Boot
+                  # certificate of this checkout (a rotated certificate makes it unverified, so
+                  # the next run signs the kernel again), unverified otherwise
+  local signed predicates cert
+  signed=$(ask signed "$1" modules)
+  [[ $signed == signed ]] || { echo unverified; return 0; }
+  predicates=$(ask predicates "$1" modules)
+  [[ $predicates != unverified ]] || { echo unverified; return 0; }
+  cert=$(sha256sum "$SECUREBOOT_CERT" | cut -d' ' -f1)
+  jq -sr --arg kernel "$2" --arg cert "$cert" '
+    if any(.[]; .boot == "vmlinuz" and .kernel_digest == $kernel and .secureboot_cert == $cert)
+    then "verified" else "unverified" end' <<< "$predicates"
+}
+
 kernel_verdict() { # kernel_verdict REF: verified when a pins/inputs attestation of REF, verified
                     # against the trusted refs, equals the inputs of this checkout, unverified
                     # otherwise. The signature says who built REF, this says from what: a kernel
@@ -301,6 +321,16 @@ resolve() {
     return 0
   fi
   lines+=("kernel_digest=$kernel" "devel_digest=$devel")
+  tag="$nvr-k${kernel:7:12}"
+  lines+=("boot_tag=$tag")
+  digest=$(ask digest "$REGISTRY/azoth-boot:$tag")
+  verdict=unverified
+  [[ -z $digest ]] || verdict=$(boot_verdict "$REGISTRY/azoth-boot@$digest" "$kernel")
+  if [[ $verdict == verified ]]; then
+    lines+=("boot_digest=$digest")
+  else
+    state=modules-missing
+  fi
   for branch in open legacy; do
     version=$(sed -n "s/^NVIDIA_${branch^^}_VERSION=//p" "$PINS")
     [[ -n $version ]] || die "NVIDIA_${branch^^}_VERSION is not set in $PINS"
@@ -441,7 +471,8 @@ check_plan() {
       annotate warning "azoth:$nvr is not published yet: Kernel Build on this pull request proves the kernel and the modules build and boot; the images are built after the merge"
       ;;
     modules-missing)
-      [[ $only_nvidia_pins == true && $nvidia_moved == true && $other_moved == false ]] || die "the NVIDIA modules of azoth:$nvr are not published: with unchanged NVIDIA pins publishing them is the Orchestrator's job (bootstrap or interrupted publication), and NVIDIA pins move in their own pull request"
+      [[ $only_nvidia_pins == true && $nvidia_moved == true && $other_moved == false ]] || die "the signed kernel artefacts of azoth:$nvr (NVIDIA modules, signed vmlinuz) are not published: with unchanged NVIDIA pins publishing them is the Orchestrator's job (bootstrap, interrupted publication or a new Secure Boot certificate), and NVIDIA pins move in their own pull request"
+      grep -q '^boot_digest=.' "$FILE" || die "the signed vmlinuz of azoth:$nvr is not published, and every image copies it in: the Orchestrator publishes it (NVIDIA kmod) before an NVIDIA pin bump can be checked"
       gpus=none delta=true
       annotate warning "the NVIDIA modules of the new pins are not published yet: only the default image is built; the variants are built and gated after the merge"
       ;;
@@ -460,7 +491,7 @@ case $command in
     [[ $# -eq 0 ]] || usage
     resolve
     state=$(get state)
-    [[ $state == ready ]] || die "state=$state: the kernel of the pins and both NVIDIA module branches must be published, signed and attested"
+    [[ $state == ready ]] || die "state=$state: the kernel of the pins, its signed vmlinuz and both NVIDIA module branches must be published, signed and attested"
     ;;
   cycle) cycle "$@" ;;
   check-plan) check_plan "$@" ;;
