@@ -4,9 +4,9 @@
 | --- | --- |
 | Purpose | Inventory of every secret, variable and environment the pipeline uses, how to make each one again from zero, and who holds the keys |
 | Owner | Maintainer |
-| Status | Revision 1, 2026-10-06. Section 1 and section 3 are facts. Section 2 and every line marked _(Proposal)_ await the maintainer |
+| Status | Revision 1, 2026-10-06. Section 1 and section 3 are facts. Section 2 is decided for the single-maintainer phase (2026-10-06). Every line marked _(Proposal)_ awaits the maintainer |
 | Depends on | `doc_kernel_build.md` section 6 (key design), `doc_kernel_profile.md` D43 and section 9 (custody, key table), `doc_update_trust.md` UT2, UT3 (image key), decisions A2-27, A2-33, A2-35 |
-| Defines | SEC1-SEC12 (secrets), VAR1-VAR5 (variables), ENV1-ENV4 (environments), KC1-KC6 (custody), RL1-RL8 (recovery) |
+| Defines | SEC1-SEC12 (secrets), VAR1-VAR5 (variables), ENV1-ENV4 (environments), KC1-KC8 (custody), RL1-RL8 (recovery) |
 | Facts checked with | `git grep` on `origin/iso-v0` at `bd1f0e4a`; `gh secret list`, `gh variable list`, `gh api repos/hr-mes/athanor/environments` and its `secrets`, `variables` and `deployment-branch-policies` endpoints, names only; the branches of open PRs #115 (`sign-vmlinuz`), #180 (`a2/delivery`) and #185 (`a2/rpm-sign-job`) |
 
 No value of any secret appears here or was read to write this. Commands below use
@@ -166,20 +166,22 @@ the stored tokens cannot be read back from GitHub; the minimum each needs, from 
 _(Proposal)_ `KERNEL_BUMP_TOKEN` now serves six workflows, not only the kernel; a name such as
 `BOT_PR_TOKEN` would say so. Renaming touches every reference in one commit.
 
-## 2. Key custody _(Proposal)_
+## 2. Key custody
 
-Today: one maintainer holds every key, with an offline backup held by the key custodian;
-`signing` has one required reviewer, who may approve their own runs. Decision A2-27 keeps two approvals per release cycle (`sign-kernel`, then
-`sign-system-images`). Everything below is a proposal.
+The maintainer decided KC1-KC4, KC7 and KC8 on 2026-10-06, for as long as the project has a
+single maintainer. KC5 and KC6 apply as written. Lines marked _(Proposal)_ take effect when a
+second maintainer joins.
 
-| Id | Proposal |
+| Id | Rule |
 | --- | --- |
-| KC1 | **Two holders,** the maintainer and one deputy, both required reviewers of `signing` and `stable-override`. Once there are two, set `prevent_self_review`: a run is approved by the holder who did not start it. The two approvals of A2-27 then each need the second person. |
-| KC2 | **Offline encrypted backup in two places.** The private keys of section 1.4, encrypted to both holders' OpenPGP keys, each on a hardware token: `tar -C "${KEYDIR:?}" -c ... \| gpg --encrypt -r <holder A> -r <holder B> -o <archive>`. Two copies, in two separate places, each kept by a different holder. Tokens are not backed up: they are made again (RL1). A private custody runbook, outside this public repository, records where each backup is and what it holds. |
-| KC3 | **Generation ceremony.** Keys are generated on tmpfs as in section 1.4, with both holders present (in person or on a call). The archive of KC2 is written and test-decrypted before the plaintext is shredded. The committed certificate or public key is the record of what was generated. |
-| KC4 | **Maintainer unavailable.** The deputy approves releases (KC1) and holds a backup copy (KC2), so the pipeline continues. The repository belongs to a personal account (`gh api repos/hr-mes/athanor --jq .owner.type` is `User`), so nobody else can administer it. Move it to an organisation with both holders as owners. To rebuild elsewhere, the deputy decrypts the copy and loads the secrets into the new `signing` environment with the commands of section 1.4. |
+| KC1 | **One holder.** The maintainer holds every private key and is the only required reviewer of `signing`, with self-review allowed, so each of the two approvals per release cycle of A2-27 is the maintainer's. _(Proposal)_ With a second maintainer, the deputy becomes a holder and a required reviewer of `signing` and `stable-override`, and `prevent_self_review` is set: each approval then comes from the holder who did not start the run. |
+| KC2 | **Offline backup on two encrypted USB drives.** Each drive is a LUKS2 volume that holds the private keys and passphrases of section 1.4 (SEC1-SEC6) and the fingerprint inventory of KC7. Tokens are not backed up: they are made again (RL1). The LUKS passphrase is long, used for nothing else, and stored on neither drive. The two drives are kept in two separate places, so that one theft, fire or loss cannot take both. Where they are is written only in the sealed instructions of KC8, never in this repository. _(Proposal)_ With a second maintainer, the keys move to hardware tokens, and the backup becomes an archive encrypted to both holders' OpenPGP keys, one copy kept by each holder. |
+| KC3 | **Generation ceremony.** Keys are generated on tmpfs as in section 1.4. Before the plaintext is shredded, both drives are written, then each is reopened and its copy compared by SHA-256 with the tmpfs copy. The fingerprints go into the inventory (KC7). The committed certificate or public key is the public record of what was generated. _(Proposal)_ With two holders, both are present, in person or on a call. |
+| KC4 | **Maintainer unavailable.** Nothing can be signed or released until the drives reach someone who can continue. Only the maintainer can approve `signing`, and only the maintainer can administer the repository, which belongs to a personal account (`gh api repos/hr-mes/athanor --jq .owner.type` is `User`). The trusted person of KC8 recovers the drives and hands them on as the letter says. The new holder then loads the secrets into a `signing` environment with the commands of section 1.4. _(Proposal)_ Move the repository to an organisation with two owners. This also makes GitHub's merge queue available, which repositories of personal accounts do not have. The move changes the workflow identity (`https://github.com/<owner>/athanor/...`) that keyless signatures and the image policy check, so it is planned as a signing change. |
 | KC5 | **Compromise.** 1. Stop: `gh workflow disable` the workflows that sign, `gh secret delete` the exposed secret. 2. Rotate the key as in section 1.4. 3. Revoke: SEC2, the old certificate goes to `keys/revoked/`; SEC1, MokListX entry or `mokutil --delete` of the old certificate on each machine (D41); SEC3, public notice, then the recovery command of `RECOVERY.md` on each machine (UT2); tokens, revoke in the GitHub settings. 4. Audit: list the deployments of `signing` since the suspected exposure (`gh api "repos/$REPO/deployments?environment=signing"`) and every digest signed in that window. |
 | KC6 | **A holder leaves.** A private key cannot be taken back. Rotate every key that holder could decrypt, then re-encrypt the backup to the new pair of holders. |
+| KC7 | **Quarterly check.** In the first week of January, April, July and October, open both drives. Check each key's fingerprint against the inventory and against the committed certificate or public key, then record the date in the private custody log. A drive that does not open is rewritten from the other one the same day and replaced: flash memory fails without warning. A key whose fingerprint does not match is treated as KC5. |
+| KC8 | **Sealed instructions.** A sealed letter, kept by a person the maintainer trusts, says where the two drives are, how to reach the LUKS passphrase, and whom to give the drives to so the project can continue (KC4). The letter contains no key and no passphrase. The passphrase reaches that person by a separate route the maintainer chooses, so the letter alone opens nothing. The letter is renewed whenever a drive moves or the passphrase changes. |
 
 ## 3. Recovery after a loss
 
