@@ -1,8 +1,0 @@
-#!/bin/sh
-cat << 'EOF'
-# Athanor OS GRUB Security Hardening
-set superusers="admin"
-# Generare l'hash con: grub2-mkpasswd-pbkdf2
-# Sostituire l'hash sottostante con la password desiderata per l'editor di GRUB
-password_pbkdf2 admin grub.pbkdf2.sha512.10000.CHANGE_THIS_PBKDF2_HASH_IN_PRODUCTION
-EOF
