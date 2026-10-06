@@ -5,7 +5,7 @@ Release:        2%{?dist}
 Summary:        Athanor kernel profile: effective settings per role combination and their checker
 
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor
+URL:            https://github.com/ars-regia/athanor
 BuildArch:      noarch
 Requires:       python3 >= 3.11
 

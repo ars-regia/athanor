@@ -27,7 +27,7 @@ CI1 athanor-forge-orchestrator.yml        concurrency: one run per ref, the newe
        build-repo -> dag-system-image [signing approval] -> sign-system-images [signing approval]
 
 Kernel path (doc_build_ordering.md, O1):
-CI9 kernel-bump.yml (PR) -> merge -> CI8 kernel-build.yml (publish azoth) -> dispatches CI1 with force_image
+CI9 kernel-bump.yml (PR) -> merge -> CI8 kernel-build.yml (publish azoth) -> dispatches CI1
 Release path: CI1 publishes :<run_id> and :latest -> CI12 iso-acceptance.yml (weekly) -> CI11 promote-stable.yml (manual, :stable)
 ```
 
@@ -65,7 +65,7 @@ The DNF channel on GitHub Pages (branch `gh-pages`) is deployed only on `main` (
 
 ### 1.4 What a pull request runs
 
-Branch protection on `iso-v0` requires one check: `Kernel gate` (`gh api repos/hr-mes/athanor/branches/iso-v0/protection`, 2026-10-06). Everything else reports but does not block a merge.
+Branch protection on `iso-v0` requires one check: `Kernel gate` (`gh api repos/ars-regia/athanor/branches/iso-v0/protection`, 2026-10-06). Everything else reports but does not block a merge.
 
 | Check | Workflow | Runs on a PR when | Required | Gates |
 |---|---|---|---|---|
@@ -85,7 +85,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 
 - **File:** `athanor-forge-orchestrator.yml`.
 - **Purpose:** builds the forge packages, the tier repositories, the three system images and the ISO (section 1.1).
-- **Triggers:** push to `main`, `iso-v0` on `forge/**` (not `forge/test/**`, `forge/specs/azoth/**`), `system/**`, `Cargo.toml`, `flake.nix`, `flake.lock`, `call-*.yml`, the NVIDIA workflows; dispatch (`sha`, `force_image`); cron `0 4 * * *`.
+- **Triggers:** push to `main`, `iso-v0` on `forge/**` (not `forge/test/**`, `forge/specs/azoth/**`), `system/**`, `Cargo.toml`, `flake.nix`, `flake.lock`, `call-*.yml`, the NVIDIA workflows; dispatch (`sha`); cron `0 4 * * *`.
 - **Outputs:** artifact `kernel-artifacts`; images of CI3, CI4, CI5, CI6.
 - **Secrets, variables:** `REGISTRY_HOST`, `KERNEL_REGISTRY`; `secrets: inherit` to CI6 and CI5.
 - **Environment:** none itself; CI6 and CI5 use `signing`.
@@ -297,7 +297,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 
 ## 4. Self-hosted runner
 
-One runner is registered (`athanor-vm-<timestamp>`, labels `self-hosted`, `Linux`, `X64`, online on 2026-10-06 per `gh api repos/hr-mes/athanor/actions/runners`). It runs each job in an ephemeral KVM guest; [scripts/runner/README.md](../../scripts/runner/README.md) owns its design and installation.
+One runner is registered (`athanor-vm-<timestamp>`, labels `self-hosted`, `Linux`, `X64`, online on 2026-10-06 per `gh api repos/ars-regia/athanor/actions/runners`). It runs each job in an ephemeral KVM guest; [scripts/runner/README.md](../../scripts/runner/README.md) owns its design and installation.
 
 | Job | Why self-hosted |
 |---|---|
@@ -326,7 +326,7 @@ Every name below is described in the secrets inventory, `docs/operations/secrets
 | `KERNEL_REGISTRY` | variable, default `ghcr.io/<owner>` | not set | CI1, CI6, CI8, CI9, CI13 |
 | `BUILDER_STABLE_TAG` | variable, default `latest` | not set | CI21-CI23 |
 
-Environments (`gh api repos/hr-mes/athanor/environments`):
+Environments (`gh api repos/ars-regia/athanor/environments`):
 
 | Environment | Protection | Used by |
 |---|---|---|

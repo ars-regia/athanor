@@ -176,7 +176,7 @@ ynl --without selftests --without doc`: patch e `process_configs.sh -w -n -c`.
 9. ccache su directory persistente del runner (non `actions/cache`): tra due
    patch level cambiano pochi file, la LTO finale no;
 10. pubblicazione (job `publish` su runner GitHub, dall'artefatto del job `build`):
-    tre pacchetti OCI con i soli RPM dentro, `ghcr.io/hr-mes/azoth`
+    tre pacchetti OCI con i soli RPM dentro, `ghcr.io/ars-regia/azoth`
     (binari), `azoth-devel`, `azoth-debuginfo`, tag `<nvr>`.
     Pacchetti separati e non suffissi del tag, perché la retention di ghcr è per
     pacchetto (`retention.sh`, prima del gate, che così verifica ciò che resta):
@@ -358,7 +358,7 @@ Ogni PR di bump e ogni cambio in `forge/specs/azoth/**` passa:
    pubblicato per l'NVR dei pin quando il kernel è riusato, con la toolchain del
    kernel; ogni `.ko` deve portare il vermagic del kernel e i tipi kCFI. Poi, sui
    push, il job `orchestrator` di Kernel Build avvia l'Orchestrator sullo stesso
-   commit (`sha`, `force_image`) quando ha pubblicato un kernel nuovo o quando
+   commit (`sha`) quando ha pubblicato un kernel nuovo o quando
    `system/kernel-artifacts.sh` non risponde `ready`; l'Orchestrator chiama il
    workflow riusabile `nvidia-kmod.yml` quando lo stato è `modules-missing`
    (`doc_build_ordering.md`, O1-O4). Lì il job `artifacts` risolve il kernel per

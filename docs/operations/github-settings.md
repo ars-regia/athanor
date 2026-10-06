@@ -93,7 +93,7 @@ Facts read by `export`; each one is in the file named. `diff` against `hr-mes/at
 | Environment `signing`: reviewer `hr-mes`, branches `iso-v0` and `main`, admin bypass on, five secrets including `MOK_PRIVATE_KEY` | `environments.json` |
 | Environment `github-pages`: branches `gh-pages` and `main` | `environments.json` |
 | Environment `delete`: no rule, no secret | `environments.json` |
-| Pages: legacy build from `main:/docs`; `gh api repos/hr-mes/athanor/pages` reports `"status": "errored"` (status is volatile, not stored) | `pages.json` |
+| Pages: legacy build from `main:/docs`; `gh api repos/ars-regia/athanor/pages` reports `"status": "errored"` (status is volatile, not stored) | `pages.json` |
 | Actions: all actions allowed, SHA pinning not required, default token read-only, Actions cannot approve pull requests, approval required for all external contributors | `actions.json` |
 
 ## 6. Open points _(Proposal for the maintainer)_
