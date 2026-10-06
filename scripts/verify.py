@@ -424,6 +424,8 @@ def update_trust_problems(root=None):
                                 f"the registry comes from the build's variables")
     # D2: the Secure Boot daemon is retired. D42 (issue #148): nothing in the image seals LUKS to
     # the TPM or increments a rollback counter by itself, so none of these units may be shipped.
+    # A2-27: 1.0 unlocks LUKS with the passphrase; the TPM seal returns in 1.1 with the UKI and
+    # the signed PCR 11 policy.
     for source in walk(root / "forge/specs/athanor-secure-boot", ".rs"):
         if "org.athanor.SecureBoot" in read(source):
             problems.append(f"{rel(source)}: serves org.athanor.SecureBoot, a name no bus policy lets it own (retired by D2)")
