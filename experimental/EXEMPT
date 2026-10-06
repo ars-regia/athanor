@@ -1,4 +1,4 @@
-# iso-v0: crate fuori dalla build di boot (NEXT.md BLOCCO 2). Tornano nel DAG con la v1.
+# iso-v0: crate fuori dalla build di boot (DAG ridotto del 2026-09-03, 5fbc9304). Tornano nel DAG con la v1.
 # Un nome per riga; letto da scripts/verify.py (check "shipped").
 athanor-mesh-bus
 athanor-cluster-mesh
@@ -21,20 +21,13 @@ athanor-greeter
 # signatures against a caller-supplied key; cosmic-store covers the store until it is
 # redesigned.
 #
-# Out of the workspace since 2026-09-19, and athanor-settings-rs "signed" its CRDT writes
-# with a Dilithium key generated for each write and passed a Cloudflare API token to curl
-# on the command line; cosmic-settings covers settings until the application is
-# redesigned.
-#
-# Out of the workspace since 2026-09-19, and athanor-daemon-rs was D-Bus-activated on the
-# session bus, outside its hardened system unit, and claimed os.athanor.Bedrock and the
-# athanor portal name there; nothing in the COSMIC session uses it.
-#
 # The GTK 0.7 dock library of athanor-shell-rs lives in that program's frozen workspace,
 # at forge/specs/athanor-shell-rs/athanor-dock-0.7, since 2026-09-29; the name
 # athanor-dock and forge/specs/athanor-dock belong to the dock of package 2c.
-# athanor-gatekeeper-rs is not fit to enable (independent review, 2026-09-17): its global
-# allocator ignores alignment, launch success is reported before any isolation boundary
-# runs, the fanotify group fd is inherited by sandboxed applications, and applications
-# run as root. It leaves the image until a dedicated redesign.
-athanor-gatekeeper-rs
+#
+# athanor-lvfs-rs is out of the image since 2026-09-30. Its unit runs as DynamicUser while
+# its bus policy lets only root own os.athanor.Lvfs, so it cannot take its name. Its "Parsing
+# CAB archive" and "CAB parsed successfully" are two log lines with nothing between them,
+# and "staged successfully" is logged whether or not an update was installed. fwupd, which
+# is in the image, covers firmware until the daemon is redesigned.
+athanor-lvfs-rs

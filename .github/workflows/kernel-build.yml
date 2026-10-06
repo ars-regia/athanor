@@ -7,7 +7,7 @@ name: Kernel Build
 # of the spec. publish: on a GitHub runner, publishes the RPMs as four OCI images
 # (kernel, devel, debuginfo, and the MicroVM guest kernel as the <nvr>-microvm tag of the
 # kernel) signed with cosign keyless, with SBOM, SLSA provenance and the attestation of
-# the pins; `:latest` moves only on main. kmod: the NVIDIA modules against the freshly
+# the pins; `:latest` moves only on the repository's default branch. kmod: the NVIDIA modules against the freshly
 # built kernel-devel (nvidia-build.yml, reusable). gate: the single "Kernel gate" check
 # that the branch protection requires on PRs, including those of the bump bot (phase
 # K5): that is why the workflow runs on every PR, with no path filter. A PR builds and
@@ -312,6 +312,8 @@ jobs:
         env:
           BUILDAH_ISOLATION: chroot
           NVR_EXPECTED: ${{ needs.inputs.outputs.nvr }}
+          # `:latest` follows the default branch, whatever it is called (re-audit decision 11).
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           nvr=$(cat out/nvr)
@@ -320,9 +322,9 @@ jobs:
           mkdir -p digests
           for group in kernel devel debuginfo microvm; do
             case $group in
-              kernel) image=$IMAGE tag=$nvr latest=latest ;;
-              microvm) image=$IMAGE tag="${nvr}-microvm" latest=latest-microvm ;;
-              *) image="${IMAGE}-${group}" tag=$nvr latest=latest ;;
+              kernel) repo=$IMAGE tag=$nvr latest=latest ;;
+              microvm) repo=$IMAGE tag="${nvr}-microvm" latest=latest-microvm ;;
+              *) repo="${IMAGE}-${group}" tag=$nvr latest=latest ;;
             esac
             ctr=$(buildah from scratch)
             buildah copy "$ctr" "out/${group}/" /
@@ -332,12 +334,12 @@ jobs:
               --label org.opencontainers.image.revision="${GITHUB_SHA}" \
               --label org.opencontainers.image.source="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
               "$ctr"
-            buildah commit --omit-timestamp "$ctr" "${image}:${tag}"
-            buildah push --digestfile "digests/${group}" "${image}:${tag}"
-            if [[ $GITHUB_REF == refs/heads/main ]]; then
-              buildah push "${image}:${tag}" "docker://${image}:${latest}"
+            buildah commit --omit-timestamp "$ctr" "${repo}:${tag}"
+            buildah push --digestfile "digests/${group}" "${repo}:${tag}"
+            if [[ $GITHUB_REF == "refs/heads/${DEFAULT_BRANCH}" ]]; then
+              buildah push "${repo}:${tag}" "docker://${repo}:${latest}"
             fi
-            echo "${image}@$(cat "digests/${group}")"
+            echo "${repo}@$(cat "digests/${group}")"
             echo "${group}=$(cat "digests/${group}")" >> "$GITHUB_OUTPUT"
           done
 
@@ -358,9 +360,9 @@ jobs:
           # (without the RPM archive cataloger syft sees nothing).
           declare -A SBOM_PACKAGE=([kernel]=kernel-core [devel]=kernel-devel [debuginfo]=kernel-debuginfo [microvm]=azoth-microvm)
           for group in kernel devel debuginfo microvm; do
-            image=$IMAGE
-            [[ $group == kernel || $group == microvm ]] || image="${IMAGE}-${group}"
-            ref="${image}@$(cat "digests/${group}")"
+            repo=$IMAGE
+            [[ $group == kernel || $group == microvm ]] || repo="${IMAGE}-${group}"
+            ref="${repo}@$(cat "digests/${group}")"
             syft scan "registry:${ref}" --select-catalogers "+rpm-archive-cataloger" -o "spdx-json=sbom/${group}.spdx.json"
             jq -e --arg name "${SBOM_PACKAGE[$group]}" '[.packages[] | select(.name == $name)] | length > 0' "sbom/${group}.spdx.json" > /dev/null \
               || { echo "SBOM of ${group} lacks package ${SBOM_PACKAGE[$group]}"; exit 1; }

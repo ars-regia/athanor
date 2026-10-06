@@ -33,7 +33,7 @@ jobs:
     name: 🎯 Fuzz Unified Suite (${{ matrix.sanitizer_name }})
     runs-on: ubuntu-24.04
     container:
-      image: ghcr.io/hr-mes/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
+      image: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
     timeout-minutes: 20
     env:
       RUSTC_WRAPPER: sccache

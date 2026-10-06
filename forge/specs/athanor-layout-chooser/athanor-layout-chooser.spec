@@ -3,7 +3,7 @@ Name:           athanor-layout-chooser
 Version:        1.0.0
 Release:        2%{?dist}
 Summary:        The Athanor layout chooser
-License:        MIT
+License:        GPL-3.0-or-later
 
 BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gettext
 Requires:       gtk4 athanor-calmo athanor-bar

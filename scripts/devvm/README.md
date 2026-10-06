@@ -12,7 +12,7 @@ change. Pick the fastest tier that can show the change:
 ## Tier A
 
 ```sh
-scripts/devvm/nested.sh ./target/debug/athanor-settings-rs
+scripts/devvm/nested.sh ./target/debug/athanor-bar
 ```
 
 cosmic-comp detects the parent Wayland session, opens its own socket (`wayland-2`) and

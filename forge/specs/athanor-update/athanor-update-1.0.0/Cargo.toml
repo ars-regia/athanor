@@ -4,7 +4,7 @@ version = "1.0.0"
 edition = "2021"
 authors = ["Athanor Forge <forge@athanor.os>"]
 description = "Checks, downloads and applies Athanor system image updates, and publishes the trust state"
-license = "MIT"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 athanor-trust-state = { path = "../../../../system/athanor-trust-state" }

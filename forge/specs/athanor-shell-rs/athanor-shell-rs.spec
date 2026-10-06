@@ -2,10 +2,10 @@
 # Il crate vive nel workspace: la spec compila il checkout in place, non un tarball.
 Name:           athanor-shell-rs
 Version:        1.0.0
-Release:        37%{?dist}
+Release:        38%{?dist}
 Summary:        Athanor OS Native Rust GTK4 Shell
 
-License:        MIT
+License:        GPL-3.0-or-later
 
 BuildRequires:  rust cargo gcc gcc-c++ gtk4-devel glib2-devel pkgconf-pkg-config gtk4-layer-shell-devel clang-devel speech-dispatcher-devel upower-devel
 Requires: gtk4 gtk4-layer-shell glib2 upower xdg-utils plocate foot wl-clipboard
@@ -29,6 +29,13 @@ install -m 0755 forge/specs/athanor-shell-rs/target/release/athanor-shell-rs %{b
 /usr/bin/athanor-shell-rs
 
 %changelog
+* Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-38
+- The privacy prompt answers the portal with a status of its own: Allow exits 100, and
+  Deny, Escape and a closed window exit 1. Until now Allow exited 0, which is also what a
+  closed window and a second instance of the single-instance prompt exit with, so either
+  could be read as a grant. The prompt is no longer single-instance: each request is its
+  own process. Logs go to standard error, so standard output stays the answer of the
+  chooser and the prompt to the portal that ran them.
 * Sat Sep 20 2026 Athanor Forge <forge@athanor.os> - 1.0.0-37
 - The unreachable biometrics prompt, whose password fallback accepted any non-empty
   input as confirmed, is removed. If an administrator prompt is wanted again it must be

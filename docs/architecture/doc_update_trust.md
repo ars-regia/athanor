@@ -14,7 +14,7 @@ What ships today, checked on the maintainer's desktop (image 0bd565cd) and in th
 - **The version says nothing.** The build sets no version label, so the image inherits the base's: two builds a day apart are both `43.20260916.0`.
 - **A machine installed from the ISO boots a digest no signature covers.** The installer converts the image to OCI layout, which changes the manifest digest; the layers are the same. The first `bootc switch --enforce-container-sigpolicy` resolves the tag against the registry again and lands the machine on the signed digest without downloading a layer, which is what makes UT4 cheap.
 - **`/run/athanor` has no owner.** The attestation key release creates it with default permissions and writes the released disk key into it. No `tmpfiles.d` entry declares it.
-- **`athanor-secure-boot` cannot work.** It is a D-Bus service on `org.athanor.SecureBoot` with no bus policy file, so it cannot own its name; it reads one efivar; it is in `packages.json`.
+- **`athanor-secure-boot` cannot work.** It is a D-Bus service on `org.athanor.SecureBoot` with no bus policy file, so it cannot own its name; it reads one efivar; it was in `packages.json`. (Removed with its package by issue #148.)
 - **Retention can remove signatures.** `forge/scripts/clean_ghcr.sh` keeps the two newest tagged versions per package, and a cosign signature is a tagged version of the same package.
 - A nightly Orchestrator run without a source change publishes no new digest (`has_changes` stays false). Every merge that touches the image does.
 
@@ -87,6 +87,7 @@ What is available: `skopeo` 1.22 and `bootc` 1.16 are in the image; `bootc upgra
 - **The held digest is needed and cannot come from bootc:** after a rollback, `bootc upgrade --check` says "No changes" while `--download-only` stages the digest the user just left.
 - `GoBack()` targets the immediately previous deployment only and logs the caller's uid at notice.
 - **One read beside the two requests.** `State()` takes no argument, asks no polkit and is open to every user. It reads the state file of UT7 with `athanor-trust-state`, requiring root as the owner, and returns the validated document re-serialised, so a caller never receives bytes the parser refused. A missing file is `os.athanor.Update1.Error.NoState`, a file not owned by root or writable by others is `Error.Untrusted`, and an unparsable one is `Error.Unreadable`. The call counts as activity for the idle exit and nothing more.
+- **A console client.** `athanor-update go-back` calls `GoBack()` for an administrator at a text console, which is where a machine whose desktop does not start leaves the person. Run through `sudo`, the caller is root, whom polkit authorises without asking (`check_authorization_sync`: uid 0 is always authorised unless the call asks to always check), and the uid logged at notice is 0; from any other user it needs an authentication agent, which a console has none of, and the command tells the person to use `sudo`.
 - **Held digest:** `/var/lib/athanor-update/held` names the digest the user left. The check skips it and offers only a newer one. No request releases it.
 
 **UT7. One state file, written atomically.** *(constraint 6)*
@@ -122,10 +123,10 @@ What is available: `skopeo` 1.22 and `bootc` 1.16 are in the image; `bootc upgra
 ## 4. Decisions that are the maintainer's (all three taken on 2026-09-19)
 
 - **D1. A `stable` tag.** Users follow `:stable`; `:latest` stays for testing. A manual workflow runs `system/promote.sh <run id>`, which points `stable` at an already signed digest with `skopeo copy`; the signature is by digest, so it carries. Without it every merge that touches the image asks every user to restart. It also gives UT4's migration a new image name to switch to. A moved tag can only move machines forward, because of the build-time rule of UT5. **Recommended.** `doc_kernel_profile.md` leaves channels to release 1.1; this brings one hand-promoted channel forward.
-- **D2. `athanor-secure-boot` leaves the image.** It cannot own its bus name, so it has never answered a call, and UT8 replaces its one reading. **Recommended.** Nothing in the repository calls that name. Retiring means the binary, its unit and its bus name leave; the TPM sealing script and unit, the rollback check and the `systemd-pcrphase-sysinit` drop-in stay, and so does the `SOURCES` tree, which `system/Containerfile` reads directly. Which of those the image enables today is checked before the change. The alternative is a bus policy file and a review of what the service claims to attest.
+- **D2. `athanor-secure-boot` leaves the image.** It cannot own its bus name, so it has never answered a call, and UT8 replaces its one reading. **Recommended.** Nothing in the repository calls that name. Retiring means the binary, its unit and its bus name leave; the TPM sealing script and unit, the rollback check and the `systemd-pcrphase-sysinit` drop-in were first kept and then removed too (issue #148, decision A2-10, D42), so the package is gone and `verify.py shipped` fails if those units return. The alternative is a bus policy file and a review of what the service claims to attest.
 - **D3. Who generates and holds the cosign key:** the maintainer, offline, as with the Secure Boot and module keys. The agent never sees the private key.
 
-Found on the way and out of scope: `athanor-backup`, which ships, guards its methods with `org.athanor.backup.*` actions that no `.policy` file declares, so polkit denies every call, and `verify.py polkit` does not look at the `org.athanor.*` namespace.
+Found on the way and since resolved: `athanor-backup` guarded its methods with `org.athanor.backup.*` actions that no `.policy` file declared, so polkit denied every call. It is now a root command with no D-Bus interface and no polkit action (commit `e66ad6d9`). `verify.py polkit` still does not look at the `org.athanor.*` namespace.
 
 ## 5. Changes to other documents
 

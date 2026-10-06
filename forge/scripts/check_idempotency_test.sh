@@ -4,6 +4,8 @@
 #
 # Run it from anywhere with skopeo available:
 #   bash forge/scripts/check_idempotency_test.sh
+# The probed image is $REGISTRY_HOST/$GITHUB_REPOSITORY_OWNER/athanor-forge-tetragon (defaults
+# ghcr.io and hr-mes), the variables the workflows and clean_ghcr.sh read.
 #
 # The case that matters is the first one. The probe used to pass --creds whenever a token
 # was set, and a token the registry rejects makes skopeo fail with 403 even on an image
@@ -12,6 +14,8 @@
 # of them. Anonymous first, credentials only as a fallback, and a registry that does not
 # answer at all is an error rather than a silent rebuild.
 set -u
+owner=${GITHUB_REPOSITORY_OWNER:-hr-mes}
+image=${REGISTRY_HOST:-ghcr.io}/${owner,,}/athanor-forge-tetragon
 # A tag every kept package carries; the hash tags of a package change on each rebuild.
 h_present=latest
 h_absent=0000000000000000000000000000000000000000000000000000000000000000
@@ -27,7 +31,7 @@ check() { # check LABEL EXPECTED ACTUAL
 # an unwritable HOME fails in milliseconds and no request is ever made. That failure read
 # as "image absent" and rebuilt the whole graph.
 if [[ $(id -u) -ne 0 && ! -w ${HOME:-/root} ]]; then
-  if skopeo inspect --no-tags "docker://ghcr.io/hr-mes/athanor-forge-tetragon:${h_present}" > /dev/null 2>&1; then
+  if skopeo inspect --no-tags "docker://${image}:${h_present}" > /dev/null 2>&1; then
     echo "  FAIL unwritable HOME: skopeo unexpectedly succeeded, the workaround is now moot"
     fail=1
   else
@@ -42,13 +46,13 @@ fi
 [[ -w ${HOME:-/root} ]] || { HOME=$(mktemp -d); export HOME; }
 
 probe() { # probe TAG TOKEN
-  local url="docker://ghcr.io/hr-mes/athanor-forge-tetragon:$1" token=$2
+  local url="docker://${image}:$1" token=$2
   local status="" err rc
   for attempt in anonymous authenticated; do
     local args=("--no-tags")
     if [[ $attempt == authenticated ]]; then
       [[ -n $token ]] || continue
-      args+=("--creds" "hr-mes:${token}")
+      args+=("--creds" "${owner}:${token}")
     fi
     err=$(skopeo inspect "${args[@]}" "$url" 2>&1 >/dev/null); rc=$?
     if [[ $rc -eq 0 ]]; then status=found; break; fi

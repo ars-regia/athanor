@@ -14,7 +14,6 @@
     "matugen",
     "calmo",
     "dart-sass",
-    "shell-rs",
     "greeter-ui",
     "layout-chooser",
     "shelld",
@@ -27,7 +26,6 @@
     "update",
     "xdg-desktop-portal-athanor",
     "secure-boot",
-    "lvfs-rs",
     "tetragon",
     "qa",
     "antigravity",
@@ -38,7 +36,6 @@
     "recovery",
     "cargo-tools",
     "kernel-forge",
-    "athanor-semantic-db",
     "cosmic-comp"
   ],
   "custom_tier0": [
@@ -71,7 +68,6 @@
     "cosmic-comp"
   ],
   "custom_tier3": [
-    "shell-rs",
     "greeter-ui",
     "layout-chooser",
     "shelld",
@@ -85,9 +81,7 @@
     "backup",
     "update",
     "xdg-desktop-portal-athanor",
-    "lvfs-rs",
-    "qa",
-    "athanor-semantic-db"
+    "qa"
   ],
   "cachyos_addons": [],
   "upstream_core": [
@@ -95,7 +89,6 @@
     "nix-daemon",
     "busybox",
     "brightnessctl",
-    "bcachefs-tools",
     "dbus-tools",
     "dconf",
     "distribution-gpg-keys",
@@ -142,7 +135,6 @@
     "cosmic-store",
     "adw-gtk3-theme",
     "fontawesome-fonts-all",
-    "foot",
     "gtk4-layer-shell",
     "pulseaudio-libs-glib2",
     "gtk-layer-shell",

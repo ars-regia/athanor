@@ -37,8 +37,12 @@
 # The file is $KERNEL_ARTIFACTS_DIR/kernel-artifacts.env (default: kernel-artifacts/ at the
 # repository root). KERNEL_REGISTRY is the registry and owner (default ghcr.io/ followed by
 # GITHUB_REPOSITORY_OWNER, else hr-mes); GITHUB_SERVER_URL and GITHUB_REPOSITORY name the
-# workflows whose signatures are trusted. cycle and check-plan run git in the repository
-# checkout that is the current directory. Needs skopeo, cosign and jq for the registry.
+# workflows whose signatures are trusted, and KERNEL_TRUSTED_REFS the branches they may have run
+# on (space separated, default "iso-v0 main"): a kernel or a module signed by the same workflow on
+# any other branch is not published, whoever pushed it. A kernel is ready only when its verified
+# pins attestation carries the inputs of this checkout (forge/specs/azoth/build-inputs.py), as
+# the modules' does. cycle and check-plan run git in the repository checkout that is the current
+# directory. Needs skopeo, cosign and jq for the registry.
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -54,9 +58,20 @@ ISSUER=https://token.actions.githubusercontent.com
 workflows="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-hr-mes/athanor}/.github/workflows"
 # Owner, repository and host names hold no regex metacharacter other than the dot.
 workflows=${workflows//./\\.}
+# The branches whose runs may publish. A signature carries the ref of the run that made it, and
+# a workflow_dispatch can be started from any branch: without this list any branch could sign a
+# kernel the images then trust.
+TRUSTED_REFS=${KERNEL_TRUSTED_REFS:-iso-v0 main}
+refs=''
+read -ra trusted <<< "$TRUSTED_REFS"
+for ref in "${trusted[@]}"; do
+  [[ $ref =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "kernel-artifacts: KERNEL_TRUSTED_REFS: '$ref' is not a branch name" >&2; exit 1; }
+  refs+="${refs:+|}${ref//./\\.}"
+done
+[[ -n $refs ]] || { echo "kernel-artifacts: KERNEL_TRUSTED_REFS names no branch" >&2; exit 1; }
 declare -A IDENTITY=(
-  [kernel]="^${workflows}/kernel-build\.yml@refs/heads/"
-  [modules]="^${workflows}/nvidia-kmod\.yml@refs/heads/"
+  [kernel]="^${workflows}/kernel-build\.yml@refs/heads/(${refs})\$"
+  [modules]="^${workflows}/nvidia-kmod\.yml@refs/heads/(${refs})\$"
 )
 # cosign v3 reports a missing or foreign signature or attestation with these messages. Any
 # other failure (registry, Rekor, TUF, network) is an error, never a missing artifact.
@@ -102,6 +117,8 @@ probe_signed() {
   if [[ $status -eq 0 ]]; then
     echo signed
   elif grep -qE "$UNVERIFIED" "$TMP/err"; then
+    # stderr: stdout is the verdict. The identity it did have is what a maintainer needs to see.
+    sed -n "s|.*got \"\(.*\)\".*|kernel-artifacts: $1 is signed as \1, not by a trusted ref|p" "$TMP/err" >&2
     echo unsigned
   else
     cat "$TMP/err" >&2
@@ -166,6 +183,20 @@ module_verdict() { # module_verdict REF BRANCH KERNEL_DIGEST DEVEL_DIGEST: verif
   jq -sr --arg branch "$2" --arg kernel "$3" --arg devel "$4" --argjson pins "$pins" '
     if any(.[]; .driver == $branch and .kernel_digest == $kernel and .devel_digest == $devel and (.pins as $p | $pins | to_entries | all(.value == $p[.key])))
     then "verified" else "unverified" end' <<< "$predicates"
+}
+
+kernel_verdict() { # kernel_verdict REF: verified when a pins/inputs attestation of REF, verified
+                    # against the trusted refs, equals the inputs of this checkout, unverified
+                    # otherwise. The signature says who built REF, this says from what: a kernel
+                    # built from other patches or another Fedora pin is signed all the same. Like
+                    # module_verdict it scans every verified entry. A failure of build-inputs.py
+                    # or of the verification dies here: the caller checks the substitution.
+  local predicates expected status=0
+  predicates=$(ask predicates "$1" kernel) || exit 1
+  [[ $predicates != unverified ]] || { echo unverified; return 0; }
+  expected=$(python3 "$ROOT/forge/specs/azoth/build-inputs.py" | jq -cS .) || status=$?
+  [[ $status -eq 0 && -n $expected ]] || die "build-inputs.py did not produce the inputs of this checkout"
+  jq -sr --argjson expected "$expected" 'if any(.[]; . == $expected) then "verified" else "unverified" end' <<< "$predicates"
 }
 
 attested_nvr() { # attested_nvr REF NVR: whether REF's cosign-verified custom pins attestation
@@ -250,6 +281,12 @@ resolve() {
   devel_signed=$(ask signed "$REGISTRY/azoth-devel@$devel" kernel)
   if [[ $kernel_signed != signed || $devel_signed != signed ]]; then
     [[ -z $expect ]] || die "$REGISTRY/azoth:$nvr is no longer signed, the caller resolved $expect: the kernel was republished or its signature was revoked since"
+    write kernel-missing "${lines[@]}"
+    return 0
+  fi
+  verdict=$(kernel_verdict "$REGISTRY/azoth@$kernel") || exit 1
+  if [[ $verdict != verified ]]; then
+    [[ -z $expect ]] || die "$REGISTRY/azoth:$nvr is $kernel but was not built from the inputs of this checkout, the caller resolved $expect: the kernel was republished with other inputs"
     write kernel-missing "${lines[@]}"
     return 0
   fi

@@ -1,9 +1,0 @@
-[Unit]
-Description=Timer for Athanor Bcachefs Time-Warp Snapshots
-
-[Timer]
-OnCalendar=daily
-Persistent=true
-
-[Install]
-WantedBy=timers.target

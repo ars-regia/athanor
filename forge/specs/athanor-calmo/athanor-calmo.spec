@@ -3,7 +3,7 @@ Name:           athanor-calmo
 Version:        1.0.0
 Release:        1%{?dist}
 Summary:        The Calmo identity: COSMIC defaults, hearth wallpaper and seal icons
-License:        MIT
+License:        GPL-3.0-or-later
 URL:            https://github.com/hr-mes/athanor-forge
 BuildArch:      noarch
 

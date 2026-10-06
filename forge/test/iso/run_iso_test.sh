@@ -175,4 +175,9 @@ set -e
 
 kill "$shots_pid" 2> /dev/null || true
 
-python3 "${here}/verdict.py" "$output" "$GREETER_WAIT" "$qemu_status"
+# Both run whatever the first answers, so a failed install still gets its memory report and
+# a session over budget still gets its verdict; the script exits with the worse of the two.
+status=0
+python3 "${here}/verdict.py" "$output" "$GREETER_WAIT" "$qemu_status" || status=$?
+python3 "${here}/../../../scripts/session-memory/report.py" "${output}/serial.log" "${output}/memory.json" || status=$?
+exit "$status"

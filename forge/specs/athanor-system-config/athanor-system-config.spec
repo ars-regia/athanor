@@ -2,9 +2,9 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:48.fc43}
+Release:        %{?autorelease}%{!?autorelease:49.fc43}
 Summary:        Athanor OS athanor-system-config
-License:        MIT
+License:        GPL-3.0-or-later
 URL:            https://github.com/hr-mes/athanor-forge
 BuildArch:      noarch
 
@@ -23,7 +23,6 @@ Requires: xdg-desktop-portal-athanor
 Recommends: athanor-sysmon-ebpf athanor-cloud-rs
 Requires: usbguard bolt
 
-Requires:       bcachefs-tools
 %description
 Provides athanor-system-config for Athanor OS.
 
@@ -74,15 +73,13 @@ mkdir -p /etc/yum.repos.d
 %attr(0755,root,root) /usr/bin/athanor-greeter-session
 %attr(0755,root,root) /usr/bin/athanor-usbguard-hook
 %attr(0755,root,root) /usr/bin/athanor-uki-enroll
-%attr(0755,root,root) /usr/libexec/athanor-snapshot-trigger.sh
 %attr(0755,root,root) /usr/libexec/athanor-greeter-client
 %dir /usr/lib/systemd/system/greetd.service.d
 /usr/lib/systemd/system/greetd.service.d/10-athanor-wantedby.conf
-/usr/lib/systemd/system/athanor-timewarp.service
-/usr/lib/systemd/system/athanor-timewarp.timer
 /usr/lib/systemd/system-preset/80-athanor-display-manager.preset
 /usr/lib/systemd/system-preset/80-athanor-system.preset
 /usr/lib/tmpfiles.d/10-athanor-greetd.conf
+/usr/lib/environment.d/50-athanor-desktop.conf
 /usr/share/athanor-system-config/greetd.toml
 /usr/share/athanor-system-config/usbguard-daemon.conf
 /usr/share/athanor-system-config/athanor-forge.repo
@@ -91,6 +88,12 @@ mkdir -p /etc/yum.repos.d
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-49
+- Set XDG_CURRENT_DESKTOP=Athanor:COSMIC for the user manager through
+  /usr/lib/environment.d/50-athanor-desktop.conf. athanor-desktop published it only
+  after cosmic-comp started, so a portal activated earlier never read
+  athanor-portals.conf and fell back to other backends for the whole session.
+
 * Fri Oct 02 2026 Athanor Forge <forge@athanor.os> - 1.0.0-48
 - athanor-desktop publishes XDG_SESSION_CLASS, read from logind, to the user manager:
   localsearch's unit requires it and never started.
