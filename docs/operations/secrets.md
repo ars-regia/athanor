@@ -31,7 +31,7 @@ Workflow references are `file:line` under `.github/workflows/` at `bd1f0e4a`.
 | SEC9 | `FORGE_PAT` | repository | personal access token (classic) | `forge-ghcr-cleanup.yml` `cleanup-janitor` (:32, :39) through `forge/scripts/clean_ghcr.sh`, which deletes container package versions | none |
 | SEC10 | `GITHUB_TOKEN` | automatic, per job | GitHub App installation token | most workflows; its scopes are each workflow's `permissions:` block | none |
 | SEC11 | `MOK_PRIVATE_KEY` | environment `signing` | X.509 private key of the single MOK of 2026-09-04, retired 2026-09-13 | **nothing**: no workflow or script names it; `doc_system_image.md:168` and `doc_kernel_profile.md:939` mention it only for its deletion | `forge/specs/azoth/keys/revoked/ermete-mok-2026-09-04.pem` (compiled into the revocation list) |
-| SEC12 | runner credential `github-token` | host of the self-hosted runner, not GitHub | today the maintainer's own `gh auth token` (`scripts/runner/README.md:65`) | `scripts/runner/install.sh:30,46` encrypts it with `systemd-creds` (host key and TPM2) into `/etc/credstore.encrypted/athanor-runner.github-token`; `athanor-runner.service:22` loads it; `vm.sh:29,102` uses it only to create a just-in-time runner configuration per job | none |
+| SEC12 | runner credential `github-token` | host of the self-hosted runner, not GitHub | GitHub token read by `install.sh` from standard input | `scripts/runner/install.sh:30,46` encrypts it with `systemd-creds` (host key and TPM2) into `/etc/credstore.encrypted/athanor-runner.github-token`; `athanor-runner.service:22` loads it; `vm.sh:29,102` uses it only to create a just-in-time runner configuration per job | none |
 
 Keyless signatures (`forge/scripts/sign_attest.sh`, `cosign sign --yes`) use the workflow's
 OIDC identity and need no secret.
@@ -70,6 +70,16 @@ No repository variable is set (`gh variable list` is empty), so every default be
 
 Generate every private key on tmpfs (`$XDG_RUNTIME_DIR`), never on the btrfs disk, where
 copy-on-write makes `shred` ineffective. Record the fingerprints the commands print.
+Every block below starts by running this preamble in the same shell; it fails if
+`XDG_RUNTIME_DIR` or `REPO` is unset, and every path uses `${KEYDIR:?}` so none can resolve to `/`:
+
+```bash
+umask 077
+: "${REPO:?set REPO=<owner>/<name>}"
+KEYDIR=$(mktemp -d -p "${XDG_RUNTIME_DIR:?}" athanor-keys.XXXXXX)
+```
+
+When done: `shred -u "${KEYDIR:?}"/*.key` and `rm -r "${KEYDIR:?}"` (tmpfs: the pages are freed).
 Upload with `gh secret set NAME --env signing --repo "$REPO" < FILE`, which never echoes the value.
 Today every key and token is held by the maintainer alone (`hr-mes`).
 
@@ -79,10 +89,10 @@ Today every key and token is held by the maintainer alone (`hr-mes`).
 one first.
 
 ```bash
-KEYDIR=$XDG_RUNTIME_DIR/athanor-keys
+# preamble of section 1.4 first
 git rm forge/specs/azoth/keys/secureboot/athanor-secureboot.pem forge/specs/azoth/keys/secureboot/athanor-secureboot.der
-bash forge/specs/azoth/keys/generate.sh secureboot --key-dir "$KEYDIR"
-gh secret set SECUREBOOT_SIGNING_KEY --env signing --repo "$REPO" < "$KEYDIR/athanor-secureboot.key"
+bash forge/specs/azoth/keys/generate.sh secureboot --key-dir "${KEYDIR:?}"
+gh secret set SECUREBOOT_SIGNING_KEY --env signing --repo "$REPO" < "${KEYDIR:?}/athanor-secureboot.key"
 ```
 
 Consequences of a rotation:
@@ -97,9 +107,10 @@ Signing Key", not a CA, `digitalSignature`), RSA 4096, SHA-256, 3650 days. `buil
 requires exactly one certificate in `keys/modules/` and at least one in `keys/revoked/`.
 
 ```bash
+# preamble of section 1.4 first
 git mv forge/specs/azoth/keys/modules/athanor-modules.pem forge/specs/azoth/keys/revoked/athanor-modules-$(date -I).pem
-bash forge/specs/azoth/keys/generate.sh modules --key-dir "$KEYDIR"
-gh secret set MODULE_SIGNING_KEY --env signing --repo "$REPO" < "$KEYDIR/athanor-modules.key"
+bash forge/specs/azoth/keys/generate.sh modules --key-dir "${KEYDIR:?}"
+gh secret set MODULE_SIGNING_KEY --env signing --repo "$REPO" < "${KEYDIR:?}/athanor-modules.key"
 ```
 
 Consequences: the certificate is compiled into Azoth, so a rotation is a kernel rebuild. Order:
@@ -110,9 +121,10 @@ The old certificate moves to `keys/revoked/`, so the new kernel refuses anything
 **SEC3 and SEC4, image signing key** (`doc_update_trust.md` UT2, D3).
 
 ```bash
-cosign generate-key-pair --output-key-prefix "$KEYDIR/cosign"   # prompts for the password: that is COSIGN_PASSWORD
-cp "$KEYDIR/cosign.pub" system/keys/athanor-image-<n>.pub
-gh secret set COSIGN_PRIVATE_KEY --env signing --repo "$REPO" < "$KEYDIR/cosign.key"
+# preamble of section 1.4 first
+cosign generate-key-pair --output-key-prefix "${KEYDIR:?}/cosign"   # prompts for the password: that is COSIGN_PASSWORD
+cp "${KEYDIR:?}/cosign.pub" system/keys/athanor-image-<n>.pub
+gh secret set COSIGN_PRIVATE_KEY --env signing --repo "$REPO" < "${KEYDIR:?}/cosign.key"
 gh secret set COSIGN_PASSWORD --env signing --repo "$REPO"   # prompts, nothing echoed
 ```
 
@@ -126,10 +138,11 @@ key and an optional passphrase. The repository fixes no algorithm or identity. _
 RSA 4096, sign-only, two years:
 
 ```bash
-export GNUPGHOME=$KEYDIR/gnupg; mkdir -p -m 700 "$GNUPGHOME"
+# preamble of section 1.4 first
+export GNUPGHOME=${KEYDIR:?}/gnupg; mkdir -p -m 700 "$GNUPGHOME"
 gpg --quick-gen-key "Athanor Package Signing Key" rsa4096 sign 2y   # pinentry asks the passphrase: RPM_GPG_PASSPHRASE
-gpg --armor --export-secret-keys "Athanor Package Signing Key" > "$KEYDIR/rpm.key"
-gh secret set RPM_GPG_KEY --env signing --repo "$REPO" < "$KEYDIR/rpm.key"
+gpg --armor --export-secret-keys "Athanor Package Signing Key" > "${KEYDIR:?}/rpm.key"
+gh secret set RPM_GPG_KEY --env signing --repo "$REPO" < "${KEYDIR:?}/rpm.key"
 gh secret set RPM_GPG_PASSPHRASE --env signing --repo "$REPO"
 ```
 
@@ -138,7 +151,7 @@ finds no repository file that names it), so nothing else changes. Once machines 
 new public key must ship in an image before the first package it signs.
 
 **SEC7, SEC8, SEC9, SEC12, tokens.** A token is made again in the GitHub settings of the account
-that owns it, then stored with `gh secret set NAME --repo "$REPO"` (SEC12: `gh auth token | sudo
+that owns it, then stored with `gh secret set NAME --repo "$REPO"` (SEC12: piped into `sudo
 scripts/runner/install.sh --image <golden image>`, `scripts/runner/README.md:65-74`). A rotation
 has no consequence beyond the runs that fail while the secret is stale. The type and scopes of
 the stored tokens cannot be read back from GitHub; the minimum each needs, from what the code does:
@@ -148,23 +161,21 @@ the stored tokens cannot be read back from GitHub; the minimum each needs, from 
 | SEC7 | fine-grained: Contents read and write, Pull requests read and write, Issues read and write | pushes `bump/*` branches, `gh label create` (`forge/specs/azoth/open_bump_pr.sh:47`), `gh pr create`, `gh pr merge --auto` (`kernel-bump.yml:243`), merges in `bot_merge.py` |
 | SEC8 | fine-grained: Contents read and write, Pull requests read and write | the message in `forge-util-update-specs.yml:35-39` |
 | SEC9 | classic: `read:packages`, `delete:packages` (`clean_ghcr.sh:16`) | GitHub Packages accepts only classic tokens |
-| SEC12 | _(Proposal)_ a dedicated fine-grained token with Administration read and write instead of the maintainer's own token | `generate-jitconfig` (`vm.sh:102`) is the only call; a personal login token carries every scope of its owner |
+| SEC12 | _(Proposal)_ a dedicated fine-grained token with Administration read and write on this repository only, used for nothing else | `generate-jitconfig` (`vm.sh:102`) is the only call it serves |
 
 _(Proposal)_ `KERNEL_BUMP_TOKEN` now serves six workflows, not only the kernel; a name such as
 `BOT_PR_TOKEN` would say so. Renaming touches every reference in one commit.
 
 ## 2. Key custody _(Proposal)_
 
-Today: one maintainer holds every key; the encrypted copy of SEC1 and SEC2 made on 2026-09-13
-is on the USB stick `ATHANOR-KIT`; `doc_update_trust.md:41` puts SEC3 in the same kit, which is
-not verifiable from the repository; `signing` has one required reviewer, who may approve their
-own runs. Decision A2-27 keeps two approvals per release cycle (`sign-kernel`, then
+Today: one maintainer holds every key, with an offline backup held by the key custodian;
+`signing` has one required reviewer, who may approve their own runs. Decision A2-27 keeps two approvals per release cycle (`sign-kernel`, then
 `sign-system-images`). Everything below is a proposal.
 
 | Id | Proposal |
 | --- | --- |
 | KC1 | **Two holders,** the maintainer and one deputy, both required reviewers of `signing` and `stable-override`. Once there are two, set `prevent_self_review`: a run is approved by the holder who did not start it. The two approvals of A2-27 then each need the second person. |
-| KC2 | **Offline encrypted backup in two places.** One archive with SEC1, SEC3 and SEC4, SEC2, SEC5 and SEC6, plus a text file of fingerprints and dates. Encrypted to both holders' OpenPGP keys, each on a hardware token: `tar -C "$KEYDIR" -c ... \| gpg --encrypt -r <holder A> -r <holder B> -o athanor-signing-keys-<date>.tar.gpg`. One copy on `ATHANOR-KIT` with the maintainer, one on a second stick with the deputy, at a different site. Tokens are not backed up: they are made again (RL1). |
+| KC2 | **Offline encrypted backup in two places.** The private keys of section 1.4, encrypted to both holders' OpenPGP keys, each on a hardware token: `tar -C "${KEYDIR:?}" -c ... \| gpg --encrypt -r <holder A> -r <holder B> -o <archive>`. Two copies, in two separate places, each kept by a different holder. Tokens are not backed up: they are made again (RL1). A private custody runbook, outside this public repository, records where each backup is and what it holds. |
 | KC3 | **Generation ceremony.** Keys are generated on tmpfs as in section 1.4, with both holders present (in person or on a call). The archive of KC2 is written and test-decrypted before the plaintext is shredded. The committed certificate or public key is the record of what was generated. |
 | KC4 | **Maintainer unavailable.** The deputy approves releases (KC1) and holds a backup copy (KC2), so the pipeline continues. The repository belongs to a personal account (`gh api repos/hr-mes/athanor --jq .owner.type` is `User`), so nobody else can administer it. Move it to an organisation with both holders as owners. To rebuild elsewhere, the deputy decrypts the copy and loads the secrets into the new `signing` environment with the commands of section 1.4. |
 | KC5 | **Compromise.** 1. Stop: `gh workflow disable` the workflows that sign, `gh secret delete` the exposed secret. 2. Rotate the key as in section 1.4. 3. Revoke: SEC2, the old certificate goes to `keys/revoked/`; SEC1, MokListX entry or `mokutil --delete` of the old certificate on each machine (D41); SEC3, public notice, then the recovery command of `RECOVERY.md` on each machine (UT2); tokens, revoke in the GitHub settings. 4. Audit: list the deployments of `signing` since the suspected exposure (`gh api "repos/$REPO/deployments?environment=signing"`) and every digest signed in that window. |
@@ -182,6 +193,6 @@ read back, so the backup of KC2 is the only copy that can be restored.
 | RL3 | SEC2 | yes | a kernel rebuild (section 1.4); no machine action |
 | RL4 | SEC1 | a new key, never the old one | every machine with Secure Boot on re-enrols, with someone at the console for MokManager. Images signed with the old key keep booting where it is enrolled. Machines with Secure Boot off need nothing |
 | RL5 | SEC3 or SEC4 | a new key, never the old one | the new key cannot reach machines in an image signed with the old one (UT3 needs the old key), so every installed machine stops accepting updates. Each one is recovered out of band: `athanor-update recover-key` (`RECOVERY.md`) or a reinstall from a new ISO. This is the costliest loss |
-| RL6 | SEC11 | not needed | nothing; the key is retired |
+| RL6 | SEC11 | not needed | nothing for its loss. A **leak** still matters: shim on a machine that still has the 2026-09-04 MOK enrolled boots what it signs, and kernels built before its revocation (2026-09-13) accept modules it signs. Its exposure stays relevant until that MOK is deleted (`mokutil --delete`) or listed in MokListX on every machine that enrolled it. Deleting it from `signing` remains a step for the maintainer (section 1.3) |
 | RL7 | an environment (ENV1, ENV2) | yes | recreate it with its reviewers and deployment branches as in section 1.2, then load its secrets from the backup |
 | RL8 | the backup itself, with the GitHub secrets still in place | yes, for the backup | a GitHub secret cannot be exported, so rotate SEC1, SEC2 and SEC3 at a planned date while their old keys still sign, and back up the new keys (KC2) |
