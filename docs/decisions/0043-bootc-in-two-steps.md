@@ -2,7 +2,7 @@
 id: A2-8
 title: "bootc in two steps (D6 closed)"
 date: 2026-10-05
-status: accepted
+status: amended by ADR-0076
 issues: []
 areas: [update, kernel, security]
 ---
