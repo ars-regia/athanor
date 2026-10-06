@@ -79,21 +79,6 @@
         packages = rec {
           just-hermetic = pkgs.just;
 
-          athanor-core = (pkgs.makeRustPlatform {
-            cargo = rust-toolchain;
-            rustc = rust-toolchain;
-          }).buildRustPackage {
-            pname = "athanor-core";
-            version = "1.0.0";
-            src = ./.;
-            cargoLock = {
-              lockFile = ./Cargo.lock;
-            };
-            nativeBuildInputs = with pkgs; [ pkg-config ];
-            buildInputs = with pkgs; [ openssl glib gtk4 wayland wayland-protocols ];
-            doCheck = false;
-          };
-
           # Compatibilità FHS del builder: directory àncora e symlink verso la glibc e le
           # librerie di runtime di gcc di nixpkgs, come contenuto immutabile dell'immagine.
           # È una derivazione ordinaria, costruibile e ispezionabile da sola:
