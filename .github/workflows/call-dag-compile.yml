@@ -30,7 +30,10 @@ on:
         default: 'latest'
 
 env:
-  REGISTRY: ghcr.io
+  # The registry host is the REGISTRY_HOST repository variable (default ghcr.io), the owner
+  # the repository's: the same knob forge-ghcr-cleanup.yml and promote-stable.yml read.
+  REGISTRY: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
+  BUILDER_IMAGE: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}/athanor-builder:${{ inputs.builder_hash }}
   FEDORA_VERSION: 43
   SCCACHE_CACHE_SIZE: 10G
 
@@ -74,11 +77,11 @@ jobs:
           PKG_NAME: ${{ matrix.package }}
         run: |
           set -euo pipefail
-          echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | podman login "${REGISTRY}" -u ${{ github.actor }} --password-stdin
           # Pull the builder explicitly: the podman run below would pull it implicitly,
           # where a blob read that the registry drops fails the job outright (run
           # 34148155801, shell-rs, four blobs lost to pkg-containers.githubusercontent.com).
-          bash scripts/retry.sh podman pull ghcr.io/hr-mes/athanor-builder:${{ inputs.builder_hash }}
+          bash scripts/retry.sh podman pull "${BUILDER_IMAGE,,}"
           img_name="athanor-forge-${PKG_NAME}"
           if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
             img_name="athanor-forge-rolling-${PKG_NAME}"
@@ -88,7 +91,7 @@ jobs:
           # new user namespace: on the 334k files of the builder that cost between 108 and
           # 535 seconds per job, in every one of the 47 jobs, for a check that takes a
           # second. It was also what made HOME=/root unwritable and broke the probe.
-          podman run -i --rm --security-opt label=disable --security-opt seccomp=unconfined -e GITHUB_TOKEN="${GITHUB_TOKEN}" -v ${{ github.workspace }}:/workspace -w /workspace/forge ghcr.io/hr-mes/athanor-builder:${{ inputs.builder_hash }} bash scripts/check_idempotency.sh --package "${PKG_NAME}" --registry ${{ env.REGISTRY }} --owner ${{ github.repository_owner }} --image-name "$img_name" > idemp.out
+          podman run -i --rm --security-opt label=disable --security-opt seccomp=unconfined -e GITHUB_TOKEN="${GITHUB_TOKEN}" -v ${{ github.workspace }}:/workspace -w /workspace/forge "${BUILDER_IMAGE,,}" bash scripts/check_idempotency.sh --package "${PKG_NAME}" --registry ${{ env.REGISTRY }} --owner ${{ github.repository_owner }} --image-name "$img_name" > idemp.out
           source ./idemp.out
           echo "hash=$CONTENT_HASH" >> "$GITHUB_OUTPUT"
           if [ "$CACHE_HIT" = "true" ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; else echo "skip=false" >> "$GITHUB_OUTPUT"; fi
@@ -118,11 +121,11 @@ jobs:
           set -euo pipefail
           mkdir -p RPMS
           mkdir -p ${{ github.workspace }}/.sccache
-          echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | podman login "${REGISTRY}" -u ${{ github.actor }} --password-stdin
           # Pull the builder explicitly: the podman run below would pull it implicitly,
           # where a blob read that the registry drops fails the job outright (run
           # 34148155801, shell-rs, four blobs lost to pkg-containers.githubusercontent.com).
-          bash scripts/retry.sh podman pull ghcr.io/hr-mes/athanor-builder:${{ inputs.builder_hash }}
+          bash scripts/retry.sh podman pull "${BUILDER_IMAGE,,}"
           
           PKG_CLEAN=$(echo "$PKG_NAME" | tr -cd '[:alnum:]-')
           SPEC_DIR=""
@@ -136,13 +139,10 @@ jobs:
                 cp result/RPMS/*.rpm RPMS/
               else
             echo "📦 Compiling Custom Spec: $SPEC_DIR"
-            podman run --rm \
+            # Fetch with network, then build with --network=none (forge golden rule 4).
+            bash scripts/run_spec_build.sh "${BUILDER_IMAGE,,}" "$SPEC_DIR" \
               -e SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE}" \
-              -v ${{ github.workspace }}:/workspace \
-              -v ${{ github.workspace }}/.sccache:/root/.cache/sccache \
-              -w /workspace/forge \
-              ghcr.io/hr-mes/athanor-builder:${{ inputs.builder_hash }} \
-              bash scripts/build_spec.sh "$SPEC_DIR"
+              -v ${{ github.workspace }}/.sccache:/root/.cache/sccache
               fi
           else
             echo "❌ [MARTIAL LAW FATAL] Attempted to build upstream package ${PKG_NAME} without local spec! Dynamic downloads are strictly forbidden!"
@@ -257,11 +257,11 @@ jobs:
           PKG_NAME: ${{ matrix.package }}
         run: |
           set -euo pipefail
-          echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | podman login "${REGISTRY}" -u ${{ github.actor }} --password-stdin
           # Pull the builder explicitly: the podman run below would pull it implicitly,
           # where a blob read that the registry drops fails the job outright (run
           # 34148155801, shell-rs, four blobs lost to pkg-containers.githubusercontent.com).
-          bash scripts/retry.sh podman pull ghcr.io/hr-mes/athanor-builder:${{ inputs.builder_hash }}
+          bash scripts/retry.sh podman pull "${BUILDER_IMAGE,,}"
           img_name="athanor-forge-${PKG_NAME}"
           if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
             img_name="athanor-forge-rolling-${PKG_NAME}"
@@ -271,7 +271,7 @@ jobs:
           # new user namespace: on the 334k files of the builder that cost between 108 and
           # 535 seconds per job, in every one of the 47 jobs, for a check that takes a
           # second. It was also what made HOME=/root unwritable and broke the probe.
-          podman run -i --rm --security-opt label=disable --security-opt seccomp=unconfined -e GITHUB_TOKEN="${GITHUB_TOKEN}" -v ${{ github.workspace }}:/workspace -w /workspace/forge ghcr.io/hr-mes/athanor-builder:${{ inputs.builder_hash }} bash scripts/check_idempotency.sh --package "${PKG_NAME}" --registry ${{ env.REGISTRY }} --owner ${{ github.repository_owner }} --image-name "$img_name" > idemp.out
+          podman run -i --rm --security-opt label=disable --security-opt seccomp=unconfined -e GITHUB_TOKEN="${GITHUB_TOKEN}" -v ${{ github.workspace }}:/workspace -w /workspace/forge "${BUILDER_IMAGE,,}" bash scripts/check_idempotency.sh --package "${PKG_NAME}" --registry ${{ env.REGISTRY }} --owner ${{ github.repository_owner }} --image-name "$img_name" > idemp.out
           source ./idemp.out
           echo "hash=$CONTENT_HASH" >> "$GITHUB_OUTPUT"
           if [ "$CACHE_HIT" = "true" ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; else echo "skip=false" >> "$GITHUB_OUTPUT"; fi
@@ -301,11 +301,11 @@ jobs:
           set -euo pipefail
           mkdir -p RPMS
           mkdir -p ${{ github.workspace }}/.sccache
-          echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | podman login "${REGISTRY}" -u ${{ github.actor }} --password-stdin
           # Pull the builder explicitly: the podman run below would pull it implicitly,
           # where a blob read that the registry drops fails the job outright (run
           # 34148155801, shell-rs, four blobs lost to pkg-containers.githubusercontent.com).
-          bash scripts/retry.sh podman pull ghcr.io/hr-mes/athanor-builder:${{ inputs.builder_hash }}
+          bash scripts/retry.sh podman pull "${BUILDER_IMAGE,,}"
           
           PKG_CLEAN=$(echo "$PKG_NAME" | tr -cd '[:alnum:]-')
           SPEC_DIR=""
@@ -319,13 +319,10 @@ jobs:
                 cp result/RPMS/*.rpm RPMS/
               else
             echo "📦 Compiling Custom Spec: $SPEC_DIR"
-            podman run --rm \
+            # Fetch with network, then build with --network=none (forge golden rule 4).
+            bash scripts/run_spec_build.sh "${BUILDER_IMAGE,,}" "$SPEC_DIR" \
               -e SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE}" \
-              -v ${{ github.workspace }}:/workspace \
-              -v ${{ github.workspace }}/.sccache:/root/.cache/sccache \
-              -w /workspace/forge \
-              ghcr.io/hr-mes/athanor-builder:${{ inputs.builder_hash }} \
-              bash scripts/build_spec.sh "$SPEC_DIR"
+              -v ${{ github.workspace }}/.sccache:/root/.cache/sccache
               fi
           else
             echo "❌ [MARTIAL LAW FATAL] Attempted to build upstream package ${PKG_NAME} without local spec! Dynamic downloads are strictly forbidden!"
@@ -440,11 +437,11 @@ jobs:
           PKG_NAME: ${{ matrix.package }}
         run: |
           set -euo pipefail
-          echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | podman login "${REGISTRY}" -u ${{ github.actor }} --password-stdin
           # Pull the builder explicitly: the podman run below would pull it implicitly,
           # where a blob read that the registry drops fails the job outright (run
           # 34148155801, shell-rs, four blobs lost to pkg-containers.githubusercontent.com).
-          bash scripts/retry.sh podman pull ghcr.io/hr-mes/athanor-builder:${{ inputs.builder_hash }}
+          bash scripts/retry.sh podman pull "${BUILDER_IMAGE,,}"
           img_name="athanor-forge-${PKG_NAME}"
           if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then img_name="athanor-forge-rolling-${PKG_NAME}"; fi
           # This check only reads the checkout and asks the registry, so it needs neither
@@ -452,7 +449,7 @@ jobs:
           # new user namespace: on the 334k files of the builder that cost between 108 and
           # 535 seconds per job, in every one of the 47 jobs, for a check that takes a
           # second. It was also what made HOME=/root unwritable and broke the probe.
-          podman run -i --rm --security-opt label=disable --security-opt seccomp=unconfined -e GITHUB_TOKEN="${GITHUB_TOKEN}" -v ${{ github.workspace }}:/workspace -w /workspace/forge ghcr.io/hr-mes/athanor-builder:${{ inputs.builder_hash }} bash scripts/check_idempotency.sh --package "${PKG_NAME}" --registry ${{ env.REGISTRY }} --owner ${{ github.repository_owner }} --image-name "$img_name" > idemp.out
+          podman run -i --rm --security-opt label=disable --security-opt seccomp=unconfined -e GITHUB_TOKEN="${GITHUB_TOKEN}" -v ${{ github.workspace }}:/workspace -w /workspace/forge "${BUILDER_IMAGE,,}" bash scripts/check_idempotency.sh --package "${PKG_NAME}" --registry ${{ env.REGISTRY }} --owner ${{ github.repository_owner }} --image-name "$img_name" > idemp.out
           source ./idemp.out
           echo "hash=$CONTENT_HASH" >> "$GITHUB_OUTPUT"
           if [ "$CACHE_HIT" = "true" ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; else echo "skip=false" >> "$GITHUB_OUTPUT"; fi
@@ -482,11 +479,11 @@ jobs:
           set -euo pipefail
           mkdir -p RPMS
           mkdir -p ${{ github.workspace }}/.sccache
-          echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | podman login "${REGISTRY}" -u ${{ github.actor }} --password-stdin
           # Pull the builder explicitly: the podman run below would pull it implicitly,
           # where a blob read that the registry drops fails the job outright (run
           # 34148155801, shell-rs, four blobs lost to pkg-containers.githubusercontent.com).
-          bash scripts/retry.sh podman pull ghcr.io/hr-mes/athanor-builder:${{ inputs.builder_hash }}
+          bash scripts/retry.sh podman pull "${BUILDER_IMAGE,,}"
           
           PKG_CLEAN=$(echo "$PKG_NAME" | tr -cd '[:alnum:]-')
           SPEC_DIR=""
@@ -500,13 +497,10 @@ jobs:
                 cp result/RPMS/*.rpm RPMS/
               else
             echo "📦 Compiling Custom Spec: $SPEC_DIR"
-            podman run --rm \
+            # Fetch with network, then build with --network=none (forge golden rule 4).
+            bash scripts/run_spec_build.sh "${BUILDER_IMAGE,,}" "$SPEC_DIR" \
               -e SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE}" \
-              -v ${{ github.workspace }}:/workspace \
-              -v ${{ github.workspace }}/.sccache:/root/.cache/sccache \
-              -w /workspace/forge \
-              ghcr.io/hr-mes/athanor-builder:${{ inputs.builder_hash }} \
-              bash scripts/build_spec.sh "$SPEC_DIR"
+              -v ${{ github.workspace }}/.sccache:/root/.cache/sccache
               fi
           else
             echo "❌ [MARTIAL LAW FATAL] Attempted to build upstream package ${PKG_NAME} without local spec! Dynamic downloads are strictly forbidden!"

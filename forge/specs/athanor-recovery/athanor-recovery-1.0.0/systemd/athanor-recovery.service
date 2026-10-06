@@ -1,6 +1,6 @@
 [Unit]
 Description=Athanor OS Pre-Boot GUI Recovery Kiosk
-Documentation=https://github.com/hr-mes/athanor-forge
+Documentation=https://github.com/hr-mes/athanor
 After=systemd-user-sessions.service plymouth-quit-wait.service
 Conflicts=getty@tty1.service
 

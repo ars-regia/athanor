@@ -1,6 +1,7 @@
 [package]
 name = "athanor-cluster-mesh"
 version = "1.0.0"
+license = "GPL-3.0-or-later"
 edition = "2021"
 description = "Athanor OS Multi-Node Zero-Conf P2P Swarm Computing Daemon for Distributed NPU Inference"
 authors = ["athanor-swarm-cluster-architect"]

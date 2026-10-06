@@ -1,14 +1,16 @@
 # Athanor shell: direction, layout model, stages
 
-Status: **revision 5, 2026-09-25, awaiting the maintainer's approval.** It carries the maintainer's correction of that day (section 1): of COSMIC only cosmic-comp stays, and our own bar and dock come next. It rewrites SH1, SH2, SH3 and section 3, and changes SH4, SH6, SH7, SH9, SH12, SH13 and sections 4 to 8 where they assumed cosmic-panel. Revision 3 was approved on 2026-09-18; revision 4, approved by the maintainer on 2026-09-24, added outputs taller than wide to SH7, SH10, SH13 and sections 4, 5 and 7. For revision 3 the maintainer took the decisions and delegated the validation. Revision 1 failed two independent reviews, an adversarial one and a security one: the direction held, the update and trust part did not. Revision 2 took their findings, both reviewers then found it approvable with changes, and revision 3 takes those changes. The four reports are `.superpowers/shell-spec-review.md`, `shell-spec-security-review.md` and their `-r2` successors.
+Status: **revision 5, 2026-09-25, awaiting the maintainer's approval;** the stage 2 switch (PR #83), `doc_bar.md` revision 1 and `doc_shell_standard.md` are already built on it. It carries the maintainer's correction of that day (section 1): of COSMIC only cosmic-comp stays, and our own bar and dock come next. It rewrites SH1, SH2, SH3 and section 3, and changes SH4, SH6, SH7, SH9, SH12, SH13 and sections 4 to 8 where they assumed cosmic-panel. Revision 3 was approved on 2026-09-18; revision 4, approved by the maintainer on 2026-09-24, added outputs taller than wide to SH7, SH10, SH13 and sections 4, 5 and 7. For revision 3 the maintainer took the decisions and delegated the validation. Revision 1 failed two independent reviews, an adversarial one and a security one: the direction held, the update and trust part did not. Revision 2 took their findings, both reviewers then found it approvable with changes, and revision 3 takes those changes. The four reports are `.superpowers/shell-spec-review.md`, `shell-spec-security-review.md` and their `-r2` successors.
 
-Stage 1 is implemented: package 1a is merged (PR #55), packages 1b-system and 1c are delivered by PRs #64 and #63, and the gate of section 7 has not run yet. Package 1b-shield is not built; package 1d, the seal in the greeter, takes its place. Stage 2 starts with spike P4, and its bar and dock get a specification of their own, `doc_bar.md`, written after P4. Section 5 lists what is still unverified.
+Stage 1 is implemented: package 1a is merged (PR #55), packages 1b-system and 1c are delivered by PRs #64 and #63; no run of the gate of section 7 is recorded. Package 1b-shield is not built; package 1d, the seal in the greeter, takes its place. Stage 2 began with spike P4, and its bar and dock have a specification of their own, `doc_bar.md` (revision 1, approved 2026-09-25), written from P4's results. Section 5 lists what is still unverified.
 
-Stage 2 is switched by PR #83 (opened 2026-10-01): packages 2a, 2b and 2c are in (PRs #68, #69, #70, #71, #76, #78, #79, and 2b.4 and 2b.5 with the switch), cosmic-panel, cosmic-applets and cosmic-notifications have left the image, and our bar, our dock and `athanor-shelld` are enabled for every user by preset. Section 8 records the acceptance runs.
+Stage 2 is switched by PR #83 (merged 2026-10-01): packages 2a, 2b and 2c are in (PRs #68, #69, #70, #71, #76, #78, #79, and 2b.4 and 2b.5 with the switch), cosmic-panel, cosmic-applets and cosmic-notifications have left the image, and our bar, our dock and `athanor-shelld` are enabled for every user by preset. Section 8 lists the acceptance criteria of stage 2; no run of them is recorded in this document.
 
-The three spikes of section 3 ran on 2026-09-18 (`.superpowers/spike-p1-applet.md`, `spike-p2-gtk-bump.md`, `spike-p3-headless.md`). Their results are written into SH4, SH5, SH12 and SH13 below; none overturned a decision. Spike P4 has not run yet.
+The three spikes of section 3 ran on 2026-09-18 (`.superpowers/spike-p1-applet.md`, `spike-p2-gtk-bump.md`, `spike-p3-headless.md`). Their results are written into SH4, SH5, SH12 and SH13 below; none overturned a decision. Spike P4 ran on 2026-09-25; its results are written into SH3 and into `doc_bar.md`.
 
 The document replaces `doc_shell_ui.md` and amends `doc_platform_experience.md`, section 3. Section 6 lists the changes other documents take.
+
+SH3 was amended on 2026-10-06: the scope budget (maintainer decision A2-14, #159); cosmic-launcher kept until the Alt+Tab switcher of `doc_overview.md` exists (maintainer decision A2-24, #159); and COSMIC's applications no longer called content, as `doc_software.md` revision 3, decision 7, ruled on 2026-10-05.
 
 ## 1. Context
 
@@ -39,8 +41,8 @@ What the platform gives us today:
 
 - **Stage 1** (implemented): a real design system, the update experience and the trust state, on top of COSMIC. Section 3 records it.
 - **Stage 2:** our bar and our dock, on a compositor client that holds every dependency on COSMIC (SH2). The session shield is born inside our bar.
-- **Later stages,** in this order unless a stage's own spec argues otherwise: 3, the launcher and the application library; 4, the password prompts, session lock and polkit agent together, because both reuse the greeter's authentication code and both are the trusted path; 5, the on-screen display, unless it already left with its agent in stage 4; 6, Settings; 7, the workspace overview; 8, the headless daemons: settings daemon, idle, wallpaper. Visible surfaces come first.
-- **The rule for replacing a surface:** ours is usable by an average user and better than COSMIC's at the moment of the switch. Until then ours is enabled by hand and the image keeps COSMIC's. Tray, fractional scaling, screen-reader roles and i18n are requirements of every surface, not extras.
+- **Later stages,** in this order unless a stage's own spec argues otherwise: 3, the launcher and the application library; 4, the password prompts, session lock, polkit agent, on-screen display and end-of-session dialogs together, with cosmic-osd leaving in one step, because the lock and the agent both reuse the greeter's authentication code and both are the trusted path; 5, struck: the on-screen display left in stage 4 (`doc_osd.md` D7); 6, Settings; 7, the workspace overview; 8, the headless daemons: the launch broker, idle, wallpaper and the session services that replace the settings daemon. Visible surfaces come first.
+- **The rule for replacing a surface:** ours passes `doc_shell_standard.md`. Until then ours is enabled by hand and the image keeps COSMIC's. Tray, fractional scaling, screen-reader roles and i18n are requirements of every surface, not extras.
 - **No facades.** A control that does nothing, or a reading with no source, is a defect.
 
 **SH2. cosmic-comp stays; the dependency has an exit.** We do not write a compositor.
@@ -52,7 +54,7 @@ What the platform gives us today:
 - **Standard protocols are used anywhere:** `ext-workspace-v1`, `ext-foreign-toplevel-list-v1`, `ext-image-copy-capture-v1`, `ext-session-lock-v1`, `ext-idle-notify-v1`, and `wlr-layer-shell` through the shim (SH4). They survive a change of compositor, and where one covers a need the compositor client uses it too.
 - **Exceptions, by path.** `forge/tools/calmo-cosmic-theme` generates, by hand when the tokens or the libcosmic revision change, the committed default `CosmicTheme` that COSMIC applications read (SH3, SH5); the build fails when that output is stale. Until the switch of stage 2, the bridge of package 1c: `forge/specs/athanor-layout-translator`, and `system/athanor-layout/src/cosmic.rs` and `apply.rs`, which leave with it (SH7).
 - **The boundary is checked.** `scripts/verify.py` fails when a crate other than these names a dependency `libcosmic` or `cosmic-*`, or when Rust source outside them names a `com.system76` configuration. The check covers Rust only; the Python token generator under `system/athanor-style/calmo/` also writes COSMIC defaults, which are content for COSMIC applications. `system/athanor-style/src/cosmic_theme.rs` failed it until package 2a moved it into the compositor client, in the change that added the check; the check passes. The boundary is a failing check, not a review comment.
-- **Security features only a compositor can give** (authenticated privileged clients, a trusted path for credential prompts, compositor-drawn trust decorations) are proposed upstream first. If upstream declines, they become a small isolated patch set built in the forge and rebased per release.
+- **Security features only a compositor can give** (authenticated privileged clients, a trusted path for credential prompts, compositor-drawn trust decorations) are proposed upstream first. If upstream declines, they become a small isolated patch set built in the forge and rebased per release. The trusted path for credential prompts is the exception: by the maintainer's decision of 2026-10-05 it is our own cosmic-comp patch in `forge/specs/cosmic-comp`, with no upstream proposal (`doc_lock_and_prompts.md` D10, LP13); authenticated privileged clients and compositor-drawn trust decorations other than the prompt's keep this rule.
 - **A fork is reconsidered only when** System76 abandons or relicenses cosmic-comp, or a security requirement we cannot drop is declined and the patch set stops being maintainable, or the project has more maintainers. A fork starts from cosmic-comp, never from zero.
 
 **SH3. Of COSMIC only cosmic-comp stays.** The shell owns pixels and plumbing; cosmic-comp owns the screen and the input.
@@ -61,16 +63,23 @@ What the platform gives us today:
 |---|---|---|---|
 | cosmic-panel, cosmic-applets | panel, dock, the tray's `org.kde.StatusNotifierWatcher` (in `cosmic-applet-status-area`), network, Bluetooth, audio, battery, power, input source | 2, gone since the switch (PR #83) | our bar (2b) and our dock (2c) |
 | cosmic-notifications | notification daemon, a child of the panel's wrapper on an inherited socket pair until the switch | 2, gone since the switch (PR #83) | `athanor-shelld`, the notification server, with the bar |
-| cosmic-launcher, cosmic-app-library, pop-launcher | launcher, application library, the launcher's search backend | 3 (P4 found they work without the panel) | our launcher and application library (`doc_launcher.md`) |
+| cosmic-launcher, cosmic-app-library, pop-launcher | launcher, application library, the launcher's search backend; cosmic-launcher also serves Alt+Tab | 3 (P4 found they work without the panel); cosmic-launcher only together with a window switcher on Alt+Tab (amended 2026-10-06, A2-24, #159) | our launcher and application library (`doc_launcher.md`); the Alt+Tab switcher of `doc_overview.md` (section 7 there) |
 | cosmic-greeter as locker | session lock | 4 | our lock, on the greeter's authentication code |
-| cosmic-osd | on-screen display and the session's only polkit agent | 4, or 5 if it can run without its agent | our polkit agent (4) and on-screen display (5) |
-| cosmic-settings, cosmic-randr | Settings application, output configuration | 6 | our Settings; `athanor-settings-rs` is not revived, only mined |
-| cosmic-workspaces | overview | 7 | our overview |
-| cosmic-settings-daemon, cosmic-idle, cosmic-bg | configuration bus and media keys; `org.freedesktop.ScreenSaver` and idle policy; wallpaper | 8 | our daemons |
+| cosmic-osd | on-screen display, end-of-session dialogs and the session's only polkit agent | 4, in one step | our polkit agent and `athanor-osd` (`doc_lock_and_prompts.md`, `doc_osd.md`) |
+| cosmic-settings, cosmic-randr | Settings application, output configuration | 6 | our Settings (`doc_settings.md`); `athanor-settings-rs` was deleted on 2026-10-05 and stays in history to be mined |
+| cosmic-workspaces | overview | 7 | our overview (`doc_overview.md`) |
+| cosmic-settings-daemon, cosmic-idle, cosmic-bg | configuration bus (the media keys leave in stage 4, with `athanor-osd`); `org.freedesktop.ScreenSaver` and idle policy; wallpaper | 8 | `athanor-idle`, `athanor-wallpaper` and `athanor-sessiond`; the launch broker `athanor-broker` is a new component of stage 8 (`doc_session_daemons.md`) |
 
 The table is the end state and its order, not a calendar. A component leaves only when its replacement passes SH1's rule; until then the image keeps it.
 
-COSMIC applications (`cosmic-files`, `cosmic-term`, `cosmic-edit`, `cosmic-store`) are content, not dependencies. They read `CosmicTheme`, so the design system writes it (SH5).
+**Scope budget** (amended 2026-10-06, maintainer decision A2-14, #159). Athanor builds only what it differentiates on. Every new component of Athanor's own, whether a program, a daemon, a library or a patch series, that does what an upstream project already does carries two things in its specification before its first plan is written:
+
+1. a written "why not upstream": the upstream candidates weighed, each with the reason it falls short, checked against the upstream project as it is on the day of writing;
+2. a maintenance owner, named by the maintainer.
+
+A component without both is not planned. The rule first applied on 2026-10-06: the own disk utility gave way to GNOME Disks (`doc_disks.md` section 7); the own file manager is limited to the chooser's view library until 1.0, with Nautilus as the file manager of 1.0 (`doc_files.md` section 7); Software carries a written comparison with Bazaar (`doc_software.md` section 9).
+
+COSMIC's applications (`cosmic-files`, `cosmic-term`, `cosmic-edit`, `cosmic-store`) no longer stay as content (amended 2026-10-06; ruled 2026-10-05 in `doc_software.md` decision 7): each gives way to the default application that decision names for its use, with the amendments of `doc_software.md` section 9. Until they leave the image, they read `CosmicTheme`, which the design system writes (SH5).
 
 **SH4. GTK4, with the shim kept replaceable.**
 
@@ -89,7 +98,7 @@ COSMIC applications (`cosmic-files`, `cosmic-term`, `cosmic-edit`, `cosmic-store
 - **Calmo is the default, not a migration.** COSMIC's RPMs own the files under `/usr/share/cosmic/`, so our defaults cannot be packaged at those paths. The plan of 1a picks the mechanism: an overlay directory ahead of `/usr/share` in `XDG_DATA_DIRS` if cosmic-config honours it, otherwise a build step after the COSMIC RPMs, checked by `verify.py shipped`. A user whose `~/.config/cosmic` already holds a theme keeps it.
 - **Factory accent:** indigo, hue 231 and saturation 62 % in the HSL tokens (`#2e44c2` on light, `#8898f7` on dark). The user changes the accent; trust colours (verified, attention, blocked) are fixed and never derived from the accent.
 - **Stage 1 has one accent control, COSMIC's.** GTK inherits nothing from COSMIC: on the maintainer's desktop COSMIC is dark while GTK's colour scheme says `default`, and a GTK surface comes up light (spike P1). Our surfaces therefore read `CosmicTheme` themselves, for the mode and for the accent, and compute the on-accent text colour against WCAG AA at run time. The greeter uses the factory accent. A curated palette arrives with a Settings surface of our own, not before.
-- **Contrast is validated:** every text/background pair of the tokens meets WCAG AA in four variants, light and dark, each normal and high-contrast, checked in CI. Our surfaces follow COSMIC's high-contrast flag. Every animation has a disabled path that follows the reduced-motion setting.
+- **Contrast is validated:** every text/background pair of the tokens meets WCAG AA in four variants, light and dark, each normal and high-contrast, checked in CI. Today our surfaces take the mode and the accent from `CosmicTheme` (`system/athanor-compositor-client/src/theme.rs`); no `org.athanor.desktop.appearance` schema exists yet, and `doc_visual_language.md` VL4 plans it as the source they will follow. Every animation has a disabled path that follows the reduced-motion setting.
 - **The identity lives in form, not in colour,** because the colour is the user's. Two signatures carry it:
   - **The mark is the seal.** The Athanor mark is reserved for the trust shield (SH12) and appears nowhere else in the shell; the launcher uses a neutral glyph.
   - **The hearth wallpaper.** The default wallpaper is a set of concentric discs rising from a corner. Stage 1 ships it as two images, light and dark, in the factory accent. It follows the user's accent only when the accent comes from a curated palette, because each hue is then an image built ahead of time.
@@ -127,7 +136,7 @@ COSMIC applications (`cosmic-files`, `cosmic-term`, `cosmic-edit`, `cosmic-store
 - **Reading:** the shell reads every schema version it ever shipped and migrates in memory. A preset or key removed in a later version maps to a named successor in a migration table shipped with the schema.
 - **Rejecting:** an unknown key, a newer `schema`, or a malformed file rejects the whole user document. The shell then applies the nearest preset it knows and logs at error priority. A rollback to an older `/usr` therefore degrades, and a later upgrade restores.
 - **Writing:** the shell writes the user document only when the user changes the layout, at the current schema. It never rewrites it on its own. When the rejected document has a newer schema, the chooser asks before saving and keeps the old file as `layout.toml.<schema>`.
-- **Crash-loop protection:** five failures within ten minutes on `CLOCK_BOOTTIME`, the policy `/usr/bin/athanor-cosmic-panel` applied until the switch, then the vendor layout. The shell is never lost.
+- **Crash-loop protection:** five failures within ten minutes on `CLOCK_BOOTTIME`, the policy `/usr/bin/athanor-cosmic-panel` applied until the switch, then the vendor layout. The shell is never lost. The protection does not apply to `athanor-lock.service`, which restarts without limit (`doc_lock_and_prompts.md` LP10).
 
 **SH9. Invariants, never configurable.**
 
@@ -145,6 +154,8 @@ COSMIC applications (`cosmic-files`, `cosmic-term`, `cosmic-edit`, `cosmic-store
 - **Confirmation is one step:** "Restart to update" asks the system side to unlock the deployment (`bootc upgrade --from-downloaded`) and reboot in the same request. The system side first asks logind whether a reboot is blocked by an inhibitor, and when it is, refuses without unlocking. An unlocked deployment therefore never waits for some later shutdown, the request grants a process nothing beyond the reboot logind already allows the active local user, and it takes the same polkit defaults.
 - **After the first boot into a new deployment,** one notification says which version is now running, with the version and date from the image labels, and offers the way back. It claims no changelog: none exists yet.
 - **Going back** is `bootc rollback` to the immediately previous deployment, behind administrator authentication, followed by a restart. A digest the user went back from is held: it is not downloaded again, and only a newer digest is offered. Without this rule the timer would undo the rollback. Stage 1 has no request that releases a held digest.
+- **Amendment of 2026-10-06: security updates apply at the next shutdown** (maintainer decision A2-5 of 2026-10-05, #150). The rule "never applied unconfirmed" in the heading now holds for feature updates only. An update of the security class (`doc_kernel_profile.md`, D34) applies at the next shutdown or reboot the user starts, with a notice that says so and, after the first boot into it, the one-step way back of the bullet above. It is still never forced, and nothing reboots by itself. For this class the sentence of the confirmation bullet that an unlocked deployment never waits for some later shutdown is superseded. The system side is `doc_update_trust.md`, UT13.
+- **Amendment of 2026-10-06: no `systemd-sysupdate` replacement** (maintainer decision A2-8 of 2026-10-05, #150). `doc_kernel_profile.md` D6 is closed on bootc in two steps, so the first paragraph's replacement of bootc by `systemd-sysupdate` with A/B `/usr` does not happen: release 1.0 runs bootc on the ostree backend, and release 1.1 moves to bootc's sealed composefs backend behind the same experience.
 
 **SH12. The shield reports only what a verifier backs.**
 
@@ -154,7 +165,7 @@ COSMIC applications (`cosmic-files`, `cosmic-term`, `cosmic-edit`, `cosmic-store
   - a check: the booted image is verified, it is the newest the machine has booted, and the last successful check for updates is at most 14 days old;
   - an exclamation mark: not verified yet, the policy is not in force, the machine runs an older version than one it has booted, as after going back, or no check for updates has succeeded for 14 days, with that date. A machine whose updates stopped silently must not stay green: that defect has already shipped once (section 1), and an attacker who can only drop traffic causes it at will;
   - a cross: the last download was refused by the policy. It clears when a later download passes the policy.
-- **Rows that do not move the badge.** Secure Boot off is the declared degraded mode of `doc_kernel_profile.md` D3: its row says so, plainly. The header of the sheet claims only what the rows back: "System image verified", never "this computer is safe". That sentence is about the image the deployment refers to. It is not a measurement of the running `/usr`: nothing ties the booted files to the digest until the dm-verity `/usr` of `doc_kernel_profile.md`, and no wording in the interface suggests otherwise.
+- **Rows that do not move the badge.** Secure Boot off is the declared degraded mode of `doc_kernel_profile.md` D3: its row says so, plainly. The header of the sheet claims only what the rows back: "System image verified", never "this computer is safe". That sentence is about the image the deployment refers to. It is not a measurement of the running `/usr`: nothing ties the booted files to the digest until the dm-verity `/usr` of `doc_kernel_profile.md`, and no wording in the interface suggests otherwise. *Amended on 2026-10-06 (A2-8, #150):* the dm-verity `/usr` is superseded; nothing ties the booted files to the digest until the `/usr` sealed by composefs with fs-verity of release 1.1 (`doc_kernel_profile.md`, D6).
 - **The session shield is informative, not a trusted path.** A process running as the user can still draw over our bar, or replace the bar's user unit with a file or a drop-in of its own. The greeter's seal is the stronger one, because no user code runs there. A spoof-resistant shield needs the compositor work of SH2.
 - **The shield is the Athanor mark with the badge.** There is no permanent text in the panel: the words are in the sheet and in the accessible name. Its place is the end of the panel in every layout, and the top end corner of the greeter: the right under left-to-right text, the left under right-to-left text (`doc_bar.md`, BR6). cosmic-panel does not mirror.
 - **The session shield is a module of our bar** (package 2b). Its sheet carries the rows, "Restart to update" and "Go back to the previous version". It is a GTK popover of the bar if P4 shows that one opens from a top-level layer surface, and otherwise a layer-shell surface of its own, started by the bar. Spike P1 found the second shape forced inside cosmic-panel, which does not display a GTK popover (`surface missing from known popups`) and whose applets die of a second Wayland connection; the applet of package 1b-shield is therefore not built. Until 2b there is no session shield, and until the switch it exists only in a bar enabled by hand; meanwhile the trust state is reachable from the greeter's seal (package 1d) and from the notifier (`doc_update_trust.md`, UT11).
@@ -167,21 +178,21 @@ COSMIC applications (`cosmic-files`, `cosmic-term`, `cosmic-edit`, `cosmic-store
 4. Existing installs move from `ostree-unverified-registry:` to a signed reference by an explicit, tested step.
 5. The helper is a root D-Bus service with two methods and no arguments, apply and go back, one polkit action each in the `os.athanor.*` namespace, the subject taken from the bus sender through `athanor_bus_api::polkit`. Apply takes logind's defaults for a reboot (SH11); going back is `auth_admin` for every subject. Every new unit is hardened, and the user-side processes restrict themselves with Landlock at start, as the greeter does.
 6. The state directory is declared in `tmpfiles.d` with owner and mode, apart from the directory that holds the released disk key.
-7. "Secure Boot on" means `SecureBoot=1`, `SetupMode=0`, shim validation not disabled and kernel lockdown active, each published separately. The shipped `athanor-secure-boot` daemon cannot own its bus name today; `doc_update_trust.md`, D2, retires it and keeps the TPM files its package also ships.
+7. "Secure Boot on" means `SecureBoot=1`, `SetupMode=0`, shim validation not disabled and kernel lockdown active, each published separately. The `athanor-secure-boot` daemon could not own its bus name; `doc_update_trust.md`, D2, retired it and its package is gone.
 8. Registry retention never removes an image, or the signature of an image, that a supported machine may still boot, download or go back to. `forge/scripts/clean_ghcr.sh` keeps two tagged versions per package today and counts signatures as versions.
 9. Every published image carries a version label of its own. Today two builds a day apart are both `43.20260916.0`, and SH11 names the running version to the user.
 
 **SH13. Tests.**
 
 - **Layouts** are captured left-to-right in English with a fixed clock and an empty tray. The three presets at their factory knobs run outputs {1, 2} × scale {1.0, 1.5}: 12 cases. The other 11 layouts of SH7 run once at one output and scale 1.0. On one output taller than wide, at scale 1.0, the three presets at their factory knobs run once more, and so does `float` with the panel at the bottom, which stacks the dock above the panel: 27 layout cases. Until the switch of stage 2 they capture cosmic-panel; after it, our bar and dock, with the same 14 layouts and the same `layout.toml`.
-- **Our own surfaces** run scale {1.0, 1.5} × theme {light, dark} × text {English, German for length, a right-to-left pseudo-locale}: 12 cases each. In stage 1 they are the greeter, with its seal from package 1d, and the chooser: 24 surface cases. The shield's 12 cases move to the bar; the bar and the dock add theirs in `doc_bar.md`. Italian and English are the shipped locales.
+- **Our own surfaces** run scale {1.0, 1.5} × theme {light, dark} × text {English, German for length, a right-to-left pseudo-locale}: 12 cases each. In stage 1 they are the greeter, with its seal from package 1d, and the chooser: 24 surface cases. The shield's 12 cases move to the bar; the bar and the dock add theirs in `doc_bar.md`. Italian and English are the shipped locales. The rig gains the clock cases of LN17 and the font case of LN13 (`doc_languages.md`).
 - **Where they run** (spike P3): in a rootless `fedora:43` container on the hosted `ubuntu-24.04` runner, with no GPU: a headless sway on pixman, cosmic-comp with its winit backend on llvmpipe, `cosmic-randr` for size and scale (an output taller than wide is set as a portrait size, not as a transform: only the shape matters, SH7), cosmic-panel, and `grim` over `ext-image-copy-capture-v1`. A scene costs 8 seconds and 1 GiB, and two independent runs are byte-identical.
 - **Two outputs are not reachable there:** cosmic-comp has no headless backend and Smithay's winit backend has one output. The 6 two-output cases run as a scheduled job on the KVM runner. They do not gate a push, and they are not dropped: they are the ones that catch a per-output regression in the panel. A `vkms` device on the hosted runner may replace the KVM job; nobody has tried it.
 - **What makes a golden reproducible:** isolated `XDG_*` directories per case, a frozen wall clock with a live monotonic clock, `TZ=UTC`, `LC_ALL` per case, a fixed set of running clients, the runner label `ubuntu-24.04` and the container pinned by digest. A case passes when at most a stated number of pixels differ from its golden image; the plan states the number.
 - **There is no input in that environment,** so a surface is captured by starting it in the state under test. A surface with a sheet or a popover, such as the bar's shield, starts with it open.
 - **What a golden cannot show:** the nested route has no dmabuf, no pointer, no hotplug, and reports a physical size of 0 × 0 mm. It proves layout and drawing, not behaviour on a real screen.
 - Each surface has an automated accessibility check: every interactive widget exposes a role and a name in the AT-SPI tree.
-- All strings go through gettext from the first commit.
+- All strings go through gettext from the first commit: read through `athanor-i18n` in the shell and the greeter, and through `gettext-rs` and glibc's gettext in our libadwaita applications (`doc_languages.md` LN1).
 
 ## 3. Stages
 
@@ -214,9 +225,11 @@ Three packages in this order, then one switch. Each package has its own implemen
 
 Out of stage 2: our launcher, lock, polkit agent, on-screen display, Settings and overview; the headless daemons; the `split` preset; named outputs; releasing a held digest; a screen reader at the greeter; any compositor patch.
 
+**The control center** comes before the rest of stage 3 (`doc_shell_standard.md`, section 4, step 5): its own specification, built on the services the bar already holds, then its implementation and its gate.
+
 ### Later stages
 
-Stages 3 to 8 follow SH1 and SH3, each with its own spec. Stage 4 first checks whether cosmic-osd can run without its polkit agent, because a session holds one agent: if it cannot, the on-screen display comes forward from stage 5 into stage 4.
+Stages 3 to 8 follow SH1 and SH3, each with its own spec. Stage 4's check of whether cosmic-osd can run without its polkit agent is replaced by the joint retirement of `doc_osd.md` OD15 (D7): cosmic-osd leaves in stage 4 with `athanor-osd` and our polkit agent, without a patch.
 
 ### Spikes
 
@@ -247,7 +260,7 @@ P4 replaces the two spikes revision 4 reserved for stage 2: the security-context
 2. **Where the verification runs.** `skopeo standalone-verify`, `cosign verify` with the key, or the pull itself under the policy: `doc_update_trust.md` picks one and says what it needs offline.
 3. **The metered state** is "unknown" on many networks, so SH11 downloads there. A user on an unmarked tethered phone pays for it; the rule errs towards being up to date.
 4. **The sheet's behaviour** is designed in `doc_bar.md`: dismissal on an outside click or on focus loss, its stacking against the panel's own popups, which it drew over in the spike, and its place when the panel is at the bottom.
-5. **Hiding COSMIC Settings pages** that configure a panel we later remove may need a patch. It is a problem of stage 6, when Settings becomes ours.
+5. **Hiding COSMIC Settings pages** that configure a panel we later remove may need a patch. It is a problem of stage 6, when Settings becomes ours. Answered by `doc_settings.md` SE23: no COSMIC page is hidden or patched.
 6. **The greeter holds the real Wayland socket,** with capture and clipboard privilege. Per-surface confinement needs the compositor work of SH2. P4 measures what every client on that socket can do.
 7. **A screen reader at the greeter** needs an accessibility bus, Orca and audio for the `greetd` user. Stage 1 delivers the roles and names; the plumbing is a later requirement of "for everyone", not a wish.
 8. **Inter** is a proposal from the mockups, not yet seen on real hardware at fractional scale.
@@ -261,7 +274,7 @@ P4 replaces the two spikes revision 4 reserved for stage 2: the security-context
 - `doc_update_trust.md` is a new document (SH12).
 - `doc_platform_experience.md`, section 3, names "the native GTK4/Relm4 panel and the horizontal strip of `Niri`". It takes a pointer to this document.
 - `doc_kernel_profile.md`, the note on the existing override that "stages updates automatically": it takes a pointer to SH11, which removes that override.
-- `NEXT.md` takes stage 1 as a block with the gate of section 7, and stage 2 as a second block with the gate of section 8.
+- The GitHub milestone `iso-v0` takes stage 1 as an issue with the gate of section 7, and stage 2 as a second issue with the gate of section 8.
 - `doc_bar.md` is a new document, written after spike P4 (section 3).
 - `CLAUDE.md`, "Desktop GTK4/Wayland": unchanged.
 

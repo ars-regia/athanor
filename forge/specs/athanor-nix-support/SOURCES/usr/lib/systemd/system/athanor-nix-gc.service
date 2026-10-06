@@ -1,0 +1,20 @@
+[Unit]
+Description=Collect garbage in the Nix store
+Documentation=https://nix.dev/manual/nix/2.31/command-ref/new-cli/nix3-store-gc.html
+# The store must be the writable /var/nix behind the /nix bind mount.
+Requires=nix.mount
+After=nix.mount athanor-nix-relabel.service
+
+[Service]
+Type=oneshot
+# Same configuration as the daemon (min-free, max-free, the store's settings).
+Environment=NIX_CONF_DIR=/usr/share/athanor/nix/daemon
+Environment=NIX_CACHE_HOME=/var/cache/nix
+# Deletes every store path no GC root reaches; profiles and their generations are roots,
+# so nothing a user installed goes away.
+# Fedora ships only /usr/bin/nix, not the legacy nix-store; the feature is named here so
+# the collection does not depend on /etc/nix/nix.conf enabling it.
+ExecStart=/usr/bin/nix --extra-experimental-features nix-command store gc
+Nice=19
+CPUSchedulingPolicy=idle
+IOSchedulingClass=idle

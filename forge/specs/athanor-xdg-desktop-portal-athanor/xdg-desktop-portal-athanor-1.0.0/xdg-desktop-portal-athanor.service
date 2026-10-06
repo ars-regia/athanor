@@ -1,0 +1,34 @@
+[Unit]
+Description=Athanor backend for xdg-desktop-portal
+# Started by the bus when the frontend first calls it (doc_portal.md, PT3).
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=dbus
+BusName=org.freedesktop.impl.portal.desktop.athanor
+ExecStart=/usr/libexec/xdg-desktop-portal-athanor
+Restart=on-failure
+Slice=session.slice
+
+# GSettings maps dconf's shared-memory flag beneath $XDG_RUNTIME_DIR/dconf read-write to
+# learn that a value changed. Under ProtectSystem=strict and Landlock the backend could not
+# create that directory itself, and would then never see a change: systemd creates it before
+# the start, writable for this unit, and keeps it at the stop because every GSettings client
+# of the session shares it. Landlock grants the same path and no other (main.rs).
+RuntimeDirectory=dconf
+RuntimeDirectoryPreserve=yes
+
+ProtectSystem=strict
+PrivateTmp=yes
+NoNewPrivileges=yes
+SystemCallFilter=@system-service
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# The backend speaks only D-Bus and journald, both over Unix sockets.
+RestrictAddressFamilies=AF_UNIX

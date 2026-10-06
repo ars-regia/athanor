@@ -2,7 +2,7 @@
 name = "athanor-preview-render"
 version = "1.0.0"
 edition = "2021"
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "Decodes one untrusted image or PDF from standard input into a bitmap, inside a sandboxed unit"
 
 [dependencies]

@@ -3,7 +3,7 @@ Name:           athanor-bar
 Version:        1.0.0
 Release:        5%{?dist}
 Summary:        The Athanor bar
-License:        MIT
+License:        GPL-3.0-or-later
 
 BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gtk4-layer-shell-devel pulseaudio-libs-devel binutils python3 gettext
 Requires:       gtk4 gtk4-layer-shell athanor-calmo athanor-shelld

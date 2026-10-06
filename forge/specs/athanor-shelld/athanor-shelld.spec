@@ -3,7 +3,7 @@ Name:           athanor-shelld
 Version:        1.0.0
 Release:        2%{?dist}
 Summary:        The Athanor shell's daemon: desktop notifications and the tray watcher
-License:        MIT
+License:        GPL-3.0-or-later
 
 BuildRequires:  rust cargo gcc pkgconf-pkg-config
 
