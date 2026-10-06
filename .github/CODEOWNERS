@@ -3,7 +3,8 @@
 # The last matching pattern wins, so the protected paths come last. The owner is
 # the GitHub account that owns the repository (checked with
 # `gh repo view hr-mes/athanor --json owner`). Review by a code owner is only
-# enforced once the branch protection rule "Require review from Code Owners" is on.
+# enforced once the branch protection rule "Require review from Code Owners" is on; it stays off while
+# there is a single code owner, who could not approve their own changes (decided 2026-10-06, #160).
 
 * @hr-mes
 

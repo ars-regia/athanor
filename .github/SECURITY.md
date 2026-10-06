@@ -10,7 +10,7 @@ expect.
 
 ## Response times
 
-Proposed targets, pending maintainer confirmation. They are not a commitment until the maintainer confirms them.
+Targets confirmed by the maintainer on 2026-10-06.
 
 | Step | Target |
 | --- | --- |
