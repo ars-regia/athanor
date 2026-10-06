@@ -14,6 +14,11 @@ settled, from the 15th of the month after the release month (June 15, December 1
 the next release, every six months, is a bump like any other. Never backwards: a branch older than
 the pinned one is never chosen. Revision: the head of that branch. narHash: the NAR hash of the
 GitHub archive of the revision, computed here (the top directory stripped, as Nix unpacks it).
+Descent: a new revision on the pinned branch must descend from the current pin (GitHub's compare
+API says "ahead" or "identical"); a force-pushed or rewritten branch fails instead of moving the
+pin. Across a release change the two branches are siblings off master, so "diverged" is accepted
+there and only an unrelated history ("behind" or an error) fails. The API call uses GITHUB_TOKEN
+when set, read-only.
 Standard library and git only: it runs on the GitHub runner without installing anything.
 """
 
@@ -22,6 +27,7 @@ import datetime
 import hashlib
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -33,6 +39,7 @@ HERE = Path(__file__).resolve().parent
 REGISTRY = HERE / "SOURCES" / "usr" / "share" / "athanor" / "nix" / "registry.json"
 BRANCH_FILE = HERE / "nixpkgs-branch"
 REPO = "https://github.com/NixOS/nixpkgs"
+API = "https://api.github.com/repos/NixOS/nixpkgs"
 BRANCH_RE = re.compile(r"^nixos-(\d\d)\.(05|11)$")
 
 
@@ -75,6 +82,34 @@ def remote_heads():
         if BRANCH_RE.match(branch):
             heads[branch] = sha
     return heads
+
+
+def compare_status(base, head):
+    """GitHub's verdict on `head` relative to `base`: ahead, identical, behind or diverged."""
+    req = urllib.request.Request(
+        f"{API}/compare/{base}...{head}?per_page=1",
+        headers={"Accept": "application/vnd.github+json"},
+    )
+    token = os.environ.get("GITHUB_TOKEN")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return json.load(resp)["status"]
+
+
+def verify_descent(old, new):
+    """Fails unless the new revision descends from the current pin (see the module docstring)."""
+    if old["rev"] == new["rev"]:
+        return
+    allowed = {"ahead", "identical"}
+    if new["branch"] != old["branch"]:
+        allowed.add("diverged")
+    status = compare_status(old["rev"], new["rev"])
+    if status not in allowed:
+        sys.exit(
+            f"bump.py: {new['rev']} is {status!r} relative to the pinned {old['rev']}, "
+            f"not {' or '.join(sorted(allowed))}: the branch was rewritten, not advanced"
+        )
 
 
 def nar_string(h, data):
@@ -193,11 +228,9 @@ def compute(today):
     branch = choose_branch(heads, old["branch"], today)
     if branch == old["branch"] and heads[branch] == old["rev"]:
         return {"changed": False, "old": old, "new": old}
-    new = {
-        "branch": branch,
-        "rev": heads[branch],
-        "narHash": archive_nar_hash(heads[branch]),
-    }
+    new = {"branch": branch, "rev": heads[branch]}
+    verify_descent(old, new)
+    new["narHash"] = archive_nar_hash(new["rev"])
     return {"changed": True, "old": old, "new": new}
 
 

@@ -1,13 +1,17 @@
 """Unit tests of the nixpkgs registry bump, without network
 (python3 -B -m unittest discover -s forge/specs/athanor-nix-support/tests -v)."""
 
+import contextlib
 import datetime
 import io
 import json
 import pathlib
+import shutil
 import sys
 import tarfile
+import tempfile
 import unittest
+from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(HERE))
@@ -147,6 +151,118 @@ class Pin(unittest.TestCase):
             "Release branch change",
             bump.body(dict(result, new=dict(new, branch="nixos-26.05"))),
         )
+OLD = {"branch": "nixos-26.05", "rev": "c" * 40, "narHash": "sha256-old"}
+JUNE = datetime.date(2026, 7, 1)
+DECEMBER = datetime.date(2026, 12, 20)
+
+
+@contextlib.contextmanager
+def faked(heads, status="ahead", pin=OLD):
+    """The network faked at the function boundary: git ls-remote, the compare API and the
+    archive download. Yields the compare and download mocks."""
+    with (
+        mock.patch.object(bump, "read_pin", return_value=pin),
+        mock.patch.object(bump, "remote_heads", return_value=heads),
+        mock.patch.object(bump, "compare_status", return_value=status) as cmp,
+        mock.patch.object(bump, "archive_nar_hash", return_value="sha256-new") as nar,
+    ):
+        yield cmp, nar
+
+
+class Compute(unittest.TestCase):
+    def test_unchanged_pin_asks_nothing(self):
+        with faked(dict(HEADS, **{"nixos-26.05": OLD["rev"]})) as (cmp, nar):
+            result = bump.compute(JUNE)
+        self.assertFalse(result["changed"])
+        cmp.assert_not_called()
+        nar.assert_not_called()
+
+    def test_a_descendant_moves_the_pin_and_hashes_the_archive(self):
+        pin = dict(OLD, rev="e" * 40)
+        with faked(HEADS, pin=pin) as (cmp, nar):
+            result = bump.compute(JUNE)
+        self.assertEqual(
+            result["new"],
+            {
+                "branch": "nixos-26.05",
+                "rev": HEADS["nixos-26.05"],
+                "narHash": "sha256-new",
+            },
+        )
+        cmp.assert_called_once_with(pin["rev"], HEADS["nixos-26.05"])
+        nar.assert_called_once_with(HEADS["nixos-26.05"])
+
+    def test_a_rewritten_branch_fails_before_the_download(self):
+        for status in ("diverged", "behind"):
+            with self.subTest(status=status):
+                with faked(HEADS, status=status, pin=dict(OLD, rev="e" * 40)) as (
+                    _,
+                    nar,
+                ):
+                    with self.assertRaises(SystemExit):
+                        bump.compute(JUNE)
+                    nar.assert_not_called()
+
+    def test_a_release_change_accepts_sibling_branches_but_not_a_rewind(self):
+        for status, ok in (("diverged", True), ("ahead", True), ("behind", False)):
+            with self.subTest(status=status):
+                with faked(HEADS, status=status, pin=dict(OLD, rev="e" * 40)):
+                    if ok:
+                        self.assertEqual(
+                            bump.compute(DECEMBER)["new"]["branch"], "nixos-26.11"
+                        )
+                    else:
+                        with self.assertRaises(SystemExit):
+                            bump.compute(DECEMBER)
+
+
+class CompareStatus(unittest.TestCase):
+    def test_the_status_is_read_from_the_api_reply_with_the_token(self):
+        reply = mock.MagicMock()
+        reply.__enter__.return_value = io.BytesIO(b'{"status": "ahead"}')
+        with (
+            mock.patch.object(
+                bump.urllib.request, "urlopen", return_value=reply
+            ) as opened,
+            mock.patch.dict(bump.os.environ, {"GITHUB_TOKEN": "t"}),
+        ):
+            self.assertEqual(bump.compare_status("a" * 40, "b" * 40), "ahead")
+        req = opened.call_args[0][0]
+        self.assertIn("/compare/" + "a" * 40 + "..." + "b" * 40, req.full_url)
+        self.assertEqual(req.get_header("Authorization"), "Bearer t")
+
+
+class Apply(unittest.TestCase):
+    def run_apply(self, result):
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp)
+        reg, branch, out = tmp / "registry.json", tmp / "nixpkgs-branch", tmp / "out"
+        reg.write_text("old\n")
+        branch.write_text("nixos-26.05\n")
+        with (
+            mock.patch.object(bump, "compute", return_value=result),
+            mock.patch.object(bump, "REGISTRY", reg),
+            mock.patch.object(bump, "BRANCH_FILE", branch),
+            mock.patch.object(sys, "argv", ["bump.py", "apply", str(out)]),
+        ):
+            bump.main()
+        return reg, branch, out
+
+    def test_a_move_rewrites_the_pin_and_writes_title_and_body(self):
+        new = {"branch": "nixos-26.11", "rev": "d" * 40, "narHash": "sha256-new"}
+        reg, branch, out = self.run_apply({"changed": True, "old": OLD, "new": new})
+        self.assertEqual(json.loads(reg.read_text()), bump.registry_for(new))
+        self.assertEqual(branch.read_text(), "nixos-26.11\n")
+        self.assertEqual(
+            (out / "title").read_text(),
+            "chore(nix): bump nixpkgs to nixos-26.11-dddddddddddd\n",
+        )
+        self.assertIn("Never auto-merged", (out / "body.md").read_text())
+
+    def test_no_move_writes_nothing(self):
+        reg, branch, out = self.run_apply({"changed": False, "old": OLD, "new": OLD})
+        self.assertEqual(reg.read_text(), "old\n")
+        self.assertFalse(out.exists())
 
 
 if __name__ == "__main__":

@@ -27,19 +27,26 @@ jobs:
   bump:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    env:
-      # A PAT: PRs opened with the GITHUB_TOKEN do not trigger the checks.
-      GH_TOKEN: ${{ secrets.KERNEL_BUMP_TOKEN }}
     steps:
+      # The default token, read-only and not persisted: bump.py needs no secret, and a step
+      # that runs a downloaded archive through Python must not see the PAT.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          token: ${{ secrets.KERNEL_BUMP_TOKEN }}
+          persist-credentials: false
 
       - name: Run bump.py apply
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: python3 forge/specs/athanor-nix-support/bump.py apply "$RUNNER_TEMP/bump"
 
       - name: Branch, commit, PR (never auto-merged)
-        run: forge/specs/azoth/open_bump_pr.sh nix-registry-bump bump/nixpkgs forge/specs/athanor-nix-support "$RUNNER_TEMP/bump" "$GITHUB_REF_NAME"
+        env:
+          # A PAT: PRs opened with the GITHUB_TOKEN do not trigger the checks. Only this step
+          # has it; gh auth setup-git makes git push use it.
+          GH_TOKEN: ${{ secrets.KERNEL_BUMP_TOKEN }}
+        run: |
+          gh auth setup-git
+          forge/specs/azoth/open_bump_pr.sh nix-registry-bump bump/nixpkgs forge/specs/athanor-nix-support "$RUNNER_TEMP/bump" "$GITHUB_REF_NAME"
 
       - name: Upload what the bump wrote
         if: ${{ always() }}
