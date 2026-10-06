@@ -1165,6 +1165,94 @@ def check_licence():
     return r
 
 
+DECISION_FIELDS = ("id", "title", "date", "status", "issues", "areas")
+DECISION_ID = r"[A-Z0-9][A-Za-z0-9-]*"
+DECISION_STATUS = re.compile(
+    rf"^(accepted|(?:superseded|amended) by {DECISION_ID}(?:, {DECISION_ID})*)$")
+
+
+def decision_front_matter(text):
+    """Front matter of a decision record as a dict of raw strings, or None."""
+    m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
+    if not m:
+        return None
+    fields = {}
+    for line in m.group(1).split("\n"):
+        k, sep, v = line.partition(":")
+        if sep:
+            fields[k.strip()] = v.strip()
+    return fields
+
+
+def decision_problems(root=None):
+    root = Path(root or ROOT)
+    folder = root / "docs" / "decisions"
+    out = []
+    files = sorted(p for p in folder.glob("[0-9][0-9][0-9][0-9]-*.md"))
+    records = {}
+    for f in files:
+        name = f.name
+        fm = decision_front_matter(read(f))
+        if fm is None:
+            out.append(f"{name}: no front matter")
+            continue
+        for field in DECISION_FIELDS:
+            if not fm.get(field) and field not in ("issues",):
+                out.append(f"{name}: front matter lacks '{field}'")
+            elif field == "issues" and field not in fm:
+                out.append(f"{name}: front matter lacks 'issues'")
+        id_ = fm.get("id", "")
+        if id_ and not re.fullmatch(DECISION_ID, id_):
+            out.append(f"{name}: malformed id '{id_}'")
+        if id_ in records:
+            out.append(f"{name}: id {id_} already used by {records[id_][0]}")
+        elif id_:
+            records[id_] = (name, fm.get("status", ""), fm.get("title", "").strip('"'))
+        status = fm.get("status")
+        if status and not DECISION_STATUS.match(status):
+            out.append(f"{name}: status '{status}' is not accepted, superseded by <id> or amended by <id>")
+        for h in ("Context", "Decision", "Consequences"):
+            if f"\n## {h}\n" not in read(f):
+                out.append(f"{name}: missing section '## {h}'")
+    for id_, (name, status, _) in records.items():
+        for target in re.findall(DECISION_ID, status.partition(" by ")[2]):
+            if target not in records:
+                out.append(f"{name}: status points to {target}, which has no record")
+    readme = folder / "README.md"
+    if not readme.is_file():
+        out.append("docs/decisions/README.md: missing")
+        return out
+    listed = re.findall(
+        r"^\| ([^|\s]+) \| (\d{4}) \| \[([^\]]*)\]\(([^)]+)\) \| ([^|]*?) \|",
+        read(readme), re.M)
+    index_files = [row[3] for row in listed]
+    for f in files:
+        if f.name not in index_files:
+            out.append(f"README.md: index does not list {f.name}")
+    for id_, num, title, n, status in listed:
+        if not (folder / n).is_file():
+            out.append(f"README.md: index lists {n}, which does not exist")
+        elif id_ not in records or records[id_][0] != n:
+            out.append(f"README.md: index row {id_} does not match {n}")
+        elif title != records[id_][2]:
+            out.append(f"README.md: index title of {id_} differs from {n}")
+        elif status != records[id_][1]:
+            out.append(f"README.md: index status of {id_} differs from {n}")
+        elif not n.startswith(num + "-"):
+            out.append(f"README.md: index number {num} does not match {n}")
+    if len(index_files) != len(set(index_files)):
+        out.append("README.md: index lists a file twice")
+    return out
+
+
+@check("decisions", "decision records have valid front matter, unique ids, a matching README index and existing targets")
+def check_decisions():
+    r = Result()
+    for problem in decision_problems():
+        r.fail(problem)
+    return r
+
+
 # --------------------------------------------------------------------------- #
 # runner
 # --------------------------------------------------------------------------- #
