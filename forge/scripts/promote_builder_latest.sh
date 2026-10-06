@@ -18,12 +18,8 @@ usage="usage: promote_builder_latest.sh REPOSITORY CONTENT_HASH REF DEFAULT_BRAN
 repository=${1:?$usage}
 content_hash=${2:?$usage}
 ref=${3:?$usage}
-default_branch=${4:-}
+default_branch=${4:?the event carries no default branch: $usage}
 
-if [[ -z $default_branch ]]; then
-    echo "promote_builder_latest.sh: the event carries no default branch; :latest is not moved" >&2
-    exit 0
-fi
 if [[ $ref != "refs/heads/${default_branch}" ]]; then
     echo "promote_builder_latest.sh: ${ref} is not the default branch ${default_branch}; :latest is not moved"
     exit 0

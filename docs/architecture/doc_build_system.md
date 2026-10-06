@@ -45,7 +45,10 @@ Every package builds inside `athanor-builder`, an OCI image produced by Nix alon
 `builderImage` in `flake.nix` (`dockerTools.buildLayeredImage`), with no Containerfile.
 `call-build-builder.yml` hashes `forge/builder`, the forge configuration, `flake.nix` and
 `flake.lock` with `forge/scripts/check_idempotency.sh --package builder`; when `athanor-builder:<hash>` already exists it is reused, otherwise
-the job runs `nix build .#builderImage`, loads it and pushes it as `:<hash>` and `:latest`.
+the job runs `nix build .#builderImage`, loads it and pushes it as `:<hash>`. On the default
+branch, built or reused, `forge/scripts/promote_builder_latest.sh` then points `:latest` at
+that `:<hash>`: `:latest` is the default branch's builder, which the pull request spec check
+(`spec-build-check.yml`) uses when a change leaves the builder's inputs alone.
 The hash is handed to the package and image jobs, so a run builds with exactly one builder.
 
 ## 4. The DAG
