@@ -27,7 +27,8 @@
 #                                       against (the same $REGISTRY resolve writes to the file);
 #                                       no network call, so a caller can compose an image
 #                                       reference before resolve has ever run
-#   digest REF                          the digest of REF, empty when the tag does not exist
+#   digest REF                          the digest of REF, empty when the tag does not exist or
+#                                       the registry denies its package (never published)
 #   signed REF kernel|modules           signed or unsigned, by the workflow that publishes it
 #   predicates REF modules              the custom predicates of REF, one JSON per line, or
 #                                       unverified
@@ -104,6 +105,15 @@ probe_digest() {
   out=$(skopeo inspect --format '{{.Digest}}' "docker://$1" 2> "$TMP/err") || status=$?
   if [[ $status -ne 0 ]]; then
     grep -q 'manifest unknown' "$TMP/err" && return 0
+    # ghcr.io answers a package that was never published (azoth-nvidia before the first
+    # NVIDIA build under an owner) by denying the anonymous bearer token, not with manifest
+    # unknown. A private package gets the same answer and would be rebuilt and pushed
+    # again: the kernel artifacts are public by design, so the log names both readings.
+    if grep -qE 'Requesting bearer token: .*403' "$TMP/err"; then
+      local repo=${1%@*}
+      echo "kernel-artifacts: ${repo%:*}: denied, read as never published (or not public)" >&2
+      return 0
+    fi
     cat "$TMP/err" >&2
     return 1
   fi
