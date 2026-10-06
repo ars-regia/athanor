@@ -47,8 +47,10 @@ image that is already signed.
 
 ## Installation and updates
 
-The ISO installs with `athanor-install.ks`: the image is fixed, while the disk layout and
-the user account are chosen in Anaconda's interactive screens.
+`forge/scripts/build_iso.sh` builds the ISO from `system/disk_config/iso.toml`, whose
+kickstart fixes the image. `athanor-install.ks` is the equivalent kickstart for a manual
+Anaconda installation. In both, the disk layout and the user account are chosen in
+Anaconda's interactive screens.
 
 An existing Fedora Atomic machine switches with:
 
