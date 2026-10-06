@@ -44,7 +44,7 @@ own the rest:
 Every package builds inside `athanor-builder`, an OCI image produced by Nix alone:
 `builderImage` in `flake.nix` (`dockerTools.buildLayeredImage`), with no Containerfile.
 `call-build-builder.yml` hashes `forge/builder`, the forge configuration, `flake.nix` and
-`flake.lock` with `forge/scripts/check_idempotency.sh --package builder`; when `athanor-builder:<hash>` already exists it is reused, otherwise
+`flake.lock` with `forge/scripts/check_idempotency.sh --package builder` (not `packages.json`, which the image does not read); when `athanor-builder:<hash>` already exists it is reused, otherwise
 the job runs `nix build .#builderImage`, loads it and pushes it as `:<hash>` and `:latest`.
 The hash is handed to the package and image jobs, so a run builds with exactly one builder.
 
@@ -60,11 +60,15 @@ package jobs of one run:
   adds an edge too.
 - **Node hash**: for a custom package, `package_hash`: its spec directory plus every
   directory its crates reach through path dependencies outside it.
-- **Dirty nodes**: a node whose transitive hash differs from the stored one. The store is
-  Redis when `ATHANOR_REDIS_URL` is set and reachable, and `forge/.cache/<node>.hash`
-  otherwise. No workflow sets `ATHANOR_REDIS_URL` and a CI checkout starts without
-  `.cache`, so in CI every node is dirty and the per-package idempotency check (section 5)
-  decides what is rebuilt.
+- **Dirty nodes**: a custom package is dirty when the registry has no
+  `athanor-forge-<package>:hash-<hash>`, the hash being the one
+  `check_idempotency.sh --hash-only` computes. The lookup is `registry_probe.sh` under
+  `retry.sh`: "manifest unknown" (and ghcr's 403 for a never-published package) means
+  absent; any other failure is retried and then stops the run, because reading an
+  unanswered question as "clean" would ship stale images and reading it as "dirty" would
+  silently rebuild the whole graph. A dirty package does not dirty its dependents: builds
+  never consume another package's output. Upstream nodes and flatpaks are never dirty, so a
+  commit that changes no package schedules no matrix job.
 - **Output**: the dirty custom packages split into levels 0, 1 and 2 (every deeper level
   joins level 2) and the dirty flatpaks, written to `GITHUB_OUTPUT` with a Mermaid summary
   of the graph. Upstream nodes are never scheduled.
@@ -78,7 +82,7 @@ package, so the levels order the jobs but no build consumes the output of anothe
 
 1. **Idempotency.** `check_idempotency.sh` hashes the spec directory, `config/rpmmacros`
    and `config/packages.json`, and asks the registry whether
-   `athanor-forge-<package>:<hash>` exists. If it does, the job stops there. This hash does
+   `athanor-forge-<package>:hash-<hash>` exists. If it does, the job stops there. This hash does
    not include the path dependencies that `package_hash` follows: a change confined to a
    crate under `system/` does not rebuild the packages that depend on it (known gap).
 2. **Build.** `forge/scripts/run_spec_build.sh` runs `build_spec.sh` twice in the builder
@@ -92,7 +96,7 @@ package, so the levels order the jobs but no build consumes the output of anothe
    package. `athanor-telemetry` is the exception: it builds with
    `nix build .#athanor-telemetry-rpm`.
 3. **Publication.** The RPMs go into a `FROM scratch` image,
-   `<registry>/<owner>/athanor-forge-<package>`, tagged `:latest` and `:<hash>`, with the
+   `<registry>/<owner>/athanor-forge-<package>`, tagged `:latest` and `:hash-<hash>`, with the
    hash in the `tier.content.sha256` label. The registry host is the `REGISTRY_HOST`
    repository variable (default `ghcr.io`) and the owner is the repository's.
 4. **Provenance.** Syft writes an SPDX SBOM, and `forge/scripts/sign_attest.sh` signs the

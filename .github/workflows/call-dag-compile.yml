@@ -167,9 +167,9 @@ jobs:
           IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')
           buildah config --label tier.content.sha256="${{ steps.check.outputs.hash }}" "$ctr"
           buildah commit --omit-timestamp "$ctr" "$IMAGE_LOWER:latest"
-          buildah tag "$IMAGE_LOWER:latest" "$IMAGE_LOWER:${{ steps.check.outputs.hash }}"
+          buildah tag "$IMAGE_LOWER:latest" "$IMAGE_LOWER:hash-${{ steps.check.outputs.hash }}"
           buildah push "$IMAGE_LOWER:latest"
-          buildah push "$IMAGE_LOWER:${{ steps.check.outputs.hash }}"
+          buildah push "$IMAGE_LOWER:hash-${{ steps.check.outputs.hash }}"
           buildah rm "$ctr" || true
 
       - name: Generate SBOM (Syft)
@@ -347,9 +347,9 @@ jobs:
           IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')
           buildah config --label tier.content.sha256="${{ steps.check.outputs.hash }}" "$ctr"
           buildah commit --omit-timestamp "$ctr" "$IMAGE_LOWER:latest"
-          buildah tag "$IMAGE_LOWER:latest" "$IMAGE_LOWER:${{ steps.check.outputs.hash }}"
+          buildah tag "$IMAGE_LOWER:latest" "$IMAGE_LOWER:hash-${{ steps.check.outputs.hash }}"
           buildah push "$IMAGE_LOWER:latest"
-          buildah push "$IMAGE_LOWER:${{ steps.check.outputs.hash }}"
+          buildah push "$IMAGE_LOWER:hash-${{ steps.check.outputs.hash }}"
           buildah rm "$ctr" || true
 
       - name: Generate SBOM (Syft)
@@ -525,9 +525,9 @@ jobs:
           IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')
           buildah config --label tier.content.sha256="${{ steps.check.outputs.hash }}" "$ctr"
           buildah commit --omit-timestamp "$ctr" "$IMAGE_LOWER:latest"
-          buildah tag "$IMAGE_LOWER:latest" "$IMAGE_LOWER:${{ steps.check.outputs.hash }}"
+          buildah tag "$IMAGE_LOWER:latest" "$IMAGE_LOWER:hash-${{ steps.check.outputs.hash }}"
           buildah push "$IMAGE_LOWER:latest"
-          buildah push "$IMAGE_LOWER:${{ steps.check.outputs.hash }}"
+          buildah push "$IMAGE_LOWER:hash-${{ steps.check.outputs.hash }}"
           buildah rm "$ctr" || true
 
       - name: Generate SBOM (Syft)

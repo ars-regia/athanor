@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 Athanor Forge DAG Orchestrator Engine
-Calculates Directed Acyclic Graph (DAG) for RPM & Flatpak dependencies,
-queries Redis distributed cache for node states, invalidates downstream dependencies,
-and outputs topological matrix execution levels for parallel GitHub Actions execution.
+Calculates Directed Acyclic Graph (DAG) for RPM dependencies, asks the registry which
+custom packages are already built, and outputs topological matrix execution levels for
+parallel GitHub Actions execution.
 """
 
 import sys
@@ -12,17 +12,17 @@ import glob
 import re
 import json
 import hashlib
+import subprocess
 import tomllib
 from collections import defaultdict, deque
-
-try:
-    import redis
-except ImportError:
-    redis = None
 
 CONFIG_PATH = os.environ.get("CONFIG_PATH", "config/packages.json")
 if not os.path.exists(CONFIG_PATH) and os.path.exists("forge/config/packages.json"):
     CONFIG_PATH = "forge/config/packages.json"
+
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+# check_idempotency.sh reads specs/ and config/ relative to the forge directory.
+FORGE_DIR = os.environ.get("FORGE_DIR", os.path.dirname(SCRIPTS_DIR))
 
 SPECS_DIR = os.environ.get("SPECS_DIR", "specs")
 if not os.path.exists(SPECS_DIR) and os.path.exists("forge/specs"):
@@ -283,83 +283,47 @@ def build_dag(manifest):
         
     return all_nodes, graph, prereqs, in_degree, node_hashes, node_types
 
-def evaluate_dirty_nodes(all_nodes, graph, prereqs, node_hashes):
+def content_hash(pkg):
+    """The content hash check_idempotency.sh gives a package: the tag its image carries."""
+    out = subprocess.run(
+        ["bash", os.path.join(SCRIPTS_DIR, "check_idempotency.sh"), "--package", pkg, "--hash-only"],
+        cwd=FORGE_DIR, capture_output=True, text=True, check=True,
+    ).stdout
+    return out.strip().removeprefix("CONTENT_HASH=")
+
+
+def image_exists(ref):
+    """Whether the registry has ref. registry_probe.sh answers present or absent and fails
+    on anything else; retry.sh repeats those failures, and one that outlasts the retries
+    raises, so a registry that cannot be asked stops the run instead of reading as clean."""
+    out = subprocess.run(
+        ["bash", os.path.join(SCRIPTS_DIR, "retry.sh"), "bash",
+         os.path.join(SCRIPTS_DIR, "registry_probe.sh"), ref],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    return out == "present"
+
+
+def evaluate_dirty_nodes(all_nodes, node_types, exists=image_exists, hash_of=content_hash):
     """
-    Reads local file cache for previous hashes.
-    Marks node DIRTY if content hash changed OR if any upstream dependency is DIRTY.
+    A custom package is dirty when the registry has no
+    <registry>/<owner>/athanor-forge-<package>:hash-<content hash>. Builds run with
+    rpmbuild --nodeps and never consume another package's output, so a dirty package does
+    not dirty its dependents. Upstream packages are never built here and flatpaks publish
+    nothing: neither is ever dirty.
     """
+    owner = os.environ.get("GITHUB_REPOSITORY_OWNER")
+    if not owner:
+        sys.exit("dag_orchestrator: GITHUB_REPOSITORY_OWNER is not set")
+    registry = os.environ.get("REGISTRY_HOST", "ghcr.io")
     dirty_nodes = set()
-    transitive_hashes = {}
-    
-    in_deg = {n: len(prereqs[n]) for n in all_nodes}
-    queue = deque([n for n in all_nodes if in_deg[n] == 0])
-    topo_order = []
-    
-    while queue:
-        curr = queue.popleft()
-        topo_order.append(curr)
-        for neighbor in graph[curr]:
-            in_deg[neighbor] -= 1
-            if in_deg[neighbor] == 0:
-                queue.append(neighbor)
-
-    os.makedirs(".cache", exist_ok=True)
-    
-    redis_client = None
-    if redis is not None:
-        redis_url = os.environ.get("ATHANOR_REDIS_URL")
-        if redis_url:
-            try:
-                redis_client = redis.from_url(redis_url, socket_timeout=2, socket_connect_timeout=2)
-                redis_client.ping()
-            except Exception as e:
-                print(f"⚠️ Redis connection failed: {e}. Falling back to local cache.")
-                redis_client = None
-
-    for node in topo_order:
-        hasher = hashlib.sha256()
-        hasher.update(node_hashes.get(node, "").encode())
-        for parent in sorted(prereqs[node]):
-            hasher.update(transitive_hashes.get(parent, "").encode())
-        trans_hash = hasher.hexdigest()[:16]
-        transitive_hashes[node] = trans_hash
-        
-        cached_val = None
-        redis_key = f"athanor:build:hash:{node}"
-        
-        if redis_client:
-            try:
-                val = redis_client.get(redis_key)
-                if val:
-                    cached_val = val.decode("utf-8")
-            except Exception:
-                pass
-
-        if cached_val is None and os.path.exists(f".cache/{node}.hash"):
-            try:
-                with open(f".cache/{node}.hash", "r") as f:
-                    cached_val = f.read().strip()
-            except OSError:
-                pass
-                
-        is_parent_dirty = any(parent in dirty_nodes for parent in prereqs[node])
-        
-        if cached_val != trans_hash or is_parent_dirty:
+    for node in sorted(all_nodes):
+        if node_types.get(node) != "custom":
+            continue
+        ref = f"{registry}/{owner}/athanor-forge-{node}:hash-{hash_of(node)}"
+        if not exists(ref):
             dirty_nodes.add(node)
-            
-            if redis_client:
-                try:
-                    redis_client.set(redis_key, trans_hash)
-                except Exception:
-                    pass
-            # Write new hash to disk for future runs
-            try:
-                with open(f".cache/{node}.hash", "w") as f:
-                    f.write(trans_hash)
-            except OSError:
-                pass
-
-    return dirty_nodes, transitive_hashes
+    return dirty_nodes
 
 def partition_dag_levels(dirty_nodes, graph, prereqs, node_types):
     """
@@ -407,32 +371,16 @@ def partition_dag_levels(dirty_nodes, graph, prereqs, node_types):
     return level_0, level_1, level_2, flatpaks
 
 def main():
-    print("🧠 Forge DAG Architect initializing... (Local File Cache Enabled)")
+    print("🧠 Forge DAG Architect initializing... (registry hash tags)")
     
     manifest = load_package_manifest()
     all_nodes, graph, prereqs, in_degree, node_hashes, node_types = build_dag(manifest)
     
     print(f"📊 DAG Topology built: {len(all_nodes)} nodes analyzed.")
     
-    dirty_nodes, transitive_hashes = evaluate_dirty_nodes(
-        all_nodes, graph, prereqs, node_hashes
-    )
+    dirty_nodes = evaluate_dirty_nodes(all_nodes, node_types)
     
     level_0, level_1, level_2, flatpaks = partition_dag_levels(dirty_nodes, graph, prereqs, node_types)
-    
-    dag_plan = {
-        "dirty_count": len(dirty_nodes),
-        "level_0": level_0,
-        "level_1": level_1,
-        "level_2": level_2,
-        "flatpaks": flatpaks
-    }
-    
-    try:
-        with open(".cache/dag_plan.json", "w") as f:
-            json.dump(dag_plan, f)
-    except OSError:
-        pass
     
     has_changes = "true" if len(dirty_nodes) > 0 else "false"
     

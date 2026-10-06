@@ -67,7 +67,7 @@ jobs:
     uses: ./.github/workflows/call-lint.yml
 
   orchestrator-brain:
-    name: 🧠 DAG Orchestrator Brain & Distributed Cache
+    name: 🧠 DAG Orchestrator Brain
     needs: [lint]
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
@@ -87,6 +87,8 @@ jobs:
 
       - name: Compute Dependency DAG & Topological Matrix
         id: brain
+        env:
+          REGISTRY_HOST: ${{ env.REGISTRY }}
         run: ./scripts/dynamic-matrix.sh
 
       - name: 🧹 Fix Workspace Permissions (GH Actions Cleanup)

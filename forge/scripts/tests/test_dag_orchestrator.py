@@ -2,9 +2,12 @@
 dependencies it builds from (python3 -B -m unittest discover -s forge/scripts/tests -v)."""
 
 import importlib.util
+import os
 import pathlib
+import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "dag_orchestrator.py"
 spec = importlib.util.spec_from_file_location("dag_orchestrator", SCRIPT)
@@ -61,6 +64,72 @@ class PathDependenciesTest(unittest.TestCase):
         )
         crate(self.root, "specs/athanor-shell/shell-1.0.0", "unit = { workspace = true }\nserde = { workspace = true }\n")
         self.assertEqual(dag.path_dependencies(str(workspace)), [str(self.root / "system/unit")])
+
+
+class RegistryStateTest(unittest.TestCase):
+    """UD41: a custom package is dirty when the registry lacks its hash tag. The registry is
+    a stub skopeo on PATH, so the whole chain runs: check_idempotency.sh --hash-only,
+    retry.sh and registry_probe.sh."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = pathlib.Path(tmp.name).resolve()
+        (root / "forge/specs/athanor-dock").mkdir(parents=True)
+        (root / "forge/specs/athanor-dock/dock.spec").write_text("Name: athanor-dock\n")
+        (root / "bin").mkdir()
+        stub = root / "bin/skopeo"
+        stub.write_text(
+            '#!/usr/bin/env bash\ncat "$ANSWER_DIR/answer" >&2\n'
+            '[[ $(cat "$ANSWER_DIR/status") == 0 ]] && echo sha256:00\nexit "$(cat "$ANSWER_DIR/status")"\n'
+        )
+        stub.chmod(0o755)
+        self.root = root
+        env = {
+            "PATH": f"{root / 'bin'}:{os.environ['PATH']}",
+            "ANSWER_DIR": str(root),
+            "GITHUB_REPOSITORY_OWNER": "Acme",
+            "RETRY_ATTEMPTS": "1",
+        }
+        patcher = mock.patch.dict(os.environ, env)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(dag, "FORGE_DIR", str(root / "forge"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def answer(self, status, text=""):
+        (self.root / "status").write_text(str(status))
+        (self.root / "answer").write_text(text)
+
+    def dirty(self):
+        return dag.evaluate_dirty_nodes({"dock", "libx", "fp"}, {"dock": "custom", "libx": "upstream", "fp": "flatpak"})
+
+    def test_tag_present_is_clean(self):
+        self.answer(0)
+        self.assertEqual(set(), self.dirty())
+
+    def test_tag_missing_is_dirty_and_only_for_custom_packages(self):
+        self.answer(1, "manifest unknown: manifest unknown")
+        self.assertEqual({"dock"}, self.dirty())
+
+    def test_never_published_package_is_dirty(self):
+        self.answer(1, "Requesting bearer token: invalid status code from registry 403 (Forbidden)")
+        self.assertEqual({"dock"}, self.dirty())
+
+    def test_registry_error_stops_the_run(self):
+        self.answer(1, "dial tcp: i/o timeout")
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.dirty()
+
+    def test_lookup_asks_for_the_hash_tag_of_the_node_image(self):
+        self.answer(0)
+        refs = []
+        dirty = dag.evaluate_dirty_nodes(
+            {"dock"}, {"dock": "custom"}, exists=lambda r: refs.append(r) or True
+        )
+        self.assertEqual(set(), dirty)
+        self.assertRegex(refs[0], r"^ghcr\.io/Acme/athanor-forge-dock:hash-[0-9a-f]{64}$")
 
 
 if __name__ == "__main__":
