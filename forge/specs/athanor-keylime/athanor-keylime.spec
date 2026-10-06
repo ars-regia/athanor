@@ -12,7 +12,7 @@ BuildArch:      noarch
 
 %description
 Configuration package for the Keylime agent in Athanor OS: a drop-in that sets the
-agent identity (uuid generated on first start). It does not seal or bind anything.
+agent's uuid and measured_boot_imports options. It does not seal or bind anything.
 
 %prep
 # Nothing to unpack: the drop-in is Source0.
@@ -29,7 +29,7 @@ install -D -m 0644 %{SOURCE0} %{buildroot}/etc/keylime/agent.conf.d/99-athanor.c
 
 %changelog
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0-4
-- Reword the %description and the drop-in comment: identity only, no sealing
+- Reword the %description and the drop-in comment: list the options set, no sealing
 
 * Sun Sep 07 2026 Athanor Forge <forge@athanor.os> - 1.0-3
 - Stop owning /etc/keylime/agent.conf.d: keylime-agent-rust-common owns it and

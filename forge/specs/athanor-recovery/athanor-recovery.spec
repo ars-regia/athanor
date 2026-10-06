@@ -2,7 +2,7 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-recovery
 Version:        1.0.0
-Release:        7%{?dist}
+Release:        6%{?dist}
 Summary:        Text console shown when the desktop does not start
 
 License:        GPL-3.0-or-later
@@ -41,9 +41,6 @@ install -D -m 0644 %{sources}/usr/share/athanor-recovery/recovery.issue %{buildr
 /usr/share/athanor-recovery/recovery.issue
 
 %changelog
-* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
-- Point unit Documentation= at the project repository
-
 * Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
 - The graphical kiosk leaves the image. It ran as an unprivileged user with
   NoNewPrivileges, so the rollback it ran (`rpm-ostree rollback`) could not do its work, and
