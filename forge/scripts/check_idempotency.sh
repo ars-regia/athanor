@@ -3,6 +3,9 @@
 # Deterministic Build Timestamp (Reproducible Builds)
 export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-1723320000}
 set -euo pipefail
+# sort -z orders by the locale: the brain (host) and the job (builder image) would hash
+# the same tree differently under en_US.UTF-8 and C.
+export LC_ALL=C
 # Bedrock Pure Bash Idempotency Checker
 # Replaces python3 idempotency_checker.py with native system tools (find, sha256sum, skopeo)
 

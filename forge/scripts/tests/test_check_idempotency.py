@@ -1,6 +1,7 @@
 """UD42: the builder hash covers the builder's inputs only
 (python3 -B -m unittest discover -s forge/scripts/tests -v)."""
 
+import os
 import pathlib
 import shutil
 import subprocess
@@ -65,10 +66,11 @@ class PackageHashTest(unittest.TestCase):
         (self.forge / "specs/athanor-dock/dock.spec").write_text("Name: athanor-dock\n")
         self.root = root
 
-    def dock_hash(self):
+    def dock_hash(self, locale=None):
+        env = {**os.environ, "LC_ALL": locale} if locale else None
         out = subprocess.run(
             ["bash", SCRIPT, "--package", "dock", "--hash-only"],
-            cwd=self.forge, capture_output=True, text=True, check=True,
+            cwd=self.forge, capture_output=True, text=True, check=True, env=env,
         ).stdout
         return out.strip().removeprefix("CONTENT_HASH=")
 
@@ -81,6 +83,12 @@ class PackageHashTest(unittest.TestCase):
         before = self.dock_hash()
         (self.root / "system/unrelated/lib.rs").write_text("// v2\n")
         self.assertEqual(before, self.dock_hash())
+
+    def test_the_hash_does_not_depend_on_the_locale(self):
+        spec = self.forge / "specs/athanor-dock"
+        (spec / "a-b.txt").write_text("1\n")
+        (spec / "aa.txt").write_text("2\n")
+        self.assertEqual(self.dock_hash("C"), self.dock_hash("en_US.UTF-8"))
 
     def test_the_hash_does_not_depend_on_the_checkout_location(self):
         before = self.dock_hash()
