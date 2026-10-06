@@ -7,7 +7,7 @@
 | Status | Revision 1, 2026-10-06. Section 1 and section 3 are facts. Section 2 and every line marked _(Proposal)_ await the maintainer |
 | Depends on | `doc_kernel_build.md` section 6 (key design), `doc_kernel_profile.md` D43 and section 9 (custody, key table), `doc_update_trust.md` UT2, UT3 (image key), decisions A2-27, A2-33, A2-35 |
 | Defines | SEC1-SEC12 (secrets), VAR1-VAR5 (variables), ENV1-ENV4 (environments), KC1-KC6 (custody), RL1-RL8 (recovery) |
-| Facts checked with | `git grep` on `origin/iso-v0` at `bd1f0e4a`; `gh secret list`, `gh variable list`, `gh api repos/ars-regia/athanor/environments` and its `secrets`, `variables` and `deployment-branch-policies` endpoints, names only; the branches of open PRs #115 (`sign-vmlinuz`), #180 (`a2/delivery`) and #185 (`a2/rpm-sign-job`) |
+| Facts checked with | `git grep` on `origin/iso-v0` at `bd1f0e4a`; `gh secret list`, `gh variable list`, `gh api repos/ars-regia/athanor/environments` and its `secrets`, `variables` and `deployment-branch-policies` endpoints, names only; the branches of open PRs #115 (`sign-vmlinuz`), #180 (`a2/delivery`) and #185 (`a2/rpm-sign-job`). The repository was then `hr-mes/athanor`; after the transfer the same `gh` queries on `ars-regia/athanor` (2026-10-06, at `33983ef6`) return the same names, reviewers and deployment branches |
 
 No value of any secret appears here or was read to write this. Commands below use
 `REPO=<owner>/<name>` so they work on a new organisation; today it is `ars-regia/athanor`.
