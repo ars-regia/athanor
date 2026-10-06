@@ -37,7 +37,7 @@ class BuildImage(unittest.TestCase):
         self.tmp.cleanup()
 
     def artifacts_file(self, **values):
-        lines = {"state": "ready", "nvr": NVR, "registry": "ghcr.io/hr-mes", "kernel_digest": KERNEL,
+        lines = {"state": "ready", "nvr": NVR, "registry": "ghcr.io/ars-regia", "kernel_digest": KERNEL,
                  "nvidia_open_digest": OPEN, "nvidia_legacy_digest": LEGACY, **values}
         (self.artifacts / "kernel-artifacts.env").write_text("".join(f"{k}={v}\n" for k, v in lines.items() if v is not None))
 
@@ -72,7 +72,7 @@ class BuildImage(unittest.TestCase):
         self.artifacts_file()
         r, args = self.build("nvidia")
         self.assertEqual(r.returncode, 0, r.stderr)
-        for expected in (f"AZOTH_NVR={NVR}", "KERNEL_REGISTRY=ghcr.io/hr-mes", f"NVIDIA_OPEN_DIGEST={OPEN}",
+        for expected in (f"AZOTH_NVR={NVR}", "KERNEL_REGISTRY=ghcr.io/ars-regia", f"NVIDIA_OPEN_DIGEST={OPEN}",
                          f"io.athanor.azoth.digest={KERNEL}", f"io.athanor.azoth-nvidia.digest={OPEN}"):
             self.assertIn(expected, args)
         self.assertNotIn(f"NVIDIA_LEGACY_DIGEST={LEGACY}", args)
@@ -85,7 +85,7 @@ class BuildImage(unittest.TestCase):
         # A regression check, not just a smoke test: the default build still reads its own
         # digest plumbing from the file (a pre-digest build-image.sh would pass the two
         # assertions above without ever calling kernel-artifacts.sh at all).
-        for expected in (f"AZOTH_NVR={NVR}", "KERNEL_REGISTRY=ghcr.io/hr-mes", f"io.athanor.azoth.digest={KERNEL}"):
+        for expected in (f"AZOTH_NVR={NVR}", "KERNEL_REGISTRY=ghcr.io/ars-regia", f"io.athanor.azoth.digest={KERNEL}"):
             self.assertIn(expected, args)
 
     def test_variant_without_its_module_digest_is_refused(self):

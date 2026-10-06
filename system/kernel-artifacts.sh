@@ -27,7 +27,8 @@
 #                                       against (the same $REGISTRY resolve writes to the file);
 #                                       no network call, so a caller can compose an image
 #                                       reference before resolve has ever run
-#   digest REF                          the digest of REF, empty when the tag does not exist
+#   digest REF                          the digest of REF, empty when the tag does not exist or
+#                                       the registry denies its package (never published)
 #   signed REF kernel|modules           signed or unsigned, by the workflow that publishes it
 #   predicates REF modules              the custom predicates of REF, one JSON per line, or
 #                                       unverified
@@ -36,7 +37,7 @@
 #
 # The file is $KERNEL_ARTIFACTS_DIR/kernel-artifacts.env (default: kernel-artifacts/ at the
 # repository root). KERNEL_REGISTRY is the registry and owner (default ghcr.io/ followed by
-# GITHUB_REPOSITORY_OWNER, else hr-mes); GITHUB_SERVER_URL and GITHUB_REPOSITORY name the
+# GITHUB_REPOSITORY_OWNER, else ars-regia); GITHUB_SERVER_URL and GITHUB_REPOSITORY name the
 # workflows whose signatures are trusted, and KERNEL_TRUSTED_REFS the branches they may have run
 # on (space separated, default "iso-v0 main"): a kernel or a module signed by the same workflow on
 # any other branch is not published, whoever pushed it. A kernel is ready only when its verified
@@ -52,10 +53,10 @@ ROOT=$(dirname "$HERE")
 DIR=${KERNEL_ARTIFACTS_DIR:-$ROOT/kernel-artifacts}
 FILE=$DIR/kernel-artifacts.env
 PINS=$ROOT/forge/specs/azoth/pins.env
-owner=${GITHUB_REPOSITORY_OWNER:-hr-mes}
+owner=${GITHUB_REPOSITORY_OWNER:-ars-regia}
 REGISTRY=${KERNEL_REGISTRY:-ghcr.io/${owner,,}}
 ISSUER=https://token.actions.githubusercontent.com
-workflows="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-hr-mes/athanor}/.github/workflows"
+workflows="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-ars-regia/athanor}/.github/workflows"
 # Owner, repository and host names hold no regex metacharacter other than the dot.
 workflows=${workflows//./\\.}
 # The branches whose runs may publish. A signature carries the ref of the run that made it, and
@@ -104,6 +105,15 @@ probe_digest() {
   out=$(skopeo inspect --format '{{.Digest}}' "docker://$1" 2> "$TMP/err") || status=$?
   if [[ $status -ne 0 ]]; then
     grep -q 'manifest unknown' "$TMP/err" && return 0
+    # ghcr.io answers a package that was never published (azoth-nvidia before the first
+    # NVIDIA build under an owner) by denying the anonymous bearer token, not with manifest
+    # unknown. A private package gets the same answer and would be rebuilt and pushed
+    # again: the kernel artifacts are public by design, so the log names both readings.
+    if grep -qE 'Requesting bearer token: .*403' "$TMP/err"; then
+      local repo=${1%@*}
+      echo "kernel-artifacts: ${repo%:*}: denied, read as never published (or not public)" >&2
+      return 0
+    fi
     cat "$TMP/err" >&2
     return 1
   fi

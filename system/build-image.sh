@@ -63,7 +63,7 @@ pinned=$(bash "$ROOT/forge/specs/azoth/nvr.sh")
 [[ $nvr == "$pinned" ]] || { echo "${0##*/}: the kernel artifacts were resolved for ${nvr}, the pins give ${pinned}: run system/kernel-artifacts.sh resolve again" >&2; exit 2; }
 registry=$(artifact registry)
 # The tier repositories of the forge DAG (forge/scripts/fetch_repo_rpms.sh publishes them).
-forge_registry=${REGISTRY_HOST:-ghcr.io}/${GITHUB_REPOSITORY_OWNER:-hr-mes}
+forge_registry=${REGISTRY_HOST:-ghcr.io}/${GITHUB_REPOSITORY_OWNER:-ars-regia}
 forge_registry=${forge_registry,,}
 kernel=$(artifact kernel_digest)
 args=(--layers --pull=newer --format docker --build-arg "AZOTH_NVR=$nvr" --build-arg "GPU=$GPU" --build-arg "IMAGE_REGISTRY=$REGISTRY"

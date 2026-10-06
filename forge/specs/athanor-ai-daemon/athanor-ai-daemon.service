@@ -1,6 +1,6 @@
 [Unit]
 Description=Athanor OS Local AI & Machine Learning Inference Daemon
-Documentation=https://github.com/hr-mes/athanor
+Documentation=https://github.com/ars-regia/athanor
 After=network-online.target dbus.service
 Requires=dbus.service
 

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REGISTRY="ghcr.io"
-OWNER="${GITHUB_REPOSITORY_OWNER:-hr-mes}"
+OWNER="${GITHUB_REPOSITORY_OWNER:-ars-regia}"
 
 echo "🌋 Executing Athanor Forge DAG Orchestration Engine..." >&2
 

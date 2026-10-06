@@ -23,7 +23,7 @@ lang en_US.UTF-8
 # The bootc image is the identity of the system, not a user choice. This kickstart
 # follows :latest; an installation that needs a fixed build replaces the tag with a
 # run-id tag of the image.
-ostreecontainer --url=ghcr.io/hr-mes/athanor-system:latest --transport=registry
+ostreecontainer --url=ghcr.io/ars-regia/athanor-system:latest --transport=registry
 
 # The root account stays locked: administration is through the wheel user Anaconda
 # creates. No user is declared here, so Anaconda asks the installer to create one.

@@ -5,7 +5,7 @@ Release:        3%{?dist}
 Summary:        Athanor OS Device Policy Daemon
 
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor
+URL:            https://github.com/ars-regia/athanor
 Requires:       polkit cryptsetup systemd
 
 

@@ -4,7 +4,7 @@ Version:        1.0.0
 Release:        2%{?dist}
 Summary:        The Calmo identity: COSMIC defaults, hearth wallpaper and seal icons
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor
+URL:            https://github.com/ars-regia/athanor
 BuildArch:      noarch
 
 BuildRequires:  python3

@@ -16,7 +16,7 @@ PINS = dict(re.findall(r"^(\w+)=(.*)$", (ROOT / "forge/specs/azoth/pins.env").re
 # A version the NVIDIA open pin never holds, so a bump built from it always moves the pin.
 NVIDIA_OPEN_BUMP = f"{PINS['NVIDIA_OPEN_VERSION']}.1"
 NVR = subprocess.run(["bash", str(ROOT / "forge/specs/azoth/nvr.sh")], capture_output=True, text=True, check=True).stdout.strip()
-REG = "ghcr.io/hr-mes"
+REG = "ghcr.io/ars-regia"
 KERNEL = "sha256:" + "1" * 64
 DEVEL = "sha256:" + "2" * 64
 OTHER_KERNEL = "sha256:" + "9" * 64
@@ -29,8 +29,8 @@ ATTESTED_OTHER_NVR = subprocess.run(
 assert ATTESTED_OTHER_NVR != NVR, "OTHER_FEDORA_KERNEL_NVR must derive an NVR other than the real one"
 INPUTS = json.loads(subprocess.run(["python3", str(ROOT / "forge/specs/azoth/build-inputs.py")], capture_output=True, text=True, check=True).stdout)
 MODULE = {"open": "sha256:" + "3" * 64, "legacy": "sha256:" + "4" * 64}
-KERNEL_BUILD = "https://github.com/hr-mes/athanor/.github/workflows/kernel-build.yml@refs/heads/iso-v0"
-KMOD = "https://github.com/hr-mes/athanor/.github/workflows/nvidia-kmod.yml@refs/heads/iso-v0"
+KERNEL_BUILD = "https://github.com/ars-regia/athanor/.github/workflows/kernel-build.yml@refs/heads/iso-v0"
+KMOD = "https://github.com/ars-regia/athanor/.github/workflows/nvidia-kmod.yml@refs/heads/iso-v0"
 
 
 def tag(branch, kernel=KERNEL):
@@ -74,8 +74,8 @@ class Tool(unittest.TestCase):
         self.env = {
             "PATH": f"{bin_dir}:{os.environ['PATH']}", "HOME": str(self.dir), "RETRY_ATTEMPTS": "1",
             "KERNEL_ARTIFACTS_DIR": str(self.artifacts), "FAKE_REGISTRY": str(self.dir / "registry.json"),
-            "FAKE_LOG": str(self.dir / "calls.log"), "GITHUB_REPOSITORY_OWNER": "hr-mes",
-            "GITHUB_REPOSITORY": "hr-mes/athanor", "GITHUB_SERVER_URL": "https://github.com",
+            "FAKE_LOG": str(self.dir / "calls.log"), "GITHUB_REPOSITORY_OWNER": "ars-regia",
+            "GITHUB_REPOSITORY": "ars-regia/athanor", "GITHUB_SERVER_URL": "https://github.com",
             "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
         }
         self.registry({})
@@ -86,8 +86,8 @@ class Tool(unittest.TestCase):
     def registry(self, fx):
         (self.dir / "registry.json").write_text(json.dumps(fx))
 
-    def run_script(self, *args, cwd=None):
-        return subprocess.run(["bash", str(SCRIPT), *args], capture_output=True, text=True, env=self.env, cwd=cwd or self.dir)
+    def run_script(self, *args, cwd=None, script=SCRIPT):
+        return subprocess.run(["bash", str(script), *args], capture_output=True, text=True, env=self.env, cwd=cwd or self.dir)
 
     def state_file(self):
         path = self.artifacts / "kernel-artifacts.env"
@@ -114,6 +114,39 @@ class Resolve(Tool):
         self.assertEqual(got["nvidia_open_digest"], MODULE["open"])
         self.assertNotIn("nvidia_legacy_digest", got)
         self.assertEqual(got["nvidia_legacy_tag"], tag("legacy"))
+
+    def test_never_published_module_package_is_modules_missing(self):
+        # ghcr.io denies the bearer token for a package that does not exist yet (azoth-nvidia
+        # before the first NVIDIA build under an owner), instead of answering manifest unknown.
+        fx = published(branches=())
+        fx["unpublished"] = [f"{REG}/azoth-nvidia"]
+        self.registry(fx)
+        r = self.run_script("resolve")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        got = self.state_file()
+        self.assertEqual(got["state"], "modules-missing")
+        self.assertEqual(got["nvidia_open_tag"], tag("open"))
+        self.assertNotIn("nvidia_open_digest", got)
+        self.assertIn(f"{REG}/azoth-nvidia: denied", r.stderr)
+
+    def test_never_published_kernel_package_is_kernel_missing(self):
+        fx = published()
+        fx["unpublished"] = [f"{REG}/azoth"]
+        self.registry(fx)
+        r = self.run_script("resolve")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.state_file(), {"state": "kernel-missing", "nvr": NVR, "registry": REG})
+
+    def test_publish_refuses_a_tag_the_anonymous_resolve_could_not_see(self):
+        # A private azoth-nvidia: the anonymous resolve did not see the legacy tag, the
+        # logged-in publish does. It must stop before building or pushing anything.
+        self.registry(published(branches=("open",)))
+        self.assertEqual(self.run_script("resolve").returncode, 0)
+        self.registry(published())
+        r = self.run_script(str(self.dir / "signed"), script=ROOT / "forge/specs/azoth/nvidia-publish.sh")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn(f"already holds {MODULE['legacy']}", r.stderr)
+        self.assertIn("refusing to overwrite", r.stderr)
 
     def test_absent_kernel_is_kernel_missing(self):
         fx = published()
@@ -759,7 +792,7 @@ class CheckPlan(Repo):
 
 
 def signed_by(ref_name, workflow="kernel-build.yml"):
-    return f"https://github.com/hr-mes/athanor/.github/workflows/{workflow}@{ref_name}"
+    return f"https://github.com/ars-regia/athanor/.github/workflows/{workflow}@{ref_name}"
 
 
 class TrustedRefs(Tool):

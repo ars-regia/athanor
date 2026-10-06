@@ -5,7 +5,7 @@
 # Run it from anywhere with skopeo available:
 #   bash forge/scripts/check_idempotency_test.sh
 # The probed image is $REGISTRY_HOST/$GITHUB_REPOSITORY_OWNER/athanor-forge-tetragon (defaults
-# ghcr.io and hr-mes), the variables the workflows and clean_ghcr.sh read.
+# ghcr.io and ars-regia), the variables the workflows and clean_ghcr.sh read.
 #
 # The case that matters is the first one. The probe used to pass --creds whenever a token
 # was set, and a token the registry rejects makes skopeo fail with 403 even on an image
@@ -14,7 +14,7 @@
 # of them. Anonymous first, credentials only as a fallback, and a registry that does not
 # answer at all is an error rather than a silent rebuild.
 set -u
-owner=${GITHUB_REPOSITORY_OWNER:-hr-mes}
+owner=${GITHUB_REPOSITORY_OWNER:-ars-regia}
 image=${REGISTRY_HOST:-ghcr.io}/${owner,,}/athanor-forge-tetragon
 # A tag every kept package carries; the hash tags of a package change on each rebuild.
 h_present=latest
