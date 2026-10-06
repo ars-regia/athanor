@@ -20,7 +20,7 @@ Workflow references are `file:line` under `.github/workflows/` at `bd1f0e4a`.
 
 | Id | Name | Scope | Material | Used by (workflow, job) | Public half in the repository |
 | --- | --- | --- | --- | --- | --- |
-| SEC1 | `SECUREBOOT_SIGNING_KEY` | environment `signing` | X.509 private key, RSA 4096, PEM, unencrypted | `call-system-image.yml` `dag-system-image` (:243, environment :249, secret :292), handed to the image build as the podman secret `uki_key` (`system/build-image.sh:82`); signs the UKI and its PCR policy. PR #115 moves it to a new sign-only job `sign-kernel` (`system/sign-kernel.sh`, signs the vmlinuz) and takes the environment off `dag-system-image` | `forge/specs/azoth/keys/secureboot/athanor-secureboot.pem` and `.der` (the form `mokutil --import` takes) |
+| SEC1 | `SECUREBOOT_SIGNING_KEY` | environment `signing` | X.509 private key, RSA 4096, PEM, unencrypted | `call-system-image.yml` `dag-system-image` (:243, environment :249, secret :292), handed to the image build as the podman secret `uki_key` (`system/build-image.sh:85`); signs the UKI and its PCR policy. PR #115 moves it to a new sign-only job `sign-kernel` (`system/sign-kernel.sh`, signs the vmlinuz) and takes the environment off `dag-system-image` | `forge/specs/azoth/keys/secureboot/athanor-secureboot.pem` and `.der` (the form `mokutil --import` takes) |
 | SEC2 | `MODULE_SIGNING_KEY` | environment `signing` | X.509 private key, RSA 4096, PEM, unencrypted | `nvidia-kmod.yml` `sign` (:94, environment :101, secret :164); signs the NVIDIA modules. PR #115 moves the step into `system/sign-nvidia-modules.sh` | `forge/specs/azoth/keys/modules/athanor-modules.pem`, compiled into Azoth (`kernel-local:42`, `CONFIG_SYSTEM_TRUSTED_KEYS`) |
 | SEC3 | `COSIGN_PRIVATE_KEY` | environment `signing` | cosign key pair, ECDSA P-256, private half encrypted with SEC4 | `call-system-image.yml` `sign-system-images` (:414, environment :420, secret :439) through `system/sign-images.sh:26-41`; the key-based image signature of UT2 | `system/keys/athanor-image-1.pub`, rendered into the image policy (UT3) |
 | SEC4 | `COSIGN_PASSWORD` | environment `signing` | passphrase of SEC3 | as SEC3 (:440) | none |
@@ -99,7 +99,7 @@ Consequences of a rotation:
 
 - Every machine with Secure Boot on trusts the old certificate through MokList. It must enrol the new one (`mokutil --import athanor-secureboot.der`, then MokManager at the console at the next boot) **before** it boots an image signed with the new key, or shim refuses that boot.
 - The installer enrols the certificate of the image it installs (A2-35), so new installations need nothing.
-- The repository holds one Secure Boot certificate (`system/build-image.sh:82` names it). A staged rotation, where release N ships the new certificate for enrolment and release N+1 is the first one it signs, needs a change there first. _(Proposal)_
+- The repository holds one Secure Boot certificate (`system/build-image.sh:85` names it). A staged rotation, where release N ships the new certificate for enrolment and release N+1 is the first one it signs, needs a change there first. _(Proposal)_
 - Disk unlock is not affected at 1.0: TPM sealing is disabled until 1.1 (A2-27). From P4b the PCR policy key decides it (`doc_kernel_profile.md` section 9).
 
 **SEC2, module signing key.** Parameters: `profiles/modules.cnf` (CN "Athanor Kernel Module
