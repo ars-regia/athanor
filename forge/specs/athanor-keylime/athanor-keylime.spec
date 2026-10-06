@@ -1,6 +1,6 @@
 Name:           athanor-keylime
 Version:        1.0
-Release:        3%{?dist}
+Release:        4%{?dist}
 Summary:        Athanor OS Keylime Agent Configuration
 License:        GPL-3.0-or-later
 URL:            https://github.com/hr-mes/athanor
@@ -11,8 +11,8 @@ Requires:       tpm2-tools
 BuildArch:      noarch
 
 %description
-Configuration package for the Keylime agent in Athanor OS: binds the TPM
-measurements for remote attestation (phase 3) and seals the security enclave.
+Configuration package for the Keylime agent in Athanor OS: a drop-in that sets the
+agent identity (uuid generated on first start). It does not seal or bind anything.
 
 %prep
 # Nothing to unpack: the drop-in is Source0.
@@ -28,6 +28,9 @@ install -D -m 0644 %{SOURCE0} %{buildroot}/etc/keylime/agent.conf.d/99-athanor.c
 %config(noreplace) /etc/keylime/agent.conf.d/99-athanor.conf
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0-4
+- Reword the %description and the drop-in comment: identity only, no sealing
+
 * Sun Sep 07 2026 Athanor Forge <forge@athanor.os> - 1.0-3
 - Stop owning /etc/keylime/agent.conf.d: keylime-agent-rust-common owns it and
   the two sets of attributes conflicted at install time

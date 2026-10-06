@@ -5,7 +5,7 @@ Version:        1.0.0
 Release:        %{?autorelease}%{!?autorelease:49.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor-forge
+URL:            https://github.com/hr-mes/athanor
 BuildArch:      noarch
 
 Requires: cosmic-comp greetd greenboot systemd-ukify nodejs
@@ -93,6 +93,7 @@ mkdir -p /etc/yum.repos.d
   /usr/lib/environment.d/50-athanor-desktop.conf. athanor-desktop published it only
   after cosmic-comp started, so a portal activated earlier never read
   athanor-portals.conf and fell back to other backends for the whole session.
+- Point URL at the project repository.
 
 * Fri Oct 02 2026 Athanor Forge <forge@athanor.os> - 1.0.0-48
 - athanor-desktop publishes XDG_SESSION_CLASS, read from logind, to the user manager:
