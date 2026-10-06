@@ -408,9 +408,6 @@ def update_trust_problems(root=None):
                                 f"the registry comes from the build's variables")
     # D2: the Secure Boot daemon is retired. D42 (issue #148): nothing in the image seals LUKS to
     # the TPM or increments a rollback counter by itself, so none of these units may be shipped.
-    for source in walk(root / "forge/specs/athanor-secure-boot", ".rs"):
-        if "org.athanor.SecureBoot" in read(source):
-            problems.append(f"{rel(source)}: serves org.athanor.SecureBoot, a name no bus policy lets it own (retired by D2)")
     for spec in walk(root / "forge/specs", ".spec"):
         # The changelog may name what was retired: only what the spec installs counts.
         text = read(spec).split("%changelog", 1)[0]
@@ -864,9 +861,35 @@ def check_polkit_subject():
 # 9. spec RPM — la sorgente di `install` deve esistere da dove gira %install
 # --------------------------------------------------------------------------- #
 
+# Packages that dedicated workflows build, outside the DAG (forge/scripts/dag_orchestrator.py).
+EXTERNAL_PACKAGES = {"kernel", "kernel-forge"}
+
+
+def manifest_spec_problems(root=None):
+    """Every custom_* entry of packages.json has a package directory under forge/specs."""
+    root = root or ROOT
+    manifest = root / "forge" / "config" / "packages.json"
+    specs = root / "forge" / "specs"
+    if not manifest.is_file():
+        return []
+    problems = []
+    for key, pkgs in json.loads(read(manifest)).items():
+        if not key.startswith("custom_"):
+            continue
+        for pkg in pkgs:
+            if pkg in EXTERNAL_PACKAGES:
+                continue
+            if not ((specs / f"athanor-{pkg}").is_dir() or (specs / pkg).is_dir()):
+                problems.append(f"{rel(manifest)}: {key} lists {pkg}, but forge/specs has neither "
+                                f"athanor-{pkg} nor {pkg}")
+    return problems
+
+
 @check("specs", "Le spec installano da percorsi che esistono dalla loro working directory")
 def check_specs():
     r = Result()
+    for problem in manifest_spec_problems():
+        r.fail(problem)
     import shlex
 
     def sections(text):

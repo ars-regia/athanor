@@ -128,11 +128,13 @@ format:
 # 🧹 UTILITY & MAINTENANCE
 # ------------------------------------------------------------------------------
 
-# Cleans all build artifacts across Forge and System
+# Cleans build artifacts (cargo target, RPMS_OUT, System outputs); never removes tracked files
 [group('Utility')]
 clean:
     just system/clean
-    rm -rf RPMS_OUT/ forge/build/ idemp.out *.lock
+    cargo clean
+    rm -rf RPMS_OUT/
+    rm -f idemp.out
 
 # Checks syntax of all Justfiles in repository
 [group('Utility')]
