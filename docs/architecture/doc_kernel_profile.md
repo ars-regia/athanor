@@ -233,7 +233,8 @@ Four layers, one source of truth each:
   verified by firmware, so an attacker with root or physical access can replace the UKI,
   its command line (root hash and `ipe.enforce=0` included) and its addons on the ESP.
   IPE enforcement, the root boundary (D44) and image verification are guarantees of
-  attested mode only; on a degraded machine a TPM+PIN prompt can come from a replaced boot
+  attested mode only; on a degraded machine an unlock prompt (the passphrase at release 1.0,
+  also TPM+PIN once the TPM seal returns in 1.1, A2-27, #131, #145) can come from a replaced boot
   chain. `athanor-profile-check` reports the mode and the reasons.
 - In degraded mode the role addons are not verified either: shim verifies them only
   under Secure Boot, so someone with physical access can add a forged addon such as
