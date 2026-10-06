@@ -146,7 +146,7 @@ On a pure pin bump the variants are therefore built and gated only after the mer
 
 ## 4. Risks
 
-- **Approvals in the same run:** two approvals arrive minutes apart in the same run on a pin bump. Both are needed; rejecting either makes the run red.
+- **Approvals in the same run:** two approvals arrive minutes apart in the same run on a pin bump. Both are needed; rejecting either makes the run red. Maintainer decision A2-27 (#131, #145): the two approvals per release cycle stay, `sign-kernel` first and `sign-system-images` after it.
 - **Unanswered approvals:** a run waiting for the `signing` approval holds its concurrency group for up to 30 days; `timeout-minutes` does not count that wait. An approval nobody answers stops image builds on that branch, and on a pin bump there are two such waits. Rejecting the pending approval is how to unblock it.
 - **Queueing:** `cancel-in-progress: false` means a long cycle delays the next one instead of being cut. GitHub keeps only the newest pending run.
 - **Variants on pin bumps:** they are tested only after the merge (O7).
@@ -161,7 +161,6 @@ Both deserve their own decision.
 
 - **`doc_kernel_build.md` section 10:** NVIDIA kmod as a reusable workflow called by the Orchestrator, the tag form of O2, retention by NVIDIA kmod only.
 - **`doc_system_image.md` S6 and S8:** the image is built from the digests written by `system/kernel-artifacts.sh`.
-- **`doc_naming.md`:** the `azoth-nvidia` row names the new tag form.
 
 ## 6. Acceptance
 

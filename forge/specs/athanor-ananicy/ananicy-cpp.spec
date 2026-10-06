@@ -11,7 +11,7 @@ Version:        1.1.1^%{snapdate}git%(echo %{commit} | cut -c1-7)
 Release:        1%{?dist}
 Summary:        Ananicy rewritten in C++
 
-License:        GPLv3
+License:        GPL-3.0-only
 URL:            https://gitlab.com/ananicy-cpp/ananicy-cpp
 Source0:        https://gitlab.com/ananicy-cpp/ananicy-cpp/-/archive/%{commit}/ananicy-cpp-%{commit}.tar.gz
 

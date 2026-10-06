@@ -2,7 +2,7 @@ Name:           azoth-nvidia-kmod
 Version:        %{nvidia_version}
 Release:        1%{?dist}
 Summary:        Declares the signed NVIDIA modules of the Azoth kernel as the installed nvidia-kmod
-License:        MIT
+License:        GPL-3.0-or-later
 URL:            https://github.com/hr-mes/athanor
 BuildArch:      noarch
 # The modules themselves come from ghcr.io/hr-mes/azoth-nvidia:<kernel-nvr>-<branch>, built

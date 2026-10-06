@@ -3,7 +3,7 @@ Name:           athanor-launcher
 Version:        1.0.0
 Release:        1%{?dist}
 Summary:        The Athanor launcher
-License:        MIT
+License:        GPL-3.0-or-later
 
 BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gtk4-layer-shell-devel binutils python3 gettext
 # localsearch's client library (athanor-search), poppler and cairo (the decoder), and what

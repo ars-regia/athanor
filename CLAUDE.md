@@ -4,11 +4,9 @@ OS immutabile, zero-trust, cloud-native. Workspace Rust.
 Desktop GTK4/Wayland, nervo eBPF in ring-0, mesh post-quantistica, rootfs immutabile.
 Il kernel e' **Azoth** (`forge/specs/azoth`).
 
-**Rinomina in corso.** Il progetto si chiamava Ermete OS fino al 5 settembre 2026
-(commit 02bf9c05). La maggior parte dei crate e' oggi `athanor-*`, ma alcuni sono
-ancora `ermete-*` (`ermete-shell-rs`, `ermete-settings-rs`, `ermete-daemon-rs`,
-`ermete-ebpf-sched`, `ermete-niri`, `ermete-tetragon`). **Non assumere un prefisso:
-verificalo.** Non rinominare nulla di tua iniziativa.
+**Rinomina eseguita.** Il progetto si chiamava Ermete OS fino al 5 settembre 2026
+(commit 02bf9c05). Su `iso-v0` non resta nessun crate `ermete-*`: quei nomi sono
+storia, presenti solo su `main`. Non rinominare nulla di tua iniziativa.
 
 <!-- Le convenzioni per area stanno in .claude/rules/ con `paths:`: entrano in
      contesto solo quando apri i file corrispondenti. Qui solo ciò che serve sempre. -->
@@ -16,7 +14,7 @@ verificalo.** Non rinominare nulla di tua iniziativa.
 ## Mappa
 
 - `system/` — livello sistema: kernel, eBPF, compositor, bus IPC, attestazione, mesh
-- `forge/specs/<nome>/` — pacchetti e crate applicativi: shell, settings, dock, store, daemon, gatekeeper, e le spec RPM
+- `forge/specs/<nome>/` — pacchetti e crate applicativi: shell (shelld, bar, dock, launcher), store, update, backup, recovery, portal, e le spec RPM
 - `docs/architecture/*.md` — documenti di architettura. Leggi quello dell'area **prima** di modificarla, mai all'avvio
 
 <!-- Nessun conteggio qui dentro di proposito: i numeri di crate e documenti cambiano
@@ -30,9 +28,9 @@ grafo. Interrogali con `/graphify query`, non aprirli.
 ## Stato corrente
 
 Branch `iso-v0`. Obiettivo: **un'ISO che si avvia e mostra il greeter**, non la 1.0.
-Il piano operativo è in `NEXT.md`, a blocchi ordinati con un gate ciascuno: non
-passare al blocco successivo finché il gate non è verde. Il contesto diagnostico
-è in `ANALISI_2026-09-02.md`.
+Il piano operativo è la milestone GitHub "iso-v0" (`gh issue list --milestone iso-v0`),
+una issue per blocco con il suo gate: non passare al blocco successivo finché il gate
+non è verde.
 
 Il working tree ha centinaia di file modificati non committati. **Verificalo
 sempre con `git status` prima di qualunque operazione git distruttiva.**
@@ -87,10 +85,10 @@ invece di cambiare directory.
 ## Limiti inviolabili
 
 - **Modello di minaccia a tre livelli** (`docs/architecture/doc_threat_model.md`): il codice dell'utente non confinato è l'utente; le applicazioni confinate (Flatpak e classe `confined` del broker) sono non fidate e non scrivono i percorsi di persistenza; root e l'immagine sono di `doc_kernel_profile.md`. Una spec dichiara contro quale livello vale ogni sua garanzia.
-- **Ogni servizio systemd spedito dal repository imposta `NoNewPrivileges=yes` o `CapabilityBoundingSet=` (allow-list)**, scritto in chiaro (non dedotto da `DynamicUser=` o simili); lo verifica `python3 scripts/verify.py services`. Un'eccezione va nella lista `SERVICE_EXEMPT` con il motivo. Mai `chmod 777`, mai root diretto.
+- **Ogni servizio systemd spedito dal repository imposta `NoNewPrivileges=yes` o `CapabilityBoundingSet=` (allow-list)**, scritto in chiaro (non dedotto da `DynamicUser=` o simili); lo verifica `python3 scripts/verify.py services`. Un'eccezione va nella lista `SERVICE_EXEMPT` con il motivo. Mai `chmod 777`, mai root diretto, mai aggirare la policy IPE, il confinamento Landlock o i compartimenti.
 - **Niente finte implementazioni nella sicurezza**: crittografia, validazione dei token e hash devono essere reali. Un placeholder in un percorso di sicurezza è un bug, non una bozza.
 - **`panic = "abort"` su dev e release**: un panic non è recuperabile, termina il processo. Nei daemon questo significa perdita di servizio.
-- Modifiche a `system/athanor-bus-api/src/polkit.rs`, al Gatekeeper (`forge/specs/athanor-gatekeeper-rs`) o all'attestazione (`system/confidential_computing/athanor-attestation`): fermati e chiedi prima di editare.
+- Modifiche a `system/athanor-bus-api/src/polkit.rs` o all'attestazione (`system/confidential_computing/athanor-attestation`): fermati e chiedi prima di editare.
 
 ## Protocollo scratch
 

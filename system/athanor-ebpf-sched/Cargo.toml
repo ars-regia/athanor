@@ -1,6 +1,7 @@
 [package]
 name = "athanor-ebpf-sched"
 version = "0.1.0"
+license = "GPL-3.0-or-later"
 edition = "2021"
 description = "AI-Driven eBPF Kernel Scheduler Bridge (sched_ext & cgroup priority manager)"
 build = "build.rs"

@@ -1,0 +1,25 @@
+[Unit]
+Description=Relabel a Nix store created before the Nix SELinux policy
+Documentation=file:///usr/share/selinux/packages/athanor_nix_daemon.cil
+# A store made before athanor_nix_daemon carries var_t and default_t, and the daemon's
+# domain cannot use it. New stores are labelled as they are created; this runs once on a
+# system that already had one, and the stamp keeps it from walking the store every boot.
+# The stamp's name carries the policy's labelling revision: a policy that changes the
+# file contexts bumps it, and the store is relabelled once more.
+DefaultDependencies=no
+ConditionSecurity=selinux
+ConditionPathExists=/var/nix/store
+ConditionPathExists=!/var/nix/var/nix/athanor-selinux-relabel-1
+Requires=local-fs.target
+After=local-fs.target systemd-tmpfiles-setup.service
+Before=nix.mount nix-daemon.socket nix-daemon.service sysinit.target shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+# restorecon walks and relabels files of every owner in the store, so it keeps the
+# capabilities that bypass file permissions and ownership and nothing else. No
+# NoNewPrivileges: it would forbid restorecon's transition to setfiles_t.
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER
+ExecStart=/usr/sbin/restorecon -RF /var/nix
+ExecStartPost=/usr/bin/touch /var/nix/var/nix/athanor-selinux-relabel-1

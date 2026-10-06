@@ -14,13 +14,14 @@
 #      switch, switches the development VM to it and reboots it.
 #
 # A clean checkout already built for the same specs skips steps 1 to 3. The tag goes to
-# .scratch/local-image/tag. OWNER (default ghcr.io/hr-mes), BUILDER and TIER3 name the
+# .scratch/local-image/tag. OWNER (default $REGISTRY_HOST/$GITHUB_REPOSITORY_OWNER, which
+# default to ghcr.io and hr-mes), BUILDER and TIER3 name the
 # published images. Needs podman, rpm, skopeo and, for --push-to-vm, gh, jq and the VM.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(git -C "$HERE" rev-parse --show-toplevel)
-OWNER=${OWNER:-ghcr.io/hr-mes}
+OWNER=${OWNER:-${REGISTRY_HOST:-ghcr.io}/${GITHUB_REPOSITORY_OWNER:-hr-mes}}
 BUILDER=${BUILDER:-$OWNER/athanor-builder:latest}
 TIER3=${TIER3:-$OWNER/athanor-forge-tier3-repo}
 OVERLAY=localhost:5000/${TIER3#*/}

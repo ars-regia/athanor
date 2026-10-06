@@ -3,7 +3,7 @@ Name:           athanor-ide-bootstrap
 Version:        1.0.0
 Release:        1%{?dist}
 Summary:        Athanor OS athanor-ide-bootstrap
-License:        MIT
+License:        GPL-3.0-or-later
 URL:            https://github.com/hr-mes/athanor-forge
 BuildArch:      noarch
 

@@ -2,7 +2,7 @@
 name = "athanor-unit"
 version = "1.0.0"
 edition = "2021"
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "What a user unit of the shell does at start: the crash-loop record, journal priorities, readiness, Landlock, and making other processes' text safe to show"
 authors = ["Athanor Forge <forge@athanor.os>"]
 

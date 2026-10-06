@@ -4,7 +4,7 @@ version = "1.0.0"
 edition = "2021"
 authors = ["Athanor Forge <forge@athanor.os>"]
 description = "Tells the user that a system update is ready, or that a new version is running"
-license = "MIT"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 athanor-trust-state = { path = "../../../../system/athanor-trust-state" }

@@ -1,18 +1,18 @@
 # Security Policy
 
-Athanor OS treats security as its highest priority. The system is designed around Zero-Trust enclaves and Post-Quantum Cryptography.
+## Supported versions
 
-## Supported Versions
-| Version | Supported          |
-| ------- | ------------------ |
-| 1.x     | :white_check_mark: |
-| < 1.0   | :x:                |
+Athanor has no release yet. Security fixes land on the development branch `iso-v0`; no
+other branch receives them.
 
-## Reporting a Vulnerability
+## Reporting a vulnerability
 
-If you discover a vulnerability in Athanor OS (e.g., in `athanor-ebpf-sched`, `athanor-mesh-bus`, or `athanor-hypervisor-daemon`), **DO NOT** open a public issue.
+Do not open a public issue. Report the vulnerability privately through GitHub's private
+vulnerability reporting ("Report a vulnerability" under the repository's Security tab),
+with a description and the steps to reproduce it.
 
-Instead, please email **security@athanor.org** with a detailed description and steps to reproduce. Our Security Response Team (SRT) will acknowledge your report within 24 hours.
+In scope are the parts that ship in the system image: the kernel and its signing keys, the
+image build and signing pipeline, the update path (`athanor-update`), the desktop portal
+backend and the shell. Crates listed in `experimental/EXEMPT` are not part of the image.
 
-### Bug Bounty
-We offer bug bounties for verified remote code execution (RCE) or hypervisor escape vulnerabilities that bypass our KVM/SEV-SNP enclaves.
+Athanor is maintained by one person, and reports are answered on a best-effort basis.

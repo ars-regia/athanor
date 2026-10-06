@@ -4,7 +4,7 @@ Version:        1.0.0
 Release:        2%{?dist}
 Summary:        eBPF System Monitoring & Telemetry Daemon for Athanor OS
 
-License:        GPL-2.0-or-later
+License:        GPL-3.0-or-later
 URL:            https://github.com/hr-mes/athanor-forge
 
 

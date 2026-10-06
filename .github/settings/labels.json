@@ -1,0 +1,122 @@
+[
+  {
+    "color": "5319e7",
+    "description": "Azoth kernel and its profile",
+    "name": "area:kernel"
+  },
+  {
+    "color": "006b75",
+    "description": "Network defaults and services",
+    "name": "area:network"
+  },
+  {
+    "color": "fbca04",
+    "description": "Build, signing and CI",
+    "name": "area:pipeline"
+  },
+  {
+    "color": "1d76db",
+    "description": "Image, boot, updates, integrity",
+    "name": "area:platform"
+  },
+  {
+    "color": "0e8a16",
+    "description": "Desktop shell and its programs",
+    "name": "area:shell"
+  },
+  {
+    "color": "d73a4a",
+    "description": "Something isn't working",
+    "name": "bug"
+  },
+  {
+    "color": "0366d6",
+    "description": "Pull requests that update a dependency file",
+    "name": "dependencies"
+  },
+  {
+    "color": "0075ca",
+    "description": "Improvements or additions to documentation",
+    "name": "documentation"
+  },
+  {
+    "color": "cfd3d7",
+    "description": "This issue or pull request already exists",
+    "name": "duplicate"
+  },
+  {
+    "color": "a2eeef",
+    "description": "New feature or request",
+    "name": "enhancement"
+  },
+  {
+    "color": "000000",
+    "description": "Pull requests that update GitHub Actions code",
+    "name": "github_actions"
+  },
+  {
+    "color": "7057ff",
+    "description": "Good for newcomers",
+    "name": "good first issue"
+  },
+  {
+    "color": "008672",
+    "description": "Extra attention is needed",
+    "name": "help wanted"
+  },
+  {
+    "color": "e4e669",
+    "description": "This doesn't seem right",
+    "name": "invalid"
+  },
+  {
+    "color": "0E8A16",
+    "description": "PR aperta dal bot di bump del kernel (kernel-bump.yml)",
+    "name": "kernel-bump"
+  },
+  {
+    "color": "BFD4F2",
+    "description": "Opened by a bump bot",
+    "name": "nix-registry-bump"
+  },
+  {
+    "color": "D93F0B",
+    "description": "Report prepared by athanor-report-problem",
+    "name": "problem-report"
+  },
+  {
+    "color": "d876e3",
+    "description": "Further information is requested",
+    "name": "question"
+  },
+  {
+    "color": "000000",
+    "description": "Pull requests that update rust code",
+    "name": "rust"
+  },
+  {
+    "color": "1D76DB",
+    "description": "PR opened by the system group of the bump bot (kernel-bump.yml)",
+    "name": "system-bump"
+  },
+  {
+    "color": "bfdadc",
+    "description": "A gate run, no code",
+    "name": "type:acceptance"
+  },
+  {
+    "color": "c5def5",
+    "description": "A planned block with a gate",
+    "name": "type:block"
+  },
+  {
+    "color": "d93f0b",
+    "description": "Needs a maintainer decision before code",
+    "name": "type:decision"
+  },
+  {
+    "color": "ffffff",
+    "description": "This will not be worked on",
+    "name": "wontfix"
+  }
+]

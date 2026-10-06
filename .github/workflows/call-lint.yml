@@ -37,8 +37,8 @@ jobs:
           python3 -m venv /tmp/pykickstart
           /tmp/pykickstart/bin/pip install --quiet pykickstart==3.78
           echo /tmp/pykickstart/bin >> "$GITHUB_PATH"
-      - name: Structural checks (scripts/verify.py workflows, kickstart, boundary, cmdline, services)
-        run: python3 scripts/verify.py workflows kickstart boundary cmdline services
+      - name: Structural checks (scripts/verify.py workflows, kickstart, boundary, cmdline, services, registry, licence, ci)
+        run: python3 scripts/verify.py workflows kickstart boundary cmdline services registry licence ci
       - name: Kernel profile manifest and checker (kernel_profile.py check, unit tests)
         run: |
           set -euo pipefail
@@ -46,6 +46,8 @@ jobs:
           python3 -B -m unittest discover -s forge/specs/athanor-kernel-profile/tests -v
       - name: Azoth kernel scripts (unit tests)
         run: python3 -B -m unittest discover -s forge/specs/azoth/tests -v
+      - name: nixpkgs registry bump (unit tests, no network)
+        run: python3 -B -m unittest discover -s forge/specs/athanor-nix-support/tests -v
       - name: NVIDIA lock and build gate (unit tests)
         run: |
           set -euo pipefail
