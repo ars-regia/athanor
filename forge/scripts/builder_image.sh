@@ -23,7 +23,7 @@ build)
 resolve)
     published=${3:?$usage}
     if [[ -f $archive ]]; then
-        loaded=$(podman load -i "$archive" | sed -n 's/^Loaded image(s)\{0,1\}: //p')
+        loaded=$(podman load -i "$archive" | sed -n 's/^Loaded image[^:]*: //p')
         [[ -n $loaded ]] || {
             echo "builder_image.sh: podman load reported no image name" >&2
             exit 1
