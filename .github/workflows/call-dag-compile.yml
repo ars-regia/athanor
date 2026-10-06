@@ -167,9 +167,7 @@ jobs:
           IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')
           buildah config --label tier.content.sha256="${{ steps.check.outputs.hash }}" "$ctr"
           buildah commit --omit-timestamp "$ctr" "$IMAGE_LOWER:latest"
-          buildah tag "$IMAGE_LOWER:latest" "$IMAGE_LOWER:hash-${{ steps.check.outputs.hash }}"
           buildah push "$IMAGE_LOWER:latest"
-          buildah push "$IMAGE_LOWER:hash-${{ steps.check.outputs.hash }}"
           buildah rm "$ctr" || true
 
       - name: Generate SBOM (Syft)
@@ -201,6 +199,18 @@ jobs:
           # Keyless signing talks to Fulcio, Rekor and the timestamp authority: the script
           # retries their transient failures, a persistent one still fails the job.
           nix shell nixpkgs#cosign -c bash scripts/sign_attest.sh "$IMAGE_LOWER" "sbom-${PKG_NAME}.spdx.json"
+
+      - name: Publish the hash tag, last (the brain reads it as built, signed and attested)
+        if: steps.check.outputs.skip != 'true'
+        env:
+          PKG_NAME: ${{ matrix.package }}
+        run: |
+          set -euo pipefail
+          export BUILDAH_ISOLATION=chroot
+          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/athanor-forge-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')
+          # The image the Publish step committed, still in local storage: pushed under its
+          # hash tag only now, so a failed signature or attestation leaves the node dirty.
+          bash scripts/retry.sh buildah push "$IMAGE_LOWER:latest" "docker://$IMAGE_LOWER:hash-${{ steps.check.outputs.hash }}"
 
       - name: 🛟 Upload Crash Artifacts (Nix/SCCache)
         if: failure()
@@ -347,9 +357,7 @@ jobs:
           IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')
           buildah config --label tier.content.sha256="${{ steps.check.outputs.hash }}" "$ctr"
           buildah commit --omit-timestamp "$ctr" "$IMAGE_LOWER:latest"
-          buildah tag "$IMAGE_LOWER:latest" "$IMAGE_LOWER:hash-${{ steps.check.outputs.hash }}"
           buildah push "$IMAGE_LOWER:latest"
-          buildah push "$IMAGE_LOWER:hash-${{ steps.check.outputs.hash }}"
           buildah rm "$ctr" || true
 
       - name: Generate SBOM (Syft)
@@ -381,6 +389,18 @@ jobs:
           # Keyless signing talks to Fulcio, Rekor and the timestamp authority: the script
           # retries their transient failures, a persistent one still fails the job.
           nix shell nixpkgs#cosign -c bash scripts/sign_attest.sh "$IMAGE_LOWER" "sbom-${PKG_NAME}.spdx.json"
+
+      - name: Publish the hash tag, last (the brain reads it as built, signed and attested)
+        if: steps.check.outputs.skip != 'true'
+        env:
+          PKG_NAME: ${{ matrix.package }}
+        run: |
+          set -euo pipefail
+          export BUILDAH_ISOLATION=chroot
+          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/athanor-forge-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')
+          # The image the Publish step committed, still in local storage: pushed under its
+          # hash tag only now, so a failed signature or attestation leaves the node dirty.
+          bash scripts/retry.sh buildah push "$IMAGE_LOWER:latest" "docker://$IMAGE_LOWER:hash-${{ steps.check.outputs.hash }}"
 
       - name: 🛟 Upload Crash Artifacts (Nix/SCCache)
         if: failure()
@@ -525,9 +545,7 @@ jobs:
           IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')
           buildah config --label tier.content.sha256="${{ steps.check.outputs.hash }}" "$ctr"
           buildah commit --omit-timestamp "$ctr" "$IMAGE_LOWER:latest"
-          buildah tag "$IMAGE_LOWER:latest" "$IMAGE_LOWER:hash-${{ steps.check.outputs.hash }}"
           buildah push "$IMAGE_LOWER:latest"
-          buildah push "$IMAGE_LOWER:hash-${{ steps.check.outputs.hash }}"
           buildah rm "$ctr" || true
 
       - name: Generate SBOM (Syft)
@@ -559,6 +577,18 @@ jobs:
           # Keyless signing talks to Fulcio, Rekor and the timestamp authority: the script
           # retries their transient failures, a persistent one still fails the job.
           nix shell nixpkgs#cosign -c bash scripts/sign_attest.sh "$IMAGE_LOWER" "sbom-${PKG_NAME}.spdx.json"
+
+      - name: Publish the hash tag, last (the brain reads it as built, signed and attested)
+        if: steps.check.outputs.skip != 'true'
+        env:
+          PKG_NAME: ${{ matrix.package }}
+        run: |
+          set -euo pipefail
+          export BUILDAH_ISOLATION=chroot
+          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/athanor-forge-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')
+          # The image the Publish step committed, still in local storage: pushed under its
+          # hash tag only now, so a failed signature or attestation leaves the node dirty.
+          bash scripts/retry.sh buildah push "$IMAGE_LOWER:latest" "docker://$IMAGE_LOWER:hash-${{ steps.check.outputs.hash }}"
 
       - name: 🛟 Upload Crash Artifacts (Nix/SCCache)
         if: failure()
