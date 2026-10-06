@@ -1,7 +1,8 @@
 # azoth
 
-Il kernel di Athanor OS: il pacchetto `kernel` di Fedora ricostruito con clang/ThinLTO
-sopra la base CachyOS (BORE, tunable; -O2 al posto del loro -O3, deciso dall'A/B), con l'hardening in piu' di Athanor. La
+Il kernel di Athanor OS: il pacchetto `kernel` di Fedora ricostruito con clang, senza LTO
+(Rust con DEBUG_INFO_BTF richiede !LTO finche' pahole non regge il DWARF unito da LTO, vedi
+`kernel-local`) sopra la base CachyOS (BORE, tunable; -O2 al posto del loro -O3, deciso dall'A/B), con l'hardening in piu' di Athanor. La
 specifica e' `docs/architecture/doc_kernel_build.md`; qui c'e' solo cosa sta in questa
 directory e come si usa.
 
@@ -148,7 +149,7 @@ progetto (workflow `.github/workflows/nvidia-kmod.yml`, che poi li carica in QEM
 ## Pubblicazione
 
 Ogni push su `main` o `iso-v0` che tocca questa directory costruisce e pubblica tre
-OCI con i soli RPM dentro, tag `<nvr>` (es. `7.1.8-100.azoth.fc43`):
+OCI con i soli RPM dentro, tag `<nvr>` (quello che stampa `bash nvr.sh`):
 
 | Immagine | Contenuto |
 |----------|-----------|
@@ -161,13 +162,13 @@ OCI con i soli RPM dentro, tag `<nvr>` (es. `7.1.8-100.azoth.fc43`):
 Ognuna e' firmata con cosign keyless dall'identita' del workflow, porta un SBOM SPDX
 e un'attestazione custom con i pin (`pins.json`: pins.env, hash del manifest, del
 delta e del Containerfile, immagine base del builder); la principale ha anche la
-provenance SLSA di GitHub. `:latest` si muove solo su `main`. Verifica:
+provenance SLSA di GitHub. `:latest` si muove solo sul branch di default del repository. Verifica:
 
 ```sh
 cosign verify --certificate-identity-regexp '^https://github.com/hr-mes/athanor/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/hr-mes/azoth:7.1.8-100.azoth.fc43
-gh attestation verify oci://ghcr.io/hr-mes/azoth:7.1.8-100.azoth.fc43 --repo hr-mes/athanor
+  "ghcr.io/hr-mes/azoth:$(bash nvr.sh)"
+gh attestation verify "oci://ghcr.io/hr-mes/azoth:$(bash nvr.sh)" --repo hr-mes/athanor
 ```
 
 ## Bump

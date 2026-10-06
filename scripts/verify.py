@@ -418,8 +418,10 @@ def update_trust_problems(root=None):
     if override.exists():
         problems.append(f"{rel(override)}: calls `bootc upgrade --stage`, a flag bootc 1.16 does not have")
     for literal in walk(root / "forge/specs/athanor-update", ""):
-        if literal.is_file() and "target" not in literal.parts and "vectors" not in literal.parts and "ghcr.io/hr-mes" in read(literal):
-            problems.append(f"{rel(literal)}: literal ghcr.io/hr-mes; the registry comes from the build's variables")
+        if literal.is_file() and "target" not in literal.parts and "vectors" not in literal.parts:
+            for owner in literal_owners(read(literal)):
+                problems.append(f"{rel(literal)}: literal registry owner {owner}; "
+                                f"the registry comes from the build's variables")
     # D2: the Secure Boot daemon is retired. D42 (issue #148): nothing in the image seals LUKS to
     # the TPM or increments a rollback counter by itself, so none of these units may be shipped.
     for source in walk(root / "forge/specs/athanor-secure-boot", ".rs"):
@@ -540,6 +542,48 @@ def check_shipped():
 # 6. documentazione — i link devono risolvere e non essere assoluti
 # --------------------------------------------------------------------------- #
 
+REGISTER = "docs/architecture/shell-features.md"
+REGISTER_STATUSES = ("have", "partial", "missing", "excluded (proposed)")
+
+
+def register_count_problems(text):
+    """Where the Counts section of the shell feature register differs from its rows: each
+    `## <surface>` table of `| F-... |` rows against the `### <surface>` table under Counts."""
+    rows, stated = {}, {}
+    surface, in_counts = None, False
+    for line in text.split("\n"):
+        if line.startswith("## "):
+            surface, in_counts = line[3:].strip(), line.strip() == "## Counts"
+            continue
+        if in_counts and line.startswith("### "):
+            surface = line[4:].strip()
+            stated[surface] = {}
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if in_counts and surface in stated and len(cells) == 2 and cells[1].isdigit():
+            stated[surface][cells[0]] = int(cells[1])
+        elif not in_counts and surface and cells[0].startswith("F-") and len(cells) >= 5:
+            rows.setdefault(surface, []).append((cells[0], cells[3]))
+
+    problems = []
+    for surface, entries in rows.items():
+        for entry, status in entries:
+            if status not in REGISTER_STATUSES:
+                problems.append(f"{REGISTER}: {entry} has the unknown status '{status}'")
+        if surface not in stated:
+            problems.append(f"{REGISTER}: surface '{surface}' has no table under Counts")
+            continue
+        actual = {s: sum(1 for _, st in entries if st == s) for s in REGISTER_STATUSES}
+        actual["total"] = len(entries)
+        for status, n in actual.items():
+            if stated[surface].get(status) != n:
+                problems.append(f"{REGISTER}: Counts of '{surface}' say {status} "
+                                f"{stated[surface].get(status)}, the rows give {n}")
+    for surface in stated.keys() - rows.keys():
+        problems.append(f"{REGISTER}: Counts name '{surface}', which has no rows")
+    return problems
+
+
 FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 CODE_SPAN = re.compile(r"(`+)(?!`).*?(?<!`)\1(?!`)", re.S)
 LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
@@ -588,6 +632,10 @@ def check_docs():
                 continue
             if not (base / link).exists():
                 r.fail(f"{t}: link rotto [{label[:30]}] -> {link}")
+    register = ROOT / REGISTER
+    if register.exists():
+        for problem in register_count_problems(read(register)):
+            r.fail(problem)
     return r
 
 
@@ -887,6 +935,109 @@ def boundary_problems(root):
 def check_boundary():
     r = Result()
     for problem in boundary_problems(ROOT):
+        r.fail(problem)
+    return r
+
+
+# Placeholders the unit tests use for an owner: they name no real registry namespace.
+PLACEHOLDER_OWNERS = {"owner", "o"}
+# Where the pipeline names its images. system/Containerfile is outside on purpose: its tier
+# mounts are the one literal decision 12 of the 2026-10-05 re-audit keeps (see the comment there).
+REGISTRY_DIRS = (".github/workflows", "scripts", "forge/scripts")
+REGISTRY_FILES = ("Justfile", "forge/Justfile", "system/Justfile")
+# The file types that name images: workflows, scripts, recipes and container builds.
+REGISTRY_SUFFIXES = {".yml", ".yaml", ".sh", ".py", ".just"}
+REGISTRY_NAMES = {"Justfile", "Containerfile"}
+
+
+def literal_owners(text):
+    """The hard-coded ghcr.io owners in text: ghcr.io/ followed by a name, not by a variable."""
+    found = re.findall(r"ghcr\.io/([A-Za-z0-9][A-Za-z0-9_.-]*)", text)
+    return [f"ghcr.io/{o}" for o in dict.fromkeys(found) if o not in PLACEHOLDER_OWNERS]
+
+
+def registry_problems(root):
+    """Every image the pipeline names comes from REGISTRY_HOST and the repository owner, each
+    with a default, never from a literal owner (standing rule of 2026-09-10)."""
+    root = Path(root)
+    paths = [root / f for f in REGISTRY_FILES]
+    for base in REGISTRY_DIRS:
+        paths += walk(root / base, "")
+    problems = []
+    for path in sorted(paths):
+        relative = path.relative_to(root)
+        # Unit test fixtures need a literal owner to prove the check reports one.
+        if (not path.is_file() or relative.parts[:2] == ("scripts", "tests")
+                or (path.suffix not in REGISTRY_SUFFIXES and path.name not in REGISTRY_NAMES)):
+            continue
+        for i, line in enumerate(read(path).split("\n"), 1):
+            for owner in literal_owners(line):
+                problems.append(f"{relative.as_posix()}:{i}: literal registry owner {owner}; use "
+                                f"REGISTRY_HOST and the repository owner, each with a default")
+    return problems
+
+
+@check("registry", "Images come from REGISTRY_HOST and the repository owner, never a literal owner")
+def check_registry():
+    r = Result()
+    for problem in registry_problems(ROOT):
+        r.fail(problem)
+    return r
+
+
+# Golden rules 2 and 3 of docs/architecture/doc_forge_development_guide.md.
+SPEC_SECTION = re.compile(
+    r"^%(package|description|prep|generate_buildrequires|conf|build|install|check|clean|files|"
+    r"changelog|pre|post|preun|postun|pretrans|posttrans|preuntrans|postuntrans|verify|"
+    r"(?:trans)?filetrigger(?:in|un|postun)|trigger(?:prein|in|un|postun))\b")
+SCRIPTLETS = {"pre", "post", "preun", "postun", "pretrans", "posttrans", "preuntrans",
+              "postuntrans", "verify", "triggerprein", "triggerin", "triggerun", "triggerpostun",
+              "filetriggerin", "filetriggerun", "filetriggerpostun", "transfiletriggerin",
+              "transfiletriggerun", "transfiletriggerpostun"}
+# /usr and /etc, spelled out or through the macros that expand below them.
+IMAGE_PATH = (r"(?:/usr|/etc)\b|%\{?_(?:sysconfdir|prefix|exec_prefix|bindir|sbindir|libdir|"
+              r"libexecdir|datadir|datarootdir|includedir|mandir|docdir|unitdir|userunitdir|"
+              r"presetdir|userpresetdir|tmpfilesdir|sysusersdir|udevrulesdir|modprobedir|"
+              r"sysctldir|environmentdir)\b")
+MUTATION = re.compile(r"(?:^|[\s;&|(])(?:cp|mv|install|chmod|chown|chgrp|ln|rm|mkdir|touch|tee|"
+                      r"truncate|rsync|sed\s+-i\S*)\s[^;&|]*?(?:" + IMAGE_PATH + r")"
+                      r"|>>?\s*(?:" + IMAGE_PATH + r")")
+WEAKENING = re.compile(r"\b(?:repo_)?gpgcheck\s*=\s*(?:0|false|no)\b|--nogpgcheck\b"
+                       r"|%undefine\s+_(?:fortify_source|hardened_build)\b"
+                       r"|%(?:define|global)\s+_(?:fortify_level|hardened_build)\s+0\b"
+                       r"|-U_FORTIFY_SOURCE\b|-D_FORTIFY_SOURCE=0\b|-fno-stack-protector\b"
+                       r"|-fcf-protection=none\b|-z\s*(?:norelro|execstack)\b|-no-pie\b|-fno-PIE\b")
+
+
+def forge_rule_problems(root):
+    """Rule 2: no scriptlet writes under /usr or /etc, which belong to the image (%install and
+    tmpfiles do). Rule 3: no spec turns off a signature check or a hardening flag."""
+    root = Path(root)
+    problems = []
+    for path in sorted(root.glob("forge/specs/*/*.spec")):
+        relative = path.relative_to(root).as_posix()
+        section = None
+        for i, line in enumerate(read(path).split("\n"), 1):
+            header = SPEC_SECTION.match(line)
+            if header:
+                section = header.group(1)
+            if section == "changelog":
+                break
+            if header or line.lstrip().startswith("#"):
+                continue
+            if section in SCRIPTLETS and MUTATION.search(line):
+                problems.append(f"{relative}:{i}: rule 2, %{section} writes under /usr or /etc: "
+                                f"install the file in %install or create it with tmpfiles.d")
+            if WEAKENING.search(line):
+                problems.append(f"{relative}:{i}: rule 3, turns off a signature check or a "
+                                f"hardening flag")
+    return problems
+
+
+@check("forge-rules", "Specs keep golden rules 2 and 3 of the forge guide")
+def check_forge_rules():
+    r = Result()
+    for problem in forge_rule_problems(ROOT):
         r.fail(problem)
     return r
 

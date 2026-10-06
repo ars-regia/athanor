@@ -7,7 +7,7 @@ name: Kernel Build
 # of the spec. publish: on a GitHub runner, publishes the RPMs as four OCI images
 # (kernel, devel, debuginfo, and the MicroVM guest kernel as the <nvr>-microvm tag of the
 # kernel) signed with cosign keyless, with SBOM, SLSA provenance and the attestation of
-# the pins; `:latest` moves only on main. kmod: the NVIDIA modules against the freshly
+# the pins; `:latest` moves only on the repository's default branch. kmod: the NVIDIA modules against the freshly
 # built kernel-devel (nvidia-build.yml, reusable). gate: the single "Kernel gate" check
 # that the branch protection requires on PRs, including those of the bump bot (phase
 # K5): that is why the workflow runs on every PR, with no path filter. A PR builds and
@@ -312,6 +312,8 @@ jobs:
         env:
           BUILDAH_ISOLATION: chroot
           NVR_EXPECTED: ${{ needs.inputs.outputs.nvr }}
+          # `:latest` follows the default branch, whatever it is called (re-audit decision 11).
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           nvr=$(cat out/nvr)
@@ -334,7 +336,7 @@ jobs:
               "$ctr"
             buildah commit --omit-timestamp "$ctr" "${repo}:${tag}"
             buildah push --digestfile "digests/${group}" "${repo}:${tag}"
-            if [[ $GITHUB_REF == refs/heads/main ]]; then
+            if [[ $GITHUB_REF == "refs/heads/${DEFAULT_BRANCH}" ]]; then
               buildah push "${repo}:${tag}" "docker://${repo}:${latest}"
             fi
             echo "${repo}@$(cat "digests/${group}")"
