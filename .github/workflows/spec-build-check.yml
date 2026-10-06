@@ -9,7 +9,7 @@ name: Spec Build Check
 # a one-day workflow artifact, never pushed); any other in the published athanor-builder:latest.
 # Each spec builds in its own job with forge/scripts/run_spec_build.sh, the script of
 # call-dag-compile.yml (fetch with network, build without). On a green build of the spec bot's
-# pull request, forge/scripts/bot_merge.py merges it when every bump keeps its major version.
+# pull request, forge/scripts/bot_merge.py merges it when every bump keeps its leading non-zero version component (semver-compatible).
 # The kernel (forge/specs/azoth) is Kernel Build's.
 
 on:
