@@ -22,7 +22,8 @@ KVER = "6.18.38-1.azoth.fc43.x86_64"
 COSIGN = b"cosign v3 stand-in\n"
 
 # Records each call; for `run`, whether every mounted key file is readable right then, and the
-# files `prepare` would write into the directory mounted on /out.
+# files `prepare` would write into the directory mounted on /out. The tree mounted on /modules
+# goes through the real allow-list of sign-kernel.sh, as in the signer image.
 PODMAN = f"""#!/usr/bin/env bash
 set -euo pipefail
 echo "podman $*" >> "$PODMAN_LOG"
@@ -31,6 +32,9 @@ if [[ $1 == run ]]; then
     case $arg in
       /*:/run/keys/*) [[ -s ${{arg%%:*}} ]] && echo "key readable ${{arg%%:*}}" >> "$PODMAN_LOG" ;;
       /*:/out) out=${{arg%:/out}} ;;
+      /*:/modules | /*:/modules:ro)
+        modules=${{arg%:/modules*}}
+        bash "$SIGN_KERNEL_SH" check-modules --kver {KVER} --dir "$modules" >> "$PODMAN_LOG" ;;
     esac
   done
   if [[ " $* " == *" prepare "* ]]; then
@@ -80,7 +84,9 @@ class SignerRun(unittest.TestCase):
             f"state=modules-missing\nregistry=evil.example\nkernel_digest={EVIL}\n",
         )
         bin_dir = self.root / "bin"
-        for name, body in (("podman", PODMAN), ("curl", CURL)):
+        # modinfo of the signer image: every module stand-in is of KVER.
+        modinfo = f'#!/usr/bin/env bash\necho "{KVER} SMP preempt mod_unload"\n'
+        for name, body in (("podman", PODMAN), ("curl", CURL), ("modinfo", modinfo)):
             self.write(f"bin/{name}", body).chmod(0o755)
         self.log = self.root / "podman.log"
         self.env = {
@@ -89,6 +95,7 @@ class SignerRun(unittest.TestCase):
             "PODMAN_LOG": str(self.log),
             "RETRY_ATTEMPTS": "1",
             "TMPDIR": str(self.root),
+            "SIGN_KERNEL_SH": str(REPO / "forge/specs/azoth/sign-kernel.sh"),
             "RESOLVED": f"state=modules-missing\\nregistry={REG}\\nkernel_digest={KERNEL}\\ndevel_digest={DEVEL}\\n",
         }
 
@@ -201,6 +208,31 @@ class SignerRun(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("run.sh inputs derives it", r.stderr)
         self.assertFalse(any(c.startswith("key readable") for c in self.calls()))
+
+    def test_prepare_signs_a_copy_the_allow_list_admits_and_ships_its_certificate(self):
+        """The certificate of the test MOK stays outside the tree the signer checks and signs,
+        and joins mok/ only afterwards, for the boot job."""
+        profile = "forge/specs/azoth/keys/profiles/secureboot.cnf"
+        (self.root / profile).parent.mkdir(parents=True)
+        shutil.copy(REPO / profile, self.root / profile)
+        self.digest()
+        self.modules()
+        self.write("out/open-rm.log", "log")
+        r = self.run_script("prepare", KERNEL_DIGEST=KERNEL)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        runs = self.runs()
+        self.assertEqual(len(runs), 3)
+        for run in runs:
+            self.assert_confined(run)
+        self.assertIn(f"-v {self.root}/mok:/modules ", runs[2])
+        (cert,) = re.findall(r"-v (\S+):/run/certs/test-mok.pem:ro ", runs[2])
+        self.assertFalse(
+            pathlib.Path(cert).is_relative_to(self.root / "mok"), "outside the checked tree"
+        )
+        self.assertEqual(
+            sum("nothing else" in c for c in self.calls()), 2, "out/ and mok/ both admitted"
+        )
+        self.assertIn("BEGIN CERTIFICATE", (self.root / "mok/test-mok.pem").read_text())
 
     def test_inputs_refuses_a_kernel_the_registry_does_not_verify(self):
         self.digest()

@@ -138,12 +138,15 @@ prepare)
     derive
     mkdir mok
     cp -a out/open mok/open
+    # The certificate stays outside mok/ while the signer checks and signs that tree, which
+    # admits only modules, and joins it afterwards for the boot job.
     openssl req -x509 -newkey rsa:2048 -nodes -days 2 -config "$ROOT/$SECUREBOOT_PROFILE" \
-        -subj '/CN=Athanor OS K3 test MOK/' -keyout "$WORK/test-mok" -out mok/test-mok.pem 2> /dev/null
+        -subj '/CN=Athanor OS K3 test MOK/' -keyout "$WORK/test-mok" -out "$WORK/test-mok.pem" 2> /dev/null
     signer -v "$ROOT/mok:/modules" -v "$ROOT/kernel-unsigned:/in:ro" \
-        -v "$WORK/test-mok:/run/keys/test-mok:ro" -v "$ROOT/mok/test-mok.pem:/run/certs/test-mok.pem:ro" -- \
+        -v "$WORK/test-mok:/run/keys/test-mok:ro" -v "$WORK/test-mok.pem:/run/certs/test-mok.pem:ro" -- \
         modules --key /run/keys/test-mok --cert /run/certs/test-mok.pem --hash /in/module-sig-hash \
         --kver "$(< kernel-unsigned/kver)" --dir /modules
+    cp "$WORK/test-mok.pem" mok/test-mok.pem
     ;;
 inputs)
     derive
