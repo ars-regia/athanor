@@ -23,7 +23,7 @@ storia, presenti solo su `main`. Non rinominare nulla di tua iniziativa.
 - `scripts/verify.py` — verificatore del progetto: workflow, polkit, percorsi, file spediti, documentazione
 
 **Mai entrare in `docs/architecture/graph-vaults/`**: sono 2958 file generati dal
-grafo. Interrogali con `/graphify query`, non aprirli.
+grafo. Interrogali da Bash con `graphify query "<domanda>"`, non aprirli.
 
 ## Stato corrente
 
