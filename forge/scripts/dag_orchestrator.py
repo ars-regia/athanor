@@ -357,26 +357,39 @@ def image_exists(ref):
     return out == "present"
 
 
-def evaluate_dirty_nodes(all_nodes, node_types, exists=image_exists, hash_of=content_hash):
-    """
-    A custom package is dirty when the registry has no
-    <registry>/<owner>/athanor-forge-<package>:hash-<content hash>. Builds run with
-    rpmbuild --nodeps and never consume another package's output, so a dirty package does
-    not dirty its dependents. Upstream packages are never built here and flatpaks publish
-    nothing: neither is ever dirty.
-    """
+def custom_hashes(all_nodes, node_types, hash_of=content_hash):
+    """{node: content hash} of every custom package the DAG builds."""
+    return {n: hash_of(n) for n in sorted(all_nodes) if node_types.get(n) == "custom"}
+
+
+def image_ref(node, hash_):
+    """<registry>/<owner>/athanor-forge-<node>:hash-<hash>, the image a build of that
+    content publishes."""
     owner = os.environ.get("GITHUB_REPOSITORY_OWNER")
     if not owner:
         sys.exit("dag_orchestrator: GITHUB_REPOSITORY_OWNER is not set")
     registry = os.environ.get("REGISTRY_HOST", "ghcr.io")
-    dirty_nodes = set()
-    for node in sorted(all_nodes):
-        if node_types.get(node) != "custom":
-            continue
-        ref = f"{registry}/{owner}/athanor-forge-{node}:hash-{hash_of(node)}"
-        if not exists(ref):
-            dirty_nodes.add(node)
-    return dirty_nodes
+    return f"{registry}/{owner}/athanor-forge-{node}:hash-{hash_}"
+
+
+def evaluate_dirty_nodes(hashes, exists=image_exists):
+    """
+    A custom package is dirty when the registry has no image for its hash. Builds run with
+    rpmbuild --nodeps and never consume another package's output, so a dirty package does
+    not dirty its dependents. Upstream packages are never built here and flatpaks publish
+    nothing: neither is ever dirty.
+    """
+    return {node for node, hash_ in hashes.items() if not exists(image_ref(node, hash_))}
+
+
+def write_hashes(hashes):
+    """Writes {node: hash} to $DAG_STATE_DIR/hashes.json (default dag-state/): the file the
+    system image build reads to pull each package image by hash, never by :latest."""
+    state_dir = os.environ.get("DAG_STATE_DIR", "dag-state")
+    os.makedirs(state_dir, exist_ok=True)
+    with open(os.path.join(state_dir, "hashes.json"), "w") as f:
+        json.dump(hashes, f, indent=2, sort_keys=True)
+        f.write("\n")
 
 def partition_dag_levels(dirty_nodes, graph, prereqs, node_types):
     """
@@ -431,7 +444,9 @@ def main():
     
     print(f"📊 DAG Topology built: {len(all_nodes)} nodes analyzed.")
     
-    dirty_nodes = evaluate_dirty_nodes(all_nodes, node_types)
+    hashes = custom_hashes(all_nodes, node_types)
+    write_hashes(hashes)
+    dirty_nodes = evaluate_dirty_nodes(hashes)
     
     level_0, level_1, level_2, flatpaks = partition_dag_levels(dirty_nodes, graph, prereqs, node_types)
     

@@ -123,7 +123,9 @@ artifact and never pushed; any other change runs in the published `athanor-build
 `call-system-image.yml` turns the package images into tier repositories and images:
 
 - **Tier repositories.** In the builder, `forge/scripts/fetch_repo_rpms.sh` pulls the
-  package images of each tier (tier 0 also takes the kernel, `azoth@<digest>` from the
+  package images of each tier by `:hash-<hash>`, from the map `dag-hashes` (`hashes.json`) the
+  brain wrote for this run and the job downloads; nothing in the pipeline reads a package's
+  `:latest`, which stays for people (tier 0 also takes the kernel, `azoth@<digest>` from the
   verified kernel artifacts). For each tier whose content hash changed, the job signs the
   RPMs when `RPM_GPG_KEY` is available, runs `createrepo_c` and publishes
   `athanor-forge-tier<N>-repo:latest`; an unchanged tier is not pushed. On `main` the same repositories are deployed to GitHub Pages as a DNF channel.

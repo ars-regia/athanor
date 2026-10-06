@@ -3,6 +3,7 @@ dependencies a package builds from, and the registry decides what is dirty
 (python3 -B -m unittest discover -s forge/scripts/tests -v)."""
 
 import importlib.util
+import json
 import os
 import pathlib
 import subprocess
@@ -95,7 +96,8 @@ class RegistryStateTest(unittest.TestCase):
         (self.root / "answer").write_text(text)
 
     def dirty(self):
-        return dag.evaluate_dirty_nodes({"dock", "libx", "fp"}, {"dock": "custom", "libx": "upstream", "fp": "flatpak"})
+        nodes = {"dock": "custom", "libx": "upstream", "fp": "flatpak"}
+        return dag.evaluate_dirty_nodes(dag.custom_hashes(set(nodes), nodes))
 
     def test_tag_present_is_clean(self):
         self.answer(0)
@@ -114,11 +116,20 @@ class RegistryStateTest(unittest.TestCase):
         with self.assertRaises(subprocess.CalledProcessError):
             self.dirty()
 
+    def test_every_custom_hash_is_written_for_the_system_image_build(self):
+        self.answer(0)
+        state = self.root / "state"
+        with mock.patch.dict(os.environ, {"DAG_STATE_DIR": str(state)}):
+            hashes = dag.custom_hashes({"dock", "libx"}, {"dock": "custom", "libx": "upstream"})
+            dag.write_hashes(hashes)
+        self.assertEqual(hashes, json.loads((state / "hashes.json").read_text()))
+        self.assertEqual(["dock"], list(hashes))
+
     def test_lookup_asks_for_the_hash_tag_of_the_node_image(self):
         self.answer(0)
         refs = []
         dirty = dag.evaluate_dirty_nodes(
-            {"dock"}, {"dock": "custom"}, exists=lambda r: refs.append(r) or True
+            dag.custom_hashes({"dock"}, {"dock": "custom"}), exists=lambda r: refs.append(r) or True
         )
         self.assertEqual(set(), dirty)
         self.assertRegex(refs[0], r"^ghcr\.io/Acme/athanor-forge-dock:hash-[0-9a-f]{64}$")
