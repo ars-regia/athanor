@@ -16,6 +16,6 @@ A runbook says how to act. What a component must do lives in its spec under
 | [repository-layout.md](repository-layout.md) | The top-level layout and the paths that moved |
 | [ownership.md](ownership.md) | Areas, their paths and owners, the proposed CODEOWNERS map (OWN1 to OWN4) |
 | [secrets.md](secrets.md) | Every GitHub secret, variable and environment the pipeline uses; how each key is generated, where its public half lives, rotation, custody, recovery after a loss (SEC, VAR, ENV, KC, RL) |
-| [transfer-to-organisation.md](transfer-to-organisation.md) | Moving the repository to the `athanor-os` organisation, and what a later rename costs (TO1 to TO8) |
+| [transfer-to-organisation.md](transfer-to-organisation.md) | Moving the repository to the `ars-regia` organisation, and what a later rename costs (TO1 to TO8) |
 
 `rebuild.md` (rebuild from zero on a new organisation and new machines) is planned in the same phase.
