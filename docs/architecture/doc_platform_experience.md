@@ -34,6 +34,7 @@ The login screen is `athanor-greeter-ui`, a GTK4 client of greetd. `athanor-gree
 starts it on a `cosmic-comp` instance of its own, inside a bubblewrap sandbox, and the
 greeter confines its own writes with Landlock before anything else. After login the session
 runs on `cosmic-comp` ([doc_shell.md](doc_shell.md)).
+First run is specified in [doc_first_run.md](doc_first_run.md).
 
 ---
 

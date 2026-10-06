@@ -1,0 +1,1045 @@
+# Athanor component inventory: one [[component]] per top-level component, the
+# machine-readable source of "what exists, where, and which specification owns it".
+# `python3 scripts/verify.py coverage` checks this file against the tree.
+#
+# How to update it:
+# - Adding a directory under system/, forge/, forge/specs/ or scripts/, or at the root,
+#   needs an entry here in the same change, or the coverage check fails.
+# - Removing or renaming a component removes or renames its entry.
+# - Fields:
+#   path     the directory or file, relative to the repository root.
+#   kind     crate | rpm spec | script tool | config | image | tests | site.
+#   area     kernel | build-ci | signing-update | security | shell | apps | platform | docs.
+#   status   specified: `spec` names a file in docs/architecture and `item` the item id
+#              or section that owns the component (its build, its behaviour or its retirement);
+#            out-of-1.0: not in release 1.0, and `issue` names the GitHub issue that says so;
+#            missing: no specification yet (reported as a warning).
+#   branch   only while `spec` exists on another branch that is being merged; remove the
+#            field once the file is on this branch.
+#   purpose  one line.
+# - Keep entries sorted by path.
+
+[[component]]
+path = ".github/workflows"
+kind = "config"
+area = "build-ci"
+status = "specified"
+spec = "doc_build_system.md"
+item = "section 7"
+purpose = "GitHub Actions workflows: checkout, call the scripts, upload their output"
+
+[[component]]
+path = "Cargo.toml"
+kind = "config"
+area = "build-ci"
+status = "specified"
+spec = "doc_build_system.md"
+item = "section 1"
+purpose = "Rust workspace: members, exclusions, shared profile with panic = abort"
+
+[[component]]
+path = "Justfile"
+kind = "config"
+area = "build-ci"
+status = "missing"
+purpose = "Root recipes: all, matrix, audit, lint, format, check-syntax, update-specs and more"
+
+[[component]]
+path = "deny.toml"
+kind = "config"
+area = "security"
+status = "missing"
+purpose = "cargo-deny policy: licences, advisories and sources of Rust dependencies"
+
+[[component]]
+path = "experimental"
+kind = "config"
+area = "build-ci"
+status = "specified"
+spec = "doc_kernel_profile.md"
+item = "section 14"
+purpose = "EXEMPT: workspace crates kept out of the package DAG, with the reasons"
+
+[[component]]
+path = "flake.nix"
+kind = "image"
+area = "build-ci"
+status = "specified"
+spec = "doc_build_system.md"
+item = "section 3"
+purpose = "Nix flake that builds the athanor-builder OCI image (with flake.lock)"
+
+[[component]]
+path = "forge/Justfile"
+kind = "config"
+area = "build-ci"
+status = "specified"
+spec = "doc_forge_development_guide.md"
+item = "section 4"
+purpose = "Forge recipes: audit, package builds, local checks"
+
+[[component]]
+path = "forge/assets"
+kind = "config"
+area = "build-ci"
+status = "specified"
+spec = "doc_kernel_build.md"
+item = "section 2"
+purpose = "Repository definitions the builds use"
+
+[[component]]
+path = "forge/build"
+kind = "image"
+area = "build-ci"
+status = "missing"
+purpose = "Ermete-era multistage Containerfile and initramfs init script; no workflow builds it"
+
+[[component]]
+path = "forge/build-manifest.toml"
+kind = "config"
+area = "build-ci"
+status = "missing"
+purpose = "Ermete-era toolchain manifest; nothing reads it"
+
+[[component]]
+path = "forge/builder"
+kind = "script tool"
+area = "build-ci"
+status = "specified"
+spec = "doc_build_system.md"
+item = "section 3"
+purpose = "Builder image inputs: compiler verification hashed into the builder tag"
+
+[[component]]
+path = "forge/config"
+kind = "config"
+area = "build-ci"
+status = "specified"
+spec = "doc_build_system.md"
+item = "section 2"
+purpose = "packages.json, the manifest of what the image carries, and the RPM macros"
+
+[[component]]
+path = "forge/repo-cache"
+kind = "config"
+area = "build-ci"
+status = "specified"
+spec = "doc_build_system.md"
+item = "section 6"
+purpose = "Working directory of the tier repositories in call-system-image.yml; the tracked manifests are empty"
+
+[[component]]
+path = "forge/scripts"
+kind = "script tool"
+area = "build-ci"
+status = "specified"
+spec = "doc_build_system.md"
+item = "sections 4 to 8"
+purpose = "The package pipeline: DAG, spec builds, tier repositories, ISO, bots, registry clean-up"
+
+[[component]]
+path = "forge/specs/athanor-ai-daemon"
+kind = "rpm spec"
+area = "apps"
+status = "missing"
+purpose = "Legacy local inference daemon, not shipped; doc_local_ai.md AI11 proposes its deletion"
+
+[[component]]
+path = "forge/specs/athanor-ananicy"
+kind = "rpm spec"
+area = "platform"
+status = "missing"
+purpose = "ananicy-cpp process priority daemon; not in the package manifest"
+
+[[component]]
+path = "forge/specs/athanor-antigravity"
+kind = "rpm spec"
+area = "apps"
+status = "out-of-1.0"
+issue = 149
+purpose = "Stub package shipped in tier 0; issue 149 removes it from the image"
+
+[[component]]
+path = "forge/specs/athanor-astro-toolchain"
+kind = "rpm spec"
+area = "build-ci"
+status = "out-of-1.0"
+issue = 149
+purpose = "Stub toolchain package that leaks into the image through tier 0; issue 149 removes it"
+
+[[component]]
+path = "forge/specs/athanor-backup"
+kind = "rpm spec"
+area = "platform"
+status = "missing"
+purpose = "Hourly btrfs snapshots of /var/home with retention and restore, as a root CLI; shipped"
+
+[[component]]
+path = "forge/specs/athanor-bar"
+kind = "rpm spec"
+area = "shell"
+status = "specified"
+spec = "doc_bar.md"
+item = "BR1"
+purpose = "The Athanor bar"
+
+[[component]]
+path = "forge/specs/athanor-base-config"
+kind = "rpm spec"
+area = "platform"
+status = "missing"
+purpose = "Base configuration installed first: systemd settings, polkit rules, kargs, branding, GPG keys; shipped"
+
+[[component]]
+path = "forge/specs/athanor-bat"
+kind = "rpm spec"
+area = "apps"
+status = "missing"
+purpose = "Rebuild of bat, a cat clone with syntax highlighting; shipped"
+
+[[component]]
+path = "forge/specs/athanor-bpf-linker"
+kind = "rpm spec"
+area = "kernel"
+status = "missing"
+purpose = "bpf-linker for live patching, which left the repository on 2026-10-05; still shipped in tier 0"
+
+[[component]]
+path = "forge/specs/athanor-calmo"
+kind = "rpm spec"
+area = "shell"
+status = "specified"
+spec = "doc_shell.md"
+item = "SH5"
+purpose = "The Calmo identity: COSMIC defaults overlay, hearth wallpaper, seal icons"
+
+[[component]]
+path = "forge/specs/athanor-cargo-tools"
+kind = "rpm spec"
+area = "build-ci"
+status = "out-of-1.0"
+issue = 149
+purpose = "Stub package of Cargo tools that leaks into the image through tier 0; issue 149 removes it"
+
+[[component]]
+path = "forge/specs/athanor-cliphist"
+kind = "rpm spec"
+area = "shell"
+status = "missing"
+purpose = "cliphist, a Wayland clipboard history store; shipped"
+
+[[component]]
+path = "forge/specs/athanor-cloud-rs"
+kind = "rpm spec"
+area = "platform"
+status = "out-of-1.0"
+issue = 57
+purpose = "Fleet continuity and P2P sync daemon; placeholder authentication, out of the DAG until redesigned"
+
+[[component]]
+path = "forge/specs/athanor-cluster-mesh"
+kind = "rpm spec"
+area = "platform"
+status = "out-of-1.0"
+issue = 57
+purpose = "Package of the fleet swarm computing daemon; out of the DAG until the fleet is redesigned"
+
+[[component]]
+path = "forge/specs/athanor-cosign"
+kind = "rpm spec"
+area = "signing-update"
+status = "missing"
+purpose = "Rebuild of cosign; not in the package manifest"
+
+[[component]]
+path = "forge/specs/athanor-dart-sass"
+kind = "rpm spec"
+area = "shell"
+status = "missing"
+purpose = "Precompiled Dart Sass for the frozen shell's theming; shipped"
+
+[[component]]
+path = "forge/specs/athanor-desktop-ui"
+kind = "rpm spec"
+area = "apps"
+status = "specified"
+spec = "doc_software.md"
+item = "SWe, decision 7"
+purpose = "Desktop defaults: default applications, MIME and terminal lists, favourites"
+
+[[component]]
+path = "forge/specs/athanor-dock"
+kind = "rpm spec"
+area = "shell"
+status = "specified"
+spec = "doc_bar.md"
+item = "BR1"
+purpose = "The Athanor dock"
+
+[[component]]
+path = "forge/specs/athanor-doctor"
+kind = "rpm spec"
+area = "platform"
+status = "missing"
+purpose = "System diagnostic CLI; shipped"
+
+[[component]]
+path = "forge/specs/athanor-greeter"
+kind = "rpm spec"
+area = "shell"
+status = "missing"
+purpose = "Ermete-era package of system/athanor-greeter; not in the package manifest"
+
+[[component]]
+path = "forge/specs/athanor-greeter-ui"
+kind = "rpm spec"
+area = "shell"
+status = "specified"
+spec = "doc_shell.md"
+item = "section 3, stages 1a and 1d"
+purpose = "The greeter run by greetd: login, language and layout"
+
+[[component]]
+path = "forge/specs/athanor-hypervisor-daemon"
+kind = "rpm spec"
+area = "platform"
+status = "out-of-1.0"
+issue = 57
+purpose = "Package of the micro-hypervisor daemon; attestation is a placeholder, out of the DAG"
+
+[[component]]
+path = "forge/specs/athanor-ide-bootstrap"
+kind = "rpm spec"
+area = "apps"
+status = "out-of-1.0"
+issue = 149
+purpose = "Stub IDE bootstrap package shipped in tier 1; issue 149 removes it"
+
+[[component]]
+path = "forge/specs/athanor-init-oracle"
+kind = "rpm spec"
+area = "platform"
+status = "missing"
+purpose = "Package of the Ermete-era AI init oracle; not in the package manifest"
+
+[[component]]
+path = "forge/specs/athanor-kernel-profile"
+kind = "rpm spec"
+area = "kernel"
+status = "specified"
+spec = "doc_kernel_profile.md"
+item = "section 3"
+purpose = "Effective kernel settings per role combination and their checker"
+
+[[component]]
+path = "forge/specs/athanor-keylime"
+kind = "rpm spec"
+area = "security"
+status = "missing"
+purpose = "Keylime agent configuration; shipped, with no verifier"
+
+[[component]]
+path = "forge/specs/athanor-launcher"
+kind = "rpm spec"
+area = "shell"
+status = "specified"
+spec = "doc_launcher.md"
+item = "LA1"
+purpose = "The Athanor launcher"
+
+[[component]]
+path = "forge/specs/athanor-layout-chooser"
+kind = "rpm spec"
+area = "shell"
+status = "specified"
+spec = "doc_settings.md"
+item = "SE23"
+purpose = "The layout chooser (os.athanor.Layout); retired when the Settings Desktop page lands"
+
+[[component]]
+path = "forge/specs/athanor-lvfs-rs"
+kind = "rpm spec"
+area = "platform"
+status = "missing"
+purpose = "Firmware automation daemon; out of the image since 2026-09-30, fwupd covers firmware"
+
+[[component]]
+path = "forge/specs/athanor-matugen"
+kind = "rpm spec"
+area = "shell"
+status = "missing"
+purpose = "matugen, Material 3 colour generation for the frozen shell's theming; shipped"
+
+[[component]]
+path = "forge/specs/athanor-mdm-rs"
+kind = "rpm spec"
+area = "platform"
+status = "missing"
+purpose = "Ermete-era mobile device management daemon; not in the package manifest"
+
+[[component]]
+path = "forge/specs/athanor-mesh-bus"
+kind = "rpm spec"
+area = "platform"
+status = "out-of-1.0"
+issue = 57
+purpose = "Package of the fleet mesh bus; out of the DAG until the fleet is redesigned"
+
+[[component]]
+path = "forge/specs/athanor-mesh-sync"
+kind = "rpm spec"
+area = "platform"
+status = "out-of-1.0"
+issue = 57
+purpose = "Fleet P2P mesh sync daemon; placeholder keys, out of the DAG until redesigned"
+
+[[component]]
+path = "forge/specs/athanor-net-unikernel"
+kind = "rpm spec"
+area = "platform"
+status = "missing"
+purpose = "Package of the Ermete-era userspace TCP/IP stack; not in the package manifest"
+
+[[component]]
+path = "forge/specs/athanor-niri-ipc"
+kind = "crate"
+area = "shell"
+status = "missing"
+purpose = "niri IPC client kept only for the frozen athanor-shell-rs and its dock"
+
+[[component]]
+path = "forge/specs/athanor-nix-support"
+kind = "rpm spec"
+area = "platform"
+status = "specified"
+spec = "doc_software.md"
+item = "SW9"
+purpose = "Nix on the immutable image: /nix bind mount, daemon socket, presets, SELinux module"
+
+[[component]]
+path = "forge/specs/athanor-qa"
+kind = "rpm spec"
+area = "build-ci"
+status = "out-of-1.0"
+issue = 149
+purpose = "QA scripts shipped in the image; issue 149 removes them"
+
+[[component]]
+path = "forge/specs/athanor-recovery"
+kind = "rpm spec"
+area = "signing-update"
+status = "specified"
+spec = "doc_recovery.md"
+item = "R1"
+purpose = "Text recovery console shown when the desktop does not start"
+
+[[component]]
+path = "forge/specs/athanor-rosenpass"
+kind = "rpm spec"
+area = "platform"
+status = "missing"
+purpose = "Rosenpass post-quantum WireGuard key exchange; not in the package manifest"
+
+[[component]]
+path = "forge/specs/athanor-selinux"
+kind = "rpm spec"
+area = "security"
+status = "missing"
+purpose = "Athanor's own SELinux policy modules; shipped"
+
+[[component]]
+path = "forge/specs/athanor-semantic-db"
+kind = "rpm spec"
+area = "apps"
+status = "specified"
+spec = "doc_local_ai.md"
+item = "AI8"
+purpose = "Semantic index stub, not shipped; AI8 replaces it with a real index"
+
+[[component]]
+path = "forge/specs/athanor-shell-rs"
+kind = "rpm spec"
+area = "shell"
+status = "specified"
+spec = "doc_shell.md"
+item = "SH4"
+purpose = "The frozen Ermete-era GTK shell; its file chooser still serves the portal until PT14"
+
+[[component]]
+path = "forge/specs/athanor-shelld"
+kind = "rpm spec"
+area = "shell"
+status = "specified"
+spec = "doc_bar.md"
+item = "BR4"
+purpose = "The shell daemon: desktop notifications and the tray watcher"
+
+[[component]]
+path = "forge/specs/athanor-store-rs"
+kind = "rpm spec"
+area = "apps"
+status = "specified"
+spec = "doc_software.md"
+item = "section 6, decision 5"
+purpose = "Legacy store daemon, out of the workspace and the image; decision 5 deletes it"
+
+[[component]]
+path = "forge/specs/athanor-syft"
+kind = "rpm spec"
+area = "build-ci"
+status = "missing"
+purpose = "syft SBOM generator; shipped in tier 0 although only the pipeline uses SBOMs"
+
+[[component]]
+path = "forge/specs/athanor-sysmon-ebpf"
+kind = "rpm spec"
+area = "kernel"
+status = "missing"
+purpose = "Ermete-era eBPF system monitor and telemetry daemon; out of the DAG"
+
+[[component]]
+path = "forge/specs/athanor-system-config"
+kind = "rpm spec"
+area = "platform"
+status = "missing"
+purpose = "System configuration: greetd, session scripts, USBGuard, groups; shipped"
+
+[[component]]
+path = "forge/specs/athanor-system-services"
+kind = "rpm spec"
+area = "platform"
+status = "missing"
+purpose = "User units of the session: athanor-desktop, the session target, skel sync, COSMIC daemons; shipped"
+
+[[component]]
+path = "forge/specs/athanor-system-tweaks"
+kind = "rpm spec"
+area = "security"
+status = "missing"
+purpose = "Wheel polkit rule, sysctl, DNS, NetworkManager, tmpfiles and PipeWire settings; shipped"
+
+[[component]]
+path = "forge/specs/athanor-telemetry"
+kind = "rpm spec"
+area = "platform"
+status = "missing"
+purpose = "Package of the Ermete-era telemetry daemon; not in the package manifest"
+
+[[component]]
+path = "forge/specs/athanor-tetragon"
+kind = "rpm spec"
+area = "security"
+status = "specified"
+spec = "doc_tetragon.md"
+item = "TG1"
+purpose = "Cilium Tetragon with Athanor's tracing policies; shipped"
+
+[[component]]
+path = "forge/specs/athanor-update"
+kind = "rpm spec"
+area = "signing-update"
+status = "specified"
+spec = "doc_update_trust.md"
+item = "UT1"
+purpose = "System image updates, trust state and the update notifier"
+
+[[component]]
+path = "forge/specs/athanor-xdg-desktop-portal-athanor"
+kind = "rpm spec"
+area = "shell"
+status = "specified"
+spec = "doc_portal.md"
+item = "PT1"
+purpose = "Athanor's xdg-desktop-portal backend and the session's choice of backends"
+
+[[component]]
+path = "forge/specs/azoth"
+kind = "rpm spec"
+area = "kernel"
+status = "specified"
+spec = "doc_kernel_build.md"
+item = "section 3"
+purpose = "The Azoth kernel: sources, pins, build, bump bot, NVIDIA modules, boot matrix"
+
+[[component]]
+path = "forge/specs/buildah"
+kind = "rpm spec"
+area = "build-ci"
+status = "missing"
+purpose = "Rebuild of buildah; not in the package manifest"
+
+[[component]]
+path = "forge/specs/cosmic-comp"
+kind = "rpm spec"
+area = "shell"
+status = "specified"
+spec = "doc_compositor.md"
+item = "CO3"
+purpose = "cosmic-comp with Athanor's patches; the one COSMIC component that stays"
+
+[[component]]
+path = "forge/specs/osbuild"
+kind = "rpm spec"
+area = "build-ci"
+status = "missing"
+purpose = "Rebuild of osbuild; not in the package manifest"
+
+[[component]]
+path = "forge/specs/stage0-bootstrap"
+kind = "rpm spec"
+area = "build-ci"
+status = "missing"
+purpose = "Stub package with one binary; shipped in tier 0"
+
+[[component]]
+path = "forge/test"
+kind = "tests"
+area = "build-ci"
+status = "specified"
+spec = "doc_shell.md"
+item = "SH13"
+purpose = "Shell layout goldens and the unattended ISO acceptance"
+
+[[component]]
+path = "forge/tools"
+kind = "crate"
+area = "shell"
+status = "specified"
+spec = "doc_shell.md"
+item = "SH2"
+purpose = "calmo-cosmic-theme: generates the committed default CosmicTheme"
+
+[[component]]
+path = "forge/upstream-watch.json"
+kind = "config"
+area = "build-ci"
+status = "missing"
+purpose = "Upstream releases the update bot watches"
+
+[[component]]
+path = "scripts/cosmic-comp-rebase"
+kind = "script tool"
+area = "shell"
+status = "specified"
+spec = "doc_compositor.md"
+item = "CO3"
+purpose = "Rebases Athanor's cosmic-comp patches on a new upstream tag"
+
+[[component]]
+path = "scripts/decode-drm-panic.py"
+kind = "script tool"
+area = "kernel"
+status = "missing"
+purpose = "Decodes the kernel log of a drm_panic QR code"
+
+[[component]]
+path = "scripts/devvm"
+kind = "script tool"
+area = "shell"
+status = "specified"
+spec = "doc_shell.md"
+item = "SH13"
+purpose = "Development VM and the acceptance scripts of the shell programs"
+
+[[component]]
+path = "scripts/github-settings"
+kind = "script tool"
+area = "build-ci"
+status = "specified"
+spec = "../operations/github-settings.md"
+item = "whole document"
+purpose = "GitHub repository settings as code: export, diff and apply .github/settings"
+
+[[component]]
+path = "scripts/rename.py"
+kind = "script tool"
+area = "docs"
+status = "missing"
+purpose = "The Ermete to Athanor rename tool; its specification doc_naming.md was deleted in cc66b328"
+
+[[component]]
+path = "scripts/runner"
+kind = "script tool"
+area = "build-ci"
+status = "missing"
+purpose = "Self-hosted kernel runner: one ephemeral KVM guest per just-in-time job"
+
+[[component]]
+path = "scripts/session-memory"
+kind = "script tool"
+area = "shell"
+status = "specified"
+spec = "doc_shell_standard.md"
+item = "ST5"
+purpose = "Measures the session's memory against the budget of the shell standard"
+
+[[component]]
+path = "scripts/shell-bench"
+kind = "script tool"
+area = "shell"
+status = "specified"
+spec = "doc_shell_standard.md"
+item = "ST9"
+purpose = "Measures the bar, the dock and athanor-shelld on the reference machine against ST5 and ST6"
+
+[[component]]
+path = "scripts/tests"
+kind = "tests"
+area = "build-ci"
+status = "missing"
+purpose = "Unit tests of verify.py and decode-drm-panic.py"
+
+[[component]]
+path = "scripts/verify.py"
+kind = "script tool"
+area = "build-ci"
+status = "missing"
+purpose = "Structural checks of the repository: workflows, polkit, paths, shipped, docs, coverage and more"
+
+[[component]]
+path = "supply-chain"
+kind = "config"
+area = "security"
+status = "missing"
+purpose = "cargo-vet audits and imports, Trivy ignore list"
+
+[[component]]
+path = "system/Containerfile"
+kind = "image"
+area = "build-ci"
+status = "specified"
+spec = "doc_system_image.md"
+item = "S2"
+purpose = "The system image: base, tier repositories, upstream packages, GPU layer"
+
+[[component]]
+path = "system/Justfile"
+kind = "config"
+area = "build-ci"
+status = "missing"
+purpose = "System recipes: image, ISO through bootc-image-builder, unikernel"
+
+[[component]]
+path = "system/athanor-agentic-kernel"
+kind = "crate"
+area = "platform"
+status = "missing"
+purpose = "Ermete-era 'agentic OS controller'; workspace member, not packaged"
+
+[[component]]
+path = "system/athanor-apps"
+kind = "crate"
+area = "shell"
+status = "specified"
+spec = "doc_bar.md"
+item = "BR3"
+purpose = "The applications row the bar and dock share: favourites, running windows, launching"
+
+[[component]]
+path = "system/athanor-bus-api"
+kind = "crate"
+area = "security"
+status = "missing"
+purpose = "Shared D-Bus types and the polkit subject check every system service uses"
+
+[[component]]
+path = "system/athanor-cluster-mesh"
+kind = "crate"
+area = "platform"
+status = "out-of-1.0"
+issue = 57
+purpose = "Fleet swarm computing daemon; out of the DAG until the fleet is redesigned"
+
+[[component]]
+path = "system/athanor-compositor-client"
+kind = "crate"
+area = "shell"
+status = "specified"
+spec = "doc_shell.md"
+item = "SH2"
+purpose = "The shell's only client of cosmic-comp: windows, workspaces, outputs, launches"
+
+[[component]]
+path = "system/athanor-ebpf-sched"
+kind = "crate"
+area = "kernel"
+status = "out-of-1.0"
+issue = 123
+spec = "doc_kernel_profile.md"
+item = "D5"
+purpose = "AI eBPF scheduler bridge, retired as a scheduler in P3"
+
+[[component]]
+path = "system/athanor-greeter"
+kind = "crate"
+area = "shell"
+status = "missing"
+purpose = "Ermete-era greeter meant to replace greetd; workspace member, out of the DAG"
+
+[[component]]
+path = "system/athanor-hypervisor-daemon"
+kind = "crate"
+area = "platform"
+status = "out-of-1.0"
+issue = 57
+purpose = "Micro-hypervisor daemon; placeholder attestation, out of the DAG"
+
+[[component]]
+path = "system/athanor-i18n"
+kind = "crate"
+area = "shell"
+status = "specified"
+spec = "doc_languages.md"
+item = "LN2"
+purpose = "Pure-Rust gettext catalog reader shared by the shell programs"
+
+[[component]]
+path = "system/athanor-init-oracle"
+kind = "crate"
+area = "platform"
+status = "missing"
+purpose = "Ermete-era AI systemd init oracle; workspace member, out of the DAG"
+
+[[component]]
+path = "system/athanor-install.ks"
+kind = "config"
+area = "platform"
+status = "missing"
+purpose = "Kickstart of the manual ISO build; enables sshd and systemd-homed"
+
+[[component]]
+path = "system/athanor-layout"
+kind = "crate"
+area = "shell"
+status = "specified"
+spec = "doc_shell.md"
+item = "SH6"
+purpose = "The layout document: schema, layers and presets"
+
+[[component]]
+path = "system/athanor-mesh-bus"
+kind = "crate"
+area = "platform"
+status = "out-of-1.0"
+issue = 57
+purpose = "Fleet post-quantum WireGuard mesh bus; out of the DAG until the fleet is redesigned"
+
+[[component]]
+path = "system/athanor-net-unikernel"
+kind = "crate"
+area = "platform"
+status = "missing"
+purpose = "Ermete-era userspace TCP/IP stack daemon; workspace member, out of the DAG"
+
+[[component]]
+path = "system/athanor-oobe"
+kind = "crate"
+area = "shell"
+status = "specified"
+spec = "doc_first_run.md"
+item = "FR1"
+purpose = "First-run wizard prototype, not packaged; FR1 retires it"
+
+[[component]]
+path = "system/athanor-portal"
+kind = "crate"
+area = "shell"
+status = "specified"
+spec = "doc_portal.md"
+item = "PT2"
+purpose = "The portal backend's decisions that tests reach without a display"
+
+[[component]]
+path = "system/athanor-preview"
+kind = "crate"
+area = "shell"
+status = "specified"
+spec = "doc_launcher.md"
+item = "LA6"
+purpose = "The launcher's preview pane"
+
+[[component]]
+path = "system/athanor-preview-render"
+kind = "crate"
+area = "security"
+status = "specified"
+spec = "doc_launcher.md"
+item = "LA6"
+purpose = "Decodes one untrusted image or PDF into a bitmap inside a sandboxed unit"
+
+[[component]]
+path = "system/athanor-search"
+kind = "crate"
+area = "shell"
+status = "specified"
+spec = "doc_launcher.md"
+item = "LA2"
+purpose = "The launcher's and library's search: sources, ranking, usage"
+
+[[component]]
+path = "system/athanor-store"
+kind = "crate"
+area = "apps"
+status = "specified"
+spec = "doc_software.md"
+item = "section 6, decision 5"
+purpose = "Legacy store CLI; decision 5 removes its install commands, its storage waits for the fleet"
+
+[[component]]
+path = "system/athanor-style"
+kind = "crate"
+area = "shell"
+status = "specified"
+spec = "doc_shell.md"
+item = "SH5"
+purpose = "Calmo tokens and the generator of the shell's style"
+
+[[component]]
+path = "system/athanor-telemetry"
+kind = "crate"
+area = "platform"
+status = "missing"
+purpose = "Ermete-era telemetry and log aggregator; workspace member, out of the DAG"
+
+[[component]]
+path = "system/athanor-trust-state"
+kind = "crate"
+area = "signing-update"
+status = "specified"
+spec = "doc_update_trust.md"
+item = "UT7"
+purpose = "Reads the update and trust state file and computes the shield badge"
+
+[[component]]
+path = "system/athanor-unit"
+kind = "crate"
+area = "security"
+status = "specified"
+spec = "doc_kernel_profile.md"
+item = "section 10"
+purpose = "Start-up of a shell unit: crash-loop record, readiness, journal, Landlock"
+
+[[component]]
+path = "system/build-image.sh"
+kind = "script tool"
+area = "build-ci"
+status = "specified"
+spec = "doc_system_image.md"
+item = "S8"
+purpose = "Builds the three system image variants"
+
+[[component]]
+path = "system/confidential_computing"
+kind = "crate"
+area = "security"
+status = "missing"
+purpose = "athanor-attestation, a confidential computing attestation tool; workspace member, protected path"
+
+[[component]]
+path = "system/cosign.pub"
+kind = "config"
+area = "signing-update"
+status = "missing"
+purpose = "A cosign public key read only by system/athanor-store"
+
+[[component]]
+path = "system/disk_config"
+kind = "config"
+area = "platform"
+status = "specified"
+spec = "doc_first_run.md"
+item = "FR21"
+purpose = "bootc-image-builder configuration of the ISO and of the raw disk image"
+
+[[component]]
+path = "system/ebpf"
+kind = "crate"
+area = "kernel"
+status = "missing"
+purpose = "ebpf-core and ebpf-loader; workspace members, not packaged"
+
+[[component]]
+path = "system/image-digests.sh"
+kind = "script tool"
+area = "signing-update"
+status = "specified"
+spec = "doc_update_trust.md"
+item = "UT2"
+purpose = "Writes the digests file the signing job reads"
+
+[[component]]
+path = "system/kernel-artifacts.sh"
+kind = "script tool"
+area = "kernel"
+status = "specified"
+spec = "doc_build_ordering.md"
+item = "O3"
+purpose = "Resolves and verifies the kernel artifacts the image build installs"
+
+[[component]]
+path = "system/keys"
+kind = "config"
+area = "signing-update"
+status = "specified"
+spec = "doc_update_trust.md"
+item = "UT2"
+purpose = "Public key of the key-based image signature"
+
+[[component]]
+path = "system/nvidia"
+kind = "script tool"
+area = "kernel"
+status = "specified"
+spec = "doc_system_image.md"
+item = "S7"
+purpose = "NVIDIA module package, locks, mirror and gate of the GPU variants"
+
+[[component]]
+path = "system/package-delta.sh"
+kind = "script tool"
+area = "build-ci"
+status = "specified"
+spec = "doc_system_image.md"
+item = "section 4"
+purpose = "Package names an image loses and gains against another, for a base change review"
+
+[[component]]
+path = "system/promote.sh"
+kind = "script tool"
+area = "signing-update"
+status = "specified"
+spec = "doc_update_trust.md"
+item = "UT4"
+purpose = "Moves the signed reference machines follow"
+
+[[component]]
+path = "system/scripts"
+kind = "script tool"
+area = "build-ci"
+status = "missing"
+purpose = "UKI assembly, bootc-image-builder ISO, unikernel build, theme generator, Flatpak provisioner"
+
+[[component]]
+path = "system/sign-images.sh"
+kind = "script tool"
+area = "signing-update"
+status = "specified"
+spec = "doc_update_trust.md"
+item = "UT2"
+purpose = "Adds the key-based signature to the published system images"
+
+[[component]]
+path = "system/sysctl.d"
+kind = "config"
+area = "security"
+status = "missing"
+purpose = "A sysctl hardening file that nothing installs"
+
+[[component]]
+path = "system/tests"
+kind = "tests"
+area = "build-ci"
+status = "specified"
+spec = "doc_build_system.md"
+item = "section 6"
+purpose = "Unit tests of the image build, signing, promotion, kernel artifacts and registry clean-up scripts"

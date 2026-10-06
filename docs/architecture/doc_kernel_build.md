@@ -376,8 +376,8 @@ Ogni PR di bump e ogni cambio in `forge/specs/azoth/**` passa:
 6. **riproducibilità** settimanale (sezione 3).
 
 **Il check unico.** Il job `gate` di `kernel-build.yml` (check `Kernel gate`)
-dipende da tutti gli altri ed è verde solo se `inputs`, `boot` e `kmod` sono
-verdi e `build` è verde o saltato per riuso. È l'unico check richiesto dalla
+dipende da tutti gli altri ed è verde solo se `lint` (il lint condiviso,
+`call-lint.yml`, che gira per primo), `inputs`, `boot` e `kmod` sono verdi e `build` è verde o saltato per riuso. È l'unico check richiesto dalla
 protezione del branch, e Kernel Build parte su ogni PR, senza filtro di
 percorsi: così il check esiste sempre e l'auto-merge del bot (sezione 8) ha un
 nome solo da aspettare.

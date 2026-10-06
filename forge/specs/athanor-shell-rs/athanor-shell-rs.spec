@@ -2,7 +2,7 @@
 # Il crate vive nel workspace: la spec compila il checkout in place, non un tarball.
 Name:           athanor-shell-rs
 Version:        1.0.0
-Release:        38%{?dist}
+Release:        39%{?dist}
 Summary:        Athanor OS Native Rust GTK4 Shell
 
 License:        GPL-3.0-or-later
@@ -12,7 +12,8 @@ Requires: gtk4 gtk4-layer-shell glib2 upower xdg-utils plocate foot wl-clipboard
 Requires:       cliphist
 
 %description
-Pure Rust native shell for Athanor OS, replacing AGS/GJS.
+Pure Rust native shell for Athanor OS, replacing AGS/GJS. Frozen at GTK 0.7 in a
+workspace of its own (doc_shell.md, SH4); the session no longer starts it.
 
 %prep
 
@@ -29,6 +30,9 @@ install -m 0755 forge/specs/athanor-shell-rs/target/release/athanor-shell-rs %{b
 /usr/bin/athanor-shell-rs
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-39
+- State in the %description that the shell is frozen and not started by the session
+
 * Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-38
 - The privacy prompt answers the portal with a status of its own: Allow exits 100, and
   Deny, Escape and a closed window exit 1. Until now Allow exited 0, which is also what a
