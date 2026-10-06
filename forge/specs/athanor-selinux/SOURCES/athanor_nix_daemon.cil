@@ -295,7 +295,9 @@
 (allow nix_build_t node_t (node (tcp_send tcp_recv udp_send udp_recv)))
 ; Test suites of the packages listen on the loopback of the build's private network namespace
 ; (the sandbox gives a build its own, with only `lo` up): name_bind is limited to the
-; unprivileged ports and node_bind to specific addresses (127.0.0.1), not the wildcard.
+; unprivileged ports. node_bind cannot be limited by address: Fedora's policy has no nodecon
+; entry, so every address, 0.0.0.0 included, is node_t. A fixed-output fetch shares the host
+; network, so it can listen on an unprivileged port of any host address.
 (allow nix_build_t ephemeral_port_t (tcp_socket (name_bind)))
 (allow nix_build_t ephemeral_port_t (udp_socket (name_bind)))
 (allow nix_build_t unreserved_port_t (tcp_socket (name_bind)))
