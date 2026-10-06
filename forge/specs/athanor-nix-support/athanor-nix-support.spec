@@ -84,14 +84,17 @@ ln -s ../athanor-nix-gc.timer %{buildroot}/usr/lib/systemd/system/timers.target.
   path with it. The daemon reads /usr/share/athanor/nix/daemon/nix.conf, through the
   NIX_CONF_DIR of its drop-in: trusted-users = root, allowed-users = *,
   sandbox-fallback = false, min-free = 2G, max-free = 8G, netrc and machines kept in
-  /etc/nix, and /etc/nix/nix.conf included last so the administrator's values win.
+  /etc/nix, and /etc/nix/nix.conf included between the defaults an administrator may
+  change and the security settings, which come last and cannot be weakened.
   /etc/xdg/nix/nix.conf is the users' layer: the nix-command and flakes features and
   a flake registry, /usr/share/athanor/nix/registry.json, that pins nixpkgs to a
   revision of nixos-26.05 with its narHash, replacing the network registry.
 - nix-daemon.service drop-in: MemoryHigh=75%, CPUWeight=50, IOWeight=50,
   TasksMax=16384, the narinfo cache in /var/cache/nix, ProtectKernelModules and
   RestrictAddressFamilies. Only options a sandboxed build was tested under are set; the
-  drop-in lists those left out and why.
+  drop-in lists those left out and why. CapabilityBoundingSet is an allow-list derived
+  from the Nix 2.31 sources, not yet run under the root daemon. The daemon requires and
+  follows athanor-nix-relabel.service, so a failed relabel keeps it down.
 - athanor-nix-gc.timer collects garbage weekly; athanor-nix-relabel.service relabels,
   once, a store made before the Nix SELinux policy of athanor-selinux 1.0-7. Both are
   enabled by links under /usr, so systems installed before this release get them.
