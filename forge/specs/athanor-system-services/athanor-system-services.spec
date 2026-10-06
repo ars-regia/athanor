@@ -3,7 +3,7 @@ Name:           athanor-system-services
 Version:        1.0.1
 Release:        25%{?dist}
 Summary:        Athanor OS athanor-system-services
-License:        MIT
+License:        GPL-3.0-or-later
 URL:            https://github.com/hr-mes/athanor-forge
 BuildArch:      noarch
 Requires:       systemd

@@ -1,6 +1,7 @@
 [package]
 name = "athanor-dock"
 version = "1.0.0"
+license = "GPL-3.0-or-later"
 edition = "2021"
 authors = ["Athanor Forge <forge@athanor.os>"]
 description = "Visual Dock and taskbar application logic for Athanor OS"

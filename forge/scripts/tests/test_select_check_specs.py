@@ -10,8 +10,9 @@ spec = importlib.util.spec_from_file_location("select_check_specs", SCRIPT)
 sel = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sel)
 
-DAG = ["specs/athanor-bar", "specs/athanor-telemetry", "specs/bat", "specs/cosmic-comp"]
+DAG = {"specs/athanor-bar", "specs/athanor-gone", "specs/bat", "specs/cosmic-comp"}
 NO_SPEC = {"specs/athanor-gone"}
+ALL_BUILT = ["specs/athanor-bar", "specs/bat", "specs/cosmic-comp"]
 
 
 def select(*changed):
@@ -27,37 +28,26 @@ class SelectTest(unittest.TestCase):
             (False, ["specs/bat"], {}),
         )
 
-    def test_rpmmacros_rebuilds_every_dag_spec_and_the_changed_ones(self):
-        builder, specs, _ = select(
-            "forge/config/rpmmacros", "forge/specs/polkit/polkit.spec"
-        )
+    def test_rpmmacros_rebuilds_every_dag_spec(self):
+        builder, specs, _ = select("forge/config/rpmmacros", "forge/specs/bat/bat.spec")
         self.assertFalse(builder)
-        self.assertEqual(
-            specs,
-            ["specs/athanor-bar", "specs/bat", "specs/cosmic-comp", "specs/polkit"],
-        )
+        self.assertEqual(specs, ALL_BUILT)
 
     def test_the_shared_build_scripts_rebuild_every_dag_spec(self):
         for script in ("build_spec.sh", "run_spec_build.sh", "fetch_sources.sh"):
             with self.subTest(script=script):
                 builder, specs, _ = select(f"forge/scripts/{script}")
                 self.assertFalse(builder)
-                self.assertEqual(
-                    specs, ["specs/athanor-bar", "specs/bat", "specs/cosmic-comp"]
-                )
+                self.assertEqual(specs, ALL_BUILT)
 
     def test_the_builder_inputs_build_the_builder_and_every_dag_spec(self):
         for path in ("flake.nix", "flake.lock", "forge/builder/verify_compilers.sh"):
             with self.subTest(path=path):
                 builder, specs, _ = select(path)
                 self.assertTrue(builder)
-                self.assertEqual(
-                    specs, ["specs/athanor-bar", "specs/bat", "specs/cosmic-comp"]
-                )
+                self.assertEqual(specs, ALL_BUILT)
 
-    def test_the_kernel_the_nix_built_telemetry_and_specless_directories_are_skipped(
-        self,
-    ):
+    def test_directories_outside_the_dag_or_without_a_spec_are_skipped(self):
         builder, specs, skipped = select(
             "forge/specs/azoth/config",
             "forge/specs/athanor-telemetry/telemetry.spec",
@@ -65,8 +55,12 @@ class SelectTest(unittest.TestCase):
         )
         self.assertEqual((builder, specs), (False, []))
         self.assertEqual(
-            sorted(skipped),
-            ["specs/athanor-gone", "specs/athanor-telemetry", "specs/azoth"],
+            skipped,
+            {
+                "specs/athanor-gone": "holds no spec after the change",
+                "specs/athanor-telemetry": "is not built by the DAG",
+                "specs/azoth": "is not built by the DAG",
+            },
         )
 
     def test_other_changes_build_nothing(self):
