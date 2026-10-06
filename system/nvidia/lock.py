@@ -112,7 +112,7 @@ def http_get(url):
 
 def mirror_repository():
     """<registry>/athanor-nvidia-rpms, the registry resolved as system/kernel-artifacts.sh does."""
-    owner = os.environ.get("GITHUB_REPOSITORY_OWNER", "hr-mes").lower()
+    owner = os.environ.get("GITHUB_REPOSITORY_OWNER", "ars-regia").lower()
     return f"{os.environ.get('KERNEL_REGISTRY') or f'ghcr.io/{owner}'}/{MIRROR}"
 
 

@@ -23,7 +23,7 @@ hermetic-build lockfile="athanor-build.lock":
 
 # Checks if a package OCI container image already exists on GHCR using deterministic SHA-256 hashing
 [group('CI/CD Pipeline')]
-check-idempotency package registry="ghcr.io" owner="hr-mes" image_name="" base_digest="":
+check-idempotency package registry="ghcr.io" owner="ars-regia" image_name="" base_digest="":
     #!/usr/bin/env bash
     set -euo pipefail
     ARGS=("--package" "{{ package }}" "--registry" "{{ registry }}" "--owner" "{{ owner }}")
@@ -40,7 +40,7 @@ dynamic-matrix:
 
 # Downloads and extracts micro-container RPM images (Tier 0-3) from GHCR, deduplicating versions
 [group('CI/CD Pipeline')]
-fetch-repo-rpms owner="hr-mes":
+fetch-repo-rpms owner="ars-regia":
     #!/usr/bin/env bash
     set -euo pipefail
     bash ../system/kernel-artifacts.sh require-ready
@@ -48,7 +48,7 @@ fetch-repo-rpms owner="hr-mes":
 
 # Cleans up old and untagged container package versions on GHCR
 [group('CI/CD Pipeline')]
-clean-ghcr owner="hr-mes":
+clean-ghcr owner="ars-regia":
     #!/usr/bin/env bash
     set -euo pipefail
     bash scripts/clean_ghcr.sh "{{ owner }}"

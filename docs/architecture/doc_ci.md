@@ -297,7 +297,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 
 ## 4. Self-hosted runner
 
-One runner is registered (`athanor-vm-<timestamp>`, labels `self-hosted`, `Linux`, `X64`, online on 2026-10-06 per `gh api repos/hr-mes/athanor/actions/runners`). It runs each job in an ephemeral KVM guest; [scripts/runner/README.md](../../scripts/runner/README.md) owns its design and installation.
+One runner is registered (`athanor-vm-<timestamp>`, labels `self-hosted`, `Linux`, `X64`, online on 2026-10-06 per `gh api repos/ars-regia/athanor/actions/runners`). It runs each job in an ephemeral KVM guest; [scripts/runner/README.md](../../scripts/runner/README.md) owns its design and installation.
 
 | Job | Why self-hosted |
 |---|---|
@@ -326,7 +326,7 @@ Every name below is described in the secrets inventory, `docs/operations/secrets
 | `KERNEL_REGISTRY` | variable, default `ghcr.io/<owner>` | not set | CI1, CI6, CI8, CI9, CI13 |
 | `BUILDER_STABLE_TAG` | variable, default `latest` | not set | CI21-CI23 |
 
-Environments (`gh api repos/hr-mes/athanor/environments`):
+Environments (`gh api repos/ars-regia/athanor/environments`):
 
 | Environment | Protection | Used by |
 |---|---|---|

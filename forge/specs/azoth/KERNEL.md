@@ -153,11 +153,11 @@ OCI con i soli RPM dentro, tag `<nvr>` (quello che stampa `bash nvr.sh`):
 
 | Immagine | Contenuto |
 |----------|-----------|
-| `ghcr.io/hr-mes/azoth` | kernel, core, modules, modules-core/extra/internal, uki-virt |
-| `ghcr.io/hr-mes/azoth-devel` | kernel-devel, per i kmod esterni (NVIDIA, fase K4) |
-| `ghcr.io/hr-mes/azoth:<nvr>-microvm` | azoth-microvm: vmlinux, bzImage, config e release del kernel guest (sezione 9) |
-| `ghcr.io/hr-mes/azoth-debuginfo` | debuginfo, restano le due versioni piu' recenti |
-| `ghcr.io/hr-mes/azoth-nvidia` | i `.ko` NVIDIA firmati, tag `<nvr>-k<12 cifre esadecimali del digest del kernel>-<branch>-<versione>` (pubblicata da `nvidia-kmod.yml`, non da Kernel Build) |
+| `ghcr.io/ars-regia/azoth` | kernel, core, modules, modules-core/extra/internal, uki-virt |
+| `ghcr.io/ars-regia/azoth-devel` | kernel-devel, per i kmod esterni (NVIDIA, fase K4) |
+| `ghcr.io/ars-regia/azoth:<nvr>-microvm` | azoth-microvm: vmlinux, bzImage, config e release del kernel guest (sezione 9) |
+| `ghcr.io/ars-regia/azoth-debuginfo` | debuginfo, restano le due versioni piu' recenti |
+| `ghcr.io/ars-regia/azoth-nvidia` | i `.ko` NVIDIA firmati, tag `<nvr>-k<12 cifre esadecimali del digest del kernel>-<branch>-<versione>` (pubblicata da `nvidia-kmod.yml`, non da Kernel Build) |
 
 Ognuna e' firmata con cosign keyless dall'identita' del workflow, porta un SBOM SPDX
 e un'attestazione custom con i pin (`pins.json`: pins.env, hash del manifest, del
@@ -165,10 +165,10 @@ delta e del Containerfile, immagine base del builder); la principale ha anche la
 provenance SLSA di GitHub. `:latest` si muove solo sul branch di default del repository. Verifica:
 
 ```sh
-cosign verify --certificate-identity-regexp '^https://github.com/hr-mes/athanor/' \
+cosign verify --certificate-identity-regexp '^https://github.com/ars-regia/athanor/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  "ghcr.io/hr-mes/azoth:$(bash nvr.sh)"
-gh attestation verify "oci://ghcr.io/hr-mes/azoth:$(bash nvr.sh)" --repo hr-mes/athanor
+  "ghcr.io/ars-regia/azoth:$(bash nvr.sh)"
+gh attestation verify "oci://ghcr.io/ars-regia/azoth:$(bash nvr.sh)" --repo ars-regia/athanor
 ```
 
 ## Bump
