@@ -1,6 +1,6 @@
 # System image: base and GPU variants
 
-Status: **approved by the maintainer on 2026-09-16; implemented by docs/superpowers/plans/2026-09-16-system-image-variants.md**. This document records what the maintainer decided on 2026-09-16: option C+A, with Fedora's atomic desktop base. `doc_kernel_build.md` (section 10) and `doc_kernel_profile.md` (sections 6 and 14) keep owning the kernel modules and the kernel profile; section 8 lists what they must change to agree with this document.
+Status: **approved by the maintainer on 2026-09-16; implemented by the plan in history: `git show 1fbef951:docs/superpowers/plans/2026-09-16-system-image-variants.md`**. This document records what the maintainer decided on 2026-09-16: option C+A, with Fedora's atomic desktop base. `doc_kernel_build.md` (section 10) and `doc_kernel_profile.md` (sections 6 and 14) keep owning the kernel modules and the kernel profile; section 8 lists what they must change to agree with this document.
 
 ## 1. Context
 
