@@ -90,7 +90,7 @@ Facts read by `export`; each one is in the file named. `diff` against `hr-mes/at
 | Dependabot alerts and Dependabot security updates are off; secret scanning and push protection are on; private vulnerability reporting is on | `repository.json` |
 | Only `iso-v0` is protected: required check `Kernel gate` (not strict), no review, `enforce_admins` off, force push and deletion off | `branch-protection.json` |
 | No repository ruleset | `rulesets.json` |
-| Environment `signing`: reviewer `hr-mes`, branches `iso-v0` and `main`, admin bypass on, five secrets including `MOK_PRIVATE_KEY` | `environments.json` |
+| Environment `signing`: reviewer `hr-mes`, branches `iso-v0` and `main`, admin bypass on, four secrets | `environments.json` |
 | Environment `github-pages`: branches `gh-pages` and `main` | `environments.json` |
 | Environment `delete`: no rule, no secret | `environments.json` |
 | Pages: legacy build from `main:/docs`; `gh api repos/ars-regia/athanor/pages` reports `"status": "errored"` (status is volatile, not stored) | `pages.json` |
@@ -107,5 +107,4 @@ Each one is a change to a file followed by `apply`; none has been made.
 | Environment `delete` has no rule and no secret, and no workflow names it (`grep -rn "environment:" .github/workflows` finds only `signing`) | Delete it by hand and re-export |
 | Pages builds `main:/docs` and errors, while [call-system-image.yml](../../.github/workflows/call-system-image.yml) line 180 publishes to a `gh-pages` branch | Decide the Pages source (`gh-pages`, or off) and set `pages.json` |
 | `signing` lets an admin bypass the reviewer, and `enforce_admins` is off on `iso-v0` | Decide whether the single admin should be bound by the gate |
-| `MOK_PRIVATE_KEY` is still in `signing` | Delete it once the key cut-over is complete, as planned at the rotation |
 | No scheduled drift check | A workflow running `diff` needs an admin token as a secret; decide whether drift detection is worth that token |

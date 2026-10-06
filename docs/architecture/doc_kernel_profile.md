@@ -1050,9 +1050,8 @@ Found on the running system and in the repository (2026-09-14):
   image predates the new module certificate. Images from Orchestrator runs 34842214986 and
   34853705590 are built but not deployed, and NVIDIA kmod run 34854397484 failed in its
   sign job on an artifact download error after the green run 34847702229. The cut-over is
-  the redeploy of the newest image; `MOK_PRIVATE_KEY` is deleted once a deployed system loads `nvidia`
-  signed by the module signing key (task 9 of
-  `docs/superpowers/plans/2026-09-13-signing-key-rotation.md`). Until then `cosmic-comp`
+  the redeploy of the newest image. The retired MOK's private key is no longer kept: no
+  environment holds it (2026-10-07). Until the redeploy `cosmic-comp`
   floods the journal with `VRR_ENABLED` warnings under nouveau.
 - **Kernel series:** Azoth is pinned to 7.1.8 while 7.1 is end of life; the bump bot,
   scheduled daily from the default branch `iso-v0` (first scheduled run pending), moves it to 7.2 (D37).

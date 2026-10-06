@@ -331,7 +331,6 @@ Every name below is described in the secrets inventory, `docs/operations/secrets
 | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | secret | environment `signing` | CI5 |
 | `MODULE_SIGNING_KEY` | secret | environment `signing` | CI6 |
 | `RPM_GPG_KEY`, `RPM_GPG_PASSPHRASE` | secret | **nowhere**: the RPMs and tier repositories are not GPG-signed (`call-system-image.yml:94,123`) | CI5 |
-| `MOK_PRIVATE_KEY` | secret | environment `signing` | no workflow |
 | `REGISTRY_HOST` | variable, default `ghcr.io` | not set | CI1, CI3, CI4, CI11, CI14, CI21-CI23 |
 | `KERNEL_REGISTRY` | variable, default `ghcr.io/<owner>` | not set | CI1, CI6, CI8, CI9, CI13, CI25 |
 | `BUILDER_STABLE_TAG` | variable, default `latest` | not set | CI21-CI23 |

@@ -166,8 +166,6 @@ These defects were found on the same boot and each needs its own fix:
    - `cosmic-panel` initialises EGL;
    - `modinfo -F signer nvidia` names the module signing key.
 
-   After this check `MOK_PRIVATE_KEY` is deleted from the `signing` environment.
-
 ## 7. Migration of the maintainer's desktop
 
 1. **Now, to use the desktop:** the temporary kernel argument `modprobe.blacklist=nvidia,nvidia_drm,nvidia_modeset,nvidia_uvm,nvidia_peermem` hands both GPUs back to `nouveau`.

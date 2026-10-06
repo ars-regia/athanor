@@ -57,7 +57,6 @@
       "COSIGN_PASSWORD",
       "COSIGN_PRIVATE_KEY",
       "MODULE_SIGNING_KEY",
-      "MOK_PRIVATE_KEY",
       "SECUREBOOT_SIGNING_KEY"
     ],
     "variables": [],
