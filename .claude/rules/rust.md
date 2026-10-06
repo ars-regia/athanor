@@ -3,47 +3,46 @@ paths:
   - "**/*.rs"
 ---
 
-# Rust — Ermete OS
+# Rust
 
-## Concorrenza senza panic
+## Concurrency without panics
 
-`panic = "abort"` è impostato **sia su dev che su release**. Un panic non si
-propaga e non si recupera: termina il processo. In un daemon di sistema questo
-significa perdita di servizio, e in `ermete-agentic-kernel` o nel compositor
-significa sessione utente persa.
+`panic = "abort"` is set on **both dev and release** (`Cargo.toml`). A panic
+does not unwind and cannot be recovered: it ends the process. In a system daemon
+that means loss of service; in `athanor-agentic-kernel` or a shell component it
+means a lost user session.
 
-- Mai `.unwrap()` o `.expect()` su `RwLock` / `Mutex`: un lock avvelenato fa
-  cadere a cascata tutto ciò che dipende dal daemon. Propaga con `anyhow::Result`.
-- Mai `.unwrap()` su `Option` / `Result` in codice che gira in un daemon o nel
-  compositor. Nei test va bene.
-- Indicizzazione di slice e aritmetica: `release` ha `overflow-checks = true`,
-  quindi un overflow che in altri progetti passerebbe silenziosamente qui aborta.
-  Usa `checked_*` / `saturating_*` dove l'input non è sotto il tuo controllo.
+- Never `.unwrap()` or `.expect()` on `RwLock` / `Mutex`: a poisoned lock takes
+  down everything that depends on the daemon. Propagate with `anyhow::Result`.
+- Never `.unwrap()` on `Option` / `Result` in code that runs in a daemon or a
+  shell component. Tests may.
+- Slice indexing and arithmetic: `release` has `overflow-checks = true`, so an
+  overflow that passes silently elsewhere aborts here. Use `checked_*` /
+  `saturating_*` where the input is not under your control.
 
-## Errori
+## Errors
 
-- `thiserror` per i tipi di errore delle librerie, `anyhow` per la propagazione
-  nei binari. Sono entrambi già nelle dipendenze del workspace.
-- Un `Err` va propagato o gestito, mai inghiottito. Un `catch` vuoto o un
-  `let _ =` su un `Result` in un percorso di sicurezza è un difetto.
+- `thiserror` for library error types, `anyhow` for propagation in binaries.
+  Both are already workspace dependencies.
+- An `Err` is propagated or handled, never swallowed. An empty `catch` or a
+  `let _ =` on a `Result` in a security path is a defect.
 
-## Dipendenze
+## Dependencies
 
-Le versioni stanno in `[workspace.dependencies]` nel `Cargo.toml` di root.
-Nei crate usa `nome = { workspace = true }`. **Non aggiungere una dipendenza
-diretta con la sua versione**: rompe l'allineamento del workspace.
+Versions live in `[workspace.dependencies]` in the root `Cargo.toml`. In a crate
+use `name = { workspace = true }`. **Do not add a direct dependency with its own
+version**: it breaks workspace alignment.
 
-Prima di introdurre un crate nuovo, verifica che non ce ne sia già uno che fa
-la stessa cosa fra le dipendenze del workspace, e chiedi conferma: `deny.toml`
-impone vincoli su licenze e provenienza.
+Before introducing a new crate, check that no workspace dependency already does
+the same job, and ask for confirmation: `deny.toml` enforces licence and source
+constraints.
 
-## Prima di modificare
+## Before changing
 
-Se il simbolo è condiviso fra crate, `codegraph_impact` prima di toccarlo: il
-workspace ha 33 membri e una firma cambiata si propaga più lontano di quanto
-sembri. Per una modifica ripetuta su più occorrenze, `/ast-refactor`.
+If the symbol is shared between crates, run `codegraph_impact` before touching
+it: a changed signature travels further across the workspace than it seems. For
+the same change at many sites, use a structural tool such as `ast-grep`.
 
-## Verifica
+## Verification
 
-`cargo test -p <crate>` sul crate toccato, poi `just lint`.
-La formattazione la fa l'hook: non sistemare indentazione a mano.
+`cargo test -p <crate>` on the crate you touched, then `just lint`.

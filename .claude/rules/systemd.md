@@ -7,7 +7,14 @@ paths:
   - "**/*.mount"
   - "**/*.path"
   - "**/*.preset"
-  - "**/*.conf.d/**"
+  - "**/*.service.d/**"
+  - "**/*.socket.d/**"
+  - "**/*.timer.d/**"
+  - "**/*.mount.d/**"
+  - "**/*.target.d/**"
+  - "**/*.path.d/**"
+  - "**/*.slice.d/**"
+  - "**/systemd/*.conf.d/**"
 ---
 
 # systemd units and D-Bus services

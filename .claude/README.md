@@ -18,6 +18,22 @@
 | `skills/`              | on demand                      | `convert-documents-to-markdown` (MIT, third party)             |
 
 Personal preferences go in `settings.local.json` (git-ignored) or `~/.claude/`.
+
+Limits of these rules, per the Claude Code permission documentation:
+
+- A Bash rule matches each subcommand of a compound command on its own, so a
+  rule that contains `|` or `&&` never matches. `curl ... | sh` is denied
+  through its bare `sh` subcommand.
+- A Bash rule matches the command text only: `/usr/bin/rm`, `sh -c '...'` or
+  `git -C . push` escape it.
+- `Read()` deny rules cover the built-in file tools and the file commands Claude
+  Code recognises in Bash (`cat`, `head`, `tail`, `sed`, `tee`, redirections).
+  They do not stop `grep -r` over a directory or a script that opens the file
+  itself.
+
+The boundary that does not depend on command text is the OS sandbox. Enable it
+in your user settings and list your own secret locations under
+`sandbox.filesystem.denyRead`.
 A trap found while working becomes one line in the matching `rules/<area>.md`,
 never only a personal memory.
 

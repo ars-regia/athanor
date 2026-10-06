@@ -6,43 +6,43 @@ paths:
   - "scripts/verify.py"
 ---
 
-# CI e build
+# CI and build
 
-## Valida in locale, non con un push
+## Validate locally, not with a push
 
-I workflow del percorso ISO si validano prima di committare:
+Validate ISO-path workflows before committing:
 
 ```
 actionlint
 python3 scripts/verify.py workflows
-bash -n   # su ogni blocco run: non banale
+bash -n   # on every non-trivial run: block
 ```
 
-Non usare il push come test. Un `startup_failure` su GitHub costa più di trenta
-secondi di verifica locale.
+Never use a push as the test. A `startup_failure` on GitHub costs more than
+thirty seconds of local checks.
 
-## Errori già visti su questo repository
+## Errors already seen in this repository
 
-- **Step con solo `name:`**, senza `run:` né `uses:`. GitHub rifiuta l'**intero
-  file**, non solo lo step: i workflow non partono affatto. Se ricostruisci uno
-  step, dagli un corpo o rimuovilo. Mai lasciarlo vuoto.
-- **Blocchi `if ...; then` / `fi` vuoti**. In bash sono errori di sintassi con
-  uscita 2, non no-op silenziosi.
-- **POST verso servizi esterni** per i log. Usa `actions/upload-artifact` e
-  `$GITHUB_STEP_SUMMARY`.
+- **A step with only `name:`**, no `run:` and no `uses:`. GitHub rejects the
+  **whole file**, not just the step, and no workflow in it starts. Give a
+  rebuilt step a body or remove it; never leave it empty.
+- **Empty `if ...; then` / `fi` blocks.** In bash they are syntax errors with
+  exit code 2, not silent no-ops.
+- **POST requests to external services** for logs. Use
+  `actions/upload-artifact` and `$GITHUB_STEP_SUMMARY`.
 
-## Vincoli
+## Constraints
 
-- Mai aggiungere `|| true` o `continue-on-error` per far passare un job. Un job
-  che fallisce sta dicendo qualcosa.
-- Un commit per problema, non un commit che sistema tutto.
-- Ogni workflow del percorso ISO ha un job `lint` che gira per primo.
+- Never add `|| true` or `continue-on-error` to make a job pass. A failing job
+  is telling you something.
+- One commit per problem, not one commit that fixes everything.
+- Every ISO-path workflow has a `lint` job that runs first.
 
 ## Justfile
 
-`just lint`, `just format`, `just check-syntax` sono le porte d'ingresso.
-Il Justfile stesso è formattato da `just --unstable --fmt`: se lo modifichi,
-`just check-syntax` deve restare verde.
+`just lint`, `just format` and `just check-syntax` are the entry points.
+The Justfile itself is formatted by `just --unstable --fmt`: if you change it,
+`just check-syntax` must stay green.
 
 ## Known traps
 

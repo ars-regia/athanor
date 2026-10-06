@@ -21,8 +21,8 @@ Il kernel e' **Azoth** (`forge/specs/azoth`).
 - `scripts/verify.py` — verificatore del progetto: workflow, polkit, percorsi, file spediti, documentazione
 - `.claude/` — configurazione Claude Code condivisa: permessi, trappole per area in `rules/`, setup consigliato in `.claude/README.md`
 
-**Mai entrare in `docs/architecture/graph-vaults/`**: sono 2958 file generati dal
-grafo. Interrogali con `/graphify query`, non aprirli.
+Il grafo (`docs/architecture/graph-vaults/`, `graph-pages/`, `.graphify*`) si genera in
+locale con `/graphify` e non sta nel repository: si interroga con `/graphify query`, mai aperto.
 
 ## Stato corrente
 
