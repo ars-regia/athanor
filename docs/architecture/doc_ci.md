@@ -17,7 +17,7 @@ The task brief counted 23 workflows. There are 24: `nix-registry-bump.yml` lande
 push to forge/** or system/** (main, iso-v0) | daily 04:00 UTC | dispatch (Kernel Build, manual)
 CI1 athanor-forge-orchestrator.yml        concurrency: one run per ref, the newest waits
  |- lint ............................ CI2 call-lint.yml
- |- orchestrator-brain .............. forge/scripts/dynamic-matrix.sh -> dag_level_0..2, dag_flatpaks, has_changes, image_needed
+ |- orchestrator-brain .............. forge/scripts/dynamic-matrix.sh -> dag_level_0..2, dag_flatpaks, has_changes
  |- build-builder ................... CI3 call-build-builder.yml -> athanor-builder:<content_hash>
  |- kernel-artifacts ................ system/kernel-artifacts.sh resolve, cycle -> state, cycle, kernel_digest
  |   `- nvidia-kmod (modules-missing)  CI6 nvidia-kmod.yml -> CI7 nvidia-build.yml   [signing approval]

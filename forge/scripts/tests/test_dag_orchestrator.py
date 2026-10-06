@@ -61,16 +61,6 @@ class PathDependenciesTest(unittest.TestCase):
         self.assertEqual(dag.path_dependencies(str(workspace)), [str(self.root / "system/unit")])
 
 
-class ImageNeededTest(unittest.TestCase):
-    def test_a_push_builds_the_image_with_every_package_clean(self):
-        for event in ("push", "pull_request", "workflow_dispatch", "workflow_run"):
-            self.assertTrue(dag.image_needed(event, 0), event)
-
-    def test_the_nightly_run_needs_a_dirty_package(self):
-        self.assertFalse(dag.image_needed("schedule", 0))
-        self.assertTrue(dag.image_needed("schedule", 1))
-
-
 class RegistryStateTest(unittest.TestCase):
     """UD41: a custom package is dirty when the registry lacks its hash tag. The registry is
     a stub skopeo on PATH, so the whole chain runs: check_idempotency.sh --hash-only,

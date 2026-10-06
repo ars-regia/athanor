@@ -79,9 +79,9 @@ and the same with `-legacy-<NVIDIA_LEGACY_VERSION>`. A republished kernel with t
    - `system/build-image.sh` passes the module digests as build arguments;
    - everything comes from the file of step 3, so the image is built from exactly what was verified.
 
-**When the image jobs run:** when the brain's `image_needed` is true (every run but the nightly one, which needs a dirty package; a push that touches only `system/` leaves every package clean and still publishes), or when step 1 did not answer `ready`, or when the dispatch sets the input `force_image`. Kernel Build always sets it.
+**When the image jobs run:** on every orchestrator run (push, dispatch, schedule), whatever the package matrix holds: `system/Containerfile` installs from the live Fedora repositories with unpinned `dnf5`, so the nightly rebuild is how Fedora errata reach the image. `has_changes` only shapes the package matrix. The `force_image` input, which Kernel Build always sets, is kept for dispatch compatibility and no longer gates the jobs.
 
-- **Why the input is needed:** `forge/scripts/dag_orchestrator.py` sets `has_changes` from dirty DAG nodes only (`image_needed` adds the event rule), and the kernel is external to the DAG. Without the input, a dispatched run after a pin bump would go green without an image.
+- **Why the image no longer waits for `has_changes`:** `forge/scripts/dag_orchestrator.py` sets it from dirty DAG nodes only, and neither the kernel nor the unpinned Fedora packages are DAG nodes.
 
 **`kernel-missing` at step 1.** The decision uses the commit range, not the Actions API, because a Kernel Build run for the same push may not exist yet when the Orchestrator starts.
 
