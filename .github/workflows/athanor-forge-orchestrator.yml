@@ -71,7 +71,10 @@ jobs:
     needs: [lint]
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # Lookups run 8 at a time and the first failure ends the run. One lookup that retry.sh
+    # keeps retrying takes up to ~4 minutes of waits plus the attempts themselves (~2.5 more
+    # at skopeo's own timeouts); the rest of the job is a checkout and a few seconds of hashing.
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: forge

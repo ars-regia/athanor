@@ -60,7 +60,7 @@ package jobs of one run:
   adds an edge too.
 - **Dirty nodes**: a custom package is dirty when the registry has no
   `athanor-forge-<package>:hash-<hash>`, the hash being the one
-  `check_idempotency.sh --hash-only` computes. The lookup is `registry_probe.sh` under
+  `check_idempotency.sh --hash-only` computes. The lookups run eight at a time, each `registry_probe.sh` under
   `retry.sh`: "manifest unknown" (and ghcr's 403 for a never-published package) means
   absent; any other failure is retried and then stops the run, because reading an
   unanswered question as "clean" would ship stale images and reading it as "dirty" would

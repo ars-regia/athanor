@@ -8,6 +8,8 @@ import os
 import pathlib
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 from unittest import mock
 
@@ -113,7 +115,7 @@ class RegistryStateTest(unittest.TestCase):
 
     def test_registry_error_stops_the_run(self):
         self.answer(1, "dial tcp: i/o timeout")
-        with self.assertRaises(subprocess.CalledProcessError):
+        with self.assertRaisesRegex(RuntimeError, "i/o timeout"):
             self.dirty()
 
     def test_every_custom_hash_is_written_for_the_system_image_build(self):
@@ -124,6 +126,25 @@ class RegistryStateTest(unittest.TestCase):
             dag.write_hashes(hashes)
         self.assertEqual(hashes, json.loads((state / "hashes.json").read_text()))
         self.assertEqual(["dock"], list(hashes))
+
+    def test_lookups_run_concurrently_within_the_bound(self):
+        lock = threading.Lock()
+        running = peak = 0
+
+        def exists(ref):
+            nonlocal running, peak
+            with lock:
+                running += 1
+                peak = max(peak, running)
+            time.sleep(0.02)
+            with lock:
+                running -= 1
+            return True
+
+        hashes = {f"p{i}": "0" * 64 for i in range(40)}
+        self.assertEqual(set(), dag.evaluate_dirty_nodes(hashes, exists=exists))
+        self.assertGreater(peak, 1)
+        self.assertLessEqual(peak, dag.PROBE_WORKERS)
 
     def test_lookup_asks_for_the_hash_tag_of_the_node_image(self):
         self.answer(0)

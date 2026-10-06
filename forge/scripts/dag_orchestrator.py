@@ -12,6 +12,7 @@ import glob
 import re
 import json
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 import tomllib
 from collections import defaultdict, deque
 
@@ -348,13 +349,16 @@ def content_hash(pkg):
 def image_exists(ref):
     """Whether the registry has ref. registry_probe.sh answers present or absent and fails
     on anything else; retry.sh repeats those failures, and one that outlasts the retries
-    raises, so a registry that cannot be asked stops the run instead of reading as clean."""
-    out = subprocess.run(
+    raises with the probe's own message, so a registry that cannot be asked stops the run
+    instead of reading as clean."""
+    result = subprocess.run(
         ["bash", os.path.join(SCRIPTS_DIR, "retry.sh"), "bash",
          os.path.join(SCRIPTS_DIR, "registry_probe.sh"), ref],
-        capture_output=True, text=True, check=True,
-    ).stdout.strip()
-    return out == "present"
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"registry lookup of {ref} failed (exit {result.returncode}):\n{result.stderr.strip()}")
+    return result.stdout.strip() == "present"
 
 
 def custom_hashes(all_nodes, node_types, hash_of=content_hash):
@@ -372,6 +376,11 @@ def image_ref(node, hash_):
     return f"{registry}/{owner}/athanor-forge-{node}:hash-{hash_}"
 
 
+# Registry lookups in flight at once. Each is one skopeo inspect; retry.sh may hold one for
+# about four minutes, so sequential lookups of ~40 packages could not fit a job.
+PROBE_WORKERS = 8
+
+
 def evaluate_dirty_nodes(hashes, exists=image_exists):
     """
     A custom package is dirty when the registry has no image for its hash. Builds run with
@@ -379,7 +388,13 @@ def evaluate_dirty_nodes(hashes, exists=image_exists):
     not dirty its dependents. Upstream packages are never built here and flatpaks publish
     nothing: neither is ever dirty.
     """
-    return {node for node, hash_ in hashes.items() if not exists(image_ref(node, hash_))}
+    with ThreadPoolExecutor(max_workers=PROBE_WORKERS) as pool:
+        futures = {node: pool.submit(exists, image_ref(node, hash_)) for node, hash_ in hashes.items()}
+        try:
+            return {node for node, future in futures.items() if not future.result()}
+        finally:
+            # The first failed lookup ends the run: do not start the rest.
+            pool.shutdown(wait=False, cancel_futures=True)
 
 
 def write_hashes(hashes):
