@@ -810,6 +810,30 @@ def check_cmdline():
     return r
 
 
+PAM_CONTAINERFILE = "system/Containerfile"
+NULLOK_GUARD = re.compile(r"^RUN authselect enable-feature without-nullok\b", re.MULTILINE)
+
+
+def nullok_problems(root=None):
+    """The image build drops nullok from every authselect stack (decision A2-23)."""
+    root = root or ROOT
+    try:
+        text = read(root / PAM_CONTAINERFILE)
+    except OSError as err:
+        return [f"{PAM_CONTAINERFILE}: cannot read ({err})"]
+    if not NULLOK_GUARD.search(text):
+        return [f"{PAM_CONTAINERFILE}: no 'RUN authselect enable-feature without-nullok' step (A2-23)"]
+    return []
+
+
+@check("pam", "No account authenticates with an empty password (A2-23)")
+def check_pam():
+    r = Result()
+    for problem in nullok_problems():
+        r.fail(problem)
+    return r
+
+
 # --------------------------------------------------------------------------- #
 # 8. polkit, il lato codice — il subject deve essere il CHIAMANTE
 # --------------------------------------------------------------------------- #
@@ -1031,12 +1055,11 @@ def check_boundary():
 
 # Placeholders the unit tests use for an owner: they name no real registry namespace.
 PLACEHOLDER_OWNERS = {"owner", "o"}
-# Where the pipeline names its images. system/Containerfile is outside on purpose: its tier
-# mounts are the one literal decision 12 of the 2026-10-05 re-audit keeps (see the comment there).
+# Where the pipeline names its images.
 REGISTRY_DIRS = (".github/workflows", "scripts", "forge/scripts")
-REGISTRY_FILES = ("Justfile", "forge/Justfile", "system/Justfile")
-# The file types that name images: workflows, scripts, recipes and container builds.
-REGISTRY_SUFFIXES = {".yml", ".yaml", ".sh", ".py", ".just"}
+REGISTRY_FILES = ("Justfile", "forge/Justfile", "system/Justfile", "system/Containerfile", "flake.nix")
+# The file types that name images: workflows, scripts, recipes, container builds and Nix.
+REGISTRY_SUFFIXES = {".yml", ".yaml", ".sh", ".py", ".just", ".nix"}
 REGISTRY_NAMES = {"Justfile", "Containerfile"}
 
 
