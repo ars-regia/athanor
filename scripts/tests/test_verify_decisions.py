@@ -36,8 +36,8 @@ e
 """
 
 
-def row(id_, num, name):
-    return f"| {id_} | {num} | [T]({name}) | accepted | docs |\n"
+def row(id_, num, name, status="accepted"):
+    return f"| {id_} | {num} | [T]({name}) | {status} | docs |\n"
 
 
 class DecisionProblemsTest(unittest.TestCase):
@@ -51,7 +51,7 @@ class DecisionProblemsTest(unittest.TestCase):
         for name, (id_, status) in records.items():
             (folder / name).write_text(RECORD % dict(id=id_, status=status))
         if index is None:
-            index = "".join(row(i, n[:4], n) for n, (i, _) in records.items())
+            index = "".join(row(i, n[:4], n, st) for n, (i, st) in records.items())
         (folder / "README.md").write_text(
             "| Id | No. | Title | Status | Areas |\n| - | - | - | - | - |\n" + index
         )
