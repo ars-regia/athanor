@@ -542,6 +542,84 @@ def check_shipped():
 # 6. documentazione — i link devono risolvere e non essere assoluti
 # --------------------------------------------------------------------------- #
 
+REQUIREMENT_HEAD = re.compile(r"^\s*(?:[-*]\s+)?\*\*([A-Z]{1,3}\d+[a-z]?)\.")
+NEEDS_LINE = re.compile(r"^\s*(?:[-*]\s+|\d+\.\s+)?Needs:\s*(.*)$")
+REQUIREMENT_ID = re.compile(r"[A-Z]{1,3}\d+[a-z]?")
+
+
+def needs_graph(root=None):
+    """The cross-specification dependency graph of docs/architecture/doc_session.md, SN11.
+
+    A line `Needs: A1, B2.` belongs to the nearest requirement head (`**A1.` or `- **A1.`) above
+    it in the same section: a Markdown heading ends a requirement, so a Needs line below one and
+    before the next requirement is a problem, not silently attributed. Fenced code blocks are
+    skipped. Returns (problems, graph), graph mapping each requirement to the set it needs."""
+    root = root or ROOT
+    files = sorted((root / "docs" / "architecture").glob("*.md"))
+    defined, needs, problems = {}, {}, []
+    for f in files:
+        name = f.relative_to(root)
+        current, fenced = None, False
+        for number, line in enumerate(read(f).splitlines(), 1):
+            if line.lstrip().startswith(("```", "~~~")):
+                fenced = not fenced
+                continue
+            if fenced:
+                continue
+            if line.startswith("#"):
+                current = None
+                continue
+            head = REQUIREMENT_HEAD.match(line)
+            if head:
+                current = head.group(1)
+                defined.setdefault(current, []).append(f"{name}:{number}")
+                continue
+            m = NEEDS_LINE.match(line)
+            if not m:
+                continue
+            where = f"{name}:{number}"
+            if current is None:
+                problems.append(f"{where}: Needs line outside a requirement")
+                continue
+            tokens = [t.strip() for t in m.group(1).rstrip().rstrip(".").split(",")]
+            for token in tokens:
+                if not REQUIREMENT_ID.fullmatch(token):
+                    problems.append(f"{where}: {current} needs {token!r}, not a requirement identifier")
+                elif token == current:
+                    problems.append(f"{where}: {current} needs itself")
+                else:
+                    needs.setdefault(current, {})[token] = where
+    graph = {}
+    for source, targets in needs.items():
+        if len(defined[source]) > 1:
+            problems.append(f"{source} is defined more than once: {', '.join(defined[source])}")
+        for target, where in targets.items():
+            if target not in defined:
+                problems.append(f"{where}: {source} needs {target}, which no specification defines")
+            elif len(defined[target]) > 1:
+                problems.append(f"{where}: {source} needs {target}, defined more than once: {', '.join(defined[target])}")
+            graph.setdefault(source, set()).add(target)
+    # Depth-first search with three colours; a grey node met again closes a cycle.
+    colour, stack = {}, []
+
+    def visit(node):
+        colour[node] = "grey"
+        stack.append(node)
+        for nxt in sorted(graph.get(node, ())):
+            if colour.get(nxt) == "grey":
+                cycle = stack[stack.index(nxt):] + [nxt]
+                problems.append("Needs cycle: " + " -> ".join(cycle))
+            elif nxt not in colour:
+                visit(nxt)
+        stack.pop()
+        colour[node] = "black"
+
+    for node in sorted(graph):
+        if node not in colour:
+            visit(node)
+    return problems, graph
+
+
 REGISTER = "docs/architecture/shell-features.md"
 REGISTER_STATUSES = ("have", "partial", "missing", "excluded (proposed)")
 
@@ -632,6 +710,11 @@ def check_docs():
                 continue
             if not (base / link).exists():
                 r.fail(f"{t}: link rotto [{label[:30]}] -> {link}")
+    problems, graph = needs_graph()
+    for problem in problems:
+        r.fail(problem)
+    edges = sum(len(targets) for targets in graph.values())
+    r.note(f"Needs graph: {len(set(graph) | set().union(*graph.values()))} requirements, {edges} edges")
     register = ROOT / REGISTER
     if register.exists():
         for problem in register_count_problems(read(register)):
