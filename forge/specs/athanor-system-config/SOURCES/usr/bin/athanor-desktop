@@ -31,6 +31,9 @@ if [ -n "${XDG_SESSION_ID:-}" ] && class=$(loginctl show-session "$XDG_SESSION_I
 else
 	echo "athanor-desktop: cannot read the session class from logind; file search stays off" >&2
 fi
+# XDG_CURRENT_DESKTOP already reaches the manager, before any unit starts, from
+# /usr/lib/environment.d/50-athanor-desktop.conf. Importing it again republishes the
+# value athanor-session exported, which is the same one.
 systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XDG_SESSION_CLASS
 
 # Runs a session component again whenever it exits, as cosmic-session does, for as long

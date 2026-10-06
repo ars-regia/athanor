@@ -7,8 +7,7 @@
 
 ## Security & Verification
 - [ ] This PR does not introduce `unwrap()` or `expect()`.
-- [ ] No `unsafe` Rust blocks were added, OR they are formally proven.
-- [ ] Kani verification passes locally.
+- [ ] `just lint` and `python3 scripts/verify.py` pass locally.
 - [ ] Input data is strictly sanitized against bash injection.
 
 ## Type of change
@@ -20,5 +19,5 @@
 ## Checklist:
 - [ ] My code follows the style guidelines of Athanor OS.
 - [ ] I have performed a self-review of my own code.
-- [ ] I have updated `ARCHITECTURE.md` if necessary.
+- [ ] I have updated the affected documents under `docs/architecture/`.
 - [ ] My commits are signed.
