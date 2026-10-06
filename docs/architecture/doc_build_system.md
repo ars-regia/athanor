@@ -58,8 +58,6 @@ package jobs of one run:
 - **Edges**: every package of tier N+1 depends on every package of tier N; a
   `BuildRequires` or `Requires` naming another node (with the `athanor-` prefix removed)
   adds an edge too.
-- **Node hash**: for a custom package, `package_hash`: its spec directory plus every
-  directory its crates reach through path dependencies outside it.
 - **Dirty nodes**: a custom package is dirty when the registry has no
   `athanor-forge-<package>:hash-<hash>`, the hash being the one
   `check_idempotency.sh --hash-only` computes. The lookup is `registry_probe.sh` under
@@ -82,9 +80,10 @@ package, so the levels order the jobs but no build consumes the output of anothe
 
 1. **Idempotency.** `check_idempotency.sh` hashes the spec directory, `config/rpmmacros`
    and `config/packages.json`, and asks the registry whether
-   `athanor-forge-<package>:hash-<hash>` exists. If it does, the job stops there. This hash does
-   not include the path dependencies that `package_hash` follows: a change confined to a
-   crate under `system/` does not rebuild the packages that depend on it (known gap).
+   `athanor-forge-<package>:hash-<hash>` exists. If it does, the job stops there. The hash also covers the Cargo path dependencies of the
+   package's crates (`dag_orchestrator.py --path-dependencies`), so a change confined to a
+   shared crate under `system/` rebuilds its consumers, and the registry is read through
+   `registry_probe.sh` only.
 2. **Build.** `forge/scripts/run_spec_build.sh` runs `build_spec.sh` twice in the builder
    image, sharing its home directory through a podman volume. The `fetch` stage has the
    network: it downloads the `Source` files and verifies them against

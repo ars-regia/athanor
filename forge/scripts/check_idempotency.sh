@@ -135,73 +135,15 @@ IMAGE_URL_LOWER=$(echo "$IMAGE_URL" | tr '[:upper:]' '[:lower:]')
 
 echo ">>> Verifica esistenza su GHCR: ${IMAGE_URL_LOWER}..." >&2
 
-# Verifica con skopeo (se skopeo non è installato, tenta di installarlo o usa fallback)
-if ! command -v skopeo >/dev/null 2>&1; then
-  if command -v dnf >/dev/null 2>&1; then
-    sudo -n dnf install -y skopeo >&2 || dnf install -y skopeo >&2 || :
-  fi
-fi
-
-if ! command -v skopeo >/dev/null 2>&1; then
-  echo "check_idempotency.sh: skopeo non trovato, impossibile interrogare il registro" >&2
+# One reading of the registry for the whole pipeline: registry_probe.sh answers present or
+# absent (including ghcr's 403 for a never-published package) and fails on anything else,
+# which stops here rather than reading as a hit or a miss. Anonymous: the forge images are
+# public, and credentials a registry rejects fail even a public read.
+if ! PROBE=$(bash "$(dirname "${BASH_SOURCE[0]}")/registry_probe.sh" "${IMAGE_URL_LOWER#docker://}"); then
+  echo "check_idempotency.sh: il registro non ha risposto per ${IMAGE_URL_LOWER}" >&2
   exit 1
 fi
-
-# skopeo legge la configurazione dei registri sotto $HOME prima ancora di aprire la rete.
-# Il job lo esegue con --userns=keep-id, quindi non è root, mentre HOME resta /root: il
-# risultato è "open /root/.config/containers/registries.d: permission denied" in 34
-# millisecondi, senza che nessuna richiesta parta. Una home scrivibile evita l'errore.
-if [[ ! -w "${HOME:-/root}" ]]; then
-  HOME=$(mktemp -d)
-  export HOME
-fi
-
-# Prima senza credenziali, poi con. Le immagini della forge sono pubbliche e si leggono
-# anonimamente; passare --creds a un registro che poi rifiuta quelle credenziali fa
-# fallire skopeo con 403 anche su un'immagine leggibile da chiunque. Quel fallimento era
-# indistinguibile da "immagine assente" e ricostruiva l'intero DAG a ogni run: tutti e 47
-# i nodi, 4,6 ore di runner, per un push che non toccava nessuno di quei pacchetti.
-#
-# L'esito viene distinto in tre casi, perché "non c'è" e "non sono riuscito a chiedere"
-# richiedono risposte diverse: la prima è una build da fare, la seconda è un guasto.
-inspect_status=""
-for attempt in anonymous authenticated; do
-  INSPECT_ARGS=("--no-tags")
-  if [[ "$attempt" == "authenticated" ]]; then
-    [[ -n "${GITHUB_TOKEN:-}" ]] || continue
-    INSPECT_ARGS+=("--creds" "${OWNER}:${GITHUB_TOKEN}")
-  fi
-
-  set +e
-  inspect_err=$(skopeo inspect "${INSPECT_ARGS[@]}" "${IMAGE_URL_LOWER}" 2>&1 >/dev/null)
-  rc=$?
-  set -e
-
-  if [[ $rc -eq 0 ]]; then
-    inspect_status="found"
-    break
-  fi
-  # Il registro risponde "manifest unknown" quando il tag non esiste: è una risposta, non
-  # un guasto, e non serve riprovare autenticati.
-  if grep -qi 'manifest unknown\|name unknown\|not found' <<< "$inspect_err"; then
-    inspect_status="absent"
-    break
-  fi
-  inspect_status="error"
-  last_error=$inspect_err
-done
-
-case "$inspect_status" in
-  found) CACHE_HIT="true" ;;
-  absent) CACHE_HIT="false" ;;
-  *)
-    # Né presente né assente: il registro non ha risposto. Costruire sarebbe uno spreco
-    # silenzioso, dichiarare la cache valida sarebbe peggio: si ferma e lo dice.
-    echo "check_idempotency.sh: il registro non ha risposto per ${IMAGE_URL_LOWER}" >&2
-    echo "${last_error:-nessun dettaglio}" >&2
-    exit 1
-    ;;
-esac
+[[ "$PROBE" == "present" ]] && CACHE_HIT="true" || CACHE_HIT="false"
 
 echo "CACHE_HIT=${CACHE_HIT}"
 echo "CONTENT_HASH=${CONTENT_HASH}"
