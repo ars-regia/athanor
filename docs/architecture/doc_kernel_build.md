@@ -297,9 +297,13 @@ patchano i Makefile per forzarlo.
   sta nel secret `MODULE_SIGNING_KEY` dell'environment `signing`, ammesso solo
   ai branch `main` e `iso-v0`. Un secret non è più sicuro per essere nato sul
   runner: conta dove si usa, e chi ne ha la custodia.
-- **Chiave Secure Boot**: firma la UKI e la sua policy PCR (`ukify
---pcr-private-key`; oggi la firma la chiave Secure Boot; la chiave di policy PCR separata di D43 è aperta, P4b).
-  L'immagine non crea alcun keyslot TPM: l'unico percorso è `athanor-uki-enroll`, lanciato dall'utente. Profilo `keys/profiles/secureboot.cnf`: non CA, `codeSigning`.
+- **Chiave Secure Boot**: firma con sbsign il vmlinuz di ogni nuovo kernel, nel
+  job `sign` di nvidia-kmod (`sign-kernel.sh vmlinuz`, D43); l'immagine system lo
+  prende già firmato da `azoth-boot`. Nessuna fase assembla una UKI (ADR-0037): avvio shim, GRUB,
+  vmlinuz firmato. L'immagine non crea alcun keyslot TPM: l'unico percorso è
+  `athanor-uki-enroll`, lanciato dall'utente, che lega ancora il keyslot a PCR 11,
+  costante senza stub UKI (aperto, riservato al maintainer). Profilo
+  `keys/profiles/secureboot.cnf`: non CA, `codeSigning`.
   Secret `SECUREBOOT_SIGNING_KEY`, certificato
   `keys/secureboot/athanor-secureboot.pem` (`.der` per `mokutil --import`). Non
   essendo una CA, anche arruolata resta fuori dal keyring machine
@@ -312,10 +316,9 @@ patchano i Makefile per forzarlo.
   uno di loro è rifiutato anche dove quella MOK fosse ancora arruolata. Il primo
   è la MOK unica del 2026-09-04 ("Ermete OS Secure Boot MOK"), che firmava UKI e
   moduli, ritirata il 2026-09-13.
-- **UKI**: kernel, initrd, `cmdline` e microcode early in un'unica immagine
-  firmata con la chiave Secure Boot dietro lo shim Fedora; la produce la fase
-  system-image, perché l'initrd dipende dall'immagine, non dal kernel. Lo spec
-  Fedora fornisce già le stringhe SBAT (`kernel.sbat`, `uki.sbat`).
+- **Niente UKI** (ADR-0037): initrd e `cmdline` non sono firmati; la catena
+  Secure Boot copre shim, GRUB e il vmlinuz. Una UKI tornerebbe con una sua
+  decisione, insieme alla policy PCR che `athanor-uki-enroll` presuppone.
 - **Primo avvio**: arruolamento guidato del certificato Secure Boot
   (`mokutil --import`), unica interazione richiesta per avere Secure Boot acceso
   su un PC qualsiasi; i moduli non ne dipendono.
