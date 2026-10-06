@@ -11,7 +11,7 @@
 -->
 <policyconfig>
   <vendor>Athanor OS</vendor>
-  <vendor_url>https://github.com/hr-mes/athanor</vendor_url>
+  <vendor_url>https://github.com/ars-regia/athanor</vendor_url>
 
   <!-- Erases the device for good: every request authenticates, never cached. -->
   <action id="os.athanor.mdm.wipe">

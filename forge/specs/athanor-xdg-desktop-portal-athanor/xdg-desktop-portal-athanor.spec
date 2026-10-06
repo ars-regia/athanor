@@ -6,7 +6,7 @@ Release:        7%{?dist}
 Summary:        Athanor backend for xdg-desktop-portal, and the session's choice of backends
 
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor
+URL:            https://github.com/ars-regia/athanor
 
 
 BuildRequires:  rust cargo gcc pkgconf-pkg-config glib2-devel

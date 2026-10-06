@@ -6,7 +6,7 @@ image twice, `build_spec.sh fetch` with network and then `build_spec.sh build` w
 
 ```bash
 cd forge
-bash scripts/run_spec_build.sh ghcr.io/hr-mes/athanor-builder:latest specs/athanor-<name>
+bash scripts/run_spec_build.sh ghcr.io/ars-regia/athanor-builder:latest specs/athanor-<name>
 ```
 
 The RPMs land in `forge/RPMS/`.

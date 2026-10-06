@@ -5,7 +5,7 @@ Release:        1%{?dist}
 Summary:        Athanor OS Zero-Trust Hardware Micro-Hypervisor & Confidential Enclave Orchestrator
 
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor
+URL:            https://github.com/ars-regia/athanor
 Requires:       qemu-kvm dbus
 
 

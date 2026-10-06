@@ -14,12 +14,12 @@ Counts are as of 2026-10-06; the command beside each recomputes it.
 
 | Fact | Evidence |
 | --- | --- |
-| The default branch is `iso-v0` | `gh repo view hr-mes/athanor --json defaultBranchRef` |
+| The default branch is `iso-v0` | `gh repo view ars-regia/athanor --json defaultBranchRef` |
 | `main` is the frozen pre-rename line: last commit `4578bb3f`, 2026-08-31. It is an ancestor of `iso-v0`, which was 915 commits ahead on 2026-10-06; `main` has no commit of its own | `git rev-list --count origin/main..origin/iso-v0`, `git merge-base --is-ancestor origin/main origin/iso-v0` |
-| `iso-v0` requires the status check `Kernel gate` and no review; force push and deletion are off. `main` is not protected | `gh api repos/hr-mes/athanor/branches/<name>/protection` |
+| `iso-v0` requires the status check `Kernel gate` and no review; force push and deletion are off. `main` is not protected | `gh api repos/ars-regia/athanor/branches/<name>/protection` |
 | `shell-specs` (73 commits ahead of `iso-v0` on 2026-10-06, `git rev-list --count origin/iso-v0..origin/shell-specs`) is being merged into `iso-v0` and retired; PRs #177 and #184 target it | `gh pr list --state open` |
 | Stacked chains have been the norm: #120 on #119 on #118 on `iso-v0`; #185 on #115 on `iso-v0` | `gh pr list --state open` |
-| 29 branches existed on GitHub on 2026-10-06 | `gh api repos/hr-mes/athanor/branches --paginate --jq '.[].name' \| wc -l` |
+| 29 branches existed on GitHub on 2026-10-06 | `gh api repos/ars-regia/athanor/branches --paginate --jq '.[].name' \| wc -l` |
 | `fuzzing.yml`, `nix-vanguard.yml` and `rust-security-audit.yml` trigger on `main` (and `develop`) only, so a push or pull request to `iso-v0` never runs them | [fuzzing.yml](../../.github/workflows/fuzzing.yml) lines 5 and 12, [nix-vanguard.yml](../../.github/workflows/nix-vanguard.yml) lines 5 and 7, [rust-security-audit.yml](../../.github/workflows/rust-security-audit.yml) lines 5 and 7 |
 | The DNF channel and the installer ISO's `:latest` publish from `refs/heads/main` only, so neither publishes today | [call-system-image.yml](../../.github/workflows/call-system-image.yml) lines 149 and 394 |
 | The kernel's `:latest` follows the default branch, whatever its name | [kernel-build.yml](../../.github/workflows/kernel-build.yml) lines 316 and 339 |
