@@ -128,7 +128,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-21 | 0058 | [Network privacy remainder of #143](0058-network-privacy-remainder.md) | accepted | network, security |
 | A2-22 | 0059 | [Installer for 1.0: Anaconda web UI](0059-installer-anaconda-web-ui.md) | accepted | installer |
 | A2-23 | 0060 | [authselect without nullok](0060-authselect-without-nullok.md) | accepted | security |
-| A2-24 | 0061 | [Desktop minor decisions](0061-desktop-minor-decisions.md) | amended by ADR-0077 | shell |
+| A2-24 | 0061 | [Desktop minor decisions](0061-desktop-minor-decisions.md) | accepted | shell |
 | A2-25 | 0062 | [Governance targets confirmed](0062-governance-targets-confirmed.md) | accepted | security, process |
 | A2-26 | 0063 | [Update policy](0063-update-policy.md) | accepted | update |
 | A2-27 | 0064 | [Signing approvals and MOK enrolment](0064-signing-approvals-and-mok-enrolment.md) | amended by A2-35 | signing, installer |
@@ -140,8 +140,8 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-33 | 0070 | [Report-a-problem packaging](0070-report-a-problem-packaging.md) | accepted | shell, ci |
 | A2-34 | 0071 | [Documentation and team model](0071-documentation-and-team-model.md) | amended by ADR-0074 | docs, process, ci |
 | A2-35 | 0072 | [MOK enrolment page in the installer](0072-mok-enrolment-in-installer.md) | accepted | signing, installer |
-| ADR-0073 | 0073 | [Retire components without a product role](0073-component-verdicts.md) | accepted | platform, security, build-ci |
-| ADR-0074 | 0074 | [Agent and contributor model](0074-agent-and-contributor-model.md) | accepted | docs, process |
-| ADR-0075 | 0075 | [Engineering gates](0075-engineering-gates.md) | accepted | build-ci, security |
-| ADR-0076 | 0076 | [Platform scope for 1.0](0076-platform-scope-for-1-0.md) | accepted | platform, security, build-ci, docs |
+| ADR-0073 | 0073 | [Retire components without a product role](0073-component-verdicts.md) | accepted | platform, security, build |
+| ADR-0074 | 0074 | [Agent and contributor model](0074-agent-and-contributor-model.md) | accepted | docs |
+| ADR-0075 | 0075 | [Engineering gates](0075-engineering-gates.md) | accepted | build, security |
+| ADR-0076 | 0076 | [Platform scope for 1.0](0076-platform-scope-for-1-0.md) | accepted | platform, security, build, docs |
 | ADR-0077 | 0077 | [Desktop decisions from Audit 3](0077-desktop-decisions.md) | accepted | shell, apps, security |

@@ -2,7 +2,7 @@
 id: A2-24
 title: "Desktop minor decisions"
 date: 2026-10-05
-status: amended by ADR-0077
+status: accepted
 issues: [156, 159]
 areas: [shell]
 ---

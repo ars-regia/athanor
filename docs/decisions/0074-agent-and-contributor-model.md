@@ -4,7 +4,7 @@ title: "Agent and contributor model"
 date: 2026-10-06
 status: accepted
 issues: [223]
-areas: [docs, process]
+areas: [docs]
 ---
 
 # 0074. Agent and contributor model
@@ -45,7 +45,7 @@ A2-34 also asks that hooks and the command gate be versioned in `.claude/`.
    - secret paths and destructive git commands are denied;
    - hooks that block commands stay in each contributor's setup until a versioned gate has its
      own tests;
-   - `.serena/` stays personal.
+   - `.serena/` is personal: the tracked `.serena/project.yml` leaves the repository.
 
    This amends the hooks-and-gate part of A2-34.
 
@@ -60,10 +60,12 @@ A2-34 also asks that hooks and the command gate be versioned in `.claude/`.
 7. **The target repository layout of TEAM-16 is adopted as the plan for A2-34 phases 1-4.**
    It covers the docs index by Diátaxis quadrant, `docs/reviews/`, `docs/plans/` in place of
    `docs/superpowers/plans/`, the operations documents, the templates, and the
-   build-and-boot tutorial.
+   build-and-boot tutorial. The exception is `.serena/`, which leaves the repository
+   (item 3).
 
 ## Consequences
 
+- **Record status.** This record amends the hooks-and-gate part of A2-34 (item 3).
 - **Delivery.** Workstreams W5 and W10 of the Audit 3 program apply this record.
 - **#192 and #213.** #192 (shared configuration) is fixed to follow items 1-3, and absorbs
   #213.

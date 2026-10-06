@@ -16,7 +16,7 @@ remediation. Progress is tracked in the GitHub issue linked from the decision re
 | `platform-specs.md` (SPA) | platform, boot, update and delivery specifications |       25 |        0 |   10 |
 | `desktop-specs.md` (SPD)  | desktop and session specifications                 |       25 |        0 |   12 |
 | `system-components.md`    | every component under `system/`, both eras (CSY)   |       50 |        6 |    4 |
-| `forge-packages.md` (CFG) | every package under `forge/specs/`, both eras      |       26 |        3 |    7 |
+| `forge-packages.md` (CFG) | every package under `forge/specs/`, both eras      |       25 |        3 |    7 |
 | `engineering.md` (ENG)    | workspace, CI, supply chain, repository hygiene    |       18 |        0 |    5 |
 | `team-maintainability.md` | agent entry points, process, governance (TEAM)     |       16 |        0 |    6 |
 | `open-prs.md` (PRS)       | triage of the ten open pull requests               |       10 |        0 |    1 |
@@ -42,7 +42,7 @@ Around that core, five problems recur across every report:
    ships; the rest are one packaging step away.
 2. **Controls exist but do not bind.** The Rust security workflow never runs on the default
    branch and suppresses its own failures. The cargo-vet audit is fabricated and `deny.toml`
-   is the template. No pull request runs the verifier or the tests. The verifier itself is red
+   is the template. No pull request runs the full verifier or the crate tests. The verifier itself is red
    on five checks.
 3. **Accepted decisions were not applied.** Records 0036-0072 were accepted on 2026-10-05/06,
    but most specifications still say the opposite. Several were appended as amendments that
@@ -126,28 +126,30 @@ CFG-20 need no action: the Ermete-era components they judge stay deleted.
     `init-oracle`, `net-unikernel`;
   - `ebpf`, `ebpf-sched`, `oobe`, `store`, `store-rs`, `lvfs-rs`, `mdm-rs`, `rosenpass`,
     `sysmon-ebpf`, `ai-daemon`, `ananicy`;
-  - the frozen `shell-rs` with its only consumers (`niri-ipc`, `cliphist`, `matugen`,
-    `dart-sass`).
+  - the frozen `shell-rs` and `niri-ipc`, its only consumer.
 
   The workspace, `components.toml`, the verifier and every document that names them change
   in the same pull request.
 
 - **Wave 2.** After #169 is reworked, retire the stubs that ship through the tier
   repositories: `stage0-bootstrap`, `antigravity`, `astro-toolchain`, `cargo-tools`,
-  `ide-bootstrap`, `qa`, `bpf-linker`, `syft`, `cosign` and `doctor`. Replace `bat`,
+  `ide-bootstrap`, `qa`, `bpf-linker`, `syft`, `cosign` and `doctor`, and the former
+  `shell-rs` consumers `cliphist`, `matugen` and `dart-sass`. The manifest entries and the
+  `Requires:` of `athanor-desktop-ui` change in the same pull request. Replace `bat`,
   `buildah` and `osbuild` with the Fedora packages.
 - **Check.** `verify.py specs` fails on a manifest entry without a package directory. The
   DAG fails at load on the same condition.
 
 ### W2. Image inputs and manifest integrity
 
-Closes CFG-01, CFG-21, CFG-22, SPD-04, SPD-17, PRS-169, ENG-12, SPA-22, and the part of
+Closes CFG-01, CFG-21..23, SPD-04, SPD-17, PRS-169, ENG-12, SPA-22, and the part of
 the intermediate-image finding that needs no key:
 
 - Remove `secure-boot` from the manifest.
 - Consume the tier repositories by digest, passed between steps through files, under one
   registry variable.
 - Apply decision 0045 through the reworked #169.
+- Build SRPMs, then binary RPMs from them (ADR-0076).
 
 ### W3. Shipped packages with fake or broken mechanisms
 
@@ -172,6 +174,7 @@ Closes ENG-01..05, ENG-09, ENG-11, SPA-16 and TEAM-04:
   `pr.yml` workflow runs it as the required check. Current verifier failures are
   allow-listed, one issue each, and leave the list as they are fixed.
 - The repository side of the runner findings.
+- Remove the GitHub Pages DNF channel (ADR-0076).
 
 ### W5. Agent and contributor entry points
 
@@ -239,7 +242,8 @@ Closes ENG-06, ENG-07, ENG-10, ENG-14, ENG-16..18, TEAM-15, CSY-10 and CSY-16..1
 
 ### W10. Repository model
 
-Closes TEAM-06, TEAM-12..14, TEAM-16 and SPA-20:
+Closes TEAM-06, TEAM-12, TEAM-14, TEAM-16, SPA-20, and the versioning part of TEAM-13 (the
+branch rename stays with the maintainer):
 
 - A docs index by Diátaxis quadrant.
 - Approved operations documents.
@@ -252,7 +256,7 @@ Closes TEAM-06, TEAM-12..14, TEAM-16 and SPA-20:
 1. **Now, in parallel:**
    - W1 wave 1, W2 (manifest entry), the first items of W4, the GRUB stanza of W3, and the
      `AGENTS.md` of W5;
-   - the open pull requests in the order `open-prs.md` gives.
+   - the open pull requests in the order `open-prs.md` gives (#187 is already merged).
 2. **When the verifier is green, apart from the allow-list:**
    - `pr.yml` becomes a required check;
    - W1 wave 2, the rest of W3, W6.

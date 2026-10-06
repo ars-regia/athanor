@@ -4,7 +4,7 @@ title: "Engineering gates"
 date: 2026-10-06
 status: accepted
 issues: [223]
-areas: [build-ci, security]
+areas: [build, security]
 ---
 
 # 0075. Engineering gates
@@ -16,8 +16,8 @@ engineering controls exist but do not bind:
 
 - The Rust security workflow triggers only on branches that are no longer developed, and it
   suppresses its own failures.
-- No pull request runs lint, the verifier or the crate tests, and most crate tests run
-  nowhere.
+- No pull request runs the full verifier or the crate tests, and most crate tests run
+  nowhere. Since #217 the Kernel gate runs the shared lint and eight verifier checks only.
 - The cargo-vet audit is fabricated, and `deny.toml` is the template with advisories ignored.
 - Compiler flags and lint policy are split across four places, and the RPM macros override
   the workspace's.

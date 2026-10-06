@@ -4,7 +4,7 @@ title: "Retire components without a product role"
 date: 2026-10-06
 status: accepted
 issues: [223]
-areas: [platform, security, build-ci]
+areas: [platform, security, build]
 ---
 
 # 0073. Retire components without a product role
@@ -25,7 +25,7 @@ Audit 3 judged every component under `system/` and `forge/specs/`, in both the A
 - **Both eras.** Where a component exists in both, the `iso-v0` version is the same or better.
 
 Earlier records already retired some of these components, but nothing was deleted: RA-5
-(old crates), A2-12 (fleet transport, superseding the fleet crates), and A2-19 (no
+(old crates), A2-12 (fleet transport; doc_fleet supersedes D26-D38), and A2-19 (no
 telemetry). A2-10 lists `doc_forge_development_guide.md` among the dead documents, but
 `iso-v0` has since rewritten that document and cites it.
 
@@ -43,8 +43,8 @@ telemetry). A2-10 lists `doc_forge_development_guide.md` among the dead document
      `athanor-store-rs`;
    - `athanor-lvfs-rs` (fwupd replaces it), `athanor-mdm-rs`, `athanor-rosenpass`,
      `athanor-sysmon-ebpf`, `athanor-ai-daemon` and `athanor-ananicy`;
-   - the frozen `athanor-shell-rs` and its only consumers (`athanor-niri-ipc`,
-     `athanor-cliphist`, `athanor-matugen`, `athanor-dart-sass`);
+   - the frozen `athanor-shell-rs` and its only consumers (`athanor-niri-ipc`, and
+     `cliphist`, `matugen` and `dart-sass`, which ship through the tier repositories);
    - the stubs and build tools in the tier repositories (`stage0-bootstrap`,
      `athanor-antigravity`, `athanor-astro-toolchain`, `athanor-cargo-tools`,
      `athanor-ide-bootstrap`, `athanor-qa`, `athanor-bpf-linker`, `athanor-syft`,
@@ -60,7 +60,7 @@ telemetry). A2-10 lists `doc_forge_development_guide.md` among the dead document
    `athanor-semantic-db` stays out of the image until doc_local_ai item AI8.
 
 4. **Ermete-era components that exist only on `main` stay deleted.** For each of them the
-   reports name the component or the Fedora package that supersedes it.
+   reports give the reason.
 5. **`doc_forge_development_guide.md` stays.** It is the live forge guide on `iso-v0`. This
    amends the dead-documents list of A2-10.
 6. **A rewrite of any retired component starts from an approved specification, not from the
@@ -68,10 +68,12 @@ telemetry). A2-10 lists `doc_forge_development_guide.md` among the dead document
 
 ## Consequences
 
+- **Record status.** This record amends the dead-documents list of A2-10
+  (`doc_forge_development_guide.md` stays).
 - **Delivery.** The work lands as W1 of the Audit 3 program, in two waves:
   1. the crates and package directories that the image manifest does not list;
-  2. the stubs that ship through the tier repositories. This wave follows the rework of #169,
-     which applies A2-10.
+  2. the stubs that ship through the tier repositories, with their manifest entries and the
+     `Requires:` that name them. This wave follows the rework of #169, which applies A2-10.
 - **Same pull request as each deletion.** `components.toml`, the workspace members, the
   verifier and every document that names a retired component change with it.
 - **Specification changes.** doc_software decision 5, which keeps the storage of

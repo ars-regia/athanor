@@ -17,10 +17,10 @@ without an owner or with contradictory answers:
 - No specification owns the microphone, camera and location indicators or their switches.
 - Settings and Software are described as confined, yet both can start arbitrary transient
   units on the session bus.
-- Thirteen documents cite the control-center and notification-center specifications, which
+- Twelve documents cite the control-center and notification-center specifications, which
   live only on unmerged branches.
-- SH5 and VL8 disagree on where the mark may appear. A2-24 settled only that the shield is
-  always visible.
+- SH5 and VL8 disagree on where the mark may appear. A2-24 settled that the shield is always
+  visible, not where else the mark appears.
 
 ## Decision
 
@@ -35,6 +35,7 @@ without an owner or with contradictory answers:
 
 ## Consequences
 
-- **Record status.** This record amends A2-24 (where the mark appears) and VL8.
+- **Specification change.** This record amends VL8 of `doc_visual_language.md`: its other
+  placements of the mark are withdrawn. A2-24 is unchanged.
 - **Delivery.** Workstreams W6 (citations and the mark), W7 (the privacy specification) and
   W8 (the bus filter) of the Audit 3 program apply it.

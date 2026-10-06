@@ -571,7 +571,7 @@ Severity count: critical 6, high 4, medium 8, low 32.
 - **Severity:** low
 - **Category:** era comparison; misleading documentation
 - **Where:** `origin/main:system/ARCHITECTURE.md` (233 lines)
-- **Evidence:** "Ermete OS v3.0 Architectural Specification", with a repository root of `/var/home/ermete/GEMINI/ermete-os`. It claims "Formally Verified (AWS Kani Proofs)", "SLSA Level 4", bcachefs snapshots and an XDP firewall. None of these hold in either era. Decision 0017 (RA-1) deleted it. iso-v0 replaces it with arc42-style `docs/architecture/doc_*.md` specs plus `components.toml`.
+- **Evidence:** "Ermete OS v3.0 Architectural Specification", with a repository root on the author's machine. It claims "Formally Verified (AWS Kani Proofs)", "SLSA Level 4", bcachefs snapshots and an XDP firewall. None of these hold in either era. Decision 0017 (RA-1) deleted it. iso-v0 replaces it with arc42-style `docs/architecture/doc_*.md` specs plus `components.toml`.
 - **Standard:** arc42/C4; Diátaxis.
 - **Recommendation:** Do not bring it back.
 - **Needs a decision:** no.

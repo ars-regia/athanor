@@ -4,7 +4,7 @@ title: "Platform scope for 1.0"
 date: 2026-10-06
 status: accepted
 issues: [223]
-areas: [platform, security, build-ci, docs]
+areas: [platform, security, build, docs]
 ---
 
 # 0076. Platform scope for 1.0
@@ -15,16 +15,16 @@ Audit 3 (`docs/reviews/2026-10-06-audit-3/platform-specs.md` and `forge-packages
 several platform questions open. None of them involves signing keys:
 
 - **Execution control.** A2-8 gave up IPE for 1.0 and moved execution control to fs-verity
-  and signed images in 1.1. That left 1.0 without a stated control, and the specifications
+  and signed images. That left 1.0 without a stated control, and the specifications
   still name IPE.
-- **The DNF channel.** It is still published to GitHub Pages, although images consume the
-  tier repositories as OCI images.
+- **The DNF channel.** The workflow still defines a GitHub Pages DNF channel, whose deploy
+  step is gated on the retired `main`; images consume the tier repositories as OCI images.
 - **Factory reset.** It has no scope (D36).
 - **Local AI.** doc_local_ai is stale, and its scope for 1.0 is undecided.
 - **The release package.** `athanor-base-config` obsoletes `fedora-release` and is installed
   with `--nodeps`.
-- **The builder.** forge builds RPMs in its own Nix builder container, while Fedora's
-  standard isolated builder is mock.
+- **The builder.** forge builds binary RPMs in place, without SRPMs, in its own Nix builder
+  container, while Fedora's standard isolated builder is mock.
 - **Specification structure.** The specifications have no common structure.
 
 ## Decision
@@ -43,8 +43,8 @@ several platform questions open. None of them involves signing keys:
 4. **Local AI is out of the 1.0 scope.** The spikes stay. doc_local_ai is marked deferred.
 5. **Athanor carries its own release package**, the Fedora Remix route, in place of
    obsoleting `fedora-release` and installing with `--nodeps`.
-6. **forge keeps SRPMs and the current builder container.** mock is adopted when aarch64
-   builds become real.
+6. **forge builds SRPMs in the current builder container**, then binary RPMs from them.
+   mock is adopted when aarch64 builds become real.
 7. **One specification template.** It has fixed headings: scope, non-goals, rationale,
    interfaces, failure behaviour and acceptance criteria. Each specification adopts it at its
    next revision, and `verify.py docs` enforces it on revised documents.
@@ -52,8 +52,9 @@ several platform questions open. None of them involves signing keys:
 ## Consequences
 
 - **Record status.** This record amends A2-8 (execution control for 1.0).
-- **Delivery.** Workstreams W3 (release package), W6 (template and the IPE text) and W7
-  (recovery and reset) of the Audit 3 program apply it.
+- **Delivery.** Workstreams W2 (SRPM builds), W3 (release package), W4 (removal of the Pages
+  channel), W6 (template and the IPE text) and W7 (recovery and reset) of the Audit 3
+  program apply it.
 - **Specification changes.**
   - doc_kernel_profile and doc_update_trust replace their IPE text.
   - doc_local_ai is marked deferred.
