@@ -20,3 +20,5 @@ Kernel :latest follows the repository default branch, no branch name in the work
 ## Consequences
 
 No specification document under `docs/architecture` cites this record yet; it takes effect through the work it describes.
+
+The kernel documentation is `forge/specs/azoth/KERNEL.md`.

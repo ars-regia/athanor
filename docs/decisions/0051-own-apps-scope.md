@@ -19,4 +19,4 @@ Own apps: file manager limited to the portal chooser until 1.0 (Nautilus with de
 
 ## Consequences
 
-Applied by `docs/architecture/doc_disks.md` (on shell-specs), `docs/architecture/doc_files.md` (on shell-specs), `docs/architecture/doc_portal.md` (on shell-specs), `docs/architecture/doc_shell.md` (on shell-specs), `docs/architecture/doc_software.md` (on shell-specs).
+Applied by `docs/architecture/doc_disks.md`, `docs/architecture/doc_files.md`, `docs/architecture/doc_portal.md`, `docs/architecture/doc_shell.md`, `docs/architecture/doc_software.md`.

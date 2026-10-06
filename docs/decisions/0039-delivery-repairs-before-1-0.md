@@ -19,4 +19,4 @@ Delivery repairs before 1.0: rechunking, acceptance evidence required by promote
 
 ## Consequences
 
-Applied by `docs/architecture/doc_kernel_profile.md` (on shell-specs).
+Applied by `docs/architecture/doc_kernel_profile.md`.

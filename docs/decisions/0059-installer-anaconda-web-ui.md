@@ -19,4 +19,4 @@ Installer for 1.0: Anaconda web UI; v3/UEFI/disk checks in the kickstart (closes
 
 ## Consequences
 
-Applied by `docs/architecture/doc_first_run.md` (on shell-specs), `docs/architecture/doc_kernel_profile.md` (on shell-specs).
+Applied by `docs/architecture/doc_first_run.md`, `docs/architecture/doc_kernel_profile.md`.

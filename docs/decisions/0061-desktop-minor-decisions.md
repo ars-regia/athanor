@@ -19,4 +19,4 @@ Desktop minor: crash notices from sessiond (core dumps stay off, local report at
 
 ## Consequences
 
-Applied by `docs/architecture/doc_overview.md` (on shell-specs), `docs/architecture/doc_session.md` (on shell-specs), `docs/architecture/doc_shell.md` (on shell-specs), `docs/architecture/doc_software.md` (on shell-specs), `docs/architecture/doc_visual_language.md` (on shell-specs).
+Applied by `docs/architecture/doc_overview.md`, `docs/architecture/doc_session.md`, `docs/architecture/doc_shell.md`, `docs/architecture/doc_software.md`, `docs/architecture/doc_visual_language.md`.

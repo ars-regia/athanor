@@ -20,3 +20,5 @@ ghcr.io/hr-mes: the Containerfile literal is the single documented exception (bu
 ## Consequences
 
 No specification document under `docs/architecture` cites this record yet; it takes effect through the work it describes.
+
+Today the exception covers the four `--mount=type=bind,from=ghcr.io/hr-mes/athanor-forge-tier*-repo` lines in `system/Containerfile`.

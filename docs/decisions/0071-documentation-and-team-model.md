@@ -22,3 +22,5 @@ every aspect of Athanor is described in the repository, for maintenance, rebuild
 No specification document under `docs/architecture` cites this record yet; it takes effect through the work it describes.
 
 This directory is the first application of the decision: the maintainer decision log, previously kept outside the repository, is recorded here one file per decision. `scripts/verify.py decisions` checks the records.
+
+Application pending: `.claude/` holds rules and skills only; the agents, hooks and gate are not yet versioned there. GitHub settings are JSON files under `.github/settings/`, applied by `scripts/github-settings`.

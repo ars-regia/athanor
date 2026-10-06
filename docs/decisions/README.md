@@ -74,7 +74,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | W1-DISKS | 0004 | [doc_disks decisions (wave 1)](0004-wave1-disks.md) | amended by A2-14, A2-16 | storage, security |
 | W1-LANGUAGES | 0005 | [doc_languages decisions (wave 1)](0005-wave1-languages.md) | accepted | shell, i18n |
 | W1-FILES | 0006 | [doc_files decisions (wave 1)](0006-wave1-files.md) | accepted | shell, files |
-| W1-RULINGS | 0007 | [Cross-document rulings after wave 1](0007-wave1-cross-document-rulings.md) | accepted | shell, security |
+| W1-RULINGS | 0007 | [Cross-document rulings after wave 1](0007-wave1-cross-document-rulings.md) | amended by A2-6, A2-7 | shell, security |
 | W1-FOLLOWUP | 0008 | [Follow-up decisions after wave 1](0008-wave1-follow-up.md) | accepted | shell, security, storage |
 | W2-PORTAL | 0009 | [doc_portal decisions (wave 2)](0009-wave2-portal.md) | accepted | shell, portal |
 | W2-SETTINGS | 0010 | [doc_settings decisions (wave 2)](0010-wave2-settings.md) | accepted | shell, settings, security |

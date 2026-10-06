@@ -19,4 +19,4 @@ D6 closed on bootc in two steps: 1.0 = bootc ostree backend + greenboot (GRUB bo
 
 ## Consequences
 
-Applied by `docs/architecture/doc_disks.md` (on shell-specs), `docs/architecture/doc_kernel_profile.md` (on shell-specs), `docs/architecture/doc_recovery.md` (on shell-specs), `docs/architecture/doc_shell.md` (on shell-specs), `docs/architecture/doc_update_trust.md` (on shell-specs).
+Applied by `docs/architecture/doc_disks.md`, `docs/architecture/doc_kernel_profile.md`, `docs/architecture/doc_recovery.md`, `docs/architecture/doc_shell.md`, `docs/architecture/doc_update_trust.md`.
