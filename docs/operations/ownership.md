@@ -5,7 +5,7 @@
 | Purpose | The areas of the repository, their paths and their owners |
 | Owner | the maintainer (`@hr-mes`) |
 | Status | revision 1, 2026-10-06, _(Proposal for the maintainer)_. `.github/CODEOWNERS` is not changed here: PR #170 owns it |
-| Depends on | [CONTRIBUTING.md](../../CONTRIBUTING.md) CT4 and CT6, [branching.md](branching.md) |
+| Depends on | [contributing.md](contributing.md) CT4 and CT6, [branching.md](branching.md) |
 | Defines | OWN1 to OWN4, and the areas `kernel`, `build`, `signing`, `security`, `shell`, `apps`, `docs` |
 
 ## 1. Today (facts)
@@ -19,7 +19,7 @@
 
 - **OWN1.** Every path belongs to one area; an owner of the area reviews its changes. Paths outside every area fall to the default owner.
 - **OWN2.** A spec belongs to the area it specifies, not to `docs`.
-- **OWN3.** `security` and `signing` changes need two approvals (CONTRIBUTING.md CT6). On a path shared by two areas, both owners are listed on one line.
+- **OWN3.** `security` and `signing` changes need two approvals (contributing.md CT6). On a path shared by two areas, both owners are listed on one line.
 - **OWN4.** Today every area has one owner, the maintainer. When the repository moves to an organisation, each `@hr-mes` below becomes a team such as `@<org>/kernel`, with the maintainer kept on `security` and `signing`.
 
 ## 3. Area map _(Proposal)_
@@ -34,7 +34,6 @@ protected paths last, as in PR #170.
 # docs: documents without an area, project instructions for people and agents
 /docs/                                         @hr-mes
 /README.md                                     @hr-mes
-/CONTRIBUTING.md                               @hr-mes
 /.claude/                                      @hr-mes
 
 # build: CI, forge, image definition, project checks
@@ -66,7 +65,6 @@ protected paths last, as in PR #170.
 /docs/architecture/doc_kernel_*.md             @hr-mes
 
 # shell: compositor, greeter, bar, dock, launcher, rig, dev VM
-/system/athanor-shell-rs/                      @hr-mes
 /system/athanor-greeter/                       @hr-mes
 /system/athanor-layout/                        @hr-mes
 /system/athanor-compositor-client/             @hr-mes

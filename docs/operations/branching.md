@@ -5,19 +5,21 @@
 | Purpose | The branches of the repository today, and a model for a team of 5 to 10 |
 | Owner | the maintainer (`@hr-mes`) |
 | Status | revision 1, 2026-10-06. Section 1 is fact; sections 2 and 3 are _(Proposal for the maintainer)_ |
-| Depends on | [CONTRIBUTING.md](../../CONTRIBUTING.md) CT4, [ownership.md](ownership.md) |
+| Depends on | [contributing.md](contributing.md) CT4, [ownership.md](ownership.md) |
 | Defines | BRN1 to BRN6 |
 
 ## 1. Today (facts, 2026-10-06)
 
+Counts are as of 2026-10-06; the command beside each recomputes it.
+
 | Fact | Evidence |
 | --- | --- |
 | The default branch is `iso-v0` | `gh repo view hr-mes/athanor --json defaultBranchRef` |
-| `main` is the frozen pre-rename line: last commit `4578bb3f`, 2026-08-31. It is an ancestor of `iso-v0`, which is 915 commits ahead; `main` has no commit of its own | `git rev-list --count origin/main..origin/iso-v0`, `git merge-base --is-ancestor origin/main origin/iso-v0` |
+| `main` is the frozen pre-rename line: last commit `4578bb3f`, 2026-08-31. It is an ancestor of `iso-v0`, which was 915 commits ahead on 2026-10-06; `main` has no commit of its own | `git rev-list --count origin/main..origin/iso-v0`, `git merge-base --is-ancestor origin/main origin/iso-v0` |
 | `iso-v0` requires the status check `Kernel gate` and no review; force push and deletion are off. `main` is not protected | `gh api repos/hr-mes/athanor/branches/<name>/protection` |
-| `shell-specs` (73 commits ahead of `iso-v0`) is being merged into `iso-v0` and retired; PRs #177 and #184 target it | `gh pr list --state open` |
+| `shell-specs` (73 commits ahead of `iso-v0` on 2026-10-06, `git rev-list --count origin/iso-v0..origin/shell-specs`) is being merged into `iso-v0` and retired; PRs #177 and #184 target it | `gh pr list --state open` |
 | Stacked chains have been the norm: #120 on #119 on #118 on `iso-v0`; #185 on #115 on `iso-v0` | `gh pr list --state open` |
-| 29 branches exist on GitHub | `gh api repos/hr-mes/athanor/branches --paginate` |
+| 29 branches existed on GitHub on 2026-10-06 | `gh api repos/hr-mes/athanor/branches --paginate --jq '.[].name' \| wc -l` |
 | `fuzzing.yml`, `nix-vanguard.yml` and `rust-security-audit.yml` trigger on `main` (and `develop`) only, so a push or pull request to `iso-v0` never runs them | [fuzzing.yml](../../.github/workflows/fuzzing.yml) lines 5 and 12, [nix-vanguard.yml](../../.github/workflows/nix-vanguard.yml) lines 5 and 7, [rust-security-audit.yml](../../.github/workflows/rust-security-audit.yml) lines 5 and 7 |
 | The DNF channel and the installer ISO's `:latest` publish from `refs/heads/main` only, so neither publishes today | [call-system-image.yml](../../.github/workflows/call-system-image.yml) lines 149 and 394 |
 | The kernel's `:latest` follows the default branch, whatever its name | [kernel-build.yml](../../.github/workflows/kernel-build.yml) lines 316 and 339 |
@@ -47,7 +49,7 @@ old name (not verified here). It changes no file and no clone:
 
 | Consequence | Action |
 | --- | --- |
-| Open pull requests (17 on 2026-10-06) | Retargeted by GitHub; check the chains of section 1 |
+| Open pull requests (17 on 2026-10-06, `gh pr list --state open`) | Retargeted by GitHub; check the chains of section 1 |
 | Workflow `branches:` filters | Edit the files in the table below |
 | Kernel and module signatures made on `refs/heads/iso-v0` | Keep `iso-v0` in `KERNEL_TRUSTED_REFS` until every deployed kernel and module is re-signed from `main`, then drop it |
 | Local clones and worktrees | `git branch -m iso-v0 main`, `git fetch origin`, `git branch -u origin/main main` |

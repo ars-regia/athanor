@@ -5,11 +5,11 @@
 | Purpose | From a clean machine to a merged pull request, for people and for agents |
 | Owner | the maintainer (`@hr-mes`) |
 | Status | revision 1, 2026-10-06. Items marked _(Proposal)_ await the maintainer |
-| Depends on | [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) (code rules), [branching](docs/operations/branching.md), [ownership](docs/operations/ownership.md) |
+| Depends on | [.github/CONTRIBUTING.md](../../.github/CONTRIBUTING.md) (code rules), [branching](branching.md), [ownership](ownership.md) |
 | Defines | CT1 to CT8 |
 
 This file is the operating model. The code rules (panics, placeholders in security paths,
-commit language) stay in [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md). Read each
+commit language) stay in [.github/CONTRIBUTING.md](../../.github/CONTRIBUTING.md). Read each
 linked document's header before its body.
 
 ## CT1. First day
@@ -17,10 +17,10 @@ linked document's header before its body.
 | Need | Where |
 | --- | --- |
 | Tools | `git`, `gh`, `just`, `podman`, a Rust toolchain (`cargo`), `python3`; `actionlint`, `shellcheck` and `ksvalidator` (pykickstart), because `scripts/verify.py` passes a check with a note when one is missing |
-| Shell and application work without an image build | [scripts/devvm/README.md](scripts/devvm/README.md): tiers A (nested compositor), B (KVM VM), C (CI image) |
-| GTK crates, golden captures, end-to-end scenes | the shell rig, [forge/test/shell/rig.sh](forge/test/shell/rig.sh) (its header lists every command) |
-| The builder image and local package builds | [doc_build_system.md](docs/architecture/doc_build_system.md) sections 3 and 8, [forge/README-build-local.md](forge/README-build-local.md) |
-| The self-hosted kernel runner (maintainers only) | [scripts/runner/README.md](scripts/runner/README.md) |
+| Shell and application work without an image build | [scripts/devvm/README.md](../../scripts/devvm/README.md): tiers A (nested compositor), B (KVM VM), C (CI image) |
+| GTK crates, golden captures, end-to-end scenes | the shell rig, [forge/test/shell/rig.sh](../../forge/test/shell/rig.sh) (its header lists every command) |
+| The builder image and local package builds | [doc_build_system.md](../architecture/doc_build_system.md) sections 3 and 8, [forge/README-build-local.md](../../forge/README-build-local.md) |
+| The self-hosted kernel runner (maintainers only) | [scripts/runner/README.md](../../scripts/runner/README.md) |
 | What exists and why | `docs/architecture/doc_<area>.md` (specs), `docs/decisions/` (decision records) |
 
 ## CT2. Build
@@ -29,7 +29,7 @@ linked document's header before its body.
 | --- | --- |
 | One crate | `cargo build -p <crate>`; a crate that links GTK: `forge/test/shell/rig.sh build-image` once, then `forge/test/shell/rig.sh cargo build -p <crate>` |
 | One spec | `bash forge/scripts/run_spec_build.sh <builder image> specs/<package>` (RPMs in `forge/RPMS/`) |
-| The image | `system/build-image.sh` (without `SECUREBOOT_SIGNING_KEY` it signs with a throwaway key and refuses to push, [system/README.md](system/README.md)) |
+| The image | `system/build-image.sh` (without `SECUREBOOT_SIGNING_KEY` it signs with a throwaway key and refuses to push, [system/README.md](../../system/README.md)) |
 | An image with unmerged RPMs, for the dev VM | `scripts/devvm/local-image.sh` |
 
 `just all` runs the whole pipeline and takes hours: never run it as a check.
@@ -50,8 +50,8 @@ A new `verify.py` check is registered with `@check` like the others and has a te
 ## CT4. The unit of work
 
 - **One issue per unit.** Assign it to yourself before starting (`gh issue edit <n> --add-assignee @me`). No issue, no branch.
-- **One area per agent at a time.** Areas are defined in [ownership.md](docs/operations/ownership.md). A change that spans areas is split, or reviewed by every owner it touches.
-- **Small pull requests against the product branch** (today `iso-v0`, [branching.md](docs/operations/branching.md)). No stacked chains: when B needs A, wait for A to merge or put both in one pull request.
+- **One area per agent at a time.** Areas are defined in [ownership.md](ownership.md). A change that spans areas is split, or reviewed by every owner it touches.
+- **Small pull requests against the product branch** (today `iso-v0`, [branching.md](branching.md)). No stacked chains: when B needs A, wait for A to merge or put both in one pull request.
 - Commit subjects follow Conventional Commits in English, as `git log` shows. No attribution of any kind.
 
 ## CT5. Specs and decisions
@@ -62,7 +62,7 @@ A new `verify.py` check is registered with `@check` like the others and has a te
 
 ## CT6. Review
 
-- **Area owners** are listed in `.github/CODEOWNERS`; the proposed area map is [ownership.md](docs/operations/ownership.md).
+- **Area owners** are listed in `.github/CODEOWNERS`; the proposed area map is [ownership.md](ownership.md).
 - **Two-person review** for signing, attestation, polkit, cryptography and authentication: two approvals, at least one from an owner of the area, never the author. Today the maintainer is the only owner, so every such change waits for the maintainer.
 - Enforcement _(Proposal)_: once a second owner exists, turn on "Require review from Code Owners" on the product branch; today `iso-v0` requires only the status check `Kernel gate` (`gh api repos/hr-mes/athanor/branches/iso-v0/protection`).
 
