@@ -19,4 +19,4 @@ Security-class updates (D34) apply at the next user-started shutdown or reboot, 
 
 ## Consequences
 
-Applied by `docs/architecture/doc_first_run.md` (on shell-specs), `docs/architecture/doc_kernel_profile.md` (on shell-specs), `docs/architecture/doc_shell.md` (on shell-specs), `docs/architecture/doc_update_trust.md` (on shell-specs).
+Applied by `docs/architecture/doc_first_run.md`, `docs/architecture/doc_kernel_profile.md`, `docs/architecture/doc_shell.md`, `docs/architecture/doc_update_trust.md`.

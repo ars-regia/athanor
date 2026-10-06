@@ -40,7 +40,7 @@ sempre con `git status` prima di qualunque operazione git distruttiva.**
 - Lint: `just lint` — copre forge, system e la sintassi del Justfile
 - Formattazione: `just format`
 - Verifica sintassi senza modificare: `just check-syntax`
-- Verificatore di progetto: `python3 scripts/verify.py` (o `workflows`, `kickstart`, `polkit`, `paths`, `shipped`, `docs`, `services`).
+- Verificatore di progetto: `python3 scripts/verify.py` (o `workflows`, `kickstart`, `polkit`, `paths`, `shipped`, `docs`).
   `workflows` chiama `actionlint` (che a sua volta passa shellcheck sui blocchi `run:`) e `kickstart` chiama
   `ksvalidator` di `pykickstart` sui file `.ks`: se il binario manca il controllo passa con una nota, quindi installali.
 - Test: `cargo test -p <crate>`. 52 file contengono test; non esiste una suite unica, mira al crate.
@@ -84,8 +84,7 @@ invece di cambiare directory.
 
 ## Limiti inviolabili
 
-- **Modello di minaccia a tre livelli** (`docs/architecture/doc_threat_model.md`): il codice dell'utente non confinato è l'utente; le applicazioni confinate (Flatpak e classe `confined` del broker) sono non fidate e non scrivono i percorsi di persistenza; root e l'immagine sono di `doc_kernel_profile.md`. Una spec dichiara contro quale livello vale ogni sua garanzia.
-- **Ogni servizio systemd spedito dal repository imposta `NoNewPrivileges=yes` o `CapabilityBoundingSet=` (allow-list)**, scritto in chiaro (non dedotto da `DynamicUser=` o simili); lo verifica `python3 scripts/verify.py services`. Un'eccezione va nella lista `SERVICE_EXEMPT` con il motivo. Mai `chmod 777`, mai root diretto, mai aggirare la policy IPE, il confinamento Landlock o i compartimenti.
+- **Zero-trust**: nessun daemon o applicazione fuori da un compartimento o da una MicroVM. Mai `chmod 777`, mai root diretto, mai aggirare la policy IPE, il confinamento Landlock o i compartimenti.
 - **Niente finte implementazioni nella sicurezza**: crittografia, validazione dei token e hash devono essere reali. Un placeholder in un percorso di sicurezza è un bug, non una bozza.
 - **`panic = "abort"` su dev e release**: un panic non è recuperabile, termina il processo. Nei daemon questo significa perdita di servizio.
 - Modifiche a `system/athanor-bus-api/src/polkit.rs` o all'attestazione (`system/confidential_computing/athanor-attestation`): fermati e chiedi prima di editare.

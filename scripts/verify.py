@@ -1569,6 +1569,119 @@ def check_services():
 
 
 # --------------------------------------------------------------------------- #
+# coverage: every component has an inventory entry (A2-34)
+# --------------------------------------------------------------------------- #
+
+COMPONENTS = "docs/architecture/components.toml"
+# Every child directory of these is a component; "" is the repository root.
+COMPONENT_PARENTS = ("", "system", "forge", "forge/specs", "scripts")
+# Children of COMPONENT_PARENTS that hold components instead of being one.
+COMPONENT_CONTAINERS = {"docs", "forge", "forge/specs", "scripts", "system"}
+COMPONENT_KINDS = {"crate", "rpm spec", "script tool", "config", "image", "tests", "site"}
+COMPONENT_AREAS = {"kernel", "build-ci", "signing-update", "security", "shell", "apps",
+                   "platform", "docs"}
+COMPONENT_STATUSES = {"specified", "out-of-1.0", "missing"}
+
+
+def component_dirs(files):
+    """The component directories that the tracked files imply: each child directory of a
+    COMPONENT_PARENTS entry, except hidden directories and the containers."""
+    dirs = set()
+    for f in files:
+        parts = f.split("/")
+        for parent in COMPONENT_PARENTS:
+            depth = len(parent.split("/")) if parent else 0
+            if len(parts) > depth + 1 and "/".join(parts[:depth]) == parent:
+                child = "/".join(parts[:depth + 1])
+                if not parts[depth].startswith(".") and child not in COMPONENT_CONTAINERS:
+                    dirs.add(child)
+    return dirs
+
+
+def entry_problems(root, entry):
+    """The problems of one inventory entry, and whether its specification awaits a merge."""
+    path = entry["path"]
+    out = []
+    if not (root / path).exists():
+        out.append("the path does not exist")
+    if entry.get("kind") not in COMPONENT_KINDS:
+        out.append(f"kind {entry.get('kind')!r} is not one of {sorted(COMPONENT_KINDS)}")
+    if entry.get("area") not in COMPONENT_AREAS:
+        out.append(f"area {entry.get('area')!r} is not one of {sorted(COMPONENT_AREAS)}")
+    if not entry.get("purpose"):
+        out.append("no purpose")
+    status = entry.get("status")
+    if status not in COMPONENT_STATUSES:
+        out.append(f"status {status!r} is not one of {sorted(COMPONENT_STATUSES)}")
+    if status == "out-of-1.0" and not (isinstance(entry.get("issue"), int) and entry["issue"] > 0):
+        out.append("out-of-1.0 without an issue number")
+    if status == "specified" and not (entry.get("spec") and entry.get("item")):
+        out.append("specified without both spec and item")
+    pending = False
+    spec = entry.get("spec")
+    if spec and not (root / "docs/architecture" / spec).is_file():
+        if entry.get("branch"):
+            pending = True
+        else:
+            out.append(f"{spec} is absent from docs/architecture")
+    return out, pending
+
+
+def coverage_problems(root=None, files=None):
+    """Failures and warnings of the component inventory against the tree. A component
+    without a specification (status missing) is a warning, not a failure."""
+    root = Path(root or ROOT)
+    if files is None:
+        git = subprocess.run(["git", "-C", str(root), "ls-files", "--cached", "-z"],
+                             capture_output=True, text=True)
+        if git.returncode:
+            return [f"cannot list the repository files: {git.stderr.strip()}"], []
+        files = [f for f in git.stdout.split("\0") if f]
+    try:
+        entries = tomllib.loads(read(root / COMPONENTS)).get("component", [])
+    except FileNotFoundError:
+        return [f"{COMPONENTS}: missing"], []
+    except tomllib.TOMLDecodeError as e:
+        return [f"{COMPONENTS}: unreadable ({e})"], []
+    problems, missing, pending, seen = [], [], [], set()
+    for n, entry in enumerate(entries, 1):
+        path = entry.get("path")
+        if not path:
+            problems.append(f"{COMPONENTS}: entry {n} has no path")
+            continue
+        if path in seen:
+            problems.append(f"{COMPONENTS}: {path}: listed twice")
+        seen.add(path)
+        found, waits = entry_problems(root, entry)
+        problems += [f"{COMPONENTS}: {path}: {p}" for p in found]
+        if waits:
+            pending.append(f"{path} ({entry['spec']} on {entry['branch']})")
+        if entry.get("status") == "missing":
+            missing.append(path)
+    for d in sorted(component_dirs(files) - seen):
+        problems.append(f"{d}: component directory without an entry in {COMPONENTS}")
+    notes = []
+    if missing:
+        notes.append(f"{len(missing)} components have no specification (status missing): "
+                     + ", ".join(missing))
+    if pending:
+        notes.append(f"{len(pending)} entries cite a specification not merged here yet: "
+                     + ", ".join(pending))
+    return problems, notes
+
+
+@check("coverage", "Every component has an inventory entry, and every entry a spec or an issue")
+def check_coverage():
+    r = Result()
+    problems, notes = coverage_problems()
+    for problem in problems:
+        r.fail(problem)
+    for note in notes:
+        r.note(note)
+    return r
+
+
+# --------------------------------------------------------------------------- #
 # runner
 # --------------------------------------------------------------------------- #
 

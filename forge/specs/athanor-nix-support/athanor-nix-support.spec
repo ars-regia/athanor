@@ -1,10 +1,10 @@
 %global debug_package %{nil}
 Name:           athanor-nix-support
 Version:        1.0.0
-Release:        9%{?dist}
+Release:        10%{?dist}
 Summary:        Athanor OS athanor-nix-support
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor-forge
+URL:            https://github.com/hr-mes/athanor
 BuildArch:      noarch
 
 # The Fedora Nix packages provide the binary, the store, the daemon and its systemd
@@ -78,9 +78,14 @@ ln -s ../athanor-nix-gc.timer %{buildroot}/usr/lib/systemd/system/timers.target.
 /usr/share/athanor/nix/registry.json
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
+- athanor-nix-gc.service and athanor-nix-relabel.service bound their capabilities
+  (doc_threat_model.md, TM8); nix-gc keeps CAP_SYS_PTRACE so that nix's runtime-root scan
+  can read /proc/<pid>/{maps,exe,fd} of other users' processes.
+
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-9
-- athanor-nix-gc.service and athanor-nix-relabel.service bound their capabilities to
-  CAP_DAC_OVERRIDE, CAP_DAC_READ_SEARCH and CAP_FOWNER (doc_threat_model.md, TM8).
+- Point URL at the project repository
+- Point unit Documentation= at the project repository
 
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-8
 - Nix base configuration (#154, decisions A2-13 and A2-16; doc_software.md, SW9 and

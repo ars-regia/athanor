@@ -31,4 +31,4 @@ Controller rulings on overview conflicts:
 
 ## Consequences
 
-Elaborated in `docs/architecture/doc_overview.md` (on shell-specs).
+Elaborated in `docs/architecture/doc_overview.md`.

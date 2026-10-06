@@ -16,7 +16,9 @@ Environment=NIX_CACHE_HOME=/var/cache/nix
 # the collection does not depend on /etc/nix/nix.conf enabling it.
 ExecStart=/usr/bin/nix --extra-experimental-features nix-command store gc
 # Deleting store paths needs only to bypass file permissions and ownership.
-CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER
+# CAP_SYS_PTRACE: nix's runtime-root scan reads /proc/<pid>/{maps,exe,fd} of other users'
+# processes; without it the scan ignores EACCES and could collect live store paths.
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_SYS_PTRACE
 Nice=19
 CPUSchedulingPolicy=idle
 IOSchedulingClass=idle

@@ -19,4 +19,4 @@ authselect without-nullok now + verify.py check (auth module: show the diff to t
 
 ## Consequences
 
-No specification document under `docs/architecture` cites this record yet; it takes effect through the work it describes.
+Application pending: `system/Containerfile` does not remove `nullok` and `scripts/verify.py` has no check for it.

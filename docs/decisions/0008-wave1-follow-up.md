@@ -28,4 +28,4 @@ Recorded in the maintainer decision log, section 'Follow-up decisions (maintaine
 
 ## Consequences
 
-No specification document under `docs/architecture` cites this record yet; it takes effect through the work it describes.
+Application pending: `usbguard-dbus` is not installed; `forge/config/packages.json` lists `usbguard` only.

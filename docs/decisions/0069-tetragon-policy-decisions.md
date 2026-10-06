@@ -29,4 +29,4 @@ Recorded in the maintainer decision log, section 'Audit 2 decisions (2026-10-05,
 
 ## Consequences
 
-Applied by `docs/architecture/doc_tetragon.md` (on shell-specs).
+Applied by `docs/architecture/doc_tetragon.md`.

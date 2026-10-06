@@ -1,6 +1,6 @@
 [Unit]
 Description=Nix Store bind mount from /var/nix
-Documentation=https://github.com/hr-mes/athanor-forge
+Documentation=https://github.com/hr-mes/athanor
 # On this ostree system / is read-only, so the Nix store cannot live under /usr. It
 # lives in /var/nix, which is writable and, on the installed system, the LUKS-encrypted
 # home volume. This unit makes /nix a bind mount of /var/nix so every Nix tool sees a

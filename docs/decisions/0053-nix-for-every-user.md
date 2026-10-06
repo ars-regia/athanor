@@ -19,4 +19,4 @@ Nix for every user, six conditions: trusted-users = root only, allowed-users = *
 
 ## Consequences
 
-Applied by `docs/architecture/doc_disks.md` (on shell-specs), `docs/architecture/doc_software.md` (on shell-specs).
+Applied by `docs/architecture/doc_disks.md`, `docs/architecture/doc_software.md`.

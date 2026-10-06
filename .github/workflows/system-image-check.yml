@@ -93,7 +93,7 @@ jobs:
           path: kernel-artifacts
 
       - name: Login to GHCR
-        # system/Containerfile binds ghcr.io/<owner>/athanor-forge-tier{0..3}-repo:latest and
+        # system/Containerfile binds the athanor-forge-tier{0..3}-repo:latest images of the project registry and
         # pulls the azoth-nvidia modules by digest: the build needs a registry session before it
         # starts, not only the delta step at the end.
         env:

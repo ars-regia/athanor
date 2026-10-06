@@ -31,7 +31,7 @@ CI9 kernel-bump.yml (PR) -> merge -> CI8 kernel-build.yml (publish azoth) -> dis
 Release path: CI1 publishes :<run_id> and :latest -> CI12 iso-acceptance.yml (weekly) -> CI11 promote-stable.yml (manual, :stable)
 ```
 
-CI2 also runs inside CI3, CI4 and CI5, so one Orchestrator run lints four times (run 37384733899 lists the jobs `lint`, `build-builder / lint`, `dag-compile / lint`, `system-image / lint`).
+CI2 also runs inside CI3, CI4 and CI5, so one Orchestrator run lints four times (run 37384733899 lists the jobs `lint`, `build-builder / lint`, `dag-compile / lint`, `system-image / lint`). CI8 calls it as its first job.
 
 ### 1.2 Where things are built
 
@@ -69,13 +69,13 @@ Branch protection on `iso-v0` requires one check: `Kernel gate` (`gh api repos/h
 
 | Check | Workflow | Runs on a PR when | Required | Gates |
 |---|---|---|---|---|
-| `Kernel gate` | CI8 | every PR (no path filter) | yes | kernel prep/build, boot matrix, NVIDIA module build |
+| `Kernel gate` | CI8 | every PR (no path filter) | yes | lint (CI2), kernel prep/build, boot matrix, NVIDIA module build |
 | System Image Check | CI13 | the image inputs change | no | the three images build with a throwaway UKI key; package delta; merges `bump/system-*` PRs |
 | Spec Build Check | CI14 | a forge spec changes | no | changed specs build as the DAG builds them; merges the spec bot's PR |
 | Shell surfaces | CI15 | a shell crate or `forge/test/shell/**` changes | no | rig tests of the greeter, layout, compositor client, shelld, bar, dock, launcher; also CI2 |
 | Fuzzing, Rust Security & FFI Audit, Nix Vanguard | CI23, CI22, CI24 | only PRs based on `main` | no | see section 3 |
 
-CI2 (actionlint, `scripts/verify.py`, the unit test suites) has no trigger of its own: on a PR it runs only through CI15.
+CI2 (actionlint, `scripts/verify.py`, the unit test suites) has no trigger of its own: on a PR it runs through CI8, which runs on every pull request and whose `Kernel gate` requires it, and through CI15.
 
 ## 2. The workflows
 
@@ -96,7 +96,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 ### CI2 Reusable Workflow Lint
 
 - **File:** `call-lint.yml`. **Purpose:** actionlint with shellcheck, `scripts/verify.py workflows kickstart boundary cmdline registry licence ci`, and the Python unit test suites of the kernel profile, Azoth, Nix support, NVIDIA, build ordering, update, recovery, system config, ISO verdict, `scripts/tests`, Calmo, forge scripts and shell rig.
-- **Triggers:** `workflow_call` only (CI1, CI3, CI4, CI5, CI11, CI12, CI15). **Inputs, outputs:** none.
+- **Triggers:** `workflow_call` only (CI1, CI3, CI4, CI5, CI8, CI11, CI12, CI15). **Inputs, outputs:** none.
 - **Secrets, variables:** none. **Environment:** none. **Runner:** hosted. **Concurrency:** caller's.
 - **Scripts:** `scripts/verify.py`, `forge/specs/athanor-kernel-profile/kernel_profile.py`, `forge/test/iso/test_verdict.py`, `system/athanor-style/calmo/contrast.py`, `generate.py`.
 - **Health:** green in every caller run listed here.
@@ -146,7 +146,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 
 ### CI8 Kernel Build
 
-- **File:** `kernel-build.yml`. **Purpose:** the Azoth kernel: prep, RPM build, boot matrix, NVIDIA module gate, publication of four signed OCI images, dispatch of CI1 (doc_kernel_build.md).
+- **File:** `kernel-build.yml`. **Purpose:** the Azoth kernel: lint (CI2), prep, RPM build, boot matrix, NVIDIA module gate, publication of four signed OCI images, dispatch of CI1 (doc_kernel_build.md).
 - **Triggers:** every `pull_request`; push to `main`, `iso-v0` on `forge/specs/azoth/**` and its two workflow files; dispatch (`stage`: `prep`, `build`).
 - **Outputs:** `azoth`, `azoth-devel`, `azoth-debuginfo` images; artifacts `kernel-<stage>`, `kernel-boot`, `kernel-devel`, `kernel-boot-logs`, `kernel-attestations`; check `Kernel gate`.
 - **Secrets, variables:** `GITHUB_TOKEN`, `KERNEL_REGISTRY`. **Environment:** none.
@@ -336,5 +336,5 @@ Environments (`gh api repos/hr-mes/athanor/environments`):
 
 ## 6. Proposals
 
-- **CP2** _(Proposal)_: run CI2 on every pull request and make it a required check next to `Kernel gate`. Today a PR that touches only, say, `scripts/` or a workflow outside the CI15 paths is never linted before merge.
+- **CP2** _(Done 2026-10-06)_: CI8 runs on every pull request and calls CI2 first; `Kernel gate`, the check required on `iso-v0`, is green only when CI2 is, so no PR merges into `iso-v0` unlinted. PRs into `main` or into a stacked branch are linted but not gated. The cost is accepted: a CI2 failure unrelated to the kernel (a red suite, a download that fails) also holds back the kernel build, its publication and the Orchestrator dispatch until a re-run.
 - **CP3** _(Proposal)_: call CI2 once in CI1 and drop the nested calls in CI3, CI4 and CI5; they lint the same commit four times per run.

@@ -1,10 +1,10 @@
 %global debug_package %{nil}
 Name:           athanor-system-services
 Version:        1.0.1
-Release:        25%{?dist}
+Release:        26%{?dist}
 Summary:        Athanor OS athanor-system-services
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor-forge
+URL:            https://github.com/hr-mes/athanor
 BuildArch:      noarch
 Requires:       systemd
 Requires:       cosmic-bg
@@ -37,10 +37,13 @@ cp -a %{_sourcedir}/usr/lib/systemd/user/* %{buildroot}/usr/lib/systemd/user/
 /usr/lib/systemd/user/cosmic-osd.service
 
 %changelog
-* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.1-25
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.1-26
 - athanor-desktop.service sets NoNewPrivileges=yes: every shipped service sets it or a
   capability bound (doc_threat_model.md, TM8), and the readiness probe needs neither
   privilege nor a setuid helper.
+
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.1-25
+- Point URL and unit Documentation= at the project repository
 
 * Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.1-24
 - Stage 2 switch: cosmic-panel, cosmic-applets and cosmic-notifications leave the session;

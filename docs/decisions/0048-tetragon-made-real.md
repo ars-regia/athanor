@@ -19,4 +19,6 @@ Tetragon made real (verified 2026-10-05: preset-all disables it, tp.d empty, the
 
 ## Consequences
 
-Applied by `docs/architecture/doc_kernel_profile.md` (on shell-specs), `docs/architecture/doc_tetragon.md` (on shell-specs).
+Applied by `docs/architecture/doc_kernel_profile.md`, `docs/architecture/doc_tetragon.md`.
+
+Application pending: `forge/specs/athanor-tetragon` ships an empty `tetragon.tp.d` and no TracingPolicy files.

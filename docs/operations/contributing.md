@@ -39,7 +39,7 @@ linked document's header before its body.
 | Check | Command |
 | --- | --- |
 | Linters | `just lint` |
-| Project checks | `python3 scripts/verify.py`, or one check: `workflows`, `kickstart`, `polkit`, `paths`, `shipped`, `docs`, `panics`, `cmdline`, `polkit-subject`, `specs`, `boundary`, `registry`, `forge-rules`, `licence` |
+| Project checks | `python3 scripts/verify.py`, or one check: `workflows`, `kickstart`, `polkit`, `paths`, `shipped`, `docs`, `panics`, `cmdline`, `polkit-subject`, `specs`, `boundary`, `registry`, `forge-rules`, `licence`, `decisions` |
 | Tests of `verify.py` | `python3 -B -m unittest discover -s scripts/tests` |
 | Python tests of an area | `python3 -B -m unittest discover -s <area>/tests` |
 | A crate | `cargo test -p <crate>`; there is no single suite |
@@ -57,7 +57,7 @@ A new `verify.py` check is registered with `@check` like the others and has a te
 ## CT5. Specs and decisions
 
 - **A behaviour change updates its spec in the same pull request:** `docs/architecture/doc_<area>.md`, citing the item id it changes (for example `BR7`).
-- **A decision is a record:** `docs/decisions/NNNN-slug.md`, with the front matter described in `docs/decisions/README.md` (introduced by PR #188). A spec states what; the record states why and which alternative was rejected.
+- **A decision is a record:** `docs/decisions/NNNN-slug.md`, with the front matter described in `docs/decisions/README.md`. A spec states what; the record states why and which alternative was rejected.
 - A runbook (run, release, rotate, rebuild) goes to `docs/operations/<topic>.md`.
 
 ## CT6. Review
@@ -75,7 +75,7 @@ A new `verify.py` check is registered with `@check` like the others and has a te
 
 ## CT8. Claude Code
 
-- **Project configuration lives in `.claude/`:** rules with `paths:` front matter under `.claude/rules/`, plus the shared settings being added there. Personal settings stay in `.claude/settings.local.json`, which is not committed.
+- **Project configuration lives in `.claude/`:** rules with `paths:` front matter under `.claude/rules/`, skills under `.claude/skills/`, plus the shared settings being added there. Personal settings stay in `.claude/settings.local.json`, which is not committed.
 - **Scope a session to one area and one issue.** Start a new session for the next issue instead of carrying a large context.
 - **Load little.** Read a document's header first, then only the sections you need. Never open `docs/architecture/graph-vaults/` or `docs/architecture/graph-pages/`: they are generated.
 - **Project knowledge goes to the repository, not to personal memory:** a trap to `.claude/rules/<area>.md`, a behaviour to its spec, a decision to `docs/decisions/`, a procedure to `docs/operations/`. Personal memory holds personal preferences only; what it alone knows is lost to the team.

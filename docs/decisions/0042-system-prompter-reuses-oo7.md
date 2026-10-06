@@ -19,4 +19,4 @@ D11 SystemPrompter reuses the oo7 crate's secret exchange, tested against oo7-da
 
 ## Consequences
 
-Applied by `docs/architecture/doc_session.md` (on shell-specs).
+Applied by `docs/architecture/doc_session.md`.
