@@ -46,6 +46,8 @@ jobs:
           python3 -B -m unittest discover -s forge/specs/athanor-kernel-profile/tests -v
       - name: Azoth kernel scripts (unit tests)
         run: python3 -B -m unittest discover -s forge/specs/azoth/tests -v
+      - name: nixpkgs registry bump (unit tests, no network)
+        run: python3 -B -m unittest discover -s forge/specs/athanor-nix-support/tests -v
       - name: NVIDIA lock and build gate (unit tests)
         run: |
           set -euo pipefail

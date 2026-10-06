@@ -155,8 +155,8 @@ COPY system/scripts/ /scripts/
 # into the policy store with `semodule -i`; there is no OSTree-safe %post to do it (the
 # scriptlet was purged for immutability), so the modules were dead files. Load them at
 # build time here, which writes them into /etc/selinux/targeted and bakes them into the
-# image. This activates athanor_nix_daemon (lets PID1 open the Nix daemon socket under
-# enforcing) and athanor_scx, which had never been loaded.
+# image. This activates athanor_nix_daemon (the Nix store, socket and daemon types and
+# their file contexts) and athanor_scx, which had never been loaded.
 RUN if ls /usr/share/selinux/packages/*.cil >/dev/null 2>&1; then \
         echo "Loading custom SELinux policy modules..." && \
         semodule -i /usr/share/selinux/packages/*.cil; \
