@@ -12,6 +12,7 @@ OWNER=""
 IMAGE_NAME=""
 
 BASE_DIGEST=""
+HASH_ONLY=false
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -20,6 +21,7 @@ while [[ $# -gt 0 ]]; do
     --owner) OWNER="$2"; shift 2 ;;
     --image-name) IMAGE_NAME="$2"; shift 2 ;;
     --base-digest) BASE_DIGEST="$2"; shift 2 ;;
+    --hash-only) HASH_ONLY=true; shift ;;
     *) echo "Argomento sconosciuto: $1" >&2; exit 1 ;;
   esac
 done
@@ -27,6 +29,11 @@ done
 if [[ -z "$IMAGE_NAME" ]]; then
   IMAGE_NAME="athanor-forge-${PACKAGE}"
 fi
+
+# Package images carry their content hash as hash-<hash> (UD41), the tag the DAG
+# orchestrator asks for. The builder keeps the bare hash its consumers pull by.
+HASH_TAG_PREFIX="hash-"
+[[ "$PACKAGE" == "builder" ]] && HASH_TAG_PREFIX=""
 
 # Determina directory o seed per il calcolo dell'hash
 if [[ "$PACKAGE" == "builder" ]]; then
@@ -55,7 +62,9 @@ if [[ -n "$DIR" && -d "$DIR" ]]; then
       echo -n "builder/rpmfusion-custom.repo"
       cat "builder/rpmfusion-custom.repo"
     fi
-    if [[ -f "config/packages.json" ]]; then
+    if [[ "$PACKAGE" != "builder" && -f "config/packages.json" ]]; then
+      # Not part of the builder's hash: the image is built by flake.nix, which never reads
+      # the package lists, so editing them must not rebuild it (UD42).
       echo -n "config/packages.json"
       cat "config/packages.json"
     fi
@@ -106,8 +115,14 @@ fi
 
 echo ">>> Content Hash calcolato per ${PACKAGE}: ${CONTENT_HASH}" >&2
 
+# --hash-only: the caller asks the registry itself (dag_orchestrator.py, UD41).
+if [[ "$HASH_ONLY" == "true" ]]; then
+  echo "CONTENT_HASH=${CONTENT_HASH}"
+  exit 0
+fi
+
 # Costruisce URL immagine GHCR
-IMAGE_URL="docker://${REGISTRY}/${OWNER}/${IMAGE_NAME}:${CONTENT_HASH}"
+IMAGE_URL="docker://${REGISTRY}/${OWNER}/${IMAGE_NAME}:${HASH_TAG_PREFIX}${CONTENT_HASH}"
 IMAGE_URL_LOWER=$(echo "$IMAGE_URL" | tr '[:upper:]' '[:lower:]')
 
 echo ">>> Verifica esistenza su GHCR: ${IMAGE_URL_LOWER}..." >&2
