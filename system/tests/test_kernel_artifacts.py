@@ -204,10 +204,26 @@ class Resolve(Tool):
         self.registry(published(branches=("open",)))
         self.assertEqual(self.run_script("resolve").returncode, 0)
         self.registry(published())
-        r = self.run_script(str(self.dir / "signed"), script=ROOT / "forge/specs/azoth/nvidia-publish.sh")
+        r = self.run_script(str(self.dir / "signed"), str(self.dir / "boot"), script=ROOT / "forge/specs/azoth/nvidia-publish.sh")
         self.assertEqual(r.returncode, 1, r.stderr)
         self.assertIn(f"already holds {MODULE['legacy']}", r.stderr)
         self.assertIn("refusing to overwrite", r.stderr)
+
+    def test_publish_refuses_a_boot_tag_the_anonymous_resolve_could_not_see(self):
+        # The same for a private azoth-boot: every module is published, the signed vmlinuz
+        # only appears to the logged-in publish.
+        self.registry(published(boot=False))
+        self.assertEqual(self.run_script("resolve").returncode, 0)
+        self.registry(published())
+        r = self.run_script(str(self.dir / "signed"), str(self.dir / "boot"), script=ROOT / "forge/specs/azoth/nvidia-publish.sh")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn(f"azoth-boot:{boot_tag()} already holds {BOOT}", r.stderr)
+        self.assertIn("refusing to overwrite", r.stderr)
+
+    def test_publish_takes_the_signed_vmlinuz_directory(self):
+        r = self.run_script(str(self.dir / "signed"), script=ROOT / "forge/specs/azoth/nvidia-publish.sh")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("SIGNED_DIR BOOT_DIR", r.stderr)
 
     def test_absent_kernel_is_kernel_missing(self):
         fx = published()
