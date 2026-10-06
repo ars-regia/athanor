@@ -60,7 +60,7 @@ CI2 also runs inside CI3, CI4 and CI5, so one Orchestrator run lints four times 
 | `KERNEL_REGISTRY/azoth`, `azoth-devel`, `azoth-debuginfo` | CI8 `publish` | `<nvr>`, `<nvr>-microvm` (guest kernel), `latest` only on the default branch (`kernel-build.yml:339`) |
 | `KERNEL_REGISTRY/azoth-nvidia` | CI6 `publish` | the tag `system/kernel-artifacts.sh` computes per driver branch (`forge/specs/azoth/nvidia-publish.sh:32`) |
 | `KERNEL_REGISTRY/azoth-boot` | CI6 `publish` | `<nvr>-k<12 hex of the kernel digest>`: the vmlinuz signed for Secure Boot, keyless-signed and attested; `system/Containerfile` copies it in by digest |
-| `KERNEL_REGISTRY/azoth-signer` | CI25 | `<12 hex of the toolchain lock hash>`: the sign toolchain (sbsigntools, sign-file), run by the digest committed in `forge/specs/azoth/signer/image.digest` |
+| `KERNEL_REGISTRY/azoth-signer` | CI25 | `<12 hex of a sha256 over the Containerfile, the lock, lock.sh and sign-kernel.sh>`: the sign toolchain (sbsigntools, sign-file) and `sign-kernel.sh`, run by the digest committed in `forge/specs/azoth/signer/image.digest` |
 | `KERNEL_REGISTRY/athanor-nvidia-rpms` | CI9 `system` | the locked NVIDIA RPMs (`system/nvidia/mirror.sh`) |
 
 The DNF channel on GitHub Pages (branch `gh-pages`) is deployed only on `main` (`call-system-image.yml:149`).
@@ -97,7 +97,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 
 ### CI2 Reusable Workflow Lint
 
-- **File:** `call-lint.yml`. **Purpose:** actionlint with shellcheck, `scripts/verify.py workflows kickstart boundary cmdline registry licence ci`, and the Python unit test suites of the kernel profile, Azoth, Nix support, NVIDIA, build ordering, update, recovery, system config, ISO verdict, `scripts/tests`, Calmo, forge scripts and shell rig.
+- **File:** `call-lint.yml`. **Purpose:** actionlint with shellcheck, `scripts/verify.py workflows kickstart boundary cmdline registry licence ci`, and the Python unit test suites of the kernel profile, Azoth, Nix support, NVIDIA, build ordering, update, recovery, system config, ISO verdict, `scripts/tests`, Calmo, forge scripts and shell rig. `verify.py workflows` carries the D43 lint: it parses every workflow with PyYAML (installed by this job; the lint fails without it) and fails a signing secret read outside the sign step of a job of the environment that holds it, any read of the secrets context other than by name, a signing job with another action or input, a container or a build, and `secrets: inherit` into a workflow with a signing job. It is a regression guard against drift in reviewed workflows, not a security boundary: the environment protection and the review of every workflow change are.
 - **Triggers:** `workflow_call` only (CI1, CI3, CI4, CI5, CI8, CI11, CI12, CI15). **Inputs, outputs:** none.
 - **Secrets, variables:** none. **Environment:** none. **Runner:** hosted. **Concurrency:** caller's.
 - **Scripts:** `scripts/verify.py`, `forge/specs/athanor-kernel-profile/kernel_profile.py`, `forge/test/iso/test_verdict.py`, `system/athanor-style/calmo/contrast.py`, `generate.py`.
@@ -132,8 +132,8 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 ### CI6 NVIDIA kmod
 
 - **File:** `nvidia-kmod.yml`. **Purpose:** the signing cycle of a kernel: builds the NVIDIA modules for the pinned kernel, signs them with the module key and the kernel's vmlinuz with the Secure Boot key, boots the modules and publishes both (doc_build_ordering.md, O3-O5).
-- **Triggers:** `workflow_call` (CI1, when the modules or the signed vmlinuz are missing); dispatch (`kernel_digest`). **Outputs:** `azoth-nvidia`, `azoth-boot`; artifacts `nvidia-kernel-artifacts`, `azoth-kernel-unsigned`, `nvidia-signed`, `azoth-kernel-signed`, `nvidia-mok-signed`, `nvidia-boot-logs`, `nvidia-attestations`.
-- **Secrets, variables:** `MODULE_SIGNING_KEY`, `SECUREBOOT_SIGNING_KEY`, `GITHUB_TOKEN`, `KERNEL_REGISTRY`. **Environment:** `signing` on `sign`, the sign-kernel job of D43: checkout, artifact download and upload, and `forge/specs/azoth/signer/run.sh sign`, which runs the signer image by digest without network. The key-less `prepare` job extracts the unsigned vmlinuz before it; `publish` verifies the signature with `sbverify` against `keys/secureboot/athanor-secureboot.pem` after it.
+- **Triggers:** `workflow_call` (CI1, when the modules or the signed vmlinuz are missing); dispatch (`kernel_digest`). **Outputs:** `azoth-nvidia`, `azoth-boot`; artifacts `nvidia-kernel-artifacts`, `nvidia-signed`, `azoth-kernel-signed`, `nvidia-mok-signed`, `nvidia-boot-logs`, `nvidia-attestations`.
+- **Secrets, variables:** `MODULE_SIGNING_KEY`, `SECUREBOOT_SIGNING_KEY`, `GITHUB_TOKEN`, `KERNEL_REGISTRY`. **Environment:** `signing` on `sign`, the sign-kernel job of D43: checkout, artifact download and upload, and `forge/specs/azoth/signer/run.sh`, which runs the signer image by digest without network, with no part of the checkout mounted, the inputs and certificates read-only and only the output writable. The job signs only what it derives itself: its key-less step `run.sh inputs` resolves the kernel again with cosign (fetched by the sha256 in `signer/cosign.pin`, not by an action), requires the kernel digest the `artifacts` job passed as an output, extracts the vmlinuz from that kernel-core, and allow-lists the module tree (names, paths, vermagic of the derived kver, no symlink); only then does `run.sh sign` see the keys, and it checks that the signed vmlinuz without its signature is the input. The key-less `prepare` job builds the MOK-signed negative sample; `publish` verifies the signature with `sbverify` against `keys/secureboot/athanor-secureboot.pem` and that the signed vmlinuz is the one of the kernel-core RPM it resolved.
 - **Runner:** hosted, KVM for `boot`. **Concurrency:** job `publish` in `azoth-nvidia-publish`.
 - **Scripts:** `system/kernel-artifacts.sh`, `forge/specs/azoth/nvidia.sh`, `signer/run.sh`, `sign-kernel.sh`, `nvidia-publish.sh`, `boot.sh`, `retention.sh`.
 - **Health:** no run on `iso-v0` since the Orchestrator calls it; skipped in 37384733899 (modules present). Last dispatches: 35227069058 success, 35217964753 success, 34966900609 cancelled, 34907939626 success, 34854397484 failure (2026-09-14 to 09-17).
@@ -289,7 +289,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 ### CI25 Azoth signer image
 
 - **File:** `azoth-signer.yml`. **Purpose:** builds and publishes `azoth-signer`, the toolchain image CI6 `sign` runs (`forge/specs/azoth/signer/`), from the Fedora digest and the locked RPMs; skips a tag that exists.
-- **Triggers:** push to `main` or `iso-v0` on `forge/specs/azoth/signer/**` or `sign-kernel.sh`; dispatch. **Outputs:** `azoth-signer:<lock hash>`, keyless-signed; the digest to commit, in the step summary.
+- **Triggers:** push to `main` or `iso-v0` on `forge/specs/azoth/signer/**`, `lock.sh` or `sign-kernel.sh`; dispatch. **Outputs:** `azoth-signer:<inputs hash>`, keyless-signed; the digest to commit, in the step summary.
 - **Secrets, variables:** `GITHUB_TOKEN`, `KERNEL_REGISTRY`. **Environment:** none. **Runner:** hosted. **Concurrency:** none.
 - **Scripts:** `forge/specs/azoth/signer/publish.sh`, `lock.sh`, `forge/scripts/retry.sh`.
 - **Health:** not run yet. Until its digest is committed in `signer/image.digest`, CI6 `prepare` and `sign` fail closed.
