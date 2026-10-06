@@ -406,6 +406,17 @@ def write_hashes(hashes):
         json.dump(hashes, f, indent=2, sort_keys=True)
         f.write("\n")
 
+def image_needed(event_name, dirty_count):
+    """
+    Whether the system image builds on this run. It is not decided by the package matrix:
+    a push that only touches system/ (Containerfile, scripts, disk config) or a base digest
+    bump leaves every package clean and must still publish an image. Only the nightly run
+    publishes nothing without a source change (doc_update_trust.md: "A nightly Orchestrator
+    run without a source change publishes no new digest"), so it needs a dirty package.
+    """
+    return event_name != "schedule" or dirty_count > 0
+
+
 def partition_dag_levels(dirty_nodes, graph, prereqs, node_types):
     """
     Groups dirty nodes into topological execution levels (Level 0, Level 1, Level 2, Flatpaks).
@@ -467,6 +478,7 @@ def main():
     
     has_changes = "true" if len(dirty_nodes) > 0 else "false"
     
+    build_image = "true" if image_needed(os.environ.get("GITHUB_EVENT_NAME", ""), len(dirty_nodes)) else "false"
     j_lvl0 = json.dumps(level_0)
     j_lvl1 = json.dumps(level_1)
     j_lvl2 = json.dumps(level_2)
@@ -514,6 +526,7 @@ def main():
             f.write(f"dag_flatpaks={j_fp}\n")
             f.write(f"dirty_count={len(dirty_nodes)}\n")
             f.write(f"has_changes={has_changes}\n")
+            f.write(f"image_needed={build_image}\n")
 
 if __name__ == "__main__":
     if sys.argv[1:2] == ["--inputs"] and len(sys.argv) == 3:

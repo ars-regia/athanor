@@ -18,7 +18,7 @@ What ships today, checked on the maintainer's desktop (image 0bd565cd) and in th
 - **`/run/athanor` has no owner.** The attestation key release creates it with default permissions and writes the released disk key into it. No `tmpfiles.d` entry declares it.
 - **`athanor-secure-boot` cannot work.** It is a D-Bus service on `org.athanor.SecureBoot` with no bus policy file, so it cannot own its name; it reads one efivar; it was in `packages.json`. (Removed with its package by issue #148.)
 - **Retention can remove signatures.** `forge/scripts/clean_ghcr.sh` keeps the two newest tagged versions per package, and a cosign signature is a tagged version of the same package.
-- A nightly Orchestrator run without a source change publishes no new digest (`has_changes` stays false). Every merge that touches the image does.
+- A nightly Orchestrator run without a source change publishes no new digest (`image_needed` stays false). Every merge that touches the image does.
 
 What is available: `skopeo` 1.22 and `bootc` 1.16 are in the image; `bootc upgrade` has `--check`, `--download-only` and `--from-downloaded`; `bootc switch` has `--enforce-container-sigpolicy`; the workspace has `zbus` 5.18 on tokio, and `athanor_bus_api::polkit::check_polkit_auth_zbus(conn, sender, action_id, allow_user_interaction)`, which builds the subject from the bus sender.
 

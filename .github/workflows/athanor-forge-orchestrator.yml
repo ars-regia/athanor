@@ -85,6 +85,7 @@ jobs:
       dag_flatpaks: ${{ steps.brain.outputs.dag_flatpaks }}
       dirty_count: ${{ steps.brain.outputs.dirty_count }}
       has_changes: ${{ steps.brain.outputs.has_changes }}
+      image_needed: ${{ steps.brain.outputs.image_needed }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -218,14 +219,15 @@ jobs:
       builder_hash: ${{ needs.build-builder.outputs.content_hash }}
 
   system-image:
-    # The images run when a DAG node changed, when the kernel artifacts were not ready at
+    # The images run on every run but the nightly one, which needs a changed DAG node (the
+    # brain's image_needed: doc_update_trust.md, doc_build_ordering.md), when the kernel artifacts were not ready at
     # the start (the kernel is outside the DAG), or when the dispatch forces them (O4).
     # inputs.force_image is compared against both the boolean and the string form: a
     # gh workflow run -f sends "true"/"false" as a string, which GitHub Actions does not
     # coerce to the declared boolean type, so a bare `|| inputs.force_image` would treat a
     # future explicit "false" as truthy (any non-empty string is truthy).
     needs: [orchestrator-brain, dag-compile, build-builder, kernel-artifacts, kernel-artifacts-final]
-    if: ${{ !cancelled() && needs.orchestrator-brain.result == 'success' && needs.kernel-artifacts-final.result == 'success' && needs.build-builder.result == 'success' && (needs.dag-compile.result == 'success' || needs.dag-compile.result == 'skipped') && (needs.orchestrator-brain.outputs.has_changes == 'true' || needs.kernel-artifacts.outputs.state != 'ready' || inputs.force_image == true || inputs.force_image == 'true') }}
+    if: ${{ !cancelled() && needs.orchestrator-brain.result == 'success' && needs.kernel-artifacts-final.result == 'success' && needs.build-builder.result == 'success' && (needs.dag-compile.result == 'success' || needs.dag-compile.result == 'skipped') && (needs.orchestrator-brain.outputs.image_needed == 'true' || needs.kernel-artifacts.outputs.state != 'ready' || inputs.force_image == true || inputs.force_image == 'true') }}
     uses: ./.github/workflows/call-system-image.yml
     with:
       builder_content_hash: ${{ needs.build-builder.outputs.content_hash }}
