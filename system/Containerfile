@@ -96,10 +96,14 @@ RUN dnf5 install -y --allowerasing --enablerepo=fedora-cisco-openh264 openh264 &
 
 # The Azoth kernel of the pins is the one tier 0 installed. Its vmlinuz is replaced by the
 # same kernel signed for Secure Boot, which shim accepts through MokList; `rpm -V kernel-core`
-# reports the file as modified (doc_system_image.md).
+# reports the file as modified (doc_system_image.md). azoth-boot names in /kver the kernel it
+# signed: a BOOT_DIGEST of another kernel fails here, not at boot. The mode is the RPM's.
 ARG AZOTH_NVR
 RUN test -f "/usr/lib/modules/${AZOTH_NVR}.x86_64/vmlinuz"
-COPY --from=signed-kernel /vmlinuz /usr/lib/modules/${AZOTH_NVR}.x86_64/vmlinuz
+RUN --mount=type=bind,from=signed-kernel,source=/kver,target=/tmp/azoth-boot-kver \
+    signed=$(cat /tmp/azoth-boot-kver) && \
+    if [ "$signed" != "${AZOTH_NVR}.x86_64" ]; then echo "azoth-boot signed the vmlinuz of $signed, not of ${AZOTH_NVR}.x86_64" >&2; exit 1; fi
+COPY --chmod=0755 --from=signed-kernel /vmlinuz /usr/lib/modules/${AZOTH_NVR}.x86_64/vmlinuz
 
 # Tier 0: Install Cilium Tetragon eBPF Runtime Security is now delegated to athanor-tetragon RPM
 

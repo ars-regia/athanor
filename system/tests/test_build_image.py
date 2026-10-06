@@ -197,5 +197,34 @@ class BuildImage(unittest.TestCase):
         self.assertEqual(args, [])
 
 
+
+class SignedKernelStage(unittest.TestCase):
+    """system/Containerfile installs azoth-boot's vmlinuz only over the kernel it was signed for."""
+
+    def setUp(self):
+        lines = (ROOT / "system" / "Containerfile").read_text().replace("\\\n", " ").splitlines()
+        copies = [i for i, line in enumerate(lines) if line.startswith("COPY") and "--from=signed-kernel" in line]
+        self.assertEqual(len(copies), 1, "exactly one COPY of the signed vmlinuz")
+        self.copy = lines[copies[0]]
+        self.check = lines[copies[0] - 1]
+
+    def test_the_vmlinuz_keeps_the_mode_of_the_rpm(self):
+        self.assertIn("--chmod=0755", self.copy.split())
+        self.assertTrue(self.copy.endswith(" /vmlinuz /usr/lib/modules/${AZOTH_NVR}.x86_64/vmlinuz"), self.copy)
+
+    def test_the_kver_of_azoth_boot_is_compared_with_the_pins_before_the_copy(self):
+        self.assertTrue(self.check.startswith("RUN --mount=type=bind,from=signed-kernel,source=/kver,target=/tmp/azoth-boot-kver "), self.check)
+        command = self.check.split("target=/tmp/azoth-boot-kver ", 1)[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            kver = pathlib.Path(tmp) / "kver"
+            command = command.replace("/tmp/azoth-boot-kver", str(kver))
+            for signed, status in ((f"{NVR}.x86_64", 0), ("7.0.0-1.azoth.fc43.x86_64", 1)):
+                kver.write_text(signed + "\n")
+                r = subprocess.run(["sh", "-c", command], env={"AZOTH_NVR": NVR, "PATH": os.environ["PATH"]},
+                                   capture_output=True, text=True)
+                self.assertEqual(r.returncode, status, r.stderr)
+            self.assertIn("not of " + NVR, r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
