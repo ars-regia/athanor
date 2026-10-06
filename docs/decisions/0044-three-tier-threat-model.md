@@ -19,4 +19,6 @@ Threat model: three tiers (unconfined user code = the user; confined apps untrus
 
 ## Consequences
 
-Applied by `docs/architecture/doc_files.md` (on shell-specs).
+Applied by `docs/architecture/doc_files.md`.
+
+Application pending: the CLAUDE.md rule is not yet replaced and `scripts/verify.py` has no `NoNewPrivileges` or capability-bound check.

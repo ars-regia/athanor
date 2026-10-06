@@ -20,3 +20,5 @@ Cleanup approved: dead packages (stubs, COSMIC apps, Thunar, foot, swaybg, swayl
 ## Consequences
 
 Applied by `docs/architecture/doc_kernel_profile.md` (on iso-v0), `docs/architecture/doc_update_trust.md` (on iso-v0).
+
+Application pending: `virt-manager`, `qemu-img`, `qemu-kvm`, `swaybg`, `swaylock` and `Thunar` remain in `forge/config/packages.json`; `system/Containerfile` still enables `systemd-homed`; `doc_forge_development_guide.md` and `athanor-telemetry` still exist; there is no forbidden-names check in `scripts/verify.py`.

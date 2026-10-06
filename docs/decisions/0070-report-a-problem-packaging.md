@@ -19,4 +19,4 @@ report-a-problem (SE-S11): athanor-report-problem ships in athanor-kernel-profil
 
 ## Consequences
 
-No specification document under `docs/architecture` cites this record yet; it takes effect through the work it describes.
+Application pending: `athanor-report-problem` is not yet in `athanor-kernel-profile`; only the `problem-report` label exists (`.github/settings/labels.json`).

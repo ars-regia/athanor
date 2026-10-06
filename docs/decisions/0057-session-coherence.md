@@ -19,4 +19,4 @@ Session coherence: doc_session.md (environment, target, start/stop order, crash-
 
 ## Consequences
 
-Applied by `docs/architecture/doc_compositor.md` (on shell-specs), `docs/architecture/doc_lock_and_prompts.md` (on shell-specs), `docs/architecture/doc_session.md` (on shell-specs), `docs/architecture/doc_session_daemons.md` (on shell-specs), `docs/architecture/doc_shell_standard.md` (on shell-specs).
+Applied by `docs/architecture/doc_compositor.md`, `docs/architecture/doc_lock_and_prompts.md`, `docs/architecture/doc_session.md`, `docs/architecture/doc_session_daemons.md`, `docs/architecture/doc_shell_standard.md`.

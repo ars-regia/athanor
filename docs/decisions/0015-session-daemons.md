@@ -39,4 +39,4 @@ Controller rulings on session-daemons conflicts (owed amendments, applied to the
 
 ## Consequences
 
-Elaborated in `docs/architecture/doc_session_daemons.md` (on shell-specs).
+Elaborated in `docs/architecture/doc_session_daemons.md`.

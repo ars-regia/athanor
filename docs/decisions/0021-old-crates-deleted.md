@@ -19,4 +19,4 @@ Old crates: delete athanor-settings-rs, athanor-daemon-rs, athanor-niri-ipc; ath
 
 ## Consequences
 
-No specification document under `docs/architecture` cites this record yet; it takes effect through the work it describes.
+Application pending: `athanor-settings-rs` and `athanor-daemon-rs` are deleted; `forge/specs/athanor-niri-ipc` still exists, is a workspace member and is a path dependency of `athanor-dock` and `athanor-shell-rs`. Its deletion follows their removal.

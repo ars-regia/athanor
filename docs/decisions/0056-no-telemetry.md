@@ -19,4 +19,4 @@ Telemetry: none. A "Report a problem" command and Settings entry prepare a prefi
 
 ## Consequences
 
-Applied by `docs/architecture/doc_kernel_profile.md` (on shell-specs), `docs/architecture/doc_session.md` (on shell-specs), `docs/architecture/doc_settings.md` (on shell-specs), `docs/architecture/doc_tetragon.md` (on shell-specs).
+Applied by `docs/architecture/doc_kernel_profile.md`, `docs/architecture/doc_session.md`, `docs/architecture/doc_settings.md`, `docs/architecture/doc_tetragon.md`.

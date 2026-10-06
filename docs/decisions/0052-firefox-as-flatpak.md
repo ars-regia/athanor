@@ -19,4 +19,4 @@ Firefox moves to Flatpak (Mozilla on Flathub).
 
 ## Consequences
 
-Applied by `docs/architecture/doc_software.md` (on shell-specs).
+Applied by `docs/architecture/doc_software.md`.

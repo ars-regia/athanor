@@ -30,4 +30,4 @@ Recorded in the maintainer decision log, section 'Wave 1 maintainer decisions', 
 
 ## Consequences
 
-Elaborated in `docs/architecture/doc_lock_and_prompts.md` (on shell-specs).
+Elaborated in `docs/architecture/doc_lock_and_prompts.md`.

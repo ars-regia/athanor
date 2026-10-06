@@ -2,7 +2,7 @@
 id: W1-RULINGS
 title: "Cross-document rulings after wave 1"
 date: 2026-10-05
-status: accepted
+status: amended by A2-6, A2-7
 issues: []
 areas: [shell, security]
 ---

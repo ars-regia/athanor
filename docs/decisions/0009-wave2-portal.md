@@ -25,4 +25,4 @@ Recorded in the maintainer decision log, section 'Wave 2 decisions (maintainer, 
 
 ## Consequences
 
-Elaborated in `docs/architecture/doc_portal.md` (on shell-specs).
+Elaborated in `docs/architecture/doc_portal.md`.
