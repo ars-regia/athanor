@@ -2,7 +2,7 @@
 id: A2-17
 title: "Audience and support window"
 date: 2026-10-05
-status: accepted
+status: amended by ADR-0079
 issues: []
 areas: [product, update]
 ---

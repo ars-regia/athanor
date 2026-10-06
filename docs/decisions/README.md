@@ -107,7 +107,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-2 | 0037 | [Secure Boot at 1.0 with a real MOK chain](0037-secure-boot-mok-chain.md) | accepted | signing, security |
 | A2-3 | 0038 | [GPL-3.0-or-later for all own code](0038-licence-gpl-3-or-later.md) | accepted | docs, ci |
 | A2-4 | 0039 | [Delivery repairs before 1.0](0039-delivery-repairs-before-1-0.md) | accepted | update, ci |
-| A2-5 | 0040 | [Security-class updates apply at the next shutdown](0040-security-updates-at-next-shutdown.md) | accepted | update |
+| A2-5 | 0040 | [Security-class updates apply at the next shutdown](0040-security-updates-at-next-shutdown.md) | amended by ADR-0080 | update |
 | A2-6 | 0041 | [Trusted path built on cosmic-comp PR #1441](0041-trusted-path-on-cosmic-comp.md) | accepted | security, shell |
 | A2-7 | 0042 | [SystemPrompter reuses the oo7 secret exchange](0042-system-prompter-reuses-oo7.md) | accepted | security, shell |
 | A2-8 | 0043 | [bootc in two steps (D6 closed)](0043-bootc-in-two-steps.md) | amended by ADR-0076 | update, kernel, security |
@@ -121,7 +121,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-14 | 0051 | [Scope of the own applications](0051-own-apps-scope.md) | accepted | shell, packages |
 | A2-15 | 0052 | [Firefox moves to Flatpak](0052-firefox-as-flatpak.md) | accepted | packages |
 | A2-16 | 0053 | [Nix for every user](0053-nix-for-every-user.md) | accepted | nix, packages, security |
-| A2-17 | 0054 | [Audience and support window](0054-audience-and-support-window.md) | accepted | product, update |
+| A2-17 | 0054 | [Audience and support window](0054-audience-and-support-window.md) | amended by ADR-0079 | product, update |
 | A2-18 | 0055 | [Governance](0055-governance.md) | accepted | docs, security, process |
 | A2-19 | 0056 | [No telemetry; report a problem](0056-no-telemetry.md) | accepted | security, shell |
 | A2-20 | 0057 | [Session coherence](0057-session-coherence.md) | accepted | shell, session |
@@ -130,8 +130,8 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-23 | 0060 | [authselect without nullok](0060-authselect-without-nullok.md) | accepted | security |
 | A2-24 | 0061 | [Desktop minor decisions](0061-desktop-minor-decisions.md) | accepted | shell |
 | A2-25 | 0062 | [Governance targets confirmed](0062-governance-targets-confirmed.md) | accepted | security, process |
-| A2-26 | 0063 | [Update policy](0063-update-policy.md) | accepted | update |
-| A2-27 | 0064 | [Signing approvals and MOK enrolment](0064-signing-approvals-and-mok-enrolment.md) | amended by A2-35 | signing, installer |
+| A2-26 | 0063 | [Update policy](0063-update-policy.md) | amended by ADR-0080 | update |
+| A2-27 | 0064 | [Signing approvals and MOK enrolment](0064-signing-approvals-and-mok-enrolment.md) | amended by A2-35, ADR-0078 | signing, installer |
 | A2-28 | 0065 | [Bazaar waits for the Fedora 45 base](0065-bazaar-waits-for-fedora-45.md) | accepted | packages, shell |
 | A2-29 | 0066 | [Threat model path lists](0066-threat-model-path-lists.md) | accepted | security |
 | A2-30 | 0067 | [Offline help with Yelp](0067-offline-help-yelp.md) | accepted | docs, shell |
@@ -146,3 +146,6 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0076 | 0076 | [Platform scope for 1.0](0076-platform-scope-for-1-0.md) | accepted | platform, security, build, docs |
 | ADR-0077 | 0077 | [Desktop decisions from Audit 3](0077-desktop-decisions.md) | accepted | shell, apps, security |
 | ADR-0079 | 0079 | [Captive portals under strict DNS over TLS](0079-captive-portals-under-strict-dot.md) | accepted | network, security |
+| ADR-0078 | 0078 | [Pipeline architecture](0078-pipeline-architecture.md) | accepted | build, signing, security |
+| ADR-0079 | 0079 | [CRA compliance posture](0079-cra-compliance-posture.md) | accepted | security, update, product |
+| ADR-0080 | 0080 | [Update control: postpone and opt-out](0080-update-control.md) | accepted | update, security |

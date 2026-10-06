@@ -2,7 +2,7 @@
 id: A2-5
 title: "Security-class updates apply at the next shutdown"
 date: 2026-10-05
-status: accepted
+status: amended by ADR-0080
 issues: []
 areas: [update]
 ---

@@ -2,7 +2,7 @@
 id: A2-26
 title: "Update policy"
 date: 2026-10-06
-status: accepted
+status: amended by ADR-0080
 issues: []
 areas: [update]
 ---
