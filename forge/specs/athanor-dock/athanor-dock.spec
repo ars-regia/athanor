@@ -3,7 +3,7 @@ Name:           athanor-dock
 Version:        1.0.0
 Release:        4%{?dist}
 Summary:        The Athanor dock
-License:        MIT
+License:        GPL-3.0-or-later
 
 BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gtk4-layer-shell-devel binutils python3 gettext
 # athanor-bar ships the vendor favourites, /usr/share/athanor/favorites.toml, that both read.

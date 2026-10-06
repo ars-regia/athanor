@@ -7,7 +7,7 @@ Version:        1.0.0
 Release:        5%{?dist}
 Summary:        Athanor system image updates and trust state
 
-License:        MIT
+License:        GPL-3.0-or-later
 URL:            https://github.com/hr-mes/athanor
 
 BuildRequires:  rust cargo gcc systemd-rpm-macros

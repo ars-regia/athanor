@@ -1043,6 +1043,129 @@ def check_forge_rules():
 
 
 # --------------------------------------------------------------------------- #
+# licence: one licence for our own code (maintainer decision A2-3, 2026-10-05)
+# --------------------------------------------------------------------------- #
+
+OWN_LICENCE = "GPL-3.0-or-later"
+# Specs that package somebody else's software, by repository path: they declare
+# upstream's licence, which must be an expression of known SPDX identifiers. Every
+# other spec, every Cargo.toml and every nfpm `license:` field is our own code and
+# must say OWN_LICENCE.
+UPSTREAM_SPECS = {
+    "forge/specs/athanor-ananicy/ananicy-cpp.spec",
+    "forge/specs/athanor-bat/bat.spec",
+    "forge/specs/athanor-bpf-linker/athanor-bpf-linker.spec",
+    "forge/specs/athanor-cliphist/athanor-cliphist.spec",
+    "forge/specs/athanor-cosign/athanor-cosign.spec",
+    "forge/specs/athanor-dart-sass/athanor-dart-sass.spec",
+    "forge/specs/athanor-matugen/athanor-matugen.spec",
+    "forge/specs/athanor-rosenpass/athanor-rosenpass.spec",
+    "forge/specs/athanor-syft/athanor-syft.spec",
+    "forge/specs/athanor-tetragon/athanor-tetragon.spec",
+    "forge/specs/azoth/microvm/azoth-microvm.spec",
+    "forge/specs/cosmic-comp/cosmic-comp.spec",
+}
+# Crates whose manifests agents may not edit without the maintainer's approval.
+PROTECTED_CRATES = {"system/confidential_computing/athanor-attestation/Cargo.toml"}
+# Files that carry packaging metadata outside Cargo.toml and *.spec.
+NFPM_FILES = ["flake.nix"]
+# The SPDX identifiers the repository actually uses. A new one is added here on purpose.
+SPDX_IDS = {
+    "0BSD", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "BSL-1.0", "CC0-1.0",
+    "GPL-2.0-only", "GPL-2.0-or-later", "GPL-3.0-only", "GPL-3.0-or-later", "ISC",
+    "LGPL-2.1-or-later", "LGPL-3.0-or-later", "MIT", "MPL-2.0", "Unicode-3.0",
+    "Unlicense", "Zlib",
+}
+SPDX_EXCEPTIONS = {"LLVM-exception", "Linux-syscall-note"}
+
+
+def spdx_problem(expr):
+    """Why `expr` is not an SPDX expression of known identifiers, or None."""
+    tokens = re.findall(r"\(|\)|[^\s()]+", expr)
+    if not tokens:
+        return "empty"
+    depth, expect = 0, "id"  # id: identifier or "(" ; exc: exception id ; op: operator or ")"
+    for tok in tokens:
+        if tok == "(":
+            if expect != "id":
+                return "unexpected '('"
+            depth += 1
+        elif tok == ")":
+            depth -= 1
+            if expect != "op" or depth < 0:
+                return "unbalanced ')'"
+        elif expect == "id":
+            if tok not in SPDX_IDS:
+                return f"'{tok}' is not a known SPDX identifier"
+            expect = "op"
+        elif expect == "exc":
+            if tok not in SPDX_EXCEPTIONS:
+                return f"'{tok}' is not a known SPDX exception"
+            expect = "op"
+        elif tok in ("AND", "OR"):
+            expect = "id"
+        elif tok == "WITH":
+            expect = "exc"
+        else:
+            return f"expected AND/OR/WITH, found '{tok}'"
+    if expect != "op" or depth:
+        return "incomplete expression"
+    return None
+
+
+def licence_problems(root=None):
+    root = Path(root or ROOT)
+    out = []
+    git = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "--cached", "--others", "--exclude-standard"],
+        capture_output=True, text=True)
+    if git.returncode:
+        return [f"cannot list the repository files: {git.stderr.strip()}"]
+    files = [f for f in git.stdout.split("\n") if (root / f).is_file()]
+    for f in sorted(files):
+        name = f.rsplit("/", 1)[-1]
+        if name == "Cargo.toml":
+            try:
+                pkg = tomllib.loads(read(root / f)).get("package")
+            except tomllib.TOMLDecodeError as e:
+                out.append(f"{f}: unreadable manifest ({e})")
+                continue
+            if pkg is None:
+                continue
+            lic = pkg.get("license")
+            if lic != OWN_LICENCE:
+                note = " (change awaits maintainer approval: protected crate)" \
+                    if f in PROTECTED_CRATES else ""
+                out.append(f"{f}: license = {lic!r}, expected {OWN_LICENCE!r}{note}")
+        elif name.endswith(".spec"):
+            m = re.search(r"^License:\s*(.*?)\s*$", read(root / f), re.M)
+            if not m:
+                out.append(f"{f}: no License: field")
+            elif f in UPSTREAM_SPECS:
+                why = spdx_problem(m.group(1))
+                if why:
+                    out.append(f"{f}: License: {m.group(1)} ({why})")
+            elif m.group(1) != OWN_LICENCE:
+                out.append(f"{f}: License: {m.group(1)}, expected {OWN_LICENCE}")
+        elif f in NFPM_FILES:
+            for n, line in enumerate(read(root / f).split("\n"), 1):
+                m = re.match(r"""^\s*license:\s*["']?([^"'\s]*)""", line)
+                if m and m.group(1) != OWN_LICENCE:
+                    out.append(f"{f}:{n}: nfpm license: {m.group(1)}, expected {OWN_LICENCE}")
+    if not (root / "LICENSE").is_file():
+        out.append("LICENSE: missing at the repository root")
+    return out
+
+
+@check("licence", "own crates and specs declare GPL-3.0-or-later, upstream specs a valid SPDX expression")
+def check_licence():
+    r = Result()
+    for problem in licence_problems():
+        r.fail(problem)
+    return r
+
+
+# --------------------------------------------------------------------------- #
 # runner
 # --------------------------------------------------------------------------- #
 

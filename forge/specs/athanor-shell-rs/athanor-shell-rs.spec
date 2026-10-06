@@ -5,7 +5,7 @@ Version:        1.0.0
 Release:        38%{?dist}
 Summary:        Athanor OS Native Rust GTK4 Shell
 
-License:        MIT
+License:        GPL-3.0-or-later
 
 BuildRequires:  rust cargo gcc gcc-c++ gtk4-devel glib2-devel pkgconf-pkg-config gtk4-layer-shell-devel clang-devel speech-dispatcher-devel upower-devel
 Requires: gtk4 gtk4-layer-shell glib2 upower xdg-utils plocate foot wl-clipboard

@@ -39,3 +39,10 @@ GitHub milestone `iso-v0`.
 ## Contributing and security
 
 See [CONTRIBUTING](.github/CONTRIBUTING.md) and the [security policy](.github/SECURITY.md).
+
+## Licence
+
+Athanor's own code is licensed under the GNU General Public License, version 3 or
+(at your option) any later version (`GPL-3.0-or-later`); see [LICENSE](LICENSE).
+Packages that Athanor only redistributes, such as the patched `cosmic-comp`
+(GPL-3.0-only), keep the licence of their upstream.

@@ -3,7 +3,7 @@ Name:           athanor-nix-support
 Version:        1.0.0
 Release:        7%{?dist}
 Summary:        Athanor OS athanor-nix-support
-License:        MIT
+License:        GPL-3.0-or-later
 URL:            https://github.com/hr-mes/athanor-forge
 BuildArch:      noarch
 

@@ -4,7 +4,7 @@ Version:        1.0.0
 Release:        2%{?dist}
 Summary:        Athanor OS System Diagnostic CLI
 
-License:        MIT
+License:        GPL-3.0-or-later
 
 
 BuildRequires:  rust cargo gcc
