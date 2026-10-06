@@ -148,7 +148,7 @@ progetto (workflow `.github/workflows/nvidia-kmod.yml`, che poi li carica in QEM
 
 ## Pubblicazione
 
-Ogni push su `main` o `iso-v0` che tocca questa directory costruisce e pubblica tre
+Ogni push su `main` o `iso-v0` che tocca questa directory costruisce e pubblica quattro
 OCI con i soli RPM dentro, tag `<nvr>` (quello che stampa `bash nvr.sh`):
 
 | Immagine | Contenuto |
@@ -157,7 +157,7 @@ OCI con i soli RPM dentro, tag `<nvr>` (quello che stampa `bash nvr.sh`):
 | `ghcr.io/hr-mes/azoth-devel` | kernel-devel, per i kmod esterni (NVIDIA, fase K4) |
 | `ghcr.io/hr-mes/azoth:<nvr>-microvm` | azoth-microvm: vmlinux, bzImage, config e release del kernel guest (sezione 9) |
 | `ghcr.io/hr-mes/azoth-debuginfo` | debuginfo, restano le due versioni piu' recenti |
-| `ghcr.io/hr-mes/azoth-nvidia` | i `.ko` NVIDIA firmati, tag `<nvr>-open` e `<nvr>-legacy` (workflow `nvidia-kmod.yml`) |
+| `ghcr.io/hr-mes/azoth-nvidia` | i `.ko` NVIDIA firmati, tag `<nvr>-k<12 cifre esadecimali del digest del kernel>-<branch>-<versione>` (pubblicata da `nvidia-kmod.yml`, non da Kernel Build) |
 
 Ognuna e' firmata con cosign keyless dall'identita' del workflow, porta un SBOM SPDX
 e un'attestazione custom con i pin (`pins.json`: pins.env, hash del manifest, del
@@ -175,7 +175,7 @@ gh attestation verify "oci://ghcr.io/hr-mes/azoth:$(bash nvr.sh)" --repo hr-mes/
 
 Il bot (`kernel-bump.yml`, spec sezione 8) apre ogni giorno, dal branch di default, una
 PR con i pin nuovi, i manifesti rigenerati, l'esito di `prep` e le opzioni derivate, e
-le mette l'auto-merge sul check `Kernel gate` di Kernel Build. A mano, nella stessa
+le mette l'auto-merge sul check `Kernel gate` di Kernel Build, ma solo se `prep` e' verde e nessun lock NVIDIA si muove: altrimenti la fonde una persona. A mano, nella stessa
 sequenza:
 
 1. `python3 bump.py check --group kernel` mostra cosa muoverebbe;

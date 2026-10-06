@@ -1,7 +1,7 @@
 name: cosmic-comp rebase drill
 
 # Tries Athanor's cosmic-comp patch set (forge/specs/cosmic-comp/SOURCES) on the newest
-# upstream tag and reports which patches apply (doc_compositor.md, CO3). The logic is in
+# upstream tag and reports which patches apply. The logic is in
 # scripts/cosmic-comp-rebase/rebase.py; this file checks out, calls it and uploads its
 # output. The run is red when a patch no longer applies, which is what it is for. It
 # changes nothing in the repository: the bump itself is cosmic-comp-bump.yml.

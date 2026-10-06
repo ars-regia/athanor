@@ -94,7 +94,6 @@ protected paths last, as in PR #170.
 # apps: portal, software, backup, recovery, first run
 /system/athanor-apps/                          @hr-mes
 /system/athanor-portal/                        @hr-mes
-/system/portal/                                @hr-mes
 /system/athanor-store/                         @hr-mes
 /system/athanor-search/                        @hr-mes
 /system/athanor-oobe/                          @hr-mes

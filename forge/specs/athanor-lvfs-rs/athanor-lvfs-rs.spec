@@ -1,11 +1,11 @@
 %global debug_package %{nil}
 Name:           athanor-lvfs-rs
 Version:        1.0.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Athanor OS Firmware Automation Daemon
 
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor-forge
+URL:            https://github.com/hr-mes/athanor
 
 
 BuildRequires:  rust cargo systemd-rpm-macros pkgconf-pkg-config openssl-devel
@@ -94,6 +94,9 @@ EOF
 %{_datadir}/polkit-1/actions/os.athanor.lvfs.policy
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
+- Point URL at the project repository
+
 * Thu Jul 16 2026 Athanor <athanor@athanor.os> - 1.0.0-1
 - Initial release
 
