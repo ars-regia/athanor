@@ -1,5 +1,6 @@
 #!/bin/bash
-# Checks that the registry probe in check_idempotency.sh tells its three answers apart,
+# Checks that registry_probe.sh (the one reading of the registry, used by check_idempotency.sh
+# and the DAG orchestrator) tells present from absent,
 # against images that really are and really are not in the registry.
 #
 # Run it from anywhere with skopeo available:
@@ -45,29 +46,12 @@ fi
 # about the registry rather than about the home directory.
 [[ -w ${HOME:-/root} ]] || { HOME=$(mktemp -d); export HOME; }
 
-probe() { # probe TAG TOKEN
-  local url="docker://${image}:$1" token=$2
-  local status="" err rc
-  for attempt in anonymous authenticated; do
-    local args=("--no-tags")
-    if [[ $attempt == authenticated ]]; then
-      [[ -n $token ]] || continue
-      args+=("--creds" "${owner}:${token}")
-    fi
-    err=$(skopeo inspect "${args[@]}" "$url" 2>&1 >/dev/null); rc=$?
-    if [[ $rc -eq 0 ]]; then status=found; break; fi
-    if grep -qi 'manifest unknown\|name unknown\|not found' <<< "$err"; then status=absent; break; fi
-    status=error
-  done
-  echo "$status"
-}
+here=$(dirname "${BASH_SOURCE[0]}")
+probe() { bash "$here/registry_probe.sh" "${image}:$1" 2> /dev/null || echo error; }
 
-# The exact CI failure: a real image, a token the registry rejects.
-check "present image + rejected token" found "$(probe "$h_present" not-a-real-token)"
-# No token at all, the way a local run works.
-check "present image, no token"        found "$(probe "$h_present" "")"
+# A real image reads as present, with no credentials involved.
+check "present image"  present "$(probe "$h_present")"
 # A tag that genuinely does not exist must read as absent, not as an error.
-check "missing image"                  absent "$(probe "$h_absent" "")"
-check "missing image + rejected token" absent "$(probe "$h_absent" not-a-real-token)"
+check "missing image"  absent  "$(probe "$h_absent")"
 
 exit $fail

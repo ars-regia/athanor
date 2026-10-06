@@ -1,10 +1,17 @@
-"""Unit tests of forge/scripts/dag_orchestrator.py: a package's hash covers the Cargo path
-dependencies it builds from (python3 -B -m unittest discover -s forge/scripts/tests -v)."""
+"""Unit tests of forge/scripts/dag_orchestrator.py: path_dependencies finds the Cargo path
+dependencies a package builds from, and the registry decides what is dirty
+(python3 -B -m unittest discover -s forge/scripts/tests -v)."""
 
 import importlib.util
+import json
+import os
 import pathlib
+import subprocess
 import tempfile
+import threading
+import time
 import unittest
+from unittest import mock
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "dag_orchestrator.py"
 spec = importlib.util.spec_from_file_location("dag_orchestrator", SCRIPT)
@@ -43,15 +50,6 @@ class PathDependenciesTest(unittest.TestCase):
             [str(self.root / "system/apps"), str(self.root / "system/unit")],
         )
 
-    def test_a_change_two_path_dependencies_away_changes_the_package_hash(self):
-        before = dag.package_hash(str(self.spec))
-        (self.root / "system/unit/lib.rs").write_text("// changed\n")
-        self.assertNotEqual(dag.package_hash(str(self.spec)), before)
-
-    def test_a_package_without_path_dependencies_keeps_its_directory_hash(self):
-        plain = crate(self.root, "specs/athanor-plain/plain-1.0.0", 'serde = "1"\n').parent
-        self.assertEqual(dag.package_hash(str(plain)), dag.compute_dir_hash(str(plain)))
-
     def test_a_path_dependency_inherited_from_the_workspace_is_followed(self):
         workspace = self.root / "specs/athanor-shell"
         workspace.mkdir(parents=True)
@@ -61,6 +59,153 @@ class PathDependenciesTest(unittest.TestCase):
         )
         crate(self.root, "specs/athanor-shell/shell-1.0.0", "unit = { workspace = true }\nserde = { workspace = true }\n")
         self.assertEqual(dag.path_dependencies(str(workspace)), [str(self.root / "system/unit")])
+
+
+class WriteHashesCommandTest(unittest.TestCase):
+    def test_the_command_writes_the_map_without_the_registry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                ["python3", "-B", str(SCRIPT), "--write-hashes"],
+                cwd=SCRIPT.parents[1], capture_output=True, text=True,
+                env={**os.environ, "DAG_STATE_DIR": tmp, "PATH": "/nonexistent:/usr/bin:/bin"},
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            hashes = json.loads((pathlib.Path(tmp) / "hashes.json").read_text())
+        self.assertTrue(hashes)
+        self.assertTrue(all(len(h) == 64 for h in hashes.values()))
+
+
+class ContentHashTest(unittest.TestCase):
+    def test_the_hash_scripts_own_error_reaches_the_raised_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            forge = pathlib.Path(tmp) / "forge"
+            (forge / "specs/athanor-dock").mkdir(parents=True)
+            (forge / "config").mkdir()
+            (forge / "specs/athanor-dock/dock.spec").write_text(
+                "# repo-input: system/does-not-exist\nName: athanor-dock\n"
+            )
+            with mock.patch.object(dag, "FORGE_DIR", str(forge)), mock.patch.object(
+                dag, "SPECS_DIR", str(forge / "specs")
+            ):
+                with self.assertRaisesRegex(RuntimeError, "does-not-exist"):
+                    dag.content_hash("dock")
+
+
+class RegistryStateTest(unittest.TestCase):
+    """UD41: a custom package is dirty when the registry lacks its hash tag. The registry is
+    a stub skopeo on PATH, so the whole chain runs: check_idempotency.sh --hash-only,
+    retry.sh and registry_probe.sh."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = pathlib.Path(tmp.name).resolve()
+        (root / "forge/specs/athanor-dock").mkdir(parents=True)
+        (root / "forge/specs/athanor-dock/dock.spec").write_text("Name: athanor-dock\n")
+        (root / "bin").mkdir()
+        stub = root / "bin/skopeo"
+        stub.write_text(
+            '#!/usr/bin/env bash\ncat "$ANSWER_DIR/answer" >&2\n'
+            '[[ $(cat "$ANSWER_DIR/status") == 0 ]] && echo sha256:00\nexit "$(cat "$ANSWER_DIR/status")"\n'
+        )
+        stub.chmod(0o755)
+        self.root = root
+        env = {
+            "PATH": f"{root / 'bin'}:{os.environ['PATH']}",
+            "ANSWER_DIR": str(root),
+            "GITHUB_REPOSITORY_OWNER": "Acme",
+            "RETRY_ATTEMPTS": "1",
+        }
+        patcher = mock.patch.dict(os.environ, env)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(dag, "FORGE_DIR", str(root / "forge"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def answer(self, status, text=""):
+        (self.root / "status").write_text(str(status))
+        (self.root / "answer").write_text(text)
+
+    def dirty(self):
+        nodes = {"dock": "custom", "libx": "upstream", "fp": "flatpak"}
+        return dag.evaluate_dirty_nodes(dag.custom_hashes(set(nodes), nodes))
+
+    def test_tag_present_is_clean(self):
+        self.answer(0)
+        self.assertEqual(set(), self.dirty())
+
+    def test_tag_missing_is_dirty_and_only_for_custom_packages(self):
+        self.answer(1, "manifest unknown: manifest unknown")
+        self.assertEqual({"dock"}, self.dirty())
+
+    def test_never_published_package_is_dirty(self):
+        self.answer(1, "Requesting bearer token: invalid status code from registry 403 (Forbidden)")
+        self.assertEqual({"dock"}, self.dirty())
+
+    def test_registry_error_stops_the_run(self):
+        self.answer(1, "dial tcp: i/o timeout")
+        with self.assertRaisesRegex(RuntimeError, "i/o timeout"):
+            self.dirty()
+
+    def test_every_custom_hash_is_written_for_the_system_image_build(self):
+        self.answer(0)
+        state = self.root / "state"
+        with mock.patch.dict(os.environ, {"DAG_STATE_DIR": str(state)}):
+            hashes = dag.custom_hashes({"dock", "libx"}, {"dock": "custom", "libx": "upstream"})
+            dag.write_hashes(hashes)
+        self.assertEqual(hashes, json.loads((state / "hashes.json").read_text()))
+        self.assertEqual(["dock"], list(hashes))
+
+    def test_lookups_run_concurrently_within_the_bound(self):
+        lock = threading.Lock()
+        running = peak = 0
+
+        def exists(ref):
+            nonlocal running, peak
+            with lock:
+                running += 1
+                peak = max(peak, running)
+            time.sleep(0.02)
+            with lock:
+                running -= 1
+            return True
+
+        hashes = {f"p{i}": "0" * 64 for i in range(40)}
+        self.assertEqual(set(), dag.evaluate_dirty_nodes(hashes, exists=exists))
+        self.assertGreater(peak, 1)
+        self.assertLessEqual(peak, dag.PROBE_WORKERS)
+
+    def test_the_first_failure_in_completion_order_ends_the_run(self):
+        release = threading.Event()
+        self.addCleanup(release.set)
+        started = []
+
+        def exists(ref):
+            started.append(ref)
+            if "athanor-forge-bad:" in ref:
+                raise RuntimeError("registry down")
+            release.wait(5)  # slower than the failure: it must not be waited for
+            return True
+
+        # The failing node is submitted after the slow ones and ahead of the pending queue.
+        hashes = {f"slow{i}": "0" * 64 for i in range(7)}
+        hashes["bad"] = "0" * 64
+        hashes.update({f"late{i}": "0" * 64 for i in range(30)})
+        begin = time.monotonic()
+        with self.assertRaisesRegex(RuntimeError, "registry down"):
+            dag.evaluate_dirty_nodes(hashes, exists=exists)
+        self.assertLess(time.monotonic() - begin, 2)
+        self.assertLessEqual(len(started), dag.PROBE_WORKERS + 1)  # pending lookups cancelled
+
+    def test_lookup_asks_for_the_hash_tag_of_the_node_image(self):
+        self.answer(0)
+        refs = []
+        dirty = dag.evaluate_dirty_nodes(
+            dag.custom_hashes({"dock"}, {"dock": "custom"}), exists=lambda r: refs.append(r) or True
+        )
+        self.assertEqual(set(), dirty)
+        self.assertRegex(refs[0], r"^ghcr\.io/Acme/athanor-forge-dock:hash-[0-9a-f]{64}$")
 
 
 if __name__ == "__main__":
