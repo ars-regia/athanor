@@ -34,10 +34,6 @@ on:
         description: "commit whose Kernel Build dispatched this run; empty for a manual run"
         type: string
         default: ""
-      force_image:
-        description: "build the system images even when no DAG node changed: the kernel is outside the DAG (Kernel Build sets it)"
-        type: boolean
-        default: false
   schedule:
     - cron: "0 4 * * *"
 
@@ -221,7 +217,7 @@ jobs:
     # The images build on every run (push, dispatch, schedule), whatever the package matrix
     # holds: system/Containerfile installs from the live Fedora repositories with unpinned
     # dnf5, so the nightly rebuild is how Fedora errata reach the image. has_changes only
-    # shapes the package matrix, so neither it nor the kernel state or force_image gates
+    # shapes the package matrix, so neither it nor the kernel state gates
     # this job.
     needs: [orchestrator-brain, dag-compile, build-builder, kernel-artifacts, kernel-artifacts-final]
     if: ${{ !cancelled() && needs.orchestrator-brain.result == 'success' && needs.kernel-artifacts-final.result == 'success' && needs.build-builder.result == 'success' && (needs.dag-compile.result == 'success' || needs.dag-compile.result == 'skipped') }}

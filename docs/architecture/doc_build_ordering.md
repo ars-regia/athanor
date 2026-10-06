@@ -79,7 +79,7 @@ and the same with `-legacy-<NVIDIA_LEGACY_VERSION>`. A republished kernel with t
    - `system/build-image.sh` passes the module digests as build arguments;
    - everything comes from the file of step 3, so the image is built from exactly what was verified.
 
-**When the image jobs run:** on every orchestrator run (push, dispatch, schedule), whatever the package matrix holds: `system/Containerfile` installs from the live Fedora repositories with unpinned `dnf5`, so the nightly rebuild is how Fedora errata reach the image. `has_changes` only shapes the package matrix. The `force_image` input, which Kernel Build always sets, is kept for dispatch compatibility and no longer gates the jobs.
+**When the image jobs run:** on every orchestrator run (push, dispatch, schedule), whatever the package matrix holds: `system/Containerfile` installs from the live Fedora repositories with unpinned `dnf5`, so the nightly rebuild is how Fedora errata reach the image. `has_changes` only shapes the package matrix.
 
 - **Why the image no longer waits for `has_changes`:** `forge/scripts/dag_orchestrator.py` sets it from dirty DAG nodes only, and neither the kernel nor the unpinned Fedora packages are DAG nodes.
 
@@ -136,7 +136,7 @@ On a pure pin bump the variants are therefore built and gated only after the mer
 | Event | Kernel Build | Orchestrator | Approvals |
 |---|---|---|---|
 | push to `system/**` or `forge/**` outside the kernel, pins unchanged | does not run | `ready`: builds | 1 |
-| kernel pin bump merged | builds, publishes, dispatches with `force_image` | not triggered by the push. The dispatched run: `modules-missing`, calls kmod, `ready`, builds | 2 |
+| kernel pin bump merged | builds, publishes, dispatches the Orchestrator | not triggered by the push. The dispatched run: `modules-missing`, calls kmod, `ready`, builds | 2 |
 | NVIDIA pin bump merged | reuses the kernel; the script does not answer `ready`, so it dispatches | as above | 2 |
 | a document under `forge/specs/azoth/` | reuses the kernel, script `ready`, no dispatch | not triggered | 0 |
 | push touching kernel and `system/**` | builds, dispatches | push run: `kernel-missing` with the range in Kernel Build's paths, notice. Dispatched run as above | 2 or 1 |

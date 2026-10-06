@@ -358,7 +358,7 @@ Ogni PR di bump e ogni cambio in `forge/specs/azoth/**` passa:
    pubblicato per l'NVR dei pin quando il kernel è riusato, con la toolchain del
    kernel; ogni `.ko` deve portare il vermagic del kernel e i tipi kCFI. Poi, sui
    push, il job `orchestrator` di Kernel Build avvia l'Orchestrator sullo stesso
-   commit (`sha`, `force_image`) quando ha pubblicato un kernel nuovo o quando
+   commit (`sha`) quando ha pubblicato un kernel nuovo o quando
    `system/kernel-artifacts.sh` non risponde `ready`; l'Orchestrator chiama il
    workflow riusabile `nvidia-kmod.yml` quando lo stato è `modules-missing`
    (`doc_build_ordering.md`, O1-O4). Lì il job `artifacts` risolve il kernel per
