@@ -101,14 +101,16 @@ def rel(p):
 # The secrets that sign what a machine trusts. D43 (docs/architecture/doc_kernel_profile.md,
 # section 12, item 1): they reach only sign-only jobs, which run in the `signing` environment,
 # use no action beyond checkout and the artifact transfer, and build nothing beyond the locked
-# tool images below. RPM_GPG_KEY is not listed yet: build-repo signs the tier repositories with
-# it inside the builder container, and moving that signature to a sign-only job is its own change.
+# tool images below. RPM_GPG_KEY signs the tier repositories in sign-repo, which receives the
+# unsigned tree from build-repo (decision A2-33).
 SIGNING_SECRETS = (
     "SECUREBOOT_SIGNING_KEY",
     "MODULE_SIGNING_KEY",
     "COSIGN_PRIVATE_KEY",
     "COSIGN_PASSWORD",
     "MOK_PRIVATE_KEY",
+    "RPM_GPG_KEY",
+    "RPM_GPG_PASSPHRASE",
 )
 SIGN_ONLY_ACTIONS = (
     "actions/checkout",

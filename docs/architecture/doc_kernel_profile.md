@@ -929,8 +929,10 @@ Found on the running system and in the repository (2026-09-14):
   signs the Azoth `vmlinuz` (`system/sign-kernel.sh`, in the locked tool image
   `forge/specs/azoth/sign/`), the image build receives the signed kernel as an artifact and only
   verifies it against the certificate, and `scripts/verify.py workflows` fails when a signing
-  secret reaches a job that is not sign-only. `RPM_GPG_KEY`, which signs the tier repositories
-  inside `build-repo`, is not covered yet.
+  secret reaches a job that is not sign-only. `RPM_GPG_KEY` follows the same rule (decision
+  A2-33): `build-repo` hands the unsigned tier repositories to the sign-only job `sign-repo`,
+  which signs the RPMs and `repomd.xml` with the network off (`forge/scripts/tier_repos.sh`)
+  and publishes them.
 - **Boot path until 1.1** (issue #145): firmware → shim → GRUB → `vmlinuz` of the Azoth
   `kernel-core`, signed with the Secure Boot key and trusted through MokList; the UKI, its
   copies under `/boot/efi` and the PCR policy key return with P4b in 1.1. The certificate is

@@ -180,6 +180,45 @@ class SigningSecrets(unittest.TestCase):
             lines,
         )
 
+    def test_the_tier_repository_key_beside_the_package_build(self):
+        # The layout before decision A2-33: build-repo pulled the package images and signed the
+        # tier repositories with RPM_GPG_KEY in the same job, inside the builder container.
+        old_build_repo = (
+            "  build-repo:\n    runs-on: ubuntu-24.04\n    steps:\n"
+            "      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262\n"
+            "      - uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b\n"
+            "      - env:\n          RPM_GPG_KEY: ${{ secrets.RPM_GPG_KEY }}\n"
+            "          RPM_GPG_PASSPHRASE: ${{ secrets.RPM_GPG_PASSPHRASE }}\n"
+            "        run: |\n"
+            '          bash scripts/fetch_repo_rpms.sh "${GITHUB_REPOSITORY_OWNER}"\n'
+            "          find repo-cache -name '*.rpm' -exec rpmsign --addsign {} +\n"
+            '          buildah push "$image"\n'
+        )
+        problems = self.problems(old_build_repo)
+        self.assertTrue(
+            any(
+                "RPM_GPG_KEY, RPM_GPG_PASSPHRASE outside the signing environment" in p
+                for p in problems
+            ),
+            problems,
+        )
+        self.assertTrue(any("buildah" in p for p in problems), problems)
+
+    def test_the_tier_repositories_are_signed_in_a_sign_only_job(self):
+        workflow = verify.read(ROOT / ".github/workflows/call-system-image.yml")
+        jobs = verify.workflow_jobs(workflow)
+        _, build = jobs["build-repo"]
+        self.assertNotIn("RPM_GPG", "\n".join(build))
+        _, sign = jobs["sign-repo"]
+        self.assertIn("    environment: signing", sign)
+        self.assertIn(
+            "    if: github.ref == 'refs/heads/iso-v0' || github.ref == 'refs/heads/main'",
+            sign,
+        )
+        self.assertIn(
+            "    needs: [sign-repo, sign-kernel]", jobs["dag-system-image"][1]
+        )
+
     def test_a_comment_is_not_a_reference(self):
         job = "  build:\n    runs-on: ubuntu-24.04\n    steps:\n      # secrets.SECUREBOOT_SIGNING_KEY is not here\n      - run: make\n"
         self.assertEqual(self.problems(job), [])

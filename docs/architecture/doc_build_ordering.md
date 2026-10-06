@@ -74,7 +74,9 @@ and the same with `-legacy-<NVIDIA_LEGACY_VERSION>`. A republished kernel with t
 1. **`kernel-artifacts`:** runs the script.
 2. **`nvidia-kmod`:** the reusable workflow, only when the state is `modules-missing`. It receives the kernel digest.
 3. **`kernel-artifacts-final`:** runs the script again and requires `ready`; any other state fails the run. It is the single source of the digests that later jobs use. A job cannot run twice, hence a separate job.
-4. **`build-repo`, then `dag-system-image`:**
+4. **`build-repo`, then `dag-system-image`** (with `sign-repo`, in the `signing`
+   environment, between them: it signs and publishes the tier repositories that
+   `build-repo` aggregated, decision A2-33):
    - tier 0 pulls `azoth@<digest>`;
    - `system/build-image.sh` passes the module digests as build arguments;
    - everything comes from the file of step 3, so the image is built from exactly what was verified.
