@@ -148,10 +148,8 @@ purpose = "The package pipeline: DAG, spec builds, tier repositories, ISO, bots,
 path = "forge/specs/athanor-ai-daemon"
 kind = "rpm spec"
 area = "apps"
-status = "specified"
-spec = "doc_local_ai.md"
-item = "AI11"
-purpose = "Legacy local inference daemon, not shipped; AI11 deletes it with the first local-AI package"
+status = "missing"
+purpose = "Legacy local inference daemon, not shipped; doc_local_ai.md AI11 proposes its deletion"
 
 [[component]]
 path = "forge/specs/athanor-ananicy"
