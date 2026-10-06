@@ -81,7 +81,7 @@ Outside the files and left as they are: collaborators and teams, webhooks, deplo
 
 ## 5. Live state at export (2026-10-06)
 
-Facts read by `export`; each one is in the file named. `diff` against `ars-regia/athanor` printed "live state matches the files" and exited 0 right after export.
+Facts read by `export`; each one is in the file named. `diff` against `hr-mes/athanor` printed "live state matches the files" and exited 0 right after export.
 
 | Fact | File |
 | --- | --- |
