@@ -11,7 +11,7 @@
 | Directory or file | Purpose | Owner |
 | --- | --- | --- |
 | `system/athanor-*`, `system/ebpf`, `system/confidential_computing` | Rust crates of the shell and platform services, eBPF, attestation | `.github/CODEOWNERS` (default owner, plus per-crate entries) |
-| `system/` (loose files) | The image build: `Containerfile`, `build-image.sh`, `sign-images.sh`, `promote.sh`, `package-delta.sh`, `image-digests.sh`, `kernel-artifacts.sh`, `athanor-install.ks`, `keys/`, `cosign.pub`, `sysctl.d/`, `disk_config/`, `nvidia/`, `scripts/`, `tests/`, `Justfile` | `/system/Containerfile` in CODEOWNERS, else default owner |
+| `system/` (loose files) | The image build: `Containerfile`, `build-image.sh`, `sign-images.sh`, `promote.sh`, `package-delta.sh`, `image-digests.sh`, `shared-layers.sh`, `kernel-artifacts.sh`, `athanor-install.ks`, `keys/`, `cosign.pub`, `sysctl.d/`, `disk_config/`, `nvidia/`, `scripts/`, `tests/`, `Justfile` | `/system/Containerfile` in CODEOWNERS, else default owner |
 | `forge/` | RPM build system: `specs/` (packages and the Azoth kernel), `scripts/`, `builder/`, `test/` | `/forge/` in CODEOWNERS |
 | `docs/architecture/` | Specifications, one `doc_<area>.md` each | maintainer |
 | `docs/superpowers/` | Plans in progress and dated reviews | author of the plan |
@@ -36,7 +36,7 @@ Generated and not tracked (after this change): `docs/architecture/graph-vaults/`
 image/
   Containerfile  Justfile  README.md
   build-image.sh  sign-images.sh  promote.sh  package-delta.sh
-  image-digests.sh  kernel-artifacts.sh
+  image-digests.sh  shared-layers.sh  kernel-artifacts.sh
   athanor-install.ks  cosign.pub  keys/  sysctl.d/  disk_config/
   nvidia/  scripts/  tests/
 system/         crates, ebpf/, confidential_computing/ (units and sources only)
