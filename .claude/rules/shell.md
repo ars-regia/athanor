@@ -11,7 +11,7 @@ paths:
   - "system/athanor-compositor-client/**"
   - "system/athanor-layout/**"
   - "system/athanor-greeter/**"
-  - "system/athanor-shell-rs/**"
+  - "system/athanor-style/**"
 ---
 
 # Shell, GTK and COSMIC

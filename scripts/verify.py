@@ -693,7 +693,9 @@ def markdown_links(text):
 def check_docs():
     r = Result()
     targets = ["README.md", "system/README.md", "system/ARCHITECTURE.md",
-               "ANALISI_2026-09-02.md", "PIANO_RIPARTENZA.md", "CLAUDE.md", "ROADMAP.md"]
+               "ANALISI_2026-09-02.md", "PIANO_RIPARTENZA.md", "CLAUDE.md", "ROADMAP.md",
+               "AGENTS.md", "forge/AGENTS.md", "forge/specs/azoth/AGENTS.md", "system/AGENTS.md",
+               ".github/workflows/AGENTS.md"]
     targets += [rel(p) for p in walk(ROOT / "docs", ".md")]
 
     for t in targets:

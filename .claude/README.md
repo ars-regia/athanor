@@ -1,59 +1,53 @@
 # Claude Code configuration
 
-| Field      | Value                                                               |
-| ---------- | ------------------------------------------------------------------- |
-| Purpose    | What the repository ships for Claude Code, and the recommended setup |
-| Owner      | Maintainer                                                          |
-| Status     | Active                                                              |
-| Revision   | 1 (2026-10-06)                                                      |
-| Depends on | A2-34 (`docs/decisions/`), `CLAUDE.md`                              |
+| Field | Value |
+| --- | --- |
+| Purpose | What the repository shares for Claude Code, and what stays in each contributor's setup |
+| Owner | the maintainer (`@hr-mes`) |
+| Status | revision 2, 2026-10-06 |
+| Depends on | ADR-0074 in `docs/decisions/` (agent and contributor model), `AGENTS.md` |
 
-## Versioned here
+The project rules for every agent are in `AGENTS.md` and the nested `AGENTS.md` files. This
+directory holds only what is specific to Claude Code.
 
-| Path                   | Loaded                         | Content                                                        |
-| ---------------------- | ------------------------------ | -------------------------------------------------------------- |
-| `../CLAUDE.md`         | every session                  | project map, commands, standing rules, hard limits             |
-| `settings.json`        | every session, merged with yours | deny rules for secrets and destructive commands, ask rules for pushes, merges and host changes |
-| `rules/<area>.md`      | when a file matching `paths:` is read; always if no `paths:` | repository traps, one rule and its reason per line |
-| `skills/`              | on demand                      | `convert-documents-to-markdown` (MIT, third party)             |
+## Shared
 
-Personal preferences go in `settings.local.json` (git-ignored) or `~/.claude/`.
+| Path | Loaded | Content |
+| --- | --- | --- |
+| `../CLAUDE.md` | every session | imports `AGENTS.md`, then the Claude Code notes |
+| `settings.json` | every session, merged with your settings | permissions only: deny rules for secret paths and destructive commands, ask rules for pushes, merges and host mutations |
+| `rules/<area>.md` | when a file matching `paths:` is read; every session if there is no `paths:` | repository traps, one rule and its reason per line |
+| `skills/convert-documents-to-markdown/` | on demand | document conversion with a pinned `anydoc` (MIT, third party) |
 
-Limits of these rules, per the Claude Code permission documentation:
+The shared settings contain no hooks. Hooks that block commands (a command gate) stay in
+each contributor's own setup until a versioned gate has its own tests (ADR-0074, item 3).
 
-- A Bash rule matches each subcommand of a compound command on its own, so a
-  rule that contains `|` or `&&` never matches. `curl ... | sh` is denied
-  through its bare `sh` subcommand.
-- A Bash rule matches the command text only: `/usr/bin/rm`, `sh -c '...'` or
-  `git -C . push` escape it.
-- `Read()` deny rules cover the built-in file tools and the file commands Claude
-  Code recognises in Bash (`cat`, `head`, `tail`, `sed`, `tee`, redirections).
-  They do not stop `grep -r` over a directory or a script that opens the file
-  itself.
+## Personal
 
-The boundary that does not depend on command text is the OS sandbox. Enable it
-in your user settings and list your own secret locations under
+- `settings.local.json` in this directory: your permissions, hooks, plugins and MCP servers
+  for this repository. It is git-ignored. Create it with the same schema as
+  `settings.json`; Claude Code merges both, and a deny rule in either one wins.
+- `~/.claude/`: your settings, agents, skills and memory for every project.
+- `.serena/` and other tools' state are personal and not part of this configuration.
+
+If you already have an untracked `.claude/settings.json` from before it was versioned, move
+its content to `settings.local.json` before you pull.
+
+## Limits of the permission rules
+
+From the Claude Code permission documentation:
+
+- A Bash rule matches each subcommand of a compound command on its own, so a rule that
+  contains `|` or `&&` never matches. `curl ... | sh` is denied through its bare `sh`.
+- A Bash rule matches the command text only: `/usr/bin/rm`, `sh -c '...'` or `git -C . push`
+  escape it.
+- `Read()` deny rules cover the built-in file tools and the file commands Claude Code
+  recognises in Bash (`cat`, `head`, `tail`, `sed`, redirections). They do not stop
+  `grep -r` over a directory, or a script that opens the file itself.
+- Deny rules have no exceptions. `*.pem` also covers the public certificates under
+  `forge/specs/azoth/keys/`, and `*.env` also covers `forge/specs/azoth/pins.env`, whose
+  values `KERNEL.md` shows in its pin table.
+
+The boundary that does not depend on command text is the operating system sandbox. Enable
+it in your user settings and list your own secret locations under
 `sandbox.filesystem.denyRead`.
-A trap found while working becomes one line in the matching `rules/<area>.md`,
-never only a personal memory.
-
-## Recommended personal setup
-
-None of this is required. The maintainer's tooling lives in the private
-repository `hr-mes/cc-setup` (entry point `setup-athanor.sh`); it has no licence
-yet, so it is described here and not copied.
-
-| Tool                                                                           | Purpose                                                    |
-| ------------------------------------------------------------------------------ | ---------------------------------------------------------- |
-| Pre-tool gate hook (`guard.mjs`, `block-no-verify.mjs`)                        | blocks destructive commands and secret reads by command text |
-| `config-protection.mjs`, `format.mjs`, `clean-invisible.mjs`, `graph-guide.mjs` | protects config files, formats on save, strips invisible characters, steers to the code graph |
-| `/accept` skill with the `verify-stop.mjs` Stop hook                           | executable acceptance criteria checked before a turn ends   |
-| `cc-test.mjs`, `cc-diff.mjs`                                                   | truncated test output, file comparison without reading both |
-| Agents `auditor`, `scout`, `log-triage`                                        | adversarial review, read-only search, log reduction         |
-| Skills `orient`, `code-graph`, `pre-commit-audit`, `ast-refactor`, `surgical-refactor`, `auto-doc`, `db-schema`, `skill-scan`, `handoff`, `remember`, `repo-snapshot`, `bootstrap`, `config-gc`, `context-budget` | orientation, refactoring, audit, session hygiene |
-| Plugins `superpowers`, `pr-review-toolkit`, `security-guidance`, `ponytail`, language-server plugins | process skills and focused reviewers |
-| MCP servers `codegraph`, `serena`, `git`, `ast-grep`, `gitmcp`                 | code graph, symbol edits, git, structural search, upstream docs |
-
-_(Proposal)_ Either publish `cc-setup` with a licence and link it here, or
-vendor an English port of the gate hook, `cc-test.mjs` and the three agents into
-`.claude/` so that every contributor gets them on clone.
