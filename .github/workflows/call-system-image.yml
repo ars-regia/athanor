@@ -14,11 +14,13 @@ on:
       RPM_GPG_PASSPHRASE:
         description: "Passphrase for GPG key"
         required: false
+      # Declared for actionlint's type check only. No caller passes them: the job that signs
+      # reads them from its own `environment:`, which takes precedence over a passed secret.
       COSIGN_PRIVATE_KEY:
-        description: "Private key that signs the system images for the update service (system/keys); supplied by the signing environment"
+        description: "Private key that signs the system images (system/keys); from the job's environment, never passed"
         required: false
       COSIGN_PASSWORD:
-        description: "Passphrase of COSIGN_PRIVATE_KEY; supplied by the signing environment"
+        description: "Passphrase of COSIGN_PRIVATE_KEY; from the job's environment, never passed"
         required: false
 
 jobs:

@@ -166,9 +166,9 @@ jobs:
     uses: ./.github/workflows/nvidia-kmod.yml
     with:
       kernel_digest: ${{ needs.kernel-artifacts.outputs.kernel_digest }}
-    # A called workflow sees the signing environment's secrets only when the caller
-    # inherits them; without it the sign job reads an empty MODULE_SIGNING_KEY.
-    secrets: inherit
+    # No secrets are passed: the sign job of nvidia-kmod.yml reads its keys from its own
+    # `environment:`, which a called workflow's job resolves by itself, and an inherit would
+    # hand every repository secret to every job of the called workflow (D43).
 
   kernel-artifacts-final:
     # The single source of the digests the images are built from: resolved again after
@@ -217,4 +217,8 @@ jobs:
     uses: ./.github/workflows/call-system-image.yml
     with:
       builder_content_hash: ${{ needs.build-builder.outputs.content_hash }}
-    secrets: inherit
+    # Only the repository secrets build-repo reads. COSIGN_* are not passed: the job that
+    # signs reads them from its own `environment:` (D43, UT2).
+    secrets:
+      RPM_GPG_KEY: ${{ secrets.RPM_GPG_KEY }}
+      RPM_GPG_PASSPHRASE: ${{ secrets.RPM_GPG_PASSPHRASE }}
