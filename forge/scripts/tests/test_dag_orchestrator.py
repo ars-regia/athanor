@@ -1,5 +1,6 @@
-"""Unit tests of forge/scripts/dag_orchestrator.py: a package's hash covers the Cargo path
-dependencies it builds from (python3 -B -m unittest discover -s forge/scripts/tests -v)."""
+"""Unit tests of forge/scripts/dag_orchestrator.py: path_dependencies finds the Cargo path
+dependencies a package builds from, and the registry decides what is dirty
+(python3 -B -m unittest discover -s forge/scripts/tests -v)."""
 
 import importlib.util
 import os
@@ -45,15 +46,6 @@ class PathDependenciesTest(unittest.TestCase):
             dag.path_dependencies(str(self.spec)),
             [str(self.root / "system/apps"), str(self.root / "system/unit")],
         )
-
-    def test_a_change_two_path_dependencies_away_changes_the_package_hash(self):
-        before = dag.package_hash(str(self.spec))
-        (self.root / "system/unit/lib.rs").write_text("// changed\n")
-        self.assertNotEqual(dag.package_hash(str(self.spec)), before)
-
-    def test_a_package_without_path_dependencies_keeps_its_directory_hash(self):
-        plain = crate(self.root, "specs/athanor-plain/plain-1.0.0", 'serde = "1"\n').parent
-        self.assertEqual(dag.package_hash(str(plain)), dag.compute_dir_hash(str(plain)))
 
     def test_a_path_dependency_inherited_from_the_workspace_is_followed(self):
         workspace = self.root / "specs/athanor-shell"

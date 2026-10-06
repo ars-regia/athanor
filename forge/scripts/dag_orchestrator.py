@@ -11,7 +11,6 @@ import os
 import glob
 import re
 import json
-import hashlib
 import subprocess
 import tomllib
 from collections import defaultdict, deque
@@ -29,25 +28,6 @@ if not os.path.exists(SPECS_DIR) and os.path.exists("forge/specs"):
     SPECS_DIR = "forge/specs"
 
 
-
-def compute_dir_hash(dir_path):
-    """Calculates deterministic SHA256 for a directory."""
-    hasher = hashlib.sha256()
-    if not os.path.exists(dir_path):
-        return hasher.hexdigest()[:16]
-        
-    for root, dirs, files in sorted(os.walk(dir_path)):
-        for name in sorted(files):
-            if name.startswith(".") or name.endswith(".swp"):
-                continue
-            filepath = os.path.join(root, name)
-            try:
-                with open(filepath, "rb") as f:
-                    while chunk := f.read(65536):
-                        hasher.update(chunk)
-            except OSError:
-                pass
-    return hasher.hexdigest()[:16]
 
 def workspace_path(manifest, name):
     """The directory a `name = { workspace = true }` dependency of manifest points at, when
@@ -104,21 +84,6 @@ def path_dependencies(spec_dir):
                     found.add(target)
                     pending.append(os.path.join(target, "Cargo.toml"))
     return sorted(found)
-
-
-def package_hash(spec_dir):
-    """The hash of a custom package: its spec directory and, when its crates have path
-    dependencies outside it, each of those directories, named relative to spec_dir. A
-    package without any keeps the plain directory hash."""
-    dependencies = path_dependencies(spec_dir)
-    if not dependencies:
-        return compute_dir_hash(spec_dir)
-    hasher = hashlib.sha256(compute_dir_hash(spec_dir).encode())
-    spec_root = os.path.realpath(spec_dir)
-    for dependency in dependencies:
-        hasher.update(os.path.relpath(dependency, spec_root).encode())
-        hasher.update(compute_dir_hash(dependency).encode())
-    return hasher.hexdigest()[:16]
 
 
 def parse_spec_dependencies(spec_path):
@@ -220,7 +185,6 @@ def build_dag(manifest):
     graph = defaultdict(set)       # node -> set of nodes depending on node (outgoing edges)
     in_degree = defaultdict(int)   # node -> number of prerequisites
     prereqs = defaultdict(set)     # node -> set of nodes node depends on
-    node_hashes = {}
     node_types = {}
     
     for node in all_nodes:
@@ -258,9 +222,6 @@ def build_dag(manifest):
         spec_dir = spec_dir_for(pkg)
         spec_files = glob.glob(os.path.join(spec_dir, "*.spec"))
         
-        hash_val = package_hash(spec_dir)
-        node_hashes[pkg] = hash_val
-        
         if spec_files:
             build_reqs, reqs = parse_spec_dependencies(spec_files[0])
             for dep in build_reqs | reqs:
@@ -269,19 +230,10 @@ def build_dag(manifest):
                     graph[clean_dep].add(pkg)
                     prereqs[pkg].add(clean_dep)
 
-    for pkg in all_upstream:
-        hash_val = hashlib.sha256(f"upstream-{pkg}".encode()).hexdigest()[:16]
-        node_hashes[pkg] = hash_val
-        
-    for pkg in flatpaks:
-        fp_dir = os.path.join("flatpaks", pkg)
-        hash_val = compute_dir_hash(fp_dir)
-        node_hashes[pkg] = hash_val
-
     for node in all_nodes:
         in_degree[node] = len(prereqs[node])
         
-    return all_nodes, graph, prereqs, in_degree, node_hashes, node_types
+    return all_nodes, graph, prereqs, in_degree, node_types
 
 def content_hash(pkg):
     """The content hash check_idempotency.sh gives a package: the tag its image carries."""
@@ -374,7 +326,7 @@ def main():
     print("🧠 Forge DAG Architect initializing... (registry hash tags)")
     
     manifest = load_package_manifest()
-    all_nodes, graph, prereqs, in_degree, node_hashes, node_types = build_dag(manifest)
+    all_nodes, graph, prereqs, in_degree, node_types = build_dag(manifest)
     
     print(f"📊 DAG Topology built: {len(all_nodes)} nodes analyzed.")
     
@@ -433,7 +385,12 @@ def main():
             f.write(f"has_changes={has_changes}\n")
 
 if __name__ == "__main__":
-    if sys.argv[1:] == ["--list-spec-dirs"]:
+    if sys.argv[1:2] == ["--path-dependencies"] and len(sys.argv) == 3:
+        # One line per directory, relative to the working directory so that the hash
+        # check_idempotency.sh builds from them does not depend on where the checkout is.
+        for directory in path_dependencies(sys.argv[2]):
+            print(os.path.relpath(directory))
+    elif sys.argv[1:] == ["--list-spec-dirs"]:
         spec_dirs = custom_spec_dirs(load_package_manifest())
         if not spec_dirs:
             sys.exit(f"dag_orchestrator: no custom_packages in {CONFIG_PATH}")
