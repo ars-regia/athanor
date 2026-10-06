@@ -467,9 +467,11 @@ def image_policy_problems(root=None):
 # Packages the image no longer ships (maintainer decision A2-10, issue #149). The check
 # reads what the image would contain: the manifest, every install and enable in the
 # Containerfile and the kickstart, the preset files, and the Requires of shipped specs.
+# cosmic-store is not listed: it stays until Software ships, as the only graphical way to
+# install an application (doc_software.md, decision 5).
 REMOVED_PACKAGES = {
     "antigravity", "astro-toolchain", "cargo-tools", "ide-bootstrap", "qa",
-    "cosmic-term", "cosmic-files", "cosmic-edit", "cosmic-store", "cosmic-player",
+    "cosmic-term", "cosmic-files", "cosmic-edit", "cosmic-player",
     "foot", "swaybg", "swaylock", "Thunar", "thunar-archive-plugin", "thunar-volman",
     "virt-manager", "qemu-kvm", "qemu-img", "compiler-rt",
 }

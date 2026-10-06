@@ -114,6 +114,7 @@
     "cosmic-idle",
     "cosmic-greeter",
     "cosmic-icon-theme",
+    "cosmic-store",
     "adw-gtk3-theme",
     "fontawesome-fonts-all",
     "gtk4-layer-shell",

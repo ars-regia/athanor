@@ -7,9 +7,9 @@
 #
 # Anaconda goes interactive for exactly the directives that are absent here: with no
 # `part`/`autopart`/`clearpart` it asks for the disk, and with no `user` it asks the
-# person to create their account in the GUI. The home directory it creates is
-# encrypted by systemd-homed (LUKS2); the image never enrols it to the TPM by itself
-# (doc_kernel_profile.md, D42), so nothing about the account needs to be scripted here.
+# person to create their account in the GUI. The account is a classic one in
+# /etc/passwd: systemd-homed stays disabled until a homed specification with a migration
+# exists (decision 0045), so nothing about the account needs to be scripted here.
 
 lang en_US.UTF-8
 

@@ -765,7 +765,7 @@ path = "system/athanor-install.ks"
 kind = "config"
 area = "platform"
 status = "missing"
-purpose = "Kickstart of the manual ISO build; enables sshd and systemd-homed"
+purpose = "Kickstart of the manual ISO build; enables sshd, classic accounts"
 
 [[component]]
 path = "system/athanor-layout"
