@@ -23,7 +23,7 @@
 /.github/ @hr-mes
 /forge/ @hr-mes
 
-# Protected paths: the maintainer reviews every change (see CLAUDE.md, "Limiti inviolabili").
+# Protected paths: the maintainer reviews every change (see the protected-paths section of CLAUDE.md).
 # Authorisation (polkit subject checks)
 /system/athanor-bus-api/src/polkit.rs @hr-mes
 # Attestation

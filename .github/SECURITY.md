@@ -18,15 +18,14 @@ affected component and image version, the steps to reproduce, and the impact you
 
 ## Response times
 
-Targets confirmed by the maintainer on 2026-10-06. Athanor is maintained by one person, so
-they are targets, not guarantees.
+Targets confirmed by the maintainer (decision A2-25, `docs/decisions/0062-governance-targets-confirmed.md`).
+Athanor is maintained by one person, so they are targets, not guarantees.
 
 | Step | Target |
 | --- | --- |
 | Acknowledge the report | 7 days |
 | First assessment (accepted, needs information, or out of scope) | 14 days |
-| Fix or mitigation in the image built from `iso-v0`, for an accepted report | 90 days; sooner for a key compromise or remote code execution |
-| Public advisory | with the fix, or at 90 days at the latest, in agreement with the reporter |
+| Fix or mitigation in the image built from `iso-v0`, for an accepted report | 90 days |
 
 ## Scope
 

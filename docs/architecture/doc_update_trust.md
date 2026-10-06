@@ -166,8 +166,6 @@ The `signing` environment has required reviewers (D43). The keyless signature of
 
 No second named human reviewer exists as of 2026-10-06, so in the maintainer's absence signing stops and option 3 applies. Any additional automated check on the `signing` environment is a signing decision for the maintainer and is not recorded here.
 
-Whichever option names a person, the new holder generates a new key pair (UT3 rotation, with the recovery command of UT2 written and tested first) rather than receiving the old private key, so the old key can be retired after one release.
-
 **Expiry of the stable manifest. Decided 2026-10-06 (#160).** A machine that has not seen a `:stable` promotion for a bounded time must say so (a notice in the updates view, with a reason from the closed list of the trust state) instead of showing "up to date" indefinitely. The bound: 180 days since the build time of the newest promoted digest, longer than the 90-day move to a new Fedora (`README.md`, support window) so a late release does not raise a false alarm. This is the image-side counterpart of the manifest expiry and minimum version that `doc_kernel_profile.md` D41 asks of update manifests; neither is implemented yet.
 
 Found on the way and since resolved: `athanor-backup` guarded its methods with `org.athanor.backup.*` actions that no `.policy` file declared, so polkit denied every call. It is now a root command with no D-Bus interface and no polkit action (commit `e66ad6d9`). `verify.py polkit` still does not look at the `org.athanor.*` namespace.
