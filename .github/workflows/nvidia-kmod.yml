@@ -6,12 +6,13 @@ name: NVIDIA kmod
 # digest and the module tags bound to it; unless the modules are missing (both branches
 # already published, signed and attested, or the kernel of the pins not published) the run
 # ends there with a notice, asking for no approval. build: nvidia-build.yml, the two branches
-# (open, legacy) against azoth-devel by digest. prepare: key-less, the unsigned vmlinuz of the
-# kernel and the module hash for the signer, and the MOK-signed negative sample. sign: on a
-# GitHub runner in the `signing` environment, the one sign-only job of a kernel cycle (D43): it
-# receives built artefacts and runs only the signer image pinned by digest
-# (forge/specs/azoth/signer/run.sh), signing the .ko files with the module key and vmlinuz with
-# the Secure Boot key; no build, no third-party action. boot: in QEMU,
+# (open, legacy) against azoth-devel by digest. prepare: key-less, the MOK-signed negative
+# sample. sign: on a GitHub runner in the `signing-kernel` environment, the one sign-only job of
+# a kernel cycle (D43): a key-less step derives the kernel from the registry, verified with
+# cosign, and allow-lists the modules of the build job; then the step with the keys runs only
+# the signer image pinned by digest (forge/specs/azoth/signer/run.sh), signing the .ko files
+# with the module key and vmlinuz with the Secure Boot key; no build, no third-party action.
+# boot: in QEMU,
 # every case of the matrix: the signed nvidia.ko of each branch must pass the signature check
 # against the certificate compiled into the kernel (ENODEV: no GPU), while an unsigned copy and
 # a copy signed by an enrolled Secure Boot-profile MOK must be rejected (EKEYREJECTED).
@@ -135,7 +136,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    environment: signing
+    environment: signing-kernel
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 

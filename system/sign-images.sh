@@ -23,8 +23,8 @@ set -euo pipefail
 
 [[ $# -eq 1 && -s $1 ]] || { echo "usage: ${0##*/} DIGESTS_FILE" >&2; exit 2; }
 digests=$1
-[[ -n ${COSIGN_PRIVATE_KEY:-} ]] || { echo "${0##*/}: COSIGN_PRIVATE_KEY is not available to this job: check the signing environment" >&2; exit 2; }
-[[ -n ${COSIGN_PASSWORD+set} ]] || { echo "${0##*/}: COSIGN_PASSWORD is not available to this job: check the signing environment" >&2; exit 2; }
+[[ -n ${COSIGN_PRIVATE_KEY:-} ]] || { echo "${0##*/}: COSIGN_PRIVATE_KEY is not available to this job: check the signing-images environment" >&2; exit 2; }
+[[ -n ${COSIGN_PASSWORD+set} ]] || { echo "${0##*/}: COSIGN_PASSWORD is not available to this job: check the signing-images environment" >&2; exit 2; }
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 retry="$root/forge/scripts/retry.sh"

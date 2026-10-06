@@ -14,12 +14,12 @@ Three workflows produce what a system image is built from, and nothing orders th
 - **Kernel Build** (`kernel-build.yml`) runs on a push to `forge/specs/azoth/**`. It publishes `azoth:<nvr>`, or reuses it when the attested inputs match. On success it dispatches NVIDIA kmod and does not wait for it.
 - **NVIDIA kmod** (`nvidia-kmod.yml`) runs only on dispatch. It:
   - builds the open and legacy modules against `azoth-devel:<nvr>`;
-  - signs them in the `signing` environment, which needs a maintainer approval;
+  - signs them in the `signing-kernel` environment, which needs a maintainer approval;
   - boots them;
   - overwrites `azoth-nvidia:<nvr>-open` and `azoth-nvidia:<nvr>-legacy`.
 - **Athanor Forge Orchestrator** runs on a push to `forge/**` or `system/**`, on dispatch, and daily at 04:00 UTC. It has `cancel-in-progress`.
   - `build-repo` pulls `azoth:<nvr>` by tag into tier 0 (`forge/scripts/fetch_repo_rpms.sh`). It exits with `[FATAL] Image not found` when the tag is missing.
-  - `dag-system-image` asks for the `signing` approval. It then copies the modules with `FROM azoth-nvidia:<nvr>-<branch>`, by tag.
+  - `dag-system-image` asks for the `signing-images` approval. It then copies the modules with `FROM azoth-nvidia:<nvr>-<branch>`, by tag.
 
 A merged kernel bump touches `forge/specs/azoth/**`, which is also under `forge/**`, so Kernel Build and the Orchestrator start together.
 
@@ -69,14 +69,14 @@ and the same with `-legacy-<NVIDIA_LEGACY_VERSION>`. A republished kernel with t
 - **In the workflows:** a step runs the script and copies `state` into a job output, a two-line step with no decision logic.
 - **Callers:** the Orchestrator (O4), NVIDIA kmod at its start (O5), System Image Check (O7) and Kernel Build before dispatching (O1).
 
-**O4. The Orchestrator pipeline.** Four jobs in order, all before and outside the `signing` environment except where noted.
+**O4. The Orchestrator pipeline.** Four jobs in order, all before and outside the signing environments except where noted.
 
 1. **`kernel-artifacts`:** runs the script.
 2. **`nvidia-kmod`:** the reusable workflow, only when the state is `modules-missing`. It receives the kernel digest.
 3. **`kernel-artifacts-final`:** runs the script again and requires `ready`; any other state fails the run. It is the single source of the digests that later jobs use. A job cannot run twice, hence a separate job.
 4. **`build-repo`, then `dag-system-image`:**
    - tier 0 pulls `azoth@<digest>`;
-   - the system stage replaces its vmlinuz with the one of `azoth-boot@<boot_digest>`, signed for Secure Boot; `dag-system-image` holds no key and runs outside the `signing` environment (D43);
+   - the system stage replaces its vmlinuz with the one of `azoth-boot@<boot_digest>`, signed for Secure Boot; `dag-system-image` holds no key and runs outside the signing environmentsironment (D43);
    - `system/build-image.sh` passes the module and `azoth-boot` digests as build arguments;
    - everything comes from the file of step 3, so the image is built from exactly what was verified.
 
@@ -148,7 +148,7 @@ On a pure pin bump the variants are therefore built and gated only after the mer
 ## 4. Risks
 
 - **Approvals in the same run:** two approvals arrive minutes apart in the same run on a pin bump. Both are needed; rejecting either makes the run red. Maintainer decision A2-27 (#131, #145): the two approvals per release cycle stay, `sign-kernel` first and `sign-system-images` after it.
-- **Unanswered approvals:** a run waiting for the `signing` approval holds its concurrency group for up to 30 days; `timeout-minutes` does not count that wait. An approval nobody answers stops image builds on that branch, and on a pin bump there are two such waits. Rejecting the pending approval is how to unblock it.
+- **Unanswered approvals:** a run waiting for a signing approval holds its concurrency group for up to 30 days; `timeout-minutes` does not count that wait. An approval nobody answers stops image builds on that branch, and on a pin bump there are two such waits. Rejecting the pending approval is how to unblock it.
 - **Queueing:** `cancel-in-progress: false` means a long cycle delays the next one instead of being cut. GitHub keeps only the newest pending run.
 - **Variants on pin bumps:** they are tested only after the merge (O7).
 

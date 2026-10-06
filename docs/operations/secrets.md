@@ -6,7 +6,7 @@
 | Owner | Maintainer |
 | Status | Revision 1, 2026-10-06. Section 1 and section 3 are facts. Section 2 and every line marked _(Proposal)_ await the maintainer |
 | Depends on | `doc_kernel_build.md` section 6 (key design), `doc_kernel_profile.md` D43 and section 9 (custody, key table), `doc_update_trust.md` UT2, UT3 (image key), decisions A2-27, A2-33, A2-35 |
-| Defines | SEC1-SEC12 (secrets), VAR1-VAR5 (variables), ENV1-ENV4 (environments), KC1-KC6 (custody), RL1-RL8 (recovery) |
+| Defines | SEC1-SEC12 (secrets), VAR1-VAR5 (variables), ENV1-ENV5 (environments), KC1-KC6 (custody), RL1-RL8 (recovery) |
 | Facts checked with | `git grep` on `origin/iso-v0` at `bd1f0e4a`; `gh secret list`, `gh variable list`, `gh api repos/ars-regia/athanor/environments` and its `secrets`, `variables` and `deployment-branch-policies` endpoints, names only; the branches of open PRs #115 (`sign-vmlinuz`), #180 (`a2/delivery`) and #185 (`a2/rpm-sign-job`) |
 
 No value of any secret appears here or was read to write this. Commands below use
@@ -20,11 +20,11 @@ Workflow references are `file:line` under `.github/workflows/` at `bd1f0e4a`.
 
 | Id | Name | Scope | Material | Used by (workflow, job) | Public half in the repository |
 | --- | --- | --- | --- | --- | --- |
-| SEC1 | `SECUREBOOT_SIGNING_KEY` | environment `signing` | X.509 private key, RSA 4096, PEM, unencrypted | `nvidia-kmod.yml` `sign` (:138, environment :145), the sign-kernel job of D43, through `forge/specs/azoth/signer/run.sh sign`: written to a 0600 file for the one command, mounted read-only into the signer image run by digest without network, `sign-kernel.sh vmlinuz` signs the kernel's vmlinuz (`azoth-boot`). No image build sees it; 1.0 has no UKI (A2-8) | `forge/specs/azoth/keys/secureboot/athanor-secureboot.pem` and `.der` (the form `mokutil --import` takes) |
-| SEC2 | `MODULE_SIGNING_KEY` | environment `signing` | X.509 private key, RSA 4096, PEM, unencrypted | `nvidia-kmod.yml` `sign` (:138, environment :145) through `forge/specs/azoth/signer/run.sh sign`, as SEC1; `sign-kernel.sh modules` signs the NVIDIA modules | `forge/specs/azoth/keys/modules/athanor-modules.pem`, compiled into Azoth (`kernel-local:42`, `CONFIG_SYSTEM_TRUSTED_KEYS`) |
-| SEC3 | `COSIGN_PRIVATE_KEY` | environment `signing` | cosign key pair, ECDSA P-256, private half encrypted with SEC4 | `call-system-image.yml` `sign-system-images` (:425, environment :431) through `system/sign-images.sh:26-41`; the key-based image signature of UT2 | `system/keys/athanor-image-1.pub`, rendered into the image policy (UT3) |
-| SEC4 | `COSIGN_PASSWORD` | environment `signing` | passphrase of SEC3 | as SEC3 (:440) | none |
-| SEC5 | `RPM_GPG_KEY` | **missing on GitHub** | OpenPGP secret key, ASCII-armoured, sign-only | `call-system-image.yml` `build-repo` (:31, no environment; :58, :157). PR #185 moves it to the sign-only job `sign-repo` in environment `signing` (`forge/scripts/tier_repos.sh sign`), decision A2-33 | none committed. On PR #185 `tier_repos.sh:97` exports it at signing time to `RPM-GPG-KEY-athanor`, published with the tier repositories (`:167-168`) |
+| SEC1 | `SECUREBOOT_SIGNING_KEY` | environment `signing-kernel` | X.509 private key, RSA 4096, PEM, unencrypted | `nvidia-kmod.yml` `sign` (:130, environment :139), the sign-kernel job of D43, through `forge/specs/azoth/signer/run.sh sign`: written to a 0600 file for the one command, mounted read-only into the signer image run by digest without network, `sign-kernel.sh vmlinuz` signs the kernel's vmlinuz (`azoth-boot`). No image build sees it; 1.0 has no UKI (A2-8) | `forge/specs/azoth/keys/secureboot/athanor-secureboot.pem` and `.der` (the form `mokutil --import` takes) |
+| SEC2 | `MODULE_SIGNING_KEY` | environment `signing-kernel` | X.509 private key, RSA 4096, PEM, unencrypted | `nvidia-kmod.yml` `sign` (:130, environment :139) through `forge/specs/azoth/signer/run.sh sign`, as SEC1; `sign-kernel.sh modules` signs the NVIDIA modules | `forge/specs/azoth/keys/modules/athanor-modules.pem`, compiled into Azoth (`kernel-local:42`, `CONFIG_SYSTEM_TRUSTED_KEYS`) |
+| SEC3 | `COSIGN_PRIVATE_KEY` | environment `signing-images` | cosign key pair, ECDSA P-256, private half encrypted with SEC4 | `call-system-image.yml` `sign-system-images` (:427, environment :433) through `system/sign-images.sh:26-41`; the key-based image signature of UT2 | `system/keys/athanor-image-1.pub`, rendered into the image policy (UT3) |
+| SEC4 | `COSIGN_PASSWORD` | environment `signing-images` | passphrase of SEC3 | as SEC3 (:453) | none |
+| SEC5 | `RPM_GPG_KEY` | **missing on GitHub** | OpenPGP secret key, ASCII-armoured, sign-only | `call-system-image.yml` `build-repo` (:31, no environment; :58, :157). PR #185 moves it to the sign-only job `sign-repo` (`forge/scripts/tier_repos.sh sign`), decision A2-33; that branch predates the split and names `signing`, which becomes `signing-images` so a release cycle keeps at most two approvals (ADR-0064) | none committed. On PR #185 `tier_repos.sh:97` exports it at signing time to `RPM-GPG-KEY-athanor`, published with the tier repositories (`:167-168`) |
 | SEC6 | `RPM_GPG_PASSPHRASE` | **missing on GitHub** | passphrase of SEC5, optional | as SEC5 (:59, :158) | none |
 | SEC7 | `KERNEL_BUMP_TOKEN` | repository | personal access token | `kernel-bump.yml` `pr` (:203, :207) and `system` (:263, :309); `cosmic-comp-bump.yml` `bump` (:33, :37); `nix-registry-bump.yml` `bump` (:46); as `MERGE_TOKEN` in `spec-build-check.yml` `merge` (:144) and `system-image-check.yml` `merge` (:152) for `forge/scripts/bot_merge.py`. A token, not `GITHUB_TOKEN`, because pull requests opened with `GITHUB_TOKEN` start no checks (`doc_kernel_build.md:447`) | none |
 | SEC8 | `SPECS_UPDATE_TOKEN` | repository | personal access token | `forge-util-update-specs.yml` `update-specs` (:32, :45, :62): pushes `chore/update-specs-zero-trust` and opens its pull request | none |
@@ -47,18 +47,20 @@ No repository variable is set (`gh variable list` is empty), so every default be
 | VAR4 | `RELEASE_BRANCH` | `iso-v0` | PR #180 only: orchestrator, `call-system-image.yml`, `iso-acceptance.yml`, `promote-stable.yml` |
 | VAR5 | `PROMOTE_DWELL_HOURS` | `24` | PR #180 only: `promote-stable.yml` |
 
-| Id | Environment | Secrets | Protection (GitHub API, 2026-10-06) | Referenced by |
+| Id | Environment | Secrets | Protection (`.github/settings/environments.json`; GitHub still has the single `signing` environment until the bootstrap of section 4) | Referenced by |
 | --- | --- | --- | --- | --- |
-| ENV1 | `signing` | SEC1, SEC2, SEC3, SEC4 | required reviewer `hr-mes`, self-review allowed; deployment branches `iso-v0` and `main` | `call-system-image.yml:431` (`sign-system-images`), `nvidia-kmod.yml:145` (`sign`, the sign-kernel job); PR #185 adds `sign-repo`. `scripts/verify.py workflows` fails a signing secret outside this environment, a signing job that builds or uses an action other than checkout and artifact transfer, and a step that hands a signing secret to anything but a sign script (D43) |
+| ENV1 | `signing-kernel` | SEC1, SEC2 | required reviewer `hr-mes`, self-review allowed (`prevent_self_review` false, see `github-settings.md` section 7), no administrator bypass; deployment branches `iso-v0` and `main`, both protected (required check `Kernel gate`, no force push, no deletion) | `nvidia-kmod.yml:139` (`sign`, the sign-kernel job). `scripts/verify.py workflows` fails a signing secret outside a job of the environment that holds it in `environments.json`, a signing job that builds or uses an action other than checkout and artifact transfer, a step that hands a signing secret to anything but a sign script, and a signing environment with administrator bypass or a deployment branch that `branch-protection.json` does not protect (D43) |
 | ENV2 | `stable-override` | none | **missing on GitHub** | PR #180 only (`promote-stable.yml`, checked by `system/require-review.sh`); `doc_update_trust.md` on that branch asks for required reviewers, the release branch only and no administrator bypass |
 | ENV3 | `delete` | none | none; created 2026-08-08 | nothing |
 | ENV4 | `github-pages` | none | deployment branches `gh-pages` and `main` | no workflow names it |
+| ENV5 | `signing-images` | SEC3, SEC4 | required reviewer `hr-mes`, self-review allowed (`prevent_self_review` false, see `github-settings.md` section 7), no administrator bypass; deployment branches `iso-v0` and `main`, both protected (required check `Kernel gate`, no force push, no deletion) | `call-system-image.yml:433` (`sign-system-images`); PR #185 adds `sign-repo` and SEC5, SEC6 |
 
 ### 1.3 Drift between code and GitHub
 
 | Direction | Item | Effect | Action |
 | --- | --- | --- | --- |
-| used, missing | SEC5, SEC6 | `call-system-image.yml` signs only when `RPM_GPG_KEY` is set: the tier repositories are published unsigned | create the key (SEC5 below) in environment `signing` when PR #185 merges, not as a repository secret, so it never reaches `build-repo` |
+| files ahead of GitHub | ENV1, ENV5, protection of `main` | the split and the protection exist only in `.github/settings`; GitHub still has `signing` with every key, and the workflows name the new environments, so a signing job fails to find its keys until they move | the bootstrap of section 4 |
+| used, missing | SEC5, SEC6 | `call-system-image.yml` signs only when `RPM_GPG_KEY` is set: the tier repositories are published unsigned | create the key (SEC5 below) in environment `signing-images` when PR #185 merges, not as a repository secret, so it never reaches `build-repo` |
 | used, missing | ENV2 | PR #180's override path fails by design until the environment exists | create it when PR #180 merges |
 | present, unused | ENV3 | none | delete it, or say what it is for |
 | other | SEC9 | `forge-ghcr-cleanup.yml` fails on every run (37173567085, 36288233693, 35483291172) | outside this runbook |
@@ -78,7 +80,7 @@ KEYDIR=$(mktemp -d -p "${XDG_RUNTIME_DIR:?}" athanor-keys.XXXXXX)
 ```
 
 When done: `shred -u "${KEYDIR:?}"/*.key` and `rm -r "${KEYDIR:?}"` (tmpfs: the pages are freed).
-Upload with `gh secret set NAME --env signing --repo "$REPO" < FILE`, which never echoes the value.
+Upload with `gh secret set NAME --env ENVIRONMENT --repo "$REPO" < FILE` into the environment section 1.2 names for the secret, which never echoes the value.
 Today every key and token is held by the maintainer alone (`hr-mes`).
 
 **SEC1, Secure Boot key.** Parameters: `forge/specs/azoth/keys/profiles/secureboot.cnf`
@@ -90,7 +92,7 @@ one first.
 # preamble of section 1.4 first
 git rm forge/specs/azoth/keys/secureboot/athanor-secureboot.pem forge/specs/azoth/keys/secureboot/athanor-secureboot.der
 bash forge/specs/azoth/keys/generate.sh secureboot --key-dir "${KEYDIR:?}"
-gh secret set SECUREBOOT_SIGNING_KEY --env signing --repo "$REPO" < "${KEYDIR:?}/athanor-secureboot.key"
+gh secret set SECUREBOOT_SIGNING_KEY --env signing-kernel --repo "$REPO" < "${KEYDIR:?}/athanor-secureboot.key"
 ```
 
 Consequences of a rotation:
@@ -108,7 +110,7 @@ requires exactly one certificate in `keys/modules/` and at least one in `keys/re
 # preamble of section 1.4 first
 git mv forge/specs/azoth/keys/modules/athanor-modules.pem forge/specs/azoth/keys/revoked/athanor-modules-$(date -I).pem
 bash forge/specs/azoth/keys/generate.sh modules --key-dir "${KEYDIR:?}"
-gh secret set MODULE_SIGNING_KEY --env signing --repo "$REPO" < "${KEYDIR:?}/athanor-modules.key"
+gh secret set MODULE_SIGNING_KEY --env signing-kernel --repo "$REPO" < "${KEYDIR:?}/athanor-modules.key"
 ```
 
 Consequences: the certificate is compiled into Azoth, so a rotation is a kernel rebuild. Order:
@@ -122,8 +124,8 @@ The old certificate moves to `keys/revoked/`, so the new kernel refuses anything
 # preamble of section 1.4 first
 cosign generate-key-pair --output-key-prefix "${KEYDIR:?}/cosign"   # prompts for the password: that is COSIGN_PASSWORD
 cp "${KEYDIR:?}/cosign.pub" system/keys/athanor-image-<n>.pub
-gh secret set COSIGN_PRIVATE_KEY --env signing --repo "$REPO" < "${KEYDIR:?}/cosign.key"
-gh secret set COSIGN_PASSWORD --env signing --repo "$REPO"   # prompts, nothing echoed
+gh secret set COSIGN_PRIVATE_KEY --env signing-images --repo "$REPO" < "${KEYDIR:?}/cosign.key"
+gh secret set COSIGN_PASSWORD --env signing-images --repo "$REPO"   # prompts, nothing echoed
 ```
 
 Rotation follows UT3: key n+1 ships in the policy of an image signed with key n, and key n
@@ -140,8 +142,8 @@ RSA 4096, sign-only, two years:
 export GNUPGHOME=${KEYDIR:?}/gnupg; mkdir -p -m 700 "$GNUPGHOME"
 gpg --quick-gen-key "Athanor Package Signing Key" rsa4096 sign 2y   # pinentry asks the passphrase: RPM_GPG_PASSPHRASE
 gpg --armor --export-secret-keys "Athanor Package Signing Key" > "${KEYDIR:?}/rpm.key"
-gh secret set RPM_GPG_KEY --env signing --repo "$REPO" < "${KEYDIR:?}/rpm.key"
-gh secret set RPM_GPG_PASSPHRASE --env signing --repo "$REPO"
+gh secret set RPM_GPG_KEY --env signing-images --repo "$REPO" < "${KEYDIR:?}/rpm.key"
+gh secret set RPM_GPG_PASSPHRASE --env signing-images --repo "$REPO"
 ```
 
 Rotation: replace the secret. No machine checks this key today (`git grep RPM-GPG-KEY-athanor`
@@ -167,18 +169,18 @@ _(Proposal)_ `KERNEL_BUMP_TOKEN` now serves six workflows, not only the kernel; 
 ## 2. Key custody _(Proposal)_
 
 Today: one maintainer holds every key, with an offline backup held by the key custodian;
-`signing` has one required reviewer, who may approve their own runs. Decision A2-27 keeps two approvals per release cycle (`sign-kernel`, then
-`sign-system-images`). `sign-kernel` is the `sign` job of `nvidia-kmod.yml`, which runs only
+`signing-kernel` and `signing-images` each have one required reviewer, who may approve their own runs. Decision A2-27 keeps two approvals per release cycle (`sign-kernel` in `signing-kernel`, then
+`sign-system-images` in `signing-images`; ADR-0064). `sign-kernel` is the `sign` job of `nvidia-kmod.yml`, which runs only
 when a kernel or NVIDIA change leaves the signed modules or vmlinuz missing; any other cycle
 asks for `sign-system-images` alone. Everything below is a proposal.
 
 | Id | Proposal |
 | --- | --- |
-| KC1 | **Two holders,** the maintainer and one deputy, both required reviewers of `signing` and `stable-override`. Once there are two, set `prevent_self_review`: a run is approved by the holder who did not start it. The two approvals of A2-27 then each need the second person. |
+| KC1 | **Two holders,** the maintainer and one deputy, both required reviewers of `signing-kernel`, `signing-images` and `stable-override`. Once there are two, set `prevent_self_review`: a run is approved by the holder who did not start it. The two approvals of A2-27 then each need the second person. |
 | KC2 | **Offline encrypted backup in two places.** The private keys of section 1.4, encrypted to both holders' OpenPGP keys, each on a hardware token: `tar -C "${KEYDIR:?}" -c ... \| gpg --encrypt -r <holder A> -r <holder B> -o <archive>`. Two copies, in two separate places, each kept by a different holder. Tokens are not backed up: they are made again (RL1). A private custody runbook, outside this public repository, records where each backup is and what it holds. |
 | KC3 | **Generation ceremony.** Keys are generated on tmpfs as in section 1.4, with both holders present (in person or on a call). The archive of KC2 is written and test-decrypted before the plaintext is shredded. The committed certificate or public key is the record of what was generated. |
-| KC4 | **Maintainer unavailable.** The deputy approves releases (KC1) and holds a backup copy (KC2), so the pipeline continues. The repository belongs to the organisation `ars-regia` since 2026-10-06 (`gh api repos/ars-regia/athanor --jq .owner.type` is `Organization`), but the maintainer is its only owner, so nobody else can administer it yet. Make the deputy an organisation owner. To rebuild elsewhere, the deputy decrypts the copy and loads the secrets into the new `signing` environment with the commands of section 1.4. |
-| KC5 | **Compromise.** 1. Stop: `gh workflow disable` the workflows that sign, `gh secret delete` the exposed secret. 2. Rotate the key as in section 1.4. 3. Revoke: SEC2, the old certificate goes to `keys/revoked/`; SEC1, MokListX entry or `mokutil --delete` of the old certificate on each machine (D41); SEC3, public notice, then the recovery command of `RECOVERY.md` on each machine (UT2); tokens, revoke in the GitHub settings. 4. Audit: list the deployments of `signing` since the suspected exposure (`gh api "repos/$REPO/deployments?environment=signing"`) and every digest signed in that window. |
+| KC4 | **Maintainer unavailable.** The deputy approves releases (KC1) and holds a backup copy (KC2), so the pipeline continues. The repository belongs to the organisation `ars-regia` since 2026-10-06 (`gh api repos/ars-regia/athanor --jq .owner.type` is `Organization`), but the maintainer is its only owner, so nobody else can administer it yet. Make the deputy an organisation owner. To rebuild elsewhere, the deputy decrypts the copy and loads the secrets into the new `signing-kernel` and `signing-images` environments with the commands of section 1.4. |
+| KC5 | **Compromise.** 1. Stop: `gh workflow disable` the workflows that sign, `gh secret delete` the exposed secret. 2. Rotate the key as in section 1.4. 3. Revoke: SEC2, the old certificate goes to `keys/revoked/`; SEC1, MokListX entry or `mokutil --delete` of the old certificate on each machine (D41); SEC3, public notice, then the recovery command of `RECOVERY.md` on each machine (UT2); tokens, revoke in the GitHub settings. 4. Audit: list the deployments of the environment that held the key since the suspected exposure (`gh api "repos/$REPO/deployments?environment=signing-kernel"`, or `signing-images`; before the split, `signing`) and every digest signed in that window. |
 | KC6 | **A holder leaves.** A private key cannot be taken back. Rotate every key that holder could decrypt, then re-encrypt the backup to the new pair of holders. |
 
 ## 3. Recovery after a loss
@@ -194,5 +196,5 @@ read back, so the backup of KC2 is the only copy that can be restored.
 | RL4 | SEC1 | a new key, never the old one | every machine with Secure Boot on re-enrols, with someone at the console for MokManager. Images signed with the old key keep booting where it is enrolled. Machines with Secure Boot off need nothing |
 | RL5 | SEC3 or SEC4 | a new key, never the old one | the new key cannot reach machines in an image signed with the old one (UT3 needs the old key), so every installed machine stops accepting updates. Each one is recovered out of band: `athanor-update recover-key` (`RECOVERY.md`) or a reinstall from a new ISO. This is the costliest loss |
 | RL6 | the private key of the MOK of 2026-09-04, retired and held by no environment | not needed | nothing for its loss. A **leak** still matters: shim on a machine that still has the 2026-09-04 MOK enrolled boots what it signs, and kernels built before its revocation (2026-09-13) accept modules it signs. Its exposure stays relevant until that MOK is deleted (`mokutil --delete`) or listed in MokListX on every machine that enrolled it |
-| RL7 | an environment (ENV1, ENV2) | yes | recreate it with its reviewers and deployment branches as in section 1.2, then load its secrets from the backup |
+| RL7 | an environment (ENV1, ENV2, ENV5) | yes | recreate it with its reviewers and deployment branches as in section 1.2, then load its secrets from the backup |
 | RL8 | the backup itself, with the GitHub secrets still in place | yes, for the backup | a GitHub secret cannot be exported, so rotate SEC1, SEC2 and SEC3 at a planned date while their old keys still sign, and back up the new keys (KC2) |

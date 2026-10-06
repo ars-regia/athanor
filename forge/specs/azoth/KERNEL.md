@@ -11,7 +11,7 @@ directory e come si usa.
 | `pins.env` | i pin: NVR Fedora (stesso patch level della release CachyOS), release CachyOS, commit del config e delle patch |
 | `SOURCES/sources.sha256` | hash di ogni file che build.sh scarica; lo scrive `build.sh --stage manifest` |
 | `SOURCES/keys/{cachyos,kernel.org}/` | chiavi pubbliche che firmano i tarball CachyOS e vanilla |
-| `keys/` | `profiles/` e `generate.sh`: le chiavi di firma del progetto; certificati pubblici in `secureboot/` (vmlinuz, secret `SECUREBOOT_SIGNING_KEY`), `modules/` (moduli esterni, compilato nel kernel, secret `MODULE_SIGNING_KEY`) e `revoked/` (compilati nella blacklist del kernel); i secret stanno nell'environment `signing` |
+| `keys/` | `profiles/` e `generate.sh`: le chiavi di firma del progetto; certificati pubblici in `secureboot/` (vmlinuz, secret `SECUREBOOT_SIGNING_KEY`), `modules/` (moduli esterni, compilato nel kernel, secret `MODULE_SIGNING_KEY`) e `revoked/` (compilati nella blacklist del kernel); i secret stanno nell'environment `signing-kernel` |
 | `kernel-local` | delta Kconfig di Athanor sul config x86_64 di Fedora |
 | `patches.list` | patch di CachyOS/kernel-patches applicate sopra la base |
 | `patches/refreshed/` | copie rinfrescate e riviste delle patch di `patches.list` che non entrano più senza fuzz; il preambolo registra il file upstream da cui derivano (`build.sh --stage refresh`, spec sezione 8) |

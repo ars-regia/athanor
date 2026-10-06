@@ -113,8 +113,8 @@ A mismatch is a build failure with the exact values, never a warning.
 - **Build and publication:**
   - `call-system-image.yml` builds the default image, then the two variants from the shared stages;
   - each image is pushed, signed and SBOM-attested like `athanor-system` today;
-  - the signing job serves all three images, so a cycle needs one approval of the `signing` environment. The plan verifies that GitHub groups the waiting jobs into one review;
-  - the build job holds no key and runs outside `signing` (D43): the vmlinuz arrives signed for Secure Boot (section 8).
+  - the signing job serves all three images, so a cycle needs one approval of the `signing-images` environment. The plan verifies that GitHub groups the waiting jobs into one review;
+  - the build job holds no key and runs outside the signing environments (D43): the vmlinuz arrives signed for Secure Boot (section 8).
 - **Installation:**
   - the installer ISO stays single and installs `athanor-system`;
   - a machine with NVIDIA hardware moves to its variant with `bootc switch ghcr.io/ars-regia/athanor-system-nvidia:latest`, or `-nvidia-legacy`;

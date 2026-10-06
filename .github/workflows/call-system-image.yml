@@ -430,7 +430,7 @@ jobs:
     # beside the key: checkout, registry login, system/sign-images.sh (doc_update_trust.md UT2).
     needs: [dag-system-image]
     runs-on: ubuntu-24.04
-    environment: signing
+    environment: signing-images
     timeout-minutes: 60
     permissions:
       contents: read

@@ -90,7 +90,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 - **Triggers:** push to `main`, `iso-v0` on `forge/**` (not `forge/test/**`, `forge/specs/azoth/**`), `system/**`, `Cargo.toml`, `flake.nix`, `flake.lock`, `call-*.yml`, the NVIDIA workflows; dispatch (`sha`, `force_image`); cron `0 4 * * *`.
 - **Outputs:** artifact `kernel-artifacts`; images of CI3, CI4, CI5, CI6.
 - **Secrets, variables:** `REGISTRY_HOST`, `KERNEL_REGISTRY`; `secrets: inherit` to CI6 and CI5.
-- **Environment:** none itself; CI6 and CI5 use `signing`.
+- **Environment:** none itself; CI6 uses `signing-kernel` and CI5 `signing-images` (ADR-0064).
 - **Runner:** hosted. **Concurrency:** `<workflow>-<ref>`, no cancel: the newest run waits (`:61-63`, O6).
 - **Scripts:** `forge/scripts/dynamic-matrix.sh`, `system/kernel-artifacts.sh`.
 - **Health:** 37444165929 pending; 37441359373, 37436322329, 37389162383, 37384753812 cancelled. The cancelled runs were superseded in the concurrency group while 37384733899 waited for the `signing` approvals (its `dag-system-image` started 9 h after `build-repo`; its `sign-system-images` was still waiting at 09:44 UTC). Last complete runs: 37362183855 failure (a lint job cancelled at its limit), 37315915191 and 37299854397 success with all system-image jobs green.
@@ -124,7 +124,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 - **File:** `call-system-image.yml`. **Purpose:** aggregates the tier repositories, builds the three system images and the ISO, signs them keyless and with the update key.
 - **Triggers:** `workflow_call` (CI1). **Input:** `builder_content_hash`. **Outputs:** tier repository images, system images, ISO image, `gh-pages` on `main`; artifact `image-digests`.
 - **Secrets:** `RPM_GPG_KEY`, `RPM_GPG_PASSPHRASE` (optional), `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD`, `GITHUB_TOKEN`.
-- **Environment:** `signing` on `sign-system-images` only: one maintainer approval per run (D43). `dag-system-image` holds no key; the vmlinuz arrives signed, from `azoth-boot` by digest.
+- **Environment:** `signing-images` on `sign-system-images` only: one maintainer approval per run (D43). `dag-system-image` holds no key; the vmlinuz arrives signed, from `azoth-boot` by digest.
 - **Runner:** hosted. **Concurrency:** caller's.
 - **Scripts:** `scripts/fetch_repo_rpms.sh` (in `forge/`), `system/build-image.sh`, `system/shared-layers.sh`, `system/image-digests.sh`, `system/sign-images.sh`, `forge/scripts/sbom_rootfs.sh`, `sign_attest.sh`, `build_iso.sh`, `retry.sh`.
 - **Health:** green in 37315915191, 37299854397, 37240182079; waiting for approval in 37384733899.
@@ -133,7 +133,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 
 - **File:** `nvidia-kmod.yml`. **Purpose:** the signing cycle of a kernel: builds the NVIDIA modules for the pinned kernel, signs them with the module key and the kernel's vmlinuz with the Secure Boot key, boots the modules and publishes both (doc_build_ordering.md, O3-O5).
 - **Triggers:** `workflow_call` (CI1, when the modules or the signed vmlinuz are missing); dispatch (`kernel_digest`). **Outputs:** `azoth-nvidia`, `azoth-boot`; artifacts `nvidia-kernel-artifacts`, `nvidia-signed`, `azoth-kernel-signed`, `nvidia-mok-signed`, `nvidia-boot-logs`, `nvidia-attestations`.
-- **Secrets, variables:** `MODULE_SIGNING_KEY`, `SECUREBOOT_SIGNING_KEY`, `GITHUB_TOKEN`, `KERNEL_REGISTRY`. **Environment:** `signing` on `sign`, the sign-kernel job of D43: checkout, artifact download and upload, and `forge/specs/azoth/signer/run.sh`, which runs the signer image by digest without network, with no part of the checkout mounted, the inputs and certificates read-only and only the output writable. The job signs only what it derives itself: its key-less step `run.sh inputs` resolves the kernel again with cosign (fetched by the sha256 in `signer/cosign.pin`, not by an action), requires the kernel digest the `artifacts` job passed as an output, extracts the vmlinuz from that kernel-core, and allow-lists the module tree (names, paths, vermagic of the derived kver, no symlink); only then does `run.sh sign` see the keys, and it checks that the signed vmlinuz without its signature is the input. The key-less `prepare` job builds the MOK-signed negative sample; `publish` verifies the signature with `sbverify` against `keys/secureboot/athanor-secureboot.pem` and that the signed vmlinuz is the one of the kernel-core RPM it resolved.
+- **Secrets, variables:** `MODULE_SIGNING_KEY`, `SECUREBOOT_SIGNING_KEY`, `GITHUB_TOKEN`, `KERNEL_REGISTRY`. **Environment:** `signing-kernel` on `sign`, the sign-kernel job of D43: checkout, artifact download and upload, and `forge/specs/azoth/signer/run.sh`, which runs the signer image by digest without network, with no part of the checkout mounted, the inputs and certificates read-only and only the output writable. The job signs only what it derives itself: its key-less step `run.sh inputs` resolves the kernel again with cosign (fetched by the sha256 in `signer/cosign.pin`, not by an action), requires the kernel digest the `artifacts` job passed as an output, extracts the vmlinuz from that kernel-core, and allow-lists the module tree (names, paths, vermagic of the derived kver, no symlink); only then does `run.sh sign` see the keys, and it checks that the signed vmlinuz without its signature is the input. The key-less `prepare` job builds the MOK-signed negative sample; `publish` verifies the signature with `sbverify` against `keys/secureboot/athanor-secureboot.pem` and that the signed vmlinuz is the one of the kernel-core RPM it resolved.
 - **Runner:** hosted, KVM for `boot`. **Concurrency:** job `publish` in `azoth-nvidia-publish`.
 - **Scripts:** `system/kernel-artifacts.sh`, `forge/specs/azoth/nvidia.sh`, `signer/run.sh`, `sign-kernel.sh`, `nvidia-publish.sh`, `boot.sh`, `retention.sh`.
 - **Health:** no run on `iso-v0` since the Orchestrator calls it; skipped in 37384733899 (modules present). Last dispatches: 35227069058 success, 35217964753 success, 34966900609 cancelled, 34907939626 success, 34854397484 failure (2026-09-14 to 09-17).
@@ -327,9 +327,9 @@ Every name below is described in the secrets inventory, `docs/operations/secrets
 | `KERNEL_BUMP_TOKEN` | secret (PAT) | repository | CI9, CI13, CI14, CI17, CI19 |
 | `SPECS_UPDATE_TOKEN` | secret (PAT) | repository | CI20 |
 | `FORGE_PAT` | secret (PAT, delete:packages) | repository | CI21 |
-| `SECUREBOOT_SIGNING_KEY` | secret | environment `signing` | CI6 |
-| `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | secret | environment `signing` | CI5 |
-| `MODULE_SIGNING_KEY` | secret | environment `signing` | CI6 |
+| `SECUREBOOT_SIGNING_KEY` | secret | environment `signing-kernel` | CI6 |
+| `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | secret | environment `signing-images` | CI5 |
+| `MODULE_SIGNING_KEY` | secret | environment `signing-kernel` | CI6 |
 | `RPM_GPG_KEY`, `RPM_GPG_PASSPHRASE` | secret | **nowhere**: the RPMs and tier repositories are not GPG-signed (`call-system-image.yml:94,123`) | CI5 |
 | `REGISTRY_HOST` | variable, default `ghcr.io` | not set | CI1, CI3, CI4, CI11, CI14, CI21-CI23 |
 | `KERNEL_REGISTRY` | variable, default `ghcr.io/<owner>` | not set | CI1, CI6, CI8, CI9, CI13, CI25 |
@@ -339,7 +339,8 @@ Environments (`gh api repos/ars-regia/athanor/environments`):
 
 | Environment | Protection | Used by |
 |---|---|---|
-| `signing` | required reviewer `hr-mes`; branches `iso-v0`, `main` | CI5 (`sign-system-images`), CI6 (`sign`) |
+| `signing-kernel` | required reviewer `hr-mes`, no administrator bypass; branches `iso-v0`, `main`, both protected | CI6 (`sign`) |
+| `signing-images` | as `signing-kernel` | CI5 (`sign-system-images`) |
 | `github-pages` | custom branch policy | no workflow (GitHub Pages) |
 | `delete` | none | no workflow |
 

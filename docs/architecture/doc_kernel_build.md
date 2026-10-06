@@ -66,7 +66,7 @@ Directory `forge/specs/azoth/` dopo il blocco:
 | `bconds.sh`              | i bcond di kernel.spec, gli stessi per `dnf builddep`, `rpmbuild` e il lock                                                                                                                                                                                                      |
 | `build.sh`               | l'intera build, riproducibile in locale e in CI                                                                                                                                                                                                                                  |
 | `build-inputs.py`        | gli input che cambiano gli RPM come JSON: predicato dell'attestazione dei pin e chiave del riuso (sezione 7)                                                                                                                                                                     |
-| `keys/`                  | profili e generatore delle chiavi di firma (`profiles/`, `generate.sh`); certificati pubblici della chiave Secure Boot (`secureboot/`), della chiave dei moduli (`modules/`) e delle chiavi ritirate (`revoked/`) (sezione 6); le chiavi private sono nell'environment `signing` |
+| `keys/`                  | profili e generatore delle chiavi di firma (`profiles/`, `generate.sh`); certificati pubblici della chiave Secure Boot (`secureboot/`), della chiave dei moduli (`modules/`) e delle chiavi ritirate (`revoked/`) (sezione 6); le chiavi private sono nell'environment `signing-kernel` |
 | `microvm/`               | config e spec del kernel guest (sezione 9)                                                                                                                                                                                                                                       |
 | `KERNEL.md`              | cosa c'è nella directory, uso locale, bump; il bot (K5) ne riscrive la tabella dei pin                                                                                                                                                                                           |
 
@@ -294,7 +294,7 @@ patchano i Makefile per forzarlo.
   (`CONFIG_SYSTEM_TRUSTED_KEYS`): la fiducia non dipende dal firmware né da
   Secure Boot. La chiave privata (RSA 4096, profilo `keys/profiles/modules.cnf`,
   generata con `keys/generate.sh` il 2026-09-13, copia cifrata fuori da GitHub)
-  sta nel secret `MODULE_SIGNING_KEY` dell'environment `signing`, ammesso solo
+  sta nel secret `MODULE_SIGNING_KEY` dell'environment `signing-kernel`, ammesso solo
   ai branch `main` e `iso-v0`. Un secret non è più sicuro per essere nato sul
   runner: conta dove si usa, e chi ne ha la custodia.
 - **Chiave Secure Boot**: firma con sbsign il vmlinuz di ogni nuovo kernel, nel
@@ -580,7 +580,7 @@ kernel-devel e l'hash di `CONFIG_MODULE_SIG_HASH`, e rilegge il firmatario con
 `modinfo`. Il workflow `nvidia-kmod.yml`: `artifacts` (`system/kernel-artifacts.sh`
 risolve il kernel dei pin e i tag dei moduli; se non mancano, il run finisce lì),
 `build` (matrice dei due rami, runner GitHub, `azoth-devel` per digest),
-`sign` (runner GitHub, environment `signing`: vede solo i `.ko` e la chiave,
+`sign` (runner GitHub, environment `signing-kernel`: vede solo i `.ko` e la chiave,
 montata in sola lettura per la durata del comando), `boot` (la catena della
 firma end-to-end in QEMU, gate 4 della sezione 7), `publish` (un'immagine
 `scratch` per ramo con `lib/modules/<kver>/extra/nvidia/*.ko`, il layout che

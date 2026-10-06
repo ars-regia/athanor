@@ -19,18 +19,34 @@ CHECKOUT = "actions/checkout@11d5960a326750d5838078e36cf38b85af677262"
 DOWNLOAD = "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
 UPLOAD = "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
 
-ENVIRONMENTS = {
-    "signing": {
+PROTECTED = {"allow_deletions": False, "allow_force_pushes": False}
+BRANCH_PROTECTION = {"iso-v0": PROTECTED, "main": PROTECTED, "old": {}}
+SIGNING_BRANCHES = {
+    "custom_branch_policies": True,
+    "protected_branches": False,
+    "policies": [{"name": "iso-v0", "type": "branch"}, {"name": "main", "type": "branch"}],
+}
+
+
+def signing_environment(*secrets):
+    return {
+        "can_admins_bypass": False,
+        "deployment_branch_policy": SIGNING_BRANCHES,
         "reviewers": [{"name": "maintainer", "type": "User"}],
-        "secrets": ["COSIGN_PRIVATE_KEY", "SECUREBOOT_SIGNING_KEY"],
-    },
+        "secrets": list(secrets),
+    }
+
+
+ENVIRONMENTS = {
+    "signing-images": signing_environment("COSIGN_PRIVATE_KEY"),
+    "signing-kernel": signing_environment("SECUREBOOT_SIGNING_KEY"),
     "github-pages": {"reviewers": [], "secrets": []},
 }
 
 SIGN_JOB = f"""\
   sign:
     runs-on: ubuntu-24.04
-    environment: signing
+    environment: signing-kernel
     steps:
       - uses: {CHECKOUT}
       - uses: {DOWNLOAD}
@@ -72,6 +88,9 @@ class SigningTest(unittest.TestCase):
             (root / ".github/settings/environments.json").write_text(
                 json.dumps(environments)
             )
+            (root / ".github/settings/branch-protection.json").write_text(
+                json.dumps(BRANCH_PROTECTION)
+            )
             for name, text in workflows.items():
                 (root / ".github/workflows" / name).write_text(text)
             return verify.signing_problems(root)
@@ -85,27 +104,27 @@ class SigningTest(unittest.TestCase):
         self.assertEqual(self.problems({"k.yml": workflow(BUILD_JOB, SIGN_JOB)}), [])
 
     def test_rule_1_a_signing_secret_outside_the_signing_environment_fails(self):
-        job = SIGN_JOB.replace("    environment: signing\n", "")
+        job = SIGN_JOB.replace("    environment: signing-kernel\n", "")
         self.assertEqual(
             self.problems({"k.yml": workflow(job)}),
             [
-                "k.yml: job sign reads SECUREBOOT_SIGNING_KEY without environment: signing, which holds it (D43)"
+                "k.yml: job sign reads SECUREBOOT_SIGNING_KEY without environment: signing-kernel, which holds it (D43)"
             ],
         )
 
     def test_rule_1_the_environment_written_as_a_mapping_counts(self):
         job = SIGN_JOB.replace(
-            "    environment: signing\n", "    environment:\n      name: signing\n"
+            "    environment: signing-kernel\n", "    environment:\n      name: signing-kernel\n"
         )
         self.assertEqual(self.problems({"k.yml": workflow(job)}), [])
 
     def test_rule_1_the_secret_name_is_case_insensitive(self):
         job = SIGN_JOB.replace(
             "secrets.SECUREBOOT_SIGNING_KEY", "secrets.secureboot_signing_key"
-        ).replace("    environment: signing\n", "")
+        ).replace("    environment: signing-kernel\n", "")
         self.assert_one(
             {"k.yml": workflow(job)},
-            r"reads SECUREBOOT_SIGNING_KEY without environment: signing",
+            r"reads SECUREBOOT_SIGNING_KEY without environment: signing-kernel",
         )
 
     def test_rule_2_a_third_party_action_in_a_signing_job_fails(self):
@@ -133,7 +152,7 @@ class SigningTest(unittest.TestCase):
         job = textwrap.indent(
             textwrap.dedent("""\
                 sign:
-                  environment: signing
+                  environment: signing-kernel
                   uses: ./.github/workflows/other.yml
                 """),
             "  ",
@@ -266,7 +285,7 @@ class SigningTest(unittest.TestCase):
     def test_rule_3_c_layouts_a_line_parser_missed_are_read(self):
         """A comment after jobs:, four-space indentation and a quoted job key: before the YAML
         parser each gave zero jobs and a silent pass."""
-        unprotected = workflow(SIGN_JOB.replace("    environment: signing\n", ""))
+        unprotected = workflow(SIGN_JOB.replace("    environment: signing-kernel\n", ""))
         # The jobs at four spaces instead of two, everything under them shifted with them.
         four_spaces = "\n".join(("  " + line if line.startswith("  ") else line) for line in unprotected.split("\n"))
         for text in (
@@ -302,21 +321,21 @@ class SigningTest(unittest.TestCase):
         )
 
     def test_rule_4_a_signing_secret_in_a_job_of_another_environment_fails(self):
-        job = SIGN_JOB.replace("environment: signing", "environment: github-pages")
+        job = SIGN_JOB.replace("environment: signing-kernel", "environment: github-pages")
         self.assertEqual(
             self.problems({"k.yml": workflow(job)}),
             [
-                "k.yml: job sign reads SECUREBOOT_SIGNING_KEY without environment: signing, which holds it (D43)"
+                "k.yml: job sign reads SECUREBOOT_SIGNING_KEY without environment: signing-kernel, which holds it (D43)"
             ],
         )
 
     def test_rule_5_a_signing_environment_without_reviewers_fails(self):
         environments = json.loads(json.dumps(ENVIRONMENTS))
-        environments["signing"]["reviewers"] = []
+        environments["signing-kernel"]["reviewers"] = []
         self.assertEqual(
             self.problems({"k.yml": workflow(SIGN_JOB)}, environments),
             [
-                ".github/settings/environments.json: the signing environment has no required reviewer (D43)"
+                ".github/settings/environments.json: the signing-kernel environment has no required reviewer (D43)"
             ],
         )
 
@@ -328,6 +347,54 @@ class SigningTest(unittest.TestCase):
             ),
             [".github/settings/environments.json: no signing environment (D43)"],
         )
+
+    def test_rule_4_a_signing_secret_in_the_other_signing_environment_fails(self):
+        """The map secret -> environment is environments.json: the image key is not the
+        kernel's, so a job of signing-images cannot read the Secure Boot key."""
+        job = SIGN_JOB.replace("environment: signing-kernel", "environment: signing-images")
+        self.assertEqual(
+            self.problems({"k.yml": workflow(job)}),
+            [
+                "k.yml: job sign reads SECUREBOOT_SIGNING_KEY without environment: signing-kernel, which holds it (D43)"
+            ],
+        )
+
+    def test_rule_5_a_secret_in_two_signing_environments_fails(self):
+        environments = json.loads(json.dumps(ENVIRONMENTS))
+        environments["signing-images"]["secrets"].append("SECUREBOOT_SIGNING_KEY")
+        self.assertIn(
+            ".github/settings/environments.json: SECUREBOOT_SIGNING_KEY is in signing-images and in "
+            "signing-kernel: each key has one environment (D43)",
+            self.problems({"k.yml": workflow(SIGN_JOB)}, environments),
+        )
+
+    def test_rule_5_a_signing_environment_an_admin_can_bypass_fails(self):
+        environments = json.loads(json.dumps(ENVIRONMENTS))
+        environments["signing-images"]["can_admins_bypass"] = True
+        self.assertEqual(
+            self.problems({"k.yml": workflow(SIGN_JOB)}, environments),
+            [
+                ".github/settings/environments.json: the signing-images environment lets administrators "
+                "bypass its reviewer (D43)"
+            ],
+        )
+
+    def test_rule_5_a_signing_environment_deploys_only_from_protected_branches(self):
+        for policy, where in (
+            (None, "any branch"),
+            ({"custom_branch_policies": False, "protected_branches": True, "policies": []}, "any protected branch"),
+            ({**SIGNING_BRANCHES, "policies": []}, "no branch"),
+            ({**SIGNING_BRANCHES, "policies": [{"name": "old", "type": "branch"}]}, "old"),
+            ({**SIGNING_BRANCHES, "policies": [{"name": "feature", "type": "branch"}]}, "feature"),
+            ({**SIGNING_BRANCHES, "policies": [{"name": "main", "type": "tag"}]}, "tag main"),
+            ({**SIGNING_BRANCHES, "policies": [{"name": "*", "type": "branch"}]}, "*"),
+        ):
+            with self.subTest(where=where):
+                environments = json.loads(json.dumps(ENVIRONMENTS))
+                environments["signing-kernel"]["deployment_branch_policy"] = policy
+                problems = self.problems({"k.yml": workflow(SIGN_JOB)}, environments)
+                self.assertEqual(len(problems), 1, problems)
+                self.assertIn(f"the signing-kernel environment deploys from {where}", problems[0])
 
     def test_without_pyyaml_the_lint_fails_closed(self):
         saved, verify.yaml = verify.yaml, None

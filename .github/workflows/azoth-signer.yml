@@ -2,7 +2,7 @@ name: Azoth signer image
 
 # The image the sign-only job of NVIDIA kmod runs by digest (forge/specs/azoth/signer,
 # docs/architecture/doc_ci.md, D43): built and published here, in a job without any key, and
-# never in the signing environment. The summary names the digest to commit in
+# in no signing environment. The summary names the digest to commit in
 # forge/specs/azoth/signer/image.digest; until it is committed the sign job keeps running the
 # previous one.
 

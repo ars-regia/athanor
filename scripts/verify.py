@@ -198,6 +198,7 @@ EXPRESSION = re.compile(r"\$\{\{(.*?)\}\}", re.S)
 SECRET_NAME = re.compile(r"\bsecrets\s*\.\s*([A-Za-z_][A-Za-z0-9_-]*)", re.I)
 SECRETS_WORD = re.compile(r"\bsecrets\b", re.I)
 ENVIRONMENTS_JSON = ".github/settings/environments.json"
+BRANCH_PROTECTION_JSON = ".github/settings/branch-protection.json"
 
 
 def yaml_strings(node, path=()):
@@ -231,17 +232,53 @@ def job_environment(job):
     return environment.strip() if isinstance(environment, str) else None
 
 
+def protected_branches(root):
+    """The branches branch-protection.json protects against force pushes and deletion."""
+    protection = json.loads(read(Path(root) / BRANCH_PROTECTION_JSON))
+    return {branch for branch, rules in protection.items()
+            if rules and rules.get("allow_force_pushes") is False and rules.get("allow_deletions") is False}
+
+
+def deployment_problem(policy, protected):
+    """Where a deployment branch policy lets a job of the environment run from, when that is
+    more than named protected branches; None when it is only those."""
+    if not policy:
+        return "any branch"
+    if not policy.get("custom_branch_policies"):
+        return "any protected branch"
+    branches = policy.get("policies") or []
+    if not branches:
+        return "no branch"
+    for branch in branches:
+        if branch.get("type", "branch") != "branch":
+            return f"{branch.get('type')} {branch.get('name')}"
+        if branch.get("name") not in protected:
+            return branch.get("name")
+    return None
+
+
 def signing_environments(root):
     """{secret: environment} for the environments named signing* in environments.json, the one
-    place that says which environment holds which key, and the problems of those environments."""
+    place that says which environment holds which key, and the problems of those environments:
+    each needs a required reviewer, no administrator bypass, and deploys only from branches
+    branch-protection.json protects by name (a glob or "any protected branch" would follow
+    whoever can protect a new branch)."""
     environments = json.loads(read(Path(root) / ENVIRONMENTS_JSON))
     signing = {name: env for name, env in environments.items() if name.startswith("signing")}
     if not signing:
         return {}, [f"{ENVIRONMENTS_JSON}: no signing environment (D43)"]
     holders, problems = {}, []
+    protected = protected_branches(root)
     for name, env in sorted(signing.items()):
         if not env.get("reviewers"):
             problems.append(f"{ENVIRONMENTS_JSON}: the {name} environment has no required reviewer (D43)")
+        if env.get("can_admins_bypass") is not False:
+            problems.append(f"{ENVIRONMENTS_JSON}: the {name} environment lets administrators bypass "
+                            "its reviewer (D43)")
+        where = deployment_problem(env.get("deployment_branch_policy"), protected)
+        if where:
+            problems.append(f"{ENVIRONMENTS_JSON}: the {name} environment deploys from {where}, not only "
+                            f"from branches {BRANCH_PROTECTION_JSON} protects (D43)")
         for secret in env.get("secrets", []):
             if secret in holders:
                 problems.append(f"{ENVIRONMENTS_JSON}: {secret} is in {holders[secret]} and in {name}: "
@@ -257,7 +294,8 @@ def signing_problems(root):
     upload-artifact pinned by SHA and pointed at this run and repository, calls no reusable
     workflow, runs no container and builds, installs or runs no locally built image; no secret
     is read other than by name, and no caller inherits secrets into a workflow with a signing
-    job; each signing environment has a required reviewer."""
+    job; each signing environment has a required reviewer, no administrator bypass, and deploys
+    only from protected branches."""
     root = Path(root)
     holders, problems = signing_environments(root)
     if yaml is None:
