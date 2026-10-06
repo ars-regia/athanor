@@ -54,7 +54,8 @@ for hours: never use it as a check.
   absent. A placeholder or an unconditional `Ok(true)` in a security path is a defect: if
   you cannot build the real thing, stop and say so.
 - **`panic = "abort"` in dev and release.** A panic ends the process; in a daemon that is a
-  loss of service. No `unwrap()` or `expect()` outside tests (`verify.py panics`).
+  loss of service. No new `unwrap()`, `expect()` or `panic!` outside tests: `verify.py panics`
+  holds a budget that only goes down.
 - **No hidden failures.** No `|| true`, no `continue-on-error`, no `2>/dev/null` that hides
   an error. Prefer the idiomatic fix to the minimal patch.
 - **English for everything committed**: code, comments, commit messages (Conventional
@@ -78,8 +79,11 @@ for hours: never use it as a check.
 - Migrations of data or on-disk state, and anything destructive: force push, history
   rewrite, `git reset --hard`, deleting branches, tags, releases or registry images.
 
-Never read secrets: `.env` files, private keys, `scripts/runner/*.env`. When a value is
-needed, ask for the variable's name, not its content.
+Never push to `iso-v0` or `main` directly: every change lands through a pull request.
+
+Never read secrets: dotenv files (`.env`, `.env.*`), private keys, credential stores
+(`gh`, `containers/auth.json`, `/etc/credstore*`). When a value is needed, ask for the
+variable's name, not its content.
 
 ## Read before editing
 

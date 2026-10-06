@@ -9,7 +9,8 @@ pipeline and installation; the image is specified in
 - **Enable units with a preset file, never `systemctl enable` in the `Containerfile`.** The
   `Containerfile` runs `systemctl preset-all` after it and again in the GPU stages, and
   Fedora's `99-default-disable.preset` (`disable *`) then disables every unit no preset
-  names (`docs/architecture/doc_tetragon.md`).
+  names (`docs/architecture/doc_tetragon.md`). `Containerfile:180` still enables three units
+  that way: known debt, tracked in `doc_tetragon.md`, not a pattern to copy.
 - **A workspace crate ships in a package** or is listed in `experimental/EXEMPT`
   (`verify.py shipped`).
 - **No runtime path into the build tree or `/tmp`.** Load artefacts from installed paths,

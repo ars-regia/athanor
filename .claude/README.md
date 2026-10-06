@@ -38,15 +38,20 @@ its content to `settings.local.json` before you pull.
 From the Claude Code permission documentation:
 
 - A Bash rule matches each subcommand of a compound command on its own, so a rule that
-  contains `|` or `&&` never matches. `curl ... | sh` is denied through its bare `sh`.
-- A Bash rule matches the command text only: `/usr/bin/rm`, `sh -c '...'` or `git -C . push`
-  escape it.
+  contains `|` or `&&` never matches. `curl ... | sh` is denied through its bare `sh`;
+  `curl ... | sh -s` is not, and falls to the default prompt.
+- A Bash rule matches the command text only: `/usr/bin/rm` or `sh -c '...'` escape it. The
+  git rules come in two forms, `git push ...` and `git * push ...`, so options before the
+  subcommand (`git -C <dir> push`) are covered; combined short flags (`git push -uf`) are not,
+  and only the `ask` on every push stops them.
 - `Read()` deny rules cover the built-in file tools and the file commands Claude Code
   recognises in Bash (`cat`, `head`, `tail`, `sed`, redirections). They do not stop
   `grep -r` over a directory, or a script that opens the file itself.
 - Deny rules have no exceptions. `*.pem` also covers the public certificates under
-  `forge/specs/azoth/keys/`, and `*.env` also covers `forge/specs/azoth/pins.env`, whose
-  values `KERNEL.md` shows in its pin table.
+  `forge/specs/azoth/keys/`.
+- The tracked `*.env` files (`pins.env`, `devvm.env`, `runner.env`) are public configuration
+  and are not denied; only dotenv files (`.env`, `.env.*`) are. The runner's GitHub token is a
+  systemd credential under `/etc/credstore.encrypted/` (`scripts/runner/README.md`).
 
 The boundary that does not depend on command text is the operating system sandbox. Enable
 it in your user settings and list your own secret locations under
