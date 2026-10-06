@@ -93,7 +93,7 @@ EOF
 
 %changelog
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-4
-- Point URL at the project repository
+- Point URL and the polkit vendor_url at the project repository
 - Correct the %description: the daemon manages Flatpak only
 
 * Thu Jul 16 2026 Athanor <athanor@athanor.os> - 1.0.0-1

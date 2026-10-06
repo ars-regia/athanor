@@ -95,7 +95,7 @@ EOF
 
 %changelog
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-3
-- Point URL at the project repository
+- Point URL and the polkit vendor_url at the project repository
 
 * Thu Jul 16 2026 Athanor <athanor@athanor.os> - 1.0.0-1
 - Initial release
