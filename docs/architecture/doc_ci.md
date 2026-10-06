@@ -7,6 +7,8 @@
 - **Defines:** CI1-CI24 (one per workflow), CB1-CB4 (known broken workflows), CP1-CP3 (proposals).
 - **Enforced by:** `python3 scripts/verify.py ci`. It fails when a workflow file is missing here, when this document names a workflow file that does not exist, or when a secret or variable a workflow references is not named here.
 
+**Target.** This document describes the workflows as they are. The architecture they converge on, and the plan that gets there, is [doc_pipeline.md](doc_pipeline.md) (ADR-0078).
+
 The task brief counted 23 workflows. There are 24: `nix-registry-bump.yml` landed in `c1bab0ad` on 2026-10-06.
 
 ## 1. The pipeline
