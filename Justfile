@@ -76,7 +76,7 @@ hermetic-build lockfile="athanor-build.lock":
 
 # Check idempotency of a package build against GHCR SHA-256 digest
 [group('QA & Security')]
-check-idempotency package registry="ghcr.io" owner="hr-mes" image_name="" base_digest="":
+check-idempotency package registry="ghcr.io" owner="ars-regia" image_name="" base_digest="":
     just forge/check-idempotency "{{ package }}" "{{ registry }}" "{{ owner }}" "{{ image_name }}" "{{ base_digest }}"
 
 # Runs full Rust security suite (Clippy policies, Cargo Vet, Cargo Deny)
@@ -155,7 +155,7 @@ update-specs:
 
 # Cleans old and untagged GHCR container images
 [group('Utility')]
-clean-ghcr owner="hr-mes":
+clean-ghcr owner="ars-regia":
     just forge/clean-ghcr "{{ owner }}"
 
 # Runs the entire CI pipeline locally via Act for rapid debugging

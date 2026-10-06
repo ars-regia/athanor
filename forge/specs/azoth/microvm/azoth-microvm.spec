@@ -16,7 +16,7 @@ Version:        %{kversion}
 Release:        %{krelease}
 Summary:        Athanor OS guest kernel for the MicroVMs
 License:        GPL-2.0-only WITH Linux-syscall-note
-URL:            https://github.com/hr-mes/athanor
+URL:            https://github.com/ars-regia/athanor
 ExclusiveArch:  x86_64
 # The toolchain of the main kernel (builder/Containerfile): clang and lld, pahole for the BTF.
 BuildRequires:  clang lld llvm make dwarves

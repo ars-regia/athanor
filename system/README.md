@@ -56,7 +56,7 @@ Anaconda's interactive screens.
 An existing Fedora Atomic machine switches with:
 
 ```bash
-sudo bootc switch ghcr.io/hr-mes/athanor-system:stable
+sudo bootc switch ghcr.io/ars-regia/athanor-system:stable
 ```
 
 Once the image's signature policy is in force, `athanor-update-migrate.service` moves the

@@ -4,7 +4,7 @@ Release:        1%{?dist}
 Summary:        Athanor OS Core Component - stage0-bootstrap
 
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor
+URL:            https://github.com/ars-regia/athanor
 
 %description
 Core component implementation for stage0-bootstrap.

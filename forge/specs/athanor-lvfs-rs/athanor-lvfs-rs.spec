@@ -5,7 +5,7 @@ Release:        2%{?dist}
 Summary:        Athanor OS Firmware Automation Daemon
 
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor
+URL:            https://github.com/ars-regia/athanor
 
 
 BuildRequires:  rust cargo systemd-rpm-macros pkgconf-pkg-config openssl-devel

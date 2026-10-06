@@ -77,7 +77,7 @@ invece di cambiare directory.
 - **Pipeline portable, GitHub as glue.** Logic lives in scripts under the repo, the
   workflow YAML only checks out, calls them and uploads their output: no `run:` block
   beyond a few lines. Steps exchange data through files in a known directory, not
-  through `$GITHUB_OUTPUT` or artifacts alone. No hard-coded `ghcr.io/hr-mes`: a
+  through `$GITHUB_OUTPUT` or artifacts alone. No hard-coded `ghcr.io/ars-regia`: a
   variable with a default. Prefer a standard mechanism (OCI, cosign with a key, a file
   on disk) over one that exists only on GitHub. Applies to new code and to any file
   touched anyway; no refactoring for its own sake. *(2026-09-10)*

@@ -16,7 +16,7 @@ PINS = dict(re.findall(r"^(\w+)=(.*)$", (ROOT / "forge/specs/azoth/pins.env").re
 # A version the NVIDIA open pin never holds, so a bump built from it always moves the pin.
 NVIDIA_OPEN_BUMP = f"{PINS['NVIDIA_OPEN_VERSION']}.1"
 NVR = subprocess.run(["bash", str(ROOT / "forge/specs/azoth/nvr.sh")], capture_output=True, text=True, check=True).stdout.strip()
-REG = "ghcr.io/hr-mes"
+REG = "ghcr.io/ars-regia"
 KERNEL = "sha256:" + "1" * 64
 DEVEL = "sha256:" + "2" * 64
 OTHER_KERNEL = "sha256:" + "9" * 64
@@ -29,8 +29,8 @@ ATTESTED_OTHER_NVR = subprocess.run(
 assert ATTESTED_OTHER_NVR != NVR, "OTHER_FEDORA_KERNEL_NVR must derive an NVR other than the real one"
 INPUTS = json.loads(subprocess.run(["python3", str(ROOT / "forge/specs/azoth/build-inputs.py")], capture_output=True, text=True, check=True).stdout)
 MODULE = {"open": "sha256:" + "3" * 64, "legacy": "sha256:" + "4" * 64}
-KERNEL_BUILD = "https://github.com/hr-mes/athanor/.github/workflows/kernel-build.yml@refs/heads/iso-v0"
-KMOD = "https://github.com/hr-mes/athanor/.github/workflows/nvidia-kmod.yml@refs/heads/iso-v0"
+KERNEL_BUILD = "https://github.com/ars-regia/athanor/.github/workflows/kernel-build.yml@refs/heads/iso-v0"
+KMOD = "https://github.com/ars-regia/athanor/.github/workflows/nvidia-kmod.yml@refs/heads/iso-v0"
 
 
 def tag(branch, kernel=KERNEL):
@@ -74,8 +74,8 @@ class Tool(unittest.TestCase):
         self.env = {
             "PATH": f"{bin_dir}:{os.environ['PATH']}", "HOME": str(self.dir), "RETRY_ATTEMPTS": "1",
             "KERNEL_ARTIFACTS_DIR": str(self.artifacts), "FAKE_REGISTRY": str(self.dir / "registry.json"),
-            "FAKE_LOG": str(self.dir / "calls.log"), "GITHUB_REPOSITORY_OWNER": "hr-mes",
-            "GITHUB_REPOSITORY": "hr-mes/athanor", "GITHUB_SERVER_URL": "https://github.com",
+            "FAKE_LOG": str(self.dir / "calls.log"), "GITHUB_REPOSITORY_OWNER": "ars-regia",
+            "GITHUB_REPOSITORY": "ars-regia/athanor", "GITHUB_SERVER_URL": "https://github.com",
             "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
         }
         self.registry({})
@@ -759,7 +759,7 @@ class CheckPlan(Repo):
 
 
 def signed_by(ref_name, workflow="kernel-build.yml"):
-    return f"https://github.com/hr-mes/athanor/.github/workflows/{workflow}@{ref_name}"
+    return f"https://github.com/ars-regia/athanor/.github/workflows/{workflow}@{ref_name}"
 
 
 class TrustedRefs(Tool):

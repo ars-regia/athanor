@@ -176,7 +176,7 @@ ynl --without selftests --without doc`: patch e `process_configs.sh -w -n -c`.
 9. ccache su directory persistente del runner (non `actions/cache`): tra due
    patch level cambiano pochi file, la LTO finale no;
 10. pubblicazione (job `publish` su runner GitHub, dall'artefatto del job `build`):
-    tre pacchetti OCI con i soli RPM dentro, `ghcr.io/hr-mes/azoth`
+    tre pacchetti OCI con i soli RPM dentro, `ghcr.io/ars-regia/azoth`
     (binari), `azoth-devel`, `azoth-debuginfo`, tag `<nvr>`.
     Pacchetti separati e non suffissi del tag, perché la retention di ghcr è per
     pacchetto (`retention.sh`, prima del gate, che così verifica ciò che resta):

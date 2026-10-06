@@ -4,7 +4,7 @@ Version:        1.0
 Release:        8%{?dist}
 Summary:        Custom SELinux policies for Athanor OS
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor
+URL:            https://github.com/ars-regia/athanor
 Source0:        bootupd_lsblk.te
 Source1:        athanor_scx.te
 Source2:        athanor_nix_daemon.cil
