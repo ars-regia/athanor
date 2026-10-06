@@ -126,8 +126,8 @@ artifact and never pushed; any other change runs in the published `athanor-build
   by digest, the RPMs of each tier repository image (bind-mounted, then installed), the
   `upstream_*` packages by name, and a UKI signed with the Secure Boot key. The `system`
   stage the three share is built once per run and each variant is built `FROM` its image
-  ID, so all three carry the same system layers (`system/shared-layers.sh` checks it after
-  the push; doc_update_delivery.md, UD40). The images are
+  ID, so all three carry the same system layers (`system/shared-layers.sh` checks it in local
+  storage before the push; doc_update_delivery.md, UD40). The images are
   pushed and signed with cosign keyless; a separate job adds the key-based signature
   (`system/sign-images.sh`). `forge/scripts/build_iso.sh` builds the ISO with osbuild.
 

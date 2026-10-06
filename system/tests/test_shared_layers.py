@@ -1,6 +1,6 @@
 """Unit tests of system/shared-layers.sh, the acceptance of UD40 (doc_update_delivery.md): every
-variant starts with every layer of the system image it was built FROM. A skopeo stub answers
-`skopeo inspect --config REF` from fixture files (python3 -B -m unittest discover -s system/tests -v).
+variant starts with every layer of the system image it was built FROM, checked in local storage
+before the push. A skopeo stub answers `skopeo inspect --config REF` from fixture files (python3 -B -m unittest discover -s system/tests -v).
 
 The fixtures under fixtures/shared-layers are the `skopeo inspect --config` output of the three
 images run 37384733899 published, trimmed to the platform, labels and rootfs. That run built the
@@ -49,7 +49,7 @@ class SharedLayers(unittest.TestCase):
             """)
         )
         (bin_dir / "skopeo").chmod(0o755)
-        self.env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "RETRY_ATTEMPTS": "1"}
+        self.env = {"PATH": f"{bin_dir}:/usr/bin:/bin"}
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -65,7 +65,7 @@ class SharedLayers(unittest.TestCase):
         self.serve(f"containers-storage:{SYSTEM_ID}", config)
 
     def serve_variant(self, name, config):
-        self.serve(f"docker://{REGISTRY}/{name}:{RUN}", config)
+        self.serve(f"containers-storage:{REGISTRY}/{name}:{RUN}", config)
 
     def check(self, system=f"sha256:{SYSTEM_ID}"):
         return subprocess.run(
@@ -106,7 +106,7 @@ class SharedLayers(unittest.TestCase):
         self.assertEqual(
             refs,
             [f"containers-storage:{SYSTEM_ID}"]
-            + [f"docker://{REGISTRY}/{n}:{RUN}" for n in NAMES],
+            + [f"containers-storage:{REGISTRY}/{n}:{RUN}" for n in NAMES],
         )
 
     def test_variants_that_rebuilt_the_system_stage_fail(self):
@@ -118,10 +118,10 @@ class SharedLayers(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertNotIn("athanor-system:", r.stderr)
         for name in NAMES[1:]:
-            self.assertIn(
-                f"{name}: layer {BASE_LAYERS + 1} of {SYSTEM_STAGE_LAYERS} differs",
-                r.stderr,
-            )
+            message = f"{name}: layer {BASE_LAYERS + 1} of {SYSTEM_STAGE_LAYERS} differs"
+            self.assertIn(message, r.stderr)
+            # The job summary is the report on stdout: the failure is there as well.
+            self.assertIn(f"**failed**: {message}", r.stdout)
 
     def test_a_variant_with_fewer_layers_than_the_system_image_fails(self):
         system = self.system_stage()
@@ -142,14 +142,45 @@ class SharedLayers(unittest.TestCase):
     def test_an_unreadable_variant_fails(self):
         self.serve_system(self.system_stage())
         r = self.check()
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("manifest unknown", r.stderr)
+        self.assertEqual(r.returncode, 1)
+        for name in NAMES:
+            message = f"cannot read the configuration of {REGISTRY}/{name}:{RUN} from local storage"
+            self.assertIn(message, r.stderr)
+            self.assertIn(message, r.stdout)
+
+    def test_a_variant_without_diff_ids_fails_with_its_own_message(self):
+        system = self.system_stage()
+        self.serve_system(system)
+        for name in NAMES:
+            config = fixture(name)
+            config["rootfs"]["diff_ids"] = system
+            if name == "athanor-system-nvidia":
+                del config["rootfs"]["diff_ids"]
+            self.serve_variant(name, config)
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        message = f"{REGISTRY}/athanor-system-nvidia:{RUN}: the image configuration has no rootfs.diff_ids array"
+        self.assertIn(message, r.stderr)
+        self.assertIn(message, r.stdout)
+        # The other two are still checked and reported.
+        self.assertRegex(r.stdout, r"athanor-system-nvidia-legacy`: 116 of 116")
+
+    def test_a_system_image_without_diff_ids_fails_with_its_own_message(self):
+        config = fixture("athanor-system")
+        del config["rootfs"]["diff_ids"]
+        self.serve(f"containers-storage:{SYSTEM_ID}", config)
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        message = f"{SYSTEM_ID}: the image configuration has no rootfs.diff_ids array"
+        self.assertIn(message, r.stderr)
+        self.assertIn(message, r.stdout)
 
     def test_a_system_image_without_layers_is_refused(self):
         self.serve_system([])
         r = self.check()
-        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(r.returncode, 1)
         self.assertIn("no layers", r.stderr)
+        self.assertIn("**failed**", r.stdout)
 
     def test_the_system_image_is_an_image_id(self):
         r = self.check(system="localhost/athanor-system:latest")

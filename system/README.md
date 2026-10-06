@@ -35,8 +35,8 @@ The Orchestrator (`.github/workflows/athanor-forge-orchestrator.yml`) calls
 
 1. aggregates the forge's tier repositories and publishes them;
 2. builds the `system` stage once and the three images `FROM` it with `build-image.sh`,
-   pushes them under the run id and `latest`, and checks that all three carry every layer
-   of the system image (`shared-layers.sh`);
+   checks in local storage that all three carry every layer of the system image
+   (`shared-layers.sh`), then pushes them under the run id and `latest`;
 3. records their digests (`image-digests.sh`), attaches an SPDX SBOM and a keyless cosign
    signature (`forge/scripts/sbom_rootfs.sh`, `forge/scripts/sign_attest.sh`);
 4. builds the installer ISO with bootc-image-builder (`forge/scripts/build_iso.sh`) and
