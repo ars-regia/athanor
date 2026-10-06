@@ -1,6 +1,6 @@
 # Athanor Software: applications, background activity and developer tools
 
-Status: Approved, rev 2 (2026-09-30): the maintainer accepted every recommendation of section 6, which now records the decisions. Revision 3 (2026-10-05) adds decision 7, the default applications, and amends decision 6 accordingly; it awaits the maintainer's review. It turns the maintainer's request of 2026-09-30 into a specification: one application, working title **Software**, with which an average user never has to struggle and which also serves developers. Section 6 records the maintainer's decisions, with the options that were weighed. Section 4 lists what must be proven before the first plan is written.
+Status: Approved, rev 2 (2026-09-30): the maintainer accepted every recommendation of section 6, which now records the decisions. Revision 3 (2026-10-05) adds decision 7, the default applications, and amends decision 6 accordingly; it awaits the maintainer's review. Section 9 (2026-10-06) records maintainer decisions A2-14, A2-15 and A2-24 (#159): GNOME Disks, Nautilus until 1.0, Firefox as a Flatpak, the written comparison with Bazaar that this document needs before approval, and the format of the offline help, which the maintainer chose (A2-30, #159); it overrides the text above where they disagree. It turns the maintainer's request of 2026-09-30 into a specification: one application, working title **Software**, with which an average user never has to struggle and which also serves developers. Section 6 records the maintainer's decisions, with the options that were weighed. Section 4 lists what must be proven before the first plan is written.
 
 ## 1. Context
 
@@ -18,9 +18,9 @@ Checked in the repository at `27378de3`, and, where the repository cannot answer
 
 **Applications.**
 
-- `flatpak` is installed by the image build (`system/Containerfile:140`, `forge/config/packages.json:113`), on the base `quay.io/fedora-ostree-desktops/base-atomic:43` (`system/Containerfile:31`).
+- `flatpak` is installed by the image build (`system/Containerfile:143`, `forge/config/packages.json:113`), on the base `quay.io/fedora-ostree-desktops/base-atomic:43` (`system/Containerfile:41`).
 - `cosmic-store` ships (`forge/config/packages.json:156`) and is today the only graphical way to install an application.
-- **No Flathub remote is configured.** The only remote on the desktop is `fedora` (system, OCI), which Fedora's `flatpak-add-fedora-repos.service` adds (enabled by Fedora's `90-default.preset:374`, desktop). The one script that adds Flathub and installs the `flatpaks` list of `forge/config/packages.json:203-208` is `system/scripts/provision_flatpak.sh:24-36`; the image copies it to `/scripts/` (`system/Containerfile:142`), and no unit, kickstart or script runs it. That list therefore installs nothing, as the `upstream_*` lists once did.
+- **No Flathub remote is configured.** The only remote on the desktop is `fedora` (system, OCI), which Fedora's `flatpak-add-fedora-repos.service` adds (enabled by Fedora's `90-default.preset:374`, desktop). The one script that adds Flathub and installs the `flatpaks` list of `forge/config/packages.json:203-208` is `system/scripts/provision_flatpak.sh:24-36`; the image copies it to `/scripts/` (`system/Containerfile:145`), and no unit, kickstart or script runs it. That list therefore installs nothing, as the `upstream_*` lists once did.
 - The system helper's polkit defaults (Flatpak 1.16.6, desktop): install and uninstall are `auth_admin_keep` for an active session, update and AppStream refresh are `yes` for an active session and `auth_admin` otherwise. Fedora's `org.freedesktop.Flatpak.rules` lets an active local member of `wheel` install and uninstall without a password.
 
 **The legacy store crates.**
@@ -242,7 +242,7 @@ Each runs before the plan it gates and produces an answer, not code we keep.
 - **The Background portal has no backend today** (SW4). Until one ships, Software cannot list what runs in the background right now, and says so.
 - **Two snapshot timers are enabled,** `athanor-timewarp.timer` and `athanor-backup-hourly.timer` (`80-athanor-system.preset:9-10`), and the second fails by construction (section 1.2). Open question 2 must name one "Backup" feature, not two.
 - **Scope.** Four packages for one maintainer. The brake is the same as the shell's: each package ships alone and enabled by hand, and `cosmic-store` stays until SWa passes SH1's rule.
-- **Archives are parsed unconfined while Nautilus is the interim file manager.** It extracts through libarchive in its own process, with all of the user's rights (decision 7); the risk ends when Athanor's file manager ships.
+- **Archives are parsed unconfined while Nautilus is the interim file manager.** It extracts through libarchive in its own process, with all of the user's rights (decision 7); the risk would end if Athanor's file manager replaced Nautilus after 1.0, which is intended, pending the maintainer (`doc_files.md` section 7).
 - **A new file manager can lose data.** A move across filesystems, a copy interrupted halfway and a name conflict are where file managers lose files; `doc_files.md` makes each an acceptance case before the file manager replaces Nautilus.
 - **GNOME Disks is GTK3** while it is the interim disk utility: it ignores the accent and looks unlike the other defaults (decision 7).
 - **A disk utility destroys data by design.** Formatting the wrong disk cannot be undone; `doc_disks.md` makes the choice of the target disk and its confirmation acceptance cases, tested on virtual disks, before the utility replaces GNOME Disks.
@@ -370,3 +370,91 @@ On a fresh install in the dev VM, and on the maintainer's desktop upgraded in pl
 14. The AT-SPI tree exposes a role and a name for every control; every flow completes from the keyboard; Orca reads a change of health once. Both languages run.
 15. The 120 surface cases of SW17 pass in CI; `verify.py polkit`, `verify.py shipped` and the unit tests of the crate pass.
 16. On a fresh install, every default application of decision 7 opens a file of its type from the file manager, an archive included, which is extracted by the sandboxed helper of `doc_files.md`; the file manager shows a PDF thumbnail; the journal holds no glycin warning that a loader ran without its sandbox; the compositor's Terminal action and the launcher both open Ptyxis. Every default is read by Orca and is usable from the keyboard alone, at scale 1.0 and 1.5. Once the Settings backend of decision 7 ships, every default but the interim GNOME Disks follows a change of colour scheme, accent and high contrast without a restart. No package removed by decision 7 is installed, and Papers, removed by the user, is still absent after two runs of the update service.
+
+## 9. Amendments of 2026-10-06
+
+Maintainer decisions A2-14, A2-15 and A2-24 (#159), from specification audit 2 of 2026-10-05. They override sections 1 to 8 where they disagree.
+
+### 9.1 Disks: GNOME Disks for good
+
+The Disks row of decision 7 now reads: **GNOME Disks**, Fedora RPM `gnome-disk-utility`, replacing nothing. Athanor does not write its own disk utility (`doc_disks.md` section 7); GParted stays out because its whole interface runs as root through `pkexec` (maintainer decision A2-16 (#155); #159 repeats it).
+
+- GNOME Disks 46.1 (GTK3 with libhandy) remains a **declared exception** to the third and fifth criteria until the GTK4 port is released and reaches Fedora. Upstream on 2026-10-06: tag `51.beta` (2026-07-30), no `51.0`, work item 505 open (`https://gitlab.gnome.org/GNOME/gnome-disk-utility/-/work_items/505`). The GTK4 release with GNOME 52 is audit 2's estimate.
+- **Channel.** As decision 7 sets for every RPM default, GNOME Disks ships as a `Requires` of `athanor-desktop-ui`, beside `nautilus`, `ptyxis` and `gnome-text-editor`; `packages.json` gains nothing. Today nothing requires it and the base image does not carry it; the image change lands with PR #169.
+- `athanor-mimeapps.list` maps the disk image types to GNOME Disks's own entries, `gnome-disk-image-mounter.desktop` and `gnome-disk-image-writer.desktop` (both in the Fedora 43 package, `mdapi.fedoraproject.org`, 2026-10-06), not to `athanor-disks`.
+- Section 5's risk "GNOME Disks is GTK3" holds until the GTK4 release; acceptance item 16 keeps its exception for it until then.
+
+### 9.2 Files: Nautilus through 1.0
+
+The Files and Archives rows of decision 7 read: **Nautilus is the file manager of 1.0**, with the declared risk of `doc_files.md` section 7 (extraction in process through gnome-autoar and libarchive, the network and the whole session bus, writes to the paths where an attack persists, system extensions and user scripts). Until 1.0 Athanor builds only `athanor-files-view`, the view the FileChooser backend of `doc_portal.md` needs. The rest of `doc_files.md` waits until after 1.0 and the scope budget of `doc_shell.md` SH3. Acceptance item 16 runs with Nautilus: the archive is extracted by Nautilus, unconfined, and "by the sandboxed helper of `doc_files.md`" applies only once that file manager ships.
+
+### 9.3 Firefox: the Flatpak from Mozilla
+
+The Web row of decision 7 now reads: **Firefox**, channel **Flatpak**, `org.mozilla.firefox` from Flathub (A2-15, #159), replacing the Firefox RPM.
+
+- **The build.** Read from the Flathub API on 2026-10-06 (`https://flathub.org/api/v2/appstream/org.mozilla.firefox`): developer Mozilla, verified by Flathub, licence MPL-2.0. Its filesystem permissions are the downloads folder, read-only GTK 3 settings, the Kerberos credential socket and the speech-dispatcher socket: no home folder and no host. It has the network, every device, Wayland, X11, PulseAudio, PC/SC and CUPS; on the session bus it may talk to gvfs, the accessibility bus and `org.freedesktop.FileManager1`; on the system bus to NetworkManager. By SW3's rule it is sandboxed, and its details page says it reaches the network and all devices.
+- **Why.** An RPM browser runs unconfined as the user; the Flatpak keeps the parser that meets the most untrusted input out of the home folder, as Papers does for documents (security audit 2: the RPM browser is in the class the persistence finding names).
+- **What the user gets today.** The base image `quay.io/fedora-ostree-desktops/base-atomic:43` itself ships `firefox` and `firefox-langpacks` as RPMs: on the maintainer's desktop (image 43.20261004.153) both carry the install time of the base layer, not of Athanor's layer, and `rpm -q --whatrequires firefox` names `firefox-langpacks` and `athanor-desktop-ui`. `athanor-desktop-ui.spec:21` also requires it. The `flatpaks` list of `packages.json` already names `org.mozilla.firefox`, but nothing installs that list (section 1.2; `provision_flatpak.sh` is never run, PR #169), so no machine has the Flatpak. Today every user gets the Firefox RPM.
+- **The order of the change** (a proposal awaiting the maintainer), so that no machine is ever left without a browser: (1) the system update service of decision 6 (i) reads the preinstall files and installs from Flathub (package SWa), and Firefox gets a `*.preinstall` file beside Papers's (decision 7, "The preinstalled Flatpak"); (2) in the same change, `athanor-desktop-ui` drops `Requires: firefox`, the image build removes the base image's `firefox` and `firefox-langpacks`, and `athanor-mimeapps.list` and the favourites name `org.mozilla.firefox.desktop`. Dropping the `Requires` alone removes nothing, because the base image carries the RPM. Until step (1) the RPM stays.
+- **A machine updated from an earlier image** loses the RPM at step (2) and gets the Flatpak from the first run of the update service; the profile under `~/.mozilla` is not migrated by this document. Whether the image offers Mozilla's own profile import or a one-time copy into `~/.var/app/org.mozilla.firefox` is left to the plan of step (2), and it is an acceptance case there.
+- Firefox's row joins the preinstalled Flatpaks: "Papers is the only Flatpak default" now reads "Papers and Firefox are the Flatpak defaults". Decision 6's deletion of the `flatpaks` list stands; until the preinstall files replace it, `org.mozilla.firefox` stays named there.
+
+### 9.4 Software and Bazaar: the written comparison
+
+Maintainer decision A2-14 (#159) asks for a written comparison with Bazaar before this document is approved. The working hypothesis of #159 is Bazaar for applications, with an Athanor page for developer mode, the Quadlet view and the confinement badges. This section gives the facts and a recommendation; the choice is the maintainer's.
+
+**Bazaar, read on 2026-10-06:**
+
+- Repository: `https://gitlab.gnome.org/World/bazaar` (moved from `https://github.com/kolunmi/bazaar`, now archived, on 2026-08-18). Licence GPL-3.0, written in C. Latest tags `v0.9.7` (2026-10-03) and `v0.9.6` (2026-09-18): pre-1.0, released about every two weeks.
+- Build dependencies (`src/meson.build` at `v0.9.7`): GTK 4.22.1 or later, libadwaita 1.8 or later, libflatpak, libappstream, WebKitGTK 6.0, malcontent, libsecret, glycin 2, libsoup 3, libsystemd.
+- Scope (`docs/overview.md` at `v0.9.7`): Flatpak remotes only; Flathub's data and Flathub sign-in; a queue of transactions; a curated front page in YAML that the distribution writes; a blocklist of application IDs; hooks (`view-app`, `article-app`, `before-transaction`, `after-transaction`) that run shell snippets the distribution configures; `hide-auto-update-options`, which hides its own automatic updates "if your distro handles auto-updates of Flatpaks already". A background `bazaar-daemon --no-window` started by an autostart entry keeps the catalogue warm and serves the shell's search through `org.gnome.Shell.SearchProvider2`.
+- Permissions shown to the user: `src/bz-app-permissions.c` reads an application's metadata and flags it as able to escape its sandbox for the session or system bus socket, the `gpg-agent` socket, `xdg-data/flatpak/overrides:create`, and talking to `org.freedesktop.Flatpak` or to the permission store: close to SW3's rule, written independently.
+- Translations: 40 files under `po/` at `v0.9.7`, Italian and Arabic among them.
+- Packaging: Fedora 43, 44 and rawhide do not package it (`mdapi.fedoraproject.org`, 2026-10-06). Flathub carries `io.github.kolunmi.Bazaar` (`https://github.com/flathub/io.github.kolunmi.Bazaar`, last commit 2026-10-03 "v0.9.7"): runtime `org.gnome.Platform` 51; `finish-args` include the network, `/var/lib/flatpak`, `xdg-data/flatpak`, `/var/tmp`, `~/.var/app`, `--talk-name=org.freedesktop.Flatpak`, `--system-talk-name=org.freedesktop.Flatpak.SystemHelper` and `org.freedesktop.Accounts`. By SW3's rule that build is not sandboxed: talking to `org.freedesktop.Flatpak` lets it run any command on the host. Inside its sandbox it reads the distribution's configuration from `/run/host/etc/bazaar/` (`bazaar.yaml`, `config.yaml`, `blocklist.txt`), which needs a Flatpak override granting that path, shipped by the image under `/var/lib/flatpak/overrides` through tmpfiles, as Bluefin and Aurora do.
+- Adoption: Bluefin ships it and calls a distribution's own store unsustainable (`https://github.com/ublue-os/bluefin-docs`, `docs/index.md`, lines 58 and 75).
+
+**Against this document's requirements:**
+
+| Requirement | Bazaar | Athanor's Software |
+| --- | --- | --- |
+| SW3 Explore, Installed, Updates, details, remove | yes; curated front page, queue | to write (package SWa) |
+| SW3 permissions in words, "not sandboxed" | yes, its own escape-sandbox flags | to write |
+| SW3 system or user installation decided by a `CheckAuthorization` | not verified in its source | to write |
+| SW15 and decision 6 (i): updates by a system timer with no session | not its job; its own automatic updates can be hidden | the timer is this document's in both options |
+| SW4 background activity, SW5 features, SW6 failures in plain language | no | to write (package SWb) |
+| SW2, SW7 to SW9 developer mode, Quadlet, Nix | no | to write (packages SWc, SWd) |
+| SW10 confinement badges for Nix tools and user units | no | to write |
+| SW16 the image's version, read-only | no | to write |
+| SW14 untrusted input, Orca, gettext, Italian, right-to-left | GTK4 and libadwaita; Italian and Arabic translations; Orca not checked | to write |
+| SH4 plain `gtk4-rs`, Rust | C | Rust |
+| Fedora 43 RPM or verified Flathub build (decision 7, sixth criterion) | Flathub only, not sandboxed | own RPM |
+
+**Options:**
+
+- **(a) Athanor's Software as written:** every page of this document, SWa to SWd. Most code to own; the Flatpak catalogue, its search and its queue duplicate what Bazaar and GNOME Software already maintain.
+- **(b) Bazaar for applications, plus an Athanor page** for what Bazaar does not do: background activity and features (SW4 to SW6), developer mode with Quadlet and Nix (SW2, SW7 to SW9), the confinement badges for Nix tools and user units (SW10) and the image's version (SW16). SWa shrinks to the update service of decision 6 (i), the preinstall files and Bazaar's configuration (curated page, blocklist, `hide-auto-update-options`); SWb to SWd stay.
+- **(c) Bazaar alone.** Leaves the maintainer's request of 2026-09-30 (section 1.3) unmet for background activity, features and developer mode.
+
+**Recommendation: (b),** with four conditions, each checked before the plan of SWa is written:
+
+1. **Channel.** Preferably an RPM Athanor builds from the upstream tag (the pattern of `forge/specs`), unconfined as the user like Nautilus and declared in section 5, rather than the Flathub build, which SW3 calls not sandboxed and which needs a host override to read its configuration. **This does not hold on Fedora 43 today:** Bazaar `v0.9.7` requires GTK 4.22.1 or later, Fedora 43 ships `gtk4` 4.20.2 and Fedora 44 ships 4.22.5 (`mdapi.fedoraproject.org`, 2026-10-06). On a Fedora 43 base the choices are the Flathub build with its "not sandboxed" label stated, an older Bazaar tag that builds against GTK 4.20 (unchecked), or waiting for a Fedora 44 base. The maintainer chooses among them with option (b). **Decided (A2-28, #159):** option (b), and Bazaar waits for the Fedora 45 base: no Flathub build and no older tag.
+2. **One updater.** `hide-auto-update-options: true`, and `bazaar-daemon` does not update: the system timer of decision 6 (i) remains the only updater of the system installation, and Bazaar's Updates page shows what it left pending.
+3. **No distribution hooks.** The image configures none of Bazaar's hooks: they run shell snippets on user actions, which is code outside any review of this document.
+4. **Scope budget** (`doc_shell.md` SH3). The Athanor page states its "why not upstream" (no upstream program covers SW4 to SW10 and SW16) and gets an owner named by the maintainer; Bazaar's maintenance owner on the image side is named too, because a pre-1.0 upstream that releases every two weeks moves under the image.
+
+The maintainer chose (b) (A2-28, #159), and Bazaar waits for the Fedora 45 base. A revision of this document then rewrites SW1, SW3, SW13, SW15, SW17, section 3 and the acceptance items of package SWa for Bazaar plus the page; until then SW1 to SW17 stand as written.
+
+### 9.5 Scope budget
+
+Every new component of Athanor's own that does what an upstream project already does carries a written "why not upstream" and a maintenance owner before its first plan (`doc_shell.md` SH3, A2-14, #159). For this document: Software's application pages are weighed in 9.4; the features helper (SW12), the update service of decision 6 (i) and the developer pages have no upstream equivalent on this image and need only their owner.
+
+### 9.6 Offline help (decided)
+
+Maintainer decision A2-24 (#159): offline help ships in 1.0; the format is chosen in a short specification. Today the image has no help viewer, no user guide and no Yelp: on the maintainer's desktop (image 43.20261004.153) `/usr/share/help/C` holds only Orca's pages and `yelp` is not installed. This section is that short specification; the maintainer chose (a) (A2-30, #159).
+
+- **(a) Yelp with Mallard pages of Athanor's own.** Fedora 43 packages `yelp` 49.2 (GTK4, libadwaita, WebKitGTK 6.0) and `yelp-xsl` (`mdapi.fedoraproject.org`, 2026-10-06). Athanor writes its guide as Mallard pages, English and Italian, under `/usr/share/help/<lang>/athanor/`, in a package of its own; the bar, Settings and the shield's sheet open `help:athanor/<page>`. Applications that ship their own help (Nautilus, GNOME Disks, Ptyxis) open theirs in the same viewer. `gnome-user-docs` is not installed: it describes GNOME Shell, and on this desktop it would mislead. Yelp follows the accent through libadwaita; its footprint on the image is not yet measured and is still to be measured (A2-30, #159).
+- **(b) HTML pages opened in the browser.** No viewer to ship, but with Firefox as a Flatpak (9.3) the browser cannot read `/usr/share`, so the pages would need a local server or a copy into each user's home; applications' own Mallard help would still need Yelp.
+- **(c) A help page inside Athanor's own surfaces.** A new own component under the scope budget (`doc_shell.md` SH3), for content Yelp already renders.
+- **(d) Online only.** Excluded by A2-24.
+
+**Decided: (a)** (A2-30, #159; the recommendation adopted). It reuses the viewer GNOME applications already target, needs no new own component and works offline in both languages; that Orca reads its pages is checked in its acceptance, not assumed. Its specification fixes the page list (first steps, the shield, updates, Software, developer mode, recovery), the package, the `help:` links each surface opens, and an acceptance case that opens every page with the network down. Until the package ships, no surface links to help.

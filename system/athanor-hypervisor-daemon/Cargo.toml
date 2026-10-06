@@ -1,6 +1,7 @@
 [package]
 name = "athanor-hypervisor-daemon"
 version = "1.0.0"
+license = "GPL-3.0-or-later"
 edition = "2021"
 description = "Athanor OS Zero-Trust Hardware Micro-Hypervisor & Confidential Enclave Orchestrator"
 authors = ["athanor-security-architect"]

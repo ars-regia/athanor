@@ -13,7 +13,6 @@
     "matugen",
     "calmo",
     "dart-sass",
-    "shell-rs",
     "greeter-ui",
     "layout-chooser",
     "shelld",
@@ -25,7 +24,6 @@
     "backup",
     "update",
     "xdg-desktop-portal-athanor",
-    "secure-boot",
     "tetragon",
     "syft",
     "bpf-linker",
@@ -39,7 +37,6 @@
     "base-config",
     "selinux",
     "nix-support",
-    "secure-boot",
     "tetragon",
     "syft",
     "bpf-linker"
@@ -60,7 +57,6 @@
     "cosmic-comp"
   ],
   "custom_tier3": [
-    "shell-rs",
     "greeter-ui",
     "layout-chooser",
     "shelld",

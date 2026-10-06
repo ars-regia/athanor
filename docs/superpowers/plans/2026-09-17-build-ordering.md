@@ -1,5 +1,7 @@
 # Build Ordering Implementation Plan
 
+**Status (2026-10-06):** PR A (Tasks 1-6) and Task 8 are merged; the checkboxes below were not ticked. Open: Task 7 (the Azoth retention script still prunes a single package set and its test does not exist), Task 9 and Task 10.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** One Orchestrator chain turns a published kernel into signed NVIDIA modules and system images, every input identified by a verified digest, with no red cycle waiting for a human rerun.

@@ -1,0 +1,8 @@
+[Unit]
+Description=Collect garbage in the Nix store every week
+Documentation=https://nix.dev/manual/nix/2.31/command-ref/new-cli/nix3-store-gc.html
+
+[Timer]
+OnCalendar=weekly
+RandomizedDelaySec=6h
+Persistent=true

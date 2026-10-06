@@ -1,6 +1,7 @@
 [package]
 name = "athanor-agentic-kernel"
 version = "1.0.0"
+license = "GPL-3.0-or-later"
 edition = "2021"
 description = "Level 14 Autonomous Ring-0 Agentic OS Controller for Athanor OS"
 

@@ -1,10 +1,10 @@
 %global debug_package %{nil}
 Name:           athanor-calmo
 Version:        1.0.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        The Calmo identity: COSMIC defaults, hearth wallpaper and seal icons
-License:        MIT
-URL:            https://github.com/hr-mes/athanor-forge
+License:        GPL-3.0-or-later
+URL:            https://github.com/hr-mes/athanor
 BuildArch:      noarch
 
 BuildRequires:  python3
@@ -56,6 +56,9 @@ gtk4-update-icon-cache -q -t -f /usr/share/icons/hicolor
 /usr/share/icons/hicolor/scalable/status/athanor-seal-blocked-symbolic.svg
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
+- Point URL at the project repository
+
 * Sat Sep 19 2026 Athanor Forge <forge@athanor.os> - 1.0.0-1
 - First package of the Calmo identity (doc_shell.md, SH5): COSMIC's default theme and
   wallpaper served from /usr/share/athanor/cosmic-defaults, the hearth wallpaper in

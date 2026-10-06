@@ -133,8 +133,8 @@ class RemovedNamesTest(unittest.TestCase):
             root = pathlib.Path(tmp)
             for name, text in {
                 "docs/architecture/doc_core_daemons.md": "x",
-                "system/doc_forge_development_guide.md": "x",
-                "README.md": "[a](docs/architecture/doc_forge_development_guide.md)",
+                "system/doc_telemetry.md": "x",
+                "README.md": "[a](docs/architecture/doc_telemetry.md)",
                 "system/README.md": '<a href="../docs/architecture/doc_core_daemons.md">x</a>',
             }.items():
                 (root / name).parent.mkdir(parents=True, exist_ok=True)

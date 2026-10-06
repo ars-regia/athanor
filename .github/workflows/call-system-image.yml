@@ -144,8 +144,8 @@ jobs:
           EOF
 
       - name: 🌐 Deploy the DNF channel to GitHub Pages
-        # A release step: the channel is published from main only, the way
-        # kernel-build.yml moves its :latest tags only from main.
+        # A release step: the channel is published from main only. kernel-build.yml moves
+        # its :latest tags from the default branch instead (re-audit decision 11).
         if: github.ref == 'refs/heads/main'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
