@@ -2,11 +2,11 @@
 %global spec_dir forge/specs/%{name}
 Name:           athanor-ai-daemon
 Version:        1.0.0
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        Athanor OS Local AI & Machine Learning Inference Daemon
 
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor-forge
+URL:            https://github.com/hr-mes/athanor
 
 
 BuildRequires:  rust >= 1.80.0
@@ -15,7 +15,9 @@ BuildRequires:  systemd-rpm-macros
 BuildRequires:  gcc gcc-c++ pkgconf-pkg-config openssl-devel
 
 %description
-Local AI and Machine Learning inference service for Athanor OS using Candle framework over D-Bus (os.athanor.AiDaemon).
+Local AI inference service for Athanor OS, exposed over D-Bus (os.athanor.AiDaemon).
+The Candle-based model loader parses the GGUF header only and builds placeholder
+weights: inference is not implemented yet.
 
 %prep
 # Built in place from the workspace checkout: nothing to unpack.
@@ -43,6 +45,10 @@ install -D -m 0644 %{spec_dir}/athanor-ai-daemon.service %{buildroot}/usr/lib/sy
 /usr/lib/systemd/system/%{name}.service
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-3
+- Point URL at the project repository
+- Correct the %description: inference is a stub
+
 * Sun Sep 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
 - Install the unit from the spec directory instead of an empty placeholder file
 

@@ -1,11 +1,11 @@
 %global debug_package %{nil}
 Name:           athanor-base-config
 Version:        43.0.0
-Release:        11%{?dist}
+Release:        12%{?dist}
 Summary:        Athanor OS Base Configuration (Systemd, Branding, GPG)
 
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor-forge
+URL:            https://github.com/hr-mes/athanor
 BuildArch:      noarch
 
 Requires:       glibc-langpack-it glibc-langpack-en
@@ -38,9 +38,10 @@ Provides:       system-release = %{version}-%{release}
 Provides:       system-release(43)
 Obsoletes:      system-release < 43
 %description
-This package provides the foundational configuration for Athanor Base.
-It includes Dracut configurations,
-Systemd presets, custom Plymouth/GDM branding, Polkit rules, and GPG keys.
+This package provides the foundational configuration for Athanor Base: os-release
+and the fedora-release identity, Dracut configuration, systemd presets, units and
+tmpfiles, sshd, coredump and journald drop-ins, GRUB authentication, SELinux mode,
+Plymouth branding, Polkit rules, repository definitions and GPG keys.
 
 %prep
 # No extraction needed, files are injected in install phase.
@@ -76,6 +77,10 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 /usr/share/polkit-1/rules.d/*
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 43.0.0-12
+- Point URL at the project repository
+- Correct the %description: there is no GDM branding, list what the package ships
+
 * Thu Oct 01 2026 Athanor Forge <forge@athanor.os> - 43.0.0-11
 - Drop kargs.d 02-06: the base kernel command line now comes from athanor-kernel-profile,
   generated from profile.toml (doc_kernel_profile.md, section 6). Removed with them:

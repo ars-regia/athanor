@@ -542,6 +542,84 @@ def check_shipped():
 # 6. documentazione — i link devono risolvere e non essere assoluti
 # --------------------------------------------------------------------------- #
 
+REQUIREMENT_HEAD = re.compile(r"^\s*(?:[-*]\s+)?\*\*([A-Z]{1,3}\d+[a-z]?)\.")
+NEEDS_LINE = re.compile(r"^\s*(?:[-*]\s+|\d+\.\s+)?Needs:\s*(.*)$")
+REQUIREMENT_ID = re.compile(r"[A-Z]{1,3}\d+[a-z]?")
+
+
+def needs_graph(root=None):
+    """The cross-specification dependency graph of docs/architecture/doc_session.md, SN11.
+
+    A line `Needs: A1, B2.` belongs to the nearest requirement head (`**A1.` or `- **A1.`) above
+    it in the same section: a Markdown heading ends a requirement, so a Needs line below one and
+    before the next requirement is a problem, not silently attributed. Fenced code blocks are
+    skipped. Returns (problems, graph), graph mapping each requirement to the set it needs."""
+    root = root or ROOT
+    files = sorted((root / "docs" / "architecture").glob("*.md"))
+    defined, needs, problems = {}, {}, []
+    for f in files:
+        name = f.relative_to(root)
+        current, fenced = None, False
+        for number, line in enumerate(read(f).splitlines(), 1):
+            if line.lstrip().startswith(("```", "~~~")):
+                fenced = not fenced
+                continue
+            if fenced:
+                continue
+            if line.startswith("#"):
+                current = None
+                continue
+            head = REQUIREMENT_HEAD.match(line)
+            if head:
+                current = head.group(1)
+                defined.setdefault(current, []).append(f"{name}:{number}")
+                continue
+            m = NEEDS_LINE.match(line)
+            if not m:
+                continue
+            where = f"{name}:{number}"
+            if current is None:
+                problems.append(f"{where}: Needs line outside a requirement")
+                continue
+            tokens = [t.strip() for t in m.group(1).rstrip().rstrip(".").split(",")]
+            for token in tokens:
+                if not REQUIREMENT_ID.fullmatch(token):
+                    problems.append(f"{where}: {current} needs {token!r}, not a requirement identifier")
+                elif token == current:
+                    problems.append(f"{where}: {current} needs itself")
+                else:
+                    needs.setdefault(current, {})[token] = where
+    graph = {}
+    for source, targets in needs.items():
+        if len(defined[source]) > 1:
+            problems.append(f"{source} is defined more than once: {', '.join(defined[source])}")
+        for target, where in targets.items():
+            if target not in defined:
+                problems.append(f"{where}: {source} needs {target}, which no specification defines")
+            elif len(defined[target]) > 1:
+                problems.append(f"{where}: {source} needs {target}, defined more than once: {', '.join(defined[target])}")
+            graph.setdefault(source, set()).add(target)
+    # Depth-first search with three colours; a grey node met again closes a cycle.
+    colour, stack = {}, []
+
+    def visit(node):
+        colour[node] = "grey"
+        stack.append(node)
+        for nxt in sorted(graph.get(node, ())):
+            if colour.get(nxt) == "grey":
+                cycle = stack[stack.index(nxt):] + [nxt]
+                problems.append("Needs cycle: " + " -> ".join(cycle))
+            elif nxt not in colour:
+                visit(nxt)
+        stack.pop()
+        colour[node] = "black"
+
+    for node in sorted(graph):
+        if node not in colour:
+            visit(node)
+    return problems, graph
+
+
 REGISTER = "docs/architecture/shell-features.md"
 REGISTER_STATUSES = ("have", "partial", "missing", "excluded (proposed)")
 
@@ -632,6 +710,11 @@ def check_docs():
                 continue
             if not (base / link).exists():
                 r.fail(f"{t}: link rotto [{label[:30]}] -> {link}")
+    problems, graph = needs_graph()
+    for problem in problems:
+        r.fail(problem)
+    edges = sum(len(targets) for targets in graph.values())
+    r.note(f"Needs graph: {len(set(graph) | set().union(*graph.values()))} requirements, {edges} edges")
     register = ROOT / REGISTER
     if register.exists():
         for problem in register_count_problems(read(register)):
@@ -1162,6 +1245,248 @@ def check_licence():
     r = Result()
     for problem in licence_problems():
         r.fail(problem)
+    return r
+
+
+CI_DOC = "docs/architecture/doc_ci.md"
+# A workflow file name, bare or under .github/workflows/; not the tail of another path such as
+# .github/actions/kvm/action.yml.
+WORKFLOW_NAME = re.compile(r"(?<![\w./-])(?:\.github/workflows/)?([\w-][\w.-]*\.ya?ml)\b")
+SECRET_OR_VAR = re.compile(r"\b(?:secrets|vars)\.([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def ci_problems(root):
+    """doc_ci.md describes every workflow and names every secret and variable they read, and
+    names no workflow that does not exist."""
+    root = Path(root)
+    doc = root / CI_DOC
+    if not doc.is_file():
+        return [f"{CI_DOC}: missing"]
+    text = read(doc)
+    workflows = sorted(p for p in (root / ".github/workflows").glob("*.y*ml")
+                       if p.suffix in (".yml", ".yaml"))
+    present = {p.name for p in workflows}
+    named = set(WORKFLOW_NAME.findall(text))
+    problems = [f".github/workflows/{name}: not described in {CI_DOC}"
+                for name in sorted(present - named)]
+    problems += [f"{CI_DOC}: names {name}, which is not in .github/workflows"
+                 for name in sorted(named - present)]
+    for path in workflows:
+        seen = set()
+        for i, line in enumerate(read(path).split("\n"), 1):
+            for name in SECRET_OR_VAR.findall(line):
+                if name not in seen and not re.search(rf"\b{name}\b", text):
+                    seen.add(name)
+                    problems.append(f"{path.relative_to(root).as_posix()}:{i}: {name} is not named in {CI_DOC}")
+    return problems
+
+
+@check("ci", "every workflow, secret and variable is described in docs/architecture/doc_ci.md")
+def check_ci():
+    r = Result()
+    for problem in ci_problems(ROOT):
+        r.fail(problem)
+    return r
+
+
+DECISION_FIELDS = ("id", "title", "date", "status", "issues", "areas")
+DECISION_ID = r"[A-Z0-9][A-Za-z0-9-]*"
+DECISION_STATUS = re.compile(
+    rf"^(accepted|(?:superseded|amended) by {DECISION_ID}(?:, {DECISION_ID})*)$")
+
+
+def decision_front_matter(text):
+    """Front matter of a decision record as a dict of raw strings, or None."""
+    m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
+    if not m:
+        return None
+    fields = {}
+    for line in m.group(1).split("\n"):
+        k, sep, v = line.partition(":")
+        if sep:
+            fields[k.strip()] = v.strip()
+    return fields
+
+
+def decision_problems(root=None):
+    root = Path(root or ROOT)
+    folder = root / "docs" / "decisions"
+    out = []
+    files = sorted(p for p in folder.glob("[0-9][0-9][0-9][0-9]-*.md"))
+    records = {}
+    for f in files:
+        name = f.name
+        fm = decision_front_matter(read(f))
+        if fm is None:
+            out.append(f"{name}: no front matter")
+            continue
+        for field in DECISION_FIELDS:
+            if not fm.get(field) and field not in ("issues",):
+                out.append(f"{name}: front matter lacks '{field}'")
+            elif field == "issues" and field not in fm:
+                out.append(f"{name}: front matter lacks 'issues'")
+        id_ = fm.get("id", "")
+        if id_ and not re.fullmatch(DECISION_ID, id_):
+            out.append(f"{name}: malformed id '{id_}'")
+        if id_ in records:
+            out.append(f"{name}: id {id_} already used by {records[id_][0]}")
+        elif id_:
+            records[id_] = (name, fm.get("status", ""), fm.get("title", "").strip('"'))
+        status = fm.get("status")
+        if status and not DECISION_STATUS.match(status):
+            out.append(f"{name}: status '{status}' is not accepted, superseded by <id> or amended by <id>")
+        for h in ("Context", "Decision", "Consequences"):
+            if f"\n## {h}\n" not in read(f):
+                out.append(f"{name}: missing section '## {h}'")
+    for id_, (name, status, _) in records.items():
+        for target in re.findall(DECISION_ID, status.partition(" by ")[2]):
+            if target not in records:
+                out.append(f"{name}: status points to {target}, which has no record")
+    readme = folder / "README.md"
+    if not readme.is_file():
+        out.append("docs/decisions/README.md: missing")
+        return out
+    listed = re.findall(
+        r"^\| ([^|\s]+) \| (\d{4}) \| \[([^\]]*)\]\(([^)]+)\) \| ([^|]*?) \|",
+        read(readme), re.M)
+    index_files = [row[3] for row in listed]
+    for f in files:
+        if f.name not in index_files:
+            out.append(f"README.md: index does not list {f.name}")
+    for id_, num, title, n, status in listed:
+        if not (folder / n).is_file():
+            out.append(f"README.md: index lists {n}, which does not exist")
+        elif id_ not in records or records[id_][0] != n:
+            out.append(f"README.md: index row {id_} does not match {n}")
+        elif title != records[id_][2]:
+            out.append(f"README.md: index title of {id_} differs from {n}")
+        elif status != records[id_][1]:
+            out.append(f"README.md: index status of {id_} differs from {n}")
+        elif not n.startswith(num + "-"):
+            out.append(f"README.md: index number {num} does not match {n}")
+    if len(index_files) != len(set(index_files)):
+        out.append("README.md: index lists a file twice")
+    return out
+
+
+@check("decisions", "decision records have valid front matter, unique ids, a matching README index and existing targets")
+def check_decisions():
+    r = Result()
+    for problem in decision_problems():
+        r.fail(problem)
+    return r
+
+
+# --------------------------------------------------------------------------- #
+# coverage: every component has an inventory entry (A2-34)
+# --------------------------------------------------------------------------- #
+
+COMPONENTS = "docs/architecture/components.toml"
+# Every child directory of these is a component; "" is the repository root.
+COMPONENT_PARENTS = ("", "system", "forge", "forge/specs", "scripts")
+# Children of COMPONENT_PARENTS that hold components instead of being one.
+COMPONENT_CONTAINERS = {"docs", "forge", "forge/specs", "scripts", "system"}
+COMPONENT_KINDS = {"crate", "rpm spec", "script tool", "config", "image", "tests", "site"}
+COMPONENT_AREAS = {"kernel", "build-ci", "signing-update", "security", "shell", "apps",
+                   "platform", "docs"}
+COMPONENT_STATUSES = {"specified", "out-of-1.0", "missing"}
+
+
+def component_dirs(files):
+    """The component directories that the tracked files imply: each child directory of a
+    COMPONENT_PARENTS entry, except hidden directories and the containers."""
+    dirs = set()
+    for f in files:
+        parts = f.split("/")
+        for parent in COMPONENT_PARENTS:
+            depth = len(parent.split("/")) if parent else 0
+            if len(parts) > depth + 1 and "/".join(parts[:depth]) == parent:
+                child = "/".join(parts[:depth + 1])
+                if not parts[depth].startswith(".") and child not in COMPONENT_CONTAINERS:
+                    dirs.add(child)
+    return dirs
+
+
+def entry_problems(root, entry):
+    """The problems of one inventory entry, and whether its specification awaits a merge."""
+    path = entry["path"]
+    out = []
+    if not (root / path).exists():
+        out.append("the path does not exist")
+    if entry.get("kind") not in COMPONENT_KINDS:
+        out.append(f"kind {entry.get('kind')!r} is not one of {sorted(COMPONENT_KINDS)}")
+    if entry.get("area") not in COMPONENT_AREAS:
+        out.append(f"area {entry.get('area')!r} is not one of {sorted(COMPONENT_AREAS)}")
+    if not entry.get("purpose"):
+        out.append("no purpose")
+    status = entry.get("status")
+    if status not in COMPONENT_STATUSES:
+        out.append(f"status {status!r} is not one of {sorted(COMPONENT_STATUSES)}")
+    if status == "out-of-1.0" and not (isinstance(entry.get("issue"), int) and entry["issue"] > 0):
+        out.append("out-of-1.0 without an issue number")
+    if status == "specified" and not (entry.get("spec") and entry.get("item")):
+        out.append("specified without both spec and item")
+    pending = False
+    spec = entry.get("spec")
+    if spec and not (root / "docs/architecture" / spec).is_file():
+        if entry.get("branch"):
+            pending = True
+        else:
+            out.append(f"{spec} is absent from docs/architecture")
+    return out, pending
+
+
+def coverage_problems(root=None, files=None):
+    """Failures and warnings of the component inventory against the tree. A component
+    without a specification (status missing) is a warning, not a failure."""
+    root = Path(root or ROOT)
+    if files is None:
+        git = subprocess.run(["git", "-C", str(root), "ls-files", "--cached", "-z"],
+                             capture_output=True, text=True)
+        if git.returncode:
+            return [f"cannot list the repository files: {git.stderr.strip()}"], []
+        files = [f for f in git.stdout.split("\0") if f]
+    try:
+        entries = tomllib.loads(read(root / COMPONENTS)).get("component", [])
+    except FileNotFoundError:
+        return [f"{COMPONENTS}: missing"], []
+    except tomllib.TOMLDecodeError as e:
+        return [f"{COMPONENTS}: unreadable ({e})"], []
+    problems, missing, pending, seen = [], [], [], set()
+    for n, entry in enumerate(entries, 1):
+        path = entry.get("path")
+        if not path:
+            problems.append(f"{COMPONENTS}: entry {n} has no path")
+            continue
+        if path in seen:
+            problems.append(f"{COMPONENTS}: {path}: listed twice")
+        seen.add(path)
+        found, waits = entry_problems(root, entry)
+        problems += [f"{COMPONENTS}: {path}: {p}" for p in found]
+        if waits:
+            pending.append(f"{path} ({entry['spec']} on {entry['branch']})")
+        if entry.get("status") == "missing":
+            missing.append(path)
+    for d in sorted(component_dirs(files) - seen):
+        problems.append(f"{d}: component directory without an entry in {COMPONENTS}")
+    notes = []
+    if missing:
+        notes.append(f"{len(missing)} components have no specification (status missing): "
+                     + ", ".join(missing))
+    if pending:
+        notes.append(f"{len(pending)} entries cite a specification not merged here yet: "
+                     + ", ".join(pending))
+    return problems, notes
+
+
+@check("coverage", "Every component has an inventory entry, and every entry a spec or an issue")
+def check_coverage():
+    r = Result()
+    problems, notes = coverage_problems()
+    for problem in problems:
+        r.fail(problem)
+    for note in notes:
+        r.note(note)
     return r
 
 

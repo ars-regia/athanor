@@ -1,6 +1,6 @@
 [Unit]
 Description=Athanor OS User Skeleton Sync
-Documentation=https://github.com/hr-mes/athanor-forge
+Documentation=https://github.com/hr-mes/athanor
 Before=athanor-bar.service athanor-dock.service
 DefaultDependencies=no
 
