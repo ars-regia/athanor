@@ -1,8 +1,9 @@
 name: Spec Build Check
 
 # Pull requests that change forge specs build them the way the DAG does, without publishing:
-# forge/scripts/build_changed_specs.sh runs forge/scripts/build_spec.sh, the script of
-# call-dag-compile.yml, in the builder image for every changed spec. On a green build of the
+# forge/scripts/build_changed_specs.sh runs forge/scripts/run_spec_build.sh, the script of
+# call-dag-compile.yml, in the builder image for every changed spec (fetch with network,
+# build without). On a green build of the
 # spec bot's pull request, forge/scripts/bot_merge.py merges it when every bump keeps its
 # major version. The kernel (forge/specs/azoth) is Kernel Build's.
 
@@ -13,6 +14,7 @@ on:
       - "!forge/specs/azoth/**"
       - forge/config/rpmmacros
       - forge/scripts/build_spec.sh
+      - forge/scripts/run_spec_build.sh
       - forge/scripts/build_changed_specs.sh
       - forge/scripts/fetch_sources.sh
       - .github/workflows/spec-build-check.yml
@@ -30,7 +32,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     env:
-      REGISTRY: ghcr.io/${{ github.repository_owner }}
+      REGISTRY: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

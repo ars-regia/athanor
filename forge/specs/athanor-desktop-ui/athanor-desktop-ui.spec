@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-desktop-ui
 Version:        1.0.0
-Release:        10%{?dist}
+Release:        11%{?dist}
 Summary:        Athanor OS Desktop UI configurations
 License:        GPL-3.0-or-later
 URL:            https://github.com/hr-mes/athanor-forge
@@ -12,13 +12,12 @@ Obsoletes:      athanor-ags-config < 1.0.1-3
 
 Requires: cliphist
 Requires: ddcutil
-Requires: foot
 Requires: grim
 Requires: slurp
 Requires: wl-clipboard
 Requires: brightnessctl
 Requires: playerctl
-Requires:       athanor-shell-rs wireplumber nautilus firefox
+Requires:       wireplumber nautilus firefox
 
 %description
 Provides the unified Desktop UI configuration for Athanor OS.
@@ -42,6 +41,10 @@ cp -p %{_sourcedir}/etc/udev/rules.d/99-ddcutil-i2c.rules %{buildroot}/usr/lib/u
 /usr/lib/udev/rules.d/99-ddcutil-i2c.rules
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-11
+- Drop athanor-shell-rs and foot (doc_portal.md, PT14; doc_software.md). Nothing in the
+  session starts either: the portal's file chooser is xdg-desktop-portal-gtk's, and the
+  greeter runs athanor-greeter-ui.
 * Thu Sep 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
 - Drop the athanor-settings-rs dependency: the application leaves the image and
   cosmic-settings takes its place.

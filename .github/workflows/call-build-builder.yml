@@ -8,7 +8,8 @@ on:
         value: ${{ jobs.build-builder.outputs.content_hash }}
 
 env:
-  REGISTRY: ghcr.io
+  # REGISTRY_HOST repository variable, default ghcr.io (as in forge-ghcr-cleanup.yml).
+  REGISTRY: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
   FEDORA_VERSION: 43
   SCCACHE_CACHE_SIZE: 5G
 
@@ -43,11 +44,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | podman login "${REGISTRY}" -u ${{ github.actor }} --password-stdin
           # On the runner itself, not inside the builder image: the check decides whether
           # that image has to exist, so it cannot depend on it (first run, renamed image).
           # The script only needs bash, coreutils and skopeo, all on the runner.
-          bash scripts/check_idempotency.sh --package builder --registry ghcr.io --owner ${{ github.repository_owner }} --image-name athanor-builder > idemp.out
+          bash scripts/check_idempotency.sh --package builder --registry "${REGISTRY}" --owner ${{ github.repository_owner }} --image-name athanor-builder > idemp.out
           source ./idemp.out
           if [ "$CACHE_HIT" = "true" ]; then
             echo "cache_hit=true" >> "$GITHUB_OUTPUT"
@@ -62,11 +63,13 @@ jobs:
           set -euo pipefail
           echo "Building OCI image purely via Nix Flake..."
           nix build --extra-experimental-features "nix-command flakes" ../#builderImage
-          podman load -i result
+          # The name the flake gives the image, whatever registry it was written for.
+          loaded=$(podman load -i result | sed -n 's/^Loaded image(s)\{0,1\}: //p')
+          [[ -n $loaded ]] || { echo "podman load reported no image name" >&2; exit 1; }
           
-          echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | podman login "${REGISTRY}" -u ${{ github.actor }} --password-stdin
           IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/athanor-builder" | tr '[:upper:]' '[:lower:]')
-          podman tag ghcr.io/hr-mes/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }} "$IMAGE_LOWER:latest" || true
+          podman tag "$loaded" "$IMAGE_LOWER:latest"
           podman tag "$IMAGE_LOWER:latest" "$IMAGE_LOWER:${{ steps.check_idempotency.outputs.content_hash }}"
           bash scripts/retry.sh podman push "$IMAGE_LOWER:latest"
           bash scripts/retry.sh podman push "$IMAGE_LOWER:${{ steps.check_idempotency.outputs.content_hash }}"

@@ -3,29 +3,29 @@
 //! The methods of this backend are called by `xdg-desktop-portal`, the frontend that owns
 //! `org.freedesktop.portal.Desktop`, on behalf of an application it has identified. They
 //! sit on the session bus, where any process can call them directly, and then the
-//! application id in the call is whatever that process says: the prompt would show the
-//! user the name of an application that is not the one asking. So a method answers only
-//! the frontend, and every other caller is refused before anything is shown.
+//! application id in the call is whatever that process says. So every method answers only
+//! the frontend, and every other caller is refused with a journal line (doc_portal.md, PT3).
 
-use zbus::fdo::{self, DBusProxy};
+use zbus::fdo::DBusProxy;
 use zbus::message::Header;
 use zbus::names::{BusName, UniqueName};
 use zbus::Connection;
 
+use crate::Error;
+
 const FRONTEND: &str = "org.freedesktop.portal.Desktop";
 
 /// Refuses the call unless its sender is the current owner of the frontend's name.
-pub async fn authorise(header: &Header<'_>, conn: &Connection) -> fdo::Result<()> {
-    let sender = header
-        .sender()
-        .ok_or_else(|| fdo::Error::AccessDenied("a call with no sender".into()))?;
+pub async fn authorise(header: &Header<'_>, conn: &Connection) -> Result<(), Error> {
+    let Some(sender) = header.sender() else {
+        tracing::warn!("refused a call with no sender");
+        return Err(Error::AccessDenied("a call with no sender".into()));
+    };
     if is_frontend(conn, sender).await {
-        Ok(())
-    } else {
-        Err(fdo::Error::AccessDenied(format!(
-            "only {FRONTEND} may call this interface"
-        )))
+        return Ok(());
     }
+    tracing::warn!(%sender, member = ?header.member(), "refused a caller that is not {FRONTEND}");
+    Err(Error::AccessDenied(format!("only {FRONTEND} may call this interface")))
 }
 
 /// Whether `sender` owns the frontend's name. Fails closed: a bus that cannot say, or a
@@ -45,18 +45,21 @@ async fn is_frontend(conn: &Connection, sender: &UniqueName<'_>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
     use std::io::{BufRead, BufReader};
     use std::process::{Child, Command, Stdio};
+    use std::sync::{Arc, RwLock};
     use std::{env, fs, path::PathBuf, process};
 
     use zbus::connection::Builder;
-    use zbus::zvariant::{ObjectPath, Value};
+    use zbus::zvariant::OwnedValue;
 
     use super::*;
-    use crate::portal::FileChooserPortal;
+    use crate::settings::{Portal, Store};
 
     const PORTAL_NAME: &str = "org.freedesktop.impl.portal.desktop.athanor";
+    const PATH: &str = "/org/freedesktop/portal/desktop";
+    const SETTINGS: &str = "org.freedesktop.impl.portal.Settings";
 
     /// A private dbus-daemon, as the tests of `athanor-shelld` use.
     struct Bus {
@@ -120,87 +123,77 @@ mod tests {
         assert!(!is_frontend(&other, &other_id).await);
     }
 
+    /// A portal serving one appearance value, on `bus`.
+    async fn portal(bus: &Bus) -> Connection {
+        let mut store = Store::new();
+        store.insert(
+            "org.freedesktop.appearance".into(),
+            BTreeMap::from([("color-scheme".to_owned(), glib::Variant::from(1u32))]),
+        );
+        bus.builder()
+            .name(PORTAL_NAME)
+            .expect("name")
+            .serve_at(PATH, Portal::new(Arc::new(RwLock::new(store))))
+            .expect("serve")
+            .build()
+            .await
+            .expect("portal")
+    }
+
+    async fn read(conn: &Connection, namespace: &str, key: &str) -> zbus::Result<zbus::Message> {
+        conn.call_method(Some(PORTAL_NAME), PATH, Some(SETTINGS), "Read", &(namespace, key))
+            .await
+    }
+
     /// The whole path: a portal method on a bus, called by the frontend and by a stranger.
     #[tokio::test]
     async fn a_method_answers_the_frontend_and_refuses_a_stranger() {
         let bus = Bus::start("method");
-        let _portal = bus
-            .builder()
-            .name(PORTAL_NAME)
-            .expect("name")
-            .serve_at("/org/freedesktop/portal/desktop", FileChooserPortal)
-            .expect("serve")
-            .build()
-            .await
-            .expect("portal");
+        let _portal = portal(&bus).await;
         let frontend = bus.builder().name(FRONTEND).expect("name").build().await.expect("frontend");
         let stranger = bus.builder().build().await.expect("stranger");
 
-        let call = |conn: Connection| async move {
-            conn.call_method(
-                Some(PORTAL_NAME),
-                "/org/freedesktop/portal/desktop",
-                Some("org.freedesktop.impl.portal.FileChooser"),
-                "OpenFile",
-                &(
-                    ObjectPath::try_from("/org/freedesktop/portal/desktop/request/1").expect("path"),
-                    "org.example.App",
-                    "",
-                    "Open",
-                    HashMap::<String, Value<'_>>::new(),
-                ),
-            )
+        let refused = read(&stranger, "org.freedesktop.appearance", "color-scheme")
             .await
-        };
-
-        // The stranger is refused before the chooser is started.
-        let refused = call(stranger).await.expect_err("a stranger must be refused");
+            .expect_err("a stranger must be refused");
+        assert!(
+            matches!(&refused, zbus::Error::MethodError(name, _, _) if name.as_str() == "org.freedesktop.DBus.Error.AccessDenied"),
+            "{refused}"
+        );
+        let refused = stranger
+            .call_method(Some(PORTAL_NAME), PATH, Some(SETTINGS), "ReadAll", &(Vec::<String>::new(),))
+            .await
+            .expect_err("a stranger must be refused");
         assert!(refused.to_string().contains("only org.freedesktop.portal.Desktop"), "{refused}");
 
-        // The frontend gets an answer. The chooser program is not the real one under test, so
-        // nothing is chosen and the answer is "cancelled", code 1, with no path.
-        let reply = call(frontend).await.expect("the frontend is answered");
-        let (code, results): (u32, HashMap<String, zbus::zvariant::OwnedValue>) = reply.body().deserialize().expect("a response");
-        assert_eq!(code, 1);
-        assert!(results.is_empty());
+        let reply = read(&frontend, "org.freedesktop.appearance", "color-scheme")
+            .await
+            .expect("the frontend is answered");
+        let value: OwnedValue = reply.body().deserialize().expect("a variant");
+        assert_eq!(u32::try_from(value).expect("a u32"), 1);
+
+        let reply = frontend
+            .call_method(Some(PORTAL_NAME), PATH, Some(SETTINGS), "ReadAll", &(vec!["org.freedesktop.*"],))
+            .await
+            .expect("the frontend is answered");
+        let all: HashMap<String, HashMap<String, OwnedValue>> =
+            reply.body().deserialize().expect("a{sa{sv}}");
+        assert_eq!(all.len(), 1);
+        assert!(all["org.freedesktop.appearance"].contains_key("color-scheme"));
     }
 
-    /// Saving is refused, not answered with a made-up path.
+    /// A key that is not served is NotFound, the error the frontend falls through on.
     #[tokio::test]
-    async fn saving_is_refused_and_names_no_path() {
-        let bus = Bus::start("save");
-        let _portal = bus
-            .builder()
-            .name(PORTAL_NAME)
-            .expect("name")
-            .serve_at("/org/freedesktop/portal/desktop", FileChooserPortal)
-            .expect("serve")
-            .build()
-            .await
-            .expect("portal");
+    async fn a_setting_that_is_not_served_is_not_found() {
+        let bus = Bus::start("missing");
+        let _portal = portal(&bus).await;
         let frontend = bus.builder().name(FRONTEND).expect("name").build().await.expect("frontend");
-
-        for method in ["SaveFile", "SaveFiles"] {
-            let reply = frontend
-                .call_method(
-                    Some(PORTAL_NAME),
-                    "/org/freedesktop/portal/desktop",
-                    Some("org.freedesktop.impl.portal.FileChooser"),
-                    method,
-                    &(
-                        ObjectPath::try_from("/org/freedesktop/portal/desktop/request/2").expect("path"),
-                        "org.example.App",
-                        "",
-                        "Save",
-                        HashMap::<String, Value<'_>>::new(),
-                    ),
-                )
-                .await
-                .expect("the frontend is answered");
-            let (code, results): (u32, HashMap<String, zbus::zvariant::OwnedValue>) =
-                reply.body().deserialize().expect("a response");
-            assert_eq!(code, 2, "{method} must end in another way, not succeed");
-            assert!(results.is_empty(), "{method} must name no path");
+        for (namespace, key) in [("org.freedesktop.appearance", "missing"), ("org.example", "color-scheme")] {
+            let missing = read(&frontend, namespace, key).await.expect_err("not served");
+            assert!(
+                matches!(&missing, zbus::Error::MethodError(name, _, _) if name.as_str() == "org.freedesktop.portal.Error.NotFound"),
+                "{missing}"
+            );
         }
     }
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds every forge spec that changed since BASE and that the DAG builds, each with
-# build_spec.sh in the builder image, the way the DAG builds it. Spec Build Check runs it on a
-# pull request; it runs locally too.
+# run_spec_build.sh in the builder image (fetch with network, build without), the way the
+# DAG builds it. Spec Build Check runs it on a pull request; it runs locally too.
 #
 # Usage: build_changed_specs.sh [--dry-run] BASE [BUILDER_IMAGE]
 #
@@ -46,8 +46,7 @@ for dir in "${dirs[@]}"; do
         echo "build_changed_specs: would build $dir"
     else
         echo "build_changed_specs: building $dir"
-        podman run --rm -v "$root:/workspace" -w /workspace/forge "$IMAGE" \
-            bash scripts/build_spec.sh "${dir#forge/}"
+        bash "$root/forge/scripts/run_spec_build.sh" "$IMAGE" "${dir#forge/}"
     fi
     built=$((built + 1))
 done
