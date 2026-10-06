@@ -10,6 +10,8 @@ The three spikes of section 3 ran on 2026-09-18 (`.superpowers/spike-p1-applet.m
 
 The document replaces `doc_shell_ui.md` and amends `doc_platform_experience.md`, section 3. Section 6 lists the changes other documents take.
 
+SH3 was amended on 2026-10-06: the scope budget (maintainer decision A2-14, #159); cosmic-launcher kept until the Alt+Tab switcher of `doc_overview.md` exists (maintainer decision A2-24, #159); and COSMIC's applications no longer called content, as `doc_software.md` revision 3, decision 7, ruled on 2026-10-05.
+
 ## 1. Context
 
 Since 2026-09-11 the desktop is Fedora's COSMIC 1.8 on cosmic-comp: panel, dock, launcher, settings, notifications. `athanor-shell-rs` survived only as the greeter (on 2026-09-18; since stage 1a the greeter is `athanor-greeter-ui`). The maintainer wants a proprietary shell back, evolved rather than restored, because the graphical environment is what an average user judges the system by.
@@ -61,7 +63,7 @@ What the platform gives us today:
 |---|---|---|---|
 | cosmic-panel, cosmic-applets | panel, dock, the tray's `org.kde.StatusNotifierWatcher` (in `cosmic-applet-status-area`), network, Bluetooth, audio, battery, power, input source | 2, gone since the switch (PR #83) | our bar (2b) and our dock (2c) |
 | cosmic-notifications | notification daemon, a child of the panel's wrapper on an inherited socket pair until the switch | 2, gone since the switch (PR #83) | `athanor-shelld`, the notification server, with the bar |
-| cosmic-launcher, cosmic-app-library, pop-launcher | launcher, application library, the launcher's search backend | 3 (P4 found they work without the panel) | our launcher and application library (`doc_launcher.md`) |
+| cosmic-launcher, cosmic-app-library, pop-launcher | launcher, application library, the launcher's search backend; cosmic-launcher also serves Alt+Tab | 3 (P4 found they work without the panel); cosmic-launcher only together with a window switcher on Alt+Tab (amended 2026-10-06, A2-24, #159) | our launcher and application library (`doc_launcher.md`); the Alt+Tab switcher of `doc_overview.md` (section 7 there) |
 | cosmic-greeter as locker | session lock | 4 | our lock, on the greeter's authentication code |
 | cosmic-osd | on-screen display, end-of-session dialogs and the session's only polkit agent | 4, in one step | our polkit agent and `athanor-osd` (`doc_lock_and_prompts.md`, `doc_osd.md`) |
 | cosmic-settings, cosmic-randr | Settings application, output configuration | 6 | our Settings (`doc_settings.md`); `athanor-settings-rs` is not revived, only mined |
@@ -70,7 +72,14 @@ What the platform gives us today:
 
 The table is the end state and its order, not a calendar. A component leaves only when its replacement passes SH1's rule; until then the image keeps it.
 
-COSMIC applications (`cosmic-files`, `cosmic-term`, `cosmic-edit`, `cosmic-store`) are content, not dependencies. They read `CosmicTheme`, so the design system writes it (SH5).
+**Scope budget** (amended 2026-10-06, maintainer decision A2-14, #159). Athanor builds only what it differentiates on. Every new component of Athanor's own, whether a program, a daemon, a library or a patch series, that does what an upstream project already does carries two things in its specification before its first plan is written:
+
+1. a written "why not upstream": the upstream candidates weighed, each with the reason it falls short, checked against the upstream project as it is on the day of writing;
+2. a maintenance owner, named by the maintainer.
+
+A component without both is not planned. The rule first applied on 2026-10-06: the own disk utility gave way to GNOME Disks (`doc_disks.md` section 7); the own file manager is limited to the chooser's view library until 1.0, with Nautilus as the file manager of 1.0 (`doc_files.md` section 7); Software carries a written comparison with Bazaar (`doc_software.md` section 9).
+
+COSMIC's applications (`cosmic-files`, `cosmic-term`, `cosmic-edit`, `cosmic-store`) no longer stay as content (amended 2026-10-06; ruled 2026-10-05 in `doc_software.md` decision 7): each gives way to the default application that decision names for its use, with the amendments of `doc_software.md` section 9. Until they leave the image, they read `CosmicTheme`, which the design system writes (SH5).
 
 **SH4. GTK4, with the shim kept replaceable.**
 
@@ -145,6 +154,8 @@ COSMIC applications (`cosmic-files`, `cosmic-term`, `cosmic-edit`, `cosmic-store
 - **Confirmation is one step:** "Restart to update" asks the system side to unlock the deployment (`bootc upgrade --from-downloaded`) and reboot in the same request. The system side first asks logind whether a reboot is blocked by an inhibitor, and when it is, refuses without unlocking. An unlocked deployment therefore never waits for some later shutdown, the request grants a process nothing beyond the reboot logind already allows the active local user, and it takes the same polkit defaults.
 - **After the first boot into a new deployment,** one notification says which version is now running, with the version and date from the image labels, and offers the way back. It claims no changelog: none exists yet.
 - **Going back** is `bootc rollback` to the immediately previous deployment, behind administrator authentication, followed by a restart. A digest the user went back from is held: it is not downloaded again, and only a newer digest is offered. Without this rule the timer would undo the rollback. Stage 1 has no request that releases a held digest.
+- **Amendment of 2026-10-06: security updates apply at the next shutdown** (maintainer decision A2-5 of 2026-10-05, #150). The rule "never applied unconfirmed" in the heading now holds for feature updates only. An update of the security class (`doc_kernel_profile.md`, D34) applies at the next shutdown or reboot the user starts, with a notice that says so and, after the first boot into it, the one-step way back of the bullet above. It is still never forced, and nothing reboots by itself. For this class the sentence of the confirmation bullet that an unlocked deployment never waits for some later shutdown is superseded. The system side is `doc_update_trust.md`, UT13.
+- **Amendment of 2026-10-06: no `systemd-sysupdate` replacement** (maintainer decision A2-8 of 2026-10-05, #150). `doc_kernel_profile.md` D6 is closed on bootc in two steps, so the first paragraph's replacement of bootc by `systemd-sysupdate` with A/B `/usr` does not happen: release 1.0 runs bootc on the ostree backend, and release 1.1 moves to bootc's sealed composefs backend behind the same experience.
 
 **SH12. The shield reports only what a verifier backs.**
 
@@ -154,7 +165,7 @@ COSMIC applications (`cosmic-files`, `cosmic-term`, `cosmic-edit`, `cosmic-store
   - a check: the booted image is verified, it is the newest the machine has booted, and the last successful check for updates is at most 14 days old;
   - an exclamation mark: not verified yet, the policy is not in force, the machine runs an older version than one it has booted, as after going back, or no check for updates has succeeded for 14 days, with that date. A machine whose updates stopped silently must not stay green: that defect has already shipped once (section 1), and an attacker who can only drop traffic causes it at will;
   - a cross: the last download was refused by the policy. It clears when a later download passes the policy.
-- **Rows that do not move the badge.** Secure Boot off is the declared degraded mode of `doc_kernel_profile.md` D3: its row says so, plainly. The header of the sheet claims only what the rows back: "System image verified", never "this computer is safe". That sentence is about the image the deployment refers to. It is not a measurement of the running `/usr`: nothing ties the booted files to the digest until the dm-verity `/usr` of `doc_kernel_profile.md`, and no wording in the interface suggests otherwise.
+- **Rows that do not move the badge.** Secure Boot off is the declared degraded mode of `doc_kernel_profile.md` D3: its row says so, plainly. The header of the sheet claims only what the rows back: "System image verified", never "this computer is safe". That sentence is about the image the deployment refers to. It is not a measurement of the running `/usr`: nothing ties the booted files to the digest until the dm-verity `/usr` of `doc_kernel_profile.md`, and no wording in the interface suggests otherwise. *Amended on 2026-10-06 (A2-8, #150):* the dm-verity `/usr` is superseded; nothing ties the booted files to the digest until the `/usr` sealed by composefs with fs-verity of release 1.1 (`doc_kernel_profile.md`, D6).
 - **The session shield is informative, not a trusted path.** A process running as the user can still draw over our bar, or replace the bar's user unit with a file or a drop-in of its own. The greeter's seal is the stronger one, because no user code runs there. A spoof-resistant shield needs the compositor work of SH2.
 - **The shield is the Athanor mark with the badge.** There is no permanent text in the panel: the words are in the sheet and in the accessible name. Its place is the end of the panel in every layout, and the top end corner of the greeter: the right under left-to-right text, the left under right-to-left text (`doc_bar.md`, BR6). cosmic-panel does not mirror.
 - **The session shield is a module of our bar** (package 2b). Its sheet carries the rows, "Restart to update" and "Go back to the previous version". It is a GTK popover of the bar if P4 shows that one opens from a top-level layer surface, and otherwise a layer-shell surface of its own, started by the bar. Spike P1 found the second shape forced inside cosmic-panel, which does not display a GTK popover (`surface missing from known popups`) and whose applets die of a second Wayland connection; the applet of package 1b-shield is therefore not built. Until 2b there is no session shield, and until the switch it exists only in a bar enabled by hand; meanwhile the trust state is reachable from the greeter's seal (package 1d) and from the notifier (`doc_update_trust.md`, UT11).

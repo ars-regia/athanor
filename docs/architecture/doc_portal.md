@@ -205,7 +205,7 @@ Status: revision 1 draft, 2026-10-05: the maintainer's decisions applied; text n
 
 1. **Honest configuration and appearance.** `athanor-portals.conf` with the table of PT1 in its interim form (FileChooser, Access and Inhibit on `gtk`, ScreenCast `none`); `athanor.portal` without `UseIn`; PT14 in full; the new crate skeleton with Settings (PT5), the unit, the confinement and the frontend-only rule of PT3, carried over from release 6. `athanor-daemon-rs` gives up the bus name it would otherwise contest (section 3). Gate: a Flatpak libadwaita application follows the variant, the exact accent and the contrast live, and Papers opens and saves through the gtk chooser.
 2. **Prompts, inhibition, background.** Access (PT6), Inhibit (PT11), Background (PT12), `Portal1` with `SessionInhibitors`; the table switches Access and Inhibit to `athanor`.
-3. **The file chooser** (PT7), after `doc_files.md` FM21 step 2 has merged `athanor-files-view`; the table switches FileChooser to `athanor`.
+3. **The file chooser** (PT7), after `doc_files.md` FM21 step 2 has merged `athanor-files-view` (since 2026-10-06 only the view part of that step, `doc_files.md` section 7; maintainer decision A2-14, #159); the table switches FileChooser to `athanor`.
 4. **Screenshots and the colour picker** (PT8), `athanor-recorder screenshot` and `pick-color`, the Print key, and the control center's two tiles (CC14 step 4).
 5. **Screen sharing and recording** (PT9, PT10, PT13 `record`): the producer, the picker, `CaptureSessions`, the bar's indicator, the do-not-disturb trigger, the recording tile; the table switches ScreenCast to `athanor`.
 6. **The gate of the standard:** measurement against PT17, scenarios, accessibility and languages, the maintainer's aesthetic signature (ST2).
