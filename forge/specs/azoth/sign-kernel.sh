@@ -17,7 +17,7 @@
 #                  from the kernel-devel RPM in --devel, OUT/module-sig-hash
 #                  (CONFIG_MODULE_SIG_HASH)
 #   check-modules  DIR holds only what nvidia.sh build writes for kernel KVER: per branch (open,
-#                  legacy) BRANCH/kver equal to KVER, BRANCH/version, the build log next to
+#                  legacy) BRANCH/kver equal to KVER, BRANCH/version, the build and RM logs next to
 #                  BRANCH, and BRANCH/lib/modules/KVER/extra/nvidia/ with nvidia.ko and only
 #                  the nvidia-{drm,modeset,uvm,peermem}.ko beside it, each a regular file whose
 #                  vermagic is of KVER. Anything else, a symlink included, fails
@@ -161,7 +161,7 @@ check_modules() { # sets KOS, the modules under $DIR, once $DIR passed the allow
             KOS+=("$entry")
         elif [[ $rel =~ ^(open|legacy)/kver$ ]]; then
             [[ $(< "$entry") == "$KVER" ]] || die "$rel names $(< "$entry"), not $KVER"
-        elif ! [[ $rel =~ ^(open|legacy)/version$ || $rel =~ ^(open|legacy)-build\.log$ ]]; then
+        elif ! [[ $rel =~ ^(open|legacy)/version$ || $rel =~ ^(open|legacy)-(build|rm)\.log$ ]]; then
             die "$rel: not an NVIDIA module of kernel $KVER, nor a file nvidia.sh build writes"
         fi
     done < <(find "$DIR" -mindepth 1 -print0)

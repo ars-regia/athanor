@@ -9,6 +9,7 @@ sign and publish jobs of NVIDIA kmod instead.
 import glob
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -16,6 +17,17 @@ import unittest
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "sign-kernel.sh"
 KVER = "6.18.38-1.azoth.fc43.x86_64"
+
+
+def nvidia_outputs():
+    """The files `nvidia.sh build` writes under --out besides the modules, read from its
+    source ($DRIVER for the branch): a new one shows up in the fixture tree and fails the
+    allow-list test until sign-kernel.sh check-modules admits it."""
+    source = (SCRIPT.parent / "nvidia.sh").read_text()
+    body = re.search(r"^build\(\) \{\n(.*?)^\}\n", source, re.M | re.S).group(1)
+    outputs = sorted(set(re.findall(r'> "\$OUT/([^"]+)"', body)))
+    assert "$DRIVER/kver" in outputs and "$DRIVER-build.log" in outputs, outputs
+    return outputs
 HOST_VMLINUZ = sorted(
     p for p in glob.glob("/usr/lib/modules/*/vmlinuz") if os.access(p, os.R_OK)
 )
@@ -163,15 +175,16 @@ class SignKernel(unittest.TestCase):
         )
 
     def nvidia_tree(self, root, branches=("open", "legacy")):
-        """The tree nvidia.sh build writes under --out, one module set per branch."""
+        """The tree nvidia.sh build writes under --out, one module set per branch, and every
+        other file its build stage writes there."""
         for branch in branches:
             nvidia = root / branch / "lib/modules" / KVER / "extra/nvidia"
             nvidia.mkdir(parents=True)
             for name in ("nvidia", "nvidia-drm", "nvidia-modeset", "nvidia-uvm"):
                 (nvidia / f"{name}.ko").write_text("ko")
-            (root / branch / "kver").write_text(f"{KVER}\n")
-            (root / branch / "version").write_text("580.95.05\n")
-            (root / f"{branch}-build.log").write_text("log\n")
+            for output in nvidia_outputs():
+                text = f"{KVER}\n" if output.endswith("/kver") else "580.95.05\n"
+                (root / output.replace("$DRIVER", branch)).write_text(text)
         return root
 
     def check_modules(self, root):
