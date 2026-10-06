@@ -14,9 +14,6 @@ on:
       RPM_GPG_PASSPHRASE:
         description: "Passphrase for GPG key"
         required: false
-      SECUREBOOT_SIGNING_KEY:
-        description: "Secure Boot private key (PEM) that signs the UKI and its PCR policy; supplied by the signing environment"
-        required: false
       COSIGN_PRIVATE_KEY:
         description: "Private key that signs the system images for the update service (system/keys); supplied by the signing environment"
         required: false
@@ -244,21 +241,14 @@ jobs:
     name: 💿 System Image & Disk Build
     needs: [build-repo]
     runs-on: ubuntu-24.04
-    # The signing environment holds SECUREBOOT_SIGNING_KEY, the Secure Boot key that
-    # signs the UKI and its PCR policy (forge/specs/azoth/KERNEL.md).
-    environment: signing
+    # No key and no environment (D43): the vmlinuz arrives signed for Secure Boot, by the
+    # azoth-boot digest in the kernel artifacts, and the images are signed by the next job.
     timeout-minutes: 180
     permissions:
       contents: write
       packages: write
       id-token: write
     steps:
-      - name: 🔑 Require the Secure Boot key
-        # First, so a missing secret fails in seconds instead of after the system stage build.
-        env:
-          SECUREBOOT_SIGNING_KEY: ${{ secrets.SECUREBOOT_SIGNING_KEY }}
-        run: |
-          [[ -n ${SECUREBOOT_SIGNING_KEY:-} ]] || { echo "SECUREBOOT_SIGNING_KEY is not available to this job: check the signing environment" >&2; exit 1; }
       - name: ⚙️ Prepare environment
         run: |
           set -euo pipefail
@@ -296,12 +286,11 @@ jobs:
 
       - name: 🐳 Build OS Images
         # build-image.sh builds the default, NVIDIA and NVIDIA-legacy images in turn FROM the
-        # system image, all three signed with the same Secure Boot key, so one job and one
-        # approval covers the whole cycle (S8). Nothing is pushed until all three have built.
+        # system image, all three with the same signed vmlinuz (S8). Nothing is pushed until
+        # all three have built.
         env:
           RUN_ID: ${{ github.run_id }}
           RUN_NUMBER: ${{ github.run_number }}
-          SECUREBOOT_SIGNING_KEY: ${{ secrets.SECUREBOOT_SIGNING_KEY }}
         run: |
           set -euo pipefail
           for gpu in none nvidia nvidia-legacy; do

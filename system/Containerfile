@@ -2,8 +2,10 @@
 # selected by the GPU build argument: none (athanor-system), nvidia (athanor-system-nvidia)
 # and nvidia-legacy (athanor-system-nvidia-legacy). Everything up to the `system` stage is
 # shared; the GPU stages add the signed NVIDIA modules of the Azoth kernel with the locked
-# vendor packages; the final stage gates, assembles the UKI and lints. system/build-image.sh
-# passes AZOTH_NVR, the registries and the module digests from the file system/kernel-artifacts.sh
+# vendor packages; the final stage gates, generates the initramfs and lints. No key reaches the
+# build: the vmlinuz is the one signed for Secure Boot in the kernel cycle (azoth-boot, D43).
+# system/build-image.sh passes AZOTH_NVR, the registries, the signed vmlinuz digest and the module
+# digests from the file system/kernel-artifacts.sh
 # wrote (docs/architecture/doc_build_ordering.md, O4, O9). A stage the target does not use is
 # never pulled, so the default image builds without module digests.
 # The `system` stage is built once, on its own (--target system), and the GPU stages start FROM
@@ -15,7 +17,13 @@ ARG KERNEL_REGISTRY
 ARG FORGE_REGISTRY
 ARG NVIDIA_OPEN_DIGEST
 ARG NVIDIA_LEGACY_DIGEST
+ARG BOOT_DIGEST
 ARG SYSTEM_IMAGE
+
+# The vmlinuz of the pinned kernel signed with the Secure Boot key, /vmlinuz and /kver
+# (forge/specs/azoth/nvidia-publish.sh); system/kernel-artifacts.sh verified its signature and
+# its attestation of the kernel digest and the certificate.
+FROM ${KERNEL_REGISTRY}/azoth-boot@${BOOT_DIGEST} AS signed-kernel
 
 FROM ${KERNEL_REGISTRY}/azoth-nvidia@${NVIDIA_OPEN_DIGEST} AS nvidia-modules-open
 FROM ${KERNEL_REGISTRY}/azoth-nvidia@${NVIDIA_LEGACY_DIGEST} AS nvidia-modules-legacy
@@ -86,17 +94,20 @@ RUN dnf5 install -y --allowerasing --enablerepo=fedora-cisco-openh264 openh264 &
     rpm -q openh264 && \
     ! rpm -q noopenh264
 
-# The Azoth kernel of the pins is the one tier 0 installed.
+# The Azoth kernel of the pins is the one tier 0 installed. Its vmlinuz is replaced by the
+# same kernel signed for Secure Boot, which shim accepts through MokList; `rpm -V kernel-core`
+# reports the file as modified (doc_system_image.md).
 ARG AZOTH_NVR
 RUN test -f "/usr/lib/modules/${AZOTH_NVR}.x86_64/vmlinuz"
+COPY --from=signed-kernel /vmlinuz /usr/lib/modules/${AZOTH_NVR}.x86_64/vmlinuz
 
 # Tier 0: Install Cilium Tetragon eBPF Runtime Security is now delegated to athanor-tetragon RPM
 
 # TIER 1: CORE USERSERVICE, DBUS & POLICYKIT
 RUN --mount=type=bind,from=tier1-repo,source=/,target=/tmp/tier1-repo \
     --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
-    echo "Tier 1: Installing Scudo Hardened Allocator (compiler-rt), Keylime & UKI tools..." && \
-    dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs compiler-rt keylime-tenant keylime-agent systemd-ukify systemd-boot-unsigned sbsigntools openssl tpm2-tools cryptsetup dracut && \
+    echo "Tier 1: Installing Scudo Hardened Allocator (compiler-rt), Keylime, TPM and LUKS tools..." && \
+    dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs compiler-rt keylime-tenant keylime-agent systemd-ukify openssl tpm2-tools cryptsetup dracut && \
     if find /tmp/tier1-repo -name "*.rpm" 1> /dev/null 2>&1; then \
         echo "Tier 1: Installing Core User Services, DBus & Policies..." && \
         RPM_LIST=$(find /tmp/tier1-repo -name "*.rpm" ! -name "*-devel-*" ! -name "*-doc-*" ! -name "*debuginfo*" ! -name "*debugsource*" ! -name "*astro-toolchain*" ! -name "*buildah*" ! -name "*osbuild*" ! -name "*cargo-tools*") && \
@@ -242,6 +253,7 @@ RUN --mount=type=bind,from=nvidia-rpms,source=/out/legacy,target=/tmp/nvidia-rpm
 
 FROM gpu-${GPU} AS final
 ARG GPU
+ARG AZOTH_NVR
 COPY forge/specs/azoth/pins.env /scripts/pins.env
 COPY system/nvidia/gate.sh /scripts/nvidia-gate.sh
 RUN bash /scripts/nvidia-gate.sh "${GPU}" /scripts/pins.env /
@@ -256,11 +268,8 @@ RUN bash /scripts/nvidia-gate.sh "${GPU}" /scripts/pins.env /
 # file; this is only the last word.
 RUN systemctl preset NetworkManager-wait-online.service
 
-# Initramfs & Unified Kernel Image (UKI) generation
-RUN --mount=type=secret,id=uki_key,required=false \
-    --mount=type=secret,id=uki_cert,required=false \
-    --mount=type=secret,id=uki_crt,required=false \
-    /bin/bash /scripts/assemble_uki.sh
+# Module index and initramfs, once every module is in place
+RUN bash /scripts/initramfs.sh "${AZOTH_NVR}.x86_64"
 
 # Hardening & OSTree cleanup. glibc-all-langpacks stays: glibc requires a langpack
 # provider and it is the one the base image ships. The runtime directories are
@@ -273,7 +282,7 @@ RUN dnf5 remove -y --no-autoremove \
         nodejs-docs python3-botocore kernel-debug kernel-debug-core kernel-debug-modules kernel-debug-modules-core kernel-debug-modules-extra && \
     for d in /usr/lib/modules/*; do if [ -d "$d" ] && [ ! -e "$d/vmlinuz" ] && [ ! -L "$d/vmlinuz" ]; then rm -rf "$d"; fi; done && \
     rm -f /etc/machine-id && touch /etc/machine-id && \
-    rm -rf /scripts /etc/pki/secureboot/private /etc/pki/uki/*.key && \
+    rm -rf /scripts && \
     dnf5 clean all && \
     rm -rf /var/lib/dnf5/* /var/tmp/* /var/log/* && \
     for p in /tmp/* /run/* /etc/NetworkManager/system-connections/*; do \
