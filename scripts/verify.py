@@ -159,6 +159,95 @@ def check_workflows():
     return r
 
 
+# The actions a sign-only job may use, pinned by a full commit SHA (D43).
+SIGN_ONLY_ACTIONS = re.compile(
+    r"^actions/(?:checkout|download-artifact|upload-artifact)@[0-9a-f]{40}$")
+# What builds, installs or runs a locally built image. A sign-only job receives built
+# artefacts and runs no build step: a compromised build must not be able to sign (D43).
+SIGN_ONLY_FORBIDDEN = re.compile(
+    r"\b(?:podman|docker)\s+build\b|\bbuildah\s+(?:bud|build|from|commit)\b|\brpmbuild\b"
+    r"|\bcargo\s+(?:build|install|run)\b|\bnix\s+(?:build|run|shell|develop|profile)\b"
+    r"|\bapt(?:-get)?\s+install\b|\bdnf5?\s+install\b|\bpip3?\s+install\b"
+    r"|\bbuild-image\.sh\b|\bbuild_iso\.sh\b|\bnvidia\.sh\s+build\b|\blocalhost/")
+
+
+def workflow_jobs(text):
+    """The jobs of a workflow as (id, first line number, lines), from the two-space layout
+    every workflow of this repository uses: verify.py reads YAML without a YAML parser."""
+    lines = text.split("\n")
+    jobs, current, inside = [], None, False
+    for number, line in enumerate(lines, 1):
+        if re.match(r"^jobs:\s*$", line):
+            inside = True
+            continue
+        if inside and re.match(r"^\S", line):
+            inside = False
+        if not inside:
+            continue
+        m = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
+        if m:
+            current = (m.group(1), number, [])
+            jobs.append(current)
+        elif current is not None:
+            current[2].append((number, line))
+    return jobs
+
+
+def job_environment(lines):
+    """The environment name a job declares, or None."""
+    for i, (_, line) in enumerate(lines):
+        m = re.match(r"^    environment:\s*(\S*)\s*$", line)
+        if not m:
+            continue
+        if m.group(1):
+            return m.group(1).strip("'\"")
+        for _, nxt in lines[i + 1:]:
+            n = re.match(r"^      name:\s*(\S+)", nxt)
+            if n:
+                return n.group(1).strip("'\"")
+            if re.match(r"^    \S", nxt):
+                break
+    return None
+
+
+def signing_problems(root):
+    """D43 (doc_kernel_profile.md, section 12 item 1): a secret of the `signing` environment is
+    read only by jobs of that environment; such a job uses no action but checkout,
+    download-artifact and upload-artifact pinned by SHA, calls no reusable workflow, and builds,
+    installs or runs no locally built image; the environment has a required reviewer."""
+    root = Path(root)
+    settings = root / ".github/settings/environments.json"
+    environments = json.loads(read(settings))
+    signing = environments.get("signing")
+    if signing is None:
+        return [f"{settings.relative_to(root).as_posix()}: no signing environment (D43)"]
+    problems = []
+    if not signing.get("reviewers"):
+        problems.append(f"{settings.relative_to(root).as_posix()}: "
+                        "the signing environment has no required reviewer (D43)")
+    secrets = re.compile(r"\bsecrets\.(" + "|".join(map(re.escape, signing.get("secrets", []))) + r")\b")
+    for wf in sorted((root / ".github/workflows").glob("*.y*ml")):
+        for job, _, lines in workflow_jobs(read(wf)):
+            code = [(n, line) for n, line in lines if not line.lstrip().startswith("#")]
+            environment = job_environment(code)
+            if signing.get("secrets"):
+                read_secrets = sorted({m for _, line in code for m in secrets.findall(line)})
+                for secret in read_secrets if environment != "signing" else ():
+                    problems.append(f"{wf.name}: job {job} reads {secret} without environment: signing (D43)")
+            if environment != "signing":
+                continue
+            for _, line in code:
+                m = re.match(r"^\s*(?:- )?uses:\s*(\S+)", line)
+                if m and not SIGN_ONLY_ACTIONS.match(m.group(1)):
+                    problems.append(f"{wf.name}: signing job {job} uses {m.group(1)}: only checkout, "
+                                    "download-artifact and upload-artifact pinned by SHA (D43)")
+            for n, line in code:
+                m = SIGN_ONLY_FORBIDDEN.search(line)
+                if m:
+                    problems.append(f"{wf.name}:{n}: signing job {job} builds or installs: {m.group(0)} (D43)")
+    return problems
+
+
 # --------------------------------------------------------------------------- #
 # 2. kickstart — una direttiva che Anaconda non riconosce ferma l'installazione
 # --------------------------------------------------------------------------- #
