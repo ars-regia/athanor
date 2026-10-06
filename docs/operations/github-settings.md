@@ -88,7 +88,7 @@ Facts read by `export`; each one is in the file named. `diff` against `hr-mes/at
 | Default branch `iso-v0`; all three merge methods on; auto-merge on; head branches deleted on merge | `repository.json` |
 | Description is still `ermete-os` | `repository.json` |
 | Dependabot alerts and Dependabot security updates are off; secret scanning and push protection are on; private vulnerability reporting is on | `repository.json` |
-| Only `iso-v0` is protected: required check `Kernel gate` (not strict), no review, `enforce_admins` off, force push and deletion off | `branch-protection.json` |
+| Only `iso-v0` is protected: required checks `Kernel gate` and `Spec gate` (not strict), no review, `enforce_admins` off, force push and deletion off | `branch-protection.json` |
 | No repository ruleset | `rulesets.json` |
 | Environment `signing`: reviewer `hr-mes`, branches `iso-v0` and `main`, admin bypass on, five secrets including `MOK_PRIVATE_KEY` | `environments.json` |
 | Environment `github-pages`: branches `gh-pages` and `main` | `environments.json` |

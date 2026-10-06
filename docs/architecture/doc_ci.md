@@ -65,7 +65,7 @@ The DNF channel on GitHub Pages (branch `gh-pages`) is deployed only on `main` (
 
 ### 1.4 What a pull request runs
 
-Branch protection on `iso-v0` requires one check: `Kernel gate` (`gh api repos/hr-mes/athanor/branches/iso-v0/protection`, 2026-10-06). Everything else reports but does not block a merge.
+Branch protection on `iso-v0` requires two checks, `Kernel gate` and `Spec gate` (`.github/settings/branch-protection.json`, applied with `scripts/github-settings/ghsettings.py`). Both workflows run on every pull request, so both checks always report. The bots' merges wait for both (`forge/scripts/bot_merge.py`, `REQUIRED_CHECKS`). Everything else reports but does not block a merge.
 
 | Check | Workflow | Runs on a PR when | Required | Gates |
 |---|---|---|---|---|
