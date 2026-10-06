@@ -64,14 +64,14 @@ A new `verify.py` check is registered with `@check` like the others and has a te
 
 - **Area owners** are listed in `.github/CODEOWNERS`; the proposed area map is [ownership.md](ownership.md).
 - **Two-person review** for signing, attestation, polkit, cryptography and authentication: two approvals, at least one from an owner of the area, never the author. Today the maintainer is the only owner, so every such change waits for the maintainer.
-- Enforcement _(Proposal)_: once a second owner exists, turn on "Require review from Code Owners" on the product branch; today `iso-v0` requires only the status check `Kernel gate` (`gh api repos/hr-mes/athanor/branches/iso-v0/protection`).
+- Enforcement _(Proposal)_: once a second owner exists, turn on "Require review from Code Owners" on the product branch; today `iso-v0` requires only the status check `Kernel gate` (`gh api repos/ars-regia/athanor/branches/iso-v0/protection`).
 
 ## CT7. Red CI _(Proposal)_
 
 - A workflow on the product branch is green or disabled. There is no third state.
 - A red workflow gets, within one working day, a fix or `gh workflow disable <file>` plus an open issue that names the failing run id. The fix pull request enables it again.
 - No `continue-on-error`, no `|| true`, no retry loop that hides the failure.
-- Today, on `iso-v0`: `forge-ghcr-cleanup.yml` failed (run 37173567085), `fuzzing.yml` failed (run 37190403649), and `test-mok.yml` is registered as active with no file in the tree (`gh api repos/hr-mes/athanor/actions/workflows`, 2026-10-06).
+- Today, on `iso-v0`: `forge-ghcr-cleanup.yml` failed (run 37173567085), `fuzzing.yml` failed (run 37190403649), and `test-mok.yml` is registered as active with no file in the tree (`gh api repos/ars-regia/athanor/actions/workflows`, 2026-10-06).
 
 ## CT8. Claude Code
 

@@ -20,7 +20,7 @@ find repo-cache/ -maxdepth 2 -name "*.rpm" -type f -delete
 TMP_DIR=$(mktemp -d)
 trap "rm -rf $TMP_DIR" EXIT
 
-OWNER="${1:-hr-mes}"
+OWNER="${1:-ars-regia}"
 
 # Fetch package lists dynamically from Single Source of Truth
 readarray -t CUSTOM_TIER0 < <(jq -r '.custom_tier0[] // empty' config/packages.json)

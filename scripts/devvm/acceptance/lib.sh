@@ -18,7 +18,7 @@ mkdir -p "$ACC_STATE"
 # The 31 GB host cannot hold the 16 GB runner guest and this 8 GB VM together.
 guard_no_ci() {
   local busy
-  busy=$(gh api "repos/${GITHUB_REPOSITORY:-hr-mes/athanor}/actions/runs?status=in_progress&per_page=1" --jq .total_count)
+  busy=$(gh api "repos/${GITHUB_REPOSITORY:-ars-regia/athanor}/actions/runs?status=in_progress&per_page=1" --jq .total_count)
   [[ $busy -eq 0 ]] || die "$busy workflow run(s) in progress: the dev VM must not run beside a CI job on this host"
 }
 

@@ -36,7 +36,7 @@
 #
 # The file is $KERNEL_ARTIFACTS_DIR/kernel-artifacts.env (default: kernel-artifacts/ at the
 # repository root). KERNEL_REGISTRY is the registry and owner (default ghcr.io/ followed by
-# GITHUB_REPOSITORY_OWNER, else hr-mes); GITHUB_SERVER_URL and GITHUB_REPOSITORY name the
+# GITHUB_REPOSITORY_OWNER, else ars-regia); GITHUB_SERVER_URL and GITHUB_REPOSITORY name the
 # workflows whose signatures are trusted, and KERNEL_TRUSTED_REFS the branches they may have run
 # on (space separated, default "iso-v0 main"): a kernel or a module signed by the same workflow on
 # any other branch is not published, whoever pushed it. A kernel is ready only when its verified
@@ -52,10 +52,10 @@ ROOT=$(dirname "$HERE")
 DIR=${KERNEL_ARTIFACTS_DIR:-$ROOT/kernel-artifacts}
 FILE=$DIR/kernel-artifacts.env
 PINS=$ROOT/forge/specs/azoth/pins.env
-owner=${GITHUB_REPOSITORY_OWNER:-hr-mes}
+owner=${GITHUB_REPOSITORY_OWNER:-ars-regia}
 REGISTRY=${KERNEL_REGISTRY:-ghcr.io/${owner,,}}
 ISSUER=https://token.actions.githubusercontent.com
-workflows="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-hr-mes/athanor}/.github/workflows"
+workflows="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-ars-regia/athanor}/.github/workflows"
 # Owner, repository and host names hold no regex metacharacter other than the dot.
 workflows=${workflows//./\\.}
 # The branches whose runs may publish. A signature carries the ref of the run that made it, and

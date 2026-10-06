@@ -184,7 +184,7 @@ impl Default for DatabaseSnapshot {
                 .unwrap_or_default()
                 .as_secs(),
             installed_packages: Vec::new(),
-            registry_url: "ghcr.io/hr-mes/athanor-store".to_string(),
+            registry_url: "ghcr.io/ars-regia/athanor-store".to_string(),
             integrity_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000".to_string(),
         }
     }

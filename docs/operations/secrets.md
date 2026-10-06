@@ -7,10 +7,10 @@
 | Status | Revision 1, 2026-10-06. Section 1 and section 3 are facts. Section 2 and every line marked _(Proposal)_ await the maintainer |
 | Depends on | `doc_kernel_build.md` section 6 (key design), `doc_kernel_profile.md` D43 and section 9 (custody, key table), `doc_update_trust.md` UT2, UT3 (image key), decisions A2-27, A2-33, A2-35 |
 | Defines | SEC1-SEC12 (secrets), VAR1-VAR5 (variables), ENV1-ENV4 (environments), KC1-KC6 (custody), RL1-RL8 (recovery) |
-| Facts checked with | `git grep` on `origin/iso-v0` at `bd1f0e4a`; `gh secret list`, `gh variable list`, `gh api repos/hr-mes/athanor/environments` and its `secrets`, `variables` and `deployment-branch-policies` endpoints, names only; the branches of open PRs #115 (`sign-vmlinuz`), #180 (`a2/delivery`) and #185 (`a2/rpm-sign-job`) |
+| Facts checked with | `git grep` on `origin/iso-v0` at `bd1f0e4a`; `gh secret list`, `gh variable list`, `gh api repos/ars-regia/athanor/environments` and its `secrets`, `variables` and `deployment-branch-policies` endpoints, names only; the branches of open PRs #115 (`sign-vmlinuz`), #180 (`a2/delivery`) and #185 (`a2/rpm-sign-job`) |
 
 No value of any secret appears here or was read to write this. Commands below use
-`REPO=<owner>/<name>` so they work on a new organisation; today it is `hr-mes/athanor`.
+`REPO=<owner>/<name>` so they work on a new organisation; today it is `ars-regia/athanor`.
 
 ## 1. Inventory
 
@@ -177,7 +177,7 @@ Today: one maintainer holds every key, with an offline backup held by the key cu
 | KC1 | **Two holders,** the maintainer and one deputy, both required reviewers of `signing` and `stable-override`. Once there are two, set `prevent_self_review`: a run is approved by the holder who did not start it. The two approvals of A2-27 then each need the second person. |
 | KC2 | **Offline encrypted backup in two places.** The private keys of section 1.4, encrypted to both holders' OpenPGP keys, each on a hardware token: `tar -C "${KEYDIR:?}" -c ... \| gpg --encrypt -r <holder A> -r <holder B> -o <archive>`. Two copies, in two separate places, each kept by a different holder. Tokens are not backed up: they are made again (RL1). A private custody runbook, outside this public repository, records where each backup is and what it holds. |
 | KC3 | **Generation ceremony.** Keys are generated on tmpfs as in section 1.4, with both holders present (in person or on a call). The archive of KC2 is written and test-decrypted before the plaintext is shredded. The committed certificate or public key is the record of what was generated. |
-| KC4 | **Maintainer unavailable.** The deputy approves releases (KC1) and holds a backup copy (KC2), so the pipeline continues. The repository belongs to a personal account (`gh api repos/hr-mes/athanor --jq .owner.type` is `User`), so nobody else can administer it. Move it to an organisation with both holders as owners. To rebuild elsewhere, the deputy decrypts the copy and loads the secrets into the new `signing` environment with the commands of section 1.4. |
+| KC4 | **Maintainer unavailable.** The deputy approves releases (KC1) and holds a backup copy (KC2), so the pipeline continues. The repository belongs to a personal account (`gh api repos/ars-regia/athanor --jq .owner.type` is `User`), so nobody else can administer it. Move it to an organisation with both holders as owners. To rebuild elsewhere, the deputy decrypts the copy and loads the secrets into the new `signing` environment with the commands of section 1.4. |
 | KC5 | **Compromise.** 1. Stop: `gh workflow disable` the workflows that sign, `gh secret delete` the exposed secret. 2. Rotate the key as in section 1.4. 3. Revoke: SEC2, the old certificate goes to `keys/revoked/`; SEC1, MokListX entry or `mokutil --delete` of the old certificate on each machine (D41); SEC3, public notice, then the recovery command of `RECOVERY.md` on each machine (UT2); tokens, revoke in the GitHub settings. 4. Audit: list the deployments of `signing` since the suspected exposure (`gh api "repos/$REPO/deployments?environment=signing"`) and every digest signed in that window. |
 | KC6 | **A holder leaves.** A private key cannot be taken back. Rotate every key that holder could decrypt, then re-encrypt the backup to the new pair of holders. |
 
