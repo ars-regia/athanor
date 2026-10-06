@@ -27,6 +27,13 @@ set -euo pipefail
 DRY=''
 [[ ${1:-} == --dry-run ]] && DRY=1
 OWNER=${GITHUB_REPOSITORY_OWNER:-hr-mes}
+# The package API lives under /users for a personal account and under /orgs for an organisation.
+owner_type=$(gh api "/users/${OWNER}" --jq .type)
+case $owner_type in
+  User) PACKAGES_API="/users/${OWNER}/packages" ;;
+  Organization) PACKAGES_API="/orgs/${OWNER}/packages" ;;
+  *) echo "${0##*/}: ${OWNER} is neither a user nor an organisation (${owner_type})" >&2; exit 1 ;;
+esac
 
 prune() { # prune PACKAGE KEEP
   local pkg=$1 keep=$2 api versions digest hex member err
@@ -34,14 +41,14 @@ prune() { # prune PACKAGE KEEP
   # A package that has never been published (azoth-nvidia before its first NVIDIA
   # build, every package on the first run of a renamed project) has nothing to prune.
   # Any other API error stays fatal.
-  if ! err=$(gh api "/users/${OWNER}/packages/container/${pkg}" --silent 2>&1); then
+  if ! err=$(gh api "${PACKAGES_API}/container/${pkg}" --silent 2>&1); then
     case $err in
       *"HTTP 404"*) echo "${pkg}: not published yet, nothing to prune"; return 0 ;;
     esac
     printf '%s\n' "$err" >&2
     return 1
   fi
-  api="/users/${OWNER}/packages/container/${pkg}/versions"
+  api="${PACKAGES_API}/container/${pkg}/versions"
   versions=$(gh api --paginate "${api}?per_page=100" | jq -s 'add // []')
 
   while read -r digest; do

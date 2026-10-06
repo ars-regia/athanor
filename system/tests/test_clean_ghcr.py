@@ -31,6 +31,22 @@ class Janitor(Tool):
                                    "/users/hr-mes/packages/container/athanor-forge-tier0-repo/versions/7"])
         self.assertFalse(any("azoth" in " ".join(c) and "versions" in " ".join(c) for c in calls))
 
+    def test_an_organisation_is_pruned_through_the_orgs_api(self):
+        self.registry({"owner_type": "Organization", "user_packages": ["athanor-forge-tier0-repo"], "packages": {
+            "athanor-forge-tier0-repo": [version(3, ["101"], 1), version(4, ["102"], 2), version(5, ["103"], 3)],
+        }})
+        r = subprocess.run(["bash", str(JANITOR), "athanor-os"], capture_output=True, text=True, env=self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        calls = [json.loads(line) for line in (self.dir / "calls.log").read_text().splitlines()]
+        deleted = [c[-1] for c in calls if "DELETE" in c]
+        self.assertEqual(deleted, ["/orgs/athanor-os/packages/container/athanor-forge-tier0-repo/versions/3"])
+
+    def test_an_unknown_owner_stops_before_any_delete(self):
+        self.registry({"owner_type": "Bot", "user_packages": ["athanor-forge-tier0-repo"]})
+        r = subprocess.run(["bash", str(JANITOR), "someone"], capture_output=True, text=True, env=self.env)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("neither a user nor an organisation", r.stderr)
+
 
 NOW = "1789776000"  # 2026-09-19T00:00:00Z
 OLD, RECENT = "2026-05-01", "2026-08-01"  # outside and inside the 90 days before NOW

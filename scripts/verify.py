@@ -1047,12 +1047,11 @@ def check_boundary():
 
 # Placeholders the unit tests use for an owner: they name no real registry namespace.
 PLACEHOLDER_OWNERS = {"owner", "o"}
-# Where the pipeline names its images. system/Containerfile is outside on purpose: its tier
-# mounts are the one literal decision 12 of the 2026-10-05 re-audit keeps (see the comment there).
+# Where the pipeline names its images.
 REGISTRY_DIRS = (".github/workflows", "scripts", "forge/scripts")
-REGISTRY_FILES = ("Justfile", "forge/Justfile", "system/Justfile")
-# The file types that name images: workflows, scripts, recipes and container builds.
-REGISTRY_SUFFIXES = {".yml", ".yaml", ".sh", ".py", ".just"}
+REGISTRY_FILES = ("Justfile", "forge/Justfile", "system/Justfile", "system/Containerfile", "flake.nix")
+# The file types that name images: workflows, scripts, recipes, container builds and Nix.
+REGISTRY_SUFFIXES = {".yml", ".yaml", ".sh", ".py", ".just", ".nix"}
 REGISTRY_NAMES = {"Justfile", "Containerfile"}
 
 
