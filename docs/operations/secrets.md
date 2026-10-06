@@ -4,7 +4,7 @@
 | --- | --- |
 | Purpose | Inventory of every secret, variable and environment the pipeline uses, how to make each one again from zero, and who holds the keys |
 | Owner | Maintainer |
-| Status | Revision 1, 2026-10-06. Section 1 and section 3 are facts. Section 2 and every line marked _(Proposal)_ await the maintainer |
+| Status | Revision 1, 2026-10-06; section 4 added 2026-10-07. Sections 1, 3 and 4 are facts. Section 2 and every line marked _(Proposal)_ await the maintainer |
 | Depends on | `doc_kernel_build.md` section 6 (key design), `doc_kernel_profile.md` D43 and section 9 (custody, key table), `doc_update_trust.md` UT2, UT3 (image key), decisions A2-27, A2-33, A2-35 |
 | Defines | SEC1-SEC12 (secrets), VAR1-VAR5 (variables), ENV1-ENV5 (environments), KC1-KC6 (custody), RL1-RL8 (recovery) |
 | Facts checked with | `git grep` on `origin/iso-v0` at `bd1f0e4a`; `gh secret list`, `gh variable list`, `gh api repos/ars-regia/athanor/environments` and its `secrets`, `variables` and `deployment-branch-policies` endpoints, names only; the branches of open PRs #115 (`sign-vmlinuz`), #180 (`a2/delivery`) and #185 (`a2/rpm-sign-job`) |
@@ -198,3 +198,31 @@ read back, so the backup of KC2 is the only copy that can be restored.
 | RL6 | the private key of the MOK of 2026-09-04, retired and held by no environment | not needed | nothing for its loss. A **leak** still matters: shim on a machine that still has the 2026-09-04 MOK enrolled boots what it signs, and kernels built before its revocation (2026-09-13) accept modules it signs. Its exposure stays relevant until that MOK is deleted (`mokutil --delete`) or listed in MokListX on every machine that enrolled it |
 | RL7 | an environment (ENV1, ENV2, ENV5) | yes | recreate it with its reviewers and deployment branches as in section 1.2, then load its secrets from the backup |
 | RL8 | the backup itself, with the GitHub secrets still in place | yes, for the backup | a GitHub secret cannot be exported, so rotate SEC1, SEC2 and SEC3 at a planned date while their old keys still sign, and back up the new keys (KC2) |
+
+## 4. Bootstrap after merge
+
+The merge of the sign-only signing cycle (D43, ADR-0064) leaves the pipeline waiting on five
+steps, in this order. Until step 4 is done, System Image Check fails every system pull request:
+`system/kernel-artifacts.sh check-plan` finds no `azoth-boot` for the pinned kernel and stops,
+because the Orchestrator, not a pull request, publishes the signed vmlinuz.
+
+1. **The maintainer creates the secrets of the two environments.** Create `signing-kernel` and
+   `signing-images` as `.github/settings/environments.json` describes them
+   (`docs/operations/github-settings.md` section 7: reviewer, branches `iso-v0` and `main`,
+   administrator bypass off by hand), then load SEC1 and SEC2 into `signing-kernel` and SEC3 and
+   SEC4 into `signing-images` with the commands of section 1.4, from the backup of KC2. Delete
+   `signing` only after a run of each signing job has passed with the new environments.
+2. **`azoth-signer.yml` publishes the signer image.** It runs on the push of the merge
+   (`forge/specs/azoth/signer/**`, `lock.sh` and `sign-kernel.sh` are in its paths), or by hand:
+   `gh workflow run azoth-signer.yml --ref iso-v0 --repo "$REPO"`. It needs no key and no
+   approval.
+3. **Commit the digest into `forge/specs/azoth/signer/image.digest`.** The run's step summary
+   names it (`sha256:` and 64 hex digits, alone on the line). Until it is committed,
+   `signer/run.sh` stops before any container runs, so `prepare` and `sign` of NVIDIA kmod fail.
+4. **The Orchestrator runs, NVIDIA kmod `sign` is approved, and `azoth-boot` is published.** The
+   Orchestrator finds the signed vmlinuz missing and calls NVIDIA kmod. Its `sign` job waits for
+   the `signing-kernel` approval; once approved, `publish` verifies the signed vmlinuz and
+   publishes `azoth-boot` beside the modules.
+5. **The system images build.** In the same Orchestrator run, the system stage copies the signed
+   vmlinuz from `azoth-boot` by digest, and `sign-system-images` waits for the `signing-images`
+   approval. From then on a cycle without a kernel or NVIDIA change asks only for that approval.
