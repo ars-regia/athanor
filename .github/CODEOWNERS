@@ -4,14 +4,7 @@
 
 # Core OS & Kernel
 /system/athanor-ebpf-sched/ @hr-mes-architect
-/system/athanor-hypervisor-daemon/ @hr-mes-architect
 /forge/specs/kernel/ @hr-mes-architect
-
-# Post-Quantum Mesh
-/system/athanor-mesh-bus/ @hr-mes-architect
-
-# Wayland & UI
-/system/athanor-greeter/ @hr-mes-architect
 
 # CI/CD
 /.github/ @hr-mes-architect

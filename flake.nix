@@ -79,31 +79,6 @@
         packages = rec {
           just-hermetic = pkgs.just;
 
-          athanor-telemetry-rpm = pkgs.runCommand "athanor-telemetry-rpm" {
-            nativeBuildInputs = [ pkgs.nfpm ];
-            # Dipende matematicamente dalla compilazione Rust pura
-            src = athanor-core;
-          } ''
-            mkdir -p $out/RPMS
-            cat > nfpm.yaml <<EOF
-name: "athanor-telemetry"
-arch: "x86_64"
-platform: "linux"
-version: "1.0.0"
-section: "default"
-priority: "extra"
-maintainer: "Athanor OS"
-description: "Athanor Telemetry Daemon"
-vendor: "Athanor OS"
-license: "GPL-3.0-or-later"
-contents:
-  - src: "$src/bin/athanor-telemetry"
-    dst: "/usr/bin/athanor-telemetry"
-EOF
-            # Infallibilit�: Genera l'RPM senza root e senza dnf!
-            nfpm pkg --packager rpm --target $out/RPMS/athanor-telemetry.rpm
-          '';
-
           athanor-core = (pkgs.makeRustPlatform {
             cargo = rust-toolchain;
             rustc = rust-toolchain;

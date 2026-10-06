@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:50.fc43}
+Release:        %{?autorelease}%{!?autorelease:51.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/hr-mes/athanor
@@ -18,9 +18,6 @@ Requires: cosmic-greeter cosmic-idle
 Requires: athanor-greeter-ui
 Requires: athanor-calmo
 Requires: xdg-desktop-portal-athanor
-# The eBPF monitor and the cloud agent are integrations the configuration is ready
-# for, not prerequisites of the configuration itself: weak dependencies.
-Recommends: athanor-sysmon-ebpf athanor-cloud-rs
 Requires: usbguard bolt
 
 %description
@@ -88,6 +85,10 @@ mkdir -p /etc/yum.repos.d
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-51
+- Drop the weak dependencies on athanor-sysmon-ebpf and athanor-cloud-rs: both packages
+  are retired (ADR-0073).
+
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-50
 - Point URL at the project repository.
 
