@@ -28,6 +28,7 @@ Fixture keys:
                 is passed (without it containers/image never looks for sigstore attachments)
   packages      {"package": [package versions as the GitHub API returns them]}
   user_packages ["package", ...]  the container packages of the owner
+  owner_type    "User" (the default) or "Organization", what /users/<owner> reports
   runs          [{"databaseId": 1, "headBranch": "iso-v0"}]
 """
 
@@ -130,10 +131,14 @@ def gh(args, fx):
         if "DELETE" in args:
             return 0
         path = next(a for a in args[1:] if a.startswith("/"))
-        if path.startswith("/users/") and path.split("?")[0].endswith("/packages"):
+        if re.fullmatch(r"/users/[^/?]+", path):
+            print(fx.get("owner_type", "User"))
+            return 0
+        root = "/orgs/" if fx.get("owner_type") == "Organization" else "/users/"
+        if path.startswith(root) and path.split("?")[0].endswith("/packages"):
             print(json.dumps([{"name": name} for name in fx.get("user_packages", [])]))
             return 0
-        match = re.match(r"/users/[^/]+/packages/container/([^/?]+)(/versions)?", path)
+        match = re.match(re.escape(root) + r"[^/]+/packages/container/([^/?]+)(/versions)?", path)
         if not match or match.group(1) not in fx.get("packages", {}):
             return fail("gh: Not Found (HTTP 404)")
         if match.group(2):

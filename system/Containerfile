@@ -3,17 +3,27 @@
 # and nvidia-legacy (athanor-system-nvidia-legacy). Everything up to the `system` stage is
 # shared; the GPU stages add the signed NVIDIA modules of the Azoth kernel with the locked
 # vendor packages; the final stage gates, assembles the UKI and lints. system/build-image.sh
-# passes AZOTH_NVR, the registry and the module digests from the file system/kernel-artifacts.sh
+# passes AZOTH_NVR, the registries and the module digests from the file system/kernel-artifacts.sh
 # wrote (docs/architecture/doc_build_ordering.md, O4, O9). A stage the target does not use is
 # never pulled, so the default image builds without module digests.
 ARG AZOTH_NVR
 ARG GPU=none
-ARG KERNEL_REGISTRY=ghcr.io/hr-mes
+ARG KERNEL_REGISTRY
+ARG FORGE_REGISTRY
 ARG NVIDIA_OPEN_DIGEST
 ARG NVIDIA_LEGACY_DIGEST
 
 FROM ${KERNEL_REGISTRY}/azoth-nvidia@${NVIDIA_OPEN_DIGEST} AS nvidia-modules-open
 FROM ${KERNEL_REGISTRY}/azoth-nvidia@${NVIDIA_LEGACY_DIGEST} AS nvidia-modules-legacy
+
+# The forge tier repositories, bound by the four tier steps of the system stage. FORGE_REGISTRY
+# is the project registry, which system/build-image.sh derives from REGISTRY_HOST and the
+# repository owner. The ARG stays in these FROM lines: inside a RUN --mount=...,from= value it
+# made buildah 5.8.4 SIGSEGV at commit (exit 134), taking down all three images.
+FROM ${FORGE_REGISTRY}/athanor-forge-tier0-repo:latest AS tier0-repo
+FROM ${FORGE_REGISTRY}/athanor-forge-tier1-repo:latest AS tier1-repo
+FROM ${FORGE_REGISTRY}/athanor-forge-tier2-repo:latest AS tier2-repo
+FROM ${FORGE_REGISTRY}/athanor-forge-tier3-repo:latest AS tier3-repo
 
 # The vendor RPMs of both NVIDIA branches, verified by hash and GPG, with the shim and the
 # configuration package, and NVIDIA's container toolkit (system/nvidia/build-rpms.sh). A throwaway stage: rpm-build never
@@ -38,14 +48,7 @@ ARG TETRAGON_VERSION=v1.3.0
 # TIER 0: BEDROCK HARDWARE & KERNEL FOUNDATION
 # The tier repositories mount under /tmp: in an ostree image /mnt is a symlink to var/mnt,
 # which does not exist at build time, so podman cannot create a mount target below it.
-# The registry here is a literal, not ${KERNEL_REGISTRY}: an ARG in a RUN --mount=...,from=
-# value made buildah 5.8.4 SIGSEGV at commit (exit 134), taking down all three images. Only
-# the two FROM ...@digest lines above tolerate the ARG; do not reapply it here.
-# This covers all four tier mounts below and is the single hard-coded registry owner the
-# pipeline keeps (re-audit decision 12, 2026-10-05): a fork that publishes elsewhere edits
-# these four lines. Everywhere else the owner comes from REGISTRY_HOST and the repository
-# owner, and `scripts/verify.py registry` enforces it.
-RUN --mount=type=bind,from=ghcr.io/hr-mes/athanor-forge-tier0-repo:latest,source=/,target=/tmp/tier0-repo \
+RUN --mount=type=bind,from=tier0-repo,source=/,target=/tmp/tier0-repo \
     --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
     base_kernel=$(rpm -qa kernel kernel-core 'kernel-modules*' 'kernel-uki-virt*') && \
     if [ -n "$base_kernel" ]; then \
@@ -86,7 +89,7 @@ RUN test -f "/usr/lib/modules/${AZOTH_NVR}.x86_64/vmlinuz"
 # Tier 0: Install Cilium Tetragon eBPF Runtime Security is now delegated to athanor-tetragon RPM
 
 # TIER 1: CORE USERSERVICE, DBUS & POLICYKIT
-RUN --mount=type=bind,from=ghcr.io/hr-mes/athanor-forge-tier1-repo:latest,source=/,target=/tmp/tier1-repo \
+RUN --mount=type=bind,from=tier1-repo,source=/,target=/tmp/tier1-repo \
     --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
     echo "Tier 1: Installing Scudo Hardened Allocator (compiler-rt), Keylime & UKI tools..." && \
     dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs compiler-rt keylime-tenant keylime-agent systemd-ukify systemd-boot-unsigned sbsigntools openssl tpm2-tools cryptsetup dracut && \
@@ -99,7 +102,7 @@ RUN --mount=type=bind,from=ghcr.io/hr-mes/athanor-forge-tier1-repo:latest,source
     fi
 
 # TIER 2: DESIGN SYSTEM & STATIC ASSETS
-RUN --mount=type=bind,from=ghcr.io/hr-mes/athanor-forge-tier2-repo:latest,source=/,target=/tmp/tier2-repo \
+RUN --mount=type=bind,from=tier2-repo,source=/,target=/tmp/tier2-repo \
     --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
     if find /tmp/tier2-repo -name "*.rpm" 1> /dev/null 2>&1; then \
         echo "Tier 2: Installing Design System & Static Assets..." && \
@@ -110,7 +113,7 @@ RUN --mount=type=bind,from=ghcr.io/hr-mes/athanor-forge-tier2-repo:latest,source
     fi
 
 # TIER 3: AGILE RUST SHELL & APPS
-RUN --mount=type=bind,from=ghcr.io/hr-mes/athanor-forge-tier3-repo:latest,source=/,target=/tmp/tier3-repo \
+RUN --mount=type=bind,from=tier3-repo,source=/,target=/tmp/tier3-repo \
     --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
     if find /tmp/tier3-repo -name "*.rpm" 1> /dev/null 2>&1; then \
         echo "Tier 3: Installing Agile Rust Shell & Apps..." && \
