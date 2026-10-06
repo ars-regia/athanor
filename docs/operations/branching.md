@@ -57,14 +57,14 @@ old name (not verified here). It changes no file and no clone:
 | Documentation | Edit the files below. The GitHub milestone `iso-v0` is not a branch and keeps its name |
 
 **Files that name the branch `iso-v0`** (`git grep -n iso-v0`, excluding the generated
-`docs/architecture/graph-*` and the dated records under `docs/superpowers/`, which stay as written):
+`docs/architecture/graph-*` and the dated records under `docs/superpowers/` and `docs/decisions/`, which stay as written):
 
 | Kind | File:line |
 | --- | --- |
 | Workflow triggers | `.github/workflows/athanor-forge-orchestrator.yml:8` (its comment, lines 6-7, still calls `iso-v0` a non-default branch), `cosmic-comp-bump.yml:16`, `iso-acceptance.yml:31`, `kernel-build.yml:33`, `kernel-bump.yml:37`, `kernel-weekly.yml:37`, `nix-registry-bump.yml:15`, `shell-surfaces.yml:5` |
 | Trust and its tests | `system/kernel-artifacts.sh:41,64`; `system/tests/test_kernel_artifacts.py` (13 lines), `system/tests/fake_registry.py:31` |
 | Unit `Documentation=` URLs | `forge/specs/athanor-launcher/athanor-launcher-1.0.0/data/athanor-launcher.service:3`, `athanor-launcher-rates.service:3`, `athanor-launcher-rates.timer:3`; `forge/specs/athanor-update/SOURCES/usr/lib/systemd/system/athanor-update.service:3`, `athanor-update-check.service:3`, `athanor-update-check.timer:3`, `athanor-update-migrate.service:3`, `athanor-update-state.service:3`, `user/athanor-update-notify.service:3` |
-| Policy and documentation | `CLAUDE.md:30`, `README.md:10`, `.github/SECURITY.md:5`, `forge/specs/azoth/KERNEL.md:151`, `docs/architecture/doc_build_ordering.md:50,156`, `doc_build_system.md:129`, `doc_kernel_build.md:298`, `doc_kernel_profile.md:35,944`, `doc_shell.md:79`, `doc_software.md:232`, `experimental/EXEMPT:1` |
+| Policy and documentation | `CLAUDE.md:30`, `README.md:10`, `.github/SECURITY.md:5`, `forge/specs/azoth/KERNEL.md:151`, `docs/architecture/doc_build_ordering.md:50,156`, `doc_build_system.md:137`, `doc_kernel_build.md:298`, `doc_kernel_profile.md:35,944`, `doc_shell.md:79`, `doc_software.md:232`, `experimental/EXEMPT:1` |
 
 Other matches name the milestone `iso-v0` (`CLAUDE.md:31`, `README.md:12`,
 `doc_kernel_profile.md:1012`, `doc_local_ai.md:11,193`, `doc_shell.md:264`) or a past
