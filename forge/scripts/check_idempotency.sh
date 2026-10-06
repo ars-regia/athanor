@@ -50,17 +50,22 @@ else
 fi
 
 if [[ -n "$DIR" && -d "$DIR" ]]; then
+  # Captured before the hash: a scan that fails (a path dependency that does not exist)
+  # must stop here, not leave a partial hash behind.
+  PATH_DEPENDENCIES=""
+  if [[ "$PACKAGE" != "builder" ]]; then
+    PATH_DEPENDENCIES=$(python3 "$(dirname "${BASH_SOURCE[0]}")/dag_orchestrator.py" --path-dependencies "$DIR")
+  fi
   # Hash SHA-256 deterministico dei path relativi e dei contenuti
   CONTENT_HASH=$({
     find "$DIR" -type f -print0 | sort -z | xargs -0 sha256sum
     # The crates of a package build from their Cargo path dependencies outside the spec
     # directory, so those sources belong to its hash (one implementation, shared with the
     # orchestrator: dag_orchestrator.py --path-dependencies).
-    if [[ "$PACKAGE" != "builder" ]]; then
-      while IFS= read -r dependency; do
-        find "$dependency" -type f -not -path '*/target/*' -print0 | sort -z | xargs -0 sha256sum
-      done < <(python3 "$(dirname "${BASH_SOURCE[0]}")/dag_orchestrator.py" --path-dependencies "$DIR")
-    fi
+    while IFS= read -r dependency; do
+      [[ -n "$dependency" ]] || continue
+      find "$dependency" -type f -not -path '*/target/*' -print0 | sort -z | xargs -0 sha256sum
+    done <<< "$PATH_DEPENDENCIES"
     if [[ -f "config/rpmmacros" ]]; then
       echo -n "config/rpmmacros"
       cat "config/rpmmacros"

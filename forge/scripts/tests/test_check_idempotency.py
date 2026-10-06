@@ -90,6 +90,18 @@ class PackageHashTest(unittest.TestCase):
         (spec / "aa.txt").write_text("2\n")
         self.assertEqual(self.dock_hash("C"), self.dock_hash("en_US.UTF-8"))
 
+    def test_a_failing_dependency_scan_fails_the_hash(self):
+        crate = self.root / "forge/specs/athanor-dock/dock-1.0.0"
+        (crate / "Cargo.toml").write_text(
+            '[package]\nname = "dock"\nversion = "1.0.0"\n\n[dependencies]\n'
+            'gone = { path = "../../../../system/gone" }\n'
+        )
+        result = subprocess.run(
+            ["bash", SCRIPT, "--package", "dock", "--hash-only"],
+            cwd=self.forge, capture_output=True, text=True,
+        )
+        self.assertNotEqual(0, result.returncode)
+
     def test_the_hash_does_not_depend_on_the_checkout_location(self):
         before = self.dock_hash()
         moved = self.root.parent / (self.root.name + "-moved")
