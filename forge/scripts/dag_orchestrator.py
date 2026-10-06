@@ -525,6 +525,11 @@ if __name__ == "__main__":
         # One path per line, relative to the working directory so that the hash
         # check_idempotency.sh builds from them does not depend on where the checkout is.
         print("\n".join(package_inputs(sys.argv[2])))
+    elif sys.argv[1:] == ["--write-hashes"]:
+        # The hash map alone, without asking the registry: what a local tier assembly
+        # (just fetch-repo-rpms) needs to pull each package image by hash.
+        all_nodes, _, _, _, node_types = build_dag(load_package_manifest())
+        write_hashes(custom_hashes(all_nodes, node_types))
     elif sys.argv[1:] == ["--list-spec-dirs"]:
         spec_dirs = custom_spec_dirs(load_package_manifest())
         if not spec_dirs:

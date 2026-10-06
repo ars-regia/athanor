@@ -1,3 +1,6 @@
+# Hash map the brain writes for the tier assembly
+forge/dag-state/
+
 # Archives & Logs
 *.zip
 *.tar

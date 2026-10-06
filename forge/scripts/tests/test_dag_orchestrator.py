@@ -61,6 +61,20 @@ class PathDependenciesTest(unittest.TestCase):
         self.assertEqual(dag.path_dependencies(str(workspace)), [str(self.root / "system/unit")])
 
 
+class WriteHashesCommandTest(unittest.TestCase):
+    def test_the_command_writes_the_map_without_the_registry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                ["python3", "-B", str(SCRIPT), "--write-hashes"],
+                cwd=SCRIPT.parents[1], capture_output=True, text=True,
+                env={**os.environ, "DAG_STATE_DIR": tmp, "PATH": "/nonexistent:/usr/bin:/bin"},
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            hashes = json.loads((pathlib.Path(tmp) / "hashes.json").read_text())
+        self.assertTrue(hashes)
+        self.assertTrue(all(len(h) == 64 for h in hashes.values()))
+
+
 class ContentHashTest(unittest.TestCase):
     def test_the_hash_scripts_own_error_reaches_the_raised_one(self):
         with tempfile.TemporaryDirectory() as tmp:
