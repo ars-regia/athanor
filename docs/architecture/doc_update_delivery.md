@@ -270,7 +270,7 @@ The download saving is bounded at about 820 MB, or 11% (stage-5 measurement), wh
 
 ### 10.1 Kernel builds: measure before moving
 
-The kernel builds on the self-hosted runner (F16). A hosted build is estimated at 3 to 4.5 hours, and the 14 GB of free disk on a hosted runner is the first blocker. The move is deferred. `doc_kernel_build.md` item 9 (compiler cache) is implemented first on the self-hosted runner. Each build writes the `ccache -s` hit rate to its job summary and to `artifacts/metrics/ccache.json`. The move is revisited only with a measured hit rate over at least five consecutive bump builds. This is a sequencing decision, not a requirement of this document.
+The kernel builds on the self-hosted runner (F16). A hosted build is estimated at 3 to 4.5 hours, and the 14 GB of free disk on a hosted runner is the first blocker. The move is deferred. No compiler cache is used (`doc_kernel_build.md` item 9): it would only speed up a rebuild of the same NVR, and the `inputs` job already skips a build whose inputs match the published kernel. The move is revisited only when a hosted runner is measured building the kernel within the job time limit. This is a sequencing decision, not a requirement of this document.
 
 ## 11. Phases
 
@@ -283,7 +283,7 @@ Each phase ends at a gate. The next phase does not start until the gate is green
 | **P2. `stable` exists**                            | UD1, UD2, UD5, UD6, UD7, UD8, UD10, UD16, UD20, UD22, UD23, UD27 | `:stable` created by `promote.sh` with evidence, then one automatic promotion; a dev VM installed from the ISO follows `:stable` signed                                                                                          | machines move once to `stable`, one download, and the shield turns verified                        |
 | **P3. Namespace** (after TO5, the republication) | UD11, UD12, UD13, UD14 | the desktop and the laptop are verified on an `ars-regia` reference | one switch per machine, done by the maintainer |
 | **P4. Lighter**                                    | UD28 to UD39                                                     | five candidates with `upgrade-bytes.json`; the weekly reproducibility check green or with named exceptions; a soft reboot observed on the dev VM                                                                                 | one full download (UD33), then smaller updates; "Restart the desktop" when the kernel is unchanged |
-| **P5. Pipeline**                                   | UD40, UD41, UD42, UD44, section 10.1                             | a documentation-only commit schedules zero matrix jobs; variants share the `system` layers; tier signatures are verified in the system build; the ccache hit rate is recorded for five builds                                    | nothing                                                                                            |
+| **P5. Pipeline**                                   | UD40, UD41, UD42, UD44, section 10.1                             | a documentation-only commit schedules zero matrix jobs; variants share the `system` layers; tier signatures are verified in the system build                                                                                     | nothing                                                                                            |
 
 The transfer to `ars-regia` took place on 2026-10-06, so P2 creates `:stable` under `ars-regia` only; no `hr-mes:stable` is ever published. Spike S1 (soft reboot, UD35 to UD37) runs on the dev VM at the start of P4.
 
