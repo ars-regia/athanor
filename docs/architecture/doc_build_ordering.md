@@ -161,7 +161,6 @@ Both deserve their own decision.
 
 - **`doc_kernel_build.md` section 10:** NVIDIA kmod as a reusable workflow called by the Orchestrator, the tag form of O2, retention by NVIDIA kmod only.
 - **`doc_system_image.md` S6 and S8:** the image is built from the digests written by `system/kernel-artifacts.sh`.
-- **`doc_naming.md`:** the `azoth-nvidia` row names the new tag form.
 
 ## 6. Acceptance
 

@@ -41,6 +41,10 @@ ARG TETRAGON_VERSION=v1.3.0
 # The registry here is a literal, not ${KERNEL_REGISTRY}: an ARG in a RUN --mount=...,from=
 # value made buildah 5.8.4 SIGSEGV at commit (exit 134), taking down all three images. Only
 # the two FROM ...@digest lines above tolerate the ARG; do not reapply it here.
+# This covers all four tier mounts below and is the single hard-coded registry owner the
+# pipeline keeps (re-audit decision 12, 2026-10-05): a fork that publishes elsewhere edits
+# these four lines. Everywhere else the owner comes from REGISTRY_HOST and the repository
+# owner, and `scripts/verify.py registry` enforces it.
 RUN --mount=type=bind,from=ghcr.io/hr-mes/athanor-forge-tier0-repo:latest,source=/,target=/tmp/tier0-repo \
     --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
     base_kernel=$(rpm -qa kernel kernel-core 'kernel-modules*' 'kernel-uki-virt*') && \
@@ -146,18 +150,13 @@ RUN dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs fla
 COPY system/scripts/ /scripts/
 
 
-# TPM 2.0 PCR Sealing Provisioning Service & Script for LUKS /var/home
-COPY forge/specs/athanor-secure-boot/SOURCES/usr/libexec/athanor-tpm-luks-seal.sh /usr/libexec/athanor-tpm-luks-seal.sh
-COPY forge/specs/athanor-secure-boot/SOURCES/usr/lib/systemd/system/athanor-tpm-luks-seal.service /usr/lib/systemd/system/athanor-tpm-luks-seal.service
-RUN chmod +x /usr/libexec/athanor-tpm-luks-seal.sh
-
 # Custom SELinux policy modules. athanor-selinux installs its CIL modules under
 # /usr/share/selinux/packages, but a .cil placed there is not active until it is loaded
 # into the policy store with `semodule -i`; there is no OSTree-safe %post to do it (the
 # scriptlet was purged for immutability), so the modules were dead files. Load them at
 # build time here, which writes them into /etc/selinux/targeted and bakes them into the
-# image. This activates athanor_nix_daemon (lets PID1 open the Nix daemon socket under
-# enforcing) and athanor_scx, which had never been loaded.
+# image. This activates athanor_nix_daemon (the Nix store, socket and daemon types and
+# their file contexts) and athanor_scx, which had never been loaded.
 RUN if ls /usr/share/selinux/packages/*.cil >/dev/null 2>&1; then \
         echo "Loading custom SELinux policy modules..." && \
         semodule -i /usr/share/selinux/packages/*.cil; \
@@ -178,7 +177,7 @@ RUN /usr/libexec/athanor-update/render-policy --registry "${IMAGE_REGISTRY}" --k
 
 # Declarative Systemd presets & sysusers
 RUN authselect enable-feature with-systemd-homed && \
-    systemctl enable tetragon.service systemd-sysext.service systemd-homed.service athanor-tpm-rollback-check.service athanor-tpm-rollback-update.service athanor-tpm-luks-seal.service && systemd-sysusers && systemctl preset-all && systemctl --global preset-all
+    systemctl enable tetragon.service systemd-sysext.service systemd-homed.service && systemd-sysusers && systemctl preset-all && systemctl --global preset-all
 
 # Stage 2 switch (doc_shell.md, section 8, item 2): the COSMIC shell is gone, our shell is
 # enabled for every user, and each bus name it owns has exactly one activation file.

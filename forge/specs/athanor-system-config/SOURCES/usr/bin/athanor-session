@@ -14,7 +14,9 @@ systemctl --user stop athanor-session.target
 systemctl --user reset-failed
 
 # A colon-separated list, most specific first, as the specification reads it: COSMIC's
-# own components and the portals recognise the desktop by its second name.
+# own components and the portals recognise the desktop by its second name. The user
+# manager reads the same value from /usr/lib/environment.d/50-athanor-desktop.conf;
+# keep the two equal.
 export XDG_CURRENT_DESKTOP=Athanor:COSMIC
 export XDG_SESSION_TYPE=wayland
 

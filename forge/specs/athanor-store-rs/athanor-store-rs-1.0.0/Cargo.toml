@@ -1,6 +1,7 @@
 [package]
 name = "athanor-store-rs"
 version = "1.0.0"
+license = "GPL-3.0-or-later"
 edition = "2021"
 description = "Athanor OS Universal App Store Daemon (Flatpak/OCI)"
 

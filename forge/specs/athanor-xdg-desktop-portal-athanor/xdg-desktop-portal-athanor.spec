@@ -2,40 +2,66 @@
 %global crate_dir forge/specs/athanor-%{name}/%{name}-%{version}
 Name:           xdg-desktop-portal-athanor
 Version:        1.0.0
-Release:        6%{?dist}
-Summary:        Athanor OS Desktop Portal (File Chooser)
+Release:        7%{?dist}
+Summary:        Athanor backend for xdg-desktop-portal, and the session's choice of backends
 
 License:        GPL-3.0-or-later
 URL:            https://github.com/hr-mes/athanor-forge
 
 
-BuildRequires:  rust cargo pkgconf-pkg-config openssl-devel
-Requires:       athanor-shell-rs >= 1.0.0-38
+BuildRequires:  rust cargo gcc pkgconf-pkg-config glib2-devel
+# The frontend, and every backend athanor-portals.conf names (doc_portal.md, PT1).
+Requires:       xdg-desktop-portal
+Requires:       xdg-desktop-portal-gtk
+Requires:       gnome-keyring
+# The GNOME schemas the Settings interface serves (PT5).
+Requires:       gsettings-desktop-schemas
 
 %description
-Athanor OS backend of the XDG Desktop Portal for the file chooser, which opens a single file through the chooser of athanor-shell-rs. Only the owner of org.freedesktop.portal.Desktop may call it.
+Athanor's backend for xdg-desktop-portal (doc_portal.md). It serves the Settings
+interface: org.freedesktop.appearance, derived from the GNOME interface and accessibility
+keys, and the GNOME namespaces GTK and libadwaita read through the portal. It answers only
+the owner of org.freedesktop.portal.Desktop and runs as a confined user unit, activated by
+the bus.
+
+The package also ships athanor-portals.conf, which chooses the backend of every portal
+interface in the Athanor session and offers none that it does not list.
 
 %prep
 # Built in place from the workspace checkout: nothing to unpack.
 
 %build
 %set_build_flags
-# cargo generate-lockfile // FORBIDDEN BY RULE 4 (Offline Build)
 cargo build --release --locked -p %{name}
 
 %install
 install -D -m 0755 target/release/%{name} %{buildroot}%{_libexecdir}/%{name}
-
-# D-Bus session service and portal definition, from the crate directory.
+install -D -m 0644 %{crate_dir}/xdg-desktop-portal-athanor.service %{buildroot}/usr/lib/systemd/user/xdg-desktop-portal-athanor.service
 install -D -m 0644 %{crate_dir}/org.freedesktop.impl.portal.desktop.athanor.service %{buildroot}%{_datadir}/dbus-1/services/org.freedesktop.impl.portal.desktop.athanor.service
 install -D -m 0644 %{crate_dir}/athanor.portal %{buildroot}%{_datadir}/xdg-desktop-portal/portals/athanor.portal
+install -D -m 0644 %{crate_dir}/athanor-portals.conf %{buildroot}%{_datadir}/xdg-desktop-portal/athanor-portals.conf
 
 %files
 %{_libexecdir}/%{name}
+/usr/lib/systemd/user/xdg-desktop-portal-athanor.service
 %{_datadir}/dbus-1/services/org.freedesktop.impl.portal.desktop.athanor.service
 %{_datadir}/xdg-desktop-portal/portals/athanor.portal
+%{_datadir}/xdg-desktop-portal/athanor-portals.conf
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
+- The backend is rewritten to serve Settings (doc_portal.md, PT5): the appearance from the
+  GNOME colour-scheme, accent-color and high-contrast keys, or the computed accent of the
+  wallpaper mode, and the GNOME namespaces whole, with SettingChanged for every change.
+- athanor-portals.conf chooses every backend with default=none (PT1): FileChooser, Access
+  and Inhibit on gtk; Secret on gnome-keyring; ScreenCast, Screenshot and Background off
+  until this backend implements them, since no installed backend does. athanor.portal
+  loses UseIn.
+- The athanor-shell-rs file chooser leaves, with its Requires, the MicroVM path and its
+  fabricated virtio-fs tunnel, and the unconditional writable flag (PT14). Papers and every
+  other application open and save through the gtk chooser.
+- A systemd user unit with Landlock confinement replaces transient activation (PT3). Only
+  the owner of org.freedesktop.portal.Desktop may call the backend, as in release 6.
 * Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
 - The camera, microphone and location interfaces are removed, with the privacy prompt they
   used. xdg-desktop-portal 1.18.4 defines no backend interface for any of the three, so it

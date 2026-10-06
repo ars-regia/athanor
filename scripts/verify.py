@@ -65,6 +65,10 @@ PRUNE = {"target", ".git", "repo-cache", ".cache", "node_modules",
          "experimental"}
 
 
+# Units that sealed LUKS to the TPM or bumped its rollback counter on their own (D42, issue #148).
+AUTO_TPM_UNITS = ("athanor-tpm-luks-seal", "athanor-tpm-rollback-check", "athanor-tpm-rollback-update")
+
+
 def walk(base, suffix):
     """os.walk con potatura: rglob su questo repo entra in target/ (decine di
     migliaia di file) e su un filesystem montato ci mette minuti."""
@@ -414,22 +418,31 @@ def update_trust_problems(root=None):
     if override.exists():
         problems.append(f"{rel(override)}: calls `bootc upgrade --stage`, a flag bootc 1.16 does not have")
     for literal in walk(root / "forge/specs/athanor-update", ""):
-        if literal.is_file() and "target" not in literal.parts and "vectors" not in literal.parts and "ghcr.io/hr-mes" in read(literal):
-            problems.append(f"{rel(literal)}: literal ghcr.io/hr-mes; the registry comes from the build's variables")
-    # D2: the Secure Boot daemon is retired, the TPM files of its package are not.
-    secure_boot = root / "forge/specs/athanor-secure-boot"
-    for source in walk(secure_boot, ".rs"):
+        if literal.is_file() and "target" not in literal.parts and "vectors" not in literal.parts:
+            for owner in literal_owners(read(literal)):
+                problems.append(f"{rel(literal)}: literal registry owner {owner}; "
+                                f"the registry comes from the build's variables")
+    # D2: the Secure Boot daemon is retired. D42 (issue #148): nothing in the image seals LUKS to
+    # the TPM or increments a rollback counter by itself, so none of these units may be shipped.
+    for source in walk(root / "forge/specs/athanor-secure-boot", ".rs"):
         if "org.athanor.SecureBoot" in read(source):
             problems.append(f"{rel(source)}: serves org.athanor.SecureBoot, a name no bus policy lets it own (retired by D2)")
-    if (secure_boot / "athanor-secure-boot.spec").exists():
+    for spec in walk(root / "forge/specs", ".spec"):
         # The changelog may name what was retired: only what the spec installs counts.
-        text = read(secure_boot / "athanor-secure-boot.spec").split("%changelog", 1)[0]
+        text = read(spec).split("%changelog", 1)[0]
         if "athanor-secure-boot.service" in text:
-            problems.append("athanor-secure-boot.spec: still ships athanor-secure-boot.service (retired by D2)")
-        for kept in ("athanor-tpm-luks-seal.sh", "athanor-tpm-luks-seal.service", "athanor-tpm-rollback-check.service",
-                     "athanor-tpm-rollback-update.service", "10-rollback-check.conf"):
-            if kept not in text or not list(walk(secure_boot / "SOURCES", kept)):
-                problems.append(f"athanor-secure-boot: {kept} must stay; system/Containerfile and the rollback check use it")
+            problems.append(f"{rel(spec)}: still ships athanor-secure-boot.service (retired by D2)")
+        for unit in AUTO_TPM_UNITS:
+            if unit in text:
+                problems.append(f"{rel(spec)}: ships {unit}, which seals or counts without the user's action (D42)")
+    for tree in ("forge", "system"):
+        for found in walk(root / tree, ""):
+            if found.is_file() and any(found.name.startswith(unit) for unit in AUTO_TPM_UNITS):
+                problems.append(f"{rel(found)}: {found.name} is shipped; D42 forbids auto-sealing and the rollback-counter units")
+    for name in ("system/Containerfile", "system/athanor-install.ks"):
+        installer = root / name
+        if installer.exists() and any(unit in read(installer) for unit in AUTO_TPM_UNITS):
+            problems.append(f"{name}: names one of {', '.join(AUTO_TPM_UNITS)} (D42)")
     return problems
 
 
@@ -607,6 +620,75 @@ def needs_graph(root=None):
     return problems, graph
 
 
+REGISTER = "docs/architecture/shell-features.md"
+REGISTER_STATUSES = ("have", "partial", "missing", "excluded (proposed)")
+
+
+def register_count_problems(text):
+    """Where the Counts section of the shell feature register differs from its rows: each
+    `## <surface>` table of `| F-... |` rows against the `### <surface>` table under Counts."""
+    rows, stated = {}, {}
+    surface, in_counts = None, False
+    for line in text.split("\n"):
+        if line.startswith("## "):
+            surface, in_counts = line[3:].strip(), line.strip() == "## Counts"
+            continue
+        if in_counts and line.startswith("### "):
+            surface = line[4:].strip()
+            stated[surface] = {}
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if in_counts and surface in stated and len(cells) == 2 and cells[1].isdigit():
+            stated[surface][cells[0]] = int(cells[1])
+        elif not in_counts and surface and cells[0].startswith("F-") and len(cells) >= 5:
+            rows.setdefault(surface, []).append((cells[0], cells[3]))
+
+    problems = []
+    for surface, entries in rows.items():
+        for entry, status in entries:
+            if status not in REGISTER_STATUSES:
+                problems.append(f"{REGISTER}: {entry} has the unknown status '{status}'")
+        if surface not in stated:
+            problems.append(f"{REGISTER}: surface '{surface}' has no table under Counts")
+            continue
+        actual = {s: sum(1 for _, st in entries if st == s) for s in REGISTER_STATUSES}
+        actual["total"] = len(entries)
+        for status, n in actual.items():
+            if stated[surface].get(status) != n:
+                problems.append(f"{REGISTER}: Counts of '{surface}' say {status} "
+                                f"{stated[surface].get(status)}, the rows give {n}")
+    for surface in stated.keys() - rows.keys():
+        problems.append(f"{REGISTER}: Counts name '{surface}', which has no rows")
+    return problems
+
+
+FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
+CODE_SPAN = re.compile(r"(`+)(?!`).*?(?<!`)\1(?!`)", re.S)
+LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
+
+
+def markdown_links(text):
+    """(label, target) of every inline link outside code. Fenced blocks (``` or ~~~, closed
+    only by a run of the same character at least as long) and code spans are examples, not
+    links: a fence left open runs to the end of the file, as CommonMark has it."""
+    prose, fence = [], None
+    for line in text.splitlines():
+        m = FENCE.match(line)
+        if fence is None:
+            if m:
+                fence = m.group(1)
+            else:
+                prose.append(line)
+        elif m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) \
+                and not line.strip().lstrip(fence[0]):
+            fence = None
+            prose.append("")
+    # A code span never crosses a paragraph, so a stray backtick stays in its own.
+    paragraphs = "\n".join(prose).split("\n\n")
+    plain = "\n\n".join(CODE_SPAN.sub(" ", para) for para in paragraphs)
+    return [(m.group(1), m.group(2)) for m in LINK.finditer(plain)]
+
+
 @check("docs", "I link nella documentazione risolvono e sono portabili")
 def check_docs():
     r = Result()
@@ -619,20 +701,24 @@ def check_docs():
         if not f.exists():
             continue
         base = f.parent
-        for m in re.finditer(r"\[([^\]]*)\]\(([^)]+)\)", read(f)):
-            link = m.group(2).split("#")[0].strip()
+        for label, target in markdown_links(read(f)):
+            link = target.split("#")[0].strip()
             if not link or link.startswith(("http://", "https://", "mailto:")):
                 continue
             if link.startswith("file://"):
                 r.fail(f"{t}: link assoluto della macchina di sviluppo -> {link[:70]}")
                 continue
             if not (base / link).exists():
-                r.fail(f"{t}: link rotto [{m.group(1)[:30]}] -> {link}")
+                r.fail(f"{t}: link rotto [{label[:30]}] -> {link}")
     problems, graph = needs_graph()
     for problem in problems:
         r.fail(problem)
     edges = sum(len(targets) for targets in graph.values())
     r.note(f"Needs graph: {len(set(graph) | set().union(*graph.values()))} requirements, {edges} edges")
+    register = ROOT / REGISTER
+    if register.exists():
+        for problem in register_count_problems(read(register)):
+            r.fail(problem)
     return r
 
 
@@ -932,6 +1018,232 @@ def boundary_problems(root):
 def check_boundary():
     r = Result()
     for problem in boundary_problems(ROOT):
+        r.fail(problem)
+    return r
+
+
+# Placeholders the unit tests use for an owner: they name no real registry namespace.
+PLACEHOLDER_OWNERS = {"owner", "o"}
+# Where the pipeline names its images. system/Containerfile is outside on purpose: its tier
+# mounts are the one literal decision 12 of the 2026-10-05 re-audit keeps (see the comment there).
+REGISTRY_DIRS = (".github/workflows", "scripts", "forge/scripts")
+REGISTRY_FILES = ("Justfile", "forge/Justfile", "system/Justfile")
+# The file types that name images: workflows, scripts, recipes and container builds.
+REGISTRY_SUFFIXES = {".yml", ".yaml", ".sh", ".py", ".just"}
+REGISTRY_NAMES = {"Justfile", "Containerfile"}
+
+
+def literal_owners(text):
+    """The hard-coded ghcr.io owners in text: ghcr.io/ followed by a name, not by a variable."""
+    found = re.findall(r"ghcr\.io/([A-Za-z0-9][A-Za-z0-9_.-]*)", text)
+    return [f"ghcr.io/{o}" for o in dict.fromkeys(found) if o not in PLACEHOLDER_OWNERS]
+
+
+def registry_problems(root):
+    """Every image the pipeline names comes from REGISTRY_HOST and the repository owner, each
+    with a default, never from a literal owner (standing rule of 2026-09-10)."""
+    root = Path(root)
+    paths = [root / f for f in REGISTRY_FILES]
+    for base in REGISTRY_DIRS:
+        paths += walk(root / base, "")
+    problems = []
+    for path in sorted(paths):
+        relative = path.relative_to(root)
+        # Unit test fixtures need a literal owner to prove the check reports one.
+        if (not path.is_file() or relative.parts[:2] == ("scripts", "tests")
+                or (path.suffix not in REGISTRY_SUFFIXES and path.name not in REGISTRY_NAMES)):
+            continue
+        for i, line in enumerate(read(path).split("\n"), 1):
+            for owner in literal_owners(line):
+                problems.append(f"{relative.as_posix()}:{i}: literal registry owner {owner}; use "
+                                f"REGISTRY_HOST and the repository owner, each with a default")
+    return problems
+
+
+@check("registry", "Images come from REGISTRY_HOST and the repository owner, never a literal owner")
+def check_registry():
+    r = Result()
+    for problem in registry_problems(ROOT):
+        r.fail(problem)
+    return r
+
+
+# Golden rules 2 and 3 of docs/architecture/doc_forge_development_guide.md.
+SPEC_SECTION = re.compile(
+    r"^%(package|description|prep|generate_buildrequires|conf|build|install|check|clean|files|"
+    r"changelog|pre|post|preun|postun|pretrans|posttrans|preuntrans|postuntrans|verify|"
+    r"(?:trans)?filetrigger(?:in|un|postun)|trigger(?:prein|in|un|postun))\b")
+SCRIPTLETS = {"pre", "post", "preun", "postun", "pretrans", "posttrans", "preuntrans",
+              "postuntrans", "verify", "triggerprein", "triggerin", "triggerun", "triggerpostun",
+              "filetriggerin", "filetriggerun", "filetriggerpostun", "transfiletriggerin",
+              "transfiletriggerun", "transfiletriggerpostun"}
+# /usr and /etc, spelled out or through the macros that expand below them.
+IMAGE_PATH = (r"(?:/usr|/etc)\b|%\{?_(?:sysconfdir|prefix|exec_prefix|bindir|sbindir|libdir|"
+              r"libexecdir|datadir|datarootdir|includedir|mandir|docdir|unitdir|userunitdir|"
+              r"presetdir|userpresetdir|tmpfilesdir|sysusersdir|udevrulesdir|modprobedir|"
+              r"sysctldir|environmentdir)\b")
+MUTATION = re.compile(r"(?:^|[\s;&|(])(?:cp|mv|install|chmod|chown|chgrp|ln|rm|mkdir|touch|tee|"
+                      r"truncate|rsync|sed\s+-i\S*)\s[^;&|]*?(?:" + IMAGE_PATH + r")"
+                      r"|>>?\s*(?:" + IMAGE_PATH + r")")
+WEAKENING = re.compile(r"\b(?:repo_)?gpgcheck\s*=\s*(?:0|false|no)\b|--nogpgcheck\b"
+                       r"|%undefine\s+_(?:fortify_source|hardened_build)\b"
+                       r"|%(?:define|global)\s+_(?:fortify_level|hardened_build)\s+0\b"
+                       r"|-U_FORTIFY_SOURCE\b|-D_FORTIFY_SOURCE=0\b|-fno-stack-protector\b"
+                       r"|-fcf-protection=none\b|-z\s*(?:norelro|execstack)\b|-no-pie\b|-fno-PIE\b")
+
+
+def forge_rule_problems(root):
+    """Rule 2: no scriptlet writes under /usr or /etc, which belong to the image (%install and
+    tmpfiles do). Rule 3: no spec turns off a signature check or a hardening flag."""
+    root = Path(root)
+    problems = []
+    for path in sorted(root.glob("forge/specs/*/*.spec")):
+        relative = path.relative_to(root).as_posix()
+        section = None
+        for i, line in enumerate(read(path).split("\n"), 1):
+            header = SPEC_SECTION.match(line)
+            if header:
+                section = header.group(1)
+            if section == "changelog":
+                break
+            if header or line.lstrip().startswith("#"):
+                continue
+            if section in SCRIPTLETS and MUTATION.search(line):
+                problems.append(f"{relative}:{i}: rule 2, %{section} writes under /usr or /etc: "
+                                f"install the file in %install or create it with tmpfiles.d")
+            if WEAKENING.search(line):
+                problems.append(f"{relative}:{i}: rule 3, turns off a signature check or a "
+                                f"hardening flag")
+    return problems
+
+
+@check("forge-rules", "Specs keep golden rules 2 and 3 of the forge guide")
+def check_forge_rules():
+    r = Result()
+    for problem in forge_rule_problems(ROOT):
+        r.fail(problem)
+    return r
+
+
+# --------------------------------------------------------------------------- #
+# licence: one licence for our own code (maintainer decision A2-3, 2026-10-05)
+# --------------------------------------------------------------------------- #
+
+OWN_LICENCE = "GPL-3.0-or-later"
+# Specs that package somebody else's software, by repository path: they declare
+# upstream's licence, which must be an expression of known SPDX identifiers. Every
+# other spec, every Cargo.toml and every nfpm `license:` field is our own code and
+# must say OWN_LICENCE.
+UPSTREAM_SPECS = {
+    "forge/specs/athanor-ananicy/ananicy-cpp.spec",
+    "forge/specs/athanor-bat/bat.spec",
+    "forge/specs/athanor-bpf-linker/athanor-bpf-linker.spec",
+    "forge/specs/athanor-cliphist/athanor-cliphist.spec",
+    "forge/specs/athanor-cosign/athanor-cosign.spec",
+    "forge/specs/athanor-dart-sass/athanor-dart-sass.spec",
+    "forge/specs/athanor-matugen/athanor-matugen.spec",
+    "forge/specs/athanor-rosenpass/athanor-rosenpass.spec",
+    "forge/specs/athanor-syft/athanor-syft.spec",
+    "forge/specs/athanor-tetragon/athanor-tetragon.spec",
+    "forge/specs/azoth/microvm/azoth-microvm.spec",
+    "forge/specs/cosmic-comp/cosmic-comp.spec",
+}
+# Crates whose manifests agents may not edit without the maintainer's approval.
+PROTECTED_CRATES = {"system/confidential_computing/athanor-attestation/Cargo.toml"}
+# Files that carry packaging metadata outside Cargo.toml and *.spec.
+NFPM_FILES = ["flake.nix"]
+# The SPDX identifiers the repository actually uses. A new one is added here on purpose.
+SPDX_IDS = {
+    "0BSD", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "BSL-1.0", "CC0-1.0",
+    "GPL-2.0-only", "GPL-2.0-or-later", "GPL-3.0-only", "GPL-3.0-or-later", "ISC",
+    "LGPL-2.1-or-later", "LGPL-3.0-or-later", "MIT", "MPL-2.0", "Unicode-3.0",
+    "Unlicense", "Zlib",
+}
+SPDX_EXCEPTIONS = {"LLVM-exception", "Linux-syscall-note"}
+
+
+def spdx_problem(expr):
+    """Why `expr` is not an SPDX expression of known identifiers, or None."""
+    tokens = re.findall(r"\(|\)|[^\s()]+", expr)
+    if not tokens:
+        return "empty"
+    depth, expect = 0, "id"  # id: identifier or "(" ; exc: exception id ; op: operator or ")"
+    for tok in tokens:
+        if tok == "(":
+            if expect != "id":
+                return "unexpected '('"
+            depth += 1
+        elif tok == ")":
+            depth -= 1
+            if expect != "op" or depth < 0:
+                return "unbalanced ')'"
+        elif expect == "id":
+            if tok not in SPDX_IDS:
+                return f"'{tok}' is not a known SPDX identifier"
+            expect = "op"
+        elif expect == "exc":
+            if tok not in SPDX_EXCEPTIONS:
+                return f"'{tok}' is not a known SPDX exception"
+            expect = "op"
+        elif tok in ("AND", "OR"):
+            expect = "id"
+        elif tok == "WITH":
+            expect = "exc"
+        else:
+            return f"expected AND/OR/WITH, found '{tok}'"
+    if expect != "op" or depth:
+        return "incomplete expression"
+    return None
+
+
+def licence_problems(root=None):
+    root = Path(root or ROOT)
+    out = []
+    git = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "--cached", "--others", "--exclude-standard"],
+        capture_output=True, text=True)
+    if git.returncode:
+        return [f"cannot list the repository files: {git.stderr.strip()}"]
+    files = [f for f in git.stdout.split("\n") if (root / f).is_file()]
+    for f in sorted(files):
+        name = f.rsplit("/", 1)[-1]
+        if name == "Cargo.toml":
+            try:
+                pkg = tomllib.loads(read(root / f)).get("package")
+            except tomllib.TOMLDecodeError as e:
+                out.append(f"{f}: unreadable manifest ({e})")
+                continue
+            if pkg is None:
+                continue
+            lic = pkg.get("license")
+            if lic != OWN_LICENCE:
+                note = " (change awaits maintainer approval: protected crate)" \
+                    if f in PROTECTED_CRATES else ""
+                out.append(f"{f}: license = {lic!r}, expected {OWN_LICENCE!r}{note}")
+        elif name.endswith(".spec"):
+            m = re.search(r"^License:\s*(.*?)\s*$", read(root / f), re.M)
+            if not m:
+                out.append(f"{f}: no License: field")
+            elif f in UPSTREAM_SPECS:
+                why = spdx_problem(m.group(1))
+                if why:
+                    out.append(f"{f}: License: {m.group(1)} ({why})")
+            elif m.group(1) != OWN_LICENCE:
+                out.append(f"{f}: License: {m.group(1)}, expected {OWN_LICENCE}")
+        elif f in NFPM_FILES:
+            for n, line in enumerate(read(root / f).split("\n"), 1):
+                m = re.match(r"""^\s*license:\s*["']?([^"'\s]*)""", line)
+                if m and m.group(1) != OWN_LICENCE:
+                    out.append(f"{f}:{n}: nfpm license: {m.group(1)}, expected {OWN_LICENCE}")
+    if not (root / "LICENSE").is_file():
+        out.append("LICENSE: missing at the repository root")
+    return out
+
+
+@check("licence", "own crates and specs declare GPL-3.0-or-later, upstream specs a valid SPDX expression")
+def check_licence():
+    r = Result()
+    for problem in licence_problems():
         r.fail(problem)
     return r
 

@@ -66,7 +66,7 @@ What the platform gives us today:
 | cosmic-launcher, cosmic-app-library, pop-launcher | launcher, application library, the launcher's search backend; cosmic-launcher also serves Alt+Tab | 3 (P4 found they work without the panel); cosmic-launcher only together with a window switcher on Alt+Tab (amended 2026-10-06, A2-24, #159) | our launcher and application library (`doc_launcher.md`); the Alt+Tab switcher of `doc_overview.md` (section 7 there) |
 | cosmic-greeter as locker | session lock | 4 | our lock, on the greeter's authentication code |
 | cosmic-osd | on-screen display, end-of-session dialogs and the session's only polkit agent | 4, in one step | our polkit agent and `athanor-osd` (`doc_lock_and_prompts.md`, `doc_osd.md`) |
-| cosmic-settings, cosmic-randr | Settings application, output configuration | 6 | our Settings (`doc_settings.md`); `athanor-settings-rs` is not revived, only mined |
+| cosmic-settings, cosmic-randr | Settings application, output configuration | 6 | our Settings (`doc_settings.md`); `athanor-settings-rs` was deleted on 2026-10-05 and stays in history to be mined |
 | cosmic-workspaces | overview | 7 | our overview (`doc_overview.md`) |
 | cosmic-settings-daemon, cosmic-idle, cosmic-bg | configuration bus (the media keys leave in stage 4, with `athanor-osd`); `org.freedesktop.ScreenSaver` and idle policy; wallpaper | 8 | `athanor-idle`, `athanor-wallpaper` and `athanor-sessiond`; the launch broker `athanor-broker` is a new component of stage 8 (`doc_session_daemons.md`) |
 
@@ -178,7 +178,7 @@ COSMIC's applications (`cosmic-files`, `cosmic-term`, `cosmic-edit`, `cosmic-sto
 4. Existing installs move from `ostree-unverified-registry:` to a signed reference by an explicit, tested step.
 5. The helper is a root D-Bus service with two methods and no arguments, apply and go back, one polkit action each in the `os.athanor.*` namespace, the subject taken from the bus sender through `athanor_bus_api::polkit`. Apply takes logind's defaults for a reboot (SH11); going back is `auth_admin` for every subject. Every new unit is hardened, and the user-side processes restrict themselves with Landlock at start, as the greeter does.
 6. The state directory is declared in `tmpfiles.d` with owner and mode, apart from the directory that holds the released disk key.
-7. "Secure Boot on" means `SecureBoot=1`, `SetupMode=0`, shim validation not disabled and kernel lockdown active, each published separately. The shipped `athanor-secure-boot` daemon cannot own its bus name today; `doc_update_trust.md`, D2, retires it and keeps the TPM files its package also ships.
+7. "Secure Boot on" means `SecureBoot=1`, `SetupMode=0`, shim validation not disabled and kernel lockdown active, each published separately. The `athanor-secure-boot` daemon could not own its bus name; `doc_update_trust.md`, D2, retired it and its package is gone.
 8. Registry retention never removes an image, or the signature of an image, that a supported machine may still boot, download or go back to. `forge/scripts/clean_ghcr.sh` keeps two tagged versions per package today and counts signatures as versions.
 9. Every published image carries a version label of its own. Today two builds a day apart are both `43.20260916.0`, and SH11 names the running version to the user.
 
@@ -274,7 +274,7 @@ P4 replaces the two spikes revision 4 reserved for stage 2: the security-context
 - `doc_update_trust.md` is a new document (SH12).
 - `doc_platform_experience.md`, section 3, names "the native GTK4/Relm4 panel and the horizontal strip of `Niri`". It takes a pointer to this document.
 - `doc_kernel_profile.md`, the note on the existing override that "stages updates automatically": it takes a pointer to SH11, which removes that override.
-- `NEXT.md` takes stage 1 as a block with the gate of section 7, and stage 2 as a second block with the gate of section 8.
+- The GitHub milestone `iso-v0` takes stage 1 as an issue with the gate of section 7, and stage 2 as a second issue with the gate of section 8.
 - `doc_bar.md` is a new document, written after spike P4 (section 3).
 - `CLAUDE.md`, "Desktop GTK4/Wayland": unchanged.
 

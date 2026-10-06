@@ -2,7 +2,7 @@
 name = "athanor-compositor-client"
 version = "1.0.0"
 edition = "2021"
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "The shell's client of the compositor: windows, workspaces, outputs, actions and application launch"
 authors = ["Athanor Forge <forge@athanor.os>"]
 

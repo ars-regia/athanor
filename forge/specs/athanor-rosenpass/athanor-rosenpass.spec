@@ -3,7 +3,7 @@ Name:           athanor-rosenpass
 Version:        0.2.1
 Release:        1%{?dist}
 Summary:        Post-Quantum WireGuard Key Exchange (La Via Purista)
-License:        MIT
+License:        MIT OR Apache-2.0
 URL:            https://github.com/rosenpass/rosenpass
 Source0:        rosenpass-0.2.1.tar.gz
 

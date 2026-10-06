@@ -4,7 +4,7 @@ Version:        43.0.0
 Release:        11%{?dist}
 Summary:        Athanor OS Base Configuration (Systemd, Branding, GPG)
 
-License:        MIT
+License:        GPL-3.0-or-later
 URL:            https://github.com/hr-mes/athanor-forge
 BuildArch:      noarch
 

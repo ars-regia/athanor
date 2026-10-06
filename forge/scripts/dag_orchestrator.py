@@ -154,6 +154,26 @@ def load_package_manifest():
             return json.load(f)
     return {}
 
+# Packages that dedicated workflows build, outside the DAG.
+EXTERNAL_PACKAGES = {"kernel", "kernel-forge"}
+
+
+def spec_dir_for(pkg):
+    """The spec directory of a custom package: specs/athanor-<pkg>, else specs/<pkg>."""
+    spec_dir = os.path.join(SPECS_DIR, f"athanor-{pkg}")
+    if not os.path.exists(spec_dir):
+        spec_dir = os.path.join(SPECS_DIR, pkg)
+    return spec_dir
+
+
+def custom_spec_dirs(manifest):
+    """The spec directories of the custom packages the DAG builds."""
+    return sorted(
+        spec_dir_for(pkg)
+        for pkg in set(manifest.get("custom_packages", [])) - EXTERNAL_PACKAGES
+    )
+
+
 def build_dag(manifest):
     """Constructs the dependency graph and node metadata."""
     custom_pkgs = manifest.get("custom_packages", [])
@@ -172,7 +192,7 @@ def build_dag(manifest):
     all_upstream = set(upstream_core + upstream_desktop + upstream_media + upstream_cli)
     
     # Exclude external packages handled by dedicated workflows (e.g., self-hosted kernel)
-    external_pkgs = {"kernel", "kernel-forge"}
+    external_pkgs = EXTERNAL_PACKAGES
     
     all_nodes = (all_custom | all_upstream | set(flatpaks)) - external_pkgs
     
@@ -214,9 +234,7 @@ def build_dag(manifest):
     for pkg in all_custom:
         if pkg not in all_nodes:
             continue
-        spec_dir = os.path.join(SPECS_DIR, f"athanor-{pkg}")
-        if not os.path.exists(spec_dir):
-            spec_dir = os.path.join(SPECS_DIR, pkg)
+        spec_dir = spec_dir_for(pkg)
         spec_files = glob.glob(os.path.join(spec_dir, "*.spec"))
         
         hash_val = package_hash(spec_dir)
@@ -446,4 +464,10 @@ def main():
             f.write(f"has_changes={has_changes}\n")
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] == ["--list-spec-dirs"]:
+        spec_dirs = custom_spec_dirs(load_package_manifest())
+        if not spec_dirs:
+            sys.exit(f"dag_orchestrator: no custom_packages in {CONFIG_PATH}")
+        print("\n".join(spec_dirs))
+    else:
+        main()
