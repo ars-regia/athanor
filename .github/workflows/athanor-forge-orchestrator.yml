@@ -67,10 +67,14 @@ jobs:
     needs: [lint]
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
-    # Lookups run 8 at a time and the first failure ends the run. One lookup that retry.sh
-    # keeps retrying takes up to ~4 minutes of waits plus the attempts themselves (~2.5 more
-    # at skopeo's own timeouts); the rest of the job is a checkout and a few seconds of hashing.
-    timeout-minutes: 15
+    # Worst case of the registry lookups (35 custom packages, 8 at a time, first failure
+    # ends the run). One lookup under retry.sh: 5 attempts of at most 30 s each
+    # (registry_probe.sh --command-timeout) plus 15+30+60+120 = 225 s of waits = 375 s. A
+    # failing registry therefore ends the run within 375 s. For a slow registry where every
+    # wave has a lookup that only succeeds on its last attempt: ceil(35/8) = 5 waves x 375 s
+    # = 1875 s = 31.25 min. Checkout and hashing 35 packages take under 2 min: 40 minutes
+    # leaves about 7 minutes of margin.
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: forge
