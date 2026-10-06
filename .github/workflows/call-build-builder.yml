@@ -64,7 +64,7 @@ jobs:
           echo "Building OCI image purely via Nix Flake..."
           nix build --extra-experimental-features "nix-command flakes" ../#builderImage
           # The name the flake gives the image, whatever registry it was written for.
-          loaded=$(podman load -i result | sed -n 's/^Loaded image(s)\{0,1\}: //p')
+          loaded=$(podman load -i result | sed -n 's/^Loaded image[^:]*: //p')
           [[ -n $loaded ]] || { echo "podman load reported no image name" >&2; exit 1; }
           
           echo "${{ secrets.GITHUB_TOKEN }}" | podman login "${REGISTRY}" -u ${{ github.actor }} --password-stdin

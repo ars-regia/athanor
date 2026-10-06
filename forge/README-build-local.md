@@ -11,6 +11,7 @@ podman run --rm -v "$PWD:/workspace" -w /workspace/forge \
 
 The RPMs land in `forge/RPMS/`.
 
-`scripts/build_changed_specs.sh BASE BUILDER_IMAGE` does the same for every spec that
-changed since the commit `BASE`; Spec Build Check runs it on pull requests. It skips
-`specs/azoth`, which Kernel Build builds.
+`scripts/build_changed_specs.sh [--dry-run] BASE BUILDER_IMAGE` builds, one after the other,
+what Spec Build Check builds for the change since the commit `BASE`: the DAG's specs that
+changed, or all of them when the builder, `config/rpmmacros` or the shared build scripts
+changed. Directories the DAG does not build, such as `specs/azoth`, are skipped.
