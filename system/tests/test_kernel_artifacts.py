@@ -115,6 +115,28 @@ class Resolve(Tool):
         self.assertNotIn("nvidia_legacy_digest", got)
         self.assertEqual(got["nvidia_legacy_tag"], tag("legacy"))
 
+    def test_never_published_module_package_is_modules_missing(self):
+        # ghcr.io denies the bearer token for a package that does not exist yet (azoth-nvidia
+        # before the first NVIDIA build under an owner), instead of answering manifest unknown.
+        fx = published(branches=())
+        fx["unpublished"] = [f"{REG}/azoth-nvidia"]
+        self.registry(fx)
+        r = self.run_script("resolve")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        got = self.state_file()
+        self.assertEqual(got["state"], "modules-missing")
+        self.assertEqual(got["nvidia_open_tag"], tag("open"))
+        self.assertNotIn("nvidia_open_digest", got)
+        self.assertIn(f"{REG}/azoth-nvidia: denied", r.stderr)
+
+    def test_never_published_kernel_package_is_kernel_missing(self):
+        fx = published()
+        fx["unpublished"] = [f"{REG}/azoth"]
+        self.registry(fx)
+        r = self.run_script("resolve")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.state_file(), {"state": "kernel-missing", "nvr": NVR, "registry": REG})
+
     def test_absent_kernel_is_kernel_missing(self):
         fx = published()
         del fx["tags"][f"{REG}/azoth:{NVR}"]

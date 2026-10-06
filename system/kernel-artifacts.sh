@@ -104,6 +104,15 @@ probe_digest() {
   out=$(skopeo inspect --format '{{.Digest}}' "docker://$1" 2> "$TMP/err") || status=$?
   if [[ $status -ne 0 ]]; then
     grep -q 'manifest unknown' "$TMP/err" && return 0
+    # ghcr.io answers a package that was never published (azoth-nvidia before the first
+    # NVIDIA build under an owner) by denying the anonymous bearer token, not with manifest
+    # unknown. A private package gets the same answer and would be rebuilt and pushed
+    # again: the kernel artifacts are public by design, so the log names both readings.
+    if grep -qE 'Requesting bearer token: .*403' "$TMP/err"; then
+      local repo=${1%@*}
+      echo "kernel-artifacts: ${repo%:*}: denied, read as never published (or not public)" >&2
+      return 0
+    fi
     cat "$TMP/err" >&2
     return 1
   fi
