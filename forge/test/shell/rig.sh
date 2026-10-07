@@ -13,7 +13,7 @@
 #   rig.sh build-compositor-client  clippy, tests and release build of cc-probe into <out>/bin
 #   rig.sh build-shelld     clippy, tests and release build of athanor-shelld into <out>/bin
 #   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps) into <out>/bin, with the DT_NEEDED check
-#   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout)
+#   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout); passes ATHANOR_REQUIRE_QALC through
 #   rig.sh build-dock       clippy, tests and release build of athanor-dock (and athanor-apps) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-launcher   clippy, tests (qalc required) and release build of athanor-launcher and athanor-preview-render into <out>/bin, with the DT_NEEDED check
 #   rig.sh dock-roundtrip   the dock's surface off screen and back, three times, under cosmic-comp (BR7)
@@ -382,7 +382,7 @@ cargo)
     mkdir -p "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
-        -e CARGO_TARGET_DIR=/out/target -w /repo "$local_image:build" cargo "$@"
+        -e CARGO_TARGET_DIR=/out/target -e ATHANOR_REQUIRE_QALC -w /repo "$local_image:build" cargo "$@"
     ;;
 build-bar)
     mkdir -p "$out/bin" "$out/target"
