@@ -35,6 +35,11 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>) -> Result<Outcome, Failure> {
         ctx.store.set_migrated().map_err(storage)?;
         return Ok(Outcome::Done);
     }
+    if status.rollback_queued {
+        // A switch would stage over the queued return (doc_recovery.md, R5); the next boot
+        // tries again.
+        return Ok(Outcome::Waiting("rollback-queued"));
+    }
     let policy = crate::policy::in_force(&ctx.policy);
     if !policy.info.shipped {
         return Ok(Outcome::Waiting("policy-not-in-force"));
@@ -113,6 +118,15 @@ mod tests {
         std::fs::remove_file(&machine.policy.etc_registries).expect("unlink");
         let tools = Fake::booted(from_media(1000)).offering(SIGNED, 1000);
         assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Waiting("policy-not-in-force")));
+        assert!(tools.calls.borrow().is_empty() && !machine.store.migrated());
+    }
+
+    #[test]
+    fn a_queued_rollback_waits() {
+        let machine = Machine::new("migrate-rollback-queued", &["real/k1.pub"]);
+        let tools = Fake::booted(from_media(1000)).offering(SIGNED, 1000);
+        tools.status.borrow_mut().rollback_queued = true;
+        assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Waiting("rollback-queued")));
         assert!(tools.calls.borrow().is_empty() && !machine.store.migrated());
     }
 

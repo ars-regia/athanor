@@ -158,7 +158,17 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failu
     let storage = |_| Failure { code: ErrorCode::Storage, host: None };
     let newest = ctx.store.record_booted(status.booted.build_time).map_err(storage)?;
     let policy = crate::policy::in_force(&ctx.policy);
-    let (update, failure) = if offline { (local_update(ctx, &status), None) } else { online_update(ctx, &policy, &mut status) };
+    // A queued rollback leaves the booted digest (doc_recovery.md, R5): it is held, as GoBack()
+    // holds it, and nothing is downloaded, since a staged deployment would become the default
+    // of the next boot in place of the return.
+    let (update, failure) = if status.rollback_queued {
+        let held = ctx.store.set_held(&status.booted.digest).err().map(|_| Failure { code: ErrorCode::Storage, host: None });
+        (local_update(ctx, &status), held)
+    } else if offline {
+        (local_update(ctx, &status), None)
+    } else {
+        online_update(ctx, &policy, &mut status)
+    };
     if !offline && enforced(&policy, &status.booted) {
         // A machine whose signature object was never stored, or was lost, heals here. A
         // failure is not the check's: the reason below already says `no-signature`.
@@ -219,7 +229,7 @@ pub(crate) mod tests {
     impl Fake {
         pub(crate) fn booted(booted: Deployed) -> Self {
             Self {
-                status: RefCell::new(Status { booted, staged: None, rollback: None }),
+                status: RefCell::new(Status { booted, staged: None, rollback: None, rollback_queued: false }),
                 candidate: Err(Failure { code: ErrorCode::Network, host: Some("localhost:5000".into()) }),
                 download: Err(Failure { code: ErrorCode::Internal, host: None }),
                 metered: false,
@@ -352,6 +362,20 @@ pub(crate) mod tests {
         assert_eq!((state.last_error, state.last_successful_check), (ErrorCode::None, Some(5000)));
         assert!(machine.store.signature_dir(SIGNED).expect("dir").join("manifest.json").exists());
         assert_eq!(athanor_trust_state::read_owned_by(&machine.store.run.join("state.json"), std::os::unix::fs::MetadataExt::uid(&std::fs::metadata(&machine.root).expect("meta"))), Ok(state));
+    }
+
+    #[test]
+    fn a_queued_rollback_holds_the_booted_digest_and_downloads_nothing() {
+        for offline in [true, false] {
+            let machine = Machine::new(&format!("rollback-queued-{offline}"), &["real/k1.pub"]);
+            let tools = Fake::booted(deployed(&digest(2), 2000)).offering(&digest(3), 3000);
+            tools.status.borrow_mut().rollback = Some(deployed(&digest(1), 1000));
+            tools.status.borrow_mut().rollback_queued = true;
+            let state = run(&machine.ctx(&tools, 5000), offline).expect("state");
+            assert_eq!(machine.store.held(), Some(digest(2)));
+            assert_eq!(state.update, UpdateState::None);
+            assert!(!tools.called("candidate") && !tools.called("download"));
+        }
     }
 
     #[test]
