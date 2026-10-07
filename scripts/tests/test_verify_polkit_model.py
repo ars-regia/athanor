@@ -160,5 +160,64 @@ class PolkitModelTest(unittest.TestCase):
         self.assertIn("bad.policy", found[0])
         self.assertIn("cannot be checked", found[0])
 
+    def test_an_aliased_polkit_object_fails(self):
+        self.unreadable(
+            "var p = polkit;\n"
+            'p.addRule(function(action, subject) { if (action.id == "org.example.a") return p.Result.YES; });\n'
+        )
+
+    def test_a_bracket_read_of_the_action_id_fails(self):
+        self.unreadable(
+            "polkit.addRule(function(action, subject) {\n"
+            '    if (action.id == "org.example.a" || action["id"] == "org.example.b") return polkit.Result.YES;\n'
+            "});\n"
+        )
+
+    def test_an_aliased_action_fails(self):
+        self.unreadable(
+            "polkit.addRule(function(action, subject) {\n"
+            "    var id = action.id;\n"
+            '    if (action.id == "org.example.a" || id == "org.example.b") return polkit.Result.YES;\n'
+            "});\n"
+        )
+
+    def test_a_comment_marker_inside_a_string_hides_no_code(self):
+        self.unreadable(
+            "polkit.addRule(function(action, subject) {\n"
+            '    var u = "//"; if (action.id == "org.example.a") { return polkit.Result.NO; } '
+            'if (action.id.indexOf("org.") == 0) { return polkit.Result.YES; }\n'
+            "});\n"
+        )
+
+    def test_a_url_in_a_string_is_not_a_comment(self):
+        files = dict(FILES)
+        files[RULES_PATH] = RULES.replace(
+            "    if (action.id",
+            '    var doc = "https://example.org/x"; if (action.id',
+        )
+        self.assertEqual(problems(HEADER + ROWS, files), [])
+
+    def test_a_concatenated_action_id_fails(self):
+        self.unreadable(
+            "polkit.addRule(function(action, subject) {\n"
+            '    if (action.id == "org.example." + "a") return polkit.Result.YES;\n'
+            "});\n"
+        )
+
+    def test_an_aliased_result_fails(self):
+        self.unreadable(
+            "polkit.addRule(function(action, subject) {\n"
+            "    var r = polkit.Result;\n"
+            '    if (action.id == "org.example.a") { if (subject.local) return r.YES; return polkit.Result.NO; }\n'
+            "});\n"
+        )
+
+    def test_a_renamed_action_parameter_fails(self):
+        self.unreadable(
+            "polkit.addRule(function(a, subject) {\n"
+            '    if (a.id == "org.example.b" || action.id == "org.example.a") return polkit.Result.YES;\n'
+            "});\n"
+        )
+
 if __name__ == "__main__":
     unittest.main()
