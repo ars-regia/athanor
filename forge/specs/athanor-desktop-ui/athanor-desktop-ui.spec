@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-desktop-ui
 Version:        1.0.0
-Release:        12%{?dist}
+Release:        13%{?dist}
 Summary:        Athanor OS Desktop UI configurations
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -17,7 +17,7 @@ Requires: slurp
 Requires: wl-clipboard
 Requires: brightnessctl
 Requires: playerctl
-Requires:       wireplumber nautilus firefox
+Requires:       wireplumber nautilus ptyxis gnome-text-editor gnome-disk-utility firefox
 
 %description
 Runtime dependencies of the Athanor OS desktop (clipboard, screenshot, brightness,
@@ -40,6 +40,11 @@ cp -p %{_sourcedir}/etc/udev/rules.d/99-ddcutil-i2c.rules %{buildroot}/usr/lib/u
 /usr/lib/udev/rules.d/99-ddcutil-i2c.rules
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-13
+- Require Ptyxis, GNOME Text Editor and GNOME Disks, the default applications of
+  doc_software.md decision 7, which replace cosmic-term, cosmic-edit and the COSMIC
+  disk tools that leave the image.
+
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-12
 - Point URL at the project repository
 - Correct the %description to what the package ships

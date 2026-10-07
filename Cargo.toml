@@ -1,7 +1,6 @@
 [workspace]
 members = [
   "forge/specs/athanor-backup/athanor-backup-1.0.0",
-  "forge/specs/athanor-doctor/athanor-doctor-1.0.0",
   "forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0",
   "forge/specs/athanor-layout-chooser/athanor-layout-chooser-1.0.0",
   "forge/specs/athanor-shelld/athanor-shelld-1.0.0",

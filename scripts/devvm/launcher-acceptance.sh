@@ -410,7 +410,7 @@ write_term_script() {
     printf '%s\n' '#!/bin/sh' "printf '\\033]0;%s\\007' \"\$1\"" 'head -c 4 > "$2"' 'exec sleep 600' | guest_put "$TERM_SCRIPT"
 }
 start_term() { # start_term TITLE OUT
-    in_session "setsid -f cosmic-term -- sh $TERM_SCRIPT $1 $2 > /dev/null 2>&1"
+    in_session "setsid -f ptyxis --new-window -x \"sh $TERM_SCRIPT $1 $2\" > /dev/null 2>&1"
 }
 
 stage_windows() {
@@ -423,8 +423,8 @@ stage_windows() {
     sleep 3
     start_term acceptance-other $b
     sleep 3
-    search acceptance-window "acceptance-window — COSMIC Terminal, Window"
-    [[ $(first_row) == "acceptance-window — COSMIC Terminal, Window" ]] || fail "first row is '$(first_row)'"
+    search acceptance-window "acceptance-window — Terminal, Window"
+    [[ $(first_row) == "acceptance-window — Terminal, Window" ]] || fail "first row is '$(first_row)'"
     # The window opened last holds the focus; Enter must give it to the other one (item 5).
     type_keys @enter
     wait_until 8 hidden || fail "the launcher is still shown after Enter on a window"
@@ -468,7 +468,7 @@ stage_focus() {
     end_terms
     # The precondition: the terminal's window is gone, so the focus stack is empty. Without it
     # the check would pass on a stock compositor.
-    wait_until 10 eval '! in_session "pgrep -x cosmic-term" > /dev/null' || fail "a terminal is still open: check 1 needs a workspace with no window"
+    wait_until 10 eval '! in_session "pgrep -x ptyxis" > /dev/null' || fail "a terminal is still open: check 1 needs a workspace with no window"
     sleep 3
     open_launcher
     type_keys '2+2*3'
@@ -908,7 +908,7 @@ memory_round() {
     type_keys @up
     sleep 4
     close_launcher || fail "the launcher does not close"
-    search acceptance-memory "acceptance-memory — COSMIC Terminal, Window"
+    search acceptance-memory "acceptance-memory — Terminal, Window"
     close_launcher || fail "the launcher does not close"
     preview_decoded okpng-1 okpng-1.png
     preview_decoded okpdf-1 okpdf-1.pdf

@@ -346,17 +346,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "athanor-doctor"
-version = "1.0.0"
-dependencies = [
- "libc",
- "serde",
- "serde_json",
- "tokio",
- "zbus",
-]
-
-[[package]]
 name = "athanor-greeter-ui"
 version = "1.0.0"
 dependencies = [
