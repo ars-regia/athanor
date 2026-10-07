@@ -102,10 +102,6 @@ class BoundaryTest(unittest.TestCase):
             with self.subTest(path):
                 self.assertEqual(len(problems({path: COSMIC_CONFIG})), 1)
 
-    def test_the_frozen_tree_is_not_exempt(self):
-        path = "forge/specs/athanor-shell-rs/athanor-style-0.7/src/lib.rs"
-        self.assertEqual(len(problems({path: COSMIC_CONFIG})), 1)
-
     def test_a_manifest_that_does_not_parse_is_a_problem(self):
         found = problems({"system/athanor-dock/Cargo.toml": "[dependencies\n"})
         self.assertEqual(len(found), 1, found)

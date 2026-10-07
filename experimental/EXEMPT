@@ -1,33 +1,10 @@
-# iso-v0: crate fuori dalla build di boot (DAG ridotto del 2026-09-03, 5fbc9304). Tornano nel DAG con la v1.
-# Un nome per riga; letto da scripts/verify.py (check "shipped").
-athanor-mesh-bus
-athanor-cluster-mesh
-athanor-mesh-sync
-athanor-cloud-rs
-athanor-hypervisor-daemon
-athanor-net-unikernel
-athanor-telemetry
-athanor-init-oracle
-athanor-sysmon-ebpf
-athanor-mdm-rs
-athanor-greeter
-# The four blocks below need no entry of their own any more: the crates left
-# [workspace.members] on 2026-09-19 and the "shipped" check reads members only. The
-# reasons are kept, because they are why the crates are not coming back as they are.
+# Workspace crates that no package ships, one name per line; read by scripts/verify.py (check "shipped").
+# Empty since ADR-0073 retired the crates that were listed here.
 #
-# Out of the workspace since 2026-09-19, and out of the system image since 2026-09-17:
-# the source stays, the RPM does not ship. athanor-store-rs ran `flatpak install` for any
-# D-Bus caller without the polkit check its policy declares, and verified package
-# signatures against a caller-supplied key; cosmic-store covers the store until it is
-# redesigned.
+# Crates outside [workspace.members] need no name here, because the "shipped" check reads
+# members only. Their reasons are kept, because they are why the crates are not built.
 #
-# The GTK 0.7 dock library of athanor-shell-rs lives in that program's frozen workspace,
-# at forge/specs/athanor-shell-rs/athanor-dock-0.7, since 2026-09-29; the name
-# athanor-dock and forge/specs/athanor-dock belong to the dock of package 2c.
-#
-# athanor-lvfs-rs is out of the image since 2026-09-30. Its unit runs as DynamicUser while
-# its bus policy lets only root own os.athanor.Lvfs, so it cannot take its name. Its "Parsing
-# CAB archive" and "CAB parsed successfully" are two log lines with nothing between them,
-# and "staged successfully" is logged whether or not an update was installed. fwupd, which
-# is in the image, covers firmware until the daemon is redesigned.
-athanor-lvfs-rs
+# athanor-attestation is out of the workspace since 2026-10-07 (A2-9, #151): attestation is
+# outside the 1.0 threat model (doc_threat_model.md TM7), and the crate is rewritten on
+# Keylime with the PCR 11 and PCR 12 policy of doc_kernel_profile.md before mesh admission
+# depends on it.

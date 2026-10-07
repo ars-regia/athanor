@@ -7,7 +7,9 @@ Fedora targeted SELinux policy and the running system. The maintainer approved t
 decisions introduced by the verifications on 2026-09-14 and chose the firmware policy of
 D48 on the same day. The specification passed gate P0 on 2026-09-14, with the mechanism of
 the guided reseal (D42) left open for P4b. Revision 16 (2026-10-05) amends D23 with the
-udisks exception and records the removal of the Gatekeeper (section 10).
+udisks exception and records the removal of the Gatekeeper (section 10). Amended 2026-10-06 (maintainer decision
+A2-9 (#151)): this document is tier 3, root and the image, of `doc_threat_model.md`;
+sections 9 and 10 say what changed.
 
 Implementation status (2026-10-05): of the blocks of section 15, only P1 is built
 (`athanor-kernel-profile`: `profile.toml` and `athanor-profile-check`). P2 to P7 and the
@@ -130,7 +132,7 @@ release or block that delivers it, or the S1 outcome it depends on.
 | --- | --- | --- | --- |
 | D1 | One kernel binary; roles are runtime profiles | one build, one signature, simple attestation | final |
 | D2 | Roles compose; a machine holds zero or more. A machine with no role runs the base profile, with the desktop IPE class under the dm-verity option (D6) | a workstation can also be a mesh host | final; combinations of an interactive role with the mesh role from the mesh delivery (D38) |
-| D3 | Userland baseline x86-64-v3 and UEFI, enforced by the installer; integrity chain optional with declared degraded mode | matches the v3 userland; keeps machines without TPM or Secure Boot installable | final; installer checks in P4b. Amended on 2026-10-06 (A2-22, #150): the installer of 1.0 is Anaconda with its web interface, and the x86-64-v3, UEFI and disk checks run in its kickstart |
+| D3 | Userland baseline x86-64-v3 and UEFI, enforced by the installer; integrity chain optional with declared degraded mode. Audience: UEFI x86-64-v3 desktops and laptops; machines such as the Intel N5100 class are excluded, stated in `README.md` (maintainer decision A2-17, #160). Supported version: the current image built from `iso-v0` (`README.md`). Support window: Athanor follows the current Fedora and moves to the next within 90 days of its release; security updates for five years for the product line, with the Fedora base rebased forward within it (ADR-0081). Today's base is Fedora 43 (`system/Containerfile`), supported until 2026-12-02; Fedora 45 until 2027-11-24, Fedora 44 until 2027-06-02 (target and fallback: ADR-0078); both dates are on the Fedora schedule and changeable | matches the v3 userland; keeps machines without TPM or Secure Boot installable; one maintainer cannot carry more than one base release | final; installer checks in P4b. Amended on 2026-10-06 (A2-22, #150): the installer of 1.0 is Anaconda with its web interface, and the x86-64-v3, UEFI and disk checks run in its kickstart |
 | D4 | Rust enabled; performance from AutoFDO; ThinLTO re-checked at every bump; Propeller deferred until profiling runs automatically on more than one CPU vendor | `RUST` still depends on `!DEBUG_INFO_BTF \|\| (PAHOLE_HAS_LANG_EXCLUDE && !LTO)`; AutoFDO and Propeller do not require LTO; a Propeller profile is bound to one binary and one test machine's workload | final |
 | D5 | BORE is the base scheduler; sched_ext only through `scx_loader` as a role setting; `athanor-ebpf-sched` retired as a scheduler. If the BORE patch does not apply to a bump required by D37, the kernel ships on plain EEVDF rather than waiting | one owner; sched_ext falls back to the fair class; an out-of-tree patch must never delay a security bump | provisional (BORE against plain EEVDF in P7) |
 | D6 | The verified image and A/B update mechanism: either `/usr` on dm-verity with a signed root hash, A/B slots with `systemd-sysupdate` and UKI boot with systemd-boot, or bootc with sealed composefs and UKI | the first option leaves `/etc` to be designed, depends on a `systemd-sysupdate` marked experimental again in systemd 262, and makes Athanor maintain its own update system; bootc's sealed composefs backend is close to stable and handles `/etc` per deployment, but has no boot counting today and cannot be covered by IPE | closed by the maintainer on 2026-10-05 (A2-8, #150), recorded on 2026-10-06: bootc in two steps, 1.0 on the ostree backend with greenboot (GRUB boot counting) and a MOK-signed kernel, 1.1 on sealed composefs (UKI and fs-verity) once bootc's composefs backend has boot counting; costs: IPE coverage lost, 1.0 installations may need a reinstall for composefs. Earlier state: open (spike S1 on Fedora 45, no time box) |
@@ -675,6 +677,7 @@ the module key could sign them too, because both are builtin, hence the shared c
 kernels built after the revocation; superseded UKIs older than the fallback version are
 revoked through MokListX hashes confirmed by the owner, or by a rotation of the Secure
 Boot key; manifests carry an expiry and a minimum version.
+Who holds and who can use these keys when the maintainer is absent, and the expiry of the `:stable` image, are in `doc_update_trust.md`, "Key succession" (maintainer decision A2-18, #160); the choice of successor is open.
 
 **Measurements:** PCR 7 (Secure Boot state and the authorities used, including db, dbx,
 MOK, shim's built-in certificate, SbatLevel and MokSBState), PCR 11 (UKI sections of the
@@ -707,6 +710,11 @@ Keylime's example measured-boot policy considers PCRs 0–9 and 14 only, so a de
 policy covers PCR 11 and the command line events of the allowed role sets in PCR 12. The
 attestation code in the repository today returns fixed results and quotes the wrong PCRs;
 it is replaced, with the maintainer's approval, before any mesh admission depends on it.
+Amended 2026-10-06 (maintainer decision A2-9 (#151)): attestation is outside the threat
+model of 1.0 (`doc_threat_model.md`, TM7). Decided 2026-10-07 by the maintainer:
+`athanor-attestation` leaves the workspace members and stays in `system/confidential_computing`
+(ADR-0087; `experimental/EXEMPT` records the reason) and is rewritten on Keylime with the PCR 11 and PCR 12 policy above
+before any mesh admission depends on it; it is not deleted.
 
 ## 10. Execution integrity and security primitives
 
@@ -849,7 +857,10 @@ decision A2-10b (#153): Tetragon stays and does real work, see `doc_tetragon.md`
   IPE does not see; `ptrace_scope=1` still allows root and a process's ancestors.
 - Code running as the user persists through autostart entries, `systemd --user` units and
   shell startup files; a Flatpak application with home access can write those files and
-  leave its sandbox.
+  leave its sandbox. Amended 2026-10-06 (maintainer decision A2-9 (#151)): unconfined user
+  code is the user (`doc_threat_model.md`, TM1); an application of the broker's `confined`
+  class cannot write those paths (TM3, `doc_session_daemons.md` SD8); the Flatpak case
+  remains, stated in TM4.
 - Unconfined user code can create user namespaces and reach kernel code gated by
   in-namespace capabilities, such as `nf_tables`.
 - An unconfined root is not bounded by SELinux under Fedora's targeted policy (D44), keeps
@@ -1093,7 +1104,8 @@ Found on the running system and in the repository (2026-09-14):
   The `athanor-secure-boot` package was removed from the repository with those units. *Amended on 2026-10-06 (A2-27, #131, #145):* release 1.0 unlocks the disk with the passphrase only; TPM sealing arrives with 1.1.
   `athanor-gatekeeper-rs`, `athanor-daemon` and `athanor-store-rs` were removed from the
   image on 2026-09-17 pending redesign; the Gatekeeper was removed from the repository on
-  2026-10-05, and attestation is a restricted area.
+  2026-10-05, and attestation is a restricted area. ADR-0073 deleted `athanor-lvfs-rs`
+  and `athanor-store-rs` from the tree.
 - **Snapshots** (P3): `athanor-timewarp` targets bcachefs, which left mainline in Linux
   6.18, and misdetects `/var/home` as tmpfs; `athanor-backup-hourly` fails because
   `athanor-backup` is disabled. Both are ported to btrfs subvolume snapshots.
@@ -1110,8 +1122,8 @@ Found on the running system and in the repository (2026-09-14):
   members excluded from the package DAG (`experimental/EXEMPT`); `athanor-mesh-sync`
   returns all-zero Kyber and Dilithium public keys while logging post-quantum key
   exchange, and `athanor-hypervisor-daemon`, also excluded, derives attestation from the
-  existence of device files. They are removed or made to fail explicitly (D38).
-- **Retirements** (P3): `athanor-ebpf-sched` (embeds a `candle` AI model) is retired as a scheduler.
+  existence of device files. They are removed or made to fail explicitly (D38). ADR-0073 deleted the crates from the tree.
+- **Retirements** (P3): `athanor-ebpf-sched` (embeds a `candle` AI model) is retired as a scheduler; ADR-0073 deleted it from the tree.
   `.github/workflows/live-patching.yml`, which built kernel live patches that section 5
   removes (`LIVEPATCH`), left the repository on 2026-10-05.
 - **Userland flags** (after 1.0, with the Forge pipeline review): `forge/config/rpmmacros`

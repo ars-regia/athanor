@@ -20,13 +20,26 @@ name: Spec Build Check
 
 on:
   pull_request:
+  # pr.yml calls this workflow as its `specs` job when changes.json selects the specs. Until
+  # this pull_request trigger is removed, together with "Spec gate" in branch-protection.json
+  # (docs/operations/github-settings.md section 8), both run, and only the direct run merges
+  # the spec bot's pull requests.
+  workflow_call:
+    inputs:
+      from_pr_gate:
+        description: "Set by pr.yml: the call builds and judges, and leaves the bot merge to the direct run."
+        type: boolean
+        default: false
 
 permissions:
   contents: read
   packages: read
 
+# In a call, github is the caller's context: the workflow name keeps the call of pr.yml and the
+# direct run in separate groups, so neither cancels the other, and a merge group (no pull
+# request number) has its own ref.
 concurrency:
-  group: spec-build-check-${{ github.event.pull_request.number }}
+  group: spec-build-check-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -134,14 +147,14 @@ jobs:
     # reports why it leaves any other. The script is the base branch's copy; the workflow
     # file, as for any same-repository pull_request, is the pull request's own, and forks get
     # no secrets.
-    if: ${{ always() && github.head_ref == 'chore/update-specs-zero-trust' && github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ always() && !inputs.from_pr_gate && github.head_ref == 'chore/update-specs-zero-trust' && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-24.04
     # The job's own token reads the pull request and the Kernel Build runs; the PAT only merges.
     permissions:
       actions: read
       contents: read
       pull-requests: read
-    # It waits for the required checks (Kernel gate) before merging.
+    # It waits for the checks .github/settings/branch-protection.json requires before merging.
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

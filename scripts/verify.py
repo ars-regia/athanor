@@ -10,17 +10,22 @@ Uso:
     python3 scripts/verify.py              # tutti i controlli
     python3 scripts/verify.py polkit       # uno solo
     python3 scripts/verify.py --list
+    python3 scripts/verify.py --known-red scripts/ci/known-red.txt [--known-red-base REF]
+                                           # a listed red check does not fail the run (PQ12)
 
 Exit code: numero di controlli falliti (0 = tutto a posto).
 Nessuna dipendenza oltre a python3 e git. Va eseguito dalla radice del repo.
 """
 
+import collections
+import datetime
 import json
 import os
 import re
 import subprocess
 import sys
 import tomllib
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 try:
@@ -282,13 +287,22 @@ def deployment_problem(policy, protected):
     return None
 
 
+def image_key_rotation(root):
+    """Image key rotation (docs/operations/secrets.md section 4.1): it lasts while system/keys
+    holds both image keys, and ends when athanor-image-1.pub leaves."""
+    return all((Path(root) / "system/keys" / f"athanor-image-{n}.pub").is_file() for n in (1, 2))
+
+
 def signing_environments(root):
     """{secret: environment} for the environments named signing* in environments.json, the one
     place that says which environment holds which key, and the problems of those environments:
     each needs a required reviewer, no administrator bypass, and deploys only from branches
     branch-protection.json protects by name (a glob or "any protected branch" would follow
-    whoever can protect a new branch)."""
+    whoever can protect a new branch). During the image key rotation the old `signing`
+    environment is an alias of signing-images: its rules apply, but it holds no key of its own,
+    so the keys it still keeps until the rotation ends are not counted twice."""
     environments = json.loads(read(Path(root) / ENVIRONMENTS_JSON))
+    alias = "signing" if image_key_rotation(root) else None
     signing = {name: env for name, env in environments.items() if name.startswith("signing")}
     if not signing:
         return {}, [f"{ENVIRONMENTS_JSON}: no signing environment (D43)"]
@@ -304,7 +318,7 @@ def signing_environments(root):
         if where:
             problems.append(f"{ENVIRONMENTS_JSON}: the {name} environment deploys from {where}, not only "
                             f"from branches {BRANCH_PROTECTION_JSON} protects (D43)")
-        for secret in env.get("secrets", []):
+        for secret in env.get("secrets", []) if name != alias else []:
             if secret in holders:
                 problems.append(f"{ENVIRONMENTS_JSON}: {secret} is in {holders[secret]} and in {name}: "
                                 "each key has one environment (D43)")
@@ -337,9 +351,10 @@ def signing_problems(root):
     # Image key rotation (docs/operations/secrets.md section 4.1): while system/keys holds both
     # image keys, the old `signing` environment, the only holder of key 1, counts as
     # signing-images, so every rule of a signing job applies to a job that names it. The alias
-    # ends when athanor-image-1.pub leaves system/keys.
-    if all((root / "system/keys" / f"athanor-image-{n}.pub").is_file() for n in (1, 2)):
-        canonical.setdefault("signing", "signing-images")
+    # ends when athanor-image-1.pub leaves system/keys; from then on a `signing` entry left in
+    # environments.json holds the same keys as signing-images and signing-kernel, and fails.
+    if image_key_rotation(root):
+        canonical["signing"] = "signing-images"
     repository = set(json.loads(read(root / ACTIONS_JSON)).get("secrets") or [])
     for secret in sorted(repository & holders.keys()):
         problems.append(f"{ACTIONS_JSON}: {secret} is a repository secret, which every job reads, "
@@ -531,6 +546,37 @@ def check_kickstart():
 
 
 # --------------------------------------------------------------------------- #
+# os-release — bootc-image-builder reads it to build the ISO
+# --------------------------------------------------------------------------- #
+
+OS_RELEASE = "forge/specs/athanor-base-config/SOURCES/usr/lib/os-release"
+
+
+def os_release_problems(root=None):
+    """Every non-empty line of the shipped os-release is KEY=VALUE.
+
+    os-release(5) allows comment lines, but bootc-image-builder does not: it stops the ISO build
+    with "readOSRelease: invalid input" on any non-empty line without "=".
+    """
+    root = root or ROOT
+    try:
+        text = read(root / OS_RELEASE)
+    except OSError as err:
+        return [f"{OS_RELEASE}: cannot read ({err})"]
+    return [f"{OS_RELEASE}:{number}: not KEY=VALUE, bootc-image-builder rejects it: {line.strip()}"
+            for number, line in enumerate(text.splitlines(), 1)
+            if line.strip() and "=" not in line]
+
+
+@check("os-release", "Every line of os-release is KEY=VALUE, as bootc-image-builder requires")
+def check_os_release():
+    r = Result()
+    for problem in os_release_problems():
+        r.fail(problem)
+    return r
+
+
+# --------------------------------------------------------------------------- #
 # 3. polkit — ogni azione applicata dal codice deve essere dichiarata
 # --------------------------------------------------------------------------- #
 
@@ -580,24 +626,8 @@ def check_polkit():
 # 4. percorsi runtime — niente artefatti letti da target/ o stato in /tmp
 # --------------------------------------------------------------------------- #
 
-# Alberi congelati: codice morto che si mina e si cancella, non si sviluppa. La copia
-# congelata di athanor-style è ferma a GTK 0.7 in un workspace suo (doc_shell.md, SH4) e il
-# suo Cargo.toml dice "do not develop here", quindi un rilievo là dentro non ha niente da
-# dire — e sistemarlo contraddirebbe il congelamento. Il binario della vecchia shell,
-# accanto ad essa, resta invece spedito e quindi resta scansionato. L'esclusione sparisce
-# insieme all'albero.
-FROZEN_TREES = ("forge/specs/athanor-shell-rs/athanor-style-0.7/",)
-
-
-def is_frozen(relative_path):
-    """True se il file sta in un albero congelato: si mina e si cancella, non si sviluppa."""
-    return any(relative_path.startswith(tree) for tree in FROZEN_TREES)
-
-
 def path_problems(relative_path, text):
     """I rilievi di percorso di un file, già formattati con riga e motivo."""
-    if is_frozen(relative_path):
-        return []
     # un build script gira a build time: può legittimamente parlare di target/
     is_build_script = Path(relative_path).name == "build.rs"
     problems = []
@@ -1025,7 +1055,9 @@ def markdown_links(text):
 def check_docs():
     r = Result()
     targets = ["README.md", "system/README.md", "system/ARCHITECTURE.md",
-               "ANALISI_2026-09-02.md", "PIANO_RIPARTENZA.md", "CLAUDE.md", "ROADMAP.md"]
+               "ANALISI_2026-09-02.md", "PIANO_RIPARTENZA.md", "CLAUDE.md", "ROADMAP.md",
+               "AGENTS.md", "forge/AGENTS.md", "forge/specs/azoth/AGENTS.md", "system/AGENTS.md",
+               ".github/workflows/AGENTS.md"]
     targets += [rel(p) for p in walk(ROOT / "docs", ".md")]
 
     for t in targets:
@@ -1060,7 +1092,7 @@ def check_docs():
 
 # Valori misurati sul repo il 2026-09-30, senza tests/, benches/ ed examples/. Sono un cricchetto: si abbassano,
 # non si alzano. Se un controllo fallisce qui, propaga con `?`.
-BUDGET = {".unwrap()": 0, ".expect(": 2, "panic!(": 1}
+BUDGET = {".unwrap()": 0, ".expect(": 2, "panic!(": 0}
 
 
 def is_test_file(p):
@@ -1093,9 +1125,11 @@ def check_panics():
 
     for k, budget in BUDGET.items():
         if counts[k] > budget:
-            extra = ", ".join(where[k][:6])
-            r.fail(f"{k}: {counts[k]} occorrenze, budget {budget}. Propaga con `?`. "
-                   f"Prime: {extra}")
+            # One finding per occurrence, so that scripts/ci/known-red.txt can list each and
+            # a new one is red even while an old one is fixed.
+            for at in where[k]:
+                r.fail(f"{at}: {k} over the budget of {budget}, propagate with `?`")
+            r.note(f"{k}: {counts[k]} occorrenze, budget {budget}")
         elif counts[k] < budget:
             r.note(f"{k}: {counts[k]} (budget {budget}) — abbassa il budget in scripts/verify.py")
 
@@ -1163,6 +1197,7 @@ def check_cmdline():
 
 PAM_CONTAINERFILE = "system/Containerfile"
 NULLOK_GUARD = re.compile(r"^RUN authselect enable-feature without-nullok\b", re.MULTILINE)
+PWQUALITY_MINLEN = "'minlen = 12'"
 
 
 def nullok_problems(root=None):
@@ -1177,10 +1212,22 @@ def nullok_problems(root=None):
     return []
 
 
-@check("pam", "No account authenticates with an empty password (A2-23)")
+def pwquality_problems(root=None):
+    """The image build asks a new password for twelve characters."""
+    root = root or ROOT
+    try:
+        text = read(root / PAM_CONTAINERFILE)
+    except OSError as err:
+        return [f"{PAM_CONTAINERFILE}: cannot read ({err})"]
+    if any(PWQUALITY_MINLEN in line and not line.lstrip().startswith("#") for line in text.splitlines()):
+        return []
+    return [f"{PAM_CONTAINERFILE}: no pwquality drop-in with {PWQUALITY_MINLEN}"]
+
+
+@check("pam", "No empty passwords (A2-23), no new password under twelve characters")
 def check_pam():
     r = Result()
-    for problem in nullok_problems():
+    for problem in nullok_problems() + pwquality_problems():
         r.fail(problem)
     return r
 
@@ -1341,7 +1388,7 @@ def check_specs():
 # --------------------------------------------------------------------------- #
 
 # SH2: the compositor client is the protocol boundary; the theme tool generates COSMIC's
-# theme files. Nothing else may depend on COSMIC, the frozen tree included.
+# theme files. Nothing else may depend on COSMIC.
 COSMIC_ALLOWED = (
     "system/athanor-compositor-client/",
     "forge/tools/calmo-cosmic-theme/",
@@ -1516,18 +1563,18 @@ OWN_LICENCE = "GPL-3.0-or-later"
 # other spec, every Cargo.toml and every nfpm `license:` field is our own code and
 # must say OWN_LICENCE.
 UPSTREAM_SPECS = {
-    "forge/specs/athanor-ananicy/ananicy-cpp.spec",
     "forge/specs/athanor-bat/bat.spec",
     "forge/specs/athanor-bpf-linker/athanor-bpf-linker.spec",
     "forge/specs/athanor-cliphist/athanor-cliphist.spec",
     "forge/specs/athanor-cosign/athanor-cosign.spec",
     "forge/specs/athanor-dart-sass/athanor-dart-sass.spec",
     "forge/specs/athanor-matugen/athanor-matugen.spec",
-    "forge/specs/athanor-rosenpass/athanor-rosenpass.spec",
     "forge/specs/athanor-syft/athanor-syft.spec",
     "forge/specs/athanor-tetragon/athanor-tetragon.spec",
     "forge/specs/azoth/microvm/azoth-microvm.spec",
     "forge/specs/cosmic-comp/cosmic-comp.spec",
+    "forge/specs/greenboot-rs/greenboot-rs.spec",
+    "forge/specs/polkit/polkit.spec",
 }
 # Crates whose manifests agents may not edit without the maintainer's approval.
 PROTECTED_CRATES = {"system/confidential_computing/athanor-attestation/Cargo.toml"}
@@ -1537,8 +1584,8 @@ NFPM_FILES = ["flake.nix"]
 SPDX_IDS = {
     "0BSD", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "BSL-1.0", "CC0-1.0",
     "GPL-2.0-only", "GPL-2.0-or-later", "GPL-3.0-only", "GPL-3.0-or-later", "ISC",
-    "LGPL-2.1-or-later", "LGPL-3.0-or-later", "MIT", "MPL-2.0", "Unicode-3.0",
-    "Unlicense", "Zlib",
+    "LGPL-2.0-or-later", "LGPL-2.1-or-later", "LGPL-3.0-or-later", "MIT", "MPL-2.0", "Unicode-3.0",
+    "Unicode-DFS-2016", "Unlicense", "Zlib",
 }
 SPDX_EXCEPTIONS = {"LLVM-exception", "Linux-syscall-note"}
 
@@ -1759,6 +1806,487 @@ def check_decisions():
 
 
 # --------------------------------------------------------------------------- #
+# 11. services — every shipped service sets NoNewPrivileges or a capability allow-list
+# --------------------------------------------------------------------------- #
+
+# docs/architecture/doc_threat_model.md, TM8 (maintainer decision A2-9 (#151)). Each entry
+# names a unit that does not meet the rule and why; an entry that no longer matches a failing
+# unit fails the check, so the list cannot outlive its reasons.
+SERVICE_EXEMPT = {}
+
+TRUE_VALUES = {"1", "yes", "true", "on"}
+# Settings that make a drop-in run a command of ours in the unit it extends.
+EXEC_KEYS = {
+    "ExecCondition",
+    "ExecStartPre",
+    "ExecStart",
+    "ExecStartPost",
+    "ExecReload",
+    "ExecStop",
+    "ExecStopPost",
+}
+# A heredoc: its opening line (whose `> file` names the target, before or after `<<`), its
+# delimiter, and the body up to the delimiter's own line.
+HEREDOC = re.compile(
+    r"^([^\n]*<<-?[ \t]*['\"]?(\w+)['\"]?[^\n]*)\n(.*?)^[ \t]*\2[ \t]*$", re.M | re.S
+)
+
+
+def unit_directives(text):
+    """(key, value) of every assignment in the [Service] section of a unit or drop-in."""
+    section, found = None, []
+    # A trailing backslash continues the line (systemd.syntax(7)): join before parsing.
+    for line in re.sub(r"\\[ \t]*\r?\n", " ", text).splitlines():
+        line = line.strip()
+        if not line or line[0] in "#;":
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1]
+        elif section == "Service" and "=" in line:
+            key, value = line.split("=", 1)
+            found.append((key.strip(), value.strip()))
+    return found
+
+
+# Capabilities that give root back to a process that keeps them (doc_threat_model.md).
+ROOT_CAPS = {"CAP_SYS_ADMIN", "CAP_SYS_MODULE", "CAP_DAC_OVERRIDE", "CAP_SYS_PTRACE"}
+
+
+def is_hardened(directives):
+    """True if the merged directives end with NoNewPrivileges= true, or with a capability
+    bounding set that is an explicit allow-list without CAP_SYS_ADMIN, CAP_SYS_MODULE,
+    CAP_DAC_OVERRIDE or CAP_SYS_PTRACE.
+
+    The bound follows systemd.exec(5): the first list sets it, a later list is merged by OR,
+    a `~` list is removed by AND NOT, an empty assignment is the empty set and `~` alone the
+    full one. Only an allow-list counts as a bound: a deny-list (`~CAP_X ...`) keeps every
+    capability it does not name, CAP_SYS_MODULE or CAP_SYS_ADMIN among them unless it lists
+    them, so it fails unless NoNewPrivileges= is also set."""
+    no_new_privileges, allow, caps = False, None, set()
+    for key, value in directives:
+        if key == "NoNewPrivileges":
+            no_new_privileges = value.lower() in TRUE_VALUES
+        elif key == "CapabilityBoundingSet":
+            named = set(value.lstrip("~").split())
+            if not value or value == "~":
+                allow, caps = not value, set()
+            elif value.startswith("~"):
+                caps = caps - named if allow else caps | named
+                allow = bool(allow)
+            elif allow is False:
+                caps -= named
+            else:
+                allow, caps = True, caps | named
+    return no_new_privileges or (allow is True and not caps & ROOT_CAPS)
+
+
+def dropin_dirs(unit):
+    """The drop-in directories that apply to a service, least specific first (systemd.unit(5)):
+    `service.d`, each dash prefix (`foo-.service.d` for `foo-bar.service`), the template's
+    (`foo@.service.d` for `foo@x.service`) and the unit's own."""
+    stem = unit[: -len(".service")]
+    parts = stem.split("-")
+    dirs = ["service.d"]
+    dirs += ["-".join(parts[:i]) + "-.service.d" for i in range(1, len(parts))]
+    template, at, instance = stem.partition("@")
+    if at and instance:
+        dirs.append(f"{template}@.service.d")
+    dirs.append(f"{unit}.d")
+    return dirs
+
+
+def service_units(files):
+    """{id: (unit name, text)} for every systemd service unit among {relative path: text}:
+    unit files, and units a package specification writes through a heredoc. Empty unit files
+    (masks) and D-Bus activation files are not units that run anything."""
+    units = {}
+    for path, text in files.items():
+        name = Path(path).name
+        if path.endswith(".spec"):
+            for m in HEREDOC.finditer(text):
+                if "[Service]" in m.group(3):
+                    target = re.search(r">\s*(\S+\.service)\b", m.group(1))
+                    unit = (
+                        Path(target.group(1)).name
+                        if target
+                        else f"heredoc-{m.group(2)}"
+                    )
+                    unit = unit.replace("%{name}", Path(path).stem)
+                    units[f"{path}:{unit}"] = (unit, m.group(3))
+        elif (
+            name.endswith(".service") and text.strip() and "[D-BUS Service]" not in text
+        ):
+            units[path] = (name, text)
+    return units
+
+
+def service_problems(files):
+    """Services among {relative path: text} that set neither NoNewPrivileges= nor an allow-list
+    capability bound, after every drop-in that applies to them (dropin_dirs) is merged in file
+    name order, a file in a more specific directory replacing one of the same name.
+
+    A drop-in directory that is not the own directory of a unit in `files` (an upstream unit, a
+    dash prefix, a template, `service.d`) counts as a service of its own when it adds a command
+    (EXEC_KEYS): that command is ours, and the upstream unit's own settings are not visible."""
+    dropins = {}
+    for path in files:
+        parent = Path(path).parent.name
+        if path.endswith(".conf") and (
+            parent == "service.d" or parent.endswith(".service.d")
+        ):
+            dropins.setdefault(parent, []).append(path)
+
+    def merged(unit):
+        chosen = {}
+        for d in dropin_dirs(unit):
+            for p in dropins.get(d, []):
+                chosen[Path(p).name] = p
+        return [chosen[name] for name in sorted(chosen)]
+
+    units = service_units(files)
+    own = {f"{unit}.d" for unit, _ in units.values()}
+    for d, paths in dropins.items():
+        if d not in own and any(
+            key in EXEC_KEYS for p in paths for key, _ in unit_directives(files[p])
+        ):
+            unit = d[:-2] if d != "service.d" else ".service"
+            units[str(Path(sorted(paths)[0]).parent)] = (unit, "")
+
+    failing = set()
+    for ident, (unit, text) in units.items():
+        directives = unit_directives(text)
+        for p in merged(unit):
+            directives += unit_directives(files[p])
+        if not is_hardened(directives):
+            failing.add(ident)
+
+    problems = [
+        f"{ident}: sets neither NoNewPrivileges=yes nor an allow-list "
+        f"CapabilityBoundingSet= (doc_threat_model.md, TM8)"
+        for ident in sorted(failing - SERVICE_EXEMPT.keys())
+    ]
+    problems += [
+        f"{ident}: exempt in SERVICE_EXEMPT but meets the rule or no longer exists; "
+        f"remove the entry"
+        for ident in sorted(SERVICE_EXEMPT.keys() - failing)
+    ]
+    return problems
+
+
+@check("services", "Every shipped service sets NoNewPrivileges or a capability allow-list")
+def check_services():
+    r = Result()
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", "--", "*.service", "*service.d/*.conf", "*.spec"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if listed.returncode != 0:
+        r.fail(f"git ls-files failed: {listed.stderr.strip()}")
+        return r
+    files = {
+        p: read(ROOT / p)
+        for p in listed.stdout.split("\0")
+        if p and (ROOT / p).is_file()
+    }
+    for problem in service_problems(files):
+        r.fail(problem)
+    for ident, why in SERVICE_EXEMPT.items():
+        r.note(f"exempt: {ident}: {why}")
+    return r
+# The polkit model (doc_threat_model.md TM9, maintainer decision T3 of 2026-10-07): every
+# action the repository declares in a .policy file or overrides in a polkit .rules file has
+# one row in TM9's table, with its result for the active session.
+POLKIT_RULES_WORDS = {"polkit", "addRule", "addAdminRule", "Result", "function", "if", "else", "return", "action", "id", "subject", "user", "groups", "isInGroup", "isInNetGroup", "local", "active", "session", "seat", "pid"}
+POLKIT_MODEL_DOC = "docs/architecture/doc_threat_model.md"
+POLKIT_RESULTS = {
+    "no",
+    "yes",
+    "auth_self",
+    "auth_self_keep",
+    "auth_admin",
+    "auth_admin_keep",
+    "not_handled",
+}
+
+
+def js_without_comments_and_strings(text):
+    """(code, literals): comments dropped and every string literal replaced by \\0<n>\\0,
+    its index in literals, so that no pattern matches inside a string or a comment and no
+    identifier can pass for a literal. None when the text holds a template literal or NUL.
+    """
+    # ponytail: no JS regex literals; a rule using one (/"/) may misread, add when one ships
+    out, literals, i, n = [], [], 0, len(text)
+    if "\0" in text:
+        return None
+    while i < n:
+        if text.startswith("//", i):
+            j = re.search("[\n\r\u2028\u2029]", text[i:])
+            i = n if j is None else i + j.start()
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            out.append(" ")
+        elif text[i] == "`":
+            return None
+        elif text[i] in "\"'":
+            j = i + 1
+            while j < n and text[j] != text[i]:
+                j += 2 if text[j] == "\\" else 1
+            literals.append(text[i + 1 : j])
+            out.append(f"\0{len(literals) - 1}\0")
+            i = j + 1
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out), literals
+
+
+def js_close(code, i):
+    """Index after the bracket that closes code[i], or -1."""
+    depth = 0
+    for j in range(i, len(code)):
+        depth += (code[j] in "([{") - (code[j] in ")]}")
+        if depth == 0:
+            return j + 1
+    return -1
+
+
+def js_top_split(code, sep):
+    """code split at every sep outside brackets."""
+    parts, depth, start, i = [], 0, 0, 0
+    while i < len(code):
+        depth += (code[i] in "([{") - (code[i] in ")]}")
+        if depth == 0 and code.startswith(sep, i):
+            parts.append(code[start:i])
+            start = i = i + len(sep)
+            continue
+        i += 1
+    return parts + [code[start:]]
+
+
+def polkit_rule_ids(cond, literals):
+    """The action ids an if condition requires, or None when it is not in the one form read:
+    `action.id == L` or several joined by `||`, alone or as one operand of `&&` whose other
+    operands do not name the action. Redundant parentheses are allowed."""
+
+    def bare(e):
+        e = e.strip()
+        while e.startswith("(") and js_close(e, 0) == len(e):
+            e = e[1:-1].strip()
+        return e
+
+    def ids_of(e):
+        tests = [
+            re.fullmatch(r"action\s*\.\s*id\s*===?\s*\x00(\d+)\x00", bare(alt))
+            for alt in js_top_split(bare(e), "||")
+        ]
+        return [literals[int(t.group(1))] for t in tests] if all(tests) else None
+
+    cond = bare(cond)
+    if len(js_top_split(cond, "||")) > 1:
+        return ids_of(cond)
+    guards = []
+    for part in js_top_split(cond, "&&"):
+        ids = ids_of(part)
+        if ids:
+            guards.append(ids)
+        elif re.search(r"\baction\b", part):
+            return None
+    return guards[0] if len(guards) == 1 else None
+
+
+def polkit_rules_declared(path, text, cannot):
+    """{(action, path): results} of one polkit .rules file, and why it cannot be read.
+
+    Only one shape is read. At the top level, nothing but polkit.addRule(...) and
+    polkit.addAdminRule(...) calls. Each addRule function is
+    `function(action, subject) { if (<ids>) { ... } }` with nothing after the block, where
+    <ids> is polkit_rule_ids's form, and the block returns only polkit.Result.X and does
+    not name the action. Anything else fails, so a rule cannot override an action unseen.
+    """
+
+    def unreadable(why):
+        return {}, [f"{path}: {why}, {cannot}"]
+
+    tokens = js_without_comments_and_strings(text)
+    if tokens is None:
+        return unreadable("a template literal or a NUL byte is not read")
+    code, literals = tokens
+    words = set(re.findall(r"[A-Za-z_$][\w$]*", code))
+    if words - POLKIT_RULES_WORDS - {r.upper() for r in POLKIT_RESULTS}:
+        return unreadable(
+            f"it uses {', '.join(sorted(words - POLKIT_RULES_WORDS - {r.upper() for r in POLKIT_RESULTS}))}, "
+            "outside the identifiers a rule is read with"
+        )
+    if re.sub(r"\x00\d+\x00|[A-Za-z_]+", "", code).strip(" \t\r\n(){}[].,;=|&"):
+        return unreadable("it uses characters other than identifiers, strings and ( ) { } [ ] . , ; = | &")
+    if any(len(run) not in (2, 3) for run in re.findall(r"=+", code)):
+        return unreadable("it assigns: only == and === are read")
+    members = (
+        r"\bpolkit\s*\.\s*(?:addRule|addAdminRule|Result\s*\.\s*[A-Z_]+)\b"
+    )
+    if len(re.findall(r"\bpolkit\b", code)) != len(re.findall(members, code)):
+        return unreadable(
+            "polkit is used other than through polkit.addRule, polkit.Result.X and its other members"
+        )
+    if len(re.findall(r"\bResult\b", code)) != len(
+        re.findall(r"\bpolkit\s*\.\s*Result\s*\.\s*[A-Z_]+", code)
+    ):
+        return unreadable("Result is used other than as polkit.Result.X")
+    declared, rules, pos = {}, 0, 0
+    call = re.compile(r"[\s;]*polkit\s*\.\s*(addRule|addAdminRule)\s*\(")
+    while m := call.match(code, pos):
+        pos = js_close(code, m.end() - 1)
+        if pos < 0:
+            return unreadable("a polkit call is not closed")
+        if m.group(1) == "addAdminRule":
+            continue
+        rules += 1
+        arg = code[m.end() : pos - 1]
+        head = re.match(
+            r"\s*function\s*\(\s*action\s*(?:,\s*subject\s*)?\)\s*\{\s*if\s*\(", arg
+        )
+        cond_end = js_close(arg, head.end() - 1) if head else -1
+        brace = re.compile(r"\s*\{").match(arg, cond_end) if cond_end > 0 else None
+        block_end = js_close(arg, brace.end() - 1) if brace else -1
+        if block_end < 0 or arg[block_end:].strip() != "}":
+            return unreadable(
+                "an addRule function is not `function(action, subject) { if (...) { ... } }` "
+                "with nothing after the block"
+            )
+        ids = polkit_rule_ids(arg[head.end() : cond_end - 1], literals)
+        block = arg[brace.end() : block_end - 1]
+        results = {
+            r.lower()
+            for r in re.findall(r"\bpolkit\s*\.\s*Result\s*\.\s*([A-Z_]+)", block)
+        }
+        returns = len(re.findall(r"\breturn\b", block))
+        if returns != len(re.findall(r"\breturn\s+polkit\s*\.\s*Result\s*\.\s*[A-Z_]+\s*[;}]", block + ";")):
+            ids = None
+        if not ids or not results or re.search(r"\b(?:action|function)\b", block):
+            return unreadable(
+                'an addRule tests the action other than as action.id == "..." joined by || '
+                "(and, in parentheses, && conditions on the subject), or its block names the "
+                "action or returns no polkit.Result"
+            )
+        for a in ids:
+            declared.setdefault((a, path), set()).update(results)
+    if code[pos:].strip(" \t\r\n;"):
+        return unreadable(
+            "code other than polkit.addRule(...) and polkit.addAdminRule(...) stands at the top level"
+        )
+    if len(re.findall(r"\baddRule\b", code)) != rules:
+        return unreadable(
+            "addRule is reached other than as a top-level polkit.addRule(...)"
+        )
+    return declared, []
+
+
+def polkit_declared(files):
+    """{(action, file): results} for the active session, and the files that cannot be read.
+
+    A .policy gives its `allow_active` default (`no` when absent). A polkit .rules file gives,
+    for each action its addRule functions test, every polkit.Result the function returns
+    (polkit_rules_declared). A .rules file that has neither `polkit.` nor `addRule` is a
+    udev rule and is skipped.
+    """
+    cannot = f"so its rows of {POLKIT_MODEL_DOC} TM9 cannot be checked"
+    declared, unreadable = {}, []
+    for path, text in sorted(files.items()):
+        if path.endswith(".policy"):
+            try:
+                root = ET.fromstring(text)
+            except ET.ParseError as e:
+                unreadable.append(f"{path}: not valid XML ({e}), {cannot}")
+                continue
+            for action in root.iter("action"):
+                if not action.get("id"):
+                    unreadable.append(f"{path}: an <action> has no id, {cannot}")
+                    continue
+                active = (action.findtext("defaults/allow_active") or "no").strip()
+                declared[(action.get("id"), path)] = {active}
+        elif path.endswith(".rules") and "udev/rules.d/" not in path:
+            found, problems = polkit_rules_declared(path, text, cannot)
+            declared.update(found)
+            unreadable += problems
+    return declared, unreadable
+
+
+def polkit_table(doc):
+    """[(action, file, results)] from the table whose header starts with | Action | Declared in |."""
+    rows, inside = [], False
+    for line in doc.split("\n"):
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if line.startswith("| Action") and len(cells) > 2 and cells[1] == "Declared in":
+            inside = True
+            continue
+        if not inside:
+            continue
+        if not line.startswith("|"):
+            break
+        if set(cells[0]) <= set("-: "):
+            continue
+        tokens = set(re.findall(r"`([a-z_]+)`", cells[2]))
+        rows.append((cells[0].strip("`"), cells[1].strip("`"), tokens & POLKIT_RESULTS))
+    return rows
+
+
+def polkit_model_problems(files, doc):
+    declared, problems = polkit_declared(files)
+    rows = polkit_table(doc)
+    if not rows:
+        problems.append(
+            f"{POLKIT_MODEL_DOC}: no table with the header | Action | Declared in | ..."
+        )
+    seen = set()
+    for action, path, results in rows:
+        key = (action, path)
+        if key in seen:
+            problems.append(f"{POLKIT_MODEL_DOC} TM9: {action} ({path}) has two rows")
+            continue
+        seen.add(key)
+        if key not in declared:
+            problems.append(
+                f"{POLKIT_MODEL_DOC} TM9: {action} is not declared in {path}: remove the row"
+            )
+        elif results != declared[key]:
+            problems.append(
+                f"{POLKIT_MODEL_DOC} TM9: {action} gives {', '.join(sorted(declared[key]))} for the "
+                f"active session in {path}, the table says {', '.join(sorted(results)) or 'nothing'}"
+            )
+    for action, path in sorted(declared.keys() - seen):
+        problems.append(f"{path}: {action} has no row in {POLKIT_MODEL_DOC} TM9")
+    return problems
+
+
+@check(
+    "polkit-model",
+    "Every polkit action the repository declares or overrides has its row in TM9",
+)
+def check_polkit_model():
+    r = Result()
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", "--", "*.policy", "*.rules"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if listed.returncode != 0:
+        r.fail(f"git ls-files failed: {listed.stderr.strip()}")
+        return r
+    files = {
+        p: read(ROOT / p)
+        for p in listed.stdout.split("\0")
+        if p and (ROOT / p).is_file()
+    }
+    for problem in polkit_model_problems(files, read(ROOT / POLKIT_MODEL_DOC)):
+        r.fail(problem)
+    return r
+
+
+# --------------------------------------------------------------------------- #
 # coverage: every component has an inventory entry (A2-34)
 # --------------------------------------------------------------------------- #
 
@@ -1875,7 +2403,138 @@ def check_coverage():
 # runner
 # --------------------------------------------------------------------------- #
 
+# --------------------------------------------------------------------------- #
+# known-red: checks red when `just check` became the gate (doc_pipeline.md PQ12)
+# --------------------------------------------------------------------------- #
+
+KNOWN_RED_LINE = re.compile(r"(\S+)\s+(#\d+)\s+(\d{4}-\d{2}-\d{2})\s+(\S.*)")
+LINE_NUMBER = re.compile(r"(?<=\S):\d+")
+
+
+def known_red_finding(problem):
+    """The stable text of a problem: the problem without its line numbers (`a.rs:18` reads
+    `a.rs`), so that a finding keeps its entry when unrelated lines move it."""
+    return LINE_NUMBER.sub("", problem)
+
+
+def parse_known_red(text):
+    """[(check, issue, expires, finding)] from the text of scripts/ci/known-red.txt.
+
+    One entry per line, `check #issue YYYY-MM-DD finding`: the check may report that finding
+    (known_red_finding of a problem) until `expires`, inclusive, while the issue tracks the
+    fix. A finding the check reports n times is listed n times. Blank lines and `#` comments
+    are ignored; anything else raises ValueError.
+    """
+    entries = []
+    for number, line in enumerate(text.splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = KNOWN_RED_LINE.fullmatch(line)
+        if not match:
+            raise ValueError(
+                f"line {number}: expected `check #issue YYYY-MM-DD finding`: {line}"
+            )
+        name, issue, expires, finding = match.groups()
+        try:
+            entries.append((name, issue, datetime.date.fromisoformat(expires), finding))
+        except ValueError:
+            raise ValueError(f"line {number}: {expires} is not a date") from None
+    return entries
+
+
+def load_known_red_base(root, ref, path):
+    """The list as revision REF has it, None when REF has no such file (the adoption)."""
+
+    def git(*args):
+        return subprocess.run(
+            ["git", "-C", str(root), *args], capture_output=True, text=True
+        )
+
+    commit = git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
+    if commit.returncode != 0:
+        raise ValueError(f"{ref} is not a commit of {root}")
+    blob = f"{commit.stdout.strip()}:{path}"
+    if git("cat-file", "-e", blob).returncode != 0:
+        return None
+    return parse_known_red(git("show", blob).stdout)
+
+
+def judge_known_red(entries, base, results, today):
+    """(tolerated, problems): the checks whose failure the list excuses, and what is wrong
+    with the list itself.
+
+    A check that ran is tolerated while every finding it reports is listed, as many times as
+    it reports it, and none of its entries has expired. A listed finding the check no longer
+    reports must leave the list. Against BASE (the list of the base revision, None at
+    adoption) the list may only shrink: no finding the base does not list, no later expiry;
+    the issue of an entry may change.
+    """
+    problems, listed, expired = [], {}, set()
+    for name, issue, expires, finding in entries:
+        if name not in CHECKS:
+            problems.append(f"{name}: no such check")
+            continue
+        listed.setdefault(name, collections.Counter())[finding] += 1
+        if today > expires:
+            expired.add(name)
+            problems.append(f"{name}: expired on {expires} ({issue}): {finding}")
+    if base is not None:
+        latest = {}
+        for name, _, expires, finding in base:
+            key = (name, finding)
+            latest[key] = max(expires, latest.get(key, expires))
+        added = collections.Counter(
+            (n, f) for n, _, _, f in entries
+        ) - collections.Counter((n, f) for n, _, _, f in base)
+        for name, finding in added.elements():
+            problems.append(
+                f"{name}: not in the base list, the list may only shrink: {finding}"
+            )
+        for name, _, expires, finding in entries:
+            was = latest.get((name, finding))
+            if was is not None and expires > was:
+                problems.append(
+                    f"{name}: expiry moved from {was} to {expires}: {finding}"
+                )
+
+    tolerated = set()
+    for name, known in sorted(listed.items()):
+        if name not in results:
+            continue
+        found = collections.Counter(
+            known_red_finding(p) for p in results[name].problems
+        )
+        new, fixed = found - known, known - found
+        problems += [f"{name}: not in the list: {f}" for f in new.elements()]
+        problems += [f"{name}: fixed, remove its entry: {f}" for f in fixed.elements()]
+        if found and not new and name not in expired:
+            tolerated.add(name)
+    return tolerated, problems
+def take_option(argv, name):
+    """Removes `NAME VALUE` from argv and returns VALUE, None when NAME is absent."""
+    if name not in argv:
+        return None
+    at = argv.index(name)
+    if at + 1 >= len(argv) or argv[at + 1].startswith("-"):
+        raise ValueError(f"{name} needs a value")
+    value = argv[at + 1]
+    del argv[at : at + 2]
+    return value
+
+
 def main(argv):
+    argv = list(argv)
+    try:
+        known_red_path = take_option(argv, "--known-red")
+        known_red_ref = take_option(argv, "--known-red-base")
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
+    if known_red_ref and not known_red_path:
+        print("--known-red-base needs --known-red", file=sys.stderr)
+        return 2
+
     if "--list" in argv:
         for n, f in CHECKS.items():
             print(f"  {n:12s} {f.title}")
@@ -1888,20 +2547,48 @@ def main(argv):
         print(f"disponibili: {', '.join(CHECKS)}", file=sys.stderr)
         return 2
 
+    entries, base = [], None
+    if known_red_path:
+        try:
+            path = Path(known_red_path)
+            entries = parse_known_red(path.read_text())
+            if known_red_ref:
+                relative = path.resolve().relative_to(ROOT).as_posix()
+                base = load_known_red_base(ROOT, known_red_ref, relative)
+        except (OSError, ValueError) as e:
+            print(f"known-red: {e}", file=sys.stderr)
+            return 2
+
     failed = 0
     problems = 0
     print(f"{BOLD}Athanor OS — controlli strutturali{OFF}  {DIM}({ROOT}){OFF}\n")
 
-    for name in wanted:
+    results = {name: CHECKS[name]() for name in wanted}
+    tolerated, list_problems = judge_known_red(
+        entries, base, results, datetime.date.today()
+    )
+
+    for name, res in results.items():
         fn = CHECKS[name]
-        res = fn()
+        n = len(res.problems)
         if res.ok:
-            print(f"  {GRN}PASS{OFF}  {BOLD}{name}{OFF}  {GRN}0{OFF}  {DIM}{fn.title}{OFF}")
+            print(
+                f"  {GRN}PASS{OFF}  {BOLD}{name}{OFF}  {GRN}0{OFF}  {DIM}{fn.title}{OFF}"
+            )
         else:
-            failed += 1
-            n = len(res.problems)
-            problems += n
-            print(f"  {RED}FAIL{OFF}  {BOLD}{name}{OFF}  {RED}{n}{OFF}  {DIM}{fn.title}{OFF}")
+            if name in tolerated:
+                own = [(issue, expires) for check, issue, expires, _ in entries if check == name]
+                issues = ", ".join(sorted({issue for issue, _ in own}))
+                print(
+                    f"  {YEL}KNOWN-RED{OFF}  {BOLD}{name}{OFF}  {YEL}{n}{OFF}  "
+                    f"{DIM}{fn.title} ({issues}, until {min(e for _, e in own)}){OFF}"
+                )
+            else:
+                failed += 1
+                problems += n
+                print(
+                    f"  {RED}FAIL{OFF}  {BOLD}{name}{OFF}  {RED}{n}{OFF}  {DIM}{fn.title}{OFF}"
+                )
             for pr in res.problems[:25]:
                 print(f"          {pr}")
             if len(res.problems) > 25:
@@ -1910,13 +2597,34 @@ def main(argv):
             print(f"          {YEL}nota{OFF} {DIM}{n}{OFF}")
         print()
 
+    if known_red_path:
+        if list_problems:
+            failed += 1
+            problems += len(list_problems)
+            print(
+                f"  {RED}FAIL{OFF}  {BOLD}known-red{OFF}  {RED}{len(list_problems)}{OFF}  "
+                f"{DIM}{known_red_path}{OFF}"
+            )
+            for pr in list_problems:
+                print(f"          {pr}")
+        else:
+            print(
+                f"  {GRN}PASS{OFF}  {BOLD}known-red{OFF}  {GRN}0{OFF}  {DIM}{known_red_path}{OFF}"
+            )
+        print()
+
     total = len(wanted)
     if failed:
         print(f"{BOLD}Problemi totali: {problems}{OFF}")
-        print(f"{RED}{failed}/{total} controlli falliti.{OFF} "
-              f"Ogni riga sopra cita file:riga: nessuna va interpretata.")
+        print(
+            f"{RED}{failed} controlli falliti su {total}.{OFF} "
+            f"Ogni riga sopra cita file:riga: nessuna va interpretata."
+        )
     else:
-        print(f"{GRN}{total}/{total} controlli superati.{OFF}")
+        print(
+            f"{GRN}{total}/{total} controlli superati"
+            f"{f', {len(tolerated)} noti rossi' if tolerated else ''}.{OFF}"
+        )
     return failed
 
 

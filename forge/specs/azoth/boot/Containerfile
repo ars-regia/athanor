@@ -10,7 +10,7 @@
 # schbench is not in the Fedora repos: from source at the pinned commit, its GitHub
 # archive pinned by hash like Firecracker below, in a separate
 # stage so that gcc stays out of the image.
-FROM registry.fedoraproject.org/fedora:43@sha256:a60334b24af6818e9ccf199d188b5ddef1c3d7f549470b560d9b744c78c2c58b AS schbench
+FROM registry.fedoraproject.org/fedora:43@sha256:005ce311c13eaa639de9d9c52e470f10652c7371561697fb8c1c6e852e23c481 AS schbench
 ARG SCHBENCH_COMMIT=24e32b8ef67cbafb0761aed68747d90a291767ae
 ARG SCHBENCH_SHA256=cd8b7192f48bc51e2d7b78d77c2458a327b99558ce314cfbd240e3e53db57e17
 RUN printf 'install_weak_deps=False\nkeepcache=False\n' >> /etc/dnf/dnf.conf
@@ -22,7 +22,7 @@ RUN bash /tmp/lock/lock.sh install /tmp/lock/schbench.lock \
     && make -C "/tmp/schbench-${SCHBENCH_COMMIT}" \
     && install -m 755 "/tmp/schbench-${SCHBENCH_COMMIT}/schbench" /usr/local/bin/schbench
 
-FROM registry.fedoraproject.org/fedora:43@sha256:a60334b24af6818e9ccf199d188b5ddef1c3d7f549470b560d9b744c78c2c58b
+FROM registry.fedoraproject.org/fedora:43@sha256:005ce311c13eaa639de9d9c52e470f10652c7371561697fb8c1c6e852e23c481
 
 RUN printf 'install_weak_deps=False\nkeepcache=False\n' >> /etc/dnf/dnf.conf
 

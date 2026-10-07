@@ -79,46 +79,6 @@
         packages = rec {
           just-hermetic = pkgs.just;
 
-          athanor-telemetry-rpm = pkgs.runCommand "athanor-telemetry-rpm" {
-            nativeBuildInputs = [ pkgs.nfpm ];
-            # Dipende matematicamente dalla compilazione Rust pura
-            src = athanor-core;
-          } ''
-            mkdir -p $out/RPMS
-            cat > nfpm.yaml <<EOF
-name: "athanor-telemetry"
-arch: "x86_64"
-platform: "linux"
-version: "1.0.0"
-section: "default"
-priority: "extra"
-maintainer: "Athanor OS"
-description: "Athanor Telemetry Daemon"
-vendor: "Athanor OS"
-license: "GPL-3.0-or-later"
-contents:
-  - src: "$src/bin/athanor-telemetry"
-    dst: "/usr/bin/athanor-telemetry"
-EOF
-            # Infallibilit�: Genera l'RPM senza root e senza dnf!
-            nfpm pkg --packager rpm --target $out/RPMS/athanor-telemetry.rpm
-          '';
-
-          athanor-core = (pkgs.makeRustPlatform {
-            cargo = rust-toolchain;
-            rustc = rust-toolchain;
-          }).buildRustPackage {
-            pname = "athanor-core";
-            version = "1.0.0";
-            src = ./.;
-            cargoLock = {
-              lockFile = ./Cargo.lock;
-            };
-            nativeBuildInputs = with pkgs; [ pkg-config ];
-            buildInputs = with pkgs; [ openssl glib gtk4 wayland wayland-protocols ];
-            doCheck = false;
-          };
-
           # Compatibilità FHS del builder: directory àncora e symlink verso la glibc e le
           # librerie di runtime di gcc di nixpkgs, come contenuto immutabile dell'immagine.
           # È una derivazione ordinaria, costruibile e ispezionabile da sola:

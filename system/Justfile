@@ -43,11 +43,6 @@ build-vm type="qcow2" target_image=("localhost/" + image_name) tag=default_tag:
 build-iso target_image=("localhost/" + image_name) tag=default_tag:
     just _build-bib "{{ target_image }}" "{{ tag }}" "iso"
 
-# Build Bare-Metal Ring-0 Unikernel Binary (RustyHermit)
-[group('Build')]
-build-unikernel component="athanor-unikernel-daemon" mode="release":
-    ./scripts/build_unikernel.sh "{{ component }}" "{{ mode }}"
-
 # Security Scan of System Image using Trivy
 [group('QA & Security')]
 security-scan target_image=("localhost/" + image_name) tag=default_tag:

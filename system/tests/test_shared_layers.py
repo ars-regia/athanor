@@ -1,6 +1,7 @@
 """Unit tests of system/shared-layers.sh, the acceptance of UD40 (doc_update_delivery.md): every
 variant starts with every layer of the system image it was built FROM, checked in local storage
-before the push. A skopeo stub answers `skopeo inspect --config REF` from fixture files (python3 -B -m unittest discover -s system/tests -v).
+before the push. A podman stub answers `podman image inspect --format '{{json .RootFS.Layers}}'
+REF` with the rootfs.diff_ids of fixture files (python3 -B -m unittest discover -s system/tests -v).
 
 The fixtures under fixtures/shared-layers are the `skopeo inspect --config` output of the three
 images run 37384733899 published, trimmed to the platform, labels and rootfs. That run built the
@@ -37,18 +38,19 @@ class SharedLayers(unittest.TestCase):
         self.configs.mkdir()
         bin_dir = self.dir / "bin"
         bin_dir.mkdir()
-        # The stub serves configs only: any other skopeo use is a failure of the script.
-        (bin_dir / "skopeo").write_text(
+        # The stub serves layer lists only: any other podman use is a failure of the script. A
+        # config without diff_ids prints null, as podman does for an image without RootFS.Layers.
+        (bin_dir / "podman").write_text(
             textwrap.dedent(f"""\
             #!/bin/bash
-            [[ $# -eq 3 && $1 == inspect && $2 == --config ]] || {{ echo "unexpected skopeo $*" >&2; exit 64; }}
-            echo "$3" >> {self.dir}/skopeo.refs
-            file={self.configs}/$(printf '%s' "$3" | tr '/:' '__').json
-            [[ -f $file ]] || {{ echo "manifest unknown: $3" >&2; exit 1; }}
-            cat "$file"
+            [[ $# -eq 5 && $1 == image && $2 == inspect && $3 == --format && $4 == '{{{{json .RootFS.Layers}}}}' ]] || {{ echo "unexpected podman $*" >&2; exit 64; }}
+            echo "$5" >> {self.dir}/podman.refs
+            file={self.configs}/$(printf '%s' "$5" | tr '/:' '__').json
+            [[ -f $file ]] || {{ echo "image not known: $5" >&2; exit 125; }}
+            jq -c '.rootfs.diff_ids' "$file"
             """)
         )
-        (bin_dir / "skopeo").chmod(0o755)
+        (bin_dir / "podman").chmod(0o755)
         self.env = {"PATH": f"{bin_dir}:/usr/bin:/bin"}
 
     def tearDown(self):
@@ -62,10 +64,10 @@ class SharedLayers(unittest.TestCase):
     def serve_system(self, diff_ids):
         config = fixture("athanor-system")
         config["rootfs"]["diff_ids"] = diff_ids
-        self.serve(f"containers-storage:{SYSTEM_ID}", config)
+        self.serve(SYSTEM_ID, config)
 
     def serve_variant(self, name, config):
-        self.serve(f"containers-storage:{REGISTRY}/{name}:{RUN}", config)
+        self.serve(f"{REGISTRY}/{name}:{RUN}", config)
 
     def check(self, system=f"sha256:{SYSTEM_ID}"):
         return subprocess.run(
@@ -102,12 +104,8 @@ class SharedLayers(unittest.TestCase):
             self.assertRegex(
                 r.stdout, rf"{name}\b.*{SYSTEM_STAGE_LAYERS} of {SYSTEM_STAGE_LAYERS}"
             )
-        refs = (self.dir / "skopeo.refs").read_text().splitlines()
-        self.assertEqual(
-            refs,
-            [f"containers-storage:{SYSTEM_ID}"]
-            + [f"containers-storage:{REGISTRY}/{n}:{RUN}" for n in NAMES],
-        )
+        refs = (self.dir / "podman.refs").read_text().splitlines()
+        self.assertEqual(refs, [SYSTEM_ID] + [f"{REGISTRY}/{n}:{RUN}" for n in NAMES])
 
     def test_variants_that_rebuilt_the_system_stage_fail(self):
         # Run 37384733899 as published: the NVIDIA variants rebuilt the system stage.
@@ -159,7 +157,7 @@ class SharedLayers(unittest.TestCase):
             self.serve_variant(name, config)
         r = self.check()
         self.assertEqual(r.returncode, 1)
-        message = f"{REGISTRY}/athanor-system-nvidia:{RUN}: the image configuration has no rootfs.diff_ids array"
+        message = f"{REGISTRY}/athanor-system-nvidia:{RUN}: the image has no RootFS.Layers array"
         self.assertIn(message, r.stderr)
         self.assertIn(message, r.stdout)
         # The other two are still checked and reported.
@@ -168,10 +166,10 @@ class SharedLayers(unittest.TestCase):
     def test_a_system_image_without_diff_ids_fails_with_its_own_message(self):
         config = fixture("athanor-system")
         del config["rootfs"]["diff_ids"]
-        self.serve(f"containers-storage:{SYSTEM_ID}", config)
+        self.serve(SYSTEM_ID, config)
         r = self.check()
         self.assertEqual(r.returncode, 1)
-        message = f"{SYSTEM_ID}: the image configuration has no rootfs.diff_ids array"
+        message = f"{SYSTEM_ID}: the image has no RootFS.Layers array"
         self.assertIn(message, r.stderr)
         self.assertIn(message, r.stdout)
 
@@ -185,7 +183,7 @@ class SharedLayers(unittest.TestCase):
     def test_the_system_image_is_an_image_id(self):
         r = self.check(system="localhost/athanor-system:latest")
         self.assertEqual(r.returncode, 2)
-        self.assertFalse((self.dir / "skopeo.refs").exists())
+        self.assertFalse((self.dir / "podman.refs").exists())
 
 
 if __name__ == "__main__":

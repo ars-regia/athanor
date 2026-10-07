@@ -17,8 +17,10 @@ date the line is placed on the market, with the Fedora base rebased forward with
 in-place update.
 
 - The support end date is the `SUPPORT_END` field of `/usr/lib/os-release` of every image
-  (`forge/specs/athanor-base-config/SOURCES/usr/lib/os-release`, the single source). It is
-  also stated in the release notes of each release.
+  from 1.0 on (`forge/specs/athanor-base-config/SOURCES/usr/lib/os-release`, the single
+  source). The 1.0 release sets it to five years after its own date, and the release notes
+  of each release state it. Images before 1.0 carry no `SUPPORT_END` and promise no
+  support period.
 
 ## Reporting a vulnerability
 
