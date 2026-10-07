@@ -35,7 +35,7 @@ Run them from the repository root. There is no single suite: target what you cha
 | Check | Command |
 | --- | --- |
 | Linters (shell scripts, Justfiles) | `just lint`; `just format` rewrites, `just check-syntax` only checks |
-| Project checks that CI runs | `python3 scripts/verify.py workflows kickstart boundary cmdline registry licence ci coverage` |
+| Project checks that CI runs | `python3 scripts/verify.py workflows kickstart os-release boundary cmdline services polkit-model registry licence ci coverage` |
 | All project checks | `python3 scripts/verify.py` (`--list` names the checks; pass names to run some) |
 | A crate | `cargo test -p <crate>`, for every crate you touch |
 | Python tests | `python3 -B -m unittest discover -s <dir>/tests`, e.g. `scripts/tests`, `system/tests` |
