@@ -302,7 +302,9 @@ jobs:
     # beside the key: checkout, registry login, system/sign-images.sh (doc_update_trust.md UT2).
     # Here, not in call-system-image.yml: a called workflow's job reads the secrets of its
     # environment only when its caller inherits every secret (actions/runner#4453, D43).
-    needs: [system-image]
+    # build-builder: the verification runs the skopeo of this run's builder image, as the
+    # runner's is too old for the keyPaths of the shipped policy (system/sign-images.sh).
+    needs: [system-image, build-builder]
     # Explicit: the implicit success() also requires every transitive need to have succeeded,
     # and the NVIDIA kmod jobs upstream of system-image are skipped on most runs, which
     # skipped this job with them.
@@ -337,4 +339,5 @@ jobs:
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+          SIGN_VERIFY_BUILDER: ${{ needs.build-builder.outputs.content_hash }}
         run: bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"

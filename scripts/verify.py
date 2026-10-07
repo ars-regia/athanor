@@ -203,7 +203,9 @@ SIGN_JOB_COMMANDS = {
 }
 # The names a signing job, its steps and its workflow may set in env besides the secrets of the
 # job's environment: plain values, none read by bash, the dynamic loader or a PATH lookup.
-SIGN_JOB_ENV = {"GH_TOKEN", "GITHUB_TOKEN", "GITHUB_ACTOR", "KERNEL_DIGEST", "KERNEL_REGISTRY"}
+# SIGN_VERIFY_BUILDER names the builder image that verifies after the key is removed;
+# sign-images.sh refuses anything but a 64-character content hash.
+SIGN_JOB_ENV = {"GH_TOKEN", "GITHUB_TOKEN", "GITHUB_ACTOR", "KERNEL_DIGEST", "KERNEL_REGISTRY", "SIGN_VERIFY_BUILDER"}
 # The runners a signing job may use: GitHub-hosted, never a self-hosted machine (D43).
 GITHUB_HOSTED = re.compile(r"^ubuntu-(?:latest|\d{2}\.\d{2})$")
 # The only commands a step holding a signing secret may run, whole: the sign scripts (D43).
