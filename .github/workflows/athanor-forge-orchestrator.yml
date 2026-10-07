@@ -300,9 +300,12 @@ jobs:
     name: 🔏 Key-based signature of the system images
     # The only job that receives COSIGN_*. It builds nothing and runs no third-party tool
     # beside the key: checkout, registry login, system/sign-images.sh (doc_update_trust.md UT2).
+    # The script runs in the builder image of this run, not on the runner: the shipped policy
+    # names its keys with `keyPaths`, which the runner's skopeo 1.13 rejects, so the
+    # verification a machine makes can only run with the builder's current skopeo.
     # Here, not in call-system-image.yml: a called workflow's job reads the secrets of its
     # environment only when its caller inherits every secret (actions/runner#4453, D43).
-    needs: [system-image]
+    needs: [system-image, build-builder]
     # Explicit: the implicit success() also requires every transitive need to have succeeded,
     # and the NVIDIA kmod jobs upstream of system-image are skipped on most runs, which
     # skipped this job with them.
@@ -332,9 +335,20 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
-        run: echo "${GITHUB_TOKEN}" | skopeo login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-      - name: 🔏 Sign, then verify as a machine will (system/sign-images.sh)
+        run: echo "${GITHUB_TOKEN}" | podman login --authfile "${RUNNER_TEMP}/auth.json" ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+      - name: 🔏 Sign, then verify as a machine will (system/sign-images.sh, in the builder image)
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
-        run: bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
+          BUILDER_IMAGE: ghcr.io/${{ github.repository_owner }}/athanor-builder:${{ needs.build-builder.outputs.content_hash }}
+        # `-e NAME` without a value hands the container the variable of podman's environment,
+        # so the key never appears on a command line.
+        run: >-
+          podman run -i --rm --security-opt label=disable
+          --authfile "${RUNNER_TEMP}/auth.json"
+          -v "${RUNNER_TEMP}/auth.json:/run/registry-auth.json:ro" -e REGISTRY_AUTH_FILE=/run/registry-auth.json
+          -v "${GITHUB_WORKSPACE}:/workspace:ro" -w /workspace
+          -e COSIGN_PRIVATE_KEY -e COSIGN_PASSWORD
+          "${BUILDER_IMAGE,,}"
+          bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" artifacts/image-digests.txt
+          | tee -a "${GITHUB_STEP_SUMMARY}"
