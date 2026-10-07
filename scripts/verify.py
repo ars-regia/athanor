@@ -1169,6 +1169,8 @@ def check_cmdline():
 
 PAM_CONTAINERFILE = "system/Containerfile"
 NULLOK_GUARD = re.compile(r"^RUN authselect enable-feature without-nullok\b", re.MULTILINE)
+FAILLOCK_GUARD = re.compile(r"^RUN authselect enable-feature with-faillock\b", re.MULTILINE)
+PWQUALITY_SETTINGS = ("'minlen = 12'", "'dictcheck = 1'")
 
 
 def nullok_problems(root=None):
@@ -1183,10 +1185,26 @@ def nullok_problems(root=None):
     return []
 
 
-@check("pam", "No account authenticates with an empty password (A2-23)")
+def lockout_problems(root=None):
+    """The image build locks out password guessing and refuses short passwords."""
+    root = root or ROOT
+    try:
+        text = read(root / PAM_CONTAINERFILE)
+    except OSError as err:
+        return [f"{PAM_CONTAINERFILE}: cannot read ({err})"]
+    problems = []
+    if not FAILLOCK_GUARD.search(text):
+        problems.append(f"{PAM_CONTAINERFILE}: no 'RUN authselect enable-feature with-faillock' step")
+    for setting in PWQUALITY_SETTINGS:
+        if setting not in text:
+            problems.append(f"{PAM_CONTAINERFILE}: pwquality setting {setting} missing")
+    return problems
+
+
+@check("pam", "No empty passwords (A2-23), password guessing locked out, short passwords refused")
 def check_pam():
     r = Result()
-    for problem in nullok_problems():
+    for problem in nullok_problems() + lockout_problems():
         r.fail(problem)
     return r
 
