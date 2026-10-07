@@ -21,9 +21,9 @@ name: Spec Build Check
 on:
   pull_request:
   # pr.yml calls this workflow as its `specs` job when changes.json selects the specs. Until
-  # the required check is `gate` of pr.yml and this pull_request trigger is removed
-  # (docs/operations/github-settings.md, "Switching the required check to gate"), both run,
-  # and only the direct run merges the spec bot's pull requests.
+  # this pull_request trigger is removed, together with "Spec gate" in branch-protection.json
+  # (docs/operations/github-settings.md section 8), both run, and only the direct run merges
+  # the spec bot's pull requests.
   workflow_call:
     inputs:
       from_pr_gate:

@@ -145,8 +145,8 @@ di build.sh, o l'immagine `azoth-devel:<nvr>`). I `.ko` finiscono in
 sistema copia) con il vermagic del kernel e i preamboli kCFI, senza firma:
 `nvidia.sh sign --key K --cert C --devel DIR --out DIR` li firma con sign-file del
 kernel-devel, in locale con una chiave effimera, in CI con la chiave dei moduli del
-progetto (workflow `.github/workflows/nvidia-kmod.yml`, che poi li carica in QEMU con
-`boot.sh --mok --insmod` prima di pubblicarli).
+progetto (job `nvidia-kmod-sign` di `.github/workflows/athanor-forge-orchestrator.yml`;
+poi `nvidia-kmod.yml` li carica in QEMU con `boot.sh --mok --insmod` prima di pubblicarli).
 
 ## Pubblicazione
 

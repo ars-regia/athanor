@@ -622,7 +622,7 @@ kind = "script tool"
 area = "build-ci"
 status = "specified"
 spec = "doc_ci.md"
-item = "CI26"
+item = "CI27"
 purpose = "Pull Request gate: changed areas, the gate verdict, the pinned tools of just check, the known-red list"
 
 [[component]]
