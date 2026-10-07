@@ -67,7 +67,8 @@ The maintainer decided on 2026-10-07 to amend ADR-0080 as follows:
 ## Consequences
 
 - Decisions 1, 2, 3 and 5 of ADR-0080 and its consequence on the security class are amended
-  as above; decisions 4 and 6 are unchanged.
+  as above (items 1 to 5 of this record); decisions 4 and 6 of ADR-0080 are unchanged. Items 6
+  and 7 are new decisions that ADR-0080 did not take.
 - `doc_pipeline.md` revision 2 applies this record (sections 2, 3.2, 4, 12 and 13).
 - Release candidates built in the merge queue are not adopted now (`doc_pipeline.md` PL44).
 - `.github/settings/rulesets.json` holds one ruleset today (PR #264); PB2 splits it into the
