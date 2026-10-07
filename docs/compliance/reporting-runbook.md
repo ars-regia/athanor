@@ -15,10 +15,14 @@ read them when deciding.
 | Item | Value |
 | ---- | ----- |
 | Reporting platform | ENISA single reporting platform, https://portal.cra-srp.enisa.europa.eu/ |
-| Coordinating CSIRT | `<LAWYER: designated by the Member State of main establishment; Italy and CSIRT Italia are assumed, not confirmed>` |
+| Coordinating CSIRT | CSIRT Italia (confirmed by the maintainer; legal confirmation of the Member State of main establishment still **[LAWYER]**) |
 | Registration of the manufacturer on the platform | `<MAINTAINER: not done; check first that the platform accepts a natural person>` |
-| Reporting e-mail address | `<MAINTAINER: same address as in .github/SECURITY.md>` |
-| Manufacturer identity and address | `<MAINTAINER, LAWYER>` |
+| Reporting e-mail address | esenese@proton.me (as in `.github/SECURITY.md`) |
+| Manufacturer identity and postal address | `<MAINTAINER: undecided; not published here>` |
+
+The Art. 13 contact obligation needs a postal address or an electronic address that
+users and authorities can use; the maintainer has to decide whether to publish a postal
+address or choose an alternative **[LAWYER]**.
 
 ## Clocks
 
