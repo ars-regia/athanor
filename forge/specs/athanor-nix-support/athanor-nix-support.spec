@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-nix-support
 Version:        1.0.0
-Release:        10%{?dist}
+Release:        11%{?dist}
 Summary:        Athanor OS athanor-nix-support
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -78,6 +78,13 @@ ln -s ../athanor-nix-gc.timer %{buildroot}/usr/lib/systemd/system/timers.target.
 /usr/share/athanor/nix/registry.json
 
 %changelog
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-11
+- athanor-nix-gc.service is a client of nix-daemon (NIX_REMOTE=daemon) under a dynamic
+  user with NoNewPrivileges=yes and an empty capability bound: the daemon owns the store and
+  the runtime-root scan, the unit holds no privilege (doc_threat_model.md, TM8).
+- athanor-nix-relabel.service drops CAP_DAC_OVERRIDE; CAP_DAC_READ_SEARCH and CAP_FOWNER
+  remain, so its bound holds no capability that gives root back.
+
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
 - athanor-nix-gc.service and athanor-nix-relabel.service bound their capabilities
   (doc_threat_model.md, TM8); nix-gc keeps CAP_SYS_PTRACE so that nix's runtime-root scan
