@@ -47,6 +47,10 @@ pub enum Reason {
     /// The machine would migrate to the signed channel, but the registry has no manifest
     /// for it yet (decision A2-4 publishes `stable` later). Not a failure: it waits.
     ChannelAbsent,
+    /// The migration has run, but the booted reference, and any staged one, no longer
+    /// enforce the policy: a plain `bootc switch` followed a tag without verifying it. This
+    /// machine does not verify its updates, and `athanor-update` does not check for any.
+    OriginNotEnforcing,
 }
 
 /// The `verified` member of the file. The pair is redundant on purpose, so a reader can
@@ -284,7 +288,7 @@ mod tests {
 
     #[test]
     fn every_reason_but_signature_is_attention() {
-        for reason in [Reason::Media, Reason::NoSignature, Reason::KeyNotInPolicy, Reason::PolicyNotInForce, Reason::ReferenceOutOfScope, Reason::LocalChanges, Reason::ChannelAbsent] {
+        for reason in [Reason::Media, Reason::NoSignature, Reason::KeyNotInPolicy, Reason::PolicyNotInForce, Reason::ReferenceOutOfScope, Reason::LocalChanges, Reason::ChannelAbsent, Reason::OriginNotEnforcing] {
             let state = State { verified: reason.into(), ..verified_state() };
             assert_eq!(badge(&state, NOW), Badge::Attention, "{reason:?}");
         }
@@ -358,6 +362,7 @@ mod tests {
         assert_eq!(serde_json::to_string(&Reason::ReferenceOutOfScope).expect("serialize"), r#""reference-out-of-scope""#);
         assert_eq!(serde_json::to_string(&Reason::LocalChanges).expect("serialize"), r#""local-changes""#);
         assert_eq!(serde_json::to_string(&Reason::ChannelAbsent).expect("serialize"), r#""channel-absent""#);
+        assert_eq!(serde_json::to_string(&Reason::OriginNotEnforcing).expect("serialize"), r#""origin-not-enforcing""#);
     }
 
     fn scratch(test: &str) -> std::path::PathBuf {

@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-nix-support
 Version:        1.0.0
-Release:        11%{?dist}
+Release:        12%{?dist}
 Summary:        Athanor OS athanor-nix-support
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -78,6 +78,10 @@ ln -s ../athanor-nix-gc.timer %{buildroot}/usr/lib/systemd/system/timers.target.
 /usr/share/athanor/nix/registry.json
 
 %changelog
+* Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-12
+- nix-daemon runs with NoNewPrivileges=yes; athanor_nix_daemon.cil already grants the
+  init_t -> nix_daemon_t nnp_transition (doc_threat_model.md, TM8).
+
 * Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-11
 - athanor-nix-gc.service is a client of nix-daemon (NIX_REMOTE=daemon) under a dynamic
   user with NoNewPrivileges=yes and an empty capability bound: the daemon owns the store and

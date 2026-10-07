@@ -95,7 +95,7 @@ An evidence file is JSON written by the gate's script: `{"gate", "digest", "run_
 
 **UD9. A missing channel is a wait, not a failure.** `migrate.rs` maps a registry answer of "manifest unknown" for the channel to `Waiting("channel-absent")`, writes no stamp, exits 0, and the unit retries on its timer, not on `Restart=on-failure`. Other errors keep failing. Acceptance: `cargo test -p athanor-update` gains a case with a fake `candidate()` returning manifest unknown; on the dev VM with no `:stable`, `systemctl show -p NRestarts athanor-update-migrate.service` stays 0 for an hour.
 
-**UD10. A machine leaves an unverified reference by itself, once its policy is in force** (UT4, unchanged), and the check names why it waits: `local-changes`, `policy-not-in-force`, `reference-out-of-scope`, `channel-absent`. The shield shows the reason with its remedy (UD16 for `local-changes`). Acceptance: dev-VM harness stage `migrate`, extended with a machine without `:stable`.
+**UD10. A machine leaves an unverified reference by itself, once its policy is in force** (UT4, unchanged), and the check names why it waits: `local-changes`, `policy-not-in-force`, `reference-out-of-scope`, `channel-absent`. A machine that migrated and was later switched to a reference that does not enforce the policy reads `origin-not-enforcing`: it is reported, not switched back. The shield shows the reason with its remedy (UD16 for `local-changes`). Acceptance: dev-VM harness stage `migrate`, extended with a machine without `:stable`.
 
 ## 5. The namespace move (priority 1)
 

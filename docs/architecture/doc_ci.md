@@ -81,7 +81,7 @@ Branch protection on `iso-v0` requires three checks, `Kernel gate`, `Spec gate` 
 | `Spec gate` | CI14 | every PR (no path filter) | until CP4 | changed specs build as the DAG builds them; a change that selects none passes; merges the spec bot's PR |
 | Shell surfaces | CI15 | a shell crate or `forge/test/shell/**` changes | no | rig tests of the greeter, layout, compositor client, shelld, bar, dock, launcher; also CI2 |
 | Rust Security & FFI Audit | CI22 | every PR to `iso-v0` | no | clippy, cargo-deny (`deny.toml`) over the root lockfile |
-| Fuzzing, Nix Vanguard | CI23, CI24 | only PRs based on `main` | no | see section 3 |
+| Nix Vanguard | CI24 | only PRs based on `main` | no | see section 3 |
 
 CI2 (actionlint, `scripts/verify.py`, the unit test suites) has no trigger of its own: on a PR it runs through CI8, which runs on every pull request and whose `Kernel gate` requires it, and through CI15. The `check` job of CI27 runs `just check`, which covers what CI2 runs and adds the remaining `verify.py` checks and the four test directories CI2 leaves out (those of `scripts/ci`, the runner, session memory and the cosmic-comp rebase drill); CI2 goes once CI8 no longer runs on pull requests (doc_pipeline.md section 3.4).
 
@@ -276,13 +276,9 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 - **Scripts:** `scripts/ci/security-audit.sh`.
 - **Health:** green on PR #226 (run 37695768570), the first run without suppressions.
 
-### CI23 Rust Security & Buffer Overflow Fuzzing
+### CI23 Rust Security & Buffer Overflow Fuzzing (retired)
 
-- **File:** `fuzzing.yml`. **Purpose:** `cargo fuzz` with AddressSanitizer and MemorySanitizer on `tests/fuzz`.
-- **Triggers:** push and `pull_request` on `main` (Rust spec paths); cron `0 3 * * 0`; dispatch (`fuzz_seconds`). **Output:** artifact `fuzz-artifacts-<sanitizer>`.
-- **Secrets, variables:** `REGISTRY_HOST`, `BUILDER_STABLE_TAG`. **Environment:** none. **Runner:** hosted, inside the `athanor-builder` container. **Concurrency:** `<workflow>-<ref>`, cancels in progress.
-- **Scripts:** none.
-- **Health:** red, CB3.
+- **File:** none; the workflow was deleted. Its targets, `tests/fuzz`, were removed in `0c4e012f` (2026-08-14), and every run after 2026-08-16 failed. Fuzzing returns as a weekly job of `maintenance.yml` (doc_pipeline.md section 3.1) once a crate has a fuzz target.
 
 ### CI24 Athanor Nix Vanguard
 
@@ -339,7 +335,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 |---|---|---|---|
 | CB1 | CI22 | Every job runs in the Nix `athanor-builder` container, where the runner's `node24` cannot load `libstdc++.so.6`, so `actions/checkout` and every JavaScript action fail. The nixpkgs `ld.so` of the image searched neither `/lib/x86_64-linux-gnu` nor `/usr/lib64`, where `builder-fhs-compat` links `libstdc++.so.6`, and `LD_LIBRARY_PATH` did not name them. Fixed in `flake.nix` by adding `/lib/x86_64-linux-gnu` to `LD_LIBRARY_PATH`; it takes effect when the builder image is rebuilt. | Run 37436972597 (2026-10-06): `/__e/node24/bin/node: error while loading shared libraries: libstdc++.so.6`. Runs 33735152030, 33735141194, 33735127883, 33735106788 (2026-09-03) failed. Last success 31723735366 (2026-08-13). |
 | CB2 | CI21 | Same container cause. The rewritten `forge/scripts/clean_ghcr.sh` has never pruned in CI. The job has a 10-minute limit (`forge-ghcr-cleanup.yml:23`) against a backlog nobody has measured since. | Run 37173567085 (2026-10-04): same `libstdc++.so.6` error. Every run since 31918663684 (2026-08-16) failed; last success 31590170415 (2026-08-12). |
-| CB3 | CI23 | Same container cause, and the fuzz targets are gone: `tests/fuzz` was deleted in `0c4e012f` (2026-08-14), yet the job runs `cd tests/fuzz` (`fuzzing.yml:91`). The schedule fires on the default branch, `iso-v0`. | Runs 37190403649, 36306818604, 35498243254 (iso-v0) and 34745872130, 34018916505 (main) failed; 37190403649 shows the `libstdc++.so.6` error. Last success 31924793226 (2026-08-16). |
+| CB3 | CI23 | Retired. The workflow ran in the same container as CB1 and its targets, `tests/fuzz`, were deleted in `0c4e012f` (2026-08-14); every run after 2026-08-16 failed (the last 30) and it was removed. | Last success 31924793226 (2026-08-16). |
 | CB4 | CI24 | Green, but not reproducible: `cachix/install-nix-action@v25` is a tag, not a commit (`nix-vanguard.yml:19`); `nixos-unstable` floats (`:21`). It builds `pkgs.just` (`flake.nix:77`), nothing of Athanor, and runs only for `main` (`:5,7`). | Runs 37436972430, 33735156990, 33735143255, 33735130648, 33735112511 success. |
 
 - **CP1** _(Proposal)_: a workflow is either green or disabled with an open issue that names the cause. CB1-CB4 then become four issues, and the workflows are disabled (`gh workflow disable`) until each is fixed or deleted.
@@ -369,9 +365,9 @@ Every name below is described in the secrets inventory, `docs/operations/secrets
 | `SECUREBOOT_SIGNING_KEY` | secret | environment `signing-kernel` | CI1 |
 | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | secret | environment `signing-images` | CI1 |
 | `MODULE_SIGNING_KEY` | secret | environment `signing-kernel` | CI1 |
-| `REGISTRY_HOST` | variable, default `ghcr.io` | not set | CI1, CI3, CI4, CI11, CI14, CI21-CI23 |
+| `REGISTRY_HOST` | variable, default `ghcr.io` | not set | CI1, CI3, CI4, CI11, CI14, CI21, CI22 |
 | `KERNEL_REGISTRY` | variable, default `ghcr.io/<owner>` | not set | CI1, CI6, CI8, CI9, CI13, CI25, CI26 |
-| `BUILDER_STABLE_TAG` | variable, default `latest` | not set | CI21-CI23 |
+| `BUILDER_STABLE_TAG` | variable, default `latest` | not set | CI21, CI22 |
 | `SETTINGS_APP_PRIVATE_KEY` | secret (GitHub App key, read-only App) | repository, not set yet | CI29 |
 | `SETTINGS_APP_CLIENT_ID` | variable, no default | repository, not set yet | CI29 |
 

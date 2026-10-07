@@ -117,7 +117,7 @@ A mismatch is a build failure with the exact values, never a warning.
   - the build job holds no key and runs outside the signing environments (D43): the vmlinuz arrives signed for Secure Boot (section 8).
 - **Installation:**
   - the installer ISO stays single and installs `athanor-system`;
-  - a machine with NVIDIA hardware moves to its variant with `bootc switch ghcr.io/ars-regia/athanor-system-nvidia:latest`, or `-nvidia-legacy`;
+  - a machine with NVIDIA hardware moves to its variant with `bootc switch --enforce-container-sigpolicy ghcr.io/ars-regia/athanor-system-nvidia:latest`, or `-nvidia-legacy`. A switch without the flag leaves the machine on a reference that does not verify its updates, and `athanor-update` reports it as `origin-not-enforcing`. `:stable` replaces `:latest` once the stable channel is published (A2-4);
   - detecting the GPU in the installer and choosing the image there is future work.
 - **Acceptance:**
   - ISO acceptance keeps installing the default image in a VM without GPU;
@@ -169,7 +169,7 @@ These defects were found on the same boot and each needs its own fix:
 ## 7. Migration of the maintainer's desktop
 
 1. **Now, to use the desktop:** the temporary kernel argument `modprobe.blacklist=nvidia,nvidia_drm,nvidia_modeset,nvidia_uvm,nvidia_peermem` hands both GPUs back to `nouveau`.
-2. **Once the variant is published:** `sudo rpm-ostree kargs --delete=modprobe.blacklist=nvidia,nvidia_drm,nvidia_modeset,nvidia_uvm,nvidia_peermem` and `sudo bootc switch ghcr.io/ars-regia/athanor-system-nvidia:latest`, then a reboot at the maintainer's choice.
+2. **Once the variant is published:** `sudo rpm-ostree kargs --delete=modprobe.blacklist=nvidia,nvidia_drm,nvidia_modeset,nvidia_uvm,nvidia_peermem` and `sudo bootc switch --enforce-container-sigpolicy ghcr.io/ars-regia/athanor-system-nvidia:latest`, then a reboot at the maintainer's choice.
 3. The checks of section 6, item 3.
 
 ## 8. Version and signatures
