@@ -31,3 +31,8 @@ athanor-greeter
 # and "staged successfully" is logged whether or not an update was installed. fwupd, which
 # is in the image, covers firmware until the daemon is redesigned.
 athanor-lvfs-rs
+#
+# athanor-attestation is outside the workspace since 2026-10-07 (A2-9, #151): attestation is
+# outside the 1.0 threat model (doc_threat_model.md TM7), and the crate is rewritten on Keylime
+# with the PCR 11 and PCR 12 policy of doc_kernel_profile.md before mesh admission uses it.
+athanor-attestation
