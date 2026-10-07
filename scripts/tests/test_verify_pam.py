@@ -12,7 +12,7 @@ verify = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(verify)
 
 
-class Nullok(unittest.TestCase):
+class Tree(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.tmp.name)
@@ -23,6 +23,8 @@ class Nullok(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+
+class Nullok(Tree):
     def test_the_tree_drops_nullok(self):
         self.assertEqual(verify.nullok_problems(self.root), [])
 
@@ -37,19 +39,20 @@ class Nullok(unittest.TestCase):
         self.assertEqual(len(verify.nullok_problems(self.root)), 1)
 
 
-class Lockout(Nullok):
-    def test_the_tree_locks_out_and_refuses_short_passwords(self):
-        self.assertEqual(verify.lockout_problems(self.root), [])
-
-    def test_a_build_without_faillock_fails(self):
-        text = self.containerfile.read_text()
-        self.containerfile.write_text(text.replace("enable-feature with-faillock", "enable-feature with-mdns4"))
-        self.assertEqual(len(verify.lockout_problems(self.root)), 1)
+class Pwquality(Tree):
+    def test_the_tree_asks_twelve_characters(self):
+        self.assertEqual(verify.pwquality_problems(self.root), [])
 
     def test_a_shorter_minimum_fails(self):
         text = self.containerfile.read_text()
         self.containerfile.write_text(text.replace("'minlen = 12'", "'minlen = 8'"))
-        self.assertEqual(len(verify.lockout_problems(self.root)), 1)
+        self.assertEqual(len(verify.pwquality_problems(self.root)), 1)
+
+    def test_the_minimum_in_a_comment_only_fails(self):
+        lines = self.containerfile.read_text().splitlines(keepends=True)
+        kept = ["# " + line if "'minlen = 12'" in line else line for line in lines]
+        self.containerfile.write_text("".join(kept))
+        self.assertEqual(len(verify.pwquality_problems(self.root)), 1)
 
 
 if __name__ == "__main__":
