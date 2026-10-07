@@ -1813,7 +1813,8 @@ HEREDOC = re.compile(
 def unit_directives(text):
     """(key, value) of every assignment in the [Service] section of a unit or drop-in."""
     section, found = None, []
-    for line in text.splitlines():
+    # A trailing backslash continues the line (systemd.syntax(7)): join before parsing.
+    for line in re.sub(r"\\[ \t]*\r?\n", " ", text).splitlines():
         line = line.strip()
         if not line or line[0] in "#;":
             continue
@@ -1825,9 +1826,14 @@ def unit_directives(text):
     return found
 
 
+# Capabilities that give root back to a process that keeps them (doc_threat_model.md).
+ROOT_CAPS = {"CAP_SYS_ADMIN", "CAP_SYS_MODULE", "CAP_DAC_OVERRIDE", "CAP_SYS_PTRACE"}
+
+
 def is_hardened(directives):
     """True if the merged directives end with NoNewPrivileges= true, or with a capability
-    bounding set that is an explicit allow-list.
+    bounding set that is an explicit allow-list without CAP_SYS_ADMIN, CAP_SYS_MODULE,
+    CAP_DAC_OVERRIDE or CAP_SYS_PTRACE.
 
     The bound follows systemd.exec(5): the first list sets it, a later list is merged by OR,
     a `~` list is removed by AND NOT, an empty assignment is the empty set and `~` alone the
@@ -1849,7 +1855,7 @@ def is_hardened(directives):
                 caps -= named
             else:
                 allow, caps = True, caps | named
-    return no_new_privileges or allow is True
+    return no_new_privileges or (allow is True and not caps & ROOT_CAPS)
 
 
 def dropin_dirs(unit):

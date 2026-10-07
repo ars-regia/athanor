@@ -66,6 +66,27 @@ class ServicesTest(unittest.TestCase):
         )
         self.assertEqual(problems({PATH: deny_with_nnp}), [])
 
+    def test_an_allow_list_that_keeps_a_root_giving_capability_fails_without_nnp(self):
+        for cap in (
+            "CAP_SYS_ADMIN",
+            "CAP_SYS_MODULE",
+            "CAP_DAC_OVERRIDE",
+            "CAP_SYS_PTRACE",
+        ):
+            with self.subTest(cap=cap):
+                text = UNIT + f"CapabilityBoundingSet=CAP_CHOWN {cap}\n"
+                self.assertEqual(len(problems({PATH: text})), 1)
+                self.assertEqual(problems({PATH: text + "NoNewPrivileges=yes\n"}), [])
+        removed = UNIT + "CapabilityBoundingSet=CAP_SYS_ADMIN CAP_CHOWN\n"
+        removed += "CapabilityBoundingSet=~CAP_SYS_ADMIN\n"
+        self.assertEqual(problems({PATH: removed}), [])
+
+    def test_a_continued_line_is_joined_and_never_read_as_a_directive(self):
+        text = UNIT + "Environment=A=1 \\\nNoNewPrivileges=yes\n"
+        self.assertEqual(len(problems({PATH: text})), 1)
+        split = UNIT + "CapabilityBoundingSet=CAP_CHOWN \\\n  CAP_SYS_ADMIN\n"
+        self.assertEqual(len(problems({PATH: split})), 1)
+
     def test_a_bound_reset_to_the_full_set_fails(self):
         for lines in (["", "~"], ["~", "CAP_NET_ADMIN"]):
             with self.subTest(lines=lines):
