@@ -55,7 +55,7 @@ CI1 runs CI2 once, as its first job, and calls CI3, CI4 and CI5 only after it pa
 
 | Image | Producer | Tags |
 |---|---|---|
-| `REGISTRY/<owner>/athanor-builder` | CI3 | `latest`, `<content_hash>` (`call-build-builder.yml:71-75`) |
+| `REGISTRY/<owner>/athanor-builder` | CI3 | `<content_hash>` when built; `latest` moved to the default branch's `<content_hash>` on every default-branch run, cache hit included (`forge/scripts/promote_builder_latest.sh`) |
 | `REGISTRY/<owner>/athanor-forge-<package>`, `athanor-forge-rolling-<package>` | CI4 | `latest`, `<content hash>`; keyless signature and SPDX attestation (`forge/scripts/sign_attest.sh`) |
 | `ghcr.io/<owner>/athanor-forge-tier0-repo` ... `tier3-repo`, `athanor-forge-rolling-repo` | CI5 `build-repo` | `latest`, pushed only when the RPM content hash changes (`call-system-image.yml:107-136`) |
 | `ghcr.io/<owner>/athanor-system`, `athanor-system-nvidia`, `athanor-system-nvidia-legacy` | CI5 `dag-system-image` | `<run_id>`, `latest`; keyless signature and SBOM, then the key-based signature of CI1 `sign-system-images` (`system/sign-images.sh`), of the digest the build job recorded, never of a tag |
@@ -113,7 +113,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 - **File:** `call-build-builder.yml`. **Purpose:** builds the builder OCI image from `flake.nix` (`.#builderImage`) when its content hash is not yet published.
 - **Triggers:** `workflow_call` (CI1). **Output:** `content_hash`; image `athanor-builder`.
 - **Secrets, variables:** `GITHUB_TOKEN`, `REGISTRY_HOST`. **Environment:** none. **Runner:** hosted. **Concurrency:** caller's.
-- **Scripts:** `forge/scripts/check_idempotency.sh`, `forge/scripts/retry.sh`.
+- **Scripts:** `forge/scripts/check_idempotency.sh`, `forge/scripts/promote_builder_latest.sh`, `forge/scripts/retry.sh`.
 - **Health:** green in 37384733899, 37315915191, 37299854397.
 
 ### CI4 Reusable DAG Compile Workflow
