@@ -21,9 +21,16 @@
 # registry is given by the caller, and the file must name exactly the three shipped
 # repositories under it, once each. A build job cannot steer the key onto another repository.
 #
+# The shipped policy names its keys with keyPaths, which a skopeo older than 1.15 rejects
+# (the runner's is 1.13). With SIGN_VERIFY_BUILDER, the content hash of the builder image of
+# the run, the verification runs that image's skopeo under podman, after the key files are
+# removed: the container receives the rendered policy, the public keys and the registry login,
+# never the key. Without it the host's skopeo verifies.
+#
 # Usage: sign-images.sh --registry REGISTRY/OWNER DIGESTS_FILE
 #        (lines: "REPOSITORY TAG DIGEST", image-digests.sh)
 # Environment: COSIGN_PRIVATE_KEY, COSIGN_PASSWORD; SIGN_KEYS_DIR (default system/keys);
+#              SIGN_VERIFY_BUILDER (REGISTRY/OWNER/athanor-builder:HASH verifies);
 #              the registry login is the caller's business.
 set -euo pipefail
 
@@ -33,6 +40,13 @@ digests=$3
 shipped=(athanor-system athanor-system-nvidia athanor-system-nvidia-legacy)
 [[ -n ${COSIGN_PRIVATE_KEY:-} ]] || { echo "${0##*/}: COSIGN_PRIVATE_KEY is not available to this job: check the signing-images environment" >&2; exit 2; }
 [[ -n ${COSIGN_PASSWORD+set} ]] || { echo "${0##*/}: COSIGN_PASSWORD is not available to this job: check the signing-images environment" >&2; exit 2; }
+if [[ -n ${SIGN_VERIFY_BUILDER:-} ]]; then
+  [[ $SIGN_VERIFY_BUILDER =~ ^[0-9a-f]{64}$ ]] || { echo "${0##*/}: SIGN_VERIFY_BUILDER is not a content hash: '$SIGN_VERIFY_BUILDER'" >&2; exit 2; }
+  # Where skopeo login wrote the credentials, by the containers-auth.json(5) lookup.
+  if [[ -n ${XDG_RUNTIME_DIR:-} ]]; then auth=$XDG_RUNTIME_DIR/containers/auth.json; else auth=/run/containers/$UID/auth.json; fi
+  auth=${REGISTRY_AUTH_FILE:-$auth}
+  [[ -s $auth ]] || { echo "${0##*/}: no registry login at $auth for the verification in the builder image" >&2; exit 2; }
+fi
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 retry="$root/forge/scripts/retry.sh"
@@ -57,8 +71,17 @@ while read -r repository tag digest; do
   seen[$repository]=1
 done < "$digests"
 [[ ${#seen[@]} -eq ${#shipped[@]} ]] || { echo "${0##*/}: $digests names ${#seen[@]} of the ${#shipped[@]} shipped repositories" >&2; exit 2; }
+keys_dir=$(cd "$keys_dir" && pwd)
 bash "$root/forge/specs/athanor-update/SOURCES/usr/libexec/athanor-update/render-policy" \
   --registry "$registry" --keys-dir "$keys_dir" --out "$work/policy"
+verifier=()
+if [[ -n ${SIGN_VERIFY_BUILDER:-} ]]; then
+  # The policy names the keys by absolute path, so they are mounted where the policy says.
+  verifier=(podman run --rm --security-opt label=disable
+    -v "$work/policy:$work/policy:ro" -v "$keys_dir:$keys_dir:ro"
+    -v "$auth:/run/registry-auth.json:ro" -e REGISTRY_AUTH_FILE=/run/registry-auth.json
+    "${registry,,}/athanor-builder:$SIGN_VERIFY_BUILDER")
+fi
 
 while read -r repository _ digest; do
   # skopeo writes the sigstore attachment only where registries.d enables it: the rendered
@@ -68,11 +91,17 @@ while read -r repository _ digest; do
     "docker://$repository@$digest" "docker://$repository@$digest"
 done < "$digests"
 
+# The key is no longer needed: nothing after this point, and no container, can read it.
+unlink "$work/key"
+unlink "$work/passphrase"
 n=0
 while read -r repository _ digest; do
   n=$((n + 1))
-  bash "$retry" skopeo --registries.d "$work/policy/registries.d" copy --policy "$work/policy/policy.json" \
-    "docker://$repository@$digest" "dir:$pulls/verified-$n"
+  # In the builder image the pull lands in the container, which --rm removes.
+  target="$pulls/verified-$n"
+  [[ ${#verifier[@]} -eq 0 ]] || target=/var/tmp/verified
+  bash "$retry" "${verifier[@]}" skopeo --registries.d "$work/policy/registries.d" copy --policy "$work/policy/policy.json" \
+    "docker://$repository@$digest" "dir:$target"
   rm -rf "$pulls/verified-$n"
   echo "signed and verified with the shipped policy: $repository@$digest"
 done < "$digests"
