@@ -90,8 +90,9 @@
 
 (typetransition initrc_domain nix_daemon_exec_t process nix_daemon_t)
 ; athanor-nix-gc.service runs `nix store gc` with NoNewPrivileges=yes (and DynamicUser=,
-; which implies it): the kernel refuses a domain transition under no_new_privs unless the
-; policy grants nnp_transition, and the exec would fail with EPERM.
+; which implies it): under no_new_privs the kernel denies the transition unless the policy
+; grants nnp_transition, the client stays in init_t, and nix-daemon's socket refuses it
+; ("Permission denied"; measured on a booted image with this rule removed, 2026-10-07).
 (allow init_t nix_daemon_t (process2 (nnp_transition nosuid_transition)))
 
 ; --- nix-daemon ----------------------------------------------------------------------------
