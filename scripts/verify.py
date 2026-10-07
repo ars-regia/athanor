@@ -1977,6 +1977,7 @@ def check_services():
 # The polkit model (doc_threat_model.md TM9, maintainer decision T3 of 2026-10-07): every
 # action the repository declares in a .policy file or overrides in a polkit .rules file has
 # one row in TM9's table, with its result for the active session.
+POLKIT_RULES_WORDS = {"polkit", "addRule", "addAdminRule", "Result", "function", "if", "else", "return", "action", "id", "subject", "user", "groups", "isInGroup", "isInNetGroup", "local", "active", "session", "seat", "pid"}
 POLKIT_MODEL_DOC = "docs/architecture/doc_threat_model.md"
 POLKIT_RESULTS = {
     "no",
@@ -2000,8 +2001,8 @@ def js_without_comments_and_strings(text):
         return None
     while i < n:
         if text.startswith("//", i):
-            j = text.find("\n", i)
-            i = n if j < 0 else j
+            j = re.search("[\n\r\u2028\u2029]", text[i:])
+            i = n if j is None else i + j.start()
         elif text.startswith("/*", i):
             j = text.find("*/", i + 2)
             i = n if j < 0 else j + 2
@@ -2046,26 +2047,33 @@ def js_top_split(code, sep):
 
 def polkit_rule_ids(cond, literals):
     """The action ids an if condition requires, or None when it is not in the one form read:
-    `action.id == L` or several joined by `||`, alone or, in parentheses, first operand of
-    `&&` conditions that do not name the action."""
-    ands = [p.strip() for p in js_top_split(cond, "&&")]
-    first = ands[0]
-    if len(ands) > 1 and first.startswith("(") and js_close(first, 0) == len(first):
-        first = first[1:-1]
-    elif len(ands) > 1 and len(js_top_split(first, "||")) > 1:
-        return None
-    ids = [
-        re.fullmatch(r"\s*action\s*\.\s*id\s*===?\s*\x00(\d+)\x00\s*", alt)
-        for alt in js_top_split(first, "||")
-    ]
-    if not all(ids):
-        return None
-    for rest in ands[1:]:
-        if re.search(r"\baction\b", rest) or any(
-            len(js_top_split(rest, s)) > 1 for s in ("||", "?", ",")
-        ):
+    `action.id == L` or several joined by `||`, alone or as one operand of `&&` whose other
+    operands do not name the action. Redundant parentheses are allowed."""
+
+    def bare(e):
+        e = e.strip()
+        while e.startswith("(") and js_close(e, 0) == len(e):
+            e = e[1:-1].strip()
+        return e
+
+    def ids_of(e):
+        tests = [
+            re.fullmatch(r"action\s*\.\s*id\s*===?\s*\x00(\d+)\x00", bare(alt))
+            for alt in js_top_split(bare(e), "||")
+        ]
+        return [literals[int(t.group(1))] for t in tests] if all(tests) else None
+
+    cond = bare(cond)
+    if len(js_top_split(cond, "||")) > 1:
+        return ids_of(cond)
+    guards = []
+    for part in js_top_split(cond, "&&"):
+        ids = ids_of(part)
+        if ids:
+            guards.append(ids)
+        elif re.search(r"\baction\b", part):
             return None
-    return [literals[int(m.group(1))] for m in ids]
+    return guards[0] if len(guards) == 1 else None
 
 
 def polkit_rules_declared(path, text, cannot):
@@ -2085,12 +2093,16 @@ def polkit_rules_declared(path, text, cannot):
     if tokens is None:
         return unreadable("a template literal or a NUL byte is not read")
     code, literals = tokens
-    if re.search(r"\b(?:eval|Function|this|globalThis|require|import)\b", code):
+    words = set(re.findall(r"[A-Za-z_$][\w$]*", code))
+    if words - POLKIT_RULES_WORDS - {r.upper() for r in POLKIT_RESULTS}:
         return unreadable(
-            "eval, Function, this, globalThis, require and import are not read"
+            f"it uses {', '.join(sorted(words - POLKIT_RULES_WORDS - {r.upper() for r in POLKIT_RESULTS}))}, "
+            "outside the identifiers a rule is read with"
         )
+    if re.sub(r"\x00\d+\x00|[A-Za-z_]+", "", code).strip(" \t\r\n(){}[].,;=|&"):
+        return unreadable("it uses characters other than identifiers, strings and ( ) { } [ ] . , ; = | &")
     members = (
-        r"\bpolkit\s*\.\s*(?:addRule|addAdminRule|Result\s*\.\s*[A-Z_]+|log|spawn)\b"
+        r"\bpolkit\s*\.\s*(?:addRule|addAdminRule|Result\s*\.\s*[A-Z_]+)\b"
     )
     if len(re.findall(r"\bpolkit\b", code)) != len(re.findall(members, code)):
         return unreadable(
@@ -2127,7 +2139,10 @@ def polkit_rules_declared(path, text, cannot):
             r.lower()
             for r in re.findall(r"\bpolkit\s*\.\s*Result\s*\.\s*([A-Z_]+)", block)
         }
-        if not ids or not results or re.search(r"\baction\b", block):
+        returns = len(re.findall(r"\breturn\b", block))
+        if returns != len(re.findall(r"\breturn\s+polkit\s*\.\s*Result\s*\.\s*[A-Z_]+\s*[;}]", block + ";")):
+            ids = None
+        if not ids or not results or re.search(r"\b(?:action|function)\b", block):
             return unreadable(
                 'an addRule tests the action other than as action.id == "..." joined by || '
                 "(and, in parentheses, && conditions on the subject), or its block names the "
@@ -2169,7 +2184,7 @@ def polkit_declared(files):
                     continue
                 active = (action.findtext("defaults/allow_active") or "no").strip()
                 declared[(action.get("id"), path)] = {active}
-        elif path.endswith(".rules") and re.search(r"\bpolkit\s*\.|\baddRule\b", text):
+        elif path.endswith(".rules") and "udev/rules.d/" not in path:
             found, problems = polkit_rules_declared(path, text, cannot)
             declared.update(found)
             unreadable += problems
