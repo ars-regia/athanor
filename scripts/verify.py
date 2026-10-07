@@ -10,11 +10,14 @@ Uso:
     python3 scripts/verify.py              # tutti i controlli
     python3 scripts/verify.py polkit       # uno solo
     python3 scripts/verify.py --list
+    python3 scripts/verify.py --known-red scripts/ci/known-red.txt [--known-red-base REF]
+                                           # a listed red check does not fail the run (PQ12)
 
 Exit code: numero di controlli falliti (0 = tutto a posto).
 Nessuna dipendenza oltre a python3 e git. Va eseguito dalla radice del repo.
 """
 
+import datetime
 import json
 import os
 import re
@@ -1865,7 +1868,126 @@ def check_coverage():
 # runner
 # --------------------------------------------------------------------------- #
 
+# --------------------------------------------------------------------------- #
+# known-red: checks red when `just check` became the gate (doc_pipeline.md PQ12)
+# --------------------------------------------------------------------------- #
+
+KNOWN_RED_LINE = re.compile(r"(\S+)\s+([1-9]\d*)\s+(#\d+)\s+(\d{4}-\d{2}-\d{2})")
+
+
+def parse_known_red(text):
+    """{check: (ceiling, issue, expires)} from the text of scripts/ci/known-red.txt.
+
+    One entry per line, `check ceiling issue expires`: the check may report at most
+    `ceiling` problems until `expires` (inclusive) while issue `#n` tracks the fix.
+    Blank lines and `#` comments are ignored; anything else raises ValueError.
+    """
+    entries = {}
+    for number, line in enumerate(text.splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = KNOWN_RED_LINE.fullmatch(line)
+        if not match:
+            raise ValueError(
+                f"line {number}: expected `check ceiling #issue YYYY-MM-DD`: {line}"
+            )
+        name, ceiling, issue, expires = match.groups()
+        if name in entries:
+            raise ValueError(f"line {number}: {name} is listed twice")
+        try:
+            entries[name] = (int(ceiling), issue, datetime.date.fromisoformat(expires))
+        except ValueError:
+            raise ValueError(f"line {number}: {expires} is not a date") from None
+    return entries
+
+
+def load_known_red_base(root, ref, path):
+    """The list as revision REF has it, None when REF has no such file (the adoption)."""
+
+    def git(*args):
+        return subprocess.run(
+            ["git", "-C", str(root), *args], capture_output=True, text=True
+        )
+
+    commit = git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
+    if commit.returncode != 0:
+        raise ValueError(f"{ref} is not a commit of {root}")
+    blob = f"{commit.stdout.strip()}:{path}"
+    if git("cat-file", "-e", blob).returncode != 0:
+        return None
+    return parse_known_red(git("show", blob).stdout)
+
+
+def judge_known_red(entries, base, results, today):
+    """(tolerated, problems): the checks whose failure the list excuses, and what is wrong
+    with the list itself.
+
+    A listed check that ran is tolerated while it fails with at most its ceiling of problems
+    and its entry has not expired. A listed check that passes must leave the list. Against
+    BASE (the list of the base revision, None at adoption) the list may only shrink: no new
+    entry, no higher ceiling, no later expiry.
+    """
+    tolerated, problems = set(), []
+    for name, (ceiling, issue, expires) in sorted(entries.items()):
+        if name not in CHECKS:
+            problems.append(f"{name}: no such check")
+            continue
+        if base is not None:
+            if name not in base:
+                problems.append(
+                    f"{name}: not in the base list, the list may only shrink"
+                )
+            else:
+                old_ceiling, _, old_expires = base[name]
+                if ceiling > old_ceiling:
+                    problems.append(
+                        f"{name}: ceiling raised from {old_ceiling} to {ceiling}"
+                    )
+                if expires > old_expires:
+                    problems.append(
+                        f"{name}: expiry moved from {old_expires} to {expires}"
+                    )
+        if name not in results:
+            continue
+        found = len(results[name].problems)
+        if found == 0:
+            problems.append(f"{name}: passes now, remove its entry")
+        elif today > expires:
+            problems.append(f"{name}: the entry expired on {expires} ({issue})")
+        elif found > ceiling:
+            problems.append(
+                f"{name}: {found} problems, above the ceiling of {ceiling} ({issue})"
+            )
+        else:
+            tolerated.add(name)
+    return tolerated, problems
+
+
+def take_option(argv, name):
+    """Removes `NAME VALUE` from argv and returns VALUE, None when NAME is absent."""
+    if name not in argv:
+        return None
+    at = argv.index(name)
+    if at + 1 >= len(argv) or argv[at + 1].startswith("-"):
+        raise ValueError(f"{name} needs a value")
+    value = argv[at + 1]
+    del argv[at : at + 2]
+    return value
+
+
 def main(argv):
+    argv = list(argv)
+    try:
+        known_red_path = take_option(argv, "--known-red")
+        known_red_ref = take_option(argv, "--known-red-base")
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
+    if known_red_ref and not known_red_path:
+        print("--known-red-base needs --known-red", file=sys.stderr)
+        return 2
+
     if "--list" in argv:
         for n, f in CHECKS.items():
             print(f"  {n:12s} {f.title}")
@@ -1878,20 +2000,47 @@ def main(argv):
         print(f"disponibili: {', '.join(CHECKS)}", file=sys.stderr)
         return 2
 
+    entries, base = {}, None
+    if known_red_path:
+        try:
+            path = Path(known_red_path)
+            entries = parse_known_red(path.read_text())
+            if known_red_ref:
+                relative = path.resolve().relative_to(ROOT).as_posix()
+                base = load_known_red_base(ROOT, known_red_ref, relative)
+        except (OSError, ValueError) as e:
+            print(f"known-red: {e}", file=sys.stderr)
+            return 2
+
     failed = 0
     problems = 0
     print(f"{BOLD}Athanor OS — controlli strutturali{OFF}  {DIM}({ROOT}){OFF}\n")
 
-    for name in wanted:
+    results = {name: CHECKS[name]() for name in wanted}
+    tolerated, list_problems = judge_known_red(
+        entries, base, results, datetime.date.today()
+    )
+
+    for name, res in results.items():
         fn = CHECKS[name]
-        res = fn()
+        n = len(res.problems)
         if res.ok:
-            print(f"  {GRN}PASS{OFF}  {BOLD}{name}{OFF}  {GRN}0{OFF}  {DIM}{fn.title}{OFF}")
+            print(
+                f"  {GRN}PASS{OFF}  {BOLD}{name}{OFF}  {GRN}0{OFF}  {DIM}{fn.title}{OFF}"
+            )
         else:
-            failed += 1
-            n = len(res.problems)
-            problems += n
-            print(f"  {RED}FAIL{OFF}  {BOLD}{name}{OFF}  {RED}{n}{OFF}  {DIM}{fn.title}{OFF}")
+            if name in tolerated:
+                ceiling, issue, expires = entries[name]
+                print(
+                    f"  {YEL}KNOWN-RED{OFF}  {BOLD}{name}{OFF}  {YEL}{n}/{ceiling}{OFF}  "
+                    f"{DIM}{fn.title} ({issue}, until {expires}){OFF}"
+                )
+            else:
+                failed += 1
+                problems += n
+                print(
+                    f"  {RED}FAIL{OFF}  {BOLD}{name}{OFF}  {RED}{n}{OFF}  {DIM}{fn.title}{OFF}"
+                )
             for pr in res.problems[:25]:
                 print(f"          {pr}")
             if len(res.problems) > 25:
@@ -1900,13 +2049,34 @@ def main(argv):
             print(f"          {YEL}nota{OFF} {DIM}{n}{OFF}")
         print()
 
+    if known_red_path:
+        if list_problems:
+            failed += 1
+            problems += len(list_problems)
+            print(
+                f"  {RED}FAIL{OFF}  {BOLD}known-red{OFF}  {RED}{len(list_problems)}{OFF}  "
+                f"{DIM}{known_red_path}{OFF}"
+            )
+            for pr in list_problems:
+                print(f"          {pr}")
+        else:
+            print(
+                f"  {GRN}PASS{OFF}  {BOLD}known-red{OFF}  {GRN}0{OFF}  {DIM}{known_red_path}{OFF}"
+            )
+        print()
+
     total = len(wanted)
     if failed:
         print(f"{BOLD}Problemi totali: {problems}{OFF}")
-        print(f"{RED}{failed}/{total} controlli falliti.{OFF} "
-              f"Ogni riga sopra cita file:riga: nessuna va interpretata.")
+        print(
+            f"{RED}{failed} controlli falliti su {total}.{OFF} "
+            f"Ogni riga sopra cita file:riga: nessuna va interpretata."
+        )
     else:
-        print(f"{GRN}{total}/{total} controlli superati.{OFF}")
+        print(
+            f"{GRN}{total}/{total} controlli superati"
+            f"{f', {len(tolerated)} noti rossi' if tolerated else ''}.{OFF}"
+        )
     return failed
 
 

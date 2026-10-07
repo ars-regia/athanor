@@ -1,0 +1,14 @@
+# Checks of scripts/verify.py that were red when `just check` became the gate of pr.yml
+# (doc_pipeline.md PQ12, ADR-0075). One entry per check:
+#
+#   check  ceiling  issue  expires
+#
+# The check may report at most `ceiling` problems until `expires` (inclusive) while the issue
+# tracks the fix. The list may only shrink: verify.py --known-red-base refuses a new entry,
+# a higher ceiling or a later expiry against the base branch, and an entry whose check passes
+# must be removed in the same change.
+polkit       1  #223  2027-01-07
+paths       14  #223  2027-01-07
+shipped      6  #223  2027-01-07
+panics       1  #223  2027-01-07
+forge-rules  3  #223  2027-01-07
