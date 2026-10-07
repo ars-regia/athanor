@@ -85,7 +85,7 @@ Outside the files and left as they are: collaborators and teams, webhooks, deplo
 
 Facts read by `export`; each one is in the file named. `diff` against `hr-mes/athanor` printed "live state matches the files" and exited 0 right after export.
 
-Since then the files have moved ahead of GitHub (2026-10-07, ADR-0064): the two signing environments of section 7 replace `signing`, and `main` is protected like `iso-v0`. `diff` lists these changes until the maintainer applies them (bootstrap: `docs/operations/secrets.md` section 4).
+Since then the files have moved ahead of GitHub (2026-10-07, ADR-0064): the two signing environments of section 7 take over from `signing`, which stays until the image key rotation ends (section 7), and `main` is protected like `iso-v0`. `diff` lists these changes until the maintainer applies them (bootstrap: `docs/operations/secrets.md` section 4).
 
 | Fact | File |
 | --- | --- |
@@ -122,17 +122,28 @@ no job holds a key it does not use:
 | --- | --- | --- |
 | `signing-kernel` | `SECUREBOOT_SIGNING_KEY`, `MODULE_SIGNING_KEY` | `sign` of `nvidia-kmod.yml`, only when a kernel or NVIDIA change leaves the signed vmlinuz or modules missing |
 | `signing-images` | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | `sign-system-images` of `call-system-image.yml` |
+| `signing` | the five keys it held before the split, `MOK_PRIVATE_KEY` included | `sign-system-images` of `call-system-image.yml`, during the image key rotation only |
+
+`signing` is the environment the split replaces. It holds image key 1, which signs the
+transitional release of the image key rotation (`docs/operations/secrets.md` section 4.1), so
+`environments.json` declares it as it is live until the rotation ends and `ghsettings.py diff`
+does not report it. While `system/keys` holds both image keys, `scripts/verify.py` treats it as
+an alias of `signing-images`: its protection rules apply, and its keys are not counted as held
+twice. When `athanor-image-1.pub` leaves `system/keys`, the maintainer deletes `signing` with
+`MOK_PRIVATE_KEY` and its entry leaves `environments.json`; an entry left behind fails the lint,
+because its keys are then held twice.
 
 Both have the same protection in `environments.json`: required reviewer `hr-mes`; administrator
 bypass off (`can_admins_bypass: false`, set by hand: section 4); deployment branches `iso-v0` and
 `main`, which `branch-protection.json` protects alike (required check `Kernel gate`, no force
 push, no deletion).
 
-`prevent_self_review` stays `false` for now. Every push and every run today is started by the
-maintainer's own account, agents included, so with it `true` the only reviewer could never
-approve a run and the pipeline would lock its own maintainer out. It turns `true` once agents push
-with their own GitHub App identity, a planned follow-up: their runs are then approved by the
-maintainer as another person.
+`prevent_self_review` stays `false`, deferred until a second reviewer exists (secrets.md
+KC1). GitHub refuses the approval of the person who triggered the run, and a release run, or a
+re-run of one, is triggered by the maintainer, who is today the only reviewer: with it `true`,
+every release the maintainer triggers or re-runs would wait for an approval nobody can give. An
+App identity for agents does not change this, because the maintainer still starts and re-runs
+releases. It turns `true` when a second required reviewer is added to the signing environments.
 
 `environments.json` is the one place that says which environment holds which key.
 `scripts/verify.py workflows` reads it and fails a signing secret read by a job of any other
@@ -181,12 +192,19 @@ by tag, so it is enabled only after every `uses:` is pinned by commit SHA (PB3,
 
 The order of the maintainer's steps, each followed by `ghsettings.py diff`:
 
-1. Create the settings GitHub App, owned by the organisation, installed on this repository
+1. Protect `main` as `branch-protection.json` describes it (`ghsettings.py apply`), the step of
+   the bootstrap (`docs/operations/secrets.md` section 4) still open.
+2. Create the settings GitHub App, owned by the organisation, installed on this repository
    only, with the read permissions above; store its client id as `SETTINGS_APP_CLIENT_ID`
    and its private key as `SETTINGS_APP_PRIVATE_KEY` (secrets.md SEC13).
-2. Merge PB1, so that `gate` reports on pull requests and merge groups.
-3. Apply the ruleset (`ghsettings.py apply`, then `--yes`), which also enables the merge
+3. Merge PB1, so that `gate` reports on pull requests and merge groups.
+4. Apply the ruleset (`ghsettings.py apply`, then `--yes`), which also enables the merge
    queue, and re-export to record what GitHub stored.
-4. Create the bot App of PL5, move the bots to it, delete the three personal tokens, then
+5. Create the bot App of PL5, move the bots to it, delete the three personal tokens, then
    set `personal_tokens.retired` to `true` and drop them from `secrets`.
-5. Last, once every action is pinned by SHA: enable SHA pinning enforcement.
+6. At the end of the image key rotation (`athanor-image-1.pub` leaves `system/keys`,
+   `docs/operations/secrets.md` section 4.1, step 4): delete `signing` together with
+   `MOK_PRIVATE_KEY`, and remove its entry from `environments.json`.
+7. Last, once every action is pinned by SHA: enable SHA pinning enforcement.
+
+`prevent_self_review` is not among these steps: it waits for a second reviewer (section 7).

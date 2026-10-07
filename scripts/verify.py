@@ -282,13 +282,22 @@ def deployment_problem(policy, protected):
     return None
 
 
+def image_key_rotation(root):
+    """Image key rotation (docs/operations/secrets.md section 4.1): it lasts while system/keys
+    holds both image keys, and ends when athanor-image-1.pub leaves."""
+    return all((Path(root) / "system/keys" / f"athanor-image-{n}.pub").is_file() for n in (1, 2))
+
+
 def signing_environments(root):
     """{secret: environment} for the environments named signing* in environments.json, the one
     place that says which environment holds which key, and the problems of those environments:
     each needs a required reviewer, no administrator bypass, and deploys only from branches
     branch-protection.json protects by name (a glob or "any protected branch" would follow
-    whoever can protect a new branch)."""
+    whoever can protect a new branch). During the image key rotation the old `signing`
+    environment is an alias of signing-images: its rules apply, but it holds no key of its own,
+    so the keys it still keeps until the rotation ends are not counted twice."""
     environments = json.loads(read(Path(root) / ENVIRONMENTS_JSON))
+    alias = "signing" if image_key_rotation(root) else None
     signing = {name: env for name, env in environments.items() if name.startswith("signing")}
     if not signing:
         return {}, [f"{ENVIRONMENTS_JSON}: no signing environment (D43)"]
@@ -304,7 +313,7 @@ def signing_environments(root):
         if where:
             problems.append(f"{ENVIRONMENTS_JSON}: the {name} environment deploys from {where}, not only "
                             f"from branches {BRANCH_PROTECTION_JSON} protects (D43)")
-        for secret in env.get("secrets", []):
+        for secret in env.get("secrets", []) if name != alias else []:
             if secret in holders:
                 problems.append(f"{ENVIRONMENTS_JSON}: {secret} is in {holders[secret]} and in {name}: "
                                 "each key has one environment (D43)")
@@ -335,9 +344,10 @@ def signing_problems(root):
     # Image key rotation (docs/operations/secrets.md section 4.1): while system/keys holds both
     # image keys, the old `signing` environment, the only holder of key 1, counts as
     # signing-images, so every rule of a signing job applies to a job that names it. The alias
-    # ends when athanor-image-1.pub leaves system/keys.
-    if all((root / "system/keys" / f"athanor-image-{n}.pub").is_file() for n in (1, 2)):
-        canonical.setdefault("signing", "signing-images")
+    # ends when athanor-image-1.pub leaves system/keys; from then on a `signing` entry left in
+    # environments.json holds the same keys as signing-images and signing-kernel, and fails.
+    if image_key_rotation(root):
+        canonical["signing"] = "signing-images"
     repository = set(json.loads(read(root / ACTIONS_JSON)).get("secrets") or [])
     for secret in sorted(repository & holders.keys()):
         problems.append(f"{ACTIONS_JSON}: {secret} is a repository secret, which every job reads, "
