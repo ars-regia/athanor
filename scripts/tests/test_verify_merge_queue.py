@@ -46,6 +46,30 @@ class MergeQueueTest(unittest.TestCase):
         self.assertEqual(1, len(problems))
         self.assertIn("'Kernel gate'", problems[0])
 
+    def test_a_reusable_workflow_caller_reports_its_inner_jobs(self):
+        caller = "on:\n  merge_group:\njobs:\n  kernel:\n    uses: ./.github/workflows/k.yml\n"
+        inner = "on:\n  workflow_call:\njobs:\n  gate:\n    name: Kernel gate\n    runs-on: x\n"
+        required = {"iso-v0": {"required_status_checks": {"checks": [{"context": "kernel"}]}}}
+        nested = {"iso-v0": {"required_status_checks": {"checks": [{"context": "kernel / Kernel gate"}]}}}
+        workflows = {"pr.yml": PR, "c.yml": caller, "k.yml": inner}
+        self.assertEqual(1, len(verify.merge_queue_problems(tree([REQUIRED, QUEUE], required, workflows))))
+        self.assertEqual([], verify.merge_queue_problems(tree([REQUIRED, QUEUE], nested, workflows)))
+
+    def test_an_unnamed_matrix_job_reports_one_context_per_combination(self):
+        matrix = "on:\n  merge_group:\njobs:\n  gate:\n    strategy:\n      matrix:\n        n: [1, 2]\n    runs-on: x\n"
+        self.assertEqual(1, len(verify.merge_queue_problems(tree([REQUIRED, QUEUE], {}, {"pr.yml": matrix}))))
+        combo = {"iso-v0": {"required_status_checks": {"checks": [{"context": "gate (1)"}]}}}
+        only_combo = [{"type": "merge_queue", "parameters": {}}]
+        self.assertEqual([], verify.merge_queue_problems(tree(only_combo, combo, {"pr.yml": matrix})))
+
+    def test_the_committed_settings_with_a_queue_report_the_legacy_contexts(self):
+        root = SCRIPT.parents[1]
+        problems = verify.merge_queue_problems(tree(
+            [REQUIRED, QUEUE], json.loads((root / verify.BRANCH_PROTECTION_JSON).read_text()),
+            {p.name: p.read_text() for p in (root / ".github/workflows").glob("*.y*ml")}))
+        self.assertTrue(problems)
+        self.assertFalse(any("'gate'" in p for p in problems))
+
     def test_the_committed_settings_pass(self):
         self.assertEqual([], verify.merge_queue_problems(SCRIPT.parents[1]))
 

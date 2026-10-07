@@ -19,6 +19,7 @@ Nessuna dipendenza oltre a python3 e git. Va eseguito dalla radice del repo.
 
 import collections
 import datetime
+import fnmatch
 import json
 import os
 import re
@@ -332,7 +333,9 @@ def signing_environments(root):
 def merge_queue_problems(root):
     """PIPE-N06: a ruleset with a merge queue needs every required status context reported by
     a workflow that runs on merge_group; otherwise a merge group never gets the context and
-    cannot be satisfied. Job names are the contexts (the job id when it has no name)."""
+    cannot be satisfied. A job reports its name (its id when it has none); a job that calls a
+    reusable workflow reports `<name> / <inner context>`, and a matrix job without a name reports
+    `<id> (<values>)`, so both are matched as GitHub composes them."""
     root = Path(root)
     rulesets = json.loads(read(root / RULESETS_JSON))
     queued = sorted(name for name, rs in rulesets.items()
@@ -349,10 +352,32 @@ def merge_queue_problems(root):
     for wf in sorted((root / ".github/workflows").glob("*.y*ml")):
         doc = yaml.safe_load(read(wf))
         if isinstance(doc, dict) and "merge_group" in triggers(doc):
-            reported |= {job.get("name", job_id) for job_id, job in (doc.get("jobs") or {}).items()}
+            reported |= job_contexts(root, doc)
     return [f"{RULESETS_JSON}: ruleset {name} enables a merge queue, but the required context "
             f"{context!r} is reported by no workflow that runs on merge_group (PIPE-N06)"
-            for name in queued for context in sorted(required - reported)]
+            for name in queued for context in sorted(required)
+            if not any(fnmatch.fnmatchcase(context, pattern) for pattern in reported)]
+
+
+def job_contexts(root, doc, depth=0):
+    """The status contexts a workflow's jobs report, as fnmatch patterns: an expression in a
+    name and the values of an unnamed matrix match anything, and so does the inner job of a
+    reusable workflow that is not in this repository or nested deeper than GitHub allows."""
+    patterns = set()
+    for job_id, job in (doc.get("jobs") or {}).items():
+        job = job or {}
+        name = re.sub(r"\$\{\{.*?\}\}", "*", str(job.get("name", job_id)))
+        if "name" not in job and (job.get("strategy") or {}).get("matrix"):
+            name += " (*)"
+        uses = job.get("uses")
+        if not uses:
+            patterns.add(name)
+        elif uses.startswith("./") and depth < 4 and (root / uses).is_file():
+            inner = yaml.safe_load(read(root / uses)) or {}
+            patterns |= {f"{name} / {context}" for context in job_contexts(root, inner, depth + 1)}
+        else:
+            patterns.add(f"{name} / *")
+    return patterns
 
 
 def signing_problems(root):
