@@ -13,16 +13,20 @@
 # bind-mounted over /etc/containers. Nothing else on the machine sees them, and they are
 # gone when the switch ends, however it ends: /etc is never modified.
 #
-# Usage: sudo bash scripts/switch-verified.sh REGISTRY/OWNER/athanor-system:latest
+# KEYS_DIR replaces the booted image's keys with the public keys under it, for a first
+# switch to a derived image signed with its builder's own key (docs/operations/derived-images.md).
+#
+# Usage: sudo bash scripts/switch-verified.sh REGISTRY/OWNER/athanor-system:latest [KEYS_DIR]
 #        ssh HOST 'sudo bash -s -- IMAGE' < scripts/switch-verified.sh
 set -euo pipefail
 
 usage() {
-    echo "usage: ${0##*/} REGISTRY/OWNER/athanor-system[-nvidia[-legacy]]:TAG" >&2
+    echo "usage: ${0##*/} REGISTRY/OWNER/athanor-system[-nvidia[-legacy]]:TAG [KEYS_DIR]" >&2
     exit 2
 }
-[[ $# -eq 1 ]] || usage
+[[ $# -eq 1 || $# -eq 2 ]] || usage
 image=$1
+keys_dir=${2:-/usr/share/athanor/keys}
 name=${image%:*}
 registry=${name%/*}
 [[ $name != "$image" && $registry == */* ]] || usage
@@ -31,7 +35,7 @@ work=$(mktemp -d /run/athanor-switch.XXXXXX)
 trap 'rm -r "$work"' EXIT
 
 /usr/libexec/athanor-update/render-policy --registry "$registry" \
-    --keys-dir /usr/share/athanor/keys --out "$work"
+    --keys-dir "$keys_dir" --out "$work"
 # The policy pins the system images by name; any other name would fall to the accept-all
 # default and be switched to unverified.
 grep -q -F "\"$name\": [{\"type\": \"sigstoreSigned\"" "$work/policy.json" ||
