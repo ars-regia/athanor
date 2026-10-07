@@ -1,7 +1,7 @@
 name: System Image Check
 
-# Pull requests that change the system images build them on a GitHub runner, with the
-# UKI signed by a throwaway key and without pushing, and report the package delta of the
+# Pull requests that change the system images build them on a GitHub runner, the same way the
+# pipeline does (no key reaches a build, D43) but without pushing, and report the package delta of the
 # default image against the published athanor-system (docs/architecture/doc_system_image.md,
 # S2, S8, section 4). The gates of system/nvidia/gate.sh run inside the builds. Which images
 # are built follows the kernel artifacts of the pull request's pins
@@ -103,7 +103,7 @@ jobs:
           set -euo pipefail
           echo "${GITHUB_TOKEN}" | podman login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
 
-      - name: Build the planned images (throwaway UKI key)
+      - name: Build the planned images
         # Which GPUs to build, none, one or all three, follows the kernel artifacts of this pull
         # request's pins (system/kernel-artifacts.sh check-plan, O7): an empty list is a pure
         # kernel pin bump, and the loop below then builds nothing.
@@ -137,7 +137,7 @@ jobs:
       actions: read
       contents: read
       pull-requests: read
-    # It waits for the required checks (Kernel gate) before merging.
+    # It waits for the checks .github/settings/branch-protection.json requires before merging.
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

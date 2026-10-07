@@ -22,9 +22,11 @@ build argument `GPU` selects the variant:
 | `nvidia-legacy` | `athanor-system-nvidia-legacy` |
 
 The Azoth kernel and the NVIDIA modules come from the kernel registry, by the digests that
-`kernel-artifacts.sh` verified. `build-image.sh` builds one image, in CI and locally;
-without `SECUREBOOT_SIGNING_KEY` it signs the UKI with a throwaway key and refuses to push
-the result.
+`kernel-artifacts.sh` verified. `build-image.sh` builds one image, in CI and locally,
+`FROM` the image of the `system` stage: `--system` builds that stage alone and writes its
+image ID, `--system-image ID` builds a variant from it, and without it the stage is built
+first. No key reaches the build: the vmlinuz comes signed for Secure Boot from `azoth-boot`,
+by the digest `kernel-artifacts.sh` verified (D43).
 
 ## Pipeline
 
@@ -32,8 +34,9 @@ The Orchestrator (`.github/workflows/athanor-forge-orchestrator.yml`) calls
 `.github/workflows/call-system-image.yml`, which:
 
 1. aggregates the forge's tier repositories and publishes them;
-2. builds the three images with `build-image.sh` and pushes them under the run id and
-   `latest`;
+2. builds the `system` stage once and the three images `FROM` it with `build-image.sh`,
+   checks in local storage that all three carry every layer of the system image
+   (`shared-layers.sh`), then pushes them under the run id and `latest`;
 3. records their digests (`image-digests.sh`), attaches an SPDX SBOM and a keyless cosign
    signature (`forge/scripts/sbom_rootfs.sh`, `forge/scripts/sign_attest.sh`);
 4. builds the installer ISO with bootc-image-builder (`forge/scripts/build_iso.sh`) and
@@ -56,7 +59,7 @@ Anaconda's interactive screens.
 An existing Fedora Atomic machine switches with:
 
 ```bash
-sudo bootc switch ghcr.io/hr-mes/athanor-system:stable
+sudo bootc switch ghcr.io/ars-regia/athanor-system:stable
 ```
 
 Once the image's signature policy is in force, `athanor-update-migrate.service` moves the

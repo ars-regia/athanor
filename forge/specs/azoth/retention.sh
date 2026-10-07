@@ -26,7 +26,7 @@ set -euo pipefail
 
 DRY=''
 [[ ${1:-} == --dry-run ]] && DRY=1
-OWNER=${GITHUB_REPOSITORY_OWNER:-hr-mes}
+OWNER=${GITHUB_REPOSITORY_OWNER:-ars-regia}
 # The package API lives under /users for a personal account and under /orgs for an organisation.
 owner_type=$(gh api "/users/${OWNER}" --jq .type)
 case $owner_type in
@@ -76,3 +76,4 @@ prune azoth 1000000
 prune azoth-devel 1000000
 prune azoth-debuginfo 2
 prune azoth-nvidia 1000000
+prune azoth-boot 1000000

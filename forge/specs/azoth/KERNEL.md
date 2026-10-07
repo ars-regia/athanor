@@ -11,7 +11,7 @@ directory e come si usa.
 | `pins.env` | i pin: NVR Fedora (stesso patch level della release CachyOS), release CachyOS, commit del config e delle patch |
 | `SOURCES/sources.sha256` | hash di ogni file che build.sh scarica; lo scrive `build.sh --stage manifest` |
 | `SOURCES/keys/{cachyos,kernel.org}/` | chiavi pubbliche che firmano i tarball CachyOS e vanilla |
-| `keys/` | `profiles/` e `generate.sh`: le chiavi di firma del progetto; certificati pubblici in `secureboot/` (UKI e policy PCR, secret `SECUREBOOT_SIGNING_KEY`), `modules/` (moduli esterni, compilato nel kernel, secret `MODULE_SIGNING_KEY`) e `revoked/` (compilati nella blacklist del kernel); i secret stanno nell'environment `signing` |
+| `keys/` | `profiles/` e `generate.sh`: le chiavi di firma del progetto; certificati pubblici in `secureboot/` (vmlinuz, secret `SECUREBOOT_SIGNING_KEY`), `modules/` (moduli esterni, compilato nel kernel, secret `MODULE_SIGNING_KEY`) e `revoked/` (compilati nella blacklist del kernel); i secret stanno nell'environment `signing-kernel` |
 | `kernel-local` | delta Kconfig di Athanor sul config x86_64 di Fedora |
 | `patches.list` | patch di CachyOS/kernel-patches applicate sopra la base |
 | `patches/refreshed/` | copie rinfrescate e riviste delle patch di `patches.list` che non entrano più senza fuzz; il preambolo registra il file upstream da cui derivano (`build.sh --stage refresh`, spec sezione 8) |
@@ -35,16 +35,18 @@ directory e come si usa.
 | `microvm/boot.sh`, `microvm/init` | il gate del kernel guest: vmlinux in Firecracker con una rootfs ext4 di prova, `K6 RESULT ok` sulla seriale |
 | `nvidia.sh` | i moduli kernel NVIDIA, rami `open` (610) e `legacy` (580), contro il kernel-devel: `build`, `sign` e `manifest` (l'hash del `.run` legacy) |
 | `nvidia/Containerfile`, `nvidia/sources.sha256` | l'ambiente di nvidia.sh (la toolchain LLVM del kernel, kmod, openssl) e l'hash del `.run` legacy |
+| `sign-kernel.sh` | le firme degli artefatti del kernel (D43): vmlinuz con sbsign, moduli NVIDIA con sign-file dopo l'allow-list `check-modules`, `verify` contro il vmlinuz dell'RPM; gira solo nell'immagine del signer |
+| `signer/Containerfile`, `signer/toolchain.*`, `signer/publish.sh`, `signer/run.sh`, `signer/cosign.pin` | il signer: immagine con sbsigntools e il sign-file di kernel-devel dal lock e `sign-kernel.sh` dentro, taggata dall'hash dei suoi input (`publish.sh`) e usata per digest (`signer/image.digest`); `run.sh` la lancia senza rete, con gli input in sola lettura, negli step senza chiave (`prepare`, `inputs`, che risolve di nuovo il kernel con cosign scaricato per sha256) e nello step con le chiavi (`sign`) |
 
 ## Pin correnti
 
 <!-- pins:begin (table written by bump.py apply) -->
 | pin | value |
 | --- | --- |
-| `FEDORA_KERNEL_NVR` | `7.2.8-100.fc43` |
+| `FEDORA_KERNEL_NVR` | `7.2.9-100.fc43` |
 | `FEDORA_KEY_FPR` | `c6e7f081cf80e13146676e88829b606631645531` |
 | `KERNEL_CHANNEL` | `stable` |
-| `CACHYOS_RELEASE` | `cachyos-7.2.8-1` |
+| `CACHYOS_RELEASE` | `cachyos-7.2.9-2` |
 | `CACHYOS_CONFIG_COMMIT` | `6676e72b85eb9e30d079a8c3dcdf93aedd1e8226` |
 | `CACHYOS_PATCHES_COMMIT` | `17bb0bb818d283d0dc6e0280a2e9d5b95e66808b` |
 | `NVIDIA_OPEN_VERSION` | `615.71.09` |
@@ -143,8 +145,8 @@ di build.sh, o l'immagine `azoth-devel:<nvr>`). I `.ko` finiscono in
 sistema copia) con il vermagic del kernel e i preamboli kCFI, senza firma:
 `nvidia.sh sign --key K --cert C --devel DIR --out DIR` li firma con sign-file del
 kernel-devel, in locale con una chiave effimera, in CI con la chiave dei moduli del
-progetto (workflow `.github/workflows/nvidia-kmod.yml`, che poi li carica in QEMU con
-`boot.sh --mok --insmod` prima di pubblicarli).
+progetto (job `nvidia-kmod-sign` di `.github/workflows/athanor-forge-orchestrator.yml`;
+poi `nvidia-kmod.yml` li carica in QEMU con `boot.sh --mok --insmod` prima di pubblicarli).
 
 ## Pubblicazione
 
@@ -153,11 +155,11 @@ OCI con i soli RPM dentro, tag `<nvr>` (quello che stampa `bash nvr.sh`):
 
 | Immagine | Contenuto |
 |----------|-----------|
-| `ghcr.io/hr-mes/azoth` | kernel, core, modules, modules-core/extra/internal, uki-virt |
-| `ghcr.io/hr-mes/azoth-devel` | kernel-devel, per i kmod esterni (NVIDIA, fase K4) |
-| `ghcr.io/hr-mes/azoth:<nvr>-microvm` | azoth-microvm: vmlinux, bzImage, config e release del kernel guest (sezione 9) |
-| `ghcr.io/hr-mes/azoth-debuginfo` | debuginfo, restano le due versioni piu' recenti |
-| `ghcr.io/hr-mes/azoth-nvidia` | i `.ko` NVIDIA firmati, tag `<nvr>-k<12 cifre esadecimali del digest del kernel>-<branch>-<versione>` (pubblicata da `nvidia-kmod.yml`, non da Kernel Build) |
+| `ghcr.io/ars-regia/azoth` | kernel, core, modules, modules-core/extra/internal, uki-virt |
+| `ghcr.io/ars-regia/azoth-devel` | kernel-devel, per i kmod esterni (NVIDIA, fase K4) |
+| `ghcr.io/ars-regia/azoth:<nvr>-microvm` | azoth-microvm: vmlinux, bzImage, config e release del kernel guest (sezione 9) |
+| `ghcr.io/ars-regia/azoth-debuginfo` | debuginfo, restano le due versioni piu' recenti |
+| `ghcr.io/ars-regia/azoth-nvidia` | i `.ko` NVIDIA firmati, tag `<nvr>-k<12 cifre esadecimali del digest del kernel>-<branch>-<versione>` (pubblicata da `nvidia-kmod.yml`, non da Kernel Build) |
 
 Ognuna e' firmata con cosign keyless dall'identita' del workflow, porta un SBOM SPDX
 e un'attestazione custom con i pin (`pins.json`: pins.env, hash del manifest, del
@@ -165,10 +167,10 @@ delta e del Containerfile, immagine base del builder); la principale ha anche la
 provenance SLSA di GitHub. `:latest` si muove solo sul branch di default del repository. Verifica:
 
 ```sh
-cosign verify --certificate-identity-regexp '^https://github.com/hr-mes/athanor/' \
+cosign verify --certificate-identity-regexp '^https://github.com/ars-regia/athanor/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  "ghcr.io/hr-mes/azoth:$(bash nvr.sh)"
-gh attestation verify "oci://ghcr.io/hr-mes/azoth:$(bash nvr.sh)" --repo hr-mes/athanor
+  "ghcr.io/ars-regia/azoth:$(bash nvr.sh)"
+gh attestation verify "oci://ghcr.io/ars-regia/azoth:$(bash nvr.sh)" --repo ars-regia/athanor
 ```
 
 ## Bump

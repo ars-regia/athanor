@@ -206,10 +206,6 @@ jobs:
             component: ebpf
             dir: system/ebpf/ebpf-core
             cmd: RUSTC_WRAPPER="" RUSTFLAGS="" cargo build --target bpfel-unknown-none -Z build-std=core --release
-          - target_name: attestation-baremetal
-            component: attestation
-            dir: system/confidential_computing/athanor-attestation
-            cmd: cargo build --release
           - target_name: cloud-zk-baremetal
             component: cloud
             dir: forge/specs/athanor-cloud-rs/athanor-cloud-rs-1.0.0

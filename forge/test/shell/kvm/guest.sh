@@ -59,7 +59,7 @@ done
 }
 
 rig_out=${ATHANOR_RIG_OUT:-$root/.scratch/shell-rig}
-registry=${ATHANOR_REGISTRY:-ghcr.io/hr-mes}
+registry=${ATHANOR_REGISTRY:-ghcr.io/ars-regia}
 memory=${GUEST_MEMORY:-8G}
 cpus=${GUEST_CPUS:-4}
 

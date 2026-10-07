@@ -70,6 +70,10 @@
 (filecon "/var/nix/var/nix/gc-socket(/.*)?" any (system_u object_r nix_socket_t ((s0) (s0))))
 ; The daemon's narinfo cache (NIX_CACHE_HOME in its drop-in, created by CacheDirectory=nix).
 (filecon "/var/cache/nix(/.*)?" any (system_u object_r nix_var_t ((s0) (s0))))
+; The cache directory of athanor-nix-gc.service (CacheDirectory= with DynamicUser=, so
+; systemd creates it under private/ and links it).
+(filecon "/var/cache/athanor-nix-gc(/.*)?" any (system_u object_r nix_var_t ((s0) (s0))))
+(filecon "/var/cache/private/athanor-nix-gc(/.*)?" any (system_u object_r nix_var_t ((s0) (s0))))
 (filecon "/usr/bin/nix" file (system_u object_r nix_daemon_exec_t ((s0) (s0))))
 
 ; --- systemd: the mount, the socket, the cache directory ---------------------------------
@@ -85,6 +89,11 @@
 (allow init_t nix_var_t (file (create getattr open write setattr)))
 
 (typetransition initrc_domain nix_daemon_exec_t process nix_daemon_t)
+; athanor-nix-gc.service runs `nix store gc` with NoNewPrivileges=yes (and DynamicUser=,
+; which implies it): under no_new_privs the kernel denies the transition unless the policy
+; grants nnp_transition, the client stays in init_t, and nix-daemon's socket refuses it
+; ("Permission denied"; measured on a booted image with this rule removed, 2026-10-07).
+(allow init_t nix_daemon_t (process2 (nnp_transition nosuid_transition)))
 
 ; --- nix-daemon ----------------------------------------------------------------------------
 

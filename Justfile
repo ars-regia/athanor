@@ -60,11 +60,6 @@ disk-qcow2 target_image=("localhost/" + env('IMAGE_NAME', 'athanor-system')) tag
 disk-iso target_image=("localhost/" + env('IMAGE_NAME', 'athanor-system')) tag=env('DEFAULT_TAG', 'latest'):
     just system/build-iso "{{ target_image }}" "{{ tag }}"
 
-# Builds Rust microservice as zero-latency bare-metal Unikernel (RustyHermit target)
-[group('Pipeline')]
-unikernel package="athanor-unikernel-daemon" mode="release":
-    ./system/scripts/build_unikernel.sh "{{ package }}" "{{ mode }}"
-
 # ------------------------------------------------------------------------------
 # 🛡️ QA, AUDIT & HERMETIC BENCHMARK (Nix Paradigm)
 # ------------------------------------------------------------------------------
@@ -76,18 +71,13 @@ hermetic-build lockfile="athanor-build.lock":
 
 # Check idempotency of a package build against GHCR SHA-256 digest
 [group('QA & Security')]
-check-idempotency package registry="ghcr.io" owner="hr-mes" image_name="" base_digest="":
+check-idempotency package registry="ghcr.io" owner="ars-regia" image_name="" base_digest="":
     just forge/check-idempotency "{{ package }}" "{{ registry }}" "{{ owner }}" "{{ image_name }}" "{{ base_digest }}"
 
 # Runs full Rust security suite (Clippy policies, Cargo Vet, Cargo Deny)
 [group('QA & Security')]
 audit:
     just forge/audit
-
-# Audits and enforces strict 0700/0400 permissions on Secure Boot & UKI signing keys
-[group('QA & Security')]
-secureboot-key-audit:
-    just system/secureboot-key-audit
 
 # Runs cargo-fuzz fuzzing suite on Rust spec targets
 [group('QA & Security')]
@@ -122,6 +112,31 @@ lint:
     just system/lint
     just check-syntax
 
+# The pull request gate (ADR-0075, doc_pipeline.md PL3): the `check` job of pr.yml runs exactly
+# this, and a contributor runs it before pushing. Workflow lint (actionlint, with shellcheck on
+# every run: block), Justfile syntax, every verify.py check with the findings listed in
+# scripts/ci/known-red.txt excused (the list may only shrink against BASE), and every Python
+# test directory of the repository.
+[group('QA & Security')]
+check base="HEAD":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v actionlint >/dev/null || { echo "check: actionlint is not on PATH (scripts/ci/install-tools.sh)" >&2; exit 1; }
+    command -v shellcheck >/dev/null || { echo "check: shellcheck is not on PATH; actionlint would skip the run: blocks" >&2; exit 1; }
+    actionlint -no-color -pyflakes=
+    just check-syntax
+    python3 -B scripts/verify.py --known-red scripts/ci/known-red.txt --known-red-base "{{ base }}"
+    python3 -B forge/specs/athanor-kernel-profile/kernel_profile.py check
+    python3 -B system/athanor-style/calmo/contrast.py
+    python3 -B system/athanor-style/calmo/generate.py --check
+    # This suite holds no TestCase: its own main() runs the cases, and discovery would find none.
+    python3 -B forge/test/iso/test_verdict.py
+    dirs=$(git ls-files -- ':(glob)**/test_*.py' | xargs -n1 dirname | sort -u | grep -vx 'forge/test/iso')
+    for dir in $dirs; do
+        echo "check: unit tests in $dir"
+        python3 -B -m unittest discover -s "$dir"
+    done
+
 # Formats all shell scripts and Justfiles across workspace
 [group('QA & Security')]
 format:
@@ -155,7 +170,7 @@ update-specs:
 
 # Cleans old and untagged GHCR container images
 [group('Utility')]
-clean-ghcr owner="hr-mes":
+clean-ghcr owner="ars-regia":
     just forge/clean-ghcr "{{ owner }}"
 
 # Runs the entire CI pipeline locally via Act for rapid debugging

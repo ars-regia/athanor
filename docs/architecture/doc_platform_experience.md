@@ -18,11 +18,12 @@ command line are specified in [doc_kernel_profile.md](doc_kernel_profile.md).
 ### Home encryption and the TPM
 
 The installer leaves the disk layout to Anaconda (`system/athanor-install.ks`).
-systemd-homed encrypts the user's home with LUKS2. At first boot
-`athanor-tpm-luks-seal.service` enrolls the LUKS device behind `/var/home` in the TPM 2.0
-with `systemd-cryptenroll`, bound to PCRs 0 (firmware), 2 (option ROMs), 7 (Secure Boot
-state) and 11 (the UKI). The TPM releases the key only when those measurements match the
-ones it was sealed to.
+systemd-homed encrypts the user's home with LUKS2. In 1.0 the LUKS device unlocks with the
+passphrase only: nothing in the image enrols it in the TPM 2.0 (decision A2-27; D42 in
+doc_kernel_profile.md). `athanor-tpm-luks-seal`, which sealed it at first boot to PCRs 0,
+2, 7 and 11, was removed with the other TPM units that acted without the user (issue #148),
+and `verify.py shipped` fails if it is shipped again. The TPM seal returns in 1.1 with the
+UKI and a signed PCR 11 policy, so that a kernel update does not break the unlock.
 
 ---
 

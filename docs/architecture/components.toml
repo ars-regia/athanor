@@ -137,19 +137,6 @@ spec = "doc_build_system.md"
 item = "sections 4 to 8"
 purpose = "The package pipeline: DAG, spec builds, tier repositories, ISO, bots, registry clean-up"
 
-[[component]]
-path = "forge/specs/athanor-ai-daemon"
-kind = "rpm spec"
-area = "apps"
-status = "missing"
-purpose = "Legacy local inference daemon, not shipped; doc_local_ai.md AI11 proposes its deletion"
-
-[[component]]
-path = "forge/specs/athanor-ananicy"
-kind = "rpm spec"
-area = "platform"
-status = "missing"
-purpose = "ananicy-cpp process priority daemon; not in the package manifest"
 
 [[component]]
 path = "forge/specs/athanor-backup"
@@ -205,22 +192,6 @@ status = "missing"
 purpose = "cliphist, a Wayland clipboard history store; shipped"
 
 [[component]]
-path = "forge/specs/athanor-cloud-rs"
-kind = "rpm spec"
-area = "platform"
-status = "out-of-1.0"
-issue = 57
-purpose = "Fleet continuity and P2P sync daemon; placeholder authentication, out of the DAG until redesigned"
-
-[[component]]
-path = "forge/specs/athanor-cluster-mesh"
-kind = "rpm spec"
-area = "platform"
-status = "out-of-1.0"
-issue = 57
-purpose = "Package of the fleet swarm computing daemon; out of the DAG until the fleet is redesigned"
-
-[[component]]
 path = "forge/specs/athanor-cosign"
 kind = "rpm spec"
 area = "signing-update"
@@ -260,13 +231,6 @@ status = "missing"
 purpose = "System diagnostic CLI; shipped"
 
 [[component]]
-path = "forge/specs/athanor-greeter"
-kind = "rpm spec"
-area = "shell"
-status = "missing"
-purpose = "Ermete-era package of system/athanor-greeter; not in the package manifest"
-
-[[component]]
 path = "forge/specs/athanor-greeter-ui"
 kind = "rpm spec"
 area = "shell"
@@ -275,20 +239,6 @@ spec = "doc_shell.md"
 item = "section 3, stages 1a and 1d"
 purpose = "The greeter run by greetd: login, language and layout"
 
-[[component]]
-path = "forge/specs/athanor-hypervisor-daemon"
-kind = "rpm spec"
-area = "platform"
-status = "out-of-1.0"
-issue = 57
-purpose = "Package of the micro-hypervisor daemon; attestation is a placeholder, out of the DAG"
-
-[[component]]
-path = "forge/specs/athanor-init-oracle"
-kind = "rpm spec"
-area = "platform"
-status = "missing"
-purpose = "Package of the Ermete-era AI init oracle; not in the package manifest"
 
 [[component]]
 path = "forge/specs/athanor-kernel-profile"
@@ -325,55 +275,11 @@ item = "SE23"
 purpose = "The layout chooser (os.athanor.Layout); retired when the Settings Desktop page lands"
 
 [[component]]
-path = "forge/specs/athanor-lvfs-rs"
-kind = "rpm spec"
-area = "platform"
-status = "missing"
-purpose = "Firmware automation daemon; out of the image since 2026-09-30, fwupd covers firmware"
-
-[[component]]
 path = "forge/specs/athanor-matugen"
 kind = "rpm spec"
 area = "shell"
 status = "missing"
 purpose = "matugen, Material 3 colour generation for the frozen shell's theming; shipped"
-
-[[component]]
-path = "forge/specs/athanor-mdm-rs"
-kind = "rpm spec"
-area = "platform"
-status = "missing"
-purpose = "Ermete-era mobile device management daemon; not in the package manifest"
-
-[[component]]
-path = "forge/specs/athanor-mesh-bus"
-kind = "rpm spec"
-area = "platform"
-status = "out-of-1.0"
-issue = 57
-purpose = "Package of the fleet mesh bus; out of the DAG until the fleet is redesigned"
-
-[[component]]
-path = "forge/specs/athanor-mesh-sync"
-kind = "rpm spec"
-area = "platform"
-status = "out-of-1.0"
-issue = 57
-purpose = "Fleet P2P mesh sync daemon; placeholder keys, out of the DAG until redesigned"
-
-[[component]]
-path = "forge/specs/athanor-net-unikernel"
-kind = "rpm spec"
-area = "platform"
-status = "missing"
-purpose = "Package of the Ermete-era userspace TCP/IP stack; not in the package manifest"
-
-[[component]]
-path = "forge/specs/athanor-niri-ipc"
-kind = "crate"
-area = "shell"
-status = "missing"
-purpose = "niri IPC client kept only for the frozen athanor-shell-rs and its dock"
 
 [[component]]
 path = "forge/specs/athanor-nix-support"
@@ -394,13 +300,6 @@ item = "R1"
 purpose = "Text recovery console shown when the desktop does not start"
 
 [[component]]
-path = "forge/specs/athanor-rosenpass"
-kind = "rpm spec"
-area = "platform"
-status = "missing"
-purpose = "Rosenpass post-quantum WireGuard key exchange; not in the package manifest"
-
-[[component]]
 path = "forge/specs/athanor-selinux"
 kind = "rpm spec"
 area = "security"
@@ -417,15 +316,6 @@ item = "AI8"
 purpose = "Semantic index stub, not shipped; AI8 replaces it with a real index"
 
 [[component]]
-path = "forge/specs/athanor-shell-rs"
-kind = "rpm spec"
-area = "shell"
-status = "specified"
-spec = "doc_shell.md"
-item = "SH4"
-purpose = "The frozen Ermete-era GTK shell; its file chooser still serves the portal until PT14"
-
-[[component]]
 path = "forge/specs/athanor-shelld"
 kind = "rpm spec"
 area = "shell"
@@ -435,27 +325,11 @@ item = "BR4"
 purpose = "The shell daemon: desktop notifications and the tray watcher"
 
 [[component]]
-path = "forge/specs/athanor-store-rs"
-kind = "rpm spec"
-area = "apps"
-status = "specified"
-spec = "doc_software.md"
-item = "section 6, decision 5"
-purpose = "Legacy store daemon, out of the workspace and the image; decision 5 deletes it"
-
-[[component]]
 path = "forge/specs/athanor-syft"
 kind = "rpm spec"
 area = "build-ci"
 status = "missing"
 purpose = "syft SBOM generator; shipped in tier 0 although only the pipeline uses SBOMs"
-
-[[component]]
-path = "forge/specs/athanor-sysmon-ebpf"
-kind = "rpm spec"
-area = "kernel"
-status = "missing"
-purpose = "Ermete-era eBPF system monitor and telemetry daemon; out of the DAG"
 
 [[component]]
 path = "forge/specs/athanor-system-config"
@@ -477,13 +351,6 @@ kind = "rpm spec"
 area = "security"
 status = "missing"
 purpose = "Wheel polkit rule, sysctl, DNS, NetworkManager, tmpfiles and PipeWire settings; shipped"
-
-[[component]]
-path = "forge/specs/athanor-telemetry"
-kind = "rpm spec"
-area = "platform"
-status = "missing"
-purpose = "Package of the Ermete-era telemetry daemon; not in the package manifest"
 
 [[component]]
 path = "forge/specs/athanor-tetragon"
@@ -538,11 +405,29 @@ item = "CO3"
 purpose = "cosmic-comp with Athanor's patches; the one COSMIC component that stays"
 
 [[component]]
+path = "forge/specs/greenboot-rs"
+kind = "rpm spec"
+area = "signing-update"
+status = "specified"
+spec = "doc_recovery.md"
+item = "R5"
+purpose = "greenboot with GREENBOOT_AUTO_REBOOT: a failed health check queues the previous deployment without rebooting"
+
+[[component]]
 path = "forge/specs/osbuild"
 kind = "rpm spec"
 area = "build-ci"
 status = "missing"
 purpose = "Rebuild of osbuild; not in the package manifest"
+
+[[component]]
+path = "forge/specs/polkit"
+kind = "rpm spec"
+area = "security"
+status = "specified"
+spec = "doc_lock_and_prompts.md"
+item = "D9"
+purpose = "polkit 127 rebuilt from Fedora 44 for Fedora 43: socket-activated, non-setuid agent helper"
 
 [[component]]
 path = "forge/specs/stage0-bootstrap"
@@ -575,6 +460,15 @@ kind = "config"
 area = "build-ci"
 status = "missing"
 purpose = "Upstream releases the update bot watches"
+
+[[component]]
+path = "scripts/ci"
+kind = "script tool"
+area = "build-ci"
+status = "specified"
+spec = "doc_ci.md"
+item = "CI27"
+purpose = "Pull Request gate: changed areas, the gate verdict, the pinned tools of just check, the known-red list"
 
 [[component]]
 path = "scripts/cosmic-comp-rebase"
@@ -677,14 +571,7 @@ path = "system/Justfile"
 kind = "config"
 area = "build-ci"
 status = "missing"
-purpose = "System recipes: image, ISO through bootc-image-builder, unikernel"
-
-[[component]]
-path = "system/athanor-agentic-kernel"
-kind = "crate"
-area = "platform"
-status = "missing"
-purpose = "Ermete-era 'agentic OS controller'; workspace member, not packaged"
+purpose = "System recipes: image and ISO through bootc-image-builder"
 
 [[component]]
 path = "system/athanor-apps"
@@ -703,14 +590,6 @@ status = "missing"
 purpose = "Shared D-Bus types and the polkit subject check every system service uses"
 
 [[component]]
-path = "system/athanor-cluster-mesh"
-kind = "crate"
-area = "platform"
-status = "out-of-1.0"
-issue = 57
-purpose = "Fleet swarm computing daemon; out of the DAG until the fleet is redesigned"
-
-[[component]]
 path = "system/athanor-compositor-client"
 kind = "crate"
 area = "shell"
@@ -718,31 +597,6 @@ status = "specified"
 spec = "doc_shell.md"
 item = "SH2"
 purpose = "The shell's only client of cosmic-comp: windows, workspaces, outputs, launches"
-
-[[component]]
-path = "system/athanor-ebpf-sched"
-kind = "crate"
-area = "kernel"
-status = "out-of-1.0"
-issue = 123
-spec = "doc_kernel_profile.md"
-item = "D5"
-purpose = "AI eBPF scheduler bridge, retired as a scheduler in P3"
-
-[[component]]
-path = "system/athanor-greeter"
-kind = "crate"
-area = "shell"
-status = "missing"
-purpose = "Ermete-era greeter meant to replace greetd; workspace member, out of the DAG"
-
-[[component]]
-path = "system/athanor-hypervisor-daemon"
-kind = "crate"
-area = "platform"
-status = "out-of-1.0"
-issue = 57
-purpose = "Micro-hypervisor daemon; placeholder attestation, out of the DAG"
 
 [[component]]
 path = "system/athanor-i18n"
@@ -754,18 +608,11 @@ item = "LN2"
 purpose = "Pure-Rust gettext catalog reader shared by the shell programs"
 
 [[component]]
-path = "system/athanor-init-oracle"
-kind = "crate"
-area = "platform"
-status = "missing"
-purpose = "Ermete-era AI systemd init oracle; workspace member, out of the DAG"
-
-[[component]]
 path = "system/athanor-install.ks"
 kind = "config"
 area = "platform"
 status = "missing"
-purpose = "Kickstart of the manual ISO build; enables sshd, classic accounts"
+purpose = "Kickstart of the manual ISO build; sshd off on new installs, classic accounts"
 
 [[component]]
 path = "system/athanor-layout"
@@ -775,30 +622,6 @@ status = "specified"
 spec = "doc_shell.md"
 item = "SH6"
 purpose = "The layout document: schema, layers and presets"
-
-[[component]]
-path = "system/athanor-mesh-bus"
-kind = "crate"
-area = "platform"
-status = "out-of-1.0"
-issue = 57
-purpose = "Fleet post-quantum WireGuard mesh bus; out of the DAG until the fleet is redesigned"
-
-[[component]]
-path = "system/athanor-net-unikernel"
-kind = "crate"
-area = "platform"
-status = "missing"
-purpose = "Ermete-era userspace TCP/IP stack daemon; workspace member, out of the DAG"
-
-[[component]]
-path = "system/athanor-oobe"
-kind = "crate"
-area = "shell"
-status = "specified"
-spec = "doc_first_run.md"
-item = "FR1"
-purpose = "First-run wizard prototype, not packaged; FR1 retires it"
 
 [[component]]
 path = "system/athanor-portal"
@@ -837,15 +660,6 @@ item = "LA2"
 purpose = "The launcher's and library's search: sources, ranking, usage"
 
 [[component]]
-path = "system/athanor-store"
-kind = "crate"
-area = "apps"
-status = "specified"
-spec = "doc_software.md"
-item = "section 6, decision 5"
-purpose = "Legacy store CLI; decision 5 removes its install commands, its storage waits for the fleet"
-
-[[component]]
 path = "system/athanor-style"
 kind = "crate"
 area = "shell"
@@ -853,13 +667,6 @@ status = "specified"
 spec = "doc_shell.md"
 item = "SH5"
 purpose = "Calmo tokens and the generator of the shell's style"
-
-[[component]]
-path = "system/athanor-telemetry"
-kind = "crate"
-area = "platform"
-status = "missing"
-purpose = "Ermete-era telemetry and log aggregator; workspace member, out of the DAG"
 
 [[component]]
 path = "system/athanor-trust-state"
@@ -892,15 +699,9 @@ purpose = "Builds the three system image variants"
 path = "system/confidential_computing"
 kind = "crate"
 area = "security"
-status = "missing"
-purpose = "athanor-attestation, a confidential computing attestation tool; workspace member, protected path"
-
-[[component]]
-path = "system/cosign.pub"
-kind = "config"
-area = "signing-update"
-status = "missing"
-purpose = "A cosign public key read only by system/athanor-store"
+status = "out-of-1.0"
+issue = 151
+purpose = "athanor-attestation, a confidential computing attestation tool; outside the workspace until its Keylime rewrite, protected path"
 
 [[component]]
 path = "system/disk_config"
@@ -910,13 +711,6 @@ status = "specified"
 spec = "doc_first_run.md"
 item = "FR21"
 purpose = "bootc-image-builder configuration of the ISO and of the raw disk image"
-
-[[component]]
-path = "system/ebpf"
-kind = "crate"
-area = "kernel"
-status = "missing"
-purpose = "ebpf-core and ebpf-loader; workspace members, not packaged"
 
 [[component]]
 path = "system/image-digests.sh"
@@ -977,7 +771,7 @@ path = "system/scripts"
 kind = "script tool"
 area = "build-ci"
 status = "missing"
-purpose = "UKI assembly, bootc-image-builder ISO, unikernel build, theme generator, Flatpak provisioner"
+purpose = "Initramfs generation, bootc-image-builder ISO, container build, Flatpak provisioner"
 
 [[component]]
 path = "system/sign-images.sh"
@@ -987,13 +781,6 @@ status = "specified"
 spec = "doc_update_trust.md"
 item = "UT2"
 purpose = "Adds the key-based signature to the published system images"
-
-[[component]]
-path = "system/sysctl.d"
-kind = "config"
-area = "security"
-status = "missing"
-purpose = "A sysctl hardening file that nothing installs"
 
 [[component]]
 path = "system/tests"

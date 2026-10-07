@@ -1,0 +1,253 @@
+name: Reusable Kernel Check
+
+# The check part of Kernel Build (kernel-build.yml), for pr.yml: inputs (reuse of a kernel
+# built from identical inputs), build on the self-hosted runner, the boot matrix with KVM,
+# and the NVIDIA modules against the kernel (nvidia-build.yml), then a verdict job with the
+# rule of the "Kernel gate". Nothing is published and nothing is signed: those jobs stay in
+# kernel-build.yml, which runs them on pushes.
+#
+# The jobs inputs, build, boot and kmod are kept identical to those of kernel-build.yml
+# (scripts/ci/tests/test_call_kernel.py checks it) until kernel-build.yml calls this
+# workflow itself (doc_pipeline.md section 3.4, block PB12); change both together.
+
+on:
+  workflow_call:
+    inputs:
+      stage:
+        description: "prep: sources, patches and config gate. build: the RPMs as well."
+        type: string
+        default: build
+
+permissions:
+  contents: read
+
+env:
+  STAGE: ${{ inputs.stage || 'build' }}
+  # As in kernel-build.yml: the one knob system/kernel-artifacts.sh reads.
+  KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
+
+jobs:
+  inputs:
+    # A kernel already built from these identical inputs is not rebuilt: the `<nvr>`
+    # image carries the attestation of the pins (build-inputs.py), verified with cosign;
+    # when the predicate matches the one of this commit, the reuse is proven.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      nvr: ${{ steps.key.outputs.nvr }}
+      reuse: ${{ steps.key.outputs.reuse }}
+      kernel_digest: ${{ steps.artifacts.outputs.kernel_digest }}
+      devel_digest: ${{ steps.artifacts.outputs.devel_digest }}
+      registry: ${{ steps.artifacts.outputs.registry }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Registry (system/kernel-artifacts.sh)
+        run: echo "IMAGE=$(bash system/kernel-artifacts.sh registry)/azoth" >> "$GITHUB_ENV"
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+
+      - id: key
+        run: |
+          set -euo pipefail
+          # The same NVR that rpmbuild produces with `%buildid .azoth` (build.sh);
+          # publish checks that they match.
+          nvr=$(bash forge/specs/azoth/nvr.sh)
+          python3 forge/specs/azoth/build-inputs.py > inputs.json
+          reuse=false
+          if cosign verify-attestation --type custom \
+               --certificate-identity-regexp "^${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/" \
+               --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+               "${IMAGE}:${nvr}" 2> /dev/null \
+             | jq -cS '.payload | @base64d | fromjson | .predicate.Data | fromjson' \
+             | grep -qxF "$(jq -cS . inputs.json)"; then
+            # Identical inputs: reuse only when all four images are signed. publish may
+            # have stopped after the push and before the signatures.
+            reuse=true
+            for ref in "${IMAGE}:${nvr}" "${IMAGE}:${nvr}-microvm" "${IMAGE}-devel:${nvr}" "${IMAGE}-debuginfo:${nvr}"; do
+              cosign verify \
+                --certificate-identity-regexp "^${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/" \
+                --certificate-oidc-issuer https://token.actions.githubusercontent.com "$ref" > /dev/null 2>&1 \
+                || { echo "${ref} is not signed: build required"; reuse=false; }
+            done
+          fi
+          echo "kernel ${nvr}: $([[ $reuse == true ]] && echo "image published from identical inputs, no build" || echo "build required")" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "nvr=${nvr}" >> "$GITHUB_OUTPUT"
+          echo "reuse=${reuse}" >> "$GITHUB_OUTPUT"
+
+      - name: Digest of the reused kernel and kernel-devel (system/kernel-artifacts.sh)
+        # The kmod gate builds against the published azoth-devel by digest, never by tag;
+        # the boot job below pulls the kernel-core the same way.
+        id: artifacts
+        if: ${{ steps.key.outputs.reuse == 'true' }}
+        run: |
+          set -euo pipefail
+          bash system/kernel-artifacts.sh resolve
+          grep -E '^(kernel_digest|devel_digest|registry)=' kernel-artifacts/kernel-artifacts.env >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: inputs
+    # The self-hosted runner executes only code of this repository: a pull request from a
+    # fork never reaches it, so its gate stays red until the branch is pushed here.
+    if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && ((inputs.stage || 'build') == 'prep' || needs.inputs.outputs.reuse != 'true') }}
+    runs-on: self-hosted
+    # A full kernel with kCFI: about an hour on 16 cores.
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Build the kernel builder image
+        # Rootless podman on the WSL runner has no systemd session: crun cannot create
+        # the scope of the build container ("sd-bus call: Access denied"). The chroot
+        # isolation of buildah is the one the other workflows already use.
+        env:
+          BUILDAH_ISOLATION: chroot
+        run: podman build -t localhost/azoth-builder -f forge/specs/azoth/builder/Containerfile forge/specs/azoth
+
+      - name: Run build.sh
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.cache/azoth" out
+          podman run --rm \
+            -v "$GITHUB_WORKSPACE:/forge" \
+            -v "$HOME/.cache/azoth:/var/cache/azoth" \
+            -w /forge localhost/azoth-builder \
+            bash forge/specs/azoth/build.sh --stage "$STAGE" --out /forge/out
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kernel-${{ env.STAGE }}
+          path: out/
+          if-no-files-found: error
+
+      - name: Artifact for the boot matrix
+        # The boot job only needs vmlinuz (the kernel-core, 21 MB instead of 1.3 GB) and
+        # the guest kernel package.
+        if: ${{ env.STAGE == 'build' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kernel-boot
+          path: |
+            out/kernel/kernel-core-*.rpm
+            out/microvm/*.rpm
+          if-no-files-found: error
+
+      - name: Artifact for the NVIDIA modules
+        # The kmod job only needs the kernel-devel.
+        if: ${{ env.STAGE == 'build' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kernel-devel
+          path: out/devel/kernel-devel-[0-9]*.rpm
+          if-no-files-found: error
+
+  boot:
+    needs: [inputs, build]
+    # Also when build is skipped for reuse: the matrix always runs.
+    if: ${{ !cancelled() && (inputs.stage || 'build') == 'build' && needs.inputs.result == 'success' && (needs.build.result == 'success' || needs.inputs.outputs.reuse == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        if: ${{ needs.inputs.outputs.reuse != 'true' }}
+        with:
+          name: kernel-boot
+          path: out
+
+      - name: Kernel-core and the guest kernel from the published images
+        if: ${{ needs.inputs.outputs.reuse == 'true' }}
+        env:
+          NVR: ${{ needs.inputs.outputs.nvr }}
+          KERNEL_DIGEST: ${{ needs.inputs.outputs.kernel_digest }}
+        run: |
+          set -euo pipefail
+          IMAGE=$(bash system/kernel-artifacts.sh registry)/azoth
+          mkdir -p out
+          # The kernel-core is pulled by the digest the inputs job already resolved and
+          # verified, so a republish of azoth:<nvr> between inputs and here cannot boot a
+          # different kernel than the one whose reuse was proven. The MicroVM guest kernel
+          # has no digest in kernel-artifacts.env (system/kernel-artifacts.sh resolves only
+          # azoth and azoth-devel, not the -microvm tag), so it stays pulled by tag.
+          for ref in "${IMAGE}@${KERNEL_DIGEST}" "${IMAGE}:${NVR}-microvm"; do
+            ctr=$(podman create "${ref}" /kernel)
+            podman cp "${ctr}:/." out/ && podman rm "$ctr" > /dev/null
+          done
+          ls out
+
+      - uses: ./.github/actions/kvm
+
+      - name: Build the boot-matrix image
+        env:
+          BUILDAH_ISOLATION: chroot
+        run: podman build -t localhost/azoth-boot -f forge/specs/azoth/boot/Containerfile forge/specs/azoth
+
+      - name: Run boot.sh
+        # Four boots: {SeaBIOS, OVMF+Secure Boot via shim} x {Nehalem, host}, each one
+        # must end with `K3 RESULT ok` on the serial console (assertions in boot/init).
+        run: |
+          set -euo pipefail
+          mkdir -p boot-out
+          podman run --rm --device /dev/kvm -v "$GITHUB_WORKSPACE:/forge" -w /forge localhost/azoth-boot bash forge/specs/azoth/boot.sh --rpms /forge/out --out /forge/boot-out
+
+      - name: Run microvm/boot.sh
+        # The guest kernel (spec, section 9): the vmlinux of the package boots in
+        # Firecracker with a test rootfs and ends with `K6 RESULT ok` (assertions in
+        # microvm/init).
+        run: |
+          set -euo pipefail
+          podman run --rm --device /dev/kvm -v "$GITHUB_WORKSPACE:/forge" -w /forge localhost/azoth-boot bash forge/specs/azoth/microvm/boot.sh --rpms /forge/out --out /forge/boot-out/microvm
+
+      - name: Summary
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          for f in boot-out/summary.md boot-out/microvm/summary.md; do
+            if [[ -f $f ]]; then cat "$f" >> "$GITHUB_STEP_SUMMARY"; fi
+          done
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        # Even when the matrix fails, but only if boot.sh wrote something.
+        if: ${{ always() && hashFiles('boot-out/**') != '' }}
+        with:
+          name: kernel-boot-logs
+          path: boot-out/
+          if-no-files-found: error
+
+  kmod:
+    # The NVIDIA modules (spec, section 7, gate 4) against this kernel: the freshly
+    # built kernel-devel artifact, or the published image when the kernel is reused.
+    needs: [inputs, build]
+    if: ${{ !cancelled() && (inputs.stage || 'build') == 'build' && needs.inputs.result == 'success' && (needs.build.result == 'success' || needs.inputs.outputs.reuse == 'true') }}
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/nvidia-build.yml
+    with:
+      devel-artifact: ${{ needs.inputs.outputs.reuse != 'true' && 'kernel-devel' || '' }}
+      devel-digest: ${{ needs.inputs.outputs.devel_digest }}
+      registry: ${{ needs.inputs.outputs.registry }}
+
+
+  verdict:
+    # The rule of the "Kernel gate" of kernel-build.yml, without the lint (just check runs
+    # it in pr.yml): green only when every job is green, or build is skipped because the
+    # kernel is reused. A pull request from a fork never reaches the self-hosted runner, so
+    # its verdict stays red until the branch is pushed here. A red verdict fails the call,
+    # and with it the `kernel` job that gate of pr.yml needs.
+    name: Kernel verdict
+    needs: [inputs, build, boot, kmod]
+    if: ${{ always() && (inputs.stage || 'build') == 'build' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      RESULTS: ${{ toJSON(needs) }}
+      REUSE: ${{ needs.inputs.outputs.reuse }}
+    steps:
+      - run: |
+          set -euo pipefail
+          jq -r 'to_entries[] | "- \(.key): \(.value.result)"' <<< "$RESULTS" | tee -a "$GITHUB_STEP_SUMMARY"
+          result() { jq -r --arg job "$1" '.[$job].result' <<< "$RESULTS"; }
+          [[ $(result inputs) == success && $(result boot) == success && $(result kmod) == success ]]
+          [[ $(result build) == success || ( $(result build) == skipped && $REUSE == true ) ]]

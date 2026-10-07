@@ -1,10 +1,10 @@
 %global debug_package %{nil}
 Name:           athanor-selinux
 Version:        1.0
-Release:        8%{?dist}
+Release:        9%{?dist}
 Summary:        Custom SELinux policies for Athanor OS
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor
+URL:            https://github.com/ars-regia/athanor
 Source0:        bootupd_lsblk.te
 Source1:        athanor_scx.te
 Source2:        athanor_nix_daemon.cil
@@ -46,6 +46,11 @@ install -D -m 0644 athanor_nvidia_modules_load.cil %{buildroot}%{_datadir}/selin
 %{_datadir}/selinux/packages/athanor_nvidia_modules_load.cil
 
 %changelog
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0-9
+- athanor_nix_daemon: let init_t enter nix_daemon_t under no_new_privs, since
+  athanor-nix-gc.service now runs as an unprivileged client of nix-daemon with
+  NoNewPrivileges=yes; label its cache directory nix_var_t.
+
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0-8
 - Point URL at the project repository
 

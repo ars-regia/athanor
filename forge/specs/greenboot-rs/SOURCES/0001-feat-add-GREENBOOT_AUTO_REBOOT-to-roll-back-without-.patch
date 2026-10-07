@@ -1,0 +1,277 @@
+From 51f2ac4bbbc9e756e9831f4c9cedb5414f70875a Mon Sep 17 00:00:00 2001
+From: Ermete Architect <esenese@proton.me>
+Date: Wed, 7 Oct 2026 15:02:31 +0200
+Subject: [PATCH] feat: add GREENBOOT_AUTO_REBOOT to roll back without
+ rebooting
+
+Some systems must never reboot on their own, for example a desktop where the
+user decides when the machine restarts. Today a failed required health check
+always ends in `systemctl reboot`, and greenboot.conf has no way to stop it.
+
+Add GREENBOOT_AUTO_REBOOT (default true, so nothing changes unless it is set).
+When it is false and a required health check fails, greenboot still runs the
+red.d scripts and sets boot_success=0, and then, if the booted deployment is
+a new one (greenboot_next_deployment_id is set), it rolls back right away:
+the same `bootc rollback` / `rpm-ostree rollback` and the same cleanup of
+boot_counter and greenboot_next_deployment_id as when the boot counter runs
+out, without the reboot. The previous deployment becomes the default, so the
+next boot, whenever it is started, is the previous deployment, and greenboot
+on that boot finds "Rollback successful" in the previous boot's journal and
+reports the fallback, as it does today. GREENBOOT_MAX_BOOT_ATTEMPTS is not
+used in this mode. Without a rollback trigger greenboot asks for manual
+intervention, as it does when the counter runs out.
+
+The rollback does not go through GRUB's boot counter. With the counter, the
+fallback happens only if boot_success is still 0 when GRUB runs
+(08_greenboot.cfg, and Fedora's 08_fallback_counting), but between the
+failure and a reboot the user starts, anything may set boot_success=1:
+grub-boot-success.timer does so after two minutes of a user session, through
+grub2-set-bootflag, which does not look at boot_counter. The next boot would
+then be the failed deployment again.
+
+The MOTD says that the previous deployment will boot at the next restart.
+---
+ README.md                    |   2 +
+ etc/greenboot/greenboot.conf |   6 ++
+ src/lib/handler.rs           |   3 +-
+ src/main.rs                  | 137 ++++++++++++++++++++++++++++++++++-
+ 4 files changed, 146 insertions(+), 2 deletions(-)
+
+diff --git a/README.md b/README.md
+index 45911ab..922b027 100644
+--- a/README.md
++++ b/README.md
+@@ -74,6 +74,7 @@ Ordering of units can be achieved using standard systemd vocabulary.
+ ### Configuration
+ At the moment, it is possible to customize the following parameters via environment variables. These environment variables can be described as well in the config file `/etc/greenboot/greenboot.conf`:
+ - **GREENBOOT_MAX_BOOT_ATTEMPTS**: Maximum number of boot attempts before declaring the deployment as problematic and rolling back to the previous one.
++- **GREENBOOT_AUTO_REBOOT**: Whether greenboot reboots the system when a required health check fails (default `true`). When set to `false`, greenboot never reboots: if the booted deployment is a new one (the rollback trigger set by `greenboot-set-rollback-trigger.service` when it was staged), a failed required health check rolls back to the previous deployment right away, so that the next boot, whenever the user or another component starts it, is the previous deployment. `GREENBOOT_MAX_BOOT_ATTEMPTS` is not used in this mode.
+ - **GREENBOOT_WATCHDOG_CHECK_ENABLED**: Enables/disables *Check if current boot has been triggered by hardware watchdog* health check. More info on [Health checks included with subpackage greenboot-default-health-checks](#health-checks-included-with-subpackage-greenboot\-default\-health\-checks) section.
+ - **GREENBOOT_WATCHDOG_GRACE_PERIOD**: Number of hours after an upgrade that we consider the new deployment as culprit of reboot.
+ 
+@@ -84,6 +85,7 @@ At the moment, it is possible to customize the following parameters via environm
+     - After the above:
+       - Creates the MOTD specifying which scripts have failed.
+       - It performs a series of checks to determine if there's a requirement for manual intervention. If there's not, it reboots the system.
++      - With `GREENBOOT_AUTO_REBOOT=false`, it does not reboot: on a new deployment it rolls back to the previous one, which takes effect at the next boot.
+   - If all scripts in `required.d` folder succeeded:
+     - `boot-complete.target` is reached.
+     - Unsets `boot_counter` GRUB env var and sets `boot_success` GRUB env var to 1.
+diff --git a/etc/greenboot/greenboot.conf b/etc/greenboot/greenboot.conf
+index b03d001..7b8702e 100644
+--- a/etc/greenboot/greenboot.conf
++++ b/etc/greenboot/greenboot.conf
+@@ -3,6 +3,12 @@
+ ## Generic
+ GREENBOOT_MAX_BOOT_ATTEMPTS=3
+ 
++### Reboot when a required health check fails. When false, greenboot never
++### reboots: after an update, a failed required check makes the previous
++### deployment the default for the next boot, which is left to the user,
++### and GREENBOOT_MAX_BOOT_ATTEMPTS is not used.
++GREENBOOT_AUTO_REBOOT=true
++
+ 
+ ### Multiple healthchecks may be skipped by separating
+ ### the script names with spaces.
+diff --git a/src/lib/handler.rs b/src/lib/handler.rs
+index 8c4e6a9..b82cebd 100644
+--- a/src/lib/handler.rs
++++ b/src/lib/handler.rs
+@@ -139,7 +139,8 @@ pub fn handle_reboot(force: bool) -> Result<()> {
+ 
+ #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+ pub enum RollbackMode {
+-    /// GRUB kernel fallback detected — bypass boot_counter and force rollback immediately.
++    /// Bypass boot_counter and force rollback immediately: used when GRUB kernel fallback
++    /// is detected, and when a health check fails with GREENBOOT_AUTO_REBOOT=false.
+     Forced,
+     /// Normal healthcheck-driven rollback — respect boot_counter guard.
+     Normal,
+diff --git a/src/main.rs b/src/main.rs
+index 34a9c37..70d336e 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -31,18 +31,26 @@ struct Cli {
+ struct GreenbootConfig {
+     max_reboot: u16,
+     disabled_healthchecks: Vec<String>,
++    /// Reboot when a required health check fails. When false, greenboot never
++    /// reboots: it queues the previous deployment for the next boot instead.
++    auto_reboot: bool,
+ }
+ 
+ impl GreenbootConfig {
+     pub fn get_config() -> Self {
++        Self::from_file(GREENBOOT_CONFIG_FILE)
++    }
++
++    fn from_file(path: &str) -> Self {
+         let mut config = Self {
+             max_reboot: 3,                 // Default value
+             disabled_healthchecks: vec![], //empty list
++            auto_reboot: true,
+         };
+ 
+         // Try to load from config file
+         if let Ok(parsed_config) = Config::builder()
+-            .add_source(File::new(GREENBOOT_CONFIG_FILE, FileFormat::Ini))
++            .add_source(File::new(path, FileFormat::Ini))
+             .build()
+         {
+             config.max_reboot = match parsed_config.get_int("GREENBOOT_MAX_BOOT_ATTEMPTS") {
+@@ -64,6 +72,22 @@ impl GreenbootConfig {
+                     vec![]
+                 }
+             };
++
++            config.auto_reboot = match parsed_config.get_bool("GREENBOOT_AUTO_REBOOT") {
++                Ok(auto_reboot) => auto_reboot,
++                Err(config::ConfigError::NotFound(_)) => {
++                    log::debug!(
++                        "GREENBOOT_AUTO_REBOOT not found in config using default value : true"
++                    );
++                    true
++                }
++                Err(e) => {
++                    log::warn!(
++                        "GREENBOOT_AUTO_REBOOT is invalid ({e}), using default value : true"
++                    );
++                    true
++                }
++            };
+         }
+ 
+         config
+@@ -388,6 +412,10 @@ fn health_check() -> Result<()> {
+                 with_boot_rw(|| set_boot_status(false))
+                     .unwrap_or_else(|e| log::error!("cannot set boot_status: {e}"));
+ 
++                if !config.auto_reboot {
++                    return rollback_without_reboot(previous_rollback);
++                }
++
+                 // Check if boot_counter is 0 (exhausted retries) or if no counter is set
+                 match get_boot_counter()? {
+                     Some(counter) if counter > 0 => {
+@@ -445,6 +473,54 @@ fn health_check() -> Result<()> {
+     }
+ }
+ 
++/// Handles a failed health check when GREENBOOT_AUTO_REBOOT is false.
++///
++/// Instead of spending boot attempts on reboots, the previous deployment is
++/// made the default right away, with the same rollback and the same cleanup
++/// as when the boot counter runs out, and nothing reboots: the next boot,
++/// whenever it is started, is the previous deployment, and greenboot on that
++/// boot reports the fallback. The rollback does not depend on GRUB's boot
++/// counter, which anything that sets boot_success=1 before that boot (such as
++/// grub-boot-success.timer in a user session) would cancel.
++fn rollback_without_reboot(previous_rollback: bool) -> Result<()> {
++    if get_next_deployment_id().unwrap_or(None).is_none() {
++        log::warn!(
++            "Health check failed but no next-deployment-id set - manual intervention required"
++        );
++        bail!("Manual intervention required - no rollback trigger");
++    }
++
++    log::info!(
++        "GREENBOOT_AUTO_REBOOT is false - queueing the previous deployment for the next boot without rebooting"
++    );
++    // The trigger is cleared before the rollback: left behind, it would make the next
++    // boot, of the previous deployment, look like a GRUB fallback, whose forced rollback
++    // would swap back to the deployment that failed.
++    if let Err(e) = with_boot_rw(|| {
++        unset_boot_counter()?;
++        unset_next_deployment_id()?;
++        Ok(())
++    }) {
++        log::error!("Failed to clear grub vars: {e}");
++        bail!("Manual intervention required - cannot clear the rollback trigger");
++    }
++    match handle_rollback(RollbackMode::Forced) {
++        Ok(()) => {
++            log::info!("Rollback successful");
++            handle_motd(&generate_motd_message(
++                "Greenboot healthcheck failed - status is RED. The previous deployment will boot at the next restart",
++                previous_rollback,
++            )?)
++            .unwrap_or_else(|e| log::error!("cannot set motd: {e}"));
++            bail!("greenboot healthcheck failed")
++        }
++        Err(rollback_err) => {
++            log::error!("Rollback failed: {rollback_err}");
++            bail!("Manual intervention required - rollback failed");
++        }
++    }
++}
++
+ // This function parses a string expected in bash-array format like
+ // `( "item1" "item2" ... )` into a Vec<String>.
+ fn parse_bash_array_string(raw_str: &str) -> Vec<String> {
+@@ -510,3 +586,62 @@ fn main() -> Result<()> {
+         }
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use std::fs;
++    use tempfile::TempDir;
++
++    fn config_with(contents: &str) -> GreenbootConfig {
++        let dir = TempDir::new().expect("cannot create temp dir");
++        let path = dir.path().join("greenboot.conf");
++        fs::write(&path, contents).expect("cannot write config");
++        GreenbootConfig::from_file(path.to_str().unwrap())
++    }
++
++    #[test]
++    fn test_auto_reboot_defaults_to_true_without_config_file() {
++        let config = GreenbootConfig::from_file("/nonexistent/greenboot.conf");
++        assert!(config.auto_reboot);
++        assert_eq!(config.max_reboot, 3);
++    }
++
++    #[test]
++    fn test_auto_reboot_defaults_to_true_when_key_is_absent() {
++        let config = config_with("GREENBOOT_MAX_BOOT_ATTEMPTS=5\n");
++        assert!(config.auto_reboot);
++        assert_eq!(config.max_reboot, 5);
++    }
++
++    #[test]
++    fn test_auto_reboot_false() {
++        let config = config_with("GREENBOOT_AUTO_REBOOT=false\n");
++        assert!(!config.auto_reboot);
++    }
++
++    #[test]
++    fn test_auto_reboot_true() {
++        let config = config_with("GREENBOOT_AUTO_REBOOT=true\n");
++        assert!(config.auto_reboot);
++    }
++
++    #[test]
++    fn test_auto_reboot_invalid_value_keeps_default() {
++        let config = config_with("GREENBOOT_AUTO_REBOOT=sometimes\n");
++        assert!(config.auto_reboot);
++    }
++
++    #[test]
++    fn test_auto_reboot_does_not_affect_other_keys() {
++        let config = config_with(
++            "GREENBOOT_MAX_BOOT_ATTEMPTS=2\nGREENBOOT_AUTO_REBOOT=false\nDISABLED_HEALTHCHECKS=(\"01_repository_dns_check.sh\")\n",
++        );
++        assert!(!config.auto_reboot);
++        assert_eq!(config.max_reboot, 2);
++        assert_eq!(
++            config.disabled_healthchecks,
++            vec!["01_repository_dns_check.sh"]
++        );
++    }
++}
+-- 
+2.55.0
+

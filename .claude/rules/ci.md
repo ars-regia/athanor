@@ -4,42 +4,65 @@ paths:
   - "Justfile"
   - "**/Justfile"
   - "scripts/verify.py"
+  - "system/*.sh"
+  - "system/tests/**"
 ---
 
-# CI e build
+# CI and build
 
-## Valida in locale, non con un push
+The area rules are in `.github/workflows/AGENTS.md`; this file adds local checks and traps.
 
-I workflow del percorso ISO si validano prima di committare:
+## Validate locally, not with a push
+
+Validate workflows, and the pipeline scripts they call (`system/*.sh`), before committing:
 
 ```
 actionlint
 python3 scripts/verify.py workflows
-bash -n   # su ogni blocco run: non banale
+bash -n <script>   # and on every non-trivial run: block
+python3 -B -m unittest discover -s system/tests
 ```
 
-Non usare il push come test. Un `startup_failure` su GitHub costa più di trenta
-secondi di verifica locale.
+`verify.py workflows` runs `actionlint` only when it is on `PATH`; otherwise it passes with
+a note and nothing of actionlint's is checked. Install `actionlint`, and `shellcheck`, which
+it runs on every `run:` block.
 
-## Errori già visti su questo repository
+Never use a push as the test. A `startup_failure` on GitHub costs more than thirty seconds of
+local checks.
 
-- **Step con solo `name:`**, senza `run:` né `uses:`. GitHub rifiuta l'**intero
-  file**, non solo lo step: i workflow non partono affatto. Se ricostruisci uno
-  step, dagli un corpo o rimuovilo. Mai lasciarlo vuoto.
-- **Blocchi `if ...; then` / `fi` vuoti**. In bash sono errori di sintassi con
-  uscita 2, non no-op silenziosi.
-- **POST verso servizi esterni** per i log. Usa `actions/upload-artifact` e
+## Errors already seen in this repository
+
+- **A step with only `name:`**, no `run:` and no `uses:`. GitHub rejects the **whole file**,
+  not just the step, and no workflow in it starts.
+- **Empty `if ...; then` / `fi` blocks.** In bash they are syntax errors with exit code 2,
+  not silent no-ops.
+- **POST requests to external services** for logs. Use `actions/upload-artifact` and
   `$GITHUB_STEP_SUMMARY`.
 
-## Vincoli
+## Constraints
 
-- Mai aggiungere `|| true` o `continue-on-error` per far passare un job. Un job
-  che fallisce sta dicendo qualcosa.
-- Un commit per problema, non un commit che sistema tutto.
-- Ogni workflow del percorso ISO ha un job `lint` che gira per primo.
+- Never add `|| true` or `continue-on-error` to make a job pass. The existing `|| true` are
+  known debt to resolve, not a model: for example the `chown` fallbacks at
+  `call-build-builder.yml:81,88,90` and `call-dag-compile.yml:217,224,226`, and
+  `buildah rm "$ctr" || true` at `call-dag-compile.yml:173`;
+  `grep -n '|| true' .github/workflows/*.yml` lists them all.
+- One commit per problem, not one commit that fixes everything.
 
 ## Justfile
 
-`just lint`, `just format`, `just check-syntax` sono le porte d'ingresso.
-Il Justfile stesso è formattato da `just --unstable --fmt`: se lo modifichi,
-`just check-syntax` deve restare verde.
+`just lint`, `just format` and `just check-syntax` are the entry points. The Justfile itself
+is formatted by `just --unstable --fmt`: if you change it, `just check-syntax` must stay
+green.
+
+## Known traps
+
+- Push a change that matches a new workflow's trigger before dispatching it. Why: a workflow on a non-default branch is not registered until then, and `gh workflow run` answers 404.
+- Keep the `Kernel gate` check running on every PR to `iso-v0`. Why: it is a required status check there.
+- Call reusable workflows that need environment secrets with `secrets: inherit`. Why: they see none otherwise.
+- Approve or cancel a run waiting on the `signing` environment. Why: it holds its concurrency group and blocks newer runs.
+- Capture output before testing it instead of `nm ... | grep -q` under `pipefail`. Why: grep exits early and the pipeline dies of SIGPIPE.
+- Decide registry retention by reachability from tagged manifests, never by "untagged". Why: cosign v3 stores signatures as untagged manifests.
+- After a synthetic merge of a stacked PR, diff the commits outside the stack. Why: a squash of a stack can silently revert them.
+- Avoid pushing to `kernel-build.yml` while a Kernel Build runs. Why: its concurrency group cancels the running build.
+- Run JavaScript actions outside the Nix builder container. Why: it has no Node, so they fail inside it.
+- Prove a spec change with a rebuilt tier overlay, not System Image Check alone. Why: on a PR it mounts the published overlays, not the PR's specs.
