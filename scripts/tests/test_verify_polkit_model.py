@@ -192,8 +192,8 @@ class PolkitModelTest(unittest.TestCase):
     def test_a_url_in_a_string_is_not_a_comment(self):
         files = dict(FILES)
         files[RULES_PATH] = RULES.replace(
-            "    if (action.id",
-            '    var doc = "https://example.org/x"; if (action.id',
+            '"wheel"',
+            '"https://example.org//wheel"',
         )
         self.assertEqual(problems(HEADER + ROWS, files), [])
 
@@ -218,6 +218,91 @@ class PolkitModelTest(unittest.TestCase):
             '    if (a.id == "org.example.b" || action.id == "org.example.a") return polkit.Result.YES;\n'
             "});\n"
         )
+
+    def test_a_negated_action_test_fails(self):
+        self.unreadable(
+            "polkit.addRule(function(action, subject) {\n"
+            '    if (!(action.id == "org.example.a")) { return polkit.Result.YES; }\n'
+            "});\n"
+        )
+
+    def test_a_result_in_an_else_branch_fails(self):
+        self.unreadable(
+            "polkit.addRule(function(action, subject) {\n"
+            '    if (action.id == "org.example.a") { } else { return polkit.Result.YES; }\n'
+            "});\n"
+        )
+
+    def test_an_always_true_alternative_fails(self):
+        self.unreadable(
+            "polkit.addRule(function(action, subject) {\n"
+            '    if (action.id == "org.example.a" || true) { return polkit.Result.YES; }\n'
+            "});\n"
+        )
+
+    def test_an_or_after_an_and_fails(self):
+        self.unreadable(
+            "polkit.addRule(function(action, subject) {\n"
+            '    if (action.id == "org.example.a" && subject.local || subject.active) { return polkit.Result.YES; }\n'
+            "});\n"
+        )
+
+    def test_an_unparenthesised_or_before_an_and_fails(self):
+        self.unreadable(
+            "polkit.addRule(function(action, subject) {\n"
+            '    if (action.id == "org.example.a" || action.id == "org.example.b" && subject.local) { return polkit.Result.YES; }\n'
+            "});\n"
+        )
+
+    def test_a_template_literal_fails(self):
+        self.unreadable(
+            "var x = `${polkit.addRule(function(action, subject) { return polkit.Result.YES; })}`;\n"
+        )
+
+    def test_eval_fails(self):
+        self.unreadable('eval("polkit.addRule(function(a){return polkit.Result.YES})");\n')
+
+    def test_code_beside_the_calls_fails(self):
+        self.unreadable(
+            "var unused = 1;\n"
+            "polkit.addRule(function(action, subject) {\n"
+            '    if (action.id == "org.example.a") { return polkit.Result.YES; }\n'
+            "});\n"
+        )
+
+    def test_a_rule_registered_inside_a_rule_fails(self):
+        self.unreadable(
+            "polkit.addRule(function(action, subject) {\n"
+            '    if (action.id == "org.example.a") {\n'
+            "        polkit.addRule(function(action, subject) { return polkit.Result.YES; });\n"
+            "        return polkit.Result.NO;\n"
+            "    }\n"
+            "});\n"
+        )
+
+    def test_an_identifier_shaped_like_a_literal_marker_fails(self):
+        self.unreadable(
+            "polkit.addRule(function(action, subject) {\n"
+            "    if (action.id == S0) { return polkit.Result.YES; }\n"
+            "});\n"
+        )
+
+    def test_an_id_guard_and_a_subject_condition_are_read(self):
+        files = dict(FILES)
+        files[RULES_PATH] = (
+            "polkit.addRule(function (action, subject) {\n"
+            '  if ((action.id == "org.example.mount" || action.id == "org.example.eject") && subject.user == "runner") {\n'
+            "    return polkit.Result.YES;\n"
+            "  }\n"
+            "});\n"
+        )
+        rows = ROWS.replace("`yes` for wheel, `auth_admin` otherwise", "`yes` for runner")
+        self.assertEqual(problems(HEADER + rows, files), [])
+
+    def test_a_udev_rule_naming_polkit_in_a_comment_is_skipped(self):
+        files = dict(FILES)
+        files["pkg/udev/rules.d/72-x.rules"] = '# access is granted via polkit\nSUBSYSTEM=="usb", MODE="0660"\n'
+        self.assertEqual(problems(HEADER + ROWS, files), [])
 
 if __name__ == "__main__":
     unittest.main()
