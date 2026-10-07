@@ -62,6 +62,15 @@ class Units(unittest.TestCase):
             self.assertIn(directive, lines)
         self.assertTrue(any(line.startswith("RandomizedDelaySec=") for line in lines))
 
+    def test_the_migration_retries_on_its_own_timer_until_the_stamp_exists(self):
+        lines = directives("athanor-update-migrate.timer")
+        for directive in ("OnBootSec=6h", "OnUnitActiveSec=6h", "ConditionPathExists=!/var/lib/athanor-update/migrated"):
+            self.assertIn(directive, lines)
+
+    def test_the_check_does_not_wait_on_the_migration(self):
+        wants = [line for line in directives("athanor-update-check.service") if line.startswith(("Wants=", "Requires="))]
+        self.assertFalse(any("athanor-update-migrate" in line for line in wants), wants)
+
     @unittest.skipUnless(shutil.which("systemd-analyze"), "systemd-analyze is not installed")
     def test_exposure_stays_below_the_stated_threshold(self):
         for unit, (_, threshold) in SERVICES.items():
@@ -74,7 +83,8 @@ class Presets(unittest.TestCase):
     def test_our_units_are_enabled_and_the_stock_timer_is_not(self):
         preset = (SOURCES / "usr/lib/systemd/system-preset/80-athanor-update.preset").read_text()
         for line in ("enable athanor-update-check.timer", "enable athanor-update-state.service",
-                     "enable athanor-update-migrate.service", "disable bootc-fetch-apply-updates.timer"):
+                     "enable athanor-update-migrate.service", "enable athanor-update-migrate.timer",
+                     "disable bootc-fetch-apply-updates.timer"):
             self.assertIn(line, preset.splitlines())
         self.assertIn("enable athanor-update-notify.service", (SOURCES / "usr/lib/systemd/user-preset/80-athanor-update.preset").read_text())
 

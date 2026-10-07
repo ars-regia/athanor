@@ -1,15 +1,15 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        5%{?dist}
+Release:        6%{?dist}
 Summary:        The Athanor bar
 License:        GPL-3.0-or-later
 
 BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gtk4-layer-shell-devel pulseaudio-libs-devel binutils python3 gettext
 Requires:       gtk4 gtk4-layer-shell athanor-calmo athanor-shelld
 # The shield asks os.athanor.Update1.State(), which athanor-update serves from 1.0.0-2; the
-# local-changes reason it may publish exists from 1.0.0-4.
-Requires:       athanor-update >= 1.0.0-4
+# local-changes reason it may publish exists from 1.0.0-4, channel-absent from 1.0.0-6.
+Requires:       athanor-update >= 1.0.0-6
 # The first-session pick and the vendor layout moved here from the translator.
 Obsoletes:      athanor-layout-translator < 1.0.1
 
@@ -70,6 +70,9 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
+- The shield names the channel-absent reason of athanor-update 1.0.0-6.
+
 * Thu Oct 01 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
 - The shield names the local-changes reason of athanor-update 1.0.0-4.
 

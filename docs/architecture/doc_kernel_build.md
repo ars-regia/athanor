@@ -66,7 +66,7 @@ Directory `forge/specs/azoth/` dopo il blocco:
 | `bconds.sh`              | i bcond di kernel.spec, gli stessi per `dnf builddep`, `rpmbuild` e il lock                                                                                                                                                                                                      |
 | `build.sh`               | l'intera build, riproducibile in locale e in CI                                                                                                                                                                                                                                  |
 | `build-inputs.py`        | gli input che cambiano gli RPM come JSON: predicato dell'attestazione dei pin e chiave del riuso (sezione 7)                                                                                                                                                                     |
-| `keys/`                  | profili e generatore delle chiavi di firma (`profiles/`, `generate.sh`); certificati pubblici della chiave Secure Boot (`secureboot/`), della chiave dei moduli (`modules/`) e delle chiavi ritirate (`revoked/`) (sezione 6); le chiavi private sono nell'environment `signing` |
+| `keys/`                  | profili e generatore delle chiavi di firma (`profiles/`, `generate.sh`); certificati pubblici della chiave Secure Boot (`secureboot/`), della chiave dei moduli (`modules/`) e delle chiavi ritirate (`revoked/`) (sezione 6); le chiavi private sono nell'environment `signing-kernel` |
 | `microvm/`               | config e spec del kernel guest (sezione 9)                                                                                                                                                                                                                                       |
 | `KERNEL.md`              | cosa c'è nella directory, uso locale, bump; il bot (K5) ne riscrive la tabella dei pin                                                                                                                                                                                           |
 
@@ -173,10 +173,16 @@ ynl --without selftests --without doc`: patch e `process_configs.sh -w -n -c`.
    (`repro.py`): la chiave che firma moduli e immagine nasce in ogni build,
    quindi firma dei `.ko` e certificato in `.init.data` sono attesi; ogni altra
    differenza è un bug da aprire, e il job è rosso;
-9. ccache su directory persistente del runner (non `actions/cache`): tra due
-   patch level cambiano pochi file, la LTO finale no;
+9. nessuna cache di compilazione (decisione del 2026-10-07). rpm 6 compila in
+   una directory che contiene la versione, quindi ccache servirebbe solo a
+   ricompilare lo stesso NVR. Tra due patch level un header comune come
+   `asm/div64.h` raggiunge il 93% dei file C, e un cambio di config tocca
+   `autoconf.h`, incluso ovunque. Una build da input identici la evita già il
+   job `inputs`, che riusa l'immagine pubblicata e attestata. Una cache
+   condivisa fra PR e push lascerebbe a una PR non unita un oggetto dentro un
+   kernel firmato, e separarla costa più di quanto rende;
 10. pubblicazione (job `publish` su runner GitHub, dall'artefatto del job `build`):
-    tre pacchetti OCI con i soli RPM dentro, `ghcr.io/hr-mes/azoth`
+    tre pacchetti OCI con i soli RPM dentro, `ghcr.io/ars-regia/azoth`
     (binari), `azoth-devel`, `azoth-debuginfo`, tag `<nvr>`.
     Pacchetti separati e non suffissi del tag, perché la retention di ghcr è per
     pacchetto (`retention.sh`, prima del gate, che così verifica ciò che resta):
@@ -294,12 +300,16 @@ patchano i Makefile per forzarlo.
   (`CONFIG_SYSTEM_TRUSTED_KEYS`): la fiducia non dipende dal firmware né da
   Secure Boot. La chiave privata (RSA 4096, profilo `keys/profiles/modules.cnf`,
   generata con `keys/generate.sh` il 2026-09-13, copia cifrata fuori da GitHub)
-  sta nel secret `MODULE_SIGNING_KEY` dell'environment `signing`, ammesso solo
+  sta nel secret `MODULE_SIGNING_KEY` dell'environment `signing-kernel`, ammesso solo
   ai branch `main` e `iso-v0`. Un secret non è più sicuro per essere nato sul
   runner: conta dove si usa, e chi ne ha la custodia.
-- **Chiave Secure Boot**: firma la UKI e la sua policy PCR (`ukify
---pcr-private-key`; oggi la firma la chiave Secure Boot; la chiave di policy PCR separata di D43 è aperta, P4b).
-  L'immagine non crea alcun keyslot TPM: l'unico percorso è `athanor-uki-enroll`, lanciato dall'utente. Profilo `keys/profiles/secureboot.cnf`: non CA, `codeSigning`.
+- **Chiave Secure Boot**: firma con sbsign il vmlinuz di ogni nuovo kernel, nel
+  job `sign` di nvidia-kmod (`sign-kernel.sh vmlinuz`, D43); l'immagine system lo
+  prende già firmato da `azoth-boot`. Nessuna fase assembla una UKI (ADR-0037): avvio shim, GRUB,
+  vmlinuz firmato. L'immagine non crea alcun keyslot TPM: l'unico percorso è
+  `athanor-uki-enroll`, lanciato dall'utente, che lega ancora il keyslot a PCR 11,
+  costante senza stub UKI (aperto, riservato al maintainer). Profilo
+  `keys/profiles/secureboot.cnf`: non CA, `codeSigning`.
   Secret `SECUREBOOT_SIGNING_KEY`, certificato
   `keys/secureboot/athanor-secureboot.pem` (`.der` per `mokutil --import`). Non
   essendo una CA, anche arruolata resta fuori dal keyring machine
@@ -312,10 +322,9 @@ patchano i Makefile per forzarlo.
   uno di loro è rifiutato anche dove quella MOK fosse ancora arruolata. Il primo
   è la MOK unica del 2026-09-04 ("Ermete OS Secure Boot MOK"), che firmava UKI e
   moduli, ritirata il 2026-09-13.
-- **UKI**: kernel, initrd, `cmdline` e microcode early in un'unica immagine
-  firmata con la chiave Secure Boot dietro lo shim Fedora; la produce la fase
-  system-image, perché l'initrd dipende dall'immagine, non dal kernel. Lo spec
-  Fedora fornisce già le stringhe SBAT (`kernel.sbat`, `uki.sbat`).
+- **Niente UKI** (ADR-0037): initrd e `cmdline` non sono firmati; la catena
+  Secure Boot copre shim, GRUB e il vmlinuz. Una UKI tornerebbe con una sua
+  decisione, insieme alla policy PCR che `athanor-uki-enroll` presuppone.
 - **Primo avvio**: arruolamento guidato del certificato Secure Boot
   (`mokutil --import`), unica interazione richiesta per avere Secure Boot acceso
   su un PC qualsiasi; i moduli non ne dipendono.
@@ -358,7 +367,7 @@ Ogni PR di bump e ogni cambio in `forge/specs/azoth/**` passa:
    pubblicato per l'NVR dei pin quando il kernel è riusato, con la toolchain del
    kernel; ogni `.ko` deve portare il vermagic del kernel e i tipi kCFI. Poi, sui
    push, il job `orchestrator` di Kernel Build avvia l'Orchestrator sullo stesso
-   commit (`sha`, `force_image`) quando ha pubblicato un kernel nuovo o quando
+   commit (`sha`) quando ha pubblicato un kernel nuovo o quando
    `system/kernel-artifacts.sh` non risponde `ready`; l'Orchestrator chiama il
    workflow riusabile `nvidia-kmod.yml` quando lo stato è `modules-missing`
    (`doc_build_ordering.md`, O1-O4). Lì il job `artifacts` risolve il kernel per
@@ -577,7 +586,7 @@ kernel-devel e l'hash di `CONFIG_MODULE_SIG_HASH`, e rilegge il firmatario con
 `modinfo`. Il workflow `nvidia-kmod.yml`: `artifacts` (`system/kernel-artifacts.sh`
 risolve il kernel dei pin e i tag dei moduli; se non mancano, il run finisce lì),
 `build` (matrice dei due rami, runner GitHub, `azoth-devel` per digest),
-`sign` (runner GitHub, environment `signing`: vede solo i `.ko` e la chiave,
+`sign` (runner GitHub, environment `signing-kernel`: vede solo i `.ko` e la chiave,
 montata in sola lettura per la durata del comando), `boot` (la catena della
 firma end-to-end in QEMU, gate 4 della sezione 7), `publish` (un'immagine
 `scratch` per ramo con `lib/modules/<kver>/extra/nvidia/*.ko`, il layout che

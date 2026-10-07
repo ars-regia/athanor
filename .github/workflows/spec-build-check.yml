@@ -11,29 +11,35 @@ name: Spec Build Check
 # call-dag-compile.yml (fetch with network, build without). On a green build of the spec bot's
 # pull request, forge/scripts/bot_merge.py merges it when every bump keeps its leading non-zero version component (semver-compatible).
 # The kernel (forge/specs/azoth) is Kernel Build's.
+#
+# The workflow runs on every pull request, without a path filter, so that its gate job
+# always reports: "Spec gate" is a required check of the branch protection
+# (.github/settings/branch-protection.json), and a required check of a workflow that a path
+# filter skipped would stay pending. select decides what is built; a change that selects
+# nothing passes in seconds.
 
 on:
   pull_request:
-    paths:
-      - forge/specs/**
-      - "!forge/specs/azoth/**"
-      - forge/config/rpmmacros
-      - forge/builder/**
-      - flake.nix
-      - flake.lock
-      - forge/scripts/build_spec.sh
-      - forge/scripts/run_spec_build.sh
-      - forge/scripts/fetch_sources.sh
-      - forge/scripts/select_check_specs.py
-      - forge/scripts/builder_image.sh
-      - .github/workflows/spec-build-check.yml
+  # pr.yml calls this workflow as its `specs` job when changes.json selects the specs. Until
+  # this pull_request trigger is removed, together with "Spec gate" in branch-protection.json
+  # (docs/operations/github-settings.md section 8), both run, and only the direct run merges
+  # the spec bot's pull requests.
+  workflow_call:
+    inputs:
+      from_pr_gate:
+        description: "Set by pr.yml: the call builds and judges, and leaves the bot merge to the direct run."
+        type: boolean
+        default: false
 
 permissions:
   contents: read
   packages: read
 
+# In a call, github is the caller's context: the workflow name keeps the call of pr.yml and the
+# direct run in separate groups, so neither cancels the other, and a merge group (no pull
+# request number) has its own ref.
 concurrency:
-  group: spec-build-check-${{ github.event.pull_request.number }}
+  group: spec-build-check-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -115,21 +121,40 @@ jobs:
           image=$(bash forge/scripts/builder_image.sh resolve "$RUNNER_TEMP/spec-check/athanor-builder.tar.gz" "${REGISTRY,,}/athanor-builder:latest")
           bash forge/scripts/run_spec_build.sh "$image" "$SPEC"
 
+  gate:
+    # The one name the branch protection requires: green when every selected spec built, or when
+    # the change selects none (build skipped). A builder image that failed to build fails it.
+    name: Spec gate
+    needs: [select, builder, build]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      RESULTS: ${{ toJSON(needs) }}
+    steps:
+      - run: |
+          set -euo pipefail
+          jq -r 'to_entries[] | "- \(.key): \(.value.result)"' <<< "$RESULTS" | tee -a "$GITHUB_STEP_SUMMARY"
+          result() { jq -r --arg job "$1" '.[$job].result' <<< "$RESULTS"; }
+          [[ $(result select) == success ]]
+          [[ $(result builder) == success || $(result builder) == skipped ]]
+          [[ $(result build) == success || $(result build) == skipped ]]
+
   merge:
-    needs: [select, build]
+    needs: gate
     # The spec bot's pull requests only, whatever the build's outcome: forge/scripts/bot_merge.py
     # merges a green one of the bot's shape at its head once the required checks pass, and
     # reports why it leaves any other. The script is the base branch's copy; the workflow
     # file, as for any same-repository pull_request, is the pull request's own, and forks get
     # no secrets.
-    if: ${{ always() && github.head_ref == 'chore/update-specs-zero-trust' && github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ always() && !inputs.from_pr_gate && github.head_ref == 'chore/update-specs-zero-trust' && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-24.04
     # The job's own token reads the pull request and the Kernel Build runs; the PAT only merges.
     permissions:
       actions: read
       contents: read
       pull-requests: read
-    # It waits for the required checks (Kernel gate) before merging.
+    # It waits for the checks .github/settings/branch-protection.json requires before merging.
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -144,6 +169,6 @@ jobs:
           MERGE_TOKEN: ${{ secrets.KERNEL_BUMP_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
-          # A change that selects no spec builds nothing and passes, as the single build job did.
-          BUILD: ${{ needs.select.result == 'success' && needs.select.outputs.specs == '[]' && 'success' || needs.build.result }}
+          # The gate's result: a change that selects no spec builds nothing and passes.
+          BUILD: ${{ needs.gate.result }}
         run: python3 forge/scripts/bot_merge.py spec "$PR" "$SHA" "$BUILD"

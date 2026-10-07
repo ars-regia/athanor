@@ -5,7 +5,7 @@ Release:        2%{?dist}
 Summary:        Athanor OS P2P Mesh Synchronization Daemon
 
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor
+URL:            https://github.com/ars-regia/athanor
 
 
 BuildRequires:  rust >= 1.80.0

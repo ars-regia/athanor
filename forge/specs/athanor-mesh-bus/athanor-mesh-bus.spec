@@ -4,7 +4,7 @@ Release:        1%{?dist}
 Summary:        Athanor OS Core Component - athanor-mesh-bus
 
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor
+URL:            https://github.com/ars-regia/athanor
 
 %description
 Core component implementation for athanor-mesh-bus.

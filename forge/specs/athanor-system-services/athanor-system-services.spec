@@ -4,7 +4,7 @@ Version:        1.0.1
 Release:        27%{?dist}
 Summary:        Athanor OS athanor-system-services
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor
+URL:            https://github.com/ars-regia/athanor
 BuildArch:      noarch
 Requires:       systemd
 Requires:       cosmic-bg

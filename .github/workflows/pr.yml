@@ -1,0 +1,119 @@
+name: Pull Request
+
+# The pull request workflow (docs/architecture/doc_pipeline.md section 3, ADR-0075). Every pull
+# request and every merge group runs it whole: no path filter decides whether it runs (PL3).
+#
+# changes: scripts/ci/changes.py writes changes.json, the areas the change touches; it is the
+#   `changes` artifact, and the job output carries the same JSON for the `if:` of the jobs.
+# check:   `just check`, the gate a contributor runs locally (lint, every verify.py check with
+#   scripts/ci/known-red.txt, the Python test directories), with tools pinned by digest.
+# kernel:  the kernel check (call-kernel.yml) when changes.json selects the kernel.
+# specs:   Spec Build Check (spec-build-check.yml) when changes.json selects the specs.
+# gate:    the one required check. It needs every other job, always runs, and is red when a job
+#   it needs failed or was cancelled, or when an area the change selects did not run
+#   (scripts/ci/gate.py). A skipped build is a pass.
+#
+# Until the maintainer switches the required check from "Kernel gate" and "Spec gate" to
+# `gate` (docs/operations/github-settings.md), kernel-build.yml and spec-build-check.yml keep
+# their own pull_request runs next to this workflow.
+
+on:
+  pull_request:
+  merge_group:
+
+permissions: {}
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The base the change is measured against: the target branch of the pull request, or the
+  # base of the merge group.
+  BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      changes: ${{ steps.changes.outputs.json }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Change detection (scripts/ci/changes.py)
+        id: changes
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE"
+          python3 -B scripts/ci/changes.py "$BASE" "$RUNNER_TEMP/out/changes.json"
+          echo "json=$(< "$RUNNER_TEMP/out/changes.json")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: changes
+          path: ${{ runner.temp }}/out/changes.json
+          if-no-files-found: error
+
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Pinned tools (scripts/ci/install-tools.sh)
+        run: |
+          set -euo pipefail
+          bash scripts/ci/install-tools.sh "$RUNNER_TEMP/tools"
+          echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
+
+      - name: just check
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE"
+          just check "$BASE"
+
+  kernel:
+    needs: changes
+    if: ${{ fromJSON(needs.changes.outputs.changes).kernel }}
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/call-kernel.yml
+
+  specs:
+    needs: changes
+    if: ${{ fromJSON(needs.changes.outputs.changes).specs }}
+    # What Spec Build Check's jobs ask for, its bot merge included: GitHub validates a called
+    # workflow's permissions when the run starts, even for jobs that will be skipped.
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+      pull-requests: read
+    uses: ./.github/workflows/spec-build-check.yml
+    with:
+      from_pr_gate: true
+
+  gate:
+    needs: [changes, check, kernel, specs]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      NEEDS: ${{ toJSON(needs) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Verdict (scripts/ci/gate.py)
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/out"
+          printf '%s\n' "$NEEDS" > "$RUNNER_TEMP/out/needs.json"
+          python3 -B scripts/ci/gate.py "$RUNNER_TEMP/out/needs.json" | tee -a "$GITHUB_STEP_SUMMARY"
