@@ -24,8 +24,9 @@
 # The shipped policy names its keys with keyPaths, which a skopeo older than 1.15 rejects
 # (the runner's is 1.13). With SIGN_VERIFY_BUILDER, the content hash of the builder image of
 # the run, the verification runs that image's skopeo under podman, after the key files are
-# removed: the container receives the rendered policy, the public keys and the registry login,
-# never the key. Without it the host's skopeo verifies.
+# removed. The container receives the rendered policy and the public keys, read-only, and no
+# registry login: it pulls anonymously, as a machine does, so the job's token, which can write
+# packages, never reaches code built from the repository. Without it the host's skopeo verifies.
 #
 # Usage: sign-images.sh --registry REGISTRY/OWNER DIGESTS_FILE
 #        (lines: "REPOSITORY TAG DIGEST", image-digests.sh)
@@ -42,10 +43,6 @@ shipped=(athanor-system athanor-system-nvidia athanor-system-nvidia-legacy)
 [[ -n ${COSIGN_PASSWORD+set} ]] || { echo "${0##*/}: COSIGN_PASSWORD is not available to this job: check the signing-images environment" >&2; exit 2; }
 if [[ -n ${SIGN_VERIFY_BUILDER:-} ]]; then
   [[ $SIGN_VERIFY_BUILDER =~ ^[0-9a-f]{64}$ ]] || { echo "${0##*/}: SIGN_VERIFY_BUILDER is not a content hash: '$SIGN_VERIFY_BUILDER'" >&2; exit 2; }
-  # Where skopeo login wrote the credentials, by the containers-auth.json(5) lookup.
-  if [[ -n ${XDG_RUNTIME_DIR:-} ]]; then auth=$XDG_RUNTIME_DIR/containers/auth.json; else auth=/run/containers/$UID/auth.json; fi
-  auth=${REGISTRY_AUTH_FILE:-$auth}
-  [[ -s $auth ]] || { echo "${0##*/}: no registry login at $auth for the verification in the builder image" >&2; exit 2; }
 fi
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -77,9 +74,8 @@ bash "$root/forge/specs/athanor-update/SOURCES/usr/libexec/athanor-update/render
 verifier=()
 if [[ -n ${SIGN_VERIFY_BUILDER:-} ]]; then
   # The policy names the keys by absolute path, so they are mounted where the policy says.
-  verifier=(podman run --rm --security-opt label=disable
+  verifier=(podman run --rm --cap-drop=all --security-opt no-new-privileges --security-opt label=disable
     -v "$work/policy:$work/policy:ro" -v "$keys_dir:$keys_dir:ro"
-    -v "$auth:/run/registry-auth.json:ro" -e REGISTRY_AUTH_FILE=/run/registry-auth.json
     "${registry,,}/athanor-builder:$SIGN_VERIFY_BUILDER")
 fi
 

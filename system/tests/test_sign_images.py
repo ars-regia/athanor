@@ -104,8 +104,6 @@ class SignImages(unittest.TestCase):
         podman = self.dir / "bin" / "podman"
         podman.write_text(PODMAN)
         podman.chmod(0o755)
-        self.auth = self.dir / "auth.json"
-        self.auth.write_text('{"auths": {}}')
         self.state = self.dir / "state"
         self.state.mkdir()
         self.tags = {f"{REG}/{name}:412": "sha256:" + f"{i + 1}" * 64 for i, name in enumerate(NAMES)}
@@ -187,14 +185,16 @@ class SignImages(unittest.TestCase):
 
     def test_with_the_builder_the_verification_runs_in_its_image_without_the_key(self):
         self.digests()
-        r = self.sign(SIGN_VERIFY_BUILDER=BUILDER, REGISTRY_AUTH_FILE=str(self.auth))
+        r = self.sign(SIGN_VERIFY_BUILDER=BUILDER)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(json.loads((self.state / "signed.json").read_text()), list(self.tags.values()))
         runs = [json.loads(line) for line in (self.state / "podman.log").read_text().splitlines()]
         self.assertEqual(len(runs), 3)
         for run in runs:
             self.assertEqual(run["image"], f"{REG}/athanor-builder:{BUILDER}")
-            self.assertIn(f"{self.auth}:/run/registry-auth.json:ro", run["mounts"])
+            self.assertEqual(len(run["mounts"]), 2, "only the rendered policy and the public keys")
+            self.assertNotIn("-e", run["args"])
+            self.assertIn("--cap-drop=all", run["args"])
             self.assertNotIn("--sign-by-sigstore-private-key", run["args"])
         self.assertTrue(all("--policy" not in c["args"] for c in self.calls() if "--sign-by-sigstore-private-key" in c["args"]))
         self.assertEqual(r.stdout.count("signed and verified with the shipped policy"), 3)
@@ -203,17 +203,10 @@ class SignImages(unittest.TestCase):
         self.digests()
         for value in ("latest", BUILDER[:-1], f"{BUILDER} --privileged"):
             with self.subTest(value=value):
-                r = self.sign(SIGN_VERIFY_BUILDER=value, REGISTRY_AUTH_FILE=str(self.auth))
+                r = self.sign(SIGN_VERIFY_BUILDER=value)
                 self.assertEqual(r.returncode, 2, r.stderr)
                 self.assertEqual(json.loads((self.state / "signed.json").read_text()), [])
                 self.assertFalse((self.state / "podman.log").exists())
-
-    def test_without_a_registry_login_the_builder_verification_fails_before_signing(self):
-        self.digests()
-        r = self.sign(SIGN_VERIFY_BUILDER=BUILDER, REGISTRY_AUTH_FILE=str(self.dir / "absent.json"))
-        self.assertEqual(r.returncode, 2, r.stderr)
-        self.assertIn("no registry login", r.stderr)
-        self.assertEqual(json.loads((self.state / "signed.json").read_text()), [])
 
     def test_a_signature_a_machine_would_not_accept_fails_the_job(self):
         self.digests()
