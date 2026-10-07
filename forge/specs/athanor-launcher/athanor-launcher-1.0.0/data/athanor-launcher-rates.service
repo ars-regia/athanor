@@ -1,6 +1,6 @@
 [Unit]
 Description=Currency rates of the launcher's calculator
-Documentation=https://github.com/hr-mes/athanor/blob/iso-v0/docs/architecture/doc_launcher.md
+Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_launcher.md
 
 [Service]
 Type=oneshot

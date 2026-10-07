@@ -39,7 +39,7 @@ set -euo pipefail
 root=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
 rig=$root/forge/test/shell
 out=${ATHANOR_RIG_OUT:-$root/.scratch/shell-rig}
-registry=${ATHANOR_REGISTRY:-ghcr.io/hr-mes}
+registry=${ATHANOR_REGISTRY:-ghcr.io/ars-regia}
 local_image=localhost/athanor-shell-rig
 
 # The image: an explicit one, else the published one pinned by digest, else the local build.

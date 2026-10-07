@@ -5,7 +5,7 @@ Release:        1%{?dist}
 Summary:        Athanor OS Userspace Zero-Copy Isolated Rust TCP/IP Stack Daemon
 
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor
+URL:            https://github.com/ars-regia/athanor
 Requires:       dbus
 
 
