@@ -6,14 +6,18 @@ Description=Say at the console that the desktop did not start
 # agetty passes over it (measured with util-linux 2.39, `agetty --show-issue`). agetty does
 # not read /run/issue.d while /etc/issue exists, which is why the message is not put there.
 Before=getty@tty1.service
+# The message depends on whether greenboot has queued the previous deployment after a failed
+# health check (doc_recovery.md, R5), so it is written once greenboot is done.
+After=greenboot-healthcheck.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 RuntimeDirectory=athanor-recovery
-ExecStart=/usr/bin/install -m 0644 /usr/share/athanor-recovery/recovery.issue /run/athanor-recovery/recovery.issue
+ExecStart=/usr/libexec/athanor-recovery/write-notice /run/athanor-recovery/recovery.issue
 
-# A root process writes a file in a directory it owns: no capability is needed.
+# A root process writes a file in a directory it owns and reads the journal, whose files root
+# owns: no capability is needed.
 CapabilityBoundingSet=
 NoNewPrivileges=yes
 ProtectSystem=strict

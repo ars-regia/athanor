@@ -2,20 +2,22 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-recovery
 Version:        1.0.0
-Release:        6%{?dist}
+Release:        7%{?dist}
 Summary:        Text console shown when the desktop does not start
 
 License:        GPL-3.0-or-later
 BuildArch:      noarch
 
-Requires:       systemd util-linux greetd athanor-update
+Requires:       systemd util-linux greetd athanor-update bash grep
 
 %description
 When greetd fails three times in a minute, the desktop does not start. This package
 then gives the person a text login on tty1 and a message, in English and Italian, that
 says how to go back to the previous system version: `sudo athanor-update go-back`.
 It carries the greetd drop-in that starts the console, the target, and the unit that
-writes the message. The graphical kiosk it replaces is kept as source in the frozen
+writes the message. When greenboot has already queued the previous version after a failed
+health check, the message says to restart instead. The package also enables greenboot's
+units through its preset. The graphical kiosk it replaces is kept as source in the frozen
 crate forge/specs/athanor-recovery/athanor-recovery-1.0.0, out of the workspace and the image.
 
 %prep
@@ -30,6 +32,9 @@ install -D -m 0644 %{sources}/usr/lib/systemd/system/athanor-recovery-notice.ser
 install -D -m 0644 %{sources}/usr/lib/systemd/system/greetd.service.d/recovery-fallback.conf %{buildroot}/usr/lib/systemd/system/greetd.service.d/recovery-fallback.conf
 install -D -m 0644 %{sources}/usr/lib/tmpfiles.d/athanor-recovery.conf %{buildroot}/usr/lib/tmpfiles.d/athanor-recovery.conf
 install -D -m 0644 %{sources}/usr/share/athanor-recovery/recovery.issue %{buildroot}/usr/share/athanor-recovery/recovery.issue
+install -D -m 0644 %{sources}/usr/share/athanor-recovery/rollback-queued.issue %{buildroot}/usr/share/athanor-recovery/rollback-queued.issue
+install -D -m 0755 %{sources}/usr/libexec/athanor-recovery/write-notice %{buildroot}/usr/libexec/athanor-recovery/write-notice
+install -D -m 0644 %{sources}/usr/lib/systemd/system-preset/80-athanor-recovery.preset %{buildroot}/usr/lib/systemd/system-preset/80-athanor-recovery.preset
 
 %files
 /usr/lib/systemd/system/athanor-recovery.target
@@ -39,8 +44,20 @@ install -D -m 0644 %{sources}/usr/share/athanor-recovery/recovery.issue %{buildr
 /usr/lib/tmpfiles.d/athanor-recovery.conf
 %dir /usr/share/athanor-recovery
 /usr/share/athanor-recovery/recovery.issue
+/usr/share/athanor-recovery/rollback-queued.issue
+%dir /usr/libexec/athanor-recovery
+/usr/libexec/athanor-recovery/write-notice
+/usr/lib/systemd/system-preset/80-athanor-recovery.preset
 
 %changelog
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
+- Enable greenboot-healthcheck.service and greenboot-set-rollback-trigger.service through
+  80-athanor-recovery.preset (doc_recovery.md, R5): nothing enabled them, so no update was
+  ever checked.
+- Write the console message after greenboot's health check. When greenboot has made the
+  previous deployment the default after a failed check, the message says so and tells the
+  person to restart: `athanor-update go-back` would swap the deployments back to the failed
+  version.
 * Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
 - The graphical kiosk leaves the image. It ran as an unprivileged user with
   NoNewPrivileges, so the rollback it ran (`rpm-ostree rollback`) could not do its work, and

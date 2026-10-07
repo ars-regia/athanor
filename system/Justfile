@@ -48,31 +48,6 @@ build-iso target_image=("localhost/" + image_name) tag=default_tag:
 security-scan target_image=("localhost/" + image_name) tag=default_tag:
     trivy image --ignorefile ../supply-chain/.trivyignore "{{ target_image }}:{{ tag }}" --severity CRITICAL,HIGH
 
-# Strictly enforces 0700/0400 permissions on Secure Boot signing keys (KEK, PK, db, UKI keys)
-[group('QA & Security')]
-secureboot-key-audit:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "🔒 Auditing Secure Boot & UKI key permissions..."
-    if [ -d "/etc/pki/secureboot/private" ]; then
-        chmod 0700 /etc/pki/secureboot/private
-    fi
-    for k in /etc/pki/secureboot/private/*.key /etc/pki/uki/*.key /run/secrets/*.key; do
-        if [ -f "$k" ]; then
-            chmod 0400 "$k"
-            echo "  ✓ Secured $k (chmod 0400)"
-        fi
-    done
-    if [ -f "/etc/pki/uki/uki-signing.key" ]; then
-        echo "⚠️ WARNING: Private UKI signing key found in generic path /etc/pki/uki/uki-signing.key!"
-        echo "  Migrating key to isolated enclave /etc/pki/secureboot/private/..."
-        mkdir -p /etc/pki/secureboot/private
-        chmod 0700 /etc/pki/secureboot/private
-        mv -f /etc/pki/uki/uki-signing.key /etc/pki/secureboot/private/uki-signing.key
-        chmod 0400 /etc/pki/secureboot/private/uki-signing.key
-    fi
-    echo "✅ Secure Boot key permission audit complete."
-
 # Generate SPDX SBOM using Syft
 [group('QA & Security')]
 generate-sbom target_image=("localhost/" + image_name) tag=default_tag output_file="system-sbom.spdx.json":

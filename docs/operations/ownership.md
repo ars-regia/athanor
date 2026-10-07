@@ -12,7 +12,7 @@
 
 - `.github/CODEOWNERS` on `iso-v0` names `@hr-mes-architect` and the path `/forge/specs/kernel/`, which no longer exists (the kernel is `forge/specs/azoth/`).
 - PR #170 replaces it: owner `@hr-mes`, the protected paths last (polkit, attestation, `system/Containerfile`, signing and promotion, `CLAUDE.md`), and "Require review from Code Owners" off while there is a single owner.
-- The repository belongs to a user account (`gh api users/hr-mes --jq .type` is `User`). GitHub teams, and with them per-area owner groups, need an organisation.
+- The repository belongs to the organisation `ars-regia` since 2026-10-06 (moved from the personal account `hr-mes`, [transfer-to-organisation.md](transfer-to-organisation.md)). GitHub teams, and with them per-area owner groups, are now possible; none exists yet.
 - The Gatekeeper left the tree in #121 (`ca00f23b`); its area stays reserved under `security` for its return.
 
 ## 2. Rules _(Proposal)_
@@ -56,7 +56,6 @@ protected paths last, as in PR #170.
 /forge/specs/azoth/                            @hr-mes
 /forge/specs/athanor-kernel-profile/           @hr-mes
 /system/nvidia/                                @hr-mes
-/system/sysctl.d/                              @hr-mes
 /system/kernel-artifacts.sh                    @hr-mes
 /.github/workflows/kernel-*.yml                @hr-mes
 /.github/workflows/nvidia-*.yml                @hr-mes

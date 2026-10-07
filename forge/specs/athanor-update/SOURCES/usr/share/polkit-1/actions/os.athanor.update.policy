@@ -3,7 +3,7 @@
  "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
 <policyconfig>
   <vendor>Athanor</vendor>
-  <vendor_url>https://github.com/hr-mes/athanor</vendor_url>
+  <vendor_url>https://github.com/ars-regia/athanor</vendor_url>
 
   <!-- logind's own defaults for a reboot on this image: the request grants nothing beyond
        the reboot logind already allows the active local user (doc_shell.md, SH11). -->

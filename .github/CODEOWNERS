@@ -1,11 +1,4 @@
-# Code Owners for Athanor OS
+# Code owners of Athanor OS. GitHub requests their review on every pull request.
+# One maintainer owns the whole tree; add path rules when ownership is split.
 
-* @hr-mes-architect
-
-# Core OS & Kernel
-/forge/specs/kernel/ @hr-mes-architect
-
-# CI/CD
-/.github/ @hr-mes-architect
-/forge/ @hr-mes-architect
-/system/Containerfile @hr-mes-architect
+* @hr-mes

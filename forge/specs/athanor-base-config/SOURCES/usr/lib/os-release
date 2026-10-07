@@ -10,10 +10,13 @@ ANSI_COLOR="0;38;2;120;40;160"
 LOGO=athanor-logo
 CPE_NAME="cpe:/o:athanor:athanor:43"
 DEFAULT_HOSTNAME="athanor"
-HOME_URL="https://github.com/hr-mes/athanor"
-DOCUMENTATION_URL="https://github.com/hr-mes/athanor"
-SUPPORT_URL="https://github.com/hr-mes/athanor/issues"
-BUG_REPORT_URL="https://github.com/hr-mes/athanor/issues"
+HOME_URL="https://github.com/ars-regia/athanor"
+DOCUMENTATION_URL="https://github.com/ars-regia/athanor"
+SUPPORT_URL="https://github.com/ars-regia/athanor/issues"
+BUG_REPORT_URL="https://github.com/ars-regia/athanor/issues"
 PLATFORM_ID="platform:f43"
 VARIANT="bootc"
 VARIANT_ID=athanor
+# Product line support end (ADR-0081): five years from 2026.
+# Single source: SECURITY.md and the release notes point here.
+SUPPORT_END=2031-12-31
