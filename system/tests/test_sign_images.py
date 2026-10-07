@@ -32,11 +32,21 @@ STUB = textwrap.dedent("""\
         log.write(json.dumps({"args": args, "env": sorted(k for k in os.environ if k.startswith("COSIGN_"))}) + "\\n")
     tags = json.loads((state / "tags.json").read_text())
     signed = json.loads((state / "signed.json").read_text())
+    lag_file = state / "lag.json"
+    lag = json.loads(lag_file.read_text()) if lag_file.exists() else {}
     if args[0] == "inspect":
         ref = args[-1].removeprefix("docker://")
         if ref not in tags:
             sys.exit("manifest unknown")
-        print(tags[ref])
+        with open(state / "inspect.log", "a") as log:
+            log.write(ref + "\\n")
+        if lag.get(ref, [None, 0])[1] > 0:
+            # The registry still serves the manifest the tag named before the copy.
+            lag[ref][1] -= 1
+            lag_file.write_text(json.dumps(lag))
+            print(lag[ref][0])
+        else:
+            print(tags[ref])
     elif "--sign-by-sigstore-private-key" in args:
         # containers/image writes a sigstore attachment only where registries.d enables it.
         conf = pathlib.Path(args[args.index("--registries.d") + 1]) if "--registries.d" in args else None
@@ -75,6 +85,10 @@ STUB = textwrap.dedent("""\
         repository, digest = source.split("@")
         assert target.startswith(f"{repository}:"), args
         if not os.environ.get("STUB_STALE"):
+            # STUB_LAG=N: the next N reads of the tag still return its previous digest.
+            if os.environ.get("STUB_LAG"):
+                lag[target] = [tags.get(target, "sha256:" + "0" * 64), int(os.environ["STUB_LAG"])]
+                lag_file.write_text(json.dumps(lag))
             tags[target] = digest
             (state / "tags.json").write_text(json.dumps(tags))
     else:
@@ -125,7 +139,7 @@ class SignImages(unittest.TestCase):
         shutil.copy(A_KEY, self.dir / "keys" / "athanor-image-1.pub")
         (self.dir / "runtime").mkdir(mode=0o700)
         (self.dir / "tmp").mkdir()
-        self.env = {"PATH": f"{self.dir / 'bin'}:{os.environ['PATH']}", "STUB_STATE": str(self.state), "RETRY_ATTEMPTS": "1",
+        self.env = {"PATH": f"{self.dir / 'bin'}:{os.environ['PATH']}", "STUB_STATE": str(self.state), "RETRY_ATTEMPTS": "1", "TAG_READBACK_DELAY": "0",
                     "SIGN_KEYS_DIR": str(self.dir / "keys"), "VERIFY_KEYS_DIR": str(self.dir / "keys"), "XDG_RUNTIME_DIR": str(self.dir / "runtime"), "TMPDIR": str(self.dir / "tmp"),
                     "COSIGN_PRIVATE_KEY": SECRET, "COSIGN_PASSWORD": "correct horse"}
         self.file = self.dir / "artifacts" / "image-digests.txt"
@@ -144,8 +158,9 @@ class SignImages(unittest.TestCase):
         clean = {k: v for k, v in self.env.items() if not k.startswith("COSIGN_")}
         return subprocess.run(["bash", str(VERIFY), "--registry", REG, *args, str(self.file)], capture_output=True, text=True, env={**clean, **env})
 
-    def tag(self, **env):
-        return subprocess.run(["bash", str(TAG), "--registry", REG, "--tag", "latest", str(self.file)], capture_output=True, text=True, env={**self.env, **env})
+    def tag(self, *args, **env):
+        target = list(args) or [str(self.file)]
+        return subprocess.run(["bash", str(TAG), "--registry", REG, "--tag", "latest", *target], capture_output=True, text=True, env={**self.env, **env})
 
     def calls(self):
         return [json.loads(line) for line in (self.state / "calls.log").read_text().splitlines()]
@@ -270,6 +285,35 @@ class SignImages(unittest.TestCase):
         r = self.tag(STUB_STALE="1")
         self.assertEqual(r.returncode, 1, r.stderr)
         self.assertIn("after the copy", r.stderr)
+
+    def test_a_tag_the_registry_serves_late_is_read_again(self):
+        """Right after the copy the registry may still serve the previous manifest: the
+        read-back is tried again, a bounded number of times."""
+        self.digests()
+        r = self.tag(STUB_LAG="2")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        reads = (self.state / "inspect.log").read_text().splitlines()
+        for name in NAMES:
+            self.assertEqual(reads.count(f"{REG}/{name}:latest"), 3)
+        self.assertEqual(r.stdout.count(":latest -> sha256:"), 3)
+        # Six stale reads exhaust the six attempts: the job fails instead of waiting on.
+        tags = json.loads((self.state / "tags.json").read_text())
+        tags.update({f"{REG}/{name}:latest": "sha256:" + "0" * 64 for name in NAMES})
+        (self.state / "tags.json").write_text(json.dumps(tags))
+        r = self.tag(STUB_LAG="6")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("after the copy", r.stderr)
+
+    def test_the_iso_latest_moves_to_the_digest_of_its_run(self):
+        iso = "sha256:" + "7" * 64
+        self.tags[f"{REG}/athanor-iso:412"] = iso
+        (self.state / "tags.json").write_text(json.dumps(self.tags))
+        r = self.tag("--iso", "412")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads((self.state / "tags.json").read_text())[f"{REG}/athanor-iso:latest"], iso)
+        for value in ("latest", "412 extra"):
+            with self.subTest(value=value):
+                self.assertEqual(self.tag("--iso", *value.split()).returncode, 2)
 
     def test_verify_and_tag_refuse_a_repository_outside_the_shipped_set(self):
         self.digests()

@@ -518,8 +518,8 @@ writer per tag and repository, and `verify.py workflows` enforces it in the work
 the scripts they call (`system/sign-images.sh`, `system/promote.sh`) (UD1 acceptance).
 Today the `dag-system-image` job of `call-system-image.yml` pushes the system images by
 `:<run_id>` only, and `tag-system-images` of the Orchestrator moves their `:latest` after
-`verify-system-images` verified the key-based signature; the ISO's `:latest` is still pushed
-by `dag-system-image` on `main`; `call-build-builder.yml` moves the builder's `:latest` on default-branch runs
+`verify-system-images` verified the key-based signature, and on `main` the ISO's `:latest`
+in the same job; `call-build-builder.yml` moves the builder's `:latest` on default-branch runs
 (`forge/scripts/promote_builder_latest.sh`, PR #228), which the pull-request spec check
 reads until it consumes the builder by digest (PL13).
 

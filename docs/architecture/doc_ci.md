@@ -30,7 +30,7 @@ CI1 athanor-forge-orchestrator.yml        concurrency: one run per ref, the newe
  |- system-image .................... CI5 call-system-image.yml: build-repo -> dag-system-image
  |- sign-system-images .............. environment signing (signing-images)   [signing approval]
  |- verify-system-images ............ system/verify-images.sh: no key, anonymous pulls through the shipped policy
- `- tag-system-images ............... system/tag-images.sh: :latest -> the verified digests
+ `- tag-system-images ............... system/tag-images.sh: :latest -> the verified digests; athanor-iso:latest on main
 
 Kernel path (doc_build_ordering.md, O1):
 CI9 kernel-bump.yml (PR) -> merge -> CI8 kernel-build.yml (publish azoth) -> dispatches CI1
@@ -61,7 +61,7 @@ CI1 runs CI2 once, as its first job, and calls CI3, CI4 and CI5 only after it pa
 | `REGISTRY/<owner>/athanor-forge-<package>`, `athanor-forge-rolling-<package>` | CI4 | `latest`, `<content hash>`; keyless signature and SPDX attestation (`forge/scripts/sign_attest.sh`) |
 | `ghcr.io/<owner>/athanor-forge-tier0-repo` ... `tier3-repo`, `athanor-forge-rolling-repo` | CI5 `build-repo` | `latest`, pushed only when the RPM content hash changes (`call-system-image.yml:107-136`) |
 | `ghcr.io/<owner>/athanor-system`, `athanor-system-nvidia`, `athanor-system-nvidia-legacy` | CI5 `dag-system-image` (`<run_id>`), CI1 `tag-system-images` (`latest`) | `<run_id>`; keyless signature and SBOM, then the key-based signature of CI1 `sign-system-images` (`system/sign-images.sh`), of the digest the build job recorded, never of a tag; CI1 `verify-system-images` pulls each digest through the shipped policy without a key (`system/verify-images.sh`), and only then CI1 `tag-system-images` moves `latest` to it (`system/tag-images.sh`, UD25). The run fails when an image is not signed |
-| `ghcr.io/<owner>/athanor-iso` | CI5 | `<run_id>`; `latest` only on `main` (`call-system-image.yml:416`) |
+| `ghcr.io/<owner>/athanor-iso` | CI5 (`<run_id>`), CI1 `tag-system-images` (`latest`) | `<run_id>`; `latest` only on `main`, after the default image it installs verified (`system/tag-images.sh --iso`) |
 | the three system images, tag `stable` | CI11 | moved by `system/promote.sh` |
 | `KERNEL_REGISTRY/azoth`, `azoth-devel`, `azoth-debuginfo` | CI8 `publish` | `<nvr>`, `<nvr>-microvm` (guest kernel), `latest` only on the default branch (`kernel-build.yml:339`) |
 | `KERNEL_REGISTRY/azoth-nvidia` | CI6 `publish` | the tag `system/kernel-artifacts.sh` computes per driver branch (`forge/specs/azoth/nvidia-publish.sh:42`) |

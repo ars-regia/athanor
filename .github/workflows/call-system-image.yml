@@ -284,13 +284,13 @@ jobs:
       - name: 📀 Publish the ISO
         # As an OCI image, the way kernel-build.yml publishes the kernel artifacts: the
         # ISO carries the whole system image and is far past the 2 GB an Actions
-        # artifact takes. :latest only from main, again as the kernel does.
+        # artifact takes. By run id only: tag-system-images of the Orchestrator moves :latest,
+        # on main, after the image this ISO installs verified (doc_update_delivery.md, UD25).
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
           RUN_ID: ${{ github.run_id }}
           GITHUB_SHA: ${{ github.sha }}
-          GITHUB_REF: ${{ github.ref }}
           GITHUB_SERVER_URL: ${{ github.server_url }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
@@ -312,10 +312,6 @@ jobs:
           COPY $(basename "$iso") /athanor-${RUN_ID}.iso
           CONTAINERFILE
           bash forge/scripts/retry.sh podman push "${image}:${RUN_ID}"
-          if [[ $GITHUB_REF == refs/heads/main ]]; then
-            podman tag "${image}:${RUN_ID}" "${image}:latest"
-            bash forge/scripts/retry.sh podman push "${image}:latest"
-          fi
           {
             echo "### Installer ISO"
             echo

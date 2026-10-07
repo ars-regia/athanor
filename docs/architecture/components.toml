@@ -754,7 +754,7 @@ area = "signing-update"
 status = "specified"
 spec = "doc_update_delivery.md"
 item = "UD25"
-purpose = "Moves :latest of the system images to the digests whose signature verified"
+purpose = "Moves :latest of the system images to the digests whose signature verified, and of the ISO that installs them"
 
 [[component]]
 path = "system/tests"
