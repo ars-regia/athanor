@@ -117,6 +117,31 @@ lint:
     just system/lint
     just check-syntax
 
+# The pull request gate (ADR-0075, doc_pipeline.md PL3): the `check` job of pr.yml runs exactly
+# this, and a contributor runs it before pushing. Workflow lint (actionlint, with shellcheck on
+# every run: block), Justfile syntax, every verify.py check with the red ones of
+# scripts/ci/known-red.txt excused (the list may only shrink against BASE), and every Python
+# test directory of the repository.
+[group('QA & Security')]
+check base="HEAD":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v actionlint >/dev/null || { echo "check: actionlint is not on PATH (scripts/ci/install-tools.sh)" >&2; exit 1; }
+    command -v shellcheck >/dev/null || { echo "check: shellcheck is not on PATH; actionlint would skip the run: blocks" >&2; exit 1; }
+    actionlint -no-color -pyflakes=
+    just check-syntax
+    python3 -B scripts/verify.py --known-red scripts/ci/known-red.txt --known-red-base "{{ base }}"
+    python3 -B forge/specs/athanor-kernel-profile/kernel_profile.py check
+    python3 -B system/athanor-style/calmo/contrast.py
+    python3 -B system/athanor-style/calmo/generate.py --check
+    # This suite holds no TestCase: its own main() runs the cases, and discovery would find none.
+    python3 -B forge/test/iso/test_verdict.py
+    dirs=$(git ls-files -- ':(glob)**/test_*.py' | xargs -n1 dirname | sort -u | grep -vx 'forge/test/iso')
+    for dir in $dirs; do
+        echo "check: unit tests in $dir"
+        python3 -B -m unittest discover -s "$dir"
+    done
+
 # Formats all shell scripts and Justfiles across workspace
 [group('QA & Security')]
 format:
