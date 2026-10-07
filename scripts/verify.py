@@ -2101,6 +2101,8 @@ def polkit_rules_declared(path, text, cannot):
         )
     if re.sub(r"\x00\d+\x00|[A-Za-z_]+", "", code).strip(" \t\r\n(){}[].,;=|&"):
         return unreadable("it uses characters other than identifiers, strings and ( ) { } [ ] . , ; = | &")
+    if any(len(run) not in (2, 3) for run in re.findall(r"=+", code)):
+        return unreadable("it assigns: only == and === are read")
     members = (
         r"\bpolkit\s*\.\s*(?:addRule|addAdminRule|Result\s*\.\s*[A-Z_]+)\b"
     )
@@ -2149,7 +2151,7 @@ def polkit_rules_declared(path, text, cannot):
                 "action or returns no polkit.Result"
             )
         for a in ids:
-            declared[(a, path)] = results
+            declared.setdefault((a, path), set()).update(results)
     if code[pos:].strip(" \t\r\n;"):
         return unreadable(
             "code other than polkit.addRule(...) and polkit.addAdminRule(...) stands at the top level"
