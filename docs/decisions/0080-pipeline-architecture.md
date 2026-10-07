@@ -69,7 +69,7 @@ priority.
   decided by a spike before PB5. Decision 3: `MOK_PRIVATE_KEY` is retired at the close of
   the image key rotation (PB5b), not with the two environments. Decision 5:
   `prevent_self_review` is switched on in both environments when a second human reviewer is
-  listed in them; until then the maintainer's approval of runs he triggered is an accepted
+  listed in them; until then the maintainer's approval of runs the maintainer triggered is an accepted
   risk with the compensating controls of `doc_pipeline.md` PL5. Consequences: the security
   class is set and signed when the release is signed, since releases run on push and are
   not dispatched (PQ4).

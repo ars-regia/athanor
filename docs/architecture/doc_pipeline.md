@@ -260,7 +260,7 @@ code owner exists: until then "Require review from Code Owners" stays off
 ([ADR-0062](../decisions/0062-governance-targets-confirmed.md), A2-25; PR #264 sets it in
 `.github/settings/`), and the merge queue and `gate` are the controls on those pull requests. The
 maintainer is the bypass actor of the review ruleset only, in the "for pull requests only"
-mode, recorded in the settings file (PQ5): his own pull requests merge without a second
+mode, recorded in the settings file (PQ5): the maintainer's own pull requests merge without a second
 review and still pass the merge queue and `gate`. No one pushes directly to a product
 branch, in an emergency either: an urgent fix is a pull request whose change detection
 selects the minimum.
@@ -276,7 +276,7 @@ to the job that mints its tokens, never as a repository secret, with a row in
 `prevent_self_review` stays off while the maintainer is the only required reviewer of the
 signing environments. GitHub refuses the approval of the user who triggered the run
 (https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-deployments/managing-environments-for-deployment),
-and the maintainer triggers every release he merges, dispatches or re-runs, so the switch
+and the maintainer triggers every release they merge, dispatch or re-run, so the switch
 would leave those runs without a possible approver. Approval resting on one account is an
 accepted risk, bounded by the deployment branch restriction to the protected branches, the
 integrity ruleset without bypass (PL1), the key isolation of PL11 and the absence of an
@@ -656,7 +656,7 @@ not block the next run's builds. Each signing job has a concurrency group with
 and replaces the pending one when a newer job queues
 (https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/control-the-concurrency-of-workflows-and-jobs),
 so the oldest job runs, every intermediate one is cancelled and the newest waits next.
-Approvals therefore follow the maintainer's approval sessions, not the merges, and he
+Approvals therefore follow the maintainer's approval sessions, not the merges, and the maintainer
 rejects a stale waiting run when a newer one is pending. GitHub does not document whether a
 job waiting for its environment approval holds its group; PB11 measures it. The approval
 latency is a metric of PL53, reported and not gated. The nightly orchestrator schedule (04:00 UTC today) is removed: a release runs
