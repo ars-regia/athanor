@@ -14,7 +14,7 @@ name: Kernel Build
 # K5): that is why the workflow runs on every PR, with no path filter. A PR builds and
 # boots but does not publish. orchestrator: on pushes, downstream of publish, dispatches the
 # Athanor Forge Orchestrator for this commit when a new kernel was published
-# or system/kernel-artifacts.sh does not answer ready; the Orchestrator calls nvidia-kmod.yml
+# or system/kernel-artifacts.sh does not answer ready; the Orchestrator runs the kmod cycle
 # (signing, boot with Secure Boot, publication of the modules) and builds the system images
 # (docs/architecture/doc_build_ordering.md, O1). inputs:
 # when the image with this NVR already carries the attestation of identical build

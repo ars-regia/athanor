@@ -9,7 +9,7 @@ name: Call NVIDIA kmod prepare (Reusable Workflow)
 # prepare: the MOK-signed negative sample of the boot job. The sign job is not here: a called
 # workflow's job reads the secrets of its environment only when its caller inherits every
 # secret (actions/runner#4453), so the job that signs belongs to the workflow the event starts,
-# the Orchestrator or nvidia-kmod-dispatch.yml (D43). nvidia-kmod.yml then boots and publishes.
+# the Orchestrator (D43). nvidia-kmod.yml then boots and publishes.
 
 on:
   workflow_call:

@@ -6,8 +6,7 @@ name: NVIDIA kmod
 # which runs in three steps because a called workflow's job reads the secrets of its environment
 # only when its caller inherits every secret (actions/runner#4453, D43):
 # call-nvidia-kmod-prepare.yml (artifacts, build, prepare, key-less), then the sign job of the
-# workflow the event started, `nvidia-kmod-sign` of the Orchestrator or `sign` of
-# nvidia-kmod-dispatch.yml (on a GitHub runner in the `signing-kernel` environment, the one
+# workflow the event started, `nvidia-kmod-sign` of the Orchestrator (on a GitHub runner in the `signing-kernel` environment, the one
 # sign-only job of a kernel cycle: a key-less step derives the kernel from the registry,
 # verified with cosign, and allow-lists the modules of the build job; then the step with the
 # keys runs only the signer image pinned by digest, forge/specs/azoth/signer/run.sh, signing the
@@ -25,11 +24,11 @@ name: NVIDIA kmod
 # system/kernel-artifacts.sh trusts the modules and azoth-boot signed by nvidia-kmod.yml only,
 # so publish stays here. publish alone holds the azoth-nvidia-publish concurrency group with
 # cancel-in-progress false, so a queued publish never interleaves a push and its signature
-# with another run's. The sign jobs and boot stay out of the group: none of them pushes
+# with another run's. The sign job and boot stay out of the group: neither pushes
 # anything, and sharing the group with them would let a competing run's sign seize it and
 # cancel this run's already-queued boot or publish, leaving modules built and unpublished. The
 # Orchestrator runs the cycle when the modules or the signed vmlinuz are missing (state
-# modules-missing); nvidia-kmod-dispatch.yml runs it by hand. The gate on PRs is the kmod job
+# modules-missing); a manual cycle dispatches the Orchestrator. The gate on PRs is the kmod job
 # of Kernel Build.
 
 on:

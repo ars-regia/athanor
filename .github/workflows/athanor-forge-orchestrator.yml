@@ -184,8 +184,8 @@ jobs:
     # Signs only what it derives itself: the kernel from the registry, verified by cosign in the
     # key-less step below, and the modules of the build job once they pass the allow-list. Only
     # when the prepare part still finds the modules missing: otherwise it ends after its
-    # artifacts job, asking for no approval. The same job as sign of nvidia-kmod-dispatch.yml:
-    # change both together.
+    # artifacts job, asking for no approval. The one sign-kernel job of the repository: a manual
+    # cycle dispatches this workflow.
     needs: [nvidia-kmod]
     if: ${{ needs.nvidia-kmod.outputs.state == 'modules-missing' }}
     runs-on: ubuntu-24.04
