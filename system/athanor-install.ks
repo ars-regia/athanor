@@ -31,10 +31,10 @@ rootpw --lock
 
 # Anaconda's `firewall` command has no `--default`: an unknown option is a parse error,
 # so the directive it was meant to harden aborted the whole installation instead. The
-# default zone firewalld ships already refuses unsolicited inbound traffic, and
-# `--service=ssh` is what opens the single port Athanor wants reachable.
-firewall --enabled --service=ssh
-services --enabled=sshd,systemd-homed
+# default zone firewalld ships already refuses unsolicited inbound traffic. Remote login
+# is off on new installs (doc_software.md, decision 2): no sshd, no SSH port.
+firewall --enabled
+services --enabled=systemd-homed
 
 # Disk layout is the installer's choice: no clearpart/part/autopart here, so Anaconda
 # opens its partitioning screen. systemd-homed encrypts the user's home (LUKS2); a TPM

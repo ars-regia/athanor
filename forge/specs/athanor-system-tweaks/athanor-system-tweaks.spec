@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-system-tweaks
 Version:        1.0.0
-Release:        7%{?dist}
+Release:        8%{?dist}
 Summary:        Athanor OS athanor-system-tweaks
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -50,6 +50,10 @@ cp -a %{_sourcedir}/usr/lib/NetworkManager/conf.d/50-athanor-hostname.conf %{bui
 /usr/lib/tmpfiles.d/99-azoth-sysfs.conf
 /usr/lib/NetworkManager/conf.d/50-athanor-hostname.conf
 %changelog
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-8
+- resolved: MulticastDNS=no. Avahi is the one mDNS stack, and nss-mdns
+  resolves .local names through it before nss-resolve is asked.
+
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
 - Point URL at the project repository
 

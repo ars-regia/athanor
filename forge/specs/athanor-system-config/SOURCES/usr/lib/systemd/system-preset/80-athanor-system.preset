@@ -9,3 +9,7 @@ enable fstrim.timer
 enable athanor-backup-hourly.timer
 enable usbguard.service
 enable boltd.service
+
+# Remote login is off by default (doc_software.md, decision 2): Fedora's 90-default.preset
+# enables sshd, and a machine reachable over SSH is a choice its owner makes, not a default.
+disable sshd.service

@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:50.fc43}
+Release:        %{?autorelease}%{!?autorelease:51.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -88,6 +88,12 @@ mkdir -p /etc/yum.repos.d
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-51
+- Disable sshd.service in 80-athanor-system.preset: remote login is off by
+  default (doc_software.md, decision 2). A machine that follows the image
+  default loses sshd at its next update; one that needs it keeps it with a
+  local enablement made after that update.
+
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-50
 - Point URL at the project repository.
 
