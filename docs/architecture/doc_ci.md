@@ -277,7 +277,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 
 ### CI23 Rust Security & Buffer Overflow Fuzzing (retired)
 
-- **File:** none; `fuzzing.yml` was deleted. Its targets, `tests/fuzz`, were removed in `0c4e012f` (2026-08-14), so the job could not have run, and every run failed. Fuzzing returns as a weekly job of `maintenance.yml` (doc_pipeline.md, PB12) once a crate has a fuzz target.
+- **File:** none; the workflow was deleted. Its targets, `tests/fuzz`, were removed in `0c4e012f` (2026-08-14), and every run after 2026-08-16 failed. Fuzzing returns as a weekly job of `maintenance.yml` (doc_pipeline.md section 3.1) once a crate has a fuzz target.
 
 ### CI24 Athanor Nix Vanguard
 
@@ -334,7 +334,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 |---|---|---|---|
 | CB1 | CI22 | Every job runs in the Nix `athanor-builder` container, where the runner's `node24` cannot load `libstdc++.so.6`, so `actions/checkout` and every JavaScript action fail. The workflow does not run on `iso-v0` at all (`rust-security-audit.yml:5,7`). | Run 37436972597 (2026-10-06): `/__e/node24/bin/node: error while loading shared libraries: libstdc++.so.6`. Runs 33735152030, 33735141194, 33735127883, 33735106788 (2026-09-03) failed. Last success 31723735366 (2026-08-13). |
 | CB2 | CI21 | Same container cause. The rewritten `forge/scripts/clean_ghcr.sh` has never pruned in CI. The job has a 10-minute limit (`forge-ghcr-cleanup.yml:23`) against a backlog nobody has measured since. | Run 37173567085 (2026-10-04): same `libstdc++.so.6` error. Every run since 31918663684 (2026-08-16) failed; last success 31590170415 (2026-08-12). |
-| CB3 | CI23 | Retired. The workflow ran in the same container as CB1 and its targets, `tests/fuzz`, were deleted in `0c4e012f` (2026-08-14); it failed every run (20 of 20) and was removed. | Last success 31924793226 (2026-08-16). |
+| CB3 | CI23 | Retired. The workflow ran in the same container as CB1 and its targets, `tests/fuzz`, were deleted in `0c4e012f` (2026-08-14); every run after 2026-08-16 failed (the last 30) and it was removed. | Last success 31924793226 (2026-08-16). |
 | CB4 | CI24 | Green, but not reproducible: `cachix/install-nix-action@v25` is a tag, not a commit (`nix-vanguard.yml:19`); `nixos-unstable` floats (`:21`). It builds `pkgs.just` (`flake.nix:77`), nothing of Athanor, and runs only for `main` (`:5,7`). | Runs 37436972430, 33735156990, 33735143255, 33735130648, 33735112511 success. |
 
 - **CP1** _(Proposal)_: a workflow is either green or disabled with an open issue that names the cause. CB1-CB4 then become four issues, and the workflows are disabled (`gh workflow disable`) until each is fixed or deleted.
