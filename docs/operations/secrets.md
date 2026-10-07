@@ -199,8 +199,10 @@ because the Orchestrator, not a pull request, publishes the signed vmlinuz.
    names it (`sha256:` and 64 hex digits, alone on the line). The file does not exist when the
    cycle merges, and until it is committed `signer/run.sh` fails closed in every stage before
    any container runs: NVIDIA kmod `prepare` fails, so `sign` never asks for the approval and
-   nothing is signed. A run started before this commit, the one the merge itself starts
-   included, fails that way; start the Orchestrator again once the digest is on the branch.
+   nothing is signed. Every stage also verifies, before the pull, that `azoth-signer.yml`
+   signed that digest on `iso-v0` or `main`. A run started before this commit, the one the
+   merge itself starts included, fails that way; start the Orchestrator again once the digest
+   is on the branch.
 4. **The Orchestrator runs, NVIDIA kmod `sign` is approved, and `azoth-boot` is published.** The
    Orchestrator finds the signed vmlinuz missing and calls NVIDIA kmod. Its `sign` job waits for
    the `signing-kernel` approval; once approved, `publish` verifies the signed vmlinuz and

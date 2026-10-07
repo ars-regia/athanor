@@ -51,7 +51,9 @@ printf 'cosign v3 stand-in\\n' > "$2"
 """
 
 # system/kernel-artifacts.sh: `resolve` writes RESOLVED (the registry's answer) into
-# $KERNEL_ARTIFACTS_DIR and records which cosign it was given; `get` reads that file.
+# $KERNEL_ARTIFACTS_DIR and records which cosign it was given; `get` reads that file; `signed`
+# records its arguments, its cosign and any key still in its environment, and answers
+# SIGNER_VERDICT.
 ARTIFACTS = f"""#!/usr/bin/env bash
 set -euo pipefail
 file=${{KERNEL_ARTIFACTS_DIR:-$PWD/kernel-artifacts}}/kernel-artifacts.env
@@ -61,6 +63,9 @@ case $1 in
     echo "resolve ${{*:2}} cosign=$(command -v cosign)" >> "$PODMAN_LOG"
     mkdir -p "${{file%/*}}"; printf '%b' "$RESOLVED" > "$file" ;;
   get) value=$(sed -n "s/^$2=//p" "$file"); [[ -n $value ]]; echo "$value" ;;
+  signed)
+    echo "signed ${{*:2}} cosign=$(command -v cosign) keys=${{MODULE_SIGNING_KEY:-}}${{SECUREBOOT_SIGNING_KEY:-}}" >> "$PODMAN_LOG"
+    echo "${{SIGNER_VERDICT:-signed}}" ;;
   *) exit 2 ;;
 esac
 """
@@ -84,6 +89,7 @@ class SignerRun(unittest.TestCase):
             f"state=modules-missing\nregistry=evil.example\nkernel_digest={EVIL}\n",
         )
         bin_dir = self.root / "bin"
+        (self.root / "tmp").mkdir()
         # modinfo of the signer image: every module stand-in is of KVER.
         modinfo = f'#!/usr/bin/env bash\necho "{KVER} SMP preempt mod_unload"\n'
         for name, body in (("podman", PODMAN), ("curl", CURL), ("modinfo", modinfo)):
@@ -94,7 +100,7 @@ class SignerRun(unittest.TestCase):
             "HOME": str(self.root),
             "PODMAN_LOG": str(self.log),
             "RETRY_ATTEMPTS": "1",
-            "TMPDIR": str(self.root),
+            "TMPDIR": str(self.root / "tmp"),
             "SIGN_KERNEL_SH": str(REPO / "forge/specs/azoth/sign-kernel.sh"),
             "RESOLVED": f"state=modules-missing\\nregistry={REG}\\nkernel_digest={KERNEL}\\ndevel_digest={DEVEL}\\n",
         }
@@ -147,6 +153,38 @@ class SignerRun(unittest.TestCase):
                     mount,
                 )
 
+    def assert_signer_verified(self, calls):
+        """cosign of the pin fetched, the signer image verified by its digest as signed by
+        azoth-signer.yml on a trusted branch, and only then pulled."""
+        self.assertEqual(
+            calls[0].split()[-1],
+            "https://github.com/sigstore/cosign/releases/download/v3.1.3/cosign-linux-amd64",
+        )
+        self.assertRegex(
+            calls[1], rf"^signed {REG}/azoth-signer@{DIGEST} signer cosign={self.root}/tmp\S+/bin/cosign "
+        )
+        self.assertEqual(calls[2], f"podman pull {REG}/azoth-signer@{DIGEST}")
+
+    def test_a_signer_image_its_workflow_did_not_sign_never_runs(self):
+        """A digest in signer/image.digest that azoth-signer.yml did not sign on a trusted
+        branch is never pulled, and the sign step leaves no key file behind."""
+        self.digest()
+        self.modules()
+        for name, text in (("vmlinuz", "MZ"), ("kver", KVER), ("module-sig-hash", "sha512")):
+            self.write(f"kernel-unsigned/{name}", text + "\n")
+        for stage, env in (
+            ("inputs", {"KERNEL_DIGEST": KERNEL}),
+            ("sign", {"MODULE_SIGNING_KEY": "module secret", "SECUREBOOT_SIGNING_KEY": "secure boot secret"}),
+            ("verify", {}),
+        ):
+            with self.subTest(stage=stage):
+                self.log.unlink(missing_ok=True)
+                r = self.run_script(stage, SIGNER_VERDICT="unsigned", **env)
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn("is not signed by .github/workflows/azoth-signer.yml", r.stderr)
+                self.assertFalse(any(c.startswith("podman ") for c in self.calls()), self.calls())
+                self.assertEqual(list((self.root / "tmp").iterdir()), [], "no key file survives")
+
     def test_without_a_committed_digest_nothing_runs(self):
         r = self.run_script("verify")
         self.assertNotEqual(r.returncode, 0)
@@ -166,10 +204,7 @@ class SignerRun(unittest.TestCase):
         r = self.run_script("inputs", KERNEL_DIGEST=KERNEL)
         self.assertEqual(r.returncode, 0, r.stderr)
         calls = self.calls()
-        self.assertIn(
-            "https://github.com/sigstore/cosign/releases/download/v3.1.3/cosign-linux-amd64",
-            calls[1],
-        )
+        self.assert_signer_verified(calls)
         resolve = next(c for c in calls if c.startswith("resolve "))
         self.assertIn(f"--expect-kernel-digest {KERNEL} ", resolve)
         self.assertRegex(resolve, r"cosign=\S+/bin/cosign$")
@@ -291,7 +326,8 @@ class SignerRun(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("secret", r.stdout + r.stderr)
         calls = self.calls()
-        self.assertEqual(calls[0], f"podman pull {REG}/azoth-signer@{DIGEST}")
+        self.assert_signer_verified(calls)
+        self.assertTrue(calls[1].endswith(" keys="), "the keys left the environment first")
         self.assertFalse(
             any(c.startswith("resolve ") for c in calls),
             "the sign step resolves nothing",
@@ -328,6 +364,84 @@ class SignerRun(unittest.TestCase):
             ),
             run,
         )
+
+
+class SignerPublish(unittest.TestCase):
+    """signer/publish.sh with a stand-in podman, cosign and system/kernel-artifacts.sh: a tag
+    already published is trusted only when azoth-signer.yml signed its digest on a trusted
+    branch, and is never rebuilt or overwritten."""
+
+    def setUp(self):
+        self.root = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root)
+        for path in ("forge/specs/azoth/signer/publish.sh", "forge/scripts/retry.sh"):
+            (self.root / path).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(REPO / path, self.root / path)
+        for path in ("signer/Containerfile", "signer/toolchain.lock", "lock.sh", "sign-kernel.sh"):
+            self.write(f"forge/specs/azoth/{path}", path)
+        self.log = self.root / "calls.log"
+        self.write(
+            "system/kernel-artifacts.sh",
+            f"""#!/usr/bin/env bash
+set -euo pipefail
+case $1 in
+  registry) echo {REG} ;;
+  digest) echo "$PUBLISHED" ;;
+  signed) echo "signed ${{*:2}}" >> "$CALLS"; echo "$VERDICT" ;;
+  *) exit 2 ;;
+esac
+""",
+        )
+        for tool in ("podman", "cosign"):
+            self.write(
+                f"bin/{tool}",
+                f"""#!/usr/bin/env bash
+set -euo pipefail
+echo "{tool} $*" >> "$CALLS"
+if [[ $1 == push ]]; then echo {DIGEST} > "$3"; fi
+""",
+            ).chmod(0o755)
+
+    def write(self, path, text):
+        target = self.root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text)
+        return target
+
+    def publish(self, published, verdict="signed"):
+        r = subprocess.run(
+            ["bash", "forge/specs/azoth/signer/publish.sh"],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            env={
+                "PATH": f"{self.root / 'bin'}:{os.environ['PATH']}",
+                "HOME": str(self.root),
+                "CALLS": str(self.log),
+                "RETRY_ATTEMPTS": "1",
+                "PUBLISHED": published,
+                "VERDICT": verdict,
+            },
+        )
+        return r, self.log.read_text().splitlines() if self.log.exists() else []
+
+    def test_a_new_tag_is_built_checked_pushed_and_signed_by_digest(self):
+        r, calls = self.publish("")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([c.split()[:2] for c in calls], [["podman", "build"], ["podman", "run"], ["podman", "push"], ["cosign", "sign"]])
+        self.assertEqual(calls[-1], f"cosign sign --yes {REG}/azoth-signer@{DIGEST}")
+
+    def test_a_published_tag_its_workflow_signed_is_reused(self):
+        r, calls = self.publish(DIGEST)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(calls, [f"signed {REG}/azoth-signer@{DIGEST} signer"])
+        self.assertIn("already published", (self.root / "signer-publish/summary.md").read_text())
+
+    def test_a_published_tag_its_workflow_did_not_sign_fails(self):
+        r, calls = self.publish(DIGEST, verdict="unsigned")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("is not signed by .github/workflows/azoth-signer.yml", r.stderr)
+        self.assertEqual(calls, [f"signed {REG}/azoth-signer@{DIGEST} signer"], "nothing built, pushed or signed")
 
 
 class SignerImageInputs(unittest.TestCase):

@@ -34,6 +34,7 @@ BOOT = "sha256:" + "5" * 64
 SECUREBOOT_CERT = hashlib.sha256((ROOT / "forge/specs/azoth/keys/secureboot/athanor-secureboot.pem").read_bytes()).hexdigest()
 KERNEL_BUILD = "https://github.com/ars-regia/athanor/.github/workflows/kernel-build.yml@refs/heads/iso-v0"
 KMOD = "https://github.com/ars-regia/athanor/.github/workflows/nvidia-kmod.yml@refs/heads/iso-v0"
+SIGNER = "https://github.com/ars-regia/athanor/.github/workflows/azoth-signer.yml@refs/heads/"
 
 
 def tag(branch, kernel=KERNEL):
@@ -109,6 +110,31 @@ class Tool(unittest.TestCase):
     def state_file(self):
         path = self.artifacts / "kernel-artifacts.env"
         return dict(line.split("=", 1) for line in path.read_text().splitlines()) if path.exists() else None
+
+
+class Signer(Tool):
+    def test_the_signer_image_is_signed_only_by_its_workflow_on_a_trusted_branch(self):
+        ref = f"{REG}/azoth-signer@{BOOT}"
+        for identity, verdict in (
+            (SIGNER + "main", "signed"),
+            (SIGNER + "iso-v0", "signed"),
+            (SIGNER + "feature", "unsigned"),
+            (KMOD, "unsigned"),
+        ):
+            with self.subTest(identity=identity):
+                self.registry({"signatures": {ref: identity}, "errors": []})
+                r = self.run_script("signed", ref, "signer")
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(r.stdout.strip(), verdict)
+
+    def test_an_unknown_identity_fails_rather_than_matching_every_signature(self):
+        ref = f"{REG}/azoth-signer@{BOOT}"
+        self.registry({"signatures": {ref: SIGNER + "main"}, "errors": []})
+        for command in ("signed", "predicates"):
+            with self.subTest(command=command):
+                r = self.run_script(command, ref, "nobody")
+                self.assertNotEqual(r.returncode, 0)
+                self.assertNotIn("signed", r.stdout)
 
 
 class Resolve(Tool):

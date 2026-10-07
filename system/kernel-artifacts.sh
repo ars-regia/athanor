@@ -33,7 +33,8 @@
 #                                       reference before resolve has ever run
 #   digest REF                          the digest of REF, empty when the tag does not exist or
 #                                       the registry denies its package (never published)
-#   signed REF kernel|modules           signed or unsigned, by the workflow that publishes it
+#   signed REF kernel|modules|signer    signed or unsigned, by the workflow that publishes it
+#                                       (signer: the signer image, azoth-signer.yml)
 #   predicates REF modules              the custom predicates of REF, one JSON per line, or
 #                                       unverified
 #   probe digest|signed|predicates|config ...
@@ -78,6 +79,7 @@ done
 declare -A IDENTITY=(
   [kernel]="^${workflows}/kernel-build\.yml@refs/heads/(${refs})\$"
   [modules]="^${workflows}/nvidia-kmod\.yml@refs/heads/(${refs})\$"
+  [signer]="^${workflows}/azoth-signer\.yml@refs/heads/(${refs})\$"
 )
 # cosign v3 reports a missing or foreign signature or attestation with these messages. Any
 # other failure (registry, Rekor, TUF, network) is an error, never a missing artifact.
@@ -127,8 +129,9 @@ probe_digest() {
 }
 
 probe_signed() {
-  local status=0
-  cosign verify --certificate-identity-regexp "$(identity "$2")" --certificate-oidc-issuer "$ISSUER" "$1" > /dev/null 2> "$TMP/err" || status=$?
+  local status=0 regex
+  regex=$(identity "$2")
+  cosign verify --certificate-identity-regexp "$regex" --certificate-oidc-issuer "$ISSUER" "$1" > /dev/null 2> "$TMP/err" || status=$?
   if [[ $status -eq 0 ]]; then
     echo signed
   elif grep -qE "$UNVERIFIED" "$TMP/err"; then
@@ -142,8 +145,9 @@ probe_signed() {
 }
 
 probe_predicates() {
-  local status=0
-  cosign verify-attestation --type custom --certificate-identity-regexp "$(identity "$2")" --certificate-oidc-issuer "$ISSUER" "$1" > "$TMP/out" 2> "$TMP/err" || status=$?
+  local status=0 regex
+  regex=$(identity "$2")
+  cosign verify-attestation --type custom --certificate-identity-regexp "$regex" --certificate-oidc-issuer "$ISSUER" "$1" > "$TMP/out" 2> "$TMP/err" || status=$?
   if [[ $status -eq 0 ]]; then
     jq -ce '.payload | @base64d | fromjson | .predicate.Data | fromjson' "$TMP/out" || die "$1: malformed attestation"
   elif grep -qE "$UNVERIFIED" "$TMP/err"; then

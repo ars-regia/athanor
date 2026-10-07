@@ -6,6 +6,8 @@
 # sha256 over every file the image is made of (INPUTS: the Containerfile, the lock, and what it
 # copies), so a change to any of them is a new tag rather than a skipped build. A tag already published is
 # never rebuilt or overwritten: the digest committed in signer/image.digest must keep resolving.
+# It is trusted only when this workflow signed its digest on a trusted branch, as run.sh checks
+# before every use; otherwise the run fails and names the tag to delete.
 # Writes signer-publish/summary.md with the digest to commit in signer/image.digest; the sign
 # job of nvidia-kmod.yml runs only that digest.
 #
@@ -28,6 +30,11 @@ image=$registry/azoth-signer
 mkdir -p "$OUT"
 digest=$(bash "$ROOT/system/kernel-artifacts.sh" digest "$image:$tag")
 if [[ -n $digest ]]; then
+    verdict=$(bash "$ROOT/system/kernel-artifacts.sh" signed "$image@$digest" signer)
+    if [[ $verdict != signed ]]; then
+        echo "publish: $image:$tag is $digest, which is not signed by .github/workflows/azoth-signer.yml on a trusted branch: delete that tag and run again" >&2
+        exit 1
+    fi
     echo "- \`$image:$tag\` is already published as \`$digest\`: not rebuilt" | tee "$OUT/summary.md"
 else
     podman build --pull=newer -t "$image:$tag" -f "$HERE/Containerfile" "$AZOTH"

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # The steps of .github/workflows/nvidia-kmod.yml that run the signer image (signer/Containerfile,
 # which carries ../sign-kernel.sh; docs/architecture/doc_ci.md, D43). The image is pulled by the
-# digest committed in signer/image.digest and is never built here; every container runs without
-# network, sees its inputs read-only and only its output directory writable, and never sees the
-# checkout. Run from the repository root.
+# digest committed in signer/image.digest, only once cosign has verified that digest as signed
+# by .github/workflows/azoth-signer.yml on a trusted branch, and is never built here; every
+# container runs without network, sees its inputs read-only and only its output directory
+# writable, and never sees the checkout. Run from the repository root.
 #
 # Usage: run.sh prepare|inputs|sign|verify
 #   prepare  key-less job, after the module build: what `inputs` derives, then mok/: out/open
@@ -18,15 +19,16 @@
 #            sign-kernel.sh check-modules for that kver
 #   sign     in the signing-kernel environment, after `inputs` in the same job: the modules
 #            under out/ signed in place with MODULE_SIGNING_KEY, kernel-signed/ from
-#            kernel-unsigned/ with SECUREBOOT_SIGNING_KEY; each key lives in a 0600 file for
-#            the duration of the command, mounted read-only
+#            kernel-unsigned/ with SECUREBOOT_SIGNING_KEY; each key moves to a 0600 file before
+#            any other command runs, leaves the environment, and is mounted read-only
 #   verify   key-less, before the publication: kernel-signed/vmlinuz verifies against the
 #            Secure Boot certificate committed in keys/secureboot and, without its signature,
 #            is the vmlinuz of azoth@kernel_digest in kernel-artifacts/kernel-artifacts.env,
 #            which the publish job resolves itself
 # KERNEL_DIGEST (prepare, inputs) is the digest of azoth the artifacts job resolved, passed as a
-# job output. resolve needs cosign, which the runner lacks and a signing job may not install
-# with a third-party action: the release named in signer/cosign.pin is fetched by its sha256.
+# job output. The signer check and resolve need cosign, which the runner lacks and a signing job
+# may not install with a third-party action: the release named in signer/cosign.pin is fetched
+# by its sha256.
 # GH_TOKEN, when set, logs podman in to the registry for the pulls (ghcr answers 403 to the
 # anonymous token even for a public package) and out again at the end.
 set -euo pipefail
@@ -73,12 +75,14 @@ cleanup() {
     [[ -z $logged_in ]] || podman logout "$host" > /dev/null
 }
 trap cleanup EXIT
-
-if [[ -n ${GH_TOKEN:-} ]]; then
-    echo "$GH_TOKEN" | podman login "$host" -u "${GITHUB_ACTOR:?}" --password-stdin
-    logged_in=1
+if [[ $STAGE == sign ]]; then
+    (
+        umask 077
+        printf '%s\n' "$MODULE_SIGNING_KEY" > "$WORK/module"
+        printf '%s\n' "$SECUREBOOT_SIGNING_KEY" > "$WORK/secureboot"
+    )
+    unset MODULE_SIGNING_KEY SECUREBOOT_SIGNING_KEY
 fi
-retry podman pull "$IMAGE"
 
 signer() { # signer [podman options...] -- sign-kernel.sh arguments...
     local -a options=()
@@ -113,12 +117,21 @@ fetch_cosign() { # cosign of signer/cosign.pin into $WORK/bin, checked by its sh
     chmod 0755 "$WORK/bin/cosign"
 }
 
+if [[ -n ${GH_TOKEN:-} ]]; then
+    echo "$GH_TOKEN" | podman login "$host" -u "${GITHUB_ACTOR:?}" --password-stdin
+    logged_in=1
+fi
+fetch_cosign
+verdict=$(PATH=$WORK/bin:$PATH artifact signed "$IMAGE" signer)
+[[ $verdict == signed ]] ||
+    die "$IMAGE is not signed by .github/workflows/azoth-signer.yml on a trusted branch: signer/image.digest names an image this run does not trust"
+retry podman pull "$IMAGE"
+
 derive() { # kernel-unsigned/ from the registry, verified in this job
     local resolved=$WORK/resolved kernel devel kver
     [[ ${KERNEL_DIGEST:-} =~ ^sha256:[0-9a-f]{64}$ ]] ||
         die "KERNEL_DIGEST is '${KERNEL_DIGEST:-}', not the sha256 digest of azoth the artifacts job resolved"
     [[ ! -e kernel-unsigned ]] || die "kernel-unsigned/ exists already: it is derived here, never downloaded"
-    fetch_cosign
     PATH=$WORK/bin:$PATH KERNEL_ARTIFACTS_DIR=$resolved artifact resolve --expect-kernel-digest "$KERNEL_DIGEST"
     kernel=$(KERNEL_ARTIFACTS_DIR=$resolved artifact get kernel_digest) ||
         die "azoth of the pins is not published, signed by Kernel Build and built from this checkout: nothing to sign"
@@ -152,11 +165,6 @@ inputs)
     derive
     ;;
 sign)
-    (
-        umask 077
-        printf '%s\n' "$MODULE_SIGNING_KEY" > "$WORK/module"
-        printf '%s\n' "$SECUREBOOT_SIGNING_KEY" > "$WORK/secureboot"
-    )
     signer -v "$ROOT/out:/modules" -v "$ROOT/kernel-unsigned:/in:ro" \
         -v "$WORK/module:/run/keys/module:ro" -v "$ROOT/$MODULE_CERT:/run/certs/module.pem:ro" -- \
         modules --key /run/keys/module --cert /run/certs/module.pem --hash /in/module-sig-hash \

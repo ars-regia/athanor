@@ -3,8 +3,10 @@ name: Azoth signer image
 # The image the sign-only job of NVIDIA kmod runs by digest (forge/specs/azoth/signer,
 # docs/architecture/doc_ci.md, D43): built and published here, in a job without any key, and
 # in no signing environment. The summary names the digest to commit in
-# forge/specs/azoth/signer/image.digest; until it is committed the sign job keeps running the
-# previous one.
+# forge/specs/azoth/signer/image.digest; until it is committed the sign job runs the digest
+# committed before, or fails closed when none is. signer/run.sh runs a digest only when this
+# workflow signed it on iso-v0 or main, so the job runs on those branches alone, whatever the
+# trigger.
 
 on:
   push:
@@ -26,6 +28,7 @@ env:
 
 jobs:
   publish:
+    if: github.ref == 'refs/heads/iso-v0' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     concurrency:

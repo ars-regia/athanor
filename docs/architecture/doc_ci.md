@@ -288,11 +288,11 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 
 ### CI25 Azoth signer image
 
-- **File:** `azoth-signer.yml`. **Purpose:** builds and publishes `azoth-signer`, the toolchain image CI6 `sign` runs (`forge/specs/azoth/signer/`), from the Fedora digest and the locked RPMs; skips a tag that exists.
-- **Triggers:** push to `main` or `iso-v0` on `forge/specs/azoth/signer/**`, `lock.sh` or `sign-kernel.sh`; dispatch. **Outputs:** `azoth-signer:<inputs hash>`, keyless-signed; the digest to commit, in the step summary.
-- **Secrets, variables:** `GITHUB_TOKEN`, `KERNEL_REGISTRY`. **Environment:** none. **Runner:** hosted. **Concurrency:** none.
+- **File:** `azoth-signer.yml`. **Purpose:** builds and publishes `azoth-signer`, the toolchain image CI6 `sign` runs (`forge/specs/azoth/signer/`), from the Fedora digest and the locked RPMs; reuses a tag that exists only when this workflow signed its digest on `iso-v0` or `main`, and fails otherwise.
+- **Triggers:** push to `main` or `iso-v0` on `forge/specs/azoth/signer/**`, `lock.sh` or `sign-kernel.sh`; dispatch. The job runs on `iso-v0` and `main` only, whatever the trigger. **Outputs:** `azoth-signer:<inputs hash>`, keyless-signed; the digest to commit, in the step summary.
+- **Secrets, variables:** `GITHUB_TOKEN`, `KERNEL_REGISTRY`. **Environment:** none. **Runner:** hosted. **Concurrency:** job group `azoth-signer-publish`, never cancelled.
 - **Scripts:** `forge/specs/azoth/signer/publish.sh`, `lock.sh`, `forge/scripts/retry.sh`.
-- **Health:** not run yet. Until its digest is committed in `signer/image.digest`, CI6 `prepare` and `sign` fail closed.
+- **Health:** not run yet. Until its digest is committed in `signer/image.digest`, CI6 `prepare` and `sign` fail closed. `signer/run.sh` pulls that digest only once cosign has verified it as signed by this workflow on `iso-v0` or `main`.
 
 ## 3. Known broken workflows
 
