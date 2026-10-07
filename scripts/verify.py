@@ -154,7 +154,7 @@ def check_workflows():
                     r.fail(f"{wf.name}:{i+1} log inviati a un servizio esterno ({host})")
 
     # 1e. D43: signing keys only in sign-only jobs
-    for problem in signing_problems(ROOT):
+    for problem in signing_problems(ROOT) + merge_queue_problems(ROOT):
         r.fail(problem)
 
     # 1d. actionlint, se disponibile
@@ -219,6 +219,7 @@ SECRET_NAME = re.compile(r"\bsecrets\s*\.\s*([A-Za-z_][A-Za-z0-9_-]*)", re.I)
 SECRETS_WORD = re.compile(r"\bsecrets\b", re.I)
 ENVIRONMENTS_JSON = ".github/settings/environments.json"
 BRANCH_PROTECTION_JSON = ".github/settings/branch-protection.json"
+RULESETS_JSON = ".github/settings/rulesets.json"
 # Its "secrets" are the repository secrets, which every job can read: none of them signs.
 ACTIONS_JSON = ".github/settings/actions.json"
 # The secret GitHub gives every run; nobody stores it.
@@ -326,6 +327,32 @@ def signing_environments(root):
                                 "each key has one environment (D43)")
             holders.setdefault(secret, name)
     return holders, problems
+
+
+def merge_queue_problems(root):
+    """PIPE-N06: a ruleset with a merge queue needs every required status context reported by
+    a workflow that runs on merge_group; otherwise a merge group never gets the context and
+    cannot be satisfied. Job names are the contexts (the job id when it has no name)."""
+    root = Path(root)
+    rulesets = json.loads(read(root / RULESETS_JSON))
+    queued = sorted(name for name, rs in rulesets.items()
+                    if any(rule.get("type") == "merge_queue" for rule in rs.get("rules", [])))
+    if not queued:
+        return []
+    required = {check["context"]
+                for protection in json.loads(read(root / BRANCH_PROTECTION_JSON)).values() if protection
+                for check in (protection.get("required_status_checks") or {}).get("checks", [])}
+    required |= {check["context"] for rs in rulesets.values() for rule in rs.get("rules", [])
+                 if rule.get("type") == "required_status_checks"
+                 for check in rule["parameters"]["required_status_checks"]}
+    reported = set()
+    for wf in sorted((root / ".github/workflows").glob("*.y*ml")):
+        doc = yaml.safe_load(read(wf))
+        if isinstance(doc, dict) and "merge_group" in triggers(doc):
+            reported |= {job.get("name", job_id) for job_id, job in (doc.get("jobs") or {}).items()}
+    return [f"{RULESETS_JSON}: ruleset {name} enables a merge queue, but the required context "
+            f"{context!r} is reported by no workflow that runs on merge_group (PIPE-N06)"
+            for name in queued for context in sorted(required - reported)]
 
 
 def signing_problems(root):
