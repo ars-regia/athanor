@@ -5,6 +5,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+import tempfile
 import unittest
 
 PACKAGE = pathlib.Path(__file__).resolve().parents[1]
@@ -41,8 +42,11 @@ class Notice(unittest.TestCase):
 
     def test_it_writes_the_message_where_the_banner_fragment_links_to(self):
         lines = directives(self.NOTICE)
-        self.assertIn("ExecStart=/usr/bin/install -m 0644 /usr/share/athanor-recovery/recovery.issue /run/athanor-recovery/recovery.issue", lines)
+        self.assertIn("ExecStart=/usr/libexec/athanor-recovery/write-notice /run/athanor-recovery/recovery.issue", lines)
         self.assertIn("RuntimeDirectory=athanor-recovery", lines)
+
+    def test_the_message_is_chosen_once_greenboot_is_done(self):
+        self.assertIn("After=greenboot-healthcheck.service", directives(self.NOTICE))
 
     def test_it_can_write_only_its_own_run_directory_and_has_no_capability(self):
         lines = directives(self.NOTICE)
@@ -78,6 +82,66 @@ class Message(unittest.TestCase):
     def test_it_has_no_agetty_escape(self):
         # agetty expands backslash sequences (\n, \l, ...) in an issue file; the message has none.
         self.assertNotIn("\\", self.TEXT)
+
+
+class QueuedMessage(unittest.TestCase):
+    TEXT = (SOURCES / "usr/share/athanor-recovery/rollback-queued.issue").read_text()
+
+    def test_it_says_to_restart_and_not_to_go_back(self):
+        # After greenboot's rollback, going back would swap the deployments back to the failed one.
+        self.assertIn("sudo systemctl reboot", self.TEXT)
+        self.assertNotIn("go-back", self.TEXT)
+        self.assertIn("journalctl -b -u greetd -u greenboot-healthcheck", self.TEXT)
+
+    def test_it_is_in_both_shipped_languages(self):
+        self.assertIn("the\nprevious version is already set to start next time.", self.TEXT)
+        self.assertIn("la versione precedente è già impostata per il prossimo avvio.", self.TEXT)
+
+    def test_it_has_no_agetty_escape(self):
+        self.assertNotIn("\\", self.TEXT)
+
+
+class WriteNotice(unittest.TestCase):
+    """write-notice, run with stand-ins for journalctl and install that record what it would copy."""
+
+    SCRIPT = SOURCES / "usr/libexec/athanor-recovery/write-notice"
+
+    def run_script(self, journal, journal_status=0):
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir = pathlib.Path(tmp)
+            (bin_dir / "journal.txt").write_text(journal)
+            stubs = {
+                "journalctl": f'#!/bin/bash\ncat "{tmp}/journal.txt"\nexit {journal_status}\n',
+                # install -m 0644 <source> <destination>: the destination gets the source's name.
+                "install": '#!/bin/bash\nprintf "%s\\n" "$3" > "$4"\n',
+            }
+            for name, body in stubs.items():
+                (bin_dir / name).write_text(body)
+                (bin_dir / name).chmod(0o755)
+            out = bin_dir / "recovery.issue"
+            env = {"PATH": f"{tmp}:/usr/bin:/bin"}
+            r = subprocess.run(["bash", str(self.SCRIPT), str(out)], capture_output=True, text=True, env=env)
+            return r.returncode, out.read_text().strip()
+
+    def test_the_general_message_when_greenboot_did_not_roll_back(self):
+        self.assertEqual(self.run_script("INFO greenboot > greenboot health-check passed\n"),
+                         (0, "/usr/share/athanor-recovery/recovery.issue"))
+
+    def test_the_restart_message_once_greenboot_queued_the_previous_deployment(self):
+        self.assertEqual(self.run_script(" INFO  greenboot > Rollback successful\n"),
+                         (0, "/usr/share/athanor-recovery/rollback-queued.issue"))
+
+    def test_an_unreadable_journal_fails_the_unit_and_leaves_the_general_message(self):
+        status, message = self.run_script("Rollback successful\n", journal_status=1)
+        self.assertNotEqual(status, 0)
+        self.assertEqual(message, "/usr/share/athanor-recovery/recovery.issue")
+
+
+class Preset(unittest.TestCase):
+    def test_it_enables_greenboot(self):
+        lines = (SOURCES / "usr/lib/systemd/system-preset/80-athanor-recovery.preset").read_text().splitlines()
+        for unit in ("greenboot-healthcheck.service", "greenboot-set-rollback-trigger.service"):
+            self.assertIn(f"enable {unit}", lines)
 
 
 class Package(unittest.TestCase):

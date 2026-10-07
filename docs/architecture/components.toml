@@ -578,6 +578,15 @@ item = "CO3"
 purpose = "cosmic-comp with Athanor's patches; the one COSMIC component that stays"
 
 [[component]]
+path = "forge/specs/greenboot-rs"
+kind = "rpm spec"
+area = "signing-update"
+status = "specified"
+spec = "doc_recovery.md"
+item = "R5"
+purpose = "greenboot with GREENBOOT_AUTO_REBOOT: a failed health check queues the previous deployment without rebooting"
+
+[[component]]
 path = "forge/specs/osbuild"
 kind = "rpm spec"
 area = "build-ci"

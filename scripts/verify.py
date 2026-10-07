@@ -1547,6 +1547,7 @@ UPSTREAM_SPECS = {
     "forge/specs/athanor-tetragon/athanor-tetragon.spec",
     "forge/specs/azoth/microvm/azoth-microvm.spec",
     "forge/specs/cosmic-comp/cosmic-comp.spec",
+    "forge/specs/greenboot-rs/greenboot-rs.spec",
 }
 # Crates whose manifests agents may not edit without the maintainer's approval.
 PROTECTED_CRATES = {"system/confidential_computing/athanor-attestation/Cargo.toml"}
@@ -1557,7 +1558,7 @@ SPDX_IDS = {
     "0BSD", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "BSL-1.0", "CC0-1.0",
     "GPL-2.0-only", "GPL-2.0-or-later", "GPL-3.0-only", "GPL-3.0-or-later", "ISC",
     "LGPL-2.1-or-later", "LGPL-3.0-or-later", "MIT", "MPL-2.0", "Unicode-3.0",
-    "Unlicense", "Zlib",
+    "Unicode-DFS-2016", "Unlicense", "Zlib",
 }
 SPDX_EXCEPTIONS = {"LLVM-exception", "Linux-syscall-note"}
 
