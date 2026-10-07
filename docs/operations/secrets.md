@@ -210,3 +210,23 @@ because the Orchestrator, not a pull request, publishes the signed vmlinuz.
 5. **The system images build.** In the same Orchestrator run, the system stage copies the signed
    vmlinuz from `azoth-boot` by digest, and `sign-system-images` waits for the `signing-images`
    approval. From then on a cycle without a kernel or NVIDIA change asks only for that approval.
+
+### 4.1 Image key rotation, October 2026
+
+The password of image key 1 (SEC4) was lost before the bootstrap (RL5). Key 1 still signs
+from the old `signing` environment, so the rotation of `doc_update_trust.md` UT3 replaces it
+before that environment is deleted, and no installed machine needs the out-of-band recovery:
+
+1. **Key 2 exists.** It was generated into the KC2 backup with a random password that lives only
+   there and in `signing-images`, which holds key 2 as SEC3 and SEC4. Key 1 is archived without
+   its password. `system/keys/athanor-image-2.pub` is committed, so every image built from then
+   on trusts both keys.
+2. **A transitional release is signed with key 1.** `sign-system-images` runs in `signing` until
+   a release that carries key 2 is published and installed.
+3. **The images are signed with key 2.** `sign-system-images` moves back to `signing-images`.
+4. **Key 1 leaves.** One release after the first image signed with key 2,
+   `system/keys/athanor-image-1.pub` is removed, and `signing` is deleted together with
+   `MOK_PRIVATE_KEY`.
+
+A machine that skips the transitional release still trusts key 1 only and refuses the images
+signed with key 2: it is moved with `athanor-update recover-key` (`RECOVERY.md`).

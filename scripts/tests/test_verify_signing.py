@@ -84,9 +84,12 @@ def workflow(*jobs):
 
 
 class SigningTest(unittest.TestCase):
-    def problems(self, workflows, environments=ENVIRONMENTS, repository=REPOSITORY_SECRETS):
+    def problems(self, workflows, environments=ENVIRONMENTS, repository=REPOSITORY_SECRETS, keys=()):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
+            (root / "system/keys").mkdir(parents=True)
+            for key in keys:
+                (root / "system/keys" / key).write_text("-----BEGIN PUBLIC KEY-----\n")
             (root / ".github/settings").mkdir(parents=True)
             (root / ".github/workflows").mkdir(parents=True)
             (root / ".github/settings/environments.json").write_text(
@@ -364,6 +367,21 @@ class SigningTest(unittest.TestCase):
             "k.yml: job sign reads SECUREBOOT_SIGNING_KEY without environment: signing-kernel, which holds it (D43)",
             self.problems({"k.yml": workflow(job)}),
         )
+
+    def test_the_old_signing_environment_signs_images_only_during_the_key_rotation(self):
+        """docs/operations/secrets.md section 4.1: with both image keys committed, the old
+        `signing` environment counts as signing-images; once key 1 leaves, it no longer does."""
+        job = SIGN_JOB.replace("SECUREBOOT_SIGNING_KEY", "COSIGN_PRIVATE_KEY").replace(
+            "environment: signing-kernel", "environment: signing"
+        )
+        both = ("athanor-image-1.pub", "athanor-image-2.pub")
+        self.assertEqual(self.problems({"k.yml": workflow(job)}, keys=both), [])
+        self.assertEqual(
+            self.problems({"k.yml": workflow(job)}, keys=both[1:]),
+            ["k.yml: job sign reads COSIGN_PRIVATE_KEY without environment: signing-images, which holds it (D43)"],
+        )
+        third_party = job.replace(f"uses: {CHECKOUT}", "uses: someone/action@v1")
+        self.assertNotEqual(self.problems({"k.yml": workflow(third_party)}, keys=both), [])
 
     def test_rule_5_a_secret_in_two_signing_environments_fails(self):
         environments = json.loads(json.dumps(ENVIRONMENTS))

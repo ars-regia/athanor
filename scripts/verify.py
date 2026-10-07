@@ -332,6 +332,12 @@ def signing_problems(root):
     signing = {name for name in environments if name.startswith("signing")}
     # GitHub compares environment names without regard to case.
     canonical = {name.lower(): name for name in environments}
+    # Image key rotation (docs/operations/secrets.md section 4.1): while system/keys holds both
+    # image keys, the old `signing` environment, the only holder of key 1, counts as
+    # signing-images, so every rule of a signing job applies to a job that names it. The alias
+    # ends when athanor-image-1.pub leaves system/keys.
+    if all((root / "system/keys" / f"athanor-image-{n}.pub").is_file() for n in (1, 2)):
+        canonical.setdefault("signing", "signing-images")
     repository = set(json.loads(read(root / ACTIONS_JSON)).get("secrets") or [])
     for secret in sorted(repository & holders.keys()):
         problems.append(f"{ACTIONS_JSON}: {secret} is a repository secret, which every job reads, "
