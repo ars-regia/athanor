@@ -34,10 +34,13 @@ jobs:
 
       - name: Run the audit in the builder image
         run: |
-          mkdir -p "$HOME/.cargo"
+          # Only the download caches: the runner's ~/.cargo/bin holds rustup proxies that
+          # cargo would run instead of the builder's own clippy.
+          mkdir -p "$HOME/.cargo/registry" "$HOME/.cargo/git"
           bash forge/scripts/retry.sh podman pull "${BUILDER_IMAGE,,}"
           podman run --rm --security-opt label=disable -v "$GITHUB_WORKSPACE:/workspace" -w /workspace \
-            -v "$HOME/.cargo:/cargo" -e CARGO_HOME=/cargo -e CARGO_NET_RETRY "${BUILDER_IMAGE,,}" \
+            -v "$HOME/.cargo/registry:/cargo/registry" -v "$HOME/.cargo/git:/cargo/git" \
+            -e CARGO_HOME=/cargo -e CARGO_NET_RETRY "${BUILDER_IMAGE,,}" \
             bash scripts/ci/security-audit.sh
 
       - name: Upload the audit logs
