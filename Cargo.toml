@@ -11,7 +11,6 @@ members = [
   "forge/specs/athanor-update/athanor-update-1.0.0",
   "forge/specs/athanor-update/athanor-update-notify-1.0.0",
   "forge/specs/athanor-xdg-desktop-portal-athanor/xdg-desktop-portal-athanor-1.0.0",
-  "system/confidential_computing/athanor-attestation",
   "system/athanor-bus-api",
   "system/athanor-compositor-client",
   "system/athanor-apps",
@@ -33,6 +32,10 @@ exclude = [
   "tests/fuzz",
   "forge/tools/calmo-cosmic-theme",
   "forge/specs/athanor-recovery/athanor-recovery-1.0.0",
+  # Out since 2026-10-07 (A2-9, #151): attestation is outside the 1.0 threat model
+  # (doc_threat_model.md TM7) and is rewritten on Keylime with the PCR 11 and PCR 12
+  # policy of doc_kernel_profile.md before mesh admission depends on it.
+  "system/confidential_computing/athanor-attestation",
 ]
 
 resolver = "2"
@@ -82,10 +85,6 @@ anyhow = "1.0.99"
 # Logging & Telemetry
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
-env_logger = "0.11.11"
-
-# Post-quantum signatures: only athanor-attestation uses them (#201, #206).
-pqc_dilithium = "0.2.0"
 
 # Hashing & Utilities
 sha2 = "0.10.9"

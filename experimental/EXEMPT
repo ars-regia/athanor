@@ -1,2 +1,10 @@
 # Workspace crates that no package ships, one name per line; read by scripts/verify.py (check "shipped").
 # Empty since ADR-0073 retired the crates that were listed here.
+#
+# Crates outside [workspace.members] need no name here, because the "shipped" check reads
+# members only. Their reasons are kept, because they are why the crates are not built.
+#
+# athanor-attestation is out of the workspace since 2026-10-07 (A2-9, #151): attestation is
+# outside the 1.0 threat model (doc_threat_model.md TM7), and the crate is rewritten on
+# Keylime with the PCR 11 and PCR 12 policy of doc_kernel_profile.md before mesh admission
+# depends on it.

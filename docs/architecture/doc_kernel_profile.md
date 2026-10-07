@@ -712,8 +712,8 @@ attestation code in the repository today returns fixed results and quotes the wr
 it is replaced, with the maintainer's approval, before any mesh admission depends on it.
 Amended 2026-10-06 (maintainer decision A2-9 (#151)): attestation is outside the threat
 model of 1.0 (`doc_threat_model.md`, TM7). Decided 2026-10-07 by the maintainer:
-`athanor-attestation` moves to `experimental/` (listed in `experimental/EXEMPT`, out of the
-workspace members) and is rewritten on Keylime with the PCR 11 and PCR 12 policy above
+`athanor-attestation` leaves the workspace members and stays in `system/confidential_computing`
+(ADR-0087; `experimental/EXEMPT` records the reason) and is rewritten on Keylime with the PCR 11 and PCR 12 policy above
 before any mesh admission depends on it; it is not deleted.
 
 ## 10. Execution integrity and security primitives
