@@ -33,7 +33,7 @@ readarray -t UPSTREAM_DESKTOP < <(jq -r '.upstream_desktop[] // empty' config/pa
 readarray -t UPSTREAM_MEDIA < <(jq -r '.upstream_media[] // empty' config/packages.json)
 readarray -t UPSTREAM_CLI < <(jq -r '.upstream_cli[] // empty' config/packages.json)
 
-# Per-tier package images. An entry without a tag means :latest. The kernel is the
+# Per-tier package images, by the hash tag of dag-state/hashes.json. The kernel is the
 # azoth image of the pins by the digest system/kernel-artifacts.sh verified, never by tag
 # (docs/architecture/doc_build_ordering.md, O4): run its require-ready first. The NVIDIA
 # modules are not RPMs: system/Containerfile copies them from their image by digest.
@@ -89,7 +89,12 @@ pull_and_extract() {
   local img="$1"
   local target_dir="$2"
   local ref="$img"
-  [[ "$ref" == *:* ]] || ref="$ref:latest"
+  # A package image is pulled by the hash the brain verified for this run, never by
+  # :latest, which a revert or a second branch moves away from that content. Everything
+  # else here is the kernel, named by digest.
+  case "$img" in
+    athanor-forge-*) ref=$(bash "$(dirname "${BASH_SOURCE[0]}")/resolve_node_image.sh" "${img#athanor-forge-}") || return 1 ;;
+  esac
   local IMAGE_LOWER=$(echo "ghcr.io/$OWNER/$ref" | tr '[:upper:]' '[:lower:]')
   
   local old_digest="${OLD_DIGESTS[$img]:-}"

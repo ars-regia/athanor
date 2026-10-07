@@ -8,6 +8,9 @@ print against ghcr.io (observed 2026-09-17), because system/kernel-artifacts.sh 
 Fixture keys:
   tags          {"registry/repo:tag" or "registry/repo@digest": "sha256:..."}
   errors        ["ref", ...]  transport failure for that reference, in every tool
+  unpublished   ["registry/repo", ...]  a package that was never published: ghcr.io denies
+                the anonymous bearer token for every reference in it (403) instead of
+                answering manifest unknown
   signature_transient_errors
                 ["ref", ...]  cosign verify fails with a transient error (a Rekor lookup
                 timeout) whose message still starts with "no matching signatures:", the same
@@ -76,6 +79,8 @@ def skopeo(args, fx):
     ref = args[-1].removeprefix("docker://")
     if ref in fx.get("errors", []):
         return fail(f'time="2026-09-17T00:00:00Z" level=fatal msg="Error parsing image name \\"docker://{ref}\\": pinging container registry: dial tcp: i/o timeout"')
+    if re.sub(r"[:@][^/]*$", "", ref) in fx.get("unpublished", []):
+        return fail(f'time="2026-10-06T00:00:00Z" level=fatal msg="Error parsing image name \\"docker://{ref}\\": Requesting bearer token: invalid status code from registry 403 (Forbidden)"')
     unknown = f'time="2026-09-17T00:00:00Z" level=fatal msg="Error parsing image name \\"docker://{ref}\\": reading manifest in {ref}: manifest unknown"'
     if "--config" in args:
         if ref not in fx.get("configs", {}):

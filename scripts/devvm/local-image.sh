@@ -8,8 +8,8 @@
 #      registry (localhost:5000): the published tier3 minus the rebuilt packages and minus
 #      the packages the switch removes, plus the new RPMs;
 #   3. builds localhost:5000/acc/athanor-system:switch-<short hash> with the tier3
-#      reference remapped to the overlay, and pushes it to the acceptance registry. The UKI
-#      is signed with build-image.sh's throwaway key: the image never leaves this host;
+#      reference remapped to the overlay, and pushes it to the acceptance registry; the
+#      image never leaves this host;
 #   4. with --push-to-vm, signs it with a throwaway key the guest trusts for that one
 #      switch, switches the development VM to it and reboots it.
 #

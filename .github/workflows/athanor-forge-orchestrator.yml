@@ -34,10 +34,6 @@ on:
         description: "commit whose Kernel Build dispatched this run; empty for a manual run"
         type: string
         default: ""
-      force_image:
-        description: "build the system images even when no DAG node changed: the kernel is outside the DAG (Kernel Build sets it)"
-        type: boolean
-        default: false
   schedule:
     - cron: "0 4 * * *"
 
@@ -67,11 +63,18 @@ jobs:
     uses: ./.github/workflows/call-lint.yml
 
   orchestrator-brain:
-    name: 🧠 DAG Orchestrator Brain & Distributed Cache
+    name: 🧠 DAG Orchestrator Brain
     needs: [lint]
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # Worst case of the registry lookups (35 custom packages, 8 at a time, first failure
+    # ends the run). One lookup under retry.sh: 5 attempts of at most 30 s each
+    # (registry_probe.sh --command-timeout) plus 15+30+60+120 = 225 s of waits = 375 s. A
+    # failing registry therefore ends the run within 375 s. For a slow registry where every
+    # wave has a lookup that only succeeds on its last attempt: ceil(35/8) = 5 waves x 375 s
+    # = 1875 s = 31.25 min. Checkout and hashing 35 packages take under 2 min: 40 minutes
+    # leaves about 7 minutes of margin.
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: forge
@@ -87,7 +90,16 @@ jobs:
 
       - name: Compute Dependency DAG & Topological Matrix
         id: brain
+        env:
+          REGISTRY_HOST: ${{ env.REGISTRY }}
         run: ./scripts/dynamic-matrix.sh
+
+      - name: Hashes of this run (read by the system image build)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dag-hashes
+          path: forge/dag-state/hashes.json
+          if-no-files-found: error
 
       - name: 🧹 Fix Workspace Permissions (GH Actions Cleanup)
         if: always()
@@ -166,9 +178,9 @@ jobs:
     uses: ./.github/workflows/nvidia-kmod.yml
     with:
       kernel_digest: ${{ needs.kernel-artifacts.outputs.kernel_digest }}
-    # A called workflow sees the signing environment's secrets only when the caller
-    # inherits them; without it the sign job reads an empty MODULE_SIGNING_KEY.
-    secrets: inherit
+    # No secrets are passed: the sign job of nvidia-kmod.yml reads its keys from its own
+    # `environment:`, which a called workflow's job resolves by itself, and an inherit would
+    # hand every repository secret to every job of the called workflow (D43).
 
   kernel-artifacts-final:
     # The single source of the digests the images are built from: resolved again after
@@ -206,15 +218,15 @@ jobs:
       builder_hash: ${{ needs.build-builder.outputs.content_hash }}
 
   system-image:
-    # The images run when a DAG node changed, when the kernel artifacts were not ready at
-    # the start (the kernel is outside the DAG), or when the dispatch forces them (O4).
-    # inputs.force_image is compared against both the boolean and the string form: a
-    # gh workflow run -f sends "true"/"false" as a string, which GitHub Actions does not
-    # coerce to the declared boolean type, so a bare `|| inputs.force_image` would treat a
-    # future explicit "false" as truthy (any non-empty string is truthy).
+    # The images build on every run (push, dispatch, schedule), whatever the package matrix
+    # holds: system/Containerfile installs from the live Fedora repositories with unpinned
+    # dnf5, so the nightly rebuild is how Fedora errata reach the image. has_changes only
+    # shapes the package matrix, so neither it nor the kernel state gates
+    # this job.
     needs: [orchestrator-brain, dag-compile, build-builder, kernel-artifacts, kernel-artifacts-final]
-    if: ${{ !cancelled() && needs.orchestrator-brain.result == 'success' && needs.kernel-artifacts-final.result == 'success' && needs.build-builder.result == 'success' && (needs.dag-compile.result == 'success' || needs.dag-compile.result == 'skipped') && (needs.orchestrator-brain.outputs.has_changes == 'true' || needs.kernel-artifacts.outputs.state != 'ready' || inputs.force_image == true || inputs.force_image == 'true') }}
+    if: ${{ !cancelled() && needs.orchestrator-brain.result == 'success' && needs.kernel-artifacts-final.result == 'success' && needs.build-builder.result == 'success' && (needs.dag-compile.result == 'success' || needs.dag-compile.result == 'skipped') }}
     uses: ./.github/workflows/call-system-image.yml
     with:
       builder_content_hash: ${{ needs.build-builder.outputs.content_hash }}
-    secrets: inherit
+    # No secret is passed: the job that signs reads COSIGN_* from its own `environment:`
+    # (D43, UT2).

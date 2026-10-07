@@ -44,6 +44,8 @@ fetch-repo-rpms owner="ars-regia":
     #!/usr/bin/env bash
     set -euo pipefail
     bash ../system/kernel-artifacts.sh require-ready
+    # The tier assembly pulls every package image by the hash of this checkout.
+    python3 scripts/dag_orchestrator.py --write-hashes
     bash scripts/fetch_repo_rpms.sh "{{ owner }}"
 
 # Cleans up old and untagged container package versions on GHCR
