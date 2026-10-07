@@ -1989,6 +1989,89 @@ POLKIT_RESULTS = {
 }
 
 
+def js_without_comments_and_strings(text):
+    """(code, literals): comments dropped and every string literal replaced by S<n>,
+    its index in literals, so that no pattern below matches inside a string or a comment.
+    """
+    # ponytail: no JS regex literals; a rule using one (/"/) may misread, add when one ships
+    out, literals, i, n = [], [], 0, len(text)
+    while i < n:
+        if text.startswith("//", i):
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            out.append(" ")
+        elif text[i] in "\"'`":
+            j = i + 1
+            while j < n and text[j] != text[i]:
+                j += 2 if text[j] == "\\" else 1
+            literals.append(text[i + 1 : j])
+            out.append(f" S{len(literals) - 1} ")
+            i = j + 1
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out), literals
+
+
+def polkit_rules_declared(path, text, cannot):
+    """{(action, path): results} of one polkit .rules file, and why it cannot be read.
+
+    Only one form is read: polkit.addRule(function(action, ...) { ... }) whose function
+    reads the action only as action.id == "literal" and returns only polkit.Result.X.
+    Anything else (an alias of polkit, of polkit.Result or of the action, action["id"],
+    a prefix match, a concatenated id) makes the whole file unreadable.
+    """
+    code, literals = js_without_comments_and_strings(text)
+    members = (
+        r"\bpolkit\s*\.\s*(?:addRule|addAdminRule|Result\s*\.\s*[A-Z_]+|log|spawn)\b"
+    )
+    if len(re.findall(r"\bpolkit\b", code)) != len(re.findall(members, code)):
+        return {}, [
+            f"{path}: polkit is used other than through polkit.addRule, polkit.Result.X and its other members, {cannot}"
+        ]
+    if len(re.findall(r"\bResult\b", code)) != len(
+        re.findall(r"\bpolkit\s*\.\s*Result\s*\.\s*[A-Z_]+", code)
+    ):
+        return {}, [f"{path}: Result is used other than as polkit.Result.X, {cannot}"]
+    calls = re.split(r"\bpolkit\s*\.\s*addRule\s*\(", code)
+    if len(re.findall(r"\baddRule\b", code)) != len(calls) - 1:
+        return {}, [
+            f"{path}: addRule is reached other than as polkit.addRule(...), {cannot}"
+        ]
+    declared = {}
+    for body in calls[1:]:
+        body = re.split(r"\bpolkit\s*\.\s*addAdminRule\b", body)[0]
+        head = re.match(r"\s*function\s*\(\s*action\b", body)
+        reads = (
+            list(
+                re.finditer(
+                    r"\baction\s*\.\s*id\s*===?\s*S(\d+)\b(?!\s*\+)", body[head.end() :]
+                )
+            )
+            if head
+            else []
+        )
+        results = {
+            r.lower()
+            for r in re.findall(r"\bpolkit\s*\.\s*Result\s*\.\s*([A-Z_]+)", body)
+        }
+        if (
+            not reads
+            or not results
+            or len(re.findall(r"\baction\b", body[head.end() :])) != len(reads)
+        ):
+            return {}, [
+                f"{path}: an addRule function does not take action as its first parameter, reads it "
+                f'other than as action.id == "...", or returns no polkit.Result, {cannot}'
+            ]
+        for m in reads:
+            declared[(literals[int(m.group(1))], path)] = results
+    return declared, []
+
+
 def polkit_declared(files):
     """{(action, file): results} for the active session, and the files that cannot be read.
 
@@ -1996,7 +2079,7 @@ def polkit_declared(files):
     for each `action.id == "..."` of an addRule function, every polkit.Result that function
     returns: the results of one function are not told apart per action, so a function whose
     actions get different results is split into one function per result set. A .rules file
-    with no polkit call is a udev rule and is skipped. Comments are dropped before reading.
+    that names neither polkit nor addRule is a udev rule and is skipped.
     """
     cannot = f"so its rows of {POLKIT_MODEL_DOC} TM9 cannot be checked"
     declared, unreadable = {}, []
@@ -2013,37 +2096,10 @@ def polkit_declared(files):
                     continue
                 active = (action.findtext("defaults/allow_active") or "no").strip()
                 declared[(action.get("id"), path)] = {active}
-        elif path.endswith(".rules") and "polkit." in text:
-            code = re.sub(r"/\*.*?\*/|//[^\n]*", "", text, flags=re.S)
-            calls = re.split(r"polkit\s*\.\s*addRule\s*\(", code)
-            if code.count("addRule") != len(calls) - 1:
-                unreadable.append(
-                    f"{path}: addRule is reached other than as polkit.addRule(...), {cannot}"
-                )
-            for body in calls[1:]:
-                body = re.split(r"polkit\s*\.\s*addAdminRule", body)[0]
-                ids = [
-                    m.group(2)
-                    for m in re.finditer(
-                        r"action\s*\.\s*id\s*===?\s*([\"'])([^\"']+)\1", body
-                    )
-                ]
-                results = {
-                    r.lower()
-                    for r in re.findall(r"polkit\s*\.\s*Result\s*\.\s*([A-Z_]+)", body)
-                }
-                if (
-                    not ids
-                    or not results
-                    or len(re.findall(r"action\s*\.\s*id\b", body)) != len(ids)
-                ):
-                    unreadable.append(
-                        f'{path}: an addRule matches an action other than as action.id == "..." '
-                        f"or returns no polkit.Result, {cannot}"
-                    )
-                    continue
-                for a in ids:
-                    declared[(a, path)] = results
+        elif path.endswith(".rules") and ("polkit" in text or "addRule" in text):
+            found, problems = polkit_rules_declared(path, text, cannot)
+            declared.update(found)
+            unreadable += problems
     return declared, unreadable
 
 
