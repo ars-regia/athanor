@@ -6,7 +6,7 @@
 | Owner | the maintainer (`@hr-mes`) |
 | Status | revision 1, 2026-10-06. Sections 1 to 5 are fact; section 6 is _(Proposal for the maintainer)_ |
 | Depends on | `docs/operations/secrets.md` for secret values (separate change) |
-| Defines | GHS1 to GHS9 |
+| Defines | GHS1 to GHS10 |
 
 ## 1. What is managed
 
@@ -28,12 +28,14 @@ Secret values are never read, stored or written (GHS8). Variable values are not 
 
 Run from the repository root. `--repo OWNER/NAME` defaults to the repository of the current checkout (`gh repo view`). `--dir` defaults to `.github/settings`.
 
-Every command first reads `repos/{r}` and stops with exit code 2 and "insufficient rights" unless `permissions.admin` is true: without the admin role GitHub answers 404 on the admin endpoints, which would otherwise read as "off". A 404 counts as "off" only where GitHub documents it so: `vulnerability-alerts` and `pages`. Any other API failure (403, 404, 5xx), an answer that is not JSON, a missing `gh`, and a settings file that is missing, unreadable, not JSON or lacks a key of its area also exit 2 with a message, before the first write.
+`export` and `apply` first read `repos/{r}` and stop with exit code 2 and "insufficient rights" unless `permissions.admin` is true: without the admin role GitHub answers 404 on the admin endpoints, which would otherwise read as "off". A 404 counts as "off" only where GitHub documents it so: `vulnerability-alerts` and `pages`. Any other API failure (403, 404, 5xx), an answer that is not JSON, a missing `gh`, and a settings file that is missing, unreadable, not JSON or lacks a key of its area also exit 2 with a message, before the first write.
+
+`diff` only reads and also runs with a read-only GitHub App token, whose answer to `repos/{r}` carries no `permissions.admin`. It first reads `repos/{r}/actions/permissions`, which answers only a token that can read the administration settings, and stops with exit code 2 otherwise, so no 404 of a token without those rights reads as "off".
 
 | Command | Effect | Exit code |
 | --- | --- | --- |
 | `python3 scripts/github-settings/ghsettings.py export` | Writes the live state to the seven files | 0, or 2 on an error |
-| `python3 scripts/github-settings/ghsettings.py diff` | Prints a unified diff per area, files on the minus side, live state on the plus side | 0 when equal, 1 on a difference, 2 on an error |
+| `python3 scripts/github-settings/ghsettings.py diff` | Prints one line per drift, `drift <area> <path>: ...`, then a count. Objects compare by key; lists of names and lists of named entries (environments' reviewers and branch policies, ruleset rules by `type`, required checks by `context`, labels) compare by name, so their order is not drift; anything else compares as a whole value. Read-only: it calls `gh api` with GET only and reads secret and variable names, never values (GHS10) | 0 when equal, 1 on a drift, 2 on an error |
 | `python3 scripts/github-settings/ghsettings.py apply` | Prints the plan: first one line per API call (`METHOD path body`, prefixed `DESTRUCTIVE` for a deletion, followed by the ruleset, branch, label or Pages note in parentheses), then one `MANUAL:` line per step only a human can take. Calls nothing that writes | 0, or 2 on an error |
 | `python3 scripts/github-settings/ghsettings.py apply --yes` | Prints the same plan, calls and `MANUAL:` lines, then runs the calls in order. Refuses the whole plan, with nothing written, when it holds a `DESTRUCTIVE` call | 0, or 2 on an error or a refused plan |
 | `python3 scripts/github-settings/ghsettings.py apply --yes --allow-destructive` | As `--yes`, and also runs the `DESTRUCTIVE` calls | 0, or 2 on an error |
@@ -54,7 +56,7 @@ GHS9 `apply` is idempotent: it compares the live state with the files first, so 
 
 Deleting a label removes it from every issue and pull request; deleting a protection or a ruleset opens the branch. Read the plan before `--yes`, and the `DESTRUCTIVE` lines before `--allow-destructive`.
 
-The tests run against a stub `gh` on `PATH`: `python3 -B -m unittest discover -s scripts/tests -p test_ghsettings.py -v`.
+The tests run against a stub `gh` on `PATH` that serves recorded API answers: `python3 -B -m unittest discover -s scripts/tests -p 'test_ghsettings*.py' -v`.
 
 ## 3. Token
 
@@ -109,7 +111,7 @@ Each one is a change to a file followed by `apply`; none has been made.
 | Environment `delete` has no rule and no secret, and no workflow names it (`grep -rn "environment:" .github/workflows` finds only `signing-kernel` and `signing-images`) | Delete it by hand and re-export |
 | Pages builds `main:/docs` and errors, and nothing publishes to the `gh-pages` branch since the DNF channel was removed (ADR-0076, decision 2) | Turn Pages off in `pages.json`, then delete the `gh-pages` branch and the `github-pages` environment by hand and re-export |
 | `enforce_admins` is off on `iso-v0` and `main`: the admin may push past the required check | Decide whether the single admin should be bound by the branch protection, as the signing environments already bind them (section 7) |
-| No scheduled drift check | A workflow running `diff` needs an admin token as a secret; decide whether drift detection is worth that token |
+| No scheduled drift check | _(Done in PB2, section 8)_ `maintenance.yml` runs `diff` daily with a read-only token of a GitHub App, not an admin token |
 
 ## 7. Signing environments (ADR-0064)
 
@@ -138,3 +140,53 @@ environment, a secret listed in two environments, a signing environment without 
 administrator bypass, or deploying from a branch `branch-protection.json` does not protect by
 name. It is a regression guard on the files, not a check of the live settings: `ghsettings.py
 diff` is.
+
+## 8. Drift check, rulesets and the GitHub App (doc_pipeline.md PB2)
+
+GHS10 **Declared, not stored.** A settings file may hold keys GitHub does not store.
+`export` keeps them from the file, `apply` never reads them, and `diff` acts on them. The
+only one is `personal_tokens` in `actions.json`: the personal access tokens
+`FORGE_PAT`, `KERNEL_BUMP_TOKEN` and `SPECS_UPDATE_TOKEN`, which the GitHub App identities
+replace (doc_pipeline.md PL5). While `retired` is `false` they are ordinary entries of
+`secrets`. Once the App has replaced them, the maintainer sets `retired` to `true` and drops
+them from `secrets`; from then on `diff` reports each of them still set as drift, which is
+the PB2 gate "the three personal tokens are absent from the secrets list".
+
+**Daily check.** `.github/workflows/maintenance.yml` runs `ghsettings.py diff` every day
+(PL52) and on dispatch. It mints a token of the settings App with
+`actions/create-github-app-token`, limited to this repository and to read access on Actions,
+Administration, Environments, Pages, Secrets and Variables (Metadata read is implied). The
+App needs no write permission: its key, `SETTINGS_APP_PRIVATE_KEY` (secrets.md SEC13), can
+mint nothing that changes the repository. Its client id is the variable
+`SETTINGS_APP_CLIENT_ID` (VAR6). A drift fails the job; the `alert` action of PL51 that
+turns a failed scheduled job into a `ci-alert` issue is not part of this change.
+
+**Desired state ahead of GitHub.** The files now ask for:
+
+| File | Desired | Live until the maintainer applies it |
+| --- | --- | --- |
+| `rulesets.json` | ruleset `product-branches` on `refs/heads/iso-v0` and `refs/heads/main`: no deletion, no force push, linear history, a pull request with one approval and a code-owner review (squash only, stale approvals dismissed), required check `gate` of GitHub Actions (integration 15368, not strict), merge queue (squash, all green, at most two entries built and merged together, 360 minutes for checks); bypass by the repository admin role in pull-request mode, so the maintainer merges their own pull requests without a second reviewer but never pushes past the ruleset (PL1, PL2, PL4, PQ5) | no ruleset |
+| `actions.json` | `sha_pinning_required: true` (PL8); secret `SETTINGS_APP_PRIVATE_KEY` and variable `SETTINGS_APP_CLIENT_ID`; `personal_tokens` declared, not yet retired | pinning not required; neither name set |
+
+`gate` is the job of `pr.yml` that PB1 introduces; until PB1 is merged no check of that name
+reports, so applying the ruleset before PB1 blocks every merge. `branch-protection.json`
+still requires `Kernel gate`; PB1 changes it to `gate`. Classic branch protection and the
+ruleset both apply until the maintainer decides to retire the former.
+
+The merge queue needs `merge_group` among the triggers of every required workflow (PB1's
+`pr.yml`). SHA pinning enforcement makes GitHub refuse every workflow that uses an action
+by tag, so it is enabled only after every `uses:` is pinned by commit SHA (PB3,
+`verify.py pinning`); on 2026-10-07 two references are still tags
+(`actions/upload-artifact@v4`, `cachix/install-nix-action@v25`).
+
+The order of the maintainer's steps, each followed by `ghsettings.py diff`:
+
+1. Create the settings GitHub App, owned by the organisation, installed on this repository
+   only, with the read permissions above; store its client id as `SETTINGS_APP_CLIENT_ID`
+   and its private key as `SETTINGS_APP_PRIVATE_KEY` (secrets.md SEC13).
+2. Merge PB1, so that `gate` reports on pull requests and merge groups.
+3. Apply the ruleset (`ghsettings.py apply`, then `--yes`), which also enables the merge
+   queue, and re-export to record what GitHub stored.
+4. Create the bot App of PL5, move the bots to it, delete the three personal tokens, then
+   set `personal_tokens.retired` to `true` and drop them from `secrets`.
+5. Last, once every action is pinned by SHA: enable SHA pinning enforcement.

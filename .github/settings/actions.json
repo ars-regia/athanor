@@ -3,15 +3,26 @@
   "permissions": {
     "allowed_actions": "all",
     "enabled": true,
-    "sha_pinning_required": false
+    "sha_pinning_required": true
+  },
+  "personal_tokens": {
+    "names": [
+      "FORGE_PAT",
+      "KERNEL_BUMP_TOKEN",
+      "SPECS_UPDATE_TOKEN"
+    ],
+    "retired": false
   },
   "secrets": [
     "FORGE_PAT",
     "KERNEL_BUMP_TOKEN",
+    "SETTINGS_APP_PRIVATE_KEY",
     "SPECS_UPDATE_TOKEN"
   ],
   "selected_actions": null,
-  "variables": [],
+  "variables": [
+    "SETTINGS_APP_CLIENT_ID"
+  ],
   "workflow_permissions": {
     "can_approve_pull_request_reviews": false,
     "default_workflow_permissions": "read"
