@@ -44,6 +44,15 @@ class CssTest(unittest.TestCase):
         self.assertIn("@define-color ath_acc #2e44c2;", generate.css(self.tokens, "light"))
         self.assertIn("@define-color ath_acc #8898f7;", generate.css(self.tokens, "dark"))
 
+    def test_only_the_focused_widget_draws_the_focus_ring(self):
+        # GTK4 sets :focus-visible on every ancestor of the focus widget too: a bare
+        # :focus-visible rule rings each container around a password entry at once.
+        text = generate.css(self.tokens, "light")
+        selectors = re.findall(r"^([^{}\n]*:focus-visible[^{}\n]*)\{", text, re.M)
+        self.assertTrue(selectors)
+        for selector in selectors:
+            self.assertIn(":focus:focus-visible", selector)
+
     def test_translucent_colours_keep_their_alpha(self):
         self.assertRegex(generate.css(self.tokens, "light"), r"@define-color ath_d1 rgba\(\d+, \d+, \d+, 0\.5\);")
 

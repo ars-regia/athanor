@@ -83,17 +83,19 @@ Outside the files and left as they are: collaborators and teams, webhooks, deplo
 
 Facts read by `export`; each one is in the file named. `diff` against `hr-mes/athanor` printed "live state matches the files" and exited 0 right after export.
 
+Since then the files have moved ahead of GitHub (2026-10-07, ADR-0064): the two signing environments of section 7 replace `signing`, and `main` is protected like `iso-v0`. `diff` lists these changes until the maintainer applies them (bootstrap: `docs/operations/secrets.md` section 4).
+
 | Fact | File |
 | --- | --- |
 | Default branch `iso-v0`; all three merge methods on; auto-merge on; head branches deleted on merge | `repository.json` |
 | Description is still `ermete-os` | `repository.json` |
 | Dependabot alerts and Dependabot security updates are off; secret scanning and push protection are on; private vulnerability reporting is on | `repository.json` |
-| Only `iso-v0` is protected: required check `Kernel gate` (not strict), no review, `enforce_admins` off, force push and deletion off | `branch-protection.json` |
+| Only `iso-v0` is protected: required check `Kernel gate` (not strict), no review, `enforce_admins` off, force push and deletion off | `branch-protection.json` (now also `main`, section 7) |
 | No repository ruleset | `rulesets.json` |
-| Environment `signing`: reviewer `hr-mes`, branches `iso-v0` and `main`, admin bypass on, five secrets including `MOK_PRIVATE_KEY` | `environments.json` |
-| Environment `github-pages`: branches `gh-pages` and `main` | `environments.json` |
+| Environment `signing`: reviewer `hr-mes`, branches `iso-v0` and `main`, admin bypass on, four secrets | `environments.json` until 2026-10-07 (now section 7) |
+| Environment `github-pages`: branches `gh-pages` and `main`; no workflow deploys to it since the DNF channel was removed (ADR-0076, decision 2) | `environments.json` |
 | Environment `delete`: no rule, no secret | `environments.json` |
-| Pages: legacy build from `main:/docs`; `gh api repos/hr-mes/athanor/pages` reports `"status": "errored"` (status is volatile, not stored) | `pages.json` |
+| Pages: legacy build from `main:/docs`; `gh api repos/ars-regia/athanor/pages` reports `"status": "errored"` (status is volatile, not stored) | `pages.json` |
 | Actions: all actions allowed, SHA pinning not required, default token read-only, Actions cannot approve pull requests, approval required for all external contributors | `actions.json` |
 
 ## 6. Open points _(Proposal for the maintainer)_
@@ -104,8 +106,35 @@ Each one is a change to a file followed by `apply`; none has been made.
 | --- | --- |
 | Description `ermete-os` | Set the Athanor description in `repository.json` |
 | Dependabot alerts off | Set `vulnerability_alerts` to `true` |
-| Environment `delete` has no rule and no secret, and no workflow names it (`grep -rn "environment:" .github/workflows` finds only `signing`) | Delete it by hand and re-export |
-| Pages builds `main:/docs` and errors, while [call-system-image.yml](../../.github/workflows/call-system-image.yml) line 180 publishes to a `gh-pages` branch | Decide the Pages source (`gh-pages`, or off) and set `pages.json` |
-| `signing` lets an admin bypass the reviewer, and `enforce_admins` is off on `iso-v0` | Decide whether the single admin should be bound by the gate |
-| `MOK_PRIVATE_KEY` is still in `signing` | Delete it once the key cut-over is complete, as planned at the rotation |
+| Environment `delete` has no rule and no secret, and no workflow names it (`grep -rn "environment:" .github/workflows` finds only `signing-kernel` and `signing-images`) | Delete it by hand and re-export |
+| Pages builds `main:/docs` and errors, and nothing publishes to the `gh-pages` branch since the DNF channel was removed (ADR-0076, decision 2) | Turn Pages off in `pages.json`, then delete the `gh-pages` branch and the `github-pages` environment by hand and re-export |
+| `enforce_admins` is off on `iso-v0` and `main`: the admin may push past the required check | Decide whether the single admin should be bound by the branch protection, as the signing environments already bind them (section 7) |
 | No scheduled drift check | A workflow running `diff` needs an admin token as a secret; decide whether drift detection is worth that token |
+
+## 7. Signing environments (ADR-0064)
+
+Two environments hold the signing keys, so a release cycle asks for at most two approvals and
+no job holds a key it does not use:
+
+| Environment | Secrets | Job |
+| --- | --- | --- |
+| `signing-kernel` | `SECUREBOOT_SIGNING_KEY`, `MODULE_SIGNING_KEY` | `sign` of `nvidia-kmod.yml`, only when a kernel or NVIDIA change leaves the signed vmlinuz or modules missing |
+| `signing-images` | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | `sign-system-images` of `call-system-image.yml` |
+
+Both have the same protection in `environments.json`: required reviewer `hr-mes`; administrator
+bypass off (`can_admins_bypass: false`, set by hand: section 4); deployment branches `iso-v0` and
+`main`, which `branch-protection.json` protects alike (required check `Kernel gate`, no force
+push, no deletion).
+
+`prevent_self_review` stays `false` for now. Every push and every run today is started by the
+maintainer's own account, agents included, so with it `true` the only reviewer could never
+approve a run and the pipeline would lock its own maintainer out. It turns `true` once agents push
+with their own GitHub App identity, a planned follow-up: their runs are then approved by the
+maintainer as another person.
+
+`environments.json` is the one place that says which environment holds which key.
+`scripts/verify.py workflows` reads it and fails a signing secret read by a job of any other
+environment, a secret listed in two environments, a signing environment without a reviewer, with
+administrator bypass, or deploying from a branch `branch-protection.json` does not protect by
+name. It is a regression guard on the files, not a check of the live settings: `ghsettings.py
+diff` is.

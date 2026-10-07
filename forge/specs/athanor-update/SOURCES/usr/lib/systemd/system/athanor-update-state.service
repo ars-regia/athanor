@@ -1,6 +1,6 @@
 [Unit]
 Description=Publish the Athanor trust state at boot
-Documentation=https://github.com/hr-mes/athanor/blob/iso-v0/docs/architecture/doc_update_trust.md
+Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_update_trust.md
 After=systemd-tmpfiles-setup.service
 Before=display-manager.service greetd.service
 

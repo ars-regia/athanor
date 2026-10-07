@@ -1,11 +1,11 @@
 %global debug_package %{nil}
 Name:           athanor-base-config
 Version:        43.0.0
-Release:        12%{?dist}
+Release:        13%{?dist}
 Summary:        Athanor OS Base Configuration (Systemd, Branding, GPG)
 
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor
+URL:            https://github.com/ars-regia/athanor
 BuildArch:      noarch
 
 Requires:       glibc-langpack-it glibc-langpack-en
@@ -40,7 +40,7 @@ Obsoletes:      system-release < 43
 %description
 This package provides the foundational configuration for Athanor Base: os-release
 and the fedora-release identity, Dracut configuration, systemd presets, units and
-tmpfiles, sshd, coredump and journald drop-ins, GRUB authentication, SELinux mode,
+tmpfiles, sshd, coredump and journald drop-ins, SELinux mode,
 Plymouth branding, Polkit rules, repository definitions and GPG keys.
 
 %prep
@@ -67,7 +67,6 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 /usr/lib/systemd/journald.conf.d/*
 /usr/lib/fedora-release
 /usr/lib/os-release
-/etc/grub.d/01_athanor_grub_auth
 /usr/lib/dracut/dracut.conf.d/*
 /usr/lib/systemd/system-preset/*
 /usr/lib/systemd/system/scx_loader.service.d/*
@@ -77,6 +76,12 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 /usr/share/polkit-1/rules.d/*
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 43.0.0-13
+- Drop /etc/grub.d/01_athanor_grub_auth: it set the GRUB superuser "admin" with the placeholder
+  hash CHANGE_THIS_PBKDF2_HASH_IN_PRODUCTION, so the shipped stanza was a placeholder in
+  a security path. The GRUB menu is not password-protected in 1.0; whether and how to protect
+  it belongs to the boot-chain decision.
+
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 43.0.0-12
 - Point URL at the project repository
 - Correct the %description: there is no GDM branding, list what the package ships

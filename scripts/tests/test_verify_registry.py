@@ -50,13 +50,17 @@ class RegistryTest(unittest.TestCase):
         )
         self.assertEqual(len(found), 3, found)
 
-    def test_the_containerfile_and_test_fixtures_are_outside(self):
+    def test_the_containerfile_and_the_flake_are_checked(self):
         found = self.problems(
             {
-                "system/Containerfile": "RUN --mount=type=bind,from=ghcr.io/someone/tier0:latest\n",
-                "scripts/tests/test_x.py": 'FIXTURE = "ghcr.io/someone/athanor-system"\n',
+                "system/Containerfile": "FROM ghcr.io/someone/athanor-forge-tier0-repo:latest AS tier0-repo\n",
+                "flake.nix": 'name = "ghcr.io/someone/athanor-builder";\n',
             }
         )
+        self.assertEqual(len(found), 2, found)
+
+    def test_test_fixtures_are_outside(self):
+        found = self.problems({"scripts/tests/test_x.py": 'FIXTURE = "ghcr.io/someone/athanor-system"\n'})
         self.assertEqual(found, [])
 
     def test_unit_test_placeholders_are_not_owners(self):

@@ -5,7 +5,7 @@ Release:        3%{?dist}
 Summary:        eBPF System Monitoring & Telemetry Daemon for Athanor OS
 
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor
+URL:            https://github.com/ars-regia/athanor
 
 
 BuildRequires:  rust >= 1.80.0

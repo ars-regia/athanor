@@ -167,9 +167,9 @@ jobs:
           IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')
           buildah config --label tier.content.sha256="${{ steps.check.outputs.hash }}" "$ctr"
           buildah commit --omit-timestamp "$ctr" "$IMAGE_LOWER:latest"
-          buildah tag "$IMAGE_LOWER:latest" "$IMAGE_LOWER:${{ steps.check.outputs.hash }}"
-          buildah push "$IMAGE_LOWER:latest"
-          buildah push "$IMAGE_LOWER:${{ steps.check.outputs.hash }}"
+          # The digest of this push is the identity of the node: it is the one signed,
+          # attested and given the hash tag. :latest is for people and is never read back.
+          buildah push --digestfile "$RUNNER_TEMP/image.digest" "$IMAGE_LOWER:latest"
           buildah rm "$ctr" || true
 
       - name: Generate SBOM (Syft)
@@ -182,7 +182,7 @@ jobs:
           if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
             img_prefix="athanor-forge-rolling"
           fi
-          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}:latest" | tr "[:upper:]" "[:lower:]")
+          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr "[:upper:]" "[:lower:]")@$(cat "$RUNNER_TEMP/image.digest")
           nix run nixpkgs#syft -- packages "$IMAGE_LOWER" -o "spdx-json=sbom-${PKG_NAME}.spdx.json"
 
       - name: Sign & Attest Micro-Container
@@ -197,10 +197,27 @@ jobs:
           if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
             img_prefix="athanor-forge-rolling"
           fi
-          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}:latest" | tr '[:upper:]' '[:lower:]')
+          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')@$(cat "$RUNNER_TEMP/image.digest")
           # Keyless signing talks to Fulcio, Rekor and the timestamp authority: the script
           # retries their transient failures, a persistent one still fails the job.
           nix shell nixpkgs#cosign -c bash scripts/sign_attest.sh "$IMAGE_LOWER" "sbom-${PKG_NAME}.spdx.json"
+
+      - name: Publish the hash tag, last (the brain reads it as built, signed and attested)
+        if: steps.check.outputs.skip != 'true'
+        env:
+          PKG_NAME: ${{ matrix.package }}
+        run: |
+          set -euo pipefail
+          export BUILDAH_ISOLATION=chroot
+          img_prefix="athanor-forge"
+          if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
+            img_prefix="athanor-forge-rolling"
+          fi
+          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')
+          # A registry-side copy of the digest that was signed and attested, asserted to
+          # resolve to it (tag_signed_image.sh): a failed signature leaves the node dirty,
+          # and a moved :latest cannot give the hash tag an unsigned digest.
+          bash scripts/tag_signed_image.sh "$IMAGE_LOWER" "$(cat "$RUNNER_TEMP/image.digest")" "${{ steps.check.outputs.hash }}"
 
       - name: 🛟 Upload Crash Artifacts (Nix/SCCache)
         if: failure()
@@ -347,9 +364,9 @@ jobs:
           IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')
           buildah config --label tier.content.sha256="${{ steps.check.outputs.hash }}" "$ctr"
           buildah commit --omit-timestamp "$ctr" "$IMAGE_LOWER:latest"
-          buildah tag "$IMAGE_LOWER:latest" "$IMAGE_LOWER:${{ steps.check.outputs.hash }}"
-          buildah push "$IMAGE_LOWER:latest"
-          buildah push "$IMAGE_LOWER:${{ steps.check.outputs.hash }}"
+          # The digest of this push is the identity of the node: it is the one signed,
+          # attested and given the hash tag. :latest is for people and is never read back.
+          buildah push --digestfile "$RUNNER_TEMP/image.digest" "$IMAGE_LOWER:latest"
           buildah rm "$ctr" || true
 
       - name: Generate SBOM (Syft)
@@ -362,7 +379,7 @@ jobs:
           if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
             img_prefix="athanor-forge-rolling"
           fi
-          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}:latest" | tr "[:upper:]" "[:lower:]")
+          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr "[:upper:]" "[:lower:]")@$(cat "$RUNNER_TEMP/image.digest")
           nix run nixpkgs#syft -- packages "$IMAGE_LOWER" -o "spdx-json=sbom-${PKG_NAME}.spdx.json"
 
       - name: Sign & Attest Micro-Container
@@ -377,10 +394,27 @@ jobs:
           if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
             img_prefix="athanor-forge-rolling"
           fi
-          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}:latest" | tr '[:upper:]' '[:lower:]')
+          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')@$(cat "$RUNNER_TEMP/image.digest")
           # Keyless signing talks to Fulcio, Rekor and the timestamp authority: the script
           # retries their transient failures, a persistent one still fails the job.
           nix shell nixpkgs#cosign -c bash scripts/sign_attest.sh "$IMAGE_LOWER" "sbom-${PKG_NAME}.spdx.json"
+
+      - name: Publish the hash tag, last (the brain reads it as built, signed and attested)
+        if: steps.check.outputs.skip != 'true'
+        env:
+          PKG_NAME: ${{ matrix.package }}
+        run: |
+          set -euo pipefail
+          export BUILDAH_ISOLATION=chroot
+          img_prefix="athanor-forge"
+          if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
+            img_prefix="athanor-forge-rolling"
+          fi
+          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')
+          # A registry-side copy of the digest that was signed and attested, asserted to
+          # resolve to it (tag_signed_image.sh): a failed signature leaves the node dirty,
+          # and a moved :latest cannot give the hash tag an unsigned digest.
+          bash scripts/tag_signed_image.sh "$IMAGE_LOWER" "$(cat "$RUNNER_TEMP/image.digest")" "${{ steps.check.outputs.hash }}"
 
       - name: 🛟 Upload Crash Artifacts (Nix/SCCache)
         if: failure()
@@ -525,9 +559,9 @@ jobs:
           IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')
           buildah config --label tier.content.sha256="${{ steps.check.outputs.hash }}" "$ctr"
           buildah commit --omit-timestamp "$ctr" "$IMAGE_LOWER:latest"
-          buildah tag "$IMAGE_LOWER:latest" "$IMAGE_LOWER:${{ steps.check.outputs.hash }}"
-          buildah push "$IMAGE_LOWER:latest"
-          buildah push "$IMAGE_LOWER:${{ steps.check.outputs.hash }}"
+          # The digest of this push is the identity of the node: it is the one signed,
+          # attested and given the hash tag. :latest is for people and is never read back.
+          buildah push --digestfile "$RUNNER_TEMP/image.digest" "$IMAGE_LOWER:latest"
           buildah rm "$ctr" || true
 
       - name: Generate SBOM (Syft)
@@ -540,7 +574,7 @@ jobs:
           if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
             img_prefix="athanor-forge-rolling"
           fi
-          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}:latest" | tr "[:upper:]" "[:lower:]")
+          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr "[:upper:]" "[:lower:]")@$(cat "$RUNNER_TEMP/image.digest")
           nix run nixpkgs#syft -- packages "$IMAGE_LOWER" -o "spdx-json=sbom-${PKG_NAME}.spdx.json"
 
       - name: Sign & Attest Micro-Container
@@ -555,10 +589,27 @@ jobs:
           if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
             img_prefix="athanor-forge-rolling"
           fi
-          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}:latest" | tr '[:upper:]' '[:lower:]')
+          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')@$(cat "$RUNNER_TEMP/image.digest")
           # Keyless signing talks to Fulcio, Rekor and the timestamp authority: the script
           # retries their transient failures, a persistent one still fails the job.
           nix shell nixpkgs#cosign -c bash scripts/sign_attest.sh "$IMAGE_LOWER" "sbom-${PKG_NAME}.spdx.json"
+
+      - name: Publish the hash tag, last (the brain reads it as built, signed and attested)
+        if: steps.check.outputs.skip != 'true'
+        env:
+          PKG_NAME: ${{ matrix.package }}
+        run: |
+          set -euo pipefail
+          export BUILDAH_ISOLATION=chroot
+          img_prefix="athanor-forge"
+          if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
+            img_prefix="athanor-forge-rolling"
+          fi
+          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')
+          # A registry-side copy of the digest that was signed and attested, asserted to
+          # resolve to it (tag_signed_image.sh): a failed signature leaves the node dirty,
+          # and a moved :latest cannot give the hash tag an unsigned digest.
+          bash scripts/tag_signed_image.sh "$IMAGE_LOWER" "$(cat "$RUNNER_TEMP/image.digest")" "${{ steps.check.outputs.hash }}"
 
       - name: 🛟 Upload Crash Artifacts (Nix/SCCache)
         if: failure()

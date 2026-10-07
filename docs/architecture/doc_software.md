@@ -18,9 +18,9 @@ Checked in the repository at `27378de3`, and, where the repository cannot answer
 
 **Applications.**
 
-- `flatpak` is installed by the image build (`system/Containerfile:140`, `forge/config/packages.json:113`), on the base `quay.io/fedora-ostree-desktops/base-atomic:43` (`system/Containerfile:31`).
+- `flatpak` is installed by the image build (`system/Containerfile:143`, `forge/config/packages.json:113`), on the base `quay.io/fedora-ostree-desktops/base-atomic:43` (`system/Containerfile:41`).
 - `cosmic-store` ships (`forge/config/packages.json:156`) and is today the only graphical way to install an application.
-- **No Flathub remote is configured.** The only remote on the desktop is `fedora` (system, OCI), which Fedora's `flatpak-add-fedora-repos.service` adds (enabled by Fedora's `90-default.preset:374`, desktop). The one script that adds Flathub and installs the `flatpaks` list of `forge/config/packages.json:203-208` is `system/scripts/provision_flatpak.sh:24-36`; the image copies it to `/scripts/` (`system/Containerfile:142`), and no unit, kickstart or script runs it. That list therefore installs nothing, as the `upstream_*` lists once did.
+- **No Flathub remote is configured.** The only remote on the desktop is `fedora` (system, OCI), which Fedora's `flatpak-add-fedora-repos.service` adds (enabled by Fedora's `90-default.preset:374`, desktop). The one script that adds Flathub and installs the `flatpaks` list of `forge/config/packages.json:203-208` is `system/scripts/provision_flatpak.sh:24-36`; the image copies it to `/scripts/` (`system/Containerfile:145`), and no unit, kickstart or script runs it. That list therefore installs nothing, as the `upstream_*` lists once did.
 - The system helper's polkit defaults (Flatpak 1.16.6, desktop): install and uninstall are `auth_admin_keep` for an active session, update and AppStream refresh are `yes` for an active session and `auth_admin` otherwise. Fedora's `org.freedesktop.Flatpak.rules` lets an active local member of `wheel` install and uninstall without a password.
 
 **The legacy store crates.**
