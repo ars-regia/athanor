@@ -5,8 +5,8 @@
   of a manufacturer, and the ordered plan that reaches it. [doc_ci.md](doc_ci.md) describes
   the workflows as they are; this document describes what they become and why.
 - **Owner:** the maintainer.
-- **Status:** draft, revision 1 (2026-10-07), awaiting the maintainer's review. Nothing here
-  is built before it. Measured figures come from the GitHub API run data of 2026-09-23 to
+- **Status:** approved, revision 1 (2026-10-07). The maintainer approved the document and
+  answered PQ1-PQ12 as recommended on 2026-10-07; the blocks of section 12 are built in order. Measured figures come from the GitHub API run data of 2026-09-23 to
   2026-10-07 (784 runs) collected by the pipeline review of 2026-10-07; every other number is
   labelled as an estimate.
 - **Depends on:** [doc_update_delivery.md](doc_update_delivery.md) (UD1-UD44: channels,
@@ -22,7 +22,7 @@
   (update control), [ADR-0075](../decisions/0075-engineering-gates.md) (`just check`),
   [ADR-0076](../decisions/0076-platform-scope-for-1-0.md), [A2-4](../decisions/0039-delivery-repairs-before-1-0.md),
   [A2-27](../decisions/0064-signing-approvals-and-mok-enrolment.md).
-- **Defines:** PL1-PL53 (requirements), PB0-PB12 (plan blocks), PQ1-PQ12 (open decisions).
+- **Defines:** PL1-PL53 (requirements), PB0-PB12 (plan blocks), PQ1-PQ12 (decisions on the review questions).
 - **Enforced by:** `python3 scripts/verify.py` once the checks of section 10 exist; until
   then, by review against this document.
 
@@ -617,9 +617,12 @@ step only the maintainer can take.
 | **PB11** | Performance | `pr.yml` selections, the bar job, timeouts, concurrency, caches, NVIDIA modules once | the section 7.2 targets measured by `scripts/ci/run_stats.py` over five runs per path | PB1 | 3 (estimate) |
 | **PB12** | Topology consolidation | the 24 workflows to the 12 of section 3, `bots.yml`, `maintenance.yml`, `dag_orchestrator.py` (PL48), doc_ci.md, `docs/operations/ci-runbook.md` | `ls .github/workflows` matches section 3; `python3 scripts/verify.py` green with the checks of section 10; a release run with a dirty package at graph depth 3 or more builds it in the single matrix | PB3, PB11 | 5 (estimate) |
 
-## 13. Open decisions for the maintainer
+## 13. Decisions on the review questions
 
-| #    | Question | Recommendation |
+The maintainer answered every question as recommended on 2026-10-07. Items marked
+[LAWYER] stand as decided and are confirmed with counsel before the CRA obligations apply.
+
+| #    | Question | Decision |
 | ---- | -------- | -------------- |
 | PQ1  | Does `main` keep a release role, now that `iso-v0` is the default branch? | Keep it protected by the same ruleset and frozen, since D43 allows it to deploy; decide its future with the 1.0 branch model. |
 | PQ2  | How is the ISO signed? | Keylessly, by the stage that builds it (PL32): the ISO is built after the images are signed, so signing it with the cosign key would need a second `signing-images` job and a third approval. A key-based signature for offline verification is reconsidered if users ask for it. |
