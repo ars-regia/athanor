@@ -14,12 +14,10 @@ env:
   SCCACHE_CACHE_SIZE: 5G
 
 jobs:
-  lint:
-    uses: ./.github/workflows/call-lint.yml
-
+  # No lint job of its own: the Orchestrator, its only caller, runs call-lint.yml once and
+  # calls this workflow only after it passed (docs/architecture/doc_pipeline.md, PL44).
   build-builder:
     name: 🏗️ Build Base Builder
-    needs: [lint]
     outputs:
       content_hash: ${{ steps.check_idempotency.outputs.content_hash }}
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'

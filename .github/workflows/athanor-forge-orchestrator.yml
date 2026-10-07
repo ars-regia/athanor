@@ -52,11 +52,21 @@ permissions:
 
 # A newer run waits instead of cancelling one that may be pushing or signing images; GitHub
 # keeps only the newest waiting run of the group (docs/architecture/doc_build_ordering.md, O6).
+# The group stays at run level, not per job, because it is what publishes the images in
+# commit order: a run takes it when it starts and holds it through the image push, so an
+# older commit's system image can never overwrite a newer one's :latest, and clients order
+# images by build time (doc_update_trust.md, UT9). A group on the image job alone is taken
+# in arrival order instead, and a run whose packages build longer arrives later. Job-level
+# groups (doc_pipeline.md, PL49) need the image publish to refuse a revision older than the
+# published one first, and the signing approvals out of this run.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  # The one lint of the run. Every other job needs it, directly or through another job, and
+  # the called workflows have no lint of their own: each used to repeat it, about 2 minutes
+  # apiece on the critical path (docs/architecture/doc_pipeline.md, PL44).
   lint:
     uses: ./.github/workflows/call-lint.yml
 
@@ -77,10 +87,7 @@ jobs:
       run:
         working-directory: forge
     outputs:
-      dag_level_0: ${{ steps.brain.outputs.dag_level_0 }}
-      dag_level_1: ${{ steps.brain.outputs.dag_level_1 }}
-      dag_level_2: ${{ steps.brain.outputs.dag_level_2 }}
-      dag_flatpaks: ${{ steps.brain.outputs.dag_flatpaks }}
+      dag_packages: ${{ steps.brain.outputs.dag_packages }}
       dirty_count: ${{ steps.brain.outputs.dirty_count }}
       has_changes: ${{ steps.brain.outputs.has_changes }}
     steps:
@@ -274,10 +281,7 @@ jobs:
     needs: [orchestrator-brain, build-builder]
     uses: ./.github/workflows/call-dag-compile.yml
     with:
-      dag_level_0: ${{ needs.orchestrator-brain.outputs.dag_level_0 }}
-      dag_level_1: ${{ needs.orchestrator-brain.outputs.dag_level_1 }}
-      dag_level_2: ${{ needs.orchestrator-brain.outputs.dag_level_2 }}
-      dag_flatpaks: ${{ needs.orchestrator-brain.outputs.dag_flatpaks }}
+      dag_packages: ${{ needs.orchestrator-brain.outputs.dag_packages }}
       builder_hash: ${{ needs.build-builder.outputs.content_hash }}
 
   system-image:

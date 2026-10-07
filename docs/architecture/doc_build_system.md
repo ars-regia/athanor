@@ -67,16 +67,20 @@ package jobs of one run:
   silently rebuild the whole graph. A dirty package does not dirty its dependents: builds
   never consume another package's output. Upstream nodes and flatpaks are never dirty, so a
   commit that changes no package schedules no matrix job.
-- **Output**: the dirty custom packages split into levels 0, 1 and 2 (every deeper level
-  joins level 2) and the dirty flatpaks, written to `GITHUB_OUTPUT` with a Mermaid summary
-  of the graph. Upstream nodes are never scheduled.
+- **Cycle check**: `graphlib.TopologicalSorter.prepare()` on the graph; a cycle (a tier
+  order and a `Requires` that contradict each other) fails the plan.
+- **Output**: the dirty custom packages as one sorted list, `dag_packages`, with
+  `dirty_count` and `has_changes`, written to `GITHUB_OUTPUT`. Upstream nodes are never
+  scheduled.
 
 Builds run with `rpmbuild --nodeps` in the builder image and never install another forge
-package, so the levels order the jobs but no build consumes the output of another.
+package, so no build consumes the output of another and every dirty package builds in one
+matrix (doc_pipeline.md, PL48). The graph orders the image's tiers and the content hashes,
+not the builds.
 
 ## 5. Package jobs
 
-`call-dag-compile.yml` runs one matrix job per package and level:
+`call-dag-compile.yml` runs one matrix job per dirty package:
 
 1. **Idempotency.** `check_idempotency.sh` hashes the spec directory, `config/rpmmacros`,
    the package's entry in `config/packages.json` (the lists that name it) and every other
