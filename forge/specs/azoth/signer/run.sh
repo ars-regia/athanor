@@ -60,14 +60,8 @@ if [[ $STAGE == sign ]]; then
     [[ -s kernel-unsigned/vmlinuz && -s kernel-unsigned/kver && -s kernel-unsigned/module-sig-hash ]] ||
         die "kernel-unsigned/ is incomplete: run.sh inputs derives it in this job, before this step"
 fi
-[[ -f $HERE/image.digest ]] ||
-    die "signer/image.digest is missing: publish the signer image (.github/workflows/azoth-signer.yml) and commit the digest it reports"
-digest=$(< "$HERE/image.digest")
-[[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || die "signer/image.digest holds '$digest', not a sha256 digest"
-registry=$(artifact registry)
-host=${registry%%/*}
-IMAGE=$registry/azoth-signer@$digest
-
+# The keys move to files and leave the environment before any other script runs: mktemp,
+# a system binary, is the only process started while they are still exported.
 WORK=$(mktemp -d)
 logged_in=''
 cleanup() {
@@ -83,6 +77,14 @@ if [[ $STAGE == sign ]]; then
     )
     unset MODULE_SIGNING_KEY SECUREBOOT_SIGNING_KEY
 fi
+
+[[ -f $HERE/image.digest ]] ||
+    die "signer/image.digest is missing: publish the signer image (.github/workflows/azoth-signer.yml) and commit the digest it reports"
+digest=$(< "$HERE/image.digest")
+[[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || die "signer/image.digest holds '$digest', not a sha256 digest"
+registry=$(artifact registry)
+host=${registry%%/*}
+IMAGE=$registry/azoth-signer@$digest
 
 signer() { # signer [podman options...] -- sign-kernel.sh arguments...
     local -a options=()
