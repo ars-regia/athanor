@@ -518,8 +518,11 @@ delete a member of that set, and has a unit test on a fixture graph.
 
 **The support period** is five years for the product line from the date it is placed on
 the market, with the Fedora base rebased forward within the line (ADR-0081, amends
-A2-17). The end date is published in `SECURITY.md`, in the release notes and as
-`SUPPORT_END` in `/usr/lib/os-release` (shipped by `athanor-base-config`, PR #261).
+A2-17). The line is each major version, and its five years run from the date 1.0 is
+placed on the market (PQ7). The end date is published in `SECURITY.md`, in the release
+notes and as `SUPPORT_END` in `/usr/lib/os-release` (`athanor-base-config`). The 1.0
+release adds `SUPPORT_END`; images before it carry none, because no support period is
+promised for them.
 
 ## 6. CRA operations
 
@@ -762,7 +765,7 @@ step only the maintainer can take.
 | | **[M]** decide that the machines meant to keep updating have booted a key-2 release (secrets.md section 4.1, step 2), then delete `signing` and `MOK_PRIVATE_KEY` | | | | |
 | **PB6** | Signed install path, machines on the signed transport | keyless ISO signing in the stage that builds the ISO (PL32), `system/athanor-install.ks`, UD15 | the ISO acceptance asserts `ostree-image-signed` and a digest reference; the desktop and laptop origin files name `ostree-image-signed` under `ars-regia` | PB5 | 2 (estimate) |
 | | **[M]** UD15 on the desktop and laptop (needs `sudo`) | | | | |
-| **PB7** | CVD, support period, documentation | `.github/SECURITY.md`, `docs/compliance/` (Annex VII skeleton, Annex I mapping, reporting runbook), `os-release` `SUPPORT_END` | `python3 scripts/verify.py docs` green with the new files; `grep SUPPORT_END /usr/lib/os-release` in the image acceptance | PB0 (parallel with PB1-PB6) | 2 (estimate) |
+| **PB7** | CVD, support period, documentation | `.github/SECURITY.md`, `docs/compliance/` (Annex VII skeleton, Annex I mapping, reporting runbook), `os-release` `SUPPORT_END` | `python3 scripts/verify.py docs` green with the new files; `grep SUPPORT_END /usr/lib/os-release` in the acceptance of the 1.0 image | PB0 (parallel with PB1-PB6) | 2 (estimate) |
 | | **[M][LAWYER]** e-mail channel, coordinating CSIRT, the declaration template | | | | |
 | **PB8** | Scanning, VEX, advisories | `scripts/vuln/scan.sh`, `security/vex/`, CSAF provider on Pages, CodeQL in `maintenance.yml` | a candidate with a critical finding that has a fixed version available and no VEX statement is refused by `policy_check.py`, and one whose finding has no fixed version promotes with the finding reported; the daily rescan of `:stable` runs green or alerts; one CSAF document validates against the CSAF 2.0 schema | PB5 | 3 (estimate) |
 | **PB9** | Retention and the evidence archive | `forge/scripts/clean_ghcr.sh`, `promote.yml` (GitHub Release), UT10 and UD8 text | the janitor's unit test on a fixture graph keeps every member of the reachable set of section 5 and ages out the rest; its dry run on the live registry deletes no member; the first promotion has a GitHub Release with the bundle and a verifying `bundle.sha256` signature | PB5 | 2 (estimate) |
@@ -890,8 +893,9 @@ already did differently, `iso-v0` wins:
   against their specs) and PR #228 (the builder's `:latest`) are described as today's state
   (sections 3.2, 3.5, PL35, PL48); section 3.5 counts 28 workflows with `pr.yml`,
   `call-kernel.yml` and `call-nvidia-kmod-prepare.yml`; doc_ci.md defines CI1-CI28.
-- PR #261 (PB7) ships `SUPPORT_END` in `os-release`; revision 2's "`SUPPORT_END` from 1.0"
-  (minor 1) is withdrawn (section 5, PB7).
+- PR #261 (PB7) shipped `SUPPORT_END=2031-12-31`, five years from 2026. The maintainer
+  decided PQ7 on 2026-10-07: the five years run from 1.0, so `SUPPORT_END` leaves
+  `os-release` until the 1.0 release sets it (section 5, PB7).
 - ADR-0062 (A2-25) keeps "Require review from Code Owners" off while there is one code owner:
   the code-owner review of agent and bot pull requests applies once a second code owner
   exists (PL1, PL4, PQ5).

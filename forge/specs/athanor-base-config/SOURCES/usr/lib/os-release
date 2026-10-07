@@ -17,6 +17,6 @@ BUG_REPORT_URL="https://github.com/ars-regia/athanor/issues"
 PLATFORM_ID="platform:f43"
 VARIANT="bootc"
 VARIANT_ID=athanor
-# Product line support end (ADR-0081): five years from 2026.
-# Single source: SECURITY.md and the release notes point here.
-SUPPORT_END=2031-12-31
+# SUPPORT_END is added by the 1.0 release: five years from the date 1.0 is placed on the
+# market (ADR-0081, doc_pipeline.md PQ7). Images before 1.0 promise no support period.
+# Single source once set: SECURITY.md and the release notes point here.

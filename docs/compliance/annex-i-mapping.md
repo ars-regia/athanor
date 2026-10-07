@@ -47,7 +47,7 @@ Status: **Met** (design and, where stated, checks exist), **Partial**, **Gap**.
 
 | Obligation | Where | Status |
 | ---------- | ----- | ------ |
-| Art. 13(8), (19): support period and published end date | `.github/SECURITY.md`; `SUPPORT_END` in `forge/specs/athanor-base-config/SOURCES/usr/lib/os-release` | Met |
+| Art. 13(8), (19): support period and published end date | `.github/SECURITY.md`; `SUPPORT_END` in `forge/specs/athanor-base-config/SOURCES/usr/lib/os-release`, set by the 1.0 release | Met from 1.0 |
 | Art. 13(9), (13): ten-year availability of updates and documentation | Promoted digests never deleted; evidence bundle per release (doc_pipeline.md section 5) | Policy decided; janitor change and bundle are PB9 |
 | Art. 14: reporting of exploited vulnerabilities and severe incidents | [reporting-runbook.md](reporting-runbook.md) | Procedure written; registration is **[MAINTAINER][LAWYER]** |
 | Art. 28, Annex V: declaration of conformity | Template in [technical-documentation.md](technical-documentation.md) | Placeholder **[LAWYER]** |
