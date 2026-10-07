@@ -123,8 +123,8 @@ no job holds a key it does not use:
 
 Both have the same protection in `environments.json`: required reviewer `hr-mes`; administrator
 bypass off (`can_admins_bypass: false`, set by hand: section 4); deployment branches `iso-v0` and
-`main`, which `branch-protection.json` protects alike (required check `Kernel gate`, no force
-push, no deletion).
+`main`, which `branch-protection.json` protects alike (required check `gate`, live once section 8
+is applied, `Kernel gate` before it; no force push, no deletion).
 
 `prevent_self_review` stays `false` for now. Every push and every run today is started by the
 maintainer's own account, agents included, so with it `true` the only reviewer could never
@@ -138,3 +138,24 @@ environment, a secret listed in two environments, a signing environment without 
 administrator bypass, or deploying from a branch `branch-protection.json` does not protect by
 name. It is a regression guard on the files, not a check of the live settings: `ghsettings.py
 diff` is.
+
+## 8. Switching the required check to gate
+
+`branch-protection.json` requires one check on `iso-v0` and `main`: `gate`, the aggregate job of
+`pr.yml` (doc_pipeline.md PL3, ADR-0075). The live protection still requires `Kernel gate` and
+`Spec gate` until a maintainer applies the file; until then `ghsettings.py diff` reports that
+difference, and it is expected. `pr.yml` reports `gate` on every pull request from the moment it
+is on the base branch, so the change is safe in both states: the bots wait for all three checks
+(`forge/scripts/bot_merge.py`, `REQUIRED_CHECKS`), and a check that is required but never reports
+would leave a pull request pending forever. The order below avoids that.
+
+| Step | Who | Action |
+| --- | --- | --- |
+| 1 | maintainer | Merge the change that adds `Spec gate` (PR #235) and apply its protection, if not done |
+| 2 | maintainer | Merge the change that adds `pr.yml` into `iso-v0` (and into `main` when `main` takes it) |
+| 3 | maintainer | Give every open pull request one new event (a push, or "Update branch"), so `pr.yml` runs on it; check that each shows a `gate` check (`gh pr checks <n>`) |
+| 4 | **[M]** maintainer | `python3 scripts/github-settings/ghsettings.py apply`, read the plan (one `PUT .../branches/<b>/protection` per branch, no `DESTRUCTIVE` line), then `apply --yes` and `diff`, which must print nothing for branch protection |
+| 5 | maintainer | Merge the follow-up that removes the `pull_request` triggers of `kernel-build.yml` and `spec-build-check.yml`, removes `Kernel gate` and `Spec gate` from `REQUIRED_CHECKS`, and moves the spec bot merge into `pr.yml`. Before it, kernel and spec changes are built twice |
+
+To roll back, restore the two contexts in `branch-protection.json` and apply it again: both
+legacy workflows still run on every pull request until step 5.

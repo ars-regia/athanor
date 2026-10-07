@@ -69,17 +69,18 @@ The tier repositories are published as OCI images only; there is no DNF channel 
 
 ### 1.4 What a pull request runs
 
-Branch protection on `iso-v0` requires two checks, `Kernel gate` and `Spec gate` (`.github/settings/branch-protection.json`, applied with `scripts/github-settings/ghsettings.py`). Both workflows run on every pull request, so both checks always report. The bots' merges wait for both (`forge/scripts/bot_merge.py`, `REQUIRED_CHECKS`). Everything else reports but does not block a merge.
+Branch protection on `iso-v0` requires two checks today, `Kernel gate` and `Spec gate` (`.github/settings/branch-protection.json`, applied with `scripts/github-settings/ghsettings.py`). Both workflows run on every pull request, so both checks always report. CI26 (`pr.yml`, doc_pipeline.md PL3) runs on every pull request as well and reports `gate`, the one check that replaces both once the maintainer switches the branch protection to it (section 6, CP4). Until then `gate` reports without blocking, and the kernel and the specs of a change that selects them are checked twice: by CI8 and CI14 on their own, and inside CI26. The bots' merges wait for all three (`forge/scripts/bot_merge.py`, `REQUIRED_CHECKS`), so they hold in either state. Everything else reports but does not block a merge.
 
 | Check | Workflow | Runs on a PR when | Required | Gates |
 |---|---|---|---|---|
-| `Kernel gate` | CI8 | every PR (no path filter) | yes | lint (CI2), kernel prep/build, boot matrix, NVIDIA module build |
+| `gate` | CI26 | every PR and merge group (no path filter) | after CP4 | `just check` (actionlint, Justfile syntax, every `verify.py` check with `scripts/ci/known-red.txt`, every Python test directory); the kernel check (CI27) and CI14 when `scripts/ci/changes.py` selects them |
+| `Kernel gate` | CI8 | every PR (no path filter) | until CP4 | lint (CI2), kernel prep/build, boot matrix, NVIDIA module build |
 | System Image Check | CI13 | the image inputs change | no | the three images build as in the pipeline, without a key; package delta; merges `bump/system-*` PRs |
-| `Spec gate` | CI14 | every PR (no path filter) | yes | changed specs build as the DAG builds them; a change that selects none passes; merges the spec bot's PR |
+| `Spec gate` | CI14 | every PR (no path filter) | until CP4 | changed specs build as the DAG builds them; a change that selects none passes; merges the spec bot's PR |
 | Shell surfaces | CI15 | a shell crate or `forge/test/shell/**` changes | no | rig tests of the greeter, layout, compositor client, shelld, bar, dock, launcher; also CI2 |
 | Fuzzing, Rust Security & FFI Audit, Nix Vanguard | CI23, CI22, CI24 | only PRs based on `main` | no | see section 3 |
 
-CI2 (actionlint, `scripts/verify.py`, the unit test suites) has no trigger of its own: on a PR it runs through CI8, which runs on every pull request and whose `Kernel gate` requires it, and through CI15.
+CI2 (actionlint, `scripts/verify.py`, the unit test suites) has no trigger of its own: on a PR it runs through CI8, which runs on every pull request and whose `Kernel gate` requires it, and through CI15. The `check` job of CI26 runs `just check`, which covers what CI2 runs and adds the remaining `verify.py` checks and the four test directories CI2 leaves out (those of `scripts/ci`, the runner, session memory and the cosmic-comp rebase drill); CI2 goes once CI8 no longer runs on pull requests (doc_pipeline.md section 3.4).
 
 ## 2. The workflows
 
@@ -143,7 +144,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 ### CI7 NVIDIA kmod build
 
 - **File:** `nvidia-build.yml`. **Purpose:** compiles the open and legacy NVIDIA modules against a kernel-devel, unsigned.
-- **Triggers:** `workflow_call` (CI8 job `kmod`, CI6 job `build`). **Inputs:** `devel-artifact`, `devel-digest`, `registry`. **Output:** artifacts `nvidia-<driver>-unsigned`.
+- **Triggers:** `workflow_call` (CI8 and CI27 job `kmod`, CI6 job `build`). **Inputs:** `devel-artifact`, `devel-digest`, `registry`. **Output:** artifacts `nvidia-<driver>-unsigned`.
 - **Secrets, variables:** `GITHUB_TOKEN`. **Environment:** none. **Runner:** hosted. **Concurrency:** caller's.
 - **Scripts:** `forge/specs/azoth/nvidia.sh`, `system/kernel-artifacts.sh`.
 - **Health:** green inside the five CI8 runs below.
@@ -151,7 +152,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 ### CI8 Kernel Build
 
 - **File:** `kernel-build.yml`. **Purpose:** the Azoth kernel: lint (CI2), prep, RPM build, boot matrix, NVIDIA module gate, publication of four signed OCI images, dispatch of CI1 (doc_kernel_build.md).
-- **Triggers:** every `pull_request`; push to `main`, `iso-v0` on `forge/specs/azoth/**` and its two workflow files; dispatch (`stage`: `prep`, `build`).
+- **Triggers:** every `pull_request` (until CP4 is applied and the trigger is removed); push to `main`, `iso-v0` on `forge/specs/azoth/**` and its two workflow files; dispatch (`stage`: `prep`, `build`). Its jobs `inputs`, `build`, `boot` and `kmod` are mirrored in CI27, and `scripts/ci/tests/test_call_kernel.py` fails when the two differ.
 - **Outputs:** `azoth`, `azoth-devel`, `azoth-debuginfo` images; artifacts `kernel-<stage>`, `kernel-boot`, `kernel-devel`, `kernel-boot-logs`, `kernel-attestations`; check `Kernel gate`.
 - **Secrets, variables:** `GITHUB_TOKEN`, `KERNEL_REGISTRY`. **Environment:** none.
 - **Runner:** `build` self-hosted (`:120`), skipped for PRs from forks (`:119`); the rest hosted. **Concurrency:** `kernel-<ref>`, cancels in progress.
@@ -202,8 +203,8 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 ### CI14 Spec Build Check
 
 - **File:** `spec-build-check.yml`. **Purpose:** PR build of changed forge specs in the builder image; merges the spec bot's PR when every bump keeps its major version.
-- **Triggers:** every `pull_request`; `select_check_specs.py` picks the changed specs (not `azoth`), or all of them when `forge/config/rpmmacros`, the builder or the build scripts change. **Required check:** `Spec gate`. **Output:** a merge.
-- **Secrets, variables:** `KERNEL_BUMP_TOKEN`, `REGISTRY_HOST`. **Environment:** none. **Runner:** hosted. **Concurrency:** `spec-build-check-<PR>`, cancels in progress.
+- **Triggers:** every `pull_request` (until CP4 is applied and the trigger is removed); `workflow_call` from CI26 job `specs` with `from_pr_gate: true`, which builds and judges but leaves the bot merge to the direct run; `select_check_specs.py` picks the changed specs (not `azoth`), or all of them when `forge/config/rpmmacros`, the builder or the build scripts change. **Required check:** `Spec gate` until CP4. **Output:** a merge.
+- **Secrets, variables:** `KERNEL_BUMP_TOKEN`, `REGISTRY_HOST`. **Environment:** none. **Runner:** hosted. **Concurrency:** `spec-build-check-<workflow>-<PR or ref>`, cancels in progress; the workflow name keeps the direct run and the call of CI26 apart.
 - **Scripts:** `forge/scripts/build_changed_specs.sh`, `build_spec.sh`, `run_spec_build.sh`, `fetch_sources.sh`, `retry.sh`, `bot_merge.py`.
 - **Health (PRs):** 37444217670 success; 37442223223 in progress; 37439356668 failure; 37438370850, 37437287063 success.
 
@@ -296,6 +297,23 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 - **Scripts:** `forge/specs/azoth/signer/publish.sh`, `lock.sh`, `forge/scripts/retry.sh`.
 - **Health:** not run yet. Until its digest is committed in `signer/image.digest`, CI6 `prepare` and `sign` fail closed. `signer/run.sh` pulls that digest only once cosign has verified it as signed by this workflow on `iso-v0` or `main`.
 
+### CI26 Pull Request
+
+- **File:** `pr.yml`. **Purpose:** the pull request gate (doc_pipeline.md section 3, PL3; ADR-0075): change detection, `just check`, the build checks the change selects, and `gate`, the one aggregate check.
+- **Triggers:** every `pull_request` and `merge_group`, with no path filter. **Outputs:** artifact `changes` (`changes.json`: `kernel`, `specs`, `image`, `shell`, `docs_only`); check `gate`.
+- **Jobs:** `changes` (`scripts/ci/changes.py`), `check` (`scripts/ci/install-tools.sh`, then `just check <base>`), `kernel` (CI27, when the kernel is selected), `specs` (CI14, when the specs are selected), `gate` (`scripts/ci/gate.py`: needs every other job, runs always, red when a job failed or was cancelled or a selected area did not run). The image and shell areas are detected but still checked by CI13 and CI15 (doc_pipeline.md blocks PB11, PB12).
+- **Secrets, variables:** none of its own; CI27 reads `KERNEL_REGISTRY`, CI14 `REGISTRY_HOST`. **Environment:** none. **Runner:** hosted; CI27's `build` self-hosted. **Concurrency:** `pr-<PR or ref>`, cancels in progress.
+- **Scripts:** `scripts/ci/changes.py`, `scripts/ci/gate.py`, `scripts/ci/install-tools.sh`, the `check` recipe of the `Justfile`.
+- **Health:** not run yet.
+
+### CI27 Reusable Kernel Check
+
+- **File:** `call-kernel.yml`. **Purpose:** the check part of CI8 for CI26: inputs (reuse), build, boot matrix, NVIDIA modules (CI7), and a `Kernel verdict` job with the rule of `Kernel gate` without the lint. It publishes and signs nothing.
+- **Triggers:** `workflow_call` from CI26 job `kernel`. **Inputs:** `stage` (default `build`). **Outputs:** artifacts `kernel-<stage>`, `kernel-boot`, `kernel-devel`, `kernel-boot-logs`.
+- **Secrets, variables:** `GITHUB_TOKEN`, `KERNEL_REGISTRY`. **Environment:** none. **Runner:** `build` self-hosted, skipped for PRs from forks; the rest hosted. **Concurrency:** caller's.
+- **Scripts:** as CI8, without `retention.sh`. Its jobs mirror CI8's until CI8 calls it (doc_pipeline.md block PB12).
+- **Health:** not run yet.
+
 ## 3. Known broken workflows
 
 | Id | Workflow | Cause | Evidence |
@@ -348,3 +366,4 @@ Environments (`gh api repos/ars-regia/athanor/environments`):
 
 - **CP2** _(Done 2026-10-06)_: CI8 runs on every pull request and calls CI2 first; `Kernel gate`, the check required on `iso-v0`, is green only when CI2 is, so no PR merges into `iso-v0` unlinted. PRs into `main` or into a stacked branch are linted but not gated. The cost is accepted: a CI2 failure unrelated to the kernel (a red suite, a download that fails) also holds back the kernel build, its publication and the Orchestrator dispatch until a re-run.
 - **CP3** _(Proposal)_: call CI2 once in CI1 and drop the nested calls in CI3, CI4 and CI5; they lint the same commit four times per run.
+- **CP4** _(Ready, waits for the maintainer)_: `gate` of CI26 becomes the only required check of `iso-v0` and `main`, in place of `Kernel gate` and `Spec gate`. `.github/settings/branch-protection.json` already names it; applying it is a live step, in the order of `docs/operations/github-settings.md` ("Switching the required check to gate"). After it, a follow-up change removes the `pull_request` triggers of CI8 and CI14, drops `Kernel gate` and `Spec gate` from `REQUIRED_CHECKS`, and moves the spec bot merge into CI26; a documentation-only pull request then runs no kernel job at all.

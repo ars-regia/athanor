@@ -14,11 +14,7 @@
       "checks": [
         {
           "app_id": 15368,
-          "context": "Kernel gate"
-        },
-        {
-          "app_id": 15368,
-          "context": "Spec gate"
+          "context": "gate"
         }
       ],
       "strict": false
@@ -40,7 +36,7 @@
       "checks": [
         {
           "app_id": 15368,
-          "context": "Kernel gate"
+          "context": "gate"
         }
       ],
       "strict": false
