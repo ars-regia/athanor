@@ -1,5 +1,6 @@
 # Athanor OS: environment of the kernel signatures (forge/specs/azoth/sign-kernel.sh;
-# docs/architecture/doc_ci.md, D43). The sign-only job of nvidia-kmod.yml runs this image by
+# docs/architecture/doc_ci.md, D43). The sign-only job of the kmod cycle (nvidia-kmod-sign,
+# athanor-forge-orchestrator.yml) runs this image by
 # the digest in signer/image.digest and never builds it: next to the Secure Boot and module
 # keys run only Fedora's sbsigntools, openssl, kmod (modinfo) and the sign-file of Fedora's
 # kernel-devel, never a binary this project compiled. The packages are toolchain.packages,

@@ -73,7 +73,12 @@ class BotMergeTest(unittest.TestCase):
         (root / bot.WATCH_FILE).write_text(json.dumps(watch))
         os.chdir(root)
         self.runs = [{"id": 1, "status": "completed"}]
-        self.jobs = {1: [{"name": "Kernel gate", "conclusion": "success"}]}
+        # Spec Build Check calls the bot from its own run: the gate job has ended, the run has not.
+        self.spec_runs = [{"id": 101, "status": "in_progress"}]
+        self.jobs = {
+            1: [{"name": "Kernel gate", "conclusion": "success"}],
+            101: [{"name": "Spec gate", "conclusion": "success"}, {"name": "merge", "conclusion": None}],
+        }
 
     def tearDown(self):
         os.chdir(self.cwd)
@@ -110,9 +115,12 @@ class BotMergeTest(unittest.TestCase):
         return [c for c in self.calls if c[:2] == ("pr", "merge")]
 
     def actions(self, endpoint):
-        """The Actions API of the fake repository: Kernel Build runs on SHA and their jobs."""
+        """The Actions API of the fake repository: Kernel Build and Spec Build Check runs on SHA
+        and their jobs."""
         if endpoint == f"repos/owner/repo/actions/workflows/kernel-build.yml/runs?head_sha={SHA}&event=pull_request":
             return json.dumps({"workflow_runs": self.runs})
+        if endpoint == f"repos/owner/repo/actions/workflows/spec-build-check.yml/runs?head_sha={SHA}&event=pull_request":
+            return json.dumps({"workflow_runs": self.spec_runs})
         run = int(endpoint.split("/runs/")[1].split("/")[0])
         assert endpoint == f"repos/owner/repo/actions/runs/{run}/jobs?per_page=100", endpoint
         return json.dumps({"jobs": self.jobs[run]})
@@ -274,19 +282,21 @@ class BotMergeTest(unittest.TestCase):
         self.assertFalse([c for c in self.calls if c[:2] == ("pr", "merge")])
 
     def test_gate_not_reported_yet_is_awaited(self):
-        states = [[], [{"id": 1, "status": "queued"}], self.runs]
+        # A queued run has no gate job yet; it ends green on the third poll.
+        states = [[], [{"id": 3, "status": "queued"}], [{"id": 3, "status": "completed"}]]
         slept = []
 
         def sleep(_):
             slept.append(_)
             self.runs = states[len(slept)]
+            self.jobs[3] = [{"name": "Kernel gate", "conclusion": "success"}] if len(slept) == 2 else []
 
         self.runs = states[0]
-        bot.wait_for_required_check(SHA, self.gh_actions, sleep=sleep)
+        bot.wait_for_required_checks(SHA, self.gh_actions, sleep=sleep)
         self.assertEqual(len(slept), 2)
         self.runs = []
         with self.assertRaises(SystemExit):
-            bot.wait_for_required_check(SHA, self.gh_actions, sleep=slept.append, polls=3)
+            bot.wait_for_required_checks(SHA, self.gh_actions, sleep=slept.append, polls=3)
 
     def test_superseded_green_gate_does_not_count(self):
         # PR #94: a green gate of an earlier Kernel Build on the same commit, and a newer
@@ -295,7 +305,7 @@ class BotMergeTest(unittest.TestCase):
         self.runs.append({"id": 2, "status": "in_progress"})
         self.jobs[2] = [{"name": "inputs", "conclusion": None}]
         with self.assertRaises(SystemExit):
-            bot.wait_for_required_check(SHA, self.gh_actions, sleep=lambda _: None, polls=3)
+            bot.wait_for_required_checks(SHA, self.gh_actions, sleep=lambda _: None, polls=3)
         done = []
 
         def finish(_):
@@ -303,12 +313,33 @@ class BotMergeTest(unittest.TestCase):
             self.jobs[2] = [{"name": "Kernel gate", "conclusion": "success"}]
             done.append(_)
 
-        bot.wait_for_required_check(SHA, self.gh_actions, sleep=finish)
+        bot.wait_for_required_checks(SHA, self.gh_actions, sleep=finish)
         self.assertEqual(len(done), 1)
         self.runs[1]["status"] = "completed"
         self.jobs[2] = [{"name": "inputs", "conclusion": "failure"}]
         with self.assertRaises(SystemExit):
-            bot.wait_for_required_check(SHA, self.gh_actions, sleep=lambda _: None)
+            bot.wait_for_required_checks(SHA, self.gh_actions, sleep=lambda _: None)
+
+
+    def test_red_or_missing_spec_gate_fails_without_merging(self):
+        self.jobs[101] = [{"name": "Spec gate", "conclusion": "failure"}]
+        with self.assertRaises(SystemExit):
+            self.system()
+        self.assertFalse([c for c in self.calls if c[:2] == ("pr", "merge")])
+        self.spec_runs = [{"id": 101, "status": "completed"}]
+        self.jobs[101] = [{"name": "select", "conclusion": "success"}]
+        with self.assertRaises(SystemExit):
+            bot.wait_for_required_checks(SHA, self.gh_actions, sleep=lambda _: None)
+
+    def test_spec_gate_pending_is_awaited(self):
+        self.jobs[101] = [{"name": "Spec gate", "conclusion": None}]
+        with self.assertRaises(SystemExit):
+            bot.wait_for_required_checks(SHA, self.gh_actions, sleep=lambda _: None, polls=3)
+
+        def finish(_):
+            self.jobs[101] = [{"name": "Spec gate", "conclusion": "success"}]
+
+        bot.wait_for_required_checks(SHA, self.gh_actions, sleep=finish)
 
 
 if __name__ == "__main__":

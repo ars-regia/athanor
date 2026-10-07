@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# The steps of .github/workflows/nvidia-kmod.yml that run the signer image (signer/Containerfile,
+# The steps of the NVIDIA kmod cycle (.github/workflows/call-nvidia-kmod-prepare.yml and the
+# nvidia-kmod-sign job of athanor-forge-orchestrator.yml) that run the signer image (signer/Containerfile,
 # which carries ../sign-kernel.sh; docs/architecture/doc_ci.md, D43). The image is pulled by the
 # digest committed in signer/image.digest, only once cosign has verified that digest as signed
 # by .github/workflows/azoth-signer.yml on a trusted branch, and is never built here; every

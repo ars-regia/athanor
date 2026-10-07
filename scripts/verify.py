@@ -319,8 +319,10 @@ def signing_problems(root):
     upload-artifact pinned by SHA and pointed at this run and repository, calls no reusable
     workflow, runs no container and builds, installs or runs no locally built image; no secret
     is read other than by name, and no caller inherits secrets into a workflow with a signing
-    job; each signing environment has a required reviewer, no administrator bypass, and deploys
-    only from protected branches. Every secret read is declared in the settings: held by an
+    job; no signing job is in a workflow that runs on workflow_call, where the secrets of its
+    environment are empty unless the caller inherits them (actions/runner#4453); each signing
+    environment has a required reviewer, no administrator bypass, and deploys only from
+    protected branches. Every secret read is declared in the settings: held by an
     environment of environments.json, or a repository secret of actions.json that no signing
     environment holds."""
     root = Path(root)
@@ -367,6 +369,14 @@ def signing_problems(root):
             problems.append(f"{name}: runs on pull_request_target, which runs with the secrets of this "
                             "repository on behalf of a fork (D43)")
         if name in with_signing_job:
+            if "workflow_call" in triggers(doc):
+                for job_id, job in doc["jobs"].items():
+                    if environment_of(job) in signing:
+                        problems.append(
+                            f"{name}: signing job {job_id} is in a workflow that runs on workflow_call, "
+                            "where its environment's secrets are empty unless the caller inherits every "
+                            "secret (actions/runner#4453): sign in a job of the workflow the event "
+                            "starts (D43)")
             env = doc.get("env") or {}
             for key in sorted(set(env) - SIGN_JOB_ENV) if isinstance(env, dict) else ["env"]:
                 problems.append(f"{name}: sets {key} in env, beside a signing job: only {sorted(SIGN_JOB_ENV)} (D43)")
