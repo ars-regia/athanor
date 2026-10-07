@@ -112,7 +112,7 @@ class ServicesTest(unittest.TestCase):
             1,
         )
 
-    def test_a_drop_in_on_an_upstream_unit_counts_only_when_it_adds_a_command(self):
+    def test_a_drop_in_on_an_upstream_unit_counts_when_it_adds_a_command(self):
         dropin = "pkg/SOURCES/usr/lib/systemd/system/greetd.service.d/10.conf"
         self.assertEqual(problems({dropin: "[Service]\nEnvironment=A=1\n"}), [])
         for command in (
@@ -126,6 +126,26 @@ class ServicesTest(unittest.TestCase):
                 self.assertIn("greetd.service.d", found[0])
                 hardened = "[Service]\n" + command + "NoNewPrivileges=yes\n"
                 self.assertEqual(problems({dropin: hardened}), [])
+
+    def test_a_drop_in_on_an_upstream_unit_counts_when_it_sets_privileges(self):
+        dropin = "pkg/SOURCES/usr/lib/systemd/system/nix-daemon.service.d/50.conf"
+        for setting in (
+            "CapabilityBoundingSet=CAP_CHOWN CAP_SYS_ADMIN\n",
+            "AmbientCapabilities=CAP_NET_ADMIN\n",
+            "NoNewPrivileges=no\n",
+            "User=root\n",
+            "Group=wheel\n",
+            "SupplementaryGroups=wheel\n",
+        ):
+            with self.subTest(setting=setting):
+                found = problems({dropin: "[Service]\nMemoryHigh=75%\n" + setting})
+                self.assertEqual(len(found), 1)
+                self.assertIn("nix-daemon.service.d", found[0])
+                hardened = "[Service]\n" + setting + "NoNewPrivileges=yes\n"
+                self.assertEqual(problems({dropin: hardened}), [])
+        allow_list = "[Service]\nCapabilityBoundingSet=CAP_CHOWN CAP_KILL\n"
+        self.assertEqual(problems({dropin: allow_list}), [])
+        self.assertEqual(problems({dropin: "[Service]\nNoNewPrivileges=yes\n"}), [])
 
     def test_the_top_level_service_d_applies_to_every_unit(self):
         top = "pkg/SOURCES/usr/lib/systemd/system/service.d/10-nnp.conf"

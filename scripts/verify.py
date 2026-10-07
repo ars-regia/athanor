@@ -1955,6 +1955,15 @@ EXEC_KEYS = {
     "ExecStop",
     "ExecStopPost",
 }
+# Settings that change the privileges the unit it extends runs with.
+PRIVILEGE_KEYS = {
+    "User",
+    "Group",
+    "SupplementaryGroups",
+    "AmbientCapabilities",
+    "CapabilityBoundingSet",
+    "NoNewPrivileges",
+}
 # A heredoc: its opening line (whose `> file` names the target, before or after `<<`), its
 # delimiter, and the body up to the delimiter's own line.
 HEREDOC = re.compile(
@@ -2057,7 +2066,9 @@ def service_problems(files):
 
     A drop-in directory that is not the own directory of a unit in `files` (an upstream unit, a
     dash prefix, a template, `service.d`) counts as a service of its own when it adds a command
-    (EXEC_KEYS): that command is ours, and the upstream unit's own settings are not visible."""
+    (EXEC_KEYS) or changes the unit's privileges (PRIVILEGE_KEYS): that command or privilege is
+    ours. The upstream unit's own settings are not visible, so the drop-in alone must meet the
+    rule."""
     dropins = {}
     for path in files:
         parent = Path(path).parent.name
@@ -2077,7 +2088,9 @@ def service_problems(files):
     own = {f"{unit}.d" for unit, _ in units.values()}
     for d, paths in dropins.items():
         if d not in own and any(
-            key in EXEC_KEYS for p in paths for key, _ in unit_directives(files[p])
+            key in EXEC_KEYS | PRIVILEGE_KEYS
+            for p in paths
+            for key, _ in unit_directives(files[p])
         ):
             unit = d[:-2] if d != "service.d" else ".service"
             units[str(Path(sorted(paths)[0]).parent)] = (unit, "")
