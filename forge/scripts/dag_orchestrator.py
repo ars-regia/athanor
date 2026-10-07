@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 """
 Athanor Forge DAG Orchestrator Engine
-Calculates Directed Acyclic Graph (DAG) for RPM dependencies, asks the registry which
-custom packages are already built, and outputs topological matrix execution levels for
-parallel GitHub Actions execution.
+Builds the package graph (tiers and spec requirements) and fails on a cycle, asks the
+registry which custom packages are already built, and outputs the dirty ones as the one
+build matrix of call-dag-compile.yml (docs/architecture/doc_pipeline.md, PL48).
 """
 
 import sys
 import os
 import glob
+import graphlib
 import re
 import json
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import tomllib
-from collections import defaultdict, deque
+from collections import defaultdict
 
 CONFIG_PATH = os.environ.get("CONFIG_PATH", "config/packages.json")
 if not os.path.exists(CONFIG_PATH) and os.path.exists("forge/config/packages.json"):
@@ -429,50 +430,25 @@ def write_hashes(hashes):
         json.dump(hashes, f, indent=2, sort_keys=True)
         f.write("\n")
 
-def partition_dag_levels(dirty_nodes, graph, prereqs, node_types):
-    """
-    Groups dirty nodes into topological execution levels (Level 0, Level 1, Level 2, Flatpaks).
-    """
-    level_0 = []
-    level_1 = []
-    level_2 = []
-    flatpaks = []
-    
-    dirty_prereqs = {n: set(p for p in prereqs[n] if p in dirty_nodes) for n in dirty_nodes}
-    dirty_in_degree = {n: len(dirty_prereqs[n]) for n in dirty_nodes}
-    
-    queue = deque([n for n in dirty_nodes if dirty_in_degree[n] == 0])
-    level_map = {}
-    
-    for n in queue:
-        level_map[n] = 0
+def graph_cycle(nodes, prereqs):
+    """A cycle of the package graph, as the list of its nodes, or None. The graph is not a
+    build order (see build_matrix) but the runtime and tier order the image installs in: a
+    cycle there means a tier assignment and a Requires that contradict each other."""
+    try:
+        graphlib.TopologicalSorter({node: prereqs[node] for node in nodes}).prepare()
+    except graphlib.CycleError as error:
+        return error.args[1]
+    return None
 
-    while queue:
-        curr = queue.popleft()
-        curr_lvl = level_map[curr]
-        
-        for neighbor in graph[curr]:
-            if neighbor in dirty_nodes:
-                level_map[neighbor] = max(level_map.get(neighbor, 0), curr_lvl + 1)
-                dirty_in_degree[neighbor] -= 1
-                if dirty_in_degree[neighbor] == 0:
-                    queue.append(neighbor)
 
-    for node in dirty_nodes:
-        if node_types.get(node) == "flatpak":
-            flatpaks.append(node)
-        elif node_types.get(node) == "custom":
-            lvl = level_map.get(node, 0)
-            if lvl == 0:
-                level_0.append(node)
-            elif lvl == 1:
-                level_1.append(node)
-            else:
-                level_2.append(node)
-        else:
-            pass # [MARTIAL LAW] Do not schedule upstream packages for compilation!
-                
-    return level_0, level_1, level_2, flatpaks
+def build_matrix(dirty_nodes):
+    """The one matrix of package builds: every dirty package, sorted, whatever its place in
+    the graph. Builds run with rpmbuild --nodeps in the builder image and none consumes
+    another package's output: no BuildRequires names a package of the graph, and no Source
+    or fetch step pulls a forge image. Ordering them in levels made a package wait for
+    builds it never reads."""
+    return sorted(dirty_nodes)
+
 
 def main():
     print("🧠 Forge DAG Architect initializing... (registry hash tags)")
@@ -483,6 +459,10 @@ def main():
         sys.exit("dag_orchestrator: a package requires one of a later tier; move one of them in "
                  "forge/config/packages.json:\n  " + "\n  ".join(inversions))
     all_nodes, graph, prereqs, in_degree, node_types = build_dag(manifest)
+    cycle = graph_cycle(all_nodes, prereqs)
+    if cycle:
+        sys.exit("dag_orchestrator: the package graph has a cycle, a tier order and a Requires "
+                 "that contradict each other: " + " -> ".join(cycle))
     
     print(f"📊 DAG Topology built: {len(all_nodes)} nodes analyzed.")
     
@@ -490,55 +470,21 @@ def main():
     write_hashes(hashes)
     dirty_nodes = evaluate_dirty_nodes(hashes)
     
-    level_0, level_1, level_2, flatpaks = partition_dag_levels(dirty_nodes, graph, prereqs, node_types)
-    
-    has_changes = "true" if len(dirty_nodes) > 0 else "false"
-    
-    j_lvl0 = json.dumps(level_0)
-    j_lvl1 = json.dumps(level_1)
-    j_lvl2 = json.dumps(level_2)
-    j_fp = json.dumps(flatpaks)
-    
-    print(f"🚀 DAG Execution Plan calculated:")
-    print(f"  -> Level 0 Parallel Nodes ({len(level_0)}): {j_lvl0}")
-    print(f"  -> Level 1 Parallel Nodes ({len(level_1)}): {j_lvl1}")
-    print(f"  -> Level 2 Parallel Nodes ({len(level_2)}): {j_lvl2}")
-    print(f"  -> Flatpak Parallel Nodes ({len(flatpaks)}): {j_fp}")
+    packages = json.dumps(build_matrix(dirty_nodes))
+    has_changes = "true" if dirty_nodes else "false"
+
+    print(f"🚀 Packages to build ({len(dirty_nodes)}): {packages}")
     print(f"  -> Has Changes: {has_changes}")
 
-    
-    # Creazione della Rappresentazione Visiva del DAG (Mermaid) per Github Actions
-    mermaid = ["```mermaid", "graph TD;"]
-    for node in dirty_nodes:
-        safe_node = "n_" + node.replace("-", "_")
-        parents = [p for p in prereqs[node] if p in dirty_nodes]
-        if parents:
-            for p in parents:
-                safe_p = "n_" + p.replace("-", "_")
-                mermaid.append(f'    {safe_p}["{p}"] --> {safe_node}["{node}"];')
-        else:
-            mermaid.append(f'    {safe_node}["{node}"];')
-    mermaid.append("```")
-    mermaid_str = "\n".join(mermaid)
-    if len(mermaid_str) > 40000:
-        mermaid_str = "```mermaid\ngraph TD;\n    too_large[\"Il DAG supera i 40k caratteri e non puo' essere renderizzato.\"];\n```"
-    
     github_summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if github_summary:
-        try:
-            with open(github_summary, "a") as f:
-                f.write("### 🌋 Athanor Forge DAG - Execution Topology\n")
-                f.write(mermaid_str + "\n")
-        except OSError:
-            pass
+        with open(github_summary, "a") as f:
+            f.write(f"### 🌋 Athanor Forge DAG\n\nPackages to build ({len(dirty_nodes)}): `{packages}`\n")
 
     github_output = os.environ.get("GITHUB_OUTPUT")
     if github_output:
         with open(github_output, "a") as f:
-            f.write(f"dag_level_0={j_lvl0}\n")
-            f.write(f"dag_level_1={j_lvl1}\n")
-            f.write(f"dag_level_2={j_lvl2}\n")
-            f.write(f"dag_flatpaks={j_fp}\n")
+            f.write(f"dag_packages={packages}\n")
             f.write(f"dirty_count={len(dirty_nodes)}\n")
             f.write(f"has_changes={has_changes}\n")
 

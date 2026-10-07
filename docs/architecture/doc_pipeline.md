@@ -10,7 +10,9 @@
   decisions it changes (section 15). The maintainer approved the document and
   answered PQ1-PQ12 as recommended on 2026-10-07; the blocks of section 12 are built in order. Measured figures come from the GitHub API run data of 2026-09-23 to
   2026-10-07 (784 runs) collected by the pipeline review of 2026-10-07; every other number is
-  labelled as an estimate.
+  labelled as an estimate. Amended 2026-10-07: the two signing jobs are jobs of `release.yml`,
+  not reusable stages, because a called workflow's job does not read its environment's secrets
+  ([actions/runner#4453](https://github.com/actions/runner/issues/4453); section 3.2).
 - **Depends on:** [doc_update_delivery.md](doc_update_delivery.md) (UD1-UD44: channels,
   promotion, retention, pinning), [doc_update_trust.md](doc_update_trust.md) (UT1-UT13),
   [doc_build_ordering.md](doc_build_ordering.md) (O1-O9), [doc_build_system.md](doc_build_system.md),
@@ -84,7 +86,8 @@ signed digest).
 
 ### 3.1 Entry workflows
 
-Six workflows have triggers. Everything else is a reusable stage they call.
+Six workflows have triggers. Everything else is a reusable stage they call, except the two
+jobs that sign, which are jobs of `release.yml` itself (section 3.2).
 
 | Entry            | Triggers                                       | What it does                                                                                                                                                       |
 | ---------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -102,9 +105,21 @@ Six workflows have triggers. Everything else is a reusable stage they call.
 | `call-builder.yml`        | the builder image, by content hash (UD42)                                                               | hosted                             |
 | `call-packages.yml`       | one matrix over the dirty packages of `plan.json`; tier repositories by `hash-` tag (PR #248, UD44)      | hosted                             |
 | `call-kernel.yml`         | Azoth, `azoth-devel`, the NVIDIA modules once per kernel or NVIDIA change, unsigned                      | self-hosted ephemeral guest (build), hosted (the rest) |
-| `call-sign-kernel.yml`    | environment `signing-kernel`: signs the modules and `vmlinuz`, publishes `azoth-nvidia` and `azoth-boot` | hosted, pinned signer image only   |
+| `call-kernel-publish.yml` | after the `sign-kernel` job of `release.yml`: boots the signed modules, publishes `azoth-nvidia` and `azoth-boot` | hosted, KVM for the boot |
 | `call-image.yml`          | the `system` stage once and the three variants from its digest (UD40); pushes `:<run_id>` only (UD24)    | hosted                             |
-| `call-sign-images.yml`    | environment `signing-images`: key-based signature, verification, then the tags (UD25)                   | hosted, pinned signer image only   |
+| `call-tag.yml`            | after the `sign-images` job of `release.yml`: verifies the key-based signature as a machine does, then moves the tags (UD25) | hosted |
+
+The two jobs that hold a key are not stages: `sign-kernel` (environment `signing-kernel`)
+and `sign-images` (environment `signing-images`) are jobs of `release.yml`, each between
+the stage that hands it digests and the stage that publishes what it signed, all of them
+exchanging files through the run's artifacts. A job of a called workflow reads the secrets
+of its environment only when its caller passes `secrets: inherit`
+([actions/runner#4453](https://github.com/actions/runner/issues/4453)): in run 37598455557 the sign job of `nvidia-kmod.yml`, called
+by the Orchestrator without it, ran with both kernel keys empty although `signing-kernel`
+holds them. An inherit would hand every secret of the repository to every job of the
+stage, which D43 forbids, so a signing job lives in the workflow the event starts, where
+its environment resolves. `verify.py workflows` rejects a job of a signing environment in
+a workflow that has `workflow_call` among its triggers.
 
 The build stages generate SLSA provenance themselves, so the signer identity of every
 attestation is the stage, not the caller (PL21).
@@ -126,7 +141,7 @@ The schemas live in `scripts/ci/schemas/` and every writer validates against the
 
 | File                          | Writer                    | Readers                         | Content                                                                                             |
 | ----------------------------- | ------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `changes.json`                | `pr.yml` change detection | `pr.yml` jobs                   | the areas a change touches (specs, kernel, image, shell, docs only)                                 |
+| `changes.json`                | `pr.yml` change detection | `pr.yml` jobs                   | the areas a change touches (specs, kernel, docs only; image and shell join with their `pr.yml` jobs in PB11, PB12). Known gap: `Cargo.toml`, `Cargo.lock` and `deny.toml` belong to no area yet, so a dependency change selects no build (follow-up) |
 | `plan.json`                   | release `plan`            | every release stage             | dirty packages with content hashes, whether kernel or modules change, the variants of `images.json` |
 | `kernel-artifacts.env`        | `system/kernel-artifacts.sh` | image, signing                | kernel, devel, module and boot digests and their registry (O5)                                      |
 | `tier-digests.json`           | `call-packages.yml`       | `call-image.yml`                | tier repository digests, verified (UD44)                                                            |
@@ -152,10 +167,11 @@ flowchart LR
   subgraph R["release.yml"]
     P[plan.json] --> PK[call-packages]
     P --> KE[call-kernel]
-    KE --> SK[call-sign-kernel<br/>env signing-kernel]
-    PK & SK --> IM[call-image]
-    IM --> SI[call-sign-images<br/>env signing-images]
-    SI --> L[":latest"]
+    KE --> SK[sign-kernel job<br/>env signing-kernel]
+    SK --> KP[call-kernel-publish]
+    PK & KP --> IM[call-image]
+    IM --> SI[sign-images job<br/>env signing-images]
+    SI --> L["call-tag<br/>:latest"]
     SI --> ISO[ISO]
   end
   R --> A["accept.yml<br/>evidence + VSA"]
@@ -173,20 +189,20 @@ flowchart LR
 | `call-build-builder.yml`         | kept as `call-builder.yml`, consumed by digest                                                     |
 | `call-dag-compile.yml`           | replaced by `call-packages.yml`: one matrix instead of three copies of the level job               |
 | `call-lint.yml`                  | deleted: `just check` in `pr.yml`; the release path does not lint again (PL44)                     |
-| `call-system-image.yml`          | split into `call-image.yml` and `call-sign-images.yml`                                             |
+| `call-system-image.yml`          | split into `call-image.yml`, the `sign-images` job of `release.yml` and `call-tag.yml` |
 | `cosmic-comp-bump.yml`           | merged into `bots.yml`                                                                             |
 | `cosmic-comp-rebase.yml`         | merged into `maintenance.yml` (weekly)                                                             |
 | `forge-ghcr-cleanup.yml`         | merged into `maintenance.yml` (weekly janitor, section 5)                                               |
 | `forge-util-update-specs.yml`    | merged into `bots.yml`                                                                             |
 | `fuzzing.yml`                    | merged into `maintenance.yml` (weekly)                                                             |
 | `iso-acceptance.yml`             | replaced by `accept.yml`, addressed by run id (UD17)                                               |
-| `kernel-build.yml`               | split: the check into `pr.yml`, the build into `call-kernel.yml`, the signing into `call-sign-kernel.yml` |
+| `kernel-build.yml`               | split: the check into `pr.yml`, the build into `call-kernel.yml`, the signing into the `sign-kernel` job of `release.yml` |
 | `kernel-bump.yml`                | merged into `bots.yml`                                                                             |
 | `kernel-weekly.yml`              | merged into `maintenance.yml` (weekly)                                                             |
 | `nix-registry-bump.yml`          | merged into `bots.yml`                                                                             |
 | `nix-vanguard.yml`               | deleted: its triggers name a branch without a release role and `just check` covers the flake      |
 | `nvidia-build.yml`               | merged into `call-kernel.yml`                                                                      |
-| `nvidia-kmod.yml`                | split into `call-kernel.yml` (build) and `call-sign-kernel.yml` (D43)                              |
+| `nvidia-kmod.yml`                | split into `call-kernel.yml` (build), the `sign-kernel` job of `release.yml` and `call-kernel-publish.yml` (D43) |
 | `promote-stable.yml`             | replaced by `promote.yml`                                                                          |
 | `rust-security-audit.yml`        | deleted: `cargo deny` in `just check` (ADR-0075), the daily rescan in `maintenance.yml`            |
 | `shell-layout-outputs.yml`       | merged into `maintenance.yml` (weekly)                                                             |
@@ -282,7 +298,8 @@ cache step in a release-path job.
 
 **PL11. A job that holds a signing key builds nothing and runs no third-party action**
 (D43). It runs the pinned signer image on the exact digests a build job handed over, and
-`verify.py workflows` rejects any other step in a job that names an environment with a key.
+`verify.py workflows` rejects any other step in a job that names an environment with a key,
+and such a job in a reusable workflow (section 3.2).
 
 ### 4.3 Intermediate artifacts
 
@@ -445,12 +462,12 @@ action.
 
 **PL35. One rule per tag, one writer per tag** (UD1). `:<run_id>` and `hash-<h>` are
 immutable names written once; `:latest` is written on a push to the default branch only: for the system
-images by `call-sign-images.yml` after verification, for the ISO by the stage that builds it
-after its keyless signature verified (PL32); the kernel has no `:latest`, since every
-consumer reads it by digest (PL13). `:stable`, `:stable-previous`, `:stable-<YYYYMMDD>` are
-written only by `promote.sh`. There is one writer per tag and repository, and
-`verify.py workflows` enforces it in the workflows and in the scripts they call
-(`system/sign-images.sh`, `system/promote.sh`) (UD1 acceptance).
+images by `call-tag.yml` after it verified the key-based signature as a machine does (UD25),
+for the ISO by the stage that builds it after its keyless signature verified (PL32); the
+kernel has no `:latest`, since every consumer reads it by digest (PL13). `:stable`,
+`:stable-previous`, `:stable-<YYYYMMDD>` are written only by `promote.sh`. There is one
+writer per tag and repository, and `verify.py workflows` enforces it in the workflows and in
+the scripts they call (`system/sign-images.sh`, `system/promote.sh`) (UD1 acceptance).
 
 Retention, by ADR-0081 (this amends the 90-day figure of UT10 and UD8):
 
@@ -648,8 +665,9 @@ runs (Node runtime, action majors), so a deprecation has an owner before it brea
   (exists: `registry`), pinning (PL8), permissions (PL7), timeouts (PL47), key isolation
   (PL11), one writer per tag (PL35).
 - **`just check` runs every verify check** and the four test directories that no
-  workflow runs today; checks red at adoption are allow-listed in the verifier itself
-  (ADR-0075 decision 1), each with an issue and an expiry date, and the list may only shrink (PQ12).
+  workflow runs today; the findings red at adoption are listed one by one in
+  `scripts/ci/known-red.txt` (the finding text without line numbers, each with an issue
+  and an expiry date), any finding not listed is red, and the list may only shrink (PQ12).
 - **doc_ci.md is checked against the tree** (`verify.py ci`, exists) and gains the
   stage and contract tables generated from the workflow files, so the description cannot
   drift. Until PB12, `verify.py docs` also fails when section 3.5 of this document and
@@ -704,7 +722,7 @@ step only the maintainer can take.
 | **PB0** | Publication under `ars-regia` and the two signing environments (D43) | branch `perf/sign-only-uki`, PR #249, `.github/settings/environments.json`, `nvidia-kmod.yml`, `call-system-image.yml`, `docs/operations/secrets.md` | `python3 scripts/verify.py workflows` green with the key-isolation rule; one release run on `iso-v0` publishes three signed `:<run_id>` images under `ars-regia` with at most two approvals; the live environments list `signing-kernel` and `signing-images`, plus `signing` while the image key rotation of secrets.md section 4.1 runs, each recorded in `environments.json` and deployable from `iso-v0` and `main` only | PR #249 | 2-3 (estimate) |
 | | **[M]** create the two environments, move the secrets, approve the run; `signing` and `MOK_PRIVATE_KEY` stay until PB5b | | | | |
 | **PB1** | One gate (ADR-0075) | `pr.yml`, `Justfile` (`check`), `scripts/ci/changes.py`, `scripts/ci/gate.py`, the `pull_request` trigger of `kernel-build.yml`, `.github/settings/branch-protection.json` | `just check` passes locally and in `pr.yml`; a documentation-only PR finishes with Kernel Build skipped and `gate` green; a PR with a failing selected job has `gate` red | PB0 | 3 (estimate) |
-| | **[M]** in the window of the `pr.yml` merge, replace the required check `Kernel gate` with `gate` on both branches (branch protection is enough; the rulesets come in PB2). Order: merge `pr.yml` with `gate` reporting beside `Kernel gate`, switch the required check, then drop the `pull_request` trigger of `kernel-build.yml` | | | | |
+| | **[M]** apply `branch-protection.json`, which adds `gate` to `Kernel gate` and `Spec gate` on `iso-v0` (`docs/operations/github-settings.md` section 8); the follow-up that drops their `pull_request` triggers removes the two names from the file in the same change, and until it, Kernel Build still runs on a documentation-only PR, while the `kernel` job of `pr.yml` is skipped | | | | |
 | **PB2** | Source, review and settings controls, alerting | `.github/settings/rulesets.json`, `actions.json`, `environments.json`, `CODEOWNERS`, `scripts/github-settings/ghsettings.py` (extended), `.github/actions/alert`, the five action references still pinned by tag, `scripts/verify.py` (`pinning`) | `python3 scripts/github-settings/ghsettings.py diff` exits 0 against the live repository; the integrity ruleset (merge queue, `gate`, no bypass actor) and the review ruleset are live on both product branches; `python3 scripts/verify.py pinning` is green before SHA pinning is switched on; a release run triggered by the maintainer is approvable by him (PL5); the three personal tokens are absent from the secrets list; a forced failure of a scheduled job opens a `ci-alert` issue | PB1 | 2 (estimate) |
 | | **[M]** create one GitHub App per role, each private key in an environment scoped to its token-minting job with a row in secrets.md; decide the identity of the agents on the workstation (an App whose key lives in the maintainer's secret store, or a fine-grained token with an expiry); apply the two rulesets; enable the merge queue; enable SHA pinning once `verify.py pinning` is green | | | | |
 | **PB3** | Pinned inputs, verified hops (PL8, PL12-PL14) | `.github/actions/verify-input`, `scripts/ci/registry.sh`, `forge/config/images.json`, the key-isolation constants of `scripts/verify.py`, `scripts/runner/` (PL8) | `python3 scripts/verify.py pinning images workflows` green, with no literal registry host in the key-isolation lint; a release run's logs show a verification for every hop of PL12; the runner VM does not replace its pinned runner release | PB1 | 3-4 (estimate) |
@@ -740,7 +758,7 @@ The maintainer answered every question as recommended on 2026-10-07. Items marke
 | PQ9  | Are the SBOMs public? | Yes, in the evidence bundle: the product is open source and publication costs nothing. |
 | PQ10 | Visibility of `azoth-nvidia` | Public for the open-module branch; the legacy branch only after a licence check [LAWYER]. |
 | PQ11 | Which edge of the `update → recovery` cycle is wrong? | Drop the synthetic all-to-all tier edges and build the graph from the specs' requirements only; tiers stay as publication groups. The edge removal lands with the `graph` check, in PB12. |
-| PQ12 | Red verify checks when `just check` becomes the gate | Adopt with an allow-list (issue and expiry per entry, only shrinking) rather than blocking PB1 on fixing them all first. Revision 2: the allow-list lives in the verifier, as ADR-0075 decision 1 says, not in a separate `known-red.txt`. |
+| PQ12 | Red verify checks when `just check` becomes the gate | Adopt with `known-red.txt` (one entry per finding, not per check, with issue and expiry; only shrinking) rather than blocking PB1 on fixing them all first. |
 
 ## 14. Changes to other documents
 

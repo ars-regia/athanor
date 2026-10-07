@@ -35,7 +35,8 @@
     "recovery",
     "cargo-tools",
     "kernel-forge",
-    "cosmic-comp"
+    "cosmic-comp",
+    "greenboot-rs"
   ],
   "custom_tier0": [
     "stage0-bootstrap",
@@ -62,7 +63,8 @@
     "dart-sass",
     "keylime",
     "kernel-forge",
-    "cosmic-comp"
+    "cosmic-comp",
+    "greenboot-rs"
   ],
   "custom_tier3": [
     "greeter-ui",
@@ -98,8 +100,6 @@
     "glibc-langpack-it",
     "gnome-keyring",
     "gnome-keyring-pam",
-    "greenboot",
-    "greenboot-default-health-checks",
     "gvfs",
     "libnotify",
     "libxcrypt-compat",
