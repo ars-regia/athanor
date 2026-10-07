@@ -6,9 +6,10 @@
 # The signature must be the classic cosign attachment at <repo>:sha256-<hex>.sig, the only
 # format containers/image reads, so it is made with `skopeo copy
 # --sign-by-sigstore-private-key` and never with cosign 3, which writes a bundle every
-# Athanor machine treats as no signature. Each image is then pulled through the policy
-# rendered from this checkout (`skopeo copy --policy`), not checked with `cosign verify`:
-# that also catches a wrong registries.d entry before a machine meets it.
+# Athanor machine treats as no signature. It copies repo@digest onto itself: the digest the
+# build job recorded is what is signed, and no tag is read. Each image is then pulled through
+# the policy rendered from this checkout (`skopeo copy --policy`), not checked with `cosign
+# verify`: that also catches a wrong registries.d entry before a machine meets it.
 #
 # The key and its passphrase arrive in COSIGN_PRIVATE_KEY and COSIGN_PASSWORD. skopeo takes
 # both as files only, so they are written by the shell's own printf, under umask 077, into a
@@ -49,15 +50,12 @@ done < "$digests"
 bash "$root/forge/specs/athanor-update/SOURCES/usr/libexec/athanor-update/render-policy" \
   --registry "$registry" --keys-dir "$keys_dir" --out "$work/policy"
 
-while read -r repository tag digest; do
-  # The signature covers a digest; the tag is only how skopeo addresses the copy. A tag that
-  # no longer names the digest the build job recorded is not signed.
-  now=$(bash "$retry" skopeo inspect --format '{{.Digest}}' "docker://$repository:$tag")
-  [[ $now == "$digest" ]] || { echo "${0##*/}: $repository:$tag is $now, the build job recorded $digest" >&2; exit 1; }
+while read -r repository _ digest; do
   # skopeo writes the sigstore attachment only where registries.d enables it: the rendered
-  # one does, for exactly these repositories, and the runner's default does not.
+  # one does, for exactly these repositories, and the runner's default does not. A copy onto
+  # a digest reference fails unless the manifest still has that digest.
   bash "$retry" skopeo --registries.d "$work/policy/registries.d" copy --preserve-digests --sign-by-sigstore-private-key "$work/key" --sign-passphrase-file "$work/passphrase" \
-    "docker://$repository:$tag" "docker://$repository:$tag"
+    "docker://$repository@$digest" "docker://$repository@$digest"
 done < "$digests"
 
 n=0
