@@ -76,3 +76,4 @@ prune azoth 1000000
 prune azoth-devel 1000000
 prune azoth-debuginfo 2
 prune azoth-nvidia 1000000
+prune azoth-boot 1000000

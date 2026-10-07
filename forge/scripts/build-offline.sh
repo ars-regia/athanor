@@ -55,32 +55,14 @@ if command -v git &>/dev/null && git rev-parse --is-inside-work-tree &>/dev/null
     BUILD_ARGS+=("--build-arg" "SHA_HEAD_SHORT=${SHA_SHORT}")
 fi
 
-# Secure Boot key isolation & restrictive permissions check (chmod 0400)
-SECRET_ARGS=()
-if [ -d "/etc/pki/secureboot/private" ]; then
-    chmod 0700 /etc/pki/secureboot/private
-fi
-for keyfile in /etc/pki/secureboot/private/*.key /etc/pki/uki/*.key /run/secrets/*.key; do
-    if [ -f "$keyfile" ]; then
-        chmod 0400 "$keyfile"
-    fi
-done
-
-if [ -f "/etc/pki/secureboot/private/uki-signing.key" ]; then
-    SECRET_ARGS+=("--secret" "id=uki_key,src=/etc/pki/secureboot/private/uki-signing.key")
-elif [ -f "/etc/pki/uki/uki-signing.key" ]; then
-    SECRET_ARGS+=("--secret" "id=uki_key,src=/etc/pki/uki/uki-signing.key")
-fi
-if [ -f "/etc/pki/uki/uki-signing.crt" ]; then
-    SECRET_ARGS+=("--secret" "id=uki_crt,src=/etc/pki/uki/uki-signing.crt")
-fi
+# No key reaches the image build: the vmlinuz arrives already signed in azoth-boot, signed by
+# the sign-only job of nvidia-kmod (docs/architecture/doc_ci.md, D43; ADR-0037).
 
 BUILD_DATE=$(date -u +%Y-%m-%d\T%H:%M:%SZ)
 
-echo "🏗️  Starting local podman build with isolated Secure Boot signing enclave..."
+echo "🏗️  Starting local podman build..."
 podman build \
     ${PULL_FLAG} \
-    "${SECRET_ARGS[@]}" \
     --tag "${FULL_IMAGE_REF}" \
     --label "org.opencontainers.image.created=${BUILD_DATE}" \
     --label "org.opencontainers.image.title=athanor-system-offline" \
