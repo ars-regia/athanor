@@ -59,6 +59,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # The one lint of the run. Every other job needs it, directly or through another job, and
+  # the called workflows have no lint of their own: each used to repeat it, about 2 minutes
+  # apiece on the critical path (docs/architecture/doc_pipeline.md, PL44).
   lint:
     uses: ./.github/workflows/call-lint.yml
 

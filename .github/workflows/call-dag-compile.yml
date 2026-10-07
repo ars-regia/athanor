@@ -43,11 +43,9 @@ permissions:
   id-token: write
 
 jobs:
-  lint:
-    uses: ./.github/workflows/call-lint.yml
-
+  # No lint job of its own: the Orchestrator, its only caller, runs call-lint.yml once and
+  # calls this workflow only after it passed (docs/architecture/doc_pipeline.md, PL44).
   dag-build-level-0:
-    needs: [lint]
     if: inputs.dag_level_0 != '[]' && inputs.dag_level_0 != ''
     name: ⚡ DAG Level 0 Parallel Build
     runs-on: ubuntu-24.04
@@ -244,8 +242,8 @@ jobs:
           fi
 
   dag-build-level-1:
-    needs: [lint, dag-build-level-0]
-    if: always() && needs.lint.result == 'success' && inputs.dag_level_1 != '[]' && inputs.dag_level_1 != '' && !contains(needs.dag-build-level-0.result, 'failure')
+    needs: [dag-build-level-0]
+    if: always() && inputs.dag_level_1 != '[]' && inputs.dag_level_1 != '' && !contains(needs.dag-build-level-0.result, 'failure')
     name: ⚡ DAG Level 1 Parallel Build
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -441,8 +439,8 @@ jobs:
           fi
 
   dag-build-level-2:
-    needs: [lint, dag-build-level-1]
-    if: always() && needs.lint.result == 'success' && inputs.dag_level_2 != '[]' && inputs.dag_level_2 != '' && !contains(needs.dag-build-level-1.result, 'failure')
+    needs: [dag-build-level-1]
+    if: always() && inputs.dag_level_2 != '[]' && inputs.dag_level_2 != '' && !contains(needs.dag-build-level-1.result, 'failure')
     name: ⚡ DAG Level 2 Parallel Build
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -636,8 +634,8 @@ jobs:
           fi
 
   dag-build-flatpaks:
-    needs: [lint, dag-build-level-2]
-    if: always() && needs.lint.result == 'success' && inputs.dag_flatpaks != '[]' && inputs.dag_flatpaks != '' && !contains(needs.dag-build-level-2.result, 'failure')
+    needs: [dag-build-level-2]
+    if: always() && inputs.dag_flatpaks != '[]' && inputs.dag_flatpaks != '' && !contains(needs.dag-build-level-2.result, 'failure')
     name: 📦 DAG Flatpaks Parallel Build
     runs-on: ubuntu-24.04
     timeout-minutes: 10

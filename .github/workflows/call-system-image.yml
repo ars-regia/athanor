@@ -18,13 +18,11 @@ on:
         required: false
 
 jobs:
-  lint:
-    uses: ./.github/workflows/call-lint.yml
-
+  # No lint job of its own: the Orchestrator, its only caller, runs call-lint.yml once and
+  # calls this workflow only after it passed (docs/architecture/doc_pipeline.md, PL44).
   build-repo:
     # The tier repositories are consumed as OCI images only (ADR-0076, decision 2).
     name: 📦 Aggregate the tier repositories
-    needs: [lint]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
