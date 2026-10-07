@@ -65,20 +65,42 @@ Before this revision each specification wrote its own adversary paragraph, and t
 - **What does not change.** Shell programs confine themselves with Landlock (`doc_kernel_profile.md` section 10); third-party applications are Flatpak by default; MicroVMs are only for received workloads after 1.0 (`doc_kernel_profile.md` D28).
 - **The project instructions** carry the rule in the text the maintainer approved on 2026-10-07; it lands through a separate change, until which the instructions still hold the earlier rule.
 
-## 4. How specifications cite this document
+## 4. The polkit model
+
+**TM9. Every polkit action Athanor declares or overrides, and its result for the active session.** The table has one row for each action that a `.policy` file of the repository declares and for each action that a polkit `.rules` file of the repository overrides. Every other action keeps the default its upstream package declares. "Active session" is the result for a process of the user's active local session: for a `.policy`, its `allow_active`; for a rule, every result the rule returns. `auth_admin` asks for the password of an administrator. The image's `10-athanor-wheel-admin.rules` makes the members of `wheel` the only administrators (`polkit.addAdminRule`).
+
+| Action | Declared in | Active session | Shipped | Notes |
+| --- | --- | --- | --- | --- |
+| `os.athanor.update.apply` | `forge/specs/athanor-update/SOURCES/usr/share/polkit-1/actions/os.athanor.update.policy` | `yes` | yes | Applies an update the service has already verified (`doc_update_trust.md`). Inactive and remote sessions: `auth_admin_keep`. |
+| `os.athanor.update.rollback` | `forge/specs/athanor-update/SOURCES/usr/share/polkit-1/actions/os.athanor.update.policy` | `auth_admin` | yes | Returns to the previous deployment. |
+| `org.freedesktop.udisks2.filesystem-mount` | `forge/specs/athanor-system-tweaks/SOURCES/etc/polkit-1/rules.d/10-athanor-wheel-admin.rules` | `yes` for `wheel`, `auth_admin` otherwise | yes | Stricter than upstream, whose active default is `yes`: a user outside `wheel` cannot mount a removable disk without an administrator. |
+| `org.freedesktop.udisks2.eject-media` | `forge/specs/athanor-system-tweaks/SOURCES/etc/polkit-1/rules.d/10-athanor-wheel-admin.rules` | `yes` for `wheel`, `auth_admin` otherwise | yes | As the row above. |
+| `org.containers.bootc.status` | `forge/specs/athanor-base-config/SOURCES/usr/share/polkit-1/rules.d/org.containers.bootc.rules` | `yes` for `wheel` | yes | No effect: no package of the image declares this action (`pkaction` lists no `org.containers.bootc` action on an installed Athanor, 2026-10-07), and polkit refuses an action that is not declared before it reads any rule. |
+| `org.freedesktop.login1.inhibit-block-sleep` | `scripts/runner/50-athanor-runner-inhibit.rules` | `yes` | no | Installed on the CI runner host only, for the user `athanor-runner`, which runs outside any session. |
+| `os.athanor.cloudsync.mount` | `forge/specs/athanor-cloud-rs/athanor-cloud-rs-1.0.0/os.athanor.cloud.policy` | `auth_admin_keep` | no | Package out of the image (`experimental/EXEMPT`). |
+| `os.athanor.lvfs.apply` | `forge/specs/athanor-lvfs-rs/athanor-lvfs-rs-1.0.0/os.athanor.lvfs.policy` | `auth_admin_keep` | no | Package out of the image (`experimental/EXEMPT`). |
+| `os.athanor.mdm.wipe` | `forge/specs/athanor-mdm-rs/athanor-mdm-rs-1.0.0/os.athanor.mdm.policy` | `auth_admin` | no | Package out of the image (`experimental/EXEMPT`). |
+| `os.athanor.mdm.apply_policy` | `forge/specs/athanor-mdm-rs/athanor-mdm-rs-1.0.0/os.athanor.mdm.policy` | `auth_admin` | no | Package out of the image (`experimental/EXEMPT`). |
+| `os.athanor.store.install` | `forge/specs/athanor-store-rs/athanor-store-rs-1.0.0/os.athanor.store.policy` | `auth_admin_keep` | no | Package out of the image since 2026-09-17 (`experimental/EXEMPT`). |
+
+- **Enforcement.** `python3 scripts/verify.py polkit-model`, run in CI by the lint workflow, fails in three cases: an action declared or overridden in a tracked `.policy` or polkit `.rules` file has no row; a row names an action its file does not declare; or the "Active session" column differs from the file. A rule whose actions the check cannot read, because it matches anything other than `action.id == "..."`, also fails, so a new rule cannot escape the table. The "Shipped" and "Notes" columns are not checked.
+- **Who answers for a row.** The change that adds or edits a `.policy` or polkit `.rules` file edits its row in the same change. A result that grants more than upstream (`yes` where upstream asks for authentication) states its reason in "Notes".
+- **The polkit check** (`verify.py polkit`) is a different check. It fails when Athanor code enforces an action that no `.policy` declares.
+
+## 5. How specifications cite this document
 
 A specification's threat paragraph names the tier each of its guarantees holds against and cites the TM rule; it adds only what is specific to it. Amended on 2026-10-06: `doc_lock_and_prompts.md`, `doc_software.md`, `doc_session_daemons.md`, `doc_kernel_profile.md`.
 
 Owed at each document's next revision: `doc_shell.md` SH12 and `doc_bar.md` BR1 (the informative checks are TM1's integrity checks), `doc_accessibility.md` (the reader gate's residual risk is TM1), `doc_portal.md` and `doc_files.md` (the persistence paths of TM3 for the file manager and the portal's FileChooser).
 
-## 5. Open doubts
+## 6. Open doubts
 
 1. **T1. Absent start-up files.** Decided 2026-10-06 (A2-29 (#151)): the unit binds an empty read-only file over each absent path (TM3).
 2. **T2. Further candidates for TM3.** Decided 2026-10-06 (A2-29 (#151)): all of them are rows of TM3.
-3. **T3. The polkit model.** Which actions Athanor adds or overrides and their result for the active session have no single owner (audit 2, security and trust, finding 15). Decided 2026-10-07 by the maintainer: the table belongs in this document, one row per action Athanor declares or overrides with its result for the active session, and `verify.py` fails when an action declared in the repository's `.policy` or `.rules` files is missing from the table or has a different result. Until that section and its check land, the gap stands.
+3. **T3. The polkit model.** Which actions Athanor adds or overrides and their result for the active session have no single owner (audit 2, security and trust, finding 15). Decided 2026-10-07 by the maintainer: the table belongs in this document, with a check (TM9).
 4. **T4. Windows the trusted-path border does not mark.** cosmic-comp#1441 borders floating windows only, so a confined application can imitate a prompt with a fullscreen or tiled window (TM6). Decided 2026-10-06 (A2-31): the extension of the indicator to every window state is proposed upstream with #1441; until it lands, the gap is a stated residual risk of TM6 (`doc_lock_and_prompts.md` L13).
 
-## 6. Acceptance
+## 7. Acceptance
 
-1. `python3 scripts/verify.py services` passes in CI.
+1. `python3 scripts/verify.py services` and `python3 scripts/verify.py polkit-model` pass in CI.
 2. On the dev VM, a `confined` test application fails to create or change a file in each path of TM3, and the same write succeeds from a terminal (SD22 step 6).

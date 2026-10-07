@@ -25,6 +25,7 @@ import re
 import subprocess
 import sys
 import tomllib
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 try:
@@ -1972,6 +1973,125 @@ def check_services():
         r.fail(problem)
     for ident, why in SERVICE_EXEMPT.items():
         r.note(f"exempt: {ident}: {why}")
+    return r
+# The polkit model (doc_threat_model.md TM9, maintainer decision T3 of 2026-10-07): every
+# action the repository declares in a .policy file or overrides in a polkit .rules file has
+# one row in TM9's table, with its result for the active session.
+POLKIT_MODEL_DOC = "docs/architecture/doc_threat_model.md"
+POLKIT_RESULTS = {
+    "no",
+    "yes",
+    "auth_self",
+    "auth_self_keep",
+    "auth_admin",
+    "auth_admin_keep",
+}
+
+
+def polkit_declared(files):
+    """{(action, file): results} for the active session, and the files that cannot be read.
+
+    A .policy gives its `allow_active` default (`no` when absent). A polkit .rules file gives,
+    for each `action.id == "..."` of an addRule function, every polkit.Result that function
+    returns. A .rules file with no polkit call is a udev rule and is skipped.
+    """
+    declared, unreadable = {}, []
+    for path, text in sorted(files.items()):
+        if path.endswith(".policy"):
+            try:
+                root = ET.fromstring(text)
+            except ET.ParseError as e:
+                unreadable.append(f"{path}: not valid XML ({e})")
+                continue
+            for action in root.iter("action"):
+                active = (action.findtext("defaults/allow_active") or "no").strip()
+                declared[(action.get("id"), path)] = {active}
+        elif path.endswith(".rules") and "polkit." in text:
+            for body in text.split("polkit.addRule(")[1:]:
+                actions = re.findall(r'action\.id\s*==\s*"([^"]+)"', body)
+                results = {
+                    r.lower() for r in re.findall(r"polkit\.Result\.([A-Z_]+)", body)
+                }
+                if not actions or not results:
+                    unreadable.append(
+                        f'{path}: an addRule names no action as action.id == "..." or returns '
+                        f"no polkit.Result, so its rows of {POLKIT_MODEL_DOC} TM9 cannot be checked"
+                    )
+                    continue
+                for a in actions:
+                    declared[(a, path)] = results
+    return declared, unreadable
+
+
+def polkit_table(doc):
+    """[(action, file, results)] from the table whose header starts with | Action | Declared in |."""
+    rows, inside = [], False
+    for line in doc.split("\n"):
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if line.startswith("| Action") and len(cells) > 2 and cells[1] == "Declared in":
+            inside = True
+            continue
+        if not inside:
+            continue
+        if not line.startswith("|"):
+            break
+        if set(cells[0]) <= set("-: "):
+            continue
+        tokens = set(re.findall(r"`([a-z_]+)`", cells[2]))
+        rows.append((cells[0].strip("`"), cells[1].strip("`"), tokens & POLKIT_RESULTS))
+    return rows
+
+
+def polkit_model_problems(files, doc):
+    declared, problems = polkit_declared(files)
+    rows = polkit_table(doc)
+    if not rows:
+        problems.append(
+            f"{POLKIT_MODEL_DOC}: no table with the header | Action | Declared in | ..."
+        )
+    seen = set()
+    for action, path, results in rows:
+        key = (action, path)
+        if key in seen:
+            problems.append(f"{POLKIT_MODEL_DOC} TM9: {action} ({path}) has two rows")
+            continue
+        seen.add(key)
+        if key not in declared:
+            problems.append(
+                f"{POLKIT_MODEL_DOC} TM9: {action} is not declared in {path}: remove the row"
+            )
+        elif results != declared[key]:
+            problems.append(
+                f"{POLKIT_MODEL_DOC} TM9: {action} gives {', '.join(sorted(declared[key]))} for the "
+                f"active session in {path}, the table says {', '.join(sorted(results)) or 'nothing'}"
+            )
+    for action, path in sorted(declared.keys() - seen):
+        problems.append(f"{path}: {action} has no row in {POLKIT_MODEL_DOC} TM9")
+    return problems
+
+
+@check(
+    "polkit-model",
+    "Every polkit action the repository declares or overrides has its row in TM9",
+)
+def check_polkit_model():
+    r = Result()
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", "--", "*.policy", "*.rules"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if listed.returncode != 0:
+        r.fail(f"git ls-files failed: {listed.stderr.strip()}")
+        return r
+    files = {
+        p: read(ROOT / p)
+        for p in listed.stdout.split("\0")
+        if p and (ROOT / p).is_file()
+    }
+    for problem in polkit_model_problems(files, read(ROOT / POLKIT_MODEL_DOC)):
+        r.fail(problem)
     return r
 
 
