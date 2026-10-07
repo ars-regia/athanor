@@ -137,7 +137,7 @@ The schemas live in `scripts/ci/schemas/` and every writer validates against the
 
 | File                          | Writer                    | Readers                         | Content                                                                                             |
 | ----------------------------- | ------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `changes.json`                | `pr.yml` change detection | `pr.yml` jobs                   | the areas a change touches (specs, kernel, image, shell, docs only)                                 |
+| `changes.json`                | `pr.yml` change detection | `pr.yml` jobs                   | the areas a change touches (specs, kernel, docs only; image and shell join with their `pr.yml` jobs in PB11, PB12). Known gap: `Cargo.toml`, `Cargo.lock` and `deny.toml` belong to no area yet, so a dependency change selects no build (follow-up) |
 | `plan.json`                   | release `plan`            | every release stage             | dirty packages with content hashes, whether kernel or modules change, the variants of `images.json` |
 | `kernel-artifacts.env`        | `system/kernel-artifacts.sh` | image, signing                | kernel, devel, module and boot digests and their registry (O5)                                      |
 | `tier-digests.json`           | `call-packages.yml`       | `call-image.yml`                | tier repository digests, verified (UD44)                                                            |
@@ -579,8 +579,9 @@ hand-copied.
   (exists: `registry`), pinning (PL8), permissions (PL7), timeouts (PL47), key isolation
   (PL11), one writer per tag (PL35).
 - **`just check` runs every verify check** and the four test directories that no
-  workflow runs today; checks red at adoption are listed in `scripts/ci/known-red.txt`,
-  each with an issue and an expiry date, and the list may only shrink (PQ12).
+  workflow runs today; the findings red at adoption are listed one by one in
+  `scripts/ci/known-red.txt` (the finding text without line numbers, each with an issue
+  and an expiry date), any finding not listed is red, and the list may only shrink (PQ12).
 - **doc_ci.md is checked against the tree** (`verify.py ci`, exists) and gains the
   stage and contract tables generated from the workflow files, so the description cannot
   drift.
@@ -628,6 +629,7 @@ step only the maintainer can take.
 | **PB0** | Publication under `ars-regia` and the two signing environments (D43) | branch `perf/sign-only-uki`, PR #249, `.github/settings/environments.json`, `nvidia-kmod.yml`, `call-system-image.yml`, `docs/operations/secrets.md` | `python3 scripts/verify.py workflows` green with the key-isolation rule; one release run on `iso-v0` publishes three signed `:<run_id>` images under `ars-regia` with at most two approvals; the live environments list `signing-kernel` and `signing-images`, deployable from `iso-v0` and `main` only; `MOK_PRIVATE_KEY` absent | PR #249 | 2-3 (estimate) |
 | | **[M]** create the two environments, move the secrets, delete `MOK_PRIVATE_KEY`, approve the run | | | | |
 | **PB1** | One gate (ADR-0075) | `pr.yml`, `Justfile` (`check`), `scripts/ci/changes.py`, `scripts/ci/gate.py` | `just check` passes locally and in `pr.yml`; a documentation-only PR finishes with Kernel Build skipped and `gate` green; a PR with a failing selected job has `gate` red | PB0 | 3 (estimate) |
+| | **[M]** apply `branch-protection.json`, which adds `gate` to `Kernel gate` and `Spec gate` on `iso-v0` (`docs/operations/github-settings.md` section 8); the follow-up that drops their `pull_request` triggers removes the two names from the file in the same change, and until it, Kernel Build still runs on a documentation-only PR, while the `kernel` job of `pr.yml` is skipped | | | | |
 | **PB2** | Source, review and settings controls, alerting | `.github/settings/rulesets.json`, `actions.json`, `environments.json`, `CODEOWNERS`, `scripts/ci/settings_drift.py`, `.github/actions/alert` | `python3 scripts/ci/settings_drift.py` exits 0 against the live repository; `gate` is the required check of both product branches; the three personal tokens are absent from the secrets list; a forced failure of a scheduled job opens a `ci-alert` issue | PB1 | 2 (estimate) |
 | | **[M]** create the GitHub App and its secrets, apply the rulesets, enable the merge queue and SHA pinning | | | | |
 | **PB3** | Pinned inputs, verified hops (PL8, PL12-PL14) | `.github/actions/verify-input`, `scripts/ci/registry.sh`, `forge/config/images.json`, every workflow `uses:` | `python3 scripts/verify.py pinning images` green; a release run's logs show a verification for every hop of PL12 | PB1 | 3-4 (estimate) |
@@ -661,7 +663,7 @@ The maintainer answered every question as recommended on 2026-10-07. Items marke
 | PQ9  | Are the SBOMs public? | Yes, in the evidence bundle: the product is open source and publication costs nothing. |
 | PQ10 | Visibility of `azoth-nvidia` | Public for the open-module branch; the legacy branch only after a licence check [LAWYER]. |
 | PQ11 | Which edge of the `update → recovery` cycle is wrong? | Drop the synthetic all-to-all tier edges and build the graph from the specs' requirements only; tiers stay as publication groups. The edge removal lands with the `graph` check, in PB12. |
-| PQ12 | Red verify checks when `just check` becomes the gate | Adopt with `known-red.txt` (issue and expiry per entry, only shrinking) rather than blocking PB1 on fixing them all first. |
+| PQ12 | Red verify checks when `just check` becomes the gate | Adopt with `known-red.txt` (one entry per finding, not per check, with issue and expiry; only shrinking) rather than blocking PB1 on fixing them all first. |
 
 ## 14. Changes to other documents
 

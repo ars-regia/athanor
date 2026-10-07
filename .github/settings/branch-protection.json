@@ -19,6 +19,10 @@
         {
           "app_id": 15368,
           "context": "Spec gate"
+        },
+        {
+          "app_id": 15368,
+          "context": "gate"
         }
       ],
       "strict": false

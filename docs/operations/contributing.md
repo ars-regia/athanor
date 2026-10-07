@@ -64,7 +64,7 @@ A new `verify.py` check is registered with `@check` like the others and has a te
 
 - **Area owners** are listed in `.github/CODEOWNERS`; the proposed area map is [ownership.md](ownership.md).
 - **Two-person review** for signing, attestation, polkit, cryptography and authentication: two approvals, at least one from an owner of the area, never the author. Today the maintainer is the only owner, so every such change waits for the maintainer.
-- Enforcement _(Proposal)_: once a second owner exists, turn on "Require review from Code Owners" on the product branch; today `iso-v0` requires only the status checks `Kernel gate` and `Spec gate` (`.github/settings/branch-protection.json`).
+- Enforcement _(Proposal)_: once a second owner exists, turn on "Require review from Code Owners" on the product branch; today `iso-v0` requires only the status checks `Kernel gate`, `Spec gate` and `gate` (`.github/settings/branch-protection.json`), and `gate` alone once the follow-up of `github-settings.md` section 8 removes the legacy `pull_request` triggers.
 
 ## CT7. Red CI _(Proposal)_
 

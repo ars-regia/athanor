@@ -617,6 +617,15 @@ status = "missing"
 purpose = "Upstream releases the update bot watches"
 
 [[component]]
+path = "scripts/ci"
+kind = "script tool"
+area = "build-ci"
+status = "specified"
+spec = "doc_ci.md"
+item = "CI27"
+purpose = "Pull Request gate: changed areas, the gate verdict, the pinned tools of just check, the known-red list"
+
+[[component]]
 path = "scripts/cosmic-comp-rebase"
 kind = "script tool"
 area = "shell"
