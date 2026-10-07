@@ -142,6 +142,15 @@ mod tests {
     }
 
     #[test]
+    fn the_stamp_clears_a_stale_channel_absent() {
+        let machine = Machine::new("migrate-stamp-clears", &["real/k1.pub"]);
+        machine.store.set_channel_absent(true).expect("flag");
+        let tools = Fake::booted(Deployed { enforcing: true, ..from_media(1000) });
+        assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Done));
+        assert!(machine.store.migrated() && !machine.store.channel_absent());
+    }
+
+    #[test]
     fn any_other_registry_failure_still_fails() {
         let machine = Machine::new("migrate-registry", &["real/k1.pub"]);
         let mut tools = Fake::booted(from_media(1000));

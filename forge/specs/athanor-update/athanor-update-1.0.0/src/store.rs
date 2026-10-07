@@ -139,9 +139,10 @@ impl Store {
     }
 
     /// # Errors
-    /// The file cannot be written.
+    /// A file cannot be written or removed.
     pub fn set_migrated(&self) -> std::io::Result<()> {
-        Self::replace(&self.var, "migrated", 0o644, b"")
+        Self::replace(&self.var, "migrated", 0o644, b"")?;
+        self.set_channel_absent(false)
     }
 
     #[must_use]

@@ -2,9 +2,7 @@
 Description=Check for, verify and download an Athanor system image update
 Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_update_trust.md
 After=network-online.target athanor-update-migrate.service
-# A machine still waiting for the channel (`channel-absent`) retries its migration here, every
-# run of the timer; once the stamp exists the migrate unit's condition skips it.
-Wants=network-online.target athanor-update-migrate.service
+Wants=network-online.target
 
 [Service]
 Type=oneshot
