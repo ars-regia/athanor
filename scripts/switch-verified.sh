@@ -13,7 +13,7 @@
 # bind-mounted over /etc/containers. Nothing else on the machine sees them, and they are
 # gone when the switch ends, however it ends: /etc is never modified.
 #
-# Usage: sudo bash scripts/switch-verified.sh ghcr.io/ars-regia/athanor-system:latest
+# Usage: sudo bash scripts/switch-verified.sh REGISTRY/OWNER/athanor-system:latest
 #        ssh HOST 'sudo bash -s -- IMAGE' < scripts/switch-verified.sh
 set -euo pipefail
 
