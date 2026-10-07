@@ -482,8 +482,13 @@ class SigningTest(unittest.TestCase):
                     {"k.yml": workflow(job)},
                     rf"^k\.yml: signing job sign step 3 sets {key.split(':')[0]}",
                 )
-        job = SIGN_JOB.replace("    steps:\n", "    defaults:\n      run:\n        shell: sh\n    steps:\n")
-        self.assert_one({"k.yml": workflow(job)}, r"^k\.yml: signing job sign sets defaults")
+        for defaults in ("      run:\n        shell: sh\n", "      run:\n        shell: bash\n        working-directory: x\n"):
+            with self.subTest(defaults=defaults):
+                job = SIGN_JOB.replace("    steps:\n", f"    defaults:\n{defaults}    steps:\n")
+                self.assert_one({"k.yml": workflow(job)}, r"^k\.yml: signing job sign sets defaults other than")
+        # GitHub's bash shell only adds -o pipefail: a failing sign script piped into tee fails.
+        job = SIGN_JOB.replace("    steps:\n", "    defaults:\n      run:\n        shell: bash\n    steps:\n")
+        self.assertEqual(self.problems({"k.yml": workflow(job)}), [])
         text = workflow(SIGN_JOB).replace("jobs:\n", "defaults:\n  run:\n    shell: sh\njobs:\n")
         self.assert_one({"k.yml": text}, r"^k\.yml: sets defaults, beside a signing job")
 

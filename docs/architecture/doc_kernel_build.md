@@ -173,8 +173,14 @@ ynl --without selftests --without doc`: patch e `process_configs.sh -w -n -c`.
    (`repro.py`): la chiave che firma moduli e immagine nasce in ogni build,
    quindi firma dei `.ko` e certificato in `.init.data` sono attesi; ogni altra
    differenza è un bug da aprire, e il job è rosso;
-9. ccache su directory persistente del runner (non `actions/cache`): tra due
-   patch level cambiano pochi file, la LTO finale no;
+9. nessuna cache di compilazione (decisione del 2026-10-07). rpm 6 compila in
+   una directory che contiene la versione, quindi ccache servirebbe solo a
+   ricompilare lo stesso NVR. Tra due patch level un header comune come
+   `asm/div64.h` raggiunge il 93% dei file C, e un cambio di config tocca
+   `autoconf.h`, incluso ovunque. Una build da input identici la evita già il
+   job `inputs`, che riusa l'immagine pubblicata e attestata. Una cache
+   condivisa fra PR e push lascerebbe a una PR non unita un oggetto dentro un
+   kernel firmato, e separarla costa più di quanto rende;
 10. pubblicazione (job `publish` su runner GitHub, dall'artefatto del job `build`):
     tre pacchetti OCI con i soli RPM dentro, `ghcr.io/ars-regia/azoth`
     (binari), `azoth-devel`, `azoth-debuginfo`, tag `<nvr>`.
@@ -361,7 +367,7 @@ Ogni PR di bump e ogni cambio in `forge/specs/azoth/**` passa:
    pubblicato per l'NVR dei pin quando il kernel è riusato, con la toolchain del
    kernel; ogni `.ko` deve portare il vermagic del kernel e i tipi kCFI. Poi, sui
    push, il job `orchestrator` di Kernel Build avvia l'Orchestrator sullo stesso
-   commit (`sha`, `force_image`) quando ha pubblicato un kernel nuovo o quando
+   commit (`sha`) quando ha pubblicato un kernel nuovo o quando
    `system/kernel-artifacts.sh` non risponde `ready`; l'Orchestrator chiama il
    workflow riusabile `nvidia-kmod.yml` quando lo stato è `modules-missing`
    (`doc_build_ordering.md`, O1-O4). Lì il job `artifacts` risolve il kernel per

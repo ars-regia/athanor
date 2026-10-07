@@ -420,10 +420,16 @@ def workflow_signing_problems(name, jobs, holders, signing, with_signing_job, re
     return problems
 
 
+# The only defaults a signing job may set: GitHub's bash shell, `bash --noprofile --norc -eo
+# pipefail {0}`, so a sign script piped into tee fails the step when it fails.
+SIGN_JOB_DEFAULTS = {"run": {"shell": "bash"}}
+
+
 def signing_job_problems(where, job, steps, environment, holders):
-    """A job of a signing environment: GitHub-hosted, no container or defaults, only the pinned
-    actions with their allowed inputs, only the allow-listed commands, no shell or working
-    directory of its own, and in env only the secrets of its environment and plain values."""
+    """A job of a signing environment: GitHub-hosted, no container, no defaults but the bash
+    shell, only the pinned actions with their allowed inputs, only the allow-listed commands, no
+    shell or working directory of its own, and in env only the secrets of its environment and
+    plain values."""
     problems = []
     runs_on = job.get("runs-on")
     if "uses" not in job and not (isinstance(runs_on, str) and GITHUB_HOSTED.match(runs_on)):
@@ -431,8 +437,9 @@ def signing_job_problems(where, job, steps, environment, holders):
     for key in ("container", "services"):
         if key in job:
             problems.append(f"{where} runs a {key} beside the key (D43)")
-    if "defaults" in job:
-        problems.append(f"{where} sets defaults, which changes what its steps run (D43)")
+    if "defaults" in job and job["defaults"] != SIGN_JOB_DEFAULTS:
+        problems.append(f"{where} sets defaults other than {SIGN_JOB_DEFAULTS}, which changes what its steps "
+                        "run (D43)")
     if "uses" in job:
         problems.append(f"{where} uses {job['uses']}: only checkout, download-artifact and upload-artifact "
                         "pinned by SHA (D43)")

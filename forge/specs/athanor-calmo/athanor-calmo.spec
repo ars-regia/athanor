@@ -1,3 +1,4 @@
+# repo-input: system/athanor-style/calmo
 %global debug_package %{nil}
 Name:           athanor-calmo
 Version:        1.0.0
