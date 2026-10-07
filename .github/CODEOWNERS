@@ -1,4 +1,45 @@
-# Code owners of Athanor OS. GitHub requests their review on every pull request.
-# One maintainer owns the whole tree; add path rules when ownership is split.
+# Code owners for Athanor.
+#
+# The last matching pattern wins, so the protected paths come last. The owner is the
+# maintainer's account; the repository belongs to the organisation ars-regia.
+# Review by a code owner is enforced only when the branch protection rule "Require review
+# from Code Owners" is on. It stays off while there is one code owner, who could not approve
+# their own changes (ADR-0062). The per-path rules below name the owner who must review once
+# code-owner review is enabled.
 
 * @hr-mes
+
+# Core OS and kernel
+/system/athanor-ebpf-sched/ @hr-mes
+/system/athanor-hypervisor-daemon/ @hr-mes
+/forge/specs/azoth/ @hr-mes
+
+# Mesh
+/system/athanor-mesh-bus/ @hr-mes
+
+# Wayland and UI
+/system/athanor-greeter/ @hr-mes
+
+# CI/CD and packaging
+/.github/ @hr-mes
+/forge/ @hr-mes
+
+# Protected paths: the maintainer reviews every change (see the section "Limiti inviolabili" of CLAUDE.md).
+# Authorisation (polkit subject checks)
+/system/athanor-bus-api/src/polkit.rs @hr-mes
+# Attestation
+/system/confidential_computing/athanor-attestation/ @hr-mes
+# Image definition: PAM and authselect configuration live here
+/system/Containerfile @hr-mes
+# Signing, promotion and the keys' public halves
+/system/keys/ @hr-mes
+/system/sign-images.sh @hr-mes
+/system/promote.sh @hr-mes
+/system/build-image.sh @hr-mes
+/forge/scripts/sign_attest.sh @hr-mes
+/.github/workflows/call-system-image.yml @hr-mes
+/.github/workflows/athanor-forge-orchestrator.yml @hr-mes
+/.github/workflows/nvidia-kmod.yml @hr-mes
+/.github/workflows/promote-stable.yml @hr-mes
+# Policy files
+/CLAUDE.md @hr-mes

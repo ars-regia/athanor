@@ -2,8 +2,8 @@
 id: A2-9
 title: "Three-tier threat model"
 date: 2026-10-05
-status: accepted
-issues: []
+status: amended by ADR-0086
+issues: [151]
 areas: [security, docs]
 ---
 
@@ -19,6 +19,6 @@ Threat model: three tiers (unconfined user code = the user; confined apps untrus
 
 ## Consequences
 
-Applied by `docs/architecture/doc_files.md`.
+Applied by `docs/architecture/doc_threat_model.md` (TM1 to TM8), by `docs/architecture/doc_files.md`, and by the tier statements of `doc_software.md`, `doc_session_daemons.md`, `doc_lock_and_prompts.md` and `doc_kernel_profile.md`. The `scripts/verify.py services` check, run by the lint workflow, now enforces the service rule.
 
-Application pending: the CLAUDE.md rule is not yet replaced and `scripts/verify.py` has no `NoNewPrivileges` or capability-bound check.
+Application pending: the project instructions file still carries the old compartment-or-MicroVM rule; its replacement, approved by the maintainer on 2026-10-07, lands through a separate change. ADR-0086 amends the decision for `toolbox`, which is not isolation.

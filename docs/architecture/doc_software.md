@@ -1,6 +1,6 @@
 # Athanor Software: applications, background activity and developer tools
 
-Status: Approved, rev 2 (2026-09-30): the maintainer accepted every recommendation of section 6, which now records the decisions. Revision 3 (2026-10-05) adds decision 7, the default applications, and amends decision 6 accordingly; it awaits the maintainer's review. Section 9 (2026-10-06) records maintainer decisions A2-14, A2-15 and A2-24 (#159): GNOME Disks, Nautilus until 1.0, Firefox as a Flatpak, the written comparison with Bazaar that this document needs before approval, and the format of the offline help, which the maintainer chose (A2-30, #159); it overrides the text above where they disagree. It turns the maintainer's request of 2026-09-30 into a specification: one application, working title **Software**, with which an average user never has to struggle and which also serves developers. Section 6 records the maintainer's decisions, with the options that were weighed. Section 4 lists what must be proven before the first plan is written.
+Status: Approved, rev 2 (2026-09-30): the maintainer accepted every recommendation of section 6, which now records the decisions. Revision 3 (2026-10-05) adds decision 7, the default applications, and amends decision 6 accordingly; it awaits the maintainer's review. Amended 2026-10-06 (maintainer decision A2-9 (#151)): the project rule and the confinement of user workloads follow `doc_threat_model.md`, and decision 3 (c) no longer counts `toolbox` as isolation (ADR-0086). Section 9 (2026-10-06) records maintainer decisions A2-14, A2-15 and A2-24 (#159): GNOME Disks, Nautilus until 1.0, Firefox as a Flatpak, the written comparison with Bazaar that this document needs before approval, and the format of the offline help, which the maintainer chose (A2-30, #159); it overrides the text above where they disagree. It turns the maintainer's request of 2026-09-30 into a specification: one application, working title **Software**, with which an average user never has to struggle and which also serves developers. Section 6 records the maintainer's decisions, with the options that were weighed. Section 4 lists what must be proven before the first plan is written.
 
 ## 1. Context
 
@@ -10,7 +10,7 @@ Status: Approved, rev 2 (2026-09-30): the maintainer accepted every recommendati
 - `doc_bar.md`: applications start behind a `wp_security_context_v1` socket in a transient unit of the user manager (BR2, `doc_bar.md:34-53`); untrusted strings are plain text (BR4, `doc_bar.md:79`); the shield and its sheet (BR6, `doc_bar.md:105-119`).
 - `doc_update_trust.md`: system image updates, the state file and the two requests (UT6, UT7, UT11). **This document does not touch system image updates.** They stay in the shield and its sheet (`doc_bar.md`, BR3 and BR6) and in the notifier (`doc_update_trust.md`, UT11). Software shows the running version read-only and points at the shield (SW16).
 - `doc_kernel_profile.md`: applications update through Flatpak with no interruption (class A, `doc_kernel_profile.md:479`); on the desktop class code in the home runs and is measured, and a quarantine prompt outside the kernel is bypassable, a stated residual risk (D23, `doc_kernel_profile.md:100`); code running as the user persists through autostart entries and `systemd --user` units, and a Flatpak application with home access can leave its sandbox (`doc_kernel_profile.md:715-722`).
-- The project rule: no daemon or application outside a compartment or a MicroVM (`CLAUDE.md`, "Limiti inviolabili"). SW10 states where this document does not meet it.
+- The threat model is `doc_threat_model.md` (amended 2026-10-06, maintainer decision A2-9 (#151)). It replaces the project rule "no daemon or application outside a compartment or a MicroVM": code running as the user outside confinement is the user (TM1), confined applications are untrusted (TM2), and every shipped service sets `NoNewPrivileges=yes` or a capability bound (TM8). SW10 states which tier each workload is in.
 
 ### 1.2 What ships today
 
@@ -141,16 +141,17 @@ Two levels in one application. For the average user: Flatpak at the centre (sear
 - Every Nix tool carries the badge of SW10.
 - Whether a tool installed this way appears on the session's `PATH` and in the launcher (`~/.nix-profile/share/applications` on `XDG_DATA_DIRS`) is checked in spike S1; Software states what the session does, it does not fix it.
 
-**SW10. Confinement, stated.** The zero-trust rule is met by some workloads and not by others, and the interface says which.
+**SW10. Confinement, stated.** Each workload belongs to a tier of `doc_threat_model.md`, and the interface says which (amended 2026-10-06, maintainer decision A2-9 (#151)).
 
 | Workload                  | Confinement today                                                                | What escapes it                                                                              |
 | ------------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | Flatpak application       | bubblewrap namespaces, portals, seccomp                                          | whatever its permissions grant; home or host access leaves the sandbox (SW3)                 |
 | Quadlet container         | rootless user namespace, SELinux `container_t`, seccomp, its own cgroup          | mounts the user adds, host networking and the keys SW8 flags; the image itself is unverified |
 | Nix tool                  | **none**: it runs as the user, unconfined, like any binary in the home under D23 | everything the user can do                                                                   |
+| `toolbox` container       | **none**: privileged, host namespaces, SELinux off (TM5)                         | everything the user can do                                                                   |
 | user unit written by hand | **none** by default                                                              | everything the user can do                                                                   |
 
-This document does not claim that Nix tools or hand-written user units are compartmentalised. Their confinement is decision 3 (a): they carry a "Not isolated: runs with all your rights" badge and exist only in developer mode.
+This document does not claim that Nix tools, hand-written user units or `toolbox` containers are compartmentalised: in the threat model they are tier 1, the user (`doc_threat_model.md`, TM1 and TM5). Their confinement is decision 3 (a): they carry a "Not isolated: runs with all your rights" badge and exist only in developer mode.
 
 **SW11. Who does the work.**
 
@@ -275,9 +276,9 @@ Each runs before the plan it gates and produces an answer, not code we keep.
    - **Decided:** the table as it stands, with `backup` bound to whichever snapshot mechanism the backup rewrite keeps, and `smart-cards` shown only when a reader is present. Remote login is **off** by default on new installs: the kickstart stops enabling `sshd` (`system/athanor-install.ks:37-38`) and stops opening the SSH port in the same package that ships the feature switch (SWb), so that turning it on never needs a terminal. Existing installs keep their state. Revised on 2026-10-07: the default moved ahead of SWb, set by the ISO's kickstart (`system/disk_config/iso.toml`, `services --disabled=sshd`) and not by the image's preset, so that installed machines keep sshd through the ostree `/etc` merge; until SWb ships, turning it on is `systemctl enable --now sshd.service`.
 
 3. **Confinement of Nix and Quadlet workloads.**
-   - (a) **Declared exception:** Nix tools and hand-written units stay unconfined, only in developer mode, with the badge of SW10, and the exception is written into the project rule by the maintainer (section 7).
+   - (a) **Declared exception:** Nix tools and hand-written units stay unconfined, only in developer mode, with the badge of SW10, and the exception is written into the project rule by the maintainer (section 7). Amended 2026-10-06 (maintainer decision A2-9 (#151)): no exception is needed, because the threat model makes these workloads tier 1, the user (`doc_threat_model.md`, TM1).
    - (b) **Per-tool sandbox:** run every Nix tool through a bubblewrap or Landlock wrapper. A generic profile either breaks developer tools, which need the home and the network, or restricts nothing.
-   - (c) **A container for untrusted tools:** Nix inside a `toolbox` container (already on the image) or the dev VM, with only the profile's result exported. It isolates, at the cost of friction.
+   - (c) **A container for untrusted tools:** Nix inside a rootless podman container with SELinux `container_t` and SW8's defaults, or the dev VM, with only the profile's result exported. It isolates, at the cost of friction. Amended 2026-10-07 (ADR-0086, which amends A2-9, #151): a `toolbox` container, which this option first named, is not isolation and leaves this decision; rootless podman confined as `container_t`, or the dev VM, is the isolation. toolbox creates it privileged, in the host's process and network namespaces, with SELinux separation disabled and the host's root mounted at `/run/host` (`doc_threat_model.md`, TM5); code in it is tier 1, and where Software shows one it carries SW10's "Not isolated" badge.
    - (d) **For Quadlet:** rootless podman with SW8's defaults and refusals, and the "Less isolated" badge on anything weaker.
    - **Decided:** (a) now, with (c) documented as the way to run a tool one does not trust, and (d) for containers. A real confinement of user workloads belongs with the confinement of launched applications that `doc_bar.md` BR2 already defers.
 4. **Placement.**
@@ -335,7 +336,7 @@ Each change lands with the package named beside it, not with this document.
 - `doc_shell.md`, SH3 (`doc_shell.md:73`): `cosmic-store` leaves the image at the switch of package SWa (decision 5). With SWa.
 - `doc_shell.md`, section 3, "Later stages": a pointer to this document as an application track after stage 2. With the first plan (package S).
 - `experimental/EXEMPT:18-22`: the comment on `athanor-store-rs` is removed with the crate. With SWa.
-- `CLAUDE.md`, "Limiti inviolabili": the maintainer writes the exception of decision 3 (a): Nix tools and hand-written user units run unconfined, only in developer mode and marked as such. Before SWc.
+- `CLAUDE.md`, "Limiti inviolabili": the compartment-or-MicroVM rule is replaced by the service rule of `doc_threat_model.md`, TM8, in text the maintainer reviews; decision 3 (a) needs no exception (amended 2026-10-06, maintainer decision A2-9 (#151)). Before SWc.
 - `forge/config/packages.json`: the `flatpaks` list and `system/scripts/provision_flatpak.sh` are deleted (decision 6). With SWa.
 - `forge/specs/athanor-desktop-ui/athanor-desktop-ui.spec`: requires the RPM defaults of decision 7 and no longer `foot`; ships `athanor-mimeapps.list`, `athanor-xdg-terminals.list` and the preinstall file for Papers. With SWe.
 - `forge/config/packages.json`, `upstream_desktop` and `upstream_media`: the removals of decision 7. With SWe.
