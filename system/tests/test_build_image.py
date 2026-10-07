@@ -14,6 +14,7 @@ NVR = subprocess.run(["bash", str(ROOT / "forge/specs/azoth/nvr.sh")], capture_o
 KERNEL = "sha256:" + "1" * 64
 OPEN = "sha256:" + "3" * 64
 LEGACY = "sha256:" + "4" * 64
+SYSTEM = "5" * 64  # the image ID the stub's --iidfile reports for the system stage
 
 
 class BuildImage(unittest.TestCase):
@@ -24,7 +25,11 @@ class BuildImage(unittest.TestCase):
         bin_dir.mkdir()
         (bin_dir / "podman").write_text(textwrap.dedent(f"""\
             #!/bin/bash
-            printf '%s\\n' "$@" > {self.dir}/podman.args
+            printf '%s\\n' "$@" -- >> {self.dir}/podman.args
+            while [[ $# -gt 0 ]]; do
+                [[ $1 != --iidfile ]] || echo "sha256:{SYSTEM}" > "$2"
+                shift
+            done
             """))
         (bin_dir / "podman").chmod(0o755)
         self.artifacts = self.dir / "artifacts"
@@ -41,11 +46,65 @@ class BuildImage(unittest.TestCase):
                  "nvidia_open_digest": OPEN, "nvidia_legacy_digest": LEGACY, **values}
         (self.artifacts / "kernel-artifacts.env").write_text("".join(f"{k}={v}\n" for k, v in lines.items() if v is not None))
 
-    def build(self, gpu):
-        r = subprocess.run(["bash", str(BUILD), "--gpu", gpu, "--registry", "localhost", "--tag", "check"],
+    def calls(self):
+        """The arguments of each podman call, in order."""
+        if not (self.dir / "podman.args").exists():
+            return []
+        calls, call = [], []
+        for line in (self.dir / "podman.args").read_text().splitlines():
+            if line == "--":
+                calls.append(call)
+                call = []
+            else:
+                call.append(line)
+        return calls
+
+    def build(self, gpu, *extra):
+        r = subprocess.run(["bash", str(BUILD), "--gpu", gpu, "--registry", "localhost", "--tag", "check", *extra],
                            capture_output=True, text=True, env=self.env)
-        args = (self.dir / "podman.args").read_text().splitlines() if (self.dir / "podman.args").exists() else []
-        return r, args
+        return r, [a for call in self.calls() for a in call]
+
+    def test_the_system_stage_is_built_alone_and_reports_its_image_id(self):
+        self.artifacts_file()
+        iid = self.dir / "out" / "system-image.iid"
+        r = subprocess.run(["bash", str(BUILD), "--system", "--registry", "localhost", "--iidfile", str(iid)],
+                           capture_output=True, text=True, env=self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        [args] = self.calls()
+        self.assertEqual(args[args.index("--target") + 1], "system")
+        self.assertEqual(args[args.index("--iidfile") + 1], str(iid))
+        self.assertEqual(iid.read_text().strip(), f"sha256:{SYSTEM}")
+        for expected in (f"AZOTH_NVR={NVR}", "IMAGE_REGISTRY=localhost", "FORGE_REGISTRY=ghcr.io/ars-regia", "--format", "docker"):
+            self.assertIn(expected, args)
+        # Nothing of a variant: no GPU, no tag, no label, no Secure Boot key.
+        for absent in ("-t", "--label", "--secret"):
+            self.assertNotIn(absent, args)
+        self.assertFalse(any(a.startswith(("GPU=", "SYSTEM_IMAGE=", "NVIDIA_")) for a in args))
+
+    def test_a_variant_builds_from_the_system_image_it_is_given(self):
+        self.artifacts_file()
+        given = "6" * 64
+        r, _ = self.build("nvidia", "--system-image", f"sha256:{given}")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        [args] = self.calls()
+        self.assertIn(f"SYSTEM_IMAGE={given}", args)
+        self.assertIn("GPU=nvidia", args)
+        self.assertNotIn("--target", args)
+
+    def test_a_variant_alone_builds_the_system_stage_first(self):
+        self.artifacts_file()
+        r, _ = self.build("none")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        system, variant = self.calls()
+        self.assertEqual(system[system.index("--target") + 1], "system")
+        self.assertIn(f"SYSTEM_IMAGE={SYSTEM}", variant)
+        self.assertIn("localhost/athanor-system:check", variant)
+
+    def test_the_system_image_is_an_image_id(self):
+        self.artifacts_file()
+        r, args = self.build("none", "--system-image", "localhost/athanor-system:latest")
+        self.assertEqual(r.returncode, 2)
+        self.assertEqual(args, [])
 
     def test_every_image_carries_its_own_version_and_build_time(self):
         self.artifacts_file()
@@ -53,7 +112,7 @@ class BuildImage(unittest.TestCase):
         r = subprocess.run(["bash", str(BUILD), "--gpu", "none", "--registry", "localhost", "--tag", "check", "--serial", "412"],
                            capture_output=True, text=True, env=self.env)
         self.assertEqual(r.returncode, 0, r.stderr)
-        args = (self.dir / "podman.args").read_text().splitlines()
+        args = self.calls()[-1]
         self.assertIn("org.opencontainers.image.version=43.20260915.412", args)
         self.assertIn("org.opencontainers.image.created=2026-09-15T10:00:00Z", args)
         self.assertIn("IMAGE_REGISTRY=localhost", args)

@@ -6,12 +6,16 @@
 # passes AZOTH_NVR, the registries and the module digests from the file system/kernel-artifacts.sh
 # wrote (docs/architecture/doc_build_ordering.md, O4, O9). A stage the target does not use is
 # never pulled, so the default image builds without module digests.
+# The `system` stage is built once, on its own (--target system), and the GPU stages start FROM
+# its image ID, SYSTEM_IMAGE: the three images carry the same system layers, built once per run
+# (docs/architecture/doc_update_delivery.md, UD40). A variant build never runs the stage itself.
 ARG AZOTH_NVR
 ARG GPU=none
 ARG KERNEL_REGISTRY
 ARG FORGE_REGISTRY
 ARG NVIDIA_OPEN_DIGEST
 ARG NVIDIA_LEGACY_DIGEST
+ARG SYSTEM_IMAGE
 
 FROM ${KERNEL_REGISTRY}/azoth-nvidia@${NVIDIA_OPEN_DIGEST} AS nvidia-modules-open
 FROM ${KERNEL_REGISTRY}/azoth-nvidia@${NVIDIA_LEGACY_DIGEST} AS nvidia-modules-legacy
@@ -208,12 +212,13 @@ RUN for pkg in cosmic-panel cosmic-applets cosmic-notifications athanor-layout-t
 # GPU stages (S2-S5): the signed modules of the kernel NVR with the locked vendor packages of
 # the same version, the shim and athanor-nvidia-config. libva-nvidia-driver (VA-API on NVDEC)
 # only makes sense with the NVIDIA driver, and so does the locked container toolkit (S4), which
-# gives containers the GPU through CDI.
-FROM system AS gpu-none
+# gives containers the GPU through CDI. SYSTEM_IMAGE is the image ID of the `system` stage,
+# built beforehand by system/build-image.sh.
+FROM ${SYSTEM_IMAGE} AS gpu-none
 
 # The modules must land in the directory of the pinned kernel: hardening deletes every other
 # modules directory, so a mismatch fails here rather than silently later.
-FROM system AS gpu-nvidia
+FROM ${SYSTEM_IMAGE} AS gpu-nvidia
 ARG AZOTH_NVR
 COPY --from=nvidia-modules-open /lib/modules/ /usr/lib/modules/
 RUN test -f "/usr/lib/modules/${AZOTH_NVR}.x86_64/extra/nvidia/nvidia.ko"
@@ -224,7 +229,7 @@ RUN --mount=type=bind,from=nvidia-rpms,source=/out/open,target=/tmp/nvidia-rpms 
         /tmp/container-toolkit/*.rpm libva-nvidia-driver && \
     systemctl preset-all
 
-FROM system AS gpu-nvidia-legacy
+FROM ${SYSTEM_IMAGE} AS gpu-nvidia-legacy
 ARG AZOTH_NVR
 COPY --from=nvidia-modules-legacy /lib/modules/ /usr/lib/modules/
 RUN test -f "/usr/lib/modules/${AZOTH_NVR}.x86_64/extra/nvidia/nvidia.ko"

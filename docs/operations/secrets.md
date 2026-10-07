@@ -50,7 +50,7 @@ No repository variable is set (`gh variable list` is empty), so every default be
 
 | Id | Environment | Secrets | Protection (GitHub API, 2026-10-06) | Referenced by |
 | --- | --- | --- | --- | --- |
-| ENV1 | `signing` | SEC1, SEC2, SEC3, SEC4, SEC11 | required reviewer `hr-mes`, self-review allowed; deployment branches `iso-v0` and `main` | `call-system-image.yml:249,420`, `nvidia-kmod.yml:101`; PR #115 adds `sign-kernel`, PR #185 adds `sign-repo` |
+| ENV1 | `signing` | SEC1, SEC2, SEC3, SEC4, SEC11 | required reviewer `hr-mes`, self-review allowed; deployment branches `iso-v0` and `main` | `call-system-image.yml:249,442`, `nvidia-kmod.yml:101`; PR #115 adds `sign-kernel`, PR #185 adds `sign-repo` |
 | ENV2 | `stable-override` | none | **missing on GitHub** | PR #180 only (`promote-stable.yml`, checked by `system/require-review.sh`); `doc_update_trust.md` on that branch asks for required reviewers, the release branch only and no administrator bypass |
 | ENV3 | `delete` | none | none; created 2026-08-08 | nothing |
 | ENV4 | `github-pages` | none | deployment branches `gh-pages` and `main` | no workflow names it |

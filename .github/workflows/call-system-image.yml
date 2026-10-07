@@ -259,6 +259,12 @@ jobs:
       packages: write
       id-token: write
     steps:
+      - name: 🔑 Require the Secure Boot key
+        # First, so a missing secret fails in seconds instead of after the system stage build.
+        env:
+          SECUREBOOT_SIGNING_KEY: ${{ secrets.SECUREBOOT_SIGNING_KEY }}
+        run: |
+          [[ -n ${SECUREBOOT_SIGNING_KEY:-} ]] || { echo "SECUREBOOT_SIGNING_KEY is not available to this job: check the signing environment" >&2; exit 1; }
       - name: ⚙️ Prepare environment
         run: |
           set -euo pipefail
@@ -285,24 +291,40 @@ jobs:
         run: |
           set -euo pipefail
           echo "${GITHUB_TOKEN}" | podman login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-      - name: 🐳 Build OS Images
+      - name: 🧱 Build the system stage
         # The Containerfile pulls its base and the tier repository images and installs
         # Fedora packages with dnf5, so the build needs the network; the build context
-        # is the repository root, where its COPY sources live. build-image.sh builds the
-        # default, NVIDIA and NVIDIA-legacy images in turn, all three signed with the same
-        # Secure Boot key, so one job and one approval covers the whole cycle (S8). Nothing
-        # is pushed until all three have built.
+        # is the repository root, where its COPY sources live. The system stage the three
+        # images share is built once per run, and its image ID is the base of all three
+        # (doc_update_delivery.md, UD40). The rechunk of UD32 is a step of its own after
+        # this one, writing the ID of the rechunked image to the same file.
+        run: bash system/build-image.sh --system --registry "${IMAGE_REGISTRY}" --iidfile artifacts/system-image.iid
+
+      - name: 🐳 Build OS Images
+        # build-image.sh builds the default, NVIDIA and NVIDIA-legacy images in turn FROM the
+        # system image, all three signed with the same Secure Boot key, so one job and one
+        # approval covers the whole cycle (S8). Nothing is pushed until all three have built.
         env:
           RUN_ID: ${{ github.run_id }}
           RUN_NUMBER: ${{ github.run_number }}
           SECUREBOOT_SIGNING_KEY: ${{ secrets.SECUREBOOT_SIGNING_KEY }}
         run: |
           set -euo pipefail
-          [[ -n ${SECUREBOOT_SIGNING_KEY:-} ]] || { echo "SECUREBOOT_SIGNING_KEY is not available to this job: check the signing environment" >&2; exit 1; }
           for gpu in none nvidia nvidia-legacy; do
-            bash system/build-image.sh --gpu "$gpu" --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" --tag "${DEFAULT_TAG}" --serial "${RUN_NUMBER}"
+            bash system/build-image.sh --gpu "$gpu" --system-image "$(<artifacts/system-image.iid)" --registry "${IMAGE_REGISTRY}" \
+              --tag "${RUN_ID}" --tag "${DEFAULT_TAG}" --serial "${RUN_NUMBER}"
           done
           df -h
+
+      - name: 🧩 Check that the images share the system layers
+        # The acceptance of UD40: each image starts with every layer of the system image.
+        # Read from local storage before the push, so a failure publishes no tag.
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          bash system/shared-layers.sh --system "$(<artifacts/system-image.iid)" --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" \
+            | tee -a "${GITHUB_STEP_SUMMARY}"
 
       - name: 📤 Push OS Images
         env:
