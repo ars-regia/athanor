@@ -270,7 +270,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 
 ### CI22 Rust Security & FFI Audit
 
-- **File:** `rust-security-audit.yml`. **Purpose:** clippy over the root workspace, a compile check of the frozen shell workspace, and cargo-deny (licences, advisories, bans, sources, one policy in `deny.toml`) over both lockfiles. There is no cargo-vet, Kani or eBPF job (ADR-0075).
+- **File:** `rust-security-audit.yml`. **Purpose:** clippy over the root workspace and cargo-deny (licences, advisories, bans, sources, one policy in `deny.toml`) over its lockfile; the frozen shell workspace left the tree with ADR-0073 wave 1. There is no cargo-vet, Kani or eBPF job (ADR-0075).
 - **Triggers:** push and `pull_request` on `iso-v0`. **Outputs:** artifact `security-audit-logs`.
 - **Secrets, variables:** `REGISTRY_HOST`, `BUILDER_STABLE_TAG`. **Environment:** none. **Runner:** hosted, inside the `athanor-builder` container. **Concurrency:** `<workflow>-<ref>`, cancels in progress.
 - **Scripts:** `scripts/ci/security-audit.sh`.
