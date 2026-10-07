@@ -8,7 +8,7 @@ metadata:
 
 # Convert documents to Markdown
 
-Run the anydoc CLI, pinned to the exact version below (do not run an unpinned `@latest`). It needs Node 20+ and no install:
+Run the anydoc CLI, pinned to the exact version below; never run an unpinned or `@latest` version. It needs Node 20+ and no install:
 
 ```bash
 npx -y @firecrawl/anydoc@0.2.4 <file>              # Markdown to stdout
