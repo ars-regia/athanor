@@ -1038,13 +1038,6 @@ item = "UT2"
 purpose = "Adds the key-based signature to the published system images"
 
 [[component]]
-path = "system/sysctl.d"
-kind = "config"
-area = "security"
-status = "missing"
-purpose = "A sysctl hardening file that nothing installs"
-
-[[component]]
 path = "system/tests"
 kind = "tests"
 area = "build-ci"
