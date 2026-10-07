@@ -9,51 +9,53 @@ paths:
   - "system/confidential_computing/**"
 ---
 
-# Sicurezza — percorsi critici
+# Security-critical paths
 
-<!-- I glob sono scritti per FUNZIONE (`*attestation*`, `*bus-api*`, `*mesh*`)
-     e non per nome di prodotto. La rinomina Ermete -> Athanor del 5 settembre 2026
-     aveva gia' spezzato cinque glob su sei scritti con il prefisso vecchio: la
-     regola restava nel repository, sembrava configurata, e non si caricava piu'
-     su nessuno dei file che deve proteggere. Non reintrodurre prefissi fissi. -->
+<!-- The globs name the function (`*attestation*`, `*bus-api*`, `*mesh*`), not the product.
+     The Ermete -> Athanor rename of 2026-09-05 broke five of the six globs written with the
+     old prefix: the rule stayed in the repository, looked configured, and loaded for none
+     of the files it protects. Do not reintroduce fixed prefixes. -->
 
-Stai lavorando su un componente di sicurezza. Qui le regole generali non bastano.
+You are working on a security component. `system/athanor-bus-api/src/polkit.rs` and
+`system/confidential_computing/` are stop-and-ask paths (`AGENTS.md`): confirm with the
+contributor before editing them.
 
-## Niente teatro
+## No security theatre
 
-Crittografia, validazione dei token, hash e attestazione devono essere **reali**.
-`pqc_kyber`, `pqc_dilithium`, `ml-kem`, `sha2`, `zeroize` e `subtle` sono già nel
-workspace: usali. Un placeholder, un valore hardcoded o un `return Ok(true)` in un
-percorso di autorizzazione **non è una bozza da completare dopo, è una falla**.
+Cryptography, token validation, hashes and attestation are **real**. A placeholder, a
+hard-coded value or a `return Ok(true)` in an authorisation path **is not a draft to finish
+later, it is a vulnerability**. If you cannot implement the real thing now, do not write the
+fake one: stop and say so.
 
-Se non puoi implementare la cosa reale in questo passaggio, non scrivere la finta:
-fermati e dillo.
+- Key encapsulation: `ml-kem`. Do not use `pqc_kyber` in new code: `deny.toml` ignores its
+  timing advisory RUSTSEC-2023-0079 (KyberSlash) without a recorded reason.
+- Do not add new uses of `pqc_dilithium`, a pre-standard Dilithium rather than FIPS 204
+  ML-DSA. No ML-DSA crate is a workspace dependency yet: propose one in a decision record.
+- Hash with `sha2`, wipe secret material with `zeroize`, compare secrets in constant time
+  with `subtle`. All three are workspace dependencies.
 
 ## Zero-trust
 
-- Nessun daemon o applicazione fuori da un compartimento o da una MicroVM `crosvm`.
-- La policy IPE, il confinamento Landlock e i compartimenti non si aggirano. Se un percorso richiede di saltarli, il percorso è sbagliato.
-- Mai `chmod 777`, mai permessi allargati "per far funzionare la cosa".
+- No daemon or application outside a compartment or a MicroVM.
+- The IPE policy, Landlock confinement and the compartments are never bypassed. If a path
+  requires skipping them, the path is wrong.
+- Never `chmod 777`, never widen permissions "to make it work".
 
 ## Polkit
 
-Il subject polkit deve identificare **il chiamante**, non il bus. È un difetto già
-corretto una volta: non reintrodurlo.
+The polkit subject identifies **the caller**, not the bus connection. This defect was fixed
+once: do not reintroduce it (`python3 scripts/verify.py polkit-subject`).
 
-Ogni azione polkit dichiarata deve avere il suo file `.policy` installato. Verifica
-con `python3 scripts/verify.py polkit`.
+Every polkit action the code checks is declared in an installed `.policy` file:
+`python3 scripts/verify.py polkit`.
 
-## Segreti
+## Secrets
 
-Le chiavi non entrano nel repository: `*.key` e `*.pem` sono git-ignored, e ci sono
-regole di permesso che ne bloccano la lettura. Se ti serve un valore, chiedi il nome
-della variabile d'ambiente, mai il contenuto.
+Keys never enter the repository: `*.key` and `*.pem` are git-ignored except the public
+certificates under `forge/specs/azoth/keys/`, and `.claude/settings.json` denies reading
+them. If a value is needed, ask for the environment variable's name, never its content.
 
-Azzera il materiale sensibile con `zeroize` e confronta con `subtle` per evitare
-attacchi a tempo.
+## Before delivering
 
-## Prima di consegnare
-
-Una modifica qui va rivista dal sub-agente `auditor` con uno scenario di
-fallimento concreto, non con un parere. E chiedi conferma all'utente prima di
-editare: sono i percorsi che il `CLAUDE.md` marca come da fermarsi.
+A change here needs a second reviewer who checks it against a concrete failure scenario,
+not an opinion (`docs/operations/contributing.md`, CT6).

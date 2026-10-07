@@ -145,6 +145,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0075 | 0075 | [Engineering gates](0075-engineering-gates.md) | accepted | build, security |
 | ADR-0076 | 0076 | [Platform scope for 1.0](0076-platform-scope-for-1-0.md) | accepted | platform, security, build, docs |
 | ADR-0077 | 0077 | [Desktop decisions from Audit 3](0077-desktop-decisions.md) | accepted | shell, apps, security |
+| ADR-0078 | 0078 | [Fedora 45 is the next base, with Fedora 44 as the fallback](0078-fedora-release-target.md) | accepted | platform |
 | ADR-0079 | 0079 | [Captive portals under strict DNS over TLS](0079-captive-portals-under-strict-dot.md) | accepted | network, security |
 | ADR-0080 | 0080 | [Pipeline architecture](0080-pipeline-architecture.md) | accepted | build, signing, security |
 | ADR-0081 | 0081 | [CRA compliance posture](0081-cra-compliance-posture.md) | accepted | security, update, product |
