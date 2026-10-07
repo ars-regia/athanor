@@ -21,3 +21,6 @@ Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/bin/sh -c 'for _ in $(seq 100); do wayland-info >/dev/null 2>&1 && exit 0; sleep 0.1; done; echo "compositor did not become ready" >&2; exit 1'
 TimeoutStartSec=15
+# The probe needs no privilege, and gains none from a setuid program it might run
+# (docs/architecture/doc_threat_model.md, TM8).
+NoNewPrivileges=yes

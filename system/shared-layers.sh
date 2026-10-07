@@ -2,8 +2,8 @@
 # The acceptance of UD40 (docs/architecture/doc_update_delivery.md): the build job builds the
 # system stage once and every variant FROM that image, so each variant starts with every layer
 # of the system image, in order. Compares the diff_ids (uncompressed layer digests) that
-# `skopeo inspect --config` reports for the images in local storage, where the build left them,
-# before anything is pushed: a failed check never publishes a tag. A push does not change
+# `podman image inspect` reports as RootFS.Layers for the images in local storage, where the
+# build left them, before anything is pushed: a failed check never publishes a tag. A push does not change
 # diff_ids, so the published images carry the same layers. Prints one Markdown line per variant
 # for the job summary, and every failure both there and on stderr; exits 1 when a variant does
 # not carry the system layers or an image cannot be read.
@@ -31,15 +31,17 @@ fail() {
     echo "${0##*/}: $1" >&2
 }
 
-# The diff_ids of a local image, as a JSON array.
+# The diff_ids of a local image, as a JSON array. podman, not skopeo: a rootless skopeo opens
+# its own user namespace to read containers-storage, and the hosted runner's AppArmor policy
+# denies unprivileged user namespaces to binaries without a profile of their own.
 diff_ids() {
-    local config
-    config=$(skopeo inspect --config "containers-storage:$1") || {
+    local layers
+    layers=$(podman image inspect --format '{{json .RootFS.Layers}}' "$1") || {
         fail "cannot read the configuration of $1 from local storage"
         return 1
     }
-    jq -ec '.rootfs.diff_ids | arrays' <<< "$config" || {
-        fail "$1: the image configuration has no rootfs.diff_ids array"
+    jq -ec 'arrays' <<< "$layers" || {
+        fail "$1: the image has no RootFS.Layers array"
         return 1
     }
 }

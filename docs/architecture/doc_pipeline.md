@@ -61,8 +61,10 @@ These are the maintainer's, and this document does not reopen them.
    `signing-images` holds the cosign key. Both deploy only from the protected branches
    `iso-v0` and `main`. A release cycle asks for **at most two approvals** (amends A2-27).
    A job that holds a key builds nothing and runs no third-party action, and
-   `verify.py workflows` enforces it. `MOK_PRIVATE_KEY` is retired. Agents later push with
-   their own GitHub App identity, so that `prevent_self_review` can be switched on.
+   `verify.py workflows` enforces it. `MOK_PRIVATE_KEY` is retired with the old `signing`
+   environment at the end of the image key rotation (`docs/operations/secrets.md` section 4.1).
+   `prevent_self_review` stays off until a second reviewer exists: with one reviewer it would
+   block every release the maintainer triggers or re-runs.
 2. **No compiler cache for the kernel** (PR #250).
 3. **CRA: comply now, at manufacturer level** (ADR-0081). Support period of five years for
    the product line, with the Fedora base rebased forward and the end date published.
@@ -233,8 +235,8 @@ maintainer is a ruleset bypass actor, recorded in the settings file (PQ5).
 **PL5. Agents and bots act through GitHub App identities, never personal tokens.** Tokens
 come from `actions/create-github-app-token` per job, scoped to the repository and the
 permissions the job needs, and expire within the hour. Personal access tokens are removed
-from the repository secrets. Once agents push as their App, `prevent_self_review` is on in
-both signing environments (D43).
+from the repository secrets. `prevent_self_review` in the signing environments waits for a
+second reviewer, not for the App: the maintainer still triggers and re-runs releases (D43).
 
 **PL6. Bot pull requests merge through the same queue and the same gate.** Auto-merge is
 enabled by the bot's App identity from a default-branch run, never from a job that runs
@@ -561,7 +563,7 @@ when something merged.
 composite action, which opens or updates one issue per workflow and job labelled
 `ci-alert`, and closes it on the next success. No scheduled failure stays silent.
 
-**PL52. Settings drift is detected daily.** `scripts/ci/settings_drift.py` compares
+**PL52. Settings drift is detected daily.** `scripts/github-settings/ghsettings.py diff` compares
 `.github/settings/*.json` with the live repository (rulesets, environments, Actions
 permissions, security features) using a read-only App token, and raises PL51's alert on a
 difference.
@@ -627,11 +629,11 @@ step only the maintainer can take.
 | Block | Goal | Scope | Gate | Depends on | Effort |
 | ----- | ---- | ----- | ---- | ---------- | ------ |
 | **PB0** | Publication under `ars-regia` and the two signing environments (D43) | branch `perf/sign-only-uki`, PR #249, `.github/settings/environments.json`, `nvidia-kmod.yml`, `call-system-image.yml`, `docs/operations/secrets.md` | `python3 scripts/verify.py workflows` green with the key-isolation rule; one release run on `iso-v0` publishes three signed `:<run_id>` images under `ars-regia` with at most two approvals; the live environments list `signing-kernel` and `signing-images`, deployable from `iso-v0` and `main` only; `MOK_PRIVATE_KEY` absent | PR #249 | 2-3 (estimate) |
-| | **[M]** create the two environments, move the secrets, delete `MOK_PRIVATE_KEY`, approve the run | | | | |
+| | **[M]** create the two environments, move the secrets, approve the run; `signing` and `MOK_PRIVATE_KEY` go at the end of the image key rotation (secrets.md section 4.1) | | | | |
 | **PB1** | One gate (ADR-0075) | `pr.yml`, `Justfile` (`check`), `scripts/ci/changes.py`, `scripts/ci/gate.py` | `just check` passes locally and in `pr.yml`; a documentation-only PR finishes with Kernel Build skipped and `gate` green; a PR with a failing selected job has `gate` red | PB0 | 3 (estimate) |
 | | **[M]** apply `branch-protection.json`, which adds `gate` to `Kernel gate` and `Spec gate` on `iso-v0` (`docs/operations/github-settings.md` section 8); the follow-up that drops their `pull_request` triggers removes the two names from the file in the same change, and until it, Kernel Build still runs on a documentation-only PR, while the `kernel` job of `pr.yml` is skipped | | | | |
-| **PB2** | Source, review and settings controls, alerting | `.github/settings/rulesets.json`, `actions.json`, `environments.json`, `CODEOWNERS`, `scripts/ci/settings_drift.py`, `.github/actions/alert` | `python3 scripts/ci/settings_drift.py` exits 0 against the live repository; `gate` is the required check of both product branches; the three personal tokens are absent from the secrets list; a forced failure of a scheduled job opens a `ci-alert` issue | PB1 | 2 (estimate) |
-| | **[M]** create the GitHub App and its secrets, apply the rulesets, enable the merge queue and SHA pinning | | | | |
+| **PB2** | Source, review and settings controls, alerting | `.github/settings/rulesets.json`, `actions.json`, `environments.json`, `CODEOWNERS`, `scripts/github-settings/ghsettings.py` (`diff`), `.github/actions/alert` | `python3 scripts/github-settings/ghsettings.py diff` exits 0 against the live repository; `gate` is the required check of both product branches; the three personal tokens are absent from the secrets list; a forced failure of a scheduled job opens a `ci-alert` issue | PB1 | 2 (estimate) |
+| | **[M]** create the GitHub App and its secrets, apply the rulesets, enable the merge queue; SHA pinning waits for PB3 | | | | |
 | **PB3** | Pinned inputs, verified hops (PL8, PL12-PL14) | `.github/actions/verify-input`, `scripts/ci/registry.sh`, `forge/config/images.json`, every workflow `uses:` | `python3 scripts/verify.py pinning images` green; a release run's logs show a verification for every hop of PL12 | PB1 | 3-4 (estimate) |
 | **PB4** | SLSA Build L3 provenance and CycloneDX SBOM for every artifact | the six stages, `.github/actions/attest`, `scripts/ci/verify_release.sh`, `scripts/ci/sbom_check.py` | `scripts/ci/verify_release.sh <run_id>` exits 0 for a release run, covering every digest in `image-digests.txt` and `kernel-artifacts.env` | PB3 | 3 (estimate) |
 | **PB5** | Evidence, VSA and the policy gate | `accept.yml`, `promote.yml`, `system/promote.sh`, `scripts/ci/policy_check.py`, `scripts/ci/policy.json` | doc_update_delivery.md phases P1 and P2 gates, plus: `policy_check.py` refuses a candidate with each single piece of evidence removed (unit test), and the first automatic promotion carries a VSA | PB4 | 4 (estimate) |
@@ -656,7 +658,7 @@ The maintainer answered every question as recommended on 2026-10-07. Items marke
 | PQ2  | How is the ISO signed? | Keylessly, by the stage that builds it (PL32): the ISO is built after the images are signed, so signing it with the cosign key would need a second `signing-images` job and a third approval. A key-based signature for offline verification is reconsidered if users ask for it. |
 | PQ3  | Where do kernel builds of pull requests run? | Same-repository pull requests on the ephemeral self-hosted guest with a pull-request-only cache volume; forks never on self-hosted. |
 | PQ4  | Who signs the security class of a release? Today a security-class promotion goes through `promote.sh` in a signing environment (doc_update_delivery.md, decision 3), which can make three approvals in a cycle. | Set the class when the release is dispatched with its advisory ids, and sign it in `signing-images` with the images; `promote.yml` then holds no key. |
-| PQ5  | Review on the maintainer's own pull requests | Maintainer as a recorded ruleset bypass actor; agent and bot pull requests require a code-owner review; `prevent_self_review` on once agents push as their App. |
+| PQ5  | Review on the maintainer's own pull requests | Maintainer as a recorded ruleset bypass actor; agent and bot pull requests require a code-owner review; `prevent_self_review` deferred until a second reviewer exists. |
 | PQ6  | Length of the postpone (ADR-0082) | One postpone per update, up to seven days, then the update applies at the next shutdown. |
 | PQ7  | What is the "product line" whose five years run, and from when? | Each major version (1.x), from the date 1.0 is placed on the market; `SUPPORT_END` set from it. |
 | PQ8  | The CVD contact besides GitHub private reporting | A project e-mail alias owned by the maintainer, named in `SECURITY.md` [LAWYER for the CSIRT]. |

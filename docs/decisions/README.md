@@ -111,7 +111,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-6 | 0041 | [Trusted path built on cosmic-comp PR #1441](0041-trusted-path-on-cosmic-comp.md) | accepted | security, shell |
 | A2-7 | 0042 | [SystemPrompter reuses the oo7 secret exchange](0042-system-prompter-reuses-oo7.md) | accepted | security, shell |
 | A2-8 | 0043 | [bootc in two steps (D6 closed)](0043-bootc-in-two-steps.md) | amended by ADR-0076 | update, kernel, security |
-| A2-9 | 0044 | [Three-tier threat model](0044-three-tier-threat-model.md) | accepted | security, docs |
+| A2-9 | 0044 | [Three-tier threat model](0044-three-tier-threat-model.md) | amended by ADR-0086 | security, docs |
 | A2-10 | 0045 | [Cleanup of dead packages, documents and units](0045-cleanup-of-dead-components.md) | amended by ADR-0073 | packages, docs |
 | A2-11 | 0046 | [DNS model: strict DNS over TLS](0046-dns-strict-dot.md) | amended by ADR-0079 | network, security |
 | A2-12 | 0047 | [Fleet identity and transport](0047-fleet-transport-and-identity.md) | accepted | fleet, network |
@@ -145,8 +145,12 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0075 | 0075 | [Engineering gates](0075-engineering-gates.md) | accepted | build, security |
 | ADR-0076 | 0076 | [Platform scope for 1.0](0076-platform-scope-for-1-0.md) | accepted | platform, security, build, docs |
 | ADR-0077 | 0077 | [Desktop decisions from Audit 3](0077-desktop-decisions.md) | accepted | shell, apps, security |
+| ADR-0078 | 0078 | [Fedora 45 is the next base, with Fedora 44 as the fallback](0078-fedora-release-target.md) | accepted | platform |
 | ADR-0079 | 0079 | [Captive portals under strict DNS over TLS](0079-captive-portals-under-strict-dot.md) | accepted | network, security |
 | ADR-0080 | 0080 | [Pipeline architecture](0080-pipeline-architecture.md) | accepted | build, signing, security |
 | ADR-0081 | 0081 | [CRA compliance posture](0081-cra-compliance-posture.md) | accepted | security, update, product |
 | ADR-0082 | 0082 | [Update control: postpone and opt-out](0082-update-control.md) | accepted | update, security |
 | ADR-0083 | 0083 | [One supported desktop; derived images stay open](0083-one-desktop-derived-images-open.md) | accepted | product, shell, update |
+| ADR-0084 | 0084 | [The key custody model is definitive for the single-maintainer phase](0084-key-custody-model.md) | accepted | security, process |
+| ADR-0085 | 0085 | [Keyring prompter: the secret exchange comes from upstream oo7](0085-keyring-prompter-secret-exchange-source.md) | accepted | security, shell |
+| ADR-0086 | 0086 | [toolbox is not isolation; podman as container_t or the dev VM is](0086-toolbox-is-not-isolation.md) | accepted | security, apps |
