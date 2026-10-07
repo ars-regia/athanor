@@ -32,9 +32,10 @@ rootpw --lock
 # Anaconda's `firewall` command has no `--default`: an unknown option is a parse error,
 # so the directive it was meant to harden aborted the whole installation instead. The
 # default zone firewalld ships already refuses unsolicited inbound traffic. Remote login
-# is off on new installs (doc_software.md, decision 2): no sshd, no SSH port.
+# is off on new installs (doc_software.md, decision 2): sshd is not enabled, and the ssh
+# service is not added to the firewall.
 firewall --enabled
-services --enabled=systemd-homed
+services --enabled=systemd-homed --disabled=sshd
 
 # Disk layout is the installer's choice: no clearpart/part/autopart here, so Anaconda
 # opens its partitioning screen. systemd-homed encrypts the user's home (LUKS2); a TPM

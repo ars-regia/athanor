@@ -26,6 +26,9 @@
 # what left greetd enabled and dead in runs 34269959759 and 34275504878.
 xconfig --startxonboot
 
+# Remote login off, as the shipped ISO's kickstart sets it, repeated for the same reason.
+services --disabled=sshd
+
 # The whole disk, no questions. The test VM has one virtio disk and nothing to preserve.
 clearpart --all --initlabel
 autopart --type=btrfs
