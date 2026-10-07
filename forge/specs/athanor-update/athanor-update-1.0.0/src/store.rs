@@ -7,6 +7,7 @@
 //!   `newest-booted`   the newest build time this machine has booted, seconds since the epoch
 //!   `last-success`    when the registry last answered a check, seconds since the epoch
 //!   `migrated`        stamp of `athanor-update migrate`
+//!   `channel-absent`  `migrate` found no manifest for the channel; cleared when it finds one
 //!   `signatures/<hex>/`  the signature object of a digest, as `skopeo copy … dir:` wrote it
 use athanor_trust_state::State;
 use std::fs::File;
@@ -138,9 +139,27 @@ impl Store {
     }
 
     /// # Errors
-    /// The file cannot be written.
+    /// A file cannot be written or removed.
     pub fn set_migrated(&self) -> std::io::Result<()> {
-        Self::replace(&self.var, "migrated", 0o644, b"")
+        Self::replace(&self.var, "migrated", 0o644, b"")?;
+        self.set_channel_absent(false)
+    }
+
+    #[must_use]
+    pub fn channel_absent(&self) -> bool {
+        self.var.join("channel-absent").exists()
+    }
+
+    /// # Errors
+    /// The file cannot be written or removed.
+    pub fn set_channel_absent(&self, absent: bool) -> std::io::Result<()> {
+        if absent {
+            return Self::replace(&self.var, "channel-absent", 0o644, b"");
+        }
+        match std::fs::remove_file(self.var.join("channel-absent")) {
+            Err(err) if err.kind() != std::io::ErrorKind::NotFound => Err(err),
+            _ => Ok(()),
+        }
     }
 
     /// The directory of the signature object of `digest`; `None` for anything but `sha256:<64 hex>`.
