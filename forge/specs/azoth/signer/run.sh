@@ -60,8 +60,8 @@ if [[ $STAGE == sign ]]; then
     [[ -s kernel-unsigned/vmlinuz && -s kernel-unsigned/kver && -s kernel-unsigned/module-sig-hash ]] ||
         die "kernel-unsigned/ is incomplete: run.sh inputs derives it in this job, before this step"
 fi
-# The keys move to files and leave the environment before any other script runs: mktemp,
-# a system binary, is the only process started while they are still exported.
+# The keys move to files and leave the environment before any repository script runs: only
+# system binaries (dirname, mktemp) start while they are still exported.
 WORK=$(mktemp -d)
 logged_in=''
 cleanup() {
