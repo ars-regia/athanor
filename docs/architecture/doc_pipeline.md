@@ -219,7 +219,7 @@ flowchart LR
 | `cosmic-comp-rebase.yml`         | merged into `maintenance.yml` (weekly)                                                             |
 | `forge-ghcr-cleanup.yml`         | merged into `maintenance.yml` (weekly janitor, section 5)                                               |
 | `forge-util-update-specs.yml`    | merged into `bots.yml`                                                                             |
-| `fuzzing.yml`                    | merged into `maintenance.yml` (weekly)                                                             |
+| `fuzzing.yml`                    | deleted: it had no targets (`tests/fuzz` is gone); fuzzing returns in `maintenance.yml` (weekly, section 3.1) when a crate has a target |
 | `iso-acceptance.yml`             | replaced by `accept.yml`, addressed by run id (UD17)                                               |
 | `kernel-build.yml`               | split: the check into `pr.yml` (done through `call-kernel.yml`, PR #266; its own `pull_request` trigger goes with the PB1 follow-up), the build and the publication into `call-kernel.yml`. It signs nothing: `vmlinuz` is signed by the Orchestrator's `nvidia-kmod-sign`, which becomes `sign-kernel` |
 | `kernel-bump.yml`                | merged into `bots.yml`                                                                             |
