@@ -137,9 +137,10 @@ artifact and never pushed; any other change runs in the published `athanor-build
   package images of each tier by `:hash-<hash>`, from the map `dag-hashes` (`hashes.json`) the
   brain wrote for this run and the job downloads; nothing in the pipeline reads a package's
   `:latest`, which stays for people (tier 0 also takes the kernel, `azoth@<digest>` from the
-  verified kernel artifacts). For each tier whose content hash changed, the job signs the
-  RPMs when `RPM_GPG_KEY` is available, runs `createrepo_c` and publishes
-  `athanor-forge-tier<N>-repo:latest`; an unchanged tier is not pushed. On `main` the same repositories are deployed to GitHub Pages as a DNF channel.
+  verified kernel artifacts). For each tier whose content hash changed, the job runs
+  `createrepo_c` and publishes `athanor-forge-tier<N>-repo:latest`; an unchanged tier is not
+  pushed. The RPMs are not signed and there is no DNF channel: they reach machines only inside
+  the signed image (ADR-0076, decision 2).
 - **System images.** `system/build-image.sh` builds the default, `nvidia` and
   `nvidia-legacy` variants from `system/Containerfile`: the Fedora `base-atomic:43` base
   by digest, the RPMs of each tier repository image (bind-mounted, then installed), the

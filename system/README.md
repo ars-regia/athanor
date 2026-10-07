@@ -25,8 +25,8 @@ The Azoth kernel and the NVIDIA modules come from the kernel registry, by the di
 `kernel-artifacts.sh` verified. `build-image.sh` builds one image, in CI and locally,
 `FROM` the image of the `system` stage: `--system` builds that stage alone and writes its
 image ID, `--system-image ID` builds a variant from it, and without it the stage is built
-first. Without `SECUREBOOT_SIGNING_KEY` it signs the UKI with a throwaway key and refuses
-to push the result.
+first. No key reaches the build: the vmlinuz comes signed for Secure Boot from `azoth-boot`,
+by the digest `kernel-artifacts.sh` verified (D43).
 
 ## Pipeline
 

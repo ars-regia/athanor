@@ -172,7 +172,7 @@ COSMIC's applications (`cosmic-files`, `cosmic-term`, `cosmic-edit`, `cosmic-sto
 
 **The system side has its own spec, `doc_update_trust.md`,** written and passed through the `auditor` before package 1b-system is planned; the maintainer consents to it because it changes the signing pipeline. This document binds it to the following:
 
-1. Release images gain a key-based cosign signature beside the keyless one, with the key in the `signing` environment.
+1. Release images gain a key-based cosign signature beside the keyless one, with the key in the `signing-images` environment.
 2. The policy is `sigstoreSigned` with a `keyPaths` list, scoped to the project's registry only; `default` is untouched, so other registries keep working. The tools read only `/etc/containers/`, so the policy and the `registries.d` entry with `use-sigstore-attachments` live under `/usr` and the image build makes the `/etc` paths symbolic links to them. A local file that replaces a link shadows the policy; the state file names the policy actually in force, and the badge follows it.
 3. A key rotation ships the new public key in an image still signed with the old one.
 4. Existing installs move from `ostree-unverified-registry:` to a signed reference by an explicit, tested step.
