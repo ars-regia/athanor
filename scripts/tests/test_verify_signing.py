@@ -579,6 +579,20 @@ class SigningTest(unittest.TestCase):
                 text = workflow(BUILD_JOB).replace("on: push\n", f"on: {on}\n")
                 self.assert_one({"b.yml": text}, r"^b\.yml: runs on pull_request_target")
 
+    def test_rule_8_a_signing_job_in_a_called_workflow_fails(self):
+        # A job of a called workflow reads the secrets of its environment only when the caller
+        # passes secrets: inherit (actions/runner#4453), which rule 3 e forbids: its keys are
+        # empty. A signing job belongs to the workflow the event starts.
+        for on in ("workflow_call", "[workflow_call, workflow_dispatch]", "{workflow_call: {inputs: {}}, push: {}}"):
+            with self.subTest(on=on):
+                text = workflow(BUILD_JOB, SIGN_JOB).replace("on: push\n", f"on: {on}\n")
+                self.assert_one(
+                    {"k.yml": text},
+                    r"^k\.yml: signing job sign is in a workflow that runs on workflow_call",
+                )
+        called_build = workflow(BUILD_JOB).replace("on: push\n", "on: workflow_call\n")
+        self.assertEqual(self.problems({"k.yml": called_build}), [])
+
     def test_without_pyyaml_the_lint_fails_closed(self):
         saved, verify.yaml = verify.yaml, None
         try:

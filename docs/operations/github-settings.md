@@ -92,7 +92,7 @@ Since then the files have moved ahead of GitHub (2026-10-07, ADR-0064): the two 
 | Default branch `iso-v0`; all three merge methods on; auto-merge on; head branches deleted on merge | `repository.json` |
 | Description is still `ermete-os` | `repository.json` |
 | Dependabot alerts and Dependabot security updates are off; secret scanning and push protection are on; private vulnerability reporting is on | `repository.json` |
-| Only `iso-v0` is protected: required check `Kernel gate` (not strict), no review, `enforce_admins` off, force push and deletion off | `branch-protection.json` (now also `main`, section 7) |
+| Only `iso-v0` is protected: required checks `Kernel gate` and `Spec gate` (not strict), no review, `enforce_admins` off, force push and deletion off | `branch-protection.json` (now also `main`, section 7) |
 | No repository ruleset | `rulesets.json` |
 | Environment `signing`: reviewer `hr-mes`, branches `iso-v0` and `main`, admin bypass on, four secrets | `environments.json` until 2026-10-07 (now section 7) |
 | Environment `github-pages`: branches `gh-pages` and `main`; no workflow deploys to it since the DNF channel was removed (ADR-0076, decision 2) | `environments.json` |
@@ -111,7 +111,7 @@ Each one is a change to a file followed by `apply`; none has been made.
 | Environment `delete` has no rule and no secret, and no workflow names it (`grep -rn "environment:" .github/workflows` finds only `signing-kernel` and `signing-images`) | Delete it by hand and re-export |
 | Pages builds `main:/docs` and errors, and nothing publishes to the `gh-pages` branch since the DNF channel was removed (ADR-0076, decision 2) | Turn Pages off in `pages.json`, then delete the `gh-pages` branch and the `github-pages` environment by hand and re-export |
 | `enforce_admins` is off on `iso-v0` and `main`: the admin may push past the required check | Decide whether the single admin should be bound by the branch protection, as the signing environments already bind them (section 7) |
-| No scheduled drift check | _(Done in PB2, section 8)_ `maintenance.yml` runs `diff` daily with a read-only token of a GitHub App, not an admin token |
+| No scheduled drift check | _(Done in PB2, section 9)_ `maintenance.yml` runs `diff` daily with a read-only token of a GitHub App, not an admin token |
 
 ## 7. Signing environments (ADR-0064)
 
@@ -120,9 +120,9 @@ no job holds a key it does not use:
 
 | Environment | Secrets | Job |
 | --- | --- | --- |
-| `signing-kernel` | `SECUREBOOT_SIGNING_KEY`, `MODULE_SIGNING_KEY` | `sign` of `nvidia-kmod.yml`, only when a kernel or NVIDIA change leaves the signed vmlinuz or modules missing |
-| `signing-images` | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | `sign-system-images` of `call-system-image.yml` |
-| `signing` | the five keys it held before the split, `MOK_PRIVATE_KEY` included | `sign-system-images` of `call-system-image.yml`, during the image key rotation only |
+| `signing-kernel` | `SECUREBOOT_SIGNING_KEY`, `MODULE_SIGNING_KEY` | `nvidia-kmod-sign` of `athanor-forge-orchestrator.yml`, only when a kernel or NVIDIA change leaves the signed vmlinuz or modules missing |
+| `signing-images` | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | `sign-system-images` of `athanor-forge-orchestrator.yml` |
+| `signing` | the five keys it held before the split, `MOK_PRIVATE_KEY` included | `sign-system-images` of `athanor-forge-orchestrator.yml`, during the image key rotation only |
 
 `signing` is the environment the split replaces. It holds image key 1, which signs the
 transitional release of the image key rotation (`docs/operations/secrets.md` section 4.1), so
@@ -135,8 +135,8 @@ because its keys are then held twice.
 
 Both have the same protection in `environments.json`: required reviewer `hr-mes`; administrator
 bypass off (`can_admins_bypass: false`, set by hand: section 4); deployment branches `iso-v0` and
-`main`, which `branch-protection.json` protects alike (required check `Kernel gate`, no force
-push, no deletion).
+`main`, both protected by `branch-protection.json` (required checks `Kernel gate`, `Spec gate`
+and `gate` on `iso-v0`, `Kernel gate` on `main`, section 8; no force push, no deletion).
 
 `prevent_self_review` stays `false`, deferred until a second reviewer exists (secrets.md
 KC1). GitHub refuses the approval of the person who triggered the run, and a release run, or a
@@ -152,7 +152,30 @@ administrator bypass, or deploying from a branch `branch-protection.json` does n
 name. It is a regression guard on the files, not a check of the live settings: `ghsettings.py
 diff` is.
 
-## 8. Drift check, rulesets and the GitHub App (doc_pipeline.md PB2)
+## 8. Switching the required check to gate
+
+`branch-protection.json` declares exactly what is applied. On `iso-v0` it requires three checks:
+`Kernel gate`, `Spec gate` and `gate`, the aggregate job of `pr.yml` (doc_pipeline.md PL3,
+ADR-0075); `main` requires `Kernel gate` until it takes `pr.yml`. The file is applied as soon as
+the change that adds `pr.yml` is merged, and it blocks nothing: the three workflows run on every
+pull request, so every required check reports. The bots wait for the checks this file requires
+(`forge/scripts/bot_merge.py`), so they follow it in every state. The follow-up that removes the
+`pull_request` triggers of `kernel-build.yml` and `spec-build-check.yml` removes `Kernel gate` and
+`Spec gate` from this file in the same change: a check that is required but never reports would
+leave every pull request pending.
+
+| Step | Who | Action |
+| --- | --- | --- |
+| 1 | maintainer | Merge the change that adds `pr.yml` into `iso-v0` |
+| 2 | maintainer | Give every open pull request one new event (a push, or "Update branch"), so `pr.yml` runs on it; check that each shows a `gate` check (`gh pr checks <n>`) |
+| 3 | **[M]** maintainer | `python3 scripts/github-settings/ghsettings.py apply`, read the plan (one `PUT .../branches/iso-v0/protection` adding `gate`, no `DESTRUCTIVE` line), then `apply --yes` and `diff`, which must print nothing for branch protection |
+| 4 | maintainer | Merge the follow-up (doc_ci.md CP4) that removes the `pull_request` triggers of `kernel-build.yml` and `spec-build-check.yml` and, in the same change, `Kernel gate` and `Spec gate` from `branch-protection.json` and from `CHECK_WORKFLOWS` of `bot_merge.py`, and moves the spec bot merge into `pr.yml`. Before it, kernel and spec changes are built twice |
+| 5 | **[M]** maintainer | Apply the file again as in step 3, right after step 4: the plan drops the two legacy contexts |
+
+To roll back step 3, remove `gate` from `branch-protection.json` and apply it again; step 4 is
+rolled back by reverting its change and applying the file.
+
+## 9. Drift check, rulesets and the GitHub App (doc_pipeline.md PB2)
 
 GHS10 **Declared, not stored.** A settings file may hold keys GitHub does not store.
 `export` keeps them from the file, `apply` never reads them, and `diff` acts on them. The
@@ -162,6 +185,10 @@ replace (doc_pipeline.md PL5). While `retired` is `false` they are ordinary entr
 `secrets`. Once the App has replaced them, the maintainer sets `retired` to `true` and drops
 them from `secrets`; from then on `diff` reports each of them still set as drift, which is
 the PB2 gate "the three personal tokens are absent from the secrets list".
+
+**Who applies.** Applying is a maintainer action: `ghsettings.py apply` runs from the
+maintainer's machine with their own token. No workflow applies anything to GitHub, and the
+settings App below holds no write permission, so the drift check reports and never repairs.
 
 **Daily check.** `.github/workflows/maintenance.yml` runs `ghsettings.py diff` every day
 (PL52) and on dispatch. It mints a token of the settings App with
@@ -176,13 +203,15 @@ turns a failed scheduled job into a `ci-alert` issue is not part of this change.
 
 | File | Desired | Live until the maintainer applies it |
 | --- | --- | --- |
-| `rulesets.json` | ruleset `product-branches` on `refs/heads/iso-v0` and `refs/heads/main`: no deletion, no force push, linear history, a pull request with one approval and a code-owner review (squash only, stale approvals dismissed), required check `gate` of GitHub Actions (integration 15368, not strict), merge queue (squash, all green, at most two entries built and merged together, 360 minutes for checks); bypass by the repository admin role in pull-request mode, so the maintainer merges their own pull requests without a second reviewer but never pushes past the ruleset (PL1, PL2, PL4, PQ5) | no ruleset |
+| `rulesets.json` | ruleset `product-branches` on `refs/heads/iso-v0` and `refs/heads/main`: no deletion, no force push, linear history, a pull request with one approval and no code-owner review (squash only, stale approvals dismissed; ADR-0062 keeps `require_code_owner_review` off while there is one code owner), required check `gate` of GitHub Actions (integration 15368, not strict), merge queue (squash, all green, at most two entries built and merged together, 360 minutes for checks); bypass by the repository admin role in pull-request mode, so the maintainer merges their own pull requests without a second reviewer but never pushes past the ruleset (PL1, PL2, PL4, PQ5) | no ruleset |
 | `actions.json` | secret `SETTINGS_APP_PRIVATE_KEY` and variable `SETTINGS_APP_CLIENT_ID`; `personal_tokens` declared, not yet retired; `sha_pinning_required` stays `false` until PB3 (below) | neither name set |
 
-`gate` is the job of `pr.yml` that PB1 introduces; until PB1 is merged no check of that name
-reports, so applying the ruleset before PB1 blocks every merge. `branch-protection.json`
-still requires `Kernel gate`; PB1 changes it to `gate`. Classic branch protection and the
-ruleset both apply until the maintainer decides to retire the former.
+`gate` is the aggregate job of `pr.yml` (PB1, ADR-0075). It runs `just check`, which tolerates
+the findings of `scripts/ci/known-red.txt` until their expiry, so the ruleset adds no
+exception of its own for known red checks. `branch-protection.json` requires `gate` next to
+`Kernel gate` and `Spec gate` on `iso-v0` (section 8); the ruleset requires `gate` alone on
+both branches. Classic branch protection and the ruleset both apply until the maintainer
+decides to retire the former; section 8 step 4 and step 5 drop the two legacy contexts.
 
 The merge queue needs `merge_group` among the triggers of every required workflow (PB1's
 `pr.yml`). SHA pinning enforcement makes GitHub refuse every workflow that uses an action
@@ -208,7 +237,8 @@ The order of the maintainer's steps, each followed by `ghsettings.py diff`:
    `git diff --no-index` against `rulesets.json` shows no change), so a default GitHub adds is
    not reported as drift. A difference in either is fixed in the files or in the App
    permissions before the daily run is trusted.
-3. Merge PB1, so that `gate` reports on pull requests and merge groups.
+3. Check that `gate` reports on pull requests and merge groups (section 8, step 2), because
+   the ruleset requires it.
 4. Apply the ruleset (`ghsettings.py apply`, then `--yes`), which also enables the merge
    queue, and re-export to record what GitHub stored.
 5. Create the bot App of PL5, move the bots to it, delete the three personal tokens, then

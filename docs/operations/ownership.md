@@ -58,7 +58,6 @@ protected paths last, as in PR #170.
 /system/nvidia/                                @hr-mes
 /system/ebpf/                                  @hr-mes
 /system/athanor-ebpf-sched/                    @hr-mes
-/system/sysctl.d/                              @hr-mes
 /system/kernel-artifacts.sh                    @hr-mes
 /.github/workflows/kernel-*.yml                @hr-mes
 /.github/workflows/nvidia-*.yml                @hr-mes

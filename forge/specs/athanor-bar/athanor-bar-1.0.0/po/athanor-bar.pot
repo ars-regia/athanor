@@ -478,6 +478,10 @@ msgstr ""
 msgid "Not verified: the system was changed on this machine"
 msgstr ""
 
+#: src/ui/shield.rs:311
+msgid "Not verified: waiting for the stable channel to be published"
+msgstr ""
+
 #: src/ui/shield.rs:316
 msgid "Up to date"
 msgstr ""

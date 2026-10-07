@@ -224,7 +224,7 @@ class Generation(unittest.TestCase):
             )
             out = tmp / "out"
             paths = ("--manifest", str(source), "--out", str(out), "--kargs", str(tmp / "kargs.toml"),
-                     "--boot-cmdline", str(tmp / "cmdline"))
+                     "--boot-cmdline", str(tmp / "cmdline"), "--sysctl", str(tmp / "sysctl.conf"))
             code, text = run_tool("generate", *paths)
             self.assertEqual(code, 0, text)
             self.assertEqual(sorted(p.name for p in out.glob("*.json")), ["base.json", "desktop.json"])
@@ -250,7 +250,7 @@ class Generation(unittest.TestCase):
             )
             kargs, boot = tmp / "kargs.d" / "10.toml", tmp / "cmdline"
             paths = ("--manifest", str(source), "--out", str(tmp / "out"), "--kargs", str(kargs),
-                     "--boot-cmdline", str(boot))
+                     "--boot-cmdline", str(boot), "--sysctl", str(tmp / "sysctl.conf"))
             code, text = run_tool("generate", *paths)
             self.assertEqual(code, 0, text)
             document = tomllib.loads(kargs.read_text())
@@ -266,6 +266,28 @@ class Generation(unittest.TestCase):
                     self.assertEqual(code, 1, text)
                     self.assertIn(str(path), text)
                     path.write_text(good)
+
+    def test_sysctl_file_is_generated_and_checked(self) -> None:
+        with tempfile.TemporaryDirectory() as name:
+            tmp = pathlib.Path(name)
+            source = tmp / "profile.toml"
+            source.write_text(
+                'schema = 1\n[base.sysctl]\n"kernel.yama.ptrace_scope" = { value = "1", decision = "D47" }\n'
+                '"fs.suid_dumpable" = { value = "0", decision = "D47" }\n'
+                '[base.cmdline]\nlockdown = { value = "integrity", decision = "t" }\n'
+            )
+            sysctl = tmp / "sysctl.d" / "90.conf"
+            paths = ("--manifest", str(source), "--out", str(tmp / "out"), "--kargs", str(tmp / "kargs.toml"),
+                     "--boot-cmdline", str(tmp / "cmdline"), "--sysctl", str(sysctl))
+            code, text = run_tool("generate", *paths)
+            self.assertEqual(code, 0, text)
+            settings = [line for line in sysctl.read_text().splitlines() if line and not line.startswith("#")]
+            self.assertEqual(settings, ["fs.suid_dumpable = 0", "kernel.yama.ptrace_scope = 1"])
+
+            sysctl.write_text(sysctl.read_text().replace("= 0", "= 2"))
+            code, text = run_tool("check", *paths)
+            self.assertEqual(code, 1, text)
+            self.assertIn(str(sysctl), text)
 
     def test_cmdline_cannot_be_empty(self) -> None:
         with self.assertRaisesRegex(kp.ProfileError, "base command line is empty"):
