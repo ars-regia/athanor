@@ -130,7 +130,7 @@ same_image() { # same_image A B: A and B are the same vmlinuz once their signatu
 prepare() {
     local devel kver hash
     [[ $KERNEL && $DEVEL && $OUT ]] || usage
-    devel=$(one "$DEVEL/kernel-devel-*.rpm")
+    devel=$(one "$DEVEL/kernel-devel-[0-9]*.rpm")
     kver=$(rpm_vmlinuz)
     extract "$(realpath "$devel")" "$WORK/devel" "./usr/src/kernels/$kver/.config"
     hash=$(sed -n 's/^CONFIG_MODULE_SIG_HASH="\(.*\)"$/\1/p' "$WORK/devel/usr/src/kernels/$kver/.config")
