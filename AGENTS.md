@@ -35,7 +35,7 @@ Run them from the repository root. There is no single suite: target what you cha
 | Check | Command |
 | --- | --- |
 | Linters (shell scripts, Justfiles) | `just lint`; `just format` rewrites, `just check-syntax` only checks |
-| Project checks that CI runs | `python3 scripts/verify.py workflows kickstart boundary cmdline registry licence ci coverage` |
+| Project checks that CI runs | `python3 scripts/verify.py workflows kickstart os-release boundary cmdline services polkit-model registry licence ci coverage` |
 | All project checks | `python3 scripts/verify.py` (`--list` names the checks; pass names to run some) |
 | A crate | `cargo test -p <crate>`, for every crate you touch |
 | Python tests | `python3 -B -m unittest discover -s <dir>/tests`, e.g. `scripts/tests`, `system/tests` |
@@ -48,9 +48,12 @@ for hours: never use it as a check.
 
 ## Inviolable rules
 
-- **Zero-trust.** No daemon or application outside a compartment or a MicroVM. Never
-  `chmod 777`, never run as root directly, never bypass the IPE policy, Landlock
-  confinement or the compartments.
+- **Least privilege for services.** Every shipped service sets `NoNewPrivileges=yes` or a
+  `CapabilityBoundingSet=` allow-list without `CAP_SYS_ADMIN`, `CAP_SYS_MODULE`,
+  `CAP_DAC_OVERRIDE` or `CAP_SYS_PTRACE` (`doc_threat_model.md` TM8, checked by
+  `verify.py services`). A confined application never writes the persistence paths of TM3.
+  Never `chmod 777`, never run as root directly, never bypass the IPE policy or Landlock
+  confinement.
 - **No fake security.** Cryptography, token validation, hashes and attestation are real or
   absent. A placeholder or an unconditional `Ok(true)` in a security path is a defect: if
   you cannot build the real thing, stop and say so.

@@ -303,6 +303,10 @@ jobs:
     # Here, not in call-system-image.yml: a called workflow's job reads the secrets of its
     # environment only when its caller inherits every secret (actions/runner#4453, D43).
     needs: [system-image]
+    # Explicit: the implicit success() also requires every transitive need to have succeeded,
+    # and the NVIDIA kmod jobs upstream of system-image are skipped on most runs, which
+    # skipped this job with them.
+    if: ${{ !cancelled() && needs.system-image.result == 'success' }}
     runs-on: ubuntu-24.04
     # Image key rotation (docs/operations/secrets.md section 4.1): until a release that carries
     # athanor-image-2.pub is published, the images are signed with key 1, which only the old

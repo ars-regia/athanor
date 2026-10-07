@@ -34,11 +34,14 @@ fake one: stop and say so.
 - Hash with `sha2`, wipe secret material with `zeroize`, compare secrets in constant time
   with `subtle`. All three are workspace dependencies.
 
-## Zero-trust
+## Least privilege
 
-- No daemon or application outside a compartment or a MicroVM.
-- The IPE policy, Landlock confinement and the compartments are never bypassed. If a path
-  requires skipping them, the path is wrong.
+- Every shipped service sets `NoNewPrivileges=yes` or a `CapabilityBoundingSet=` allow-list
+  without `CAP_SYS_ADMIN`, `CAP_SYS_MODULE`, `CAP_DAC_OVERRIDE` or `CAP_SYS_PTRACE`
+  (`doc_threat_model.md` TM8, `python3 scripts/verify.py services`).
+- A confined application never writes the persistence paths of TM3.
+- The IPE policy and Landlock confinement are never bypassed. If a path requires skipping
+  them, the path is wrong.
 - Never `chmod 777`, never widen permissions "to make it work".
 
 ## Polkit

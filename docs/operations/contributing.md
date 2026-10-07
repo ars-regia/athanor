@@ -39,7 +39,7 @@ linked document's header before its body.
 | Check | Command |
 | --- | --- |
 | Linters | `just lint` |
-| Project checks | `python3 scripts/verify.py`, or one check: `workflows`, `kickstart`, `polkit`, `paths`, `shipped`, `docs`, `panics`, `cmdline`, `polkit-subject`, `specs`, `boundary`, `registry`, `forge-rules`, `licence`, `decisions` |
+| Project checks | `python3 scripts/verify.py`, or the checks named after it (`--list` names them all) |
 | Tests of `verify.py` | `python3 -B -m unittest discover -s scripts/tests` |
 | Python tests of an area | `python3 -B -m unittest discover -s <area>/tests` |
 | A crate | `cargo test -p <crate>`; there is no single suite |

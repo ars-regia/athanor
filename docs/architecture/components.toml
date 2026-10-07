@@ -959,8 +959,9 @@ purpose = "Builds the three system image variants"
 path = "system/confidential_computing"
 kind = "crate"
 area = "security"
-status = "missing"
-purpose = "athanor-attestation, a confidential computing attestation tool; workspace member, protected path"
+status = "out-of-1.0"
+issue = 151
+purpose = "athanor-attestation, a confidential computing attestation tool; outside the workspace until its Keylime rewrite, protected path"
 
 [[component]]
 path = "system/cosign.pub"
