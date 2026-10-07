@@ -356,5 +356,22 @@ class PolkitModelTest(unittest.TestCase):
         rows = ROWS.replace("`yes` for wheel, `auth_admin` otherwise", "`yes` for runner")
         self.assertEqual(problems(HEADER + rows, files), [])
 
+    def test_two_rules_on_one_action_merge_their_results(self):
+        declared, unreadable = verify.polkit_declared({
+            RULES_PATH: (
+                'polkit.addRule(function(action, subject) { if (action.id == "org.example.a" && subject.isInGroup("wheel")) { return polkit.Result.YES; } });\n'
+                'polkit.addRule(function(action, subject) { if (action.id == "org.example.a") { return polkit.Result.NO; } });\n'
+            )
+        })
+        self.assertEqual((declared, unreadable), ({("org.example.a", RULES_PATH): {"yes", "no"}}, []))
+
+    def test_an_assignment_in_the_guard_fails(self):
+        self.unreadable(
+            'polkit.addRule(function(action, subject) { if (action.id == "org.example.a" && (polkit.Result.NO = polkit.Result.YES)) { return polkit.Result.NO; } });\n'
+        )
+
+    def test_an_assignment_in_an_admin_rule_fails(self):
+        self.unreadable("polkit.addAdminRule(function(action, subject) { polkit.Result.NO = polkit.Result.YES; });\n")
+
 if __name__ == "__main__":
     unittest.main()
