@@ -121,7 +121,7 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
   - `athanor-session` exports `XDG_CURRENT_DESKTOP` and `XDG_DATA_DIRS`, then execs cosmic-comp. It sets no locale, XKB or input-method variable.
   - `athanor-desktop` imports only `WAYLAND_DISPLAY`, `DISPLAY`, `XDG_CURRENT_DESKTOP`, `XDG_SESSION_TYPE` and `XDG_SESSION_CLASS` into the user manager (`athanor-desktop:34`). So the bar and every other user unit run with the user manager's locale, which comes from `/etc/locale.conf`, not the user's own.
   - The greeter's `StartSession` passes only `XDG_SESSION_TYPE` and `XDG_CURRENT_DESKTOP` (`athanor-greeter-ui`, `auth.rs:268-274`).
-  - `system/athanor-oobe` is an unpackaged first-run prototype. It maps language names to locales and writes `/etc/locale.conf` and `/etc/vconsole.conf` directly when `localectl` fails (`main.rs:40-95`). It is not a model for this document.
+  - `system/athanor-oobe` is an unpackaged first-run prototype. It maps language names to locales and writes `/etc/locale.conf` and `/etc/vconsole.conf` directly when `localectl` fails (`main.rs:40-95`). It is not a model for this document. ADR-0073 deleted it from the tree.
 
 ## 2. Decisions
 
@@ -178,7 +178,7 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
 - The system locale (`/etc/locale.conf`) and the system keyboard (`/etc/vconsole.conf`, `X11Layout` and related properties) are written only through `org.freedesktop.locale1`: `SetLocale`, `SetVConsoleKeyboard` and `SetX11Keyboard` with `convert` set to true.
 - localed's own polkit actions (`org.freedesktop.locale1.set-locale` and `set-keyboard`) authorise the calls, and both require an administrator's authorisation, kept for the polkit session (`auth_admin_keep`, localed's own default in `/usr/share/polkit-1/actions/org.freedesktop.locale1.policy`).
 - **The rule that keeps that default.** Two COSMIC rules grant both actions to local, active members of `wheel` or `sudo` without authentication (section 1). Athanor ships `40-athanor-locale1.rules` to override them:
-  - **File:** `/usr/share/polkit-1/rules.d/40-athanor-locale1.rules`, in the package `athanor-base-config`, which already installs `/usr/share/polkit-1/rules.d/*` (`forge/specs/athanor-base-config/athanor-base-config.spec:76`).
+  - **File:** `/usr/share/polkit-1/rules.d/40-athanor-locale1.rules`, in the package `athanor-base-config`, whose spec lists it in `%files` (the package has shipped no polkit rule since 2026-10-07, #282).
   - **Content:** one `polkit.addRule` that returns `polkit.Result.AUTH_ADMIN_KEEP` when `action.id` is `org.freedesktop.locale1.set-locale` or `org.freedesktop.locale1.set-keyboard`, for every subject, and returns nothing for any other action.
   - **Order:** polkit processes the rules files of `/etc/polkit-1/rules.d` and `/usr/share/polkit-1/rules.d` in lexical order of their basename and stops at the first rule that returns a result (polkit(8), polkit 126-6.fc43.2, read 2026-10-05). `40-athanor-locale1.rules` sorts after `10-athanor-wheel-admin.rules`, which makes `wheel` the administrators, and before `50-default.rules`, `cosmic-settings-daemon.rules` and `cosmic-settings.rules`.
   - **Effect:** a member of `wheel` changes the system locale or keyboard after typing their own password. cosmic-settings-daemon's push of a user's layout to localed (LN9) is refused without a prompt, because it calls `SetX11Keyboard` with `interactive` false (`src/locale.rs:70-77`, tag `epoch-1.8.0`), and the refusal is only logged by the daemon.
@@ -445,7 +445,7 @@ Applied with the approval of this document. Line numbers into code are those of 
   - SW14's "gettext from the first commit" (`doc_software.md:196`) gains "through `gettext-rs` with glibc's gettext (`doc_languages.md`, LN1)";
   - Software applies the Chromium input-method override (LN11);
   - Software extends Flatpak's `extra-languages` if spike S3 requires it (LN14).
-- **`forge/specs/athanor-base-config/`:** adds `SOURCES/usr/share/polkit-1/rules.d/40-athanor-locale1.rules`, installed by the existing `/usr/share/polkit-1/rules.d/*` line (`athanor-base-config.spec:76`) (LN5, LN19 step 3).
+- **`forge/specs/athanor-base-config/`:** adds `SOURCES/usr/share/polkit-1/rules.d/40-athanor-locale1.rules` and its `%files` line in `athanor-base-config.spec` (LN5, LN19 step 3).
 - **`forge/test/shell/Containerfile:17`:** adds `adwaita-sans-fonts`, `adwaita-mono-fonts`, `google-noto-sans-hebrew-fonts` and `google-noto-sans-cjk-vf-fonts` (LN13).
 - **`forge/config/packages.json`:** removes `glibc-langpack-en` and `glibc-langpack-it` (`packages.json:104-105`), and adds `hunspell-it` (LN4). `ibus-wayland` and `ibus-panel` are added at LN19 step 5.
 - Amendments received, from the maintainer's rulings of 2026-10-05: LN7 gains the first-run hand-off step (`doc_first_run.md` FR15); the `system_actions` file of LN9 is defined here as the single owner of that file.

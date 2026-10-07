@@ -107,13 +107,13 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-2 | 0037 | [Secure Boot at 1.0 with a real MOK chain](0037-secure-boot-mok-chain.md) | accepted | signing, security |
 | A2-3 | 0038 | [GPL-3.0-or-later for all own code](0038-licence-gpl-3-or-later.md) | accepted | docs, ci |
 | A2-4 | 0039 | [Delivery repairs before 1.0](0039-delivery-repairs-before-1-0.md) | accepted | update, ci |
-| A2-5 | 0040 | [Security-class updates apply at the next shutdown](0040-security-updates-at-next-shutdown.md) | accepted | update |
+| A2-5 | 0040 | [Security-class updates apply at the next shutdown](0040-security-updates-at-next-shutdown.md) | amended by ADR-0082 | update |
 | A2-6 | 0041 | [Trusted path built on cosmic-comp PR #1441](0041-trusted-path-on-cosmic-comp.md) | accepted | security, shell |
 | A2-7 | 0042 | [SystemPrompter reuses the oo7 secret exchange](0042-system-prompter-reuses-oo7.md) | accepted | security, shell |
 | A2-8 | 0043 | [bootc in two steps (D6 closed)](0043-bootc-in-two-steps.md) | amended by ADR-0076 | update, kernel, security |
-| A2-9 | 0044 | [Three-tier threat model](0044-three-tier-threat-model.md) | accepted | security, docs |
+| A2-9 | 0044 | [Three-tier threat model](0044-three-tier-threat-model.md) | amended by ADR-0086 | security, docs |
 | A2-10 | 0045 | [Cleanup of dead packages, documents and units](0045-cleanup-of-dead-components.md) | amended by ADR-0073 | packages, docs |
-| A2-11 | 0046 | [DNS model: strict DNS over TLS](0046-dns-strict-dot.md) | accepted | network, security |
+| A2-11 | 0046 | [DNS model: strict DNS over TLS](0046-dns-strict-dot.md) | amended by ADR-0079 | network, security |
 | A2-12 | 0047 | [Fleet identity and transport](0047-fleet-transport-and-identity.md) | accepted | fleet, network |
 | A2-10b | 0048 | [Tetragon made real](0048-tetragon-made-real.md) | accepted | security, kernel |
 | A2-10c | 0049 | [Keylime stays installed and disabled](0049-keylime-installed-disabled.md) | accepted | security, fleet |
@@ -121,7 +121,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-14 | 0051 | [Scope of the own applications](0051-own-apps-scope.md) | accepted | shell, packages |
 | A2-15 | 0052 | [Firefox moves to Flatpak](0052-firefox-as-flatpak.md) | accepted | packages |
 | A2-16 | 0053 | [Nix for every user](0053-nix-for-every-user.md) | accepted | nix, packages, security |
-| A2-17 | 0054 | [Audience and support window](0054-audience-and-support-window.md) | accepted | product, update |
+| A2-17 | 0054 | [Audience and support window](0054-audience-and-support-window.md) | amended by ADR-0081 | product, update |
 | A2-18 | 0055 | [Governance](0055-governance.md) | accepted | docs, security, process |
 | A2-19 | 0056 | [No telemetry; report a problem](0056-no-telemetry.md) | accepted | security, shell |
 | A2-20 | 0057 | [Session coherence](0057-session-coherence.md) | accepted | shell, session |
@@ -130,8 +130,8 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-23 | 0060 | [authselect without nullok](0060-authselect-without-nullok.md) | accepted | security |
 | A2-24 | 0061 | [Desktop minor decisions](0061-desktop-minor-decisions.md) | accepted | shell |
 | A2-25 | 0062 | [Governance targets confirmed](0062-governance-targets-confirmed.md) | accepted | security, process |
-| A2-26 | 0063 | [Update policy](0063-update-policy.md) | accepted | update |
-| A2-27 | 0064 | [Signing approvals and MOK enrolment](0064-signing-approvals-and-mok-enrolment.md) | amended by A2-35 | signing, installer |
+| A2-26 | 0063 | [Update policy](0063-update-policy.md) | amended by ADR-0082 | update |
+| A2-27 | 0064 | [Signing approvals and MOK enrolment](0064-signing-approvals-and-mok-enrolment.md) | amended by A2-35, ADR-0080 | signing, installer |
 | A2-28 | 0065 | [Bazaar waits for the Fedora 45 base](0065-bazaar-waits-for-fedora-45.md) | accepted | packages, shell |
 | A2-29 | 0066 | [Threat model path lists](0066-threat-model-path-lists.md) | accepted | security |
 | A2-30 | 0067 | [Offline help with Yelp](0067-offline-help-yelp.md) | accepted | docs, shell |
@@ -140,8 +140,19 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-33 | 0070 | [Report-a-problem packaging](0070-report-a-problem-packaging.md) | accepted | shell, ci |
 | A2-34 | 0071 | [Documentation and team model](0071-documentation-and-team-model.md) | amended by ADR-0074 | docs, process, ci |
 | A2-35 | 0072 | [MOK enrolment page in the installer](0072-mok-enrolment-in-installer.md) | accepted | signing, installer |
-| ADR-0073 | 0073 | [Retire components without a product role](0073-component-verdicts.md) | accepted | platform, security, build |
+| ADR-0073 | 0073 | [Retire components without a product role](0073-component-verdicts.md) | amended by ADR-0087 | platform, security, build |
 | ADR-0074 | 0074 | [Agent and contributor model](0074-agent-and-contributor-model.md) | accepted | docs |
 | ADR-0075 | 0075 | [Engineering gates](0075-engineering-gates.md) | accepted | build, security |
 | ADR-0076 | 0076 | [Platform scope for 1.0](0076-platform-scope-for-1-0.md) | accepted | platform, security, build, docs |
 | ADR-0077 | 0077 | [Desktop decisions from Audit 3](0077-desktop-decisions.md) | accepted | shell, apps, security |
+| ADR-0078 | 0078 | [Fedora 45 is the next base, with Fedora 44 as the fallback](0078-fedora-release-target.md) | accepted | platform |
+| ADR-0079 | 0079 | [Captive portals under strict DNS over TLS](0079-captive-portals-under-strict-dot.md) | accepted | network, security |
+| ADR-0080 | 0080 | [Pipeline architecture](0080-pipeline-architecture.md) | amended by ADR-0088 | build, signing, security |
+| ADR-0081 | 0081 | [CRA compliance posture](0081-cra-compliance-posture.md) | accepted | security, update, product |
+| ADR-0082 | 0082 | [Update control: postpone and opt-out](0082-update-control.md) | accepted | update, security |
+| ADR-0083 | 0083 | [One supported desktop; derived images stay open](0083-one-desktop-derived-images-open.md) | accepted | product, shell, update |
+| ADR-0084 | 0084 | [The key custody model is definitive for the single-maintainer phase](0084-key-custody-model.md) | accepted | security, process |
+| ADR-0085 | 0085 | [Keyring prompter: the secret exchange comes from upstream oo7](0085-keyring-prompter-secret-exchange-source.md) | accepted | security, shell |
+| ADR-0086 | 0086 | [toolbox is not isolation; podman as container_t or the dev VM is](0086-toolbox-is-not-isolation.md) | accepted | security, apps |
+| ADR-0087 | 0087 | [Keep athanor-attestation outside the workspace until its Keylime rewrite](0087-attestation-outside-the-workspace.md) | accepted | security, build |
+| ADR-0088 | 0088 | [Pipeline revision 2](0088-pipeline-revision-2.md) | accepted | build, signing, security |

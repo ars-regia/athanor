@@ -7,34 +7,21 @@ on:
         description: "Content hash of the builder container image"
         required: true
         type: string
-    secrets:
-      RPM_GPG_KEY:
-        description: "GPG key for RPM signing"
-        required: false
-      RPM_GPG_PASSPHRASE:
-        description: "Passphrase for GPG key"
-        required: false
-      SECUREBOOT_SIGNING_KEY:
-        description: "Secure Boot private key (PEM) that signs the UKI and its PCR policy; supplied by the signing environment"
-        required: false
-      COSIGN_PRIVATE_KEY:
-        description: "Private key that signs the system images for the update service (system/keys); supplied by the signing environment"
-        required: false
-      COSIGN_PASSWORD:
-        description: "Passphrase of COSIGN_PRIVATE_KEY; supplied by the signing environment"
-        required: false
+
+# The key-based signature of the images is not here: a called workflow's job reads the secrets
+# of its environment only when its caller inherits every secret (actions/runner#4453), so it is
+# sign-system-images of athanor-forge-orchestrator.yml, after this workflow (D43).
 
 jobs:
-  lint:
-    uses: ./.github/workflows/call-lint.yml
-
+  # No lint job of its own: the Orchestrator, its only caller, runs call-lint.yml once and
+  # calls this workflow only after it passed (docs/architecture/doc_pipeline.md, PL44).
   build-repo:
-    name: 📦 Aggregate Repositories & Deploy DNF/Flatpak Channel
-    needs: [lint]
+    # The tier repositories are consumed as OCI images only (ADR-0076, decision 2).
+    name: 📦 Aggregate the tier repositories
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
-      contents: write
+      contents: read
       packages: write
       id-token: write
     steps:
@@ -61,8 +48,6 @@ jobs:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
           GITHUB_WORKSPACE: ${{ github.workspace }}
-          RPM_GPG_KEY: ${{ secrets.RPM_GPG_KEY }}
-          RPM_GPG_PASSPHRASE: ${{ secrets.RPM_GPG_PASSPHRASE }}
           BUILDER_CONTENT_HASH: ${{ inputs.builder_content_hash }}
         run: |
           set -euo pipefail
@@ -73,8 +58,6 @@ jobs:
             -e GITHUB_TOKEN="${GITHUB_TOKEN}" \
             -e GITHUB_ACTOR="${GITHUB_ACTOR}" \
             -e GITHUB_REPOSITORY_OWNER="${GITHUB_REPOSITORY_OWNER}" \
-            -e RPM_GPG_KEY="${RPM_GPG_KEY}" \
-            -e RPM_GPG_PASSPHRASE="${RPM_GPG_PASSPHRASE}" \
             "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/athanor-builder:${BUILDER_CONTENT_HASH}" \
             bash <<'EOF'
             set -e
@@ -97,14 +80,6 @@ jobs:
             } > /var/tmp/storage.conf
             export CONTAINERS_STORAGE_CONF=/var/tmp/storage.conf
 
-            if [ -n "${RPM_GPG_KEY}" ]; then
-              echo "::add-mask::${RPM_GPG_PASSPHRASE}"
-              echo "${RPM_GPG_KEY}" | gpg --import
-              mkdir -p ~; echo '%_signature gpg' > ~/.rpmmacros
-              echo '%_gpg_name athanor' >> ~/.rpmmacros
-              echo '%__gpg_sign_cmd %{__gpg} --batch --verbose --no-armor --passphrase "${RPM_GPG_PASSPHRASE}" --pinentry-mode loopback --no-secmem-warning -u "%{_gpg_name}" -sbo %{__signature_filename} --digest-algo sha256 %{__plaintext_filename}' >> ~/.rpmmacros
-            fi
-
             echo "${GITHUB_TOKEN}" | buildah login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
             bash scripts/fetch_repo_rpms.sh "${GITHUB_REPOSITORY_OWNER}"
 
@@ -126,9 +101,6 @@ jobs:
                 echo "Tier '${tier:-rolling}' ($img_name): RPM content unchanged, not pushed"
                 return 0
               fi
-              if [ -n "${RPM_GPG_KEY}" ]; then
-                find "$dir" -name '*.rpm' -exec rpmsign --addsign {} +
-              fi
               (
                 cd "$dir"
                 createrepo_c .
@@ -149,84 +121,6 @@ jobs:
             for pid in "${pids[@]}"; do wait "$pid"; done
           EOF
 
-      - name: 🌐 Deploy the DNF channel to GitHub Pages
-        # A release step: the channel is published from main only. kernel-build.yml moves
-        # its :latest tags from the default branch instead (re-audit decision 11).
-        if: github.ref == 'refs/heads/main'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_WORKSPACE: ${{ github.workspace }}
-          EVENT_REPO_NAME: ${{ github.event.repository.name }}
-          RPM_GPG_KEY: ${{ secrets.RPM_GPG_KEY }}
-          RPM_GPG_PASSPHRASE: ${{ secrets.RPM_GPG_PASSPHRASE }}
-          BUILDER_CONTENT_HASH: ${{ inputs.builder_content_hash }}
-        run: |
-          set -euo pipefail
-          podman run -i --rm --security-opt label=disable --security-opt seccomp=unconfined \
-            -v "${GITHUB_WORKSPACE}:/workspace" \
-            -w /workspace/forge \
-            -e GITHUB_TOKEN="${GITHUB_TOKEN}" \
-            -e GITHUB_ACTOR="${GITHUB_ACTOR}" \
-            -e GITHUB_REPOSITORY_OWNER="${GITHUB_REPOSITORY_OWNER}" \
-            -e GITHUB_REPOSITORY="${GITHUB_REPOSITORY}" \
-            -e EVENT_REPO_NAME="${EVENT_REPO_NAME}" \
-            -e RPM_GPG_KEY="${RPM_GPG_KEY}" \
-            -e RPM_GPG_PASSPHRASE="${RPM_GPG_PASSPHRASE}" \
-            "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/athanor-builder:${BUILDER_CONTENT_HASH}" \
-            bash <<'EOF'
-            set -e
-            if [ -n "${RPM_GPG_KEY}" ]; then
-              echo "::add-mask::${RPM_GPG_PASSPHRASE}"
-              echo "${RPM_GPG_KEY}" | gpg --import
-            fi
-
-            git clone --depth 1 -b gh-pages "https://${GITHUB_ACTOR}:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" /workspace/pages_repo || {
-              mkdir -p /workspace/pages_repo
-              cd /workspace/pages_repo
-              git init
-              git checkout -b gh-pages
-            }
-            cd /workspace/pages_repo
-            git config --global user.name "Athanor Forge"
-            git config --global user.email "forge@athanor.os"
-            git config --global --add safe.directory /workspace/pages_repo
-
-            rm -rf tier0 tier1 tier2 tier3
-            if [ -n "${RPM_GPG_KEY}" ]; then
-              gpg --export --armor athanor > RPM-GPG-KEY-athanor
-            fi
-            cp -a /workspace/forge/repo-cache/repo-tier0 tier0
-            cp -a /workspace/forge/repo-cache/repo-tier1 tier1
-            cp -a /workspace/forge/repo-cache/repo-tier2 tier2
-            cp -a /workspace/forge/repo-cache/repo-tier3 tier3
-
-            mkdir -p recovery
-            cp /usr/share/ipxe/ipxe-x86_64.efi recovery/ipxe.efi
-            echo '#!ipxe' > recovery/boot.ipxe
-            echo 'dhcp' >> recovery/boot.ipxe
-            echo "chain https://${GITHUB_REPOSITORY_OWNER}.github.io/${EVENT_REPO_NAME}/recovery/menu.ipxe || shell" >> recovery/boot.ipxe
-
-            # GitHub Pages refuses files above 100 MB; keep the channel well below.
-            find . -type f -name '*.rpm' -size +49M -delete
-
-            pids=()
-            for tier_dir in tier0 tier1 tier2 tier3; do
-              createrepo_c "$tier_dir" &
-              pids+=($!)
-            done
-            for pid in "${pids[@]}"; do wait "$pid"; done
-
-            git add -A
-            if git rev-parse HEAD >/dev/null 2>&1; then
-              git commit --amend -m "Deploy the DNF and Flatpak channels of Athanor OS"
-            else
-              git commit -m "Deploy the DNF and Flatpak channels of Athanor OS"
-            fi
-            git push -f "https://${GITHUB_ACTOR}:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
-          EOF
       - name: 🧹 Cleanup Workspace Permissions
         if: always()
         env:
@@ -250,9 +144,9 @@ jobs:
     name: 💿 System Image & Disk Build
     needs: [build-repo]
     runs-on: ubuntu-24.04
-    # The signing environment holds SECUREBOOT_SIGNING_KEY, the Secure Boot key that
-    # signs the UKI and its PCR policy (forge/specs/azoth/KERNEL.md).
-    environment: signing
+    # No key and no environment (D43): the vmlinuz arrives signed for Secure Boot, by the
+    # azoth-boot digest in the kernel artifacts, and the images are signed with the update key
+    # by sign-system-images of the Orchestrator, from the digests this job records.
     timeout-minutes: 180
     permissions:
       contents: write
@@ -285,24 +179,44 @@ jobs:
         run: |
           set -euo pipefail
           echo "${GITHUB_TOKEN}" | podman login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-      - name: 🐳 Build OS Images
+      - name: 🧱 Build the system stage
         # The Containerfile pulls its base and the tier repository images and installs
         # Fedora packages with dnf5, so the build needs the network; the build context
-        # is the repository root, where its COPY sources live. build-image.sh builds the
-        # default, NVIDIA and NVIDIA-legacy images in turn, all three signed with the same
-        # Secure Boot key, so one job and one approval covers the whole cycle (S8). Nothing
-        # is pushed until all three have built.
+        # is the repository root, where its COPY sources live. The system stage the three
+        # images share is built once per run, and its image ID is the base of all three
+        # (doc_update_delivery.md, UD40). The rechunk of UD32 is a step of its own after
+        # this one, writing the ID of the rechunked image to the same file.
+        run: bash system/build-image.sh --system --registry "${IMAGE_REGISTRY}" --iidfile artifacts/system-image.iid
+
+      - name: 🔖 Check our RPMs against their specs
+        # The tier repositories were rebuilt from this checkout earlier in this run; a stale
+        # per-package image once shipped athanor-recovery 1.0.0-5 while its spec said 6.
+        run: bash system/check-image-rpms.sh "$(<artifacts/system-image.iid)"
+
+      - name: 🐳 Build OS Images
+        # build-image.sh builds the default, NVIDIA and NVIDIA-legacy images in turn FROM the
+        # system image, all three with the same signed vmlinuz (S8). Nothing is pushed until
+        # all three have built.
         env:
           RUN_ID: ${{ github.run_id }}
           RUN_NUMBER: ${{ github.run_number }}
-          SECUREBOOT_SIGNING_KEY: ${{ secrets.SECUREBOOT_SIGNING_KEY }}
         run: |
           set -euo pipefail
-          [[ -n ${SECUREBOOT_SIGNING_KEY:-} ]] || { echo "SECUREBOOT_SIGNING_KEY is not available to this job: check the signing environment" >&2; exit 1; }
           for gpu in none nvidia nvidia-legacy; do
-            bash system/build-image.sh --gpu "$gpu" --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" --tag "${DEFAULT_TAG}" --serial "${RUN_NUMBER}"
+            bash system/build-image.sh --gpu "$gpu" --system-image "$(<artifacts/system-image.iid)" --registry "${IMAGE_REGISTRY}" \
+              --tag "${RUN_ID}" --tag "${DEFAULT_TAG}" --serial "${RUN_NUMBER}"
           done
           df -h
+
+      - name: 🧩 Check that the images share the system layers
+        # The acceptance of UD40: each image starts with every layer of the system image.
+        # Read from local storage before the push, so a failure publishes no tag.
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          bash system/shared-layers.sh --system "$(<artifacts/system-image.iid)" --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" \
+            | tee -a "${GITHUB_STEP_SUMMARY}"
 
       - name: 📤 Push OS Images
         env:
@@ -416,32 +330,3 @@ jobs:
           else
             chown -R 1001:1001 . || chown -R 1000:1000 . || true
           fi
-
-  sign-system-images:
-    name: 🔏 Key-based signature of the system images
-    # The only job that receives COSIGN_*. It builds nothing and runs no third-party tool
-    # beside the key: checkout, registry login, system/sign-images.sh (doc_update_trust.md UT2).
-    needs: [dag-system-image]
-    runs-on: ubuntu-24.04
-    environment: signing
-    timeout-minutes: 60
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: 📎 Digests recorded by the build job
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: image-digests
-          path: artifacts
-      - name: 🔑 Login to the registry
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_ACTOR: ${{ github.actor }}
-        run: echo "${GITHUB_TOKEN}" | skopeo login "$(cut -d/ -f1 artifacts/image-digests.txt | head -n 1)" -u "${GITHUB_ACTOR}" --password-stdin
-      - name: 🔏 Sign, then verify as a machine will (system/sign-images.sh)
-        env:
-          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
-          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
-        run: bash system/sign-images.sh artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"

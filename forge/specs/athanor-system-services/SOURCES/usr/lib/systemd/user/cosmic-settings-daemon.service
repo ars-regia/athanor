@@ -20,6 +20,10 @@ RestartSec=2s
 
 ProtectSystem=strict
 ProtectHome=read-only
+# ProtectSystem=strict makes the rest of the tree read-only, the runtime directory
+# included; the daemon binds its varlink socket there and panicked at the bind, which
+# left the volume keys dead (issue #144).
+ReadWritePaths=%t
 ConfigurationDirectory=cosmic
 StateDirectory=cosmic
 PrivateTmp=true

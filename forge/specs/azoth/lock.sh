@@ -198,7 +198,7 @@ check)
     while read -r name; do
         current "$name" || die "$name.lock does not match its base, $name.packages, FEDORA_KERNEL_NVR or bconds.sh: run lock.sh generate"
     done < <(names)
-    [[ -z ${2:-} || ! -f $INSTALLED ]] || cmp -s "$INSTALLED" "$HERE/$2/toolchain.lock" ||
+    [[ -z ${2:-} || ! -f $INSTALLED ]] || [[ $(<"$INSTALLED") == "$(<"$HERE/$2/toolchain.lock")" ]] ||
         die "the $2 image was built from another toolchain.lock: rebuild it"
     ;;
 

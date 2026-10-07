@@ -1,5 +1,6 @@
 """Unit tests of forge/scripts/dag_orchestrator.py: path_dependencies finds the Cargo path
-dependencies a package builds from, and the registry decides what is dirty
+dependencies a package builds from, the registry decides what is dirty, and every dirty
+package builds in one matrix
 (python3 -B -m unittest discover -s forge/scripts/tests -v)."""
 
 import importlib.util
@@ -206,6 +207,104 @@ class RegistryStateTest(unittest.TestCase):
         )
         self.assertEqual(set(), dirty)
         self.assertRegex(refs[0], r"^ghcr\.io/Acme/athanor-forge-dock:hash-[0-9a-f]{64}$")
+
+
+class TierInversionTest(unittest.TestCase):
+    """system/Containerfile installs each tier in a dnf transaction of its own, in order: a
+    runtime Requires on a package of a later tier cannot be resolved there."""
+
+    def specs(self, tmp, requires):
+        for name, deps in requires.items():
+            directory = tmp / "specs" / f"athanor-{name}"
+            directory.mkdir(parents=True)
+            lines = [f"Name: athanor-{name}"] + [f"Requires: {dep}" for dep in deps]
+            (directory / f"athanor-{name}.spec").write_text("\n".join(lines) + "\n")
+        return mock.patch.object(dag, "SPECS_DIR", str(tmp / "specs"))
+
+    def test_a_runtime_requirement_on_a_later_tier_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.specs(pathlib.Path(tmp), {"recovery": ["systemd", "athanor-update >= 1.0"], "update": []}):
+                manifest = {"custom_tier2": ["recovery"], "custom_tier3": ["update"]}
+                self.assertEqual(
+                    dag.tier_inversions(manifest),
+                    ["recovery (custom_tier2) requires athanor-update, which ships in custom_tier3"],
+                )
+                manifest = {"custom_tier2": [], "custom_tier3": ["update", "recovery"]}
+                self.assertEqual(dag.tier_inversions(manifest), [])
+                manifest = {"custom_tier2": ["update"], "custom_tier3": ["recovery"]}
+                self.assertEqual(dag.tier_inversions(manifest), [])
+
+    def test_the_repository_manifest_has_no_inversion(self):
+        forge = SCRIPT.parents[1]
+        with mock.patch.object(dag, "CONFIG_PATH", str(forge / "config" / "packages.json")), mock.patch.object(
+            dag, "SPECS_DIR", str(forge / "specs")
+        ):
+            self.assertEqual(dag.tier_inversions(dag.load_package_manifest()), [])
+
+
+class MatrixTest(unittest.TestCase):
+    """PL48: one build matrix whatever the graph depth, and a cycle in the graph fails the
+    plan."""
+
+    def specs(self, tmp, requires):
+        for name, deps in requires.items():
+            directory = tmp / "specs" / f"athanor-{name}"
+            directory.mkdir(parents=True)
+            lines = [f"Name: athanor-{name}"] + [f"Requires: {dep}" for dep in deps]
+            (directory / f"athanor-{name}.spec").write_text("\n".join(lines) + "\n")
+        return mock.patch.object(dag, "SPECS_DIR", str(tmp / "specs"))
+
+    def plan(self, manifest, dirty):
+        """main() on manifest with the registry answering dirty: its GITHUB_OUTPUT lines."""
+        with tempfile.TemporaryDirectory() as out:
+            output = pathlib.Path(out) / "output"
+            with mock.patch.object(dag, "load_package_manifest", return_value=manifest), \
+                    mock.patch.object(dag, "custom_hashes", return_value={}), \
+                    mock.patch.object(dag, "write_hashes"), \
+                    mock.patch.object(dag, "evaluate_dirty_nodes", return_value=set(dirty)), \
+                    mock.patch.dict(os.environ, {"GITHUB_OUTPUT": str(output)}), \
+                    mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}):
+                dag.main()
+            return dict(line.split("=", 1) for line in output.read_text().splitlines())
+
+    def test_a_package_at_graph_depth_three_builds_in_the_one_matrix(self):
+        tiers = {f"custom_tier{n}": [name] for n, name in enumerate(["base", "core", "style", "bar"])}
+        manifest = {"custom_packages": ["base", "core", "style", "bar"], **tiers}
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.specs(pathlib.Path(tmp), {"base": [], "core": [], "style": [], "bar": ["athanor-style"]}):
+                self.assertEqual({"style"}, dag.build_dag(manifest)[2]["bar"])  # base -> core -> style -> bar
+                outputs = self.plan(manifest, {"bar", "style", "core", "base"})
+        self.assertEqual(
+            {"dag_packages": '["bar", "base", "core", "style"]', "dirty_count": "4", "has_changes": "true"},
+            outputs,
+        )
+
+    def test_nothing_dirty_is_an_empty_matrix(self):
+        manifest = {"custom_packages": ["base"], "custom_tier0": ["base"]}
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.specs(pathlib.Path(tmp), {"base": []}):
+                outputs = self.plan(manifest, set())
+        self.assertEqual({"dag_packages": "[]", "dirty_count": "0", "has_changes": "false"}, outputs)
+
+    def test_a_tier_order_against_a_requires_is_a_cycle_that_fails_the_plan(self):
+        # The cycle PL48 records: every custom_tier3 package depends on every custom_tier2 one,
+        # and athanor-recovery requires athanor-update.
+        manifest = {"custom_packages": ["recovery", "update"], "custom_tier2": ["recovery"], "custom_tier3": ["update"]}
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.specs(pathlib.Path(tmp), {"recovery": ["athanor-update"], "update": []}):
+                nodes, _, prereqs, _, _ = dag.build_dag(manifest)
+                self.assertEqual({"recovery", "update"}, set(dag.graph_cycle(nodes, prereqs)))
+                with mock.patch.object(dag, "tier_inversions", return_value=[]):
+                    with self.assertRaisesRegex(SystemExit, "cycle"):
+                        self.plan(manifest, set())
+
+    def test_the_repository_graph_has_no_cycle(self):
+        forge = SCRIPT.parents[1]
+        with mock.patch.object(dag, "CONFIG_PATH", str(forge / "config" / "packages.json")), mock.patch.object(
+            dag, "SPECS_DIR", str(forge / "specs")
+        ):
+            nodes, _, prereqs, _, _ = dag.build_dag(dag.load_package_manifest())
+        self.assertIsNone(dag.graph_cycle(nodes, prereqs))
 
 
 if __name__ == "__main__":

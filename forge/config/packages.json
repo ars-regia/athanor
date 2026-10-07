@@ -26,7 +26,9 @@
     "keylime",
     "recovery",
     "kernel-forge",
-    "cosmic-comp"
+    "cosmic-comp",
+    "greenboot-rs",
+    "polkit"
   ],
   "custom_tier0": [
     "base-config",
@@ -38,16 +40,17 @@
     "bat",
     "cliphist",
     "system-tweaks",
-    "kernel-profile"
+    "kernel-profile",
+    "polkit"
   ],
   "custom_tier2": [
     "calmo",
     "matugen",
     "dart-sass",
     "keylime",
-    "recovery",
     "kernel-forge",
-    "cosmic-comp"
+    "cosmic-comp",
+    "greenboot-rs"
   ],
   "custom_tier3": [
     "greeter-ui",
@@ -61,6 +64,7 @@
     "system-config",
     "backup",
     "update",
+    "recovery",
     "xdg-desktop-portal-athanor"
   ],
   "cachyos_addons": [],
@@ -80,8 +84,6 @@
     "glibc-langpack-it",
     "gnome-keyring",
     "gnome-keyring-pam",
-    "greenboot",
-    "greenboot-default-health-checks",
     "gvfs",
     "libnotify",
     "libxcrypt-compat",

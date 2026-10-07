@@ -30,15 +30,16 @@ jobs:
           command -v shellcheck
           /tmp/actionlint -no-color -pyflakes=
       # Ubuntu ships no ksvalidator, so the tool comes from PyPI into a throwaway
-      # virtualenv, pinned like actionlint above rather than floating on latest.
-      - name: Install pykickstart 3.78 (ksvalidator)
+      # virtualenv, pinned like actionlint above rather than floating on latest. PyYAML is
+      # for the D43 lint of verify.py workflows, which fails without it.
+      - name: Install pykickstart 3.78 (ksvalidator) and PyYAML 6.0.2
         run: |
           set -euo pipefail
           python3 -m venv /tmp/pykickstart
-          /tmp/pykickstart/bin/pip install --quiet pykickstart==3.78
+          /tmp/pykickstart/bin/pip install --quiet pykickstart==3.78 pyyaml==6.0.2
           echo /tmp/pykickstart/bin >> "$GITHUB_PATH"
-      - name: Structural checks (scripts/verify.py workflows, kickstart, boundary, cmdline, registry, licence, ci, coverage)
-        run: python3 scripts/verify.py workflows kickstart boundary cmdline registry licence ci coverage
+      - name: Structural checks (scripts/verify.py workflows, kickstart, os-release, boundary, cmdline, services, polkit-model, registry, licence, ci, coverage)
+        run: python3 scripts/verify.py workflows kickstart os-release boundary cmdline services polkit-model registry licence ci coverage
       - name: Kernel profile manifest and checker (kernel_profile.py check, unit tests)
         run: |
           set -euo pipefail

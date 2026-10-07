@@ -7,7 +7,9 @@ Fedora targeted SELinux policy and the running system. The maintainer approved t
 decisions introduced by the verifications on 2026-09-14 and chose the firmware policy of
 D48 on the same day. The specification passed gate P0 on 2026-09-14, with the mechanism of
 the guided reseal (D42) left open for P4b. Revision 16 (2026-10-05) amends D23 with the
-udisks exception and records the removal of the Gatekeeper (section 10).
+udisks exception and records the removal of the Gatekeeper (section 10). Amended 2026-10-06 (maintainer decision
+A2-9 (#151)): this document is tier 3, root and the image, of `doc_threat_model.md`;
+sections 9 and 10 say what changed.
 
 Implementation status (2026-10-05): of the blocks of section 15, only P1 is built
 (`athanor-kernel-profile`: `profile.toml` and `athanor-profile-check`). P2 to P7 and the
@@ -130,7 +132,7 @@ release or block that delivers it, or the S1 outcome it depends on.
 | --- | --- | --- | --- |
 | D1 | One kernel binary; roles are runtime profiles | one build, one signature, simple attestation | final |
 | D2 | Roles compose; a machine holds zero or more. A machine with no role runs the base profile, with the desktop IPE class under the dm-verity option (D6) | a workstation can also be a mesh host | final; combinations of an interactive role with the mesh role from the mesh delivery (D38) |
-| D3 | Userland baseline x86-64-v3 and UEFI, enforced by the installer; integrity chain optional with declared degraded mode | matches the v3 userland; keeps machines without TPM or Secure Boot installable | final; installer checks in P4b. Amended on 2026-10-06 (A2-22, #150): the installer of 1.0 is Anaconda with its web interface, and the x86-64-v3, UEFI and disk checks run in its kickstart |
+| D3 | Userland baseline x86-64-v3 and UEFI, enforced by the installer; integrity chain optional with declared degraded mode. Audience: UEFI x86-64-v3 desktops and laptops; machines such as the Intel N5100 class are excluded, stated in `README.md` (maintainer decision A2-17, #160). Supported version: the current image built from `iso-v0` (`README.md`). Support window: Athanor follows the current Fedora and moves to the next within 90 days of its release; security updates for five years for the product line, with the Fedora base rebased forward within it (ADR-0081). Today's base is Fedora 43 (`system/Containerfile`), supported until 2026-12-02; Fedora 45 until 2027-11-24, Fedora 44 until 2027-06-02 (target and fallback: ADR-0078); both dates are on the Fedora schedule and changeable | matches the v3 userland; keeps machines without TPM or Secure Boot installable; one maintainer cannot carry more than one base release | final; installer checks in P4b. Amended on 2026-10-06 (A2-22, #150): the installer of 1.0 is Anaconda with its web interface, and the x86-64-v3, UEFI and disk checks run in its kickstart |
 | D4 | Rust enabled; performance from AutoFDO; ThinLTO re-checked at every bump; Propeller deferred until profiling runs automatically on more than one CPU vendor | `RUST` still depends on `!DEBUG_INFO_BTF \|\| (PAHOLE_HAS_LANG_EXCLUDE && !LTO)`; AutoFDO and Propeller do not require LTO; a Propeller profile is bound to one binary and one test machine's workload | final |
 | D5 | BORE is the base scheduler; sched_ext only through `scx_loader` as a role setting; `athanor-ebpf-sched` retired as a scheduler. If the BORE patch does not apply to a bump required by D37, the kernel ships on plain EEVDF rather than waiting | one owner; sched_ext falls back to the fair class; an out-of-tree patch must never delay a security bump | provisional (BORE against plain EEVDF in P7) |
 | D6 | The verified image and A/B update mechanism: either `/usr` on dm-verity with a signed root hash, A/B slots with `systemd-sysupdate` and UKI boot with systemd-boot, or bootc with sealed composefs and UKI | the first option leaves `/etc` to be designed, depends on a `systemd-sysupdate` marked experimental again in systemd 262, and makes Athanor maintain its own update system; bootc's sealed composefs backend is close to stable and handles `/etc` per deployment, but has no boot counting today and cannot be covered by IPE | closed by the maintainer on 2026-10-05 (A2-8, #150), recorded on 2026-10-06: bootc in two steps, 1.0 on the ostree backend with greenboot (GRUB boot counting) and a MOK-signed kernel, 1.1 on sealed composefs (UKI and fs-verity) once bootc's composefs backend has boot counting; costs: IPE coverage lost, 1.0 installations may need a reinstall for composefs. Earlier state: open (spike S1 on Fedora 45, no time box) |
@@ -675,6 +677,7 @@ the module key could sign them too, because both are builtin, hence the shared c
 kernels built after the revocation; superseded UKIs older than the fallback version are
 revoked through MokListX hashes confirmed by the owner, or by a rotation of the Secure
 Boot key; manifests carry an expiry and a minimum version.
+Who holds and who can use these keys when the maintainer is absent, and the expiry of the `:stable` image, are in `doc_update_trust.md`, "Key succession" (maintainer decision A2-18, #160); the choice of successor is open.
 
 **Measurements:** PCR 7 (Secure Boot state and the authorities used, including db, dbx,
 MOK, shim's built-in certificate, SbatLevel and MokSBState), PCR 11 (UKI sections of the
@@ -694,10 +697,10 @@ is never the Secure Boot key: a compromise of one must not give the other (D43).
 
 | Key | Where it lives | Who uses it | Rotation | Revocation |
 | --- | --- | --- | --- | --- |
-| Secure Boot signing key (`SECUREBOOT_SIGNING_KEY`) | secret of the `signing` environment (D43); certificate `keys/secureboot/athanor-secureboot.pem` in the repository, enrolled as a MOK | today the `dag-system-image` job (`call-system-image.yml`), which also builds the image and runs third-party actions, signs the UKI with it (systemd-boot and role addons are not signed yet); target per D43: a sign-only job, #131/#145; shim, through MokList, to verify the UKI | new key and certificate, a new MOK enrolment confirmed by the owner, UKIs re-signed; keys older than the fallback version are retired with the UKIs they signed | `keys/revoked/` for compiled-in certificates of later kernels; MokListX hashes confirmed by the owner for older UKIs (D41); a rotation of this key; custody and environment protection rules: open (#131) |
-| Module signing key (`MODULE_SIGNING_KEY`) | secret of the `signing` environment; certificate compiled into Azoth; encrypted copy outside GitHub | the sign-only CI job, for external modules (NVIDIA); the kernel, through the builtin certificate | a new certificate needs a new kernel; modules are re-signed in the same release | `keys/revoked/` for the old certificate from the kernels built after the revocation; the old kernel keeps trusting it (D41) |
-| Cosign key | secret of the `signing` environment; public key shipped in `/usr` and named by `policy.json` | the sign-only CI job, for the image and its sigstore attachments; every machine that pulls an image, through `policy.json` (`sigstoreSigned`) | new key pair, new public key delivered by an image the old key signed; rotation procedure and the signing root outside GitHub's OIDC: open (#141) | removal of the old public key from the next image; a machine that never updated cannot learn it: open (#141) |
-| PCR policy key (today: the Secure Boot key, which signs the PCR policy; target per D43: a separate PCR policy key, #145/P4b) | secret of the `signing` environment, a key of its own, not the Secure Boot key; public key in the TPM keyslot policy | today `system/scripts/assemble_uki.sh` signs the PCR policy with `ukify --pcr-private-key` and `--phases=enter-initrd` in the same job as the Secure Boot key; target per D42/D43: a sign-only job and `--sign-initrd-pcrs`, PCR 11, UKI profile 0 only (#131/#145); the TPM, to release the keyslot | rotation invalidates every TPM keyslot; the guided reseal (D42) enrols only the key of the newest installed UKI, on the first boot of profile 0 of a UKI signed with it | only the newest PCR policy key is enrolled, so a UKI with an older key never unlocks the disk; custody and environment: open (#131, P4b) |
+| Secure Boot signing key (`SECUREBOOT_SIGNING_KEY`) | secret of the `signing-kernel` environment (D43); certificate `keys/secureboot/athanor-secureboot.pem` in the repository, enrolled as a MOK | the sign-only `nvidia-kmod-sign` job of the Orchestrator (`athanor-forge-orchestrator.yml`, D43), which holds this key and the module key and runs no build and no third-party action: it signs the vmlinuz of each kernel with `sbsign` in the signer image run by digest (`forge/specs/azoth/signer/`), published as `azoth-boot` and copied into the images by digest; 1.0 has no UKI, systemd-boot and role addons arrive with 1.1 (A2-8, #145); shim, through MokList, to verify the vmlinuz GRUB loads | new key and certificate, a new MOK enrolment confirmed by the owner, every kernel's vmlinuz re-signed (UKIs from 1.1); keys older than the fallback version are retired with the UKIs they signed | `keys/revoked/` for compiled-in certificates of later kernels; MokListX hashes confirmed by the owner for older UKIs (D41); a rotation of this key; custody and environment protection rules: open (#131) |
+| Module signing key (`MODULE_SIGNING_KEY`) | secret of the `signing-kernel` environment; certificate compiled into Azoth; encrypted copy outside GitHub | the same sign-only `nvidia-kmod-sign` job, for external modules (NVIDIA); the kernel, through the builtin certificate | a new certificate needs a new kernel; modules are re-signed in the same release | `keys/revoked/` for the old certificate from the kernels built after the revocation; the old kernel keeps trusting it (D41) |
+| Cosign key | secret of the `signing-images` environment; public key shipped in `/usr` and named by `policy.json` | the sign-only CI job, for the image and its sigstore attachments; every machine that pulls an image, through `policy.json` (`sigstoreSigned`) | new key pair, new public key delivered by an image the old key signed; rotation procedure and the signing root outside GitHub's OIDC: open (#141) | removal of the old public key from the next image; a machine that never updated cannot learn it: open (#141) |
+| PCR policy key (today: the Secure Boot key, which signs the PCR policy; target per D43: a separate PCR policy key, #145/P4b) | secret of the `signing-kernel` environment, a key of its own, not the Secure Boot key; public key in the TPM keyslot policy | none on 1.0: no UKI is built and no PCR policy is signed (the UKI assembly that signed one with the Secure Boot key in the image build is removed); target for 1.1 per D42/D43: a sign-only job and `--sign-initrd-pcrs`, PCR 11, UKI profile 0 only (#131/#145); the TPM, to release the keyslot | rotation invalidates every TPM keyslot; the guided reseal (D42) enrols only the key of the newest installed UKI, on the first boot of profile 0 of a UKI signed with it | only the newest PCR policy key is enrolled, so a UKI with an older key never unlocks the disk; custody and environment: open (#131, P4b) |
 | LUKS recovery passphrase | the user's head and the user's own storage; the keyslot is in the LUKS header; never in the repository, the image or CI | the user, when the TPM keyslot does not release (unforeseen PCR change, degraded mode) | by the user, with `homectl` or `cryptsetup`; the guided reseal does not rotate it | the user removes the keyslot; always enrolled (D42), so it is never revoked by Athanor; its enrolment flow in the installer: open (#145) |
 | TPM-sealed LUKS key | target: a keyslot in the LUKS header of the home, sealed by the TPM of the machine through `systemd-pcrlock` (PCR 7 and 14) and the signed PCR 11 policy; the TPM secret never leaves the machine. Today the image creates no TPM keyslot; the user-invoked `athanor-uki-enroll` is the only path | `systemd-cryptsetup` in the initrd, in attested mode only; nothing seals or reseals it without the user's action | resealed by the guided reseal when the pcrlock policy changes (firmware, db, dbx, shim, MokList) or the PCR policy key rotates; mechanism designed in P4b: open | never applied automatically (D42); the keyslot is wiped and enrolment is offered again when attested mode no longer holds or db, dbx or SbatLevel revoke less than at the last seal; the offer in the installer: open (#145) |
 
@@ -707,6 +710,11 @@ Keylime's example measured-boot policy considers PCRs 0–9 and 14 only, so a de
 policy covers PCR 11 and the command line events of the allowed role sets in PCR 12. The
 attestation code in the repository today returns fixed results and quotes the wrong PCRs;
 it is replaced, with the maintainer's approval, before any mesh admission depends on it.
+Amended 2026-10-06 (maintainer decision A2-9 (#151)): attestation is outside the threat
+model of 1.0 (`doc_threat_model.md`, TM7). Decided 2026-10-07 by the maintainer:
+`athanor-attestation` leaves the workspace members and stays in `system/confidential_computing`
+(ADR-0087; `experimental/EXEMPT` records the reason) and is rewritten on Keylime with the PCR 11 and PCR 12 policy above
+before any mesh admission depends on it; it is not deleted.
 
 ## 10. Execution integrity and security primitives
 
@@ -849,7 +857,10 @@ decision A2-10b (#153): Tetragon stays and does real work, see `doc_tetragon.md`
   IPE does not see; `ptrace_scope=1` still allows root and a process's ancestors.
 - Code running as the user persists through autostart entries, `systemd --user` units and
   shell startup files; a Flatpak application with home access can write those files and
-  leave its sandbox.
+  leave its sandbox. Amended 2026-10-06 (maintainer decision A2-9 (#151)): unconfined user
+  code is the user (`doc_threat_model.md`, TM1); an application of the broker's `confined`
+  class cannot write those paths (TM3, `doc_session_daemons.md` SD8); the Flatpak case
+  remains, stated in TM4.
 - Unconfined user code can create user namespaces and reach kernel code gated by
   in-namespace capabilities, such as `nf_tables`.
 - An unconfined root is not bounded by SELinux under Fedora's targeted policy (D44), keeps
@@ -1050,15 +1061,15 @@ Found on the running system and in the repository (2026-09-14):
   image predates the new module certificate. Images from Orchestrator runs 34842214986 and
   34853705590 are built but not deployed, and NVIDIA kmod run 34854397484 failed in its
   sign job on an artifact download error after the green run 34847702229. The cut-over is
-  the redeploy of the newest image; `MOK_PRIVATE_KEY` is deleted once a deployed system loads `nvidia`
-  signed by the module signing key (task 9 of
-  `docs/superpowers/plans/2026-09-13-signing-key-rotation.md`). Until then `cosmic-comp`
+  the redeploy of the newest image. The retired MOK's private key is no longer kept: no
+  environment holds it (2026-10-07). Until the redeploy `cosmic-comp`
   floods the journal with `VRR_ENABLED` warnings under nouveau.
 - **Kernel series:** Azoth is pinned to 7.1.8 while 7.1 is end of life; the bump bot,
   scheduled daily from the default branch `iso-v0` (first scheduled run pending), moves it to 7.2 (D37).
-- **CI signing:** the Secure Boot key is used in the same job as the image build and
-  third-party actions, and the `signing` environment, which had no required reviewers, requires the
-  maintainer's approval since 2026-09-14 (D43; immediate item of section 15).
+- **CI signing:** the `signing` environment, which had no required reviewers, requires the
+  maintainer's approval since 2026-09-14. The Secure Boot key, once used in the same job as the
+  image build and third-party actions, is now held only by the sign-only job of NVIDIA kmod, and
+  `scripts/verify.py workflows` enforces the rules of section 12 item 1 (D43).
 - **Base configuration** (P3): `ermete-base-config` came with the former `ermete-base-nvidia`
   base and duplicated `10-ermete.conf` (scx_loader), `99-ermete-slim-boot.conf`,
   `99-Ermete-Base.preset`, `10-ermete-hw-groups.conf`, `kargs.d/01-nvidia.toml` and a
@@ -1093,7 +1104,8 @@ Found on the running system and in the repository (2026-09-14):
   The `athanor-secure-boot` package was removed from the repository with those units. *Amended on 2026-10-06 (A2-27, #131, #145):* release 1.0 unlocks the disk with the passphrase only; TPM sealing arrives with 1.1.
   `athanor-gatekeeper-rs`, `athanor-daemon` and `athanor-store-rs` were removed from the
   image on 2026-09-17 pending redesign; the Gatekeeper was removed from the repository on
-  2026-10-05, and attestation is a restricted area.
+  2026-10-05, and attestation is a restricted area. ADR-0073 deleted `athanor-lvfs-rs`
+  and `athanor-store-rs` from the tree.
 - **Snapshots** (P3): `athanor-timewarp` targets bcachefs, which left mainline in Linux
   6.18, and misdetects `/var/home` as tmpfs; `athanor-backup-hourly` fails because
   `athanor-backup` is disabled. Both are ported to btrfs subvolume snapshots.
@@ -1110,8 +1122,8 @@ Found on the running system and in the repository (2026-09-14):
   members excluded from the package DAG (`experimental/EXEMPT`); `athanor-mesh-sync`
   returns all-zero Kyber and Dilithium public keys while logging post-quantum key
   exchange, and `athanor-hypervisor-daemon`, also excluded, derives attestation from the
-  existence of device files. They are removed or made to fail explicitly (D38).
-- **Retirements** (P3): `athanor-ebpf-sched` (embeds a `candle` AI model) is retired as a scheduler.
+  existence of device files. They are removed or made to fail explicitly (D38). ADR-0073 deleted the crates from the tree.
+- **Retirements** (P3): `athanor-ebpf-sched` (embeds a `candle` AI model) is retired as a scheduler; ADR-0073 deleted it from the tree.
   `.github/workflows/live-patching.yml`, which built kernel live patches that section 5
   removes (`LIVEPATCH`), left the repository on 2026-10-05.
 - **Userland flags** (after 1.0, with the Forge pipeline review): `forge/config/rpmmacros`
@@ -1135,7 +1147,7 @@ of D6 on Fedora 45 (issue #124). *Confirmed on 2026-10-06 (A2-31, #124):* S1 has
 | --- | --- |
 | Release chain (Kernel Build, NVIDIA kmod and system image workflows) after pull request #25 (merged) and the NVIDIA cut-over | NVIDIA kmod green, `modinfo -F signer nvidia` on the redeployed machine names the module signing key |
 | The 7.2 bump after pull request #26 (merged; D37) | the 7.2 bump pull request merged with the Kernel Build gate (doc_kernel_build.md section 7) green |
-| Sign-only CI jobs and shared key custody (D43) | the `verify.py workflows` check of section 12 item 1 green, and the protection rules of the signing environment include required reviewers |
+| Sign-only CI jobs and shared key custody (D43) | the `verify.py workflows` check of section 12 item 1 green, and the protection rules of the signing environments include required reviewers |
 
 | Block | Content | Gate |
 | --- | --- | --- |

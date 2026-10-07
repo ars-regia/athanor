@@ -45,7 +45,10 @@ Every package builds inside `athanor-builder`, an OCI image produced by Nix alon
 `builderImage` in `flake.nix` (`dockerTools.buildLayeredImage`), with no Containerfile.
 `call-build-builder.yml` hashes `forge/builder`, the forge configuration, `flake.nix` and
 `flake.lock` with `forge/scripts/check_idempotency.sh --package builder` (not `packages.json`, which the image does not read); when `athanor-builder:<hash>` already exists it is reused, otherwise
-the job runs `nix build .#builderImage`, loads it and pushes it as `:<hash>` and `:latest`.
+the job runs `nix build .#builderImage`, loads it and pushes it as `:<hash>`. On the default
+branch, built or reused, `forge/scripts/promote_builder_latest.sh` then points `:latest` at
+that `:<hash>`: `:latest` is the default branch's builder, which the pull request spec check
+(`spec-build-check.yml`) uses when a change leaves the builder's inputs alone.
 The hash is handed to the package and image jobs, so a run builds with exactly one builder.
 
 ## 4. The DAG
@@ -67,16 +70,20 @@ package jobs of one run:
   silently rebuild the whole graph. A dirty package does not dirty its dependents: builds
   never consume another package's output. Upstream nodes and flatpaks are never dirty, so a
   commit that changes no package schedules no matrix job.
-- **Output**: the dirty custom packages split into levels 0, 1 and 2 (every deeper level
-  joins level 2) and the dirty flatpaks, written to `GITHUB_OUTPUT` with a Mermaid summary
-  of the graph. Upstream nodes are never scheduled.
+- **Cycle check**: `graphlib.TopologicalSorter.prepare()` on the graph; a cycle (a tier
+  order and a `Requires` that contradict each other) fails the plan.
+- **Output**: the dirty custom packages as one sorted list, `dag_packages`, with
+  `dirty_count` and `has_changes`, written to `GITHUB_OUTPUT`. Upstream nodes are never
+  scheduled.
 
 Builds run with `rpmbuild --nodeps` in the builder image and never install another forge
-package, so the levels order the jobs but no build consumes the output of another.
+package, so no build consumes the output of another and every dirty package builds in one
+matrix (doc_pipeline.md, PL48). The graph orders the image's tiers and the content hashes,
+not the builds.
 
 ## 5. Package jobs
 
-`call-dag-compile.yml` runs one matrix job per package and level:
+`call-dag-compile.yml` runs one matrix job per dirty package:
 
 1. **Idempotency.** `check_idempotency.sh` hashes the spec directory, `config/rpmmacros`,
    the package's entry in `config/packages.json` (the lists that name it) and every other
@@ -106,8 +113,7 @@ package, so the levels order the jobs but no build consumes the output of anothe
    `go.mod` pin. The `build` stage runs `rpmbuild` with `--network=none`,
    `CARGO_NET_OFFLINE=true` and `GOPROXY=off`. Specs without `Source` build the checkout
    in place (`rpmbuild --build-in-place`). Rust compiles through sccache, cached per
-   package. `athanor-telemetry` is the exception: it builds with
-   `nix build .#athanor-telemetry-rpm`.
+   package.
 3. **Publication.** The RPMs go into a `FROM scratch` image,
    `<registry>/<owner>/athanor-forge-<package>`, tagged `:latest` and `:hash-<hash>`, with the
    hash in the `tier.content.sha256` label. The registry host is the `REGISTRY_HOST`
@@ -137,13 +143,17 @@ artifact and never pushed; any other change runs in the published `athanor-build
   package images of each tier by `:hash-<hash>`, from the map `dag-hashes` (`hashes.json`) the
   brain wrote for this run and the job downloads; nothing in the pipeline reads a package's
   `:latest`, which stays for people (tier 0 also takes the kernel, `azoth@<digest>` from the
-  verified kernel artifacts). For each tier whose content hash changed, the job signs the
-  RPMs when `RPM_GPG_KEY` is available, runs `createrepo_c` and publishes
-  `athanor-forge-tier<N>-repo:latest`; an unchanged tier is not pushed. On `main` the same repositories are deployed to GitHub Pages as a DNF channel.
+  verified kernel artifacts). For each tier whose content hash changed, the job runs
+  `createrepo_c` and publishes `athanor-forge-tier<N>-repo:latest`; an unchanged tier is not
+  pushed. The RPMs are not signed and there is no DNF channel: they reach machines only inside
+  the signed image (ADR-0076, decision 2).
 - **System images.** `system/build-image.sh` builds the default, `nvidia` and
   `nvidia-legacy` variants from `system/Containerfile`: the Fedora `base-atomic:43` base
   by digest, the RPMs of each tier repository image (bind-mounted, then installed), the
-  `upstream_*` packages by name, and a UKI signed with the Secure Boot key. The images are
+  `upstream_*` packages by name, and a UKI signed with the Secure Boot key. The `system`
+  stage the three share is built once per run and each variant is built `FROM` its image
+  ID, so all three carry the same system layers (`system/shared-layers.sh` checks it in local
+  storage before the push; doc_update_delivery.md, UD40). The images are
   pushed and signed with cosign keyless; a separate job adds the key-based signature
   (`system/sign-images.sh`). `forge/scripts/build_iso.sh` builds the ISO with osbuild.
 
