@@ -7,7 +7,9 @@ Fedora targeted SELinux policy and the running system. The maintainer approved t
 decisions introduced by the verifications on 2026-09-14 and chose the firmware policy of
 D48 on the same day. The specification passed gate P0 on 2026-09-14, with the mechanism of
 the guided reseal (D42) left open for P4b. Revision 16 (2026-10-05) amends D23 with the
-udisks exception and records the removal of the Gatekeeper (section 10).
+udisks exception and records the removal of the Gatekeeper (section 10). Amended 2026-10-06 (maintainer decision
+A2-9 (#151)): this document is tier 3, root and the image, of `doc_threat_model.md`;
+sections 9 and 10 say what changed.
 
 Implementation status (2026-10-05): of the blocks of section 15, only P1 is built
 (`athanor-kernel-profile`: `profile.toml` and `athanor-profile-check`). P2 to P7 and the
@@ -707,6 +709,11 @@ Keylime's example measured-boot policy considers PCRs 0–9 and 14 only, so a de
 policy covers PCR 11 and the command line events of the allowed role sets in PCR 12. The
 attestation code in the repository today returns fixed results and quotes the wrong PCRs;
 it is replaced, with the maintainer's approval, before any mesh admission depends on it.
+Amended 2026-10-06 (maintainer decision A2-9 (#151)): attestation is outside the threat
+model of 1.0 (`doc_threat_model.md`, TM7). Decided 2026-10-07 by the maintainer:
+`athanor-attestation` moves to `experimental/` (listed in `experimental/EXEMPT`, out of the
+workspace members) and is rewritten on Keylime with the PCR 11 and PCR 12 policy above
+before any mesh admission depends on it; it is not deleted.
 
 ## 10. Execution integrity and security primitives
 
@@ -849,7 +856,10 @@ decision A2-10b (#153): Tetragon stays and does real work, see `doc_tetragon.md`
   IPE does not see; `ptrace_scope=1` still allows root and a process's ancestors.
 - Code running as the user persists through autostart entries, `systemd --user` units and
   shell startup files; a Flatpak application with home access can write those files and
-  leave its sandbox.
+  leave its sandbox. Amended 2026-10-06 (maintainer decision A2-9 (#151)): unconfined user
+  code is the user (`doc_threat_model.md`, TM1); an application of the broker's `confined`
+  class cannot write those paths (TM3, `doc_session_daemons.md` SD8); the Flatpak case
+  remains, stated in TM4.
 - Unconfined user code can create user namespaces and reach kernel code gated by
   in-namespace capabilities, such as `nf_tables`.
 - An unconfined root is not bounded by SELinux under Fedora's targeted policy (D44), keeps

@@ -3,7 +3,7 @@ id: A2-6
 title: "Trusted path built on cosmic-comp PR #1441"
 date: 2026-10-05
 status: accepted
-issues: []
+issues: [151]
 areas: [security, shell]
 ---
 
@@ -19,4 +19,4 @@ D10 trusted path built on cosmic-comp PR #1441; guarantee stated against confine
 
 ## Consequences
 
-No specification document under `docs/architecture` cites this record yet; it takes effect through the work it describes.
+Applied by `docs/architecture/doc_lock_and_prompts.md` (LP13, D10) and cited by `docs/architecture/doc_threat_model.md` (TM6).
