@@ -40,8 +40,15 @@ HEX64 = r"[0-9a-f]{64}"
 SPEC_FILE = re.compile(rf"(?:{NAME}\.spec|SOURCES/sources\.sha256)")
 WATCH_FILE = "forge/upstream-watch.json"
 # The checks the branch protection requires (.github/settings/branch-protection.json), each
-# the gate job of its workflow.
-REQUIRED_CHECKS = {"Kernel gate": "kernel-build.yml", "Spec gate": "spec-build-check.yml"}
+# the gate job of its workflow, and `gate` of pr.yml, the one required check once the
+# maintainer switches to it (docs/operations/github-settings.md). The bot waits for all of
+# them in both states: the protection does not bind administrators (enforce_admins: false)
+# and the merging PAT is a maintainer's, so this wait is what keeps a red check from merging.
+REQUIRED_CHECKS = {
+    "Kernel gate": "kernel-build.yml",
+    "Spec gate": "spec-build-check.yml",
+    "gate": "pr.yml",
+}
 SYSTEM_PATH = re.compile(rf"system/(Containerfile|nvidia/locks/{NAME}\.lock)")
 VERSION = re.compile(r"Version:[ \t]+(\d+(?:\.\d+)*)")
 RELEASE = re.compile(r"Release:[ \t]+\d+%\{\?dist\}")

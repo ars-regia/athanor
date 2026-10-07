@@ -75,9 +75,12 @@ class BotMergeTest(unittest.TestCase):
         self.runs = [{"id": 1, "status": "completed"}]
         # Spec Build Check calls the bot from its own run: the gate job has ended, the run has not.
         self.spec_runs = [{"id": 101, "status": "in_progress"}]
+        # The Pull Request workflow's gate, whose own build jobs carry the caller's prefix.
+        self.pr_runs = [{"id": 201, "status": "completed"}]
         self.jobs = {
             1: [{"name": "Kernel gate", "conclusion": "success"}],
             101: [{"name": "Spec gate", "conclusion": "success"}, {"name": "merge", "conclusion": None}],
+            201: [{"name": "specs / Spec gate", "conclusion": "success"}, {"name": "gate", "conclusion": "success"}],
         }
 
     def tearDown(self):
@@ -115,12 +118,14 @@ class BotMergeTest(unittest.TestCase):
         return [c for c in self.calls if c[:2] == ("pr", "merge")]
 
     def actions(self, endpoint):
-        """The Actions API of the fake repository: Kernel Build and Spec Build Check runs on SHA
-        and their jobs."""
+        """The Actions API of the fake repository: Kernel Build, Spec Build Check and Pull
+        Request runs on SHA and their jobs."""
         if endpoint == f"repos/owner/repo/actions/workflows/kernel-build.yml/runs?head_sha={SHA}&event=pull_request":
             return json.dumps({"workflow_runs": self.runs})
         if endpoint == f"repos/owner/repo/actions/workflows/spec-build-check.yml/runs?head_sha={SHA}&event=pull_request":
             return json.dumps({"workflow_runs": self.spec_runs})
+        if endpoint == f"repos/owner/repo/actions/workflows/pr.yml/runs?head_sha={SHA}&event=pull_request":
+            return json.dumps({"workflow_runs": self.pr_runs})
         run = int(endpoint.split("/runs/")[1].split("/")[0])
         assert endpoint == f"repos/owner/repo/actions/runs/{run}/jobs?per_page=100", endpoint
         return json.dumps({"jobs": self.jobs[run]})
@@ -338,6 +343,23 @@ class BotMergeTest(unittest.TestCase):
 
         def finish(_):
             self.jobs[101] = [{"name": "Spec gate", "conclusion": "success"}]
+
+        bot.wait_for_required_checks(SHA, self.gh_actions, sleep=finish)
+
+    def test_red_pull_request_gate_fails_without_merging(self):
+        self.jobs[201] = [{"name": "specs / Spec gate", "conclusion": "success"}, {"name": "gate", "conclusion": "failure"}]
+        with self.assertRaises(SystemExit):
+            self.spec()
+        self.assertFalse([c for c in self.calls if c[:2] == ("pr", "merge")])
+
+    def test_pull_request_gate_pending_is_awaited(self):
+        self.pr_runs = [{"id": 201, "status": "in_progress"}]
+        self.jobs[201] = [{"name": "gate", "conclusion": None}]
+        with self.assertRaises(SystemExit):
+            bot.wait_for_required_checks(SHA, self.gh_actions, sleep=lambda _: None, polls=3)
+
+        def finish(_):
+            self.jobs[201] = [{"name": "gate", "conclusion": "success"}]
 
         bot.wait_for_required_checks(SHA, self.gh_actions, sleep=finish)
 
