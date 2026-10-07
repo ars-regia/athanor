@@ -25,6 +25,7 @@ import re
 import subprocess
 import sys
 import tomllib
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 try:
@@ -1961,6 +1962,295 @@ def check_services():
         r.fail(problem)
     for ident, why in SERVICE_EXEMPT.items():
         r.note(f"exempt: {ident}: {why}")
+    return r
+# The polkit model (doc_threat_model.md TM9, maintainer decision T3 of 2026-10-07): every
+# action the repository declares in a .policy file or overrides in a polkit .rules file has
+# one row in TM9's table, with its result for the active session.
+POLKIT_RULES_WORDS = {"polkit", "addRule", "addAdminRule", "Result", "function", "if", "else", "return", "action", "id", "subject", "user", "groups", "isInGroup", "isInNetGroup", "local", "active", "session", "seat", "pid"}
+POLKIT_MODEL_DOC = "docs/architecture/doc_threat_model.md"
+POLKIT_RESULTS = {
+    "no",
+    "yes",
+    "auth_self",
+    "auth_self_keep",
+    "auth_admin",
+    "auth_admin_keep",
+    "not_handled",
+}
+
+
+def js_without_comments_and_strings(text):
+    """(code, literals): comments dropped and every string literal replaced by \\0<n>\\0,
+    its index in literals, so that no pattern matches inside a string or a comment and no
+    identifier can pass for a literal. None when the text holds a template literal or NUL.
+    """
+    # ponytail: no JS regex literals; a rule using one (/"/) may misread, add when one ships
+    out, literals, i, n = [], [], 0, len(text)
+    if "\0" in text:
+        return None
+    while i < n:
+        if text.startswith("//", i):
+            j = re.search("[\n\r\u2028\u2029]", text[i:])
+            i = n if j is None else i + j.start()
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            out.append(" ")
+        elif text[i] == "`":
+            return None
+        elif text[i] in "\"'":
+            j = i + 1
+            while j < n and text[j] != text[i]:
+                j += 2 if text[j] == "\\" else 1
+            literals.append(text[i + 1 : j])
+            out.append(f"\0{len(literals) - 1}\0")
+            i = j + 1
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out), literals
+
+
+def js_close(code, i):
+    """Index after the bracket that closes code[i], or -1."""
+    depth = 0
+    for j in range(i, len(code)):
+        depth += (code[j] in "([{") - (code[j] in ")]}")
+        if depth == 0:
+            return j + 1
+    return -1
+
+
+def js_top_split(code, sep):
+    """code split at every sep outside brackets."""
+    parts, depth, start, i = [], 0, 0, 0
+    while i < len(code):
+        depth += (code[i] in "([{") - (code[i] in ")]}")
+        if depth == 0 and code.startswith(sep, i):
+            parts.append(code[start:i])
+            start = i = i + len(sep)
+            continue
+        i += 1
+    return parts + [code[start:]]
+
+
+def polkit_rule_ids(cond, literals):
+    """The action ids an if condition requires, or None when it is not in the one form read:
+    `action.id == L` or several joined by `||`, alone or as one operand of `&&` whose other
+    operands do not name the action. Redundant parentheses are allowed."""
+
+    def bare(e):
+        e = e.strip()
+        while e.startswith("(") and js_close(e, 0) == len(e):
+            e = e[1:-1].strip()
+        return e
+
+    def ids_of(e):
+        tests = [
+            re.fullmatch(r"action\s*\.\s*id\s*===?\s*\x00(\d+)\x00", bare(alt))
+            for alt in js_top_split(bare(e), "||")
+        ]
+        return [literals[int(t.group(1))] for t in tests] if all(tests) else None
+
+    cond = bare(cond)
+    if len(js_top_split(cond, "||")) > 1:
+        return ids_of(cond)
+    guards = []
+    for part in js_top_split(cond, "&&"):
+        ids = ids_of(part)
+        if ids:
+            guards.append(ids)
+        elif re.search(r"\baction\b", part):
+            return None
+    return guards[0] if len(guards) == 1 else None
+
+
+def polkit_rules_declared(path, text, cannot):
+    """{(action, path): results} of one polkit .rules file, and why it cannot be read.
+
+    Only one shape is read. At the top level, nothing but polkit.addRule(...) and
+    polkit.addAdminRule(...) calls. Each addRule function is
+    `function(action, subject) { if (<ids>) { ... } }` with nothing after the block, where
+    <ids> is polkit_rule_ids's form, and the block returns only polkit.Result.X and does
+    not name the action. Anything else fails, so a rule cannot override an action unseen.
+    """
+
+    def unreadable(why):
+        return {}, [f"{path}: {why}, {cannot}"]
+
+    tokens = js_without_comments_and_strings(text)
+    if tokens is None:
+        return unreadable("a template literal or a NUL byte is not read")
+    code, literals = tokens
+    words = set(re.findall(r"[A-Za-z_$][\w$]*", code))
+    if words - POLKIT_RULES_WORDS - {r.upper() for r in POLKIT_RESULTS}:
+        return unreadable(
+            f"it uses {', '.join(sorted(words - POLKIT_RULES_WORDS - {r.upper() for r in POLKIT_RESULTS}))}, "
+            "outside the identifiers a rule is read with"
+        )
+    if re.sub(r"\x00\d+\x00|[A-Za-z_]+", "", code).strip(" \t\r\n(){}[].,;=|&"):
+        return unreadable("it uses characters other than identifiers, strings and ( ) { } [ ] . , ; = | &")
+    if any(len(run) not in (2, 3) for run in re.findall(r"=+", code)):
+        return unreadable("it assigns: only == and === are read")
+    members = (
+        r"\bpolkit\s*\.\s*(?:addRule|addAdminRule|Result\s*\.\s*[A-Z_]+)\b"
+    )
+    if len(re.findall(r"\bpolkit\b", code)) != len(re.findall(members, code)):
+        return unreadable(
+            "polkit is used other than through polkit.addRule, polkit.Result.X and its other members"
+        )
+    if len(re.findall(r"\bResult\b", code)) != len(
+        re.findall(r"\bpolkit\s*\.\s*Result\s*\.\s*[A-Z_]+", code)
+    ):
+        return unreadable("Result is used other than as polkit.Result.X")
+    declared, rules, pos = {}, 0, 0
+    call = re.compile(r"[\s;]*polkit\s*\.\s*(addRule|addAdminRule)\s*\(")
+    while m := call.match(code, pos):
+        pos = js_close(code, m.end() - 1)
+        if pos < 0:
+            return unreadable("a polkit call is not closed")
+        if m.group(1) == "addAdminRule":
+            continue
+        rules += 1
+        arg = code[m.end() : pos - 1]
+        head = re.match(
+            r"\s*function\s*\(\s*action\s*(?:,\s*subject\s*)?\)\s*\{\s*if\s*\(", arg
+        )
+        cond_end = js_close(arg, head.end() - 1) if head else -1
+        brace = re.compile(r"\s*\{").match(arg, cond_end) if cond_end > 0 else None
+        block_end = js_close(arg, brace.end() - 1) if brace else -1
+        if block_end < 0 or arg[block_end:].strip() != "}":
+            return unreadable(
+                "an addRule function is not `function(action, subject) { if (...) { ... } }` "
+                "with nothing after the block"
+            )
+        ids = polkit_rule_ids(arg[head.end() : cond_end - 1], literals)
+        block = arg[brace.end() : block_end - 1]
+        results = {
+            r.lower()
+            for r in re.findall(r"\bpolkit\s*\.\s*Result\s*\.\s*([A-Z_]+)", block)
+        }
+        returns = len(re.findall(r"\breturn\b", block))
+        if returns != len(re.findall(r"\breturn\s+polkit\s*\.\s*Result\s*\.\s*[A-Z_]+\s*[;}]", block + ";")):
+            ids = None
+        if not ids or not results or re.search(r"\b(?:action|function)\b", block):
+            return unreadable(
+                'an addRule tests the action other than as action.id == "..." joined by || '
+                "(and, in parentheses, && conditions on the subject), or its block names the "
+                "action or returns no polkit.Result"
+            )
+        for a in ids:
+            declared.setdefault((a, path), set()).update(results)
+    if code[pos:].strip(" \t\r\n;"):
+        return unreadable(
+            "code other than polkit.addRule(...) and polkit.addAdminRule(...) stands at the top level"
+        )
+    if len(re.findall(r"\baddRule\b", code)) != rules:
+        return unreadable(
+            "addRule is reached other than as a top-level polkit.addRule(...)"
+        )
+    return declared, []
+
+
+def polkit_declared(files):
+    """{(action, file): results} for the active session, and the files that cannot be read.
+
+    A .policy gives its `allow_active` default (`no` when absent). A polkit .rules file gives,
+    for each action its addRule functions test, every polkit.Result the function returns
+    (polkit_rules_declared). A .rules file that has neither `polkit.` nor `addRule` is a
+    udev rule and is skipped.
+    """
+    cannot = f"so its rows of {POLKIT_MODEL_DOC} TM9 cannot be checked"
+    declared, unreadable = {}, []
+    for path, text in sorted(files.items()):
+        if path.endswith(".policy"):
+            try:
+                root = ET.fromstring(text)
+            except ET.ParseError as e:
+                unreadable.append(f"{path}: not valid XML ({e}), {cannot}")
+                continue
+            for action in root.iter("action"):
+                if not action.get("id"):
+                    unreadable.append(f"{path}: an <action> has no id, {cannot}")
+                    continue
+                active = (action.findtext("defaults/allow_active") or "no").strip()
+                declared[(action.get("id"), path)] = {active}
+        elif path.endswith(".rules") and "udev/rules.d/" not in path:
+            found, problems = polkit_rules_declared(path, text, cannot)
+            declared.update(found)
+            unreadable += problems
+    return declared, unreadable
+
+
+def polkit_table(doc):
+    """[(action, file, results)] from the table whose header starts with | Action | Declared in |."""
+    rows, inside = [], False
+    for line in doc.split("\n"):
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if line.startswith("| Action") and len(cells) > 2 and cells[1] == "Declared in":
+            inside = True
+            continue
+        if not inside:
+            continue
+        if not line.startswith("|"):
+            break
+        if set(cells[0]) <= set("-: "):
+            continue
+        tokens = set(re.findall(r"`([a-z_]+)`", cells[2]))
+        rows.append((cells[0].strip("`"), cells[1].strip("`"), tokens & POLKIT_RESULTS))
+    return rows
+
+
+def polkit_model_problems(files, doc):
+    declared, problems = polkit_declared(files)
+    rows = polkit_table(doc)
+    if not rows:
+        problems.append(
+            f"{POLKIT_MODEL_DOC}: no table with the header | Action | Declared in | ..."
+        )
+    seen = set()
+    for action, path, results in rows:
+        key = (action, path)
+        if key in seen:
+            problems.append(f"{POLKIT_MODEL_DOC} TM9: {action} ({path}) has two rows")
+            continue
+        seen.add(key)
+        if key not in declared:
+            problems.append(
+                f"{POLKIT_MODEL_DOC} TM9: {action} is not declared in {path}: remove the row"
+            )
+        elif results != declared[key]:
+            problems.append(
+                f"{POLKIT_MODEL_DOC} TM9: {action} gives {', '.join(sorted(declared[key]))} for the "
+                f"active session in {path}, the table says {', '.join(sorted(results)) or 'nothing'}"
+            )
+    for action, path in sorted(declared.keys() - seen):
+        problems.append(f"{path}: {action} has no row in {POLKIT_MODEL_DOC} TM9")
+    return problems
+
+
+@check(
+    "polkit-model",
+    "Every polkit action the repository declares or overrides has its row in TM9",
+)
+def check_polkit_model():
+    r = Result()
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", "--", "*.policy", "*.rules"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if listed.returncode != 0:
+        r.fail(f"git ls-files failed: {listed.stderr.strip()}")
+        return r
+    files = {
+        p: read(ROOT / p)
+        for p in listed.stdout.split("\0")
+        if p and (ROOT / p).is_file()
+    }
+    for problem in polkit_model_problems(files, read(ROOT / POLKIT_MODEL_DOC)):
+        r.fail(problem)
     return r
 
 
