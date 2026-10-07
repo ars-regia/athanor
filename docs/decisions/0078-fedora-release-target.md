@@ -25,8 +25,8 @@ The dates come from the Fedora 45 schedule and Bodhi, checked on 2026-10-06: Fed
 1. **The next base is Fedora 45.** The move starts on the Fedora 45 beta once
    block P3 of `doc_kernel_profile.md` is green (D25); no build uses Fedora 45 yet.
 2. **Fallback to Fedora 44.** If the Fedora 45 image is not green by mid-November 2026, the
-   image moves to Fedora 44 instead, so that it never runs on Fedora 43 after its end of life. On
-   Fedora 44 the support window ends on 2027-06-02, and the move to Fedora 45 follows.
+   image moves to Fedora 44 instead, so that it never runs on Fedora 43 after its end of life. Fedora 44
+   reaches its end of life on 2027-06-02, so the move to Fedora 45 follows before that date.
 
 ## Consequences
 
