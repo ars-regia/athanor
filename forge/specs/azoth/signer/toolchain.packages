@@ -1,0 +1,3 @@
+# sbsign and sbverify for vmlinuz, sign-file (kernel-devel) and modinfo (kmod) for the
+# modules, openssl for the certificate names, rpm2cpio and cpio to read the kernel RPMs.
+sbsigntools kernel-devel kmod openssl rpm cpio findutils

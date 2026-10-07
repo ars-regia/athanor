@@ -73,7 +73,7 @@ mkdir -p "$ACC_STATE/pipeline-keys"
 cp "$keys/acc-1.pub" "$ACC_STATE/pipeline-keys/athanor-image-1.pub"
 HOME=$ACC_STATE/home bash "$ROOT/system/image-digests.sh" --registry "$ACC_REGISTRY" --tag v2 --out "$ACC_STATE/image-digests.txt"
 COSIGN_PRIVATE_KEY=$(< "$keys/acc-1.private") COSIGN_PASSWORD='' SIGN_KEYS_DIR=$ACC_STATE/pipeline-keys \
-  HOME=$ACC_STATE/home bash "$ROOT/system/sign-images.sh" "$ACC_STATE/image-digests.txt"
+  HOME=$ACC_STATE/home bash "$ROOT/system/sign-images.sh" --registry "$ACC_REGISTRY" "$ACC_STATE/image-digests.txt"
 
 # v3b: the only signature is what cosign 3 writes, a bundle index at sha256-<hex>.
 # cosign signs with a key pair of its own making; the image ships that public key, so the

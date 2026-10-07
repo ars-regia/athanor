@@ -3,6 +3,9 @@
 # Deterministic Build Timestamp (Reproducible Builds)
 export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-1723320000}
 set -euo pipefail
+# sort -z orders by the locale: the brain (host) and the job (builder image) would hash
+# the same tree differently under en_US.UTF-8 and C.
+export LC_ALL=C
 # Bedrock Pure Bash Idempotency Checker
 # Replaces python3 idempotency_checker.py with native system tools (find, sha256sum, skopeo)
 
@@ -12,6 +15,7 @@ OWNER=""
 IMAGE_NAME=""
 
 BASE_DIGEST=""
+HASH_ONLY=false
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -20,6 +24,7 @@ while [[ $# -gt 0 ]]; do
     --owner) OWNER="$2"; shift 2 ;;
     --image-name) IMAGE_NAME="$2"; shift 2 ;;
     --base-digest) BASE_DIGEST="$2"; shift 2 ;;
+    --hash-only) HASH_ONLY=true; shift ;;
     *) echo "Argomento sconosciuto: $1" >&2; exit 1 ;;
   esac
 done
@@ -27,6 +32,11 @@ done
 if [[ -z "$IMAGE_NAME" ]]; then
   IMAGE_NAME="athanor-forge-${PACKAGE}"
 fi
+
+# Package images carry their content hash as hash-<hash> (UD41), the tag the DAG
+# orchestrator asks for. The builder keeps the bare hash its consumers pull by.
+HASH_TAG_PREFIX="hash-"
+[[ "$PACKAGE" == "builder" ]] && HASH_TAG_PREFIX=""
 
 # Determina directory o seed per il calcolo dell'hash
 if [[ "$PACKAGE" == "builder" ]]; then
@@ -40,9 +50,33 @@ else
 fi
 
 if [[ -n "$DIR" && -d "$DIR" ]]; then
+  # Captured before the hash: an input list that fails (a path dependency that does not exist)
+  # must stop here, not leave a partial hash behind.
+  INPUTS=""
+  if [[ "$PACKAGE" != "builder" ]]; then
+    INPUTS=$(python3 "$(dirname "${BASH_SOURCE[0]}")/dag_orchestrator.py" --inputs "$PACKAGE")
+  fi
+  # The one thing a package build takes from packages.json is where the package is listed
+  # (its tier): not the other packages' entries, which would rebuild every package on any
+  # edit, and not at all for the builder (UD42).
+  ENTRY=""
+  if [[ "$PACKAGE" != "builder" && -f "config/packages.json" ]]; then
+    ENTRY=$(jq -c --arg p "$PACKAGE" '[to_entries[] | select((.value | type) == "array" and (.value | index($p) != null)) | .key]' config/packages.json)
+  fi
   # Hash SHA-256 deterministico dei path relativi e dei contenuti
   CONTENT_HASH=$({
     find "$DIR" -type f -print0 | sort -z | xargs -0 sha256sum
+    # What the build reads besides the spec directory (dag_orchestrator.py --inputs, the one
+    # list the orchestrator and the job share): Cargo path dependencies, declared repo
+    # paths, the workspace manifest and lock, the build scripts, the builder identity.
+    while IFS= read -r input; do
+      [[ -n "$input" ]] || continue
+      if [[ -d "$input" ]]; then
+        find "$input" -type f -not -path '*/target/*' -print0 | sort -z | xargs -0 sha256sum
+      else
+        sha256sum "$input"
+      fi
+    done <<< "$INPUTS"
     if [[ -f "config/rpmmacros" ]]; then
       echo -n "config/rpmmacros"
       cat "config/rpmmacros"
@@ -55,9 +89,8 @@ if [[ -n "$DIR" && -d "$DIR" ]]; then
       echo -n "builder/rpmfusion-custom.repo"
       cat "builder/rpmfusion-custom.repo"
     fi
-    if [[ -f "config/packages.json" ]]; then
-      echo -n "config/packages.json"
-      cat "config/packages.json"
+    if [[ -n "$ENTRY" ]]; then
+      echo -n "packages.json:${ENTRY}"
     fi
     if [[ "$PACKAGE" == "builder" ]]; then
       # L'immagine builder è definita dal flake: senza queste righe una modifica a
@@ -106,79 +139,27 @@ fi
 
 echo ">>> Content Hash calcolato per ${PACKAGE}: ${CONTENT_HASH}" >&2
 
+# --hash-only: the caller asks the registry itself (dag_orchestrator.py, UD41).
+if [[ "$HASH_ONLY" == "true" ]]; then
+  echo "CONTENT_HASH=${CONTENT_HASH}"
+  exit 0
+fi
+
 # Costruisce URL immagine GHCR
-IMAGE_URL="docker://${REGISTRY}/${OWNER}/${IMAGE_NAME}:${CONTENT_HASH}"
+IMAGE_URL="docker://${REGISTRY}/${OWNER}/${IMAGE_NAME}:${HASH_TAG_PREFIX}${CONTENT_HASH}"
 IMAGE_URL_LOWER=$(echo "$IMAGE_URL" | tr '[:upper:]' '[:lower:]')
 
 echo ">>> Verifica esistenza su GHCR: ${IMAGE_URL_LOWER}..." >&2
 
-# Verifica con skopeo (se skopeo non è installato, tenta di installarlo o usa fallback)
-if ! command -v skopeo >/dev/null 2>&1; then
-  if command -v dnf >/dev/null 2>&1; then
-    sudo -n dnf install -y skopeo >&2 || dnf install -y skopeo >&2 || :
-  fi
-fi
-
-if ! command -v skopeo >/dev/null 2>&1; then
-  echo "check_idempotency.sh: skopeo non trovato, impossibile interrogare il registro" >&2
+# One reading of the registry for the whole pipeline: registry_probe.sh answers present or
+# absent (including ghcr's 403 for a never-published package) and fails on anything else,
+# which stops here rather than reading as a hit or a miss. Anonymous: the forge images are
+# public, and credentials a registry rejects fail even a public read.
+if ! PROBE=$(bash "$(dirname "${BASH_SOURCE[0]}")/registry_probe.sh" "${IMAGE_URL_LOWER#docker://}"); then
+  echo "check_idempotency.sh: il registro non ha risposto per ${IMAGE_URL_LOWER}" >&2
   exit 1
 fi
-
-# skopeo legge la configurazione dei registri sotto $HOME prima ancora di aprire la rete.
-# Il job lo esegue con --userns=keep-id, quindi non è root, mentre HOME resta /root: il
-# risultato è "open /root/.config/containers/registries.d: permission denied" in 34
-# millisecondi, senza che nessuna richiesta parta. Una home scrivibile evita l'errore.
-if [[ ! -w "${HOME:-/root}" ]]; then
-  HOME=$(mktemp -d)
-  export HOME
-fi
-
-# Prima senza credenziali, poi con. Le immagini della forge sono pubbliche e si leggono
-# anonimamente; passare --creds a un registro che poi rifiuta quelle credenziali fa
-# fallire skopeo con 403 anche su un'immagine leggibile da chiunque. Quel fallimento era
-# indistinguibile da "immagine assente" e ricostruiva l'intero DAG a ogni run: tutti e 47
-# i nodi, 4,6 ore di runner, per un push che non toccava nessuno di quei pacchetti.
-#
-# L'esito viene distinto in tre casi, perché "non c'è" e "non sono riuscito a chiedere"
-# richiedono risposte diverse: la prima è una build da fare, la seconda è un guasto.
-inspect_status=""
-for attempt in anonymous authenticated; do
-  INSPECT_ARGS=("--no-tags")
-  if [[ "$attempt" == "authenticated" ]]; then
-    [[ -n "${GITHUB_TOKEN:-}" ]] || continue
-    INSPECT_ARGS+=("--creds" "${OWNER}:${GITHUB_TOKEN}")
-  fi
-
-  set +e
-  inspect_err=$(skopeo inspect "${INSPECT_ARGS[@]}" "${IMAGE_URL_LOWER}" 2>&1 >/dev/null)
-  rc=$?
-  set -e
-
-  if [[ $rc -eq 0 ]]; then
-    inspect_status="found"
-    break
-  fi
-  # Il registro risponde "manifest unknown" quando il tag non esiste: è una risposta, non
-  # un guasto, e non serve riprovare autenticati.
-  if grep -qi 'manifest unknown\|name unknown\|not found' <<< "$inspect_err"; then
-    inspect_status="absent"
-    break
-  fi
-  inspect_status="error"
-  last_error=$inspect_err
-done
-
-case "$inspect_status" in
-  found) CACHE_HIT="true" ;;
-  absent) CACHE_HIT="false" ;;
-  *)
-    # Né presente né assente: il registro non ha risposto. Costruire sarebbe uno spreco
-    # silenzioso, dichiarare la cache valida sarebbe peggio: si ferma e lo dice.
-    echo "check_idempotency.sh: il registro non ha risposto per ${IMAGE_URL_LOWER}" >&2
-    echo "${last_error:-nessun dettaglio}" >&2
-    exit 1
-    ;;
-esac
+[[ "$PROBE" == "present" ]] && CACHE_HIT="true" || CACHE_HIT="false"
 
 echo "CACHE_HIT=${CACHE_HIT}"
 echo "CONTENT_HASH=${CONTENT_HASH}"

@@ -21,6 +21,7 @@ SECRET = "-----BEGIN ENCRYPTED SIGSTORE PRIVATE KEY-----\nnot-a-real-key\n-----E
 STUB = textwrap.dedent("""\
     #!/usr/bin/env python3
     # A skopeo that knows tags.json (ref -> digest) and records what it signs in signed.json.
+    # It signs only a copy of repo@digest onto itself, of a manifest the registry holds.
     import json, os, pathlib, stat, sys
     state = pathlib.Path(os.environ["STUB_STATE"])
     args = sys.argv[1:]
@@ -46,7 +47,11 @@ STUB = textwrap.dedent("""\
             assert mode == 0o600 and parent == 0o700, (secret, oct(mode), oct(parent))
         (state / "key.seen").write_text(key.read_text())
         (state / "passphrase.seen").write_text(phrase.read_text())
-        signed.append(tags[args[-1].removeprefix("docker://")])
+        assert args[-2] == args[-1] and "@sha256:" in args[-1], f"signed by tag: {args[-2:]}"
+        repository, digest = args[-1].removeprefix("docker://").split("@")
+        if not any(ref.startswith(f"{repository}:") and d == digest for ref, d in tags.items()):
+            sys.exit("manifest unknown")
+        signed.append(digest)
         (state / "signed.json").write_text(json.dumps(signed))
     elif "--policy" in args:
         policy = json.loads(pathlib.Path(args[args.index("--policy") + 1]).read_text())
@@ -91,7 +96,7 @@ class SignImages(unittest.TestCase):
         return subprocess.run(["bash", str(DIGESTS), "--registry", REG, "--tag", "412", "--out", str(self.file)], capture_output=True, text=True, env=self.env)
 
     def sign(self, **env):
-        return subprocess.run(["bash", str(SIGN), str(self.file)], capture_output=True, text=True, env={**self.env, **env})
+        return subprocess.run(["bash", str(SIGN), "--registry", REG, str(self.file)], capture_output=True, text=True, env={**self.env, **env})
 
     def calls(self):
         return [json.loads(line) for line in (self.state / "calls.log").read_text().splitlines()]
@@ -133,20 +138,51 @@ class SignImages(unittest.TestCase):
         self.assertIn("COSIGN_PRIVATE_KEY is not available", r.stderr)
         self.assertEqual(len(self.calls()), before)
 
-    def test_a_tag_that_moved_since_the_build_is_not_signed(self):
+    def test_the_recorded_digest_is_signed_even_after_its_tag_moved(self):
+        """Every reference of the job is repo@digest: a tag that moves between the build and
+        the signature changes nothing that is signed, and no tag is ever read."""
         self.digests()
+        before = len(self.calls())
+        recorded = list(self.tags.values())
+        self.tags[f"{REG}/athanor-system:old"] = self.tags[f"{REG}/athanor-system:412"]
         self.tags[f"{REG}/athanor-system:412"] = "sha256:" + "9" * 64
         (self.state / "tags.json").write_text(json.dumps(self.tags))
         r = self.sign()
-        self.assertEqual(r.returncode, 1)
-        self.assertIn("the build job recorded", r.stderr)
-        self.assertEqual(json.loads((self.state / "signed.json").read_text()), [])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads((self.state / "signed.json").read_text()), recorded)
+        for call in self.calls()[before:]:
+            self.assertNotIn("inspect", call["args"])
+            self.assertFalse(any(":412" in a for a in call["args"]), call["args"])
 
     def test_a_signature_a_machine_would_not_accept_fails_the_job(self):
         self.digests()
         r = self.sign(STUB_REFUSE="1")
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("A signature was required", r.stderr)
+
+    def test_a_repository_outside_the_shipped_set_is_refused_before_signing(self):
+        for line in (f"{REG}/other 412 sha256:{'1' * 64}", f"ghcr.io/elsewhere/athanor-system 412 sha256:{'1' * 64}"):
+            with self.subTest(line=line):
+                self.digests()
+                lines = self.file.read_text().splitlines()
+                self.file.write_text("\n".join([line] + lines[1:]) + "\n")
+                (self.state / "calls.log").unlink()
+                r = self.sign()
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertIn("not a shipped repository", r.stderr)
+                self.assertFalse((self.state / "calls.log").exists())
+
+    def test_a_missing_or_repeated_repository_is_refused_before_signing(self):
+        self.digests()
+        lines = self.file.read_text().splitlines()
+        for content, message in (([lines[0], lines[1]], "2 of the 3"), ([lines[0], lines[0], lines[1]], "twice")):
+            with self.subTest(message=message):
+                self.file.write_text("\n".join(content) + "\n")
+                (self.state / "calls.log").unlink(missing_ok=True)
+                r = self.sign()
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertIn(message, r.stderr)
+                self.assertFalse((self.state / "calls.log").exists())
 
 
 if __name__ == "__main__":
