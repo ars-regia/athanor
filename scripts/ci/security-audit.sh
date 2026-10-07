@@ -9,11 +9,7 @@ out="${AUDIT_OUT:-$root/audit-out}"
 mkdir -p "$out"
 cd "$root"
 
-# eBPF crates build for bpfel-unknown-none and the greeter needs GTK headers the
-# audit container does not carry; none of them is clippy-checked on the host.
-cargo clippy --workspace \
-    --exclude ebpf-core --exclude athanor-sysmon-ebpf --exclude athanor-greeter \
-    --all-targets --all-features 2>&1 | tee "$out/clippy.log"
+cargo clippy --workspace --all-targets --all-features 2>&1 | tee "$out/clippy.log"
 
 # The frozen shell workspace (doc_shell.md, SH4) is outside the root workspace but
 # still ships: the portal execs it. Its crate root allows all clippy lints, so the
