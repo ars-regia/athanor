@@ -658,6 +658,13 @@ status = "missing"
 purpose = "The Ermete to Athanor rename tool; its specification doc_naming.md was deleted in cc66b328"
 
 [[component]]
+path = "scripts/ci"
+kind = "script tool"
+area = "build-ci"
+status = "missing"
+purpose = "CI gate scripts the workflows call: Rust security audit (clippy, cargo-deny)"
+
+[[component]]
 path = "scripts/runner"
 kind = "script tool"
 area = "build-ci"
