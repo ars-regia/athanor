@@ -9,7 +9,10 @@ out="${AUDIT_OUT:-$root/audit-out}"
 mkdir -p "$out"
 cd "$root"
 
-cargo clippy --workspace --all-targets --all-features 2>&1 | tee "$out/clippy.log"
+# cargo unifies features across the packages of one invocation: glycin drives zbus with
+# async-io, the rest of the workspace with tokio, so the preview decoder is linted alone.
+cargo clippy --workspace --exclude athanor-preview-render --all-targets --all-features 2>&1 | tee "$out/clippy.log"
+cargo clippy -p athanor-preview-render --all-targets --all-features 2>&1 | tee -a "$out/clippy.log"
 
 # --config is explicit: cargo-deny would otherwise look for a deny.toml next to the
 # manifest and fall back to its defaults.
