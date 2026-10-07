@@ -16,11 +16,12 @@ permissions:
 jobs:
   security-audit:
     name: Clippy and dependency policy
+    # The builder runs under podman, not as the job container: the JavaScript actions
+    # (checkout, cache, upload) need the runner's libstdc++, which the Nix image lacks.
     runs-on: ubuntu-24.04
-    container:
-      image: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
     timeout-minutes: 30
     env:
+      BUILDER_IMAGE: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
       CARGO_NET_RETRY: 10
     steps:
       - name: Check out the repository
@@ -31,10 +32,13 @@ jobs:
         with:
           shared-key: rust-security-audit
 
-      - name: Run the audit
-        env:
-          AUDIT_OUT: ${{ github.workspace }}/audit-out
-        run: scripts/ci/security-audit.sh
+      - name: Run the audit in the builder image
+        run: |
+          mkdir -p "$HOME/.cargo"
+          bash forge/scripts/retry.sh podman pull "${BUILDER_IMAGE,,}"
+          podman run --rm --security-opt label=disable -v "$GITHUB_WORKSPACE:/workspace" -w /workspace \
+            -v "$HOME/.cargo:/cargo" -e CARGO_HOME=/cargo -e CARGO_NET_RETRY "${BUILDER_IMAGE,,}" \
+            bash scripts/ci/security-audit.sh
 
       - name: Upload the audit logs
         if: always()
