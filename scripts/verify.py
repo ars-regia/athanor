@@ -192,9 +192,9 @@ SIGN_JOB_DOWNLOADS = {"out", "artifacts"}
 SIGN_JOB_COMMANDS = {
     "bash forge/specs/azoth/signer/run.sh inputs",
     "bash forge/specs/azoth/signer/run.sh sign",
-    'echo "${GITHUB_TOKEN}" | skopeo login "$(cut -d/ -f1 artifacts/image-digests.txt | head -n 1)"'
-    ' -u "${GITHUB_ACTOR}" --password-stdin',
-    'bash system/sign-images.sh artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"',
+    'echo "${GITHUB_TOKEN}" | skopeo login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin',
+    'bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" artifacts/image-digests.txt'
+    ' | tee -a "${GITHUB_STEP_SUMMARY}"',
 }
 # The names a signing job, its steps and its workflow may set in env besides the secrets of the
 # job's environment: plain values, none read by bash, the dynamic loader or a PATH lookup.
@@ -204,7 +204,8 @@ GITHUB_HOSTED = re.compile(r"^ubuntu-(?:latest|\d{2}\.\d{2})$")
 # The only commands a step holding a signing secret may run, whole: the sign scripts (D43).
 SIGN_SCRIPTS = re.compile(
     r"^bash (?:forge/specs/azoth/signer/run\.sh sign"
-    r'|system/sign-images\.sh [\w./-]+ \| tee -a "\$\{GITHUB_STEP_SUMMARY\}")$')
+    r'|system/sign-images\.sh --registry "ghcr\.io/\$\{GITHUB_REPOSITORY_OWNER,,\}" artifacts/image-digests\.txt'
+    r' \| tee -a "\$\{GITHUB_STEP_SUMMARY\}")$')
 EXPRESSION = re.compile(r"\$\{\{(.*?)\}\}", re.S)
 # Contexts are case-insensitive: secrets.cosign_private_key reads COSIGN_PRIVATE_KEY.
 SECRET_NAME = re.compile(r"\bsecrets\s*\.\s*([A-Za-z_][A-Za-z0-9_-]*)", re.I)

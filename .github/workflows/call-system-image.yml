@@ -348,9 +348,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
-        run: echo "${GITHUB_TOKEN}" | skopeo login "$(cut -d/ -f1 artifacts/image-digests.txt | head -n 1)" -u "${GITHUB_ACTOR}" --password-stdin
+        run: echo "${GITHUB_TOKEN}" | skopeo login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
       - name: 🔏 Sign, then verify as a machine will (system/sign-images.sh)
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
-        run: bash system/sign-images.sh artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
+        run: bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"

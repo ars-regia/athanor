@@ -96,7 +96,7 @@ class SignImages(unittest.TestCase):
         return subprocess.run(["bash", str(DIGESTS), "--registry", REG, "--tag", "412", "--out", str(self.file)], capture_output=True, text=True, env=self.env)
 
     def sign(self, **env):
-        return subprocess.run(["bash", str(SIGN), str(self.file)], capture_output=True, text=True, env={**self.env, **env})
+        return subprocess.run(["bash", str(SIGN), "--registry", REG, str(self.file)], capture_output=True, text=True, env={**self.env, **env})
 
     def calls(self):
         return [json.loads(line) for line in (self.state / "calls.log").read_text().splitlines()]
@@ -159,6 +159,30 @@ class SignImages(unittest.TestCase):
         r = self.sign(STUB_REFUSE="1")
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("A signature was required", r.stderr)
+
+    def test_a_repository_outside_the_shipped_set_is_refused_before_signing(self):
+        for line in (f"{REG}/other 412 sha256:{'1' * 64}", f"ghcr.io/elsewhere/athanor-system 412 sha256:{'1' * 64}"):
+            with self.subTest(line=line):
+                self.digests()
+                lines = self.file.read_text().splitlines()
+                self.file.write_text("\n".join([line] + lines[1:]) + "\n")
+                (self.state / "calls.log").unlink()
+                r = self.sign()
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertIn("not a shipped repository", r.stderr)
+                self.assertFalse((self.state / "calls.log").exists())
+
+    def test_a_missing_or_repeated_repository_is_refused_before_signing(self):
+        self.digests()
+        lines = self.file.read_text().splitlines()
+        for content, message in (([lines[0], lines[1]], "2 of the 3"), ([lines[0], lines[0], lines[1]], "twice")):
+            with self.subTest(message=message):
+                self.file.write_text("\n".join(content) + "\n")
+                (self.state / "calls.log").unlink(missing_ok=True)
+                r = self.sign()
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertIn(message, r.stderr)
+                self.assertFalse((self.state / "calls.log").exists())
 
 
 if __name__ == "__main__":
