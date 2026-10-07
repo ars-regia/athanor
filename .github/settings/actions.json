@@ -3,7 +3,7 @@
   "permissions": {
     "allowed_actions": "all",
     "enabled": true,
-    "sha_pinning_required": true
+    "sha_pinning_required": false
   },
   "personal_tokens": {
     "names": [

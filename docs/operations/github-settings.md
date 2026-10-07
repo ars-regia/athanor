@@ -177,7 +177,7 @@ turns a failed scheduled job into a `ci-alert` issue is not part of this change.
 | File | Desired | Live until the maintainer applies it |
 | --- | --- | --- |
 | `rulesets.json` | ruleset `product-branches` on `refs/heads/iso-v0` and `refs/heads/main`: no deletion, no force push, linear history, a pull request with one approval and a code-owner review (squash only, stale approvals dismissed), required check `gate` of GitHub Actions (integration 15368, not strict), merge queue (squash, all green, at most two entries built and merged together, 360 minutes for checks); bypass by the repository admin role in pull-request mode, so the maintainer merges their own pull requests without a second reviewer but never pushes past the ruleset (PL1, PL2, PL4, PQ5) | no ruleset |
-| `actions.json` | `sha_pinning_required: true` (PL8); secret `SETTINGS_APP_PRIVATE_KEY` and variable `SETTINGS_APP_CLIENT_ID`; `personal_tokens` declared, not yet retired | pinning not required; neither name set |
+| `actions.json` | secret `SETTINGS_APP_PRIVATE_KEY` and variable `SETTINGS_APP_CLIENT_ID`; `personal_tokens` declared, not yet retired; `sha_pinning_required` stays `false` until PB3 (below) | neither name set |
 
 `gate` is the job of `pr.yml` that PB1 introduces; until PB1 is merged no check of that name
 reports, so applying the ruleset before PB1 blocks every merge. `branch-protection.json`
@@ -188,7 +188,11 @@ The merge queue needs `merge_group` among the triggers of every required workflo
 `pr.yml`). SHA pinning enforcement makes GitHub refuse every workflow that uses an action
 by tag, so it is enabled only after every `uses:` is pinned by commit SHA (PB3,
 `verify.py pinning`); on 2026-10-07 two references are still tags
-(`actions/upload-artifact@v4`, `cachix/install-nix-action@v25`).
+(`actions/upload-artifact@v4`, `cachix/install-nix-action@v25`). The files declare only what
+is meant to be applied now, and `apply` writes a whole area at a time: declaring
+`sha_pinning_required: true` today would turn it on with the next `apply` of `actions.json`
+and stop those workflows. It stays `false` until PB3 pins the two actions and flips it to
+`true` (PL8).
 
 The order of the maintainer's steps, each followed by `ghsettings.py diff`:
 
@@ -196,7 +200,14 @@ The order of the maintainer's steps, each followed by `ghsettings.py diff`:
    the bootstrap (`docs/operations/secrets.md` section 4) still open.
 2. Create the settings GitHub App, owned by the organisation, installed on this repository
    only, with the read permissions above; store its client id as `SETTINGS_APP_CLIENT_ID`
-   and its private key as `SETTINGS_APP_PRIVATE_KEY` (secrets.md SEC13).
+   and its private key as `SETTINGS_APP_PRIVATE_KEY` (secrets.md SEC13). Once, right after:
+   dispatch `maintenance.yml` (`gh workflow run maintenance.yml --ref iso-v0`) and read its
+   log. Confirm that `security_and_analysis` is readable with the App token, so secret
+   scanning and push protection are not reported as drift for want of a permission, and that
+   the ruleset parameters re-export cleanly (`export` into a scratch directory, then
+   `git diff --no-index` against `rulesets.json` shows no change), so a default GitHub adds is
+   not reported as drift. A difference in either is fixed in the files or in the App
+   permissions before the daily run is trusted.
 3. Merge PB1, so that `gate` reports on pull requests and merge groups.
 4. Apply the ruleset (`ghsettings.py apply`, then `--yes`), which also enables the merge
    queue, and re-export to record what GitHub stored.
@@ -205,6 +216,7 @@ The order of the maintainer's steps, each followed by `ghsettings.py diff`:
 6. At the end of the image key rotation (`athanor-image-1.pub` leaves `system/keys`,
    `docs/operations/secrets.md` section 4.1, step 4): delete `signing` together with
    `MOK_PRIVATE_KEY`, and remove its entry from `environments.json`.
-7. Last, once every action is pinned by SHA: enable SHA pinning enforcement.
+7. Last: PB3 pins the two actions still referenced by tag and flips `sha_pinning_required`
+   to `true` in `actions.json`; the maintainer then applies it.
 
 `prevent_self_review` is not among these steps: it waits for a second reviewer (section 7).
