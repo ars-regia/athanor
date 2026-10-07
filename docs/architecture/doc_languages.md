@@ -121,7 +121,7 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
   - `athanor-session` exports `XDG_CURRENT_DESKTOP` and `XDG_DATA_DIRS`, then execs cosmic-comp. It sets no locale, XKB or input-method variable.
   - `athanor-desktop` imports only `WAYLAND_DISPLAY`, `DISPLAY`, `XDG_CURRENT_DESKTOP`, `XDG_SESSION_TYPE` and `XDG_SESSION_CLASS` into the user manager (`athanor-desktop:34`). So the bar and every other user unit run with the user manager's locale, which comes from `/etc/locale.conf`, not the user's own.
   - The greeter's `StartSession` passes only `XDG_SESSION_TYPE` and `XDG_CURRENT_DESKTOP` (`athanor-greeter-ui`, `auth.rs:268-274`).
-  - `system/athanor-oobe` is an unpackaged first-run prototype. It maps language names to locales and writes `/etc/locale.conf` and `/etc/vconsole.conf` directly when `localectl` fails (`main.rs:40-95`). It is not a model for this document.
+  - `system/athanor-oobe` is an unpackaged first-run prototype. It maps language names to locales and writes `/etc/locale.conf` and `/etc/vconsole.conf` directly when `localectl` fails (`main.rs:40-95`). It is not a model for this document. ADR-0073 deleted it from the tree.
 
 ## 2. Decisions
 

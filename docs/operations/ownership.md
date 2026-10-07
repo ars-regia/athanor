@@ -52,19 +52,16 @@ protected paths last, as in PR #170.
 /docs/architecture/doc_system_image.md         @hr-mes
 /docs/architecture/doc_forge_development_guide.md @hr-mes
 
-# kernel: Azoth, its profile, NVIDIA modules, eBPF
+# kernel: Azoth, its profile, NVIDIA modules
 /forge/specs/azoth/                            @hr-mes
 /forge/specs/athanor-kernel-profile/           @hr-mes
 /system/nvidia/                                @hr-mes
-/system/ebpf/                                  @hr-mes
-/system/athanor-ebpf-sched/                    @hr-mes
 /system/kernel-artifacts.sh                    @hr-mes
 /.github/workflows/kernel-*.yml                @hr-mes
 /.github/workflows/nvidia-*.yml                @hr-mes
 /docs/architecture/doc_kernel_*.md             @hr-mes
 
 # shell: compositor, greeter, bar, dock, launcher, rig, dev VM
-/system/athanor-greeter/                       @hr-mes
 /system/athanor-layout/                        @hr-mes
 /system/athanor-compositor-client/             @hr-mes
 /system/athanor-style/                         @hr-mes
@@ -93,11 +90,8 @@ protected paths last, as in PR #170.
 # apps: portal, software, backup, recovery, first run
 /system/athanor-apps/                          @hr-mes
 /system/athanor-portal/                        @hr-mes
-/system/athanor-store/                         @hr-mes
 /system/athanor-search/                        @hr-mes
-/system/athanor-oobe/                          @hr-mes
 /forge/specs/athanor-xdg-desktop-portal-athanor/ @hr-mes
-/forge/specs/athanor-store-rs/                 @hr-mes
 /forge/specs/athanor-backup/                   @hr-mes
 /forge/specs/athanor-recovery/                 @hr-mes
 /docs/architecture/doc_software.md             @hr-mes
@@ -105,7 +99,6 @@ protected paths last, as in PR #170.
 
 # signing: keys' public halves, signing, promotion, updates and the trust state
 /system/keys/                                  @hr-mes
-/system/cosign.pub                             @hr-mes
 /system/sign-images.sh                         @hr-mes
 /system/promote.sh                             @hr-mes
 /system/build-image.sh                         @hr-mes
@@ -133,6 +126,5 @@ protected paths last, as in PR #170.
 /CLAUDE.md                                     @hr-mes
 ```
 
-Crates of the Ermete era without a current specification (for example
-`system/athanor-agentic-kernel/`, `system/athanor-mesh-bus/`) fall to the default owner
-until a spec gives them an area.
+A crate or package without an entry above falls to the default owner until a specification
+gives it an area. The Ermete-era components without one were retired by ADR-0073.

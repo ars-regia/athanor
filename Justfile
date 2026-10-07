@@ -60,11 +60,6 @@ disk-qcow2 target_image=("localhost/" + env('IMAGE_NAME', 'athanor-system')) tag
 disk-iso target_image=("localhost/" + env('IMAGE_NAME', 'athanor-system')) tag=env('DEFAULT_TAG', 'latest'):
     just system/build-iso "{{ target_image }}" "{{ tag }}"
 
-# Builds Rust microservice as zero-latency bare-metal Unikernel (RustyHermit target)
-[group('Pipeline')]
-unikernel package="athanor-unikernel-daemon" mode="release":
-    ./system/scripts/build_unikernel.sh "{{ package }}" "{{ mode }}"
-
 # ------------------------------------------------------------------------------
 # 🛡️ QA, AUDIT & HERMETIC BENCHMARK (Nix Paradigm)
 # ------------------------------------------------------------------------------

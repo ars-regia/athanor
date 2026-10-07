@@ -628,24 +628,8 @@ def check_polkit():
 # 4. percorsi runtime — niente artefatti letti da target/ o stato in /tmp
 # --------------------------------------------------------------------------- #
 
-# Alberi congelati: codice morto che si mina e si cancella, non si sviluppa. La copia
-# congelata di athanor-style è ferma a GTK 0.7 in un workspace suo (doc_shell.md, SH4) e il
-# suo Cargo.toml dice "do not develop here", quindi un rilievo là dentro non ha niente da
-# dire — e sistemarlo contraddirebbe il congelamento. Il binario della vecchia shell,
-# accanto ad essa, resta invece spedito e quindi resta scansionato. L'esclusione sparisce
-# insieme all'albero.
-FROZEN_TREES = ("forge/specs/athanor-shell-rs/athanor-style-0.7/",)
-
-
-def is_frozen(relative_path):
-    """True se il file sta in un albero congelato: si mina e si cancella, non si sviluppa."""
-    return any(relative_path.startswith(tree) for tree in FROZEN_TREES)
-
-
 def path_problems(relative_path, text):
     """I rilievi di percorso di un file, già formattati con riga e motivo."""
-    if is_frozen(relative_path):
-        return []
     # un build script gira a build time: può legittimamente parlare di target/
     is_build_script = Path(relative_path).name == "build.rs"
     problems = []
@@ -1110,7 +1094,7 @@ def check_docs():
 
 # Valori misurati sul repo il 2026-09-30, senza tests/, benches/ ed examples/. Sono un cricchetto: si abbassano,
 # non si alzano. Se un controllo fallisce qui, propaga con `?`.
-BUDGET = {".unwrap()": 0, ".expect(": 2, "panic!(": 1}
+BUDGET = {".unwrap()": 0, ".expect(": 2, "panic!(": 0}
 
 
 def is_test_file(p):
@@ -1406,7 +1390,7 @@ def check_specs():
 # --------------------------------------------------------------------------- #
 
 # SH2: the compositor client is the protocol boundary; the theme tool generates COSMIC's
-# theme files. Nothing else may depend on COSMIC, the frozen tree included.
+# theme files. Nothing else may depend on COSMIC.
 COSMIC_ALLOWED = (
     "system/athanor-compositor-client/",
     "forge/tools/calmo-cosmic-theme/",
@@ -1581,14 +1565,12 @@ OWN_LICENCE = "GPL-3.0-or-later"
 # other spec, every Cargo.toml and every nfpm `license:` field is our own code and
 # must say OWN_LICENCE.
 UPSTREAM_SPECS = {
-    "forge/specs/athanor-ananicy/ananicy-cpp.spec",
     "forge/specs/athanor-bat/bat.spec",
     "forge/specs/athanor-bpf-linker/athanor-bpf-linker.spec",
     "forge/specs/athanor-cliphist/athanor-cliphist.spec",
     "forge/specs/athanor-cosign/athanor-cosign.spec",
     "forge/specs/athanor-dart-sass/athanor-dart-sass.spec",
     "forge/specs/athanor-matugen/athanor-matugen.spec",
-    "forge/specs/athanor-rosenpass/athanor-rosenpass.spec",
     "forge/specs/athanor-syft/athanor-syft.spec",
     "forge/specs/athanor-tetragon/athanor-tetragon.spec",
     "forge/specs/azoth/microvm/azoth-microvm.spec",
@@ -1832,12 +1814,7 @@ def check_decisions():
 # docs/architecture/doc_threat_model.md, TM8 (maintainer decision A2-9 (#151)). Each entry
 # names a unit that does not meet the rule and why; an entry that no longer matches a failing
 # unit fails the check, so the list cannot outlive its reasons.
-SERVICE_EXEMPT = {
-    "forge/specs/athanor-rosenpass/athanor-rosenpass.spec:rosenpass.service": (
-        "athanor-rosenpass is in no forge/config/packages.json list, so no image ships it; "
-        "the unit is fixed or deleted with the package, not hardened untested"
-    ),
-}
+SERVICE_EXEMPT = {}
 
 TRUE_VALUES = {"1", "yes", "true", "on"}
 # Settings that make a drop-in run a command of ours in the unit it extends.

@@ -16,10 +16,10 @@ The document does not change the objective of the GitHub milestone `iso-v0` (an 
 
 **What exists, and what it is worth.**
 
-- `athanor-ai-daemon` is outside the workspace and is built by nothing. Its weights loader allocates zero-filled quantized tensors and reports the model as loaded; its DRM lease returns "unimplemented"; its answer to a query is a formatted string. It carries `.expect` calls and direct dependency versions (`candle-core`, `vulkano`, `openvino`). It is not a base to build on.
+- `athanor-ai-daemon` is outside the workspace and is built by nothing. Its weights loader allocates zero-filled quantized tensors and reports the model as loaded; its DRM lease returns "unimplemented"; its answer to a query is a formatted string. It carries `.expect` calls and direct dependency versions (`candle-core`, `vulkano`, `openvino`). It is not a base to build on. ADR-0073 deleted `athanor-ai-daemon` from the tree.
 - `athanor-ui-agent`, deleted on 2026-10-05, was a Python daemon that asked Ollama and `llama3.2:1b` for widgets and wrote `widgets.json` for `athanor-shell-rs`, which is frozen (`doc_shell.md`, SH4).
 - `athanor-semantic-db` is a stub: its spec installs a script that prints one line. It is listed in `custom_packages` and `custom_tier3` of `forge/config/packages.json`, so it ships. That is a facade in the image (`doc_shell.md`, SH1).
-- `athanor-ai-daemon` is in no tier list, so it does not ship; neither did `athanor-ui-agent`.
+- `athanor-ai-daemon` is in no tier list, so it does not ship; neither did `athanor-ui-agent`. ADR-0073 deleted `athanor-ai-daemon` from the tree.
 
 **What the audit of 2026-09-30 found that this document depends on.** Each item is a prerequisite in package A0 (section 3).
 

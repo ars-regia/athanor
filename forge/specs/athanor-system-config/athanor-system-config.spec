@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:51.fc43}
+Release:        %{?autorelease}%{!?autorelease:52.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -18,9 +18,6 @@ Requires: cosmic-greeter cosmic-idle
 Requires: athanor-greeter-ui
 Requires: athanor-calmo
 Requires: xdg-desktop-portal-athanor
-# The eBPF monitor and the cloud agent are integrations the configuration is ready
-# for, not prerequisites of the configuration itself: weak dependencies.
-Recommends: athanor-sysmon-ebpf athanor-cloud-rs
 Requires: usbguard bolt
 
 %description
@@ -90,6 +87,10 @@ mkdir -p /etc/yum.repos.d
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-52
+- Drop the weak dependencies on athanor-sysmon-ebpf and athanor-cloud-rs: both packages
+  are retired (ADR-0073).
+
 * Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-51
 - Configure greenboot not to reboot (doc_recovery.md, R5): GREENBOOT_AUTO_REBOOT=false, so a
   required check that fails after an update makes the previous deployment the default for

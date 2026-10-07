@@ -9,32 +9,13 @@
 # finding not listed is red. The list may only shrink: verify.py --known-red-base refuses a
 # finding the base branch does not list and a later expiry, and a listed finding the check no
 # longer reports must be removed in the same change.
-polkit #223 2027-01-07 os.athanor.ebpfsched.update: applicata in system/athanor-ebpf-sched/src/dbus_interface.rs ma NON dichiarata in alcun .policy -> CheckAuthorization nega sempre
-paths #223 2027-01-07 system/athanor-agentic-kernel/src/ebpf_monitor.rs carica un artefatto da target/ — percorso dell'albero di build, inesistente su un sistema installato
-paths #223 2027-01-07 system/athanor-ebpf-sched/src/bpf_trace.rs carica un artefatto da target/ — percorso dell'albero di build, inesistente su un sistema installato
-paths #223 2027-01-07 system/athanor-ebpf-sched/src/sched_ext.rs carica un artefatto da target/ — percorso dell'albero di build, inesistente su un sistema installato
-paths #223 2027-01-07 system/athanor-ebpf-sched/src/sched_ext.rs carica un artefatto da target/ — percorso dell'albero di build, inesistente su un sistema installato
-paths #223 2027-01-07 system/athanor-ebpf-sched/src/sched_ext.rs carica un artefatto da target/ — percorso dell'albero di build, inesistente su un sistema installato
-paths #223 2027-01-07 system/athanor-init-oracle/src/systemd_manager.rs percorso hard-coded in /tmp — usa /run/athanor (0700) per stato privilegiato
-paths #223 2027-01-07 system/athanor-oobe/src/main.rs percorso hard-coded in /tmp — usa /run/athanor (0700) per stato privilegiato
 paths #223 2027-01-07 system/athanor-style/src/appearance_engine.rs percorso hard-coded in /tmp — usa /run/athanor (0700) per stato privilegiato
 paths #223 2027-01-07 system/confidential_computing/athanor-attestation/src/cvm_manager.rs percorso hard-coded in /tmp — usa /run/athanor (0700) per stato privilegiato
 paths #223 2027-01-07 system/confidential_computing/athanor-attestation/src/cvm_manager.rs percorso hard-coded in /tmp — usa /run/athanor (0700) per stato privilegiato
-paths #223 2027-01-07 system/ebpf/ebpf-loader/src/main.rs carica un artefatto da target/ — percorso dell'albero di build, inesistente su un sistema installato
-paths #223 2027-01-07 system/ebpf/ebpf-loader/src/main.rs carica un artefatto da target/ — percorso dell'albero di build, inesistente su un sistema installato
-paths #223 2027-01-07 forge/specs/athanor-shell-rs/athanor-dock-0.7/src/dock.rs percorso hard-coded in /tmp — usa /run/athanor (0700) per stato privilegiato
-paths #223 2027-01-07 forge/specs/athanor-sysmon-ebpf/athanor-sysmon-ebpf-1.0.0/src/main.rs carica un artefatto da target/ — percorso dell'albero di build, inesistente su un sistema installato
-shipped #223 2027-01-07 ebpf-core: nessuno .spec, non in packages.json -> compila ma non arriva sul sistema. Impacchettalo, spostalo in experimental/, o elencalo in experimental/EXEMPT
-shipped #223 2027-01-07 ebpf-loader: nessuno .spec, non in packages.json -> compila ma non arriva sul sistema. Impacchettalo, spostalo in experimental/, o elencalo in experimental/EXEMPT
-shipped #223 2027-01-07 athanor-agentic-kernel: nessuno .spec, non in packages.json -> compila ma non arriva sul sistema. Impacchettalo, spostalo in experimental/, o elencalo in experimental/EXEMPT
-shipped #223 2027-01-07 athanor-ebpf-sched: nessuno .spec, non in packages.json -> compila ma non arriva sul sistema. Impacchettalo, spostalo in experimental/, o elencalo in experimental/EXEMPT
-shipped #223 2027-01-07 athanor-store: nessuno .spec, non in packages.json -> compila ma non arriva sul sistema. Impacchettalo, spostalo in experimental/, o elencalo in experimental/EXEMPT
 panics #223 2027-01-07 system/athanor-compositor-client/src/shortcuts.rs: .expect( over the budget of 2, propagate with `?`
 panics #223 2027-01-07 system/athanor-compositor-client/src/shortcuts.rs: .expect( over the budget of 2, propagate with `?`
 panics #223 2027-01-07 system/athanor-compositor-client/src/shortcuts.rs: .expect( over the budget of 2, propagate with `?`
 panics #223 2027-01-07 system/athanor-compositor-client/src/shortcuts.rs: .expect( over the budget of 2, propagate with `?`
-panics #223 2027-01-07 forge/specs/athanor-ai-daemon/athanor-ai-daemon-1.0.0/src/model_loader.rs: .expect( over the budget of 2, propagate with `?`
-panics #223 2027-01-07 forge/specs/athanor-ai-daemon/athanor-ai-daemon-1.0.0/src/model_loader.rs: .expect( over the budget of 2, propagate with `?`
 forge-rules #223 2027-01-07 forge/specs/athanor-system-config/athanor-system-config.spec: rule 2, %post writes under /usr or /etc: install the file in %install or create it with tmpfiles.d
 forge-rules #223 2027-01-07 forge/specs/athanor-system-config/athanor-system-config.spec: rule 2, %post writes under /usr or /etc: install the file in %install or create it with tmpfiles.d
 forge-rules #223 2027-01-07 forge/specs/athanor-system-config/athanor-system-config.spec: rule 2, %post writes under /usr or /etc: install the file in %install or create it with tmpfiles.d

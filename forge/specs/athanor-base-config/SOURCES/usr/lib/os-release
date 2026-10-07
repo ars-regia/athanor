@@ -17,4 +17,3 @@ BUG_REPORT_URL="https://github.com/ars-regia/athanor/issues"
 PLATFORM_ID="platform:f43"
 VARIANT="bootc"
 VARIANT_ID=athanor
-SUPPORT_END=2031-12-31

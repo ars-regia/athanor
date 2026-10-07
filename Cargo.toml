@@ -1,61 +1,37 @@
 [workspace]
 members = [
   "forge/specs/athanor-backup/athanor-backup-1.0.0",
-  "forge/specs/athanor-cloud-rs/athanor-cloud-rs-1.0.0",
   "forge/specs/athanor-doctor/athanor-doctor-1.0.0",
   "forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0",
   "forge/specs/athanor-layout-chooser/athanor-layout-chooser-1.0.0",
-  "forge/specs/athanor-lvfs-rs/athanor-lvfs-rs-1.0.0",
-  "forge/specs/athanor-mdm-rs/athanor-mdm-rs-1.0.0",
-  "forge/specs/athanor-mesh-sync/athanor-mesh-sync-1.0.0",
   "forge/specs/athanor-shelld/athanor-shelld-1.0.0",
   "forge/specs/athanor-bar/athanor-bar-1.0.0",
   "forge/specs/athanor-dock/athanor-dock-1.0.0",
   "forge/specs/athanor-launcher/athanor-launcher-1.0.0",
-  "forge/specs/athanor-sysmon-ebpf/athanor-sysmon-ebpf-1.0.0",
   "forge/specs/athanor-update/athanor-update-1.0.0",
   "forge/specs/athanor-update/athanor-update-notify-1.0.0",
   "forge/specs/athanor-xdg-desktop-portal-athanor/xdg-desktop-portal-athanor-1.0.0",
-  "forge/specs/athanor-niri-ipc",
-  "system/ebpf/ebpf-core",
-  "system/ebpf/ebpf-loader",
-  "system/athanor-agentic-kernel",
   "system/athanor-bus-api",
-  "system/athanor-cluster-mesh",
   "system/athanor-compositor-client",
   "system/athanor-apps",
-  "system/athanor-ebpf-sched",
-  "system/athanor-greeter",
-  "system/athanor-hypervisor-daemon",
   "system/athanor-i18n",
-  "system/athanor-init-oracle",
   "system/athanor-layout",
   "system/athanor-preview",
   "system/athanor-portal",
   "system/athanor-preview-render",
   "system/athanor-search",
   "system/athanor-unit",
-  "system/athanor-mesh-bus",
-  "system/athanor-net-unikernel",
-  "system/athanor-store",
-  "system/athanor-telemetry",
   "system/athanor-trust-state",
 ]
 
-# Out of this workspace since 2026-09-19 (doc_shell.md, SH4): gtk4-sys declares
-# links = "gtk-4", so every GTK crate of one workspace moves together. The old shell and
-# its dock are frozen at GTK 0.7 in forge/specs/athanor-shell-rs/, a workspace of their
-# own; the other four ship nothing and are built by nothing until they are redesigned.
-# The recovery kiosk joined them on 2026-09-30: what athanor-recovery ships is now a text
-# console (doc_recovery.md), and the kiosk's source stays where it was, to be mined when a
-# graphical recovery is built on the polkit agent of stage 4.
+# The recovery kiosk is out of this workspace since 2026-09-30: what athanor-recovery
+# ships is a text console (doc_recovery.md), and the kiosk's source stays where it was, to be
+# mined when a graphical recovery is built on the polkit agent of stage 4. tests/fuzz and the
+# calmo theme tool are separate workspaces.
 exclude = [
   "tests/fuzz",
   "forge/tools/calmo-cosmic-theme",
-  "forge/specs/athanor-shell-rs",
   "forge/specs/athanor-recovery/athanor-recovery-1.0.0",
-  "forge/specs/athanor-store-rs/athanor-store-rs-1.0.0",
-  "system/athanor-oobe",
   # Out since 2026-10-07 (A2-9, #151): attestation is outside the 1.0 threat model
   # (doc_threat_model.md TM7) and is rewritten on Keylime with the PCR 11 and PCR 12
   # policy of doc_kernel_profile.md before mesh admission depends on it.
@@ -67,19 +43,13 @@ resolver = "2"
 [workspace.dependencies]
 # Async Runtime & Core Utilities
 tokio = { version = "1.53.1", features = ["full"] }
-tokio-util = { version = "0.7.13", features = ["codec"] }
 async-trait = "0.1.91"
 futures-util = "0.3.30"
-bytes = "1.10.1"
 libc = "0.2.189"
 
 # D-Bus & Inter-Process Communication
 zbus = { version = "5.18.0", features = ["tokio"] }
 zvariant = "5.15.0"
-notify-rust = "4.11"
-
-# HTTP & Network Clients
-reqwest = { version = "0.13.4", features = ["stream", "rustls", "json"] }
 
 # GUI, Display & Wayland Ecosystem
 gtk4 = { version = "0.11.4", features = ["v4_18"] }
@@ -115,26 +85,16 @@ anyhow = "1.0.99"
 # Logging & Telemetry
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
-log = "0.4.29"
-env_logger = "0.11.11"
 
-# Post-Quantum & Security Cryptography
-pqc_kyber = "0.7.1"
-
-pqc_dilithium = "0.2.0"
+# Hashing & Utilities
 sha2 = "0.10.9"
-ml-kem = "0.3.2"
 hex = "0.4.3"
 zeroize = "1.8.1"
 subtle = "2.6.1"
 
-# eBPF / Kernel Instrumentation
-aya = "0.14.0"
-
 # System Utilities & CLI
 nix = "0.29.0"
 clap = { version = "4.6.4", features = ["derive"] }
-mimalloc = { version = "0.1.43", default-features = false }
 greetd_ipc = "0.10.3"
 landlock = "0.4"
 rand = "0.8.5"

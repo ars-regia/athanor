@@ -25,12 +25,12 @@ Checked in the repository at `27378de3`, and, where the repository cannot answer
 
 **The legacy store crates.**
 
-- `forge/specs/athanor-store-rs` is out of the workspace (`Cargo.toml:55`, `exclude`) and out of the image (absent from `forge/config/packages.json:2-48`). `experimental/EXEMPT:18-22` records why: it ran `flatpak install` for any D-Bus caller without the polkit check its policy declares, and verified signatures against a caller-supplied key. Read on 2026-09-30:
+- `forge/specs/athanor-store-rs` is out of the workspace (`Cargo.toml:55`, `exclude`) and out of the image (absent from `forge/config/packages.json:2-48`). `experimental/EXEMPT:18-22` records why: it ran `flatpak install` for any D-Bus caller without the polkit check its policy declares, and verified signatures against a caller-supplied key. Read on 2026-09-30: ADR-0073 deleted this crate from the tree.
   - The unit is a system unit with `Type=dbus`, `BusName=os.athanor.Store` and `DynamicUser=yes` (`athanor-store-rs.spec:50-60`), the bus policy lets only root own the name (`os.athanor.Store.conf:5-7`), and the code connects to the **session** bus (`src/backend/dbus.rs:105`). It could never have started.
   - `os.athanor.store.install` is declared (`os.athanor.store.policy:9`) and checked nowhere.
   - `verify_pqc_package` verifies a Dilithium signature against a public key the caller passes in (`src/backend/dbus.rs:31-51`), which proves nothing: a facade in a security path.
   - The catalog is `flatpak list` of installed applications with a constant rating of 5.0 (`src/backend/repository.rs:54-88`); `install_app` in `src/backend/flatpak.rs:15` is called by nothing.
-- `system/athanor-store` is a second crate, a workspace member (`Cargo.toml:39`) that no spec builds. Its `install` command pins the "verified" digest to the literal `@sha256:PINNED_IMMUTABLE_HASH_PLACEHOLDER` (`system/athanor-store/src/main.rs:193`), and it can delete the Flathub remote (`main.rs:86-95`). Its storage engine is referenced by name from the exempt mesh crates.
+- `system/athanor-store` is a second crate, a workspace member (`Cargo.toml:39`) that no spec builds. Its `install` command pins the "verified" digest to the literal `@sha256:PINNED_IMMUTABLE_HASH_PLACEHOLDER` (`system/athanor-store/src/main.rs:193`), and it can delete the Flathub remote (`main.rs:86-95`). Its storage engine is referenced by name from the exempt mesh crates. ADR-0073 deleted this crate from the tree.
 
 **Nix.**
 
@@ -288,7 +288,7 @@ Each runs before the plan it gates and produces an answer, not code we keep.
    - **Decided:** (a). "What runs on my machine and where it came from" is one question and belongs in one place; Settings is three stages away and should not hold Flatpak back. Only the developer-mode switch moves into Settings.
 5. **The fate of `athanor-store-rs`, `system/athanor-store` and `cosmic-store`.**
    - `athanor-store-rs`: extend, rename, or delete. **Decided: delete it** in SWa, per SH4's rule for legacy crates (`doc_shell.md:76`). Nothing is worth mining: its function is two `flatpak` invocations, and its signature check is a facade (section 1.2).
-   - `system/athanor-store`: **Decided:** remove its `install` and `disconnect-flathub` commands, which hold a placeholder digest in a security path. Its storage engine belongs to the mesh and is decided with the mesh, not here.
+   - `system/athanor-store`: **Withdrawn by ADR-0073.** The crate, storage engine included, is deleted from the tree; doc_fleet (A2-12) will specify its own storage. The earlier decision, to remove the `install` and `disconnect-flathub` commands and leave the storage engine to the mesh, no longer applies.
    - `cosmic-store`: keep it for good as COSMIC content (SH3), or remove it at SWa's switch. **Decided: remove it at the switch.** Two stores would give two answers to "where does it come from" and two update paths for the same installation.
 6. **Flatpak remotes and automatic application updates.**
    - Remotes: (a) Fedora's only, as today; (b) Flathub added as a system remote by a file the image ships, beside Fedora's; (c) as (b), limited to Flathub's verified subset. The `flatpaks` list of `packages.json` either gets an installer run on first boot or is deleted.
@@ -327,7 +327,7 @@ Each runs before the plan it gates and produces an answer, not code we keep.
      - A Settings backend that serves Athanor's appearance, for every default. On the maintainer's desktop on 2026-10-05, with no backend for `Athanor` and no `portals.conf`, `xdg-desktop-portal` 1.20.4 falls back to the gtk backend, which answers `color-scheme` 0 (no preference) and `contrast` 0 and does not know `accent-color`. libadwaita and GTK4 read these keys from the portal in sandboxed and unsandboxed applications alike, so today every default draws light, with libadwaita's own accent, whatever the shell shows.
      - `doc_portal.md` decides both backends and `doc_visual_language.md` the values the Settings backend serves. The RPM defaults ship without waiting; acceptance item 16 passes only when all three hold.
    - **Wired by the image:** the favourites of a new user (`forge/specs/athanor-bar/athanor-bar-1.0.0/data/favorites.toml`) become the file manager (Nautilus until it ships), Ptyxis, GNOME Text Editor and Settings; `/usr/share/applications/athanor-mimeapps.list`, which the XDG lookup reads before Fedora's lists because the session's first desktop name is `Athanor`, opens each type with the application of the table; `/usr/share/xdg-terminal-exec/athanor-xdg-terminals.list` names Ptyxis; the compositor's Terminal action runs `xdg-terminal-exec` instead of COSMIC's `cosmic-term`, set in the image's COSMIC defaults under `/usr/share/athanor/cosmic-defaults`, where the theme already lives. The icon theme is decided in `doc_visual_language.md`.
-   - **Removed from the image:** `cosmic-files`, `cosmic-term`, `cosmic-edit`, `Thunar`, `thunar-archive-plugin` and `thunar-volman` from `upstream_desktop`; `mpv` and `imv` from `upstream_media`; `cosmic-store` at SWa's switch. `foot` leaves with `athanor-shell-rs`, not before: `athanor-shell-rs.spec:11` requires it and the legacy shell's search runs it. `athanor-shell-rs` is shipped and started by nothing since the greeter moved to `athanor-greeter-ui`; the portal still requires it (`xdg-desktop-portal-athanor.spec:13`), although its chooser no longer runs it, so it leaves with `doc_portal.md`.
+   - **Removed from the image:** `cosmic-files`, `cosmic-term`, `cosmic-edit`, `Thunar`, `thunar-archive-plugin` and `thunar-volman` from `upstream_desktop`; `mpv` and `imv` from `upstream_media`; `cosmic-store` at SWa's switch. `foot` leaves with `athanor-shell-rs`, not before: `athanor-shell-rs.spec:11` requires it and the legacy shell's search runs it. `athanor-shell-rs` is shipped and started by nothing since the greeter moved to `athanor-greeter-ui`; the portal required it until its release 7 dropped the chooser (PT14), and ADR-0073 deleted it from the tree.
 
 ## 7. Changes to other documents
 
@@ -335,7 +335,7 @@ Each change lands with the package named beside it, not with this document.
 
 - `doc_shell.md`, SH3 (`doc_shell.md:73`): `cosmic-store` leaves the image at the switch of package SWa (decision 5). With SWa.
 - `doc_shell.md`, section 3, "Later stages": a pointer to this document as an application track after stage 2. With the first plan (package S).
-- `experimental/EXEMPT:18-22`: the comment on `athanor-store-rs` is removed with the crate. With SWa.
+- `experimental/EXEMPT:18-22`: the comment on `athanor-store-rs` is removed with the crate. With SWa. Moot: ADR-0073 deleted the crate and emptied `experimental/EXEMPT`.
 - `CLAUDE.md`, "Limiti inviolabili": the compartment-or-MicroVM rule is replaced by the service rule of `doc_threat_model.md`, TM8, in text the maintainer reviews; decision 3 (a) needs no exception (amended 2026-10-06, maintainer decision A2-9 (#151)). Before SWc.
 - `forge/config/packages.json`: the `flatpaks` list and `system/scripts/provision_flatpak.sh` are deleted (decision 6). With SWa.
 - `forge/specs/athanor-desktop-ui/athanor-desktop-ui.spec`: requires the RPM defaults of decision 7 and no longer `foot`; ships `athanor-mimeapps.list`, `athanor-xdg-terminals.list` and the preinstall file for Papers. With SWe.
@@ -348,7 +348,7 @@ Each change lands with the package named beside it, not with this document.
 - `doc_disks.md`, to be written: Athanor's disk utility over `udisks2` and its acceptance cases for destructive operations (decision 7). Its package removes `gnome-disk-utility` from `athanor-desktop-ui`.
 - `doc_portal.md`, to be written: the FileChooser and Settings backends of decision 7, and the removal of `athanor-shell-rs`, of the portal's `Requires` on it and of `foot`.
 - `system/athanor-install.ks`: `sshd` no longer enabled and the SSH port no longer opened on new installs (decision 2). With SWb.
-- `system/athanor-store`: the `install` and `disconnect-flathub` commands are removed (decision 5). With SWa.
+- `system/athanor-store`: the `install` and `disconnect-flathub` commands are removed (decision 5). With SWa. Withdrawn: ADR-0073 deleted the crate (decision 5).
 - The system image: `debug-shell.service` is masked (decision 1). Independent of Software, in its own change, as soon as possible.
 
 ## 8. Acceptance
