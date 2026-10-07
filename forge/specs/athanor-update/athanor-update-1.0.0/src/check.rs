@@ -38,7 +38,8 @@ fn deployment(deployed: &Deployed) -> Deployment {
 
 /// Why the booted image is, or is not, verified. Never a stored answer: the stored
 /// signature object is verified again, against the keys the shipped policy names today.
-fn reason<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, booted: &Deployed) -> Reason {
+fn reason<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &Status) -> Reason {
+    let booted = &status.booted;
     if booted.local_changes {
         // What runs is the image plus local packages: no signature covers that tree.
         return Reason::LocalChanges;
@@ -49,6 +50,13 @@ fn reason<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, booted: &Deployed) -
     let repository = sigobj::repository_of(&booted.image);
     let Some(key_paths) = policy.scopes.get(repository) else { return Reason::ReferenceOutOfScope };
     if !booted.enforcing {
+        let pending = status.staged.as_ref().is_some_and(|staged| staged.enforcing);
+        // The migration ran and nothing enforcing is staged: the reference was switched
+        // afterwards without the policy. Reported, not repaired: the migration does not run
+        // again (UT4).
+        if ctx.store.migrated() && !pending {
+            return Reason::OriginNotEnforcing;
+        }
         // The installer's reference, or an install that has not migrated yet (UT4).
         return if ctx.store.channel_absent() { Reason::ChannelAbsent } else { Reason::Media };
     }
@@ -180,7 +188,7 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failu
     }
     let state = State {
         schema: SCHEMA,
-        verified: reason(ctx, &policy, &status.booted).into(),
+        verified: reason(ctx, &policy, &status).into(),
         booted: deployment(&status.booted),
         downloaded: status.staged.as_ref().map(deployment),
         previous: status.rollback.as_ref().map(deployment),
@@ -444,6 +452,24 @@ pub(crate) mod tests {
         let state = run(&machine.ctx(&tools, 5000), false).expect("check");
         assert_eq!((state.verified.reason, state.update), (Reason::Media, UpdateState::None));
         assert!(tools.calls.borrow().is_empty(), "no registry call at all: {:?}", tools.calls.borrow());
+    }
+
+    #[test]
+    fn a_migrated_machine_on_a_reference_that_does_not_enforce_the_policy_says_so() {
+        let machine = Machine::new("origin-not-enforcing", &["real/k1.pub"]);
+        machine.store.set_migrated().expect("stamp");
+        let unverified = || Deployed { enforcing: false, ..deployed(&digest(1), 1000) };
+        let tools = Fake::booted(unverified()).offering(&digest(2), 2000);
+        let state = run(&machine.ctx(&tools, 5000), false).expect("check");
+        assert_eq!((state.verified.value, state.verified.reason, state.update), (false, Reason::OriginNotEnforcing, UpdateState::None));
+        assert!(tools.calls.borrow().is_empty(), "reported, not repaired: {:?}", tools.calls.borrow());
+
+        // A staged deployment that does not enforce either changes nothing.
+        tools.status.borrow_mut().staged = Some(Deployed { download_only: true, ..unverified() });
+        assert_eq!(run(&machine.ctx(&tools, 5000), true).expect("offline").verified.reason, Reason::OriginNotEnforcing);
+        // One that does is the migration waiting for the restart.
+        tools.status.borrow_mut().staged = Some(deployed(&digest(2), 2000));
+        assert_eq!(run(&machine.ctx(&tools, 5000), true).expect("offline").verified.reason, Reason::Media);
     }
 
     #[test]

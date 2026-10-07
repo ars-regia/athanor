@@ -474,6 +474,10 @@ msgstr "Non verificata: il sistema è stato modificato su questa macchina"
 msgid "Not verified: waiting for the stable channel to be published"
 msgstr "Non verificata: in attesa della pubblicazione del canale stabile"
 
+#: src/ui/shield.rs:312
+msgid "Not verified: this machine does not verify its updates"
+msgstr "Non verificata: questa macchina non verifica i suoi aggiornamenti"
+
 #: src/ui/shield.rs:316
 msgid "Up to date"
 msgstr "Aggiornato"
