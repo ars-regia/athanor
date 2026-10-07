@@ -188,6 +188,11 @@ jobs:
         # this one, writing the ID of the rechunked image to the same file.
         run: bash system/build-image.sh --system --registry "${IMAGE_REGISTRY}" --iidfile artifacts/system-image.iid
 
+      - name: 🔖 Check our RPMs against their specs
+        # The tier repositories were rebuilt from this checkout earlier in this run; a stale
+        # per-package image once shipped athanor-recovery 1.0.0-5 while its spec said 6.
+        run: bash system/check-image-rpms.sh "$(<artifacts/system-image.iid)"
+
       - name: 🐳 Build OS Images
         # build-image.sh builds the default, NVIDIA and NVIDIA-legacy images in turn FROM the
         # system image, all three with the same signed vmlinuz (S8). Nothing is pushed until
