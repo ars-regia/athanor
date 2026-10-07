@@ -562,8 +562,9 @@ hand-copied.
   (exists: `registry`), pinning (PL8), permissions (PL7), timeouts (PL47), key isolation
   (PL11), one writer per tag (PL35).
 - **`just check` runs every verify check** and the four test directories that no
-  workflow runs today; checks red at adoption are listed in `scripts/ci/known-red.txt`,
-  each with an issue and an expiry date, and the list may only shrink (PQ12).
+  workflow runs today; the findings red at adoption are listed one by one in
+  `scripts/ci/known-red.txt` (the finding text without line numbers, each with an issue
+  and an expiry date), any finding not listed is red, and the list may only shrink (PQ12).
 - **doc_ci.md is checked against the tree** (`verify.py ci`, exists) and gains the
   stage and contract tables generated from the workflow files, so the description cannot
   drift.
@@ -645,7 +646,7 @@ The maintainer answered every question as recommended on 2026-10-07. Items marke
 | PQ9  | Are the SBOMs public? | Yes, in the evidence bundle: the product is open source and publication costs nothing. |
 | PQ10 | Visibility of `azoth-nvidia` | Public for the open-module branch; the legacy branch only after a licence check [LAWYER]. |
 | PQ11 | Which edge of the `update → recovery` cycle is wrong? | Drop the synthetic all-to-all tier edges and build the graph from the specs' requirements only; tiers stay as publication groups. The edge removal lands with the `graph` check, in PB12. |
-| PQ12 | Red verify checks when `just check` becomes the gate | Adopt with `known-red.txt` (issue and expiry per entry, only shrinking) rather than blocking PB1 on fixing them all first. |
+| PQ12 | Red verify checks when `just check` becomes the gate | Adopt with `known-red.txt` (one entry per finding, not per check, with issue and expiry; only shrinking) rather than blocking PB1 on fixing them all first. |
 
 ## 14. Changes to other documents
 

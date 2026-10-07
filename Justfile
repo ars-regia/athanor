@@ -119,7 +119,7 @@ lint:
 
 # The pull request gate (ADR-0075, doc_pipeline.md PL3): the `check` job of pr.yml runs exactly
 # this, and a contributor runs it before pushing. Workflow lint (actionlint, with shellcheck on
-# every run: block), Justfile syntax, every verify.py check with the red ones of
+# every run: block), Justfile syntax, every verify.py check with the findings listed in
 # scripts/ci/known-red.txt excused (the list may only shrink against BASE), and every Python
 # test directory of the repository.
 [group('QA & Security')]

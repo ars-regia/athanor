@@ -17,6 +17,7 @@ Exit code: numero di controlli falliti (0 = tutto a posto).
 Nessuna dipendenza oltre a python3 e git. Va eseguito dalla radice del repo.
 """
 
+import collections
 import datetime
 import json
 import os
@@ -1086,9 +1087,11 @@ def check_panics():
 
     for k, budget in BUDGET.items():
         if counts[k] > budget:
-            extra = ", ".join(where[k][:6])
-            r.fail(f"{k}: {counts[k]} occorrenze, budget {budget}. Propaga con `?`. "
-                   f"Prime: {extra}")
+            # One finding per occurrence, so that scripts/ci/known-red.txt can list each and
+            # a new one is red even while an old one is fixed.
+            for at in where[k]:
+                r.fail(f"{at}: {k} over the budget of {budget}, propagate with `?`")
+            r.note(f"{k}: {counts[k]} occorrenze, budget {budget}")
         elif counts[k] < budget:
             r.note(f"{k}: {counts[k]} (budget {budget}) — abbassa il budget in scripts/verify.py")
 
@@ -1872,17 +1875,25 @@ def check_coverage():
 # known-red: checks red when `just check` became the gate (doc_pipeline.md PQ12)
 # --------------------------------------------------------------------------- #
 
-KNOWN_RED_LINE = re.compile(r"(\S+)\s+([1-9]\d*)\s+(#\d+)\s+(\d{4}-\d{2}-\d{2})")
+KNOWN_RED_LINE = re.compile(r"(\S+)\s+(#\d+)\s+(\d{4}-\d{2}-\d{2})\s+(\S.*)")
+LINE_NUMBER = re.compile(r"(?<=\S):\d+")
+
+
+def known_red_finding(problem):
+    """The stable text of a problem: the problem without its line numbers (`a.rs:18` reads
+    `a.rs`), so that a finding keeps its entry when unrelated lines move it."""
+    return LINE_NUMBER.sub("", problem)
 
 
 def parse_known_red(text):
-    """{check: (ceiling, issue, expires)} from the text of scripts/ci/known-red.txt.
+    """[(check, issue, expires, finding)] from the text of scripts/ci/known-red.txt.
 
-    One entry per line, `check ceiling issue expires`: the check may report at most
-    `ceiling` problems until `expires` (inclusive) while issue `#n` tracks the fix.
-    Blank lines and `#` comments are ignored; anything else raises ValueError.
+    One entry per line, `check #issue YYYY-MM-DD finding`: the check may report that finding
+    (known_red_finding of a problem) until `expires`, inclusive, while the issue tracks the
+    fix. A finding the check reports n times is listed n times. Blank lines and `#` comments
+    are ignored; anything else raises ValueError.
     """
-    entries = {}
+    entries = []
     for number, line in enumerate(text.splitlines(), 1):
         line = line.strip()
         if not line or line.startswith("#"):
@@ -1890,13 +1901,11 @@ def parse_known_red(text):
         match = KNOWN_RED_LINE.fullmatch(line)
         if not match:
             raise ValueError(
-                f"line {number}: expected `check ceiling #issue YYYY-MM-DD`: {line}"
+                f"line {number}: expected `check #issue YYYY-MM-DD finding`: {line}"
             )
-        name, ceiling, issue, expires = match.groups()
-        if name in entries:
-            raise ValueError(f"line {number}: {name} is listed twice")
+        name, issue, expires, finding = match.groups()
         try:
-            entries[name] = (int(ceiling), issue, datetime.date.fromisoformat(expires))
+            entries.append((name, issue, datetime.date.fromisoformat(expires), finding))
         except ValueError:
             raise ValueError(f"line {number}: {expires} is not a date") from None
     return entries
@@ -1923,47 +1932,53 @@ def judge_known_red(entries, base, results, today):
     """(tolerated, problems): the checks whose failure the list excuses, and what is wrong
     with the list itself.
 
-    A listed check that ran is tolerated while it fails with at most its ceiling of problems
-    and its entry has not expired. A listed check that passes must leave the list. Against
-    BASE (the list of the base revision, None at adoption) the list may only shrink: no new
-    entry, no higher ceiling, no later expiry.
+    A check that ran is tolerated while every finding it reports is listed, as many times as
+    it reports it, and none of its entries has expired. A listed finding the check no longer
+    reports must leave the list. Against BASE (the list of the base revision, None at
+    adoption) the list may only shrink: no finding the base does not list, no later expiry;
+    the issue of an entry may change.
     """
-    tolerated, problems = set(), []
-    for name, (ceiling, issue, expires) in sorted(entries.items()):
+    problems, listed, expired = [], {}, set()
+    for name, issue, expires, finding in entries:
         if name not in CHECKS:
             problems.append(f"{name}: no such check")
             continue
-        if base is not None:
-            if name not in base:
+        listed.setdefault(name, collections.Counter())[finding] += 1
+        if today > expires:
+            expired.add(name)
+            problems.append(f"{name}: expired on {expires} ({issue}): {finding}")
+    if base is not None:
+        latest = {}
+        for name, _, expires, finding in base:
+            key = (name, finding)
+            latest[key] = max(expires, latest.get(key, expires))
+        added = collections.Counter(
+            (n, f) for n, _, _, f in entries
+        ) - collections.Counter((n, f) for n, _, _, f in base)
+        for name, finding in added.elements():
+            problems.append(
+                f"{name}: not in the base list, the list may only shrink: {finding}"
+            )
+        for name, _, expires, finding in entries:
+            was = latest.get((name, finding))
+            if was is not None and expires > was:
                 problems.append(
-                    f"{name}: not in the base list, the list may only shrink"
+                    f"{name}: expiry moved from {was} to {expires}: {finding}"
                 )
-            else:
-                old_ceiling, _, old_expires = base[name]
-                if ceiling > old_ceiling:
-                    problems.append(
-                        f"{name}: ceiling raised from {old_ceiling} to {ceiling}"
-                    )
-                if expires > old_expires:
-                    problems.append(
-                        f"{name}: expiry moved from {old_expires} to {expires}"
-                    )
+
+    tolerated = set()
+    for name, known in sorted(listed.items()):
         if name not in results:
             continue
-        found = len(results[name].problems)
-        if found == 0:
-            problems.append(f"{name}: passes now, remove its entry")
-        elif today > expires:
-            problems.append(f"{name}: the entry expired on {expires} ({issue})")
-        elif found > ceiling:
-            problems.append(
-                f"{name}: {found} problems, above the ceiling of {ceiling} ({issue})"
-            )
-        else:
+        found = collections.Counter(
+            known_red_finding(p) for p in results[name].problems
+        )
+        new, fixed = found - known, known - found
+        problems += [f"{name}: not in the list: {f}" for f in new.elements()]
+        problems += [f"{name}: fixed, remove its entry: {f}" for f in fixed.elements()]
+        if found and not new and name not in expired:
             tolerated.add(name)
     return tolerated, problems
-
-
 def take_option(argv, name):
     """Removes `NAME VALUE` from argv and returns VALUE, None when NAME is absent."""
     if name not in argv:
@@ -2000,7 +2015,7 @@ def main(argv):
         print(f"disponibili: {', '.join(CHECKS)}", file=sys.stderr)
         return 2
 
-    entries, base = {}, None
+    entries, base = [], None
     if known_red_path:
         try:
             path = Path(known_red_path)
@@ -2030,10 +2045,11 @@ def main(argv):
             )
         else:
             if name in tolerated:
-                ceiling, issue, expires = entries[name]
+                own = [(issue, expires) for check, issue, expires, _ in entries if check == name]
+                issues = ", ".join(sorted({issue for issue, _ in own}))
                 print(
-                    f"  {YEL}KNOWN-RED{OFF}  {BOLD}{name}{OFF}  {YEL}{n}/{ceiling}{OFF}  "
-                    f"{DIM}{fn.title} ({issue}, until {expires}){OFF}"
+                    f"  {YEL}KNOWN-RED{OFF}  {BOLD}{name}{OFF}  {YEL}{n}{OFF}  "
+                    f"{DIM}{fn.title} ({issues}, until {min(e for _, e in own)}){OFF}"
                 )
             else:
                 failed += 1
