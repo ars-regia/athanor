@@ -94,7 +94,11 @@ pub async fn go_back<T: Tools, P: Power>(ctx: &Context<'_, T>, power: &P) -> Res
     }
     // Held first: if the rollback then fails, the worst case is a digest not offered again.
     ctx.store.set_held(&status.booted.digest).map_err(|_| Refusal::Failed)?;
-    ctx.tools.rollback().map_err(|_| Refusal::Failed)?;
+    // A queued rollback (greenboot after a failed health check, doc_recovery.md R5) already
+    // makes the previous deployment the next boot; a second `bootc rollback` would swap back.
+    if !status.rollback_queued {
+        ctx.tools.rollback().map_err(|_| Refusal::Failed)?;
+    }
     republish(ctx);
     power.reboot().await.map_err(Refusal::from)
 }
@@ -203,6 +207,19 @@ mod tests {
         assert_eq!(go_back(&machine.ctx(&tools, 5000), &power).await, Ok(()));
         assert_eq!(machine.store.held(), Some(digest(2)));
         assert_eq!(*tools.calls.borrow(), ["rollback"]);
+        assert!(power.rebooted.get());
+    }
+
+    #[tokio::test]
+    async fn go_back_after_a_queued_rollback_only_holds_and_reboots() {
+        let machine = Machine::new("go-back-queued", &["real/k1.pub"]);
+        let tools = Fake::booted(deployed(&digest(2), 2000));
+        tools.status.borrow_mut().rollback = Some(deployed(&digest(1), 1000));
+        tools.status.borrow_mut().rollback_queued = true;
+        let power = FakePower::new(false, Ok(()));
+        assert_eq!(go_back(&machine.ctx(&tools, 5000), &power).await, Ok(()));
+        assert_eq!(machine.store.held(), Some(digest(2)));
+        assert!(tools.calls.borrow().is_empty(), "no second rollback");
         assert!(power.rebooted.get());
     }
 }

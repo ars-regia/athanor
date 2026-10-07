@@ -4,7 +4,7 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-update
 Version:        1.0.0
-Release:        6%{?dist}
+Release:        7%{?dist}
 Summary:        Athanor system image updates and trust state
 
 License:        GPL-3.0-or-later
@@ -74,6 +74,12 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
 %doc /usr/share/doc/athanor-update/RECOVERY.md
 
 %changelog
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
+- A queued rollback (`rollbackQueued` in `bootc status`: greenboot after a failed health
+  check, or `bootc rollback`) holds the booted digest at every check and downloads nothing.
+  `GoBack()` on such a boot holds and reboots without a second `bootc rollback`, which
+  would have swapped back to the deployment being left.
+
 * Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
 - `athanor-update migrate`: a channel without a manifest on the registry (`:stable` is
   published later, A2-4) is a wait, not a failure. The unit exits 0, no longer restarts every
