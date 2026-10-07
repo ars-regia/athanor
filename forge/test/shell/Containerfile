@@ -41,7 +41,9 @@ RUN dnf5 -y install --setopt=install_weak_deps=False \
       qalculate localsearch tinysparql poppler-glib \
   && dnf5 clean all
 
-# The build stage compiles our GTK crates against the same GTK the rig runs.
+# The build stage compiles our GTK crates against the same GTK the rig runs. rig.sh runs the
+# published one pinned by build-image.digest when that file exists: a change here takes effect
+# when `rig.sh publish-build-image` publishes it and the new digest is committed with it.
 FROM rig AS build
 # glycin (athanor-preview-render) links libseccomp and fontconfig. The portal's settings test
 # writes the GNOME interface and accessibility schemas (gsettings-desktop-schemas).
