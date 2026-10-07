@@ -39,6 +39,7 @@ Run them from the repository root. There is no single suite: target what you cha
 | All project checks | `python3 scripts/verify.py` (`--list` names the checks; pass names to run some) |
 | A crate | `cargo test -p <crate>`, for every crate you touch |
 | Python tests | `python3 -B -m unittest discover -s <dir>/tests`, e.g. `scripts/tests`, `system/tests` |
+| A kernel panic read from a QR code | `python3 scripts/decode-drm-panic.py '<drm-panic url or payload>'` prints the log, without a browser |
 
 Some `verify.py` checks fail at HEAD on known debt: compare with `origin/iso-v0` and add no
 new failure. `workflows` and `kickstart` pass with only a note when `actionlint` or
@@ -97,9 +98,11 @@ variable's name, not its content.
 
 Crates and packages are named `athanor-*`; no `ermete-*` crate remains (the project was
 Ermete OS until 2026-09-05, commit `02bf9c05`). Exceptions: the crates `ebpf-core`,
-`ebpf-loader` and `xdg-desktop-portal-athanor`, and the upstream specs `azoth`,
+`ebpf-loader` and `xdg-desktop-portal-athanor` (its spec directory is
+`forge/specs/athanor-xdg-desktop-portal-athanor`), and the upstream specs `azoth`,
 `cosmic-comp`, `buildah`, `osbuild` and `stage0-bootstrap`. Rename nothing on your own.
 
 Never open `docs/architecture/graph-vaults/`, `docs/architecture/graph-pages/` or
-`.graphify/`: they are generated locally, git-ignored, and thousands of files. Temporary
+`.graphify/`: they are generated locally, git-ignored, and thousands of files. Query them
+with `graphify query "<question>"` instead. Temporary
 scripts and logs go in `.scratch/` at the root, which is git-ignored.

@@ -9,8 +9,8 @@ pipeline and installation; the image is specified in
 - **Enable units with a preset file, never `systemctl enable` in the `Containerfile`.** The
   `Containerfile` runs `systemctl preset-all` after it and again in the GPU stages, and
   Fedora's `99-default-disable.preset` (`disable *`) then disables every unit no preset
-  names (`docs/architecture/doc_tetragon.md`). `Containerfile:180` still enables three units
-  that way: known debt, tracked in `doc_tetragon.md`, not a pattern to copy.
+  names (`docs/architecture/doc_tetragon.md`). The `Containerfile` still enables three units
+  that way (`grep -n 'systemctl enable' system/Containerfile`): known debt, tracked in `doc_tetragon.md`, not a pattern to copy.
 - **A workspace crate ships in a package** or is listed in `experimental/EXEMPT`
   (`verify.py shipped`).
 - **No runtime path into the build tree or `/tmp`.** Load artefacts from installed paths,
@@ -23,8 +23,9 @@ pipeline and installation; the image is specified in
 - **`system/.gitignore` hides `output`, `test_*/`, `*.log`, `logs_*`, `mnt_*/` and `ctr_id` at
   any depth.** After adding files, run `git status --porcelain --ignored -- <dir>` and add a
   narrow negation for anything it hides.
-- **`build-image.sh` without `SECUREBOOT_SIGNING_KEY`** signs the UKI with a throwaway key
-  and refuses to push. That is the local path; do not work around it.
+- **The image signs nothing.** The `Containerfile` takes the vmlinuz signed for Secure Boot
+  in the kernel cycle from `azoth-boot`, pinned by digest, and fails when its kernel is not
+  `AZOTH_NVR` (D43). Never add a signing step or a key to the image build.
 
 ## Checks
 
