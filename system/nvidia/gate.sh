@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build gate of the system image (docs/architecture/doc_system_image.md, S3, S6, S8): run on the
-# finished image root before the UKI is assembled.
+# finished image root, as the last step of system/Containerfile.
 #   none           no NVIDIA module, kernel argument, modprobe option, dracut configuration,
 #                  negativo17 repository or RPM Fusion NVIDIA driver repository
 #   nvidia         modules, driver packages, shim and GSP firmware at NVIDIA_OPEN_VERSION,
