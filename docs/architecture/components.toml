@@ -169,13 +169,6 @@ status = "missing"
 purpose = "Rebuild of bat, a cat clone with syntax highlighting; shipped"
 
 [[component]]
-path = "forge/specs/athanor-bpf-linker"
-kind = "rpm spec"
-area = "kernel"
-status = "missing"
-purpose = "bpf-linker for live patching, which left the repository on 2026-10-05; still shipped in tier 0"
-
-[[component]]
 path = "forge/specs/athanor-calmo"
 kind = "rpm spec"
 area = "shell"
@@ -190,13 +183,6 @@ kind = "rpm spec"
 area = "shell"
 status = "missing"
 purpose = "cliphist, a Wayland clipboard history store; shipped"
-
-[[component]]
-path = "forge/specs/athanor-cosign"
-kind = "rpm spec"
-area = "signing-update"
-status = "missing"
-purpose = "Rebuild of cosign; not in the package manifest"
 
 [[component]]
 path = "forge/specs/athanor-dart-sass"
@@ -222,13 +208,6 @@ status = "specified"
 spec = "doc_bar.md"
 item = "BR1"
 purpose = "The Athanor dock"
-
-[[component]]
-path = "forge/specs/athanor-doctor"
-kind = "rpm spec"
-area = "platform"
-status = "missing"
-purpose = "System diagnostic CLI; shipped"
 
 [[component]]
 path = "forge/specs/athanor-greeter-ui"
@@ -323,13 +302,6 @@ status = "specified"
 spec = "doc_bar.md"
 item = "BR4"
 purpose = "The shell daemon: desktop notifications and the tray watcher"
-
-[[component]]
-path = "forge/specs/athanor-syft"
-kind = "rpm spec"
-area = "build-ci"
-status = "missing"
-purpose = "syft SBOM generator; shipped in tier 0 although only the pipeline uses SBOMs"
 
 [[component]]
 path = "forge/specs/athanor-system-config"
@@ -428,13 +400,6 @@ status = "specified"
 spec = "doc_lock_and_prompts.md"
 item = "D9"
 purpose = "polkit 127 rebuilt from Fedora 44 for Fedora 43: socket-activated, non-setuid agent helper"
-
-[[component]]
-path = "forge/specs/stage0-bootstrap"
-kind = "rpm spec"
-area = "build-ci"
-status = "missing"
-purpose = "Stub package with one binary; shipped in tier 0"
 
 [[component]]
 path = "forge/test"

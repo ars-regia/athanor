@@ -31,8 +31,8 @@ class ManifestSpecs(unittest.TestCase):
 
     def test_prefixed_and_bare_directories_resolve(self):
         self.spec_dir("athanor-bar")
-        self.spec_dir("stage0-bootstrap")
-        self.manifest(custom_packages=["bar", "stage0-bootstrap"], custom_tier0=["bar"])
+        self.spec_dir("calmo")
+        self.manifest(custom_packages=["bar", "calmo"], custom_tier0=["bar"])
         self.assertEqual(verify.manifest_spec_problems(self.root), [])
 
     def test_missing_directory_is_reported_per_list(self):

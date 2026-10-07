@@ -1697,12 +1697,9 @@ OWN_LICENCE = "GPL-3.0-or-later"
 # must say OWN_LICENCE.
 UPSTREAM_SPECS = {
     "forge/specs/athanor-bat/bat.spec",
-    "forge/specs/athanor-bpf-linker/athanor-bpf-linker.spec",
     "forge/specs/athanor-cliphist/athanor-cliphist.spec",
-    "forge/specs/athanor-cosign/athanor-cosign.spec",
     "forge/specs/athanor-dart-sass/athanor-dart-sass.spec",
     "forge/specs/athanor-matugen/athanor-matugen.spec",
-    "forge/specs/athanor-syft/athanor-syft.spec",
     "forge/specs/athanor-tetragon/athanor-tetragon.spec",
     "forge/specs/azoth/microvm/azoth-microvm.spec",
     "forge/specs/cosmic-comp/cosmic-comp.spec",

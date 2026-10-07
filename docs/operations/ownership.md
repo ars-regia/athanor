@@ -104,7 +104,6 @@ protected paths last, as in PR #170.
 /system/build-image.sh                         @hr-mes
 /forge/scripts/sign_attest.sh                  @hr-mes
 /forge/specs/athanor-update/                   @hr-mes
-/forge/specs/athanor-cosign/                   @hr-mes
 /system/athanor-trust-state/                   @hr-mes
 /.github/workflows/call-system-image.yml       @hr-mes
 /.github/workflows/athanor-forge-orchestrator.yml @hr-mes
