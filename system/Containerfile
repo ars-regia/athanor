@@ -304,7 +304,8 @@ RUN bash /scripts/initramfs.sh "${AZOTH_NVR}.x86_64"
 # provider and it is the one the base image ships. The runtime directories are
 # emptied entry by entry, skipping the build-time mounts podman places under /run
 # (secrets, resolv.conf); every command is part of one && chain, so the step fails
-# as soon as one of them does.
+# as soon as one of them does. grep reads the whole mount list: with -q, findmnt killed
+# by SIGPIPE would make the test true under pipefail and remove a mount point.
 RUN dnf5 remove -y --no-autoremove \
         gcc make llvm-static rust-std-static mesa-dxil-devel \
         edk2-aarch64 qemu-user qemu-user-static distribution-gpg-keys-copr \
@@ -315,7 +316,7 @@ RUN dnf5 remove -y --no-autoremove \
     dnf5 clean all && \
     rm -rf /var/lib/dnf5/* /var/tmp/* /var/log/* && \
     for p in /tmp/* /run/* /etc/NetworkManager/system-connections/*; do \
-        if [ -e "$p" ] && ! findmnt -rno TARGET | grep -q "^$p"; then rm -rf "$p" || exit 1; fi; \
+        if [ -e "$p" ] && ! findmnt -rno TARGET | grep "^$p" > /dev/null; then rm -rf "$p" || exit 1; fi; \
     done
 
 # Image Validation & Linting
