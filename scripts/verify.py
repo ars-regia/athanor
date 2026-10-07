@@ -1723,7 +1723,6 @@ OWN_LICENCE = "GPL-3.0-or-later"
 # other spec, every Cargo.toml and every nfpm `license:` field is our own code and
 # must say OWN_LICENCE.
 UPSTREAM_SPECS = {
-    "forge/specs/athanor-bat/bat.spec",
     "forge/specs/athanor-cliphist/athanor-cliphist.spec",
     "forge/specs/athanor-dart-sass/athanor-dart-sass.spec",
     "forge/specs/athanor-matugen/athanor-matugen.spec",

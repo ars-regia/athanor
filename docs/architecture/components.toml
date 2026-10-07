@@ -162,13 +162,6 @@ status = "missing"
 purpose = "Base configuration installed first: systemd settings, polkit rules, kargs, branding, GPG keys; shipped"
 
 [[component]]
-path = "forge/specs/athanor-bat"
-kind = "rpm spec"
-area = "apps"
-status = "missing"
-purpose = "Rebuild of bat, a cat clone with syntax highlighting; shipped"
-
-[[component]]
 path = "forge/specs/athanor-calmo"
 kind = "rpm spec"
 area = "shell"
