@@ -1,0 +1,6 @@
+# Numbered below 81: the first preset line that matches a unit wins, and Fedora's
+# 99-default-disable.preset would otherwise decide first (see 80-athanor-base.preset).
+# greenboot's health check runs at every boot and marks a failed update (doc_recovery.md,
+# R5); the rollback trigger records, at shutdown, which deployment is the update.
+enable greenboot-healthcheck.service
+enable greenboot-set-rollback-trigger.service
