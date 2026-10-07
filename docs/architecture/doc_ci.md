@@ -4,7 +4,7 @@
 - **Owner:** the maintainer.
 - **Status:** draft, revision 1 (2026-10-06), awaiting the maintainer's review. Facts were read on `origin/iso-v0` at `c1bab0ad` and from the GitHub API on 2026-10-06.
 - **Depends on:** [doc_build_system.md](doc_build_system.md) (packages and tiers), [doc_build_ordering.md](doc_build_ordering.md) (O1-O9, kernel and module order), [doc_kernel_build.md](doc_kernel_build.md), [doc_system_image.md](doc_system_image.md), [doc_update_trust.md](doc_update_trust.md) (D1, `:stable`), the secrets inventory `docs/operations/secrets.md`, the runner [README](../../scripts/runner/README.md).
-- **Defines:** CI1-CI28 (one per workflow), CB1-CB4 (known broken workflows), CP1-CP3 (proposals).
+- **Defines:** CI1-CI29 (one per workflow), CB1-CB4 (known broken workflows), CP1-CP3 (proposals).
 - **Enforced by:** `python3 scripts/verify.py ci`. It fails when a workflow file is missing here, when this document names a workflow file that does not exist, or when a secret or variable a workflow references is not named here.
 
 **Target.** This document describes the workflows as they are. The architecture they converge on, and the plan that gets there, is [doc_pipeline.md](doc_pipeline.md) (ADR-0080).
@@ -324,6 +324,14 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 - **Scripts:** as CI8, without `retention.sh`. Its jobs mirror CI8's until CI8 calls it (doc_pipeline.md block PB12).
 - **Health:** not run yet.
 
+### CI29 Maintenance
+
+- **File:** `maintenance.yml`. **Purpose:** the scheduled maintenance of doc_pipeline.md section 3.1; today only the daily settings drift check (PL52): `ghsettings.py diff` compares `.github/settings/*.json` with the live repository and fails on a drift (`docs/operations/github-settings.md` section 9).
+- **Triggers:** cron `23 5 * * *`; dispatch. **Outputs:** one line per drift in the log.
+- **Secrets, variables:** `SETTINGS_APP_PRIVATE_KEY`, `SETTINGS_APP_CLIENT_ID`: a read-only token of the settings GitHub App for this repository. **Environment:** none. **Runner:** hosted. **Concurrency:** none.
+- **Scripts:** `scripts/github-settings/ghsettings.py`.
+- **Health:** not run yet; red until the settings App and its two names exist.
+
 ## 3. Known broken workflows
 
 | Id | Workflow | Cause | Evidence |
@@ -363,6 +371,8 @@ Every name below is described in the secrets inventory, `docs/operations/secrets
 | `REGISTRY_HOST` | variable, default `ghcr.io` | not set | CI1, CI3, CI4, CI11, CI14, CI21-CI23 |
 | `KERNEL_REGISTRY` | variable, default `ghcr.io/<owner>` | not set | CI1, CI6, CI8, CI9, CI13, CI25, CI26 |
 | `BUILDER_STABLE_TAG` | variable, default `latest` | not set | CI21-CI23 |
+| `SETTINGS_APP_PRIVATE_KEY` | secret (GitHub App key, read-only App) | repository, not set yet | CI29 |
+| `SETTINGS_APP_CLIENT_ID` | variable, no default | repository, not set yet | CI29 |
 
 Environments (`gh api repos/ars-regia/athanor/environments`):
 
