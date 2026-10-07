@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# switch-verified.sh IMAGE: as root on an Athanor machine, `bootc switch` to IMAGE with its
+# switch-verified.sh IMAGE [KEYS_DIR]: as root on an Athanor machine, `bootc switch` to IMAGE with its
 # signature verified against the project keys of the booted image, also when IMAGE belongs
 # to an owner the booted image's policy does not name.
 #
@@ -24,7 +24,7 @@ usage() {
     echo "usage: ${0##*/} REGISTRY/OWNER/athanor-system[-nvidia[-legacy]]:TAG [KEYS_DIR]" >&2
     exit 2
 }
-[[ $# -eq 1 || $# -eq 2 ]] || usage
+[[ $# -eq 1 || ($# -eq 2 && -n $2) ]] || usage
 image=$1
 keys_dir=${2:-/usr/share/athanor/keys}
 name=${image%:*}

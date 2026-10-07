@@ -54,43 +54,52 @@ Keep `my-image.private` and `passphrase` offline, and put `my-image.pub` next to
 Containerfile under `keys/`:
 
 ```dockerfile
-FROM ghcr.io/ars-regia/athanor-system:stable
+# The tag your machines follow: `stable` once the channel is published (A2-4), `latest`
+# until then.
+FROM ghcr.io/ars-regia/athanor-system:latest
 ARG REGISTRY
-ARG CREATED
 
 # Your changes.
 RUN dnf5 install -y --setopt=install_weak_deps=False <packages> && dnf5 clean all
 
-# Trust your key for your repositories: render the policy for your owner, as the Athanor
-# image build does for its own.
+# Trust your key, and only yours, for your repositories: render the policy for your owner,
+# as the Athanor image build does for its own.
+RUN rm /usr/share/athanor/keys/*.pub
 COPY keys/ /usr/share/athanor/keys/
 RUN /usr/libexec/athanor-update/render-policy --registry "${REGISTRY}" \
         --keys-dir /usr/share/athanor/keys --out /usr/share/athanor/containers --link-etc /etc && \
     bootc container lint
 
 # The update service offers only an image built after the booted one, by this label.
+ARG CREATED
+RUN test -n "${CREATED}"
 LABEL org.opencontainers.image.created="${CREATED}"
 ```
 
 ```bash
-podman build --build-arg REGISTRY=ghcr.io/you \
+podman build --format docker --build-arg REGISTRY=ghcr.io/you \
     --build-arg CREATED="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    -t ghcr.io/you/athanor-system:stable .
+    -t ghcr.io/you/athanor-system:candidate .
 ```
 
-`CREATED` is not optional. The image inherits the label of its base, and an image whose
-build time is not strictly newer than the booted one's is never offered (UT5): without it,
-your machines would stop updating after the first switch.
-
-The project keys stay in `/usr/share/athanor/keys` and harm nothing: every signature names
-its repository, and the policy refuses a signature made for another one
-(`matchRepository`).
+- **`CREATED` is not optional.** The image inherits the label of its base, and an image
+  whose build time is not strictly newer than the booted one's is never offered (UT5).
+  Without it, your machines get no update of your image until the Athanor base it starts
+  from is rebuilt; an empty value would block them for good, so the build refuses it.
+- **Remove the project keys.** `keyPaths` lists keys any one of which is enough. Left in
+  place, a project key could sign an image for your repository, and your machines would
+  accept it without yours.
+- **`--format docker`** keeps the `SHELL` instruction of the base, as the project's own
+  builds do (`system/build-image.sh`).
 
 ## 4. Sign and publish
 
 The machine reads only the classic signature attachment. Sign with skopeo, not with
 cosign 3, which writes a format the machine treats as no signature (UT3). skopeo writes the
-attachment only for a repository a `registries.d` file names, for example
+attachment only for a repository a `registries.d` file names, and it reads the unsigned
+image under a policy, which on a machine already running your image would refuse it. Give
+it both files for this step:
+
 `registries.d/you.yaml`:
 
 ```yaml
@@ -99,17 +108,25 @@ docker:
     use-sigstore-attachments: true
 ```
 
+`sign-policy.json`:
+
+```json
+{
+  "default": [{"type": "reject"}],
+  "transports": {"docker": {"ghcr.io/you/athanor-system": [{"type": "insecureAcceptAnything"}]}}
+}
+```
+
 Push under a tag no machine follows, sign that digest, then move the followed tag onto it.
 A signature belongs to the digest, so it is already in place when the tag moves; a machine
 that checked an unsigned digest would report the update as refused (UT3).
 
 ```bash
-podman tag ghcr.io/you/athanor-system:stable ghcr.io/you/athanor-system:candidate
 podman push ghcr.io/you/athanor-system:candidate
-skopeo --registries.d registries.d copy --preserve-digests \
+skopeo --policy sign-policy.json --registries.d registries.d copy --preserve-digests \
     --sign-by-sigstore-private-key my-image.private --sign-passphrase-file passphrase \
     docker://ghcr.io/you/athanor-system:candidate docker://ghcr.io/you/athanor-system:candidate
-skopeo copy --preserve-digests \
+skopeo --registries.d registries.d copy --preserve-digests \
     docker://ghcr.io/you/athanor-system:candidate docker://ghcr.io/you/athanor-system:stable
 ```
 
@@ -124,17 +141,35 @@ without changing `/etc`:
 sudo bash scripts/switch-verified.sh ghcr.io/you/athanor-system:stable /path/to/keys
 ```
 
-`/path/to/keys` holds `my-image.pub`. Reboot afterwards. From then on the machine runs your
-image's policy: the update service checks your repository, verifies your signature, and
-reports the machine as verified. It follows the tag you switched to.
+- `/path/to/keys` holds `my-image.pub`.
+- If the machine has not migrated yet (`/var/lib/athanor-update/migrated` is absent, as on
+  a fresh install from the ISO), stop the migration's timer first with
+  `sudo systemctl stop athanor-update-migrate.timer`: a migration between the switch and the
+  reboot would stage the Athanor channel over your image (UT4). After the reboot the
+  machine already enforces your policy, and the migration records itself as done.
+- Reboot right after the switch.
 
-To go back, run the same script with the Athanor image and no key directory.
+From then on the machine runs your image's policy and follows the tag you switched to: the
+update service checks your repository and verifies your signature. The machine reads
+"verified" after its first check, at most 45 minutes after boot; to check at once:
+
+```bash
+sudo systemctl start athanor-update-check.service
+```
+
+To go back, run the same script with the Athanor image and a directory holding the
+project's public keys (`system/keys` of this repository): your image no longer carries them.
 
 ## 6. Checked so far
 
 - The update acceptance on the dev VM (`scripts/devvm/acceptance`) builds a derived image
-  in this way, signs it with a throwaway key and checks that the machine verifies and
-  updates it.
+  with the policy rendered for a throwaway key, signs it with skopeo and checks that the
+  machine verifies and updates it. It reaches that image by the migration, not by
+  `switch-verified.sh`.
 - `render-policy` run with another owner inside an Athanor image renders the three scopes
   for that owner (2026-10-07).
-- A desktop swapped in a derived image has not been tried.
+- The Containerfile of section 3, without the `dnf5` step, built with podman on an Athanor
+  image (2026-10-07): it fails without `CREATED`, and with it passes `bootc container lint`,
+  carries the label, and ships a policy whose only key is the new one.
+- Not tried yet: `switch-verified.sh` with a key directory, the signing step on a machine
+  running a derived image, and a desktop swapped in a derived image.
