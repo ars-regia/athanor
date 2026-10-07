@@ -25,10 +25,9 @@ members = [
 
 # The recovery kiosk is out of this workspace since 2026-09-30: what athanor-recovery
 # ships is a text console (doc_recovery.md), and the kiosk's source stays where it was, to be
-# mined when a graphical recovery is built on the polkit agent of stage 4. tests/fuzz and the
-# calmo theme tool are separate workspaces.
+# mined when a graphical recovery is built on the polkit agent of stage 4. The
+# calmo theme tool is a separate workspace.
 exclude = [
-  "tests/fuzz",
   "forge/tools/calmo-cosmic-theme",
   "forge/specs/athanor-recovery/athanor-recovery-1.0.0",
   # Out since 2026-10-07 (A2-9, #151): attestation is outside the 1.0 threat model

@@ -79,11 +79,6 @@ check-idempotency package registry="ghcr.io" owner="ars-regia" image_name="" bas
 audit:
     just forge/audit
 
-# Runs cargo-fuzz fuzzing suite on Rust spec targets
-[group('QA & Security')]
-fuzz component="all" time="60":
-    just forge/fuzz "{{ component }}" "{{ time }}"
-
 # Runs AWS Kani formal verification proofs on Rust spec targets
 [group('QA & Security')]
 verify component:
