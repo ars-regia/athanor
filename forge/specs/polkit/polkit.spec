@@ -184,6 +184,8 @@ exit $fail
 %{_unitdir}/polkit.service
 %{_unitdir}/polkit-agent-helper.socket
 %{_unitdir}/polkit-agent-helper@.service
+%dir %{_unitdir}/polkit-agent-helper.socket.d
+%dir %{_unitdir}/polkit-agent-helper@.service.d
 %{_unitdir}/polkit-agent-helper.socket.d/50-athanor-limits.conf
 %{_unitdir}/polkit-agent-helper@.service.d/50-athanor-limits.conf
 /usr/lib/systemd/system-preset/80-athanor-polkit.preset
