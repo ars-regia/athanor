@@ -307,9 +307,10 @@ patchano i Makefile per forzarlo.
   job `sign` di nvidia-kmod (`sign-kernel.sh vmlinuz`, D43); l'immagine system lo
   prende già firmato da `azoth-boot`. Nessuna fase assembla una UKI (ADR-0037): avvio shim, GRUB,
   vmlinuz firmato. L'immagine non crea alcun keyslot TPM: l'unico percorso è
-  `athanor-uki-enroll`, lanciato da un amministratore, che lega il keyslot a PCR 7
-  per valore e alla policy `systemd-pcrlock` della macchina (D42); la policy non è
-  generata né consegnata all'initrd dall'immagine (P4b). Profilo
+  `athanor-uki-enroll`, lanciato da un amministratore, che lega il keyslot al solo
+  valore di PCR 7: un aggiornamento di dbx o della MOK lo cambia e il boot successivo
+  chiede passphrase o recovery key. La policy `systemd-pcrlock` arriva con la UKI
+  (P4b, D42). Profilo
   `keys/profiles/secureboot.cnf`: non CA, `codeSigning`.
   Secret `SECUREBOOT_SIGNING_KEY`, certificato
   `keys/secureboot/athanor-secureboot.pem` (`.der` per `mokutil --import`). Non

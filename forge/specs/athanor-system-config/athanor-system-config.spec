@@ -85,11 +85,13 @@ mkdir -p /etc/usbguard
 
 %changelog
 * Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-55
-- athanor-uki-enroll binds the TPM2 keyslot to PCR 7 and the machine's systemd-pcrlock
-  policy (/var/lib/systemd/pcrlock.json) instead of PCRs 0, 4, 7 and 11, which firmware
-  and kernel updates change (doc_kernel_profile.md, D42). It refuses to run without that
-  policy, enrols a recovery key first when the volume has none, never wipes a passphrase
-  slot, and replaces earlier TPM2 keyslots only after the new one is enrolled.
+- athanor-uki-enroll binds the TPM2 keyslot to the value of PCR 7 only, instead of PCRs
+  0, 4, 7 and 11, which firmware and kernel updates change (doc_kernel_profile.md, D42).
+  A systemd-pcrlock policy arrives with the UKI (P4b); until then the enrolment turns off
+  systemd-cryptenroll's own pick-up of pcrlock.json. A dbx or MOK update changes PCR 7
+  and the next boot asks for the passphrase or the recovery key. The script enrols a
+  recovery key first when the volume has none, never wipes a passphrase slot, and
+  replaces earlier TPM2 keyslots only after the new one is enrolled.
 
 * Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-54
 - Drop /usr/share/athanor-system-config/athanor-forge.repo. It pointed at a GitHub

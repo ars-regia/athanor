@@ -50,12 +50,12 @@ doc_kernel_profile.md), and nothing in the image enrols the TPM 2.0 by itself.
 `athanor-tpm-luks-seal`, which sealed the volume at first boot to PCRs 0, 2, 7 and 11, was
 removed with the other TPM units that acted without the user (issue #148), and
 `verify.py shipped` fails if it is shipped again. An administrator may run
-`athanor-uki-enroll <device>`: it binds a TPM keyslot to PCR 7 and to the machine's
-`systemd-pcrlock` policy (`/var/lib/systemd/pcrlock.json`), enrols a recovery key first
-when the volume has none, and keeps the passphrase. It does not create that policy, nothing
-updates the policy after a firmware or Secure Boot database change, and nothing hands it to
-the initrd before the system volume is unlocked; until those exist (P4b), TPM unlock of the
-system volume is not supported, and the passphrase stays the way in.
+`athanor-uki-enroll <device>`: it binds a TPM keyslot to the value of PCR 7 only, enrols a
+recovery key first when the volume has none, and keeps the passphrase. Kernel and firmware
+updates leave PCR 7 alone, but a Secure Boot database (dbx) or MOK update changes it, and
+the next boot then asks for the passphrase or the recovery key; running the tool again
+binds the new value. A `systemd-pcrlock` policy, which survives announced dbx and MOK
+updates, arrives with the UKI (P4b, D42).
 
 ---
 
