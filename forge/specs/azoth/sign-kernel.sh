@@ -6,10 +6,12 @@
 # signer/toolchain.lock, so nothing built by this project runs next to a key. The image carries
 # this script at /usr/local/bin/sign-kernel.sh, so its digest pins it too. signer/run.sh calls
 # `prepare` and `check-modules` in the key-less steps, `modules` and `vmlinuz` in the step that
-# holds the keys, and `verify` in the publish job.
+# holds the keys, and `verify` in the publish job, where nvidia-publish.sh runs `check-signed`
+# from the checkout before it pushes a module.
 #
 # Usage: sign-kernel.sh prepare --kernel DIR --devel DIR --out DIR
 #        sign-kernel.sh check-modules --kver KVER --dir DIR
+#        sign-kernel.sh check-signed --cert FILE --kver KVER --dir DIR
 #        sign-kernel.sh modules --key FILE --cert FILE --hash FILE --kver KVER --dir DIR
 #        sign-kernel.sh vmlinuz --key FILE --cert FILE --in DIR --out DIR
 #        sign-kernel.sh verify  --cert FILE --dir DIR --kernel DIR
@@ -21,6 +23,9 @@
 #                  BRANCH, and BRANCH/lib/modules/KVER/extra/nvidia/ with nvidia.ko and only
 #                  the nvidia-{drm,modeset,uvm,peermem}.ko beside it, each a regular file whose
 #                  vermagic is of KVER. Anything else, a symlink included, fails
+#   check-signed   check-modules, then every module ends with the PKCS#7 signature sign-file
+#                  appends, and that detached CMS signature over the rest of the module
+#                  verifies against --cert (PEM)
 #   modules        check-modules, then sign every module with the hash named in --hash, in
 #                  place, and check with modinfo that the signer is the CN of --cert
 #   vmlinuz        remove every signature of IN/vmlinuz (the kernel build leaves Fedora's test
@@ -190,6 +195,32 @@ modules() {
     done
 }
 
+# The trailer sign-file appends to a module (include/linux/module_signature.h): the signature,
+# struct module_signature (12 bytes, id_type at offset 2, big-endian sig_len at offset 8), then
+# this magic and a newline.
+MODULE_MAGIC='~Module signature appended~'
+
+check_signed() {
+    local ko rel size sig_len id_type content
+    [[ $CERT && $KVER && $DIR ]] || usage
+    check_modules
+    for ko in "${KOS[@]}"; do
+        rel=${ko#"$DIR"/}
+        cmp -s <(tail -c 28 "$ko") <(printf '%s\n' "$MODULE_MAGIC") || die "$rel carries no module signature"
+        size=$(stat -c %s "$ko")
+        id_type=$(tail -c 40 "$ko" | head -c 3 | tail -c 1 | od -An -tu1 | tr -d ' ')
+        sig_len=$(tail -c 32 "$ko" | head -c 4 | od -An -tu4 --endian=big | tr -d ' ')
+        content=$((size - 40 - sig_len))
+        [[ $id_type == 2 && $sig_len -gt 0 && $content -gt 0 ]] || die "$rel: malformed module signature"
+        head -c "$content" "$ko" > "$WORK/content"
+        tail -c $((40 + sig_len)) "$ko" | head -c "$sig_len" > "$WORK/signature"
+        openssl cms -verify -binary -inform DER -in "$WORK/signature" -content "$WORK/content" \
+            -certfile "$CERT" -nointern -noverify -out /dev/null 2> "$WORK/cms.err" ||
+            die "$rel: its signature does not verify against $CERT: $(head -n 1 "$WORK/cms.err")"
+        echo "$rel: signature verifies against $(cert_cn "$CERT")"
+    done
+}
+
 verify() { # verify FILE: exactly one signature, valid against $CERT
     local count
     count=$(signatures "$1")
@@ -215,6 +246,7 @@ check-modules)
     [[ $KVER && $DIR ]] || usage
     check_modules
     ;;
+check-signed) check_signed ;;
 modules) modules ;;
 vmlinuz) vmlinuz ;;
 verify)

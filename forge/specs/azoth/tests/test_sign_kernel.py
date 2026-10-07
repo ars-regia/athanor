@@ -10,6 +10,7 @@ import glob
 import os
 import pathlib
 import re
+import struct
 import shutil
 import subprocess
 import tempfile
@@ -57,6 +58,22 @@ def cert(directory, cn):
         capture_output=True,
     )
     return key, crt
+
+
+def sign_module(ko, key, crt):
+    """Append to KO the signature sign-file appends: a detached CMS over the module, without
+    attributes or certificates, then struct module_signature (id_type 2, PKCS#7) and the magic."""
+    signature = subprocess.run(
+        ["openssl", "cms", "-sign", "-binary", "-noattr", "-nocerts", "-outform", "DER",
+         "-md", "sha512", "-signer", crt, "-inkey", key, "-in", ko],
+        check=True,
+        capture_output=True,
+    ).stdout
+    with open(ko, "ab") as module:
+        module.write(signature + struct.pack(">BBBBB3xI", 0, 0, 2, 0, 0, len(signature)) + MAGIC)
+
+
+MAGIC = b"~Module signature appended~\n"
 
 
 class SignKernel(unittest.TestCase):
@@ -231,6 +248,61 @@ class SignKernel(unittest.TestCase):
         result = self.check_modules(root)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("nvidia.ko is missing", result.stderr)
+
+    def signed_tree(self, crt_key):
+        key, crt = crt_key
+        tree = self.nvidia_tree(pathlib.Path(tempfile.mkdtemp(dir=self.tmp)))
+        for ko in sorted(tree.glob("*/lib/modules/*/extra/nvidia/*.ko")):
+            sign_module(ko, key, crt)
+        return tree
+
+    def check_signed(self, tree, crt):
+        return self.run_script("check-signed", "--cert", crt, "--kver", KVER, "--dir", tree)
+
+    def test_check_signed_accepts_modules_whose_signature_verifies(self):
+        self.modinfo()
+        ours = cert(self.tmp, "Athanor test modules")
+        result = self.check_signed(self.signed_tree(ours), ours[1])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.count("signature verifies against Athanor test modules"), 8)
+
+    def test_check_signed_refuses_a_module_unsigned_foreign_or_altered(self):
+        self.modinfo()
+        ours = cert(self.tmp, "Athanor test modules")
+        theirs = cert(self.tmp, "Someone else")
+        nvidia = f"open/lib/modules/{KVER}/extra/nvidia"
+
+        def unsigned(ko):
+            ko.write_text("ko")
+
+        def foreign(ko):
+            ko.write_text("ko")
+            sign_module(ko, *theirs)
+
+        def altered(ko):
+            ko.write_bytes(b"KO" + ko.read_bytes()[2:])
+
+        def truncated(ko):
+            ko.write_bytes(ko.read_bytes()[-40:])
+
+        for case, change, message in (
+            ("unsigned", unsigned, "carries no module signature"),
+            ("signed by another key", foreign, "does not verify against"),
+            ("altered after signing", altered, "does not verify against"),
+            ("only a signature trailer", truncated, "malformed module signature"),
+        ):
+            with self.subTest(case):
+                tree = self.signed_tree(ours)
+                change(tree / nvidia / "nvidia-uvm.ko")
+                result = self.check_signed(tree, ours[1])
+                self.assertNotEqual(result.returncode, 0, case)
+                self.assertIn(f"{nvidia}/nvidia-uvm.ko", result.stderr)
+                self.assertIn(message, result.stderr)
+        tree = self.signed_tree(ours)
+        (tree / "open/run.sh").write_text("echo")
+        result = self.check_signed(tree, ours[1])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("open/run.sh", result.stderr)
 
     def modules(self, signer, hash_name="sha512", tree=None):
         key, crt = cert(self.tmp, "Athanor test modules")

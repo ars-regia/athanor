@@ -6,6 +6,7 @@ import json
 import os
 import pathlib
 import re
+import struct
 import subprocess
 import tempfile
 import unittest
@@ -245,6 +246,37 @@ class Resolve(Tool):
         self.assertEqual(r.returncode, 1, r.stderr)
         self.assertIn(f"azoth-boot:{boot_tag()} already holds {BOOT}", r.stderr)
         self.assertIn("refusing to overwrite", r.stderr)
+
+    def test_publish_verifies_the_module_signatures_before_building(self):
+        """Modules signed by any key but the one of the committed certificate are never built
+        into an image, let alone pushed."""
+        self.registry(published(branches=("legacy",)))
+        self.assertEqual(self.run_script("resolve").returncode, 0)
+        kver = f"{NVR}.x86_64"
+        signed = self.dir / "signed"
+        nvidia = signed / "open/lib/modules" / kver / "extra/nvidia"
+        nvidia.mkdir(parents=True)
+        (signed / "open/version").write_text(PINS["NVIDIA_OPEN_VERSION"] + "\n")
+        (signed / "open/kver").write_text(kver + "\n")
+        key, crt = self.dir / "other.priv", self.dir / "other.crt"
+        subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+                        "-subj", "/CN=Athanor OS module signing/", "-keyout", key, "-out", crt],
+                       check=True, capture_output=True)
+        ko = nvidia / "nvidia.ko"
+        ko.write_bytes(b"ko")
+        signature = subprocess.run(["openssl", "cms", "-sign", "-binary", "-noattr", "-nocerts", "-outform", "DER",
+                                    "-md", "sha512", "-signer", crt, "-inkey", key, "-in", ko],
+                                   check=True, capture_output=True).stdout
+        with open(ko, "ab") as module:
+            module.write(signature + struct.pack(">BBBBB3xI", 0, 0, 2, 0, 0, len(signature)) + b"~Module signature appended~\n")
+        for tool, body in (("modinfo", f'echo "{kver} SMP preempt mod_unload"'), ("buildah", 'echo "$*" >> "$FAKE_LOG.buildah"; exit 3')):
+            (self.dir / "bin" / tool).write_text(f"#!/usr/bin/env bash\n{body}\n")
+            (self.dir / "bin" / tool).chmod(0o755)
+        r = self.run_script(str(signed), str(self.dir / "boot"), script=ROOT / "forge/specs/azoth/nvidia-publish.sh")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn(f"open/lib/modules/{kver}/extra/nvidia/nvidia.ko: its signature does not verify against", r.stderr)
+        self.assertIn("keys/modules/athanor-modules.pem", r.stderr)
+        self.assertFalse((self.dir / "calls.log.buildah").exists(), "nothing built")
 
     def test_publish_takes_the_signed_vmlinuz_directory(self):
         r = self.run_script(str(self.dir / "signed"), script=ROOT / "forge/specs/azoth/nvidia-publish.sh")

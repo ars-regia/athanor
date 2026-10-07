@@ -15,8 +15,11 @@
 # Usage: nvidia-publish.sh SIGNED_DIR BOOT_DIR. Run system/kernel-artifacts.sh resolve first,
 # inside the azoth-nvidia-publish concurrency group. Needs buildah and cosign logged in to the
 # registry, syft, SIGNED_DIR/<branch>/ as sign-kernel.sh modules leaves it and BOOT_DIR as
-# sign-kernel.sh vmlinuz leaves it, already verified (signer/run.sh verify). Writes
-# nvidia-publish/: sbom/, digests/, pins-<branch>.json, boot.json and summary.md.
+# sign-kernel.sh vmlinuz leaves it, already verified (signer/run.sh verify). SIGNED_DIR comes
+# from another job: before a branch is built, sign-kernel.sh check-signed verifies the whole
+# tree again here (the allow-list, the vermagic, and every module signature against the
+# committed module certificate). Writes nvidia-publish/: sbom/, digests/, pins-<branch>.json,
+# boot.json and summary.md.
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -53,6 +56,8 @@ for driver in open legacy; do
   kver=$(cat "$SIGNED/$driver/kver")
   [[ $built == "$version" ]] || { echo "the ${driver} modules are ${built}, the pins ${version}" >&2; exit 1; }
   [[ $kver == "${nvr}.x86_64" ]] || { echo "the ${driver} modules were built for ${kver}, the kernel is ${nvr}.x86_64" >&2; exit 1; }
+  bash "$ROOT/forge/specs/azoth/sign-kernel.sh" check-signed --cert "$ROOT/forge/specs/azoth/keys/modules/athanor-modules.pem" \
+    --kver "$kver" --dir "$SIGNED"
 
   ctr=$(buildah from scratch)
   buildah copy "$ctr" "$SIGNED/$driver/" /
