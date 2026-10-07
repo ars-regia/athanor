@@ -6,7 +6,7 @@
 | Owner | Maintainer |
 | Status | Revision 1, 2026-10-06; section 4 added 2026-10-07; SEC5, SEC6 and RL2 removed on 2026-10-07 with RPM signing (ADR-0076, decision 2). Sections 1, 3 and 4 are facts. Section 2 and every line marked _(Proposal)_ await the maintainer |
 | Depends on | `doc_kernel_build.md` section 6 (key design), `doc_kernel_profile.md` D43 and section 9 (custody, key table), `doc_update_trust.md` UT2, UT3 (image key), decisions A2-27, A2-35, ADR-0076 |
-| Defines | SEC1-SEC12 (secrets), VAR1-VAR5 (variables), ENV1-ENV5 (environments), KC1-KC6 (custody), RL1-RL8 (recovery) |
+| Defines | SEC1-SEC13 (secrets), VAR1-VAR6 (variables), ENV1-ENV6 (environments), KC1-KC6 (custody), RL1-RL8 (recovery) |
 | Facts checked with | `git grep` on `origin/iso-v0` at `bd1f0e4a`; `gh secret list`, `gh variable list`, `gh api repos/ars-regia/athanor/environments` and its `secrets`, `variables` and `deployment-branch-policies` endpoints, names only; the branches of open PRs #115 (`sign-vmlinuz`), #180 (`a2/delivery`) and #185 (`a2/rpm-sign-job`). The repository was then `hr-mes/athanor`; after the transfer the same `gh` queries on `ars-regia/athanor` on 2026-10-06 return the same names, reviewers and deployment branches |
 
 No value of any secret appears here or was read to write this. Commands below use
@@ -30,6 +30,8 @@ Workflow references are `file:line` under `.github/workflows/` at `bd1f0e4a`.
 | SEC10 | `GITHUB_TOKEN` | automatic, per job | GitHub App installation token | most workflows; its scopes are each workflow's `permissions:` block | none |
 | SEC12 | runner credential `github-token` | host of the self-hosted runner, not GitHub | GitHub token read by `install.sh` from standard input | `scripts/runner/install.sh:30,46` encrypts it with `systemd-creds` (host key and TPM2) into `/etc/credstore.encrypted/athanor-runner.github-token`; `athanor-runner.service:22` loads it; `vm.sh:29,102` uses it only to create a just-in-time runner configuration per job | none |
 
+| SEC13 | `SETTINGS_APP_PRIVATE_KEY` | repository | private key of the settings GitHub App, which holds read permissions only (`github-settings.md` section 9) | `maintenance.yml` `settings-drift`, through `actions/create-github-app-token`, which mints a read-only token for this repository; not set yet | none |
+
 Keyless signatures (`forge/scripts/sign_attest.sh`, `cosign sign --yes`) use the workflow's
 OIDC identity and need no secret.
 
@@ -44,20 +46,23 @@ No repository variable is set (`gh variable list` is empty), so every default be
 | VAR3 | `BUILDER_STABLE_TAG` | `latest` | `forge-ghcr-cleanup.yml:25`, `fuzzing.yml:36`, `rust-security-audit.yml:22,139,193` |
 | VAR4 | `RELEASE_BRANCH` | `iso-v0` | PR #180 only: orchestrator, `call-system-image.yml`, `iso-acceptance.yml`, `promote-stable.yml` |
 | VAR5 | `PROMOTE_DWELL_HOURS` | `24` | PR #180 only: `promote-stable.yml` |
+| VAR6 | `SETTINGS_APP_CLIENT_ID` | none; not set yet | `maintenance.yml` `settings-drift`: client id of the settings GitHub App (SEC13) |
 
-| Id | Environment | Secrets | Protection (`.github/settings/environments.json`; GitHub still has the single `signing` environment until the bootstrap of section 4) | Referenced by |
+| Id | Environment | Secrets | Protection (`.github/settings/environments.json`; `signing` stays beside the split until the image key rotation of section 4.1 ends) | Referenced by |
 | --- | --- | --- | --- | --- |
 | ENV1 | `signing-kernel` | SEC1, SEC2 | required reviewer `hr-mes`, self-review allowed (`prevent_self_review` false, see `github-settings.md` section 7), no administrator bypass; deployment branches `iso-v0` and `main`, both protected (required checks `Kernel gate`, `Spec gate` and `gate` on `iso-v0`, `Kernel gate` on `main`; no force push, no deletion) | `athanor-forge-orchestrator.yml:196` (`nvidia-kmod-sign`, the sign-kernel job; a manual cycle dispatches the Orchestrator). `scripts/verify.py workflows` fails a signing secret outside a job of the environment that holds it in `environments.json`, a signing job that builds or uses an action other than checkout and artifact transfer, a step that hands a signing secret to anything but a sign script, a signing job in a workflow with `workflow_call` among its triggers, whose keys would be empty unless the caller inherits every secret (actions/runner#4453), and a signing environment with administrator bypass or a deployment branch that `branch-protection.json` does not protect (D43) |
 | ENV2 | `stable-override` | none | **missing on GitHub** | PR #180 only (`promote-stable.yml`, checked by `system/require-review.sh`); `doc_update_trust.md` on that branch asks for required reviewers, the release branch only and no administrator bypass |
 | ENV3 | `delete` | none | none; created 2026-08-08 | nothing |
 | ENV4 | `github-pages` | none | deployment branches `gh-pages` and `main` | no workflow names it; it served the DNF channel, removed by ADR-0076 decision 2, and the maintainer deletes it with the `gh-pages` branch |
 | ENV5 | `signing-images` | SEC3, SEC4 | required reviewer `hr-mes`, self-review allowed (`prevent_self_review` false, see `github-settings.md` section 7), no administrator bypass; deployment branches `iso-v0` and `main`, both protected (required checks `Kernel gate`, `Spec gate` and `gate` on `iso-v0`, `Kernel gate` on `main`; no force push, no deletion) | `athanor-forge-orchestrator.yml``:306` (`sign-system-images`, in `signing` during the rotation of section 4.1); PR #185 adds `sign-repo` and SEC5, SEC6 |
+| ENV6 | `signing` | SEC1 to SEC4, `MOK_PRIVATE_KEY` | as ENV5; declared in `environments.json` only during the image key rotation (section 4.1), as an alias of ENV5 for `scripts/verify.py` | `athanor-forge-orchestrator.yml` `sign-system-images` until step 3 of section 4.1; deleted at step 4 |
 
 ### 1.3 Drift between code and GitHub
 
 | Direction | Item | Effect | Action |
 | --- | --- | --- | --- |
-| files ahead of GitHub | ENV1, ENV5, protection of `main` | the split and the protection exist only in `.github/settings`; GitHub still has `signing` with every key, and the workflows name the new environments, so a signing job fails to find its keys until they move | the bootstrap of section 4 |
+| files ahead of GitHub | ENV1, ENV5, protection of `main` | the split and the protection exist only in `.github/settings`; GitHub still has `signing` with every key (it stays until section 4.1 ends), and the workflows name the new environments, so a signing job fails to find its keys until they move | the bootstrap of section 4 |
+| files ahead of GitHub | SEC13, VAR6 | `maintenance.yml` fails until both exist | step 2 of `github-settings.md` section 9 |
 | used, missing | ENV2 | PR #180's override path fails by design until the environment exists | create it when PR #180 merges |
 | present, unused | ENV3 | none | delete it, or say what it is for |
 | other | SEC9 | `forge-ghcr-cleanup.yml` fails on every run (37173567085, 36288233693, 35483291172) | outside this runbook |
@@ -189,8 +194,9 @@ because the Orchestrator, not a pull request, publishes the signed vmlinuz.
    `signing-images` as `.github/settings/environments.json` describes them
    (`docs/operations/github-settings.md` section 7: reviewer, branches `iso-v0` and `main`,
    administrator bypass off by hand), then load SEC1 and SEC2 into `signing-kernel` and SEC3 and
-   SEC4 into `signing-images` with the commands of section 1.4, from the backup of KC2. Delete
-   `signing` only after a run of each signing job has passed with the new environments.
+   SEC4 into `signing-images` with the commands of section 1.4, from the backup of KC2. Keep
+   `signing`: it signs the transitional release with image key 1 and is deleted, with
+   `MOK_PRIVATE_KEY`, only at step 4 of section 4.1.
 2. **`azoth-signer.yml` publishes the signer image.** It runs on the push of the merge
    (`forge/specs/azoth/signer/**`, `lock.sh` and `sign-kernel.sh` are in its paths), or by hand:
    `gh workflow run azoth-signer.yml --ref iso-v0 --repo "$REPO"`. It needs no key and no
