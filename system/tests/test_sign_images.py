@@ -60,11 +60,37 @@ STUB = textwrap.dedent("""\
         if digest not in signed or os.environ.get("STUB_REFUSE"):
             sys.exit("Source image rejected: A signature was required, but no signature exists")
         pull = pathlib.Path(args[-1].removeprefix("dir:"))
-        assert not pull.is_relative_to(os.environ["XDG_RUNTIME_DIR"]), f"a whole image pulled into the memory-backed key directory: {pull}"
-        pull.mkdir()
+        if os.environ.get("STUB_IN_CONTAINER"):
+            assert str(pull) == "/var/tmp/verified", f"the container pulls outside its own /var/tmp: {pull}"
+        else:
+            assert not pull.is_relative_to(os.environ["XDG_RUNTIME_DIR"]), f"a whole image pulled into the memory-backed key directory: {pull}"
+            pull.mkdir()
     else:
         sys.exit(f"stub skopeo: unsupported {args}")
     """)
+
+
+PODMAN = textwrap.dedent("""\
+    #!/usr/bin/env python3
+    # A podman that records the container it would start and runs its command on the host,
+    # after checking that every mount is read-only and that no key file sits beside one.
+    import json, os, pathlib, sys
+    state = pathlib.Path(os.environ["STUB_STATE"])
+    args = sys.argv[1:]
+    assert args[:2] == ["run", "--rm"], args
+    mounts = [args[i + 1] for i, a in enumerate(args) if a == "-v"]
+    for mount in mounts:
+        assert mount.endswith(":ro"), mount
+        host = pathlib.Path(mount.split(":")[0])
+        for d in (host, *host.parents):
+            assert not (d / "key").exists() and not (d / "passphrase").exists(), f"key file reachable from {mount}"
+    image = next(a for a in args if "/athanor-builder:" in a)
+    with open(state / "podman.log", "a") as log:
+        log.write(json.dumps({"mounts": mounts, "image": image, "args": args}) + "\\n")
+    cmd = args[args.index(image) + 1:]
+    os.execvpe(cmd[0], cmd, {**os.environ, "STUB_IN_CONTAINER": "1"})
+    """)
+BUILDER = "ab" * 32
 
 
 class SignImages(unittest.TestCase):
@@ -75,6 +101,9 @@ class SignImages(unittest.TestCase):
         stub = self.dir / "bin" / "skopeo"
         stub.write_text(STUB)
         stub.chmod(0o755)
+        podman = self.dir / "bin" / "podman"
+        podman.write_text(PODMAN)
+        podman.chmod(0o755)
         self.state = self.dir / "state"
         self.state.mkdir()
         self.tags = {f"{REG}/{name}:412": "sha256:" + f"{i + 1}" * 64 for i, name in enumerate(NAMES)}
@@ -153,6 +182,31 @@ class SignImages(unittest.TestCase):
         for call in self.calls()[before:]:
             self.assertNotIn("inspect", call["args"])
             self.assertFalse(any(":412" in a for a in call["args"]), call["args"])
+
+    def test_with_the_builder_the_verification_runs_in_its_image_without_the_key(self):
+        self.digests()
+        r = self.sign(SIGN_VERIFY_BUILDER=BUILDER)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads((self.state / "signed.json").read_text()), list(self.tags.values()))
+        runs = [json.loads(line) for line in (self.state / "podman.log").read_text().splitlines()]
+        self.assertEqual(len(runs), 3)
+        for run in runs:
+            self.assertEqual(run["image"], f"{REG}/athanor-builder:{BUILDER}")
+            self.assertEqual(len(run["mounts"]), 2, "only the rendered policy and the public keys")
+            self.assertNotIn("-e", run["args"])
+            self.assertIn("--cap-drop=all", run["args"])
+            self.assertNotIn("--sign-by-sigstore-private-key", run["args"])
+        self.assertTrue(all("--policy" not in c["args"] for c in self.calls() if "--sign-by-sigstore-private-key" in c["args"]))
+        self.assertEqual(r.stdout.count("signed and verified with the shipped policy"), 3)
+
+    def test_a_builder_that_is_not_a_content_hash_is_refused_before_signing(self):
+        self.digests()
+        for value in ("latest", BUILDER[:-1], f"{BUILDER} --privileged"):
+            with self.subTest(value=value):
+                r = self.sign(SIGN_VERIFY_BUILDER=value)
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertEqual(json.loads((self.state / "signed.json").read_text()), [])
+                self.assertFalse((self.state / "podman.log").exists())
 
     def test_a_signature_a_machine_would_not_accept_fails_the_job(self):
         self.digests()
