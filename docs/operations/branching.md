@@ -21,7 +21,7 @@ Counts are as of 2026-10-06; the command beside each recomputes it.
 | Stacked chains have been the norm: #120 on #119 on #118 on `iso-v0`; #185 on #115 on `iso-v0` | `gh pr list --state open` |
 | 29 branches existed on GitHub on 2026-10-06 | `gh api repos/ars-regia/athanor/branches --paginate --jq '.[].name' \| wc -l` |
 | `fuzzing.yml` and `nix-vanguard.yml` trigger on `main` (and `develop`) only, so a push or pull request to `iso-v0` never runs them | [fuzzing.yml](../../.github/workflows/fuzzing.yml) lines 5 and 12, [nix-vanguard.yml](../../.github/workflows/nix-vanguard.yml) lines 5 and 7 |
-| The installer ISO's `:latest` publishes from `refs/heads/main` only, so it does not publish today | [call-system-image.yml](../../.github/workflows/call-system-image.yml) line 309 |
+| The installer ISO's `:latest` publishes from `refs/heads/main` only, so it does not publish today | [call-system-image.yml](../../.github/workflows/call-system-image.yml) line 315 |
 | The kernel's `:latest` follows the default branch, whatever its name | [kernel-build.yml](../../.github/workflows/kernel-build.yml) lines 316 and 339 |
 | The image trusts kernels and NVIDIA modules signed by workflows on `refs/heads/iso-v0` or `refs/heads/main` (`KERNEL_TRUSTED_REFS`), and `main` is not protected | [kernel-artifacts.sh](../../system/kernel-artifacts.sh) lines 64 and 73-74 |
 
