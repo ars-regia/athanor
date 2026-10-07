@@ -29,7 +29,7 @@ linked document's header before its body.
 | --- | --- |
 | One crate | `cargo build -p <crate>`; a crate that links GTK: `forge/test/shell/rig.sh build-image` once, then `forge/test/shell/rig.sh cargo build -p <crate>` |
 | One spec | `bash forge/scripts/run_spec_build.sh <builder image> specs/<package>` (RPMs in `forge/RPMS/`) |
-| The image | `system/build-image.sh` (without `SECUREBOOT_SIGNING_KEY` it signs with a throwaway key and refuses to push, [system/README.md](../../system/README.md)) |
+| The image | `system/build-image.sh` (no key reaches the build: the vmlinuz comes signed from `azoth-boot`, [system/README.md](../../system/README.md)) |
 | An image with unmerged RPMs, for the dev VM | `scripts/devvm/local-image.sh` |
 
 `just all` runs the whole pipeline and takes hours: never run it as a check.
