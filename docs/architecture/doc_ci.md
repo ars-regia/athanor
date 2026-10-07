@@ -19,14 +19,14 @@ The task brief counted 23 workflows. There are 24: `nix-registry-bump.yml` lande
 push to forge/** or system/** (main, iso-v0) | daily 04:00 UTC | dispatch (Kernel Build, manual)
 CI1 athanor-forge-orchestrator.yml        concurrency: one run per ref, the newest waits
  |- lint ............................ CI2 call-lint.yml
- |- orchestrator-brain .............. forge/scripts/dynamic-matrix.sh -> dag_level_0..2, dag_flatpaks, has_changes
+ |- orchestrator-brain .............. forge/scripts/dynamic-matrix.sh -> dag_packages, has_changes
  |- build-builder ................... CI3 call-build-builder.yml -> athanor-builder:<content_hash>
  |- kernel-artifacts ................ system/kernel-artifacts.sh resolve, cycle -> state, cycle, kernel_digest
  |   `- nvidia-kmod (modules-missing)  CI26 call-nvidia-kmod-prepare.yml -> CI7 nvidia-build.yml
  |      `- nvidia-kmod-sign ........... environment signing-kernel   [signing approval: sign-kernel]
  |         `- nvidia-kmod-publish ..... CI6 nvidia-kmod.yml: boot, publish
  |- kernel-artifacts-final .......... system/kernel-artifacts.sh require-ready -> artifact kernel-artifacts
- |- dag-compile ..................... CI4 call-dag-compile.yml: level 0 -> level 1 -> level 2 -> flatpaks
+ |- dag-compile ..................... CI4 call-dag-compile.yml: one matrix of every dirty package
  |- system-image .................... CI5 call-system-image.yml: build-repo -> dag-system-image
  `- sign-system-images .............. environment signing (signing-images)   [signing approval]
 
@@ -35,14 +35,14 @@ CI9 kernel-bump.yml (PR) -> merge -> CI8 kernel-build.yml (publish azoth) -> dis
 Release path: CI1 publishes :<run_id> and :latest -> CI12 iso-acceptance.yml (weekly) -> CI11 promote-stable.yml (manual, :stable)
 ```
 
-CI2 also runs inside CI3, CI4 and CI5, so one Orchestrator run lints four times (run 37384733899 lists the jobs `lint`, `build-builder / lint`, `dag-compile / lint`, `system-image / lint`). CI8 calls it as its first job.
+CI1 runs CI2 once, as its first job, and calls CI3, CI4 and CI5 only after it passed; they have no lint of their own. They used to repeat it, so one Orchestrator run linted four times, about 2 minutes each on the critical path (run 37384733899 lists the jobs `lint`, `build-builder / lint`, `dag-compile / lint`, `system-image / lint`). CI8 calls it as its first job.
 
 ### 1.2 Where things are built
 
 | Stage | Runner | Workflow, job |
 |---|---|---|
 | Builder image (Nix) | GitHub-hosted `ubuntu-24.04` | CI3 `build-builder` |
-| Forge RPMs, one matrix job per package | GitHub-hosted | CI4 `dag-build-level-0..2` |
+| Forge RPMs, one matrix job per package | GitHub-hosted | CI4 `dag-build` |
 | Tier repositories, system images, ISO | GitHub-hosted | CI5 `build-repo`, `dag-system-image` |
 | Kernel RPMs (about an hour) | **self-hosted** | CI8 `build` |
 | Kernel boot matrix, publication | GitHub-hosted with KVM (`.github/actions/kvm`) | CI8 `boot`, `publish` |
@@ -96,14 +96,14 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 - **Outputs:** artifact `kernel-artifacts`; images of CI3, CI4, CI5, CI6.
 - **Secrets, variables:** `REGISTRY_HOST`, `KERNEL_REGISTRY`, `GITHUB_TOKEN`; `MODULE_SIGNING_KEY` and `SECUREBOOT_SIGNING_KEY` in `nvidia-kmod-sign`, `COSIGN_PRIVATE_KEY` and `COSIGN_PASSWORD` in `sign-system-images`. No secret is passed to a called workflow.
 - **Environment:** `signing-kernel` on `nvidia-kmod-sign`; `signing` on `sign-system-images`, the alias of `signing-images` during the image key rotation (`docs/operations/secrets.md` section 4.1; ADR-0064). Both are jobs of this workflow, not of CI6 or CI5: a called workflow's job reads the secrets of its environment only when its caller passes `secrets: inherit` ([actions/runner#4453](https://github.com/actions/runner/issues/4453)), so the sign job of CI6, called without it, ran with both kernel keys empty in run 37598455557, and an inherit would hand every secret to every job of the called workflow (D43). The workflow sets no workflow-level `env:`, which D43 limits to plain values beside a signing job.
-- **Runner:** hosted. **Concurrency:** `<workflow>-<ref>`, no cancel: the newest run waits (`:61-63`, O6).
+- **Runner:** hosted. **Concurrency:** `<workflow>-<ref>`, no cancel: the newest run waits (O6). The group stays at run level because it publishes the system images in commit order: a group on the image job alone is taken in arrival order, and clients order images by build time (doc_update_trust.md, UT9). It also holds the signing approvals of the run (`sign-system-images`, and `nvidia-kmod` when the modules are missing), so the next push waits for them; PL49 lifts this once the image publish refuses an older revision and signing leaves the run.
 - **Scripts:** `forge/scripts/dynamic-matrix.sh`, `system/kernel-artifacts.sh`, `forge/specs/azoth/signer/run.sh`, `system/sign-images.sh`.
 - **Health:** 37444165929 pending; 37441359373, 37436322329, 37389162383, 37384753812 cancelled. The cancelled runs were superseded in the concurrency group while 37384733899 waited for the `signing` approvals (its `dag-system-image` started 9 h after `build-repo`; its `sign-system-images` was still waiting at 09:44 UTC). Last complete runs: 37362183855 failure (a lint job cancelled at its limit), 37315915191 and 37299854397 success with all system-image jobs green.
 
 ### CI2 Reusable Workflow Lint
 
 - **File:** `call-lint.yml`. **Purpose:** actionlint with shellcheck, `scripts/verify.py workflows kickstart boundary cmdline registry licence ci`, and the Python unit test suites of the kernel profile, Azoth, Nix support, NVIDIA, build ordering, update, recovery, system config, ISO verdict, `scripts/tests`, Calmo, forge scripts and shell rig. `verify.py workflows` carries the D43 lint: it parses every workflow with PyYAML (installed by this job; the lint fails without it) and fails a signing secret read outside the sign step of a job of the environment that holds it, any read of the secrets context other than by name, a signing job with another action or input, a container, defaults, a runner that is not a GitHub-hosted ubuntu label, a `run:` that is not one of the exact allow-listed commands, a `shell:` or `working-directory:` of its own, an `env:` name (job, step or workflow) outside the secrets of its environment and a short list of plain values, or a download into the checkout, an environment named by an expression (names compare without regard to case), `pull_request_target` in any workflow, `secrets: inherit` into a workflow with a signing job, a signing job in a workflow with `workflow_call` among its triggers (its keys would be empty, actions/runner#4453), and any secret that neither `.github/settings/environments.json` (an environment holds it) nor `actions.json` (a repository secret, which no signing environment may hold) declares, `GITHUB_TOKEN` aside. It is a regression guard against drift in reviewed workflows, not a security boundary: the environment protection and the review of every workflow change are.
-- **Triggers:** `workflow_call` only (CI1, CI3, CI4, CI5, CI8, CI11, CI12, CI15). **Inputs, outputs:** none.
+- **Triggers:** `workflow_call` only (CI1, CI8, CI11, CI12, CI15). **Inputs, outputs:** none.
 - **Secrets, variables:** none. **Environment:** none. **Runner:** hosted. **Concurrency:** caller's.
 - **Scripts:** `scripts/verify.py`, `forge/specs/athanor-kernel-profile/kernel_profile.py`, `forge/test/iso/test_verdict.py`, `system/athanor-style/calmo/contrast.py`, `generate.py`.
 - **Health:** green in every caller run listed here.
@@ -119,10 +119,10 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 ### CI4 Reusable DAG Compile Workflow
 
 - **File:** `call-dag-compile.yml`. **Purpose:** builds every changed forge package in the builder image (fetch with network, build without), publishes it as a micro-container, SBOM, keyless signature.
-- **Triggers:** `workflow_call` (CI1). **Inputs:** `dag_level_0..2`, `dag_flatpaks`, `builder_hash`. **Outputs:** package images; artifact `crash-logs-<package>` on failure.
-- **Secrets, variables:** `GITHUB_TOKEN`, `REGISTRY_HOST`. **Environment:** none. **Runner:** hosted, up to 20 parallel jobs per level. **Concurrency:** caller's.
+- **Triggers:** `workflow_call` (CI1). **Inputs:** `dag_packages`, `builder_hash`. **Outputs:** package images; artifact `crash-logs-<package>` on failure.
+- **Secrets, variables:** `GITHUB_TOKEN`, `REGISTRY_HOST`. **Environment:** none. **Runner:** hosted, up to 20 parallel jobs in one matrix. **Concurrency:** caller's.
 - **Scripts:** `forge/scripts/check_idempotency.sh`, `run_spec_build.sh`, `retry.sh`, `sign_attest.sh`.
-- **Health:** all levels green in 37384733899.
+- **Health:** all levels green in 37384733899, before the levels were merged into one matrix.
 
 ### CI5 Call System Image
 
@@ -375,5 +375,5 @@ Environments (`gh api repos/ars-regia/athanor/environments`):
 ## 6. Proposals
 
 - **CP2** _(Done 2026-10-06)_: CI8 runs on every pull request and calls CI2 first; `Kernel gate`, the check required on `iso-v0`, is green only when CI2 is, so no PR merges into `iso-v0` unlinted. PRs into `main` or into a stacked branch are linted but not gated. The cost is accepted: a CI2 failure unrelated to the kernel (a red suite, a download that fails) also holds back the kernel build, its publication and the Orchestrator dispatch until a re-run.
-- **CP3** _(Proposal)_: call CI2 once in CI1 and drop the nested calls in CI3, CI4 and CI5; they lint the same commit four times per run.
+- **CP3** _(Done 2026-10-07)_: call CI2 once in CI1 and drop the nested calls in CI3, CI4 and CI5; they lint the same commit four times per run.
 - **CP4** _(Proposal, after CI27 is merged and its protection applied)_: a follow-up change removes the `pull_request` triggers of CI8 and CI14 and, in the same change, `Kernel gate` and `Spec gate` from `.github/settings/branch-protection.json` and from `CHECK_WORKFLOWS` of `bot_merge.py`, and moves the spec bot merge into CI27. The maintainer applies the file right after the merge (`docs/operations/github-settings.md` section 8); `gate` of CI27 is then the only required check of `iso-v0`, and a documentation-only pull request runs no kernel job at all.
