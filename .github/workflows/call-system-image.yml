@@ -157,7 +157,6 @@ jobs:
         run: |
           set -euo pipefail
           echo "IMAGE_REGISTRY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "${GITHUB_ENV}"
-          echo "DEFAULT_TAG=latest" >> "${GITHUB_ENV}"
       - name: 📥 Checkout Repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Kernel artifacts verified by the Orchestrator
@@ -204,7 +203,7 @@ jobs:
           set -euo pipefail
           for gpu in none nvidia nvidia-legacy; do
             bash system/build-image.sh --gpu "$gpu" --system-image "$(<artifacts/system-image.iid)" --registry "${IMAGE_REGISTRY}" \
-              --tag "${RUN_ID}" --tag "${DEFAULT_TAG}" --serial "${RUN_NUMBER}"
+              --tag "${RUN_ID}" --serial "${RUN_NUMBER}"
           done
           df -h
 
@@ -219,12 +218,14 @@ jobs:
             | tee -a "${GITHUB_STEP_SUMMARY}"
 
       - name: 📤 Push OS Images
+        # By run id only: :latest moves in tag-system-images of the Orchestrator, after the
+        # key-based signature of these digests verified (doc_update_delivery.md, UD24, UD25).
         env:
           RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
           for gpu in none nvidia nvidia-legacy; do
-            bash system/build-image.sh --gpu "$gpu" --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" --tag "${DEFAULT_TAG}" --push-only
+            bash system/build-image.sh --gpu "$gpu" --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" --push-only
           done
 
       - name: 🧾 Record the pushed digests for the signing job
@@ -240,8 +241,8 @@ jobs:
           if-no-files-found: error
 
       - name: 🔐 Sign & Attest OS Image (Zero-Trust Keyless Sigstore)
-        # One signature and one SBOM attestation per image digest: the :latest tag
-        # resolves to the same digest as :<run_id>, so cosign verify accepts both.
+        # One signature and one SBOM attestation per image digest: the :latest tag, moved
+        # later to the same digest as :<run_id>, carries them, so cosign verify accepts both.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
@@ -265,7 +266,7 @@ jobs:
         run: |
           set -euo pipefail
           for name in athanor-system-nvidia athanor-system-nvidia-legacy; do
-            podman rmi "${IMAGE_REGISTRY}/${name}:${RUN_ID}" "${IMAGE_REGISTRY}/${name}:${DEFAULT_TAG}"
+            podman rmi "${IMAGE_REGISTRY}/${name}:${RUN_ID}"
           done
           df -h
 
