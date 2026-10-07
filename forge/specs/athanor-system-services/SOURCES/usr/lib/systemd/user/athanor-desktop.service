@@ -1,6 +1,6 @@
 [Unit]
 Description=Athanor session readiness gate
-Documentation=https://github.com/hr-mes/athanor-forge
+Documentation=https://github.com/ars-regia/athanor
 
 # The one thing every graphical unit needs and none of them can assume: a compositor that
 # answers. cosmic-comp creates its Wayland socket a moment before it can serve a surface,

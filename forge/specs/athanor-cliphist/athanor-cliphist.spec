@@ -5,7 +5,7 @@ Version:        0.7.0
 Release:        3%{?dist}
 Summary:        Wayland clipboard manager
 
-License:        GPL-3.0
+License:        GPL-3.0-only
 URL:            https://github.com/sentriz/cliphist
 Source0:        https://github.com/sentriz/cliphist/archive/refs/tags/v%{version}.tar.gz#/cliphist-%{version}.tar.gz
 

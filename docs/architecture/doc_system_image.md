@@ -1,6 +1,6 @@
 # System image: base and GPU variants
 
-Status: **approved by the maintainer on 2026-09-16; implemented by docs/superpowers/plans/2026-09-16-system-image-variants.md**. This document records what the maintainer decided on 2026-09-16: option C+A, with Fedora's atomic desktop base. `doc_kernel_build.md` (section 10) and `doc_kernel_profile.md` (sections 6 and 14) keep owning the kernel modules and the kernel profile; section 8 lists what they must change to agree with this document.
+Status: **approved by the maintainer on 2026-09-16; implemented by the plan in history: `git show 1fbef951:docs/superpowers/plans/2026-09-16-system-image-variants.md`**. This document records what the maintainer decided on 2026-09-16: option C+A, with Fedora's atomic desktop base. `doc_kernel_build.md` (section 10) and `doc_kernel_profile.md` (sections 6 and 14) keep owning the kernel modules and the kernel profile; section 8 lists what they must change to agree with this document.
 
 ## 1. Context
 
@@ -50,7 +50,7 @@ The bump bot moves the digest by pull request, as it does for the kernel Contain
 | `athanor-system-nvidia` | signed open modules + NVIDIA userspace at `NVIDIA_OPEN_VERSION` | NVIDIA Turing and later |
 | `athanor-system-nvidia-legacy` | signed legacy modules + NVIDIA userspace at `NVIDIA_LEGACY_VERSION` | NVIDIA Maxwell, Pascal, Volta |
 
-The tier packages, the upstream packages, the UKI assembly and the hardening are shared stages, so a variant cannot drift from the default image except in its GPU layer.
+The tier packages, the upstream packages, the signed kernel, the initramfs and the hardening are shared stages, so a variant cannot drift from the default image except in its GPU layer.
 
 **S3. The default image carries no NVIDIA blobs.** In `athanor-system`:
 
@@ -113,10 +113,11 @@ A mismatch is a build failure with the exact values, never a warning.
 - **Build and publication:**
   - `call-system-image.yml` builds the default image, then the two variants from the shared stages;
   - each image is pushed, signed and SBOM-attested like `athanor-system` today;
-  - the signing job serves all three images, so a cycle needs one approval of the `signing` environment. The plan verifies that GitHub groups the waiting jobs into one review.
+  - the signing job serves all three images, so a cycle needs one approval of the `signing-images` environment. The plan verifies that GitHub groups the waiting jobs into one review;
+  - the build job holds no key and runs outside the signing environments (D43): the vmlinuz arrives signed for Secure Boot (section 8).
 - **Installation:**
   - the installer ISO stays single and installs `athanor-system`;
-  - a machine with NVIDIA hardware moves to its variant with `bootc switch ghcr.io/hr-mes/athanor-system-nvidia:latest`, or `-nvidia-legacy`;
+  - a machine with NVIDIA hardware moves to its variant with `bootc switch ghcr.io/ars-regia/athanor-system-nvidia:latest`, or `-nvidia-legacy`;
   - detecting the GPU in the installer and choosing the image there is future work.
 - **Acceptance:**
   - ISO acceptance keeps installing the default image in a VM without GPU;
@@ -138,7 +139,7 @@ A mismatch is a build failure with the exact values, never a warning.
 - **RPM Fusion keeps only the latest release.**
   - `updates/43` publishes only the newest NVR of each package. The mirror (S7) keeps the pinned NVR building after RPM Fusion moves past it, and the bump bot verifies the lock on every daily run and moves the pin or regenerates the lock by pull request.
   - When 580 becomes a legacy series, RPM Fusion renames the packages (`xorg-x11-drv-nvidia-580xx*`). That needs a change to the package list in `lock.py`, not only a version bump.
-- **CI cost:** three image builds per cycle instead of one. The shared stages are cached layers, so only the GPU layer and the UKI assembly are paid three times.
+- **CI cost:** three image builds per cycle instead of one. The shared stages are cached layers, so only the GPU layer and the initramfs are paid three times.
 - **Flatpak applications** need the NVIDIA GL runtime extension matching the host driver version (`org.freedesktop.Platform.GL.nvidia-<version>`). flatpak installs it when the host driver is present; the hardware check covers it.
 - **Content drift of the base:** the digest pin plus a reviewed bump PR, with the package difference reported in the PR body.
 - **Package sets differed from the old base.** base-atomic is not identical to `ermete-base-nvidia`. The first implementation task compared the two package sets in CI and listed every package the image lost or gained for review.
@@ -165,18 +166,18 @@ These defects were found on the same boot and each needs its own fix:
    - `cosmic-panel` initialises EGL;
    - `modinfo -F signer nvidia` names the module signing key.
 
-   After this check `MOK_PRIVATE_KEY` is deleted from the `signing` environment.
-
 ## 7. Migration of the maintainer's desktop
 
 1. **Now, to use the desktop:** the temporary kernel argument `modprobe.blacklist=nvidia,nvidia_drm,nvidia_modeset,nvidia_uvm,nvidia_peermem` hands both GPUs back to `nouveau`.
-2. **Once the variant is published:** `sudo rpm-ostree kargs --delete=modprobe.blacklist=nvidia,nvidia_drm,nvidia_modeset,nvidia_uvm,nvidia_peermem` and `sudo bootc switch ghcr.io/hr-mes/athanor-system-nvidia:latest`, then a reboot at the maintainer's choice.
+2. **Once the variant is published:** `sudo rpm-ostree kargs --delete=modprobe.blacklist=nvidia,nvidia_drm,nvidia_modeset,nvidia_uvm,nvidia_peermem` and `sudo bootc switch ghcr.io/ars-regia/athanor-system-nvidia:latest`, then a reboot at the maintainer's choice.
 3. The checks of section 6, item 3.
 
 ## 8. Version and signatures
 
 - **Version.** `system/build-image.sh` labels every image with `org.opencontainers.image.version`, `<base major>.<UTC build date>.<serial>`, and `org.opencontainers.image.created`. The serial is the CI run number in the pipeline and `0` in a local build. Ordering uses the build time, never the version string (`doc_update_trust.md`, UT9).
 - **Signatures.** The three images carry two signatures. The keyless Sigstore signature and SBOM attestation (`forge/scripts/sign_attest.sh`) record provenance. The key-based signature, made by `system/sign-images.sh` in the `sign-system-images` job, is what machines verify: the policy rendered from the public keys under `system/keys` is in force in the image (`/etc/containers/policy.json` links to it), and the job verifies each signature through that policy before it reports success (`doc_update_trust.md`, UT2 and UT3).
+- **Signed kernel.** GRUB loads `/usr/lib/modules/<kver>/vmlinuz` through shim; 1.0 has no UKI (A2-8, #145). That vmlinuz is the one NVIDIA kmod's sign-only job signs with the Secure Boot key for each kernel and publishes as `KERNEL_REGISTRY/azoth-boot:<nvr>-k<12 hex of the kernel digest>`, keyless-signed and attested with the kernel digest and the sha256 of `forge/specs/azoth/keys/secureboot/athanor-secureboot.pem`. `system/kernel-artifacts.sh` verifies both and records `boot_digest`; the system stage copies the file in by that digest over the one the `kernel-core` RPM installed, and each image carries the digest as `io.athanor.azoth-boot.digest`. No key reaches an image build (D43), so a pull-request check and a local build produce the same image as the pipeline.
+- **`rpm -V` consequence.** The replaced file keeps the path the RPM database records, so `rpm -V kernel-core` on an installed machine reports `/usr/lib/modules/<kver>/vmlinuz` with a size and digest mismatch (`S.5......`). This is expected: the RPM's vmlinuz carries only the build's test signature, the shipped one carries the project's Secure Boot signature over the same kernel. `sbverify --cert athanor-secureboot.pem` on that file is the check that matters.
 
 ## 9. Changes owed by other documents
 

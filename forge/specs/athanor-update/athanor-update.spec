@@ -4,11 +4,11 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-update
 Version:        1.0.0
-Release:        5%{?dist}
+Release:        6%{?dist}
 Summary:        Athanor system image updates and trust state
 
-License:        MIT
-URL:            https://github.com/hr-mes/athanor
+License:        GPL-3.0-or-later
+URL:            https://github.com/ars-regia/athanor
 
 BuildRequires:  rust cargo gcc systemd-rpm-macros
 BuildRequires:  dbus-daemon
@@ -39,7 +39,7 @@ install -D -m 0755 %{sources}/usr/libexec/athanor-update/render-policy %{buildro
 for template in policy.json.in attachments-policy.json.in athanor.yaml.in; do
     install -D -m 0644 %{sources}/usr/share/athanor/containers/templates/$template %{buildroot}/usr/share/athanor/containers/templates/$template
 done
-for unit in athanor-update-check.timer athanor-update-check.service athanor-update.service athanor-update-state.service athanor-update-migrate.service; do
+for unit in athanor-update-check.timer athanor-update-check.service athanor-update.service athanor-update-state.service athanor-update-migrate.service athanor-update-migrate.timer; do
     install -D -m 0644 %{sources}/usr/lib/systemd/system/$unit %{buildroot}/usr/lib/systemd/system/$unit
 done
 install -D -m 0644 %{sources}/usr/lib/systemd/user/athanor-update-notify.service %{buildroot}/usr/lib/systemd/user/athanor-update-notify.service
@@ -63,6 +63,7 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
 /usr/lib/systemd/system/athanor-update.service
 /usr/lib/systemd/system/athanor-update-state.service
 /usr/lib/systemd/system/athanor-update-migrate.service
+/usr/lib/systemd/system/athanor-update-migrate.timer
 /usr/lib/systemd/user/athanor-update-notify.service
 /usr/lib/systemd/system-preset/80-athanor-update.preset
 /usr/lib/systemd/user-preset/80-athanor-update.preset
@@ -73,6 +74,13 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
 %doc /usr/share/doc/athanor-update/RECOVERY.md
 
 %changelog
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
+- `athanor-update migrate`: a channel without a manifest on the registry (`:stable` is
+  published later, A2-4) is a wait, not a failure. The unit exits 0, no longer restarts every
+  five minutes, and the state reads `verified.reason = channel-absent`.
+  athanor-update-migrate.timer retries every six hours until the stamp exists; the stamp
+  clears `channel-absent`.
+
 * Sun Oct 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
 - `athanor-update go-back`: the console client of GoBack(), for an administrator at a text
   console (`sudo athanor-update go-back`). It calls the service the notifier calls and

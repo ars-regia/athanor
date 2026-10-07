@@ -11,7 +11,7 @@ as %autosetup does: each patch on top of those before it. A patch that fails is 
 left out; the rest are still tried. Writes OUT_DIR/report.json and OUT_DIR/report.md.
 Exits 1 when a patch does not apply; 0 when all apply, or when the spec declares no patches
 (said so in the report). A missing spec, patch directory or declared patch file is an error
-(exit 1 with a message), never an empty set (doc_compositor.md, CO3).
+(exit 1 with a message), never an empty set.
 """
 
 import argparse

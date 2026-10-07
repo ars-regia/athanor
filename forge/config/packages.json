@@ -25,7 +25,6 @@
     "backup",
     "update",
     "xdg-desktop-portal-athanor",
-    "secure-boot",
     "tetragon",
     "qa",
     "antigravity",
@@ -36,14 +35,14 @@
     "recovery",
     "cargo-tools",
     "kernel-forge",
-    "cosmic-comp"
+    "cosmic-comp",
+    "greenboot-rs"
   ],
   "custom_tier0": [
     "stage0-bootstrap",
     "base-config",
     "selinux",
     "nix-support",
-    "secure-boot",
     "tetragon",
     "antigravity",
     "syft",
@@ -63,9 +62,9 @@
     "matugen",
     "dart-sass",
     "keylime",
-    "recovery",
     "kernel-forge",
-    "cosmic-comp"
+    "cosmic-comp",
+    "greenboot-rs"
   ],
   "custom_tier3": [
     "greeter-ui",
@@ -80,6 +79,7 @@
     "system-config",
     "backup",
     "update",
+    "recovery",
     "xdg-desktop-portal-athanor",
     "qa"
   ],
@@ -100,8 +100,6 @@
     "glibc-langpack-it",
     "gnome-keyring",
     "gnome-keyring-pam",
-    "greenboot",
-    "greenboot-default-health-checks",
     "gvfs",
     "libnotify",
     "libxcrypt-compat",

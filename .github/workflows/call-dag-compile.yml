@@ -3,23 +3,8 @@ name: Reusable DAG Compile Workflow
 on:
   workflow_call:
     inputs:
-      dag_level_0:
-        description: 'JSON array of DAG Level 0 packages'
-        type: string
-        required: false
-        default: '[]'
-      dag_level_1:
-        description: 'JSON array of DAG Level 1 packages'
-        type: string
-        required: false
-        default: '[]'
-      dag_level_2:
-        description: 'JSON array of DAG Level 2 packages'
-        type: string
-        required: false
-        default: '[]'
-      dag_flatpaks:
-        description: 'JSON array of DAG Flatpak packages'
+      dag_packages:
+        description: 'JSON array of the dirty custom packages, built in one matrix'
         type: string
         required: false
         default: '[]'
@@ -43,13 +28,14 @@ permissions:
   id-token: write
 
 jobs:
-  lint:
-    uses: ./.github/workflows/call-lint.yml
-
-  dag-build-level-0:
-    needs: [lint]
-    if: inputs.dag_level_0 != '[]' && inputs.dag_level_0 != ''
-    name: ⚡ DAG Level 0 Parallel Build
+  # No lint job of its own: the Orchestrator, its only caller, runs call-lint.yml once and
+  # calls this workflow only after it passed (docs/architecture/doc_pipeline.md, PL44).
+  # One matrix over every dirty package: builds run with rpmbuild --nodeps and none reads
+  # another's output, so levels only made packages wait (docs/architecture/doc_pipeline.md,
+  # PL48).
+  dag-build:
+    if: inputs.dag_packages != '[]' && inputs.dag_packages != ''
+    name: ⚡ Package Build
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     defaults:
@@ -59,7 +45,7 @@ jobs:
       fail-fast: false
       max-parallel: 20
       matrix:
-        package: ${{ fromJson(inputs.dag_level_0) }}
+        package: ${{ fromJson(inputs.dag_packages) }}
     permissions:
       contents: read
       packages: write
@@ -100,7 +86,7 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          shared-key: "sccache-level0-${{ matrix.package }}"
+          shared-key: "sccache-${{ matrix.package }}"
           cache-on-failure: "true"
 
       - name: Cache sccache
@@ -167,9 +153,9 @@ jobs:
           IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')
           buildah config --label tier.content.sha256="${{ steps.check.outputs.hash }}" "$ctr"
           buildah commit --omit-timestamp "$ctr" "$IMAGE_LOWER:latest"
-          buildah tag "$IMAGE_LOWER:latest" "$IMAGE_LOWER:${{ steps.check.outputs.hash }}"
-          buildah push "$IMAGE_LOWER:latest"
-          buildah push "$IMAGE_LOWER:${{ steps.check.outputs.hash }}"
+          # The digest of this push is the identity of the node: it is the one signed,
+          # attested and given the hash tag. :latest is for people and is never read back.
+          buildah push --digestfile "$RUNNER_TEMP/image.digest" "$IMAGE_LOWER:latest"
           buildah rm "$ctr" || true
 
       - name: Generate SBOM (Syft)
@@ -182,7 +168,7 @@ jobs:
           if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
             img_prefix="athanor-forge-rolling"
           fi
-          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}:latest" | tr "[:upper:]" "[:lower:]")
+          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr "[:upper:]" "[:lower:]")@$(cat "$RUNNER_TEMP/image.digest")
           nix run nixpkgs#syft -- packages "$IMAGE_LOWER" -o "spdx-json=sbom-${PKG_NAME}.spdx.json"
 
       - name: Sign & Attest Micro-Container
@@ -197,190 +183,27 @@ jobs:
           if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
             img_prefix="athanor-forge-rolling"
           fi
-          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}:latest" | tr '[:upper:]' '[:lower:]')
+          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')@$(cat "$RUNNER_TEMP/image.digest")
           # Keyless signing talks to Fulcio, Rekor and the timestamp authority: the script
           # retries their transient failures, a persistent one still fails the job.
           nix shell nixpkgs#cosign -c bash scripts/sign_attest.sh "$IMAGE_LOWER" "sbom-${PKG_NAME}.spdx.json"
 
-      - name: 🛟 Upload Crash Artifacts (Nix/SCCache)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: crash-logs-${{ matrix.package }}
-          path: |
-            /tmp/nix-build*/
-            RPMS/
-            idemp.out
-
-      - name: 🧹 Cleanup Workspace Permissions
-        if: always()
-        run: podman unshare chown -R "$USER:$USER" ${{ github.workspace }} || true
-
-      - name: 🧹 Fix Workspace Permissions (GH Actions Cleanup)
-        if: always()
-        run: |
-          set -euo pipefail
-          if command -v sudo >/dev/null 2>&1; then
-            sudo chown -R 1001:1001 . || sudo chown -R 1000:1000 . || true
-          else
-            chown -R 1001:1001 . || chown -R 1000:1000 . || true
-          fi
-
-  dag-build-level-1:
-    needs: [lint, dag-build-level-0]
-    if: always() && needs.lint.result == 'success' && inputs.dag_level_1 != '[]' && inputs.dag_level_1 != '' && !contains(needs.dag-build-level-0.result, 'failure')
-    name: ⚡ DAG Level 1 Parallel Build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    defaults:
-      run:
-        working-directory: forge
-    strategy:
-      fail-fast: false
-      max-parallel: 20
-      matrix:
-        package: ${{ fromJson(inputs.dag_level_1) }}
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: ❄️ Install Nix (Bedrock Cache)
-        uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
-        with:
-          extra_nix_config: "experimental-features = nix-command flakes"
-      - name: Check Idempotency (GHCR Cache)
-        id: check
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PKG_NAME: ${{ matrix.package }}
-        run: |
-          set -euo pipefail
-          echo "${{ secrets.GITHUB_TOKEN }}" | podman login "${REGISTRY}" -u ${{ github.actor }} --password-stdin
-          # Pull the builder explicitly: the podman run below would pull it implicitly,
-          # where a blob read that the registry drops fails the job outright (run
-          # 34148155801, shell-rs, four blobs lost to pkg-containers.githubusercontent.com).
-          bash scripts/retry.sh podman pull "${BUILDER_IMAGE,,}"
-          img_name="athanor-forge-${PKG_NAME}"
-          if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
-            img_name="athanor-forge-rolling-${PKG_NAME}"
-          fi
-          # This check only reads the checkout and asks the registry, so it needs neither
-          # --privileged nor --userns=keep-id. keep-id remaps every uid in the image into a
-          # new user namespace: on the 334k files of the builder that cost between 108 and
-          # 535 seconds per job, in every one of the 47 jobs, for a check that takes a
-          # second. It was also what made HOME=/root unwritable and broke the probe.
-          podman run -i --rm --security-opt label=disable --security-opt seccomp=unconfined -e GITHUB_TOKEN="${GITHUB_TOKEN}" -v ${{ github.workspace }}:/workspace -w /workspace/forge "${BUILDER_IMAGE,,}" bash scripts/check_idempotency.sh --package "${PKG_NAME}" --registry ${{ env.REGISTRY }} --owner ${{ github.repository_owner }} --image-name "$img_name" > idemp.out
-          source ./idemp.out
-          echo "hash=$CONTENT_HASH" >> "$GITHUB_OUTPUT"
-          if [ "$CACHE_HIT" = "true" ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; else echo "skip=false" >> "$GITHUB_OUTPUT"; fi
-
-      - name: Extreme Rust Cache (LLVM & Dependencies)
-        if: steps.check.outputs.skip != 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          shared-key: "sccache-level1-${{ matrix.package }}"
-          cache-on-failure: "true"
-
-      - name: Cache sccache
-        if: steps.check.outputs.skip != 'true'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: .sccache
-          key: sccache-${{ matrix.package }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            sccache-${{ matrix.package }}-
-
-      - name: Build Package (Custom Spec or Upstream SRPM)
-        if: steps.check.outputs.skip != 'true'
-        env:
-          PKG_NAME: ${{ matrix.package }}
-          SCCACHE_CACHE_SIZE: 10G
-        run: |
-          set -euo pipefail
-          mkdir -p RPMS
-          mkdir -p ${{ github.workspace }}/.sccache
-          echo "${{ secrets.GITHUB_TOKEN }}" | podman login "${REGISTRY}" -u ${{ github.actor }} --password-stdin
-          # Pull the builder explicitly: the podman run below would pull it implicitly,
-          # where a blob read that the registry drops fails the job outright (run
-          # 34148155801, shell-rs, four blobs lost to pkg-containers.githubusercontent.com).
-          bash scripts/retry.sh podman pull "${BUILDER_IMAGE,,}"
-          
-          PKG_CLEAN=$(echo "$PKG_NAME" | tr -cd '[:alnum:]-')
-          SPEC_DIR=""
-          if [ -d "specs/athanor-${PKG_CLEAN}" ]; then SPEC_DIR="specs/athanor-${PKG_CLEAN}"; elif [ -d "specs/${PKG_CLEAN}" ]; then SPEC_DIR="specs/${PKG_CLEAN}"; fi
-          if [ -z "$SPEC_DIR" ]; then echo "DEBUG: PKG_NAME='$PKG_NAME' PKG_CLEAN='$PKG_CLEAN'"; ls -la specs/; fi
-            if [ -n "$SPEC_DIR" ]; then
-              if [ "$PKG_NAME" = "athanor-telemetry" ] || [ "$PKG_NAME" = "telemetry" ]; then
-                echo "🚀 [A/B TEST] Compiling $PKG_NAME via Nix Flake pure derivation!"
-                nix run nixpkgs#nix -- build .#athanor-telemetry-rpm
-                mkdir -p RPMS
-                cp result/RPMS/*.rpm RPMS/
-              else
-            echo "📦 Compiling Custom Spec: $SPEC_DIR"
-            # Fetch with network, then build with --network=none (forge golden rule 4).
-            bash scripts/run_spec_build.sh "${BUILDER_IMAGE,,}" "$SPEC_DIR" \
-              -e SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE}" \
-              -v ${{ github.workspace }}/.sccache:/root/.cache/sccache
-              fi
-          else
-            echo "❌ [MARTIAL LAW FATAL] Attempted to build upstream package ${PKG_NAME} without local spec! Dynamic downloads are strictly forbidden!"
-            exit 1
-          fi
-
-      - name: Publish Micro-Container OCI
+      - name: Publish the hash tag, last (the brain reads it as built, signed and attested)
         if: steps.check.outputs.skip != 'true'
         env:
           PKG_NAME: ${{ matrix.package }}
         run: |
           set -euo pipefail
           export BUILDAH_ISOLATION=chroot
-          echo "${{ secrets.GITHUB_TOKEN }}" | buildah login -u ${{ github.actor }} --password-stdin ${{ env.REGISTRY }}
-          ctr=$(buildah from scratch)
-          buildah copy "$ctr" RPMS/*.rpm /
-          
           img_prefix="athanor-forge"
           if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
             img_prefix="athanor-forge-rolling"
           fi
           IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')
-          buildah config --label tier.content.sha256="${{ steps.check.outputs.hash }}" "$ctr"
-          buildah commit --omit-timestamp "$ctr" "$IMAGE_LOWER:latest"
-          buildah tag "$IMAGE_LOWER:latest" "$IMAGE_LOWER:${{ steps.check.outputs.hash }}"
-          buildah push "$IMAGE_LOWER:latest"
-          buildah push "$IMAGE_LOWER:${{ steps.check.outputs.hash }}"
-          buildah rm "$ctr" || true
-
-      - name: Generate SBOM (Syft)
-        if: steps.check.outputs.skip != 'true'
-        env:
-          PKG_NAME: ${{ matrix.package }}
-        run: |
-          set -euo pipefail
-          img_prefix="athanor-forge"
-          if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
-            img_prefix="athanor-forge-rolling"
-          fi
-          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}:latest" | tr "[:upper:]" "[:lower:]")
-          nix run nixpkgs#syft -- packages "$IMAGE_LOWER" -o "spdx-json=sbom-${PKG_NAME}.spdx.json"
-
-      - name: Sign & Attest Micro-Container
-        if: steps.check.outputs.skip != 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PKG_NAME: ${{ matrix.package }}
-        run: |
-          set -euo pipefail
-          nix run nixpkgs#cosign -- login ${{ env.REGISTRY }} -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
-          img_prefix="athanor-forge"
-          if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
-            img_prefix="athanor-forge-rolling"
-          fi
-          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}:latest" | tr '[:upper:]' '[:lower:]')
-          # Keyless signing talks to Fulcio, Rekor and the timestamp authority: the script
-          # retries their transient failures, a persistent one still fails the job.
-          nix shell nixpkgs#cosign -c bash scripts/sign_attest.sh "$IMAGE_LOWER" "sbom-${PKG_NAME}.spdx.json"
+          # A registry-side copy of the digest that was signed and attested, asserted to
+          # resolve to it (tag_signed_image.sh): a failed signature leaves the node dirty,
+          # and a moved :latest cannot give the hash tag an unsigned digest.
+          bash scripts/tag_signed_image.sh "$IMAGE_LOWER" "$(cat "$RUNNER_TEMP/image.digest")" "${{ steps.check.outputs.hash }}"
 
       - name: 🛟 Upload Crash Artifacts (Nix/SCCache)
         if: failure()
@@ -405,224 +228,3 @@ jobs:
           else
             chown -R 1001:1001 . || chown -R 1000:1000 . || true
           fi
-
-  dag-build-level-2:
-    needs: [lint, dag-build-level-1]
-    if: always() && needs.lint.result == 'success' && inputs.dag_level_2 != '[]' && inputs.dag_level_2 != '' && !contains(needs.dag-build-level-1.result, 'failure')
-    name: ⚡ DAG Level 2 Parallel Build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    defaults:
-      run:
-        working-directory: forge
-    strategy:
-      fail-fast: false
-      max-parallel: 20
-      matrix:
-        package: ${{ fromJson(inputs.dag_level_2) }}
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: ❄️ Install Nix (Bedrock Cache)
-        uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
-        with:
-          extra_nix_config: "experimental-features = nix-command flakes"
-      - name: Check Idempotency (GHCR Cache)
-        id: check
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PKG_NAME: ${{ matrix.package }}
-        run: |
-          set -euo pipefail
-          echo "${{ secrets.GITHUB_TOKEN }}" | podman login "${REGISTRY}" -u ${{ github.actor }} --password-stdin
-          # Pull the builder explicitly: the podman run below would pull it implicitly,
-          # where a blob read that the registry drops fails the job outright (run
-          # 34148155801, shell-rs, four blobs lost to pkg-containers.githubusercontent.com).
-          bash scripts/retry.sh podman pull "${BUILDER_IMAGE,,}"
-          img_name="athanor-forge-${PKG_NAME}"
-          if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then img_name="athanor-forge-rolling-${PKG_NAME}"; fi
-          # This check only reads the checkout and asks the registry, so it needs neither
-          # --privileged nor --userns=keep-id. keep-id remaps every uid in the image into a
-          # new user namespace: on the 334k files of the builder that cost between 108 and
-          # 535 seconds per job, in every one of the 47 jobs, for a check that takes a
-          # second. It was also what made HOME=/root unwritable and broke the probe.
-          podman run -i --rm --security-opt label=disable --security-opt seccomp=unconfined -e GITHUB_TOKEN="${GITHUB_TOKEN}" -v ${{ github.workspace }}:/workspace -w /workspace/forge "${BUILDER_IMAGE,,}" bash scripts/check_idempotency.sh --package "${PKG_NAME}" --registry ${{ env.REGISTRY }} --owner ${{ github.repository_owner }} --image-name "$img_name" > idemp.out
-          source ./idemp.out
-          echo "hash=$CONTENT_HASH" >> "$GITHUB_OUTPUT"
-          if [ "$CACHE_HIT" = "true" ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; else echo "skip=false" >> "$GITHUB_OUTPUT"; fi
-
-      - name: Extreme Rust Cache (LLVM & Dependencies)
-        if: steps.check.outputs.skip != 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          shared-key: "sccache-level2-${{ matrix.package }}"
-          cache-on-failure: "true"
-
-      - name: Cache sccache
-        if: steps.check.outputs.skip != 'true'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: .sccache
-          key: sccache-${{ matrix.package }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            sccache-${{ matrix.package }}-
-
-      - name: Build Package (Custom Spec or Upstream SRPM)
-        if: steps.check.outputs.skip != 'true'
-        env:
-          PKG_NAME: ${{ matrix.package }}
-          SCCACHE_CACHE_SIZE: 10G
-        run: |
-          set -euo pipefail
-          mkdir -p RPMS
-          mkdir -p ${{ github.workspace }}/.sccache
-          echo "${{ secrets.GITHUB_TOKEN }}" | podman login "${REGISTRY}" -u ${{ github.actor }} --password-stdin
-          # Pull the builder explicitly: the podman run below would pull it implicitly,
-          # where a blob read that the registry drops fails the job outright (run
-          # 34148155801, shell-rs, four blobs lost to pkg-containers.githubusercontent.com).
-          bash scripts/retry.sh podman pull "${BUILDER_IMAGE,,}"
-          
-          PKG_CLEAN=$(echo "$PKG_NAME" | tr -cd '[:alnum:]-')
-          SPEC_DIR=""
-          if [ -d "specs/athanor-${PKG_CLEAN}" ]; then SPEC_DIR="specs/athanor-${PKG_CLEAN}"; elif [ -d "specs/${PKG_CLEAN}" ]; then SPEC_DIR="specs/${PKG_CLEAN}"; fi
-          if [ -z "$SPEC_DIR" ]; then echo "DEBUG: PKG_NAME='$PKG_NAME' PKG_CLEAN='$PKG_CLEAN'"; ls -la specs/; fi
-            if [ -n "$SPEC_DIR" ]; then
-              if [ "$PKG_NAME" = "athanor-telemetry" ] || [ "$PKG_NAME" = "telemetry" ]; then
-                echo "🚀 [A/B TEST] Compiling $PKG_NAME via Nix Flake pure derivation!"
-                nix run nixpkgs#nix -- build .#athanor-telemetry-rpm
-                mkdir -p RPMS
-                cp result/RPMS/*.rpm RPMS/
-              else
-            echo "📦 Compiling Custom Spec: $SPEC_DIR"
-            # Fetch with network, then build with --network=none (forge golden rule 4).
-            bash scripts/run_spec_build.sh "${BUILDER_IMAGE,,}" "$SPEC_DIR" \
-              -e SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE}" \
-              -v ${{ github.workspace }}/.sccache:/root/.cache/sccache
-              fi
-          else
-            echo "❌ [MARTIAL LAW FATAL] Attempted to build upstream package ${PKG_NAME} without local spec! Dynamic downloads are strictly forbidden!"
-            exit 1
-          fi
-
-      - name: Publish Micro-Container OCI
-        if: steps.check.outputs.skip != 'true'
-        env:
-          PKG_NAME: ${{ matrix.package }}
-        run: |
-          set -euo pipefail
-          export BUILDAH_ISOLATION=chroot
-          echo "${{ secrets.GITHUB_TOKEN }}" | buildah login -u ${{ github.actor }} --password-stdin ${{ env.REGISTRY }}
-          ctr=$(buildah from scratch)
-          buildah copy "$ctr" RPMS/*.rpm /
-          
-          img_prefix="athanor-forge"
-          if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
-            img_prefix="athanor-forge-rolling"
-          fi
-          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')
-          buildah config --label tier.content.sha256="${{ steps.check.outputs.hash }}" "$ctr"
-          buildah commit --omit-timestamp "$ctr" "$IMAGE_LOWER:latest"
-          buildah tag "$IMAGE_LOWER:latest" "$IMAGE_LOWER:${{ steps.check.outputs.hash }}"
-          buildah push "$IMAGE_LOWER:latest"
-          buildah push "$IMAGE_LOWER:${{ steps.check.outputs.hash }}"
-          buildah rm "$ctr" || true
-
-      - name: Generate SBOM (Syft)
-        if: steps.check.outputs.skip != 'true'
-        env:
-          PKG_NAME: ${{ matrix.package }}
-        run: |
-          set -euo pipefail
-          img_prefix="athanor-forge"
-          if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
-            img_prefix="athanor-forge-rolling"
-          fi
-          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}:latest" | tr "[:upper:]" "[:lower:]")
-          nix run nixpkgs#syft -- packages "$IMAGE_LOWER" -o "spdx-json=sbom-${PKG_NAME}.spdx.json"
-
-      - name: Sign & Attest Micro-Container
-        if: steps.check.outputs.skip != 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PKG_NAME: ${{ matrix.package }}
-        run: |
-          set -euo pipefail
-          nix run nixpkgs#cosign -- login ${{ env.REGISTRY }} -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
-          img_prefix="athanor-forge"
-          if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
-            img_prefix="athanor-forge-rolling"
-          fi
-          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}:latest" | tr '[:upper:]' '[:lower:]')
-          # Keyless signing talks to Fulcio, Rekor and the timestamp authority: the script
-          # retries their transient failures, a persistent one still fails the job.
-          nix shell nixpkgs#cosign -c bash scripts/sign_attest.sh "$IMAGE_LOWER" "sbom-${PKG_NAME}.spdx.json"
-
-      - name: 🛟 Upload Crash Artifacts (Nix/SCCache)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: crash-logs-${{ matrix.package }}
-          path: |
-            /tmp/nix-build*/
-            RPMS/
-            idemp.out
-
-      - name: 🧹 Cleanup Workspace Permissions
-        if: always()
-        run: podman unshare chown -R "$USER:$USER" ${{ github.workspace }} || true
-
-      - name: 🧹 Fix Workspace Permissions (GH Actions Cleanup)
-        if: always()
-        run: |
-          set -euo pipefail
-          if command -v sudo >/dev/null 2>&1; then
-            sudo chown -R 1001:1001 . || sudo chown -R 1000:1000 . || true
-          else
-            chown -R 1001:1001 . || chown -R 1000:1000 . || true
-          fi
-
-  dag-build-flatpaks:
-    needs: [lint, dag-build-level-2]
-    if: always() && needs.lint.result == 'success' && inputs.dag_flatpaks != '[]' && inputs.dag_flatpaks != '' && !contains(needs.dag-build-level-2.result, 'failure')
-    name: 📦 DAG Flatpaks Parallel Build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: forge
-    strategy:
-      fail-fast: false
-      max-parallel: 20
-      matrix:
-        flatpak: ${{ fromJson(inputs.dag_flatpaks) }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: ❄️ Install Nix (Bedrock Cache)
-        uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
-        with:
-          extra_nix_config: "experimental-features = nix-command flakes"
-      - name: Build & Validate Flatpak Package
-        env:
-          FLATPAK_NAME: ${{ matrix.flatpak }}
-        run: |
-          set -euo pipefail
-          echo "📦 [DAG Flatpak Orchestrator] Validating & Pre-fetching Flatpak metadata for: ${FLATPAK_NAME}"
-          curl -sI "https://dl.flathub.org/repo/appstream/x86_64/issues/${FLATPAK_NAME}.json" || true
-          echo "✅ Declarative Flatpak layer validation completed for ${FLATPAK_NAME}"
-
-      - name: 🧹 Fix Workspace Permissions (GH Actions Cleanup)
-        if: always()
-        run: |
-          set -euo pipefail
-          if command -v sudo >/dev/null 2>&1; then
-            sudo chown -R 1001:1001 . || sudo chown -R 1000:1000 . || true
-          else
-            chown -R 1001:1001 . || chown -R 1000:1000 . || true
-          fi
-
-
-
-

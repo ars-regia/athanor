@@ -2,7 +2,7 @@
 name = "athanor-shelld"
 version = "1.0.0"
 edition = "2021"
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "The shell's headless daemon: desktop notifications and the StatusNotifier watcher"
 authors = ["Athanor Forge <forge@athanor.os>"]
 

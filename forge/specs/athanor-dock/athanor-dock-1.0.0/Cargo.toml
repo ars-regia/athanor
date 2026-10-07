@@ -2,7 +2,7 @@
 name = "athanor-dock"
 version = "1.0.0"
 edition = "2021"
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "The Athanor dock: one layer-shell surface per output with the openers, the favourites and the running applications"
 authors = ["Athanor Forge <forge@athanor.os>"]
 

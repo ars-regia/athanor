@@ -1,0 +1,432 @@
+{
+  "date": "2026-10-04",
+  "commit": "1b4c5f7",
+  "repeat": 50,
+  "facts": {
+    "cpu": "Intel(R) Core(TM) i7-8550U CPU @ 1.80GHz",
+    "memory_kb": 7995124,
+    "gpus": [
+      "00:02.0 VGA compatible controller [0300]: Intel Corporation Kaby Lake-R GT2 [UHD Graphics 620] [8086:5917] (rev 07)",
+      "01:00.0 3D controller [0302]: NVIDIA Corporation GP108M [GeForce MX150] [10de:1d12] (rev a1)"
+    ],
+    "kernel": "7.2.8-100.azoth.fc43.x86_64",
+    "image": "ghcr.io/hr-mes/athanor-system:37188690695",
+    "digest": "sha256:dd278e0676380841c2e4971f8fc200705ad9fd2a50edbea19f1698d73aad68bb"
+  },
+  "response": {
+    "athanor-bar/Not verified yet": {
+      "in_place_p95_ms": {
+        "value": 180.243286,
+        "limit": 50,
+        "pass": false
+      },
+      "opening_p95_ms": {
+        "value": 29.431307,
+        "limit": 100,
+        "pass": true
+      },
+      "misses": 0,
+      "smoothness": {
+        "animations": 0,
+        "on_time": {
+          "value": null,
+          "limit": 0.99,
+          "pass": false
+        },
+        "worst_intervals": {
+          "value": 0.0,
+          "limit": 2,
+          "pass": true
+        }
+      }
+    },
+    "athanor-bar/Power": {
+      "in_place_p95_ms": {
+        "value": 193.704644,
+        "limit": 50,
+        "pass": false
+      },
+      "opening_p95_ms": {
+        "value": 42.92197,
+        "limit": 100,
+        "pass": true
+      },
+      "misses": 0,
+      "smoothness": {
+        "animations": 0,
+        "on_time": {
+          "value": null,
+          "limit": 0.99,
+          "pass": false
+        },
+        "worst_intervals": {
+          "value": 0.0,
+          "limit": 2,
+          "pass": true
+        }
+      }
+    },
+    "athanor-bar/Notifications": {
+      "in_place_p95_ms": {
+        "value": 180.249511,
+        "limit": 50,
+        "pass": false
+      },
+      "opening_p95_ms": {
+        "value": 30.261787,
+        "limit": 100,
+        "pass": true
+      },
+      "misses": 0,
+      "smoothness": {
+        "animations": 0,
+        "on_time": {
+          "value": null,
+          "limit": 0.99,
+          "pass": false
+        },
+        "worst_intervals": {
+          "value": 0.0,
+          "limit": 2,
+          "pass": true
+        }
+      }
+    },
+    "athanor-bar/Battery": {
+      "in_place_p95_ms": {
+        "value": 186.219683,
+        "limit": 50,
+        "pass": false
+      },
+      "opening_p95_ms": {
+        "value": 35.483658,
+        "limit": 100,
+        "pass": true
+      },
+      "misses": 0,
+      "smoothness": {
+        "animations": 0,
+        "on_time": {
+          "value": null,
+          "limit": 0.99,
+          "pass": false
+        },
+        "worst_intervals": {
+          "value": 0.0,
+          "limit": 2,
+          "pass": true
+        }
+      }
+    },
+    "athanor-bar/Network": {
+      "in_place_p95_ms": {
+        "value": 183.621736,
+        "limit": 50,
+        "pass": false
+      },
+      "opening_p95_ms": {
+        "value": 32.89908,
+        "limit": 100,
+        "pass": true
+      },
+      "misses": 0,
+      "smoothness": {
+        "animations": 0,
+        "on_time": {
+          "value": null,
+          "limit": 0.99,
+          "pass": false
+        },
+        "worst_intervals": {
+          "value": 0.0,
+          "limit": 2,
+          "pass": true
+        }
+      }
+    },
+    "athanor-bar/Sound": {
+      "in_place_p95_ms": {
+        "value": 181.128887,
+        "limit": 50,
+        "pass": false
+      },
+      "opening_p95_ms": {
+        "value": 30.465848,
+        "limit": 100,
+        "pass": true
+      },
+      "misses": 0,
+      "smoothness": {
+        "animations": 0,
+        "on_time": {
+          "value": null,
+          "limit": 0.99,
+          "pass": false
+        },
+        "worst_intervals": {
+          "value": 0.0,
+          "limit": 2,
+          "pass": true
+        }
+      }
+    },
+    "athanor-bar/Tiling": {
+      "in_place_p95_ms": {
+        "value": 192.571697,
+        "limit": 50,
+        "pass": false
+      },
+      "opening_p95_ms": {
+        "value": 41.77469,
+        "limit": 100,
+        "pass": true
+      },
+      "misses": 0,
+      "smoothness": {
+        "animations": 0,
+        "on_time": {
+          "value": null,
+          "limit": 0.99,
+          "pass": false
+        },
+        "worst_intervals": {
+          "value": 0.0,
+          "limit": 2,
+          "pass": true
+        }
+      }
+    },
+    "athanor-bar/Accessibility": {
+      "in_place_p95_ms": {
+        "value": 181.089465,
+        "limit": 50,
+        "pass": false
+      },
+      "opening_p95_ms": {
+        "value": 30.303201,
+        "limit": 100,
+        "pass": true
+      },
+      "misses": 0,
+      "smoothness": {
+        "animations": 0,
+        "on_time": {
+          "value": null,
+          "limit": 0.99,
+          "pass": false
+        },
+        "worst_intervals": {
+          "value": 0.0,
+          "limit": 2,
+          "pass": true
+        }
+      }
+    },
+    "athanor-bar/Sunday 4 October 2026, 17:49": {
+      "in_place_p95_ms": {
+        "value": 179.978493,
+        "limit": 50,
+        "pass": false
+      },
+      "opening_p95_ms": {
+        "value": 29.226174,
+        "limit": 100,
+        "pass": true
+      },
+      "misses": 0,
+      "smoothness": {
+        "animations": 0,
+        "on_time": {
+          "value": null,
+          "limit": 0.99,
+          "pass": false
+        },
+        "worst_intervals": {
+          "value": 0.0,
+          "limit": 2,
+          "pass": true
+        }
+      }
+    },
+    "athanor-dock/COSMIC Settings": {
+      "in_place_p95_ms": {
+        "value": 159.199135,
+        "limit": 50,
+        "pass": false
+      },
+      "opening_p95_ms": {
+        "value": 36.087179,
+        "limit": 100,
+        "pass": true
+      },
+      "misses": 0,
+      "smoothness": {
+        "animations": 0,
+        "on_time": {
+          "value": null,
+          "limit": 0.99,
+          "pass": false
+        },
+        "worst_intervals": {
+          "value": 0.0,
+          "limit": 2,
+          "pass": true
+        }
+      }
+    },
+    "athanor-dock/COSMIC Text Editor": {
+      "in_place_p95_ms": {
+        "value": 157.7313,
+        "limit": 50,
+        "pass": false
+      },
+      "opening_p95_ms": {
+        "value": 36.094429,
+        "limit": 100,
+        "pass": true
+      },
+      "misses": 0,
+      "smoothness": {
+        "animations": 0,
+        "on_time": {
+          "value": null,
+          "limit": 0.99,
+          "pass": false
+        },
+        "worst_intervals": {
+          "value": 0.0,
+          "limit": 2,
+          "pass": true
+        }
+      }
+    },
+    "athanor-dock/COSMIC Terminal": {
+      "in_place_p95_ms": {
+        "value": 158.339444,
+        "limit": 50,
+        "pass": false
+      },
+      "opening_p95_ms": {
+        "value": 35.443464,
+        "limit": 100,
+        "pass": true
+      },
+      "misses": 0,
+      "smoothness": {
+        "animations": 11,
+        "on_time": {
+          "value": 1.0,
+          "limit": 0.99,
+          "pass": true
+        },
+        "worst_intervals": {
+          "value": 1.000239995200096,
+          "limit": 2,
+          "pass": true
+        }
+      }
+    },
+    "athanor-dock/COSMIC Files": {
+      "in_place_p95_ms": {
+        "value": 157.140591,
+        "limit": 50,
+        "pass": false
+      },
+      "opening_p95_ms": {
+        "value": 35.821642,
+        "limit": 100,
+        "pass": true
+      },
+      "misses": 0,
+      "smoothness": {
+        "animations": 13,
+        "on_time": {
+          "value": 1.0,
+          "limit": 0.99,
+          "pass": true
+        },
+        "worst_intervals": {
+          "value": 1.00029999400012,
+          "limit": 2,
+          "pass": true
+        }
+      }
+    }
+  },
+  "idle": {
+    "cpu": {
+      "value": 0.0010333333333333334,
+      "limit": 0.001,
+      "pass": false
+    }
+  },
+  "memory": {
+    "athanor-bar": {
+      "value": 30.01953125,
+      "limit": 64,
+      "pass": true
+    },
+    "athanor-dock": {
+      "value": 25.0185546875,
+      "limit": 48,
+      "pass": true
+    },
+    "athanor-shelld": {
+      "value": 3.958984375,
+      "limit": 16,
+      "pass": true
+    }
+  },
+  "recovery": {
+    "athanor-bar": {
+      "recovery_s": {
+        "value": 5.613986007,
+        "limit": 1.0,
+        "pass": false
+      },
+      "same_state": true
+    },
+    "athanor-dock": {
+      "recovery_s": {
+        "value": 5.790365314,
+        "limit": 1.0,
+        "pass": false
+      },
+      "same_state": true
+    }
+  },
+  "start": {
+    "athanor-bar": {
+      "value": 3.700926365,
+      "limit": 1.5,
+      "pass": false
+    },
+    "athanor-dock": {
+      "value": 3.700926365,
+      "limit": 1.5,
+      "pass": false
+    }
+  },
+  "scenarios": {
+    "dock-autohide/switch": {
+      "pass": false,
+      "register": "F-dock-27",
+      "detail": "settled in time: False; 14391 pixels differ"
+    },
+    "dock-autohide/rest": {
+      "pass": false,
+      "register": "F-dock-27",
+      "detail": "settled in time: False; box (18, 1034, 373, 1074), off centre by -764.5 px"
+    },
+    "dock-autohide/leave": {
+      "pass": false,
+      "register": "F-dock-27",
+      "detail": "settled in time: False; 14391 pixels differ"
+    },
+    "dock-autohide/menu": {
+      "pass": false,
+      "register": "F-dock-27",
+      "detail": "settled in time: False; 14391 pixels differ"
+    }
+  }
+}

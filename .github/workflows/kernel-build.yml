@@ -1,6 +1,7 @@
 name: Kernel Build
 
 # The Athanor kernel (forge/specs/azoth, docs/architecture/doc_kernel_build.md).
+# lint: the shared lint (call-lint.yml) runs first, and the gate requires it.
 # build: on the self-hosted runner, `prep` (sources, patches, config gate) in a few
 # minutes or `build` (RPMs) in about an hour. boot: on a GitHub runner with KVM, the boot
 # matrix (SeaBIOS and OVMF with Secure Boot, Nehalem and host CPUs) with the assertions
@@ -12,8 +13,8 @@ name: Kernel Build
 # that the branch protection requires on PRs, including those of the bump bot (phase
 # K5): that is why the workflow runs on every PR, with no path filter. A PR builds and
 # boots but does not publish. orchestrator: on pushes, downstream of publish, dispatches the
-# Athanor Forge Orchestrator for this commit with force_image when a new kernel was published
-# or system/kernel-artifacts.sh does not answer ready; the Orchestrator calls nvidia-kmod.yml
+# Athanor Forge Orchestrator for this commit when a new kernel was published
+# or system/kernel-artifacts.sh does not answer ready; the Orchestrator runs the kmod cycle
 # (signing, boot with Secure Boot, publication of the modules) and builds the system images
 # (docs/architecture/doc_build_ordering.md, O1). inputs:
 # when the image with this NVR already carries the attestation of identical build
@@ -54,7 +55,11 @@ env:
   KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
 
 jobs:
+  lint:
+    uses: ./.github/workflows/call-lint.yml
+
   inputs:
+    needs: [lint]
     # A kernel already built from these identical inputs is not rebuilt: the `<nvr>`
     # image carries the attestation of the pins (build-inputs.py), verified with cosign;
     # when the predicate matches the one of this commit, the reuse is proven.
@@ -257,11 +262,11 @@ jobs:
       registry: ${{ needs.inputs.outputs.registry }}
 
   gate:
-    # The single check required by the branch protection: green only when every gate is
+    # The single check required by the branch protection: green only when the lint and every gate are
     # green, or skipped because the kernel is reused (build). One name to wait for, for
     # the auto-merge of the bump bot.
     name: Kernel gate
-    needs: [inputs, build, boot, kmod]
+    needs: [lint, inputs, build, boot, kmod]
     if: ${{ always() && (inputs.stage || 'build') == 'build' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -273,7 +278,7 @@ jobs:
           set -euo pipefail
           jq -r 'to_entries[] | "- \(.key): \(.value.result)"' <<< "$RESULTS" | tee -a "$GITHUB_STEP_SUMMARY"
           result() { jq -r --arg job "$1" '.[$job].result' <<< "$RESULTS"; }
-          [[ $(result inputs) == success && $(result boot) == success && $(result kmod) == success ]]
+          [[ $(result lint) == success && $(result inputs) == success && $(result boot) == success && $(result kmod) == success ]]
           [[ $(result build) == success || ( $(result build) == skipped && $REUSE == true ) ]]
 
   publish:
@@ -445,4 +450,4 @@ jobs:
 
       - name: Dispatch the Orchestrator
         if: ${{ needs.publish.result == 'success' || steps.artifacts.outputs.state != 'ready' }}
-        run: gh workflow run athanor-forge-orchestrator.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f sha="$GITHUB_SHA" -f force_image=true
+        run: gh workflow run athanor-forge-orchestrator.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f sha="$GITHUB_SHA"

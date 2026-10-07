@@ -1,12 +1,12 @@
 %global debug_package %{nil}
 Name:           athanor-store-rs
 Version:        1.0.0
-Release:        3%{?dist}
+Release:        4%{?dist}
 Summary:        Athanor OS Universal App Store Daemon
 
 
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor-forge
+URL:            https://github.com/ars-regia/athanor
 
 
 BuildRequires:  rust cargo systemd-rpm-macros pkgconf-pkg-config openssl-devel gtk4-devel
@@ -14,7 +14,7 @@ BuildRequires:  rust cargo systemd-rpm-macros pkgconf-pkg-config openssl-devel g
 Requires:       flatpak
 
 %description
-Athanor OS Universal App Store Daemon for Flatpak and OCI container management.
+Athanor OS App Store Daemon for Flatpak application management.
 
 %prep
 # Stub prep
@@ -92,6 +92,10 @@ EOF
 %{_datadir}/polkit-1/actions/os.athanor.store.policy
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-4
+- Point URL and the polkit vendor_url at the project repository
+- Correct the %description: the daemon manages Flatpak only
+
 * Thu Jul 16 2026 Athanor <athanor@athanor.os> - 1.0.0-1
 - Initial release
 

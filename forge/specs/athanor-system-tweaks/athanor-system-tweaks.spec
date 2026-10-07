@@ -1,10 +1,10 @@
 %global debug_package %{nil}
 Name:           athanor-system-tweaks
 Version:        1.0.0
-Release:        6%{?dist}
+Release:        7%{?dist}
 Summary:        Athanor OS athanor-system-tweaks
-License:        MIT
-URL:            https://github.com/hr-mes/athanor-forge
+License:        GPL-3.0-or-later
+URL:            https://github.com/ars-regia/athanor
 BuildArch:      noarch
 
 %description
@@ -50,6 +50,9 @@ cp -a %{_sourcedir}/usr/lib/NetworkManager/conf.d/50-athanor-hostname.conf %{bui
 /usr/lib/tmpfiles.d/99-azoth-sysfs.conf
 /usr/lib/NetworkManager/conf.d/50-athanor-hostname.conf
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
+- Point URL at the project repository
+
 * Mon Oct 05 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
 - DNS: strict DNS over TLS to Quad9 (9.9.9.9, 149.112.112.112, 2620:fe::fe,
   2620:fe::9, TLS name dns.quad9.net), routing domain "~." so the global resolver

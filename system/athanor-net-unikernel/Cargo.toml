@@ -1,6 +1,7 @@
 [package]
 name = "athanor-net-unikernel"
 version = "1.0.0"
+license = "GPL-3.0-or-later"
 edition = "2021"
 description = "Athanor OS Userspace Zero-Copy Isolated Rust TCP/IP Stack Daemon (smoltcp + TUN/TAP / virtio-net bypass)"
 authors = ["athanor-network-architect"]

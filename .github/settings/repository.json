@@ -1,0 +1,33 @@
+{
+  "allow_auto_merge": true,
+  "allow_forking": true,
+  "allow_merge_commit": true,
+  "allow_rebase_merge": true,
+  "allow_squash_merge": true,
+  "allow_update_branch": false,
+  "default_branch": "iso-v0",
+  "delete_branch_on_merge": true,
+  "description": "ermete-os",
+  "has_discussions": false,
+  "has_issues": true,
+  "has_projects": true,
+  "has_wiki": true,
+  "homepage": "https://ars-regia.github.io/athanor/",
+  "is_template": false,
+  "merge_commit_message": "PR_TITLE",
+  "merge_commit_title": "MERGE_MESSAGE",
+  "private_vulnerability_reporting": true,
+  "security_and_analysis": {
+    "dependabot_security_updates": "disabled",
+    "secret_scanning": "enabled",
+    "secret_scanning_non_provider_patterns": "disabled",
+    "secret_scanning_push_protection": "enabled",
+    "secret_scanning_validity_checks": "disabled"
+  },
+  "squash_merge_commit_message": "COMMIT_MESSAGES",
+  "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
+  "topics": [],
+  "visibility": "public",
+  "vulnerability_alerts": false,
+  "web_commit_signoff_required": false
+}

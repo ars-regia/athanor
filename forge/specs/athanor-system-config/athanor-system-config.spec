@@ -2,10 +2,10 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:49.fc43}
+Release:        %{?autorelease}%{!?autorelease:51.fc43}
 Summary:        Athanor OS athanor-system-config
-License:        MIT
-URL:            https://github.com/hr-mes/athanor-forge
+License:        GPL-3.0-or-later
+URL:            https://github.com/ars-regia/athanor
 BuildArch:      noarch
 
 Requires: cosmic-comp greetd greenboot systemd-ukify nodejs
@@ -40,6 +40,7 @@ cp -a %{_sourcedir}/etc %{buildroot}/ 2>/dev/null || true
 mkdir -p %{buildroot}/usr/share/athanor-system-config
 mv %{buildroot}/etc/usbguard/usbguard-daemon.conf %{buildroot}/usr/share/athanor-system-config/usbguard-daemon.conf
 mv %{buildroot}/etc/yum.repos.d/athanor-forge.repo %{buildroot}/usr/share/athanor-system-config/athanor-forge.repo
+mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-system-config/greenboot.conf
 
 %post
 # Configurations are now managed declaratively via tmpfiles.d (10-athanor-greetd.conf)
@@ -83,11 +84,27 @@ mkdir -p /etc/yum.repos.d
 /usr/share/athanor-system-config/greetd.toml
 /usr/share/athanor-system-config/usbguard-daemon.conf
 /usr/share/athanor-system-config/athanor-forge.repo
+/usr/share/athanor-system-config/greenboot.conf
 %attr(0755,root,root) /etc/greenboot/check/required.d/10-greetd-running.sh
 %config(noreplace) /etc/security/limits.d/99-athanor-realtime.conf
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-51
+- Configure greenboot not to reboot (doc_recovery.md, R5): GREENBOOT_AUTO_REBOOT=false, so a
+  required check that fails after an update makes the previous deployment the default for
+  the next restart instead of restarting the machine. Disable 01_repository_dns_check.sh and
+  01_update_platforms_check.sh: they check OSTree remotes and rpm-ostree platforms, which
+  Athanor does not update from, and the DNS check fails every boot that starts offline. The
+  file is linked to /etc/greenboot/greenboot.conf by tmpfiles.d, as greenboot owns it.
+- 10-greetd-running.sh, now able to queue a rollback, waits up to two minutes for greetd and
+  asks one run of it to stay active for ten seconds; it fails at once when systemd has given
+  up on greetd. The 15-second window could fail a good update on a slow first boot, and a
+  greetd in a crash loop passed.
+
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-50
+- Point URL at the project repository.
+
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-49
 - Set XDG_CURRENT_DESKTOP=Athanor:COSMIC for the user manager through
   /usr/lib/environment.d/50-athanor-desktop.conf. athanor-desktop published it only

@@ -4,21 +4,19 @@
  "http://www.freedesktop.org/standards/PolicyKit/1.0/policyconfig.dtd">
 
 <!--
-  Azioni polkit di athanor-cloud-rs.
+  Polkit actions of athanor-cloud-rs.
 
-  Correzione 2026-09-02: questo file dichiarava "os.athanor.cloud.trust", che nessun
-  codice controlla, mentre l'unica azione realmente applicata dal daemon è
-  "os.athanor.cloudsync.mount" (src/main.rs:182), che non era dichiarata da nessuna
-  parte. L'id sbagliato rendeva il mount sempre negato e la policy inerte.
-  Vedi ANALISI_2026-09-02.md §2.1.
+  Fixed 2026-09-02: this file declared "os.athanor.cloud.trust", which no code
+  checks, while the only action the daemon enforces, "os.athanor.cloudsync.mount"
+  (src/main.rs), was declared nowhere. The wrong id made every mount denied.
 -->
 <policyconfig>
   <vendor>Athanor OS</vendor>
-  <vendor_url>https://github.com/hr-mes/athanor-forge</vendor_url>
+  <vendor_url>https://github.com/ars-regia/athanor</vendor_url>
 
-  <!-- Monta un remote FUSE arbitrario su un mountpoint arbitrario, entrambi scelti
-       dal chiamante. Il sito di chiamata passa già allow_user_interaction = true,
-       quindi auth_admin_keep può davvero mostrare il dialogo. -->
+  <!-- Mounts an arbitrary FUSE remote on an arbitrary mountpoint, both chosen by
+       the caller. The call site passes allow_user_interaction = true, so
+       auth_admin_keep can actually show the dialog. -->
   <action id="os.athanor.cloudsync.mount">
     <description>Mount a remote cloud filesystem</description>
     <description xml:lang="it">Montare un filesystem cloud remoto</description>

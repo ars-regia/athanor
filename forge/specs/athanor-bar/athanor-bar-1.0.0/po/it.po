@@ -470,6 +470,10 @@ msgstr "Non verificata: l'immagine è fuori dall'ambito della policy"
 msgid "Not verified: the system was changed on this machine"
 msgstr "Non verificata: il sistema è stato modificato su questa macchina"
 
+#: src/ui/shield.rs:311
+msgid "Not verified: waiting for the stable channel to be published"
+msgstr "Non verificata: in attesa della pubblicazione del canale stabile"
+
 #: src/ui/shield.rs:316
 msgid "Up to date"
 msgstr "Aggiornato"

@@ -1,33 +1,47 @@
 #!/usr/bin/env bash
-# Builds every forge spec that changed since BASE, each with run_spec_build.sh in the builder
-# image (fetch with network, build without), the way the DAG builds it. Spec Build Check runs it on a pull request; it runs locally too.
+# Builds, one after the other, what Spec Build Check builds for the change since BASE: the specs
+# select_check_specs.py selects, each with run_spec_build.sh (fetch with network, build
+# without), in the builder image of the change when it touches the builder's inputs, else in
+# BUILDER_IMAGE. Every selected spec is built; the failed ones are listed at the end.
+# --dry-run prints what would be built and skipped, and needs no BUILDER_IMAGE.
 #
-# Usage: build_changed_specs.sh BASE BUILDER_IMAGE
-#
-# Skipped: forge/specs/azoth (Kernel Build builds the kernel), athanor-telemetry (the DAG builds
-# it with Nix, not rpmbuild), and directories the change deleted or that hold no .spec.
+# Usage: build_changed_specs.sh [--dry-run] BASE [BUILDER_IMAGE]
 set -euo pipefail
 
-BASE=${1:?usage: build_changed_specs.sh BASE BUILDER_IMAGE}
-IMAGE=${2:?usage: build_changed_specs.sh BASE BUILDER_IMAGE}
-root=$(git rev-parse --show-toplevel)
+usage="usage: build_changed_specs.sh [--dry-run] BASE [BUILDER_IMAGE]"
+dry_run=0
+if [[ ${1:-} == --dry-run ]]; then
+    dry_run=1
+    shift
+fi
+BASE=${1:?$usage}
+if ((dry_run)); then IMAGE=${2:-}; else IMAGE=${2:?$usage}; fi
+scripts=$(dirname "${BASH_SOURCE[0]}")
 
-mapfile -t dirs < <(git -C "$root" diff --name-only "$BASE"...HEAD -- forge/specs | cut -d/ -f1-3 | sort -u)
+out=$(mktemp -d)
+trap 'rm -rf "$out"' EXIT
 
-built=0
-for dir in "${dirs[@]}"; do
-    case $dir in
-    forge/specs/azoth | forge/specs/athanor-telemetry)
-        echo "build_changed_specs: $dir is built by its own workflow, skipped"
-        continue
-        ;;
-    esac
-    if ! compgen -G "$root/$dir/*.spec" > /dev/null; then
-        echo "build_changed_specs: $dir holds no spec after the change, skipped"
-        continue
+python3 "$scripts/select_check_specs.py" "$BASE" "$out"
+mapfile -t specs < <(python3 -c 'import json, sys; sys.stdout.writelines(s + "\n" for s in json.load(sys.stdin))' < "$out/specs.json")
+if ((dry_run)); then
+    for spec in "${specs[@]}"; do echo "build_changed_specs: would build forge/$spec"; done
+    exit 0
+fi
+
+if [[ $(< "$out/builder") == true ]]; then
+    bash "$scripts/builder_image.sh" build "$out/athanor-builder.tar.gz"
+fi
+image=$(bash "$scripts/builder_image.sh" resolve "$out/athanor-builder.tar.gz" "$IMAGE")
+
+failed=()
+for spec in "${specs[@]}"; do
+    echo "build_changed_specs: building $spec"
+    if ! bash "$scripts/run_spec_build.sh" "$image" "$spec"; then
+        failed+=("$spec")
     fi
-    echo "build_changed_specs: building $dir"
-    bash "$root/forge/scripts/run_spec_build.sh" "$IMAGE" "${dir#forge/}"
-    built=$((built + 1))
 done
-echo "build_changed_specs: built $built spec(s)"
+if ((${#failed[@]})); then
+    echo "build_changed_specs: failed: ${failed[*]}" >&2
+    exit 1
+fi
+echo "build_changed_specs: built ${#specs[@]} spec(s)"

@@ -3,8 +3,8 @@ Version:        1.0.0
 Release:        1%{?dist}
 Summary:        Athanor OS Core Component - athanor-antigravity
 
-License:        GPLv3
-URL:            https://github.com/hr-mes/athanor
+License:        GPL-3.0-or-later
+URL:            https://github.com/ars-regia/athanor
 
 %description
 Core component implementation for athanor-antigravity.

@@ -9,6 +9,7 @@ pub mod menu;
 pub mod model;
 pub mod openers;
 pub mod row;
+pub mod timing;
 
 use std::rc::Rc;
 

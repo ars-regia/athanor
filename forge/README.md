@@ -27,8 +27,8 @@ The packages of the desktop and of the platform services:
 | `athanor-update` | System image updates and the trust state |
 | `athanor-backup` | Hourly btrfs snapshots of `/var/home`, with retention and restore |
 | `athanor-recovery` | The text console shown when the desktop does not start |
+| `greenboot-rs` | greenboot's boot health checks, patched to mark a failed update without rebooting |
 | `athanor-kernel-profile` | The kernel profile's settings per role and their checker |
-| `athanor-secure-boot` | TPM sealing and rollback protection |
 
 The kernel, Azoth, is built by its own workflow from `specs/azoth`
 ([doc_kernel_build.md](../docs/architecture/doc_kernel_build.md)).
@@ -43,7 +43,7 @@ and mold for Rust.
 
 `.github/workflows/athanor-forge-orchestrator.yml` computes which packages changed
 (`scripts/dynamic-matrix.sh`, `scripts/dag_orchestrator.py`) and calls `call-dag-compile.yml`, which builds each of
-them with `scripts/build_spec.sh` inside the builder image, then publishes the RPMs as
+them with `scripts/run_spec_build.sh` (`build_spec.sh fetch`, then `build` without network) inside the builder image, then publishes the RPMs as
 the OCI image `athanor-forge-<name>` with an SPDX SBOM and a keyless cosign signature.
 `call-system-image.yml` aggregates those images into one repository per tier, from which
 `system/Containerfile` installs them.
