@@ -8,22 +8,54 @@ they meet.
 
 ## 1. Boot and disk encryption
 
-### Unified Kernel Image
+### Boot chain
 
-The kernel, its initramfs and its command line are one signed file, a Unified Kernel Image
-(UKI). `system/build-image.sh` builds it and signs it with the project's Secure Boot key;
-an image whose UKI is signed with a throwaway key is never published. The kernel and its
-command line are specified in [doc_kernel_profile.md](doc_kernel_profile.md).
+Release 1.0 has no Unified Kernel Image (ADR-0037, ADR-0043). The firmware starts shim,
+shim verifies GRUB and the kernel, and the kernel (`vmlinuz`) is signed with the project's
+Secure Boot key in a sign-only CI job and trusted on the machine through a MOK the owner
+enrols (ADR-0064). The initramfs and the kernel command line are not signed. The UKI, with
+a signed PCR 11 policy, arrives with the sealed composefs of release 1.1 (ADR-0043). The
+kernel and its command line are specified in [doc_kernel_profile.md](doc_kernel_profile.md).
 
-### Home encryption and the TPM
+### Disk encryption and the TPM
 
-The installer leaves the disk layout to Anaconda (`system/athanor-install.ks`).
-systemd-homed encrypts the user's home with LUKS2. In 1.0 the LUKS device unlocks with the
-passphrase only: nothing in the image enrols it in the TPM 2.0 (decision A2-27; D42 in
-doc_kernel_profile.md). `athanor-tpm-luks-seal`, which sealed it at first boot to PCRs 0,
-2, 7 and 11, was removed with the other TPM units that acted without the user (issue #148),
-and `verify.py shipped` fails if it is shipped again. The TPM seal returns in 1.1 with the
-UKI and a signed PCR 11 policy, so that a kernel update does not break the unlock.
+In release 1.0, disk encryption is a choice the person makes in the installer, not a
+default (maintainer decision of 2026-10-08). The installer offers LUKS2 encryption, and the
+person may decline it.
+
+What the installer does today. The ISO is bootc-image-builder's Anaconda installer with the
+kickstart in `system/disk_config/iso.toml`; the manual build uses `system/athanor-install.ks`.
+Neither kickstart carries `clearpart`, `part` or `autopart`, so Anaconda opens its storage
+screen and leaves the disk layout and the encryption choice to the person. Anaconda's
+encryption option is off until the person turns it on. When it is on, Anaconda asks for a
+passphrase and, with automatic partitioning, puts the btrfs file system that holds `/`,
+`/var` and `/home` in one LUKS2 volume; `/boot` and the EFI system partition stay
+unencrypted. When it is off, user data is stored unencrypted.
+
+Gaps, named here so that this text claims no more than the tree does:
+
+- The ISO carries Anaconda's GTK interface. The web interface that ADR-0059 chooses for 1.0
+  is not built yet, and its encryption screen has not been checked.
+- No acceptance run installs with encryption on. The encrypted layout above is Anaconda's
+  behaviour, not one the project's tests verify.
+- The installer enrols neither a recovery key nor the TPM: the volume it creates has the
+  passphrase keyslot only.
+
+Accounts are classic accounts in `/etc/passwd`, and systemd-homed is disabled by preset
+(ADR-0045), so nothing encrypts a home directory by itself: the home is encrypted exactly
+when the system volume is.
+
+In 1.0 an encrypted volume unlocks with its passphrase (ADR-0064; A2-27, D42 in
+doc_kernel_profile.md), and nothing in the image enrols the TPM 2.0 by itself.
+`athanor-tpm-luks-seal`, which sealed the volume at first boot to PCRs 0, 2, 7 and 11, was
+removed with the other TPM units that acted without the user (issue #148), and
+`verify.py shipped` fails if it is shipped again. An administrator may run
+`athanor-uki-enroll <device>`: it binds a TPM keyslot to PCR 7 and to the machine's
+`systemd-pcrlock` policy (`/var/lib/systemd/pcrlock.json`), enrols a recovery key first
+when the volume has none, and keeps the passphrase. It does not create that policy, nothing
+updates the policy after a firmware or Secure Boot database change, and nothing hands it to
+the initrd before the system volume is unlocked; until those exist (P4b), TPM unlock of the
+system volume is not supported, and the passphrase stays the way in.
 
 ---
 

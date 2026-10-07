@@ -307,8 +307,9 @@ patchano i Makefile per forzarlo.
   job `sign` di nvidia-kmod (`sign-kernel.sh vmlinuz`, D43); l'immagine system lo
   prende già firmato da `azoth-boot`. Nessuna fase assembla una UKI (ADR-0037): avvio shim, GRUB,
   vmlinuz firmato. L'immagine non crea alcun keyslot TPM: l'unico percorso è
-  `athanor-uki-enroll`, lanciato dall'utente, che lega ancora il keyslot a PCR 11,
-  costante senza stub UKI (aperto, riservato al maintainer). Profilo
+  `athanor-uki-enroll`, lanciato da un amministratore, che lega il keyslot a PCR 7
+  per valore e alla policy `systemd-pcrlock` della macchina (D42); la policy non è
+  generata né consegnata all'initrd dall'immagine (P4b). Profilo
   `keys/profiles/secureboot.cnf`: non CA, `codeSigning`.
   Secret `SECUREBOOT_SIGNING_KEY`, certificato
   `keys/secureboot/athanor-secureboot.pem` (`.der` per `mokutil --import`). Non
@@ -324,7 +325,7 @@ patchano i Makefile per forzarlo.
   moduli, ritirata il 2026-09-13.
 - **Niente UKI** (ADR-0037): initrd e `cmdline` non sono firmati; la catena
   Secure Boot copre shim, GRUB e il vmlinuz. Una UKI tornerebbe con una sua
-  decisione, insieme alla policy PCR che `athanor-uki-enroll` presuppone.
+  decisione, insieme alla policy PCR 11 firmata di D42.
 - **Primo avvio**: arruolamento guidato del certificato Secure Boot
   (`mokutil --import`), unica interazione richiesta per avere Secure Boot acceso
   su un PC qualsiasi; i moduli non ne dipendono.

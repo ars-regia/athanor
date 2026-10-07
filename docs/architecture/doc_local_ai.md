@@ -101,7 +101,7 @@ Rules that hold for every tool:
 **AI8. Embeddings feed a real semantic index, which replaces the stub.**
 
 - The index covers application names, settings pages and folders the user chooses, and nothing else by default. It never indexes keyrings, browser profiles or anything under a secrets path.
-- It lives under `$XDG_STATE_HOME/athanor/`, inside the encrypted home, and the launcher (stage 3) and Settings (stage 6) query it.
+- It lives under `$XDG_STATE_HOME/athanor/`, inside the home (encrypted when the person chose disk encryption in the installer), and the launcher (stage 3) and Settings (stage 6) query it.
 - Whether Needle's own embedding head suffices, or a dedicated model is needed, is decided by spike N1. The Rust runtime the maintainer approves may not carry the head at all (section 5).
 
 **AI9. Laya is admitted only through a gate.** A calibrated score is a hint to the interface, never an input to a security decision.

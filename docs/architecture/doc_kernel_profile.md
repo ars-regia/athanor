@@ -206,8 +206,8 @@ firmware (UEFI db)
                            ├─ /usr/lib/athanor/roles/<r>/     role content
                            └─ athanor-roles generator → /run/{sysctl.d,modprobe.d,tmpfiles.d,systemd}
 /etc: handling per D39
-/ , /var, /home: btrfs on LUKS (1.0: passphrase only, A2-27; from 1.1: TPM-only offered in attested mode,
-                 TPM+PIN or passphrase otherwise)
+/ , /var, /home: btrfs, on LUKS when the person chooses encryption in the installer (1.0: passphrase
+                 only, A2-27; from 1.1: TPM-only offered in attested mode, TPM+PIN or passphrase otherwise)
 ```
 
 Four layers, one source of truth each:
@@ -524,8 +524,9 @@ checks run in its kickstart.
 
 **Disk layout** (installation creates it): ESP of 2 GiB when Athanor owns the disk, or
 XBOOTLDR (VFAT, 2 GiB) next to an existing ESP (D17); storage for two images per D6, each sized
-to twice the largest image built in P4b; root and data on btrfs inside LUKS (`/`, `/var`,
-`/home` subvolumes); `/etc` per D39.
+to twice the largest image built in P4b; root and data on btrfs (`/`, `/var`,
+`/home` subvolumes), inside LUKS when the person chooses encryption, which the installer
+offers and the person may decline (1.0: not a default, maintainer decision of 2026-10-08); `/etc` per D39.
 
 **Image build.** The existing OCI build (GitHub Actions, dnf5, tier repositories, cosign,
 SBOM) stays the source of the root filesystem and of provenance. With the dm-verity
@@ -702,7 +703,7 @@ is never the Secure Boot key: a compromise of one must not give the other (D43).
 | Cosign key | secret of the `signing-images` environment; public key shipped in `/usr` and named by `policy.json` | the sign-only CI job, for the image and its sigstore attachments; every machine that pulls an image, through `policy.json` (`sigstoreSigned`) | new key pair, new public key delivered by an image the old key signed; rotation procedure and the signing root outside GitHub's OIDC: open (#141) | removal of the old public key from the next image; a machine that never updated cannot learn it: open (#141) |
 | PCR policy key (today: the Secure Boot key, which signs the PCR policy; target per D43: a separate PCR policy key, #145/P4b) | secret of the `signing-kernel` environment, a key of its own, not the Secure Boot key; public key in the TPM keyslot policy | none on 1.0: no UKI is built and no PCR policy is signed (the UKI assembly that signed one with the Secure Boot key in the image build is removed); target for 1.1 per D42/D43: a sign-only job and `--sign-initrd-pcrs`, PCR 11, UKI profile 0 only (#131/#145); the TPM, to release the keyslot | rotation invalidates every TPM keyslot; the guided reseal (D42) enrols only the key of the newest installed UKI, on the first boot of profile 0 of a UKI signed with it | only the newest PCR policy key is enrolled, so a UKI with an older key never unlocks the disk; custody and environment: open (#131, P4b) |
 | LUKS recovery passphrase | the user's head and the user's own storage; the keyslot is in the LUKS header; never in the repository, the image or CI | the user, when the TPM keyslot does not release (unforeseen PCR change, degraded mode) | by the user, with `homectl` or `cryptsetup`; the guided reseal does not rotate it | the user removes the keyslot; always enrolled (D42), so it is never revoked by Athanor; its enrolment flow in the installer: open (#145) |
-| TPM-sealed LUKS key | target: a keyslot in the LUKS header of the home, sealed by the TPM of the machine through `systemd-pcrlock` (PCR 7 and 14) and the signed PCR 11 policy; the TPM secret never leaves the machine. Today the image creates no TPM keyslot; the user-invoked `athanor-uki-enroll` is the only path | `systemd-cryptsetup` in the initrd, in attested mode only; nothing seals or reseals it without the user's action | resealed by the guided reseal when the pcrlock policy changes (firmware, db, dbx, shim, MokList) or the PCR policy key rotates; mechanism designed in P4b: open | never applied automatically (D42); the keyslot is wiped and enrolment is offered again when attested mode no longer holds or db, dbx or SbatLevel revoke less than at the last seal; the offer in the installer: open (#145) |
+| TPM-sealed LUKS key | target: a keyslot in the LUKS header of the home, sealed by the TPM of the machine through `systemd-pcrlock` (PCR 7 and 14) and the signed PCR 11 policy; the TPM secret never leaves the machine. Today the image creates no TPM keyslot; the only path is `athanor-uki-enroll`, run by an administrator, which binds the keyslot to PCR 7 by value and to the machine's pcrlock policy (`/var/lib/systemd/pcrlock.json`), enrols a recovery key first when the volume has none and keeps the passphrase; it does not create or refresh the policy, and nothing hands the policy to the initrd before the system volume is unlocked (P4b) | `systemd-cryptsetup` in the initrd, in attested mode only; nothing seals or reseals it without the user's action | resealed by the guided reseal when the pcrlock policy changes (firmware, db, dbx, shim, MokList) or the PCR policy key rotates; mechanism designed in P4b: open | never applied automatically (D42); the keyslot is wiped and enrolment is offered again when attested mode no longer holds or db, dbx or SbatLevel revoke less than at the last seal; the offer in the installer: open (#145) |
 
 **Attestation** (restricted area): admission of a mesh host requires its identity, a
 verified TPM quote and with the dm-verity option, the active IPE class derived from PCR 11 and the PCR 12 event log (D38, section 10).
