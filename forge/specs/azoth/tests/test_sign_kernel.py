@@ -150,6 +150,23 @@ class SignKernel(unittest.TestCase):
         self.assertEqual((out / "kver").read_text(), f"{KVER}\n")
         self.assertEqual((out / "module-sig-hash").read_text(), "sha512\n")
 
+    def test_prepare_ignores_kernel_devel_matched_beside_kernel_devel(self):
+        """The published azoth-devel image carries kernel-devel-matched too, a metapackage
+        without the tree: the glob of nvidia.sh already skips it."""
+        self.rpms('CONFIG_MODULE_SIG_HASH="sha512"')
+        self.archive(self.tmp / f"devel/kernel-devel-matched-{KVER}.rpm", {"usr/share/doc/x": ""})
+        result = self.run_script(
+            "prepare",
+            "--kernel",
+            self.tmp / "kernel",
+            "--devel",
+            self.tmp / "devel",
+            "--out",
+            self.tmp / "out",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.tmp / "out/module-sig-hash").read_text(), "sha512\n")
+
     def test_prepare_refuses_a_hash_outside_the_kernel_list(self):
         self.rpms('CONFIG_MODULE_SIG_HASH="md5; touch /tmp/x"')
         result = self.run_script(
