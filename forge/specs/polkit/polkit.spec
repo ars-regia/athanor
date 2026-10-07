@@ -19,8 +19,13 @@
 #   - the ldconfig scriptlets are spelled out, as the builder has no %%ldconfig_scriptlets;
 #   - explicit meson commands instead of %%meson, which the builder does not define, as
 #     forge/specs/athanor-ananicy does for cmake;
-#   - Source0 is pinned in SOURCES/sources.sha256, and the Release carries .athanor1 so
-#     that it sorts above Fedora 43's 126 and below a later Fedora 43 polkit build.
+#   - Source0 is pinned in SOURCES/sources.sha256. The Release is Fedora's 127-2.fc44.2 with
+#     the dist tag of Fedora 43 and .athanor1 appended: it sorts above Fedora 43's 126 and
+#     below every later Fedora 127 build (127-2.fc43.3, 127-2.fc44.N), so a Fedora rebuild
+#     replaces this backport instead of being hidden by it;
+#   - drop-ins limit the agent helper socket to 8 connections per UID and end a helper
+#     that has run for 5 minutes, so one local user cannot hold every helper;
+#   - os_type=redhat is set, as meson cannot detect the distribution in the builder.
 #
 # Exit condition: drop this backport (spec directory and the "polkit" entries of
 # forge/config/packages.json) when the image base reaches Fedora 44 or later
@@ -28,17 +33,18 @@
 #
 # License and the upstream changelog below are Fedora's.
 %global debug_package %{nil}
-%global upstream_release 2.2
 
 Summary: An authorization framework
 Name: polkit
 Version: 127
-Release: %{upstream_release}.fc43.athanor1
+Release: 2.fc43.2.athanor1
 License: LGPL-2.0-or-later
 URL: https://github.com/polkit-org/polkit
 Source0: https://github.com/polkit-org/polkit/archive/refs/tags/%{version}.tar.gz#/polkit-%{version}.tar.gz
 Source1: polkit.sysusers
 Source2: 80-athanor-polkit.preset
+Source3: polkit-agent-helper-socket-limits.conf
+Source4: polkit-agent-helper-service-limits.conf
 
 Patch1: 0001-polkit-agent-helper-service-simplify-sandbox-rules.patch
 Patch2: 0002-agent-helper-Send-standard-error-to-journal.patch
@@ -111,6 +117,7 @@ meson setup build \
        -D examples=false \
        -D gtk_doc=false \
        -D introspection=true \
+       -D os_type=redhat \
        -D man=false \
        -D session_tracking=logind \
        -D tests=false
@@ -120,6 +127,8 @@ meson compile -C build %{?_smp_mflags}
 DESTDIR=%{buildroot} meson install -C build --no-rebuild
 install -Dpm 0644 %{SOURCE1} %{buildroot}%{_sysusersdir}/polkit.conf
 install -Dpm 0644 %{SOURCE2} %{buildroot}/usr/lib/systemd/system-preset/80-athanor-polkit.preset
+install -Dpm 0644 %{SOURCE3} %{buildroot}%{_unitdir}/polkit-agent-helper.socket.d/50-athanor-limits.conf
+install -Dpm 0644 %{SOURCE4} %{buildroot}%{_unitdir}/polkit-agent-helper@.service.d/50-athanor-limits.conf
 
 rm -f %{buildroot}%{_libdir}/*.la
 
@@ -175,6 +184,8 @@ exit $fail
 %{_unitdir}/polkit.service
 %{_unitdir}/polkit-agent-helper.socket
 %{_unitdir}/polkit-agent-helper@.service
+%{_unitdir}/polkit-agent-helper.socket.d/50-athanor-limits.conf
+%{_unitdir}/polkit-agent-helper@.service.d/50-athanor-limits.conf
 /usr/lib/systemd/system-preset/80-athanor-polkit.preset
 %dir %{_datadir}/polkit-1/
 %dir %{_datadir}/polkit-1/actions
@@ -213,6 +224,11 @@ exit $fail
 %{_libdir}/girepository-1.0/*.typelib
 
 %changelog
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 127-2.fc43.2.athanor1
+- Release sorts below every later Fedora 127 build, so a Fedora rebuild replaces it
+- Limit the agent helper socket to 8 connections per UID and end a helper after 5 minutes
+- Set os_type=redhat instead of relying on the distribution detection of meson
+
 * Mon Oct 05 2026 Athanor Forge <forge@athanor.os> - 127-2.2.fc43.athanor1
 - Fedora 44's polkit 127-2.2 rebuilt for Fedora 43: polkit-agent-helper-1 is not setuid and
   polkit-agent-helper.socket is enabled by preset; no -devel, -docs or man pages.
