@@ -1,0 +1,91 @@
+name: NVIDIA kmod dispatch
+
+# The NVIDIA kmod cycle by hand, the same three steps the Orchestrator runs (nvidia-kmod.yml
+# describes them): call-nvidia-kmod-prepare.yml, the sign job below, nvidia-kmod.yml. The sign
+# job is in this workflow, the one the dispatch starts, because a called workflow's job reads
+# the secrets of its environment only when its caller inherits every secret
+# (actions/runner#4453, D43). It is the same job as nvidia-kmod-sign of
+# athanor-forge-orchestrator.yml: change both together.
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_digest:
+        description: "digest of azoth:<nvr>; empty: the one system/kernel-artifacts.sh resolves"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/call-nvidia-kmod-prepare.yml
+    with:
+      kernel_digest: ${{ inputs.kernel_digest }}
+
+  sign:
+    # Signs only what it derives itself: the kernel from the registry, verified by cosign in the
+    # key-less step below, and the modules of the build job once they pass the allow-list. Only
+    # when the modules are missing: otherwise prepare ends after its artifacts job, asking for
+    # no approval.
+    needs: [prepare]
+    if: ${{ needs.prepare.outputs.state == 'modules-missing' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+    environment: signing-kernel
+    env:
+      # system/kernel-artifacts.sh, which run.sh inputs runs, resolves against it (O9).
+      KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: nvidia-*-unsigned
+          path: out
+          merge-multiple: true
+
+      - name: Derive and verify what is signed, without a key (signer/run.sh inputs)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KERNEL_DIGEST: ${{ needs.prepare.outputs.kernel_digest }}
+        run: bash forge/specs/azoth/signer/run.sh inputs
+
+      - name: Sign the modules and vmlinuz (signer/run.sh sign)
+        # The public certificates are in the repository: the module one is compiled into the
+        # kernel (kernel-local), the Secure Boot one is what shim checks through MokList.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODULE_SIGNING_KEY: ${{ secrets.MODULE_SIGNING_KEY }}
+          SECUREBOOT_SIGNING_KEY: ${{ secrets.SECUREBOOT_SIGNING_KEY }}
+        run: bash forge/specs/azoth/signer/run.sh sign
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nvidia-signed
+          path: out/
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: azoth-kernel-signed
+          path: kernel-signed/
+          if-no-files-found: error
+
+  publish:
+    # Boot and publication, only after a successful signature.
+    needs: [sign]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      actions: read
+    uses: ./.github/workflows/nvidia-kmod.yml

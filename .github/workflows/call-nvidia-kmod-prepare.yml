@@ -1,0 +1,112 @@
+name: Call NVIDIA kmod prepare (Reusable Workflow)
+
+# The key-less first part of the NVIDIA kmod cycle (docs/architecture/doc_build_ordering.md,
+# O1, O2, O5): artifacts, build, prepare. artifacts: system/kernel-artifacts.sh resolves the
+# kernel of the pins by digest and the module tags bound to it; unless the modules are missing
+# (both branches already published, signed and attested, or the kernel of the pins not
+# published) the cycle ends there with a notice, and the caller skips its sign job on the state
+# output. build: nvidia-build.yml, the two branches (open, legacy) against azoth-devel by digest.
+# prepare: the MOK-signed negative sample of the boot job. The sign job is not here: a called
+# workflow's job reads the secrets of its environment only when its caller inherits every
+# secret (actions/runner#4453), so the job that signs belongs to the workflow the event starts,
+# the Orchestrator or nvidia-kmod-dispatch.yml (D43). nvidia-kmod.yml then boots and publishes.
+
+on:
+  workflow_call:
+    inputs:
+      kernel_digest:
+        description: "digest of azoth:<nvr> that the caller resolved, empty for the one system/kernel-artifacts.sh resolves; the run fails if the registry holds another"
+        type: string
+        required: true
+    outputs:
+      state:
+        description: "state of the kernel artifacts; the sign job runs only on modules-missing"
+        value: ${{ jobs.artifacts.outputs.state }}
+      kernel_digest:
+        description: "digest of the kernel the modules were built for, which the sign job requires"
+        value: ${{ jobs.artifacts.outputs.kernel_digest }}
+
+permissions:
+  contents: read
+
+env:
+  # The same knob kernel-build.yml sets (system/kernel-artifacts.sh reads it under this
+  # exact name): every resolve below must agree with what kernel-build.yml published to,
+  # or a repository variable override would make this workflow see kernel-missing forever
+  # (doc_build_ordering.md, O9).
+  KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
+
+jobs:
+  artifacts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      state: ${{ steps.artifacts.outputs.state }}
+      kernel_digest: ${{ steps.artifacts.outputs.kernel_digest }}
+      devel_digest: ${{ steps.artifacts.outputs.devel_digest }}
+      registry: ${{ steps.artifacts.outputs.registry }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+
+      - name: Resolve the kernel artifacts (system/kernel-artifacts.sh)
+        id: artifacts
+        env:
+          KERNEL_DIGEST: ${{ inputs.kernel_digest }}
+        run: |
+          set -euo pipefail
+          bash system/kernel-artifacts.sh resolve --expect-kernel-digest "$KERNEL_DIGEST"
+          grep -E '^(state|kernel_digest|devel_digest|registry)=' kernel-artifacts/kernel-artifacts.env >> "$GITHUB_OUTPUT"
+
+      - name: Nothing to build
+        if: ${{ steps.artifacts.outputs.state != 'modules-missing' }}
+        env:
+          STATE: ${{ steps.artifacts.outputs.state }}
+        run: |
+          echo "::notice title=NVIDIA kmod::state ${STATE}: the modules and the signed vmlinuz of the pins are published, or their kernel is not; no build and no approval"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nvidia-kernel-artifacts
+          path: kernel-artifacts/kernel-artifacts.env
+          if-no-files-found: error
+
+  build:
+    needs: artifacts
+    if: ${{ needs.artifacts.outputs.state == 'modules-missing' }}
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/nvidia-build.yml
+    with:
+      devel-digest: ${{ needs.artifacts.outputs.devel_digest }}
+      registry: ${{ needs.artifacts.outputs.registry }}
+
+  prepare:
+    # The negative sample of the boot job, outside the signing environment.
+    needs: [artifacts, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: nvidia-open-unsigned
+          path: out
+
+      - name: The MOK-signed negative sample (signer/run.sh prepare)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KERNEL_DIGEST: ${{ needs.artifacts.outputs.kernel_digest }}
+        run: bash forge/specs/azoth/signer/run.sh prepare
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nvidia-mok-signed
+          path: mok/
+          if-no-files-found: error
