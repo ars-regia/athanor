@@ -17,7 +17,3 @@ cargo clippy -p athanor-preview-render --all-targets --all-features 2>&1 | tee -
 # --config is explicit: cargo-deny would otherwise look for a deny.toml next to the
 # manifest and fall back to its defaults.
 cargo deny --manifest-path Cargo.toml --config deny.toml check 2>&1 | tee "$out/deny.log"
-
-if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-    { echo '## clippy (last 50 lines)'; echo '```'; tail -n 50 "$out/clippy.log"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-fi

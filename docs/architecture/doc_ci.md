@@ -80,7 +80,7 @@ Branch protection on `iso-v0` requires three checks, `Kernel gate`, `Spec gate` 
 | System Image Check | CI13 | the image inputs change | no | the three images build as in the pipeline, without a key; package delta; merges `bump/system-*` PRs |
 | `Spec gate` | CI14 | every PR (no path filter) | until CP4 | changed specs build as the DAG builds them; a change that selects none passes; merges the spec bot's PR |
 | Shell surfaces | CI15 | a shell crate or `forge/test/shell/**` changes | no | rig tests of the greeter, layout, compositor client, shelld, bar, dock, launcher; also CI2 |
-| Rust Security & FFI Audit | CI22 | every PR to `iso-v0` | no | clippy, the shell workspace compile check, cargo-deny (`deny.toml`) |
+| Rust Security & FFI Audit | CI22 | every PR to `iso-v0` | no | clippy, cargo-deny (`deny.toml`) over the root lockfile |
 | Fuzzing, Nix Vanguard | CI23, CI24 | only PRs based on `main` | no | see section 3 |
 
 CI2 (actionlint, `scripts/verify.py`, the unit test suites) has no trigger of its own: on a PR it runs through CI8, which runs on every pull request and whose `Kernel gate` requires it, and through CI15. The `check` job of CI27 runs `just check`, which covers what CI2 runs and adds the remaining `verify.py` checks and the four test directories CI2 leaves out (those of `scripts/ci`, the runner, session memory and the cosmic-comp rebase drill); CI2 goes once CI8 no longer runs on pull requests (doc_pipeline.md section 3.4).
@@ -272,9 +272,9 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 
 - **File:** `rust-security-audit.yml`. **Purpose:** clippy over the root workspace and cargo-deny (licences, advisories, bans, sources, one policy in `deny.toml`) over its lockfile; the frozen shell workspace left the tree with ADR-0073 wave 1. There is no cargo-vet, Kani or eBPF job (ADR-0075).
 - **Triggers:** push and `pull_request` on `iso-v0`. **Outputs:** artifact `security-audit-logs`.
-- **Secrets, variables:** `REGISTRY_HOST`, `BUILDER_STABLE_TAG`. **Environment:** none. **Runner:** hosted, inside the `athanor-builder` container. **Concurrency:** `<workflow>-<ref>`, cancels in progress.
+- **Secrets, variables:** `REGISTRY_HOST`, `BUILDER_STABLE_TAG`. **Environment:** none. **Runner:** hosted; the audit runs in the `athanor-builder` image under podman, not as a job container. **Concurrency:** `<workflow>-<ref>`, cancels in progress.
 - **Scripts:** `scripts/ci/security-audit.sh`.
-- **Health:** red until the builder image carrying the CB1 fix is published, then expected to fail only on the open dependency advisories.
+- **Health:** green on PR #226 (run 37695768570), the first run without suppressions.
 
 ### CI23 Rust Security & Buffer Overflow Fuzzing
 

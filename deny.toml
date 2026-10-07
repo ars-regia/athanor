@@ -1,13 +1,14 @@
 # cargo-deny policy (ADR-0075 item 2).
 #
-# One policy for every lockfile that resolves a shipped binary: the root workspace
-# and the frozen shell workspace (see scripts/ci/security-audit.sh). The licence
+# One policy for the root workspace lockfile (see scripts/ci/security-audit.sh). The
+# packages built from their own vendored lockfile (athanor-backup's release tarball,
+# greenboot-rs) are not covered yet. The licence
 # allow-list is the set of identifiers the current dependency graphs need, derived
 # from `cargo metadata`; an entry nothing uses is a warning, so it cannot go stale
 # unnoticed.
 
 [graph]
-all-features = false
+all-features = true
 no-default-features = false
 
 [advisories]
