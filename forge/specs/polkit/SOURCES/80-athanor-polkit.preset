@@ -1,0 +1,3 @@
+# The socket-activated authentication helper of polkit >= 127: with it the setuid
+# polkit-agent-helper-1 is not needed (see polkit.spec, issue #144).
+enable polkit-agent-helper.socket

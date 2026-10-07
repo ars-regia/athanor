@@ -594,6 +594,15 @@ status = "missing"
 purpose = "Rebuild of osbuild; not in the package manifest"
 
 [[component]]
+path = "forge/specs/polkit"
+kind = "rpm spec"
+area = "security"
+status = "specified"
+spec = "doc_lock_and_prompts.md"
+item = "D9"
+purpose = "polkit 127 rebuilt from Fedora 44 for Fedora 43: socket-activated, non-setuid agent helper"
+
+[[component]]
 path = "forge/specs/stage0-bootstrap"
 kind = "rpm spec"
 area = "build-ci"

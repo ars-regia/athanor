@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-system-services
 Version:        1.0.1
-Release:        26%{?dist}
+Release:        27%{?dist}
 Summary:        Athanor OS athanor-system-services
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -37,6 +37,10 @@ cp -a %{_sourcedir}/usr/lib/systemd/user/* %{buildroot}/usr/lib/systemd/user/
 /usr/lib/systemd/user/cosmic-osd.service
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.1-27
+- cosmic-settings-daemon: ReadWritePaths=%%t so the varlink bind under ProtectSystem=strict
+  no longer panics and the volume keys work again (#144).
+
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.1-26
 - athanor-desktop.service sets NoNewPrivileges=yes: every shipped service sets it or a
   capability bound (doc_threat_model.md, TM8), and the readiness probe needs neither
