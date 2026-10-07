@@ -14,7 +14,8 @@ pub enum Outcome {
     Done,
     /// The reference was switched; the signed digest boots at the next restart.
     Switched,
-    /// Nothing was done and nothing is wrong: the unit succeeds and the next boot tries again.
+    /// Nothing was done and nothing is wrong: the unit succeeds and the next boot, or the next
+    /// run of the check timer, tries again.
     Waiting(&'static str),
 }
 
@@ -44,7 +45,13 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>) -> Result<Outcome, Failure> {
     }
     let target = format!("{repository}:{CHANNEL}");
     // The build-time rule of UT5 holds here too: the migration never moves a machine back.
-    let candidate = ctx.tools.candidate(&target)?;
+    let Some(candidate) = ctx.tools.candidate(&target)? else {
+        // The channel is not published yet (A2-4). Record it for the state and wait: the unit
+        // succeeds, and the check timer starts it again (athanor-update-check.service).
+        ctx.store.set_channel_absent(true).map_err(storage)?;
+        return Ok(Outcome::Waiting("channel-absent"));
+    };
+    ctx.store.set_channel_absent(false).map_err(storage)?;
     if candidate.build_time < status.booted.build_time {
         return Ok(Outcome::Waiting("channel-older-than-booted"));
     }
@@ -115,6 +122,34 @@ mod tests {
         let tools = Fake::booted(Deployed { local_changes: true, ..from_media(1000) }).offering(SIGNED, 1000);
         assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Waiting("local-changes")));
         assert!(tools.calls.borrow().is_empty() && !machine.store.migrated());
+    }
+
+    #[test]
+    fn a_channel_that_is_not_published_yet_waits_and_reads_channel_absent() {
+        let machine = Machine::new("migrate-absent", &["real/k1.pub"]);
+        let mut tools = Fake::booted(from_media(1000)).offering(SIGNED, 1000);
+        tools.candidate = Ok(None);
+        assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Waiting("channel-absent")));
+        assert!(!tools.called("switch") && !machine.store.migrated());
+        // The later checks keep saying why, until the channel appears.
+        let state = crate::check::run(&machine.ctx(&tools, 5000), true).expect("offline");
+        assert_eq!(state.verified.reason, athanor_trust_state::Reason::ChannelAbsent);
+
+        let published = Fake::booted(from_media(1000)).offering(SIGNED, 1000);
+        assert_eq!(run(&machine.ctx(&published, 6000)), Ok(Outcome::Switched));
+        let state = crate::check::run(&machine.ctx(&published, 6000), true).expect("offline");
+        assert_eq!(state.verified.reason, athanor_trust_state::Reason::Media);
+    }
+
+    #[test]
+    fn any_other_registry_failure_still_fails() {
+        let machine = Machine::new("migrate-registry", &["real/k1.pub"]);
+        let mut tools = Fake::booted(from_media(1000));
+        for code in [athanor_trust_state::ErrorCode::Registry, athanor_trust_state::ErrorCode::Network] {
+            tools.candidate = Err(Failure { code, host: None });
+            assert_eq!(run(&machine.ctx(&tools, 5000)).map_err(|failure| failure.code), Err(code));
+        }
+        assert!(!machine.store.channel_absent() && !machine.store.migrated());
     }
 
     #[test]
