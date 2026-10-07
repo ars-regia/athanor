@@ -1985,6 +1985,7 @@ POLKIT_RESULTS = {
     "auth_self_keep",
     "auth_admin",
     "auth_admin_keep",
+    "not_handled",
 }
 
 
@@ -1993,32 +1994,55 @@ def polkit_declared(files):
 
     A .policy gives its `allow_active` default (`no` when absent). A polkit .rules file gives,
     for each `action.id == "..."` of an addRule function, every polkit.Result that function
-    returns. A .rules file with no polkit call is a udev rule and is skipped.
+    returns: the results of one function are not told apart per action, so a function whose
+    actions get different results is split into one function per result set. A .rules file
+    with no polkit call is a udev rule and is skipped. Comments are dropped before reading.
     """
+    cannot = f"so its rows of {POLKIT_MODEL_DOC} TM9 cannot be checked"
     declared, unreadable = {}, []
     for path, text in sorted(files.items()):
         if path.endswith(".policy"):
             try:
                 root = ET.fromstring(text)
             except ET.ParseError as e:
-                unreadable.append(f"{path}: not valid XML ({e})")
+                unreadable.append(f"{path}: not valid XML ({e}), {cannot}")
                 continue
             for action in root.iter("action"):
+                if not action.get("id"):
+                    unreadable.append(f"{path}: an <action> has no id, {cannot}")
+                    continue
                 active = (action.findtext("defaults/allow_active") or "no").strip()
                 declared[(action.get("id"), path)] = {active}
         elif path.endswith(".rules") and "polkit." in text:
-            for body in text.split("polkit.addRule(")[1:]:
-                actions = re.findall(r'action\.id\s*==\s*"([^"]+)"', body)
+            code = re.sub(r"/\*.*?\*/|//[^\n]*", "", text, flags=re.S)
+            calls = re.split(r"polkit\s*\.\s*addRule\s*\(", code)
+            if code.count("addRule") != len(calls) - 1:
+                unreadable.append(
+                    f"{path}: addRule is reached other than as polkit.addRule(...), {cannot}"
+                )
+            for body in calls[1:]:
+                body = re.split(r"polkit\s*\.\s*addAdminRule", body)[0]
+                ids = [
+                    m.group(2)
+                    for m in re.finditer(
+                        r"action\s*\.\s*id\s*===?\s*([\"'])([^\"']+)\1", body
+                    )
+                ]
                 results = {
-                    r.lower() for r in re.findall(r"polkit\.Result\.([A-Z_]+)", body)
+                    r.lower()
+                    for r in re.findall(r"polkit\s*\.\s*Result\s*\.\s*([A-Z_]+)", body)
                 }
-                if not actions or not results:
+                if (
+                    not ids
+                    or not results
+                    or len(re.findall(r"action\s*\.\s*id\b", body)) != len(ids)
+                ):
                     unreadable.append(
-                        f'{path}: an addRule names no action as action.id == "..." or returns '
-                        f"no polkit.Result, so its rows of {POLKIT_MODEL_DOC} TM9 cannot be checked"
+                        f'{path}: an addRule matches an action other than as action.id == "..." '
+                        f"or returns no polkit.Result, {cannot}"
                     )
                     continue
-                for a in actions:
+                for a in ids:
                     declared[(a, path)] = results
     return declared, unreadable
 

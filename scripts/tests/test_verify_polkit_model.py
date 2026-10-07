@@ -109,5 +109,56 @@ class PolkitModelTest(unittest.TestCase):
         self.assertIn("20-y.rules", found[0])
 
 
+    def unreadable(self, text):
+        files = dict(FILES)
+        files["pkg/rules.d/20-y.rules"] = text
+        found = problems(HEADER + ROWS, files)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("20-y.rules", found[0])
+        self.assertIn("cannot be checked", found[0])
+
+    def test_a_prefix_match_beside_an_exact_one_fails(self):
+        self.unreadable(
+            "polkit.addRule(function(action, subject) {\n"
+            '    if (action.id == "org.example.a") { return polkit.Result.NO; }\n'
+            '    if (action.id.indexOf("org.freedesktop.") == 0) { return polkit.Result.YES; }\n'
+            "});\n"
+        )
+
+    def test_an_aliased_addrule_fails(self):
+        self.unreadable(
+            "var r = polkit.addRule;\n"
+            'r(function(action, subject) { if (action.id == "org.example.a") return polkit.Result.YES; });\n'
+        )
+
+    def test_spacing_and_single_quotes_are_read(self):
+        files = dict(FILES)
+        files[RULES_PATH] = RULES.replace("polkit.addRule(", "polkit.addRule (").replace(
+            '"org.example.eject"', "'org.example.eject'"
+        ).replace("==", "===")
+        self.assertEqual(problems(HEADER + ROWS, files), [])
+
+    def test_comments_are_not_rules(self):
+        files = dict(FILES)
+        files[RULES_PATH] = (
+            '/* was: action.id == "org.example.old", polkit.Result.NO, polkit.addRule( */\n'
+            "// polkit.Result.AUTH_SELF\n" + RULES
+        )
+        self.assertEqual(problems(HEADER + ROWS, files), [])
+
+    def test_not_handled_can_be_written_in_the_table(self):
+        files = dict(FILES)
+        files[RULES_PATH] = RULES.replace("polkit.Result.AUTH_ADMIN", "polkit.Result.NOT_HANDLED")
+        rows = ROWS.replace("`auth_admin` otherwise", "`not_handled` otherwise")
+        self.assertEqual(problems(HEADER + rows, files), [])
+
+    def test_a_policy_action_without_an_id_fails(self):
+        files = dict(FILES)
+        files["pkg/bad.policy"] = "<policyconfig><action><defaults/></action></policyconfig>"
+        found = problems(HEADER + ROWS, files)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("bad.policy", found[0])
+        self.assertIn("cannot be checked", found[0])
+
 if __name__ == "__main__":
     unittest.main()
