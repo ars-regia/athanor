@@ -22,6 +22,13 @@ OWNER=${1:?usage: clean_ghcr.sh OWNER}
 REGISTRY_HOST=${REGISTRY_HOST:-ghcr.io}
 RETENTION_DAYS=${RETENTION_DAYS:-90}
 NOW=${CLEAN_GHCR_NOW:-$(date -u +%s)}
+# The package API lives under /users for a personal account and under /orgs for an organisation.
+owner_type=$(gh api "/users/${OWNER}" --jq .type)
+case $owner_type in
+  User) PACKAGES_API="/users/${OWNER}/packages" ;;
+  Organization) PACKAGES_API="/orgs/${OWNER}/packages" ;;
+  *) echo "${0##*/}: ${OWNER} is neither a user nor an organisation (${owner_type})" >&2; exit 1 ;;
+esac
 
 delete() { # delete PACKAGE API: version ids on stdin
   local id
@@ -60,7 +67,7 @@ prune_system_image() { # prune_system_image PACKAGE API VERSIONS
   done < <(jq -r '.[] | "\(.id) \(.name)"' <<< "$versions") | delete "$package" "$api"
 }
 
-packages=$(gh api --paginate "/users/${OWNER}/packages?package_type=container" | jq -rs 'add // [] | .[].name')
+packages=$(gh api --paginate "${PACKAGES_API}?package_type=container" | jq -rs 'add // [] | .[].name')
 while IFS= read -r package; do
   [[ -n $package ]] || continue
   case $package in
@@ -70,7 +77,7 @@ while IFS= read -r package; do
     athanor-nvidia-rpms) echo "${package}: the NVIDIA locks name its blobs, skipped"; continue ;;
   esac
   encoded=$(jq -rn --arg name "$package" '$name | @uri')
-  api="/users/${OWNER}/packages/container/${encoded}/versions"
+  api="${PACKAGES_API}/container/${encoded}/versions"
   versions=$(gh api --paginate "${api}?per_page=100" | jq -s 'add // []')
   case $package in
     athanor-system | athanor-system-nvidia | athanor-system-nvidia-legacy)

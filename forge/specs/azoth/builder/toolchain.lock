@@ -1,4 +1,4 @@
-# base: registry.fedoraproject.org/fedora:43@sha256:17ec53e139b4f9baa29cc91f469c120b86aa15959fcfca73b76182e58d5ff89d
+# base: registry.fedoraproject.org/fedora:43@sha256:005ce311c13eaa639de9d9c52e470f10652c7371561697fb8c1c6e852e23c481
 # kernel: 7.2.9-100.fc43
 # inputs: b0cfec56625e7ce792b3f93d1e427f8a57c5b72b8bcb7f611471d8c796450762
 # key: c6e7f081cf80e13146676e88829b606631645531
@@ -58,12 +58,12 @@ da3cf12f62c4037e89b5fb76d185a002aa68aa2b6431e8d4d700ea86d7fa2103  gcc-15.3.1-1.f
 21b8dc161ab2223f314b00617aa6dd849d1b77b7f843e3ef30807d9c4784457d  gcc-plugin-annobin-15.3.1-1.fc43.x86_64.rpm  gcc/15.3.1/1.fc43
 0d33bc5c39fa9435196fff9389cb262862f9f45f99c0d919befc5c791e2d3f05  gdb-minimal-17.2-2.fc43.x86_64.rpm  gdb/17.2/2.fc43
 9713150511786795222cdfc7739404a7fd945e6b8e1e90f1ede8219aaa624872  ghc-srpm-macros-1.9.2-3.fc43.noarch.rpm  ghc-srpm-macros/1.9.2/3.fc43
-51d7d1337bde6a9fe7182cf127e562316ef791f61dc289167d98190b2839d487  git-2.55.0-1.fc43.x86_64.rpm  git/2.55.0/1.fc43
-4669e60d2677683d2e9105a6e3d7b55179049b6643bec9704bd1b88ad65e99f6  git-core-2.55.0-1.fc43.x86_64.rpm  git/2.55.0/1.fc43
-d9b9e9c7c592d510ce0df81367e1d36987385ab23ae0872d018c548e14c8a47f  git-core-doc-2.55.0-1.fc43.noarch.rpm  git/2.55.0/1.fc43
-c38b1185f8e046e60cd833f902745f43a254e3ebaffc5bf7ff0b76def98d6ca5  glibc-devel-2.42-16.fc43.x86_64.rpm  glibc/2.42/16.fc43
-1d2079455bb58ffc25e0dd0a10c359edb51f40fc273163a4810f1c0f48fdb56d  glibc-gconv-extra-2.42-16.fc43.x86_64.rpm  glibc/2.42/16.fc43
-cb3e8019016dded46eb52527b822823e8c6923aaa9ddb521c16847c05a9435da  glibc-static-2.42-16.fc43.x86_64.rpm  glibc/2.42/16.fc43
+8df5fdeb2e19e958e265ebe6fd1a48c1ea832d72741e01d38221c1214fde73f2  git-2.56.0-1.fc43.x86_64.rpm  git/2.56.0/1.fc43
+6aa10d035b4cd3e431983fe2ee2d6438346e98751c08537571f6fa42fbc8b318  git-core-2.56.0-1.fc43.x86_64.rpm  git/2.56.0/1.fc43
+9e0ed1144f5e2957ecccca983bba5b52ea7b452d885388b471e4c54156561348  git-core-doc-2.56.0-1.fc43.noarch.rpm  git/2.56.0/1.fc43
+1f6e97cc834f6d693633acb58ad0f231f584150cc08c84eedae9a9a7327d350e  glibc-devel-2.42-17.fc43.x86_64.rpm  glibc/2.42/17.fc43
+f2e7e5b72d5a848e413bf19da56342a4a3836c3769b57db1fe1d75c90e0a9bc7  glibc-gconv-extra-2.42-17.fc43.x86_64.rpm  glibc/2.42/17.fc43
+bcee09aff26d410dbaf307e303f48326cc46246f3f01119abf553265be759a5a  glibc-static-2.42-17.fc43.x86_64.rpm  glibc/2.42/17.fc43
 c8f7500f95bb05419956705b19dfcaecc32abeb9dcfb44663ba38fa93f78424e  gnat-srpm-macros-7-1.fc43.noarch.rpm  gnat-srpm-macros/7/1.fc43
 a14cb218bea16c733b09ab6ef4242b331433507eb76763584552aefeb142c525  gnome-srpm-macros-1.0-1.fc43.noarch.rpm  gnome-srpm-macros/1.0/1.fc43
 e40badf4ae6288315c09927e8c9b5204cd4260dd55974b55062b1c06ca329d4c  go-srpm-macros-3.8.0-1.fc43.noarch.rpm  go-rpm-macros/3.8.0/1.fc43
@@ -167,7 +167,7 @@ e3fadaada36b90a5262efbf98f227e3650a661de923bf102167ab03b937fadb9  perl-File-Find
 1fcffa9a011a0a87ee97b1b315d1a81793b7e9c9ce6f660988cbaee747f84fed  perl-FileHandle-2.05-524.fc43.noarch.rpm  perl/5.42.3/524.fc43
 9d006fb2fd884058ea885de08e44470525dd899428821ac6af986a074f357a5b  perl-Getopt-Long-2.58-520.fc43.noarch.rpm  perl-Getopt-Long/2.58/520.fc43
 8e7d1ab71cd50632f81299651c3e14a3185790d4cf72ed777b9926195545f391  perl-Getopt-Std-1.14-524.fc43.noarch.rpm  perl/5.42.3/524.fc43
-c58c9cb1be4b1ca561ef3e0569acb8f2d10beaab9c00e246d52f211644dc5dc7  perl-Git-2.55.0-1.fc43.noarch.rpm  git/2.55.0/1.fc43
+bcaecfd36df81c3d549059d837846260c1411268a95c5388165b1c32e6331f82  perl-Git-2.56.0-1.fc43.noarch.rpm  git/2.56.0/1.fc43
 a3cda2b041ada11225e10d866ec007b135dd4460d023aa7f327d21ced86f96ce  perl-HTTP-Tiny-0.096-1.fc43.noarch.rpm  perl-HTTP-Tiny/0.096/1.fc43
 36d0c6975b514d6701a8fbd7daeea9b6c7d63e9648fc0f2e761fa00af78c8608  perl-Hash-Util-0.32-524.fc43.x86_64.rpm  perl/5.42.3/524.fc43
 47b1cf28b5db2eb9ad26991b2a589c450b7f602c55e1fc6d5be4034e66c32b1a  perl-Hash-Util-FieldHash-1.27-524.fc43.x86_64.rpm  perl/5.42.3/524.fc43

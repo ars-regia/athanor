@@ -1,0 +1,57 @@
+name: Azoth signer image
+
+# The image the sign-only job of NVIDIA kmod runs by digest (forge/specs/azoth/signer,
+# docs/architecture/doc_ci.md, D43): built and published here, in a job without any key, and
+# in no signing environment. The summary names the digest to commit in
+# forge/specs/azoth/signer/image.digest; until it is committed the sign job runs the digest
+# committed before, or fails closed when none is. signer/run.sh runs a digest only when this
+# workflow signed it on iso-v0 or main, so the job runs on those branches alone, whatever the
+# trigger.
+
+on:
+  push:
+    branches: [iso-v0, main]
+    paths:
+      - forge/specs/azoth/signer/Containerfile
+      - forge/specs/azoth/signer/toolchain.lock
+      - forge/specs/azoth/signer/publish.sh
+      - forge/specs/azoth/lock.sh
+      - forge/specs/azoth/sign-kernel.sh
+      - .github/workflows/azoth-signer.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/iso-v0' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    concurrency:
+      group: azoth-signer-publish
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+
+      - name: Publish (signer/publish.sh)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUILDAH_ISOLATION: chroot
+        run: |
+          set -euo pipefail
+          host=$(bash system/kernel-artifacts.sh registry)
+          host=${host%%/*}
+          echo "${GH_TOKEN}" | podman login "$host" -u "${GITHUB_ACTOR}" --password-stdin
+          echo "${GH_TOKEN}" | cosign login "$host" -u "${GITHUB_ACTOR}" --password-stdin
+          bash forge/specs/azoth/signer/publish.sh
+          cat signer-publish/summary.md >> "$GITHUB_STEP_SUMMARY"

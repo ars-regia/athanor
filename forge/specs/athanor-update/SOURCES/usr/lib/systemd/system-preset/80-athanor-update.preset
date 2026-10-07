@@ -3,5 +3,6 @@
 enable athanor-update-check.timer
 enable athanor-update-state.service
 enable athanor-update-migrate.service
+enable athanor-update-migrate.timer
 # The stock timer applies an update and reboots by itself (doc_shell.md, SH11: never).
 disable bootc-fetch-apply-updates.timer

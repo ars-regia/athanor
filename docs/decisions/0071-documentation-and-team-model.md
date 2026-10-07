@@ -2,7 +2,7 @@
 id: A2-34
 title: "Documentation and team model"
 date: 2026-10-06
-status: accepted
+status: amended by ADR-0074
 issues: []
 areas: [docs, process, ci]
 ---

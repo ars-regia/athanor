@@ -2,18 +2,40 @@
 # selected by the GPU build argument: none (athanor-system), nvidia (athanor-system-nvidia)
 # and nvidia-legacy (athanor-system-nvidia-legacy). Everything up to the `system` stage is
 # shared; the GPU stages add the signed NVIDIA modules of the Azoth kernel with the locked
-# vendor packages; the final stage gates, assembles the UKI and lints. system/build-image.sh
-# passes AZOTH_NVR, the registry and the module digests from the file system/kernel-artifacts.sh
+# vendor packages; the final stage gates, generates the initramfs and lints. No key reaches the
+# build: the vmlinuz is the one signed for Secure Boot in the kernel cycle (azoth-boot, D43).
+# system/build-image.sh passes AZOTH_NVR, the registries, the signed vmlinuz digest and the module
+# digests from the file system/kernel-artifacts.sh
 # wrote (docs/architecture/doc_build_ordering.md, O4, O9). A stage the target does not use is
 # never pulled, so the default image builds without module digests.
+# The `system` stage is built once, on its own (--target system), and the GPU stages start FROM
+# its image ID, SYSTEM_IMAGE: the three images carry the same system layers, built once per run
+# (docs/architecture/doc_update_delivery.md, UD40). A variant build never runs the stage itself.
 ARG AZOTH_NVR
 ARG GPU=none
-ARG KERNEL_REGISTRY=ghcr.io/hr-mes
+ARG KERNEL_REGISTRY
+ARG FORGE_REGISTRY
 ARG NVIDIA_OPEN_DIGEST
 ARG NVIDIA_LEGACY_DIGEST
+ARG BOOT_DIGEST
+ARG SYSTEM_IMAGE
+
+# The vmlinuz of the pinned kernel signed with the Secure Boot key, /vmlinuz and /kver
+# (forge/specs/azoth/nvidia-publish.sh); system/kernel-artifacts.sh verified its signature and
+# its attestation of the kernel digest and the certificate.
+FROM ${KERNEL_REGISTRY}/azoth-boot@${BOOT_DIGEST} AS signed-kernel
 
 FROM ${KERNEL_REGISTRY}/azoth-nvidia@${NVIDIA_OPEN_DIGEST} AS nvidia-modules-open
 FROM ${KERNEL_REGISTRY}/azoth-nvidia@${NVIDIA_LEGACY_DIGEST} AS nvidia-modules-legacy
+
+# The forge tier repositories, bound by the four tier steps of the system stage. FORGE_REGISTRY
+# is the project registry, which system/build-image.sh derives from REGISTRY_HOST and the
+# repository owner. The ARG stays in these FROM lines: inside a RUN --mount=...,from= value it
+# made buildah 5.8.4 SIGSEGV at commit (exit 134), taking down all three images.
+FROM ${FORGE_REGISTRY}/athanor-forge-tier0-repo:latest AS tier0-repo
+FROM ${FORGE_REGISTRY}/athanor-forge-tier1-repo:latest AS tier1-repo
+FROM ${FORGE_REGISTRY}/athanor-forge-tier2-repo:latest AS tier2-repo
+FROM ${FORGE_REGISTRY}/athanor-forge-tier3-repo:latest AS tier3-repo
 
 # The vendor RPMs of both NVIDIA branches, verified by hash and GPG, with the shim and the
 # configuration package, and NVIDIA's container toolkit (system/nvidia/build-rpms.sh). A throwaway stage: rpm-build never
@@ -38,14 +60,7 @@ ARG TETRAGON_VERSION=v1.3.0
 # TIER 0: BEDROCK HARDWARE & KERNEL FOUNDATION
 # The tier repositories mount under /tmp: in an ostree image /mnt is a symlink to var/mnt,
 # which does not exist at build time, so podman cannot create a mount target below it.
-# The registry here is a literal, not ${KERNEL_REGISTRY}: an ARG in a RUN --mount=...,from=
-# value made buildah 5.8.4 SIGSEGV at commit (exit 134), taking down all three images. Only
-# the two FROM ...@digest lines above tolerate the ARG; do not reapply it here.
-# This covers all four tier mounts below and is the single hard-coded registry owner the
-# pipeline keeps (re-audit decision 12, 2026-10-05): a fork that publishes elsewhere edits
-# these four lines. Everywhere else the owner comes from REGISTRY_HOST and the repository
-# owner, and `scripts/verify.py registry` enforces it.
-RUN --mount=type=bind,from=ghcr.io/hr-mes/athanor-forge-tier0-repo:latest,source=/,target=/tmp/tier0-repo \
+RUN --mount=type=bind,from=tier0-repo,source=/,target=/tmp/tier0-repo \
     --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
     base_kernel=$(rpm -qa kernel kernel-core 'kernel-modules*' 'kernel-uki-virt*') && \
     if [ -n "$base_kernel" ]; then \
@@ -79,17 +94,24 @@ RUN dnf5 install -y --allowerasing --enablerepo=fedora-cisco-openh264 openh264 &
     rpm -q openh264 && \
     ! rpm -q noopenh264
 
-# The Azoth kernel of the pins is the one tier 0 installed.
+# The Azoth kernel of the pins is the one tier 0 installed. Its vmlinuz is replaced by the
+# same kernel signed for Secure Boot, which shim accepts through MokList; `rpm -V kernel-core`
+# reports the file as modified (doc_system_image.md). azoth-boot names in /kver the kernel it
+# signed: a BOOT_DIGEST of another kernel fails here, not at boot. The mode is the RPM's.
 ARG AZOTH_NVR
 RUN test -f "/usr/lib/modules/${AZOTH_NVR}.x86_64/vmlinuz"
+RUN --mount=type=bind,from=signed-kernel,source=/kver,target=/tmp/azoth-boot-kver \
+    signed=$(cat /tmp/azoth-boot-kver) && \
+    if [ "$signed" != "${AZOTH_NVR}.x86_64" ]; then echo "azoth-boot signed the vmlinuz of $signed, not of ${AZOTH_NVR}.x86_64" >&2; exit 1; fi
+COPY --chmod=0755 --from=signed-kernel /vmlinuz /usr/lib/modules/${AZOTH_NVR}.x86_64/vmlinuz
 
 # Tier 0: Install Cilium Tetragon eBPF Runtime Security is now delegated to athanor-tetragon RPM
 
 # TIER 1: CORE USERSERVICE, DBUS & POLICYKIT
-RUN --mount=type=bind,from=ghcr.io/hr-mes/athanor-forge-tier1-repo:latest,source=/,target=/tmp/tier1-repo \
+RUN --mount=type=bind,from=tier1-repo,source=/,target=/tmp/tier1-repo \
     --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
-    echo "Tier 1: Installing Scudo Hardened Allocator (compiler-rt), Keylime & UKI tools..." && \
-    dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs compiler-rt keylime-tenant keylime-agent systemd-ukify systemd-boot-unsigned sbsigntools openssl tpm2-tools cryptsetup dracut && \
+    echo "Tier 1: Installing Scudo Hardened Allocator (compiler-rt), Keylime, TPM and LUKS tools..." && \
+    dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs compiler-rt keylime-tenant keylime-agent systemd-ukify openssl tpm2-tools cryptsetup dracut && \
     if find /tmp/tier1-repo -name "*.rpm" 1> /dev/null 2>&1; then \
         echo "Tier 1: Installing Core User Services, DBus & Policies..." && \
         RPM_LIST=$(find /tmp/tier1-repo -name "*.rpm" ! -name "*-devel-*" ! -name "*-doc-*" ! -name "*debuginfo*" ! -name "*debugsource*" ! -name "*astro-toolchain*" ! -name "*buildah*" ! -name "*osbuild*" ! -name "*cargo-tools*") && \
@@ -99,7 +121,7 @@ RUN --mount=type=bind,from=ghcr.io/hr-mes/athanor-forge-tier1-repo:latest,source
     fi
 
 # TIER 2: DESIGN SYSTEM & STATIC ASSETS
-RUN --mount=type=bind,from=ghcr.io/hr-mes/athanor-forge-tier2-repo:latest,source=/,target=/tmp/tier2-repo \
+RUN --mount=type=bind,from=tier2-repo,source=/,target=/tmp/tier2-repo \
     --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
     if find /tmp/tier2-repo -name "*.rpm" 1> /dev/null 2>&1; then \
         echo "Tier 2: Installing Design System & Static Assets..." && \
@@ -110,7 +132,7 @@ RUN --mount=type=bind,from=ghcr.io/hr-mes/athanor-forge-tier2-repo:latest,source
     fi
 
 # TIER 3: AGILE RUST SHELL & APPS
-RUN --mount=type=bind,from=ghcr.io/hr-mes/athanor-forge-tier3-repo:latest,source=/,target=/tmp/tier3-repo \
+RUN --mount=type=bind,from=tier3-repo,source=/,target=/tmp/tier3-repo \
     --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
     if find /tmp/tier3-repo -name "*.rpm" 1> /dev/null 2>&1; then \
         echo "Tier 3: Installing Agile Rust Shell & Apps..." && \
@@ -130,16 +152,16 @@ COPY forge/config/packages.json /usr/share/athanor/packages.json
 # and served from the tier repositories, as the custom packages are; until then Fedora's
 # GPG signatures are the provenance. The list is the single source of truth in
 # packages.json, so a package added there reaches the image. --allowerasing lets the
-# RPM Fusion ffmpeg replace the base image's ffmpeg-free. --exclude=cosmic-comp hides
-# Fedora's build from this transaction, so neither --allowerasing nor a newer Fedora
-# release can replace Athanor's, installed above from the tier 2 repository; the installed
-# package still satisfies what the COSMIC packages require. The release assertion below
-# stays as the check.
+# RPM Fusion ffmpeg replace the base image's ffmpeg-free. The --exclude options hide
+# Fedora's builds of cosmic-comp and greenboot from this transaction, so neither
+# --allowerasing nor a newer Fedora release can replace Athanor's, installed above from the
+# tier 2 repository; the installed packages still satisfy what the COSMIC packages and
+# athanor-system-config require. The release assertions below stay as the check.
 RUN --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
     dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs jq && \
     UPSTREAM=$(jq -r '(.upstream_core + .upstream_desktop + .upstream_media + .upstream_cli)[]' /usr/share/athanor/packages.json) && \
     echo "Installing upstream packages: $UPSTREAM" && \
-    dnf5 install -y --allowerasing --exclude=cosmic-comp --setopt=install_weak_deps=False --setopt=tsflags=nodocs $UPSTREAM
+    dnf5 install -y --allowerasing --exclude=cosmic-comp --exclude=greenboot --exclude=greenboot-default-health-checks --setopt=install_weak_deps=False --setopt=tsflags=nodocs $UPSTREAM
 
 # FLATPAK MANIFEST: the applications are provisioned on the installed system, not at
 # build time. Extra-data apps such as Chrome run an apply_extra script under
@@ -179,6 +201,20 @@ RUN /usr/libexec/athanor-update/render-policy --registry "${IMAGE_REGISTRY}" --k
 RUN authselect enable-feature with-systemd-homed && \
     systemctl enable tetragon.service systemd-sysext.service systemd-homed.service && systemd-sysusers && systemctl preset-all && systemctl --global preset-all
 
+# No account authenticates with an empty password (#152). The base image's "local" authselect
+# profile ships nullok on pam_unix; the feature removes it from every generated stack.
+RUN authselect enable-feature without-nullok && \
+    test -s /etc/pam.d/system-auth && test -s /etc/pam.d/password-auth && \
+    ! grep -n nullok /etc/pam.d/system-auth /etc/pam.d/password-auth
+
+# Short passwords. pam_pwquality asks a new password for twelve characters; systemd-homed reads
+# the same configuration for homectl passwd. Existing passwords are not touched. The lockout
+# after failed attempts (pam_faillock) comes with the lock screen that can write its tally
+# (doc_lock_and_prompts.md, D3 and LP18 step 3).
+RUN install -d -m 0755 /etc/security/pwquality.conf.d && \
+    printf '%s\n' '# Athanor (system/Containerfile).' 'minlen = 12' \
+        > /etc/security/pwquality.conf.d/50-athanor.conf
+
 # Stage 2 switch (doc_shell.md, section 8, item 2): the COSMIC shell is gone, our shell is
 # enabled for every user, and each bus name it owns has exactly one activation file.
 RUN for pkg in cosmic-panel cosmic-applets cosmic-notifications athanor-layout-translator; do \
@@ -196,15 +232,31 @@ RUN for pkg in cosmic-panel cosmic-applets cosmic-notifications athanor-layout-t
             || { echo "$name is activated by: $owners" >&2; exit 1; }; \
     done
 
+# Health checks (doc_recovery.md, R5): Athanor's greenboot build, which can mark a failed
+# update without rebooting, enabled by athanor-recovery's preset and configured not to reboot.
+# The configuration reaches /etc through tmpfiles.d at boot, so the build checks its source.
+RUN for pkg in greenboot greenboot-default-health-checks; do \
+        case $(rpm -q --qf '%{RELEASE}' "$pkg") in *.athanor*) ;; \
+            *) echo "$pkg is not Athanor's build: $(rpm -q "$pkg")" >&2; exit 1;; esac; \
+    done && \
+    for unit in greenboot-healthcheck greenboot-set-rollback-trigger; do \
+        test "$(systemctl is-enabled "$unit.service")" = enabled \
+            || { echo "$unit.service is not enabled" >&2; exit 1; }; \
+    done && \
+    grep -qx 'GREENBOOT_AUTO_REBOOT=false' /usr/share/athanor-system-config/greenboot.conf && \
+    systemd-tmpfiles --cat-config \
+        | grep -qx 'L+ /etc/greenboot/greenboot.conf - - - - /usr/share/athanor-system-config/greenboot.conf'
+
 # GPU stages (S2-S5): the signed modules of the kernel NVR with the locked vendor packages of
 # the same version, the shim and athanor-nvidia-config. libva-nvidia-driver (VA-API on NVDEC)
 # only makes sense with the NVIDIA driver, and so does the locked container toolkit (S4), which
-# gives containers the GPU through CDI.
-FROM system AS gpu-none
+# gives containers the GPU through CDI. SYSTEM_IMAGE is the image ID of the `system` stage,
+# built beforehand by system/build-image.sh.
+FROM ${SYSTEM_IMAGE} AS gpu-none
 
 # The modules must land in the directory of the pinned kernel: hardening deletes every other
 # modules directory, so a mismatch fails here rather than silently later.
-FROM system AS gpu-nvidia
+FROM ${SYSTEM_IMAGE} AS gpu-nvidia
 ARG AZOTH_NVR
 COPY --from=nvidia-modules-open /lib/modules/ /usr/lib/modules/
 RUN test -f "/usr/lib/modules/${AZOTH_NVR}.x86_64/extra/nvidia/nvidia.ko"
@@ -215,7 +267,7 @@ RUN --mount=type=bind,from=nvidia-rpms,source=/out/open,target=/tmp/nvidia-rpms 
         /tmp/container-toolkit/*.rpm libva-nvidia-driver && \
     systemctl preset-all
 
-FROM system AS gpu-nvidia-legacy
+FROM ${SYSTEM_IMAGE} AS gpu-nvidia-legacy
 ARG AZOTH_NVR
 COPY --from=nvidia-modules-legacy /lib/modules/ /usr/lib/modules/
 RUN test -f "/usr/lib/modules/${AZOTH_NVR}.x86_64/extra/nvidia/nvidia.ko"
@@ -228,6 +280,7 @@ RUN --mount=type=bind,from=nvidia-rpms,source=/out/legacy,target=/tmp/nvidia-rpm
 
 FROM gpu-${GPU} AS final
 ARG GPU
+ARG AZOTH_NVR
 COPY forge/specs/azoth/pins.env /scripts/pins.env
 COPY system/nvidia/gate.sh /scripts/nvidia-gate.sh
 RUN bash /scripts/nvidia-gate.sh "${GPU}" /scripts/pins.env /
@@ -242,11 +295,8 @@ RUN bash /scripts/nvidia-gate.sh "${GPU}" /scripts/pins.env /
 # file; this is only the last word.
 RUN systemctl preset NetworkManager-wait-online.service
 
-# Initramfs & Unified Kernel Image (UKI) generation
-RUN --mount=type=secret,id=uki_key,required=false \
-    --mount=type=secret,id=uki_cert,required=false \
-    --mount=type=secret,id=uki_crt,required=false \
-    /bin/bash /scripts/assemble_uki.sh
+# Module index and initramfs, once every module is in place
+RUN bash /scripts/initramfs.sh "${AZOTH_NVR}.x86_64"
 
 # Hardening & OSTree cleanup. glibc-all-langpacks stays: glibc requires a langpack
 # provider and it is the one the base image ships. The runtime directories are
@@ -259,7 +309,7 @@ RUN dnf5 remove -y --no-autoremove \
         nodejs-docs python3-botocore kernel-debug kernel-debug-core kernel-debug-modules kernel-debug-modules-core kernel-debug-modules-extra && \
     for d in /usr/lib/modules/*; do if [ -d "$d" ] && [ ! -e "$d/vmlinuz" ] && [ ! -L "$d/vmlinuz" ]; then rm -rf "$d"; fi; done && \
     rm -f /etc/machine-id && touch /etc/machine-id && \
-    rm -rf /scripts /etc/pki/secureboot/private /etc/pki/uki/*.key && \
+    rm -rf /scripts && \
     dnf5 clean all && \
     rm -rf /var/lib/dnf5/* /var/tmp/* /var/log/* && \
     for p in /tmp/* /run/* /etc/NetworkManager/system-connections/*; do \

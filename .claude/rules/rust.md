@@ -3,13 +3,13 @@ paths:
   - "**/*.rs"
 ---
 
-# Rust — Ermete OS
+# Rust — Athanor
 
 ## Concorrenza senza panic
 
 `panic = "abort"` è impostato **sia su dev che su release**. Un panic non si
 propaga e non si recupera: termina il processo. In un daemon di sistema questo
-significa perdita di servizio, e in `ermete-agentic-kernel` o nel compositor
+significa perdita di servizio, e in `athanor-agentic-kernel` o nel compositor
 significa sessione utente persa.
 
 - Mai `.unwrap()` o `.expect()` su `RwLock` / `Mutex`: un lock avvelenato fa
@@ -40,7 +40,7 @@ impone vincoli su licenze e provenienza.
 ## Prima di modificare
 
 Se il simbolo è condiviso fra crate, `codegraph_impact` prima di toccarlo: il
-workspace ha 33 membri e una firma cambiata si propaga più lontano di quanto
+workspace ha decine di membri e una firma cambiata si propaga più lontano di quanto
 sembri. Per una modifica ripetuta su più occorrenze, `/ast-refactor`.
 
 ## Verifica

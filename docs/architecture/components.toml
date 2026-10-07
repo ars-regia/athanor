@@ -578,6 +578,15 @@ item = "CO3"
 purpose = "cosmic-comp with Athanor's patches; the one COSMIC component that stays"
 
 [[component]]
+path = "forge/specs/greenboot-rs"
+kind = "rpm spec"
+area = "signing-update"
+status = "specified"
+spec = "doc_recovery.md"
+item = "R5"
+purpose = "greenboot with GREENBOOT_AUTO_REBOOT: a failed health check queues the previous deployment without rebooting"
+
+[[component]]
 path = "forge/specs/osbuild"
 kind = "rpm spec"
 area = "build-ci"
@@ -615,6 +624,15 @@ kind = "config"
 area = "build-ci"
 status = "missing"
 purpose = "Upstream releases the update bot watches"
+
+[[component]]
+path = "scripts/ci"
+kind = "script tool"
+area = "build-ci"
+status = "specified"
+spec = "doc_ci.md"
+item = "CI27"
+purpose = "Pull Request gate: changed areas, the gate verdict, the pinned tools of just check, the known-red list"
 
 [[component]]
 path = "scripts/cosmic-comp-rebase"
@@ -805,7 +823,7 @@ path = "system/athanor-install.ks"
 kind = "config"
 area = "platform"
 status = "missing"
-purpose = "Kickstart of the manual ISO build; enables sshd and systemd-homed"
+purpose = "Kickstart of the manual ISO build; enables systemd-homed"
 
 [[component]]
 path = "system/athanor-layout"
@@ -1017,7 +1035,7 @@ path = "system/scripts"
 kind = "script tool"
 area = "build-ci"
 status = "missing"
-purpose = "UKI assembly, bootc-image-builder ISO, unikernel build, theme generator, Flatpak provisioner"
+purpose = "Initramfs generation, bootc-image-builder ISO, unikernel build, theme generator, Flatpak provisioner"
 
 [[component]]
 path = "system/sign-images.sh"
@@ -1027,13 +1045,6 @@ status = "specified"
 spec = "doc_update_trust.md"
 item = "UT2"
 purpose = "Adds the key-based signature to the published system images"
-
-[[component]]
-path = "system/sysctl.d"
-kind = "config"
-area = "security"
-status = "missing"
-purpose = "A sysctl hardening file that nothing installs"
 
 [[component]]
 path = "system/tests"

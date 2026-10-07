@@ -4,7 +4,7 @@ Version:        1.0.0
 Release:        12%{?dist}
 Summary:        Athanor OS Desktop UI configurations
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor
+URL:            https://github.com/ars-regia/athanor
 BuildArch:      noarch
 
 Provides:       athanor-ags-config = 1.0.1-3

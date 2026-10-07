@@ -50,7 +50,7 @@ fn reason<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, booted: &Deployed) -
     let Some(key_paths) = policy.scopes.get(repository) else { return Reason::ReferenceOutOfScope };
     if !booted.enforcing {
         // The installer's reference, or an install that has not migrated yet (UT4).
-        return Reason::Media;
+        return if ctx.store.channel_absent() { Reason::ChannelAbsent } else { Reason::Media };
     }
     let keys: Vec<_> = key_paths.iter().filter_map(|path| std::fs::read_to_string(path).ok()).filter_map(|pem| sigobj::load_key(&pem)).collect();
     let claims = ctx.store.signature_dir(&booted.digest).and_then(|dir| sigobj::claims(&dir, &keys).ok()).unwrap_or_default();
@@ -101,7 +101,9 @@ fn online_update<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &mut 
         return (local, None);
     }
     let candidate = match ctx.tools.candidate(&status.booted.image) {
-        Ok(candidate) => candidate,
+        Ok(Some(candidate)) => candidate,
+        // The followed tag has no manifest: a registry answer, but nothing to offer.
+        Ok(None) => return (local, Some(Failure { code: ErrorCode::Registry, host: crate::tools::host_of(&status.booted.image) })),
         Err(failure) => return (local, Some(failure)),
     };
     // The registry answered: that is a successful check, whatever it said.
@@ -156,7 +158,17 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failu
     let storage = |_| Failure { code: ErrorCode::Storage, host: None };
     let newest = ctx.store.record_booted(status.booted.build_time).map_err(storage)?;
     let policy = crate::policy::in_force(&ctx.policy);
-    let (update, failure) = if offline { (local_update(ctx, &status), None) } else { online_update(ctx, &policy, &mut status) };
+    // A queued rollback leaves the booted digest (doc_recovery.md, R5): it is held, as GoBack()
+    // holds it, and nothing is downloaded, since a staged deployment would become the default
+    // of the next boot in place of the return.
+    let (update, failure) = if status.rollback_queued {
+        let held = ctx.store.set_held(&status.booted.digest).err().map(|_| Failure { code: ErrorCode::Storage, host: None });
+        (local_update(ctx, &status), held)
+    } else if offline {
+        (local_update(ctx, &status), None)
+    } else {
+        online_update(ctx, &policy, &mut status)
+    };
     if !offline && enforced(&policy, &status.booted) {
         // A machine whose signature object was never stored, or was lost, heals here. A
         // failure is not the check's: the reason below already says `no-signature`.
@@ -206,7 +218,7 @@ pub(crate) mod tests {
     /// bootc, skopeo, ostree and NetworkManager as one scripted object that records its calls.
     pub(crate) struct Fake {
         pub status: RefCell<Status>,
-        pub candidate: Result<Candidate, Failure>,
+        pub candidate: Result<Option<Candidate>, Failure>,
         /// What `download` stages, or how it fails.
         pub download: Result<Deployed, Failure>,
         pub metered: bool,
@@ -217,7 +229,7 @@ pub(crate) mod tests {
     impl Fake {
         pub(crate) fn booted(booted: Deployed) -> Self {
             Self {
-                status: RefCell::new(Status { booted, staged: None, rollback: None }),
+                status: RefCell::new(Status { booted, staged: None, rollback: None, rollback_queued: false }),
                 candidate: Err(Failure { code: ErrorCode::Network, host: Some("localhost:5000".into()) }),
                 download: Err(Failure { code: ErrorCode::Internal, host: None }),
                 metered: false,
@@ -227,7 +239,7 @@ pub(crate) mod tests {
         }
 
         pub(crate) fn offering(mut self, digest: &str, build_time: i64) -> Self {
-            self.candidate = Ok(Candidate { digest: digest.into(), version: format!("43.{build_time}"), build_time });
+            self.candidate = Ok(Some(Candidate { digest: digest.into(), version: format!("43.{build_time}"), build_time }));
             self.download = Ok(Deployed { download_only: true, ..deployed(digest, build_time) });
             self
         }
@@ -245,7 +257,7 @@ pub(crate) mod tests {
         fn status(&self) -> Result<Status, Failure> {
             Ok(self.status.borrow().clone())
         }
-        fn candidate(&self, image: &str) -> Result<Candidate, Failure> {
+        fn candidate(&self, image: &str) -> Result<Option<Candidate>, Failure> {
             self.call(format!("candidate {image}"));
             self.candidate.clone()
         }
@@ -350,6 +362,20 @@ pub(crate) mod tests {
         assert_eq!((state.last_error, state.last_successful_check), (ErrorCode::None, Some(5000)));
         assert!(machine.store.signature_dir(SIGNED).expect("dir").join("manifest.json").exists());
         assert_eq!(athanor_trust_state::read_owned_by(&machine.store.run.join("state.json"), std::os::unix::fs::MetadataExt::uid(&std::fs::metadata(&machine.root).expect("meta"))), Ok(state));
+    }
+
+    #[test]
+    fn a_queued_rollback_holds_the_booted_digest_and_downloads_nothing() {
+        for offline in [true, false] {
+            let machine = Machine::new(&format!("rollback-queued-{offline}"), &["real/k1.pub"]);
+            let tools = Fake::booted(deployed(&digest(2), 2000)).offering(&digest(3), 3000);
+            tools.status.borrow_mut().rollback = Some(deployed(&digest(1), 1000));
+            tools.status.borrow_mut().rollback_queued = true;
+            let state = run(&machine.ctx(&tools, 5000), offline).expect("state");
+            assert_eq!(machine.store.held(), Some(digest(2)));
+            assert_eq!(state.update, UpdateState::None);
+            assert!(!tools.called("candidate") && !tools.called("download"));
+        }
     }
 
     #[test]
