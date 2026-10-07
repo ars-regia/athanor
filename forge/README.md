@@ -27,6 +27,7 @@ The packages of the desktop and of the platform services:
 | `athanor-update` | System image updates and the trust state |
 | `athanor-backup` | Hourly btrfs snapshots of `/var/home`, with retention and restore |
 | `athanor-recovery` | The text console shown when the desktop does not start |
+| `greenboot-rs` | greenboot's boot health checks, patched to mark a failed update without rebooting |
 | `athanor-kernel-profile` | The kernel profile's settings per role and their checker |
 
 The kernel, Azoth, is built by its own workflow from `specs/azoth`

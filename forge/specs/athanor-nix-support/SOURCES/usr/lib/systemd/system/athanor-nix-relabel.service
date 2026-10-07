@@ -17,5 +17,11 @@ Conflicts=shutdown.target
 
 [Service]
 Type=oneshot
+# restorecon walks and reads every directory of the store (CAP_DAC_READ_SEARCH) and sets
+# security.selinux on files it does not own (CAP_FOWNER: the kernel's setxattr check for the
+# security.* namespace is inode_owner_or_capable). It does not write file data, so it has no
+# CAP_DAC_OVERRIDE. No NoNewPrivileges: it would forbid restorecon's transition to
+# setfiles_t, which is why the bound must hold no capability that gives root back.
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_FOWNER
 ExecStart=/usr/sbin/restorecon -RF /var/nix
 ExecStartPost=/usr/bin/touch /var/nix/var/nix/athanor-selinux-relabel-1

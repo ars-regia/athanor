@@ -3,14 +3,17 @@
 # it. `bootc upgrade` cannot do this here: create.sh installs from an ISO whose kickstart
 # pins `ostreecontainer` to the run-id tag it was built with (the osbuild-base.ks that bootc-image-builder generates and scripts/devvm/devvm.ks includes),
 # and upgrade only re-pulls that same tag, never a newer one. This runs the equivalent
-# `bootc switch` to `:latest` instead, the way the dev VM verification reports did by hand.
+# `bootc switch` to `:latest` instead (scripts/switch-verified.sh), the way the dev VM
+# verification reports did by hand.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source-path=SCRIPTDIR
 source "$HERE/devvm.env"
 
-guest_ssh sudo bootc switch --transport registry "$SYSTEM_IMAGE:latest"
+# Verified against the project key, with the signed origin recorded, as a shipped install
+# does: `--transport registry` recorded an unverified origin that every later pull inherited.
+guest_ssh sudo bash -s -- "$SYSTEM_IMAGE:latest" < "$HERE/../switch-verified.sh"
 guest_ssh sudo systemctl reboot
 echo "rebooting; waiting for SSH"
 sleep 5 # give the reboot time to actually drop the current SSH session

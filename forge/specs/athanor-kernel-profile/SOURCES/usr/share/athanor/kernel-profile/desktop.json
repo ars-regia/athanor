@@ -163,6 +163,22 @@
       }
     },
     "sysctl": {
+      "dev.tty.ldisc_autoload": {
+        "decision": "D47",
+        "value": "0"
+      },
+      "fs.protected_fifos": {
+        "decision": "D47",
+        "value": "2"
+      },
+      "fs.protected_regular": {
+        "decision": "D47",
+        "value": "2"
+      },
+      "fs.suid_dumpable": {
+        "decision": "D47",
+        "value": "0"
+      },
       "kernel.dmesg_restrict": {
         "decision": "D47",
         "value": "1"
@@ -170,6 +186,10 @@
       "kernel.kptr_restrict": {
         "decision": "D47",
         "value": "2"
+      },
+      "kernel.yama.ptrace_scope": {
+        "decision": "D47",
+        "value": "1"
       },
       "net.core.default_qdisc": {
         "decision": "section 6",

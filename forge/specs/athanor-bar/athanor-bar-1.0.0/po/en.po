@@ -470,6 +470,10 @@ msgstr "Not verified: the image is outside the policy's scope"
 msgid "Not verified: the system was changed on this machine"
 msgstr "Not verified: the system was changed on this machine"
 
+#: src/ui/shield.rs:311
+msgid "Not verified: waiting for the stable channel to be published"
+msgstr "Not verified: waiting for the stable channel to be published"
+
 #: src/ui/shield.rs:316
 msgid "Up to date"
 msgstr "Up to date"
