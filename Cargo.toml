@@ -11,6 +11,7 @@ members = [
   "forge/specs/athanor-update/athanor-update-1.0.0",
   "forge/specs/athanor-update/athanor-update-notify-1.0.0",
   "forge/specs/athanor-xdg-desktop-portal-athanor/xdg-desktop-portal-athanor-1.0.0",
+  "system/confidential_computing/athanor-attestation",
   "system/athanor-bus-api",
   "system/athanor-compositor-client",
   "system/athanor-apps",
@@ -81,6 +82,10 @@ anyhow = "1.0.99"
 # Logging & Telemetry
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
+env_logger = "0.11.11"
+
+# Post-quantum signatures: only athanor-attestation uses them (#201, #206).
+pqc_dilithium = "0.2.0"
 
 # Hashing & Utilities
 sha2 = "0.10.9"

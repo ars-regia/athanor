@@ -112,8 +112,9 @@ protected paths last, as in PR #170.
 /.github/workflows/promote-stable.yml          @hr-mes
 /docs/architecture/doc_update_trust.md         @hr-mes
 
-# security: polkit, MAC policy, runtime enforcement, PAM, the Gatekeeper
+# security: polkit, attestation, MAC policy, runtime enforcement, PAM, the Gatekeeper
 /system/athanor-bus-api/                       @hr-mes
+/system/confidential_computing/                @hr-mes
 /forge/specs/athanor-tetragon/                 @hr-mes
 /forge/specs/athanor-selinux/                  @hr-mes
 /forge/specs/athanor-keylime/                  @hr-mes

@@ -108,7 +108,7 @@ self-hosted KVM runner. Section 15 turns the rest into gated blocks.
 - Roles: desktop, laptop, mesh; a machine may hold several. The mesh is personal: it
   joins the devices of one owner, and it comes after release 1.0 (D26, D38).
 - Areas that require explicit maintainer approval before any code change remain so:
-  attestation (its crate was deleted by ADR-0073; a rewrite starts from a specification) and
+  attestation (`system/confidential_computing/athanor-attestation`) and
   `system/athanor-bus-api/src/polkit.rs`. This document fixes requirements and kernel
   primitives for them, not their code. The Gatekeeper was removed on 2026-10-05.
 
@@ -1104,8 +1104,8 @@ Found on the running system and in the repository (2026-09-14):
   The `athanor-secure-boot` package was removed from the repository with those units. *Amended on 2026-10-06 (A2-27, #131, #145):* release 1.0 unlocks the disk with the passphrase only; TPM sealing arrives with 1.1.
   `athanor-gatekeeper-rs`, `athanor-daemon` and `athanor-store-rs` were removed from the
   image on 2026-09-17 pending redesign; the Gatekeeper was removed from the repository on
-  2026-10-05, and attestation is a restricted area. ADR-0073 deleted `athanor-lvfs-rs`,
-  `athanor-store-rs` and the attestation crate from the tree.
+  2026-10-05, and attestation is a restricted area. ADR-0073 deleted `athanor-lvfs-rs`
+  and `athanor-store-rs` from the tree.
 - **Snapshots** (P3): `athanor-timewarp` targets bcachefs, which left mainline in Linux
   6.18, and misdetects `/var/home` as tmpfs; `athanor-backup-hourly` fails because
   `athanor-backup` is disabled. Both are ported to btrfs subvolume snapshots.

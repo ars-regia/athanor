@@ -1545,7 +1545,7 @@ UPSTREAM_SPECS = {
     "forge/specs/greenboot-rs/greenboot-rs.spec",
 }
 # Crates whose manifests agents may not edit without the maintainer's approval.
-PROTECTED_CRATES = set()
+PROTECTED_CRATES = {"system/confidential_computing/athanor-attestation/Cargo.toml"}
 # Files that carry packaging metadata outside Cargo.toml and *.spec.
 NFPM_FILES = ["flake.nix"]
 # The SPDX identifiers the repository actually uses. A new one is added here on purpose.

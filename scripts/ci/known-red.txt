@@ -10,6 +10,9 @@
 # finding the base branch does not list and a later expiry, and a listed finding the check no
 # longer reports must be removed in the same change.
 paths #223 2027-01-07 system/athanor-style/src/appearance_engine.rs percorso hard-coded in /tmp — usa /run/athanor (0700) per stato privilegiato
+paths #223 2027-01-07 system/confidential_computing/athanor-attestation/src/cvm_manager.rs percorso hard-coded in /tmp — usa /run/athanor (0700) per stato privilegiato
+paths #223 2027-01-07 system/confidential_computing/athanor-attestation/src/cvm_manager.rs percorso hard-coded in /tmp — usa /run/athanor (0700) per stato privilegiato
+shipped #223 2027-01-07 athanor-attestation: nessuno .spec, non in packages.json -> compila ma non arriva sul sistema. Impacchettalo, spostalo in experimental/, o elencalo in experimental/EXEMPT
 panics #223 2027-01-07 system/athanor-compositor-client/src/shortcuts.rs: .expect( over the budget of 2, propagate with `?`
 panics #223 2027-01-07 system/athanor-compositor-client/src/shortcuts.rs: .expect( over the budget of 2, propagate with `?`
 panics #223 2027-01-07 system/athanor-compositor-client/src/shortcuts.rs: .expect( over the budget of 2, propagate with `?`
