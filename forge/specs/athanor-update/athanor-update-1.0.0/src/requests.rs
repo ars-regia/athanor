@@ -52,7 +52,9 @@ pub async fn apply<T: Tools, P: Power>(ctx: &Context<'_, T>, power: &P) -> Resul
     let _lock = ctx.store.try_lock().map_err(|_| Refusal::Busy)?;
     let status = ctx.tools.status().map_err(|_| Refusal::Failed)?;
     let policy = crate::policy::in_force(&ctx.policy);
-    let ready = status.staged.as_ref().is_some_and(|staged| {
+    // bootc rollback discards the staged deployment; one staged after it would replace the
+    // queued return (doc_recovery.md, R5), so a queued rollback has nothing to apply.
+    let ready = !status.rollback_queued && status.staged.as_ref().is_some_and(|staged| {
         staged.download_only
             && status.booted.enforcing
             && policy.scopes.contains_key(sigobj::repository_of(&status.booted.image))
@@ -94,7 +96,11 @@ pub async fn go_back<T: Tools, P: Power>(ctx: &Context<'_, T>, power: &P) -> Res
     }
     // Held first: if the rollback then fails, the worst case is a digest not offered again.
     ctx.store.set_held(&status.booted.digest).map_err(|_| Refusal::Failed)?;
-    ctx.tools.rollback().map_err(|_| Refusal::Failed)?;
+    // A queued rollback (greenboot after a failed health check, doc_recovery.md R5) already
+    // makes the previous deployment the next boot; a second `bootc rollback` would swap back.
+    if !status.rollback_queued {
+        ctx.tools.rollback().map_err(|_| Refusal::Failed)?;
+    }
     republish(ctx);
     power.reboot().await.map_err(Refusal::from)
 }
@@ -157,7 +163,9 @@ mod tests {
         unlocked.status.borrow_mut().staged.as_mut().expect("staged").download_only = false;
         let held = downloaded();
         machine.store.set_held(&digest(2)).expect("held");
-        for tools in [Fake::booted(deployed(&digest(1), 1000)).offering(&digest(2), 2000), unlocked, held] {
+        let queued = downloaded();
+        queued.status.borrow_mut().rollback_queued = true;
+        for tools in [Fake::booted(deployed(&digest(1), 1000)).offering(&digest(2), 2000), unlocked, held, queued] {
             let power = FakePower::new(false, Ok(()));
             assert_eq!(apply(&machine.ctx(&tools, 5000), &power).await, Err(Refusal::NothingDownloaded));
             assert!(tools.calls.borrow().is_empty() && !power.rebooted.get());
@@ -203,6 +211,19 @@ mod tests {
         assert_eq!(go_back(&machine.ctx(&tools, 5000), &power).await, Ok(()));
         assert_eq!(machine.store.held(), Some(digest(2)));
         assert_eq!(*tools.calls.borrow(), ["rollback"]);
+        assert!(power.rebooted.get());
+    }
+
+    #[tokio::test]
+    async fn go_back_after_a_queued_rollback_only_holds_and_reboots() {
+        let machine = Machine::new("go-back-queued", &["real/k1.pub"]);
+        let tools = Fake::booted(deployed(&digest(2), 2000));
+        tools.status.borrow_mut().rollback = Some(deployed(&digest(1), 1000));
+        tools.status.borrow_mut().rollback_queued = true;
+        let power = FakePower::new(false, Ok(()));
+        assert_eq!(go_back(&machine.ctx(&tools, 5000), &power).await, Ok(()));
+        assert_eq!(machine.store.held(), Some(digest(2)));
+        assert!(tools.calls.borrow().is_empty(), "no second rollback");
         assert!(power.rebooted.get());
     }
 }

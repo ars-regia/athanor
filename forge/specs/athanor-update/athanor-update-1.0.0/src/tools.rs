@@ -35,6 +35,9 @@ pub struct Status {
     pub booted: Deployed,
     pub staged: Option<Deployed>,
     pub rollback: Option<Deployed>,
+    /// The rollback deployment is already the default of the next boot: greenboot queued it
+    /// after a failed health check (doc_recovery.md, R5), or `bootc rollback` was run.
+    pub rollback_queued: bool,
 }
 
 /// What the tag points at in the registry, read without downloading a layer.
@@ -103,10 +106,13 @@ struct BootcStatus {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct BootcHost {
     booted: Option<BootcEntry>,
     staged: Option<BootcEntry>,
     rollback: Option<BootcEntry>,
+    #[serde(default)]
+    rollback_queued: bool,
 }
 
 #[derive(Deserialize)]
@@ -155,7 +161,12 @@ pub fn parse_status(json: &str, local: impl FnOnce() -> Option<Deployed>) -> Opt
     let host = serde_json::from_str::<BootcStatus>(json).ok()?.status;
     let booted = host.booted?;
     let booted = if booted.incompatible { local()? } else { deployed(booted)? };
-    Some(Status { booted, staged: host.staged.and_then(deployed), rollback: host.rollback.and_then(deployed) })
+    Some(Status {
+        booted,
+        staged: host.staged.and_then(deployed),
+        rollback: host.rollback.and_then(deployed),
+        rollback_queued: host.rollback_queued,
+    })
 }
 
 #[derive(Deserialize)]
@@ -320,6 +331,9 @@ mod tests {
         let rollback = status.rollback.expect("rollback");
         assert!(!rollback.enforcing, "an origin without `signature` is ostree-unverified-registry");
         assert_eq!((rollback.build_time, rollback.version.as_str()), (0, ""));
+        assert!(!status.rollback_queued);
+        let queued = STAGED.replacen(r#""status":{"#, r#""status":{"rollbackQueued":true,"#, 1);
+        assert!(parse_status(&queued, || None).expect("status").rollback_queued);
     }
 
     #[test]
