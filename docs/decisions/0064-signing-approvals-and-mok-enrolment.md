@@ -19,7 +19,7 @@ At most two approvals per release cycle: the NVIDIA kmod `sign` job, which holds
 
 ## Consequences
 
-No specification document under `docs/architecture` cites this record yet; it takes effect through the work it describes.
+`docs/architecture/doc_ci.md` cites this record for the signing environments of CI5 and CI6, as do `docs/operations/secrets.md` and `docs/operations/github-settings.md`; it takes effect through the work it describes.
 
 A2-35 amends the placement of the MOK enrolment page: it moves from a first-run page to the last page of the installer. The rest of this decision stands.
 

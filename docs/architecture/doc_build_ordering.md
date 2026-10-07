@@ -45,7 +45,7 @@ No wrong image is published today: tier 0, `FROM` and the gate all fail closed. 
 - **Kernel Build:** on a push, it dispatches the Orchestrator on the same ref, passing the commit `sha`. It does so only when it published a new `azoth:<nvr>`, or when the script of O3 does not answer `ready`. A push under the kernel directory that changes nothing, such as a document, costs no image cycle.
 - **NVIDIA kmod:** becomes a reusable workflow (`workflow_call`) that the Orchestrator calls directly, not through `call-system-image.yml`. The chain Orchestrator → kmod → `nvidia-build.yml` uses three of the four nesting levels GitHub allows. Kmod keeps `workflow_dispatch` for manual runs.
 - **Permissions:** the Orchestrator grants `attestations: write`, which kmod's publication needs because a called workflow cannot exceed its caller, and `actions: read`.
-- **Secrets:** `MODULE_SIGNING_KEY` still resolves in the kmod job that declares `environment: signing`; no secret is inherited for it.
+- **Secrets:** `MODULE_SIGNING_KEY` resolves only in the `sign` job of `nvidia-kmod.yml`, which declares `environment: signing-kernel`; no secret is passed or inherited for it (D43).
 
 A dispatch with `GITHUB_TOKEN` starts runs; `workflow_run` would fire only from the default branch, and `iso-v0` is the working branch.
 
@@ -76,7 +76,7 @@ and the same with `-legacy-<NVIDIA_LEGACY_VERSION>`. A republished kernel with t
 3. **`kernel-artifacts-final`:** runs the script again and requires `ready`; any other state fails the run. It is the single source of the digests that later jobs use. A job cannot run twice, hence a separate job.
 4. **`build-repo`, then `dag-system-image`:**
    - tier 0 pulls `azoth@<digest>`;
-   - the system stage replaces its vmlinuz with the one of `azoth-boot@<boot_digest>`, signed for Secure Boot; `dag-system-image` holds no key and runs outside the signing environmentsironment (D43);
+   - the system stage replaces its vmlinuz with the one of `azoth-boot@<boot_digest>`, signed for Secure Boot; `dag-system-image` holds no key and runs outside the signing environments (D43);
    - `system/build-image.sh` passes the module and `azoth-boot` digests as build arguments;
    - everything comes from the file of step 3, so the image is built from exactly what was verified.
 

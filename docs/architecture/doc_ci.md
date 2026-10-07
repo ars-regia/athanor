@@ -89,7 +89,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 - **Purpose:** builds the forge packages, the tier repositories, the three system images and the ISO (section 1.1).
 - **Triggers:** push to `main`, `iso-v0` on `forge/**` (not `forge/test/**`, `forge/specs/azoth/**`), `system/**`, `Cargo.toml`, `flake.nix`, `flake.lock`, `call-*.yml`, the NVIDIA workflows; dispatch (`sha`, `force_image`); cron `0 4 * * *`.
 - **Outputs:** artifact `kernel-artifacts`; images of CI3, CI4, CI5, CI6.
-- **Secrets, variables:** `REGISTRY_HOST`, `KERNEL_REGISTRY`; `secrets: inherit` to CI6 and CI5.
+- **Secrets, variables:** `REGISTRY_HOST`, `KERNEL_REGISTRY`; no secret is passed to CI6 or CI5: their signing jobs read their keys from their own environments (D43).
 - **Environment:** none itself; CI6 uses `signing-kernel` and CI5 `signing-images` (ADR-0064).
 - **Runner:** hosted. **Concurrency:** `<workflow>-<ref>`, no cancel: the newest run waits (`:61-63`, O6).
 - **Scripts:** `forge/scripts/dynamic-matrix.sh`, `system/kernel-artifacts.sh`.
