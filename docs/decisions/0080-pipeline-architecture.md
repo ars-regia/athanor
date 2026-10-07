@@ -2,7 +2,7 @@
 id: ADR-0080
 title: "Pipeline architecture"
 date: 2026-10-07
-status: accepted
+status: amended by ADR-0088
 issues: []
 areas: [build, signing, security]
 ---
@@ -58,24 +58,3 @@ priority.
   are amended: the security class is set when the release is dispatched and signed in
   `signing-images` with the images, so promotion holds no key in any class (PQ4).
 - Applied by `docs/architecture/doc_pipeline.md`.
-
-## Amendments
-
-- Proposed with `doc_pipeline.md` revision 2 (adversarial review, 2026-10-07), **awaiting the
-  maintainer's approval**; the decision text above stays as accepted until then. Decision 1:
-  the plan blocks gain PB5b after PB5. Decision 2: Build L3 is claimed for artifacts built on
-  GitHub-hosted runners, and artifacts built on the self-hosted runner (the kernel) claim
-  Build L2; the policy gate is a repository script or Conforma's standalone `ec` CLI,
-  decided by a spike before PB5. Decision 3: `MOK_PRIVATE_KEY` is retired at the close of
-  the image key rotation (PB5b), not with the two environments. Decision 5:
-  `prevent_self_review` is switched on in both environments when a second human reviewer is
-  listed in them; until then the maintainer's approval of runs the maintainer triggered is an accepted
-  risk with the compensating controls of `doc_pipeline.md` PL5. Consequences: the security
-  class is set and signed when the release is signed, since releases run on push and are
-  not dispatched (PQ4).
-- Recorded 2026-10-07 by PR #265, without a change of the decisions: the signing jobs of
-  decision 3 are jobs of the entry workflow, today `nvidia-kmod-sign` and
-  `sign-system-images` of `athanor-forge-orchestrator.yml`, in the target the `sign-kernel`
-  and `sign-images` jobs of `release.yml`, because a called workflow's job reads the secrets
-  of its environment only when its caller inherits every secret
-  ([actions/runner#4453](https://github.com/actions/runner/issues/4453)).
