@@ -207,6 +207,14 @@ RUN authselect enable-feature without-nullok && \
     test -s /etc/pam.d/system-auth && test -s /etc/pam.d/password-auth && \
     ! grep -n nullok /etc/pam.d/system-auth /etc/pam.d/password-auth
 
+# Short passwords. pam_pwquality asks a new password for twelve characters; systemd-homed reads
+# the same configuration for homectl passwd. Existing passwords are not touched. The lockout
+# after failed attempts (pam_faillock) comes with the lock screen that can write its tally
+# (doc_lock_and_prompts.md, D3 and LP18 step 3).
+RUN install -d -m 0755 /etc/security/pwquality.conf.d && \
+    printf '%s\n' '# Athanor (system/Containerfile).' 'minlen = 12' \
+        > /etc/security/pwquality.conf.d/50-athanor.conf
+
 # Stage 2 switch (doc_shell.md, section 8, item 2): the COSMIC shell is gone, our shell is
 # enabled for every user, and each bus name it owns has exactly one activation file.
 RUN for pkg in cosmic-panel cosmic-applets cosmic-notifications athanor-layout-translator; do \

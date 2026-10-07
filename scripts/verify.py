@@ -1169,6 +1169,7 @@ def check_cmdline():
 
 PAM_CONTAINERFILE = "system/Containerfile"
 NULLOK_GUARD = re.compile(r"^RUN authselect enable-feature without-nullok\b", re.MULTILINE)
+PWQUALITY_MINLEN = "'minlen = 12'"
 
 
 def nullok_problems(root=None):
@@ -1183,10 +1184,22 @@ def nullok_problems(root=None):
     return []
 
 
-@check("pam", "No account authenticates with an empty password (A2-23)")
+def pwquality_problems(root=None):
+    """The image build asks a new password for twelve characters."""
+    root = root or ROOT
+    try:
+        text = read(root / PAM_CONTAINERFILE)
+    except OSError as err:
+        return [f"{PAM_CONTAINERFILE}: cannot read ({err})"]
+    if any(PWQUALITY_MINLEN in line and not line.lstrip().startswith("#") for line in text.splitlines()):
+        return []
+    return [f"{PAM_CONTAINERFILE}: no pwquality drop-in with {PWQUALITY_MINLEN}"]
+
+
+@check("pam", "No empty passwords (A2-23), no new password under twelve characters")
 def check_pam():
     r = Result()
-    for problem in nullok_problems():
+    for problem in nullok_problems() + pwquality_problems():
         r.fail(problem)
     return r
 
