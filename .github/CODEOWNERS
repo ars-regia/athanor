@@ -4,7 +4,8 @@
 # maintainer's account; the repository belongs to the organisation ars-regia.
 # Review by a code owner is enforced only when the branch protection rule "Require review
 # from Code Owners" is on. It stays off while there is one code owner, who could not approve
-# their own changes (ADR-0062). The rules below take effect when a second owner joins.
+# their own changes (ADR-0062). The per-path rules below name the owner who must review once
+# code-owner review is enabled.
 
 * @hr-mes
 
@@ -23,7 +24,7 @@
 /.github/ @hr-mes
 /forge/ @hr-mes
 
-# Protected paths: the maintainer reviews every change (see the protected-paths section of CLAUDE.md).
+# Protected paths: the maintainer reviews every change (see the section "Limiti inviolabili" of CLAUDE.md).
 # Authorisation (polkit subject checks)
 /system/athanor-bus-api/src/polkit.rs @hr-mes
 # Attestation
