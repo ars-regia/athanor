@@ -222,8 +222,15 @@ before that environment is deleted, and no installed machine needs the out-of-ba
    its password. `system/keys/athanor-image-2.pub` is committed, so every image built from then
    on trusts both keys.
 2. **A transitional release is signed with key 1.** `sign-system-images` runs in `signing` until
-   a release that carries key 2 is published and installed.
-3. **The images are signed with key 2.** `sign-system-images` moves back to `signing-images`.
+   a release that carries key 2 is promoted to `stable` and the machines meant to keep updating
+   without recovery have booted it: bootc checks an image against the policy of the booted
+   deployment. `promote.sh` and `sign-images.sh` verify against the keys of the checkout, which
+   already holds both, so they cannot tell when this holds: the maintainer decides it. Until
+   step 4, the D43 lint of `scripts/verify.py` treats `signing` as `signing-images`; the
+   environment has the same reviewer, branches and no administrator bypass.
+3. **The images are signed with key 2.** `sign-system-images` moves back to `signing-images`, and
+   `sign-images.sh` verifies the signature against `athanor-image-2.pub` alone, so an image still
+   signed with key 1 fails there instead of passing a policy that trusts both keys.
 4. **Key 1 leaves.** One release after the first image signed with key 2,
    `system/keys/athanor-image-1.pub` is removed, and `signing` is deleted together with
    `MOK_PRIVATE_KEY`.
