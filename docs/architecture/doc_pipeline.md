@@ -521,10 +521,12 @@ with `--nodeps` (`forge/scripts/build_spec.sh`, lines 68 and 70) and no build co
 another's output (doc_build_system.md), so every dirty package builds in one matrix.
 `forge/scripts/dag_orchestrator.py` keeps the graph for content hashes and runtime
 requirements and runs `graphlib.TopologicalSorter.prepare()`, which raises `CycleError`
-on a cycle; a cycle fails the plan. The graph has one today, `update → recovery →
-update`, made of a tier edge (every `custom_tier3` package depends on every
-`custom_tier2` one) and the runtime `Requires: athanor-update` of `athanor-recovery`
-(PQ11).
+on a cycle; a cycle fails the plan. The graph had one, `update → recovery → update`,
+made of a tier edge (every `custom_tier3` package depends on every `custom_tier2` one)
+and the runtime `Requires: athanor-update` of `athanor-recovery` (PQ11). The same
+requirement broke the image build, which installs each tier in a dnf transaction of its
+own: `athanor-recovery` now ships in `custom_tier3`, and the plan fails on a runtime
+requirement of a later tier (`tier_inversions`).
 
 **PL49. Concurrency does not waste builds or hold the queue.** Pull-request runs cancel
 their predecessor. Release runs queue on the build jobs and are never cancelled after

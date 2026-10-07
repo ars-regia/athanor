@@ -208,5 +208,38 @@ class RegistryStateTest(unittest.TestCase):
         self.assertRegex(refs[0], r"^ghcr\.io/Acme/athanor-forge-dock:hash-[0-9a-f]{64}$")
 
 
+class TierInversionTest(unittest.TestCase):
+    """system/Containerfile installs each tier in a dnf transaction of its own, in order: a
+    runtime Requires on a package of a later tier cannot be resolved there."""
+
+    def specs(self, tmp, requires):
+        for name, deps in requires.items():
+            directory = tmp / "specs" / f"athanor-{name}"
+            directory.mkdir(parents=True)
+            lines = [f"Name: athanor-{name}"] + [f"Requires: {dep}" for dep in deps]
+            (directory / f"athanor-{name}.spec").write_text("\n".join(lines) + "\n")
+        return mock.patch.object(dag, "SPECS_DIR", str(tmp / "specs"))
+
+    def test_a_runtime_requirement_on_a_later_tier_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.specs(pathlib.Path(tmp), {"recovery": ["systemd", "athanor-update >= 1.0"], "update": []}):
+                manifest = {"custom_tier2": ["recovery"], "custom_tier3": ["update"]}
+                self.assertEqual(
+                    dag.tier_inversions(manifest),
+                    ["recovery (custom_tier2) requires athanor-update, which ships in custom_tier3"],
+                )
+                manifest = {"custom_tier2": [], "custom_tier3": ["update", "recovery"]}
+                self.assertEqual(dag.tier_inversions(manifest), [])
+                manifest = {"custom_tier2": ["update"], "custom_tier3": ["recovery"]}
+                self.assertEqual(dag.tier_inversions(manifest), [])
+
+    def test_the_repository_manifest_has_no_inversion(self):
+        forge = SCRIPT.parents[1]
+        with mock.patch.object(dag, "CONFIG_PATH", str(forge / "config" / "packages.json")), mock.patch.object(
+            dag, "SPECS_DIR", str(forge / "specs")
+        ):
+            self.assertEqual(dag.tier_inversions(dag.load_package_manifest()), [])
+
+
 if __name__ == "__main__":
     unittest.main()

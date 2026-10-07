@@ -262,6 +262,24 @@ def custom_spec_dirs(manifest):
     )
 
 
+def tier_inversions(manifest):
+    """Runtime requirements on a package of a later tier. system/Containerfile installs each
+    tier in a dnf transaction of its own, in order, so such a requirement cannot be resolved
+    when the earlier tier installs, and the image build fails."""
+    tier_of = {pkg: n for n in range(4) for pkg in manifest.get(f"custom_tier{n}", [])}
+    problems = []
+    for pkg, tier in sorted(tier_of.items()):
+        spec_files = sorted(glob.glob(os.path.join(spec_dir_for(pkg), "*.spec")))
+        if pkg in EXTERNAL_PACKAGES or not spec_files:
+            continue
+        _, requires = parse_spec_dependencies(spec_files[0])
+        for dep in sorted(requires):
+            target = tier_of.get(dep.replace("athanor-", ""), -1)
+            if target > tier:
+                problems.append(f"{pkg} (custom_tier{tier}) requires {dep}, which ships in custom_tier{target}")
+    return problems
+
+
 def build_dag(manifest):
     """Constructs the dependency graph and node metadata."""
     custom_pkgs = manifest.get("custom_packages", [])
@@ -460,6 +478,10 @@ def main():
     print("🧠 Forge DAG Architect initializing... (registry hash tags)")
     
     manifest = load_package_manifest()
+    inversions = tier_inversions(manifest)
+    if inversions:
+        sys.exit("dag_orchestrator: a package requires one of a later tier; move one of them in "
+                 "forge/config/packages.json:\n  " + "\n  ".join(inversions))
     all_nodes, graph, prereqs, in_degree, node_types = build_dag(manifest)
     
     print(f"📊 DAG Topology built: {len(all_nodes)} nodes analyzed.")
