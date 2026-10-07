@@ -37,10 +37,8 @@ on:
   schedule:
     - cron: "0 4 * * *"
 
-env:
-  # REGISTRY_HOST repository variable, default ghcr.io (as in forge-ghcr-cleanup.yml).
-  REGISTRY: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
-  FEDORA_VERSION: 43
+# No workflow-level env: this workflow holds the signing jobs, beside which D43 allows only
+# plain values (scripts/verify.py, SIGN_JOB_ENV); each job sets what it reads.
 
 permissions:
   contents: write
@@ -98,7 +96,8 @@ jobs:
       - name: Compute Dependency DAG & Topological Matrix
         id: brain
         env:
-          REGISTRY_HOST: ${{ env.REGISTRY }}
+          # REGISTRY_HOST repository variable, default ghcr.io (as in forge-ghcr-cleanup.yml).
+          REGISTRY_HOST: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
         run: ./scripts/dynamic-matrix.sh
 
       - name: Hashes of this run (read by the system image build)
@@ -172,10 +171,78 @@ jobs:
           bash system/kernel-artifacts.sh cycle --event "$EVENT" --before "$BEFORE" --after "$AFTER" --sha "$SHA" --head "$GITHUB_SHA"
           grep -E '^(state|cycle|kernel_digest)=' kernel-artifacts/kernel-artifacts.env >> "$GITHUB_OUTPUT"
 
+  # The NVIDIA kmod cycle, in three steps (nvidia-kmod.yml): the key-less prepare part, the
+  # sign job, the boot and publish part. The sign job is here, not in a called workflow: a
+  # called workflow's job reads the secrets of its environment only when its caller passes
+  # `secrets: inherit` (actions/runner#4453), which would hand every secret to every job of
+  # that workflow (D43). The artifacts of the three steps are this run's, which all share.
   nvidia-kmod:
     # Only when the modules of the pins are missing; its approval comes before the image's.
     needs: [kernel-artifacts]
     if: ${{ needs.kernel-artifacts.outputs.cycle == 'build' && needs.kernel-artifacts.outputs.state == 'modules-missing' }}
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/call-nvidia-kmod-prepare.yml
+    with:
+      kernel_digest: ${{ needs.kernel-artifacts.outputs.kernel_digest }}
+
+  nvidia-kmod-sign:
+    # Signs only what it derives itself: the kernel from the registry, verified by cosign in the
+    # key-less step below, and the modules of the build job once they pass the allow-list. Only
+    # when the prepare part still finds the modules missing: otherwise it ends after its
+    # artifacts job, asking for no approval. The one sign-kernel job of the repository: a manual
+    # cycle dispatches this workflow.
+    needs: [nvidia-kmod]
+    if: ${{ needs.nvidia-kmod.outputs.state == 'modules-missing' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+    environment: signing-kernel
+    env:
+      # system/kernel-artifacts.sh, which run.sh inputs runs, resolves against it (O9).
+      KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: nvidia-*-unsigned
+          path: out
+          merge-multiple: true
+
+      - name: Derive and verify what is signed, without a key (signer/run.sh inputs)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KERNEL_DIGEST: ${{ needs.nvidia-kmod.outputs.kernel_digest }}
+        run: bash forge/specs/azoth/signer/run.sh inputs
+
+      - name: Sign the modules and vmlinuz (signer/run.sh sign)
+        # The public certificates are in the repository: the module one is compiled into the
+        # kernel (kernel-local), the Secure Boot one is what shim checks through MokList.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODULE_SIGNING_KEY: ${{ secrets.MODULE_SIGNING_KEY }}
+          SECUREBOOT_SIGNING_KEY: ${{ secrets.SECUREBOOT_SIGNING_KEY }}
+        run: bash forge/specs/azoth/signer/run.sh sign
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nvidia-signed
+          path: out/
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: azoth-kernel-signed
+          path: kernel-signed/
+          if-no-files-found: error
+
+  nvidia-kmod-publish:
+    # Boot and publication, only after a successful signature.
+    needs: [nvidia-kmod-sign]
     permissions:
       contents: read
       packages: write
@@ -183,17 +250,13 @@ jobs:
       attestations: write
       actions: read
     uses: ./.github/workflows/nvidia-kmod.yml
-    with:
-      kernel_digest: ${{ needs.kernel-artifacts.outputs.kernel_digest }}
-    # No secrets are passed: the sign job of nvidia-kmod.yml reads its keys from its own
-    # `environment:`, which a called workflow's job resolves by itself, and an inherit would
-    # hand every repository secret to every job of the called workflow (D43).
 
   kernel-artifacts-final:
     # The single source of the digests the images are built from: resolved again after
-    # NVIDIA kmod and required to be ready. A job cannot run twice, hence a second job.
-    needs: [kernel-artifacts, nvidia-kmod]
-    if: ${{ !cancelled() && needs.kernel-artifacts.result == 'success' && needs.kernel-artifacts.outputs.cycle == 'build' && (needs.nvidia-kmod.result == 'success' || needs.nvidia-kmod.result == 'skipped') }}
+    # NVIDIA kmod and required to be ready. A job cannot run twice, hence a second job. Each
+    # step of the kmod cycle succeeded or did not run.
+    needs: [kernel-artifacts, nvidia-kmod, nvidia-kmod-sign, nvidia-kmod-publish]
+    if: ${{ !cancelled() && needs.kernel-artifacts.result == 'success' && needs.kernel-artifacts.outputs.cycle == 'build' && (needs.nvidia-kmod.result == 'success' || needs.nvidia-kmod.result == 'skipped') && (needs.nvidia-kmod-sign.result == 'success' || needs.nvidia-kmod-sign.result == 'skipped') && (needs.nvidia-kmod-publish.result == 'success' || needs.nvidia-kmod-publish.result == 'skipped') }}
     runs-on: ubuntu-24.04
     # require-ready runs the same resolve() as the kernel-artifacts job above, at the same
     # registry/Rekor cost: see the arithmetic on that job's timeout-minutes.
@@ -232,5 +295,42 @@ jobs:
     uses: ./.github/workflows/call-system-image.yml
     with:
       builder_content_hash: ${{ needs.build-builder.outputs.content_hash }}
-    # No secret is passed: the job that signs reads COSIGN_* from its own `environment:`
-    # (D43, UT2).
+
+  sign-system-images:
+    name: 🔏 Key-based signature of the system images
+    # The only job that receives COSIGN_*. It builds nothing and runs no third-party tool
+    # beside the key: checkout, registry login, system/sign-images.sh (doc_update_trust.md UT2).
+    # Here, not in call-system-image.yml: a called workflow's job reads the secrets of its
+    # environment only when its caller inherits every secret (actions/runner#4453, D43).
+    needs: [system-image]
+    runs-on: ubuntu-24.04
+    # Image key rotation (docs/operations/secrets.md section 4.1): until a release that carries
+    # athanor-image-2.pub is published, the images are signed with key 1, which only the old
+    # `signing` environment still holds. The next step moves this job back to `signing-images`.
+    environment: signing
+    # An explicit bash shell runs every step with -o pipefail, so a signing failure piped
+    # into tee fails the job instead of passing with the summary of a failed run.
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: 📎 Digests recorded by the build job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: image-digests
+          path: artifacts
+      - name: 🔑 Login to the registry
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: echo "${GITHUB_TOKEN}" | skopeo login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+      - name: 🔏 Sign, then verify as a machine will (system/sign-images.sh)
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"

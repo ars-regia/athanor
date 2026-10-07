@@ -39,9 +39,9 @@ NAME = r"[A-Za-z0-9._+-]+"
 HEX64 = r"[0-9a-f]{64}"
 SPEC_FILE = re.compile(rf"(?:{NAME}\.spec|SOURCES/sources\.sha256)")
 WATCH_FILE = "forge/upstream-watch.json"
-# The single check the branch protection requires: job gate of kernel-build.yml.
-REQUIRED_CHECK = "Kernel gate"
-REQUIRED_WORKFLOW = "kernel-build.yml"
+# The checks the branch protection requires (.github/settings/branch-protection.json), each
+# the gate job of its workflow.
+REQUIRED_CHECKS = {"Kernel gate": "kernel-build.yml", "Spec gate": "spec-build-check.yml"}
 SYSTEM_PATH = re.compile(rf"system/(Containerfile|nvidia/locks/{NAME}\.lock)")
 VERSION = re.compile(r"Version:[ \t]+(\d+(?:\.\d+)*)")
 RELEASE = re.compile(r"Release:[ \t]+\d+%\{\?dist\}")
@@ -222,31 +222,45 @@ def report(pr, message):
             s.write(line + "\n")
 
 
-def wait_for_required_check(sha, gh, sleep=time.sleep, polls=160):
-    """Wait for the required check of the newest Kernel Build run on SHA to end green; any
-    other end fails the run.
+def gate_conclusion(name, workflow, sha, gh):
+    """The conclusion of job NAME in the newest WORKFLOW run on SHA, None while it is pending.
 
-    GitHub judges the required check by the newest run of its workflow: a green gate of an
+    GitHub judges a required check by the newest run of its workflow: a green gate of an
     earlier run on the same commit (a reopened pull request, a rerun) does not count while a
-    newer run has not reported its own, and the merge is refused. So the script follows the
-    newest run of the workflow, not any check run of that name, and reads the gate job of its
-    latest attempt once the run completes.
+    newer run has not reported its own, and the merge is refused. So the newest run is
+    followed, not any check run of that name, and its gate job is read in the latest attempt.
+    The job, not the run: Spec Build Check calls this script from its own run, whose gate job
+    has ended while the run is still in progress.
     """
     repo = os.environ["GITHUB_REPOSITORY"]
-    runs_query = f"repos/{repo}/actions/workflows/{REQUIRED_WORKFLOW}/runs?head_sha={sha}&event=pull_request"
+    runs = json.loads(
+        gh("api", f"repos/{repo}/actions/workflows/{workflow}/runs?head_sha={sha}&event=pull_request")
+    )["workflow_runs"]
+    if not runs:
+        return None
+    latest = max(runs, key=lambda r: r["id"])
+    jobs = json.loads(gh("api", f"repos/{repo}/actions/runs/{latest['id']}/jobs?per_page=100"))["jobs"]
+    gate = next((j["conclusion"] for j in jobs if j["name"] == name), None)
+    if gate is None and latest["status"] == "completed":
+        return "missing"
+    return gate
+
+
+def wait_for_required_checks(sha, gh, sleep=time.sleep, polls=160):
+    """Wait for every required check on SHA to end green; any other end fails the run."""
+    pending = dict(REQUIRED_CHECKS)
     for _ in range(polls):
-        runs = json.loads(gh("api", runs_query))["workflow_runs"]
-        latest = max(runs, key=lambda r: r["id"]) if runs else None
-        if latest and latest["status"] == "completed":
-            jobs = json.loads(
-                gh("api", f"repos/{repo}/actions/runs/{latest['id']}/jobs?per_page=100")
-            )["jobs"]
-            gate = next((j["conclusion"] for j in jobs if j["name"] == REQUIRED_CHECK), "missing")
+        for name, workflow in list(pending.items()):
+            gate = gate_conclusion(name, workflow, sha, gh)
+            if gate is None:
+                continue
             if gate != "success":
-                sys.exit(f"bot_merge: {REQUIRED_CHECK} of run {latest['id']} is {gate} on {sha}: not merged")
+                sys.exit(f"bot_merge: {name} ({workflow}) is {gate} on {sha}: not merged")
+            del pending[name]
+        if not pending:
             return
         sleep(30)
-    sys.exit(f"bot_merge: {REQUIRED_CHECK} did not complete on {sha} in time: not merged")
+    sys.exit(f"bot_merge: {', '.join(pending)} did not complete on {sha} in time: not merged")
 
 
 def main(kind, pr, sha, build, gh=run_gh, merge=merge_gh):
@@ -257,7 +271,7 @@ def main(kind, pr, sha, build, gh=run_gh, merge=merge_gh):
     except Refused as reason:
         report(pr, f"stays for a person: {reason}")
         return 0
-    wait_for_required_check(sha, gh)
+    wait_for_required_checks(sha, gh)
     merge("pr", "merge", pr, "--squash", "--match-head-commit", sha)
     report(pr, f"merged at {sha} ({kind} bot, the change has the bot's shape)")
     return 0
