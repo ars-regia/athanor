@@ -43,10 +43,10 @@ directory e come si usa.
 <!-- pins:begin (table written by bump.py apply) -->
 | pin | value |
 | --- | --- |
-| `FEDORA_KERNEL_NVR` | `7.2.8-100.fc43` |
+| `FEDORA_KERNEL_NVR` | `7.2.9-100.fc43` |
 | `FEDORA_KEY_FPR` | `c6e7f081cf80e13146676e88829b606631645531` |
 | `KERNEL_CHANNEL` | `stable` |
-| `CACHYOS_RELEASE` | `cachyos-7.2.8-1` |
+| `CACHYOS_RELEASE` | `cachyos-7.2.9-2` |
 | `CACHYOS_CONFIG_COMMIT` | `6676e72b85eb9e30d079a8c3dcdf93aedd1e8226` |
 | `CACHYOS_PATCHES_COMMIT` | `17bb0bb818d283d0dc6e0280a2e9d5b95e66808b` |
 | `NVIDIA_OPEN_VERSION` | `615.71.09` |
@@ -145,8 +145,8 @@ di build.sh, o l'immagine `azoth-devel:<nvr>`). I `.ko` finiscono in
 sistema copia) con il vermagic del kernel e i preamboli kCFI, senza firma:
 `nvidia.sh sign --key K --cert C --devel DIR --out DIR` li firma con sign-file del
 kernel-devel, in locale con una chiave effimera, in CI con la chiave dei moduli del
-progetto (workflow `.github/workflows/nvidia-kmod.yml`, che poi li carica in QEMU con
-`boot.sh --mok --insmod` prima di pubblicarli).
+progetto (job `nvidia-kmod-sign` di `.github/workflows/athanor-forge-orchestrator.yml`;
+poi `nvidia-kmod.yml` li carica in QEMU con `boot.sh --mok --insmod` prima di pubblicarli).
 
 ## Pubblicazione
 

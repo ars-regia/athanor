@@ -47,7 +47,9 @@ pub struct Candidate {
 
 pub trait Tools {
     fn status(&self) -> Result<Status, Failure>;
-    fn candidate(&self, image: &str) -> Result<Candidate, Failure>;
+    /// `None` when the registry answers that the tag has no manifest (skopeo: `reading manifest
+    /// TAG in REPO: manifest unknown`): the tag was never published, which is not a failure.
+    fn candidate(&self, image: &str) -> Result<Option<Candidate>, Failure>;
     fn download(&self) -> Result<(), Failure>;
     fn apply_downloaded(&self) -> Result<(), Failure>;
     fn relock(&self) -> Result<(), Failure>;
@@ -69,6 +71,13 @@ pub fn unix_time(rfc3339: &str) -> Option<i64> {
 #[must_use]
 pub fn host_of(image: &str) -> Option<String> {
     image.split('/').next().filter(|host| !host.is_empty()).map(str::to_owned)
+}
+
+/// True for the registry's answer that a tag has no manifest. Narrower than the `Registry`
+/// code, which also covers `unauthorized` and `denied`: those must keep failing.
+#[must_use]
+pub fn manifest_absent(stderr: &str) -> bool {
+    stderr.contains("reading manifest") && stderr.contains("manifest unknown")
 }
 
 /// Maps the error text of bootc, skopeo or ostree to a code. The text goes no further.
@@ -207,7 +216,13 @@ const BUSCTL: &str = "/usr/bin/busctl";
 pub const ATTACHMENTS_POLICY: &str = "/usr/share/athanor/containers/attachments-policy.json";
 
 fn run(program: &str, args: &[&str], host: Option<String>) -> Result<String, Failure> {
-    let output = Command::new(program).args(args).env("LC_ALL", "C").output().map_err(|_| Failure { code: ErrorCode::Internal, host: None })?;
+    run_with_stderr(program, args, host).map_err(|(failure, _)| failure)
+}
+
+/// Like [`run`], and hands the error text to the caller that must tell two failures of one
+/// code apart. The text must not leave the process.
+fn run_with_stderr(program: &str, args: &[&str], host: Option<String>) -> Result<String, (Failure, String)> {
+    let output = Command::new(program).args(args).env("LC_ALL", "C").output().map_err(|_| (Failure { code: ErrorCode::Internal, host: None }, String::new()))?;
     if output.status.success() {
         return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
     }
@@ -216,7 +231,7 @@ fn run(program: &str, args: &[&str], host: Option<String>) -> Result<String, Fai
     tracing::warn!(program, status = ?output.status.code(), %stderr, "command failed");
     let code = classify(&stderr);
     let host = host.filter(|_| matches!(code, ErrorCode::Network | ErrorCode::Registry));
-    Err(Failure { code, host })
+    Err((Failure { code, host }, stderr.into_owned()))
 }
 
 impl Tools for System {
@@ -227,20 +242,24 @@ impl Tools for System {
         status.ok_or_else(|| failure.unwrap_or(Failure { code: ErrorCode::Internal, host: None }))
     }
 
-    fn candidate(&self, image: &str) -> Result<Candidate, Failure> {
+    fn candidate(&self, image: &str) -> Result<Option<Candidate>, Failure> {
         let host = host_of(image);
-        let digest = run(SKOPEO, &["inspect", "--format", "{{.Digest}}", &format!("docker://{image}")], host.clone())?.trim().to_owned();
+        let digest = match run_with_stderr(SKOPEO, &["inspect", "--format", "{{.Digest}}", &format!("docker://{image}")], host.clone()) {
+            Ok(out) => out.trim().to_owned(),
+            Err((_, stderr)) if manifest_absent(&stderr) => return Ok(None),
+            Err((failure, _)) => return Err(failure),
+        };
         // The configuration is read by digest, so both facts describe one image even if
         // the tag moves between the two calls.
         let pinned = format!("docker://{}@{digest}", crate::sigobj::repository_of(image));
         let config = run(SKOPEO, &["inspect", "--config", &pinned], host)?;
         let labels = serde_json::from_str::<serde_json::Value>(&config).ok().map(|value| value["config"]["Labels"].clone()).unwrap_or_default();
         let label = |name: &str| labels[name].as_str().unwrap_or_default().to_owned();
-        Ok(Candidate {
+        Ok(Some(Candidate {
             digest,
             version: label("org.opencontainers.image.version"),
             build_time: unix_time(&label("org.opencontainers.image.created")).unwrap_or(0),
-        })
+        }))
     }
 
     fn download(&self) -> Result<(), Failure> {
@@ -361,6 +380,13 @@ mod tests {
         ] {
             assert_eq!(classify(stderr), code, "{stderr}");
         }
+    }
+
+    #[test]
+    fn only_a_missing_manifest_is_absent() {
+        assert!(manifest_absent("Error parsing image name \"docker://r/o/a:stable\": reading manifest stable in r/o/a: manifest unknown"));
+        assert!(!manifest_absent("reading manifest stable in r/o/a: unauthorized: authentication required"));
+        assert!(!manifest_absent("pinging container registry r: dial tcp: i/o timeout"));
     }
 
     #[test]

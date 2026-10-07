@@ -50,7 +50,7 @@ fn reason<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, booted: &Deployed) -
     let Some(key_paths) = policy.scopes.get(repository) else { return Reason::ReferenceOutOfScope };
     if !booted.enforcing {
         // The installer's reference, or an install that has not migrated yet (UT4).
-        return Reason::Media;
+        return if ctx.store.channel_absent() { Reason::ChannelAbsent } else { Reason::Media };
     }
     let keys: Vec<_> = key_paths.iter().filter_map(|path| std::fs::read_to_string(path).ok()).filter_map(|pem| sigobj::load_key(&pem)).collect();
     let claims = ctx.store.signature_dir(&booted.digest).and_then(|dir| sigobj::claims(&dir, &keys).ok()).unwrap_or_default();
@@ -101,7 +101,9 @@ fn online_update<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &mut 
         return (local, None);
     }
     let candidate = match ctx.tools.candidate(&status.booted.image) {
-        Ok(candidate) => candidate,
+        Ok(Some(candidate)) => candidate,
+        // The followed tag has no manifest: a registry answer, but nothing to offer.
+        Ok(None) => return (local, Some(Failure { code: ErrorCode::Registry, host: crate::tools::host_of(&status.booted.image) })),
         Err(failure) => return (local, Some(failure)),
     };
     // The registry answered: that is a successful check, whatever it said.
@@ -206,7 +208,7 @@ pub(crate) mod tests {
     /// bootc, skopeo, ostree and NetworkManager as one scripted object that records its calls.
     pub(crate) struct Fake {
         pub status: RefCell<Status>,
-        pub candidate: Result<Candidate, Failure>,
+        pub candidate: Result<Option<Candidate>, Failure>,
         /// What `download` stages, or how it fails.
         pub download: Result<Deployed, Failure>,
         pub metered: bool,
@@ -227,7 +229,7 @@ pub(crate) mod tests {
         }
 
         pub(crate) fn offering(mut self, digest: &str, build_time: i64) -> Self {
-            self.candidate = Ok(Candidate { digest: digest.into(), version: format!("43.{build_time}"), build_time });
+            self.candidate = Ok(Some(Candidate { digest: digest.into(), version: format!("43.{build_time}"), build_time }));
             self.download = Ok(Deployed { download_only: true, ..deployed(digest, build_time) });
             self
         }
@@ -245,7 +247,7 @@ pub(crate) mod tests {
         fn status(&self) -> Result<Status, Failure> {
             Ok(self.status.borrow().clone())
         }
-        fn candidate(&self, image: &str) -> Result<Candidate, Failure> {
+        fn candidate(&self, image: &str) -> Result<Option<Candidate>, Failure> {
             self.call(format!("candidate {image}"));
             self.candidate.clone()
         }

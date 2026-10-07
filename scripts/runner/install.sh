@@ -32,7 +32,14 @@ CREDENTIAL=/etc/credstore.encrypted/athanor-runner.github-token
 # the dynamic user when the service starts.
 STATE=/var/lib/private/athanor-runner
 
-if systemctl is-active --quiet "$UNIT"; then systemctl stop "$UNIT"; fi
+# Stop whenever the unit is loaded, not only when it is active: between two guests the unit
+# waits in auto-restart (Restart=always), where is-active is false, and the pending restart
+# would start vm.sh on a half-copied image. A stop job also cancels that restart.
+# A failed query stops the script (set -e): inside the test it would read as "not loaded".
+load_state=$(systemctl show --property=LoadState --value "$UNIT")
+if [[ $load_state == loaded ]]; then
+  systemctl stop "$UNIT"
+fi
 
 install -d -m 0755 "$LIBEXEC"
 install -m 0755 "$HERE/vm.sh" "$HERE/balloon.py" "$LIBEXEC/"

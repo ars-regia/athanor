@@ -9,7 +9,7 @@
 # It is trusted only when this workflow signed its digest on a trusted branch, as run.sh checks
 # before every use; otherwise the run fails and names the tag to delete.
 # Writes signer-publish/summary.md with the digest to commit in signer/image.digest; the sign
-# job of nvidia-kmod.yml runs only that digest.
+# job of the kmod cycle, nvidia-kmod-sign of athanor-forge-orchestrator.yml, runs only that digest.
 #
 # Usage: publish.sh. Needs podman logged in to the registry and cosign on PATH, logged in too.
 set -euo pipefail

@@ -44,6 +44,11 @@ CONFIG_CPU_MITIGATIONS = { value = "y", decision = "section 6", locked = true }
 [base.sysctl]
 "kernel.kptr_restrict" = { value = "2", decision = "D47", locked = true }
 "kernel.dmesg_restrict" = { value = "1", decision = "D47", locked = true }
+"kernel.yama.ptrace_scope" = { value = "1", decision = "D47", locked = true }
+"dev.tty.ldisc_autoload" = { value = "0", decision = "D47", locked = true }
+"fs.protected_fifos" = { value = "2", decision = "D47", locked = true }
+"fs.protected_regular" = { value = "2", decision = "D47", locked = true }
+"fs.suid_dumpable" = { value = "0", decision = "D47", locked = true }
 "net.core.default_qdisc" = { value = "fq", decision = "section 6", locked = true }
 
 [base.runtime]

@@ -63,8 +63,12 @@ for hours: never use it as a check.
   Commits, as `git log` shows), pull requests, issues, workflow output and documentation,
   in an enterprise tone. The conversation follows the contributor's language. Published
   history is never rewritten to translate it.
-- **Portable pipeline.** Logic lives in scripts in the repository; workflow YAML only checks
-  out, calls them and uploads their output.
+- **Portable pipeline, GitHub as glue.** Logic lives in scripts in the repository; workflow
+  YAML only checks out, calls them and uploads their output, with no `run:` block beyond a
+  few lines. Steps exchange data through files in a known directory, not through
+  `$GITHUB_OUTPUT` or artifacts alone. No hard-coded registry owner: a variable with a
+  default. Prefer a standard mechanism (OCI, cosign with a key, a file on disk) over one
+  that exists only on GitHub.
 - **No attribution.** No model names, "Generated with" lines, co-author trailers or session
   links in code, commits, pull requests or documents.
 - **One logical change per commit.** Report unrelated problems instead of fixing them in

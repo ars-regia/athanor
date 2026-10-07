@@ -152,16 +152,16 @@ COPY forge/config/packages.json /usr/share/athanor/packages.json
 # and served from the tier repositories, as the custom packages are; until then Fedora's
 # GPG signatures are the provenance. The list is the single source of truth in
 # packages.json, so a package added there reaches the image. --allowerasing lets the
-# RPM Fusion ffmpeg replace the base image's ffmpeg-free. --exclude=cosmic-comp hides
-# Fedora's build from this transaction, so neither --allowerasing nor a newer Fedora
-# release can replace Athanor's, installed above from the tier 2 repository; the installed
-# package still satisfies what the COSMIC packages require. The release assertion below
-# stays as the check.
+# RPM Fusion ffmpeg replace the base image's ffmpeg-free. The --exclude options hide
+# Fedora's builds of cosmic-comp and greenboot from this transaction, so neither
+# --allowerasing nor a newer Fedora release can replace Athanor's, installed above from the
+# tier 2 repository; the installed packages still satisfy what the COSMIC packages and
+# athanor-system-config require. The release assertions below stay as the check.
 RUN --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
     dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs jq && \
     UPSTREAM=$(jq -r '(.upstream_core + .upstream_desktop + .upstream_media + .upstream_cli)[]' /usr/share/athanor/packages.json) && \
     echo "Installing upstream packages: $UPSTREAM" && \
-    dnf5 install -y --allowerasing --exclude=cosmic-comp --setopt=install_weak_deps=False --setopt=tsflags=nodocs $UPSTREAM
+    dnf5 install -y --allowerasing --exclude=cosmic-comp --exclude=greenboot --exclude=greenboot-default-health-checks --setopt=install_weak_deps=False --setopt=tsflags=nodocs $UPSTREAM
 
 # FLATPAK MANIFEST: the applications are provisioned on the installed system, not at
 # build time. Extra-data apps such as Chrome run an apply_extra script under
@@ -207,6 +207,14 @@ RUN authselect enable-feature without-nullok && \
     test -s /etc/pam.d/system-auth && test -s /etc/pam.d/password-auth && \
     ! grep -n nullok /etc/pam.d/system-auth /etc/pam.d/password-auth
 
+# Short passwords. pam_pwquality asks a new password for twelve characters; systemd-homed reads
+# the same configuration for homectl passwd. Existing passwords are not touched. The lockout
+# after failed attempts (pam_faillock) comes with the lock screen that can write its tally
+# (doc_lock_and_prompts.md, D3 and LP18 step 3).
+RUN install -d -m 0755 /etc/security/pwquality.conf.d && \
+    printf '%s\n' '# Athanor (system/Containerfile).' 'minlen = 12' \
+        > /etc/security/pwquality.conf.d/50-athanor.conf
+
 # Stage 2 switch (doc_shell.md, section 8, item 2): the COSMIC shell is gone, our shell is
 # enabled for every user, and each bus name it owns has exactly one activation file.
 RUN for pkg in cosmic-panel cosmic-applets cosmic-notifications athanor-layout-translator; do \
@@ -223,6 +231,21 @@ RUN for pkg in cosmic-panel cosmic-applets cosmic-notifications athanor-layout-t
         test "$owners" = "/usr/share/dbus-1/services/$name.service" \
             || { echo "$name is activated by: $owners" >&2; exit 1; }; \
     done
+
+# Health checks (doc_recovery.md, R5): Athanor's greenboot build, which can mark a failed
+# update without rebooting, enabled by athanor-recovery's preset and configured not to reboot.
+# The configuration reaches /etc through tmpfiles.d at boot, so the build checks its source.
+RUN for pkg in greenboot greenboot-default-health-checks; do \
+        case $(rpm -q --qf '%{RELEASE}' "$pkg") in *.athanor*) ;; \
+            *) echo "$pkg is not Athanor's build: $(rpm -q "$pkg")" >&2; exit 1;; esac; \
+    done && \
+    for unit in greenboot-healthcheck greenboot-set-rollback-trigger; do \
+        test "$(systemctl is-enabled "$unit.service")" = enabled \
+            || { echo "$unit.service is not enabled" >&2; exit 1; }; \
+    done && \
+    grep -qx 'GREENBOOT_AUTO_REBOOT=false' /usr/share/athanor-system-config/greenboot.conf && \
+    systemd-tmpfiles --cat-config \
+        | grep -qx 'L+ /etc/greenboot/greenboot.conf - - - - /usr/share/athanor-system-config/greenboot.conf'
 
 # GPU stages (S2-S5): the signed modules of the kernel NVR with the locked vendor packages of
 # the same version, the shim and athanor-nvidia-config. libva-nvidia-driver (VA-API on NVDEC)

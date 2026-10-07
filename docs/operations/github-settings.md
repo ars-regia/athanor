@@ -90,7 +90,7 @@ Since then the files have moved ahead of GitHub (2026-10-07, ADR-0064): the two 
 | Default branch `iso-v0`; all three merge methods on; auto-merge on; head branches deleted on merge | `repository.json` |
 | Description is still `ermete-os` | `repository.json` |
 | Dependabot alerts and Dependabot security updates are off; secret scanning and push protection are on; private vulnerability reporting is on | `repository.json` |
-| Only `iso-v0` is protected: required check `Kernel gate` (not strict), no review, `enforce_admins` off, force push and deletion off | `branch-protection.json` (now also `main`, section 7) |
+| Only `iso-v0` is protected: required checks `Kernel gate` and `Spec gate` (not strict), no review, `enforce_admins` off, force push and deletion off | `branch-protection.json` (now also `main`, section 7) |
 | No repository ruleset | `rulesets.json` |
 | Environment `signing`: reviewer `hr-mes`, branches `iso-v0` and `main`, admin bypass on, four secrets | `environments.json` until 2026-10-07 (now section 7) |
 | Environment `github-pages`: branches `gh-pages` and `main`; no workflow deploys to it since the DNF channel was removed (ADR-0076, decision 2) | `environments.json` |
@@ -118,13 +118,13 @@ no job holds a key it does not use:
 
 | Environment | Secrets | Job |
 | --- | --- | --- |
-| `signing-kernel` | `SECUREBOOT_SIGNING_KEY`, `MODULE_SIGNING_KEY` | `sign` of `nvidia-kmod.yml`, only when a kernel or NVIDIA change leaves the signed vmlinuz or modules missing |
-| `signing-images` | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | `sign-system-images` of `call-system-image.yml` |
+| `signing-kernel` | `SECUREBOOT_SIGNING_KEY`, `MODULE_SIGNING_KEY` | `nvidia-kmod-sign` of `athanor-forge-orchestrator.yml`, only when a kernel or NVIDIA change leaves the signed vmlinuz or modules missing |
+| `signing-images` | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | `sign-system-images` of `athanor-forge-orchestrator.yml` |
 
 Both have the same protection in `environments.json`: required reviewer `hr-mes`; administrator
 bypass off (`can_admins_bypass: false`, set by hand: section 4); deployment branches `iso-v0` and
-`main`, which `branch-protection.json` protects alike (required check `Kernel gate`, no force
-push, no deletion).
+`main`, both protected by `branch-protection.json` (required checks `Kernel gate`, `Spec gate`
+and `gate` on `iso-v0`, `Kernel gate` on `main`, section 8; no force push, no deletion).
 
 `prevent_self_review` stays `false` for now. Every push and every run today is started by the
 maintainer's own account, agents included, so with it `true` the only reviewer could never
@@ -138,3 +138,26 @@ environment, a secret listed in two environments, a signing environment without 
 administrator bypass, or deploying from a branch `branch-protection.json` does not protect by
 name. It is a regression guard on the files, not a check of the live settings: `ghsettings.py
 diff` is.
+
+## 8. Switching the required check to gate
+
+`branch-protection.json` declares exactly what is applied. On `iso-v0` it requires three checks:
+`Kernel gate`, `Spec gate` and `gate`, the aggregate job of `pr.yml` (doc_pipeline.md PL3,
+ADR-0075); `main` requires `Kernel gate` until it takes `pr.yml`. The file is applied as soon as
+the change that adds `pr.yml` is merged, and it blocks nothing: the three workflows run on every
+pull request, so every required check reports. The bots wait for the checks this file requires
+(`forge/scripts/bot_merge.py`), so they follow it in every state. The follow-up that removes the
+`pull_request` triggers of `kernel-build.yml` and `spec-build-check.yml` removes `Kernel gate` and
+`Spec gate` from this file in the same change: a check that is required but never reports would
+leave every pull request pending.
+
+| Step | Who | Action |
+| --- | --- | --- |
+| 1 | maintainer | Merge the change that adds `pr.yml` into `iso-v0` |
+| 2 | maintainer | Give every open pull request one new event (a push, or "Update branch"), so `pr.yml` runs on it; check that each shows a `gate` check (`gh pr checks <n>`) |
+| 3 | **[M]** maintainer | `python3 scripts/github-settings/ghsettings.py apply`, read the plan (one `PUT .../branches/iso-v0/protection` adding `gate`, no `DESTRUCTIVE` line), then `apply --yes` and `diff`, which must print nothing for branch protection |
+| 4 | maintainer | Merge the follow-up (doc_ci.md CP4) that removes the `pull_request` triggers of `kernel-build.yml` and `spec-build-check.yml` and, in the same change, `Kernel gate` and `Spec gate` from `branch-protection.json` and from `CHECK_WORKFLOWS` of `bot_merge.py`, and moves the spec bot merge into `pr.yml`. Before it, kernel and spec changes are built twice |
+| 5 | **[M]** maintainer | Apply the file again as in step 3, right after step 4: the plan drops the two legacy contexts |
+
+To roll back step 3, remove `gate` from `branch-protection.json` and apply it again; step 4 is
+rolled back by reverting its change and applying the file.

@@ -1,46 +1,38 @@
 name: NVIDIA kmod
 
-# The NVIDIA kernel modules, signed and published (forge/specs/azoth/nvidia.sh,
-# docs/architecture/doc_kernel_build.md, section 10; docs/architecture/doc_build_ordering.md,
-# O1, O2, O5, O6). artifacts: system/kernel-artifacts.sh resolves the kernel of the pins by
-# digest and the module tags bound to it; unless the modules are missing (both branches
-# already published, signed and attested, or the kernel of the pins not published) the run
-# ends there with a notice, asking for no approval. build: nvidia-build.yml, the two branches
-# (open, legacy) against azoth-devel by digest. prepare: key-less, the MOK-signed negative
-# sample. sign: on a GitHub runner in the `signing-kernel` environment, the one sign-only job of
-# a kernel cycle (D43): a key-less step derives the kernel from the registry, verified with
-# cosign, and allow-lists the modules of the build job; then the step with the keys runs only
-# the signer image pinned by digest (forge/specs/azoth/signer/run.sh), signing the .ko files
-# with the module key and vmlinuz with the Secure Boot key; no build, no third-party action.
-# boot: in QEMU,
-# every case of the matrix: the signed nvidia.ko of each branch must pass the signature check
-# against the certificate compiled into the kernel (ENODEV: no GPU), while an unsigned copy and
-# a copy signed by an enrolled Secure Boot-profile MOK must be rejected (EKEYREJECTED).
+# The NVIDIA kernel modules and the signed vmlinuz, verified and published
+# (forge/specs/azoth/nvidia.sh, docs/architecture/doc_kernel_build.md, section 10;
+# docs/architecture/doc_build_ordering.md, O1, O2, O5, O6). The last part of the kmod cycle,
+# which runs in three steps because a called workflow's job reads the secrets of its environment
+# only when its caller inherits every secret (actions/runner#4453, D43):
+# call-nvidia-kmod-prepare.yml (artifacts, build, prepare, key-less), then the sign job of the
+# workflow the event started, `nvidia-kmod-sign` of the Orchestrator (on a GitHub runner in the `signing-kernel` environment, the one
+# sign-only job of a kernel cycle: a key-less step derives the kernel from the registry,
+# verified with cosign, and allow-lists the modules of the build job; then the step with the
+# keys runs only the signer image pinned by digest, forge/specs/azoth/signer/run.sh, signing the
+# .ko files with the module key and vmlinuz with the Secure Boot key; no build, no third-party
+# action), then this workflow, called only once the sign job has succeeded. Every part reads
+# the artifacts of the others from the run, which all of them share.
+# boot: in QEMU, every case of the matrix: the signed nvidia.ko of each branch must pass the
+# signature check against the certificate compiled into the kernel (ENODEV: no GPU), while an
+# unsigned copy and a copy signed by an enrolled Secure Boot-profile MOK must be rejected
+# (EKEYREJECTED).
 # publish: nvidia-publish.sh, azoth-nvidia:<nvr>-k<12 hex of the kernel digest>-<branch>-<version>
 # with SBOM, signature and attestation, and azoth-boot:<nvr>-k<12 hex> (the signed vmlinuz,
 # verified again with sbverify first), never overwriting a published tag; then the retention
-# and the verification. publish alone holds the azoth-nvidia-publish concurrency group with
+# and the verification. The keyless signatures name this file, whoever calls it:
+# system/kernel-artifacts.sh trusts the modules and azoth-boot signed by nvidia-kmod.yml only,
+# so publish stays here. publish alone holds the azoth-nvidia-publish concurrency group with
 # cancel-in-progress false, so a queued publish never interleaves a push and its signature
-# with another run's. sign and boot stay out of the group: neither of them pushes anything,
-# and sharing the group with them would let a competing run's sign seize it and cancel this
-# run's already-queued boot or publish, leaving modules built and unpublished. The
-# Orchestrator calls this workflow when the modules or the signed vmlinuz are missing
-# (state modules-missing); it also runs by hand. The
-# gate on PRs is the kmod job of Kernel Build.
+# with another run's. The sign job and boot stay out of the group: neither pushes
+# anything, and sharing the group with them would let a competing run's sign seize it and
+# cancel this run's already-queued boot or publish, leaving modules built and unpublished. The
+# Orchestrator runs the cycle when the modules or the signed vmlinuz are missing (state
+# modules-missing); a manual cycle dispatches the Orchestrator. The gate on PRs is the kmod job
+# of Kernel Build.
 
 on:
   workflow_call:
-    inputs:
-      kernel_digest:
-        description: "digest of azoth:<nvr> that the caller resolved; the run fails if the registry holds another"
-        type: string
-        required: true
-  workflow_dispatch:
-    inputs:
-      kernel_digest:
-        description: "digest of azoth:<nvr>; empty: the one system/kernel-artifacts.sh resolves"
-        type: string
-        default: ""
 
 permissions:
   contents: read
@@ -53,128 +45,7 @@ env:
   KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
 
 jobs:
-  artifacts:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    outputs:
-      state: ${{ steps.artifacts.outputs.state }}
-      kernel_digest: ${{ steps.artifacts.outputs.kernel_digest }}
-      devel_digest: ${{ steps.artifacts.outputs.devel_digest }}
-      registry: ${{ steps.artifacts.outputs.registry }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
-
-      - name: Resolve the kernel artifacts (system/kernel-artifacts.sh)
-        id: artifacts
-        env:
-          KERNEL_DIGEST: ${{ inputs.kernel_digest }}
-        run: |
-          set -euo pipefail
-          bash system/kernel-artifacts.sh resolve --expect-kernel-digest "$KERNEL_DIGEST"
-          grep -E '^(state|kernel_digest|devel_digest|registry)=' kernel-artifacts/kernel-artifacts.env >> "$GITHUB_OUTPUT"
-
-      - name: Nothing to build
-        if: ${{ steps.artifacts.outputs.state != 'modules-missing' }}
-        env:
-          STATE: ${{ steps.artifacts.outputs.state }}
-        run: |
-          echo "::notice title=NVIDIA kmod::state ${STATE}: the modules and the signed vmlinuz of the pins are published, or their kernel is not; no build and no approval"
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: nvidia-kernel-artifacts
-          path: kernel-artifacts/kernel-artifacts.env
-          if-no-files-found: error
-
-  build:
-    needs: artifacts
-    if: ${{ needs.artifacts.outputs.state == 'modules-missing' }}
-    permissions:
-      contents: read
-      packages: read
-    uses: ./.github/workflows/nvidia-build.yml
-    with:
-      devel-digest: ${{ needs.artifacts.outputs.devel_digest }}
-      registry: ${{ needs.artifacts.outputs.registry }}
-
-  prepare:
-    # The negative sample of the boot job, outside the signing environment.
-    needs: [artifacts, build]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    permissions:
-      contents: read
-      packages: read
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: nvidia-open-unsigned
-          path: out
-
-      - name: The MOK-signed negative sample (signer/run.sh prepare)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          KERNEL_DIGEST: ${{ needs.artifacts.outputs.kernel_digest }}
-        run: bash forge/specs/azoth/signer/run.sh prepare
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: nvidia-mok-signed
-          path: mok/
-          if-no-files-found: error
-
-  sign:
-    # Signs only what it derives itself: the kernel from the registry, verified by cosign in the
-    # key-less step below, and the modules of the build job once they pass the allow-list.
-    needs: [artifacts, prepare]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    permissions:
-      contents: read
-      packages: read
-    environment: signing-kernel
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          pattern: nvidia-*-unsigned
-          path: out
-          merge-multiple: true
-
-      - name: Derive and verify what is signed, without a key (signer/run.sh inputs)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          KERNEL_DIGEST: ${{ needs.artifacts.outputs.kernel_digest }}
-        run: bash forge/specs/azoth/signer/run.sh inputs
-
-      - name: Sign the modules and vmlinuz (signer/run.sh sign)
-        # The public certificates are in the repository: the module one is compiled into the
-        # kernel (kernel-local), the Secure Boot one is what shim checks through MokList.
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          MODULE_SIGNING_KEY: ${{ secrets.MODULE_SIGNING_KEY }}
-          SECUREBOOT_SIGNING_KEY: ${{ secrets.SECUREBOOT_SIGNING_KEY }}
-        run: bash forge/specs/azoth/signer/run.sh sign
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: nvidia-signed
-          path: out/
-          if-no-files-found: error
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: azoth-kernel-signed
-          path: kernel-signed/
-          if-no-files-found: error
-
   boot:
-    needs: [prepare, sign]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -249,7 +120,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [sign, boot]
+    needs: [boot]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     concurrency:

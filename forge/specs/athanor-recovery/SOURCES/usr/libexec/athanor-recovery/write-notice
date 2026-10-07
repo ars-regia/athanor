@@ -1,0 +1,25 @@
+#!/bin/bash
+# write-notice <file> - writes the message of the recovery console (athanor-recovery-notice.service).
+#
+# Two messages, both in /usr/share/athanor-recovery. recovery.issue tells the person to go back
+# with `sudo athanor-update go-back`. rollback-queued.issue is for the boot in which greenboot
+# has already done that: a required health check failed after an update, and greenboot, which
+# does not reboot on Athanor (GREENBOOT_AUTO_REBOOT=false, doc_recovery.md R5), made the
+# previous deployment the default for the next start. Going back again would undo it, since
+# `bootc rollback` on a queued rollback swaps the two deployments back, so that message says
+# to restart instead.
+set -euo pipefail
+
+out=${1:?usage: write-notice <file>}
+messages=/usr/share/athanor-recovery
+
+# The general message first: if reading the journal fails below, the console still says how
+# to go back, and the unit fails, which records the error.
+install -m 0644 "$messages/recovery.issue" "$out"
+
+# greenboot logs this line once the rollback is queued; it looks for the same line in the
+# previous boot to tell that the deployment it runs on is the result of a rollback.
+log=$(journalctl --boot --unit=greenboot-healthcheck.service --output=cat --no-pager)
+if grep -qF 'Rollback successful' <<< "$log"; then
+    install -m 0644 "$messages/rollback-queued.issue" "$out"
+fi
