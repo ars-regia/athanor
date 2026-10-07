@@ -2,6 +2,7 @@
 """Fail when an RPM installed in the system image does not match its spec in the checkout.
 
 Usage: rpm -qa --qf '%{NAME} %{VERSION}-%{RELEASE} %{SOURCERPM}\\n' | check_image_rpms.py SPECS_DIR
+system/check-image-rpms.sh runs it inside a built image.
 
 The source RPM of each installed package names the spec it was built from (Name: of
 SPECS_DIR/*/*.spec). Two defects fail the check:

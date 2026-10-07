@@ -224,15 +224,6 @@ RUN for pkg in cosmic-panel cosmic-applets cosmic-notifications athanor-layout-t
             || { echo "$name is activated by: $owners" >&2; exit 1; }; \
     done
 
-# Every RPM of ours is the version of its spec in this checkout. The tier repositories are
-# built from per-package images keyed by a state hash, and a stale one once put
-# athanor-recovery 1.0.0-5 into published images while the spec said 6. The check maps each
-# installed RPM to its spec through the source RPM, so it needs no name prefix, and also fails
-# an athanor-* package that has no spec (forge/scripts/check_image_rpms.py).
-RUN --mount=type=bind,source=forge/specs,target=/tmp/specs \
-    --mount=type=bind,source=forge/scripts/check_image_rpms.py,target=/tmp/check_image_rpms.py \
-    rpm -qa --qf '%{NAME} %{VERSION}-%{RELEASE} %{SOURCERPM}\n' | python3 /tmp/check_image_rpms.py /tmp/specs
-
 # GPU stages (S2-S5): the signed modules of the kernel NVR with the locked vendor packages of
 # the same version, the shim and athanor-nvidia-config. libva-nvidia-driver (VA-API on NVDEC)
 # only makes sense with the NVIDIA driver, and so does the locked container toolkit (S4), which
