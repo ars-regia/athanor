@@ -235,6 +235,8 @@ RUN for pkg in cosmic-panel cosmic-applets cosmic-notifications athanor-layout-t
 # Health checks (doc_recovery.md, R5): Athanor's greenboot build, which can mark a failed
 # update without rebooting, enabled by athanor-recovery's preset and configured not to reboot.
 # The configuration reaches /etc through tmpfiles.d at boot, so the build checks its source.
+# The tmpfiles grep reads the whole stream: with -q it would stop at the match and, under
+# pipefail, systemd-tmpfiles killed by SIGPIPE would fail the step (exit 141).
 RUN for pkg in greenboot greenboot-default-health-checks; do \
         case $(rpm -q --qf '%{RELEASE}' "$pkg") in *.athanor*) ;; \
             *) echo "$pkg is not Athanor's build: $(rpm -q "$pkg")" >&2; exit 1;; esac; \
@@ -245,7 +247,7 @@ RUN for pkg in greenboot greenboot-default-health-checks; do \
     done && \
     grep -qx 'GREENBOOT_AUTO_REBOOT=false' /usr/share/athanor-system-config/greenboot.conf && \
     systemd-tmpfiles --cat-config \
-        | grep -qx 'L+ /etc/greenboot/greenboot.conf - - - - /usr/share/athanor-system-config/greenboot.conf'
+        | grep -xF 'L+ /etc/greenboot/greenboot.conf - - - - /usr/share/athanor-system-config/greenboot.conf' > /dev/null
 
 # GPU stages (S2-S5): the signed modules of the kernel NVR with the locked vendor packages of
 # the same version, the shim and athanor-nvidia-config. libva-nvidia-driver (VA-API on NVDEC)
@@ -302,7 +304,8 @@ RUN bash /scripts/initramfs.sh "${AZOTH_NVR}.x86_64"
 # provider and it is the one the base image ships. The runtime directories are
 # emptied entry by entry, skipping the build-time mounts podman places under /run
 # (secrets, resolv.conf); every command is part of one && chain, so the step fails
-# as soon as one of them does.
+# as soon as one of them does. grep reads the whole mount list: with -q, findmnt killed
+# by SIGPIPE would make the test true under pipefail and remove a mount point.
 RUN dnf5 remove -y --no-autoremove \
         gcc make llvm-static rust-std-static mesa-dxil-devel \
         edk2-aarch64 qemu-user qemu-user-static distribution-gpg-keys-copr \
@@ -313,7 +316,7 @@ RUN dnf5 remove -y --no-autoremove \
     dnf5 clean all && \
     rm -rf /var/lib/dnf5/* /var/tmp/* /var/log/* && \
     for p in /tmp/* /run/* /etc/NetworkManager/system-connections/*; do \
-        if [ -e "$p" ] && ! findmnt -rno TARGET | grep -q "^$p"; then rm -rf "$p" || exit 1; fi; \
+        if [ -e "$p" ] && ! findmnt -rno TARGET | grep "^$p" > /dev/null; then rm -rf "$p" || exit 1; fi; \
     done
 
 # Image Validation & Linting
