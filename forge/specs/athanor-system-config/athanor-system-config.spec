@@ -97,6 +97,10 @@ mkdir -p /etc/yum.repos.d
   01_update_platforms_check.sh: they check OSTree remotes and rpm-ostree platforms, which
   Athanor does not update from, and the DNS check fails every boot that starts offline. The
   file is linked to /etc/greenboot/greenboot.conf by tmpfiles.d, as greenboot owns it.
+- 10-greetd-running.sh, now able to queue a rollback, waits up to two minutes for greetd and
+  asks one run of it to stay active for ten seconds; it fails at once when systemd has given
+  up on greetd. The 15-second window could fail a good update on a slow first boot, and a
+  greetd in a crash loop passed.
 
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-50
 - Point URL at the project repository.

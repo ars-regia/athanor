@@ -1,4 +1,4 @@
-From 1b9767e93d8b0fc46b3f1f556da26892a4893495 Mon Sep 17 00:00:00 2001
+From 51f2ac4bbbc9e756e9831f4c9cedb5414f70875a Mon Sep 17 00:00:00 2001
 From: Ermete Architect <esenese@proton.me>
 Date: Wed, 7 Oct 2026 15:02:31 +0200
 Subject: [PATCH] feat: add GREENBOOT_AUTO_REBOOT to roll back without
@@ -34,8 +34,8 @@ The MOTD says that the previous deployment will boot at the next restart.
  README.md                    |   2 +
  etc/greenboot/greenboot.conf |   6 ++
  src/lib/handler.rs           |   3 +-
- src/main.rs                  | 132 ++++++++++++++++++++++++++++++++++-
- 4 files changed, 141 insertions(+), 2 deletions(-)
+ src/main.rs                  | 137 ++++++++++++++++++++++++++++++++++-
+ 4 files changed, 146 insertions(+), 2 deletions(-)
 
 diff --git a/README.md b/README.md
 index 45911ab..922b027 100644
@@ -89,7 +89,7 @@ index 8c4e6a9..b82cebd 100644
      /// Normal healthcheck-driven rollback — respect boot_counter guard.
      Normal,
 diff --git a/src/main.rs b/src/main.rs
-index 34a9c37..a1378bd 100644
+index 34a9c37..70d336e 100644
 --- a/src/main.rs
 +++ b/src/main.rs
 @@ -31,18 +31,26 @@ struct Cli {
@@ -154,7 +154,7 @@ index 34a9c37..a1378bd 100644
                  // Check if boot_counter is 0 (exhausted retries) or if no counter is set
                  match get_boot_counter()? {
                      Some(counter) if counter > 0 => {
-@@ -445,6 +473,49 @@ fn health_check() -> Result<()> {
+@@ -445,6 +473,54 @@ fn health_check() -> Result<()> {
      }
  }
  
@@ -178,15 +178,20 @@ index 34a9c37..a1378bd 100644
 +    log::info!(
 +        "GREENBOOT_AUTO_REBOOT is false - queueing the previous deployment for the next boot without rebooting"
 +    );
++    // The trigger is cleared before the rollback: left behind, it would make the next
++    // boot, of the previous deployment, look like a GRUB fallback, whose forced rollback
++    // would swap back to the deployment that failed.
++    if let Err(e) = with_boot_rw(|| {
++        unset_boot_counter()?;
++        unset_next_deployment_id()?;
++        Ok(())
++    }) {
++        log::error!("Failed to clear grub vars: {e}");
++        bail!("Manual intervention required - cannot clear the rollback trigger");
++    }
 +    match handle_rollback(RollbackMode::Forced) {
 +        Ok(()) => {
 +            log::info!("Rollback successful");
-+            with_boot_rw(|| {
-+                unset_boot_counter()?;
-+                unset_next_deployment_id()?;
-+                Ok(())
-+            })
-+            .unwrap_or_else(|e| log::error!("Failed to clear grub vars: {e}"));
 +            handle_motd(&generate_motd_message(
 +                "Greenboot healthcheck failed - status is RED. The previous deployment will boot at the next restart",
 +                previous_rollback,
@@ -204,7 +209,7 @@ index 34a9c37..a1378bd 100644
  // This function parses a string expected in bash-array format like
  // `( "item1" "item2" ... )` into a Vec<String>.
  fn parse_bash_array_string(raw_str: &str) -> Vec<String> {
-@@ -510,3 +581,62 @@ fn main() -> Result<()> {
+@@ -510,3 +586,62 @@ fn main() -> Result<()> {
          }
      }
  }
