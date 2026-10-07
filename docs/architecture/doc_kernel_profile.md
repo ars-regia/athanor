@@ -710,9 +710,10 @@ policy covers PCR 11 and the command line events of the allowed role sets in PCR
 attestation code in the repository today returns fixed results and quotes the wrong PCRs;
 it is replaced, with the maintainer's approval, before any mesh admission depends on it.
 Amended 2026-10-06 (maintainer decision A2-9 (#151)): attestation is outside the threat
-model of 1.0 (`doc_threat_model.md`, TM7). Moving `athanor-attestation` to
-`experimental/` is proposed in #151 and is not part of A2-9; it awaits the maintainer,
-because its path is restricted.
+model of 1.0 (`doc_threat_model.md`, TM7). Decided 2026-10-07 by the maintainer:
+`athanor-attestation` moves to `experimental/` (listed in `experimental/EXEMPT`, out of the
+workspace members) and is rewritten on Keylime with the PCR 11 and PCR 12 policy above
+before any mesh admission depends on it; it is not deleted.
 
 ## 10. Execution integrity and security primitives
 

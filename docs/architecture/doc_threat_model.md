@@ -75,7 +75,7 @@ Owed at each document's next revision: `doc_shell.md` SH12 and `doc_bar.md` BR1 
 
 1. **T1. Absent start-up files.** Decided 2026-10-06 (A2-29 (#151)): the unit binds an empty read-only file over each absent path (TM3).
 2. **T2. Further candidates for TM3.** Decided 2026-10-06 (A2-29 (#151)): all of them are rows of TM3.
-3. **T3. The polkit model.** Which actions Athanor adds or overrides and their result for the active session have no single owner (audit 2, security and trust, finding 15). Whether that table belongs here is for the maintainer.
+3. **T3. The polkit model.** Which actions Athanor adds or overrides and their result for the active session have no single owner (audit 2, security and trust, finding 15). Decided 2026-10-07 by the maintainer: the table belongs in this document, one row per action Athanor declares or overrides with its result for the active session, and `verify.py` fails when an action declared in the repository's `.policy` or `.rules` files is missing from the table or has a different result. Until that section and its check land, the gap stands.
 4. **T4. Windows the trusted-path border does not mark.** cosmic-comp#1441 borders floating windows only, so a confined application can imitate a prompt with a fullscreen or tiled window (TM6). Decided 2026-10-06 (A2-31): the extension of the indicator to every window state is proposed upstream with #1441; until it lands, the gap is a stated residual risk of TM6 (`doc_lock_and_prompts.md` L13).
 
 ## 6. Acceptance
