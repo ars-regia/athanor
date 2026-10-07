@@ -5,7 +5,7 @@ Version:        1.0.0
 Release:        %{?autorelease}%{!?autorelease:50.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor
+URL:            https://github.com/ars-regia/athanor
 BuildArch:      noarch
 
 Requires: cosmic-comp greetd greenboot systemd-ukify nodejs

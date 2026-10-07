@@ -1,6 +1,6 @@
 [Unit]
 Description=Move this machine onto the signed Athanor image reference
-Documentation=https://github.com/hr-mes/athanor/blob/iso-v0/docs/architecture/doc_update_trust.md
+Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_update_trust.md
 ConditionPathExists=!/var/lib/athanor-update/migrated
 After=network-online.target athanor-update-state.service
 Wants=network-online.target

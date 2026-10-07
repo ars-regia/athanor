@@ -44,7 +44,7 @@ own the rest:
 Every package builds inside `athanor-builder`, an OCI image produced by Nix alone:
 `builderImage` in `flake.nix` (`dockerTools.buildLayeredImage`), with no Containerfile.
 `call-build-builder.yml` hashes `forge/builder`, the forge configuration, `flake.nix` and
-`flake.lock` with `forge/scripts/check_idempotency.sh --package builder`; when `athanor-builder:<hash>` already exists it is reused, otherwise
+`flake.lock` with `forge/scripts/check_idempotency.sh --package builder` (not `packages.json`, which the image does not read); when `athanor-builder:<hash>` already exists it is reused, otherwise
 the job runs `nix build .#builderImage`, loads it and pushes it as `:<hash>` and `:latest`.
 The hash is handed to the package and image jobs, so a run builds with exactly one builder.
 
@@ -58,13 +58,15 @@ package jobs of one run:
 - **Edges**: every package of tier N+1 depends on every package of tier N; a
   `BuildRequires` or `Requires` naming another node (with the `athanor-` prefix removed)
   adds an edge too.
-- **Node hash**: for a custom package, `package_hash`: its spec directory plus every
-  directory its crates reach through path dependencies outside it.
-- **Dirty nodes**: a node whose transitive hash differs from the stored one. The store is
-  Redis when `ATHANOR_REDIS_URL` is set and reachable, and `forge/.cache/<node>.hash`
-  otherwise. No workflow sets `ATHANOR_REDIS_URL` and a CI checkout starts without
-  `.cache`, so in CI every node is dirty and the per-package idempotency check (section 5)
-  decides what is rebuilt.
+- **Dirty nodes**: a custom package is dirty when the registry has no
+  `athanor-forge-<package>:hash-<hash>`, the hash being the one
+  `check_idempotency.sh --hash-only` computes. The lookups run eight at a time, each `registry_probe.sh` under
+  `retry.sh`: "manifest unknown" (and ghcr's 403 for a never-published package) means
+  absent; any other failure is retried and then stops the run, because reading an
+  unanswered question as "clean" would ship stale images and reading it as "dirty" would
+  silently rebuild the whole graph. A dirty package does not dirty its dependents: builds
+  never consume another package's output. Upstream nodes and flatpaks are never dirty, so a
+  commit that changes no package schedules no matrix job.
 - **Output**: the dirty custom packages split into levels 0, 1 and 2 (every deeper level
   joins level 2) and the dirty flatpaks, written to `GITHUB_OUTPUT` with a Mermaid summary
   of the graph. Upstream nodes are never scheduled.
@@ -76,11 +78,26 @@ package, so the levels order the jobs but no build consumes the output of anothe
 
 `call-dag-compile.yml` runs one matrix job per package and level:
 
-1. **Idempotency.** `check_idempotency.sh` hashes the spec directory, `config/rpmmacros`
-   and `config/packages.json`, and asks the registry whether
-   `athanor-forge-<package>:<hash>` exists. If it does, the job stops there. This hash does
-   not include the path dependencies that `package_hash` follows: a change confined to a
-   crate under `system/` does not rebuild the packages that depend on it (known gap).
+1. **Idempotency.** `check_idempotency.sh` hashes the spec directory, `config/rpmmacros`,
+   the package's entry in `config/packages.json` (the lists that name it) and every other
+   input `dag_orchestrator.py --inputs` reports: the Cargo path dependencies of its crates,
+   the repo paths the spec declares with `# repo-input: <path>` (a unit test fails when a
+   spec names a repo path it did not declare; it sees literal paths only), the workspace
+   `Cargo.toml`, `Cargo.lock` and `.cargo/config.toml` for an in-place cargo build, the
+   build scripts and the builder identity (`flake.nix`, `flake.lock`, `forge/builder/`). It
+   asks the registry whether `athanor-forge-<package>:hash-<hash>` exists. If it does, the
+   job stops there.
+
+   The declared-input check is a tripwire for literal paths, not a proof of completeness.
+   It reads the spec text (outside comments and `%description`) and fails when a repo-rooted
+   path that exists is not declared. It does not see: paths assembled from shell variables
+   or macros at build time; relative `../` paths; files a script reads on its own (a
+   `build.rs` or `include_str!` that reaches outside the crate and its path dependencies, a
+   generator reading a neighbouring directory); and anything inside a declared directory
+   that points elsewhere, since a declared directory vouches for everything under it. The
+   telemetry package builds through `nix build`, so only `flake.nix` and `flake.lock` cover
+   it. A build that reads more than it declares keeps its tag when that input changes: the
+   author of the spec is the one who closes the gap, by declaring the path.
 2. **Build.** `forge/scripts/run_spec_build.sh` runs `build_spec.sh` twice in the builder
    image, sharing its home directory through a podman volume. The `fetch` stage has the
    network: it downloads the `Source` files and verifies them against
@@ -92,7 +109,7 @@ package, so the levels order the jobs but no build consumes the output of anothe
    package. `athanor-telemetry` is the exception: it builds with
    `nix build .#athanor-telemetry-rpm`.
 3. **Publication.** The RPMs go into a `FROM scratch` image,
-   `<registry>/<owner>/athanor-forge-<package>`, tagged `:latest` and `:<hash>`, with the
+   `<registry>/<owner>/athanor-forge-<package>`, tagged `:latest` and `:hash-<hash>`, with the
    hash in the `tier.content.sha256` label. The registry host is the `REGISTRY_HOST`
    repository variable (default `ghcr.io`) and the owner is the repository's.
 4. **Provenance.** Syft writes an SPDX SBOM, and `forge/scripts/sign_attest.sh` signs the
@@ -117,14 +134,20 @@ artifact and never pushed; any other change runs in the published `athanor-build
 `call-system-image.yml` turns the package images into tier repositories and images:
 
 - **Tier repositories.** In the builder, `forge/scripts/fetch_repo_rpms.sh` pulls the
-  package images of each tier (tier 0 also takes the kernel, `azoth@<digest>` from the
-  verified kernel artifacts). For each tier whose content hash changed, the job signs the
-  RPMs when `RPM_GPG_KEY` is available, runs `createrepo_c` and publishes
-  `athanor-forge-tier<N>-repo:latest`; an unchanged tier is not pushed. On `main` the same repositories are deployed to GitHub Pages as a DNF channel.
+  package images of each tier by `:hash-<hash>`, from the map `dag-hashes` (`hashes.json`) the
+  brain wrote for this run and the job downloads; nothing in the pipeline reads a package's
+  `:latest`, which stays for people (tier 0 also takes the kernel, `azoth@<digest>` from the
+  verified kernel artifacts). For each tier whose content hash changed, the job runs
+  `createrepo_c` and publishes `athanor-forge-tier<N>-repo:latest`; an unchanged tier is not
+  pushed. The RPMs are not signed and there is no DNF channel: they reach machines only inside
+  the signed image (ADR-0076, decision 2).
 - **System images.** `system/build-image.sh` builds the default, `nvidia` and
   `nvidia-legacy` variants from `system/Containerfile`: the Fedora `base-atomic:43` base
   by digest, the RPMs of each tier repository image (bind-mounted, then installed), the
-  `upstream_*` packages by name, and a UKI signed with the Secure Boot key. The images are
+  `upstream_*` packages by name, and a UKI signed with the Secure Boot key. The `system`
+  stage the three share is built once per run and each variant is built `FROM` its image
+  ID, so all three carry the same system layers (`system/shared-layers.sh` checks it in local
+  storage before the push; doc_update_delivery.md, UD40). The images are
   pushed and signed with cosign keyless; a separate job adds the key-based signature
   (`system/sign-images.sh`). `forge/scripts/build_iso.sh` builds the ISO with osbuild.
 

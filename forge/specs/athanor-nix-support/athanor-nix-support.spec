@@ -4,7 +4,7 @@ Version:        1.0.0
 Release:        9%{?dist}
 Summary:        Athanor OS athanor-nix-support
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor
+URL:            https://github.com/ars-regia/athanor
 BuildArch:      noarch
 
 # The Fedora Nix packages provide the binary, the store, the daemon and its systemd

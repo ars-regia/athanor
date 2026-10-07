@@ -10,7 +10,7 @@ there, or when the document names a workflow file that does not exist.
   Prefer a standard mechanism (OCI, cosign with a key, a file on disk) to one that exists
   only on GitHub.
 - **No literal registry owner.** Images come from `REGISTRY_HOST` and the repository owner,
-  never `ghcr.io/hr-mes` written out (`verify.py registry`).
+  never `ghcr.io/ars-regia` written out (`verify.py registry`).
 - **Stop and ask** before changing a job that uses the `signing` environment or the secrets
   it holds (`docs/operations/secrets.md`).
 - **Never hide a failure.** No `|| true`, no `continue-on-error`. The existing `|| true` are

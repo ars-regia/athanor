@@ -23,6 +23,11 @@ import sys
 import tomllib
 from pathlib import Path
 
+try:
+    import yaml  # PyYAML, for the D43 lint, which fails closed without it
+except ImportError:
+    yaml = None
+
 ROOT = Path(__file__).resolve().parent.parent
 RS_DIRS = ["system", "forge/specs"]
 
@@ -143,6 +148,10 @@ def check_workflows():
                 if host in line:
                     r.fail(f"{wf.name}:{i+1} log inviati a un servizio esterno ({host})")
 
+    # 1e. D43: signing keys only in sign-only jobs
+    for problem in signing_problems(ROOT):
+        r.fail(problem)
+
     # 1d. actionlint, se disponibile
     try:
         p = subprocess.run(["actionlint", "-no-color", "-oneline"], cwd=ROOT,
@@ -157,6 +166,322 @@ def check_workflows():
         r.note(f"actionlint non eseguito: {e}")
 
     return r
+
+
+# D43 lint. A regression guard, not a security boundary: it keeps a reviewed workflow from
+# drifting into handing a signing key to a build or to a third-party action, and fails closed on
+# a workflow it cannot read. What protects the keys is the environment protection on GitHub
+# (required reviewer, deployment branches) and the review of every workflow change.
+
+# The actions a sign-only job may use, pinned by a full commit SHA (D43).
+SIGN_ONLY_ACTIONS = re.compile(
+    r"^actions/(?:checkout|download-artifact|upload-artifact)@[0-9a-f]{40}$")
+# The only inputs of those actions a sign-only job may set: no other ref or repository to check
+# out, no other run's or repository's artifacts, no checkout outside the workspace root (D43).
+SIGN_ONLY_INPUTS = {
+    "actions/checkout": {"persist-credentials"},
+    "actions/download-artifact": {"name", "pattern", "path", "merge-multiple"},
+    "actions/upload-artifact": {"name", "path", "if-no-files-found", "retention-days"},
+}
+# Where a sign-only job may download: a directory that is not in the checkout, so an artifact
+# never replaces the sign script (a download without a path lands on the workspace root).
+SIGN_JOB_DOWNLOADS = {"out", "artifacts"}
+# The only commands a step of a signing job may run, whole. A sign-only job receives built
+# artefacts and runs no build step, and an earlier step must not be able to rewrite the sign
+# script or the environment of the step that holds the key ($GITHUB_ENV, BASH_ENV) (D43).
+SIGN_JOB_COMMANDS = {
+    "bash forge/specs/azoth/signer/run.sh inputs",
+    "bash forge/specs/azoth/signer/run.sh sign",
+    'echo "${GITHUB_TOKEN}" | skopeo login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin',
+    'bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" artifacts/image-digests.txt'
+    ' | tee -a "${GITHUB_STEP_SUMMARY}"',
+}
+# The names a signing job, its steps and its workflow may set in env besides the secrets of the
+# job's environment: plain values, none read by bash, the dynamic loader or a PATH lookup.
+SIGN_JOB_ENV = {"GH_TOKEN", "GITHUB_TOKEN", "GITHUB_ACTOR", "KERNEL_DIGEST", "KERNEL_REGISTRY"}
+# The runners a signing job may use: GitHub-hosted, never a self-hosted machine (D43).
+GITHUB_HOSTED = re.compile(r"^ubuntu-(?:latest|\d{2}\.\d{2})$")
+# The only commands a step holding a signing secret may run, whole: the sign scripts (D43).
+SIGN_SCRIPTS = re.compile(
+    r"^bash (?:forge/specs/azoth/signer/run\.sh sign"
+    r'|system/sign-images\.sh --registry "ghcr\.io/\$\{GITHUB_REPOSITORY_OWNER,,\}" artifacts/image-digests\.txt'
+    r' \| tee -a "\$\{GITHUB_STEP_SUMMARY\}")$')
+EXPRESSION = re.compile(r"\$\{\{(.*?)\}\}", re.S)
+# Contexts are case-insensitive: secrets.cosign_private_key reads COSIGN_PRIVATE_KEY.
+SECRET_NAME = re.compile(r"\bsecrets\s*\.\s*([A-Za-z_][A-Za-z0-9_-]*)", re.I)
+SECRETS_WORD = re.compile(r"\bsecrets\b", re.I)
+ENVIRONMENTS_JSON = ".github/settings/environments.json"
+BRANCH_PROTECTION_JSON = ".github/settings/branch-protection.json"
+# Its "secrets" are the repository secrets, which every job can read: none of them signs.
+ACTIONS_JSON = ".github/settings/actions.json"
+# The secret GitHub gives every run; nobody stores it.
+BUILTIN_SECRETS = {"GITHUB_TOKEN"}
+
+
+def yaml_strings(node, path=()):
+    """Every string of a parsed YAML node, with the keys and indexes that lead to it."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield from yaml_strings(value, path + (key,))
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            yield from yaml_strings(value, path + (index,))
+    elif isinstance(node, str):
+        yield path, node
+
+
+def secret_references(text):
+    """The secrets the expressions of text name as secrets.NAME, upper-cased, and whether any
+    of them reads secrets another way (secrets['X'], secrets[format(...)], toJSON(secrets))."""
+    names, dynamic = set(), False
+    for expression in EXPRESSION.findall(text):
+        named = SECRET_NAME.findall(expression)
+        names |= {name.upper() for name in named}
+        dynamic |= len(SECRETS_WORD.findall(expression)) > len(named)
+    return names, dynamic
+
+
+def job_environment(job):
+    """The environment name a parsed job declares, as a string or as a mapping, or None."""
+    environment = job.get("environment")
+    if isinstance(environment, dict):
+        environment = environment.get("name")
+    return environment if isinstance(environment, str) else None
+
+
+def triggers(doc):
+    """The event names of a parsed workflow; PyYAML reads the key `on` as True."""
+    on = doc.get("on", doc.get(True))
+    if isinstance(on, str):
+        return {on}
+    return {str(event) for event in on} if isinstance(on, (list, dict)) else set()
+
+
+def protected_branches(root):
+    """The branches branch-protection.json protects against force pushes and deletion."""
+    protection = json.loads(read(Path(root) / BRANCH_PROTECTION_JSON))
+    return {branch for branch, rules in protection.items()
+            if rules and rules.get("allow_force_pushes") is False and rules.get("allow_deletions") is False}
+
+
+def deployment_problem(policy, protected):
+    """Where a deployment branch policy lets a job of the environment run from, when that is
+    more than named protected branches; None when it is only those."""
+    if not policy:
+        return "any branch"
+    if not policy.get("custom_branch_policies"):
+        return "any protected branch"
+    branches = policy.get("policies") or []
+    if not branches:
+        return "no branch"
+    for branch in branches:
+        if branch.get("type", "branch") != "branch":
+            return f"{branch.get('type')} {branch.get('name')}"
+        if branch.get("name") not in protected:
+            return branch.get("name")
+    return None
+
+
+def signing_environments(root):
+    """{secret: environment} for the environments named signing* in environments.json, the one
+    place that says which environment holds which key, and the problems of those environments:
+    each needs a required reviewer, no administrator bypass, and deploys only from branches
+    branch-protection.json protects by name (a glob or "any protected branch" would follow
+    whoever can protect a new branch)."""
+    environments = json.loads(read(Path(root) / ENVIRONMENTS_JSON))
+    signing = {name: env for name, env in environments.items() if name.startswith("signing")}
+    if not signing:
+        return {}, [f"{ENVIRONMENTS_JSON}: no signing environment (D43)"]
+    holders, problems = {}, []
+    protected = protected_branches(root)
+    for name, env in sorted(signing.items()):
+        if not env.get("reviewers"):
+            problems.append(f"{ENVIRONMENTS_JSON}: the {name} environment has no required reviewer (D43)")
+        if env.get("can_admins_bypass") is not False:
+            problems.append(f"{ENVIRONMENTS_JSON}: the {name} environment lets administrators bypass "
+                            "its reviewer (D43)")
+        where = deployment_problem(env.get("deployment_branch_policy"), protected)
+        if where:
+            problems.append(f"{ENVIRONMENTS_JSON}: the {name} environment deploys from {where}, not only "
+                            f"from branches {BRANCH_PROTECTION_JSON} protects (D43)")
+        for secret in env.get("secrets", []):
+            if secret in holders:
+                problems.append(f"{ENVIRONMENTS_JSON}: {secret} is in {holders[secret]} and in {name}: "
+                                "each key has one environment (D43)")
+            holders.setdefault(secret, name)
+    return holders, problems
+
+
+def signing_problems(root):
+    """D43 (doc_ci.md; doc_kernel_profile.md, section 12 item 1): a signing secret is read only
+    in the env of a step that runs nothing but a sign script, in a job of the environment that
+    holds it; a job of a signing environment uses no action but checkout, download-artifact and
+    upload-artifact pinned by SHA and pointed at this run and repository, calls no reusable
+    workflow, runs no container and builds, installs or runs no locally built image; no secret
+    is read other than by name, and no caller inherits secrets into a workflow with a signing
+    job; each signing environment has a required reviewer, no administrator bypass, and deploys
+    only from protected branches. Every secret read is declared in the settings: held by an
+    environment of environments.json, or a repository secret of actions.json that no signing
+    environment holds."""
+    root = Path(root)
+    holders, problems = signing_environments(root)
+    if yaml is None:
+        return problems + ["scripts/verify.py: PyYAML is missing, so the D43 lint cannot read the "
+                           "workflows (pip install pyyaml)"]
+    environments = json.loads(read(root / ENVIRONMENTS_JSON))
+    signing = {name for name in environments if name.startswith("signing")}
+    # GitHub compares environment names without regard to case.
+    canonical = {name.lower(): name for name in environments}
+    # Image key rotation (docs/operations/secrets.md section 4.1): while system/keys holds both
+    # image keys, the old `signing` environment, the only holder of key 1, counts as
+    # signing-images, so every rule of a signing job applies to a job that names it. The alias
+    # ends when athanor-image-1.pub leaves system/keys.
+    if all((root / "system/keys" / f"athanor-image-{n}.pub").is_file() for n in (1, 2)):
+        canonical.setdefault("signing", "signing-images")
+    repository = set(json.loads(read(root / ACTIONS_JSON)).get("secrets") or [])
+    for secret in sorted(repository & holders.keys()):
+        problems.append(f"{ACTIONS_JSON}: {secret} is a repository secret, which every job reads, "
+                        f"and {holders[secret]} holds it (D43)")
+    declared = repository | BUILTIN_SECRETS | {
+        secret for env in environments.values() for secret in env.get("secrets") or []}
+    workflows = {}
+    for wf in sorted((root / ".github/workflows").glob("*.y*ml")):
+        try:
+            doc = yaml.safe_load(read(wf))
+        except yaml.YAMLError as error:
+            problems.append(f"{wf.name}: not YAML the D43 lint can read: {str(error).splitlines()[0]}")
+            continue
+        jobs = doc.get("jobs") if isinstance(doc, dict) else None
+        if not isinstance(jobs, dict) or not jobs or not all(isinstance(job, dict) for job in jobs.values()):
+            problems.append(f"{wf.name}: no mapping of jobs the D43 lint can read")
+            continue
+        workflows[wf.name] = doc
+    def environment_of(job):
+        environment = job_environment(job)
+        return canonical.get(environment.lower(), environment) if environment else None
+
+    with_signing_job = {name for name, doc in workflows.items()
+                        if any(environment_of(job) in signing for job in doc["jobs"].values())}
+    for name, doc in workflows.items():
+        if "pull_request_target" in triggers(doc):
+            problems.append(f"{name}: runs on pull_request_target, which runs with the secrets of this "
+                            "repository on behalf of a fork (D43)")
+        if name in with_signing_job:
+            env = doc.get("env") or {}
+            for key in sorted(set(env) - SIGN_JOB_ENV) if isinstance(env, dict) else ["env"]:
+                problems.append(f"{name}: sets {key} in env, beside a signing job: only {sorted(SIGN_JOB_ENV)} (D43)")
+            if "defaults" in doc:
+                problems.append(f"{name}: sets defaults, beside a signing job, which changes what its steps "
+                                "run (D43)")
+        problems += workflow_signing_problems(name, doc["jobs"], holders, signing, with_signing_job,
+                                              set(workflows), environment_of)
+        undeclared = set()
+        for path, text in yaml_strings(doc):
+            names, dynamic = secret_references(text)
+            undeclared |= names - declared
+            if dynamic:
+                problems.append(f"{name}: {'.'.join(map(str, path))} reads secrets other than as "
+                                "secrets.NAME, which hides the secret it reads (D43)")
+            if names & holders.keys() and path[:1] != ("jobs",):
+                for secret in sorted(names & holders.keys()):
+                    problems.append(f"{name}: {secret} at the workflow level ({path[0]}), where every job "
+                                    "reads it (D43)")
+        for secret in sorted(undeclared):
+            problems.append(f"{name}: reads {secret}, which neither {ENVIRONMENTS_JSON} nor {ACTIONS_JSON} "
+                            "declares (D43)")
+    return problems
+
+
+def workflow_signing_problems(name, jobs, holders, signing, with_signing_job, readable, environment_of):
+    """The D43 problems of the jobs of one workflow (see signing_problems)."""
+    problems = []
+    for job_id, job in jobs.items():
+        environment = environment_of(job)
+        if environment and "${{" in environment:
+            problems.append(f"{name}: job {job_id} names its environment with an expression the D43 lint "
+                            "cannot resolve")
+        steps = job.get("steps") if isinstance(job.get("steps"), list) else []
+        for path, text in yaml_strings(job):
+            for secret in sorted(secret_references(text)[0] & holders.keys()):
+                if environment != holders[secret]:
+                    problems.append(f"{name}: job {job_id} reads {secret} without environment: "
+                                    f"{holders[secret]}, which holds it (D43)")
+                elif path[:1] != ("steps",) or path[2:3] != ("env",) or len(path) != 4:
+                    problems.append(f"{name}: job {job_id} reads {secret} in {'.'.join(map(str, path))}, "
+                                    "not in the env of the step that signs (D43)")
+                else:
+                    step = steps[path[1]]
+                    run = step.get("run")
+                    if "uses" in step or not isinstance(run, str) or not SIGN_SCRIPTS.match(run.strip()):
+                        problems.append(f"{name}: job {job_id} step {path[1] + 1} hands {secret} to a step "
+                                        "that does not run only a sign script (D43)")
+        if job.get("secrets") == "inherit":
+            called = str(job.get("uses", ""))
+            local = called.removeprefix("./.github/workflows/")
+            if local == called or local in with_signing_job or local not in readable:
+                problems.append(f"{name}: job {job_id} inherits every secret into {called}, which has a "
+                                "signing job or cannot be read: pass the secrets it needs by name (D43)")
+        if environment in signing:
+            problems += signing_job_problems(f"{name}: signing job {job_id}", job, steps, environment, holders)
+    return problems
+
+
+# The only defaults a signing job may set: GitHub's bash shell, `bash --noprofile --norc -eo
+# pipefail {0}`, so a sign script piped into tee fails the step when it fails.
+SIGN_JOB_DEFAULTS = {"run": {"shell": "bash"}}
+
+
+def signing_job_problems(where, job, steps, environment, holders):
+    """A job of a signing environment: GitHub-hosted, no container, no defaults but the bash
+    shell, only the pinned actions with their allowed inputs, only the allow-listed commands, no
+    shell or working directory of its own, and in env only the secrets of its environment and
+    plain values."""
+    problems = []
+    runs_on = job.get("runs-on")
+    if "uses" not in job and not (isinstance(runs_on, str) and GITHUB_HOSTED.match(runs_on)):
+        problems.append(f"{where} runs on {runs_on}: only a GitHub-hosted ubuntu label (D43)")
+    for key in ("container", "services"):
+        if key in job:
+            problems.append(f"{where} runs a {key} beside the key (D43)")
+    if "defaults" in job and job["defaults"] != SIGN_JOB_DEFAULTS:
+        problems.append(f"{where} sets defaults other than {SIGN_JOB_DEFAULTS}, which changes what its steps "
+                        "run (D43)")
+    if "uses" in job:
+        problems.append(f"{where} uses {job['uses']}: only checkout, download-artifact and upload-artifact "
+                        "pinned by SHA (D43)")
+    allowed_env = SIGN_JOB_ENV | {secret for secret, holder in holders.items() if holder == environment}
+    envs = [("env", job.get("env"))]
+    envs += [(f"steps.{index + 1}.env", step.get("env")) for index, step in enumerate(steps) if isinstance(step, dict)]
+    for path, env in envs:
+        for key in sorted(set(env) - allowed_env) if isinstance(env, dict) else ([] if env is None else ["env"]):
+            problems.append(f"{where} sets {key} in {path}: only the secrets of its environment and "
+                            f"{sorted(SIGN_JOB_ENV)} (D43)")
+    for index, step in enumerate(steps):
+        if not isinstance(step, dict):
+            problems.append(f"{where} step {index + 1} is not a mapping the D43 lint can read")
+            continue
+        for key in ("shell", "working-directory"):
+            if key in step:
+                problems.append(f"{where} step {index + 1} sets {key} (D43)")
+        if "run" in step and str(step["run"]).strip() not in SIGN_JOB_COMMANDS:
+            command = str(step["run"]).strip().splitlines()[0] if str(step["run"]).strip() else ""
+            problems.append(f"{where} step {index + 1} runs a command outside the allow-list of D43: {command}")
+        if "uses" not in step:
+            continue
+        action = str(step["uses"])
+        if not SIGN_ONLY_ACTIONS.match(action):
+            problems.append(f"{where} uses {action}: only checkout, download-artifact and upload-artifact "
+                            "pinned by SHA (D43)")
+            continue
+        action = action.split("@")[0]
+        inputs = step.get("with") if isinstance(step.get("with"), dict) else {}
+        for key in sorted(set(inputs) - SIGN_ONLY_INPUTS[action]):
+            problems.append(f"{where} sets {key} on {action}: it signs only this run's artifacts of this "
+                            "repository (D43)")
+        if action == "actions/download-artifact" and str(inputs.get("path", "")).rstrip("/") not in SIGN_JOB_DOWNLOADS:
+            problems.append(f"{where} downloads into {inputs.get('path', 'the workspace root')}: only into one of "
+                            f"{sorted(SIGN_JOB_DOWNLOADS)}, outside the checkout (D43)")
+    return problems
 
 
 # --------------------------------------------------------------------------- #
@@ -424,9 +749,6 @@ def update_trust_problems(root=None):
                                 f"the registry comes from the build's variables")
     # D2: the Secure Boot daemon is retired. D42 (issue #148): nothing in the image seals LUKS to
     # the TPM or increments a rollback counter by itself, so none of these units may be shipped.
-    for source in walk(root / "forge/specs/athanor-secure-boot", ".rs"):
-        if "org.athanor.SecureBoot" in read(source):
-            problems.append(f"{rel(source)}: serves org.athanor.SecureBoot, a name no bus policy lets it own (retired by D2)")
     for spec in walk(root / "forge/specs", ".spec"):
         # The changelog may name what was retired: only what the spec installs counts.
         text = read(spec).split("%changelog", 1)[0]
@@ -831,6 +1153,30 @@ def check_cmdline():
     return r
 
 
+PAM_CONTAINERFILE = "system/Containerfile"
+NULLOK_GUARD = re.compile(r"^RUN authselect enable-feature without-nullok\b", re.MULTILINE)
+
+
+def nullok_problems(root=None):
+    """The image build drops nullok from every authselect stack (decision A2-23)."""
+    root = root or ROOT
+    try:
+        text = read(root / PAM_CONTAINERFILE)
+    except OSError as err:
+        return [f"{PAM_CONTAINERFILE}: cannot read ({err})"]
+    if not NULLOK_GUARD.search(text):
+        return [f"{PAM_CONTAINERFILE}: no 'RUN authselect enable-feature without-nullok' step (A2-23)"]
+    return []
+
+
+@check("pam", "No account authenticates with an empty password (A2-23)")
+def check_pam():
+    r = Result()
+    for problem in nullok_problems():
+        r.fail(problem)
+    return r
+
+
 # --------------------------------------------------------------------------- #
 # 8. polkit, il lato codice — il subject deve essere il CHIAMANTE
 # --------------------------------------------------------------------------- #
@@ -882,9 +1228,35 @@ def check_polkit_subject():
 # 9. spec RPM — la sorgente di `install` deve esistere da dove gira %install
 # --------------------------------------------------------------------------- #
 
+# Packages that dedicated workflows build, outside the DAG (forge/scripts/dag_orchestrator.py).
+EXTERNAL_PACKAGES = {"kernel", "kernel-forge"}
+
+
+def manifest_spec_problems(root=None):
+    """Every custom_* entry of packages.json has a package directory under forge/specs."""
+    root = root or ROOT
+    manifest = root / "forge" / "config" / "packages.json"
+    specs = root / "forge" / "specs"
+    if not manifest.is_file():
+        return []
+    problems = []
+    for key, pkgs in json.loads(read(manifest)).items():
+        if not key.startswith("custom_"):
+            continue
+        for pkg in pkgs:
+            if pkg in EXTERNAL_PACKAGES:
+                continue
+            if not ((specs / f"athanor-{pkg}").is_dir() or (specs / pkg).is_dir()):
+                problems.append(f"{rel(manifest)}: {key} lists {pkg}, but forge/specs has neither "
+                                f"athanor-{pkg} nor {pkg}")
+    return problems
+
+
 @check("specs", "Le spec installano da percorsi che esistono dalla loro working directory")
 def check_specs():
     r = Result()
+    for problem in manifest_spec_problems():
+        r.fail(problem)
     import shlex
 
     def sections(text):
@@ -1026,12 +1398,11 @@ def check_boundary():
 
 # Placeholders the unit tests use for an owner: they name no real registry namespace.
 PLACEHOLDER_OWNERS = {"owner", "o"}
-# Where the pipeline names its images. system/Containerfile is outside on purpose: its tier
-# mounts are the one literal decision 12 of the 2026-10-05 re-audit keeps (see the comment there).
+# Where the pipeline names its images.
 REGISTRY_DIRS = (".github/workflows", "scripts", "forge/scripts")
-REGISTRY_FILES = ("Justfile", "forge/Justfile", "system/Justfile")
-# The file types that name images: workflows, scripts, recipes and container builds.
-REGISTRY_SUFFIXES = {".yml", ".yaml", ".sh", ".py", ".just"}
+REGISTRY_FILES = ("Justfile", "forge/Justfile", "system/Justfile", "system/Containerfile", "flake.nix")
+# The file types that name images: workflows, scripts, recipes, container builds and Nix.
+REGISTRY_SUFFIXES = {".yml", ".yaml", ".sh", ".py", ".just", ".nix"}
 REGISTRY_NAMES = {"Justfile", "Containerfile"}
 
 

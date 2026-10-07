@@ -8,20 +8,20 @@
 #      registry (localhost:5000): the published tier3 minus the rebuilt packages and minus
 #      the packages the switch removes, plus the new RPMs;
 #   3. builds localhost:5000/acc/athanor-system:switch-<short hash> with the tier3
-#      reference remapped to the overlay, and pushes it to the acceptance registry. The UKI
-#      is signed with build-image.sh's throwaway key: the image never leaves this host;
+#      reference remapped to the overlay, and pushes it to the acceptance registry; the
+#      image never leaves this host;
 #   4. with --push-to-vm, signs it with a throwaway key the guest trusts for that one
 #      switch, switches the development VM to it and reboots it.
 #
 # A clean checkout already built for the same specs skips steps 1 to 3. The tag goes to
 # .scratch/local-image/tag. OWNER (default $REGISTRY_HOST/$GITHUB_REPOSITORY_OWNER, which
-# default to ghcr.io and hr-mes), BUILDER and TIER3 name the
+# default to ghcr.io and ars-regia), BUILDER and TIER3 name the
 # published images. Needs podman, rpm, skopeo and, for --push-to-vm, gh, jq and the VM.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(git -C "$HERE" rev-parse --show-toplevel)
-OWNER=${OWNER:-${REGISTRY_HOST:-ghcr.io}/${GITHUB_REPOSITORY_OWNER:-hr-mes}}
+OWNER=${OWNER:-${REGISTRY_HOST:-ghcr.io}/${GITHUB_REPOSITORY_OWNER:-ars-regia}}
 BUILDER=${BUILDER:-$OWNER/athanor-builder:latest}
 TIER3=${TIER3:-$OWNER/athanor-forge-tier3-repo}
 OVERLAY=localhost:5000/${TIER3#*/}

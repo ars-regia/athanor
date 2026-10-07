@@ -35,7 +35,7 @@ enum Commands {
     SyncDb,
 }
 
-const REGISTRY_URL: &str = "ghcr.io/hr-mes/athanor-store";
+const REGISTRY_URL: &str = "ghcr.io/ars-regia/athanor-store";
 const PUBLIC_KEY_PATH: &str = "/etc/athanor/keys/cosign.pub";
 const PQC_PUBLIC_KEY_PATH: &str = "/etc/athanor/keys/dilithium5.pub";
 const SIGNATURES_DIR: &str = "/etc/athanor/keys/signatures";
