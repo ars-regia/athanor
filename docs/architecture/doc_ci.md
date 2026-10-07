@@ -19,12 +19,12 @@ The task brief counted 23 workflows. There are 24: `nix-registry-bump.yml` lande
 push to forge/** or system/** (main, iso-v0) | daily 04:00 UTC | dispatch (Kernel Build, manual)
 CI1 athanor-forge-orchestrator.yml        concurrency: one run per ref, the newest waits
  |- lint ............................ CI2 call-lint.yml
- |- orchestrator-brain .............. forge/scripts/dynamic-matrix.sh -> dag_level_0..2, dag_flatpaks, has_changes
+ |- orchestrator-brain .............. forge/scripts/dynamic-matrix.sh -> dag_packages, has_changes
  |- build-builder ................... CI3 call-build-builder.yml -> athanor-builder:<content_hash>
  |- kernel-artifacts ................ system/kernel-artifacts.sh resolve, cycle -> state, cycle, kernel_digest
  |   `- nvidia-kmod (modules-missing)  CI6 nvidia-kmod.yml -> CI7 nvidia-build.yml   [signing approval: sign-kernel]
  |- kernel-artifacts-final .......... system/kernel-artifacts.sh require-ready -> artifact kernel-artifacts
- |- dag-compile ..................... CI4 call-dag-compile.yml: level 0 -> level 1 -> level 2 -> flatpaks
+ |- dag-compile ..................... CI4 call-dag-compile.yml: one matrix of every dirty package
  `- system-image .................... CI5 call-system-image.yml
        build-repo -> dag-system-image -> sign-system-images [signing approval]
 
@@ -40,7 +40,7 @@ CI1 runs CI2 once, as its first job, and calls CI3, CI4 and CI5 only after it pa
 | Stage | Runner | Workflow, job |
 |---|---|---|
 | Builder image (Nix) | GitHub-hosted `ubuntu-24.04` | CI3 `build-builder` |
-| Forge RPMs, one matrix job per package | GitHub-hosted | CI4 `dag-build-level-0..2` |
+| Forge RPMs, one matrix job per package | GitHub-hosted | CI4 `dag-build` |
 | Tier repositories, system images, ISO | GitHub-hosted | CI5 `build-repo`, `dag-system-image` |
 | Kernel RPMs (about an hour) | **self-hosted** | CI8 `build` |
 | Kernel boot matrix, publication | GitHub-hosted with KVM (`.github/actions/kvm`) | CI8 `boot`, `publish` |
@@ -116,10 +116,10 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 ### CI4 Reusable DAG Compile Workflow
 
 - **File:** `call-dag-compile.yml`. **Purpose:** builds every changed forge package in the builder image (fetch with network, build without), publishes it as a micro-container, SBOM, keyless signature.
-- **Triggers:** `workflow_call` (CI1). **Inputs:** `dag_level_0..2`, `dag_flatpaks`, `builder_hash`. **Outputs:** package images; artifact `crash-logs-<package>` on failure.
-- **Secrets, variables:** `GITHUB_TOKEN`, `REGISTRY_HOST`. **Environment:** none. **Runner:** hosted, up to 20 parallel jobs per level. **Concurrency:** caller's.
+- **Triggers:** `workflow_call` (CI1). **Inputs:** `dag_packages`, `builder_hash`. **Outputs:** package images; artifact `crash-logs-<package>` on failure.
+- **Secrets, variables:** `GITHUB_TOKEN`, `REGISTRY_HOST`. **Environment:** none. **Runner:** hosted, up to 20 parallel jobs in one matrix. **Concurrency:** caller's.
 - **Scripts:** `forge/scripts/check_idempotency.sh`, `run_spec_build.sh`, `retry.sh`, `sign_attest.sh`.
-- **Health:** all levels green in 37384733899.
+- **Health:** all levels green in 37384733899, before the levels were merged into one matrix.
 
 ### CI5 Call System Image
 

@@ -82,10 +82,7 @@ jobs:
       run:
         working-directory: forge
     outputs:
-      dag_level_0: ${{ steps.brain.outputs.dag_level_0 }}
-      dag_level_1: ${{ steps.brain.outputs.dag_level_1 }}
-      dag_level_2: ${{ steps.brain.outputs.dag_level_2 }}
-      dag_flatpaks: ${{ steps.brain.outputs.dag_flatpaks }}
+      dag_packages: ${{ steps.brain.outputs.dag_packages }}
       dirty_count: ${{ steps.brain.outputs.dirty_count }}
       has_changes: ${{ steps.brain.outputs.has_changes }}
     steps:
@@ -214,10 +211,7 @@ jobs:
     needs: [orchestrator-brain, build-builder]
     uses: ./.github/workflows/call-dag-compile.yml
     with:
-      dag_level_0: ${{ needs.orchestrator-brain.outputs.dag_level_0 }}
-      dag_level_1: ${{ needs.orchestrator-brain.outputs.dag_level_1 }}
-      dag_level_2: ${{ needs.orchestrator-brain.outputs.dag_level_2 }}
-      dag_flatpaks: ${{ needs.orchestrator-brain.outputs.dag_flatpaks }}
+      dag_packages: ${{ needs.orchestrator-brain.outputs.dag_packages }}
       builder_hash: ${{ needs.build-builder.outputs.content_hash }}
 
   system-image:
