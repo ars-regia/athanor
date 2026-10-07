@@ -1,0 +1,40 @@
+# Scheduled maintenance (doc_pipeline.md section 3.1). Today it holds the daily settings
+# drift check of PL52; the other maintenance jobs move here with PB12.
+name: Maintenance
+
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  settings-drift:
+    name: Settings drift
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # A read-only token of the settings App, for this repository only (PL5, PL52).
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.SETTINGS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.SETTINGS_APP_PRIVATE_KEY }}
+          permission-actions: read
+          permission-administration: read
+          permission-environments: read
+          permission-pages: read
+          permission-secrets: read
+          permission-variables: read
+
+      - name: Compare .github/settings with the live repository
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: python3 scripts/github-settings/ghsettings.py --repo "${GITHUB_REPOSITORY}" diff
