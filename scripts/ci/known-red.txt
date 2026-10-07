@@ -24,7 +24,6 @@ paths #223 2027-01-07 system/ebpf/ebpf-loader/src/main.rs carica un artefatto da
 paths #223 2027-01-07 system/ebpf/ebpf-loader/src/main.rs carica un artefatto da target/ — percorso dell'albero di build, inesistente su un sistema installato
 paths #223 2027-01-07 forge/specs/athanor-shell-rs/athanor-dock-0.7/src/dock.rs percorso hard-coded in /tmp — usa /run/athanor (0700) per stato privilegiato
 paths #223 2027-01-07 forge/specs/athanor-sysmon-ebpf/athanor-sysmon-ebpf-1.0.0/src/main.rs carica un artefatto da target/ — percorso dell'albero di build, inesistente su un sistema installato
-shipped #223 2027-01-07 athanor-attestation: nessuno .spec, non in packages.json -> compila ma non arriva sul sistema. Impacchettalo, spostalo in experimental/, o elencalo in experimental/EXEMPT
 shipped #223 2027-01-07 ebpf-core: nessuno .spec, non in packages.json -> compila ma non arriva sul sistema. Impacchettalo, spostalo in experimental/, o elencalo in experimental/EXEMPT
 shipped #223 2027-01-07 ebpf-loader: nessuno .spec, non in packages.json -> compila ma non arriva sul sistema. Impacchettalo, spostalo in experimental/, o elencalo in experimental/EXEMPT
 shipped #223 2027-01-07 athanor-agentic-kernel: nessuno .spec, non in packages.json -> compila ma non arriva sul sistema. Impacchettalo, spostalo in experimental/, o elencalo in experimental/EXEMPT

@@ -140,7 +140,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-33 | 0070 | [Report-a-problem packaging](0070-report-a-problem-packaging.md) | accepted | shell, ci |
 | A2-34 | 0071 | [Documentation and team model](0071-documentation-and-team-model.md) | amended by ADR-0074 | docs, process, ci |
 | A2-35 | 0072 | [MOK enrolment page in the installer](0072-mok-enrolment-in-installer.md) | accepted | signing, installer |
-| ADR-0073 | 0073 | [Retire components without a product role](0073-component-verdicts.md) | accepted | platform, security, build |
+| ADR-0073 | 0073 | [Retire components without a product role](0073-component-verdicts.md) | amended by ADR-0087 | platform, security, build |
 | ADR-0074 | 0074 | [Agent and contributor model](0074-agent-and-contributor-model.md) | accepted | docs |
 | ADR-0075 | 0075 | [Engineering gates](0075-engineering-gates.md) | accepted | build, security |
 | ADR-0076 | 0076 | [Platform scope for 1.0](0076-platform-scope-for-1-0.md) | accepted | platform, security, build, docs |
@@ -154,3 +154,4 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0084 | 0084 | [The key custody model is definitive for the single-maintainer phase](0084-key-custody-model.md) | accepted | security, process |
 | ADR-0085 | 0085 | [Keyring prompter: the secret exchange comes from upstream oo7](0085-keyring-prompter-secret-exchange-source.md) | accepted | security, shell |
 | ADR-0086 | 0086 | [toolbox is not isolation; podman as container_t or the dev VM is](0086-toolbox-is-not-isolation.md) | accepted | security, apps |
+| ADR-0087 | 0087 | [Keep athanor-attestation outside the workspace until its Keylime rewrite](0087-attestation-outside-the-workspace.md) | accepted | security, build |
