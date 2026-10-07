@@ -35,7 +35,9 @@ STATE=/var/lib/private/athanor-runner
 # Stop whenever the unit is loaded, not only when it is active: between two guests the unit
 # waits in auto-restart (Restart=always), where is-active is false, and the pending restart
 # would start vm.sh on a half-copied image. A stop job also cancels that restart.
-if [[ $(systemctl show --property=LoadState --value "$UNIT") == loaded ]]; then
+# A failed query stops the script (set -e): inside the test it would read as "not loaded".
+load_state=$(systemctl show --property=LoadState --value "$UNIT")
+if [[ $load_state == loaded ]]; then
   systemctl stop "$UNIT"
 fi
 
