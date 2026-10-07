@@ -1,10 +1,12 @@
 """Unit tests of system/kernel-artifacts.sh against an offline registry
 (python3 -B -m unittest discover -s system/tests -v)."""
 
+import hashlib
 import json
 import os
 import pathlib
 import re
+import struct
 import subprocess
 import tempfile
 import unittest
@@ -16,7 +18,7 @@ PINS = dict(re.findall(r"^(\w+)=(.*)$", (ROOT / "forge/specs/azoth/pins.env").re
 # A version the NVIDIA open pin never holds, so a bump built from it always moves the pin.
 NVIDIA_OPEN_BUMP = f"{PINS['NVIDIA_OPEN_VERSION']}.1"
 NVR = subprocess.run(["bash", str(ROOT / "forge/specs/azoth/nvr.sh")], capture_output=True, text=True, check=True).stdout.strip()
-REG = "ghcr.io/hr-mes"
+REG = "ghcr.io/ars-regia"
 KERNEL = "sha256:" + "1" * 64
 DEVEL = "sha256:" + "2" * 64
 OTHER_KERNEL = "sha256:" + "9" * 64
@@ -29,8 +31,11 @@ ATTESTED_OTHER_NVR = subprocess.run(
 assert ATTESTED_OTHER_NVR != NVR, "OTHER_FEDORA_KERNEL_NVR must derive an NVR other than the real one"
 INPUTS = json.loads(subprocess.run(["python3", str(ROOT / "forge/specs/azoth/build-inputs.py")], capture_output=True, text=True, check=True).stdout)
 MODULE = {"open": "sha256:" + "3" * 64, "legacy": "sha256:" + "4" * 64}
-KERNEL_BUILD = "https://github.com/hr-mes/athanor/.github/workflows/kernel-build.yml@refs/heads/iso-v0"
-KMOD = "https://github.com/hr-mes/athanor/.github/workflows/nvidia-kmod.yml@refs/heads/iso-v0"
+BOOT = "sha256:" + "5" * 64
+SECUREBOOT_CERT = hashlib.sha256((ROOT / "forge/specs/azoth/keys/secureboot/athanor-secureboot.pem").read_bytes()).hexdigest()
+KERNEL_BUILD = "https://github.com/ars-regia/athanor/.github/workflows/kernel-build.yml@refs/heads/iso-v0"
+KMOD = "https://github.com/ars-regia/athanor/.github/workflows/nvidia-kmod.yml@refs/heads/iso-v0"
+SIGNER = "https://github.com/ars-regia/athanor/.github/workflows/azoth-signer.yml@refs/heads/"
 
 
 def tag(branch, kernel=KERNEL):
@@ -43,8 +48,17 @@ def predicate(branch, kernel=KERNEL):
             "pins": {k: v for k, v in PINS.items() if k.startswith("NVIDIA_")}}
 
 
-def published(branches=("open", "legacy")):
-    """A registry holding the signed kernel of the pins and the attested modules of BRANCHES."""
+def boot_tag(kernel=KERNEL):
+    return f"{NVR}-k{kernel[7:19]}"
+
+
+def boot_predicate(kernel=KERNEL, cert=SECUREBOOT_CERT):
+    return {"boot": "vmlinuz", "kver": f"{NVR}.x86_64", "kernel_digest": kernel, "secureboot_cert": cert}
+
+
+def published(branches=("open", "legacy"), boot=True):
+    """A registry holding the signed kernel of the pins, the attested modules of BRANCHES and,
+    with BOOT, its attested signed vmlinuz."""
     fx = {
         "tags": {f"{REG}/azoth:{NVR}": KERNEL, f"{REG}/azoth-devel:{NVR}": DEVEL},
         "signatures": {f"{REG}/azoth@{KERNEL}": KERNEL_BUILD, f"{REG}/azoth-devel@{DEVEL}": KERNEL_BUILD},
@@ -57,6 +71,11 @@ def published(branches=("open", "legacy")):
         fx["tags"][f"{REG}/azoth-nvidia:{tag(branch)}"] = MODULE[branch]
         fx["signatures"][ref] = KMOD
         fx["attestations"][ref] = [{"identity": KMOD, "predicate": predicate(branch)}]
+    if boot:
+        ref = f"{REG}/azoth-boot@{BOOT}"
+        fx["tags"][f"{REG}/azoth-boot:{boot_tag()}"] = BOOT
+        fx["signatures"][ref] = KMOD
+        fx["attestations"][ref] = [{"identity": KMOD, "predicate": boot_predicate()}]
     return fx
 
 
@@ -74,8 +93,8 @@ class Tool(unittest.TestCase):
         self.env = {
             "PATH": f"{bin_dir}:{os.environ['PATH']}", "HOME": str(self.dir), "RETRY_ATTEMPTS": "1",
             "KERNEL_ARTIFACTS_DIR": str(self.artifacts), "FAKE_REGISTRY": str(self.dir / "registry.json"),
-            "FAKE_LOG": str(self.dir / "calls.log"), "GITHUB_REPOSITORY_OWNER": "hr-mes",
-            "GITHUB_REPOSITORY": "hr-mes/athanor", "GITHUB_SERVER_URL": "https://github.com",
+            "FAKE_LOG": str(self.dir / "calls.log"), "GITHUB_REPOSITORY_OWNER": "ars-regia",
+            "GITHUB_REPOSITORY": "ars-regia/athanor", "GITHUB_SERVER_URL": "https://github.com",
             "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
         }
         self.registry({})
@@ -86,12 +105,37 @@ class Tool(unittest.TestCase):
     def registry(self, fx):
         (self.dir / "registry.json").write_text(json.dumps(fx))
 
-    def run_script(self, *args, cwd=None):
-        return subprocess.run(["bash", str(SCRIPT), *args], capture_output=True, text=True, env=self.env, cwd=cwd or self.dir)
+    def run_script(self, *args, cwd=None, script=SCRIPT):
+        return subprocess.run(["bash", str(script), *args], capture_output=True, text=True, env=self.env, cwd=cwd or self.dir)
 
     def state_file(self):
         path = self.artifacts / "kernel-artifacts.env"
         return dict(line.split("=", 1) for line in path.read_text().splitlines()) if path.exists() else None
+
+
+class Signer(Tool):
+    def test_the_signer_image_is_signed_only_by_its_workflow_on_a_trusted_branch(self):
+        ref = f"{REG}/azoth-signer@{BOOT}"
+        for identity, verdict in (
+            (SIGNER + "main", "signed"),
+            (SIGNER + "iso-v0", "signed"),
+            (SIGNER + "feature", "unsigned"),
+            (KMOD, "unsigned"),
+        ):
+            with self.subTest(identity=identity):
+                self.registry({"signatures": {ref: identity}, "errors": []})
+                r = self.run_script("signed", ref, "signer")
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(r.stdout.strip(), verdict)
+
+    def test_an_unknown_identity_fails_rather_than_matching_every_signature(self):
+        ref = f"{REG}/azoth-signer@{BOOT}"
+        self.registry({"signatures": {ref: SIGNER + "main"}, "errors": []})
+        for command in ("signed", "predicates"):
+            with self.subTest(command=command):
+                r = self.run_script(command, ref, "nobody")
+                self.assertNotEqual(r.returncode, 0)
+                self.assertNotIn("signed", r.stdout)
 
 
 class Resolve(Tool):
@@ -105,6 +149,50 @@ class Resolve(Tool):
         self.assertEqual((got["nvidia_open_digest"], got["nvidia_legacy_digest"]), (MODULE["open"], MODULE["legacy"]))
         self.assertEqual(got["nvidia_open_tag"], f"{NVR}-k{'1' * 12}-open-{PINS['NVIDIA_OPEN_VERSION']}")
 
+    def test_ready_records_the_signed_vmlinuz(self):
+        self.registry(published())
+        r = self.run_script("resolve")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        got = self.state_file()
+        self.assertEqual((got["state"], got["boot_tag"], got["boot_digest"]), ("ready", boot_tag(), BOOT))
+
+    def test_missing_signed_vmlinuz_is_modules_missing(self):
+        self.registry(published(boot=False))
+        r = self.run_script("resolve")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        got = self.state_file()
+        self.assertEqual(got["state"], "modules-missing")
+        self.assertEqual(got["boot_tag"], boot_tag())
+        self.assertNotIn("boot_digest", got)
+        self.assertEqual((got["nvidia_open_digest"], got["nvidia_legacy_digest"]), (MODULE["open"], MODULE["legacy"]))
+
+    def test_signed_vmlinuz_that_does_not_match_is_modules_missing(self):
+        for case, identity, attested in (
+            ("signed by Kernel Build, not NVIDIA kmod", KERNEL_BUILD, boot_predicate()),
+            ("attested for another kernel", KMOD, boot_predicate(kernel=OTHER_KERNEL)),
+            ("signed with a rotated certificate", KMOD, boot_predicate(cert="0" * 64)),
+            ("attested as something else", KMOD, dict(boot_predicate(), boot="initramfs")),
+        ):
+            with self.subTest(case):
+                fx = published()
+                ref = f"{REG}/azoth-boot@{BOOT}"
+                fx["signatures"][ref] = identity
+                fx["attestations"][ref] = [{"identity": identity, "predicate": attested}]
+                self.registry(fx)
+                r = self.run_script("resolve")
+                self.assertEqual(r.returncode, 0, r.stderr)
+                got = self.state_file()
+                self.assertEqual(got["state"], "modules-missing")
+                self.assertNotIn("boot_digest", got)
+
+    def test_signed_vmlinuz_registry_error_fails(self):
+        fx = published()
+        fx["errors"].append(f"{REG}/azoth-boot:{boot_tag()}")
+        self.registry(fx)
+        r = self.run_script("resolve")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIsNone(self.state_file())
+
     def test_missing_module_tag_is_modules_missing(self):
         self.registry(published(branches=("open",)))
         r = self.run_script("resolve")
@@ -114,6 +202,86 @@ class Resolve(Tool):
         self.assertEqual(got["nvidia_open_digest"], MODULE["open"])
         self.assertNotIn("nvidia_legacy_digest", got)
         self.assertEqual(got["nvidia_legacy_tag"], tag("legacy"))
+
+    def test_never_published_module_package_is_modules_missing(self):
+        # ghcr.io denies the bearer token for a package that does not exist yet (azoth-nvidia
+        # before the first NVIDIA build under an owner), instead of answering manifest unknown.
+        fx = published(branches=())
+        fx["unpublished"] = [f"{REG}/azoth-nvidia"]
+        self.registry(fx)
+        r = self.run_script("resolve")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        got = self.state_file()
+        self.assertEqual(got["state"], "modules-missing")
+        self.assertEqual(got["nvidia_open_tag"], tag("open"))
+        self.assertNotIn("nvidia_open_digest", got)
+        self.assertIn(f"{REG}/azoth-nvidia: denied", r.stderr)
+
+    def test_never_published_kernel_package_is_kernel_missing(self):
+        fx = published()
+        fx["unpublished"] = [f"{REG}/azoth"]
+        self.registry(fx)
+        r = self.run_script("resolve")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.state_file(), {"state": "kernel-missing", "nvr": NVR, "registry": REG})
+
+    def test_publish_refuses_a_tag_the_anonymous_resolve_could_not_see(self):
+        # A private azoth-nvidia: the anonymous resolve did not see the legacy tag, the
+        # logged-in publish does. It must stop before building or pushing anything.
+        self.registry(published(branches=("open",)))
+        self.assertEqual(self.run_script("resolve").returncode, 0)
+        self.registry(published())
+        r = self.run_script(str(self.dir / "signed"), str(self.dir / "boot"), script=ROOT / "forge/specs/azoth/nvidia-publish.sh")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn(f"already holds {MODULE['legacy']}", r.stderr)
+        self.assertIn("refusing to overwrite", r.stderr)
+
+    def test_publish_refuses_a_boot_tag_the_anonymous_resolve_could_not_see(self):
+        # The same for a private azoth-boot: every module is published, the signed vmlinuz
+        # only appears to the logged-in publish.
+        self.registry(published(boot=False))
+        self.assertEqual(self.run_script("resolve").returncode, 0)
+        self.registry(published())
+        r = self.run_script(str(self.dir / "signed"), str(self.dir / "boot"), script=ROOT / "forge/specs/azoth/nvidia-publish.sh")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn(f"azoth-boot:{boot_tag()} already holds {BOOT}", r.stderr)
+        self.assertIn("refusing to overwrite", r.stderr)
+
+    def test_publish_verifies_the_module_signatures_before_building(self):
+        """Modules signed by any key but the one of the committed certificate are never built
+        into an image, let alone pushed."""
+        self.registry(published(branches=("legacy",)))
+        self.assertEqual(self.run_script("resolve").returncode, 0)
+        kver = f"{NVR}.x86_64"
+        signed = self.dir / "signed"
+        nvidia = signed / "open/lib/modules" / kver / "extra/nvidia"
+        nvidia.mkdir(parents=True)
+        (signed / "open/version").write_text(PINS["NVIDIA_OPEN_VERSION"] + "\n")
+        (signed / "open/kver").write_text(kver + "\n")
+        key, crt = self.dir / "other.priv", self.dir / "other.crt"
+        subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+                        "-subj", "/CN=Athanor OS module signing/", "-keyout", key, "-out", crt],
+                       check=True, capture_output=True)
+        ko = nvidia / "nvidia.ko"
+        ko.write_bytes(b"ko")
+        signature = subprocess.run(["openssl", "cms", "-sign", "-binary", "-noattr", "-nocerts", "-outform", "DER",
+                                    "-md", "sha512", "-signer", crt, "-inkey", key, "-in", ko],
+                                   check=True, capture_output=True).stdout
+        with open(ko, "ab") as module:
+            module.write(signature + struct.pack(">BBBBB3xI", 0, 0, 2, 0, 0, len(signature)) + b"~Module signature appended~\n")
+        for tool, body in (("modinfo", f'echo "{kver} SMP preempt mod_unload"'), ("buildah", 'echo "$*" >> "$FAKE_LOG.buildah"; exit 3')):
+            (self.dir / "bin" / tool).write_text(f"#!/usr/bin/env bash\n{body}\n")
+            (self.dir / "bin" / tool).chmod(0o755)
+        r = self.run_script(str(signed), str(self.dir / "boot"), script=ROOT / "forge/specs/azoth/nvidia-publish.sh")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn(f"open/lib/modules/{kver}/extra/nvidia/nvidia.ko: its signature does not verify against", r.stderr)
+        self.assertIn("keys/modules/athanor-modules.pem", r.stderr)
+        self.assertFalse((self.dir / "calls.log.buildah").exists(), "nothing built")
+
+    def test_publish_takes_the_signed_vmlinuz_directory(self):
+        r = self.run_script(str(self.dir / "signed"), script=ROOT / "forge/specs/azoth/nvidia-publish.sh")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("SIGNED_DIR BOOT_DIR", r.stderr)
 
     def test_absent_kernel_is_kernel_missing(self):
         fx = published()
@@ -715,10 +883,17 @@ class CheckPlan(Repo):
         self.assertIn("own pull request", r.stderr)
 
     def test_nvidia_pin_bump_builds_the_default_image(self):
-        self.state("modules-missing", kernel_digest=KERNEL)
+        self.state("modules-missing", kernel_digest=KERNEL, boot_digest=BOOT)
         r = self.plan({**self.pin_change(NVIDIA_OPEN_VERSION=NVIDIA_OPEN_BUMP), "system/nvidia/locks/open.lock": "l\n"})
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual((self.state_file()["check_gpus"], self.state_file()["check_delta"]), ("none", "true"))
+
+    def test_nvidia_pin_bump_without_the_signed_vmlinuz_fails(self):
+        # Even the default image copies the signed vmlinuz in: without it nothing can be built.
+        self.state("modules-missing", kernel_digest=KERNEL)
+        r = self.plan({**self.pin_change(NVIDIA_OPEN_VERSION=NVIDIA_OPEN_BUMP), "system/nvidia/locks/open.lock": "l\n"})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("signed vmlinuz", r.stderr)
 
     def test_missing_modules_with_unchanged_pins_fail(self):
         self.state("modules-missing", kernel_digest=KERNEL)
@@ -759,7 +934,7 @@ class CheckPlan(Repo):
 
 
 def signed_by(ref_name, workflow="kernel-build.yml"):
-    return f"https://github.com/hr-mes/athanor/.github/workflows/{workflow}@{ref_name}"
+    return f"https://github.com/ars-regia/athanor/.github/workflows/{workflow}@{ref_name}"
 
 
 class TrustedRefs(Tool):

@@ -76,18 +76,13 @@ hermetic-build lockfile="athanor-build.lock":
 
 # Check idempotency of a package build against GHCR SHA-256 digest
 [group('QA & Security')]
-check-idempotency package registry="ghcr.io" owner="hr-mes" image_name="" base_digest="":
+check-idempotency package registry="ghcr.io" owner="ars-regia" image_name="" base_digest="":
     just forge/check-idempotency "{{ package }}" "{{ registry }}" "{{ owner }}" "{{ image_name }}" "{{ base_digest }}"
 
 # Runs full Rust security suite (Clippy policies, Cargo Vet, Cargo Deny)
 [group('QA & Security')]
 audit:
     just forge/audit
-
-# Audits and enforces strict 0700/0400 permissions on Secure Boot & UKI signing keys
-[group('QA & Security')]
-secureboot-key-audit:
-    just system/secureboot-key-audit
 
 # Runs cargo-fuzz fuzzing suite on Rust spec targets
 [group('QA & Security')]
@@ -133,11 +128,13 @@ format:
 # 🧹 UTILITY & MAINTENANCE
 # ------------------------------------------------------------------------------
 
-# Cleans all build artifacts across Forge and System
+# Cleans build artifacts (cargo target, RPMS_OUT, System outputs); never removes tracked files
 [group('Utility')]
 clean:
     just system/clean
-    rm -rf RPMS_OUT/ forge/build/ idemp.out *.lock
+    cargo clean
+    rm -rf RPMS_OUT/
+    rm -f idemp.out
 
 # Checks syntax of all Justfiles in repository
 [group('Utility')]
@@ -153,7 +150,7 @@ update-specs:
 
 # Cleans old and untagged GHCR container images
 [group('Utility')]
-clean-ghcr owner="hr-mes":
+clean-ghcr owner="ars-regia":
     just forge/clean-ghcr "{{ owner }}"
 
 # Runs the entire CI pipeline locally via Act for rapid debugging

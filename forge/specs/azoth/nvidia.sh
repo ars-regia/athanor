@@ -25,7 +25,7 @@
 #              NVIDIA publishes next to it and writes OUT/sources.sha256 (the bump bot
 #              copies it to nvidia/sources.sha256)
 #   --key/--cert  private key and certificate (PEM or DER) of the signer: in CI the
-#              project module signing key (`signing` environment, keys/modules), locally
+#              project module signing key (`signing-kernel` environment, keys/modules), locally
 #              an ephemeral one
 set -euo pipefail
 

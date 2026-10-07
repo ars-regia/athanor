@@ -1,9 +1,9 @@
 Name:           athanor-keylime
 Version:        1.0
-Release:        4%{?dist}
+Release:        5%{?dist}
 Summary:        Athanor OS Keylime Agent Configuration
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor
+URL:            https://github.com/ars-regia/athanor
 Source0:        99-athanor.conf
 
 Requires:       keylime-agent
@@ -12,7 +12,7 @@ BuildArch:      noarch
 
 %description
 Configuration package for the Keylime agent in Athanor OS: a drop-in that sets the
-agent's uuid and measured_boot_imports options. It does not seal or bind anything.
+agent's uuid option. It does not seal or bind anything.
 
 %prep
 # Nothing to unpack: the drop-in is Source0.
@@ -28,6 +28,10 @@ install -D -m 0644 %{SOURCE0} %{buildroot}/etc/keylime/agent.conf.d/99-athanor.c
 %config(noreplace) /etc/keylime/agent.conf.d/99-athanor.conf
 
 %changelog
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0-5
+- Drop measured_boot_imports from the agent drop-in: it is a Keylime verifier
+  option, unknown to the agent, and True is not a TOML boolean
+
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0-4
 - Reword the %description and the drop-in comment: list the options set, no sealing
 

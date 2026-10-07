@@ -4,19 +4,26 @@ paths:
   - "Justfile"
   - "**/Justfile"
   - "scripts/verify.py"
+  - "system/*.sh"
+  - "system/tests/**"
 ---
 
 # CI e build
 
 ## Valida in locale, non con un push
 
-I workflow del percorso ISO si validano prima di committare:
+I workflow e gli script di pipeline (`system/*.sh`, che portano la logica
+che i workflow richiamano) si validano prima di committare:
 
 ```
 actionlint
 python3 scripts/verify.py workflows
 bash -n   # su ogni blocco run: non banale
 ```
+
+`verify.py workflows` esegue `actionlint` solo se è nel PATH; altrimenti passa
+con una nota senza controllare nulla. Installa `actionlint`. Per gli script di
+pipeline vedi anche i test in `system/tests/`.
 
 Non usare il push come test. Un `startup_failure` su GitHub costa più di trenta
 secondi di verifica locale.
@@ -34,7 +41,9 @@ secondi di verifica locale.
 ## Vincoli
 
 - Mai aggiungere `|| true` o `continue-on-error` per far passare un job. Un job
-  che fallisce sta dicendo qualcosa.
+  che fallisce sta dicendo qualcosa. Gli `|| true` già presenti (ad esempio i
+  fallback di `chown` in `call-build-builder.yml` e `call-dag-compile.yml`) sono
+  debito noto da risolvere, non un modello da copiare.
 - Un commit per problema, non un commit che sistema tutto.
 - Ogni workflow del percorso ISO ha un job `lint` che gira per primo.
 

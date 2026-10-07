@@ -1010,7 +1010,7 @@ path = "system/scripts"
 kind = "script tool"
 area = "build-ci"
 status = "missing"
-purpose = "UKI assembly, bootc-image-builder ISO, unikernel build, theme generator, Flatpak provisioner"
+purpose = "Initramfs generation, bootc-image-builder ISO, unikernel build, theme generator, Flatpak provisioner"
 
 [[component]]
 path = "system/sign-images.sh"

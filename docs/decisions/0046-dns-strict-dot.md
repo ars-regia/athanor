@@ -2,7 +2,7 @@
 id: A2-11
 title: "DNS model: strict DNS over TLS"
 date: 2026-10-05
-status: accepted
+status: amended by ADR-0079
 issues: [143]
 areas: [network, security]
 ---

@@ -19,4 +19,4 @@ authselect without-nullok now + verify.py check (auth module: show the diff to t
 
 ## Consequences
 
-Application pending: `system/Containerfile` does not remove `nullok` and `scripts/verify.py` has no check for it.
+Applied by `system/Containerfile`, which enables `without-nullok` and fails the build if `nullok` remains, and by the `pam` check of `scripts/verify.py`.

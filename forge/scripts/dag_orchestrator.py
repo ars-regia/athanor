@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 Athanor Forge DAG Orchestrator Engine
-Calculates Directed Acyclic Graph (DAG) for RPM & Flatpak dependencies,
-queries Redis distributed cache for node states, invalidates downstream dependencies,
-and outputs topological matrix execution levels for parallel GitHub Actions execution.
+Calculates Directed Acyclic Graph (DAG) for RPM dependencies, asks the registry which
+custom packages are already built, and outputs topological matrix execution levels for
+parallel GitHub Actions execution.
 """
 
 import sys
@@ -11,43 +11,24 @@ import os
 import glob
 import re
 import json
-import hashlib
+import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import tomllib
 from collections import defaultdict, deque
-
-try:
-    import redis
-except ImportError:
-    redis = None
 
 CONFIG_PATH = os.environ.get("CONFIG_PATH", "config/packages.json")
 if not os.path.exists(CONFIG_PATH) and os.path.exists("forge/config/packages.json"):
     CONFIG_PATH = "forge/config/packages.json"
+
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+# check_idempotency.sh reads specs/ and config/ relative to the forge directory.
+FORGE_DIR = os.environ.get("FORGE_DIR", os.path.dirname(SCRIPTS_DIR))
 
 SPECS_DIR = os.environ.get("SPECS_DIR", "specs")
 if not os.path.exists(SPECS_DIR) and os.path.exists("forge/specs"):
     SPECS_DIR = "forge/specs"
 
 
-
-def compute_dir_hash(dir_path):
-    """Calculates deterministic SHA256 for a directory."""
-    hasher = hashlib.sha256()
-    if not os.path.exists(dir_path):
-        return hasher.hexdigest()[:16]
-        
-    for root, dirs, files in sorted(os.walk(dir_path)):
-        for name in sorted(files):
-            if name.startswith(".") or name.endswith(".swp"):
-                continue
-            filepath = os.path.join(root, name)
-            try:
-                with open(filepath, "rb") as f:
-                    while chunk := f.read(65536):
-                        hasher.update(chunk)
-            except OSError:
-                pass
-    return hasher.hexdigest()[:16]
 
 def workspace_path(manifest, name):
     """The directory a `name = { workspace = true }` dependency of manifest points at, when
@@ -106,19 +87,105 @@ def path_dependencies(spec_dir):
     return sorted(found)
 
 
-def package_hash(spec_dir):
-    """The hash of a custom package: its spec directory and, when its crates have path
-    dependencies outside it, each of those directories, named relative to spec_dir. A
-    package without any keeps the plain directory hash."""
-    dependencies = path_dependencies(spec_dir)
-    if not dependencies:
-        return compute_dir_hash(spec_dir)
-    hasher = hashlib.sha256(compute_dir_hash(spec_dir).encode())
-    spec_root = os.path.realpath(spec_dir)
-    for dependency in dependencies:
-        hasher.update(os.path.relpath(dependency, spec_root).encode())
-        hasher.update(compute_dir_hash(dependency).encode())
-    return hasher.hexdigest()[:16]
+# Repo files every package build runs, whatever the package: the stages of build_spec.sh and
+# the check an in-place Rust build calls, plus the builder's identity (the Nix flake carries
+# rustc and rpm; forge/builder/ is what Spec Build Check also treats as a builder input).
+# Paths are relative to the forge directory, the working directory of the jobs.
+BUILD_INPUTS = (
+    "scripts/build_spec.sh",
+    "scripts/run_spec_build.sh",
+    "scripts/fetch_sources.sh",
+    "scripts/check_shim_link_order.py",
+    "builder",
+    "../flake.nix",
+    "../flake.lock",
+)
+# What `cargo build` of an in-place spec reads from the workspace root.
+WORKSPACE_INPUTS = ("../Cargo.toml", "../Cargo.lock", "../.cargo/config.toml")
+REPO_ROOTS = ("system", "forge", "docs", "experimental", "supply-chain", "scripts")
+REPO_REFERENCE = re.compile(
+    r"(?<![\w./%{}$-])(?:/forge/)?((?:" + "|".join(REPO_ROOTS) + r")/[^\s\"'`;)\\]*)"
+)
+DECLARATION = re.compile(r"^#\s*repo-input:\s*(\S+)\s*$")
+
+
+def spec_lines(spec_dir):
+    """The lines of the spec files under spec_dir, comments included."""
+    for path in sorted(glob.glob(os.path.join(spec_dir, "*.spec"))):
+        with open(path) as f:
+            yield from f.read().splitlines()
+
+
+def declared_inputs(spec_dir):
+    """The repo paths a spec declares as inputs with `# repo-input: <path>` lines, relative
+    to the repository root."""
+    return sorted(
+        m.group(1).rstrip("/")
+        for m in map(DECLARATION.match, spec_lines(spec_dir))
+        if m
+    )
+
+
+def builds_in_place(spec_dir):
+    """Whether the spec builds the checkout (no Source), as build_spec.sh's in_place does."""
+    return not any(re.match(r"Source\d*:", line) for line in spec_lines(spec_dir))
+
+
+def uses_cargo(spec_dir):
+    return any(re.match(r"\s*cargo\s", line) for line in spec_lines(spec_dir))
+
+
+def repo_relative(path):
+    """path, relative to the forge working directory, as a path relative to the repo root."""
+    return os.path.relpath(os.path.realpath(path), os.path.realpath(".."))
+
+
+def package_inputs(pkg):
+    """Every repo path whose content decides what the build of pkg produces, relative to
+    the forge directory: its spec directory, the path dependencies of its crates, the repo
+    paths the spec declares, the workspace manifest and lock of an in-place cargo build,
+    and the build scripts and builder identity every build shares."""
+    spec_dir = spec_dir_for(pkg)
+    inputs = {spec_dir, *path_dependencies(spec_dir), *filter(os.path.exists, BUILD_INPUTS)}
+    for declared in declared_inputs(spec_dir):
+        target = os.path.join("..", declared)
+        if not os.path.exists(target):
+            sys.exit(f"dag_orchestrator: {spec_dir} declares repo-input {declared}, which does not exist")
+        inputs.add(target)
+    if builds_in_place(spec_dir) and uses_cargo(spec_dir):
+        inputs.update(path for path in WORKSPACE_INPUTS if os.path.exists(path))
+    return sorted(os.path.relpath(p) for p in inputs)
+
+
+def undeclared_repo_references(pkg):
+    """Repo paths the spec text names that none of package_inputs covers. A reference is a
+    repository-rooted path (system/..., forge/..., or /forge/system/... as the old specs
+    spell it) that exists in the tree; it is covered when it lies inside an input or inside
+    the spec's own directory (or is a parent of it, as `forge/specs/%{name}` truncates to). The
+    %description prose is skipped. Generated paths that do not exist are not references.
+    Limits: only literal paths are seen, not ones a script or a shell variable builds, and
+    a declared directory vouches for everything under it."""
+    spec_dir = spec_dir_for(pkg)
+    covered = [repo_relative(p) for p in package_inputs(pkg)]
+    own = repo_relative(spec_dir)
+    missing = set()
+    prose = False
+    for line in spec_lines(spec_dir):
+        if re.match(r"%[a-z]", line):
+            prose = line.startswith("%description")
+        if prose or line.lstrip().startswith("#"):
+            continue
+        for match in REPO_REFERENCE.finditer(line):
+            ref = match.group(1)
+            ref = re.split(r"[*%$]", ref)[0].rstrip("/")
+            if not ref or not os.path.exists(os.path.join("..", ref)):
+                continue
+            if ref == own or ref.startswith(own + "/") or own.startswith(ref + "/") or any(
+                ref == c or ref.startswith(c + "/") for c in covered
+            ):
+                continue
+            missing.add(ref)
+    return sorted(missing)
 
 
 def parse_spec_dependencies(spec_path):
@@ -147,13 +214,6 @@ def parse_spec_dependencies(spec_path):
                         
     return build_requires, requires
 
-def load_package_manifest():
-    """Loads packages.json single source of truth."""
-    if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH, "r") as f:
-            return json.load(f)
-    return {}
-
 # Packages that dedicated workflows build, outside the DAG.
 EXTERNAL_PACKAGES = {"kernel", "kernel-forge"}
 
@@ -166,12 +226,58 @@ def spec_dir_for(pkg):
     return spec_dir
 
 
+def load_package_manifest():
+    """Loads packages.json single source of truth.
+
+    Fails when a custom package, other than an external one, has no spec directory: such an
+    entry is built by nothing, and would otherwise surface only as a late build failure.
+    """
+    if not os.path.exists(CONFIG_PATH):
+        return {}
+    with open(CONFIG_PATH, "r") as f:
+        manifest = json.load(f)
+    listed = {
+        pkg
+        for key, pkgs in manifest.items()
+        if key.startswith("custom_")
+        for pkg in pkgs
+    }
+    missing = sorted(
+        pkg for pkg in listed - EXTERNAL_PACKAGES if not os.path.isdir(spec_dir_for(pkg))
+    )
+    if missing:
+        sys.exit(
+            f"dag_orchestrator: {CONFIG_PATH} lists custom packages with no spec directory "
+            f"under {SPECS_DIR}/: {', '.join(missing)}. Remove them from the custom_* lists "
+            f"or restore their specs."
+        )
+    return manifest
+
+
 def custom_spec_dirs(manifest):
     """The spec directories of the custom packages the DAG builds."""
     return sorted(
         spec_dir_for(pkg)
         for pkg in set(manifest.get("custom_packages", [])) - EXTERNAL_PACKAGES
     )
+
+
+def tier_inversions(manifest):
+    """Runtime requirements on a package of a later tier. system/Containerfile installs each
+    tier in a dnf transaction of its own, in order, so such a requirement cannot be resolved
+    when the earlier tier installs, and the image build fails."""
+    tier_of = {pkg: n for n in range(4) for pkg in manifest.get(f"custom_tier{n}", [])}
+    problems = []
+    for pkg, tier in sorted(tier_of.items()):
+        spec_files = sorted(glob.glob(os.path.join(spec_dir_for(pkg), "*.spec")))
+        if pkg in EXTERNAL_PACKAGES or not spec_files:
+            continue
+        _, requires = parse_spec_dependencies(spec_files[0])
+        for dep in sorted(requires):
+            target = tier_of.get(dep.replace("athanor-", ""), -1)
+            if target > tier:
+                problems.append(f"{pkg} (custom_tier{tier}) requires {dep}, which ships in custom_tier{target}")
+    return problems
 
 
 def build_dag(manifest):
@@ -199,7 +305,6 @@ def build_dag(manifest):
     graph = defaultdict(set)       # node -> set of nodes depending on node (outgoing edges)
     in_degree = defaultdict(int)   # node -> number of prerequisites
     prereqs = defaultdict(set)     # node -> set of nodes node depends on
-    node_hashes = {}
     node_types = {}
     
     for node in all_nodes:
@@ -237,9 +342,6 @@ def build_dag(manifest):
         spec_dir = spec_dir_for(pkg)
         spec_files = glob.glob(os.path.join(spec_dir, "*.spec"))
         
-        hash_val = package_hash(spec_dir)
-        node_hashes[pkg] = hash_val
-        
         if spec_files:
             build_reqs, reqs = parse_spec_dependencies(spec_files[0])
             for dep in build_reqs | reqs:
@@ -248,97 +350,84 @@ def build_dag(manifest):
                     graph[clean_dep].add(pkg)
                     prereqs[pkg].add(clean_dep)
 
-    for pkg in all_upstream:
-        hash_val = hashlib.sha256(f"upstream-{pkg}".encode()).hexdigest()[:16]
-        node_hashes[pkg] = hash_val
-        
-    for pkg in flatpaks:
-        fp_dir = os.path.join("flatpaks", pkg)
-        hash_val = compute_dir_hash(fp_dir)
-        node_hashes[pkg] = hash_val
-
     for node in all_nodes:
         in_degree[node] = len(prereqs[node])
         
-    return all_nodes, graph, prereqs, in_degree, node_hashes, node_types
+    return all_nodes, graph, prereqs, in_degree, node_types
 
-def evaluate_dirty_nodes(all_nodes, graph, prereqs, node_hashes):
+def content_hash(pkg):
+    """The content hash check_idempotency.sh gives a package: the tag its image carries."""
+    result = subprocess.run(
+        ["bash", os.path.join(SCRIPTS_DIR, "check_idempotency.sh"), "--package", pkg, "--hash-only"],
+        cwd=FORGE_DIR, capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"content hash of {pkg} failed (exit {result.returncode}):\n{result.stderr.strip()}")
+    return result.stdout.strip().removeprefix("CONTENT_HASH=")
+
+
+def image_exists(ref):
+    """Whether the registry has ref. registry_probe.sh answers present or absent and fails
+    on anything else; retry.sh repeats those failures, and one that outlasts the retries
+    raises with the probe's own message, so a registry that cannot be asked stops the run
+    instead of reading as clean."""
+    result = subprocess.run(
+        ["bash", os.path.join(SCRIPTS_DIR, "retry.sh"), "bash",
+         os.path.join(SCRIPTS_DIR, "registry_probe.sh"), ref],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"registry lookup of {ref} failed (exit {result.returncode}):\n{result.stderr.strip()}")
+    return result.stdout.strip() == "present"
+
+
+def custom_hashes(all_nodes, node_types, hash_of=content_hash):
+    """{node: content hash} of every custom package the DAG builds."""
+    return {n: hash_of(n) for n in sorted(all_nodes) if node_types.get(n) == "custom"}
+
+
+def image_ref(node, hash_):
+    """<registry>/<owner>/athanor-forge-<node>:hash-<hash>, the image a build of that
+    content publishes."""
+    owner = os.environ.get("GITHUB_REPOSITORY_OWNER")
+    if not owner:
+        sys.exit("dag_orchestrator: GITHUB_REPOSITORY_OWNER is not set")
+    registry = os.environ.get("REGISTRY_HOST", "ghcr.io")
+    return f"{registry}/{owner}/athanor-forge-{node}:hash-{hash_}"
+
+
+# Registry lookups in flight at once. Each is one skopeo inspect under retry.sh, which may
+# hold one for ~6 minutes (see the brain's timeout-minutes), so sequential lookups of the
+# 35 custom packages could not fit a job.
+PROBE_WORKERS = 8
+
+
+def evaluate_dirty_nodes(hashes, exists=image_exists):
     """
-    Reads local file cache for previous hashes.
-    Marks node DIRTY if content hash changed OR if any upstream dependency is DIRTY.
+    A custom package is dirty when the registry has no image for its hash. Builds run with
+    rpmbuild --nodeps and never consume another package's output, so a dirty package does
+    not dirty its dependents. Upstream packages are never built here and flatpaks publish
+    nothing: neither is ever dirty.
     """
-    dirty_nodes = set()
-    transitive_hashes = {}
-    
-    in_deg = {n: len(prereqs[n]) for n in all_nodes}
-    queue = deque([n for n in all_nodes if in_deg[n] == 0])
-    topo_order = []
-    
-    while queue:
-        curr = queue.popleft()
-        topo_order.append(curr)
-        for neighbor in graph[curr]:
-            in_deg[neighbor] -= 1
-            if in_deg[neighbor] == 0:
-                queue.append(neighbor)
+    pool = ThreadPoolExecutor(max_workers=PROBE_WORKERS)
+    futures = {pool.submit(exists, image_ref(node, hash_)): node for node, hash_ in hashes.items()}
+    try:
+        # In completion order: a failure is raised as soon as it happens, not when its turn
+        # comes behind slower lookups.
+        return {futures[f] for f in as_completed(futures) if not f.result()}
+    finally:
+        # Whatever ended the loop, lookups not yet started are dropped.
+        pool.shutdown(wait=False, cancel_futures=True)
 
-    os.makedirs(".cache", exist_ok=True)
-    
-    redis_client = None
-    if redis is not None:
-        redis_url = os.environ.get("ATHANOR_REDIS_URL")
-        if redis_url:
-            try:
-                redis_client = redis.from_url(redis_url, socket_timeout=2, socket_connect_timeout=2)
-                redis_client.ping()
-            except Exception as e:
-                print(f"⚠️ Redis connection failed: {e}. Falling back to local cache.")
-                redis_client = None
 
-    for node in topo_order:
-        hasher = hashlib.sha256()
-        hasher.update(node_hashes.get(node, "").encode())
-        for parent in sorted(prereqs[node]):
-            hasher.update(transitive_hashes.get(parent, "").encode())
-        trans_hash = hasher.hexdigest()[:16]
-        transitive_hashes[node] = trans_hash
-        
-        cached_val = None
-        redis_key = f"athanor:build:hash:{node}"
-        
-        if redis_client:
-            try:
-                val = redis_client.get(redis_key)
-                if val:
-                    cached_val = val.decode("utf-8")
-            except Exception:
-                pass
-
-        if cached_val is None and os.path.exists(f".cache/{node}.hash"):
-            try:
-                with open(f".cache/{node}.hash", "r") as f:
-                    cached_val = f.read().strip()
-            except OSError:
-                pass
-                
-        is_parent_dirty = any(parent in dirty_nodes for parent in prereqs[node])
-        
-        if cached_val != trans_hash or is_parent_dirty:
-            dirty_nodes.add(node)
-            
-            if redis_client:
-                try:
-                    redis_client.set(redis_key, trans_hash)
-                except Exception:
-                    pass
-            # Write new hash to disk for future runs
-            try:
-                with open(f".cache/{node}.hash", "w") as f:
-                    f.write(trans_hash)
-            except OSError:
-                pass
-
-    return dirty_nodes, transitive_hashes
+def write_hashes(hashes):
+    """Writes {node: hash} to $DAG_STATE_DIR/hashes.json (default dag-state/): the file the
+    system image build reads to pull each package image by hash, never by :latest."""
+    state_dir = os.environ.get("DAG_STATE_DIR", "dag-state")
+    os.makedirs(state_dir, exist_ok=True)
+    with open(os.path.join(state_dir, "hashes.json"), "w") as f:
+        json.dump(hashes, f, indent=2, sort_keys=True)
+        f.write("\n")
 
 def partition_dag_levels(dirty_nodes, graph, prereqs, node_types):
     """
@@ -386,32 +475,22 @@ def partition_dag_levels(dirty_nodes, graph, prereqs, node_types):
     return level_0, level_1, level_2, flatpaks
 
 def main():
-    print("🧠 Forge DAG Architect initializing... (Local File Cache Enabled)")
+    print("🧠 Forge DAG Architect initializing... (registry hash tags)")
     
     manifest = load_package_manifest()
-    all_nodes, graph, prereqs, in_degree, node_hashes, node_types = build_dag(manifest)
+    inversions = tier_inversions(manifest)
+    if inversions:
+        sys.exit("dag_orchestrator: a package requires one of a later tier; move one of them in "
+                 "forge/config/packages.json:\n  " + "\n  ".join(inversions))
+    all_nodes, graph, prereqs, in_degree, node_types = build_dag(manifest)
     
     print(f"📊 DAG Topology built: {len(all_nodes)} nodes analyzed.")
     
-    dirty_nodes, transitive_hashes = evaluate_dirty_nodes(
-        all_nodes, graph, prereqs, node_hashes
-    )
+    hashes = custom_hashes(all_nodes, node_types)
+    write_hashes(hashes)
+    dirty_nodes = evaluate_dirty_nodes(hashes)
     
     level_0, level_1, level_2, flatpaks = partition_dag_levels(dirty_nodes, graph, prereqs, node_types)
-    
-    dag_plan = {
-        "dirty_count": len(dirty_nodes),
-        "level_0": level_0,
-        "level_1": level_1,
-        "level_2": level_2,
-        "flatpaks": flatpaks
-    }
-    
-    try:
-        with open(".cache/dag_plan.json", "w") as f:
-            json.dump(dag_plan, f)
-    except OSError:
-        pass
     
     has_changes = "true" if len(dirty_nodes) > 0 else "false"
     
@@ -464,7 +543,16 @@ def main():
             f.write(f"has_changes={has_changes}\n")
 
 if __name__ == "__main__":
-    if sys.argv[1:] == ["--list-spec-dirs"]:
+    if sys.argv[1:2] == ["--inputs"] and len(sys.argv) == 3:
+        # One path per line, relative to the working directory so that the hash
+        # check_idempotency.sh builds from them does not depend on where the checkout is.
+        print("\n".join(package_inputs(sys.argv[2])))
+    elif sys.argv[1:] == ["--write-hashes"]:
+        # The hash map alone, without asking the registry: what a local tier assembly
+        # (just fetch-repo-rpms) needs to pull each package image by hash.
+        all_nodes, _, _, _, node_types = build_dag(load_package_manifest())
+        write_hashes(custom_hashes(all_nodes, node_types))
+    elif sys.argv[1:] == ["--list-spec-dirs"]:
         spec_dirs = custom_spec_dirs(load_package_manifest())
         if not spec_dirs:
             sys.exit(f"dag_orchestrator: no custom_packages in {CONFIG_PATH}")

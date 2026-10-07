@@ -1,6 +1,6 @@
 [Unit]
 Description=Athanor update notifications
-Documentation=https://github.com/hr-mes/athanor/blob/iso-v0/docs/architecture/doc_update_trust.md
+Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_update_trust.md
 PartOf=graphical-session.target
 After=graphical-session.target
 

@@ -4,7 +4,7 @@ Release:        2%{?dist}
 Summary:        Athanor OS Quality Assurance Scripts
 
 License:        GPL-3.0-or-later
-URL:            https://github.com/hr-mes/athanor
+URL:            https://github.com/ars-regia/athanor
 
 BuildArch:      noarch
 
