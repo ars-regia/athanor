@@ -25,8 +25,8 @@ The maintainer decided on 2026-10-07 to keep the crate in the tree instead of de
 
 - `system/confidential_computing/athanor-attestation` leaves the workspace members and joins
   `exclude`, so it is neither built nor shipped;
-- its source stays where it is, a protected path, as the starting point of the Keylime
-  rewrite;
+- its source stays where it is, a protected path; the Keylime rewrite starts from an
+  approved specification, as ADR-0073 item 6 requires;
 - #201 and #206 stay open until that rewrite replaces it.
 
 ## Consequences
