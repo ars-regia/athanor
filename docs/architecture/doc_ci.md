@@ -93,7 +93,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 - **Outputs:** artifact `kernel-artifacts`; images of CI3, CI4, CI5, CI6.
 - **Secrets, variables:** `REGISTRY_HOST`, `KERNEL_REGISTRY`; no secret is passed to CI6 or CI5: their signing jobs read their keys from their own environments (D43).
 - **Environment:** none itself; CI6 uses `signing-kernel` and CI5 `signing-images` (ADR-0064).
-- **Runner:** hosted. **Concurrency:** `<workflow>-<ref>`, no cancel: the newest run waits (`:61-63`, O6).
+- **Runner:** hosted. **Concurrency:** `<workflow>-<ref>`, no cancel: the newest run waits (O6). The group stays at run level because it publishes the system images in commit order: a group on the image job alone is taken in arrival order, and clients order images by build time (doc_update_trust.md, UT9). It also holds the signing approvals of the run (`sign-system-images`, and `nvidia-kmod` when the modules are missing), so the next push waits for them; PL49 lifts this once the image publish refuses an older revision and signing leaves the run.
 - **Scripts:** `forge/scripts/dynamic-matrix.sh`, `system/kernel-artifacts.sh`.
 - **Health:** 37444165929 pending; 37441359373, 37436322329, 37389162383, 37384753812 cancelled. The cancelled runs were superseded in the concurrency group while 37384733899 waited for the `signing` approvals (its `dag-system-image` started 9 h after `build-repo`; its `sign-system-images` was still waiting at 09:44 UTC). Last complete runs: 37362183855 failure (a lint job cancelled at its limit), 37315915191 and 37299854397 success with all system-image jobs green.
 
