@@ -90,7 +90,7 @@ Since then the files have moved ahead of GitHub (2026-10-07, ADR-0064): the two 
 | Default branch `iso-v0`; all three merge methods on; auto-merge on; head branches deleted on merge | `repository.json` |
 | Description is still `ermete-os` | `repository.json` |
 | Dependabot alerts and Dependabot security updates are off; secret scanning and push protection are on; private vulnerability reporting is on | `repository.json` |
-| Only `iso-v0` is protected: required check `Kernel gate` (not strict), no review, `enforce_admins` off, force push and deletion off | `branch-protection.json` (now also `main`, section 7) |
+| Only `iso-v0` is protected: required checks `Kernel gate` and `Spec gate` (not strict), no review, `enforce_admins` off, force push and deletion off | `branch-protection.json` (now also `main`, section 7) |
 | No repository ruleset | `rulesets.json` |
 | Environment `signing`: reviewer `hr-mes`, branches `iso-v0` and `main`, admin bypass on, four secrets | `environments.json` until 2026-10-07 (now section 7) |
 | Environment `github-pages`: branches `gh-pages` and `main`; no workflow deploys to it since the DNF channel was removed (ADR-0076, decision 2) | `environments.json` |
