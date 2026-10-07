@@ -52,7 +52,9 @@ pub async fn apply<T: Tools, P: Power>(ctx: &Context<'_, T>, power: &P) -> Resul
     let _lock = ctx.store.try_lock().map_err(|_| Refusal::Busy)?;
     let status = ctx.tools.status().map_err(|_| Refusal::Failed)?;
     let policy = crate::policy::in_force(&ctx.policy);
-    let ready = status.staged.as_ref().is_some_and(|staged| {
+    // bootc rollback discards the staged deployment; one staged after it would replace the
+    // queued return (doc_recovery.md, R5), so a queued rollback has nothing to apply.
+    let ready = !status.rollback_queued && status.staged.as_ref().is_some_and(|staged| {
         staged.download_only
             && status.booted.enforcing
             && policy.scopes.contains_key(sigobj::repository_of(&status.booted.image))
@@ -161,7 +163,9 @@ mod tests {
         unlocked.status.borrow_mut().staged.as_mut().expect("staged").download_only = false;
         let held = downloaded();
         machine.store.set_held(&digest(2)).expect("held");
-        for tools in [Fake::booted(deployed(&digest(1), 1000)).offering(&digest(2), 2000), unlocked, held] {
+        let queued = downloaded();
+        queued.status.borrow_mut().rollback_queued = true;
+        for tools in [Fake::booted(deployed(&digest(1), 1000)).offering(&digest(2), 2000), unlocked, held, queued] {
             let power = FakePower::new(false, Ok(()));
             assert_eq!(apply(&machine.ctx(&tools, 5000), &power).await, Err(Refusal::NothingDownloaded));
             assert!(tools.calls.borrow().is_empty() && !power.rebooted.get());

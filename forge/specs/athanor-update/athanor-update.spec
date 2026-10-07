@@ -78,7 +78,9 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
 - A queued rollback (`rollbackQueued` in `bootc status`: greenboot after a failed health
   check, or `bootc rollback`) holds the booted digest at every check and downloads nothing.
   `GoBack()` on such a boot holds and reboots without a second `bootc rollback`, which
-  would have swapped back to the deployment being left.
+  would have swapped back to the deployment being left. `Apply()` refuses and the migration
+  waits (`rollback-queued`), since bootc discards the staged deployment on a rollback and a
+  new one would replace the return.
 
 * Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
 - `athanor-update migrate`: a channel without a manifest on the registry (`:stable` is

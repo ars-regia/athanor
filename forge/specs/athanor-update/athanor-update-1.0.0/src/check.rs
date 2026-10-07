@@ -366,16 +366,16 @@ pub(crate) mod tests {
 
     #[test]
     fn a_queued_rollback_holds_the_booted_digest_and_downloads_nothing() {
-        let machine = Machine::new("rollback-queued", &["real/k1.pub"]);
-        let tools = Fake::booted(deployed(&digest(2), 2000)).offering(&digest(3), 3000);
-        tools.status.borrow_mut().rollback = Some(deployed(&digest(1), 1000));
-        tools.status.borrow_mut().rollback_queued = true;
         for offline in [true, false] {
+            let machine = Machine::new(&format!("rollback-queued-{offline}"), &["real/k1.pub"]);
+            let tools = Fake::booted(deployed(&digest(2), 2000)).offering(&digest(3), 3000);
+            tools.status.borrow_mut().rollback = Some(deployed(&digest(1), 1000));
+            tools.status.borrow_mut().rollback_queued = true;
             let state = run(&machine.ctx(&tools, 5000), offline).expect("state");
             assert_eq!(machine.store.held(), Some(digest(2)));
             assert_eq!(state.update, UpdateState::None);
+            assert!(!tools.called("candidate") && !tools.called("download"));
         }
-        assert!(!tools.called("candidate") && !tools.called("download"));
     }
 
     #[test]
