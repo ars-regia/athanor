@@ -71,13 +71,13 @@ The tier repositories are published as OCI images only; there is no DNF channel 
 
 ### 1.4 What a pull request runs
 
-Branch protection on `iso-v0` requires one check: `Kernel gate` (`gh api repos/ars-regia/athanor/branches/iso-v0/protection`, 2026-10-06). Everything else reports but does not block a merge.
+Branch protection on `iso-v0` requires two checks, `Kernel gate` and `Spec gate` (`.github/settings/branch-protection.json`, applied with `scripts/github-settings/ghsettings.py`). Both workflows run on every pull request, so both checks always report. The bots' merges wait for both (`forge/scripts/bot_merge.py`, `REQUIRED_CHECKS`). Everything else reports but does not block a merge.
 
 | Check | Workflow | Runs on a PR when | Required | Gates |
 |---|---|---|---|---|
 | `Kernel gate` | CI8 | every PR (no path filter) | yes | lint (CI2), kernel prep/build, boot matrix, NVIDIA module build |
 | System Image Check | CI13 | the image inputs change | no | the three images build as in the pipeline, without a key; package delta; merges `bump/system-*` PRs |
-| Spec Build Check | CI14 | a forge spec changes | no | changed specs build as the DAG builds them; merges the spec bot's PR |
+| `Spec gate` | CI14 | every PR (no path filter) | yes | changed specs build as the DAG builds them; a change that selects none passes; merges the spec bot's PR |
 | Shell surfaces | CI15 | a shell crate or `forge/test/shell/**` changes | no | rig tests of the greeter, layout, compositor client, shelld, bar, dock, launcher; also CI2 |
 | Fuzzing, Rust Security & FFI Audit, Nix Vanguard | CI23, CI22, CI24 | only PRs based on `main` | no | see section 3 |
 
@@ -204,7 +204,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 ### CI14 Spec Build Check
 
 - **File:** `spec-build-check.yml`. **Purpose:** PR build of changed forge specs in the builder image; merges the spec bot's PR when every bump keeps its major version.
-- **Triggers:** `pull_request` on `forge/specs/**` (not `azoth`), `forge/config/rpmmacros`, the build scripts. **Output:** a merge.
+- **Triggers:** every `pull_request`; `select_check_specs.py` picks the changed specs (not `azoth`), or all of them when `forge/config/rpmmacros`, the builder or the build scripts change. **Required check:** `Spec gate`. **Output:** a merge.
 - **Secrets, variables:** `KERNEL_BUMP_TOKEN`, `REGISTRY_HOST`. **Environment:** none. **Runner:** hosted. **Concurrency:** `spec-build-check-<PR>`, cancels in progress.
 - **Scripts:** `forge/scripts/build_changed_specs.sh`, `build_spec.sh`, `run_spec_build.sh`, `fetch_sources.sh`, `retry.sh`, `bot_merge.py`.
 - **Health (PRs):** 37444217670 success; 37442223223 in progress; 37439356668 failure; 37438370850, 37437287063 success.

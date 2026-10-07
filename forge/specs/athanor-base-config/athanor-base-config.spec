@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-base-config
 Version:        43.0.0
-Release:        13%{?dist}
+Release:        14%{?dist}
 Summary:        Athanor OS Base Configuration (Systemd, Branding, GPG)
 
 License:        GPL-3.0-or-later
@@ -76,6 +76,10 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 /usr/share/polkit-1/rules.d/*
 
 %changelog
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 43.0.0-14
+- Add SUPPORT_END to os-release: the end of the five-year support period of the product
+  line (ADR-0081)
+
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 43.0.0-13
 - Drop /etc/grub.d/01_athanor_grub_auth: it set the GRUB superuser "admin" with the placeholder
   hash CHANGE_THIS_PBKDF2_HASH_IN_PRODUCTION, so the shipped stanza was a placeholder in
