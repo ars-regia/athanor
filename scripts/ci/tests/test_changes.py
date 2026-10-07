@@ -12,13 +12,7 @@ spec = importlib.util.spec_from_file_location("changes", SCRIPT)
 changes = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(changes)
 
-NONE = {
-    "kernel": False,
-    "specs": False,
-    "image": False,
-    "shell": False,
-    "docs_only": False,
-}
+NONE = {"kernel": False, "specs": False, "docs_only": False}
 ALL = {area: True for area in NONE}
 
 
@@ -59,14 +53,10 @@ class ClassifyTest(unittest.TestCase):
                 )
         self.assertFalse(changes.classify(["forge/specs/azoth/azoth.spec"])["specs"])
 
-    def test_a_path_selects_every_area_it_feeds(self):
+    def test_a_change_selects_every_area_it_feeds(self):
         self.assertEqual(
-            changes.classify(["system/kernel-artifacts.sh"]),
-            {**NONE, "kernel": True, "image": True},
-        )
-        self.assertEqual(
-            changes.classify(["forge/specs/athanor-bar/athanor-bar.spec"]),
-            {**NONE, "specs": True, "shell": True},
+            changes.classify(["system/kernel-artifacts.sh", "forge/specs/athanor-bar/athanor-bar.spec"]),
+            {**NONE, "kernel": True, "specs": True},
         )
 
     def test_a_prefix_is_a_directory_not_a_name_prefix(self):
@@ -126,6 +116,18 @@ class MainTest(unittest.TestCase):
         self.assertTrue(written["kernel"])
         self.assertFalse(written["docs_only"])
         self.assertRegex(written["base"], r"^[0-9a-f]{40}$")
+
+    def test_a_path_git_would_quote_still_selects_its_area(self):
+        # Without -z, git prints such a path quoted and escaped ("forge/specs/azoth/p\303\240...").
+        for name in ("p\u00e0tch.patch", "tab\there.patch", 'quote".patch'):
+            with self.subTest(name=name):
+                self.git("reset", "-q", "--hard", "HEAD")
+                (self.root / "forge/specs/azoth" / name).write_text("patch\n")
+                self.git("add", "-A")
+                self.git("commit", "-q", "-m", "add")
+                out = self.root / "out" / "changes.json"
+                changes.main("HEAD^1", str(out), cwd=self.root)
+                self.assertTrue(json.loads(out.read_text())["kernel"])
 
 
 if __name__ == "__main__":

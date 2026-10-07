@@ -300,8 +300,8 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 ### CI26 Pull Request
 
 - **File:** `pr.yml`. **Purpose:** the pull request gate (doc_pipeline.md section 3, PL3; ADR-0075): change detection, `just check`, the build checks the change selects, and `gate`, the one aggregate check.
-- **Triggers:** every `pull_request` and `merge_group`, with no path filter. **Outputs:** artifact `changes` (`changes.json`: `kernel`, `specs`, `image`, `shell`, `docs_only`); check `gate`.
-- **Jobs:** `changes` (`scripts/ci/changes.py`), `check` (`scripts/ci/install-tools.sh`, then `just check <base>`), `kernel` (CI27, when the kernel is selected), `specs` (CI14, when the specs are selected), `gate` (`scripts/ci/gate.py`: needs every other job, runs always, red when a job failed or was cancelled or a selected area did not run). The image and shell areas are detected but still checked by CI13 and CI15 (doc_pipeline.md blocks PB11, PB12).
+- **Triggers:** every `pull_request` and `merge_group`, with no path filter. **Outputs:** artifact `changes` (`changes.json`: `kernel`, `specs`, `docs_only`, from `git diff -z`, so any path name matches); check `gate`.
+- **Jobs:** `changes` (`scripts/ci/changes.py`), `check` (`scripts/ci/install-tools.sh`, then `just check <base>`), `kernel` (CI27, when the kernel is selected), `specs` (CI14, when the specs are selected), `gate` (`scripts/ci/gate.py`: needs every other job, runs always, red when a job failed or was cancelled or a selected area did not run). The image and shell are still checked by CI13 and CI15; their areas join `changes.json` with their jobs (doc_pipeline.md blocks PB11, PB12). `Cargo.toml`, `Cargo.lock` and `deny.toml` belong to no area yet (follow-up).
 - **Secrets, variables:** none of its own; CI27 reads `KERNEL_REGISTRY`, CI14 `REGISTRY_HOST`. **Environment:** none. **Runner:** hosted; CI27's `build` self-hosted. **Concurrency:** `pr-<PR or ref>`, cancels in progress.
 - **Scripts:** `scripts/ci/changes.py`, `scripts/ci/gate.py`, `scripts/ci/install-tools.sh`, the `check` recipe of the `Justfile`.
 - **Health:** not run yet.

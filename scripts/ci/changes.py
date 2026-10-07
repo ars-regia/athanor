@@ -6,12 +6,12 @@ Usage: changes.py BASE OUT
 Lists the files that differ between BASE and HEAD (both sides of a rename) and writes OUT,
 the changes.json of doc_pipeline.md section 3.3:
 
-  {"base": "<sha>", "kernel": bool, "specs": bool, "image": bool, "shell": bool,
-   "docs_only": bool}
+  {"base": "<sha>", "kernel": bool, "specs": bool, "docs_only": bool}
 
 pr.yml runs a build job only for an area set to true. The areas repeat the path filters the
-build workflows had before pr.yml (kernel-build.yml, spec-build-check.yml,
-system-image-check.yml, shell-surfaces.yml). A change to the selection itself (pr.yml or
+build workflows had before pr.yml (kernel-build.yml, spec-build-check.yml); an area exists
+only with the pr.yml job that consumes it, so the image and shell checks join with their jobs
+(doc_pipeline.md PB11, PB12). A change to the selection itself (pr.yml or
 scripts/ci) selects every area, so a change to the gate is tested by every job it gates.
 docs_only is true when every changed file is documentation and no area is selected.
 
@@ -46,42 +46,6 @@ AREAS = {
         "forge/scripts/select_check_specs.py",
         "forge/scripts/builder_image.sh",
         ".github/workflows/spec-build-check.yml",
-    ),
-    "image": (
-        "system/Containerfile",
-        "system/nvidia/",
-        "system/scripts/",
-        "system/keys/",
-        "system/build-image.sh",
-        "system/kernel-artifacts.sh",
-        "system/package-delta.sh",
-        "forge/config/packages.json",
-        "forge/specs/athanor-base-config/",
-        "forge/specs/azoth/pins.env",
-        "forge/specs/azoth/nvr.sh",
-        "forge/scripts/retry.sh",
-        ".containerignore",
-        ".github/workflows/system-image-check.yml",
-    ),
-    "shell": (
-        "system/athanor-style/",
-        "forge/specs/athanor-greeter-ui/",
-        "system/athanor-layout/",
-        "forge/specs/athanor-layout-chooser/",
-        "system/athanor-compositor-client/",
-        "system/athanor-i18n/",
-        "forge/specs/athanor-shelld/",
-        "forge/specs/athanor-bar/",
-        "forge/specs/athanor-dock/",
-        "system/athanor-search/",
-        "system/athanor-preview/",
-        "system/athanor-preview-render/",
-        "forge/specs/athanor-launcher/",
-        "system/athanor-apps/",
-        "system/athanor-unit/",
-        "system/athanor-trust-state/",
-        "forge/test/shell/",
-        ".github/workflows/shell-surfaces.yml",
     ),
 }
 # Inside an area's directories, what belongs to another workflow: the kernel spec is Kernel
@@ -119,15 +83,23 @@ def classify(changed):
 
 
 def git(cwd, *args):
+    # surrogateescape: a path that is not UTF-8 still round-trips instead of failing the job.
     return subprocess.run(
-        ["git", "-C", str(cwd), *args], check=True, stdout=subprocess.PIPE, text=True
+        ["git", "-C", str(cwd), *args],
+        check=True,
+        stdout=subprocess.PIPE,
+        encoding="utf-8",
+        errors="surrogateescape",
     ).stdout
 
 
 def main(base, out, cwd="."):
     # A two-dot tree diff: BASE is an ancestor of HEAD (the merge commit's first parent on
     # pull_request, the queue's base on merge_group), and only the two trees are needed.
-    changed = git(cwd, "diff", "--name-only", "--no-renames", base, "HEAD").splitlines()
+    # -z: without it git quotes and escapes a path with a non-ASCII byte, a tab or a quote,
+    # and the quoted form would match no area.
+    out_z = git(cwd, "diff", "--name-only", "--no-renames", "-z", base, "HEAD")
+    changed = [path for path in out_z.split("\0") if path]
     result = {"base": git(cwd, "rev-parse", "--verify", f"{base}^{{commit}}").strip()}
     result.update(classify(changed))
     path = pathlib.Path(out)
