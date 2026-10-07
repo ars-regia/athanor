@@ -20,10 +20,10 @@ Workflow references are `file:line` under `.github/workflows/` at `bd1f0e4a`.
 
 | Id | Name | Scope | Material | Used by (workflow, job) | Public half in the repository |
 | --- | --- | --- | --- | --- | --- |
-| SEC1 | `SECUREBOOT_SIGNING_KEY` | environment `signing-kernel` | X.509 private key, RSA 4096, PEM, unencrypted | `nvidia-kmod.yml` `sign` (:130, environment :139), the sign-kernel job of D43, through `forge/specs/azoth/signer/run.sh sign`: written to a 0600 file for the one command, mounted read-only into the signer image run by digest without network, `sign-kernel.sh vmlinuz` signs the kernel's vmlinuz (`azoth-boot`). No image build sees it; 1.0 has no UKI (A2-8) | `forge/specs/azoth/keys/secureboot/athanor-secureboot.pem` and `.der` (the form `mokutil --import` takes) |
-| SEC2 | `MODULE_SIGNING_KEY` | environment `signing-kernel` | X.509 private key, RSA 4096, PEM, unencrypted | `nvidia-kmod.yml` `sign` (:130, environment :139) through `forge/specs/azoth/signer/run.sh sign`, as SEC1; `sign-kernel.sh modules` signs the NVIDIA modules | `forge/specs/azoth/keys/modules/athanor-modules.pem`, compiled into Azoth (`kernel-local:42`, `CONFIG_SYSTEM_TRUSTED_KEYS`) |
-| SEC3 | `COSIGN_PRIVATE_KEY` | environment `signing-images` | cosign key pair, ECDSA P-256, private half encrypted with SEC4 | `call-system-image.yml` `sign-system-images` (:427, environment :433) through `system/sign-images.sh:26-41`; the key-based image signature of UT2 | `system/keys/athanor-image-1.pub`, rendered into the image policy (UT3) |
-| SEC4 | `COSIGN_PASSWORD` | environment `signing-images` | passphrase of SEC3 | as SEC3 (:453) | none |
+| SEC1 | `SECUREBOOT_SIGNING_KEY` | environment `signing-kernel` | X.509 private key, RSA 4096, PEM, unencrypted | `athanor-forge-orchestrator.yml` `nvidia-kmod-sign` (:183, environment :196), the sign-kernel job of D43, through `forge/specs/azoth/signer/run.sh sign`: written to a 0600 file for the one command, mounted read-only into the signer image run by digest without network, `sign-kernel.sh vmlinuz` signs the kernel's vmlinuz (`azoth-boot`). No image build sees it; 1.0 has no UKI (A2-8) | `forge/specs/azoth/keys/secureboot/athanor-secureboot.pem` and `.der` (the form `mokutil --import` takes) |
+| SEC2 | `MODULE_SIGNING_KEY` | environment `signing-kernel` | X.509 private key, RSA 4096, PEM, unencrypted | `athanor-forge-orchestrator.yml` `nvidia-kmod-sign`, as SEC1, through `forge/specs/azoth/signer/run.sh sign`, as SEC1; `sign-kernel.sh modules` signs the NVIDIA modules | `forge/specs/azoth/keys/modules/athanor-modules.pem`, compiled into Azoth (`kernel-local:42`, `CONFIG_SYSTEM_TRUSTED_KEYS`) |
+| SEC3 | `COSIGN_PRIVATE_KEY` | environment `signing-images` | cosign key pair, ECDSA P-256, private half encrypted with SEC4 | `athanor-forge-orchestrator.yml` `sign-system-images` (:295, environment :306) through `system/sign-images.sh:26-41`; the key-based image signature of UT2 | `system/keys/athanor-image-1.pub`, rendered into the image policy (UT3) |
+| SEC4 | `COSIGN_PASSWORD` | environment `signing-images` | passphrase of SEC3 | as SEC3 (:331) | none |
 | SEC7 | `KERNEL_BUMP_TOKEN` | repository | personal access token | `kernel-bump.yml` `pr` (:203, :207) and `system` (:263, :309); `cosmic-comp-bump.yml` `bump` (:33, :37); `nix-registry-bump.yml` `bump` (:46); as `MERGE_TOKEN` in `spec-build-check.yml` `merge` (:156) and `system-image-check.yml` `merge` (:152) for `forge/scripts/bot_merge.py`. A token, not `GITHUB_TOKEN`, because pull requests opened with `GITHUB_TOKEN` start no checks (`doc_kernel_build.md:447`) | none |
 | SEC8 | `SPECS_UPDATE_TOKEN` | repository | personal access token | `forge-util-update-specs.yml` `update-specs` (:32, :45, :62): pushes `chore/update-specs-zero-trust` and opens its pull request | none |
 | SEC9 | `FORGE_PAT` | repository | personal access token (classic) | `forge-ghcr-cleanup.yml` `cleanup-janitor` (:32, :39) through `forge/scripts/clean_ghcr.sh`, which deletes container package versions | none |
@@ -39,19 +39,19 @@ No repository variable is set (`gh variable list` is empty), so every default be
 
 | Id | Name | Default | Used by |
 | --- | --- | --- | --- |
-| VAR1 | `REGISTRY_HOST` | `ghcr.io` | orchestrator (:46), `call-build-builder.yml:12`, `call-dag-compile.yml:35-36`, `forge-ghcr-cleanup.yml:34,41`, `fuzzing.yml:36`, `promote-stable.yml:37,42`, `rust-security-audit.yml:22,139,193`, `spec-build-check.yml:93` |
-| VAR2 | `KERNEL_REGISTRY` | `ghcr.io/<owner>` (`system/kernel-artifacts.sh:56`) | orchestrator (:135, :186), `kernel-build.yml:54`, `kernel-bump.yml:60,258`, `nvidia-kmod.yml:46`, `system-image-check.yml:53` |
+| VAR1 | `REGISTRY_HOST` | `ghcr.io` | orchestrator (:93), `call-build-builder.yml:12`, `call-dag-compile.yml:35-36`, `forge-ghcr-cleanup.yml:34,41`, `fuzzing.yml:36`, `promote-stable.yml:37,42`, `rust-security-audit.yml:22,139,193`, `spec-build-check.yml:93` |
+| VAR2 | `KERNEL_REGISTRY` | `ghcr.io/<owner>` (`system/kernel-artifacts.sh:56`) | orchestrator (:146, :199, :261), `kernel-build.yml:54`, `kernel-bump.yml:60,258`, `nvidia-kmod.yml:45`, `call-nvidia-kmod-prepare.yml:37`, `system-image-check.yml:53` |
 | VAR3 | `BUILDER_STABLE_TAG` | `latest` | `forge-ghcr-cleanup.yml:25`, `fuzzing.yml:36`, `rust-security-audit.yml:22,139,193` |
 | VAR4 | `RELEASE_BRANCH` | `iso-v0` | PR #180 only: orchestrator, `call-system-image.yml`, `iso-acceptance.yml`, `promote-stable.yml` |
 | VAR5 | `PROMOTE_DWELL_HOURS` | `24` | PR #180 only: `promote-stable.yml` |
 
 | Id | Environment | Secrets | Protection (`.github/settings/environments.json`; GitHub still has the single `signing` environment until the bootstrap of section 4) | Referenced by |
 | --- | --- | --- | --- | --- |
-| ENV1 | `signing-kernel` | SEC1, SEC2 | required reviewer `hr-mes`, self-review allowed (`prevent_self_review` false, see `github-settings.md` section 7), no administrator bypass; deployment branches `iso-v0` and `main`, both protected (required check `Kernel gate`, no force push, no deletion) | `nvidia-kmod.yml:139` (`sign`, the sign-kernel job). `scripts/verify.py workflows` fails a signing secret outside a job of the environment that holds it in `environments.json`, a signing job that builds or uses an action other than checkout and artifact transfer, a step that hands a signing secret to anything but a sign script, and a signing environment with administrator bypass or a deployment branch that `branch-protection.json` does not protect (D43) |
+| ENV1 | `signing-kernel` | SEC1, SEC2 | required reviewer `hr-mes`, self-review allowed (`prevent_self_review` false, see `github-settings.md` section 7), no administrator bypass; deployment branches `iso-v0` and `main`, both protected (required check `Kernel gate`, no force push, no deletion) | `athanor-forge-orchestrator.yml:196` (`nvidia-kmod-sign`, the sign-kernel job; a manual cycle dispatches the Orchestrator). `scripts/verify.py workflows` fails a signing secret outside a job of the environment that holds it in `environments.json`, a signing job that builds or uses an action other than checkout and artifact transfer, a step that hands a signing secret to anything but a sign script, a signing job in a workflow with `workflow_call` among its triggers, whose keys would be empty unless the caller inherits every secret (actions/runner#4453), and a signing environment with administrator bypass or a deployment branch that `branch-protection.json` does not protect (D43) |
 | ENV2 | `stable-override` | none | **missing on GitHub** | PR #180 only (`promote-stable.yml`, checked by `system/require-review.sh`); `doc_update_trust.md` on that branch asks for required reviewers, the release branch only and no administrator bypass |
 | ENV3 | `delete` | none | none; created 2026-08-08 | nothing |
 | ENV4 | `github-pages` | none | deployment branches `gh-pages` and `main` | no workflow names it; it served the DNF channel, removed by ADR-0076 decision 2, and the maintainer deletes it with the `gh-pages` branch |
-| ENV5 | `signing-images` | SEC3, SEC4 | required reviewer `hr-mes`, self-review allowed (`prevent_self_review` false, see `github-settings.md` section 7), no administrator bypass; deployment branches `iso-v0` and `main`, both protected (required check `Kernel gate`, no force push, no deletion) | `call-system-image.yml:433` (`sign-system-images`); PR #185 adds `sign-repo` and SEC5, SEC6 |
+| ENV5 | `signing-images` | SEC3, SEC4 | required reviewer `hr-mes`, self-review allowed (`prevent_self_review` false, see `github-settings.md` section 7), no administrator bypass; deployment branches `iso-v0` and `main`, both protected (required check `Kernel gate`, no force push, no deletion) | `athanor-forge-orchestrator.yml``:306` (`sign-system-images`, in `signing` during the rotation of section 4.1); PR #185 adds `sign-repo` and SEC5, SEC6 |
 
 ### 1.3 Drift between code and GitHub
 
@@ -150,7 +150,7 @@ _(Proposal)_ `KERNEL_BUMP_TOKEN` now serves six workflows, not only the kernel; 
 
 Today: one maintainer holds every key, with an offline backup held by the key custodian;
 `signing-kernel` and `signing-images` each have one required reviewer, who may approve their own runs. Decision A2-27 keeps two approvals per release cycle (`sign-kernel` in `signing-kernel`, then
-`sign-system-images` in `signing-images`; ADR-0064). `sign-kernel` is the `sign` job of `nvidia-kmod.yml`, which runs only
+`sign-system-images` in `signing-images`; ADR-0064). `sign-kernel` is the `nvidia-kmod-sign` job of the Orchestrator (a manual cycle dispatches the Orchestrator), which runs only
 when a kernel or NVIDIA change leaves the signed modules or vmlinuz missing; any other cycle
 asks for `sign-system-images` alone. Everything below is a proposal.
 
@@ -203,10 +203,10 @@ because the Orchestrator, not a pull request, publishes the signed vmlinuz.
    signed that digest on `iso-v0` or `main`. A run started before this commit, the one the
    merge itself starts included, fails that way; start the Orchestrator again once the digest
    is on the branch.
-4. **The Orchestrator runs, NVIDIA kmod `sign` is approved, and `azoth-boot` is published.** The
-   Orchestrator finds the signed vmlinuz missing and calls NVIDIA kmod. Its `sign` job waits for
-   the `signing-kernel` approval; once approved, `publish` verifies the signed vmlinuz and
-   publishes `azoth-boot` beside the modules.
+4. **The Orchestrator runs, `nvidia-kmod-sign` is approved, and `azoth-boot` is published.** The
+   Orchestrator finds the signed vmlinuz missing and runs the NVIDIA kmod cycle. Its
+   `nvidia-kmod-sign` job waits for the `signing-kernel` approval; once approved, `publish` of
+   NVIDIA kmod verifies the signed vmlinuz and publishes `azoth-boot` beside the modules.
 5. **The system images build.** In the same Orchestrator run, the system stage copies the signed
    vmlinuz from `azoth-boot` by digest, and `sign-system-images` waits for the `signing-images`
    approval. From then on a cycle without a kernel or NVIDIA change asks only for that approval.

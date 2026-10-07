@@ -118,8 +118,8 @@ no job holds a key it does not use:
 
 | Environment | Secrets | Job |
 | --- | --- | --- |
-| `signing-kernel` | `SECUREBOOT_SIGNING_KEY`, `MODULE_SIGNING_KEY` | `sign` of `nvidia-kmod.yml`, only when a kernel or NVIDIA change leaves the signed vmlinuz or modules missing |
-| `signing-images` | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | `sign-system-images` of `call-system-image.yml` |
+| `signing-kernel` | `SECUREBOOT_SIGNING_KEY`, `MODULE_SIGNING_KEY` | `nvidia-kmod-sign` of `athanor-forge-orchestrator.yml`, only when a kernel or NVIDIA change leaves the signed vmlinuz or modules missing |
+| `signing-images` | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | `sign-system-images` of `athanor-forge-orchestrator.yml` |
 
 Both have the same protection in `environments.json`: required reviewer `hr-mes`; administrator
 bypass off (`can_admins_bypass: false`, set by hand: section 4); deployment branches `iso-v0` and
