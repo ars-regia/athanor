@@ -211,7 +211,8 @@ the findings of `scripts/ci/known-red.txt` until their expiry, so the ruleset ad
 exception of its own for known red checks. `branch-protection.json` requires `gate` next to
 `Kernel gate` and `Spec gate` on `iso-v0` (section 8); the ruleset requires `gate` alone on
 both branches. Classic branch protection and the ruleset both apply until the maintainer
-decides to retire the former; section 8 step 4 and step 5 drop the two legacy contexts.
+decides to retire the former; section 8 step 4 and step 5 drop the two legacy contexts, and
+they must be done before the merge queue is enabled (step 4 of the order below).
 
 The merge queue needs `merge_group` among the triggers of every required workflow (PB1's
 `pr.yml`). SHA pinning enforcement makes GitHub refuse every workflow that uses an action
@@ -239,8 +240,14 @@ The order of the maintainer's steps, each followed by `ghsettings.py diff`:
    permissions before the daily run is trusted.
 3. Check that `gate` reports on pull requests and merge groups (section 8, step 2), because
    the ruleset requires it.
-4. Apply the ruleset (`ghsettings.py apply`, then `--yes`), which also enables the merge
-   queue, and re-export to record what GitHub stored.
+4. Precondition: section 8 steps 4 and 5 are done, so `branch-protection.json` no longer
+   requires `Kernel gate` and `Spec gate` and the live protection of `iso-v0` and `main` has
+   dropped them. Only `pr.yml` has a `merge_group` trigger; `kernel-build.yml` and
+   `spec-build-check.yml` do not, so a merge group never gets those two contexts and a queue
+   enabled while they are still required cannot be satisfied. Check with
+   `ghsettings.py diff` and by reading the required contexts of both branches, then apply
+   the ruleset (`ghsettings.py apply`, then `--yes`), which also enables the merge queue, and
+   re-export to record what GitHub stored.
 5. Create the bot App of PL5, move the bots to it, delete the three personal tokens, then
    set `personal_tokens.retired` to `true` and drop them from `secrets`.
 6. At the end of the image key rotation (`athanor-image-1.pub` leaves `system/keys`,
