@@ -1,9 +1,10 @@
 # Code owners for Athanor.
 #
-# The last matching pattern wins, so the protected paths come last. The owner is
-# the maintainer's account; the repository belongs to the organisation ars-regia. Review by a code owner is only
-# enforced once the branch protection rule "Require review from Code Owners" is on; it stays off while
-# there is a single code owner, who could not approve their own changes (decided 2026-10-06, #160).
+# The last matching pattern wins, so the protected paths come last. The owner is the
+# maintainer's account; the repository belongs to the organisation ars-regia.
+# Review by a code owner is enforced only when the branch protection rule "Require review
+# from Code Owners" is on. It stays off while there is one code owner, who could not approve
+# their own changes (ADR-0062). The rules below take effect when a second owner joins.
 
 * @hr-mes
 

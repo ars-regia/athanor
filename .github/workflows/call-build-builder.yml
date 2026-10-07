@@ -14,12 +14,10 @@ env:
   SCCACHE_CACHE_SIZE: 5G
 
 jobs:
-  lint:
-    uses: ./.github/workflows/call-lint.yml
-
+  # No lint job of its own: the Orchestrator, its only caller, runs call-lint.yml once and
+  # calls this workflow only after it passed (docs/architecture/doc_pipeline.md, PL44).
   build-builder:
     name: 🏗️ Build Base Builder
-    needs: [lint]
     outputs:
       content_hash: ${{ steps.check_idempotency.outputs.content_hash }}
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
@@ -69,12 +67,16 @@ jobs:
           
           echo "${{ secrets.GITHUB_TOKEN }}" | podman login "${REGISTRY}" -u ${{ github.actor }} --password-stdin
           IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/athanor-builder" | tr '[:upper:]' '[:lower:]')
-          podman tag "$loaded" "$IMAGE_LOWER:latest"
-          podman tag "$IMAGE_LOWER:latest" "$IMAGE_LOWER:${{ steps.check_idempotency.outputs.content_hash }}"
-          bash scripts/retry.sh podman push "$IMAGE_LOWER:latest"
+          podman tag "$loaded" "$IMAGE_LOWER:${{ steps.check_idempotency.outputs.content_hash }}"
           bash scripts/retry.sh podman push "$IMAGE_LOWER:${{ steps.check_idempotency.outputs.content_hash }}"
           echo "Waiting 15 seconds for GHCR eventual consistency..."
           sleep 15
+
+      - name: Point athanor-builder:latest at this builder (default branch only)
+        env:
+          CONTENT_HASH: ${{ steps.check_idempotency.outputs.content_hash }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: bash scripts/promote_builder_latest.sh "${REGISTRY}/${{ github.repository_owner }}/athanor-builder" "$CONTENT_HASH" "$GITHUB_REF" "$DEFAULT_BRANCH"
 
       - name: 🧹 Cleanup Workspace Permissions
         if: always()

@@ -43,9 +43,9 @@ No wrong image is published today: tier 0, `FROM` and the gate all fail closed. 
 
 - **Push triggers:** the Orchestrator no longer triggers on pushes that touch only `forge/specs/azoth/**`. No DAG node hashes anything under that path: `kernel-forge` is external to the brain and to `fetch_repo_rpms.sh`. It does trigger on changes to `nvidia-kmod.yml` and `nvidia-build.yml`, which it now calls.
 - **Kernel Build:** on a push, it dispatches the Orchestrator on the same ref, passing the commit `sha`. It does so only when it published a new `azoth:<nvr>`, or when the script of O3 does not answer `ready`. A push under the kernel directory that changes nothing, such as a document, costs no image cycle.
-- **NVIDIA kmod:** becomes a reusable workflow (`workflow_call`) that the Orchestrator calls directly, not through `call-system-image.yml`. The chain Orchestrator → kmod → `nvidia-build.yml` uses three of the four nesting levels GitHub allows. Kmod keeps `workflow_dispatch` for manual runs.
+- **NVIDIA kmod:** becomes a reusable workflow (`workflow_call`) that the Orchestrator calls directly, not through `call-system-image.yml`. The chain Orchestrator → kmod → `nvidia-build.yml` uses three of the four nesting levels GitHub allows. Kmod has no trigger of its own: a manual cycle dispatches the Orchestrator, so the sign job exists once (D43).
 - **Permissions:** the Orchestrator grants `attestations: write`, which kmod's publication needs because a called workflow cannot exceed its caller, and `actions: read`.
-- **Secrets:** `MODULE_SIGNING_KEY` resolves only in the `sign` job of `nvidia-kmod.yml`, which declares `environment: signing-kernel`; no secret is passed or inherited for it (D43).
+- **Secrets:** `MODULE_SIGNING_KEY` resolves only in the `nvidia-kmod-sign` job of the Orchestrator, which declares `environment: signing-kernel`. It is a job of the workflow the event starts, not of a called workflow, whose jobs read the secrets of their environment only when the caller inherits every secret ([actions/runner#4453](https://github.com/actions/runner/issues/4453)); no secret is passed or inherited (D43).
 
 A dispatch with `GITHUB_TOKEN` starts runs; `workflow_run` would fire only from the default branch, and `iso-v0` is the working branch.
 

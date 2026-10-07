@@ -308,6 +308,7 @@ fn reason_words(reason: Reason) -> String {
         Reason::PolicyNotInForce => tr("Not verified: fetched under a permissive policy"),
         Reason::ReferenceOutOfScope => tr("Not verified: the image is outside the policy's scope"),
         Reason::LocalChanges => tr("Not verified: the system was changed on this machine"),
+        Reason::ChannelAbsent => tr("Not verified: waiting for the stable channel to be published"),
     }
 }
 
