@@ -286,13 +286,22 @@ def deployment_problem(policy, protected):
     return None
 
 
+def image_key_rotation(root):
+    """Image key rotation (docs/operations/secrets.md section 4.1): it lasts while system/keys
+    holds both image keys, and ends when athanor-image-1.pub leaves."""
+    return all((Path(root) / "system/keys" / f"athanor-image-{n}.pub").is_file() for n in (1, 2))
+
+
 def signing_environments(root):
     """{secret: environment} for the environments named signing* in environments.json, the one
     place that says which environment holds which key, and the problems of those environments:
     each needs a required reviewer, no administrator bypass, and deploys only from branches
     branch-protection.json protects by name (a glob or "any protected branch" would follow
-    whoever can protect a new branch)."""
+    whoever can protect a new branch). During the image key rotation the old `signing`
+    environment is an alias of signing-images: its rules apply, but it holds no key of its own,
+    so the keys it still keeps until the rotation ends are not counted twice."""
     environments = json.loads(read(Path(root) / ENVIRONMENTS_JSON))
+    alias = "signing" if image_key_rotation(root) else None
     signing = {name: env for name, env in environments.items() if name.startswith("signing")}
     if not signing:
         return {}, [f"{ENVIRONMENTS_JSON}: no signing environment (D43)"]
@@ -308,7 +317,7 @@ def signing_environments(root):
         if where:
             problems.append(f"{ENVIRONMENTS_JSON}: the {name} environment deploys from {where}, not only "
                             f"from branches {BRANCH_PROTECTION_JSON} protects (D43)")
-        for secret in env.get("secrets", []):
+        for secret in env.get("secrets", []) if name != alias else []:
             if secret in holders:
                 problems.append(f"{ENVIRONMENTS_JSON}: {secret} is in {holders[secret]} and in {name}: "
                                 "each key has one environment (D43)")
@@ -341,9 +350,10 @@ def signing_problems(root):
     # Image key rotation (docs/operations/secrets.md section 4.1): while system/keys holds both
     # image keys, the old `signing` environment, the only holder of key 1, counts as
     # signing-images, so every rule of a signing job applies to a job that names it. The alias
-    # ends when athanor-image-1.pub leaves system/keys.
-    if all((root / "system/keys" / f"athanor-image-{n}.pub").is_file() for n in (1, 2)):
-        canonical.setdefault("signing", "signing-images")
+    # ends when athanor-image-1.pub leaves system/keys; from then on a `signing` entry left in
+    # environments.json holds the same keys as signing-images and signing-kernel, and fails.
+    if image_key_rotation(root):
+        canonical["signing"] = "signing-images"
     repository = set(json.loads(read(root / ACTIONS_JSON)).get("secrets") or [])
     for secret in sorted(repository & holders.keys()):
         problems.append(f"{ACTIONS_JSON}: {secret} is a repository secret, which every job reads, "
@@ -1013,7 +1023,9 @@ def markdown_links(text):
 def check_docs():
     r = Result()
     targets = ["README.md", "system/README.md", "system/ARCHITECTURE.md",
-               "ANALISI_2026-09-02.md", "PIANO_RIPARTENZA.md", "CLAUDE.md", "ROADMAP.md"]
+               "ANALISI_2026-09-02.md", "PIANO_RIPARTENZA.md", "CLAUDE.md", "ROADMAP.md",
+               "AGENTS.md", "forge/AGENTS.md", "forge/specs/azoth/AGENTS.md", "system/AGENTS.md",
+               ".github/workflows/AGENTS.md"]
     targets += [rel(p) for p in walk(ROOT / "docs", ".md")]
 
     for t in targets:
@@ -1757,6 +1769,198 @@ def check_decisions():
     r = Result()
     for problem in decision_problems():
         r.fail(problem)
+    return r
+
+
+# --------------------------------------------------------------------------- #
+# 11. services — every shipped service sets NoNewPrivileges or a capability allow-list
+# --------------------------------------------------------------------------- #
+
+# docs/architecture/doc_threat_model.md, TM8 (maintainer decision A2-9 (#151)). Each entry
+# names a unit that does not meet the rule and why; an entry that no longer matches a failing
+# unit fails the check, so the list cannot outlive its reasons.
+SERVICE_EXEMPT = {}
+
+TRUE_VALUES = {"1", "yes", "true", "on"}
+# Settings that make a drop-in run a command of ours in the unit it extends.
+EXEC_KEYS = {
+    "ExecCondition",
+    "ExecStartPre",
+    "ExecStart",
+    "ExecStartPost",
+    "ExecReload",
+    "ExecStop",
+    "ExecStopPost",
+}
+# A heredoc: its opening line (whose `> file` names the target, before or after `<<`), its
+# delimiter, and the body up to the delimiter's own line.
+HEREDOC = re.compile(
+    r"^([^\n]*<<-?[ \t]*['\"]?(\w+)['\"]?[^\n]*)\n(.*?)^[ \t]*\2[ \t]*$", re.M | re.S
+)
+
+
+def unit_directives(text):
+    """(key, value) of every assignment in the [Service] section of a unit or drop-in."""
+    section, found = None, []
+    # A trailing backslash continues the line (systemd.syntax(7)): join before parsing.
+    for line in re.sub(r"\\[ \t]*\r?\n", " ", text).splitlines():
+        line = line.strip()
+        if not line or line[0] in "#;":
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1]
+        elif section == "Service" and "=" in line:
+            key, value = line.split("=", 1)
+            found.append((key.strip(), value.strip()))
+    return found
+
+
+# Capabilities that give root back to a process that keeps them (doc_threat_model.md).
+ROOT_CAPS = {"CAP_SYS_ADMIN", "CAP_SYS_MODULE", "CAP_DAC_OVERRIDE", "CAP_SYS_PTRACE"}
+
+
+def is_hardened(directives):
+    """True if the merged directives end with NoNewPrivileges= true, or with a capability
+    bounding set that is an explicit allow-list without CAP_SYS_ADMIN, CAP_SYS_MODULE,
+    CAP_DAC_OVERRIDE or CAP_SYS_PTRACE.
+
+    The bound follows systemd.exec(5): the first list sets it, a later list is merged by OR,
+    a `~` list is removed by AND NOT, an empty assignment is the empty set and `~` alone the
+    full one. Only an allow-list counts as a bound: a deny-list (`~CAP_X ...`) keeps every
+    capability it does not name, CAP_SYS_MODULE or CAP_SYS_ADMIN among them unless it lists
+    them, so it fails unless NoNewPrivileges= is also set."""
+    no_new_privileges, allow, caps = False, None, set()
+    for key, value in directives:
+        if key == "NoNewPrivileges":
+            no_new_privileges = value.lower() in TRUE_VALUES
+        elif key == "CapabilityBoundingSet":
+            named = set(value.lstrip("~").split())
+            if not value or value == "~":
+                allow, caps = not value, set()
+            elif value.startswith("~"):
+                caps = caps - named if allow else caps | named
+                allow = bool(allow)
+            elif allow is False:
+                caps -= named
+            else:
+                allow, caps = True, caps | named
+    return no_new_privileges or (allow is True and not caps & ROOT_CAPS)
+
+
+def dropin_dirs(unit):
+    """The drop-in directories that apply to a service, least specific first (systemd.unit(5)):
+    `service.d`, each dash prefix (`foo-.service.d` for `foo-bar.service`), the template's
+    (`foo@.service.d` for `foo@x.service`) and the unit's own."""
+    stem = unit[: -len(".service")]
+    parts = stem.split("-")
+    dirs = ["service.d"]
+    dirs += ["-".join(parts[:i]) + "-.service.d" for i in range(1, len(parts))]
+    template, at, instance = stem.partition("@")
+    if at and instance:
+        dirs.append(f"{template}@.service.d")
+    dirs.append(f"{unit}.d")
+    return dirs
+
+
+def service_units(files):
+    """{id: (unit name, text)} for every systemd service unit among {relative path: text}:
+    unit files, and units a package specification writes through a heredoc. Empty unit files
+    (masks) and D-Bus activation files are not units that run anything."""
+    units = {}
+    for path, text in files.items():
+        name = Path(path).name
+        if path.endswith(".spec"):
+            for m in HEREDOC.finditer(text):
+                if "[Service]" in m.group(3):
+                    target = re.search(r">\s*(\S+\.service)\b", m.group(1))
+                    unit = (
+                        Path(target.group(1)).name
+                        if target
+                        else f"heredoc-{m.group(2)}"
+                    )
+                    unit = unit.replace("%{name}", Path(path).stem)
+                    units[f"{path}:{unit}"] = (unit, m.group(3))
+        elif (
+            name.endswith(".service") and text.strip() and "[D-BUS Service]" not in text
+        ):
+            units[path] = (name, text)
+    return units
+
+
+def service_problems(files):
+    """Services among {relative path: text} that set neither NoNewPrivileges= nor an allow-list
+    capability bound, after every drop-in that applies to them (dropin_dirs) is merged in file
+    name order, a file in a more specific directory replacing one of the same name.
+
+    A drop-in directory that is not the own directory of a unit in `files` (an upstream unit, a
+    dash prefix, a template, `service.d`) counts as a service of its own when it adds a command
+    (EXEC_KEYS): that command is ours, and the upstream unit's own settings are not visible."""
+    dropins = {}
+    for path in files:
+        parent = Path(path).parent.name
+        if path.endswith(".conf") and (
+            parent == "service.d" or parent.endswith(".service.d")
+        ):
+            dropins.setdefault(parent, []).append(path)
+
+    def merged(unit):
+        chosen = {}
+        for d in dropin_dirs(unit):
+            for p in dropins.get(d, []):
+                chosen[Path(p).name] = p
+        return [chosen[name] for name in sorted(chosen)]
+
+    units = service_units(files)
+    own = {f"{unit}.d" for unit, _ in units.values()}
+    for d, paths in dropins.items():
+        if d not in own and any(
+            key in EXEC_KEYS for p in paths for key, _ in unit_directives(files[p])
+        ):
+            unit = d[:-2] if d != "service.d" else ".service"
+            units[str(Path(sorted(paths)[0]).parent)] = (unit, "")
+
+    failing = set()
+    for ident, (unit, text) in units.items():
+        directives = unit_directives(text)
+        for p in merged(unit):
+            directives += unit_directives(files[p])
+        if not is_hardened(directives):
+            failing.add(ident)
+
+    problems = [
+        f"{ident}: sets neither NoNewPrivileges=yes nor an allow-list "
+        f"CapabilityBoundingSet= (doc_threat_model.md, TM8)"
+        for ident in sorted(failing - SERVICE_EXEMPT.keys())
+    ]
+    problems += [
+        f"{ident}: exempt in SERVICE_EXEMPT but meets the rule or no longer exists; "
+        f"remove the entry"
+        for ident in sorted(SERVICE_EXEMPT.keys() - failing)
+    ]
+    return problems
+
+
+@check("services", "Every shipped service sets NoNewPrivileges or a capability allow-list")
+def check_services():
+    r = Result()
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", "--", "*.service", "*service.d/*.conf", "*.spec"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if listed.returncode != 0:
+        r.fail(f"git ls-files failed: {listed.stderr.strip()}")
+        return r
+    files = {
+        p: read(ROOT / p)
+        for p in listed.stdout.split("\0")
+        if p and (ROOT / p).is_file()
+    }
+    for problem in service_problems(files):
+        r.fail(problem)
+    for ident, why in SERVICE_EXEMPT.items():
+        r.note(f"exempt: {ident}: {why}")
     return r
 
 

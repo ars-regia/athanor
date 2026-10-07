@@ -10,7 +10,6 @@ See docs/operations/github-settings.md.
 """
 
 import argparse
-import difflib
 import json
 import pathlib
 import subprocess
@@ -57,6 +56,10 @@ PROTECTION_FLAGS = (
     "required_signatures",
 )
 SECRETS_DOC = "docs/operations/secrets.md"
+# Keys a settings file declares that GitHub does not store: export keeps them from the
+# file, apply never reads them, and diff acts on them instead of comparing them
+# (docs/operations/github-settings.md, GHS10).
+DECLARATIONS = {"actions": ("personal_tokens",)}
 
 
 class NotFound(Exception):
@@ -756,36 +759,148 @@ def _require(where, obj, keys):
         raise SettingsError(f"{where} lacks the key(s): {', '.join(missing)}")
 
 
+def without_declarations(area, data):
+    """The part of a settings file GitHub stores (see DECLARATIONS)."""
+    if not isinstance(data, dict):
+        return data
+    return {k: v for k, v in data.items() if k not in DECLARATIONS.get(area, ())}
+
+
 def cmd_export(repo, directory, _args):
     directory.mkdir(parents=True, exist_ok=True)
     for area, (export, _) in AREAS.items():
-        (directory / f"{area}.json").write_text(dump(export(repo)))
-        print(f"wrote {directory / f'{area}.json'}")
+        data = export(repo)
+        path = directory / f"{area}.json"
+        if area in DECLARATIONS and path.exists():
+            old = load(directory, area)
+            data.update({k: old[k] for k in DECLARATIONS[area] if k in old})
+        path.write_text(dump(data))
+        print(f"wrote {path}")
     return 0
 
 
-def cmd_diff(repo, directory, _args):
-    differs = False
-    for area, (export, _) in AREAS.items():
-        live = dump(export(repo))
-        path = directory / f"{area}.json"
-        wanted = dump(load(directory, area))
-        if live != wanted:
-            differs = True
-            sys.stdout.writelines(
-                difflib.unified_diff(
-                    wanted.splitlines(True),
-                    live.splitlines(True),
-                    f"{path} (files)",
-                    f"{repo} (live)",
-                )
+ABSENT = object()
+# The field that names an entry of a list of objects, in order of preference.
+ENTRY_KEYS = ("name", "context", "type")
+
+
+def _show(value):
+    return "absent" if value is ABSENT else json.dumps(value, sort_keys=True)
+
+
+def _entry_key(want, live):
+    """The field that names every entry of both lists once, or None."""
+    for key in ENTRY_KEYS:
+        if all(isinstance(x, dict) and key in x for x in want + live) and all(
+            len({json.dumps(x[key]) for x in side}) == len(side) for side in (want, live)
+        ):
+            return key
+    return None
+
+
+def _membership(path, want, live):
+    for name in sorted(want, key=json.dumps):
+        if name not in live:
+            yield f"{path}: {json.dumps(name)} is in the file but not live"
+    for name in sorted(live, key=json.dumps):
+        if name not in want:
+            yield f"{path}: {json.dumps(name)} is live but not in the file"
+
+
+def compare(path, want, live):
+    """One line per difference between a file and the live state: objects by key, lists
+    of names and lists of named entries by name (their order is not a setting), anything
+    else as a whole."""
+    if isinstance(want, dict) and isinstance(live, dict):
+        for key in sorted(want.keys() | live.keys()):
+            yield from compare(
+                f"{path}.{key}" if path else key,
+                want.get(key, ABSENT),
+                live.get(key, ABSENT),
             )
-    print(
-        "live state differs from the files"
-        if differs
-        else "live state matches the files"
-    )
-    return 1 if differs else 0
+        return
+    if isinstance(want, list) and isinstance(live, list):
+        if all(isinstance(x, str) for x in want + live):
+            yield from _membership(path, want, live)
+            return
+        key = _entry_key(want, live)
+        if key:
+            w, l = {x[key]: x for x in want}, {x[key]: x for x in live}
+            yield from _membership(path, w, l)
+            for name in sorted(w.keys() & l.keys(), key=json.dumps):
+                yield from compare(f"{path}[{name}]", w[name], l[name])
+            return
+    if want != live:
+        yield f"{path}: file {_show(want)}, live {_show(live)}"
+
+
+def _personal_tokens(want, live):
+    """Applies the personal_tokens declaration of actions.json: the personal access
+    tokens the GitHub App identities replace (PL5). While `retired` is false they are
+    ordinary entries of `secrets`; once it is true, each one still set live is drift.
+    Returns the lines it adds."""
+    declaration = want.pop("personal_tokens", None)
+    if declaration is None:
+        return []
+    names, retired = declaration.get("names"), declaration.get("retired")
+    if not (
+        isinstance(names, list)
+        and all(isinstance(n, str) for n in names)
+        and isinstance(retired, bool)
+    ):
+        raise SettingsError(
+            'actions.json personal_tokens must be {"names": [names], "retired": true|false}'
+        )
+    if not retired:
+        return []
+    want["secrets"] = [s for s in want["secrets"] if s not in names]
+    still_set = [s for s in live["secrets"] if s in names]
+    live["secrets"] = [s for s in live["secrets"] if s not in names]
+    return [
+        f"secrets: {json.dumps(n)} is a retired personal token (personal_tokens) and is still set"
+        for n in sorted(still_set)
+    ]
+
+
+def drift(repo, directory):
+    """The differences between the files and the live state, one line each."""
+    # Every file is read before the first call, so a bad file stops the run early.
+    desired = {area: load(directory, area) for area in AREAS}
+    lines = []
+    for area, (export, _) in AREAS.items():
+        want, live = desired[area], export(repo)
+        extra = _personal_tokens(want, live) if area == "actions" else []
+        for line in list(compare("", want, live)) + extra:
+            # A difference of the whole area has an empty path: "drift pages: ...".
+            lines.append(
+                f"drift {area}{line}" if line[0] == ":" else f"drift {area} {line}"
+            )
+    return lines
+
+
+def check_read_rights(repo):
+    """diff only reads, and also runs with a read-only GitHub App token, whose answer
+    to repos/{r} carries no permissions.admin. A token that cannot read the
+    administration settings gets 404 from endpoints where a 404 reads as "off"; this
+    one answers 404 to no token that can read them, so it proves the rights first."""
+    try:
+        get(f"repos/{repo}/actions/permissions")
+    except NotFound as error:
+        raise GhError(
+            f"repos/{repo}/actions/permissions is not readable with this token: it needs "
+            "read access to the administration settings of the repository"
+        ) from error
+
+
+def cmd_diff(repo, directory, _args):
+    lines = drift(repo, directory)
+    for line in lines:
+        print(line)
+    if lines:
+        print(f"{len(lines)} drift(s): live state differs from the files")
+        return 1
+    print("no drift: live state matches the files")
+    return 0
 
 
 def cmd_apply(repo, directory, args):
@@ -868,7 +983,10 @@ def main(argv=None):
                 check=True,
             ).stdout.strip()
         )
-        check_rights(repo)
+        if args.command == "diff":
+            check_read_rights(repo)
+        else:
+            check_rights(repo)
         return {"export": cmd_export, "diff": cmd_diff, "apply": cmd_apply}[
             args.command
         ](repo, args.dir, args)

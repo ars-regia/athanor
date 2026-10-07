@@ -231,8 +231,9 @@ class GhSettings(unittest.TestCase):
         self.edit("repository", lambda d: d.update(allow_merge_commit=False))
         result = self.run_script("diff")
         self.assertEqual(result.returncode, 1)
-        self.assertIn('-  "allow_merge_commit": false', result.stdout)
-        self.assertIn('+  "allow_merge_commit": true', result.stdout)
+        self.assertIn(
+            "drift repository allow_merge_commit: file false, live true", result.stdout
+        )
 
     def test_apply_on_a_matching_state_plans_nothing(self):
         result = self.run_script("apply", "--yes")
@@ -382,7 +383,8 @@ class GhSettings(unittest.TestCase):
     def test_a_token_without_admin_rights_exits_2(self):
         live = dict(LIVE[R], permissions={"admin": False, "push": True})
         self.set_live(R, live)
-        for command in (["diff"], ["export"], ["apply", "--yes"]):
+        # diff proves read rights another way (test_ghsettings_drift.py).
+        for command in (["export"], ["apply", "--yes"]):
             with self.subTest(command=command):
                 result = self.run_script(*command)
                 self.assertEqual(result.returncode, 2)

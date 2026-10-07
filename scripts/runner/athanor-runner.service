@@ -16,6 +16,9 @@ RuntimeMaxSec=8h
 # The runner executes workflow code: nothing of the host is reachable but /dev/kvm, the
 # service's own directories and the network.
 DynamicUser=yes
+# Implied by DynamicUser=, and written out so that the rule every repository service follows
+# (doc_threat_model.md, TM8) is visible here and to scripts/verify.py services.
+NoNewPrivileges=yes
 StateDirectory=athanor-runner
 RuntimeDirectory=athanor-runner
 LogsDirectory=athanor-runner
