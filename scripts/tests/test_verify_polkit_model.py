@@ -304,5 +304,57 @@ class PolkitModelTest(unittest.TestCase):
         files["pkg/udev/rules.d/72-x.rules"] = '# access is granted via polkit\nSUBSYSTEM=="usb", MODE="0660"\n'
         self.assertEqual(problems(HEADER + ROWS, files), [])
 
+    def test_a_rules_file_outside_udev_that_never_names_addRule_fails(self):
+        self.unreadable('polkit["add" + "Rule"](function(action, subject) { return "yes"; });\n')
+
+    def test_an_identifier_outside_the_closed_set_fails(self):
+        self.unreadable(
+            "polkit.addRule(function(action, subject) {\n"
+            '    if (action.id == "org.example.a") { return polkit.Result.NO; "".constructor.constructor("x")(); }\n'
+            "});\n"
+        )
+
+    def test_an_admin_rule_body_outside_the_closed_set_fails(self):
+        self.unreadable(
+            'polkit.addAdminRule(function(action, subject) { "".constructor.constructor("x")(); return ["unix-group:wheel"]; });\n'
+        )
+
+    def test_a_return_other_than_a_polkit_result_fails(self):
+        self.unreadable(
+            "polkit.addRule(function(action, subject) {\n"
+            '    if (action.id == "org.example.a") { if (subject.user == "x") { return polkit.Result.NO; } return "yes"; }\n'
+            "});\n"
+        )
+
+    def test_a_line_separator_ends_a_comment(self):
+        self.unreadable(
+            RULES
+            + "// x polkit.addRule(function(action, subject) { return polkit.Result.YES; });\n"
+        )
+
+    def test_a_carriage_return_ends_a_comment(self):
+        self.unreadable(
+            RULES + "// x\rpolkit.addRule(function(action, subject) { return polkit.Result.YES; });\n"
+        )
+
+    def test_a_backslash_outside_a_string_fails(self):
+        self.unreadable(
+            "polkit.addRule(function(\\u0061ction, subject) {\n"
+            '    if (action.id == "org.example.a") { return polkit.Result.YES; }\n'
+            "});\n"
+        )
+
+    def test_a_subject_condition_before_the_action_test_is_read(self):
+        files = dict(FILES)
+        files[RULES_PATH] = (
+            "polkit.addRule(function (action, subject) {\n"
+            '  if (subject.user == "runner" && ((action.id == "org.example.mount" || action.id == "org.example.eject"))) {\n'
+            "    return polkit.Result.YES;\n"
+            "  }\n"
+            "});\n"
+        )
+        rows = ROWS.replace("`yes` for wheel, `auth_admin` otherwise", "`yes` for runner")
+        self.assertEqual(problems(HEADER + rows, files), [])
+
 if __name__ == "__main__":
     unittest.main()
