@@ -152,6 +152,8 @@ GUEST_PASSWORD = b"collaudo"
 DIAGNOSTICS = (
     b"systemctl is-system-running",
     b"systemctl get-default",
+    # Remote login is off on new installs (system/disk_config/iso.toml).
+    b"systemctl is-enabled sshd.service",
     b"systemctl list-jobs --no-pager",
     b"systemctl status greetd.service --no-pager -l | head -20",
     b"systemctl list-units --failed --no-pager",

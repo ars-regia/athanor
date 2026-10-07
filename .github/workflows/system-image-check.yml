@@ -137,7 +137,7 @@ jobs:
       actions: read
       contents: read
       pull-requests: read
-    # It waits for the required checks (Kernel gate) before merging.
+    # It waits for the checks .github/settings/branch-protection.json requires before merging.
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
