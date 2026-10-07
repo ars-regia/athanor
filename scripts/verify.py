@@ -176,19 +176,31 @@ def check_workflows():
 # The actions a sign-only job may use, pinned by a full commit SHA (D43).
 SIGN_ONLY_ACTIONS = re.compile(
     r"^actions/(?:checkout|download-artifact|upload-artifact)@[0-9a-f]{40}$")
-# The inputs of those actions a sign-only job may not set: another ref or repository to check
-# out, another run's or repository's artifacts to download (D43).
+# The only inputs of those actions a sign-only job may set: no other ref or repository to check
+# out, no other run's or repository's artifacts, no checkout outside the workspace root (D43).
 SIGN_ONLY_INPUTS = {
-    "actions/checkout": {"ref", "repository"},
-    "actions/download-artifact": {"run-id", "repository", "github-token"},
+    "actions/checkout": {"persist-credentials"},
+    "actions/download-artifact": {"name", "pattern", "path", "merge-multiple"},
+    "actions/upload-artifact": {"name", "path", "if-no-files-found", "retention-days"},
 }
-# What builds, installs or runs a locally built image. A sign-only job receives built
-# artefacts and runs no build step: a compromised build must not be able to sign (D43).
-SIGN_ONLY_FORBIDDEN = re.compile(
-    r"\b(?:podman|docker)\s+build\b|\bbuildah\s+(?:bud|build|from|commit)\b|\brpmbuild\b"
-    r"|\bcargo\s+(?:build|install|run)\b|\bnix\s+(?:build|run|shell|develop|profile)\b"
-    r"|\bapt(?:-get)?\s+install\b|\bdnf5?\s+install\b|\bpip3?\s+install\b"
-    r"|\bbuild-image\.sh\b|\bbuild_iso\.sh\b|\bnvidia\.sh\s+build\b|\blocalhost/")
+# Where a sign-only job may download: a directory that is not in the checkout, so an artifact
+# never replaces the sign script (a download without a path lands on the workspace root).
+SIGN_JOB_DOWNLOADS = {"out", "artifacts"}
+# The only commands a step of a signing job may run, whole. A sign-only job receives built
+# artefacts and runs no build step, and an earlier step must not be able to rewrite the sign
+# script or the environment of the step that holds the key ($GITHUB_ENV, BASH_ENV) (D43).
+SIGN_JOB_COMMANDS = {
+    "bash forge/specs/azoth/signer/run.sh inputs",
+    "bash forge/specs/azoth/signer/run.sh sign",
+    'echo "${GITHUB_TOKEN}" | skopeo login "$(cut -d/ -f1 artifacts/image-digests.txt | head -n 1)"'
+    ' -u "${GITHUB_ACTOR}" --password-stdin',
+    'bash system/sign-images.sh artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"',
+}
+# The names a signing job, its steps and its workflow may set in env besides the secrets of the
+# job's environment: plain values, none read by bash, the dynamic loader or a PATH lookup.
+SIGN_JOB_ENV = {"GH_TOKEN", "GITHUB_TOKEN", "GITHUB_ACTOR", "KERNEL_DIGEST", "KERNEL_REGISTRY"}
+# The runners a signing job may use: GitHub-hosted, never a self-hosted machine (D43).
+GITHUB_HOSTED = re.compile(r"^ubuntu-(?:latest|\d{2}\.\d{2})$")
 # The only commands a step holding a signing secret may run, whole: the sign scripts (D43).
 SIGN_SCRIPTS = re.compile(
     r"^bash (?:forge/specs/azoth/signer/run\.sh sign"
@@ -233,7 +245,15 @@ def job_environment(job):
     environment = job.get("environment")
     if isinstance(environment, dict):
         environment = environment.get("name")
-    return environment.strip() if isinstance(environment, str) else None
+    return environment if isinstance(environment, str) else None
+
+
+def triggers(doc):
+    """The event names of a parsed workflow; PyYAML reads the key `on` as True."""
+    on = doc.get("on", doc.get(True))
+    if isinstance(on, str):
+        return {on}
+    return {str(event) for event in on} if isinstance(on, (list, dict)) else set()
 
 
 def protected_branches(root):
@@ -309,6 +329,8 @@ def signing_problems(root):
                            "workflows (pip install pyyaml)"]
     environments = json.loads(read(root / ENVIRONMENTS_JSON))
     signing = {name for name in environments if name.startswith("signing")}
+    # GitHub compares environment names without regard to case.
+    canonical = {name.lower(): name for name in environments}
     repository = set(json.loads(read(root / ACTIONS_JSON)).get("secrets") or [])
     for secret in sorted(repository & holders.keys()):
         problems.append(f"{ACTIONS_JSON}: {secret} is a repository secret, which every job reads, "
@@ -327,10 +349,25 @@ def signing_problems(root):
             problems.append(f"{wf.name}: no mapping of jobs the D43 lint can read")
             continue
         workflows[wf.name] = doc
+    def environment_of(job):
+        environment = job_environment(job)
+        return canonical.get(environment.lower(), environment) if environment else None
+
     with_signing_job = {name for name, doc in workflows.items()
-                        if any(job_environment(job) in signing for job in doc["jobs"].values())}
+                        if any(environment_of(job) in signing for job in doc["jobs"].values())}
     for name, doc in workflows.items():
-        problems += workflow_signing_problems(name, doc["jobs"], holders, signing, with_signing_job, set(workflows))
+        if "pull_request_target" in triggers(doc):
+            problems.append(f"{name}: runs on pull_request_target, which runs with the secrets of this "
+                            "repository on behalf of a fork (D43)")
+        if name in with_signing_job:
+            env = doc.get("env") or {}
+            for key in sorted(set(env) - SIGN_JOB_ENV) if isinstance(env, dict) else ["env"]:
+                problems.append(f"{name}: sets {key} in env, beside a signing job: only {sorted(SIGN_JOB_ENV)} (D43)")
+            if "defaults" in doc:
+                problems.append(f"{name}: sets defaults, beside a signing job, which changes what its steps "
+                                "run (D43)")
+        problems += workflow_signing_problems(name, doc["jobs"], holders, signing, with_signing_job,
+                                              set(workflows), environment_of)
         undeclared = set()
         for path, text in yaml_strings(doc):
             names, dynamic = secret_references(text)
@@ -348,11 +385,14 @@ def signing_problems(root):
     return problems
 
 
-def workflow_signing_problems(name, jobs, holders, signing, with_signing_job, readable):
+def workflow_signing_problems(name, jobs, holders, signing, with_signing_job, readable, environment_of):
     """The D43 problems of the jobs of one workflow (see signing_problems)."""
     problems = []
     for job_id, job in jobs.items():
-        environment = job_environment(job)
+        environment = environment_of(job)
+        if environment and "${{" in environment:
+            problems.append(f"{name}: job {job_id} names its environment with an expression the D43 lint "
+                            "cannot resolve")
         steps = job.get("steps") if isinstance(job.get("steps"), list) else []
         for path, text in yaml_strings(job):
             for secret in sorted(secret_references(text)[0] & holders.keys()):
@@ -374,27 +414,59 @@ def workflow_signing_problems(name, jobs, holders, signing, with_signing_job, re
             if local == called or local in with_signing_job or local not in readable:
                 problems.append(f"{name}: job {job_id} inherits every secret into {called}, which has a "
                                 "signing job or cannot be read: pass the secrets it needs by name (D43)")
-        if environment not in signing:
+        if environment in signing:
+            problems += signing_job_problems(f"{name}: signing job {job_id}", job, steps, environment, holders)
+    return problems
+
+
+def signing_job_problems(where, job, steps, environment, holders):
+    """A job of a signing environment: GitHub-hosted, no container or defaults, only the pinned
+    actions with their allowed inputs, only the allow-listed commands, no shell or working
+    directory of its own, and in env only the secrets of its environment and plain values."""
+    problems = []
+    runs_on = job.get("runs-on")
+    if "uses" not in job and not (isinstance(runs_on, str) and GITHUB_HOSTED.match(runs_on)):
+        problems.append(f"{where} runs on {runs_on}: only a GitHub-hosted ubuntu label (D43)")
+    for key in ("container", "services"):
+        if key in job:
+            problems.append(f"{where} runs a {key} beside the key (D43)")
+    if "defaults" in job:
+        problems.append(f"{where} sets defaults, which changes what its steps run (D43)")
+    if "uses" in job:
+        problems.append(f"{where} uses {job['uses']}: only checkout, download-artifact and upload-artifact "
+                        "pinned by SHA (D43)")
+    allowed_env = SIGN_JOB_ENV | {secret for secret, holder in holders.items() if holder == environment}
+    envs = [("env", job.get("env"))]
+    envs += [(f"steps.{index + 1}.env", step.get("env")) for index, step in enumerate(steps) if isinstance(step, dict)]
+    for path, env in envs:
+        for key in sorted(set(env) - allowed_env) if isinstance(env, dict) else ([] if env is None else ["env"]):
+            problems.append(f"{where} sets {key} in {path}: only the secrets of its environment and "
+                            f"{sorted(SIGN_JOB_ENV)} (D43)")
+    for index, step in enumerate(steps):
+        if not isinstance(step, dict):
+            problems.append(f"{where} step {index + 1} is not a mapping the D43 lint can read")
             continue
-        uses = [job["uses"]] if "uses" in job else []
-        uses += [step["uses"] for step in steps if isinstance(step, dict) and "uses" in step]
-        for action in uses:
-            if not SIGN_ONLY_ACTIONS.match(str(action)):
-                problems.append(f"{name}: signing job {job_id} uses {action}: only checkout, "
-                                "download-artifact and upload-artifact pinned by SHA (D43)")
-        for step in steps:
-            action = str(step.get("uses", "")).split("@")[0] if isinstance(step, dict) else ""
-            for key in sorted(SIGN_ONLY_INPUTS.get(action, set()) & set(step.get("with") or {})):
-                problems.append(f"{name}: signing job {job_id} sets {key} on {action}: it signs only this "
-                                "run's artifacts of this repository (D43)")
-        for key in ("container", "services"):
-            if key in job:
-                problems.append(f"{name}: signing job {job_id} runs a {key} beside the key (D43)")
-        for path, text in yaml_strings(job):
-            match = SIGN_ONLY_FORBIDDEN.search(text)
-            if match:
-                problems.append(f"{name}: signing job {job_id} builds or installs: {match.group(0)} "
-                                f"({'.'.join(map(str, path))}) (D43)")
+        for key in ("shell", "working-directory"):
+            if key in step:
+                problems.append(f"{where} step {index + 1} sets {key} (D43)")
+        if "run" in step and str(step["run"]).strip() not in SIGN_JOB_COMMANDS:
+            command = str(step["run"]).strip().splitlines()[0] if str(step["run"]).strip() else ""
+            problems.append(f"{where} step {index + 1} runs a command outside the allow-list of D43: {command}")
+        if "uses" not in step:
+            continue
+        action = str(step["uses"])
+        if not SIGN_ONLY_ACTIONS.match(action):
+            problems.append(f"{where} uses {action}: only checkout, download-artifact and upload-artifact "
+                            "pinned by SHA (D43)")
+            continue
+        action = action.split("@")[0]
+        inputs = step.get("with") if isinstance(step.get("with"), dict) else {}
+        for key in sorted(set(inputs) - SIGN_ONLY_INPUTS[action]):
+            problems.append(f"{where} sets {key} on {action}: it signs only this run's artifacts of this "
+                            "repository (D43)")
+        if action == "actions/download-artifact" and str(inputs.get("path", "")).rstrip("/") not in SIGN_JOB_DOWNLOADS:
+            problems.append(f"{where} downloads into {inputs.get('path', 'the workspace root')}: only into one of "
+                            f"{sorted(SIGN_JOB_DOWNLOADS)}, outside the checkout (D43)")
     return problems
 
 
