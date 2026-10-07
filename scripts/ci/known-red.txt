@@ -18,4 +18,3 @@ panics #223 2027-01-07 system/athanor-compositor-client/src/shortcuts.rs: .expec
 panics #223 2027-01-07 system/athanor-compositor-client/src/shortcuts.rs: .expect( over the budget of 2, propagate with `?`
 forge-rules #223 2027-01-07 forge/specs/athanor-system-config/athanor-system-config.spec: rule 2, %post writes under /usr or /etc: install the file in %install or create it with tmpfiles.d
 forge-rules #223 2027-01-07 forge/specs/athanor-system-config/athanor-system-config.spec: rule 2, %post writes under /usr or /etc: install the file in %install or create it with tmpfiles.d
-forge-rules #223 2027-01-07 forge/specs/athanor-system-config/athanor-system-config.spec: rule 2, %post writes under /usr or /etc: install the file in %install or create it with tmpfiles.d

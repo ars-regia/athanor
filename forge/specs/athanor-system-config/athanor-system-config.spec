@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:52.fc43}
+Release:        %{?autorelease}%{!?autorelease:54.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -36,7 +36,6 @@ cp -a %{_sourcedir}/etc %{buildroot}/ 2>/dev/null || true
 
 mkdir -p %{buildroot}/usr/share/athanor-system-config
 mv %{buildroot}/etc/usbguard/usbguard-daemon.conf %{buildroot}/usr/share/athanor-system-config/usbguard-daemon.conf
-mv %{buildroot}/etc/yum.repos.d/athanor-forge.repo %{buildroot}/usr/share/athanor-system-config/athanor-forge.repo
 mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-system-config/greenboot.conf
 
 %post
@@ -62,7 +61,6 @@ for group in video tty; do
     gpasswd -a greetd "$group" > /dev/null 2>&1 || :
 done
 mkdir -p /etc/usbguard
-mkdir -p /etc/yum.repos.d
 
 %files
 %dir /usr/share/athanor-system-config
@@ -80,13 +78,22 @@ mkdir -p /etc/yum.repos.d
 /usr/lib/environment.d/50-athanor-desktop.conf
 /usr/share/athanor-system-config/greetd.toml
 /usr/share/athanor-system-config/usbguard-daemon.conf
-/usr/share/athanor-system-config/athanor-forge.repo
 /usr/share/athanor-system-config/greenboot.conf
 %attr(0755,root,root) /etc/greenboot/check/required.d/10-greetd-running.sh
 %config(noreplace) /etc/security/limits.d/99-athanor-realtime.conf
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-54
+- Drop /usr/share/athanor-system-config/athanor-forge.repo. It pointed at a GitHub
+  Pages DNF channel that ADR-0076 retires, and nothing installed it into
+  /etc/yum.repos.d: packages reach a machine only inside the signed system image.
+
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-53
+- 80-athanor-system.preset disables systemd-homed.service and
+  systemd-homed-activate.service: Fedora's 90-systemd.preset enables them and preset-all
+  applied it. Accounts stay classic.
+
 * Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-52
 - Drop the weak dependencies on athanor-sysmon-ebpf and athanor-cloud-rs: both packages
   are retired (ADR-0073).

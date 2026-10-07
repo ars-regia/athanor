@@ -7,9 +7,9 @@
 #
 # Anaconda goes interactive for exactly the directives that are absent here: with no
 # `part`/`autopart`/`clearpart` it asks for the disk, and with no `user` it asks the
-# person to create their account in the GUI. The home directory it creates is
-# encrypted by systemd-homed (LUKS2); the image never enrols it to the TPM by itself
-# (doc_kernel_profile.md, D42), so nothing about the account needs to be scripted here.
+# person to create their account in the GUI. The account is a classic one in
+# /etc/passwd: systemd-homed stays disabled until a homed specification with a migration
+# exists (decision 0045), so nothing about the account needs to be scripted here.
 
 lang en_US.UTF-8
 
@@ -35,11 +35,10 @@ rootpw --lock
 # is off on new installs (doc_software.md, decision 2): sshd is not enabled, and the ssh
 # service is not added to the firewall.
 firewall --enabled
-services --enabled=systemd-homed --disabled=sshd
+services --disabled=sshd
 
 # Disk layout is the installer's choice: no clearpart/part/autopart here, so Anaconda
-# opens its partitioning screen. systemd-homed encrypts the user's home (LUKS2); a TPM
-# keyslot is offered to the user later, never applied automatically (D42).
+# opens its partitioning screen. Accounts are classic: the image disables systemd-homed by preset.
 
 reboot
 

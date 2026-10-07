@@ -100,7 +100,7 @@ verify component:
 test-nvidia-modules:
     #!/usr/bin/env bash
     set -euo pipefail
-    bash specs/athanor-qa/SOURCES/test-nvidia-modules.sh
+    bash scripts/test-nvidia-modules.sh
 
 # Runs shellcheck on all Bash scripts in forge/
 [group('Utility')]

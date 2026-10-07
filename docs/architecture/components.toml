@@ -137,21 +137,6 @@ spec = "doc_build_system.md"
 item = "sections 4 to 8"
 purpose = "The package pipeline: DAG, spec builds, tier repositories, ISO, bots, registry clean-up"
 
-[[component]]
-path = "forge/specs/athanor-antigravity"
-kind = "rpm spec"
-area = "apps"
-status = "out-of-1.0"
-issue = 149
-purpose = "Stub package shipped in tier 0; issue 149 removes it from the image"
-
-[[component]]
-path = "forge/specs/athanor-astro-toolchain"
-kind = "rpm spec"
-area = "build-ci"
-status = "out-of-1.0"
-issue = 149
-purpose = "Stub toolchain package that leaks into the image through tier 0; issue 149 removes it"
 
 [[component]]
 path = "forge/specs/athanor-backup"
@@ -198,14 +183,6 @@ status = "specified"
 spec = "doc_shell.md"
 item = "SH5"
 purpose = "The Calmo identity: COSMIC defaults overlay, hearth wallpaper, seal icons"
-
-[[component]]
-path = "forge/specs/athanor-cargo-tools"
-kind = "rpm spec"
-area = "build-ci"
-status = "out-of-1.0"
-issue = 149
-purpose = "Stub package of Cargo tools that leaks into the image through tier 0; issue 149 removes it"
 
 [[component]]
 path = "forge/specs/athanor-cliphist"
@@ -262,13 +239,6 @@ spec = "doc_shell.md"
 item = "section 3, stages 1a and 1d"
 purpose = "The greeter run by greetd: login, language and layout"
 
-[[component]]
-path = "forge/specs/athanor-ide-bootstrap"
-kind = "rpm spec"
-area = "apps"
-status = "out-of-1.0"
-issue = 149
-purpose = "Stub IDE bootstrap package shipped in tier 1; issue 149 removes it"
 
 [[component]]
 path = "forge/specs/athanor-kernel-profile"
@@ -319,14 +289,6 @@ status = "specified"
 spec = "doc_software.md"
 item = "SW9"
 purpose = "Nix on the immutable image: /nix bind mount, daemon socket, presets, SELinux module"
-
-[[component]]
-path = "forge/specs/athanor-qa"
-kind = "rpm spec"
-area = "build-ci"
-status = "out-of-1.0"
-issue = 149
-purpose = "QA scripts shipped in the image; issue 149 removes them"
 
 [[component]]
 path = "forge/specs/athanor-recovery"
@@ -650,7 +612,7 @@ path = "system/athanor-install.ks"
 kind = "config"
 area = "platform"
 status = "missing"
-purpose = "Kickstart of the manual ISO build; enables systemd-homed"
+purpose = "Kickstart of the manual ISO build; sshd off on new installs, classic accounts"
 
 [[component]]
 path = "system/athanor-layout"
