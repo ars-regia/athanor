@@ -39,15 +39,17 @@ NAME = r"[A-Za-z0-9._+-]+"
 HEX64 = r"[0-9a-f]{64}"
 SPEC_FILE = re.compile(rf"(?:{NAME}\.spec|SOURCES/sources\.sha256)")
 WATCH_FILE = "forge/upstream-watch.json"
-# The checks the branch protection requires (.github/settings/branch-protection.json), each
-# the gate job of its workflow, and `gate` of pr.yml, the one required check once the
-# maintainer switches to it (docs/operations/github-settings.md). The bot waits for all of
-# them in both states: the protection does not bind administrators (enforce_admins: false)
-# and the merging PAT is a maintainer's, so this wait is what keeps a red check from merging.
-REQUIRED_CHECKS = {
+# The bot waits for the checks the branch protection of the base branch requires, read from
+# the checkout: the protection does not bind administrators (enforce_admins: false) and the
+# merging PAT is a maintainer's, so this wait is what keeps a red check from merging. Switching
+# the required check (docs/operations/github-settings.md section 8) is a change of that file.
+BRANCH_PROTECTION = ".github/settings/branch-protection.json"
+# The workflow whose newest pull_request run reports each check a branch may require, as the
+# name of its gate job.
+CHECK_WORKFLOWS = {
+    "gate": "pr.yml",
     "Kernel gate": "kernel-build.yml",
     "Spec gate": "spec-build-check.yml",
-    "gate": "pr.yml",
 }
 SYSTEM_PATH = re.compile(rf"system/(Containerfile|nvidia/locks/{NAME}\.lock)")
 VERSION = re.compile(r"Version:[ \t]+(\d+(?:\.\d+)*)")
@@ -168,7 +170,7 @@ def check(kind, pr, sha, gh):
             "view",
             pr,
             "--json",
-            "state,headRefName,headRefOid,isCrossRepository,labels,changedFiles",
+            "state,baseRefName,headRefName,headRefOid,isCrossRepository,labels,changedFiles",
         )
     )
     if view["state"] != "OPEN":
@@ -219,6 +221,7 @@ def check(kind, pr, sha, gh):
             check_spec(f)
         else:
             check_system(f, contents)
+    return view["baseRefName"]
 
 
 def report(pr, message):
@@ -253,9 +256,26 @@ def gate_conclusion(name, workflow, sha, gh):
     return gate
 
 
-def wait_for_required_checks(sha, gh, sleep=time.sleep, polls=160):
-    """Wait for every required check on SHA to end green; any other end fails the run."""
-    pending = dict(REQUIRED_CHECKS)
+def required_checks(base):
+    """The checks BRANCH_PROTECTION requires on BASE, each with the workflow reporting it.
+
+    A base without required checks, or a check no known workflow reports, fails the run: the
+    bot never merges past a check it cannot wait for.
+    """
+    with open(BRANCH_PROTECTION) as f:
+        protection = json.load(f).get(base) or {}
+    contexts = [c["context"] for c in (protection.get("required_status_checks") or {}).get("checks", [])]
+    if not contexts:
+        sys.exit(f"bot_merge: {BRANCH_PROTECTION} requires no check on {base}: not merged")
+    unknown = [c for c in contexts if c not in CHECK_WORKFLOWS]
+    if unknown:
+        sys.exit(f"bot_merge: no workflow known for the required check(s) {', '.join(unknown)}: not merged")
+    return {c: CHECK_WORKFLOWS[c] for c in contexts}
+
+
+def wait_for_required_checks(sha, checks, gh, sleep=time.sleep, polls=160):
+    """Wait for every check of CHECKS on SHA to end green; any other end fails the run."""
+    pending = dict(checks)
     for _ in range(polls):
         for name, workflow in list(pending.items()):
             gate = gate_conclusion(name, workflow, sha, gh)
@@ -274,11 +294,11 @@ def main(kind, pr, sha, build, gh=run_gh, merge=merge_gh):
     try:
         if build != "success":
             raise Refused(f"build is {build}")
-        check(kind, pr, sha, gh)
+        base = check(kind, pr, sha, gh)
     except Refused as reason:
         report(pr, f"stays for a person: {reason}")
         return 0
-    wait_for_required_checks(sha, gh)
+    wait_for_required_checks(sha, required_checks(base), gh)
     merge("pr", "merge", pr, "--squash", "--match-head-commit", sha)
     report(pr, f"merged at {sha} ({kind} bot, the change has the bot's shape)")
     return 0

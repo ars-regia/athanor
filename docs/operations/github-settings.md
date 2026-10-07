@@ -145,9 +145,10 @@ diff` is.
 `pr.yml` (doc_pipeline.md PL3, ADR-0075). The live protection still requires `Kernel gate` and
 `Spec gate` until a maintainer applies the file; until then `ghsettings.py diff` reports that
 difference, and it is expected. `pr.yml` reports `gate` on every pull request from the moment it
-is on the base branch, so the change is safe in both states: the bots wait for all three checks
-(`forge/scripts/bot_merge.py`, `REQUIRED_CHECKS`), and a check that is required but never reports
-would leave a pull request pending forever. The order below avoids that.
+is on the base branch, so the change is safe in both states: the bots wait for the checks this
+file requires (`forge/scripts/bot_merge.py`), that is `gate`, which covers what the two legacy
+checks check for a bot's change. A check that is required but never reports would leave a pull
+request pending forever; the order below avoids that.
 
 | Step | Who | Action |
 | --- | --- | --- |
@@ -155,7 +156,7 @@ would leave a pull request pending forever. The order below avoids that.
 | 2 | maintainer | Merge the change that adds `pr.yml` into `iso-v0` (and into `main` when `main` takes it) |
 | 3 | maintainer | Give every open pull request one new event (a push, or "Update branch"), so `pr.yml` runs on it; check that each shows a `gate` check (`gh pr checks <n>`) |
 | 4 | **[M]** maintainer | `python3 scripts/github-settings/ghsettings.py apply`, read the plan (one `PUT .../branches/<b>/protection` per branch, no `DESTRUCTIVE` line), then `apply --yes` and `diff`, which must print nothing for branch protection |
-| 5 | maintainer | Merge the follow-up that removes the `pull_request` triggers of `kernel-build.yml` and `spec-build-check.yml`, removes `Kernel gate` and `Spec gate` from `REQUIRED_CHECKS`, and moves the spec bot merge into `pr.yml`. Before it, kernel and spec changes are built twice |
+| 5 | maintainer | Merge the follow-up that removes the `pull_request` triggers of `kernel-build.yml` and `spec-build-check.yml`, removes `Kernel gate` and `Spec gate` from `CHECK_WORKFLOWS` of `bot_merge.py`, and moves the spec bot merge into `pr.yml`. Before it, kernel and spec changes are built twice |
 
 To roll back, restore the two contexts in `branch-protection.json` and apply it again: both
 legacy workflows still run on every pull request until step 5.
