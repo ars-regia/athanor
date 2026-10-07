@@ -546,6 +546,37 @@ def check_kickstart():
 
 
 # --------------------------------------------------------------------------- #
+# os-release — bootc-image-builder reads it to build the ISO
+# --------------------------------------------------------------------------- #
+
+OS_RELEASE = "forge/specs/athanor-base-config/SOURCES/usr/lib/os-release"
+
+
+def os_release_problems(root=None):
+    """Every non-empty line of the shipped os-release is KEY=VALUE.
+
+    os-release(5) allows comment lines, but bootc-image-builder does not: it stops the ISO build
+    with "readOSRelease: invalid input" on any non-empty line without "=".
+    """
+    root = root or ROOT
+    try:
+        text = read(root / OS_RELEASE)
+    except OSError as err:
+        return [f"{OS_RELEASE}: cannot read ({err})"]
+    return [f"{OS_RELEASE}:{number}: not KEY=VALUE, bootc-image-builder rejects it: {line.strip()}"
+            for number, line in enumerate(text.splitlines(), 1)
+            if line.strip() and "=" not in line]
+
+
+@check("os-release", "Every line of os-release is KEY=VALUE, as bootc-image-builder requires")
+def check_os_release():
+    r = Result()
+    for problem in os_release_problems():
+        r.fail(problem)
+    return r
+
+
+# --------------------------------------------------------------------------- #
 # 3. polkit — ogni azione applicata dal codice deve essere dichiarata
 # --------------------------------------------------------------------------- #
 
