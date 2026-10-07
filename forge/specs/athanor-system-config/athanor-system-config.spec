@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:54.fc43}
+Release:        %{?autorelease}%{!?autorelease:55.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -84,6 +84,13 @@ mkdir -p /etc/usbguard
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-55
+- athanor-uki-enroll binds the TPM2 keyslot to PCR 7 and the machine's systemd-pcrlock
+  policy (/var/lib/systemd/pcrlock.json) instead of PCRs 0, 4, 7 and 11, which firmware
+  and kernel updates change (doc_kernel_profile.md, D42). It refuses to run without that
+  policy, enrols a recovery key first when the volume has none, never wipes a passphrase
+  slot, and replaces earlier TPM2 keyslots only after the new one is enrolled.
+
 * Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-54
 - Drop /usr/share/athanor-system-config/athanor-forge.repo. It pointed at a GitHub
   Pages DNF channel that ADR-0076 retires, and nothing installed it into

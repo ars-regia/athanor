@@ -1,13 +1,39 @@
 #!/usr/bin/env bash
-set -e
-
-echo "Enrolling LUKS2 volume to TPM2..."
-# Bind LUKS2 to TPM2 PCRs 7 and 11
+# Enrol a LUKS2 volume in the TPM 2.0, bound to PCR 7 and to the machine's systemd-pcrlock
+# policy (doc_kernel_profile.md, D42). Run by an administrator; nothing runs it by itself.
+#
 # Usage: athanor-uki-enroll <luks-device>
-if [ -z "$1" ]; then
-    echo "Usage: $0 <luks-device>"
+#
+# - PCR 7 (Secure Boot state and authorities) is bound by value. PCRs 0, 4 and 11 are not:
+#   firmware and kernel updates change them, and a value bound to them stops unsealing.
+# - The pcrlock policy is the file `systemd-pcrlock make-policy` writes. This script does
+#   not create it: the policy must exist before a keyslot is bound to it.
+# - Existing passphrase slots are never wiped. A recovery key is enrolled first when the
+#   volume has none, so the volume always has a way in that does not need the TPM.
+# - Earlier TPM2 keyslots are wiped only by the same systemd-cryptenroll call, which
+#   enrols the new keyslot first and wipes only after that succeeded.
+set -euo pipefail
+
+policy=/var/lib/systemd/pcrlock.json
+
+if [[ $# -ne 1 ]]; then
+    echo "Usage: $0 <luks-device>" >&2
+    exit 2
+fi
+device=$1
+
+if [[ ! -f $policy ]]; then
+    echo "No systemd-pcrlock policy at $policy." >&2
+    echo "Create it first: /usr/lib/systemd/systemd-pcrlock make-policy --pcr=7 --pcr=14" >&2
     exit 1
 fi
 
-systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+4+7+11 "$1"
+header=$(cryptsetup luksDump --dump-json-metadata "$device")
+if ! grep -Eq '"type"[[:space:]]*:[[:space:]]*"systemd-recovery"' <<< "$header"; then
+    echo "Enrolling a recovery key. Write it down and keep it away from this machine."
+    systemd-cryptenroll --recovery-key "$device"
+fi
+
+systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=7 --tpm2-pcrlock="$policy" \
+    --wipe-slot=tpm2 "$device"
 echo "Enrollment complete."
