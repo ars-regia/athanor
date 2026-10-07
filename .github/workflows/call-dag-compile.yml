@@ -118,18 +118,11 @@ jobs:
           if [ -d "specs/athanor-${PKG_CLEAN}" ]; then SPEC_DIR="specs/athanor-${PKG_CLEAN}"; elif [ -d "specs/${PKG_CLEAN}" ]; then SPEC_DIR="specs/${PKG_CLEAN}"; fi
           if [ -z "$SPEC_DIR" ]; then echo "DEBUG: PKG_NAME='$PKG_NAME' PKG_CLEAN='$PKG_CLEAN'"; ls -la specs/; fi
             if [ -n "$SPEC_DIR" ]; then
-              if [ "$PKG_NAME" = "athanor-telemetry" ] || [ "$PKG_NAME" = "telemetry" ]; then
-                echo "🚀 [A/B TEST] Compiling $PKG_NAME via Nix Flake pure derivation!"
-                nix run nixpkgs#nix -- build .#athanor-telemetry-rpm
-                mkdir -p RPMS
-                cp result/RPMS/*.rpm RPMS/
-              else
             echo "📦 Compiling Custom Spec: $SPEC_DIR"
             # Fetch with network, then build with --network=none (forge golden rule 4).
             bash scripts/run_spec_build.sh "${BUILDER_IMAGE,,}" "$SPEC_DIR" \
               -e SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE}" \
               -v ${{ github.workspace }}/.sccache:/root/.cache/sccache
-              fi
           else
             echo "❌ [MARTIAL LAW FATAL] Attempted to build upstream package ${PKG_NAME} without local spec! Dynamic downloads are strictly forbidden!"
             exit 1

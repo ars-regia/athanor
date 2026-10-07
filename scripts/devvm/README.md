@@ -26,7 +26,7 @@ scripts/devvm/create.sh            # once: fetch the newest ISO (5 GB), install 
 scripts/devvm/start.sh             # boot (~20 s to SSH), report the guest GL renderer
 scripts/devvm/ssh.sh               # a shell; ssh.sh CMD runs CMD
 scripts/devvm/deploy.sh --restart-session \
-  target/release/athanor-shell-rs:/usr/bin/athanor-shell-rs
+  target/release/athanor-bar:/usr/bin/athanor-bar
 scripts/devvm/ssh.sh sudo poweroff # stop (or: systemctl --user stop athanor-devvm)
 scripts/devvm/reset.sh             # back to the freshly installed system
 ```
