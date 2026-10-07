@@ -19,4 +19,6 @@ Security-class updates (D34) apply at the next user-started shutdown or reboot, 
 
 ## Consequences
 
+Amended by ADR-0082: a postpone limited in time and an opt-out with a warning in Settings.
+
 Applied by `docs/architecture/doc_first_run.md`, `docs/architecture/doc_kernel_profile.md`, `docs/architecture/doc_shell.md`, `docs/architecture/doc_update_trust.md`.

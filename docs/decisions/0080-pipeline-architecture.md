@@ -54,4 +54,7 @@ priority.
   `doc_pipeline.md` as the target until PB12 makes them agree.
 - The repository settings gain rulesets, the merge queue, SHA pinning and the two
   environments; each is a maintainer action listed in the plan.
+- doc_update_delivery.md (UD6, decision 3 of section 15) and doc_update_trust.md (UT13)
+  are amended: the security class is set when the release is dispatched and signed in
+  `signing-images` with the images, so promotion holds no key in any class (PQ4).
 - Applied by `docs/architecture/doc_pipeline.md`.

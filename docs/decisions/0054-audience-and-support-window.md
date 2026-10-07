@@ -19,4 +19,6 @@ Audience and support: UEFI x86-64-v3 desktops and laptops (N5100-class excluded,
 
 ## Consequences
 
+Amended by ADR-0081: a support period of five years for the product line, with a published end date.
+
 No specification document under `docs/architecture` cites this record yet; it takes effect through the work it describes.

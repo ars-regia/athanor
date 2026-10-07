@@ -355,10 +355,15 @@ scan without blocking findings (PL26), the VSA, and the evidence of UD4 includin
 `hardware` for the NVIDIA variants. It is the same idea as Conforma's policy evaluation,
 implemented in one repository script.
 
-**PL31. A promotion carries freshness.** The promotion attestation (UD6) carries a
-monotonic version (the serial of UT9) and an expiry. A machine refuses a promotion whose
-version is lower than the one it runs (UT5, UD7) or whose expiry has passed. This gives
-the rollback and freeze protection of TUF without a TUF repository (section 11).
+**PL31. A release carries a monotonic version.** The version serial of UT9 is set when
+the release is dispatched and signed with the images, in the key-signed attestation of the
+`signing-images` job that also carries the security class (PQ4), so an offline machine
+verifies it with the shipped key (UT2, UT3). A machine refuses an image whose version is
+lower than the one it runs (UT5, UD7). This gives the rollback protection of TUF without a
+TUF repository (section 11). Freeze protection, an expiry that machines enforce, needs a
+signature renewed on a schedule, and so a key in a scheduled job; promotion holds no key
+(PL42). An expiry is therefore not part of this design: it needs a new requirement in
+doc_update_trust.md before any key is placed in a scheduled job.
 
 ### 4.9 Install path and machines
 
@@ -498,7 +503,9 @@ Targets are estimates until PB11 measures them; each becomes a metric of PL53.
 decides; Kernel Build no longer runs on unrelated pull requests.
 
 **PL44. The release path does not repeat what the merge queue proved.** `just check`
-runs once, on the `merge_group` commit; `release.yml` starts from the plan.
+runs once, on the `merge_group` commit; `release.yml` starts from the plan. `release.yml`
+refuses a commit whose `gate` check is not green, so a push that bypasses the queue (PQ5)
+is not released unchecked.
 
 **PL45. The bar is built once per run** and its output passed to the jobs that test it.
 
@@ -582,7 +589,7 @@ hand-copied.
 | Alternative                                   | Why not                                                                                                                                                                  |
 | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Konflux, Tekton Chains, Conforma as a service | they need a Kubernetes cluster to operate; principle 6 puts the logic in scripts, and PL30 implements the policy evaluation in one script against the same attestations |
-| A full TUF repository                         | rollback and freeze protection is what Athanor needs from TUF; PL31 gives it with a version and an expiry inside an attestation machines already verify                  |
+| A full TUF repository                         | rollback protection is what Athanor needs from TUF now; PL31 gives it with a version inside an attestation machines already verify. Freeze protection is deferred (PL31)                  |
 | Bazel or Buck2                                | a second build language for one maintainer and agents; content addressing already comes from OCI digests and `hash-` tags                                                |
 | Nix or Hydra as the CI driver                 | Nix stays the builder (A2-13); a second scheduler duplicates GitHub's without a gain the plan needs                                                                      |
 | slsa-github-generator                         | `actions/attest-build-provenance` in reusable workflows reaches Build L3 with a maintained action                                                                         |
@@ -607,7 +614,7 @@ step only the maintainer can take.
 | **PB3** | Pinned inputs, verified hops (PL8, PL12-PL14) | `.github/actions/verify-input`, `scripts/ci/registry.sh`, `forge/config/images.json`, every workflow `uses:` | `python3 scripts/verify.py pinning images` green; a release run's logs show a verification for every hop of PL12 | PB1 | 3-4 (estimate) |
 | **PB4** | SLSA Build L3 provenance and CycloneDX SBOM for every artifact | the six stages, `.github/actions/attest`, `scripts/ci/verify_release.sh`, `scripts/ci/sbom_check.py` | `scripts/ci/verify_release.sh <run_id>` exits 0 for a release run, covering every digest in `image-digests.txt` and `kernel-artifacts.env` | PB3 | 3 (estimate) |
 | **PB5** | Evidence, VSA and the policy gate | `accept.yml`, `promote.yml`, `system/promote.sh`, `scripts/ci/policy_check.py`, `scripts/ci/policy.json` | doc_update_delivery.md phases P1 and P2 gates, plus: `policy_check.py` refuses a candidate with each single piece of evidence removed (unit test), and the first automatic promotion carries a VSA | PB4 | 4 (estimate) |
-| **PB6** | Signed install path, machines on the signed transport | ISO signing in `call-sign-images.yml`, `system/athanor-install.ks`, UD15 | the ISO acceptance asserts `ostree-image-signed` and a digest reference; the desktop and laptop origin files name `ostree-image-signed` under `ars-regia` | PB5 | 2 (estimate) |
+| **PB6** | Signed install path, machines on the signed transport | keyless ISO signing in the stage that builds the ISO (PL32), `system/athanor-install.ks`, UD15 | the ISO acceptance asserts `ostree-image-signed` and a digest reference; the desktop and laptop origin files name `ostree-image-signed` under `ars-regia` | PB5 | 2 (estimate) |
 | | **[M]** UD15 on the desktop and laptop (needs `sudo`) | | | | |
 | **PB7** | CVD, support period, documentation | `.github/SECURITY.md`, `docs/compliance/` (Annex VII skeleton, Annex I mapping, reporting runbook), `os-release` `SUPPORT_END` | `python3 scripts/verify.py docs` green with the new files; `grep SUPPORT_END /usr/lib/os-release` in the image acceptance | PB0 (parallel with PB1-PB6) | 2 (estimate) |
 | | **[M][LAWYER]** e-mail channel, coordinating CSIRT, the declaration template | | | | |
@@ -634,7 +641,7 @@ The maintainer answered every question as recommended on 2026-10-07. Items marke
 | PQ8  | The CVD contact besides GitHub private reporting | A project e-mail alias owned by the maintainer, named in `SECURITY.md` [LAWYER for the CSIRT]. |
 | PQ9  | Are the SBOMs public? | Yes, in the evidence bundle: the product is open source and publication costs nothing. |
 | PQ10 | Visibility of `azoth-nvidia` | Public for the open-module branch; the legacy branch only after a licence check [LAWYER]. |
-| PQ11 | Which edge of the `update → recovery` cycle is wrong? | Drop the synthetic all-to-all tier edges and build the graph from the specs' requirements only; tiers stay as publication groups. |
+| PQ11 | Which edge of the `update → recovery` cycle is wrong? | Drop the synthetic all-to-all tier edges and build the graph from the specs' requirements only; tiers stay as publication groups. The edge removal lands with the `graph` check, in PB12. |
 | PQ12 | Red verify checks when `just check` becomes the gate | Adopt with `known-red.txt` (issue and expiry per entry, only shrinking) rather than blocking PB1 on fixing them all first. |
 
 ## 14. Changes to other documents
@@ -643,6 +650,12 @@ The maintainer answered every question as recommended on 2026-10-07. Items marke
   become generated in PB12.
 - doc_update_delivery.md: UD8's 90-day figure and UT10 follow section 5; UD5's promotion
   gains the policy check of PL30.
-- doc_update_trust.md: UT13 follows ADR-0082 (postpone and opt-out).
+- doc_update_delivery.md: UD6 and decision 3 of section 15 follow PQ4. The security class
+  and the version serial are set when the release is dispatched and signed by the
+  `signing-images` job with the images; `promote.sh` holds no key, and promotion is keyless
+  in every class. UD6's workflow identity `promote-stable.yml` becomes `promote.yml` (PB5).
+- doc_update_trust.md: UT13 follows ADR-0082 (postpone and opt-out). Its security-class
+  marker and test 18 read the class from the key-signed attestation of the `signing-images`
+  job, not from a promotion attestation (PQ4).
 - `docs/operations/secrets.md`: the two environments and the App replace the personal
   tokens and `signing`.

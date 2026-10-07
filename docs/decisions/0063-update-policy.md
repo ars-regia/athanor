@@ -19,4 +19,6 @@ greenboot auto-reboot off: a failed health check marks the deployment bad, the s
 
 ## Consequences
 
+Amended by ADR-0082: a postpone limited in time and an opt-out with a warning in Settings.
+
 No specification document under `docs/architecture` cites this record yet; it takes effect through the work it describes.
