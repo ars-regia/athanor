@@ -383,6 +383,26 @@ class SigningTest(unittest.TestCase):
         third_party = job.replace(f"uses: {CHECKOUT}", "uses: someone/action@v1")
         self.assertNotEqual(self.problems({"k.yml": workflow(third_party)}, keys=both), [])
 
+    def test_the_old_signing_environment_is_declared_only_during_the_key_rotation(self):
+        """environments.json declares `signing` as it is live, keys included, until key 1
+        leaves: during the rotation it holds no key of its own; after it, it fails rule 5."""
+        environments = json.loads(json.dumps(ENVIRONMENTS))
+        environments["signing"] = json.loads(json.dumps(environments["signing-images"]))
+        environments["signing"]["secrets"] = ["COSIGN_PRIVATE_KEY", "SECUREBOOT_SIGNING_KEY"]
+        both = ("athanor-image-1.pub", "athanor-image-2.pub")
+        self.assertEqual(self.problems({"k.yml": workflow(SIGN_JOB)}, environments, keys=both), [])
+        self.assertIn(
+            ".github/settings/environments.json: COSIGN_PRIVATE_KEY is in signing and in "
+            "signing-images: each key has one environment (D43)",
+            self.problems({"k.yml": workflow(SIGN_JOB)}, environments, keys=both[1:]),
+        )
+        environments["signing"]["can_admins_bypass"] = True
+        self.assertIn(
+            ".github/settings/environments.json: the signing environment lets administrators "
+            "bypass its reviewer (D43)",
+            self.problems({"k.yml": workflow(SIGN_JOB)}, environments, keys=both),
+        )
+
     def test_rule_5_a_secret_in_two_signing_environments_fails(self):
         environments = json.loads(json.dumps(ENVIRONMENTS))
         environments["signing-images"]["secrets"].append("SECUREBOOT_SIGNING_KEY")

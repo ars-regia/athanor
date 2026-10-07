@@ -3,7 +3,7 @@ id: A2-31
 title: "Session memory budget and prompter timing"
 date: 2026-10-06
 status: accepted
-issues: []
+issues: [151]
 areas: [session, security]
 ---
 
@@ -22,4 +22,4 @@ Recorded in the maintainer decision log, section 'Audit 2 decisions (2026-10-05,
 
 ## Consequences
 
-No specification document under `docs/architecture` cites this record yet; it takes effect through the work it describes.
+Applied by `docs/architecture/doc_lock_and_prompts.md` (LP12, step 6) and cited by `docs/architecture/doc_threat_model.md` and `docs/architecture/doc_shell_standard.md`.

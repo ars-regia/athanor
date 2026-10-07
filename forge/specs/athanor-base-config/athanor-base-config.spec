@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-base-config
 Version:        43.0.0
-Release:        15%{?dist}
+Release:        17%{?dist}
 Summary:        Athanor OS Base Configuration (Systemd, Branding, GPG)
 
 License:        GPL-3.0-or-later
@@ -41,7 +41,7 @@ Obsoletes:      system-release < 43
 This package provides the foundational configuration for Athanor Base: os-release
 and the fedora-release identity, Dracut configuration, systemd presets, units and
 tmpfiles, sshd, coredump and journald drop-ins, SELinux mode,
-Plymouth branding, Polkit rules, repository definitions and GPG keys.
+Plymouth branding, repository definitions and GPG keys.
 
 %prep
 # No extraction needed, files are injected in install phase.
@@ -73,12 +73,19 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 /usr/lib/sysusers.d/*
 /usr/share/pixmaps/*
 /usr/share/plymouth/themes/spinner/watermark.png
-/usr/share/polkit-1/rules.d/*
 
 %changelog
-* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 43.0.0-15
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 43.0.0-17
 - Drop SUPPORT_END from os-release until 1.0: the five-year support period runs from
-  the date 1.0 is placed on the market, so the 1.0 release sets it (PQ7)
+  the date 1.0 is placed on the market, so the 1.0 release sets it (PQ7, ADR-0081)
+
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 43.0.0-16
+- Drop org.containers.bootc.rules: no package of the image declares the action it grants
+
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 43.0.0-15
+- Drop the comment lines from os-release: bootc-image-builder rejects any non-empty
+  line without "=" ("readOSRelease: invalid input"), so the ISO could not be built.
+  ADR-0081 records where SUPPORT_END comes from.
 
 * Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 43.0.0-14
 - Add SUPPORT_END to os-release: the end of the five-year support period of the product

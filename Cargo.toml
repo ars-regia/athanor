@@ -17,7 +17,6 @@ members = [
   "forge/specs/athanor-update/athanor-update-notify-1.0.0",
   "forge/specs/athanor-xdg-desktop-portal-athanor/xdg-desktop-portal-athanor-1.0.0",
   "forge/specs/athanor-niri-ipc",
-  "system/confidential_computing/athanor-attestation",
   "system/ebpf/ebpf-core",
   "system/ebpf/ebpf-loader",
   "system/athanor-agentic-kernel",
@@ -57,6 +56,10 @@ exclude = [
   "forge/specs/athanor-recovery/athanor-recovery-1.0.0",
   "forge/specs/athanor-store-rs/athanor-store-rs-1.0.0",
   "system/athanor-oobe",
+  # Out since 2026-10-07 (A2-9, #151): attestation is outside the 1.0 threat model
+  # (doc_threat_model.md TM7) and is rewritten on Keylime with the PCR 11 and PCR 12
+  # policy of doc_kernel_profile.md before mesh admission depends on it.
+  "system/confidential_computing/athanor-attestation",
 ]
 
 resolver = "2"
