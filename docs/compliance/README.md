@@ -23,7 +23,8 @@ The coordinated vulnerability disclosure policy is [`.github/SECURITY.md`](../..
 
 - Support period of five years for the product line; the end date is published in
   `.github/SECURITY.md`, in the release notes and as `SUPPORT_END` in `/usr/lib/os-release`
-  (ADR-0081, decision 2).
+  (ADR-0081, decision 2). The five years run from 1.0, so images before 1.0 carry no
+  `SUPPORT_END` (doc_pipeline.md section 5, PQ7).
 - Digests promoted to `:stable` are never deleted from GHCR; each promoted release has a
   GitHub Release with a signed evidence bundle (ADR-0081, decision 3; doc_pipeline.md PL35,
   PL42).

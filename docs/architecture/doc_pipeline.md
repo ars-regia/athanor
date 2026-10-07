@@ -5,10 +5,10 @@
   of a manufacturer, and the ordered plan that reaches it. [doc_ci.md](doc_ci.md) describes
   the workflows as they are; this document describes what they become and why.
 - **Owner:** the maintainer.
-- **Status:** approved at revision 1 (2026-10-07). **Revision 2 is a draft awaiting the
-  maintainer's approval:** it applies the adversarial review of the accepted architecture,
-  is rewritten on `iso-v0` at `e238b833` (after #265, #266 and #268), and lists the decisions
-  it changes in section 15. The maintainer approved revision 1 and
+- **Status:** approved at revision 2 (2026-10-07). Revision 2 applies the adversarial review
+  of the accepted architecture, is rewritten on `iso-v0` at `e238b833` (after #265, #266 and
+  #268), lists its changes in section 15, and the decisions it changes are recorded in
+  ADR-0088. The maintainer approved revision 1 and
   answered PQ1-PQ12 as recommended on 2026-10-07; the blocks of section 12 are built in order. Measured figures come from the GitHub API run data of 2026-09-23 to
   2026-10-07 (784 runs) collected by the pipeline review of 2026-10-07; every other number is
   labelled as an estimate. Amended 2026-10-07 (#265): the target's two signing jobs are jobs of `release.yml`,
@@ -22,7 +22,8 @@
   [secrets.md](../operations/secrets.md), the settings record
   [github-settings.md](../operations/github-settings.md).
 - **Binding decisions:** [ADR-0080](../decisions/0080-pipeline-architecture.md) (this
-  architecture and the two signing environments), [ADR-0081](../decisions/0081-cra-compliance-posture.md)
+  architecture and the two signing environments), [ADR-0088](../decisions/0088-pipeline-revision-2.md)
+  (its amendments by revision 2), [ADR-0081](../decisions/0081-cra-compliance-posture.md)
   (CRA posture, support period, archive), [ADR-0082](../decisions/0082-update-control.md)
   (update control), [ADR-0075](../decisions/0075-engineering-gates.md) (`just check`),
   [ADR-0076](../decisions/0076-platform-scope-for-1-0.md), [A2-4](../decisions/0039-delivery-repairs-before-1-0.md),
@@ -64,11 +65,16 @@ These are the maintainer's, and this document does not reopen them.
    `signing-images` holds the cosign key. Both deploy only from the protected branches
    `iso-v0` and `main`. A release cycle asks for **at most two approvals** (amends A2-27).
    A job that holds a key builds nothing and runs no third-party action, and
-   `verify.py workflows` enforces it. `MOK_PRIVATE_KEY` is retired. Agents later push with
-   their own GitHub App identity, so that `prevent_self_review` can be switched on.
-   Revision 2 proposes two amendments of ADR-0080 for the maintainer's approval:
-   `MOK_PRIVATE_KEY` is retired at the close of the image key rotation (PB5b), and
-   `prevent_self_review` waits for a second human reviewer (PL5).
+   `verify.py workflows` enforces it. `MOK_PRIVATE_KEY` is retired.
+   [ADR-0088](../decisions/0088-pipeline-revision-2.md) amends ADR-0080: the plan gains PB5b
+   and the stages gain `call-iso.yml` (section 3.2); Build L3 is claimed for artifacts built
+   on GitHub-hosted runners and Build L2 for the self-hosted kernel and the signed derivatives
+   (PL21), and a spike decides between a repository script and Conforma's `ec` CLI for the
+   policy gate (PL30); `MOK_PRIVATE_KEY` is retired at the close of the image key rotation
+   (PB5b); `prevent_self_review` waits for a second human reviewer (PL5); the security class
+   is set and signed when the release is signed (PQ4); agents on the workstation push with a
+   GitHub App identity, not a token (PL5); and SBOMs carry each ecosystem's strongest hash,
+   with SHA-512 for what Athanor delivers and the gap a documented deviation (PL24).
 2. **No compiler cache for the kernel** (PR #250).
 3. **CRA: comply now, at manufacturer level** (ADR-0081). Support period of five years for
    the product line, with the Fedora base rebased forward and the end date published.
@@ -92,7 +98,8 @@ spec in the system stage).
 ## 3. Target topology
 
 This section describes the target. Of its files, only `pr.yml` and `call-kernel.yml` (PR
-#266) and the `kvm` composite action exist on `iso-v0`; every other entry workflow, stage and
+#266), `maintenance.yml` (PR #264, with the settings drift check of PL52 alone) and the `kvm`
+composite action exist on `iso-v0`; every other entry workflow, stage and
 composite action, and the `sign-kernel` and `sign-images` jobs, are proposed. Today the
 two signing jobs are `nvidia-kmod-sign` (environment `signing-kernel`) and
 `sign-system-images` (environment `signing` during the image key rotation of
@@ -120,9 +127,10 @@ jobs that sign, which are jobs of `release.yml` itself (section 3.2).
 | `call-builder.yml`        | the builder image, by content hash (UD42)                                                               | hosted                             |
 | `call-packages.yml`       | one matrix over the dirty packages of `plan.json`; tier repositories by `hash-` tag (PR #248, UD44)      | hosted                             |
 | `call-kernel.yml`         | Azoth, `azoth-devel`, the NVIDIA modules once per kernel or NVIDIA change, unsigned. Today it is the kernel check `pr.yml` calls (build, boot, modules, verdict), publishing nothing | self-hosted ephemeral guest (build), hosted (the rest) |
-| `call-kernel-publish.yml` | after the `sign-kernel` job of `release.yml`: boots the signed modules, publishes `azoth-nvidia` and `azoth-boot` | hosted, KVM for the boot |
+| `call-kernel-publish.yml` | after the `sign-kernel` job of `release.yml`: boots the signed modules, publishes `azoth-nvidia` and `azoth-boot` with the provenance of the signed derivatives (PL19) | hosted, KVM for the boot |
 | `call-image.yml`          | the `system` stage once and the three variants from its digest (UD40), every installed RPM checked against its spec (`system/check-image-rpms.sh`, PR #274); pushes `:<run_id>` only (UD24) | hosted                             |
 | `call-tag.yml`            | after the `sign-images` job of `release.yml`: verifies the key-based signature as a machine does, then moves the tags (UD25) | hosted |
+| `call-iso.yml`            | after the `sign-images` job of `release.yml`: builds the ISO from the signed digest of the default image, signs its `SHA256SUMS` keylessly with build provenance beside it, moves the ISO's `:latest` (PL32, PL35). Today the ISO is built in `call-system-image.yml` | hosted |
 
 The two jobs that hold a key are not stages: `sign-kernel` (environment `signing-kernel`)
 and `sign-images` (environment `signing-images`) are jobs of `release.yml`, each between
@@ -187,7 +195,7 @@ flowchart LR
     PK & KP --> IM[call-image]
     IM --> SI[sign-images job<br/>env signing-images]
     SI --> L["call-tag<br/>:latest"]
-    SI --> ISO[ISO]
+    SI --> ISO["call-iso<br/>ISO"]
   end
   R --> A["accept.yml<br/>evidence + VSA"]
   A --> PR2["promote.yml<br/>policy, dwell, :stable"]
@@ -195,7 +203,7 @@ flowchart LR
   PR2 --> M["machines verify signature<br/>(+ signed release attestation from 1.0)"]
 ```
 
-### 3.5 Today's 28 workflows
+### 3.5 Today's 29 workflows
 
 | Workflow                         | Target                                                                                             |
 | -------------------------------- | -------------------------------------------------------------------------------------------------- |
@@ -206,7 +214,7 @@ flowchart LR
 | `call-kernel.yml`                | kept: today the kernel check of `pr.yml` (PR #266); it gains the release build of `kernel-build.yml` and the module build of `call-nvidia-kmod-prepare.yml` |
 | `call-lint.yml`                  | deleted: `just check` in `pr.yml`; the release path does not lint again (PL44). Today the Orchestrator calls it once per run (PR #268) and `kernel-build.yml` once more |
 | `call-nvidia-kmod-prepare.yml`   | merged into `call-kernel.yml`: since PR #265 it holds the artifacts, build and prepare jobs of the module cycle |
-| `call-system-image.yml`          | split into `call-image.yml` and `call-tag.yml`; its signing job already moved to the Orchestrator (PR #265) and becomes the `sign-images` job of `release.yml` |
+| `call-system-image.yml`          | split into `call-image.yml`, `call-tag.yml` and `call-iso.yml`, which takes over its ISO build; its signing job already moved to the Orchestrator (PR #265) and becomes the `sign-images` job of `release.yml` |
 | `cosmic-comp-bump.yml`           | merged into `bots.yml`                                                                             |
 | `cosmic-comp-rebase.yml`         | merged into `maintenance.yml` (weekly)                                                             |
 | `forge-ghcr-cleanup.yml`         | merged into `maintenance.yml` (weekly janitor, section 5)                                               |
@@ -216,6 +224,7 @@ flowchart LR
 | `kernel-build.yml`               | split: the check into `pr.yml` (done through `call-kernel.yml`, PR #266; its own `pull_request` trigger goes with the PB1 follow-up), the build and the publication into `call-kernel.yml`. It signs nothing: `vmlinuz` is signed by the Orchestrator's `nvidia-kmod-sign`, which becomes `sign-kernel` |
 | `kernel-bump.yml`                | merged into `bots.yml`                                                                             |
 | `kernel-weekly.yml`              | merged into `maintenance.yml` (weekly)                                                             |
+| `maintenance.yml`                | kept (PR #264, the daily settings drift check of PL52); gains the scheduled jobs merged into it (PB12) |
 | `nix-registry-bump.yml`          | merged into `bots.yml`                                                                             |
 | `nix-vanguard.yml`               | deleted: its triggers name a branch without a release role and `just check` covers the flake      |
 | `nvidia-build.yml`               | merged into `call-kernel.yml`                                                                      |
@@ -228,7 +237,7 @@ flowchart LR
 | `spec-build-check.yml`           | merged into `pr.yml`, selected by change detection                                                 |
 | `system-image-check.yml`         | merged into `pr.yml`, selected by change detection                                                 |
 
-28 files become 12 (six entries, six stages) plus five composite actions.
+29 files become 13 (six entries, seven stages) plus five composite actions.
 
 ## 4. The trust chain, end to end
 
@@ -240,7 +249,11 @@ reject force pushes and deletions, require a pull request, require the `gate` ch
 rulesets, because a bypass actor is exempt from every rule of the ruleset that names it: the
 integrity ruleset (merge queue, required `gate`, linear history, no force push, no deletion)
 has **no bypass actor**; the review ruleset (pull request, with a code-owner review once a
-second code owner exists, PL4) is the only one with a bypass actor.
+second code owner exists, PL4) is the only one with a bypass actor, in the "for pull requests
+only" mode. The bypass actor is the repository Admin role (`RepositoryRole` 5), which the
+maintainer alone holds today: a ruleset does not accept a single user as a bypass actor.
+Today `rulesets.json` (PR #264) holds one ruleset, `product-branches`, whose bypass therefore
+also covers the merge queue and `gate`; PB2 splits it in two.
 (SSDF PS.1; Scorecard Branch-Protection.)
 
 **PL2. Changes land through the merge queue.** The `gate` runs on the `merge_group` commit,
@@ -259,8 +272,8 @@ Pull requests opened by an agent or a bot require the review of a code owner onc
 code owner exists: until then "Require review from Code Owners" stays off
 ([ADR-0062](../decisions/0062-governance-targets-confirmed.md), A2-25; PR #264 sets it in
 `.github/settings/`), and the merge queue and `gate` are the controls on those pull requests. The
-maintainer is the bypass actor of the review ruleset only, in the "for pull requests only"
-mode, recorded in the settings file (PQ5): the maintainer's own pull requests merge without a second
+repository Admin role, held by the maintainer alone, is the bypass actor of the review ruleset
+only, in the "for pull requests only" mode, recorded in the settings file (PL1, PQ5): the maintainer's own pull requests merge without a second
 review and still pass the merge queue and `gate`. No one pushes directly to a product
 branch, in an emergency either: an urgent fix is a pull request whose change detection
 selects the minimum.
@@ -268,9 +281,12 @@ selects the minimum.
 **PL5. Agents and bots act through GitHub App identities, never personal tokens.** Tokens
 come from `actions/create-github-app-token` per job, scoped to the repository and the
 permissions the job needs, and expire within the hour. Personal access tokens are removed
-from the repository secrets. There is one App per role (bots; agents, if the maintainer
-chooses an App for them in PB2), and each App's private key lives in an environment scoped
-to the job that mints its tokens, never as a repository secret, with a row in
+from the repository secrets. There is one App per role, the bots and the agents. Agents on
+the workstation push with their App identity, not with a fine-grained token: a token of the
+maintainer would make an agent's pull request the maintainer's, which passes under the review
+bypass and voids the code-owner review of PL4. The bots' App private keys live in environments
+scoped to the job that mints their tokens, never as a repository secret; the agents' App private
+key lives in the maintainer's secret store. Each key has a row in
 `docs/operations/secrets.md` for its custody and rotation.
 
 `prevent_self_review` stays off while the maintainer is the only required reviewer of the
@@ -280,8 +296,10 @@ and the maintainer triggers every release they merge, dispatch or re-run, so the
 would leave those runs without a possible approver. Approval resting on one account is an
 accepted risk, bounded by the deployment branch restriction to the protected branches, the
 integrity ruleset without bypass (PL1), the key isolation of PL11 and the absence of an
-administrator bypass (PL15). `prevent_self_review` is switched on when a second human
-reviewer is listed in both environments (D43, as revision 2 proposes for ADR-0080).
+administrator bypass (PL15). Which actor GitHub records for a push made by the merge queue,
+and so who triggered the release run it starts, is measured in PB2's gate.
+`prevent_self_review` is switched on when a second human reviewer is listed in both
+environments (D43, ADR-0088).
 
 **PL6. Bot pull requests merge through the same queue and the same gate.** Auto-merge is
 enabled by the bot's App identity from a default-branch run, never from a job that runs
@@ -295,8 +313,9 @@ each job asks for exactly what it uses. No workflow uses `pull_request_target` o
 Token-Permissions, Dangerous-Workflow.)
 
 **PL8. Everything executed is pinned.** Actions by full commit SHA (with
-`sha_pinning_required: true` in the repository settings, switched on only once
-`verify.py pinning` is green, so no workflow fails at start in between), container images by digest
+`sha_pinning_required: true` in the repository settings, switched on only once every action
+is pinned by SHA, the action part of `verify.py pinning`, so no workflow fails at start in
+between), container images by digest
 (UD43), tools from the repository flake and its `flake.lock`, never from an unpinned
 `nixpkgs#` reference. `verify.py` gains a `pinning` check. The self-hosted runner's release is pinned by SHA-256
 (`scripts/runner/build-image.sh`), the runner is configured not to replace itself when a job
@@ -368,7 +387,11 @@ sequence of releases (UD27): new key shipped in a promoted image, then used.
 the `azoth-signer` image, kernel, devel, modules, boot image, the three system images and the ISO. Provenance is the
 `https://slsa.dev/provenance/v1` predicate, generated by `actions/attest-build-provenance`
 inside the stage that built the artifact, in the job that built it, so the provenance's
-runner environment is the build's.
+runner environment is the build's. The signed derivatives are the one exception: the signed
+`vmlinuz` of `azoth-boot` and the signed NVIDIA modules of `azoth-nvidia` are new bytes
+written by the `sign-kernel` job, which runs no step but the signer (PL11). Their provenance
+is generated by `call-kernel-publish.yml`, names the unsigned digest and the signing run as
+its inputs, and claims Build L2 (PL21).
 
 **PL20. Provenance names its inputs by digest:** source commit, builder digest, base image
 digest, tier digests, kernel artifacts. A digest absent from the provenance is an input
@@ -380,9 +403,11 @@ that must have built it, and the release evidence records the result. Public sta
 verifies and nothing higher (RA-3). The script passes `--deny-self-hosted-runners` for every
 artifact claimed at Build L3 and records each attestation's runner environment in the
 evidence. Artifacts built on the self-hosted runner (`azoth`, `azoth-devel`, the debuginfo
-and MicroVM kernels, and the signed `vmlinuz` of `azoth-boot`, which carries that build's
-bytes) claim Build L2; Build L3 for them would need the kernel build on a hosted runner,
-which is not planned.
+and MicroVM kernels) and the signed derivatives of PL19 (the signed `vmlinuz` of
+`azoth-boot`, which carries that build's bytes, and the signed modules of `azoth-nvidia`)
+claim Build L2. Build L3 for the kernel would need its build on a hosted runner, which is
+not planned; for a signed derivative it would need provenance from the job that wrote its
+bytes, which PL11 forbids.
 
 ### 4.6 SBOM
 
@@ -468,7 +493,7 @@ doc_update_trust.md before any key is placed in a scheduled job.
 
 **PL32. The ISO is signed and names its image by digest.** The ISO is built after the
 images are signed, so its `SHA256SUMS` is signed keylessly (Sigstore) by the stage that
-built it, with build provenance beside it, and published with the ISO: no key and no
+built it, `call-iso.yml`, with build provenance beside it, and published with the ISO: no key and no
 approval, and a user verifies it with `cosign verify-blob` against that exact workflow
 identity (PQ2). The kickstart installs the promoted digest through the signed transport
 (UD2), and the installer carries the policy of UT3 (UD22).
@@ -486,7 +511,7 @@ action.
 **PL35. One rule per tag, one writer per tag** (UD1). `:<run_id>` and `hash-<h>` are
 immutable names written once; `:latest` is written on a push to the default branch only: for the system
 images by `call-tag.yml` after it verified the key-based signature as a machine does (UD25),
-for the ISO by the stage that builds it after its keyless signature verified (PL32); the
+for the ISO by `call-iso.yml` after its keyless signature verified (PL32); the
 kernel has no `:latest`, since every consumer reads it by digest (PL13). `:stable`,
 `:stable-previous`, `:stable-<YYYYMMDD>` are written only by `promote.sh`. There is one
 writer per tag and repository, and `verify.py workflows` enforces it in the workflows and in
@@ -522,7 +547,8 @@ A2-17). The line is each major version, and its five years run from the date 1.0
 placed on the market (PQ7). The end date is published in `SECURITY.md`, in the release
 notes and as `SUPPORT_END` in `/usr/lib/os-release` (`athanor-base-config`). The 1.0
 release adds `SUPPORT_END`; images before it carry none, because no support period is
-promised for them.
+promised for them. The acceptance of the 1.0 release asserts it
+(`grep SUPPORT_END /usr/lib/os-release`), the check PB7 leaves to that release.
 
 ## 6. CRA operations
 
@@ -724,7 +750,7 @@ runs (Node runtime, action majors), so a deprecation has an owner before it brea
 | ------------------ | --------------------------------------------------------------------------- |
 | `workflows` (ext.) | PL3, PL7, PL10 (no cache on the release path), PL11, PL14, PL35, PL47, section 9 rules |
 | `docs` (ext.)      | section 3.5 matches `.github/workflows` until PB12                          |
-| `pinning` (new)    | PL8, PL13                                                                    |
+| `pinning` (new)    | PL8, PL13 (actions in PB2; containers and the flake in PB3)                  |
 | `owners` (new)     | PL4                                                                          |
 | `graph` (new)      | PL48 (`graphlib` cycle check on the package graph)                           |
 | `images` (new)     | PL14 (one variant list, used by every workflow and script)                   |
@@ -752,26 +778,26 @@ step only the maintainer can take.
 
 | Block | Goal | Scope | Gate | Depends on | Effort |
 | ----- | ---- | ----- | ---- | ---------- | ------ |
-| **PB0** | Publication under `ars-regia` and the two signing environments (D43) | branch `perf/sign-only-uki`, PR #249, `.github/settings/environments.json`, `nvidia-kmod.yml` and `call-system-image.yml` (whose signing jobs PR #265 moved to `athanor-forge-orchestrator.yml`), `docs/operations/secrets.md` | `python3 scripts/verify.py workflows` green with the key-isolation rule; one release run on `iso-v0` publishes three signed `:<run_id>` images under `ars-regia` with at most two approvals; the live environments list `signing-kernel` and `signing-images`, plus `signing` while the image key rotation of secrets.md section 4.1 runs, which `environments.json` does not record and the D43 lint of `verify.py` treats as `signing-images` until `athanor-image-1.pub` leaves `system/keys/`; all deployable from `iso-v0` and `main` only | PR #249 | 2-3 (estimate) |
+| **PB0** | Publication under `ars-regia` and the two signing environments (D43) | `.github/settings/environments.json`, `nvidia-kmod.yml` and `call-system-image.yml` (whose signing jobs PR #265 moved to `athanor-forge-orchestrator.yml`), `docs/operations/secrets.md` | `python3 scripts/verify.py workflows` green with the key-isolation rule; one release run on `iso-v0` publishes three signed `:<run_id>` images under `ars-regia` with at most two approvals; the live environments list `signing-kernel` and `signing-images`, plus `signing` while the image key rotation of secrets.md section 4.1 runs, which `environments.json` records during the rotation (secrets.md ENV6) and the D43 lint of `verify.py` treats as an alias of `signing-images` until `athanor-image-1.pub` leaves `system/keys/`; all deployable from `iso-v0` and `main` only | none | 2-3 (estimate) |
 | | **[M]** create the two environments, move the secrets, approve the run; `signing` and `MOK_PRIVATE_KEY` stay until PB5b | | | | |
 | **PB1** | One gate (ADR-0075); built in PR #266 except the **[M]** step and its follow-up | `pr.yml`, `Justfile` (`check`), `scripts/ci/changes.py`, `scripts/ci/gate.py`, `scripts/ci/known-red.txt`, the `pull_request` triggers of `kernel-build.yml` and `spec-build-check.yml`, `.github/settings/branch-protection.json` | `just check` passes locally and in `pr.yml`; a documentation-only PR finishes with Kernel Build skipped and `gate` green; a PR with a failing selected job has `gate` red | PB0 | 3 (estimate) |
 | | **[M]** apply `branch-protection.json`, which adds `gate` to `Kernel gate` and `Spec gate` on `iso-v0` (`docs/operations/github-settings.md` section 8); the follow-up that drops their `pull_request` triggers removes the two names from the file in the same change, and until it, Kernel Build still runs on a documentation-only PR, while the `kernel` job of `pr.yml` is skipped | | | | |
-| **PB2** | Source, review and settings controls, alerting | `.github/settings/rulesets.json`, `actions.json`, `environments.json`, `CODEOWNERS`, `scripts/github-settings/ghsettings.py` (extended), `.github/actions/alert`, the five action references still pinned by tag, `scripts/verify.py` (`pinning`) | `python3 scripts/github-settings/ghsettings.py diff` exits 0 against the live repository; the integrity ruleset (merge queue, `gate`, no bypass actor) and the review ruleset are live on both product branches; `python3 scripts/verify.py pinning` is green before SHA pinning is switched on; a release run triggered by the maintainer is approvable by him (PL5); the three personal tokens are absent from the secrets list; a forced failure of a scheduled job opens a `ci-alert` issue | PB1 | 2 (estimate) |
-| | **[M]** create one GitHub App per role, each private key in an environment scoped to its token-minting job with a row in secrets.md; decide the identity of the agents on the workstation (an App whose key lives in the maintainer's secret store, or a fine-grained token with an expiry); apply the two rulesets; enable the merge queue; enable SHA pinning once `verify.py pinning` is green | | | | |
+| **PB2** | Source, review and settings controls, alerting | `.github/settings/rulesets.json`, `actions.json`, `environments.json`, `CODEOWNERS`, `scripts/github-settings/ghsettings.py` (extended), `.github/actions/alert`, the three action references still pinned by tag (`call-dag-compile.yml`, `iso-acceptance.yml`, `nix-vanguard.yml`), `scripts/verify.py` (the action part of `pinning`) | `python3 scripts/github-settings/ghsettings.py diff` exits 0 against the live repository; the integrity ruleset (merge queue, `gate`, no bypass actor) and the review ruleset (the Admin role as bypass actor, for pull requests only) are live on both product branches; every action is pinned by full commit SHA (the action part of `verify.py pinning`; containers and the flake are PB3's) before SHA pinning is switched on; a release run triggered by the maintainer is approvable by the maintainer (PL5), and the actor GitHub records for a push made by the merge queue is measured on a live merge and written into PL5; the three personal tokens are absent from the secrets list; a forced failure of a scheduled job opens a `ci-alert` issue | PB1 | 2 (estimate) |
+| | **[M]** create one GitHub App per role, each private key in an environment scoped to its token-minting job with a row in secrets.md; create the agents' App, its private key in the maintainer's secret store (PL5); apply the two rulesets; enable the merge queue; enable SHA pinning once every action is pinned by SHA | | | | |
 | **PB3** | Pinned inputs, verified hops (PL8, PL12-PL14) | `.github/actions/verify-input`, `scripts/ci/registry.sh`, `forge/config/images.json`, the key-isolation constants of `scripts/verify.py`, `scripts/runner/` (PL8) | `python3 scripts/verify.py pinning images workflows` green, with no literal registry host in the key-isolation lint; a release run's logs show a verification for every hop of PL12; the runner VM does not replace its pinned runner release | PB1 | 3-4 (estimate) |
-| **PB4** | SLSA provenance (Build L3 hosted, L2 self-hosted, PL21) and CycloneDX SBOM for every artifact | the six stages, the `azoth-signer` image, `.github/actions/attest`, `scripts/ci/verify_release.sh`, `scripts/ci/sbom_check.py` | `scripts/ci/verify_release.sh <run_id>` exits 0 for a release run, covering every digest in `image-digests.txt` and `kernel-artifacts.env`, and refuses an L3 claim on an attestation from a self-hosted runner; the `sbom_check.py` fixture tests pass for each ecosystem | PB3 | 3 (estimate) |
+| **PB4** | SLSA provenance (Build L3 hosted, L2 self-hosted, PL21) and CycloneDX SBOM for every artifact | the seven stages, the `azoth-signer` image, `.github/actions/attest`, `scripts/ci/verify_release.sh`, `scripts/ci/sbom_check.py`, `docs/compliance/` (the SHA-512 deviation record of PL24) | `scripts/ci/verify_release.sh <run_id>` exits 0 for a release run, covering every digest in `image-digests.txt` and `kernel-artifacts.env`, the signed `vmlinuz` and modules with provenance from `call-kernel-publish.yml` naming the unsigned digest and the signing run (PL19), and refuses an L3 claim on an attestation from a self-hosted runner or for a signed derivative; the `sbom_check.py` fixture tests pass for each ecosystem; `grep -ril sha-512 docs/compliance` names the deviation record of PL24 | PB3 | 3 (estimate) |
 | **PB5** | Evidence, VSA and the policy gate | the Conforma `ec` spike first (PL30), `accept.yml`, `promote.yml`, `system/promote.sh`, `scripts/ci/policy_check.py`, `scripts/ci/policy.json` | doc_update_delivery.md phases P1 and P2 gates, plus: `policy_check.py` refuses a candidate with each single piece of evidence removed (unit test), and the first automatic promotion carries a VSA | PB4 | 4 (estimate) |
 | **PB5b** | Close of the image key rotation (secrets.md section 4.1) | `system/keys/`, `.github/settings/environments.json`, the `sign-system-images` job of `athanor-forge-orchestrator.yml` (`sign-images` of `release.yml` after PB12), `docs/operations/secrets.md`, the `signing` alias of `scripts/verify.py` | a release signed with key 2 alone was promoted to `:stable` and one more release followed; `athanor-image-1.pub` is gone from `system/keys/`; the live environments and `environments.json` list `signing-kernel` and `signing-images` only; `MOK_PRIVATE_KEY` is absent | PB5 | 0.5 (estimate) |
 | | **[M]** decide that the machines meant to keep updating have booted a key-2 release (secrets.md section 4.1, step 2), then delete `signing` and `MOK_PRIVATE_KEY` | | | | |
-| **PB6** | Signed install path, machines on the signed transport | keyless ISO signing in the stage that builds the ISO (PL32), `system/athanor-install.ks`, UD15 | the ISO acceptance asserts `ostree-image-signed` and a digest reference; the desktop and laptop origin files name `ostree-image-signed` under `ars-regia` | PB5 | 2 (estimate) |
+| **PB6** | Signed install path, machines on the signed transport | keyless ISO signing in `call-iso.yml` (PL32), `system/athanor-install.ks`, UD15 | the ISO acceptance asserts `ostree-image-signed` and a digest reference; the desktop and laptop origin files name `ostree-image-signed` under `ars-regia` | PB5 | 2 (estimate) |
 | | **[M]** UD15 on the desktop and laptop (needs `sudo`) | | | | |
-| **PB7** | CVD, support period, documentation | `.github/SECURITY.md`, `docs/compliance/` (Annex VII skeleton, Annex I mapping, reporting runbook), `os-release` `SUPPORT_END` | `python3 scripts/verify.py docs` green with the new files; `grep SUPPORT_END /usr/lib/os-release` in the acceptance of the 1.0 image | PB0 (parallel with PB1-PB6) | 2 (estimate) |
+| **PB7** | CVD, support period, documentation | `.github/SECURITY.md`, `docs/compliance/` (Annex VII skeleton, Annex I mapping, reporting runbook), `os-release` `SUPPORT_END` | `python3 scripts/verify.py docs` green with the new files; no `SUPPORT_END` in the images before 1.0 (`forge/specs/athanor-base-config/SOURCES/usr/lib/os-release` carries none); the `grep SUPPORT_END /usr/lib/os-release` check moves to the acceptance of the 1.0 release (section 5) | PB0 (parallel with PB1-PB6) | 2 (estimate) |
 | | **[M][LAWYER]** e-mail channel, coordinating CSIRT, the declaration template | | | | |
 | **PB8** | Scanning, VEX, advisories | `scripts/vuln/scan.sh`, `security/vex/`, CSAF provider on Pages, CodeQL in `maintenance.yml` | a candidate with a critical finding that has a fixed version available and no VEX statement is refused by `policy_check.py`, and one whose finding has no fixed version promotes with the finding reported; the daily rescan of `:stable` runs green or alerts; one CSAF document validates against the CSAF 2.0 schema | PB5 | 3 (estimate) |
 | **PB9** | Retention and the evidence archive | `forge/scripts/clean_ghcr.sh`, `promote.yml` (GitHub Release), UT10 and UD8 text | the janitor's unit test on a fixture graph keeps every member of the reachable set of section 5 and ages out the rest; its dry run on the live registry deletes no member; the first promotion has a GitHub Release with the bundle and a verifying `bundle.sha256` signature | PB5 | 2 (estimate) |
 | **PB10** | Update control (ADR-0082) | `athanor-update`, Settings, doc_update_trust.md (UT13) | dev-VM harness: a security update applies at the next shutdown by default; postpone holds it until its limit, then it applies; the opt-out stops automatic application, shows the warning, and still notifies | PB5 | 3 (estimate) |
 | **PB11** | Performance | `pr.yml` selections, the bar job, timeouts, concurrency, caches, NVIDIA modules once | the section 7.2 targets measured by `scripts/ci/run_stats.py` over five runs per path, driven by `workflow_dispatch` with a forced selection where a path is rare, and timed from the start of the first job, so approval waits are reported (PL49) and not gated | PB1 | 3 (estimate) |
-| **PB12** | Topology consolidation | the 28 workflows to the 12 of section 3, `bots.yml`, `maintenance.yml`, `dag_orchestrator.py` (PL48), doc_ci.md, `docs/operations/ci-runbook.md` | `ls .github/workflows` matches section 3; `python3 scripts/verify.py` green with the checks of section 10; a release run dispatched with a fixture spec at graph depth 3 or more builds it in the single matrix | PB3, PB11 | 5 (estimate) |
+| **PB12** | Topology consolidation | the 29 workflows to the 13 of section 3, `bots.yml`, `maintenance.yml`, `dag_orchestrator.py` (PL48), doc_ci.md, `docs/operations/ci-runbook.md` | `ls .github/workflows` matches section 3; `python3 scripts/verify.py` green with the checks of section 10; a release run dispatched with a fixture spec at graph depth 3 or more builds it in the single matrix | PB3, PB11 | 5 (estimate) |
 
 ## 13. Decisions on the review questions
 
@@ -781,10 +807,10 @@ The maintainer answered every question as recommended on 2026-10-07. Items marke
 | #    | Question | Decision |
 | ---- | -------- | -------------- |
 | PQ1  | Does `main` keep a release role, now that `iso-v0` is the default branch? | Keep it protected by the same ruleset and frozen, since D43 allows it to deploy; decide its future with the 1.0 branch model. |
-| PQ2  | How is the ISO signed? | Keylessly, by the stage that builds it (PL32): the ISO is built after the images are signed, so signing it with the cosign key would need a second `signing-images` job and a third approval. A key-based signature for offline verification is reconsidered if users ask for it. |
+| PQ2  | How is the ISO signed? | Keylessly, by the stage that builds it, `call-iso.yml` (PL32): the ISO is built after the images are signed, so signing it with the cosign key would need a second `signing-images` job and a third approval. A key-based signature for offline verification is reconsidered if users ask for it. |
 | PQ3  | Where do kernel builds of pull requests run? | Same-repository pull requests on the ephemeral self-hosted guest with a pull-request-only cache volume; forks never on self-hosted. |
-| PQ4  | Who signs the security class of a release? Today a security-class promotion goes through `promote.sh` in a signing environment (doc_update_delivery.md, decision 3), which can make three approvals in a cycle. | Set the class, with its advisory ids, when the release is signed (revision 2: "dispatched" read "signed", since releases run on push), and sign it in `signing-images` with the images; `promote.yml` then holds no key. |
-| PQ5  | Review on the maintainer's own pull requests | Maintainer as a recorded ruleset bypass actor; agent and bot pull requests require a code-owner review; `prevent_self_review` on once agents push as their App. Revision 2, for confirmation: the bypass covers the review ruleset only, in the "for pull requests only" mode (PL1, PL4), and `prevent_self_review` waits for a second human reviewer (PL5); the code-owner review applies once a second code owner exists, as ADR-0062 (A2-25) decided, not on every agent and bot pull request today (PL4). |
+| PQ4  | Who signs the security class of a release? Today a security-class promotion goes through `promote.sh` in a signing environment (doc_update_delivery.md, decision 3), which can make three approvals in a cycle. | Set the class, with its advisory ids, when the release is signed, since releases run on push and are not dispatched (ADR-0088), and sign it in `signing-images` with the images; `promote.yml` then holds no key. |
+| PQ5  | Review on the maintainer's own pull requests | The repository Admin role, held by the maintainer alone, is the recorded bypass actor of the review ruleset only, in the "for pull requests only" mode; the integrity ruleset has none (PL1, PL4, ADR-0088). Agent and bot pull requests require a code-owner review once a second code owner exists, as ADR-0062 (A2-25) decided (PL4); agents push with their own App identity (PL5). `prevent_self_review` is switched on when a second human reviewer is listed in both signing environments (PL5). |
 | PQ6  | Length of the postpone (ADR-0082) | One postpone per update, up to seven days, then the update applies at the next shutdown. |
 | PQ7  | What is the "product line" whose five years run, and from when? | Each major version (1.x), from the date 1.0 is placed on the market; `SUPPORT_END` set from it. |
 | PQ8  | The CVD contact besides GitHub private reporting | A project e-mail alias owned by the maintainer, named in `SECURITY.md` [LAWYER for the CSIRT]. |
@@ -814,7 +840,7 @@ The maintainer answered every question as recommended on 2026-10-07. Items marke
 
 **Revision 1 (2026-10-07).** First approved version; PQ1-PQ12 answered as recommended.
 
-**Revision 2 (2026-10-07).** Applies the adversarial review of the accepted architecture
+**Revision 2 (2026-10-07), approved 2026-10-07.** Applies the adversarial review of the accepted architecture
 (4 blockers, 18 majors, 16 minors). Every finding was checked against the tree at
 `62909b0a` and, for claims about GitHub, against GitHub's documentation.
 
@@ -825,7 +851,7 @@ Applied:
 - B2: the switch of the required check to `gate` is a PB1 [M] step (its order as PR #266
   wrote it, see below).
 - B3: `prevent_self_review` stays off until a second human reviewer exists, as an accepted
-  risk with its compensating controls (PL5, PQ5, ADR-0080 decision 5).
+  risk with its compensating controls (PL5, PQ5, ADR-0088).
 - B4: PL24 asks each ecosystem's strongest published hash and SHA-512 for what Athanor
   delivers, with the TR-03183-2 gap documented; fixture tests per ecosystem (PB4).
 - M1: two rulesets, the integrity one without a bypass actor; no direct pushes (PL1, PL4,
@@ -835,7 +861,7 @@ Applied:
 - M3 (in part): an artifact is built at most twice; the `merge_group` run builds nothing.
   Release candidates built in the merge queue are not adopted now (PL44).
 - M4: Build L3 for hosted builds, L2 for the self-hosted kernel, `--deny-self-hosted-runners`
-  in the verification (principle 1, PL19, PL21, PB4, ADR-0080 decision 2).
+  in the verification (principle 1, PL19, PL21, PB4, ADR-0088).
 - M5: release-path builds restore no cache (PL10, PL50, section 10).
 - M6: one order, the signed build time of UT9; the serial is a display value (PL31, PQ4,
   section 14).
@@ -848,7 +874,7 @@ Applied:
   already follow the maintainer's sessions, not the merges.
 - M10: blocking only on findings with a fixed version available (PL26, PL27, PB8).
 - M11: a Conforma `ec` spike precedes `policy_check.py` (PL30, section 11, PB5,
-  ADR-0080 decision 2).
+  ADR-0088).
 - M12 (in part): PL52 is `ghsettings.py diff`, extended; one home per kind of script
   (section 9). A `verify.py` rule on script roots is not added.
 - M13 (in part): the key-isolation lint reads the registry variable and a runner allow-list
@@ -857,8 +883,9 @@ Applied:
   recorded in the bundle (PL30, section 14).
 - M15: PB11 and PB12 gates run on dispatched runs and exclude approval waits.
 - M16: retention by reachability from promoted roots, referrers included (section 5, PB9).
-- M17: one App per role, keys in scoped environments with secrets.md rows; the agents'
-  workstation identity is a PB2 [M] decision (PL5, PB2).
+- M17: one App per role, keys in scoped environments with secrets.md rows; agents on the
+  workstation push with their own App identity, whose key lives in the maintainer's secret
+  store (PL5, PB2, ADR-0088).
 - M18: actions pinned and `verify.py pinning` green in PB2, before SHA pinning is switched on
   (PL8, PB2, PB3).
 - Minors 3, 4, 5, 7, 8, 9, 11, 12, 13, 14, 15: promotion reads `RELEASE_BRANCH`, p95 over
@@ -881,8 +908,8 @@ already did differently, `iso-v0` wins:
   `release.yml`, followed by `call-kernel-publish.yml` and `call-tag.yml`, instead of the
   `call-sign-*` stages (sections 3.2, 3.4, 3.5, PL11, PL35); today's jobs are
   `nvidia-kmod-sign` and `sign-system-images` of the Orchestrator (section 3, PB0, PB5b).
-  `signing` stays out of `environments.json` and is an alias of `signing-images` in the
-  D43 lint during the rotation, instead of being recorded there (B1, PB0).
+  `environments.json` records `signing` during the rotation (PR #264, secrets.md ENV6), and
+  the D43 lint treats it as an alias of `signing-images` (B1, PB0).
 - PR #266: `changes.json` lists only the areas `pr.yml` consumes, with the dependency-file
   gap recorded (section 3.3). The known-red list is `scripts/ci/known-red.txt`, one entry
   per finding, read by `verify.py --known-red`; revision 2's allow-list inside the verifier
@@ -891,14 +918,36 @@ already did differently, `iso-v0` wins:
   names; revision 2's replace-then-drop order (B2) is withdrawn.
 - PR #268 (one package matrix, one lint per release run), PR #274 (installed RPMs checked
   against their specs) and PR #228 (the builder's `:latest`) are described as today's state
-  (sections 3.2, 3.5, PL35, PL48); section 3.5 counts 28 workflows with `pr.yml`,
-  `call-kernel.yml` and `call-nvidia-kmod-prepare.yml`; doc_ci.md defines CI1-CI28.
+  (sections 3.2, 3.5, PL35, PL48); section 3.5 counts 29 workflows with `pr.yml`,
+  `call-kernel.yml`, `call-nvidia-kmod-prepare.yml` and `maintenance.yml` (PR #264); doc_ci.md defines CI1-CI28.
 - PR #261 (PB7) shipped `SUPPORT_END=2031-12-31`, five years from 2026. The maintainer
   decided PQ7 on 2026-10-07: the five years run from 1.0, so `SUPPORT_END` leaves
   `os-release` until the 1.0 release sets it (section 5, PB7).
 - ADR-0062 (A2-25) keeps "Require review from Code Owners" off while there is one code owner:
   the code-owner review of agent and bot pull requests applies once a second code owner
   exists (PL1, PL4, PQ5).
-- Self-review: section 2 names the two amendments revision 2 proposes; PL33 and the diagram
+- Self-review: section 2 names the amendments of ADR-0080 that ADR-0088 records; PL33 and the diagram
   name the key-signed release attestation of PL31, which PQ4 chose over a promotion
   attestation; the obsolete note on doc_ci.md's range leaves section 14.
+
+Approved by the maintainer on 2026-10-07, with the review delegated. The approval decided
+M17 (agents on the workstation push with a GitHub App identity, PL5, PB2) and kept B3, B4,
+M1, M3 and M4 as written; ADR-0088 records the amendments of ADR-0080. Fixes applied with the
+approval:
+
+- The provenance of the signed derivatives (`azoth-boot`, `azoth-nvidia`) is generated by
+  `call-kernel-publish.yml` at Build L2, naming the unsigned digest and the signing run
+  (PL19, PL21, PB4).
+- The ISO stage is `call-iso.yml` (sections 3.2, 3.4, 3.5, PL32, PL35, PQ2, PB6); the target
+  has seven stages.
+- `maintenance.yml` exists since PR #264: section 3 and section 3.5 count 29 workflows.
+- `environments.json` records `signing` during the rotation (PB0).
+- PB2's gate asks for actions pinned by SHA, the action part of `verify.py pinning`; PB3 keeps
+  containers and the flake (PL8, PB2). Three actions are still pinned by tag, not five.
+- PB2's gate measures the actor GitHub records for a push made by the merge queue (PL5).
+- The rulesets: today one ruleset, `product-branches`, split in PB2; the bypass actor is the
+  repository Admin role (PL1, PL4, PQ5).
+- PB4's scope and gate include the SHA-512 deviation record in `docs/compliance/` (PL24).
+- PB7's gate before 1.0 is the absence of `SUPPORT_END`; its presence is checked by the 1.0
+  release (section 5).
+- PR #249 is merged and leaves PB0's scope and dependencies.
