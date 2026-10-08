@@ -232,7 +232,7 @@ msgid "Nearby devices"
 msgstr ""
 
 #: src/ui/bluetooth.rs:708 src/ui/network.rs:606 src/ui/power.rs:110
-#: src/ui/shield.rs:542
+#: src/ui/shield.rs:546
 msgid "Cancel"
 msgstr ""
 
@@ -429,12 +429,12 @@ msgstr ""
 msgid "Power"
 msgstr ""
 
-#: src/ui/power.rs:149 src/ui/power.rs:155 src/ui/shield.rs:528
-#: src/ui/shield.rs:564
+#: src/ui/power.rs:149 src/ui/power.rs:155 src/ui/shield.rs:532
+#: src/ui/shield.rs:568
 msgid "Restart to update"
 msgstr ""
 
-#: src/ui/power.rs:154 src/ui/shield.rs:563
+#: src/ui/power.rs:154 src/ui/shield.rs:567
 msgid "Restart and install the update now?"
 msgstr ""
 
@@ -490,151 +490,159 @@ msgstr ""
 msgid "Not verified: the project moved; this machine is moving with it"
 msgstr ""
 
-#: src/ui/shield.rs:319
-msgid "Up to date"
+#: src/ui/shield.rs:315
+msgid "Not verified: the project moved; this machine cannot follow it yet"
 msgstr ""
 
-#: src/ui/shield.rs:320
-msgid "An update is available; it downloads at the next check"
-msgstr ""
-
-#: src/ui/shield.rs:321
-msgid "An update is ready; it installs when you restart"
-msgstr ""
-
-#: src/ui/shield.rs:322
-msgid "The update installs at the next restart"
+#: src/ui/shield.rs:317
+msgid "Signed, but pinned to one build: it receives no updates"
 msgstr ""
 
 #: src/ui/shield.rs:323
-msgid "The last update was refused by the policy"
+msgid "Up to date"
+msgstr ""
+
+#: src/ui/shield.rs:324
+msgid "An update is available; it downloads at the next check"
 msgstr ""
 
 #: src/ui/shield.rs:325
-msgid "You went back from the newest version; only a newer one is offered"
+msgid "An update is ready; it installs when you restart"
+msgstr ""
+
+#: src/ui/shield.rs:326
+msgid "The update installs at the next restart"
 msgstr ""
 
 #: src/ui/shield.rs:327
+msgid "The last update was refused by the policy"
+msgstr ""
+
+#: src/ui/shield.rs:329
+msgid "You went back from the newest version; only a newer one is offered"
+msgstr ""
+
+#: src/ui/shield.rs:331
 msgid "This version is older than one this machine has run"
 msgstr ""
 
-#: src/ui/shield.rs:334
+#: src/ui/shield.rs:338
 msgid "The last check failed: network error"
 msgstr ""
 
-#: src/ui/shield.rs:335
+#: src/ui/shield.rs:339
 msgid "The last check failed: registry error"
 msgstr ""
 
-#: src/ui/shield.rs:336
+#: src/ui/shield.rs:340
 msgid "The last check failed: refused by the policy"
 msgstr ""
 
-#: src/ui/shield.rs:337
+#: src/ui/shield.rs:341
 msgid "The last check failed: storage error"
 msgstr ""
 
-#: src/ui/shield.rs:338
+#: src/ui/shield.rs:342
 msgid "The last check failed: internal error"
 msgstr ""
 
-#: src/ui/shield.rs:344
+#: src/ui/shield.rs:348
 msgid "No trust state yet: the first check has not run"
 msgstr ""
 
-#: src/ui/shield.rs:346
+#: src/ui/shield.rs:350
 msgid "The trust state file is not owned by the system and was ignored"
 msgstr ""
 
-#: src/ui/shield.rs:348
+#: src/ui/shield.rs:352
 msgid "The trust state file could not be read"
 msgstr ""
 
-#: src/ui/shield.rs:349 src/ui/shield.rs:363
+#: src/ui/shield.rs:353 src/ui/shield.rs:367
 msgid "The update service did not answer"
 msgstr ""
 
-#: src/ui/shield.rs:355
+#: src/ui/shield.rs:359
 msgid "Not authorised"
 msgstr ""
 
-#: src/ui/shield.rs:356
+#: src/ui/shield.rs:360
 msgid "Another update request is running"
 msgstr ""
 
-#: src/ui/shield.rs:358
+#: src/ui/shield.rs:362
 msgid "Nothing is downloaded yet; the update downloads at the next check"
 msgstr ""
 
-#: src/ui/shield.rs:360
+#: src/ui/shield.rs:364
 msgid "There is no previous version to go back to"
 msgstr ""
 
-#: src/ui/shield.rs:361
+#: src/ui/shield.rs:365
 msgid "A program is blocking the restart; close it and try again"
 msgstr ""
 
-#: src/ui/shield.rs:362
+#: src/ui/shield.rs:366
 msgid "The request failed; the system journal says why"
 msgstr ""
 
-#: src/ui/shield.rs:424
+#: src/ui/shield.rs:428
 #, rust-format
 msgid "Version {version}"
 msgstr ""
 
-#: src/ui/shield.rs:429
+#: src/ui/shield.rs:433
 #, rust-format
 msgid "Built on {date}"
 msgstr ""
 
-#: src/ui/shield.rs:435
+#: src/ui/shield.rs:439
 #, rust-format
 msgid "Last checked on {date}"
 msgstr ""
 
-#: src/ui/shield.rs:436
+#: src/ui/shield.rs:440
 msgid "Never checked"
 msgstr ""
 
-#: src/ui/shield.rs:442
+#: src/ui/shield.rs:446
 #, rust-format
 msgid "Host: {host}"
 msgstr ""
 
-#: src/ui/shield.rs:446
+#: src/ui/shield.rs:450
 msgid "Signature policy in force"
 msgstr ""
 
-#: src/ui/shield.rs:448
+#: src/ui/shield.rs:452
 msgid "Signature policy not in force"
 msgstr ""
 
-#: src/ui/shield.rs:451
+#: src/ui/shield.rs:455
 msgid "The policy is the one Athanor ships"
 msgstr ""
 
-#: src/ui/shield.rs:453
+#: src/ui/shield.rs:457
 msgid "The policy was changed on this machine"
 msgstr ""
 
-#: src/ui/shield.rs:456
+#: src/ui/shield.rs:460
 msgid "Secure Boot on"
 msgstr ""
 
-#: src/ui/shield.rs:458
+#: src/ui/shield.rs:462
 msgid "Secure Boot off: this machine runs in the declared degraded mode"
 msgstr ""
 
-#: src/ui/shield.rs:530
+#: src/ui/shield.rs:534
 msgid "Go back to the previous version"
 msgstr ""
 
-#: src/ui/shield.rs:569
+#: src/ui/shield.rs:573
 msgid "Go back to the previous version and restart? This asks for an administrator's password."
 msgstr ""
 
-#: src/ui/shield.rs:570
+#: src/ui/shield.rs:574
 msgid "Go back"
 msgstr ""
 

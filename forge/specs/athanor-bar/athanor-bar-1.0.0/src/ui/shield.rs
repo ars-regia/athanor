@@ -311,6 +311,10 @@ fn reason_words(reason: Reason) -> String {
         Reason::ChannelAbsent => tr("Not verified: waiting for the stable channel to be published"),
         Reason::OriginNotEnforcing => tr("Not verified: this machine does not verify its updates"),
         Reason::OwnerMoved => tr("Not verified: the project moved; this machine is moving with it"),
+        Reason::OwnerMovedWaiting => {
+            tr("Not verified: the project moved; this machine cannot follow it yet")
+        }
+        Reason::PinnedBuild => tr("Signed, but pinned to one build: it receives no updates"),
     }
 }
 
