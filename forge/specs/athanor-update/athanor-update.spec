@@ -89,7 +89,8 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
   nothing, or not the target with the policy enforced, fails; a staged target waits for the
   restart (`restart-pending`); the stamp is written once the signed reference has booted, so
   a deployment that does not boot is switched once more, and then not again for that digest
-  (`move-record` counts failed boots only, never a staging a power cycle discarded). A
+  (`move-record` counts failed boots only, of deployments bootc names, never a staging a
+  power cycle discarded, and is removed with the stamp). A
   stamp is ignored on an image of the previous owner, and neither athanor-update-migrate.service
   nor its timer has the stamp as a condition; with the stamp and no previous owner listed,
   the unit ends without asking bootc.

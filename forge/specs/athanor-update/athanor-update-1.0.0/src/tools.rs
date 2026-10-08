@@ -143,8 +143,8 @@ struct BootcEntry {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BootcOstree {
-    checksum: String,
-    deploy_serial: u32,
+    checksum: Option<String>,
+    deploy_serial: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -172,7 +172,7 @@ fn deployed(entry: BootcEntry) -> Option<Deployed> {
         build_time: image.timestamp.as_deref().and_then(unix_time).unwrap_or(0),
         download_only: entry.download_only,
         local_changes: false,
-        deployment: entry.ostree.map(|ostree| format!("{}.{}", ostree.checksum, ostree.deploy_serial)),
+        deployment: entry.ostree.and_then(|ostree| Some(format!("{}.{}", ostree.checksum?, ostree.deploy_serial?))),
     })
 }
 
@@ -371,6 +371,11 @@ mod tests {
         // The members of the desktop's booted entry of 2026-10-01 (INCOMPATIBLE), on the staged one.
         let named = STAGED.replacen(r#""downloadOnly":true,"#, r#""downloadOnly":true,"ostree":{"checksum":"b87dc949","deploySerial":1,"stateroot":"default"},"#, 1);
         assert_eq!(parse_status(&named, || None).expect("status").staged.expect("staged").deployment.as_deref(), Some("b87dc949.1"));
+        // A bootc that leaves out one of the two loses the name, not the status.
+        for partial in [r#""checksum":"b87dc949","#, r#""deploySerial":1,"#] {
+            let staged = parse_status(&named.replacen(partial, "", 1), || None).expect("status").staged.expect("staged");
+            assert_eq!((staged.digest.as_str(), staged.deployment), ("sha256:e64f7608", None), "{partial}");
+        }
     }
 
     #[test]

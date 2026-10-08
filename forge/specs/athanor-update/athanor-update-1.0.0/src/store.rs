@@ -14,7 +14,7 @@
 //!                     the new owner is the held digest; cleared when it moves or finds another
 //!   `move-record`     `<digest> <failed boots> [<deployment>]`: deployments of that digest
 //!                     `migrate` staged that did not boot, and the one it staged last, until
-//!                     a later run sees what became of it
+//!                     a later run sees what became of it; removed with the stamp
 //!   `signatures/<hex>/`  the signature object of a digest, as `skopeo copy … dir:` wrote it
 use athanor_trust_state::State;
 use std::fs::File;
@@ -34,8 +34,8 @@ pub struct MoveRecord {
     pub digest: String,
     /// Deployments of the digest that were deployed and did not boot for good.
     pub failed_boots: u32,
-    /// The deployment the last switch staged (`Deployed::deployment`, or `-` when bootc did
-    /// not name it), until a later run sees what became of it.
+    /// The deployment the last switch staged (`Deployed::deployment`), until a later run sees
+    /// what became of it. `None` as well when bootc did not name it: nothing is counted then.
     pub staged: Option<String>,
 }
 
@@ -161,6 +161,11 @@ impl Store {
     pub fn set_migrated(&self) -> std::io::Result<()> {
         Self::replace(&self.var, "migrated", 0o644, b"")?;
         self.set_move_held(false)?;
+        // The moved deployment booted: a later return from it is no failed boot to count.
+        match std::fs::remove_file(self.var.join("move-record")) {
+            Err(err) if err.kind() != std::io::ErrorKind::NotFound => return Err(err),
+            _ => {}
+        }
         self.set_channel_absent(false)
     }
 

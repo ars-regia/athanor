@@ -97,10 +97,9 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>) -> Result<Outcome, Failure> {
         // The staging of an earlier run is gone (restart-pending returned above). Deployed and
         // left, it is the rollback deployment now: it did not boot for good, and greenboot or
         // the person went back. Not there, a power cycle discarded it before it was finalized,
-        // which says nothing about the digest (spike U1, section 4).
-        let left = status.rollback.as_ref().is_some_and(|rollback| {
-            rollback.digest == candidate.digest && (staged == "-" || rollback.deployment.as_deref().is_none_or(|deployment| deployment == staged))
-        });
+        // which says nothing about the digest (spike U1, section 4). Only the deployment's name
+        // tells the two apart once an earlier deployment of the digest is the rollback.
+        let left = status.rollback.as_ref().is_some_and(|rollback| rollback.digest == candidate.digest && rollback.deployment.as_deref() == Some(staged.as_str()));
         if left {
             record.failed_boots += 1;
             tracing::warn!(digest = %candidate.digest, failed_boots = record.failed_boots, "the switched deployment did not boot");
@@ -131,7 +130,10 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>) -> Result<Outcome, Failure> {
         tracing::error!(%target, "bootc switch returned without staging the target with the policy enforced");
         return Err(Failure { code: athanor_trust_state::ErrorCode::Internal, host: None });
     };
-    record.staged = Some(staged.deployment.clone().unwrap_or_else(|| "-".into()));
+    // Unnamed, the staging is not followed: a deployment that does not boot is still left by
+    // greenboot, whose queued return holds the digest (check.rs), and a held digest is never
+    // staged again.
+    record.staged.clone_from(&staged.deployment);
     ctx.store.set_move_record(&record).map_err(storage)?;
     if staged.build_time > status.booted.build_time {
         // A newer build is an update, and an update waits for the user (SH11).
@@ -242,6 +244,44 @@ mod tests {
             assert_eq!(run(&machine.ctx(&newer, 9000)), Ok(Outcome::Switched));
             assert!(newer.called("relock") && !machine.store.move_held());
         }
+    }
+
+    #[test]
+    fn without_deployment_names_no_boot_is_counted_and_greenboot_still_holds() {
+        // A power-off after a deployment of the digest is the rollback: the original finding.
+        let machine = Machine::new("migrate-unnamed-power-off", &["real/k1.pub"]);
+        let mut tools = Fake::booted(from_previous_owner_at(&digest(1), 1000)).offering(SIGNED, 2000);
+        tools.names = false;
+        assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Switched));
+        tools.apply_downloaded().expect("Apply()");
+        failed_boot(&tools);
+        for now in [6000, 7000, 8000, 9000] {
+            assert_eq!(run(&machine.ctx(&tools, now)), Ok(Outcome::Switched), "{now}");
+            power_off(&tools);
+        }
+        assert_eq!(machine.store.move_record(SIGNED).failed_boots, 0);
+        // A real failure: greenboot queues the return and the check of that boot holds the digest.
+        let machine = Machine::new("migrate-unnamed-greenboot", &["real/k1.pub"]);
+        let mut tools = Fake::booted(Deployed { enforcing: false, ..from_previous_owner_at(&digest(1), 1000) }).offering(SIGNED, 2000);
+        tools.names = false;
+        assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Switched));
+        tools.apply_downloaded().expect("Apply()");
+        restart(&tools);
+        tools.status.borrow_mut().rollback_queued = true;
+        crate::check::run(&machine.ctx(&tools, 5500), true).expect("offline");
+        back_on_the_previous_owner(&tools);
+        assert_held_on_the_previous_owner(&machine, &tools);
+    }
+
+    #[test]
+    fn a_move_that_booted_leaves_no_staging_to_count_after_going_back() {
+        let (machine, tools) = moved("migrate-booted-then-back");
+        machine.store.set_held(SIGNED).expect("GoBack()");
+        back_on_the_previous_owner(&tools);
+        // A later return on the previous owner holds its own digest in the single slot.
+        machine.store.set_held(&digest(1)).expect("rollback on the previous owner");
+        assert_eq!(run(&machine.ctx(&tools, 6000)), Ok(Outcome::Switched));
+        assert_eq!(machine.store.move_record(SIGNED).failed_boots, 0, "the moved deployment booted");
     }
 
     #[test]

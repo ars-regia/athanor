@@ -264,6 +264,8 @@ pub(crate) mod tests {
         pub stages: bool,
         /// `bootc status` fails, as it does when bootc cannot read the sysroot.
         pub status_fails: bool,
+        /// Whether bootc names a deployment by its ostree checksum and deploy serial.
+        pub names: bool,
         pub calls: RefCell<Vec<String>>,
     }
 
@@ -277,6 +279,7 @@ pub(crate) mod tests {
                 relock: Ok(()),
                 stages: true,
                 status_fails: false,
+                names: true,
                 calls: RefCell::new(Vec::new()),
             }
         }
@@ -338,7 +341,7 @@ pub(crate) mod tests {
                 // bootc switch stages a deployment of `image` that is not locked against
                 // finalization, a new ostree deployment each time.
                 let serial = self.calls.borrow().iter().filter(|call| call.starts_with("switch")).count();
-                self.status.borrow_mut().staged = Some(Deployed { image: image.into(), download_only: false, deployment: Some(format!("{}.{serial}", deployed.digest)), ..deployed });
+                self.status.borrow_mut().staged = Some(Deployed { image: image.into(), download_only: false, deployment: self.names.then(|| format!("{}.{serial}", deployed.digest)), ..deployed });
             }
             Ok(())
         }
