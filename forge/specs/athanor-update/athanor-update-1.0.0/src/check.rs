@@ -48,7 +48,11 @@ fn reason<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &Status) -> 
         return Reason::PolicyNotInForce;
     }
     let repository = sigobj::repository_of(&booted.image);
-    let Some(key_paths) = policy.scopes.get(repository) else { return Reason::ReferenceOutOfScope };
+    let Some(key_paths) = policy.scopes.get(repository) else {
+        // The same image under the owner the policy pins: the project moved, and the
+        // migration moves this machine after it (doc_update_delivery.md, UD45).
+        return if crate::policy::successor(&policy.scopes, repository).is_some() { Reason::OwnerMoved } else { Reason::ReferenceOutOfScope };
+    };
     if !booted.enforcing {
         let pending = status.staged.as_ref().is_some_and(|staged| staged.enforcing);
         // The migration ran and nothing enforcing is staged: the reference was switched
@@ -295,7 +299,8 @@ pub(crate) mod tests {
         }
         fn switch(&self, image: &str) -> Result<(), Failure> {
             self.call(format!("switch {image}"));
-            self.status.borrow_mut().staged = Some(self.download.clone()?);
+            // bootc switch stages a deployment that is not locked against finalization.
+            self.status.borrow_mut().staged = Some(Deployed { download_only: false, ..self.download.clone()? });
             Ok(())
         }
         fn fetch_signature(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure> {

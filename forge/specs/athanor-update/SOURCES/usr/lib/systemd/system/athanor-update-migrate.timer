@@ -1,8 +1,8 @@
 [Unit]
 Description=Retry moving this machine onto the signed Athanor image reference
 Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_update_trust.md
-# A machine waiting for the channel (`channel-absent`) retries here; once the stamp exists the
-# timer no longer starts.
+# A machine waiting for the channel (`channel-absent`) or for its image under the project's new
+# owner (`successor-absent`) retries here; once the stamp exists the timer no longer starts.
 ConditionPathExists=!/var/lib/athanor-update/migrated
 
 [Timer]

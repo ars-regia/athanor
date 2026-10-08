@@ -28,6 +28,26 @@ pub fn scopes(policy_json: &[u8]) -> Scopes {
     found
 }
 
+/// The one scope with the registry host and the image name of `repository` under another
+/// owner: where a machine that follows the project's previous owner moves
+/// (docs/architecture/doc_update_delivery.md, UD45). `None` when `repository` is a scope
+/// itself, or when no scope, or more than one, matches.
+#[must_use]
+pub fn successor<'a>(scopes: &'a Scopes, repository: &str) -> Option<&'a str> {
+    fn host_and_name(repository: &str) -> Option<(&str, &str)> {
+        Some((repository.split_once('/')?.0, repository.rsplit_once('/')?.1))
+    }
+    if scopes.contains_key(repository) {
+        return None;
+    }
+    let wanted = host_and_name(repository)?;
+    let mut matches = scopes.keys().filter(|scope| host_and_name(scope) == Some(wanted));
+    match (matches.next(), matches.next()) {
+        (Some(only), None) => Some(only),
+        _ => None,
+    }
+}
+
 /// Where the files of this module live; tests point them at a scratch directory.
 #[derive(Debug, Clone)]
 pub struct PolicyPaths {
@@ -95,6 +115,19 @@ mod tests {
         assert_eq!(found["registry.example/owner/athanor-system"].len(), 2);
         assert!(scopes(br#"{"default":[{"type":"insecureAcceptAnything"}]}"#).is_empty());
         assert!(scopes(b"not json").is_empty());
+    }
+
+    #[test]
+    fn the_successor_is_the_same_image_under_the_owner_the_policy_pins() {
+        let found = scopes(SHIPPED.as_bytes());
+        assert_eq!(successor(&found, "registry.example/previous/athanor-system"), Some("registry.example/owner/athanor-system"));
+        assert_eq!(successor(&found, "registry.example/owner/athanor-system"), None, "already in scope");
+        assert_eq!(successor(&found, "other.example/previous/athanor-system"), None, "another registry");
+        assert_eq!(successor(&found, "registry.example/previous/athanor-system-nvidia"), None, "another image");
+        assert_eq!(successor(&found, "athanor-system"), None);
+        let third = r#""registry.example/third/athanor-system":[{"type":"sigstoreSigned","keyPaths":[],"signedIdentity":{"type":"matchRepository"}}]"#;
+        let two = SHIPPED.replace(r#""registry.example/owner/relaxed":[{"type":"insecureAcceptAnything"}]"#, third);
+        assert_eq!(successor(&scopes(two.as_bytes()), "registry.example/previous/athanor-system"), None, "ambiguous");
     }
 
     #[test]

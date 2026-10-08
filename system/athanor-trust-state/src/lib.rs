@@ -51,6 +51,10 @@ pub enum Reason {
     /// enforce the policy: a plain `bootc switch` followed a tag without verifying it. This
     /// machine does not verify its updates, and `athanor-update` does not check for any.
     OriginNotEnforcing,
+    /// The booted image is the project's image under its previous owner, which the policy
+    /// no longer names. The migration switches the machine, verified, to the same image
+    /// under the owner the policy pins; until that deployment boots, the state reads this.
+    OwnerMoved,
 }
 
 /// The `verified` member of the file. The pair is redundant on purpose, so a reader can
@@ -288,7 +292,7 @@ mod tests {
 
     #[test]
     fn every_reason_but_signature_is_attention() {
-        for reason in [Reason::Media, Reason::NoSignature, Reason::KeyNotInPolicy, Reason::PolicyNotInForce, Reason::ReferenceOutOfScope, Reason::LocalChanges, Reason::ChannelAbsent, Reason::OriginNotEnforcing] {
+        for reason in [Reason::Media, Reason::NoSignature, Reason::KeyNotInPolicy, Reason::PolicyNotInForce, Reason::ReferenceOutOfScope, Reason::LocalChanges, Reason::ChannelAbsent, Reason::OriginNotEnforcing, Reason::OwnerMoved] {
             let state = State { verified: reason.into(), ..verified_state() };
             assert_eq!(badge(&state, NOW), Badge::Attention, "{reason:?}");
         }
@@ -363,6 +367,7 @@ mod tests {
         assert_eq!(serde_json::to_string(&Reason::LocalChanges).expect("serialize"), r#""local-changes""#);
         assert_eq!(serde_json::to_string(&Reason::ChannelAbsent).expect("serialize"), r#""channel-absent""#);
         assert_eq!(serde_json::to_string(&Reason::OriginNotEnforcing).expect("serialize"), r#""origin-not-enforcing""#);
+        assert_eq!(serde_json::to_string(&Reason::OwnerMoved).expect("serialize"), r#""owner-moved""#);
     }
 
     fn scratch(test: &str) -> std::path::PathBuf {

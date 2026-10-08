@@ -4,7 +4,7 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-update
 Version:        1.0.0
-Release:        8%{?dist}
+Release:        9%{?dist}
 Summary:        Athanor system image updates and trust state
 
 License:        GPL-3.0-or-later
@@ -74,6 +74,15 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
 %doc /usr/share/doc/athanor-update/RECOVERY.md
 
 %changelog
+* Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-9
+- `athanor-update migrate` moves a machine that follows the project's previous owner, an
+  image the policy in force no longer names, to the same image under the owner the policy
+  pins, on the tag or digest it follows, with `bootc switch --enforce-container-sigpolicy`.
+  The image the machine already runs supplies the policy, so the switch is verified even
+  when the machine reached that image through an unverified reference. Until the new
+  deployment boots, the state reads `verified.reason = owner-moved`; an image or tag the new
+  owner has not published is a wait (`successor-absent`), retried by the migration timer.
+
 * Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-8
 - A machine that has migrated but boots a reference that does not enforce the policy, with
   no enforcing deployment staged, publishes `verified.reason = origin-not-enforcing` instead
