@@ -21,18 +21,14 @@ jobs:
         with:
           persist-credentials: false
 
-      # A read-only token of the settings App, for this repository only (PL5, PL52).
+      # A token of the settings App, for this repository only (PL5, PL52). It inherits the
+      # App's permissions, which are read-only; the action cannot request the Variables
+      # permission by name, so narrowing the token here would drop it.
       - id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ vars.SETTINGS_APP_CLIENT_ID }}
           private-key: ${{ secrets.SETTINGS_APP_PRIVATE_KEY }}
-          permission-actions: read
-          permission-administration: read
-          permission-environments: read
-          permission-pages: read
-          permission-secrets: read
-          permission-variables: read
 
       - name: Compare .github/settings with the live repository
         env:
