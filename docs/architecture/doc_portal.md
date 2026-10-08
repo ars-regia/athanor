@@ -1,6 +1,6 @@
 # Athanor desktop portal
 
-Status: revision 1 draft, 2026-10-05: the maintainer's decisions applied; text not yet reviewed. It designs Athanor's backend for xdg-desktop-portal: which portal interfaces Athanor answers and which stay with other backends, the Settings portal that carries the appearance of `doc_visual_language.md` to sandboxed applications, the file chooser built on `athanor-files-view`, the access dialog behind the application permission prompts, inhibition, background applications, screenshots and the colour picker, screen sharing and the integrated recorder with its indicator in the bar, the confinement of every program involved, the tests and the order of construction.
+Status: **revision 2, approved by the maintainer on 2026-10-08 with changes:** revision 1 (2026-10-05) took the seven decisions of section 6; revision 2 adds the "why not upstream" paragraph and the owner that the scope budget (ADR 0051, A2-14) requires, makes the recorder's read of the screenshot explicit (PT3, PT13), and settles the approval scope of PT18 and the accepted risk of PT3 (section 6, decisions 8 to 10). It designs Athanor's backend for xdg-desktop-portal: which portal interfaces Athanor answers and which stay with other backends, the Settings portal that carries the appearance of `doc_visual_language.md` to sandboxed applications, the file chooser built on `athanor-files-view`, the access dialog behind the application permission prompts, inhibition, background applications, screenshots and the colour picker, screen sharing and the integrated recorder with its indicator in the bar, the confinement of every program involved, the tests and the order of construction.
 
 ## 1. Context
 
@@ -60,6 +60,12 @@ Status: revision 1 draft, 2026-10-05: the maintainer's decisions applied; text n
   - **Its windows:** the file chooser (PT7), the access dialog (PT6), the screen-sharing picker (PT9). **Its overlays:** the screenshot and colour-picking overlays (PT8), as pinned layer-shell surfaces (PT3).
 - `system/athanor-portal`, a new library with no GTK type (SH4), holds every decision the tests must reach without a display: validation of each request's options; the Settings values (PT5); the bookkeeping of requests, sessions and inhibitors; the Background state (PT12); the restore data of PT9; the admission of `os.athanor.Portal1` callers (PT10). It holds the interface definitions, generated with `zbus-xmlgen` from the XML of xdg-desktop-portal 1.20.4 and committed with the tag they came from, as disks decision 9 did for UDisks2. The `ashpd` crate's backend feature (0.13.13, MIT, crates.io, 2026-10-05) is not used: it would add a dependency for what generated proxies give, and it has no Inhibit backend.
 - `forge/specs/athanor-recorder`, a new program with no GTK and no Wayland connection: the shell's capture client (PT13).
+- **Why not upstream, and who maintains it** (scope budget, ADR 0051, A2-14; `doc_shell.md` SH3). Upstream backends exist: xdg-desktop-portal-gnome, -wlr and -cosmic, and xdg-desktop-portal-gtk, which the image uses today as a fallback. None of them serves this session as one piece.
+  - The gtk backend inhibits idle only ("Inhibiting other than idle not supported", section 1), cannot show `athanor-files-view` in its chooser, and gives `color-scheme` and `contrast` 0 and no accent; its mirror-derived Settings values would also double the `SettingChanged` signals of ours (section 6, decision 1).
+  - xdg-desktop-portal-gnome is not installed and is written for another shell; the wlr and cosmic backends are written for other compositors and need globals that cosmic-comp withholds from any security context but CosmicPanel's (PT3). No `xdg-desktop-portal-cosmic` is in `forge/config/packages.json`.
+  - The recorder and the capture surfaces have no upstream equivalent that fits the bar's indicator and the confinement of PT3.
+  - **Owner:** the maintainer owns `xdg-desktop-portal-athanor`, `system/athanor-portal` and `athanor-recorder`, and answers for their upkeep against each xdg-desktop-portal release.
+  - **Upstream first, never dependent on upstream.** Every component here works if upstream never accepts a change. A small fix to an upstream project goes upstream at once; a large feature starts with an upstream issue or discussion. A patch we carry meanwhile is listed and dropped when upstream takes it.
 - **Reused, not rewritten:** `athanor-files-view` (FM17), `athanor-compositor-client` (its outputs, its toplevel model, its capture code and its layer-shell support; the only crate that knows COSMIC), `athanor-style`, `athanor-i18n`, `athanor-unit` (`sandbox`, `dirs`, `journal`), `athanor-preview` for thumbnails (LA6, FM10).
 
 **PT3. Confinement.**
@@ -74,7 +80,8 @@ Status: revision 1 draft, 2026-10-05: the maintainer's decisions applied; text n
 - **The Wayland socket.** The backend uses the main socket, as the bar does. Capture, layer-shell overlays and the import of a parent window need globals that cosmic-comp withholds from any security context but CosmicPanel's (spike P4), and a capture backend in a context would have to claim that engine name, which Athanor does not do.
 - **Only the frontend may call it.** Every call on an `org.freedesktop.impl.portal.*` interface whose sender is not the current owner of `org.freedesktop.portal.Desktop` is refused with `AccessDenied` and a journal line, as release 6 already does (`caller.rs`, kept by the rewrite). Without this, any process on the session bus could call `Screenshot` with `permission_store_checked` set and take the screen without a prompt.
 - **A declared limit, ended for `confined` applications by the launch broker** (`doc_session_daemons.md` SD9, SD22 step 6): the broker's filtered bus does not expose `org.freedesktop.host.portal.Registry`, so a `confined` application cannot register another application id. The limit stands for the `unconfined` class, whose host application has the whole session bus and may register any application id through `org.freedesktop.host.portal.Registry` (`data/org.freedesktop.host.portal.Registry.xml`, 1.20.4). A grant given to a host application's id therefore protects nothing against another host application. Flatpak applications are identified by the frontend from their sandbox and are not affected.
-- **The recorder** confines itself the same way at start: writes only beneath `$XDG_PICTURES_DIR/Screenshots`, `$XDG_VIDEOS_DIR/Screencasts` and its GStreamer registry cache, no TCP. It opens no Wayland connection.
+- **The recorder** confines itself the same way at start: writes only beneath `$XDG_PICTURES_DIR/Screenshots`, `$XDG_VIDEOS_DIR/Screencasts` and its GStreamer registry cache, no TCP. It opens no Wayland connection. It also reads, and never writes, beneath the backend's runtime directory, because the PNG of PT8 is born there; it never removes that original, which the backend's own sweep does (PT8).
+- **Accepted risk** (confirmed by the maintainer on 2026-10-08). The backend holds the main Wayland socket (capture, layer-shell) and reads all of `$HOME` (the chooser) in one process. The mitigations are this Landlock ruleset, the frontend-only rule and decoders outside the process; a second process for the capture producer was considered and not taken (section 6, decision 2).
 
 **PT4. Requests, windows and names.**
 
@@ -165,7 +172,7 @@ Status: revision 1 draft, 2026-10-05: the maintainer's decisions applied; text n
 **PT13. `athanor-recorder`, the shell's capture client.**
 
 - **Three commands:**
-  - `athanor-recorder screenshot`: an interactive `Screenshot` through the public portal; the result moves to `$XDG_PICTURES_DIR/Screenshots/Screenshot from <date and time>.png`, and a notification "Screenshot saved" offers "Show in Files" (`org.freedesktop.FileManager1.ShowItems`, FM16).
+  - `athanor-recorder screenshot`: an interactive `Screenshot` through the public portal; the recorder copies the result from the backend's runtime directory (a read its Landlock allows, PT3) to `$XDG_PICTURES_DIR/Screenshots/Screenshot from <date and time>.png`, and the original stays for the sweep of PT8; a notification "Screenshot saved" offers "Show in Files" (`org.freedesktop.FileManager1.ShowItems`, FM16).
   - `athanor-recorder pick-color`: `PickColor`, then a notification "Colour copied" with the value.
   - `athanor-recorder record`: a ScreenCast session (monitor or window, cursor embedded, no persistence), the portal's picker, then a GStreamer pipeline from `pipewiresrc` to `$XDG_VIDEOS_DIR/Screencasts/Screencast from <date and time>.webm`: VP8 in WebM, video only (decision 4). When the session closes, from the bar's Stop or for any other reason, the pipeline ends cleanly and a notification "Recording saved" offers "Show in Files". A full disk ends the recording with the file playable up to that point and a notification saying so.
 - **One recording at a time.** While recording the program owns `os.athanor.Recorder` on the session bus; a second `record` asks it to stop instead, so the control center's tile toggles.
@@ -201,7 +208,7 @@ Status: revision 1 draft, 2026-10-05: the maintainer's decisions applied; text n
 
 **PT17. Budgets.** Proposals, confirmed or corrected by the first measurement: the backend at most 64 MB PSS at rest with nothing mapped; the access dialog's first complete frame within 100 ms of the request at the 95th percentile (ST5); the chooser's first frame within 200 ms on a folder of 1000 files; a shared 1920×1080 screen at 60 frames per second with the backend under one core of athanor-ref.
 
-**PT18. Construction.** Each step merges on its own. From step 2 on, each build is installed on the reference laptop and judged by the maintainer before it merges.
+**PT18. Construction.** The six steps are approved together (section 6, decision 9). Each step merges on its own. From step 2 on, each build is installed on the reference laptop and judged by the maintainer before it merges.
 
 1. **Honest configuration and appearance.** `athanor-portals.conf` with the table of PT1 in its interim form (FileChooser, Access and Inhibit on `gtk`, ScreenCast `none`); `athanor.portal` without `UseIn`; PT14 in full; the new crate skeleton with Settings (PT5), the unit, the confinement and the frontend-only rule of PT3, carried over from release 6. `athanor-daemon-rs` gives up the bus name it would otherwise contest (section 3). Gate: a Flatpak libadwaita application follows the variant, the exact accent and the contrast live, and Papers opens and saves through the gtk chooser.
 2. **Prompts, inhibition, background.** Access (PT6), Inhibit (PT11), Background (PT12), `Portal1` with `SessionInhibitors`; the table switches Access and Inhibit to `athanor`.
@@ -243,7 +250,7 @@ Applied with the approval of this document. Requests met, by the rule that made 
 ## 4. Open doubts
 
 1. **The seven decisions** of section 6 were taken by the maintainer on 2026-10-05, all as the draft recommended.
-2. **The spikes,** each a short probe on the image as shipped, run before the step that needs it. A spike that fails sends its rule back to the maintainer.
+2. **The spikes,** each a short probe on the image as shipped, run before the step that needs it. A spike that fails sends its rule back to the maintainer; the approval of PT18 does not cover a rule whose spike failed.
    - S1 (step 4). ext-image-copy-capture on cosmic-comp 1.8 for outputs and toplevels: the shared-memory formats offered, DMA-BUF buffers, the cursor session, behaviour across a scale change and an output unplugged mid-session.
    - S2 (step 5). The PipeWire producer in Rust: the `pipewire` crate (0.10.1 on crates.io, MIT, 2026-10-05), format and buffer negotiation with Firefox, Chromium and OBS, memory and latency at 60 frames per second.
    - S3 (step 2). `zxdg_importer_v2` on cosmic-comp 1.8: whether an imported parent makes the dialog transient and modal over the application, for GTK4, Qt 6 and Chromium handles.
@@ -287,3 +294,9 @@ Decided by the maintainer on 2026-10-05, each as the draft recommended.
 5. **An application's suspend inhibition** (PT11). It blocks automatic suspend only; the user's own suspend is never blocked. Reason: an application may stop the machine from suspending under its work, not stop a person who chose to suspend.
 6. **The dialogs left to xdg-desktop-portal-gtk** (PT1). AppChooser, Print, Account, Email, DynamicLauncher and Notification forwarding stay with gtk in the first release. Reason: they work today and receive the appearance through GSettings; AppChooser is the first candidate for a later revision.
 7. **A background notice nobody answers** (PT12). The application runs this once (answer 2). Reason: nothing a person did not see is ended, the frontend asks again at the next start, and Software's page shows it running meanwhile.
+
+Decided by the maintainer on 2026-10-08, each as the review recommended.
+
+8. **Scope budget** (PT2). The "why not upstream" paragraph and the owner are part of this document, and the decision of 2026-10-04, "Athanor writes its own, real portal backend", stands. Reason: the rule of A2-14 was written after the first draft.
+9. **Approval of PT18** (PT18, section 4). All six steps are approved together. Reason: a failed spike returns its rule to the maintainer and each step merges on its own.
+10. **The accepted risk of PT3.** One process with the main socket and read access to `$HOME`, as decision 2 chose.
