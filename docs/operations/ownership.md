@@ -4,9 +4,9 @@
 | --- | --- |
 | Purpose | The areas of the repository, their paths and their owners |
 | Owner | the maintainer (`@hr-mes`) |
-| Status | revision 1, 2026-10-06, _(Proposal for the maintainer)_. `.github/CODEOWNERS` is not changed here: PR #170 owns it |
+| Status | revision 1, 2026-10-06, _(Proposal for the maintainer)_, except section 4, decided on 2026-10-08 (ADR-0097). `.github/CODEOWNERS` is not changed here: PR #170 owns it |
 | Depends on | [contributing.md](contributing.md) CT4 and CT6, [branching.md](branching.md) |
-| Defines | OWN1 to OWN4, and the areas `kernel`, `build`, `signing`, `security`, `shell`, `apps`, `docs` |
+| Defines | OWN1 to OWN5, and the areas `kernel`, `build`, `signing`, `security`, `shell`, `apps`, `docs` |
 
 ## 1. Today (facts)
 
@@ -127,3 +127,20 @@ protected paths last, as in PR #170.
 
 A crate or package without an entry above falls to the default owner until a specification
 gives it an area. The Ermete-era components without one were retired by ADR-0073.
+
+## 4. Maintenance owners of own components (decided, ADR-0097)
+
+- **OWN5.** The scope budget (`doc_shell.md` SH3) plans no own component without a "why not
+  upstream" and a maintenance owner named by the maintainer. Until the maintainer names
+  another person, the owner of every own component is the maintainer (`@hr-mes`). The table
+  lists the components whose specification asked for the name, and where their reason is
+  written; a new one is added in the change that writes its "why not upstream".
+
+| Component | Reason written in | Owner |
+| --- | --- | --- |
+| `udisks` and `usbguard` modules of `system/athanor-services` | `doc_disks.md` DK3 and section 7 | the maintainer |
+| Athanor page of Software | `doc_software.md` section 9 | the maintainer |
+| Bazaar, image side (an upstream program that moves under the image) | `doc_software.md` section 9 | the maintainer |
+
+Upstream dependencies are not own components; the maintainer also follows the releases of the
+`tracker-rs` bindings (`doc_launcher.md` LA2).

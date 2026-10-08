@@ -101,7 +101,7 @@ The measurement is the sum of `Pss` over every process in the user's session sli
 | One place for the theme and the accessibility tree                     | The privileged protocols are granted per security context and per launch directory (`doc_bar.md`, BR2); a merged process widens one grant to every surface                                                                                      |
 | Fewer units to order and to monitor                                    | A leak in one surface is no longer attributable by `smaps_rollup`, so the 10% growth rule of the Memory row loses its meaning for it; the cold-start races the surfaces already show are shared                                                  |
 
-> **Proposal, awaiting the maintainer:** do not merge now. The saving is small against the whole-session budget (to be measured, A2-31), and the cost is paid in isolation, the property the zero-trust rules exist for. Revisit if the measured sum exceeds the budget, and then merge only the two surfaces with no privileged protocol and the same confinement (the on-screen display and the notification popups) before any other.
+> **Decided by the maintainer on 2026-10-08 (ADR-0097):** do not merge now. The saving is small against the whole-session budget (to be measured, A2-31), and the cost is paid in isolation, the property the zero-trust rules exist for. Revisit if the measured sum exceeds the budget, and then merge only the two surfaces with no privileged protocol and the same confinement (the on-screen display and the notification popups) before any other.
 
 **ST6. Behaviour is specified by scenarios.**
 
