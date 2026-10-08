@@ -33,7 +33,10 @@ by the digest `kernel-artifacts.sh` verified (D43).
 The Orchestrator (`.github/workflows/athanor-forge-orchestrator.yml`) calls
 `.github/workflows/call-system-image.yml`, which:
 
-1. aggregates the forge's tier repositories and publishes them;
+1. aggregates the forge's tier repositories, publishes them and hands their digests to the
+   image build in `tier-digests.json` (`forge/scripts/publish_tiers.sh`): the images take the
+   tiers by digest, never by tag. A build outside the Orchestrator writes the file with
+   `tier-digests.sh resolve`, which reads the published tiers once;
 2. builds the `system` stage once and the three images `FROM` it with `build-image.sh`,
    checks in local storage that all three carry every layer of the system image
    (`shared-layers.sh`), then pushes them under the run id and `latest`;

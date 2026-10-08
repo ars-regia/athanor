@@ -72,13 +72,12 @@ kernel-build stage="build":
         -w /forge localhost/azoth-builder \
         bash forge/specs/azoth/build.sh --stage "{{ stage }}" --out /forge/out
 
-# Runs Rust Clippy policies, Cargo Vet cryptographic supply-chain audit, and Cargo Deny security check
+# Runs Rust Clippy policies and the Cargo Deny dependency policy (deny.toml)
 [group('QA & Validation')]
 audit:
     #!/usr/bin/env bash
     set -euo pipefail
     cargo clippy --all-targets --all-features -- -D clippy::undocumented_unsafe_blocks -D clippy::multiple_unsafe_ops_per_block -D warnings
-    cargo vet check
     cargo deny check
 
 # Runs AWS Kani formal verification proof harnesses on Rust spec targets

@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-desktop-ui
 Version:        1.0.0
-Release:        13%{?dist}
+Release:        14%{?dist}
 Summary:        Athanor OS Desktop UI configurations
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -36,10 +36,19 @@ mkdir -p %{buildroot}/usr/lib/systemd/user
 # Copy UDEV rules
 cp -p %{_sourcedir}/etc/udev/rules.d/99-ddcutil-i2c.rules %{buildroot}/usr/lib/udev/rules.d/
 
+# Firefox policy (Fedora's package ships no policies.json, only distribution.ini)
+mkdir -p %{buildroot}/usr/lib64/firefox/distribution
+cp -p %{_sourcedir}/usr/lib64/firefox/distribution/policies.json %{buildroot}/usr/lib64/firefox/distribution/
+
 %files
 /usr/lib/udev/rules.d/99-ddcutil-i2c.rules
+/usr/lib64/firefox/distribution/policies.json
 
 %changelog
+* Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-14
+- Ship a Firefox policy that turns off telemetry, studies, the default-browser agent, Pocket
+  and sponsored content, until Firefox moves to Flatpak (doc_software.md, section 6)
+
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-13
 - Require Ptyxis, GNOME Text Editor and GNOME Disks, the default applications of
   doc_software.md decision 7, which replace cosmic-term, cosmic-edit and the COSMIC
