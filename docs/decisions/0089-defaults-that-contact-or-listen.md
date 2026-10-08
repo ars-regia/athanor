@@ -45,4 +45,4 @@ Decided by the maintainer on 2026-10-08.
   `athanor-desktop-ui` (Firefox policy).
 - `doc_first_run.md` FR12 and `doc_settings.md` SE9 carry the resolver requirement; no code for it
   exists yet.
-- Wiring `system/check-image-contacts.sh` into the image workflow is not done by this record.
+- `call-system-image.yml` runs `system/check-image-contacts.sh` on the built system image, next to the RPM check.
