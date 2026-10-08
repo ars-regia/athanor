@@ -58,9 +58,10 @@ pub enum Reason {
     /// As `OwnerMoved`, but the migration cannot move the machine yet: a rollback is queued,
     /// or the new owner publishes no such image or tag (a run-number tag, for one).
     OwnerMovedWaiting,
-    /// As `OwnerMoved`, but the image under the new owner is the digest the user went back
-    /// from, or one that failed to boot after two moves: a held digest is never staged, so
-    /// the machine stays where it is until the new owner publishes a newer build.
+    /// As `OwnerMoved`, but the image under the new owner is the held digest (the user or
+    /// greenboot went back from it), or one whose deployments failed to boot twice: the
+    /// migration stages neither, so the machine stays where it is until the new owner
+    /// publishes a newer build.
     OwnerMovedHeld,
     /// The signature verifies, but the machine follows a run-number tag or a digest: one
     /// build, under which nothing newer is ever published. It receives no updates until it

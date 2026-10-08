@@ -12,8 +12,9 @@ use crate::tools::{Failure, Tools};
 /// The tag machines follow (decision D1).
 pub const CHANNEL: &str = "stable";
 
-/// How many times the migration stages one digest: once, and once more after a deployment of
-/// it that did not boot. Then the digest is held, as a rollback holds it (UT6).
+/// How many deployments of one digest may fail to boot before the migration stops staging it:
+/// the first, and one more. A staging that was discarded unbooted (a power cycle before a
+/// locked update was applied, or before a clean shutdown) is not a failure.
 pub const ATTEMPTS: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,18 +92,34 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>) -> Result<Outcome, Failure> {
         return Ok(Outcome::Waiting(if successor.is_some() { "successor-absent" } else { "channel-absent" }));
     };
     ctx.store.set_channel_absent(false).map_err(storage)?;
-    // Nothing releases a held digest, and the migration never stages one: the user went back
-    // from it, greenboot rolled it back, or it was staged ATTEMPTS times and never booted for
-    // good. The machine stays where it is until the tag names a newer build.
-    let mut held = ctx.store.held().as_deref() == Some(candidate.digest.as_str());
-    if !held && ctx.store.move_attempts(&candidate.digest) >= ATTEMPTS {
-        tracing::warn!(digest = %candidate.digest, attempts = ATTEMPTS, "the switched deployment did not boot: the digest is held and not staged again");
-        ctx.store.set_held(&candidate.digest).map_err(storage)?;
-        held = true;
+    let mut record = ctx.store.move_record(&candidate.digest);
+    if let Some(staged) = record.staged.take() {
+        // The staging of an earlier run is gone (restart-pending returned above). Deployed and
+        // left, it is the rollback deployment now: it did not boot for good, and greenboot or
+        // the person went back. Not there, a power cycle discarded it before it was finalized,
+        // which says nothing about the digest (spike U1, section 4).
+        let left = status.rollback.as_ref().is_some_and(|rollback| {
+            rollback.digest == candidate.digest && (staged == "-" || rollback.deployment.as_deref().is_none_or(|deployment| deployment == staged))
+        });
+        if left {
+            record.failed_boots += 1;
+            tracing::warn!(digest = %candidate.digest, failed_boots = record.failed_boots, "the switched deployment did not boot");
+        }
+        ctx.store.set_move_record(&record).map_err(storage)?;
     }
-    ctx.store.set_move_held(held).map_err(storage)?;
+    // Nothing releases a held digest, and the migration never stages one: the user went back
+    // from it, or greenboot rolled it back. Nor does it stage again a digest whose deployments
+    // failed to boot ATTEMPTS times; that is the migration's own record, not the held file,
+    // which keeps the digest the person went back from. Either way the machine stays where it
+    // is until the tag names a newer build.
+    let held = ctx.store.held().as_deref() == Some(candidate.digest.as_str());
+    let failed = record.failed_boots >= ATTEMPTS;
+    ctx.store.set_move_held(held || failed).map_err(storage)?;
     if held {
         return Ok(Outcome::Waiting("held"));
+    }
+    if failed {
+        return Ok(Outcome::Waiting("boot-failed"));
     }
     if candidate.build_time < status.booted.build_time {
         return Ok(Outcome::Waiting("channel-older-than-booted"));
@@ -114,7 +131,8 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>) -> Result<Outcome, Failure> {
         tracing::error!(%target, "bootc switch returned without staging the target with the policy enforced");
         return Err(Failure { code: athanor_trust_state::ErrorCode::Internal, host: None });
     };
-    ctx.store.record_move_attempt(&staged.digest).map_err(storage)?;
+    record.staged = Some(staged.deployment.clone().unwrap_or_else(|| "-".into()));
+    ctx.store.set_move_record(&record).map_err(storage)?;
     if staged.build_time > status.booted.build_time {
         // A newer build is an update, and an update waits for the user (SH11).
         ctx.tools.relock()?;
@@ -125,7 +143,7 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>) -> Result<Outcome, Failure> {
         }
     }
     // No stamp yet: the machine has migrated once it boots the signed reference, so a
-    // deployment that does not boot leaves it to switch again, up to ATTEMPTS stagings.
+    // deployment that does not boot leaves it to switch again, up to ATTEMPTS failed boots.
     Ok(Outcome::Switched)
 }
 
@@ -176,34 +194,94 @@ mod tests {
         }
     }
 
+    /// The staged deployment was deployed and did not boot: the machine is back on the old
+    /// deployment, and the one that failed is the rollback (greenboot spent its tries).
+    fn failed_boot(tools: &Fake) {
+        let mut status = tools.status.borrow_mut();
+        status.rollback = Some(status.staged.take().expect("staged"));
+    }
+
+    /// A power cycle before the staged deployment was finalized: it is gone, nothing booted it
+    /// (spike U1, section 4: `status.staged: null`, the booted version unchanged).
+    fn power_off(tools: &Fake) {
+        tools.status.borrow_mut().staged = None;
+    }
+
     #[test]
-    fn a_switched_deployment_that_does_not_boot_is_switched_once_more_and_then_held() {
-        for booted in [from_media(1000), from_previous_owner(":latest", true)] {
-            let owner = booted.enforcing;
-            let machine = Machine::new(&format!("migrate-no-boot-{owner}"), &["real/k1.pub"]);
-            let tools = Fake::booted(booted).offering(SIGNED, 1000);
-            assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Switched));
-            // The deployment failed to boot and the machine is back on the old reference, with
-            // nothing staged: one more attempt.
-            tools.status.borrow_mut().staged = None;
-            assert_eq!(run(&machine.ctx(&tools, 6000)), Ok(Outcome::Switched));
-            // It failed again: the digest is held, recorded as a rollback records it, and no
-            // third switch is made, at this run or any later one.
-            tools.status.borrow_mut().staged = None;
+    fn a_switched_deployment_that_does_not_boot_is_switched_once_more_and_then_left() {
+        // The same build finalizes on its own at shutdown; a newer one is locked and applied
+        // by the user. Either way the deployment then fails to boot, twice.
+        let cases = [(from_media(1000), 1000, false), (from_previous_owner(":latest", true), 1000, false), (from_previous_owner_at(&digest(1), 1000), 2000, true)];
+        for (n, (booted, build_time, locked)) in cases.into_iter().enumerate() {
+            let owner = booted.image.starts_with(PREVIOUS);
+            let machine = Machine::new(&format!("migrate-no-boot-{n}"), &["real/k1.pub"]);
+            // The digest the person went back from earlier stays held, whatever the move does.
+            machine.store.set_held(&digest(7)).expect("GoBack()");
+            let tools = Fake::booted(booted).offering(SIGNED, build_time);
+            for now in [5000, 6000] {
+                assert_eq!(run(&machine.ctx(&tools, now)), Ok(Outcome::Switched));
+                assert_eq!(tools.called("relock"), locked);
+                if locked {
+                    tools.apply_downloaded().expect("Apply()");
+                }
+                failed_boot(&tools);
+            }
+            // Two failed boots of the digest: no third switch, at this run or any later one.
             for now in [7000, 8000] {
-                assert_eq!(run(&machine.ctx(&tools, now)), Ok(Outcome::Waiting("held")));
+                assert_eq!(run(&machine.ctx(&tools, now)), Ok(Outcome::Waiting("boot-failed")), "{n}");
             }
             assert_eq!(switches(&tools), 2);
-            assert_eq!(machine.store.held().as_deref(), Some(SIGNED));
+            assert_eq!(machine.store.held(), Some(digest(7)), "the held digest of GoBack() is not released");
             assert!(!machine.store.migrated());
             if owner {
                 let state = crate::check::run(&machine.ctx(&tools, 8000), true).expect("offline");
                 assert_eq!(state.verified.reason, athanor_trust_state::Reason::OwnerMovedHeld);
             }
-            // A newer build under the tag is not held: the move resumes, locked for the user.
-            let newer = Fake::booted(tools.status.borrow().booted.clone()).offering(&digest(4), 2000);
+            // A newer build under the tag has not failed: the move resumes, locked for the user.
+            let newer = Fake::booted(tools.status.borrow().booted.clone()).offering(&digest(4), 3000);
             assert_eq!(run(&machine.ctx(&newer, 9000)), Ok(Outcome::Switched));
             assert!(newer.called("relock") && !machine.store.move_held());
+        }
+    }
+
+    #[test]
+    fn a_power_off_after_one_failed_boot_is_not_a_second_one() {
+        let machine = Machine::new("migrate-fail-then-power-off", &["real/k1.pub"]);
+        let tools = Fake::booted(from_previous_owner_at(&digest(1), 1000)).offering(SIGNED, 2000);
+        assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Switched));
+        tools.apply_downloaded().expect("Apply()");
+        failed_boot(&tools);
+        // The failed deployment stays the rollback while the next stagings are powered off.
+        for now in [6000, 7000, 8000] {
+            assert_eq!(run(&machine.ctx(&tools, now)), Ok(Outcome::Switched), "{now}");
+            power_off(&tools);
+        }
+        assert_eq!(run(&machine.ctx(&tools, 9000)), Ok(Outcome::Switched));
+        tools.apply_downloaded().expect("Apply()");
+        failed_boot(&tools);
+        assert_eq!(run(&machine.ctx(&tools, 10000)), Ok(Outcome::Waiting("boot-failed")));
+        assert_eq!(switches(&tools), 5);
+    }
+
+    #[test]
+    fn a_staged_move_that_is_powered_off_is_staged_again_and_never_left() {
+        // A newer build is locked and waits for Apply(); the same build waits for a clean
+        // shutdown. A power cycle discards either, which says nothing about the digest.
+        for (n, (booted, build_time)) in [(from_previous_owner_at(&digest(1), 1000), 2000), (from_media(1000), 1000)].into_iter().enumerate() {
+            let machine = Machine::new(&format!("migrate-power-off-{n}"), &["real/k1.pub"]);
+            machine.store.set_held(&digest(7)).expect("GoBack()");
+            let tools = Fake::booted(booted).offering(SIGNED, build_time);
+            for now in [5000, 6000, 7000, 8000] {
+                assert_eq!(run(&machine.ctx(&tools, now)), Ok(Outcome::Switched), "{n} at {now}");
+                power_off(&tools);
+            }
+            assert_eq!(switches(&tools), 4);
+            assert_eq!(machine.store.held(), Some(digest(7)));
+            assert!(!machine.store.move_held());
+            if n == 0 {
+                let state = crate::check::run(&machine.ctx(&tools, 8000), true).expect("offline");
+                assert_eq!(state.verified.reason, athanor_trust_state::Reason::OwnerMoved);
+            }
         }
     }
 

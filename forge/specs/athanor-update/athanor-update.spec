@@ -88,14 +88,15 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
 - The migration decides from the deployments, not from the stamp alone: a switch that staged
   nothing, or not the target with the policy enforced, fails; a staged target waits for the
   restart (`restart-pending`); the stamp is written once the signed reference has booted, so
-  a deployment that does not boot is switched once more, and then its digest is held. A
+  a deployment that does not boot is switched once more, and then not again for that digest
+  (`move-record` counts failed boots only, never a staging a power cycle discarded). A
   stamp is ignored on an image of the previous owner, and neither athanor-update-migrate.service
   nor its timer has the stamp as a condition; with the stamp and no previous owner listed,
   the unit ends without asking bootc.
-- The migration never stages a held digest: after `GoBack()` or a greenboot rollback of the
-  moved deployment the machine stays on the previous owner, `move-held` is written and the
-  state reads `verified.reason = owner-moved-held`, until the new owner publishes a newer
-  build.
+- The migration never stages a held digest, and never writes one: after `GoBack()` or a
+  greenboot rollback of the moved deployment, or two failed boots of its digest, the machine
+  stays on the previous owner, `move-held` is written and the state reads
+  `verified.reason = owner-moved-held`, until the new owner publishes a newer build.
 - A verified machine on a run-number tag (digits only) or a digest publishes
   `verified.reason = pinned-build`: one build, which receives no updates. Nothing moves it.
   Any other tag follows newer builds.

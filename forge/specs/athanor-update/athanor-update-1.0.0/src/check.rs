@@ -249,7 +249,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn deployed(digest: &str, build_time: i64) -> Deployed {
-        Deployed { image: format!("{REPO}:stable"), digest: digest.into(), version: format!("43.{build_time}"), build_time, enforcing: true, download_only: false, local_changes: false }
+        Deployed { image: format!("{REPO}:stable"), digest: digest.into(), version: format!("43.{build_time}"), build_time, enforcing: true, download_only: false, local_changes: false, deployment: None }
     }
 
     /// bootc, skopeo, ostree and NetworkManager as one scripted object that records its calls.
@@ -335,8 +335,10 @@ pub(crate) mod tests {
             self.call(format!("switch {image}"));
             let deployed = self.download.clone()?;
             if self.stages {
-                // bootc switch stages a deployment of `image` that is not locked against finalization.
-                self.status.borrow_mut().staged = Some(Deployed { image: image.into(), download_only: false, ..deployed });
+                // bootc switch stages a deployment of `image` that is not locked against
+                // finalization, a new ostree deployment each time.
+                let serial = self.calls.borrow().iter().filter(|call| call.starts_with("switch")).count();
+                self.status.borrow_mut().staged = Some(Deployed { image: image.into(), download_only: false, deployment: Some(format!("{}.{serial}", deployed.digest)), ..deployed });
             }
             Ok(())
         }

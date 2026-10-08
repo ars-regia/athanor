@@ -28,6 +28,9 @@ pub struct Deployed {
     /// bootc calls the deployment incompatible: packages were layered, removed or replaced
     /// with rpm-ostree, so bootc neither describes it as an image nor upgrades it.
     pub local_changes: bool,
+    /// The ostree deployment, `<checksum>.<deploySerial>` as `ostree admin status` names it: two
+    /// deployments of one digest differ here. `None` when bootc does not report it.
+    pub deployment: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,6 +137,14 @@ struct BootcEntry {
     download_only: bool,
     #[serde(default)]
     incompatible: bool,
+    ostree: Option<BootcOstree>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BootcOstree {
+    checksum: String,
+    deploy_serial: u32,
 }
 
 #[derive(Deserialize)]
@@ -161,6 +172,7 @@ fn deployed(entry: BootcEntry) -> Option<Deployed> {
         build_time: image.timestamp.as_deref().and_then(unix_time).unwrap_or(0),
         download_only: entry.download_only,
         local_changes: false,
+        deployment: entry.ostree.map(|ostree| format!("{}.{}", ostree.checksum, ostree.deploy_serial)),
     })
 }
 
@@ -224,6 +236,7 @@ pub fn parse_local(json: &str) -> Option<Deployed> {
         enforcing: reference.starts_with("ostree-image-signed:"),
         download_only: false,
         local_changes: true,
+        deployment: None,
     })
 }
 
@@ -350,6 +363,14 @@ mod tests {
         assert!(!status.rollback_queued);
         let queued = STAGED.replacen(r#""status":{"#, r#""status":{"rollbackQueued":true,"#, 1);
         assert!(parse_status(&queued, || None).expect("status").rollback_queued);
+    }
+
+    #[test]
+    fn a_deployment_is_named_by_its_checksum_and_serial_when_bootc_gives_them() {
+        assert_eq!(parse_status(STAGED, || None).expect("status").staged.expect("staged").deployment, None);
+        // The members of the desktop's booted entry of 2026-10-01 (INCOMPATIBLE), on the staged one.
+        let named = STAGED.replacen(r#""downloadOnly":true,"#, r#""downloadOnly":true,"ostree":{"checksum":"b87dc949","deploySerial":1,"stateroot":"default"},"#, 1);
+        assert_eq!(parse_status(&named, || None).expect("status").staged.expect("staged").deployment.as_deref(), Some("b87dc949.1"));
     }
 
     #[test]
