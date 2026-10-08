@@ -1,6 +1,5 @@
 {
   "custom_packages": [
-    "bat",
     "selinux",
     "base-config",
     "desktop-ui",
@@ -37,7 +36,6 @@
     "tetragon"
   ],
   "custom_tier1": [
-    "bat",
     "cliphist",
     "system-tweaks",
     "kernel-profile",
@@ -71,6 +69,7 @@
   "upstream_core": [
     "nix",
     "nix-daemon",
+    "bat",
     "busybox",
     "brightnessctl",
     "dbus-tools",

@@ -59,7 +59,9 @@ The maintainer decided on 2026-10-07 to amend ADR-0080 as follows:
 6. **Rulesets.** The product branches carry two rulesets: an integrity ruleset (merge queue,
    required `gate`, linear history, no force push, no deletion) without a bypass actor, and a
    review ruleset whose bypass actor is the repository Admin role, held by the maintainer
-   alone, in the "for pull requests only" mode.
+   alone, in the "for pull requests only" mode. Amended 2026-10-08 by the maintainer
+   (PIPE-N06): the merge queue stays out of the integrity ruleset until every required
+   context is reported on `merge_group` (doc_pipeline.md, PL2).
 7. **SBOM hashes.** SBOMs carry the strongest hash each ecosystem publishes, and every file
    Athanor builds and delivers carries a SHA-512 hash; the missing SHA-512 of upstream
    components that TR-03183-2 asks for is a documented deviation in `docs/compliance/`.

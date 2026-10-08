@@ -34,6 +34,9 @@
 # Signing, promotion and the keys' public halves
 /system/keys/ @hr-mes
 /system/sign-images.sh @hr-mes
+/system/verify-images.sh @hr-mes
+/system/tag-images.sh @hr-mes
+/system/image-digests.sh @hr-mes
 /system/promote.sh @hr-mes
 /system/build-image.sh @hr-mes
 /forge/scripts/sign_attest.sh @hr-mes

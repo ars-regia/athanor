@@ -81,13 +81,6 @@ audit:
     cargo vet check
     cargo deny check
 
-# Runs cargo-fuzz fuzzing harness across Rust components
-[group('QA & Validation')]
-fuzz component="all" time="60":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    bash scripts/run_fuzz.sh "{{ component }}" "{{ time }}"
-
 # Runs AWS Kani formal verification proof harnesses on Rust spec targets
 [group('QA & Validation')]
 verify component:

@@ -302,9 +302,8 @@ jobs:
     # beside the key: checkout, registry login, system/sign-images.sh (doc_update_trust.md UT2).
     # Here, not in call-system-image.yml: a called workflow's job reads the secrets of its
     # environment only when its caller inherits every secret (actions/runner#4453, D43).
-    # build-builder: the verification runs the skopeo of this run's builder image, as the
-    # runner's is too old for the keyPaths of the shipped policy (system/sign-images.sh).
-    needs: [system-image, build-builder]
+    # It does not verify: verify-system-images does, without the key.
+    needs: [system-image]
     # Explicit: the implicit success() also requires every transitive need to have succeeded,
     # and the NVIDIA kmod jobs upstream of system-image are skipped on most runs, which
     # skipped this job with them.
@@ -335,9 +334,81 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
         run: echo "${GITHUB_TOKEN}" | skopeo login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-      - name: 🔏 Sign, then verify as a machine will (system/sign-images.sh)
+      - name: 🔏 Sign by digest (system/sign-images.sh)
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
-          SIGN_VERIFY_BUILDER: ${{ needs.build-builder.outputs.content_hash }}
         run: bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
+
+  verify-system-images:
+    name: 🔎 Verify the signatures as a machine does
+    # No environment, no secret and no registry login: the images and the builder are public,
+    # and each image is pulled anonymously through the shipped policy, as a machine pulls
+    # (doc_update_trust.md UT2, UT3; D43). It runs whenever the images were published, also
+    # when sign-system-images was skipped or failed: an image without the key-based signature
+    # fails the verification, so a run never ends green with unsigned images.
+    # build-builder: the runner's skopeo is too old for the keyPaths of the shipped policy, so
+    # the verification runs the skopeo of this run's builder image (system/verify-images.sh).
+    needs: [system-image, sign-system-images, build-builder]
+    if: ${{ !cancelled() && needs.system-image.result == 'success' }}
+    runs-on: ubuntu-24.04
+    # -o pipefail, as in sign-system-images: a failed verification piped into tee fails the job.
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: 📎 Digests recorded by the build job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: image-digests
+          path: artifacts
+      - name: 🔎 Pull each image through the shipped policy (system/verify-images.sh)
+        env:
+          BUILDER_HASH: ${{ needs.build-builder.outputs.content_hash }}
+        run: bash system/verify-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" --builder "${BUILDER_HASH}" artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
+
+  tag-system-images:
+    name: 🏷️ Move :latest to the verified images
+    # :latest moves only after the key-based signature of the same digests verified as a
+    # machine verifies it (doc_update_delivery.md UD25): a machine that follows :latest never
+    # meets an image the shipped policy refuses, nor an ISO that installs one. No key; the
+    # token writes the tags.
+    needs: [verify-system-images]
+    if: ${{ !cancelled() && needs.verify-system-images.result == 'success' }}
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: 📎 Digests recorded by the build job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: image-digests
+          path: artifacts
+      - name: 🔑 Login to the registry
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: echo "${GITHUB_TOKEN}" | skopeo login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+      - name: 🏷️ Point :latest at the verified digests (system/tag-images.sh)
+        run: bash system/tag-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" --tag latest artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
+      - name: 📀 Point the ISO's :latest at this run's ISO, on main only (system/tag-images.sh)
+        # The ISO installs the default image verified above; :latest only from main, as the
+        # kernel does.
+        if: github.ref == 'refs/heads/main'
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: bash system/tag-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" --tag latest --iso "${RUN_ID}" | tee -a "${GITHUB_STEP_SUMMARY}"

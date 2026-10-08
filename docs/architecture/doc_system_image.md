@@ -117,7 +117,7 @@ A mismatch is a build failure with the exact values, never a warning.
   - the build job holds no key and runs outside the signing environments (D43): the vmlinuz arrives signed for Secure Boot (section 8).
 - **Installation:**
   - the installer ISO stays single and installs `athanor-system`;
-  - a machine with NVIDIA hardware moves to its variant with `bootc switch ghcr.io/ars-regia/athanor-system-nvidia:latest`, or `-nvidia-legacy`;
+  - a machine with NVIDIA hardware moves to its variant with `bootc switch --enforce-container-sigpolicy ghcr.io/ars-regia/athanor-system-nvidia:latest`, or `-nvidia-legacy`. A switch without the flag leaves the machine on a reference that does not verify its updates, and `athanor-update` reports it as `origin-not-enforcing`. `:stable` replaces `:latest` once the stable channel is published (A2-4);
   - detecting the GPU in the installer and choosing the image there is future work.
 - **Acceptance:**
   - ISO acceptance keeps installing the default image in a VM without GPU;
@@ -169,13 +169,13 @@ These defects were found on the same boot and each needs its own fix:
 ## 7. Migration of the maintainer's desktop
 
 1. **Now, to use the desktop:** the temporary kernel argument `modprobe.blacklist=nvidia,nvidia_drm,nvidia_modeset,nvidia_uvm,nvidia_peermem` hands both GPUs back to `nouveau`.
-2. **Once the variant is published:** `sudo rpm-ostree kargs --delete=modprobe.blacklist=nvidia,nvidia_drm,nvidia_modeset,nvidia_uvm,nvidia_peermem` and `sudo bootc switch ghcr.io/ars-regia/athanor-system-nvidia:latest`, then a reboot at the maintainer's choice.
+2. **Once the variant is published:** `sudo rpm-ostree kargs --delete=modprobe.blacklist=nvidia,nvidia_drm,nvidia_modeset,nvidia_uvm,nvidia_peermem` and `sudo bootc switch --enforce-container-sigpolicy ghcr.io/ars-regia/athanor-system-nvidia:latest`, then a reboot at the maintainer's choice.
 3. The checks of section 6, item 3.
 
 ## 8. Version and signatures
 
 - **Version.** `system/build-image.sh` labels every image with `org.opencontainers.image.version`, `<base major>.<UTC build date>.<serial>`, and `org.opencontainers.image.created`. The serial is the CI run number in the pipeline and `0` in a local build. Ordering uses the build time, never the version string (`doc_update_trust.md`, UT9).
-- **Signatures.** The three images carry two signatures. The keyless Sigstore signature and SBOM attestation (`forge/scripts/sign_attest.sh`) record provenance. The key-based signature, made by `system/sign-images.sh` in the `sign-system-images` job, is what machines verify: the policy rendered from the public keys under `system/keys` is in force in the image (`/etc/containers/policy.json` links to it), and the job verifies each signature through that policy before it reports success (`doc_update_trust.md`, UT2 and UT3).
+- **Signatures.** The three images carry two signatures. The keyless Sigstore signature and SBOM attestation (`forge/scripts/sign_attest.sh`) record provenance. The key-based signature, made by `system/sign-images.sh` in the `sign-system-images` job, is what machines verify: the policy rendered from the public keys under `system/keys` is in force in the image (`/etc/containers/policy.json` links to it), and the `verify-system-images` job, which holds no key, pulls each image through that policy (`system/verify-images.sh`) before `:latest` moves to it (`doc_update_trust.md`, UT2 and UT3).
 - **Signed kernel.** GRUB loads `/usr/lib/modules/<kver>/vmlinuz` through shim; 1.0 has no UKI (A2-8, #145). That vmlinuz is the one NVIDIA kmod's sign-only job signs with the Secure Boot key for each kernel and publishes as `KERNEL_REGISTRY/azoth-boot:<nvr>-k<12 hex of the kernel digest>`, keyless-signed and attested with the kernel digest and the sha256 of `forge/specs/azoth/keys/secureboot/athanor-secureboot.pem`. `system/kernel-artifacts.sh` verifies both and records `boot_digest`; the system stage copies the file in by that digest over the one the `kernel-core` RPM installed, and each image carries the digest as `io.athanor.azoth-boot.digest`. No key reaches an image build (D43), so a pull-request check and a local build produce the same image as the pipeline.
 - **`rpm -V` consequence.** The replaced file keeps the path the RPM database records, so `rpm -V kernel-core` on an installed machine reports `/usr/lib/modules/<kver>/vmlinuz` with a size and digest mismatch (`S.5......`). This is expected: the RPM's vmlinuz carries only the build's test signature, the shipped one carries the project's Secure Boot signature over the same kernel. `sbverify --cert athanor-secureboot.pem` on that file is the check that matters.
 

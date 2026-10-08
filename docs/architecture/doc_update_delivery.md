@@ -95,7 +95,7 @@ An evidence file is JSON written by the gate's script: `{"gate", "digest", "run_
 
 **UD9. A missing channel is a wait, not a failure.** `migrate.rs` maps a registry answer of "manifest unknown" for the channel to `Waiting("channel-absent")`, writes no stamp, exits 0, and the unit retries on its timer, not on `Restart=on-failure`. Other errors keep failing. Acceptance: `cargo test -p athanor-update` gains a case with a fake `candidate()` returning manifest unknown; on the dev VM with no `:stable`, `systemctl show -p NRestarts athanor-update-migrate.service` stays 0 for an hour.
 
-**UD10. A machine leaves an unverified reference by itself, once its policy is in force** (UT4, unchanged), and the check names why it waits: `local-changes`, `policy-not-in-force`, `reference-out-of-scope`, `channel-absent`. The shield shows the reason with its remedy (UD16 for `local-changes`). Acceptance: dev-VM harness stage `migrate`, extended with a machine without `:stable`.
+**UD10. A machine leaves an unverified reference by itself, once its policy is in force** (UT4, unchanged), and the check names why it waits: `local-changes`, `policy-not-in-force`, `reference-out-of-scope`, `channel-absent`. A machine that migrated and was later switched to a reference that does not enforce the policy reads `origin-not-enforcing`: it is reported, not switched back. The shield shows the reason with its remedy (UD16 for `local-changes`). Acceptance: dev-VM harness stage `migrate`, extended with a machine without `:stable`.
 
 ## 5. The namespace move (priority 1)
 
@@ -168,8 +168,9 @@ The policy, keys, registries.d and verification are UT2, UT3 and UT5. This secti
 **UD25. Sign, verify, then tag.** The order of a release run becomes:
 
 1. the build job pushes `:<run_id>` and writes `image-digests.txt`;
-2. `sign-system-images` (the `signing` environment, the key alone in its job, UT2) signs by digest and verifies each digest through the shipped policy, then writes the `signature` evidence file;
-3. `tag-latest` _(new job, no secrets)_ copies `docker://<repo>@<digest>` to `:latest` and re-reads it.
+2. `sign-system-images` (the `signing` environment, the key alone in its job, UT2) signs by digest, then writes the `signature` evidence file;
+3. `verify-system-images` (no environment, no secret) pulls each digest anonymously through the shipped policy (`system/verify-images.sh`); it runs also when signing was skipped, so an unsigned image fails the run;
+4. `tag-system-images` (no key) copies `docker://<repo>@<digest>` to `:latest` and re-reads it (`system/tag-images.sh`).
 
 The ISO is still built in the build job from `:<run_id>`. Acceptance: in one run, the registry's first write of `:latest` (from the job logs) comes after the `sign-system-images` job finishes. `sign-images.sh` addresses digests, not tags (its tag comparison of today stays as a guard).
 

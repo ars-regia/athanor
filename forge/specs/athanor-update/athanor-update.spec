@@ -4,7 +4,7 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-update
 Version:        1.0.0
-Release:        7%{?dist}
+Release:        8%{?dist}
 Summary:        Athanor system image updates and trust state
 
 License:        GPL-3.0-or-later
@@ -74,6 +74,12 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
 %doc /usr/share/doc/athanor-update/RECOVERY.md
 
 %changelog
+* Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-8
+- A machine that has migrated but boots a reference that does not enforce the policy, with
+  no enforcing deployment staged, publishes `verified.reason = origin-not-enforcing` instead
+  of `media`: it does not verify its updates and the check asks the registry for none. The
+  state is reported, not repaired; the migration does not run again.
+
 * Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
 - A queued rollback (`rollbackQueued` in `bootc status`: greenboot after a failed health
   check, or `bootc rollback`) holds the booted digest at every check and downloads nothing.
