@@ -161,3 +161,4 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0091 | 0091 | [QEMU stays in the image for the runner and the development VM](0091-qemu-in-the-image.md) | accepted | packages |
 | ADR-0092 | 0092 | [Carry cosmic-comp PR #1441 as our own patch; upstream first, never dependent on upstream](0092-carry-pr-1441-upstream-first.md) | accepted | security, shell |
 | ADR-0093 | 0093 | [Desktop specifications, review batch 1, approved](0093-desktop-specs-batch-1.md) | accepted | shell, session, security |
+| ADR-0096 | 0096 | [Kernel artefacts are signed with the project key, not the workflow's OIDC identity](0096-kernel-artefacts-project-key.md) | accepted | security, pipeline |
