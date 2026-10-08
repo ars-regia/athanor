@@ -36,7 +36,7 @@ unapproved: they are revised to revision 2 and await the maintainer's approval o
    it wins, as A2-20 requires.
 5. **The accessibility bus and confined applications (Q5, AX5).** The bind of the accessibility
    bus socket into broker-confined applications is kept. `doc_threat_model.md` TM4 records the
-   leak it opens as stated and time-limited: it ends at the construction step of the reader
+   leak it opens as stated, with an intended end: the construction step of the reader
    gate. That step ships only if spike A4's latency measurement holds (`doc_accessibility.md`
    AX18 step 6); if it does not, the leak stays and TM4 says so.
 6. **The overview's first complete frame (Q6, OV6).** The first complete frame is the frame with
