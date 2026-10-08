@@ -108,6 +108,14 @@ A mismatch is a build failure with the exact values, never a warning.
   - a pinned version the repository no longer publishes is a note, not a failure: image builds take the locked packages from the mirror, and the group that owns the pin moves it once a newer version is packaged;
   - every run mirrors every manifest, whether or not a bump PR is open, and fails when the mirror lacks a locked RPM the repository no longer serves.
 
+**Planned: the Fedora RPM lock (PLAT-N10).** The base image and the tier repositories are taken by digest (S1, doc_update_delivery.md UD28); the Fedora packages the system and GPU stages install with dnf still come live from the rolling repositories. The lock that closes this follows S7:
+
+- **Lock:** `system/fedora/locks/fedora.lock` in the format of `system/nvidia/lock.py` (`<sha256>  <url>`), one entry per NEVRA the image installs beyond the base.
+- **Generation:** a local command builds the system and GPU stages unlocked, takes the `rpm -qa` difference against the base and resolves each NEVRA to its URL and SHA-256 from the repositories' `primary.xml`, with the functions `lock.py` already has.
+- **Enforcement:** every locked RPM is kept in the OCI mirror by digest, as in S7. A throwaway stage fetches them, dnf installs with `--disablerepo='*'` from that local repository and the tier repositories, and a final check fails the build when `rpm -qa` lists a package that is neither in the base nor in the lock.
+- **openh264:** pinned by Cisco's URL and SHA-256 and never mirrored, because Cisco's licence covers only its own distribution.
+- **New dependencies:** when a pull request adds a Fedora dependency, the failing check prints the local command that regenerates the lock, and the author commits the lock in the same pull request. The bump bot's system group refreshes the lock for routine updates only; pull requests get no write token.
+
 **S8. Build, publication and installation.**
 
 - **Build and publication:**

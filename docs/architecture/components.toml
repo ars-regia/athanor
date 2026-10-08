@@ -412,7 +412,7 @@ area = "build-ci"
 status = "specified"
 spec = "doc_ci.md"
 item = "CI27"
-purpose = "Pull Request gate: changed areas, the gate verdict, the pinned tools of just check, the known-red list"
+purpose = "Pull Request gate: changed areas, the gate verdict, the pinned tools of just check, the known-red list, the Rust security audit (clippy, cargo-deny)"
 
 [[component]]
 path = "scripts/cosmic-comp-rebase"
@@ -493,13 +493,6 @@ kind = "script tool"
 area = "build-ci"
 status = "missing"
 purpose = "Structural checks of the repository: workflows, polkit, paths, shipped, docs, coverage and more"
-
-[[component]]
-path = "supply-chain"
-kind = "config"
-area = "security"
-status = "missing"
-purpose = "cargo-vet audits and imports, Trivy ignore list"
 
 [[component]]
 path = "system/Containerfile"

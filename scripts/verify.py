@@ -651,6 +651,92 @@ def check_os_release():
     return r
 
 
+CONTACTS = "forge/config/contacts.toml"
+CONTACT_FIELDS = ("id", "purpose", "destination", "where_off")
+
+
+def preset_lines(root):
+    """(verb, unit, file) of every enable or disable line of the presets this repository ships."""
+    files = sorted(root.glob("forge/specs/**/*.preset")) + sorted(root.glob("system/**/*.preset"))
+    for f in files:
+        for words in commands(read(f)):
+            if words[0] in ("enable", "disable"):
+                for unit in words[1:]:
+                    yield words[0], unit, rel(f)
+
+
+def contacts_problems(root=None):
+    """The privacy promise (doc_first_run.md FR12, ADR-0056): what the image contacts by itself is
+    listed in forge/config/contacts.toml and the presets agree with the list. Every timer a preset
+    enables is a contact, a local timer or an inert one; a unit the list calls silent is disabled by
+    a preset and enabled by nothing; a listed contact with a unit is still enabled; a contact that
+    names a configuration file finds its text there. A listener is a unit the image enables that
+    listens and that new installs turn off in the kickstart; it may be enabled.
+
+    Limit: this reads the presets of this repository and the explicit enables of ENABLERS (the
+    Containerfile and the kickstart) only. What Fedora's 90-default.preset enables, and what the
+    packages enable in their own %post, are seen only by forge/scripts/check_image_contacts.py on
+    the built image in CI (call-system-image.yml)."""
+    root = root or ROOT
+    try:
+        data = tomllib.loads(read(root / CONTACTS))
+    except (OSError, tomllib.TOMLDecodeError) as err:
+        return [f"{CONTACTS}: cannot read ({err})"]
+    problems = []
+    contacts = data.get("contact", [])
+    for c in contacts:
+        problems += [f"{CONTACTS}: contact {c.get('id', '?')} has no {k}" for k in CONTACT_FIELDS if not c.get(k)]
+    groups = {
+        "contact": {c["unit"] for c in contacts if c.get("unit")},
+        "local": {u["unit"] for u in data.get("local", [])},
+        "inert": {u["unit"] for u in data.get("inert", [])},
+        "silent": {u["unit"] for u in data.get("silent", [])},
+        "listener": {u["unit"] for u in data.get("listener", [])},
+    }
+    names = list(groups)
+    problems += [f"{CONTACTS}: {u} is listed as both {a} and {b}"
+                 for i, a in enumerate(names) for b in names[i + 1:] for u in sorted(groups[a] & groups[b])]
+    for group in ("local", "inert", "silent", "listener"):
+        problems += [f"{CONTACTS}: a {group} entry has no reason" for u in data.get(group, []) if not u.get("reason")]
+
+    def unit(name):
+        return name if "." in name else name + ".service"
+
+    lines = [(verb, unit(u), where) for verb, u, where in preset_lines(root)]
+    enabled = {u for verb, u, _ in lines if verb == "enable"}
+    disabled = {u for verb, u, _ in lines if verb == "disable"}
+    for f in ENABLERS:
+        if (root / f).exists():
+            enabled |= {unit(u) for words in commands(read(root / f)) for u in enabled_units(words)}
+    for c in contacts:
+        if c.get("unit") and not c.get("planned") and c["unit"] not in enabled:
+            problems += [f"{CONTACTS}: contact {c['id']} lists {c['unit']}, which no preset enables"]
+        if c.get("config"):
+            try:
+                found = c.get("config_contains", "") in read(root / c["config"])
+            except OSError:
+                found = False
+            if not found:
+                problems += [f"{CONTACTS}: contact {c['id']} expects {c.get('config_contains', '')!r} in {c['config']}"]
+    known = groups["contact"] | groups["local"] | groups["inert"]
+    problems += [f"{where}: enables {u}, a timer {CONTACTS} does not list as a contact, local or inert"
+                 for verb, u, where in lines if verb == "enable" and u.endswith(".timer") and u not in known]
+    for u in sorted(groups["silent"]):
+        if u in enabled:
+            problems += [f"{CONTACTS}: {u} is silent, and something enables it"]
+        if u not in disabled:
+            problems += [f"{CONTACTS}: {u} is silent, and no preset disables it"]
+    return problems
+
+
+@check("contacts", "What the image contacts by itself is listed in contacts.toml, and the presets agree")
+def check_contacts():
+    r = Result()
+    for problem in contacts_problems():
+        r.fail(problem)
+    return r
+
+
 # --------------------------------------------------------------------------- #
 # 3. polkit — ogni azione applicata dal codice deve essere dichiarata
 # --------------------------------------------------------------------------- #

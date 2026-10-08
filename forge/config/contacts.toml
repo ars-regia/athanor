@@ -1,0 +1,104 @@
+# What the image contacts by itself, without the person asking (doc_first_run.md, FR12; ADR-0056).
+# The first-run package ships this file as /usr/share/athanor/first-run/contacts.toml.
+#
+# Two checks keep it true:
+#   - `python3 scripts/verify.py contacts` compares it with the presets of this repository;
+#   - forge/scripts/check_image_contacts.py compares it with the units of a built image.
+# A timer that is enabled must be a contact, a local timer or an inert one; a silent unit must
+# never be enabled; a listener may be (see its section). Change this file in the same change that adds or removes a contact.
+
+schema = 1
+
+# Contacts. `unit`, when present, is a unit one of our presets enables. `where_off` says where
+# the person (or the administrator) turns the contact off.
+
+[[contact]]
+id = "system-updates"
+purpose = "Check for a new system image"
+destination = "ghcr.io (the registry of doc_update_trust.md), every 6 hours"
+where_off = "Settings, Updates"
+unit = "athanor-update-check.timer"
+
+[[contact]]
+id = "dns"
+purpose = "Name resolution, encrypted (DNS over TLS, strict)"
+destination = "Quad9: 9.9.9.9, 149.112.112.112, 2620:fe::fe, 2620:fe::9 (ADR-0046, ADR-0056)"
+where_off = "first run and Settings, Network: Quad9, Cloudflare, the network's own, or a custom resolver"
+config = "forge/specs/athanor-system-tweaks/SOURCES/usr/lib/systemd/resolved.conf.d/50-athanor-dns.conf"
+config_contains = "dns.quad9.net"
+
+[[contact]]
+id = "ntp"
+purpose = "Network time"
+destination = "2.fedora.pool.ntp.org, and the time servers the network hands out"
+where_off = "Settings, Date and Time"
+
+[[contact]]
+id = "connectivity-check"
+purpose = "Detect sign-in pages of public networks"
+destination = "fedoraproject.org, every 5 minutes (ADR-0079)"
+where_off = "NetworkManager connectivity setting"
+
+[[contact]]
+id = "applications"
+purpose = "Application catalogue and application updates (planned: doc_software.md, decision 6)"
+destination = "the Flathub system remote"
+where_off = "Software"
+planned = true
+
+# Timers the image enables that never leave the computer.
+
+[[local]]
+unit = "athanor-backup-hourly.timer"
+reason = "snapshots of the person's files on the same machine"
+
+[[local]]
+unit = "athanor-update-migrate.timer"
+reason = "moves the update state to the current layout"
+
+[[local]]
+unit = "fstrim.timer"
+reason = "discards unused blocks of the local disk"
+
+[[local]]
+unit = "athanor-nix-gc.timer"
+reason = "collects garbage in the local Nix store"
+
+[[local]]
+unit = "systemd-tmpfiles-clean.timer"
+reason = "cleans local temporary files"
+
+[[local]]
+unit = "logrotate.timer"
+reason = "rotates local logs"
+
+[[local]]
+unit = "raid-check.timer"
+reason = "scrubs local software RAID"
+
+[[local]]
+unit = "plocate-updatedb.timer"
+reason = "indexes local file names; Fedora's preset enables it wherever plocate is installed, and the base image does not carry plocate"
+
+# Enabled timers that do nothing on an image.
+
+[[inert]]
+unit = "dnf-makecache.timer"
+reason = "its service has ConditionPathExists=!/run/ostree-booted"
+
+# Units Fedora enables that contact someone, or listen, and that Athanor keeps off.
+
+[[silent]]
+unit = "rpm-ostree-countme.timer"
+reason = "Fedora's install counter; the images come from ghcr.io"
+
+[[silent]]
+unit = "unbound-anchor.timer"
+reason = "fetches a DNSSEC anchor for an unbound that is not installed"
+
+# Units the image enables that listen, and that new installs turn off. The kickstart disables them
+# for a new installation; an existing installation keeps its state through the /etc merge.
+
+[[listener]]
+unit = "sshd.service"
+reason = "remote login, key only; off on new installs (kickstart services --disabled=sshd), kept on existing installs (doc_software.md, decision 2; ADR-0089)"

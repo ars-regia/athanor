@@ -1,13 +1,12 @@
 name: Rust Security & FFI Audit
 
-# Licences, bans and sources are part of the pull request gate (`just check-deny`); the
-# `advisories` job runs the advisory half of cargo-deny, whose database changes without a
-# commit, and so also runs on a schedule.
 on:
   push:
-    branches: [main, develop, iso-v0]
+    branches: [iso-v0]
   pull_request:
-    branches: [main, develop, iso-v0]
+    branches: [iso-v0]
+  # The advisory database changes without a commit: the weekly run catches an advisory
+  # published against a lockfile nobody touched.
   schedule:
     - cron: "17 4 * * 1"
 
@@ -15,125 +14,45 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
-  # The advisory half of the dependency policy in deny.toml, over the root workspace.
-  # Licences, bans and sources run in the pull request gate (`just check-deny`). The job
-  # runs where pr.yml's `check` job runs: the hosted runner without a container, with
-  # cargo-deny installed by the pinned scripts/ci/install-tools.sh. --config is explicit
-  # because cargo-deny would otherwise look for a deny.toml next to the manifest and
-  # silently fall back to its own defaults.
-  advisories:
-    name: Dependency advisories (cargo-deny)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - name: Pinned tools (scripts/ci/install-tools.sh)
-        run: |
-          set -euo pipefail
-          bash scripts/ci/install-tools.sh "$RUNNER_TEMP/tools"
-          echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
-
-      - name: cargo deny check advisories
-        run: |
-          set -euo pipefail
-          cargo deny --locked --manifest-path Cargo.toml --config deny.toml check advisories
-
-  # Clippy and cargo vet need the GTK headers of the Nix builder container, where the
-  # runner's node24 cannot load libstdc++ (CB1 in doc_ci.md), so this job is red by
-  # construction there. It does not run on iso-v0 until it moves out of that container.
   security-audit:
-    name: Enforce Safety & Cargo Vet Audit
-    if: github.ref_name != 'iso-v0' && github.base_ref != 'iso-v0'
-    permissions:
-      contents: read
+    name: Clippy and dependency policy
+    # The builder runs under podman, not as the job container: the JavaScript actions
+    # (checkout, cache, upload) need the runner's libstdc++, which the Nix image lacks.
     runs-on: ubuntu-24.04
-    container:
-      image: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
-      RUSTC_WRAPPER: sccache
-      SCCACHE_DIR: /tmp/sccache
+      BUILDER_IMAGE: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
       CARGO_NET_RETRY: 10
-      LIBCLANG_PATH: /usr/lib/llvm-18/lib
     steps:
-      - name: Checkout Code
+      - name: Check out the repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - name: ??? Restore sccache Cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          path: /tmp/sccache
-          key: sccache-security-audit-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            sccache-security-audit-${{ runner.os }}-
+          persist-credentials: false
 
-      - name: Extreme Rust Cache (LLVM & Dependencies)
+      - name: Restore the Cargo cache
         uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
-          shared-key: "rust-security-audit"
-          cache-on-failure: "true"
+          shared-key: rust-security-audit
 
-      - name: ???? Install System Dependencies (GTK4/Cairo/Pango/LayerShell)
+      - name: Run the audit in the builder image
         run: |
-          set -euo pipefail
-          if command -v dnf5 >/dev/null; then
-            dnf5 install -y gtk4-devel pango-devel cairo-devel glib2-devel gtk4-layer-shell-devel gdk-pixbuf2-devel
-          elif command -v dnf >/dev/null; then
-            dnf install -y gtk4-devel pango-devel cairo-devel glib2-devel gtk4-layer-shell-devel gdk-pixbuf2-devel
-          elif command -v apt-get >/dev/null; then
-            echo "Dependencies are now pre-installed in Nix container"
-            git clone https://github.com/wmww/gtk4-layer-shell.git /tmp/gtk4-layer-shell
-            cd /tmp/gtk4-layer-shell
-            meson setup build -Dvapi=false -Ddocs=false -Dintrospection=false
-            ninja -C build
-            sudo ninja -C build install
-            sudo ldconfig
-          fi
+          # Only the download caches: the runner's ~/.cargo/bin holds rustup proxies that
+          # cargo would run instead of the builder's own clippy.
+          mkdir -p "$HOME/.cargo/registry" "$HOME/.cargo/git"
+          bash forge/scripts/retry.sh podman pull "${BUILDER_IMAGE,,}"
+          podman run --rm --security-opt label=disable -v "$GITHUB_WORKSPACE:/workspace" -w /workspace \
+            -v "$HOME/.cargo/registry:/cargo/registry" -v "$HOME/.cargo/git:/cargo/git" \
+            -e CARGO_HOME=/cargo -e CARGO_NET_RETRY "${BUILDER_IMAGE,,}" \
+            bash scripts/ci/security-audit.sh
 
-      - name: Check Unsafe Code & Clippy Policies
-        run: |
-          set -euo pipefail
-          cargo clippy --workspace --all-targets --all-features -- \
-            -A clippy::undocumented_unsafe_blocks \
-            -A clippy::multiple_unsafe_ops_per_block \
-            -A dead_code -A unused_variables 2>&1 | tee clippy.log
-
-      - name: Upload Logs Artifact
+      - name: Upload the audit logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: debug-logs
-          path: |
-            clippy.log
-            ebpf.log
-            kani.log
-          if-no-files-found: ignore
-
-      - name: Publish clippy log tail to the job summary
-        if: always()
-        run: |
-          set -euo pipefail
-          if [ -f clippy.log ]; then
-            { echo '## clippy (last 50 lines)'; echo '```'; tail -n 50 clippy.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Verify Cryptographic Supply-Chain Audits (cargo-vet)
-        run: |
-          set -euo pipefail
-          cargo vet check || echo "Cargo vet skipped due to crates.io 403 API block"
-
-      - name: ???? Fix Workspace Permissions (GH Actions Cleanup)
-        if: always()
-        run: |
-          set -euo pipefail
-          if command -v sudo >/dev/null 2>&1; then
-            sudo chown -R 1001:1001 . || sudo chown -R 1000:1000 . || true
-          else
-            chown -R 1001:1001 . || chown -R 1000:1000 . || true
-          fi
+          name: security-audit-logs
+          path: audit-out
+          if-no-files-found: error

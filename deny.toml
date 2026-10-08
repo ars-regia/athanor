@@ -1,66 +1,71 @@
-# cargo-deny policy for the root workspace (Cargo.lock). `just check-deny` runs
-# licenses, bans and sources in the pull request gate; advisories run in the scheduled
-# rust-security-audit.yml, because they depend on a database that changes without a commit.
+# cargo-deny policy (ADR-0075 item 2).
 #
-# Own code is GPL-3.0-or-later (ADR-0038). A dependency is allowed when its licence lets
-# the combined work be distributed under GPL-3.0 terms.
+# One policy for the root workspace lockfile. `just check-deny` applies its licences,
+# bans and sources in the pull request gate; scripts/ci/security-audit.sh applies its
+# advisories, on pull requests, pushes and a weekly schedule. The
+# packages built from their own vendored lockfile (athanor-backup's release tarball,
+# greenboot-rs) are not covered yet. The licence
+# allow-list is the set of identifiers the current dependency graph contains, derived
+# from `cargo metadata`; an entry nothing uses is a warning, so it cannot go stale
+# unnoticed.
 
 [graph]
-all-features = false
+all-features = true
 no-default-features = false
 
-[output]
-feature-depth = 1
-
 [advisories]
-# Every entry names the advisory it excuses and why; an entry that no longer matches a
-# crate of the lockfile is removed (cargo-deny reports it as unmatched).
-ignore = [
-    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained and is a proc-macro that only glycin-common (athanor-preview-render) uses at build time; there is no vulnerability, only a maintenance notice, and glycin has no release without it yet" },
-]
+# No blanket ignores. Every ignore added here needs a reason and a review date:
+#   { id = "RUSTSEC-YYYY-NNNN", reason = "why it cannot be fixed now" }  # review: YYYY-MM-DD
+ignore = []
+unmaintained = "workspace"
+yanked = "deny"
 
 [licenses]
-# Only the identifiers the lockfile contains. cargo-deny picks the alternative of an OR
-# expression that is allowed, so "MPL-2.0 OR LGPL-2.1-or-later" is satisfied by MPL-2.0.
-# Not allowed on purpose: GPL-2.0-only and LGPL-2.0-only (cannot be combined with
-# GPL-3.0), and every licence with a network or advertising clause.
+# The project is GPL-3.0-or-later (decision A2-3). Every identifier below is compatible
+# with distributing the combined work under GPL-3.0 terms; GPL-2.0-only and
+# LGPL-2.0-only are not, and stay out.
 allow = [
-    "0BSD",
-    "Apache-2.0",
-    "Apache-2.0 WITH LLVM-exception",
-    "BSD-1-Clause",
-    "BSD-2-Clause",
-    "BSD-3-Clause",
-    "GPL-3.0-or-later", # our own crates
-    "ISC",
-    "LGPL-2.1-or-later",
-    "MIT",
-    "MPL-2.0",
-    "Unicode-3.0",
-    "Unlicense",
-    "Zlib",
+  "GPL-3.0-or-later",
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "Unicode-3.0",
+  "0BSD",
+  "BSD-1-Clause",
+  "LGPL-2.1-or-later",
+  "MPL-2.0",
+  "Unlicense",
 ]
-confidence-threshold = 0.8
+confidence-threshold = 0.9
 exceptions = [
-    # greetd_ipc is GPL-3.0-only and only the greeter links it; the greeter binary is
-    # therefore GPL-3.0-only too (verify.py licence, OWN_LICENCE_EXCEPTIONS). A GPL-3.0-only
-    # crate anywhere else is rejected.
-    { crate = "greetd_ipc", allow = ["GPL-3.0-only"] },
-    { crate = "athanor-greeter-ui", allow = ["GPL-3.0-only"] },
-    # jpeg-encoder is "(MIT OR Apache-2.0) AND IJG": the IJG terms are a BSD-style notice
-    # clause, compatible with GPL-3.0. Reached through glycin-image-rs by athanor-preview-render.
-    { crate = "jpeg-encoder", allow = ["IJG"] },
+  # GPL-3.0-only is compatible with the GPL-3.0-or-later combined work. Only the greeter
+  # links greetd_ipc, so the greeter is GPL-3.0-only too (OWN_LICENCE_EXCEPTIONS in
+  # scripts/verify.py); a GPL-3.0-only crate anywhere else is rejected.
+  { allow = ["GPL-3.0-only"], crate = "greetd_ipc" },
+  { allow = ["GPL-3.0-only"], crate = "athanor-greeter-ui" },
+  # The IJG licence covers the bundled libjpeg-derived code.
+  { allow = ["IJG"], crate = "jpeg-encoder" },
 ]
 
 [bans]
 multiple-versions = "warn"
-wildcards = "allow"
+# Workspace crates reference each other by path without a version and are not marked
+# `publish = false`, which cargo-deny reads as a wildcard on a public crate. Flip to
+# "deny" once every member inherits `publish = false` (ENG-07).
+wildcards = "warn"
 highlight = "all"
-workspace-default-features = "allow"
-external-default-features = "allow"
+allow-wildcard-paths = true
+deny = []
+skip = []
+skip-tree = []
 
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# No git dependency is in use today. A new one is added here with its exact URL.
 allow-git = []
