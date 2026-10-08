@@ -4,7 +4,7 @@
 | --- | --- |
 | Purpose | From a clean machine to a merged pull request, for people and for agents |
 | Owner | the maintainer (`@hr-mes`) |
-| Status | revision 1, 2026-10-06. Items marked _(Proposal)_ await the maintainer |
+| Status | revision 2, 2026-10-08. CT7 is decided ([ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md)); the item marked _(Proposal)_ in CT6 takes effect when a second owner exists |
 | Depends on | [.github/CONTRIBUTING.md](../../.github/CONTRIBUTING.md) (code rules), [branching](branching.md), [ownership](ownership.md) |
 | Defines | CT1 to CT8 |
 
@@ -62,16 +62,16 @@ A new `verify.py` check is registered with `@check` like the others and has a te
 
 ## CT6. Review
 
-- **Area owners** are listed in `.github/CODEOWNERS`; the proposed area map is [ownership.md](ownership.md).
+- **Area owners** are listed in `.github/CODEOWNERS`; the area map is [ownership.md](ownership.md).
 - **Two-person review** for signing, attestation, polkit, cryptography and authentication: two approvals, at least one from an owner of the area, never the author. Today the maintainer is the only owner, so every such change waits for the maintainer.
-- Enforcement _(Proposal)_: once a second owner exists, turn on "Require review from Code Owners" on the product branch; today `iso-v0` requires only the status checks `Kernel gate`, `Spec gate` and `gate` (`.github/settings/branch-protection.json`), and `gate` alone once the follow-up of `github-settings.md` section 8 removes the legacy `pull_request` triggers.
+- Enforcement _(Proposal, conditional on a second owner)_: once a second owner exists, turn on "Require review from Code Owners" on the product branch; today `iso-v0` requires only the status checks `Kernel gate`, `Spec gate` and `gate` (`.github/settings/branch-protection.json`), and `gate` alone once the follow-up of `github-settings.md` section 8 removes the legacy `pull_request` triggers.
 
-## CT7. Red CI _(Proposal)_
+## CT7. Red CI (decided 2026-10-08, [ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md))
 
-- A workflow on the product branch is green or disabled. There is no third state.
+- A workflow of the pipeline target that is kept (`doc_pipeline.md` section 3.5, `doc_ci.md` CP1) is, on the product branch, green or disabled. There is no third state. A workflow the target deletes or merges is not disabled: it goes with its block.
 - A red workflow gets, within one working day, a fix or `gh workflow disable <file>` plus an open issue that names the failing run id. The fix pull request enables it again.
 - No `continue-on-error`, no `|| true`, no retry loop that hides the failure.
-- Today, on `iso-v0`: `forge-ghcr-cleanup.yml` failed (run 37173567085) and `test-mok.yml` is registered as active with no file in the tree (`gh api repos/ars-regia/athanor/actions/workflows`, 2026-10-06).
+- Today, on `iso-v0`: `forge-ghcr-cleanup.yml` failed (run 37173567085) on 2026-10-06. The same listing then showed `test-mok.yml` registered as active with no file in the tree (`gh api repos/ars-regia/athanor/actions/workflows`); `ls .github/workflows` still has no such file on 2026-10-09, and the registration was not queried again.
 
 ## CT8. Claude Code
 

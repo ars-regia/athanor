@@ -4,7 +4,7 @@
 | --- | --- |
 | Purpose | Inventory of every secret, variable and environment the pipeline uses, how to make each one again from zero, and who holds the keys |
 | Owner | Maintainer |
-| Status | Revision 1, 2026-10-06; section 4 added 2026-10-07; SEC5, SEC6 and RL2 removed on 2026-10-07 with RPM signing (ADR-0076, decision 2). Sections 1, 3 and 4 are facts. Section 2 is decided for the single-maintainer phase (ADR-0084). Every line marked _(Proposal)_ awaits the maintainer |
+| Status | Revision 1, 2026-10-06; section 4 added 2026-10-07; SEC5, SEC6 and RL2 removed on 2026-10-07 with RPM signing (ADR-0076, decision 2). Sections 1, 3 and 4 are facts. Section 2 is decided for the single-maintainer phase (ADR-0084). SEC12 and the rename of `KERNEL_BUMP_TOKEN` are decided on 2026-10-08 ([ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md)); the lines marked _(Proposal)_ in section 2 take effect when a second maintainer joins |
 | Depends on | `doc_kernel_build.md` section 6 (key design), `doc_kernel_profile.md` D43 and section 9 (custody, key table), `doc_update_trust.md` UT2, UT3 (image key), decisions A2-27, A2-35, ADR-0062, ADR-0076, ADR-0084 |
 | Defines | SEC1-SEC14 (secrets), VAR1-VAR7 (variables), ENV1-ENV7 (environments), KC1-KC8 (custody), RL1-RL8 (recovery) |
 | Facts checked with | `git grep` on `origin/iso-v0` at `e238b833`; `gh secret list`, `gh variable list`, `gh api repos/ars-regia/athanor/environments` and its `secrets`, `variables` and `deployment-branch-policies` endpoints, names only; the branches of open PRs #115 (`sign-vmlinuz`), #180 (`a2/delivery`) and #185 (`a2/rpm-sign-job`). The repository was then `hr-mes/athanor`; after the transfer the same `gh` queries on `ars-regia/athanor` on 2026-10-06 return the same names, reviewers and deployment branches |
@@ -151,12 +151,12 @@ the stored tokens cannot be read back from GitHub; the minimum each needs, from 
 | SEC8 | fine-grained: Contents read and write, Pull requests read and write | the message in `forge-util-update-specs.yml:35-39` |
 | SEC9 | classic: `read:packages`, `delete:packages` (`clean_ghcr.sh:16`) | GitHub Packages accepts only classic tokens |
 | SEC14 | classic, `write:packages` only, of an account with the write role on the previous owner's three system images and nothing else (recommended), or of `hr-mes` | GitHub Packages accepts only classic tokens, and a classic token reaches every package its account can write, not one repository or package (below) |
-| SEC12 | _(Proposal)_ a dedicated fine-grained token with Administration read and write on this repository only, used for nothing else | `generate-jitconfig` (`vm.sh:102`) is the only call it serves |
+| SEC12 | decided 2026-10-08 ([ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md)), the maintainer creates it: a dedicated fine-grained token with Administration read and write on this repository only, used for nothing else | `generate-jitconfig` (`vm.sh:102`) is the only call it serves |
 
 **SEC14, reach and custody.** GitHub Packages authenticates only with a personal access token (classic) (GitHub documentation, "Working with the Container registry" and "About permissions for GitHub Packages", read 2026-10-08): no fine-grained token can be limited to a package. A classic token acts as its account, so `write:packages` (which includes `read:packages`) writes every package that account can write. A token of `hr-mes` therefore writes not only `ghcr.io/hr-mes/athanor-system*`, the bridge, but every other package of `hr-mes` and, while `hr-mes` owns `ars-regia` or holds the write role on its packages, the published `ghcr.io/ars-regia/*` images too. The narrowest token GitHub allows is one of a dedicated account that holds no role in `ars-regia` and has the write role on `ghcr.io/hr-mes/athanor-system`, `athanor-system-nvidia` and `athanor-system-nvidia-legacy` only (each package's "Manage access" settings): that is the recommended holder. Whatever the account, the token carries `write:packages` alone, expires within 90 days, is made again before it expires, and is deleted when the bridge stops (UD50). ENV7 names `hr-mes` as the required reviewer with `prevent_self_review: false`: when SEC14 is also a token of `hr-mes`, the approval adds no second party, and the gate is exactly as strong as the custody of the `hr-mes` account (password, second factor, sessions), whose compromise yields both the token and the approval.
 
-_(Proposal)_ `KERNEL_BUMP_TOKEN` now serves six workflows, not only the kernel; a name such as
-`BOT_PR_TOKEN` would say so. Renaming touches every reference in one commit.
+`KERNEL_BUMP_TOKEN` now serves six workflows, not only the kernel. Decided 2026-10-08 ([ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md)): it is renamed `BOT_PR_TOKEN`
+in one commit that touches every reference. The rename is a later code change under `.github/` and is not made yet.
 
 ## 2. Key custody
 
