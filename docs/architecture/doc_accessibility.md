@@ -292,7 +292,7 @@ Applied with the approval of this document. Line numbers into code are those of 
 
 ## 4. Open doubts
 
-1. **Live accessibility bus state on the desktop** was not read: `busctl --user` is not available inside the tool sandbox used for this draft. The binding of `org.a11y.Status` to the GSettings keys is taken from at-spi2-core's sources; the first construction step confirms it on the image.
+1. **Live accessibility bus state on the desktop** was not read: `busctl --user` is not available inside the tool sandbox used to write this specification. The binding of `org.a11y.Status` to the GSettings keys is taken from at-spi2-core's sources; the first construction step confirms it on the image.
 2. **Orca in the base image or layered** on the maintainer's desktop is unverified; AX1 makes it explicit either way.
 3. **Password text in the Pango layout.** `get_contents_at` of a GTK password entry reads the layout; by reading the source the layout holds the invisible characters, not the text. The check of AX4 settles it before the greeter step merges.
 4. **Orca and the keyboard monitor under the drop-in.** Whether Orca's key grabs and `org.gnome.Orca.KeyboardMonitor` work unchanged under `ProtectHome=read-only` and `RestrictAddressFamilies=AF_UNIX` is untested; step 1 settles it.
