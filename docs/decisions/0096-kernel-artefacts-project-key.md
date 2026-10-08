@@ -2,7 +2,7 @@
 id: ADR-0096
 title: "Kernel artefacts are signed with the project key, not the workflow's OIDC identity"
 date: 2026-10-08
-status: accepted
+status: amended by ADR-0098
 issues: [141]
 areas: [security, pipeline]
 ---
