@@ -19,6 +19,13 @@ ARG NVIDIA_OPEN_DIGEST
 ARG NVIDIA_LEGACY_DIGEST
 ARG BOOT_DIGEST
 ARG SYSTEM_IMAGE
+# Packages Athanor builds and serves from tier 2 that Fedora also ships. Every dnf
+# transaction after tier 2 hides Fedora's builds with these options, so no later
+# install, --allowerasing or newer Fedora release can replace Athanor's: Fedora's
+# cosmic-comp 1.9.0 did, through the tier 3 transaction, on 2026-10-08. The installed
+# packages still satisfy what other packages require; the release assertions in the
+# system stage stay as the check.
+ARG ATHANOR_OWNED_EXCLUDES="--exclude=cosmic-comp --exclude=greenboot --exclude=greenboot-default-health-checks"
 
 # The vmlinuz of the pinned kernel signed with the Secure Boot key, /vmlinuz and /kver
 # (forge/specs/azoth/nvidia-publish.sh); system/kernel-artifacts.sh verified its signature and
@@ -55,6 +62,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG FEDORA_VERSION=43
 ENV FEDORA_VERSION=$FEDORA_VERSION
 ARG TETRAGON_VERSION=v1.3.0
+ARG ATHANOR_OWNED_EXCLUDES
 
 
 # TIER 0: BEDROCK HARDWARE & KERNEL FOUNDATION
@@ -138,7 +146,7 @@ RUN --mount=type=bind,from=tier3-repo,source=/,target=/tmp/tier3-repo \
         echo "Tier 3: Installing Agile Rust Shell & Apps..." && \
         RPM_LIST=$(find /tmp/tier3-repo -name "*.rpm" ! -name "*-devel-*" ! -name "*-doc-*" ! -name "*debuginfo*" ! -name "*debugsource*" ! -name "*buildah*" ! -name "*osbuild*") && \
         if [ -n "$RPM_LIST" ]; then \
-            dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs $RPM_LIST; \
+            dnf5 install -y $ATHANOR_OWNED_EXCLUDES --setopt=install_weak_deps=False --setopt=tsflags=nodocs $RPM_LIST; \
         fi; \
     fi
 
@@ -152,22 +160,19 @@ COPY forge/config/packages.json /usr/share/athanor/packages.json
 # and served from the tier repositories, as the custom packages are; until then Fedora's
 # GPG signatures are the provenance. The list is the single source of truth in
 # packages.json, so a package added there reaches the image. --allowerasing lets the
-# RPM Fusion ffmpeg replace the base image's ffmpeg-free. The --exclude options hide
-# Fedora's builds of cosmic-comp and greenboot from this transaction, so neither
-# --allowerasing nor a newer Fedora release can replace Athanor's, installed above from the
-# tier 2 repository; the installed packages still satisfy what the COSMIC packages and
-# athanor-system-config require. The release assertions below stay as the check.
+# RPM Fusion ffmpeg replace the base image's ffmpeg-free; ATHANOR_OWNED_EXCLUDES keeps it
+# from replacing Athanor's tier 2 builds.
 RUN --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
-    dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs jq && \
+    dnf5 install -y $ATHANOR_OWNED_EXCLUDES --setopt=install_weak_deps=False --setopt=tsflags=nodocs jq && \
     UPSTREAM=$(jq -r '(.upstream_core + .upstream_desktop + .upstream_media + .upstream_cli)[]' /usr/share/athanor/packages.json) && \
     echo "Installing upstream packages: $UPSTREAM" && \
-    dnf5 install -y --allowerasing --exclude=cosmic-comp --exclude=greenboot --exclude=greenboot-default-health-checks --setopt=install_weak_deps=False --setopt=tsflags=nodocs $UPSTREAM
+    dnf5 install -y --allowerasing $ATHANOR_OWNED_EXCLUDES --setopt=install_weak_deps=False --setopt=tsflags=nodocs $UPSTREAM
 
 # FLATPAK MANIFEST: the applications are provisioned on the installed system, not at
 # build time. Extra-data apps such as Chrome run an apply_extra script under
 # bubblewrap, which a build container cannot host, and bootc carries /var into the
 # first deployment only.
-RUN dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs flatpak
+RUN dnf5 install -y $ATHANOR_OWNED_EXCLUDES --setopt=install_weak_deps=False --setopt=tsflags=nodocs flatpak
 
 COPY system/scripts/ /scripts/
 
@@ -284,23 +289,25 @@ FROM ${SYSTEM_IMAGE} AS gpu-none
 # modules directory, so a mismatch fails here rather than silently later.
 FROM ${SYSTEM_IMAGE} AS gpu-nvidia
 ARG AZOTH_NVR
+ARG ATHANOR_OWNED_EXCLUDES
 COPY --from=nvidia-modules-open /lib/modules/ /usr/lib/modules/
 RUN test -f "/usr/lib/modules/${AZOTH_NVR}.x86_64/extra/nvidia/nvidia.ko"
 RUN --mount=type=bind,from=nvidia-rpms,source=/out/open,target=/tmp/nvidia-rpms \
     --mount=type=bind,from=nvidia-rpms,source=/out/container-toolkit,target=/tmp/container-toolkit \
     --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
-    dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs /tmp/nvidia-rpms/*.rpm \
+    dnf5 install -y $ATHANOR_OWNED_EXCLUDES --setopt=install_weak_deps=False --setopt=tsflags=nodocs /tmp/nvidia-rpms/*.rpm \
         /tmp/container-toolkit/*.rpm libva-nvidia-driver && \
     systemctl preset-all
 
 FROM ${SYSTEM_IMAGE} AS gpu-nvidia-legacy
 ARG AZOTH_NVR
+ARG ATHANOR_OWNED_EXCLUDES
 COPY --from=nvidia-modules-legacy /lib/modules/ /usr/lib/modules/
 RUN test -f "/usr/lib/modules/${AZOTH_NVR}.x86_64/extra/nvidia/nvidia.ko"
 RUN --mount=type=bind,from=nvidia-rpms,source=/out/legacy,target=/tmp/nvidia-rpms \
     --mount=type=bind,from=nvidia-rpms,source=/out/container-toolkit,target=/tmp/container-toolkit \
     --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
-    dnf5 install -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs /tmp/nvidia-rpms/*.rpm \
+    dnf5 install -y $ATHANOR_OWNED_EXCLUDES --setopt=install_weak_deps=False --setopt=tsflags=nodocs /tmp/nvidia-rpms/*.rpm \
         /tmp/container-toolkit/*.rpm libva-nvidia-driver && \
     systemctl preset-all
 
