@@ -275,6 +275,27 @@ mod tests {
         );
     }
 
+    /// The launch directory the ruleset grants is one the unit makes writable: under
+    /// ProtectSystem=strict, /run/user is read-only but for the unit's runtime directories.
+    #[test]
+    fn the_unit_declares_the_launch_directory_as_a_runtime_directory() {
+        let unit = include_str!("../data/athanor-control-center.service");
+        let declared: Vec<&str> = unit
+            .lines()
+            .filter_map(|line| line.strip_prefix("RuntimeDirectory="))
+            .flat_map(str::split_whitespace)
+            .collect();
+        let dirs = dirs();
+        let launch = launch_dir(&dirs);
+        let name = launch
+            .strip_prefix(&dirs.runtime)
+            .expect("the launch directory is under the runtime directory");
+        assert!(
+            declared.iter().any(|dir| Path::new(dir) == name),
+            "{declared:?} lacks {name:?}"
+        );
+    }
+
     #[test]
     fn a_machine_without_rfkill_is_granted_no_rfkill_device() {
         let state = Path::new("/home/u/.local/state/athanor/control-center");

@@ -31,7 +31,11 @@ MemoryHigh=96M
 MemoryMax=192M
 
 # The failure record survives a stop, not just a restart (SH8).
-RuntimeDirectory=athanor-control-center
+# Under ProtectSystem=strict /run/user is read-only except the unit's own runtime
+# directories: "athanor" is declared as the bar declares it, because launch() creates
+# %t/athanor/<random> for the Wayland security context of an application the panel starts
+# (doc_control_center.md, CC2; doc_bar.md, BR2.2).
+RuntimeDirectory=athanor-control-center athanor
 RuntimeDirectoryMode=0700
 RuntimeDirectoryPreserve=yes
 # ~/.local/state/athanor/control-center: the Super+C marker, and the panel's own state.
