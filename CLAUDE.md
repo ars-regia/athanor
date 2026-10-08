@@ -19,24 +19,27 @@ applies to Claude Code only.
   Code merges a pull request it opened in the current session with
   `gh pr merge --squash --admin --match-head-commit <full sha>` only when all of these hold
   for that same sha:
+  - every changed path, including the old path of a rename and every deleted file
+    (`git diff --name-status -M origin/iso-v0...<sha>`), is in the allowlist below;
   - the required checks of the base branch (`.github/settings/rulesets.json` and
     `branch-protection.json`) are present and `pass`, and every other check is `pass` or
     `skipping`, none pending or failing;
   - the `auditor` subagent reviewed the diff at that sha and reported no blocker;
   - the review is the only block (`mergeable` is `MERGEABLE`, `reviewDecision` is
-    `REVIEW_REQUIRED`);
-  - no changed file is under the "Protected paths" block of `.github/CODEOWNERS` or a path
-    listed under "Stop and ask before editing" in any `AGENTS.md`;
-  - no changed file governs the merge, the checks or the rules: any `AGENTS.md` or
-    `CLAUDE.md`, `.claude/`, `.github/`, `scripts/ci/`, `scripts/verify.py`,
-    `scripts/github-settings/`, `Justfile`, `docs/operations/`, `docs/decisions/`;
-  - the change does not alter the behaviour of authentication (PAM, the greeter's login
-    path, token validation), of signing, attestation, polkit or cryptography, or migrate
-    data or on-disk state.
+    `REVIEW_REQUIRED`).
 
-  `--admin` skips the required checks too, so the verification is Claude's to make each
-  time. In every other case the maintainer reviews and merges.
-  *(maintainer decision, 2026-10-08)*
+  The allowlist:
+  - `docs/architecture/*.md`, except a change to a specification's status line: merging that
+    approves the specification (ADR-0074, item 5), which is the maintainer's act;
+  - `src/` and `tests/` of the shell applications `athanor-bar`, `athanor-control-center`,
+    `athanor-dock`, `athanor-launcher` and `athanor-layout-chooser` under
+    `forge/specs/<name>/<name>-<version>/`. Not their `Cargo.toml`, lockfile, `.spec`,
+    units or build files.
+
+  A path outside the allowlist, a symlink or a mode change means the maintainer reviews and
+  merges. `--admin` skips the required checks too, so the verification is Claude's to make
+  each time. *(maintainer decision, 2026-10-08: an allowlist, after three audits found
+  gaps in every list of exclusions)*
 - **Shared settings are permissions only.** `.claude/settings.json` denies secret paths and
   destructive commands; hooks and personal preferences stay in `.claude/settings.local.json`
   or `~/.claude/` (`.claude/README.md`).
