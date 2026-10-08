@@ -242,12 +242,17 @@ mod tests {
             .collect::<Vec<_>>()
     }
 
-    const MODE: &str = "/home/u/.config/cosmic/com.system76.CosmicTheme.Mode/v1";
+    /// The theme mode directory under `/home/u`, named through the compositor client, which
+    /// owns COSMIC's configuration names.
+    fn mode() -> String {
+        format!("/home/u/.config/cosmic/{}/v1", athanor_compositor_client::theme::MODE)
+    }
 
     #[test]
     fn the_ruleset_grants_the_state_the_theme_mode_what_gtk_writes_and_two_devices() {
         let state = Path::new("/home/u/.local/state/athanor/control-center");
-        let grants = grants(&dirs(), state, Some(Path::new(MODE)), true);
+        let mode = mode();
+        let grants = grants(&dirs(), state, Some(Path::new(&mode)), true);
         assert_eq!(
             paths(&grants.write),
             [
@@ -257,7 +262,7 @@ mod tests {
                 "/run/user/1000/athanor",
                 "/home/u/.cache",
                 "/tmp",
-                MODE
+                mode.as_str()
             ]
         );
         assert_eq!(paths(&grants.devices), ["/dev/rfkill", "/dev/dri"]);
@@ -265,7 +270,7 @@ mod tests {
             !grants
                 .write
                 .iter()
-                .any(|path| path.starts_with("/home/u/.config") && path != Path::new(MODE)),
+                .any(|path| path.starts_with("/home/u/.config") && path != Path::new(&mode)),
             "no write to the configuration but the theme mode"
         );
     }
