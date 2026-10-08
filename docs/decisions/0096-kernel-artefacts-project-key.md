@@ -22,19 +22,26 @@ key held in a hardware security module, or a private Fulcio and Rekor.
 
 On 2026-10-08 the maintainer decided:
 
-1. The kernel's OCI artefacts are signed and attested with cosign and the project key, as the
-   system images are, through the same signing environment. No verifier in the project depends on
-   GitHub's OIDC identity for them.
-2. The key stays in the custody of ADR-0084. A hardware security module is not adopted for 1.0; it
+1. The kernel's OCI artefacts are signed with the project key, with the same tool and signature
+   format as the system images (`system/sign-images.sh`), in the release's existing signing step
+   for system images (ADR-0064), so a release cycle asks for no additional approval. Every
+   verifier in the project (`kernel-build.yml`, `call-kernel.yml`, `system/kernel-artifacts.sh`,
+   the image build) verifies the kernel artefacts against `system/keys/athanor-image-*.pub`
+   instead of the workflow's OIDC identity.
+2. The keyless signature made when the kernel is published stays as a build record
+   (`doc_update_trust.md` UT2, `doc_pipeline.md` PL17), but nothing depends on it for trust.
+3. The key stays in the custody of ADR-0084. A hardware security module is not adopted for 1.0; it
    is reconsidered when a second maintainer joins, together with ADR-0084.
-3. A private Fulcio and Rekor are not adopted.
+4. A private Fulcio and Rekor are not adopted.
 
 ## Consequences
 
 - Issue #141 closes when the kernel artefacts verify with `system/keys/athanor-image-*.pub` and
-  every consumer (`kernel-build.yml`'s own checks, the image build, `doc_pipeline.md`) verifies them
-  that way.
-- Each kernel publication waits for the maintainer's approval of the signing environment, as an
-  image publication does.
+  every verifier named in point 1 verifies them that way.
+- ADR-0064's approval budget is unchanged: the kernel artefacts are signed under the approval the
+  release already asks for its system images. A kernel published between releases carries only its
+  keyless build record until the next release signs it.
+- `doc_update_trust.md` UT2, `doc_pipeline.md` and `KERNEL.md` are amended with the
+  implementation.
 - This record does not concern the Secure Boot and module signing keys, which sign the kernel
   binary and its modules, not the OCI artefacts.
