@@ -80,6 +80,10 @@ reason = "scrubs local software RAID"
 unit = "plocate-updatedb.timer"
 reason = "indexes local file names; Fedora's preset enables it wherever plocate is installed, and the base image does not carry plocate"
 
+[[local]]
+unit = "grub-boot-success.timer"
+reason = "user timer from grub2-tools, enabled by Fedora's user preset; marks the boot successful in the local GRUB environment two minutes into a session"
+
 # Enabled timers that do nothing on an image.
 
 [[inert]]
