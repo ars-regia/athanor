@@ -143,13 +143,18 @@ artifact and never pushed; any other change runs in the published `athanor-build
   package images of each tier by `:hash-<hash>`, from the map `dag-hashes` (`hashes.json`) the
   brain wrote for this run and the job downloads; nothing in the pipeline reads a package's
   `:latest`, which stays for people (tier 0 also takes the kernel, `azoth@<digest>` from the
-  verified kernel artifacts). For each tier whose content hash changed, the job runs
-  `createrepo_c` and publishes `athanor-forge-tier<N>-repo:latest`; an unchanged tier is not
-  pushed. The RPMs are not signed and there is no DNF channel: they reach machines only inside
-  the signed image (ADR-0076, decision 2).
+  verified kernel artifacts). `forge/scripts/publish_tiers.sh` then runs `createrepo_c` for
+  each tier whose content hash changed and publishes `athanor-forge-tier<N>-repo:latest`; an
+  unchanged tier is not pushed. It writes `tier-digests.json`, the digest of each tier this run
+  published or found unchanged, which the image job downloads: the image build takes the tiers
+  by these digests, never by tag (doc_update_delivery.md, UD28). The tier images are not
+  signed yet (UD44). The RPMs are not signed and there is no DNF channel: they reach machines
+  only inside the signed image (ADR-0076, decision 2).
 - **System images.** `system/build-image.sh` builds the default, `nvidia` and
   `nvidia-legacy` variants from `system/Containerfile`: the Fedora `base-atomic:43` base
-  by digest, the RPMs of each tier repository image (bind-mounted, then installed), the
+  by digest, the RPMs of each tier repository image by the digest of `tier-digests.json`
+  (bind-mounted, then installed; outside the Orchestrator, `system/tier-digests.sh resolve`
+  reads the published tiers once into the same file), the
   `upstream_*` packages by name, and a UKI signed with the Secure Boot key. The `system`
   stage the three share is built once per run and each variant is built `FROM` its image
   ID, so all three carry the same system layers (`system/shared-layers.sh` checks it in local
