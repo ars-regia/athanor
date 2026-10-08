@@ -25,7 +25,7 @@ of each, and confirmed the scope of D25.
    security state already is. Settings keeps no updates page and Software does not host it
    (SW16). A third request on `os.athanor.Update1`, `SetAutomaticSecurityUpdates(b enabled)`,
    is protected by the polkit action `os.athanor.update.set-automatic` with `auth_admin` for
-   every subject and no `_keep`. UT6 becomes three requests.
+   every subject and no `_keep`. UT6 becomes four requests with the postpone of point 3.
 2. **The opt-out is per machine.** It is held in a root-owned file under
    `/var/lib/athanor-update/`, written only by the update service, and published in
    `athanor-trust-state` at schema 2 as `automatic_security_updates: bool`, with every reader
@@ -34,7 +34,9 @@ of each, and confirmed the scope of D25.
    It is always seven days, counted from the first notice. The staged deployment is re-locked
    and the state reads `postponed-until <time>`. The expiry is stored as wall time and is also
    bounded by seven boots, whichever comes first. A newer security digest replaces the staged
-   one and keeps the remaining postpone of the one it replaces; it never extends it.
+   one and keeps the remaining postpone of the one it replaces; it never extends it. The fourth
+   request, `Postpone()`, carries it under the polkit action `os.athanor.update.postpone`, with
+   `auth_admin` for any and inactive subjects and `yes` for an active one.
 4. **The release attestation is the producer of the class.** A new pipeline block, PB4b,
    produces a key-signed in-toto statement with `build_time`, `class` (`security` or
    `feature`) and `advisories`, signed in `sign-images`. The class comes from a
@@ -59,9 +61,8 @@ and does not wait for it.
   point 3 (the host of the switch is the shield, not Settings). Its other points stand.
 - The "no Later" text of A2-26 is replaced by the bounded postpone; the greenboot and
   security-class parts of A2-26 are unchanged.
-- `athanor-update` implements the third request, the postpone and `athanor-trust-state`
-  schema 2. The polkit action needs the maintainer's approval before the polkit code is edited.
-- The request that carries the postpone is not yet specified and is settled in the
-  implementation plan.
+- `athanor-update` implements the third and fourth requests and `athanor-trust-state`
+  schema 2. The two polkit actions need the maintainer's approval before the polkit code is edited.
+- The request that carries the postpone is `Postpone()` of UT6 (point 3).
 - Whether each change of the switch is logged is not decided by the maintainer; the
   specification does not require it yet.
