@@ -161,3 +161,4 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0091 | 0091 | [QEMU stays in the image for the runner and the development VM](0091-qemu-in-the-image.md) | accepted | packages |
 | ADR-0092 | 0092 | [Carry cosmic-comp PR #1441 as our own patch; upstream first, never dependent on upstream](0092-carry-pr-1441-upstream-first.md) | accepted | security, shell |
 | ADR-0093 | 0093 | [Desktop specifications, review batch 1, approved](0093-desktop-specs-batch-1.md) | accepted | shell, session, security |
+| ADR-0095 | 0095 | [Specifications, review batches 2 and 3, approved](0095-specs-review-batches-2-3.md) | accepted | kernel, session, security, storage, desktop |

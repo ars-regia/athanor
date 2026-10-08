@@ -1,6 +1,6 @@
 # Athanor languages and input
 
-Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text not yet reviewed.** It specifies how the Athanor session handles languages, regions, keyboard layouts and input methods: how our crates and applications are translated, which languages and locale data the image ships, where the system and user settings are stored, how the shell's clock and calendar follow the region, how keyboard layouts are configured and switched on cosmic-comp, which input method framework the session runs and how it is confined, what the greeter shows before login, and which fonts cover non-Latin scripts. The Settings application's pages and the first-run screens are not designed here. This document defines the preferences, where they are stored, and the interface those two programs call.
+Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommendations of review batch 2 (ADR-0095). Revision 1 (draft, 2026-10-05) applied the maintainer's decisions of that day.** It specifies how the Athanor session handles languages, regions, keyboard layouts and input methods: how our crates and applications are translated, which languages and locale data the image ships, where the system and user settings are stored, how the shell's clock and calendar follow the region, how keyboard layouts are configured and switched on cosmic-comp, which input method framework the session runs and how it is confined, what the greeter shows before login, and which fonts cover non-Latin scripts. The Settings application's pages and the first-run screens are not designed here. This document defines the preferences, where they are stored, and the interface those two programs call.
 
 ## 1. Context
 
@@ -240,6 +240,7 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
     - the session daemon gains a `NextInputSource` method on its private interface, admitted from cosmic-comp's action process;
     - the `system_actions` entry in `/usr/share/athanor/cosmic-defaults` points to it.
     - This replaces cosmic-settings-daemon's `InputSourceSwitch`.
+  - **While the session is locked,** cosmic-comp runs only whitelisted actions. If `InputSourceSwitch` through `athanor-shelld` does not work then, the fallback of `doc_lock_and_prompts.md` LP14 applies (the chip or a native system action, never a command action). Its spike L14 and S6 here run together.
   - XKB group options such as `grp:alt_shift_toggle` keep working, because libxkbcommon handles them inside cosmic-comp.
 - **The `system_actions` file.**
   - **Path and owner:** `/usr/share/athanor/cosmic-defaults/cosmic/com.system76.CosmicSettings.Shortcuts/v1/system_actions`, shipped by `athanor-calmo`, which owns the directory. No other package owns the file.
@@ -262,6 +263,7 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
   - It parses them without sourcing the file and with the same character check it uses for the locale variables. Commas are also allowed, because the lists are comma-separated.
   - With no `xkb_config` in the greeter user's configuration, cosmic-comp then builds the system layout (spike S4).
   - No Athanor program writes `xkb_config` for the `greetd` user.
+  - **When the system and the session layouts differ.** The greeter follows the system layout; the lock, the authentication dialog and the keyring prompt follow the session's (`doc_lock_and_prompts.md` LP14). A user who set a different layout in Settings therefore types the same password with different keys at the login and at the unlock. This is documented rather than prevented: the greeter always shows the layout in use, and the account step of first run warns that the password is typed on the layout of the system (`doc_first_run.md` FR14). The greeter does not read an unauthenticated user's `xkb_config` to propose that user's layout, because that would add a surface to the trusted path (ADR-0041).
 - **Switching.** When the system has two or more layouts, the greeter's layout label becomes a switcher. It is a menu button that lists the layouts and calls `set_keyboard_group` through `athanor-compositor-client`, which the greeter client can use because it binds the main socket.
   - The current read-only label (`ui.rs:88-122`) is replaced.
   - The password field keeps its focus after a switch.
@@ -428,8 +430,8 @@ Applied with the approval of this document. Line numbers into code are those of 
   - The exclusions of LN18 are added as rows with their reasons.
 - **`doc_osd.md`** (the keyboard-layout row at `doc_osd.md:91`): subscribes to the compositor client's `KeyboardLayout` event and shows the layout's short and full name (LN9).
 - **`doc_lock_and_prompts.md`**:
-  - shows and switches the layout through the compositor client (LN9);
-  - its acceptance (section 5, `doc_lock_and_prompts.md:228`) adds the case of cosmic-comp#2702: "with an IBus engine enabled and holding the keyboard grab, the lock screen receives every key, the password included, and the input method none" (LN12). Its spike L2 (`doc_lock_and_prompts.md:220`) and S2 here run the same check;
+  - shows and switches the layout through the compositor client (LN9), and restores at unlock the group that was active when the session locked (LP14, D14);
+  - its acceptance (section 5, item 11 of `doc_lock_and_prompts.md`) adds the case of cosmic-comp#2702: "with an IBus engine enabled and holding the keyboard grab, the lock screen receives every key, the password included, and the input method none" (LN12). Its spike L2 and S2 here run the same check, and its spike L14 (switching while locked, LP14) runs with S6 here;
   - the lock screen, like the greeter, offers no input method.
 - **`doc_accessibility.md`** (AX12 at `doc_accessibility.md:133-138`, decision 5 at `doc_accessibility.md:252`): states the slot rule of LN12. `athanor-osk` and IBus compete for the single input-method slot per seat (cosmic-osk#44); while an engine is enabled, IBus holds the slot and `athanor-osk` types through `zwp_virtual_keyboard_v1` only. The accessibility spike on the on-screen keyboard and S9 here cover it together.
 - **`doc_portal.md`**: the Settings backend serves `org.gnome.desktop.interface clock-format` (LN15).
@@ -465,7 +467,7 @@ Each is unverified until its spike runs. Spikes run on the reference laptop and 
   - IBus (LN11, decision 5) is confirmed by this spike, or reversed as LN11 says.
 - **S2. The lock screen with an input method** (cosmic-comp#2702 on 1.8.0). Enable an engine, focus a text field, lock with `loginctl lock-session`, type. Pass when cosmic-greeter's lock surface (today) receives every key and the engine's log shows none. If it fails, the patch of LN12 is written and the spike repeated on the patched build.
 - **S3. Flatpak's default languages for the system installation.** On a fresh install with the system in `en_US` and a user in `it_IT`, install a GNOME runtime and check whether the `it` subset of its `.Locale` extension is installed.
-- **S4. The greeter's layout from `XKB_DEFAULT_*`.** Set the system keyboard to `it` through localed, restart greetd, type in the greeter's user field. Inferred from libxkbcommon's documentation and cosmic-comp's empty defaults, not observed.
+- **S4. The greeter's layout from `XKB_DEFAULT_*`.** Run first of all the spikes of this document, before step 1 of LN19: it takes a few minutes on the development VM, and a password typed on `us(intl)` with dead keys depends on it (`doc_lock_and_prompts.md` LP17). If it fails, the rule of LN10 returns to the maintainer. Set the system keyboard to `it` through localed, restart greetd, type in the greeter's user field. Inferred from libxkbcommon's documentation and cosmic-comp's empty defaults, not observed.
 - **S5. A new user's first layout without cosmic-settings-daemon.** With cosmic-settings-daemon masked and the seed of LN9 in place, create a user and log in. Pass when the layout is localed's, not libxkbcommon's default "us".
 - **S6. Super+Space and IBus's trigger.** IBus's default trigger is `<Super>space` (`org.freedesktop.ibus.general.hotkey triggers`, read 2026-10-05), the same key as cosmic-comp's `InputSourceSwitch`. Check which one receives the key with both bound, and that an empty IBus trigger plus our one list (LN11) switches engines and layouts in order.
 - **S7. The input method's sandbox.** `PrivateNetwork=` and `MemoryDenyWriteExecute=` in a user unit, with each shipped engine. The typing-booster engine is Python, and m17n may load code.
@@ -516,6 +518,10 @@ Taken by the maintainer on 2026-10-05. Each followed the recommendation of revis
 4. **Where a user's keyboard layouts are stored.** Choice: cosmic-comp's `xkb_config`, written only through `athanor-compositor-client` (LN9). Reason: it is the store cosmic-comp reads live, its only writer is the crate already allowed to know COSMIC, and nothing has to be kept in sync.
 5. **Which input-method framework.** Choice: IBus, confirmed or reversed by spike S1 (LN11). Reason: it is already in the base image with six engines and is what GNOME applications and Fedora expect.
 6. **cosmic-settings-daemon's keyboard behaviour until it leaves.** Choice: `40-athanor-locale1.rules` returns `AUTH_ADMIN_KEEP` for localed's two actions, built as its own construction step (LN5, LN9, LN19 step 3). Reason: it ends a silent system-wide write from a user setting without waiting for stage 8, and the system keyboard stays changeable with an administrator's authorisation.
+7. **Decision 7 (review batch 2, Q1): S4 is the first spike,** run before step 1 of LN19 on the development VM; if it fails the rule of LN10 returns to the maintainer.
+8. **Decision 8 (review batch 2, Q2): a layout divergence is written down,** in LN10 and `doc_lock_and_prompts.md` LP14, with a notice in the account step of first run; the greeter does not read an unauthenticated user's configuration.
+9. **Decision 9 (review batch 2, Q3): LN3 is brought up to date** with the lock's group restore (D14), spike L14 and references by name instead of line number.
+10. **Decision 10 (review batch 2, Q4): LN9 names the fallback of LP14** for a Super+Space that does not work while locked, and L14 and S6 run together.
 
 **Open doubts left by the decisions.**
 
