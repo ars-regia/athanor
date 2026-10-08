@@ -156,3 +156,4 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0086 | 0086 | [toolbox is not isolation; podman as container_t or the dev VM is](0086-toolbox-is-not-isolation.md) | accepted | security, apps |
 | ADR-0087 | 0087 | [Keep athanor-attestation outside the workspace until its Keylime rewrite](0087-attestation-outside-the-workspace.md) | accepted | security, build |
 | ADR-0088 | 0088 | [Pipeline revision 2](0088-pipeline-revision-2.md) | accepted | build, signing, security |
+| ADR-0089 | 0089 | [Account lockout through authselect's with-faillock](0089-account-lockout-faillock.md) | accepted | security |

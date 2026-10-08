@@ -1404,6 +1404,8 @@ def check_cmdline():
 PAM_CONTAINERFILE = "system/Containerfile"
 NULLOK_GUARD = re.compile(r"^RUN authselect enable-feature without-nullok\b", re.MULTILINE)
 PWQUALITY_MINLEN = "'minlen = 12'"
+FAILLOCK_GUARD = re.compile(r"^RUN authselect enable-feature with-faillock\b", re.MULTILINE)
+FAILLOCK_SETTINGS = ("'deny = 5'", "'fail_interval = 900'", "'unlock_time = 600'")
 
 
 def nullok_problems(root=None):
@@ -1430,10 +1432,29 @@ def pwquality_problems(root=None):
     return [f"{PAM_CONTAINERFILE}: no pwquality drop-in with {PWQUALITY_MINLEN}"]
 
 
-@check("pam", "No empty passwords (A2-23), no new password under twelve characters")
+def faillock_problems(root=None):
+    """The image build enables authselect's with-faillock with the thresholds of ADR-0089."""
+    root = root or ROOT
+    try:
+        text = read(root / PAM_CONTAINERFILE)
+    except OSError as err:
+        return [f"{PAM_CONTAINERFILE}: cannot read ({err})"]
+    code = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
+    problems = []
+    if not FAILLOCK_GUARD.search("\n".join(code)):
+        problems.append(f"{PAM_CONTAINERFILE}: no 'RUN authselect enable-feature with-faillock' step (ADR-0089)")
+    for setting in FAILLOCK_SETTINGS:
+        if not any(setting in line for line in code):
+            problems.append(f"{PAM_CONTAINERFILE}: faillock.conf lacks {setting} (ADR-0089)")
+    if any("even_deny_root" in line and "!" not in line for line in code):
+        problems.append(f"{PAM_CONTAINERFILE}: even_deny_root must stay off (ADR-0089)")
+    return problems
+
+
+@check("pam", "No empty passwords (A2-23), no new password under twelve characters, account lockout (ADR-0089)")
 def check_pam():
     r = Result()
-    for problem in nullok_problems() + pwquality_problems():
+    for problem in nullok_problems() + pwquality_problems() + faillock_problems():
         r.fail(problem)
     return r
 
