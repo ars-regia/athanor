@@ -221,10 +221,31 @@ RUN authselect enable-feature without-nullok && \
     test -s /etc/pam.d/system-auth && test -s /etc/pam.d/password-auth && \
     ! grep -n nullok /etc/pam.d/system-auth /etc/pam.d/password-auth
 
+# Account lockout (ADR-0090): five wrong passwords within fifteen minutes lock the account for
+# ten minutes, at login, sudo and every other service that includes system-auth. root is not
+# locked out (even_deny_root and admin_group stay unset). The recovery console is an
+# administrator's login, not root's: it stays reachable because the tally lives in /run/faillock
+# (tmpfs), so a boot into the recovery entry starts with no failures. The accepted trade-off is
+# that anyone who can reach a password prompt can lock the administrator out for ten minutes,
+# repeatedly. pam 1.7.1 reads only /etc/security/faillock.conf (no drop-in directory), hence the
+# appended block. The build fails if either stack lacks the module or a setting is not last-wins.
+RUN authselect enable-feature with-faillock && \
+    printf '%s\n' '' '# Athanor (system/Containerfile, ADR-0090).' \
+        'deny = 5' 'fail_interval = 900' 'unlock_time = 600' >> /etc/security/faillock.conf && \
+    for stack in system-auth password-auth; do \
+        grep -q '^auth .*pam_faillock.so preauth' "/etc/pam.d/$stack" \
+            && grep -q '^auth .*pam_faillock.so authfail' "/etc/pam.d/$stack" \
+            || { echo "pam_faillock is missing from $stack" >&2; exit 1; }; \
+    done && \
+    for setting in deny=5 fail_interval=900 unlock_time=600; do \
+        test "$(grep -E "^[[:space:]]*${setting%%=*}[[:space:]]*=" /etc/security/faillock.conf \
+            | tail -n 1 | tr -d '[:space:]')" = "$setting" \
+            || { echo "faillock.conf does not end with $setting" >&2; exit 1; }; \
+    done && \
+    ! grep -En '^[[:space:]]*(even_deny_root|admin_group)' /etc/security/faillock.conf
+
 # Short passwords. pam_pwquality asks a new password for twelve characters; systemd-homed reads
-# the same configuration for homectl passwd. Existing passwords are not touched. The lockout
-# after failed attempts (pam_faillock) comes with the lock screen that can write its tally
-# (doc_lock_and_prompts.md, D3 and LP18 step 3).
+# the same configuration for homectl passwd. Existing passwords are not touched.
 RUN install -d -m 0755 /etc/security/pwquality.conf.d && \
     printf '%s\n' '# Athanor (system/Containerfile).' 'minlen = 12' \
         > /etc/security/pwquality.conf.d/50-athanor.conf

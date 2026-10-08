@@ -31,3 +31,5 @@ Recorded in the maintainer decision log, section 'Wave 1 maintainer decisions', 
 ## Consequences
 
 Elaborated in `docs/architecture/doc_lock_and_prompts.md`.
+
+Amended 2026-10-08 by the maintainer (ADR-0090): D3's lockout is `with-faillock` with `deny = 5`, `fail_interval = 900`, `unlock_time = 600`, enabled with the image's PAM change instead of the lock screen's switch.

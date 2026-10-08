@@ -1490,6 +1490,8 @@ def check_cmdline():
 PAM_CONTAINERFILE = "system/Containerfile"
 NULLOK_GUARD = re.compile(r"^RUN authselect enable-feature without-nullok\b", re.MULTILINE)
 PWQUALITY_MINLEN = "'minlen = 12'"
+FAILLOCK_SETTINGS = {"deny": "5", "fail_interval": "900", "unlock_time": "600"}
+FAILLOCK_CONF = "/etc/security/faillock.conf"
 
 
 def nullok_problems(root=None):
@@ -1516,10 +1518,54 @@ def pwquality_problems(root=None):
     return [f"{PAM_CONTAINERFILE}: no pwquality drop-in with {PWQUALITY_MINLEN}"]
 
 
-@check("pam", "No empty passwords (A2-23), no new password under twelve characters")
+def faillock_problems(root=None):
+    """The image build enables authselect's with-faillock with the thresholds of ADR-0090."""
+    import shlex
+    root = root or ROOT
+    try:
+        text = read(root / PAM_CONTAINERFILE)
+    except OSError as err:
+        return [f"{PAM_CONTAINERFILE}: cannot read ({err})"]
+    steps = [s.strip() for s in text.replace("\\\n", " ").splitlines() if s.strip().startswith("RUN ")]
+    where, problems = PAM_CONTAINERFILE, []
+    if any("disable-feature with-faillock" in s for s in steps):
+        problems.append(f"{where}: a step disables with-faillock (ADR-0090)")
+    if not any("authselect enable-feature with-faillock" in s for s in steps):
+        problems.append(f"{where}: no 'RUN authselect enable-feature with-faillock' step (ADR-0090)")
+    writers = [s for s in steps if ">> " + FAILLOCK_CONF in s]
+    if len(writers) != 1:
+        return problems + [f"{where}: expected one RUN step appending to {FAILLOCK_CONF}, found {len(writers)} (ADR-0090)"]
+    step = writers[0]
+    if "pam_faillock.so preauth" not in step or "pam_faillock.so authfail" not in step:
+        problems.append(f"{where}: the faillock step does not check preauth and authfail in the stacks")
+    try:
+        words = shlex.split(step)
+    except ValueError as err:
+        return problems + [f"{where}: cannot parse the faillock step ({err})"]
+    if "printf" not in words:
+        return problems + [f"{where}: the faillock step has no printf"]
+    args = []
+    for word in words[words.index("printf") + 2:]:
+        if word in ("&&", ">>", ";"):
+            break
+        args.append(word)
+    last = {}
+    for arg in args:
+        m = re.match(r"^\s*(\w+)\s*=\s*(\S+)\s*$", arg)
+        if m:
+            last[m.group(1)] = m.group(2)
+        if re.match(r"^\s*(even_deny_root|admin_group)\b", arg):
+            problems.append(f"{where}: faillock.conf must not set {arg.strip()!r}: root is not locked out (ADR-0090)")
+    for key, value in FAILLOCK_SETTINGS.items():
+        if last.get(key) != value:
+            problems.append(f"{where}: faillock.conf must end with {key} = {value}, not {last.get(key)} (ADR-0090)")
+    return problems
+
+
+@check("pam", "No empty passwords (A2-23), no new password under twelve characters, account lockout (ADR-0090)")
 def check_pam():
     r = Result()
-    for problem in nullok_problems() + pwquality_problems():
+    for problem in nullok_problems() + pwquality_problems() + faillock_problems():
         r.fail(problem)
     return r
 
