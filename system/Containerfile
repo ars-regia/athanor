@@ -19,6 +19,10 @@ ARG NVIDIA_OPEN_DIGEST
 ARG NVIDIA_LEGACY_DIGEST
 ARG BOOT_DIGEST
 ARG SYSTEM_IMAGE
+ARG TIER0_DIGEST
+ARG TIER1_DIGEST
+ARG TIER2_DIGEST
+ARG TIER3_DIGEST
 
 # The vmlinuz of the pinned kernel signed with the Secure Boot key, /vmlinuz and /kver
 # (forge/specs/azoth/nvidia-publish.sh); system/kernel-artifacts.sh verified its signature and
@@ -28,14 +32,16 @@ FROM ${KERNEL_REGISTRY}/azoth-boot@${BOOT_DIGEST} AS signed-kernel
 FROM ${KERNEL_REGISTRY}/azoth-nvidia@${NVIDIA_OPEN_DIGEST} AS nvidia-modules-open
 FROM ${KERNEL_REGISTRY}/azoth-nvidia@${NVIDIA_LEGACY_DIGEST} AS nvidia-modules-legacy
 
-# The forge tier repositories, bound by the four tier steps of the system stage. FORGE_REGISTRY
-# is the project registry, which system/build-image.sh derives from REGISTRY_HOST and the
-# repository owner. The ARG stays in these FROM lines: inside a RUN --mount=...,from= value it
-# made buildah 5.8.4 SIGSEGV at commit (exit 134), taking down all three images.
-FROM ${FORGE_REGISTRY}/athanor-forge-tier0-repo:latest AS tier0-repo
-FROM ${FORGE_REGISTRY}/athanor-forge-tier1-repo:latest AS tier1-repo
-FROM ${FORGE_REGISTRY}/athanor-forge-tier2-repo:latest AS tier2-repo
-FROM ${FORGE_REGISTRY}/athanor-forge-tier3-repo:latest AS tier3-repo
+# The forge tier repositories, bound by the four tier steps of the system stage, by digest:
+# system/build-image.sh passes FORGE_REGISTRY and the four digests from tier-digests.json,
+# which the run that published the tiers wrote (forge/scripts/publish_tiers.sh) or
+# system/tier-digests.sh resolved once for a build outside it (doc_update_delivery.md, UD28).
+# The ARGs stay in these FROM lines: inside a RUN --mount=...,from= value an ARG made
+# buildah 5.8.4 SIGSEGV at commit (exit 134), taking down all three images.
+FROM ${FORGE_REGISTRY}/athanor-forge-tier0-repo@${TIER0_DIGEST} AS tier0-repo
+FROM ${FORGE_REGISTRY}/athanor-forge-tier1-repo@${TIER1_DIGEST} AS tier1-repo
+FROM ${FORGE_REGISTRY}/athanor-forge-tier2-repo@${TIER2_DIGEST} AS tier2-repo
+FROM ${FORGE_REGISTRY}/athanor-forge-tier3-repo@${TIER3_DIGEST} AS tier3-repo
 
 # The vendor RPMs of both NVIDIA branches, verified by hash and GPG, with the shim and the
 # configuration package, and NVIDIA's container toolkit (system/nvidia/build-rpms.sh). A throwaway stage: rpm-build never

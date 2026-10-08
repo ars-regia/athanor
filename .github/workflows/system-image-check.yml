@@ -23,9 +23,10 @@ on:
       - system/keys/**
       - system/build-image.sh
       - system/kernel-artifacts.sh
+      - system/tier-digests.sh
       - system/package-delta.sh
       - forge/config/packages.json
-      # The check installs the athanor-base-config RPM published in tier0:latest, not the spec
+      # The check installs the athanor-base-config RPM of the published tier 0, not the spec
       # of the pull request.
       - forge/specs/athanor-base-config/**
       - forge/specs/azoth/pins.env
@@ -93,7 +94,7 @@ jobs:
           path: kernel-artifacts
 
       - name: Login to GHCR
-        # system/Containerfile binds the athanor-forge-tier{0..3}-repo:latest images of the project registry and
+        # system/Containerfile binds the athanor-forge-tier{0..3}-repo images of the project registry and
         # pulls the azoth-nvidia modules by digest: the build needs a registry session before it
         # starts, not only the delta step at the end.
         env:
@@ -102,6 +103,10 @@ jobs:
         run: |
           set -euo pipefail
           echo "${GITHUB_TOKEN}" | podman login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+
+      - name: Tier repositories by digest (system/tier-digests.sh)
+        # The published tiers, read once: every image of this job installs the same ones (UD28).
+        run: bash system/tier-digests.sh resolve
 
       - name: Build the planned images
         # Which GPUs to build, none, one or all three, follows the kernel artifacts of this pull
