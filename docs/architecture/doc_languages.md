@@ -69,6 +69,7 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
     - The built-in `wayland` module has priority 100 and requires `zwp_text_input_manager_v3` (`gtk/gtkimcontextwayland.c:102-105`, `gtk/gtkimmodule.c:111-123`, tag 4.20.4).
     - IBus's GTK 4 module has priority 50 (`client/gtk4/ibusim.c`, tag 1.5.33).
     - So GTK 4 applications on cosmic-comp use text-input-v3 even with `ibus-gtk4` installed.
+    - With no input method bound, that module composes nothing: dead keys and Compose sequences are dropped. Observed on 2026-10-08 on the maintainer's desktop (Ptyxis 49.3, US-International), where `GTK_IM_MODULE=simple` restored them; reported for GTK 4.20 on Arch without IBus (https://gitlab.archlinux.org/archlinux/packaging/packages/gtk4/-/issues/12, not read).
   - **Upstream state, checked 2026-10-05.**
     - IBus added input-method-v2 in 1.5.32, started by `ibus start --type wayland`, and dropped custom pre-edit colours in that mode (https://desktopi18n.wordpress.com/2025/01/13/ibus-1-5-32-plan/).
     - cosmic-comp needs IBus 1.5.32 or later, or fcitx5 5.1.12 or later (pop-os/cosmic-session#185, opened 2026-02-04, open).
@@ -277,7 +278,8 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
   - When the engine list is not empty, `athanor-ime.service`, a user unit started by `athanor-session.target`, runs `ibus-daemon` in Wayland mode (`ibus start --type wayland`, which runs `ibus-wayland`) with the candidate panel. When the list becomes empty, the unit stops.
   - `ibus-wayland` and `ibus-panel` join the image.
 - **The environment.** When the unit is enabled, `athanor-session` exports `XMODIFIERS=@im=ibus` (XWayland), `QT_IM_MODULES="wayland;ibus"` and `QT_IM_MODULE=ibus`, as gnome-session does when ibus-daemon is present (`leader-main.c`, d3c610c1).
-  - It never sets `GTK_IM_MODULE`. GTK 3 and 4 use text-input-v3 through their `wayland` module, which outranks IBus's module (section 1).
+  - While no engine is enabled, `athanor-session`, `athanor-greeter-session` and the user manager's environment (`50-athanor-desktop.conf`) set `GTK_IM_MODULE=simple`, so that GTK composes dead keys itself (section 1; maintainer decision, 2026-10-08).
+  - When the unit is enabled, the variable is not set: `athanor-session` does not export it and the unit's start runs `systemctl --user unset-environment GTK_IM_MODULE`. GTK 3 and 4 then use text-input-v3 through their `wayland` module, which outranks IBus's module (section 1), and IBus composes dead keys.
 - **Chromium and Electron.**
   - Chromium-based browsers from Flatpak receive `--enable-wayland-ime --wayland-text-input-version=3` through their Flatpak override. Software applies it when the input method is enabled.
   - Electron applications that support only text-input-v1 get no input method on cosmic-comp, and are listed as a known limit.

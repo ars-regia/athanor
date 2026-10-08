@@ -20,6 +20,14 @@ systemctl --user reset-failed
 export XDG_CURRENT_DESKTOP=Athanor:COSMIC
 export XDG_SESSION_TYPE=wayland
 
+# GTK 4.20's wayland input-method module, which GTK 4 picks whenever the compositor
+# offers text-input-v3, composes nothing by itself: with no input method running,
+# dead keys and Compose sequences are dropped (US-International loses every accent).
+# The simple module composes them. doc_languages.md LN11: set while no input-method
+# engine is enabled, unset when athanor-ime.service runs, since IBus composes then.
+# The user manager reads the same value from 50-athanor-desktop.conf; keep the two equal.
+export GTK_IM_MODULE=simple
+
 # Athanor's defaults for COSMIC come from a data directory ahead of /usr/share (see
 # /usr/lib/environment.d/60-athanor-cosmic-defaults.conf, which covers the user
 # manager). cosmic-comp, and the locker and idle daemon athanor-desktop starts, are
