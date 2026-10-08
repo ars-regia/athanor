@@ -625,7 +625,7 @@ service of 1.0, not an interim one, and the `systemd-sysupdate` branch is not ta
    An update of the security class (D34) applies at the next shutdown or reboot the user
    starts, without the confirmation step, with a notice and a one-step way back
    (`doc_update_trust.md`, UT13; `doc_shell.md`, SH11); UT13 (A2-26, #150) fixes how: the check service unlocks
-   the staged deployment itself, and the class is a field of the signed promotion attestation,
+   the staged deployment itself, and the class is a field of the key-signed release attestation (`doc_pipeline.md`, PB4b),
    set by the promoter and verified by the client. Nothing reboots by itself
    in either class. On release 1.0, step 4 is greenboot's, on GRUB's boot counter
    (`doc_recovery.md`, R5); the text of step 4 applies from the composefs step of 1.1.

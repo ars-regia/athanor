@@ -31,10 +31,14 @@ of each, and confirmed the scope of D25.
    `athanor-trust-state` at schema 2 as `automatic_security_updates: bool`, with every reader
    updated in the same change. The warning texts are written in `doc_update_trust.md`.
 3. **The postpone.** An active local session user may postpone without an administrator.
-   It is always seven days, counted from the first notice. The staged deployment is re-locked
-   and the state reads `postponed-until <time>`. The expiry is stored as wall time and is also
-   bounded by seven boots, whichever comes first. A newer security digest replaces the staged
-   one and keeps the remaining postpone of the one it replaces; it never extends it. The fourth
+   The budget is counted per lineage: one postpone of seven days, also bounded by seven boots,
+   since the last security digest that was applied. The days run from the first notice, the
+   moment the security digest first reaches will-apply-at-next-shutdown on the machine,
+   whatever the session or user. The staged deployment is re-locked and the state reads
+   `postponed-until <time>`. A newer security digest inherits the remaining time and never
+   extends it; once the budget is used or expired, `Postpone()` refuses with `AlreadyPostponed`.
+   The budget resets only when a security digest is applied, never on `GoBack()`; the only way
+   to hold security updates further is the administrator's opt-out switch. The fourth
    request, `Postpone()`, carries it under the polkit action `os.athanor.update.postpone`, with
    `auth_admin` for any and inactive subjects and `yes` for an active one.
 4. **The release attestation is the producer of the class.** A new pipeline block, PB4b,
@@ -62,7 +66,8 @@ and does not wait for it.
 - The "no Later" text of A2-26 is replaced by the bounded postpone; the greenboot and
   security-class parts of A2-26 are unchanged.
 - `athanor-update` implements the third and fourth requests and `athanor-trust-state`
-  schema 2. The two polkit actions need the maintainer's approval before the polkit code is edited.
+  schema 2. The maintainer approved both polkit actions, `os.athanor.update.set-automatic` and
+  `os.athanor.update.postpone`, with these defaults on 2026-10-08.
 - The request that carries the postpone is `Postpone()` of UT6 (point 3).
 - Whether each change of the switch is logged is not decided by the maintainer; the
   specification does not require it yet.
