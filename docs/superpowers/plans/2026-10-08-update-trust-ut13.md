@@ -55,9 +55,11 @@ Each point names the texts involved, the proposed default and what it blocks.
 - **Undefined:** the host of the switch (Settings, Software, or the shield's update panel of
   BR6); the D-Bus method that sets it (UT6 says "two requests, no arguments"); the polkit
   action name and its defaults.
-- **Proposed default:** the switch lives in Software's update section beside the update list
-  (SW16 already puts system updates there), Settings keeps no updates page, and ADR-0082 is
-  amended by one line. A third request on `os.athanor.Update1`,
+- **Proposed default:** the switch lives in the shield's sheet (`doc_bar.md` BR6), where the
+  security state already is; Settings keeps no updates page, and ADR-0082 is amended by one
+  line. Software is not the host: SW16 says "System image updates are not here" and shows only
+  a read-only version row (`doc_software.md:11,202`), so placing it there would need an SW16
+  amendment, listed in point 6 only if the maintainer chooses Software. A third request on `os.athanor.Update1`,
   `SetAutomaticSecurityUpdates(b enabled)`, under a new polkit action
   `os.athanor.update.set-automatic` with `auth_admin` for every subject (no `_keep`), and UT6
   amended from "two requests" to "three requests".
@@ -147,8 +149,9 @@ Each point names the texts involved, the proposed default and what it blocks.
   contradicts the decision it implements.
 - **Proposed default:** one documentation change that amends UT11, UT13 and acceptance items
   16 to 18 to ADR-0082, PQ4 and PQ6, with points 1 to 5 settled, before the implementation
-  plan; and the matching amendments of `doc_update_delivery.md` UD6 and decision 3 that
-  `doc_pipeline.md` already lists.
+  plan; the matching amendments of `doc_update_delivery.md` UD6 and decision 3 that
+  `doc_pipeline.md` already lists; BR6 gains the switch of point 1, or SW16 is amended if the
+  maintainer places it in Software.
 - **Who decides:** the maintainer approves the amended text.
 - **Blocks:** the implementation plan itself.
 

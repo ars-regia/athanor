@@ -167,7 +167,8 @@ CONFIG_AUTOFDO_CLANG=y
 CONFIG_PREEMPT_DYNAMIC=y
 CONFIG_PREEMPT_LAZY=y
 # CONFIG_PREEMPT is not set
-# Built-in drivers of D17, kept on purpose.
+# Built-in drivers of D17, kept on purpose; I2C_DESIGNWARE_CORE because the platform driver
+# needs it.
 CONFIG_SATA_AHCI=y
 CONFIG_VIRTIO_BLK=y
 CONFIG_USB_HID=y
@@ -175,6 +176,25 @@ CONFIG_SERIO_I8042=y
 CONFIG_PINCTRL_AMD=y
 CONFIG_I2C_DESIGNWARE_CORE=y
 CONFIG_I2C_DESIGNWARE_PLATFORM=y
+CONFIG_ATA_PIIX=y
+CONFIG_BLK_DEV_SD=y
+CONFIG_VIRTIO_PCI=y
+CONFIG_USB_XHCI_HCD=y
+CONFIG_USB_XHCI_PCI=y
+CONFIG_USB_EHCI_HCD=y
+CONFIG_USB_EHCI_PCI=y
+CONFIG_USB_OHCI_HCD=y
+CONFIG_USB_OHCI_HCD_PCI=y
+CONFIG_USB_UHCI_HCD=y
+CONFIG_HID_GENERIC=y
+CONFIG_KEYBOARD_ATKBD=y
+CONFIG_MFD_INTEL_LPSS_PCI=y
+CONFIG_MFD_INTEL_LPSS_ACPI=y
+CONFIG_SERIAL_8250_DW=y
+CONFIG_SERIAL_DEV_BUS=y
+CONFIG_TCG_TIS=y
+CONFIG_TCG_CRB=y
+CONFIG_DRM_SIMPLEDRM=y
 CONFIG_BTRFS_FS=y
 # END kernel profile P2
 ```
@@ -244,6 +264,25 @@ CONFIG_SERIO_I8042 = { value = "y", decision = "D17", locked = true }
 CONFIG_PINCTRL_AMD = { value = "y", decision = "D17", locked = true }
 CONFIG_I2C_DESIGNWARE_CORE = { value = "y", decision = "D17", locked = true }
 CONFIG_I2C_DESIGNWARE_PLATFORM = { value = "y", decision = "D17", locked = true }
+CONFIG_ATA_PIIX = { value = "y", decision = "D17", locked = true }
+CONFIG_BLK_DEV_SD = { value = "y", decision = "D17", locked = true }
+CONFIG_VIRTIO_PCI = { value = "y", decision = "D17", locked = true }
+CONFIG_USB_XHCI_HCD = { value = "y", decision = "D17", locked = true }
+CONFIG_USB_XHCI_PCI = { value = "y", decision = "D17", locked = true }
+CONFIG_USB_EHCI_HCD = { value = "y", decision = "D17", locked = true }
+CONFIG_USB_EHCI_PCI = { value = "y", decision = "D17", locked = true }
+CONFIG_USB_OHCI_HCD = { value = "y", decision = "D17", locked = true }
+CONFIG_USB_OHCI_HCD_PCI = { value = "y", decision = "D17", locked = true }
+CONFIG_USB_UHCI_HCD = { value = "y", decision = "D17", locked = true }
+CONFIG_HID_GENERIC = { value = "y", decision = "D17", locked = true }
+CONFIG_KEYBOARD_ATKBD = { value = "y", decision = "D17", locked = true }
+CONFIG_MFD_INTEL_LPSS_PCI = { value = "y", decision = "D17", locked = true }
+CONFIG_MFD_INTEL_LPSS_ACPI = { value = "y", decision = "D17", locked = true }
+CONFIG_SERIAL_8250_DW = { value = "y", decision = "D17", locked = true }
+CONFIG_SERIAL_DEV_BUS = { value = "y", decision = "D17", locked = true }
+CONFIG_TCG_TIS = { value = "y", decision = "D17", locked = true }
+CONFIG_TCG_CRB = { value = "y", decision = "D17", locked = true }
+CONFIG_DRM_SIMPLEDRM = { value = "y", decision = "D17", locked = true }
 ```
 
 Then regenerate: `python3 -B forge/specs/athanor-kernel-profile/kernel_profile.py generate`
@@ -590,6 +629,7 @@ git commit -m "test(kernel): assert preemption, ASLR bits, IOMMU domains and the
 - Generate: `forge/specs/athanor-kernel-profile/SOURCES/usr/lib/bootc/kargs.d/10-athanor-kernel-profile.toml`, `forge/specs/azoth/cmdline`, the JSON profiles
 - Modify: `forge/specs/azoth/boot/init`
 - Test: `forge/specs/athanor-kernel-profile/tests/test_kernel_profile.py`, `forge/specs/azoth/tests/test_boot_init.py`
+- Modify: `scripts/tests/test_verify_cmdline.py` (its edits anchor on `vsyscall=none`, which this task removes: re-anchor every one on `page_alloc.shuffle=1`, present in `forge/specs/azoth/cmdline` and as `"page_alloc.shuffle=1",` in the `kargs.d` file; `call-lint.yml` runs this suite)
 
 **Interfaces:**
 - Consumes: the Task 1 kconfig entries.
@@ -710,13 +750,13 @@ check debugfs     debugfs_off
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `python3 -B -m unittest discover -s forge/specs/athanor-kernel-profile/tests -v && python3 -B -m unittest discover -s forge/specs/azoth/tests -v && python3 -B forge/specs/athanor-kernel-profile/kernel_profile.py check`
+Run: `python3 -B -m unittest discover -s forge/specs/athanor-kernel-profile/tests -v && python3 -B -m unittest discover -s forge/specs/azoth/tests -v && python3 -B -m unittest discover -s scripts/tests -v && python3 -B forge/specs/athanor-kernel-profile/kernel_profile.py check`
 Expected: PASS and exit 0; `cat forge/specs/azoth/cmdline` shows no `lockdown`, `init_on_free`, `vsyscall` or `debugfs`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add forge/specs/athanor-kernel-profile forge/specs/azoth/cmdline forge/specs/azoth/boot/init forge/specs/azoth/tests/test_boot_init.py
+git add forge/specs/athanor-kernel-profile forge/specs/azoth/cmdline forge/specs/azoth/boot/init forge/specs/azoth/tests/test_boot_init.py scripts/tests/test_verify_cmdline.py
 git commit -m "feat(kernel-profile): drop the parameters the kernel now builds in from the base command line"
 ```
 
@@ -867,9 +907,10 @@ class InsmodSpecs(unittest.TestCase):
 `test_boot_init.py`, inside `PlatformAssertions`:
 
 ```python
-    def ima(self, describe_rc, padd_rc, listed=""):
-        return (f'keyctl() {{ case $1 in describe) return {describe_rc} ;; padd) return {padd_rc} ;; '
-                f'list) echo "{listed}" ;; esac; }}\nimakey_file=/dev/null')
+    def ima(self, describe_rc, padd_rc, listed="", why="Key was rejected by service", key="/bin/sh"):
+        return (f'keyctl() {{ case $1 in describe) return {describe_rc} ;; '
+                f'padd) echo "add_key: {why}" >&2; return {padd_rc} ;; '
+                f'list) echo "{listed}" ;; esac; }}\nimakey_file={key}')
 
     def test_a_refused_key_passes(self):
         self.assertEqual(run_function("ima_key_refused", self.ima(0, 1)).returncode, 0)
@@ -879,6 +920,12 @@ class InsmodSpecs(unittest.TestCase):
 
     def test_ima_refusal_needs_the_keyring(self):
         self.assertNotEqual(run_function("ima_key_refused", self.ima(1, 1)).returncode, 0)
+
+    def test_a_refusal_for_another_reason_fails(self):
+        self.assertNotEqual(run_function("ima_key_refused", self.ima(0, 1, why="Bad message")).returncode, 0)
+
+    def test_a_missing_key_file_fails(self):
+        self.assertNotEqual(run_function("ima_key_refused", self.ima(0, 1, key="/nonexistent/key.der")).returncode, 0)
 ```
 
 `test_signer_run.py`: replace `test_prepare_signs_a_copy_the_allow_list_admits_and_ships_its_certificate` with a version that also copies `forge/specs/azoth/keys/profiles/test-user-ca.cnf` into the fixture and asserts:
@@ -1017,7 +1064,12 @@ virt-fw-vars -i /usr/share/edk2/ovmf/OVMF_VARS.secboot.fd -o "$WORK/vars.fd" "${
 ```sh
 ima_key_refused() { # D40, D46: a key vouched only by a machine-keyring CA never enters .ima
   keyctl describe %:.ima || { echo "no .ima keyring"; return 1; }
-  if keyctl padd asymmetric '' %:.ima < "$imakey_file"; then echo "the key was accepted"; return 1; fi
+  [ -s "$imakey_file" ] || { echo "no key to offer: $imakey_file"; return 1; }
+  out=$(keyctl padd asymmetric '' %:.ima < "$imakey_file" 2>&1) && { echo "the key was accepted"; return 1; }
+  case $out in
+    *'Key was rejected by service'*) ;; # EKEYREJECTED: the CA was consulted and refused
+    *) echo "refused for another reason: $out"; return 1 ;;
+  esac
   keyctl list %:.ima
 }
 ```
@@ -1109,11 +1161,11 @@ git commit -m "docs(kernel): describe the P2 boot matrix"
 
 **Interfaces:**
 - Consumes: every commit above on one branch based on `origin/iso-v0`.
-- Produces: a green Kernel Build run (build, config, boot matrix, kmod with the module chain) and the evidence for the maintainer.
+- Produces: a green Kernel Build run (build, config, boot matrix, kmod build) for every task but Task 6, which follows in its own pull request (Step 3), and the evidence for the maintainer.
 
 - [ ] **Step 1: Local checks**
 
-Run: `just lint && python3 scripts/verify.py && python3 -B -m unittest discover -s forge/specs/azoth/tests && python3 -B -m unittest discover -s forge/specs/athanor-kernel-profile/tests`
+Run: `just lint && python3 scripts/verify.py && python3 -B -m unittest discover -s forge/specs/azoth/tests && python3 -B -m unittest discover -s forge/specs/athanor-kernel-profile/tests && python3 -B -m unittest discover -s scripts/tests`
 Expected: all exit 0.
 
 - [ ] **Step 2: Open the pull request and watch Kernel Build**
@@ -1128,12 +1180,14 @@ gh run watch "$(gh run list --workflow 'Kernel Build' --branch "$(git branch --s
 
 - [ ] **Step 3: The module chain**
 
-The `kmod` job of Kernel Build, and on push the Orchestrator's NVIDIA kmod run, must show in `nvidia-boot-logs` for every case: `insmod-4` (mokca) `ENODEV` under `uefi-*` and `EKEYREJECTED` under `bios-*`/`iommu-*`, `insmod-5` (mokleaf) `EKEYREJECTED`, and `K3 ok   ima-key`.
+What the pull request cannot show: the `kmod` job of Kernel Build calls `nvidia-build.yml`, which boots nothing. Only `nvidia-kmod.yml` boots with `--insmod`, and the Orchestrator runs it after the merge, when the state is `modules-missing`, behind the `nvidia-kmod-sign` job in the protected signing environment. So Task 6 goes in a pull request of its own, after the rest of P2 has merged, so that a wiring error reverts alone; and the check below is a maintainer step after that merge: the maintainer approves the signing environment, and only then are the logs read. This plan neither waits on nor performs that approval.
+
+The Orchestrator's NVIDIA kmod run must show in `nvidia-boot-logs` for every case: `insmod-4` (mokca) `ENODEV` under `uefi-*` and `EKEYREJECTED` under `bios-*`/`iommu-*`, `insmod-5` (mokleaf) `EKEYREJECTED`, and `K3 ok   ima-key`.
 Run: `gh run download <run-id> -n nvidia-boot-logs -D /var/tmp/p2-kmod && grep -h -E '^K3 (FAIL|RESULT)' /var/tmp/p2-kmod/*.log`
 Expected: six `K3 RESULT ok` lines and no `K3 FAIL`.
 
 - [ ] **Step 4: Acceptance after the merge**
 
-After the squash merge, the image built from the merge commit must pass ISO Acceptance with `profile-ok` (the new kconfig entries are checked on the booted machine).
+Extra evidence, not the P2 gate (section 15 gives P2 the Kernel Build gate; acceptance `profile-ok` is the gate of P3): after the squash merge, the image built from the merge commit passes ISO Acceptance with `profile-ok` (the new kconfig entries are checked on the booted machine).
 Run: `gh run list --workflow 'ISO Acceptance' --branch iso-v0 --limit 1 --json conclusion,headSha`
 Expected: `"conclusion":"success"` on the merge commit. Then report to the maintainer: the run links, and that section 15's implementation status line for P2 can be updated.
