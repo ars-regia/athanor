@@ -24,7 +24,11 @@ is one more component to build, pin and publish.
 
 ## Decision
 
-The maintainer decided on 2026-10-08 that the image ships the QEMU the two tools use, and
+QEMU belongs in the image. Athanor intends to let a person run a Windows virtual machine
+easily, with GPU passthrough (maintainer, 2026-10-08); QEMU and KVM are the base of that
+feature, whose specification is still to be written. A2-10 should not have removed it.
+
+Until that specification exists, the image ships the QEMU the two existing tools use, and
 only that: `qemu-system-x86-core`, `qemu-img`, `edk2-ovmf`, `passt` for the runner's network,
 the `virtio-vga-gl` and `virtio-gpu-gl` display devices and the `gtk`, `egl-headless`,
 `opengl` and `spice-core` user interfaces.
@@ -40,5 +44,6 @@ The binaries are signed with the image and read-only under `/usr`, like the rest
 system. The image grows by about 160 MB installed, most of it `qemu-system-x86-core` and
 `edk2-ovmf`. `qemu-common` brings `qemu-bridge-helper`, setuid root in Fedora, with
 `/etc/qemu/bridge.conf` allowing `virbr0`; neither tool uses a bridge, so the image removes
-the setuid bit. It also brings a `qemu` system user, `/etc/modprobe.d/kvm.conf` and a QEMU
+the setuid bit. The virtual machine specification decides again on networking, the
+management layer and the passthrough pieces (VFIO binding, IOMMU kernel arguments). It also brings a `qemu` system user, `/etc/modprobe.d/kvm.conf` and a QEMU
 entry in the application list.
