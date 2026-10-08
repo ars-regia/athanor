@@ -96,8 +96,9 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
   moved deployment the machine stays on the previous owner, `move-held` is written and the
   state reads `verified.reason = owner-moved-held`, until the new owner publishes a newer
   build.
-- A verified machine on a run-number tag or a digest publishes `verified.reason =
-  pinned-build`: one build, which receives no updates. Nothing moves it.
+- A verified machine on a run-number tag (digits only) or a digest publishes
+  `verified.reason = pinned-build`: one build, which receives no updates. Nothing moves it.
+  Any other tag follows newer builds.
 - An image the registry does not hold at all (`name unknown`, or ghcr.io's 403 on the pull
   token or `denied`) is a wait like a missing tag, not a failure every five minutes.
 

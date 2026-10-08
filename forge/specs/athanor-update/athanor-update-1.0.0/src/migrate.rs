@@ -450,9 +450,12 @@ mod tests {
             let state = crate::check::run(&machine.ctx(&tools, 5000), true).expect("offline");
             assert_eq!(state.verified.reason, athanor_trust_state::Reason::PinnedBuild, "{suffix}");
         }
-        let tools = Fake::booted(Deployed { image: format!("{REPO}:latest"), ..deployed(SIGNED, 1000) });
-        let state = crate::check::run(&machine.ctx(&tools, 5000), true).expect("offline");
-        assert_eq!(state.verified.reason, athanor_trust_state::Reason::Signature, "a channel");
+        // A channel, no tag, and the moving tag of a derived image all follow newer builds.
+        for suffix in [":latest", "", ":prod", ":2026-10"] {
+            let tools = Fake::booted(Deployed { image: format!("{REPO}{suffix}"), ..deployed(SIGNED, 1000) });
+            let state = crate::check::run(&machine.ctx(&tools, 5000), true).expect("offline");
+            assert_eq!(state.verified.reason, athanor_trust_state::Reason::Signature, "{suffix}");
+        }
     }
 
     #[test]

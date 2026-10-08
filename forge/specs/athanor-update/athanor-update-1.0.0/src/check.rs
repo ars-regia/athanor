@@ -100,10 +100,13 @@ fn local_update(ctx: &Context<'_, impl Tools>, status: &Status) -> UpdateState {
     }
 }
 
-/// True when the tag or digest after the repository, `suffix`, is a channel: a tag the pipeline
-/// moves to each newer promoted build. No tag is `latest`.
+/// True when the tag or digest after the repository, `suffix`, may move to a newer build. A
+/// digest and a run tag of the pipeline (`github.run_id`, digits only) name one build; any
+/// other tag, `latest`, `stable` or the moving tag of a derived image, is followed. No tag is
+/// `latest`.
 fn follows_a_channel(suffix: &str) -> bool {
-    matches!(suffix, "" | ":latest") || suffix == format!(":{}", crate::migrate::CHANNEL)
+    let run_tag = suffix.strip_prefix(':').is_some_and(|tag| !tag.is_empty() && tag.bytes().all(|b| b.is_ascii_digit()));
+    !(suffix.starts_with('@') || run_tag)
 }
 
 /// `Available` when `digest` may be offered; otherwise why not. The order of the build
