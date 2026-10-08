@@ -215,7 +215,7 @@ impl Scanner<'_> {
         }
     }
 
-    fn expect(&mut self, c: char) -> Result<(), String> {
+    fn require(&mut self, c: char) -> Result<(), String> {
         if self.eat(c) { Ok(()) } else { Err(format!("expected '{c}'")) }
     }
 
@@ -233,7 +233,7 @@ impl Scanner<'_> {
     }
 
     fn string(&mut self) -> Result<String, String> {
-        self.expect('"')?;
+        self.require('"')?;
         let mut out = String::new();
         let mut chars = self.rest.char_indices();
         while let Some((at, c)) = chars.next() {
@@ -282,7 +282,7 @@ impl Scanner<'_> {
 pub fn parse(text: &str) -> Result<Vec<(String, String)>, String> {
     let mut s = Scanner { rest: text };
     s.skip()?;
-    s.expect('{')?;
+    s.require('{')?;
     let mut entries = Vec::new();
     loop {
         s.skip()?;
@@ -291,13 +291,13 @@ pub fn parse(text: &str) -> Result<Vec<(String, String)>, String> {
         }
         let name = s.ident()?;
         s.skip()?;
-        s.expect(':')?;
+        s.require(':')?;
         s.skip()?;
         entries.push((name, s.string()?));
         s.skip()?;
         if !s.eat(',') {
             s.skip()?;
-            s.expect('}')?;
+            s.require('}')?;
             break;
         }
     }

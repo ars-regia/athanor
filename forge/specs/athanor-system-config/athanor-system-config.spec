@@ -62,7 +62,6 @@ for group in video tty; do
     fi
     gpasswd -a greetd "$group" > /dev/null 2>&1 || :
 done
-mkdir -p /etc/usbguard
 
 %files
 %dir /usr/share/athanor-system-config
