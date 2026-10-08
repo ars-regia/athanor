@@ -16,7 +16,7 @@ applies to Claude Code only.
   an absolute path.
 - **Merging past the review rule.** The `product-branches` ruleset requires one approval on
   `iso-v0` and `main`, and the repository admin role bypasses it in pull-request mode. Claude
-  Code merges its own pull request with
+  Code merges a pull request it opened in the current session with
   `gh pr merge --squash --admin --match-head-commit <full sha>` only when all of these hold
   for that same sha:
   - the required checks of the base branch (`.github/settings/rulesets.json` and
@@ -25,15 +25,18 @@ applies to Claude Code only.
   - the `auditor` subagent reviewed the diff at that sha and reported no blocker;
   - the review is the only block (`mergeable` is `MERGEABLE`, `reviewDecision` is
     `REVIEW_REQUIRED`);
-  - the change touches no path of the "Protected paths" block of `.github/CODEOWNERS`, no
-    file that governs the merge itself (`CLAUDE.md`, `AGENTS.md`, `.claude/`, `.github/`,
-    `scripts/verify.py`), and does not change the behaviour of anything listed under "Stop
-    and ask before editing" in `AGENTS.md` or of an area of the two-person review
-    (`docs/operations/contributing.md`).
+  - no changed file is under the "Protected paths" block of `.github/CODEOWNERS` or a path
+    listed under "Stop and ask before editing" in any `AGENTS.md`;
+  - no changed file governs the merge, the checks or the rules: any `AGENTS.md` or
+    `CLAUDE.md`, `.claude/`, `.github/`, `scripts/ci/`, `scripts/verify.py`,
+    `scripts/github-settings/`, `Justfile`, `docs/operations/`, `docs/decisions/`;
+  - the change does not alter the behaviour of authentication (PAM, the greeter's login
+    path, token validation), of signing, attestation, polkit or cryptography, or migrate
+    data or on-disk state.
 
   `--admin` skips the required checks too, so the verification is Claude's to make each
-  time. Otherwise, and for every pull request Claude did not write, the maintainer
-  reviews and merges. *(maintainer decision, 2026-10-08)*
+  time. In every other case the maintainer reviews and merges.
+  *(maintainer decision, 2026-10-08)*
 - **Shared settings are permissions only.** `.claude/settings.json` denies secret paths and
   destructive commands; hooks and personal preferences stay in `.claude/settings.local.json`
   or `~/.claude/` (`.claude/README.md`).
