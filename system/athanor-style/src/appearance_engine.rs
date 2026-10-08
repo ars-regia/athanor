@@ -388,21 +388,22 @@ impl AppearanceEngine {
         }
     }
 
-    /// Get path for storing active layout preference
-    fn get_active_layout_path() -> PathBuf {
-        if let Ok(home) = std::env::var("HOME") {
+    /// Get path for storing active layout preference; none without a home, as for the presets
+    fn get_active_layout_path() -> Option<PathBuf> {
+        let home = std::env::var_os("HOME")?;
+        Some(
             PathBuf::from(home)
                 .join(".config")
                 .join("athanor")
-                .join("active_layout.toml")
-        } else {
-            PathBuf::from("/tmp/athanor_active_layout.toml")
-        }
+                .join("active_layout.toml"),
+        )
     }
 
     /// Load active layout from disk
     pub fn load_saved_active_layout(&self) {
-        let path = Self::get_active_layout_path();
+        let Some(path) = Self::get_active_layout_path() else {
+            return;
+        };
         if path.exists() {
             if let Ok(content) = std::fs::read_to_string(&path) {
                 if let Ok(preset) = parse_preset_toml(&content) {
@@ -416,7 +417,10 @@ impl AppearanceEngine {
 
     /// Persist active layout to disk
     fn save_active_layout(&self, preset: &LayoutPreset) {
-        let path = Self::get_active_layout_path();
+        let Some(path) = Self::get_active_layout_path() else {
+            error!("HOME is not set: the active layout is not saved");
+            return;
+        };
         if let Some(parent) = path.parent() {
             if let Err(e) = std::fs::create_dir_all(parent) {
                 tracing::error!("Failed to create parent dir {:?}: {:?}", parent, e);
