@@ -15,3 +15,16 @@ disable NetworkManager-wait-online.service
 disable systemd-networkd-wait-online.service
 # Machine checks are reported by the kernel on every vendor; mcelog is deprecated upstream and fails on AMD family 17h+.
 disable mcelog.service
+
+# Contacts the project did not choose (forge/config/contacts.toml lists what the image does
+# contact, and verify.py contacts fails when a silent unit is enabled).
+# Fedora's install counter: Athanor's images come from ghcr.io, so Fedora has no business counting
+# them. The unit is also masked (/etc/systemd/system/rpm-ostree-countme.timer), so that no other
+# enablement can start it.
+disable rpm-ostree-countme.timer
+# Refreshes the DNSSEC root anchor for unbound, which is not installed; systemd-resolved validates
+# with its own anchors.
+disable unbound-anchor.timer
+# Remote login is off until the person turns it on in Software (doc_software.md, decision 2; its
+# developer mode enables it again). Fedora's 90-default.preset enables it.
+disable sshd.service
