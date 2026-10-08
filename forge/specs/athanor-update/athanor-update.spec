@@ -100,7 +100,9 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
   `verified.reason = pinned-build`: one build, which receives no updates. Nothing moves it.
   Any other tag follows newer builds.
 - An image the registry does not hold at all (`name unknown`, or ghcr.io's 403 on the pull
-  token or `denied`) is a wait like a missing tag, not a failure every five minutes.
+  token or `denied`) is a wait like a missing tag, not a failure every five minutes. A 403
+  or `denied`, which a private package or an expired credential also answers, is logged at
+  warning level.
 
 * Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-8
 - A machine that has migrated but boots a reference that does not enforce the policy, with
