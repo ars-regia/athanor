@@ -14,8 +14,9 @@ areas: [shell, session, security, desktop]
 Review batch 4 of the 1.0 specification review covers the three desktop specifications that were
 still in draft after batches 1 to 3: `doc_accessibility.md`, `doc_overview.md` and
 `doc_visual_language.md`. Each question was presented with options and a recommendation. On
-2026-10-08 the maintainer accepted every recommendation. The three specifications remain
-unapproved: they are revised to revision 2 and await the maintainer's approval of the text.
+2026-10-08 the maintainer accepted every recommendation. The three specifications are
+revised to revision 2, and the maintainer approved the text on 2026-10-09 by merging the pull
+request that sets their status to approved (ADR-0074 item 5).
 
 ## Decision
 
