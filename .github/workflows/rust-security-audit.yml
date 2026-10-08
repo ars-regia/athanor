@@ -15,9 +15,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  issues: write
-  pull-requests: read
+permissions: {}
 
 jobs:
   # The advisory half of the dependency policy in deny.toml, over the root workspace.
@@ -52,6 +50,8 @@ jobs:
   security-audit:
     name: Enforce Safety & Cargo Vet Audit
     if: github.ref_name != 'iso-v0' && github.base_ref != 'iso-v0'
+    permissions:
+      contents: read
     runs-on: ubuntu-24.04
     container:
       image: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
@@ -99,7 +99,7 @@ jobs:
       - name: Check Unsafe Code & Clippy Policies
         run: |
           set -euo pipefail
-          cargo clippy --workspace --exclude ebpf-core --exclude athanor-sysmon-ebpf --exclude athanor-greeter --all-targets --all-features -- \
+          cargo clippy --workspace --all-targets --all-features -- \
             -A clippy::undocumented_unsafe_blocks \
             -A clippy::multiple_unsafe_ops_per_block \
             -A dead_code -A unused_variables 2>&1 | tee clippy.log
