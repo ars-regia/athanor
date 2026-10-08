@@ -151,7 +151,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0081 | 0081 | [CRA compliance posture](0081-cra-compliance-posture.md) | accepted | security, update, product |
 | ADR-0082 | 0082 | [Update control: postpone and opt-out](0082-update-control.md) | amended by ADR-0094 | update, security |
 | ADR-0083 | 0083 | [One supported desktop; derived images stay open](0083-one-desktop-derived-images-open.md) | accepted | product, shell, update |
-| ADR-0084 | 0084 | [The key custody model is definitive for the single-maintainer phase](0084-key-custody-model.md) | accepted | security, process |
+| ADR-0084 | 0084 | [The key custody model is definitive for the single-maintainer phase](0084-key-custody-model.md) | amended by ADR-0098 | security, process |
 | ADR-0085 | 0085 | [Keyring prompter: the secret exchange comes from upstream oo7](0085-keyring-prompter-secret-exchange-source.md) | accepted | security, shell |
 | ADR-0086 | 0086 | [toolbox is not isolation; podman as container_t or the dev VM is](0086-toolbox-is-not-isolation.md) | accepted | security, apps |
 | ADR-0087 | 0087 | [Keep athanor-attestation outside the workspace until its Keylime rewrite](0087-attestation-outside-the-workspace.md) | accepted | security, build |

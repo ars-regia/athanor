@@ -95,6 +95,17 @@ On 2026-10-08 the maintainer decided:
      adopted. It is executed in a quiet window after the ADR-0096 implementation, with no open pull
      request on the moved paths, as one squash, and the system image check green before the
      merge.
+6. **Unattended image signing until 1.0** (decided on 2026-10-09). The environments
+   `signing-images` and `bridge` lose their required reviewer until the 1.0 tag, when it
+   returns. Their deployment branches and the checks of `scripts/verify.py workflows` on signing
+   jobs stay as they are. `signing-kernel` keeps its required reviewer: a module signed with the
+   Machine Owner Key is trusted by Secure Boot on every machine that enrolled the key and is
+   withdrawn only by rotating it, while a signed image reaches `:stable` only through the
+   promotion and its evidence. The change takes effect only after the image signing job runs in
+   `signing-images` again (the end of the rotation in `secrets.md` section 4.1): the `signing`
+   environment also holds the kernel keys, so it keeps its reviewer for as long as it exists.
+   With one maintainer who may approve their own runs, the reviewer added attention, not a
+   second party (KC1), and it held every unattended build cycle at the signing step.
 
 ## Consequences
 
@@ -112,3 +123,6 @@ On 2026-10-08 the maintainer decided:
   the file changes to `repository.json` and `pages.json` and the hand deletions of item 5; the
   rename of `KERNEL_BUMP_TOKEN`; the removal of `main` from the settings files and workflows once
   the branch is deleted; the execution of the layout move.
+- ADR-0084 is amended in one part only: KC1's required reviewer on `signing-images` (and on
+  `bridge`) is suspended until the 1.0 tag by item 6. The change to `environments.json` follows
+  the end of the rotation, and the maintainer applies it with `ghsettings.py apply`.
