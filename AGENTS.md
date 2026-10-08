@@ -76,6 +76,10 @@ for hours: never use it as a check.
   links in code, commits, pull requests or documents.
 - **One logical change per commit.** Report unrelated problems instead of fixing them in
   passing.
+- **At most five open pull requests.** With five open, finish before starting: a new pull
+  request waits until one is merged or closed, and reviewers' findings on open ones are
+  closed before new work begins. A branch without an open pull request is merged, archived
+  as a tag `archive/<branch>`, or deleted.
 
 ## Audits
 
