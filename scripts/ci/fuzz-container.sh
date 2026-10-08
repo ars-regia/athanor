@@ -14,7 +14,8 @@ SANITIZER=${FUZZ_SANITIZER:-address}
 
 export RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo
 export PATH=$CARGO_HOME/bin:$PATH
-# The registry volume is shared with the other rig jobs: keep their cache, build elsewhere.
+# The registry volume (mounted at $CARGO_HOME/registry by fuzz.sh) is shared with the other
+# rig jobs: keep their cache, build elsewhere.
 export CARGO_TARGET_DIR=/out/target
 
 curl -fsSL --retry 3 -o /tmp/rustup-init \
@@ -25,6 +26,9 @@ chmod +x /tmp/rustup-init
 cargo install --locked --version "$CARGO_FUZZ_VERSION" cargo-fuzz
 
 cd /repo/fuzz
+# cargo-fuzz has no --locked of its own: resolving with it first makes a fuzz/Cargo.lock that
+# no longer matches fuzz/Cargo.toml an error instead of a silent rewrite.
+cargo metadata --locked --format-version 1 >/dev/null
 listed=$(cargo fuzz list)
 mapfile -t targets <<<"$listed"
 if [ -n "${FUZZ_TARGETS:-}" ]; then
@@ -34,7 +38,14 @@ fi
 failed=()
 for target in "${targets[@]}"; do
     mkdir -p "/out/corpus/$target" "/out/artifacts/$target" /out/logs
-    cp -r "/repo/fuzz/corpus/$target/." "/out/corpus/$target/"
+    if ! cp -r "/repo/fuzz/corpus/$target/." "/out/corpus/$target/"; then
+        echo "$target: no seed corpus in fuzz/corpus/$target" >&2
+        failed+=("$target")
+        continue
+    fi
+    if [ -d "/corpus-in/$target" ]; then
+        cp -r "/corpus-in/$target/." "/out/corpus/$target/"
+    fi
     echo "== $target ($FUZZ_SECONDS s)"
     if ! cargo fuzz run --sanitizer "$SANITIZER" "$target" "/out/corpus/$target" -- \
         "-max_total_time=$FUZZ_SECONDS" -rss_limit_mb=4096 \
