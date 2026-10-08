@@ -6,7 +6,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pin_build_image  # noqa: E402
 
-GOOD = "sha256:" + "ab12" * 16
+DIGEST = "sha256:" + "ab12" * 16
+GOOD = "ghcr.io/ars-regia/athanor-shell-rig-build@" + DIGEST
 
 
 class PinBuildImage(unittest.TestCase):
@@ -24,10 +25,22 @@ class PinBuildImage(unittest.TestCase):
         self.assertEqual(title.split()[-1], "ab12ab12ab12")
         self.assertIn(GOOD, body)
 
-    def test_rejects_anything_but_a_digest(self):
-        for bad in ("", "latest", "sha256:abc", GOOD.upper(), GOOD + "\nextra"):
-            with self.assertRaises(SystemExit, msg=bad):
-                self.run_pin(bad)
+    def test_accepts_a_registry_with_a_port(self):
+        self.run_pin("localhost:5000/o/athanor-shell-rig-build@" + DIGEST)
+
+    def test_rejects_what_is_not_a_full_lowercase_reference(self):
+        bad = (
+            "",
+            DIGEST,  # the old digest-only form is rejected, not migrated: it was never committed
+            "ghcr.io/Ars-Regia/athanor-shell-rig-build@" + DIGEST,
+            "ghcr.io/o/athanor-shell-rig-build:latest",
+            "ghcr.io/o/other@" + DIGEST,
+            "ghcr.io/o/athanor-shell-rig-build@sha256:abc",
+            GOOD + "\nextra",
+        )
+        for b in bad:
+            with self.assertRaises(SystemExit, msg=b):
+                self.run_pin(b)
 
 
 if __name__ == "__main__":

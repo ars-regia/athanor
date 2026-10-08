@@ -1,7 +1,8 @@
 name: Publish the shell rig build image
 
-# Builds the build stage of the shell rig, pushes it to the registry, pulls it back by digest
-# and opens a pull request that commits the digest as forge/test/shell/build-image.digest
+# Builds the build stage of the shell rig, pushes it to the registry, pulls it back by digest,
+# checks that it can be pulled without a login and opens a pull request that commits the full
+# reference as forge/test/shell/build-image.digest
 # (rig.sh then pulls the stage instead of building it). By hand only: the maintainer runs it
 # when the build stage changes, and makes the package public the first time, since the hosted
 # gate pulls it without a login. The digest travels between the jobs as a file.
@@ -26,6 +27,8 @@ jobs:
       contents: read
       packages: write
     steps:
+      - name: Branches only
+        run: '[ "$GITHUB_REF_TYPE" = branch ] || { echo "run this workflow from a branch, not a tag" >&2; exit 1; }'
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
@@ -40,11 +43,11 @@ jobs:
       - name: Pull it back by digest
         run: |
           podman rmi --all --force > /dev/null
-          podman pull "${ATHANOR_REGISTRY}/athanor-shell-rig-build@$(cat "$RUNNER_TEMP/rig-out/build-image.digest")"
+          podman pull "$(cat "$RUNNER_TEMP/rig-out/build-image.ref")"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: rig-build-image-digest
-          path: ${{ runner.temp }}/rig-out/build-image.digest
+          name: rig-build-image-ref
+          path: ${{ runner.temp }}/rig-out/build-image.ref
           if-no-files-found: error
 
   pin:
@@ -61,10 +64,13 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
         with:
-          name: rig-build-image-digest
-          path: ${{ runner.temp }}/digest
+          name: rig-build-image-ref
+          path: ${{ runner.temp }}/ref
+      # No registry login in this job, as in the gate: fails until the package is public.
+      - name: Pull the reference anonymously
+        run: bash forge/test/shell/check_public.sh "$RUNNER_TEMP/ref/build-image.ref"
       - name: Write the pin and the pull request text
-        run: python3 forge/test/shell/pin_build_image.py "$RUNNER_TEMP/digest/build-image.digest" "$RUNNER_TEMP/pr"
+        run: python3 forge/test/shell/pin_build_image.py "$RUNNER_TEMP/ref/build-image.ref" "$RUNNER_TEMP/pr"
       - name: Branch, commit, PR (never auto-merged)
         env:
           # A PAT: PRs opened with the GITHUB_TOKEN start no checks.
