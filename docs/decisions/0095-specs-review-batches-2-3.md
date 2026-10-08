@@ -29,16 +29,17 @@ with options and a recommendation. On 2026-10-08 the maintainer approved every s
 2. `doc_session.md` SN8: a notice that cannot be delivered because `athanor-shelld` reached its
    start limit is kept and raised at the next session start.
 3. `doc_virtualization.md` (PR #323): the owner-scoped polkit rule first accepted for VZ3 was
-   found root-equivalent by the audit of the PR (whoever defines a domain chooses its disks and
-   devices, which the system daemon hands over as root), so the maintainer decided the same day
-   that in 1.0 libvirt runs per user (`qemu:///session`, as GNOME Boxes does), with no root daemon
-   and no polkit rule, accepting the loss of sVirt separation between one user's machines; the
-   guest reaches the local network but not the host (passt with `--no-map-gw`); FreeRDP runs as a
+   found root-equivalent by the audit of the PR, and so was a session libvirt socket reachable by
+   a confined application (the domain XML can name the program QEMU runs); the maintainer decided
+   on 2026-10-08 that in 1.0 Machines runs libvirt's embedded QEMU driver inside its own
+   confinement, with QEMU, swtpm, passt and virtiofsd as its children, no root daemon, no polkit
+   rule and no libvirt socket reachable by any other application; the guest reaches the local network but not the host (passt with `--no-map-gw`); FreeRDP runs as a
    child of Machines in its `confined` class, the password on a pipe; stages V0 to V2 in 1.0, V3 and V4 after it, gated on spike
    S2; the Windows licence accepted by the person, the product key optional, and a download and
    checksum spike before V1; the shared clipboard on and declared, switchable per machine, the
-   microphone off, both listed on the Privacy page; VZ13 (a whole disk) after 1.0, with the
-   privileged helper it needs; the Windows agent added to
+   microphone off, both listed on the Privacy page; whole-disk boot (VZ13) and GPU passthrough
+   after 1.0; spike S4 proves the model before V1 and compares GNOME Boxes and Athanor's Windows
+   layer; the Windows agent added to
    the "why not upstream" section; the name Machines, disks excluded from backup, a first
    catalogue of Windows 11, Fedora Workstation, Ubuntu LTS and Debian.
 4. `doc_first_run.md`: the resolver shown as information, changed in Settings; the
@@ -50,7 +51,7 @@ with options and a recommendation. On 2026-10-08 the maintainer approved every s
 6. `doc_files.md`: approved as a preserved design, only section 7 and `athanor-files-view`
    operative in 1.0; FM14 points to GNOME Disks; Nautilus unconfined until the broker launches it
    confined.
-7. `doc_disks.md`: DK3 and the usbguard module kept with an owner and a build step before SD22
+7. `doc_disks.md`: DK3 and the usbguard module kept, the maintainer to name the owner, with a build step before SD22
    steps 4 and 5 (ADR-0007); DK20 B `noexec` decided (ADR-0025); no exec switch in 1.0; the
    udisksd hardening after spike S5; USBGuard with S4 and S6 as gates; withdrawn items marked and
    section 5 rewritten.
