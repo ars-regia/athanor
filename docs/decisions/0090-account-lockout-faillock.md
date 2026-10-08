@@ -1,5 +1,5 @@
 ---
-id: ADR-0089
+id: ADR-0090
 title: "Account lockout through authselect's with-faillock"
 date: 2026-10-08
 status: accepted
@@ -7,7 +7,7 @@ issues: []
 areas: [security]
 ---
 
-# 0089. Account lockout through authselect's with-faillock
+# 0090. Account lockout through authselect's with-faillock
 
 ## Context
 
@@ -38,5 +38,7 @@ D3, which tied the feature to the lock screen's switch.
   `/etc` three-way merge replaces every file the administrator did not modify.
 - The tally is in `/run/faillock` (tmpfs): a reboot clears it, which keeps a locked-out
   administrator one reboot away from the recovery console.
-- cosmic-greeter's locker runs PAM as the user and cannot write the tally; its behaviour once a
-  tally exists is unverified until the lock switch (doc_lock_and_prompts.md, spike L10).
+- cosmic-greeter's locker runs PAM as the user. In pam 1.7.1 an unprivileged `pam_faillock` does
+  not return an error when it cannot create or find the tally (`pam_faillock.c` check_tally and
+  write_tally treat `EACCES`/`ENOENT` as success), so the locker neither fails nor counts. This
+  is read from source and not yet run (doc_lock_and_prompts.md, spike L10).

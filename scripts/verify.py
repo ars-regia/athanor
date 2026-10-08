@@ -1433,7 +1433,7 @@ def pwquality_problems(root=None):
 
 
 def faillock_problems(root=None):
-    """The image build enables authselect's with-faillock with the thresholds of ADR-0089."""
+    """The image build enables authselect's with-faillock with the thresholds of ADR-0090."""
     root = root or ROOT
     try:
         text = read(root / PAM_CONTAINERFILE)
@@ -1442,16 +1442,16 @@ def faillock_problems(root=None):
     code = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
     problems = []
     if not FAILLOCK_GUARD.search("\n".join(code)):
-        problems.append(f"{PAM_CONTAINERFILE}: no 'RUN authselect enable-feature with-faillock' step (ADR-0089)")
+        problems.append(f"{PAM_CONTAINERFILE}: no 'RUN authselect enable-feature with-faillock' step (ADR-0090)")
     for setting in FAILLOCK_SETTINGS:
         if not any(setting in line for line in code):
-            problems.append(f"{PAM_CONTAINERFILE}: faillock.conf lacks {setting} (ADR-0089)")
+            problems.append(f"{PAM_CONTAINERFILE}: faillock.conf lacks {setting} (ADR-0090)")
     if any("even_deny_root" in line and "!" not in line for line in code):
-        problems.append(f"{PAM_CONTAINERFILE}: even_deny_root must stay off (ADR-0089)")
+        problems.append(f"{PAM_CONTAINERFILE}: even_deny_root must stay off (ADR-0090)")
     return problems
 
 
-@check("pam", "No empty passwords (A2-23), no new password under twelve characters, account lockout (ADR-0089)")
+@check("pam", "No empty passwords (A2-23), no new password under twelve characters, account lockout (ADR-0090)")
 def check_pam():
     r = Result()
     for problem in nullok_problems() + pwquality_problems() + faillock_problems():
