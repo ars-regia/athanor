@@ -39,7 +39,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with changes:** t
 | Web | the text | one entry, always last, that opens the default browser on DuckDuckGo with the whole query percent-encoded; no engine choice until Settings offers one |
 
 - **The only prefix is `>`.** Everything else needs no syntax.
-- **localsearch is reached** through the `tracker-rs` 0.8 bindings (MIT), which resolve beside `glib` 0.22, on the bus name `org.freedesktop.LocalSearch3`.
+- **localsearch is reached** through the `tracker-rs` 0.8 bindings (MIT), which resolve beside `glib` 0.22, on the bus name `org.freedesktop.LocalSearch3`. The maintainer watches their releases (ADR-0097, `docs/operations/ownership.md` OWN5).
 - **localsearch needs the session class.** Its user unit runs only when the user manager knows `XDG_SESSION_CLASS=user`, which our session never published: on the images built so far localsearch never ran. The plan publishes it from `athanor-desktop`.
 - **Currency rates** are refreshed by a separate user timer, `athanor-launcher-rates.timer`, once a day, running `qalc -e`. The launcher's `qalc` never touches the network (LA9) and uses the rates on disk; the preview shows their date.
 

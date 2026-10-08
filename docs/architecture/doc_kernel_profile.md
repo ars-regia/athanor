@@ -741,7 +741,10 @@ this section apply to neither release 1.0 nor 1.1: IPE coverage is lost, a cost 
 maintainer recorded. Execution control moves to fs-verity and signed images, as the decision
 states; fs-verity arrives with the 1.1 step, a `/usr` sealed by composefs whose digest a
 Secure Boot signed UKI carries. What carries execution control on 1.0, between the loss of
-IPE and the 1.1 seal, the decision does not state: an open question for the maintainer.
+IPE and the 1.1 seal was decided by the maintainer on 2026-10-08 (ADR-0097): the image
+signatures verified at pull, the read-only `/usr` of the deployment and the SELinux restrictions
+of this section. Tampering with `/usr` offline, by someone with access to the disk, is a
+residual risk of 1.0 (`doc_threat_model.md` TM7), closed by the 1.1 seal.
 The IPE text below stays as the record.
 
 **IPE policies** (D8, with the dm-verity option). IPE operations are `EXECUTE` (including
