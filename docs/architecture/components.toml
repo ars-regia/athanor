@@ -420,6 +420,15 @@ status = "missing"
 purpose = "Upstream releases the update bot watches"
 
 [[component]]
+path = "fuzz"
+kind = "tests"
+area = "build-ci"
+status = "specified"
+spec = "doc_ci.md"
+item = "CI30"
+purpose = "cargo-fuzz targets and the committed corpus of the parsers that read untrusted input"
+
+[[component]]
 path = "scripts/ci"
 kind = "script tool"
 area = "build-ci"
@@ -555,6 +564,15 @@ status = "specified"
 spec = "doc_shell.md"
 item = "SH2"
 purpose = "The shell's only client of cosmic-comp: windows, workspaces, outputs, launches"
+
+[[component]]
+path = "system/athanor-fuzz-entries"
+kind = "crate"
+area = "build-ci"
+status = "specified"
+spec = "doc_ci.md"
+item = "CI30"
+purpose = "Entry points of the fuzz targets, and the stable test that replays their committed corpus"
 
 [[component]]
 path = "system/athanor-i18n"

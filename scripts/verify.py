@@ -1598,6 +1598,9 @@ def check_specs():
 COSMIC_ALLOWED = (
     "system/athanor-compositor-client/",
     "forge/tools/calmo-cosmic-theme/",
+    # Writes the configuration files that the compositor client's theme reader parses, to
+    # fuzz that reader (doc_ci.md CI30).
+    "system/athanor-fuzz-entries/src/compositor.rs",
 )
 BOUNDARY_DIRS = ("system", "forge/specs", "forge/tools")
 DEPENDENCY_TABLES = ("dependencies", "dev-dependencies", "dev_dependencies",

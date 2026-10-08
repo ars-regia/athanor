@@ -4,7 +4,7 @@
 - **Owner:** the maintainer.
 - **Status:** draft, revision 1 (2026-10-06), awaiting the maintainer's review. Facts were read on `origin/iso-v0` at `c1bab0ad` and from the GitHub API on 2026-10-06.
 - **Depends on:** [doc_build_system.md](doc_build_system.md) (packages and tiers), [doc_build_ordering.md](doc_build_ordering.md) (O1-O9, kernel and module order), [doc_kernel_build.md](doc_kernel_build.md), [doc_system_image.md](doc_system_image.md), [doc_update_trust.md](doc_update_trust.md) (D1, `:stable`), the secrets inventory `docs/operations/secrets.md`, the runner [README](../../scripts/runner/README.md).
-- **Defines:** CI1-CI29 (one per workflow), CB1-CB4 (known broken workflows), CP1-CP3 (proposals).
+- **Defines:** CI1-CI30 (one per workflow), CB1-CB4 (known broken workflows), CP1-CP3 (proposals).
 - **Enforced by:** `python3 scripts/verify.py ci`. It fails when a workflow file is missing here, when this document names a workflow file that does not exist, or when a secret or variable a workflow references is not named here.
 
 **Target.** This document describes the workflows as they are. The architecture they converge on, and the plan that gets there, is [doc_pipeline.md](doc_pipeline.md) (ADR-0080).
@@ -279,7 +279,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 
 ### CI23 Rust Security & Buffer Overflow Fuzzing (retired)
 
-- **File:** none; the workflow was deleted. Its targets, `tests/fuzz`, were removed in `0c4e012f` (2026-08-14), and every run after 2026-08-16 failed. Fuzzing returns as a weekly job of `maintenance.yml` (doc_pipeline.md section 3.1) once a crate has a fuzz target.
+- **File:** none; the workflow was deleted. Its targets, `tests/fuzz`, were removed in `0c4e012f` (2026-08-14), and every run after 2026-08-16 failed. Fuzzing returned as CI30 (`fuzz.yml`) with real targets.
 
 ### CI24 Athanor Nix Vanguard
 
@@ -330,6 +330,15 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 - **Secrets, variables:** `SETTINGS_APP_PRIVATE_KEY`, `SETTINGS_APP_CLIENT_ID`: a read-only token of the settings GitHub App for this repository. **Environment:** none. **Runner:** hosted. **Concurrency:** none.
 - **Scripts:** `scripts/github-settings/ghsettings.py`.
 - **Health:** not run yet; red until the settings App and its two names exist.
+
+### CI30 Fuzz
+
+- **File:** `fuzz.yml`. **Purpose:** cargo-fuzz over the parsers that read untrusted input: `sigobj::claims`, `parse_status` and `parse_local` of athanor-update; the tray, dbusmenu, notification and PNG readers of the bar; the hints, image and icon readers of shelld; the shortcuts and theme readers of the compositor client; the layout document and favourites files; the trust-state file. Each target runs `FUZZ_SECONDS` (default 240) on a copy of its committed corpus.
+- **Triggers:** cron `41 3 * * 0`; dispatch with the input `seconds`. **Outputs:** artifact `fuzz`: `artifacts/<target>/` (the crashing inputs) and `logs/<target>.log`. The job is red when a target crashed; every target runs either way.
+- **Secrets, variables:** none. **Environment:** none. **Runner:** hosted, `ubuntu-24.04`; the work runs in the build stage of the shell rig (the image that has the GTK stack), with a nightly compiler pinned by date and cargo-fuzz pinned by version in `scripts/ci/fuzz-container.sh`. **Concurrency:** one run, never cancelled.
+- **Scripts:** `scripts/ci/fuzz.sh`, `scripts/ci/fuzz-container.sh`, `forge/test/shell/rig.sh`.
+- **Layout:** `fuzz/` is a cargo-fuzz project with its own workspace and lock file, excluded from the root workspace so that the gate needs no nightly. Its targets call `system/athanor-fuzz-entries`, a root-workspace crate on stable; its test `replay` feeds `fuzz/corpus/<target>/` through the same entry points, so `cargo test --workspace` in CI27 replays the corpus. A crash found here is committed to the corpus with its fix and stays a regression test.
+- **Health:** not run yet.
 
 ## 3. Known broken workflows
 
