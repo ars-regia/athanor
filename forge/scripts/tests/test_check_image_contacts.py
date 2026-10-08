@@ -54,9 +54,40 @@ class ImageContacts(unittest.TestCase):
         self.enable("beacon.timer", base="usr/lib/systemd/system/timers.target.wants")
         self.assertEqual(self.run_check(), ["beacon.timer is an enabled timer that contacts.toml does not list"])
 
-    def test_sshd_enabled_fails(self):
+    def test_sshd_enabled_passes(self):
+        # A listener declared for existing installs: the image enables it, new installs disable it.
         self.enable("sshd.service", base="etc/systemd/system/multi-user.target.wants")
-        self.assertEqual(self.run_check(), ["sshd.service is silent in contacts.toml and enabled in the image"])
+        self.assertEqual(self.run_check(), [])
+
+    def test_a_user_timer_is_checked(self):
+        self.enable("beacon.timer", base="usr/lib/systemd/user/timers.target.wants")
+        self.assertEqual(self.run_check(), ["beacon.timer is an enabled timer that contacts.toml does not list"])
+        self.enable("beacon2.timer", base="etc/systemd/user/timers.target.wants")
+        self.assertEqual(len(self.run_check()), 2)
+
+    def test_a_requires_directory_is_checked(self):
+        self.enable("beacon.timer", base="usr/lib/systemd/system/timers.target.requires")
+        self.assertEqual(self.run_check(), ["beacon.timer is an enabled timer that contacts.toml does not list"])
+
+    def test_an_empty_file_masks(self):
+        self.enable("beacon.timer")
+        (self.root / "etc/systemd/system/beacon.timer").touch()
+        self.assertEqual(self.run_check(), [])
+
+    def test_a_non_empty_file_does_not_mask(self):
+        self.enable("beacon.timer")
+        (self.root / "etc/systemd/system/beacon.timer").write_text("[Timer]\n")
+        self.assertEqual(len(self.run_check()), 1)
+
+    def test_a_user_unit_is_masked_in_etc_systemd_user(self):
+        self.enable("beacon.timer", base="usr/lib/systemd/user/timers.target.wants")
+        (self.root / "etc/systemd/user").mkdir(parents=True)
+        (self.root / "etc/systemd/user/beacon.timer").symlink_to("/dev/null")
+        self.assertEqual(self.run_check(), [])
+        # a system-scope mask does not mask the user unit of the same name
+        (self.root / "etc/systemd/user/beacon.timer").unlink()
+        self.mask("beacon.timer")
+        self.assertEqual(len(self.run_check()), 1)
 
 
 if __name__ == "__main__":

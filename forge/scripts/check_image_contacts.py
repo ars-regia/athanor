@@ -4,12 +4,17 @@
 Usage: check_image_contacts.py CONTACTS_TOML [IMAGE_ROOT]
 system/check-image-contacts.sh runs it inside a built image (IMAGE_ROOT defaults to /).
 
-A unit is enabled when a *.wants directory of /etc/systemd/system or /usr/lib/systemd/system holds
-it and the unit is not masked (a symlink to /dev/null in /etc/systemd/system). Two defects fail:
+Scope. A unit is enabled when a *.wants or *.requires directory of /etc/systemd/system,
+/usr/lib/systemd/system, /etc/systemd/user or /usr/lib/systemd/user holds it. It is masked, and
+left out, when the same name in /etc/systemd/system (or /etc/systemd/user, for a user unit) is a
+symlink to /dev/null or an empty file. Two defects fail:
   - an enabled timer that the list gives as neither a contact, a local timer nor an inert one,
     which is how a Fedora update adds a beacon;
   - a unit the list calls silent that is enabled.
-scripts/verify.py contacts makes the same comparison against the presets of the checkout.
+The check sees timers and the listed units only. It does not follow Wants=, Requires= or
+Upholds= written inside another unit, nor sockets, paths or D-Bus activation, so a beacon pulled
+in that way is not seen. scripts/verify.py contacts makes the same comparison against the presets
+of the checkout.
 """
 
 import pathlib
@@ -17,19 +22,27 @@ import sys
 import tomllib
 
 
+SCOPES = (("etc/systemd/system", "usr/lib/systemd/system"), ("etc/systemd/user", "usr/lib/systemd/user"))
+
+
 def enabled_units(root):
-    """Names of the units some *.wants directory of the image enables, masked ones left out."""
+    """Names of the units some *.wants or *.requires directory of the image enables, masked ones left out."""
     units = set()
-    for base in ("etc/systemd/system", "usr/lib/systemd/system"):
-        for wants in (root / base).glob("*.wants"):
-            if wants.is_dir():
-                units |= {p.name for p in wants.iterdir()}
-    return {u for u in units if not is_masked(root, u)}
+    for etc, lib in SCOPES:
+        for base in (etc, lib):
+            for pattern in ("*.wants", "*.requires"):
+                for d in (root / base).glob(pattern):
+                    if d.is_dir():
+                        units |= {p.name for p in d.iterdir() if not is_masked(root / etc, p.name)}
+    return units
 
 
-def is_masked(root, unit):
-    path = root / "etc/systemd/system" / unit
-    return path.is_symlink() and str(path.readlink()) == "/dev/null"
+def is_masked(etc_dir, unit):
+    """systemd masks a unit by a symlink to /dev/null or by an empty file in /etc."""
+    path = etc_dir / unit
+    if path.is_symlink():
+        return str(path.readlink()).endswith("/dev/null")
+    return path.is_file() and path.stat().st_size == 0
 
 
 def problems(contacts, enabled):

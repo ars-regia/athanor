@@ -78,8 +78,9 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 
 %changelog
 * Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 43.0.0-18
-- Presets: disable rpm-ostree-countme.timer (and mask it), unbound-anchor.timer and sshd.service;
-  Fedora's preset enabled all three
+- Presets: disable rpm-ostree-countme.timer (and mask it), and unbound-anchor.timer;
+  Fedora's preset enabled both. sshd.service stays enabled by Fedora's preset: new installs turn it off
+  in the kickstart, existing installs keep their state
 - Ship firewalld's public zone without mdns and ssh; the home zone keeps both
 
 * Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 43.0.0-17

@@ -47,10 +47,13 @@ class Contacts(unittest.TestCase):
         self.assertTrue(any("no preset disables it" in p for p in problems), problems)
         self.assertTrue(any("a timer" in p and "does not list" in p for p in problems), problems)
 
-    def test_dropping_the_sshd_disable_fails(self):
-        self.edit(BASE_PRESET, "disable sshd.service\n", "")
-        self.assertEqual(verify.contacts_problems(self.root),
-                         [f"{verify.CONTACTS}: sshd.service is silent, and no preset disables it"])
+    def test_a_listener_may_be_enabled(self):
+        self.edit(BASE_PRESET, "disable mcelog.service", "disable mcelog.service\nenable sshd.service")
+        self.assertEqual(verify.contacts_problems(self.root), [])
+
+    def test_a_listener_cannot_also_be_silent(self):
+        self.edit("forge/config/contacts.toml", "[[listener]]", '[[silent]]\nunit = "sshd.service"\nreason = "x"\n\n[[listener]]')
+        self.assertTrue(any("sshd.service is listed as both" in p for p in verify.contacts_problems(self.root)))
 
     def test_an_unlisted_timer_fails(self):
         self.edit(BASE_PRESET, "disable mcelog.service", "disable mcelog.service\nenable telemetry-upload.timer")

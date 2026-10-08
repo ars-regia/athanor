@@ -25,6 +25,3 @@ disable rpm-ostree-countme.timer
 # Refreshes the DNSSEC root anchor for unbound, which is not installed; systemd-resolved validates
 # with its own anchors.
 disable unbound-anchor.timer
-# Remote login is off until the person turns it on in Software (doc_software.md, decision 2; its
-# developer mode enables it again). Fedora's 90-default.preset enables it.
-disable sshd.service

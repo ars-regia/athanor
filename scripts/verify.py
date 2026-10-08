@@ -670,7 +670,13 @@ def contacts_problems(root=None):
     listed in forge/config/contacts.toml and the presets agree with the list. Every timer a preset
     enables is a contact, a local timer or an inert one; a unit the list calls silent is disabled by
     a preset and enabled by nothing; a listed contact with a unit is still enabled; a contact that
-    names a configuration file finds its text there."""
+    names a configuration file finds its text there. A listener is a unit the image enables that
+    listens and that new installs turn off in the kickstart; it may be enabled.
+
+    Limit: this reads the presets of this repository and the explicit enables of ENABLERS (the
+    Containerfile and the kickstart) only. What Fedora's 90-default.preset enables, and what the
+    packages enable in their own %post, are seen only by forge/scripts/check_image_contacts.py on
+    the built image in CI (call-system-image.yml)."""
     root = root or ROOT
     try:
         data = tomllib.loads(read(root / CONTACTS))
@@ -685,11 +691,12 @@ def contacts_problems(root=None):
         "local": {u["unit"] for u in data.get("local", [])},
         "inert": {u["unit"] for u in data.get("inert", [])},
         "silent": {u["unit"] for u in data.get("silent", [])},
+        "listener": {u["unit"] for u in data.get("listener", [])},
     }
     names = list(groups)
     problems += [f"{CONTACTS}: {u} is listed as both {a} and {b}"
                  for i, a in enumerate(names) for b in names[i + 1:] for u in sorted(groups[a] & groups[b])]
-    for group in ("local", "inert", "silent"):
+    for group in ("local", "inert", "silent", "listener"):
         problems += [f"{CONTACTS}: a {group} entry has no reason" for u in data.get(group, []) if not u.get("reason")]
 
     def unit(name):

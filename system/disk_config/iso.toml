@@ -24,8 +24,8 @@ contents = """
 xconfig --startxonboot
 
 # Remote login is off on new installs (doc_software.md, decision 2). The image's preset
-# (athanor-base-config, 80-athanor-base.preset) disables sshd; the installer records the
-# same choice for this installation, so that it holds if the preset is ever changed.
+# keeps Fedora's preset, which enables sshd, so that existing installs keep it through the /etc
+# merge; a new installation turns it off here.
 services --disabled=sshd
 
 %post --erroronfail

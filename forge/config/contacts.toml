@@ -5,7 +5,7 @@
 #   - `python3 scripts/verify.py contacts` compares it with the presets of this repository;
 #   - forge/scripts/check_image_contacts.py compares it with the units of a built image.
 # A timer that is enabled must be a contact, a local timer or an inert one; a silent unit must
-# never be enabled. Change this file in the same change that adds or removes a contact.
+# never be enabled; a listener may be (see its section). Change this file in the same change that adds or removes a contact.
 
 schema = 1
 
@@ -76,6 +76,10 @@ reason = "rotates local logs"
 unit = "raid-check.timer"
 reason = "scrubs local software RAID"
 
+[[local]]
+unit = "plocate-updatedb.timer"
+reason = "indexes local file names; Fedora's preset enables it wherever plocate is installed, and the base image does not carry plocate"
+
 # Enabled timers that do nothing on an image.
 
 [[inert]]
@@ -92,6 +96,9 @@ reason = "Fedora's install counter; the images come from ghcr.io"
 unit = "unbound-anchor.timer"
 reason = "fetches a DNSSEC anchor for an unbound that is not installed"
 
-[[silent]]
+# Units the image enables that listen, and that new installs turn off. The kickstart disables them
+# for a new installation; an existing installation keeps its state through the /etc merge.
+
+[[listener]]
 unit = "sshd.service"
-reason = "remote login is off until Software turns it on (doc_software.md, decision 2)"
+reason = "remote login, key only; off on new installs (kickstart services --disabled=sshd), kept on existing installs (doc_software.md, decision 2; ADR-0089)"
