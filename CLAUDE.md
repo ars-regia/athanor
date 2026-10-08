@@ -16,39 +16,31 @@ applies to Claude Code only.
   an absolute path.
 - **Merging past the review rule.** The `product-branches` ruleset requires one approval on
   `iso-v0` and `main`, and the repository admin role bypasses it in pull-request mode. Claude
-  Code merges a pull request it opened in the current session with
-  `gh pr merge --squash --admin --match-head-commit <full sha>` only when all of these hold
-  for that same sha:
-  - every entry of `git diff --raw -M --no-abbrev <base>...<sha>`, where `<base>` is the
-    pull request's own base (`gh pr view --json baseRefName`) freshly fetched, has mode
-    `100644` (or `000000` for a deleted file), and its path, and the old path of a rename,
-    is in the allowlist below. A symlink, a submodule or an executable bit is not;
-  - the required checks of the base branch (`.github/settings/rulesets.json` and
-    `branch-protection.json`) are present and `pass`, and every other check is `pass` or
-    `skipping`, none pending or failing;
-  - the `auditor` subagent reviewed the diff at that sha and reported no blocker;
-  - the review is the only block (`mergeable` is `MERGEABLE`, `reviewDecision` is
-    `REVIEW_REQUIRED`).
+  Code merges with `gh pr merge --squash --admin --match-head-commit <full sha>`, and the
+  same checks hold every time, for that same sha: the required checks of the base branch
+  (`.github/settings/rulesets.json` and `branch-protection.json`) are present and `pass` and
+  every other check is `pass` or `skipping`; the `auditor` subagent reviewed the diff at that
+  sha and reported no blocker; the review is the only block (`mergeable` is `MERGEABLE`,
+  `reviewDecision` is `REVIEW_REQUIRED`). Beyond that:
+  - **Unattended**, only a pull request it opened in the current session whose every entry
+    of `git diff --raw -M --no-abbrev <base>...<sha>` (`<base>` is the pull request's own
+    base, freshly fetched) is `M` with mode `100644` on an existing `docs/architecture/*.md`
+    specification awaiting approval, and leaves its Status line untouched. The Status line is
+    the first line among the first 12 that matches `^(- \*\*)?(Status|Stato)\b` or
+    `^\| Status`; it qualifies only if it contains `draft`, `awaiting`, `awaits` or `not yet
+    reviewed` and none of `approved`, `consented` or `approvata`. A file without one does not
+    qualify.
+  - **Everything else** only after the maintainer writes in the conversation to merge that
+    pull request, having seen a card with its number, the sha, the checks, the auditor's
+    verdict and, in two lines each, the hunks that touch process launch, files, `unsafe`,
+    D-Bus, confinement, the trust seal, power or signing. The answer covers that sha only: a
+    new commit needs a new card. Signing, keys, polkit, the Gatekeeper and attestation are
+    asked before the code is written (`AGENTS.md`, "Stop and ask before editing").
 
-  The allowlist:
-  - an existing `docs/architecture/*.md` specification whose Status says it awaits approval,
-    without touching its Status. An approved document, a new file, or text that approves a
-    revision is the maintainer's: merging it approves the text (ADR-0074, item 5);
-  - `src/` of the shell applications `athanor-bar`, `athanor-control-center`, `athanor-dock`,
-    `athanor-launcher` and `athanor-layout-chooser` under
-    `forge/specs/<name>/<name>-<version>/`, except security code. A file is security code,
-    and the maintainer's, when its old or new content matches
-    `landlock|grants|sandbox|shield|trust|logind|Reboot|PowerOff|include_str!|include!`
-    (case-insensitive) or its path names `sandbox`, `shield` or `power`. Not the crates'
-    `Cargo.toml`, lockfile, `data/`, `po/`, `.spec`, units or build files, and no new
-    directory or file whose name `scripts/verify.py` skips or treats as a test (`PRUNE`,
-    `is_test_file`).
-
-  Anything else means the maintainer reviews and merges. `--admin` skips the required
-  checks too, so the verification is Claude's to make each time. *(maintainer decisions,
-  2026-10-08: an allowlist, after three audits found gaps in every list of exclusions;
-  narrowed the same day to specifications awaiting approval and to shell code that is
-  not security code)*
+  `--admin` skips the required checks too, so the verification is Claude's to make each
+  time. *(maintainer decisions, 2026-10-08 and 2026-10-09: the maintainer maintains Athanor
+  through Claude Code and supervises; three audits found gaps in every list that tried to
+  tell safe code from security code, so code always goes through the maintainer's word)*
 - **Shared settings are permissions only.** `.claude/settings.json` denies secret paths and
   destructive commands; hooks and personal preferences stay in `.claude/settings.local.json`
   or `~/.claude/` (`.claude/README.md`).
