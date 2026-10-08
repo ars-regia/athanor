@@ -131,7 +131,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 
 - **File:** `call-system-image.yml`. **Purpose:** aggregates the tier repositories, builds the three system images and the ISO, signs them keyless; CI1 `sign-system-images` signs them with the update key after it.
 - **Triggers:** `workflow_call` (CI1). **Input:** `builder_content_hash`. **Outputs:** tier repository images, system images, ISO image; artifact `image-digests`.
-- **Secrets:** `GITHUB_TOKEN`.
+- **Secrets, variables:** `GITHUB_TOKEN`; `ATHANOR_BRIDGE_REGISTRY`, which the system stage build passes to `system/build-image.sh` as the image's list of previous owners (`doc_update_delivery.md` UD45).
 - **Environment:** none. `dag-system-image` holds no key; the vmlinuz arrives signed, from `azoth-boot` by digest, and the key-based signature of the images is CI1 `sign-system-images`, one maintainer approval per run (D43).
 - **Runner:** hosted. **Concurrency:** caller's.
 - **Scripts:** `scripts/fetch_repo_rpms.sh` (in `forge/`), `system/build-image.sh`, `system/shared-layers.sh`, `system/image-digests.sh`, `forge/scripts/sbom_rootfs.sh`, `sign_attest.sh`, `build_iso.sh`, `retry.sh`.
@@ -373,7 +373,7 @@ Every name below is described in the secrets inventory, `docs/operations/secrets
 | `BUILDER_STABLE_TAG` | variable, default `latest` | not set | CI21, CI22 |
 | `SETTINGS_APP_PRIVATE_KEY` | secret (GitHub App key, read-only App) | repository, not set yet | CI29 |
 | `SETTINGS_APP_CLIENT_ID` | variable, no default | repository, not set yet | CI29 |
-| `ATHANOR_BRIDGE_REGISTRY` | variable, unset: no bridge | repository, not set | CI1 |
+| `ATHANOR_BRIDGE_REGISTRY` | variable, unset: no bridge, and images list no previous owner | repository, not set | CI1, CI5 |
 | `ATHANOR_BRIDGE_TOKEN` | secret (PAT of the previous owner, write:packages) | environment `bridge`, not set yet | CI1 |
 
 Environments (`gh api repos/ars-regia/athanor/environments`):
@@ -383,7 +383,7 @@ Environments (`gh api repos/ars-regia/athanor/environments`):
 | `signing-kernel` | required reviewer `hr-mes`, no administrator bypass; branches `iso-v0`, `main`, both protected | CI1 (`nvidia-kmod-sign`) |
 | `signing-images` | as `signing-kernel` | CI1 (`sign-system-images`, as `signing` during the image key rotation) |
 | `delete` | none | no workflow |
-| `bridge` | no reviewer; branches `iso-v0`, `main`; not created yet | CI1 (`bridge-system-images`) |
+| `bridge` | required reviewer `hr-mes`, no administrator bypass; branches `iso-v0`, `main`; not created yet | CI1 (`bridge-system-images`) |
 
 ## 6. Proposals
 
