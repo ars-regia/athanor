@@ -130,3 +130,11 @@ Run after the open pull requests merge, because the moved files are touched by m
 5. Run `python3 scripts/verify.py`, `python3 -B -m unittest discover -s scripts/tests`, `python3 -B -m unittest discover -s image/tests`, `just lint`, and compare with origin/iso-v0: no new failure.
 6. Let CI build the image once on the branch. Do not merge before the system image check is green.
 7. Merge as one squash commit, so `git log --follow` and the revert both stay a single step.
+
+## Naming
+
+Crates and packages are named `athanor-*`; no `ermete-*` crate remains (the project was
+Ermete OS until 2026-09-05, commit `02bf9c05`). Exceptions: the crates `xdg-desktop-portal-athanor` (its spec directory is
+`forge/specs/athanor-xdg-desktop-portal-athanor`) and `calmo-cosmic-theme` (`forge/tools`),
+and the specs of upstream software `azoth`, `cosmic-comp`, `greenboot-rs` and `polkit`.
+Rename nothing on your own.
