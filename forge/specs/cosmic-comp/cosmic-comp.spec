@@ -6,11 +6,11 @@
 # above 1.8.0-1.fc43 and below 1.8.0-2.fc43: the Nix builder defines no %%dist.
 %global fedora_release 1.fc43
 # The commit of upstream's tag epoch-%{version}, embedded as GIT_HASH.
-%global commit a55785993e8ef6aad38862cb1a9e1ccaad3c340d
+%global commit 0fbd4574ef4caf74769a617d205fd1fc909ac9b1
 %global cosmic_minver 1.8.0
 
 Name:           cosmic-comp
-Version:        1.8.0
+Version:        1.9.0
 Release:        %{fedora_release}.athanor1
 Summary:        Wayland compositor of the COSMIC desktop, with Athanor's focus fix
 
