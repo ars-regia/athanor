@@ -6,13 +6,15 @@ Usage: changes.py BASE OUT
 Lists the files that differ between BASE and HEAD (both sides of a rename) and writes OUT,
 the changes.json of doc_pipeline.md section 3.3:
 
-  {"base": "<sha>", "kernel": bool, "specs": bool, "docs_only": bool}
+  {"base": "<sha>", "kernel": bool, "specs": bool, "shell": bool, "docs_only": bool}
 
 pr.yml runs a build job only for an area set to true. The areas repeat the path filters the
-build workflows had before pr.yml (kernel-build.yml, spec-build-check.yml); an area exists
-only with the pr.yml job that consumes it, so the image and shell checks join with their jobs
-(doc_pipeline.md PB11, PB12). A change to the selection itself (pr.yml or
-scripts/ci) selects every area, so a change to the gate is tested by every job it gates.
+build workflows had before pr.yml (kernel-build.yml, spec-build-check.yml, shell-surfaces.yml);
+an area exists only with the pr.yml job that consumes it, so the image check joins with its job
+(doc_pipeline.md PB11, PB12). `shell` selects the visual tests of the shell rig only: the tests
+of every crate of the workspace run in `just check` on every change. A change to the selection
+itself (pr.yml or scripts/ci) selects every area, so a change to the gate is tested by every job
+it gates.
 docs_only is true when every changed file is documentation and no area is selected.
 
 Path filters never decide whether pr.yml runs (PL3): this script decides which of its jobs
@@ -46,6 +48,30 @@ AREAS = {
         "forge/scripts/select_check_specs.py",
         "forge/scripts/builder_image.sh",
         ".github/workflows/spec-build-check.yml",
+    ),
+    # The crates the shell rig draws, the rig itself, and what changes every crate's build.
+    "shell": (
+        "system/athanor-style/",
+        "forge/specs/athanor-greeter-ui/",
+        "system/athanor-layout/",
+        "forge/specs/athanor-layout-chooser/",
+        "system/athanor-compositor-client/",
+        "system/athanor-i18n/",
+        "forge/specs/athanor-shelld/",
+        "forge/specs/athanor-bar/",
+        "forge/specs/athanor-dock/",
+        "system/athanor-search/",
+        "system/athanor-preview/",
+        "system/athanor-preview-render/",
+        "forge/specs/athanor-launcher/",
+        "system/athanor-apps/",
+        "system/athanor-unit/",
+        "system/athanor-trust-state/",
+        "forge/test/shell/",
+        "Cargo.toml",
+        "Cargo.lock",
+        ".cargo/",
+        ".github/workflows/shell-surfaces.yml",
     ),
 }
 # Inside an area's directories, what belongs to another workflow: the kernel spec is Kernel

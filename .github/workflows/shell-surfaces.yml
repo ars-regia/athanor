@@ -1,5 +1,8 @@
 name: Shell surfaces
 
+# The visual tests of the shell rig. On a pull request pr.yml calls this workflow when
+# scripts/ci/changes.py selects `shell` (the same paths as the push filter below), and its
+# verdict reaches the required `gate`; the crates' unit tests run in `just check`.
 on:
   push:
     branches: [iso-v0]
@@ -21,27 +24,11 @@ on:
       - "system/athanor-unit/**"
       - "system/athanor-trust-state/**"
       - "forge/test/shell/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
       - ".github/workflows/shell-surfaces.yml"
-  pull_request:
-    paths:
-      - "system/athanor-style/**"
-      - "forge/specs/athanor-greeter-ui/**"
-      - "system/athanor-layout/**"
-      - "forge/specs/athanor-layout-chooser/**"
-      - "system/athanor-compositor-client/**"
-      - "system/athanor-i18n/**"
-      - "forge/specs/athanor-shelld/**"
-      - "forge/specs/athanor-bar/**"
-      - "forge/specs/athanor-dock/**"
-      - "system/athanor-search/**"
-      - "system/athanor-preview/**"
-      - "system/athanor-preview-render/**"
-      - "forge/specs/athanor-launcher/**"
-      - "system/athanor-apps/**"
-      - "system/athanor-unit/**"
-      - "system/athanor-trust-state/**"
-      - "forge/test/shell/**"
-      - ".github/workflows/shell-surfaces.yml"
+  workflow_call:
   workflow_dispatch:
 
 permissions:
