@@ -17,12 +17,15 @@ REPO = "acme/os"
 # with the page wrapped in a list under --slurp; an unknown GET is a 404, and an
 # answer {"__status__": N} fails with HTTP N the way gh does, and {"__raw__": text}
 # prints text as it is. Every call, with its
-# stdin, is appended to $STUB_LOG; a write answers an empty body.
+# stdin, is appended to $STUB_LOG; a write answers an empty body. A GraphQL query is a
+# read: it is logged as a GET and answered from $STUB_STATE["graphql"].
 STUB_GH = f"""#!{sys.executable}
 import json, os, sys
 args = sys.argv[1:]
 method, path = args[args.index("--method") + 1], args[args.index("--method") + 2]
 body = sys.stdin.read() if "--input" in args else ""
+if path == "graphql" and "query" in json.loads(body) and "mutation" not in body:
+    method = "GET"
 with open(os.environ["STUB_LOG"], "a") as log:
     log.write(json.dumps([method, path, body]) + "\\n")
 if method != "GET":
@@ -71,6 +74,22 @@ LIVE = {
         "updated_at": "now",
         "permissions": {"admin": True, "push": True},
         "security_and_analysis": {"secret_scanning": {"status": "enabled"}},
+    },
+    "graphql": {
+        "data": {
+            "repository": {
+                "autoMergeAllowed": True,
+                "mergeCommitAllowed": True,
+                "rebaseMergeAllowed": True,
+                "squashMergeAllowed": True,
+                "allowUpdateBranch": False,
+                "deleteBranchOnMerge": True,
+                "mergeCommitMessage": "PR_TITLE",
+                "mergeCommitTitle": "MERGE_MESSAGE",
+                "squashMergeCommitMessage": "COMMIT_MESSAGES",
+                "squashMergeCommitTitle": "COMMIT_OR_PR_TITLE",
+            }
+        }
     },
     f"{R}/private-vulnerability-reporting": {"enabled": True},
     f"{R}/branches": [{"name": "main", "protected": True}],
@@ -221,6 +240,27 @@ class GhSettings(unittest.TestCase):
         )
         self.assertEqual(environments["signing"]["secrets"], ["COSIGN_PRIVATE_KEY"])
         self.assertNotIn("url", (self.dir / "labels.json").read_text())
+
+    def test_merge_settings_come_from_graphql_when_rest_hides_them(self):
+        # An App installation token reads the merge settings as null over REST.
+        live = json.loads(self.state.read_text())
+        for field in (
+            "allow_squash_merge",
+            "delete_branch_on_merge",
+            "squash_merge_commit_title",
+        ):
+            live[R][field] = None
+        self.state.write_text(json.dumps(live))
+        result = self.run_script("diff")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_unreadable_merge_settings_exit_2(self):
+        live = json.loads(self.state.read_text())
+        live["graphql"] = {"data": {"repository": {"squashMergeAllowed": None}}}
+        self.state.write_text(json.dumps(live))
+        result = self.run_script("diff")
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("not readable", result.stderr)
 
     def test_diff_is_clean_right_after_export(self):
         result = self.run_script("diff")

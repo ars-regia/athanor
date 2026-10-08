@@ -192,10 +192,16 @@ settings App below holds no write permission, so the drift check reports and nev
 
 **Daily check.** `.github/workflows/maintenance.yml` runs `ghsettings.py diff` every day
 (PL52) and on dispatch. It mints a token of the settings App with
-`actions/create-github-app-token`, limited to this repository and to read access on Actions,
-Administration, Environments, Pages, Secrets and Variables (Metadata read is implied). The
-App needs no write permission: its key, `SETTINGS_APP_PRIVATE_KEY` (secrets.md SEC13), can
-mint nothing that changes the repository. Its client id is the variable
+`actions/create-github-app-token`, limited to this repository. The workflow requests no
+narrower permissions (the action's v3.2.0 rejects `permission-variables`), so the token
+carries exactly the App's permissions, and those permissions are the only control on what
+it can do: read access on Actions, Administration, Environments, Pages, Secrets and
+Variables (Metadata read is implied), and no write permission. Whoever edits the App
+keeps it so; nothing in the repository enforces it. Its key, `SETTINGS_APP_PRIVATE_KEY`
+(secrets.md SEC13), then mints nothing that changes the repository. The REST repository
+object answers the merge settings (`allow_squash_merge` and the rest) as null to an App
+installation token, so `ghsettings.py` reads those ten fields through GraphQL, which
+answers them to both tokens. Its client id is the variable
 `SETTINGS_APP_CLIENT_ID` (VAR6). A drift fails the job; the `alert` action of PL51 that
 turns a failed scheduled job into a `ci-alert` issue is not part of this change.
 
