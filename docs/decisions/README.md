@@ -108,7 +108,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-3 | 0038 | [GPL-3.0-or-later for all own code](0038-licence-gpl-3-or-later.md) | accepted | docs, ci |
 | A2-4 | 0039 | [Delivery repairs before 1.0](0039-delivery-repairs-before-1-0.md) | accepted | update, ci |
 | A2-5 | 0040 | [Security-class updates apply at the next shutdown](0040-security-updates-at-next-shutdown.md) | amended by ADR-0082 | update |
-| A2-6 | 0041 | [Trusted path built on cosmic-comp PR #1441](0041-trusted-path-on-cosmic-comp.md) | accepted | security, shell |
+| A2-6 | 0041 | [Trusted path built on cosmic-comp PR #1441](0041-trusted-path-on-cosmic-comp.md) | amended by ADR-0092 | security, shell |
 | A2-7 | 0042 | [SystemPrompter reuses the oo7 secret exchange](0042-system-prompter-reuses-oo7.md) | accepted | security, shell |
 | A2-8 | 0043 | [bootc in two steps (D6 closed)](0043-bootc-in-two-steps.md) | amended by ADR-0076 | update, kernel, security |
 | A2-9 | 0044 | [Three-tier threat model](0044-three-tier-threat-model.md) | amended by ADR-0086 | security, docs |
@@ -159,4 +159,6 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0089 | 0089 | [Defaults that contact or listen are off until the person turns them on](0089-defaults-that-contact-or-listen.md) | accepted | security, network |
 | ADR-0090 | 0090 | [Account lockout through authselect's with-faillock](0090-account-lockout-faillock.md) | accepted | security |
 | ADR-0091 | 0091 | [QEMU stays in the image for the runner and the development VM](0091-qemu-in-the-image.md) | accepted | packages |
+| ADR-0092 | 0092 | [Carry cosmic-comp PR #1441 as our own patch; upstream first, never dependent on upstream](0092-carry-pr-1441-upstream-first.md) | accepted | security, shell |
+| ADR-0093 | 0093 | [Desktop specifications, review batch 1, approved](0093-desktop-specs-batch-1.md) | accepted | shell, session, security |
 | ADR-0094 | 0094 | [Update control: the settled points of the postpone and the opt-out](0094-update-control-settled-points.md) | accepted | update, security |
