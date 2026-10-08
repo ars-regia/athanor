@@ -33,7 +33,9 @@ class UpgradeBytes(Tool):
         new_layers=((1, 100), (3, 300), (4, 400)),
         old_kernel="7.2.9",
         new_kernel="7.2.9",
+        new_boot=30,
         errors=(),
+        latest_layers=None,
     ):
         """Each variant: the candidate under run 412 and, when from_tag is set, the image behind that tag."""
         fx = {"tags": {}, "configs": {}, "raw": {}, "errors": list(errors)}
@@ -47,7 +49,7 @@ class UpgradeBytes(Tool):
             fx["configs"][f"{REG}/{name}@{new}"] = {
                 "org.opencontainers.image.version": "43.20261008.300",
                 "ostree.linux": new_kernel,
-                BOOT: digest(30),
+                BOOT: digest(new_boot),
             }
             if from_tag:
                 fx["tags"][f"{REG}/{name}:{from_tag}"] = old
@@ -59,6 +61,13 @@ class UpgradeBytes(Tool):
                     "ostree.linux": old_kernel,
                     BOOT: digest(30),
                 }
+            if latest_layers is not None:
+                latest = digest(40 + i)
+                fx["tags"][f"{REG}/{name}:latest"] = latest
+                fx["raw"][f"{REG}/{name}@{latest}"] = {
+                    "layers": [layer(n, s) for n, s in latest_layers]
+                }
+                fx["configs"][f"{REG}/{name}@{latest}"] = {}
         self.registry(fx)
         (self.dir / "digests.txt").write_text("\n".join(lines) + "\n")
 
@@ -132,3 +141,29 @@ class UpgradeBytes(Tool):
         r, data = self.measure()
         self.assertNotEqual(r.returncode, 0)
         self.assertIsNone(data)
+
+    def test_stable_wins_over_latest(self):
+        self.published(latest_layers=((1, 100), (3, 300), (4, 400)))
+        r, data = self.measure()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        v = data["variants"][0]
+        self.assertEqual((v["from"]["tag"], v["new_bytes"]), ("stable", 700))
+
+    def test_a_registry_error_on_latest_fails(self):
+        self.published(from_tag=None, errors=[f"{REG}/athanor-system:latest"])
+        r, data = self.measure()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIsNone(data)
+
+    def test_a_repeated_layer_is_downloaded_once(self):
+        self.published(new_layers=((1, 100), (3, 300), (3, 300)))
+        r, data = self.measure()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        v = data["variants"][0]
+        self.assertEqual((v["layers"], v["bytes"], v["new_bytes"]), (2, 400, 300))
+
+    def test_a_new_boot_image_is_a_kernel_change(self):
+        self.published(new_boot=31)
+        r, data = self.measure()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(data["variants"][0]["kernel_changed"])

@@ -36,25 +36,35 @@ bash "$here/image-digests.sh" --registry "$registry" --check "$digests"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-# The image machines upgrade from, as "TAG DIGEST"; nothing on a first publication. Only a
-# missing tag moves on to the next one: any other error is an error.
+export work
+
+# The digest of IMAGE:TAG, or nothing when the tag does not exist. Any other error fails, so
+# retry.sh retries a registry outage but not a tag that is simply absent.
+tag_digest() {
+    skopeo inspect --format '{{.Digest}}' "docker://$1" 2> "$work/err" && return
+    grep -q 'manifest unknown' "$work/err" && return
+    cat "$work/err" >&2
+    return 1
+}
+export -f tag_digest
+
+# The image machines upgrade from, as "TAG DIGEST"; nothing on a first publication.
+# Its caller runs it in $(...), which does not inherit set -e: the failure is returned explicitly.
 from_image() {
     local tag digest
     for tag in stable latest; do
-        if digest=$(skopeo inspect --format '{{.Digest}}' "docker://$1:$tag" 2> "$work/err"); then
+        digest=$(bash "$retry" bash -c 'tag_digest "$1"' _ "$1:$tag") || return
+        [[ -z $digest ]] || {
             echo "$tag $digest"
             return
-        fi
-        grep -q 'manifest unknown' "$work/err" || {
-            cat "$work/err" >&2
-            return 1
         }
     done
 }
 layers() { bash "$retry" skopeo inspect --raw "docker://$1" | jq -ec '.layers // error("not a single image manifest")'; }
 labels() { bash "$retry" skopeo inspect --config "docker://$1" | jq -ec '.config.Labels // {}'; }
 
-while read -r repository tag digest; do
+# The loop reads fd 3, so no command inside it can consume the digests file.
+while read -r repository tag digest <&3; do
     from=$(from_image "$repository")
     from_tag='' from_digest='' from_layers='[]' from_labels='null'
     if [[ -n $from ]]; then
@@ -77,11 +87,11 @@ while read -r repository tag digest; do
        layers: ($all | length), bytes: ($all | map(.size) | add // 0),
        new_layers: ($new | length), new_bytes: ($new | map(.size) | add // 0),
        kernel_changed: ($from_labels == null or ($from_labels | kernel) != ($to_labels | kernel))}' >> "$work/variants.jsonl"
-done < "$digests"
+done 3< "$digests"
 
-jq -s '{variants: .}' "$work/variants.jsonl" > "$work/upgrade-bytes.json"
 mkdir -p "$(dirname "$out")"
-mv "$work/upgrade-bytes.json" "$out"
+jq -s '{variants: .}' "$work/variants.jsonl" > "$out.tmp"
+mv "$out.tmp" "$out"
 
 echo "### Upgrade download (UD34)"
 echo
