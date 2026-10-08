@@ -66,13 +66,17 @@ a limit: it protects a machine taken while powered off, not one whose `/boot` so
 changes and leaves for its owner to start, since a boot prepared that way can ask for the
 PIN itself and PCR 7 does not change; closing that needs the signed UKI (P4b). The tool
 refuses when Secure Boot does not verify the boot chain (it reads `mokutil --sb-state`),
-since PCR 7 then binds nothing. It changes no boot configuration: with no `tpm2-device=`
+since PCR 7 then binds nothing, and when PCR 7 reads all zeros, since firmware that never
+measured it leaves the keyslot on the PIN alone. It changes no boot configuration: with no `tpm2-device=`
 option, systemd-cryptsetup tries the volume's LUKS2 tokens before the passphrase, and the
 generic initramfs carries the TPM2 token plugin, so the next boot asks for the PIN. Kernel
 updates leave PCR 7 alone, and so do most firmware updates; an update of the Secure Boot
 databases (db, dbx or KEK, which fwupd applies), of shim, or a kernel signed with a new
 Secure Boot key (whose certificate shim measures from MokList) can change it, and the next boot then asks for the passphrase or the recovery key;
-running the tool again binds the new value. A `systemd-pcrlock` policy, which survives
+running the tool again binds the new value. A wrong PIN is asked for again until the TPM
+locks out its dictionary-attack counter (three failures on swtpm's default, more on most
+physical TPMs); only then does the boot ask for the passphrase or the recovery key, and the
+right PIN also fails while the lockout lasts. A `systemd-pcrlock` policy, which survives
 announced updates of that kind, arrives with the UKI (P4b, D42).
 
 ---

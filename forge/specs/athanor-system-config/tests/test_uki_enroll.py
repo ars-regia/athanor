@@ -3,8 +3,9 @@
 
 systemd-cryptenroll is a stand-in that records each call; cryptsetup is a stand-in that
 prints the LUKS2 header JSON the test gives it, or fails when there is none; mokutil is a
-stand-in that prints the Secure Boot state the test gives it. rpm-ostree, bootc, dracut
-and grubby record any call, which the script must not make.
+stand-in that prints the Secure Boot state the test gives it; systemd-analyze is a stand-in
+that prints the PCR 7 JSON the test gives it. rpm-ostree, bootc, dracut and grubby record
+any call, which the script must not make.
 """
 
 import subprocess
@@ -22,6 +23,11 @@ echo "$*" >> "$WORK/calls"
 MOKUTIL = """#!/bin/bash
 [[ $1 == --sb-state && -e $WORK/sb-state ]] || exit 1
 cat "$WORK/sb-state"
+"""
+
+ANALYZE = """#!/bin/bash
+[[ $1 == pcrs && $2 == 7 && $3 == --json=short && -e $WORK/pcr7 ]] || exit 1
+cat "$WORK/pcr7"
 """
 
 # Commands that change how the system boots.
@@ -47,12 +53,24 @@ TPM2_CALL = (
 )
 
 SECURE_BOOT_ON = "SecureBoot enabled\n"
+# systemd-analyze names the bank it reads: the laptop reference machine has only sha1.
+PCR7_MEASURED = '[{"nr":7,"name":"secure-boot-policy","sha256":"9e4f831fb1565c88e7fc0553d7b2e68f317789751d373cc9c884d37ec9f834d3"}]\n'
+PCR7_MEASURED_SHA1 = '[{"nr":7,"name":"secure-boot-policy","sha1":"316acdcf335f1ff14e3ff54ae842be21ce770509"}]\n'
+# Firmware that reports Secure Boot on but never measured PCR 7 (OVMF without a TPM driver).
+PCR7_UNMEASURED = '[{"nr":7,"name":"secure-boot-policy","sha256":"' + "0" * 64 + '"}]\n'
 
 
-def run(header, args=("/dev/vda3",), fail_recovery=False, sb_state=SECURE_BOOT_ON):
-    """Runs the script with `header` as the volume's LUKS2 JSON (None: not LUKS2) and
-    `sb_state` as mokutil's output (None: mokutil fails). Returns the finished process
-    and the recorded calls."""
+def run(
+    header,
+    args=("/dev/vda3",),
+    fail_recovery=False,
+    sb_state=SECURE_BOOT_ON,
+    pcr7=PCR7_MEASURED,
+):
+    """Runs the script with `header` as the volume's LUKS2 JSON (None: not LUKS2),
+    `sb_state` as mokutil's output (None: mokutil fails) and `pcr7` as systemd-analyze's
+    PCR 7 JSON (None: systemd-analyze fails). Returns the finished process and the
+    recorded calls."""
     work = Path(tempfile.mkdtemp())
     stubs = work / "bin"
     stubs.mkdir()
@@ -60,6 +78,7 @@ def run(header, args=("/dev/vda3",), fail_recovery=False, sb_state=SECURE_BOOT_O
         ("systemd-cryptenroll", CRYPTENROLL),
         ("cryptsetup", CRYPTSETUP),
         ("mokutil", MOKUTIL),
+        ("systemd-analyze", ANALYZE),
         ("rpm-ostree", RECORD),
         ("bootc", RECORD),
         ("dracut", RECORD),
@@ -73,6 +92,8 @@ def run(header, args=("/dev/vda3",), fail_recovery=False, sb_state=SECURE_BOOT_O
         (work / "fail-recovery").touch()
     if sb_state is not None:
         (work / "sb-state").write_text(sb_state)
+    if pcr7 is not None:
+        (work / "pcr7").write_text(pcr7)
     result = subprocess.run(
         ["/bin/bash", str(SCRIPT), *args],
         env={"PATH": f"{stubs}:/usr/bin:/bin", "WORK": str(work)},
@@ -141,6 +162,21 @@ class UkiEnroll(unittest.TestCase):
                 code, calls = enroll(WITHOUT_RECOVERY, sb_state=state)
                 self.assertNotEqual(code, 0)
                 self.assertEqual(calls, [])
+
+    def test_refuses_when_pcr_7_was_never_measured(self):
+        # systemd-cryptenroll only warns "PCR policy effectively unenforced" and binds the
+        # keyslot to the PIN alone; seen on OVMF without its TPM driver, Secure Boot on.
+        for pcr7 in (PCR7_UNMEASURED, None, "[]\n", '[{"nr":7,"name":"secure-boot-policy"}]\n'):
+            with self.subTest(pcr7=pcr7):
+                result, calls = run(WITHOUT_RECOVERY, pcr7=pcr7)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(calls, [])
+                self.assertIn("PCR 7", result.stderr)
+
+    def test_accepts_pcr_7_from_whichever_bank_the_tpm_has(self):
+        code, calls = enroll(WITH_RECOVERY, pcr7=PCR7_MEASURED_SHA1)
+        self.assertEqual(code, 0)
+        self.assertEqual(calls, [TPM2_CALL])
 
     def test_says_when_the_secure_boot_state_cannot_be_read(self):
         result, calls = run(WITHOUT_RECOVERY, sb_state=None)
