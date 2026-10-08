@@ -446,6 +446,7 @@ Statuses in the Athanor column:
 | partial | 6 |
 | missing | 22 |
 | excluded (proposed) | 2 |
+| excluded | 0 |
 | total | 48 |
 
 ### Dock
@@ -456,6 +457,7 @@ Statuses in the Athanor column:
 | partial | 5 |
 | missing | 25 |
 | excluded (proposed) | 1 |
+| excluded | 0 |
 | total | 44 |
 
 ### Control center
@@ -464,8 +466,9 @@ Statuses in the Athanor column:
 |---|---|
 | have | 11 |
 | partial | 2 |
-| missing | 42 |
-| excluded (proposed) | 3 |
+| missing | 37 |
+| excluded (proposed) | 0 |
+| excluded | 8 |
 | total | 58 |
 
 ### Notifications and calendar
@@ -476,6 +479,7 @@ Statuses in the Athanor column:
 | partial | 2 |
 | missing | 28 |
 | excluded (proposed) | 1 |
+| excluded | 0 |
 | total | 44 |
 
 ### Launcher and application library
@@ -486,6 +490,7 @@ Statuses in the Athanor column:
 | partial | 1 |
 | missing | 16 |
 | excluded (proposed) | 2 |
+| excluded | 0 |
 | total | 37 |
 
 ### On-screen display
@@ -496,6 +501,7 @@ Statuses in the Athanor column:
 | partial | 0 |
 | missing | 2 |
 | excluded (proposed) | 9 |
+| excluded | 0 |
 | total | 19 |
 
 ### Session lock and authentication dialogs
@@ -506,6 +512,7 @@ Statuses in the Athanor column:
 | partial | 3 |
 | missing | 18 |
 | excluded (proposed) | 3 |
+| excluded | 0 |
 | total | 33 |
 
 ### Settings
@@ -516,6 +523,7 @@ Statuses in the Athanor column:
 | partial | 2 |
 | missing | 8 |
 | excluded (proposed) | 10 |
+| excluded | 0 |
 | total | 36 |
 
 ### Workspace overview
@@ -526,6 +534,7 @@ Statuses in the Athanor column:
 | partial | 1 |
 | missing | 4 |
 | excluded (proposed) | 7 |
+| excluded | 0 |
 | total | 21 |
 
 ### Greeter
@@ -536,4 +545,5 @@ Statuses in the Athanor column:
 | partial | 2 |
 | missing | 15 |
 | excluded (proposed) | 0 |
+| excluded | 0 |
 | total | 22 |

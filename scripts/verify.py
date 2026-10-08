@@ -1275,7 +1275,7 @@ def needs_graph(root=None):
 
 
 REGISTER = "docs/architecture/shell-features.md"
-REGISTER_STATUSES = ("have", "partial", "missing", "excluded (proposed)")
+REGISTER_STATUSES = ("have", "partial", "missing", "excluded (proposed)", "excluded")
 
 
 def register_count_problems(text):
