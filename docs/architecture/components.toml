@@ -178,6 +178,15 @@ status = "missing"
 purpose = "cliphist, a Wayland clipboard history store; shipped"
 
 [[component]]
+path = "forge/specs/athanor-control-center"
+kind = "rpm spec"
+area = "shell"
+status = "specified"
+spec = "doc_control_center.md"
+item = "CC2"
+purpose = "The control center: the resident quick-settings panel, its D-Bus name and Super+C"
+
+[[component]]
 path = "forge/specs/athanor-dart-sass"
 kind = "rpm spec"
 area = "shell"
@@ -545,6 +554,15 @@ item = "SH2"
 purpose = "The shell's only client of cosmic-comp: windows, workspaces, outputs, launches"
 
 [[component]]
+path = "system/athanor-controls"
+kind = "crate"
+area = "shell"
+status = "specified"
+spec = "doc_control_center.md"
+item = "CC5"
+purpose = "The GTK4 widgets of the detail pages and the panel's tiles, shared by the bar and the control center"
+
+[[component]]
 path = "system/athanor-fuzz-entries"
 kind = "crate"
 area = "build-ci"
@@ -613,6 +631,15 @@ status = "specified"
 spec = "doc_launcher.md"
 item = "LA2"
 purpose = "The launcher's and library's search: sources, ranking, usage"
+
+[[component]]
+path = "system/athanor-services"
+kind = "crate"
+area = "shell"
+status = "specified"
+spec = "doc_control_center.md"
+item = "CC3"
+purpose = "The shell's models of system services: D-Bus mirrors on zbus, off the interface thread, no GTK type"
 
 [[component]]
 path = "system/athanor-style"

@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        8%{?dist}
+Release:        9%{?dist}
 Summary:        The Athanor bar
 License:        GPL-3.0-or-later
 
@@ -72,6 +72,10 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
+* Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-9
+- The control center's button, last of the status row and shown only while os.athanor.ControlCenter1
+  is installed; the notification popups stay hidden while the control center is open.
+
 * Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-8
 - The shield names the owner-moved, owner-moved-waiting, owner-moved-held and pinned-build
   reasons of athanor-update 1.0.0-9.

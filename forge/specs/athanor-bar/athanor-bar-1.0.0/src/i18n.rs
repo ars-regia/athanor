@@ -21,6 +21,8 @@ pub fn init() {
     }
     // The row and the openers of athanor-apps speak through the same catalog.
     athanor_apps::i18n::set_catalog(self::catalog());
+    // So do the pages of athanor-controls.
+    athanor_controls::i18n::set_catalog(self::catalog());
 }
 
 fn catalog() -> &'static Catalog {

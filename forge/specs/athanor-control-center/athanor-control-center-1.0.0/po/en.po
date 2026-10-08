@@ -1,0 +1,283 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: athanor-control-center\n"
+"Report-Msgid-Bugs-To: forge@athanor.os\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=ASCII\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: ../../../../system/athanor-controls/src/audio.rs:225
+#, rust-format
+msgid "{device}, in use"
+msgstr "{device}, in use"
+
+#: ../../../../system/athanor-controls/src/audio.rs:267
+msgid "Output"
+msgstr "Output"
+
+#: ../../../../system/athanor-controls/src/audio.rs:268 src/panel/mod.rs:419
+msgid "Output volume"
+msgstr "Output volume"
+
+#: ../../../../system/athanor-controls/src/audio.rs:269 src/panel/mod.rs:427
+msgid "Mute output"
+msgstr "Mute output"
+
+#: ../../../../system/athanor-controls/src/audio.rs:273
+msgid "Input"
+msgstr "Input"
+
+#: ../../../../system/athanor-controls/src/audio.rs:274 src/panel/mod.rs:439
+msgid "Input volume"
+msgstr "Input volume"
+
+#: ../../../../system/athanor-controls/src/audio.rs:275 src/panel/mod.rs:447
+msgid "Mute microphone"
+msgstr "Mute microphone"
+
+#: ../../../../system/athanor-controls/src/audio.rs:286 src/panel/media.rs:70
+msgid "Previous track"
+msgstr "Previous track"
+
+#: ../../../../system/athanor-controls/src/audio.rs:287
+#: ../../../../system/athanor-controls/src/audio.rs:397 src/panel/media.rs:228
+msgid "Pause"
+msgstr "Pause"
+
+#: ../../../../system/athanor-controls/src/audio.rs:288 src/panel/media.rs:72
+msgid "Next track"
+msgstr "Next track"
+
+#: ../../../../system/athanor-controls/src/audio.rs:399 src/panel/media.rs:71
+#: src/panel/media.rs:230
+msgid "Play"
+msgstr "Play"
+
+#: ../../../../system/athanor-controls/src/battery.rs:126
+#, rust-format
+msgid "{percent} %"
+msgstr "{percent} %"
+
+#: ../../../../system/athanor-controls/src/battery.rs:144
+#, rust-format
+msgid "{hours} h {minutes} min left"
+msgstr "{hours} h {minutes} min left"
+
+#: ../../../../system/athanor-controls/src/battery.rs:147
+#, rust-format
+msgid "{hours} h {minutes} min until full"
+msgstr "{hours} h {minutes} min until full"
+
+#: ../../../../system/athanor-controls/src/battery.rs:149
+msgid "Charging"
+msgstr "Charging"
+
+#: ../../../../system/athanor-controls/src/battery.rs:150
+msgid "Fully charged"
+msgstr "Fully charged"
+
+#: ../../../../system/athanor-controls/src/battery.rs:157 src/panel/mod.rs:300
+msgid "Power saver"
+msgstr "Power saver"
+
+#: ../../../../system/athanor-controls/src/battery.rs:158 src/panel/mod.rs:301
+msgid "Performance"
+msgstr "Performance"
+
+#: ../../../../system/athanor-controls/src/battery.rs:159 src/panel/mod.rs:302
+msgid "Balanced"
+msgstr "Balanced"
+
+#: ../../../../system/athanor-controls/src/battery.rs:188 src/panel/mod.rs:394
+msgid "Power mode"
+msgstr "Power mode"
+
+#: ../../../../system/athanor-controls/src/battery.rs:206
+msgid "Screen brightness"
+msgstr "Screen brightness"
+
+#: ../../../../system/athanor-controls/src/bluetooth.rs:279
+#: src/panel/mod.rs:275 src/panel/mod.rs:346
+msgid "Bluetooth"
+msgstr "Bluetooth"
+
+#: ../../../../system/athanor-controls/src/bluetooth.rs:282
+msgid "Nearby devices"
+msgstr "Nearby devices"
+
+#: ../../../../system/athanor-controls/src/bluetooth.rs:304
+#: ../../../../system/athanor-controls/src/network.rs:348
+msgid "Cancel"
+msgstr "Cancel"
+
+#: ../../../../system/athanor-controls/src/bluetooth.rs:306
+msgid "Pair"
+msgstr "Pair"
+
+#: ../../../../system/athanor-controls/src/bluetooth.rs:443
+#, rust-format
+msgid "{device}, connected"
+msgstr "{device}, connected"
+
+#: ../../../../system/athanor-controls/src/bluetooth.rs:476
+#, rust-format
+msgid "Pair with {device}?"
+msgstr "Pair with {device}?"
+
+#: ../../../../system/athanor-controls/src/bluetooth.rs:479
+#, rust-format
+msgid "Pair only if {device} shows the same number."
+msgstr "Pair only if {device} shows the same number."
+
+#: ../../../../system/athanor-controls/src/bluetooth.rs:492
+#, rust-format
+msgid "Pairing with {device}"
+msgstr "Pairing with {device}"
+
+#: ../../../../system/athanor-controls/src/bluetooth.rs:495
+#, rust-format
+msgid "Type this code on {device}, then press Enter there."
+msgstr "Type this code on {device}, then press Enter there."
+
+#: ../../../../system/athanor-controls/src/network.rs:307 src/panel/mod.rs:274
+msgid "Network"
+msgstr "Network"
+
+#: ../../../../system/athanor-controls/src/network.rs:313 src/panel/mod.rs:339
+msgid "Wi-Fi"
+msgstr "Wi-Fi"
+
+#: ../../../../system/athanor-controls/src/network.rs:322 src/panel/mod.rs:356
+msgid "Airplane mode"
+msgstr "Airplane mode"
+
+#: ../../../../system/athanor-controls/src/network.rs:341
+msgid "The password was not accepted. Try again."
+msgstr "The password was not accepted. Try again."
+
+#: ../../../../system/athanor-controls/src/network.rs:350
+msgid "Connect"
+msgstr "Connect"
+
+#: ../../../../system/athanor-controls/src/network.rs:467
+msgid "Wired: connected"
+msgstr "Wired: connected"
+
+#: ../../../../system/athanor-controls/src/network.rs:468
+msgid "Wired: not connected"
+msgstr "Wired: not connected"
+
+#: ../../../../system/athanor-controls/src/network.rs:506
+#, rust-format
+msgid "{network}, connected"
+msgstr "{network}, connected"
+
+#: ../../../../system/athanor-controls/src/network.rs:507
+#, rust-format
+msgid "{network}, connecting"
+msgstr "{network}, connecting"
+
+#: ../../../../system/athanor-controls/src/network.rs:508
+#, rust-format
+msgid "{network}, needs Settings"
+msgstr "{network}, needs Settings"
+
+#: ../../../../system/athanor-controls/src/network.rs:510
+#, rust-format
+msgid "{network}, secured"
+msgstr "{network}, secured"
+
+#: ../../../../system/athanor-controls/src/network.rs:541
+#, rust-format
+msgid "Password for {network}"
+msgstr "Password for {network}"
+
+#: ../../../../system/athanor-controls/src/widgets.rs:51
+msgid "The action did not complete."
+msgstr "The action did not complete."
+
+#: src/panel/footer.rs:27 src/panel/footer.rs:28
+msgid "Settings"
+msgstr "Settings"
+
+#: src/panel/footer.rs:47
+#, rust-format
+msgid "{percent}%"
+msgstr "{percent}%"
+
+#: src/panel/footer.rs:50
+#, rust-format
+msgid "Battery {level}"
+msgstr "Battery {level}"
+
+#: src/panel/media.rs:58
+msgid "Cover"
+msgstr "Cover"
+
+#: src/panel/media.rs:69
+msgid "Media player"
+msgstr "Media player"
+
+#: src/panel/media.rs:76
+msgid "Seek"
+msgstr "Seek"
+
+#: src/panel/media.rs:92
+msgid "Media"
+msgstr "Media"
+
+#: src/panel/mod.rs:146 src/panel/mod.rs:490
+msgid "Control center"
+msgstr "Control center"
+
+#: src/panel/mod.rs:170
+msgid "Back"
+msgstr "Back"
+
+#: src/panel/mod.rs:269
+msgid "Off"
+msgstr "Off"
+
+#: src/panel/mod.rs:269
+msgid "On"
+msgstr "On"
+
+#: src/panel/mod.rs:276 src/panel/mod.rs:417
+msgid "Sound"
+msgstr "Sound"
+
+#: src/panel/mod.rs:277
+msgid "Power"
+msgstr "Power"
+
+#: src/panel/mod.rs:284
+#, rust-format
+msgid "The {name} page is not available yet."
+msgstr "The {name} page is not available yet."
+
+#: src/panel/mod.rs:375
+msgid "Dark mode"
+msgstr "Dark mode"
+
+#: src/panel/mod.rs:458
+msgid "Brightness"
+msgstr "Brightness"
+
+#: src/panel/mod.rs:552
+msgid "Connecting"
+msgstr "Connecting"
+
+#: src/panel/sliders.rs:67 src/panel/tile.rs:54
+#, rust-format
+msgid "Open the {name} page"
+msgstr "Open the {name} page"
+
+#~ msgid "Display"
+#~ msgstr "Display"
+
+#~ msgid "Devices"
+#~ msgstr "Devices"
+
+#~ msgid "System"
+#~ msgstr "System"

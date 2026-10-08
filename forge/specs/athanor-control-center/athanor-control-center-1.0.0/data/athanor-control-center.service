@@ -1,0 +1,68 @@
+[Unit]
+Description=Athanor control center
+Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_control_center.md
+# Not enabled by the preset (doc_control_center.md, CC2): the session bus starts it through
+# os.athanor.ControlCenter1, which the bar's button and Super+C call.
+After=graphical-session.target athanor-desktop.service
+Requisite=athanor-desktop.service
+PartOf=graphical-session.target
+# The panel counts its own failures (doc_shell.md, SH8); this is only the outer backstop.
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+[Service]
+Type=notify
+BusName=os.athanor.ControlCenter1
+ExecStart=/usr/bin/athanor-control-center
+ExecStopPost=/usr/bin/athanor-control-center --record-exit
+TimeoutStartSec=20s
+Restart=on-failure
+# Every restart comes at once, as the bar's (doc_shell_standard.md, ST5, recovery).
+RestartSec=100ms
+Slice=session.slice
+# SH4: the layer surface is drawn with Cairo, on every GPU.
+Environment=GSK_RENDERER=cairo
+# GTK's and fontconfig's caches, inside the Landlock ruleset.
+Environment=XDG_CACHE_HOME=%C/athanor-control-center
+CacheDirectory=athanor-control-center
+# MemoryHigh throttles well above the resident size; MemoryMax is the hard cap for an icon
+# theme or a font cache loaded at once.
+MemoryHigh=96M
+MemoryMax=192M
+
+# The failure record survives a stop, not just a restart (SH8).
+# Under ProtectSystem=strict /run/user is read-only except the unit's own runtime
+# directories: "athanor" is declared as the bar declares it, because launch() creates
+# %t/athanor/<random> for the Wayland security context of an application the panel starts
+# (doc_control_center.md, CC2; doc_bar.md, BR2.2).
+RuntimeDirectory=athanor-control-center athanor
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+# ~/.local/state/athanor/control-center: the Super+C marker, and the panel's own state.
+StateDirectory=athanor/control-center
+# The theme mode is the dark mode tile's `is_dark`; it is written while the run lasts, so
+# Landlock grants it. Super+C is bound by athanor-control-center-shortcut.service (CC9), so
+# cosmic-comp's shortcuts stay read-only here.
+ConfigurationDirectory=cosmic/com.system76.CosmicTheme.Mode/v1
+
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+NoNewPrivileges=yes
+# No MemoryDenyWriteExecute: GTK's GL renderers and the Mesa drivers GTK loads map
+# executable memory. The renderer is Cairo, but GDK still probes GL at start.
+# @mount: glycin decodes every image in a bubblewrap sandbox, which mounts its own root.
+SystemCallFilter=@system-service @mount
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# Wayland, D-Bus and journald over Unix sockets; AF_NETLINK because bubblewrap brings up
+# the loopback interface of glycin's sandbox over rtnetlink.
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+
+[Install]
+WantedBy=athanor-session.target
