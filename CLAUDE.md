@@ -14,6 +14,13 @@ applies to Claude Code only.
   `cd`, relative paths cannot be checked against the permission rules, so every such command
   asks for approval. Use paths relative to the root, `git -C <dir>`, `cargo -p <crate>`, or
   an absolute path.
+- **Merging past the review rule.** The `product-branches` ruleset asks one approval on
+  `iso-v0` and `main`, and the repository admin role bypasses it in pull-request mode. Claude
+  Code merges with `gh pr merge --squash --admin --match-head-commit <full sha>` only when
+  every check is `pass` or `skipping`, none pending or failing; the audit reported no
+  blocker; and the review is the only block (`mergeable` is `MERGEABLE`, `reviewDecision` is
+  `REVIEW_REQUIRED`). `--admin` skips the required checks too, so the check is Claude's to
+  make each time; otherwise the maintainer merges. *(maintainer decision, 2026-10-08)*
 - **Shared settings are permissions only.** `.claude/settings.json` denies secret paths and
   destructive commands; hooks and personal preferences stay in `.claude/settings.local.json`
   or `~/.claude/` (`.claude/README.md`).
