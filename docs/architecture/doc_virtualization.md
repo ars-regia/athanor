@@ -20,7 +20,7 @@ Read on the maintainer's desktop and in the repository on 2026-10-08.
 - **Kernel.** The running Azoth configuration has `KVM=m`, `VFIO=m`, `VFIO_PCI=m`, `VFIO_IOMMU_TYPE1=m`, `IOMMUFD=m`, `INTEL_IOMMU=y`, `AMD_IOMMU=y`, `VHOST_NET=m` and `UDMABUF=y`; `forge/specs/azoth/kernel-local` holds no virtualization line, so these come from Fedora's configuration. The command line carries `intel_iommu=on` (`forge/specs/azoth/cmdline`). Nothing in the kernel blocks this document.
 - **QEMU** as ADR-0091 lists. No libvirt, no `swtpm`, no FreeRDP, no `virtiofsd` in the image.
 - **Firmware.** `edk2-ovmf` ships `OVMF_CODE_4M.secboot.qcow2` with `OVMF_VARS_4M.secboot.qcow2` and the firmware descriptor `30-edk2-ovmf-4m-qcow2-x64-sb-enrolled.json`: Secure Boot with Microsoft's keys enrolled, which libvirt selects by itself.
-- **Fedora 43 packages** (repository metadata, installed sizes): `libvirt-daemon-driver-qemu` 11.6.0 (3.0 MB), `libvirt-daemon-common` (0.4 MB), `libvirt-daemon-driver-storage-core` (0.9 MB), `libvirt-daemon-driver-nodedev` (0.8 MB), `libvirt-daemon-log` and `libvirt-daemon-lock` (0.1 MB each), `libvirt-client` (1.0 MB), `swtpm` with `swtpm-tools` (0.3 MB), `osinfo-db` (4.4 MB), `freerdp` 3.31 with `freerdp-libs` (5.5 MB). The dependency closure is not measured (S5).
+- **Fedora 43 packages** (repository metadata, installed sizes): `libvirt-daemon-driver-qemu` 11.6.0 (3.0 MB), `libvirt-daemon-common` (0.4 MB), `libvirt-daemon-driver-storage-core` (0.9 MB), `libvirt-daemon-driver-nodedev` (0.8 MB), `libvirt-daemon-log` and `libvirt-daemon-lock` (0.1 MB each), `libvirt-client` (1.0 MB), `swtpm` with `swtpm-tools` (0.3 MB), `osinfo-db` (4.4 MB), `freerdp` 3.31 with `freerdp-libs` (5.5 MB). The dependency closure is measured in S5.
 - **The maintainer's tooling** runs QEMU directly: the self-hosted runner (`scripts/runner`) and the development VM (`scripts/devvm`). This document does not change them.
 
 ### 1.3 What the maintainer asked for
@@ -95,12 +95,12 @@ Each spike answers one question before the plan that depends on it. Evidence goe
 - **S2. Dynamic GPU detaching.** On the maintainer's desktop or laptop with a second GPU: does `managed='yes'` detach and reattach while cosmic-comp runs, on the default and the NVIDIA images; how cosmic-comp is told to leave the second GPU alone.
 - **S3. The RDP channel.** Which owner-only channel carries RDP (vsock forward or Unix socket) and how FreeRDP connects to it.
 - **S4. `passt` in system mode.** That libvirt 11.6's `passt` backend works for `qemu:///system` domains with sVirt, and that it blocks the host and the LAN by default.
-- **S5. Size.** The installed size of the packages of section 5 with their dependency closure, measured in an image build.
+- **S5. Size. Answered 2026-10-08:** `dnf install --assumeno` without weak dependencies, over the 2026-10-08 system image, for the libvirt pieces of VZ1 with `libvirt-daemon-proxy`, `swtpm`, `swtpm-tools`, `osinfo-db`, `libosinfo`, `freerdp`, `virtiofsd` and `spice-gtk3`: 29 packages, 8 MiB to download, 24 MiB installed. The application, the catalogue and the agent come on top.
 - **S6. A clean Windows volume.** How the host reads, without mounting and with no write, that an NTFS volume on an assigned disk is neither hibernated nor marked dirty, and who reads it (the application through a privileged read, or libvirt's hook).
 
 ## 5. Placement and packages
 
-- **In the image** (signed, read-only under `/usr`): the libvirt modular daemons and client of VZ1, `swtpm` and `swtpm-tools`, `osinfo-db`, `freerdp`, `virtiofsd`, `spice-gtk`, the Machines application, the catalogue, the Windows agent, the polkit rule. Estimated 25 to 35 MB over the QEMU of ADR-0091, measured by S5.
+- **In the image** (signed, read-only under `/usr`): the libvirt modular daemons and client of VZ1, `swtpm` and `swtpm-tools`, `osinfo-db`, `freerdp`, `virtiofsd`, `spice-gtk`, the Machines application, the catalogue, the Windows agent, the polkit rule. 24 MiB of packages over the QEMU of ADR-0091 (S5), plus the application, the catalogue and the agent.
 - **Downloaded on first use, always verified (VZ7):** installation images and the `virtio-win` RPM.
 - **Data.** Machine disks live under `/var/lib/libvirt/images/<uid>/`, labelled per machine; the shared folders live in the home. Whether machine disks are excluded from Athanor's backup by default is open (section 9).
 
@@ -126,7 +126,7 @@ Each spike answers one question before the plan that depends on it. Evidence goe
 
 Each stage has its gate; the next starts when the gate is green.
 
-- **V0. Spikes** S1 to S6 answered, with evidence.
+- **V0. Spikes** S1 to S4 and S6 (S5 is answered) answered, with evidence.
 - **V1. Engine and base application.** Catalogue, verified download, unattended installation, a whole Windows or Linux desktop in a window, the shared folder. Gate: on the self-hosted runner with nested KVM, a Fedora machine is created and installed unattended, boots, writes a file into the shared folder that the host reads; unit tests prove that a wrong checksum stops the installation, that the polkit rule denies another person's domain, and that a new machine reaches neither the host nor the LAN. On the maintainer's desktop, Windows 11 installs unattended with Secure Boot and TPM on.
 - **V2. Windows applications as windows.** Agent over vsock, RemoteApp, launcher entries, the save after the last window. Gate: on the maintainer's desktop, a Windows application picked in Machines opens from the launcher as a window, with clipboard and audio, and the machine is saved 10 minutes after its last window closes.
 - **V3. Dedicated GPU.** Gate: on hardware with two GPUs, a Windows machine runs a 3D application on the dedicated GPU, and the GPU returns to the host when the machine stops; on hardware without, the application says why the setting is absent.
