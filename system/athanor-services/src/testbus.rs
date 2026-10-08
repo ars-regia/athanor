@@ -1,7 +1,6 @@
 //! A private `dbus-daemon` per test, and a service on it whose objects a test adds, changes
 //! and removes. The models are tested against a real bus, since a mirror follows a name's
 //! owner through the bus's `NameOwnerChanged`, which a peer-to-peer connection does not have.
-//! Public under the `testbus` feature for the tests of the crates that build on these models.
 
 use std::collections::{BTreeMap, HashMap};
 use std::io::{BufRead, BufReader};

@@ -16,10 +16,11 @@ pub mod mirror;
 pub mod network;
 pub mod props;
 pub mod runtime;
-#[cfg(any(test, feature = "testbus"))]
-pub mod testbus;
 
 pub use runtime::{Bus, Buses, Runtime};
+
+#[cfg(test)]
+mod testbus;
 
 #[cfg(test)]
 mod tests {
