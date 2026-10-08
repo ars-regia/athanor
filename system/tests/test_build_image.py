@@ -35,12 +35,15 @@ class BuildImage(unittest.TestCase):
             done
             """))
         (bin_dir / "podman").chmod(0o755)
+        (bin_dir / "skopeo").symlink_to(ROOT / "system" / "tests" / "fake_registry.py")
+        self.registry = self.dir / "registry.json"
         self.artifacts = self.dir / "artifacts"
         self.artifacts.mkdir()
         # No signing key anywhere: the vmlinuz arrives signed, by digest (D43).
         self.env = {k: v for k, v in os.environ.items() if not k.endswith("_KEY")}
         self.env.update(PATH=f"{bin_dir}:{os.environ['PATH']}", KERNEL_ARTIFACTS_DIR=str(self.artifacts),
-                        TIER_DIGESTS_DIR=str(self.dir / "tiers"))
+                        TIER_DIGESTS_DIR=str(self.dir / "tiers"), FAKE_REGISTRY=str(self.registry),
+                        FAKE_LOG=str(self.dir / "registry.log"))
         self.tiers_file()
 
     def tearDown(self):
@@ -56,6 +59,12 @@ class BuildImage(unittest.TestCase):
         tiers = {"registry": "ghcr.io/ars-regia", **TIERS, **values}
         (self.dir / "tiers").mkdir(exist_ok=True)
         (self.dir / "tiers" / "tier-digests.json").write_text(json.dumps({k: v for k, v in tiers.items() if v is not None}))
+        self.publish_tiers(tiers)
+
+    def publish_tiers(self, tiers):
+        """The registry holds every digest of TIERS."""
+        refs = {f"{tiers['registry']}/athanor-forge-{t}-repo@{d}": d for t, d in tiers.items() if t.startswith("tier") and d}
+        self.registry.write_text(json.dumps({"tags": refs}))
 
     def calls(self):
         """The arguments of each podman call, in order."""
@@ -182,6 +191,22 @@ class BuildImage(unittest.TestCase):
                 self.assertIn(f"TIER{n}_DIGEST={TIERS[f'tier{n}']}", args)
         for n in range(4):
             self.assertIn(f"io.athanor.forge-tier{n}.digest={TIERS[f'tier{n}']}", variant)
+
+    def test_a_resolved_file_says_how_old_it_is(self):
+        self.artifacts_file()
+        self.tiers_file(resolved="2026-10-08T00:00:00Z")
+        r, _ = self.build("none")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertRegex(r.stdout, r"tier digests resolved at 2026-10-08T00:00:00Z, \d+ h ago")
+
+    def test_a_digest_the_registry_no_longer_holds_is_refused_before_the_build(self):
+        self.artifacts_file()
+        self.tiers_file()
+        self.publish_tiers({"registry": "ghcr.io/ars-regia", **TIERS, "tier2": None})
+        r, _ = self.build("none")
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn(f"athanor-forge-tier2-repo@{TIERS['tier2']} cannot be read: re-run system/tier-digests.sh resolve", r.stderr)
+        self.assertEqual(self.calls(), [])
 
     def test_without_valid_tier_digests_nothing_builds(self):
         self.artifacts_file()

@@ -81,15 +81,25 @@ boot=$(artifact boot_digest)
 # The tier repositories of the forge DAG, by digest (doc_update_delivery.md, UD28): the
 # tier-digests.json of the run that published them (forge/scripts/publish_tiers.sh), or of
 # system/tier-digests.sh resolve for a build outside that run. The registry comes from the
-# same file, so the digests are looked up where they were read.
+# same file, so the digests are looked up where they were read. A resolved file says when it was
+# resolved, and each digest must still be in the registry: a superseded tier can be deleted.
 tiers=${TIER_DIGESTS_DIR:-$ROOT/tier-digests}/tier-digests.json
 [[ -f $tiers ]] || { echo "${0##*/}: $tiers is missing: run system/tier-digests.sh resolve" >&2; exit 2; }
 forge_registry=$(jq -er '.registry | strings | select(test("^[a-z0-9][a-z0-9.:-]*(/[a-z0-9._-]+)+$"))' "$tiers") ||
   { echo "${0##*/}: $tiers names no valid registry" >&2; exit 2; }
+if resolved=$(jq -er '.resolved | strings | select(test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))' "$tiers"); then
+  echo "${0##*/}: tier digests resolved at $resolved, $((($(date -u +%s) - $(date -u -d "$resolved" +%s)) / 3600)) h ago"
+fi
+# skopeo reads no CONTAINERS_REGISTRIES_CONF of its own: the remap of local-image.sh needs the flag.
+skopeo_conf=()
+[[ -z ${CONTAINERS_REGISTRIES_CONF:-} ]] || skopeo_conf=(--registries-conf "$CONTAINERS_REGISTRIES_CONF")
 tier_args=() tier_labels=()
 for n in 0 1 2 3; do
   digest=$(jq -er ".tier$n | strings | select(test(\"^sha256:[0-9a-f]{64}$\"))" "$tiers") ||
     { echo "${0##*/}: $tiers has no valid tier$n digest" >&2; exit 2; }
+  ref=$forge_registry/athanor-forge-tier$n-repo@$digest
+  skopeo "${skopeo_conf[@]}" inspect --format '{{.Digest}}' "docker://$ref" > /dev/null ||
+    { echo "${0##*/}: $ref cannot be read: re-run system/tier-digests.sh resolve, or the run that published the tiers" >&2; exit 2; }
   tier_args+=(--build-arg "TIER${n}_DIGEST=$digest")
   tier_labels+=(--label "io.athanor.forge-tier$n.digest=$digest")
 done

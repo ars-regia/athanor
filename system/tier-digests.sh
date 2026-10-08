@@ -3,9 +3,10 @@
 # (docs/architecture/doc_update_delivery.md, UD28), for a build outside the Orchestrator run
 # that published them: System Image Check and local builds.
 #
-#   resolve   write tier-digests.json: the registry and the digest that each
+#   resolve   write tier-digests.json: the registry, the digest that each
 #             athanor-forge-tier<N>-repo:latest names now, read once, so every image the job
-#             builds installs the same tiers whatever is published meanwhile
+#             builds installs the same tiers whatever is published meanwhile, and when it was
+#             resolved (UTC), which build-image.sh prints
 #
 # The Orchestrator does not resolve: forge/scripts/publish_tiers.sh writes the same file with
 # the digests it published in the same run. The file is $TIER_DIGESTS_DIR/tier-digests.json
@@ -23,7 +24,7 @@ fi
 
 registry=${REGISTRY_HOST:-ghcr.io}/${GITHUB_REPOSITORY_OWNER:-ars-regia}
 registry=${registry,,}
-args=(--arg registry "$registry")
+args=(--arg registry "$registry" --arg resolved "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
 for n in 0 1 2 3; do
     ref=$registry/athanor-forge-tier$n-repo:latest
     digest=$(bash "$ROOT/forge/scripts/retry.sh" skopeo inspect --format '{{.Digest}}' "docker://$ref")

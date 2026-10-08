@@ -54,10 +54,9 @@ class TierDigests(unittest.TestCase):
         self.publish("ghcr.io/ars-regia", **DIGESTS)
         r = self.resolve("resolve")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(
-            json.loads(self.out.read_text()),
-            {"registry": "ghcr.io/ars-regia", **DIGESTS},
-        )
+        tiers = json.loads(self.out.read_text())
+        self.assertRegex(tiers.pop("resolved"), r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        self.assertEqual(tiers, {"registry": "ghcr.io/ars-regia", **DIGESTS})
 
     def test_the_registry_follows_the_variables_in_lower_case(self):
         self.publish("registry.example/hr-mes", **DIGESTS)
