@@ -28,8 +28,7 @@ changes" and accepted every recommendation, including the question added on PR #
    (SN6); no lock on a guard's failure; the notice and the crash report (SN8).
 3. `doc_session_daemons.md` revision 2, decisions 10 to 14: Software `confined` (ADR-0077 point 2);
    SD8 and SD9 approved before their spikes; the residual risk of the writable
-   `org.athanor.desktop.*` schemas accepted for 1.0 and to be recorded in
-   `doc_threat_model.md`; restricted callers identified by cgroup and by executable under `/usr`;
+   `org.athanor.desktop.*` schemas accepted for 1.0, as `doc_threat_model.md` TM3 states; restricted callers identified by cgroup and by executable under `/usr`;
    the order of SD22 confirmed.
 4. `doc_lock_and_prompts.md` revision 2, decisions D13 to D16: the session's keyboard layout named
    and switchable on every trusted surface and restored on unlock; the keyring prompter deferred
@@ -40,8 +39,9 @@ changes" and accepted every recommendation, including the question added on PR #
    accepted consequence stated in OD4; memory under ADR-0068; the power-key inhibitor only if
    spike O7 shows nothing holds it.
 6. `doc_settings.md` revision 2, decisions 9 to 12: the resolver choice applied by a confined
-   system service under its own polkit action (`auth_admin_keep`); the transient units Settings
-   starts declared outside its confinement, with a two-command allow-list in code; steps 2 to 4
+   system service under its own polkit action (`auth_admin_keep`); what Settings
+   starts runs in four units installed with the image, started by name through the filtered
+   bus and never as transient units (revised the same day after the review of PR #327); steps 2 to 4
    wait for a polkit agent; the report moves to `doc_report_problem.md`.
 7. `doc_portal.md` revision 2, decisions 8 to 10: the "why not upstream" paragraph and the owner
    (A2-14); the six construction steps approved together; the accepted risk of one backend process
@@ -53,7 +53,8 @@ changes" and accepted every recommendation, including the question added on PR #
 ## Consequences
 
 The nine specifications carry the decisions in their sections 6 and their status lines; this
-record is the index. `doc_report_problem.md` revision 1 is approved with them. Open follow-ups
-named by the specifications: the dconf residual risk in `doc_threat_model.md`, the A2-14
+record is the index. `doc_report_problem.md` revision 1 is approved with them. The dconf residual
+risk is already stated in `doc_threat_model.md` TM3. Open follow-ups named by the
+specifications: the A2-14
 maintainer list for each replacement component, and spike S4 of `doc_languages.md` for the
 greeter's keyboard layout.
