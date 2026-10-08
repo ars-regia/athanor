@@ -1,10 +1,15 @@
 name: Rust Security & FFI Audit
 
+# Licences, bans and sources are part of the pull request gate (`just check-deny`); this
+# workflow runs the advisory half of cargo-deny, whose database changes without a commit, and
+# also on a schedule for that reason.
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, iso-v0]
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, iso-v0]
+  schedule:
+    - cron: "17 4 * * 1"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -69,17 +74,6 @@ jobs:
             -A clippy::multiple_unsafe_ops_per_block \
             -A dead_code -A unused_variables 2>&1 | tee clippy.log
 
-      # The frozen shell workspace (doc_shell.md, SH4) is outside the root workspace, so
-      # the clippy step above never sees it, yet athanor-shell-rs still ships: the portal
-      # execs it for the file chooser and the privacy prompt. A clippy gate on it would
-      # be noise -- its crate root carries #![allow(clippy::all, warnings)] and the tree
-      # is mined and deleted, not developed -- so the honest gate is that it still
-      # compiles against its own committed lock.
-      - name: Compile the frozen shell workspace
-        run: |
-          set -euo pipefail
-          cargo check --locked --manifest-path forge/specs/athanor-shell-rs/Cargo.toml --workspace
-
       - name: Upload Logs Artifact
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -104,21 +98,14 @@ jobs:
           set -euo pipefail
           cargo vet check || echo "Cargo vet skipped due to crates.io 403 API block"
 
-      # Every lockfile that resolves a shipped binary, judged by the one policy in
-      # deny.toml: the root workspace and the frozen shell workspace (athanor-shell-rs and
-      # its dock, still installed for the portal). forge/tools/calmo-cosmic-theme is
-      # deliberately absent: it is a build-time derive tool that no spec and no
-      # packages.json entry installs, its only output is a committed diff that a human
-      # reviews, and its dependencies are pinned to a libcosmic git revision, so auditing
-      # it would clone that repository on every run and turn a flaky clone into a failed
-      # audit. --config is explicit because cargo-deny would otherwise look for a deny.toml
-      # next to each manifest and silently fall back to its own defaults.
-      - name: Check Dependencies & Vulnerabilities (cargo-deny)
+      # The advisory half of the dependency policy in deny.toml, over the root workspace.
+      # Licences, bans and sources run in the pull request gate (`just check-deny`).
+      # --config is explicit because cargo-deny would otherwise look for a deny.toml next
+      # to the manifest and silently fall back to its own defaults.
+      - name: Check Dependency Advisories (cargo-deny)
         run: |
           set -euo pipefail
-          for manifest in Cargo.toml forge/specs/athanor-shell-rs/Cargo.toml; do
-            cargo deny --manifest-path "$manifest" --config deny.toml check advisories bans sources
-          done
+          cargo deny --locked --manifest-path Cargo.toml --config deny.toml check advisories
 
       - name: ???? Fix Workspace Permissions (GH Actions Cleanup)
         if: always()
