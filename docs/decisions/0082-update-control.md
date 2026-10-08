@@ -2,7 +2,7 @@
 id: ADR-0082
 title: "Update control: postpone and opt-out"
 date: 2026-10-07
-status: accepted
+status: amended by ADR-0094
 issues: []
 areas: [update, security]
 ---
