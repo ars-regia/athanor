@@ -484,9 +484,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_cvm_manager_flow_dev_mode_fails_without_hardware() {
+        let key_path = std::env::temp_dir().join(format!("athanor-test-var-home-{}.key", std::process::id()));
         let config = AttestationConfig {
             strict_zero_trust: false,
-            key_output_path: std::path::PathBuf::from("/tmp/test_var_home.key"),
+            key_output_path: key_path.clone(),
             ..Default::default()
         };
 
@@ -496,7 +497,7 @@ mod tests {
         let result = manager.orchestrate_enclave_attestation().await;
         assert!(result.is_err(), "SimulatedDev mode without hardware enclave must fail attestation");
         assert!(matches!(manager.get_state(), EnclaveState::Failed(_)));
-        assert!(!std::path::Path::new("/tmp/test_var_home.key").exists());
+        assert!(!key_path.exists());
     }
 
     #[tokio::test]
