@@ -1,0 +1,7 @@
+{"apiVersion":"org.containers.bootc/v1","kind":"BootcHost","status":{
+      "staged":{"downloadOnly":true,"softRebootCapable":false,"pinned":false,"image":{"imageDigest":"sha256:e64f7608","timestamp":"2026-09-15T10:00:00Z","version":"43.20260915.2",
+        "image":{"image":"localhost:5000/spike/athanor-system:stable","signature":"containerPolicy","transport":"registry"}}},
+      "booted":{"image":{"imageDigest":"sha256:08d9f3ab","timestamp":"2026-09-10T10:00:00Z","version":"43.20260910.1",
+        "image":{"image":"localhost:5000/spike/athanor-system:stable","signature":"containerPolicy","transport":"registry"}},"cachedUpdate":{"imageDigest":"sha256:stale"}},
+      "rollback":{"image":{"imageDigest":"sha256:40daa320","timestamp":null,"version":null,
+        "image":{"image":"ghcr.io/owner/athanor-system:35355843782","transport":"registry"}}}}}

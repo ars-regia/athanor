@@ -1,0 +1,4 @@
+schema = 1
+[output."*"]
+preset = "bar"
+dock = "hidden"

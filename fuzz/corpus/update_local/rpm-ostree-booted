@@ -1,0 +1,4 @@
+{"deployments":[{"booted":true,"staged":false,
+      "container-image-reference":"ostree-unverified-registry:ghcr.io/owner/athanor-system-nvidia:latest",
+      "container-image-reference-digest":"sha256:b6a2b14800b8c6799d04c4adf870e806fb5b8b655cd8fa622e3b9618a985d61d",
+      "version":"43.20261001.137","timestamp":1790852801,"base-timestamp":1790849302,"requested-packages":["nvidia-container-toolkit"]}]}
