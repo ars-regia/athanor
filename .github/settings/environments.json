@@ -1,4 +1,28 @@
 {
+  "bridge": {
+    "can_admins_bypass": true,
+    "deployment_branch_policy": {
+      "custom_branch_policies": true,
+      "policies": [
+        {
+          "name": "iso-v0",
+          "type": "branch"
+        },
+        {
+          "name": "main",
+          "type": "branch"
+        }
+      ],
+      "protected_branches": false
+    },
+    "prevent_self_review": false,
+    "reviewers": [],
+    "secrets": [
+      "ATHANOR_BRIDGE_TOKEN"
+    ],
+    "variables": [],
+    "wait_timer": 0
+  },
   "delete": {
     "can_admins_bypass": true,
     "deployment_branch_policy": null,

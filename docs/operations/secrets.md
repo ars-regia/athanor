@@ -6,7 +6,7 @@
 | Owner | Maintainer |
 | Status | Revision 1, 2026-10-06; section 4 added 2026-10-07; SEC5, SEC6 and RL2 removed on 2026-10-07 with RPM signing (ADR-0076, decision 2). Sections 1, 3 and 4 are facts. Section 2 is decided for the single-maintainer phase (ADR-0084). Every line marked _(Proposal)_ awaits the maintainer |
 | Depends on | `doc_kernel_build.md` section 6 (key design), `doc_kernel_profile.md` D43 and section 9 (custody, key table), `doc_update_trust.md` UT2, UT3 (image key), decisions A2-27, A2-35, ADR-0062, ADR-0076, ADR-0084 |
-| Defines | SEC1-SEC13 (secrets), VAR1-VAR6 (variables), ENV1-ENV6 (environments), KC1-KC8 (custody), RL1-RL8 (recovery) |
+| Defines | SEC1-SEC14 (secrets), VAR1-VAR7 (variables), ENV1-ENV7 (environments), KC1-KC8 (custody), RL1-RL8 (recovery) |
 | Facts checked with | `git grep` on `origin/iso-v0` at `e238b833`; `gh secret list`, `gh variable list`, `gh api repos/ars-regia/athanor/environments` and its `secrets`, `variables` and `deployment-branch-policies` endpoints, names only; the branches of open PRs #115 (`sign-vmlinuz`), #180 (`a2/delivery`) and #185 (`a2/rpm-sign-job`). The repository was then `hr-mes/athanor`; after the transfer the same `gh` queries on `ars-regia/athanor` on 2026-10-06 return the same names, reviewers and deployment branches |
 
 No value of any secret appears here or was read to write this. Commands below use
@@ -31,6 +31,7 @@ Workflow references are `file:line` under `.github/workflows/` at `e238b833` (`o
 | SEC12 | runner credential `github-token` | host of the self-hosted runner, not GitHub | GitHub token read by `install.sh` from standard input | `scripts/runner/install.sh:30,52-53` encrypts it with `systemd-creds` (host key and TPM2) into `/etc/credstore.encrypted/athanor-runner.github-token`; `athanor-runner.service:22` loads it; `vm.sh:29,102` uses it only to create a just-in-time runner configuration per job | none |
 
 | SEC13 | `SETTINGS_APP_PRIVATE_KEY` | repository | private key of the settings GitHub App, which holds read permissions only (`github-settings.md` section 9) | `maintenance.yml` `settings-drift`, through `actions/create-github-app-token`, which mints a read-only token for this repository; not set yet | none |
+| SEC14 | `ATHANOR_BRIDGE_TOKEN` | environment `bridge` | personal access token (classic) of the previous owner `hr-mes` | `athanor-forge-orchestrator.yml` `bridge-system-images`, the login of the bridge (`doc_update_delivery.md` UD45); `system/tag-images.sh --to` writes `:latest` under that owner. Read only while VAR7 is set; not set yet | none |
 
 Keyless signatures (`forge/scripts/sign_attest.sh`, `cosign sign --yes`) use the workflow's
 OIDC identity and need no secret.
@@ -47,6 +48,7 @@ No repository variable is set (`gh variable list` is empty), so every default be
 | VAR4 | `RELEASE_BRANCH` | `iso-v0` | PR #180 only: orchestrator, `call-system-image.yml`, `iso-acceptance.yml`, `promote-stable.yml` |
 | VAR5 | `PROMOTE_DWELL_HOURS` | `24` | PR #180 only: `promote-stable.yml` |
 | VAR6 | `SETTINGS_APP_CLIENT_ID` | none; not set yet | `maintenance.yml` `settings-drift`: client id of the settings GitHub App (SEC13) |
+| VAR7 | `ATHANOR_BRIDGE_REGISTRY` | none: the bridge is off | orchestrator `bridge-system-images`: the previous owner as `REGISTRY/OWNER` (`ghcr.io/hr-mes`); set to start the bridge, cleared to stop it (`doc_update_delivery.md` UD45, UD50). Declared in `actions.json` only while it is set |
 
 | Id | Environment | Secrets | Protection (`.github/settings/environments.json`; `signing` stays beside the split until the image key rotation of section 4.1 ends) | Referenced by |
 | --- | --- | --- | --- | --- |
@@ -55,6 +57,7 @@ No repository variable is set (`gh variable list` is empty), so every default be
 | ENV3 | `delete` | none | none; created 2026-08-08 | nothing |
 | ENV4 | `github-pages` | none | deployment branches `gh-pages` and `main` | no workflow names it; it served the DNF channel, removed by ADR-0076 decision 2, and the maintainer deletes it with the `gh-pages` branch |
 | ENV5 | `signing-images` | SEC3, SEC4 | required reviewer `hr-mes`, self-review allowed (`prevent_self_review` false, see `github-settings.md` section 7), no administrator bypass; deployment branches `iso-v0` and `main`, both protected (required checks `Kernel gate`, `Spec gate` and `gate` on `iso-v0`, `Kernel gate` on `main`; no force push, no deletion) | `athanor-forge-orchestrator.yml:299` (`sign-system-images`, still in `signing` during the rotation of section 4.1, which moves it back to `signing-images`) |
+| ENV7 | `bridge` | SEC14 | no reviewer (every run tags, and the digests it copies are verified first by `verify-system-images`); deployment branches `iso-v0` and `main` | `athanor-forge-orchestrator.yml` `bridge-system-images` |
 | ENV6 | `signing` | SEC1 to SEC4, `MOK_PRIVATE_KEY` | as ENV5; declared in `environments.json` only during the image key rotation (section 4.1), as an alias of ENV5 for `scripts/verify.py` | `athanor-forge-orchestrator.yml` `sign-system-images` until step 3 of section 4.1; deleted at step 4 |
 
 ### 1.3 Drift between code and GitHub
@@ -63,6 +66,7 @@ No repository variable is set (`gh variable list` is empty), so every default be
 | --- | --- | --- | --- |
 | files ahead of GitHub | ENV1, ENV5, protection of `main` | the split and the protection exist only in `.github/settings`; GitHub still has `signing` with every key (it stays until section 4.1 ends), and the workflows name the new environments, so a signing job fails to find its keys until they move | the bootstrap of section 4 |
 | files ahead of GitHub | SEC13, VAR6 | `maintenance.yml` fails until both exist | step 2 of `github-settings.md` section 9 |
+| files ahead of GitHub | ENV7, SEC14 | none while VAR7 is unset: the job is skipped | create them before setting VAR7 (`doc_update_delivery.md` UD45) |
 | used, missing | ENV2 | PR #180's override path fails by design until the environment exists | create it when PR #180 merges |
 | present, unused | ENV3 | none | delete it, or say what it is for |
 | other | SEC9 | `forge-ghcr-cleanup.yml` fails on every run (37173567085, 36288233693, 35483291172) | outside this runbook |
@@ -135,7 +139,7 @@ leaves one release after the first image signed with n+1. There is no revocation
 compromise, recovery is out of band (`forge/specs/athanor-update/RECOVERY.md`,
 `athanor-update recover-key`), see KC5.
 
-**SEC7, SEC8, SEC9, SEC12, tokens.** A token is made again in the GitHub settings of the account
+**SEC7, SEC8, SEC9, SEC12, SEC14, tokens.** A token is made again in the GitHub settings of the account
 that owns it, then stored with `gh secret set NAME --repo "$REPO"` (SEC12: piped into `sudo
 scripts/runner/install.sh --image <golden image>`, `scripts/runner/README.md:65-74`). A rotation
 has no consequence beyond the runs that fail while the secret is stale. The type and scopes of
@@ -146,6 +150,7 @@ the stored tokens cannot be read back from GitHub; the minimum each needs, from 
 | SEC7 | fine-grained: Contents read and write, Pull requests read and write, Issues read and write | pushes `bump/*` branches, `gh label create` (`forge/specs/azoth/open_bump_pr.sh:47`), `gh pr create`, `gh pr merge --auto` (`kernel-bump.yml:244`), merges in `bot_merge.py` |
 | SEC8 | fine-grained: Contents read and write, Pull requests read and write | the message in `forge-util-update-specs.yml:35-39` |
 | SEC9 | classic: `read:packages`, `delete:packages` (`clean_ghcr.sh:16`) | GitHub Packages accepts only classic tokens |
+| SEC14 | classic, of the account `hr-mes`: `write:packages` | the packages it writes belong to that account, not to this repository; whether an identity of `ars-regia` can write there instead is _(to verify)_ |
 | SEC12 | _(Proposal)_ a dedicated fine-grained token with Administration read and write on this repository only, used for nothing else | `generate-jitconfig` (`vm.sh:102`) is the only call it serves |
 
 _(Proposal)_ `KERNEL_BUMP_TOKEN` now serves six workflows, not only the kernel; a name such as
