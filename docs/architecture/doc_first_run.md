@@ -9,7 +9,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
 - **What binds this document.**
   - `doc_shell.md`: of COSMIC only cosmic-comp stays, and `athanor-compositor-client` is the only crate that may know COSMIC (SH2, SH3, SH4); logic in modules with no GTK type (SH4); the identity "Calmo" (SH5); the test matrix of 12 cases (SH13). The default preset is chosen once per user at the first session (SH10), so first run does not choose it.
   - `doc_shell_standard.md`: accessibility and languages (ST7), the reference machine (ST4) and its bench (ST9). First run is not a surface that replaces a COSMIC one, so the gate of ST2 does not apply; ST7's checks do.
-  - `doc_visual_language.md` (revision 1, PR #119): the mark appears in the greeter, the lock screen, first run and About (VL8); first-run headings use `title-1`, 181 % (`doc_visual_language.md:93`); the appearance schema `org.athanor.desktop.appearance` and the one function in `athanor-style` that applies it (VL4).
+  - `doc_visual_language.md` (revision 1, PR #119): the mark appears only in the trust shield (VL8 as amended by ADR-0077 point 4), so first run draws no mark; first-run headings use `title-1`, 181 % (`doc_visual_language.md:103`); the appearance keys (the GNOME keys `color-scheme` and `accent-color`, with `accent-mode` and `accent-computed` in `org.athanor.desktop.appearance`; amended 2026-10-08 by ADR-0057 (A2-20) and ADR-0099) and the one function in `athanor-style` that applies them (VL4).
   - `doc_languages.md` (revision 1): the interface first run calls (LN16), the stores and writers (LN15), the system locale only through localed (LN5), the user's languages in AccountsService (LN6), the region key read by `athanor-session` at login (LN7), the keyboard store (LN9), the greeter in the system locale and layout (LN10).
   - `doc_accessibility.md` (revision 1): the preferences and their keys (AX2), `athanor-a11y` and Orca as user units (AX3), the reader gate (AX5), the greeter's accessibility menu, speech before login and the hand-off to the session (AX13), the shortcuts Super+Alt+S and Super+Alt+A (decision 8).
   - `doc_lock_and_prompts.md` (revision 1): the root helper per connection, admitted by cgroup through a pidfd, as the model for a small privileged surface (LP8, decision D1).
@@ -175,7 +175,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
 
 - **Back and forward.** Every screen but the first has Back; Back never undoes a write already made, it shows the screen again with the current value selected. The account is created only on the last step, so every earlier choice can still change.
 - **The header** of every screen carries the accessibility menu button at the end edge (the start edge under right-to-left text) and the power menu, always visible (FR16).
-- **The first screen** shows the mark (VL8) above the title "Welcome", in `title-1`.
+- **The first screen** shows the title "Welcome", in `title-1`; it draws no mark (ADR-0077 point 4).
 - **The Secure Boot key screen** (A2-35, #131, #145; _(Proposal)_ for its wording and placement). First run asks the enrolment helper for `status` at start. On a machine with Secure Boot on, a missing certificate stops the boot at MokManager (`doc_kernel_profile.md`, section 4), so in practice the screen appears on a machine whose Secure Boot is off or whose enrolment was declined. It says that the enrolment did not succeed and that the machine runs in degraded mode without it, and how to redo it: "Prepare again" asks the helper for a new request and shows the new one-time password, to type in MokManager at the next boot, with the advice to turn Secure Boot on in the firmware settings when it is off; the `mokutil` command line is named for later.
 - **No screen is skippable except Network and Secure Boot key,** whose secondary buttons are "Set up later" and "Not now". Every other screen has a preselected value, so Next always works.
 
@@ -227,7 +227,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
 
 - **Two large previews,** light and dark, and the row of the nine accent presets of VL3, with purple preselected. The previews redraw with the chosen accent. The wallpaper-derived accent is not offered here: it needs the person's wallpaper, which does not exist yet.
 - **The screen itself follows the choice** at once, through the libadwaita style manager of the first-run process only.
-- **Stored in the hand-off** as `color-scheme` and `accent`, values of `org.athanor.desktop.appearance` (VL4), and applied at the first login through the one function of `athanor-style` (FR15).
+- **Stored in the hand-off** as `color-scheme` and `accent`, the apply function's inputs for `org.gnome.desktop.interface color-scheme` and `accent-color` (VL4; amended 2026-10-08 by ADR-0057 (A2-20) and ADR-0099), and applied at the first login through the one function of `athanor-style` (FR15).
 - **High contrast and large text** are not on this screen: they are in the accessibility menu from the first frame (FR16).
 
 **FR14. Your account.**
@@ -252,7 +252,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
   user = "anna"                # the user name sent to the helper
   region = ""                  # empty: the region follows the language (LN7)
   location = false             # FR12
-  color-scheme = "light"       # FR13, a value of org.athanor.desktop.appearance
+  color-scheme = "light"       # FR13, an input of the apply function (VL4)
   accent = "purple"
   accessibility = ["screen-reader", "large-text"]   # the AX13 feature names that are on
   ```
@@ -272,7 +272,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
 **FR16. Accessibility from the first frame.**
 
 - **Parity with the greeter.** The session of `athanor-firstrun` runs `athanor-a11y.service`, `athanor-a11y-gate.service` and `orca.service` in its own user manager, outside the client's sandbox, with the confinement of AX3 and AX4, exactly as the greeter's user does (AX13; spike A1 of `doc_accessibility.md` and F1 here). Super+Alt+S starts and stops the screen reader from the first frame, and Super+Alt+A opens the accessibility menu.
-- **The menu** is the greeter's: screen reader, magnifier, high contrast, large text, on-screen keyboard (the embedded widget of AX12), colour inversion and filter. It writes the AX2 keys of `athanor-firstrun`'s own settings through the filtered session bus, as the greeter writes `greetd`'s.
+- **The menu** is the greeter's: screen reader, magnifier, high contrast, large text, on-screen keyboard (the embedded widget of AX12); colour inversion and filter stay session settings (AX13). It writes the AX2 keys of `athanor-firstrun`'s own settings through the filtered session bus, as the greeter writes `greetd`'s.
 - **Every screen** follows AX6 and AX7: its title is announced when it appears, the focus lands on its first control (the language list's search field, the full-name field), the order of Tab follows the reading order, and errors are announced as alerts. Every control is reachable with the keyboard alone and the pointer alone.
 - **A spoken hint** (decision 6): when no key and no pointer event has arrived for 15 s on the first screen and the screen reader is off, first run says once, through speech-dispatcher in the system language, "To use a screen reader, press Super, Alt and S", and shows the same sentence on screen. It does not repeat.
 - **Large text and high contrast** apply to the first-run screens at once, through libadwaita, and travel to the first session through the hand-off (FR15).
@@ -281,7 +281,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
 
 - **Full screen** on every output; the pages are drawn on the output that holds the pointer at start, and the others show the hearth wallpaper of the factory accent (VL8). A page is at most 600 logical pixels wide, centred.
 - **The smallest screen** first run supports is 1024 × 600 logical pixels in every language of the test matrix, and 1.0, 1.25, 1.5 and 2.0 scale; nothing is cut off and nothing scrolls sideways.
-- **Type and geometry** are the visual language's: `title-1` for each screen's title, libadwaita's own sizes elsewhere (VL6, VL7). The mark appears on the first screen and the Ready screen, never as decoration elsewhere (VL8).
+- **Type and geometry** are the visual language's: `title-1` for each screen's title, libadwaita's own sizes elsewhere (VL6, VL7). No screen draws the mark, which appears only in the trust shield (ADR-0077 point 4, VL8).
 - **Motion** follows `enable-animations` of `athanor-firstrun`'s settings: page transitions of 300 ms, none when reduced motion is on (VL9).
 
 **FR18. Failure and recovery.**
@@ -346,7 +346,7 @@ Applied with the approval of this document.
   - `doc_languages.md` LN16 and section 3: first run uses exactly the interface of LN16 and the lists of `athanor_i18n::offered_languages()` and `athanor_compositor_client::keyboard::available()` (FR8, FR9); first run's own subject is the system user `athanor-firstrun` (FR2); the polkit rule that lets it call `SetLocale` and `SetX11Keyboard` is `30-athanor-first-run.rules`, which sorts before `40-athanor-locale1.rules` and names that subject (FR5), approved as decision 7; the time zone is set through timedated (FR11). LN16 item 2 (the first user's `Languages` and region) is met by the helper's `SetLanguages` (FR6) and by the hand-off applied before `athanor-session` reads the region (FR15).
   - `doc_languages.md` LN7, **owed amendment** (ruling, 2026-10-05): the login sequence gains the first-run hand-off step, `athanor-session` running `athanor-first-run apply-handoff` before it reads `Languages` and `org.gnome.system.locale region` (FR15).
   - `doc_accessibility.md` AX13, **owed amendment** (ruling, 2026-10-05): the `athanor-firstrun` user is a third pre-login place, after the greeter and the lock screen, where the AT units run, with the same menu and shortcuts (FR16); and the greeter's persisted choices are seeded once from the hand-off when the greeter has never stored any (FR15), an addition to "Persistence at the greeter".
-  - `doc_visual_language.md` VL4 and VL8: `apply-handoff` is one more caller of `athanor-style`'s apply function; the mark appears in first run (FR17).
+  - `doc_visual_language.md` VL4 and VL8: `apply-handoff` is one more caller of `athanor-style`'s apply function; first run draws no mark (FR17; ADR-0077 point 4).
 - **`doc_software.md`:** decision 2 (remote login off on new installs) and decision 6 (Flathub, automatic application updates) are stated in FR12 and not repeated as choices. No change.
 - **`doc_platform_experience.md`, section 2, "Il Primo Avvio (OOBE)" (`:24-33`):** superseded by this document. First run is not part of the greeter, generates no mesh key and signs in to no service (FR19).
 - **`shell-features.md:380`, F-settings-33:** the note becomes "specified in `doc_first_run.md`"; the status moves with FR21 step 5.
@@ -381,7 +381,7 @@ Applied with the approval of this document.
 In the dev VM installed from a kickstart that declares no user, and on the reference laptop installed from the ISO; the first eight in CI where marked, the rest judged by the maintainer on screen.
 
 1. On first boot `athanor-first-run.service` is active and greetd is not; on a machine installed with a declared user the unit is skipped, not failed, and the greeter starts (CI, ISO acceptance).
-2. The first frame shows the Language screen with the mark; Super+Alt+S starts Orca within 1 s and the screen's title and search field are announced; 15 s of inactivity produce the spoken hint once (decision 6).
+2. The first frame shows the Language screen; Super+Alt+S starts Orca within 1 s and the screen's title and search field are announced; 15 s of inactivity produce the spoken hint once (decision 6).
 3. Choosing Italiano switches every string on screen, libadwaita's included, before the Keyboard screen appears; `/etc/locale.conf` reads `LANG=it_IT.UTF-8`.
 4. Choosing a Russian layout adds `us` as a second layout, and the greeter afterwards shows the layout switcher.
 5. With no network, the Network screen appears on the laptop and "Set up later" completes first run; joining a WPA2 network creates a connection that is active after the next boot with nobody logged in.
