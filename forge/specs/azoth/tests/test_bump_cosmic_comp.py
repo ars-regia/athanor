@@ -1,5 +1,6 @@
 """Unit test of the cosmic-comp tracking of bump.py (python3 -B -m unittest discover -s forge/specs/azoth/tests -v)."""
 
+import datetime
 import pathlib
 import sys
 import tempfile
@@ -16,6 +17,10 @@ SPEC = """%global fedora_release 1.fc43
 Name:           cosmic-comp
 Version:        1.8.0
 Release:        %{fedora_release}.athanor3
+
+%changelog
+* Fri Oct 02 2026 Athanor Forge <forge@athanor.os> - 1.8.0-1.fc43.athanor3
+- Earlier entry.
 """
 
 
@@ -44,6 +49,14 @@ class CosmicCompTracking(unittest.TestCase):
         self.assertEqual(bump.cosmic_comp_pin(got), "1.9.0-2.fc43")
         self.assertIn("Release:        %{fedora_release}.athanor1\n", got)
         self.assertIn("%global commit " + "b" * 40, got)
+
+    def test_a_bump_adds_a_changelog_entry_for_the_new_release(self):
+        got = bump.cosmic_comp_spec(SPEC, "1.9.0-2.fc43", "b" * 40, datetime.date(2026, 10, 8))
+        self.assertIn(
+            "%changelog\n* Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.9.0-2.fc43.athanor1\n"
+            "- Fedora's cosmic-comp 1.9.0-2.fc43.\n\n* Fri Oct 02 2026",
+            got,
+        )
 
     def test_nothing_to_do_when_the_spec_already_has_the_newest(self):
         with mock.patch.object(bump, "cosmic_comp_nvrs", return_value=updates("cosmic-comp-1.8.0-1.fc43")):

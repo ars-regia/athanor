@@ -42,6 +42,7 @@ two digests between the merges of the two pull requests: the groups build separa
 them. Standard library only: it runs on the GitHub runner without installing anything.
 """
 
+import datetime
 import hashlib
 import json
 import os
@@ -242,14 +243,18 @@ def cosmic_comp_pin(spec):
     return f"{version.group(1)}-{release.group(1)}"
 
 
-def cosmic_comp_spec(spec, nvr, commit):
-    """The spec rewritten for Fedora's build NVR: the Athanor suffix starts again at 1."""
+def cosmic_comp_spec(spec, nvr, commit, day=None):
+    """The spec rewritten for Fedora's build NVR: the Athanor suffix starts again at 1, and the
+    changelog gains an entry for the new release."""
     version, release = COSMIC_COMP_RE.match(f"cosmic-comp-{nvr}").groups()
+    day = day or datetime.date.today()
+    entry = f"* {day:%a %b %d %Y} Athanor Forge <forge@athanor.os> - {nvr}.athanor1\n- Fedora's cosmic-comp {nvr}.\n\n"
     for pattern, value in (
         (r"^(Version:\s*).*$", rf"\g<1>{version}"),
         (r"^(%global fedora_release ).*$", rf"\g<1>{release}.fc43"),
         (r"^(Release:\s*%\{fedora_release\}\.athanor).*$", r"\g<1>1"),
         (r"^(%global commit ).*$", rf"\g<1>{commit}"),
+        (r"^%changelog\n", lambda m: m.group(0) + entry),
     ):
         spec, n = re.subn(pattern, value, spec, flags=re.M)
         if n != 1:
