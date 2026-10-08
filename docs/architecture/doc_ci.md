@@ -374,7 +374,7 @@ Every name below is described in the secrets inventory, `docs/operations/secrets
 | `SETTINGS_APP_PRIVATE_KEY` | secret (GitHub App key, read-only App) | repository, not set yet | CI29 |
 | `SETTINGS_APP_CLIENT_ID` | variable, no default | repository, not set yet | CI29 |
 | `ATHANOR_BRIDGE_REGISTRY` | variable, unset: no bridge, and images list no previous owner | repository, not set | CI1, CI5 |
-| `ATHANOR_BRIDGE_TOKEN` | secret (PAT of the previous owner, write:packages) | environment `bridge`, not set yet | CI1 |
+| `ATHANOR_BRIDGE_TOKEN` | secret (classic PAT, write:packages, of an account that can write the previous owner's images; its reach in `secrets.md` section 1.4) | environment `bridge`, not set yet | CI1 |
 
 Environments (`gh api repos/ars-regia/athanor/environments`):
 
