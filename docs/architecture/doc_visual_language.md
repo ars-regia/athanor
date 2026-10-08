@@ -1,8 +1,18 @@
 # Athanor visual language
 
-Status: **revision 1, 2026-10-05, awaiting the maintainer's review of the written text.** The maintainer took its decisions in conversation on 2026-10-05: Calmo aligned to libadwaita rather than a new identity; direction B, "Calmo tinto", chosen on drafts of three directions (A "Continuo", B "Calmo tinto", C "Ardesia") drawn on the bar, the dock, the control center and a libadwaita window, light and dark; two accent modes, fixed and from the wallpaper; purple as the factory accent; the system font and libadwaita's relative type scale for the shell; and the shield shown in the bar only when it has something to say, a decision reversed on 2026-10-06 by maintainer decision A2-24 (#159): the shield is always visible at the end of the bar (VL8 as amended). It is the specification that `doc_shell_standard.md` ST8 requires before any new surface. Section 3 lists what it changes in other documents.
+Status: **revision 2, awaiting the maintainer's approval of the text.** Revision 1 was written on 2026-10-05; revision 2 applies the review of 2026-10-08 and the maintainer's decisions of that day (ADR-0099), and follows the specification template of ADR-0076 point 7: scope, non-goals and rationale (section 1), interfaces and failure behaviour (section 2), acceptance criteria (section 5). Section 6 lists the decisions taken. The maintainer took the decisions of revision 1 in conversation on 2026-10-05: Calmo aligned to libadwaita rather than a new identity; direction B, "Calmo tinto", chosen on drafts of three directions (A "Continuo", B "Calmo tinto", C "Ardesia") drawn on the bar, the dock, the control center and a libadwaita window, light and dark; two accent modes, fixed and from the wallpaper; purple as the factory accent; the system font and libadwaita's relative type scale for the shell; and the shield shown in the bar only when it has something to say, a decision reversed on 2026-10-06 by maintainer decision A2-24 (#159): the shield is always visible at the end of the bar (VL8 as amended). It is the specification that `doc_shell_standard.md` ST8 requires before any new surface. Section 3 lists what it changes in other documents.
 
-## 1. Context
+## 1. Scope, non-goals and rationale
+
+### Scope
+
+The look of the shell and of our own applications, and the appearance values the system hands to every application: the materials, the accent and its two modes, where the preferences live and who writes them, what the portal serves, type, geometry, identity, motion and depth, the tokens file after this document, and how the look is verified (VL1 to VL12).
+
+### Non-goals
+
+The inside of third-party applications (VL1): libadwaita applications are shown as their authors drew them, with no `gtk.css` override and no patched theme. The exposure of high contrast, large text and reduced motion in the session and their tests with assistive technologies belong to `doc_accessibility.md`; the Settings pages that write the preferences belong to `doc_settings.md`; the portal backend belongs to `doc_portal.md`.
+
+### Rationale: context and verified facts
 
 `doc_shell.md` SH5 gave the shell an identity, Calmo, built from one tokens file (`system/athanor-style/calmo/tokens.toml`): light and neutral by default, an indigo factory accent, Inter as the only family, surfaces tinted on the accent hue, four contrast-checked variants, and the identity carried by form, the seal and the hearth wallpaper.
 
@@ -20,7 +30,7 @@ libadwaita does not take a palette from the system. Checked on 2026-10-05 on lib
 
 Kept as Calmo stood, the shell would wear indigo beside blue applications, Inter beside Adwaita Sans, 8 and 18 px corners beside 9 and 12. This document aligns Calmo to libadwaita so that the shell and the applications read as one system, and keeps what makes it Athanor's.
 
-## 2. Decisions
+## 2. Interfaces and decisions
 
 **VL1. Scope and sources of truth.**
 
@@ -49,25 +59,25 @@ Kept as Calmo stood, the shell would wear indigo beside blue applications, Inter
 
 **VL4. Where the preferences live, and who writes them.**
 
-- **One GSettings schema of ours,** `org.athanor.desktop.appearance`, holds the user's choices:
+- **The store is the GNOME keys** (maintainer decision of 2026-10-08, ADR-0057 (A2-20) and ADR-0099). The Athanor schema `org.athanor.desktop.appearance` keeps only what GNOME has no key for. The user's choices are:
 
-  | Key               | Type                      | Default  | Meaning                                                                   |
-  | ----------------- | ------------------------- | -------- | ------------------------------------------------------------------------- |
-  | `color-scheme`    | enum `light`, `dark`      | `light`  | the variant                                                               |
-  | `contrast`        | enum `normal`, `high`     | `normal` | the high-contrast variants                                                |
-  | `accent-mode`     | enum `fixed`, `wallpaper` | `fixed`  | VL3                                                                       |
-  | `accent`          | enum of the nine names    | `purple` | the fixed accent                                                          |
-  | `accent-computed` | string `#rrggbb`          | `""`     | the corrected colour of the wallpaper mode, written by the apply function |
+  | Key               | Schema                             | Type                         | Default   | Meaning                                                                   |
+  | ----------------- | ---------------------------------- | ---------------------------- | --------- | ------------------------------------------------------------------------- |
+  | `color-scheme`    | `org.gnome.desktop.interface`      | enum `default`, `prefer-dark` | `default` | the variant                                                               |
+  | `high-contrast`   | `org.gnome.desktop.a11y.interface` | boolean                      | `false`   | the high-contrast variants                                                |
+  | `accent-color`    | `org.gnome.desktop.interface`      | enum of the nine names       | `purple`  | the fixed accent (a vendor default; GNOME's own is `blue`)                |
+  | `accent-mode`     | `org.athanor.desktop.appearance`   | enum `fixed`, `wallpaper`    | `fixed`   | VL3                                                                       |
+  | `accent-computed` | `org.athanor.desktop.appearance`   | string `#rrggbb`             | `""`      | the corrected colour of the wallpaper mode, written by the apply function |
 
-  GSettings notifies every change, and GTK already reads it.
+  GSettings notifies every change, and GTK already reads it. The factory `accent-color` is a vendor default shipped by `athanor-system-config`, as `icon-theme` is below.
 
 - **One function applies them,** in `athanor-style`, called by every writer: Settings, the control center's quick toggles and first run's `apply-handoff` (`doc_first_run.md`). It writes, in this order:
-  1. our schema;
-  2. the matching GNOME keys, so that an application without the portal, and xdg-desktop-portal-gtk until our backend exists, see the same state: `color-scheme` (`default` for light, `prefer-dark` for dark) and `accent-color` (the fixed accent, or the preset nearest the computed one) in `org.gnome.desktop.interface`, and `high-contrast` in `org.gnome.desktop.a11y.interface`;
+  1. the GNOME keys of the table: `color-scheme` (`default` for light, `prefer-dark` for dark) and `accent-color` (the fixed accent, or the preset nearest the computed one) in `org.gnome.desktop.interface`, and `high-contrast` in `org.gnome.desktop.a11y.interface`, so that an application without the portal, and xdg-desktop-portal-gtk until our backend exists, see the same state;
+  2. `accent-mode` and `accent-computed` in our schema;
   3. the few keys of `CosmicTheme` that cosmic-comp reads for window borders and indicators, through `athanor-compositor-client`, the only crate allowed to know COSMIC (SH2). Which keys these are is spike VL-S1.
-- **The GNOME keys are mirrors.** A change written to them by another tool is not read back; our schema wins at the next apply. Two keys are not mirrors but vendor defaults: `icon-theme` (`'Adwaita'`) and `button-layout` (`':minimize,maximize,close'`) are shipped as GSettings defaults by `athanor-system-config` and reset once by `athanor-sessiond` (`doc_session_daemons.md` SD16); the apply function does not write them.
-- **The shell reads our schema,** no longer `CosmicTheme` (SH5, stage 1), and redraws on its change notification.
-- **The greeter** runs before any user session and uses the factory accent and the light variant, as SH5 already states.
+- **The GNOME keys are the store, not mirrors.** A change written to them by another tool is a change of the user's choice and is read as such; no copy exists that could disagree (ADR-0057 (A2-20) and ADR-0099). Besides the factory `accent-color`, two keys are vendor defaults: `icon-theme` (`'Adwaita'`) and `button-layout` (`':minimize,maximize,close'`) are shipped as GSettings defaults by `athanor-system-config` and reset once by `athanor-sessiond` (`doc_session_daemons.md` SD16); the apply function does not write them.
+- **The shell reads the keys of the table,** no longer `CosmicTheme` (SH5, stage 1), and redraws on its change notification.
+- **The greeter** runs before any user session and uses the factory accent, the light variant, and the high-contrast variant when its own switch is on (`doc_accessibility.md` AX13), as SH5 already states.
 
 **VL5. What the portal serves.** The Settings backend of xdg-desktop-portal is written by `doc_portal.md`. This document fixes the values and their meaning:
 
@@ -110,7 +120,7 @@ Kept as Calmo stood, the shell would wear indigo beside blue applications, Inter
 
 **VL8. Identity: the mark and the hearth.**
 
-- **The mark** (the seal) appears in four places: the greeter, the lock screen, first run, and the system's About page. It is never decoration elsewhere.
+- **The mark** (the seal) appears only in the trust shield of the bar (SH5; maintainer decision of 2026-10-06, ADR-0077 point 4, which amends this document's other placements). The greeter, the lock screen, first run and the About page do not draw it, and it is never decoration elsewhere.
 - **The shield in the bar** (amended 2026-10-06, maintainer decision A2-24, #159). The mark with the trust badge (SH12) stays where `doc_bar.md` BR6 and `doc_shell.md` SH9.1 put it: always visible, the last module at the end of the bar in every preset, in every state, the verified one included. BR6 wins over the earlier text of this bullet, which showed the shield only when there was something to know and moved its permanent place to the control center: an indicator that can be absent proves nothing by its absence, and the bar's shield is the one trust signal no layout can remove. The badge's states and the sheet it opens stay those of BR6; this document fixes only their visual rule (the mark, the tokens of VL3 and the geometry of VL7). Whether the control center also carries a "System verified" row is for `doc_control_center.md` to decide; it is no longer a stand-in for the bar's shield.
 - **The hearth wallpaper** stays the default: concentric discs rising from a corner, coloured by the accent. It ships prebuilt for the nine presets, light and dark, eighteen images made by `png.py` from the tokens, so that it follows the user's fixed accent. A wallpaper service of our own (`doc_shell.md`, stage 8) may later draw it at run time instead.
 - **Icons:** the shell's symbolic icons come from adwaita-icon-theme (49.0), the set the applications use. `cosmic-icon-theme` leaves the image once no shell surface names an icon of its own; until `cosmic-settings-daemon` leaves (stage 8) it writes `icon-theme` `'Cosmic'` at every start, against these icons, and the vendor default of VL4 with the one-time reset of `doc_session_daemons.md` SD16 covers it; the plan counts the names in use and maps each. Our own symbolic icons stay limited to the seal and its states. Applications keep their own icons.
@@ -151,18 +161,27 @@ Kept as Calmo stood, the shell would wear indigo beside blue applications, Inter
 **VL12. Construction.** Each step merges on its own and is installed on the reference laptop for the maintainer to judge on screen before it merges.
 
 1. **Tokens and generator:** VL10, the extended contrast check, the CSS lint and the motion test. The shell's surfaces regenerate; the reference images of the layout tests are rebuilt in the same change.
-2. **Appearance preferences:** the schema of VL4, the apply function and its mirrors, the shell reading our schema instead of `CosmicTheme`, reduced motion. Spike VL-S1 opens this step.
+2. **Appearance preferences:** the schema of VL4 (accent mode and computed accent), the apply function and the GNOME keys it writes, the vendor default of the factory accent, the shell reading the keys instead of `CosmicTheme`, reduced motion. Spike VL-S1 opens this step.
 3. **The shell's form:** floating bar and dock, radii, shadows and durations from the tokens, Adwaita symbolic icons, `cosmic-icon-theme` out of the image when no surface names it.
 4. **The wallpaper accent and the hearth set:** `material-colors`, the OKLCH correction, the eighteen hearth images.
 5. **The bench's checks:** pixel contrast, edge offsets, frame-timed durations, the comparison board. The first signature of the maintainer closes the document's gate.
+
+### Failure behaviour
+
+- **An empty or unreadable `accent-computed`**, or a wallpaper that cannot be read, leaves the fixed accent in force; the mode stays `wallpaper` and the extraction runs again at the next change (VL3).
+- **A wallpaper of low chroma or extreme lightness** is corrected in OKLCH before use (VL3), so libadwaita never turns it into slate and the accent keeps 3:1 against every shell surface.
+- **The hearth wallpaper** makes the wallpaper mode behave as fixed (VL3).
+- **A value written by another tool** is a change of the user's choice and is applied as such (VL4); an enum value outside the table falls back to its default.
+- **A failed write to `CosmicTheme`** is logged and leaves the shell, which reads the GNOME keys, unaffected; only cosmic-comp's borders and indicators lag (VL4, spike VL-S1).
+- **Without our portal backend**, xdg-desktop-portal-gtk reads `color-scheme` and `high-contrast` from the same keys and serves no accent (section 1).
 
 ## 3. Changes to other documents
 
 - **`doc_shell.md`, SH5:**
   - The interface family is the system font, not Inter.
   - The factory accent is purple, not indigo.
-  - The shell reads `org.athanor.desktop.appearance`, not `CosmicTheme`; the "one accent control, COSMIC's" of stage 1 ends with VL4.
-  - The mark is no longer reserved to the shield: it appears in the greeter, the lock screen, first run and About (VL8).
+  - The shell reads the appearance keys of VL4 (the GNOME keys, with `accent-mode` and `accent-computed` of `org.athanor.desktop.appearance`), not `CosmicTheme`; the "one accent control, COSMIC's" of stage 1 ends with VL4.
+  - The mark appears only in the trust shield (VL8 as amended by ADR-0077 point 4).
   - The hearth follows the nine fixed accents.
   - `cosmic-icon-theme` gives way to adwaita-icon-theme.
   - Depth: the bar and the dock carry the float shadow when they float.
@@ -170,6 +189,7 @@ Kept as Calmo stood, the shell would wear indigo beside blue applications, Inter
 - **`doc_control_center.md`, CC4:** a first row, "System verified", that opens the shield's sheet, if that document keeps it; since 2026-10-06 (A2-24, #159) it no longer replaces the bar's shield.
 - **`doc_portal.md`:** the Settings backend serves the values of VL5.
 - **`doc_accessibility.md`:** high contrast, large text and reduced motion are the preferences of VL4, VL6 and VL9; it owns their exposure in the session and their tests with assistive technologies.
+- **Amendments of 2026-10-08 (ADR-0099, ADR-0057 (A2-20) and ADR-0099):** `doc_portal.md` PT5, `doc_settings.md` (its summary, SE13 and its About page), `doc_first_run.md` (FR13 and the mark), `doc_session_daemons.md` (the hearth wallpaper) and `doc_shell.md` SH5 read the keys of VL4. `doc_first_run.md` and `doc_settings.md` draw no mark (VL8).
 
 ## 4. Open doubts
 
@@ -178,7 +198,7 @@ Kept as Calmo stood, the shell would wear indigo beside blue applications, Inter
 - **VL-S3. The OKLCH correction of VL3** on a corpus of real wallpapers (photographs, flat colours, greyscale), to tune the chroma floor and the lightness search. The values of VL3 are the starting point, not measured.
 - **VL-S4. The size of the eighteen hearth images** at the largest output the image supports; if the cost is out of proportion, the hearth is drawn at run time earlier than stage 8.
 
-## 5. Acceptance
+## 5. Acceptance criteria
 
 - **In CI:**
   - The contrast check passes for the four variants, the nine presets and the hue sweep of VL11.
@@ -193,3 +213,16 @@ Kept as Calmo stood, the shell would wear indigo beside blue applications, Inter
   - The bar and the dock float 6 px from the edges with the radii of VL7.
   - The shield is present at the end of the bar in every state, a verified system included (VL8 as amended on 2026-10-06; BR6).
   - The comparison board of VL11 is signed.
+
+## 6. Decisions taken
+
+Decisions 1 to 6 were taken by the maintainer on 2026-10-05 (the status line of revision 1; decision 6 was amended on 2026-10-06), and decision 7 on 2026-10-08.
+
+1. **Identity.** Calmo is aligned to libadwaita rather than replaced by a new identity: the default applications and our own are libadwaita applications, and the shell and they should read as one system (section 1).
+2. **Direction.** B, "Calmo tinto", chosen on drafts of three directions (A "Continuo", B "Calmo tinto", C "Ardesia") drawn on the bar, the dock, the control center and a libadwaita window, light and dark (VL2).
+3. **Accent modes.** Two: fixed, the default, and from the wallpaper (VL3).
+4. **Factory accent.** Purple, `#9141ac`, the most recognisable of libadwaita's nine and the nearest to the spirit of Calmo's indigo (VL3).
+5. **Type.** The system font and libadwaita's relative type scale for the shell (VL6).
+6. **Shield.** Chosen on 2026-10-05: the shield in the bar only when it has something to say. Reversed on 2026-10-06 by maintainer decision A2-24 (#159): the shield is always visible at the end of the bar in every preset and state, as `doc_bar.md` BR6 says (VL8). In the same wave ADR-0077 point 4 settled where else the mark may appear: only in the trust shield.
+7. **The appearance store** (VL4; 2026-10-08, ADR-0099). Choice: the GNOME keys `color-scheme`, `accent-color` and `high-contrast` are the store, and the Athanor schema keeps only `accent-mode` and `accent-computed`; the mirrors are removed. Reason: A2-20 (ADR-0057) prefers the key every consumer already reads, so nothing can disagree and no write order has to be kept. Alternative set aside: an Athanor schema as the source with GNOME keys as mirrors, which left a window in which the two disagreed and made a change by another tool silently revert.
+
