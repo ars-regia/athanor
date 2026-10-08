@@ -16,12 +16,15 @@
 # KEYS_DIR replaces the booted image's keys with the public keys under it, for a first
 # switch to a derived image signed with its builder's own key (docs/operations/derived-images.md).
 #
+# IMAGE names a channel tag, `latest` or `stable`: the check reports a machine on any other
+# tag as pinned to one build, and nothing moves it (docs/architecture/doc_update_delivery.md, UD51).
+#
 # Usage: sudo bash scripts/switch-verified.sh REGISTRY/OWNER/athanor-system:latest [KEYS_DIR]
 #        ssh HOST 'sudo bash -s -- IMAGE' < scripts/switch-verified.sh
 set -euo pipefail
 
 usage() {
-    echo "usage: ${0##*/} REGISTRY/OWNER/athanor-system[-nvidia[-legacy]]:TAG [KEYS_DIR]" >&2
+    echo "usage: ${0##*/} REGISTRY/OWNER/athanor-system[-nvidia[-legacy]]:latest|stable [KEYS_DIR]" >&2
     exit 2
 }
 [[ $# -eq 1 || ($# -eq 2 && -n $2) ]] || usage
@@ -30,6 +33,18 @@ keys_dir=${2:-/usr/share/athanor/keys}
 name=${image%:*}
 registry=${name%/*}
 [[ $name != "$image" && $registry == */* ]] || usage
+# The machine follows the reference it switches to. A channel tag moves to each newer
+# promoted build; a run-number tag or a digest names one build and never receives an update
+# (docs/architecture/doc_update_delivery.md, UD51).
+repository=${image%%@*}
+repository=${repository%:*}
+case ${image#"$repository"} in
+:latest | :stable) ;;
+*)
+    echo "${0##*/}: ${image#"$repository"} is not a channel: it names one build, which never receives an update; switch to $repository:latest" >&2
+    exit 2
+    ;;
+esac
 
 work=$(mktemp -d /run/athanor-switch.XXXXXX)
 trap 'rm -r "$work"' EXIT
