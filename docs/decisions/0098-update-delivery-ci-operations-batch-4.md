@@ -17,11 +17,13 @@ The review of 2026-10-08 covered `doc_update_delivery.md` (revision 2 of 2026-10
 `repository-layout.md`). Their open questions were put to the maintainer, who answered on
 2026-10-08. Every answer below was the recommendation unless the text says otherwise.
 ADR-0096 signs the kernel's OCI artefacts with the project key; its scope needs one
-clarification (item 3). ADR-0097 belongs to a separate pull request.
+clarification (item 3). ADR-0097 belongs to a separate pull request. Item 6, decided on
+2026-10-09, amends the approval budget of A2-27 (ADR-0064), ADR-0080 item 4, ADR-0084 KC1 and
+ADR-0088 item 4.
 
 ## Decision
 
-On 2026-10-08 the maintainer decided:
+On 2026-10-08 the maintainer decided items 1 to 5, and on 2026-10-09 item 6:
 
 1. **The decisions of section 15 of `doc_update_delivery.md`**, taken on 2026-10-06 and recorded
    here as the index asks (revision 3 of the document applies them):
@@ -97,8 +99,8 @@ On 2026-10-08 the maintainer decided:
      merge.
 6. **Unattended image signing until 1.0** (decided on 2026-10-09). The environments
    `signing-images` and `bridge` lose their required reviewer until the 1.0 tag, when it
-   returns. Their deployment branches and the checks of `scripts/verify.py workflows` on signing
-   jobs stay as they are. `signing-kernel` keeps its required reviewer: a module signed with the
+   returns. Their deployment branches and administrator bypass stay as they are. `signing-kernel`
+   keeps its required reviewer: a module signed with the
    Machine Owner Key is trusted by Secure Boot on every machine that enrolled the key and is
    withdrawn only by rotating it, while a signed image reaches `:stable` only through the
    promotion and its evidence. The change takes effect only after the image signing job runs in
@@ -106,6 +108,12 @@ On 2026-10-08 the maintainer decided:
    environment also holds the kernel keys, so it keeps its reviewer for as long as it exists.
    With one maintainer who may approve their own runs, the reviewer added attention, not a
    second party (KC1), and it held every unattended build cycle at the signing step.
+   For `bridge` the reviewer is the only control on its path, and the risk is accepted until
+   1.0: the job copies digests that `verify-system-images` verified onto the previous owner with
+   `ATHANOR_BRIDGE_TOKEN` (SEC14), a classic token of `hr-mes` that reaches every package of that
+   account, and machines that do not verify their downloads pull from there (UD46). Without the
+   reviewer, a run on a protected branch uses that token unattended. The bridge stops at 1.0
+   (UD50), when the token is deleted.
 
 ## Consequences
 
@@ -125,4 +133,13 @@ On 2026-10-08 the maintainer decided:
   the branch is deleted; the execution of the layout move.
 - ADR-0084 is amended in one part only: KC1's required reviewer on `signing-images` (and on
   `bridge`) is suspended until the 1.0 tag by item 6. The change to `environments.json` follows
-  the end of the rotation, and the maintainer applies it with `ghsettings.py apply`.
+  the end of the rotation, and the maintainer applies it with `ghsettings.py apply`. The same
+  pull request changes the D43 check of `scripts/verify.py workflows`, which today requires a
+  reviewer on every `signing*` environment, so that it exempts `signing-images` until the 1.0 tag
+  and still requires one on `signing-kernel` and `signing`.
+- ADR-0080 item 4 (`signing-images` always), the approval budget of A2-27 (ADR-0064) and
+  ADR-0088 item 4 change in the same part only: until the 1.0 tag a release cycle asks for one
+  approval, `signing-kernel`, and only when the kernel or the NVIDIA modules change. ADR-0088's
+  accepted self-review risk and its compensating controls of PL5 then apply to `signing-kernel`
+  alone; the deployment branch restriction, the integrity ruleset and the key isolation of PL11
+  still bound the unattended image job.

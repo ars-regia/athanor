@@ -136,7 +136,9 @@ because its keys are then held twice.
 Both have the same protection in `environments.json`: required reviewer `hr-mes`; administrator
 bypass off (`can_admins_bypass: false`, set by hand: section 4); deployment branches `iso-v0` and
 `main`, both protected by `branch-protection.json` (required checks `Kernel gate`, `Spec gate`
-and `gate` on `iso-v0`, `Kernel gate` on `main`, section 8; no force push, no deletion).
+and `gate` on `iso-v0`, `Kernel gate` on `main`, section 8; no force push, no deletion). Once the
+rotation of `secrets.md` section 4.1 ends, `signing-images` and `bridge` lose the required
+reviewer until the 1.0 tag (ADR-0098 item 6); `signing-kernel` keeps it.
 
 `prevent_self_review` stays `false`, deferred until a second reviewer exists (secrets.md
 KC1). GitHub refuses the approval of the person who triggered the run, and a release run, or a

@@ -131,7 +131,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-24 | 0061 | [Desktop minor decisions](0061-desktop-minor-decisions.md) | accepted | shell |
 | A2-25 | 0062 | [Governance targets confirmed](0062-governance-targets-confirmed.md) | accepted | security, process |
 | A2-26 | 0063 | [Update policy](0063-update-policy.md) | amended by ADR-0082 | update |
-| A2-27 | 0064 | [Signing approvals and MOK enrolment](0064-signing-approvals-and-mok-enrolment.md) | amended by A2-35, ADR-0080 | signing, installer |
+| A2-27 | 0064 | [Signing approvals and MOK enrolment](0064-signing-approvals-and-mok-enrolment.md) | amended by A2-35, ADR-0080, ADR-0098 | signing, installer |
 | A2-28 | 0065 | [Bazaar waits for the Fedora 45 base](0065-bazaar-waits-for-fedora-45.md) | accepted | packages, shell |
 | A2-29 | 0066 | [Threat model path lists](0066-threat-model-path-lists.md) | accepted | security |
 | A2-30 | 0067 | [Offline help with Yelp](0067-offline-help-yelp.md) | accepted | docs, shell |
@@ -147,7 +147,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0077 | 0077 | [Desktop decisions from Audit 3](0077-desktop-decisions.md) | accepted | shell, apps, security |
 | ADR-0078 | 0078 | [Fedora 45 is the next base, with Fedora 44 as the fallback](0078-fedora-release-target.md) | accepted | platform |
 | ADR-0079 | 0079 | [Captive portals under strict DNS over TLS](0079-captive-portals-under-strict-dot.md) | accepted | network, security |
-| ADR-0080 | 0080 | [Pipeline architecture](0080-pipeline-architecture.md) | amended by ADR-0088 | build, signing, security |
+| ADR-0080 | 0080 | [Pipeline architecture](0080-pipeline-architecture.md) | amended by ADR-0088, ADR-0098 | build, signing, security |
 | ADR-0081 | 0081 | [CRA compliance posture](0081-cra-compliance-posture.md) | accepted | security, update, product |
 | ADR-0082 | 0082 | [Update control: postpone and opt-out](0082-update-control.md) | amended by ADR-0094 | update, security |
 | ADR-0083 | 0083 | [One supported desktop; derived images stay open](0083-one-desktop-derived-images-open.md) | accepted | product, shell, update |
@@ -155,7 +155,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0085 | 0085 | [Keyring prompter: the secret exchange comes from upstream oo7](0085-keyring-prompter-secret-exchange-source.md) | accepted | security, shell |
 | ADR-0086 | 0086 | [toolbox is not isolation; podman as container_t or the dev VM is](0086-toolbox-is-not-isolation.md) | accepted | security, apps |
 | ADR-0087 | 0087 | [Keep athanor-attestation outside the workspace until its Keylime rewrite](0087-attestation-outside-the-workspace.md) | accepted | security, build |
-| ADR-0088 | 0088 | [Pipeline revision 2](0088-pipeline-revision-2.md) | accepted | build, signing, security |
+| ADR-0088 | 0088 | [Pipeline revision 2](0088-pipeline-revision-2.md) | amended by ADR-0098 | build, signing, security |
 | ADR-0089 | 0089 | [Defaults that contact or listen are off until the person turns them on](0089-defaults-that-contact-or-listen.md) | accepted | security, network |
 | ADR-0090 | 0090 | [Account lockout through authselect's with-faillock](0090-account-lockout-faillock.md) | accepted | security |
 | ADR-0091 | 0091 | [QEMU stays in the image for the runner and the development VM](0091-qemu-in-the-image.md) | accepted | packages |

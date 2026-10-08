@@ -22,7 +22,7 @@ Counts are as of 2026-10-06; the command beside each recomputes it.
 | 29 branches existed on GitHub on 2026-10-06 | `gh api repos/ars-regia/athanor/branches --paginate --jq '.[].name' \| wc -l` |
 | `nix-vanguard.yml` triggers on `main` (and `develop`) only, so a push or pull request to `iso-v0` never runs it | [nix-vanguard.yml](../../.github/workflows/nix-vanguard.yml) lines 5 and 7 |
 | The installer ISO's `:latest` publishes from `refs/heads/main` only, so it does not publish today | [call-system-image.yml](../../.github/workflows/call-system-image.yml) line 314 |
-| The kernel's `:latest` follows the default branch, whatever its name | [kernel-build.yml](../../.github/workflows/kernel-build.yml) lines 316 and 339 |
+| The kernel's `:latest` follows the default branch, whatever its name | [kernel-build.yml](../../.github/workflows/kernel-build.yml) lines 320 and 345 |
 | The image trusts kernels and NVIDIA modules signed by workflows on `refs/heads/iso-v0` or `refs/heads/main` (`KERNEL_TRUSTED_REFS`), and `main` is not protected | [kernel-artifacts.sh](../../system/kernel-artifacts.sh) lines 64 and 73-74 |
 
 ## 2. Model (decided 2026-10-08, [ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md))
