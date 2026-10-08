@@ -166,7 +166,15 @@ class UkiEnroll(unittest.TestCase):
     def test_refuses_when_pcr_7_was_never_measured(self):
         # systemd-cryptenroll only warns "PCR policy effectively unenforced" and binds the
         # keyslot to the PIN alone; seen on OVMF without its TPM driver, Secure Boot on.
-        for pcr7 in (PCR7_UNMEASURED, None, "[]\n", '[{"nr":7,"name":"secure-boot-policy"}]\n'):
+        for pcr7 in (
+            PCR7_UNMEASURED,
+            None,
+            "[]\n",
+            '[{"nr":7,"name":"secure-boot-policy"}]\n',
+            '[{"nr":7,"name":"secure-boot-policy","sha256":""}]\n',
+            # A field systemd might add ahead of the digest is not a digest.
+            '[{"nr":7,"name":"secure-boot-policy","description":"p","sha256":"' + "0" * 64 + '"}]\n',
+        ):
             with self.subTest(pcr7=pcr7):
                 result, calls = run(WITHOUT_RECOVERY, pcr7=pcr7)
                 self.assertNotEqual(result.returncode, 0)

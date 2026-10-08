@@ -56,10 +56,10 @@ fi
 
 # systemd-analyze reads PCR 7 from the bank it would use and names that bank's algorithm.
 if ! pcr7=$(systemd-analyze pcrs 7 --json=short) || ! python3 -c '
-import json, sys
+import json, re, sys
 (entry,) = json.load(sys.stdin)
-digest = next(v for k, v in entry.items() if k not in ("nr", "name"))
-sys.exit(int(set(digest) == {"0"}))
+(digest,) = (v for k, v in entry.items() if k in ("sha1", "sha256", "sha384", "sha512"))
+sys.exit(not (re.fullmatch("[0-9a-f]{40,128}", digest) and int(digest, 16)))
 ' <<< "$pcr7"; then
     echo "PCR 7 is unreadable or was never measured, so the keyslot would rest on the PIN alone; not enrolling." >&2
     exit 1
@@ -79,4 +79,4 @@ fi
 systemd-cryptenroll --tpm2-device=auto --tpm2-with-pin=yes --tpm2-pcrs=7 --tpm2-pcrlock= \
     --wipe-slot=tpm2 "$device"
 echo "From the next boot the volume asks for the TPM PIN; the passphrase and the recovery key still unlock it."
-echo "A wrong PIN is asked for again until the TPM locks out; only then does the boot ask for the passphrase."
+echo "After repeated wrong PINs the boot asks for the passphrase; the TPM locks out after too many."
