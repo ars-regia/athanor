@@ -326,6 +326,7 @@ publish-image)
 publish-build-image)
     # The build stage only compiles and runs unit tests, so it is published on its own: the rig's
     # digest, and with it the pixels of the goldens, stay where they are.
+    mkdir -p "$out"
     podman build "${rig_base[@]}" --target build -t "$local_image:build" -f "$rig/Containerfile" "$rig"
     podman push --digestfile "$out/build-image.digest" "$local_image:build" "docker://$registry/athanor-shell-rig-build:latest"
     echo "published $registry/athanor-shell-rig-build@$(cat "$out/build-image.digest")"

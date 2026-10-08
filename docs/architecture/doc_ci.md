@@ -4,7 +4,7 @@
 - **Owner:** the maintainer.
 - **Status:** draft, revision 1 (2026-10-06), awaiting the maintainer's review. Facts were read on `origin/iso-v0` at `c1bab0ad` and from the GitHub API on 2026-10-06.
 - **Depends on:** [doc_build_system.md](doc_build_system.md) (packages and tiers), [doc_build_ordering.md](doc_build_ordering.md) (O1-O9, kernel and module order), [doc_kernel_build.md](doc_kernel_build.md), [doc_system_image.md](doc_system_image.md), [doc_update_trust.md](doc_update_trust.md) (D1, `:stable`), the secrets inventory `docs/operations/secrets.md`, the runner [README](../../scripts/runner/README.md).
-- **Defines:** CI1-CI29 (one per workflow), CB1-CB4 (known broken workflows), CP1-CP3 (proposals).
+- **Defines:** CI1-CI30 (one per workflow), CB1-CB4 (known broken workflows), CP1-CP3 (proposals).
 - **Enforced by:** `python3 scripts/verify.py ci`. It fails when a workflow file is missing here, when this document names a workflow file that does not exist, or when a secret or variable a workflow references is not named here.
 
 **Target.** This document describes the workflows as they are. The architecture they converge on, and the plan that gets there, is [doc_pipeline.md](doc_pipeline.md) (ADR-0080).
@@ -331,6 +331,14 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 - **Scripts:** `scripts/github-settings/ghsettings.py`.
 - **Health:** not run yet; red until the settings App and its two names exist.
 
+### CI30 Publish the shell rig build image
+
+- **File:** `publish-rig-build-image.yml`. **Purpose:** builds the build stage of the shell rig, pushes `athanor-shell-rig-build`, pulls it back by digest and opens the PR that commits the digest as `forge/test/shell/build-image.digest`, so that `rig.sh` (CI15, CI27) pulls the stage instead of building it. The maintainer runs it when the build stage changes and makes the package public the first time.
+- **Triggers:** dispatch only. **Outputs:** artifact `rig-build-image-digest`, PR labelled `rig-build-image` (never auto-merged; a still-open PR of another digest fails the run naming it).
+- **Secrets, variables:** `GITHUB_TOKEN` (job `publish`, `packages: write`), `KERNEL_BUMP_TOKEN` (the PR step of job `pin` only), `KERNEL_REGISTRY`. **Environment:** none. **Runner:** hosted. **Concurrency:** `publish-rig-build-image`, no cancel.
+- **Scripts:** `forge/test/shell/rig.sh publish-build-image`, `forge/test/shell/pin_build_image.py`, `forge/specs/azoth/open_bump_pr.sh`.
+- **Health:** not run yet.
+
 ## 3. Known broken workflows
 
 | Id | Workflow | Cause | Evidence |
@@ -361,14 +369,14 @@ Every name below is described in the secrets inventory, `docs/operations/secrets
 | Name | Kind | Defined in | Used by |
 |---|---|---|---|
 | `GITHUB_TOKEN` | automatic token | GitHub | CI1, CI3-CI9, CI10-CI13, CI20, CI26 |
-| `KERNEL_BUMP_TOKEN` | secret (PAT) | repository | CI9, CI13, CI14, CI17, CI19 |
+| `KERNEL_BUMP_TOKEN` | secret (PAT) | repository | CI9, CI13, CI14, CI17, CI19, CI30 |
 | `SPECS_UPDATE_TOKEN` | secret (PAT) | repository | CI20 |
 | `FORGE_PAT` | secret (PAT, delete:packages) | repository | CI21 |
 | `SECUREBOOT_SIGNING_KEY` | secret | environment `signing-kernel` | CI1 |
 | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | secret | environment `signing-images` | CI1 |
 | `MODULE_SIGNING_KEY` | secret | environment `signing-kernel` | CI1 |
 | `REGISTRY_HOST` | variable, default `ghcr.io` | not set | CI1, CI3, CI4, CI11, CI14, CI21, CI22 |
-| `KERNEL_REGISTRY` | variable, default `ghcr.io/<owner>` | not set | CI1, CI6, CI8, CI9, CI13, CI25, CI26 |
+| `KERNEL_REGISTRY` | variable, default `ghcr.io/<owner>` | not set | CI1, CI6, CI8, CI9, CI13, CI25, CI26, CI30 |
 | `BUILDER_STABLE_TAG` | variable, default `latest` | not set | CI21, CI22 |
 | `SETTINGS_APP_PRIVATE_KEY` | secret (GitHub App key, read-only App) | repository, not set yet | CI29 |
 | `SETTINGS_APP_CLIENT_ID` | variable, no default | repository, not set yet | CI29 |
