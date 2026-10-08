@@ -8,7 +8,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
   - `doc_shell.md`: of COSMIC only cosmic-comp stays, and `athanor-compositor-client` is the only crate that may know COSMIC (SH2, SH3, SH4). Internationalisation is a requirement of every surface (`doc_shell.md:43`). The test matrix renders English, German and a right-to-left pseudo-locale, with `LC_ALL` set per case and `TZ=UTC` (SH13, `doc_shell.md:177-184`). "All strings go through gettext from the first commit" (`doc_shell.md:184`).
   - `doc_shell_standard.md`: no text is truncated in German, and the layout mirrors under a right-to-left locale (ST7).
   - `doc_bar.md`: the input-source module shows the active layout and switches between the configured ones through the compositor client (`doc_bar.md:64`). The clock follows the locale and COSMIC's `military_time` (`doc_bar.md:65`). Right-to-left mirroring is designed in `doc_bar.md:136`. Behind `wp_security_context_v1` a client loses, among other globals, the input-method and virtual-keyboard globals (`doc_bar.md:9`).
-  - `doc_visual_language.md` (revision 1): the system font is Adwaita Sans 11, with Adwaita Mono for monospace. The shell names no family (VL, `doc_visual_language.md:82`).
+  - `doc_visual_language.md` (revision 1): the system font is Adwaita Sans 11, with Adwaita Mono for monospace. The shell names no family (VL, `doc_visual_language.md:92`).
   - `doc_software.md`, SW14: gettext from the first commit, Italian and English shipped, mirrored layout under right-to-left text (`doc_software.md:196`).
 - **The register** (`shell-features.md`, v1, frozen 2026-10-04) holds these entries in this area:
 
@@ -313,7 +313,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
 
 **LN13. Fonts for every script.**
 
-- **The interface font** is the system font, Adwaita Sans 11 (`doc_visual_language.md:82`). No Athanor program names a family.
+- **The interface font** is the system font, Adwaita Sans 11 (`doc_visual_language.md:92`). No Athanor program names a family.
 - **Scripts Adwaita Sans lacks** are drawn by fontconfig's fallback to the fonts `base-atomic:43` installs (section 1). The image adds no font and removes none of the `default-fonts-*` packages.
 - **The test rig** installs `adwaita-sans-fonts` and `adwaita-mono-fonts`, so the goldens use the font the image uses. It also adds `google-noto-sans-hebrew-fonts` and `google-noto-sans-cjk-vf-fonts`, so a right-to-left case and a CJK fallback case can be rendered.
 - **A new font case** in the rig renders the bar's clock and a launcher result with an Arabic, a Japanese and a Hindi application name. Besides the golden, the case asserts that Pango's `pango_layout_get_unknown_glyphs_count` is zero for each string.
@@ -439,7 +439,7 @@ Applied with the approval of this document. Line numbers into code are those of 
   - shows and switches the layout through the compositor client (LN9), and restores at unlock the group that was active when the session locked (LP14, D14);
   - its acceptance (section 5, item 11 of `doc_lock_and_prompts.md`) adds the case of cosmic-comp#2702: "with an IBus engine enabled and holding the keyboard grab, the lock screen receives every key, the password included, and the input method none" (LN12). Its spike L2 and S2 here run the same check, and its spike L14 (switching while locked, LP14) runs with S6 here;
   - the lock screen, like the greeter, offers no input method.
-- **`doc_accessibility.md`** (AX12 at `doc_accessibility.md:133-138`, decision 5 at `doc_accessibility.md:252`): states the slot rule of LN12. `athanor-osk` and IBus compete for the single input-method slot per seat (cosmic-osk#44); while an engine is enabled, IBus holds the slot and `athanor-osk` types through `zwp_virtual_keyboard_v1` only. The accessibility spike on the on-screen keyboard and S9 here cover it together.
+- **`doc_accessibility.md`** (AX12 at `doc_accessibility.md:168-176`, decision 5 at `doc_accessibility.md:340`): states the slot rule of LN12. `athanor-osk` and IBus compete for the single input-method slot per seat (cosmic-osk#44); while an engine is enabled, IBus holds the slot and `athanor-osk` types through `zwp_virtual_keyboard_v1` only. The accessibility spike on the on-screen keyboard and S9 here cover it together.
 - **`doc_portal.md`**: the Settings backend serves `org.gnome.desktop.interface clock-format` (LN15).
 - **`doc_settings.md`**:
   - the Language and Region, Keyboard and Input-method pages use only the stores and interfaces of LN15, and say that a language or region change takes effect at the next login;
