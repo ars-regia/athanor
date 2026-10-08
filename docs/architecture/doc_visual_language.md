@@ -189,7 +189,7 @@ Kept as Calmo stood, the shell would wear indigo beside blue applications, Inter
 - **`doc_control_center.md`, CC4:** a first row, "System verified", that opens the shield's sheet, if that document keeps it; since 2026-10-06 (A2-24, #159) it no longer replaces the bar's shield.
 - **`doc_portal.md`:** the Settings backend serves the values of VL5.
 - **`doc_accessibility.md`:** high contrast, large text and reduced motion are the preferences of VL4, VL6 and VL9; it owns their exposure in the session and their tests with assistive technologies.
-- **Amendments of 2026-10-08 (ADR-0099, ADR-0057 (A2-20) and ADR-0099):** `doc_portal.md` PT5, `doc_settings.md` (its summary, SE13 and its About page), `doc_first_run.md` (FR13 and the mark), `doc_session_daemons.md` (the hearth wallpaper) and `doc_shell.md` SH5 read the keys of VL4. `doc_first_run.md` and `doc_settings.md` draw no mark (VL8).
+- **Amendments of 2026-10-08 (ADR-0057 (A2-20) and ADR-0099):** `doc_portal.md` PT5, `doc_settings.md` (its summary, SE13 and its About page), `doc_first_run.md` (FR13 and the mark), `doc_session_daemons.md` (the hearth wallpaper) and `doc_shell.md` SH5 read the keys of VL4. `doc_first_run.md` and `doc_settings.md` draw no mark (VL8).
 
 ## 4. Open doubts
 

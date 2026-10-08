@@ -82,7 +82,7 @@ The numbers are reasoned proposals, not measurements: 100 ms is the classic limi
 | `athanor-settings`, no window    | 40 MB         | `doc_settings.md`, SE5                                        |
 | `athanor-a11y`                   | 16 MB         | `doc_accessibility.md`, section 4, item 8                     |
 | `athanor-a11y-gate`              | 16 MB         | `doc_accessibility.md`, section 4, item 8                     |
-| `athanor-osk` (proposal of this revision, ADR-0099; not in the sum) | 48 MB | `doc_accessibility.md`, AX12 and section 4, item 8 (to be measured on the reference machine) |
+| `athanor-osk` (proposal of this revision, ADR-0099; not in the sum) | not sized | `doc_accessibility.md` AX12; its budget is measured on the reference machine before the row joins the sum |
 | **Sum of the declared ceilings** | **584 MB**    | 12 processes                                                  |
 
 Two further ceilings are declared in specifications that are not yet merged into this branch, and are listed apart until they are: `athanor-control-center` 64 MB (`doc_control_center.md`, CC2 and section 4, item 5) and `athanor-clipd` 24 MB (same item), both on branch `control-center-spec`. With them the sum is 672 MB for 14 processes. **Pending** means the figures are not yet part of this document's sum; they join it when that specification merges.
