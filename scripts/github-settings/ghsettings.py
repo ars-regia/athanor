@@ -844,15 +844,14 @@ def without_declarations(area, data):
 
 def cmd_export(repo, directory, _args):
     directory.mkdir(parents=True, exist_ok=True)
-    for area, (export, _) in AREAS.items():
-        data = export(repo)
-        if area == "rulesets" and any(
-            r["bypass_actors"] is None for r in data.values()
-        ):
-            raise GhError(
-                "the bypass actors of the rulesets are not readable with this token: "
-                "export needs write access to the administration settings"
-            )
+    # Every area is read before the first write, so a refusal leaves no partial export.
+    exported = {area: export(repo) for area, (export, _) in AREAS.items()}
+    if any(r["bypass_actors"] is None for r in exported["rulesets"].values()):
+        raise GhError(
+            "the bypass actors of the rulesets are not readable with this token: "
+            "export needs write access to the administration settings"
+        )
+    for area, data in exported.items():
         path = directory / f"{area}.json"
         if area in DECLARATIONS and path.exists():
             old = load(directory, area)
@@ -955,8 +954,9 @@ def drift(repo, directory):
         want, live = desired[area], export(repo)
         extra = _personal_tokens(want, live) if area == "actions" else []
         if area == "rulesets":
-            hidden, notes = hidden_bypass(repo, want, live)
+            hidden, partial = hidden_bypass(repo, want, live)
             lines += hidden
+            notes += partial
         for line in list(compare("", want, live)) + extra:
             # A difference of the whole area has an empty path: "drift pages: ...".
             lines.append(

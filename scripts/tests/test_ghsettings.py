@@ -296,9 +296,15 @@ class GhSettings(unittest.TestCase):
 
     def test_export_refuses_hidden_bypass_actors(self):
         self.hide_bypass_actors(0)
+        live = json.loads(self.state.read_text())
+        live[f"{R}"]["description"] = "changed live"
+        self.state.write_text(json.dumps(live))
+        before = {p.name: p.read_text() for p in self.dir.iterdir()}
         result = self.run_script("export")
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
         self.assertIn("bypass actors", result.stderr)
+        # A refused export writes no area, not even the ones read before rulesets.
+        self.assertEqual({p.name: p.read_text() for p in self.dir.iterdir()}, before)
 
     def test_diff_is_clean_right_after_export(self):
         result = self.run_script("diff")
