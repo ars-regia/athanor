@@ -271,7 +271,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 
 ### CI22 Rust Security & FFI Audit
 
-- **File:** `rust-security-audit.yml`. **Purpose:** clippy, cargo vet and the advisory half of cargo deny (licences, bans and sources run in the pull request gate, `just check-deny`), Kani on two crates, eBPF and bare-metal builds.
+- **File:** `rust-security-audit.yml`. **Purpose:** clippy, cargo vet and the advisory half of cargo deny (licences, bans and sources run in the pull request gate, `just check-deny`). The `advisories` job runs on the hosted runner like pr.yml's `check` job; the clippy and cargo vet job stays in the builder container and is skipped on `iso-v0` (CB1). The Kani and bare-metal jobs were removed on 2026-10-08: their targets no longer exist.
 - **Triggers:** push and `pull_request` on `main`, `develop`, `iso-v0`, and a weekly schedule. **Outputs:** artifacts `debug-logs`, `baremetal-artifact-<target>`.
 - **Secrets, variables:** `REGISTRY_HOST`, `BUILDER_STABLE_TAG`. **Environment:** none. **Runner:** hosted, inside the `athanor-builder` container. **Concurrency:** `<workflow>-<ref>`, cancels in progress.
 - **Scripts:** none.
