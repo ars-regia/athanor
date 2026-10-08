@@ -338,6 +338,49 @@ def export_rulesets(repo):
     return {name: body for name, (_, body) in _live_rulesets(repo).items()}
 
 
+# A GitHub App installation token with Administration read gets a ruleset's
+# bypass_actors as null over REST and each actor as null over GraphQL; GraphQL still
+# answers how many there are (observed 2026-10-08, maintenance.yml run 37845913138).
+# Reading the actors needs write access to the administration settings.
+def bypass_counts(repo):
+    """{ruleset name: number of bypass actors} of the rulesets this repository owns."""
+    owner, name = repo.split("/", 1)
+    query = (
+        "query($o: String!, $n: String!) { repository(owner: $o, name: $n) "
+        "{ rulesets(first: 100, includeParents: false) "
+        "{ nodes { name bypassActors { totalCount } } } } }"
+    )
+    body = {"query": query, "variables": {"o": owner, "n": name}}
+    answer = gh("graphql", method="POST", body=body)
+    live = ((answer or {}).get("data") or {}).get("repository") or {}
+    nodes = (live.get("rulesets") or {}).get("nodes")
+    if nodes is None:
+        raise GhError(f"gh api graphql: the rulesets of {repo} are not readable")
+    return {n["name"]: n["bypassActors"]["totalCount"] for n in nodes}
+
+
+def hidden_bypass(repo, want, live):
+    """Compares by count the bypass actors this token cannot read, and takes them out of
+    want and live so that compare() leaves them alone. Returns (drift lines, notes)."""
+    hidden = [n for n, r in live.items() if r.get("bypass_actors") is None and n in want]
+    if not hidden:
+        return [], []
+    counts = bypass_counts(repo)
+    lines, notes = [], []
+    for name in sorted(hidden):
+        live[name].pop("bypass_actors")
+        wanted = len(want[name].pop("bypass_actors", None) or [])
+        path = f"rulesets {name}.bypass_actors"
+        if counts.get(name) != wanted:
+            lines.append(f"drift {path}: file {wanted} actor(s), live {counts.get(name)}")
+        else:
+            notes.append(
+                f"note {path}: {wanted} actor(s) as in the file; who they are and their "
+                "bypass mode are not readable with this token"
+            )
+    return lines, notes
+
+
 def _names(path, key):
     return sorted(item["name"] for item in gh_list(path, key))
 
@@ -801,8 +844,14 @@ def without_declarations(area, data):
 
 def cmd_export(repo, directory, _args):
     directory.mkdir(parents=True, exist_ok=True)
-    for area, (export, _) in AREAS.items():
-        data = export(repo)
+    # Every area is read before the first write, so a refusal leaves no partial export.
+    exported = {area: export(repo) for area, (export, _) in AREAS.items()}
+    if any(r["bypass_actors"] is None for r in exported["rulesets"].values()):
+        raise GhError(
+            "the bypass actors of the rulesets are not readable with this token: "
+            "export needs write access to the administration settings"
+        )
+    for area, data in exported.items():
         path = directory / f"{area}.json"
         if area in DECLARATIONS and path.exists():
             old = load(directory, area)
@@ -896,19 +945,24 @@ def _personal_tokens(want, live):
 
 
 def drift(repo, directory):
-    """The differences between the files and the live state, one line each."""
+    """The differences between the files and the live state, one line each, and the
+    notes on what this token could compare only in part."""
     # Every file is read before the first call, so a bad file stops the run early.
     desired = {area: load(directory, area) for area in AREAS}
-    lines = []
+    lines, notes = [], []
     for area, (export, _) in AREAS.items():
         want, live = desired[area], export(repo)
         extra = _personal_tokens(want, live) if area == "actions" else []
+        if area == "rulesets":
+            hidden, partial = hidden_bypass(repo, want, live)
+            lines += hidden
+            notes += partial
         for line in list(compare("", want, live)) + extra:
             # A difference of the whole area has an empty path: "drift pages: ...".
             lines.append(
                 f"drift {area}{line}" if line[0] == ":" else f"drift {area} {line}"
             )
-    return lines
+    return lines, notes
 
 
 def check_read_rights(repo):
@@ -926,8 +980,8 @@ def check_read_rights(repo):
 
 
 def cmd_diff(repo, directory, _args):
-    lines = drift(repo, directory)
-    for line in lines:
+    lines, notes = drift(repo, directory)
+    for line in notes + lines:
         print(line)
     if lines:
         print(f"{len(lines)} drift(s): live state differs from the files")

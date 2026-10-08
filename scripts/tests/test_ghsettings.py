@@ -88,6 +88,11 @@ LIVE = {
                 "mergeCommitTitle": "MERGE_MESSAGE",
                 "squashMergeCommitMessage": "COMMIT_MESSAGES",
                 "squashMergeCommitTitle": "COMMIT_OR_PR_TITLE",
+                "rulesets": {
+                    "nodes": [
+                        {"name": "protect-main", "bypassActors": {"totalCount": 0}}
+                    ]
+                },
             }
         }
     },
@@ -261,6 +266,45 @@ class GhSettings(unittest.TestCase):
         result = self.run_script("diff")
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
         self.assertIn("not readable", result.stderr)
+
+    def hide_bypass_actors(self, count):
+        # An App installation token reads a ruleset's bypass actors as null over REST
+        # and GraphQL, but GraphQL still counts them (maintenance.yml run 37845913138).
+        live = json.loads(self.state.read_text())
+        live[f"{R}/rulesets/5"]["bypass_actors"] = None
+        nodes = live["graphql"]["data"]["repository"]["rulesets"]["nodes"]
+        nodes[0]["bypassActors"]["totalCount"] = count
+        self.state.write_text(json.dumps(live))
+
+    def test_hidden_bypass_actors_are_counted_and_the_limit_is_stated(self):
+        self.hide_bypass_actors(0)
+        result = self.run_script("diff")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(
+            "note rulesets protect-main.bypass_actors: 0 actor(s) as in the file", result.stdout
+        )
+        self.assertIn("not readable with this token", result.stdout)
+
+    def test_a_hidden_bypass_actor_added_live_is_drift(self):
+        self.hide_bypass_actors(1)
+        result = self.run_script("diff")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn(
+            "drift rulesets protect-main.bypass_actors: file 0 actor(s), live 1",
+            result.stdout,
+        )
+
+    def test_export_refuses_hidden_bypass_actors(self):
+        self.hide_bypass_actors(0)
+        live = json.loads(self.state.read_text())
+        live[f"{R}"]["description"] = "changed live"
+        self.state.write_text(json.dumps(live))
+        before = {p.name: p.read_text() for p in self.dir.iterdir()}
+        result = self.run_script("export")
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("bypass actors", result.stderr)
+        # A refused export writes no area, not even the ones read before rulesets.
+        self.assertEqual({p.name: p.read_text() for p in self.dir.iterdir()}, before)
 
     def test_diff_is_clean_right_after_export(self):
         result = self.run_script("diff")

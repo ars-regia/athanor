@@ -201,7 +201,12 @@ keeps it so; nothing in the repository enforces it. Its key, `SETTINGS_APP_PRIVA
 (secrets.md SEC13), then mints nothing that changes the repository. The REST repository
 object answers the merge settings (`allow_squash_merge` and the rest) as null to an App
 installation token, so `ghsettings.py` reads those ten fields through GraphQL, which
-answers them to both tokens. Its client id is the variable
+answers them to both tokens. The same token reads a ruleset's bypass actors as null over
+REST and each actor as null over GraphQL, which still counts them; reading them needs write
+access to the administration settings, which the App does not get. `diff` therefore compares
+their number and prints a `note` line saying who they are and their mode were not read, and
+`export` refuses to write a ruleset without them; the maintainer's own `diff` compares them in
+full (maintainer decision, 2026-10-08). Its client id is the variable
 `SETTINGS_APP_CLIENT_ID` (VAR6). A drift fails the job; the `alert` action of PL51 that
 turns a failed scheduled job into a `ci-alert` issue is not part of this change.
 
