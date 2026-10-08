@@ -1,0 +1,14 @@
+[package]
+name = "athanor-controls"
+version = "1.0.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "The detail pages of the network, Bluetooth, audio and battery services, which the bar's popovers and the control center share"
+authors = ["Athanor Forge <forge@athanor.os>"]
+
+[dependencies]
+athanor-i18n = { path = "../athanor-i18n" }
+athanor-services = { path = "../athanor-services" }
+gtk4 = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync"] }
+tracing = { workspace = true }

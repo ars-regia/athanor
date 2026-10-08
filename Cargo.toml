@@ -5,8 +5,10 @@ members = [
   "forge/specs/athanor-layout-chooser/athanor-layout-chooser-1.0.0",
   "forge/specs/athanor-shelld/athanor-shelld-1.0.0",
   "forge/specs/athanor-bar/athanor-bar-1.0.0",
+  "system/athanor-controls",
   "forge/specs/athanor-dock/athanor-dock-1.0.0",
   "forge/specs/athanor-launcher/athanor-launcher-1.0.0",
+  "forge/specs/athanor-control-center/athanor-control-center-1.0.0",
   "forge/specs/athanor-update/athanor-update-1.0.0",
   "forge/specs/athanor-update/athanor-update-notify-1.0.0",
   "forge/specs/athanor-xdg-desktop-portal-athanor/xdg-desktop-portal-athanor-1.0.0",
@@ -20,6 +22,7 @@ members = [
   "system/athanor-portal",
   "system/athanor-preview-render",
   "system/athanor-search",
+  "system/athanor-services",
   "system/athanor-unit",
   "system/athanor-trust-state",
 ]
@@ -73,9 +76,8 @@ cairo-rs = "0.22"
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 wayland-scanner = "0.31"
-# The PulseAudio protocol that pipewire-pulse serves, on a GLib main loop (athanor-bar).
+# The PulseAudio protocol that pipewire-pulse serves, on its threaded main loop (athanor-services).
 libpulse-binding = "2.30"
-libpulse-glib-binding = "2.29"
 
 # Serialization & Error Handling
 serde = { version = "1.0.229", features = ["derive"] }

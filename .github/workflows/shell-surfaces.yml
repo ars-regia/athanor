@@ -21,6 +21,9 @@ on:
       - "system/athanor-preview-render/**"
       - "forge/specs/athanor-launcher/**"
       - "system/athanor-apps/**"
+      - "system/athanor-controls/**"
+      - "system/athanor-services/**"
+      - "forge/specs/athanor-control-center/**"
       - "system/athanor-unit/**"
       - "system/athanor-trust-state/**"
       - "forge/test/shell/**"
@@ -277,6 +280,23 @@ jobs:
           path: |
             .scratch/shell-rig/*.log
             .scratch/shell-rig/dock-*.png
+
+  control-center:
+    name: Control center build, tests on a display and link order
+    needs: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rig image
+        run: bash forge/test/shell/rig.sh build-image
+      - name: Build the control center, with athanor-services and athanor-controls, and check the DT_NEEDED order
+        run: bash forge/test/shell/rig.sh build-control-center
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: shell-rig-control-center
+          path: .scratch/shell-rig/*.log
 
   launcher:
     name: Launcher build, layer-surface guard, end to end, accessibility and surface cases

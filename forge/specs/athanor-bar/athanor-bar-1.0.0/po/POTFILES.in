@@ -12,6 +12,7 @@ src/ui/audio.rs
 src/ui/battery.rs
 src/ui/bluetooth.rs
 src/ui/clock.rs
+src/ui/control_center.rs
 src/ui/input.rs
 src/ui/logind.rs
 src/ui/mod.rs
@@ -24,5 +25,10 @@ src/ui/shield.rs
 src/ui/running.rs
 src/ui/tiling.rs
 src/ui/tray.rs
+../../../../system/athanor-controls/src/audio.rs
+../../../../system/athanor-controls/src/battery.rs
+../../../../system/athanor-controls/src/bluetooth.rs
+../../../../system/athanor-controls/src/network.rs
+../../../../system/athanor-controls/src/widgets.rs
 ../../../../system/athanor-apps/src/openers.rs
 ../../../../system/athanor-apps/src/row.rs

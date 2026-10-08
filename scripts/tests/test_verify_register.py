@@ -31,11 +31,12 @@ ROWS = """# Shell feature register
 """
 
 
-def counts(surface, have, partial, missing, excluded, total):
+def counts(surface, have, partial, missing, excluded, total, decided=0):
     return (
         f"\n### {surface}\n\n| Status | Entries |\n|---|---|\n| have | {have} |\n"
         f"| partial | {partial} |\n| missing | {missing} |\n"
-        f"| excluded (proposed) | {excluded} |\n| total | {total} |\n"
+        f"| excluded (proposed) | {excluded} |\n| excluded | {decided} |\n"
+        f"| total | {total} |\n"
     )
 
 
@@ -70,6 +71,20 @@ class RegisterCountsTest(unittest.TestCase):
         found = verify.register_count_problems(text)
         self.assertEqual(len(found), 1, found)
         self.assertIn("F-bar-02", found[0])
+
+    def test_a_decided_exclusion_is_a_status_of_its_own(self):
+        text = ROWS.replace("| missing | not verified |", "| excluded | decided 2026-10-04 |")
+        self.assertEqual(
+            verify.register_count_problems(
+                text + counts("Bar", 1, 1, 0, 0, 3, decided=1) + counts("Dock", 0, 0, 0, 1, 1)
+            ),
+            [],
+        )
+        found = verify.register_count_problems(
+            text + counts("Bar", 1, 1, 1, 0, 3) + counts("Dock", 0, 0, 0, 1, 1)
+        )
+        self.assertEqual(len(found), 2, found)
+        self.assertTrue(all("Bar" in p for p in found), found)
 
 
 if __name__ == "__main__":

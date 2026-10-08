@@ -132,15 +132,15 @@ This closes open doubt 4 of `doc_shell.md`.
 
 | Preset | Start | Centre | End |
 |---|---|---|---|
-| `float` | workspaces, application library | clock | input source, accessibility, tray, tiling, audio, Bluetooth, network, battery, notifications, power, shield |
-| `bar` | launcher, application library, running applications | none | the same status modules, then clock, shield |
+| `float` | workspaces, application library | clock | input source, accessibility, tray, tiling, audio, Bluetooth, network, battery, notifications, power, control center, shield |
+| `bar` | launcher, application library, running applications | none | the same status modules, then clock, control center, shield |
 | `minimal` | workspaces, application library | clock | as in `float` |
 
 - **Right-to-left text.** GTK mirrors start and end. The vertical dock mirrors with them: the left edge of SH7 is the start edge, the right edge under right-to-left text.
 - **The dock (2c).** One surface per output. `dock_edge(panel, shape)` picks its edge; a vertical dock carries icons only (SH9.3).
   - It holds the launcher, workspaces and application-library buttons, the favourites and the running applications, minimised windows included, as COSMIC's dock does. The context menu pins and unpins; dragging reorders the favourites.
   - Visible: an exclusive zone. Auto-hide: no exclusive zone; it appears after a short delay when the pointer reaches a strip a few pixels wide on its edge. None: no surface.
-  - Auto-hide is specified by the scenarios of `doc_shell_standard.md`, ST6, which the shell bench runs (`scripts/shell-bench/scenarios.py`, which arrives with the shell standard, branch `shell-standard-spec`, and is not on iso-v0 yet).
+  - Auto-hide is specified by the scenarios of `doc_shell_standard.md`, ST6, which the shell bench runs (`scripts/shell-bench/scenarios.py`).
   - **Declared limit,** not a guarantee: under `none` and the `bar` preset a surface already on screen stays mapped, empty, one pixel, with no exclusive zone and no input. cosmic-comp closes the connection of a client that unmaps a layer surface and maps it again; the surface goes once cosmic-comp tolerates that.
 - **Favourites** live in `~/.config/athanor/favorites.toml`, with `schema = 1` and a list of desktop ids. They are not part of the layout document, which names only a preset and the knobs (SH6). The bar, in `bar`, and the dock both read and write the file; the code is a module of `athanor-layout`. At the first start, when the file is absent, the favourites are imported once from the user's own COSMIC application list (`~/.config/cosmic`; COSMIC's system default is a vendor choice and is not imported) through the compositor client, the only crate that knows COSMIC's paths; when that is absent too, from the vendor list under `/usr/share/athanor/`. A favourite whose application the image no longer ships is replaced at start, in place, by its successor (`SUCCESSORS` in the module: COSMIC Files, Terminal and Text Editor by Nautilus, Ptyxis and GNOME Text Editor, doc_software.md decision 7), when the successor is installed, and the file is saved; when the successor is already a favourite the dead entry is dropped instead, so it cannot bring the successor back after the user unpins it. A favourite the user installs again is kept. The replacement runs only at start, not when the file changes under a running bar or dock. Nautilus is the interim file manager (doc_software.md decision 7): when Athanor's own file manager ships, its entry in `SUCCESSORS` changes with it. Without this, a user from before a change of defaults keeps favourites the bar hides and never sees the new ones (found on 2026-10-08).
 
