@@ -11,6 +11,7 @@ members = [
   "forge/specs/athanor-update/athanor-update-notify-1.0.0",
   "forge/specs/athanor-xdg-desktop-portal-athanor/xdg-desktop-portal-athanor-1.0.0",
   "system/athanor-bus-api",
+  "system/athanor-fuzz-entries",
   "system/athanor-compositor-client",
   "system/athanor-apps",
   "system/athanor-i18n",
@@ -28,6 +29,9 @@ members = [
 # mined when a graphical recovery is built on the polkit agent of stage 4. The
 # calmo theme tool is a separate workspace.
 exclude = [
+  # cargo-fuzz project: needs nightly, driven by scripts/ci/fuzz.sh; entry points are in
+  # system/athanor-fuzz-entries, which the workspace tests.
+  "fuzz",
   "forge/tools/calmo-cosmic-theme",
   "forge/specs/athanor-recovery/athanor-recovery-1.0.0",
   # Out since 2026-10-07 (A2-9, #151): attestation is outside the 1.0 threat model

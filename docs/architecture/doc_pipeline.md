@@ -118,7 +118,7 @@ jobs that sign, which are jobs of `release.yml` itself (section 3.2).
 | `accept.yml`     | `workflow_call` from `release.yml`, `workflow_dispatch` with a run id | ISO and upgrade acceptance on the run's own digests (UD17, UD18), evidence files, the VSA                                       |
 | `promote.yml`    | hourly `schedule`, `workflow_dispatch`         | selects the candidate with complete evidence after the dwell (UD5), runs the policy check, promotes by digest, publishes the evidence bundle; checks out `RELEASE_BRANCH` (VAR4), not the default branch the schedule runs on |
 | `bots.yml`       | daily `schedule`, `workflow_dispatch`          | one matrix over the bump scripts (kernel, cosmic-comp, nixpkgs registry, specs, NVIDIA locks); each opens or updates one pull request through one shared script  |
-| `maintenance.yml`| daily and weekly `schedule`, `workflow_dispatch` | vulnerability rescan, settings drift check, run statistics; weekly: janitor, reproducibility and benchmark, fuzzing, patch rebase drill, two-output layout, Scorecard |
+| `maintenance.yml`| daily and weekly `schedule`, `workflow_dispatch` | vulnerability rescan, settings drift check, run statistics; weekly: janitor, reproducibility and benchmark, patch rebase drill, two-output layout, Scorecard |
 
 ### 3.2 Reusable stages and composite actions
 
@@ -219,7 +219,7 @@ flowchart LR
 | `cosmic-comp-rebase.yml`         | merged into `maintenance.yml` (weekly)                                                             |
 | `forge-ghcr-cleanup.yml`         | merged into `maintenance.yml` (weekly janitor, section 5)                                               |
 | `forge-util-update-specs.yml`    | merged into `bots.yml`                                                                             |
-| `fuzzing.yml`                    | deleted: it had no targets (`tests/fuzz` is gone); fuzzing returns in `maintenance.yml` (weekly, section 3.1) when a crate has a target |
+| `fuzzing.yml`                    | deleted: it had no targets (`tests/fuzz` is gone); fuzzing returned as `fuzz.yml` (weekly, doc_ci.md CI31) |
 | `iso-acceptance.yml`             | replaced by `accept.yml`, addressed by run id (UD17)                                               |
 | `kernel-build.yml`               | split: the check into `pr.yml` (done through `call-kernel.yml`, PR #266; its own `pull_request` trigger goes with the PB1 follow-up), the build and the publication into `call-kernel.yml`. It signs nothing: `vmlinuz` is signed by the Orchestrator's `nvidia-kmod-sign`, which becomes `sign-kernel` |
 | `kernel-bump.yml`                | merged into `bots.yml`                                                                             |

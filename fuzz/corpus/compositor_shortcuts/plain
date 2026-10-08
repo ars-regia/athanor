@@ -1,0 +1,4 @@
+{
+    Terminal: "sh -c \'x\'",
+    Other: "a\r\0\u{e9}\u{1F600}",
+}

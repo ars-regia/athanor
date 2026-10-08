@@ -1,0 +1,4 @@
+{"apiVersion":"org.containers.bootc/v1","kind":"BootcHost","status":{"staged":null,
+      "booted":{"image":null,"cachedUpdate":null,"incompatible":true,"pinned":false,"downloadOnly":false,"store":"ostreeContainer",
+        "ostree":{"checksum":"b87dc9499ddc437d7bf39318ad5f7baff4d1ae62faa508f01d02605e678864e6","deploySerial":0,"stateroot":"default"}},
+      "rollback":{"image":null,"incompatible":true,"downloadOnly":false}}}

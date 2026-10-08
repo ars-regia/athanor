@@ -345,6 +345,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-fuzz-entries"
+version = "1.0.0"
+dependencies = [
+ "athanor-bar",
+ "athanor-compositor-client",
+ "athanor-layout",
+ "athanor-shelld",
+ "athanor-trust-state",
+ "base64",
+ "chrono",
+ "glib",
+ "hex",
+ "p256",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tracing",
+ "zvariant",
+]
+
+[[package]]
 name = "athanor-greeter-ui"
 version = "1.0.0"
 dependencies = [

@@ -1,0 +1,43 @@
+[package]
+name = "athanor-fuzz-entries"
+version = "1.0.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Entry points of the fuzz targets: parsers that read untrusted input, callable on stable"
+publish = false
+
+# One function per fuzz target in `fuzz/fuzz_targets`, plus `tests/replay.rs`, which feeds the
+# committed corpus (`fuzz/corpus/<target>`) through the same functions. The libFuzzer driver is
+# in `fuzz/`, which needs nightly and stays out of the workspace; this crate needs neither.
+# The features keep a target group buildable without the GTK stack.
+
+# The included modules of athanor-update carry unit tests that need their own fixtures and
+# run in that crate; only tests/replay.rs belongs here.
+[lib]
+test = false
+doctest = false
+
+[features]
+default = ["update", "shelld", "layout", "gtk"]
+update = ["dep:athanor-trust-state", "dep:base64", "dep:p256", "dep:serde", "dep:serde_json", "dep:sha2", "dep:hex", "dep:chrono", "dep:tracing"]
+shelld = ["dep:athanor-shelld", "dep:zvariant"]
+layout = ["dep:athanor-layout", "dep:athanor-trust-state"]
+gtk = ["dep:athanor-bar", "dep:athanor-compositor-client", "dep:glib"]
+
+[dependencies]
+athanor-bar = { path = "../../forge/specs/athanor-bar/athanor-bar-1.0.0", optional = true }
+athanor-compositor-client = { path = "../athanor-compositor-client", optional = true }
+athanor-layout = { path = "../athanor-layout", optional = true }
+athanor-shelld = { path = "../../forge/specs/athanor-shelld/athanor-shelld-1.0.0", optional = true }
+athanor-trust-state = { path = "../athanor-trust-state", optional = true }
+# The same versions as athanor-update, whose modules `src/update.rs` includes.
+base64 = { version = "0.21", optional = true }
+p256 = { version = "0.13", features = ["ecdsa", "pem"], optional = true }
+chrono = { version = "0.4", default-features = false, features = ["std"], optional = true }
+glib = { workspace = true, optional = true }
+hex = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+zvariant = { workspace = true, optional = true }
