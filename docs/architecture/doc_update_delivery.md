@@ -239,7 +239,7 @@ Upstream state, checked on 2026-10-06:
 
 ### 9.2 Bytes downloaded per upgrade
 
-**UD34. Every promotion candidate records what an upgrade from `:stable` costs.** `system/upgrade-bytes.sh FROM_DIGEST TO_DIGEST` _(new)_ sums the compressed sizes of the candidate's layers whose digests are absent from the from-image, for each variant. It writes `artifacts/metrics/upgrade-bytes.json`, and the job summary prints it. The orchestrator keeps the series. Target _(Proposal)_: a routine update (no base bump, no kernel change) at most 400 MB on the default variant, and a base bump at most 1.2 GB, set firmly after ten measured pairs. Acceptance: the file exists for every candidate; the target is reported, not enforced, until the maintainer sets it.
+**UD34. Every promotion candidate records what an upgrade from `:stable` costs.** `system/upgrade-bytes.sh` reads the digests file of the build job (`image-digests.sh`) and sums the compressed sizes of the candidate's layers whose digests are absent from the from-image, for each variant. The from-image is `:stable`; until the first promotion it does not exist and `:latest`, read before the run moves it, stands in; the file names which one was measured. It also records whether the kernel changed (the `ostree.linux` and `io.athanor.azoth-boot.digest` labels). It writes `artifacts/metrics/upgrade-bytes.json`, and the job summary prints it. The orchestrator keeps the series. Target _(Proposal)_: a routine update (no base bump, no kernel change) at most 400 MB on the default variant, and a base bump at most 1.2 GB, set firmly after ten measured pairs. Acceptance: the file exists for every candidate; the target is reported, not enforced, until the maintainer sets it.
 
 ### 9.3 Soft reboot
 

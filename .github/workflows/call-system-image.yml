@@ -230,6 +230,21 @@ jobs:
           path: artifacts/image-digests.txt
           if-no-files-found: error
 
+      - name: 📏 Measure what an upgrade downloads
+        # UD34: the new layers against the image machines run today (:stable, :latest until
+        # the first promotion), read before tag-system-images moves :latest to this run.
+        run: |
+          set -euo pipefail
+          bash system/upgrade-bytes.sh --registry "${IMAGE_REGISTRY}" --out artifacts/metrics/upgrade-bytes.json artifacts/image-digests.txt \
+            | tee -a "${GITHUB_STEP_SUMMARY}"
+
+      - name: 📎 Keep the upgrade measure
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: upgrade-bytes
+          path: artifacts/metrics/upgrade-bytes.json
+          if-no-files-found: error
+
       - name: 🔐 Sign & Attest OS Image (Zero-Trust Keyless Sigstore)
         # One signature and one SBOM attestation per image digest: the :latest tag, moved
         # later to the same digest as :<run_id>, carries them, so cosign verify accepts both.
