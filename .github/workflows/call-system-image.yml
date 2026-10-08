@@ -176,6 +176,12 @@ jobs:
         # enabled timer it does not list, or an enabled unit it calls silent, fails the build.
         run: bash system/check-image-contacts.sh "$(<artifacts/system-image.iid)"
 
+      - name: 🥾 Check the vmlinuz of the image against the Secure Boot certificate
+        # The Containerfile checks the kernel azoth-boot names; this checks the file the image
+        # ships: exactly one Authenticode signature, by the project certificate. An image signed
+        # only by pesign's test certificate fails under Secure Boot with "bad shim signature".
+        run: nix shell nixpkgs#sbsigntool -c bash system/check-image-kernel.sh "$(<artifacts/system-image.iid)"
+
       - name: 🐳 Build OS Images
         # build-image.sh builds the default, NVIDIA and NVIDIA-legacy images in turn FROM the
         # system image, all three with the same signed vmlinuz (S8). Nothing is pushed until
