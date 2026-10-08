@@ -210,9 +210,42 @@ def check_rights(repo):
 # Export: the live state of each area, normalised (sorted, no ids, URLs, timestamps or counts).
 
 
+# The merge settings, read through GraphQL: the REST repository object returns them as
+# null to a GitHub App installation token, even one with Administration read (observed
+# 2026-10-08, maintenance.yml run 37840869909), and GraphQL returns them to both tokens.
+MERGE_FIELDS = {
+    "allow_auto_merge": "autoMergeAllowed",
+    "allow_merge_commit": "mergeCommitAllowed",
+    "allow_rebase_merge": "rebaseMergeAllowed",
+    "allow_squash_merge": "squashMergeAllowed",
+    "allow_update_branch": "allowUpdateBranch",
+    "delete_branch_on_merge": "deleteBranchOnMerge",
+    "merge_commit_message": "mergeCommitMessage",
+    "merge_commit_title": "mergeCommitTitle",
+    "squash_merge_commit_message": "squashMergeCommitMessage",
+    "squash_merge_commit_title": "squashMergeCommitTitle",
+}
+
+
+def merge_settings(repo):
+    owner, name = repo.split("/", 1)
+    fields = " ".join(MERGE_FIELDS.values())
+    query = (
+        "query($o: String!, $n: String!) "
+        f"{{ repository(owner: $o, name: $n) {{ {fields} }} }}"
+    )
+    body = {"query": query, "variables": {"o": owner, "n": name}}
+    answer = gh("graphql", method="POST", body=body)
+    live = ((answer or {}).get("data") or {}).get("repository")
+    if not live or any(live.get(f) is None for f in MERGE_FIELDS.values()):
+        raise GhError(f"gh api graphql: the merge settings of {repo} are not readable")
+    return {k: live[f] for k, f in MERGE_FIELDS.items()}
+
+
 def export_repository(repo):
     r = get(f"repos/{repo}")
     out: dict[str, Any] = {k: r.get(k) for k in REPO_FIELDS}
+    out.update(merge_settings(repo))
     out["description"] = r.get("description") or ""
     out["homepage"] = r.get("homepage") or ""
     out["topics"] = sorted(r.get("topics") or [])
