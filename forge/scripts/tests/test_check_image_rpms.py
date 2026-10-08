@@ -16,7 +16,6 @@ SPECS = {
     "config": "Name: athanor-system-config\nVersion: 1.0.0\nRelease: %{?autorelease}%{!?autorelease:50.fc43}\n",
     "comp": "%global fedora_release 1.fc43\nName: cosmic-comp\nVersion: 1.8.0\nRelease: %{fedora_release}.athanor1\n",
     "bat": "Name: bat\nVersion: 0.26.1\nRelease: 1%{?dist}\n",
-    "buildah": "Name: buildah\nVersion: 1.0.0\nRelease: 1%{?dist}\n",
     "exotic": "Name: athanor-exotic\nVersion: 1^%(date)\nRelease: 1%{?dist}\n",
 }
 
@@ -67,7 +66,7 @@ class CheckTest(unittest.TestCase):
             [],
         )
 
-    def test_fedoras_package_of_a_not_shipped_spec_is_not_compared(self):
+    def test_fedoras_package_without_a_spec_is_not_compared(self):
         self.assertEqual(self.check("buildah 1.43.2-1.fc43 buildah-1.43.2-1.fc43.src.rpm"), [])
 
     def test_an_unsupported_macro_fails_only_for_an_installed_spec(self):

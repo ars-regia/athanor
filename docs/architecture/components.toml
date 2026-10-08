@@ -354,13 +354,6 @@ item = "section 3"
 purpose = "The Azoth kernel: sources, pins, build, bump bot, NVIDIA modules, boot matrix"
 
 [[component]]
-path = "forge/specs/buildah"
-kind = "rpm spec"
-area = "build-ci"
-status = "missing"
-purpose = "Rebuild of buildah; not in the package manifest"
-
-[[component]]
 path = "forge/specs/cosmic-comp"
 kind = "rpm spec"
 area = "shell"
@@ -377,13 +370,6 @@ status = "specified"
 spec = "doc_recovery.md"
 item = "R5"
 purpose = "greenboot with GREENBOOT_AUTO_REBOOT: a failed health check queues the previous deployment without rebooting"
-
-[[component]]
-path = "forge/specs/osbuild"
-kind = "rpm spec"
-area = "build-ci"
-status = "missing"
-purpose = "Rebuild of osbuild; not in the package manifest"
 
 [[component]]
 path = "forge/specs/polkit"

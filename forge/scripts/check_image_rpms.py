@@ -9,7 +9,7 @@ SPECS_DIR/*/*.spec). Two defects fail the check:
   - a package built from a spec of the checkout carries another version-release than that spec,
     which is what a stale per-package image in a tier repository produces;
   - a package named athanor-* has no spec in the checkout.
-Everything else (Fedora's own packages, the Azoth kernel, NOT_SHIPPED) is not ours to compare.
+Everything else (Fedora's own packages, the Azoth kernel) is not ours to compare.
 
 The expected version-release is parsed from the spec, strictly: the forge builder has no dist
 macro, so %{?dist} is empty; %global macros are substituted; the autorelease fallback is taken
@@ -20,13 +20,6 @@ installed packages, so an unrelated exotic spec cannot break a build.
 import pathlib
 import re
 import sys
-
-# Specs of the builder image that the system image does not ship: the Containerfile leaves their
-# RPMs out of every tier, and Fedora's package of the same name is what the image carries.
-NOT_SHIPPED = {
-    "buildah": "builder tooling; the image carries Fedora's buildah",
-    "osbuild": "builder tooling; the image carries Fedora's osbuild",
-}
 
 MACRO = re.compile(r"%\{(\??)(\w+)\}")
 AUTORELEASE = "%{?autorelease}%{!?autorelease:"
@@ -82,8 +75,6 @@ def check(rpm_lines, specs):
         if srpm == "(none)":
             continue  # gpg-pubkey and the like
         source = srpm.removesuffix(".src.rpm").rsplit("-", 2)[0]
-        if source in NOT_SHIPPED:
-            continue
         if source in specs:
             path, expected = specs[source]
             try:

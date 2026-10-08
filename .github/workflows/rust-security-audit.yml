@@ -5,6 +5,10 @@ on:
     branches: [iso-v0]
   pull_request:
     branches: [iso-v0]
+  # The advisory database changes without a commit: the weekly run catches an advisory
+  # published against a lockfile nobody touched.
+  schedule:
+    - cron: "17 4 * * 1"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

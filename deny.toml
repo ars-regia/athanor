@@ -1,9 +1,11 @@
 # cargo-deny policy (ADR-0075 item 2).
 #
-# One policy for the root workspace lockfile (see scripts/ci/security-audit.sh). The
+# One policy for the root workspace lockfile. `just check-deny` applies its licences,
+# bans and sources in the pull request gate; scripts/ci/security-audit.sh applies its
+# advisories, on pull requests, pushes and a weekly schedule. The
 # packages built from their own vendored lockfile (athanor-backup's release tarball,
 # greenboot-rs) are not covered yet. The licence
-# allow-list is the set of identifiers the current dependency graphs need, derived
+# allow-list is the set of identifiers the current dependency graph contains, derived
 # from `cargo metadata`; an entry nothing uses is a warning, so it cannot go stale
 # unnoticed.
 
@@ -19,7 +21,9 @@ unmaintained = "workspace"
 yanked = "deny"
 
 [licenses]
-# The project is GPL-3.0-or-later (decision A2-3).
+# The project is GPL-3.0-or-later (decision A2-3). Every identifier below is compatible
+# with distributing the combined work under GPL-3.0 terms; GPL-2.0-only and
+# LGPL-2.0-only are not, and stay out.
 allow = [
   "GPL-3.0-or-later",
   "MIT",
@@ -31,14 +35,18 @@ allow = [
   "Zlib",
   "Unicode-3.0",
   "0BSD",
-  "CC0-1.0",
-  "CDLA-Permissive-2.0",
+  "BSD-1-Clause",
+  "LGPL-2.1-or-later",
   "MPL-2.0",
+  "Unlicense",
 ]
 confidence-threshold = 0.9
 exceptions = [
-  # GPL-3.0-only is compatible with the GPL-3.0-or-later combined work.
+  # GPL-3.0-only is compatible with the GPL-3.0-or-later combined work. Only the greeter
+  # links greetd_ipc, so the greeter is GPL-3.0-only too (OWN_LICENCE_EXCEPTIONS in
+  # scripts/verify.py); a GPL-3.0-only crate anywhere else is rejected.
   { allow = ["GPL-3.0-only"], crate = "greetd_ipc" },
+  { allow = ["GPL-3.0-only"], crate = "athanor-greeter-ui" },
   # The IJG licence covers the bundled libjpeg-derived code.
   { allow = ["IJG"], crate = "jpeg-encoder" },
 ]

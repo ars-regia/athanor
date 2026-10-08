@@ -111,7 +111,8 @@ lint:
 # this, and a contributor runs it before pushing. Workflow lint (actionlint, with shellcheck on
 # every run: block), Justfile syntax, every verify.py check with the findings listed in
 # scripts/ci/known-red.txt excused (the list may only shrink against BASE), every Python
-# test directory of the repository, and `cargo test` over the root workspace (check-rust).
+# test directory of the repository, `cargo test` over the root workspace (check-rust) and the
+# licence, ban and source policy of deny.toml (check-deny).
 [group('QA & Security')]
 check base="HEAD":
     #!/usr/bin/env bash
@@ -132,6 +133,7 @@ check base="HEAD":
         python3 -B -m unittest discover -s "$dir"
     done
     just check-rust
+    just check-deny
 
 # The Rust half of the gate: the tests of every crate of the root workspace, in the build stage
 # of the shell rig (forge/test/shell/Containerfile), which carries the GTK, glycin, PAM, TPM and
@@ -148,6 +150,24 @@ check-rust:
     export ATHANOR_REQUIRE_QALC=1
     bash forge/test/shell/rig.sh cargo test --locked --workspace --exclude athanor-preview-render
     bash forge/test/shell/rig.sh cargo test --locked -p athanor-preview-render
+
+# The dependency policy of deny.toml over every lockfile that resolves a shipped binary:
+# licences, bans and sources. Advisories are not here: they depend on a database that changes
+# without a commit, so rust-security-audit.yml runs them (scripts/ci/security-audit.sh) on pull
+# requests, pushes and a weekly schedule. The recovery kiosk and
+# the attestation crate are excluded from the root workspace but still inherit its
+# [workspace.dependencies], so cargo cannot resolve them on their own and cargo-deny cannot
+# read them; they join this list when they get a workspace of their own. The calmo theme tool
+# is a build-time derive tool that no spec installs and pins libcosmic to a git revision.
+[group('QA & Security')]
+check-deny:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v cargo-deny >/dev/null || { echo "check-deny: cargo-deny is not on PATH (scripts/ci/install-tools.sh)" >&2; exit 1; }
+    for manifest in Cargo.toml; do
+        echo "check-deny: $manifest"
+        cargo deny --locked --manifest-path "$manifest" --config deny.toml check licenses bans sources
+    done
 
 # Formats all shell scripts and Justfiles across workspace
 [group('QA & Security')]
