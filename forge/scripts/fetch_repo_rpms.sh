@@ -20,7 +20,7 @@ find repo-cache/ -maxdepth 2 -name "*.rpm" -type f -delete
 TMP_DIR=$(mktemp -d)
 trap "rm -rf $TMP_DIR" EXIT
 
-OWNER="${1:-hr-mes}"
+OWNER="${1:-ars-regia}"
 
 # Fetch package lists dynamically from Single Source of Truth
 readarray -t CUSTOM_TIER0 < <(jq -r '.custom_tier0[] // empty' config/packages.json)
@@ -33,7 +33,7 @@ readarray -t UPSTREAM_DESKTOP < <(jq -r '.upstream_desktop[] // empty' config/pa
 readarray -t UPSTREAM_MEDIA < <(jq -r '.upstream_media[] // empty' config/packages.json)
 readarray -t UPSTREAM_CLI < <(jq -r '.upstream_cli[] // empty' config/packages.json)
 
-# Per-tier package images. An entry without a tag means :latest. The kernel is the
+# Per-tier package images, by the hash tag of dag-state/hashes.json. The kernel is the
 # azoth image of the pins by the digest system/kernel-artifacts.sh verified, never by tag
 # (docs/architecture/doc_build_ordering.md, O4): run its require-ready first. The NVIDIA
 # modules are not RPMs: system/Containerfile copies them from their image by digest.
@@ -70,7 +70,7 @@ done
 # are installed as Fedora/RPM Fusion binaries directly in system/Containerfile. When the
 # zero-trust rebuild-from-source lands (2026-09-11 decision), each will get a spec and a
 # tier image, and its name moves into the custom_tier* lists above -- not back here as a
-# rolling image. UPSTREAM_CORE/DESKTOP/MEDIA/CLI stay read for the manifest below.
+# rolling image.
 
 TIER2_IMAGES=()
 for pkg in "${CUSTOM_TIER2[@]}"; do
@@ -89,7 +89,12 @@ pull_and_extract() {
   local img="$1"
   local target_dir="$2"
   local ref="$img"
-  [[ "$ref" == *:* ]] || ref="$ref:latest"
+  # A package image is pulled by the hash the brain verified for this run, never by
+  # :latest, which a revert or a second branch moves away from that content. Everything
+  # else here is the kernel, named by digest.
+  case "$img" in
+    athanor-forge-*) ref=$(bash "$(dirname "${BASH_SOURCE[0]}")/resolve_node_image.sh" "${img#athanor-forge-}") || return 1 ;;
+  esac
   local IMAGE_LOWER=$(echo "ghcr.io/$OWNER/$ref" | tr '[:upper:]' '[:lower:]')
   
   local old_digest="${OLD_DIGESTS[$img]:-}"

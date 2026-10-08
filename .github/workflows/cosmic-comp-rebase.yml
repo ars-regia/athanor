@@ -1,0 +1,34 @@
+name: cosmic-comp rebase drill
+
+# Tries Athanor's cosmic-comp patch set (forge/specs/cosmic-comp/SOURCES) on the newest
+# upstream tag and reports which patches apply. The logic is in
+# scripts/cosmic-comp-rebase/rebase.py; this file checks out, calls it and uploads its
+# output. The run is red when a patch no longer applies, which is what it is for. It
+# changes nothing in the repository: the bump itself is cosmic-comp-bump.yml.
+# `schedule` only works from the default branch; by hand on any branch.
+
+on:
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rebase:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Apply the patch set on the newest upstream tag
+        run: python3 scripts/cosmic-comp-rebase/rebase.py "$RUNNER_TEMP/rebase"
+
+      - name: Upload the report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cosmic-comp-rebase
+          path: ${{ runner.temp }}/rebase
+          if-no-files-found: ignore

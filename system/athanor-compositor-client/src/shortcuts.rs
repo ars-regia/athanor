@@ -447,7 +447,8 @@ impl Scanner<'_> {
     }
 }
 
-fn parse(text: &str) -> Result<Vec<(String, String)>, String> {
+#[doc(hidden)] // public for the fuzz target and its corpus replay only
+pub fn parse(text: &str) -> Result<Vec<(String, String)>, String> {
     let mut s = Scanner { rest: text };
     s.skip()?;
     s.expect('{')?;

@@ -1,0 +1,20 @@
+# Findings of scripts/verify.py that were red when `just check` became the gate of pr.yml
+# (doc_pipeline.md PQ12, ADR-0075). One entry per finding:
+#
+#   check  #issue  expires  finding
+#
+# A finding is a problem of the check without its line numbers (`a.rs:18` reads `a.rs`); one
+# the check reports n times is listed n times. While every finding a check reports is listed,
+# and no entry of it has expired (the expiry day is inclusive), the check is tolerated. A
+# finding not listed is red. The list may only shrink: verify.py --known-red-base refuses a
+# finding the base branch does not list and a later expiry, and a listed finding the check no
+# longer reports must be removed in the same change.
+paths #223 2027-01-07 system/athanor-style/src/appearance_engine.rs percorso hard-coded in /tmp — usa /run/athanor (0700) per stato privilegiato
+paths #223 2027-01-07 system/confidential_computing/athanor-attestation/src/cvm_manager.rs percorso hard-coded in /tmp — usa /run/athanor (0700) per stato privilegiato
+paths #223 2027-01-07 system/confidential_computing/athanor-attestation/src/cvm_manager.rs percorso hard-coded in /tmp — usa /run/athanor (0700) per stato privilegiato
+panics #223 2027-01-07 system/athanor-compositor-client/src/shortcuts.rs: .expect( over the budget of 2, propagate with `?`
+panics #223 2027-01-07 system/athanor-compositor-client/src/shortcuts.rs: .expect( over the budget of 2, propagate with `?`
+panics #223 2027-01-07 system/athanor-compositor-client/src/shortcuts.rs: .expect( over the budget of 2, propagate with `?`
+panics #223 2027-01-07 system/athanor-compositor-client/src/shortcuts.rs: .expect( over the budget of 2, propagate with `?`
+forge-rules #223 2027-01-07 forge/specs/athanor-system-config/athanor-system-config.spec: rule 2, %post writes under /usr or /etc: install the file in %install or create it with tmpfiles.d
+forge-rules #223 2027-01-07 forge/specs/athanor-system-config/athanor-system-config.spec: rule 2, %post writes under /usr or /etc: install the file in %install or create it with tmpfiles.d

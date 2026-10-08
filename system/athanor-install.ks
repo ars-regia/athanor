@@ -1,16 +1,15 @@
 # Kickstart for Athanor OS bare-metal, interactive install.
 #
 # This kickstart is public: it must not carry any one person's account, password or
-# disk. It sets what defines the system -- the bootc image, the hardened boot line,
-# the TPM monotonic counter -- and leaves what belongs to the person -- keyboard,
+# disk. It sets what defines the system -- the bootc image and the hardened boot line --
+# and leaves what belongs to the person -- keyboard,
 # time zone, disk layout and the user account -- to Anaconda's interactive screens.
 #
 # Anaconda goes interactive for exactly the directives that are absent here: with no
 # `part`/`autopart`/`clearpart` it asks for the disk, and with no `user` it asks the
-# person to create their account in the GUI. The home directory it creates is
-# encrypted and sealed to the TPM automatically at first boot by
-# athanor-tpm-luks-seal.service (PCRs 0,2,7,11), so nothing about the account needs to
-# be scripted here.
+# person to create their account in the GUI. The account is a classic one in
+# /etc/passwd: systemd-homed stays disabled until a homed specification with a migration
+# exists (decision 0045), so nothing about the account needs to be scripted here.
 
 lang en_US.UTF-8
 
@@ -21,10 +20,10 @@ lang en_US.UTF-8
 # module signing key compiled into Azoth. Secure Boot also needs the project Secure Boot
 # certificate enrolled as a MOK at first boot.
 
-# The bootc image is the identity of the system, not a user choice. Pin it to the
-# release being shipped rather than :latest, which on a non-default branch may resolve
-# to a different or older build.
-ostreecontainer --url=ghcr.io/hr-mes/athanor-system:latest --transport=registry
+# The bootc image is the identity of the system, not a user choice. This kickstart
+# follows :latest; an installation that needs a fixed build replaces the tag with a
+# run-id tag of the image.
+ostreecontainer --url=ghcr.io/ars-regia/athanor-system:latest --transport=registry
 
 # The root account stays locked: administration is through the wheel user Anaconda
 # creates. No user is declared here, so Anaconda asks the installer to create one.
@@ -32,29 +31,16 @@ rootpw --lock
 
 # Anaconda's `firewall` command has no `--default`: an unknown option is a parse error,
 # so the directive it was meant to harden aborted the whole installation instead. The
-# default zone firewalld ships already refuses unsolicited inbound traffic, and
-# `--service=ssh` is what opens the single port Athanor wants reachable.
-firewall --enabled --service=ssh
-services --enabled=sshd,systemd-homed
+# default zone firewalld ships already refuses unsolicited inbound traffic. Remote login
+# is off on new installs (doc_software.md, decision 2): sshd is not enabled, and the ssh
+# service is not added to the firewall.
+firewall --enabled
+services --disabled=sshd
 
 # Disk layout is the installer's choice: no clearpart/part/autopart here, so Anaconda
-# opens its partitioning screen. systemd-homed encrypts the user's home (LUKS2), and
-# athanor-tpm-luks-seal.service seals it to the TPM at first boot.
+# opens its partitioning screen. Accounts are classic: the image disables systemd-homed by preset.
 
 reboot
-
-%post --erroronfail
-# The one piece of provisioning that is the system's, not the user's: the TPM 2.0
-# monotonic counter the rollback protection reads (NV index 0x01800001). Enrolling the
-# LUKS home to the TPM is done at first boot by athanor-tpm-luks-seal.service, once the
-# user Anaconda created actually exists, so it is not repeated here.
-if command -v tpm2_getcap >/dev/null 2>&1 && tpm2_getcap properties-fixed | grep -q "TPM2_PT_TOTAL_COMMANDS"; then
-    echo "Initialising the TPM2 monotonic counter at NV index 0x01800001..."
-    tpm2_nvundefine 0x01800001 -C o 2>/dev/null || true
-    tpm2_nvdefine 0x01800001 -C o -s 8 -a "ownerread|ownerwrite|authread|authwrite|nt=counter"
-    tpm2_nvincrement 0x01800001 -C o
-fi
-%end
 
 %post --erroronfail
 set -eu

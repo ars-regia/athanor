@@ -28,6 +28,9 @@ pub struct Deployed {
     /// bootc calls the deployment incompatible: packages were layered, removed or replaced
     /// with rpm-ostree, so bootc neither describes it as an image nor upgrades it.
     pub local_changes: bool,
+    /// The ostree deployment, `<checksum>.<deploySerial>` as `ostree admin status` names it: two
+    /// deployments of one digest differ here. `None` when bootc does not report it.
+    pub deployment: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +38,9 @@ pub struct Status {
     pub booted: Deployed,
     pub staged: Option<Deployed>,
     pub rollback: Option<Deployed>,
+    /// The rollback deployment is already the default of the next boot: greenboot queued it
+    /// after a failed health check (doc_recovery.md, R5), or `bootc rollback` was run.
+    pub rollback_queued: bool,
 }
 
 /// What the tag points at in the registry, read without downloading a layer.
@@ -47,7 +53,9 @@ pub struct Candidate {
 
 pub trait Tools {
     fn status(&self) -> Result<Status, Failure>;
-    fn candidate(&self, image: &str) -> Result<Candidate, Failure>;
+    /// `None` when the registry answers that the tag has no manifest (skopeo: `reading manifest
+    /// TAG in REPO: manifest unknown`): the tag was never published, which is not a failure.
+    fn candidate(&self, image: &str) -> Result<Option<Candidate>, Failure>;
     fn download(&self) -> Result<(), Failure>;
     fn apply_downloaded(&self) -> Result<(), Failure>;
     fn relock(&self) -> Result<(), Failure>;
@@ -69,6 +77,24 @@ pub fn unix_time(rfc3339: &str) -> Option<i64> {
 #[must_use]
 pub fn host_of(image: &str) -> Option<String> {
     image.split('/').next().filter(|host| !host.is_empty()).map(str::to_owned)
+}
+
+/// True for the registry's answer that a tag, or the whole image, has no manifest:
+/// `manifest unknown` or `name unknown` (the distribution specification), and the answers
+/// ghcr.io gives for a package that does not exist, which it does not tell from a private
+/// one: a pull token refused with 403, or `denied`. Narrower than the `Registry` code, which
+/// also covers `unauthorized`: that must keep failing.
+#[must_use]
+pub fn manifest_absent(stderr: &str) -> bool {
+    (stderr.contains("reading manifest") && (stderr.contains("manifest unknown") || stderr.contains("name unknown"))) || access_denied(stderr)
+}
+
+/// True for the two answers of ghcr.io that [`manifest_absent`] reads as absent although the
+/// registry did not say "not found": a package that does not exist, but also one made
+/// private, or a credential that expired, answers the same.
+#[must_use]
+pub fn access_denied(stderr: &str) -> bool {
+    stderr.contains("Requesting bearer token: received unexpected HTTP status: 403 Forbidden") || stderr.contains("denied: requested access to the resource is denied")
 }
 
 /// Maps the error text of bootc, skopeo or ostree to a code. The text goes no further.
@@ -94,10 +120,13 @@ struct BootcStatus {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct BootcHost {
     booted: Option<BootcEntry>,
     staged: Option<BootcEntry>,
     rollback: Option<BootcEntry>,
+    #[serde(default)]
+    rollback_queued: bool,
 }
 
 #[derive(Deserialize)]
@@ -108,6 +137,14 @@ struct BootcEntry {
     download_only: bool,
     #[serde(default)]
     incompatible: bool,
+    ostree: Option<BootcOstree>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BootcOstree {
+    checksum: Option<String>,
+    deploy_serial: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -135,6 +172,7 @@ fn deployed(entry: BootcEntry) -> Option<Deployed> {
         build_time: image.timestamp.as_deref().and_then(unix_time).unwrap_or(0),
         download_only: entry.download_only,
         local_changes: false,
+        deployment: entry.ostree.and_then(|ostree| Some(format!("{}.{}", ostree.checksum?, ostree.deploy_serial?))),
     })
 }
 
@@ -146,7 +184,12 @@ pub fn parse_status(json: &str, local: impl FnOnce() -> Option<Deployed>) -> Opt
     let host = serde_json::from_str::<BootcStatus>(json).ok()?.status;
     let booted = host.booted?;
     let booted = if booted.incompatible { local()? } else { deployed(booted)? };
-    Some(Status { booted, staged: host.staged.and_then(deployed), rollback: host.rollback.and_then(deployed) })
+    Some(Status {
+        booted,
+        staged: host.staged.and_then(deployed),
+        rollback: host.rollback.and_then(deployed),
+        rollback_queued: host.rollback_queued,
+    })
 }
 
 #[derive(Deserialize)]
@@ -193,6 +236,7 @@ pub fn parse_local(json: &str) -> Option<Deployed> {
         enforcing: reference.starts_with("ostree-image-signed:"),
         download_only: false,
         local_changes: true,
+        deployment: None,
     })
 }
 
@@ -207,7 +251,13 @@ const BUSCTL: &str = "/usr/bin/busctl";
 pub const ATTACHMENTS_POLICY: &str = "/usr/share/athanor/containers/attachments-policy.json";
 
 fn run(program: &str, args: &[&str], host: Option<String>) -> Result<String, Failure> {
-    let output = Command::new(program).args(args).env("LC_ALL", "C").output().map_err(|_| Failure { code: ErrorCode::Internal, host: None })?;
+    run_with_stderr(program, args, host).map_err(|(failure, _)| failure)
+}
+
+/// Like [`run`], and hands the error text to the caller that must tell two failures of one
+/// code apart. The text must not leave the process.
+fn run_with_stderr(program: &str, args: &[&str], host: Option<String>) -> Result<String, (Failure, String)> {
+    let output = Command::new(program).args(args).env("LC_ALL", "C").output().map_err(|_| (Failure { code: ErrorCode::Internal, host: None }, String::new()))?;
     if output.status.success() {
         return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
     }
@@ -216,7 +266,7 @@ fn run(program: &str, args: &[&str], host: Option<String>) -> Result<String, Fai
     tracing::warn!(program, status = ?output.status.code(), %stderr, "command failed");
     let code = classify(&stderr);
     let host = host.filter(|_| matches!(code, ErrorCode::Network | ErrorCode::Registry));
-    Err(Failure { code, host })
+    Err((Failure { code, host }, stderr.into_owned()))
 }
 
 impl Tools for System {
@@ -227,20 +277,29 @@ impl Tools for System {
         status.ok_or_else(|| failure.unwrap_or(Failure { code: ErrorCode::Internal, host: None }))
     }
 
-    fn candidate(&self, image: &str) -> Result<Candidate, Failure> {
+    fn candidate(&self, image: &str) -> Result<Option<Candidate>, Failure> {
         let host = host_of(image);
-        let digest = run(SKOPEO, &["inspect", "--format", "{{.Digest}}", &format!("docker://{image}")], host.clone())?.trim().to_owned();
+        let digest = match run_with_stderr(SKOPEO, &["inspect", "--format", "{{.Digest}}", &format!("docker://{image}")], host.clone()) {
+            Ok(out) => out.trim().to_owned(),
+            Err((_, stderr)) if manifest_absent(&stderr) => {
+                if access_denied(&stderr) {
+                    tracing::warn!(%image, "the registry denied access, read as an absent image: the package may be private, or a credential expired");
+                }
+                return Ok(None);
+            }
+            Err((failure, _)) => return Err(failure),
+        };
         // The configuration is read by digest, so both facts describe one image even if
         // the tag moves between the two calls.
         let pinned = format!("docker://{}@{digest}", crate::sigobj::repository_of(image));
         let config = run(SKOPEO, &["inspect", "--config", &pinned], host)?;
         let labels = serde_json::from_str::<serde_json::Value>(&config).ok().map(|value| value["config"]["Labels"].clone()).unwrap_or_default();
         let label = |name: &str| labels[name].as_str().unwrap_or_default().to_owned();
-        Ok(Candidate {
+        Ok(Some(Candidate {
             digest,
             version: label("org.opencontainers.image.version"),
             build_time: unix_time(&label("org.opencontainers.image.created")).unwrap_or(0),
-        })
+        }))
     }
 
     fn download(&self) -> Result<(), Failure> {
@@ -301,6 +360,22 @@ mod tests {
         let rollback = status.rollback.expect("rollback");
         assert!(!rollback.enforcing, "an origin without `signature` is ostree-unverified-registry");
         assert_eq!((rollback.build_time, rollback.version.as_str()), (0, ""));
+        assert!(!status.rollback_queued);
+        let queued = STAGED.replacen(r#""status":{"#, r#""status":{"rollbackQueued":true,"#, 1);
+        assert!(parse_status(&queued, || None).expect("status").rollback_queued);
+    }
+
+    #[test]
+    fn a_deployment_is_named_by_its_checksum_and_serial_when_bootc_gives_them() {
+        assert_eq!(parse_status(STAGED, || None).expect("status").staged.expect("staged").deployment, None);
+        // The members of the desktop's booted entry of 2026-10-01 (INCOMPATIBLE), on the staged one.
+        let named = STAGED.replacen(r#""downloadOnly":true,"#, r#""downloadOnly":true,"ostree":{"checksum":"b87dc949","deploySerial":1,"stateroot":"default"},"#, 1);
+        assert_eq!(parse_status(&named, || None).expect("status").staged.expect("staged").deployment.as_deref(), Some("b87dc949.1"));
+        // A bootc that leaves out one of the two loses the name, not the status.
+        for partial in [r#""checksum":"b87dc949","#, r#""deploySerial":1,"#] {
+            let staged = parse_status(&named.replacen(partial, "", 1), || None).expect("status").staged.expect("staged");
+            assert_eq!((staged.digest.as_str(), staged.deployment), ("sha256:e64f7608", None), "{partial}");
+        }
     }
 
     #[test]
@@ -361,6 +436,22 @@ mod tests {
         ] {
             assert_eq!(classify(stderr), code, "{stderr}");
         }
+    }
+
+    #[test]
+    fn only_a_missing_manifest_is_absent() {
+        assert!(manifest_absent("Error parsing image name \"docker://r/o/a:stable\": reading manifest stable in r/o/a: manifest unknown"));
+        assert!(manifest_absent("reading manifest latest in r/o/a: name unknown: repository name not known to registry"));
+        // ghcr.io, for a package that does not exist (observed 2026-10-08 with skopeo 1.22).
+        assert!(manifest_absent(
+            "Error parsing image name \"docker://ghcr.io/o/absent:latest\": Requesting bearer token: received unexpected HTTP status: 403 Forbidden"
+        ));
+        assert!(manifest_absent("Error reading manifest latest in ghcr.io/o/absent: denied: requested access to the resource is denied"));
+        assert!(!manifest_absent("reading manifest stable in r/o/a: unauthorized: authentication required"));
+        assert!(!manifest_absent("Requesting bearer token: received unexpected HTTP status: 401 Unauthorized"));
+        assert!(!manifest_absent("pinging container registry r: dial tcp: i/o timeout"));
+        assert!(!access_denied("reading manifest latest in r/o/a: name unknown: repository name not known to registry"));
+        assert!(access_denied("Error reading manifest latest in ghcr.io/o/absent: denied: requested access to the resource is denied"));
     }
 
     #[test]

@@ -2,7 +2,7 @@
 name = "athanor-bar"
 version = "1.0.0"
 edition = "2021"
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "The Athanor bar: one layer-shell surface per output with the modules of doc_bar.md"
 authors = ["Athanor Forge <forge@athanor.os>"]
 

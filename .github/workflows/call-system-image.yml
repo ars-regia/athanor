@@ -7,34 +7,21 @@ on:
         description: "Content hash of the builder container image"
         required: true
         type: string
-    secrets:
-      RPM_GPG_KEY:
-        description: "GPG key for RPM signing"
-        required: false
-      RPM_GPG_PASSPHRASE:
-        description: "Passphrase for GPG key"
-        required: false
-      SECUREBOOT_SIGNING_KEY:
-        description: "Secure Boot private key (PEM) that signs the UKI and its PCR policy; supplied by the signing environment"
-        required: false
-      COSIGN_PRIVATE_KEY:
-        description: "Private key that signs the system images for the update service (system/keys); supplied by the signing environment"
-        required: false
-      COSIGN_PASSWORD:
-        description: "Passphrase of COSIGN_PRIVATE_KEY; supplied by the signing environment"
-        required: false
+
+# The key-based signature of the images is not here: a called workflow's job reads the secrets
+# of its environment only when its caller inherits every secret (actions/runner#4453), so it is
+# sign-system-images of athanor-forge-orchestrator.yml, after this workflow (D43).
 
 jobs:
-  lint:
-    uses: ./.github/workflows/call-lint.yml
-
+  # No lint job of its own: the Orchestrator, its only caller, runs call-lint.yml once and
+  # calls this workflow only after it passed (docs/architecture/doc_pipeline.md, PL44).
   build-repo:
-    name: 📦 Aggregate Repositories & Deploy DNF/Flatpak Channel
-    needs: [lint]
+    # The tier repositories are consumed as OCI images only (ADR-0076, decision 2).
+    name: 📦 Aggregate the tier repositories
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
-      contents: write
+      contents: read
       packages: write
       id-token: write
     steps:
@@ -45,6 +32,12 @@ jobs:
         with:
           name: kernel-artifacts
           path: kernel-artifacts
+      - name: Package hashes verified by the Orchestrator
+        # fetch_repo_rpms.sh pulls every package image by its hash tag from this file.
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: dag-hashes
+          path: forge/dag-state
       - name: ❄️ Install Nix (Bedrock Cache)
         uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
         with:
@@ -55,8 +48,6 @@ jobs:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
           GITHUB_WORKSPACE: ${{ github.workspace }}
-          RPM_GPG_KEY: ${{ secrets.RPM_GPG_KEY }}
-          RPM_GPG_PASSPHRASE: ${{ secrets.RPM_GPG_PASSPHRASE }}
           BUILDER_CONTENT_HASH: ${{ inputs.builder_content_hash }}
         run: |
           set -euo pipefail
@@ -67,8 +58,6 @@ jobs:
             -e GITHUB_TOKEN="${GITHUB_TOKEN}" \
             -e GITHUB_ACTOR="${GITHUB_ACTOR}" \
             -e GITHUB_REPOSITORY_OWNER="${GITHUB_REPOSITORY_OWNER}" \
-            -e RPM_GPG_KEY="${RPM_GPG_KEY}" \
-            -e RPM_GPG_PASSPHRASE="${RPM_GPG_PASSPHRASE}" \
             "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/athanor-builder:${BUILDER_CONTENT_HASH}" \
             bash <<'EOF'
             set -e
@@ -91,136 +80,20 @@ jobs:
             } > /var/tmp/storage.conf
             export CONTAINERS_STORAGE_CONF=/var/tmp/storage.conf
 
-            if [ -n "${RPM_GPG_KEY}" ]; then
-              echo "::add-mask::${RPM_GPG_PASSPHRASE}"
-              echo "${RPM_GPG_KEY}" | gpg --import
-              mkdir -p ~; echo '%_signature gpg' > ~/.rpmmacros
-              echo '%_gpg_name athanor' >> ~/.rpmmacros
-              echo '%__gpg_sign_cmd %{__gpg} --batch --verbose --no-armor --passphrase "${RPM_GPG_PASSPHRASE}" --pinentry-mode loopback --no-secmem-warning -u "%{_gpg_name}" -sbo %{__signature_filename} --digest-algo sha256 %{__plaintext_filename}' >> ~/.rpmmacros
-            fi
-
             echo "${GITHUB_TOKEN}" | buildah login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
             bash scripts/fetch_repo_rpms.sh "${GITHUB_REPOSITORY_OWNER}"
 
-            # publish_tier TIER: one of tier0..tier3, or "" for the rolling aggregate. The
-            # image is pushed only when the RPM content differs from the published one.
-            publish_tier() {
-              local tier=$1 dir img_name image new_hash old_hash ctr
-              if [ -n "$tier" ]; then
-                dir="repo-cache/repo-${tier}"
-                img_name="athanor-forge-${tier}-repo:latest"
-              else
-                dir="repo-cache/repo"
-                img_name="athanor-forge-rolling-repo:latest"
-              fi
-              image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${img_name}"
-              new_hash=$(find "$dir" -name '*.rpm' -type f | sort | xargs -r sha256sum | sha256sum | awk '{print $1}')
-              old_hash=$(skopeo inspect --config "docker://$image" 2>/dev/null | jq -r '.config.Labels["tier.content.sha256"] // ""')
-              if [ -n "$old_hash" ] && [ "$new_hash" = "$old_hash" ]; then
-                echo "Tier '${tier:-rolling}' ($img_name): RPM content unchanged, not pushed"
-                return 0
-              fi
-              if [ -n "${RPM_GPG_KEY}" ]; then
-                find "$dir" -name '*.rpm' -exec rpmsign --addsign {} +
-              fi
-              (
-                cd "$dir"
-                createrepo_c .
-                ctr=$(buildah from scratch)
-                buildah copy "$ctr" . /
-                buildah config --label tier.content.sha256="$new_hash" "$ctr"
-                buildah commit --omit-timestamp "$ctr" "$image"
-                buildah push "$image"
-                buildah rm "$ctr"
-                buildah rmi "$image"
-              )
-            }
-            pids=()
-            for tier in tier0 tier1 tier2 tier3 ""; do
-              publish_tier "$tier" &
-              pids+=($!)
-            done
-            for pid in "${pids[@]}"; do wait "$pid"; done
+            # The tier images, and the digests the image build of this run installs (UD28).
+            bash scripts/publish_tiers.sh /workspace/tier-digests/tier-digests.json
           EOF
 
-      - name: 🌐 Deploy the DNF channel to GitHub Pages
-        # A release step: the channel is published from main only, the way
-        # kernel-build.yml moves its :latest tags only from main.
-        if: github.ref == 'refs/heads/main'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_WORKSPACE: ${{ github.workspace }}
-          EVENT_REPO_NAME: ${{ github.event.repository.name }}
-          RPM_GPG_KEY: ${{ secrets.RPM_GPG_KEY }}
-          RPM_GPG_PASSPHRASE: ${{ secrets.RPM_GPG_PASSPHRASE }}
-          BUILDER_CONTENT_HASH: ${{ inputs.builder_content_hash }}
-        run: |
-          set -euo pipefail
-          podman run -i --rm --security-opt label=disable --security-opt seccomp=unconfined \
-            -v "${GITHUB_WORKSPACE}:/workspace" \
-            -w /workspace/forge \
-            -e GITHUB_TOKEN="${GITHUB_TOKEN}" \
-            -e GITHUB_ACTOR="${GITHUB_ACTOR}" \
-            -e GITHUB_REPOSITORY_OWNER="${GITHUB_REPOSITORY_OWNER}" \
-            -e GITHUB_REPOSITORY="${GITHUB_REPOSITORY}" \
-            -e EVENT_REPO_NAME="${EVENT_REPO_NAME}" \
-            -e RPM_GPG_KEY="${RPM_GPG_KEY}" \
-            -e RPM_GPG_PASSPHRASE="${RPM_GPG_PASSPHRASE}" \
-            "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/athanor-builder:${BUILDER_CONTENT_HASH}" \
-            bash <<'EOF'
-            set -e
-            if [ -n "${RPM_GPG_KEY}" ]; then
-              echo "::add-mask::${RPM_GPG_PASSPHRASE}"
-              echo "${RPM_GPG_KEY}" | gpg --import
-            fi
+      - name: Hand the tier digests to the image build
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tier-digests
+          path: tier-digests/tier-digests.json
+          if-no-files-found: error
 
-            git clone --depth 1 -b gh-pages "https://${GITHUB_ACTOR}:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" /workspace/pages_repo || {
-              mkdir -p /workspace/pages_repo
-              cd /workspace/pages_repo
-              git init
-              git checkout -b gh-pages
-            }
-            cd /workspace/pages_repo
-            git config --global user.name "Athanor Forge"
-            git config --global user.email "forge@athanor.os"
-            git config --global --add safe.directory /workspace/pages_repo
-
-            rm -rf tier0 tier1 tier2 tier3
-            if [ -n "${RPM_GPG_KEY}" ]; then
-              gpg --export --armor athanor > RPM-GPG-KEY-athanor
-            fi
-            cp -a /workspace/forge/repo-cache/repo-tier0 tier0
-            cp -a /workspace/forge/repo-cache/repo-tier1 tier1
-            cp -a /workspace/forge/repo-cache/repo-tier2 tier2
-            cp -a /workspace/forge/repo-cache/repo-tier3 tier3
-
-            mkdir -p recovery
-            cp /usr/share/ipxe/ipxe-x86_64.efi recovery/ipxe.efi
-            echo '#!ipxe' > recovery/boot.ipxe
-            echo 'dhcp' >> recovery/boot.ipxe
-            echo "chain https://${GITHUB_REPOSITORY_OWNER}.github.io/${EVENT_REPO_NAME}/recovery/menu.ipxe || shell" >> recovery/boot.ipxe
-
-            # GitHub Pages refuses files above 100 MB; keep the channel well below.
-            find . -type f -name '*.rpm' -size +49M -delete
-
-            pids=()
-            for tier_dir in tier0 tier1 tier2 tier3; do
-              createrepo_c "$tier_dir" &
-              pids+=($!)
-            done
-            for pid in "${pids[@]}"; do wait "$pid"; done
-
-            git add -A
-            if git rev-parse HEAD >/dev/null 2>&1; then
-              git commit --amend -m "Deploy the DNF and Flatpak channels of Athanor OS"
-            else
-              git commit -m "Deploy the DNF and Flatpak channels of Athanor OS"
-            fi
-            git push -f "https://${GITHUB_ACTOR}:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
-          EOF
       - name: 🧹 Cleanup Workspace Permissions
         if: always()
         env:
@@ -244,9 +117,9 @@ jobs:
     name: 💿 System Image & Disk Build
     needs: [build-repo]
     runs-on: ubuntu-24.04
-    # The signing environment holds SECUREBOOT_SIGNING_KEY, the Secure Boot key that
-    # signs the UKI and its PCR policy (forge/specs/azoth/KERNEL.md).
-    environment: signing
+    # No key and no environment (D43): the vmlinuz arrives signed for Secure Boot, by the
+    # azoth-boot digest in the kernel artifacts, and the images are signed with the update key
+    # by sign-system-images of the Orchestrator, from the digests this job records.
     timeout-minutes: 180
     permissions:
       contents: write
@@ -257,7 +130,6 @@ jobs:
         run: |
           set -euo pipefail
           echo "IMAGE_REGISTRY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "${GITHUB_ENV}"
-          echo "DEFAULT_TAG=latest" >> "${GITHUB_ENV}"
       - name: 📥 Checkout Repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Kernel artifacts verified by the Orchestrator
@@ -266,6 +138,12 @@ jobs:
         with:
           name: kernel-artifacts
           path: kernel-artifacts
+      - name: Tier digests published earlier in this run
+        # build-image.sh installs the tier repositories by these digests, never by tag (UD28).
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: tier-digests
+          path: tier-digests
       - name: ❄️ Install Nix (Bedrock Cache & Security Tools)
         uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
         with:
@@ -279,32 +157,71 @@ jobs:
         run: |
           set -euo pipefail
           echo "${GITHUB_TOKEN}" | podman login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-      - name: 🐳 Build OS Images
-        # The Containerfile pulls its base and the tier repository images and installs
+      - name: 🧱 Build the system stage
+        # The Containerfile pulls its base and the tier repository images by digest and installs
         # Fedora packages with dnf5, so the build needs the network; the build context
-        # is the repository root, where its COPY sources live. build-image.sh builds the
-        # default, NVIDIA and NVIDIA-legacy images in turn, all three signed with the same
-        # Secure Boot key, so one job and one approval covers the whole cycle (S8). Nothing
-        # is pushed until all three have built.
+        # is the repository root, where its COPY sources live. The system stage the three
+        # images share is built once per run, and its image ID is the base of all three
+        # (doc_update_delivery.md, UD40). The rechunk of UD32 is a step of its own after
+        # this one, writing the ID of the rechunked image to the same file.
+        run: bash system/build-image.sh --system --registry "${IMAGE_REGISTRY}" --iidfile artifacts/system-image.iid
+
+      - name: ✂️ Rechunk the system stage
+        # UD32: rpm-ostree regroups the system stage into at most 116 layers by package, so an
+        # upgrade downloads only what changed. It replaces artifacts/system-image.iid, so the
+        # checks below and the three images use the rechunked image.
+        run: bash system/rechunk-image.sh artifacts/system-image.iid
+
+      - name: 🔖 Check our RPMs against their specs
+        # The tier repositories were rebuilt from this checkout earlier in this run; a stale
+        # per-package image once shipped athanor-recovery 1.0.0-5 while its spec said 6.
+        run: bash system/check-image-rpms.sh "$(<artifacts/system-image.iid)"
+
+      - name: 🔒 Check the enabled units against the contacts list
+        # forge/config/contacts.toml lists what the image contacts by itself (ADR-0056); an
+        # enabled timer it does not list, or an enabled unit it calls silent, fails the build.
+        run: bash system/check-image-contacts.sh "$(<artifacts/system-image.iid)"
+
+      - name: 🥾 Check the vmlinuz of the image against the Secure Boot certificate
+        # The Containerfile checks the kernel azoth-boot names; this checks the file the image
+        # ships: exactly one Authenticode signature, by the project certificate. An image signed
+        # only by pesign's test certificate fails under Secure Boot with "bad shim signature".
+        run: nix shell nixpkgs#sbsigntool -c bash system/check-image-kernel.sh "$(<artifacts/system-image.iid)"
+
+      - name: 🐳 Build OS Images
+        # build-image.sh builds the default, NVIDIA and NVIDIA-legacy images in turn FROM the
+        # system image, all three with the same signed vmlinuz (S8). Nothing is pushed until
+        # all three have built.
         env:
           RUN_ID: ${{ github.run_id }}
           RUN_NUMBER: ${{ github.run_number }}
-          SECUREBOOT_SIGNING_KEY: ${{ secrets.SECUREBOOT_SIGNING_KEY }}
         run: |
           set -euo pipefail
-          [[ -n ${SECUREBOOT_SIGNING_KEY:-} ]] || { echo "SECUREBOOT_SIGNING_KEY is not available to this job: check the signing environment" >&2; exit 1; }
           for gpu in none nvidia nvidia-legacy; do
-            bash system/build-image.sh --gpu "$gpu" --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" --tag "${DEFAULT_TAG}" --serial "${RUN_NUMBER}"
+            bash system/build-image.sh --gpu "$gpu" --system-image "$(<artifacts/system-image.iid)" --registry "${IMAGE_REGISTRY}" \
+              --tag "${RUN_ID}" --serial "${RUN_NUMBER}"
           done
           df -h
 
+      - name: 🧩 Check that the images share the system layers
+        # The acceptance of UD40: each image starts with every layer of the system image.
+        # Read from local storage before the push, so a failure publishes no tag.
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          bash system/shared-layers.sh --system "$(<artifacts/system-image.iid)" --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" \
+            | tee -a "${GITHUB_STEP_SUMMARY}"
+
       - name: 📤 Push OS Images
+        # By run id only: :latest moves in tag-system-images of the Orchestrator, after the
+        # key-based signature of these digests verified (doc_update_delivery.md, UD24, UD25).
         env:
           RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
           for gpu in none nvidia nvidia-legacy; do
-            bash system/build-image.sh --gpu "$gpu" --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" --tag "${DEFAULT_TAG}" --push-only
+            bash system/build-image.sh --gpu "$gpu" --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" --push-only
           done
 
       - name: 🧾 Record the pushed digests for the signing job
@@ -319,9 +236,24 @@ jobs:
           path: artifacts/image-digests.txt
           if-no-files-found: error
 
+      - name: 📏 Measure what an upgrade downloads
+        # UD34: the new layers against the image machines run today (:stable, :latest until
+        # the first promotion), read before tag-system-images moves :latest to this run.
+        run: |
+          set -euo pipefail
+          bash system/upgrade-bytes.sh --registry "${IMAGE_REGISTRY}" --out artifacts/metrics/upgrade-bytes.json artifacts/image-digests.txt \
+            | tee -a "${GITHUB_STEP_SUMMARY}"
+
+      - name: 📎 Keep the upgrade measure
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: upgrade-bytes
+          path: artifacts/metrics/upgrade-bytes.json
+          if-no-files-found: error
+
       - name: 🔐 Sign & Attest OS Image (Zero-Trust Keyless Sigstore)
-        # One signature and one SBOM attestation per image digest: the :latest tag
-        # resolves to the same digest as :<run_id>, so cosign verify accepts both.
+        # One signature and one SBOM attestation per image digest: the :latest tag, moved
+        # later to the same digest as :<run_id>, carries them, so cosign verify accepts both.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
@@ -345,7 +277,7 @@ jobs:
         run: |
           set -euo pipefail
           for name in athanor-system-nvidia athanor-system-nvidia-legacy; do
-            podman rmi "${IMAGE_REGISTRY}/${name}:${RUN_ID}" "${IMAGE_REGISTRY}/${name}:${DEFAULT_TAG}"
+            podman rmi "${IMAGE_REGISTRY}/${name}:${RUN_ID}"
           done
           df -h
 
@@ -363,13 +295,13 @@ jobs:
       - name: 📀 Publish the ISO
         # As an OCI image, the way kernel-build.yml publishes the kernel artifacts: the
         # ISO carries the whole system image and is far past the 2 GB an Actions
-        # artifact takes. :latest only from main, again as the kernel does.
+        # artifact takes. By run id only: tag-system-images of the Orchestrator moves :latest,
+        # on main, after the image this ISO installs verified (doc_update_delivery.md, UD25).
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
           RUN_ID: ${{ github.run_id }}
           GITHUB_SHA: ${{ github.sha }}
-          GITHUB_REF: ${{ github.ref }}
           GITHUB_SERVER_URL: ${{ github.server_url }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
@@ -391,10 +323,6 @@ jobs:
           COPY $(basename "$iso") /athanor-${RUN_ID}.iso
           CONTAINERFILE
           bash forge/scripts/retry.sh podman push "${image}:${RUN_ID}"
-          if [[ $GITHUB_REF == refs/heads/main ]]; then
-            podman tag "${image}:${RUN_ID}" "${image}:latest"
-            bash forge/scripts/retry.sh podman push "${image}:latest"
-          fi
           {
             echo "### Installer ISO"
             echo
@@ -410,32 +338,3 @@ jobs:
           else
             chown -R 1001:1001 . || chown -R 1000:1000 . || true
           fi
-
-  sign-system-images:
-    name: 🔏 Key-based signature of the system images
-    # The only job that receives COSIGN_*. It builds nothing and runs no third-party tool
-    # beside the key: checkout, registry login, system/sign-images.sh (doc_update_trust.md UT2).
-    needs: [dag-system-image]
-    runs-on: ubuntu-24.04
-    environment: signing
-    timeout-minutes: 60
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: 📎 Digests recorded by the build job
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: image-digests
-          path: artifacts
-      - name: 🔑 Login to the registry
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_ACTOR: ${{ github.actor }}
-        run: echo "${GITHUB_TOKEN}" | skopeo login "$(cut -d/ -f1 artifacts/image-digests.txt | head -n 1)" -u "${GITHUB_ACTOR}" --password-stdin
-      - name: 🔏 Sign, then verify as a machine will (system/sign-images.sh)
-        env:
-          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
-          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
-        run: bash system/sign-images.sh artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"

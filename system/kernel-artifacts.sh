@@ -4,7 +4,11 @@
 # the build ordering runs this script and reads its file; none repeats its decisions.
 #
 #   resolve [--expect-kernel-digest D]  write kernel-artifacts.env: state=ready, modules-missing
-#                                       or kernel-missing, then the verified digests. Exit 0 for
+#                                       or kernel-missing, then the verified digests. The signed
+#                                       kernel artefacts NVIDIA kmod publishes are the two module
+#                                       branches and azoth-boot (vmlinuz signed for Secure Boot
+#                                       by the certificate committed in keys/secureboot):
+#                                       modules-missing when any of them is. Exit 0 for
 #                                       the three states; 1 on a registry, Rekor, network or data
 #                                       error, or when azoth:<nvr> is still D's own NVR but no
 #                                       longer resolves to D (republished or withdrawn since). D
@@ -27,8 +31,10 @@
 #                                       against (the same $REGISTRY resolve writes to the file);
 #                                       no network call, so a caller can compose an image
 #                                       reference before resolve has ever run
-#   digest REF                          the digest of REF, empty when the tag does not exist
-#   signed REF kernel|modules           signed or unsigned, by the workflow that publishes it
+#   digest REF                          the digest of REF, empty when the tag does not exist or
+#                                       the registry denies its package (never published)
+#   signed REF kernel|modules|signer    signed or unsigned, by the workflow that publishes it
+#                                       (signer: the signer image, azoth-signer.yml)
 #   predicates REF modules              the custom predicates of REF, one JSON per line, or
 #                                       unverified
 #   probe digest|signed|predicates|config ...
@@ -36,9 +42,13 @@
 #
 # The file is $KERNEL_ARTIFACTS_DIR/kernel-artifacts.env (default: kernel-artifacts/ at the
 # repository root). KERNEL_REGISTRY is the registry and owner (default ghcr.io/ followed by
-# GITHUB_REPOSITORY_OWNER, else hr-mes); GITHUB_SERVER_URL and GITHUB_REPOSITORY name the
-# workflows whose signatures are trusted. cycle and check-plan run git in the repository
-# checkout that is the current directory. Needs skopeo, cosign and jq for the registry.
+# GITHUB_REPOSITORY_OWNER, else ars-regia); GITHUB_SERVER_URL and GITHUB_REPOSITORY name the
+# workflows whose signatures are trusted, and KERNEL_TRUSTED_REFS the branches they may have run
+# on (space separated, default "iso-v0 main"): a kernel or a module signed by the same workflow on
+# any other branch is not published, whoever pushed it. A kernel is ready only when its verified
+# pins attestation carries the inputs of this checkout (forge/specs/azoth/build-inputs.py), as
+# the modules' does. cycle and check-plan run git in the repository checkout that is the current
+# directory. Needs skopeo, cosign and jq for the registry.
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -48,15 +58,28 @@ ROOT=$(dirname "$HERE")
 DIR=${KERNEL_ARTIFACTS_DIR:-$ROOT/kernel-artifacts}
 FILE=$DIR/kernel-artifacts.env
 PINS=$ROOT/forge/specs/azoth/pins.env
-owner=${GITHUB_REPOSITORY_OWNER:-hr-mes}
+SECUREBOOT_CERT=$ROOT/forge/specs/azoth/keys/secureboot/athanor-secureboot.pem
+owner=${GITHUB_REPOSITORY_OWNER:-ars-regia}
 REGISTRY=${KERNEL_REGISTRY:-ghcr.io/${owner,,}}
 ISSUER=https://token.actions.githubusercontent.com
-workflows="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-hr-mes/athanor}/.github/workflows"
+workflows="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-ars-regia/athanor}/.github/workflows"
 # Owner, repository and host names hold no regex metacharacter other than the dot.
 workflows=${workflows//./\\.}
+# The branches whose runs may publish. A signature carries the ref of the run that made it, and
+# a workflow_dispatch can be started from any branch: without this list any branch could sign a
+# kernel the images then trust.
+TRUSTED_REFS=${KERNEL_TRUSTED_REFS:-iso-v0 main}
+refs=''
+read -ra trusted <<< "$TRUSTED_REFS"
+for ref in "${trusted[@]}"; do
+  [[ $ref =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "kernel-artifacts: KERNEL_TRUSTED_REFS: '$ref' is not a branch name" >&2; exit 1; }
+  refs+="${refs:+|}${ref//./\\.}"
+done
+[[ -n $refs ]] || { echo "kernel-artifacts: KERNEL_TRUSTED_REFS names no branch" >&2; exit 1; }
 declare -A IDENTITY=(
-  [kernel]="^${workflows}/kernel-build\.yml@refs/heads/"
-  [modules]="^${workflows}/nvidia-kmod\.yml@refs/heads/"
+  [kernel]="^${workflows}/kernel-build\.yml@refs/heads/(${refs})\$"
+  [modules]="^${workflows}/nvidia-kmod\.yml@refs/heads/(${refs})\$"
+  [signer]="^${workflows}/azoth-signer\.yml@refs/heads/(${refs})\$"
 )
 # cosign v3 reports a missing or foreign signature or attestation with these messages. Any
 # other failure (registry, Rekor, TUF, network) is an error, never a missing artifact.
@@ -89,6 +112,15 @@ probe_digest() {
   out=$(skopeo inspect --format '{{.Digest}}' "docker://$1" 2> "$TMP/err") || status=$?
   if [[ $status -ne 0 ]]; then
     grep -q 'manifest unknown' "$TMP/err" && return 0
+    # ghcr.io answers a package that was never published (azoth-nvidia before the first
+    # NVIDIA build under an owner) by denying the anonymous bearer token, not with manifest
+    # unknown. A private package gets the same answer and would be rebuilt and pushed
+    # again: the kernel artifacts are public by design, so the log names both readings.
+    if grep -qE 'Requesting bearer token: .*403' "$TMP/err"; then
+      local repo=${1%@*}
+      echo "kernel-artifacts: ${repo%:*}: denied, read as never published (or not public)" >&2
+      return 0
+    fi
     cat "$TMP/err" >&2
     return 1
   fi
@@ -97,11 +129,14 @@ probe_digest() {
 }
 
 probe_signed() {
-  local status=0
-  cosign verify --certificate-identity-regexp "$(identity "$2")" --certificate-oidc-issuer "$ISSUER" "$1" > /dev/null 2> "$TMP/err" || status=$?
+  local status=0 regex
+  regex=$(identity "$2")
+  cosign verify --certificate-identity-regexp "$regex" --certificate-oidc-issuer "$ISSUER" "$1" > /dev/null 2> "$TMP/err" || status=$?
   if [[ $status -eq 0 ]]; then
     echo signed
   elif grep -qE "$UNVERIFIED" "$TMP/err"; then
+    # stderr: stdout is the verdict. The identity it did have is what a maintainer needs to see.
+    sed -n "s|.*got \"\(.*\)\".*|kernel-artifacts: $1 is signed as \1, not by a trusted ref|p" "$TMP/err" >&2
     echo unsigned
   else
     cat "$TMP/err" >&2
@@ -110,8 +145,9 @@ probe_signed() {
 }
 
 probe_predicates() {
-  local status=0
-  cosign verify-attestation --type custom --certificate-identity-regexp "$(identity "$2")" --certificate-oidc-issuer "$ISSUER" "$1" > "$TMP/out" 2> "$TMP/err" || status=$?
+  local status=0 regex
+  regex=$(identity "$2")
+  cosign verify-attestation --type custom --certificate-identity-regexp "$regex" --certificate-oidc-issuer "$ISSUER" "$1" > "$TMP/out" 2> "$TMP/err" || status=$?
   if [[ $status -eq 0 ]]; then
     jq -ce '.payload | @base64d | fromjson | .predicate.Data | fromjson' "$TMP/out" || die "$1: malformed attestation"
   elif grep -qE "$UNVERIFIED" "$TMP/err"; then
@@ -166,6 +202,35 @@ module_verdict() { # module_verdict REF BRANCH KERNEL_DIGEST DEVEL_DIGEST: verif
   jq -sr --arg branch "$2" --arg kernel "$3" --arg devel "$4" --argjson pins "$pins" '
     if any(.[]; .driver == $branch and .kernel_digest == $kernel and .devel_digest == $devel and (.pins as $p | $pins | to_entries | all(.value == $p[.key])))
     then "verified" else "unverified" end' <<< "$predicates"
+}
+
+boot_verdict() { # boot_verdict REF KERNEL_DIGEST: verified when REF is signed by NVIDIA kmod and
+                  # attested as the vmlinuz of KERNEL_DIGEST signed with the Secure Boot
+                  # certificate of this checkout (a rotated certificate makes it unverified, so
+                  # the next run signs the kernel again), unverified otherwise
+  local signed predicates cert
+  signed=$(ask signed "$1" modules)
+  [[ $signed == signed ]] || { echo unverified; return 0; }
+  predicates=$(ask predicates "$1" modules)
+  [[ $predicates != unverified ]] || { echo unverified; return 0; }
+  cert=$(sha256sum "$SECUREBOOT_CERT" | cut -d' ' -f1)
+  jq -sr --arg kernel "$2" --arg cert "$cert" '
+    if any(.[]; .boot == "vmlinuz" and .kernel_digest == $kernel and .secureboot_cert == $cert)
+    then "verified" else "unverified" end' <<< "$predicates"
+}
+
+kernel_verdict() { # kernel_verdict REF: verified when a pins/inputs attestation of REF, verified
+                    # against the trusted refs, equals the inputs of this checkout, unverified
+                    # otherwise. The signature says who built REF, this says from what: a kernel
+                    # built from other patches or another Fedora pin is signed all the same. Like
+                    # module_verdict it scans every verified entry. A failure of build-inputs.py
+                    # or of the verification dies here: the caller checks the substitution.
+  local predicates expected status=0
+  predicates=$(ask predicates "$1" kernel) || exit 1
+  [[ $predicates != unverified ]] || { echo unverified; return 0; }
+  expected=$(python3 "$ROOT/forge/specs/azoth/build-inputs.py" | jq -cS .) || status=$?
+  [[ $status -eq 0 && -n $expected ]] || die "build-inputs.py did not produce the inputs of this checkout"
+  jq -sr --argjson expected "$expected" 'if any(.[]; . == $expected) then "verified" else "unverified" end' <<< "$predicates"
 }
 
 attested_nvr() { # attested_nvr REF NVR: whether REF's cosign-verified custom pins attestation
@@ -253,7 +318,23 @@ resolve() {
     write kernel-missing "${lines[@]}"
     return 0
   fi
+  verdict=$(kernel_verdict "$REGISTRY/azoth@$kernel") || exit 1
+  if [[ $verdict != verified ]]; then
+    [[ -z $expect ]] || die "$REGISTRY/azoth:$nvr is $kernel but was not built from the inputs of this checkout, the caller resolved $expect: the kernel was republished with other inputs"
+    write kernel-missing "${lines[@]}"
+    return 0
+  fi
   lines+=("kernel_digest=$kernel" "devel_digest=$devel")
+  tag="$nvr-k${kernel:7:12}"
+  lines+=("boot_tag=$tag")
+  digest=$(ask digest "$REGISTRY/azoth-boot:$tag")
+  verdict=unverified
+  [[ -z $digest ]] || verdict=$(boot_verdict "$REGISTRY/azoth-boot@$digest" "$kernel")
+  if [[ $verdict == verified ]]; then
+    lines+=("boot_digest=$digest")
+  else
+    state=modules-missing
+  fi
   for branch in open legacy; do
     version=$(sed -n "s/^NVIDIA_${branch^^}_VERSION=//p" "$PINS")
     [[ -n $version ]] || die "NVIDIA_${branch^^}_VERSION is not set in $PINS"
@@ -394,7 +475,8 @@ check_plan() {
       annotate warning "azoth:$nvr is not published yet: Kernel Build on this pull request proves the kernel and the modules build and boot; the images are built after the merge"
       ;;
     modules-missing)
-      [[ $only_nvidia_pins == true && $nvidia_moved == true && $other_moved == false ]] || die "the NVIDIA modules of azoth:$nvr are not published: with unchanged NVIDIA pins publishing them is the Orchestrator's job (bootstrap or interrupted publication), and NVIDIA pins move in their own pull request"
+      [[ $only_nvidia_pins == true && $nvidia_moved == true && $other_moved == false ]] || die "the signed kernel artefacts of azoth:$nvr (NVIDIA modules, signed vmlinuz) are not published: with unchanged NVIDIA pins publishing them is the Orchestrator's job (bootstrap, interrupted publication or a new Secure Boot certificate), and NVIDIA pins move in their own pull request"
+      grep -q '^boot_digest=.' "$FILE" || die "the signed vmlinuz of azoth:$nvr is not published, and every image copies it in: the Orchestrator publishes it (NVIDIA kmod) before an NVIDIA pin bump can be checked"
       gpus=none delta=true
       annotate warning "the NVIDIA modules of the new pins are not published yet: only the default image is built; the variants are built and gated after the merge"
       ;;
@@ -413,7 +495,7 @@ case $command in
     [[ $# -eq 0 ]] || usage
     resolve
     state=$(get state)
-    [[ $state == ready ]] || die "state=$state: the kernel of the pins and both NVIDIA module branches must be published, signed and attested"
+    [[ $state == ready ]] || die "state=$state: the kernel of the pins, its signed vmlinuz and both NVIDIA module branches must be published, signed and attested"
     ;;
   cycle) cycle "$@" ;;
   check-plan) check_plan "$@" ;;

@@ -4,13 +4,14 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-update
 Version:        1.0.0
-Release:        4%{?dist}
+Release:        9%{?dist}
 Summary:        Athanor system image updates and trust state
 
-License:        MIT
-URL:            https://github.com/hr-mes/athanor
+License:        GPL-3.0-or-later
+URL:            https://github.com/ars-regia/athanor
 
 BuildRequires:  rust cargo gcc systemd-rpm-macros
+BuildRequires:  dbus-daemon
 Requires:       bootc skopeo ostree systemd polkit containers-common
 
 %description
@@ -38,7 +39,7 @@ install -D -m 0755 %{sources}/usr/libexec/athanor-update/render-policy %{buildro
 for template in policy.json.in attachments-policy.json.in athanor.yaml.in; do
     install -D -m 0644 %{sources}/usr/share/athanor/containers/templates/$template %{buildroot}/usr/share/athanor/containers/templates/$template
 done
-for unit in athanor-update-check.timer athanor-update-check.service athanor-update.service athanor-update-state.service athanor-update-migrate.service; do
+for unit in athanor-update-check.timer athanor-update-check.service athanor-update.service athanor-update-state.service athanor-update-migrate.service athanor-update-migrate.timer; do
     install -D -m 0644 %{sources}/usr/lib/systemd/system/$unit %{buildroot}/usr/lib/systemd/system/$unit
 done
 install -D -m 0644 %{sources}/usr/lib/systemd/user/athanor-update-notify.service %{buildroot}/usr/lib/systemd/user/athanor-update-notify.service
@@ -62,6 +63,7 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
 /usr/lib/systemd/system/athanor-update.service
 /usr/lib/systemd/system/athanor-update-state.service
 /usr/lib/systemd/system/athanor-update-migrate.service
+/usr/lib/systemd/system/athanor-update-migrate.timer
 /usr/lib/systemd/user/athanor-update-notify.service
 /usr/lib/systemd/system-preset/80-athanor-update.preset
 /usr/lib/systemd/user-preset/80-athanor-update.preset
@@ -72,6 +74,64 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
 %doc /usr/share/doc/athanor-update/RECOVERY.md
 
 %changelog
+* Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-9
+- `athanor-update migrate` moves a machine that follows the project's previous owner (listed
+  in `/usr/share/athanor/containers/moved-from`, which render-policy writes from
+  `--moved-from` at the image build), an image the policy in force no longer names, to
+  the same image under the owner the policy pins, on the tag or digest it follows, with
+  `bootc switch --enforce-container-sigpolicy`. The image the machine already runs supplies
+  the policy, so the switch is verified even when the machine reached that image through an
+  unverified reference. Any other owner, a fork included, stays `reference-out-of-scope`.
+  Until the new deployment boots, the state reads `verified.reason = owner-moved`; an image
+  or tag the new owner has not published (`successor-absent`) or a queued rollback reads
+  `owner-moved-waiting`, and the migration timer retries.
+- The migration decides from the deployments, not from the stamp alone: a switch that staged
+  nothing, or not the target with the policy enforced, fails; a staged target waits for the
+  restart (`restart-pending`); the stamp is written once the signed reference has booted, so
+  a deployment that does not boot is switched once more, and then not again for that digest
+  (`move-record` counts failed boots only, of deployments bootc names, never a staging a
+  power cycle discarded, and is removed with the stamp). A
+  stamp is ignored on an image of the previous owner, and neither athanor-update-migrate.service
+  nor its timer has the stamp as a condition; with the stamp and no previous owner listed,
+  the unit ends without asking bootc.
+- The migration never stages a held digest, and never writes one: after `GoBack()` or a
+  greenboot rollback of the moved deployment, or two failed boots of its digest, the machine
+  stays on the previous owner, `move-held` is written and the state reads
+  `verified.reason = owner-moved-held`, until the new owner publishes a newer build.
+- A verified machine on a run-number tag (digits only) or a digest publishes
+  `verified.reason = pinned-build`: one build, which receives no updates. Nothing moves it.
+  Any other tag follows newer builds.
+- An image the registry does not hold at all (`name unknown`, or ghcr.io's 403 on the pull
+  token or `denied`) is a wait like a missing tag, not a failure every five minutes. A 403
+  or `denied`, which a private package or an expired credential also answers, is logged at
+  warning level.
+
+* Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-8
+- A machine that has migrated but boots a reference that does not enforce the policy, with
+  no enforcing deployment staged, publishes `verified.reason = origin-not-enforcing` instead
+  of `media`: it does not verify its updates and the check asks the registry for none. The
+  state is reported, not repaired; the migration does not run again.
+
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
+- A queued rollback (`rollbackQueued` in `bootc status`: greenboot after a failed health
+  check, or `bootc rollback`) holds the booted digest at every check and downloads nothing.
+  `GoBack()` on such a boot holds and reboots without a second `bootc rollback`, which
+  would have swapped back to the deployment being left. `Apply()` refuses and the migration
+  waits (`rollback-queued`), since bootc discards the staged deployment on a rollback and a
+  new one would replace the return.
+
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
+- `athanor-update migrate`: a channel without a manifest on the registry (`:stable` is
+  published later, A2-4) is a wait, not a failure. The unit exits 0, no longer restarts every
+  five minutes, and the state reads `verified.reason = channel-absent`.
+  athanor-update-migrate.timer retries every six hours until the stamp exists; the stamp
+  clears `channel-absent`.
+
+* Sun Oct 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
+- `athanor-update go-back`: the console client of GoBack(), for an administrator at a text
+  console (`sudo athanor-update go-back`). It calls the service the notifier calls and
+  reports what the service answers; run as any other user it says to use sudo.
+
 * Thu Oct 01 2026 Athanor Forge <forge@athanor.os> - 1.0.0-4
 - A deployment bootc reports incompatible (packages layered, removed or replaced with
   rpm-ostree) is described from rpm-ostree and published as not verified, reason

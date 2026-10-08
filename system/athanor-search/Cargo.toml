@@ -2,7 +2,7 @@
 name = "athanor-search"
 version = "1.0.0"
 edition = "2021"
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "The launcher's and the library's search: sources, ranking, usage and the result board, on the GLib main loop and with no GTK type"
 authors = ["Athanor Forge <forge@athanor.os>"]
 

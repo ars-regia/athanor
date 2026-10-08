@@ -3,7 +3,7 @@ name = "athanor-greeter-ui"
 version = "1.0.0"
 edition = "2021"
 authors = ["Athanor Forge <forge@athanor.os>"]
-license = "MIT"
+license = "GPL-3.0-only"
 description = "The Athanor greeter: one surface, one binary, the process that reads the password"
 
 [dependencies]

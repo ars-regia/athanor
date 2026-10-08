@@ -23,6 +23,11 @@ contents = """
 # this file.
 xconfig --startxonboot
 
+# Remote login is off on new installs (doc_software.md, decision 2). The image's preset
+# keeps Fedora's preset, which enables sshd, so that existing installs keep it through the /etc
+# merge; a new installation turns it off here.
+services --disabled=sshd
+
 %post --erroronfail
 set -eu
 # Anaconda writes a / line into /etc/fstab (subvol=root,compress=zstd:1,...,ro). On a

@@ -2,11 +2,19 @@
 //!
 //! `/run/athanor-update/`   `lock`, `state.json` (0644, written to a temporary name and renamed)
 //! `/var/lib/athanor-update/`
-//!   `held`            the digest the user went back from; nothing releases it
+//!   `held`            the digest the user went back from, or a queued rollback left;
+//!                     nothing releases it, and `migrate` never writes it
 //!   `refused`         the digest the policy last refused; cleared by a download that passes
 //!   `newest-booted`   the newest build time this machine has booted, seconds since the epoch
 //!   `last-success`    when the registry last answered a check, seconds since the epoch
 //!   `migrated`        stamp of `athanor-update migrate`
+//!   `channel-absent`  `migrate` found no manifest for the channel, or for the image under the
+//!                     project's new owner; cleared when it finds one
+//!   `move-held`       `migrate` left a machine on the previous owner because the image under
+//!                     the new owner is the held digest; cleared when it moves or finds another
+//!   `move-record`     `<digest> <failed boots> [<deployment>]`: deployments of that digest
+//!                     `migrate` staged that did not boot, and the one it staged last, until
+//!                     a later run sees what became of it; removed with the stamp
 //!   `signatures/<hex>/`  the signature object of a digest, as `skopeo copy … dir:` wrote it
 use athanor_trust_state::State;
 use std::fs::File;
@@ -18,6 +26,17 @@ use std::path::{Path, PathBuf};
 pub struct Store {
     pub run: PathBuf,
     pub var: PathBuf,
+}
+
+/// What `migrate` knows of its moves to one digest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoveRecord {
+    pub digest: String,
+    /// Deployments of the digest that were deployed and did not boot for good.
+    pub failed_boots: u32,
+    /// The deployment the last switch staged (`Deployed::deployment`), until a later run sees
+    /// what became of it. `None` as well when bootc did not name it: nothing is counted then.
+    pub staged: Option<String>,
 }
 
 /// Holds the lock of UT1 until dropped.
@@ -138,9 +157,70 @@ impl Store {
     }
 
     /// # Errors
-    /// The file cannot be written.
+    /// A file cannot be written or removed.
     pub fn set_migrated(&self) -> std::io::Result<()> {
-        Self::replace(&self.var, "migrated", 0o644, b"")
+        Self::replace(&self.var, "migrated", 0o644, b"")?;
+        self.set_move_held(false)?;
+        // The moved deployment booted: a later return from it is no failed boot to count.
+        match std::fs::remove_file(self.var.join("move-record")) {
+            Err(err) if err.kind() != std::io::ErrorKind::NotFound => return Err(err),
+            _ => {}
+        }
+        self.set_channel_absent(false)
+    }
+
+    #[must_use]
+    pub fn channel_absent(&self) -> bool {
+        self.var.join("channel-absent").exists()
+    }
+
+    /// # Errors
+    /// The file cannot be written or removed.
+    pub fn set_channel_absent(&self, absent: bool) -> std::io::Result<()> {
+        if absent {
+            return Self::replace(&self.var, "channel-absent", 0o644, b"");
+        }
+        match std::fs::remove_file(self.var.join("channel-absent")) {
+            Err(err) if err.kind() != std::io::ErrorKind::NotFound => Err(err),
+            _ => Ok(()),
+        }
+    }
+
+    #[must_use]
+    pub fn move_held(&self) -> bool {
+        self.var.join("move-held").exists()
+    }
+
+    /// # Errors
+    /// The file cannot be written or removed.
+    pub fn set_move_held(&self, held: bool) -> std::io::Result<()> {
+        if held {
+            return Self::replace(&self.var, "move-held", 0o644, b"");
+        }
+        match std::fs::remove_file(self.var.join("move-held")) {
+            Err(err) if err.kind() != std::io::ErrorKind::NotFound => Err(err),
+            _ => Ok(()),
+        }
+    }
+
+    /// What `migrate` recorded of its moves to `digest`; an empty record for any other digest.
+    #[must_use]
+    pub fn move_record(&self, digest: &str) -> MoveRecord {
+        let line = self.read_line("move-record").unwrap_or_default();
+        let mut fields = line.split(' ');
+        let mut record = MoveRecord { digest: digest.to_owned(), failed_boots: 0, staged: None };
+        if fields.next() == Some(digest) {
+            record.failed_boots = fields.next().and_then(|count| count.parse().ok()).unwrap_or(0);
+            record.staged = fields.next().map(str::to_owned);
+        }
+        record
+    }
+
+    /// # Errors
+    /// The file cannot be written.
+    pub fn set_move_record(&self, record: &MoveRecord) -> std::io::Result<()> {
+        let staged = record.staged.as_deref().map(|staged| format!(" {staged}")).unwrap_or_default();
+        Self::replace(&self.var, "move-record", 0o644, format!("{} {}{staged}\n", record.digest, record.failed_boots).as_bytes())
     }
 
     /// The directory of the signature object of `digest`; `None` for anything but `sha256:<64 hex>`.
@@ -199,6 +279,20 @@ mod tests {
         assert_eq!(store.try_lock().err().map(|err| err.kind()), Some(std::io::ErrorKind::WouldBlock));
         drop(held);
         assert!(store.try_lock().is_ok());
+    }
+
+    #[test]
+    fn the_move_record_survives_and_belongs_to_one_digest() {
+        let store = scratch("move-record");
+        let empty = MoveRecord { digest: "sha256:aa".into(), failed_boots: 0, staged: None };
+        assert_eq!(store.move_record("sha256:aa"), empty);
+        let record = MoveRecord { failed_boots: 1, staged: Some("b87d.1".into()), ..empty.clone() };
+        store.set_move_record(&record).expect("write");
+        assert_eq!(store.move_record("sha256:aa"), record);
+        assert_eq!(store.move_record("sha256:a").failed_boots, 0, "a prefix is another digest");
+        store.set_move_record(&MoveRecord { staged: None, ..record }).expect("write");
+        assert_eq!(store.move_record("sha256:aa").staged, None);
+        assert_eq!(store.move_record("sha256:bb"), MoveRecord { digest: "sha256:bb".into(), ..empty });
     }
 
     #[test]

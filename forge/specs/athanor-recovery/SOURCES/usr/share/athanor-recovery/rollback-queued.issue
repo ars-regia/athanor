@@ -1,0 +1,18 @@
+
+The desktop did not start.
+Il desktop non si è avviato.
+
+This version of the system failed its health check after the update, and the
+previous version is already set to start next time.
+Questa versione del sistema non ha superato il controllo di salute dopo
+l'aggiornamento, e la versione precedente è già impostata per il prossimo avvio.
+
+To restart on the previous version, log in as an administrator and run:
+Per riavviare con la versione precedente, accedi come amministratore ed esegui:
+
+    sudo systemctl reboot
+
+To see first why this version failed:
+Per vedere prima perché questa versione non è partita:
+
+    journalctl -b -u greetd -u greenboot-healthcheck

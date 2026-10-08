@@ -1,64 +1,114 @@
-# Athanor OS: Platform Experience (Boot, Sicurezza Hardware e User-Land)
+# Athanor: Platform Experience (Boot, Disk Encryption and the Desktop)
 
-Questo documento colma la distanza tra l'infrastruttura di basso livello (Kernel, Mesh, IPC) e l'esperienza tangibile dell'utente finale. Dettaglia la catena di fiducia hardware (Boot) e le interfacce primarie con cui l'utente interagisce dal momento in cui preme il pulsante di accensione.
-
----
-
-## 1. Boot Flow, UKI e TPM 2.0 (La Catena di Fiducia)
-
-In Athanor OS, l'avvio del sistema non è un semplice caricamento di file dal disco, ma un rigoroso processo crittografico di validazione continua (Measured Boot).
-
-### Unified Kernel Image (UKI)
-Abbandoniamo la classica frammentazione (kernel, initramfs, parametri di boot separati) a favore di un singolo file binario firmato digitalmente: l'**UKI**. 
-L'intero sistema operativo base viene pacchettizzato in questo payload e firmato crittograficamente (Secure Boot). Se un singolo bit viene alterato, il firmware UEFI della macchina si rifiuta fisicamente di avviarlo.
-
-### Sigillo TPM 2.0 (Trusted Platform Module)
-La partizione dei dati dell'utente (`/var/home`), gestita tramite *Bcachefs*, è interamente crittografata con LUKS2.
-Invece di chiedere password complesse a ogni avvio, Athanor OS sfrutta il chip TPM 2.0 della scheda madre:
-- Durante l'avvio, il sistema misura lo stato del firmware, del bootloader e del kernel UKI registrandoli nei PCR (Platform Configuration Registers) del TPM.
-- Le chiavi di decrittazione del disco sono "sigillate" (sealed) all'interno del TPM.
-- Il TPM decritta il disco **solo se** l'hash del sistema operativo in fase di avvio corrisponde esattamente a quello firmato in origine. Se un attaccante tenta di manomettere il kernel o di avviare il disco da una chiavetta live, il TPM si rifiuta di rilasciare la chiave crittografica.
+This document links the platform's trust chain to what the user sees, from power-on to the
+desktop. Each area has a specification of its own, named below; this one only says how
+they meet.
 
 ---
 
-## 2. L'Esperienza OOBE (Out-Of-Box Experience) e il Greeter
+## 1. Boot and disk encryption
 
-L'impatto iniziale dell'utente con Athanor OS è gestito dal demone `athanor-greeter`, scritto in Rust nativo.
+### Boot chain
 
-### Il Primo Avvio (OOBE)
-Al primo boot di una macchina vergine, il Greeter non mostra un generico desktop vuoto. Lancia un flusso isolato e blindato per:
-1. Creare l'account utente amministratore (in un ambiente in cui le password sono gestite con primitive di *Zeroing* in RAM tramite `ZeroizeOnDrop` per prevenire dump della memoria).
-2. Generare la coppia di chiavi ellittiche **X25519** che fungeranno da identità crittografica inviolabile per il Mesh.
-3. Chiedere il login opzionale a Cloudflare Zero Trust per innescare immediatamente l'adesione della macchina allo Swarm globale.
+Release 1.0 has no Unified Kernel Image (ADR-0037, ADR-0043). The firmware starts shim,
+shim verifies GRUB and the kernel, and the kernel (`vmlinuz`) is signed with the project's
+Secure Boot key in a sign-only CI job and trusted on the machine through a MOK the owner
+enrols (ADR-0064). The initramfs and the kernel command line are not signed. The UKI, with
+a signed PCR 11 policy, arrives with the sealed composefs of release 1.1 (ADR-0043). The
+kernel and its command line are specified in [doc_kernel_profile.md](doc_kernel_profile.md).
 
-### Il Login Quotidiano
-Il `athanor-greeter` sfrutta Wayland per presentare una schermata di login a latenza zero. Non carica pesanti dipendenze X11 o Web. Valida le credenziali e sblocca il portachiavi (Keyring) dell'utente in un'unica transazione atomica, passando il controllo al compositor `Niri`.
+### Disk encryption and the TPM
+
+In release 1.0, disk encryption is a choice the person makes in the installer, not a
+default (maintainer decision of 2026-10-08). The installer offers LUKS2 encryption, and the
+person may decline it.
+
+What the installer does today. The ISO is bootc-image-builder's Anaconda installer with the
+kickstart in `system/disk_config/iso.toml`; the manual build uses `system/athanor-install.ks`.
+Neither kickstart carries `clearpart`, `part` or `autopart`, so Anaconda opens its storage
+screen and leaves the disk layout and the encryption choice to the person. Anaconda's
+encryption option is off until the person turns it on. When it is on, Anaconda asks for a
+passphrase and, with automatic partitioning, puts the btrfs file system that holds `/`,
+`/var` and `/home` in one LUKS2 volume; `/boot` and the EFI system partition stay
+unencrypted. When it is off, user data is stored unencrypted.
+
+Gaps, named here so that this text claims no more than the tree does:
+
+- The ISO carries Anaconda's GTK interface. The web interface that ADR-0059 chooses for 1.0
+  is not built yet, and its encryption screen has not been checked.
+- No acceptance run installs with encryption on. The encrypted layout above is Anaconda's
+  behaviour, not one the project's tests verify.
+- The installer enrols neither a recovery key nor the TPM: the volume it creates has the
+  passphrase keyslot only.
+
+Accounts are classic accounts in `/etc/passwd`, and systemd-homed is disabled by preset
+(ADR-0045), so nothing encrypts a home directory by itself: the home is encrypted exactly
+when the system volume is.
+
+In 1.0 an encrypted volume unlocks with its passphrase, or with TPM plus PIN once an
+administrator runs `athanor-uki-enroll`; TPM-only unlocking needs the signed UKI (ADR-0064;
+A2-27 as amended on 2026-10-08, D42 in doc_kernel_profile.md). Nothing in the image enrols
+the TPM 2.0 by itself.
+`athanor-tpm-luks-seal`, which sealed the volume at first boot to PCRs 0, 2, 7 and 11, was
+removed with the other TPM units that acted without the user (issue #148), and
+`verify.py shipped` fails if it is shipped again. An administrator may run
+`athanor-uki-enroll <device>` (A2-27 as amended on 2026-10-08): it adds a keyslot that needs
+both the TPM and a PIN, bound to the value of PCR 7, enrols a recovery key first when the
+volume has none, and keeps the passphrase. PCR 7 holds the Secure Boot state, the
+firmware's PK, KEK, db and dbx, the db certificate that verified shim and, as shim's
+[README.tpm](https://github.com/rhboot/shim/blob/15.8/README.tpm) states (lines 9-22), the
+certificate from db, MokList or shim's own list that matched each binary shim verifies,
+GRUB and the kernel, plus SBAT and MokSBState. It does not hold the initrd or the kernel
+command line. The PIN is required in 1.0 because neither is signed and GRUB has no
+password, so the TPM alone cannot tell the boot Athanor ships from another one that
+Secure Boot also accepts. TPM-only unlocking waits for the signed UKI (D42). The PIN has
+a limit: it protects a machine taken while powered off, not one whose `/boot` someone
+changes and leaves for its owner to start, since a boot prepared that way can ask for the
+PIN itself and PCR 7 does not change; closing that needs the signed UKI (P4b). The tool
+refuses when Secure Boot does not verify the boot chain (it reads `mokutil --sb-state`),
+since PCR 7 then binds nothing, and when PCR 7 reads all zeros, since firmware that never
+measured it leaves the keyslot on the PIN alone. It changes no boot configuration: with no `tpm2-device=`
+option, systemd-cryptsetup tries the volume's LUKS2 tokens before the passphrase, and the
+generic initramfs carries the TPM2 token plugin, so the next boot asks for the PIN. Kernel
+updates leave PCR 7 alone, and so do most firmware updates; an update of the Secure Boot
+databases (db, dbx or KEK, which fwupd applies), of shim, or a kernel signed with a new
+Secure Boot key (whose certificate shim measures from MokList) can change it, and the next boot then asks for the passphrase or the recovery key;
+running the tool again binds the new value. A wrong PIN is asked for again, with no
+limit of its own (crypttab's `tries=` counts passphrases, not PINs; an empty PIN and Escape
+do not skip it): the boot asks for the passphrase or the recovery key only once the TPM's
+dictionary-attack lockout engages. That took three failures on swtpm; the reference laptop's
+Intel PTT allows 32 and forgets one every two hours, and eight wrong PINs in a row neither
+locked it nor reached the passphrase. Someone who forgets the PIN therefore keeps entering
+wrong ones until the lockout, or unlocks with the passphrase or the recovery key from
+installation media, then runs the tool again to set a new PIN. While a lockout lasts the
+right PIN fails too. A `systemd-pcrlock` policy, which survives
+announced updates of that kind, arrives with the UKI (P4b, D42).
 
 ---
 
-## 3. La Dotazione User-Land (App e Desktop)
+## 2. First run and the greeter
 
-Athanor OS è per sua natura un sistema ostile al software legacy. Il filesystem principale è immutabile e non prevede l'installazione di programmi tramite i classici `apt` o `dnf` in user-space.
+The first run is specified in doc_first_run.md.
 
-### Flatpak come Standard Assoluto
-Tutte le applicazioni grafiche utente (Browser, Editor, Media Player) esistono esclusivamente sotto forma di **Container Flatpak** (o OCI) sottoposti a verifica SLSA Level 4.
-Queste app operano in un sandbox stretto (Bubblewrap). Se scarichi un PDF maligno tramite il browser, l'exploit rimane confinato nel filesystem effimero del browser e non può toccare la root del sistema o i tuoi documenti personali senza passare per i portali XDG (`xdg-desktop-portal-athanor`), i quali operano sotto una rigorosa policy **Fail-Closed Zero-Trust** (nessun permesso viene accordato in caso di errore di sistema).
-
-### Le App Predefinite Minimali
-Al primo avvio, l'OS fornisce un set di strumenti essenziali curati per non violare l'isolamento:
-- **Browser:** Una versione hardenizzata (spesso basata su Firefox/LibreWolf) fornita via Flatpak.
-- **Terminal/IDE:** Ambienti di sviluppo forniti tramite podman/toolbx, che permettono all'utente di distruggere e ricreare macchine virtuali di sviluppo senza mai "sporcare" l'OS host.
-- **Interface:** COSMIC on cosmic-comp, with Athanor's own surfaces replacing COSMIC's one stage at a time. See [doc_shell.md](doc_shell.md), which supersedes the niri and Relm4 panel described here before 2026-09-18.
+The login screen is `athanor-greeter-ui`, a GTK4 client of greetd. `athanor-greeter-session`
+starts it on a `cosmic-comp` instance of its own, inside a bubblewrap sandbox, and the
+greeter confines its own writes with Landlock before anything else. After login the session
+runs on `cosmic-comp` ([doc_shell.md](doc_shell.md)).
+First run is specified in [doc_first_run.md](doc_first_run.md).
 
 ---
 
-## 4. Il Portale Web Integrato (Astro.js)
+## 3. Applications and the desktop
 
-L'anello di congiunzione tra l'utente avanzato e la documentazione del sistema è un vero e proprio portale web servito localmente in `localhost`, eliminando la necessità di cercare wiki online.
+The root filesystem is immutable: applications are not installed with `dnf`. Graphical
+applications are Flatpaks, confined by bubblewrap, and reach the user's files through the
+XDG portals; the image ships `xdg-desktop-portal-athanor` for the file chooser. How
+applications are found, installed and updated is specified in
+[doc_software.md](doc_software.md), which also records that no Flathub remote is configured
+today.
 
-### Motore Astro.js e Ricerca Pagefind
-Il codice in `system/portal/` genera un sito web statico compresso ad altissime prestazioni. Utilizza `Pagefind` per offrire una barra di ricerca istantanea (Zero-JS) che indicizza tutta l'architettura dell'OS, i log di sistema e i comandi utili.
-
-### Ricerca e Documentazione (Zero-JS e Zero-AI)
-L'aspetto pi� avanzato del portale � la sua staticit� estrema. Invece di affidarsi a instabili demoni di traduzione AI (ormai rimossi dall'OS) o pesanti framework JavaScript, il portale utilizza **Astro.js e Pagefind**. L'indicizzazione e la traduzione dei documenti avvengono in fase di build statica, permettendo una ricerca fulminea e a zero overhead sulla macchina locale.
-
+- **Interface:** COSMIC on cosmic-comp, with Athanor's own surfaces replacing COSMIC's one
+  stage at a time. See [doc_shell.md](doc_shell.md), which supersedes the niri and Relm4
+  panel described here before 2026-09-18.
+- **Development:** the image carries Nix (`athanor-nix-support`); the developer mode is
+  part of [doc_software.md](doc_software.md).

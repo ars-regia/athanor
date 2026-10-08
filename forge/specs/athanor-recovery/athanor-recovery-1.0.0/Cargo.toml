@@ -4,7 +4,7 @@ version = "1.0.0"
 edition = "2021"
 authors = ["Athanor Forge <forge@athanor.os>"]
 description = "Pre-Boot GUI Recovery Kiosk & Rollback Manager for Athanor OS"
-license = "MIT"
+license = "GPL-3.0-or-later"
 
 [[bin]]
 name = "athanor-recovery-ui"

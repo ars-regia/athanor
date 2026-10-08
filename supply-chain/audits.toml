@@ -1,7 +1,0 @@
-[audits]
-
-[[audits.libc]]
-who = "Athanor OS Security Team <security@athanor.os>"
-criteria = "safe-to-deploy"
-version = "0.2.155"
-notes = "Audited libc FFI bindings for memory safety, pointer validity, and alignment."

@@ -1,0 +1,41 @@
+[Unit]
+Description=Say at the console that the desktop did not start
+# agetty prints /etc/issue.d/*.issue in its banner, so the message has to be in place before
+# the getty starts. /etc/issue.d/50-athanor-recovery.issue is a link that tmpfiles declares
+# to the file this unit writes: at every boot but a recovery the link points at nothing, and
+# agetty passes over it (measured with util-linux 2.39, `agetty --show-issue`). agetty does
+# not read /run/issue.d while /etc/issue exists, which is why the message is not put there.
+Before=getty@tty1.service
+# The message depends on whether greenboot has queued the previous deployment after a failed
+# health check (doc_recovery.md, R5), so it is written once greenboot is done.
+After=greenboot-healthcheck.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+RuntimeDirectory=athanor-recovery
+ExecStart=/usr/libexec/athanor-recovery/write-notice /run/athanor-recovery/recovery.issue
+
+# A root process writes a file in a directory it owns and reads the journal, whose files root
+# owns: no capability is needed.
+CapabilityBoundingSet=
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+UMask=0022

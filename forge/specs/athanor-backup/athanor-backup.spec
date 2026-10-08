@@ -5,7 +5,7 @@ Version:        1.0.0
 Release:        6%{?dist}
 Summary:        Hourly btrfs snapshots of /var/home with retention and restore
 
-License:        MIT
+License:        GPL-3.0-or-later
 
 
 BuildRequires:  rust cargo gcc

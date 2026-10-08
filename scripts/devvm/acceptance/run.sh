@@ -21,13 +21,18 @@ stage_install() { # the machine starts from v1, on a reference that verifies not
   [[ $(marker) == v1 ]] || die "the guest did not boot v1"
 }
 
+staged_signature() { guest_ssh sudo bootc status --format json | jq -r '.status.staged.image.image.signature // empty'; }
+
 stage_migrate() { # items 7 and 8
   expect "7: not verified before the migration" .verified.reason media
   expect "7: and nothing is downloaded meanwhile" .update none
   guest_ssh 'systemctl is-active athanor-update-migrate.service || sudo journalctl -u athanor-update-migrate.service -n 5 --no-pager'
-  for _ in $(seq 60); do guest_ssh test -e /var/lib/athanor-update/migrated && break; sleep 10; done
-  guest_ssh test -e /var/lib/athanor-update/migrated || die "FAIL  the migration did not complete in 10 minutes"
+  # The switch is staged with the policy enforced; the stamp follows the boot of it.
+  for _ in $(seq 60); do [[ $(staged_signature) == containerPolicy ]] && break; sleep 10; done
+  [[ $(staged_signature) == containerPolicy ]] || die "FAIL  the migration did not stage the signed reference in 10 minutes"
   reboot_guest
+  for _ in $(seq 30); do guest_ssh test -e /var/lib/athanor-update/migrated && break; sleep 10; done
+  guest_ssh test -e /var/lib/athanor-update/migrated || die "FAIL  the migration did not complete after the boot of the signed reference"
   [[ $(marker) == v1 ]] || die "FAIL  7: the migration changed the version"
   expect "7: verified after the migration, with no update in between" .verified.reason signature
   [[ $(guest_ssh sudo bootc status --format json | jq -r .status.booted.image.image.signature) == containerPolicy ]] || die "FAIL  8: the reference does not enforce the policy"

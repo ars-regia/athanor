@@ -1,3 +1,4 @@
 [D-BUS Service]
 Name=org.freedesktop.impl.portal.desktop.athanor
 Exec=/usr/libexec/xdg-desktop-portal-athanor
+SystemdService=xdg-desktop-portal-athanor.service

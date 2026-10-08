@@ -2,7 +2,7 @@
 name = "athanor-preview"
 version = "1.0.0"
 edition = "2021"
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "The launcher's preview pane; untrusted files are decoded by athanor-preview-render"
 
 [dependencies]

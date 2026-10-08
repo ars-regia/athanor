@@ -88,10 +88,13 @@ jobs:
           # on a branch means by "test the ISO we just built".
           #
           # The tags are the run id that produced each ISO, so the highest is the most
-          # recent. `users/` and not `orgs/`: this repository belongs to an account, and
-          # the organisation endpoint answers 404 for it.
+          # recent. The package API lives under users/ for an account and orgs/ for an
+          # organisation, and each answers 404 for the other.
           if [[ $ISO_TAG == newest ]]; then
-            ISO_TAG=$(gh api "users/${GITHUB_REPOSITORY_OWNER}/packages/container/athanor-iso/versions" \
+            case $(gh api "users/${GITHUB_REPOSITORY_OWNER}" --jq .type) in
+              User) root=users ;; Organization) root=orgs ;; *) echo "unknown owner type" >&2; exit 1 ;;
+            esac
+            ISO_TAG=$(gh api "${root}/${GITHUB_REPOSITORY_OWNER}/packages/container/athanor-iso/versions" \
               --jq 'map(.metadata.container.tags[]) | map(select(test("^[0-9]+$"))) | max')
             [[ -n $ISO_TAG && $ISO_TAG != null ]] || { echo "no published athanor-iso tag to test" >&2; exit 1; }
             echo "resolved newest published ISO: ${ISO_TAG}"
@@ -138,6 +141,7 @@ jobs:
             iso-test/serial.log
             iso-test/phases.txt
             iso-test/verdict.md
+            iso-test/memory.json
           # A job that failed before the VM started has nothing to upload, and the empty
           # upload should not be a second error on top of the real one.
           if-no-files-found: ignore

@@ -1,6 +1,7 @@
 [package]
 name = "calmo-cosmic-theme"
 version = "1.0.0"
+license = "GPL-3.0-or-later"
 edition = "2021"
 publish = false
 description = "Builds COSMIC's system defaults for the Calmo identity with COSMIC's own ThemeBuilder"

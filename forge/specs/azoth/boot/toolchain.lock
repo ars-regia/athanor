@@ -1,4 +1,4 @@
-# base: registry.fedoraproject.org/fedora:43@sha256:a60334b24af6818e9ccf199d188b5ddef1c3d7f549470b560d9b744c78c2c58b
+# base: registry.fedoraproject.org/fedora:43@sha256:005ce311c13eaa639de9d9c52e470f10652c7371561697fb8c1c6e852e23c481
 # inputs: fc9315ec48b0f7868ca2378ce53ebce92ab6bb51cfdcfd5b5e7094293b97a714
 # key: c6e7f081cf80e13146676e88829b606631645531
 83540ce104993d1e1a33967ae407ce46821c82395a1a90d61bfeb7ea32b55873  bc-1.08.2-2.fc43.x86_64.rpm  bc/1.08.2/2.fc43
@@ -89,7 +89,7 @@ d05f4b22f06dd145d192c38983933851f1d956f1342aef9734150c22613a3f1f  python3-ply-3.
 7b3ee8a4c0fea3659711a2ed51e92ff4237e845052770b40d53aafee6742e2d7  python3-pycparser-2.22-5.fc43.noarch.rpm  python-pycparser/2.22/5.fc43
 2a4e391d2cea352a3ca3cfefb886271f13b4d18561c791ac62c69c6227e2b64b  python3-pyyaml-6.0.2-7.fc43.x86_64.rpm  PyYAML/6.0.2/7.fc43
 b5f9d36f6d66fcb3a767caf7829564407608817f847b9da88430a94da41a036f  python3-requests-2.33.1-1.fc43.noarch.rpm  python-requests/2.33.1/1.fc43
-0c09b827f30a90f7dc3d156b9bd02f69095c2ad5e2606542b7a5a2df87068e36  python3-urllib3-2.7.0-2.fc43.noarch.rpm  python-urllib3/2.7.0/2.fc43
+7af4572bc29cff4590daa75bf3b9f8f3b280a38ada2aadb428d1f79faf480500  python3-urllib3-2.8.0-1.fc43.noarch.rpm  python-urllib3/2.8.0/1.fc43
 0fad089f9b5c0b911a8a8c332f3d9c9c477df24a2daea0d800654bd34a034ad4  python3-virt-firmware-26.9-1.fc43.noarch.rpm  python-virt-firmware/26.9/1.fc43
 8d8de7bb78f375bb261093adfe9ec86f26ec1d555aad32d1535a744145ee8aa5  python3-zstandard-0.25.0-1.fc43.x86_64.rpm  python-zstandard/0.25.0/1.fc43
 3d276293732b3da1f88569b5ac93cb4dc5214eafd399ded86ad9fa21396ab4bd  qatlib-25.08.0-4.fc43.x86_64.rpm  qatlib/25.08.0/4.fc43

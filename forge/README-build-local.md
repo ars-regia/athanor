@@ -1,24 +1,17 @@
-# 🌋 Athanor Forge — Local Package Build Guide
+# Building a forge package locally
 
-To build individual custom packages or upstream RPMs locally, use the micro-container OCI build tool:
+Build a spec the way CI builds it: with `scripts/run_spec_build.sh`, which runs the builder
+image twice, `build_spec.sh fetch` with network and then `build_spec.sh build` with
+`--network=none`. Run it from `forge/`, inside a git checkout:
 
 ```bash
-./scripts/build_rolling_local.sh <package-name>
+cd forge
+bash scripts/run_spec_build.sh ghcr.io/ars-regia/athanor-builder:latest specs/athanor-<name>
 ```
 
-### 📦 100% Rust UI Stack & Core Custom Packages
+The RPMs land in `forge/RPMS/`.
 
-Custom Athanor OS components inside `specs/` are built individually into isolated RPM artifacts:
-
-1. **`base-config`** (`specs/athanor-base-config`): System hierarchy, repositories, sysusers
-2. **`system-config`** (`specs/athanor-system-config`): udev rules, presets, `/etc/greetd/config.toml` Kiosk
-3. **`system-services`** (`specs/athanor-system-services`): Systemd service units and timers
-4. **`system-tweaks`** (`specs/athanor-system-tweaks`): Low-latency sysctl and ZRAM configurations
-5. **`daemon-rs`** (`specs/athanor-daemon-rs`): Native Rust D-Bus system monitoring daemon
-6. **`shell-rs`** (`specs/athanor-shell-rs`): Native Rust GTK4 Topbar, Control Center & Kiosk Login Greeter
-7. **`settings-rs`** (`specs/athanor-settings-rs`): Native Rust GTK4 System Settings application
-8. **`store-rs`** (`specs/athanor-store-rs`): Native Rust GTK4 App Store & Flatpak manager
-9. **`doctor`** (`specs/athanor-doctor`): Native Rust system diagnostics and validation CLI
-10. **`ui-agent`** (`specs/athanor-ui-agent`): Zero-latency AI layout adapter daemon
-
-Every package should be built individually using `build_rolling_local.sh <package-name>`. Output RPMs are placed in `~/.rpmbuild/RPMS/` or exported to `/work/output/<package-name>/` when mounted inside a container.
+`scripts/build_changed_specs.sh [--dry-run] BASE BUILDER_IMAGE` builds, one after the other,
+what Spec Build Check builds for the change since the commit `BASE`: the DAG's specs that
+changed, or all of them when the builder, `config/rpmmacros` or the shared build scripts
+changed. Directories the DAG does not build, such as `specs/azoth`, are skipped.

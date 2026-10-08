@@ -71,8 +71,8 @@ class UpdateTrust(unittest.TestCase):
         self.assertTrue(any("--stage" in p for p in found))
 
     def test_a_literal_registry_owner_is_reported(self):
-        self.edit(f"{TEMPLATES}/athanor.yaml.in", "  @REGISTRY@/athanor-system:\n", "  ghcr.io/hr-mes/athanor-system:\n")
-        self.assertTrue(any("literal ghcr.io/hr-mes" in p for p in self.problems()))
+        self.edit(f"{TEMPLATES}/athanor.yaml.in", "  @REGISTRY@/athanor-system:\n", "  ghcr.io/someone/athanor-system:\n")
+        self.assertTrue(any("literal registry owner ghcr.io/someone" in p for p in self.problems()))
 
     def test_a_package_may_build_more_than_one_crate(self):
         built = verify.crates_built_by_specs()
@@ -81,20 +81,18 @@ class UpdateTrust(unittest.TestCase):
 
     def test_the_retired_secure_boot_daemon_must_stay_gone(self):
         self.assertEqual([p for p in verify.update_trust_problems() if "SecureBoot" in p or "secure-boot" in p], [])
-        daemon = self.root / "forge/specs/athanor-secure-boot/athanor-secure-boot-1.0.0/src/main.rs"
-        daemon.parent.mkdir(parents=True)
-        daemon.write_text('#[interface(name = "org.athanor.SecureBoot")]\n')
-        spec = self.root / "forge/specs/athanor-secure-boot/athanor-secure-boot.spec"
-        spec.write_text("%files\n/usr/lib/systemd/system/athanor-secure-boot.service\n/usr/lib/systemd/system/athanor-tpm-luks-seal.service\n")
-        found = self.problems()
-        self.assertTrue(any("org.athanor.SecureBoot" in p for p in found))
-        self.assertTrue(any("athanor-secure-boot.service" in p for p in found))
-
-    def test_the_tpm_files_the_image_reads_must_stay(self):
         spec = self.root / "forge/specs/athanor-secure-boot/athanor-secure-boot.spec"
         spec.parent.mkdir(parents=True)
-        spec.write_text("%files\n")
-        self.assertTrue(any("athanor-tpm-luks-seal.sh" in p for p in self.problems()))
+        spec.write_text("%files\n/usr/lib/systemd/system/athanor-secure-boot.service\n/usr/lib/systemd/system/athanor-tpm-luks-seal.service\n")
+        found = self.problems()
+        self.assertTrue(any("athanor-secure-boot.service" in p for p in found))
+
+    def test_the_auto_sealing_and_rollback_units_must_not_ship(self):
+        self.assertEqual([p for p in verify.update_trust_problems() if "D42" in p], [])
+        unit = self.root / "forge/specs/athanor-secure-boot/SOURCES/usr/lib/systemd/system/athanor-tpm-rollback-check.service"
+        unit.parent.mkdir(parents=True)
+        unit.write_text("[Unit]\n")
+        self.assertTrue(any("athanor-tpm-rollback-check" in p and "D42" in p for p in self.problems()))
 
     def test_the_image_build_renders_the_policy_and_links_etc(self):
         self.assertEqual(verify.image_policy_problems(), [])

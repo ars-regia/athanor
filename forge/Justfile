@@ -23,7 +23,7 @@ hermetic-build lockfile="athanor-build.lock":
 
 # Checks if a package OCI container image already exists on GHCR using deterministic SHA-256 hashing
 [group('CI/CD Pipeline')]
-check-idempotency package registry="ghcr.io" owner="hr-mes" image_name="" base_digest="":
+check-idempotency package registry="ghcr.io" owner="ars-regia" image_name="" base_digest="":
     #!/usr/bin/env bash
     set -euo pipefail
     ARGS=("--package" "{{ package }}" "--registry" "{{ registry }}" "--owner" "{{ owner }}")
@@ -40,15 +40,17 @@ dynamic-matrix:
 
 # Downloads and extracts micro-container RPM images (Tier 0-3) from GHCR, deduplicating versions
 [group('CI/CD Pipeline')]
-fetch-repo-rpms owner="hr-mes":
+fetch-repo-rpms owner="ars-regia":
     #!/usr/bin/env bash
     set -euo pipefail
     bash ../system/kernel-artifacts.sh require-ready
+    # The tier assembly pulls every package image by the hash of this checkout.
+    python3 scripts/dag_orchestrator.py --write-hashes
     bash scripts/fetch_repo_rpms.sh "{{ owner }}"
 
 # Cleans up old and untagged container package versions on GHCR
 [group('CI/CD Pipeline')]
-clean-ghcr owner="hr-mes":
+clean-ghcr owner="ars-regia":
     #!/usr/bin/env bash
     set -euo pipefail
     bash scripts/clean_ghcr.sh "{{ owner }}"
@@ -58,62 +60,29 @@ clean-ghcr owner="hr-mes":
 update-specs:
     python3 scripts/zero_trust_updater.py out/spec-updates.md
 
-# Fetches upstream kernel SRPM, applies CachyOS BORE patches, computes NVIDIA shield ceiling, and merges Kconfig tuning
+# Builds the Azoth kernel in its builder container, as CI does (specs/azoth/KERNEL.md); stage is one of manifest|prep|refresh|microvm|build
 [group('Kernel Build')]
-kernel-prepare mode="full":
+kernel-build stage="build":
     #!/usr/bin/env bash
     set -euo pipefail
-    if [ "{{ mode }}" = "meta" ]; then
-        bash specs/azoth/prepare-chimera.sh --meta
-    else
-        bash specs/azoth/prepare-chimera.sh
-    fi
+    root=$(git rev-parse --show-toplevel)
+    mkdir -p "$HOME/.cache/azoth" "$root/out"
+    podman build -t localhost/azoth-builder -f specs/azoth/builder/Containerfile specs/azoth
+    podman run --rm -v "$root:/forge" -v "$HOME/.cache/azoth:/var/cache/azoth" \
+        -w /forge localhost/azoth-builder \
+        bash forge/specs/azoth/build.sh --stage "{{ stage }}" --out /forge/out
 
-# Runs containerized local build of Chimera kernel with Clang/ThinLTO inside a privileged Fedora 43 OCI container
-[group('Kernel Build')]
-kernel-build-local:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    bash specs/azoth/build-local.sh
-
-# Builds kpatch kernel livepatch module and packages it into an RPM
-[group('Kernel Build')]
-livepatch-build:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ -f specs/athanor-livepatch/athanor-livepatch.spec ]; then
-        rpmbuild -ba specs/athanor-livepatch/athanor-livepatch.spec
-    else
-        echo "Error: specs/athanor-livepatch/athanor-livepatch.spec not found" >&2
-        exit 1
-    fi
-
-# Inject livepatch kernel modules without reboot
-[group('Kernel Build')]
-livepatch-inject:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    bash specs/athanor-livepatch/athanor-livepatch-injector.sh
-
-# Runs Rust Clippy policies, Cargo Vet cryptographic supply-chain audit, and Cargo Deny security check
+# Runs Rust Clippy policies and the Cargo Deny dependency policy (deny.toml)
 [group('QA & Validation')]
 audit:
     #!/usr/bin/env bash
     set -euo pipefail
     cargo clippy --all-targets --all-features -- -D clippy::undocumented_unsafe_blocks -D clippy::multiple_unsafe_ops_per_block -D warnings
-    cargo vet check
     cargo deny check
-
-# Runs cargo-fuzz fuzzing harness across Rust components
-[group('QA & Validation')]
-fuzz component="all" time="60":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    bash scripts/run_fuzz.sh "{{ component }}" "{{ time }}"
 
 # Runs AWS Kani formal verification proof harnesses on Rust spec targets
 [group('QA & Validation')]
-verify component="athanor-gatekeeper-rs":
+verify component:
     #!/usr/bin/env bash
     set -euo pipefail
     LD_LIBRARY_PATH=/usr/lib64:/lib64:${LD_LIBRARY_PATH:-} PATH=/home/athanor/.cargo/bin:$PATH cargo kani --package "{{ component }}"
@@ -123,7 +92,7 @@ verify component="athanor-gatekeeper-rs":
 test-nvidia-modules:
     #!/usr/bin/env bash
     set -euo pipefail
-    bash specs/athanor-qa/SOURCES/test-nvidia-modules.sh
+    bash scripts/test-nvidia-modules.sh
 
 # Runs shellcheck on all Bash scripts in forge/
 [group('Utility')]

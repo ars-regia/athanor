@@ -74,7 +74,11 @@ def main():
                 if time.monotonic() - start > WARMUP_S:
                     samples.append(pss(m))
                 if time.monotonic() - last_suspend > args.suspend_every:
-                    m.run("sudo -n systemd-run --on-active=2 rtcwake -m mem -s 60")
+                    # Suspend through logind, the path a lid close takes: systemd-sleep freezes
+                    # user.slice first. `rtcwake -m mem` writes /sys/power/state directly and
+                    # hung the reference laptop in S3; here it only arms the wake alarm.
+                    m.run("sudo -n rtcwake -m no -s 60")
+                    m.run("sudo -n systemd-run --on-active=2 systemctl suspend")
                     time.sleep(120)
                     last_suspend = time.monotonic()
         finally:

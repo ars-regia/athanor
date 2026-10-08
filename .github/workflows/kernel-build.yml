@@ -1,19 +1,20 @@
 name: Kernel Build
 
 # The Athanor kernel (forge/specs/azoth, docs/architecture/doc_kernel_build.md).
+# lint: the shared lint (call-lint.yml) runs first, and the gate requires it.
 # build: on the self-hosted runner, `prep` (sources, patches, config gate) in a few
 # minutes or `build` (RPMs) in about an hour. boot: on a GitHub runner with KVM, the boot
 # matrix (SeaBIOS and OVMF with Secure Boot, Nehalem and host CPUs) with the assertions
 # of the spec. publish: on a GitHub runner, publishes the RPMs as four OCI images
 # (kernel, devel, debuginfo, and the MicroVM guest kernel as the <nvr>-microvm tag of the
 # kernel) signed with cosign keyless, with SBOM, SLSA provenance and the attestation of
-# the pins; `:latest` moves only on main. kmod: the NVIDIA modules against the freshly
+# the pins; `:latest` moves only on the repository's default branch. kmod: the NVIDIA modules against the freshly
 # built kernel-devel (nvidia-build.yml, reusable). gate: the single "Kernel gate" check
 # that the branch protection requires on PRs, including those of the bump bot (phase
 # K5): that is why the workflow runs on every PR, with no path filter. A PR builds and
 # boots but does not publish. orchestrator: on pushes, downstream of publish, dispatches the
-# Athanor Forge Orchestrator for this commit with force_image when a new kernel was published
-# or system/kernel-artifacts.sh does not answer ready; the Orchestrator calls nvidia-kmod.yml
+# Athanor Forge Orchestrator for this commit when a new kernel was published
+# or system/kernel-artifacts.sh does not answer ready; the Orchestrator runs the kmod cycle
 # (signing, boot with Secure Boot, publication of the modules) and builds the system images
 # (docs/architecture/doc_build_ordering.md, O1). inputs:
 # when the image with this NVR already carries the attestation of identical build
@@ -54,7 +55,11 @@ env:
   KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
 
 jobs:
+  lint:
+    uses: ./.github/workflows/call-lint.yml
+
   inputs:
+    needs: [lint]
     # A kernel already built from these identical inputs is not rebuilt: the `<nvr>`
     # image carries the attestation of the pins (build-inputs.py), verified with cosign;
     # when the predicate matches the one of this commit, the reuse is proven.
@@ -257,11 +262,11 @@ jobs:
       registry: ${{ needs.inputs.outputs.registry }}
 
   gate:
-    # The single check required by the branch protection: green only when every gate is
+    # The single check required by the branch protection: green only when the lint and every gate are
     # green, or skipped because the kernel is reused (build). One name to wait for, for
     # the auto-merge of the bump bot.
     name: Kernel gate
-    needs: [inputs, build, boot, kmod]
+    needs: [lint, inputs, build, boot, kmod]
     if: ${{ always() && (inputs.stage || 'build') == 'build' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -273,7 +278,7 @@ jobs:
           set -euo pipefail
           jq -r 'to_entries[] | "- \(.key): \(.value.result)"' <<< "$RESULTS" | tee -a "$GITHUB_STEP_SUMMARY"
           result() { jq -r --arg job "$1" '.[$job].result' <<< "$RESULTS"; }
-          [[ $(result inputs) == success && $(result boot) == success && $(result kmod) == success ]]
+          [[ $(result lint) == success && $(result inputs) == success && $(result boot) == success && $(result kmod) == success ]]
           [[ $(result build) == success || ( $(result build) == skipped && $REUSE == true ) ]]
 
   publish:
@@ -312,6 +317,8 @@ jobs:
         env:
           BUILDAH_ISOLATION: chroot
           NVR_EXPECTED: ${{ needs.inputs.outputs.nvr }}
+          # `:latest` follows the default branch, whatever it is called (re-audit decision 11).
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           nvr=$(cat out/nvr)
@@ -320,9 +327,9 @@ jobs:
           mkdir -p digests
           for group in kernel devel debuginfo microvm; do
             case $group in
-              kernel) image=$IMAGE tag=$nvr latest=latest ;;
-              microvm) image=$IMAGE tag="${nvr}-microvm" latest=latest-microvm ;;
-              *) image="${IMAGE}-${group}" tag=$nvr latest=latest ;;
+              kernel) repo=$IMAGE tag=$nvr latest=latest ;;
+              microvm) repo=$IMAGE tag="${nvr}-microvm" latest=latest-microvm ;;
+              *) repo="${IMAGE}-${group}" tag=$nvr latest=latest ;;
             esac
             ctr=$(buildah from scratch)
             buildah copy "$ctr" "out/${group}/" /
@@ -332,12 +339,12 @@ jobs:
               --label org.opencontainers.image.revision="${GITHUB_SHA}" \
               --label org.opencontainers.image.source="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
               "$ctr"
-            buildah commit --omit-timestamp "$ctr" "${image}:${tag}"
-            buildah push --digestfile "digests/${group}" "${image}:${tag}"
-            if [[ $GITHUB_REF == refs/heads/main ]]; then
-              buildah push "${image}:${tag}" "docker://${image}:${latest}"
+            buildah commit --omit-timestamp "$ctr" "${repo}:${tag}"
+            buildah push --digestfile "digests/${group}" "${repo}:${tag}"
+            if [[ $GITHUB_REF == "refs/heads/${DEFAULT_BRANCH}" ]]; then
+              buildah push "${repo}:${tag}" "docker://${repo}:${latest}"
             fi
-            echo "${image}@$(cat "digests/${group}")"
+            echo "${repo}@$(cat "digests/${group}")"
             echo "${group}=$(cat "digests/${group}")" >> "$GITHUB_OUTPUT"
           done
 
@@ -358,9 +365,9 @@ jobs:
           # (without the RPM archive cataloger syft sees nothing).
           declare -A SBOM_PACKAGE=([kernel]=kernel-core [devel]=kernel-devel [debuginfo]=kernel-debuginfo [microvm]=azoth-microvm)
           for group in kernel devel debuginfo microvm; do
-            image=$IMAGE
-            [[ $group == kernel || $group == microvm ]] || image="${IMAGE}-${group}"
-            ref="${image}@$(cat "digests/${group}")"
+            repo=$IMAGE
+            [[ $group == kernel || $group == microvm ]] || repo="${IMAGE}-${group}"
+            ref="${repo}@$(cat "digests/${group}")"
             syft scan "registry:${ref}" --select-catalogers "+rpm-archive-cataloger" -o "spdx-json=sbom/${group}.spdx.json"
             jq -e --arg name "${SBOM_PACKAGE[$group]}" '[.packages[] | select(.name == $name)] | length > 0' "sbom/${group}.spdx.json" > /dev/null \
               || { echo "SBOM of ${group} lacks package ${SBOM_PACKAGE[$group]}"; exit 1; }
@@ -443,4 +450,4 @@ jobs:
 
       - name: Dispatch the Orchestrator
         if: ${{ needs.publish.result == 'success' || steps.artifacts.outputs.state != 'ready' }}
-        run: gh workflow run athanor-forge-orchestrator.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f sha="$GITHUB_SHA" -f force_image=true
+        run: gh workflow run athanor-forge-orchestrator.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f sha="$GITHUB_SHA"

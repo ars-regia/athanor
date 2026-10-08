@@ -1,10 +1,11 @@
 # Secure Boot signing key of Athanor (docs/architecture/doc_kernel_build.md, section 6):
-# signs the UKI, which shim verifies through MokList, and its PCR policy (ukify
-# --pcr-private-key). Not a CA: the kernel admits into the machine keyring only CA
+# signs vmlinuz (sign-kernel.sh vmlinuz, in the nvidia-kmod-sign job of the Orchestrator), which shim
+# verifies through MokList; nothing in the repository signs a UKI or a PCR policy with
+# it yet. Not a CA: the kernel admits into the machine keyring only CA
 # certificates (CONFIG_INTEGRITY_CA_MACHINE_KEYRING_MAX), an enrolled copy of this key
 # lands in the platform keyring, and patches/redhat/0001 keeps that keyring out of
 # module verification: it can never authorise a kernel module. boot.sh and
-# nvidia-kmod.yml build their ephemeral test MOKs from this same profile.
+# call-nvidia-kmod-prepare.yml build their ephemeral test MOKs from this same profile.
 [ req ]
 default_bits = 4096
 default_md = sha256

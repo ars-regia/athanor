@@ -8,6 +8,9 @@ print against ghcr.io (observed 2026-09-17), because system/kernel-artifacts.sh 
 Fixture keys:
   tags          {"registry/repo:tag" or "registry/repo@digest": "sha256:..."}
   errors        ["ref", ...]  transport failure for that reference, in every tool
+  unpublished   ["registry/repo", ...]  a package that was never published: ghcr.io denies
+                the anonymous bearer token for every reference in it (403) instead of
+                answering manifest unknown
   signature_transient_errors
                 ["ref", ...]  cosign verify fails with a transient error (a Rekor lookup
                 timeout) whose message still starts with "no matching signatures:", the same
@@ -28,6 +31,7 @@ Fixture keys:
                 is passed (without it containers/image never looks for sigstore attachments)
   packages      {"package": [package versions as the GitHub API returns them]}
   user_packages ["package", ...]  the container packages of the owner
+  owner_type    "User" (the default) or "Organization", what /users/<owner> reports
   runs          [{"databaseId": 1, "headBranch": "iso-v0"}]
 """
 
@@ -75,6 +79,8 @@ def skopeo(args, fx):
     ref = args[-1].removeprefix("docker://")
     if ref in fx.get("errors", []):
         return fail(f'time="2026-09-17T00:00:00Z" level=fatal msg="Error parsing image name \\"docker://{ref}\\": pinging container registry: dial tcp: i/o timeout"')
+    if re.sub(r"[:@][^/]*$", "", ref) in fx.get("unpublished", []):
+        return fail(f'time="2026-10-06T00:00:00Z" level=fatal msg="Error parsing image name \\"docker://{ref}\\": Requesting bearer token: invalid status code from registry 403 (Forbidden)"')
     unknown = f'time="2026-09-17T00:00:00Z" level=fatal msg="Error parsing image name \\"docker://{ref}\\": reading manifest in {ref}: manifest unknown"'
     if "--config" in args:
         if ref not in fx.get("configs", {}):
@@ -130,10 +136,14 @@ def gh(args, fx):
         if "DELETE" in args:
             return 0
         path = next(a for a in args[1:] if a.startswith("/"))
-        if path.startswith("/users/") and path.split("?")[0].endswith("/packages"):
+        if re.fullmatch(r"/users/[^/?]+", path):
+            print(fx.get("owner_type", "User"))
+            return 0
+        root = "/orgs/" if fx.get("owner_type") == "Organization" else "/users/"
+        if path.startswith(root) and path.split("?")[0].endswith("/packages"):
             print(json.dumps([{"name": name} for name in fx.get("user_packages", [])]))
             return 0
-        match = re.match(r"/users/[^/]+/packages/container/([^/?]+)(/versions)?", path)
+        match = re.match(re.escape(root) + r"[^/]+/packages/container/([^/?]+)(/versions)?", path)
         if not match or match.group(1) not in fx.get("packages", {}):
             return fail("gh: Not Found (HTTP 404)")
         if match.group(2):

@@ -84,6 +84,12 @@ class BoundaryTest(unittest.TestCase):
             found[0].startswith("system/athanor-style/src/theme.rs:2 "), found
         )
 
+    def test_a_cosmic_desktop_id_is_not_a_configuration(self):
+        code = 'const OLD: &str = "com.system76.CosmicTerm.desktop";\n'
+        self.assertEqual(problems({"system/athanor-layout/src/favorites.rs": code}), [])
+        both = 'const X: [&str; 2] = ["com.system76.CosmicFiles.desktop", "com.system76.CosmicPanel"];\n'
+        self.assertEqual(len(problems({"system/athanor-layout/src/favorites.rs": both})), 1)
+
     def test_only_the_theme_tool_and_the_compositor_client_may_name_cosmic(self):
         allowed = [
             "forge/tools/calmo-cosmic-theme/src/main.rs",
@@ -101,10 +107,6 @@ class BoundaryTest(unittest.TestCase):
         for path in refused:
             with self.subTest(path):
                 self.assertEqual(len(problems({path: COSMIC_CONFIG})), 1)
-
-    def test_the_frozen_tree_is_not_exempt(self):
-        path = "forge/specs/athanor-shell-rs/athanor-style-0.7/src/lib.rs"
-        self.assertEqual(len(problems({path: COSMIC_CONFIG})), 1)
 
     def test_a_manifest_that_does_not_parse_is_a_problem(self):
         found = problems({"system/athanor-dock/Cargo.toml": "[dependencies\n"})

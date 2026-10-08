@@ -1,10 +1,10 @@
 %global debug_package %{nil}
 Name:           athanor-desktop-ui
 Version:        1.0.0
-Release:        10%{?dist}
+Release:        14%{?dist}
 Summary:        Athanor OS Desktop UI configurations
-License:        MIT
-URL:            https://github.com/hr-mes/athanor-forge
+License:        GPL-3.0-or-later
+URL:            https://github.com/ars-regia/athanor
 BuildArch:      noarch
 
 Provides:       athanor-ags-config = 1.0.1-3
@@ -12,18 +12,16 @@ Obsoletes:      athanor-ags-config < 1.0.1-3
 
 Requires: cliphist
 Requires: ddcutil
-Requires: foot
 Requires: grim
 Requires: slurp
 Requires: wl-clipboard
 Requires: brightnessctl
 Requires: playerctl
-Requires:       athanor-shell-rs wireplumber nautilus firefox
+Requires:       wireplumber nautilus ptyxis gnome-text-editor gnome-disk-utility firefox
 
 %description
-Provides the unified Desktop UI configuration for Athanor OS.
-Includes dependencies for Wayland (ddcutil)
-and configures UDEV for i2c access.
+Runtime dependencies of the Athanor OS desktop (clipboard, screenshot, brightness,
+media and audio tools) and a udev rule granting i2c access for ddcutil.
 
 %prep
 # Nothing to prep
@@ -38,10 +36,32 @@ mkdir -p %{buildroot}/usr/lib/systemd/user
 # Copy UDEV rules
 cp -p %{_sourcedir}/etc/udev/rules.d/99-ddcutil-i2c.rules %{buildroot}/usr/lib/udev/rules.d/
 
+# Firefox policy (Fedora's package ships no policies.json, only distribution.ini)
+mkdir -p %{buildroot}/usr/lib64/firefox/distribution
+cp -p %{_sourcedir}/usr/lib64/firefox/distribution/policies.json %{buildroot}/usr/lib64/firefox/distribution/
+
 %files
 /usr/lib/udev/rules.d/99-ddcutil-i2c.rules
+/usr/lib64/firefox/distribution/policies.json
 
 %changelog
+* Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-14
+- Ship a Firefox policy that turns off telemetry, studies, the default-browser agent, Pocket
+  and sponsored content, until Firefox moves to Flatpak (doc_software.md, section 6)
+
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-13
+- Require Ptyxis, GNOME Text Editor and GNOME Disks, the default applications of
+  doc_software.md decision 7, which replace cosmic-term, cosmic-edit and the COSMIC
+  disk tools that leave the image.
+
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-12
+- Point URL at the project repository
+- Correct the %description to what the package ships
+
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-11
+- Drop athanor-shell-rs and foot (doc_portal.md, PT14; doc_software.md). Nothing in the
+  session starts either: the portal's file chooser is xdg-desktop-portal-gtk's, and the
+  greeter runs athanor-greeter-ui.
 * Thu Sep 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
 - Drop the athanor-settings-rs dependency: the application leaves the image and
   cosmic-settings takes its place.

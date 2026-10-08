@@ -1,0 +1,340 @@
+; Nix on Athanor: types for the store, its state and the daemon socket, a confined domain
+; for nix-daemon and a separate domain for the builders it runs (doc_software.md, SW9 and
+; SW10; issue #154; decisions A2-13 and A2-16). Written in CIL rather than a .te because a
+; .te compiled by checkmodule cannot carry file contexts. semodule -i loads it as it is.
+;
+; Layout (forge/specs/athanor-nix-support): the store lives in /var/nix, and nix.mount
+; bind-mounts it onto /nix. A bind mount shows the inodes of /var/nix, so labels are those of
+; the /var/nix paths, and every context below is declared for both spellings so that
+; restorecon and systemd-tmpfiles agree whichever path they are given.
+;
+; Domains:
+; - nix_daemon_t: /usr/bin/nix-daemon is a symbolic link to /usr/bin/nix, and a domain
+;   transition follows the file executed, so /usr/bin/nix carries nix_daemon_exec_t. Only
+;   init (systemd) transitions on it: a user who runs `nix` stays in their own domain and
+;   talks to the daemon through the socket.
+; - nix_build_t: every program the daemon executes from the store (or, for /bin/sh, from the
+;   binaries the sandbox binds in) is a builder or a builder's helper and runs here, after the
+;   Nix sandbox (user, mount, PID, network, IPC and UTS namespaces, seccomp, build users) is in
+;   place. The domain is confined and has no unconfined attribute: it manages the store and the
+;   build directory, executes what the sandbox binds in, reads the few system files a build
+;   reads and manages its own processes. Its network is limited to outbound connections to
+;   HTTP(S), proxy, git, ssh and DNS ports (fixed-output derivations) plus loopback listeners
+;   for test suites. It cannot load kernel modules, start or stop units, change SELinux state
+;   or relabel files.
+
+; --- Types -------------------------------------------------------------------------------
+
+(type nix_store_t)
+(type nix_var_t)
+(type nix_socket_t)
+(type nix_daemon_exec_t)
+(type nix_daemon_t)
+(type nix_build_t)
+
+(roletype object_r nix_store_t)
+(roletype object_r nix_var_t)
+(roletype object_r nix_socket_t)
+(roletype object_r nix_daemon_exec_t)
+(roletype object_r nix_daemon_t)
+(roletype object_r nix_build_t)
+(roletype system_r nix_daemon_t)
+(roletype system_r nix_build_t)
+
+(typeattributeset file_type (nix_store_t nix_var_t nix_socket_t nix_daemon_exec_t))
+(typeattributeset non_security_file_type (nix_store_t nix_var_t nix_socket_t nix_daemon_exec_t))
+(typeattributeset non_auth_file_type (nix_store_t nix_var_t nix_socket_t nix_daemon_exec_t))
+(typeattributeset exec_type (nix_daemon_exec_t))
+(typeattributeset entry_type (nix_daemon_exec_t nix_store_t))
+(typeattributeset direct_init_entry (nix_daemon_exec_t))
+
+(typeattributeset domain (nix_daemon_t nix_build_t))
+(typeattributeset daemon (nix_daemon_t))
+(typeattributeset nsswitch_domain (nix_daemon_t))
+(typeattributeset syslog_client_type (nix_daemon_t))
+(typeattributeset kernel_system_state_reader (nix_daemon_t))
+(typeattributeset corenet_unlabeled_type (nix_daemon_t nix_build_t))
+(typeattributeset netlabel_peer_type (nix_daemon_t nix_build_t))
+
+; --- File contexts -----------------------------------------------------------------------
+
+(filecon "/nix" dir (system_u object_r nix_var_t ((s0) (s0))))
+(filecon "/nix/store(/.*)?" any (system_u object_r nix_store_t ((s0) (s0))))
+(filecon "/nix/var(/.*)?" any (system_u object_r nix_var_t ((s0) (s0))))
+(filecon "/nix/var/nix/daemon-socket(/.*)?" any (system_u object_r nix_socket_t ((s0) (s0))))
+(filecon "/nix/var/nix/gc-socket(/.*)?" any (system_u object_r nix_socket_t ((s0) (s0))))
+(filecon "/var/nix" dir (system_u object_r nix_var_t ((s0) (s0))))
+(filecon "/var/nix/store(/.*)?" any (system_u object_r nix_store_t ((s0) (s0))))
+(filecon "/var/nix/var(/.*)?" any (system_u object_r nix_var_t ((s0) (s0))))
+(filecon "/var/nix/var/nix/daemon-socket(/.*)?" any (system_u object_r nix_socket_t ((s0) (s0))))
+(filecon "/var/nix/var/nix/gc-socket(/.*)?" any (system_u object_r nix_socket_t ((s0) (s0))))
+; The daemon's narinfo cache (NIX_CACHE_HOME in its drop-in, created by CacheDirectory=nix).
+(filecon "/var/cache/nix(/.*)?" any (system_u object_r nix_var_t ((s0) (s0))))
+; The cache directory of athanor-nix-gc.service (CacheDirectory= with DynamicUser=, so
+; systemd creates it under private/ and links it).
+(filecon "/var/cache/athanor-nix-gc(/.*)?" any (system_u object_r nix_var_t ((s0) (s0))))
+(filecon "/var/cache/private/athanor-nix-gc(/.*)?" any (system_u object_r nix_var_t ((s0) (s0))))
+(filecon "/usr/bin/nix" file (system_u object_r nix_daemon_exec_t ((s0) (s0))))
+
+; --- systemd: the mount, the socket, the cache directory ---------------------------------
+
+; nix.mount binds /var/nix onto /nix; nix-daemon.socket creates the listening socket in
+; the socket directory, labelled for the daemon's domain by systemd.
+(allow init_t nix_var_t (dir (getattr open read search mounton)))
+(allow init_t nix_socket_t (dir (getattr open read search write add_name remove_name)))
+(allow init_t nix_socket_t (sock_file (create getattr setattr unlink write)))
+; systemd creates the daemon's cache directory (CacheDirectory=nix) and the stamp that
+; athanor-nix-relabel.service leaves after relabelling a store made before this policy.
+(allow init_t nix_var_t (dir (create setattr write add_name)))
+(allow init_t nix_var_t (file (create getattr open write setattr)))
+
+(typetransition initrc_domain nix_daemon_exec_t process nix_daemon_t)
+; nix-daemon.service (its drop-in) and athanor-nix-gc.service, which runs `nix store gc`
+; with DynamicUser=, both set NoNewPrivileges=yes: under no_new_privs the kernel denies the
+; transition unless the policy grants nnp_transition, and the process stays in init_t. For the
+; GC client nix-daemon's socket then refuses it ("Permission denied"; measured on a booted
+; image with this rule removed, 2026-10-07).
+(allow init_t nix_daemon_t (process2 (nnp_transition nosuid_transition)))
+
+; --- nix-daemon ----------------------------------------------------------------------------
+
+(allow nix_daemon_t nix_daemon_exec_t (file (entrypoint execute execute_no_trans getattr map open read ioctl lock)))
+
+; Root with the capabilities of the store owner (ownership and modes of store paths,
+; build users) and of the sandbox set-up, which runs in this domain until the builder is
+; executed: namespaces, mounts, chroot and pivot_root, the loopback of the build's network
+; namespace. sys_ptrace and dac_read_search: the collector reads /proc/<pid>/{fd,maps,environ}
+; of every process for runtime roots, and the indirect roots in users' homes.
+(allow nix_daemon_t self (capability (chown dac_override dac_read_search fowner fsetid kill setgid setuid setpcap net_admin sys_chroot sys_ptrace sys_admin sys_resource)))
+; sys_ptrace is also checked against the user namespace for the sandbox set-up: the daemon
+; opens /proc/<pid>/ns/* of its own build child, which the kernel gates with ptrace access
+; (PTRACE_MODE_READ) once the child has its own user namespace (denied { sys_ptrace }
+; cap_userns, measured on a booted image, 2026-10-08). SELinux checks the capability on the
+; subject only, so it is not limited to the build child: with the nsfs read below, the
+; daemon passes the ptrace READ check on any process in a non-initial user namespace
+; (rootless containers, Flatpak, browsers) and can read its /proc entries and enter its
+; namespaces; it gets no process ptrace (no attach, no mem). This is the reach the
+; collector already needs for runtime roots; CIL cannot narrow it by target.
+(allow nix_daemon_t self (cap_userns (chown dac_override dac_read_search fowner fsetid kill setgid setuid setpcap net_admin sys_chroot sys_ptrace sys_admin)))
+(allow nix_daemon_t self (user_namespace (create)))
+(allow nix_daemon_t self (process (fork sigchld sigkill sigstop signull signal getsched setsched getpgid setpgid getcap setcap getattr setrlimit)))
+(allow nix_daemon_t self (fifo_file (ioctl read write getattr lock append open)))
+(allow nix_daemon_t self (unix_stream_socket (ioctl read write create getattr setattr lock append bind connect listen accept getopt setopt shutdown)))
+(allow nix_daemon_t self (unix_dgram_socket (ioctl read write create getattr setattr lock append bind connect getopt setopt shutdown sendto)))
+(allow nix_daemon_t self (tcp_socket (ioctl read write create getattr setattr lock append bind connect getopt setopt shutdown)))
+(allow nix_daemon_t self (udp_socket (ioctl read write create getattr setattr lock append bind connect getopt setopt shutdown)))
+(allow nix_daemon_t self (netlink_route_socket (read write create getattr setattr lock append bind connect getopt setopt shutdown nlmsg_read)))
+; /proc/<child>/uid_map and gid_map of the sandbox child, written by its parent.
+(allow nix_daemon_t self (file (ioctl read write getattr lock append open)))
+
+; The store, the database, the profiles, the GC roots, the logs and the build directories.
+(allow nix_daemon_t nix_store_t (dir (ioctl read write create getattr setattr lock unlink link rename add_name remove_name reparent search rmdir open mounton watch)))
+(allow nix_daemon_t nix_store_t (file (ioctl read write create getattr setattr lock append unlink link rename open map execute mounton)))
+(allow nix_daemon_t nix_store_t (lnk_file (read write create getattr setattr lock append unlink link rename)))
+(allow nix_daemon_t nix_var_t (dir (ioctl read write create getattr setattr lock unlink link rename add_name remove_name reparent search rmdir open mounton watch)))
+(allow nix_daemon_t nix_var_t (file (ioctl read write create getattr setattr lock append unlink link rename open map mounton)))
+(allow nix_daemon_t nix_var_t (lnk_file (read write create getattr setattr lock append unlink link rename)))
+; A collection creates the socket under gc-socket on which it hears the temporary roots of
+; the other Nix processes, which connect to it; a local collection run as root (the GC
+; timer) is the same domain, since /usr/bin/nix-store is a link to /usr/bin/nix.
+(allow nix_daemon_t nix_socket_t (dir (getattr open read search write add_name remove_name)))
+(allow nix_daemon_t nix_socket_t (sock_file (create getattr setattr unlink write)))
+(allow nix_daemon_t self (unix_stream_socket (connectto)))
+(allow nix_daemon_t var_t (dir (getattr open search)))
+
+; Configuration: Fedora's /etc/nix/nix.conf through the include of the daemon's own
+; nix.conf under /usr/share/athanor/nix, /etc/xdg/nix, CA certificates for the substituters.
+(allow nix_daemon_t etc_t (dir (getattr open read search)))
+(allow nix_daemon_t etc_t (file (getattr open read ioctl lock)))
+(allow nix_daemon_t etc_t (lnk_file (getattr read)))
+(allow nix_daemon_t usr_t (dir (getattr open read search)))
+(allow nix_daemon_t usr_t (file (getattr open read ioctl lock)))
+(allow nix_daemon_t cert_t (dir (getattr open read search)))
+(allow nix_daemon_t cert_t (file (getattr open read ioctl lock)))
+(allow nix_daemon_t cert_t (lnk_file (getattr read)))
+; Nix looks for root's user configuration (/root/.config/nix/nix.conf) at start.
+(allow nix_daemon_t admin_home_t (dir (getattr search)))
+
+; Substituters over HTTP(S), directly or through a proxy.
+(allow nix_daemon_t http_port_t (tcp_socket (name_connect)))
+(allow nix_daemon_t http_cache_port_t (tcp_socket (name_connect)))
+
+; The collector: runtime roots in /proc of every process, and indirect roots, which are
+; symbolic links wherever a user made them (profiles under ~/.local/state, `result` links).
+; A root it cannot read is not a root, and what it protects is deleted: so the daemon reads
+; links and searches directories everywhere, and nothing more there.
+(allow nix_daemon_t domain (dir (getattr open read search)))
+(allow nix_daemon_t domain (file (getattr open read)))
+(allow nix_daemon_t domain (lnk_file (getattr read)))
+(allow nix_daemon_t non_security_file_type (dir (getattr search)))
+(allow nix_daemon_t non_security_file_type (lnk_file (getattr read)))
+
+; Sandbox set-up: a private mount tree, the store paths and the build directory bound into
+; the chroot, fresh proc, devpts and tmpfs (/dev/shm) instances, the device nodes bound in,
+; pivot_root and the detach of the old root, sethostname. The kernel and the Nix sandbox
+; check the rest.
+(allow nix_daemon_t root_t (dir (getattr search mounton)))
+(allow nix_daemon_t fs_t (filesystem (getattr mount remount unmount)))
+(allow nix_daemon_t proc_t (filesystem (mount unmount)))
+(allow nix_daemon_t devpts_t (filesystem (mount unmount)))
+(allow nix_daemon_t tmpfs_t (filesystem (mount unmount)))
+(allow nix_daemon_t proc_t (dir (getattr open read search mounton)))
+(allow nix_daemon_t sysctl_t (dir (getattr open read search)))
+(allow nix_daemon_t sysctl_t (file (getattr open read)))
+(allow nix_daemon_t sysctl_kernel_t (dir (getattr open read search)))
+(allow nix_daemon_t sysctl_kernel_t (file (getattr open read)))
+; /proc/sys/vm/nr_hugepages: read by the daemon and the sandbox helper it forks (the nix
+; binary) while it detects the host's features.
+(allow nix_daemon_t sysctl_vm_t (dir (getattr open read search)))
+(allow nix_daemon_t sysctl_vm_t (file (getattr open read)))
+; Namespace files (/proc/<pid>/ns/mnt): the daemon opens the mount namespace of the sandbox
+; child to enter it (setns), which is a read of the nsfs inode ("getting sandbox mount
+; namespace" in Nix's linux sandbox set-up).
+(allow nix_daemon_t nsfs_t (file (getattr open read)))
+(allow nix_daemon_t device_t (dir (getattr open read search)))
+(allow nix_daemon_t device_t (lnk_file (getattr read)))
+(allow nix_daemon_t null_device_t (chr_file (getattr open read write ioctl append)))
+(allow nix_daemon_t zero_device_t (chr_file (getattr open read)))
+(allow nix_daemon_t random_device_t (chr_file (getattr open read)))
+(allow nix_daemon_t urandom_device_t (chr_file (getattr open read)))
+(allow nix_daemon_t devtty_t (chr_file (getattr)))
+; /dev/kvm: Nix probes it (open read write) to decide whether to advertise the `kvm` system
+; feature, and stats it to bind it into the sandbox of a derivation that asks for it. The
+; probe is refused and not audited: builds on Athanor do not use kvm (no derivation in the
+; default configuration requires the feature), and granting a build daemon control of the
+; hypervisor device is not justified by it. A derivation that requires `kvm` stays unbuildable
+; here, as it was; revisit with doc_software.md if the maintainer wants NixOS tests.
+(allow nix_daemon_t kvm_device_t (chr_file (getattr)))
+(dontaudit nix_daemon_t kvm_device_t (chr_file (open read write)))
+(allow nix_daemon_t ptmx_t (chr_file (getattr open read write ioctl setattr)))
+(allow nix_daemon_t devpts_t (dir (getattr open read search mounton)))
+(allow nix_daemon_t devpts_t (chr_file (getattr open read write ioctl setattr)))
+(allow nix_daemon_t tmpfs_t (dir (getattr open read search write add_name remove_name create setattr)))
+(allow nix_daemon_t net_conf_t (file (getattr open read)))
+
+; Builders: executing a store path enters nix_build_t. The sandbox sets no_new_privs before
+; the exec (filter-syscalls, allow-new-privileges = false), hence nnp_transition.
+(typetransition nix_daemon_t nix_store_t process nix_build_t)
+(allow nix_daemon_t nix_build_t (process (transition siginh rlimitinh noatsecure sigkill signal signull sigstop getattr)))
+(allow nix_daemon_t nix_build_t (process2 (nnp_transition nosuid_transition)))
+(allow nix_build_t nix_store_t (file (entrypoint)))
+(allow nix_build_t nix_daemon_t (fd (use)))
+(allow nix_build_t nix_daemon_t (fifo_file (ioctl read write getattr lock append)))
+(allow nix_build_t nix_daemon_t (unix_stream_socket (ioctl read write getattr getopt setopt shutdown)))
+(allow nix_build_t nix_daemon_t (process (sigchld)))
+
+; --- Builders ------------------------------------------------------------------------------
+
+; No unconfined attribute: a build gets exactly the rules below, so a compromised or malicious
+; build script that escapes the Nix sandbox lands in a domain that cannot load kernel modules,
+; start or stop units, relabel files, or connect to arbitrary local services. The grants follow
+; what a build does: it runs from the store, works in the build directory, reads the few system
+; files bound into the sandbox, manages its own processes and, for fixed-output derivations
+; only (the sandbox shares the host network namespace), reaches the network as a fetcher.
+
+(allow nix_build_t self (process (fork sigchld sigkill sigstop signull signal ptrace getsched setsched getsession getpgid setpgid getcap setcap getattr setrlimit execmem execstack execheap)))
+(allow nix_build_t self (cap_userns (chown dac_override dac_read_search fowner fsetid kill setgid setuid setpcap net_bind_service net_admin net_raw ipc_lock ipc_owner sys_chroot sys_ptrace sys_admin sys_nice sys_resource mknod setfcap)))
+(allow nix_build_t self (user_namespace (create)))
+(allow nix_build_t self (fifo_file (ioctl read write create getattr setattr lock append open)))
+(allow nix_build_t self (unix_stream_socket (ioctl read write create getattr setattr lock append bind connect listen accept getopt setopt shutdown connectto)))
+(allow nix_build_t self (unix_dgram_socket (ioctl read write create getattr setattr lock append bind connect getopt setopt shutdown sendto)))
+(allow nix_build_t self (tcp_socket (ioctl read write create getattr setattr lock append bind connect listen accept getopt setopt shutdown)))
+(allow nix_build_t self (udp_socket (ioctl read write create getattr setattr lock append bind connect getopt setopt shutdown)))
+(allow nix_build_t self (netlink_route_socket (read write create getattr setattr lock append bind connect getopt setopt shutdown nlmsg_read)))
+(allow nix_build_t self (shm (create destroy getattr setattr read write associate unix_read unix_write lock)))
+(allow nix_build_t self (sem (create destroy getattr setattr read write associate unix_read unix_write)))
+(allow nix_build_t self (msgq (create destroy getattr setattr read write associate unix_read unix_write enqueue)))
+(allow nix_build_t self (msg (send receive)))
+
+; Binaries bound into the sandbox from the host (the shell at /bin/sh, `env`): executed, not
+; written. nix_daemon_t may execute them only through the transition into nix_build_t, never
+; in its own domain: the sandbox child of the daemon execs the builder (for example
+; builder = "/bin/sh") before any store path is involved, and that exec must land in nix_build_t.
+(allow nix_daemon_t bin_t (file (getattr open read map execute)))
+(allow nix_daemon_t shell_exec_t (file (getattr open read map execute)))
+(typetransition nix_daemon_t bin_t process nix_build_t)
+(typetransition nix_daemon_t shell_exec_t process nix_build_t)
+(allow nix_build_t bin_t (file (entrypoint getattr open read map execute execute_no_trans ioctl lock)))
+(allow nix_build_t shell_exec_t (file (entrypoint getattr open read map execute execute_no_trans ioctl lock)))
+(allow nix_build_t bin_t (dir (getattr open read search)))
+(allow nix_build_t bin_t (lnk_file (getattr read)))
+(allow nix_build_t lib_t (dir (getattr open read search)))
+(allow nix_build_t lib_t (file (getattr open read map execute ioctl lock)))
+(allow nix_build_t lib_t (lnk_file (getattr read)))
+(allow nix_build_t usr_t (dir (getattr open read search)))
+(allow nix_build_t usr_t (file (getattr open read map ioctl lock)))
+(allow nix_build_t usr_t (lnk_file (getattr read)))
+
+; The store (builders write their outputs into it, and execute the tools of their inputs: the
+; transition on a store path stays in this domain) and the build directory, which is under
+; nix_var_t. Nothing else on disk is writable.
+(allow nix_build_t nix_store_t (dir (ioctl read write create getattr setattr lock unlink link rename add_name remove_name reparent search rmdir open)))
+(allow nix_build_t nix_store_t (file (ioctl read write create getattr setattr lock append unlink link rename open map execute execute_no_trans)))
+(allow nix_build_t nix_store_t (lnk_file (read write create getattr setattr lock append unlink link rename)))
+(allow nix_build_t nix_store_t (sock_file (create getattr setattr unlink read write)))
+(allow nix_build_t nix_store_t (fifo_file (ioctl read write create getattr setattr lock append unlink open)))
+(allow nix_build_t nix_var_t (dir (ioctl read write create getattr setattr lock unlink link rename add_name remove_name reparent search rmdir open)))
+(allow nix_build_t nix_var_t (file (ioctl read write create getattr setattr lock append unlink link rename open map execute execute_no_trans)))
+(allow nix_build_t nix_var_t (lnk_file (read write create getattr setattr lock append unlink link rename)))
+(allow nix_build_t nix_var_t (sock_file (create getattr setattr unlink read write)))
+(allow nix_build_t nix_var_t (fifo_file (ioctl read write create getattr setattr lock append unlink open)))
+(allow nix_build_t nix_store_t (filesystem (getattr)))
+(allow nix_build_t nix_var_t (filesystem (getattr)))
+
+; Its own /proc (the sandbox's fresh instance), /dev (the nodes the sandbox binds in) and
+; /dev/shm and /dev/pts (instances the sandbox mounts).
+(allow nix_build_t self (file (ioctl read write getattr lock append open)))
+(allow nix_build_t self (dir (getattr open read search)))
+(allow nix_build_t self (lnk_file (getattr read)))
+(allow nix_build_t self (fd (use)))
+(allow nix_build_t proc_t (dir (getattr open read search)))
+(allow nix_build_t proc_t (file (getattr open read)))
+(allow nix_build_t proc_t (lnk_file (getattr read)))
+(allow nix_build_t proc_t (filesystem (getattr)))
+(allow nix_build_t sysctl_t (dir (getattr open read search)))
+(allow nix_build_t sysctl_kernel_t (dir (getattr open read search)))
+(allow nix_build_t sysctl_kernel_t (file (getattr open read)))
+(allow nix_build_t null_device_t (chr_file (getattr open read write ioctl append)))
+(allow nix_build_t zero_device_t (chr_file (getattr open read write ioctl)))
+(allow nix_build_t random_device_t (chr_file (getattr open read)))
+(allow nix_build_t urandom_device_t (chr_file (getattr open read)))
+(allow nix_build_t devtty_t (chr_file (getattr open read write ioctl)))
+(allow nix_build_t ptmx_t (chr_file (getattr open read write ioctl setattr)))
+(allow nix_build_t devpts_t (dir (getattr open read search)))
+(allow nix_build_t devpts_t (chr_file (getattr open read write ioctl setattr)))
+(allow nix_build_t devpts_t (filesystem (getattr)))
+(allow nix_build_t tmpfs_t (dir (ioctl read write create getattr setattr lock unlink link rename add_name remove_name search rmdir open)))
+(allow nix_build_t tmpfs_t (file (ioctl read write create getattr setattr lock append unlink link rename open map)))
+(allow nix_build_t tmpfs_t (lnk_file (read write create getattr setattr lock append unlink link rename)))
+(allow nix_build_t tmpfs_t (sock_file (create getattr setattr unlink read write)))
+(allow nix_build_t tmpfs_t (filesystem (getattr)))
+
+; The CA bundle a fixed-output derivation gets (ssl-cert-file, bound into the sandbox) and
+; the resolver configuration Nix copies into it.
+(allow nix_build_t cert_t (dir (getattr open read search)))
+(allow nix_build_t cert_t (file (getattr open read ioctl lock)))
+(allow nix_build_t cert_t (lnk_file (getattr read)))
+(allow nix_build_t net_conf_t (file (getattr open read)))
+
+; Network, for fixed-output derivations: connect out to the ports a fetcher uses, and to
+; nothing else. http_port_t is HTTP and HTTPS (80, 443, 8008, 8009, 8443, 9000), http_cache_port_t
+; a forward proxy (3128, 8080, 8118, 10001-10010), git_port_t the git protocol (9418),
+; ssh_port_t git over ssh (22), dns_port_t name resolution through the stub resolver at
+; 127.0.0.53. Everything else, including the local services on any other port, is refused.
+(allow nix_build_t http_port_t (tcp_socket (name_connect)))
+(allow nix_build_t http_cache_port_t (tcp_socket (name_connect)))
+(allow nix_build_t git_port_t (tcp_socket (name_connect)))
+(allow nix_build_t ssh_port_t (tcp_socket (name_connect)))
+(allow nix_build_t dns_port_t (tcp_socket (name_connect)))
+(allow nix_build_t node_t (node (tcp_send tcp_recv udp_send udp_recv)))
+; Test suites of the packages listen on the loopback of the build's private network namespace
+; (the sandbox gives a build its own, with only `lo` up): name_bind is limited to the
+; unprivileged ports. node_bind cannot be limited by address: Fedora's policy has no nodecon
+; entry, so every address, 0.0.0.0 included, is node_t. A fixed-output fetch shares the host
+; network, so it can listen on an unprivileged port of any host address.
+(allow nix_build_t ephemeral_port_t (tcp_socket (name_bind)))
+(allow nix_build_t ephemeral_port_t (udp_socket (name_bind)))
+(allow nix_build_t unreserved_port_t (tcp_socket (name_bind)))
+(allow nix_build_t unreserved_port_t (udp_socket (name_bind)))
+(allow nix_build_t node_t (tcp_socket (node_bind)))
+(allow nix_build_t node_t (udp_socket (node_bind)))

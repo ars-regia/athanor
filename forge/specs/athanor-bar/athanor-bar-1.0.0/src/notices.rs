@@ -271,7 +271,8 @@ pub fn read_icon_file(path: &str) -> Option<Vec<u8>> {
 
 /// A PNG signature, then the IHDR chunk, whose width and height are big-endian at bytes
 /// 16 and 20, each within `1..=max_side`. GDK decodes only what passes.
-fn png_within(bytes: &[u8], max_side: u32) -> bool {
+#[doc(hidden)] // public for the fuzz target and its corpus replay only
+pub fn png_within(bytes: &[u8], max_side: u32) -> bool {
     let side = |at: usize| {
         bytes
             .get(at..at + 4)

@@ -2,10 +2,10 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:48.fc43}
+Release:        %{?autorelease}%{!?autorelease:55.fc43}
 Summary:        Athanor OS athanor-system-config
-License:        MIT
-URL:            https://github.com/hr-mes/athanor-forge
+License:        GPL-3.0-or-later
+URL:            https://github.com/ars-regia/athanor
 BuildArch:      noarch
 
 Requires: cosmic-comp greetd greenboot systemd-ukify nodejs
@@ -18,12 +18,10 @@ Requires: cosmic-greeter cosmic-idle
 Requires: athanor-greeter-ui
 Requires: athanor-calmo
 Requires: xdg-desktop-portal-athanor
-# The eBPF monitor and the cloud agent are integrations the configuration is ready
-# for, not prerequisites of the configuration itself: weak dependencies.
-Recommends: athanor-sysmon-ebpf athanor-cloud-rs
 Requires: usbguard bolt
+# athanor-uki-enroll reads the LUKS2 header, the Secure Boot state and PCR 7.
+Requires: cryptsetup mokutil python3 systemd
 
-Requires:       bcachefs-tools
 %description
 Provides athanor-system-config for Athanor OS.
 
@@ -40,7 +38,7 @@ cp -a %{_sourcedir}/etc %{buildroot}/ 2>/dev/null || true
 
 mkdir -p %{buildroot}/usr/share/athanor-system-config
 mv %{buildroot}/etc/usbguard/usbguard-daemon.conf %{buildroot}/usr/share/athanor-system-config/usbguard-daemon.conf
-mv %{buildroot}/etc/yum.repos.d/athanor-forge.repo %{buildroot}/usr/share/athanor-system-config/athanor-forge.repo
+mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-system-config/greenboot.conf
 
 %post
 # Configurations are now managed declaratively via tmpfiles.d (10-athanor-greetd.conf)
@@ -65,7 +63,6 @@ for group in video tty; do
     gpasswd -a greetd "$group" > /dev/null 2>&1 || :
 done
 mkdir -p /etc/usbguard
-mkdir -p /etc/yum.repos.d
 
 %files
 %dir /usr/share/athanor-system-config
@@ -74,23 +71,66 @@ mkdir -p /etc/yum.repos.d
 %attr(0755,root,root) /usr/bin/athanor-greeter-session
 %attr(0755,root,root) /usr/bin/athanor-usbguard-hook
 %attr(0755,root,root) /usr/bin/athanor-uki-enroll
-%attr(0755,root,root) /usr/libexec/athanor-snapshot-trigger.sh
 %attr(0755,root,root) /usr/libexec/athanor-greeter-client
 %dir /usr/lib/systemd/system/greetd.service.d
 /usr/lib/systemd/system/greetd.service.d/10-athanor-wantedby.conf
-/usr/lib/systemd/system/athanor-timewarp.service
-/usr/lib/systemd/system/athanor-timewarp.timer
 /usr/lib/systemd/system-preset/80-athanor-display-manager.preset
 /usr/lib/systemd/system-preset/80-athanor-system.preset
 /usr/lib/tmpfiles.d/10-athanor-greetd.conf
+/usr/lib/environment.d/50-athanor-desktop.conf
 /usr/share/athanor-system-config/greetd.toml
 /usr/share/athanor-system-config/usbguard-daemon.conf
-/usr/share/athanor-system-config/athanor-forge.repo
+/usr/share/athanor-system-config/greenboot.conf
 %attr(0755,root,root) /etc/greenboot/check/required.d/10-greetd-running.sh
 %config(noreplace) /etc/security/limits.d/99-athanor-realtime.conf
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-55
+- athanor-uki-enroll enrols a TPM2 keyslot that needs a PIN and is bound to the value of
+  PCR 7 only, instead of PCRs 0, 4, 7 and 11, which firmware and kernel updates change
+  (A2-27 as amended on 2026-10-08, D42). It refuses when Secure Boot does not verify the
+  boot chain. A systemd-pcrlock policy arrives with the UKI (P4b); until then the
+  enrolment turns off systemd-cryptenroll's own pick-up of pcrlock.json. The script
+  enrols a recovery key first when the volume has no recovery token with a keyslot,
+  never wipes a passphrase slot, and replaces earlier TPM2 keyslots only after the new
+  one is enrolled. Requires cryptsetup, mokutil and python3, which it runs.
+
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-54
+- Drop /usr/share/athanor-system-config/athanor-forge.repo. It pointed at a GitHub
+  Pages DNF channel that ADR-0076 retires, and nothing installed it into
+  /etc/yum.repos.d: packages reach a machine only inside the signed system image.
+
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-53
+- 80-athanor-system.preset disables systemd-homed.service and
+  systemd-homed-activate.service: Fedora's 90-systemd.preset enables them and preset-all
+  applied it. Accounts stay classic.
+
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-52
+- Drop the weak dependencies on athanor-sysmon-ebpf and athanor-cloud-rs: both packages
+  are retired (ADR-0073).
+
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-51
+- Configure greenboot not to reboot (doc_recovery.md, R5): GREENBOOT_AUTO_REBOOT=false, so a
+  required check that fails after an update makes the previous deployment the default for
+  the next restart instead of restarting the machine. Disable 01_repository_dns_check.sh and
+  01_update_platforms_check.sh: they check OSTree remotes and rpm-ostree platforms, which
+  Athanor does not update from, and the DNS check fails every boot that starts offline. The
+  file is linked to /etc/greenboot/greenboot.conf by tmpfiles.d, as greenboot owns it.
+- 10-greetd-running.sh, now able to queue a rollback, waits up to two minutes for greetd and
+  asks one run of it to stay active for ten seconds; it fails at once when systemd has given
+  up on greetd. The 15-second window could fail a good update on a slow first boot, and a
+  greetd in a crash loop passed.
+
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-50
+- Point URL at the project repository.
+
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-49
+- Set XDG_CURRENT_DESKTOP=Athanor:COSMIC for the user manager through
+  /usr/lib/environment.d/50-athanor-desktop.conf. athanor-desktop published it only
+  after cosmic-comp started, so a portal activated earlier never read
+  athanor-portals.conf and fell back to other backends for the whole session.
+
 * Fri Oct 02 2026 Athanor Forge <forge@athanor.os> - 1.0.0-48
 - athanor-desktop publishes XDG_SESSION_CLASS, read from logind, to the user manager:
   localsearch's unit requires it and never started.

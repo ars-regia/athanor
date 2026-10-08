@@ -1,0 +1,135 @@
+[package]
+name = "athanor-fuzz"
+version = "0.0.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# Its own workspace and lock file: libFuzzer needs a nightly compiler and must not enter the
+# root workspace, whose `cargo test` runs on stable.
+[workspace]
+
+[features]
+default = ["update", "shelld", "layout", "gtk"]
+update = ["athanor-fuzz-entries/update"]
+shelld = ["athanor-fuzz-entries/shelld"]
+layout = ["athanor-fuzz-entries/layout"]
+# The bar and the compositor client link GTK.
+gtk = ["athanor-fuzz-entries/gtk"]
+
+# The shipped profile checks overflow (the root Cargo.toml); fuzzing should too.
+[profile.release]
+overflow-checks = true
+debug-assertions = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+athanor-fuzz-entries = { path = "../system/athanor-fuzz-entries", default-features = false }
+
+[[bin]]
+name = "update_claims"
+path = "fuzz_targets/update_claims.rs"
+required-features = ["update"]
+test = false
+doc = false
+
+[[bin]]
+name = "update_status"
+path = "fuzz_targets/update_status.rs"
+required-features = ["update"]
+test = false
+doc = false
+
+[[bin]]
+name = "update_local"
+path = "fuzz_targets/update_local.rs"
+required-features = ["update"]
+test = false
+doc = false
+
+[[bin]]
+name = "bar_tray"
+path = "fuzz_targets/bar_tray.rs"
+required-features = ["gtk"]
+test = false
+doc = false
+
+[[bin]]
+name = "bar_dbusmenu"
+path = "fuzz_targets/bar_dbusmenu.rs"
+required-features = ["gtk"]
+test = false
+doc = false
+
+[[bin]]
+name = "bar_notice"
+path = "fuzz_targets/bar_notice.rs"
+required-features = ["gtk"]
+test = false
+doc = false
+
+[[bin]]
+name = "bar_png"
+path = "fuzz_targets/bar_png.rs"
+required-features = ["gtk"]
+test = false
+doc = false
+
+[[bin]]
+name = "shelld_hints"
+path = "fuzz_targets/shelld_hints.rs"
+required-features = ["shelld"]
+test = false
+doc = false
+
+[[bin]]
+name = "shelld_image"
+path = "fuzz_targets/shelld_image.rs"
+required-features = ["shelld"]
+test = false
+doc = false
+
+[[bin]]
+name = "shelld_icon"
+path = "fuzz_targets/shelld_icon.rs"
+required-features = ["shelld"]
+test = false
+doc = false
+
+[[bin]]
+name = "compositor_shortcuts"
+path = "fuzz_targets/compositor_shortcuts.rs"
+required-features = ["gtk"]
+test = false
+doc = false
+
+[[bin]]
+name = "compositor_theme"
+path = "fuzz_targets/compositor_theme.rs"
+required-features = ["gtk"]
+test = false
+doc = false
+
+[[bin]]
+name = "layout_document"
+path = "fuzz_targets/layout_document.rs"
+required-features = ["layout"]
+test = false
+doc = false
+
+[[bin]]
+name = "layout_favorites"
+path = "fuzz_targets/layout_favorites.rs"
+required-features = ["layout"]
+test = false
+doc = false
+
+[[bin]]
+name = "trust_state"
+path = "fuzz_targets/trust_state.rs"
+required-features = ["layout"]
+test = false
+doc = false

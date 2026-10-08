@@ -38,7 +38,8 @@ fn deployment(deployed: &Deployed) -> Deployment {
 
 /// Why the booted image is, or is not, verified. Never a stored answer: the stored
 /// signature object is verified again, against the keys the shipped policy names today.
-fn reason<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, booted: &Deployed) -> Reason {
+fn reason<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &Status) -> Reason {
+    let booted = &status.booted;
     if booted.local_changes {
         // What runs is the image plus local packages: no signature covers that tree.
         return Reason::LocalChanges;
@@ -47,15 +48,42 @@ fn reason<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, booted: &Deployed) -
         return Reason::PolicyNotInForce;
     }
     let repository = sigobj::repository_of(&booted.image);
-    let Some(key_paths) = policy.scopes.get(repository) else { return Reason::ReferenceOutOfScope };
+    let Some(key_paths) = policy.scopes.get(repository) else {
+        if crate::policy::successor(&policy.scopes, repository, &policy.moved_from).is_none() {
+            return Reason::ReferenceOutOfScope;
+        }
+        // The same image under the owner the policy pins: the project moved, and the
+        // migration moves this machine after it (doc_update_delivery.md, UD45), unless nothing
+        // can move it yet: a queued rollback, or no such image or tag under the new owner; or
+        // unless the image there is the held digest, which the migration never stages.
+        return if status.rollback_queued {
+            Reason::OwnerMovedWaiting
+        } else if ctx.store.move_held() {
+            Reason::OwnerMovedHeld
+        } else if ctx.store.channel_absent() {
+            Reason::OwnerMovedWaiting
+        } else {
+            Reason::OwnerMoved
+        };
+    };
     if !booted.enforcing {
+        let pending = status.staged.as_ref().is_some_and(|staged| staged.enforcing);
+        // The migration ran and nothing enforcing is staged: the reference was switched
+        // afterwards without the policy. Reported, not repaired: the migration does not run
+        // again (UT4).
+        if ctx.store.migrated() && !pending {
+            return Reason::OriginNotEnforcing;
+        }
         // The installer's reference, or an install that has not migrated yet (UT4).
-        return Reason::Media;
+        return if ctx.store.channel_absent() { Reason::ChannelAbsent } else { Reason::Media };
     }
     let keys: Vec<_> = key_paths.iter().filter_map(|path| std::fs::read_to_string(path).ok()).filter_map(|pem| sigobj::load_key(&pem)).collect();
     let claims = ctx.store.signature_dir(&booted.digest).and_then(|dir| sigobj::claims(&dir, &keys).ok()).unwrap_or_default();
     let covers = |claim: &&sigobj::Claim| claim.manifest_digest == booted.digest && claim.repository == repository;
     match claims.iter().filter(covers).map(|claim| claim.backed).max() {
+        // Verified, but a run-number tag or a digest names one build: nothing newer is ever
+        // published under it (doc_update_delivery.md, UD51).
+        Some(true) if !follows_a_channel(&booted.image[repository.len()..]) => Reason::PinnedBuild,
         Some(true) => Reason::Signature,
         Some(false) => Reason::KeyNotInPolicy,
         None => Reason::NoSignature,
@@ -70,6 +98,15 @@ fn local_update(ctx: &Context<'_, impl Tools>, status: &Status) -> UpdateState {
         _ if ctx.store.refused().is_some() => UpdateState::Refused,
         _ => UpdateState::None,
     }
+}
+
+/// True when the tag or digest after the repository, `suffix`, may move to a newer build. A
+/// digest and a run tag of the pipeline (`github.run_id`, digits only) name one build; any
+/// other tag, `latest`, `stable` or the moving tag of a derived image, is followed. No tag is
+/// `latest`.
+fn follows_a_channel(suffix: &str) -> bool {
+    let run_tag = suffix.strip_prefix(':').is_some_and(|tag| !tag.is_empty() && tag.bytes().all(|b| b.is_ascii_digit()));
+    !(suffix.starts_with('@') || run_tag)
 }
 
 /// `Available` when `digest` may be offered; otherwise why not. The order of the build
@@ -101,7 +138,9 @@ fn online_update<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &mut 
         return (local, None);
     }
     let candidate = match ctx.tools.candidate(&status.booted.image) {
-        Ok(candidate) => candidate,
+        Ok(Some(candidate)) => candidate,
+        // The followed tag has no manifest: a registry answer, but nothing to offer.
+        Ok(None) => return (local, Some(Failure { code: ErrorCode::Registry, host: crate::tools::host_of(&status.booted.image) })),
         Err(failure) => return (local, Some(failure)),
     };
     // The registry answered: that is a successful check, whatever it said.
@@ -156,7 +195,17 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failu
     let storage = |_| Failure { code: ErrorCode::Storage, host: None };
     let newest = ctx.store.record_booted(status.booted.build_time).map_err(storage)?;
     let policy = crate::policy::in_force(&ctx.policy);
-    let (update, failure) = if offline { (local_update(ctx, &status), None) } else { online_update(ctx, &policy, &mut status) };
+    // A queued rollback leaves the booted digest (doc_recovery.md, R5): it is held, as GoBack()
+    // holds it, and nothing is downloaded, since a staged deployment would become the default
+    // of the next boot in place of the return.
+    let (update, failure) = if status.rollback_queued {
+        let held = ctx.store.set_held(&status.booted.digest).err().map(|_| Failure { code: ErrorCode::Storage, host: None });
+        (local_update(ctx, &status), held)
+    } else if offline {
+        (local_update(ctx, &status), None)
+    } else {
+        online_update(ctx, &policy, &mut status)
+    };
     if !offline && enforced(&policy, &status.booted) {
         // A machine whose signature object was never stored, or was lost, heals here. A
         // failure is not the check's: the reason below already says `no-signature`.
@@ -168,7 +217,7 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failu
     }
     let state = State {
         schema: SCHEMA,
-        verified: reason(ctx, &policy, &status.booted).into(),
+        verified: reason(ctx, &policy, &status).into(),
         booted: deployment(&status.booted),
         downloaded: status.staged.as_ref().map(deployment),
         previous: status.rollback.as_ref().map(deployment),
@@ -200,34 +249,43 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn deployed(digest: &str, build_time: i64) -> Deployed {
-        Deployed { image: format!("{REPO}:stable"), digest: digest.into(), version: format!("43.{build_time}"), build_time, enforcing: true, download_only: false, local_changes: false }
+        Deployed { image: format!("{REPO}:stable"), digest: digest.into(), version: format!("43.{build_time}"), build_time, enforcing: true, download_only: false, local_changes: false, deployment: None }
     }
 
     /// bootc, skopeo, ostree and NetworkManager as one scripted object that records its calls.
     pub(crate) struct Fake {
         pub status: RefCell<Status>,
-        pub candidate: Result<Candidate, Failure>,
+        pub candidate: Result<Option<Candidate>, Failure>,
         /// What `download` stages, or how it fails.
         pub download: Result<Deployed, Failure>,
         pub metered: bool,
         pub relock: Result<(), Failure>,
+        /// Whether `switch` stages a deployment, or returns as if it had and stages nothing.
+        pub stages: bool,
+        /// `bootc status` fails, as it does when bootc cannot read the sysroot.
+        pub status_fails: bool,
+        /// Whether bootc names a deployment by its ostree checksum and deploy serial.
+        pub names: bool,
         pub calls: RefCell<Vec<String>>,
     }
 
     impl Fake {
         pub(crate) fn booted(booted: Deployed) -> Self {
             Self {
-                status: RefCell::new(Status { booted, staged: None, rollback: None }),
+                status: RefCell::new(Status { booted, staged: None, rollback: None, rollback_queued: false }),
                 candidate: Err(Failure { code: ErrorCode::Network, host: Some("localhost:5000".into()) }),
                 download: Err(Failure { code: ErrorCode::Internal, host: None }),
                 metered: false,
                 relock: Ok(()),
+                stages: true,
+                status_fails: false,
+                names: true,
                 calls: RefCell::new(Vec::new()),
             }
         }
 
         pub(crate) fn offering(mut self, digest: &str, build_time: i64) -> Self {
-            self.candidate = Ok(Candidate { digest: digest.into(), version: format!("43.{build_time}"), build_time });
+            self.candidate = Ok(Some(Candidate { digest: digest.into(), version: format!("43.{build_time}"), build_time }));
             self.download = Ok(Deployed { download_only: true, ..deployed(digest, build_time) });
             self
         }
@@ -243,9 +301,12 @@ pub(crate) mod tests {
 
     impl Tools for Fake {
         fn status(&self) -> Result<Status, Failure> {
+            if self.status_fails {
+                return Err(Failure { code: ErrorCode::Internal, host: None });
+            }
             Ok(self.status.borrow().clone())
         }
-        fn candidate(&self, image: &str) -> Result<Candidate, Failure> {
+        fn candidate(&self, image: &str) -> Result<Option<Candidate>, Failure> {
             self.call(format!("candidate {image}"));
             self.candidate.clone()
         }
@@ -275,7 +336,13 @@ pub(crate) mod tests {
         }
         fn switch(&self, image: &str) -> Result<(), Failure> {
             self.call(format!("switch {image}"));
-            self.status.borrow_mut().staged = Some(self.download.clone()?);
+            let deployed = self.download.clone()?;
+            if self.stages {
+                // bootc switch stages a deployment of `image` that is not locked against
+                // finalization, a new ostree deployment each time.
+                let serial = self.calls.borrow().iter().filter(|call| call.starts_with("switch")).count();
+                self.status.borrow_mut().staged = Some(Deployed { image: image.into(), download_only: false, deployment: self.names.then(|| format!("{}.{serial}", deployed.digest)), ..deployed });
+            }
             Ok(())
         }
         fn fetch_signature(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure> {
@@ -320,6 +387,7 @@ pub(crate) mod tests {
                 REPO: [{"type": "sigstoreSigned", "keyPaths": key_paths, "signedIdentity": {"type": "matchRepository"}}]}}});
             std::fs::write(root.join("usr/policy.json"), policy.to_string()).expect("write");
             std::fs::write(root.join("usr/registries.d/athanor.yaml"), "docker: {}\n").expect("write");
+            std::fs::write(root.join("usr/moved-from"), "localhost:5000/previous\n").expect("write");
             let paths = PolicyPaths { etc_policy: root.join("etc/policy.json"), etc_registries: root.join("etc/registries.d/athanor.yaml"), shipped: root.join("usr") };
             std::os::unix::fs::symlink(root.join("usr/policy.json"), &paths.etc_policy).expect("symlink");
             std::os::unix::fs::symlink(root.join("usr/registries.d/athanor.yaml"), &paths.etc_registries).expect("symlink");
@@ -350,6 +418,20 @@ pub(crate) mod tests {
         assert_eq!((state.last_error, state.last_successful_check), (ErrorCode::None, Some(5000)));
         assert!(machine.store.signature_dir(SIGNED).expect("dir").join("manifest.json").exists());
         assert_eq!(athanor_trust_state::read_owned_by(&machine.store.run.join("state.json"), std::os::unix::fs::MetadataExt::uid(&std::fs::metadata(&machine.root).expect("meta"))), Ok(state));
+    }
+
+    #[test]
+    fn a_queued_rollback_holds_the_booted_digest_and_downloads_nothing() {
+        for offline in [true, false] {
+            let machine = Machine::new(&format!("rollback-queued-{offline}"), &["real/k1.pub"]);
+            let tools = Fake::booted(deployed(&digest(2), 2000)).offering(&digest(3), 3000);
+            tools.status.borrow_mut().rollback = Some(deployed(&digest(1), 1000));
+            tools.status.borrow_mut().rollback_queued = true;
+            let state = run(&machine.ctx(&tools, 5000), offline).expect("state");
+            assert_eq!(machine.store.held(), Some(digest(2)));
+            assert_eq!(state.update, UpdateState::None);
+            assert!(!tools.called("candidate") && !tools.called("download"));
+        }
     }
 
     #[test]
@@ -418,6 +500,24 @@ pub(crate) mod tests {
         let state = run(&machine.ctx(&tools, 5000), false).expect("check");
         assert_eq!((state.verified.reason, state.update), (Reason::Media, UpdateState::None));
         assert!(tools.calls.borrow().is_empty(), "no registry call at all: {:?}", tools.calls.borrow());
+    }
+
+    #[test]
+    fn a_migrated_machine_on_a_reference_that_does_not_enforce_the_policy_says_so() {
+        let machine = Machine::new("origin-not-enforcing", &["real/k1.pub"]);
+        machine.store.set_migrated().expect("stamp");
+        let unverified = || Deployed { enforcing: false, ..deployed(&digest(1), 1000) };
+        let tools = Fake::booted(unverified()).offering(&digest(2), 2000);
+        let state = run(&machine.ctx(&tools, 5000), false).expect("check");
+        assert_eq!((state.verified.value, state.verified.reason, state.update), (false, Reason::OriginNotEnforcing, UpdateState::None));
+        assert!(tools.calls.borrow().is_empty(), "reported, not repaired: {:?}", tools.calls.borrow());
+
+        // A staged deployment that does not enforce either changes nothing.
+        tools.status.borrow_mut().staged = Some(Deployed { download_only: true, ..unverified() });
+        assert_eq!(run(&machine.ctx(&tools, 5000), true).expect("offline").verified.reason, Reason::OriginNotEnforcing);
+        // One that does is the migration waiting for the restart.
+        tools.status.borrow_mut().staged = Some(deployed(&digest(2), 2000));
+        assert_eq!(run(&machine.ctx(&tools, 5000), true).expect("offline").verified.reason, Reason::Media);
     }
 
     #[test]

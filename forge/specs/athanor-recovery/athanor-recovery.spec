@@ -1,48 +1,76 @@
 %global debug_package %{nil}
-%global crate_dir forge/specs/%{name}/%{name}-%{version}
+%global sources forge/specs/%{name}/SOURCES
 Name:           athanor-recovery
 Version:        1.0.0
-Release:        5%{?dist}
-Summary:        Athanor OS Pre-Boot GUI Recovery Kiosk & Rollback Manager
+Release:        7%{?dist}
+Summary:        Text console shown when the desktop does not start
 
-License:        MIT
+License:        GPL-3.0-or-later
+BuildArch:      noarch
 
-
-BuildRequires:  rust cargo gcc gcc-c++ gtk4-devel glib2-devel pkgconf-pkg-config
-Requires:       gtk4 glib2 cosmic-comp rpm-ostree systemd
+Requires:       systemd util-linux greetd athanor-update bash grep
 
 %description
-Pre-Boot GUI Wayland Kiosk recovery environment for Athanor OS (`athanor-recovery-ui`).
-Provides 1-click OSTree/bootc visual rollback and automatic failover when `greetd` or the graphical session crashes.
+When greetd fails three times in a minute, the desktop does not start. This package
+then gives the person a text login on tty1 and a message, in English and Italian, that
+says how to go back to the previous system version: `sudo athanor-update go-back`.
+It carries the greetd drop-in that starts the console, the target, and the unit that
+writes the message. When greenboot has already queued the previous version after a failed
+health check, the message says to restart instead. The package also enables greenboot's
+units through its preset. The graphical kiosk it replaces is kept as source in the frozen
+crate forge/specs/athanor-recovery/athanor-recovery-1.0.0, out of the workspace and the image.
 
 %prep
-# Built in place from the workspace checkout: nothing to unpack.
+# Nothing to unpack: the package is a set of files.
 
 %build
-%set_build_flags
-# cargo generate-lockfile // FORBIDDEN BY RULE 4 (Offline Build)
-cargo build --release --locked -p %{name}
+# Nothing to build.
 
 %install
-install -D -m 0755 target/release/athanor-recovery-ui %{buildroot}/usr/bin/athanor-recovery-ui
-
-# systemd units and the greetd drop-in, from the crate directory.
-install -D -m 0644 %{crate_dir}/systemd/athanor-recovery.service %{buildroot}/usr/lib/systemd/system/athanor-recovery.service
-install -D -m 0644 %{crate_dir}/systemd/athanor-recovery.target %{buildroot}/usr/lib/systemd/system/athanor-recovery.target
-install -D -m 0644 %{crate_dir}/systemd/greetd-recovery-fallback.conf %{buildroot}/usr/lib/systemd/system/greetd.service.d/recovery-fallback.conf
-install -D -m 0644 %{crate_dir}/systemd/athanor-recovery.sysusers %{buildroot}/usr/lib/sysusers.d/athanor-recovery.conf
-install -D -m 0644 %{crate_dir}/systemd/athanor-recovery.pam %{buildroot}/usr/lib/pam.d/athanor-recovery
+install -D -m 0644 %{sources}/usr/lib/systemd/system/athanor-recovery.target %{buildroot}/usr/lib/systemd/system/athanor-recovery.target
+install -D -m 0644 %{sources}/usr/lib/systemd/system/athanor-recovery-notice.service %{buildroot}/usr/lib/systemd/system/athanor-recovery-notice.service
+install -D -m 0644 %{sources}/usr/lib/systemd/system/greetd.service.d/recovery-fallback.conf %{buildroot}/usr/lib/systemd/system/greetd.service.d/recovery-fallback.conf
+install -D -m 0644 %{sources}/usr/lib/tmpfiles.d/athanor-recovery.conf %{buildroot}/usr/lib/tmpfiles.d/athanor-recovery.conf
+install -D -m 0644 %{sources}/usr/share/athanor-recovery/recovery.issue %{buildroot}/usr/share/athanor-recovery/recovery.issue
+install -D -m 0644 %{sources}/usr/share/athanor-recovery/rollback-queued.issue %{buildroot}/usr/share/athanor-recovery/rollback-queued.issue
+install -D -m 0755 %{sources}/usr/libexec/athanor-recovery/write-notice %{buildroot}/usr/libexec/athanor-recovery/write-notice
+install -D -m 0644 %{sources}/usr/lib/systemd/system-preset/80-athanor-recovery.preset %{buildroot}/usr/lib/systemd/system-preset/80-athanor-recovery.preset
 
 %files
-/usr/bin/athanor-recovery-ui
-/usr/lib/systemd/system/athanor-recovery.service
 /usr/lib/systemd/system/athanor-recovery.target
+/usr/lib/systemd/system/athanor-recovery-notice.service
 %dir /usr/lib/systemd/system/greetd.service.d
 /usr/lib/systemd/system/greetd.service.d/recovery-fallback.conf
-/usr/lib/sysusers.d/athanor-recovery.conf
-/usr/lib/pam.d/athanor-recovery
+/usr/lib/tmpfiles.d/athanor-recovery.conf
+%dir /usr/share/athanor-recovery
+/usr/share/athanor-recovery/recovery.issue
+/usr/share/athanor-recovery/rollback-queued.issue
+%dir /usr/libexec/athanor-recovery
+/usr/libexec/athanor-recovery/write-notice
+/usr/lib/systemd/system-preset/80-athanor-recovery.preset
 
 %changelog
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
+- Enable greenboot-healthcheck.service and greenboot-set-rollback-trigger.service through
+  80-athanor-recovery.preset (doc_recovery.md, R5): nothing enabled them, so no update was
+  ever checked.
+- Write the console message after greenboot's health check. When greenboot has made the
+  previous deployment the default after a failed check, the message says so and tells the
+  person to restart: `athanor-update go-back` would swap the deployments back to the failed
+  version.
+* Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
+- The graphical kiosk leaves the image. It ran as an unprivileged user with
+  NoNewPrivileges, so the rollback it ran (`rpm-ostree rollback`) could not do its work, and
+  it would have bypassed athanor-update, which holds the digest a rollback leaves so that the
+  timer does not undo it. Its fallback reported a bcachefs snapshot as a success, its
+  diagnostics ("Integrity Tamper Detected", "Bcachefs") were fixed text, and nothing in it
+  authenticated anyone.
+- After the same trigger, greetd failing three times in a minute, the machine now gets a
+  text login on tty1 with a message saying how to go back: `sudo athanor-update go-back`,
+  which asks the service that owns the rollback, under polkit. The root account is locked,
+  so the login is an administrator's.
+- No binary, no crate build, no athanor-recovery user: sysusers.d and the PAM stack of
+  the kiosk are no longer installed. The user of an existing machine stays.
 * Thu Sep 24 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
 - Declare the athanor-recovery system user in sysusers.d. The unit ran as a user no
   package created, so every fallback from a failed greetd died at the USER step and

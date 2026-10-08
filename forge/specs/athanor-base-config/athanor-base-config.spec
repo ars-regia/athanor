@@ -1,11 +1,11 @@
 %global debug_package %{nil}
 Name:           athanor-base-config
 Version:        43.0.0
-Release:        11%{?dist}
+Release:        18%{?dist}
 Summary:        Athanor OS Base Configuration (Systemd, Branding, GPG)
 
-License:        MIT
-URL:            https://github.com/hr-mes/athanor-forge
+License:        GPL-3.0-or-later
+URL:            https://github.com/ars-regia/athanor
 BuildArch:      noarch
 
 Requires:       glibc-langpack-it glibc-langpack-en
@@ -38,9 +38,10 @@ Provides:       system-release = %{version}-%{release}
 Provides:       system-release(43)
 Obsoletes:      system-release < 43
 %description
-This package provides the foundational configuration for Athanor Base.
-It includes Dracut configurations,
-Systemd presets, custom Plymouth/GDM branding, Polkit rules, and GPG keys.
+This package provides the foundational configuration for Athanor Base: os-release
+and the fedora-release identity, Dracut configuration, systemd presets, units and
+tmpfiles, sshd, coredump and journald drop-ins, SELinux mode,
+Plymouth branding, repository definitions and GPG keys.
 
 %prep
 # No extraction needed, files are injected in install phase.
@@ -59,6 +60,8 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 /etc/pki/rpm-gpg/*
 /etc/selinux/config
 /etc/yum.repos.d/*
+/etc/firewalld/zones/public.xml
+/etc/systemd/system/rpm-ostree-countme.timer
 /etc/ssh/sshd_config.d/*
 /etc/systemd/coredump.conf.d/*
 /usr/lib/systemd/system/*
@@ -66,16 +69,46 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 /usr/lib/systemd/journald.conf.d/*
 /usr/lib/fedora-release
 /usr/lib/os-release
-/etc/grub.d/01_athanor_grub_auth
 /usr/lib/dracut/dracut.conf.d/*
 /usr/lib/systemd/system-preset/*
 /usr/lib/systemd/system/scx_loader.service.d/*
 /usr/lib/sysusers.d/*
 /usr/share/pixmaps/*
 /usr/share/plymouth/themes/spinner/watermark.png
-/usr/share/polkit-1/rules.d/*
 
 %changelog
+* Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 43.0.0-18
+- Presets: disable rpm-ostree-countme.timer (and mask it), and unbound-anchor.timer;
+  Fedora's preset enabled both. sshd.service stays enabled by Fedora's preset: new installs turn it off
+  in the kickstart, existing installs keep their state
+- Ship firewalld's public zone without mdns and ssh; the home zone keeps both
+
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 43.0.0-17
+- Drop SUPPORT_END from os-release until 1.0: the five-year support period runs from
+  the date 1.0 is placed on the market, so the 1.0 release sets it (PQ7, ADR-0081)
+
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 43.0.0-16
+- Drop org.containers.bootc.rules: no package of the image declares the action it grants
+
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 43.0.0-15
+- Drop the comment lines from os-release: bootc-image-builder rejects any non-empty
+  line without "=" ("readOSRelease: invalid input"), so the ISO could not be built.
+  ADR-0081 records where SUPPORT_END comes from.
+
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 43.0.0-14
+- Add SUPPORT_END to os-release: the end of the five-year support period of the product
+  line (ADR-0081)
+
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 43.0.0-13
+- Drop /etc/grub.d/01_athanor_grub_auth: it set the GRUB superuser "admin" with the placeholder
+  hash CHANGE_THIS_PBKDF2_HASH_IN_PRODUCTION, so the shipped stanza was a placeholder in
+  a security path. The GRUB menu is not password-protected in 1.0; whether and how to protect
+  it belongs to the boot-chain decision.
+
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 43.0.0-12
+- Point URL at the project repository
+- Correct the %description: there is no GDM branding, list what the package ships
+
 * Thu Oct 01 2026 Athanor Forge <forge@athanor.os> - 43.0.0-11
 - Drop kargs.d 02-06: the base kernel command line now comes from athanor-kernel-profile,
   generated from profile.toml (doc_kernel_profile.md, section 6). Removed with them:

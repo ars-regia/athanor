@@ -1,0 +1,6 @@
+schema = 1
+mandatory = ["panel"]
+[output."*"]
+preset = "float"
+panel = "top"
+dock = "visible"

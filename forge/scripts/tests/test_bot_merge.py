@@ -71,18 +71,41 @@ class BotMergeTest(unittest.TestCase):
         (root / "forge").mkdir()
         watch = [{"repo": "demo/demo", "spec": "specs/athanor-demo/athanor-demo.spec"}]
         (root / bot.WATCH_FILE).write_text(json.dumps(watch))
+        (root / ".github/settings").mkdir(parents=True)
         os.chdir(root)
+        self.protect({"iso-v0": ["Kernel gate", "Spec gate", "gate"]})
+        self.root = root
         self.runs = [{"id": 1, "status": "completed"}]
-        self.jobs = {1: [{"name": "Kernel gate", "conclusion": "success"}]}
+        # Spec Build Check calls the bot from its own run: the gate job has ended, the run has not.
+        self.spec_runs = [{"id": 101, "status": "in_progress"}]
+        # The Pull Request workflow's gate, whose own build jobs carry the caller's prefix.
+        self.pr_runs = [{"id": 201, "status": "completed"}]
+        self.jobs = {
+            1: [{"name": "Kernel gate", "conclusion": "success"}],
+            101: [{"name": "Spec gate", "conclusion": "success"}, {"name": "merge", "conclusion": None}],
+            201: [{"name": "specs / Spec gate", "conclusion": "success"}, {"name": "gate", "conclusion": "success"}],
+        }
 
     def tearDown(self):
         os.chdir(self.cwd)
+
+    def protect(self, branches):
+        """Writes the branch protection of the checkout: required check names per branch."""
+        data = {
+            branch: {"required_status_checks": {"checks": [{"app_id": 15368, "context": c} for c in checks]}}
+            for branch, checks in branches.items()
+        }
+        pathlib.Path(bot.BRANCH_PROTECTION).write_text(json.dumps(data))
+
+    def wait(self, **kw):
+        bot.wait_for_required_checks(SHA, bot.required_checks("iso-v0"), self.gh_actions, **kw)
 
     def run_bot(
         self, kind, files, branch, labels=(), build="success", lock=LOCK, **view
     ):
         data = dict(
             state="OPEN",
+            baseRefName="iso-v0",
             headRefName=branch,
             headRefOid=SHA,
             isCrossRepository=False,
@@ -110,9 +133,14 @@ class BotMergeTest(unittest.TestCase):
         return [c for c in self.calls if c[:2] == ("pr", "merge")]
 
     def actions(self, endpoint):
-        """The Actions API of the fake repository: Kernel Build runs on SHA and their jobs."""
+        """The Actions API of the fake repository: Kernel Build, Spec Build Check and Pull
+        Request runs on SHA and their jobs."""
         if endpoint == f"repos/owner/repo/actions/workflows/kernel-build.yml/runs?head_sha={SHA}&event=pull_request":
             return json.dumps({"workflow_runs": self.runs})
+        if endpoint == f"repos/owner/repo/actions/workflows/spec-build-check.yml/runs?head_sha={SHA}&event=pull_request":
+            return json.dumps({"workflow_runs": self.spec_runs})
+        if endpoint == f"repos/owner/repo/actions/workflows/pr.yml/runs?head_sha={SHA}&event=pull_request":
+            return json.dumps({"workflow_runs": self.pr_runs})
         run = int(endpoint.split("/runs/")[1].split("/")[0])
         assert endpoint == f"repos/owner/repo/actions/runs/{run}/jobs?per_page=100", endpoint
         return json.dumps({"jobs": self.jobs[run]})
@@ -200,7 +228,7 @@ class BotMergeTest(unittest.TestCase):
         self.assertEqual(
             self.spec(
                 files=[
-                    dict(SPEC_FILES[0], filename="forge/specs/athanor-gatekeeper-rs/athanor-gatekeeper-rs.spec")
+                    dict(SPEC_FILES[0], filename="forge/specs/athanor-backup/athanor-backup.spec")
                 ]
             ),
             [],
@@ -274,19 +302,21 @@ class BotMergeTest(unittest.TestCase):
         self.assertFalse([c for c in self.calls if c[:2] == ("pr", "merge")])
 
     def test_gate_not_reported_yet_is_awaited(self):
-        states = [[], [{"id": 1, "status": "queued"}], self.runs]
+        # A queued run has no gate job yet; it ends green on the third poll.
+        states = [[], [{"id": 3, "status": "queued"}], [{"id": 3, "status": "completed"}]]
         slept = []
 
         def sleep(_):
             slept.append(_)
             self.runs = states[len(slept)]
+            self.jobs[3] = [{"name": "Kernel gate", "conclusion": "success"}] if len(slept) == 2 else []
 
         self.runs = states[0]
-        bot.wait_for_required_check(SHA, self.gh_actions, sleep=sleep)
+        self.wait(sleep=sleep)
         self.assertEqual(len(slept), 2)
         self.runs = []
         with self.assertRaises(SystemExit):
-            bot.wait_for_required_check(SHA, self.gh_actions, sleep=slept.append, polls=3)
+            self.wait(sleep=slept.append, polls=3)
 
     def test_superseded_green_gate_does_not_count(self):
         # PR #94: a green gate of an earlier Kernel Build on the same commit, and a newer
@@ -295,7 +325,7 @@ class BotMergeTest(unittest.TestCase):
         self.runs.append({"id": 2, "status": "in_progress"})
         self.jobs[2] = [{"name": "inputs", "conclusion": None}]
         with self.assertRaises(SystemExit):
-            bot.wait_for_required_check(SHA, self.gh_actions, sleep=lambda _: None, polls=3)
+            self.wait(sleep=lambda _: None, polls=3)
         done = []
 
         def finish(_):
@@ -303,12 +333,77 @@ class BotMergeTest(unittest.TestCase):
             self.jobs[2] = [{"name": "Kernel gate", "conclusion": "success"}]
             done.append(_)
 
-        bot.wait_for_required_check(SHA, self.gh_actions, sleep=finish)
+        self.wait(sleep=finish)
         self.assertEqual(len(done), 1)
         self.runs[1]["status"] = "completed"
         self.jobs[2] = [{"name": "inputs", "conclusion": "failure"}]
         with self.assertRaises(SystemExit):
-            bot.wait_for_required_check(SHA, self.gh_actions, sleep=lambda _: None)
+            self.wait(sleep=lambda _: None)
+
+
+    def test_red_or_missing_spec_gate_fails_without_merging(self):
+        self.jobs[101] = [{"name": "Spec gate", "conclusion": "failure"}]
+        with self.assertRaises(SystemExit):
+            self.system()
+        self.assertFalse([c for c in self.calls if c[:2] == ("pr", "merge")])
+        self.spec_runs = [{"id": 101, "status": "completed"}]
+        self.jobs[101] = [{"name": "select", "conclusion": "success"}]
+        with self.assertRaises(SystemExit):
+            self.wait(sleep=lambda _: None)
+
+    def test_spec_gate_pending_is_awaited(self):
+        self.jobs[101] = [{"name": "Spec gate", "conclusion": None}]
+        with self.assertRaises(SystemExit):
+            self.wait(sleep=lambda _: None, polls=3)
+
+        def finish(_):
+            self.jobs[101] = [{"name": "Spec gate", "conclusion": "success"}]
+
+        self.wait(sleep=finish)
+
+    def test_red_pull_request_gate_fails_without_merging(self):
+        self.jobs[201] = [{"name": "specs / Spec gate", "conclusion": "success"}, {"name": "gate", "conclusion": "failure"}]
+        with self.assertRaises(SystemExit):
+            self.spec()
+        self.assertFalse([c for c in self.calls if c[:2] == ("pr", "merge")])
+
+    def test_pull_request_gate_pending_is_awaited(self):
+        self.pr_runs = [{"id": 201, "status": "in_progress"}]
+        self.jobs[201] = [{"name": "gate", "conclusion": None}]
+        with self.assertRaises(SystemExit):
+            self.wait(sleep=lambda _: None, polls=3)
+
+        def finish(_):
+            self.jobs[201] = [{"name": "gate", "conclusion": "success"}]
+
+        self.wait(sleep=finish)
+
+    def test_the_branch_protection_names_the_checks_awaited(self):
+        # After the switch the file requires gate alone: a red legacy gate no longer holds the
+        # merge, and its workflow is not even read.
+        self.protect({"iso-v0": ["gate"]})
+        self.jobs[1] = [{"name": "Kernel gate", "conclusion": "failure"}]
+        self.assertEqual(len(self.spec()), 1)
+        self.assertFalse([c for c in self.calls if "kernel-build.yml" in " ".join(c)])
+
+    def test_a_check_without_a_known_workflow_or_an_unprotected_base_fails(self):
+        self.protect({"iso-v0": ["gate", "Lint"]})
+        with self.assertRaises(SystemExit):
+            self.spec()
+        self.assertFalse([c for c in self.calls if c[:2] == ("pr", "merge")])
+        self.protect({"main": ["gate"]})
+        with self.assertRaises(SystemExit):
+            self.spec()
+        self.protect({"iso-v0": []})
+        with self.assertRaises(SystemExit):
+            self.spec()
+
+    def test_every_check_the_repository_requires_has_its_workflow(self):
+        repo = pathlib.Path(__file__).resolve().parents[3]
+        os.chdir(repo)
+        for branch in json.loads((repo / bot.BRANCH_PROTECTION).read_text()):
+            with self.subTest(branch=branch):
+                self.assertTrue(bot.required_checks(branch))
 
 
 if __name__ == "__main__":

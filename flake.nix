@@ -25,11 +25,11 @@
         security-tools = with pkgs; [ syft cosign ];
         # libclang: bindgen (libspa-sys di niri, aya) carica libclang.so da LIBCLANG_PATH.
         c-toolchain = with pkgs; [ gcc gnumake cmake mold llvmPackages_latest.llvm llvmPackages_latest.clang llvmPackages_latest.lld llvmPackages_latest.libclang ccache bpf-linker pahole elfutils ];
-        rust-tools = with pkgs; [ rust-toolchain sccache clippy rustfmt cargo-deny cargo-vet cargo-fuzz ];
+        rust-tools = with pkgs; [ rust-toolchain sccache clippy rustfmt cargo-deny cargo-fuzz ];
         # Toolset POSIX di base incluso: rpmbuild, %autosetup e i Makefile upstream
         # danno per scontati grep, diff, patch, gzip, file, which, m4, gettext.
         # dbus: the %check of athanor-update runs its bus tests on a private dbus-daemon.
-        build-tools = with pkgs; [ rpm cpio dbus createrepo_c buildah skopeo jq git gnutar xz curl wget rsync flex bison bc zstd checkpolicy perl pkg-config autoconf automake libtool util-linux gnugrep diffutils patch which file gzip bzip2 unzip m4 gettext python3 go ];
+        build-tools = with pkgs; [ rpm cpio dbus createrepo_c buildah skopeo jq git gnutar xz curl wget rsync flex bison bc zstd checkpolicy perl pkg-config meson ninja gobject-introspection glibc.bin autoconf automake libtool util-linux gnugrep diffutils patch which file gzip bzip2 unzip m4 gettext python3 go ];
         system-deps = with pkgs; [ zlib openssl policycoreutils spdlog systemd nodejs_22 nlohmann_json fmt speechd gnupg ipxe ncurses iproute2 fio gtk4 pango cairo gtk4-layer-shell glib libpulseaudio pkg-config ];
         # Header e .pc delle librerie di sistema, cioè i -devel di Fedora: in nixpkgs
         # stanno nei dev output. closePropagation segue propagatedBuildInputs come fa
@@ -45,6 +45,9 @@
           }) { };
         system-libs = with pkgs; [
           zlib openssl curl spdlog systemd fmt speechd ncurses
+          # polkit (forge/specs/polkit): its BuildRequires. meson, ninja, gobject-introspection and
+          # glibc.bin (the ldd g-ir-scanner runs) are in build-tools.
+          duktape linux-pam expat gobject-introspection dbus
           # libpulseaudio: athanor-bar audio (libpulse-binding) links libpulse-mainloop-glib.so.0 by soname
           gtk4 pango cairo graphene gdk-pixbuf gtk4-layer-shell glib libpulseaudio
           # compositors niri and cosmic-comp (smithay): wayland, pixman, gbm/drm/egl, xkbcommon, libseat, libinput, pipewire, libdisplay-info
@@ -64,7 +67,7 @@
       {
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
-            rust-toolchain just jq python3 pkg-config openssl bcachefs-tools
+            rust-toolchain just jq python3 pkg-config openssl
           ];
           shellHook = ''
             echo "========================================================"
@@ -75,46 +78,6 @@
 
         packages = rec {
           just-hermetic = pkgs.just;
-
-          athanor-telemetry-rpm = pkgs.runCommand "athanor-telemetry-rpm" {
-            nativeBuildInputs = [ pkgs.nfpm ];
-            # Dipende matematicamente dalla compilazione Rust pura
-            src = athanor-core;
-          } ''
-            mkdir -p $out/RPMS
-            cat > nfpm.yaml <<EOF
-name: "athanor-telemetry"
-arch: "x86_64"
-platform: "linux"
-version: "1.0.0"
-section: "default"
-priority: "extra"
-maintainer: "Athanor OS"
-description: "Athanor Telemetry Daemon"
-vendor: "Athanor OS"
-license: "MIT"
-contents:
-  - src: "$src/bin/athanor-telemetry"
-    dst: "/usr/bin/athanor-telemetry"
-EOF
-            # Infallibilit�: Genera l'RPM senza root e senza dnf!
-            nfpm pkg --packager rpm --target $out/RPMS/athanor-telemetry.rpm
-          '';
-
-          athanor-core = (pkgs.makeRustPlatform {
-            cargo = rust-toolchain;
-            rustc = rust-toolchain;
-          }).buildRustPackage {
-            pname = "athanor-core";
-            version = "1.0.0";
-            src = ./.;
-            cargoLock = {
-              lockFile = ./Cargo.lock;
-            };
-            nativeBuildInputs = with pkgs; [ pkg-config ];
-            buildInputs = with pkgs; [ openssl glib gtk4 wayland wayland-protocols ];
-            doCheck = false;
-          };
 
           # Compatibilità FHS del builder: directory àncora e symlink verso la glibc e le
           # librerie di runtime di gcc di nixpkgs, come contenuto immutabile dell'immagine.
@@ -195,7 +158,7 @@ EOF
           # e %{_localstatedir} finirebbero sotto /nix/store dentro i pacchetti (visto su
           # athanor-daemon-rs: dbus service e polkit policy installati lì). I pacchetti
           # sono per Fedora: prefix /usr, lib64, /var. Le macro derivate (_bindir, _libdir,
-          # _mandir, …) discendono da queste nel file macros di rpm.
+          # _mandir, …) discendono da queste nel file macros di rpm. __isa dà %{_isa} = (x86-64).
           builder-rpm-macros-target =
             let
               macros = {
@@ -204,6 +167,9 @@ EOF
                 _lib = "lib64";
                 _localstatedir = "/var";
                 _docdir = "%{_datadir}/doc";
+                # Fedora's platform macros define %__isa; nixpkgs' rpm ships none, so
+                # %{?_isa} expanded to nothing and rpm added no name(x86-64) provides.
+                __isa = "x86-64";
               };
               body = pkgs.lib.concatStringsSep "
 "
@@ -221,7 +187,7 @@ EOF
           };
 
           builderImage = pkgs.dockerTools.buildLayeredImage {
-            name = "ghcr.io/hr-mes/athanor-builder";
+            name = "athanor-builder";
             tag = "latest";
             contents = [ builder-fhs-compat builder-containers-policy pkgs.dockerTools.fakeNss pkgs.bashInteractive pkgs.coreutils pkgs.findutils pkgs.gnused pkgs.gawk pkgs.cacert pkgs.tzdata pkgs.shadow ] ++ security-tools ++ c-toolchain ++ rust-tools ++ build-tools ++ system-deps ++ system-dev ++ system-lib;
             config = {
@@ -236,6 +202,8 @@ EOF
                 # I .pc dei dev output confluiscono qui dal symlinkJoin di contents;
                 # il pkg-config di nixpkgs da solo guarda soltanto nel proprio prefisso.
                 "PKG_CONFIG_PATH=/lib/pkgconfig:/share/pkgconfig"
+                # Same union for g-ir-scanner: the .gir files of glib and friends (polkit).
+                "XDG_DATA_DIRS=/share"
                 # Makefile e cmake senza pkg-config (git, ananicy-cpp): header e librerie
                 # dalle union /include e /lib, che i wrapper gcc/clang di nixpkgs onorano.
                 # Gli header di glibc restano fuori da /include: su CPATH scavalcherebbero
@@ -244,7 +212,11 @@ EOF
                 "LIBRARY_PATH=/lib"
                 # Senza RUNPATH (sotto) i binari appena compilati trovano le librerie
                 # della union solo così, per esempio nei %check o nei build script.
-                "LD_LIBRARY_PATH=/lib"
+                # /lib/x86_64-linux-gnu holds the libstdc++ and libgcc_s links of
+                # builder-fhs-compat. The nixpkgs ld.so searches neither it nor /usr/lib64,
+                # so without it the node24 that the Actions runner mounts at /__e/node24
+                # cannot start in this container and every JavaScript action fails.
+                "LD_LIBRARY_PATH=/lib:/lib/x86_64-linux-gnu"
                 # bindgen (libspa-sys di niri, aya) usa libclang direttamente, senza il
                 # wrapper: gli servono libclang.so e gli header di glibc, dopo quelli di clang.
                 "LIBCLANG_PATH=${pkgs.llvmPackages_latest.libclang.lib}/lib"

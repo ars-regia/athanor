@@ -1,39 +1,38 @@
 name: NVIDIA kmod
 
-# The NVIDIA kernel modules, signed and published (forge/specs/azoth/nvidia.sh,
-# docs/architecture/doc_kernel_build.md, section 10; docs/architecture/doc_build_ordering.md,
-# O1, O2, O5, O6). artifacts: system/kernel-artifacts.sh resolves the kernel of the pins by
-# digest and the module tags bound to it; unless the modules are missing (both branches
-# already published, signed and attested, or the kernel of the pins not published) the run
-# ends there with a notice, asking for no approval. build: nvidia-build.yml, the two branches
-# (open, legacy) against azoth-devel by digest. sign: on a GitHub runner in the `signing`
-# environment, a job that only sees the .ko files and the module signing key. boot: in QEMU,
-# every case of the matrix: the signed nvidia.ko of each branch must pass the signature check
-# against the certificate compiled into the kernel (ENODEV: no GPU), while an unsigned copy and
-# a copy signed by an enrolled Secure Boot-profile MOK must be rejected (EKEYREJECTED).
+# The NVIDIA kernel modules and the signed vmlinuz, verified and published
+# (forge/specs/azoth/nvidia.sh, docs/architecture/doc_kernel_build.md, section 10;
+# docs/architecture/doc_build_ordering.md, O1, O2, O5, O6). The last part of the kmod cycle,
+# which runs in three steps because a called workflow's job reads the secrets of its environment
+# only when its caller inherits every secret (actions/runner#4453, D43):
+# call-nvidia-kmod-prepare.yml (artifacts, build, prepare, key-less), then the sign job of the
+# workflow the event started, `nvidia-kmod-sign` of the Orchestrator (on a GitHub runner in the `signing-kernel` environment, the one
+# sign-only job of a kernel cycle: a key-less step derives the kernel from the registry,
+# verified with cosign, and allow-lists the modules of the build job; then the step with the
+# keys runs only the signer image pinned by digest, forge/specs/azoth/signer/run.sh, signing the
+# .ko files with the module key and vmlinuz with the Secure Boot key; no build, no third-party
+# action), then this workflow, called only once the sign job has succeeded. Every part reads
+# the artifacts of the others from the run, which all of them share.
+# boot: in QEMU, every case of the matrix: the signed nvidia.ko of each branch must pass the
+# signature check against the certificate compiled into the kernel (ENODEV: no GPU), while an
+# unsigned copy and a copy signed by an enrolled Secure Boot-profile MOK must be rejected
+# (EKEYREJECTED).
 # publish: nvidia-publish.sh, azoth-nvidia:<nvr>-k<12 hex of the kernel digest>-<branch>-<version>
-# with SBOM, signature and attestation, never overwriting a published tag; then the retention
-# and the verification. publish alone holds the azoth-nvidia-publish concurrency group with
+# with SBOM, signature and attestation, and azoth-boot:<nvr>-k<12 hex> (the signed vmlinuz,
+# verified again with sbverify first), never overwriting a published tag; then the retention
+# and the verification. The keyless signatures name this file, whoever calls it:
+# system/kernel-artifacts.sh trusts the modules and azoth-boot signed by nvidia-kmod.yml only,
+# so publish stays here. publish alone holds the azoth-nvidia-publish concurrency group with
 # cancel-in-progress false, so a queued publish never interleaves a push and its signature
-# with another run's. sign and boot stay out of the group: neither of them pushes anything,
-# and sharing the group with them would let a competing run's sign seize it and cancel this
-# run's already-queued boot or publish, leaving modules built and unpublished. The
-# Orchestrator calls this workflow when the modules are missing; it also runs by hand. The
-# gate on PRs is the kmod job of Kernel Build.
+# with another run's. The sign job and boot stay out of the group: neither pushes
+# anything, and sharing the group with them would let a competing run's sign seize it and
+# cancel this run's already-queued boot or publish, leaving modules built and unpublished. The
+# Orchestrator runs the cycle when the modules or the signed vmlinuz are missing (state
+# modules-missing); a manual cycle dispatches the Orchestrator. The gate on PRs is the kmod job
+# of Kernel Build.
 
 on:
   workflow_call:
-    inputs:
-      kernel_digest:
-        description: "digest of azoth:<nvr> that the caller resolved; the run fails if the registry holds another"
-        type: string
-        required: true
-  workflow_dispatch:
-    inputs:
-      kernel_digest:
-        description: "digest of azoth:<nvr>; empty: the one system/kernel-artifacts.sh resolves"
-        type: string
-        default: ""
 
 permissions:
   contents: read
@@ -46,143 +45,7 @@ env:
   KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
 
 jobs:
-  artifacts:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    outputs:
-      state: ${{ steps.artifacts.outputs.state }}
-      devel_digest: ${{ steps.artifacts.outputs.devel_digest }}
-      registry: ${{ steps.artifacts.outputs.registry }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
-
-      - name: Resolve the kernel artifacts (system/kernel-artifacts.sh)
-        id: artifacts
-        env:
-          KERNEL_DIGEST: ${{ inputs.kernel_digest }}
-        run: |
-          set -euo pipefail
-          bash system/kernel-artifacts.sh resolve --expect-kernel-digest "$KERNEL_DIGEST"
-          grep -E '^(state|devel_digest|registry)=' kernel-artifacts/kernel-artifacts.env >> "$GITHUB_OUTPUT"
-
-      - name: Nothing to build
-        if: ${{ steps.artifacts.outputs.state != 'modules-missing' }}
-        env:
-          STATE: ${{ steps.artifacts.outputs.state }}
-        run: |
-          echo "::notice title=NVIDIA kmod::state ${STATE}: the modules of the pins are published, or their kernel is not; no build and no approval"
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: nvidia-kernel-artifacts
-          path: kernel-artifacts/kernel-artifacts.env
-          if-no-files-found: error
-
-  build:
-    needs: artifacts
-    if: ${{ needs.artifacts.outputs.state == 'modules-missing' }}
-    permissions:
-      contents: read
-      packages: read
-    uses: ./.github/workflows/nvidia-build.yml
-    with:
-      devel-digest: ${{ needs.artifacts.outputs.devel_digest }}
-      registry: ${{ needs.artifacts.outputs.registry }}
-
-  sign:
-    needs: build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    permissions:
-      contents: read
-      packages: read
-    environment: signing
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          pattern: nvidia-*-unsigned
-          path: out
-          merge-multiple: true
-
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: nvidia-kernel-artifacts
-          path: kernel-artifacts
-
-      - name: Build the nvidia image
-        env:
-          BUILDAH_ISOLATION: chroot
-        run: podman build -t localhost/azoth-nvidia -f forge/specs/azoth/nvidia/Containerfile forge/specs/azoth
-
-      - name: Kernel-devel from the published image, by digest
-        # Only for scripts/sign-file, which nvidia.sh extracts from the RPM.
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          registry=$(bash system/kernel-artifacts.sh get registry)
-          devel=$(bash system/kernel-artifacts.sh get devel_digest)
-          host=${registry%%/*}
-          echo "${GH_TOKEN}" | podman login "$host" -u "${GITHUB_ACTOR}" --password-stdin
-          trap 'podman logout "$host"' EXIT
-          ctr=$(podman create "${registry}/azoth-devel@${devel}" /kernel-devel)
-          mkdir -p devel && podman cp "${ctr}:/." devel/ && podman rm "$ctr" > /dev/null
-
-      - name: Sign a copy with an enrolled-MOK-shaped key
-        # The negative sample of the boot job: nvidia.ko of the open branch signed by an
-        # ephemeral key with the Secure Boot profile, whose certificate boot.sh enrols in
-        # MokList. The kernel must refuse it: a Secure Boot key never authorises a module.
-        run: |
-          set -euo pipefail
-          mkdir -p mok
-          cp -a out/open mok/open
-          openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
-            -config forge/specs/azoth/keys/profiles/secureboot.cnf -subj '/CN=Athanor OS K3 test MOK/' \
-            -keyout "$RUNNER_TEMP/test-mok.key" -out mok/test-mok.pem 2> /dev/null
-          podman run --rm \
-            -v "$GITHUB_WORKSPACE:/forge" \
-            -v "$RUNNER_TEMP/test-mok.key:/run/test-mok.key:ro" \
-            -w /forge localhost/azoth-nvidia \
-            bash forge/specs/azoth/nvidia.sh sign --key /run/test-mok.key \
-              --cert mok/test-mok.pem --devel /forge/devel --out /forge/mok
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: nvidia-mok-signed
-          path: mok/
-          if-no-files-found: error
-
-      - name: Sign with the module signing key
-        # The key lives in a 0600 file in the runner's tmp for the duration of the
-        # command, mounted read-only in the container; the public certificate is in the
-        # repository and compiled into the kernel (kernel-local).
-        env:
-          MODULE_SIGNING_KEY: ${{ secrets.MODULE_SIGNING_KEY }}
-        run: |
-          set -euo pipefail
-          [[ -n ${MODULE_SIGNING_KEY:-} ]] || { echo "MODULE_SIGNING_KEY is not available to this job: check the signing environment" >&2; exit 1; }
-          umask 077
-          printf '%s\n' "$MODULE_SIGNING_KEY" > "$RUNNER_TEMP/module.key"
-          trap 'rm -f "$RUNNER_TEMP/module.key"' EXIT
-          podman run --rm \
-            -v "$GITHUB_WORKSPACE:/forge" \
-            -v "$RUNNER_TEMP/module.key:/run/module.key:ro" \
-            -w /forge localhost/azoth-nvidia \
-            bash forge/specs/azoth/nvidia.sh sign --key /run/module.key \
-              --cert forge/specs/azoth/keys/modules/athanor-modules.pem --devel /forge/devel --out /forge/out
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: nvidia-signed
-          path: out/
-          if-no-files-found: error
-
   boot:
-    needs: sign
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -257,7 +120,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [sign, boot]
+    needs: [boot]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     concurrency:
@@ -281,6 +144,11 @@ jobs:
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
+          name: azoth-kernel-signed
+          path: kernel-signed
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
           name: nvidia-kernel-artifacts
           path: resolved
 
@@ -296,6 +164,9 @@ jobs:
           expected=$(KERNEL_ARTIFACTS_DIR=resolved bash system/kernel-artifacts.sh get kernel_digest)
           bash system/kernel-artifacts.sh resolve --expect-kernel-digest "$expected"
 
+      - name: Verify the signed vmlinuz (signer/run.sh verify)
+        run: bash forge/specs/azoth/signer/run.sh verify
+
       - name: Publish (nvidia-publish.sh)
         env:
           BUILDAH_ISOLATION: chroot
@@ -308,15 +179,16 @@ jobs:
           export SYFT_REGISTRY_AUTH_AUTHORITY="$host"
           echo "${GH_TOKEN}" | buildah login -u "${GITHUB_ACTOR}" --password-stdin "$host"
           echo "${GH_TOKEN}" | cosign login "$host" -u "${GITHUB_ACTOR}" --password-stdin
-          bash forge/specs/azoth/nvidia-publish.sh out
+          bash forge/specs/azoth/nvidia-publish.sh out kernel-signed
           cat nvidia-publish/summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Retention (retention.sh)
         run: bash forge/specs/azoth/retention.sh
 
       - name: Verify (gate K4)
-        # The resolver verifies both tags again after the retention: signature by this
-        # workflow, and an attestation naming the pins and the kernel digest.
+        # The resolver verifies the three tags again after the retention: signature by this
+        # workflow, and an attestation naming the pins (the certificate for azoth-boot) and the
+        # kernel digest.
         run: bash system/kernel-artifacts.sh require-ready
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

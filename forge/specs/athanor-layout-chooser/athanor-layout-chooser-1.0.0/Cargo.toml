@@ -3,7 +3,7 @@ name = "athanor-layout-chooser"
 version = "1.0.0"
 edition = "2021"
 authors = ["Athanor Forge <forge@athanor.os>"]
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "The Athanor layout chooser: three presets and two knobs, written to the user's layout document"
 
 [dependencies]

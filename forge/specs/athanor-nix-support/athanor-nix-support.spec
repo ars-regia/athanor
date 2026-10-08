@@ -1,10 +1,10 @@
 %global debug_package %{nil}
 Name:           athanor-nix-support
 Version:        1.0.0
-Release:        7%{?dist}
+Release:        13%{?dist}
 Summary:        Athanor OS athanor-nix-support
-License:        MIT
-URL:            https://github.com/hr-mes/athanor-forge
+License:        GPL-3.0-or-later
+URL:            https://github.com/ars-regia/athanor
 BuildArch:      noarch
 
 # The Fedora Nix packages provide the binary, the store, the daemon and its systemd
@@ -21,7 +21,10 @@ BuildArch:      noarch
 %description
 Provides athanor-nix-support for Athanor OS: the /nix store bind mount that lets the
 Fedora Nix packages work on the read-only ostree root, with the store living in the
-writable, encrypted /var.
+writable, encrypted /var; the daemon's and the users' Nix configuration, with a flake
+registry that pins nixpkgs; the daemon's resource limits and hardening; a weekly
+garbage collection; the one-time relabel of a store made before the Nix SELinux
+policy; and the session paths to programs and desktop entries in Nix profiles.
 
 %prep
 # Nothing to prep
@@ -31,22 +34,96 @@ writable, encrypted /var.
 
 %install
 mkdir -p %{buildroot}/etc/tmpfiles.d
+mkdir -p %{buildroot}/etc/xdg/nix
 mkdir -p %{buildroot}/usr/lib/tmpfiles.d
 mkdir -p %{buildroot}/usr/lib/systemd/system
 mkdir -p %{buildroot}/usr/lib/systemd/system-preset
+mkdir -p %{buildroot}/usr/lib/environment.d
+mkdir -p %{buildroot}/usr/share/athanor/nix
 
 cp -a %{_sourcedir}/etc/tmpfiles.d/nix-daemon.conf %{buildroot}/etc/tmpfiles.d/
+cp -a %{_sourcedir}/etc/xdg/nix/nix.conf %{buildroot}/etc/xdg/nix/
 cp -a %{_sourcedir}/usr/lib/tmpfiles.d/* %{buildroot}/usr/lib/tmpfiles.d/
 cp -a %{_sourcedir}/usr/lib/systemd/system/* %{buildroot}/usr/lib/systemd/system/
 cp -a %{_sourcedir}/usr/lib/systemd/system-preset/* %{buildroot}/usr/lib/systemd/system-preset/
+cp -a %{_sourcedir}/usr/lib/environment.d/* %{buildroot}/usr/lib/environment.d/
+cp -a %{_sourcedir}/usr/share/athanor/nix/* %{buildroot}/usr/share/athanor/nix/
+
+# The GC timer and the relabel run on every system, including one installed before
+# this release: a preset is applied only at first boot, so they are enabled by links
+# under /usr instead. An administrator can still mask them.
+mkdir -p %{buildroot}/usr/lib/systemd/system/sysinit.target.wants
+mkdir -p %{buildroot}/usr/lib/systemd/system/timers.target.wants
+ln -s ../athanor-nix-relabel.service %{buildroot}/usr/lib/systemd/system/sysinit.target.wants/athanor-nix-relabel.service
+ln -s ../athanor-nix-gc.timer %{buildroot}/usr/lib/systemd/system/timers.target.wants/athanor-nix-gc.timer
 
 %files
 %config(noreplace) /etc/tmpfiles.d/nix-daemon.conf
+%dir /etc/xdg/nix
+%config(noreplace) /etc/xdg/nix/nix.conf
 /usr/lib/tmpfiles.d/10-athanor-nix.conf
 /usr/lib/systemd/system/nix.mount
+%dir /usr/lib/systemd/system/nix-daemon.service.d
+/usr/lib/systemd/system/nix-daemon.service.d/50-athanor.conf
+/usr/lib/systemd/system/athanor-nix-gc.service
+/usr/lib/systemd/system/athanor-nix-gc.timer
+/usr/lib/systemd/system/athanor-nix-relabel.service
+/usr/lib/systemd/system/sysinit.target.wants/athanor-nix-relabel.service
+/usr/lib/systemd/system/timers.target.wants/athanor-nix-gc.timer
 /usr/lib/systemd/system-preset/80-athanor-nix.preset
+/usr/lib/environment.d/60-athanor-nix.conf
+%dir /usr/share/athanor/nix
+%dir /usr/share/athanor/nix/daemon
+/usr/share/athanor/nix/daemon/nix.conf
+/usr/share/athanor/nix/registry.json
 
 %changelog
+* Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-13
+- Create /var/nix/var/nix/gc-socket from tmpfiles so that it is labelled nix_socket_t and
+  the daemon can bind the collector's socket (RT-N3).
+* Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-12
+- nix-daemon runs with NoNewPrivileges=yes; athanor_nix_daemon.cil already grants the
+  init_t -> nix_daemon_t nnp_transition (doc_threat_model.md, TM8).
+
+* Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-11
+- athanor-nix-gc.service is a client of nix-daemon (NIX_REMOTE=daemon) under a dynamic
+  user with NoNewPrivileges=yes and an empty capability bound: the daemon owns the store and
+  the runtime-root scan, the unit holds no privilege (doc_threat_model.md, TM8).
+- athanor-nix-relabel.service drops CAP_DAC_OVERRIDE; CAP_DAC_READ_SEARCH and CAP_FOWNER
+  remain, so its bound holds no capability that gives root back.
+
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
+- athanor-nix-gc.service and athanor-nix-relabel.service bound their capabilities
+  (doc_threat_model.md, TM8); nix-gc keeps CAP_SYS_PTRACE so that nix's runtime-root scan
+  can read /proc/<pid>/{maps,exe,fd} of other users' processes.
+
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-9
+- Point URL at the project repository
+- Point unit Documentation= at the project repository
+
+* Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-8
+- Nix base configuration (#154, decisions A2-13 and A2-16; doc_software.md, SW9 and
+  SW10). Fedora's nix-core owns /etc/nix/nix.conf, so no file of this package shares a
+  path with it. The daemon reads /usr/share/athanor/nix/daemon/nix.conf, through the
+  NIX_CONF_DIR of its drop-in: trusted-users = root, allowed-users = *,
+  sandbox-fallback = false, min-free = 2G, max-free = 8G, netrc and machines kept in
+  /etc/nix, and /etc/nix/nix.conf included between the defaults an administrator may
+  change and the security settings, which come last and cannot be weakened.
+  /etc/xdg/nix/nix.conf is the users' layer: the nix-command and flakes features and
+  a flake registry, /usr/share/athanor/nix/registry.json, that pins nixpkgs to a
+  revision of nixos-26.05 with its narHash, replacing the network registry.
+- nix-daemon.service drop-in: MemoryHigh=75%, CPUWeight=50, IOWeight=50,
+  TasksMax=16384, the narinfo cache in /var/cache/nix, ProtectKernelModules and
+  RestrictAddressFamilies. Only options a sandboxed build was tested under are set; the
+  drop-in lists those left out and why. CapabilityBoundingSet is an allow-list derived
+  from the Nix 2.31 sources, not yet run under the root daemon. The daemon requires and
+  follows athanor-nix-relabel.service, so a failed relabel keeps it down.
+- athanor-nix-gc.timer collects garbage weekly; athanor-nix-relabel.service relabels,
+  once, a store made before the Nix SELinux policy of athanor-selinux 1.0-7. Both are
+  enabled by links under /usr, so systems installed before this release get them.
+- /usr/lib/environment.d/60-athanor-nix.conf puts the user's and the default Nix
+  profile on PATH and their share directories on XDG_DATA_DIRS. No nixGL.
+
 * Thu Sep 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
 - Replace the nix-daemon package's tmpfiles rules with /etc/tmpfiles.d/nix-daemon.conf.
   Fedora's rules create /nix/var/nix/{daemon-socket,builds} in the read-only ostree /nix
