@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Athanor override of firewalld's "public" zone, the default zone. Fedora's own version also
+  accepts mdns and ssh; on a network the person has not marked as trusted that announces the
+  computer and offers a login to everyone on it. Both stay in the "home" zone, which the person
+  assigns to a network of their own (doc_software.md, decision 2: discovery and remote login).
+-->
+<zone>
+  <short>Public</short>
+  <description>For use in public areas. You do not trust the other computers on networks to not harm your computer. Only selected incoming connections are accepted.</description>
+  <service name="dhcpv6-client"/>
+  <forward/>
+</zone>

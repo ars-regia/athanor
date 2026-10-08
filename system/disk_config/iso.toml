@@ -23,10 +23,9 @@ contents = """
 # this file.
 xconfig --startxonboot
 
-# Remote login is off on new installs (doc_software.md, decision 2). The image keeps
-# Fedora's preset, which enables sshd, so that machines already installed keep their state
-# through the ostree /etc merge; the installer records the opposite as a local choice of
-# this installation only.
+# Remote login is off on new installs (doc_software.md, decision 2). The image's preset
+# keeps Fedora's preset, which enables sshd, so that existing installs keep it through the /etc
+# merge; a new installation turns it off here.
 services --disabled=sshd
 
 %post --erroronfail

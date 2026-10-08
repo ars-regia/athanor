@@ -229,6 +229,14 @@ RUN install -d -m 0755 /etc/security/pwquality.conf.d && \
     printf '%s\n' '# Athanor (system/Containerfile).' 'minlen = 12' \
         > /etc/security/pwquality.conf.d/50-athanor.conf
 
+# The computer never announces itself over mDNS (ADR-0089, decision 2): avahi browses, so printers
+# and services are still found, and publishes nothing, not even the host name. /etc/avahi is
+# merged on update, so a machine that edited the file keeps its own.
+RUN if rpm -q --quiet avahi; then \
+        sed -i 's/^#\?disable-publishing=.*/disable-publishing=yes/' /etc/avahi/avahi-daemon.conf && \
+        grep -qx 'disable-publishing=yes' /etc/avahi/avahi-daemon.conf; \
+    fi
+
 # Stage 2 switch (doc_shell.md, section 8, item 2): the COSMIC shell is gone, our shell is
 # enabled for every user, and each bus name it owns has exactly one activation file.
 RUN for pkg in cosmic-panel cosmic-applets cosmic-notifications athanor-layout-translator; do \

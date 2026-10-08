@@ -171,6 +171,11 @@ jobs:
         # per-package image once shipped athanor-recovery 1.0.0-5 while its spec said 6.
         run: bash system/check-image-rpms.sh "$(<artifacts/system-image.iid)"
 
+      - name: 🔒 Check the enabled units against the contacts list
+        # forge/config/contacts.toml lists what the image contacts by itself (ADR-0056); an
+        # enabled timer it does not list, or an enabled unit it calls silent, fails the build.
+        run: bash system/check-image-contacts.sh "$(<artifacts/system-image.iid)"
+
       - name: 🐳 Build OS Images
         # build-image.sh builds the default, NVIDIA and NVIDIA-legacy images in turn FROM the
         # system image, all three with the same signed vmlinuz (S8). Nothing is pushed until
