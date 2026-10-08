@@ -116,7 +116,9 @@ class SharedLayers(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertNotIn("athanor-system:", r.stderr)
         for name in NAMES[1:]:
-            message = f"{name}: layer {BASE_LAYERS + 1} of {SYSTEM_STAGE_LAYERS} differs"
+            message = (
+                f"{name}: layer {BASE_LAYERS + 1} of {SYSTEM_STAGE_LAYERS} differs"
+            )
             self.assertIn(message, r.stderr)
             # The job summary is the report on stdout: the failure is there as well.
             self.assertIn(f"**failed**: {message}", r.stdout)
@@ -136,6 +138,24 @@ class SharedLayers(unittest.TestCase):
             f"athanor-system-nvidia: layer {SYSTEM_STAGE_LAYERS} of {SYSTEM_STAGE_LAYERS} differs",
             r.stderr,
         )
+
+    def test_a_variant_over_126_layers_fails(self):
+        # UD32: the rechunked system image has at most 116 layers, each variant adds up to 10.
+        system = [f"sha256:{n:064x}" for n in range(116)]
+        self.serve_system(system)
+        for name in NAMES:
+            own = 11 if name == "athanor-system-nvidia" else 10
+            config = fixture(name)
+            config["rootfs"]["diff_ids"] = system + [
+                f"sha256:{n:064x}" for n in range(1000, 1000 + own)
+            ]
+            self.serve_variant(name, config)
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        message = "athanor-system-nvidia: 127 layers, more than 126"
+        self.assertIn(message, r.stderr)
+        self.assertIn(f"**failed**: {message}", r.stdout)
+        self.assertRegex(r.stdout, r"athanor-system-nvidia-legacy`: 116 of 116")
 
     def test_an_unreadable_variant_fails(self):
         self.serve_system(self.system_stage())

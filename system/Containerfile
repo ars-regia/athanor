@@ -296,12 +296,15 @@ RUN for pkg in greenboot greenboot-default-health-checks; do \
 # the same version, the shim and athanor-nvidia-config. libva-nvidia-driver (VA-API on NVDEC)
 # only makes sense with the NVIDIA driver, and so does the locked container toolkit (S4), which
 # gives containers the GPU through CDI. SYSTEM_IMAGE is the image ID of the `system` stage,
-# built beforehand by system/build-image.sh.
+# built beforehand by system/build-image.sh and rechunked (UD32). The rechunked image is OCI,
+# whose configuration has no SHELL, so each GPU stage sets it again for itself and `final`.
 FROM ${SYSTEM_IMAGE} AS gpu-none
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # The modules must land in the directory of the pinned kernel: hardening deletes every other
 # modules directory, so a mismatch fails here rather than silently later.
 FROM ${SYSTEM_IMAGE} AS gpu-nvidia
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG AZOTH_NVR
 ARG ATHANOR_OWNED_EXCLUDES
 COPY --from=nvidia-modules-open /lib/modules/ /usr/lib/modules/
@@ -314,6 +317,7 @@ RUN --mount=type=bind,from=nvidia-rpms,source=/out/open,target=/tmp/nvidia-rpms 
     systemctl preset-all
 
 FROM ${SYSTEM_IMAGE} AS gpu-nvidia-legacy
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG AZOTH_NVR
 ARG ATHANOR_OWNED_EXCLUDES
 COPY --from=nvidia-modules-legacy /lib/modules/ /usr/lib/modules/

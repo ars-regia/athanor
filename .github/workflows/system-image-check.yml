@@ -22,6 +22,7 @@ on:
       - system/scripts/**
       - system/keys/**
       - system/build-image.sh
+      - system/rechunk-image.sh
       - system/kernel-artifacts.sh
       - system/tier-digests.sh
       - system/package-delta.sh
@@ -113,12 +114,16 @@ jobs:
       - name: Build the planned images
         # Which GPUs to build, none, one or all three, follows the kernel artifacts of this pull
         # request's pins (system/kernel-artifacts.sh check-plan, O7): an empty list is a pure
-        # kernel pin bump, and the loop below then builds nothing.
+        # kernel pin bump, which builds nothing. As in the pipeline, the system stage is built
+        # once and rechunked (UD32), and every planned image is built FROM the rechunked one.
         run: |
           set -euo pipefail
           gpus=$(bash system/kernel-artifacts.sh get check_gpus)
+          [[ -n $gpus ]] || exit 0
+          bash system/build-image.sh --system --registry localhost --iidfile system-image.iid
+          bash system/rechunk-image.sh system-image.iid
           for gpu in $gpus; do
-            bash system/build-image.sh --gpu "$gpu" --registry localhost --tag check
+            bash system/build-image.sh --gpu "$gpu" --registry localhost --tag check --system-image "$(<system-image.iid)"
           done
 
       - name: Package delta of the default image
