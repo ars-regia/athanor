@@ -23,6 +23,9 @@ system is specified in `docs/architecture/doc_build_system.md` and package devel
   expression.
 - **Rust crates under `specs/`** take dependency versions from `[workspace.dependencies]` in
   the root `Cargo.toml` (`name = { workspace = true }`).
+- **Registry retention** (`forge/scripts/clean_ghcr.sh`, `forge/specs/azoth/retention.sh`)
+  goes by reachability from tagged manifests, never by "untagged": cosign v3 stores
+  signatures as untagged manifests.
 
 ## Checks
 
@@ -33,4 +36,4 @@ bash forge/scripts/run_spec_build.sh <builder image> specs/<package>
 ```
 
 A package with Python tests keeps them in `forge/specs/<package>/tests/`. Shell crates that
-link GTK build and test in the rig: `forge/test/shell/rig.sh cargo test -p <crate>`.
+link GTK build and test in the rig: `forge/test/shell/rig.sh cargo test -p <crate>`, after `forge/test/shell/rig.sh build-image`.

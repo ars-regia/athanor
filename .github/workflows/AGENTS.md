@@ -34,10 +34,6 @@ there, or when the document names a workflow file that does not exist.
   ask the maintainer to approve or cancel it.
 - A push to `kernel-build.yml` while a Kernel Build runs cancels that build (its concurrency
   group cancels in progress).
-- `nm ... | grep -q` under `pipefail` dies of SIGPIPE when grep exits early: capture the
-  output first, then test it.
-- cosign v3 stores signatures as untagged manifests: decide registry retention by
-  reachability from tagged manifests, never by "untagged".
 - A squash of a stacked pull request can silently revert commits outside the stack: after a
   synthetic merge, diff those commits.
 - The Nix builder container has no Node: JavaScript actions run outside it.

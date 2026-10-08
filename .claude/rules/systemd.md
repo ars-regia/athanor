@@ -19,7 +19,7 @@ paths:
 - Split `RUNTIME_DIRECTORY` on `:` when `RuntimeDirectory=` names two directories. Why: systemd passes both, colon-separated.
 - Run `systemctl reset-failed` before a crash-loop test. Why: systemd 258 keeps `NRestarts` after a give-up.
 - Check `systemctl is-enabled` after enabling, and check units one at a time. Why: enabling a unit without `[Install]` is a silent no-op, and `systemctl is-active a b c` succeeds if any one is active.
-- Enable units in the image with a preset (`80-athanor-*.preset`), never `systemctl enable` in a Containerfile. Why: `system/AGENTS.md`; `tetragon.service` shipped disabled that way.
+- Enable units in the image with a preset (`80-athanor-*.preset`), never `systemctl enable` in a Containerfile. Why: `systemctl preset-all` runs after it and again in the GPU stages, and Fedora's `99-default-disable.preset` (`disable *`) disables every unit no preset names; `tetragon.service` shipped disabled that way (`docs/architecture/doc_tetragon.md`).
 - In system units, `%U` is the manager's UID (0), not a user's. Why: it silently resolves to root.
 - Keep Unix socket paths under 108 bytes. Why: `sun_path` truncates longer paths.
 - Do not order a mount `WantedBy=local-fs.target` after `systemd-tmpfiles-setup.service`. Why: it forms a cycle that systemd breaks by dropping the mount.

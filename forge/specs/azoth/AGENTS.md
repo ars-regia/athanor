@@ -38,6 +38,8 @@ local commands.
   `realtime-tests`.
 - keys.openpgp.org serves kernel.org signing keys without user IDs: fetch them from the
   git.kernel.org `pgpkeys` repository.
+- `nm ... | grep -q` under `pipefail` dies of SIGPIPE when grep exits early
+  (`forge/specs/azoth/nvidia.sh`): capture the output first, then test it.
 
 ## Checks
 

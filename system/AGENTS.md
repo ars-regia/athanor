@@ -33,8 +33,9 @@ pipeline and installation; the image is specified in
 ```bash
 python3 scripts/verify.py paths shipped polkit polkit-subject boundary panics
 python3 -B -m unittest discover -s system/tests
+bash -n <script>   # every system/*.sh you change
 cargo test -p <crate>
 ```
 
 Crates that link GTK build and test in the shell rig:
-`forge/test/shell/rig.sh cargo test -p <crate>`.
+`forge/test/shell/rig.sh cargo test -p <crate>`, after `forge/test/shell/rig.sh build-image`.

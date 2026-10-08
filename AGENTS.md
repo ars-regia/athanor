@@ -3,7 +3,7 @@
 The entry point for people and coding agents (Claude Code, Codex and others) working in this
 repository. `forge/`, `forge/specs/azoth/`, `system/` and `.github/workflows/` each carry a
 nested `AGENTS.md` with the rules of that area: read it before you change files there.
-`docs/operations/repository-layout.md` maps every top-level entry.
+`docs/operations/repository-layout.md` maps the top-level directories.
 
 ## What Athanor is
 
@@ -15,16 +15,18 @@ as RPMs; the Rust crates of the shell and of the platform services form one Carg
 
 ## Checks
 
-`just check` is the gate every pull request passes (`Justfile`): `actionlint` and `shellcheck`
-(both required), `just check-syntax`, every `verify.py` check, the kernel profile, the Calmo
-palette, every `test_*.py` directory and the Rust workspace. Before a push, run what you changed:
+`just check` is the gate every pull request passes (`Justfile`). It requires `actionlint`,
+`shellcheck` and `cargo-deny`; install `ksvalidator` (pykickstart) too, or `verify.py kickstart`
+passes with only a note. It runs `just check-syntax`, every `verify.py` check, the kernel profile,
+the Calmo palette, every `test_*.py` directory, the Rust workspace and `just check-deny`
+(`deny.toml`). Before a push, run what you changed:
 
 | Check | Command |
 | --- | --- |
 | Project checks | `python3 scripts/verify.py <check>...`; `--list` names them |
-| A crate | `cargo test -p <crate>`; one that links GTK: `forge/test/shell/rig.sh cargo test -p <crate>` |
+| A crate | `cargo test -p <crate>`; one that links GTK: `forge/test/shell/rig.sh cargo test -p <crate>`, after `rig.sh build-image` |
 | Python tests | `python3 -B -m unittest discover -s <dir>/tests`, e.g. `scripts/tests`, `system/tests` |
-| Linters | `just lint`; `just format` rewrites |
+| Linters | `just lint`; `just format` rewrites, the `Justfile` through `just --unstable --fmt` |
 | A kernel panic read from a QR code | `python3 scripts/decode-drm-panic.py '<url or payload>'` |
 
 A check red on known debt is tolerated only while `scripts/ci/known-red.txt` lists its finding
@@ -52,11 +54,9 @@ hours: never use it as a check.
   in an enterprise tone. The conversation follows the contributor's language. Published
   history is never rewritten to translate it.
 - **Portable pipeline, GitHub as glue.** Logic lives in scripts in the repository; workflow
-  YAML only checks out, calls them and uploads their output, with no `run:` block beyond a
-  few lines. Steps exchange data through files in a known directory, not through
-  `$GITHUB_OUTPUT` or artifacts alone. No hard-coded registry owner: a variable with a
-  default. Prefer a standard mechanism (OCI, cosign with a key, a file on disk) over one
-  that exists only on GitHub.
+  YAML only checks out, calls them and uploads their output (`.github/workflows/AGENTS.md`).
+  No hard-coded registry owner; prefer a standard mechanism (OCI, cosign with a key, a file on
+  disk) over one that exists only on GitHub.
 - **No attribution.** No model names, "Generated with" lines, co-author trailers or session
   links in code, commits, pull requests or documents.
 - **One logical change per commit.** Report unrelated problems instead of fixing them in

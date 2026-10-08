@@ -2945,6 +2945,9 @@ def check_agent_docs():
                               capture_output=True).returncode == 0
 
     for doc in agent_docs(tracked):
+        if not (ROOT / doc).is_file():
+            r.fail(f"{doc}: tracked but missing from the worktree")
+            continue
         for problem in agent_doc_problems(doc, read(ROOT / doc), tracked, ignored, set(CHECKS)):
             r.fail(problem)
     return r
