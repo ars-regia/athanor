@@ -33,7 +33,9 @@ with options and a recommendation. On 2026-10-08 the maintainer approved every s
    a confined application (the domain XML can name the program QEMU runs); the maintainer decided
    on 2026-10-08 that in 1.0 Machines runs libvirt's embedded QEMU driver inside its own
    confinement, with QEMU, swtpm, passt and virtiofsd as its children, no root daemon, no polkit
-   rule and no libvirt socket reachable by any other application; the guest reaches the local network but not the host (passt with `--no-map-gw`); FreeRDP runs as a
+   rule and no libvirt socket reachable by any other application; Machines' unit gets its own
+   filesystem sandbox, an exception to SD21 (the home hidden, its state directory private to it,
+   shared files through the document portal), so that a guest escape stays inside it; the guest reaches the local network but not the host (passt with `--no-map-gw`); FreeRDP runs as a
    child of Machines in its `confined` class, the password on a pipe; stages V0 to V2 in 1.0, V3 and V4 after it, gated on spike
    S2; the Windows licence accepted by the person, the product key optional, and a download and
    checksum spike before V1; the shared clipboard on and declared, switchable per machine, the
