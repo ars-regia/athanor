@@ -29,6 +29,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-04.** It is the spec
 | `system/athanor-services`            | none, a library                  | the models: network, Bluetooth, audio, battery, power profile, brightness, media players; no GTK type |
 | `system/athanor-controls`            | none, a library                  | the GTK4 widgets of the detail pages and of the panel's tiles, used by the bar and the control center |
 | `forge/specs/athanor-control-center` | `athanor-control-center.service` | the panel                                                                                             |
+| `forge/specs/athanor-control-center` | `athanor-control-center-shortcut.service` | a login oneshot of the same program that binds Super+C (CC9) and exits                         |
 | `forge/specs/athanor-clipd`          | `athanor-clipd.service`          | the clipboard history (CC10); headless, no GTK                                                        |
 
 - **A separate program.** Building the panel inside the bar was rejected: it breaks SH4's one process per surface, it loads every model and page into the bar's 64 MB budget, and a crash of one would take the other. COSMIC's applets were rejected by SH3.
@@ -123,7 +124,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-04.** It is the spec
 
 **CC9. Opening and closing.** The bar's button and a shortcut call `Toggle()`. The panel closes on an outside click, on Escape and on the loss of focus, as the shield's sheet does (BR6), and the notification popups stay hidden while it is open. It opens on the focused output, under the bar's button, or above it when the bar is at the bottom.
 
-- **The shortcut:** Super+A belongs to the application library (`doc_launcher.md`). Super+C opens the control center, decided by the maintainer on 2026-10-04; it is written once per user at the first start in the way LA8 writes Super, and never again. Super+N and Super+V are kept for the notification center and the clipboard page.
+- **The shortcut:** Super+A belongs to the application library (`doc_launcher.md`). Super+C opens the control center, decided by the maintainer on 2026-10-04; it is written once per user at the first start in the way LA8 writes Super, and never again. The panel starts on demand, so a login oneshot of the same program, `athanor-control-center-shortcut.service`, enabled by the package's preset, makes that write; the panel's own unit cannot write cosmic-comp's shortcuts. Super+N and Super+V are kept for the notification center and the clipboard page.
 
 **CC10. The clipboard history, confined.** F-cc-56 stays in the register in this form; if spike S3 fails, it returns to the maintainer as an exclusion.
 

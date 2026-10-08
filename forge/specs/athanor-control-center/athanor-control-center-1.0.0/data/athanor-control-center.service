@@ -1,6 +1,6 @@
 [Unit]
 Description=Athanor control center
-Documentation=https://github.com/hr-mes/athanor/blob/iso-v0/docs/architecture/doc_control_center.md
+Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_control_center.md
 # Not enabled by the preset (doc_control_center.md, CC2): the session bus starts it through
 # os.athanor.ControlCenter1, which the bar's button and Super+C call.
 After=graphical-session.target athanor-desktop.service
@@ -40,11 +40,10 @@ RuntimeDirectoryMode=0700
 RuntimeDirectoryPreserve=yes
 # ~/.local/state/athanor/control-center: the Super+C marker, and the panel's own state.
 StateDirectory=athanor/control-center
-# cosmic-comp's shortcuts, where Super+C is bound once per user (CC9). The unit must grant
-# it under ProtectHome=read-only for that one write, made before the Landlock ruleset, which
-# then closes the directory for the rest of the run. The theme mode is the dark mode tile's
-# `is_dark`; it is written while the run lasts, so Landlock grants it.
-ConfigurationDirectory=cosmic/com.system76.CosmicSettings.Shortcuts/v1 cosmic/com.system76.CosmicTheme.Mode/v1
+# The theme mode is the dark mode tile's `is_dark`; it is written while the run lasts, so
+# Landlock grants it. Super+C is bound by athanor-control-center-shortcut.service (CC9), so
+# cosmic-comp's shortcuts stay read-only here.
+ConfigurationDirectory=cosmic/com.system76.CosmicTheme.Mode/v1
 
 ProtectSystem=strict
 ProtectHome=read-only

@@ -125,12 +125,14 @@ fn bind_custom(path: &Path, modifiers: &[&str], key: &str, command: &str) -> Res
             }
         }
         let end = text.trim_end().strip_suffix('}').ok_or_else(|| format("it does not end with '}'".to_owned()))?.trim_end();
-        if strip_comments(end).trim_end() != end {
-            return Err(format("a comment ends the map; the binding cannot be added after it".to_owned()));
+        // The comma goes right after `end`, so a line comment still open there would swallow it.
+        let in_line_comment = !strip_comments(&format!("{end}X")).ends_with('X');
+        if in_line_comment && !strip_comments(end).trim_end().ends_with(['{', ',']) {
+            return Err(format("a line comment ends the map; the binding cannot be added after it".to_owned()));
         }
         end.to_owned()
     };
-    let comma = if head.ends_with(['{', ',']) { "" } else { "," };
+    let comma = if strip_comments(&head).trim_end().ends_with(['{', ',']) { "" } else { "," };
     let list = modifiers.join(", ");
     let entry = format!("(modifiers: [{list}], key: \"{key}\"): {action}");
     if let Some(parent) = path.parent() {
@@ -742,6 +744,25 @@ mod tests {
         std::fs::remove_file(&path).unwrap();
         assert_eq!(set_in_custom(&path, &marker), None);
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn a_comment_inside_the_map_does_not_stop_the_binding() {
+        let path = scratch("custom-comment");
+        for (name, mine) in [
+            ("inside", "{\n    // my terminal\n    (modifiers: [Super], key: \"t\"): Spawn(\"foot\")\n}\n"),
+            ("block", "{\n    /* mine */ (modifiers: [Super], key: \"t\"): Spawn(\"foot\")\n}\n"),
+            ("after a comma", "{\n    (modifiers: [Super], key: \"t\"): Spawn(\"foot\"), // mine\n}\n"),
+        ] {
+            std::fs::write(&path, mine).unwrap();
+            assert_eq!(bind_custom(&path, &["Super"], "c", CC).unwrap(), Binding::Added, "{name}");
+            assert_eq!(bind_custom(&path, &["Super"], "c", CC).unwrap(), Binding::Unchanged, "{name}");
+        }
+        // A line comment right where the comma must go cannot take it: refused, file untouched.
+        let last = "{\n    (modifiers: [Super], key: \"t\"): Spawn(\"foot\") // mine\n}\n";
+        std::fs::write(&path, last).unwrap();
+        assert!(matches!(bind_custom(&path, &["Super"], "c", CC), Err(ShortcutError::Format { .. })));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), last);
     }
 
     fn set_in_custom(path: &Path, marker: &Path) -> Option<Binding> {

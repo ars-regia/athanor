@@ -1,6 +1,6 @@
 [Unit]
 Description=Athanor control center: bind Super+C
-Documentation=https://github.com/hr-mes/athanor/blob/iso-v0/docs/architecture/doc_control_center.md
+Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_control_center.md
 # doc_control_center.md, CC9: the panel starts on the first call to os.athanor.ControlCenter1,
 # so on a new account nothing would bind Super+C before the bar's button was used. This
 # oneshot binds it at login, once per user (the marker lives in the panel's state directory),

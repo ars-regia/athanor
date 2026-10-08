@@ -40,9 +40,8 @@ fn backlight_root() -> PathBuf {
 }
 
 /// Super+C is ours only where the user left it free, and only once per user (CC9): the marker
-/// sits in the state directory. The login oneshot calls it; the panel calls it too, before
-/// its ruleset, which leaves cosmic-comp's shortcuts read-only, and the marker makes that a
-/// no-op.
+/// sits in the state directory. Only the login oneshot calls it: the panel's unit cannot
+/// write cosmic-comp's shortcuts.
 fn bind_shortcut(state: &Path) {
     match shortcuts::set_custom_binding_once(
         &["Super"],
@@ -113,7 +112,6 @@ fn main() -> glib::ExitCode {
     if let Err(err) = std::fs::create_dir_all(&state) {
         tracing::warn!(error = %err, dir = %state.display(), "cannot create the state directory");
     }
-    bind_shortcut(&state);
     // Before GTK starts a thread. Reads stay open (CC2); writes only where `grants` says.
     let launch = launch_dir(&dirs);
     if let Err(err) = DirBuilder::new().recursive(true).mode(0o700).create(&launch) {
