@@ -204,9 +204,13 @@ SIGN_JOB_COMMANDS = {
 }
 # The names a signing job, its steps and its workflow may set in env besides the secrets of the
 # job's environment: plain values, none read by bash, the dynamic loader or a PATH lookup.
-# SIGN_VERIFY_BUILDER names the builder image that verifies after the key is removed;
-# sign-images.sh refuses anything but a 64-character content hash.
-SIGN_JOB_ENV = {"GH_TOKEN", "GITHUB_TOKEN", "GITHUB_ACTOR", "KERNEL_DIGEST", "KERNEL_REGISTRY", "SIGN_VERIFY_BUILDER"}
+SIGN_JOB_ENV = {"GH_TOKEN", "GITHUB_TOKEN", "GITHUB_ACTOR", "KERNEL_DIGEST", "KERNEL_REGISTRY"}
+# The image sign script runs beside the key and starts no container: system/verify-images.sh
+# verifies its signatures in a job without the key (D43). The kernel signer is the exception
+# by design: it runs a digest-pinned signer image it verifies first.
+IMAGE_SIGN_SCRIPT = "system/sign-images.sh"
+# A container engine as a command, not the docker:// transport of an image reference.
+CONTAINER_ENGINE = re.compile(r"\b(?:podman|docker|buildah|nerdctl|crun|runc)\b(?!://)")
 # The runners a signing job may use: GitHub-hosted, never a self-hosted machine (D43).
 GITHUB_HOSTED = re.compile(r"^ubuntu-(?:latest|\d{2}\.\d{2})$")
 # The only commands a step holding a signing secret may run, whole: the sign scripts (D43).
@@ -395,6 +399,7 @@ def signing_problems(root):
     environment holds."""
     root = Path(root)
     holders, problems = signing_environments(root)
+    problems += image_sign_script_problems(root)
     if yaml is None:
         return problems + ["scripts/verify.py: PyYAML is missing, so the D43 lint cannot read the "
                            "workflows (pip install pyyaml)"]
@@ -468,6 +473,22 @@ def signing_problems(root):
         for secret in sorted(undeclared):
             problems.append(f"{name}: reads {secret}, which neither {ENVIRONMENTS_JSON} nor {ACTIONS_JSON} "
                             "declares (D43)")
+    return problems
+
+
+def image_sign_script_problems(root):
+    """The image sign script starts no container: a line outside a comment that names a
+    container engine as a command is a problem (D43)."""
+    path = Path(root) / IMAGE_SIGN_SCRIPT
+    if not path.is_file():
+        return []
+    problems = []
+    for number, line in enumerate(read(path).splitlines(), 1):
+        code = line.strip()
+        if code.startswith("#") or not CONTAINER_ENGINE.search(code):
+            continue
+        problems.append(f"{IMAGE_SIGN_SCRIPT}:{number} starts a container beside the key: verify the "
+                        "signatures in a job without it, system/verify-images.sh (D43)")
     return problems
 
 
