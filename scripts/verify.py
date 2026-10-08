@@ -1396,14 +1396,30 @@ def is_test_file(p):
     return any(d in parts for d in ("tests", "benches", "examples")) or Path(p).name == "tests.rs"
 
 
+TEST_MODULE = re.compile(r"#\[cfg\(test\)\]\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;")
+
+
+def test_module_files(paths):
+    """The files of the modules declared `#[cfg(test)] mod name;`: test helpers kept in a file
+    of their own, compiled into the tests only, as a `#[cfg(test)]` block is."""
+    found = set()
+    for p in map(Path, paths):
+        here = p.parent if p.name in ("lib.rs", "main.rs", "mod.rs") else p.parent / p.stem
+        for name in TEST_MODULE.findall(read(p)):
+            found.update({here / f"{name}.rs", here / name / "mod.rs"})
+    return found
+
+
 @check("panics", "Il budget di panic in codice non di test non cresce")
 def check_panics():
     r = Result()
     counts = {k: 0 for k in BUDGET}
     where = {k: [] for k in BUDGET}
 
-    for p in rust_files():
-        if is_test_file(p):
+    files = list(rust_files())
+    test_modules = test_module_files(files)
+    for p in files:
+        if is_test_file(p) or p in test_modules:
             continue
         txt = read(p)
         cut = txt.find("#[cfg(test)]")
