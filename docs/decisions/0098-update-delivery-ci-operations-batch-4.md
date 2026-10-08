@@ -97,10 +97,10 @@ On 2026-10-08 the maintainer decided items 1 to 5, and on 2026-10-09 item 6:
      adopted. It is executed in a quiet window after the ADR-0096 implementation, with no open pull
      request on the moved paths, as one squash, and the system image check green before the
      merge.
-6. **Unattended image signing until 1.0** (decided on 2026-10-09). The environments
-   `signing-images` and `bridge` lose their required reviewer until the 1.0 tag, when it
-   returns. Their deployment branches and administrator bypass stay as they are. `signing-kernel`
-   keeps its required reviewer: a module signed with the
+6. **Unattended image signing until 1.0** (decided on 2026-10-09). The environment
+   `signing-images` loses its required reviewer until the 1.0 tag, when it returns. Its
+   deployment branches and administrator bypass stay as they are. `signing-kernel` keeps its
+   required reviewer: a module signed with the
    Machine Owner Key is trusted by Secure Boot on every machine that enrolled the key and is
    withdrawn only by rotating it, while a signed image reaches `:stable` only through the
    promotion and its evidence. The change takes effect only after the image signing job runs in
@@ -108,12 +108,13 @@ On 2026-10-08 the maintainer decided items 1 to 5, and on 2026-10-09 item 6:
    environment also holds the kernel keys, so it keeps its reviewer for as long as it exists.
    With one maintainer who may approve their own runs, the reviewer added attention, not a
    second party (KC1), and it held every unattended build cycle at the signing step.
-   For `bridge` the reviewer is the only control on its path, and the risk is accepted until
-   1.0: the job copies digests that `verify-system-images` verified onto the previous owner with
-   `ATHANOR_BRIDGE_TOKEN` (SEC14), a classic token of `hr-mes` that reaches every package of that
-   account, and machines that do not verify their downloads pull from there (UD46). Without the
-   reviewer, a run on a protected branch uses that token unattended. The bridge stops at 1.0
-   (UD50), when the token is deleted.
+   `bridge` keeps its required reviewer: it is the only control on that path. The job copies
+   digests that `verify-system-images` verified onto the previous owner with
+   `ATHANOR_BRIDGE_TOKEN` (SEC14), a classic token that, if it belongs to `hr-mes`, reaches every
+   package of that account, and machines that do not verify their downloads pull from there
+   (UD46); `main`, one of its deployment branches, is not protected yet. The job is skipped
+   while `ATHANOR_BRIDGE_REGISTRY` is unset, so the reviewer holds no build cycle today; whether
+   it goes is decided again when the bridge is switched on, after `main` is protected or deleted.
 
 ## Consequences
 
@@ -131,8 +132,8 @@ On 2026-10-08 the maintainer decided items 1 to 5, and on 2026-10-09 item 6:
   the file changes to `repository.json` and `pages.json` and the hand deletions of item 5; the
   rename of `KERNEL_BUMP_TOKEN`; the removal of `main` from the settings files and workflows once
   the branch is deleted; the execution of the layout move.
-- ADR-0084 is amended in one part only: KC1's required reviewer on `signing-images` (and on
-  `bridge`) is suspended until the 1.0 tag by item 6. The change to `environments.json` follows
+- ADR-0084 is amended in one part only: KC1's required reviewer on `signing-images` is
+  suspended until the 1.0 tag by item 6. The change to `environments.json` follows
   the end of the rotation, and the maintainer applies it with `ghsettings.py apply`. The same
   pull request changes the D43 check of `scripts/verify.py workflows`, which today requires a
   reviewer on every `signing*` environment, so that it exempts `signing-images` until the 1.0 tag
