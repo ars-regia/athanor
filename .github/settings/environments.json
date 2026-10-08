@@ -1,6 +1,6 @@
 {
   "bridge": {
-    "can_admins_bypass": true,
+    "can_admins_bypass": false,
     "deployment_branch_policy": {
       "custom_branch_policies": true,
       "policies": [
@@ -16,7 +16,12 @@
       "protected_branches": false
     },
     "prevent_self_review": false,
-    "reviewers": [],
+    "reviewers": [
+      {
+        "name": "hr-mes",
+        "type": "User"
+      }
+    ],
     "secrets": [
       "ATHANOR_BRIDGE_TOKEN"
     ],

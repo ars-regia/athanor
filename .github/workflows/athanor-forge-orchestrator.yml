@@ -419,9 +419,12 @@ jobs:
     # digests tagged there carry the policy of this owner, and athanor-update migrate then
     # switches each machine, verified, to its variant here (doc_update_delivery.md UD45-UD50).
     # Off unless the repository variable ATHANOR_BRIDGE_REGISTRY names the previous owner as
-    # REGISTRY/OWNER; the token of the bridge environment writes there. No signing key.
+    # REGISTRY/OWNER; the token of the bridge environment writes there, after the maintainer
+    # approves the run. Only the branches that publish :latest. No signing key.
     needs: [tag-system-images]
-    if: ${{ !cancelled() && needs.tag-system-images.result == 'success' && vars.ATHANOR_BRIDGE_REGISTRY != '' }}
+    if: >-
+      ${{ !cancelled() && needs.tag-system-images.result == 'success' && vars.ATHANOR_BRIDGE_REGISTRY != ''
+      && (github.ref == 'refs/heads/iso-v0' || github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-24.04
     environment: bridge
     defaults:

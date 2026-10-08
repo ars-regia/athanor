@@ -84,8 +84,11 @@ STUB = textwrap.dedent("""\
         assert "--preserve-digests" in args, args
         source, target = (a.removeprefix("docker://") for a in args[-2:])
         repository, digest = source.split("@")
-        # The same image, under the source's owner or, for the bridge, another one.
-        assert target.rsplit(":", 1)[0].rsplit("/", 1)[1] == repository.rsplit("/", 1)[1], args
+        # The tag stays in the source repository; STUB_COPY_TO=REGISTRY/OWNER: the bridge copies
+        # the same image under that owner, and nowhere else.
+        owner = os.environ.get("STUB_COPY_TO")
+        expected = f"{owner}/{repository.rsplit('/', 1)[1]}" if owner else repository
+        assert target.startswith(f"{expected}:"), args
         if not os.environ.get("STUB_STALE"):
             # STUB_LAG=N: the next N reads of the tag still return its previous digest.
             if os.environ.get("STUB_LAG"):
@@ -309,7 +312,7 @@ class SignImages(unittest.TestCase):
     def test_the_bridge_tags_the_verified_digests_under_the_previous_owner(self):
         self.digests()
         recorded = {name: self.tags[f"{REG}/{name}:412"] for name in NAMES}
-        r = self.tag("--to", PREVIOUS, str(self.file))
+        r = self.tag("--to", PREVIOUS, str(self.file), STUB_COPY_TO=PREVIOUS)
         self.assertEqual(r.returncode, 0, r.stderr)
         tags = json.loads((self.state / "tags.json").read_text())
         self.assertEqual({name: tags[f"{PREVIOUS}/{name}:latest"] for name in NAMES}, recorded)
