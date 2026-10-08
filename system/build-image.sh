@@ -80,7 +80,10 @@ kernel=$(artifact kernel_digest)
 boot=$(artifact boot_digest)
 # docker format: the OCI format has no SHELL instruction and podman would drop the
 # bash -o pipefail the Containerfile sets for every RUN, in the system stage image as well.
+# ATHANOR_BRIDGE_REGISTRY, the previous owner while the bridge runs (doc_update_delivery.md,
+# UD45), becomes the image's list of owners a machine moves from; unset, the list is empty.
 common=(--layers --pull=newer --format docker --build-arg "AZOTH_NVR=$nvr" --build-arg "IMAGE_REGISTRY=$REGISTRY"
+  --build-arg "IMAGE_MOVED_FROM=${ATHANOR_BRIDGE_REGISTRY:-}"
   --build-arg "KERNEL_REGISTRY=$registry" --build-arg "FORGE_REGISTRY=$forge_registry" --build-arg "BOOT_DIGEST=$boot")
 build_system() {
   mkdir -p "$(dirname "$1")"

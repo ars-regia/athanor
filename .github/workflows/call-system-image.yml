@@ -185,6 +185,8 @@ jobs:
         # images share is built once per run, and its image ID is the base of all three
         # (doc_update_delivery.md, UD40). The rechunk of UD32 is a step of its own after
         # this one, writing the ID of the rechunked image to the same file.
+        env:
+          ATHANOR_BRIDGE_REGISTRY: ${{ vars.ATHANOR_BRIDGE_REGISTRY }}
         run: bash system/build-image.sh --system --registry "${IMAGE_REGISTRY}" --iidfile artifacts/system-image.iid
 
       - name: 🔖 Check our RPMs against their specs

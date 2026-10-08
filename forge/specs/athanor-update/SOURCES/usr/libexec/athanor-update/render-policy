@@ -3,15 +3,19 @@
 # (docs/architecture/doc_update_trust.md, UT3): policy.json, attachments-policy.json and
 # registries.d/athanor.yaml under --out. keyPaths is every *.pub of --keys-dir, sorted, so
 # a key rotation is a file added to or removed from that directory.
+# moved-from, also under --out, lists the owners of --moved-from one per line, empty without
+# it: athanor-update migrate moves a machine that follows one of them to --registry
+# (docs/architecture/doc_update_delivery.md, UD45).
 # Callers: system/Containerfile (image build), system/sign-images.sh (the pipeline verifies
 # with the policy a machine will have), scripts/devvm/acceptance (throwaway registry and key).
 # Usage: render-policy --registry REGISTRY/OWNER --keys-dir DIR --out DIR [--link-etc ETC]
+#                      [--moved-from "REGISTRY/OWNER ..."]
 #   --link-etc ETC  also make ETC/containers/policy.json and ETC/containers/registries.d/athanor.yaml
 #                   symbolic links to the rendered files (the image build passes /etc)
 set -euo pipefail
 
-usage() { echo "usage: ${0##*/} --registry REGISTRY/OWNER --keys-dir DIR --out DIR [--link-etc ETC]" >&2; exit 2; }
-registry='' keys_dir='' out='' etc=''
+usage() { echo "usage: ${0##*/} --registry REGISTRY/OWNER --keys-dir DIR --out DIR [--link-etc ETC] [--moved-from \"REGISTRY/OWNER ...\"]" >&2; exit 2; }
+registry='' keys_dir='' out='' etc='' moved_from=''
 while [[ $# -gt 0 ]]; do
   [[ $# -ge 2 ]] || usage
   case $1 in
@@ -19,6 +23,7 @@ while [[ $# -gt 0 ]]; do
     --keys-dir) keys_dir=$2 ;;
     --out) out=$2 ;;
     --link-etc) etc=$2 ;;
+    --moved-from) moved_from=$2 ;;
     *) usage ;;
   esac
   shift 2
@@ -27,7 +32,12 @@ done
 templates=${ATHANOR_POLICY_TEMPLATES:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../share/athanor/containers/templates}
 
 # Both values are pasted into JSON and YAML: refuse anything that would need quoting.
-[[ $registry =~ ^[a-z0-9]([a-z0-9._:/-]*[a-z0-9])?$ ]] || { echo "${0##*/}: not a registry/owner: '$registry'" >&2; exit 2; }
+owner_pattern='^[a-z0-9]([a-z0-9._:/-]*[a-z0-9])?$'
+[[ $registry =~ $owner_pattern ]] || { echo "${0##*/}: not a registry/owner: '$registry'" >&2; exit 2; }
+read -ra previous <<< "$moved_from"
+for owner in "${previous[@]}"; do
+  [[ $owner =~ $owner_pattern && $owner == */* && $owner != "$registry" ]] || { echo "${0##*/}: not a previous registry/owner: '$owner'" >&2; exit 2; }
+done
 keys_dir=$(readlink -f "$keys_dir")
 shopt -s nullglob
 keys=("$keys_dir"/*.pub)
@@ -44,7 +54,8 @@ render() { sed -e "s|@REGISTRY@|$registry|g" -e "s|@KEY_PATHS@|$key_paths|g" "$t
 render policy.json.in "$out/policy.json"
 render attachments-policy.json.in "$out/attachments-policy.json"
 render athanor.yaml.in "$out/registries.d/athanor.yaml"
-chmod 0644 "$out/policy.json" "$out/attachments-policy.json" "$out/registries.d/athanor.yaml"
+if [[ ${#previous[@]} -gt 0 ]]; then printf '%s\n' "${previous[@]}"; fi > "$out/moved-from"
+chmod 0644 "$out/policy.json" "$out/attachments-policy.json" "$out/registries.d/athanor.yaml" "$out/moved-from"
 
 if [[ -n $etc ]]; then
   mkdir -p "$etc/containers/registries.d"
