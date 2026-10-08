@@ -82,7 +82,7 @@ Branch protection on `iso-v0` requires three checks, `Kernel gate`, `Spec gate` 
 | System Image Check | CI13 | the image inputs change | no | the three images build as in the pipeline, without a key; package delta; merges `bump/system-*` PRs |
 | `Spec gate` | CI14 | every PR (no path filter) | until CP4 | changed specs build as the DAG builds them; a change that selects none passes; merges the spec bot's PR |
 | Shell surfaces | CI15 | through CI27 when `changes.json` selects `shell`: a crate the rig draws, `forge/test/shell/**`, `Cargo.toml`, `Cargo.lock` or `.cargo/` changes | through `gate` | rig tests of the greeter, layout, compositor client, shelld, bar, dock, launcher; also CI2 |
-| Rust Security & FFI Audit, Nix Vanguard | CI22, CI24 | only PRs based on `main` | no | see section 3 |
+| Rust Security & FFI Audit, Nix Vanguard | CI22, CI24 | CI22: PRs based on `main`, `develop` or `iso-v0` (advisories only on `iso-v0`); CI24: only PRs based on `main` | no | see section 3 |
 
 CI2 (actionlint, `scripts/verify.py`, the unit test suites) has no trigger of its own: on a PR it runs through CI8, which runs on every pull request and whose `Kernel gate` requires it, and through CI15. The `check` job of CI27 runs `just check`, which covers what CI2 runs and adds the remaining `verify.py` checks and the four test directories CI2 leaves out (those of `scripts/ci`, the runner, session memory and the cosmic-comp rebase drill); CI2 goes once CI8 no longer runs on pull requests (doc_pipeline.md section 3.4).
 
@@ -272,9 +272,9 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 ### CI22 Rust Security & FFI Audit
 
 - **File:** `rust-security-audit.yml`. **Purpose:** clippy, cargo vet and the advisory half of cargo deny (licences, bans and sources run in the pull request gate, `just check-deny`). The `advisories` job runs on the hosted runner like pr.yml's `check` job; the clippy and cargo vet job stays in the builder container and is skipped on `iso-v0` (CB1). The Kani and bare-metal jobs were removed on 2026-10-08: their targets no longer exist.
-- **Triggers:** push and `pull_request` on `main`, `develop`, `iso-v0`, and a weekly schedule. **Outputs:** artifacts `debug-logs`, `baremetal-artifact-<target>`.
-- **Secrets, variables:** `REGISTRY_HOST`, `BUILDER_STABLE_TAG`. **Environment:** none. **Runner:** hosted, inside the `athanor-builder` container. **Concurrency:** `<workflow>-<ref>`, cancels in progress.
-- **Scripts:** none.
+- **Triggers:** push and `pull_request` on `main`, `develop`, `iso-v0`, and a weekly schedule. **Outputs:** artifact `debug-logs`.
+- **Secrets, variables:** `REGISTRY_HOST`, `BUILDER_STABLE_TAG`. **Environment:** none. **Runner:** hosted; `advisories` on the bare runner, `security-audit` inside the `athanor-builder` container (skipped on `iso-v0`). **Concurrency:** `<workflow>-<ref>`, cancels in progress.
+- **Scripts:** `scripts/ci/install-tools.sh` (the `advisories` job).
 - **Health:** red, CB1.
 
 ### CI23 Rust Security & Buffer Overflow Fuzzing (retired)

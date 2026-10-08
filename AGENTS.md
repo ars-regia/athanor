@@ -107,7 +107,7 @@ Crates and packages are named `athanor-*`; no `ermete-*` crate remains (the proj
 Ermete OS until 2026-09-05, commit `02bf9c05`). Exceptions: the crates `ebpf-core`,
 `ebpf-loader` and `xdg-desktop-portal-athanor` (its spec directory is
 `forge/specs/athanor-xdg-desktop-portal-athanor`), and the upstream specs `azoth`,
-`cosmic-comp`, `buildah`, `osbuild` and `stage0-bootstrap`. Rename nothing on your own.
+`cosmic-comp` and `stage0-bootstrap`. Rename nothing on your own.
 
 Never open `docs/architecture/graph-vaults/`, `docs/architecture/graph-pages/` or
 `.graphify/`: they are generated locally, git-ignored, and thousands of files. Query them
