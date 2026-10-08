@@ -163,3 +163,4 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0093 | 0093 | [Desktop specifications, review batch 1, approved](0093-desktop-specs-batch-1.md) | accepted | shell, session, security |
 | ADR-0094 | 0094 | [Update control: the settled points of the postpone and the opt-out](0094-update-control-settled-points.md) | accepted | update, security |
 | ADR-0095 | 0095 | [Specifications, review batches 2 and 3, approved](0095-specs-review-batches-2-3.md) | accepted | kernel, session, security, storage, desktop |
+| ADR-0096 | 0096 | [Kernel artefacts are signed with the project key, not the workflow's OIDC identity](0096-kernel-artefacts-project-key.md) | accepted | security, pipeline |
