@@ -48,7 +48,24 @@ fn reason<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &Status) -> 
         return Reason::PolicyNotInForce;
     }
     let repository = sigobj::repository_of(&booted.image);
-    let Some(key_paths) = policy.scopes.get(repository) else { return Reason::ReferenceOutOfScope };
+    let Some(key_paths) = policy.scopes.get(repository) else {
+        if crate::policy::successor(&policy.scopes, repository, &policy.moved_from).is_none() {
+            return Reason::ReferenceOutOfScope;
+        }
+        // The same image under the owner the policy pins: the project moved, and the
+        // migration moves this machine after it (doc_update_delivery.md, UD45), unless nothing
+        // can move it yet: a queued rollback, or no such image or tag under the new owner; or
+        // unless the image there is the held digest, which the migration never stages.
+        return if status.rollback_queued {
+            Reason::OwnerMovedWaiting
+        } else if ctx.store.move_held() {
+            Reason::OwnerMovedHeld
+        } else if ctx.store.channel_absent() {
+            Reason::OwnerMovedWaiting
+        } else {
+            Reason::OwnerMoved
+        };
+    };
     if !booted.enforcing {
         let pending = status.staged.as_ref().is_some_and(|staged| staged.enforcing);
         // The migration ran and nothing enforcing is staged: the reference was switched
@@ -64,6 +81,9 @@ fn reason<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &Status) -> 
     let claims = ctx.store.signature_dir(&booted.digest).and_then(|dir| sigobj::claims(&dir, &keys).ok()).unwrap_or_default();
     let covers = |claim: &&sigobj::Claim| claim.manifest_digest == booted.digest && claim.repository == repository;
     match claims.iter().filter(covers).map(|claim| claim.backed).max() {
+        // Verified, but a run-number tag or a digest names one build: nothing newer is ever
+        // published under it (doc_update_delivery.md, UD51).
+        Some(true) if !follows_a_channel(&booted.image[repository.len()..]) => Reason::PinnedBuild,
         Some(true) => Reason::Signature,
         Some(false) => Reason::KeyNotInPolicy,
         None => Reason::NoSignature,
@@ -78,6 +98,15 @@ fn local_update(ctx: &Context<'_, impl Tools>, status: &Status) -> UpdateState {
         _ if ctx.store.refused().is_some() => UpdateState::Refused,
         _ => UpdateState::None,
     }
+}
+
+/// True when the tag or digest after the repository, `suffix`, may move to a newer build. A
+/// digest and a run tag of the pipeline (`github.run_id`, digits only) name one build; any
+/// other tag, `latest`, `stable` or the moving tag of a derived image, is followed. No tag is
+/// `latest`.
+fn follows_a_channel(suffix: &str) -> bool {
+    let run_tag = suffix.strip_prefix(':').is_some_and(|tag| !tag.is_empty() && tag.bytes().all(|b| b.is_ascii_digit()));
+    !(suffix.starts_with('@') || run_tag)
 }
 
 /// `Available` when `digest` may be offered; otherwise why not. The order of the build
@@ -220,7 +249,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn deployed(digest: &str, build_time: i64) -> Deployed {
-        Deployed { image: format!("{REPO}:stable"), digest: digest.into(), version: format!("43.{build_time}"), build_time, enforcing: true, download_only: false, local_changes: false }
+        Deployed { image: format!("{REPO}:stable"), digest: digest.into(), version: format!("43.{build_time}"), build_time, enforcing: true, download_only: false, local_changes: false, deployment: None }
     }
 
     /// bootc, skopeo, ostree and NetworkManager as one scripted object that records its calls.
@@ -231,6 +260,12 @@ pub(crate) mod tests {
         pub download: Result<Deployed, Failure>,
         pub metered: bool,
         pub relock: Result<(), Failure>,
+        /// Whether `switch` stages a deployment, or returns as if it had and stages nothing.
+        pub stages: bool,
+        /// `bootc status` fails, as it does when bootc cannot read the sysroot.
+        pub status_fails: bool,
+        /// Whether bootc names a deployment by its ostree checksum and deploy serial.
+        pub names: bool,
         pub calls: RefCell<Vec<String>>,
     }
 
@@ -242,6 +277,9 @@ pub(crate) mod tests {
                 download: Err(Failure { code: ErrorCode::Internal, host: None }),
                 metered: false,
                 relock: Ok(()),
+                stages: true,
+                status_fails: false,
+                names: true,
                 calls: RefCell::new(Vec::new()),
             }
         }
@@ -263,6 +301,9 @@ pub(crate) mod tests {
 
     impl Tools for Fake {
         fn status(&self) -> Result<Status, Failure> {
+            if self.status_fails {
+                return Err(Failure { code: ErrorCode::Internal, host: None });
+            }
             Ok(self.status.borrow().clone())
         }
         fn candidate(&self, image: &str) -> Result<Option<Candidate>, Failure> {
@@ -295,7 +336,13 @@ pub(crate) mod tests {
         }
         fn switch(&self, image: &str) -> Result<(), Failure> {
             self.call(format!("switch {image}"));
-            self.status.borrow_mut().staged = Some(self.download.clone()?);
+            let deployed = self.download.clone()?;
+            if self.stages {
+                // bootc switch stages a deployment of `image` that is not locked against
+                // finalization, a new ostree deployment each time.
+                let serial = self.calls.borrow().iter().filter(|call| call.starts_with("switch")).count();
+                self.status.borrow_mut().staged = Some(Deployed { image: image.into(), download_only: false, deployment: self.names.then(|| format!("{}.{serial}", deployed.digest)), ..deployed });
+            }
             Ok(())
         }
         fn fetch_signature(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure> {
@@ -340,6 +387,7 @@ pub(crate) mod tests {
                 REPO: [{"type": "sigstoreSigned", "keyPaths": key_paths, "signedIdentity": {"type": "matchRepository"}}]}}});
             std::fs::write(root.join("usr/policy.json"), policy.to_string()).expect("write");
             std::fs::write(root.join("usr/registries.d/athanor.yaml"), "docker: {}\n").expect("write");
+            std::fs::write(root.join("usr/moved-from"), "localhost:5000/previous\n").expect("write");
             let paths = PolicyPaths { etc_policy: root.join("etc/policy.json"), etc_registries: root.join("etc/registries.d/athanor.yaml"), shipped: root.join("usr") };
             std::os::unix::fs::symlink(root.join("usr/policy.json"), &paths.etc_policy).expect("symlink");
             std::os::unix::fs::symlink(root.join("usr/registries.d/athanor.yaml"), &paths.etc_registries).expect("symlink");

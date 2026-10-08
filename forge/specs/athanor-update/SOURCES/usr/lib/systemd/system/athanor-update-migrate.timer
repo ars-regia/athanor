@@ -1,9 +1,10 @@
 [Unit]
 Description=Retry moving this machine onto the signed Athanor image reference
 Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_update_trust.md
-# A machine waiting for the channel (`channel-absent`) retries here; once the stamp exists the
-# timer no longer starts.
-ConditionPathExists=!/var/lib/athanor-update/migrated
+# A machine waiting for the channel (`channel-absent`) or for its image under the project's new
+# owner (`successor-absent`) retries here. No condition on the stamp, as the service has none:
+# a stamped machine on an image of the previous owner still moves (doc_update_delivery.md,
+# UD49), and on any other image the service ends at the stamp without asking bootc.
 
 [Timer]
 OnBootSec=6h

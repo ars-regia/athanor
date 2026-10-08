@@ -19,6 +19,7 @@ TAG = ROOT / "system" / "tag-images.sh"
 A_KEY = ROOT / "forge/specs/athanor-update/athanor-update-1.0.0/tests/vectors/made/a.pub"
 NAMES = ["athanor-system", "athanor-system-nvidia", "athanor-system-nvidia-legacy"]
 REG = "registry.example/owner"
+PREVIOUS = "registry.example/previous"
 SECRET = "-----BEGIN ENCRYPTED SIGSTORE PRIVATE KEY-----\nnot-a-real-key\n-----END ENCRYPTED SIGSTORE PRIVATE KEY-----\n"
 
 STUB = textwrap.dedent("""\
@@ -83,7 +84,11 @@ STUB = textwrap.dedent("""\
         assert "--preserve-digests" in args, args
         source, target = (a.removeprefix("docker://") for a in args[-2:])
         repository, digest = source.split("@")
-        assert target.startswith(f"{repository}:"), args
+        # The tag stays in the source repository; STUB_COPY_TO=REGISTRY/OWNER: the bridge copies
+        # the same image under that owner, and nowhere else.
+        owner = os.environ.get("STUB_COPY_TO")
+        expected = f"{owner}/{repository.rsplit('/', 1)[1]}" if owner else repository
+        assert target.startswith(f"{expected}:"), args
         if not os.environ.get("STUB_STALE"):
             # STUB_LAG=N: the next N reads of the tag still return its previous digest.
             if os.environ.get("STUB_LAG"):
@@ -303,6 +308,23 @@ class SignImages(unittest.TestCase):
         r = self.tag(STUB_LAG="6")
         self.assertEqual(r.returncode, 1, r.stderr)
         self.assertIn("after the copy", r.stderr)
+
+    def test_the_bridge_tags_the_verified_digests_under_the_previous_owner(self):
+        self.digests()
+        recorded = {name: self.tags[f"{REG}/{name}:412"] for name in NAMES}
+        r = self.tag("--to", PREVIOUS, str(self.file), STUB_COPY_TO=PREVIOUS)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        tags = json.loads((self.state / "tags.json").read_text())
+        self.assertEqual({name: tags[f"{PREVIOUS}/{name}:latest"] for name in NAMES}, recorded)
+        self.assertFalse([ref for ref in tags if ref.startswith(f"{REG}/") and ref.endswith(":latest")], "the source tags are not moved")
+        copies = [call["args"] for call in self.calls() if call["args"][0] == "copy"]
+        self.assertEqual(len(copies), 3)
+        for args in copies:
+            self.assertRegex(args[-2], rf"^docker://{REG}/[a-z-]+@sha256:[0-9a-f]{{64}}$", "copied by digest from the verified repository")
+        self.assertEqual(r.stdout.count(f"{PREVIOUS}/"), 3)
+        for to in (REG, "registry.example", "Registry.example/previous", "registry.example/previous; true"):
+            with self.subTest(to=to):
+                self.assertEqual(self.tag("--to", to, str(self.file)).returncode, 2)
 
     def test_the_iso_latest_moves_to_the_digest_of_its_run(self):
         iso = "sha256:" + "7" * 64

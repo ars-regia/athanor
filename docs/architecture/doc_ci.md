@@ -30,7 +30,8 @@ CI1 athanor-forge-orchestrator.yml        concurrency: one run per ref, the newe
  |- system-image .................... CI5 call-system-image.yml: build-repo -> dag-system-image
  |- sign-system-images .............. environment signing (signing-images)   [signing approval]
  |- verify-system-images ............ system/verify-images.sh: no key, anonymous pulls through the shipped policy
- `- tag-system-images ............... system/tag-images.sh: :latest -> the verified digests; athanor-iso:latest on main
+ |- tag-system-images ............... system/tag-images.sh: :latest -> the verified digests; athanor-iso:latest on main
+ `- bridge-system-images ............ system/tag-images.sh --to: the same digests under the previous owner, environment bridge; only with ATHANOR_BRIDGE_REGISTRY
 
 Kernel path (doc_build_ordering.md, O1):
 CI9 kernel-bump.yml (PR) -> merge -> CI8 kernel-build.yml (publish azoth) -> dispatches CI1
@@ -97,8 +98,8 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 - **Purpose:** builds the forge packages, the tier repositories, the three system images and the ISO (section 1.1).
 - **Triggers:** push to `main`, `iso-v0` on `forge/**` (not `forge/test/**`, `forge/specs/azoth/**`), `system/**`, `Cargo.toml`, `flake.nix`, `flake.lock`, `call-*.yml`, the NVIDIA workflows; dispatch (`sha`); cron `0 4 * * *`.
 - **Outputs:** artifact `kernel-artifacts`; images of CI3, CI4, CI5, CI6.
-- **Secrets, variables:** `REGISTRY_HOST`, `KERNEL_REGISTRY`, `GITHUB_TOKEN`; `MODULE_SIGNING_KEY` and `SECUREBOOT_SIGNING_KEY` in `nvidia-kmod-sign`, `COSIGN_PRIVATE_KEY` and `COSIGN_PASSWORD` in `sign-system-images`. No secret is passed to a called workflow.
-- **Environment:** `signing-kernel` on `nvidia-kmod-sign`; `signing` on `sign-system-images`, the alias of `signing-images` during the image key rotation (`docs/operations/secrets.md` section 4.1; ADR-0064). Both are jobs of this workflow, not of CI6 or CI5: a called workflow's job reads the secrets of its environment only when its caller passes `secrets: inherit` ([actions/runner#4453](https://github.com/actions/runner/issues/4453)), so the sign job of CI6, called without it, ran with both kernel keys empty in run 37598455557, and an inherit would hand every secret to every job of the called workflow (D43). The workflow sets no workflow-level `env:`, which D43 limits to plain values beside a signing job.
+- **Secrets, variables:** `REGISTRY_HOST`, `KERNEL_REGISTRY`, `GITHUB_TOKEN`; `MODULE_SIGNING_KEY` and `SECUREBOOT_SIGNING_KEY` in `nvidia-kmod-sign`, `COSIGN_PRIVATE_KEY` and `COSIGN_PASSWORD` in `sign-system-images`; `ATHANOR_BRIDGE_REGISTRY` and `ATHANOR_BRIDGE_TOKEN` in `bridge-system-images`. No secret is passed to a called workflow.
+- **Environment:** `signing-kernel` on `nvidia-kmod-sign`; `signing` on `sign-system-images`, the alias of `signing-images` during the image key rotation (`docs/operations/secrets.md` section 4.1; ADR-0064). Both are jobs of this workflow, not of CI6 or CI5: a called workflow's job reads the secrets of its environment only when its caller passes `secrets: inherit` ([actions/runner#4453](https://github.com/actions/runner/issues/4453)), so the sign job of CI6, called without it, ran with both kernel keys empty in run 37598455557, and an inherit would hand every secret to every job of the called workflow (D43). The workflow sets no workflow-level `env:`, which D43 limits to plain values beside a signing job. `bridge` on `bridge-system-images`, which holds the token that writes under the previous owner (doc_update_delivery.md, UD45); the job is skipped while `ATHANOR_BRIDGE_REGISTRY` is unset.
 - **Runner:** hosted. **Concurrency:** `<workflow>-<ref>`, no cancel: the newest run waits (O6). The group stays at run level because it publishes the system images in commit order: a group on the image job alone is taken in arrival order, and clients order images by build time (doc_update_trust.md, UT9). It also holds the signing approvals of the run (`sign-system-images`, and `nvidia-kmod` when the modules are missing), so the next push waits for them; PL49 lifts this once the image publish refuses an older revision and signing leaves the run.
 - **Scripts:** `forge/scripts/dynamic-matrix.sh`, `system/kernel-artifacts.sh`, `forge/specs/azoth/signer/run.sh`, `system/sign-images.sh`, `system/verify-images.sh`, `system/tag-images.sh`.
 - **Health:** 37444165929 pending; 37441359373, 37436322329, 37389162383, 37384753812 cancelled. The cancelled runs were superseded in the concurrency group while 37384733899 waited for the `signing` approvals (its `dag-system-image` started 9 h after `build-repo`; its `sign-system-images` was still waiting at 09:44 UTC). Last complete runs: 37362183855 failure (a lint job cancelled at its limit), 37315915191 and 37299854397 success with all system-image jobs green.
@@ -131,7 +132,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 
 - **File:** `call-system-image.yml`. **Purpose:** aggregates the tier repositories, builds the three system images and the ISO, signs them keyless; CI1 `sign-system-images` signs them with the update key after it.
 - **Triggers:** `workflow_call` (CI1). **Input:** `builder_content_hash`. **Outputs:** tier repository images, system images, ISO image; artifact `image-digests`.
-- **Secrets:** `GITHUB_TOKEN`.
+- **Secrets, variables:** `GITHUB_TOKEN`; `ATHANOR_BRIDGE_REGISTRY`, which the system stage build passes to `system/build-image.sh` as the image's list of previous owners (`doc_update_delivery.md` UD45) _(second step of UD45, not landed)_.
 - **Environment:** none. `dag-system-image` holds no key; the vmlinuz arrives signed, from `azoth-boot` by digest, and the key-based signature of the images is CI1 `sign-system-images`, one maintainer approval per run (D43).
 - **Runner:** hosted. **Concurrency:** caller's.
 - **Scripts:** `scripts/fetch_repo_rpms.sh` (in `forge/`), `system/build-image.sh`, `system/shared-layers.sh`, `system/image-digests.sh`, `forge/scripts/sbom_rootfs.sh`, `sign_attest.sh`, `build_iso.sh`, `retry.sh`.
@@ -389,6 +390,8 @@ Every name below is described in the secrets inventory, `docs/operations/secrets
 | `BUILDER_STABLE_TAG` | variable, default `latest` | not set | CI21, CI22 |
 | `SETTINGS_APP_PRIVATE_KEY` | secret (GitHub App key, read-only App) | repository, not set yet | CI29 |
 | `SETTINGS_APP_CLIENT_ID` | variable, no default | repository, not set yet | CI29 |
+| `ATHANOR_BRIDGE_REGISTRY` | variable, unset: no bridge, and images list no previous owner | repository, not set | CI1, CI5 |
+| `ATHANOR_BRIDGE_TOKEN` | secret (classic PAT, write:packages, of an account that can write the previous owner's images; its reach in `secrets.md` section 1.4) | environment `bridge`, not set yet | CI1 |
 
 Environments (`gh api repos/ars-regia/athanor/environments`):
 
@@ -397,6 +400,7 @@ Environments (`gh api repos/ars-regia/athanor/environments`):
 | `signing-kernel` | required reviewer `hr-mes`, no administrator bypass; branches `iso-v0`, `main`, both protected | CI1 (`nvidia-kmod-sign`) |
 | `signing-images` | as `signing-kernel` | CI1 (`sign-system-images`, as `signing` during the image key rotation) |
 | `delete` | none | no workflow |
+| `bridge` | required reviewer `hr-mes`, no administrator bypass; branches `iso-v0`, `main`; not created yet | CI1 (`bridge-system-images`) |
 
 ## 6. Proposals
 

@@ -28,6 +28,9 @@ pub struct Deployed {
     /// bootc calls the deployment incompatible: packages were layered, removed or replaced
     /// with rpm-ostree, so bootc neither describes it as an image nor upgrades it.
     pub local_changes: bool,
+    /// The ostree deployment, `<checksum>.<deploySerial>` as `ostree admin status` names it: two
+    /// deployments of one digest differ here. `None` when bootc does not report it.
+    pub deployment: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,11 +79,22 @@ pub fn host_of(image: &str) -> Option<String> {
     image.split('/').next().filter(|host| !host.is_empty()).map(str::to_owned)
 }
 
-/// True for the registry's answer that a tag has no manifest. Narrower than the `Registry`
-/// code, which also covers `unauthorized` and `denied`: those must keep failing.
+/// True for the registry's answer that a tag, or the whole image, has no manifest:
+/// `manifest unknown` or `name unknown` (the distribution specification), and the answers
+/// ghcr.io gives for a package that does not exist, which it does not tell from a private
+/// one: a pull token refused with 403, or `denied`. Narrower than the `Registry` code, which
+/// also covers `unauthorized`: that must keep failing.
 #[must_use]
 pub fn manifest_absent(stderr: &str) -> bool {
-    stderr.contains("reading manifest") && stderr.contains("manifest unknown")
+    (stderr.contains("reading manifest") && (stderr.contains("manifest unknown") || stderr.contains("name unknown"))) || access_denied(stderr)
+}
+
+/// True for the two answers of ghcr.io that [`manifest_absent`] reads as absent although the
+/// registry did not say "not found": a package that does not exist, but also one made
+/// private, or a credential that expired, answers the same.
+#[must_use]
+pub fn access_denied(stderr: &str) -> bool {
+    stderr.contains("Requesting bearer token: received unexpected HTTP status: 403 Forbidden") || stderr.contains("denied: requested access to the resource is denied")
 }
 
 /// Maps the error text of bootc, skopeo or ostree to a code. The text goes no further.
@@ -123,6 +137,14 @@ struct BootcEntry {
     download_only: bool,
     #[serde(default)]
     incompatible: bool,
+    ostree: Option<BootcOstree>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BootcOstree {
+    checksum: Option<String>,
+    deploy_serial: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -150,6 +172,7 @@ fn deployed(entry: BootcEntry) -> Option<Deployed> {
         build_time: image.timestamp.as_deref().and_then(unix_time).unwrap_or(0),
         download_only: entry.download_only,
         local_changes: false,
+        deployment: entry.ostree.and_then(|ostree| Some(format!("{}.{}", ostree.checksum?, ostree.deploy_serial?))),
     })
 }
 
@@ -213,6 +236,7 @@ pub fn parse_local(json: &str) -> Option<Deployed> {
         enforcing: reference.starts_with("ostree-image-signed:"),
         download_only: false,
         local_changes: true,
+        deployment: None,
     })
 }
 
@@ -257,7 +281,12 @@ impl Tools for System {
         let host = host_of(image);
         let digest = match run_with_stderr(SKOPEO, &["inspect", "--format", "{{.Digest}}", &format!("docker://{image}")], host.clone()) {
             Ok(out) => out.trim().to_owned(),
-            Err((_, stderr)) if manifest_absent(&stderr) => return Ok(None),
+            Err((_, stderr)) if manifest_absent(&stderr) => {
+                if access_denied(&stderr) {
+                    tracing::warn!(%image, "the registry denied access, read as an absent image: the package may be private, or a credential expired");
+                }
+                return Ok(None);
+            }
             Err((failure, _)) => return Err(failure),
         };
         // The configuration is read by digest, so both facts describe one image even if
@@ -337,6 +366,19 @@ mod tests {
     }
 
     #[test]
+    fn a_deployment_is_named_by_its_checksum_and_serial_when_bootc_gives_them() {
+        assert_eq!(parse_status(STAGED, || None).expect("status").staged.expect("staged").deployment, None);
+        // The members of the desktop's booted entry of 2026-10-01 (INCOMPATIBLE), on the staged one.
+        let named = STAGED.replacen(r#""downloadOnly":true,"#, r#""downloadOnly":true,"ostree":{"checksum":"b87dc949","deploySerial":1,"stateroot":"default"},"#, 1);
+        assert_eq!(parse_status(&named, || None).expect("status").staged.expect("staged").deployment.as_deref(), Some("b87dc949.1"));
+        // A bootc that leaves out one of the two loses the name, not the status.
+        for partial in [r#""checksum":"b87dc949","#, r#""deploySerial":1,"#] {
+            let staged = parse_status(&named.replacen(partial, "", 1), || None).expect("status").staged.expect("staged");
+            assert_eq!((staged.digest.as_str(), staged.deployment), ("sha256:e64f7608", None), "{partial}");
+        }
+    }
+
+    #[test]
     fn a_host_not_booted_from_an_image_has_no_status() {
         assert_eq!(parse_status(r#"{"status":{"booted":null,"staged":null,"rollback":null}}"#, || None), None);
         assert_eq!(parse_status("not json", || None), None);
@@ -399,8 +441,17 @@ mod tests {
     #[test]
     fn only_a_missing_manifest_is_absent() {
         assert!(manifest_absent("Error parsing image name \"docker://r/o/a:stable\": reading manifest stable in r/o/a: manifest unknown"));
+        assert!(manifest_absent("reading manifest latest in r/o/a: name unknown: repository name not known to registry"));
+        // ghcr.io, for a package that does not exist (observed 2026-10-08 with skopeo 1.22).
+        assert!(manifest_absent(
+            "Error parsing image name \"docker://ghcr.io/o/absent:latest\": Requesting bearer token: received unexpected HTTP status: 403 Forbidden"
+        ));
+        assert!(manifest_absent("Error reading manifest latest in ghcr.io/o/absent: denied: requested access to the resource is denied"));
         assert!(!manifest_absent("reading manifest stable in r/o/a: unauthorized: authentication required"));
+        assert!(!manifest_absent("Requesting bearer token: received unexpected HTTP status: 401 Unauthorized"));
         assert!(!manifest_absent("pinging container registry r: dial tcp: i/o timeout"));
+        assert!(!access_denied("reading manifest latest in r/o/a: name unknown: repository name not known to registry"));
+        assert!(access_denied("Error reading manifest latest in ghcr.io/o/absent: denied: requested access to the resource is denied"));
     }
 
     #[test]

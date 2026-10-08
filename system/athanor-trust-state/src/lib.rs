@@ -51,6 +51,22 @@ pub enum Reason {
     /// enforce the policy: a plain `bootc switch` followed a tag without verifying it. This
     /// machine does not verify its updates, and `athanor-update` does not check for any.
     OriginNotEnforcing,
+    /// The booted image is the project's image under its previous owner, which the policy
+    /// no longer names. The migration switches the machine, verified, to the same image
+    /// under the owner the policy pins; until that deployment boots, the state reads this.
+    OwnerMoved,
+    /// As `OwnerMoved`, but the migration cannot move the machine yet: a rollback is queued,
+    /// or the new owner publishes no such image or tag (a run-number tag, for one).
+    OwnerMovedWaiting,
+    /// As `OwnerMoved`, but the image under the new owner is the held digest (the user or
+    /// greenboot went back from it), or one whose deployments failed to boot twice: the
+    /// migration stages neither, so the machine stays where it is until the new owner
+    /// publishes a newer build.
+    OwnerMovedHeld,
+    /// The signature verifies, but the machine follows a run-number tag or a digest: one
+    /// build, under which nothing newer is ever published. It receives no updates until it
+    /// switches to a channel; nothing switches it automatically.
+    PinnedBuild,
 }
 
 /// The `verified` member of the file. The pair is redundant on purpose, so a reader can
@@ -288,7 +304,7 @@ mod tests {
 
     #[test]
     fn every_reason_but_signature_is_attention() {
-        for reason in [Reason::Media, Reason::NoSignature, Reason::KeyNotInPolicy, Reason::PolicyNotInForce, Reason::ReferenceOutOfScope, Reason::LocalChanges, Reason::ChannelAbsent, Reason::OriginNotEnforcing] {
+        for reason in [Reason::Media, Reason::NoSignature, Reason::KeyNotInPolicy, Reason::PolicyNotInForce, Reason::ReferenceOutOfScope, Reason::LocalChanges, Reason::ChannelAbsent, Reason::OriginNotEnforcing, Reason::OwnerMoved, Reason::OwnerMovedWaiting, Reason::OwnerMovedHeld, Reason::PinnedBuild] {
             let state = State { verified: reason.into(), ..verified_state() };
             assert_eq!(badge(&state, NOW), Badge::Attention, "{reason:?}");
         }
@@ -363,6 +379,10 @@ mod tests {
         assert_eq!(serde_json::to_string(&Reason::LocalChanges).expect("serialize"), r#""local-changes""#);
         assert_eq!(serde_json::to_string(&Reason::ChannelAbsent).expect("serialize"), r#""channel-absent""#);
         assert_eq!(serde_json::to_string(&Reason::OriginNotEnforcing).expect("serialize"), r#""origin-not-enforcing""#);
+        assert_eq!(serde_json::to_string(&Reason::OwnerMoved).expect("serialize"), r#""owner-moved""#);
+        assert_eq!(serde_json::to_string(&Reason::OwnerMovedWaiting).expect("serialize"), r#""owner-moved-waiting""#);
+        assert_eq!(serde_json::to_string(&Reason::OwnerMovedHeld).expect("serialize"), r#""owner-moved-held""#);
+        assert_eq!(serde_json::to_string(&Reason::PinnedBuild).expect("serialize"), r#""pinned-build""#);
     }
 
     fn scratch(test: &str) -> std::path::PathBuf {
