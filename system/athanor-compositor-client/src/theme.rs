@@ -14,9 +14,19 @@ use gtk4::{gdk, gio, prelude::*};
 
 use crate::cosmic_config::{self, key};
 
-const MODE: &str = "com.system76.CosmicTheme.Mode";
-const DARK: &str = "com.system76.CosmicTheme.Dark";
-const LIGHT: &str = "com.system76.CosmicTheme.Light";
+// The components `read_from` reads; public for the fuzz target, which writes where they are read.
+#[doc(hidden)]
+pub const MODE: &str = "com.system76.CosmicTheme.Mode";
+#[doc(hidden)]
+pub const DARK: &str = "com.system76.CosmicTheme.Dark";
+#[doc(hidden)]
+pub const LIGHT: &str = "com.system76.CosmicTheme.Light";
+
+/// The file `read_from` reads for `key` of `component` under the `cosmic` directory `dir`.
+#[doc(hidden)]
+pub fn key_path(dir: &Path, component: &str, key: &str) -> PathBuf {
+    cosmic_config::component(dir, component).join(key)
+}
 
 /// Calmo's ink on light accents (`ath_acc_ink` of the dark variant) and plain white.
 const DARK_INK: Rgb = Rgb {

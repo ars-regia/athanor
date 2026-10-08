@@ -31,7 +31,7 @@ pub fn claims(data: &[u8]) -> Setup {
     let Some((&shape, rest)) = data.split_first() else {
         return Ok(());
     };
-    let dir = scratch_dir()?;
+    let dir = crate::scratch_dir("claims")?;
     let manifest = dir.join("manifest.json");
     let mut blob: Option<PathBuf> = None;
     if shape % 2 == 0 {
@@ -64,20 +64,6 @@ pub fn claims(data: &[u8]) -> Setup {
         Some(path) => std::fs::remove_file(path),
         None => Ok(()),
     }
-}
-
-/// A private directory for the claims input, created once per process. `create` (not
-/// `create_dir_all`) with mode 0700 fails on a path another user placed in the shared
-/// temporary directory, so the writes below never follow someone else's symlink.
-fn scratch_dir() -> std::io::Result<&'static std::path::Path> {
-    use std::os::unix::fs::DirBuilderExt as _;
-    static DIR: OnceLock<PathBuf> = OnceLock::new();
-    if let Some(dir) = DIR.get() {
-        return Ok(dir);
-    }
-    let dir = std::env::temp_dir().join(format!("athanor-fuzz-claims-{}", std::process::id()));
-    std::fs::DirBuilder::new().mode(0o700).create(&dir)?;
-    Ok(DIR.get_or_init(|| dir))
 }
 
 /// `crate::tools::parse_status`, with the incompatible-deployment fallback answering both ways.

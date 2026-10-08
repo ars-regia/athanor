@@ -18,92 +18,65 @@ fn replay(target: &str, entry: fn(&[u8]) -> athanor_fuzz_entries::Setup) {
     }
 }
 
-#[test]
-#[cfg(feature = "update")]
-fn update_claims() {
-    replay("update_claims", athanor_fuzz_entries::update::claims);
+// One line per fuzz target: the feature that builds its entry point, the target name (also
+// the corpus directory and the `[[bin]]` of fuzz/Cargo.toml) and the entry point. The macro
+// generates the replay test and the list `every_target_is_replayed` compares to the disk.
+macro_rules! replay_tests {
+    ($($feature:literal $name:ident => $entry:path;)*) => {
+        const TARGETS: &[&str] = &[$(stringify!($name)),*];
+        $(
+            #[test]
+            #[cfg(feature = $feature)]
+            fn $name() {
+                replay(stringify!($name), $entry);
+            }
+        )*
+    };
 }
 
-#[test]
-#[cfg(feature = "update")]
-fn update_status() {
-    replay("update_status", athanor_fuzz_entries::update::status);
+replay_tests! {
+    "update" update_claims => athanor_fuzz_entries::update::claims;
+    "update" update_status => athanor_fuzz_entries::update::status;
+    "update" update_local => athanor_fuzz_entries::update::local;
+    "gtk" bar_tray => athanor_fuzz_entries::bar::tray;
+    "gtk" bar_dbusmenu => athanor_fuzz_entries::bar::dbusmenu;
+    "gtk" bar_notice => athanor_fuzz_entries::bar::notice;
+    "gtk" bar_png => athanor_fuzz_entries::bar::png;
+    "shelld" shelld_hints => athanor_fuzz_entries::shelld::hints;
+    "shelld" shelld_image => athanor_fuzz_entries::shelld::image;
+    "shelld" shelld_icon => athanor_fuzz_entries::shelld::icon;
+    "gtk" compositor_shortcuts => athanor_fuzz_entries::compositor::shortcuts;
+    "gtk" compositor_theme => athanor_fuzz_entries::compositor::theme;
+    "layout" layout_document => athanor_fuzz_entries::layout::document;
+    "layout" layout_favorites => athanor_fuzz_entries::layout::favorites;
+    "layout" trust_state => athanor_fuzz_entries::layout::trust_state;
 }
 
+/// A corpus directory or a `[[bin]]` without a line above is a target nobody replays.
 #[test]
-#[cfg(feature = "update")]
-fn update_local() {
-    replay("update_local", athanor_fuzz_entries::update::local);
-}
-
-#[test]
-#[cfg(feature = "gtk")]
-fn bar_tray() {
-    replay("bar_tray", athanor_fuzz_entries::bar::tray);
-}
-
-#[test]
-#[cfg(feature = "gtk")]
-fn bar_dbusmenu() {
-    replay("bar_dbusmenu", athanor_fuzz_entries::bar::dbusmenu);
-}
-
-#[test]
-#[cfg(feature = "gtk")]
-fn bar_notice() {
-    replay("bar_notice", athanor_fuzz_entries::bar::notice);
-}
-
-#[test]
-#[cfg(feature = "gtk")]
-fn bar_png() {
-    replay("bar_png", athanor_fuzz_entries::bar::png);
-}
-
-#[test]
-#[cfg(feature = "shelld")]
-fn shelld_hints() {
-    replay("shelld_hints", athanor_fuzz_entries::shelld::hints);
-}
-
-#[test]
-#[cfg(feature = "shelld")]
-fn shelld_image() {
-    replay("shelld_image", athanor_fuzz_entries::shelld::image);
-}
-
-#[test]
-#[cfg(feature = "shelld")]
-fn shelld_icon() {
-    replay("shelld_icon", athanor_fuzz_entries::shelld::icon);
-}
-
-#[test]
-#[cfg(feature = "gtk")]
-fn compositor_shortcuts() {
-    replay("compositor_shortcuts", athanor_fuzz_entries::compositor::shortcuts);
-}
-
-#[test]
-#[cfg(feature = "gtk")]
-fn compositor_theme() {
-    replay("compositor_theme", athanor_fuzz_entries::compositor::theme);
-}
-
-#[test]
-#[cfg(feature = "layout")]
-fn layout_document() {
-    replay("layout_document", athanor_fuzz_entries::layout::document);
-}
-
-#[test]
-#[cfg(feature = "layout")]
-fn layout_favorites() {
-    replay("layout_favorites", athanor_fuzz_entries::layout::favorites);
-}
-
-#[test]
-#[cfg(feature = "layout")]
-fn trust_state() {
-    replay("trust_state", athanor_fuzz_entries::layout::trust_state);
+fn every_target_is_replayed() {
+    let fuzz = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fuzz");
+    let mut on_disk: Vec<String> = std::fs::read_dir(fuzz.join("corpus"))
+        .expect("fuzz/corpus")
+        .map(|entry| entry.expect("corpus entry"))
+        .filter(|entry| entry.path().is_dir())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    let manifest = std::fs::read_to_string(fuzz.join("Cargo.toml")).expect("fuzz/Cargo.toml");
+    let mut bins = Vec::new();
+    let mut in_bin = false;
+    for line in manifest.lines().map(str::trim) {
+        if line.starts_with('[') {
+            in_bin = line == "[[bin]]";
+        } else if let (true, Some(name)) = (in_bin, line.strip_prefix("name = \"")) {
+            bins.push(name.trim_end_matches('"').to_owned());
+        }
+    }
+    on_disk.extend(bins.iter().cloned());
+    on_disk.sort();
+    on_disk.dedup();
+    let mut listed: Vec<String> = TARGETS.iter().map(|name| (*name).to_owned()).collect();
+    listed.sort();
+    assert_eq!(on_disk, listed, "corpus directories and [[bin]] names against replay_tests!");
+    assert_eq!(bins.len(), listed.len(), "a corpus directory has no [[bin]] or the reverse");
 }

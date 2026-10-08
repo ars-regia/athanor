@@ -37,6 +37,30 @@ mod sigobj;
 #[allow(dead_code)]
 mod tools;
 
+/// A private scratch directory named after `name`, created once per process under the
+/// temporary directory and returned on every later call. The name carries the process id and
+/// the clock in nanoseconds, so a reused pid never meets a stale directory; `create` (not
+/// `create_dir_all`) with mode 0700 fails on a path another user placed in the shared
+/// temporary directory, so the writes into it never follow someone else's symlink. Nothing
+/// removes it (`panic = "abort"` skips destructors); it lives under the temporary directory.
+#[cfg(any(feature = "update", feature = "gtk"))]
+fn scratch_dir(name: &'static str) -> std::io::Result<std::path::PathBuf> {
+    use std::os::unix::fs::DirBuilderExt as _;
+    use std::sync::Mutex;
+    static DIRS: Mutex<Vec<(&'static str, std::path::PathBuf)>> = Mutex::new(Vec::new());
+    let mut dirs = DIRS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((_, dir)) = dirs.iter().find(|(known, _)| *known == name) {
+        return Ok(dir.clone());
+    }
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let dir = std::env::temp_dir().join(format!("athanor-fuzz-{name}-{}-{nanos}", std::process::id()));
+    std::fs::DirBuilder::new().mode(0o700).create(&dir)?;
+    dirs.push((name, dir.clone()));
+    Ok(dir)
+}
+
 /// Splits `data` at each NUL byte into at most `N` fields; a missing field is empty.
 /// Lossy UTF-8: the text parsers take `&str`, and the interesting inputs are still text.
 #[cfg(any(feature = "shelld", feature = "gtk"))]

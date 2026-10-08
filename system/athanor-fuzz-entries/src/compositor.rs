@@ -16,15 +16,17 @@ pub fn shortcuts(data: &[u8]) -> Setup {
 /// `theme::read_from` over a configuration directory whose three keys come from the input,
 /// split at NUL: `is_dark`, `is_high_contrast`, `accent`, the last two in both modes.
 pub fn theme(data: &[u8]) -> Setup {
-    let root = std::env::temp_dir().join(format!("athanor-fuzz-theme-{}", std::process::id()));
+    let root = crate::scratch_dir("theme")?;
     let put = |component: &str, name: &str, value: &str| -> Setup {
-        let dir = root.join(component).join("v1");
-        std::fs::create_dir_all(&dir)?;
-        std::fs::write(dir.join(name), value)
+        let path = theme::key_path(&root, component, name);
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(path, value)
     };
     let [is_dark, high_contrast, accent] = crate::fields::<3>(data);
-    put("com.system76.CosmicTheme.Mode", "is_dark", &is_dark)?;
-    for mode in ["com.system76.CosmicTheme.Dark", "com.system76.CosmicTheme.Light"] {
+    put(theme::MODE, "is_dark", &is_dark)?;
+    for mode in [theme::DARK, theme::LIGHT] {
         put(mode, "is_high_contrast", &high_contrast)?;
         put(mode, "accent", &accent)?;
     }
