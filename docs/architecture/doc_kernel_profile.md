@@ -739,10 +739,11 @@ apply with either option of D6; the IPE policies apply with the dm-verity option
 *Amended on 2026-10-06 (A2-8, #150).* The dm-verity option is not taken, so the IPE policies of
 this section apply to neither release 1.0 nor 1.1: IPE coverage is lost, a cost the
 maintainer recorded. Execution control moves to fs-verity and signed images, as the decision
-states; fs-verity arrives with the 1.1 step, a `/usr` sealed by composefs whose digest a
+states; the sealed fs-verity digest arrives with the 1.1 step, a `/usr` sealed by composefs whose digest a
 Secure Boot signed UKI carries. Execution control on 1.0, between the loss of IPE and the
 1.1 seal, is ADR-0076 point 1: composefs for `/usr`, with fs-verity where the filesystem
-supports it, and `noexec` on the system-writable temporary mounts. Its residual risk, stated by
+supports it, and `noexec` on the system-writable temporary mounts, whose list this document still owes
+(D23 keeps the home and `/tmp` without `noexec`). Its residual risk, stated by
 the maintainer on 2026-10-08 (ADR-0097): nothing binds `/usr` to a signed digest at boot, so
 tampering with `/usr` offline, by someone with access to the disk, is not detected on 1.0
 (`doc_threat_model.md` TM7); the 1.1 seal closes it.
