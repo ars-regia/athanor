@@ -2,7 +2,7 @@
 id: A2-10
 title: "Cleanup of dead packages, documents and units"
 date: 2026-10-05
-status: amended by ADR-0073
+status: amended by ADR-0073, ADR-0091
 issues: []
 areas: [packages, docs]
 ---
