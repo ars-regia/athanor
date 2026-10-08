@@ -31,7 +31,6 @@ allow = [
     "BSD-1-Clause",
     "BSD-2-Clause",
     "BSD-3-Clause",
-    "GPL-3.0-only", # greetd_ipc, linked only by athanor-greeter-ui, which is GPL-3.0-only for that reason
     "GPL-3.0-or-later", # our own crates
     "ISC",
     "LGPL-2.1-or-later",
@@ -43,6 +42,11 @@ allow = [
 ]
 confidence-threshold = 0.8
 exceptions = [
+    # greetd_ipc is GPL-3.0-only and only the greeter links it; the greeter binary is
+    # therefore GPL-3.0-only too (verify.py licence, OWN_LICENCE_EXCEPTIONS). A GPL-3.0-only
+    # crate anywhere else is rejected.
+    { crate = "greetd_ipc", allow = ["GPL-3.0-only"] },
+    { crate = "athanor-greeter-ui", allow = ["GPL-3.0-only"] },
     # jpeg-encoder is "(MIT OR Apache-2.0) AND IJG": the IJG terms are a BSD-style notice
     # clause, compatible with GPL-3.0. Reached through glycin-image-rs by athanor-preview-render.
     { crate = "jpeg-encoder", allow = ["IJG"] },

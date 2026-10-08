@@ -1789,6 +1789,9 @@ OWN_LICENCE_EXCEPTIONS = {
     "forge/specs/athanor-greeter-ui/athanor-greeter-ui.spec":
         ("GPL-3.0-only", "links greetd_ipc (GPL-3.0-only)"),
 }
+# The crate whose dependency forces the exception above; a crate that depends on it must be
+# in the table, and a crate in the table must still depend on it.
+GPL3_ONLY_DEPENDENCY = "greetd_ipc"
 # Crates whose manifests agents may not edit without the maintainer's approval.
 PROTECTED_CRATES = {"system/confidential_computing/athanor-attestation/Cargo.toml"}
 # Files that carry packaging metadata outside Cargo.toml and *.spec.
@@ -1878,8 +1881,32 @@ def licence_problems(root=None):
                 m = re.match(r"""^\s*license:\s*["']?([^"'\s]*)""", line)
                 if m and m.group(1) != OWN_LICENCE:
                     out.append(f"{f}:{n}: nfpm license: {m.group(1)}, expected {OWN_LICENCE}")
+    out += exception_problems(root, files)
     if not (root / "LICENSE").is_file():
         out.append("LICENSE: missing at the repository root")
+    return out
+
+
+def exception_problems(root, files):
+    """OWN_LICENCE_EXCEPTIONS must match the dependency that justifies it, both ways."""
+    out = []
+    dependents = set()
+    for f in files:
+        if f.rsplit("/", 1)[-1] != "Cargo.toml":
+            continue
+        try:
+            manifest = tomllib.loads(read(root / f))
+        except tomllib.TOMLDecodeError:
+            continue  # reported as unreadable above
+        if "package" not in manifest:
+            continue
+        if GPL3_ONLY_DEPENDENCY in manifest.get("dependencies", {}):
+            dependents.add(f)
+    for f in sorted(dependents - set(OWN_LICENCE_EXCEPTIONS)):
+        out.append(f"{f}: depends on {GPL3_ONLY_DEPENDENCY} (GPL-3.0-only) and has no entry in OWN_LICENCE_EXCEPTIONS")
+    for f in sorted(p for p in OWN_LICENCE_EXCEPTIONS if p.endswith("Cargo.toml")):
+        if (root / f).is_file() and f not in dependents:
+            out.append(f"{f}: OWN_LICENCE_EXCEPTIONS entry, but it no longer depends on {GPL3_ONLY_DEPENDENCY}")
     return out
 
 
