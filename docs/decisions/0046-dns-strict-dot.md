@@ -20,3 +20,5 @@ DNS model (b): strict DoT to a chosen resolver (Quad9 default, configurable), ro
 ## Consequences
 
 No specification document under `docs/architecture` cites this record yet; it takes effect through the work it describes.
+
+Amended 2026-10-08 by the maintainer: Quad9 with strict DNS over TLS stays the default. The resolver the decision calls "configurable" is chosen at first run and in Settings, Network, among Quad9, Cloudflare, the network's own DNS (from DHCP) and a custom resolver (`doc_first_run.md` FR12, `doc_settings.md` SE9); no implementation exists yet. The default is listed as a contact in `forge/config/contacts.toml` ([ADR-0089](0089-defaults-that-contact-or-listen.md)).

@@ -83,43 +83,16 @@ jobs:
             echo "${GITHUB_TOKEN}" | buildah login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
             bash scripts/fetch_repo_rpms.sh "${GITHUB_REPOSITORY_OWNER}"
 
-            # publish_tier TIER: one of tier0..tier3, or "" for the rolling aggregate. The
-            # image is pushed only when the RPM content differs from the published one.
-            publish_tier() {
-              local tier=$1 dir img_name image new_hash old_hash ctr
-              if [ -n "$tier" ]; then
-                dir="repo-cache/repo-${tier}"
-                img_name="athanor-forge-${tier}-repo:latest"
-              else
-                dir="repo-cache/repo"
-                img_name="athanor-forge-rolling-repo:latest"
-              fi
-              image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${img_name}"
-              new_hash=$(find "$dir" -name '*.rpm' -type f | sort | xargs -r sha256sum | sha256sum | awk '{print $1}')
-              old_hash=$(skopeo inspect --config "docker://$image" 2>/dev/null | jq -r '.config.Labels["tier.content.sha256"] // ""')
-              if [ -n "$old_hash" ] && [ "$new_hash" = "$old_hash" ]; then
-                echo "Tier '${tier:-rolling}' ($img_name): RPM content unchanged, not pushed"
-                return 0
-              fi
-              (
-                cd "$dir"
-                createrepo_c .
-                ctr=$(buildah from scratch)
-                buildah copy "$ctr" . /
-                buildah config --label tier.content.sha256="$new_hash" "$ctr"
-                buildah commit --omit-timestamp "$ctr" "$image"
-                buildah push "$image"
-                buildah rm "$ctr"
-                buildah rmi "$image"
-              )
-            }
-            pids=()
-            for tier in tier0 tier1 tier2 tier3 ""; do
-              publish_tier "$tier" &
-              pids+=($!)
-            done
-            for pid in "${pids[@]}"; do wait "$pid"; done
+            # The tier images, and the digests the image build of this run installs (UD28).
+            bash scripts/publish_tiers.sh /workspace/tier-digests/tier-digests.json
           EOF
+
+      - name: Hand the tier digests to the image build
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tier-digests
+          path: tier-digests/tier-digests.json
+          if-no-files-found: error
 
       - name: 🧹 Cleanup Workspace Permissions
         if: always()
@@ -165,6 +138,12 @@ jobs:
         with:
           name: kernel-artifacts
           path: kernel-artifacts
+      - name: Tier digests published earlier in this run
+        # build-image.sh installs the tier repositories by these digests, never by tag (UD28).
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: tier-digests
+          path: tier-digests
       - name: ❄️ Install Nix (Bedrock Cache & Security Tools)
         uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
         with:
@@ -179,7 +158,7 @@ jobs:
           set -euo pipefail
           echo "${GITHUB_TOKEN}" | podman login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
       - name: 🧱 Build the system stage
-        # The Containerfile pulls its base and the tier repository images and installs
+        # The Containerfile pulls its base and the tier repository images by digest and installs
         # Fedora packages with dnf5, so the build needs the network; the build context
         # is the repository root, where its COPY sources live. The system stage the three
         # images share is built once per run, and its image ID is the base of all three
@@ -191,6 +170,11 @@ jobs:
         # The tier repositories were rebuilt from this checkout earlier in this run; a stale
         # per-package image once shipped athanor-recovery 1.0.0-5 while its spec said 6.
         run: bash system/check-image-rpms.sh "$(<artifacts/system-image.iid)"
+
+      - name: 🔒 Check the enabled units against the contacts list
+        # forge/config/contacts.toml lists what the image contacts by itself (ADR-0056); an
+        # enabled timer it does not list, or an enabled unit it calls silent, fails the build.
+        run: bash system/check-image-contacts.sh "$(<artifacts/system-image.iid)"
 
       - name: 🐳 Build OS Images
         # build-image.sh builds the default, NVIDIA and NVIDIA-legacy images in turn FROM the

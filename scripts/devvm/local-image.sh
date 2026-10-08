@@ -16,7 +16,7 @@
 # A clean checkout already built for the same specs skips steps 1 to 3. The tag goes to
 # .scratch/local-image/tag. OWNER (default $REGISTRY_HOST/$GITHUB_REPOSITORY_OWNER, which
 # default to ghcr.io and ars-regia), BUILDER and TIER3 name the
-# published images. Needs podman, rpm, skopeo and, for --push-to-vm, gh, jq and the VM.
+# published images. Needs podman, rpm, skopeo, jq and, for --push-to-vm, gh and the VM.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -96,8 +96,13 @@ else
 
     # 2. The overlay. The published tier3 holds one directory per package and no repodata: the
     # Containerfile installs every *.rpm it finds, so the new RPMs go in a directory of their own.
-    bash "$ROOT/forge/scripts/retry.sh" podman pull "$TIER3:latest"
-    cid=$(podman create "$TIER3:latest" /none)
+    # The published tiers are read once, by digest (system/tier-digests.sh); the overlay starts
+    # from that tier3 and replaces its digest in the file build-image.sh reads.
+    export TIER_DIGESTS_DIR=$work
+    bash "$ROOT/system/tier-digests.sh" resolve
+    published=$TIER3@$(jq -r .tier3 "$work/tier-digests.json")
+    bash "$ROOT/forge/scripts/retry.sh" podman pull "$published"
+    cid=$(podman create "$published" /none)
     podman export "$cid" | tar -x -C "$work/repo"
     podman rm "$cid" > /dev/null
     mapfile -t drop < <(find "$work/rpms" -name '*.rpm' -exec rpm -qp --qf '%{NAME}\n' {} +)
@@ -116,16 +121,17 @@ else
     printf 'FROM scratch\nCOPY repo/ /\n' > "$work/Containerfile.overlay"
     podman build -t "$OVERLAY:latest" -f "$work/Containerfile.overlay" "$work"
     podman push --tls-verify=false "$OVERLAY:latest"
+    overlay=$(skopeo inspect --tls-verify=false --format '{{.Digest}}' "docker://$OVERLAY:latest")
+    jq --arg digest "$overlay" '.tier3 = $digest' "$work/tier-digests.json" > "$work/tier-digests.new"
+    mv "$work/tier-digests.new" "$work/tier-digests.json"
 
-    # 3. The image. build-image.sh pulls with --pull=newer, which would replace a locally
-    # retagged tier3 with the published one: the overlay is served by a registries.conf remap.
+    # 3. The image. The Containerfile names tier3 in the published repository, by the overlay's
+    # digest: a registries.conf remap serves that repository from the overlay.
     cp /etc/containers/registries.conf "$work/registries.conf"
     printf '\n[[registry]]\nprefix = "%s"\nlocation = "%s"\ninsecure = true\n' "$TIER3" "$OVERLAY" >> "$work/registries.conf"
     bash "$ROOT/system/kernel-artifacts.sh" require-ready
     CONTAINERS_REGISTRIES_CONF=$work/registries.conf \
         bash "$ROOT/system/build-image.sh" --gpu none --registry localhost:5000/acc --tag "$tag"
-    # The remap left the local tier3 tag pointing at the overlay: take the published one back.
-    bash "$ROOT/forge/scripts/retry.sh" podman pull "$TIER3:latest"
     podman push --tls-verify=false "$image:$tag"
     echo "$tag" > "$work/tag"
     echo "$tag $*" > "$work/built"

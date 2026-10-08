@@ -40,7 +40,9 @@ The maintainer decided on 2026-10-07 to amend ADR-0080 as follows:
    signed derivatives (`azoth-boot`, `azoth-nvidia`), whose provenance
    `call-kernel-publish.yml` generates naming the unsigned digest and the signing run, claim
    Build L2. The policy gate is a repository script or Conforma's standalone `ec` CLI,
-   decided by a spike before PB5.
+   decided by a spike before PB5. Amended 2026-10-08 by the maintainer: the SLSA L3
+   statement covers provenance and signing; the Fedora RPM inputs are not pinned until the
+   RPM lock lands (PLAT-N10).
 3. **Decision 3 (two signing environments).** `MOK_PRIVATE_KEY` is retired at the close of
    the image key rotation (PB5b), not with the creation of the two environments.
 4. **Decision 5 (agent identity).** `prevent_self_review` is switched on in both signing

@@ -2,7 +2,10 @@
 # Builds one Athanor system image (docs/architecture/doc_system_image.md, S2, S8) from
 # system/Containerfile, in CI and locally, from the kernel and NVIDIA module digests that
 # system/kernel-artifacts.sh verified (docs/architecture/doc_build_ordering.md, O4): run its
-# resolve (or require-ready) first. Every image carries the digests it was built from as labels.
+# resolve (or require-ready) first. The tier repositories come by the digests of
+# $TIER_DIGESTS_DIR/tier-digests.json (default tier-digests/): the Orchestrator's publish step
+# writes it, and system/tier-digests.sh resolve writes it for any other build. Every image
+# carries the digests it was built from as labels.
 # The system stage the three images share is an image of its own, and each image is built FROM
 # its ID, so all three carry its layers unchanged (doc_update_delivery.md, UD40).
 # Usage: build-image.sh --system --registry REG --iidfile FILE
@@ -73,15 +76,38 @@ nvr=$(artifact nvr)
 pinned=$(bash "$ROOT/forge/specs/azoth/nvr.sh")
 [[ $nvr == "$pinned" ]] || { echo "${0##*/}: the kernel artifacts were resolved for ${nvr}, the pins give ${pinned}: run system/kernel-artifacts.sh resolve again" >&2; exit 2; }
 registry=$(artifact registry)
-# The tier repositories of the forge DAG (forge/scripts/fetch_repo_rpms.sh publishes them).
-forge_registry=${REGISTRY_HOST:-ghcr.io}/${GITHUB_REPOSITORY_OWNER:-ars-regia}
-forge_registry=${forge_registry,,}
 kernel=$(artifact kernel_digest)
 boot=$(artifact boot_digest)
+# The tier repositories of the forge DAG, by digest (doc_update_delivery.md, UD28): the
+# tier-digests.json of the run that published them (forge/scripts/publish_tiers.sh), or of
+# system/tier-digests.sh resolve for a build outside that run. The registry comes from the
+# same file, so the digests are looked up where they were read. A resolved file says when it was
+# resolved, and each digest must still be in the registry: a superseded tier can be deleted.
+tiers=${TIER_DIGESTS_DIR:-$ROOT/tier-digests}/tier-digests.json
+[[ -f $tiers ]] || { echo "${0##*/}: $tiers is missing: run system/tier-digests.sh resolve" >&2; exit 2; }
+forge_registry=$(jq -er '.registry | strings | select(test("^[a-z0-9][a-z0-9.:-]*(/[a-z0-9._-]+)+$"))' "$tiers") ||
+  { echo "${0##*/}: $tiers names no valid registry" >&2; exit 2; }
+if resolved=$(jq -er '.resolved | strings | select(test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))' "$tiers"); then
+  echo "${0##*/}: tier digests resolved at $resolved, $((($(date -u +%s) - $(date -u -d "$resolved" +%s)) / 3600)) h ago"
+fi
+# skopeo reads no CONTAINERS_REGISTRIES_CONF of its own: the remap of local-image.sh needs the flag.
+skopeo_conf=()
+[[ -z ${CONTAINERS_REGISTRIES_CONF:-} ]] || skopeo_conf=(--registries-conf "$CONTAINERS_REGISTRIES_CONF")
+tier_args=() tier_labels=()
+for n in 0 1 2 3; do
+  digest=$(jq -er ".tier$n | strings | select(test(\"^sha256:[0-9a-f]{64}$\"))" "$tiers") ||
+    { echo "${0##*/}: $tiers has no valid tier$n digest" >&2; exit 2; }
+  ref=$forge_registry/athanor-forge-tier$n-repo@$digest
+  skopeo "${skopeo_conf[@]}" inspect --format '{{.Digest}}' "docker://$ref" > /dev/null ||
+    { echo "${0##*/}: $ref cannot be read: re-run system/tier-digests.sh resolve, or the run that published the tiers" >&2; exit 2; }
+  tier_args+=(--build-arg "TIER${n}_DIGEST=$digest")
+  tier_labels+=(--label "io.athanor.forge-tier$n.digest=$digest")
+done
 # docker format: the OCI format has no SHELL instruction and podman would drop the
 # bash -o pipefail the Containerfile sets for every RUN, in the system stage image as well.
 common=(--layers --pull=newer --format docker --build-arg "AZOTH_NVR=$nvr" --build-arg "IMAGE_REGISTRY=$REGISTRY"
-  --build-arg "KERNEL_REGISTRY=$registry" --build-arg "FORGE_REGISTRY=$forge_registry" --build-arg "BOOT_DIGEST=$boot")
+  --build-arg "KERNEL_REGISTRY=$registry" --build-arg "FORGE_REGISTRY=$forge_registry" --build-arg "BOOT_DIGEST=$boot"
+  "${tier_args[@]}")
 build_system() {
   mkdir -p "$(dirname "$1")"
   podman build "${common[@]}" --target system --iidfile "$1" -f "$ROOT/system/Containerfile" "$ROOT"
@@ -93,7 +119,8 @@ if $SYSTEM_ONLY; then
 fi
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-args=("${common[@]}" --build-arg "GPU=$GPU" --label "io.athanor.azoth.digest=$kernel" --label "io.athanor.azoth-boot.digest=$boot")
+args=("${common[@]}" --build-arg "GPU=$GPU" --label "io.athanor.azoth.digest=$kernel" --label "io.athanor.azoth-boot.digest=$boot"
+  "${tier_labels[@]}")
 # Every published image has a version of its own and says when it was built (UT9). Machines
 # order images by `created`, never by the version string; bootc reports it as the
 # deployment's timestamp. SOURCE_DATE_EPOCH, when set, is the build time.
