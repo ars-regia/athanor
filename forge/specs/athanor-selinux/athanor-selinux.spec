@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-selinux
 Version:        1.0
-Release:        9%{?dist}
+Release:        10%{?dist}
 Summary:        Custom SELinux policies for Athanor OS
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -46,6 +46,10 @@ install -D -m 0644 athanor_nvidia_modules_load.cil %{buildroot}%{_datadir}/selin
 %{_datadir}/selinux/packages/athanor_nvidia_modules_load.cil
 
 %changelog
+* Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0-10
+- athanor_nix_daemon: let nix_daemon_t build for unprivileged users (runtime audit 2026-10-08,
+  RT-N2): read nsfs_t (setns into the sandbox mount namespace), sys_ptrace in its user
+  namespace (cap_userns) and read sysctl_vm_t. /dev/kvm stays refused (probe not audited).
 * Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0-9
 - athanor_nix_daemon: let init_t enter nix_daemon_t under no_new_privs, since
   athanor-nix-gc.service now runs as an unprivileged client of nix-daemon with
