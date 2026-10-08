@@ -1,6 +1,7 @@
 """Unit tests of the kernel artifacts in system/build-image.sh, with a podman stub that records
 its arguments (python3 -B -m unittest discover -s system/tests -v)."""
 
+import json
 import os
 import pathlib
 import subprocess
@@ -16,6 +17,7 @@ OPEN = "sha256:" + "3" * 64
 LEGACY = "sha256:" + "4" * 64
 BOOT = "sha256:" + "7" * 64  # azoth-boot, the signed vmlinuz
 SYSTEM = "5" * 64  # the image ID the stub's --iidfile reports for the system stage
+TIERS = {f"tier{n}": "sha256:" + "89ab"[n] * 64 for n in range(4)}  # the forge tier repositories
 
 
 class BuildImage(unittest.TestCase):
@@ -33,11 +35,16 @@ class BuildImage(unittest.TestCase):
             done
             """))
         (bin_dir / "podman").chmod(0o755)
+        (bin_dir / "skopeo").symlink_to(ROOT / "system" / "tests" / "fake_registry.py")
+        self.registry = self.dir / "registry.json"
         self.artifacts = self.dir / "artifacts"
         self.artifacts.mkdir()
         # No signing key anywhere: the vmlinuz arrives signed, by digest (D43).
         self.env = {k: v for k, v in os.environ.items() if not k.endswith("_KEY")}
-        self.env.update(PATH=f"{bin_dir}:{os.environ['PATH']}", KERNEL_ARTIFACTS_DIR=str(self.artifacts))
+        self.env.update(PATH=f"{bin_dir}:{os.environ['PATH']}", KERNEL_ARTIFACTS_DIR=str(self.artifacts),
+                        TIER_DIGESTS_DIR=str(self.dir / "tiers"), FAKE_REGISTRY=str(self.registry),
+                        FAKE_LOG=str(self.dir / "registry.log"))
+        self.tiers_file()
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -46,6 +53,18 @@ class BuildImage(unittest.TestCase):
         lines = {"state": "ready", "nvr": NVR, "registry": "ghcr.io/ars-regia", "kernel_digest": KERNEL,
                  "boot_digest": BOOT, "nvidia_open_digest": OPEN, "nvidia_legacy_digest": LEGACY, **values}
         (self.artifacts / "kernel-artifacts.env").write_text("".join(f"{k}={v}\n" for k, v in lines.items() if v is not None))
+
+    def tiers_file(self, **values):
+        """tier-digests.json as publish_tiers.sh and tier-digests.sh write it; None drops a key."""
+        tiers = {"registry": "ghcr.io/ars-regia", **TIERS, **values}
+        (self.dir / "tiers").mkdir(exist_ok=True)
+        (self.dir / "tiers" / "tier-digests.json").write_text(json.dumps({k: v for k, v in tiers.items() if v is not None}))
+        self.publish_tiers(tiers)
+
+    def publish_tiers(self, tiers):
+        """The registry holds every digest of TIERS."""
+        refs = {f"{tiers['registry']}/athanor-forge-{t}-repo@{d}": d for t, d in tiers.items() if t.startswith("tier") and d}
+        self.registry.write_text(json.dumps({"tags": refs}))
 
     def calls(self):
         """The arguments of each podman call, in order."""
@@ -159,6 +178,51 @@ class BuildImage(unittest.TestCase):
             self.assertNotIn("--secret", args)
             self.assertFalse(any("uki" in a for a in args), args)
         self.assertIn(f"io.athanor.azoth-boot.digest={BOOT}", variant)
+
+    def test_every_build_takes_the_tiers_by_the_digests_of_the_file(self):
+        self.artifacts_file()
+        self.tiers_file(registry="registry.example/owner")
+        r, _ = self.build("nvidia")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        system, variant = self.calls()
+        for args in (system, variant):
+            self.assertIn("FORGE_REGISTRY=registry.example/owner", args)
+            for n in range(4):
+                self.assertIn(f"TIER{n}_DIGEST={TIERS[f'tier{n}']}", args)
+        for n in range(4):
+            self.assertIn(f"io.athanor.forge-tier{n}.digest={TIERS[f'tier{n}']}", variant)
+
+    def test_a_resolved_file_says_how_old_it_is(self):
+        self.artifacts_file()
+        self.tiers_file(resolved="2026-10-08T00:00:00Z")
+        r, _ = self.build("none")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertRegex(r.stdout, r"tier digests resolved at 2026-10-08T00:00:00Z, \d+ h ago")
+
+    def test_a_digest_the_registry_no_longer_holds_is_refused_before_the_build(self):
+        self.artifacts_file()
+        self.tiers_file()
+        self.publish_tiers({"registry": "ghcr.io/ars-regia", **TIERS, "tier2": None})
+        r, _ = self.build("none")
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn(f"athanor-forge-tier2-repo@{TIERS['tier2']} cannot be read: re-run system/tier-digests.sh resolve", r.stderr)
+        self.assertEqual(self.calls(), [])
+
+    def test_without_valid_tier_digests_nothing_builds(self):
+        self.artifacts_file()
+        cases = {"no file": None, "tier missing": {"tier2": None}, "a tag, not a digest": {"tier1": "latest"},
+                 "short digest": {"tier0": "sha256:abc"}, "no registry": {"registry": None},
+                 "registry with a tag": {"registry": "ghcr.io/ars-regia:latest"}}
+        for case, values in cases.items():
+            with self.subTest(case=case):
+                if values is None:
+                    (self.dir / "tiers" / "tier-digests.json").unlink()
+                else:
+                    self.tiers_file(**values)
+                r, _ = self.build("none")
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertIn("tier-digests", r.stderr)
+                self.assertEqual(self.calls(), [])
 
     def test_push_needs_no_signing_key(self):
         self.artifacts_file()

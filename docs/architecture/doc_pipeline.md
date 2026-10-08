@@ -540,7 +540,11 @@ Retention, by ADR-0081 (this amends the 90-day figure of UT10 and UD8):
 The janitor (`forge/scripts/clean_ghcr.sh`, weekly in `maintenance.yml`) computes the kept
 set by reachability from the promoted roots: the promoted digests, the inputs their
 provenance names, and the referrers of each. It always runs its dry run first, refuses to
-delete a member of that set, and has a unit test on a fixture graph.
+delete a member of that set, and has a unit test on a fixture graph. Today a tier image
+carries only `latest` until UD44 adds its `hash-` and run tags, so the digest a system image
+installed lives on as an untagged manifest once `latest` moves. The retention of the janitor
+(PLAT-N01) must keep every tier digest that the `io.athanor.forge-tier<N>.digest` labels of
+a kept system image name.
 
 **The support period** is five years for the product line from the date it is placed on
 the market, with the Fedora base rebased forward within the line (ADR-0081, amends

@@ -37,6 +37,7 @@ output/
 _build*/
 forge/*.tar.gz
 kernel-artifacts/
+tier-digests/
 nvidia-publish/
 
 # Security / Keys
