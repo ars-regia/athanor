@@ -166,3 +166,4 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0096 | 0096 | [Kernel artefacts are signed with the project key, not the workflow's OIDC identity](0096-kernel-artefacts-project-key.md) | accepted | security, pipeline |
 | ADR-0097 | 0097 | [Component owners, 1.0 execution control, the Firefox switch and one process per surface](0097-owners-execution-firefox-processes.md) | accepted | security, kernel, shell, apps, governance |
 | ADR-0099 | 0099 | [Desktop specs review (batch 4): accessibility, overview, visual language](0099-desktop-specs-batch-4.md) | accepted | shell, session, security, desktop |
+| ADR-0100 | 0100 | [Notification center revision 2: battery notices in the session daemon](0100-notification-center-rev2.md) | accepted | shell, session, desktop |

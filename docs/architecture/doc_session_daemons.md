@@ -201,6 +201,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08.** This revision 
 
 - `Low` (3): "Battery low", "<n> % remaining, about <time> left", urgency normal.
 - `Critical` (4): "Battery critically low", "Connect the charger", urgency critical, `resident`.
+- `Low` and `Critical` carry the action "Battery settings", which calls `os.athanor.ControlCenter1.Show("battery")` (`doc_control_center.md` CC5). *Amended 2026-10-09 (ADR-0100):* the action comes from `doc_notification_center.md` NC13, whose own low-battery notice is withdrawn so that one process watches UPower.
 - `Action` (5): "The computer will act soon to save its state", urgency critical; what it does is UPower's `CriticalPowerAction`.
 - A notice closes when the state goes above its level or the machine is charging. Thresholds are UPower's (section 1), not ours. No sound is played other than the notification's own (BR4); the 3 s nag and the plug sounds of cosmic-settings-daemon are not kept. Peripheral batteries are excluded (SD21).
 
@@ -352,7 +353,7 @@ The maintainer judges each step on the reference laptop (athanor-ref); items mar
 15. An SD card inserted with the file manager closed is mounted and a notification offers "Open".
 16. **CI.** On the rig, a `confined` test application cannot call `org.freedesktop.systemd1`, cannot call `org.freedesktop.host.portal.Registry.Register`, cannot connect to `$XDG_RUNTIME_DIR/wayland-1`, `$XDG_RUNTIME_DIR/systemd/private` or `pipewire-0-manager`, and can send a notification and open a file through the portal. Amended 2026-10-06 (maintainer decision A2-9 (#151)): it also fails to create or change a file in each persistence path of `doc_threat_model.md`, TM3, whether the path existed before the launch or not, while the same write from a terminal succeeds.
 17. A user autostart entry from Settings starts at login in its own `app-athanor-*` unit behind a context; `xdg-desktop-autostart.target` is not active.
-18. With the battery driven to the low and critical levels (UPower's `--monitor` on the laptop, or a test battery on the dev VM), each notice shows once and closes on charging.
+18. With the battery driven to the low and critical levels (UPower's `--monitor` on the laptop, or a test battery on the dev VM), each notice shows once and closes on charging, and the action of Low and Critical opens the control center's battery page.
 19. Plugging a headset into the combo jack opens `athanor-osd`'s dialog; each choice gives the expected input device. Turning mono audio on plays a left-only test sound in both ears, and the setting survives a restart of `athanor-sessiond` and a new login.
 20. After step 8, `rpm -q cosmic-settings-daemon cosmic-idle cosmic-bg` reports none installed, and the scenarios above still pass.
 21. ST5 on the reference laptop: the budgets of SD20, no CPU with no input, restart within 1 s, and the 24-hour soak with the four processes running.

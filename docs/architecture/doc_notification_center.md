@@ -1,14 +1,15 @@
 # Athanor notification center
 
-Status: **revision 1, approved by the maintainer on 2026-10-04.** The maintainer took its decisions in conversation on 2026-10-04: the center is a second panel of the control center's program (NC1), `athanor-shelld` holds every notification fact (NC2), the history survives a reboot for a period the user chooses, seven days by default (NC3), automatic do not disturb by schedule, fullscreen and screen sharing (NC6), per-application settings including sound and timeout (NC5), sound on for every application by default (NC7), markup, progress and inline reply (NC9, NC10), a month calendar without events (NC11), and the classification of every register entry (section 3). It is the specification `doc_shell_standard.md`, section 4, step 6 requires for notifications and the calendar.
+Status: **revision 2, proposed on 2026-10-09.** Revision 1 was approved by the maintainer on 2026-10-04, with the decisions taken in conversation that day: the center is a second panel of the control center's program (NC1), `athanor-shelld` holds every notification fact (NC2), the history survives a reboot for a period the user chooses, seven days by default (NC3), automatic do not disturb by schedule, fullscreen and screen sharing (NC6), per-application settings including sound and timeout (NC5), sound on for every application by default (NC7), markup, progress and inline reply (NC9, NC10), a month calendar without events (NC11), and the classification of every register entry (section 3). It is the specification `doc_shell_standard.md`, section 4, step 6 requires for notifications and the calendar. Revision 2 takes in the changes later approved specifications made to it (the session lock's default and admission, `doc_lock_and_prompts.md` LP7 and ADR-0003 D4; Settings' unit, `doc_settings.md` SE4; the screen-sharing signal, `doc_portal.md` PT10; the assertive announcement, `doc_accessibility.md` AX6), hands the low-battery notice to `athanor-sessiond` (NC13, ADR-0100), gives Athanor's own session services a proven group (NC4), and applies section 4 to the documents it amends. It merges into the product branch at this revision (ADR-0077, point 3).
 
 ## 1. Context
 
 - **What binds this document.**
-  - `doc_shell_standard.md`: the gate (ST2), the register (ST3), the thresholds of ST5 (a first complete frame within 100 ms, the memory budgets, the soak, recovery within 1 s with the unread notifications kept), scenarios (ST6), accessibility and languages (ST7), the aesthetic signature (ST8).
+  - `doc_shell_standard.md`: the gate (ST2), the register (ST3), the thresholds of ST5 (a first complete frame within 100 ms, the memory budgets, the soak, recovery within 1 s with the history kept), scenarios (ST6), accessibility and languages (ST7), the aesthetic signature (ST8).
   - `doc_bar.md`: `athanor-shelld` and its private interface admitted by unit (BR1), modules that hide when their service is absent (BR3), notifications (BR4), one popover at a time (BR6).
   - `doc_control_center.md`: the program `athanor-control-center` and its interface `os.athanor.ControlCenter1` (CC2), the models of `athanor-services` on `zbus` (CC3), the do-not-disturb state this document completes (CC7), opening and closing (CC9), Super+N kept for this surface (CC9).
   - `doc_shell.md`: GTK4, one process per surface, logic in crates with no GTK type (SH4).
+  - Approved after revision 1: `doc_lock_and_prompts.md` (LP7, the lock's use of `lock_screen`), `doc_settings.md` (SE4 and SE17, Settings' unit and page), `doc_portal.md` (PT10, `CaptureSessions`), `doc_session_daemons.md` (SD14, the battery notices) and `doc_accessibility.md` (AX6, assertive announcements).
 - **The register** (`shell-features.md`, Notifications and calendar) has 44 entries, F-notif-01 to F-notif-44, and F-bar-08 is the bar's unread indicator. Section 3 classifies each.
 - **Facts verified on 2026-10-04** in `forge/specs/athanor-shelld/athanor-shelld-1.0.0`:
   - `athanor-shelld` advertises `actions`, `body`, `icon-static` and `persistence` (`src/notifications.rs:28`), keeps at most 100 notifications in memory (`src/store.rs:9`), and admits calls on `os.athanor.Notifications1` only from `athanor-bar.service` (`src/sender.rs`, checked in `src/notifications.rs`).
@@ -22,7 +23,7 @@ Status: **revision 1, approved by the maintainer on 2026-10-04.** The maintainer
 **NC1. A second panel of the control center's program.** The notification center is a panel of `athanor-control-center` (CC2), beside the control center's own. The two share the process, the resident hidden window, Landlock, the opening rules of CC9 and the accessibility plumbing; at most one of the two is open.
 
 - **Opening.** `os.athanor.ControlCenter1` gains `ToggleNotifications()`. The bar's notifications button, a click on the bar's clock and Super+N call it. Super+N is written once per user at the first start with the custom-binding writer CC9 adds for Super+C, and never again.
-- **`Open`** (CC9) is true while either panel is open, so the bar keeps its popups hidden in both cases.
+- **`Open`** (CC2, CC9) is true while either panel is open, so the bar keeps its popups hidden in both cases.
 - **The bar loses its notification list and its calendar popover;** both now live in this panel (NC11, NC12).
 - **Building the list inside the bar was rejected,** because it keeps the list under the bar's 64 MB and BR6's one popover, and **a combined column with the control center was rejected,** because it redraws the panel CC4 approved.
 
@@ -54,18 +55,19 @@ Status: **revision 1, approved by the maintainer on 2026-10-04.** The maintainer
 **NC4. Who sent it.** `athanor-shelld` takes the sender's application identity from its cgroup, which the sender cannot forge:
 
 - the unit or scope name defined by systemd's desktop-environment convention, `app-[<launcher>-]<application id>[@<random>].service` or `app-[<launcher>-]<application id>-<random>.scope`;
-- Flatpak's `app-flatpak-<application id>-<number>.scope`.
+- Flatpak's `app-flatpak-<application id>-<number>.scope`;
+- Athanor's own session services: a unit of `session.slice` named `athanor-*.service` whose sender runs an executable under `/usr`, the rule of LP13 and ADR-0041. They form one group, "System", so a notice such as the battery's (NC13) is told apart from an application that calls itself "System" in `app_name`.
 
 The `desktop-entry` hint and `app_name` are declared by the sender and may lie. A notification whose identity is proven is grouped, iconed and ruled by that identity. A notification without a proven identity goes to the group "Other applications", named by its `app_name` as plain text, and follows the shared rule of that group. A rule that grants a privilege (`bypass_dnd`) never applies to it.
 
-**NC5. Per-application rules.** One file per application, `$XDG_CONFIG_HOME/athanor/notifications/apps/<application id>.conf`, plus `$XDG_CONFIG_HOME/athanor/notifications/other.conf` for the shared group (applications without a proven identity), so that an application whose id is `other` cannot take its place, in the `key=value` lines of `dnd.rs`'s file, so no new format.
+**NC5. Per-application rules.** One file per application, `$XDG_CONFIG_HOME/athanor/notifications/apps/<application id>.conf`, plus `$XDG_CONFIG_HOME/athanor/notifications/other.conf` for the shared group (applications without a proven identity) and `system.conf` for the group "System" (NC4), so that an application whose id is `other` or `system` cannot take their place, in the `key=value` lines of `dnd.rs`'s file, so no new format.
 
 | Key           | Values                                           | Default |
 | ------------- | ------------------------------------------------ | ------- |
 | `allowed`     | `true`, `false`                                  | `true`  |
 | `popups`      | `true` (shown and listed), `false` (listed only) | `true`  |
 | `bypass_dnd`  | `true`, `false`                                  | `false` |
-| `lock_screen` | `all`, `name` (application name only), `none`    | `name`  |
+| `lock_screen` | `all`, `name` (application name only), `none`    | `none`  |
 | `sound`       | `true`, `false`                                  | `true`  |
 | `timeout`     | seconds, or `app` (the application's own)        | `app`   |
 
@@ -77,7 +79,7 @@ The `desktop-entry` hint and `app_name` are declared by the sender and may lie. 
   - `timeout_low` and `timeout_normal`: by urgency, 5 s by default;
   - the schedule and triggers of NC6.
 - **Malformed files.** An unknown key is ignored with a journal line at warning. A value that does not parse takes that key's default. The other keys still apply.
-- **`lock_screen`** is stored and served here. The session lock's specification applies it.
+- **`lock_screen`** is stored and served here, and the session lock applies it (`doc_lock_and_prompts.md` LP7): `none` counts the notification in a single line without name or icon; `name` and `all` show more only for applications the user set. The default `none` is ADR-0003, D4.
 - **Writers.** The daemon writes these files when an admitted client asks (NC8): the center's "Mute this application", and Settings' page once Settings has its specification. The daemon re-reads a file that changes on disk.
 
 **NC6. Do not disturb.** The state CC7 introduced, `{ on, until, schedule }`, is completed here. Do not disturb is in effect when any of these holds, and the daemon publishes the state together with its reason:
@@ -85,12 +87,12 @@ The `desktop-entry` hint and `app_name` are declared by the sender and may lie. 
 1. **manual:** the switch, until `until` when one is set (one hour, until 08:00, CC7);
 2. **schedule:** a daily window in local time, which may cross midnight, on the chosen days of the week (every day by default);
 3. **fullscreen:** a window that is fullscreen and activated on any output, observed by the bar, which already holds `athanor-compositor-client`, and reported to the daemon through `ReportFullscreen` (NC8); the headless daemon does not link that client, which connects through a `gdk::Display` (SH4). While no bar is connected the trigger is unavailable;
-4. **screen sharing:** a screen-capture session open in the portal backend of `doc_portal.md`.
+4. **screen sharing:** a capture session open in the portal backend, that is a non-empty `CaptureSessions` property of `os.athanor.Portal1`, which admits `athanor-shelld.service` to read it (`doc_portal.md` PT10).
 
 Rules of the state:
 
 - **Each trigger can be turned off** in Settings.
-- **A trigger the session cannot observe is published as unavailable,** with one journal line, and Settings shows it so. This covers fullscreen when cosmic-comp withholds the protocol or no bar is connected, and screen sharing until `doc_portal.md` delivers its signal. It never appears active while doing nothing.
+- **A trigger the session cannot observe is published as unavailable,** with one journal line, and Settings shows it so. This covers fullscreen when cosmic-comp withholds the protocol or no bar is connected, and screen sharing while the portal backend is absent or does not answer. It never appears active while doing nothing.
 - **A manual action wins until the next automatic change.** A manual "on", with or without `until`, holds until `until` or until the switch is turned off; automatic changes do not end it, or a fullscreen video ending would cancel "one hour". A manual "off" while an automatic source is active holds until the set of active automatic sources changes. Turned off at 23:00 inside a 22:00–07:00 window, do not disturb stays off until 07:00. Turned off during a fullscreen video, it stays off until the video ends.
 - **The end of do not disturb** shows one summary popup, "N notifications while do not disturb was on", which opens the center with `Show("notifications")` (NC12, F-notif-19). It never replays the missed popups.
 - **The clock.**
@@ -108,17 +110,17 @@ Rules of the state:
 
 **NC8. The private interface grows.** `os.athanor.Notifications1` keeps BR1's admission by unit and its unicast signals, and admits per method:
 
-| Methods                                                                        | `athanor-bar` |     `athanor-control-center`      | Settings |
-| ------------------------------------------------------------------------------ | :-----------: | :-------------------------------: | :------: |
-| `List`, `Close`, `InvokeAction`, `Reply`, `MarkRead`                           |      yes      |                yes                |    no    |
-| `ClearAll`, `ClearGroup`, `History`                                            |      no       |                yes                |    no    |
-| `DoNotDisturb`, `SetDoNotDisturb`, `SetDoNotDisturbUntil`                      |      yes      |                yes                |   yes    |
-| `ReportFullscreen(b available, b active)`                                      |      yes      |                no                 |    no    |
-| `Rules(app)`, `SetRule(app, key, value)`, `Settings`, `SetSetting(key, value)` |      no       | yes (`allowed` and `popups` only) |   yes    |
+| Methods                                                                        | `athanor-bar` |     `athanor-control-center`      |  `athanor-lock`   | Settings |
+| ------------------------------------------------------------------------------ | :-----------: | :-------------------------------: | :---------------: | :------: |
+| `List`, `Close`, `InvokeAction`, `Reply`, `MarkRead`                           |      yes      |                yes                |   `List` only     |    no    |
+| `ClearAll`, `ClearGroup`, `History`                                            |      no       |                yes                |        no         |    no    |
+| `DoNotDisturb`, `SetDoNotDisturb`, `SetDoNotDisturbUntil`                      |      yes      |                yes                |        no         |   yes    |
+| `ReportFullscreen(b available, b active)`                                      |      yes      |                no                 |        no         |    no    |
+| `Rules(app)`, `SetRule(app, key, value)`, `Settings`, `SetSetting(key, value)` |      no       | yes (`allowed` and `popups` only) | `Rules(app)` only |   yes    |
 
-- **Signals.** `added`, `replaced`, `closed`, `read`, `DoNotDisturbChanged(on, reason, until)` and `RulesChanged(app)` go to each admitted unit connected. `ReportFullscreen` is a method, admitted for `athanor-bar` only: the bar reports whether it can observe the fullscreen state and whether a window is fullscreen and activated.
+- **Signals.** `added`, `replaced`, `closed`, `read`, `DoNotDisturbChanged(on, reason, until)` and `RulesChanged(app)` go to each admitted unit connected; `athanor-lock` receives only `added`, `closed` and `RulesChanged` (`doc_lock_and_prompts.md` LP7). `ReportFullscreen` is a method, admitted for `athanor-bar` only: the bar reports whether it can observe the fullscreen state and whether a window is fullscreen and activated.
 - **`List` and `History`.** `List` returns the unread notifications (the bar's popups and its count); `History` returns all of them.
-- **Settings' unit name** is fixed by Settings' specification. Until then Settings is not admitted, and the rules change only through the center's mute and the files.
+- **Settings** is the unit `athanor-settings.service` (`doc_settings.md` SE4), and its Notifications page is SE17.
 
 **NC9. The public interface.**
 
@@ -172,6 +174,7 @@ Rules of the state:
 - **Keyboard and screen reader** (ST7).
   - Tab and the arrow keys move between groups and rows. Enter invokes the default action, Delete closes the row, Escape closes the panel.
   - On opening, the panel is announced with its unread count ("Notification center, 3 unread").
+  - A critical notification is announced at assertive priority (`doc_accessibility.md` AX6).
   - Each row's accessible name joins application, summary, body and time.
 - **Right-to-left** text mirrors the panel, as the bar.
 
@@ -187,7 +190,7 @@ Rules of the state:
 - **Rate limit.** An application that sends more than 20 notifications in 10 seconds loses popups and sound until it slows down. Its notifications still enter the history, with one journal line.
 - **The bar no longer** shows its notification list popover or its calendar popover (NC1).
 
-**NC13. Low battery.** `athanor-shelld` watches UPower's display device through the battery model of `athanor-services` (CC3). When `WarningLevel` becomes `low` or `critical` (by UPower's configuration 20% and 5% by default), it emits its own critical notification, once per level per discharge. The notification carries the remaining time and an action that opens the power page of the control center. On a machine without a battery the model is absent and nothing is watched (BR3).
+**NC13. Low battery** belongs to `athanor-sessiond` (`doc_session_daemons.md` SD14), by the maintainer's decision of 2026-10-09 (ADR-0100): one process watches UPower, not two. Its Low and Critical notices carry the action this section held in revision 1, which opens the control center's battery page. `athanor-shelld` only shows them, in the group "System" (NC4).
 
 **NC14. Limits.**
 
@@ -200,7 +203,7 @@ Rules of the state:
   - The decision table: identity proven or not, `allowed`, `transient`, each do-not-disturb source, critical, `bypass_dnd`, sound, timeout.
   - The window across midnight and the chosen days; the manual action winning until the next change; a set clock, a resume and a time-zone change.
   - The history's write, read back after a restart, coalescing, retention by age and by count, the corrupt file, a failed write.
-  - The reply never written; the markup and link filter; the rate limit; the low-battery levels once per discharge.
+  - The reply never written; the markup and link filter; the rate limit; the group "System" (an `athanor-*.service` with its executable under `/usr` is proven, the same unit name with another executable is not).
 - **On a private `dbus-daemon`,** as the daemon's tests do today:
   - the admission table of NC8, method by method;
   - signals reaching only admitted units;
@@ -221,14 +224,13 @@ Rules of the state:
    - history (NC3);
    - rules (NC5);
    - the do-not-disturb state with the schedule and the fullscreen trigger (NC6);
-   - the interface (NC8);
-   - low battery (NC13).
+   - the interface (NC8).
 2. **The panel:**
    - the center replacing the bar's list and calendar popovers;
    - Super+N, the clock and the button;
    - the read state and the bar's unread count.
 3. **The richer notification:** markup and links (NC10), progress and inline reply (NC9), sound (NC7, after spike N1), the popup corner, private popups and the rate limit (NC12).
-4. **Screen sharing,** when `doc_portal.md` delivers its signal.
+4. **Screen sharing,** reading `CaptureSessions` (`doc_portal.md` PT10) once step 5 of `doc_portal.md` ships it.
 5. **The gate of the standard:** measurement, scenarios, accessibility and languages, the aesthetic signature. Only then is the panel enabled.
 
 ## 3. The register
@@ -238,7 +240,7 @@ Classified by the maintainer on 2026-10-04.
 - **`have` once this document is built:**
   - 01 to 04, 06, 08, 10, 11, 13 to 15 and 25: today, unchanged or extended;
   - 05 (popup corner), 07 (above fullscreen), 09 (inline reply), 12 (clear a group), 16 (durations), 17 (schedule, fullscreen, screen sharing), 19 (summary);
-  - 20 (per-application settings, with Settings), 21 (per-urgency timeout), 23 (sound), 24 (markup), 28 (mute and swipe), 29 (keyboard navigation), 30 (private popups), 31 (Super+N), 33 (month calendar, moved into the panel), 34 (week numbers), 43 (low battery);
+  - 20 (per-application settings, with Settings), 21 (per-urgency timeout), 23 (sound), 24 (markup), 28 (mute and swipe), 29 (keyboard navigation), 30 (private popups), 31 (Super+N), 33 (month calendar, moved into the panel), 34 (week numbers), 43 (low battery, from `athanor-sessiond`, `doc_session_daemons.md` SD14);
   - F-bar-08 (the unread count).
 - **`excluded`, with the reason written into the register:**
 
@@ -257,11 +259,11 @@ Classified by the maintainer on 2026-10-04.
 
 ## 4. Changes to other documents
 
-Applied with the approval of this document.
+Applied by revision 2, in the same change.
 
 - **`shell-features.md`:** the statuses and exclusions of section 3, with their reasons and date.
 - **`doc_bar.md`:**
-  - BR1: `athanor-shelld` admits per method as NC8.
+  - BR1: `athanor-shelld` holds the history, the rules and the sound (NC2), and admits per method as NC8.
   - BR3: the clock no longer opens a calendar; a click opens the center.
   - BR4:
     - the capabilities of NC9;
@@ -270,11 +272,12 @@ Applied with the approval of this document.
     - the history of NC3 replaces the list of 100;
     - do not disturb is NC6;
     - the popups follow NC12.
-- **`doc_shell_standard.md`, ST5,** "What `athanor-shelld` keeps across a crash": the file is NC3's history. It is read whatever the boot, and a file that does not parse is renamed rather than removed.
+- **`doc_shell_standard.md`, ST5,** "What `athanor-shelld` keeps across a crash": the file is NC3's history, under `$XDG_STATE_HOME/athanor/shelld/`. It is read whatever the boot, and a file that does not parse is renamed rather than removed.
 - **`doc_control_center.md`:**
-  - CC2: the program has two panels, and `os.athanor.ControlCenter1` gains `ToggleNotifications()`, and `Show(page)` also accepts `notifications` (the notification panel) and `notifications:<id>` (that row, its reply field focused).
+  - CC2: the program has two panels; `os.athanor.ControlCenter1` gains `ToggleNotifications()` and the property `Open`, and `Show(page)` also accepts `notifications` (the notification panel) and `notifications:<id>` (that row, its reply field focused).
   - CC7: the schedule and triggers are NC6.
-  - CC9: `Open` covers both panels, and Super+N is written as Super+C is.
+  - CC9: `Open` covers both panels, and Super+N is written as Super+C is, by the same login oneshot.
+- **`doc_session_daemons.md`, SD14:** the Low and Critical notices gain the action of revision 1's NC13 (ADR-0100).
 
 ## 5. Open doubts
 
@@ -283,7 +286,7 @@ Applied with the approval of this document.
    - `pw-play` from `pipewire-utils`, one short process per sound;
    - a small decoder in the daemon writing to a PipeWire stream.
 2. **N2. Inline reply names.** The capability, action key, hint and signal of NC9 are taken from KDE's implementation. The plan reads plasma-workspace's source and records the exact names before step 3.
-3. **N3. The screen-sharing signal** comes from `doc_portal.md`, which does not exist yet. Until it does, the trigger is published as unavailable (NC6).
+3. **N3. The screen-sharing signal.** Settled by `doc_portal.md` PT10: `CaptureSessions`, readable by `athanor-shelld.service`. Until step 5 of `doc_portal.md` ships it, the trigger is published as unavailable (NC6).
 4. **N4. Memory.** The budgets of NC14 hold a history five times today's list. If the measurement exceeds them, the maintainer chooses between a smaller default limit and a larger budget.
 5. **N5. Application identity.** The unit and scope names of NC4 are the conventions of systemd and Flatpak. The plan confirms them on the image for applications started by the launcher, the dock, XDG autostart and Flatpak, and lists those that end in "Other applications".
 6. **N6. Popups above fullscreen.** That cosmic-comp 1.8 draws a layer-shell surface of the overlay layer above a fullscreen window is checked in the dev VM before step 3. If it does not, F-notif-07 returns to the maintainer.
@@ -295,7 +298,7 @@ On a fresh install in the dev VM and on the reference laptop:
 1. The bar's button, a click on the clock and Super+N open the center, and its first complete frame arrives within 100 ms of the input at the 95th percentile (ST5).
 2. A notification received before a reboot is in the center after it, with its actions shown as unavailable. One older than the retention period is not. One sent with `transient` never is.
 3. `notifications.json` has mode 0600, holds no image and no reply text, and is emptied on disk by "Clear all".
-4. A process outside `athanor-bar` and `athanor-control-center` is refused by `os.athanor.Notifications1`, and the bar is refused `SetRule` and `ClearAll`.
+4. A process outside the units of NC8 is refused by `os.athanor.Notifications1`; the bar is refused `SetRule` and `ClearAll`, and `athanor-lock` everything but `List` and `Rules(app)`.
 5. A notification from a process with no application unit, carrying another application's `desktop-entry`, lands in "Other applications" and does not pass do not disturb even when that application has `bypass_dnd=true`.
 6. With a schedule of 22:00–07:00, do not disturb turns on at 22:00 and off at 07:00, also across a suspend over 07:00, and at 07:00 one summary popup appears. On another night, turned off by hand at 23:00, it stays off until 07:00.
 7. A fullscreen video turns do not disturb on with the reason "fullscreen"; ending it turns it off.
@@ -303,6 +306,6 @@ On a fresh install in the dev VM and on the reference laptop:
 9. A reply typed in the center reaches the sender through `NotificationReplied` and is absent from the history file.
 10. A sound plays for a normal notification and stays silent under do not disturb, except a critical one; `sound=false` silences the application.
 11. Of twenty-one notifications sent by one application within 10 seconds, the twenty-first shows no popup and plays no sound, and the history holds all twenty-one.
-12. On the reference laptop, with the battery falling past UPower's low level, one critical notification appears once.
+12. A notice of `athanor-sessiond` lands in the group "System"; a notification whose `app_name` is "System", sent by an application, lands in its own group or in "Other applications". The battery notices themselves are acceptance 18 of `doc_session_daemons.md`.
 13. With `athanor-shelld` killed, the center shows "Notifications unavailable", and within 1 s of the daemon's return it shows the same list and unread count (ST5).
 14. The four surface scenes pass SH13's 48 cases, and the surface passes the gate of `doc_shell_standard.md` (ST2) before the panel is enabled.
