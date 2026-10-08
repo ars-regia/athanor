@@ -75,13 +75,25 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
 
 %changelog
 * Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-9
-- `athanor-update migrate` moves a machine that follows the project's previous owner, an
-  image the policy in force no longer names, to the same image under the owner the policy
-  pins, on the tag or digest it follows, with `bootc switch --enforce-container-sigpolicy`.
-  The image the machine already runs supplies the policy, so the switch is verified even
-  when the machine reached that image through an unverified reference. Until the new
-  deployment boots, the state reads `verified.reason = owner-moved`; an image or tag the new
-  owner has not published is a wait (`successor-absent`), retried by the migration timer.
+- `athanor-update migrate` moves a machine that follows the project's previous owner (listed
+  in `/usr/share/athanor/containers/moved-from`, which render-policy writes from
+  `--moved-from` at the image build), an image the policy in force no longer names, to
+  the same image under the owner the policy pins, on the tag or digest it follows, with
+  `bootc switch --enforce-container-sigpolicy`. The image the machine already runs supplies
+  the policy, so the switch is verified even when the machine reached that image through an
+  unverified reference. Any other owner, a fork included, stays `reference-out-of-scope`.
+  Until the new deployment boots, the state reads `verified.reason = owner-moved`; an image
+  or tag the new owner has not published (`successor-absent`) or a queued rollback reads
+  `owner-moved-waiting`, and the migration timer retries.
+- The migration decides from the deployments, not from the stamp alone: a switch that staged
+  nothing, or not the target with the policy enforced, fails; a staged target waits for the
+  restart (`restart-pending`); the stamp is written once the signed reference has booted, so
+  a deployment that does not boot is switched again. A stamp is ignored on an image of the
+  previous owner, and athanor-update-migrate.service no longer has the stamp as a condition.
+- A verified machine on a run-number tag or a digest publishes `verified.reason =
+  pinned-build`: one build, which receives no updates. Nothing moves it.
+- An image the registry does not hold at all (`name unknown`, or ghcr.io's 403 on the pull
+  token or `denied`) is a wait like a missing tag, not a failure every five minutes.
 
 * Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-8
 - A machine that has migrated but boots a reference that does not enforce the policy, with

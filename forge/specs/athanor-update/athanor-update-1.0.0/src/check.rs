@@ -49,9 +49,13 @@ fn reason<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &Status) -> 
     }
     let repository = sigobj::repository_of(&booted.image);
     let Some(key_paths) = policy.scopes.get(repository) else {
+        if crate::policy::successor(&policy.scopes, repository, &policy.moved_from).is_none() {
+            return Reason::ReferenceOutOfScope;
+        }
         // The same image under the owner the policy pins: the project moved, and the
-        // migration moves this machine after it (doc_update_delivery.md, UD45).
-        return if crate::policy::successor(&policy.scopes, repository).is_some() { Reason::OwnerMoved } else { Reason::ReferenceOutOfScope };
+        // migration moves this machine after it (doc_update_delivery.md, UD45), unless nothing
+        // can move it yet: a queued rollback, or no such image or tag under the new owner.
+        return if status.rollback_queued || ctx.store.channel_absent() { Reason::OwnerMovedWaiting } else { Reason::OwnerMoved };
     };
     if !booted.enforcing {
         let pending = status.staged.as_ref().is_some_and(|staged| staged.enforcing);
@@ -68,6 +72,9 @@ fn reason<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &Status) -> 
     let claims = ctx.store.signature_dir(&booted.digest).and_then(|dir| sigobj::claims(&dir, &keys).ok()).unwrap_or_default();
     let covers = |claim: &&sigobj::Claim| claim.manifest_digest == booted.digest && claim.repository == repository;
     match claims.iter().filter(covers).map(|claim| claim.backed).max() {
+        // Verified, but a run-number tag or a digest names one build: nothing newer is ever
+        // published under it (doc_update_delivery.md, UD51).
+        Some(true) if !follows_a_channel(&booted.image[repository.len()..]) => Reason::PinnedBuild,
         Some(true) => Reason::Signature,
         Some(false) => Reason::KeyNotInPolicy,
         None => Reason::NoSignature,
@@ -82,6 +89,12 @@ fn local_update(ctx: &Context<'_, impl Tools>, status: &Status) -> UpdateState {
         _ if ctx.store.refused().is_some() => UpdateState::Refused,
         _ => UpdateState::None,
     }
+}
+
+/// True when the tag or digest after the repository, `suffix`, is a channel: a tag the pipeline
+/// moves to each newer promoted build. No tag is `latest`.
+fn follows_a_channel(suffix: &str) -> bool {
+    matches!(suffix, "" | ":latest") || suffix == format!(":{}", crate::migrate::CHANNEL)
 }
 
 /// `Available` when `digest` may be offered; otherwise why not. The order of the build
@@ -235,6 +248,8 @@ pub(crate) mod tests {
         pub download: Result<Deployed, Failure>,
         pub metered: bool,
         pub relock: Result<(), Failure>,
+        /// Whether `switch` stages a deployment, or returns as if it had and stages nothing.
+        pub stages: bool,
         pub calls: RefCell<Vec<String>>,
     }
 
@@ -246,6 +261,7 @@ pub(crate) mod tests {
                 download: Err(Failure { code: ErrorCode::Internal, host: None }),
                 metered: false,
                 relock: Ok(()),
+                stages: true,
                 calls: RefCell::new(Vec::new()),
             }
         }
@@ -299,8 +315,11 @@ pub(crate) mod tests {
         }
         fn switch(&self, image: &str) -> Result<(), Failure> {
             self.call(format!("switch {image}"));
-            // bootc switch stages a deployment that is not locked against finalization.
-            self.status.borrow_mut().staged = Some(Deployed { download_only: false, ..self.download.clone()? });
+            let deployed = self.download.clone()?;
+            if self.stages {
+                // bootc switch stages a deployment of `image` that is not locked against finalization.
+                self.status.borrow_mut().staged = Some(Deployed { image: image.into(), download_only: false, ..deployed });
+            }
             Ok(())
         }
         fn fetch_signature(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure> {
@@ -345,6 +364,7 @@ pub(crate) mod tests {
                 REPO: [{"type": "sigstoreSigned", "keyPaths": key_paths, "signedIdentity": {"type": "matchRepository"}}]}}});
             std::fs::write(root.join("usr/policy.json"), policy.to_string()).expect("write");
             std::fs::write(root.join("usr/registries.d/athanor.yaml"), "docker: {}\n").expect("write");
+            std::fs::write(root.join("usr/moved-from"), "localhost:5000/previous\n").expect("write");
             let paths = PolicyPaths { etc_policy: root.join("etc/policy.json"), etc_registries: root.join("etc/registries.d/athanor.yaml"), shipped: root.join("usr") };
             std::os::unix::fs::symlink(root.join("usr/policy.json"), &paths.etc_policy).expect("symlink");
             std::os::unix::fs::symlink(root.join("usr/registries.d/athanor.yaml"), &paths.etc_registries).expect("symlink");

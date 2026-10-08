@@ -7,7 +7,8 @@
 //!   `newest-booted`   the newest build time this machine has booted, seconds since the epoch
 //!   `last-success`    when the registry last answered a check, seconds since the epoch
 //!   `migrated`        stamp of `athanor-update migrate`
-//!   `channel-absent`  `migrate` found no manifest for the channel; cleared when it finds one
+//!   `channel-absent`  `migrate` found no manifest for the channel, or for the image under the
+//!                     project's new owner; cleared when it finds one
 //!   `signatures/<hex>/`  the signature object of a digest, as `skopeo copy … dir:` wrote it
 use athanor_trust_state::State;
 use std::fs::File;

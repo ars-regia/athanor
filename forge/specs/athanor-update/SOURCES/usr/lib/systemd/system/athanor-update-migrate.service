@@ -1,7 +1,8 @@
 [Unit]
 Description=Move this machine onto the signed Athanor image reference
 Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_update_trust.md
-ConditionPathExists=!/var/lib/athanor-update/migrated
+# No condition on the stamp: the unit reads it, and ignores it on an image of the
+# project's previous owner (doc_update_delivery.md, UD49). The timer stops at the stamp.
 After=network-online.target athanor-update-state.service
 Wants=network-online.target
 

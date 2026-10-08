@@ -14,7 +14,8 @@ pub const CHANNEL: &str = "stable";
 pub enum Outcome {
     /// The stamp exists, or the booted reference already enforces the policy.
     Done,
-    /// The reference was switched; the signed digest boots at the next restart.
+    /// The reference was switched; the signed digest boots at the next restart, and the run
+    /// after that boot writes the stamp.
     Switched,
     /// Nothing was done and nothing is wrong: the unit succeeds and the next boot, or the next
     /// run of the check timer, tries again.
@@ -25,19 +26,21 @@ pub enum Outcome {
 /// bootc, the registry or the disk failed: the unit fails and systemd starts it again.
 pub fn run<T: Tools>(ctx: &Context<'_, T>) -> Result<Outcome, Failure> {
     let storage = |_| Failure { code: athanor_trust_state::ErrorCode::Storage, host: None };
-    if ctx.store.migrated() {
-        return Ok(Outcome::Done);
-    }
     let status = ctx.tools.status()?;
-    if status.booted.local_changes {
-        // bootc switch refuses a deployment with local packages; the next boot tries again.
-        return Ok(Outcome::Waiting("local-changes"));
-    }
     let policy = crate::policy::in_force(&ctx.policy);
     let repository = sigobj::repository_of(&status.booted.image);
     // An origin that enforces the policy of the previous owner is not the signed reference
     // of this image: the policy in force no longer names that repository.
-    let successor = if policy.info.shipped { crate::policy::successor(&policy.scopes, repository) } else { None };
+    let successor = if policy.info.shipped { crate::policy::successor(&policy.scopes, repository, &policy.moved_from) } else { None };
+    // The stamp ends the migration, except on an image of the previous owner: a machine stamped
+    // while that owner was the policy's still moves (doc_update_delivery.md, UD49).
+    if ctx.store.migrated() && successor.is_none() {
+        return Ok(Outcome::Done);
+    }
+    if status.booted.local_changes {
+        // bootc switch refuses a deployment with local packages; the next boot tries again.
+        return Ok(Outcome::Waiting("local-changes"));
+    }
     if status.booted.enforcing && successor.is_none() {
         ctx.store.set_migrated().map_err(storage)?;
         return Ok(Outcome::Done);
@@ -56,36 +59,41 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>) -> Result<Outcome, Failure> {
         None if policy.scopes.contains_key(repository) => (repository, format!("{repository}:{CHANNEL}")),
         None => return Ok(Outcome::Waiting("reference-out-of-scope")),
     };
+    // The switch of an earlier run is staged and boots at the next restart. A deployment that
+    // did not boot, or was removed, is no longer staged, and the machine switches again.
+    if status.staged.as_ref().is_some_and(|staged| staged.enforcing && staged.image == target) {
+        return Ok(Outcome::Waiting("restart-pending"));
+    }
     // The build-time rule of UT5 holds here too: the migration never moves a machine back.
     let Some(candidate) = ctx.tools.candidate(&target)? else {
-        if successor.is_some() {
-            // The new owner has no such image or tag yet: the state keeps reading
-            // `owner-moved`, and the migration timer starts the unit again.
-            return Ok(Outcome::Waiting("successor-absent"));
-        }
-        // The channel is not published yet (A2-4). Record it for the state and wait: the unit
-        // succeeds, and the check timer starts it again (athanor-update-check.service).
+        // The channel is not published yet (A2-4), or the new owner has no such image or tag
+        // yet. Record it for the state and wait: the unit succeeds, and the check timer starts
+        // it again (athanor-update-check.service).
         ctx.store.set_channel_absent(true).map_err(storage)?;
-        return Ok(Outcome::Waiting("channel-absent"));
+        return Ok(Outcome::Waiting(if successor.is_some() { "successor-absent" } else { "channel-absent" }));
     };
     ctx.store.set_channel_absent(false).map_err(storage)?;
     if candidate.build_time < status.booted.build_time {
         return Ok(Outcome::Waiting("channel-older-than-booted"));
     }
     ctx.tools.switch(&target)?;
-    let staged = ctx.tools.status()?.staged;
-    if let Some(staged) = &staged {
-        if staged.build_time > status.booted.build_time {
-            // A newer build is an update, and an update waits for the user (SH11).
-            ctx.tools.relock()?;
-        }
-        if let Some(dir) = ctx.store.signature_dir(&staged.digest) {
-            if let Err(failure) = ctx.tools.fetch_signature(to, &staged.digest, &dir) {
-                tracing::warn!(code = ?failure.code, "the signature object was not fetched; the next check fetches it");
-            }
+    // What bootc staged is what counts: a switch that staged nothing, or not the target with
+    // the policy enforced, failed, and the unit tries again.
+    let Some(staged) = ctx.tools.status()?.staged.filter(|staged| staged.enforcing && staged.image == target) else {
+        tracing::error!(%target, "bootc switch returned without staging the target with the policy enforced");
+        return Err(Failure { code: athanor_trust_state::ErrorCode::Internal, host: None });
+    };
+    if staged.build_time > status.booted.build_time {
+        // A newer build is an update, and an update waits for the user (SH11).
+        ctx.tools.relock()?;
+    }
+    if let Some(dir) = ctx.store.signature_dir(&staged.digest) {
+        if let Err(failure) = ctx.tools.fetch_signature(to, &staged.digest, &dir) {
+            tracing::warn!(code = ?failure.code, "the signature object was not fetched; the next check fetches it");
         }
     }
-    ctx.store.set_migrated().map_err(storage)?;
+    // No stamp yet: the machine has migrated once it boots the signed reference, so a
+    // deployment that does not boot leaves it to switch again.
     Ok(Outcome::Switched)
 }
 
@@ -99,6 +107,16 @@ mod tests {
         Deployed { enforcing: false, image: format!("{REPO}:35355843782"), ..deployed(&digest(9), build_time) }
     }
 
+    /// The restart: the staged deployment boots.
+    fn restart(tools: &Fake) {
+        let mut status = tools.status.borrow_mut();
+        status.booted = status.staged.take().expect("staged");
+    }
+
+    fn switches(tools: &Fake) -> usize {
+        tools.calls.borrow().iter().filter(|call| call.starts_with("switch")).count()
+    }
+
     #[test]
     fn a_machine_from_media_is_switched_to_the_channel_once() {
         let machine = Machine::new("migrate", &["real/k1.pub"]);
@@ -107,8 +125,38 @@ mod tests {
         assert!(tools.called(&format!("switch {REPO}:stable")));
         assert!(!tools.called("relock"), "the same build is not an update");
         assert!(machine.store.signature_dir(SIGNED).expect("dir").join("manifest.json").exists());
+        assert!(!machine.store.migrated(), "the stamp waits for the boot of the signed reference");
+        assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Waiting("restart-pending")));
+        restart(&tools);
         assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Done));
-        assert_eq!(tools.calls.borrow().iter().filter(|call| call.starts_with("switch")).count(), 1);
+        assert!(machine.store.migrated());
+        assert_eq!(switches(&tools), 1);
+    }
+
+    #[test]
+    fn a_switch_that_stages_nothing_fails_and_leaves_no_stamp() {
+        let machine = Machine::new("migrate-stages-nothing", &["real/k1.pub"]);
+        for booted in [from_media(1000), from_previous_owner(":latest", false)] {
+            let mut tools = Fake::booted(booted).offering(SIGNED, 1000);
+            tools.stages = false;
+            assert_eq!(run(&machine.ctx(&tools, 5000)).map_err(|failure| failure.code), Err(athanor_trust_state::ErrorCode::Internal));
+            assert!(!machine.store.migrated() && !tools.called("fetch_signature"));
+        }
+    }
+
+    #[test]
+    fn a_switched_deployment_that_does_not_boot_is_switched_again() {
+        for booted in [from_media(1000), from_previous_owner(":latest", true)] {
+            let machine = Machine::new(&format!("migrate-no-boot-{}", booted.enforcing), &["real/k1.pub"]);
+            let tools = Fake::booted(booted).offering(SIGNED, 1000);
+            assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Switched));
+            // The deployment failed to boot and the machine is back on the old reference, with
+            // nothing staged.
+            tools.status.borrow_mut().staged = None;
+            assert_eq!(run(&machine.ctx(&tools, 6000)), Ok(Outcome::Switched));
+            assert_eq!(switches(&tools), 2);
+            assert!(!machine.store.migrated());
+        }
     }
 
     #[test]
@@ -204,13 +252,28 @@ mod tests {
             assert!(tools.called(&format!("candidate {REPO}:latest")) && tools.called(&format!("switch {REPO}:latest")));
             assert!(!tools.called("relock"), "the same digest is not an update");
             assert!(tools.called(&format!("fetch_signature {REPO} {SIGNED}")), "the signature object of the new owner");
-            assert!(machine.store.migrated() && !machine.store.channel_absent());
+            assert!(!machine.store.migrated() && !machine.store.channel_absent());
             // Until the restart the machine still runs the previous owner's reference, and the
             // switch is the update that installs at the next restart.
             let state = crate::check::run(&machine.ctx(&tools, 5000), true).expect("offline");
             assert_eq!(state.verified.reason, athanor_trust_state::Reason::OwnerMoved);
             assert_eq!(state.update, athanor_trust_state::UpdateState::WillApplyAtNextShutdown);
+            assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Waiting("restart-pending")));
+            restart(&tools);
+            assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Done));
+            assert!(machine.store.migrated() && switches(&tools) == 1);
+            let state = crate::check::run(&machine.ctx(&tools, 5000), true).expect("offline");
+            assert_eq!(state.verified.reason, athanor_trust_state::Reason::Signature);
         }
+    }
+
+    #[test]
+    fn a_stamp_written_while_the_previous_owner_was_the_policy_s_does_not_stop_the_move() {
+        let machine = Machine::new("migrate-owner-stamped", &["real/k1.pub"]);
+        machine.store.set_migrated().expect("stamp");
+        let tools = Fake::booted(from_previous_owner(":latest", true)).offering(SIGNED, 1000);
+        assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Switched));
+        assert!(tools.called(&format!("switch {REPO}:latest")));
     }
 
     #[test]
@@ -240,9 +303,40 @@ mod tests {
         let mut tools = Fake::booted(from_previous_owner(":latest", false));
         tools.candidate = Ok(None);
         assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Waiting("successor-absent")));
-        assert!(!tools.called("switch") && !machine.store.migrated() && !machine.store.channel_absent());
+        assert!(!tools.called("switch") && !machine.store.migrated());
+        // The shield does not promise a move that cannot happen yet.
         let state = crate::check::run(&machine.ctx(&tools, 5000), true).expect("offline");
+        assert_eq!(state.verified.reason, athanor_trust_state::Reason::OwnerMovedWaiting);
+        let published = Fake::booted(from_previous_owner(":latest", false)).offering(SIGNED, 1000);
+        assert_eq!(run(&machine.ctx(&published, 6000)), Ok(Outcome::Switched));
+        let state = crate::check::run(&machine.ctx(&published, 6000), true).expect("offline");
         assert_eq!(state.verified.reason, athanor_trust_state::Reason::OwnerMoved);
+    }
+
+    #[test]
+    fn a_queued_rollback_on_the_previous_owner_reads_as_waiting() {
+        let machine = Machine::new("migrate-owner-rollback", &["real/k1.pub"]);
+        let tools = Fake::booted(from_previous_owner(":latest", false)).offering(SIGNED, 1000);
+        tools.status.borrow_mut().rollback_queued = true;
+        assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Waiting("rollback-queued")));
+        let state = crate::check::run(&machine.ctx(&tools, 5000), true).expect("offline");
+        assert_eq!(state.verified.reason, athanor_trust_state::Reason::OwnerMovedWaiting);
+    }
+
+    #[test]
+    fn a_verified_machine_on_a_run_tag_is_pinned_and_left_where_it_is() {
+        let machine = Machine::new("migrate-pinned", &["real/k1.pub"]);
+        machine.store_signature(SIGNED, "real");
+        for suffix in [":37691917204".to_owned(), format!("@{SIGNED}")] {
+            let tools = Fake::booted(Deployed { image: format!("{REPO}{suffix}"), ..deployed(SIGNED, 1000) }).offering(SIGNED, 1000);
+            assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Done));
+            assert!(!tools.called("switch"), "{suffix}");
+            let state = crate::check::run(&machine.ctx(&tools, 5000), true).expect("offline");
+            assert_eq!(state.verified.reason, athanor_trust_state::Reason::PinnedBuild, "{suffix}");
+        }
+        let tools = Fake::booted(Deployed { image: format!("{REPO}:latest"), ..deployed(SIGNED, 1000) });
+        let state = crate::check::run(&machine.ctx(&tools, 5000), true).expect("offline");
+        assert_eq!(state.verified.reason, athanor_trust_state::Reason::Signature, "a channel");
     }
 
     #[test]
@@ -260,7 +354,7 @@ mod tests {
     #[test]
     fn another_registry_or_image_name_is_not_moved() {
         let machine = Machine::new("migrate-owner-foreign", &["real/k1.pub"]);
-        for image in ["registry.example/previous/athanor-system:latest", "localhost:5000/previous/something-else:latest"] {
+        for image in ["registry.example/previous/athanor-system:latest", "localhost:5000/previous/something-else:latest", "localhost:5000/fork/athanor-system:latest"] {
             let tools = Fake::booted(Deployed { enforcing: false, image: image.into(), ..deployed(SIGNED, 1000) }).offering(SIGNED, 1000);
             assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Waiting("reference-out-of-scope")), "{image}");
             assert!(tools.calls.borrow().is_empty());

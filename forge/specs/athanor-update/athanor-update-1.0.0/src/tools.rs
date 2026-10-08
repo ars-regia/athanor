@@ -76,11 +76,16 @@ pub fn host_of(image: &str) -> Option<String> {
     image.split('/').next().filter(|host| !host.is_empty()).map(str::to_owned)
 }
 
-/// True for the registry's answer that a tag has no manifest. Narrower than the `Registry`
-/// code, which also covers `unauthorized` and `denied`: those must keep failing.
+/// True for the registry's answer that a tag, or the whole image, has no manifest:
+/// `manifest unknown` or `name unknown` (the distribution specification), and the answers
+/// ghcr.io gives for a package that does not exist, which it does not tell from a private
+/// one: a pull token refused with 403, or `denied`. Narrower than the `Registry` code, which
+/// also covers `unauthorized`: that must keep failing.
 #[must_use]
 pub fn manifest_absent(stderr: &str) -> bool {
-    stderr.contains("reading manifest") && stderr.contains("manifest unknown")
+    (stderr.contains("reading manifest") && (stderr.contains("manifest unknown") || stderr.contains("name unknown")))
+        || stderr.contains("Requesting bearer token: received unexpected HTTP status: 403 Forbidden")
+        || stderr.contains("denied: requested access to the resource is denied")
 }
 
 /// Maps the error text of bootc, skopeo or ostree to a code. The text goes no further.
@@ -399,7 +404,14 @@ mod tests {
     #[test]
     fn only_a_missing_manifest_is_absent() {
         assert!(manifest_absent("Error parsing image name \"docker://r/o/a:stable\": reading manifest stable in r/o/a: manifest unknown"));
+        assert!(manifest_absent("reading manifest latest in r/o/a: name unknown: repository name not known to registry"));
+        // ghcr.io, for a package that does not exist (observed 2026-10-08 with skopeo 1.22).
+        assert!(manifest_absent(
+            "Error parsing image name \"docker://ghcr.io/o/absent:latest\": Requesting bearer token: received unexpected HTTP status: 403 Forbidden"
+        ));
+        assert!(manifest_absent("Error reading manifest latest in ghcr.io/o/absent: denied: requested access to the resource is denied"));
         assert!(!manifest_absent("reading manifest stable in r/o/a: unauthorized: authentication required"));
+        assert!(!manifest_absent("Requesting bearer token: received unexpected HTTP status: 401 Unauthorized"));
         assert!(!manifest_absent("pinging container registry r: dial tcp: i/o timeout"));
     }
 
