@@ -120,7 +120,7 @@ class RemovedNamesTest(unittest.TestCase):
     def test_a_shipped_spec_must_not_require_a_removed_package(self):
         files = {
             "forge/config/packages.json": '{"custom_packages": ["desktop-ui", "shell-rs"]}',
-            "forge/specs/athanor-desktop-ui/athanor-desktop-ui.spec": "Requires: nautilus foot\nRequires(post): qemu-img >= 1\n",
+            "forge/specs/athanor-desktop-ui/athanor-desktop-ui.spec": "Requires: nautilus foot\nRequires(post): virt-manager >= 1\n",
             "forge/specs/athanor-other/athanor-other.spec": "Requires: foot\n",
             "forge/specs/athanor-shell-rs/athanor-shell-rs.spec": "Requires: gtk4 foot\n",
         }

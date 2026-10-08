@@ -112,7 +112,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-7 | 0042 | [SystemPrompter reuses the oo7 secret exchange](0042-system-prompter-reuses-oo7.md) | accepted | security, shell |
 | A2-8 | 0043 | [bootc in two steps (D6 closed)](0043-bootc-in-two-steps.md) | amended by ADR-0076 | update, kernel, security |
 | A2-9 | 0044 | [Three-tier threat model](0044-three-tier-threat-model.md) | amended by ADR-0086 | security, docs |
-| A2-10 | 0045 | [Cleanup of dead packages, documents and units](0045-cleanup-of-dead-components.md) | amended by ADR-0073 | packages, docs |
+| A2-10 | 0045 | [Cleanup of dead packages, documents and units](0045-cleanup-of-dead-components.md) | amended by ADR-0073, ADR-0091 | packages, docs |
 | A2-11 | 0046 | [DNS model: strict DNS over TLS](0046-dns-strict-dot.md) | amended by ADR-0079 | network, security |
 | A2-12 | 0047 | [Fleet identity and transport](0047-fleet-transport-and-identity.md) | accepted | fleet, network |
 | A2-10b | 0048 | [Tetragon made real](0048-tetragon-made-real.md) | accepted | security, kernel |
@@ -158,3 +158,4 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0088 | 0088 | [Pipeline revision 2](0088-pipeline-revision-2.md) | accepted | build, signing, security |
 | ADR-0089 | 0089 | [Defaults that contact or listen are off until the person turns them on](0089-defaults-that-contact-or-listen.md) | accepted | security, network |
 | ADR-0090 | 0090 | [Account lockout through authselect's with-faillock](0090-account-lockout-faillock.md) | accepted | security |
+| ADR-0091 | 0091 | [QEMU stays in the image for the runner and the development VM](0091-qemu-in-the-image.md) | accepted | packages |
