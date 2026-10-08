@@ -1,15 +1,10 @@
-#![allow(unsafe_code)]
-#![allow(unexpected_cfgs)]
 //! Shared wire types and D-Bus proxy definitions used across the Athanor OS mesh/telemetry stack.
 //!
-//! This crate has two independent halves:
+//! This crate has these independent parts:
 //! - Plain `serde`-serializable structs (`KernelTelemetry`, `MeshPeerInfo`,
 //!   `NodeIdentityPayload`, `AiDecisionPayload`, `MeshBusStatusPayload`) that
 //!   several daemons pass to each other as JSON over D-Bus method calls. They
 //!   carry no logic; they exist so producers and consumers agree on a shape.
-//! - [`shm_ring`]: a real zero-copy SPSC shared-memory ring buffer used for
-//!   lower-latency IPC than D-Bus method calls allow (see that module's docs
-//!   for the safety model of its `unsafe` code).
 //! - [`socket`]: small framing types (`MeshPacketType`, `MeshSocketFrame`) for
 //!   the mesh's raw socket protocol.
 //! - [`polkit`]: the one polkit client (subject types, authority proxy, caller-authorization
@@ -20,9 +15,6 @@
 //! its own; it is consumed as a path dependency by the daemons that do.
 use serde::{Deserialize, Serialize};
 use zbus::proxy;
-
-pub mod shm_ring;
-pub use shm_ring::*;
 
 pub mod socket;
 pub mod polkit;
