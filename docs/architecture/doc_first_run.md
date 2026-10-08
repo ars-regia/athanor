@@ -308,7 +308,7 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
 | Setting the clock by hand                                               | only with network time off, in Settings                                                                                                      |
 | Third-party repository choice                                           | the image's remotes are decided by `doc_software.md` decision 6                                                                              |
 | Telemetry, crash reporting and their switches                           | Athanor has neither; the prototype's switches did nothing                                                                                    |
-| Disk encryption and TPM enrolment                                       | the installer's, offered and not a default (the person may decline it); `athanor-tpm-luks-seal.service` is disabled until 1.1 and 1.0 unlocks with the passphrase (A2-27, #131, #145); first run changes no disk                                                           |
+| Disk encryption and TPM enrolment                                       | the installer's, offered and not a default (the person may decline it); `athanor-tpm-luks-seal.service` is disabled until 1.1 and 1.0 unlocks with the passphrase, or with TPM plus PIN once an administrator runs `athanor-uki-enroll` (A2-27 as amended on 2026-10-08, #131, #145); first run changes no disk                                                           |
 | systemd-homed accounts                                                  | decision 2                                                                                                                                   |
 
 **FR20. Tests.**
