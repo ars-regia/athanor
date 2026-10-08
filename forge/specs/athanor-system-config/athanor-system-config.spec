@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:55.fc43}
+Release:        %{?autorelease}%{!?autorelease:56.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -85,6 +85,10 @@ done
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-56
+- %post no longer creates /etc/usbguard: the usbguard package owns it and
+  tmpfiles.d/10-athanor-greetd.conf creates it at boot (verify.py rule 2).
+
 * Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-55
 - athanor-uki-enroll enrols a TPM2 keyslot that needs a PIN and is bound to the value of
   PCR 7 only, instead of PCRs 0, 4, 7 and 11, which firmware and kernel updates change
