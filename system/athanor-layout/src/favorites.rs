@@ -222,6 +222,32 @@ pub fn load_or_import(
     }
 }
 
+/// The defaults the image replaced, as (removed, successor) desktop ids (doc_software.md,
+/// decision 7; doc_bar.md BR7). Every successor is in the vendor list.
+pub const SUCCESSORS: &[(&str, &str)] = &[
+    ("com.system76.CosmicFiles.desktop", "org.gnome.Nautilus.desktop"),
+    ("com.system76.CosmicTerm.desktop", "org.gnome.Ptyxis.desktop"),
+    ("com.system76.CosmicEdit.desktop", "org.gnome.TextEditor.desktop"),
+];
+
+/// `ids` with each favourite that is no longer installed replaced, in place, by its
+/// successor, when the successor is installed and not already a favourite; `None` when
+/// nothing changes. A favourite the user reinstalls is never replaced.
+pub fn with_successors(ids: &[String], installed: impl Fn(&str) -> bool) -> Option<Vec<String>> {
+    let mut out = ids.to_vec();
+    let mut changed = false;
+    for slot in 0..out.len() {
+        let Some(&(_, next)) = SUCCESSORS.iter().find(|(old, _)| *old == out[slot]) else {
+            continue;
+        };
+        if !installed(&out[slot]) && installed(next) && !out.iter().any(|id| id == next) {
+            out[slot] = next.to_owned();
+            changed = true;
+        }
+    }
+    changed.then_some(out)
+}
+
 /// COSMIC's list as this file accepts it: desktop ids only, once each, at most the bound.
 fn sanitized(ids: Vec<String>) -> Vec<String> {
     let mut kept: Vec<String> = Vec::new();
@@ -318,6 +344,45 @@ mod tests {
 
     fn ids(list: &[&str]) -> Vec<String> {
         list.iter().map(|id| (*id).to_owned()).collect()
+    }
+
+    const FILES: &str = "com.system76.CosmicFiles.desktop";
+    const TERM: &str = "com.system76.CosmicTerm.desktop";
+    const NAUTILUS: &str = "org.gnome.Nautilus.desktop";
+    const PTYXIS: &str = "org.gnome.Ptyxis.desktop";
+
+    #[test]
+    fn a_removed_default_becomes_its_successor_in_place() {
+        let installed = |id: &str| id == NAUTILUS || id == PTYXIS || id == "a.desktop";
+        assert_eq!(
+            with_successors(&ids(&[FILES, "a.desktop", TERM]), installed),
+            Some(ids(&[NAUTILUS, "a.desktop", PTYXIS]))
+        );
+    }
+
+    #[test]
+    fn a_favourite_still_installed_is_kept() {
+        let installed = |_: &str| true;
+        assert_eq!(with_successors(&ids(&[FILES, TERM]), installed), None);
+    }
+
+    #[test]
+    fn no_replacement_when_the_successor_is_absent_or_already_a_favourite() {
+        let only_ptyxis = |id: &str| id == PTYXIS;
+        assert_eq!(with_successors(&ids(&[FILES]), only_ptyxis), None);
+        assert_eq!(with_successors(&ids(&[PTYXIS, TERM]), only_ptyxis), None);
+    }
+
+    #[test]
+    fn every_successor_is_a_vendor_favourite() {
+        let vendor = parse(include_str!(
+            "../../../forge/specs/athanor-bar/athanor-bar-1.0.0/data/favorites.toml"
+        ))
+        .expect("vendor");
+        for (old, next) in SUCCESSORS {
+            assert!(is_desktop_id(old) && is_desktop_id(next));
+            assert!(vendor.iter().any(|id| id == next), "{next}");
+        }
     }
 
     #[test]
