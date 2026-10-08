@@ -128,7 +128,8 @@ fn parse_bool(text: &str) -> Option<bool> {
 fn parse_accent(text: &str) -> Option<Rgb> {
     let start = text.find("base:")? + "base:".len();
     let body = &text[start..];
-    let body = &body[body.find('(')? + 1..body.find(')')?];
+    let body = &body[body.find('(')? + 1..];
+    let body = &body[..body.find(')')?];
     let channel = |name: &str| -> Option<u8> {
         let value = body
             .split(',')
@@ -330,6 +331,7 @@ mod tests {
             })
         );
         assert_eq!(parse_accent("( hover: ( red: 0.1 ) )"), None);
+        assert_eq!(parse_accent("base: )( red: 0.1 )"), None, "closing before opening");
         assert_eq!(
             parse_accent("( base: ( red: 2.0, green: 0.0, blue: 0.0 ) )"),
             None,
