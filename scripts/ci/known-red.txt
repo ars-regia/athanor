@@ -9,12 +9,4 @@
 # finding not listed is red. The list may only shrink: verify.py --known-red-base refuses a
 # finding the base branch does not list and a later expiry, and a listed finding the check no
 # longer reports must be removed in the same change.
-paths #223 2027-01-07 system/athanor-style/src/appearance_engine.rs percorso hard-coded in /tmp — usa /run/athanor (0700) per stato privilegiato
-paths #223 2027-01-07 system/confidential_computing/athanor-attestation/src/cvm_manager.rs percorso hard-coded in /tmp — usa /run/athanor (0700) per stato privilegiato
-paths #223 2027-01-07 system/confidential_computing/athanor-attestation/src/cvm_manager.rs percorso hard-coded in /tmp — usa /run/athanor (0700) per stato privilegiato
-panics #223 2027-01-07 system/athanor-compositor-client/src/shortcuts.rs: .expect( over the budget of 2, propagate with `?`
-panics #223 2027-01-07 system/athanor-compositor-client/src/shortcuts.rs: .expect( over the budget of 2, propagate with `?`
-panics #223 2027-01-07 system/athanor-compositor-client/src/shortcuts.rs: .expect( over the budget of 2, propagate with `?`
-panics #223 2027-01-07 system/athanor-compositor-client/src/shortcuts.rs: .expect( over the budget of 2, propagate with `?`
-forge-rules #223 2027-01-07 forge/specs/athanor-system-config/athanor-system-config.spec: rule 2, %post writes under /usr or /etc: install the file in %install or create it with tmpfiles.d
 forge-rules #223 2027-01-07 forge/specs/athanor-system-config/athanor-system-config.spec: rule 2, %post writes under /usr or /etc: install the file in %install or create it with tmpfiles.d
