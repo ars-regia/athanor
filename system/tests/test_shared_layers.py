@@ -140,11 +140,11 @@ class SharedLayers(unittest.TestCase):
         )
 
     def test_a_variant_over_126_layers_fails(self):
-        # UD32: the rechunked system image has at most 120 layers, each variant adds at most 6.
-        system = [f"sha256:{n:064x}" for n in range(120)]
+        # UD32: the rechunked system image has at most 116 layers, each variant adds up to 10.
+        system = [f"sha256:{n:064x}" for n in range(116)]
         self.serve_system(system)
         for name in NAMES:
-            own = 7 if name == "athanor-system-nvidia" else 6
+            own = 11 if name == "athanor-system-nvidia" else 10
             config = fixture(name)
             config["rootfs"]["diff_ids"] = system + [
                 f"sha256:{n:064x}" for n in range(1000, 1000 + own)
@@ -155,7 +155,7 @@ class SharedLayers(unittest.TestCase):
         message = "athanor-system-nvidia: 127 layers, more than 126"
         self.assertIn(message, r.stderr)
         self.assertIn(f"**failed**: {message}", r.stdout)
-        self.assertRegex(r.stdout, r"athanor-system-nvidia-legacy`: 120 of 120")
+        self.assertRegex(r.stdout, r"athanor-system-nvidia-legacy`: 116 of 116")
 
     def test_an_unreadable_variant_fails(self):
         self.serve_system(self.system_stage())

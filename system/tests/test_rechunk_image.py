@@ -23,6 +23,10 @@ LABELS = {
 }
 
 
+def config(labels, **fields):
+    return {"Cmd": ["/sbin/init"], "Env": ["container=oci"], "Labels": labels, **fields}
+
+
 class RechunkImage(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -42,7 +46,7 @@ class RechunkImage(unittest.TestCase):
               "info --format") echo /store/graph /run/store overlay ;;
               "image inspect")
                 jq -ce --arg ref "$5" '.[$ref] // error("image not known: " + $ref)' {self.images} |
-                  if [[ $4 == '{{{{.Id}}}}' ]]; then jq -r .id; else jq -c .labels; fi ;;
+                  if [[ $4 == '{{{{.Id}}}}' ]]; then jq -r .id; else jq -c .config; fi ;;
               "rmi --ignore") ;;
               run\\ *)
                 status=$(cat {self.dir}/run.status 2>/dev/null || echo 0)
@@ -55,7 +59,7 @@ class RechunkImage(unittest.TestCase):
         )
         (bin_dir / "podman").chmod(0o755)
         self.env = {"PATH": f"{bin_dir}:/usr/bin:/bin"}
-        self.images.write_text(json.dumps({SOURCE: {"id": SOURCE, "labels": LABELS}}))
+        self.images.write_text(json.dumps({SOURCE: {"id": SOURCE, "config": config(LABELS)}}))
         self.iidfile = self.dir / "artifacts" / "system-image.iid"
         self.iidfile.parent.mkdir()
         self.iidfile.write_text(f"sha256:{SOURCE}")
@@ -63,9 +67,9 @@ class RechunkImage(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def rechunked(self, labels):
+    def rechunked(self, labels, **fields):
         (self.dir / "rechunked.json").write_text(
-            json.dumps({"id": NEW, "labels": labels})
+            json.dumps({"id": NEW, "config": config(labels, **fields)})
         )
 
     def rechunk(self):
@@ -89,7 +93,7 @@ class RechunkImage(unittest.TestCase):
         run = self.run_call()
         self.assertIn(
             f"--entrypoint /usr/bin/rpm-ostree {SOURCE} compose build-chunked-oci --bootc"
-            f" --format-version=2 --max-layers=120 --from {SOURCE}"
+            f" --format-version=2 --max-layers=115 --from {SOURCE}"
             f" --output containers-storage:{OUT}",
             run,
         )
@@ -112,6 +116,19 @@ class RechunkImage(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("ostree.bootable", r.stderr)
         self.assertEqual(self.iidfile.read_text(), f"sha256:{SOURCE}")
+
+    def test_a_lost_configuration_field_fails(self):
+        self.rechunked({**LABELS, "ostree.commit": "9693ad96"}, Cmd=None)
+        r = self.rechunk()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("lost or changed: Cmd", r.stderr)
+        self.assertEqual(self.iidfile.read_text(), f"sha256:{SOURCE}")
+
+    def test_a_rechunked_image_without_ostree_commit_fails(self):
+        self.rechunked({k: v for k, v in LABELS.items() if k != "ostree.commit"})
+        r = self.rechunk()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("label ostree.commit", r.stderr)
 
     def test_a_failed_rechunk_keeps_the_iid_file(self):
         (self.dir / "run.status").write_text("1")

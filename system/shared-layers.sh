@@ -56,7 +56,7 @@ count=$(jq length <<< "$base")
     exit 1
 }
 
-# UD32: the rechunked system image has at most 120 layers and each variant adds at most 6.
+# UD32: the rechunked system image has at most 116 layers and each variant adds up to 10.
 max_layers=126
 status=0
 for name in athanor-system athanor-system-nvidia athanor-system-nvidia-legacy; do

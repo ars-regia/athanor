@@ -167,7 +167,7 @@ jobs:
         run: bash system/build-image.sh --system --registry "${IMAGE_REGISTRY}" --iidfile artifacts/system-image.iid
 
       - name: ✂️ Rechunk the system stage
-        # UD32: rpm-ostree regroups the system stage into at most 120 layers by package, so an
+        # UD32: rpm-ostree regroups the system stage into at most 116 layers by package, so an
         # upgrade downloads only what changed. It replaces artifacts/system-image.iid, so the
         # checks below and the three images use the rechunked image.
         run: bash system/rechunk-image.sh artifacts/system-image.iid
