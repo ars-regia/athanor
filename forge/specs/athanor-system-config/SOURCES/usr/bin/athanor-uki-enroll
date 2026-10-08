@@ -8,10 +8,17 @@
 # - The keyslot needs the TPM and a PIN. Release 1.0 boots GRUB with an unsigned initrd
 #   and kernel command line, which PCR 7 does not cover; the PIN is what keeps the TPM
 #   alone from unlocking the volume. TPM-only unlocking waits for the signed UKI (D42).
-# - PCR 7 (Secure Boot state and authorities) is bound by value. PCRs 0, 4 and 11 are not:
-#   firmware and kernel updates change them, and a value bound to them stops unsealing.
-#   A Secure Boot db, dbx or KEK update (fwupd) or a shim update can change PCR 7, and the
-#   next boot then asks for the passphrase or the recovery key.
+# - Residual limit: the PIN protects a machine taken while powered off. It does not
+#   protect against someone who changes /boot and leaves the machine for its owner to
+#   start: PCR 7 does not change with the initrd or the command line, so a boot prepared
+#   that way can ask for the PIN itself. Closing that needs the signed UKI (P4b).
+# - PCR 7 is bound by value. PCRs 0, 4 and 11 are not: firmware and kernel updates change
+#   them, and a value bound to them stops unsealing. PCR 7 holds the Secure Boot state, the
+#   firmware's PK, KEK, db and dbx, the db certificate that verified shim and, per shim's
+#   README.tpm, the certificate (db, MokList or shim's own) that matched each binary shim
+#   verifies, GRUB and the kernel, plus SBAT and MokSBState. A db, dbx or KEK update
+#   (fwupd), a shim update or a kernel signed with a new key can change it, and the next
+#   boot then asks for the passphrase or the recovery key.
 # - The tool refuses when Secure Boot does not verify the boot chain: PCR 7 then carries
 #   no authority. It reads the state with mokutil --sb-state, which reads the firmware's
 #   SecureBoot and SetupMode variables (the ones systemd reads) and shim's MokSBStateRT,
@@ -35,7 +42,10 @@ if [[ $# -ne 1 ]]; then
 fi
 device=$1
 
-sb_state=$(mokutil --sb-state)
+if ! sb_state=$(mokutil --sb-state); then
+    echo "The Secure Boot state could not be read (mokutil --sb-state failed); not enrolling." >&2
+    exit 1
+fi
 if [[ $sb_state != "SecureBoot enabled" ]]; then
     printf '%s\n' "$sb_state" >&2
     echo "Secure Boot does not verify the boot chain, so PCR 7 binds nothing; not enrolling." >&2

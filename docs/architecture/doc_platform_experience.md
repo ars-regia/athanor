@@ -45,25 +45,33 @@ Accounts are classic accounts in `/etc/passwd`, and systemd-homed is disabled by
 (ADR-0045), so nothing encrypts a home directory by itself: the home is encrypted exactly
 when the system volume is.
 
-In 1.0 an encrypted volume unlocks with its passphrase (ADR-0064; A2-27, D42 in
-doc_kernel_profile.md), and nothing in the image enrols the TPM 2.0 by itself.
+In 1.0 an encrypted volume unlocks with its passphrase, or with TPM plus PIN once an
+administrator runs `athanor-uki-enroll`; TPM-only unlocking needs the signed UKI (ADR-0064;
+A2-27 as amended on 2026-10-08, D42 in doc_kernel_profile.md). Nothing in the image enrols
+the TPM 2.0 by itself.
 `athanor-tpm-luks-seal`, which sealed the volume at first boot to PCRs 0, 2, 7 and 11, was
 removed with the other TPM units that acted without the user (issue #148), and
 `verify.py shipped` fails if it is shipped again. An administrator may run
 `athanor-uki-enroll <device>` (A2-27 as amended on 2026-10-08): it adds a keyslot that needs
 both the TPM and a PIN, bound to the value of PCR 7, enrols a recovery key first when the
-volume has none, and keeps the passphrase. The PIN is required in 1.0 because PCR 7
-records the Secure Boot state and the authorities that verified shim, GRUB and the kernel,
-not the initrd or the kernel command line: in 1.0 neither is signed and GRUB has no
+volume has none, and keeps the passphrase. PCR 7 holds the Secure Boot state, the
+firmware's PK, KEK, db and dbx, the db certificate that verified shim and, as shim's
+[README.tpm](https://github.com/rhboot/shim/blob/15.8/README.tpm) states (lines 9-22), the
+certificate from db, MokList or shim's own list that matched each binary shim verifies,
+GRUB and the kernel, plus SBAT and MokSBState. It does not hold the initrd or the kernel
+command line. The PIN is required in 1.0 because neither is signed and GRUB has no
 password, so the TPM alone cannot tell the boot Athanor ships from another one that
-Secure Boot also accepts. TPM-only unlocking waits for the signed UKI (D42). The tool
+Secure Boot also accepts. TPM-only unlocking waits for the signed UKI (D42). The PIN has
+a limit: it protects a machine taken while powered off, not one whose `/boot` someone
+changes and leaves for its owner to start, since a boot prepared that way can ask for the
+PIN itself and PCR 7 does not change; closing that needs the signed UKI (P4b). The tool
 refuses when Secure Boot does not verify the boot chain (it reads `mokutil --sb-state`),
 since PCR 7 then binds nothing. It changes no boot configuration: with no `tpm2-device=`
 option, systemd-cryptsetup tries the volume's LUKS2 tokens before the passphrase, and the
 generic initramfs carries the TPM2 token plugin, so the next boot asks for the PIN. Kernel
 updates leave PCR 7 alone, and so do most firmware updates; an update of the Secure Boot
-databases (db, dbx or KEK, which fwupd applies), of shim, or of the key that signs the
-kernel can change it, and the next boot then asks for the passphrase or the recovery key;
+databases (db, dbx or KEK, which fwupd applies), of shim, or a kernel signed with a new
+Secure Boot key (whose certificate shim measures from MokList) can change it, and the next boot then asks for the passphrase or the recovery key;
 running the tool again binds the new value. A `systemd-pcrlock` policy, which survives
 announced updates of that kind, arrives with the UKI (P4b, D42).
 

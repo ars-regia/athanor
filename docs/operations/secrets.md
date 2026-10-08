@@ -102,7 +102,7 @@ Consequences of a rotation:
 - Every machine with Secure Boot on trusts the old certificate through MokList. It must enrol the new one (`mokutil --import athanor-secureboot.der`, then MokManager at the console at the next boot) **before** it boots an image signed with the new key, or shim refuses that boot.
 - The installer enrols the certificate of the image it installs (A2-35), so new installations need nothing.
 - The repository holds one Secure Boot certificate (`forge/specs/azoth/signer/run.sh` signs and verifies against it, `nvidia-publish.sh` attests its hash and `system/kernel-artifacts.sh` checks that hash). A staged rotation, where release N ships the new certificate for enrolment and release N+1 is the first one it signs, needs a change there first. _(Proposal)_
-- Disk unlock is not affected at 1.0: TPM sealing is disabled until 1.1 (A2-27). From P4b the PCR policy key decides it (`doc_kernel_profile.md` section 9).
+- Disk unlock at 1.0: a passphrase is not affected. A TPM plus PIN keyslot from `athanor-uki-enroll` (A2-27 as amended on 2026-10-08) is bound to PCR 7, where shim measures the certificate that verified the kernel: the first boot of a kernel signed with the new key asks for the passphrase or the recovery key, and the administrator runs the tool again. From P4b the PCR policy key decides it (`doc_kernel_profile.md` section 9).
 
 **SEC2, module signing key.** Parameters: `profiles/modules.cnf` (CN "Athanor Kernel Module
 Signing Key", not a CA, `digitalSignature`), RSA 4096, SHA-256, 3650 days. `build.sh:290-293`

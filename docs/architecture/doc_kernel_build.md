@@ -309,9 +309,15 @@ patchano i Makefile per forzarlo.
   vmlinuz firmato. L'immagine non crea alcun keyslot TPM: l'unico percorso è
   `athanor-uki-enroll`, lanciato da un amministratore, che aggiunge un keyslot TPM
   più PIN legato al solo valore di PCR 7 (A2-27, emendata il 2026-10-08): il PIN
-  serve perché initrd e `cmdline` non sono firmati. Un aggiornamento di db, dbx o
-  KEK (fwupd), di shim o della chiave che firma il kernel può cambiare PCR 7, e il
-  boot successivo chiede passphrase o recovery key. La policy `systemd-pcrlock` arriva con la UKI
+  serve perché initrd e `cmdline` non sono firmati, e non ferma chi modifica `/boot`
+  e lascia che sia il proprietario ad avviare (serve la UKI firmata, P4b). PCR 7
+  contiene lo stato Secure Boot, PK, KEK, db e dbx, il certificato di db che ha
+  verificato shim e, secondo il
+  [README.tpm di shim](https://github.com/rhboot/shim/blob/15.8/README.tpm) (righe
+  9-22), il certificato (db, MokList o quello interno di shim) che ha verificato
+  ciascun binario caricato da shim, GRUB e il kernel. Un aggiornamento di db, dbx o
+  KEK (fwupd), di shim, o un kernel firmato con una nuova chiave Secure Boot cambia
+  PCR 7, e il boot successivo chiede passphrase o recovery key. La policy `systemd-pcrlock` arriva con la UKI
   (P4b, D42). Profilo
   `keys/profiles/secureboot.cnf`: non CA, `codeSigning`.
   Secret `SECUREBOOT_SIGNING_KEY`, certificato

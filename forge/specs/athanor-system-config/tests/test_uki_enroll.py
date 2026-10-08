@@ -142,6 +142,12 @@ class UkiEnroll(unittest.TestCase):
                 self.assertNotEqual(code, 0)
                 self.assertEqual(calls, [])
 
+    def test_says_when_the_secure_boot_state_cannot_be_read(self):
+        result, calls = run(WITHOUT_RECOVERY, sb_state=None)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(calls, [])
+        self.assertIn("Secure Boot state could not be read", result.stderr)
+
     def test_leaves_the_boot_configuration_alone_and_says_what_boot_asks(self):
         # systemd-cryptsetup tries the volume's LUKS2 tokens before the passphrase, and
         # the generic initramfs carries the TPM2 token plugin: nothing to configure.

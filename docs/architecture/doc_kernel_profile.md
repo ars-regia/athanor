@@ -260,7 +260,7 @@ Four layers, one source of truth each:
   Secure Boot is on, so the first boot always goes through MokManager, where the owner
   confirms the enrolment, a human action by design. With Secure Boot on, the machine then
   boots with the certificate enrolled, and TPM-only unlock is offered once attested mode
-  holds (D42; from release 1.1, since 1.0 unlocks with the passphrase only, A2-27, #131, #145); with Secure Boot off the machine is degraded. If the request is declined or
+  holds (D42; from release 1.1, since TPM-only unlocking needs the signed UKI and 1.0 unlocks with the passphrase, or with TPM plus PIN through `athanor-uki-enroll`, A2-27 as amended on 2026-10-08, #131, #145); with Secure Boot off the machine is degraded. If the request is declined or
   not completed, a Secure Boot machine returns to MokManager at every boot until the
   certificate is enrolled from the ESP with "Enroll key from disk" (on those boots
   MokManager waits only its default 10 seconds for a key, which the installer's guidance
@@ -1014,7 +1014,8 @@ There is no kdump.
    (`doc_recovery.md`, R5; A2-26, #150) in place of `OnFailure=` with systemd-boot.
    The clauses on systemd-boot, UKIs and addons, the compatibility profile, the PCR 11 policy
    and SBAT sections of UKIs and addons have no 1.0 carrier, release open (A2-8, #150); the PCR 11 policy and the
-   TPM seal come in release 1.1 (A2-27, #131, #145). "A new version does not become
+   TPM-only seal come in release 1.1 (A2-27, #131, #145); 1.0 allows TPM plus PIN through
+   `athanor-uki-enroll` (A2-27 as amended on 2026-10-08). "A new version does not become
    the boot default before the user confirms" holds for feature updates; a security-class
    update applies at the next shutdown or reboot the user starts, with a notice and a
    one-step way back (`doc_update_trust.md`, UT13; `doc_shell.md`, SH11).
@@ -1102,7 +1103,7 @@ Found on the running system and in the repository (2026-09-14):
   Containerfile also enabled, were removed (issue #148, decision A2-10), and `verify.py shipped`
   fails if any of them is shipped again. Shipped disabled and reviewed in a dedicated
   session before P6: `athanor-lvfs-rs`, `athanor-backup` and `athanor-recovery`.
-  The `athanor-secure-boot` package was removed from the repository with those units. *Amended on 2026-10-06 (A2-27, #131, #145):* release 1.0 unlocks the disk with the passphrase only; TPM sealing arrives with 1.1. *Amended on 2026-10-08 (A2-27):* an administrator may add a TPM plus PIN keyslot with `athanor-uki-enroll`; TPM-only sealing still waits for the signed UKI.
+  The `athanor-secure-boot` package was removed from the repository with those units. *Amended on 2026-10-06 (A2-27, #131, #145) and on 2026-10-08:* release 1.0 unlocks the disk with the passphrase, or with TPM plus PIN once an administrator runs `athanor-uki-enroll`; TPM-only sealing waits for the signed UKI (1.1).
   `athanor-gatekeeper-rs`, `athanor-daemon` and `athanor-store-rs` were removed from the
   image on 2026-09-17 pending redesign; the Gatekeeper was removed from the repository on
   2026-10-05, and attestation is a restricted area. ADR-0073 deleted `athanor-lvfs-rs`

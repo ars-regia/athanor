@@ -15,7 +15,7 @@ Recorded in the maintainer decision log, section 'Audit 2 decisions (2026-10-05,
 
 ## Decision
 
-At most two approvals per release cycle: the NVIDIA kmod `sign` job, which holds the Secure Boot and module keys and signs each new kernel's vmlinuz and modules, then sign-system-images, which holds the cosign key. A cycle without a kernel or NVIDIA change asks only for sign-system-images. No job that builds or runs a third-party action holds a key; `verify.py workflows` enforces this. MOK enrolment offered on a first-run page that prepares it with a system-generated one-time password shown to the user (CLI stays). athanor-tpm-luks-seal disabled until 1.1 (UKI + signed PCR 11 policy); 1.0 unlocks with the passphrase.
+At most two approvals per release cycle: the NVIDIA kmod `sign` job, which holds the Secure Boot and module keys and signs each new kernel's vmlinuz and modules, then sign-system-images, which holds the cosign key. A cycle without a kernel or NVIDIA change asks only for sign-system-images. No job that builds or runs a third-party action holds a key; `verify.py workflows` enforces this. MOK enrolment offered on a first-run page that prepares it with a system-generated one-time password shown to the user (CLI stays). athanor-tpm-luks-seal disabled until 1.1 (UKI + signed PCR 11 policy); 1.0 unlocks with the passphrase, or with TPM plus PIN through athanor-uki-enroll (amended 2026-10-08, below).
 
 ## Consequences
 
