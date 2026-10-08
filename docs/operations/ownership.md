@@ -4,7 +4,7 @@
 | --- | --- |
 | Purpose | The areas of the repository, their paths and their owners |
 | Owner | the maintainer (`@hr-mes`) |
-| Status | revision 1, 2026-10-06, _(Proposal for the maintainer)_, except section 4, decided on 2026-10-08 (ADR-0097). `.github/CODEOWNERS` is not changed here: PR #170 owns it |
+| Status | revision 2, 2026-10-08: sections 2 and 3 decided (ADR-0098), section 4 decided (ADR-0097); section 1 states facts. `.github/CODEOWNERS` is not changed here: PR #170 owns it |
 | Depends on | [contributing.md](contributing.md) CT4 and CT6, [branching.md](branching.md) |
 | Defines | OWN1 to OWN5, and the areas `kernel`, `build`, `signing`, `security`, `shell`, `apps`, `docs` |
 

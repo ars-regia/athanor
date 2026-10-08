@@ -17,7 +17,7 @@ The review of 2026-10-08 covered `doc_update_delivery.md` (revision 2 of 2026-10
 `repository-layout.md`). Their open questions were put to the maintainer, who answered on
 2026-10-08. Every answer below was the recommendation unless the text says otherwise.
 ADR-0096 signs the kernel's OCI artefacts with the project key; its scope needs one
-clarification (item 3). ADR-0097 belongs to a separate pull request. Item 6, decided on
+clarification (item 3). ADR-0097, on component owners, is a separate record. Item 6, decided on
 2026-10-09, amends the approval budget of A2-27 (ADR-0064), ADR-0080 item 4, ADR-0084 KC1 and
 ADR-0088 item 4.
 
