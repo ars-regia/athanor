@@ -118,7 +118,7 @@ jobs that sign, which are jobs of `release.yml` itself (section 3.2).
 | `accept.yml`     | `workflow_call` from `release.yml`, `workflow_dispatch` with a run id | ISO and upgrade acceptance on the run's own digests (UD17, UD18), evidence files, the VSA                                       |
 | `promote.yml`    | hourly `schedule`, `workflow_dispatch`         | selects the candidate with complete evidence after the dwell (UD5), runs the policy check, promotes by digest, publishes the evidence bundle; checks out `RELEASE_BRANCH` (VAR4), not the default branch the schedule runs on |
 | `bots.yml`       | daily `schedule`, `workflow_dispatch`          | one matrix over the bump scripts (kernel, cosmic-comp, nixpkgs registry, specs, NVIDIA locks); each opens or updates one pull request through one shared script  |
-| `maintenance.yml`| daily and weekly `schedule`, `workflow_dispatch` | vulnerability rescan, settings drift check, run statistics; weekly: janitor, reproducibility and benchmark, fuzzing, patch rebase drill, two-output layout, Scorecard |
+| `maintenance.yml`| daily and weekly `schedule`, `workflow_dispatch` | vulnerability rescan, settings drift check, run statistics; weekly: janitor, reproducibility and benchmark, patch rebase drill, two-output layout, Scorecard |
 
 ### 3.2 Reusable stages and composite actions
 
