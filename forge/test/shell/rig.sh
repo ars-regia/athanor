@@ -3,7 +3,7 @@
 # else, so every gate runs the same way on a laptop and on the hosted runner.
 #
 #   rig.sh build-image      build the rig and build stages locally, layered on the published rig;
-#                           with the build stage pinned (build-image.digest), pull it instead
+#                           with the build stage pinned (build-image.digest, a full reference), pull it instead
 #   rig.sh publish-image    push the rig stage and print its digest (needs a registry login)
 #   rig.sh publish-build-image  push the build stage and print its digest (needs a registry login)
 #   rig.sh probe-sandbox    prove that bubblewrap, and with it glycin, works in the rig
@@ -42,6 +42,7 @@ root=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
 rig=$root/forge/test/shell
 out=${ATHANOR_RIG_OUT:-$root/.scratch/shell-rig}
 registry=${ATHANOR_REGISTRY:-ghcr.io/ars-regia}
+registry=${registry,,} # OCI references are lowercase; an owner such as "Ars-Regia" is not
 local_image=localhost/athanor-shell-rig
 
 # The image: an explicit one, else the published one pinned by digest, else the local build.
@@ -61,7 +62,7 @@ build_image() {
     if [ -n "${ATHANOR_RIG_BUILD_IMAGE:-}" ]; then
         echo "$ATHANOR_RIG_BUILD_IMAGE"
     elif [ -s "$rig/build-image.digest" ]; then
-        echo "$registry/athanor-shell-rig-build@$(cat "$rig/build-image.digest")"
+        cat "$rig/build-image.digest" # the full reference that was pushed, see publish-build-image
     else
         echo "$local_image:build"
     fi
@@ -326,10 +327,12 @@ publish-image)
 publish-build-image)
     # The build stage only compiles and runs unit tests, so it is published on its own: the rig's
     # digest, and with it the pixels of the goldens, stay where they are.
+    mkdir -p "$out"
     podman build "${rig_base[@]}" --target build -t "$local_image:build" -f "$rig/Containerfile" "$rig"
     podman push --digestfile "$out/build-image.digest" "$local_image:build" "docker://$registry/athanor-shell-rig-build:latest"
-    echo "published $registry/athanor-shell-rig-build@$(cat "$out/build-image.digest")"
-    echo "commit that digest as forge/test/shell/build-image.digest together with the Containerfile change it builds"
+    echo "$registry/athanor-shell-rig-build@$(cat "$out/build-image.digest")" > "$out/build-image.ref"
+    echo "published $(cat "$out/build-image.ref")"
+    echo "commit that reference as forge/test/shell/build-image.digest together with the Containerfile change it builds"
     ;;
 probe-sandbox)
     in_rig "$(rig_image)" bwrap --unshare-all --ro-bind /usr /usr --symlink usr/lib64 /lib64 --dev /dev /usr/bin/true

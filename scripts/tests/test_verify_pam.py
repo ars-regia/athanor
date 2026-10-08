@@ -55,5 +55,51 @@ class Pwquality(Tree):
         self.assertEqual(len(verify.pwquality_problems(self.root)), 1)
 
 
+class Faillock(Tree):
+    def problems(self, mutate):
+        self.containerfile.write_text(mutate((ROOT / verify.PAM_CONTAINERFILE).read_text()))
+        return verify.faillock_problems(self.root)
+
+    def test_the_tree_locks_accounts_out(self):
+        self.assertEqual(verify.faillock_problems(self.root), [])
+
+    def test_a_build_without_the_feature_fails(self):
+        self.assertEqual(len(self.problems(lambda t: t.replace("enable-feature with-faillock", "enable-feature with-mdns4"))), 1)
+
+    def test_a_commented_out_step_fails(self):
+        self.assertTrue(self.problems(lambda t: t.replace("RUN authselect enable-feature with-faillock", "# RUN authselect enable-feature with-faillock")))
+
+    def test_a_later_disable_fails(self):
+        self.assertEqual(len(self.problems(lambda t: t + "\nRUN authselect disable-feature with-faillock\n")), 1)
+
+    def test_a_looser_threshold_fails(self):
+        for old, new in (("deny = 5", "deny = 50"), ("fail_interval = 900", "fail_interval = 90"), ("unlock_time = 600", "unlock_time = 6")):
+            with self.subTest(old=old):
+                self.assertEqual(len(self.problems(lambda t: t.replace(old, new))), 1)
+
+    def test_a_later_assignment_wins_and_fails(self):
+        self.assertEqual(len(self.problems(lambda t: t.replace("'unlock_time = 600'", "'unlock_time = 600' 'deny = 50'"))), 1)
+
+    def test_a_later_assignment_with_the_right_value_passes(self):
+        self.assertEqual(self.problems(lambda t: t.replace("'deny = 5'", "'deny = 50' 'deny = 5'")), [])
+
+    def test_thresholds_outside_the_appending_step_do_not_count(self):
+        def move(t):
+            t = t.replace("'deny = 5' ", "")
+            return t + "\nRUN echo 'deny = 5' > /tmp/x\n"
+        self.assertEqual(len(self.problems(move)), 1)
+
+    def test_locking_root_out_fails(self):
+        for extra in ("even_deny_root", "  even_deny_root", "admin_group = wheel", " admin_group=wheel"):
+            with self.subTest(extra=extra):
+                self.assertEqual(len(self.problems(lambda t: t.replace("'unlock_time = 600'", f"'unlock_time = 600' '{extra}'"))), 1)
+
+    def test_a_step_without_the_stack_check_fails(self):
+        self.assertEqual(len(self.problems(lambda t: t.replace("pam_faillock.so preauth", "pam_faillock.so"))), 1)
+
+    def test_a_missing_appending_step_fails(self):
+        self.assertEqual(len(self.problems(lambda t: t.replace(">> /etc/security/faillock.conf", ">> /etc/security/other.conf"))), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

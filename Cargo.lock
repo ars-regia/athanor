@@ -296,7 +296,6 @@ dependencies = [
  "async-trait",
  "base64",
  "hex",
- "libc",
  "rand",
  "rand_core",
  "ring",

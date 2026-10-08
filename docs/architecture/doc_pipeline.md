@@ -128,7 +128,7 @@ jobs that sign, which are jobs of `release.yml` itself (section 3.2).
 | `call-packages.yml`       | one matrix over the dirty packages of `plan.json`; tier repositories by `hash-` tag (PR #248, UD44)      | hosted                             |
 | `call-kernel.yml`         | Azoth, `azoth-devel`, the NVIDIA modules once per kernel or NVIDIA change, unsigned. Today it is the kernel check `pr.yml` calls (build, boot, modules, verdict), publishing nothing | self-hosted ephemeral guest (build), hosted (the rest) |
 | `call-kernel-publish.yml` | after the `sign-kernel` job of `release.yml`: boots the signed modules, publishes `azoth-nvidia` and `azoth-boot` with the provenance of the signed derivatives (PL19) | hosted, KVM for the boot |
-| `call-image.yml`          | the `system` stage once and the three variants from its digest (UD40), every installed RPM checked against its spec (`system/check-image-rpms.sh`, PR #274); pushes `:<run_id>` only (UD24) | hosted                             |
+| `call-image.yml`          | the `system` stage once and the three variants from its digest (UD40), every installed RPM checked against its spec (`system/check-image-rpms.sh`, PR #274) and every enabled timer against `forge/config/contacts.toml` (`system/check-image-contacts.sh`, ADR-0089); pushes `:<run_id>` only (UD24) | hosted                             |
 | `call-tag.yml`            | after the `sign-images` job of `release.yml`: verifies the key-based signature as a machine does, then moves the tags (UD25) | hosted |
 | `call-iso.yml`            | after the `sign-images` job of `release.yml`: builds the ISO from the signed digest of the default image, signs its `SHA256SUMS` keylessly with build provenance beside it, moves the ISO's `:latest` (PL32, PL35). Today the ISO is built in `call-system-image.yml` | hosted |
 
@@ -219,7 +219,7 @@ flowchart LR
 | `cosmic-comp-rebase.yml`         | merged into `maintenance.yml` (weekly)                                                             |
 | `forge-ghcr-cleanup.yml`         | merged into `maintenance.yml` (weekly janitor, section 5)                                               |
 | `forge-util-update-specs.yml`    | merged into `bots.yml`                                                                             |
-| `fuzzing.yml`                    | deleted: it had no targets (`tests/fuzz` is gone); fuzzing returned as `fuzz.yml` (weekly, doc_ci.md CI30) |
+| `fuzzing.yml`                    | deleted: it had no targets (`tests/fuzz` is gone); fuzzing returned as `fuzz.yml` (weekly, doc_ci.md CI31) |
 | `iso-acceptance.yml`             | replaced by `accept.yml`, addressed by run id (UD17)                                               |
 | `kernel-build.yml`               | split: the check into `pr.yml` (done through `call-kernel.yml`, PR #266; its own `pull_request` trigger goes with the PB1 follow-up), the build and the publication into `call-kernel.yml`. It signs nothing: `vmlinuz` is signed by the Orchestrator's `nvidia-kmod-sign`, which becomes `sign-kernel` |
 | `kernel-bump.yml`                | merged into `bots.yml`                                                                             |
@@ -540,7 +540,11 @@ Retention, by ADR-0081 (this amends the 90-day figure of UT10 and UD8):
 The janitor (`forge/scripts/clean_ghcr.sh`, weekly in `maintenance.yml`) computes the kept
 set by reachability from the promoted roots: the promoted digests, the inputs their
 provenance names, and the referrers of each. It always runs its dry run first, refuses to
-delete a member of that set, and has a unit test on a fixture graph.
+delete a member of that set, and has a unit test on a fixture graph. Today a tier image
+carries only `latest` until UD44 adds its `hash-` and run tags, so the digest a system image
+installed lives on as an untagged manifest once `latest` moves. The retention of the janitor
+(PLAT-N01) must keep every tier digest that the `io.athanor.forge-tier<N>.digest` labels of
+a kept system image name.
 
 **The support period** is five years for the product line from the date it is placed on
 the market, with the Fedora base rebased forward within the line (ADR-0081, amends

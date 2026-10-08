@@ -106,7 +106,16 @@
 ; namespace. sys_ptrace and dac_read_search: the collector reads /proc/<pid>/{fd,maps,environ}
 ; of every process for runtime roots, and the indirect roots in users' homes.
 (allow nix_daemon_t self (capability (chown dac_override dac_read_search fowner fsetid kill setgid setuid setpcap net_admin sys_chroot sys_ptrace sys_admin sys_resource)))
-(allow nix_daemon_t self (cap_userns (chown dac_override dac_read_search fowner fsetid kill setgid setuid setpcap net_admin sys_chroot sys_admin)))
+; sys_ptrace is also checked against the user namespace for the sandbox set-up: the daemon
+; opens /proc/<pid>/ns/* of its own build child, which the kernel gates with ptrace access
+; (PTRACE_MODE_READ) once the child has its own user namespace (denied { sys_ptrace }
+; cap_userns, measured on a booted image, 2026-10-08). SELinux checks the capability on the
+; subject only, so it is not limited to the build child: with the nsfs read below, the
+; daemon passes the ptrace READ check on any process in a non-initial user namespace
+; (rootless containers, Flatpak, browsers) and can read its /proc entries and enter its
+; namespaces; it gets no process ptrace (no attach, no mem). This is the reach the
+; collector already needs for runtime roots; CIL cannot narrow it by target.
+(allow nix_daemon_t self (cap_userns (chown dac_override dac_read_search fowner fsetid kill setgid setuid setpcap net_admin sys_chroot sys_ptrace sys_admin)))
 (allow nix_daemon_t self (user_namespace (create)))
 (allow nix_daemon_t self (process (fork sigchld sigkill sigstop signull signal getsched setsched getpgid setpgid getcap setcap getattr setrlimit)))
 (allow nix_daemon_t self (fifo_file (ioctl read write getattr lock append open)))
@@ -174,6 +183,14 @@
 (allow nix_daemon_t sysctl_t (file (getattr open read)))
 (allow nix_daemon_t sysctl_kernel_t (dir (getattr open read search)))
 (allow nix_daemon_t sysctl_kernel_t (file (getattr open read)))
+; /proc/sys/vm/nr_hugepages: read by the daemon and the sandbox helper it forks (the nix
+; binary) while it detects the host's features.
+(allow nix_daemon_t sysctl_vm_t (dir (getattr open read search)))
+(allow nix_daemon_t sysctl_vm_t (file (getattr open read)))
+; Namespace files (/proc/<pid>/ns/mnt): the daemon opens the mount namespace of the sandbox
+; child to enter it (setns), which is a read of the nsfs inode ("getting sandbox mount
+; namespace" in Nix's linux sandbox set-up).
+(allow nix_daemon_t nsfs_t (file (getattr open read)))
 (allow nix_daemon_t device_t (dir (getattr open read search)))
 (allow nix_daemon_t device_t (lnk_file (getattr read)))
 (allow nix_daemon_t null_device_t (chr_file (getattr open read write ioctl append)))
@@ -181,7 +198,14 @@
 (allow nix_daemon_t random_device_t (chr_file (getattr open read)))
 (allow nix_daemon_t urandom_device_t (chr_file (getattr open read)))
 (allow nix_daemon_t devtty_t (chr_file (getattr)))
+; /dev/kvm: Nix probes it (open read write) to decide whether to advertise the `kvm` system
+; feature, and stats it to bind it into the sandbox of a derivation that asks for it. The
+; probe is refused and not audited: builds on Athanor do not use kvm (no derivation in the
+; default configuration requires the feature), and granting a build daemon control of the
+; hypervisor device is not justified by it. A derivation that requires `kvm` stays unbuildable
+; here, as it was; revisit with doc_software.md if the maintainer wants NixOS tests.
 (allow nix_daemon_t kvm_device_t (chr_file (getattr)))
+(dontaudit nix_daemon_t kvm_device_t (chr_file (open read write)))
 (allow nix_daemon_t ptmx_t (chr_file (getattr open read write ioctl setattr)))
 (allow nix_daemon_t devpts_t (dir (getattr open read search mounton)))
 (allow nix_daemon_t devpts_t (chr_file (getattr open read write ioctl setattr)))

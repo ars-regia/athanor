@@ -159,7 +159,7 @@ The notifier of UT11 announces a digest once and never again in a later session,
 
   At the 8 seconds per scene measured in spike P3 that is about 24 minutes in series, an estimate; the workflow splits them into parallel jobs.
 - **Fixtures.** The rig container has no system services. `python3-dbusmock` provides NetworkManager, BlueZ, UPower, logind and power-profiles on a private system bus; PipeWire runs with null sinks; a test StatusNotifier client carries a dbusmenu menu; a fixed `state.json` stands in for the trust state. The plan of 2b confirms that Fedora 43 ships each of these dbusmock templates.
-- **Without a display.** Unit tests for every parser of untrusted input (notification text, `image-data`, tray pixmaps, dbusmenu layouts), the sender check of BR1, the favourites file, the environment BR2 builds, and the order of the modules under right-to-left text. The same parsers are fuzz targets (`fuzz/`, doc_ci.md CI30), and the committed corpus runs with the unit tests.
+- **Without a display.** Unit tests for every parser of untrusted input (notification text, `image-data`, tray pixmaps, dbusmenu layouts), the sender check of BR1, the favourites file, the environment BR2 builds, and the order of the modules under right-to-left text. The same parsers are fuzz targets (`fuzz/`, doc_ci.md CI31), and the committed corpus runs with the unit tests.
 - **Memory.** The resident memory of each program is measured in the rig, at rest, with every module loaded, and checked against the budgets of section 5.
 
 ## 3. Changes to other documents

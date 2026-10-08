@@ -1,4 +1,4 @@
-# Weekly fuzzing of the parsers that read untrusted input (doc_ci.md CI30). The targets are
+# Weekly fuzzing of the parsers that read untrusted input (doc_ci.md CI31). The targets are
 # in fuzz/, their entry points in system/athanor-fuzz-entries, whose test replays the
 # committed corpus in every pull request. A crash here is a finding: the artifact holds the
 # input, which belongs in fuzz/corpus/<target>/ together with the fix.
@@ -60,5 +60,5 @@ jobs:
             ${{ runner.temp }}/fuzz/logs
           if-no-files-found: ignore
           # A crashing input of a public repository is readable by anyone: keep it only as
-          # long as it takes to fix it (doc_ci.md CI30).
+          # long as it takes to fix it (doc_ci.md CI31).
           retention-days: 7

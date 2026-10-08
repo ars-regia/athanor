@@ -46,7 +46,7 @@ build-iso target_image=("localhost/" + image_name) tag=default_tag:
 # Security Scan of System Image using Trivy
 [group('QA & Security')]
 security-scan target_image=("localhost/" + image_name) tag=default_tag:
-    trivy image --ignorefile ../supply-chain/.trivyignore "{{ target_image }}:{{ tag }}" --severity CRITICAL,HIGH
+    trivy image "{{ target_image }}:{{ tag }}" --severity CRITICAL,HIGH
 
 # Generate SPDX SBOM using Syft
 [group('QA & Security')]

@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-base-config
 Version:        43.0.0
-Release:        17%{?dist}
+Release:        18%{?dist}
 Summary:        Athanor OS Base Configuration (Systemd, Branding, GPG)
 
 License:        GPL-3.0-or-later
@@ -60,6 +60,8 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 /etc/pki/rpm-gpg/*
 /etc/selinux/config
 /etc/yum.repos.d/*
+/etc/firewalld/zones/public.xml
+/etc/systemd/system/rpm-ostree-countme.timer
 /etc/ssh/sshd_config.d/*
 /etc/systemd/coredump.conf.d/*
 /usr/lib/systemd/system/*
@@ -75,6 +77,12 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 /usr/share/plymouth/themes/spinner/watermark.png
 
 %changelog
+* Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 43.0.0-18
+- Presets: disable rpm-ostree-countme.timer (and mask it), and unbound-anchor.timer;
+  Fedora's preset enabled both. sshd.service stays enabled by Fedora's preset: new installs turn it off
+  in the kickstart, existing installs keep their state
+- Ship firewalld's public zone without mdns and ssh; the home zone keeps both
+
 * Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 43.0.0-17
 - Drop SUPPORT_END from os-release until 1.0: the five-year support period runs from
   the date 1.0 is placed on the market, so the 1.0 release sets it (PQ7, ADR-0081)

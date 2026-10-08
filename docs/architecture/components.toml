@@ -425,7 +425,7 @@ kind = "tests"
 area = "build-ci"
 status = "specified"
 spec = "doc_ci.md"
-item = "CI30"
+item = "CI31"
 purpose = "cargo-fuzz targets and the committed corpus of the parsers that read untrusted input"
 
 [[component]]
@@ -435,7 +435,7 @@ area = "build-ci"
 status = "specified"
 spec = "doc_ci.md"
 item = "CI27"
-purpose = "Pull Request gate: changed areas, the gate verdict, the pinned tools of just check, the known-red list"
+purpose = "Pull Request gate: changed areas, the gate verdict, the pinned tools of just check, the known-red list, the Rust security audit (clippy, cargo-deny)"
 
 [[component]]
 path = "scripts/cosmic-comp-rebase"
@@ -518,13 +518,6 @@ status = "missing"
 purpose = "Structural checks of the repository: workflows, polkit, paths, shipped, docs, coverage and more"
 
 [[component]]
-path = "supply-chain"
-kind = "config"
-area = "security"
-status = "missing"
-purpose = "cargo-vet audits and imports, Trivy ignore list"
-
-[[component]]
 path = "system/Containerfile"
 kind = "image"
 area = "build-ci"
@@ -571,7 +564,7 @@ kind = "crate"
 area = "build-ci"
 status = "specified"
 spec = "doc_ci.md"
-item = "CI30"
+item = "CI31"
 purpose = "Entry points of the fuzz targets, and the stable test that replays their committed corpus"
 
 [[component]]

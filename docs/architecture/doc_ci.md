@@ -4,7 +4,7 @@
 - **Owner:** the maintainer.
 - **Status:** draft, revision 1 (2026-10-06), awaiting the maintainer's review. Facts were read on `origin/iso-v0` at `c1bab0ad` and from the GitHub API on 2026-10-06.
 - **Depends on:** [doc_build_system.md](doc_build_system.md) (packages and tiers), [doc_build_ordering.md](doc_build_ordering.md) (O1-O9, kernel and module order), [doc_kernel_build.md](doc_kernel_build.md), [doc_system_image.md](doc_system_image.md), [doc_update_trust.md](doc_update_trust.md) (D1, `:stable`), the secrets inventory `docs/operations/secrets.md`, the runner [README](../../scripts/runner/README.md).
-- **Defines:** CI1-CI30 (one per workflow), CB1-CB4 (known broken workflows), CP1-CP3 (proposals).
+- **Defines:** CI1-CI31 (one per workflow), CB1-CB4 (known broken workflows), CP1-CP3 (proposals).
 - **Enforced by:** `python3 scripts/verify.py ci`. It fails when a workflow file is missing here, when this document names a workflow file that does not exist, or when a secret or variable a workflow references is not named here.
 
 **Target.** This document describes the workflows as they are. The architecture they converge on, and the plan that gets there, is [doc_pipeline.md](doc_pipeline.md) (ADR-0080).
@@ -59,7 +59,7 @@ CI1 runs CI2 once, as its first job, and calls CI3, CI4 and CI5 only after it pa
 |---|---|---|
 | `REGISTRY/<owner>/athanor-builder` | CI3 | `<content_hash>` when built; `latest` moved to the default branch's `<content_hash>` on every default-branch run, cache hit included (`forge/scripts/promote_builder_latest.sh`) |
 | `REGISTRY/<owner>/athanor-forge-<package>`, `athanor-forge-rolling-<package>` | CI4 | `latest`, `<content hash>`; keyless signature and SPDX attestation (`forge/scripts/sign_attest.sh`) |
-| `ghcr.io/<owner>/athanor-forge-tier0-repo` ... `tier3-repo`, `athanor-forge-rolling-repo` | CI5 `build-repo` | `latest`, pushed only when the RPM content hash changes (`call-system-image.yml:107-136`) |
+| `ghcr.io/<owner>/athanor-forge-tier0-repo` ... `tier3-repo`, `athanor-forge-rolling-repo` | CI5 `build-repo` | `latest`, pushed only when the RPM content hash changes (`forge/scripts/publish_tiers.sh`); the digests the run used go to the image job in `tier-digests.json`, and no build reads `latest` |
 | `ghcr.io/<owner>/athanor-system`, `athanor-system-nvidia`, `athanor-system-nvidia-legacy` | CI5 `dag-system-image` (`<run_id>`), CI1 `tag-system-images` (`latest`) | `<run_id>`; keyless signature and SBOM, then the key-based signature of CI1 `sign-system-images` (`system/sign-images.sh`), of the digest the build job recorded, never of a tag; CI1 `verify-system-images` pulls each digest through the shipped policy without a key (`system/verify-images.sh`), and only then CI1 `tag-system-images` moves `latest` to it (`system/tag-images.sh`, UD25). The run fails when an image is not signed |
 | `ghcr.io/<owner>/athanor-iso` | CI5 (`<run_id>`), CI1 `tag-system-images` (`latest`) | `<run_id>`; `latest` only on `main`, after the default image it installs verified (`system/tag-images.sh --iso`) |
 | the three system images, tag `stable` | CI11 | moved by `system/promote.sh` |
@@ -81,8 +81,9 @@ Branch protection on `iso-v0` requires three checks, `Kernel gate`, `Spec gate` 
 | `Kernel gate` | CI8 | every PR (no path filter) | until CP4 | lint (CI2), kernel prep/build, boot matrix, NVIDIA module build |
 | System Image Check | CI13 | the image inputs change | no | the three images build as in the pipeline, without a key; package delta; merges `bump/system-*` PRs |
 | `Spec gate` | CI14 | every PR (no path filter) | until CP4 | changed specs build as the DAG builds them; a change that selects none passes; merges the spec bot's PR |
+| Rust Security & FFI Audit | CI22 | every PR to `iso-v0` | no | clippy, cargo-deny (`deny.toml`) over the root lockfile |
+| Nix Vanguard | CI24 | only PRs based on `main` | no | see section 3 |
 | Shell surfaces | CI15 | through CI27 when `changes.json` selects `shell`: a crate the rig draws, `forge/test/shell/**`, `Cargo.toml`, `Cargo.lock` or `.cargo/` changes | through `gate` | rig tests of the greeter, layout, compositor client, shelld, bar, dock, launcher; also CI2 |
-| Rust Security & FFI Audit, Nix Vanguard | CI22, CI24 | only PRs based on `main` | no | see section 3 |
 
 CI2 (actionlint, `scripts/verify.py`, the unit test suites) has no trigger of its own: on a PR it runs through CI8, which runs on every pull request and whose `Kernel gate` requires it, and through CI15. The `check` job of CI27 runs `just check`, which covers what CI2 runs and adds the remaining `verify.py` checks and the four test directories CI2 leaves out (those of `scripts/ci`, the runner, session memory and the cosmic-comp rebase drill); CI2 goes once CI8 no longer runs on pull requests (doc_pipeline.md section 3.4).
 
@@ -271,11 +272,11 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 
 ### CI22 Rust Security & FFI Audit
 
-- **File:** `rust-security-audit.yml`. **Purpose:** clippy, cargo vet and cargo deny, Kani on two crates, eBPF and bare-metal builds.
-- **Triggers:** push and `pull_request` on `main`, `develop` only. **Outputs:** artifacts `debug-logs`, `baremetal-artifact-<target>`.
-- **Secrets, variables:** `REGISTRY_HOST`, `BUILDER_STABLE_TAG`. **Environment:** none. **Runner:** hosted, inside the `athanor-builder` container. **Concurrency:** `<workflow>-<ref>`, cancels in progress.
-- **Scripts:** none.
-- **Health:** red, CB1.
+- **File:** `rust-security-audit.yml`. **Purpose:** clippy over the root workspace and cargo-deny (licences, advisories, bans, sources, one policy in `deny.toml`) over its lockfile; the frozen shell workspace left the tree with ADR-0073 wave 1. There is no cargo-vet, Kani or eBPF job (ADR-0075).
+- **Triggers:** push and `pull_request` on `iso-v0`. **Outputs:** artifact `security-audit-logs`.
+- **Secrets, variables:** `REGISTRY_HOST`, `BUILDER_STABLE_TAG`. **Environment:** none. **Runner:** hosted; the audit runs in the `athanor-builder` image under podman, not as a job container. **Concurrency:** `<workflow>-<ref>`, cancels in progress.
+- **Scripts:** `scripts/ci/security-audit.sh`.
+- **Health:** green on PR #226 (run 37695768570), the first run without suppressions.
 
 ### CI23 Rust Security & Buffer Overflow Fuzzing (retired)
 
@@ -312,7 +313,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 - **Jobs:** `changes` (`scripts/ci/changes.py`), `check` (`scripts/ci/install-tools.sh`, then `just check <base>`, whose `check-rust` runs `cargo test` over the root workspace in the build stage of the shell rig on every change), `kernel` (CI28, when the kernel is selected), `specs` (CI14, when the specs are selected), `shell` (CI15, when the shell is selected), `gate` (`scripts/ci/gate.py`: needs every other job, runs always, red when a job failed or was cancelled or a selected area did not run). The image is still checked by CI13; its area joins `changes.json` with its job (doc_pipeline.md blocks PB11, PB12). `deny.toml` belongs to no area yet (follow-up); a change to `Cargo.toml` or `Cargo.lock` is compiled and tested by `check` and selects `shell`.
 - **Secrets, variables:** none of its own; CI28 reads `KERNEL_REGISTRY`, CI14 `REGISTRY_HOST`. **Environment:** none. **Runner:** hosted; CI28's `build` self-hosted. **Concurrency:** `pr-<PR or ref>`, cancels in progress.
 - **Scripts:** `scripts/ci/changes.py`, `scripts/ci/gate.py`, `scripts/ci/install-tools.sh`, the `check` and `check-rust` recipes of the `Justfile`, `forge/test/shell/rig.sh`.
-- **Inputs not pinned yet:** `check-rust` runs cargo in the rig's build stage. Once `forge/test/shell/build-image.digest` is committed, it pulls that published image by digest and resolves no package. Until then it builds the stage on every pull request with `dnf5 install` against the live Fedora mirrors, so a mirror outage or a new `rustc` or `-devel` package can turn `gate` red on a pull request that did not change it. **[M]** to close it: run `forge/test/shell/rig.sh publish-build-image` with a registry login, make the `athanor-shell-rig-build` package public, and commit the printed digest. Fedora inputs in general get a lockfile and a bump bot later (PLAT-N10).
+- **Inputs not pinned yet:** `check-rust` runs cargo in the rig's build stage. Once `forge/test/shell/build-image.digest` is committed, it pulls the full reference that file holds (`<registry>/athanor-shell-rig-build@sha256:...`, as pushed) and resolves no package. Until then it builds the stage on every pull request with `dnf5 install` against the live Fedora mirrors, so a mirror outage or a new `rustc` or `-devel` package can turn `gate` red on a pull request that did not change it. **[M]** to close it: run `forge/test/shell/rig.sh publish-build-image` with a registry login, make the `athanor-shell-rig-build` package public, and commit the reference it writes to `build-image.ref`; CI30 does all of it. Fedora inputs in general get a lockfile and a bump bot later (PLAT-N10).
 - **Health:** not run yet.
 
 ### CI28 Reusable Kernel Check
@@ -331,7 +332,14 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 - **Scripts:** `scripts/github-settings/ghsettings.py`.
 - **Health:** not run yet; red until the settings App and its two names exist.
 
-### CI30 Fuzz
+### CI30 Publish the shell rig build image
+
+- **File:** `publish-rig-build-image.yml`. **Purpose:** builds the build stage of the shell rig, pushes `athanor-shell-rig-build`, pulls it back by digest, checks that it can be pulled anonymously and opens the PR that commits the full reference (`<registry>/athanor-shell-rig-build@sha256:...`, the registry lowercased by `rig.sh`) as `forge/test/shell/build-image.digest`, so that `rig.sh` (CI15, CI27) pulls the stage instead of building it. The maintainer runs it when the build stage changes and makes the package public the first time: the first run fails at the step `Pull the reference anonymously` of job `pin` ("make the package athanor-shell-rig-build public, then re-run the failed jobs") until then. It refuses to run from a tag.
+- **Triggers:** dispatch only. **Outputs:** artifact `rig-build-image-ref`, PR labelled `rig-build-image` (never auto-merged; a still-open PR of another digest fails the run naming it).
+- **Secrets, variables:** `GITHUB_TOKEN` (job `publish`, `packages: write`), `KERNEL_BUMP_TOKEN` (the PR step of job `pin` only), `KERNEL_REGISTRY`. **Environment:** none. **Runner:** hosted. **Concurrency:** `publish-rig-build-image`, no cancel.
+- **Scripts:** `forge/test/shell/rig.sh publish-build-image`, `forge/test/shell/check_public.sh`, `forge/test/shell/pin_build_image.py`, `forge/specs/azoth/open_bump_pr.sh`.
+
+### CI31 Fuzz
 
 - **File:** `fuzz.yml`. **Purpose:** cargo-fuzz over the parsers that read untrusted input: `sigobj::claims`, `parse_status` and `parse_local` of athanor-update; the tray, dbusmenu, notification and PNG readers of the bar; the hints, image and icon readers of shelld; the shortcuts and theme readers of the compositor client; the layout document and favourites files; the trust-state file. Each target runs `FUZZ_SECONDS` (default 240) on a copy of its committed corpus merged with the corpus earlier runs grew. `fuzz.sh` refuses a `FUZZ_SECONDS` that is not a positive integer, or one that makes the targets plus 30 minutes of builds exceed the 150-minute job timeout (at most 480 s with 15 targets).
 - **Triggers:** cron `41 3 * * 0`; dispatch with the input `seconds`. **Outputs:** artifact `fuzz`, kept 7 days: `artifacts/<target>/` (the crashing inputs) and `logs/<target>.log`; and the grown corpus, saved with `actions/cache` under `fuzz-corpus-<run id>` and restored from the newest earlier entry (a run with a crash does not save, so the corpus of the last green run stays). The job is red when a target crashed; every target runs either way. The repository is public: the crash artifact is readable by anyone with read access until it expires, so a red run is fixed promptly, and the input moves to `fuzz/corpus/<target>/` with the fix.
@@ -344,7 +352,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 
 | Id | Workflow | Cause | Evidence |
 |---|---|---|---|
-| CB1 | CI22 | Every job runs in the Nix `athanor-builder` container, where the runner's `node24` cannot load `libstdc++.so.6`, so `actions/checkout` and every JavaScript action fail. The workflow does not run on `iso-v0` at all (`rust-security-audit.yml:5,7`). | Run 37436972597 (2026-10-06): `/__e/node24/bin/node: error while loading shared libraries: libstdc++.so.6`. Runs 33735152030, 33735141194, 33735127883, 33735106788 (2026-09-03) failed. Last success 31723735366 (2026-08-13). |
+| CB1 | CI22 | Every job runs in the Nix `athanor-builder` container, where the runner's `node24` cannot load `libstdc++.so.6`, so `actions/checkout` and every JavaScript action fail. The nixpkgs `ld.so` of the image searched neither `/lib/x86_64-linux-gnu` nor `/usr/lib64`, where `builder-fhs-compat` links `libstdc++.so.6`, and `LD_LIBRARY_PATH` did not name them. Fixed in `flake.nix` by adding `/lib/x86_64-linux-gnu` to `LD_LIBRARY_PATH`; it takes effect when the builder image is rebuilt. | Run 37436972597 (2026-10-06): `/__e/node24/bin/node: error while loading shared libraries: libstdc++.so.6`. Runs 33735152030, 33735141194, 33735127883, 33735106788 (2026-09-03) failed. Last success 31723735366 (2026-08-13). |
 | CB2 | CI21 | Same container cause. The rewritten `forge/scripts/clean_ghcr.sh` has never pruned in CI. The job has a 10-minute limit (`forge-ghcr-cleanup.yml:23`) against a backlog nobody has measured since. | Run 37173567085 (2026-10-04): same `libstdc++.so.6` error. Every run since 31918663684 (2026-08-16) failed; last success 31590170415 (2026-08-12). |
 | CB3 | CI23 | Retired. The workflow ran in the same container as CB1 and its targets, `tests/fuzz`, were deleted in `0c4e012f` (2026-08-14); every run after 2026-08-16 failed (the last 30) and it was removed. | Last success 31924793226 (2026-08-16). |
 | CB4 | CI24 | Green, but not reproducible: `cachix/install-nix-action@v25` is a tag, not a commit (`nix-vanguard.yml:19`); `nixos-unstable` floats (`:21`). It builds `pkgs.just` (`flake.nix:77`), nothing of Athanor, and runs only for `main` (`:5,7`). | Runs 37436972430, 33735156990, 33735143255, 33735130648, 33735112511 success. |
@@ -370,14 +378,14 @@ Every name below is described in the secrets inventory, `docs/operations/secrets
 | Name | Kind | Defined in | Used by |
 |---|---|---|---|
 | `GITHUB_TOKEN` | automatic token | GitHub | CI1, CI3-CI9, CI10-CI13, CI20, CI26 |
-| `KERNEL_BUMP_TOKEN` | secret (PAT) | repository | CI9, CI13, CI14, CI17, CI19 |
+| `KERNEL_BUMP_TOKEN` | secret (PAT) | repository | CI9, CI13, CI14, CI17, CI19, CI30 |
 | `SPECS_UPDATE_TOKEN` | secret (PAT) | repository | CI20 |
 | `FORGE_PAT` | secret (PAT, delete:packages) | repository | CI21 |
 | `SECUREBOOT_SIGNING_KEY` | secret | environment `signing-kernel` | CI1 |
 | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | secret | environment `signing-images` | CI1 |
 | `MODULE_SIGNING_KEY` | secret | environment `signing-kernel` | CI1 |
 | `REGISTRY_HOST` | variable, default `ghcr.io` | not set | CI1, CI3, CI4, CI11, CI14, CI21, CI22 |
-| `KERNEL_REGISTRY` | variable, default `ghcr.io/<owner>` | not set | CI1, CI6, CI8, CI9, CI13, CI25, CI26 |
+| `KERNEL_REGISTRY` | variable, default `ghcr.io/<owner>` | not set | CI1, CI6, CI8, CI9, CI13, CI25, CI26, CI30 |
 | `BUILDER_STABLE_TAG` | variable, default `latest` | not set | CI21, CI22 |
 | `SETTINGS_APP_PRIVATE_KEY` | secret (GitHub App key, read-only App) | repository, not set yet | CI29 |
 | `SETTINGS_APP_CLIENT_ID` | variable, no default | repository, not set yet | CI29 |
