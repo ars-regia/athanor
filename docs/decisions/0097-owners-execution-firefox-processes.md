@@ -13,8 +13,9 @@ areas: [security, kernel, shell, apps, governance]
 
 After review batches 2 and 3 (ADR-0095) four questions were still written in the
 specifications as waiting for the maintainer: the maintenance owners that the scope budget
-(`doc_shell.md` SH3, maintainer decision A2-14) requires before a component's first plan, what
-controls execution on 1.0 once IPE is lost (`doc_kernel_profile.md` section 10), the order of the
+(`doc_shell.md` SH3, maintainer decision A2-14) requires before a component's first plan, the
+residual risk of execution control on 1.0 once IPE is lost (`doc_kernel_profile.md` section 10,
+which still read as if no record covered it although ADR-0076 point 1 does), the order of the
 Firefox change (`doc_software.md` section 9) and whether the shell surfaces share one process
 (`doc_shell_standard.md`). Each was presented with options and a recommendation. On 2026-10-08
 the maintainer accepted every recommendation.
@@ -23,16 +24,22 @@ the maintainer accepted every recommendation.
 
 1. **Maintenance owners.** The maintainer is the maintenance owner of every component of
    Athanor's own until they name another person. The components for which a specification asked
-   for a named owner are listed in `docs/operations/ownership.md` section 4, with their "why not
-   upstream": the `udisks` and `usbguard` modules of `doc_disks.md` DK3 (the "maintainer to name
-   the owner" of ADR-0095 point 7), the Athanor page of Software and Bazaar on the image side
-   (`doc_software.md` section 9), and the watch on the `tracker-rs` bindings (`doc_launcher.md`
-   LA2).
-2. **Execution control on 1.0.** Between the loss of IPE (A2-8) and the 1.1 seal, execution
-   control on 1.0 rests on the image signatures verified when an image is pulled, the read-only
-   `/usr` of the deployment and the SELinux restrictions of `doc_kernel_profile.md` section 10.
-   Tampering with `/usr` offline, by someone with access to the disk, is a residual risk of 1.0,
-   stated in the threat model (`doc_threat_model.md` TM7) and closed by the 1.1 seal.
+   for a named owner are listed in `docs/operations/ownership.md` section 4, each pointing to the
+   section that holds its reason: the `udisks` and `usbguard` modules of `doc_disks.md` DK3 (the
+   "maintainer to name the owner" of ADR-0095 point 7), and the Athanor page of Software and
+   Bazaar on the image side (`doc_software.md` section 9). Asked in the same question, the
+   maintainer also follows the releases of the `tracker-rs` bindings (`doc_launcher.md` LA2), an
+   upstream dependency rather than an own component.
+2. **Execution control on 1.0** stays as ADR-0076 point 1 decided it (composefs for `/usr`, with
+   fs-verity where the filesystem supports it, and `noexec` on the system-writable temporary
+   mounts); this record adds nothing to that list and amends nothing in it. It states the
+   residual risk that ADR-0076 asked `doc_kernel_profile.md` to state: without the 1.1 seal
+   nothing binds `/usr` to a signed digest at boot, so tampering with `/usr` offline, by
+   someone with access to the disk, is not detected on 1.0. The signatures checked when an
+   image is pulled (`doc_update_trust.md`) and the SELinux restrictions of
+   `doc_kernel_profile.md` section 10 (block P6) limit the other paths; neither covers that
+   one. The risk is named in the threat model (`doc_threat_model.md` TM7) and closed by the
+   1.1 seal.
 3. **Firefox moves from the RPM to Flathub** in the order `doc_software.md` section 9 gives: the
    system update service installs the preinstall files first, and in one later change the
    `Requires`, the base image's RPMs, the default applications and the favourites move together.
