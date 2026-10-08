@@ -2,7 +2,7 @@
 id: A2-6
 title: "Trusted path built on cosmic-comp PR #1441"
 date: 2026-10-05
-status: accepted
+status: amended by ADR-0092
 issues: [151]
 areas: [security, shell]
 ---
