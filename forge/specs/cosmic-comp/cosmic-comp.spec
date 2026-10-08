@@ -55,6 +55,9 @@ make install DESTDIR=%{buildroot} prefix=%{_prefix}
 %{_datadir}/cosmic/com.system76.CosmicSettings.WindowRules/v1/tiling_exception_defaults
 
 %changelog
+* Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.9.0-1.fc43.athanor1
+- Fedora's cosmic-comp 1.9.0-1.fc43; both patches still apply.
+
 * Fri Oct 02 2026 Athanor Forge <forge@athanor.os> - 1.8.0-1.fc43.athanor1
 - Fedora's cosmic-comp 1.8.0-1.fc43 built from the upstream archive, with the layer-surface
   focus patch.
