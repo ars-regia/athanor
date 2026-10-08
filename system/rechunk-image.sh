@@ -35,14 +35,16 @@ config() {
 before=$(config "$source")
 
 # rpm-ostree runs from the system image itself and writes through the caller's containers-storage,
-# mounted at its own path because its database records that path.
+# mounted at its own path because its database records that path. A rootless store lives under
+# /home, which the image links to var/home, an empty /var: a tmpfs there lets the mount point be
+# created (on GitHub's runner the store is /home/runner/.local/share/containers/storage).
 read -r graphroot runroot driver < <(podman info --format '{{.Store.GraphRoot}} {{.Store.RunRoot}} {{.Store.GraphDriverName}}')
 work=$(mktemp -d -p /var/tmp)
 trap 'rm -rf "$work"' EXIT
 printf '[storage]\ndriver = "%s"\ngraphroot = "%s"\nrunroot = "%s"\n' "$driver" "$graphroot" "$runroot" > "$work/storage.conf"
 
 podman rmi --ignore "$out" > /dev/null
-podman run --rm --privileged --security-opt label=disable \
+podman run --rm --privileged --security-opt label=disable --tmpfs /var/home \
     -v "$graphroot:$graphroot" -v "$runroot:$runroot" -v "$work:/var/tmp" -e CONTAINERS_STORAGE_CONF=/var/tmp/storage.conf \
     --entrypoint /usr/bin/rpm-ostree "$source" \
     compose build-chunked-oci --bootc --format-version=2 --max-layers=115 --from "$source" --output "containers-storage:$out"
