@@ -2,7 +2,7 @@
 name = "athanor-controls"
 version = "1.0.0"
 edition = "2021"
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "The detail pages of the network, Bluetooth, audio and battery services, which the bar's popovers and the control center share"
 authors = ["Athanor Forge <forge@athanor.os>"]
 

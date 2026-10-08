@@ -2,7 +2,7 @@
 name = "athanor-control-center"
 version = "1.0.0"
 edition = "2021"
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "The Athanor control center: one resident layer-shell panel opened by the bar's button and Super+C (doc_control_center.md)"
 authors = ["Athanor Forge <forge@athanor.os>"]
 
