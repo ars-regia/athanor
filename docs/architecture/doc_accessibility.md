@@ -41,7 +41,7 @@ Braille, mouse keys, voice control, a screen reader at the disk-unlock passphras
 
 ### Why not upstream, and owners (SH3, scope budget A2-14)
 
-The maintenance owner of each component below is the maintainer (ADR-0097 (PR #336)).
+The maintenance owner of each component below is the maintainer ([ADR-0097](../decisions/0097-owners-execution-firefox-processes.md)).
 
 - **`athanor-a11y`** (starts Orca and the magnifier from the key). Upstream candidates: cosmic-session's `a11y.rs`, which spawns Orca but belongs to a session SH3 removes; cosmic-settings-daemon's `ScreenReader` action, which only flips the property, leaves at stage 8 and never runs at the greeter; gnome-settings-daemon, which is GNOME's session. None runs at the greeter, and none can be the unit that the gate and Orca order against (`doc_session.md` SN4). Checked on 2026-10-08 against the facts above.
 - **The reader gate** (`athanor-a11y gate`). The only upstream mechanism is Flatpak's `xdg-dbus-proxy` policy, which protects sandboxed applications and nothing on the host; the gap on the host is at-spi2-core issue 65, open since 2019. The gate reuses that proxy for every non-reader and adds only the classification, one function (AX5).

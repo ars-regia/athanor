@@ -59,7 +59,7 @@ Renaming workspaces, Stage Manager, snap layouts and tiling zones, Activities, a
 
 ### Why not upstream, and owners (SH3, scope budget A2-14)
 
-The maintenance owner of each component below is the maintainer (ADR-0097 (PR #336)).
+The maintenance owner of each component below is the maintainer ([ADR-0097](../decisions/0097-owners-execution-firefox-processes.md)).
 
 - **`athanor-overview`.** The upstream candidate is cosmic-workspaces. It falls short on facts above: no AT-SPI (iced), a crash on NVIDIA at a cold start shown at once, a capture path through GBM and Vulkan that the virgl VM rejects, no arrow-key navigation, new and close workspace as commented-out code, and the typed character lost on the way to the launcher. GNOME's overview belongs to gnome-shell, which is not on our stack. The compositor client already holds the typed calls the overview needs, so the program adds a surface and a model, not a protocol layer.
 - **The hot corner.** cosmic-comp has no hot-corner key or code, and cosmic-settings 1.8.0 carries only the string. Drawing it in the shell (OV14) needs no compositor patch; a patch would be the alternative and CO3 asks for none when the shell can do it.

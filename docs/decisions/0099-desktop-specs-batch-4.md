@@ -66,6 +66,6 @@ Each is short and cites this record and ADR-0057 where it applies.
 
 The three specifications carry the decisions in their own decisions sections. Follow-ups: the
 owner rows for the new components `athanor-a11y`, the reader gate, `athanor-keyboard`,
-`athanor-osk` and `athanor-overview` in `docs/operations/ownership.md`, once the ownership table
-of ADR-0097 (PR #336) has merged; the vendor default of `enable-hot-corners` in
+`athanor-osk` and `athanor-overview` in `docs/operations/ownership.md`, the ownership table of
+ADR-0097; the vendor default of `enable-hot-corners` in
 `athanor-system-config`; and the schema of mono audio in `athanor-sessiond`.
