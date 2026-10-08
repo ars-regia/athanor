@@ -84,6 +84,12 @@ class BoundaryTest(unittest.TestCase):
             found[0].startswith("system/athanor-style/src/theme.rs:2 "), found
         )
 
+    def test_a_cosmic_desktop_id_is_not_a_configuration(self):
+        code = 'const OLD: &str = "com.system76.CosmicTerm.desktop";\n'
+        self.assertEqual(problems({"system/athanor-layout/src/favorites.rs": code}), [])
+        both = 'const X: [&str; 2] = ["com.system76.CosmicFiles.desktop", "com.system76.CosmicPanel"];\n'
+        self.assertEqual(len(problems({"system/athanor-layout/src/favorites.rs": both})), 1)
+
     def test_only_the_theme_tool_and_the_compositor_client_may_name_cosmic(self):
         allowed = [
             "forge/tools/calmo-cosmic-theme/src/main.rs",

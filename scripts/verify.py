@@ -1735,6 +1735,7 @@ COSMIC_ALLOWED = (
     "system/athanor-fuzz-entries/src/compositor.rs",
 )
 BOUNDARY_DIRS = ("system", "forge/specs", "forge/tools")
+COSMIC_DESKTOP_ID = re.compile(r"com\.system76\.\w+\.desktop\b")
 DEPENDENCY_TABLES = ("dependencies", "dev-dependencies", "dev_dependencies",
                      "build-dependencies", "build_dependencies")
 
@@ -1778,7 +1779,9 @@ def boundary_problems(root):
             if relative.startswith(COSMIC_ALLOWED):
                 continue
             for i, line in enumerate(read(path).split("\n"), 1):
-                if "com.system76" in line.split("//")[0]:
+                # A desktop id names an application, not a configuration (the favourites'
+                # successors of COSMIC's former default apps, doc_bar.md BR7).
+                if "com.system76" in COSMIC_DESKTOP_ID.sub("", line.split("//")[0]):
                     problems.append(f"{relative}:{i} names a com.system76 configuration: read it "
                                     f"through athanor-compositor-client")
     return problems
