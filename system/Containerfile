@@ -167,12 +167,15 @@ COPY forge/config/packages.json /usr/share/athanor/packages.json
 # GPG signatures are the provenance. The list is the single source of truth in
 # packages.json, so a package added there reaches the image. --allowerasing lets the
 # RPM Fusion ffmpeg replace the base image's ffmpeg-free; ATHANOR_OWNED_EXCLUDES keeps it
-# from replacing Athanor's tier 2 builds.
+# from replacing Athanor's tier 2 builds. qemu-common ships qemu-bridge-helper setuid root
+# for tap devices on virbr0; the runner and the development VM use passt and user
+# networking (ADR-0091), so the helper loses its setuid bit.
 RUN --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
     dnf5 install -y $ATHANOR_OWNED_EXCLUDES --setopt=install_weak_deps=False --setopt=tsflags=nodocs jq && \
     UPSTREAM=$(jq -r '(.upstream_core + .upstream_desktop + .upstream_media + .upstream_cli)[]' /usr/share/athanor/packages.json) && \
     echo "Installing upstream packages: $UPSTREAM" && \
-    dnf5 install -y --allowerasing $ATHANOR_OWNED_EXCLUDES --setopt=install_weak_deps=False --setopt=tsflags=nodocs $UPSTREAM
+    dnf5 install -y --allowerasing $ATHANOR_OWNED_EXCLUDES --setopt=install_weak_deps=False --setopt=tsflags=nodocs $UPSTREAM && \
+    chmod u-s /usr/libexec/qemu-bridge-helper
 
 # FLATPAK MANIFEST: the applications are provisioned on the installed system, not at
 # build time. Extra-data apps such as Chrome run an apply_extra script under

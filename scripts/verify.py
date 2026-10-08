@@ -995,12 +995,13 @@ def image_policy_problems(root=None):
 # Containerfile and the kickstart, the preset files, and the Requires of shipped specs.
 # cosmic-store is not listed: it stays until Software ships, as the only graphical way to
 # install an application (doc_software.md, decision 5). QEMU is not listed either: the
-# self-hosted runner and the development VM run it from the image (ADR-0091).
+# self-hosted runner and the development VM run it from the image (ADR-0091), but the
+# qemu-kvm metapackage stays out.
 REMOVED_PACKAGES = {
     "antigravity", "astro-toolchain", "cargo-tools", "ide-bootstrap", "qa",
     "cosmic-term", "cosmic-files", "cosmic-edit", "cosmic-player",
     "foot", "swaybg", "swaylock", "Thunar", "thunar-archive-plugin", "thunar-volman",
-    "virt-manager", "compiler-rt",
+    "virt-manager", "qemu-kvm", "compiler-rt",
 }
 REMOVED_PACKAGES |= {f"athanor-{n}" for n in ("antigravity", "astro-toolchain", "cargo-tools", "ide-bootstrap", "qa")}
 # Units and authselect features the image must not enable: accounts stay classic. Keylime

@@ -25,13 +25,20 @@ is one more component to build, pin and publish.
 ## Decision
 
 The maintainer decided on 2026-10-08 that the image ships the QEMU the two tools use, and
-only that: `qemu-system-x86-core`, `qemu-img`, `edk2-ovmf`, the `virtio-vga-gl` display
-device and the `gtk`, `egl-headless`, `opengl` and `spice-core` user interfaces.
+only that: `qemu-system-x86-core`, `qemu-img`, `edk2-ovmf`, `passt` for the runner's network,
+the `virtio-vga-gl` and `virtio-gpu-gl` display devices and the `gtk`, `egl-headless`,
+`opengl` and `spice-core` user interfaces.
 `virt-manager` and the `qemu-kvm` metapackage stay out.
 
 ## Consequences
 
+This record amends A2-10 in one point only: `qemu-img` and the QEMU packages above are
+shipped again. `qemu-kvm`, `virt-manager` and the rest of A2-10 stand, and `scripts/verify.py`
+still rejects `qemu-kvm` and `virt-manager`.
+
 The binaries are signed with the image and read-only under `/usr`, like the rest of the
-system. The image grows by the size of those packages, about 140 MB installed, most of it
-`qemu-system-x86-core` and `edk2-ovmf`. `scripts/verify.py` no longer lists `qemu-kvm` and
-`qemu-img` among the removed packages.
+system. The image grows by about 160 MB installed, most of it `qemu-system-x86-core` and
+`edk2-ovmf`. `qemu-common` brings `qemu-bridge-helper`, setuid root in Fedora, with
+`/etc/qemu/bridge.conf` allowing `virbr0`; neither tool uses a bridge, so the image removes
+the setuid bit. It also brings a `qemu` system user, `/etc/modprobe.d/kvm.conf` and a QEMU
+entry in the application list.
