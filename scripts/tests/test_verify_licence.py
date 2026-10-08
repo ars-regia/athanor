@@ -29,6 +29,25 @@ class SpdxTest(unittest.TestCase):
             self.assertIsNotNone(verify.spdx_problem(e), e)
 
 
+class LicenceExceptionTest(unittest.TestCase):
+    def test_the_greeter_is_declared_gpl_3_only_and_nothing_else_is(self):
+        self.assertEqual(verify.licence_problems(), [])
+        for path, (lic, reason) in verify.OWN_LICENCE_EXCEPTIONS.items():
+            self.assertNotEqual(lic, verify.OWN_LICENCE, path)
+            self.assertTrue(reason, path)
+
+    def test_an_exception_must_match_exactly(self):
+        crate, spec = sorted(verify.OWN_LICENCE_EXCEPTIONS)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            subprocess.run(["git", "-C", tmp, "init", "-q"], check=True)
+            (root / "LICENSE").write_text("text")
+            for rel, body in ((crate, CRATE % OWN), (spec, f"License: {OWN}\n")):
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                (root / rel).write_text(body)
+            self.assertEqual(len(verify.licence_problems(root)), 2)
+
+
 class LicenceProblemsTest(unittest.TestCase):
     def repo(self, files):
         tmp = tempfile.TemporaryDirectory()

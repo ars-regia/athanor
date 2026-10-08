@@ -1778,6 +1778,17 @@ UPSTREAM_SPECS = {
     "forge/specs/greenboot-rs/greenboot-rs.spec",
     "forge/specs/polkit/polkit.spec",
 }
+# Own code that is declared under a different licence than OWN_LICENCE, by repository
+# path: path -> (licence, reason). An entry is a decision, not a tolerance: the declared
+# licence must match exactly, so the entry cannot hide a drift in either direction.
+OWN_LICENCE_EXCEPTIONS = {
+    # greetd_ipc is GPL-3.0-only; the greeter binary links it, so the binary can only be
+    # distributed under GPL-3.0-only terms (maintainer decision, audit 4, LIC-N02).
+    "forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0/Cargo.toml":
+        ("GPL-3.0-only", "links greetd_ipc (GPL-3.0-only)"),
+    "forge/specs/athanor-greeter-ui/athanor-greeter-ui.spec":
+        ("GPL-3.0-only", "links greetd_ipc (GPL-3.0-only)"),
+}
 # Crates whose manifests agents may not edit without the maintainer's approval.
 PROTECTED_CRATES = {"system/confidential_computing/athanor-attestation/Cargo.toml"}
 # Files that carry packaging metadata outside Cargo.toml and *.spec.
@@ -1846,10 +1857,11 @@ def licence_problems(root=None):
             if pkg is None:
                 continue
             lic = pkg.get("license")
-            if lic != OWN_LICENCE:
+            want = OWN_LICENCE_EXCEPTIONS.get(f, (OWN_LICENCE,))[0]
+            if lic != want:
                 note = " (change awaits maintainer approval: protected crate)" \
                     if f in PROTECTED_CRATES else ""
-                out.append(f"{f}: license = {lic!r}, expected {OWN_LICENCE!r}{note}")
+                out.append(f"{f}: license = {lic!r}, expected {want!r}{note}")
         elif name.endswith(".spec"):
             m = re.search(r"^License:\s*(.*?)\s*$", read(root / f), re.M)
             if not m:
@@ -1858,8 +1870,9 @@ def licence_problems(root=None):
                 why = spdx_problem(m.group(1))
                 if why:
                     out.append(f"{f}: License: {m.group(1)} ({why})")
-            elif m.group(1) != OWN_LICENCE:
-                out.append(f"{f}: License: {m.group(1)}, expected {OWN_LICENCE}")
+            elif m.group(1) != OWN_LICENCE_EXCEPTIONS.get(f, (OWN_LICENCE,))[0]:
+                want = OWN_LICENCE_EXCEPTIONS.get(f, (OWN_LICENCE,))[0]
+                out.append(f"{f}: License: {m.group(1)}, expected {want}")
         elif f in NFPM_FILES:
             for n, line in enumerate(read(root / f).split("\n"), 1):
                 m = re.match(r"""^\s*license:\s*["']?([^"'\s]*)""", line)
