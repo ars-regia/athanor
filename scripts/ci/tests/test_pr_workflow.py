@@ -8,6 +8,7 @@ import yaml
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 PR = ROOT / ".github" / "workflows" / "pr.yml"
+SHELL = ROOT / ".github" / "workflows" / "shell-surfaces.yml"
 
 spec = importlib.util.spec_from_file_location("changes", ROOT / "scripts/ci/changes.py")
 changes = importlib.util.module_from_spec(spec)
@@ -50,6 +51,19 @@ class GateShapeTest(unittest.TestCase):
                     self.jobs[name]["if"],
                     f"${{{{ fromJSON(needs.changes.outputs.changes).{name} }}}}",
                 )
+
+
+class ShellAreaTest(unittest.TestCase):
+    """shell-surfaces.yml runs on a push for the paths that select it on a pull request."""
+
+    def test_push_filter_matches_the_shell_area(self):
+        workflow = yaml.safe_load(SHELL.read_text())
+        triggers = workflow[True]
+        self.assertNotIn("pull_request", triggers)
+        self.assertIn("workflow_call", triggers)
+        glob = "/" + "*" * 2
+        as_area = {p[: -len(glob) + 1] if p.endswith(glob) else p for p in triggers["push"]["paths"]}
+        self.assertEqual(as_area, set(changes.AREAS["shell"]))
 
 
 if __name__ == "__main__":

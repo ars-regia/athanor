@@ -77,11 +77,11 @@ Branch protection on `iso-v0` requires three checks, `Kernel gate`, `Spec gate` 
 
 | Check | Workflow | Runs on a PR when | Required | Gates |
 |---|---|---|---|---|
-| `gate` | CI27 | every PR and merge group (no path filter) | yes | `just check` (actionlint, Justfile syntax, every `verify.py` check with `scripts/ci/known-red.txt`, every Python test directory); the kernel check (CI28) and CI14 when `scripts/ci/changes.py` selects them |
+| `gate` | CI27 | every PR and merge group (no path filter) | yes | `just check` (actionlint, Justfile syntax, every `verify.py` check with `scripts/ci/known-red.txt`, every Python test directory, `cargo test` over the root workspace in the rig's build stage through `just check-rust`); the kernel check (CI28), CI14 and CI15 when `scripts/ci/changes.py` selects them |
 | `Kernel gate` | CI8 | every PR (no path filter) | until CP4 | lint (CI2), kernel prep/build, boot matrix, NVIDIA module build |
 | System Image Check | CI13 | the image inputs change | no | the three images build as in the pipeline, without a key; package delta; merges `bump/system-*` PRs |
 | `Spec gate` | CI14 | every PR (no path filter) | until CP4 | changed specs build as the DAG builds them; a change that selects none passes; merges the spec bot's PR |
-| Shell surfaces | CI15 | a shell crate or `forge/test/shell/**` changes | no | rig tests of the greeter, layout, compositor client, shelld, bar, dock, launcher; also CI2 |
+| Shell surfaces | CI15 | through CI27 when `changes.json` selects `shell`: a crate the rig draws, `forge/test/shell/**`, `Cargo.toml`, `Cargo.lock` or `.cargo/` changes | through `gate` | rig tests of the greeter, layout, compositor client, shelld, bar, dock, launcher; also CI2 |
 | Rust Security & FFI Audit, Nix Vanguard | CI22, CI24 | only PRs based on `main` | no | see section 3 |
 
 CI2 (actionlint, `scripts/verify.py`, the unit test suites) has no trigger of its own: on a PR it runs through CI8, which runs on every pull request and whose `Kernel gate` requires it, and through CI15. The `check` job of CI27 runs `just check`, which covers what CI2 runs and adds the remaining `verify.py` checks and the four test directories CI2 leaves out (those of `scripts/ci`, the runner, session memory and the cosmic-comp rebase drill); CI2 goes once CI8 no longer runs on pull requests (doc_pipeline.md section 3.4).
@@ -215,7 +215,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 ### CI15 Shell surfaces
 
 - **File:** `shell-surfaces.yml`. **Purpose:** builds the shell programs in the rig image and runs their surface, AT-SPI and end-to-end tests (doc_shell.md, SH13).
-- **Triggers:** push to `iso-v0` and `pull_request` on the shell crates and `forge/test/shell/**`; dispatch. **Outputs:** artifacts `shell-rig-<job>`.
+- **Triggers:** push to `iso-v0` on the shell crates, `forge/test/shell/**` and the Cargo files; `workflow_call` from CI27 job `shell` when `changes.json` selects `shell` (the same paths, kept equal by `scripts/ci/tests/test_pr_workflow.py`); dispatch. **Outputs:** artifacts `shell-rig-<job>`.
 - **Secrets, variables:** none. **Environment:** none. **Runner:** hosted. **Concurrency:** none.
 - **Scripts:** `forge/test/shell/rig.sh`.
 - **Health:** 37441359085, 37200729155, 37058387332, 37040250670, 36839207346 success.
@@ -308,10 +308,11 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 ### CI27 Pull Request
 
 - **File:** `pr.yml`. **Purpose:** the pull request gate (doc_pipeline.md section 3, PL3; ADR-0075): change detection, `just check`, the build checks the change selects, and `gate`, the one aggregate check.
-- **Triggers:** every `pull_request` and `merge_group`, with no path filter. **Outputs:** artifact `changes` (`changes.json`: `kernel`, `specs`, `docs_only`, from `git diff -z`, so any path name matches); check `gate`.
-- **Jobs:** `changes` (`scripts/ci/changes.py`), `check` (`scripts/ci/install-tools.sh`, then `just check <base>`), `kernel` (CI28, when the kernel is selected), `specs` (CI14, when the specs are selected), `gate` (`scripts/ci/gate.py`: needs every other job, runs always, red when a job failed or was cancelled or a selected area did not run). The image and shell are still checked by CI13 and CI15; their areas join `changes.json` with their jobs (doc_pipeline.md blocks PB11, PB12). `Cargo.toml`, `Cargo.lock` and `deny.toml` belong to no area yet (follow-up).
+- **Triggers:** every `pull_request` and `merge_group`, with no path filter. **Outputs:** artifact `changes` (`changes.json`: `kernel`, `specs`, `shell`, `docs_only`, from `git diff -z`, so any path name matches); check `gate`.
+- **Jobs:** `changes` (`scripts/ci/changes.py`), `check` (`scripts/ci/install-tools.sh`, then `just check <base>`, whose `check-rust` runs `cargo test` over the root workspace in the build stage of the shell rig on every change), `kernel` (CI28, when the kernel is selected), `specs` (CI14, when the specs are selected), `shell` (CI15, when the shell is selected), `gate` (`scripts/ci/gate.py`: needs every other job, runs always, red when a job failed or was cancelled or a selected area did not run). The image is still checked by CI13; its area joins `changes.json` with its job (doc_pipeline.md blocks PB11, PB12). `deny.toml` belongs to no area yet (follow-up); a change to `Cargo.toml` or `Cargo.lock` is compiled and tested by `check` and selects `shell`.
 - **Secrets, variables:** none of its own; CI28 reads `KERNEL_REGISTRY`, CI14 `REGISTRY_HOST`. **Environment:** none. **Runner:** hosted; CI28's `build` self-hosted. **Concurrency:** `pr-<PR or ref>`, cancels in progress.
-- **Scripts:** `scripts/ci/changes.py`, `scripts/ci/gate.py`, `scripts/ci/install-tools.sh`, the `check` recipe of the `Justfile`.
+- **Scripts:** `scripts/ci/changes.py`, `scripts/ci/gate.py`, `scripts/ci/install-tools.sh`, the `check` and `check-rust` recipes of the `Justfile`, `forge/test/shell/rig.sh`.
+- **Inputs not pinned yet:** `check-rust` runs cargo in the rig's build stage. Once `forge/test/shell/build-image.digest` is committed, it pulls that published image by digest and resolves no package. Until then it builds the stage on every pull request with `dnf5 install` against the live Fedora mirrors, so a mirror outage or a new `rustc` or `-devel` package can turn `gate` red on a pull request that did not change it. **[M]** to close it: run `forge/test/shell/rig.sh publish-build-image` with a registry login, make the `athanor-shell-rig-build` package public, and commit the printed digest. Fedora inputs in general get a lockfile and a bump bot later (PLAT-N10).
 - **Health:** not run yet.
 
 ### CI28 Reusable Kernel Check

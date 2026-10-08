@@ -110,8 +110,8 @@ lint:
 # The pull request gate (ADR-0075, doc_pipeline.md PL3): the `check` job of pr.yml runs exactly
 # this, and a contributor runs it before pushing. Workflow lint (actionlint, with shellcheck on
 # every run: block), Justfile syntax, every verify.py check with the findings listed in
-# scripts/ci/known-red.txt excused (the list may only shrink against BASE), and every Python
-# test directory of the repository.
+# scripts/ci/known-red.txt excused (the list may only shrink against BASE), every Python
+# test directory of the repository, and `cargo test` over the root workspace (check-rust).
 [group('QA & Security')]
 check base="HEAD":
     #!/usr/bin/env bash
@@ -131,6 +131,23 @@ check base="HEAD":
         echo "check: unit tests in $dir"
         python3 -B -m unittest discover -s "$dir"
     done
+    just check-rust
+
+# The Rust half of the gate: the tests of every crate of the root workspace, in the build stage
+# of the shell rig (forge/test/shell/Containerfile), which carries the GTK, glycin, PAM, TPM and
+# D-Bus headers the workspace links. athanor-preview-render runs in a second cargo command:
+# glycin needs zbus on async-io while the workspace enables zbus' tokio runtime, and cargo
+# unifies features within one command (CODE-N06). The visual shell tests are not here: pr.yml
+# runs them when changes.json selects `shell`.
+[group('QA & Security')]
+check-rust:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bash forge/test/shell/rig.sh build-image
+    # The calculator's test runs the real qalc of the rig and may not skip here.
+    export ATHANOR_REQUIRE_QALC=1
+    bash forge/test/shell/rig.sh cargo test --locked --workspace --exclude athanor-preview-render
+    bash forge/test/shell/rig.sh cargo test --locked -p athanor-preview-render
 
 # Formats all shell scripts and Justfiles across workspace
 [group('QA & Security')]
