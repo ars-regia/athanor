@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # The acceptance of UD40 (docs/architecture/doc_update_delivery.md): the build job builds the
 # system stage once and every variant FROM that image, so each variant starts with every layer
-# of the system image, in order. Compares the diff_ids (uncompressed layer digests) that
-# `podman image inspect` reports as RootFS.Layers for the images in local storage, where the
-# build left them, before anything is pushed: a failed check never publishes a tag. A push does not change
-# diff_ids, so the published images carry the same layers. Prints one Markdown line per variant
-# for the job summary, and every failure both there and on stderr; exits 1 when a variant does
-# not carry the system layers or an image cannot be read.
+# of the system image, in order; UD32 adds a limit of 126 layers in all. Compares the diff_ids
+# (uncompressed layer digests) that `podman image inspect` reports as RootFS.Layers for the
+# images in local storage, where the build left them, before anything is pushed: a failed check
+# never publishes a tag. A push does not change diff_ids, so the published images carry the
+# same layers. Prints one Markdown line per variant for the job summary, and every failure both
+# there and on stderr; exits 1 when a variant does not carry the system layers or has more than
+# 126 layers, or when an image cannot be read.
 # Usage: shared-layers.sh --system IMAGE_ID --registry REGISTRY/OWNER --tag TAG
 set -euo pipefail
 
@@ -55,6 +56,8 @@ count=$(jq length <<< "$base")
     exit 1
 }
 
+# UD32: the rechunked system image has at most 120 layers and each variant adds at most 6.
+max_layers=126
 status=0
 for name in athanor-system athanor-system-nvidia athanor-system-nvidia-legacy; do
     ids=$(diff_ids "$registry/$name:$tag") || {
@@ -64,11 +67,15 @@ for name in athanor-system athanor-system-nvidia athanor-system-nvidia-legacy; d
     # The 1-based position of the first system layer the variant does not carry, or 0.
     first=$(jq -r --argjson base "$base" \
         '[range($base | length) as $i | select(.[$i] != $base[$i]) | $i + 1] | first // 0' <<< "$ids")
-    if [[ $first -eq 0 ]]; then
-        echo "- \`$name\`: $count of $count system layers, $(($(jq length <<< "$ids") - count)) of its own"
-    else
+    layers=$(jq length <<< "$ids")
+    if [[ $first -ne 0 ]]; then
         fail "$name: layer $first of $count differs from the system image"
         status=1
+    elif [[ $layers -gt $max_layers ]]; then
+        fail "$name: $layers layers, more than $max_layers"
+        status=1
+    else
+        echo "- \`$name\`: $count of $count system layers, $((layers - count)) of its own"
     fi
 done
 exit "$status"
