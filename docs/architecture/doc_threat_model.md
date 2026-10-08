@@ -1,6 +1,6 @@
 # Athanor threat model
 
-Status: **revision 1, 2026-10-06,** written from maintainer decision A2-9 (#151) of 2026-10-05, with maintainer decisions A2-6 (#151) and A2-7 (#151) for the trusted path and the keyring prompter. Source: the second specification audit, security and trust group, findings 2 and 4. It is the one threat model of the project: every specification states its guarantees against the tiers defined here and cites this document instead of writing an adversary of its own.
+Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommendations of review batch 2 (ADR-0095); first written 2026-10-06,** written from maintainer decision A2-9 (#151) of 2026-10-05, with maintainer decisions A2-6 (#151) and A2-7 (#151) for the trusted path and the keyring prompter. Source: the second specification audit, security and trust group, findings 2 and 4. It is the one threat model of the project: every specification states its guarantees against the tiers defined here and cites this document instead of writing an adversary of its own.
 
 ## 1. Why one document
 
@@ -10,7 +10,7 @@ Before this revision each specification wrote its own adversary paragraph, and t
 
 **TM1. Tier 1: unconfined user code is the user.** A process that runs as the user outside any confinement holds the user's rights, and Athanor does not defend the user's session against it, as GNOME and KDE do not.
 
-- **Members.** The user's commands in a terminal and everything they start; the `unconfined` class of `doc_session_daemons.md` SD8 (Ptyxis, Software, system autostart entries); Nix tools, which carry the "not confined" badge (`doc_software.md` SW10, maintainer decision A2-16 (#155)); user units written by hand; `toolbox` containers, which are not isolation (TM5).
+- **Members.** The user's commands in a terminal and everything they start; the `unconfined` class of `doc_session_daemons.md` SD8 (Ptyxis, system autostart entries); Nix tools, which carry the "not confined" badge (`doc_software.md` SW10, maintainer decision A2-16 (#155)); user units written by hand; `toolbox` containers, which are not isolation (TM5).
 - **What it can do, stated once.** Kill the lock, call logind, replace or extend any user unit with a drop-in, rewrite dconf, read every file of the user, imitate any prompt on the main Wayland socket, and lock the administrator out for ten minutes through faillock (`doc_lock_and_prompts.md` D3, ADR-0090). Anyone who reaches a password prompt (the greeter, or `su` and `sudo -S` run as another user) can do the same, repeatedly: a local denial of service accepted for 1.0. A process running as the same user can truncate its own tally (the file is user-owned, mode 0660) and the account phase resets it on success, so the lockout bounds guesses from the greeter and from other users, not from a process running as that user; against that process only `pam_faildelay` remains.
 - **Consequence for every specification.** A check that identifies a peer by its unit or cgroup (`doc_bar.md` BR1, `doc_lock_and_prompts.md` LP8, `doc_accessibility.md`'s reader gate, `doc_first_run.md` FR6) is an integrity check against mistakes and against tier 2. It is never described as a barrier against tier 1. A specification that needs protection against tier 1 is asking for a filesystem sandbox of the whole session, which no decision has taken.
 
@@ -18,11 +18,11 @@ Before this revision each specification wrote its own adversary paragraph, and t
 
 - **No bus name outside the filter:** the broker's `xdg-dbus-proxy` (SD9) or Flatpak's own proxy.
 - **No main Wayland socket:** a security-context socket only (`doc_bar.md` BR2, SD8), so no privileged global, and its floating windows carry the compositor's border once LP13 ships (TM6).
-- **No unit manager:** `$XDG_RUNTIME_DIR/systemd/` is hidden and `org.freedesktop.systemd1` is not on the filter (SD8, SD9).
+- **No unit manager:** `$XDG_RUNTIME_DIR/systemd/` is hidden and `org.freedesktop.systemd1` is not on the filter (SD8, SD9). Exception, named: Settings, a first-party system application, is not tier 2 on this point and on the main Wayland socket; its boundary is the four installed and validated units it starts by object path (never `StartTransientUnit`), Landlock, no network and `NoNewPrivileges` (`doc_settings.md` SE6, ADR-0077 point 2).
 - **No new privileges:** `NoNewPrivileges=yes` (SD8); Flatpak sets it for its own sandbox.
-- **No write to the persistence paths of TM3.**
+- **No write to the persistence paths of TM3.** Exception, named in TM3: Settings.
 
-**TM3. Persistence paths.** A path is a persistence path when what is written there runs, or changes what runs, at a later login or a later command of the user without a new action of the user. Tier 2 is denied write on the paths listed below; the list names the known persistence paths, not every path that meets the definition (candidates in T2). For the broker's `confined` class the rule is enforced with `ReadOnlyPaths=` on the application's unit (SD8); for Flatpak it is Flatpak's own sandbox, within the limits of TM4.
+**TM3. Persistence paths.** A path is a persistence path when what is written there runs, or changes what runs, at a later login or a later command of the user without a new action of the user. Tier 2 is denied write on the paths listed below; the list names the known persistence paths, not every path that meets the definition (candidates in T2). One writer is authorised: Settings, the tool that manages them, writes `~/.config/cosmic`, `~/.config/autostart` and `~/.config/mimeapps.list` (`doc_settings.md` SE6); no other application does. For the broker's `confined` class the rule is enforced with `ReadOnlyPaths=` on the application's unit (SD8); for Flatpak it is Flatpak's own sandbox, within the limits of TM4.
 
 | Path                                                          | Why it is a persistence path                                                                                |
 | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
@@ -42,6 +42,7 @@ Before this revision each specification wrote its own adversary paragraph, and t
 | `~/.ssh/config`                                               | `ProxyCommand` runs at the user's next `ssh`; A2-29 (#151)                                                  |
 | `~/.config/mimeapps.list`                                     | chooses the program `xdg-open` and the file manager run for a file type; A2-29 (#151)                       |
 
+- **Settings.** It is the only authorised writer of the three rows above, together with the exception of TM2; this is the one exception, written here only.
 - **Rows beyond the issue's list.** `~/.local/share/systemd`, `~/.bashrc.d` and `~/.config/cosmic`, and the candidates of former open doubt T2, are not in the list of issue #151. The maintainer added them on 2026-10-06 (A2-29 (#151)); SD8's `ReadOnlyPaths=` (`doc_session_daemons.md`) covers them.
 - **The list is a deny-list and needs upkeep.** A new program that runs code from a file in the home adds its path here, in the same change that ships the program. This is the accepted cost of not building a filesystem sandbox (SD21).
 - **A path must exist to be protected.** `ReadOnlyPaths=` binds only paths present when the unit starts, and the `-` prefix that tolerates an absent path leaves it creatable by the application. The broker creates the listed directories before each launch; an absent start-up file (`~/.bash_login`, `~/.profile`, `~/.gitconfig`, `~/.ssh/config`, `~/.config/mimeapps.list` and the like) is protected by a bind of an empty read-only file over its path in the unit, so the application can neither create it nor write it, and nothing is created in the home (A2-29 (#151)).
@@ -63,7 +64,7 @@ Before this revision each specification wrote its own adversary paragraph, and t
 - **What counts.** The merged `[Service]` section, unit then drop-ins in file-name order (a file in a more specific directory replacing a same-named one), ends with `NoNewPrivileges=` true, or with a `CapabilityBoundingSet=` that is an allow-list: a positive list, or an empty assignment that drops every capability. A deny-list (`~CAP_SYS_MODULE ...`) does not count, even one that removes `CAP_SYS_ADMIN`: it keeps every capability it does not name, and several of them (`CAP_SYS_ADMIN`, `CAP_SYS_MODULE`, `CAP_DAC_OVERRIDE`, `CAP_SYS_PTRACE`) each give root back. A unit that needs a deny-list also sets `NoNewPrivileges=yes`, as the `athanor-update` units do. The setting is written explicitly: systemd also implies `NoNewPrivileges` from options such as `DynamicUser=` or `SystemCallFilter=`, but the rule asks for the setting a reader and the check can see.
 - **Enforcement.** `python3 scripts/verify.py services`, run in CI by the lint workflow. A unit that cannot meet the rule is named in the check's exemption list with its reason, so every exemption is visible; an exemption that no longer applies fails the check.
 - **What does not change.** Shell programs confine themselves with Landlock (`doc_kernel_profile.md` section 10); third-party applications are Flatpak by default; MicroVMs are only for received workloads after 1.0 (`doc_kernel_profile.md` D28).
-- **The project instructions** carry the rule in the text the maintainer approved on 2026-10-07; it lands through a separate change, until which the instructions still hold the earlier rule.
+- **The project instructions** carry the rule in the text the maintainer approved on 2026-10-07 (`AGENTS.md`, least privilege for services); the earlier rule is no longer in them.
 
 ## 4. The polkit model
 
@@ -92,7 +93,17 @@ Owed at each document's next revision: `doc_shell.md` SH12 and `doc_bar.md` BR1 
 3. **T3. The polkit model.** Which actions Athanor adds or overrides and their result for the active session have no single owner (audit 2, security and trust, finding 15). Decided 2026-10-07 by the maintainer: the table belongs in this document, with a check (TM9).
 4. **T4. Windows the trusted-path border does not mark.** cosmic-comp#1441 borders floating windows only, so a confined application can imitate a prompt with a fullscreen or tiled window (TM6). Decided 2026-10-06 (A2-31): the extension of the indicator to every window state is proposed upstream with #1441; until it lands, the gap is a stated residual risk of TM6 (`doc_lock_and_prompts.md` L13).
 
+Decided by the maintainer on 2026-10-08, accepting every recommendation of review batch 2 (ADR-0095):
+
+5. **Decision 5 (review batch 2, Q1). TM2.** TM2 names the Settings exception, with its boundary.
+6. **Decision 6 (review batch 2, Q2). TM1.** Software is `confined` (ADR-0077) and is removed from the members of TM1.
+7. **Decision 7 (review batch 2, Q3). TM3.** Settings is the only authorised writer of its three rows; acceptance item 2 uses a `confined` test application other than Settings.
+8. **Decision 8 (review batch 2, Q4). `AskPowerOff` (`doc_osd.md` M8).** Left as written: TM1's "call logind" covers it.
+9. **Decision 9 (review batch 2, Q5). The stale reference.** `doc_session_daemons.md` SD9 no longer cites the open doubt T2, which is decided.
+10. **Decision 10 (review batch 2, Q6). Owed citations.** Approved; the list of section 5 stays the merge list for the next revision of each document.
+11. **Decision 11 (review batch 2, Q7). The project instructions.** No change needed: `AGENTS.md` already carries TM8 (verified on `iso-v0`).
+
 ## 7. Acceptance
 
 1. `python3 scripts/verify.py services` and `python3 scripts/verify.py polkit-model` pass in CI.
-2. On the dev VM, a `confined` test application fails to create or change a file in each path of TM3, and the same write succeeds from a terminal (SD22 step 6).
+2. On the dev VM, an ordinary `confined` test application (not Settings) fails to create or change a file in each path of TM3, and the same write succeeds from a terminal (SD22 step 6).
