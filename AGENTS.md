@@ -76,6 +76,27 @@ for hours: never use it as a check.
   links in code, commits, pull requests or documents.
 - **One logical change per commit.** Report unrelated problems instead of fixing them in
   passing.
+- **At most five open pull requests.** With five open, finish before starting: a new pull
+  request waits until one is merged or closed, and reviewers' findings on open ones are
+  closed before new work begins. A branch without an open pull request is merged, archived
+  as a tag `archive/<branch>`, or deleted.
+
+## Audits
+
+Automate the class, audit the delta, probe the runtime.
+
+- **Every class of defect an audit finds becomes an automatic check** (`verify.py`, a CI
+  step, the VM acceptance) in the pull request that fixes it, or an issue that names the
+  check to add. A finding without one is expected to come back.
+- **Delta audits, triggered by events.** Starting from the previous audit's report and
+  covering only what changed since, one runs before every milestone (public ISO, `:stable`,
+  1.0), after a Fedora major release bump, and after a batch of merges in a sensitive area
+  (updates, signing, PAM, SELinux, the Gatekeeper). No full-repository audit on a calendar.
+- **A short runtime audit every month** on the booted signed image, even without events:
+  exposed services, `systemd-analyze security`, SELinux denials, PAM, the update and trust
+  state.
+- **Reports stay outside the public repository.** Issues and pull requests name the fix,
+  not how to exploit what it fixes.
 
 ## Stop and ask before editing
 
