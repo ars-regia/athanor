@@ -2811,6 +2811,146 @@ def check_coverage():
 
 
 # --------------------------------------------------------------------------- #
+# agent-docs: the instructions agents read name things that exist
+# --------------------------------------------------------------------------- #
+
+# ADR-0074 holds the root guide to about 100 lines; Claude Code loads every other one whole.
+AGENT_DOC_LINES = {"AGENTS.md": 100}
+AGENT_DOC_DEFAULT_LINES = 60
+CODE_TOKEN = re.compile(r"`([^`\n]+)`")
+LINE_SUFFIX = re.compile(r"(?::\d+(?:-\d+)?)?(?:#\S*)?$")
+VERIFY_CITATION = re.compile(r"verify\.py((?:[ \t]+[a-z][a-z0-9-]*)+)")
+RULE_GLOB = re.compile(r"""^\s*-\s*["']?([^"'#]+?)["']?\s*$""")
+
+
+def agent_docs(tracked):
+    """The tracked files agents load as instructions: every AGENTS.md and CLAUDE.md, and the
+    Markdown under .claude/ but its skills, which are tools, not rules."""
+    return sorted(f for f in tracked
+                  if Path(f).name in ("AGENTS.md", "CLAUDE.md")
+                  or (f.startswith(".claude/") and f.endswith(".md")
+                      and not f.startswith(".claude/skills/")))
+
+
+def glob_regex(glob):
+    """A compiled regex for a path glob as Claude Code's `paths:` reads it: `**/` is any number
+    of directories, `*` and `?` stay inside one, `{a,b}` is either."""
+    out, i = [], 0
+    while i < len(glob):
+        if glob.startswith("**/", i):
+            out.append("(?:.*/)?")
+            i += 3
+        elif glob.startswith("**", i):
+            out.append(".*")
+            i += 2
+        elif glob[i] == "*":
+            out.append("[^/]*")
+            i += 1
+        elif glob[i] == "?":
+            out.append("[^/]")
+            i += 1
+        elif glob[i] == "{" and "}" in glob[i:]:
+            end = glob.index("}", i)
+            out.append("(?:" + "|".join(map(re.escape, glob[i + 1:end].split(","))) + ")")
+            i = end + 1
+        else:
+            out.append(re.escape(glob[i]))
+            i += 1
+    return re.compile("".join(out))
+
+
+def path_exists(path, files, dirs):
+    if any(c in path for c in "*?{"):
+        pattern = glob_regex(path)
+        return any(pattern.fullmatch(f) for f in files) or any(pattern.fullmatch(d) for d in dirs)
+    return path in files or path in dirs
+
+
+def agent_doc_problems(doc, text, tracked, ignored, checks):
+    """What an agent document gets wrong about the tree: a code span naming a repository path
+    that is neither tracked nor git-ignored, a `paths:` glob of a rule that matches no tracked
+    file, a `verify.py <name>` naming no check, and a document over its line budget. A span is
+    a path only when its first segment is an entry of the root or of the document's directory:
+    `origin/iso-v0` or `actions/checkout` are not."""
+    files = set(tracked)
+    dirs = {str(parent) for f in files for parent in Path(f).parents if str(parent) != "."}
+    here = Path(doc).parent
+    roots = {Path(f).parts[0] for f in files}
+    local = {Path(f).relative_to(here).parts[0] for f in files
+             if here != Path(".") and Path(f).is_relative_to(here) and f != doc}
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    problems = []
+
+    budget = AGENT_DOC_LINES.get(doc, AGENT_DOC_DEFAULT_LINES)
+    if len(lines) > budget:
+        problems.append(f"{doc}: {len(lines)} lines, the budget is {budget}")
+
+    if doc.startswith(".claude/rules/") and lines and lines[0].strip() == "---":
+        in_paths = False
+        for n, line in enumerate(lines[1:], 2):
+            if line.strip() == "---":
+                break
+            if not line.startswith((" ", "\t", "-")):
+                in_paths = line.split(":")[0].strip() == "paths"
+                continue
+            m = RULE_GLOB.match(line)
+            if in_paths and m and not path_exists(m.group(1), files, set()):
+                problems.append(f"{doc}:{n}: paths glob {m.group(1)} matches no tracked file")
+
+    fence = None
+    for n, line in enumerate(lines, 1):
+        m = FENCE.match(line)
+        if fence is None and m:
+            fence = m.group(1)
+            continue
+        if fence is not None:
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
+                fence = None
+                continue
+            code = [line.split(" #")[0]]
+        else:
+            code = CODE_TOKEN.findall(line)
+            for token in code:
+                token = LINE_SUFFIX.sub("", token.strip())
+                if (not token or "/" not in token or any(c in token for c in " <>=$@")
+                        or token.startswith(("/", "~", "-", "http"))):
+                    continue
+                first = token.split("/")[0]
+                candidates = ([token] if first in roots else []) \
+                    + ([str(here / token)] if first in local else [])
+                if candidates and not any(path_exists(c.rstrip("/"), files, dirs) or ignored(c)
+                                          for c in candidates):
+                    problems.append(f"{doc}:{n}: {token} is neither tracked nor git-ignored")
+        for piece in code:
+            for m in VERIFY_CITATION.finditer(piece):
+                for name in m.group(1).split():
+                    if name not in checks:
+                        problems.append(f"{doc}:{n}: verify.py has no check named {name}")
+    return problems
+
+
+@check("agent-docs", "The agent instructions name paths, rule globs and checks that exist")
+def check_agent_docs():
+    r = Result()
+    listed = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True, text=True)
+    if listed.returncode:
+        r.fail(f"git ls-files failed: {listed.stderr.strip()}")
+        return r
+    tracked = [f for f in listed.stdout.split("\0") if f]
+
+    def ignored(path):
+        return subprocess.run(["git", "-C", str(ROOT), "check-ignore", "-q", "--no-index", path],
+                              capture_output=True).returncode == 0
+
+    for doc in agent_docs(tracked):
+        for problem in agent_doc_problems(doc, read(ROOT / doc), tracked, ignored, set(CHECKS)):
+            r.fail(problem)
+    return r
+
+
+# --------------------------------------------------------------------------- #
 # runner
 # --------------------------------------------------------------------------- #
 
