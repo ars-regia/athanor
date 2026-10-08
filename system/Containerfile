@@ -200,13 +200,10 @@ RUN if ls /usr/share/selinux/packages/*.cil >/dev/null 2>&1; then \
 # registry this image is published to and the public keys committed under system/keys, and
 # /etc/containers/policy.json and registries.d/athanor.yaml become links to it. No default:
 # build-image.sh always passes the registry, and the renderer refuses an empty one.
-# IMAGE_MOVED_FROM names the project's previous owner while the bridge runs, empty otherwise
-# (docs/architecture/doc_update_delivery.md, UD45).
 ARG IMAGE_REGISTRY
-ARG IMAGE_MOVED_FROM=
 COPY system/keys/ /usr/share/athanor/keys/
 RUN /usr/libexec/athanor-update/render-policy --registry "${IMAGE_REGISTRY}" --keys-dir /usr/share/athanor/keys \
-        --out /usr/share/athanor/containers --link-etc /etc --moved-from "${IMAGE_MOVED_FROM}" && \
+        --out /usr/share/athanor/containers --link-etc /etc && \
     test "$(readlink /etc/containers/policy.json)" = /usr/share/athanor/containers/policy.json && \
     test "$(readlink /etc/containers/registries.d/athanor.yaml)" = /usr/share/athanor/containers/registries.d/athanor.yaml && \
     test "$(grep -c sigstoreSigned /etc/containers/policy.json)" -eq 3

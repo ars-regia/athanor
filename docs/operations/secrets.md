@@ -48,7 +48,7 @@ No repository variable is set (`gh variable list` is empty), so every default be
 | VAR4 | `RELEASE_BRANCH` | `iso-v0` | PR #180 only: orchestrator, `call-system-image.yml`, `iso-acceptance.yml`, `promote-stable.yml` |
 | VAR5 | `PROMOTE_DWELL_HOURS` | `24` | PR #180 only: `promote-stable.yml` |
 | VAR6 | `SETTINGS_APP_CLIENT_ID` | none; not set yet | `maintenance.yml` `settings-drift`: client id of the settings GitHub App (SEC13) |
-| VAR7 | `ATHANOR_BRIDGE_REGISTRY` | none: the bridge is off | orchestrator `bridge-system-images`: the previous owner as `REGISTRY/OWNER` (`ghcr.io/hr-mes`); set to start the bridge, cleared to stop it (`doc_update_delivery.md` UD45, UD50). Declared in `actions.json` only while it is set |
+| VAR7 | `ATHANOR_BRIDGE_REGISTRY` | none: the bridge is off | orchestrator `bridge-system-images`: the previous owner as `REGISTRY/OWNER` (`ghcr.io/hr-mes`); set to start the bridge, once the images list the previous owner (the second step of `doc_update_delivery.md` UD45), cleared to stop it (UD45, UD50). Declared in `actions.json` only while it is set |
 
 | Id | Environment | Secrets | Protection (`.github/settings/environments.json`; `signing` stays beside the split until the image key rotation of section 4.1 ends) | Referenced by |
 | --- | --- | --- | --- | --- |

@@ -132,7 +132,7 @@ Health is the last five runs on `iso-v0` (`gh run list --workflow <file> --branc
 
 - **File:** `call-system-image.yml`. **Purpose:** aggregates the tier repositories, builds the three system images and the ISO, signs them keyless; CI1 `sign-system-images` signs them with the update key after it.
 - **Triggers:** `workflow_call` (CI1). **Input:** `builder_content_hash`. **Outputs:** tier repository images, system images, ISO image; artifact `image-digests`.
-- **Secrets, variables:** `GITHUB_TOKEN`; `ATHANOR_BRIDGE_REGISTRY`, which the system stage build passes to `system/build-image.sh` as the image's list of previous owners (`doc_update_delivery.md` UD45).
+- **Secrets, variables:** `GITHUB_TOKEN`; `ATHANOR_BRIDGE_REGISTRY`, which the system stage build passes to `system/build-image.sh` as the image's list of previous owners (`doc_update_delivery.md` UD45) _(second step of UD45, not landed)_.
 - **Environment:** none. `dag-system-image` holds no key; the vmlinuz arrives signed, from `azoth-boot` by digest, and the key-based signature of the images is CI1 `sign-system-images`, one maintainer approval per run (D43).
 - **Runner:** hosted. **Concurrency:** caller's.
 - **Scripts:** `scripts/fetch_repo_rpms.sh` (in `forge/`), `system/build-image.sh`, `system/shared-layers.sh`, `system/image-digests.sh`, `forge/scripts/sbom_rootfs.sh`, `sign_attest.sh`, `build_iso.sh`, `retry.sh`.

@@ -27,7 +27,9 @@ on:
       - system/package-delta.sh
       - forge/config/packages.json
       # The check installs the athanor-base-config RPM of the published tier 0, not the spec
-      # of the pull request.
+      # of the pull request. The same holds for every forge package: a Containerfile change
+      # that needs a newer package lands after that package is published, in a second pull
+      # request (doc_update_delivery.md, UD45).
       - forge/specs/athanor-base-config/**
       - forge/specs/azoth/pins.env
       - forge/specs/azoth/nvr.sh
