@@ -109,7 +109,12 @@
 ; sys_ptrace is also checked against the user namespace for the sandbox set-up: the daemon
 ; opens /proc/<pid>/ns/* of its own build child, which the kernel gates with ptrace access
 ; (PTRACE_MODE_READ) once the child has its own user namespace (denied { sys_ptrace }
-; cap_userns, measured on a booted image, 2026-10-08).
+; cap_userns, measured on a booted image, 2026-10-08). SELinux checks the capability on the
+; subject only, so it is not limited to the build child: with the nsfs read below, the
+; daemon passes the ptrace READ check on any process in a non-initial user namespace
+; (rootless containers, Flatpak, browsers) and can read its /proc entries and enter its
+; namespaces; it gets no process ptrace (no attach, no mem). This is the reach the
+; collector already needs for runtime roots; CIL cannot narrow it by target.
 (allow nix_daemon_t self (cap_userns (chown dac_override dac_read_search fowner fsetid kill setgid setuid setpcap net_admin sys_chroot sys_ptrace sys_admin)))
 (allow nix_daemon_t self (user_namespace (create)))
 (allow nix_daemon_t self (process (fork sigchld sigkill sigstop signull signal getsched setsched getpgid setpgid getcap setcap getattr setrlimit)))
