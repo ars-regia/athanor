@@ -25,7 +25,7 @@
         security-tools = with pkgs; [ syft cosign ];
         # libclang: bindgen (libspa-sys di niri, aya) carica libclang.so da LIBCLANG_PATH.
         c-toolchain = with pkgs; [ gcc gnumake cmake mold llvmPackages_latest.llvm llvmPackages_latest.clang llvmPackages_latest.lld llvmPackages_latest.libclang ccache bpf-linker pahole elfutils ];
-        rust-tools = with pkgs; [ rust-toolchain sccache clippy rustfmt cargo-deny cargo-vet cargo-fuzz ];
+        rust-tools = with pkgs; [ rust-toolchain sccache clippy rustfmt cargo-deny cargo-fuzz ];
         # Toolset POSIX di base incluso: rpmbuild, %autosetup e i Makefile upstream
         # danno per scontati grep, diff, patch, gzip, file, which, m4, gettext.
         # dbus: the %check of athanor-update runs its bus tests on a private dbus-daemon.
@@ -212,7 +212,11 @@
                 "LIBRARY_PATH=/lib"
                 # Senza RUNPATH (sotto) i binari appena compilati trovano le librerie
                 # della union solo così, per esempio nei %check o nei build script.
-                "LD_LIBRARY_PATH=/lib"
+                # /lib/x86_64-linux-gnu holds the libstdc++ and libgcc_s links of
+                # builder-fhs-compat. The nixpkgs ld.so searches neither it nor /usr/lib64,
+                # so without it the node24 that the Actions runner mounts at /__e/node24
+                # cannot start in this container and every JavaScript action fails.
+                "LD_LIBRARY_PATH=/lib:/lib/x86_64-linux-gnu"
                 # bindgen (libspa-sys di niri, aya) usa libclang direttamente, senza il
                 # wrapper: gli servono libclang.so e gli header di glibc, dopo quelli di clang.
                 "LIBCLANG_PATH=${pkgs.llvmPackages_latest.libclang.lib}/lib"

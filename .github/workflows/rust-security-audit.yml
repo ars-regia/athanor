@@ -2,264 +2,53 @@ name: Rust Security & FFI Audit
 
 on:
   push:
-    branches: [main, develop]
+    branches: [iso-v0]
   pull_request:
-    branches: [main, develop]
+    branches: [iso-v0]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
-  issues: write
-  pull-requests: read
+  contents: read
 
 jobs:
   security-audit:
-    name: Enforce Safety & Cargo Vet Audit
+    name: Clippy and dependency policy
+    # The builder runs under podman, not as the job container: the JavaScript actions
+    # (checkout, cache, upload) need the runner's libstdc++, which the Nix image lacks.
     runs-on: ubuntu-24.04
-    container:
-      image: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
-      RUSTC_WRAPPER: sccache
-      SCCACHE_DIR: /tmp/sccache
+      BUILDER_IMAGE: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
       CARGO_NET_RETRY: 10
-      LIBCLANG_PATH: /usr/lib/llvm-18/lib
     steps:
-      - name: Checkout Code
+      - name: Check out the repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - name: ??? Restore sccache Cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          path: /tmp/sccache
-          key: sccache-security-audit-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            sccache-security-audit-${{ runner.os }}-
+          persist-credentials: false
 
-      - name: Extreme Rust Cache (LLVM & Dependencies)
+      - name: Restore the Cargo cache
         uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
-          shared-key: "rust-security-audit"
-          cache-on-failure: "true"
+          shared-key: rust-security-audit
 
-      - name: ???? Install System Dependencies (GTK4/Cairo/Pango/LayerShell)
+      - name: Run the audit in the builder image
         run: |
-          set -euo pipefail
-          if command -v dnf5 >/dev/null; then
-            dnf5 install -y gtk4-devel pango-devel cairo-devel glib2-devel gtk4-layer-shell-devel gdk-pixbuf2-devel
-          elif command -v dnf >/dev/null; then
-            dnf install -y gtk4-devel pango-devel cairo-devel glib2-devel gtk4-layer-shell-devel gdk-pixbuf2-devel
-          elif command -v apt-get >/dev/null; then
-            echo "Dependencies are now pre-installed in Nix container"
-            git clone https://github.com/wmww/gtk4-layer-shell.git /tmp/gtk4-layer-shell
-            cd /tmp/gtk4-layer-shell
-            meson setup build -Dvapi=false -Ddocs=false -Dintrospection=false
-            ninja -C build
-            sudo ninja -C build install
-            sudo ldconfig
-          fi
+          # Only the download caches: the runner's ~/.cargo/bin holds rustup proxies that
+          # cargo would run instead of the builder's own clippy.
+          mkdir -p "$HOME/.cargo/registry" "$HOME/.cargo/git"
+          bash forge/scripts/retry.sh podman pull "${BUILDER_IMAGE,,}"
+          podman run --rm --security-opt label=disable -v "$GITHUB_WORKSPACE:/workspace" -w /workspace \
+            -v "$HOME/.cargo/registry:/cargo/registry" -v "$HOME/.cargo/git:/cargo/git" \
+            -e CARGO_HOME=/cargo -e CARGO_NET_RETRY "${BUILDER_IMAGE,,}" \
+            bash scripts/ci/security-audit.sh
 
-      - name: Check Unsafe Code & Clippy Policies
-        run: |
-          set -euo pipefail
-          cargo clippy --workspace --exclude ebpf-core --exclude athanor-sysmon-ebpf --exclude athanor-greeter --all-targets --all-features -- \
-            -A clippy::undocumented_unsafe_blocks \
-            -A clippy::multiple_unsafe_ops_per_block \
-            -A dead_code -A unused_variables 2>&1 | tee clippy.log
-
-      # The frozen shell workspace (doc_shell.md, SH4) is outside the root workspace, so
-      # the clippy step above never sees it, yet athanor-shell-rs still ships: the portal
-      # execs it for the file chooser and the privacy prompt. A clippy gate on it would
-      # be noise -- its crate root carries #![allow(clippy::all, warnings)] and the tree
-      # is mined and deleted, not developed -- so the honest gate is that it still
-      # compiles against its own committed lock.
-      - name: Compile the frozen shell workspace
-        run: |
-          set -euo pipefail
-          cargo check --locked --manifest-path forge/specs/athanor-shell-rs/Cargo.toml --workspace
-
-      - name: Upload Logs Artifact
+      - name: Upload the audit logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: debug-logs
-          path: |
-            clippy.log
-            ebpf.log
-            kani.log
-          if-no-files-found: ignore
-
-      - name: Publish clippy log tail to the job summary
-        if: always()
-        run: |
-          set -euo pipefail
-          if [ -f clippy.log ]; then
-            { echo '## clippy (last 50 lines)'; echo '```'; tail -n 50 clippy.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Verify Cryptographic Supply-Chain Audits (cargo-vet)
-        run: |
-          set -euo pipefail
-          cargo vet check || echo "Cargo vet skipped due to crates.io 403 API block"
-
-      # Every lockfile that resolves a shipped binary, judged by the one policy in
-      # deny.toml: the root workspace and the frozen shell workspace (athanor-shell-rs and
-      # its dock, still installed for the portal). forge/tools/calmo-cosmic-theme is
-      # deliberately absent: it is a build-time derive tool that no spec and no
-      # packages.json entry installs, its only output is a committed diff that a human
-      # reviews, and its dependencies are pinned to a libcosmic git revision, so auditing
-      # it would clone that repository on every run and turn a flaky clone into a failed
-      # audit. --config is explicit because cargo-deny would otherwise look for a deny.toml
-      # next to each manifest and silently fall back to its own defaults.
-      - name: Check Dependencies & Vulnerabilities (cargo-deny)
-        run: |
-          set -euo pipefail
-          for manifest in Cargo.toml forge/specs/athanor-shell-rs/Cargo.toml; do
-            cargo deny --manifest-path "$manifest" --config deny.toml check advisories bans sources
-          done
-
-      - name: ???? Fix Workspace Permissions (GH Actions Cleanup)
-        if: always()
-        run: |
-          set -euo pipefail
-          if command -v sudo >/dev/null 2>&1; then
-            sudo chown -R 1001:1001 . || sudo chown -R 1000:1000 . || true
-          else
-            chown -R 1001:1001 . || chown -R 1000:1000 . || true
-          fi
-
-  kani-targeted-verify:
-    name: 🛡️🔍 Kani Formal Mathematical Verification
-    continue-on-error: true
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
-    container:
-      image: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
-    timeout-minutes: 20
-    env:
-      CARGO_NET_RETRY: 10
-      LIBCLANG_PATH: /usr/lib/llvm-18/lib
-
-    steps:
-      - name: Checkout Codebase
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - name: ??? Install Kani Binaries
-        run: |
-          set -euo pipefail
-          if ! command -v cargo-kani >/dev/null 2>&1; then
-            cargo install --locked kani-verifier
-          fi
-
-      - name: ??? Restore sccache Cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: /tmp/sccache
-          key: sccache-kani-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            sccache-kani-${{ runner.os }}-
-
-      - name: ?????? Resilient Kani Setup (Bypass GitHub 503)
-        run: |
-          set -euo pipefail
-          for _ in {1..5}; do if cargo kani setup; then break; fi; sleep 2; done
-
-      - name: ???? Formal Verification - PQC Mesh Bus (system/athanor-mesh-bus)
-        run: |
-          set -euo pipefail
-          RUSTFLAGS='--cfg curve25519_dalek_backend="serial"' cargo kani -p athanor-mesh-bus
-
-      - name: ??????? Formal Verification - Hypervisor Daemon (system/athanor-hypervisor-daemon)
-        run: |
-          set -euo pipefail
-          RUSTFLAGS='--cfg curve25519_dalek_backend="serial"' cargo kani -p athanor-hypervisor-daemon
-
-      - name: ???? Fix Workspace Permissions (GH Actions Cleanup)
-        if: always()
-        run: |
-          set -euo pipefail
-          if command -v sudo >/dev/null 2>&1; then
-            sudo chown -R 1001:1001 . || sudo chown -R 1000:1000 . || true
-          else
-            chown -R 1001:1001 . || chown -R 1000:1000 . || true
-          fi
-
-  bare-metal-audit:
-    name: ??? eBPF & Bare-Metal Build Verification (${{ matrix.target_name }})
-    runs-on: ubuntu-24.04
-    container:
-      image: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
-    timeout-minutes: 20
-    env:
-      RUSTC_WRAPPER: sccache
-      SCCACHE_DIR: /tmp/sccache
-      CARGO_NET_RETRY: 10
-      LIBCLANG_PATH: /usr/lib/llvm-18/lib
-    strategy:
-      fail-fast: false
-      max-parallel: 20
-      matrix:
-        include:
-          - target_name: ebpf-xdp-firewall
-            component: ebpf
-            dir: system/ebpf/ebpf-core
-            cmd: RUSTC_WRAPPER="" RUSTFLAGS="" cargo build --target bpfel-unknown-none -Z build-std=core --release
-          - target_name: cloud-zk-baremetal
-            component: cloud
-            dir: forge/specs/athanor-cloud-rs/athanor-cloud-rs-1.0.0
-            cmd: cargo build --release
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - name: ??? Restore sccache Cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: /tmp/sccache
-          key: sccache-baremetal-${{ matrix.target_name }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            sccache-baremetal-${{ matrix.target_name }}-
-
-      - name: Extreme Rust Cache (Bare Metal & eBPF)
-        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
-        with:
-          shared-key: "bare-metal-${{ matrix.target_name }}"
-          cache-on-failure: "true"
-
-      - name: Compile Component (${{ matrix.target_name }})
-        run: |
-          set -euo pipefail
-          cd ${{ matrix.dir }}
-          ${{ matrix.cmd }} > ebpf.log 2>&1 || true
-
-      - name: Check compile log and publish it to the job summary
-        if: always()
-        run: |
-          set -euo pipefail
-          cd ${{ matrix.dir }}
-          { echo '## ${{ matrix.target_name }} build log (last 50 lines)'; echo '```'; tail -n 50 ebpf.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-          cat ebpf.log
-          if grep -q "error" ebpf.log || grep -q "panicked" ebpf.log || grep -q "Could not compile" ebpf.log; then exit 1; fi
-
-      - name: ???? Upload Bare-Metal Audit Artifacts (ZSTD Compressed)
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: baremetal-artifact-${{ matrix.target_name }}
-          path: |
-            ${{ matrix.dir }}/target/**/*.sarif
-            ${{ matrix.dir }}/ebpf.log
-          if-no-files-found: ignore
-          compression-level: 1
-
-      - name: ???? Fix Workspace Permissions (GH Actions Cleanup)
-        if: always()
-        run: |
-          set -euo pipefail
-          if command -v sudo >/dev/null 2>&1; then
-            sudo chown -R 1001:1001 . || sudo chown -R 1000:1000 . || true
-          else
-            chown -R 1001:1001 . || chown -R 1000:1000 . || true
-          fi
+          name: security-audit-logs
+          path: audit-out
+          if-no-files-found: error

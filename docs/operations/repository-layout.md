@@ -17,7 +17,6 @@
 | `docs/superpowers/` | Plans in progress and dated reviews | author of the plan |
 | `scripts/` | Project tooling: `verify.py`, `devvm/`, `runner/`, `session-memory/`, `cosmic-comp-rebase/`, `rename.py` | maintainer |
 | `experimental/` | `EXEMPT`: workspace crates that no package ships | maintainer |
-| `supply-chain/` | `cargo vet` and trivy configuration | maintainer |
 | `.github/` | Workflows, CODEOWNERS, CONTRIBUTING, SECURITY | `/.github/` in CODEOWNERS |
 | `.claude/` | Agent configuration shared by the team | maintainer |
 | `Cargo.toml`, `Cargo.lock`, `deny.toml`, `.cargo/` | Rust workspace | maintainer |
@@ -115,7 +114,7 @@ system/         crates, confidential_computing/ (units and sources only)
 
 Not found by this pattern and checked by hand at migration time:
 
-- relative paths inside `system/` (`../forge/...`, `../supply-chain/...`) in `system/Justfile` and the scripts;
+- relative paths inside `system/` (`../forge/...`) in `system/Justfile` and the scripts;
 - `$ROOT/system/...` forms assembled from variables in the shell scripts (the pattern above catches the literal part);
 - `.github/CODEOWNERS`: `/system/Containerfile` becomes `/image/`;
 - `paths:` filters in workflows, which list the moved files and trigger the image jobs.
