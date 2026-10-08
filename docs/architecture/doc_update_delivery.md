@@ -6,7 +6,7 @@
 | Owner      | the maintainer (`@hr-mes`)                                                                                                                                                                                                                                                        |
 | Status     | draft, rev 2, 2026-10-06: the six open questions of rev 1 are decided (section 15); awaiting the maintainer's approval. Nothing here is built before it                                                                                                                                                                     |
 | Depends on | [doc_update_trust.md](doc_update_trust.md) (UT1 to UT13), [doc_ci.md](doc_ci.md) (CI1, CI11, CI12), [doc_system_image.md](doc_system_image.md), [doc_kernel_build.md](doc_kernel_build.md), [transfer-to-organisation.md](../operations/transfer-to-organisation.md) (TO1 to TO8) |
-| Defines    | UD1 to UD44                                                                                                                                                                                                                                                                       |
+| Defines    | UD1 to UD50                                                                                                                                                                                                                                                                       |
 
 Binding decisions: [A2-4](../decisions/0039-delivery-repairs-before-1-0.md), [A2-5](../decisions/0040-security-updates-at-next-shutdown.md), [A2-8](../decisions/0043-bootc-in-two-steps.md), [A2-13](../decisions/0050-nixpkgs-pin-and-nix-hardening.md), [A2-16](../decisions/0053-nix-for-every-user.md), [A2-17](../decisions/0054-audience-and-support-window.md), [A2-26](../decisions/0063-update-policy.md), [A2-27](../decisions/0064-signing-approvals-and-mok-enrolment.md), [RA-12](../decisions/0028-ghcr-literal-single-exception.md), [ADR-0073](../decisions/0073-component-verdicts.md), [ADR-0075](../decisions/0075-engineering-gates.md), [ADR-0076](../decisions/0076-platform-scope-for-1-0.md).
 
@@ -99,7 +99,7 @@ An evidence file is JSON written by the gate's script: `{"gate", "digest", "run_
 
 ## 5. The namespace move (priority 1)
 
-Athanor runs on two machines, both the maintainer's: the desktop and the laptop `athanor-ref` (maintainer, 2026-10-06). Both are within reach, so the move from `ghcr.io/hr-mes` to `ghcr.io/ars-regia` is a verified step on each machine, not a mechanism in the client. A client mechanism (a file naming the canonical repository, a signed bridge image left under the old namespace) is designed only if the repository moves again after machines outside the maintainer's reach exist.
+Athanor runs on two machines, both the maintainer's: the desktop and the laptop `athanor-ref` (maintainer, 2026-10-06). Both are within reach, so the move from `ghcr.io/hr-mes` to `ghcr.io/ars-regia` is a verified step on each machine. Machines installed before the transfer that nobody logs in to follow the previous owner's frozen `:latest`; the bridge of section 5.2 (decided 2026-10-08) moves them without a step on the machine.
 
 **UD11. Each machine moves by digest, verified before the switch.** After TO5 has republished the images under `ars-regia`, on each machine:
 
@@ -112,7 +112,7 @@ Acceptance: on each machine `bootc status --format=json` names an `ars-regia` re
 
 **UD12. The policy names only the canonical namespace.** The rendered policy keeps its three `sigstoreSigned` scopes under the registry owner the build derives (#230); no `hr-mes` scope is added. Acceptance: `python3 scripts/verify.py shipped` and UD22.
 
-**UD13. The client keeps UT4's target.** `migrate.rs` keeps targeting `<booted repository>:stable`; after UD11 the booted repository is the `ars-regia` one. Acceptance: `cargo test -p athanor-update` (exists).
+**UD13. The client keeps UT4's target.** `migrate.rs` keeps targeting `<booted repository>:stable`; after UD11 the booted repository is the `ars-regia` one. A booted repository the policy does not name but whose image it pins under another owner is the case of UD47. Acceptance: `cargo test -p athanor-update` (exists).
 
 **UD14. The organisation rename stays blocked until the move is observed** (TO8, unchanged). Evidence: the desktop and the laptop both report `.verified.state == "verified"` on an `ars-regia` reference.
 
@@ -122,7 +122,7 @@ Acceptance: on each machine `bootc status --format=json` names an `ars-regia` re
 
 1. `sudo rpm-ostree uninstall nvidia-container-toolkit`. The image already ships the toolkit in its NVIDIA stage; `nvidia-ctk cdi list` after the reboot shows the GPUs _(to verify)_.
 2. Reboot. `bootc status --format=json` shows a non-null `.status.booted.image`, and `rpm-ostree status --json --booted` shows no `requested-packages`, `requested-local-packages` or overrides.
-3. The desktop moves to `ars-regia` with UD11.
+3. The desktop moves to `ars-regia` with `sudo bash scripts/switch-verified.sh ghcr.io/ars-regia/athanor-system-nvidia:latest`, which verifies the signature before the switch and records the signed origin (TO6). The bridge of section 5.2 would also move it, after one unverified pull.
 
 Acceptance: `bootc status --format=json | jq -e '.status.booted.image != null'` and the shield reads verified after step 3.
 
@@ -133,6 +133,22 @@ Acceptance: `bootc status --format=json | jq -e '.status.booted.image != null'` 
 - the dev-VM acceptance stage `local-changes` _(new)_ layers a package, checks the reason and the remedy text, removes it, and checks that updates resume.
 
 Acceptance: the dev-VM stage above.
+
+### 5.2 The bridge for machines that follow the previous owner (2026-10-08)
+
+Machines installed before the transfer follow `ghcr.io/hr-mes/athanor-system*:latest`, which no longer moves, and report no update. UD11 reaches only machines the maintainer can log in to; the bridge reaches the others without a step on the machine, and its own policy verifies the move.
+
+**UD45. The bridge is the verified image, tagged under the previous owner.** When the repository variable `ATHANOR_BRIDGE_REGISTRY` names the previous owner as `REGISTRY/OWNER` (`ghcr.io/hr-mes`), CI1 job `bridge-system-images` runs after `tag-system-images` and copies each digest that job moved to `ghcr.io/ars-regia/<image>:latest` onto `<bridge>/<image>:latest`, by digest (`system/tag-images.sh --to`, which copies with `--preserve-digests` and reads the tag back). Nothing is built or signed for it: the bridge is the image `ars-regia` publishes, with the policy that pins `ars-regia` and its keys, under the same digest. The variable is unset by default, so the job is skipped. The write token is `ATHANOR_BRIDGE_TOKEN`, held by the environment `bridge` (deployment branches `iso-v0` and `main`), so no other job reads it. Acceptance: `system/tests/test_sign_images.py` (the bridge test: only the verified digests, by digest, under the other owner, and an invalid `--to` refused) and `scripts/verify.py ci workflows`.
+
+**UD46. What is verified, and what is not.** A machine that follows the previous owner unverified, which is every machine installed before the transfer, pulls the bridge through its unverified reference, on the same terms as every image it pulled before: that one download is not verified. Nothing upgrades an unverified machine automatically (`bootc-fetch-apply-updates.timer` is disabled), so the bridge arrives at the next `bootc upgrade` or `rpm-ostree upgrade` the user runs. From the boot of the bridge on, its policy is in force, and the move of UD47 is a `bootc switch --enforce-container-sigpolicy`, verified against the `ars-regia` keys. While the bridge tag and `ars-regia:latest` name the same digest, that switch downloads no new layer and verifies, after the fact, the bytes the machine already runs _(to verify on the dev VM)_. A machine whose origin already enforced a policy that pins the previous owner cannot pull the bridge, whose signatures name `ars-regia` only; none is known (`scripts/switch-verified.sh` exists since 2026-10-07, after the transfer). Such a machine uses `scripts/switch-verified.sh`, or the maintainer also signs the bridge digests for the previous owner (`system/sign-images.sh --registry ghcr.io/hr-mes`, one signing approval) _(Proposal, not built)_.
+
+**UD47. The client follows the owner the policy pins.** `athanor-update migrate`: when the booted repository is not a scope of the shipped policy in force and exactly one scope has the same registry host and image name (`policy::successor`), the target is that scope with the tag or digest the booted reference names (`:latest` stays `:latest`, `@sha256:...` stays that digest). The image name maps the variant: `athanor-system`, `athanor-system-nvidia` and `athanor-system-nvidia-legacy` each move to the same name; any other name, another registry host, or two matching scopes stay `reference-out-of-scope`. The move also applies to an enforcing origin out of scope, which is not the signed reference of its image. UT5 holds: an older build is refused (`channel-older-than-booted`), a newer one is locked as an update for the user (UT6), the same build is staged for the next restart. The stamp is written after the switch and the signature object of the new owner is fetched for the check. Acceptance: `cargo test -p athanor-update` (`migrate::tests`, `policy::tests`).
+
+**UD48. What the user sees.** From the boot of the bridge until the switched deployment boots, the check publishes `verified.reason = owner-moved`, and the shield reads "Not verified: the project moved; this machine is moving with it". The update state is "will apply at next shutdown" (same build) or the notifier's "update ready" (a newer one). After the restart the reference is `ostree-image-signed:docker://ghcr.io/ars-regia/<image>:<tag>` and the shield reads verified. Acceptance: `cargo test -p athanor-update` and `-p athanor-trust-state`; the dev-VM stage `migrate` _(to extend)_.
+
+**UD49. Failure behaviour.** Network or registry down: the unit fails, and `Restart=on-failure` starts it again after five minutes. The image or tag absent under the new owner (`manifest unknown`): a wait, `successor-absent`, exit 0, no stamp, and the migration timer starts it again every six hours; the state keeps `owner-moved`. A signature the policy refuses: the switch fails, nothing is staged, no stamp. Layered packages or a queued rollback: the move waits, as UT4's migration does. The move is idempotent: the stamp ends it, a repeated switch to the same reference changes nothing, and a machine enforcing on a reference in scope is done.
+
+**UD50. When the bridge stops.** The maintainer clears `ATHANOR_BRIDGE_REGISTRY` once every machine known to follow the previous owner (the desktop, the laptop and the dev VM) reports `.verified.state == "verified"` on an `ars-regia` reference, plus a grace period for machines nobody knows of _(Proposal: 90 days, the window of UT10)_. The last bridge stays at the previous owner's `:latest`; nothing deletes it. It keeps working while the `ars-regia` images are signed with a key its policy holds (keys 1 and 2): a rotation away from both ends the bridge for machines that have not moved yet, which then need `scripts/switch-verified.sh`.
 
 ## 6. Upgrade test in CI (priority 2)
 
@@ -282,7 +298,7 @@ Each phase ends at a gate. The next phase does not start until the gate is green
 | **P0. Repairs**                                    | UD9, UD15 steps 1 and 2, UD24, UD25, UD3, UD43 (builder pin)     | one orchestrator run with `:latest` written after the signature job; `test_promote.sh` green; the desktop shows a non-null image and no layered packages; the migrate unit shows 0 restarts in an hour on a VM without `:stable` | no more failed-unit noise; the desktop updates again                                               |
 | **P1. Evidence**                                   | UD17, UD18, UD19, UD21, UD4 (evidence files)                     | two consecutive orchestrator runs with green ISO and upgrade acceptance on their own digests                                                                                                                                     | nothing                                                                                            |
 | **P2. `stable` exists**                            | UD1, UD2, UD5, UD6, UD7, UD8, UD10, UD16, UD20, UD22, UD23, UD27 | `:stable` created by `promote.sh` with evidence, then one automatic promotion; a dev VM installed from the ISO follows `:stable` signed                                                                                          | machines move once to `stable`, one download, and the shield turns verified                        |
-| **P3. Namespace** (after TO5, the republication) | UD11, UD12, UD13, UD14 | the desktop and the laptop are verified on an `ars-regia` reference | one switch per machine, done by the maintainer |
+| **P3. Namespace** (after TO5, the republication) | UD11, UD12, UD13, UD14, UD45 to UD50 | the desktop and the laptop are verified on an `ars-regia` reference; the bridge is stopped by UD50 | one switch per machine, done by the maintainer or, behind the bridge, by the migration |
 | **P4. Lighter**                                    | UD28 to UD39                                                     | five candidates with `upgrade-bytes.json`; the weekly reproducibility check green or with named exceptions; a soft reboot observed on the dev VM                                                                                 | one full download (UD33), then smaller updates; "Restart the desktop" when the kernel is unchanged |
 | **P5. Pipeline**                                   | UD40, UD41, UD42, UD44, section 10.1                             | a documentation-only commit schedules zero matrix jobs; variants share the `system` layers; tier signatures are verified in the system build                                                                                     | nothing                                                                                            |
 
@@ -299,7 +315,7 @@ The transfer to `ars-regia` took place on 2026-10-06, so P2 creates `:stable` un
 | `artifacts/metrics/*.json`                    | gates                       | reported, never a gate until the maintainer sets a target                                                                       |
 | state file `apply_kind`                       | `athanor-update`            | absent (older client): the notifier says "Restart to update"                                                                    |
 
-A failed promotion leaves `:stable` where it was: the copy to `:stable` is the last write.
+A failed promotion leaves `:stable` where it was: the copy to `:stable` is the last write. The bridge of section 5.2 fails as UD49 says.
 
 ## 13. Changes to other documents
 
@@ -326,6 +342,7 @@ A failed promotion leaves `:stable` where it was: the copy to `:stable` is the l
 1. **Dwell before automatic promotion: 24 hours** from the last evidence file, restarted by a newer complete candidate. The maintainer's machines on `:latest` use a release for a day before anyone else (UD5).
 2. **The NVIDIA variants promote only with `hardware` evidence** written by a maintainer machine on `:latest` after a session has started on that digest; without it the default variant promotes alone (UD4).
 3. **Automatic promotion is always of the feature class and uses no key.** A security-class promotion goes through the manual `promote.sh` in the `signing` environment, which signs the attestation; that approval is needed only when a release answers an advisory (UD6, A2-26, A2-27).
-4. **No bridge.** Athanor runs only on the maintainer's desktop and laptop, so each moves to `ars-regia` by the verified manual step of UD11, and the policy never carries `hr-mes` scopes (UD11 to UD14).
+4. **No bridge**, superseded on 2026-10-08 by decision 7. The policy still never carries `hr-mes` scopes (UD12).
 5. **The version serial is the commit count of `HEAD`**, so the label is a function of the source (UD29).
 6. **RPM signing is removed** (UD44): RPMs reach a machine only inside the signed image, which verifies the signed tier digests.
+7. **A bridge, 2026-10-08.** Machines installed before the transfer report `update: none` because the previous owner's `:latest` is frozen. A signed bridge image under the previous owner moves each one, verified at first boot, to its variant under `ars-regia`, and the shield says so (section 5.2, UD45 to UD50). The maintainer's desktop moves by `scripts/switch-verified.sh` (UD15).
