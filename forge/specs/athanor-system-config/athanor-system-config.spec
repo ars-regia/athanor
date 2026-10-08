@@ -20,7 +20,7 @@ Requires: athanor-calmo
 Requires: xdg-desktop-portal-athanor
 Requires: usbguard bolt
 # athanor-uki-enroll reads the LUKS2 header and the Secure Boot state.
-Requires: cryptsetup mokutil python3
+Requires: cryptsetup mokutil python3 systemd
 
 %description
 Provides athanor-system-config for Athanor OS.
