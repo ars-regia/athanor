@@ -22,7 +22,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-04.** It is the spec
 
 **CC1. One panel, the bar's popovers stay.** The control center is one panel of tiles and sliders, opened from a button at the end edge of the bar (the start edge under right-to-left text) and from a shortcut (CC9), as on macOS. Each icon of the bar keeps its popover. A tile with an arrow opens a detail page inside the panel; that page is the same widget the bar's icon shows in its popover (CC5), so each control has one implementation.
 
-**CC2. Programs and crates.**
+**CC2. Programs and crates.** *Amended 2026-10-09 (ADR-0100): `doc_notification_center.md`, section 4.*
 
 | Crate                                | Unit                             | Role                                                                                                  |
 | ------------------------------------ | -------------------------------- | ----------------------------------------------------------------------------------------------------- |
@@ -81,13 +81,15 @@ Status: **revision 2, approved by the maintainer on 2026-10-04.** It is the spec
 | Devices   | removable drives with mount and unmount; print queue and printer status                                                                                                                                                                      | F-cc-47, 48                 |
 | System    | background applications with a stop button; resource graphs; encrypted vaults                                                                                                                                                                | F-cc-45, 49, 50             |
 
+Each page has an id for `Show(page)` (CC2), its name in lower case: `network`, `bluetooth`, `audio`, `display`, `battery`, `devices`, `system`. *Amended 2026-10-09 (ADR-0100): `doc_notification_center.md`, section 4.*
+
 **CC6. Customising the tiles.** An edit mode in the panel adds, removes, reorders and resizes (one or two cells) the tiles of the toggles grid.
 
 - **The tiles live in their own file,** `control-center.toml`, in the same layered directories as the layout document and read by `athanor-layout` with the same rules: TOML, its own `schema = 1`, the whole file rejected on any error, and the lower layer used instead (SH8). A tile id the build does not know is an invalid value.
 - **Not a new key of the layout document.** A key in the layout document would raise its schema to 2, and an image rolled back to an older build would reject the user's whole layout, panel edge and dock included. A separate file costs the panel only its tile order on such a rollback.
 - **Defaults** come from the preset: each preset of SH7 names its default tiles.
 
-**CC7. Do not disturb.**
+**CC7. Do not disturb.** *Amended 2026-10-09 (ADR-0100): `doc_notification_center.md`, section 4.*
 
 - **The state grows from a boolean** to `{ on, until, schedule }`: `until` is an optional end time, `schedule` an optional daily window in local time. The file written by today's `dnd.rs` is read as `{ on }`. The control center offers on, off, one hour, and until 08:00 local time; the schedule and the automatic triggers are `doc_notification_center.md`, NC6, with no new format.
 - **`athanor-shelld` admits the control center.** Its sender check accepts `athanor-bar.service` and `athanor-control-center.service`, and stays informative as BR1 states. The private interface gains a read of the state and a signal when it changes, unicast to the admitted units like its other signals.
@@ -122,7 +124,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-04.** It is the spec
 - **Artwork.** The panel shows `file:` and `data:` artwork and does not fetch `https:` artwork, because it opens no network socket. Players that publish only remote artwork show their icon instead (doubt 6).
 - **The 802.1X form** picks certificate files through the file-chooser portal, not through a filesystem rule of its own.
 
-**CC9. Opening and closing.** The bar's button and a shortcut call `Toggle()`. The panel closes on an outside click, on Escape and on the loss of focus, as the shield's sheet does (BR6), and the notification popups stay hidden while `Open` is true, that is while it or the notification center is open (`doc_notification_center.md`, NC1). It opens on the focused output, under the bar's button, or above it when the bar is at the bottom.
+**CC9. Opening and closing.** *Amended 2026-10-09 (ADR-0100): `doc_notification_center.md`, section 4.* The bar's button and a shortcut call `Toggle()`. The panel closes on an outside click, on Escape and on the loss of focus, as the shield's sheet does (BR6), and the notification popups stay hidden while `Open` is true, that is while it or the notification center is open (`doc_notification_center.md`, NC1). It opens on the focused output, under the bar's button, or above it when the bar is at the bottom.
 
 - **The shortcut:** Super+A belongs to the application library (`doc_launcher.md`). Super+C opens the control center, decided by the maintainer on 2026-10-04; it is written once per user at the first start in the way LA8 writes Super, and never again. The panel starts on demand, so a login oneshot of the same program, `athanor-control-center-shortcut.service`, enabled by the package's preset, makes that write; the panel's own unit cannot write cosmic-comp's shortcuts. The same oneshot writes Super+N, which opens the notification center (`doc_notification_center.md`, NC1); Super+V is kept for the clipboard page.
 

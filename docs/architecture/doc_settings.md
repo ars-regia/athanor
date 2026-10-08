@@ -186,7 +186,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08.** Revision 2 set
 **SE17. Notifications.** Meets NC3, NC5, NC6, NC8 and NC11.
 
 - Everything goes through `os.athanor.Notifications1` (NC8): `Settings` and `SetSetting` for the global settings (retention of 1, 7 or 30 days or until cleared, NC3; sound; popup corner; private popups; the default timeouts), `Rules(app)` and `SetRule` per application (`allowed`, `popups`, `bypass_dnd`, `lock_screen`, `sound`, `timeout`, NC5, with D4's default of `lock_screen` = none), and `DoNotDisturb`, `SetDoNotDisturb`, `SetDoNotDisturbUntil`. Settings never writes the files of NC5 itself.
-- **The application list** is every installed application with a desktop entry, through `athanor-apps`, plus the shared group "Other applications" (NC5's `other.conf`).
+- **The application list** is every installed application with a desktop entry, through `athanor-apps`, plus the shared group "Other applications" (NC5's `other.conf`) and the group "System" of Athanor's session services (NC4, `system.conf`); `Rules` and `SetRule` name the two groups `:other` and `:system` (NC5). *Amended 2026-10-09 (ADR-0100): `doc_notification_center.md`, section 4.*
 - **Do not disturb** (`notifications/schedule`): the schedule (start, end, days), and a switch per trigger (schedule, fullscreen, screen sharing). A trigger the daemon publishes as unavailable is shown as "Not available in this session" with its reason, never as on (NC6).
 - **Admission:** NC8 admits the unit `athanor-settings.service` (SE4).
 

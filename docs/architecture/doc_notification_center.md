@@ -1,6 +1,6 @@
 # Athanor notification center
 
-Status: **revision 2, proposed on 2026-10-09.** Revision 1 was approved by the maintainer on 2026-10-04, with the decisions taken in conversation that day: the center is a second panel of the control center's program (NC1), `athanor-shelld` holds every notification fact (NC2), the history survives a reboot for a period the user chooses, seven days by default (NC3), automatic do not disturb by schedule, fullscreen and screen sharing (NC6), per-application settings including sound and timeout (NC5), sound on for every application by default (NC7), markup, progress and inline reply (NC9, NC10), a month calendar without events (NC11), and the classification of every register entry (section 3). It is the specification `doc_shell_standard.md`, section 4, step 6 requires for notifications and the calendar. Revision 2 takes in the changes later approved specifications made to it (the session lock's default and admission, `doc_lock_and_prompts.md` LP7 and ADR-0003 D4; Settings' unit, `doc_settings.md` SE4; the screen-sharing signal, `doc_portal.md` PT10; the assertive announcement, `doc_accessibility.md` AX6), hands the low-battery notice to `athanor-sessiond` (NC13, ADR-0100), gives Athanor's own session services a proven group (NC4), and applies section 4 to the documents it amends. It merges into the product branch at this revision (ADR-0077, point 3).
+Status: **revision 2, proposed on 2026-10-09.** Revision 1 was approved by the maintainer on 2026-10-04, with the decisions taken in conversation that day: the center is a second panel of the control center's program (NC1), `athanor-shelld` holds every notification fact (NC2), the history survives a reboot for a period the user chooses, seven days by default (NC3), automatic do not disturb by schedule, fullscreen and screen sharing (NC6), per-application settings including sound and timeout (NC5), sound on for every application by default (NC7), markup, progress and inline reply (NC9, NC10), a month calendar without events (NC11), and the classification of every register entry (section 3). It is the specification `doc_shell_standard.md`, section 4, step 6 requires for notifications and the calendar. Revision 2 takes in the changes later approved specifications made to it (the session lock's default and admission, `doc_lock_and_prompts.md` LP7 and ADR-0003 D4; Settings' unit, `doc_settings.md` SE4; the screen-sharing signal, `doc_portal.md` PT10; the assertive announcement, `doc_accessibility.md` AX6), hands the low-battery notice to `athanor-sessiond` (NC13, ADR-0100), gives Athanor's own session services a proven group (NC4), and applies section 4 to the documents it amends. It merges into the product branch once this revision is approved (ADR-0077, point 3).
 
 ## 1. Context
 
@@ -56,11 +56,11 @@ Status: **revision 2, proposed on 2026-10-09.** Revision 1 was approved by the m
 
 - the unit or scope name defined by systemd's desktop-environment convention, `app-[<launcher>-]<application id>[@<random>].service` or `app-[<launcher>-]<application id>-<random>.scope`;
 - Flatpak's `app-flatpak-<application id>-<number>.scope`;
-- Athanor's own session services: a unit of `session.slice` named `athanor-*.service` whose sender runs an executable under `/usr`, the rule of LP13 and ADR-0041. They form one group, "System", so a notice such as the battery's (NC13) is told apart from an application that calls itself "System" in `app_name`.
+- Athanor's own session services, a fixed list of units each with its own executable: today only `athanor-sessiond.service` running the `athanor-sessiond` its package installs under `/usr` (`doc_session_daemons.md` SD14). Unit and executable are both checked, the identity rule of LP13 and ADR-0041; a unit name alone, or a pattern such as `athanor-*`, would admit any `systemd-run --user --unit=athanor-x notify-send`. A new member is an amendment of this section. These services form one group, "System", so a notice such as the battery's (NC13) is told apart from an application that calls itself "System" in `app_name`. A process running as the user outside confinement can still stop the unit and impersonate it; it is the user (`doc_threat_model.md` TM1), as LP13 says of the agent.
 
 The `desktop-entry` hint and `app_name` are declared by the sender and may lie. A notification whose identity is proven is grouped, iconed and ruled by that identity. A notification without a proven identity goes to the group "Other applications", named by its `app_name` as plain text, and follows the shared rule of that group. A rule that grants a privilege (`bypass_dnd`) never applies to it.
 
-**NC5. Per-application rules.** One file per application, `$XDG_CONFIG_HOME/athanor/notifications/apps/<application id>.conf`, plus `$XDG_CONFIG_HOME/athanor/notifications/other.conf` for the shared group (applications without a proven identity) and `system.conf` for the group "System" (NC4), so that an application whose id is `other` or `system` cannot take their place, in the `key=value` lines of `dnd.rs`'s file, so no new format.
+**NC5. Per-application rules.** One file per application, `$XDG_CONFIG_HOME/athanor/notifications/apps/<application id>.conf`, plus `$XDG_CONFIG_HOME/athanor/notifications/other.conf` for the shared group (applications without a proven identity) and `system.conf` for the group "System" (NC4), so that an application whose id is `other` or `system` cannot take their place. In `Rules(app)` and `SetRule(app, …)` (NC8) the two groups are `:other` and `:system`, values no desktop-entry id can take. The files are in the `key=value` lines of `dnd.rs`'s file, so no new format.
 
 | Key           | Values                                           | Default |
 | ------------- | ------------------------------------------------ | ------- |
@@ -80,7 +80,7 @@ The `desktop-entry` hint and `app_name` are declared by the sender and may lie. 
   - the schedule and triggers of NC6.
 - **Malformed files.** An unknown key is ignored with a journal line at warning. A value that does not parse takes that key's default. The other keys still apply.
 - **`lock_screen`** is stored and served here, and the session lock applies it (`doc_lock_and_prompts.md` LP7): `none` counts the notification in a single line without name or icon; `name` and `all` show more only for applications the user set. The default `none` is ADR-0003, D4.
-- **Writers.** The daemon writes these files when an admitted client asks (NC8): the center's "Mute this application", and Settings' page once Settings has its specification. The daemon re-reads a file that changes on disk.
+- **Writers.** The daemon writes these files when an admitted client asks (NC8): the center's "Mute this application", and Settings' Notifications page (`doc_settings.md` SE17). The daemon re-reads a file that changes on disk.
 
 **NC6. Do not disturb.** The state CC7 introduced, `{ on, until, schedule }`, is completed here. Do not disturb is in effect when any of these holds, and the daemon publishes the state together with its reason:
 
@@ -174,7 +174,7 @@ Rules of the state:
 - **Keyboard and screen reader** (ST7).
   - Tab and the arrow keys move between groups and rows. Enter invokes the default action, Delete closes the row, Escape closes the panel.
   - On opening, the panel is announced with its unread count ("Notification center, 3 unread").
-  - A critical notification is announced at assertive priority (`doc_accessibility.md` AX6).
+  - A critical notification is announced at assertive priority (`doc_accessibility.md` AX6) by the bar's popup that shows it (`doc_bar.md` BR4), whether the panel is open or not.
   - Each row's accessible name joins application, summary, body and time.
 - **Right-to-left** text mirrors the panel, as the bar.
 
@@ -203,7 +203,7 @@ Rules of the state:
   - The decision table: identity proven or not, `allowed`, `transient`, each do-not-disturb source, critical, `bypass_dnd`, sound, timeout.
   - The window across midnight and the chosen days; the manual action winning until the next change; a set clock, a resume and a time-zone change.
   - The history's write, read back after a restart, coalescing, retention by age and by count, the corrupt file, a failed write.
-  - The reply never written; the markup and link filter; the rate limit; the group "System" (an `athanor-*.service` with its executable under `/usr` is proven, the same unit name with another executable is not).
+  - The reply never written; the markup and link filter; the rate limit; the group "System" (`athanor-sessiond.service` running its own executable is proven; the same unit running another executable, and `systemd-run --user --unit=athanor-x notify-send`, are not).
 - **On a private `dbus-daemon`,** as the daemon's tests do today:
   - the admission table of NC8, method by method;
   - signals reaching only admitted units;
@@ -271,13 +271,16 @@ Applied by revision 2, in the same change.
     - the list moves into the center;
     - the history of NC3 replaces the list of 100;
     - do not disturb is NC6;
-    - the popups follow NC12.
+    - the popups follow NC12;
+    - the popup of a critical notification is announced at assertive priority (NC11, AX6).
 - **`doc_shell_standard.md`, ST5,** "What `athanor-shelld` keeps across a crash": the file is NC3's history, under `$XDG_STATE_HOME/athanor/shelld/`. It is read whatever the boot, and a file that does not parse is renamed rather than removed.
 - **`doc_control_center.md`:**
   - CC2: the program has two panels; `os.athanor.ControlCenter1` gains `ToggleNotifications()` and the property `Open`, and `Show(page)` also accepts `notifications` (the notification panel) and `notifications:<id>` (that row, its reply field focused).
+  - CC5: each page has an id for `Show(page)`, its name in lower case: `network`, `bluetooth`, `audio`, `display`, `battery`, `devices`, `system`.
   - CC7: the schedule and triggers are NC6.
   - CC9: `Open` covers both panels, and Super+N is written as Super+C is, by the same login oneshot.
 - **`doc_session_daemons.md`, SD14:** the Low and Critical notices gain the action of revision 1's NC13 (ADR-0100).
+- **`doc_settings.md`, SE17:** the application list also holds the group "System" (NC4), and the two groups are `:other` and `:system` in `Rules` and `SetRule` (NC5).
 
 ## 5. Open doubts
 
@@ -306,6 +309,6 @@ On a fresh install in the dev VM and on the reference laptop:
 9. A reply typed in the center reaches the sender through `NotificationReplied` and is absent from the history file.
 10. A sound plays for a normal notification and stays silent under do not disturb, except a critical one; `sound=false` silences the application.
 11. Of twenty-one notifications sent by one application within 10 seconds, the twenty-first shows no popup and plays no sound, and the history holds all twenty-one.
-12. A notice of `athanor-sessiond` lands in the group "System"; a notification whose `app_name` is "System", sent by an application, lands in its own group or in "Other applications". The battery notices themselves are acceptance 18 of `doc_session_daemons.md`.
+12. A notice of `athanor-sessiond` lands in the group "System"; a notification whose `app_name` is "System", sent by an application, lands in its own group or in "Other applications". The battery notices themselves are acceptance 18 of `doc_session_daemons.md`. A notification sent from `systemd-run --user --unit=athanor-x notify-send` does not land in "System".
 13. With `athanor-shelld` killed, the center shows "Notifications unavailable", and within 1 s of the daemon's return it shows the same list and unread count (ST5).
 14. The four surface scenes pass SH13's 48 cases, and the surface passes the gate of `doc_shell_standard.md` (ST2) before the panel is enabled.

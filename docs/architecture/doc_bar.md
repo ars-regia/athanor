@@ -16,7 +16,7 @@ Status: **revision 1, approved by the maintainer on 2026-09-25.** It is the spec
 
 ## 2. Decisions
 
-**BR1. Three programs, one crate each.** Each runs as a user unit.
+**BR1. Three programs, one crate each.** Each runs as a user unit. *Amended 2026-10-09 (ADR-0100): `doc_notification_center.md`, section 4.*
 
 | Program | Unit | Role |
 |---|---|---|
@@ -54,7 +54,7 @@ Status: **revision 1, approved by the maintainer on 2026-09-25.** It is the spec
   - A terminal that hands its window to an existing server process, such as gnome-terminal or ptyxis, draws on that server's socket, not on the one its unit received.
   - Real confinement, a filesystem and bus sandbox for launched applications, is a later design entry and is not designed here.
 
-**BR3. The modules of the bar.** Each module reads a system service. A module whose service or hardware is absent, such as a battery on a desktop or a Bluetooth adapter, is not shown: a greyed control with no source is a facade (SH1). Each does at least what the COSMIC applet it replaces does.
+**BR3. The modules of the bar.** *Amended 2026-10-09 (ADR-0100): `doc_notification_center.md`, section 4.* Each module reads a system service. A module whose service or hardware is absent, such as a battery on a desktop or a Bluetooth adapter, is not shown: a greyed control with no source is a facade (SH1). Each does at least what the COSMIC applet it replaces does.
 
 | Module | Source | What it does |
 |---|---|---|
@@ -76,7 +76,7 @@ Status: **revision 1, approved by the maintainer on 2026-09-25.** It is the spec
 | Accessibility | the compositor client and the accessibility settings | screen reader, magnifier, high contrast |
 | Running applications (`bar`) | the compositor client | favourites and open windows grouped by app id, with their titles, minimised windows included, so they replace the minimised-windows applet; activate, minimise, close; pin and unpin from the context menu |
 
-**BR4. Notifications.** `athanor-shelld` implements the Desktop Notifications specification 1.2.
+**BR4. Notifications.** `athanor-shelld` implements the Desktop Notifications specification 1.2. *Amended 2026-10-09 (ADR-0100): `doc_notification_center.md`, section 4.*
 
 - **Capabilities:** `actions`, `body`, `body-hyperlinks`, `body-markup`, `icon-static`, `inline-reply`, `persistence`, `sound` (`doc_notification_center.md`, NC9).
 - **Every string is untrusted input.** The rule of SH12 applies: plain text only, truncated, and stripped of control and bidirectional characters. The body alone keeps the markup `doc_notification_center.md` allows, parsed by the daemon and rebuilt by the panels (NC10).
@@ -90,6 +90,7 @@ Status: **revision 1, approved by the maintainer on 2026-09-25.** It is the spec
 - **The popups** are drawn by the bar on one layer-shell surface in the top layer, or the overlay layer when the fullscreen trigger of do not disturb is off, at the corner the user chose (`doc_notification_center.md`, NC12), by default the end corner next to the panel: at the top when the panel is at the top, at the bottom when it is at the bottom, on the output of the active workspace.
   - At most three are visible; the newest is nearest to the panel, and the rest are counted on the notifications button.
   - The surface never takes the keyboard focus, so it never takes it from the active window; from the keyboard, actions are reached from the notification center.
+  - The popup of a critical notification is announced at assertive priority (`doc_notification_center.md` NC11, `doc_accessibility.md` AX6).
   - Each popup has the accessible role `alert`, so Orca reads it.
 - **The list** is the notification center (`doc_notification_center.md`), a panel of `athanor-control-center`. The bar's notifications button opens it and counts the unread notifications.
 
