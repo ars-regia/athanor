@@ -203,7 +203,7 @@ turns a failed scheduled job into a `ci-alert` issue is not part of this change.
 
 | File | Desired | Live until the maintainer applies it |
 | --- | --- | --- |
-| `rulesets.json` | ruleset `product-branches` on `refs/heads/iso-v0` and `refs/heads/main`: no deletion, no force push, linear history, a pull request with one approval and no code-owner review (squash only, stale approvals dismissed; ADR-0062 keeps `require_code_owner_review` off while there is one code owner), required check `gate` of GitHub Actions (integration 15368, not strict), merge queue (squash, all green, at most two entries built and merged together, 360 minutes for checks); bypass by the repository admin role in pull-request mode, so the maintainer merges their own pull requests without a second reviewer but never pushes past the ruleset (PL1, PL2, PL4, PQ5) | no ruleset |
+| `rulesets.json` | ruleset `product-branches` on `refs/heads/iso-v0` and `refs/heads/main`: no deletion, no force push, linear history, a pull request with one approval and no code-owner review (squash only, stale approvals dismissed; ADR-0062 keeps `require_code_owner_review` off while there is one code owner), required check `gate` of GitHub Actions (integration 15368, not strict) (no merge queue yet: see below); bypass by the repository admin role in pull-request mode, so the maintainer merges their own pull requests without a second reviewer but never pushes past the ruleset (PL1, PL2, PL4, PQ5) | no ruleset |
 | `actions.json` | secret `SETTINGS_APP_PRIVATE_KEY` and variable `SETTINGS_APP_CLIENT_ID`; `personal_tokens` declared, not yet retired; `sha_pinning_required` stays `false` until PB3 (below) | neither name set |
 
 `gate` is the aggregate job of `pr.yml` (PB1, ADR-0075). It runs `just check`, which tolerates
@@ -212,10 +212,16 @@ exception of its own for known red checks. `branch-protection.json` requires `ga
 `Kernel gate` and `Spec gate` on `iso-v0` (section 8); the ruleset requires `gate` alone on
 both branches. Classic branch protection and the ruleset both apply until the maintainer
 decides to retire the former; section 8 step 4 and step 5 drop the two legacy contexts, and
-they must be done before the merge queue is enabled (step 4 of the order below).
+they must be done before the merge queue returns (see below).
 
-The merge queue needs `merge_group` among the triggers of every required workflow (PB1's
-`pr.yml`). SHA pinning enforcement makes GitHub refuse every workflow that uses an action
+The ruleset declares no merge queue for now (maintainer decision of 2026-10-08, PIPE-N06): the
+required checks do not run on `merge_group`, so a queue could not be satisfied, and `apply`
+writes every area at once. The queue returns, in the same change that adds it to
+`rulesets.json`, when every required workflow answers `merge_group`; `verify.py workflows`
+refuses a ruleset that enables a queue while a required context is reported by no workflow with
+that trigger. The queue then is: squash, all green, at most two entries built and merged
+together, 360 minutes for checks. The queue needs `merge_group` among the triggers of every
+required workflow (PB1's `pr.yml`). SHA pinning enforcement makes GitHub refuse every workflow that uses an action
 by tag, so it is enabled only after every `uses:` is pinned by commit SHA (PB3,
 `verify.py pinning`); on 2026-10-07 two references are still tags
 (`actions/upload-artifact@v4`, `cachix/install-nix-action@v25`). The files declare only what
@@ -246,7 +252,7 @@ The order of the maintainer's steps, each followed by `ghsettings.py diff`:
    `spec-build-check.yml` do not, so a merge group never gets those two contexts and a queue
    enabled while they are still required cannot be satisfied. Check with
    `ghsettings.py diff` and by reading the required contexts of both branches, then apply
-   the ruleset (`ghsettings.py apply`, then `--yes`), which also enables the merge queue, and
+   the ruleset (`ghsettings.py apply`, then `--yes`), which declares no merge queue, and
    re-export to record what GitHub stored.
 5. Create the bot App of PL5, move the bots to it, delete the three personal tokens, then
    set `personal_tokens.retired` to `true` and drop them from `secrets`.

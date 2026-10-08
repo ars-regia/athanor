@@ -259,7 +259,7 @@ also covers the merge queue and `gate`; PB2 splits it in two.
 **PL2. Changes land through the merge queue.** The `gate` runs on the `merge_group` commit,
 so what lands passed `just check` in its merged state, and its builds are proven on the pull
 request and again by the release build (PL44), and the required check stays `strict: false` without
-losing that guarantee. (Scorecard Branch-Protection.)
+losing that guarantee. (Scorecard Branch-Protection.) Deferred on 2026-10-08 (PIPE-N06): the queue is not in `.github/settings/rulesets.json` until every required context is reported on `merge_group` (the legacy `Kernel gate` and `Spec gate` are not), and `verify.py workflows` refuses it before then; until it returns, a pull request lands by squash-merge once `gate` is green on its head.
 
 **PL3. One required check, always reported.** `gate` depends on every job of `pr.yml`, runs
 with `if: always()`, and fails when any job it needs failed or was cancelled; a skipped job
