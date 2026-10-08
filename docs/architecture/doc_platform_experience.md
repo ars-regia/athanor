@@ -8,22 +8,81 @@ they meet.
 
 ## 1. Boot and disk encryption
 
-### Unified Kernel Image
+### Boot chain
 
-The kernel, its initramfs and its command line are one signed file, a Unified Kernel Image
-(UKI). `system/build-image.sh` builds it and signs it with the project's Secure Boot key;
-an image whose UKI is signed with a throwaway key is never published. The kernel and its
-command line are specified in [doc_kernel_profile.md](doc_kernel_profile.md).
+Release 1.0 has no Unified Kernel Image (ADR-0037, ADR-0043). The firmware starts shim,
+shim verifies GRUB and the kernel, and the kernel (`vmlinuz`) is signed with the project's
+Secure Boot key in a sign-only CI job and trusted on the machine through a MOK the owner
+enrols (ADR-0064). The initramfs and the kernel command line are not signed. The UKI, with
+a signed PCR 11 policy, arrives with the sealed composefs of release 1.1 (ADR-0043). The
+kernel and its command line are specified in [doc_kernel_profile.md](doc_kernel_profile.md).
 
-### Home encryption and the TPM
+### Disk encryption and the TPM
 
-The installer leaves the disk layout to Anaconda (`system/athanor-install.ks`).
-systemd-homed encrypts the user's home with LUKS2. In 1.0 the LUKS device unlocks with the
-passphrase only: nothing in the image enrols it in the TPM 2.0 (decision A2-27; D42 in
-doc_kernel_profile.md). `athanor-tpm-luks-seal`, which sealed it at first boot to PCRs 0,
-2, 7 and 11, was removed with the other TPM units that acted without the user (issue #148),
-and `verify.py shipped` fails if it is shipped again. The TPM seal returns in 1.1 with the
-UKI and a signed PCR 11 policy, so that a kernel update does not break the unlock.
+In release 1.0, disk encryption is a choice the person makes in the installer, not a
+default (maintainer decision of 2026-10-08). The installer offers LUKS2 encryption, and the
+person may decline it.
+
+What the installer does today. The ISO is bootc-image-builder's Anaconda installer with the
+kickstart in `system/disk_config/iso.toml`; the manual build uses `system/athanor-install.ks`.
+Neither kickstart carries `clearpart`, `part` or `autopart`, so Anaconda opens its storage
+screen and leaves the disk layout and the encryption choice to the person. Anaconda's
+encryption option is off until the person turns it on. When it is on, Anaconda asks for a
+passphrase and, with automatic partitioning, puts the btrfs file system that holds `/`,
+`/var` and `/home` in one LUKS2 volume; `/boot` and the EFI system partition stay
+unencrypted. When it is off, user data is stored unencrypted.
+
+Gaps, named here so that this text claims no more than the tree does:
+
+- The ISO carries Anaconda's GTK interface. The web interface that ADR-0059 chooses for 1.0
+  is not built yet, and its encryption screen has not been checked.
+- No acceptance run installs with encryption on. The encrypted layout above is Anaconda's
+  behaviour, not one the project's tests verify.
+- The installer enrols neither a recovery key nor the TPM: the volume it creates has the
+  passphrase keyslot only.
+
+Accounts are classic accounts in `/etc/passwd`, and systemd-homed is disabled by preset
+(ADR-0045), so nothing encrypts a home directory by itself: the home is encrypted exactly
+when the system volume is.
+
+In 1.0 an encrypted volume unlocks with its passphrase, or with TPM plus PIN once an
+administrator runs `athanor-uki-enroll`; TPM-only unlocking needs the signed UKI (ADR-0064;
+A2-27 as amended on 2026-10-08, D42 in doc_kernel_profile.md). Nothing in the image enrols
+the TPM 2.0 by itself.
+`athanor-tpm-luks-seal`, which sealed the volume at first boot to PCRs 0, 2, 7 and 11, was
+removed with the other TPM units that acted without the user (issue #148), and
+`verify.py shipped` fails if it is shipped again. An administrator may run
+`athanor-uki-enroll <device>` (A2-27 as amended on 2026-10-08): it adds a keyslot that needs
+both the TPM and a PIN, bound to the value of PCR 7, enrols a recovery key first when the
+volume has none, and keeps the passphrase. PCR 7 holds the Secure Boot state, the
+firmware's PK, KEK, db and dbx, the db certificate that verified shim and, as shim's
+[README.tpm](https://github.com/rhboot/shim/blob/15.8/README.tpm) states (lines 9-22), the
+certificate from db, MokList or shim's own list that matched each binary shim verifies,
+GRUB and the kernel, plus SBAT and MokSBState. It does not hold the initrd or the kernel
+command line. The PIN is required in 1.0 because neither is signed and GRUB has no
+password, so the TPM alone cannot tell the boot Athanor ships from another one that
+Secure Boot also accepts. TPM-only unlocking waits for the signed UKI (D42). The PIN has
+a limit: it protects a machine taken while powered off, not one whose `/boot` someone
+changes and leaves for its owner to start, since a boot prepared that way can ask for the
+PIN itself and PCR 7 does not change; closing that needs the signed UKI (P4b). The tool
+refuses when Secure Boot does not verify the boot chain (it reads `mokutil --sb-state`),
+since PCR 7 then binds nothing, and when PCR 7 reads all zeros, since firmware that never
+measured it leaves the keyslot on the PIN alone. It changes no boot configuration: with no `tpm2-device=`
+option, systemd-cryptsetup tries the volume's LUKS2 tokens before the passphrase, and the
+generic initramfs carries the TPM2 token plugin, so the next boot asks for the PIN. Kernel
+updates leave PCR 7 alone, and so do most firmware updates; an update of the Secure Boot
+databases (db, dbx or KEK, which fwupd applies), of shim, or a kernel signed with a new
+Secure Boot key (whose certificate shim measures from MokList) can change it, and the next boot then asks for the passphrase or the recovery key;
+running the tool again binds the new value. A wrong PIN is asked for again, with no
+limit of its own (crypttab's `tries=` counts passphrases, not PINs; an empty PIN and Escape
+do not skip it): the boot asks for the passphrase or the recovery key only once the TPM's
+dictionary-attack lockout engages. That took three failures on swtpm; the reference laptop's
+Intel PTT allows 32 and forgets one every two hours, and eight wrong PINs in a row neither
+locked it nor reached the passphrase. Someone who forgets the PIN therefore keeps entering
+wrong ones until the lockout, or unlocks with the passphrase or the recovery key from
+installation media, then runs the tool again to set a new PIN. While a lockout lasts the
+right PIN fails too. A `systemd-pcrlock` policy, which survives
+announced updates of that kind, arrives with the UKI (P4b, D42).
 
 ---
 

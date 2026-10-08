@@ -307,8 +307,18 @@ patchano i Makefile per forzarlo.
   job `sign` di nvidia-kmod (`sign-kernel.sh vmlinuz`, D43); l'immagine system lo
   prende già firmato da `azoth-boot`. Nessuna fase assembla una UKI (ADR-0037): avvio shim, GRUB,
   vmlinuz firmato. L'immagine non crea alcun keyslot TPM: l'unico percorso è
-  `athanor-uki-enroll`, lanciato dall'utente, che lega ancora il keyslot a PCR 11,
-  costante senza stub UKI (aperto, riservato al maintainer). Profilo
+  `athanor-uki-enroll`, lanciato da un amministratore, che aggiunge un keyslot TPM
+  più PIN legato al solo valore di PCR 7 (A2-27, emendata il 2026-10-08): il PIN
+  serve perché initrd e `cmdline` non sono firmati, e non ferma chi modifica `/boot`
+  e lascia che sia il proprietario ad avviare (serve la UKI firmata, P4b). PCR 7
+  contiene lo stato Secure Boot, PK, KEK, db e dbx, il certificato di db che ha
+  verificato shim e, secondo il
+  [README.tpm di shim](https://github.com/rhboot/shim/blob/15.8/README.tpm) (righe
+  9-22), il certificato (db, MokList o quello interno di shim) che ha verificato
+  ciascun binario caricato da shim, GRUB e il kernel. Un aggiornamento di db, dbx o
+  KEK (fwupd), di shim, o un kernel firmato con una nuova chiave Secure Boot cambia
+  PCR 7, e il boot successivo chiede passphrase o recovery key. La policy `systemd-pcrlock` arriva con la UKI
+  (P4b, D42). Profilo
   `keys/profiles/secureboot.cnf`: non CA, `codeSigning`.
   Secret `SECUREBOOT_SIGNING_KEY`, certificato
   `keys/secureboot/athanor-secureboot.pem` (`.der` per `mokutil --import`). Non
@@ -324,7 +334,7 @@ patchano i Makefile per forzarlo.
   moduli, ritirata il 2026-09-13.
 - **Niente UKI** (ADR-0037): initrd e `cmdline` non sono firmati; la catena
   Secure Boot copre shim, GRUB e il vmlinuz. Una UKI tornerebbe con una sua
-  decisione, insieme alla policy PCR che `athanor-uki-enroll` presuppone.
+  decisione, insieme alla policy PCR 11 firmata di D42.
 - **Primo avvio**: arruolamento guidato del certificato Secure Boot
   (`mokutil --import`), unica interazione richiesta per avere Secure Boot acceso
   su un PC qualsiasi; i moduli non ne dipendono.

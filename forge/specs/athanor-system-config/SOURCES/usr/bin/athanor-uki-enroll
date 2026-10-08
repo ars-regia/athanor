@@ -1,13 +1,82 @@
 #!/usr/bin/env bash
-set -e
-
-echo "Enrolling LUKS2 volume to TPM2..."
-# Bind LUKS2 to TPM2 PCRs 7 and 11
+# Enrol a LUKS2 volume in the TPM 2.0, bound to a PIN and to the value of PCR 7
+# (doc_platform_experience.md, A2-27 as amended on 2026-10-08). Run by an administrator;
+# nothing runs it by itself.
+#
 # Usage: athanor-uki-enroll <luks-device>
-if [ -z "$1" ]; then
-    echo "Usage: $0 <luks-device>"
+#
+# - The keyslot needs the TPM and a PIN. Release 1.0 boots GRUB with an unsigned initrd
+#   and kernel command line, which PCR 7 does not cover; the PIN is what keeps the TPM
+#   alone from unlocking the volume. TPM-only unlocking waits for the signed UKI (D42).
+# - Residual limit: the PIN protects a machine taken while powered off. It does not
+#   protect against someone who changes /boot and leaves the machine for its owner to
+#   start: PCR 7 does not change with the initrd or the command line, so a boot prepared
+#   that way can ask for the PIN itself. Closing that needs the signed UKI (P4b).
+# - PCR 7 is bound by value. PCRs 0, 4 and 11 are not: firmware and kernel updates change
+#   them, and a value bound to them stops unsealing. PCR 7 holds the Secure Boot state, the
+#   firmware's PK, KEK, db and dbx, the db certificate that verified shim and, per shim's
+#   README.tpm, the certificate (db, MokList or shim's own) that matched each binary shim
+#   verifies, GRUB and the kernel, plus SBAT and MokSBState. A db, dbx or KEK update
+#   (fwupd), a shim update or a kernel signed with a new key can change it, and the next
+#   boot then asks for the passphrase or the recovery key.
+# - The tool refuses when Secure Boot does not verify the boot chain: PCR 7 then carries
+#   no authority. It reads the state with mokutil --sb-state, which reads the firmware's
+#   SecureBoot and SetupMode variables (the ones systemd reads) and shim's MokSBStateRT,
+#   which reports validation turned off in shim; any answer but "SecureBoot enabled"
+#   alone refuses. It also refuses when PCR 7 reads all zeros: firmware that reports
+#   Secure Boot on without measuring it (OVMF without its TPM driver did) leaves nothing to
+#   bind, and systemd-cryptenroll then only warns and binds the keyslot to the PIN alone.
+# - No systemd-pcrlock policy in release 1.0: it arrives with the UKI (P4b). The empty
+#   --tpm2-pcrlock= stops systemd-cryptenroll from picking up a pcrlock.json on its own.
+# - Existing passphrase slots are never wiped. A recovery key is enrolled first when the
+#   volume has none; a systemd-recovery token counts only while it still names a keyslot.
+# - Earlier TPM2 keyslots are wiped only by the same systemd-cryptenroll call, which
+#   enrols the new keyslot first and wipes only after that succeeded. Every keyslot this
+#   tool writes has a PIN, so the wipe never replaces a TPM+PIN keyslot with a weaker one.
+# - Nothing in the boot configuration changes: with no tpm2-device= option,
+#   systemd-cryptsetup tries the volume's LUKS2 tokens before the passphrase, and the
+#   generic initramfs carries the TPM2 token plugin (dracut tpm2-tss module).
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+    echo "Usage: $0 <luks-device>" >&2
+    exit 2
+fi
+device=$1
+
+if ! sb_state=$(mokutil --sb-state); then
+    echo "The Secure Boot state could not be read (mokutil --sb-state failed); not enrolling." >&2
+    exit 1
+fi
+if [[ $sb_state != "SecureBoot enabled" ]]; then
+    printf '%s\n' "$sb_state" >&2
+    echo "Secure Boot does not verify the boot chain, so PCR 7 binds nothing; not enrolling." >&2
     exit 1
 fi
 
-systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+4+7+11 "$1"
-echo "Enrollment complete."
+# systemd-analyze reads PCR 7 from the bank it would use and names that bank's algorithm.
+if ! pcr7=$(systemd-analyze pcrs 7 --json=short) || ! python3 -c '
+import json, re, sys
+(entry,) = json.load(sys.stdin)
+(digest,) = (v for k, v in entry.items() if k in ("sha1", "sha256", "sha384", "sha512"))
+sys.exit(not (re.fullmatch("[0-9a-f]{40,128}", digest) and int(digest, 16)))
+' <<< "$pcr7"; then
+    echo "PCR 7 is unreadable or was never measured, so the keyslot would rest on the PIN alone; not enrolling." >&2
+    exit 1
+fi
+
+header=$(cryptsetup luksDump --dump-json-metadata "$device")
+recovery_keys=$(python3 -c '
+import json, sys
+tokens = json.load(sys.stdin)["tokens"].values()
+print(sum(t["type"] == "systemd-recovery" and bool(t["keyslots"]) for t in tokens))
+' <<< "$header")
+if [[ $recovery_keys == 0 ]]; then
+    echo "Enrolling a recovery key. Write it down and keep it away from this machine."
+    systemd-cryptenroll --recovery-key "$device"
+fi
+
+systemd-cryptenroll --tpm2-device=auto --tpm2-with-pin=yes --tpm2-pcrs=7 --tpm2-pcrlock= \
+    --wipe-slot=tpm2 "$device"
+echo "From the next boot the volume asks for the TPM PIN; the passphrase and the recovery key still unlock it."
+echo "A wrong PIN is asked for again until the TPM locks out; only then does the boot ask for the passphrase."

@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:54.fc43}
+Release:        %{?autorelease}%{!?autorelease:55.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -19,6 +19,8 @@ Requires: athanor-greeter-ui
 Requires: athanor-calmo
 Requires: xdg-desktop-portal-athanor
 Requires: usbguard bolt
+# athanor-uki-enroll reads the LUKS2 header, the Secure Boot state and PCR 7.
+Requires: cryptsetup mokutil python3 systemd
 
 %description
 Provides athanor-system-config for Athanor OS.
@@ -84,6 +86,16 @@ mkdir -p /etc/usbguard
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-55
+- athanor-uki-enroll enrols a TPM2 keyslot that needs a PIN and is bound to the value of
+  PCR 7 only, instead of PCRs 0, 4, 7 and 11, which firmware and kernel updates change
+  (A2-27 as amended on 2026-10-08, D42). It refuses when Secure Boot does not verify the
+  boot chain. A systemd-pcrlock policy arrives with the UKI (P4b); until then the
+  enrolment turns off systemd-cryptenroll's own pick-up of pcrlock.json. The script
+  enrols a recovery key first when the volume has no recovery token with a keyslot,
+  never wipes a passphrase slot, and replaces earlier TPM2 keyslots only after the new
+  one is enrolled. Requires cryptsetup, mokutil and python3, which it runs.
+
 * Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-54
 - Drop /usr/share/athanor-system-config/athanor-forge.repo. It pointed at a GitHub
   Pages DNF channel that ADR-0076 retires, and nothing installed it into
