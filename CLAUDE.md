@@ -19,8 +19,10 @@ applies to Claude Code only.
   Code merges a pull request it opened in the current session with
   `gh pr merge --squash --admin --match-head-commit <full sha>` only when all of these hold
   for that same sha:
-  - every changed path, including the old path of a rename and every deleted file
-    (`git diff --name-status -M origin/iso-v0...<sha>`), is in the allowlist below;
+  - every entry of `git diff --raw -M --no-abbrev <base>...<sha>`, where `<base>` is the
+    pull request's own base (`gh pr view --json baseRefName`) freshly fetched, has mode
+    `100644` (or `000000` for a deleted file), and its path, and the old path of a rename,
+    is in the allowlist below. A symlink, a submodule or an executable bit is not;
   - the required checks of the base branch (`.github/settings/rulesets.json` and
     `branch-protection.json`) are present and `pass`, and every other check is `pass` or
     `skipping`, none pending or failing;
@@ -29,17 +31,24 @@ applies to Claude Code only.
     `REVIEW_REQUIRED`).
 
   The allowlist:
-  - `docs/architecture/*.md`, except a change to a specification's status line: merging that
-    approves the specification (ADR-0074, item 5), which is the maintainer's act;
-  - `src/` and `tests/` of the shell applications `athanor-bar`, `athanor-control-center`,
-    `athanor-dock`, `athanor-launcher` and `athanor-layout-chooser` under
-    `forge/specs/<name>/<name>-<version>/`. Not their `Cargo.toml`, lockfile, `.spec`,
-    units or build files.
+  - an existing `docs/architecture/*.md` specification whose Status says it awaits approval,
+    without touching its Status. An approved document, a new file, or text that approves a
+    revision is the maintainer's: merging it approves the text (ADR-0074, item 5);
+  - `src/` of the shell applications `athanor-bar`, `athanor-control-center`, `athanor-dock`,
+    `athanor-launcher` and `athanor-layout-chooser` under
+    `forge/specs/<name>/<name>-<version>/`, except security code. A file is security code,
+    and the maintainer's, when its old or new content matches
+    `landlock|grants|sandbox|shield|trust|logind|Reboot|PowerOff|include_str!|include!`
+    (case-insensitive) or its path names `sandbox`, `shield` or `power`. Not the crates'
+    `Cargo.toml`, lockfile, `data/`, `po/`, `.spec`, units or build files, and no new
+    directory or file whose name `scripts/verify.py` skips or treats as a test (`PRUNE`,
+    `is_test_file`).
 
-  A path outside the allowlist, a symlink or a mode change means the maintainer reviews and
-  merges. `--admin` skips the required checks too, so the verification is Claude's to make
-  each time. *(maintainer decision, 2026-10-08: an allowlist, after three audits found
-  gaps in every list of exclusions)*
+  Anything else means the maintainer reviews and merges. `--admin` skips the required
+  checks too, so the verification is Claude's to make each time. *(maintainer decisions,
+  2026-10-08: an allowlist, after three audits found gaps in every list of exclusions;
+  narrowed the same day to specifications awaiting approval and to shell code that is
+  not security code)*
 - **Shared settings are permissions only.** `.claude/settings.json` denies secret paths and
   destructive commands; hooks and personal preferences stay in `.claude/settings.local.json`
   or `~/.claude/` (`.claude/README.md`).
