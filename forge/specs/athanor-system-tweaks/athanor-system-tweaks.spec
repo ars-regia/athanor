@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-system-tweaks
 Version:        1.0.0
-Release:        8%{?dist}
+Release:        9%{?dist}
 Summary:        Athanor OS athanor-system-tweaks
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -50,6 +50,10 @@ cp -a %{_sourcedir}/usr/lib/NetworkManager/conf.d/50-athanor-hostname.conf %{bui
 /usr/lib/tmpfiles.d/99-azoth-sysfs.conf
 /usr/lib/NetworkManager/conf.d/50-athanor-hostname.conf
 %changelog
+* Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-9
+- 99-azoth-sysfs.conf no longer enables KSM: it stays off, and only roles that host VMs
+  turn it on (doc_kernel_profile.md). MGLRU is unchanged.
+
 * Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-8
 - Drop the udisks2 mount and eject rule from 10-athanor-wheel-admin.rules: removable
   drives follow udisks2's defaults (doc_disks.md DK20 A); wheel stays the admin identity

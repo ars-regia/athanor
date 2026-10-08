@@ -84,7 +84,7 @@ def workflow(*jobs):
 
 
 class SigningTest(unittest.TestCase):
-    def problems(self, workflows, environments=ENVIRONMENTS, repository=REPOSITORY_SECRETS, keys=()):
+    def problems(self, workflows, environments=ENVIRONMENTS, repository=REPOSITORY_SECRETS, keys=(), files=None):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             (root / "system/keys").mkdir(parents=True)
@@ -103,6 +103,9 @@ class SigningTest(unittest.TestCase):
             )
             for name, text in workflows.items():
                 (root / ".github/workflows" / name).write_text(text)
+            for name, text in (files or {}).items():
+                (root / name).parent.mkdir(parents=True, exist_ok=True)
+                (root / name).write_text(text)
             return verify.signing_problems(root)
 
     def assert_one(self, workflows, pattern):
@@ -500,6 +503,12 @@ class SigningTest(unittest.TestCase):
                 "          LD_PRELOAD: /tmp/x.so\n          SECUREBOOT_SIGNING_KEY:",
                 "steps.3.env",
             ),
+            # The builder image once verified inside the signing job; that is a job of its own now.
+            (
+                "          SECUREBOOT_SIGNING_KEY:",
+                "          SIGN_VERIFY_BUILDER: abc\n          SECUREBOOT_SIGNING_KEY:",
+                "steps.3.env",
+            ),
         ):
             with self.subTest(after=after):
                 self.assert_one(
@@ -592,6 +601,17 @@ class SigningTest(unittest.TestCase):
                 )
         called_build = workflow(BUILD_JOB).replace("on: push\n", "on: workflow_call\n")
         self.assertEqual(self.problems({"k.yml": called_build}), [])
+
+    def test_rule_7_the_image_sign_script_starts_no_container(self):
+        """The verification runs in a job without the key: a container started by the image
+        sign script would run beside it. Comments and docker:// references are not commands."""
+        quiet = '# podman run would be a container: this comment is not one.\nskopeo copy "docker://r@d" "docker://r@d"\n'
+        self.assertEqual(self.problems({"k.yml": workflow(SIGN_JOB)}, files={"system/sign-images.sh": quiet}), [])
+        for line in ("podman run --rm img skopeo", "verifier=(docker run img)", "x && buildah from img"):
+            with self.subTest(line=line):
+                problems = self.problems({"k.yml": workflow(SIGN_JOB)}, files={"system/sign-images.sh": quiet + line + "\n"})
+                self.assertEqual(len(problems), 1, problems)
+                self.assertRegex(problems[0], r"^system/sign-images\.sh:3 starts a container beside the key")
 
     def test_without_pyyaml_the_lint_fails_closed(self):
         saved, verify.yaml = verify.yaml, None

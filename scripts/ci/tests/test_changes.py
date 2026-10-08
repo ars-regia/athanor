@@ -12,7 +12,7 @@ spec = importlib.util.spec_from_file_location("changes", SCRIPT)
 changes = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(changes)
 
-NONE = {"kernel": False, "specs": False, "docs_only": False}
+NONE = {"kernel": False, "specs": False, "shell": False, "docs_only": False}
 ALL = {area: True for area in NONE}
 
 
@@ -53,10 +53,32 @@ class ClassifyTest(unittest.TestCase):
                 )
         self.assertFalse(changes.classify(["forge/specs/azoth/azoth.spec"])["specs"])
 
+    def test_shell_inputs_select_the_visual_tests(self):
+        for path in (
+            "system/athanor-compositor-client/src/lib.rs",
+            "system/athanor-style/calmo/generate.py",
+            "forge/test/shell/rig.sh",
+            "Cargo.lock",
+            "Cargo.toml",
+            ".cargo/config.toml",
+            ".github/workflows/shell-surfaces.yml",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(
+                    changes.classify([path]),
+                    {**NONE, "shell": True},
+                )
+
+    def test_a_crate_the_rig_does_not_draw_selects_no_visual_test(self):
+        # Its unit tests run in `just check` on every change; no area is needed for them.
+        for path in ("system/athanor-bus-api/src/lib.rs", "system/athanor-portal/src/lib.rs"):
+            with self.subTest(path=path):
+                self.assertEqual(changes.classify([path]), NONE)
+
     def test_a_change_selects_every_area_it_feeds(self):
         self.assertEqual(
             changes.classify(["system/kernel-artifacts.sh", "forge/specs/athanor-bar/athanor-bar.spec"]),
-            {**NONE, "kernel": True, "specs": True},
+            {**NONE, "kernel": True, "specs": True, "shell": True},
         )
 
     def test_a_prefix_is_a_directory_not_a_name_prefix(self):

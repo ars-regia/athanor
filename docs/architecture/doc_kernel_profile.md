@@ -405,8 +405,12 @@ key and policy rules of D46.
 allowed). **sysctl (base, overridable by roles):** `kernel.sysrq=176` (sync, remount
 read-only, reboot). The TCP congestion control is not set, so the kernel default BBRv3
 applies. `athanor-system-tweaks/.../99-bore.conf` is removed with its CFS tunables that
-no longer exist under EEVDF and its override to BBRv1. KSM stays off unless a role
-declares it.
+no longer exist under EEVDF and its override to BBRv1. **KSM** (Kernel Samepage Merging) stays
+off unless a role declares it, and only roles that host VMs may: it costs CPU on every machine
+and merges pages across guests, which only pays where guests share a host. The kernel keeps
+`CONFIG_KSM`, so a role can turn it on at runtime (`/sys/kernel/mm/ksm/run`). No role in the
+image hosts VMs yet, so no role enables it and it is off everywhere; the role that does must
+declare it in the manifest.
 
 **Scheduler:** EEVDF with BORE at the defaults of the pinned patch, `HZ=1000`.
 
@@ -1087,7 +1091,7 @@ Found on the running system and in the repository (2026-09-14):
   `kargs.d` 02–06 and `build_uki.sh` are removed, the kickstart no longer appends a command
   line, and the UKI and the boot matrix take theirs from `profile.toml` (section 6).
 - **Sysctl and memory** (P3): `99-bore.conf` forces BBRv1 and CFS tunables that fail
-  under EEVDF; `99-azoth-sysfs.conf` enables KSM; the machine has no swap at all;
+  under EEVDF; `99-azoth-sysfs.conf` enabled KSM on every machine (removed on 2026-10-08, see section 6); the machine has no swap at all;
   `kernel.yama.ptrace_scope` is 0, and `oops=panic` sets `kernel.panic_on_oops=1` on the
   desktop (D47, D19).
 - **Image content** (P3): `kernel-devel` and `kernel-headers` 6.18 from another vendor,

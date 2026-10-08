@@ -164,7 +164,7 @@ The schemas live in `scripts/ci/schemas/` and every writer validates against the
 
 | File                          | Writer                    | Readers                         | Content                                                                                             |
 | ----------------------------- | ------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `changes.json`                | `pr.yml` change detection | `pr.yml` jobs                   | the areas a change touches (specs, kernel, docs only; image and shell join with their `pr.yml` jobs in PB11, PB12). Known gap: `Cargo.toml`, `Cargo.lock` and `deny.toml` belong to no area yet, so a dependency change selects no build (follow-up) |
+| `changes.json`                | `pr.yml` change detection | `pr.yml` jobs                   | the areas a change touches (specs, kernel, shell, docs only; the image joins with its `pr.yml` job in PB11, PB12). `just check` compiles and tests the Rust workspace on every change, and `Cargo.toml`, `Cargo.lock` and `.cargo/` select `shell`. Known gap: `deny.toml` belongs to no area yet (follow-up) |
 | `plan.json`                   | release `plan`            | every release stage             | dirty packages with content hashes, whether kernel or modules change, the variants of `images.json` |
 | `kernel-artifacts.env`        | `system/kernel-artifacts.sh` | image, signing                | kernel, devel, module and boot digests and their registry (O5)                                      |
 | `tier-digests.json`           | `call-packages.yml`       | `call-image.yml`                | tier repository digests, verified (UD44)                                                            |
@@ -259,7 +259,7 @@ also covers the merge queue and `gate`; PB2 splits it in two.
 **PL2. Changes land through the merge queue.** The `gate` runs on the `merge_group` commit,
 so what lands passed `just check` in its merged state, and its builds are proven on the pull
 request and again by the release build (PL44), and the required check stays `strict: false` without
-losing that guarantee. (Scorecard Branch-Protection.)
+losing that guarantee. (Scorecard Branch-Protection.) Deferred on 2026-10-08 (PIPE-N06): the queue is not in `.github/settings/rulesets.json` until every required context is reported on `merge_group` (the legacy `Kernel gate` and `Spec gate` are not), and `verify.py workflows` refuses it before then; until it returns, a pull request lands by squash-merge once `gate` is green on its head.
 
 **PL3. One required check, always reported.** `gate` depends on every job of `pr.yml`, runs
 with `if: always()`, and fails when any job it needs failed or was cancelled; a skipped job
@@ -516,9 +516,10 @@ kernel has no `:latest`, since every consumer reads it by digest (PL13). `:stabl
 `:stable-previous`, `:stable-<YYYYMMDD>` are written only by `promote.sh`. There is one
 writer per tag and repository, and `verify.py workflows` enforces it in the workflows and in
 the scripts they call (`system/sign-images.sh`, `system/promote.sh`) (UD1 acceptance).
-Today the `dag-system-image` job of `call-system-image.yml` pushes the system images with
-`:latest` before the key-based signature of `sign-system-images`, and the ISO's `:latest`
-on `main`; `call-build-builder.yml` moves the builder's `:latest` on default-branch runs
+Today the `dag-system-image` job of `call-system-image.yml` pushes the system images by
+`:<run_id>` only, and `tag-system-images` of the Orchestrator moves their `:latest` after
+`verify-system-images` verified the key-based signature, and on `main` the ISO's `:latest`
+in the same job; `call-build-builder.yml` moves the builder's `:latest` on default-branch runs
 (`forge/scripts/promote_builder_latest.sh`, PR #228), which the pull-request spec check
 reads until it consumes the builder by digest (PL13).
 

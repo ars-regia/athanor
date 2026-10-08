@@ -168,8 +168,9 @@ The policy, keys, registries.d and verification are UT2, UT3 and UT5. This secti
 **UD25. Sign, verify, then tag.** The order of a release run becomes:
 
 1. the build job pushes `:<run_id>` and writes `image-digests.txt`;
-2. `sign-system-images` (the `signing` environment, the key alone in its job, UT2) signs by digest and verifies each digest through the shipped policy, then writes the `signature` evidence file;
-3. `tag-latest` _(new job, no secrets)_ copies `docker://<repo>@<digest>` to `:latest` and re-reads it.
+2. `sign-system-images` (the `signing` environment, the key alone in its job, UT2) signs by digest, then writes the `signature` evidence file;
+3. `verify-system-images` (no environment, no secret) pulls each digest anonymously through the shipped policy (`system/verify-images.sh`); it runs also when signing was skipped, so an unsigned image fails the run;
+4. `tag-system-images` (no key) copies `docker://<repo>@<digest>` to `:latest` and re-reads it (`system/tag-images.sh`).
 
 The ISO is still built in the build job from `:<run_id>`. Acceptance: in one run, the registry's first write of `:latest` (from the job logs) comes after the `sign-system-images` job finishes. `sign-images.sh` addresses digests, not tags (its tag comparison of today stays as a guard).
 

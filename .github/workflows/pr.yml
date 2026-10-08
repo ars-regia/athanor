@@ -6,9 +6,11 @@ name: Pull Request
 # changes: scripts/ci/changes.py writes changes.json, the areas the change touches; it is the
 #   `changes` artifact, and the job output carries the same JSON for the `if:` of the jobs.
 # check:   `just check`, the gate a contributor runs locally (lint, every verify.py check with
-#   scripts/ci/known-red.txt, the Python test directories), with tools pinned by digest.
+#   scripts/ci/known-red.txt, the Python test directories, `cargo test` over the root workspace
+#   in the shell rig's build stage), with tools pinned by digest.
 # kernel:  the kernel check (call-kernel.yml) when changes.json selects the kernel.
 # specs:   Spec Build Check (spec-build-check.yml) when changes.json selects the specs.
+# shell:   the visual tests of the shell rig (shell-surfaces.yml) when changes.json selects shell.
 # gate:    the one required check. It needs every other job, always runs, and is red when a job
 #   it needs failed or was cancelled, or when an area the change selects did not run
 #   (scripts/ci/gate.py). A skipped build is a pass.
@@ -59,7 +61,10 @@ jobs:
 
   check:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # Most of it is the Rust half (just check-rust): the rig image pull, its build stage and a
+    # cold workspace build, with no cache on the pull request path. An estimate until PL47 sizes
+    # it from runs: the Rust half took 3.5 minutes locally with four jobs and a warm registry.
+    timeout-minutes: 60
     permissions:
       contents: read
     steps:
@@ -99,8 +104,15 @@ jobs:
     with:
       from_pr_gate: true
 
+  shell:
+    needs: changes
+    if: ${{ fromJSON(needs.changes.outputs.changes).shell }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/shell-surfaces.yml
+
   gate:
-    needs: [changes, check, kernel, specs]
+    needs: [changes, check, kernel, specs, shell]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

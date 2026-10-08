@@ -162,13 +162,6 @@ status = "missing"
 purpose = "Base configuration installed first: systemd settings, polkit rules, kargs, branding, GPG keys; shipped"
 
 [[component]]
-path = "forge/specs/athanor-bat"
-kind = "rpm spec"
-area = "apps"
-status = "missing"
-purpose = "Rebuild of bat, a cat clone with syntax highlighting; shipped"
-
-[[component]]
 path = "forge/specs/athanor-calmo"
 kind = "rpm spec"
 area = "shell"
@@ -677,7 +670,7 @@ area = "signing-update"
 status = "specified"
 spec = "doc_update_trust.md"
 item = "UT2"
-purpose = "Writes the digests file the signing job reads"
+purpose = "Writes the digests file the signing, verification and tag jobs read, and checks it for them"
 
 [[component]]
 path = "system/kernel-artifacts.sh"
@@ -741,6 +734,15 @@ item = "UT2"
 purpose = "Adds the key-based signature to the published system images"
 
 [[component]]
+path = "system/tag-images.sh"
+kind = "script tool"
+area = "signing-update"
+status = "specified"
+spec = "doc_update_delivery.md"
+item = "UD25"
+purpose = "Moves :latest of the system images to the digests whose signature verified, and of the ISO that installs them"
+
+[[component]]
 path = "system/tests"
 kind = "tests"
 area = "build-ci"
@@ -748,3 +750,12 @@ status = "specified"
 spec = "doc_build_system.md"
 item = "section 6"
 purpose = "Unit tests of the image build, signing, promotion, kernel artifacts and registry clean-up scripts"
+
+[[component]]
+path = "system/verify-images.sh"
+kind = "script tool"
+area = "signing-update"
+status = "specified"
+spec = "doc_update_trust.md"
+item = "UT2"
+purpose = "Verifies the key-based signature of the published system images as a machine does"

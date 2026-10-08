@@ -19,6 +19,7 @@ Nessuna dipendenza oltre a python3 e git. Va eseguito dalla radice del repo.
 
 import collections
 import datetime
+import fnmatch
 import json
 import os
 import re
@@ -154,7 +155,7 @@ def check_workflows():
                     r.fail(f"{wf.name}:{i+1} log inviati a un servizio esterno ({host})")
 
     # 1e. D43: signing keys only in sign-only jobs
-    for problem in signing_problems(ROOT):
+    for problem in signing_problems(ROOT) + merge_queue_problems(ROOT):
         r.fail(problem)
 
     # 1d. actionlint, se disponibile
@@ -203,9 +204,13 @@ SIGN_JOB_COMMANDS = {
 }
 # The names a signing job, its steps and its workflow may set in env besides the secrets of the
 # job's environment: plain values, none read by bash, the dynamic loader or a PATH lookup.
-# SIGN_VERIFY_BUILDER names the builder image that verifies after the key is removed;
-# sign-images.sh refuses anything but a 64-character content hash.
-SIGN_JOB_ENV = {"GH_TOKEN", "GITHUB_TOKEN", "GITHUB_ACTOR", "KERNEL_DIGEST", "KERNEL_REGISTRY", "SIGN_VERIFY_BUILDER"}
+SIGN_JOB_ENV = {"GH_TOKEN", "GITHUB_TOKEN", "GITHUB_ACTOR", "KERNEL_DIGEST", "KERNEL_REGISTRY"}
+# The image sign script runs beside the key and starts no container: system/verify-images.sh
+# verifies its signatures in a job without the key (D43). The kernel signer is the exception
+# by design: it runs a digest-pinned signer image it verifies first.
+IMAGE_SIGN_SCRIPT = "system/sign-images.sh"
+# A container engine as a command, not the docker:// transport of an image reference.
+CONTAINER_ENGINE = re.compile(r"\b(?:podman|docker|buildah|nerdctl|crun|runc)\b(?!://)")
 # The runners a signing job may use: GitHub-hosted, never a self-hosted machine (D43).
 GITHUB_HOSTED = re.compile(r"^ubuntu-(?:latest|\d{2}\.\d{2})$")
 # The only commands a step holding a signing secret may run, whole: the sign scripts (D43).
@@ -219,6 +224,7 @@ SECRET_NAME = re.compile(r"\bsecrets\s*\.\s*([A-Za-z_][A-Za-z0-9_-]*)", re.I)
 SECRETS_WORD = re.compile(r"\bsecrets\b", re.I)
 ENVIRONMENTS_JSON = ".github/settings/environments.json"
 BRANCH_PROTECTION_JSON = ".github/settings/branch-protection.json"
+RULESETS_JSON = ".github/settings/rulesets.json"
 # Its "secrets" are the repository secrets, which every job can read: none of them signs.
 ACTIONS_JSON = ".github/settings/actions.json"
 # The secret GitHub gives every run; nobody stores it.
@@ -328,6 +334,56 @@ def signing_environments(root):
     return holders, problems
 
 
+def merge_queue_problems(root):
+    """PIPE-N06: a ruleset with a merge queue needs every required status context reported by
+    a workflow that runs on merge_group; otherwise a merge group never gets the context and
+    cannot be satisfied. A job reports its name (its id when it has none); a job that calls a
+    reusable workflow reports `<name> / <inner context>`, and a matrix job without a name reports
+    `<id> (<values>)`, so both are matched as GitHub composes them."""
+    root = Path(root)
+    rulesets = json.loads(read(root / RULESETS_JSON))
+    queued = sorted(name for name, rs in rulesets.items()
+                    if any(rule.get("type") == "merge_queue" for rule in rs.get("rules", [])))
+    if not queued:
+        return []
+    required = {check["context"]
+                for protection in json.loads(read(root / BRANCH_PROTECTION_JSON)).values() if protection
+                for check in (protection.get("required_status_checks") or {}).get("checks", [])}
+    required |= {check["context"] for rs in rulesets.values() for rule in rs.get("rules", [])
+                 if rule.get("type") == "required_status_checks"
+                 for check in rule["parameters"]["required_status_checks"]}
+    reported = set()
+    for wf in sorted((root / ".github/workflows").glob("*.y*ml")):
+        doc = yaml.safe_load(read(wf))
+        if isinstance(doc, dict) and "merge_group" in triggers(doc):
+            reported |= job_contexts(root, doc)
+    return [f"{RULESETS_JSON}: ruleset {name} enables a merge queue, but the required context "
+            f"{context!r} is reported by no workflow that runs on merge_group (PIPE-N06)"
+            for name in queued for context in sorted(required)
+            if not any(fnmatch.fnmatchcase(context, pattern) for pattern in reported)]
+
+
+def job_contexts(root, doc, depth=0):
+    """The status contexts a workflow's jobs report, as fnmatch patterns: an expression in a
+    name and the values of an unnamed matrix match anything, and so does the inner job of a
+    reusable workflow that is not in this repository or nested deeper than GitHub allows."""
+    patterns = set()
+    for job_id, job in (doc.get("jobs") or {}).items():
+        job = job or {}
+        name = re.sub(r"\$\{\{.*?\}\}", "*", str(job.get("name", job_id)))
+        if "name" not in job and (job.get("strategy") or {}).get("matrix"):
+            name += " (*)"
+        uses = job.get("uses")
+        if not uses:
+            patterns.add(name)
+        elif uses.startswith("./") and depth < 4 and (root / uses).is_file():
+            inner = yaml.safe_load(read(root / uses)) or {}
+            patterns |= {f"{name} / {context}" for context in job_contexts(root, inner, depth + 1)}
+        else:
+            patterns.add(f"{name} / *")
+    return patterns
+
+
 def signing_problems(root):
     """D43 (doc_ci.md; doc_kernel_profile.md, section 12 item 1): a signing secret is read only
     in the env of a step that runs nothing but a sign script, in a job of the environment that
@@ -343,6 +399,7 @@ def signing_problems(root):
     environment holds."""
     root = Path(root)
     holders, problems = signing_environments(root)
+    problems += image_sign_script_problems(root)
     if yaml is None:
         return problems + ["scripts/verify.py: PyYAML is missing, so the D43 lint cannot read the "
                            "workflows (pip install pyyaml)"]
@@ -416,6 +473,22 @@ def signing_problems(root):
         for secret in sorted(undeclared):
             problems.append(f"{name}: reads {secret}, which neither {ENVIRONMENTS_JSON} nor {ACTIONS_JSON} "
                             "declares (D43)")
+    return problems
+
+
+def image_sign_script_problems(root):
+    """The image sign script starts no container: a line outside a comment that names a
+    container engine as a command is a problem (D43)."""
+    path = Path(root) / IMAGE_SIGN_SCRIPT
+    if not path.is_file():
+        return []
+    problems = []
+    for number, line in enumerate(read(path).splitlines(), 1):
+        code = line.strip()
+        if code.startswith("#") or not CONTAINER_ENGINE.search(code):
+            continue
+        problems.append(f"{IMAGE_SIGN_SCRIPT}:{number} starts a container beside the key: verify the "
+                        "signatures in a job without it, system/verify-images.sh (D43)")
     return problems
 
 
@@ -1696,7 +1769,6 @@ OWN_LICENCE = "GPL-3.0-or-later"
 # other spec, every Cargo.toml and every nfpm `license:` field is our own code and
 # must say OWN_LICENCE.
 UPSTREAM_SPECS = {
-    "forge/specs/athanor-bat/bat.spec",
     "forge/specs/athanor-cliphist/athanor-cliphist.spec",
     "forge/specs/athanor-dart-sass/athanor-dart-sass.spec",
     "forge/specs/athanor-matugen/athanor-matugen.spec",

@@ -2,8 +2,10 @@
 # rig.sh - the one entry point of the shell test rig. Workflows call this and nothing
 # else, so every gate runs the same way on a laptop and on the hosted runner.
 #
-#   rig.sh build-image      build the rig and build stages locally, layered on the published rig
+#   rig.sh build-image      build the rig and build stages locally, layered on the published rig;
+#                           with the build stage pinned (build-image.digest), pull it instead
 #   rig.sh publish-image    push the rig stage and print its digest (needs a registry login)
+#   rig.sh publish-build-image  push the build stage and print its digest (needs a registry login)
 #   rig.sh probe-sandbox    prove that bubblewrap, and with it glycin, works in the rig
 #   rig.sh css-parse        GTK parse gate over the generated stylesheets
 #   rig.sh cosmic-keys      every key COSMIC ships exists in our overlay
@@ -13,7 +15,7 @@
 #   rig.sh build-compositor-client  clippy, tests and release build of cc-probe into <out>/bin
 #   rig.sh build-shelld     clippy, tests and release build of athanor-shelld into <out>/bin
 #   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps) into <out>/bin, with the DT_NEEDED check
-#   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout)
+#   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout); passes ATHANOR_REQUIRE_QALC through
 #   rig.sh build-dock       clippy, tests and release build of athanor-dock (and athanor-apps) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-launcher   clippy, tests (qalc required) and release build of athanor-launcher and athanor-preview-render into <out>/bin, with the DT_NEEDED check
 #   rig.sh dock-roundtrip   the dock's surface off screen and back, three times, under cosmic-comp (BR7)
@@ -50,6 +52,18 @@ rig_image() {
         echo "$registry/athanor-shell-rig@$(cat "$rig/rig-image.digest")"
     else
         echo "$local_image:rig"
+    fi
+}
+
+# The build stage, where cargo runs: an explicit one, else the published one pinned by digest,
+# else the local build. Pinned, no recipe resolves packages against the Fedora mirrors.
+build_image() {
+    if [ -n "${ATHANOR_RIG_BUILD_IMAGE:-}" ]; then
+        echo "$ATHANOR_RIG_BUILD_IMAGE"
+    elif [ -s "$rig/build-image.digest" ]; then
+        echo "$registry/athanor-shell-rig-build@$(cat "$rig/build-image.digest")"
+    else
+        echo "$local_image:build"
     fi
 }
 
@@ -294,14 +308,28 @@ capture_launcher() {
 
 case "${1:-}" in
 build-image)
-    podman build "${rig_base[@]}" --target rig -t "$local_image:rig" -f "$rig/Containerfile" "$rig"
-    podman build "${rig_base[@]}" --target build -t "$local_image:build" -f "$rig/Containerfile" "$rig"
+    if [ "$(rig_image)" = "$local_image:rig" ] || [ "$(build_image)" = "$local_image:build" ]; then
+        podman build "${rig_base[@]}" --target rig -t "$local_image:rig" -f "$rig/Containerfile" "$rig"
+    fi
+    if [ "$(build_image)" = "$local_image:build" ]; then
+        podman build "${rig_base[@]}" --target build -t "$local_image:build" -f "$rig/Containerfile" "$rig"
+    else
+        podman pull "$(build_image)"
+    fi
     ;;
 publish-image)
     podman build "${rig_base[@]}" --target rig -t "$local_image:rig" -f "$rig/Containerfile" "$rig"
     podman push --digestfile "$out/rig-image.digest" "$local_image:rig" "docker://$registry/athanor-shell-rig:latest"
     echo "published $registry/athanor-shell-rig@$(cat "$out/rig-image.digest")"
     echo "commit that digest as forge/test/shell/rig-image.digest together with the goldens it changes"
+    ;;
+publish-build-image)
+    # The build stage only compiles and runs unit tests, so it is published on its own: the rig's
+    # digest, and with it the pixels of the goldens, stay where they are.
+    podman build "${rig_base[@]}" --target build -t "$local_image:build" -f "$rig/Containerfile" "$rig"
+    podman push --digestfile "$out/build-image.digest" "$local_image:build" "docker://$registry/athanor-shell-rig-build:latest"
+    echo "published $registry/athanor-shell-rig-build@$(cat "$out/build-image.digest")"
+    echo "commit that digest as forge/test/shell/build-image.digest together with the Containerfile change it builds"
     ;;
 probe-sandbox)
     in_rig "$(rig_image)" bwrap --unshare-all --ro-bind /usr /usr --symlink usr/lib64 /lib64 --dev /dev /usr/bin/true
@@ -340,7 +368,7 @@ build-greeter)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
-        -e CARGO_TARGET_DIR=/out/target -w /repo "$local_image:build" \
+        -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-greeter-ui -p athanor-style --all-targets -- -D warnings \
                  && cargo test --locked -p athanor-greeter-ui -p athanor-style \
                  && cargo build --release --locked -p athanor-greeter-ui \
@@ -351,7 +379,7 @@ build-layout)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
-        -e CARGO_TARGET_DIR=/out/target -w /repo "$local_image:build" \
+        -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-layout -p athanor-layout-chooser -p athanor-unit --all-targets -- -D warnings \
                  && cargo test --locked -p athanor-layout -p athanor-layout-chooser -p athanor-unit \
                  && cargo build --release --locked -p athanor-layout-chooser \
@@ -361,7 +389,7 @@ build-compositor-client)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
-        -e CARGO_TARGET_DIR=/out/target -w /repo "$local_image:build" \
+        -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-compositor-client --all-targets -- -D warnings \
                  && cargo test --locked -p athanor-compositor-client \
                  && cargo build --release --locked -p athanor-compositor-client --example cc-probe \
@@ -371,7 +399,7 @@ build-shelld)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
-        -e CARGO_TARGET_DIR=/out/target -w /repo "$local_image:build" \
+        -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-unit -p athanor-shelld --all-targets -- -D warnings \
                  && cargo test --locked -p athanor-unit -p athanor-shelld \
                  && cargo build --release --locked -p athanor-shelld \
@@ -382,13 +410,13 @@ cargo)
     mkdir -p "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
-        -e CARGO_TARGET_DIR=/out/target -w /repo "$local_image:build" cargo "$@"
+        -e CARGO_TARGET_DIR=/out/target -e ATHANOR_REQUIRE_QALC -w /repo "$(build_image)" cargo "$@"
     ;;
 build-bar)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
-        -e CARGO_TARGET_DIR=/out/target -w /repo "$local_image:build" \
+        -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-apps -p athanor-bar --all-targets -- -D warnings \
                  && cargo test --locked -p athanor-apps -p athanor-bar \
                  && cargo build --release --locked -p athanor-bar \
@@ -399,7 +427,7 @@ build-dock)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
-        -e CARGO_TARGET_DIR=/out/target -w /repo "$local_image:build" \
+        -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-apps -p athanor-dock --all-targets -- -D warnings \
                  && cargo test --locked -p athanor-apps -p athanor-dock \
                  && cargo build --release --locked -p athanor-dock \
@@ -415,7 +443,7 @@ build-launcher)
     # spec builds with -p, as here.
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
-        -e CARGO_TARGET_DIR=/out/target -e ATHANOR_REQUIRE_QALC=1 -w /repo "$local_image:build" \
+        -e CARGO_TARGET_DIR=/out/target -e ATHANOR_REQUIRE_QALC=1 -w /repo "$(build_image)" \
         bash -c 'set -euo pipefail
                  for packages in "-p athanor-search -p athanor-preview -p athanor-launcher" "-p athanor-preview-render"; do
                      cargo clippy --locked $packages --all-targets -- -D warnings
