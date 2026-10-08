@@ -7,6 +7,7 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 use athanor_layout::favorites::{self, FavoritesError};
+use gio_unix::DesktopAppInfo;
 
 enum State {
     Loaded(Vec<String>),
@@ -29,18 +30,32 @@ impl Store {
             file,
             athanor_compositor_client::favorites::cosmic_favorites,
             Path::new(favorites::VENDOR_FILE),
+            |id| DesktopAppInfo::new(id).is_some(),
         )
     }
 
+    /// `installed` tells whether a desktop id has an entry; a favourite the image no longer
+    /// ships is replaced by its successor and saved (`favorites::with_successors`).
     fn load_with(
         file: Option<PathBuf>,
         cosmic: impl FnOnce() -> Option<Vec<String>>,
         vendor: &Path,
+        installed: impl Fn(&str) -> bool,
     ) -> Store {
         let state = match &file {
             None => State::Unavailable,
             Some(path) => match favorites::load_or_import(path, cosmic, vendor) {
-                Ok(ids) => State::Loaded(ids),
+                Ok(ids) => State::Loaded(match favorites::with_successors(&ids, &installed) {
+                    None => ids,
+                    Some(replaced) => favorites::update(path, |current| {
+                        Ok(favorites::with_successors(current, &installed)
+                            .unwrap_or_else(|| current.to_vec()))
+                    })
+                    .unwrap_or_else(|err| {
+                        tracing::warn!(error = %err, "the replaced favourites were not saved; the replacement runs again at the next start");
+                        replaced
+                    }),
+                }),
                 Err(err) => {
                     tracing::error!(error = %err, file = %path.display(), "the favourites are unavailable; the file is left as it is");
                     State::Unavailable
@@ -132,7 +147,24 @@ mod tests {
             Some(file.to_path_buf()),
             || None,
             Path::new("/nonexistent/athanor-apps-vendor.toml"),
+            |_| true,
         )
+    }
+
+    #[test]
+    fn a_removed_default_is_replaced_by_its_successor_and_saved() {
+        const FILES: &str = "com.system76.CosmicFiles.desktop";
+        const NAUTILUS: &str = "org.gnome.Nautilus.desktop";
+        let file = scratch("successor");
+        favorites::save(&file, &ids(&[FILES, A])).expect("save");
+        let store = Store::load_with(
+            Some(file.clone()),
+            || None,
+            Path::new("/nonexistent/athanor-apps-vendor.toml"),
+            |id| id != FILES,
+        );
+        assert_eq!(store.ids(), Some(ids(&[NAUTILUS, A])));
+        assert_eq!(favorites::read(&file).expect("read"), Some(ids(&[NAUTILUS, A])));
     }
 
     #[test]
@@ -178,6 +210,7 @@ mod tests {
             None,
             || Some(vec![A.to_owned()]),
             Path::new("/nonexistent/athanor-apps-vendor.toml"),
+            |_| true,
         );
         assert_eq!(store.ids(), None);
         assert!(!store.change(|list| favorites::pinned(list, A)));
