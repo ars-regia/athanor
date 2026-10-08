@@ -118,9 +118,9 @@ On 2026-10-08 the maintainer decided items 1 to 5, and on 2026-10-09 item 6:
 
 ## Consequences
 
-- `doc_update_delivery.md` and `doc_ci.md` carry these decisions in revision 3 and revision 2. Both
-  stay awaiting the maintainer's approval of the text (ADR-0074 item 5): this record decides the
-  points, and merging the documents approves them.
+- `doc_update_delivery.md` and `doc_ci.md` carry these decisions in revision 3 and revision 2. This
+  record decides the points; the maintainer approved both texts on 2026-10-09 by merging the
+  pull request that sets their status to approved (ADR-0074 item 5).
 - ADR-0096 is amended in one part only: the artefacts its item 1 covers (item 3 above). Its other
   items, the keyless build record, the custody of ADR-0084 and the rejection of a private Fulcio and
   Rekor, are unchanged. `doc_update_trust.md` UT2, `doc_pipeline.md` and `KERNEL.md` take the longer

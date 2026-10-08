@@ -2,7 +2,7 @@
 
 - **Purpose:** what every workflow in `.github/workflows/` does, what it reads and produces, and whether it works today.
 - **Owner:** the maintainer.
-- **Status:** revision 2 (2026-10-08), awaiting the maintainer's approval of the text. Workflow, script and settings facts were read on `origin/iso-v0` at `9587d06e`; the maintainer's decisions of 2026-10-08 are in [ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md).
+- **Status:** revision 2 (2026-10-08), approved by the maintainer on 2026-10-09. Workflow, script and settings facts were read on `origin/iso-v0` at `9587d06e`; the maintainer's decisions of 2026-10-08 are in [ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md).
 - **Depends on:** [doc_build_system.md](doc_build_system.md) (packages and tiers), [doc_build_ordering.md](doc_build_ordering.md) (O1-O9, kernel and module order), [doc_kernel_build.md](doc_kernel_build.md), [doc_system_image.md](doc_system_image.md), [doc_update_trust.md](doc_update_trust.md) (D1, `:stable`), the secrets inventory `docs/operations/secrets.md`, the runner [README](../../scripts/runner/README.md).
 - **Defines:** CI1-CI31 (one per workflow), CB1-CB4 (known broken workflows), CP1-CP4 (CP1 decided, CP2 and CP3 done, CP4 open).
 - **Enforced by:** `python3 scripts/verify.py ci`. It fails when a workflow file is missing here, when this document names a workflow file that does not exist, or when a secret or variable a workflow references is not named here.
