@@ -76,7 +76,7 @@ The numbers are reasoned proposals, not measurements: 100 ms is the classic limi
 | `athanor-launcher`               | 80 MB         | `doc_launcher.md`, section 4, item 4                          |
 | `athanor-library`                | 64 MB         | `doc_launcher.md`, section 4, item 4 (open until plan 3b)     |
 | `athanor-osd`                    | 32 MB         | `doc_osd.md`, section 2 (Memory) and section 4, item 2 (OD13) |
-| `athanor-overview`, hidden       | 64 MB         | `doc_overview.md`, section 4, item 5                          |
+| `athanor-overview`, hidden       | 64 MB         | `doc_overview.md`, section 4, item 4                          |
 | `athanor-lock`, no surface       | 80 MB         | `doc_lock_and_prompts.md`, LP15                               |
 | polkit agent                     | 64 MB         | `doc_lock_and_prompts.md`, LP15                               |
 | `athanor-settings`, no window    | 40 MB         | `doc_settings.md`, SE5                                        |

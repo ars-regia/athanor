@@ -1,18 +1,28 @@
 # Athanor workspace overview
 
-Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text not yet reviewed. Amended on 2026-10-06 by maintainer decision A2-24 (#159): this document owns the window switcher on Alt+Tab (section 7).** This document specifies stage 7 of `doc_shell.md` (SH1, SH3): Athanor's own window and workspace overview, which replaces cosmic-workspaces. It covers the program and its use of the compositor client, the surfaces, contents and thumbnails, pointer and keyboard use, opening and closing (Super+W, the bar, the dock, a three-finger gesture and a hot corner that is off by default), feedback when the workspace changes, the confinement, the tests and the order of construction. The maintainer's seven decisions of 2026-10-05 are in section 6.
+Status: **revision 2, awaiting the maintainer's approval of the text.** Revision 1 was the draft of 2026-10-05; revision 2 applies the review of 2026-10-08 and the maintainer's decisions of that day (ADR-0099), and follows the specification template of ADR-0076 point 7: scope, non-goals and rationale (section 1), interfaces and failure behaviour (section 2), acceptance criteria (section 5). **Amended on 2026-10-06 by maintainer decision A2-24 (#159): this document owns the window switcher on Alt+Tab (section 7).** This document specifies stage 7 of `doc_shell.md` (SH1, SH3): Athanor's own window and workspace overview, which replaces cosmic-workspaces. It covers the program and its use of the compositor client, the surfaces, contents and thumbnails, pointer and keyboard use, opening and closing (Super+W, the bar, the dock, a three-finger gesture and a hot corner that is off by default), feedback when the workspace changes, the confinement, the tests and the order of construction. The maintainer's decisions are in section 6: seven of 2026-10-05 and one of 2026-10-08.
 
-## 1. Context
+## 1. Scope, non-goals and rationale
+
+### Scope
+
+Stage 7 of `doc_shell.md`, as the status line lists it: the overview program `athanor-overview`, its surfaces, contents, thumbnails, pointer and keyboard use, the ways of opening and closing it, the workspace-change indicator, the hot corner, the confinement, the tests and the order of construction; and, since 2026-10-06, the ownership of the window switcher on Alt+Tab (section 7).
+
+### Non-goals
+
+Renaming workspaces, Stage Manager, snap layouts and tiling zones, Activities, and the shells drawn over other compositors' overviews (OV15); a compositor of our own (`doc_compositor.md` CO1); the bar's workspace indicator (F-bar-20); the design of the window switcher, which a later revision brings (section 7).
+
+### Rationale: context and verified facts
 
 - **What binds this document.**
   - `doc_shell_standard.md`: the gate (ST2) and the register with its written exclusions (ST3). ST1 puts "the workspace overview" in scope. The ST5 thresholds apply: a first complete frame within 100 ms, 99% of frames on time during every animation including a workspace change, recovery within 1 s, a 24-hour soak, and a memory budget set by each surface's own specification. Also binding: scenarios (ST6), accessibility and languages (ST7), and the maintainer's aesthetic signature (ST8).
   - `doc_shell.md`: of COSMIC only cosmic-comp stays (SH3, whose stage 7 row reads "cosmic-workspaces | overview | 7 | our overview"). `athanor-compositor-client` is the only crate that knows COSMIC (SH2). Each program is GTK4 in its own crate, with its logic free of GTK types (SH4). SH8 sets the crash-loop policy and SH13 the test matrix.
   - `doc_launcher.md`: resident programs opened through a D-Bus `Show` with an activation file (LA1, LA8). Layer surfaces are pinned per output and are never unmapped (LA8). Super belongs to the launcher, written once per user into `system_actions` (LA8). The Alt+Tab window switcher is left to the launcher's plan 3c (LA12).
-  - `doc_bar.md`: the bar's Workspaces module and the dock's workspaces button open cosmic-workspaces "until stage 7" (`doc_bar.md:71`). Popups go on the output of the active workspace (BR4). Launches follow BR2.
+  - `doc_bar.md`: the bar's Workspaces module and the dock's workspaces button open cosmic-workspaces "until stage 7" (`doc_bar.md:74`). Popups go on the output of the active workspace (BR4). Launches follow BR2.
   - `doc_visual_language.md`: VL7 sets radii and the grid. VL9 sets motion: 300 ms for large changes including the switch between workspaces, one curve, and zero duration when `enable-animations` is off; surfaces are opaque. `doc_accessibility.md` AX9: with reduced motion nothing slides.
-  - `doc_compositor.md` (revision 1, awaiting approval): no compositor of our own (CO1). Window-management features enter through the register (CO2). Patches stay few, are proposed upstream first, and each has an exit (CO3).
-  - `doc_osd.md` excludes F-osd-12, the workspace-change indicator: "the overview specification (`doc_overview.md`) owns workspace feedback" (`doc_osd.md:171`). `doc_settings.md:165` leaves hot corners to this document.
-- **What runs today** (cosmic-workspaces 1.8.0-1.fc43, source tag `epoch-1.8.0`, crate 1.0.12, GPL-3.0-only, iced and libcosmic; read 2026-10-05):
+  - `doc_compositor.md` (revision 2, approved by the maintainer on 2026-10-08): no compositor of our own (CO1). Window-management features enter through the register (CO2). Patches stay few, are proposed upstream first, and each has an exit (CO3).
+  - `doc_osd.md` excludes F-osd-12, the workspace-change indicator: "the overview specification (`doc_overview.md`) owns workspace feedback" (`doc_osd.md:171`). `doc_settings.md:169` leaves hot corners to this document.
+- **What runs today** (cosmic-workspaces 1.8.0-1.fc43, source tag `epoch-1.8.0`, crate 1.0.12, GPL-3.0-only, iced and libcosmic; read 2026-10-05). The cosmic-comp spec in the tree is 1.9.0 (`forge/specs/cosmic-comp/cosmic-comp.spec:13`); every source line of cosmic-workspaces, cosmic-comp and cosmic-settings cited in this document is at `epoch-1.8.0`, to recheck at `epoch-1.9.0`:
   - **Surfaces.** One layer surface per output on the `top` layer, namespace `cosmic-workspace-overview`, exclusive keyboard (`src/main.rs:263-265`). The surfaces are destroyed on hide (`:321-364`).
   - **Contents.** Live window thumbnails only for the active workspaces, and a live thumbnail of every workspace (`:372-385`). Both are captured through cctk with dmabuf buffers allocated through GBM and a Vulkan instance (`src/backend/wayland/vulkan.rs:24`).
   - **Actions.**
@@ -22,13 +32,13 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
     - Scroll to switch workspace, limited to one switch per 200 ms (`:56`).
     - Escape closes the overview (`:1078`).
     - Typing a character starts cosmic-launcher or cosmic-app-library with no text, according to cosmic-comp's `action_on_typing`, so the character is lost (`:328-345`).
-  - **Gaps.** New workspace and close workspace are commented-out code (`:803`, `:918`). There is no arrow-key navigation, and no accessibility at all: iced has no AT-SPI support (`iced-accessibility-status`, 2026-10-02).
+  - **Gaps.** New workspace and close workspace are commented-out code (`:803`, `:918`). There is no arrow-key navigation, and no accessibility at all: iced has no AT-SPI support, and libcosmic's text inputs emit no accessibility node (pop-os/libcosmic#1429, `doc_shell.md:32`).
   - **D-Bus.** It exports `com.system76.CosmicWorkspaces` with `Show` and `Hide` (`src/dbus.rs:18-29`).
   - **How it is opened.** cosmic-comp binds Super+W and `XF86LaunchA` to `System(WorkspaceOverview)` (`/usr/share/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults:106,127`, owned by cosmic-comp-1.8.0-1.fc43.athanor1). The action runs `cosmic-workspaces` (`system_actions:57`, owned by cosmic-settings-daemon-1.8.0-1.fc43). The bar and the dock open it through `Opener::Workspaces` (`system/athanor-compositor-client/src/launch.rs:466-509`), with `Activate` on a cold start and `Show` on a warm one.
 - **Its defects.**
-  - **A crash on NVIDIA.** On the maintainer's desktop it dies with SIGSEGV about 30 ms after a cold start that is shown at once, which is the bar's path. Its backend thread calls `vkCreateInstance` while wgpu enumerates instance extensions in the same Vulkan loader, and NVIDIA's ICD calls a null entry. Shown one second later, it does not crash (memory `cosmic-workspaces-vulkan-race`, 2026-10-01).
-  - **A crash in the dev VM.** It crashes there because cosmic-comp rejects its capture buffers on the virgl render node (memory `athanor-shell-2a-plan`).
-- **What cosmic-comp offers** (cosmic-comp tag `epoch-1.8.0`, read 2026-10-05).
+  - **A crash on NVIDIA.** On the maintainer's desktop it dies with SIGSEGV about 30 ms after a cold start that is shown at once, which is the bar's path. Its backend thread calls `vkCreateInstance` while wgpu enumerates instance extensions in the same Vulkan loader, and NVIDIA's ICD calls a null entry. Shown one second later, it does not crash (observed by the maintainer on 2026-10-01; the check is item 9 of section 5).
+  - **A crash in the dev VM.** It crashes there because cosmic-comp rejects its capture buffers on the virgl render node (observed during shell package 2a, PR #68, 01d100c1; the virgl VM is described in `scripts/devvm/README.md`).
+- **What cosmic-comp offers** (cosmic-comp tag `epoch-1.8.0`, read 2026-10-05, to recheck at `epoch-1.9.0`).
   - **Workspace actions.** Workspaces advertise Activate, SetTilingState, Pin and Move only, with no Rename, Create or Remove (`src/shell/mod.rs:404-409,444-449`). The handler implements exactly those five requests (`src/wayland/handlers/workspace.rs`).
   - **Moving a window.** `zcosmic_toplevel_manager_v1` version 4 moves a window to an `ext_workspace_handle_v1` on an output (`src/wayland/protocols/toplevel_management.rs:118,252-262`).
   - **Which workspace holds a window.** `zcosmic_toplevel_info_v1` version 3 reports each window's workspaces as `ext_workspace_enter`/`leave` and its per-output `geometry` (`toplevel_info.rs:320`; protocol XML at cosmic-protocols c0cff4db, vendored in the compositor client).
@@ -47,7 +57,14 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
   - F-overview-12, gestures, is "not verified": four-finger workspace switching exists.
   - F-overview-09, search, depends on cosmic-launcher, which leaves at LA12.
 
-## 2. Decisions
+### Why not upstream, and owners (SH3, scope budget A2-14)
+
+The maintenance owner of each component below is the maintainer (ADR-0097 (PR #336)).
+
+- **`athanor-overview`.** The upstream candidate is cosmic-workspaces. It falls short on facts above: no AT-SPI (iced), a crash on NVIDIA at a cold start shown at once, a capture path through GBM and Vulkan that the virgl VM rejects, no arrow-key navigation, new and close workspace as commented-out code, and the typed character lost on the way to the launcher. GNOME's overview belongs to gnome-shell, which is not on our stack. The compositor client already holds the typed calls the overview needs, so the program adds a surface and a model, not a protocol layer.
+- **The hot corner.** cosmic-comp has no hot-corner key or code, and cosmic-settings 1.8.0 carries only the string. Drawing it in the shell (OV14) needs no compositor patch; a patch would be the alternative and CO3 asks for none when the shell can do it.
+
+## 2. Interfaces and decisions
 
 **OV1. One overview, replacing cosmic-workspaces.** On every output it shows that output's workspaces as a strip, and the windows of the selected workspace as a grid of thumbnails. This is the model of macOS Mission Control and GNOME's overview.
 
@@ -71,7 +88,7 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
 - **Renderer: Cairo,** pinned in code, as the other resident surfaces (SH4, LA1).
   - The process creates no Vulkan instance and links neither wgpu nor ash. The loader race of cosmic-workspaces therefore has nothing to race in this process.
   - If spike S3 shows that Cairo misses the smoothness threshold, the renderer and the memory budget return to the maintainer (section 4).
-- **The main Wayland socket.** cosmic-comp offers the protocols the overview needs only to unsandboxed clients: window information and management, capture, and workspaces (`src/state.rs:647,688,690,736,748,760`: capture, layer shell, window information and workspaces are created with `client_not_sandboxed`). So the overview keeps the main socket, as the launcher does (LA9) and as `doc_bar.md:43` allows for the shell's own components.
+- **The main Wayland socket.** cosmic-comp offers the protocols the overview needs only to unsandboxed clients: window information and management, capture, and workspaces (`src/state.rs:647,688,690,736,748,760` at `epoch-1.8.0`, to recheck at `epoch-1.9.0`: capture, layer shell, window information and workspaces are created with `client_not_sandboxed`). So the overview keeps the main socket, as the launcher does (LA9) and as `doc_bar.md:45` allows for the shell's own components.
 - **Crashes** follow SH8's policy, as the bar's do. After a restart the overview holds no state of its own beyond the cached thumbnails (OV6), which are lost. An overview that was open when the process was killed does not reopen (ST5, Recovery).
 
 **OV3. What the compositor client gains.** Each addition is a typed call, a typed field or a typed event, with no COSMIC type crossing the boundary (SH2). Each one merges in its own change with its own tests, before the overview uses it (OV19, step 1).
@@ -131,7 +148,7 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
   - While shown, a visible window is captured again at most four times a second.
   - Windows of other workspaces are captured once per opening, for the miniatures (decision 2).
 - **Each capture is scaled down once,** to the largest size at which it can appear on that output, and the full-size buffer is released. Only the scaled texture is kept.
-- **The first frame does not wait for captures.** The overview draws at once with the thumbnails cached from its previous opening, or with the application's icon where none exists. New captures replace the cached thumbnails as they arrive. ST5's "first complete frame" is this frame: every card and miniature is in place.
+- **The first frame does not wait for captures.** The overview draws at once with the thumbnails cached from its previous opening, or with the application's icon where none exists. New captures replace the cached thumbnails as they arrive. ST5's "first complete frame" is this frame: every card and miniature is in place, with cached thumbnails or icons (maintainer decision of 2026-10-08, ADR-0099). The overview draws with `wl_shm` and Cairo; GL and GBM are not used.
 - **Thumbnails never leave the process.** They are not written to disk, `os.athanor.Overview1` does not expose them, and they are dropped for a window when it closes. When the session locks (OV10), every cached thumbnail is dropped.
 
 **OV7. Pointer actions.**
@@ -172,9 +189,9 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
 
 **OV9. Typing hands off to the launcher** (F-overview-09). A printable key typed in the overview hides it and passes the text on, following cosmic-comp's `action_on_typing` as read through the compositor client (OV3):
 
-- `OpenLauncher` calls `os.athanor.Launcher1.Search(s)`, and `OpenApplications` calls `os.athanor.Library1.Search(s)`. Each opens the program with the text in its query field. Both methods are new: section 3 asks `doc_launcher.md` for them.
+- `OpenLauncher` calls `os.athanor.Launcher1.Search(s query)`, and `OpenApplications` calls `os.athanor.Library1.Search(s query)`. Each opens the program with the text in its query field. Both methods are defined in `doc_launcher.md` (LA8, `:112`).
 - `None` ignores the key.
-- Until those methods exist, the overview calls `Show()` and the first character is lost, as it is with cosmic-workspaces today (`src/main.rs:328-345`).
+- Until those methods are built, the overview calls `Show()` and the first character is lost, as it is with cosmic-workspaces today (`src/main.rs:328-345`).
 
 **OV10. Opening and closing.**
 
@@ -225,7 +242,7 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
   - while the active workspace of that output holds a fullscreen window, read from `Window.state` and `Window.workspaces`;
   - while the overview is shown.
   - A drag never triggers it, because Wayland does not move pointer focus during a button grab.
-- **The setting.** It lives in a new GSettings schema, `org.athanor.desktop.overview`, key `hot-corner` (boolean, default `false`), shipped by `athanor-overview`. The Settings app shows it on its Desktop page; section 3 asks `doc_settings.md` for this. Turning it off empties the input region and never destroys the surface (OV4).
+- **The setting.** It is the GNOME key `org.gnome.desktop.interface enable-hot-corners` (maintainer decision of 2026-10-08, ADR-0099), whose vendor default in Athanor is `false` (GNOME's own is true); the default is set by an override shipped with the image's system configuration, not by this program. The overview reads the key and ships no schema of its own. The Settings app shows it on its Desktop page (`doc_settings.md` SE14). Turning it off empties the input region and never destroys the surface (OV4).
 - **The bar's corner pixel.** With the bar at the top, the corner pixel belongs to the hot corner while the setting is on, as GNOME's Activities corner does.
 
 **OV15. Register entries this document does not build.** Section 3 records each in the register.
@@ -244,14 +261,14 @@ Status: **revision 1 draft, 2026-10-05: the maintainer's decisions applied; text
   - Write access covers only what GTK needs (the same list as the bar's: its runtime directory, dconf, its cache, `/tmp` and `/dev/dri`).
   - It has no read access to `$HOME` beyond its configuration.
   - It has no TCP: Landlock ABI 4 denies bind and connect, and the unit allows only `AF_UNIX`.
-- **The unit** is confined as `athanor-shelld.service` is (`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=read-only`, `RestrictAddressFamilies=AF_UNIX`, `IPAddressDeny=any`, `SystemCallFilter=@system-service`). Its `MemoryHigh` is set at 1.5 times the budget of section 4, item 5.
+- **The unit** is confined as `athanor-shelld.service` is (`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=read-only`, `RestrictAddressFamilies=AF_UNIX`, which alone keeps it off the network, `SystemCallFilter=@system-service`; `athanor-shelld.service` sets no `IPAddressDeny`). Its `MemoryHigh` is set at 1.5 times the budget of section 4, item 4, the convention of `doc_accessibility.md` AX3.
 - **No privilege.** The overview starts no application and has no polkit action, setuid program or system unit. Activating a window, moving it and switching workspaces are compositor requests made on the user's own session socket.
 - **What a caller can do.** Any unconfined session peer can call `os.athanor.Overview1`, as with LA8. A call can only show or hide the overview on the user's own screen; nothing runs and nothing is returned. Squatting the name blocks the overview.
 - **Window content.** Thumbnails show only the user's own windows, to the user. OV6 keeps them in memory only and drops them when the session locks.
 
 **OV17. Retiring cosmic-workspaces.** In one change at the switch (OV19, step 5):
 
-- remove `cosmic-workspaces` from `forge/config/packages.json:126`;
+- remove `cosmic-workspaces` from `forge/config/packages.json:111`;
 - point `Opener::Workspaces` at `os.athanor.Overview1.Show` (`launch.rs:466-509`; the bar's module and the dock at `athanor-dock-1.0.0/src/ui/surface.rs:267` follow without change);
 - set the `WorkspaceOverview` entry of the `system_actions` file under `/usr/share/athanor/cosmic-defaults` (LN9's bullet "The `system_actions` file", the single owner by the ruling of 2026-10-05) to a `gdbus call` of `os.athanor.Overview1.Toggle`, written as LA8 writes the launcher's;
 - update `scripts/devvm/compositor-acceptance.sh:160`, which opens cosmic-workspaces;
@@ -284,7 +301,7 @@ The NVIDIA crash of cosmic-workspaces leaves with it. No interim fix to cosmic-w
 
 **OV19. Construction.** Each step merges on its own. `athanor-overview.service` stays disabled by default and cosmic-workspaces stays the overview until step 5. From step 2 on, the maintainer installs each build on the reference laptop and judges it on screen before it merges. The library's tests run on every change.
 
-1. **Foundations, with nothing visible.** Each addition of OV3 to the compositor client merges in its own change, with its tests. The crate gets its library (placement, navigation, indicator timing, hot-corner rule), its unit, `os.athanor.Overview1`, the activation file and Landlock. Spike S1 proves the three surface states and the hot-corner surface on cosmic-comp 1.8.0-1.fc43.athanor1 before anything is drawn on them.
+1. **Foundations, with nothing visible.** Each addition of OV3 to the compositor client merges in its own change, with its tests. The crate gets its library (placement, navigation, indicator timing, hot-corner rule), its unit, `os.athanor.Overview1`, the activation file and Landlock. Spike S1 proves the three surface states and the hot-corner surface on cosmic-comp 1.8.0-1.fc43.athanor1 (and 1.9.0, to recheck at `epoch-1.9.0`) before anything is drawn on them.
 2. **The first overview the maintainer sees,** opened by hand with `gdbus`:
    - the strip, with miniatures composed from still captures (decision 2);
    - the grid of the active workspace with live thumbnails;
@@ -299,9 +316,19 @@ The NVIDIA crash of cosmic-workspaces leaves with it. No interim fix to cosmic-w
    - typing handed to the launcher.
 4. **Feedback and reach:**
    - the indicator of OV12;
-   - the hot corner of OV14 with its schema key;
+   - the hot corner of OV14 with its GNOME key;
    - the cosmic-comp patches of decisions 4 and 5, each in its own change under CO3, after its upstream proposal is filed.
 5. **The gate and the switch.** The gate runs first: the measurement on the reference laptop, the scenarios, accessibility and languages, the 84 surface cases and the maintainer's aesthetic signature (ST2). Then the change of OV17 and the register updates of section 3 merge together.
+
+### Failure behaviour
+
+- **A crash** follows SH8's policy, as the bar's. The overview holds no state beyond the cached thumbnails, which are lost, and an overview that was open does not reopen (OV2).
+- **A capture that fails** draws the window schematically, as its rectangle with its application's icon (OV5); the first frame never waits for captures (OV6).
+- **A request for a window that has just closed** is harmless and tested (OV18, spike S5); a workspace that does not allow an action does not offer it (OV3).
+- **`Show()` while the session is locked** is refused and logged at info; the overview hides when `LockedHint` turns true and drops every cached thumbnail (OV10).
+- **An output that leaves** lets its window go; a hidden surface is never unmapped otherwise (OV4).
+- **A squatted name** blocks the overview and nothing else (OV16).
+- **Spike failures** send their rule back to the maintainer (section 4, item 1).
 
 ## 3. Changes to other documents
 
@@ -310,19 +337,19 @@ Applied with the approval of this document.
 **Requirements of earlier drafts, met here.**
 
 - `doc_osd.md` (`:171`), F-osd-12: workspace feedback belongs to the overview. Met by OV12 (decision 3, the overview's own card). F-osd-12 moves from the on-screen display's table to the overview's entries.
-- `doc_settings.md` (`:165`), SE14: hot corners belong to the overview specification. Met by OV14 (decision 6).
-- `doc_shell.md` SH3 (`:68`): stage 7, "our overview". Met by OV1 and OV17.
-- `doc_bar.md` (`:71`): the Workspaces module opens cosmic-workspaces until stage 7. Met by OV17, which repoints `Opener::Workspaces`.
+- `doc_settings.md` (`:169`), SE14: hot corners belong to the overview specification. Met by OV14 (decisions 6 and 8).
+- `doc_shell.md` SH3 (`:72`): stage 7, "our overview". Met by OV1 and OV17.
+- `doc_bar.md` (`:74`): the Workspaces module opens cosmic-workspaces until stage 7. Met by OV17, which repoints `Opener::Workspaces`.
 - `doc_launcher.md` LA6: the window preview could not show a window's workspace. OV3 adds `Window.workspaces`, which the launcher may use; this is not required of it.
 
 **Interfaces this document needs, and their owners.**
 
 - **`athanor-compositor-client`** (owner: `doc_shell.md`, SH2): the additions of OV3.
 - **`athanor_compositor_client::window_management`** (owner: `doc_settings.md`, section 3): read and watch of `workspace_layout` and `action_on_typing`.
-- **`os.athanor.Launcher1` and `os.athanor.Library1`** (owner: `doc_launcher.md`, LA8): a method `Search(s query)` on each, which shows the program with `query` in its field and selects the first result as typing would. Only `athanor-overview.service` needs it; the same toggle rules as `Show` apply to an already shown launcher, except that `Search` never hides.
+- **`os.athanor.Launcher1` and `os.athanor.Library1`** (owner: `doc_launcher.md`, LA8, `:112`): the method `Search(s query)` on each, already defined there, which shows the program with `query` in its field and selects the first result as typing would. Only `athanor-overview.service` needs it; the same toggle rules as `Show` apply to an already shown launcher, except that `Search` never hides.
 - **The `system_actions` file** (owner: `doc_languages.md` LN9, at `/usr/share/athanor/cosmic-defaults/cosmic/com.system76.CosmicSettings.Shortcuts/v1/system_actions`, by the ruling of 2026-10-05; no file is owned by two RPMs): a `WorkspaceOverview` entry calling `os.athanor.Overview1.Toggle`, added at OV19 step 5.
 - **The dock** (owner: `doc_bar.md`): a "Show all windows" entry in an application's menu, calling `ShowApplication` (OV11).
-- **The Settings app** (owner: `doc_settings.md`, SE14): a "Hot corner" switch on the Desktop page writing `org.athanor.desktop.overview hot-corner` (decision 6).
+- **The Settings app** (owner: `doc_settings.md`, SE14): a "Hot corner" switch on the Desktop page writing `org.gnome.desktop.interface enable-hot-corners` (decisions 6 and 8).
 - **The lock** (owner: `doc_lock_and_prompts.md`): `LockedHint` set by our lock, which the maintainer's decision on USBGuard of 2026-10-05 already requires; the overview only reads it.
 
 **Amendments to approved or pending documents.**
@@ -341,6 +368,7 @@ Applied with the approval of this document.
 - **`doc_accessibility.md` AX9:** reduced motion reaches the compositor's workspace switch through the patch of decision 5, from OV19 step 4.
 - **`doc_accessibility.md` AX3** (ruling of 2026-10-05): its `ScreenReader` entry moves to the `system_actions` file under `/usr/share/athanor/cosmic-defaults`, not a file in the cosmic-comp package.
 - **`doc_portal.md` section 3** (ruling of 2026-10-05): its `Screenshot` entry goes to the same file.
+- **Amendments of 2026-10-08 (ADR-0099):** `doc_settings.md` SE14 writes the GNOME key of OV14 instead of a schema of this program; `doc_shell_standard.md` ST5 cites this document's memory budget as section 4, item 4.
 - **`doc_compositor.md` CO3:** two patches, the three-finger swipe (decision 4) and the reduced-motion switch (decision 5), each proposed upstream first; a third, the overview namespace on the overlay or top layer, only if spike S3 fails (decision 1).
 
 ## 4. Open doubts
@@ -356,17 +384,16 @@ Applied with the approval of this document.
      - Whether GTK sets an opaque region that lets cosmic-comp skip those windows. This is unverified.
    - **S4. Global mode.** How cosmic-comp groups workspaces per output in `Global` workspace mode.
    - **S5. Stale windows.** Whether a request for a window that closed a moment earlier is harmless. The handle keeps a clone of the window (`toplevel_info.rs:105,675-679`), so no panic is expected, but `toplevel_management.rs:189-262` unwraps it; the probe confirms.
-2. **The first complete frame** (ST5) is defined in OV6 as the frame with every card in place, with cached thumbnails or icons. If the maintainer reads ST5 as requiring fresh thumbnails, the answer is the dmabuf path, which brings back GL and GBM. That would be a revision of this document.
+2. **The first complete frame** (ST5) is defined in OV6 as the frame with every card in place, with cached thumbnails or icons. Closed on 2026-10-08 (ADR-0099): the maintainer took that reading, so the overview keeps `wl_shm` and Cairo and brings back neither GL nor GBM.
 3. **The four-per-second refresh** of live thumbnails (OV6) is a proposal. The step 2 measurement confirms or lowers it.
-4. **Typing into the launcher** loses its first character until `doc_launcher.md` adds `Search` (OV9).
-5. **Memory budgets.** These are proposals, not measurements; the first measurement confirms or corrects them.
+4. **Memory budgets.** These are proposals, not measurements; the first measurement confirms or corrects them.
    - `athanor-overview` at most 64 MB PSS at rest, hidden.
    - At most 128 MB PSS while shown with twelve windows at 1080p.
    - Back under the rest budget within 5 s of hiding.
    - Hidden surfaces cost about 3.4 MB each per output once shown, as the launcher measured (LA8).
-6. **The Global mode** layout (S4) may need the strip to show workspaces that span outputs. The rule is written for the default mode, where workspaces are bound to an output.
+5. **The Global mode** layout (S4) may need the strip to show workspaces that span outputs. The rule is written for the default mode, where workspaces are bound to an output.
 
-## 5. Acceptance
+## 5. Acceptance criteria
 
 In CI (the hosted rig of SH13 and the KVM runner's scheduled job):
 
@@ -387,13 +414,13 @@ On the reference laptop athanor-ref, judged by the maintainer (and, for item 9, 
 9. On the maintainer's NVIDIA desktop, 50 cold starts shown at once through `Opener::Workspaces` produce no crash. `athanor-overview` has no Vulkan instance: `/proc/<pid>/maps` maps no `libvulkan`.
 10. Killed with SIGKILL, the overview is back within 1 s, and an overview that was open does not reopen.
 11. With the hot corner on, the pointer in the start-top corner opens the overview, except over a fullscreen window and during a drag. With it off, the corner does nothing.
-12. Memory stays within the budgets of section 4, item 5. The 24-hour soak of ST5 opens and closes the overview with twelve windows and records no crash, no restart and no growth above 10%.
+12. Memory stays within the budgets of section 4, item 4. The 24-hour soak of ST5 opens and closes the overview with twelve windows and records no crash, no restart and no growth above 10%.
 13. Typing in the overview opens the launcher or the library as `action_on_typing` says. Once `Search` exists, the typed text is in the field.
 14. After the switch, `rpm -q cosmic-workspaces` reports it absent, and every path that opened it opens `athanor-overview`.
 
 ## 6. Decisions taken
 
-Taken by the maintainer on 2026-10-05. Each followed the recommendation of revision 0.
+Decisions 1 to 7 were taken by the maintainer on 2026-10-05, and decision 8 on 2026-10-08. Each followed the recommendation put to the maintainer.
 
 1. **Which layer namespace?** (OV4) Choice: the neutral namespace `athanor-overview` now, with pinned surfaces; a cosmic-comp patch counting the special namespace only on the overlay or top layer only if spike S3 fails. Reason: it needs no patch on cosmic-comp 1.8.0, and the cost it leaves (windows drawn under the overview) is measured before anything depends on it; the special namespace with pinned surfaces would hide every window all session (`quirks.rs:13-25`).
 2. **What do the workspace miniatures show?** (OV5, OV6) Choice: still window captures composed at each window's geometry, with the schematic (rectangle and icon) as fallback per window. Reason: it meets F-overview-02 as written on the shm path, and the fallback keeps every window visible when a capture fails; cosmic-comp's workspace capture would contain the overview itself under a neutral namespace.
@@ -402,6 +429,7 @@ Taken by the maintainer on 2026-10-05. Each followed the recommendation of revis
 5. **Does reduced motion reach the workspace slide?** (OV13) Choice: a cosmic-comp patch adding an on/off key, written by the compositor client from `enable-animations`, proposed upstream first; the duration stays the compositor's 200 ms and VL9 is amended to it. Reason: reduced motion is an accessibility need and the workspace slide is the motion users meet most often.
 6. **Is there a hot corner?** (OV14) Choice: drawn by the shell, one 1×1 overlay surface per output, off by default, switched on Settings' Desktop page. Reason: it meets F-overview-11 without a patch; off by default avoids accidental openings for new users.
 7. **Can workspaces be renamed?** (OV15) Choice: excluded in release 1; the action shows only when the compositor advertises Rename. Reason: cosmic-comp 1.8.0 neither advertises nor handles it, the capability check brings the feature with upstream at no cost, and CO3 keeps window-management patches for entries that matter more.
+8. **First frame and hot-corner key** (OV6, OV14; 2026-10-08, ADR-0099). Choice: the first complete frame is every card in place with cached thumbnails or icons, drawn with `wl_shm` and Cairo, without GL or GBM; the hot corner is `org.gnome.desktop.interface enable-hot-corners`, with Athanor's vendor default `false`, and the overview ships no schema. Reason: the first needs no fresh thumbnail to be a complete frame and keeps the renderer that cannot race on Vulkan; the second is the key GNOME users and tools already know, and A2-20 prefers an existing GNOME key to a new one.
 
 ## 7. Amendment of 2026-10-06: the window switcher on Alt+Tab
 
