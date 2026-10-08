@@ -29,9 +29,11 @@ applies to Claude Code only.
   workflows, repository settings, `CODEOWNERS` or dependencies. Before the card, and again
   before the merge, Claude checks at the source that the required checks of the base branch,
   read live (`gh api repos/<repo>/rules/branches/<base>` and
-  `.../branches/<base>/protection`), never from the pull request's own files, are present and
-  `pass`, every other check is `pass` or `skipping`, the pull request is not a draft, and the
-  review is the only block (`mergeable` is `MERGEABLE`, `reviewDecision` is `REVIEW_REQUIRED`
+  `.../branches/<base>/protection`, where a 404 means no classic protection and only the
+  rulesets count; a base with no required check at all is not merged on this rule), never
+  from the pull request's own files, are present and
+  `pass`, every other check is `pass` or `skipping`, the pull request is not a draft, and
+  nothing blocks it but a missing review (`mergeable` is `MERGEABLE`, `reviewDecision` is `REVIEW_REQUIRED`
   or `APPROVED`). The answer covers that sha and that base only: a new commit, or a retarget
   to another base branch, makes the card invalid and needs a new one. The items of
   `AGENTS.md`, "Stop and ask before editing", are asked before the code is written.
