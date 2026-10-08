@@ -224,7 +224,7 @@ msgid "Nearby devices"
 msgstr "Nearby devices"
 
 #: src/ui/bluetooth.rs:708 src/ui/network.rs:606 src/ui/power.rs:110
-#: src/ui/shield.rs:546
+#: src/ui/shield.rs:549
 msgid "Cancel"
 msgstr "Cancel"
 
@@ -421,12 +421,12 @@ msgstr "Shut down now?"
 msgid "Power"
 msgstr "Power"
 
-#: src/ui/power.rs:149 src/ui/power.rs:155 src/ui/shield.rs:532
-#: src/ui/shield.rs:568
+#: src/ui/power.rs:149 src/ui/power.rs:155 src/ui/shield.rs:535
+#: src/ui/shield.rs:571
 msgid "Restart to update"
 msgstr "Restart to update"
 
-#: src/ui/power.rs:154 src/ui/shield.rs:567
+#: src/ui/power.rs:154 src/ui/shield.rs:570
 msgid "Restart and install the update now?"
 msgstr "Restart and install the update now?"
 
@@ -486,155 +486,159 @@ msgstr "Not verified: the project moved; this machine is moving with it"
 msgid "Not verified: the project moved; this machine cannot follow it yet"
 msgstr "Not verified: the project moved; this machine cannot follow it yet"
 
-#: src/ui/shield.rs:317
+#: src/ui/shield.rs:318
+msgid "Not verified: the project moved; this machine went back and waits for a newer version"
+msgstr "Not verified: the project moved; this machine went back and waits for a newer version"
+
+#: src/ui/shield.rs:320
 msgid "Signed, but pinned to one build: it receives no updates"
 msgstr "Signed, but pinned to one build: it receives no updates"
 
-#: src/ui/shield.rs:323
+#: src/ui/shield.rs:326
 msgid "Up to date"
 msgstr "Up to date"
 
-#: src/ui/shield.rs:324
+#: src/ui/shield.rs:327
 msgid "An update is available; it downloads at the next check"
 msgstr "An update is available; it downloads at the next check"
 
-#: src/ui/shield.rs:325
+#: src/ui/shield.rs:328
 msgid "An update is ready; it installs when you restart"
 msgstr "An update is ready; it installs when you restart"
 
-#: src/ui/shield.rs:326
+#: src/ui/shield.rs:329
 msgid "The update installs at the next restart"
 msgstr "The update installs at the next restart"
 
-#: src/ui/shield.rs:327
+#: src/ui/shield.rs:330
 msgid "The last update was refused by the policy"
 msgstr "The last update was refused by the policy"
 
-#: src/ui/shield.rs:329
+#: src/ui/shield.rs:332
 msgid "You went back from the newest version; only a newer one is offered"
 msgstr "You went back from the newest version; only a newer one is offered"
 
-#: src/ui/shield.rs:331
+#: src/ui/shield.rs:334
 msgid "This version is older than one this machine has run"
 msgstr "This version is older than one this machine has run"
 
-#: src/ui/shield.rs:338
+#: src/ui/shield.rs:341
 msgid "The last check failed: network error"
 msgstr "The last check failed: network error"
 
-#: src/ui/shield.rs:339
+#: src/ui/shield.rs:342
 msgid "The last check failed: registry error"
 msgstr "The last check failed: registry error"
 
-#: src/ui/shield.rs:340
+#: src/ui/shield.rs:343
 msgid "The last check failed: refused by the policy"
 msgstr "The last check failed: refused by the policy"
 
-#: src/ui/shield.rs:341
+#: src/ui/shield.rs:344
 msgid "The last check failed: storage error"
 msgstr "The last check failed: storage error"
 
-#: src/ui/shield.rs:342
+#: src/ui/shield.rs:345
 msgid "The last check failed: internal error"
 msgstr "The last check failed: internal error"
 
-#: src/ui/shield.rs:348
+#: src/ui/shield.rs:351
 msgid "No trust state yet: the first check has not run"
 msgstr "No trust state yet: the first check has not run"
 
-#: src/ui/shield.rs:350
+#: src/ui/shield.rs:353
 msgid "The trust state file is not owned by the system and was ignored"
 msgstr "The trust state file is not owned by the system and was ignored"
 
-#: src/ui/shield.rs:352
+#: src/ui/shield.rs:355
 msgid "The trust state file could not be read"
 msgstr "The trust state file could not be read"
 
-#: src/ui/shield.rs:353 src/ui/shield.rs:367
+#: src/ui/shield.rs:356 src/ui/shield.rs:370
 msgid "The update service did not answer"
 msgstr "The update service did not answer"
 
-#: src/ui/shield.rs:359
+#: src/ui/shield.rs:362
 msgid "Not authorised"
 msgstr "Not authorised"
 
-#: src/ui/shield.rs:360
+#: src/ui/shield.rs:363
 msgid "Another update request is running"
 msgstr "Another update request is running"
 
-#: src/ui/shield.rs:362
+#: src/ui/shield.rs:365
 msgid "Nothing is downloaded yet; the update downloads at the next check"
 msgstr "Nothing is downloaded yet; the update downloads at the next check"
 
-#: src/ui/shield.rs:364
+#: src/ui/shield.rs:367
 msgid "There is no previous version to go back to"
 msgstr "There is no previous version to go back to"
 
-#: src/ui/shield.rs:365
+#: src/ui/shield.rs:368
 msgid "A program is blocking the restart; close it and try again"
 msgstr "A program is blocking the restart; close it and try again"
 
-#: src/ui/shield.rs:366
+#: src/ui/shield.rs:369
 msgid "The request failed; the system journal says why"
 msgstr "The request failed; the system journal says why"
 
-#: src/ui/shield.rs:428
+#: src/ui/shield.rs:431
 #, rust-format
 msgid "Version {version}"
 msgstr "Version {version}"
 
-#: src/ui/shield.rs:433
+#: src/ui/shield.rs:436
 #, rust-format
 msgid "Built on {date}"
 msgstr "Built on {date}"
 
-#: src/ui/shield.rs:439
+#: src/ui/shield.rs:442
 #, rust-format
 msgid "Last checked on {date}"
 msgstr "Last checked on {date}"
 
-#: src/ui/shield.rs:440
+#: src/ui/shield.rs:443
 msgid "Never checked"
 msgstr "Never checked"
 
-#: src/ui/shield.rs:446
+#: src/ui/shield.rs:449
 #, rust-format
 msgid "Host: {host}"
 msgstr "Host: {host}"
 
-#: src/ui/shield.rs:450
+#: src/ui/shield.rs:453
 msgid "Signature policy in force"
 msgstr "Signature policy in force"
 
-#: src/ui/shield.rs:452
+#: src/ui/shield.rs:455
 msgid "Signature policy not in force"
 msgstr "Signature policy not in force"
 
-#: src/ui/shield.rs:455
+#: src/ui/shield.rs:458
 msgid "The policy is the one Athanor ships"
 msgstr "The policy is the one Athanor ships"
 
-#: src/ui/shield.rs:457
+#: src/ui/shield.rs:460
 msgid "The policy was changed on this machine"
 msgstr "The policy was changed on this machine"
 
-#: src/ui/shield.rs:460
+#: src/ui/shield.rs:463
 msgid "Secure Boot on"
 msgstr "Secure Boot on"
 
-#: src/ui/shield.rs:462
+#: src/ui/shield.rs:465
 msgid "Secure Boot off: this machine runs in the declared degraded mode"
 msgstr "Secure Boot off: this machine runs in the declared degraded mode"
 
-#: src/ui/shield.rs:534
+#: src/ui/shield.rs:537
 msgid "Go back to the previous version"
 msgstr "Go back to the previous version"
 
-#: src/ui/shield.rs:573
+#: src/ui/shield.rs:576
 msgid "Go back to the previous version and restart? This asks for an administrator's password."
 msgstr "Go back to the previous version and restart? This asks for an administrator's password."
 
-#: src/ui/shield.rs:574
+#: src/ui/shield.rs:577
 msgid "Go back"
 msgstr "Go back"
 

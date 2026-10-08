@@ -104,6 +104,11 @@ fn main() -> ExitCode {
             }
         }
         Command::Migrate => {
+            // Nothing to move and nothing to publish: bootc is not asked (migrate::finished).
+            if migrate::finished(&policy::in_force(&ctx.policy), &store) {
+                tracing::info!("migration: done");
+                return ExitCode::SUCCESS;
+            }
             let Ok(_lock) = store.lock() else { return ExitCode::FAILURE };
             let outcome = migrate::run(&ctx);
             if let Err(failure) = check::run(&ctx, true) {

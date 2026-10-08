@@ -54,8 +54,17 @@ fn reason<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &Status) -> 
         }
         // The same image under the owner the policy pins: the project moved, and the
         // migration moves this machine after it (doc_update_delivery.md, UD45), unless nothing
-        // can move it yet: a queued rollback, or no such image or tag under the new owner.
-        return if status.rollback_queued || ctx.store.channel_absent() { Reason::OwnerMovedWaiting } else { Reason::OwnerMoved };
+        // can move it yet: a queued rollback, or no such image or tag under the new owner; or
+        // unless the image there is the held digest, which the migration never stages.
+        return if status.rollback_queued {
+            Reason::OwnerMovedWaiting
+        } else if ctx.store.move_held() {
+            Reason::OwnerMovedHeld
+        } else if ctx.store.channel_absent() {
+            Reason::OwnerMovedWaiting
+        } else {
+            Reason::OwnerMoved
+        };
     };
     if !booted.enforcing {
         let pending = status.staged.as_ref().is_some_and(|staged| staged.enforcing);
@@ -250,6 +259,8 @@ pub(crate) mod tests {
         pub relock: Result<(), Failure>,
         /// Whether `switch` stages a deployment, or returns as if it had and stages nothing.
         pub stages: bool,
+        /// `bootc status` fails, as it does when bootc cannot read the sysroot.
+        pub status_fails: bool,
         pub calls: RefCell<Vec<String>>,
     }
 
@@ -262,6 +273,7 @@ pub(crate) mod tests {
                 metered: false,
                 relock: Ok(()),
                 stages: true,
+                status_fails: false,
                 calls: RefCell::new(Vec::new()),
             }
         }
@@ -283,6 +295,9 @@ pub(crate) mod tests {
 
     impl Tools for Fake {
         fn status(&self) -> Result<Status, Failure> {
+            if self.status_fails {
+                return Err(Failure { code: ErrorCode::Internal, host: None });
+            }
             Ok(self.status.borrow().clone())
         }
         fn candidate(&self, image: &str) -> Result<Option<Candidate>, Failure> {

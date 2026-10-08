@@ -58,6 +58,10 @@ pub enum Reason {
     /// As `OwnerMoved`, but the migration cannot move the machine yet: a rollback is queued,
     /// or the new owner publishes no such image or tag (a run-number tag, for one).
     OwnerMovedWaiting,
+    /// As `OwnerMoved`, but the image under the new owner is the digest the user went back
+    /// from, or one that failed to boot after two moves: a held digest is never staged, so
+    /// the machine stays where it is until the new owner publishes a newer build.
+    OwnerMovedHeld,
     /// The signature verifies, but the machine follows a run-number tag or a digest: one
     /// build, under which nothing newer is ever published. It receives no updates until it
     /// switches to a channel; nothing switches it automatically.
@@ -299,7 +303,7 @@ mod tests {
 
     #[test]
     fn every_reason_but_signature_is_attention() {
-        for reason in [Reason::Media, Reason::NoSignature, Reason::KeyNotInPolicy, Reason::PolicyNotInForce, Reason::ReferenceOutOfScope, Reason::LocalChanges, Reason::ChannelAbsent, Reason::OriginNotEnforcing, Reason::OwnerMoved, Reason::OwnerMovedWaiting, Reason::PinnedBuild] {
+        for reason in [Reason::Media, Reason::NoSignature, Reason::KeyNotInPolicy, Reason::PolicyNotInForce, Reason::ReferenceOutOfScope, Reason::LocalChanges, Reason::ChannelAbsent, Reason::OriginNotEnforcing, Reason::OwnerMoved, Reason::OwnerMovedWaiting, Reason::OwnerMovedHeld, Reason::PinnedBuild] {
             let state = State { verified: reason.into(), ..verified_state() };
             assert_eq!(badge(&state, NOW), Badge::Attention, "{reason:?}");
         }
@@ -376,6 +380,7 @@ mod tests {
         assert_eq!(serde_json::to_string(&Reason::OriginNotEnforcing).expect("serialize"), r#""origin-not-enforcing""#);
         assert_eq!(serde_json::to_string(&Reason::OwnerMoved).expect("serialize"), r#""owner-moved""#);
         assert_eq!(serde_json::to_string(&Reason::OwnerMovedWaiting).expect("serialize"), r#""owner-moved-waiting""#);
+        assert_eq!(serde_json::to_string(&Reason::OwnerMovedHeld).expect("serialize"), r#""owner-moved-held""#);
         assert_eq!(serde_json::to_string(&Reason::PinnedBuild).expect("serialize"), r#""pinned-build""#);
     }
 

@@ -9,8 +9,8 @@ BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gtk4-la
 Requires:       gtk4 gtk4-layer-shell athanor-calmo athanor-shelld
 # The shield asks os.athanor.Update1.State(), which athanor-update serves from 1.0.0-2; the
 # local-changes reason it may publish exists from 1.0.0-4, channel-absent from 1.0.0-6,
-# origin-not-enforcing from 1.0.0-8; owner-moved, owner-moved-waiting and pinned-build
-# from 1.0.0-9.
+# origin-not-enforcing from 1.0.0-8; owner-moved, owner-moved-waiting, owner-moved-held and
+# pinned-build from 1.0.0-9.
 Requires:       athanor-update >= 1.0.0-9
 # The first-session pick and the vendor layout moved here from the translator.
 Obsoletes:      athanor-layout-translator < 1.0.1
@@ -73,8 +73,8 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 
 %changelog
 * Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-8
-- The shield names the owner-moved, owner-moved-waiting and pinned-build reasons of
-  athanor-update 1.0.0-9.
+- The shield names the owner-moved, owner-moved-waiting, owner-moved-held and pinned-build
+  reasons of athanor-update 1.0.0-9.
 
 * Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
 - The shield names the origin-not-enforcing reason of athanor-update 1.0.0-8.

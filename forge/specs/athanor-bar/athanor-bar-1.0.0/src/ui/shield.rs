@@ -314,6 +314,9 @@ fn reason_words(reason: Reason) -> String {
         Reason::OwnerMovedWaiting => {
             tr("Not verified: the project moved; this machine cannot follow it yet")
         }
+        Reason::OwnerMovedHeld => {
+            tr("Not verified: the project moved; this machine went back and waits for a newer version")
+        }
         Reason::PinnedBuild => tr("Signed, but pinned to one build: it receives no updates"),
     }
 }

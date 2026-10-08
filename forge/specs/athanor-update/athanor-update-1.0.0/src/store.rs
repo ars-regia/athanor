@@ -2,13 +2,17 @@
 //!
 //! `/run/athanor-update/`   `lock`, `state.json` (0644, written to a temporary name and renamed)
 //! `/var/lib/athanor-update/`
-//!   `held`            the digest the user went back from; nothing releases it
+//!   `held`            the digest the user went back from, a queued rollback left, or the
+//!                     migration staged `migrate::ATTEMPTS` times; nothing releases it
 //!   `refused`         the digest the policy last refused; cleared by a download that passes
 //!   `newest-booted`   the newest build time this machine has booted, seconds since the epoch
 //!   `last-success`    when the registry last answered a check, seconds since the epoch
 //!   `migrated`        stamp of `athanor-update migrate`
 //!   `channel-absent`  `migrate` found no manifest for the channel, or for the image under the
 //!                     project's new owner; cleared when it finds one
+//!   `move-held`       `migrate` left a machine on the previous owner because the image under
+//!                     the new owner is the held digest; cleared when it moves or finds another
+//!   `move-attempts`   `<digest> <count>`: how many times `migrate` staged that digest
 //!   `signatures/<hex>/`  the signature object of a digest, as `skopeo copy … dir:` wrote it
 use athanor_trust_state::State;
 use std::fs::File;
@@ -143,6 +147,7 @@ impl Store {
     /// A file cannot be written or removed.
     pub fn set_migrated(&self) -> std::io::Result<()> {
         Self::replace(&self.var, "migrated", 0o644, b"")?;
+        self.set_move_held(false)?;
         self.set_channel_absent(false)
     }
 
@@ -161,6 +166,41 @@ impl Store {
             Err(err) if err.kind() != std::io::ErrorKind::NotFound => Err(err),
             _ => Ok(()),
         }
+    }
+
+    #[must_use]
+    pub fn move_held(&self) -> bool {
+        self.var.join("move-held").exists()
+    }
+
+    /// # Errors
+    /// The file cannot be written or removed.
+    pub fn set_move_held(&self, held: bool) -> std::io::Result<()> {
+        if held {
+            return Self::replace(&self.var, "move-held", 0o644, b"");
+        }
+        match std::fs::remove_file(self.var.join("move-held")) {
+            Err(err) if err.kind() != std::io::ErrorKind::NotFound => Err(err),
+            _ => Ok(()),
+        }
+    }
+
+    /// How many times `migrate` staged `digest`; 0 for any other digest.
+    #[must_use]
+    pub fn move_attempts(&self, digest: &str) -> u32 {
+        self.read_line("move-attempts")
+            .and_then(|line| line.strip_prefix(digest)?.strip_prefix(' ')?.parse().ok())
+            .unwrap_or(0)
+    }
+
+    /// Counts one more staging of `digest`; a staging of another digest starts again at 1.
+    ///
+    /// # Errors
+    /// The file cannot be written.
+    pub fn record_move_attempt(&self, digest: &str) -> std::io::Result<u32> {
+        let count = self.move_attempts(digest) + 1;
+        Self::replace(&self.var, "move-attempts", 0o644, format!("{digest} {count}\n").as_bytes())?;
+        Ok(count)
     }
 
     /// The directory of the signature object of `digest`; `None` for anything but `sha256:<64 hex>`.
@@ -219,6 +259,17 @@ mod tests {
         assert_eq!(store.try_lock().err().map(|err| err.kind()), Some(std::io::ErrorKind::WouldBlock));
         drop(held);
         assert!(store.try_lock().is_ok());
+    }
+
+    #[test]
+    fn move_attempts_count_one_digest_and_restart_for_another() {
+        let store = scratch("attempts");
+        assert_eq!(store.move_attempts("sha256:aa"), 0);
+        assert_eq!(store.record_move_attempt("sha256:aa").expect("write"), 1);
+        assert_eq!(store.record_move_attempt("sha256:aa").expect("write"), 2);
+        assert_eq!(store.move_attempts("sha256:a"), 0, "a prefix is another digest");
+        assert_eq!(store.record_move_attempt("sha256:bb").expect("write"), 1);
+        assert_eq!(store.move_attempts("sha256:aa"), 0);
     }
 
     #[test]

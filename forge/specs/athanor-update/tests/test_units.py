@@ -62,10 +62,13 @@ class Units(unittest.TestCase):
             self.assertIn(directive, lines)
         self.assertTrue(any(line.startswith("RandomizedDelaySec=") for line in lines))
 
-    def test_the_migration_retries_on_its_own_timer_until_the_stamp_exists(self):
+    def test_the_migration_retries_on_its_own_timer_and_neither_unit_stops_at_the_stamp(self):
         lines = directives("athanor-update-migrate.timer")
-        for directive in ("OnBootSec=6h", "OnUnitActiveSec=6h", "ConditionPathExists=!/var/lib/athanor-update/migrated"):
+        for directive in ("OnBootSec=6h", "OnUnitActiveSec=6h"):
             self.assertIn(directive, lines)
+        # A stamped machine on an image of the previous owner still moves (UD49).
+        for unit in ("athanor-update-migrate.timer", "athanor-update-migrate.service"):
+            self.assertFalse(any("/var/lib/athanor-update/migrated" in line for line in directives(unit)), unit)
 
     def test_the_check_does_not_wait_on_the_migration(self):
         wants = [line for line in directives("athanor-update-check.service") if line.startswith(("Wants=", "Requires="))]
