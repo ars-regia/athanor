@@ -234,18 +234,22 @@ pub const SUCCESSORS: &[(&str, &str)] = &[
 /// successor, when the successor is installed and not already a favourite; `None` when
 /// nothing changes. A favourite the user reinstalls is never replaced.
 pub fn with_successors(ids: &[String], installed: impl Fn(&str) -> bool) -> Option<Vec<String>> {
-    let mut out = ids.to_vec();
-    let mut changed = false;
-    for slot in 0..out.len() {
-        let Some(&(_, next)) = SUCCESSORS.iter().find(|(old, _)| *old == out[slot]) else {
-            continue;
-        };
-        if !installed(&out[slot]) && installed(next) && !out.iter().any(|id| id == next) {
-            out[slot] = next.to_owned();
-            changed = true;
+    let mut out: Vec<String> = Vec::with_capacity(ids.len());
+    for id in ids {
+        let next = SUCCESSORS
+            .iter()
+            .find(|(old, _)| old == id)
+            .map(|&(_, next)| next)
+            .filter(|next| !installed(id) && installed(next));
+        match next {
+            None => out.push(id.clone()),
+            // A successor already pinned keeps its own place and the dead entry goes, so it
+            // cannot bring the successor back after the user unpins it.
+            Some(next) if ids.iter().chain(&out).any(|pinned| pinned == next) => {}
+            Some(next) => out.push(next.to_owned()),
         }
     }
-    changed.then_some(out)
+    (out != ids).then_some(out)
 }
 
 /// COSMIC's list as this file accepts it: desktop ids only, once each, at most the bound.
@@ -367,10 +371,11 @@ mod tests {
     }
 
     #[test]
-    fn no_replacement_when_the_successor_is_absent_or_already_a_favourite() {
+    fn an_absent_successor_replaces_nothing_and_a_pinned_one_drops_the_dead_entry() {
         let only_ptyxis = |id: &str| id == PTYXIS;
         assert_eq!(with_successors(&ids(&[FILES]), only_ptyxis), None);
-        assert_eq!(with_successors(&ids(&[PTYXIS, TERM]), only_ptyxis), None);
+        assert_eq!(with_successors(&ids(&[PTYXIS, TERM]), only_ptyxis), Some(ids(&[PTYXIS])));
+        assert_eq!(with_successors(&ids(&[TERM, PTYXIS]), only_ptyxis), Some(ids(&[PTYXIS])));
     }
 
     #[test]
