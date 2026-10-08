@@ -73,11 +73,15 @@ generic initramfs carries the TPM2 token plugin, so the next boot asks for the P
 updates leave PCR 7 alone, and so do most firmware updates; an update of the Secure Boot
 databases (db, dbx or KEK, which fwupd applies), of shim, or a kernel signed with a new
 Secure Boot key (whose certificate shim measures from MokList) can change it, and the next boot then asks for the passphrase or the recovery key;
-running the tool again binds the new value. After repeated wrong PINs the boot asks for the
-passphrase or the recovery key. In the swtpm acceptance run that happened when the TPM's
-dictionary-attack lockout engaged, after three failures; on a physical TPM with a higher
-limit systemd-cryptsetup's own retry count may end it first. While a lockout lasts the right
-PIN fails too. A `systemd-pcrlock` policy, which survives
+running the tool again binds the new value. A wrong PIN is asked for again, with no
+limit of its own (crypttab's `tries=` counts passphrases, not PINs; an empty PIN and Escape
+do not skip it): the boot asks for the passphrase or the recovery key only once the TPM's
+dictionary-attack lockout engages. That took three failures on swtpm; the reference laptop's
+Intel PTT allows 32 and forgets one every two hours, and eight wrong PINs in a row neither
+locked it nor reached the passphrase. Someone who forgets the PIN therefore keeps entering
+wrong ones until the lockout, or unlocks with the passphrase or the recovery key from
+installation media, then runs the tool again to set a new PIN. While a lockout lasts the
+right PIN fails too. A `systemd-pcrlock` policy, which survives
 announced updates of that kind, arrives with the UKI (P4b, D42).
 
 ---

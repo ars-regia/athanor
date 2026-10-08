@@ -79,4 +79,4 @@ fi
 systemd-cryptenroll --tpm2-device=auto --tpm2-with-pin=yes --tpm2-pcrs=7 --tpm2-pcrlock= \
     --wipe-slot=tpm2 "$device"
 echo "From the next boot the volume asks for the TPM PIN; the passphrase and the recovery key still unlock it."
-echo "After repeated wrong PINs the boot asks for the passphrase; the TPM locks out after too many."
+echo "A wrong PIN is asked for again until the TPM locks out; only then does the boot ask for the passphrase."
