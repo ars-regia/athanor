@@ -74,6 +74,55 @@ class Refused(Exception):
     """A condition that does not hold: the push builds."""
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def _stream(response, dest):
+    digest = hashlib.sha256()
+    with open(dest, "wb") as out:
+        while chunk := response.read(1 << 20):
+            digest.update(chunk)
+            out.write(chunk)
+    return digest.hexdigest()
+
+
+class Api:
+    """The REST API with the workflow's token."""
+
+    def __init__(self, url, token):
+        self.url = url.rstrip("/")
+        self.headers = {
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+    def json(self, path):
+        request = urllib.request.Request(self.url + path, headers=self.headers)
+        # No redirect: the token is sent to the API host only, and a redirect fails as an HTTPError.
+        with urllib.request.build_opener(_NoRedirect).open(request, timeout=60) as response:
+            return json.load(response)
+
+    def download(self, path, dest):
+        """Stream PATH to DEST and return its SHA-256 in hex. The API redirects an artifact to
+        storage outside GitHub: the redirect is followed without the token."""
+        request = urllib.request.Request(self.url + path, headers=self.headers)
+        try:
+            with urllib.request.build_opener(_NoRedirect).open(request, timeout=60) as response:
+                return _stream(response, dest)
+        except urllib.error.HTTPError as error:
+            if error.code not in (301, 302, 303, 307, 308):
+                raise
+            location = error.headers["Location"]
+            error.close()
+            if not location:
+                raise ValueError(f"{path}: redirect without Location")
+        with urllib.request.build_opener().open(location, timeout=60) as response:
+            return _stream(response, dest)
+
+
 def git(repo, *args):
     return subprocess.run(
         ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
@@ -251,3 +300,46 @@ def promote(api, repo, repository, sha, nvr, extract):
         if isinstance(detail, bytes):
             detail = detail.decode(errors="replace")
         return {"promoted": False, "reason": f"error: {type(error).__name__}: {error} {detail}".strip()}
+
+
+def summary(decision):
+    lines = ["### Kernel promotion (ADR-0110)", ""]
+    if not decision["promoted"]:
+        return "\n".join([*lines, f"Not promoted, the push builds: {decision['reason']}", ""])
+    run, pull, artifact = decision["source_run"], decision["pull_request"], decision["artifact"]
+    lines += [
+        (
+            f"Promoted: the RPMs of run [{run['id']}]({run['url']}) of pull request #{pull['number']} "
+            f"(head `{pull['head']}`, recorded base `{pull['base']}`), artifact {artifact['id']} "
+            f"`{artifact['digest']}`. This push does not build the kernel."
+        ),
+        "",
+        "| Path | Run's head | Pushed commit | Recorded base | Pushed commit's parent |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for path, ids in decision["trees"].items():
+        lines.append(f"| `{path}` | `{ids['head']}` | `{ids['pushed']}` | `{ids['base']}` | `{ids['parent']}` |")
+    return "\n".join([*lines, ""])
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    parser.add_argument("--sha", required=True)
+    parser.add_argument("--nvr", required=True)
+    parser.add_argument("--out", required=True)
+    parser.add_argument("--extract", required=True)
+    parser.add_argument("--repo", default=".")
+    args = parser.parse_args(argv)
+    api = Api(os.environ.get("GITHUB_API_URL", "https://api.github.com"), os.environ.get("GH_TOKEN", ""))
+    decision = promote(api, args.repo, os.environ.get("GITHUB_REPOSITORY", ""), args.sha, args.nvr, args.extract)
+    out = pathlib.Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "decision.json").write_text(json.dumps(decision, indent=2, sort_keys=True) + "\n")
+    (out / "summary.md").write_text(summary(decision))
+    outcome = "promoted" if decision["promoted"] else f"not promoted, the push builds: {decision['reason']}"
+    print(f"::notice title=Kernel promotion::{outcome}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

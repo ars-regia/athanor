@@ -388,5 +388,83 @@ class ErrorTest(Case):
         self.assertIn("FileExistsError", decision["reason"])
 
 
+class MainTest(Case):
+    def test_main_writes_the_decision_and_the_summary_and_exits_zero(self):
+        shas, api, checkout = self.promote()
+        api.artifacts["artifacts"][0]["expired"] = True
+        out = self.tmp / "promotion"
+        env = {"GITHUB_REPOSITORY": REPOSITORY, "GH_TOKEN": "token"}
+        with (
+            mock.patch.dict(os.environ, env),
+            mock.patch.object(promotion, "Api", lambda url, token: api),
+            contextlib.redirect_stdout(io.StringIO()) as printed,
+        ):
+            status = promotion.main(
+                ["--sha", shas["pushed"], "--nvr", NVR, "--out", str(out),
+                 "--extract", str(self.tmp / "out"), "--repo", str(checkout)]
+            )
+        self.assertEqual(status, 0)
+        self.assertIn("::notice title=Kernel promotion::not promoted", printed.getvalue())
+        self.assertFalse(json.loads((out / "decision.json").read_text())["promoted"])
+        self.assertIn("Not promoted, the push builds: condition 4", (out / "summary.md").read_text())
+
+    def test_the_summary_of_a_promotion_lists_every_compared_path(self):
+        shas, api, checkout = self.promote()
+        text = promotion.summary(self.run_promotion(shas, api, checkout))
+        self.assertIn(f"run [{RUN}]", text)
+        for path in promotion.COMPARED:
+            self.assertIn(f"| `{path}` |", text)
+
+
+class DownloadTest(unittest.TestCase):
+    def test_the_token_goes_to_the_api_and_never_to_the_storage_it_redirects_to(self):
+        body = b"artifact bytes"
+        seen = {}
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen[self.path] = self.headers.get("Authorization")
+                if self.path == "/api/bare":
+                    self.send_response(302)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                elif self.path.startswith("/api/"):
+                    self.send_response(302)
+                    self.send_header("Location", f"http://127.0.0.1:{self.server.server_port}/blob")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                else:
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict(os.environ, {"no_proxy": "*", "NO_PROXY": "*"}),
+        ):
+            api = promotion.Api(f"http://127.0.0.1:{server.server_port}/api", "secret")
+            digest = api.download("/artifacts/1/zip", pathlib.Path(tmp) / "a.zip")
+            self.assertEqual((pathlib.Path(tmp) / "a.zip").read_bytes(), body)
+        self.assertEqual(digest, hashlib.sha256(body).hexdigest())
+        self.assertEqual(seen["/api/artifacts/1/zip"], "Bearer secret")
+        self.assertIsNone(seen["/blob"])
+        # The JSON API does not follow a redirect at all, and a redirect without Location fails.
+        seen.clear()
+        with mock.patch.dict(os.environ, {"no_proxy": "*", "NO_PROXY": "*"}):
+            with self.assertRaises(urllib.error.HTTPError):
+                api.json("/repos/x")
+            with tempfile.TemporaryDirectory() as tmp, self.assertRaises(ValueError):
+                api.download("/bare", pathlib.Path(tmp) / "a.zip")
+        self.assertNotIn("/blob", seen)
+
+
 if __name__ == "__main__":
     unittest.main()
