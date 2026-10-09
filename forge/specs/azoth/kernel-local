@@ -91,8 +91,9 @@ CONFIG_MEMCG=y
 # BEGIN kernel profile P2
 # From the command line into the build (section 6 drops lockdown, init_on_free, vsyscall
 # and debugfs from [base.cmdline]). Forced lockdown is registered early and cannot be
-# lowered at boot. The 7.2 tree has no DEBUG_FS_DISALLOW_MOUNT: the debugfs choice is
-# ALLOW_ALL or ALLOW_NONE.
+# lowered at boot. The debugfs choice of the 7.2 tree (lib/Kconfig.debug) has two arms,
+# ALLOW_ALL and ALLOW_NONE, and no DEBUG_FS_DISALLOW_MOUNT: the arms are exclusive, and
+# ALLOW_NONE, which refuses both the API and the mount, is the single choice.
 CONFIG_SECURITY_LOCKDOWN_LSM=y
 CONFIG_SECURITY_LOCKDOWN_LSM_EARLY=y
 CONFIG_LOCK_DOWN_KERNEL_FORCE_INTEGRITY=y
@@ -103,6 +104,9 @@ CONFIG_LEGACY_VSYSCALL_NONE=y
 # CONFIG_LEGACY_VSYSCALL_XONLY is not set
 CONFIG_DEBUG_FS_ALLOW_NONE=y
 # CONFIG_DEBUG_FS_ALLOW_ALL is not set
+# D16: lazy IOMMU domains by default; section 5 rejects IOMMU_DEFAULT_DMA_STRICT.
+CONFIG_IOMMU_DEFAULT_DMA_LAZY=y
+# CONFIG_IOMMU_DEFAULT_DMA_STRICT is not set
 # Reliability (D19, section 11): crash evidence through EFI pstore.
 CONFIG_PANIC_TIMEOUT=10
 CONFIG_EFI_VARS_PSTORE=y

@@ -51,6 +51,8 @@ CONFIG_LEGACY_VSYSCALL_NONE = { value = "y", decision = "section 5", locked = tr
 CONFIG_LEGACY_VSYSCALL_XONLY = { value = "n", decision = "section 5", locked = true }
 CONFIG_DEBUG_FS_ALLOW_NONE = { value = "y", decision = "section 5", locked = true }
 CONFIG_DEBUG_FS_ALLOW_ALL = { value = "n", decision = "section 5", locked = true }
+CONFIG_IOMMU_DEFAULT_DMA_LAZY = { value = "y", decision = "D16", locked = true }
+CONFIG_IOMMU_DEFAULT_DMA_STRICT = { value = "n", decision = "D16", locked = true }
 CONFIG_PANIC_TIMEOUT = { value = "10", decision = "D19", locked = true }
 CONFIG_EFI_VARS_PSTORE = { value = "y", decision = "D19", locked = true }
 CONFIG_EFI_VARS_PSTORE_DEFAULT_DISABLE = { value = "n", decision = "D19", locked = true }

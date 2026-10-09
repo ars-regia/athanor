@@ -98,8 +98,10 @@ restricts the matrix. Penryn (x86-64-v1, no POPCNT or SSE4.2; D14 of
 kernel. Every case runs the assertions of `boot/init`: uname, BTF, bpftool, sched_ext,
 IMA, BBR v3, Landlock, memcg, taint, dmesg, and the profile the build enforces (lockdown,
 `init_on_free`, `vsyscall` and `debugfs` with none of them on the command line, lazy
-preemption, ASLR bits, the mesh platform options); the IOMMU cases also check lazy
-`DMA-FQ` domains, and UEFI checks Secure Boot on and the MOK enrolled.
+preemption, ASLR bits, the mesh platform options, `DEBUG_FS_ALLOW_NONE` and
+`IOMMU_DEFAULT_DMA_LAZY` in the running config); the IOMMU cases also check lazy `DMA-FQ`
+domains, or strict `DMA` ones when the kernel logs that the virtual IOMMU forced strict
+mode ("due to virtualization"), and UEFI checks Secure Boot on and the MOK enrolled.
 Only kernel-core is needed: `--rpms` takes the `out/` of build.sh or a directory with
 that RPM alone. Without `/dev/kvm` (WSL, podman machine) add `--accel tcg`: minutes
 instead of seconds, and `host` becomes `max`. Serial logs and the summary go to

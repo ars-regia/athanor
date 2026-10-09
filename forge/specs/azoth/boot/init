@@ -68,7 +68,7 @@ vsyscall_none() { # LEGACY_VSYSCALL_NONE: no vsyscall page in any process
   not_on_cmdline vsyscall && ! grep -q '\[vsyscall\]' "$maps_file"
 }
 debugfs_off() { # DEBUG_FS_ALLOW_NONE: debugfs never registers, so it cannot be mounted
-  not_on_cmdline debugfs || return 1
+  not_on_cmdline debugfs && kconfig_enabled DEBUG_FS_ALLOW_NONE || return 1
   mkdir -p "$debugfs_dir"
   if mount -t debugfs debugfs "$debugfs_dir"; then echo "debugfs mounted"; return 1; fi
 }
@@ -83,7 +83,9 @@ aslr_bits() { # section 5: ARCH_MMAP_RND_BITS=32, ARCH_MMAP_RND_COMPAT_BITS=16
 iommu_domains() { # D16: lazy domains (DMA-FQ); an IOMMU case with no group is a failure
   # A virtual IOMMU that caches non-present entries makes the kernel force strict mode
   # (AMD-Vi "Using strict mode due to virtualization", VT-d "IOMMU batching disallowed due
-  # to virtualization"): the domains are then DMA, still translated, never identity.
+  # to virtualization"): the domains are then DMA, still translated, never identity. The
+  # build must still default to lazy, so that this exception cannot hide a strict kernel.
+  kconfig_enabled IOMMU_DEFAULT_DMA_LAZY || return 1
   want=DMA-FQ
   dmesg | grep -qE 'strict mode due to virtualization|batching disallowed due to virtualization' && want=DMA
   n=0 bad=0

@@ -377,8 +377,12 @@ Ogni PR di bump e ogni cambio in `forge/specs/azoth/**` passa:
    `vsyscall` and `debugfs` off with none of them on the command line,
    `Dynamic Preempt: lazy`, ASLR at 32 mmap bits and 16 compat bits, and the
    mesh platform options (WireGuard, KVM, vsock, virtiofs, virtio-gpu, udmabuf,
-   VFIO, TPM) in the running config; in the IOMMU cases every group has a lazy
-   `DMA-FQ` domain. The certificates compiled into the kernel (module key and
+   VFIO, TPM) in the running config; `DEBUG_FS_ALLOW_NONE` and
+   `IOMMU_DEFAULT_DMA_LAZY` in the running config too; in the IOMMU cases every
+   group has a lazy `DMA-FQ` domain, or a strict `DMA` domain when the kernel logs
+   that the virtual IOMMU forced strict mode (AMD-Vi "strict mode due to
+   virtualization", VT-d "batching disallowed due to virtualization"), never an
+   identity one. The certificates compiled into the kernel (module key and
    revoked ones) are loaded, by subject key identifier (`Loaded X.509 cert` in
    the log), and the builtin keyring holds exactly those of `keys/modules` plus
    the key the build generates; in UEFI also `SecureBoot=1` and `MokListRT`

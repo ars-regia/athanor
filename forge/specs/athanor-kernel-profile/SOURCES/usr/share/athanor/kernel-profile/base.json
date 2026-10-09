@@ -186,6 +186,14 @@
         "decision": "D40",
         "value": "y"
       },
+      "CONFIG_IOMMU_DEFAULT_DMA_LAZY": {
+        "decision": "D16",
+        "value": "y"
+      },
+      "CONFIG_IOMMU_DEFAULT_DMA_STRICT": {
+        "decision": "D16",
+        "value": "n"
+      },
       "CONFIG_IPE_POLICY_SIG_PLATFORM_KEYRING": {
         "decision": "D40",
         "value": "n"

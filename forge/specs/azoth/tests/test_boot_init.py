@@ -103,12 +103,13 @@ class PlatformAssertions(unittest.TestCase):
     def test_aslr_bits_too_low_fail(self):
         self.assertNotEqual(run_function("aslr_bits", self.vm(28, 8)).returncode, 0)
 
-    def groups(self, *types, log="[0.1] nothing\n"):
+    def groups(self, *types, log="[0.1] nothing\n", dma="CONFIG_IOMMU_DEFAULT_DMA_LAZY=y\n"):
         for i, kind in enumerate(types):
             (self.dir / "groups" / str(i)).mkdir(parents=True)
             (self.dir / "groups" / str(i) / "type").write_text(f"{kind}\n")
         (self.dir / "groups").mkdir(exist_ok=True)
-        return f'iommu_groups="{self.dir}/groups"\n' + self.log(log)
+        config = self.config(dma) + "\n" + function("kconfig_enabled")
+        return f'iommu_groups="{self.dir}/groups"\n' + self.log(log) + "\n" + config
 
     def test_lazy_domains_pass(self):
         self.assertEqual(run_function("iommu_domains", self.groups("DMA-FQ", "DMA-FQ")).returncode, 0)
@@ -125,6 +126,11 @@ class PlatformAssertions(unittest.TestCase):
     def test_strict_domains_forced_by_a_virtual_iommu_pass(self):
         log = "[0.2] AMD-Vi: Using strict mode due to virtualization\n"
         self.assertEqual(run_function("iommu_domains", self.groups("DMA", "DMA", log=log)).returncode, 0)
+
+    def test_a_strict_build_fails_even_when_a_virtual_iommu_forces_strict(self):
+        log = "[0.2] AMD-Vi: Using strict mode due to virtualization\n"
+        prelude = self.groups("DMA", "DMA", log=log, dma="CONFIG_IOMMU_DEFAULT_DMA_STRICT=y\n")
+        self.assertNotEqual(run_function("iommu_domains", prelude).returncode, 0)
 
     def test_an_identity_domain_fails_even_on_a_virtual_iommu(self):
         log = "[0.2] AMD-Vi: Using strict mode due to virtualization\n"
@@ -184,13 +190,19 @@ class PlatformAssertions(unittest.TestCase):
         prelude = self.maps("7ffd1000-7ffd3000 r-xp 00000000 00:00 0 [vdso]\n")
         self.assertEqual(run_function("vsyscall_none", prelude).returncode, 0)
 
+    def debugfs(self, mount_status, config="CONFIG_DEBUG_FS_ALLOW_NONE=y\n"):
+        stubs = f'\nmount() {{ return {mount_status}; }}\ndebugfs_dir="{self.dir}/debugfs"\n'
+        return self.cmdline("x=1") + stubs + self.config(config) + "\n" + function("kconfig_enabled")
+
     def test_debugfs_that_mounts_fails(self):
-        prelude = self.cmdline("x=1") + f'\nmount() {{ return 0; }}\ndebugfs_dir="{self.dir}/debugfs"'
-        self.assertNotEqual(run_function("debugfs_off", prelude).returncode, 0)
+        self.assertNotEqual(run_function("debugfs_off", self.debugfs(0)).returncode, 0)
 
     def test_debugfs_refused_passes(self):
-        prelude = self.cmdline("x=1") + f'\nmount() {{ return 19; }}\ndebugfs_dir="{self.dir}/debugfs"'
-        self.assertEqual(run_function("debugfs_off", prelude).returncode, 0)
+        self.assertEqual(run_function("debugfs_off", self.debugfs(19)).returncode, 0)
+
+    def test_debugfs_refused_without_allow_none_in_the_config_fails(self):
+        prelude = self.debugfs(19, "CONFIG_DEBUG_FS_ALLOW_ALL=y\n")
+        self.assertNotEqual(run_function("debugfs_off", prelude).returncode, 0)
 
     def keyring(self, count):
         ids = " ".join(str(100 + i) for i in range(count))
