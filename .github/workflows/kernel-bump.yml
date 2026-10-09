@@ -9,8 +9,8 @@ name: Kernel Bump
 # hash manifests for the new pins and runs `build.sh --stage prep` (signatures, patches,
 # config gate): the outcome goes into the PR, green or red. pr: opens the PR (label
 # kernel-bump) and, only when prep is green and no NVIDIA lock moved, enables its
-# auto-merge, which waits for the checks the branch protection requires: "Kernel gate" of
-# Kernel Build and `gate` of pr.yml, `gate` alone after docs/operations/github-settings.md section 8.
+# auto-merge, which waits for the checks the branch protection requires: `gate` of pr.yml (the
+# kernel check runs there once, doc_ci.md CP4) and "Spec gate" until the specs half of CP4.
 # system: `bump.py apply --group system` moves the FROM lines of system/Containerfile (the
 # quay.io base-atomic base) and regenerates an NVIDIA lock whose packages the repository
 # republished, then opens its PR (label system-bump): System Image Check builds the images
@@ -149,7 +149,7 @@ jobs:
 
       - name: Prep (signatures, patches, config gate)
         # Green or red, the outcome and the derived options end up in the PR body: the PR
-        # opens anyway and the Kernel Build gate keeps it red until a human decides.
+        # opens anyway and `gate` keeps it red until a human decides.
         run: |
           set -euo pipefail
           mkdir -p out
@@ -251,7 +251,7 @@ jobs:
           git push -u origin "$branch"
           cat body.md prep.md > pr.md
           if [[ $reviewed == true ]]; then
-            printf '\n## Merge\n\nThis bump moves an NVIDIA pin and its lock. Kernel Build and a human review decide the merge. No auto-merge.\n' >> pr.md
+            printf '\n## Merge\n\nThis bump moves an NVIDIA pin and its lock. The kernel check of the gate job and a human review decide the merge. No auto-merge.\n' >> pr.md
           fi
           url=$(gh pr create --base "$GITHUB_REF_NAME" --head "$branch" --label kernel-bump --title "$title" --body-file pr.md)
           if [[ $reviewed == true ]]; then
