@@ -425,9 +425,10 @@ rootless container, which still saw 16 CPUs).
 # Refusal step: do not run this block until section 5, point 4 is done (local-image.sh reads
 # ACC_PORT and ACC_REGISTRY). S1 never builds on the shared registry on port 5000.
 ACC_PORT=5001 ACC_REGISTRY=localhost:5001/s1
-[ "$ACC_PORT" != 5000 ] || { echo 'S1: port 5000 is the shared registry, stop' >&2; exit 1; }
 git -C /var/home/hr-mes/athanor worktree add --detach /var/tmp/athanor-wt/s1-build origin/iso-v0
 W=/var/tmp/athanor-wt/s1-build
+grep -q ACC_PORT "$W/scripts/devvm/local-image.sh" \
+  || { echo 'S1: local-image.sh still builds on the shared registry (section 5, point 4), stop' >&2; exit 1; }
 sed -i -e 's|^FROM quay.io/fedora-ostree-desktops/base-atomic:43@sha256:[0-9a-f]* AS system$|FROM quay.io/fedora-ostree-desktops/base-atomic:45@sha256:2c4fec150532fe1f3c30645f532e63c1ff3280791828c31364aedbd616c8c842 AS system|' \
        -e 's|^ARG FEDORA_VERSION=43$|ARG FEDORA_VERSION=45|' "$W/system/Containerfile"
 git -C "$W" diff --numstat                    # 2 2 system/Containerfile
