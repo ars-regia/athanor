@@ -20,8 +20,8 @@ system — branch bump/system-* with label system-bump (kernel-bump.yml, system 
          lock's own `# repository` line.
 
 Usage: bot_merge.py spec|system PR HEAD_SHA BUILD_RESULT
-       GH_TOKEN: reads the pull request and the Actions runs; MERGE_TOKEN: merges it (a PAT,
-       so that the merge triggers the push workflows)
+       GH_TOKEN: reads the pull request and the Actions runs; MERGE_TOKEN: merges it (a token of
+       the bots GitHub App, so that the merge triggers the push workflows)
 
 A pull request of another shape, or a build that is not `success`, is reported in the log and
 the job summary and the script exits 0. A failing gh call, a failing required check or a
@@ -41,7 +41,7 @@ SPEC_FILE = re.compile(rf"(?:{NAME}\.spec|SOURCES/sources\.sha256)")
 WATCH_FILE = "forge/upstream-watch.json"
 # The bot waits for the checks the branch protection of the base branch requires, read from
 # the checkout: the protection does not bind administrators (enforce_admins: false) and the
-# merging PAT is a maintainer's, so this wait is what keeps a red check from merging. Switching
+# merging App is a bypass actor of the pull request rule, so this wait is what keeps a red check from merging. Switching
 # the required check (docs/operations/github-settings.md section 8) is a change of that file.
 BRANCH_PROTECTION = ".github/settings/branch-protection.json"
 # The workflow whose newest pull_request run reports each check a branch may require, as the

@@ -199,13 +199,24 @@ jobs:
     if: ${{ needs.kernel.outputs.changed == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    env:
-      # A PAT: PRs opened with the GITHUB_TOKEN do not trigger the checks.
-      GH_TOKEN: ${{ secrets.KERNEL_BUMP_TOKEN }}
+    environment: bots
     steps:
+      # A bots App installation token, not the GITHUB_TOKEN: PRs opened with the
+      # GITHUB_TOKEN start no checks. Minted per job from the key of the `bots` environment.
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          token: ${{ secrets.KERNEL_BUMP_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
@@ -213,6 +224,8 @@ jobs:
           merge-multiple: true
 
       - name: Branch, commit, PR (auto-merge only on a green prep that moves no NVIDIA lock)
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
           git add forge/specs/azoth system/nvidia/locks
@@ -251,6 +264,7 @@ jobs:
     runs-on: ubuntu-24.04
     # Regenerating both NVIDIA locks downloads about 650 MB of RPMs, and mirroring them as much.
     timeout-minutes: 45
+    environment: bots
     permissions:
       contents: read
       packages: write
@@ -258,10 +272,22 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
     steps:
+      # A bots App installation token, not the GITHUB_TOKEN: PRs opened with the
+      # GITHUB_TOKEN start no checks. Minted per job from the key of the `bots` environment.
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          # A PAT: PRs opened with the GITHUB_TOKEN do not trigger the checks.
-          token: ${{ secrets.KERNEL_BUMP_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: One open system bump PR at a time
         id: open
@@ -307,7 +333,7 @@ jobs:
       - name: Branch, commit, PR (merged by System Image Check when green)
         if: ${{ steps.bump.outputs.changed == 'true' }}
         env:
-          GH_TOKEN: ${{ secrets.KERNEL_BUMP_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
           git add system/Containerfile system/nvidia/locks

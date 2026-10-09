@@ -28,18 +28,33 @@ jobs:
   bump:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    env:
-      # A PAT: PRs opened with the GITHUB_TOKEN do not trigger the checks.
-      GH_TOKEN: ${{ secrets.KERNEL_BUMP_TOKEN }}
+    environment: bots
     steps:
+      # A bots App installation token, not the GITHUB_TOKEN: PRs opened with the
+      # GITHUB_TOKEN start no checks. Minted per job from the key of the `bots` environment.
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          token: ${{ secrets.KERNEL_BUMP_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Run bump.py cosmic-comp apply
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: python3 forge/specs/azoth/bump.py cosmic-comp apply "$RUNNER_TEMP/bump"
 
       - name: Branch, commit, PR (never auto-merged)
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: forge/specs/azoth/open_bump_pr.sh cosmic-comp-bump bump/cosmic-comp forge/specs/cosmic-comp "$RUNNER_TEMP/bump" "$GITHUB_REF_NAME"
 
       - name: Upload what the bump wrote
