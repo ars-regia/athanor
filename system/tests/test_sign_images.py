@@ -507,11 +507,11 @@ class SignImages(unittest.TestCase):
                 self.assertIn("not a shipped repository", r.stderr)
                 self.assertFalse((self.state / "calls.log").exists())
 
-    def test_a_missing_or_repeated_repository_is_refused_before_signing(self):
+    def test_the_default_image_is_required_and_a_repeat_is_refused_before_signing(self):
         self.digests()
         lines = self.file.read_text().splitlines()
         for content, message in (
-            ([lines[0], lines[1]], "2 of the 3"),
+            ([lines[1], lines[2]], "athanor-system"),
             ([lines[0], lines[0], lines[1]], "twice"),
         ):
             with self.subTest(message=message):
@@ -521,6 +521,42 @@ class SignImages(unittest.TestCase):
                 self.assertEqual(r.returncode, 2, r.stderr)
                 self.assertIn(message, r.stderr)
                 self.assertFalse((self.state / "calls.log").exists())
+
+    def test_a_run_without_an_nvidia_variant_is_signed_for_the_images_it_built(self):
+        self.digests()
+        lines = self.file.read_text().splitlines()
+        self.file.write_text("\n".join([lines[0], lines[1]]) + "\n")
+        r = self.sign()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            json.loads((self.state / "signed.json").read_text()),
+            list(self.tags.values())[:2],
+        )
+
+    def test_the_digests_record_only_the_variants_that_built(self):
+        variants = self.dir / "variants.txt"
+        variants.write_text("athanor-system\n")
+        r = subprocess.run(
+            ["bash", str(DIGESTS), "--registry", REG, "--tag", "412", "--out", str(self.file), "--variants", str(variants)],
+            capture_output=True,
+            text=True,
+            env=self.env,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([line.split()[0] for line in self.file.read_text().splitlines()], [f"{REG}/athanor-system"])
+
+    def test_a_variants_file_naming_an_unknown_image_is_refused(self):
+        variants = self.dir / "variants.txt"
+        variants.write_text("athanor-system\nathanor-other\n")
+        r = subprocess.run(
+            ["bash", str(DIGESTS), "--registry", REG, "--tag", "412", "--out", str(self.file), "--variants", str(variants)],
+            capture_output=True,
+            text=True,
+            env=self.env,
+        )
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("athanor-other", r.stderr)
+        self.assertFalse(self.file.exists())
 
 
 if __name__ == "__main__":

@@ -69,7 +69,7 @@ class SharedLayers(unittest.TestCase):
     def serve_variant(self, name, config):
         self.serve(f"{REGISTRY}/{name}:{RUN}", config)
 
-    def check(self, system=f"sha256:{SYSTEM_ID}"):
+    def check(self, system=f"sha256:{SYSTEM_ID}", *extra):
         return subprocess.run(
             [
                 "bash",
@@ -80,6 +80,7 @@ class SharedLayers(unittest.TestCase):
                 REGISTRY,
                 "--tag",
                 RUN,
+                *extra,
             ],
             capture_output=True,
             text=True,
@@ -106,6 +107,20 @@ class SharedLayers(unittest.TestCase):
             )
         refs = (self.dir / "podman.refs").read_text().splitlines()
         self.assertEqual(refs, [SYSTEM_ID] + [f"{REGISTRY}/{n}:{RUN}" for n in NAMES])
+
+    def test_only_the_variants_that_built_are_checked(self):
+        # A dropped NVIDIA variant (ADR-0103 D24) has no local image: it is not looked for.
+        system = self.system_stage()
+        self.serve_system(system)
+        config = fixture("athanor-system")
+        config["rootfs"]["diff_ids"] = system + config["rootfs"]["diff_ids"][SYSTEM_STAGE_LAYERS:]
+        self.serve_variant("athanor-system", config)
+        variants = self.dir / "variants.txt"
+        variants.write_text("athanor-system\n")
+        r = self.check(f"sha256:{SYSTEM_ID}", "--variants", str(variants))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        refs = (self.dir / "podman.refs").read_text().splitlines()
+        self.assertEqual(refs, [SYSTEM_ID, f"{REGISTRY}/athanor-system:{RUN}"])
 
     def test_variants_that_rebuilt_the_system_stage_fail(self):
         # Run 37384733899 as published: the NVIDIA variants rebuilt the system stage.
