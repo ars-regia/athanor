@@ -1,0 +1,18 @@
+[
+  {
+    "base": {
+      "ref": "iso-v0",
+      "sha": "5deaa55fe0e6a34f5b810471b501fb49a323051e"
+    },
+    "head": {
+      "repo": {
+        "full_name": "ars-regia/athanor"
+      },
+      "sha": "5a19fdaca21de3281114a3a3064c5f7474552c76"
+    },
+    "merge_commit_sha": "13017b4e89c98e85ad2b9f88f25d6403a580b14a",
+    "merged_at": "2026-10-07T14:11:03Z",
+    "number": 270,
+    "state": "closed"
+  }
+]

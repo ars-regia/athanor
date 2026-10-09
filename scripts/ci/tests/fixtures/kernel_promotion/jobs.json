@@ -1,0 +1,15 @@
+{
+  "total_count": 10,
+  "jobs": [
+    {"conclusion": "success", "id": 112768140482, "name": "changes", "run_attempt": 1, "run_id": 37614092466, "status": "completed"},
+    {"conclusion": "success", "id": 112768140631, "name": "check", "run_attempt": 1, "run_id": 37614092466, "status": "completed"},
+    {"conclusion": "success", "id": 112768205877, "name": "kernel / inputs", "run_attempt": 1, "run_id": 37614092466, "status": "completed"},
+    {"conclusion": "skipped", "id": 112768207297, "name": "specs", "run_attempt": 1, "run_id": 37614092466, "status": "completed"},
+    {"conclusion": "success", "id": 112768271492, "name": "kernel / build", "run_attempt": 1, "run_id": 37614092466, "status": "completed"},
+    {"conclusion": "success", "id": 112800040517, "name": "kernel / boot", "run_attempt": 1, "run_id": 37614092466, "status": "completed"},
+    {"conclusion": "success", "id": 112800040792, "name": "kernel / kmod / build (open)", "run_attempt": 1, "run_id": 37614092466, "status": "completed"},
+    {"conclusion": "success", "id": 112800040906, "name": "kernel / kmod / build (legacy)", "run_attempt": 1, "run_id": 37614092466, "status": "completed"},
+    {"conclusion": "success", "id": 112801343883, "name": "kernel / Kernel verdict", "run_attempt": 1, "run_id": 37614092466, "status": "completed"},
+    {"conclusion": "success", "id": 112801376984, "name": "gate", "run_attempt": 1, "run_id": 37614092466, "status": "completed"}
+  ]
+}

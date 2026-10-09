@@ -1,0 +1,23 @@
+{
+  "total_count": 1,
+  "workflow_runs": [
+    {
+      "conclusion": "success",
+      "event": "pull_request",
+      "head_repository": {
+        "full_name": "ars-regia/athanor"
+      },
+      "head_sha": "5a19fdaca21de3281114a3a3064c5f7474552c76",
+      "html_url": "https://github.com/ars-regia/athanor/actions/runs/37614092466",
+      "id": 37614092466,
+      "name": "Pull Request",
+      "path": ".github/workflows/pr.yml",
+      "pull_requests": [],
+      "repository": {
+        "full_name": "ars-regia/athanor"
+      },
+      "run_attempt": 1,
+      "status": "completed"
+    }
+  ]
+}

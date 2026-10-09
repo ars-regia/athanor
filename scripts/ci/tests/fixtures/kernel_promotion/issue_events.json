@@ -1,0 +1,22 @@
+[
+  {
+    "created_at": "2026-10-07T11:26:28Z",
+    "event": "labeled"
+  },
+  {
+    "created_at": "2026-10-07T11:26:30Z",
+    "event": "auto_squash_enabled"
+  },
+  {
+    "created_at": "2026-10-07T14:11:03Z",
+    "event": "merged"
+  },
+  {
+    "created_at": "2026-10-07T14:11:03Z",
+    "event": "closed"
+  },
+  {
+    "created_at": "2026-10-07T14:11:05Z",
+    "event": "head_ref_deleted"
+  }
+]
