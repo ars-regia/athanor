@@ -32,13 +32,21 @@ class PackageSet(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.out.read_text(), "bash-5.2-1.fc43.x86_64 bb\nzlib-1.3-1.fc43.x86_64 aa\n")
         args = (self.dir / "podman.args").read_text()
-        self.assertIn("--network=none", args)
+        for flag in ("--rm", "--pull=never", "--network=none", "--entrypoint /usr/bin/rpm"):
+            self.assertIn(flag, args)
         self.assertIn("%{NEVRA} %{SHA256HEADER}", args)
 
     def test_a_podman_failure_leaves_no_file(self):
-        r = self.podman("echo 'Error: image not known' >&2; exit 125")
-        self.assertNotEqual(r.returncode, 0)
-        self.assertFalse(self.out.exists())
+        self.out.parent.mkdir()
+        self.out.write_text("stale\n")
+        for body in (
+            "echo 'Error: image not known' >&2; exit 125",
+            "echo 'bash-5.2-1.fc43.x86_64 bb'; exit 125",
+        ):
+            with self.subTest(body=body):
+                r = self.podman(body)
+                self.assertNotEqual(r.returncode, 0)
+                self.assertEqual(sorted(p.name for p in self.out.parent.iterdir()), [])
 
     def test_an_empty_set_is_refused(self):
         r = self.podman("exit 0")
