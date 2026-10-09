@@ -136,10 +136,9 @@ Acceptance: the dev-VM stage above.
 
 ### 5.2 The Bridge (dropped 2026-10-09)
 
-UD45 to UD50 specified a Bridge for machines that follow the previous owner's frozen `:latest`. [ADR-0103](../decisions/0103-audit-5-decisions.md) D4 drops them, with the environment `bridge`, its token and the variable `ATHANOR_BRIDGE_REGISTRY`; the ids are not reused. The maintainer's desktop and laptop move with `scripts/switch-verified.sh`. The owner-pinned policy (UD11 to UD13) is kept. The client side of the migration
-(`athanor-update` and `athanor-trust-state`) is still in the tree, dormant because nothing
-writes `moved-from`; issue #349 removes it. UD51 is not part of the Bridge and stays (maintainer
-decision of 2026-10-09, recorded with D4).
+UD45 to UD50 specified a Bridge for machines that follow the previous owner's frozen `:latest`. [ADR-0103](../decisions/0103-audit-5-decisions.md) D4 drops them, with the environment `bridge`, its token and the variable `ATHANOR_BRIDGE_REGISTRY`; the ids are not reused. The maintainer's desktop and laptop move with `scripts/switch-verified.sh`. The owner-pinned policy (UD11 to UD13) is kept. The client side of the migration (`athanor-update` and `athanor-trust-state`) is still in the tree, dormant because nothing writes `moved-from`; issue #349 removes it. UD51 is not part of the Bridge and stays (maintainer decision of 2026-10-09, recorded with D4).
+
+#### Pinned builds (kept)
 
 **UD51. A verified machine on a run-number tag is pinned, not up to date.** A run-number tag (`:37691917204`) or a digest names one build: nothing newer is ever published under it, so the check finds no update while `:latest` moves on. The dev VM ended there (2026-10-08, runtime audit RT-U7): `scripts/switch-verified.sh` refused a digest, the run tag was the reference left, and the state read verified with `update: none`. The migration stops at a verified booted reference whatever its tag (UT4) and does not move a pinned machine, since a pin can be deliberate. The check publishes `verified.reason = pinned-build` instead (badge at the exclamation mark), and the shield reads "Signed, but pinned to one build: it receives no updates". The check reads a reference as pinned when it is a digest or a run tag of the pipeline (`github.run_id`, digits only); any other tag, `latest`, `stable`, no tag (which is `latest`) or the moving tag of a derived image (`:prod`), follows newer builds. `scripts/switch-verified.sh` accepts only a channel tag and, on a run tag or a digest, says why and names the `:latest` reference to use. Acceptance: `cargo test -p athanor-update` (`migrate::tests`) and `scripts/tests/test_switch_verified.py`.
 

@@ -173,7 +173,7 @@ recommended option, except D19.
 ## Consequences
 
 **Specifications.** The approved specifications this record touches are amended by it from
-today: `doc_update_delivery.md` (UD4, UD28, UD45 to UD51), `doc_update_trust.md` (UT2, UT6),
+today: `doc_update_delivery.md` (UD4, UD28, UD45 to UD50), `doc_update_trust.md` (UT2, UT6),
 `doc_kernel_profile.md` (the 1.0 gate, the P2, P3 and P4a order, the disk layout),
 `doc_platform_experience.md` (encryption), `doc_pipeline.md` (section 12 order, PL42),
 `doc_tetragon.md`, `doc_shell.md` (SH3), `doc_compositor.md` (CO3), `doc_lock_and_prompts.md`
