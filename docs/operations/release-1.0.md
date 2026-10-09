@@ -91,7 +91,7 @@ in the week of 2026-10-09.
 | 1.0 | before 2026-12-02 | 0.9 with no blocking defect | To add: a query for open blocking issues that must return none |
 
 Row numbers count the rows of section 2 from the top: 1 signed immutable image; 2 NVIDIA
-failures; 3 update chain to `:stable`; 4 one human approval per release; 5 evidence bundle;
+failures; 3 update chain to `:stable`; 4 one human approval per promotion to `:stable`; 5 evidence bundle;
 6 resolved package set; 7 key hierarchy and MOK key set; 8 installer path; 9 greeter; 10 disk
 encryption; 11 recovery and rollback; 12 desktop session tier; 13 cosmic-comp patches;
 14 keyring prompter; 15 application installation; 16 Tetragon; 17 attestation deleted; 18 DNS
