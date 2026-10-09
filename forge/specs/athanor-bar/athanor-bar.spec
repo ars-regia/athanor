@@ -12,7 +12,7 @@ Requires:       gtk4 gtk4-layer-shell athanor-calmo athanor-shelld
 # origin-not-enforcing from 1.0.0-8; owner-moved, owner-moved-waiting, owner-moved-held and
 # pinned-build from 1.0.0-9.
 # The owner-moved reasons of 1.0.0-9 are no longer published from athanor-update 1.0.0-10.
-Requires:       athanor-update >= 1.0.0-9
+Requires:       athanor-update >= 1.0.0-10
 # The first-session pick and the vendor layout moved here from the translator.
 Obsoletes:      athanor-layout-translator < 1.0.1
 
