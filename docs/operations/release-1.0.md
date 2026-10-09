@@ -4,7 +4,7 @@
 | --- | --- |
 | Purpose | What Athanor 1.0 contains, how each item is accepted, what waits for 1.1, and the order of work |
 | Owner | the maintainer (`@hr-mes`) |
-| Status | revision 1, 2026-10-09 ([ADR-0103](../decisions/0103-audit-5-decisions.md), D1) |
+| Status | revision 2, 2026-10-09: scope from [ADR-0103](../decisions/0103-audit-5-decisions.md) (revision 1, D1), order and release points from [ADR-0105](../decisions/0105-releases-before-1-0.md) |
 
 ## 1. Purpose and date
 
@@ -66,17 +66,62 @@ and provenance as promotion conditions (D15). The Bridge (UD45 to UD50) is dropp
 
 ## 4. Order of work
 
-1. **Freeze (D3).** No new specification revision and no non-critical shell work until P2 of
-   the update-chain plan (the kernel build profile and boot matrix, #122) and spike S1 (#124)
-   are green.
-2. **P2 and S1 first, in parallel**, within the machine's CPU budget; S1 is time-boxed.
-3. **The Fedora 45 rebase does not wait for P3** (D26); the Fedora 44 fallback date holds.
-4. **In the release half of the pipeline, the PB5 slice comes first** (D15), then the evidence
-   copy (D23) and the key hierarchy (D5), which waits for the maintainer's LUKS2 key backup.
-5. The rows of section 2 in any order the dependencies allow; each lands with its check.
+Four releases lead to 1.0 ([ADR-0105](../decisions/0105-releases-before-1-0.md)): the work
+under the hood comes first and the graphical work last. The dates are estimates. Each 0.x
+release is a signed tag on `iso-v0` plus a `:stable` promotion of that build on evidence
+(BRN4 of `branching.md`), with the `release` approval. 1.0 is 0.9 with no blocking defect,
+before 2026-12-02.
+
+**Freeze (D3), in force.** No new specification revision and no non-critical shell work until
+P2 of the update-chain plan (the kernel build profile and boot matrix, #122) and spike S1
+(#124) are green. They run in parallel inside 0.3, within the machine's CPU budget; S1 is
+time-boxed. The Fedora 45 rebase does not wait for P3 (D26); the Fedora 44 fallback date
+holds. In the release half of the pipeline the PB5 slice comes first (D15), then the evidence
+copy (D23); the key hierarchy (D5) waits for the maintainer's LUKS2 key backup, which is done
+in the week of 2026-10-09.
+
+### 4.1 Releases
+
+| Release | Target (estimate) | Contents: rows of section 2 and work outside them | Exit |
+| --- | --- | --- | --- |
+| 0.3 "chain" | about 2026-10-20 | rows 1 (image, three variants, without the `-nvidia-legacy` evidence), 2, 3, 4, 5, 6; `release.yml` (PB13, [ADR-0104](https://github.com/ars-regia/athanor/pull/354), proposed in PR #354); P2 (#122); S1 (#124) | The first `:stable` promotion on evidence. Existing: `python3 -B -m unittest discover -s system/tests` (`test_promote.py`). To add: a check that the digest behind `:stable` equals the digest of the `accept.yml` verdict |
+| 0.5 "base" | about 2026-11-07 | rows 7, 8, 10; the Fedora 45 rebase, or Fedora 44 per [ADR-0078](../decisions/0078-fedora-release-target.md); P4b (#126), the bootc two-step update chain; the start of the image key rotation to key 2 (its close, PB5b, needs a key-2 release on `:stable` and one more release, so it lands in 0.7); the ISO acceptance under Secure Boot (#252) | An ISO install, encrypted and under Secure Boot, updates itself to the next `:stable`. Existing: `forge/test/iso/run_iso_test.sh ISO OUTPUT_DIR`. To add: that test under Secure Boot firmware, ending in an update to a newer `:stable` |
+| 0.7 "defences" | about 2026-11-20 | rows 9, 11 (acceptance 1 and 7 of `doc_recovery.md` on the dev VM), 12 (lock, polkit agent, SystemPrompter), 14 to 24; the close of the image key rotation (PB5b) | Every row placed here holds. Existing: `python3 scripts/verify.py services pam polkit polkit-model contacts shipped coverage` and the unit tests the rows name. To add: the image checks and acceptance cases the rows mark "to add" |
+| 0.9 "surface" | about 2026-11-27 | rows 12 (screenshot and screen share, bar, dock, launcher, coexistence), 13, and the hardware work below; the visual language and accessibility; the maintainer's aesthetic sign-offs (ST8, VL12) | The release candidate. Existing: `scripts/devvm/bar-acceptance.sh`, `dock-acceptance.sh`, `launcher-acceptance.sh`, `compositor-acceptance.sh`. To add: the hardware matrix as a recorded run |
+| 1.0 | before 2026-12-02 | 0.9 with no blocking defect | To add: a query for open blocking issues that must return none |
+
+Row numbers count the rows of section 2 from the top: 1 signed immutable image; 2 NVIDIA
+failures; 3 update chain to `:stable`; 4 one human approval per release; 5 evidence bundle;
+6 resolved package set; 7 key hierarchy and MOK key set; 8 installer path; 9 greeter; 10 disk
+encryption; 11 recovery and rollback; 12 desktop session tier; 13 cosmic-comp patches;
+14 keyring prompter; 15 application installation; 16 Tetragon; 17 attestation deleted; 18 DNS
+over TLS; 19 USBGuard; 20 `sshd`; 21 SearXNG; 22 snapshots; 23 update Apply; 24 least
+privilege and PAM. Every row is in exactly one release, except the three split below.
+
+### 4.2 Rows that span releases
+
+- **Row 12, desktop session tier.** Lock, polkit agent and SystemPrompter are functions with
+  security consequences and go to 0.7 with the prompter and the greeter, which share
+  `doc_lock_and_prompts.md`. Screenshot and screen share, bar, dock, launcher and the
+  coexistence of cosmic-idle, cosmic-bg, cosmic-workspaces and cosmic-settings are the
+  graphical surface and go to 0.9.
+- **Row 1, signed immutable image.** The three variants build in 0.3, and the default and `-nvidia` images promote; the
+  `-nvidia-legacy` evidence (20 boot-matrix runs, #231 closed) needs the maintainer's NVIDIA
+  hardware and goes to 0.9. Until then `-nvidia-legacy` is not promoted (D24).
+- **Row 11, recovery and rollback.** The dev VM acceptance is 0.7; `switch-verified.sh` on the
+  desktop and the laptop belongs to the hardware work of 0.9.
+
+### 4.3 Hardware work at 0.9
+
+One session, not one per release (ADR-0105): the maintainer's NVIDIA desktop, the
+`-nvidia-legacy` evidence and #231, `switch-verified.sh` on the desktop and the laptop, Wi-Fi
+and Bluetooth on hardware, and the final hardware matrix. Releases 0.3 to 0.7 are accepted on
+the dev VM and in CI; what they leave unproven on hardware is exactly this list.
 
 ## 5. How this file changes
 
-Only a decision record changes the scope of 1.0. A pull request that adds, removes or moves a
+Only a decision record changes the scope of 1.0, and only a decision record changes its order
+or its release points: [ADR-0105](../decisions/0105-releases-before-1-0.md) set the four
+releases of section 4. A pull request that adds, removes or moves a
 row of sections 2 or 3 names the record that decided it; a pull request that only turns a
 "to add" into an existing check, or corrects a path, needs none.

@@ -49,22 +49,7 @@ fn reason<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &Status) -> 
     }
     let repository = sigobj::repository_of(&booted.image);
     let Some(key_paths) = policy.scopes.get(repository) else {
-        if crate::policy::successor(&policy.scopes, repository, &policy.moved_from).is_none() {
-            return Reason::ReferenceOutOfScope;
-        }
-        // The same image under the owner the policy pins: the project moved, and the
-        // migration moves this machine after it (doc_update_delivery.md, UD45), unless nothing
-        // can move it yet: a queued rollback, or no such image or tag under the new owner; or
-        // unless the image there is the held digest, which the migration never stages.
-        return if status.rollback_queued {
-            Reason::OwnerMovedWaiting
-        } else if ctx.store.move_held() {
-            Reason::OwnerMovedHeld
-        } else if ctx.store.channel_absent() {
-            Reason::OwnerMovedWaiting
-        } else {
-            Reason::OwnerMoved
-        };
+        return Reason::ReferenceOutOfScope;
     };
     if !booted.enforcing {
         let pending = status.staged.as_ref().is_some_and(|staged| staged.enforcing);
@@ -387,7 +372,6 @@ pub(crate) mod tests {
                 REPO: [{"type": "sigstoreSigned", "keyPaths": key_paths, "signedIdentity": {"type": "matchRepository"}}]}}});
             std::fs::write(root.join("usr/policy.json"), policy.to_string()).expect("write");
             std::fs::write(root.join("usr/registries.d/athanor.yaml"), "docker: {}\n").expect("write");
-            std::fs::write(root.join("usr/moved-from"), "localhost:5000/previous\n").expect("write");
             let paths = PolicyPaths { etc_policy: root.join("etc/policy.json"), etc_registries: root.join("etc/registries.d/athanor.yaml"), shipped: root.join("usr") };
             std::os::unix::fs::symlink(root.join("usr/policy.json"), &paths.etc_policy).expect("symlink");
             std::os::unix::fs::symlink(root.join("usr/registries.d/athanor.yaml"), &paths.etc_registries).expect("symlink");

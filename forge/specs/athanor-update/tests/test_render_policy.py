@@ -82,18 +82,6 @@ class Render(unittest.TestCase):
             self.assertTrue(path.is_symlink())
             self.assertEqual(path.resolve(), self.dir / "out" / target)
 
-    def test_moved_from_lists_the_previous_owners_and_is_empty_without_them(self):
-        self.assertEqual(self.render().returncode, 0)
-        self.assertEqual((self.dir / "out/moved-from").read_text(), "")
-        r = self.render("--moved-from", "registry.example/previous other.example/older")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual((self.dir / "out/moved-from").read_text(), "registry.example/previous\nother.example/older\n")
-        self.assertEqual(self.render("--moved-from", "").returncode, 0)
-        self.assertEqual((self.dir / "out/moved-from").read_text(), "")
-        for owner in ('evil"/x', "registry.example", "registry.example/owner"):
-            with self.subTest(owner=owner):
-                self.assertEqual(self.render("--moved-from", owner).returncode, 2)
-
     def test_no_key_a_non_key_and_a_registry_that_needs_quoting_are_refused(self):
         self.assertEqual(self.render(registry='evil"/x').returncode, 2)
         (self.keys / "athanor-image-3.pub").write_text("not a key\n")

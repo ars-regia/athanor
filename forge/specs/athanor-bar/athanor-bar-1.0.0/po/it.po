@@ -175,7 +175,7 @@ msgstr "Dispositivi vicini"
 
 #: ../../../../system/athanor-controls/src/bluetooth.rs:304
 #: ../../../../system/athanor-controls/src/network.rs:348 src/ui/power.rs:110
-#: src/ui/shield.rs:549
+#: src/ui/shield.rs:542
 msgid "Cancel"
 msgstr "Annulla"
 
@@ -428,12 +428,12 @@ msgstr "Spegnere ora?"
 msgid "Power"
 msgstr "Alimentazione"
 
-#: src/ui/power.rs:149 src/ui/power.rs:155 src/ui/shield.rs:535
-#: src/ui/shield.rs:571
+#: src/ui/power.rs:149 src/ui/power.rs:155 src/ui/shield.rs:528
+#: src/ui/shield.rs:564
 msgid "Restart to update"
 msgstr "Riavvia per aggiornare"
 
-#: src/ui/power.rs:154 src/ui/shield.rs:570
+#: src/ui/power.rs:154 src/ui/shield.rs:563
 msgid "Restart and install the update now?"
 msgstr "Riavviare e installare l'aggiornamento adesso?"
 
@@ -486,166 +486,154 @@ msgid "Not verified: this machine does not verify its updates"
 msgstr "Non verificata: questa macchina non verifica i suoi aggiornamenti"
 
 #: src/ui/shield.rs:313
-msgid "Not verified: the project moved; this machine is moving with it"
-msgstr "Non verificata: il progetto ha cambiato indirizzo e questa macchina lo sta seguendo"
-
-#: src/ui/shield.rs:315
-msgid "Not verified: the project moved; this machine cannot follow it yet"
-msgstr "Non verificata: il progetto ha cambiato indirizzo e questa macchina non può ancora seguirlo"
-
-#: src/ui/shield.rs:318
-msgid "Not verified: the project moved; this machine went back and waits for a newer version"
-msgstr "Non verificata: il progetto ha cambiato indirizzo; questa macchina è tornata indietro e attende una versione più recente"
-
-#: src/ui/shield.rs:320
 msgid "Signed, but pinned to one build: it receives no updates"
 msgstr "Firmata, ma ferma su una sola build: non riceve aggiornamenti"
 
-#: src/ui/shield.rs:326
+#: src/ui/shield.rs:319
 msgid "Up to date"
 msgstr "Aggiornato"
 
-#: src/ui/shield.rs:327
+#: src/ui/shield.rs:320
 msgid "An update is available; it downloads at the next check"
 msgstr "È disponibile un aggiornamento; verrà scaricato al prossimo controllo"
 
-#: src/ui/shield.rs:328
+#: src/ui/shield.rs:321
 msgid "An update is ready; it installs when you restart"
 msgstr "Un aggiornamento è pronto; si installa al riavvio"
 
-#: src/ui/shield.rs:329
+#: src/ui/shield.rs:322
 msgid "The update installs at the next restart"
 msgstr "L'aggiornamento si installa al prossimo riavvio"
 
-#: src/ui/shield.rs:330
+#: src/ui/shield.rs:323
 msgid "The last update was refused by the policy"
 msgstr "L'ultimo aggiornamento è stato rifiutato dalla policy"
 
-#: src/ui/shield.rs:332
+#: src/ui/shield.rs:325
 msgid "You went back from the newest version; only a newer one is offered"
 msgstr "Sei tornato indietro dalla versione più recente; verrà proposta solo una versione più nuova"
 
-#: src/ui/shield.rs:334
+#: src/ui/shield.rs:327
 msgid "This version is older than one this machine has run"
 msgstr "Questa versione è più vecchia di una già avviata su questa macchina"
 
-#: src/ui/shield.rs:341
+#: src/ui/shield.rs:334
 msgid "The last check failed: network error"
 msgstr "L'ultimo controllo è fallito: errore di rete"
 
-#: src/ui/shield.rs:342
+#: src/ui/shield.rs:335
 msgid "The last check failed: registry error"
 msgstr "L'ultimo controllo è fallito: errore del registry"
 
-#: src/ui/shield.rs:343
+#: src/ui/shield.rs:336
 msgid "The last check failed: refused by the policy"
 msgstr "L'ultimo controllo è fallito: rifiutato dalla policy"
 
-#: src/ui/shield.rs:344
+#: src/ui/shield.rs:337
 msgid "The last check failed: storage error"
 msgstr "L'ultimo controllo è fallito: errore di archiviazione"
 
-#: src/ui/shield.rs:345
+#: src/ui/shield.rs:338
 msgid "The last check failed: internal error"
 msgstr "L'ultimo controllo è fallito: errore interno"
 
-#: src/ui/shield.rs:351
+#: src/ui/shield.rs:344
 msgid "No trust state yet: the first check has not run"
 msgstr "Nessuno stato di fiducia: il primo controllo non è ancora avvenuto"
 
-#: src/ui/shield.rs:353
+#: src/ui/shield.rs:346
 msgid "The trust state file is not owned by the system and was ignored"
 msgstr "Il file dello stato di fiducia non appartiene al sistema ed è stato ignorato"
 
-#: src/ui/shield.rs:355
+#: src/ui/shield.rs:348
 msgid "The trust state file could not be read"
 msgstr "Impossibile leggere il file dello stato di fiducia"
 
-#: src/ui/shield.rs:356 src/ui/shield.rs:370
+#: src/ui/shield.rs:349 src/ui/shield.rs:363
 msgid "The update service did not answer"
 msgstr "Il servizio di aggiornamento non ha risposto"
 
-#: src/ui/shield.rs:362
+#: src/ui/shield.rs:355
 msgid "Not authorised"
 msgstr "Non autorizzato"
 
-#: src/ui/shield.rs:363
+#: src/ui/shield.rs:356
 msgid "Another update request is running"
 msgstr "È in corso un'altra richiesta di aggiornamento"
 
-#: src/ui/shield.rs:365
+#: src/ui/shield.rs:358
 msgid "Nothing is downloaded yet; the update downloads at the next check"
 msgstr "Non c'è ancora nulla di scaricato; l'aggiornamento verrà scaricato al prossimo controllo"
 
-#: src/ui/shield.rs:367
+#: src/ui/shield.rs:360
 msgid "There is no previous version to go back to"
 msgstr "Non c'è una versione precedente a cui tornare"
 
-#: src/ui/shield.rs:368
+#: src/ui/shield.rs:361
 msgid "A program is blocking the restart; close it and try again"
 msgstr "Un programma impedisce il riavvio; chiudilo e riprova"
 
-#: src/ui/shield.rs:369
+#: src/ui/shield.rs:362
 msgid "The request failed; the system journal says why"
 msgstr "La richiesta è fallita; il registro di sistema ne spiega il motivo"
 
-#: src/ui/shield.rs:431
+#: src/ui/shield.rs:424
 #, rust-format
 msgid "Version {version}"
 msgstr "Versione {version}"
 
-#: src/ui/shield.rs:436
+#: src/ui/shield.rs:429
 #, rust-format
 msgid "Built on {date}"
 msgstr "Compilata il {date}"
 
-#: src/ui/shield.rs:442
+#: src/ui/shield.rs:435
 #, rust-format
 msgid "Last checked on {date}"
 msgstr "Ultimo controllo il {date}"
 
-#: src/ui/shield.rs:443
+#: src/ui/shield.rs:436
 msgid "Never checked"
 msgstr "Mai controllato"
 
-#: src/ui/shield.rs:449
+#: src/ui/shield.rs:442
 #, rust-format
 msgid "Host: {host}"
 msgstr "Host: {host}"
 
-#: src/ui/shield.rs:453
+#: src/ui/shield.rs:446
 msgid "Signature policy in force"
 msgstr "Policy delle firme in vigore"
 
-#: src/ui/shield.rs:455
+#: src/ui/shield.rs:448
 msgid "Signature policy not in force"
 msgstr "Policy delle firme non in vigore"
 
-#: src/ui/shield.rs:458
+#: src/ui/shield.rs:451
 msgid "The policy is the one Athanor ships"
 msgstr "La policy è quella fornita da Athanor"
 
-#: src/ui/shield.rs:460
+#: src/ui/shield.rs:453
 msgid "The policy was changed on this machine"
 msgstr "La policy è stata modificata su questa macchina"
 
-#: src/ui/shield.rs:463
+#: src/ui/shield.rs:456
 msgid "Secure Boot on"
 msgstr "Secure Boot attivo"
 
-#: src/ui/shield.rs:465
+#: src/ui/shield.rs:458
 msgid "Secure Boot off: this machine runs in the declared degraded mode"
 msgstr "Secure Boot disattivo: questa macchina funziona nella modalità degradata dichiarata"
 
-#: src/ui/shield.rs:537
+#: src/ui/shield.rs:530
 msgid "Go back to the previous version"
 msgstr "Torna alla versione precedente"
 
-#: src/ui/shield.rs:576
+#: src/ui/shield.rs:569
 msgid "Go back to the previous version and restart? This asks for an administrator's password."
 msgstr "Tornare alla versione precedente e riavviare? Serve la password di un amministratore."
 
-#: src/ui/shield.rs:577
+#: src/ui/shield.rs:570
 msgid "Go back"
 msgstr "Torna indietro"
 
@@ -660,3 +648,12 @@ msgstr "Affianca le finestre"
 #: src/ui/tray.rs:589
 msgid "System tray"
 msgstr "Vassoio di sistema"
+
+#~ msgid "Not verified: the project moved; this machine is moving with it"
+#~ msgstr "Non verificata: il progetto ha cambiato indirizzo e questa macchina lo sta seguendo"
+
+#~ msgid "Not verified: the project moved; this machine cannot follow it yet"
+#~ msgstr "Non verificata: il progetto ha cambiato indirizzo e questa macchina non può ancora seguirlo"
+
+#~ msgid "Not verified: the project moved; this machine went back and waits for a newer version"
+#~ msgstr "Non verificata: il progetto ha cambiato indirizzo; questa macchina è tornata indietro e attende una versione più recente"
