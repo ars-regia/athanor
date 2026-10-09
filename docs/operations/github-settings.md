@@ -95,21 +95,21 @@ Since then the files have moved ahead of GitHub (2026-10-07, ADR-0064): the two 
 | Only `iso-v0` is protected: required checks `Kernel gate` and `Spec gate` (not strict), no review, `enforce_admins` off, force push and deletion off | `branch-protection.json` (now also `main`, section 7) |
 | No repository ruleset | `rulesets.json` |
 | Environment `signing`: reviewer `hr-mes`, branches `iso-v0` and `main`, admin bypass on, four secrets | `environments.json` until 2026-10-07 (now section 7) |
-| Environment `github-pages`: branches `gh-pages` and `main`; no workflow deploys to it since the DNF channel was removed (ADR-0076, decision 2) | `environments.json` |
-| Environment `delete`: no rule, no secret | `environments.json` |
+| Environment `github-pages`: branches `gh-pages` and `main`; no workflow deploys to it since the DNF channel was removed (ADR-0076, decision 2) | deleted by hand, absent from the export of 2026-10-09 |
+| Environment `delete`: no rule, no secret | deleted by hand, absent from the export of 2026-10-09 |
 | Pages: legacy build from `main:/docs`; `gh api repos/ars-regia/athanor/pages` reports `"status": "errored"` (status is volatile, not stored) | `pages.json` |
 | Actions: all actions allowed, SHA pinning not required, default token read-only, Actions cannot approve pull requests, approval required for all external contributors | `actions.json` |
 
 ## 6. Open points (decided 2026-10-08, [ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md))
 
-Each one is a change to a file followed by `apply`, or a deletion by hand followed by an export; none has been made yet.
+Each one is a change to a file followed by `apply`, or a deletion by hand followed by an export.
 
 | Point | Decision |
 | --- | --- |
 | Description `ermete-os` | Set the Athanor description in `repository.json` (the file change follows this record) |
 | Dependabot alerts off | Set `vulnerability_alerts` to `true` in `repository.json` |
-| Environment `delete` has no rule and no secret, and no workflow names it (`grep -rn "environment:" .github/workflows` finds only `signing-kernel` and `signing-images`) | The maintainer deletes it by hand, then exports again |
-| Pages builds `main:/docs` and errors, and nothing publishes to the `gh-pages` branch since the DNF channel was removed (ADR-0076, decision 2) | Turn Pages off in `pages.json`; the maintainer then deletes the `gh-pages` branch and the `github-pages` environment by hand and exports again |
+| Environment `delete` has no rule and no secret, and no workflow names it (`grep -rn "environment:" .github/workflows` finds only `signing-kernel` and `signing-images`) | _(Done, export of 2026-10-09)_ The maintainer deletes it by hand, then exports again |
+| Pages builds `main:/docs` and errors, and nothing publishes to the `gh-pages` branch since the DNF channel was removed (ADR-0076, decision 2) | Turn Pages off in `pages.json`; the maintainer then deletes the `gh-pages` branch and the `github-pages` environment by hand and exports again _(branch and environment deleted by the export of 2026-10-09; Pages itself is still on)_ |
 | `enforce_admins` is off on `iso-v0` and `main`: the admin may push past the required check | Stays off while there is a single maintainer: turned on, it would block every merge, because nobody else can approve. Turn it on when a second maintainer joins. The signing environments bind the admin already (section 7) |
 | No scheduled drift check | _(Done in PB2, section 9)_ `maintenance.yml` runs `diff` daily with a read-only token of a GitHub App, not an admin token |
 
@@ -122,16 +122,22 @@ no job holds a key it does not use:
 | --- | --- | --- |
 | `signing-kernel` | `SECUREBOOT_SIGNING_KEY`, `MODULE_SIGNING_KEY` | `nvidia-kmod-sign` of `athanor-forge-orchestrator.yml`, only when a kernel or NVIDIA change leaves the signed vmlinuz or modules missing |
 | `signing-images` | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | `sign-system-images` of `athanor-forge-orchestrator.yml` |
-| `signing` | the five keys it held before the split, `MOK_PRIVATE_KEY` included | `sign-system-images` of `athanor-forge-orchestrator.yml`, during the image key rotation only |
+| `signing` | the four keys it held before the split (`MOK_PRIVATE_KEY`, the fifth, which no workflow used, was deleted by the maintainer before the export of 2026-10-09) | `sign-system-images` of `athanor-forge-orchestrator.yml`, during the image key rotation only |
 
 `signing` is the environment the split replaces. It holds image key 1, which signs the
 transitional release of the image key rotation (`docs/operations/secrets.md` section 4.1), so
 `environments.json` declares it as it is live until the rotation ends and `ghsettings.py diff`
 does not report it. While `system/keys` holds both image keys, `scripts/verify.py` treats it as
 an alias of `signing-images`: its protection rules apply, and its keys are not counted as held
-twice. When `athanor-image-1.pub` leaves `system/keys`, the maintainer deletes `signing` with
-`MOK_PRIVATE_KEY` and its entry leaves `environments.json`; an entry left behind fails the lint,
-because its keys are then held twice.
+twice. When `athanor-image-1.pub` leaves `system/keys`, the maintainer deletes `signing` and
+its entry leaves `environments.json`; an entry left behind fails the lint, because its keys are
+then held twice.
+
+`release` holds no key and has the same protection as the signing environments: required
+reviewer `hr-mes`, no administrator bypass, branches `iso-v0` and `main`. It is the one approval
+of a release ([ADR-0103](../decisions/0103-audit-5-decisions.md) D2, D25): the signing and
+promotion jobs move behind it, so the run's concurrency group is not held while it waits. Until
+that workflow change lands, no job uses it.
 
 Both have the same protection in `environments.json`: required reviewer `hr-mes`; administrator
 bypass off (`can_admins_bypass: false`, set by hand: section 4); deployment branches `iso-v0` and
@@ -270,8 +276,8 @@ The order of the maintainer's steps, each followed by `ghsettings.py diff`:
 5. Create the bot App of PL5, move the bots to it, delete the three personal tokens, then
    set `personal_tokens.retired` to `true` and drop them from `secrets`.
 6. At the end of the image key rotation (`athanor-image-1.pub` leaves `system/keys`,
-   `docs/operations/secrets.md` section 4.1, step 4): delete `signing` together with
-   `MOK_PRIVATE_KEY`, and remove its entry from `environments.json`.
+   `docs/operations/secrets.md` section 4.1, step 4): delete `signing` and remove its
+   entry from `environments.json`.
 7. Last: PB3 pins the two actions still referenced by tag and flips `sha_pinning_required`
    to `true` in `actions.json`; the maintainer then applies it.
 
