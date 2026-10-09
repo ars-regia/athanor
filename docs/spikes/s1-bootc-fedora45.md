@@ -77,8 +77,10 @@ Athanor pieces are present and enabled.
 **Run.** In the booted F45 `v1` guest: `rpm -q bootc ostree rpm-ostree systemd grub2-efi-x64
 shim-x64 bootupd containers-common selinux-policy-targeted composefs greenboot-rs
 athanor-update`; `bootc --version`; `bootupctl status --json`; `systemctl is-enabled
-greenboot-healthcheck.service greenboot-set-rollback-trigger.service grub-boot-success.timer
-bootloader-update.service`; `cat /etc/greenboot/greenboot.conf`.
+greenboot-healthcheck.service greenboot-set-rollback-trigger.service bootloader-update.service`;
+for the user timer `grub-boot-success.timer` (`/usr/lib/systemd/user`), `systemctl --global
+is-enabled grub-boot-success.timer` and, in the logged-in session, `systemctl --user is-enabled
+grub-boot-success.timer`; `cat /etc/greenboot/greenboot.conf`.
 
 **Pass.** `greenboot-rs` (not Fedora's `greenboot`) and `athanor-update` installed;
 both greenboot units enabled by `80-athanor-recovery.preset`; `GREENBOOT_AUTO_REBOOT=false`.
@@ -170,9 +172,12 @@ sets `boot_success=1` on a healthy one, and whether GRUB's counter, with the tim
 returns a deployment that never reaches user space, where greenboot cannot run, to the previous
 one.
 
-**Run.** Until a change ships the mask in the image, S1 masks the timer in the guest before G2
-(`sudo systemctl mask grub-boot-success.timer`; `/etc` carries the mask into each deployment
-staged after it), and G3 records which of the two is in force.
+**Run.** `grub-boot-success.timer` is a user unit (`/usr/lib/systemd/user`, enabled by
+Fedora's user preset), started by every user manager, the greeter's included. Until a change
+ships the mask in the image, S1 masks it for all users in the guest before G2 (`sudo systemctl
+--global mask grub-boot-success.timer`, which links `/etc/systemd/user/grub-boot-success.timer`
+to `/dev/null`; `/etc` carries the link into each deployment staged after it), and G3 records
+which of the two is in force.
 
 - G0, static: `grep -n boot_counter /boot/grub2/grub.cfg /boot/grub2/*.cfg`, `sudo
   grub2-editenv list`, `ls /boot/loader/entries`, `cat /proc/sys/kernel/panic`. Records whether
@@ -184,31 +189,51 @@ staged after it), and G3 records which of the two is in force.
   (screenshot through `console.sh` or the SPICE display); then `sudo systemctl reboot` and
   `bootc status` shows `v2` booted; three `athanor-update-check` runs download nothing
   (`.update` reads `held`).
-- G2, `panic`: stage it, and before the reboot record `sudo grub2-editenv list` (the
-  `boot_counter` and `greenboot_next_deployment_id` that staging set); apply it; watch
-  `console.log` for 15 minutes and count `Kernel panic` lines and GRUB menus; record which
-  deployment is running at the end, then `bootc status` and, after `sudo systemctl reboot`,
-  which deployment boots. `panic=10` is the kernel's panic setting: it restarts a kernel that has
+- G2, `panic`: stage it and apply it; watch `console.log` for 15 minutes and count `Kernel
+  panic` lines and GRUB menus; record which deployment is running at the end, then `bootc
+  status` and, after `sudo systemctl reboot`, which deployment boots. The `boot_counter` that
+  staging sets is not observable at its starting value: greenboot writes it during the shutdown
+  that finalises the staged deployment, after the last moment the guest can be read, and GRUB
+  decrements it before Linux runs. S1 therefore reads `sudo grub2-editenv list` (`boot_counter`,
+  `boot_success`, `greenboot_next_deployment_id`) on the first boot that reaches user space, the
+  return, before greenboot's units run if the console allows it, records it as the value after
+  GRUB's decrements, and takes the starting value from the count of `Kernel panic` lines. After
+  the return, three `athanor-update-check` runs download nothing again (`doc_recovery.md`
+  acceptance 10); a download is recorded as a finding for R5, not a failure of G2. `panic=10` is the kernel's panic setting: it restarts a kernel that has
   already died, standing in for the person's power cycle, and is not a reboot of a running
   system; the 1.0 image carries no `panic=` karg.
-- G3, the mask: on a good deployment, `systemctl is-enabled grub-boot-success.timer` reads
-  `masked` and `systemctl list-timers --all` does not list it; records whether the mask comes
-  from the image or from the guest's `/etc`.
-- G4, greenboot's success mark: on a healthy deployment just applied (`v2` in G1, or the return
-  of G2), log in and wait three minutes, then `sudo grub2-editenv list` reads `boot_success=1`
-  and no `boot_counter`, with `greenboot-healthcheck.service` passed in `journalctl -b`. The
-  greenboot-rs README says its success path does both; G4 records whether Fedora 45's
-  greenboot-rs does it by itself or needs a unit that Athanor ships (P4a input).
+- G3, the mask: on a good deployment, in the logged-in session, `systemctl --user is-enabled
+  grub-boot-success.timer` reads `masked` and `systemctl --user list-timers --all` does not
+  list it. `ls -l /usr/lib/systemd/user/grub-boot-success.timer
+  /etc/systemd/user/grub-boot-success.timer` and `sudo ostree admin config-diff | grep
+  grub-boot-success` record where the link to `/dev/null` lives: in `/usr/lib/systemd/user`,
+  or in `/etc/systemd/user` from the image (`/usr/etc`), the mask comes from the image; in
+  `/etc/systemd/user` as a local addition, from the guest.
+- G4, greenboot's success mark, apart from the timer: on a healthy deployment just applied
+  (`v2` in G1, or the return of G2), with the mask in force, poll over SSH until
+  `systemctl is-active greenboot-healthcheck.service` reads `active`, then at once read `sudo
+  grub2-editenv list`: `boot_success=1` and no `boot_counter`. The read falls within two
+  minutes of the first user manager's start (`systemctl show -p ActiveEnterTimestamp
+  'user@*.service'`, the greeter's included), so no session timer could have fired even
+  unmasked; the timestamps are recorded. The greenboot-rs README says its success path does
+  both; G4 records whether Fedora 45's greenboot-rs does it by itself or needs a unit that
+  Athanor ships (P4a input). Control, one boot: `sudo systemctl --global unmask
+  grub-boot-success.timer`, reboot, wait for greenboot as above, `sudo grub2-editenv -
+  set boot_success=0`, log in and wait three minutes; `sudo grub2-editenv list` reads
+  `boot_success=1` and `journalctl --user -u grub-boot-success.service` shows the run, which
+  shows the timer sets the flag on its own. Then the mask again, and G3 once more.
 
 **Pass.** G1 as written in `doc_recovery.md` acceptance 7, 8 and 10. G2: with the timer masked,
 after the tries are spent GRUB boots the previous deployment, `v2`, with no console step (no
-key pressed, no menu entry chosen), and the boot the person starts next is `v2` again. G3: the
-timer is masked. G4: a healthy deployment reads `boot_success=1`, set by greenboot. G0 is a
-record.
+key pressed, no menu entry chosen), and the boot the person starts next is `v2` again; its
+three update checks are a record. G3: the user timer is masked. G4: a healthy deployment reads
+`boot_success=1` before any session timer could fire, and the control shows the timer setting
+it when unmasked. G0 is a record.
 **Fail.** G1: any reboot nobody asked for, no mark, a return to the bad digest, or a download
 of it. G2: the `panic` deployment boots again once its tries are spent, the return needs a
-console step, or a later boot returns to it. G3: the timer runs. G4: `boot_success` stays unset
-on a healthy deployment, which would make the counter fall back from a good update.
+console step, or a later boot returns to it. G3: the timer runs in a user manager. G4:
+`boot_success` is unset at the early read on a healthy deployment, which would make the counter
+fall back from a good update unless Athanor ships a unit.
 
 **Answer.** Not run.
 
@@ -397,6 +422,10 @@ with the override prints `4 4` for the two variables; `taskset` on the host does
 rootless container, which still saw 16 CPUs).
 
 ```
+# Refusal step: do not run this block until section 5, point 4 is done (local-image.sh reads
+# ACC_PORT and ACC_REGISTRY). S1 never builds on the shared registry on port 5000.
+ACC_PORT=5001 ACC_REGISTRY=localhost:5001/s1
+[ "$ACC_PORT" != 5000 ] || { echo 'S1: port 5000 is the shared registry, stop' >&2; exit 1; }
 git -C /var/home/hr-mes/athanor worktree add --detach /var/tmp/athanor-wt/s1-build origin/iso-v0
 W=/var/tmp/athanor-wt/s1-build
 sed -i -e 's|^FROM quay.io/fedora-ostree-desktops/base-atomic:43@sha256:[0-9a-f]* AS system$|FROM quay.io/fedora-ostree-desktops/base-atomic:45@sha256:2c4fec150532fe1f3c30645f532e63c1ff3280791828c31364aedbd616c8c842 AS system|' \
@@ -404,9 +433,10 @@ sed -i -e 's|^FROM quay.io/fedora-ostree-desktops/base-atomic:43@sha256:[0-9a-f]
 git -C "$W" diff --numstat                    # 2 2 system/Containerfile
 mkdir -p /var/tmp/athanor-s1
 printf '[containers]\nenv = ["CARGO_BUILD_JOBS=4", "RPM_BUILD_NCPUS=4"]\n' > /var/tmp/athanor-s1/jobs.conf
-CONTAINERS_CONF_OVERRIDE=/var/tmp/athanor-s1/jobs.conf bash "$W/scripts/devvm/local-image.sh" athanor-update
-# -> RPMs in $W/.scratch/local-image/rpms, the image localhost:5000/acc/athanor-system:<tag>,
-#    with <tag> in $W/.scratch/local-image/tag; the address is fixed in the script (section 5, point 4)
+ACC_PORT=$ACC_PORT ACC_REGISTRY=$ACC_REGISTRY CONTAINERS_CONF_OVERRIDE=/var/tmp/athanor-s1/jobs.conf \
+  bash "$W/scripts/devvm/local-image.sh" athanor-update
+# -> RPMs in $W/.scratch/local-image/rpms, the image localhost:5001/s1/athanor-system:<tag>,
+#    with <tag> in $W/.scratch/local-image/tag
 ```
 
 If the tier 3 transaction fails on Fedora 45 (the tier repositories hold fc43 builds), the
@@ -424,7 +454,7 @@ own, `athanor-s1-registry` on port 5001 with the prefix `s1` (section 5, point 4
 
 ```
 ACC_PORT=5001 ACC_REGISTRY=localhost:5001/s1 \
-ACC_BASE=localhost:5000/acc/athanor-system:$(cat "$W/.scratch/local-image/tag") \
+ACC_BASE=localhost:5001/s1/athanor-system:$(cat "$W/.scratch/local-image/tag") \
 ACC_RPM_DIR=$W/.scratch/local-image/rpms ACC_STATE=/var/tmp/athanor-s1/acceptance \
   bash "$W/scripts/devvm/acceptance/images.sh"
 # then bad-greeter, panic, unsigned-kernel and etc-v2 FROM localhost:5001/s1/athanor-system:v2,
