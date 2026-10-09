@@ -164,6 +164,19 @@ def compare_trees(repo, sha, head, base):
     return parent, trees
 
 
+def build_inputs(repo, rev, tmp):
+    """The JSON build-inputs.py prints in the kernel directory of REV."""
+    archive = subprocess.run(
+        ["git", "-C", str(repo), "archive", rev, "forge/specs/azoth"], check=True, capture_output=True
+    ).stdout
+    with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+        tar.extractall(tmp, filter="data")
+    out = subprocess.run(
+        [sys.executable, "-B", str(pathlib.Path(tmp) / BUILD_INPUTS)], check=True, capture_output=True, text=True
+    ).stdout
+    return json.loads(out)
+
+
 def decide(api, repo, repository, sha, nvr, tmp):
     """The decision for a promotion; raises Refused when a condition does not hold."""
     tmp = pathlib.Path(tmp)
@@ -184,6 +197,11 @@ def decide(api, repo, repository, sha, nvr, tmp):
     base_unchanged(api, repository, pull["number"])
     parent, decision["trees"] = compare_trees(repo, sha, head, base)
     decision["pushed"] = {"commit": sha, "parent": parent}
+    inputs = build_inputs(repo, sha, tmp / "pushed")
+    if build_inputs(repo, head, tmp / "head") != inputs:
+        raise Refused("condition 3: build-inputs.py gives other inputs at the run's head than at the pushed commit")
+    canonical = json.dumps(inputs, sort_keys=True, separators=(",", ":")).encode()
+    decision["build_inputs_sha256"] = hashlib.sha256(canonical).hexdigest()
     return decision
 
 

@@ -281,5 +281,20 @@ class ConditionTwoTest(Case):
         self.assertRefused(self.run_promotion(shas, api, checkout), "error: CalledProcessError")
 
 
+class ConditionThreeTest(Case):
+    def test_build_inputs_run_in_the_kernel_directory_of_each_commit(self):
+        shas, api, checkout = self.promote()
+        inputs = promotion.build_inputs(checkout, shas["pushed"], self.tmp / "inputs")
+        self.assertEqual(inputs, {"pins": BUMP[PINS]})
+
+    def test_build_inputs_that_differ_at_the_pushed_commit_build(self):
+        # With the kernel directory equal (condition 2) the inputs agree by construction; the
+        # check stands as the ADR states it, so its refusal is driven directly.
+        shas, api, checkout = self.promote()
+        with mock.patch.object(promotion, "build_inputs", side_effect=[{"pins": "a"}, {"pins": "b"}]):
+            decision = self.run_promotion(shas, api, checkout)
+        self.assertRefused(decision, "condition 3: build-inputs.py")
+
+
 if __name__ == "__main__":
     unittest.main()
