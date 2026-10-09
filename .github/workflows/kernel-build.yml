@@ -361,6 +361,14 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
+      - name: Publish only from a trusted branch (system/kernel-artifacts.sh)
+        # The signer identity the images trust, checked before anything is pushed rather than
+        # only by the verification after it.
+        run: |
+          identity=$(bash system/kernel-artifacts.sh identity kernel)
+          [[ "${GITHUB_SERVER_URL}/${GITHUB_WORKFLOW_REF}" =~ $identity ]] \
+            || { echo "::error::${GITHUB_WORKFLOW_REF} is not a trusted branch of kernel-build.yml; nothing is published"; exit 1; }
+
       - name: Registry (system/kernel-artifacts.sh)
         run: echo "IMAGE=$(bash system/kernel-artifacts.sh registry)/azoth" >> "$GITHUB_ENV"
 
