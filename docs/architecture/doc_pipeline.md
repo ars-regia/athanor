@@ -884,7 +884,7 @@ security update (Art. 13(8), (9); Annex I Part II(8)); it is never bundled behin
 feature confirmation, and update control follows ADR-0082: automatic by default, a
 postpone limited in time, an opt-out in Settings with a warning (Annex I Part I(2)(c)).
 
-**PL42. The evidence bundle.** Each promotion publishes a GitHub Release named after the
+**PL42. The evidence bundle.** From release 0.5, each promotion publishes a GitHub Release named after the
 version (UT9), with the SBOMs, provenance, VSA, scan report, VEX, `promotion.json` and
 the acceptance evidence, plus a `bundle.sha256` file that `promote.yml` signs keylessly (Sigstore, the workflow
 identity), since the bundle exists only at promotion, long after the release's signing
