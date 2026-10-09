@@ -18,5 +18,6 @@ A runbook says how to act. What a component must do lives in its spec under
 | [secrets.md](secrets.md) | Every GitHub secret, variable and environment the pipeline uses; how each key is generated, where its public half lives, rotation, custody, recovery after a loss (SEC, VAR, ENV, KC, RL) |
 | [transfer-to-organisation.md](transfer-to-organisation.md) | Moving the repository to the `ars-regia` organisation, and what a later rename costs (TO1 to TO8) |
 | [derived-images.md](derived-images.md) | Building, signing and following an image of your own `FROM` an Athanor image, and what it gives up (ADR-0083) |
+| [audits.md](audits.md) | How audit findings become checks, when audits run, what they re-examine |
 
 `rebuild.md` (rebuild from zero on a new organisation and new machines) is planned in the same phase.

@@ -2,7 +2,7 @@
 
 - Purpose: orient a newcomer or a model in one read, and record the separation of the image build from `system/`.
 - Owner: maintainer.
-- Status: top-level map is current (verified with `ls` and `git ls-files` on origin/iso-v0, 2026-10-06); the target layout is decided ([ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md), 2026-10-08) and not executed yet.
+- Status: top-level map is current (verified with `ls` and `git ls-files` on origin/iso-v0, 2026-10-09); the target layout is decided ([ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md), 2026-10-08) and not executed yet.
 - Decision: A2-36 (d).
 - Depends on: [doc_system_image.md](../architecture/doc_system_image.md), [doc_build_system.md](../architecture/doc_build_system.md).
 
@@ -11,9 +11,11 @@
 | Directory or file | Purpose | Owner |
 | --- | --- | --- |
 | `system/athanor-*`, `system/confidential_computing` | Rust crates of the shell and platform services, attestation | `.github/CODEOWNERS` (default owner, plus per-crate entries) |
-| `system/` (loose files) | The image build: `Containerfile`, `build-image.sh`, `sign-images.sh`, `promote.sh`, `package-delta.sh`, `image-digests.sh`, `shared-layers.sh`, `kernel-artifacts.sh`, `athanor-install.ks`, `keys/`, `cosign.pub`, `sysctl.d/`, `disk_config/`, `nvidia/`, `scripts/`, `tests/`, `Justfile` | `/system/Containerfile` in CODEOWNERS, else default owner |
+| `system/` (loose files) | The image build: `Containerfile`, `build-image.sh`, `sign-images.sh`, `promote.sh`, `package-delta.sh`, `image-digests.sh`, `shared-layers.sh`, `kernel-artifacts.sh`, `athanor-install.ks`, `keys/`, `sysctl.d/`, `disk_config/`, `nvidia/`, `scripts/`, `tests/`, `Justfile` | `/system/Containerfile` in CODEOWNERS, else default owner |
 | `forge/` | RPM build system: `specs/` (packages and the Azoth kernel), `scripts/`, `builder/`, `test/` | `/forge/` in CODEOWNERS |
 | `docs/architecture/` | Specifications, one `doc_<area>.md` each | maintainer |
+| `docs/decisions/` | Decision records, indexed in `docs/decisions/README.md` | maintainer |
+| `docs/operations/` | Runbooks and the team model: contributing, ownership, branching, secrets, audits | maintainer |
 | `docs/superpowers/` | Plans in progress and dated reviews | author of the plan |
 | `scripts/` | Project tooling: `verify.py`, `devvm/`, `runner/`, `session-memory/`, `cosmic-comp-rebase/`, `rename.py` | maintainer |
 | `experimental/` | `EXEMPT`: workspace crates that no package ships | maintainer |
@@ -21,6 +23,7 @@
 | `.claude/` | Agent configuration shared by the team | maintainer |
 | `Cargo.toml`, `Cargo.lock`, `deny.toml`, `.cargo/` | Rust workspace | maintainer |
 | `flake.nix`, `flake.lock` | Nix builder environment | maintainer |
+| `fuzz/` | cargo-fuzz targets and their corpus, a workspace of its own | maintainer |
 | `Justfile` | Entry points: lint, format, syntax check, build | maintainer |
 
 Generated and not tracked (after this change): `docs/architecture/graph-vaults/`, `docs/architecture/graph-pages/`, `.graphify/`. Regenerate with `/graphify`.
@@ -38,7 +41,7 @@ image/
   Containerfile  Justfile  README.md
   build-image.sh  sign-images.sh  promote.sh  package-delta.sh
   image-digests.sh  shared-layers.sh  kernel-artifacts.sh
-  athanor-install.ks  cosign.pub  keys/  sysctl.d/  disk_config/
+  athanor-install.ks  keys/  sysctl.d/  disk_config/
   nvidia/  scripts/  tests/
 system/         crates, confidential_computing/ (units and sources only)
 ```
@@ -132,3 +135,11 @@ Run after the open pull requests merge, because the moved files are touched by m
 5. Run `python3 scripts/verify.py`, `python3 -B -m unittest discover -s scripts/tests`, `python3 -B -m unittest discover -s image/tests`, `just lint`, and compare with origin/iso-v0: no new failure.
 6. Let CI build the image once on the branch. Do not merge before the system image check is green.
 7. Merge as one squash commit, so `git log --follow` and the revert both stay a single step.
+
+## Naming
+
+Crates and packages are named `athanor-*`; no `ermete-*` crate remains (the project was
+Ermete OS until 2026-09-05, commit `02bf9c05`). Exceptions: the crates `xdg-desktop-portal-athanor` (its spec directory is
+`forge/specs/athanor-xdg-desktop-portal-athanor`) and `calmo-cosmic-theme` (`forge/tools`),
+and the specs of upstream software `azoth`, `cosmic-comp`, `greenboot-rs` and `polkit`.
+Rename nothing on your own.

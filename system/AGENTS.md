@@ -5,12 +5,13 @@ pipeline and installation; the image is specified in
 `docs/architecture/doc_system_image.md`.
 
 - **Stop and ask** before editing `athanor-bus-api/src/polkit.rs`, `confidential_computing/`,
-  `keys/`, `cosign.pub`, `sign-images.sh` or `promote.sh`.
+  `keys/`, `sign-images.sh` or `promote.sh`.
 - **Enable units with a preset file, never `systemctl enable` in the `Containerfile`.** The
   `Containerfile` runs `systemctl preset-all` after it and again in the GPU stages, and
   Fedora's `99-default-disable.preset` (`disable *`) then disables every unit no preset
-  names (`docs/architecture/doc_tetragon.md`). The `Containerfile` still enables three units
-  that way (`grep -n 'systemctl enable' system/Containerfile`): known debt, tracked in `doc_tetragon.md`, not a pattern to copy.
+  names (`docs/architecture/doc_tetragon.md`). One line of the `Containerfile` still enables
+  two units that way (`grep -n 'systemctl enable' system/Containerfile`): known debt, tracked
+  in `doc_tetragon.md`, not a pattern to copy.
 - **A workspace crate ships in a package** or is listed in `experimental/EXEMPT`
   (`verify.py shipped`).
 - **No runtime path into the build tree or `/tmp`.** Load artefacts from installed paths,
@@ -32,8 +33,9 @@ pipeline and installation; the image is specified in
 ```bash
 python3 scripts/verify.py paths shipped polkit polkit-subject boundary panics
 python3 -B -m unittest discover -s system/tests
+bash -n <script>   # every system/*.sh you change
 cargo test -p <crate>
 ```
 
 Crates that link GTK build and test in the shell rig:
-`forge/test/shell/rig.sh cargo test -p <crate>`.
+`forge/test/shell/rig.sh cargo test -p <crate>`, after `forge/test/shell/rig.sh build-image`.

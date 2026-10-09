@@ -5,13 +5,19 @@ paths:
   - "forge/specs/athanor-dock/**"
   - "forge/specs/athanor-launcher/**"
   - "forge/specs/athanor-layout-chooser/**"
-  - "forge/specs/athanor-greeter/**"
   - "forge/specs/athanor-greeter-ui/**"
-  - "forge/specs/athanor-shell-rs/**"
+  - "forge/specs/athanor-control-center/**"
+  - "forge/specs/athanor-desktop-ui/**"
+  - "forge/specs/athanor-calmo/**"
+  - "forge/specs/athanor-xdg-desktop-portal-athanor/**"
   - "system/athanor-compositor-client/**"
   - "system/athanor-layout/**"
-  - "system/athanor-greeter/**"
   - "system/athanor-style/**"
+  - "system/athanor-portal/**"
+  - "system/athanor-controls/**"
+  - "system/athanor-preview/**"
+  - "system/athanor-preview-render/**"
+  - "system/athanor-apps/**"
 ---
 
 # Shell, GTK and COSMIC
