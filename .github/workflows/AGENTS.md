@@ -11,8 +11,8 @@ there, or when the document names a workflow file that does not exist.
   only on GitHub.
 - **No literal registry owner.** Images come from `REGISTRY_HOST` and the repository owner,
   never `ghcr.io/ars-regia` written out (`verify.py registry`).
-- **Stop and ask** before changing a job that uses the `signing-kernel`, `signing-images`,
-  `signing` or `bridge` environment, or the secrets they hold (`docs/operations/secrets.md`).
+- **Stop and ask** before changing a job that uses the `signing-kernel`, `signing-images`
+  or `signing` environment, or the secrets they hold (`docs/operations/secrets.md`).
 - **Signing secrets go by name, never `secrets: inherit`.** A signing job reads its secret only
   in the `env` of the step that runs a sign script, in a workflow that is not `workflow_call`;
   signing jobs live in `athanor-forge-orchestrator.yml` (`verify.py workflows`, D43).
