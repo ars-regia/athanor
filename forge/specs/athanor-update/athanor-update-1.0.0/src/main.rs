@@ -104,8 +104,8 @@ fn main() -> ExitCode {
             }
         }
         Command::Migrate => {
-            // Nothing to move and nothing to publish: bootc is not asked (migrate::finished).
-            if migrate::finished(&policy::in_force(&ctx.policy), &store) {
+            // Nothing to move and nothing to publish: bootc is not asked.
+            if store.migrated() {
                 tracing::info!("migration: done");
                 return ExitCode::SUCCESS;
             }

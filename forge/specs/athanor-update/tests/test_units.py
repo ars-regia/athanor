@@ -66,7 +66,7 @@ class Units(unittest.TestCase):
         lines = directives("athanor-update-migrate.timer")
         for directive in ("OnBootSec=6h", "OnUnitActiveSec=6h"):
             self.assertIn(directive, lines)
-        # A stamped machine on an image of the previous owner still moves (UD49).
+        # The unit reads the stamp itself and ends at it without asking bootc (UT4).
         for unit in ("athanor-update-migrate.timer", "athanor-update-migrate.service"):
             self.assertFalse(any("/var/lib/athanor-update/migrated" in line for line in directives(unit)), unit)
 

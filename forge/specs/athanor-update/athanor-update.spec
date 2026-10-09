@@ -4,7 +4,7 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-update
 Version:        1.0.0
-Release:        9%{?dist}
+Release:        10%{?dist}
 Summary:        Athanor system image updates and trust state
 
 License:        GPL-3.0-or-later
@@ -74,6 +74,12 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
 %doc /usr/share/doc/athanor-update/RECOVERY.md
 
 %changelog
+* Fri Oct 09 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
+- The migration to a project's new owner is removed (ADR-0103 D4, issue #349): `moved-from`,
+  `render-policy --moved-from`, the successor lookup and the owner-moved, owner-moved-waiting
+  and owner-moved-held reasons. The migration to the signed `:stable` reference (UT4) and the
+  pinned-build reason stay.
+
 * Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-9
 - `athanor-update migrate` moves a machine that follows the project's previous owner (listed
   in `/usr/share/athanor/containers/moved-from`, which render-policy writes from
