@@ -13,6 +13,7 @@ import http.server
 import importlib.util
 import io
 import json
+import lzma
 import os
 import pathlib
 import subprocess
@@ -410,6 +411,12 @@ class ErrorTest(Case):
                 shas, api, checkout = self.promote()
                 api.error = error
                 self.assertRefused(self.run_promotion(shas, api, checkout), "error: ")
+
+    def test_an_error_of_any_library_builds(self):
+        # A corrupt LZMA member raises lzma.LZMAError, which no list of zipfile errors names.
+        shas, api, checkout = self.promote()
+        api.error = lzma.LZMAError("Corrupt input data")
+        self.assertRefused(self.run_promotion(shas, api, checkout), "error: LZMAError: Corrupt input data")
 
     def test_a_corrupt_member_whose_archive_digest_matches_builds(self):
         shas, api, checkout = self.promote()

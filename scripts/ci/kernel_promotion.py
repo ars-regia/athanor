@@ -29,7 +29,6 @@ Writes DIR/decision.json and DIR/summary.md; when promoted, the artifact's files
 
 import argparse
 import hashlib
-import http.client
 import io
 import json
 import os
@@ -42,7 +41,6 @@ import tempfile
 import urllib.error
 import urllib.request
 import zipfile
-import zlib
 
 BRANCH = "iso-v0"
 WORKFLOW = ".github/workflows/pr.yml"
@@ -58,21 +56,6 @@ COMPARED = (
 )
 BUILD_INPUTS = "forge/specs/azoth/build-inputs.py"
 BASE_EVENTS = ("base_ref_changed", "base_ref_force_pushed")
-# Failures of the API, of git or of the artifact: each one means "build", never a red job.
-ERRORS = (
-    OSError,
-    http.client.HTTPException,
-    ValueError,
-    KeyError,
-    TypeError,
-    subprocess.CalledProcessError,
-    zipfile.BadZipFile,
-    zipfile.LargeZipFile,
-    zlib.error,
-    EOFError,
-    RuntimeError,
-    tarfile.TarError,
-)
 
 
 class Refused(Exception):
@@ -307,7 +290,9 @@ def promote(api, repo, repository, sha, nvr, extract):
             return decision
     except Refused as refused:
         return {"promoted": False, "reason": str(refused)}
-    except ERRORS as error:
+    # Any other failure, of the API, of git or of any archive library, means "build" too, never a
+    # red job; the reason names the exception and lands in the decision and the summary.
+    except Exception as error:  # noqa: BLE001 - the boundary of "any failure means build"
         detail = getattr(error, "stderr", None) or ""
         if isinstance(detail, bytes):
             detail = detail.decode(errors="replace")
