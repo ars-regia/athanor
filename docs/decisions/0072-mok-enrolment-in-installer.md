@@ -2,7 +2,7 @@
 id: A2-35
 title: "MOK enrolment page in the installer"
 date: 2026-10-06
-status: accepted
+status: amended by ADR-0103
 issues: [131, 145]
 areas: [signing, installer]
 ---

@@ -2,7 +2,7 @@
 id: ADR-0078
 title: "Fedora 45 is the next base, with Fedora 44 as the fallback"
 date: 2026-10-06
-status: accepted
+status: amended by ADR-0103
 issues: [223]
 areas: [platform]
 ---

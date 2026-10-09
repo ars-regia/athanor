@@ -19,5 +19,6 @@ A runbook says how to act. What a component must do lives in its spec under
 | [transfer-to-organisation.md](transfer-to-organisation.md) | Moving the repository to the `ars-regia` organisation, and what a later rename costs (TO1 to TO8) |
 | [derived-images.md](derived-images.md) | Building, signing and following an image of your own `FROM` an Athanor image, and what it gives up (ADR-0083) |
 | [audits.md](audits.md) | How audit findings become checks, when audits run, what they re-examine |
+| [release-1.0.md](release-1.0.md) | What 1.0 contains, the acceptance check of each item, what moves to 1.1, the order of work (ADR-0103) |
 
 `rebuild.md` (rebuild from zero on a new organisation and new machines) is planned in the same phase.

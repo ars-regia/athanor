@@ -75,7 +75,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | W1-LANGUAGES | 0005 | [doc_languages decisions (wave 1)](0005-wave1-languages.md) | accepted | shell, i18n |
 | W1-FILES | 0006 | [doc_files decisions (wave 1)](0006-wave1-files.md) | accepted | shell, files |
 | W1-RULINGS | 0007 | [Cross-document rulings after wave 1](0007-wave1-cross-document-rulings.md) | amended by A2-6, A2-7 | shell, security |
-| W1-FOLLOWUP | 0008 | [Follow-up decisions after wave 1](0008-wave1-follow-up.md) | accepted | shell, security, storage |
+| W1-FOLLOWUP | 0008 | [Follow-up decisions after wave 1](0008-wave1-follow-up.md) | amended by ADR-0103 | shell, security, storage |
 | W2-PORTAL | 0009 | [doc_portal decisions (wave 2)](0009-wave2-portal.md) | accepted | shell, portal |
 | W2-SETTINGS | 0010 | [doc_settings decisions (wave 2)](0010-wave2-settings.md) | accepted | shell, settings, security |
 | W2-FIRST-RUN | 0011 | [doc_first_run decisions (wave 2)](0011-wave2-first-run.md) | accepted | shell, installer, security |
@@ -115,12 +115,12 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-10 | 0045 | [Cleanup of dead packages, documents and units](0045-cleanup-of-dead-components.md) | amended by ADR-0073, ADR-0091 | packages, docs |
 | A2-11 | 0046 | [DNS model: strict DNS over TLS](0046-dns-strict-dot.md) | amended by ADR-0079 | network, security |
 | A2-12 | 0047 | [Fleet identity and transport](0047-fleet-transport-and-identity.md) | accepted | fleet, network |
-| A2-10b | 0048 | [Tetragon made real](0048-tetragon-made-real.md) | accepted | security, kernel |
+| A2-10b | 0048 | [Tetragon made real](0048-tetragon-made-real.md) | amended by ADR-0103 | security, kernel |
 | A2-10c | 0049 | [Keylime stays installed and disabled](0049-keylime-installed-disabled.md) | accepted | security, fleet |
 | A2-13 | 0050 | [nixpkgs pin and Nix hardening](0050-nixpkgs-pin-and-nix-hardening.md) | accepted | nix, ci |
 | A2-14 | 0051 | [Scope of the own applications](0051-own-apps-scope.md) | accepted | shell, packages |
 | A2-15 | 0052 | [Firefox moves to Flatpak](0052-firefox-as-flatpak.md) | accepted | packages |
-| A2-16 | 0053 | [Nix for every user](0053-nix-for-every-user.md) | accepted | nix, packages, security |
+| A2-16 | 0053 | [Nix for every user](0053-nix-for-every-user.md) | amended by ADR-0103 | nix, packages, security |
 | A2-17 | 0054 | [Audience and support window](0054-audience-and-support-window.md) | amended by ADR-0081 | product, update |
 | A2-18 | 0055 | [Governance](0055-governance.md) | accepted | docs, security, process |
 | A2-19 | 0056 | [No telemetry; report a problem](0056-no-telemetry.md) | accepted | security, shell |
@@ -136,37 +136,38 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-29 | 0066 | [Threat model path lists](0066-threat-model-path-lists.md) | accepted | security |
 | A2-30 | 0067 | [Offline help with Yelp](0067-offline-help-yelp.md) | accepted | docs, shell |
 | A2-31 | 0068 | [Session memory budget and prompter timing](0068-session-budget-and-prompter-timing.md) | accepted | session, security |
-| A2-32 | 0069 | [Tetragon specification decisions](0069-tetragon-policy-decisions.md) | accepted | security, kernel |
+| A2-32 | 0069 | [Tetragon specification decisions](0069-tetragon-policy-decisions.md) | amended by ADR-0103 | security, kernel |
 | A2-33 | 0070 | [Report-a-problem packaging](0070-report-a-problem-packaging.md) | accepted | shell, ci |
 | A2-34 | 0071 | [Documentation and team model](0071-documentation-and-team-model.md) | amended by ADR-0074 | docs, process, ci |
-| A2-35 | 0072 | [MOK enrolment page in the installer](0072-mok-enrolment-in-installer.md) | accepted | signing, installer |
+| A2-35 | 0072 | [MOK enrolment page in the installer](0072-mok-enrolment-in-installer.md) | amended by ADR-0103 | signing, installer |
 | ADR-0073 | 0073 | [Retire components without a product role](0073-component-verdicts.md) | amended by ADR-0087 | platform, security, build |
 | ADR-0074 | 0074 | [Agent and contributor model](0074-agent-and-contributor-model.md) | accepted | docs |
 | ADR-0075 | 0075 | [Engineering gates](0075-engineering-gates.md) | accepted | build, security |
 | ADR-0076 | 0076 | [Platform scope for 1.0](0076-platform-scope-for-1-0.md) | accepted | platform, security, build, docs |
 | ADR-0077 | 0077 | [Desktop decisions from Audit 3](0077-desktop-decisions.md) | accepted | shell, apps, security |
-| ADR-0078 | 0078 | [Fedora 45 is the next base, with Fedora 44 as the fallback](0078-fedora-release-target.md) | accepted | platform |
-| ADR-0079 | 0079 | [Captive portals under strict DNS over TLS](0079-captive-portals-under-strict-dot.md) | accepted | network, security |
+| ADR-0078 | 0078 | [Fedora 45 is the next base, with Fedora 44 as the fallback](0078-fedora-release-target.md) | amended by ADR-0103 | platform |
+| ADR-0079 | 0079 | [Captive portals under strict DNS over TLS](0079-captive-portals-under-strict-dot.md) | amended by ADR-0103 | network, security |
 | ADR-0080 | 0080 | [Pipeline architecture](0080-pipeline-architecture.md) | amended by ADR-0088, ADR-0098 | build, signing, security |
-| ADR-0081 | 0081 | [CRA compliance posture](0081-cra-compliance-posture.md) | accepted | security, update, product |
+| ADR-0081 | 0081 | [CRA compliance posture](0081-cra-compliance-posture.md) | amended by ADR-0103 | security, update, product |
 | ADR-0082 | 0082 | [Update control: postpone and opt-out](0082-update-control.md) | amended by ADR-0094 | update, security |
 | ADR-0083 | 0083 | [One supported desktop; derived images stay open](0083-one-desktop-derived-images-open.md) | accepted | product, shell, update |
 | ADR-0084 | 0084 | [The key custody model is definitive for the single-maintainer phase](0084-key-custody-model.md) | amended by ADR-0098 | security, process |
-| ADR-0085 | 0085 | [Keyring prompter: the secret exchange comes from upstream oo7](0085-keyring-prompter-secret-exchange-source.md) | accepted | security, shell |
+| ADR-0085 | 0085 | [Keyring prompter: the secret exchange comes from upstream oo7](0085-keyring-prompter-secret-exchange-source.md) | amended by ADR-0103 | security, shell |
 | ADR-0086 | 0086 | [toolbox is not isolation; podman as container_t or the dev VM is](0086-toolbox-is-not-isolation.md) | accepted | security, apps |
-| ADR-0087 | 0087 | [Keep athanor-attestation outside the workspace until its Keylime rewrite](0087-attestation-outside-the-workspace.md) | accepted | security, build |
+| ADR-0087 | 0087 | [Keep athanor-attestation outside the workspace until its Keylime rewrite](0087-attestation-outside-the-workspace.md) | amended by ADR-0103 | security, build |
 | ADR-0088 | 0088 | [Pipeline revision 2](0088-pipeline-revision-2.md) | amended by ADR-0098 | build, signing, security |
-| ADR-0089 | 0089 | [Defaults that contact or listen are off until the person turns them on](0089-defaults-that-contact-or-listen.md) | accepted | security, network |
+| ADR-0089 | 0089 | [Defaults that contact or listen are off until the person turns them on](0089-defaults-that-contact-or-listen.md) | amended by ADR-0103 | security, network |
 | ADR-0090 | 0090 | [Account lockout through authselect's with-faillock](0090-account-lockout-faillock.md) | accepted | security |
 | ADR-0091 | 0091 | [QEMU stays in the image for the runner and the development VM](0091-qemu-in-the-image.md) | accepted | packages |
 | ADR-0092 | 0092 | [Carry cosmic-comp PR #1441 as our own patch; upstream first, never dependent on upstream](0092-carry-pr-1441-upstream-first.md) | accepted | security, shell |
-| ADR-0093 | 0093 | [Desktop specifications, review batch 1, approved](0093-desktop-specs-batch-1.md) | accepted | shell, session, security |
+| ADR-0093 | 0093 | [Desktop specifications, review batch 1, approved](0093-desktop-specs-batch-1.md) | amended by ADR-0103 | shell, session, security |
 | ADR-0094 | 0094 | [Update control: the settled points of the postpone and the opt-out](0094-update-control-settled-points.md) | accepted | update, security |
-| ADR-0095 | 0095 | [Specifications, review batches 2 and 3, approved](0095-specs-review-batches-2-3.md) | accepted | kernel, session, security, storage, desktop |
+| ADR-0095 | 0095 | [Specifications, review batches 2 and 3, approved](0095-specs-review-batches-2-3.md) | amended by ADR-0103 | kernel, session, security, storage, desktop |
 | ADR-0096 | 0096 | [Kernel artefacts are signed with the project key, not the workflow's OIDC identity](0096-kernel-artefacts-project-key.md) | amended by ADR-0098 | security, pipeline |
 | ADR-0097 | 0097 | [Component owners, 1.0 execution control, the Firefox switch and one process per surface](0097-owners-execution-firefox-processes.md) | accepted | security, kernel, shell, apps, governance |
-| ADR-0098 | 0098 | [Update delivery, CI and operations decisions (batch 4)](0098-update-delivery-ci-operations-batch-4.md) | accepted | update, build, signing, process |
+| ADR-0098 | 0098 | [Update delivery, CI and operations decisions (batch 4)](0098-update-delivery-ci-operations-batch-4.md) | amended by ADR-0103 | update, build, signing, process |
 | ADR-0099 | 0099 | [Desktop specs review (batch 4): accessibility, overview, visual language](0099-desktop-specs-batch-4.md) | accepted | shell, session, security, desktop |
 | ADR-0100 | 0100 | [Notification center revision 2: battery notices in the session daemon](0100-notification-center-rev2.md) | accepted | shell, session, desktop |
-| ADR-0101 | 0101 | [One backup mechanism: athanor-backup, without athanor-timewarp](0101-backup-one-mechanism.md) | accepted | software, backup |
+| ADR-0101 | 0101 | [One backup mechanism: athanor-backup, without athanor-timewarp](0101-backup-one-mechanism.md) | amended by ADR-0103 | software, backup |
 | ADR-0102 | 0102 | [Audit calendar and audit types](0102-audit-calendar.md) | accepted | process, security |
+| ADR-0103 | 0103 | [Audit 5 decisions and the scope of 1.0](0103-audit-5-decisions.md) | accepted | platform, kernel, build, signing, security, shell, apps, docs |

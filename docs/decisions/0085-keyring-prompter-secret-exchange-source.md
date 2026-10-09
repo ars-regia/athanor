@@ -2,7 +2,7 @@
 id: ADR-0085
 title: "Keyring prompter: the secret exchange comes from upstream oo7"
 date: 2026-10-07
-status: accepted
+status: amended by ADR-0103
 issues: [151]
 areas: [security, shell]
 ---

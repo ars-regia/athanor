@@ -2,7 +2,7 @@
 id: ADR-0093
 title: "Desktop specifications, review batch 1, approved"
 date: 2026-10-08
-status: accepted
+status: amended by ADR-0103
 issues: [151, 156, 161]
 areas: [shell, session, security]
 ---
