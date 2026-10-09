@@ -4,7 +4,7 @@
 | --- | --- |
 | Purpose | The branches of the repository today, and a model for a team of 5 to 10 |
 | Owner | the maintainer (`@hr-mes`) |
-| Status | revision 1, 2026-10-06. Section 1 is fact; sections 2 and 3 are _(Proposal for the maintainer)_ |
+| Status | revision 2, 2026-10-08. Section 1 is fact; sections 2 and 3 are decided ([ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md)); the tag, the deletion of `main` and the file changes are not made yet |
 | Depends on | [contributing.md](contributing.md) CT4, [ownership.md](ownership.md) |
 | Defines | BRN1 to BRN6 |
 
@@ -22,10 +22,10 @@ Counts are as of 2026-10-06; the command beside each recomputes it.
 | 29 branches existed on GitHub on 2026-10-06 | `gh api repos/ars-regia/athanor/branches --paginate --jq '.[].name' \| wc -l` |
 | `nix-vanguard.yml` triggers on `main` (and `develop`) only, so a push or pull request to `iso-v0` never runs it | [nix-vanguard.yml](../../.github/workflows/nix-vanguard.yml) lines 5 and 7 |
 | The installer ISO's `:latest` publishes from `refs/heads/main` only, so it does not publish today | [call-system-image.yml](../../.github/workflows/call-system-image.yml) line 314 |
-| The kernel's `:latest` follows the default branch, whatever its name | [kernel-build.yml](../../.github/workflows/kernel-build.yml) lines 316 and 339 |
+| The kernel's `:latest` follows the default branch, whatever its name | [kernel-build.yml](../../.github/workflows/kernel-build.yml) lines 320 and 345 |
 | The image trusts kernels and NVIDIA modules signed by workflows on `refs/heads/iso-v0` or `refs/heads/main` (`KERNEL_TRUSTED_REFS`), and `main` is not protected | [kernel-artifacts.sh](../../system/kernel-artifacts.sh) lines 64 and 73-74 |
 
-## 2. Model _(Proposal)_
+## 2. Model (decided 2026-10-08, [ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md))
 
 - **BRN1. One product branch.** All work merges there. It is the default branch, protected, and required checks guard it.
 - **BRN2. Short-lived topic branches.** One per issue (CT4), opened from the product branch, merged by squash within days, deleted on merge.
@@ -34,16 +34,29 @@ Counts are as of 2026-10-06; the command beside each recomputes it.
 - **BRN5. No long-lived integration branches.** A spec series such as `shell-specs` lands as separate pull requests on the product branch instead.
 - **BRN6. Trusted refs follow the model.** `KERNEL_TRUSTED_REFS` lists the product branch and, when they exist, `release/*` branches; no unprotected branch is trusted.
 
-## 3. The `iso-v0` name _(Proposal)_
+## 3. The `iso-v0` name (decided 2026-10-08, [ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md))
+
+The maintainer chose option A: keep `iso-v0`. Tag `archive/main-2026-08-31` at `4578bb3f` and delete `main`. The name `main` returns with the fresh repository at the 1.0 tag, decided by the maintainer on 2026-10-08. Option B stays below as the rejected alternative, with its consequences.
 
 | Option | What | Cost |
 | --- | --- | --- |
-| A. Keep `iso-v0` | Archive `main` as the tag `archive/main-2026-08-31` (at `4578bb3f`) and delete the branch | Small. The name keeps describing a milestone that the product branch outlives |
-| B. Rename `iso-v0` to `main` (recommended) | 1. Tag `archive/main-2026-08-31` at `4578bb3f`. 2. Delete `main`: it is an ancestor of `iso-v0`, so no commit is lost. 3. Rename `iso-v0` to `main` in the GitHub settings. 4. Land the file changes below in one pull request | One coordinated window; listed below |
+| A. Keep `iso-v0` (chosen) | Archive `main` as the tag `archive/main-2026-08-31` (at `4578bb3f`) and delete the branch | Small. The name keeps describing a milestone that the product branch outlives |
+| B. Rename `iso-v0` to `main` (rejected) | 1. Tag `archive/main-2026-08-31` at `4578bb3f`. 2. Delete `main`: it is an ancestor of `iso-v0`, so no commit is lost. 3. Rename `iso-v0` to `main` in the GitHub settings. 4. Land the file changes below in one pull request | One coordinated window; listed below |
 
 Both options remove `main` from the trusted refs while it is unprotected.
 
-**What a rename changes (option B).** GitHub retargets open pull requests and moves the
+**What deleting `main` needs first (option A).** Files that name `main` keep working only while the branch exists, so the deletion waits for one pull request that removes it from them (`git grep -n '\bmain\b' -- .github`, 2026-10-09):
+
+| Kind | File:line |
+| --- | --- |
+| Workflow triggers | `nix-vanguard.yml:5,7` (`main` only), and `main` beside `iso-v0` in `athanor-forge-orchestrator.yml:8`, `cosmic-comp-bump.yml:16`, `iso-acceptance.yml:31`, `kernel-build.yml:34`, `kernel-bump.yml:38`, `kernel-weekly.yml:37`, `nix-registry-bump.yml:15`, `azoth-signer.yml:13` |
+| Workflow conditions | `athanor-forge-orchestrator.yml:411` (the ISO `:latest`, `main` only), `:427` (the bridge condition), `azoth-signer.yml:31` |
+| Settings | `.github/settings/rulesets.json:15`, `branch-protection.json:32`, the deployment branch policies of `environments.json` (lines 12, 50, 72, 105, 135), `pages.json:6` |
+| Trust | `KERNEL_TRUSTED_REFS` default `iso-v0 main` (`system/kernel-artifacts.sh:71`) |
+
+The ISO `:latest` condition at `athanor-forge-orchestrator.yml:411` needs a decision of its own, because with `main` gone no ref satisfies it: it follows the product branch, as the kernel's `:latest` does.
+
+**What a rename changes (option B, rejected).** GitHub retargets open pull requests and moves the
 branch protection to the new name, and documents a redirect for web URLs that contain the
 old name (not verified here). It changes no file and no clone:
 

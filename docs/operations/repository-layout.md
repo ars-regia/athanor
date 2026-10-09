@@ -1,8 +1,8 @@
 # Repository layout
 
-- Purpose: orient a newcomer or a model in one read, and propose separating the image build from `system/`.
+- Purpose: orient a newcomer or a model in one read, and record the separation of the image build from `system/`.
 - Owner: maintainer.
-- Status: top-level map is current (verified with `ls` and `git ls-files` on origin/iso-v0, 2026-10-06); the target layout is _(Proposal)_.
+- Status: top-level map is current (verified with `ls` and `git ls-files` on origin/iso-v0, 2026-10-06); the target layout is decided ([ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md), 2026-10-08) and not executed yet.
 - Decision: A2-36 (d).
 - Depends on: [doc_system_image.md](../architecture/doc_system_image.md), [doc_build_system.md](../architecture/doc_build_system.md).
 
@@ -29,7 +29,9 @@ Generated and not tracked (after this change): `docs/architecture/graph-vaults/`
 
 `system/` holds two unrelated things: Rust crates, and the build, signing and promotion of the image. The image build is a pipeline, not a crate. A contributor who touches a crate sees the pipeline files, and the reverse. CODEOWNERS already needs a file-level entry (`/system/Containerfile`) to tell them apart.
 
-## 3. Target layout _(Proposal)_
+## 3. Target layout (decided 2026-10-08, [ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md))
+
+It is executed in a quiet window after the implementation of ADR-0096, with no open pull request on the moved paths, as one squash, and with the system image check green before the merge.
 
 ```
 image/
@@ -44,7 +46,7 @@ system/         crates, confidential_computing/ (units and sources only)
 - `git mv` keeps history. The scripts compute the repository root as `dirname/..`, so a move from `system/` to `image/` keeps their depth and they keep working; each one still needs its literal `system/` strings updated.
 - The variable-level names (`IMAGE_NAME`, tags) do not change.
 
-## 4. References that change _(Proposal)_
+## 4. References that change
 
 `git grep` over origin/iso-v0 (docs/superpowers excluded) finds 236 lines in 61 files that name a moved path as `system/<name>`. Lines per file:
 
@@ -119,7 +121,7 @@ Not found by this pattern and checked by hand at migration time:
 - `.github/CODEOWNERS`: `/system/Containerfile` becomes `/image/`;
 - `paths:` filters in workflows, which list the moved files and trigger the image jobs.
 
-## 5. Migration steps _(Proposal)_
+## 5. Migration steps
 
 Run after the open pull requests merge, because the moved files are touched by most of them.
 

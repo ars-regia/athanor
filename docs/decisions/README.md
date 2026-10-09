@@ -131,7 +131,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-24 | 0061 | [Desktop minor decisions](0061-desktop-minor-decisions.md) | accepted | shell |
 | A2-25 | 0062 | [Governance targets confirmed](0062-governance-targets-confirmed.md) | accepted | security, process |
 | A2-26 | 0063 | [Update policy](0063-update-policy.md) | amended by ADR-0082 | update |
-| A2-27 | 0064 | [Signing approvals and MOK enrolment](0064-signing-approvals-and-mok-enrolment.md) | amended by A2-35, ADR-0080 | signing, installer |
+| A2-27 | 0064 | [Signing approvals and MOK enrolment](0064-signing-approvals-and-mok-enrolment.md) | amended by A2-35, ADR-0080, ADR-0098 | signing, installer |
 | A2-28 | 0065 | [Bazaar waits for the Fedora 45 base](0065-bazaar-waits-for-fedora-45.md) | accepted | packages, shell |
 | A2-29 | 0066 | [Threat model path lists](0066-threat-model-path-lists.md) | accepted | security |
 | A2-30 | 0067 | [Offline help with Yelp](0067-offline-help-yelp.md) | accepted | docs, shell |
@@ -147,15 +147,15 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0077 | 0077 | [Desktop decisions from Audit 3](0077-desktop-decisions.md) | accepted | shell, apps, security |
 | ADR-0078 | 0078 | [Fedora 45 is the next base, with Fedora 44 as the fallback](0078-fedora-release-target.md) | accepted | platform |
 | ADR-0079 | 0079 | [Captive portals under strict DNS over TLS](0079-captive-portals-under-strict-dot.md) | accepted | network, security |
-| ADR-0080 | 0080 | [Pipeline architecture](0080-pipeline-architecture.md) | amended by ADR-0088 | build, signing, security |
+| ADR-0080 | 0080 | [Pipeline architecture](0080-pipeline-architecture.md) | amended by ADR-0088, ADR-0098 | build, signing, security |
 | ADR-0081 | 0081 | [CRA compliance posture](0081-cra-compliance-posture.md) | accepted | security, update, product |
 | ADR-0082 | 0082 | [Update control: postpone and opt-out](0082-update-control.md) | amended by ADR-0094 | update, security |
 | ADR-0083 | 0083 | [One supported desktop; derived images stay open](0083-one-desktop-derived-images-open.md) | accepted | product, shell, update |
-| ADR-0084 | 0084 | [The key custody model is definitive for the single-maintainer phase](0084-key-custody-model.md) | accepted | security, process |
+| ADR-0084 | 0084 | [The key custody model is definitive for the single-maintainer phase](0084-key-custody-model.md) | amended by ADR-0098 | security, process |
 | ADR-0085 | 0085 | [Keyring prompter: the secret exchange comes from upstream oo7](0085-keyring-prompter-secret-exchange-source.md) | accepted | security, shell |
 | ADR-0086 | 0086 | [toolbox is not isolation; podman as container_t or the dev VM is](0086-toolbox-is-not-isolation.md) | accepted | security, apps |
 | ADR-0087 | 0087 | [Keep athanor-attestation outside the workspace until its Keylime rewrite](0087-attestation-outside-the-workspace.md) | accepted | security, build |
-| ADR-0088 | 0088 | [Pipeline revision 2](0088-pipeline-revision-2.md) | accepted | build, signing, security |
+| ADR-0088 | 0088 | [Pipeline revision 2](0088-pipeline-revision-2.md) | amended by ADR-0098 | build, signing, security |
 | ADR-0089 | 0089 | [Defaults that contact or listen are off until the person turns them on](0089-defaults-that-contact-or-listen.md) | accepted | security, network |
 | ADR-0090 | 0090 | [Account lockout through authselect's with-faillock](0090-account-lockout-faillock.md) | accepted | security |
 | ADR-0091 | 0091 | [QEMU stays in the image for the runner and the development VM](0091-qemu-in-the-image.md) | accepted | packages |
@@ -163,6 +163,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0093 | 0093 | [Desktop specifications, review batch 1, approved](0093-desktop-specs-batch-1.md) | accepted | shell, session, security |
 | ADR-0094 | 0094 | [Update control: the settled points of the postpone and the opt-out](0094-update-control-settled-points.md) | accepted | update, security |
 | ADR-0095 | 0095 | [Specifications, review batches 2 and 3, approved](0095-specs-review-batches-2-3.md) | accepted | kernel, session, security, storage, desktop |
-| ADR-0096 | 0096 | [Kernel artefacts are signed with the project key, not the workflow's OIDC identity](0096-kernel-artefacts-project-key.md) | accepted | security, pipeline |
+| ADR-0096 | 0096 | [Kernel artefacts are signed with the project key, not the workflow's OIDC identity](0096-kernel-artefacts-project-key.md) | amended by ADR-0098 | security, pipeline |
 | ADR-0097 | 0097 | [Component owners, 1.0 execution control, the Firefox switch and one process per surface](0097-owners-execution-firefox-processes.md) | accepted | security, kernel, shell, apps, governance |
+| ADR-0098 | 0098 | [Update delivery, CI and operations decisions (batch 4)](0098-update-delivery-ci-operations-batch-4.md) | accepted | update, build, signing, process |
 | ADR-0099 | 0099 | [Desktop specs review (batch 4): accessibility, overview, visual language](0099-desktop-specs-batch-4.md) | accepted | shell, session, security, desktop |
