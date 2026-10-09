@@ -31,8 +31,11 @@ name: Kernel Bump
 # default branch, where workflow_dispatch alone does not make it runnable.
 
 on:
+  # Group kernel weekly on Monday, group system every day (ADR-0109): a kernel bump costs
+  # the hour-long kernel build twice, a base image bump does not touch the kernel.
   schedule:
-    - cron: "17 5 * * *"
+    - cron: "17 5 * * 1"
+    - cron: "17 5 * * 0,2-6"
   workflow_dispatch:
   push:
     branches: [main, iso-v0]
@@ -48,6 +51,7 @@ permissions:
 
 jobs:
   kernel:
+    if: ${{ github.event.schedule != '17 5 * * 0,2-6' }}
     runs-on: ubuntu-24.04
     # Regenerating an NVIDIA lock downloads about 325 MB of RPMs, and mirroring them as much.
     timeout-minutes: 45
