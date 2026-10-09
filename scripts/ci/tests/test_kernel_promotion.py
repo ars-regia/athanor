@@ -16,6 +16,7 @@ import json
 import lzma
 import os
 import pathlib
+import re
 import subprocess
 import tempfile
 import threading
@@ -70,10 +71,10 @@ def commit(repo, message, files):
     return git(repo, "rev-parse", "HEAD")
 
 
-def history(tmp, base=None, head=None, parent=None, pushed=None):
-    """origin: root, base (the base the pull request recorded), parent (iso-v0 moved on),
-    pushed (the squash of the pull request); head branches from base. checkout is a depth-1
-    clone of pushed, as actions/checkout makes it."""
+def history(tmp, base=None, head=None, parent=None, pushed=None, between=()):
+    """origin: root, base (the base the pull request recorded), the BETWEEN commits, parent
+    (iso-v0 moved on), pushed (the squash of the pull request); head branches from base.
+    checkout is a depth-1 clone of pushed, as actions/checkout makes it."""
     origin = tmp / "origin"
     origin.mkdir()
     git(origin, "init", "-q", "-b", "iso-v0")
@@ -82,6 +83,8 @@ def history(tmp, base=None, head=None, parent=None, pushed=None):
     git(origin, "config", "uploadpack.allowAnySHA1InWant", "true")
     commit(origin, "root", ROOT)
     shas = {"base": commit(origin, "base", {"docs/note": "base\n", **(base or {})})}
+    for number, files in enumerate(between):
+        commit(origin, f"between {number}", files)
     shas["parent"] = commit(origin, "parent", {"docs/note": "parent\n", **(parent or {})})
     shas["pushed"] = commit(origin, "pushed", {**BUMP, **(pushed or {})})
     git(origin, "checkout", "-q", shas["base"])
@@ -108,6 +111,19 @@ def sha256(path):
     return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
 
 
+def compare_status(repo, base, head):
+    """The `status` of GitHub's compare of BASE...HEAD."""
+    if base == head:
+        return "identical"
+
+    def ancestor(a, b):
+        return subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", a, b], check=False).returncode == 0
+
+    if ancestor(base, head):
+        return "ahead"
+    return "behind" if ancestor(head, base) else "diverged"
+
+
 class FakeApi:
     """The recorded answers, rewritten to the local history."""
 
@@ -128,6 +144,7 @@ class FakeApi:
         self.shas, self.zip_path = shas, zip_path
         self.error = None
         self.extra = {}
+        self.origin = None
 
     def json(self, path):
         if self.error:
@@ -143,6 +160,14 @@ class FakeApi:
             f"/repos/{REPOSITORY}/actions/runs/{RUN}/artifacts?name=kernel-build&per_page=100": self.artifacts,
         }
         answers.update(self.extra)
+        # The history answers come from the local origin, as GitHub computes them.
+        touched = re.fullmatch(rf"/repos/{REPOSITORY}/commits\?sha=(\w+)&path=([^&]+)&per_page=1", path)
+        if touched and self.origin:
+            latest = git(self.origin, "log", "-1", "--format=%H", touched[1], "--", touched[2])
+            return [{"sha": latest}] if latest else []
+        compared = re.fullmatch(rf"/repos/{REPOSITORY}/compare/(\w+)\.\.\.(\w+)\?per_page=1", path)
+        if compared and self.origin:
+            return {"status": compare_status(self.origin, compared[1], compared[2])}
         if path not in answers:
             raise urllib.error.HTTPError(path, 404, "Not Found", {}, None)
         return copy.deepcopy(answers[path])
@@ -163,6 +188,7 @@ class Case(unittest.TestCase):
     def promote(self, **changes):
         shas, checkout = history(self.tmp, **changes)
         api = FakeApi(shas, artifact_zip(self.tmp / "artifact.zip"))
+        api.origin = self.tmp / "origin"
         return shas, api, checkout
 
     def run_promotion(self, shas, api, checkout, nvr=NVR):
@@ -283,6 +309,19 @@ class ConditionTwoTest(Case):
             self.run_promotion(shas, api, checkout),
             f"condition 2: {CALL_KERNEL} differs between the base {shas['base']} recorded for the run",
         )
+
+    def test_a_change_reverted_on_iso_v0_after_the_head_branched_builds(self):
+        # The run may have merged head with the iso-v0 of the change: GitHub does not record the
+        # base a run used, and the trees at the recorded base and at the parent agree.
+        shas, api, checkout = self.promote(between=({CALL_KERNEL: "call-kernel X\n"}, {CALL_KERNEL: "call-kernel 1\n"}))
+        self.assertRefused(
+            self.run_promotion(shas, api, checkout),
+            f"changed {CALL_KERNEL} on iso-v0 after the run's head {shas['head']} branched",
+        )
+
+    def test_a_change_of_another_path_on_iso_v0_after_the_head_branched_promotes(self):
+        shas, api, checkout = self.promote(between=({"docs/note": "between\n"},))
+        self.assertTrue(self.run_promotion(shas, api, checkout)["promoted"])
 
     def test_a_pull_request_moved_to_another_base_builds(self):
         # pr.yml does not run on `edited`: after a base change the green run is the one built

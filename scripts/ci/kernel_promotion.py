@@ -9,8 +9,9 @@ docs/architecture/doc_kernel_build.md section 7 hold:
    pull request merged as the pushed commit, a head no other pull request shares, and its
    `kernel / build` and `kernel / Kernel verdict` jobs succeeded;
 2. every COMPARED path has the same git object at the run's head and at the pushed commit, and
-   at the base the pull request recorded and at the pushed commit's parent, and the pull
-   request's base was never changed after it was opened;
+   at the base the pull request recorded and at the pushed commit's parent, no commit of iso-v0
+   that the head lacks touched one of them, and the pull request's base was never changed
+   after it was opened;
 3. build-inputs.py gives the same inputs at the pushed commit and at the run's head, and the
    artifact's `nvr` equals the NVR of the pins;
 4. the `kernel-build` artifact, fetched by id, has the SHA-256 digest the API reports.
@@ -206,6 +207,23 @@ def compare_trees(repo, sha, head, base):
     return parent, trees
 
 
+def untouched_since_head(api, repository, head, parent):
+    """Condition 2: the last commit of PARENT that touched each COMPARED path is in HEAD's history.
+    The run merged head with the iso-v0 of its day, and GitHub records no base for a run: a
+    change made and reverted on iso-v0 after head branched leaves equal trees at the recorded
+    base and at the parent, and a different build."""
+    for path in COMPARED:
+        latest = api.json(f"/repos/{repository}/commits?sha={parent}&path={path}&per_page=1")
+        if len(latest) != 1:
+            raise Refused(f"condition 2: no commit of {parent} touches {path}")
+        commit = latest[0]["sha"]
+        status = api.json(f"/repos/{repository}/compare/{commit}...{head}?per_page=1")["status"]
+        if status not in ("ahead", "identical"):
+            raise Refused(
+                f"condition 2: commit {commit} changed {path} on {BRANCH} after the run's head {head} branched"
+            )
+
+
 def build_inputs(repo, rev, tmp):
     """The JSON build-inputs.py prints in the kernel directory of REV."""
     archive = subprocess.run(
@@ -261,6 +279,7 @@ def decide(api, repo, repository, sha, nvr, tmp):
     base_unchanged(api, repository, pull["number"])
     parent, decision["trees"] = compare_trees(repo, sha, head, base)
     decision["pushed"] = {"commit": sha, "parent": parent}
+    untouched_since_head(api, repository, head, parent)
     inputs = build_inputs(repo, sha, tmp / "pushed")
     if build_inputs(repo, head, tmp / "head") != inputs:
         raise Refused("condition 3: build-inputs.py gives other inputs at the run's head than at the pushed commit")
