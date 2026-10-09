@@ -1,4 +1,30 @@
 {
+  "bots": {
+    "can_admins_bypass": false,
+    "deployment_branch_policy": {
+      "custom_branch_policies": true,
+      "policies": [
+        {
+          "name": "iso-v0",
+          "type": "branch"
+        },
+        {
+          "name": "main",
+          "type": "branch"
+        }
+      ],
+      "protected_branches": false
+    },
+    "prevent_self_review": false,
+    "reviewers": [],
+    "secrets": [
+      "BOT_APP_PRIVATE_KEY"
+    ],
+    "variables": [
+      "BOT_APP_ID"
+    ],
+    "wait_timer": 0
+  },
   "release": {
     "can_admins_bypass": false,
     "deployment_branch_policy": {
