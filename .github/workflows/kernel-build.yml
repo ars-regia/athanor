@@ -10,9 +10,11 @@ name: Kernel Build
 # kernel) signed with cosign keyless, with SBOM, SLSA provenance and the attestation of
 # the pins; `:latest` moves only on the repository's default branch. kmod: the NVIDIA modules against the freshly
 # built kernel-devel (nvidia-build.yml, reusable). gate: the single "Kernel gate" check
-# that the branch protection requires on PRs, including those of the bump bot (phase
-# K5): that is why the workflow runs on every PR, with no path filter. A PR builds and
-# boots but does not publish. orchestrator: on pushes, downstream of publish, dispatches the
+# that the branch protection of `main` requires on PRs. A PR to `iso-v0` does not run this
+# workflow: pr.yml calls call-kernel.yml, which mirrors the check jobs, and its `gate` is the
+# required check there, for the bump bot's PRs too (doc_ci.md CP4). The `pull_request`
+# trigger stays for `main` alone, which has no pr.yml. A PR builds and boots but does not
+# publish. orchestrator: on pushes, downstream of publish, dispatches the
 # Athanor Forge Orchestrator for this commit when a new kernel was published
 # or system/kernel-artifacts.sh does not answer ready; the Orchestrator runs the kmod cycle
 # (signing, boot with Secure Boot, publication of the modules) and builds the system images
@@ -30,6 +32,7 @@ on:
         options: [prep, build]
         default: build
   pull_request:
+    branches: [main]
   push:
     branches: [main, iso-v0]
     paths:

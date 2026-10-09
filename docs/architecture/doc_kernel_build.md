@@ -396,10 +396,10 @@ Ogni PR di bump e ogni cambio in `forge/specs/azoth/**` passa:
 
 **Il check unico.** Il job `gate` di `kernel-build.yml` (check `Kernel gate`)
 dipende da tutti gli altri ed è verde solo se `lint` (il lint condiviso,
-`call-lint.yml`, che gira per primo), `inputs`, `boot` e `kmod` sono verdi e `build` è verde o saltato per riuso. È l'unico check richiesto dalla
-protezione del branch, e Kernel Build parte su ogni PR, senza filtro di
-percorsi: così il check esiste sempre e l'auto-merge del bot (sezione 8) ha un
-nome solo da aspettare.
+`call-lint.yml`, che gira per primo), `inputs`, `boot` e `kmod` sono verdi e `build` è verde o saltato per riuso. È l'unico check del kernel richiesto
+dalla protezione di `main`; su `iso-v0` Kernel Build non parte sulle PR: il
+controllo gira una volta sola in `pr.yml` (`call-kernel.yml`) e l'auto-merge del
+bot (sezione 8) aspetta `gate`.
 
 **Settimanale (K7).** `kernel-weekly.yml` (domenica, dal branch di default; a
 mano con `workflow_dispatch`): job `repro` (gate 6, sezione 3) e job `bench`
@@ -474,8 +474,8 @@ pacchetti resta nel riepilogo del check). Il gruppo kernel ha tre job:
    niente auto-merge: la PR resta aperta finché una persona non corregge e fa
    il merge a mano.
 
-Il gate della PR è il check `Kernel gate` di `kernel-build.yml` (sezione 7),
-l'unico richiesto dalla protezione del branch. Con prep verde e il check verde
+Il gate della PR è il check `gate` di `pr.yml`, che include il controllo del
+kernel (sezione 7; `Kernel gate` di `kernel-build.yml` resta per le PR su `main`). Con prep verde e il check verde
 la PR va in merge da sola; con prep rosso, o con il check rosso, resta aperta
 con il log del gate fallito. È l'unico momento in cui serve una persona, e sa
 già dove guardare. Al merge il push fa partire
@@ -495,7 +495,7 @@ che la copia proposta entri senza fuzz in entrambi gli alberi (indice Fedora e
 albero CachyOS) e la scrive in `DIR/refreshed/` con il resoconto di GNU patch. Una
 persona legge ogni hunk applicato con fuzz, copia il file in
 `forge/specs/azoth/patches/refreshed/` con lo stesso percorso di `patches.list`, fa
-il commit sul branch e, con il `Kernel gate` verde, fa il merge a mano. Il
+il commit sul branch e, con `gate` verde, fa il merge a mano. Il
 preambolo della copia registra il commit di `CachyOS/kernel-patches`, lo SHA-256
 del file upstream e i pin su cui è stata rinfrescata. La build rifiuta una copia
 che registra un altro file upstream (CachyOS ha cambiato la patch: si rinfresca di

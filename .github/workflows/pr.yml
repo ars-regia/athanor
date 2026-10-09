@@ -15,9 +15,9 @@ name: Pull Request
 #   it needs failed or was cancelled, or when an area the change selects did not run
 #   (scripts/ci/gate.py). A skipped build is a pass.
 #
-# Until the maintainer switches the required check from "Kernel gate" and "Spec gate" to
-# `gate` (docs/operations/github-settings.md), kernel-build.yml and spec-build-check.yml keep
-# their own pull_request runs next to this workflow.
+# kernel-build.yml no longer runs on pull requests to iso-v0: the kernel is built once, in the
+# `kernel` job, and `gate` is the required check (doc_ci.md CP4). Until the specs half of CP4
+# lands, spec-build-check.yml keeps its own pull_request run next to this workflow.
 
 on:
   pull_request:
