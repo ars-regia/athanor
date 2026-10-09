@@ -15,9 +15,7 @@
   },
   "secrets": [
     "FORGE_PAT",
-    "KERNEL_BUMP_TOKEN",
-    "SETTINGS_APP_PRIVATE_KEY",
-    "SPECS_UPDATE_TOKEN"
+    "SETTINGS_APP_PRIVATE_KEY"
   ],
   "selected_actions": null,
   "variables": [
