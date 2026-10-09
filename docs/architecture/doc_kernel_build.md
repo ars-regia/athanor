@@ -426,17 +426,19 @@ kernel-core dell'immagine pubblicata: un push che tocca solo test, retention o
 workflow costa i minuti della matrice, non l'ora di build. Un bump dei pin
 ricompila. La prova del riuso è una firma verificata, non un tag.
 
-**Promotion (ADR-0110, approved by the maintainer on 2026-10-09).** It takes effect once the
-single pull request build (#368) and the trusted builder build (#373) are merged; until then
-the push builds. When the inputs change,
+**Promotion (ADR-0110, approved by the maintainer on 2026-10-09).** It is in effect since the
+pull request that added `scripts/ci/kernel_promotion.py`, after the single pull request build
+(#368) and the trusted builder build (#373); the builder image of a pull request is built
+without cached layers too. When the inputs change,
 the push to `iso-v0` publishes the RPMs built by the merged pull request's `pull_request` run
 (`pr.yml` through `call-kernel.yml`) instead of building them again, only when all four
 conditions hold, and builds otherwise: (1) the run is this repository's `pull_request` run that
 builds the kernel, its `kernel / build` job and kernel verdict are green, and it is found through
 the API by the pull request's head commit; (2) the tree of `forge/specs/azoth` and the blobs of
-`pr.yml` and `call-kernel.yml` are equal at the run's `head_sha` and at the pushed commit, and
-likewise at the base commit recorded when the run started, with values taken from GitHub's
-metadata and the pushed checkout, never from the run's outputs or artifacts; (3)
+`pr.yml`, `call-kernel.yml` and `scripts/ci/build-builder.sh` are equal at the run's `head_sha`
+and at the pushed commit, and likewise at the base the pull request records and at the pushed
+commit's parent, a pull request whose base was changed never promotes, and the values are taken
+from GitHub's metadata and the pushed checkout, never from the run's outputs or artifacts; (3)
 `build-inputs.py` at the pushed commit equals the run's, and `out/nvr` equals the NVR of the
 pins; (4) the artifact is fetched by id and its SHA-256 digest equals the one the API reports.
 `boot` and `kmod` still run on the promoted RPMs; `publish` signs with the `iso-v0` identity and
