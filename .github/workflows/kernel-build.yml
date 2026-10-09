@@ -372,6 +372,12 @@ jobs:
 
       - uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26
 
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        if: ${{ needs.inputs.outputs.promoted == 'true' }}
+        with:
+          name: kernel-promotion
+          path: promotion
+
       - name: Publish the four OCI images
         id: publish
         # A scratch image holding only the RPMs of each group, digests in digests/; the
@@ -412,6 +418,29 @@ jobs:
             echo "${group}=$(cat "digests/${group}")" >> "$GITHUB_OUTPUT"
           done
 
+      - name: Attest the promotion (ADR-0110)
+        # The RPMs come from the merged pull request's run: a predicate of its own type names
+        # the source run, the merge commit, the compared trees and the artifact digest
+        # (scripts/ci/kernel_promotion.py). It runs before the pins attestation of the next
+        # step, which stays as it is: the reuse check of the inputs job and
+        # system/kernel-artifacts.sh key on the pins, so a promotion whose record failed is
+        # never reused as proven, and the next push decides again.
+        if: ${{ needs.inputs.outputs.promoted == 'true' }}
+        run: |
+          set -euo pipefail
+          echo "${GH_TOKEN}" | cosign login "${IMAGE%%/*}" -u "${GITHUB_ACTOR}" --password-stdin
+          type="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/kernel-promotion/v1"
+          identity=$(bash system/kernel-artifacts.sh identity kernel)
+          for group in kernel devel debuginfo microvm; do
+            repo=$IMAGE
+            [[ $group == kernel || $group == microvm ]] || repo="${IMAGE}-${group}"
+            ref="${repo}@$(cat "digests/${group}")"
+            cosign attest --yes --type "$type" --predicate promotion/decision.json "$ref"
+            cosign verify-attestation --type "$type" \
+              --certificate-identity-regexp "$identity" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com "$ref" > /dev/null
+          done
+
       - name: SBOM, sign, attest
         # cosign keyless with the OIDC identity of the workflow: signature, SPDX SBOM of
         # every image, and the pins as a custom predicate. The images contain .rpm files,
@@ -442,32 +471,6 @@ jobs:
         env:
           SYFT_REGISTRY_AUTH_USERNAME: ${{ github.actor }}
           SYFT_REGISTRY_AUTH_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        if: ${{ needs.inputs.outputs.promoted == 'true' }}
-        with:
-          name: kernel-promotion
-          path: promotion
-
-      - name: Attest the promotion (ADR-0110)
-        # The RPMs come from the merged pull request's run: a predicate of its own type names
-        # the source run, the merge commit, the compared trees and the artifact digest
-        # (scripts/ci/kernel_promotion.py). The pins attestation above stays as it is, because
-        # the reuse check of the inputs job and system/kernel-artifacts.sh match it exactly.
-        if: ${{ needs.inputs.outputs.promoted == 'true' }}
-        run: |
-          set -euo pipefail
-          type="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/kernel-promotion/v1"
-          identity=$(bash system/kernel-artifacts.sh identity kernel)
-          for group in kernel devel debuginfo microvm; do
-            repo=$IMAGE
-            [[ $group == kernel || $group == microvm ]] || repo="${IMAGE}-${group}"
-            ref="${repo}@$(cat "digests/${group}")"
-            cosign attest --yes --type "$type" --predicate promotion/decision.json "$ref"
-            cosign verify-attestation --type "$type" \
-              --certificate-identity-regexp "$identity" \
-              --certificate-oidc-issuer https://token.actions.githubusercontent.com "$ref" > /dev/null
-          done
 
       - name: Provenance SLSA (kernel)
         # In the GitHub attestation store, not in the registry: `gh attestation verify`

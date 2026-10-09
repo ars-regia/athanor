@@ -25,8 +25,17 @@ class PublishTest(unittest.TestCase):
     def test_publish_attests_the_decision_with_its_own_predicate_type(self):
         names = [s.get("name") for s in self.publish["steps"]]
         attest = names.index("Attest the promotion (ADR-0110)")
-        self.assertLess(names.index("SBOM, sign, attest"), attest)
-        self.assertLess(attest, names.index("Retention (retention.sh)"))
+        # Before the pins attestation of "SBOM, sign, attest": the reuse check keys on the pins,
+        # so a promotion whose record failed is never reused as proven.
+        self.assertLess(names.index("Publish the four OCI images"), attest)
+        self.assertLess(attest, names.index("SBOM, sign, attest"))
+        download = next(
+            i
+            for i, s in enumerate(self.publish["steps"])
+            if "download-artifact" in s.get("uses", "") and s["with"]["name"] == "kernel-promotion"
+        )
+        # The decision is on disk before anything is pushed.
+        self.assertLess(download, names.index("Publish the four OCI images"))
         step = self.publish["steps"][attest]
         self.assertEqual(step["if"], f"${{{{ {PROMOTED} }}}}")
         self.assertIn('--type "$type" --predicate promotion/decision.json', step["run"])
