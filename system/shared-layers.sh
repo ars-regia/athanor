@@ -7,21 +7,28 @@
 # never publishes a tag. A push does not change diff_ids, so the published images carry the
 # same layers. Prints one Markdown line per variant for the job summary, and every failure both
 # there and on stderr; exits 1 when a variant does not carry the system layers or has more than
-# 126 layers, or when an image cannot be read.
-# Usage: shared-layers.sh --system IMAGE_ID --registry REGISTRY/OWNER --tag TAG
+# 126 layers, or when an image cannot be read. With --variants, only the images the run built
+# (system/build-variants.sh) are read: a dropped NVIDIA variant has no local image.
+# Usage: shared-layers.sh --system IMAGE_ID --registry REGISTRY/OWNER --tag TAG [--variants FILE]
 set -euo pipefail
 
 usage() {
-    echo "usage: ${0##*/} --system IMAGE_ID --registry REGISTRY/OWNER --tag TAG" >&2
+    echo "usage: ${0##*/} --system IMAGE_ID --registry REGISTRY/OWNER --tag TAG [--variants FILE]" >&2
     exit 2
 }
-system='' registry='' tag=''
+system='' registry='' tag='' variants=''
 while [[ $# -gt 0 ]]; do
     [[ $# -ge 2 ]] || usage
-    case $1 in --system) system=${2#sha256:} ;; --registry) registry=$2 ;; --tag) tag=$2 ;; *) usage ;; esac
+    case $1 in --system) system=${2#sha256:} ;; --registry) registry=$2 ;; --tag) tag=$2 ;; --variants) variants=$2 ;; *) usage ;; esac
     shift 2
 done
 [[ $system =~ ^[0-9a-f]{64}$ && -n $registry && -n $tag ]] || usage
+names=(athanor-system athanor-system-nvidia athanor-system-nvidia-legacy)
+[[ -z $variants ]] || mapfile -t names < "$variants"
+[[ " ${names[*]} " == *" athanor-system "* ]] || {
+    echo "${0##*/}: $variants names no athanor-system: the default image is required" >&2
+    exit 2
+}
 
 # The report goes to the caller's stdout through fd 3, also from inside $(...).
 exec 3>&1
@@ -59,7 +66,7 @@ count=$(jq length <<< "$base")
 # UD32: the rechunked system image has at most 116 layers and each variant adds up to 10.
 max_layers=126
 status=0
-for name in athanor-system athanor-system-nvidia athanor-system-nvidia-legacy; do
+for name in "${names[@]}"; do
     ids=$(diff_ids "$registry/$name:$tag") || {
         status=1
         continue

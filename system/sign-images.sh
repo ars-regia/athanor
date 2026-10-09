@@ -18,8 +18,8 @@
 # file, or in the environment of skopeo.
 #
 # The digests file comes from the build job, so it is not trusted for what to sign:
-# image-digests.sh --check requires it to name exactly the shipped repositories under the
-# registry the caller gives, once each.
+# image-digests.sh --check requires it to name the default image and any NVIDIA variant the
+# run built, under the registry the caller gives, once each.
 #
 # Usage: sign-images.sh --registry REGISTRY/OWNER DIGESTS_FILE
 #        (lines: "REPOSITORY TAG DIGEST", image-digests.sh)

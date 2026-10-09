@@ -4,25 +4,29 @@
 # job runs it after the push; the file travels to the jobs that sign, verify and tag, which
 # build nothing.
 #
+# With --variants it records only the images the run built (system/build-variants.sh): an
+# NVIDIA variant that failed to build left the run (ADR-0103 D24).
+#
 # With --check it reads such a file instead, for those jobs. The file comes from the build
 # job, so it is not trusted for what to touch: the registry is given by the caller, and the
-# file must name exactly the shipped repositories under it, once each, by digest. A build job
-# cannot steer the key, the verification or a tag onto another repository.
-# Usage: image-digests.sh --registry REGISTRY/OWNER --tag TAG --out FILE
+# file must name the default image and any NVIDIA variant the run built, under it, once each,
+# by digest. A build job cannot steer the key, the verification or a tag onto another
+# repository; leaving a variant out only keeps that variant's previous :latest.
+# Usage: image-digests.sh --registry REGISTRY/OWNER --tag TAG --out FILE [--variants FILE]
 #        image-digests.sh --registry REGISTRY/OWNER --check FILE
 set -euo pipefail
 
-usage() { echo "usage: ${0##*/} --registry REGISTRY/OWNER (--tag TAG --out FILE | --check FILE)" >&2; exit 2; }
-registry='' tag='' out='' check=''
+usage() { echo "usage: ${0##*/} --registry REGISTRY/OWNER (--tag TAG --out FILE [--variants FILE] | --check FILE)" >&2; exit 2; }
+registry='' tag='' out='' check='' variants=''
 while [[ $# -gt 0 ]]; do
   [[ $# -ge 2 ]] || usage
-  case $1 in --registry) registry=$2 ;; --tag) tag=$2 ;; --out) out=$2 ;; --check) check=$2 ;; *) usage ;; esac
+  case $1 in --registry) registry=$2 ;; --tag) tag=$2 ;; --out) out=$2 ;; --check) check=$2 ;; --variants) variants=$2 ;; *) usage ;; esac
   shift 2
 done
 shipped=(athanor-system athanor-system-nvidia athanor-system-nvidia-legacy)
 
 if [[ -n $check ]]; then
-  [[ -n $registry && -z $tag && -z $out ]] || usage
+  [[ -n $registry && -z $tag && -z $out && -z $variants ]] || usage
   [[ -s $check ]] || { echo "${0##*/}: $check is missing or empty" >&2; exit 2; }
   declare -A seen=()
   while read -r repository tag digest; do
@@ -32,15 +36,26 @@ if [[ -n $check ]]; then
     [[ -z ${seen[$repository]:-} ]] || { echo "${0##*/}: $check names $repository twice" >&2; exit 2; }
     seen[$repository]=1
   done < "$check"
-  [[ ${#seen[@]} -eq ${#shipped[@]} ]] || { echo "${0##*/}: $check names ${#seen[@]} of the ${#shipped[@]} shipped repositories" >&2; exit 2; }
+  [[ -n ${seen[$registry/athanor-system]:-} ]] || { echo "${0##*/}: $check names no $registry/athanor-system: the default image is required" >&2; exit 2; }
   exit 0
 fi
 
 [[ -n $registry && -n $tag && -n $out ]] || usage
+names=("${shipped[@]}")
+if [[ -n $variants ]]; then
+  mapfile -t names < "$variants"
+  declare -A listed=()
+  for name in "${names[@]}"; do
+    [[ " ${shipped[*]} " == *" $name "* ]] || { echo "${0##*/}: $variants names $name, not a shipped repository" >&2; exit 2; }
+    [[ -z ${listed[$name]:-} ]] || { echo "${0##*/}: $variants names $name twice" >&2; exit 2; }
+    listed[$name]=1
+  done
+  [[ -n ${listed[athanor-system]:-} ]] || { echo "${0##*/}: $variants names no athanor-system: the default image is required" >&2; exit 2; }
+fi
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 mkdir -p "$(dirname "$out")"
 : > "$out.tmp"
-for name in "${shipped[@]}"; do
+for name in "${names[@]}"; do
   digest=$(bash "$root/forge/scripts/retry.sh" skopeo inspect --format '{{.Digest}}' "docker://$registry/$name:$tag")
   [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "${0##*/}: $registry/$name:$tag has no digest: '$digest'" >&2; exit 1; }
   echo "$registry/$name $tag $digest" >> "$out.tmp"

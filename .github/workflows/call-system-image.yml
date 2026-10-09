@@ -163,18 +163,18 @@ jobs:
         run: nix shell nixpkgs#sbsigntool -c bash system/check-image-kernel.sh "$(<artifacts/system-image.iid)"
 
       - name: 🐳 Build OS Images
-        # build-image.sh builds the default, NVIDIA and NVIDIA-legacy images in turn FROM the
-        # system image, all three with the same signed vmlinuz (S8). Nothing is pushed until
-        # all three have built.
+        # build-variants.sh builds the default, NVIDIA and NVIDIA-legacy images in turn FROM the
+        # system image, all with the same signed vmlinuz (S8), and names in variants.txt the
+        # ones that built: an NVIDIA variant that fails leaves the run (ADR-0103 D24), the
+        # default image may not. Every later step works on the images variants.txt names.
+        # Nothing is pushed until all have built.
         env:
           RUN_ID: ${{ github.run_id }}
           RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
-          for gpu in none nvidia nvidia-legacy; do
-            bash system/build-image.sh --gpu "$gpu" --system-image "$(<artifacts/system-image.iid)" --registry "${IMAGE_REGISTRY}" \
-              --tag "${RUN_ID}" --serial "${RUN_NUMBER}"
-          done
+          bash system/build-variants.sh --system-image "$(<artifacts/system-image.iid)" --registry "${IMAGE_REGISTRY}" \
+            --tag "${RUN_ID}" --serial "${RUN_NUMBER}" --out artifacts/variants.txt
           df -h
 
       - name: 🧩 Check that the images share the system layers
@@ -185,7 +185,7 @@ jobs:
         run: |
           set -euo pipefail
           bash system/shared-layers.sh --system "$(<artifacts/system-image.iid)" --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" \
-            | tee -a "${GITHUB_STEP_SUMMARY}"
+            --variants artifacts/variants.txt | tee -a "${GITHUB_STEP_SUMMARY}"
 
       - name: 📤 Push OS Images
         # By run id only: :latest moves in tag-system-images of the Orchestrator, after the
@@ -194,14 +194,19 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
-          for gpu in none nvidia nvidia-legacy; do
+          # A for loop over the names, not `while read`: a command in the body may read stdin.
+          mapfile -t names < artifacts/variants.txt
+          for name in "${names[@]}"; do
+            gpu=${name#athanor-system}; gpu=${gpu#-}; gpu=${gpu:-none}
             bash system/build-image.sh --gpu "$gpu" --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" --push-only
           done
 
       - name: 🧾 Record the pushed digests for the signing job
         env:
           RUN_ID: ${{ github.run_id }}
-        run: bash system/image-digests.sh --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" --out artifacts/image-digests.txt
+        run: |
+          bash system/image-digests.sh --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" --out artifacts/image-digests.txt \
+            --variants artifacts/variants.txt
 
       - name: 📎 Hand the digests to the signing job
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -235,7 +240,8 @@ jobs:
         run: |
           set -euo pipefail
           nix run nixpkgs#cosign -- login ghcr.io -u "${GITHUB_ACTOR}" -p "${GITHUB_TOKEN}"
-          for name in athanor-system athanor-system-nvidia athanor-system-nvidia-legacy; do
+          mapfile -t names < artifacts/variants.txt
+          for name in "${names[@]}"; do
             image="${IMAGE_REGISTRY}/${name}:${RUN_ID}"
             # The SBOM comes from the mounted root filesystem of the local image, not from
             # syft's image source: with about 120 layers and 270k files that source needs
@@ -245,13 +251,15 @@ jobs:
           done
 
       - name: 🧹 Free the NVIDIA images before the ISO
-        # The ISO embeds only the default image; the two variants are published and signed.
+        # The ISO embeds only the default image; the variants are published and signed. A
+        # dropped variant has no local image to free.
         env:
           RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
-          for name in athanor-system-nvidia athanor-system-nvidia-legacy; do
-            podman rmi "${IMAGE_REGISTRY}/${name}:${RUN_ID}"
+          mapfile -t names < artifacts/variants.txt
+          for name in "${names[@]}"; do
+            [[ $name == athanor-system ]] || podman rmi "${IMAGE_REGISTRY}/${name}:${RUN_ID}"
           done
           df -h
 
