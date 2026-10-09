@@ -35,6 +35,8 @@ failing on polkit. Both facts are out of date on the product branch:
 
 - `doc_software.md` section 1.2 (the presets and the backup unit), section 5 (the two timers) and
   section 6, point 2 (the `backup` row and its decision line).
+- `doc_kernel_profile.md` section 14, the Snapshots item: `athanor-timewarp` was removed, not
+  ported to btrfs.
 
 ## Consequences
 
