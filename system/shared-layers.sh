@@ -25,6 +25,10 @@ done
 [[ $system =~ ^[0-9a-f]{64}$ && -n $registry && -n $tag ]] || usage
 names=(athanor-system athanor-system-nvidia athanor-system-nvidia-legacy)
 [[ -z $variants ]] || mapfile -t names < "$variants"
+[[ " ${names[*]} " == *" athanor-system "* ]] || {
+    echo "${0##*/}: $variants names no athanor-system: the default image is required" >&2
+    exit 2
+}
 
 # The report goes to the caller's stdout through fd 3, also from inside $(...).
 exec 3>&1

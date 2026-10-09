@@ -65,6 +65,13 @@ class BuildVariants(unittest.TestCase):
             ["athanor-system", "athanor-system-nvidia", "athanor-system-nvidia-legacy"],
         )
         self.assertNotIn("::error", r.stdout)
+        self.assertEqual(
+            (self.dir / "calls").read_text().splitlines(),
+            [
+                f"--gpu {gpu} --system-image abc --registry r.example/o --tag 412 --serial 7"
+                for gpu in ("none", "nvidia", "nvidia-legacy")
+            ],
+        )
 
     def test_a_failed_legacy_build_drops_only_the_legacy_image(self):
         r = self.run_with(["nvidia-legacy"])

@@ -44,9 +44,13 @@ fi
 names=("${shipped[@]}")
 if [[ -n $variants ]]; then
   mapfile -t names < "$variants"
+  declare -A listed=()
   for name in "${names[@]}"; do
     [[ " ${shipped[*]} " == *" $name "* ]] || { echo "${0##*/}: $variants names $name, not a shipped repository" >&2; exit 2; }
+    [[ -z ${listed[$name]:-} ]] || { echo "${0##*/}: $variants names $name twice" >&2; exit 2; }
+    listed[$name]=1
   done
+  [[ -n ${listed[athanor-system]:-} ]] || { echo "${0##*/}: $variants names no athanor-system: the default image is required" >&2; exit 2; }
 fi
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 mkdir -p "$(dirname "$out")"

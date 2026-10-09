@@ -122,6 +122,15 @@ class SharedLayers(unittest.TestCase):
         refs = (self.dir / "podman.refs").read_text().splitlines()
         self.assertEqual(refs, [SYSTEM_ID, f"{REGISTRY}/athanor-system:{RUN}"])
 
+    def test_a_variants_file_without_the_default_image_is_refused(self):
+        variants = self.dir / "variants.txt"
+        for content in ("athanor-system-nvidia\n", ""):
+            with self.subTest(content=content):
+                variants.write_text(content)
+                r = self.check(f"sha256:{SYSTEM_ID}", "--variants", str(variants))
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertIn("the default image is required", r.stderr)
+
     def test_variants_that_rebuilt_the_system_stage_fail(self):
         # Run 37384733899 as published: the NVIDIA variants rebuilt the system stage.
         self.serve_system(self.system_stage())

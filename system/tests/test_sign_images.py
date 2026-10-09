@@ -511,7 +511,7 @@ class SignImages(unittest.TestCase):
         self.digests()
         lines = self.file.read_text().splitlines()
         for content, message in (
-            ([lines[1], lines[2]], "athanor-system"),
+            ([lines[1], lines[2]], "the default image is required"),
             ([lines[0], lines[0], lines[1]], "twice"),
         ):
             with self.subTest(message=message):
@@ -533,6 +533,17 @@ class SignImages(unittest.TestCase):
             list(self.tags.values())[:2],
         )
 
+    def test_a_run_with_only_the_default_image_is_signed_for_it_alone(self):
+        self.digests()
+        lines = self.file.read_text().splitlines()
+        self.file.write_text(lines[0] + "\n")
+        r = self.sign()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            json.loads((self.state / "signed.json").read_text()),
+            [self.tags[f"{REG}/athanor-system:412"]],
+        )
+
     def test_the_digests_record_only_the_variants_that_built(self):
         variants = self.dir / "variants.txt"
         variants.write_text("athanor-system\n")
@@ -545,18 +556,25 @@ class SignImages(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual([line.split()[0] for line in self.file.read_text().splitlines()], [f"{REG}/athanor-system"])
 
-    def test_a_variants_file_naming_an_unknown_image_is_refused(self):
+    def test_a_variants_file_that_is_not_a_set_with_the_default_image_is_refused(self):
         variants = self.dir / "variants.txt"
-        variants.write_text("athanor-system\nathanor-other\n")
-        r = subprocess.run(
-            ["bash", str(DIGESTS), "--registry", REG, "--tag", "412", "--out", str(self.file), "--variants", str(variants)],
-            capture_output=True,
-            text=True,
-            env=self.env,
-        )
-        self.assertEqual(r.returncode, 2, r.stderr)
-        self.assertIn("athanor-other", r.stderr)
-        self.assertFalse(self.file.exists())
+        for content, message in (
+            ("athanor-system\nathanor-other\n", "athanor-other"),
+            ("athanor-system\nathanor-system-nvidia\nathanor-system-nvidia\n", "twice"),
+            ("athanor-system-nvidia\n", "the default image is required"),
+            ("", "the default image is required"),
+        ):
+            with self.subTest(content=content):
+                variants.write_text(content)
+                r = subprocess.run(
+                    ["bash", str(DIGESTS), "--registry", REG, "--tag", "412", "--out", str(self.file), "--variants", str(variants)],
+                    capture_output=True,
+                    text=True,
+                    env=self.env,
+                )
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertIn(message, r.stderr)
+                self.assertFalse(self.file.exists())
 
 
 if __name__ == "__main__":
