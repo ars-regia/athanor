@@ -15,6 +15,7 @@ markers it recognises across chunk boundaries, when it stops, and the PNG conver
 checked on the pixels rather than on the file existing.
 """
 
+import json
 import os
 import pathlib
 import shutil
@@ -64,6 +65,36 @@ def test_pass(tmp: pathlib.Path) -> None:
     assert "first boot to greeter: 300s" in report, report
     assert "greeter to session: 60s" in report, report
     assert "session to settings: 40s" in report, report
+
+
+COMPLETE = [
+    ("installed", 100),
+    ("kickstart-done", 110),
+    ("profile-ok", 390),
+    ("karg-compress-ok", 395),
+    ("greeter-alive", 400),
+    ("session-alive", 460),
+    ("settings-alive", 500),
+]
+
+
+def test_verdict_json_on_pass(tmp: pathlib.Path) -> None:
+    """The promotion reads a machine verdict, never the Markdown report (UD4, UD17)."""
+    code, _ = verdict(tmp, COMPLETE)
+    data = json.loads((tmp / "run" / "verdict.json").read_text())
+    assert code == 0 and data["pass"] is True, data
+    assert data["checks"] == {
+        "installed": True, "kickstart-done": True, "profile": True, "karg": True,
+        "greeter": True, "session": True, "settings": True, "no-guest-failure": True,
+    }, data
+
+
+def test_verdict_json_on_guest_failure(tmp: pathlib.Path) -> None:
+    """A panic after a complete run is a fail in the JSON as in the report."""
+    code, report = verdict(tmp, COMPLETE + [("panic", 510)])
+    data = json.loads((tmp / "run" / "verdict.json").read_text())
+    assert code != 0 and "**FAIL**" in report, report
+    assert data["pass"] is False and data["checks"]["no-guest-failure"] is False, data
 
 
 def test_session_without_settings_fails(tmp: pathlib.Path) -> None:
@@ -664,6 +695,8 @@ def main() -> int:
         tmp = pathlib.Path(name)
         for test in (
             test_pass,
+            test_verdict_json_on_pass,
+            test_verdict_json_on_guest_failure,
             test_greeter_without_session_fails,
             test_session_without_settings_fails,
             test_profile_drift_fails,

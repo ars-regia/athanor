@@ -145,7 +145,7 @@ A mismatch is a build failure with the exact values, never a warning.
   - A package negativo17 drops before the bot mirrors it is still lost. The bot mirrors on every daily run and right after it regenerates a manifest, which leaves a window of about one day.
   - The last-resort fallback is to extract firmware and userspace from NVIDIA's `.run` of the pinned version ourselves. `nvidia.sh` already downloads it for the legacy branch.
 - **RPM Fusion keeps only the latest release.**
-  - `updates/43` publishes only the newest NVR of each package. The mirror (S7) keeps the pinned NVR building after RPM Fusion moves past it, and the bump bot verifies the lock on every daily run and moves the pin or regenerates the lock by pull request.
+  - `updates/43` publishes only the newest NVR of each package. The mirror (S7) keeps the pinned NVR building after RPM Fusion moves past it, and the bump bot verifies the lock every day and regenerates it by pull request; its kernel group moves the pin weekly (ADR-0109).
   - When 580 becomes a legacy series, RPM Fusion renames the packages (`xorg-x11-drv-nvidia-580xx*`). That needs a change to the package list in `lock.py`, not only a version bump.
 - **CI cost:** three image builds per cycle instead of one. The shared stages are cached layers, so only the GPU layer and the initramfs are paid three times.
 - **Flatpak applications** need the NVIDIA GL runtime extension matching the host driver version (`org.freedesktop.Platform.GL.nvidia-<version>`). flatpak installs it when the host driver is present; the hardware check covers it.

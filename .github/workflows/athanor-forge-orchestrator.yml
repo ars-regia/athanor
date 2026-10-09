@@ -371,7 +371,13 @@ jobs:
       - name: 🔎 Pull each image through the shipped policy (system/verify-images.sh)
         env:
           BUILDER_HASH: ${{ needs.build-builder.outputs.content_hash }}
-        run: bash system/verify-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" --builder "${BUILDER_HASH}" artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
+        run: bash system/verify-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" --builder "${BUILDER_HASH}" --evidence evidence --build-run-id "${GITHUB_RUN_ID}" artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
+      - name: 📎 Hand the signature evidence to the promotion
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: evidence-${{ github.run_id }}-signature
+          path: evidence/
+          if-no-files-found: error
 
   tag-system-images:
     name: 🏷️ Move :latest to the verified images

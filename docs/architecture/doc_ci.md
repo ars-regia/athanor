@@ -34,7 +34,7 @@ CI1 athanor-forge-orchestrator.yml        concurrency: one run per ref, the newe
 
 Kernel path (doc_build_ordering.md, O1):
 CI9 kernel-bump.yml (PR) -> merge -> CI8 kernel-build.yml (publish azoth) -> dispatches CI1
-Release path: CI1 publishes :<run_id> and :latest -> CI12 iso-acceptance.yml (weekly) -> CI11 promote-stable.yml (manual, :stable)
+Release path: CI1 publishes :<run_id> and :latest -> CI12 accept.yml (dispatched with the run id) -> CI11 promote-stable.yml (manual, :stable)
 ```
 
 CI1 runs CI2 once, as its first job, and calls CI3, CI4 and CI5 only after it passed; they have no lint of their own. They used to repeat it, so one Orchestrator run linted four times, about 2 minutes each on the critical path (run 37384733899 lists the jobs `lint`, `build-builder / lint`, `dag-compile / lint`, `system-image / lint`). CI8 calls it as its first job.
@@ -100,7 +100,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 - **File:** `athanor-forge-orchestrator.yml`.
 - **Purpose:** builds the forge packages, the tier repositories, the three system images and the ISO (section 1.1).
 - **Triggers:** push to `main`, `iso-v0` on `forge/**` (not `forge/test/**`, `forge/specs/azoth/**`), `system/**`, `Cargo.toml`, `flake.nix`, `flake.lock`, `call-*.yml`, the NVIDIA workflows; dispatch (`sha`); cron `0 4 * * *`.
-- **Outputs:** artifact `kernel-artifacts`; images of CI3, CI4, CI5, CI6.
+- **Outputs:** artifacts `kernel-artifacts` and `evidence-<run_id>-signature`; images of CI3, CI4, CI5, CI6.
 - **Secrets, variables:** `REGISTRY_HOST`, `KERNEL_REGISTRY`, `GITHUB_TOKEN`; `MODULE_SIGNING_KEY` and `SECUREBOOT_SIGNING_KEY` in `nvidia-kmod-sign`, `COSIGN_PRIVATE_KEY` and `COSIGN_PASSWORD` in `sign-system-images`. No secret is passed to a called workflow.
 - **Environment:** `signing-kernel` on `nvidia-kmod-sign`; `signing` on `sign-system-images`, the alias of `signing-images` during the image key rotation (`docs/operations/secrets.md` section 4.1; ADR-0064). Both are jobs of this workflow, not of CI6 or CI5: a called workflow's job reads the secrets of its environment only when its caller passes `secrets: inherit` ([actions/runner#4453](https://github.com/actions/runner/issues/4453)), so the sign job of CI6, called without it, ran with both kernel keys empty in run 37598455557, and an inherit would hand every secret to every job of the called workflow (D43). The workflow sets no workflow-level `env:`, which D43 limits to plain values beside a signing job.
 - **Runner:** hosted. **Concurrency:** `<workflow>-<ref>`, no cancel: the newest run waits (O6). The group stays at run level because it publishes the system images in commit order: a group on the image job alone is taken in arrival order, and clients order images by build time (doc_update_trust.md, UT9). It also holds the signing approvals of the run (`sign-system-images`, and `nvidia-kmod` when the modules are missing), so the next push waits for them; Revision 3 of doc_pipeline.md, awaiting approval, lifts this: the image signing, its verification and the move of `:latest` leave the run for a release workflow with its own group (PL57, CP5, ADR-0104).
@@ -110,7 +110,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 ### CI2 Reusable Workflow Lint
 
 - **File:** `call-lint.yml`. **Purpose:** actionlint with shellcheck, `scripts/verify.py workflows kickstart os-release boundary cmdline services polkit-model registry licence ci coverage`, and the Python unit test suites of the kernel profile, Azoth, Nix support, NVIDIA, build ordering, update, recovery, system config, ISO verdict, `scripts/tests`, Calmo, forge scripts and shell rig. `verify.py workflows` carries the D43 lint: it parses every workflow with PyYAML (installed by this job; the lint fails without it) and fails a signing secret read outside the sign step of a job of the environment that holds it, any read of the secrets context other than by name, a signing job with another action or input, a container, defaults, a runner that is not a GitHub-hosted ubuntu label, a `run:` that is not one of the exact allow-listed commands, a `shell:` or `working-directory:` of its own, an `env:` name (job, step or workflow) outside the secrets of its environment and a short list of plain values, or a download into the checkout, an environment named by an expression (names compare without regard to case), `pull_request_target` in any workflow, `secrets: inherit` into a workflow with a signing job, a signing job in a workflow with `workflow_call` among its triggers (its keys would be empty, actions/runner#4453), and any secret that neither `.github/settings/environments.json` (an environment holds it) nor `actions.json` (a repository secret, which no signing environment may hold) declares, `GITHUB_TOKEN` aside. It is a regression guard against drift in reviewed workflows, not a security boundary: the environment protection and the review of every workflow change are.
-- **Triggers:** `workflow_call` only (CI1, CI8, CI11, CI12, CI15). **Inputs, outputs:** none.
+- **Triggers:** `workflow_call` only (CI1, CI8, CI11, CI15). **Inputs, outputs:** none.
 - **Secrets, variables:** none. **Environment:** none. **Runner:** hosted. **Concurrency:** caller's.
 - **Scripts:** `scripts/verify.py`, `forge/specs/athanor-kernel-profile/kernel_profile.py`, `forge/test/iso/test_verdict.py`, `system/athanor-style/calmo/contrast.py`, `generate.py`.
 - **Health:** `gh run list --workflow call-lint.yml --branch iso-v0 --limit 5`.
@@ -134,7 +134,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 ### CI5 Call System Image
 
 - **File:** `call-system-image.yml`. **Purpose:** aggregates the tier repositories, builds the three system images and the ISO, signs them keyless; CI1 `sign-system-images` signs them with the update key after it.
-- **Triggers:** `workflow_call` (CI1). **Input:** `builder_content_hash`. **Outputs:** tier repository images, system images, ISO image; artifacts `image-digests` and `upgrade-bytes` (`artifacts/metrics/upgrade-bytes.json`, UD34).
+- **Triggers:** `workflow_call` (CI1). **Input:** `builder_content_hash`. **Outputs:** tier repository images, system images, ISO image; artifacts `image-digests`, `iso-digest` (the ISO digest and the system image digest it was built from, read by CI12) and `upgrade-bytes` (`artifacts/metrics/upgrade-bytes.json`, UD34).
 - **Secrets, variables:** `GITHUB_TOKEN`.
 - **Environment:** none. `dag-system-image` holds no key; the vmlinuz arrives signed, from `azoth-boot` by digest, and the key-based signature of the images is CI1 `sign-system-images`, one maintainer approval per run (D43), none once the job is back in `signing-images` at the end of the key rotation, 1.0 included (ADR-0098 item 6, ADR-0104 item 8).
 - **Runner:** hosted. **Concurrency:** caller's.
@@ -171,9 +171,9 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 ### CI9 Kernel Bump
 
 - **File:** `kernel-bump.yml`. **Purpose:** bump bot. Group `kernel` moves the kernel pins and opens a `kernel-bump` PR with auto-merge when prep is green; group `system` moves the base image pins and opens a `system-bump` PR; every run mirrors the locked NVIDIA RPMs (O7, O8).
-- **Triggers:** cron `17 5 * * *`; dispatch; push of its own file. **Outputs:** PRs; artifacts `bump-pins`, `bump-prep`; image `KERNEL_REGISTRY/athanor-nvidia-rpms`.
+- **Triggers:** cron `17 5 * * 1` (both groups) and `17 5 * * 0,2-6` (group `system` only, ADR-0109); dispatch; push of its own file. **Outputs:** PRs; artifacts `bump-pins`, `bump-prep`; image `KERNEL_REGISTRY/athanor-nvidia-rpms`.
 - **Secrets, variables:** `BOT_APP_PRIVATE_KEY`, `BOT_APP_CLIENT_ID` (jobs `pr` and `system`: the PRs open with an App token, so that they start checks), `GITHUB_TOKEN`, `KERNEL_REGISTRY`. **Environment:** `bots` (jobs `pr` and `system`).
-- **Runner:** `prep` self-hosted (`:112`), the rest hosted. **Concurrency:** `kernel-bump`, no cancel.
+- **Runner:** `prep` self-hosted (`:116`), the rest hosted. **Concurrency:** `kernel-bump`, no cancel.
 - **Scripts:** `forge/specs/azoth/bump.py`, `build.sh`, `lock.sh`, `nvidia.sh`, `SOURCES/sources.sh`, `nvidia/sources.sh`, `system/nvidia/mirror.sh`, `mirror-locks.sh`, `forge/scripts/bot_merge.py`.
 - **Health:** `gh run list --workflow kernel-bump.yml --branch iso-v0 --limit 5`.
 
@@ -193,13 +193,13 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 - **Scripts:** `system/promote.sh`.
 - **Health:** `gh run list --workflow promote-stable.yml --branch iso-v0 --limit 5`.
 
-### CI12 ISO Acceptance
+### CI12 Acceptance
 
-- **File:** `iso-acceptance.yml`. **Purpose:** installs a published ISO in a KVM guest, reboots, logs in at the greeter and checks that a session starts; screenshots.
-- **Triggers:** cron `17 3 * * 1`; dispatch (`iso_tag`); push of its file or `forge/test/iso/**`. **Output:** artifact `iso-acceptance-<run_id>`.
-- **Secrets, variables:** `GITHUB_TOKEN`. **Environment:** none. **Runner:** hosted with KVM. **Concurrency:** `iso-acceptance-<ref>`, no cancel.
-- **Scripts:** `forge/test/iso/run_iso_test.sh`, `screenshots.py`, `forge/scripts/retry.sh`.
-- **Health:** `gh run list --workflow iso-acceptance.yml --branch iso-v0 --limit 5`.
+- **File:** `accept.yml`. **Purpose:** installs the ISO of one build run in a KVM guest, reboots, logs in at the greeter and checks that a session starts; screenshots; writes the `iso-acceptance` evidence of UD4 for the run's `athanor-system` digest.
+- **Triggers:** dispatch (`run_id`, the build run). **Output:** artifacts `evidence-<run_id>-iso-acceptance` and `acceptance-<run_id>-<acceptance run id>`.
+- **Secrets, variables:** `GITHUB_TOKEN`, `REGISTRY_HOST`. **Environment:** none. **Runner:** hosted with KVM. **Concurrency:** `accept-<run_id>`, no cancel.
+- **Scripts:** `forge/test/iso/run_iso_test.sh`, `screenshots.py`, `forge/scripts/retry.sh`, `system/accept-target.sh`, `system/trusted-run.sh`, `scripts/ci/evidence.py`.
+- **Health:** `gh run list --workflow accept.yml --branch iso-v0 --limit 5`.
 
 ### CI13 System Image Check
 
@@ -378,7 +378,7 @@ One runner is registered (`athanor-vm-<timestamp>`, labels `self-hosted`, `Linux
 | Job | Why self-hosted |
 |---|---|
 | CI8 `build` (`kernel-build.yml:125`) | the kernel RPM build takes about an hour and a persistent cache (`~/.cache/azoth`) |
-| CI9 `prep` (`kernel-bump.yml:112`) | `build.sh --stage prep` of the new pins, in the same builder |
+| CI9 `prep` (`kernel-bump.yml:116`) | `build.sh --stage prep` of the new pins, in the same builder |
 | CI10 `repro`, `variant` (`kernel-weekly.yml:54,128`) | full kernel rebuilds |
 
 CI8 runs on every PR; its `build` job is skipped for PRs from forks (`kernel-build.yml:124`), so outside code never reaches the runner through it.
@@ -398,7 +398,7 @@ Every name below is described in the secrets inventory, `docs/operations/secrets
 | `SECUREBOOT_SIGNING_KEY` | secret | environments `signing-kernel` and `signing` | CI1 |
 | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | secret | environments `signing-images` and `signing` | CI1 |
 | `MODULE_SIGNING_KEY` | secret | environments `signing-kernel` and `signing` | CI1 |
-| `REGISTRY_HOST` | variable, default `ghcr.io` | not set | CI1, CI3, CI4, CI11, CI14, CI21, CI22 |
+| `REGISTRY_HOST` | variable, default `ghcr.io` | not set | CI1, CI3, CI4, CI11, CI12, CI14, CI21, CI22 |
 | `KERNEL_REGISTRY` | variable, default `ghcr.io/<owner>` | not set | CI1, CI6, CI8, CI9, CI13, CI25, CI26, CI28, CI30 |
 | `BUILDER_STABLE_TAG` | variable, default `latest` | not set | CI21, CI22 |
 | `SETTINGS_APP_PRIVATE_KEY` | secret (GitHub App key, read-only App) | repository | CI29 |

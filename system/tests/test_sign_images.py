@@ -16,7 +16,9 @@ SIGN = ROOT / "system" / "sign-images.sh"
 DIGESTS = ROOT / "system" / "image-digests.sh"
 VERIFY = ROOT / "system" / "verify-images.sh"
 TAG = ROOT / "system" / "tag-images.sh"
-A_KEY = ROOT / "forge/specs/athanor-update/athanor-update-1.0.0/tests/vectors/made/a.pub"
+A_KEY = (
+    ROOT / "forge/specs/athanor-update/athanor-update-1.0.0/tests/vectors/made/a.pub"
+)
 NAMES = ["athanor-system", "athanor-system-nvidia", "athanor-system-nvidia-legacy"]
 REG = "registry.example/owner"
 SECRET = "-----BEGIN ENCRYPTED SIGSTORE PRIVATE KEY-----\nnot-a-real-key\n-----END ENCRYPTED SIGSTORE PRIVATE KEY-----\n"
@@ -133,50 +135,100 @@ class SignImages(unittest.TestCase):
         podman.chmod(0o755)
         self.state = self.dir / "state"
         self.state.mkdir()
-        self.tags = {f"{REG}/{name}:412": "sha256:" + f"{i + 1}" * 64 for i, name in enumerate(NAMES)}
+        self.tags = {
+            f"{REG}/{name}:412": "sha256:" + f"{i + 1}" * 64
+            for i, name in enumerate(NAMES)
+        }
         (self.state / "tags.json").write_text(json.dumps(self.tags))
         (self.state / "signed.json").write_text("[]")
         (self.dir / "keys").mkdir()
         shutil.copy(A_KEY, self.dir / "keys" / "athanor-image-1.pub")
         (self.dir / "runtime").mkdir(mode=0o700)
         (self.dir / "tmp").mkdir()
-        self.env = {"PATH": f"{self.dir / 'bin'}:{os.environ['PATH']}", "STUB_STATE": str(self.state), "RETRY_ATTEMPTS": "1", "TAG_READBACK_DELAY": "0",
-                    "SIGN_KEYS_DIR": str(self.dir / "keys"), "VERIFY_KEYS_DIR": str(self.dir / "keys"), "XDG_RUNTIME_DIR": str(self.dir / "runtime"), "TMPDIR": str(self.dir / "tmp"),
-                    "COSIGN_PRIVATE_KEY": SECRET, "COSIGN_PASSWORD": "correct horse"}
+        self.env = {
+            "PATH": f"{self.dir / 'bin'}:{os.environ['PATH']}",
+            "STUB_STATE": str(self.state),
+            "RETRY_ATTEMPTS": "1",
+            "TAG_READBACK_DELAY": "0",
+            "SIGN_KEYS_DIR": str(self.dir / "keys"),
+            "VERIFY_KEYS_DIR": str(self.dir / "keys"),
+            "XDG_RUNTIME_DIR": str(self.dir / "runtime"),
+            "TMPDIR": str(self.dir / "tmp"),
+            "COSIGN_PRIVATE_KEY": SECRET,
+            "COSIGN_PASSWORD": "correct horse",
+        }
         self.file = self.dir / "artifacts" / "image-digests.txt"
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def digests(self):
-        return subprocess.run(["bash", str(DIGESTS), "--registry", REG, "--tag", "412", "--out", str(self.file)], capture_output=True, text=True, env=self.env)
+        return subprocess.run(
+            [
+                "bash",
+                str(DIGESTS),
+                "--registry",
+                REG,
+                "--tag",
+                "412",
+                "--out",
+                str(self.file),
+            ],
+            capture_output=True,
+            text=True,
+            env=self.env,
+        )
 
     def sign(self, **env):
-        return subprocess.run(["bash", str(SIGN), "--registry", REG, str(self.file)], capture_output=True, text=True, env={**self.env, **env})
+        return subprocess.run(
+            ["bash", str(SIGN), "--registry", REG, str(self.file)],
+            capture_output=True,
+            text=True,
+            env={**self.env, **env},
+        )
 
     def verify(self, *args, **env):
         # The verification job holds no key.
         clean = {k: v for k, v in self.env.items() if not k.startswith("COSIGN_")}
-        return subprocess.run(["bash", str(VERIFY), "--registry", REG, *args, str(self.file)], capture_output=True, text=True, env={**clean, **env})
+        return subprocess.run(
+            ["bash", str(VERIFY), "--registry", REG, *args, str(self.file)],
+            capture_output=True,
+            text=True,
+            env={**clean, **env},
+        )
 
     def tag(self, *args, **env):
         target = list(args) or [str(self.file)]
-        return subprocess.run(["bash", str(TAG), "--registry", REG, "--tag", "latest", *target], capture_output=True, text=True, env={**self.env, **env})
+        return subprocess.run(
+            ["bash", str(TAG), "--registry", REG, "--tag", "latest", *target],
+            capture_output=True,
+            text=True,
+            env={**self.env, **env},
+        )
 
     def calls(self):
-        return [json.loads(line) for line in (self.state / "calls.log").read_text().splitlines()]
+        return [
+            json.loads(line)
+            for line in (self.state / "calls.log").read_text().splitlines()
+        ]
 
     def test_the_build_job_records_three_digests(self):
         r = self.digests()
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(self.file.read_text().splitlines(), [f"{REG}/{name} 412 {self.tags[f'{REG}/{name}:412']}" for name in NAMES])
+        self.assertEqual(
+            self.file.read_text().splitlines(),
+            [f"{REG}/{name} 412 {self.tags[f'{REG}/{name}:412']}" for name in NAMES],
+        )
 
     def test_three_images_are_signed_by_digest_and_nothing_else(self):
         """The signing job signs and ends: no verification and no container beside the key."""
         self.digests()
         r = self.sign()
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(json.loads((self.state / "signed.json").read_text()), list(self.tags.values()))
+        self.assertEqual(
+            json.loads((self.state / "signed.json").read_text()),
+            list(self.tags.values()),
+        )
         self.assertFalse(any("--policy" in c["args"] for c in self.calls()))
         self.assertFalse((self.state / "podman.log").exists())
         self.assertEqual(r.stdout.count("signed: "), 3)
@@ -188,10 +240,16 @@ class SignImages(unittest.TestCase):
         self.assertEqual((self.state / "key.seen").read_text(), SECRET)
         self.assertEqual((self.state / "passphrase.seen").read_text(), "correct horse")
         for call in self.calls()[3:]:  # the calls of sign-images.sh
-            self.assertEqual(call["env"], [], "COSIGN_* must not be in the environment of skopeo")
+            self.assertEqual(
+                call["env"], [], "COSIGN_* must not be in the environment of skopeo"
+            )
             self.assertNotIn("not-a-real-key", " ".join(call["args"]))
             self.assertNotIn("correct horse", " ".join(call["args"]))
-        self.assertEqual(list((self.dir / "runtime").iterdir()), [], "the private directory is removed on exit")
+        self.assertEqual(
+            list((self.dir / "runtime").iterdir()),
+            [],
+            "the private directory is removed on exit",
+        )
         self.assertNotIn("not-a-real-key", r.stdout + r.stderr)
 
     def test_without_the_key_the_job_fails_before_touching_the_registry(self):
@@ -218,18 +276,33 @@ class SignImages(unittest.TestCase):
             self.assertNotIn("inspect", call["args"])
             self.assertFalse(any(":412" in a for a in call["args"]), call["args"])
 
-    def test_the_signed_images_are_pulled_through_the_rendered_policy_without_the_key(self):
+    def test_the_signed_images_are_pulled_through_the_rendered_policy_without_the_key(
+        self,
+    ):
         self.digests()
         self.sign()
         before = len(self.calls())
         r = self.verify()
         self.assertEqual(r.returncode, 0, r.stderr)
         verified = [c for c in self.calls()[before:]]
-        self.assertEqual([c["args"][-2] for c in verified], [f"docker://{REG}/{name}@{self.tags[f'{REG}/{name}:412']}" for name in NAMES])
-        self.assertTrue(all("--policy" in c["args"] and "--registries.d" in c["args"] for c in verified))
+        self.assertEqual(
+            [c["args"][-2] for c in verified],
+            [
+                f"docker://{REG}/{name}@{self.tags[f'{REG}/{name}:412']}"
+                for name in NAMES
+            ],
+        )
+        self.assertTrue(
+            all(
+                "--policy" in c["args"] and "--registries.d" in c["args"]
+                for c in verified
+            )
+        )
         self.assertTrue(all(c["env"] == [] for c in verified))
         self.assertEqual(r.stdout.count("verified with the shipped policy"), 3)
-        self.assertEqual(list((self.dir / "tmp").iterdir()), [], "the verification pulls are removed")
+        self.assertEqual(
+            list((self.dir / "tmp").iterdir()), [], "the verification pulls are removed"
+        )
 
     def test_images_the_signing_job_did_not_sign_fail_the_verification(self):
         """A skipped or rejected signing job leaves the images unsigned: the verification job,
@@ -246,16 +319,83 @@ class SignImages(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("A signature was required", r.stderr)
 
+    def test_verification_writes_one_signature_evidence_per_image(self):
+        self.digests()
+        self.sign()
+        out = self.dir / "evidence"
+        run_id = self.file.read_text().split()[1]
+        r = self.verify(
+            "--evidence",
+            str(out),
+            "--build-run-id",
+            run_id,
+            GITHUB_SERVER_URL="https://github.com",
+            GITHUB_REPOSITORY="ars-regia/athanor",
+            GITHUB_RUN_ID="9",
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for line in self.file.read_text().splitlines():
+            repository, tag, digest = line.split()
+            data = json.loads(
+                (out / f"signature.{repository.rsplit('/', 1)[1]}.json").read_text()
+            )
+            self.assertEqual(
+                (data["digest"], data["run_id"], data["verdict"]),
+                (digest, int(tag), "pass"),
+            )
+            self.assertEqual(
+                data["workflow_run_url"],
+                "https://github.com/ars-regia/athanor/actions/runs/9",
+            )
+
+    def test_a_failed_verification_writes_no_evidence_for_that_image(self):
+        self.digests()
+        # No signature at all: the first image already fails the policy pull.
+        out = self.dir / "evidence"
+        r = self.verify(
+            "--evidence",
+            str(out),
+            "--build-run-id",
+            self.file.read_text().split()[1],
+            GITHUB_SERVER_URL="https://github.com",
+            GITHUB_REPOSITORY="ars-regia/athanor",
+            GITHUB_RUN_ID="9",
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(list(out.glob("signature.*.json")) if out.exists() else [], [])
+
+    def test_a_digests_file_of_another_build_run_writes_no_evidence(self):
+        self.digests()
+        self.sign()
+        out = self.dir / "evidence"
+        r = self.verify(
+            "--evidence",
+            str(out),
+            "--build-run-id",
+            "1",
+            GITHUB_SERVER_URL="https://github.com",
+            GITHUB_REPOSITORY="ars-regia/athanor",
+            GITHUB_RUN_ID="9",
+        )
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("build run 1", r.stderr)
+        self.assertFalse(out.exists())
+
     def test_with_the_builder_the_verification_runs_in_its_image(self):
         self.digests()
         self.sign()
         r = self.verify("--builder", BUILDER)
         self.assertEqual(r.returncode, 0, r.stderr)
-        runs = [json.loads(line) for line in (self.state / "podman.log").read_text().splitlines()]
+        runs = [
+            json.loads(line)
+            for line in (self.state / "podman.log").read_text().splitlines()
+        ]
         self.assertEqual(len(runs), 3)
         for run in runs:
             self.assertEqual(run["image"], f"{REG}/athanor-builder:{BUILDER}")
-            self.assertEqual(len(run["mounts"]), 2, "only the rendered policy and the public keys")
+            self.assertEqual(
+                len(run["mounts"]), 2, "only the rendered policy and the public keys"
+            )
             self.assertNotIn("-e", run["args"])
             self.assertIn("--cap-drop=all", run["args"])
         self.assertEqual(r.stdout.count("verified with the shipped policy"), 3)
@@ -276,12 +416,17 @@ class SignImages(unittest.TestCase):
         r = self.tag()
         self.assertEqual(r.returncode, 0, r.stderr)
         tags = json.loads((self.state / "tags.json").read_text())
-        self.assertEqual({repository: tags[f"{repository}:latest"] for repository in recorded}, recorded)
+        self.assertEqual(
+            {repository: tags[f"{repository}:latest"] for repository in recorded},
+            recorded,
+        )
         self.assertEqual(r.stdout.count(":latest -> sha256:"), 3)
 
     def test_a_tag_that_does_not_read_back_fails(self):
         self.digests()
-        self.tags.update({f"{REG}/{name}:latest": "sha256:" + "0" * 64 for name in NAMES})
+        self.tags.update(
+            {f"{REG}/{name}:latest": "sha256:" + "0" * 64 for name in NAMES}
+        )
         (self.state / "tags.json").write_text(json.dumps(self.tags))
         r = self.tag(STUB_STALE="1")
         self.assertEqual(r.returncode, 1, r.stderr)
@@ -311,7 +456,12 @@ class SignImages(unittest.TestCase):
         (self.state / "tags.json").write_text(json.dumps(self.tags))
         r = self.tag("--iso", "412")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(json.loads((self.state / "tags.json").read_text())[f"{REG}/athanor-iso:latest"], iso)
+        self.assertEqual(
+            json.loads((self.state / "tags.json").read_text())[
+                f"{REG}/athanor-iso:latest"
+            ],
+            iso,
+        )
         for value in ("latest", "412 extra"):
             with self.subTest(value=value):
                 self.assertEqual(self.tag("--iso", *value.split()).returncode, 2)
@@ -319,7 +469,9 @@ class SignImages(unittest.TestCase):
     def test_verify_and_tag_refuse_a_repository_outside_the_shipped_set(self):
         self.digests()
         lines = self.file.read_text().splitlines()
-        self.file.write_text("\n".join([f"{REG}/other 412 sha256:{'1' * 64}"] + lines[1:]) + "\n")
+        self.file.write_text(
+            "\n".join([f"{REG}/other 412 sha256:{'1' * 64}"] + lines[1:]) + "\n"
+        )
         for run in (self.verify, self.tag):
             with self.subTest(script=run.__name__):
                 (self.state / "calls.log").unlink(missing_ok=True)
@@ -329,7 +481,10 @@ class SignImages(unittest.TestCase):
                 self.assertFalse((self.state / "calls.log").exists())
 
     def test_a_repository_outside_the_shipped_set_is_refused_before_signing(self):
-        for line in (f"{REG}/other 412 sha256:{'1' * 64}", f"ghcr.io/elsewhere/athanor-system 412 sha256:{'1' * 64}"):
+        for line in (
+            f"{REG}/other 412 sha256:{'1' * 64}",
+            f"ghcr.io/elsewhere/athanor-system 412 sha256:{'1' * 64}",
+        ):
             with self.subTest(line=line):
                 self.digests()
                 lines = self.file.read_text().splitlines()
@@ -343,7 +498,10 @@ class SignImages(unittest.TestCase):
     def test_a_missing_or_repeated_repository_is_refused_before_signing(self):
         self.digests()
         lines = self.file.read_text().splitlines()
-        for content, message in (([lines[0], lines[1]], "2 of the 3"), ([lines[0], lines[0], lines[1]], "twice")):
+        for content, message in (
+            ([lines[0], lines[1]], "2 of the 3"),
+            ([lines[0], lines[0], lines[1]], "twice"),
+        ):
             with self.subTest(message=message):
                 self.file.write_text("\n".join(content) + "\n")
                 (self.state / "calls.log").unlink(missing_ok=True)

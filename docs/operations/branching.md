@@ -49,7 +49,7 @@ Both options remove `main` from the trusted refs while it is unprotected.
 
 | Kind | File:line |
 | --- | --- |
-| Workflow triggers | `nix-vanguard.yml:5,7` (`main` only), and `main` beside `iso-v0` in `athanor-forge-orchestrator.yml:8`, `cosmic-comp-bump.yml:16`, `iso-acceptance.yml:31`, `kernel-build.yml:34`, `kernel-bump.yml:38`, `kernel-weekly.yml:37`, `nix-registry-bump.yml:15`, `azoth-signer.yml:13` |
+| Workflow triggers | `nix-vanguard.yml:5,7` (`main` only), and `main` beside `iso-v0` in `athanor-forge-orchestrator.yml:8`, `cosmic-comp-bump.yml:16`, `kernel-build.yml:34`, `kernel-bump.yml:38`, `kernel-weekly.yml:37`, `nix-registry-bump.yml:15`, `azoth-signer.yml:13` |
 | Workflow conditions | `athanor-forge-orchestrator.yml:411` (the ISO `:latest`, `main` only), `azoth-signer.yml:31` |
 | Settings | `.github/settings/rulesets.json:15`, `branch-protection.json:32`, the deployment branch policies of `environments.json` (lines 12, 41, 68, 100, 130) |
 | Trust | `KERNEL_TRUSTED_REFS` default `iso-v0 main` (`system/kernel-artifacts.sh:71`) |
@@ -74,7 +74,7 @@ old name (not verified here). It changes no file and no clone:
 
 | Kind | File:line |
 | --- | --- |
-| Workflow triggers | `.github/workflows/athanor-forge-orchestrator.yml:8` (its comment, lines 6-7, still calls `iso-v0` a non-default branch), `cosmic-comp-bump.yml:16`, `iso-acceptance.yml:31`, `kernel-build.yml:33`, `kernel-bump.yml:37`, `kernel-weekly.yml:37`, `nix-registry-bump.yml:15`, `shell-surfaces.yml:5` |
+| Workflow triggers | `.github/workflows/athanor-forge-orchestrator.yml:8` (its comment, lines 6-7, still calls `iso-v0` a non-default branch), `cosmic-comp-bump.yml:16`, `kernel-build.yml:33`, `kernel-bump.yml:37`, `kernel-weekly.yml:37`, `nix-registry-bump.yml:15`, `shell-surfaces.yml:5` |
 | Trust and its tests | `system/kernel-artifacts.sh:41,64`; `system/tests/test_kernel_artifacts.py` (13 lines), `system/tests/fake_registry.py:31` |
 | Unit `Documentation=` URLs | `forge/specs/athanor-launcher/athanor-launcher-1.0.0/data/athanor-launcher.service:3`, `athanor-launcher-rates.service:3`, `athanor-launcher-rates.timer:3`; `forge/specs/athanor-update/SOURCES/usr/lib/systemd/system/athanor-update.service:3`, `athanor-update-check.service:3`, `athanor-update-check.timer:3`, `athanor-update-migrate.service:3`, `athanor-update-state.service:3`, `user/athanor-update-notify.service:3` |
 | Policy and documentation | `CLAUDE.md:30`, `README.md:10`, `.github/SECURITY.md:5`, `forge/specs/azoth/KERNEL.md:151`, `docs/architecture/doc_build_ordering.md:50,156`, `doc_build_system.md:137`, `doc_kernel_build.md:298`, `doc_kernel_profile.md:35,944`, `doc_shell.md:79`, `doc_software.md:232`, `experimental/EXEMPT:1` |

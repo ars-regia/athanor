@@ -13,18 +13,23 @@
 # runs in that image under podman, which receives the rendered policy and the public keys,
 # read-only, and nothing else. Without it the host's skopeo verifies.
 #
-# Usage: verify-images.sh --registry REGISTRY/OWNER [--builder CONTENT_HASH] DIGESTS_FILE
+# With --evidence DIR --build-run-id ID it also writes the `signature` evidence of UD4
+# (scripts/ci/evidence.py) for each image it verified, naming ID as the run; a digests file
+# whose tag is not ID on every line is refused before anything is verified.
+#
+# Usage: verify-images.sh --registry REGISTRY/OWNER [--builder CONTENT_HASH]
+#                         [--evidence DIR --build-run-id ID] DIGESTS_FILE
 #        (lines: "REPOSITORY TAG DIGEST", image-digests.sh)
 # Environment: VERIFY_KEYS_DIR (default system/keys).
 set -euo pipefail
 
 usage() {
-    echo "usage: ${0##*/} --registry REGISTRY/OWNER [--builder CONTENT_HASH] DIGESTS_FILE" >&2
+    echo "usage: ${0##*/} --registry REGISTRY/OWNER [--builder CONTENT_HASH] [--evidence DIR --build-run-id ID] DIGESTS_FILE" >&2
     exit 2
 }
-registry='' builder=''
+registry='' builder='' evidence='' build_run=''
 while [[ $# -gt 1 ]]; do
-    case $1 in --registry) registry=$2 ;; --builder) builder=$2 ;; *) usage ;; esac
+    case $1 in --registry) registry=$2 ;; --builder) builder=$2 ;; --evidence) evidence=$2 ;; --build-run-id) build_run=$2 ;; *) usage ;; esac
     shift 2
 done
 [[ $# -eq 1 && -n $registry ]] || usage
@@ -34,9 +39,23 @@ digests=$1
     exit 2
 }
 
+if [[ -n $evidence || -n $build_run ]]; then
+    [[ -n $evidence && $build_run =~ ^[0-9]+$ && -n ${GITHUB_SERVER_URL:-} && -n ${GITHUB_REPOSITORY:-} && -n ${GITHUB_RUN_ID:-} ]] || {
+        echo "${0##*/}: --evidence needs --build-run-id (a number), GITHUB_SERVER_URL, GITHUB_REPOSITORY and GITHUB_RUN_ID" >&2
+        exit 2
+    }
+fi
+
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 retry="$root/forge/scripts/retry.sh"
 bash "$root/system/image-digests.sh" --registry "$registry" --check "$digests"
+if [[ -n $evidence ]]; then
+    others=$(awk -v run="$build_run" '$2 != run { print $1 ":" $2 }' "$digests")
+    [[ -z $others ]] || {
+        echo "${0##*/}: evidence for build run $build_run, but the digests file names other tags: $others" >&2
+        exit 1
+    }
+fi
 keys_dir=$(cd "${VERIFY_KEYS_DIR:-$root/system/keys}" && pwd)
 
 work=$(mktemp -d)
@@ -61,4 +80,9 @@ while read -r repository _ digest; do
         "docker://$repository@$digest" "dir:$target"
     rm -rf "$work/pull-$n"
     echo "verified with the shipped policy: $repository@$digest"
+    if [[ -n $evidence ]]; then
+        python3 -B "$root/scripts/ci/evidence.py" write --gate signature --image "${repository##*/}" \
+            --digest "$digest" --run-id "$build_run" --verdict pass \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --out "$evidence"
+    fi
 done < "$digests"

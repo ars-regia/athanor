@@ -30,6 +30,7 @@ picture says it started *correctly*, and the second question is not one this scr
 answer.
 """
 
+import json
 import pathlib
 import sys
 
@@ -119,20 +120,22 @@ def main() -> int:
     if session and settings:
         lines.append(f"- session to settings: {phases[settings] - phases[session]}s")
 
-    ok = (
-        installed
-        and kickstart_done
-        and profile is not None
-        and karg is not None
-        and greeter is not None
-        and session is not None
-        and settings is not None
-        and not failures
-    )
+    checks = {
+        "installed": installed,
+        "kickstart-done": kickstart_done,
+        "profile": profile is not None,
+        "karg": karg is not None,
+        "greeter": greeter is not None,
+        "session": session is not None,
+        "settings": settings is not None,
+        "no-guest-failure": not failures,
+    }
+    ok = all(checks.values())
     lines.insert(1, f"**{'PASS' if ok else 'FAIL'}**")
     report = "\n".join(lines) + "\n"
 
     (out / "verdict.md").write_text(report)
+    (out / "verdict.json").write_text(json.dumps({"pass": ok, "checks": checks}, indent=2) + "\n")
     print(report)
     return 0 if ok else 1
 
