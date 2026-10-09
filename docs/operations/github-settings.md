@@ -109,7 +109,7 @@ Each one is a change to a file followed by `apply`, or a deletion by hand follow
 | Description `ermete-os` | Set the Athanor description in `repository.json` (the file change follows this record) |
 | Dependabot alerts off | Set `vulnerability_alerts` to `true` in `repository.json` |
 | Environment `delete` has no rule and no secret, and no workflow names it (`grep -rn "environment:" .github/workflows` finds only `signing-kernel` and `signing-images`) | _(Done, export of 2026-10-09)_ The maintainer deletes it by hand, then exports again |
-| Pages builds `main:/docs` and errors, and nothing publishes to the `gh-pages` branch since the DNF channel was removed (ADR-0076, decision 2) | Turn Pages off in `pages.json`; the maintainer then deletes the `gh-pages` branch and the `github-pages` environment by hand and exports again _(branch and environment deleted by the export of 2026-10-09; Pages itself is still on)_ |
+| Pages builds `main:/docs` and errors, and nothing publishes to the `gh-pages` branch since the DNF channel was removed (ADR-0076, decision 2) | Turn Pages off in `pages.json`; the maintainer then deletes the `gh-pages` branch and the `github-pages` environment by hand and exports again _(Done: the maintainer deleted the branch, the environment and the Pages site by hand on 2026-10-09; the export of that day records it)_ |
 | `enforce_admins` is off on `iso-v0` and `main`: the admin may push past the required check | Stays off while there is a single maintainer: turned on, it would block every merge, because nobody else can approve. Turn it on when a second maintainer joins. The signing environments bind the admin already (section 7) |
 | No scheduled drift check | _(Done in PB2, section 9)_ `maintenance.yml` runs `diff` daily with a read-only token of a GitHub App, not an admin token |
 
@@ -122,7 +122,7 @@ no job holds a key it does not use:
 | --- | --- | --- |
 | `signing-kernel` | `SECUREBOOT_SIGNING_KEY`, `MODULE_SIGNING_KEY` | `nvidia-kmod-sign` of `athanor-forge-orchestrator.yml`, only when a kernel or NVIDIA change leaves the signed vmlinuz or modules missing |
 | `signing-images` | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | `sign-system-images` of `athanor-forge-orchestrator.yml` |
-| `signing` | the four keys it held before the split (`MOK_PRIVATE_KEY`, the fifth, which no workflow used, was deleted by the maintainer before the export of 2026-10-09) | `sign-system-images` of `athanor-forge-orchestrator.yml`, during the image key rotation only |
+| `signing` | the four keys it still holds; `MOK_PRIVATE_KEY`, a fifth that no workflow used, was deleted by the maintainer before the export of 2026-10-09 | `sign-system-images` of `athanor-forge-orchestrator.yml`, during the image key rotation only |
 
 `signing` is the environment the split replaces. It holds image key 1, which signs the
 transitional release of the image key rotation (`docs/operations/secrets.md` section 4.1), so
@@ -139,7 +139,7 @@ of a release ([ADR-0103](../decisions/0103-audit-5-decisions.md) D2, D25): the s
 promotion jobs move behind it, so the run's concurrency group is not held while it waits. Until
 that workflow change lands, no job uses it.
 
-Both have the same protection in `environments.json`: required reviewer `hr-mes`; administrator
+`signing-kernel` and `signing-images` have the same protection in `environments.json`: required reviewer `hr-mes`; administrator
 bypass off (`can_admins_bypass: false`, set by hand: section 4); deployment branches `iso-v0` and
 `main`, both protected by `branch-protection.json` (required checks `Kernel gate`, `Spec gate`
 and `gate` on `iso-v0`, `Kernel gate` on `main`, section 8; no force push, no deletion). Once the
@@ -151,7 +151,8 @@ KC1). GitHub refuses the approval of the person who triggered the run, and a rel
 re-run of one, is triggered by the maintainer, who is today the only reviewer: with it `true`,
 every release the maintainer triggers or re-runs would wait for an approval nobody can give. An
 App identity for agents does not change this, because the maintainer still starts and re-runs
-releases. It turns `true` when a second required reviewer is added to the signing environments.
+releases. It turns `true` when a second required reviewer is added to the signing environments and to
+`release`, which waits for the same reason.
 
 `environments.json` is the one place that says which environment holds which key.
 `scripts/verify.py workflows` reads it and fails a signing secret read by a job of any other

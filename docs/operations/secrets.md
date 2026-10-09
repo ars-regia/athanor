@@ -69,7 +69,6 @@ No repository variable is set (`gh variable list` is empty), so every default be
 | files ahead of GitHub | SEC13, VAR6 | `maintenance.yml` fails until both exist | step 2 of `github-settings.md` section 9 |
 | files ahead of GitHub | ENV7, SEC14 | none while VAR7 is unset: the job is skipped | create them before setting VAR7 (`doc_update_delivery.md` UD45) |
 | used, missing | ENV2 | PR #180's override path fails by design until the environment exists | create it when PR #180 merges |
-| present, unused | ENV3 | none | delete it, or say what it is for |
 | other | SEC9 | `forge-ghcr-cleanup.yml` fails on every run (37173567085, 36288233693, 35483291172) | outside this runbook |
 | other | `system/cosign.pub` | an old public key (2026-07-24, blob `ef686642`), not the image key (`athanor-image-1.pub`, blob `48cdddb2`). `system/athanor-store/src/main.rs:39` reads `/etc/athanor/keys/cosign.pub`, and `git grep` finds nothing that installs that file | maintainer to decide: retire it or make the store use the image key |
 
