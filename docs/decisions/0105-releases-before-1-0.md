@@ -33,8 +33,8 @@ Decided by the maintainer on 2026-10-09.
    | Release | Name | Target | Contents | Exit |
    | --- | --- | --- | --- | --- |
    | 0.3 | chain | about 2026-10-20 | `release.yml` (PB13, [ADR-0104](https://github.com/ars-regia/athanor/pull/354), proposed in open PR #354); the PB5 slice, promotion to `:stable` only on acceptance evidence (`accept.yml` verdict, `promote.sh` refusal); P2, the kernel build profile and boot matrix (#122); spike S1 (#124); the signed evidence bundle copied off GitHub (D23); the resolved Fedora package set (D16); NVIDIA failure isolation (D24, UD4) | the first `:stable` promotion on evidence |
-   | 0.5 | base | about 2026-11-07 | the Fedora 45 rebase, or Fedora 44 per ADR-0078; the bootc two-step update chain P4b (#126); the key hierarchy (D5) and the image key rotation to key 2 (PB5b); the MOK interim key set; the installer path (D17); LUKS2 on by default (D6); the ISO acceptance under Secure Boot (#252) | an ISO install, encrypted and under Secure Boot, updates itself to the next `:stable` |
-   | 0.7 | defences | about 2026-11-20 | the greeter PAM conversation and account lockout (D7); the polkit agent, SystemPrompter and keyring prompter, as function and not looks (D13, D20); Tetragon step 1 (D9); deletion of attestation and the mesh and post-quantum residue (D10); DNS over TLS (D11), USBGuard (D12), sshd (D18), update Apply polkit (D22); recovery acceptance; snapshots (D21), Flatpak (D8), SearXNG (D19); least privilege and PAM | the rows of `release-1.0.md` placed in 0.7 hold |
+   | 0.5 | base | about 2026-11-07 | the Fedora 45 rebase, or Fedora 44 per ADR-0078; the bootc two-step update chain P4b (#126); the key hierarchy (D5) and the start of the image key rotation to key 2 (its close, PB5b, needs a key-2 release on `:stable` and one more release, so it lands in 0.7); the MOK interim key set; the installer path (D17); LUKS2 on by default (D6); the ISO acceptance under Secure Boot (#252) | an ISO install, encrypted and under Secure Boot, updates itself to the next `:stable` |
+   | 0.7 | defences | about 2026-11-20 | the greeter PAM conversation and account lockout (D7); the polkit agent, SystemPrompter and keyring prompter, as function and not looks (D13, D20); the close of the image key rotation (PB5b); Tetragon step 1 (D9); deletion of attestation and the mesh and post-quantum residue (D10); DNS over TLS (D11), USBGuard (D12), sshd (D18), update Apply polkit (D22); recovery acceptance; snapshots (D21), Flatpak (D8), SearXNG (D19); least privilege and PAM | the rows of `release-1.0.md` placed in 0.7 hold |
    | 0.9 | surface | about 2026-11-27 | bar, dock and launcher acceptance; cosmic-comp patches 1, 2, 5 and 6 (D14); screenshot and screen share; the visual language and accessibility; the maintainer's aesthetic sign-offs (ST8, VL12); all hardware tests (item 3) | the release candidate: the rows placed in 0.9 hold and the hardware matrix is complete |
 
    **1.0** is 0.9 with no blocking defect, before 2026-12-02. Fedora 43 never ships in 1.0.
@@ -78,8 +78,9 @@ session tier" is split between 0.7 and 0.9, the row "Signed immutable image" bet
 0.9, and the row "Recovery and rollback" between 0.7 and 0.9; the reasons are in that file.
 
 **Risk on the dates.** The 0.5 date assumes the Fedora 45 image is green in time.
-If it is not green by mid-November the base moves to Fedora 44 (ADR-0078), and 0.5, 0.7 and
-0.9 move by the time lost; the 1.0 deadline of 2026-12-02 does not. The 0.7 to 0.9 interval is
+0.5 falls before the mid-November checkpoint of ADR-0078: if the Fedora 45 image is not green
+by the 0.5 date, 0.5 waits for it until the checkpoint and then moves to Fedora 44, and 0.7
+and 0.9 move by the time lost; the 1.0 deadline of 2026-12-02 does not. The 0.7 to 0.9 interval is
 one week and is the most exposed.
 
 **Milestones.** One GitHub milestone per release (0.3, 0.5, 0.7, 0.9) groups the open issues;
