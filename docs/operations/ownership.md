@@ -4,7 +4,7 @@
 | --- | --- |
 | Purpose | The areas of the repository, their paths and their owners |
 | Owner | the maintainer (`@hr-mes`) |
-| Status | revision 1, 2026-10-06, _(Proposal for the maintainer)_, except section 4, decided on 2026-10-08 (ADR-0097). `.github/CODEOWNERS` is not changed here: PR #170 owns it |
+| Status | revision 2, 2026-10-08: sections 2 and 3 decided (ADR-0098), section 4 decided (ADR-0097); section 1 states facts. `.github/CODEOWNERS` is not changed here: PR #170 owns it |
 | Depends on | [contributing.md](contributing.md) CT4 and CT6, [branching.md](branching.md) |
 | Defines | OWN1 to OWN5, and the areas `kernel`, `build`, `signing`, `security`, `shell`, `apps`, `docs` |
 
@@ -15,14 +15,14 @@
 - The repository belongs to the organisation `ars-regia` since 2026-10-06 (moved from the personal account `hr-mes`, [transfer-to-organisation.md](transfer-to-organisation.md)). GitHub teams, and with them per-area owner groups, are now possible; none exists yet.
 - The Gatekeeper left the tree in #121 (`ca00f23b`); its area stays reserved under `security` for its return.
 
-## 2. Rules _(Proposal)_
+## 2. Rules (decided 2026-10-08, [ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md))
 
 - **OWN1.** Every path belongs to one area; an owner of the area reviews its changes. Paths outside every area fall to the default owner.
 - **OWN2.** A spec belongs to the area it specifies, not to `docs`.
 - **OWN3.** `security` and `signing` changes need two approvals (contributing.md CT6). On a path shared by two areas, both owners are listed on one line.
 - **OWN4.** Today every area has one owner, the maintainer. When the repository moves to an organisation, each `@hr-mes` below becomes a team such as `@<org>/kernel`, with the maintainer kept on `security` and `signing`.
 
-## 3. Area map _(Proposal)_
+## 3. Area map (decided 2026-10-08, [ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md))
 
 CODEOWNERS syntax; the last matching line wins, so broad areas come first and the
 protected paths last, as in PR #170.
