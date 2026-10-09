@@ -134,17 +134,19 @@ its entry leaves `environments.json`; an entry left behind fails the lint, becau
 then held twice.
 
 `release` holds no key and has the same protection as the signing environments: required
-reviewer `hr-mes`, no administrator bypass, branches `iso-v0` and `main`. It is the one approval
-of a release ([ADR-0103](../decisions/0103-audit-5-decisions.md) D2, D25): the signing and
-promotion jobs move behind it, so the run's concurrency group is not held while it waits. Until
-that workflow change lands, no job uses it.
+reviewer `hr-mes`, no administrator bypass, branches `iso-v0` and `main`. It gates only the
+promotion to `:stable` ([ADR-0104](../decisions/0104-release-workflow-and-stable-gate.md),
+amending [ADR-0103](../decisions/0103-audit-5-decisions.md) D2 and D25): the job that moves
+`:stable` runs in it after the evidence and the dwell, and the image signing does not wait
+for it. Until PB13 of `docs/architecture/doc_pipeline.md` lands, no job uses it.
 
 `signing-kernel` and `signing-images` have the same protection in `environments.json`: required reviewer `hr-mes`; administrator
 bypass off (`can_admins_bypass: false`, set by hand: section 4); deployment branches `iso-v0` and
 `main`, both protected by `branch-protection.json` (required checks `Kernel gate`, `Spec gate`
 and `gate` on `iso-v0`, `Kernel gate` on `main`, section 8; no force push, no deletion). Once the
-rotation of `secrets.md` section 4.1 ends, `signing-images` loses the required reviewer until
-the 1.0 tag (ADR-0098 item 6); `signing-kernel` keeps it.
+rotation of `secrets.md` section 4.1 ends, `signing-images` loses the required reviewer, which
+does not return at the 1.0 tag (ADR-0098 item 6, amended by ADR-0104 item 8): the human gate
+is the `release` approval of the promotion. `signing-kernel` keeps it.
 
 `prevent_self_review` stays `false`, deferred until a second reviewer exists (secrets.md
 KC1). GitHub refuses the approval of the person who triggered the run, and a release run, or a
