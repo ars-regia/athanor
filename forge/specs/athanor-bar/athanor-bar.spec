@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        9%{?dist}
+Release:        10%{?dist}
 Summary:        The Athanor bar
 License:        GPL-3.0-or-later
 
@@ -11,7 +11,8 @@ Requires:       gtk4 gtk4-layer-shell athanor-calmo athanor-shelld
 # local-changes reason it may publish exists from 1.0.0-4, channel-absent from 1.0.0-6,
 # origin-not-enforcing from 1.0.0-8; owner-moved, owner-moved-waiting, owner-moved-held and
 # pinned-build from 1.0.0-9.
-Requires:       athanor-update >= 1.0.0-9
+# The owner-moved reasons of 1.0.0-9 are no longer published from athanor-update 1.0.0-10.
+Requires:       athanor-update >= 1.0.0-10
 # The first-session pick and the vendor layout moved here from the translator.
 Obsoletes:      athanor-layout-translator < 1.0.1
 
@@ -72,6 +73,10 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
+* Fri Oct 09 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
+- The shield no longer names the owner-moved, owner-moved-waiting and owner-moved-held
+  reasons, which athanor-update no longer publishes (ADR-0103 D4, issue #349).
+
 * Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-9
 - The control center's button, last of the status row and shown only while os.athanor.ControlCenter1
   is installed; the notification popups stay hidden while the control center is open.

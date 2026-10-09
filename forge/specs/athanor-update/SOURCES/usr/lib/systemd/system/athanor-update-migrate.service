@@ -1,9 +1,8 @@
 [Unit]
 Description=Move this machine onto the signed Athanor image reference
 Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_update_trust.md
-# No condition on the stamp: the unit reads it, and ignores it on an image of the
-# project's previous owner (doc_update_delivery.md, UD49). athanor-update-migrate.timer
-# starts it every six hours.
+# No condition on the stamp: the unit reads it and ends at it without asking bootc.
+# athanor-update-migrate.timer starts it every six hours.
 After=network-online.target athanor-update-state.service
 Wants=network-online.target
 

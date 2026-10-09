@@ -8,10 +8,7 @@
 //!   `newest-booted`   the newest build time this machine has booted, seconds since the epoch
 //!   `last-success`    when the registry last answered a check, seconds since the epoch
 //!   `migrated`        stamp of `athanor-update migrate`
-//!   `channel-absent`  `migrate` found no manifest for the channel, or for the image under the
-//!                     project's new owner; cleared when it finds one
-//!   `move-held`       `migrate` left a machine on the previous owner because the image under
-//!                     the new owner is the held digest; cleared when it moves or finds another
+//!   `channel-absent`  `migrate` found no manifest for the channel; cleared when it finds one
 //!   `move-record`     `<digest> <failed boots> [<deployment>]`: deployments of that digest
 //!                     `migrate` staged that did not boot, and the one it staged last, until
 //!                     a later run sees what became of it; removed with the stamp
@@ -160,8 +157,7 @@ impl Store {
     /// A file cannot be written or removed.
     pub fn set_migrated(&self) -> std::io::Result<()> {
         Self::replace(&self.var, "migrated", 0o644, b"")?;
-        self.set_move_held(false)?;
-        // The moved deployment booted: a later return from it is no failed boot to count.
+        // The signed reference booted: a later return from it is no failed boot to count.
         match std::fs::remove_file(self.var.join("move-record")) {
             Err(err) if err.kind() != std::io::ErrorKind::NotFound => return Err(err),
             _ => {}
@@ -181,23 +177,6 @@ impl Store {
             return Self::replace(&self.var, "channel-absent", 0o644, b"");
         }
         match std::fs::remove_file(self.var.join("channel-absent")) {
-            Err(err) if err.kind() != std::io::ErrorKind::NotFound => Err(err),
-            _ => Ok(()),
-        }
-    }
-
-    #[must_use]
-    pub fn move_held(&self) -> bool {
-        self.var.join("move-held").exists()
-    }
-
-    /// # Errors
-    /// The file cannot be written or removed.
-    pub fn set_move_held(&self, held: bool) -> std::io::Result<()> {
-        if held {
-            return Self::replace(&self.var, "move-held", 0o644, b"");
-        }
-        match std::fs::remove_file(self.var.join("move-held")) {
             Err(err) if err.kind() != std::io::ErrorKind::NotFound => Err(err),
             _ => Ok(()),
         }
