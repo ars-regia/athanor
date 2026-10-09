@@ -389,7 +389,6 @@ Every name below is described in the secrets inventory, `docs/operations/secrets
 | `SECUREBOOT_SIGNING_KEY` | secret | environments `signing-kernel` and `signing` | CI1 |
 | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | secret | environments `signing-images` and `signing` | CI1 |
 | `MODULE_SIGNING_KEY` | secret | environments `signing-kernel` and `signing` | CI1 |
-| `MOK_PRIVATE_KEY` | secret | environment `signing` | no workflow; retired at the close of the image key rotation (ADR-0088 decision 3) |
 | `REGISTRY_HOST` | variable, default `ghcr.io` | not set | CI1, CI3, CI4, CI11, CI14, CI21, CI22 |
 | `KERNEL_REGISTRY` | variable, default `ghcr.io/<owner>` | not set | CI1, CI6, CI8, CI9, CI13, CI25, CI26, CI28, CI30 |
 | `BUILDER_STABLE_TAG` | variable, default `latest` | not set | CI21, CI22 |
@@ -406,8 +405,7 @@ Environments (`gh api repos/ars-regia/athanor/environments`):
 | `signing-images` | as `signing-kernel`; without the required reviewer once `sign-system-images` is back in it at the end of the image key rotation, until the 1.0 tag (ADR-0098 item 6) | CI1 (`sign-system-images`, as `signing` during the image key rotation) |
 | `signing` | required reviewer `hr-mes`, no administrator bypass; branches `iso-v0`, `main`; the alias of `signing-images` and `signing-kernel` during the image key rotation (`docs/operations/secrets.md` section 4.1) | CI1 (`sign-system-images`) |
 | `bridge` | required reviewer `hr-mes`, no administrator bypass; branches `iso-v0`, `main` | CI1 (`bridge-system-images`) |
-| `delete` | none; deleted by hand by the maintainer, then the settings are exported again ([ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md)) | no workflow |
-| `github-pages` | no reviewer; branches `gh-pages`, `main`; Pages is turned off, and the maintainer deletes the `gh-pages` branch and this environment by hand ([ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md)) | no workflow |
+| `release` | required reviewer `hr-mes`, no administrator bypass; branches `iso-v0`, `main`; no secret | no job yet; the signing and promotion jobs move behind it, so a release asks for one approval and the run's concurrency group is not held while it waits ([ADR-0103](../decisions/0103-audit-5-decisions.md) D2, D25) |
 
 ## 6. Proposals
 

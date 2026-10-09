@@ -51,7 +51,7 @@ Both options remove `main` from the trusted refs while it is unprotected.
 | --- | --- |
 | Workflow triggers | `nix-vanguard.yml:5,7` (`main` only), and `main` beside `iso-v0` in `athanor-forge-orchestrator.yml:8`, `cosmic-comp-bump.yml:16`, `iso-acceptance.yml:31`, `kernel-build.yml:34`, `kernel-bump.yml:38`, `kernel-weekly.yml:37`, `nix-registry-bump.yml:15`, `azoth-signer.yml:13` |
 | Workflow conditions | `athanor-forge-orchestrator.yml:411` (the ISO `:latest`, `main` only), `:427` (the bridge condition), `azoth-signer.yml:31` |
-| Settings | `.github/settings/rulesets.json:15`, `branch-protection.json:32`, the deployment branch policies of `environments.json` (lines 12, 50, 72, 105, 135), `pages.json:6` |
+| Settings | `.github/settings/rulesets.json:15`, `branch-protection.json:32`, the deployment branch policies of `environments.json` (lines 12, 41, 68, 100, 130) |
 | Trust | `KERNEL_TRUSTED_REFS` default `iso-v0 main` (`system/kernel-artifacts.sh:71`) |
 
 The ISO `:latest` condition at `athanor-forge-orchestrator.yml:411` needs a decision of its own, because with `main` gone no ref satisfies it: it follows the product branch, as the kernel's `:latest` does.

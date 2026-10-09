@@ -1,9 +1,1 @@
-{
-  "build_type": "legacy",
-  "cname": null,
-  "https_enforced": true,
-  "source": {
-    "branch": "main",
-    "path": "/docs"
-  }
-}
+null

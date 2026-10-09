@@ -54,11 +54,12 @@ No repository variable is set (`gh variable list` is empty), so every default be
 | --- | --- | --- | --- | --- |
 | ENV1 | `signing-kernel` | SEC1, SEC2 | required reviewer `hr-mes`, self-review allowed (`prevent_self_review` false, see `github-settings.md` section 7), no administrator bypass; deployment branches `iso-v0` and `main`, both protected (required checks `Kernel gate`, `Spec gate` and `gate` on `iso-v0`, `Kernel gate` on `main`; no force push, no deletion) | `athanor-forge-orchestrator.yml:203` (`nvidia-kmod-sign`, the sign-kernel job; a manual cycle dispatches the Orchestrator). `scripts/verify.py workflows` fails a signing secret outside a job of the environment that holds it in `environments.json`, a signing job that builds or uses an action other than checkout and artifact transfer, a step that hands a signing secret to anything but a sign script, a signing job in a workflow with `workflow_call` among its triggers, whose keys would be empty unless the caller inherits every secret (actions/runner#4453), and a signing environment with administrator bypass or a deployment branch that `branch-protection.json` does not protect (D43) |
 | ENV2 | `stable-override` | none | **missing on GitHub** | PR #180 only (`promote-stable.yml`, checked by `system/require-review.sh`); `doc_update_trust.md` on that branch asks for required reviewers, the release branch only and no administrator bypass |
-| ENV3 | `delete` | none | none; created 2026-08-08 | nothing |
-| ENV4 | `github-pages` | none | deployment branches `gh-pages` and `main` | no workflow names it; it served the DNF channel, removed by ADR-0076 decision 2, and the maintainer deletes it with the `gh-pages` branch |
+| ENV3 | `delete` | none | deleted by the maintainer; absent from the export of 2026-10-09 | nothing |
+| ENV4 | `github-pages` | none | deleted with the `gh-pages` branch; absent from the export of 2026-10-09 | nothing; it served the DNF channel, removed by ADR-0076 decision 2 |
 | ENV5 | `signing-images` | SEC3, SEC4 | required reviewer `hr-mes`, self-review allowed (`prevent_self_review` false, see `github-settings.md` section 7), no administrator bypass; deployment branches `iso-v0` and `main`, both protected (required checks `Kernel gate`, `Spec gate` and `gate` on `iso-v0`, `Kernel gate` on `main`; no force push, no deletion) | `athanor-forge-orchestrator.yml:299` (`sign-system-images`, still in `signing` during the rotation of section 4.1, which moves it back to `signing-images`) |
 | ENV7 | `bridge` | SEC14 | required reviewer `hr-mes`, self-review allowed, no administrator bypass; with SEC14 a token of `hr-mes`, the approval is only as strong as the custody of that account (section 1.4): the token writes under another owner, which machines that do not verify their downloads pull from (`doc_update_delivery.md` UD46); the digests it copies are verified first by `verify-system-images`; deployment branches `iso-v0` and `main` | `athanor-forge-orchestrator.yml` `bridge-system-images` |
-| ENV6 | `signing` | SEC1 to SEC4, `MOK_PRIVATE_KEY` | as ENV5; declared in `environments.json` only during the image key rotation (section 4.1), as an alias of ENV5 for `scripts/verify.py` | `athanor-forge-orchestrator.yml` `sign-system-images` until step 3 of section 4.1; deleted at step 4 |
+| ENV6 | `signing` | SEC1 to SEC4 (`MOK_PRIVATE_KEY`, which no workflow used, deleted by the maintainer; absent from the export of 2026-10-09) | as ENV5; declared in `environments.json` only during the image key rotation (section 4.1), as an alias of ENV5 for `scripts/verify.py` | `athanor-forge-orchestrator.yml` `sign-system-images` until step 3 of section 4.1; deleted at step 4 |
+| ENV8 | `release` | none | required reviewer `hr-mes`, self-review allowed, no administrator bypass; deployment branches `iso-v0` and `main` | no job yet; the signing and promotion jobs move behind it, so a release asks for one approval and the run's concurrency group is not held while it waits ([ADR-0103](../decisions/0103-audit-5-decisions.md) D2, D25) |
 
 ### 1.3 Drift between code and GitHub
 
@@ -68,7 +69,6 @@ No repository variable is set (`gh variable list` is empty), so every default be
 | files ahead of GitHub | SEC13, VAR6 | `maintenance.yml` fails until both exist | step 2 of `github-settings.md` section 9 |
 | files ahead of GitHub | ENV7, SEC14 | none while VAR7 is unset: the job is skipped | create them before setting VAR7 (`doc_update_delivery.md` UD45) |
 | used, missing | ENV2 | PR #180's override path fails by design until the environment exists | create it when PR #180 merges |
-| present, unused | ENV3 | none | delete it, or say what it is for |
 | other | SEC9 | `forge-ghcr-cleanup.yml` fails on every run (37173567085, 36288233693, 35483291172) | outside this runbook |
 | other | `system/cosign.pub` | an old public key (2026-07-24, blob `ef686642`), not the image key (`athanor-image-1.pub`, blob `48cdddb2`). `system/athanor-store/src/main.rs:39` reads `/etc/athanor/keys/cosign.pub`, and `git grep` finds nothing that installs that file | maintainer to decide: retire it or make the store use the image key |
 
@@ -211,8 +211,8 @@ because the Orchestrator, not a pull request, publishes the signed vmlinuz.
    (`docs/operations/github-settings.md` section 7: reviewer, branches `iso-v0` and `main`,
    administrator bypass off by hand), then load SEC1 and SEC2 into `signing-kernel` and SEC3 and
    SEC4 into `signing-images` with the commands of section 1.4, from the backup of KC2. Keep
-   `signing`: it signs the transitional release with image key 1 and is deleted, with
-   `MOK_PRIVATE_KEY`, only at step 4 of section 4.1.
+   `signing`: it signs the transitional release with image key 1 and is deleted only at step 4
+   of section 4.1.
 2. **`azoth-signer.yml` publishes the signer image.** It runs on the push of the merge
    (`forge/specs/azoth/signer/**`, `lock.sh` and `sign-kernel.sh` are in its paths), or by hand:
    `gh workflow run azoth-signer.yml --ref iso-v0 --repo "$REPO"`. It needs no key and no
@@ -254,8 +254,7 @@ before that environment is deleted, and no installed machine needs the out-of-ba
    `sign-images.sh` verifies the signature against `athanor-image-2.pub` alone, so an image still
    signed with key 1 fails there instead of passing a policy that trusts both keys.
 4. **Key 1 leaves.** One release after the first image signed with key 2,
-   `system/keys/athanor-image-1.pub` is removed, and `signing` is deleted together with
-   `MOK_PRIVATE_KEY`.
+   `system/keys/athanor-image-1.pub` is removed, and `signing` is deleted.
 
 A machine that skips the transitional release still trusts key 1 only and refuses the images
 signed with key 2: it is moved with `athanor-update recover-key` (`RECOVERY.md`).
