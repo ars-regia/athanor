@@ -77,7 +77,7 @@ The tier repositories are published as OCI images only; there is no DNF channel 
 
 Branch protection on `iso-v0` requires three checks, `Kernel gate`, `Spec gate` and `gate` (`.github/settings/branch-protection.json`, applied with `scripts/github-settings/ghsettings.py` as soon as a change of the file is merged; `main` requires `Kernel gate` until it takes CI27). The file declares exactly what is applied. All three workflows run on every pull request, so every required check always reports. CI27 (`pr.yml`, doc_pipeline.md PL3) reports `gate`, the one check that replaces the other two with CP4: the follow-up that removes the `pull_request` triggers of CI8 and CI14 removes `Kernel gate` and `Spec gate` from `branch-protection.json` in the same change. Until then the kernel and the specs of a change that selects them are checked twice: by CI8 and CI14 on their own, and inside CI27. The bots' merges wait for the checks `branch-protection.json` requires on the base branch (`forge/scripts/bot_merge.py`), so they follow the file in both states. Everything else reports but does not block a merge.
 
-The ruleset `product-branches` (`.github/settings/rulesets.json`, active) applies on top of the branch protection, to `refs/heads/iso-v0` and `refs/heads/main`: no deletion, no force push, linear history, a pull request merged by squash only with code-owner review and no other approval (stale reviews dismissed on push; the paths with no owner in `.github/CODEOWNERS` merge without a review, ADR-0107), and the required check `gate` (not strict). Its only bypass actor is the repository Admin role (`RepositoryRole` 5), in the `pull_request` mode. There is no merge queue: it stays out of the ruleset until every required context reports on `merge_group` (ADR-0088 item 6, PIPE-N06). `rulesets.json` holds one ruleset, where doc_pipeline.md PL1 targets two. So `main` requires `Kernel gate` through the branch protection and `gate` through the ruleset.
+Two rulesets (`.github/settings/rulesets.json`, active) apply on top of the branch protection, to `refs/heads/iso-v0` and `refs/heads/main`. `product-branches` holds the integrity rules: no deletion, no force push, linear history and the required check `gate` (not strict); it has no bypass actor. `product-review` holds the pull request rule: squash only, code-owner review and no other approval (stale reviews dismissed on push; the paths with no owner in `.github/CODEOWNERS` merge without a review, ADR-0107). Its bypass actors are the repository Admin role (`RepositoryRole` 5) and the bots GitHub App (`Integration`), both in the `pull_request` mode, so a bot merges its own pull request and nobody pushes past the integrity rules. The App entry is added to `rulesets.json` once the App's id is known. There is no merge queue: it stays out of the rulesets until every required context reports on `merge_group` (ADR-0088 item 6, PIPE-N06). So `main` requires `Kernel gate` through the branch protection and `gate` through `product-branches`.
 
 | Check | Workflow | Runs on a PR when | Required | Gates |
 |---|---|---|---|---|
@@ -172,7 +172,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 
 - **File:** `kernel-bump.yml`. **Purpose:** bump bot. Group `kernel` moves the kernel pins and opens a `kernel-bump` PR with auto-merge when prep is green; group `system` moves the base image pins and opens a `system-bump` PR; every run mirrors the locked NVIDIA RPMs (O7, O8).
 - **Triggers:** cron `17 5 * * *`; dispatch; push of its own file. **Outputs:** PRs; artifacts `bump-pins`, `bump-prep`; image `KERNEL_REGISTRY/athanor-nvidia-rpms`.
-- **Secrets, variables:** `KERNEL_BUMP_TOKEN` (PRs that trigger checks), `GITHUB_TOKEN`, `KERNEL_REGISTRY`. **Environment:** none.
+- **Secrets, variables:** `BOT_APP_PRIVATE_KEY`, `BOT_APP_ID` (jobs `pr` and `system`: the PRs open with an App token, so that they start checks), `GITHUB_TOKEN`, `KERNEL_REGISTRY`. **Environment:** `bots` (jobs `pr` and `system`).
 - **Runner:** `prep` self-hosted (`:112`), the rest hosted. **Concurrency:** `kernel-bump`, no cancel.
 - **Scripts:** `forge/specs/azoth/bump.py`, `build.sh`, `lock.sh`, `nvidia.sh`, `SOURCES/sources.sh`, `nvidia/sources.sh`, `system/nvidia/mirror.sh`, `mirror-locks.sh`, `forge/scripts/bot_merge.py`.
 - **Health:** `gh run list --workflow kernel-bump.yml --branch iso-v0 --limit 5`.
@@ -205,7 +205,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 
 - **File:** `system-image-check.yml`. **Purpose:** PR build of the system images as the pipeline builds them (no key reaches a build), without pushing, plus the package delta against the published image; merges the bot's `bump/system-*` PRs (O7).
 - **Triggers:** `pull_request` on the image inputs (`system/Containerfile`, `system/nvidia/**`, `system/scripts/**`, `system/keys/**`, `forge/config/packages.json`, ...). **Output:** artifact `kernel-artifacts`; a merge.
-- **Secrets, variables:** `GITHUB_TOKEN`, `KERNEL_BUMP_TOKEN`, `KERNEL_REGISTRY`. **Environment:** none. **Runner:** hosted. **Concurrency:** `system-image-check-<PR>`, cancels in progress.
+- **Secrets, variables:** `GITHUB_TOKEN`, `BOT_APP_PRIVATE_KEY`, `BOT_APP_ID` (job `merge` only: a merge made with an App token triggers the push workflows), `KERNEL_REGISTRY`. **Environment:** `bots` (job `merge`). **Runner:** hosted. **Concurrency:** `system-image-check-<PR>`, cancels in progress.
 - **Scripts:** `system/kernel-artifacts.sh`, `build-image.sh`, `rechunk-image.sh`, `package-delta.sh`, `nvidia/gate.sh`, `forge/specs/azoth/nvr.sh`, `forge/scripts/bot_merge.py`, `retry.sh`.
 - **Health:** `gh run list --workflow system-image-check.yml --branch iso-v0 --limit 5`.
 
@@ -213,7 +213,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 
 - **File:** `spec-build-check.yml`. **Purpose:** PR build of changed forge specs in the builder image; merges the spec bot's PR when every bump keeps its major version.
 - **Triggers:** every `pull_request` (until CP4 removes the trigger); `workflow_call` from CI27 job `specs` with `from_pr_gate: true`, which builds and judges but leaves the bot merge to the direct run; `select_check_specs.py` picks the changed specs (not `azoth`), or all of them when `forge/config/rpmmacros`, the builder or the build scripts change. **Required check:** `Spec gate` until CP4. **Output:** a merge.
-- **Secrets, variables:** `KERNEL_BUMP_TOKEN`, `REGISTRY_HOST`. **Environment:** none. **Runner:** hosted. **Concurrency:** `spec-build-check-<workflow>-<PR or ref>`, cancels in progress; the workflow name keeps the direct run and the call of CI27 apart.
+- **Secrets, variables:** `BOT_APP_PRIVATE_KEY`, `BOT_APP_ID` (job `merge` only, as CI13), `REGISTRY_HOST`. **Environment:** `bots` (job `merge`). **Runner:** hosted. **Concurrency:** `spec-build-check-<workflow>-<PR or ref>`, cancels in progress; the workflow name keeps the direct run and the call of CI27 apart.
 - **Scripts:** `forge/scripts/build_changed_specs.sh`, `build_spec.sh`, `run_spec_build.sh`, `fetch_sources.sh`, `retry.sh`, `bot_merge.py`.
 - **Health:** `gh run list --workflow spec-build-check.yml --branch iso-v0 --limit 5`.
 
@@ -237,7 +237,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 
 - **File:** `cosmic-comp-bump.yml`. **Purpose:** follows Fedora's stable cosmic-comp build and opens a PR, never auto-merged.
 - **Triggers:** cron `43 5 * * *`; dispatch; push of its file. **Outputs:** PR, artifact `cosmic-comp-bump`.
-- **Secrets, variables:** `KERNEL_BUMP_TOKEN`. **Environment:** none. **Runner:** hosted. **Concurrency:** `cosmic-comp-bump`, no cancel.
+- **Secrets, variables:** `BOT_APP_PRIVATE_KEY`, `BOT_APP_ID`. **Environment:** `bots`. **Runner:** hosted. **Concurrency:** `cosmic-comp-bump`, no cancel.
 - **Scripts:** `forge/specs/azoth/bump.py`, `open_bump_pr.sh`.
 - **Health:** `gh run list --workflow cosmic-comp-bump.yml --branch iso-v0 --limit 5`.
 
@@ -253,7 +253,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 
 - **File:** `nix-registry-bump.yml`. **Purpose:** moves the nixpkgs pin of the system flake registry and opens a PR, never auto-merged.
 - **Triggers:** cron `17 6 * * 1`; dispatch; push of its file. **Outputs:** PR, artifact `nix-registry-bump`.
-- **Secrets, variables:** `KERNEL_BUMP_TOKEN` (for the PR step only). **Environment:** none. **Runner:** hosted. **Concurrency:** `nix-registry-bump`, no cancel.
+- **Secrets, variables:** `BOT_APP_PRIVATE_KEY`, `BOT_APP_ID` (minted after the bump step, so that the step which runs a downloaded archive never sees the token). **Environment:** `bots`. **Runner:** hosted. **Concurrency:** `nix-registry-bump`, no cancel.
 - **Scripts:** `forge/specs/athanor-nix-support/bump.py`, `forge/specs/azoth/open_bump_pr.sh`.
 - **Health:** `gh run list --workflow nix-registry-bump.yml --branch iso-v0 --limit 5`.
 
@@ -261,7 +261,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 
 - **File:** `forge-util-update-specs.yml`. **Purpose:** bumps the watched specs to their latest upstream releases and opens the PR `chore/update-specs-zero-trust`, which CI14 merges.
 - **Triggers:** cron `0 2 * * *`; dispatch. **Output:** PR.
-- **Secrets, variables:** `SPECS_UPDATE_TOKEN`, `GITHUB_TOKEN`. **Environment:** none. **Runner:** hosted. **Concurrency:** `<workflow>-<ref>`, cancels in progress.
+- **Secrets, variables:** `BOT_APP_PRIVATE_KEY`, `BOT_APP_ID`, `GITHUB_TOKEN`. **Environment:** `bots`. **Runner:** hosted. **Concurrency:** `<workflow>-<ref>`, cancels in progress.
 - **Scripts:** `forge/scripts/zero_trust_updater.py`.
 - **Health:** `gh run list --workflow forge-util-update-specs.yml --branch iso-v0 --limit 5`.
 
@@ -340,7 +340,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 
 - **File:** `publish-rig-build-image.yml`. **Purpose:** builds the build stage of the shell rig, pushes `athanor-shell-rig-build`, pulls it back by digest, checks that it can be pulled anonymously and opens the PR that commits the full reference (`<registry>/athanor-shell-rig-build@sha256:...`, the registry lowercased by `rig.sh`) as `forge/test/shell/build-image.digest`, so that `rig.sh` (CI15, CI27) pulls the stage instead of building it. The maintainer runs it when the build stage changes and makes the package public the first time: the first run fails at the step `Pull the reference anonymously` of job `pin` ("make the package athanor-shell-rig-build public, then re-run the failed jobs") until then. It refuses to run from a tag.
 - **Triggers:** dispatch only. **Outputs:** artifact `rig-build-image-ref`, PR labelled `rig-build-image` (never auto-merged; a still-open PR of another digest fails the run naming it).
-- **Secrets, variables:** `GITHUB_TOKEN` (job `publish`, `packages: write`), `KERNEL_BUMP_TOKEN` (the PR step of job `pin` only), `KERNEL_REGISTRY`. **Environment:** none. **Runner:** hosted. **Concurrency:** `publish-rig-build-image`, no cancel.
+- **Secrets, variables:** `GITHUB_TOKEN` (job `publish`, `packages: write`), `BOT_APP_PRIVATE_KEY`, `BOT_APP_ID` (job `pin` only), `KERNEL_REGISTRY`. **Environment:** `bots` (job `pin`). **Runner:** hosted. **Concurrency:** `publish-rig-build-image`, no cancel.
 - **Scripts:** `forge/test/shell/rig.sh publish-build-image`, `forge/test/shell/check_public.sh`, `forge/test/shell/pin_build_image.py`, `forge/specs/azoth/open_bump_pr.sh`.
 
 ### CI31 Fuzz
@@ -382,8 +382,10 @@ Every name below is described in the secrets inventory, `docs/operations/secrets
 | Name | Kind | Defined in | Used by |
 |---|---|---|---|
 | `GITHUB_TOKEN` | automatic token | GitHub | CI1, CI3-CI9, CI10-CI13, CI20, CI25, CI26, CI30 |
-| `KERNEL_BUMP_TOKEN` | secret (PAT); renamed `BOT_PR_TOKEN` in one commit ([ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md), not yet done) | repository | CI9, CI13, CI14, CI17, CI19, CI30 |
-| `SPECS_UPDATE_TOKEN` | secret (PAT) | repository | CI20 |
+| `KERNEL_BUMP_TOKEN` | secret (PAT), retired 2026-10-09 and replaced by `BOT_APP_PRIVATE_KEY`; the rename to `BOT_PR_TOKEN` of [ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md) is void | repository | none |
+| `SPECS_UPDATE_TOKEN` | secret (PAT), retired 2026-10-09 and replaced by `BOT_APP_PRIVATE_KEY` | repository | none |
+| `BOT_APP_PRIVATE_KEY` | secret (private key of the bots GitHub App) | environment `bots` | CI9, CI13, CI14, CI17, CI19, CI20, CI30 |
+| `BOT_APP_ID` | variable, no default | environment `bots` | CI9, CI13, CI14, CI17, CI19, CI20, CI30 |
 | `FORGE_PAT` | secret (PAT, delete:packages) | repository | CI21 |
 | `SECUREBOOT_SIGNING_KEY` | secret | environments `signing-kernel` and `signing` | CI1 |
 | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | secret | environments `signing-images` and `signing` | CI1 |
