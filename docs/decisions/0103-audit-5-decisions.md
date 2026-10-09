@@ -42,9 +42,11 @@ recommended option, except D19.
 - **D26. The kernel profile's 1.0 gate is re-cut to the narrow 1.0.** The 1.0 row of
   `doc_kernel_profile.md` section 12 ("the immediate items, S1 and P1–P7 green") and the order
   of P2, P3 and P4a are re-cut to the narrow 1.0: roles (P5), IPE (the dm-verity part of P6)
-  and AutoFDO (P7) move to 1.1. P3 no longer has to be green before the Fedora 45 rebase
-  starts, so [ADR-0078](0078-fedora-release-target.md) item 1 is amended in its start
-  condition only; its fallback to Fedora 44 stays.
+  and AutoFDO (P7) move to 1.1. The new order follows the audit recommendation the
+  maintainer accepted: the Fedora 45 rebase (P4a) no longer waits for P3, so
+  [ADR-0078](0078-fedora-release-target.md) item 1 is amended in its start condition only;
+  its fallback to Fedora 44 stays. The `doc_kernel_profile.md` revision that applies this
+  decision writes the order out.
 
 ### Release trust and review
 
@@ -60,8 +62,8 @@ recommended option, except D19.
   not hold the concurrency group of the builds, and it runs behind the `release` environment.
   No transitional release signed with key 2 is cut before the key hierarchy of D5 exists.
 - **D23. Evidence leaves GitHub.** At promotion, the signed evidence bundle is copied to a
-  location off GitHub ([ADR-0081](0081-cra-compliance-posture.md) item 3, `doc_pipeline.md`
-  PL42).
+  location off GitHub (`doc_pipeline.md` PL42). This supersedes the sentence "There is no
+  copy outside GitHub for now" of [ADR-0081](0081-cra-compliance-posture.md) item 3.
 
 ### Platform and updates
 
@@ -81,8 +83,8 @@ recommended option, except D19.
 - **D16. The resolved Fedora package set is recorded per build for 1.0**; a snapshot and lock
   of the Fedora input (the planned lock of `doc_system_image.md`, `doc_update_delivery.md`
   UD28) follow in 1.1.
-- **D24. NVIDIA failures are decoupled from the other images now**, as UD4 of
-  `doc_update_delivery.md` requires (the default image promotes alone).
+- **D24. NVIDIA failures are decoupled from the other images now**: a failure in an NVIDIA
+  variant no longer stops the build or promotion of the others.
   `athanor-system-nvidia-legacy` is in 1.0 only if 20 boot-matrix runs show an acceptable flake
   rate and #231 is fixed.
 
@@ -102,7 +104,7 @@ recommended option, except D19.
 - **D10. athanor-attestation is deleted**, with its Cargo exclusion and the mesh and
   post-quantum residue in `athanor-bus-api`. This amends
   [ADR-0087](0087-attestation-outside-the-workspace.md), reversing its decision to keep the
-  crate in the tree until a Keylime rewrite; a rewrite starts from an approved specification.
+  crate in the tree until a Keylime rewrite.
 - **D11. DNS over TLS is opportunistic until the captive-portal probe ships, then strict.**
   This amends [ADR-0079](0079-captive-portals-under-strict-dot.md) item 1 and
   [ADR-0089](0089-defaults-that-contact-or-listen.md) item 6 until the probe exists.
@@ -110,9 +112,10 @@ recommended option, except D19.
   present at install (webcam, Bluetooth, readers) are allowed; a new external device that is
   not a human interface device needs confirmation once the notice exists (`doc_disks.md` DK21).
   This amends the default-deny baseline of [W1-FOLLOWUP](0008-wave1-follow-up.md).
-- **D18. Remote login survives the update.** Machines with `sshd` already enabled keep it;
-  it is off only on new installs. This amends
-  [ADR-0089](0089-defaults-that-contact-or-listen.md) item 2 for existing machines.
+- **D18. Remote login survives the update.** Machines with `sshd` already enabled keep it
+  reachable: the update keeps ssh open in their active firewall zone instead of closing it.
+  New installs have it off. This amends [ADR-0089](0089-defaults-that-contact-or-listen.md)
+  item 2 and its "Existing installs" consequence for existing machines.
 - **D22. Update Apply asks an administrator when other sessions exist.**
   `os.athanor.update.apply` is `auth_admin` when other sessions exist and `allow_active` only
   with one session; `blocked()` fails closed (`doc_update_trust.md` UT6,
@@ -161,7 +164,8 @@ recommended option, except D19.
 
 - **D27. One area vocabulary.** The areas are the seven of `docs/operations/ownership.md`
   (`kernel`, `build`, `signing`, `security`, `shell`, `apps`, `docs`) plus `platform`; the
-  `build-ci` area of `components.toml` becomes `build`. A `verify.py` check aligns the decision
+  `build-ci` area of `components.toml` becomes `build`, and its `signing-update` area becomes
+  `signing` until the owners of signing and of updates differ. A `verify.py` check aligns the decision
   records, the inventory and the ownership map. This applies item 4 of
   [ADR-0074](0074-agent-and-contributor-model.md).
 

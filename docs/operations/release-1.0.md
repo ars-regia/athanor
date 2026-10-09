@@ -40,7 +40,7 @@ pull request that builds the row adds it, under that name or a better one.
 | Keyring prompter exchange carried by Athanor (D20) | `doc_lock_and_prompts.md` LP12 | to add: SystemPrompter acceptance on the dev VM |
 | Application installation: verified Flathub remote, Flatpak update timer, the packaged store (D8) | `doc_software.md` SW15 to SW17 | `python3 scripts/verify.py contacts`; to add: an image check for the remote and the enabled timer |
 | Tetragon: step 1, three or four journal-only policies, SELinux CIL type (D9) | `doc_tetragon.md` TG10, TG11 | `python3 scripts/verify.py services`; to add: an image check that asserts the daemon's real state |
-| athanor-attestation and the mesh and post-quantum residue deleted (D10) | ADR-0103 D10 | `python3 scripts/verify.py shipped coverage` |
+| athanor-attestation and the mesh and post-quantum residue deleted (D10) | ADR-0103 D10 | `python3 scripts/verify.py shipped coverage`; to add: a check that the crate directory and the mesh and post-quantum modules of `athanor-bus-api` are absent |
 | DNS over TLS opportunistic until the captive-portal probe ships, then strict (D11) | [ADR-0079](../decisions/0079-captive-portals-under-strict-dot.md) | `python3 scripts/verify.py contacts`; to add: an image check of the resolver mode |
 | USBGuard class allowlist; confirmation for new external devices once the notice exists (D12) | `doc_disks.md` DK21 | to add: a rule test over the admitted and blocked classes |
 | Existing machines with `sshd` enabled keep it; off on new installs (D18) | [ADR-0089](../decisions/0089-defaults-that-contact-or-listen.md) items 2, 3 | to add: a test of both paths, `sshd` enabled and not enabled |
