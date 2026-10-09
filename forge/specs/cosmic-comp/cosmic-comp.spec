@@ -4,13 +4,13 @@
 # Name so that it replaces Fedora's build instead of sitting beside it (like
 # forge/specs/just). The release spells out Fedora's, so that 1.8.0-1.fc43.athanor1 sorts
 # above 1.8.0-1.fc43 and below 1.8.0-2.fc43: the Nix builder defines no %%dist.
-%global fedora_release 1.fc43
+%global fedora_release 2.fc43
 # The commit of upstream's tag epoch-%{version}, embedded as GIT_HASH.
-%global commit 0fbd4574ef4caf74769a617d205fd1fc909ac9b1
+%global commit 41497b42d9744d9963c4c6d17e8add49489b45ee
 %global cosmic_minver 1.8.0
 
 Name:           cosmic-comp
-Version:        1.9.0
+Version:        1.10.0
 Release:        %{fedora_release}.athanor1
 Summary:        Wayland compositor of the COSMIC desktop, with Athanor's focus fix
 
@@ -46,7 +46,12 @@ export GIT_HASH=%{commit}
 cargo build --release --locked
 
 %install
-make install DESTDIR=%{buildroot} prefix=%{_prefix}
+# What the `install` recipe of upstream's justfile installs; 1.10.0 has no Makefile.
+install -Dm0755 target/release/cosmic-comp %{buildroot}%{_bindir}/cosmic-comp
+install -Dm0644 data/keybindings.ron \
+    %{buildroot}%{_datadir}/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults
+install -Dm0644 data/tiling-exceptions.ron \
+    %{buildroot}%{_datadir}/cosmic/com.system76.CosmicSettings.WindowRules/v1/tiling_exception_defaults
 
 %files
 %license LICENSE
@@ -55,6 +60,9 @@ make install DESTDIR=%{buildroot} prefix=%{_prefix}
 %{_datadir}/cosmic/com.system76.CosmicSettings.WindowRules/v1/tiling_exception_defaults
 
 %changelog
+* Fri Oct 09 2026 Athanor Forge <forge@athanor.os> - 1.10.0-2.fc43.athanor1
+- Fedora's cosmic-comp 1.10.0-2.fc43.
+
 * Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.9.0-1.fc43.athanor1
 - Fedora's cosmic-comp 1.9.0-1.fc43; both patches still apply.
 
