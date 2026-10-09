@@ -1381,6 +1381,7 @@ through `main`'s old jobs, without a marker, until ADR-0098 option A deletes `ma
 marker has two writers, the jobs `tag-latest` and `mark-current`, counted per job (PL35,
 PL54-PL58, section 10).
 
-Amended on 2026-10-09, still proposed: the push to `iso-v0` may publish the kernel RPMs
+Amended on 2026-10-09 and approved by the maintainer with ADR-0110, independently of the rest
+of revision 3: the push to `iso-v0` may publish the kernel RPMs
 built by the merged pull request's run instead of building them again, under four conditions
 and with a rebuild as the fallback (PL44, ADR-0110; `doc_kernel_build.md` section 7).
