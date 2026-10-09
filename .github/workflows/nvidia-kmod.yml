@@ -69,6 +69,17 @@ jobs:
           path: mok
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        # The user CA path (D40): modules signed by a trusted user CA and by a leaf of it.
+        with:
+          name: nvidia-mokca-signed
+          path: mokca
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: nvidia-mokleaf-signed
+          path: mokleaf
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: nvidia-kernel-artifacts
           path: kernel-artifacts
@@ -93,7 +104,9 @@ jobs:
       - name: Run boot.sh with the signed modules
         # Every case: the trust in the module signing key is compiled into the kernel, so
         # SeaBIOS proves it holds without firmware, and the UEFI cases prove that a MOK
-        # enrolled in MokList does not extend it.
+        # enrolled in MokList does not extend it. A module signed directly by a trusted user CA
+        # loads under UEFI and is rejected without firmware; a module signed by a leaf of that
+        # CA and an IMA key vouched by it are refused everywhere (D40, D46).
         run: |
           set -euo pipefail
           mkdir -p boot-out
@@ -101,10 +114,14 @@ jobs:
           podman run --rm --device /dev/kvm -v "$GITHUB_WORKSPACE:/forge" -w /forge localhost/azoth-boot \
             bash forge/specs/azoth/boot.sh --rpms /forge/out --out /forge/boot-out \
               --mok mok/test-mok.pem \
+              --mok-ca mokca/test-ca.pem \
+              --ima-key mokleaf/test-leaf.pem \
               --insmod "signed/open/${ko}:ENODEV" \
               --insmod "signed/legacy/${ko}:ENODEV" \
               --insmod "unsigned/open/${ko}:EKEYREJECTED" \
-              --insmod "mok/open/${ko}:EKEYREJECTED"
+              --insmod "mok/open/${ko}:EKEYREJECTED" \
+              --insmod "mokca/open/${ko}:ENODEV:EKEYREJECTED" \
+              --insmod "mokleaf/open/${ko}:EKEYREJECTED"
 
       - name: Summary
         if: ${{ always() }}

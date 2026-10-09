@@ -221,6 +221,26 @@ class PlatformAssertions(unittest.TestCase):
         prelude = "keyctl() { echo 'keyctl: Required key not available' >&2; return 1; }\nbuiltin_expected=0"
         self.assertNotEqual(run_function("builtin_exact", prelude).returncode, 0)
 
+    def ima(self, describe_rc, padd_rc, listed="", why="Key was rejected by service", key="/bin/sh"):
+        return (f'keyctl() {{ case $1 in describe) return {describe_rc} ;; '
+                f'padd) echo "add_key: {why}" >&2; return {padd_rc} ;; '
+                f'list) echo "{listed}" ;; esac; }}\nimakey_file={key}')
+
+    def test_a_refused_key_passes(self):
+        self.assertEqual(run_function("ima_key_refused", self.ima(0, 1)).returncode, 0)
+
+    def test_an_accepted_key_fails(self):
+        self.assertNotEqual(run_function("ima_key_refused", self.ima(0, 0)).returncode, 0)
+
+    def test_ima_refusal_needs_the_keyring(self):
+        self.assertNotEqual(run_function("ima_key_refused", self.ima(1, 1)).returncode, 0)
+
+    def test_a_refusal_for_another_reason_fails(self):
+        self.assertNotEqual(run_function("ima_key_refused", self.ima(0, 1, why="Bad message")).returncode, 0)
+
+    def test_a_missing_key_file_fails(self):
+        self.assertNotEqual(run_function("ima_key_refused", self.ima(0, 1, key="/nonexistent/key.der")).returncode, 0)
+
     def test_init_runs_the_platform_checks(self):
         text = INIT.read_text()
         for needle in ("check preempt", "check aslr", "check iommu", "check mesh-platform",

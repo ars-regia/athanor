@@ -14,19 +14,24 @@
 # (EKEYREJECTED).
 #
 # Usage: boot.sh --rpms DIR --out DIR [--accel kvm|tcg] [--case NAME]... [--mok CERT]...
-#                [--insmod FILE.ko:ERRNO]...
+#                [--mok-ca CERT]... [--ima-key CERT] [--insmod FILE.ko:ERRNO[:BIOS_ERRNO]]...
 #   --rpms   directory to search for kernel-core-*.rpm (the out of build.sh or the artifact)
 #   --out    serial logs, summary and test material
 #   --accel  kvm (default, needs /dev/kvm) or tcg (emulation: slow, `host` becomes `max`)
 #   --case   restricts the matrix (repeatable): bios-penryn bios-host uefi-penryn uefi-host iommu-intel iommu-amd
 #   --mok    certificate (PEM) to enrol in MokList besides the ephemeral one of the UKI,
 #            to prove an enrolled MOK does not authorise modules
+#   --mok-ca user CA (PEM) to enrol in MokList and trust for the machine keyring, as
+#            `mokutil --trust-mok` does (D40)
+#   --ima-key certificate (PEM) the guest offers to the .ima keyring, which must refuse it
+#            (D40, D46)
 #   --insmod module to load in the guest and the errno expected from insmod (ENODEV,
-#            EKEYREJECTED, or 0), in every case
+#            EKEYREJECTED, or 0); BIOS_ERRNO, when given, applies to the bios-* and iommu-*
+#            cases, the first errno to the uefi-* ones
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-RPMS='' OUT='' ACCEL=kvm CASES=() MOKS=() INSMOD=()
+RPMS='' OUT='' ACCEL=kvm CASES=() MOKS=() MOK_CAS=() IMA_KEY='' INSMOD=()
 while [[ $# -gt 0 ]]; do
   case $1 in
     --rpms) RPMS=$2; shift 2 ;;
@@ -34,16 +39,27 @@ while [[ $# -gt 0 ]]; do
     --accel) ACCEL=$2; shift 2 ;;
     --case) CASES+=("$2"); shift 2 ;;
     --mok) MOKS+=("$2"); shift 2 ;;
+    --mok-ca) MOK_CAS+=("$2"); shift 2 ;;
+    --ima-key) IMA_KEY=$2; shift 2 ;;
     --insmod) INSMOD+=("$2"); shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
-[[ $RPMS && $OUT ]] || { echo "usage: boot.sh --rpms DIR --out DIR [--accel kvm|tcg] [--case NAME]... [--mok CERT]... [--insmod FILE.ko:ERRNO]..." >&2; exit 2; }
+[[ $RPMS && $OUT ]] || { echo "usage: boot.sh --rpms DIR --out DIR [--accel kvm|tcg] [--case NAME]... [--mok CERT]... [--mok-ca CERT]... [--ima-key CERT] [--insmod FILE.ko:ERRNO[:BIOS_ERRNO]]..." >&2; exit 2; }
 [[ ${#CASES[@]} -gt 0 ]] || CASES=(bios-penryn bios-host uefi-penryn uefi-host iommu-intel iommu-amd)
 [[ $ACCEL == kvm && ! -w /dev/kvm ]] && { echo "/dev/kvm not accessible: use --accel tcg" >&2; exit 2; }
 
 die() { echo "error: $*" >&2; exit 1; }
 step() { echo; echo "== $*"; }
+insmod_spec() { # insmod_spec FILE.ko:ERRNO[:BIOS_ERRNO]: print "file uefi-errno bios-errno"
+  local ko=${1%%:*} rest=${1#*:} uefi bios
+  [[ $1 == *:* && $ko ]] || die "--insmod expects FILE.ko:ERRNO[:BIOS_ERRNO], got: $1"
+  uefi=${rest%%:*}; bios=$uefi; [[ $rest == *:* ]] && bios=${rest#*:}
+  for e in "$uefi" "$bios"; do
+    [[ $e =~ ^(0|ENODEV|EKEYREJECTED)$ ]] || die "--insmod: unknown errno '$e' in $1"
+  done
+  echo "$ko $uefi $bios"
+}
 
 mapfile -t CORE < <(find "$RPMS" -name 'kernel-core-*.rpm')
 [[ ${#CORE[@]} -eq 1 ]] || die "expected exactly one kernel-core-*.rpm in $RPMS, found ${#CORE[@]}"
@@ -94,15 +110,21 @@ install_binary /usr/bin/keyctl
 install -m 755 "$HERE/boot/init" "$R/init"
 # The modules under test, numbered: two branches share the same nvidia.ko. The k3.insmod
 # parameter lists file:errno and goes into the command line of every case.
-K3_INSMOD=''
+for s in "${INSMOD[@]}"; do insmod_spec "$s" > /dev/null; done # the process substitution below hides a failure
+K3_INSMOD_UEFI='' K3_INSMOD_BIOS=''
 for i in "${!INSMOD[@]}"; do
-  ko=${INSMOD[$i]%%:*}; errno=${INSMOD[$i]##*:}
-  [[ -f $ko && $errno && $errno != "$ko" ]] || die "--insmod expects FILE.ko:ERRNO, got: ${INSMOD[$i]}"
+  read -r ko uefi bios < <(insmod_spec "${INSMOD[$i]}")
+  [[ -f $ko ]] || die "--insmod: no such file: $ko"
   install -D -m 644 "$ko" "$R/modules/$i-${ko##*/}"
-  K3_INSMOD+="${K3_INSMOD:+,}$i-${ko##*/}:$errno"
+  K3_INSMOD_UEFI+="${K3_INSMOD_UEFI:+,}$i-${ko##*/}:$uefi"
+  K3_INSMOD_BIOS+="${K3_INSMOD_BIOS:+,}$i-${ko##*/}:$bios"
 done
-BIOS_CMDLINE="$TEST_CMDLINE${K3_INSMOD:+ k3.insmod=$K3_INSMOD}"
-UEFI_CMDLINE="$TEST_CMDLINE${K3_INSMOD:+ k3.insmod=$K3_INSMOD} k3.sb=1"
+if [[ $IMA_KEY ]]; then
+  install -d "$R/ima" && openssl x509 -in "$IMA_KEY" -outform DER -out "$R/ima/key.der"
+  TEST_CMDLINE+=" k3.imakey=1"
+fi
+BIOS_CMDLINE="$TEST_CMDLINE${K3_INSMOD_BIOS:+ k3.insmod=$K3_INSMOD_BIOS}"
+UEFI_CMDLINE="$TEST_CMDLINE${K3_INSMOD_UEFI:+ k3.insmod=$K3_INSMOD_UEFI} k3.sb=1"
 (cd "$R" && find . | cpio -o -H newc --quiet | zstd -q -T0 -19 -o "$WORK/initramfs.img")
 echo "initramfs: $(du -sh "$R" | cut -f1) uncompressed, $(du -h "$WORK/initramfs.img" | cut -f1) compressed"
 
@@ -122,7 +144,15 @@ OVMF_CODE=/usr/share/edk2/ovmf/OVMF_CODE.secboot.fd
 # never modules.
 ADD_MOK=()
 for cert in "$OUT/mok.pem" "${MOKS[@]}"; do ADD_MOK+=(--add-mok "$(< /proc/sys/kernel/random/uuid)" "$cert"); done
-virt-fw-vars -i /usr/share/edk2/ovmf/OVMF_VARS.secboot.fd -o "$WORK/vars.fd" "${ADD_MOK[@]}" > "$OUT/varstore.log"
+# D40: a user CA enrolled in MokList and trusted for the machine keyring (mokutil --trust-mok
+# sets MokListTrusted, which shim mirrors to MokListTrustedRT).
+for cert in "${MOK_CAS[@]}"; do ADD_MOK+=(--add-mok "$(< /proc/sys/kernel/random/uuid)" "$cert"); done
+SET_JSON=()
+if [[ ${#MOK_CAS[@]} -gt 0 ]]; then
+  printf '%s\n' '{"version": 2, "variables": [{"name": "MokListTrusted", "guid": "605dab50-e046-4300-abb6-3dd810dd8b23", "attr": 3, "data": "01"}]}' > "$WORK/moktrust.json"
+  SET_JSON=(--set-json "$WORK/moktrust.json")
+fi
+virt-fw-vars -i /usr/share/edk2/ovmf/OVMF_VARS.secboot.fd -o "$WORK/vars.fd" "${ADD_MOK[@]}" "${SET_JSON[@]}" > "$OUT/varstore.log"
 # ESP: shim at the removable path, the UKI where shim looks for the second stage.
 mkdir -p "$WORK/esp/EFI/BOOT"
 cp /boot/efi/EFI/fedora/shimx64.efi "$WORK/esp/EFI/BOOT/BOOTX64.EFI"

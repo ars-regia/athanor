@@ -67,5 +67,24 @@ class Cases(unittest.TestCase):
         self.assertIn("unknown case: bios-nehalem", err)
 
 
+def insmod_spec(spec):
+    script = 'die() { echo "error: $*" >&2; exit 1; }\n' + function("insmod_spec") + f'\ninsmod_spec "{spec}"\n'
+    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    return result.returncode, result.stdout.split()
+
+
+class InsmodSpecs(unittest.TestCase):
+    def test_one_errno_applies_to_both_firmwares(self):
+        self.assertEqual(insmod_spec("a.ko:ENODEV"), (0, ["a.ko", "ENODEV", "ENODEV"]))
+
+    def test_a_bios_errno_overrides(self):
+        self.assertEqual(insmod_spec("a.ko:ENODEV:EKEYREJECTED"), (0, ["a.ko", "ENODEV", "EKEYREJECTED"]))
+
+    def test_malformed_insmod_specs_are_refused(self):
+        for spec in ("a.ko", "a.ko:", "a.ko:ENODEV:", "a.ko:EPERM", "a.ko:ENODEV:EPERM", ":ENODEV"):
+            with self.subTest(spec):
+                self.assertNotEqual(insmod_spec(spec)[0], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
