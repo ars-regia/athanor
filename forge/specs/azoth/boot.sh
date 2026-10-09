@@ -2,9 +2,10 @@
 # Boot matrix of the Athanor kernel (docs/architecture/doc_kernel_build.md, section 7, gate 3).
 # Runs in the boot/Containerfile image. Extracts vmlinuz from the kernel-core RPM, builds a
 # test initramfs (busybox, bpftool, boot/init) and a UKI signed with an ephemeral MOK,
-# enrols the MOK in the OVMF varstore with Secure Boot on and boots QEMU four times:
-# firmware {SeaBIOS, OVMF+Secure Boot via shim} x CPU {Nehalem, host}. Nehalem proves that
-# no instruction beyond the x86-64 baseline made it into the kernel. Every boot must end
+# enrols the MOK in the OVMF varstore with Secure Boot on and boots QEMU six times:
+# firmware {SeaBIOS, OVMF+Secure Boot via shim} x CPU {Penryn, host}, plus an Intel and an
+# AMD IOMMU case. Penryn (x86-64-v1, no POPCNT or SSE4.2; D14) proves that no instruction
+# beyond the baseline made it into the kernel. Every boot must end
 # with `K3 RESULT ok` on the serial console (the assertions are in boot/init).
 # Every boot also checks that the certificates of keys/modules and keys/revoked are
 # compiled into the kernel. With --insmod it exercises the external module chain (section
@@ -17,7 +18,7 @@
 #   --rpms   directory to search for kernel-core-*.rpm (the out of build.sh or the artifact)
 #   --out    serial logs, summary and test material
 #   --accel  kvm (default, needs /dev/kvm) or tcg (emulation: slow, `host` becomes `max`)
-#   --case   restricts the matrix (repeatable): bios-nehalem bios-host uefi-nehalem uefi-host
+#   --case   restricts the matrix (repeatable): bios-penryn bios-host uefi-penryn uefi-host iommu-intel iommu-amd
 #   --mok    certificate (PEM) to enrol in MokList besides the ephemeral one of the UKI,
 #            to prove an enrolled MOK does not authorise modules
 #   --insmod module to load in the guest and the errno expected from insmod (ENODEV,
@@ -38,7 +39,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ $RPMS && $OUT ]] || { echo "usage: boot.sh --rpms DIR --out DIR [--accel kvm|tcg] [--case NAME]... [--mok CERT]... [--insmod FILE.ko:ERRNO]..." >&2; exit 2; }
-[[ ${#CASES[@]} -gt 0 ]] || CASES=(bios-nehalem bios-host uefi-nehalem uefi-host)
+[[ ${#CASES[@]} -gt 0 ]] || CASES=(bios-penryn bios-host uefi-penryn uefi-host iommu-intel iommu-amd)
 [[ $ACCEL == kvm && ! -w /dev/kvm ]] && { echo "/dev/kvm not accessible: use --accel tcg" >&2; exit 2; }
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -91,7 +92,8 @@ for i in "${!INSMOD[@]}"; do
   install -D -m 644 "$ko" "$R/modules/$i-${ko##*/}"
   K3_INSMOD+="${K3_INSMOD:+,}$i-${ko##*/}:$errno"
 done
-TEST_CMDLINE+="${K3_INSMOD:+ k3.insmod=$K3_INSMOD}"
+BIOS_CMDLINE="$TEST_CMDLINE${K3_INSMOD:+ k3.insmod=$K3_INSMOD}"
+UEFI_CMDLINE="$TEST_CMDLINE${K3_INSMOD:+ k3.insmod=$K3_INSMOD} k3.sb=1"
 (cd "$R" && find . | cpio -o -H newc --quiet | zstd -q -T0 -19 -o "$WORK/initramfs.img")
 echo "initramfs: $(du -sh "$R" | cut -f1) uncompressed, $(du -h "$WORK/initramfs.img" | cut -f1) compressed"
 
@@ -100,7 +102,7 @@ step "UKI signed with an ephemeral MOK, enrolled in the OVMF varstore"
 openssl req -x509 -newkey rsa:2048 -nodes -days 2 -config "$HERE/keys/profiles/secureboot.cnf" \
   -subj '/CN=Athanor OS K3 test MOK/' -keyout "$WORK/mok.key" -out "$OUT/mok.pem" 2> /dev/null
 ukify build --linux "$VMLINUZ" --initrd "$WORK/initramfs.img" --uname "$KVER" \
-  --cmdline "$TEST_CMDLINE k3.sb=1" --stub /usr/lib/systemd/boot/efi/linuxx64.efi.stub \
+  --cmdline "$UEFI_CMDLINE" --stub /usr/lib/systemd/boot/efi/linuxx64.efi.stub \
   --signtool sbsign --secureboot-private-key "$WORK/mok.key" --secureboot-certificate "$OUT/mok.pem" \
   --output "$WORK/uki.efi" > "$OUT/ukify.log"
 sbverify --cert "$OUT/mok.pem" "$WORK/uki.efi" >> "$OUT/ukify.log"
@@ -117,24 +119,39 @@ mkdir -p "$WORK/esp/EFI/BOOT"
 cp /boot/efi/EFI/fedora/shimx64.efi "$WORK/esp/EFI/BOOT/BOOTX64.EFI"
 cp "$WORK/uki.efi" "$WORK/esp/EFI/BOOT/grubx64.efi"
 
-run_case() { # run_case NAME  (NAME = <bios|uefi>-<nehalem|host>)
-  local name=$1 fw=${1%-*} cpu=${1#*-} log="$OUT/$1.log" args
-  [[ $cpu == host && $ACCEL == tcg ]] && cpu=max
-  [[ $cpu == nehalem ]] && cpu=Nehalem
-  args=(-machine "q35,smm=on" -accel "$ACCEL" -cpu "$cpu" -smp 2 -m 2048
-        -display none -monitor none -serial "file:$log" -no-reboot
-        -device virtio-rng-pci)
-  case $fw in
-    bios) args+=(-kernel "$VMLINUZ" -initrd "$WORK/initramfs.img" -append "$TEST_CMDLINE") ;;
-    uefi) cp "$WORK/vars.fd" "$WORK/vars-$name.fd"
-          args+=(-global "driver=cfi.pflash01,property=secure,value=on"
-                 -drive "if=pflash,format=raw,readonly=on,file=$OVMF_CODE"
-                 -drive "if=pflash,format=raw,file=$WORK/vars-$name.fd"
-                 -drive "if=virtio,format=raw,readonly=on,file=fat:ro:$WORK/esp") ;;
+case_args() { # case_args NAME: the QEMU arguments of one case, in the global array CASE_ARGS
+  local name=$1 cpu machine=q35,smm=on iommu='' fw
+  case $name in
+    bios-penryn|uefi-penryn) cpu=Penryn ;;
+    bios-host|uefi-host) cpu=host ;;
+    # Section 12 item 2: the interrupt remapping of both IOMMUs needs the split irqchip.
+    iommu-intel) cpu=host iommu=intel-iommu,intremap=on machine+=,kernel-irqchip=split ;;
+    iommu-amd) cpu=host iommu=amd-iommu,intremap=on machine+=,kernel-irqchip=split ;;
     *) die "unknown case: $name" ;;
   esac
-  step "$name (firmware $fw, cpu $cpu, accel $ACCEL)"
-  timeout 900 qemu-system-x86_64 "${args[@]}" || echo "qemu: exit $?"
+  [[ $cpu == host && $ACCEL == tcg ]] && cpu=max
+  fw=${name%%-*}; [[ $fw == iommu ]] && fw=bios
+  CASE_ARGS=(-machine "$machine" -accel "$ACCEL" -cpu "$cpu" -smp 2 -m 2048
+             -display none -monitor none -serial "file:$OUT/$name.log" -no-reboot)
+  # The IOMMU comes before every other PCI device, as QEMU requires.
+  [[ $iommu ]] && CASE_ARGS+=(-device "$iommu")
+  CASE_ARGS+=(-device virtio-rng-pci)
+  case $fw in
+    bios) CASE_ARGS+=(-kernel "$VMLINUZ" -initrd "$WORK/initramfs.img"
+                      -append "$BIOS_CMDLINE${iommu:+ k3.iommu=${name#iommu-}}") ;;
+    uefi) CASE_ARGS+=(-global "driver=cfi.pflash01,property=secure,value=on"
+                      -drive "if=pflash,format=raw,readonly=on,file=$OVMF_CODE"
+                      -drive "if=pflash,format=raw,file=$WORK/vars-$name.fd"
+                      -drive "if=virtio,format=raw,readonly=on,file=fat:ro:$WORK/esp") ;;
+  esac
+}
+
+run_case() { # run_case NAME
+  local name=$1 log="$OUT/$1.log"
+  case_args "$name"
+  [[ $name == uefi-* ]] && cp "$WORK/vars.fd" "$WORK/vars-$name.fd"
+  step "$name (accel $ACCEL)"
+  timeout 900 qemu-system-x86_64 "${CASE_ARGS[@]}" || echo "qemu: exit $?"
   if grep -q '^K3 RESULT ok' "$log"; then
     RESULTS+=("| $name | ok |"); echo "$name: ok"
   else
