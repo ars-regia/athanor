@@ -27,7 +27,7 @@ pull request that builds the row adds it, under that name or a better one.
 | Signed immutable image, three variants: default, `-nvidia`, and `-nvidia-legacy` only on its evidence (D24) | `doc_system_image.md` S1 to S5, `doc_update_trust.md` UT2, UT3 | `system/verify-images.sh --registry REGISTRY/OWNER DIGESTS_FILE`; `python3 -B -m unittest discover -s system/tests`; `python3 scripts/verify.py registry`; to add: 20 boot-matrix runs for `-nvidia-legacy` and #231 closed |
 | NVIDIA failures do not block the other images (D24) | `doc_update_delivery.md` UD4 | to add: a pipeline test in which a failed legacy module removes only `-nvidia-legacy` from the run |
 | Update chain to `:stable`: the PB5 slice, promotion only on acceptance evidence for the same digests (D15) | `doc_pipeline.md` PB5, `doc_update_delivery.md` UD1 to UD6 | `python3 -B -m unittest discover -s system/tests` (`test_promote.py`); `.github/workflows/promote-stable.yml`; to add: `accept.yml` verdict file, and a `promote.sh` refusal without it |
-| One human approval per release, in the environment `release`; agents open, push and merge pull requests as a GitHub App (D2, D25) | ADR-0103 D2, D25; `doc_pipeline.md` PL5 | `python3 scripts/github-settings/ghsettings.py diff`; to add: `release` in `.github/settings/environments.json` |
+| One human approval per promotion to `:stable`, in the environment `release`, and `:latest` signed with no approval from step 3 of the image key rotation; agents open, push and merge pull requests as a GitHub App (D2, D25, ADR-0104) | ADR-0103 D2, D25; ADR-0104; `doc_pipeline.md` PL5, PL56, PL60 | `python3 scripts/github-settings/ghsettings.py diff`; to add: `release` in `.github/settings/environments.json` |
 | Signed evidence bundle copied off GitHub at promotion (D23) | `doc_pipeline.md` PL42 | to add: the promotion job verifies the off-GitHub copy against its signature |
 | Resolved Fedora package set recorded for every build (D16) | `doc_update_delivery.md` UD28 | to add: the resolved package list in the evidence bundle |
 | Key hierarchy for the image key; MOK interim key set with not-after and revocation (D5) | `doc_update_trust.md` UT2, [ADR-0084](../decisions/0084-key-custody-model.md) | `scripts/devvm/acceptance/run.sh` (stages `rotate`, `recover`); to add: `cargo test -p athanor-update` cases for an expired and a revoked key |
@@ -91,7 +91,7 @@ in the week of 2026-10-09.
 | 1.0 | before 2026-12-02 | 0.9 with no blocking defect | To add: a query for open blocking issues that must return none |
 
 Row numbers count the rows of section 2 from the top: 1 signed immutable image; 2 NVIDIA
-failures; 3 update chain to `:stable`; 4 one human approval per release; 5 evidence bundle;
+failures; 3 update chain to `:stable`; 4 one human approval per promotion to `:stable`; 5 evidence bundle;
 6 resolved package set; 7 key hierarchy and MOK key set; 8 installer path; 9 greeter; 10 disk
 encryption; 11 recovery and rollback; 12 desktop session tier; 13 cosmic-comp patches;
 14 keyring prompter; 15 application installation; 16 Tetragon; 17 attestation deleted; 18 DNS
