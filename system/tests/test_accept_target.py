@@ -150,6 +150,14 @@ class AcceptTarget(Tool):
         self.assertEqual(r.returncode, 10)
         self.assertIn("commit id", r.stderr)
 
+    def test_a_run_head_that_is_not_a_commit_id_is_not_trusted(self):
+        for sha in (None, "iso-v0", "A" * 40):
+            with self.subTest(sha=sha):
+                self.github(run_object(head_sha=sha))
+                r = self.trusted()
+                self.assertEqual(r.returncode, 10)
+                self.assertIn("is not a commit", r.stderr)
+
     def test_a_sha_contained_in_the_branch_is_trusted(self):
         self.github(compare="ahead")
         self.assertEqual(self.trusted().returncode, 0)
