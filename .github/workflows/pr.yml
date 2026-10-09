@@ -16,8 +16,8 @@ name: Pull Request
 #   (scripts/ci/gate.py). A skipped build is a pass.
 #
 # kernel-build.yml no longer runs on pull requests to iso-v0: the kernel is built once, in the
-# `kernel` job, and `gate` is the required check (doc_ci.md CP4). Until the specs half of CP4
-# lands, spec-build-check.yml keeps its own pull_request run next to this workflow.
+# `kernel` job, and `gate` is the required check (doc_ci.md CP4); spec-build-check.yml runs only
+# as the `specs` job, and bot-merge.yml follows this workflow for the spec bot.
 
 on:
   pull_request:

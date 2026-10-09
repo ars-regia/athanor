@@ -142,8 +142,8 @@ for it. Until PB13 of `docs/architecture/doc_pipeline.md` lands, no job uses it.
 
 `signing-kernel` and `signing-images` have the same protection in `environments.json`: required reviewer `hr-mes`; administrator
 bypass off (`can_admins_bypass: false`, set by hand: section 4); deployment branches `iso-v0` and
-`main`, both protected by `branch-protection.json` (required checks `Spec gate`
-and `gate` on `iso-v0`, `Kernel gate` on `main`, section 8; no force push, no deletion). Once the
+`main`, both protected by `branch-protection.json` (required check
+`gate` on `iso-v0`, `Kernel gate` on `main`, section 8; no force push, no deletion). Once the
 rotation of `secrets.md` section 4.1 ends, `signing-images` loses the required reviewer, which
 does not return at the 1.0 tag (ADR-0098 item 6, amended by ADR-0104 item 8): the human gate
 is the `release` approval of the promotion. `signing-kernel` keeps it.
@@ -165,8 +165,8 @@ diff` is.
 
 ## 8. Switching the required check to gate
 
-`branch-protection.json` declares exactly what is applied. On `iso-v0` it requires two checks:
-`Spec gate` and `gate`, the aggregate job of `pr.yml` (doc_pipeline.md PL3, ADR-0075); `main`
+`branch-protection.json` declares exactly what is applied. On `iso-v0` it requires one check:
+`gate`, the aggregate job of `pr.yml` (doc_pipeline.md PL3, ADR-0075); `main`
 requires `Kernel gate` until it takes `pr.yml`. The bots wait for the checks this file requires
 (`forge/scripts/bot_merge.py`), so they follow it in every state. Each follow-up that removes a
 `pull_request` trigger from `iso-v0` removes the matching check from this file in the same
@@ -179,8 +179,8 @@ change: a check that is required but never reports would leave every pull reques
 | 3 | **[M]** maintainer | `python3 scripts/github-settings/ghsettings.py apply`, read the plan (one `PUT .../branches/iso-v0/protection` adding `gate`, no `DESTRUCTIVE` line), then `apply --yes` and `diff`, which must print nothing for branch protection |
 | 4a | **[M]** maintainer | Apply the kernel follow-up's `branch-protection.json` (doc_ci.md CP4, kernel half) before merging it: the plan drops `Kernel gate` from `iso-v0`. The pull request runs its own `kernel-build.yml`, which no longer triggers on `iso-v0`, so a required `Kernel gate` would never report and would hold it |
 | 5a | maintainer | Merge the kernel follow-up: `kernel-build.yml` keeps its `pull_request` trigger for `main` only, and `Kernel gate` leaves the `iso-v0` entry of `branch-protection.json`. `CHECK_WORKFLOWS` of `bot_merge.py` keeps `Kernel gate`, which `main` still requires. Kernel changes are then built once |
-| 4b | maintainer | Merge the specs follow-up: it removes the `pull_request` trigger of `spec-build-check.yml` and `Spec gate` from `branch-protection.json` and from `CHECK_WORKFLOWS` of `bot_merge.py`, and moves the spec bot merge into `pr.yml`. Before it, spec changes are built twice |
-| 5b | **[M]** maintainer | Apply the file again as in step 3, right after step 4b: the plan drops `Spec gate` |
+| 4b | **[M]** maintainer | Apply the specs follow-up's `branch-protection.json` (doc_ci.md CP4, specs half) before merging it: the plan drops `Spec gate` from `iso-v0`. The pull request no longer runs `spec-build-check.yml` on its own, so a required `Spec gate` would never report and would hold it |
+| 5b | maintainer | Merge the specs follow-up: `spec-build-check.yml` runs only as the `specs` job of `pr.yml`, `Spec gate` leaves `branch-protection.json` and `CHECK_WORKFLOWS` of `bot_merge.py`, and `bot-merge.yml` follows `pr.yml` for the spec bot. Spec changes are then built once |
 
 To roll back step 3, remove `gate` from `branch-protection.json` and apply it again; steps 4a and
 4b are rolled back by reverting their change and applying the file.
@@ -230,8 +230,8 @@ turns a failed scheduled job into a `ci-alert` issue is not part of this change.
 
 `gate` is the aggregate job of `pr.yml` (PB1, ADR-0075). It runs `just check`, which tolerates
 the findings of `scripts/ci/known-red.txt` until their expiry, so the ruleset adds no
-exception of its own for known red checks. `branch-protection.json` requires `gate` next to
-`Spec gate` on `iso-v0` and `Kernel gate` on `main` (section 8); the ruleset requires `gate` alone on
+exception of its own for known red checks. `branch-protection.json` requires `gate` on
+`iso-v0` and `Kernel gate` on `main` (section 8); the ruleset requires `gate` alone on
 both branches. Classic branch protection and the ruleset both apply until the maintainer
 decides to retire the former; section 8 steps 4a to 5b drop the legacy contexts of `iso-v0`, and
 they must be done before a merge queue on `iso-v0` returns (see below).
