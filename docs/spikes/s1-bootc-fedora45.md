@@ -52,9 +52,13 @@ the acceptance key `acc-1`, and published to the acceptance registry under its o
 
 - `bad-greeter`: a drop-in that makes `greetd.service` run `/usr/bin/false` (the image of
   `doc_recovery.md` acceptance 7);
-- `panic`: `/usr/lib/bootc/kargs.d/90-s1-panic.toml` with `kargs = ["panic=10"]`, and a
-  unit `s1-panic.service` enabled in `sysinit.target` (`DefaultDependencies=no`,
-  `Before=sysinit.target`, `ExecStart=/bin/sh -c 'echo c > /proc/sysrq-trigger'`). It runs in
+- `panic`: `/usr/lib/bootc/kargs.d/90-s1-panic.toml` with `kargs = ["panic=10"]`, the
+  marker file `/etc/athanor-s1-spike`, which no other image carries, and a unit
+  `s1-panic.service` enabled in `sysinit.target` (`DefaultDependencies=no`,
+  `Before=sysinit.target`, `ConditionVirtualization=vm`,
+  `ConditionPathExists=/etc/athanor-s1-spike`,
+  `ExecStart=/bin/sh -c 'echo c > /proc/sysrq-trigger'`); the two conditions keep it from
+  crashing anything but a VM booted from this image. It runs in
   the real root after the switch from the initrd, so nothing in the initrd's handling of the
   command line can skip it, and before greenboot, which never runs. A write of `c` to
   `/proc/sysrq-trigger` by root crashes the kernel whatever `kernel.sysrq` says (that sysctl
@@ -151,31 +155,60 @@ matches either deployment.
 
 ### Item 2: boot counting and greenboot's fallback
 
-**Question.** Whether greenboot-rs on Fedora 45 marks a failing deployment and returns to the
-previous one without rebooting by itself (`doc_recovery.md` R5, as decided by A2-26), and what
-happens to a deployment that never reaches user space, where greenboot cannot run.
+**Decision** (the maintainer, 2026-10-09; ADR pending). GRUB's boot counter stays on, and
+`grub-boot-success.timer` is masked, so only greenboot sets `boot_success=1`, after its required
+checks pass. A kernel panic or a hang in a new deployment spends the counter's tries on the boots
+the person starts, and once they are spent GRUB boots the previous deployment. Nothing reboots
+by itself. This settles the contradiction between the R5 statement (`doc_recovery.md:30`),
+which names the counter with greenboot, and the A2-26 settlement (`doc_recovery.md:41`), which
+drops the counter because the timer sets `boot_success=1` after two minutes of any session;
+until the ADR lands, the two lines still disagree.
 
-**Run.**
+**Question.** Whether greenboot-rs on Fedora 45 marks a failing deployment and returns to the
+previous one without rebooting by itself (`doc_recovery.md` R5, as decided by A2-26), whether it
+sets `boot_success=1` on a healthy one, and whether GRUB's counter, with the timer masked,
+returns a deployment that never reaches user space, where greenboot cannot run, to the previous
+one.
+
+**Run.** Until a change ships the mask in the image, S1 masks the timer in the guest before G2
+(`sudo systemctl mask grub-boot-success.timer`; `/etc` carries the mask into each deployment
+staged after it), and G3 records which of the two is in force.
 
 - G0, static: `grep -n boot_counter /boot/grub2/grub.cfg /boot/grub2/*.cfg`, `sudo
-  grub2-editenv list`, `ls /boot/loader/entries`. Records whether bootupd's static GRUB
-  configuration on Fedora 45 carries the boot counter at all.
+  grub2-editenv list`, `ls /boot/loader/entries`, `cat /proc/sys/kernel/panic`. Records whether
+  bootupd's static GRUB configuration on Fedora 45 carries the boot counter at all, and the
+  kernel's own panic timeout.
 - G1, `bad-greeter`: `doc_recovery.md` acceptance 7 as written: stage and apply it; in that
   boot, ten minutes without a reboot (`journalctl --list-boots` count unchanged); `bootc status
   --format json | jq .status.rollbackQueued` reads `true`; the recovery console on `tty1`
   (screenshot through `console.sh` or the SPICE display); then `sudo systemctl reboot` and
   `bootc status` shows `v2` booted; three `athanor-update-check` runs download nothing
   (`.update` reads `held`).
-- G2, `panic`: stage and apply it; watch `console.log` for 15 minutes and count `Kernel panic`
-  lines and GRUB menus; record which deployment is running at the end, if any.
-- G3: on a good deployment, log in and wait three minutes, then `sudo grub2-editenv list`:
-  records whether `grub-boot-success.timer` set `boot_success=1`, the reason R5 gives for not
-  using the counter.
+- G2, `panic`: stage it, and before the reboot record `sudo grub2-editenv list` (the
+  `boot_counter` and `greenboot_next_deployment_id` that staging set); apply it; watch
+  `console.log` for 15 minutes and count `Kernel panic` lines and GRUB menus; record which
+  deployment is running at the end, then `bootc status` and, after `sudo systemctl reboot`,
+  which deployment boots. `panic=10` is the kernel's panic setting: it restarts a kernel that has
+  already died, standing in for the person's power cycle, and is not a reboot of a running
+  system; the 1.0 image carries no `panic=` karg.
+- G3, the mask: on a good deployment, `systemctl is-enabled grub-boot-success.timer` reads
+  `masked` and `systemctl list-timers --all` does not list it; records whether the mask comes
+  from the image or from the guest's `/etc`.
+- G4, greenboot's success mark: on a healthy deployment just applied (`v2` in G1, or the return
+  of G2), log in and wait three minutes, then `sudo grub2-editenv list` reads `boot_success=1`
+  and no `boot_counter`, with `greenboot-healthcheck.service` passed in `journalctl -b`. The
+  greenboot-rs README says its success path does both; G4 records whether Fedora 45's
+  greenboot-rs does it by itself or needs a unit that Athanor ships (P4a input).
 
-**Pass.** G1 as written in `doc_recovery.md` acceptance 7, 8 and 10. G0 and G3 are records.
-G2 as section 5 point 3 states it.
+**Pass.** G1 as written in `doc_recovery.md` acceptance 7, 8 and 10. G2: with the timer masked,
+after the tries are spent GRUB boots the previous deployment, `v2`, with no console step (no
+key pressed, no menu entry chosen), and the boot the person starts next is `v2` again. G3: the
+timer is masked. G4: a healthy deployment reads `boot_success=1`, set by greenboot. G0 is a
+record.
 **Fail.** G1: any reboot nobody asked for, no mark, a return to the bad digest, or a download
-of it.
+of it. G2: the `panic` deployment boots again once its tries are spent, the return needs a
+console step, or a later boot returns to it. G3: the timer runs. G4: `boot_success` stays unset
+on a healthy deployment, which would make the counter fall back from a good update.
 
 **Answer.** Not run.
 
@@ -314,7 +347,8 @@ Fedora 45 has boot counting yet, the condition A2-8 sets for release 1.1.
   `reset.sh`, `console.sh`, `monitor.sock`), 4 vCPU and 8 GB by default. It boots **plain
   OVMF without Secure Boot and without a TPM**: `ovmf_code` picks `OVMF_CODE.fd`, and nothing
   in the tooling starts `swtpm`.
-- `scripts/devvm/acceptance/`: `images.sh` (registry on `127.0.0.1:5000`, throwaway keys, ten
+- `scripts/devvm/acceptance/`: `images.sh` (registry container `athanor-acc-registry` on
+  `127.0.0.1:$ACC_PORT`, 5000 by default, throwaway keys, ten
   images `FROM $ACC_BASE`) and `run.sh` with the stages `install migrate download apply refuse
   older goback rotate recover podman report`. `ACC_BASE` is overridable, so the harness runs on
   a Fedora 45 base unchanged. `images.sh` labels every image version `43.<date>.0`; ordering
@@ -336,8 +370,8 @@ Fedora 45 has boot counting yet, the condition A2-8 sets for release 1.1.
   `XDG_DATA_HOME=/var/tmp/athanor-s1/xdg`, so its state is
   `/var/tmp/athanor-s1/xdg/athanor-devvm`. `devvm.env` itself was not read in this session
   (the local command gate blocks shell reads of `*.env` names), so section 5 lists the
-  confirmation as a prerequisite. `XDG_DATA_HOME` also moves rootless podman's storage, so the
-  image builds run without it. `forge/specs/azoth/boot.sh` writes only under its `--out`
+  confirmation as a prerequisite. `XDG_DATA_HOME` also moves rootless podman's storage, so it
+  is set on each dev VM command and never exported: the image builds run without it. `forge/specs/azoth/boot.sh` writes only under its `--out`
   directory and its own temporary work directory.
 
 ### Commands
@@ -370,10 +404,9 @@ sed -i -e 's|^FROM quay.io/fedora-ostree-desktops/base-atomic:43@sha256:[0-9a-f]
 git -C "$W" diff --numstat                    # 2 2 system/Containerfile
 mkdir -p /var/tmp/athanor-s1
 printf '[containers]\nenv = ["CARGO_BUILD_JOBS=4", "RPM_BUILD_NCPUS=4"]\n' > /var/tmp/athanor-s1/jobs.conf
-export CONTAINERS_CONF_OVERRIDE=/var/tmp/athanor-s1/jobs.conf
-bash "$W/scripts/devvm/local-image.sh" athanor-update
+CONTAINERS_CONF_OVERRIDE=/var/tmp/athanor-s1/jobs.conf bash "$W/scripts/devvm/local-image.sh" athanor-update
 # -> RPMs in $W/.scratch/local-image/rpms, the image localhost:5000/acc/athanor-system:<tag>,
-#    with <tag> in $W/.scratch/local-image/tag
+#    with <tag> in $W/.scratch/local-image/tag; the address is fixed in the script (section 5, point 4)
 ```
 
 If the tier 3 transaction fails on Fedora 45 (the tier repositories hold fc43 builds), the
@@ -386,25 +419,30 @@ Acceptance images and test images:
 
 `images.sh` takes the `athanor-update` RPM from `ACC_RPM_DIR` (default `RPMS_OUT/` at the
 root) and the base from `ACC_BASE`; both come from the step above. Its keys and registry
-configuration go to `ACC_STATE`, kept out of the maintainer's state:
+configuration go to `ACC_STATE`, kept out of the maintainer's state, and its registry is S1's
+own, `athanor-s1-registry` on port 5001 with the prefix `s1` (section 5, point 4):
 
 ```
+ACC_PORT=5001 ACC_REGISTRY=localhost:5001/s1 \
 ACC_BASE=localhost:5000/acc/athanor-system:$(cat "$W/.scratch/local-image/tag") \
 ACC_RPM_DIR=$W/.scratch/local-image/rpms ACC_STATE=/var/tmp/athanor-s1/acceptance \
   bash "$W/scripts/devvm/acceptance/images.sh"
-# then bad-greeter, panic, unsigned-kernel and etc-v2 FROM localhost:5000/acc/athanor-system:v2,
+# then bad-greeter, panic, unsigned-kernel and etc-v2 FROM localhost:5001/s1/athanor-system:v2,
 # pushed and signed with acc-1 as images.sh's build and sign functions do
 ```
 
 Install, path A (primary), in S1's own state:
 
 ```
-export XDG_DATA_HOME=/var/tmp/athanor-s1/xdg ACC_STATE=/var/tmp/athanor-s1/acceptance CPUS=4 MEMORY=8G
-bash "$W/scripts/devvm/create.sh"                  # newest published ISO, into S1's state only
-bash "$W/scripts/devvm/acceptance/run.sh" install  # switches the guest to the F45 v1
+X=/var/tmp/athanor-s1/xdg
+XDG_DATA_HOME=$X CPUS=4 MEMORY=8G bash "$W/scripts/devvm/create.sh"   # newest published ISO, S1's state only
+XDG_DATA_HOME=$X CPUS=4 MEMORY=8G ACC_STATE=/var/tmp/athanor-s1/acceptance \
+  ACC_PORT=5001 ACC_REGISTRY=localhost:5001/s1 bash "$W/scripts/devvm/acceptance/run.sh" install
 ```
 
-`run.sh install` switches the guest to the F45 `v1`. This also exercises the major upgrade of
+Every other dev VM command of the run (`start.sh`, `reset.sh`, `console.sh`, each later
+`run.sh` stage) carries the same `XDG_DATA_HOME=$X` prefix, and `run.sh` the same `ACC_*`
+variables. `run.sh install` switches the guest to the F45 `v1`. This also exercises the major upgrade of
 item 1 phase 4 and item 4. Path B (once, for item 6 S1-e): a fresh disk from the F45 image with
 `bootc install to-disk --via-loopback --filesystem btrfs` in a privileged root `podman run` of
 the image.
@@ -443,8 +481,9 @@ composefs install about 20 minutes.
   in progress. How S1 and the runner share the host is the maintainer's call (section 5).
 - At most 4 vCPU for the guest (`CPUS=4`, `-smp 4`), 8 GB of memory, and builds at 4 jobs
   (`CONTAINERS_CONF_OVERRIDE`, section 3).
-- Never the runner VM, and never the maintainer's dev VM state: S1 uses only
-  `/var/tmp/athanor-s1`.
+- Never the runner VM, never the maintainer's dev VM state, and never the maintainer's
+  acceptance registry: S1 uses only `/var/tmp/athanor-s1` and `athanor-s1-registry` on port
+  5001.
 - `uptime` before every start: a load average above 4 waits.
 - Fixed inputs: the digests of section 1 for the whole run; a newer Fedora 45 compose is a new
   run, recorded as such.
@@ -459,17 +498,21 @@ composefs install about 20 minutes.
 2. **S1 against the runner VM** (`2026-10-08-update-chain-order.md`, section 5, point 5).
    Under "one VM at a time" S1 and the runner guest compete for the host; whether the runner is
    stopped for a sitting, and when, is the maintainer's decision. Open.
-3. **Boot counting on 1.0.** The specification contradicts itself. D6, section 8 and the R5
-   statement (`doc_recovery.md:30`) name GRUB's boot counter with greenboot; the A2-26
-   settlement of R5 (`doc_recovery.md:41`) says the counter is not used, because Fedora's
-   `grub-boot-success.timer` sets `boot_success=1` after two minutes of any session. Without the
-   counter, a kernel panic or hang in a new deployment never reaches greenboot and has no
-   automatic return. Item 2 G2 measures it; its pass criterion waits for the maintainer's
-   ruling on which text holds.
-4. **S1's own dev VM state.** The dev VM scripts have no state-directory option; S1 relies on
+3. **S1's own dev VM state.** The dev VM scripts have no state-directory option; S1 relies on
    `devvm.env` deriving its state from `XDG_DATA_HOME`, as `scripts/devvm/README.md` documents.
    Prerequisite before the first `create.sh`: confirm that line of `devvm.env` (this session's
    gate kept it unread), or give the scripts a state-directory variable, so that `create.sh`
    cannot replace the maintainer's `base.qcow2` and `dev.qcow2`.
+4. **S1's own registry.** `images.sh` and `run.sh` read the registry's port and prefix from
+   `ACC_PORT` and `ACC_REGISTRY` (`scripts/devvm/acceptance/lib.sh`), which S1 sets to `5001`
+   and `localhost:5001/s1`. The container's name is fixed: `images.sh` starts a registry only
+   when no container named `athanor-acc-registry` exists, so with the maintainer's on port
+   5000 it starts none on 5001. `local-image.sh` fixes all three: the container
+   `athanor-acc-registry`, `127.0.0.1:5000`, the prefix `localhost:5000/acc`, and its tier 3
+   overlay `localhost:5000/<tier 3 path>:latest`, which it overwrites. Prerequisite before the
+   build: a change that gives both scripts a variable for the container's name and makes
+   `local-image.sh` read `ACC_PORT` and `ACC_REGISTRY`, so S1 runs `athanor-s1-registry` on
+   port 5001 with the prefix `s1`; or the maintainer lets S1 use the shared registry for the
+   sitting.
 5. **Issue #124.** Its body still describes the bake-off and asks for D6 and D39 to be closed;
    both are closed. Update the body or let the A2-8 comment stand.
