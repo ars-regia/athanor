@@ -103,7 +103,7 @@ jobs:
           if cosign verify-attestation --type custom \
                --certificate-identity-regexp "$identity" \
                --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-               "${IMAGE}:${nvr}" 2> /dev/null \
+               "${IMAGE}:${nvr}" \
              | jq -cS '.payload | @base64d | fromjson | .predicate.Data | fromjson' \
              | grep -qxF "$(jq -cS . inputs.json)"; then
             # Identical inputs: reuse only when all four images are signed. publish may
@@ -112,7 +112,7 @@ jobs:
             for ref in "${IMAGE}:${nvr}" "${IMAGE}:${nvr}-microvm" "${IMAGE}-devel:${nvr}" "${IMAGE}-debuginfo:${nvr}"; do
               cosign verify \
                 --certificate-identity-regexp "$identity" \
-                --certificate-oidc-issuer https://token.actions.githubusercontent.com "$ref" > /dev/null 2>&1 \
+                --certificate-oidc-issuer https://token.actions.githubusercontent.com "$ref" > /dev/null \
                 || { echo "${ref} is not signed: build required"; reuse=false; }
             done
           fi
