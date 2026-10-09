@@ -2,7 +2,7 @@
 #
 # The last matching pattern wins, so the protected paths come last. The owner is the
 # maintainer's account; the repository belongs to the organisation ars-regia.
-# Review by a code owner is enforced by the ruleset product-branches, with no other approval
+# Review by a code owner is enforced by the ruleset product-review, with no other approval
 # required (ADR-0107). A path with no owner merges without a review.
 
 * @hr-mes

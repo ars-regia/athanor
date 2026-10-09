@@ -14,7 +14,7 @@ applies to Claude Code only.
   `cd`, relative paths cannot be checked against the permission rules, so every such command
   asks for approval. Use paths relative to the root, `git -C <dir>`, `cargo -p <crate>`, or
   an absolute path.
-- **Merging.** The `product-branches` ruleset requires one approval on `iso-v0` and `main`
+- **Merging.** The `product-review` ruleset requires one approval on `iso-v0` and `main`
   and dismisses it on every push. Claude Code opens, pushes and merges pull requests as the
   `athanor-agent` GitHub App (`athanor-agent <command>` runs the command with a one-hour
   token of the App; commits keep the maintainer's git author). Claude never submits, edits

@@ -54,8 +54,13 @@ Decided by the maintainer on 2026-10-09, as recommended.
 
 ## Consequences
 
-- The kernel bump keeps `gh pr merge --auto`. GitHub's auto-merge waits for every
-  requirement and does not use a bypass, so a kernel bump still waits for the code owner's
-  review, as it does today.
+- The kernel bump keeps `gh pr merge --auto`, as K5 of `doc_kernel_build.md` specifies.
+  Whether GitHub applies the enabler's review bypass to auto-merge is not documented. If it
+  does, a green kernel bump merges without a review, as K5 intends. If it does not, the bump
+  waits for the code owner's review. Either way `gate` and the required checks hold.
+- A ruleset `bot-branches` lets only the bots App create, update or force-push
+  `chore/update-specs-zero-trust` and `bump/system-*`, and `bot_merge.py` merges only pull
+  requests the App opened (author `app/athanor-bots`): only the bots App writes the branches
+  `bot_merge.py` merges, and `bot_merge.py` merges only pull requests the App opened.
 - The ruleset change is applied with `scripts/github-settings/ghsettings.py` by the
   maintainer, after this record and the workflow change have merged.
