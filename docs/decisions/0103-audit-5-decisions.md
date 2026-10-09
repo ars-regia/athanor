@@ -71,7 +71,8 @@ recommended option, except D19.
   `bridge` and its token are removed. The maintainer's desktop and laptop move with
   `scripts/switch-verified.sh`. The owner-pinned policy (UD11 to UD13) is kept. This reverses
   the decision on UD50 and the part of [ADR-0098](0098-update-delivery-ci-operations-batch-4.md)
-  item 6 that concerns `bridge`.
+  item 6 that concerns `bridge`. *(Narrowed by the maintainer on 2026-10-09: UD51, the
+  `pinned-build` state, is not part of the Bridge and stays; the Bridge is UD45 to UD50.)*
 - **D5. A key hierarchy for the image key before 1.0.** An offline root, kept in the custody
   kit of [ADR-0084](0084-key-custody-model.md), signs a short-lived online signing key and a
   timestamp; clients pin the root. For the Machine Owner Key, the interim is a signed key set
@@ -172,7 +173,7 @@ recommended option, except D19.
 ## Consequences
 
 **Specifications.** The approved specifications this record touches are amended by it from
-today: `doc_update_delivery.md` (UD4, UD28, UD45 to UD51), `doc_update_trust.md` (UT2, UT6),
+today: `doc_update_delivery.md` (UD4, UD28, UD45 to UD50), `doc_update_trust.md` (UT2, UT6),
 `doc_kernel_profile.md` (the 1.0 gate, the P2, P3 and P4a order, the disk layout),
 `doc_platform_experience.md` (encryption), `doc_pipeline.md` (section 12 order, PL42),
 `doc_tetragon.md`, `doc_shell.md` (SH3), `doc_compositor.md` (CO3), `doc_lock_and_prompts.md`

@@ -17,33 +17,23 @@
 # The registry may serve the previous manifest for a moment after the copy: the read-back is
 # tried TAG_READBACK_ATTEMPTS times (default 6), TAG_READBACK_DELAY seconds apart (default 5).
 #
-# With --to REGISTRY/OWNER the tag is written under that owner instead, on the image of the
-# same name, by the same digest: the bridge of doc_update_delivery.md UD45, which keeps the
-# machines that still follow the project's previous owner on the images verified here.
-#
-# Usage: tag-images.sh --registry REGISTRY/OWNER --tag TAG [--to REGISTRY/OWNER] DIGESTS_FILE
+# Usage: tag-images.sh --registry REGISTRY/OWNER --tag TAG DIGESTS_FILE
 #        (lines: "REPOSITORY TAG DIGEST", image-digests.sh)
 #        tag-images.sh --registry REGISTRY/OWNER --tag TAG --iso RUN_ID
-# The registry login is the caller's business; with --to it must allow writing under that owner.
+# The registry login is the caller's business.
 set -euo pipefail
 
 usage() {
-    echo "usage: ${0##*/} --registry REGISTRY/OWNER --tag TAG ([--to REGISTRY/OWNER] DIGESTS_FILE | --iso RUN_ID)" >&2
+    echo "usage: ${0##*/} --registry REGISTRY/OWNER --tag TAG (DIGESTS_FILE | --iso RUN_ID)" >&2
     exit 2
 }
 [[ $# -ge 5 && $1 == --registry && -n $2 && $3 == --tag ]] || usage
 [[ $4 =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || usage
 registry=$2
 tag=$4
-to=$registry
 case $# in
     5) ;;
     6) [[ $5 == --iso && $6 =~ ^[0-9]+$ ]] || usage ;;
-    7)
-        # A registry/owner with nothing that would need quoting, and not the source itself.
-        [[ $5 == --to && $6 =~ ^[a-z0-9]([a-z0-9._:-]*[a-z0-9])?/[a-z0-9]([a-z0-9._/-]*[a-z0-9])?$ && $6 != "$registry" ]] || usage
-        to=$6
-        ;;
     *) usage ;;
 esac
 
@@ -52,8 +42,8 @@ retry="$root/forge/scripts/retry.sh"
 attempts=${TAG_READBACK_ATTEMPTS:-6}
 delay=${TAG_READBACK_DELAY:-5}
 
-move() { # move REPOSITORY DIGEST: REPOSITORY@DIGEST onto the image of that name under $to
-    local target="$to/${1##*/}" moved='' i
+move() { # move REPOSITORY DIGEST: REPOSITORY@DIGEST onto the tag $tag of REPOSITORY
+    local target=$1 moved='' i
     # --preserve-digests: the copy fails rather than write a manifest other than the verified one.
     bash "$retry" skopeo copy --preserve-digests "docker://$1@$2" "docker://$target:$tag"
     for ((i = 1; i <= attempts; i++)); do

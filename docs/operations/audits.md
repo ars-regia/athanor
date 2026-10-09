@@ -53,7 +53,7 @@ until it does an issue names it.
 | Type | When | Who runs it |
 | --- | --- | --- |
 | Vulnerabilities of the published image: a scan of its SBOM (osv-scanner or grype), plus an end-of-life calendar for the Azoth kernel base, the Flatpak runtimes and the Fedora release | nightly scan; the calendar is reviewed with the monthly documents audit | CI |
-| Update and rollback drill on real hardware: upgrade from each of the two previous images, roll back, migrate through the bridge while it is open | every release | the maintainer, on the laptop, with an agent's checklist |
+| Update and rollback drill on real hardware: upgrade from each of the two previous images, roll back | every release | the maintainer, on the laptop, with an agent's checklist |
 | Key recovery drill: restore from the LUKS2 backup, a simulated rotation, a revocation | quarterly | the maintainer |
 | Confinement escape attempts from a confined application: Landlock, bwrap, the portals, the filtered bus | quarterly | an agent, on a VM |
 | Build reproducibility: build one commit twice and compare the images | monthly | CI |
