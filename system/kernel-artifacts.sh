@@ -31,6 +31,8 @@
 #                                       against (the same $REGISTRY resolve writes to the file);
 #                                       no network call, so a caller can compose an image
 #                                       reference before resolve has ever run
+#   identity kernel|modules|signer      print the certificate identity regexp of the workflow that
+#                                       signs that artifact, on the trusted branches only
 #   digest REF                          the digest of REF, empty when the tag does not exist or
 #                                       the registry denies its package (never published)
 #   signed REF kernel|modules|signer    signed or unsigned, by the workflow that publishes it
@@ -502,6 +504,7 @@ case $command in
   get) [[ $# -eq 1 ]] || usage; get "$1" ;;
   has) [[ $# -eq 1 ]] || usage; [[ -f $FILE ]] && grep -q "^$1=." "$FILE" ;;
   registry) [[ $# -eq 0 ]] || usage; echo "$REGISTRY" ;;
+  identity) [[ $# -eq 1 ]] || usage; identity "$1" ;;
   digest) [[ $# -eq 1 ]] || usage; ask digest "$1" ;;
   signed) [[ $# -eq 2 ]] || usage; ask signed "$1" "$2" ;;
   predicates) [[ $# -eq 2 ]] || usage; ask predicates "$1" "$2" ;;

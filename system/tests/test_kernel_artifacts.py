@@ -113,6 +113,19 @@ class Tool(unittest.TestCase):
         return dict(line.split("=", 1) for line in path.read_text().splitlines()) if path.exists() else None
 
 
+class Identity(Tool):
+    def test_identity_prints_the_exact_signer_of_the_kernel_workflow(self):
+        r = self.run_script("identity", "kernel")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            r.stdout.strip(),
+            r"^https://github\.com/ars-regia/athanor/\.github/workflows/kernel-build\.yml@refs/heads/(iso-v0|main)$",
+        )
+
+    def test_identity_of_an_unknown_kind_fails(self):
+        self.assertNotEqual(self.run_script("identity", "other").returncode, 0)
+
+
 class Signer(Tool):
     def test_the_signer_image_is_signed_only_by_its_workflow_on_a_trusted_branch(self):
         ref = f"{REG}/azoth-signer@{BOOT}"
