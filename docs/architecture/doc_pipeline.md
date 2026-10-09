@@ -599,13 +599,22 @@ or images that expire (section 5), and never from a dispatch input:
 - the `release-class.toml` files of ADR-0094 item 4 committed in the git range
   `<base>..<candidate>`, the commits reachable from the candidate's commit and not from
   `<base>`. `<base>` is the commit of the `org.opencontainers.image.revision` label of
-  `:latest` when it has one; otherwise it is the `revision` recorded by the PB4b release
-  attestation of the newest image of the repository that carries one, which section 5
-  keeps. A hand release of the frozen `main` in between therefore costs nothing: the range
-  starts at the last attested release. The range is defined whether or not `<base>` is an
-  ancestor of the candidate, as long as the commit exists in the repository; a `<base>`
-  absent from the repository fails `candidate`, and so does a kept attestation that the
-  registry lists but that cannot be read or verified;
+  `:latest` when it has one; otherwise it is the `revision` of the newest release marker
+  of the repository, which section 5 keeps. From PB4b, `tag-latest` pushes the marker
+  `released-<revision>-<build_run_id>` on each digest it moves `:latest` to: an immutable
+  tag, with no key, whose prefix no other tag scheme uses (`<run_id>`, `hash-<h>`,
+  `sha256-<hex>`, `latest`, `stable*`, `main`), and whose run id keeps it unique when the
+  nightly build releases the same commit again. The newest marker is the one whose
+  revision comes last in the history of `iso-v0`, ties going to the larger run id; build
+  time does not order markers, and a marker whose revision is not on `iso-v0` does not
+  count. Only the PB4b attestation on the digest a marker names counts, so an image signed
+  but never tagged, after a failed `verify-images` or `tag-latest` (PL59), is never the
+  base and its commits stay in the range. A hand release of the frozen `main` in between
+  costs nothing: the range starts at the last marked `iso-v0` release. The range is defined
+  whether or not `<base>` is an ancestor of the candidate, as long as the commit exists in
+  the repository; a `<base>` absent from the repository fails `candidate`, and so does a
+  marker whose attestation is missing or does not verify with the keys the candidate's
+  tree trusts;
 - for each Fedora package whose NEVRA differs between the RPM databases of `:latest` and
   the candidate, the Fedora updateinfo advisories whose fixed NEVRA is newer than the
   `:latest` one and not newer than the candidate's, so nothing outside the difference is
@@ -625,8 +634,8 @@ bootstrap cases remain, and nowhere else does `candidate` fall back:
 
 - `no-baseline`, the first release of a repository: there is nothing to compare and
   nothing to lose, so `candidate` records `class = feature`, `advisories = []`;
-- `unlabelled-baseline`, an unlabelled `:latest` while no image of the repository carries a
-  PB4b release attestation yet: the git half is skipped, and the Fedora half still runs
+- `unlabelled-baseline`, an unlabelled `:latest` while the repository has no release marker
+  yet, the true bootstrap: the git half is skipped, and the Fedora half still runs
   against the `:latest` image, its baseline in every case. If it finds advisories, the class
   is `security` with those advisories; otherwise it is `feature` with none.
 
@@ -634,9 +643,14 @@ In both, `class_reason` records the case. The fallback to `feature` extends the 
 ADR-0094 item 5, that an unknown class reads as feature, the side that asks the user to
 confirm, to a signed record that carries `class_reason`, as part of this proposal. It is
 not silent: `class_reason` goes in the run summary and in the job summary the maintainer
-approves for the promotion to `:stable` (PL60). Each repository's first release with a
-PB4b attestation ends its fallback, so the step needs no switch. At bootstrap the maintainer does
+approves for the promotion to `:stable` (PL60). Each repository's first marked release
+ends its fallback, so the step needs no switch. At bootstrap the maintainer does
 nothing on a `class_reason`; anywhere else it is a defect to report. With a labelled
+The order holds through the image key rotation: PB4b
+depends on PB13, so once markers exist every release runs through `release.yml`, and the
+gate of PB5b, a release signed with key 2 alone and one more release after it, writes
+key-2 markers before `athanor-image-1.pub` leaves the tree; if PB4b lands after PB5b, no
+marker is signed with key 1. With a labelled
 baseline, a missing or unavailable updateinfo source, or an unreadable image, fails
 `candidate`, because the answer would otherwise be wrong.
 
@@ -667,7 +681,7 @@ precondition of `:latest` (PQ16).
 | `candidate` | none | PL55, then the order check of PL58 |
 | `sign-images` | `signing` until step 3 of the image key rotation, `signing-images` after it | signs the digests of `release-candidate` with the cosign key and writes the key-signed release attestation (PL31, PQ4); builds nothing and runs no third-party action (PL11) |
 | `verify-images` | none | verifies the key-based signature as a machine does (PL16) |
-| `tag-latest` | none | runs the order check of PL58 again, then moves `:latest` of the system images, and on `main` the ISO's (PL35) |
+| `tag-latest` | none | runs the order check of PL58 again, then moves `:latest` of the system images, and on `main` the ISO's (PL35); from PB4b it also pushes the marker `released-<revision>-<build_run_id>` on each digest it tags (PL55) |
 | `request-acceptance` | none | dispatches `accept.yml` with the build run id (`actions: write`), so the acceptance runs outside the release group and its evidence feeds UD4 (UD17, UD18) |
 
 | Period | `:latest`, no kernel or module change | `:latest`, kernel or module change | Promotion to `:stable` |
@@ -746,8 +760,9 @@ wait with it. Promotion holds no key in any class (UD6).
 
 ## 5. Release channels and retention
 
-**PL35. One rule per tag, one writer per tag** (UD1). `:<run_id>` and `hash-<h>` are
-immutable names written once; `:latest` is written only by `release.yml` (PL56), for a build of
+**PL35. One rule per tag, one writer per tag** (UD1). `:<run_id>`, `hash-<h>` and the
+marker `released-<revision>-<build_run_id>` are immutable names written once, the marker
+only by `tag-latest` (PL55); `:latest` is written only by `release.yml` (PL56), for a build of
 `iso-v0` or `main`: for the system images by `call-tag.yml` after it verified the
 key-based signature as a machine does (UD25), for the ISO by `call-iso.yml` after its
 keyless signature verified (PL32); the kernel has no `:latest`, since every consumer
@@ -773,7 +788,7 @@ Retention, by ADR-0081 (this amends the 90-day figure of UT10 and UD8):
 | other `hash-<h>` images                                              | 30 days after the last run that referenced them              |
 | referrers of a kept digest (signatures, attestations, SBOMs, VSAs)   | as long as the digest                                        |
 | per repository, the digest `:latest` names                           | while `:latest` names it                                     |
-| per repository, the newest image with a PB4b release attestation, and that attestation | until a newer image carries one (PL55)        |
+| per repository, the image the newest release marker names, the marker and its PB4b attestation | until a newer marker exists (PL55)   |
 | ISOs of promoted runs                                                | forever (UD8)                                                |
 | `:<run_id>` images never promoted                                    | 90 days                                                      |
 | untagged manifests not referenced by a kept index or signature       | 7 days                                                       |
@@ -781,12 +796,13 @@ Retention, by ADR-0081 (this amends the 90-day figure of UT10 and UD8):
 | workflow artifacts                                                   | the repository default of 90 days, unless the upload sets fewer |
 
 The two per-repository rows are part of this revision, at most two more digests per
-repository, and they fix a defect of the current kept set, which protects no unpromoted
-image, not even the one `:latest` names. ADR-0081 item 3 sets what is never deleted and
+repository. They close a gap in the rule: the reachability set of this section does not
+protect the current `:latest`, which the janitor keeps today only through its `latest` tag
+rule (`clean_ghcr.sh`, line 6). ADR-0081 item 3 sets what is never deleted and
 does not limit the kept set to it.
 
 The janitor (`forge/scripts/clean_ghcr.sh`, weekly in `maintenance.yml`) computes the kept
-set by reachability from the promoted roots and the two per-repository digests above: the
+set by reachability from the promoted roots and the two per-repository roots above: the
 promoted digests, the inputs their provenance names, and the referrers of each. It always runs its dry run first, refuses to
 delete a member of that set, and has a unit test on a fixture graph. Today a tier image
 carries only `latest` until UD44 adds its `hash-` and run tags, so the digest a system image
@@ -1049,7 +1065,7 @@ step only the maintainer can take.
 | | **[M]** create one GitHub App per role, each private key in an environment scoped to its token-minting job with a row in secrets.md; create the agents' App, its private key in the maintainer's secret store (PL5); apply the two rulesets; enable the merge queue; enable SHA pinning once every action is pinned by SHA | | | | |
 | **PB3** | Pinned inputs, verified hops (PL8, PL12-PL14) | `.github/actions/verify-input`, `scripts/ci/registry.sh`, `forge/config/images.json`, the key-isolation constants of `scripts/verify.py`, `scripts/runner/` (PL8) | `python3 scripts/verify.py pinning images workflows` green, with no literal registry host in the key-isolation lint; a release run's logs show a verification for every hop of PL12; the runner VM does not replace its pinned runner release | PB1 | 3-4 (estimate) |
 | **PB4** | SLSA provenance (Build L3 hosted, L2 self-hosted, PL21) and CycloneDX SBOM for every artifact | the seven stages, the `azoth-signer` image, `.github/actions/attest`, `scripts/ci/verify_release.sh`, `scripts/ci/sbom_check.py`, `docs/compliance/` (the SHA-512 deviation record of PL24) | `scripts/ci/verify_release.sh <run_id>` exits 0 for a release run, covering every digest in `image-digests.txt` and `kernel-artifacts.env`, the signed `vmlinuz` and modules with provenance from `call-kernel-publish.yml` naming the unsigned digest and the signing run (PL19), and refuses an L3 claim on an attestation from a self-hosted runner or for a signed derivative; the `sbom_check.py` fixture tests pass for each ecosystem; `grep -ril sha-512 docs/compliance` names the deviation record of PL24 | PB3 | 3 (estimate) |
-| **PB4b** | Release attestation (PQ4, PL31, ADR-0094): the key-signed in-toto statement with `class`, `advisories`, `build_time` and `revision` (the candidate's commit, PL55), produced under `scripts/ci/` and signed in `sign-images` | the block is specified when its plan is written | the class and advisory ids a client verifies before UT13 acts, derived by `candidate` as in PL55; `test_release_candidate.py`: a missing baseline `:latest` gives `class = feature`, `advisories = []` and `class_reason` `no-baseline`; an unlabelled one takes `<base>` from the `revision` of the newest kept release attestation; with no such attestation it skips the git half and records `unlabelled-baseline`, with `security` when the Fedora half finds an advisory and `feature` otherwise; a listed attestation that cannot be read fails; the janitor's dry run keeps the `:latest` digest and the newest attested image of each repository; a labelled baseline whose commit is not an ancestor uses the range `<label>..<candidate>`; a label commit absent from the repository fails; with a labelled baseline, a missing or unavailable updateinfo source fails; a security `release-class.toml` in the commit range, or a Fedora advisory whose fixed NEVRA lies after the `:latest` one and at or before the candidate's, sets the class; an advisory fixed at or before the `:latest` NEVRA, or after the candidate's, is not claimed; an empty updateinfo result gives no Fedora advisory; a re-run reads the recorded result only while each repository's `:latest` equals its `baseline_digest` or its `candidate_digest`, and any other value fails; a partial `tag-latest` re-run retags only the repositories still at their baseline | PB4, PB13 | not estimated |
+| **PB4b** | Release attestation (PQ4, PL31, ADR-0094): the key-signed in-toto statement with `class`, `advisories`, `build_time` and `revision` (the candidate's commit, PL55), produced under `scripts/ci/` and signed in `sign-images` | the block is specified when its plan is written | the class and advisory ids a client verifies before UT13 acts, derived by `candidate` as in PL55; `test_release_candidate.py`: a missing baseline `:latest` gives `class = feature`, `advisories = []` and `class_reason` `no-baseline`; an unlabelled one takes `<base>` from the newest release marker in the history of `iso-v0`, ties to the larger run id; an image signed but never tagged has no marker and is never the base; a marker whose revision is not on `iso-v0` does not count; with no marker it skips the git half and records `unlabelled-baseline`, with `security` when the Fedora half finds an advisory and `feature` otherwise; a marker whose attestation is missing or does not verify with the candidate tree's keys fails; `tag-latest` pushes the marker on each digest it tags; the janitor's dry run keeps the `:latest` digest and the newest marker's image, marker and attestation of each repository; a labelled baseline whose commit is not an ancestor uses the range `<label>..<candidate>`; a label commit absent from the repository fails; with a labelled baseline, a missing or unavailable updateinfo source fails; a security `release-class.toml` in the commit range, or a Fedora advisory whose fixed NEVRA lies after the `:latest` one and at or before the candidate's, sets the class; an advisory fixed at or before the `:latest` NEVRA, or after the candidate's, is not claimed; an empty updateinfo result gives no Fedora advisory; a re-run reads the recorded result only while each repository's `:latest` equals its `baseline_digest` or its `candidate_digest`, and any other value fails; a partial `tag-latest` re-run retags only the repositories still at their baseline | PB4, PB13 | not estimated |
 | **PB5** | Evidence, VSA and the policy gate | the Conforma `ec` spike first (PL30), `accept.yml`, `promote.yml` (its promote job in the environment `release`, PL60), `system/promote.sh`, `scripts/ci/policy_check.py`, `scripts/ci/policy.json` | doc_update_delivery.md phases P1 and P2 gates, plus: `policy_check.py` refuses a candidate with each single piece of evidence removed (unit test), and the first promotion approved in `release` carries a VSA (PL60) | PB4 | 4 (estimate) |
 | **PB5b** | Close of the image key rotation (secrets.md section 4.1) | `system/keys/`, `.github/settings/environments.json`, the `sign-system-images` job of `athanor-forge-orchestrator.yml` (`sign-images` of `release.yml` after PB13), `docs/operations/secrets.md`, the `signing` alias of `scripts/verify.py` | a release signed with key 2 alone was promoted to `:stable` and one more release followed; `athanor-image-1.pub` is gone from `system/keys/`; the live environments and `environments.json` list `signing-kernel`, `signing-images` and `release` only; `MOK_PRIVATE_KEY` is absent | PB5 | 0.5 (estimate) |
 | | **[M]** decide that the machines meant to keep updating have booted a key-2 release (secrets.md section 4.1, step 2), then delete `signing` | | | | |
@@ -1309,3 +1325,12 @@ image, so a hand release of `main` costs nothing, and only a true bootstrap skip
 half. Section 5 keeps, per repository, the digest `:latest` names and the newest attested
 image with its attestation, which fixes a kept set that protected no unpromoted image
 (PL55, section 5, PB4b).
+
+Amended on 2026-10-09, still proposed: "the newest attested image" is replaced by the
+newest release marker, `released-<revision>-<build_run_id>`, which `tag-latest` pushes
+with no key and which is ordered by the revision's place in the history of `iso-v0`. An
+image signed but never released is never the base. Bootstrap means no marker, and a marker
+whose attestation does not verify with the candidate tree's keys fails `candidate`. The
+marker order holds through the key rotation of PB5b. Section 5 keeps the newest marker's
+image and attestation, and states that its reachability set did not protect `:latest`
+(PL35, PL55, PL56, section 5, PB4b).
