@@ -2,7 +2,7 @@
 id: A2-16
 title: "Nix for every user"
 date: 2026-10-05
-status: accepted
+status: amended by ADR-0103
 issues: [155]
 areas: [nix, packages, security]
 ---

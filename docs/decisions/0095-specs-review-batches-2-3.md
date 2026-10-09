@@ -2,7 +2,7 @@
 id: ADR-0095
 title: "Specifications, review batches 2 and 3, approved"
 date: 2026-10-08
-status: accepted
+status: amended by ADR-0103
 issues: []
 areas: [kernel, session, security, storage, desktop]
 ---

@@ -2,7 +2,7 @@
 id: ADR-0089
 title: "Defaults that contact or listen are off until the person turns them on"
 date: 2026-10-08
-status: accepted
+status: amended by ADR-0103
 issues: []
 areas: [security, network]
 ---

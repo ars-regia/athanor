@@ -2,7 +2,7 @@
 id: ADR-0101
 title: "One backup mechanism: athanor-backup, without athanor-timewarp"
 date: 2026-10-09
-status: accepted
+status: amended by ADR-0103
 issues: []
 areas: [software, backup]
 ---

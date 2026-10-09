@@ -2,7 +2,7 @@
 id: A2-10b
 title: "Tetragon made real"
 date: 2026-10-05
-status: accepted
+status: amended by ADR-0103
 issues: [153]
 areas: [security, kernel]
 ---

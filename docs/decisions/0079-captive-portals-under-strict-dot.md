@@ -2,7 +2,7 @@
 id: ADR-0079
 title: "Captive portals under strict DNS over TLS"
 date: 2026-10-06
-status: accepted
+status: amended by ADR-0103
 issues: [168, 143]
 areas: [network, security]
 ---
