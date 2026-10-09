@@ -88,7 +88,8 @@ These are the maintainer's, and this document does not reopen them.
 3. **CRA: comply now, at manufacturer level** (ADR-0081). Support period of five years for
    the product line, with the Fedora base rebased forward and the end date published.
    Digests promoted to `:stable` are never deleted. A signed evidence bundle per release is
-   attached to a GitHub Release, with no off-GitHub copy for now. Updates are automatic by
+   copied to an OCI registry off GitHub (`EVIDENCE_REGISTRY`, ADR-0106) and, from release 0.5,
+   attached to a GitHub Release. Updates are automatic by
    default, with a time-limited postpone and an opt-out with a warning (ADR-0082, amends
    A2-26 and A2-5). Full wipe follows 1.0; ADR-0076 stands and the gap is documented.
 4. **Product priorities (2026-10-06):** update delivery first; the pipeline is the
@@ -813,7 +814,7 @@ Retention, by ADR-0081 (this amends the 90-day figure of UT10 and UD8):
 | ISOs of promoted runs                                                | forever (UD8)                                                |
 | `:<run_id>` images never promoted                                    | 90 days                                                      |
 | untagged manifests not referenced by a kept index or signature       | 7 days                                                       |
-| evidence bundle per promoted release                                 | attached to its GitHub Release, never deleted                |
+| evidence bundle per promoted release                                 | copied to `EVIDENCE_REGISTRY` and, from 0.5, attached to its GitHub Release; never deleted |
 | workflow artifacts                                                   | the repository default of 90 days, unless the upload sets fewer |
 
 The two per-repository rows are part of this revision, at most two more digests per
@@ -883,12 +884,14 @@ security update (Art. 13(8), (9); Annex I Part II(8)); it is never bundled behin
 feature confirmation, and update control follows ADR-0082: automatic by default, a
 postpone limited in time, an opt-out in Settings with a warning (Annex I Part I(2)(c)).
 
-**PL42. The evidence bundle.** Each promotion publishes a GitHub Release named after the
+**PL42. The evidence bundle.** From release 0.5, each promotion publishes a GitHub Release named after the
 version (UT9), with the SBOMs, provenance, VSA, scan report, VEX, `promotion.json` and
 the acceptance evidence, plus a `bundle.sha256` file that `promote.yml` signs keylessly (Sigstore, the workflow
 identity), since the bundle exists only at promotion, long after the release's signing
-jobs ended; promotion therefore holds no key. ADR-0081 accepts GitHub as the only store
-for now.
+jobs ended; promotion therefore holds no key. Each promotion also copies the bundle to an OCI registry
+off GitHub named by the variable `EVIDENCE_REGISTRY`, which has no default: unset, promotion
+fails closed (ADR-0106 item 4). In release 0.3 that copy is the only store; the GitHub Release
+follows in 0.5 (ADR-0106 item 7).
 
 Known gaps, documented in `docs/compliance/` rather than hidden: full wipe (LUKS
 crypto-erase) after 1.0 (ADR-0076), the harmonised standards still in draft (ETSI EN
@@ -1063,7 +1066,7 @@ runs (Node runtime, action majors), so a deprecation has an owner before it brea
 | slsa-github-generator                         | `actions/attest-build-provenance` in reusable workflows reaches Build L3 for hosted builds with a maintained action                                                       |
 | A compiler cache for the kernel               | decided against (PR #250)                                                                                                                                                |
 | `paths:` filters on required workflows        | a filtered required workflow stays pending; PL3's change detection replaces them                                                                                         |
-| An evidence copy outside GitHub               | ADR-0081: GitHub Releases are the archive for now; revisited when the support period starts                                                                              |
+| An evidence copy outside GitHub               | Decided by ADR-0106: an OCI registry named by `EVIDENCE_REGISTRY`, required from the first promotion                                                                     |
 | Job-level concurrency groups in one release workflow | ADR-0104 item 1: a separate `release.yml` with its own group keeps the order of `:latest` without a per-job refusal of older revisions (PL57) |
 | One approval for every `:latest`              | ADR-0104 item 3: `:latest` is the testers' channel; new installs follow `:stable` (UD2), which the `release` approval gates (PL60) |
 | An automatic `:stable` with only a veto       | ADR-0104 item 3: the promotion waits for the approval after the evidence and the dwell (PL60) |
