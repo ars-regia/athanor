@@ -428,7 +428,8 @@ ricompila. La prova del riuso è una firma verificata, non un tag.
 
 ## 8. Auto-manutenzione: il bot di bump
 
-Workflow `kernel-bump.yml`, giornaliero (`schedule` vale solo dal branch di
+Workflow `kernel-bump.yml`: il gruppo kernel ogni lunedì, il gruppo system ogni giorno
+(ADR-0109; `schedule` vale solo dal branch di
 default; a mano con `workflow_dispatch` su qualunque branch). Due gruppi, una PR
 ciascuno, perché si verificano in modo diverso (`doc_build_ordering.md`, O7 e O8):
 il gruppo **kernel** (i job sotto) e il gruppo **system** (`system/Containerfile` e i
