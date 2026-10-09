@@ -134,7 +134,7 @@ jobs:
         # isolation of buildah is the one the other workflows already use.
         env:
           BUILDAH_ISOLATION: chroot
-        run: podman build -t localhost/azoth-builder -f forge/specs/azoth/builder/Containerfile forge/specs/azoth
+        run: bash scripts/ci/build-builder.sh
 
       - name: Run build.sh
         run: |
