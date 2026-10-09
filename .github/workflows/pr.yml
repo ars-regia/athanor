@@ -93,13 +93,11 @@ jobs:
   specs:
     needs: changes
     if: ${{ fromJSON(needs.changes.outputs.changes).specs }}
-    # What Spec Build Check's jobs ask for, its bot merge included: GitHub validates a called
-    # workflow's permissions when the run starts, even for jobs that will be skipped.
+    # What Spec Build Check's jobs ask for: GitHub validates a called workflow's permissions
+    # when the run starts, even for jobs that will be skipped.
     permissions:
-      actions: read
       contents: read
       packages: read
-      pull-requests: read
     uses: ./.github/workflows/spec-build-check.yml
 
   shell:

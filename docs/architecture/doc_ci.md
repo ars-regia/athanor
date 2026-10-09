@@ -214,7 +214,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 - **Triggers:** `workflow_call` from CI27 job `specs` only (CP4), part of the run of CI27, not a run of its own; its gate reports as `specs / Spec gate` there; `select_check_specs.py` picks the changed specs (not `azoth`), or all of them when `forge/config/rpmmacros`, the builder or the build scripts change. **Required check:** none of its own; `gate` of CI27 is red when the selected specs did not build.
 - **Secrets, variables:** `REGISTRY_HOST`. **Environment:** none. **Runner:** hosted. **Concurrency:** the group of CI27.
 - **Scripts:** `forge/scripts/build_changed_specs.sh`, `build_spec.sh`, `run_spec_build.sh`, `fetch_sources.sh`, `retry.sh`.
-- **Health:** `gh run list --workflow spec-build-check.yml --branch iso-v0 --limit 5`.
+- **Health:** no run of its own: read the `specs / Spec gate` job of CI27, `gh run list --workflow pr.yml --limit 5`.
 
 ### CI15 Shell surfaces
 
@@ -353,7 +353,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 
 ### CI32 Bot Merge
 
-- **File:** `bot-merge.yml`. **Purpose:** merges the spec bot's pull request (branch `chore/update-specs-zero-trust`, from CI20) when CI14 ends on it, and the system bump bot's (branch `bump/system-*`, from CI9) when CI13 ends on it, at the head the run checked and once the required checks pass. A pull request of another shape or a run that is not green is left for a person (`forge/scripts/bot_merge.py`).
+- **File:** `bot-merge.yml`. **Purpose:** merges the spec bot's pull request (branch `chore/update-specs-zero-trust`, from CI20) when CI27, which runs CI14, ends on it, and the system bump bot's (branch `bump/system-*`, from CI9) when CI13 ends on it, at the head the run checked and once the required checks pass. A pull request of another shape or a run that is not green is left for a person (`forge/scripts/bot_merge.py`).
 - **Triggers:** `workflow_run` `completed` of `Pull Request` (CI27, for the spec bot, which also needs the `specs / Spec gate` job of that pull request's newest CI27 run green) and `System Image Check`, for `pull_request` runs of a branch of this repository only. The pull request is `workflow_run.pull_requests[0]`, the head `workflow_run.head_sha`; a run with no pull request fails the job. A `workflow_run` workflow runs the default branch's file, so the key of the `bots` environment is reachable only from a workflow file on `iso-v0` or `main`, never from one a pull request edits. **Outputs:** the merge, a summary.
 - **Secrets, variables:** `BOT_APP_PRIVATE_KEY`, `BOT_APP_CLIENT_ID` (a merge made with an App token triggers the push workflows), `GITHUB_TOKEN` (read-only: the pull request, the runs). **Environment:** `bots`. **Runner:** hosted. **Concurrency:** none; the job waits up to 90 minutes for the required checks.
 - **Scripts:** `forge/scripts/bot_merge.py`.

@@ -271,9 +271,9 @@ The order of the maintainer's steps, each followed by `ghsettings.py diff`:
 4. Precondition: section 8 steps 4a to 5b are done, so `branch-protection.json` no longer
    requires `Kernel gate` and `Spec gate` on `iso-v0` and the live protection of `iso-v0` has
    dropped them (`main` keeps `Kernel gate` by design and does not matter for a queue on
-   `iso-v0`). Only `pr.yml` has a `merge_group` trigger; `kernel-build.yml` and
-   `spec-build-check.yml` do not, so a merge group never gets those two contexts and a queue
-   enabled while they are still required cannot be satisfied. Check with
+   `iso-v0`). Only `pr.yml` has a `merge_group` trigger, so a merge group never gets the
+   contexts of `kernel-build.yml` or the former direct run of `spec-build-check.yml`, and a
+   queue enabled while they are still required cannot be satisfied. Check with
    `ghsettings.py diff` and by reading the required contexts of both branches, then apply
    the ruleset (`ghsettings.py apply`, then `--yes`), which declares no merge queue, and
    re-export to record what GitHub stored.
