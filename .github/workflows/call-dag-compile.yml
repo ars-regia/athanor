@@ -60,27 +60,9 @@ jobs:
         id: check
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
           PKG_NAME: ${{ matrix.package }}
-        run: |
-          set -euo pipefail
-          echo "${{ secrets.GITHUB_TOKEN }}" | podman login "${REGISTRY}" -u ${{ github.actor }} --password-stdin
-          # Pull the builder explicitly: the podman run below would pull it implicitly,
-          # where a blob read that the registry drops fails the job outright (run
-          # 34148155801, shell-rs, four blobs lost to pkg-containers.githubusercontent.com).
-          bash scripts/retry.sh podman pull "${BUILDER_IMAGE,,}"
-          img_name="athanor-forge-${PKG_NAME}"
-          if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
-            img_name="athanor-forge-rolling-${PKG_NAME}"
-          fi
-          # This check only reads the checkout and asks the registry, so it needs neither
-          # --privileged nor --userns=keep-id. keep-id remaps every uid in the image into a
-          # new user namespace: on the 334k files of the builder that cost between 108 and
-          # 535 seconds per job, in every one of the 47 jobs, for a check that takes a
-          # second. It was also what made HOME=/root unwritable and broke the probe.
-          podman run -i --rm --security-opt label=disable --security-opt seccomp=unconfined -e GITHUB_TOKEN="${GITHUB_TOKEN}" -v ${{ github.workspace }}:/workspace -w /workspace/forge "${BUILDER_IMAGE,,}" bash scripts/check_idempotency.sh --package "${PKG_NAME}" --registry ${{ env.REGISTRY }} --owner ${{ github.repository_owner }} --image-name "$img_name" > idemp.out
-          source ./idemp.out
-          echo "hash=$CONTENT_HASH" >> "$GITHUB_OUTPUT"
-          if [ "$CACHE_HIT" = "true" ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; else echo "skip=false" >> "$GITHUB_OUTPUT"; fi
+        run: bash scripts/dag_package.sh check
 
       - name: Extreme Rust Cache (LLVM & Dependencies)
         if: steps.check.outputs.skip != 'true'
@@ -101,68 +83,26 @@ jobs:
       - name: Build Package (Custom Spec or Upstream SRPM)
         if: steps.check.outputs.skip != 'true'
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
           PKG_NAME: ${{ matrix.package }}
           SCCACHE_CACHE_SIZE: 10G
-        run: |
-          set -euo pipefail
-          mkdir -p RPMS
-          mkdir -p ${{ github.workspace }}/.sccache
-          echo "${{ secrets.GITHUB_TOKEN }}" | podman login "${REGISTRY}" -u ${{ github.actor }} --password-stdin
-          # Pull the builder explicitly: the podman run below would pull it implicitly,
-          # where a blob read that the registry drops fails the job outright (run
-          # 34148155801, shell-rs, four blobs lost to pkg-containers.githubusercontent.com).
-          bash scripts/retry.sh podman pull "${BUILDER_IMAGE,,}"
-          
-          PKG_CLEAN=$(echo "$PKG_NAME" | tr -cd '[:alnum:]-')
-          SPEC_DIR=""
-          if [ -d "specs/athanor-${PKG_CLEAN}" ]; then SPEC_DIR="specs/athanor-${PKG_CLEAN}"; elif [ -d "specs/${PKG_CLEAN}" ]; then SPEC_DIR="specs/${PKG_CLEAN}"; fi
-          if [ -z "$SPEC_DIR" ]; then echo "DEBUG: PKG_NAME='$PKG_NAME' PKG_CLEAN='$PKG_CLEAN'"; ls -la specs/; fi
-            if [ -n "$SPEC_DIR" ]; then
-            echo "📦 Compiling Custom Spec: $SPEC_DIR"
-            # Fetch with network, then build with --network=none (forge golden rule 4).
-            bash scripts/run_spec_build.sh "${BUILDER_IMAGE,,}" "$SPEC_DIR" \
-              -e SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE}" \
-              -v ${{ github.workspace }}/.sccache:/root/.cache/sccache
-          else
-            echo "❌ [MARTIAL LAW FATAL] Attempted to build upstream package ${PKG_NAME} without local spec! Dynamic downloads are strictly forbidden!"
-            exit 1
-          fi
+        run: bash scripts/dag_package.sh build
 
       - name: Publish Micro-Container OCI
         if: steps.check.outputs.skip != 'true'
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
           PKG_NAME: ${{ matrix.package }}
-        run: |
-          set -euo pipefail
-          export BUILDAH_ISOLATION=chroot
-          echo "${{ secrets.GITHUB_TOKEN }}" | buildah login -u ${{ github.actor }} --password-stdin ${{ env.REGISTRY }}
-          ctr=$(buildah from scratch)
-          buildah copy "$ctr" RPMS/*.rpm /
-          
-          img_prefix="athanor-forge"
-          if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
-            img_prefix="athanor-forge-rolling"
-          fi
-          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')
-          buildah config --label tier.content.sha256="${{ steps.check.outputs.hash }}" "$ctr"
-          buildah commit --omit-timestamp "$ctr" "$IMAGE_LOWER:latest"
-          # The digest of this push is the identity of the node: it is the one signed,
-          # attested and given the hash tag. :latest is for people and is never read back.
-          buildah push --digestfile "$RUNNER_TEMP/image.digest" "$IMAGE_LOWER:latest"
-          buildah rm "$ctr" || true
+          CONTENT_HASH: ${{ steps.check.outputs.hash }}
+        run: bash scripts/dag_package.sh publish
 
       - name: Generate SBOM (Syft)
         if: steps.check.outputs.skip != 'true'
         env:
           PKG_NAME: ${{ matrix.package }}
-        run: |
-          set -euo pipefail
-          img_prefix="athanor-forge"
-          if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
-            img_prefix="athanor-forge-rolling"
-          fi
-          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr "[:upper:]" "[:lower:]")@$(cat "$RUNNER_TEMP/image.digest")
-          nix run nixpkgs#syft -- packages "$IMAGE_LOWER" -o "spdx-json=sbom-${PKG_NAME}.spdx.json"
+        run: bash scripts/dag_package.sh sbom
 
       - name: Sign & Attest Micro-Container
         if: steps.check.outputs.skip != 'true'
@@ -185,18 +125,8 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         env:
           PKG_NAME: ${{ matrix.package }}
-        run: |
-          set -euo pipefail
-          export BUILDAH_ISOLATION=chroot
-          img_prefix="athanor-forge"
-          if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
-            img_prefix="athanor-forge-rolling"
-          fi
-          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')
-          # A registry-side copy of the digest that was signed and attested, asserted to
-          # resolve to it (tag_signed_image.sh): a failed signature leaves the node dirty,
-          # and a moved :latest cannot give the hash tag an unsigned digest.
-          bash scripts/tag_signed_image.sh "$IMAGE_LOWER" "$(cat "$RUNNER_TEMP/image.digest")" "${{ steps.check.outputs.hash }}"
+          CONTENT_HASH: ${{ steps.check.outputs.hash }}
+        run: bash scripts/dag_package.sh tag
 
       - name: 🛟 Upload Crash Artifacts (Nix/SCCache)
         if: failure()
