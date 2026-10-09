@@ -21,7 +21,6 @@ paths:
 - Test an unpublished RPM through a `registries.conf` prefix remap to a local registry, after `system/kernel-artifacts.sh resolve`. Why: `build-image.sh --pull=newer` replaces a locally retagged tier overlay with the published one.
 - Load SELinux modules at build time with `semodule -i`. Why: a `.cil` file under `/usr/share/selinux/packages` is not active.
 - List both `nix` and `nix-daemon` in `upstream_core`. Why: `nix` does not pull `nix-daemon`, and non-root users then get Permission denied on the store lock.
-- Declare every runtime need as `Requires:` or in `packages.json`. Why: the image installs with `install_weak_deps=False`, which drops `Recommends:` such as busybox.
 - Point Nix-built binaries at the system interpreter (`patchelf`) and label them `bin_t` before a system service runs them. Why: they load the `/nix/store` interpreter, labelled `var_t`, and the service fails with 203/EXEC.
 - Audit images by digest. Why: a local `:latest` can be days old.
 - Keep read-only btrfs snapshots out of the checkout. Why: they break podman `:Z` relabelling of the build context.
