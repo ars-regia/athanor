@@ -13,6 +13,8 @@ TARGET = ROOT / "system" / "accept-target.sh"
 REG = "registry.example/owner"
 NAMES = ["athanor-system", "athanor-system-nvidia", "athanor-system-nvidia-legacy"]
 ORCH = ".github/workflows/athanor-forge-orchestrator.yml"
+SHA = "c" * 40
+COMPARE = f"/repos/ars-regia/athanor/compare/{SHA}...iso-v0"
 
 
 def digest(n):
@@ -22,6 +24,7 @@ def digest(n):
 def run_object(**over):
     run = {
         "id": 412,
+        "head_sha": SHA,
         "path": ORCH,
         "head_branch": "iso-v0",
         "event": "push",
@@ -33,27 +36,17 @@ def run_object(**over):
 
 
 class AcceptTarget(Tool):
-    def github(self, run=None, iso_version="412"):
-        digests = "".join(
-            f"{REG}/{name} 412 {digest(i + 1)}\n" for i, name in enumerate(NAMES)
-        )
+    def github(self, run=None, iso_version="412", iso_system=None, iso_artifact=True, compare="identical"):
+        digests = "".join(f"{REG}/{name} 412 {digest(i + 1)}\n" for i, name in enumerate(NAMES))
         iso = digest(9)
-        self.registry(
-            {
-                "api": {
-                    "/repos/ars-regia/athanor/actions/runs/412": run or run_object()
-                },
-                "run_artifacts": {
-                    "412": {"image-digests": {"image-digests.txt": digests}}
-                },
-                "tags": {f"{REG}/athanor-iso:412": iso},
-                "configs": {
-                    f"{REG}/athanor-iso@{iso}": {
-                        "org.opencontainers.image.version": iso_version
-                    }
-                },
-            }
-        )
+        artifacts = {"image-digests": {"image-digests.txt": digests}}
+        if iso_artifact:
+            artifacts["iso-digest"] = {"iso-digest.txt": f"{REG}/athanor-iso {iso}\n{REG}/athanor-system {iso_system or digest(1)}\n"}
+        self.registry({
+            "api": {"/repos/ars-regia/athanor/actions/runs/412": run or run_object(), COMPARE: {"status": compare}},
+            "run_artifacts": {"412": artifacts},
+            "configs": {f"{REG}/athanor-iso@{iso}": {"org.opencontainers.image.version": iso_version}},
+        })
 
     def trusted(self, *flags):
         return subprocess.run(
@@ -117,6 +110,45 @@ class AcceptTarget(Tool):
                 self.github(run_object(**over))
                 self.assertEqual(self.trusted("--completed").returncode, 10)
 
+    def test_an_event_outside_the_list_is_not_trusted(self):
+        for event in ("issue_comment", "workflow_run", "release", None):
+            with self.subTest(event=event):
+                self.github(run_object(event=event))
+                r = self.trusted()
+                self.assertEqual(r.returncode, 10)
+                self.assertIn("event", r.stderr)
+
+    def test_the_listed_events_are_trusted(self):
+        for event in ("push", "schedule", "workflow_dispatch"):
+            with self.subTest(event=event):
+                self.github(run_object(event=event))
+                self.assertEqual(self.trusted().returncode, 0)
+
+    def test_a_sha_that_is_not_on_the_release_branch_is_not_trusted(self):
+        # A tag named like the branch matches head_branch, but its commit is not on the branch.
+        for status in ("diverged", "behind"):
+            with self.subTest(status=status):
+                self.github(compare=status)
+                r = self.trusted()
+                self.assertEqual(r.returncode, 10)
+                self.assertIn("sha", r.stderr)
+
+    def test_a_sha_contained_in_the_branch_is_trusted(self):
+        self.github(compare="ahead")
+        self.assertEqual(self.trusted().returncode, 0)
+
+    def test_a_missing_head_repository_or_conclusion_is_not_trusted(self):
+        for over in ({"head_repository": None}, {"conclusion": None}):
+            with self.subTest(**{k: str(v) for k, v in over.items()}):
+                self.github(run_object(**over))
+                self.assertEqual(self.trusted().returncode, 10)
+
+    def test_a_path_with_a_ref_suffix_fails_closed(self):
+        self.github(run_object(path=f"{ORCH}@refs/heads/iso-v0"))
+        r = self.trusted()
+        self.assertEqual(r.returncode, 10)
+        self.assertIn("path", r.stderr)
+
     def test_a_failure_of_gh_is_not_a_verdict(self):
         self.registry({"api": {}})
         r = self.trusted()
@@ -136,6 +168,19 @@ class AcceptTarget(Tool):
         self.assertEqual(
             (out / "iso-ref").read_text().strip(), f"{REG}/athanor-iso@{digest(9)}"
         )
+
+    def test_an_iso_bound_to_another_system_image_is_refused(self):
+        self.github(iso_system=digest(5))
+        r, out = self.target()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("athanor-system", r.stderr)
+        self.assertFalse((out / "iso-ref").exists())
+
+    def test_a_run_without_an_iso_digest_artifact_is_refused(self):
+        self.github(iso_artifact=False)
+        r, out = self.target()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertFalse((out / "iso-ref").exists())
 
     def test_an_iso_labelled_with_another_run_is_refused(self):
         self.github(iso_version="411")

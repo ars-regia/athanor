@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Resolves what accept.yml tests for one build run (doc_update_delivery.md, UD17): the run's
-# digests, from its own image-digests artifact, and its ISO by digest, whose version label
-# must name the run. Nothing is taken from a tag that a later run could move.
+# digests, from its own image-digests artifact, and its ISO by digest, from the run's own
+# iso-digest artifact, which must name the athanor-system digest of image-digests.txt as the
+# image the ISO was built from. The version label of the ISO must name the run as well.
+# Nothing is taken from a tag that a later run could move.
 # Usage: accept-target.sh BUILD_RUN_ID OUT
 # Exit status: that of trusted-run.sh when the build run is not trusted (10).
 # Environment: REGISTRY (REGISTRY_HOST/owner), GITHUB_REPOSITORY, gh authenticated;
@@ -26,9 +28,19 @@ awk -v repo="$REGISTRY/athanor-system" '$1 == repo { print $3 }' "$out/image-dig
     exit 1
 }
 
+gh run download "$run" -n iso-digest -D "$out"
 iso=$REGISTRY/athanor-iso
-digest=$(bash "$root/forge/scripts/retry.sh" skopeo inspect --format '{{.Digest}}' "docker://$iso:$run")
-version=$(skopeo inspect --config "docker://$iso@$digest" | jq -r '.config.Labels["org.opencontainers.image.version"] // empty')
+digest=$(awk -v repo="$iso" '$1 == repo { print $2 }' "$out/iso-digest.txt")
+bound=$(awk -v repo="$REGISTRY/athanor-system" '$1 == repo { print $2 }' "$out/iso-digest.txt")
+[[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || {
+    echo "${0##*/}: run $run recorded no athanor-iso digest" >&2
+    exit 1
+}
+[[ $bound == "$(<"$out/default-digest")" ]] || {
+    echo "${0##*/}: the ISO of run $run was built from athanor-system '$bound', not '$(<"$out/default-digest")'" >&2
+    exit 1
+}
+version=$(bash "$root/forge/scripts/retry.sh" skopeo inspect --config "docker://$iso@$digest" | jq -r '.config.Labels["org.opencontainers.image.version"] // empty')
 [[ $version == "$run" ]] || {
     echo "${0##*/}: $iso@$digest has version label '$version', not run $run" >&2
     exit 1

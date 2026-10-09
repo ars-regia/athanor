@@ -134,7 +134,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 ### CI5 Call System Image
 
 - **File:** `call-system-image.yml`. **Purpose:** aggregates the tier repositories, builds the three system images and the ISO, signs them keyless; CI1 `sign-system-images` signs them with the update key after it.
-- **Triggers:** `workflow_call` (CI1). **Input:** `builder_content_hash`. **Outputs:** tier repository images, system images, ISO image; artifacts `image-digests` and `upgrade-bytes` (`artifacts/metrics/upgrade-bytes.json`, UD34).
+- **Triggers:** `workflow_call` (CI1). **Input:** `builder_content_hash`. **Outputs:** tier repository images, system images, ISO image; artifacts `image-digests`, `iso-digest` (the ISO digest and the system image digest it was built from, read by CI12) and `upgrade-bytes` (`artifacts/metrics/upgrade-bytes.json`, UD34).
 - **Secrets, variables:** `GITHUB_TOKEN`.
 - **Environment:** none. `dag-system-image` holds no key; the vmlinuz arrives signed, from `azoth-boot` by digest, and the key-based signature of the images is CI1 `sign-system-images`, one maintainer approval per run (D43), none once the job is back in `signing-images` at the end of the key rotation, 1.0 included (ADR-0098 item 6, ADR-0104 item 8).
 - **Runner:** hosted. **Concurrency:** caller's.
