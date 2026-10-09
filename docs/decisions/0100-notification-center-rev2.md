@@ -26,9 +26,10 @@ the notification center without a revision of it.
    SD14 stays the only specification of the notice; NC13 becomes a pointer to it.
 2. **SD14 gains NC13's action.** Decided by the maintainer on 2026-10-09, with point 1. The Low
    and Critical notices carry an action that opens the control center's battery page.
-3. **Revision 2 of `doc_notification_center.md`** takes in the changes of `doc_lock_and_prompts.md`
+3. **Revision 2 of `doc_notification_center.md`**, approved by the maintainer on 2026-10-09 with
+   the group "System" and the battery page of CC5 as NC13's target, takes in the changes of `doc_lock_and_prompts.md`
    (LP7, ADR-0003 D4), `doc_settings.md` (SE4), `doc_portal.md` (PT10) and `doc_accessibility.md`
-   (AX6), proposes the group "System" for a fixed list of Athanor's session services (NC4), and applies its
+   (AX6), gives a fixed list of Athanor's session services the group "System" (NC4), and applies its
    section 4 in the same change. The maintainer approves the text by merging the pull request that
    sets its status to approved (ADR-0074 item 5), which also merges the specification into the
    product branch (ADR-0077 point 3).
