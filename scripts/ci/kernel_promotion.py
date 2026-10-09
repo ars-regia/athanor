@@ -128,6 +128,42 @@ def source_run(api, repository, sha):
     return pull, run
 
 
+def base_unchanged(api, repository, number):
+    """Condition 2: the recorded base is the run's only while nobody moved the pull request to
+    another base; pr.yml does not run on `edited`, so such a change leaves the old run green."""
+    events = api.json(f"/repos/{repository}/issues/{number}/events?per_page=100")
+    if len(events) >= 100:
+        raise Refused(
+            f"condition 2: pull request #{number} has more events than one page, its base history is not read"
+        )
+    changed = [e["event"] for e in events if e["event"] in BASE_EVENTS]
+    if changed:
+        raise Refused(
+            f"condition 2: the base of pull request #{number} changed ({changed[0]}), "
+            "the base it records may not be the run's"
+        )
+
+
+def compare_trees(repo, sha, head, base):
+    """Condition 2: the COMPARED objects at head and the pushed commit, at base and its parent."""
+    git(repo, "fetch", "--no-tags", "--depth=2", "origin", sha)
+    git(repo, "fetch", "--no-tags", "--depth=1", "origin", head, base)
+    parent = git(repo, "rev-parse", f"{sha}^1")
+    revs = {"head": head, "pushed": sha, "base": base, "parent": parent}
+    trees = {}
+    for path in COMPARED:
+        ids = {name: git(repo, "rev-parse", f"{rev}:{path}") for name, rev in revs.items()}
+        trees[path] = ids
+        if ids["head"] != ids["pushed"]:
+            raise Refused(f"condition 2: {path} differs between the run's head {head} and the pushed commit {sha}")
+        if ids["base"] != ids["parent"]:
+            raise Refused(
+                f"condition 2: {path} differs between the base {base} recorded for the run "
+                f"and the pushed commit's parent {parent}"
+            )
+    return parent, trees
+
+
 def decide(api, repo, repository, sha, nvr, tmp):
     """The decision for a promotion; raises Refused when a condition does not hold."""
     tmp = pathlib.Path(tmp)
@@ -145,6 +181,9 @@ def decide(api, repo, repository, sha, nvr, tmp):
         },
         "pull_request": {"number": pull["number"], "head": head, "base": base, "merge_commit": sha},
     }
+    base_unchanged(api, repository, pull["number"])
+    parent, decision["trees"] = compare_trees(repo, sha, head, base)
+    decision["pushed"] = {"commit": sha, "parent": parent}
     return decision
 
 

@@ -230,5 +230,56 @@ class ConditionOneTest(Case):
         self.assertRefused(self.run_promotion(shas, api, checkout), "lists 101 jobs")
 
 
+class ConditionTwoTest(Case):
+    def test_a_kernel_tree_that_differs_from_the_runs_head_builds(self):
+        shas, api, checkout = self.promote(pushed={"forge/specs/azoth/kernel-local": "CONFIG_X=y\n"})
+        self.assertRefused(
+            self.run_promotion(shas, api, checkout),
+            "condition 2: forge/specs/azoth differs between the run's head",
+        )
+
+    def test_a_different_pr_yml_blob_builds(self):
+        shas, api, checkout = self.promote(pushed={PR_YML: "pr 2\n"})
+        self.assertRefused(self.run_promotion(shas, api, checkout), f"condition 2: {PR_YML} differs")
+
+    def test_a_different_builder_script_builds(self):
+        shas, api, checkout = self.promote(parent={"scripts/ci/build-builder.sh": "builder 2\n"})
+        self.assertRefused(
+            self.run_promotion(shas, api, checkout), "condition 2: scripts/ci/build-builder.sh differs"
+        )
+
+    def test_a_change_on_the_recorded_base_reverted_before_the_merge_builds(self):
+        # The run built head merged with a base that held another call-kernel.yml; iso-v0
+        # reverted it before the merge, so head and pushed agree and only the base side differs.
+        shas, api, checkout = self.promote(
+            base={CALL_KERNEL: "call-kernel X\n"},
+            head={CALL_KERNEL: "call-kernel 1\n"},
+            parent={CALL_KERNEL: "call-kernel 1\n"},
+        )
+        self.assertRefused(
+            self.run_promotion(shas, api, checkout),
+            f"condition 2: {CALL_KERNEL} differs between the base {shas['base']} recorded for the run",
+        )
+
+    def test_a_pull_request_moved_to_another_base_builds(self):
+        # pr.yml does not run on `edited`: after a base change the green run is the one built
+        # on the old base, and the base the pull request records is the new one.
+        shas, api, checkout = self.promote()
+        api.events.insert(1, {"created_at": "2026-10-07T12:00:00Z", "event": "base_ref_changed"})
+        self.assertRefused(self.run_promotion(shas, api, checkout), "changed (base_ref_changed)")
+
+    def test_a_base_history_longer_than_a_page_builds(self):
+        shas, api, checkout = self.promote()
+        api.events = api.events * 20
+        self.assertRefused(self.run_promotion(shas, api, checkout), "more events than one page")
+
+    def test_a_head_commit_git_cannot_fetch_builds(self):
+        shas, api, checkout = self.promote()
+        api.pulls[0]["head"]["sha"] = "0" * 40
+        api.runs["workflow_runs"][0]["head_sha"] = "0" * 40
+        api.shas = {**shas, "head": "0" * 40}
+        self.assertRefused(self.run_promotion(shas, api, checkout), "error: CalledProcessError")
+
+
 if __name__ == "__main__":
     unittest.main()
