@@ -945,7 +945,8 @@ candidates in the `merge_group` run instead is not adopted now: the queue's ref 
 protected branch, so its provenance identity is not one PL12 can match exactly, and the job
 would publish from code not yet on the branch; PB11's measurements reopen it.
 `build.yml` refuses a commit whose `gate` check is not green, and `release.yml` signs only a
-build run that succeeded (PL55). The kernel is the exception (ADR-0110): the push to `iso-v0`
+build run that succeeded (PL55). The kernel is the exception (ADR-0110), once #368 and #373
+are merged: the push to `iso-v0`
 publishes the RPMs of the merged pull request's `pr.yml` kernel build when the four
 conditions of `doc_kernel_build.md` section 7 hold, and builds otherwise. Today `pr.yml` runs its
 selected builds on `merge_group` too; PB11 restricts them to `pull_request`.
@@ -1384,4 +1385,5 @@ PL54-PL58, section 10).
 Amended on 2026-10-09 and approved by the maintainer with ADR-0110, independently of the rest
 of revision 3: the push to `iso-v0` may publish the kernel RPMs
 built by the merged pull request's run instead of building them again, under four conditions
-and with a rebuild as the fallback (PL44, ADR-0110; `doc_kernel_build.md` section 7).
+and with a rebuild as the fallback, once #368 and #373 are merged (PL44, ADR-0110;
+`doc_kernel_build.md` section 7).

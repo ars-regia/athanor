@@ -426,7 +426,9 @@ kernel-core dell'immagine pubblicata: un push che tocca solo test, retention o
 workflow costa i minuti della matrice, non l'ora di build. Un bump dei pin
 ricompila. La prova del riuso è una firma verificata, non un tag.
 
-**Promotion (ADR-0110, approved by the maintainer on 2026-10-09).** When the inputs change,
+**Promotion (ADR-0110, approved by the maintainer on 2026-10-09).** It takes effect once the
+single pull request build (#368) and the trusted builder build (#373) are merged; until then
+the push builds. When the inputs change,
 the push to `iso-v0` publishes the RPMs built by the merged pull request's `pull_request` run
 (`pr.yml` through `call-kernel.yml`) instead of building them again, only when all four
 conditions hold, and builds otherwise: (1) the run is this repository's `pull_request` run that
@@ -440,9 +442,9 @@ pins; (4) the artifact is fetched by id and its SHA-256 digest equals the one th
 `boot` and `kmod` still run on the promoted RPMs; `publish` signs with the `iso-v0` identity and
 the predicate names the source run, its merge commit, the compared tree hashes and the artifact
 digest. The weekly `repro` job stays the independent audit of promoted builds. Actions artifacts
-last 90 days, the maximum allowed; when the artifact is missing or expired, the push builds. On
-`iso-v0` the kernel verdict comes from `gate` of `pr.yml`; `Kernel gate` is not required there
-(#368), and `main` keeps it.
+last 90 days, the maximum allowed; when the artifact is missing or expired, the push builds. With
+#368, the kernel verdict on `iso-v0` comes from `gate` of `pr.yml` and `Kernel gate` is no longer
+required there; `main` keeps it.
 
 ## 8. Auto-manutenzione: il bot di bump
 
