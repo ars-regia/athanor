@@ -1128,7 +1128,9 @@ Found on the running system and in the repository (2026-09-14):
   and `athanor-store-rs` from the tree.
 - **Snapshots** (P3): `athanor-timewarp` targets bcachefs, which left mainline in Linux
   6.18, and misdetects `/var/home` as tmpfs; `athanor-backup-hourly` fails because
-  `athanor-backup` is disabled. Both are ported to btrfs subvolume snapshots.
+  `athanor-backup` is disabled. `athanor-backup` was rewritten for btrfs subvolume
+  snapshots (PR #62) and `athanor-timewarp` was removed (PR #121), not ported.
+  *Amended 2026-10-09 (ADR-0101).*
 - **LUKS script** (P4b): `athanor-tpm-luks-seal.sh` had a syntax error (`|| {` after `fi`)
   and bound LUKS to PCRs 0, 2, 7 and 11. It is removed (issue #148); the LUKS policy of D42
   replaces it, and nothing in the image enrols the TPM until that mechanism exists.
