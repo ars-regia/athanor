@@ -120,11 +120,13 @@ class FakeApi:
         artifacts = fixture("artifacts.json")
         artifacts["artifacts"][0]["workflow_run"]["head_sha"] = shas["head"]
         artifacts["artifacts"][0]["digest"] = "sha256:" + sha256(zip_path)
+        artifacts["artifacts"][0]["size_in_bytes"] = pathlib.Path(zip_path).stat().st_size
         self.pulls, self.runs, self.jobs, self.artifacts = pulls, runs, fixture("jobs.json"), artifacts
         self.events = fixture("issue_events.json")
         self.head_pulls = [{"number": pulls[0]["number"]}]
         self.shas, self.zip_path = shas, zip_path
         self.error = None
+        self.extra = {}
 
     def json(self, path):
         if self.error:
@@ -139,12 +141,15 @@ class FakeApi:
             f"/repos/{REPOSITORY}/actions/runs/{RUN}/jobs?filter=latest&per_page=100": self.jobs,
             f"/repos/{REPOSITORY}/actions/runs/{RUN}/artifacts?name=kernel-build&per_page=100": self.artifacts,
         }
+        answers.update(self.extra)
         if path not in answers:
             raise urllib.error.HTTPError(path, 404, "Not Found", {}, None)
         return copy.deepcopy(answers[path])
 
-    def download(self, path, dest):
+    def download(self, path, dest, limit):
         if path != f"/repos/{REPOSITORY}/actions/artifacts/{ARTIFACT}/zip":
+            raise urllib.error.HTTPError(path, 404, "Not Found", {}, None)
+        if limit != pathlib.Path(self.zip_path).stat().st_size:
             raise urllib.error.HTTPError(path, 404, "Not Found", {}, None)
         pathlib.Path(dest).write_bytes(pathlib.Path(self.zip_path).read_bytes())
         return sha256(dest)
@@ -201,6 +206,23 @@ class ConditionOneTest(Case):
         shas, api, checkout = self.promote()
         api.runs["workflow_runs"][0]["head_repository"]["full_name"] = "someone/athanor"
         self.assertRefused(self.run_promotion(shas, api, checkout), "condition 1: no completed")
+
+    def test_a_run_of_another_repository_builds(self):
+        shas, api, checkout = self.promote()
+        api.runs["workflow_runs"][0]["repository"]["full_name"] = "someone/athanor"
+        self.assertRefused(self.run_promotion(shas, api, checkout), "condition 1: no completed")
+
+    def test_the_newest_run_of_the_head_decides(self):
+        # A re-run that failed after a green one: the older green run is never promoted.
+        shas, api, checkout = self.promote()
+        newer = copy.deepcopy(api.runs["workflow_runs"][0])
+        newer["id"] = RUN + 1
+        api.runs["workflow_runs"].append(newer)
+        failed = copy.deepcopy(api.jobs)
+        for job in failed["jobs"]:
+            job["conclusion"] = "failure"
+        api.extra[f"/repos/{REPOSITORY}/actions/runs/{RUN + 1}/jobs?filter=latest&per_page=100"] = failed
+        self.assertRefused(self.run_promotion(shas, api, checkout), f"of run {RUN + 1} concluded")
 
     def test_a_run_still_in_progress_builds(self):
         shas, api, checkout = self.promote()
@@ -283,7 +305,7 @@ class ConditionTwoTest(Case):
 
 class ConditionThreeTest(Case):
     def test_build_inputs_run_in_the_kernel_directory_of_each_commit(self):
-        shas, api, checkout = self.promote()
+        shas, _, checkout = self.promote()
         inputs = promotion.build_inputs(checkout, shas["pushed"], self.tmp / "inputs")
         self.assertEqual(inputs, {"pins": BUMP[PINS]})
 
@@ -307,6 +329,7 @@ class ConditionThreeTest(Case):
         with zipfile.ZipFile(api.zip_path, "w") as archive:
             archive.writestr("kernel/kernel-core.rpm", b"rpm")
         api.artifacts["artifacts"][0]["digest"] = "sha256:" + sha256(api.zip_path)
+        api.artifacts["artifacts"][0]["size_in_bytes"] = pathlib.Path(api.zip_path).stat().st_size
         self.assertRefused(self.run_promotion(shas, api, checkout), "holds no nvr")
 
 
@@ -341,6 +364,14 @@ class ConditionFourTest(Case):
         shas, api, checkout = self.promote()
         api.artifacts["artifacts"][0]["workflow_run"]["id"] = RUN + 1
         self.assertRefused(self.run_promotion(shas, api, checkout), "has 0 artifacts")
+
+
+    def test_an_artifact_of_another_name_in_the_run_is_ignored(self):
+        shas, api, checkout = self.promote()
+        other = copy.deepcopy(api.artifacts["artifacts"][0])
+        other["name"], other["id"] = "kernel-promotion", ARTIFACT + 1
+        api.artifacts["artifacts"].append(other)
+        self.assertTrue(self.run_promotion(shas, api, checkout)["promoted"])
 
 
 class PromotedTest(Case):
@@ -380,6 +411,22 @@ class ErrorTest(Case):
                 api.error = error
                 self.assertRefused(self.run_promotion(shas, api, checkout), "error: ")
 
+    def test_a_corrupt_member_whose_archive_digest_matches_builds(self):
+        shas, api, checkout = self.promote()
+        corrupt = self.tmp / "corrupt.zip"
+        with zipfile.ZipFile(corrupt, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("nvr", NVR + "\n")
+        data = bytearray(corrupt.read_bytes())
+        with zipfile.ZipFile(corrupt) as archive:
+            info = archive.getinfo("nvr")
+        # The first deflate block header: BFINAL 1, BTYPE 11, a reserved type zlib refuses.
+        data[info.header_offset + 30 + len(info.filename.encode()) + len(info.extra)] = 0x07
+        corrupt.write_bytes(bytes(data))
+        api.zip_path = corrupt
+        api.artifacts["artifacts"][0]["digest"] = "sha256:" + sha256(corrupt)
+        api.artifacts["artifacts"][0]["size_in_bytes"] = corrupt.stat().st_size
+        self.assertRefused(self.run_promotion(shas, api, checkout), "error: ")
+
     def test_an_existing_extract_directory_builds(self):
         shas, api, checkout = self.promote()
         (self.tmp / "out").mkdir()
@@ -417,6 +464,13 @@ class MainTest(Case):
 
 
 class DownloadTest(unittest.TestCase):
+    def test_a_body_longer_than_the_reported_size_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = pathlib.Path(tmp) / "a.zip"
+            self.assertEqual(promotion._stream(io.BytesIO(b"12345"), dest, 5), hashlib.sha256(b"12345").hexdigest())
+            with self.assertRaises(ValueError):
+                promotion._stream(io.BytesIO(b"123456"), dest, 5)
+
     def test_the_token_goes_to_the_api_and_never_to_the_storage_it_redirects_to(self):
         body = b"artifact bytes"
         seen = {}
@@ -451,7 +505,7 @@ class DownloadTest(unittest.TestCase):
             mock.patch.dict(os.environ, {"no_proxy": "*", "NO_PROXY": "*"}),
         ):
             api = promotion.Api(f"http://127.0.0.1:{server.server_port}/api", "secret")
-            digest = api.download("/artifacts/1/zip", pathlib.Path(tmp) / "a.zip")
+            digest = api.download("/artifacts/1/zip", pathlib.Path(tmp) / "a.zip", len(body))
             self.assertEqual((pathlib.Path(tmp) / "a.zip").read_bytes(), body)
         self.assertEqual(digest, hashlib.sha256(body).hexdigest())
         self.assertEqual(seen["/api/artifacts/1/zip"], "Bearer secret")
@@ -462,7 +516,7 @@ class DownloadTest(unittest.TestCase):
             with self.assertRaises(urllib.error.HTTPError):
                 api.json("/repos/x")
             with tempfile.TemporaryDirectory() as tmp, self.assertRaises(ValueError):
-                api.download("/bare", pathlib.Path(tmp) / "a.zip")
+                api.download("/bare", pathlib.Path(tmp) / "a.zip", len(body))
         self.assertNotIn("/blob", seen)
 
 

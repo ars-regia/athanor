@@ -83,7 +83,12 @@ class DownstreamTest(unittest.TestCase):
         self.jobs = jobs("kernel-build.yml")
 
     def test_a_promotion_skips_the_build(self):
-        self.assertIn("needs.inputs.outputs.promoted != 'true'", self.jobs["build"]["if"])
+        self.assertEqual(
+            self.jobs["build"]["if"],
+            "${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name"
+            " == github.repository) && ((inputs.stage || 'build') == 'prep' || (needs.inputs.outputs.reuse"
+            " != 'true' && needs.inputs.outputs.promoted != 'true')) }}",
+        )
 
     def test_boot_and_kmod_run_on_the_promoted_rpms(self):
         for name in ("boot", "kmod"):

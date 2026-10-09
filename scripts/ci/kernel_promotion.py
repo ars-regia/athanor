@@ -42,6 +42,7 @@ import tempfile
 import urllib.error
 import urllib.request
 import zipfile
+import zlib
 
 BRANCH = "iso-v0"
 WORKFLOW = ".github/workflows/pr.yml"
@@ -66,6 +67,10 @@ ERRORS = (
     TypeError,
     subprocess.CalledProcessError,
     zipfile.BadZipFile,
+    zipfile.LargeZipFile,
+    zlib.error,
+    EOFError,
+    RuntimeError,
     tarfile.TarError,
 )
 
@@ -79,10 +84,15 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def _stream(response, dest):
+def _stream(response, dest, limit):
+    """Write RESPONSE to DEST, at most LIMIT bytes, and return its SHA-256 in hex."""
     digest = hashlib.sha256()
+    size = 0
     with open(dest, "wb") as out:
         while chunk := response.read(1 << 20):
+            size += len(chunk)
+            if size > limit:
+                raise ValueError(f"the download is longer than the {limit} bytes the API reports")
             digest.update(chunk)
             out.write(chunk)
     return digest.hexdigest()
@@ -105,13 +115,13 @@ class Api:
         with urllib.request.build_opener(_NoRedirect).open(request, timeout=60) as response:
             return json.load(response)
 
-    def download(self, path, dest):
-        """Stream PATH to DEST and return its SHA-256 in hex. The API redirects an artifact to
-        storage outside GitHub: the redirect is followed without the token."""
+    def download(self, path, dest, limit):
+        """Stream PATH to DEST, at most LIMIT bytes, and return its SHA-256 in hex. The API
+        redirects an artifact to storage outside GitHub: the redirect is followed without the token."""
         request = urllib.request.Request(self.url + path, headers=self.headers)
         try:
             with urllib.request.build_opener(_NoRedirect).open(request, timeout=60) as response:
-                return _stream(response, dest)
+                return _stream(response, dest, limit)
         except urllib.error.HTTPError as error:
             if error.code not in (301, 302, 303, 307, 308):
                 raise
@@ -120,7 +130,7 @@ class Api:
             if not location:
                 raise ValueError(f"{path}: redirect without Location")
         with urllib.request.build_opener().open(location, timeout=60) as response:
-            return _stream(response, dest)
+            return _stream(response, dest, limit)
 
 
 def git(repo, *args):
@@ -240,7 +250,9 @@ def fetch_artifact(api, repository, run, dest):
     expected = artifact.get("digest") or ""
     if not re.fullmatch(r"sha256:[0-9a-f]{64}", expected):
         raise Refused(f"condition 4: the API reports no SHA-256 digest for artifact {artifact['id']}")
-    actual = "sha256:" + api.download(f"/repos/{repository}/actions/artifacts/{artifact['id']}/zip", dest)
+    actual = "sha256:" + api.download(
+        f"/repos/{repository}/actions/artifacts/{artifact['id']}/zip", dest, artifact["size_in_bytes"]
+    )
     if actual != expected:
         raise Refused(f"condition 4: artifact {artifact['id']} has digest {actual}, the API reports {expected}")
     return artifact
