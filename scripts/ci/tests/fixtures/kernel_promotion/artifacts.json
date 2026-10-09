@@ -1,0 +1,19 @@
+{
+  "artifacts": [
+    {
+      "digest": "sha256:16cfb65ea00d7b28ba7463a587211f48e008beb8a80f6150d91896482e10d7f3",
+      "expired": false,
+      "id": 11482498571,
+      "name": "kernel-build",
+      "size_in_bytes": 1312013590,
+      "workflow_run": {
+        "head_branch": "bump/kernel-20261007-1126",
+        "head_repository_id": 1309933336,
+        "head_sha": "5a19fdaca21de3281114a3a3064c5f7474552c76",
+        "id": 37614092466,
+        "repository_id": 1309933336
+      }
+    }
+  ],
+  "total_count": 1
+}

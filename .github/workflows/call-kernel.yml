@@ -32,9 +32,18 @@ jobs:
     # image carries the attestation of the pins (build-inputs.py), verified with cosign;
     # when the predicate matches the one of this commit, the reuse is proven.
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # A promotion downloads the 1.3 GB of RPMs and uploads them again (30 minutes: an estimate).
+    timeout-minutes: 30
+    # actions and pull-requests: kernel_promotion.py reads the merged pull request, its events,
+    # and the run, jobs and artifact it is promoted from (ADR-0110). pr.yml's kernel job grants
+    # the same, since this job is mirrored in call-kernel.yml.
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     outputs:
       nvr: ${{ steps.key.outputs.nvr }}
+      promoted: ${{ steps.promotion.outputs.promoted }}
       reuse: ${{ steps.key.outputs.reuse }}
       kernel_digest: ${{ steps.artifacts.outputs.kernel_digest }}
       devel_digest: ${{ steps.artifacts.outputs.devel_digest }}
@@ -86,11 +95,61 @@ jobs:
           bash system/kernel-artifacts.sh resolve
           grep -E '^(kernel_digest|devel_digest|registry)=' kernel-artifacts/kernel-artifacts.env >> "$GITHUB_OUTPUT"
 
+      - name: Promote the pull request's build (scripts/ci/kernel_promotion.py, ADR-0110)
+        # Only on the push to iso-v0 when the inputs changed: when the four conditions of
+        # doc_kernel_build.md section 7 hold, the RPMs of the merged pull request's pr.yml run go
+        # into out/ and build is skipped. A condition that does not hold, or an API error, leaves
+        # promoted false with the reason in the summary, and build runs as before.
+        id: promotion
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/iso-v0' && (inputs.stage || 'build') == 'build' && steps.key.outputs.reuse != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NVR: ${{ steps.key.outputs.nvr }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/kernel_promotion.py --sha "$GITHUB_SHA" --nvr "$NVR" --out promotion --extract out
+          cat promotion/summary.md >> "$GITHUB_STEP_SUMMARY"
+          echo "promoted=$(jq -r .promoted promotion/decision.json)" >> "$GITHUB_OUTPUT"
+
+      - name: The promoted RPMs, under the build job's names
+        if: ${{ steps.promotion.outputs.promoted == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kernel-build
+          path: out/
+          if-no-files-found: error
+
+      - name: Artifact for the boot matrix (promoted)
+        if: ${{ steps.promotion.outputs.promoted == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kernel-boot
+          path: |
+            out/kernel/kernel-core-*.rpm
+            out/microvm/*.rpm
+          if-no-files-found: error
+
+      - name: Artifact for the NVIDIA modules (promoted)
+        if: ${{ steps.promotion.outputs.promoted == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kernel-devel
+          path: out/devel/kernel-devel-[0-9]*.rpm
+          if-no-files-found: error
+
+      - name: The promotion decision, which publish attests
+        if: ${{ steps.promotion.outputs.promoted == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kernel-promotion
+          path: promotion/decision.json
+          if-no-files-found: error
+
   build:
     needs: inputs
     # The self-hosted runner executes only code of this repository: a pull request from a
     # fork never reaches it, so its gate stays red until the branch is pushed here.
-    if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && ((inputs.stage || 'build') == 'prep' || needs.inputs.outputs.reuse != 'true') }}
+    if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && ((inputs.stage || 'build') == 'prep' || (needs.inputs.outputs.reuse != 'true' && needs.inputs.outputs.promoted != 'true')) }}
     runs-on: self-hosted
     # A full kernel with kCFI: about an hour on 16 cores.
     timeout-minutes: 360
@@ -145,7 +204,7 @@ jobs:
   boot:
     needs: [inputs, build]
     # Also when build is skipped for reuse: the matrix always runs.
-    if: ${{ !cancelled() && (inputs.stage || 'build') == 'build' && needs.inputs.result == 'success' && (needs.build.result == 'success' || needs.inputs.outputs.reuse == 'true') }}
+    if: ${{ !cancelled() && (inputs.stage || 'build') == 'build' && needs.inputs.result == 'success' && (needs.build.result == 'success' || needs.inputs.outputs.reuse == 'true' || needs.inputs.outputs.promoted == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -220,7 +279,7 @@ jobs:
     # The NVIDIA modules (spec, section 7, gate 4) against this kernel: the freshly
     # built kernel-devel artifact, or the published image when the kernel is reused.
     needs: [inputs, build]
-    if: ${{ !cancelled() && (inputs.stage || 'build') == 'build' && needs.inputs.result == 'success' && (needs.build.result == 'success' || needs.inputs.outputs.reuse == 'true') }}
+    if: ${{ !cancelled() && (inputs.stage || 'build') == 'build' && needs.inputs.result == 'success' && (needs.build.result == 'success' || needs.inputs.outputs.reuse == 'true' || needs.inputs.outputs.promoted == 'true') }}
     permissions:
       contents: read
       packages: read

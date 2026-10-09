@@ -160,12 +160,12 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 
 ### CI8 Kernel Build
 
-- **File:** `kernel-build.yml`. **Purpose:** the Azoth kernel: lint (CI2), prep, RPM build, boot matrix, NVIDIA module gate, publication of four OCI images, each keyless-signed and attested (the build record; the project-key signature of ADR-0096 is decided and not landed, section 1.3), dispatch of CI1 (doc_kernel_build.md).
+- **File:** `kernel-build.yml`. **Purpose:** the Azoth kernel: lint (CI2), prep, RPM build (or, on a push to `iso-v0`, the promotion of the RPMs the merged pull request's CI28 run built, ADR-0110), boot matrix, NVIDIA module gate, publication of four OCI images, each keyless-signed and attested (the build record; the project-key signature of ADR-0096 is decided and not landed, section 1.3), dispatch of CI1 (doc_kernel_build.md).
 - **Triggers:** `pull_request` to `main` only (CP4 removed it for `iso-v0`; `main` has no CI27); push to `main`, `iso-v0` on `forge/specs/azoth/**` and its two workflow files; dispatch (`stage`: `prep`, `build`). Its jobs `inputs`, `build`, `boot` and `kmod` are mirrored in CI28, and `scripts/ci/tests/test_call_kernel.py` fails when the two differ.
-- **Outputs:** `azoth`, `azoth-devel`, `azoth-debuginfo` images; artifacts `kernel-<stage>`, `kernel-boot`, `kernel-devel`, `kernel-boot-logs`, `kernel-attestations`; check `Kernel gate`.
+- **Outputs:** `azoth`, `azoth-devel`, `azoth-debuginfo` images; artifacts `kernel-<stage>`, `kernel-boot`, `kernel-devel`, `kernel-boot-logs`, `kernel-attestations`, and `kernel-promotion` (the decision `publish` attests) when the push promotes; check `Kernel gate`.
 - **Secrets, variables:** `GITHUB_TOKEN`, `KERNEL_REGISTRY`. **Environment:** none.
 - **Runner:** `build` self-hosted (`:125`), skipped for PRs from forks (`:124`); the rest hosted. **Concurrency:** `kernel-<ref>`, cancels in progress.
-- **Scripts:** `forge/specs/azoth/build.sh`, `boot.sh`, `microvm/boot.sh`, `nvr.sh`, `build-inputs.py`, `retention.sh`, `system/kernel-artifacts.sh`.
+- **Scripts:** `forge/specs/azoth/build.sh`, `boot.sh`, `microvm/boot.sh`, `nvr.sh`, `build-inputs.py`, `retention.sh`, `system/kernel-artifacts.sh`, `scripts/ci/build-builder.sh`, `scripts/ci/kernel_promotion.py`.
 - **Health:** `gh run list --workflow kernel-build.yml --branch iso-v0 --limit 5`.
 
 ### CI9 Kernel Bump

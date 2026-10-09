@@ -1,4 +1,4 @@
-"""scripts/ci/build-builder.sh: only a pull_request run may build the builder with cached layers."""
+"""scripts/ci/build-builder.sh: every event builds the builder without cached layers (ADR-0110)."""
 
 import os
 import pathlib
@@ -30,20 +30,16 @@ def podman_args(event):
 
 
 class CacheTest(unittest.TestCase):
-    def test_a_pull_request_keeps_the_layer_cache(self):
-        args = podman_args("pull_request")
-        self.assertNotIn("--no-cache", args)
-        self.assertNotIn("--pull=always", args)
-
-    def test_every_other_event_builds_fresh(self):
-        for event in ("push", "schedule", "workflow_dispatch", "merge_group", None):
+    def test_every_event_builds_fresh(self):
+        # The pull request's build is promoted to the push (ADR-0110): it gets no cached layers.
+        for event in ("pull_request", "push", "schedule", "workflow_dispatch", "merge_group", None):
             with self.subTest(event=event):
                 args = podman_args(event)
                 self.assertIn("--no-cache", args)
                 self.assertIn("--pull=always", args)
 
     def test_the_image_is_the_one_the_workflows_run(self):
-        self.assertIn("localhost/azoth-builder", podman_args("push"))
+        self.assertIn("localhost/azoth-builder", podman_args("pull_request"))
 
 
 if __name__ == "__main__":

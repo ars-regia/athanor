@@ -85,9 +85,14 @@ jobs:
   kernel:
     needs: changes
     if: ${{ fromJSON(needs.changes.outputs.changes).kernel }}
+    # actions and pull-requests: the inputs job of call-kernel.yml asks for them, because it
+    # mirrors kernel-build.yml's, whose promotion step reads the API on a push (ADR-0110).
+    # GitHub validates a called workflow's permissions when the run starts.
     permissions:
       contents: read
       packages: read
+      actions: read
+      pull-requests: read
     uses: ./.github/workflows/call-kernel.yml
 
   specs:
