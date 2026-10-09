@@ -1,6 +1,7 @@
-"""The LSM and memory controller assertions of forge/specs/azoth/boot/init, run against
-files the test writes (python3 -B -m unittest discover -s forge/specs/azoth/tests)."""
+"""The assertions of forge/specs/azoth/boot/init, run against files and stub commands
+the test writes (python3 -B -m unittest discover -s forge/specs/azoth/tests)."""
 
+import gzip
 import pathlib
 import re
 import subprocess
@@ -62,6 +63,91 @@ class BootAssertions(unittest.TestCase):
     def test_init_runs_both_checks_and_mounts_what_they_read(self):
         text = INIT.read_text()
         for needle in ("check landlock    landlock", "check memcg       memcg", "mount -t cgroup2 cgroup2 /sys/fs/cgroup"):
+            self.assertIn(needle, text)
+
+
+def run_function(name, prelude="", args=""):
+    script = f"{prelude}\n{function(name)}\n{name} {args}\n"
+    return subprocess.run(["sh", "-c", script], capture_output=True, text=True)
+
+
+class PlatformAssertions(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = pathlib.Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def log(self, text):
+        (self.dir / "dmesg").write_text(text)
+        return f'dmesg() {{ cat "{self.dir}/dmesg"; }}'
+
+    def test_preempt_lazy_passes(self):
+        self.assertEqual(run_function("preempt_lazy", self.log("[0.1] Dynamic Preempt: lazy\n")).returncode, 0)
+
+    def test_preempt_full_fails(self):
+        self.assertNotEqual(run_function("preempt_lazy", self.log("[0.1] Dynamic Preempt: full\n")).returncode, 0)
+
+    def test_preempt_line_missing_fails(self):
+        self.assertNotEqual(run_function("preempt_lazy", self.log("[0.1] nothing\n")).returncode, 0)
+
+    def vm(self, bits, compat):
+        (self.dir / "mmap_rnd_bits").write_text(f"{bits}\n")
+        (self.dir / "mmap_rnd_compat_bits").write_text(f"{compat}\n")
+        return f'vm_dir="{self.dir}"'
+
+    def test_aslr_bits_pass(self):
+        self.assertEqual(run_function("aslr_bits", self.vm(32, 16)).returncode, 0)
+
+    def test_aslr_bits_too_low_fail(self):
+        self.assertNotEqual(run_function("aslr_bits", self.vm(28, 8)).returncode, 0)
+
+    def groups(self, *types, log="[0.1] nothing\n"):
+        for i, kind in enumerate(types):
+            (self.dir / "groups" / str(i)).mkdir(parents=True)
+            (self.dir / "groups" / str(i) / "type").write_text(f"{kind}\n")
+        (self.dir / "groups").mkdir(exist_ok=True)
+        return f'iommu_groups="{self.dir}/groups"\n' + self.log(log)
+
+    def test_lazy_domains_pass(self):
+        self.assertEqual(run_function("iommu_domains", self.groups("DMA-FQ", "DMA-FQ")).returncode, 0)
+
+    def test_a_strict_domain_fails(self):
+        self.assertNotEqual(run_function("iommu_domains", self.groups("DMA-FQ", "DMA")).returncode, 0)
+
+    def test_no_iommu_group_fails(self):
+        self.assertNotEqual(run_function("iommu_domains", self.groups()).returncode, 0)
+
+    def test_an_identity_domain_fails(self):
+        self.assertNotEqual(run_function("iommu_domains", self.groups("identity")).returncode, 0)
+
+    def test_strict_domains_forced_by_a_virtual_iommu_pass(self):
+        log = "[0.2] AMD-Vi: Using strict mode due to virtualization\n"
+        self.assertEqual(run_function("iommu_domains", self.groups("DMA", "DMA", log=log)).returncode, 0)
+
+    def test_an_identity_domain_fails_even_on_a_virtual_iommu(self):
+        log = "[0.2] AMD-Vi: Using strict mode due to virtualization\n"
+        self.assertNotEqual(run_function("iommu_domains", self.groups("DMA", "identity", log=log)).returncode, 0)
+
+    def config(self, text):
+        with gzip.open(self.dir / "config.gz", "wt") as handle:
+            handle.write(text)
+        return f'kernel_config="{self.dir}/config.gz"'
+
+    def test_module_or_builtin_passes(self):
+        prelude = self.config("CONFIG_WIREGUARD=m\nCONFIG_KVM_AMD=y\n")
+        self.assertEqual(run_function("kconfig_enabled", prelude, "WIREGUARD KVM_AMD").returncode, 0)
+
+    def test_a_missing_option_fails_and_is_named(self):
+        prelude = self.config("CONFIG_WIREGUARD=m\n# CONFIG_UDMABUF is not set\n")
+        result = run_function("kconfig_enabled", prelude, "WIREGUARD UDMABUF")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("UDMABUF", result.stdout)
+
+    def test_init_runs_the_platform_checks(self):
+        text = INIT.read_text()
+        for needle in ("check preempt", "check aslr", "check iommu", "check mesh-platform"):
             self.assertIn(needle, text)
 
 
