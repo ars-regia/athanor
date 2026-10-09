@@ -55,10 +55,11 @@ jobs:
     needs: publish
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    environment: bots
     permissions:
       contents: read
     steps:
-      # The default token, read-only and not persisted: the PAT is only in the last step.
+      # The default token, read-only and not persisted: the App token is only in the last steps.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
@@ -71,10 +72,20 @@ jobs:
         run: bash forge/test/shell/check_public.sh "$RUNNER_TEMP/ref/build-image.ref"
       - name: Write the pin and the pull request text
         run: python3 forge/test/shell/pin_build_image.py "$RUNNER_TEMP/ref/build-image.ref" "$RUNNER_TEMP/pr"
+      # A bots App installation token, not the GITHUB_TOKEN: PRs opened with the
+      # GITHUB_TOKEN start no checks. Minted per job from the key of the `bots` environment.
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.BOT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
       - name: Branch, commit, PR (never auto-merged)
         env:
-          # A PAT: PRs opened with the GITHUB_TOKEN start no checks.
-          GH_TOKEN: ${{ secrets.KERNEL_BUMP_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           gh auth setup-git
           forge/specs/azoth/open_bump_pr.sh rig-build-image rig-build-image forge/test/shell/build-image.digest "$RUNNER_TEMP/pr" "$GITHUB_REF_NAME"

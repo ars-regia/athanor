@@ -464,7 +464,7 @@ pacchetti resta nel riepilogo del check). Il gruppo kernel ha tre job:
    verde o rosso. Prima del builder, `lock.sh generate` riscrive i lock degli
    ambienti i cui input si sono spostati (la base per tutti, il SRPM pinnato per il
    builder): una PR di soli pin NVIDIA o CachyOS li lascia come sono. Se prep si ferma con `refresh needed`, l'esito è `REFRESH`.
-3. **pr** (runner GitHub-hosted, con il PAT `KERNEL_BUMP_TOKEN`: le PR aperte
+3. **pr** (runner GitHub-hosted, con un token della GitHub App dei bot: le PR aperte
    con il `GITHUB_TOKEN` non fanno partire i check): branch `bump/kernel-<data>`,
    un commit con `pins.env`, i manifesti, i Containerfile, i lock degli ambienti
    e `KERNEL.md`, PR

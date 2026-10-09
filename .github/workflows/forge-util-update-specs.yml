@@ -21,28 +21,25 @@ jobs:
   update-specs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    environment: bots
     steps:
-      # A PAT: the GITHUB_TOKEN may not open pull requests, and a silent fallback to it
-      # is what made this workflow fail every night since September. Missing secret =
-      # a red run with a message, not a run that pretends to work.
-      - name: The token that opens the pull request
-        # Before the checkout, so the job's working-directory (forge) does not exist yet.
-        working-directory: ${{ github.workspace }}
-        env:
-          SPECS_UPDATE_TOKEN: ${{ secrets.SPECS_UPDATE_TOKEN }}
-        run: |
-          set -euo pipefail
-          [[ -n ${SPECS_UPDATE_TOKEN} ]] || {
-            echo "SPECS_UPDATE_TOKEN is not set: this workflow opens a pull request and the" >&2
-            echo "default token is not allowed to. Create a fine-grained token with contents" >&2
-            echo "and pull-requests write on this repository and store it as that secret." >&2
-            exit 1
-          }
+      # A bots App installation token, not the GITHUB_TOKEN: it may not open pull requests,
+      # and PRs it opened would start no checks. The action fails the job when the App id or the
+      # key is missing or refused, so a missing credential is a red run, not one that pretends to work.
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.BOT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
 
       - name: Checkout Repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          token: ${{ secrets.SPECS_UPDATE_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       # fetch_sources.sh --pin expands the Source URLs with rpmspec.
       - name: Install rpmspec
@@ -59,7 +56,7 @@ jobs:
         if: hashFiles('forge/out/spec-updates.md') != ''
         uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
         with:
-          token: ${{ secrets.SPECS_UPDATE_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           commit-message: "chore(forge): update the watched specs to their latest upstream releases"
           title: "chore(forge): update the watched specs to their latest upstream releases"
           body-path: forge/out/spec-updates.md
