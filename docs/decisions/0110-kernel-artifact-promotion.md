@@ -76,23 +76,16 @@ Decided by the maintainer on 2026-10-09.
 - A kernel change builds once, which saves about 1.1 runner hours per change (an estimate
   from the p50 compile and the build count, not a measurement of the new flow).
 - PL44 of `doc_pipeline.md` is amended: pull request builds of the kernel may be reused by
-  the release build under the conditions above. The specification text changes in a separate
-  revision that cites this record; `doc_kernel_build.md` section 7 changes in it too.
+  the release build under the conditions above. The specification text changes in the same pull
+  request as this record: `doc_pipeline.md` PL44 and `doc_kernel_build.md` section 7.
 - The SLSA build level does not change: the self-hosted runner cannot claim hosted isolation
   in either flow. The guarantees of (d) rest on the runner hardening of #369 and #373.
 - When the artifact is missing, expired or any condition fails, the push rebuilds. Promotion
   is an optimisation, never a requirement for publishing.
-- The record is not final until the open questions below are answered.
-
-## Open questions
-
-These are the open questions of section 5 of the spike. This record decides none of them.
-
-1. Is an RPM built in a `pull_request` run of code identical to the merged code acceptable as
-   "built from `iso-v0` code", if the provenance names that run honestly?
-2. Does PL44 need only an amendment through this record, or also a new revision of
-   `doc_pipeline.md` before this record merges?
-3. Is the required `Kernel gate` check renamed or kept as an alias when #368 moves the
-   verdict to `pr.yml`, and does `main` still need it?
-4. Is the Actions artifact retention long enough for the time between a pull request run and
-   its merge, or should the fallback rebuild be expected for older pull requests?
+- Provenance: an RPM built in the pull request's run, from code identical to the merged
+  code, counts as built from `iso-v0` code, because the predicate names the source run, its
+  commit and the artifact digest.
+- On `iso-v0` the kernel verdict comes from `gate` in `pr.yml`, and `Kernel gate` is not
+  required there (#368). `main` keeps `Kernel gate` by design.
+- Actions artifacts last 90 days, the repository setting and the maximum allowed (measured).
+  When the artifact is missing or expired, the push rebuilds.

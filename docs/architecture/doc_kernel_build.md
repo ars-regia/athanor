@@ -426,6 +426,23 @@ kernel-core dell'immagine pubblicata: un push che tocca solo test, retention o
 workflow costa i minuti della matrice, non l'ora di build. Un bump dei pin
 ricompila. La prova del riuso è una firma verificata, non un tag.
 
+**Promozione (ADR-0110, rev 2 del 2026-10-09).** Quando gli input cambiano, il push su `iso-v0`
+pubblica gli RPM costruiti dal run `pull_request` della PR unita (`pr.yml` tramite
+`call-kernel.yml`) invece di ricostruirli, solo se valgono tutte e quattro le condizioni, altrimenti
+ricompila: (1) il run è quello `pull_request` di questo repository che costruisce il kernel, con
+`kernel / build` e verdetto verdi, trovato via API dal commit di testa della PR; (2) l'albero di
+`forge/specs/azoth` e i blob di `pr.yml` e `call-kernel.yml` al `head_sha` del run e al commit
+del push coincidono, come pure al commit base registrato all'avvio del run, con valori che
+vengono da metadati di GitHub e dal checkout del push, mai dagli output o dagli artefatti del
+run; (3) `build-inputs.py` al commit del push coincide con quello del run e `out/nvr` con l'NVR dei
+pin; (4) l'artefatto è scaricato per id e il suo digest SHA-256 coincide con quello dell'API.
+`boot` e `kmod` girano comunque sugli RPM promossi; `publish` firma con l'identità di `iso-v0` e il
+predicato nomina il run di origine, il suo commit di merge, gli hash degli alberi confrontati e il
+digest dell'artefatto. Il job `repro` settimanale resta l'audit indipendente dei build promossi.
+Gli artefatti di Actions durano 90 giorni, il massimo consentito; se manca o è scaduto, il push
+ricompila. Il verdetto del kernel in `iso-v0` viene da `gate` di `pr.yml`; `Kernel gate` non è
+richiesto lì (#368) e `main` lo mantiene.
+
 ## 8. Auto-manutenzione: il bot di bump
 
 Workflow `kernel-bump.yml`: il gruppo kernel ogni lunedì, il gruppo system ogni giorno
