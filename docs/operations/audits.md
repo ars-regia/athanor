@@ -59,7 +59,7 @@ until it does an issue names it.
 | Build reproducibility: build one commit twice and compare the images | monthly | CI |
 | Accessibility: an Orca walk through the greeter, the bar and Settings, and a diff of the AT-SPI tree | every release | the maintainer for the Orca walk; CI for the tree diff |
 | Resource regressions: boot time, bar start-up, memory against the per-service limits of `doc_shell_standard.md` (ST5) | every image, kept as a trend | CI |
-| Licences of the image | every release | CI, reviewed by an agent |
+| Licences of the image: every installed package, beyond the crates and specs that `cargo deny` and `verify.py licence` already check | every release | CI, reviewed by an agent |
 
 Fuzzing is not on the calendar because CI already repeats it: 15 `cargo-fuzz` targets run
 weekly in `fuzz.yml`, with the corpus replayed in the gate (PR #310).
