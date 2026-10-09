@@ -13,6 +13,26 @@ def jobs(name):
     return yaml.safe_load((WORKFLOWS / name).read_text())["jobs"]
 
 
+class PublishTest(unittest.TestCase):
+    def setUp(self):
+        self.publish = jobs("kernel-build.yml")["publish"]
+
+    def test_publish_accepts_a_skipped_build_only_when_promoted(self):
+        self.assertIn(f"(needs.build.result == 'skipped' && {PROMOTED})", self.publish["if"])
+        self.assertIn("needs.boot.result == 'success'", self.publish["if"])
+        self.assertIn("github.event_name != 'pull_request'", self.publish["if"])
+
+    def test_publish_attests_the_decision_with_its_own_predicate_type(self):
+        names = [s.get("name") for s in self.publish["steps"]]
+        attest = names.index("Attest the promotion (ADR-0110)")
+        self.assertLess(names.index("SBOM, sign, attest"), attest)
+        self.assertLess(attest, names.index("Retention (retention.sh)"))
+        step = self.publish["steps"][attest]
+        self.assertEqual(step["if"], f"${{{{ {PROMOTED} }}}}")
+        self.assertIn('--type "$type" --predicate promotion/decision.json', step["run"])
+        self.assertNotIn("--type custom", step["run"])
+
+
 class InputsTest(unittest.TestCase):
     def setUp(self):
         self.inputs = jobs("kernel-build.yml")["inputs"]

@@ -347,7 +347,7 @@ jobs:
 
   publish:
     needs: [inputs, build, boot]
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && (inputs.stage || 'build') == 'build' && needs.build.result == 'success' && needs.boot.result == 'success' }}
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (inputs.stage || 'build') == 'build' && (needs.build.result == 'success' || (needs.build.result == 'skipped' && needs.inputs.outputs.promoted == 'true')) && needs.boot.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -442,6 +442,32 @@ jobs:
         env:
           SYFT_REGISTRY_AUTH_USERNAME: ${{ github.actor }}
           SYFT_REGISTRY_AUTH_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        if: ${{ needs.inputs.outputs.promoted == 'true' }}
+        with:
+          name: kernel-promotion
+          path: promotion
+
+      - name: Attest the promotion (ADR-0110)
+        # The RPMs come from the merged pull request's run: a predicate of its own type names
+        # the source run, the merge commit, the compared trees and the artifact digest
+        # (scripts/ci/kernel_promotion.py). The pins attestation above stays as it is, because
+        # the reuse check of the inputs job and system/kernel-artifacts.sh match it exactly.
+        if: ${{ needs.inputs.outputs.promoted == 'true' }}
+        run: |
+          set -euo pipefail
+          type="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/kernel-promotion/v1"
+          identity=$(bash system/kernel-artifacts.sh identity kernel)
+          for group in kernel devel debuginfo microvm; do
+            repo=$IMAGE
+            [[ $group == kernel || $group == microvm ]] || repo="${IMAGE}-${group}"
+            ref="${repo}@$(cat "digests/${group}")"
+            cosign attest --yes --type "$type" --predicate promotion/decision.json "$ref"
+            cosign verify-attestation --type "$type" \
+              --certificate-identity-regexp "$identity" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com "$ref" > /dev/null
+          done
 
       - name: Provenance SLSA (kernel)
         # In the GitHub attestation store, not in the registry: `gh attestation verify`
