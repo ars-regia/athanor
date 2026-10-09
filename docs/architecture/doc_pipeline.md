@@ -198,7 +198,7 @@ The schemas live in `scripts/ci/schemas/` and every writer validates against the
 | `tier-digests.json`           | `call-packages.yml`       | `call-image.yml`                | tier repository digests, verified (UD44)                                                            |
 | `image-digests.txt`           | `call-image.yml`          | signing, ISO, accept, promote   | `REPOSITORY TAG DIGEST` per variant (UD3)                                                           |
 | `release-request.json`        | `request-release` of `build.yml` (`scripts/ci/release_request.py`) | `candidate` of `release.yml` | the build run id and attempt, workflow path, ref, commit, builder content hash, SHA-256 of `image-digests.txt` (PL55) |
-| `release-candidate.json`      | `candidate` of `release.yml` (`scripts/ci/release_candidate.py`) | every later job of `release.yml` | the checked request, the order verdict per repository, `superseded`, and from PB4b `class`, `advisories`, `class_reason`, the updateinfo metadata timestamp and the baseline and candidate digests (PL55, PL58) |
+| `release-candidate.json`      | `candidate` of `release.yml` (`scripts/ci/release_candidate.py`) | every later job of `release.yml` | the checked request, the order verdict per repository, `superseded`, and from PB4b one entry per repository: `repository`, `baseline_digest`, `candidate_digest`, `class`, `advisories`, `class_reason`, `updateinfo_timestamp` (PL55, PL58) |
 | `evidence/<gate>.json`        | each acceptance gate      | promote                         | UD4 evidence                                                                                        |
 | `vsa.intoto.json`             | `accept.yml`              | promote                         | SLSA VSA over the run's digests                                                                     |
 | `promotion.json`              | `promote.sh`              | evidence bundle                 | UD6 record                                                                                          |
@@ -596,9 +596,12 @@ The release's security class and advisory ids are derived from durable data only
 difference between the current `:latest` and the candidate, never from per-build records
 or images that expire (section 5), and never from a dispatch input:
 
-- the `release-class.toml` files of ADR-0094 item 4 committed in the range between the
-  commit of the `org.opencontainers.image.revision` label of `:latest` and the candidate's
-  commit (git history);
+- the `release-class.toml` files of ADR-0094 item 4 committed in the git range
+  `<label>..<candidate>`, the commits reachable from the candidate's commit and not from
+  the commit of the `org.opencontainers.image.revision` label of `:latest`. The range is
+  defined whether or not that commit is an ancestor of the candidate (a `main` release
+  after an `iso-v0` one, for example), as long as the commit exists in the repository; a
+  label commit absent from the repository fails `candidate`;
 - for each Fedora package whose NEVRA differs between the RPM databases of `:latest` and
   the candidate, the Fedora updateinfo advisories whose fixed NEVRA is newer than the
   `:latest` one and not newer than the candidate's, so nothing outside the difference is
@@ -611,33 +614,43 @@ or images that expire (section 5), and never from a dispatch input:
 The class is security if any source says so, and the advisory ids are their union. The
 content of a release whose pending run was replaced (PL49) is in that difference, so the
 next release carries its class. The class is per repository: each image repository's own
-`:latest` is its baseline. When that baseline is missing, has no revision label, or its
-label's commit is not an ancestor of the candidate's commit (a `main` release after an
-`iso-v0` one, for example), `candidate` derives nothing. It records `class = feature`,
-`advisories = []` and a `class_reason` of `no-baseline`, `unlabelled-baseline` or
-`baseline-not-ancestor`. It neither fails nor claims `security`. This is the rule of
-ADR-0094 item 5: an unknown class reads as feature, the side that asks the user to
-confirm. It is not silent: `class_reason` goes in the run summary and in the job summary
-the maintainer approves for the promotion to `:stable` (PL60). The first labelled release
-of a repository ends its fallback, so the step needs no switch, and a repository that is
-never rebuilt stays on the fallback, as releases are today. With the baseline known, a
-missing or unavailable updateinfo source, or an unreadable image, fails `candidate`,
-because the answer would otherwise be wrong.
+`:latest` is its baseline. The revision label is a build check: an image without it fails
+the image checks of its own build (PB13), so it never becomes `:latest`, and an unlabelled
+`:latest` can only be one published before PB13. Two bootstrap cases remain, and nowhere
+else does `candidate` fall back:
+
+- `no-baseline`, the first release of a repository: there is nothing to compare and
+  nothing to lose, so `candidate` records `class = feature`, `advisories = []`;
+- `unlabelled-baseline`, a baseline published before PB13: the git half is skipped, and
+  the Fedora half still runs against the baseline image. If it finds advisories, the class
+  is `security` with those advisories; otherwise it is `feature` with none.
+
+In both, `class_reason` records the case. The fallback to `feature` extends the rule of
+ADR-0094 item 5, that an unknown class reads as feature, the side that asks the user to
+confirm, to a signed record that carries `class_reason`, as part of this proposal. It is
+not silent: `class_reason` goes in the run summary and in the job summary the maintainer
+approves for the promotion to `:stable` (PL60). Each repository's first release after
+PB13 ends its fallback, so the step needs no switch. At bootstrap the maintainer does
+nothing on a `class_reason`; anywhere else it is a defect to report. With a labelled
+baseline, a missing or unavailable updateinfo source, or an unreadable image, fails
+`candidate`, because the answer would otherwise be wrong.
 
 PB13 builds `release_candidate.py` with the request check of this item, the order check of
 PL58 and the `superseded` list. PB4b adds the class derivation and the release attestation. `candidate` writes the checked request, the order verdict,
-`superseded` and, from PB4b, `class`, `advisories`, `class_reason` when it fell back, the
-timestamp of the updateinfo metadata it used, and the digests of the baseline `:latest` and of the
-candidate it was computed for, into `release-candidate.json` under `$RUNNER_TEMP/out/`.
+`superseded` and, from PB4b, one entry per repository with `repository`,
+`baseline_digest`, `candidate_digest`, `class`, `advisories`, `class_reason` (empty unless
+it fell back) and `updateinfo_timestamp`, into `release-candidate.json` under
+`$RUNNER_TEMP/out/`.
 It uploads that file with `image-digests.txt` as the artifact `release-candidate`, so a
 cancelled release stays visible in the run that replaced it. Every later job reads only
-that artifact of its own run (PL11). A later job, or a re-run of failed jobs in the same
-release run, reads the class back only while the current `:latest` and the candidate
-still have the two recorded digests; otherwise the job fails, and the release is run
-again from `candidate`, which recomputes it. The green tests before the automatic signing (ADR-0104
+that artifact of its own run (PL11). A job before `tag-latest`, or a re-run of it, reads the
+class back only while each repository's current `:latest` and candidate still have the
+recorded `baseline_digest` and `candidate_digest`; otherwise the job fails, and the release
+is run again from `candidate`, which recomputes it. Once the tag has moved, later jobs and
+re-runs compare `:latest` with the recorded `candidate_digest` instead. The green tests before the automatic signing (ADR-0104
 item 2) are therefore the build's own checks: the checks the plan selected and the image
 checks of `call-image.yml` (installed RPMs, enabled units, `vmlinuz` against the Secure Boot
-certificate, shared layers). The ISO and upgrade acceptance (UD17, UD18) run after
+certificate, shared layers, the revision label). The ISO and upgrade acceptance (UD17, UD18) run after
 `:latest` moves, outside `release.yml`, and are evidence for `:stable` (UD4), not a
 precondition of `:latest` (PQ16).
 
@@ -1023,7 +1036,7 @@ step only the maintainer can take.
 | | **[M]** create one GitHub App per role, each private key in an environment scoped to its token-minting job with a row in secrets.md; create the agents' App, its private key in the maintainer's secret store (PL5); apply the two rulesets; enable the merge queue; enable SHA pinning once every action is pinned by SHA | | | | |
 | **PB3** | Pinned inputs, verified hops (PL8, PL12-PL14) | `.github/actions/verify-input`, `scripts/ci/registry.sh`, `forge/config/images.json`, the key-isolation constants of `scripts/verify.py`, `scripts/runner/` (PL8) | `python3 scripts/verify.py pinning images workflows` green, with no literal registry host in the key-isolation lint; a release run's logs show a verification for every hop of PL12; the runner VM does not replace its pinned runner release | PB1 | 3-4 (estimate) |
 | **PB4** | SLSA provenance (Build L3 hosted, L2 self-hosted, PL21) and CycloneDX SBOM for every artifact | the seven stages, the `azoth-signer` image, `.github/actions/attest`, `scripts/ci/verify_release.sh`, `scripts/ci/sbom_check.py`, `docs/compliance/` (the SHA-512 deviation record of PL24) | `scripts/ci/verify_release.sh <run_id>` exits 0 for a release run, covering every digest in `image-digests.txt` and `kernel-artifacts.env`, the signed `vmlinuz` and modules with provenance from `call-kernel-publish.yml` naming the unsigned digest and the signing run (PL19), and refuses an L3 claim on an attestation from a self-hosted runner or for a signed derivative; the `sbom_check.py` fixture tests pass for each ecosystem; `grep -ril sha-512 docs/compliance` names the deviation record of PL24 | PB3 | 3 (estimate) |
-| **PB4b** | Release attestation (PQ4, PL31, ADR-0094): the key-signed in-toto statement with `class`, `advisories` and `build_time`, produced under `scripts/ci/` and signed in `sign-images` | the block is specified when its plan is written | the class and advisory ids a client verifies before UT13 acts, derived by `candidate` as in PL55; `test_release_candidate.py`: a missing baseline `:latest`, an unlabelled one and one whose label commit is not an ancestor of the candidate each give `class = feature`, `advisories = []` and the matching `class_reason`, never a failure and never `security`; with a labelled baseline, a missing or unavailable updateinfo source fails; a security `release-class.toml` in the commit range, or a Fedora advisory whose fixed NEVRA lies after the `:latest` one and at or before the candidate's, sets the class; an advisory fixed at or before the `:latest` NEVRA, or after the candidate's, is not claimed; an empty updateinfo result gives no Fedora advisory; a re-run reads the recorded result only while the baseline and candidate digests match, and a moved `:latest` forces a recomputation | PB4, PB13 | not estimated |
+| **PB4b** | Release attestation (PQ4, PL31, ADR-0094): the key-signed in-toto statement with `class`, `advisories` and `build_time`, produced under `scripts/ci/` and signed in `sign-images` | the block is specified when its plan is written | the class and advisory ids a client verifies before UT13 acts, derived by `candidate` as in PL55; `test_release_candidate.py`: a missing baseline `:latest` gives `class = feature`, `advisories = []` and `class_reason` `no-baseline`; an unlabelled one skips the git half and records `unlabelled-baseline`, with `security` when the Fedora half finds an advisory and `feature` otherwise; a labelled baseline whose commit is not an ancestor uses the range `<label>..<candidate>`; a label commit absent from the repository fails; with a labelled baseline, a missing or unavailable updateinfo source fails; a security `release-class.toml` in the commit range, or a Fedora advisory whose fixed NEVRA lies after the `:latest` one and at or before the candidate's, sets the class; an advisory fixed at or before the `:latest` NEVRA, or after the candidate's, is not claimed; an empty updateinfo result gives no Fedora advisory; before `tag-latest` a re-run reads the recorded result only while the baseline and candidate digests match, and a moved `:latest` forces a recomputation; after it, `:latest` is compared with the recorded candidate digest | PB4, PB13 | not estimated |
 | **PB5** | Evidence, VSA and the policy gate | the Conforma `ec` spike first (PL30), `accept.yml`, `promote.yml` (its promote job in the environment `release`, PL60), `system/promote.sh`, `scripts/ci/policy_check.py`, `scripts/ci/policy.json` | doc_update_delivery.md phases P1 and P2 gates, plus: `policy_check.py` refuses a candidate with each single piece of evidence removed (unit test), and the first promotion approved in `release` carries a VSA (PL60) | PB4 | 4 (estimate) |
 | **PB5b** | Close of the image key rotation (secrets.md section 4.1) | `system/keys/`, `.github/settings/environments.json`, the `sign-system-images` job of `athanor-forge-orchestrator.yml` (`sign-images` of `release.yml` after PB13), `docs/operations/secrets.md`, the `signing` alias of `scripts/verify.py` | a release signed with key 2 alone was promoted to `:stable` and one more release followed; `athanor-image-1.pub` is gone from `system/keys/`; the live environments and `environments.json` list `signing-kernel`, `signing-images` and `release` only; `MOK_PRIVATE_KEY` is absent | PB5 | 0.5 (estimate) |
 | | **[M]** decide that the machines meant to keep updating have booted a key-2 release (secrets.md section 4.1, step 2), then delete `signing` | | | | |
@@ -1036,7 +1049,7 @@ step only the maintainer can take.
 | **PB10** | Update control (ADR-0082) | `athanor-update`, Settings, doc_update_trust.md (UT13) | dev-VM harness: a security update applies at the next shutdown by default; postpone holds it until its limit, then it applies; the opt-out stops automatic application, shows the warning, and still notifies | PB5 | 3 (estimate) |
 | **PB11** | Performance | `pr.yml` selections, the bar job, timeouts, concurrency, caches, NVIDIA modules once | the section 7.2 targets measured by `scripts/ci/run_stats.py` over five runs per path, driven by `workflow_dispatch` with a forced selection where a path is rare, and timed from the start of the first job, so approval waits are reported (PL49) and not gated | PB1 | 3 (estimate) |
 | **PB12** | Topology consolidation | the 29 workflows to the 14 of section 3, the Orchestrator renamed `build.yml`, `bots.yml`, `maintenance.yml`, `dag_orchestrator.py` (PL48), doc_ci.md, `docs/operations/ci-runbook.md` | `ls .github/workflows` matches section 3; `python3 scripts/verify.py` green with the checks of section 10; a release run dispatched with a fixture spec at graph depth 3 or more builds it in the single matrix | PB3, PB11 | 5 (estimate) |
-| **PB13** | Release workflow (ADR-0104, section 4.10) | `release.yml`; the `request-release` job of `athanor-forge-orchestrator.yml` and the removal of its `sign-system-images`, `verify-system-images` and `tag-system-images` jobs; `scripts/ci/release_request.py`, `scripts/ci/release_candidate.py` and the schema of section 3.3; the `org.opencontainers.image.revision` label in `system/build-image.sh`; the rules of PL54 (`request-release` dispatches only on `iso-v0`), PL56, PL57 and PL60 in `scripts/verify.py workflows`; the environment `release` on the promote job of `promote-stable.yml` (PL60); `.github/settings/environments.json`, doc_ci.md, secrets.md | `python3 scripts/verify.py workflows ci` green with the rules of PL54, PL56, PL57 and PL60; `python3 -B -m unittest discover -s scripts/tests` green with `test_release_candidate.py` (a request whose commit, run attempt, ref, workflow or digest hash differs; a ref other than `iso-v0` and `main`; an older candidate; an unreleased build of its ref between `:latest` and the candidate, which it lists as `superseded`; a missing `:latest`, which the order passes; a `:latest` without the revision label or from the other release ref, ordered by build time; a labelled `:latest` whose commit is not an ancestor; an equal digest; no class field before PB4b); on `iso-v0`, `gh run view <build run> --json jobs --jq '.jobs[].name'` lists no image signing, verification or tagging job; after the release run, `skopeo inspect --format '{{.Digest}}' docker://<registry>/athanor-system:latest` equals the digest of the build's `image-digests.txt`; a second build completes while a release run waits for its approval; a dispatch of an older build fails in `candidate` and leaves `:latest` unchanged; a promotion waits for the `release` approval and a rejection leaves `:stable` unchanged; the actor of the dispatched run is recorded in PL5 | PB0 | 2-3 (estimate) |
+| **PB13** | Release workflow (ADR-0104, section 4.10) | `release.yml`; the `request-release` job of `athanor-forge-orchestrator.yml` and the removal of its `sign-system-images`, `verify-system-images` and `tag-system-images` jobs; `scripts/ci/release_request.py`, `scripts/ci/release_candidate.py` and the schema of section 3.3; the `org.opencontainers.image.revision` label in `system/build-image.sh` and its image check in `call-image.yml`; the rules of PL54 (`request-release` dispatches only on `iso-v0`), PL56, PL57 and PL60 in `scripts/verify.py workflows`; the environment `release` on the promote job of `promote-stable.yml` (PL60); `.github/settings/environments.json`, doc_ci.md, secrets.md | `python3 scripts/verify.py workflows ci` green with the rules of PL54, PL56, PL57 and PL60; `python3 -B -m unittest discover -s scripts/tests` green with `test_release_candidate.py` (a request whose commit, run attempt, ref, workflow or digest hash differs; a ref other than `iso-v0` and `main`; an older candidate; an unreleased build of its ref between `:latest` and the candidate, which it lists as `superseded`; a missing `:latest`, which the order passes; a `:latest` without the revision label or from the other release ref, ordered by build time; a labelled `:latest` whose commit is not an ancestor; an equal digest; no class field before PB4b); an image built without the revision label fails the image checks of its build; on `iso-v0`, `gh run view <build run> --json jobs --jq '.jobs[].name'` lists no image signing, verification or tagging job; after the release run, `skopeo inspect --format '{{.Digest}}' docker://<registry>/athanor-system:latest` equals the digest of the build's `image-digests.txt`; a second build completes while a release run waits for its approval; a dispatch of an older build fails in `candidate` and leaves `:latest` unchanged; a promotion waits for the `release` approval and a rejection leaves `:stable` unchanged; the actor of the dispatched run is recorded in PL5 | PB0 | 2-3 (estimate) |
 | | **[M]** create the environment `release` (ADR-0103); approve the first release runs in `signing` and the first promotion in `release` | | | | |
 
 ## 13. Decisions on the review questions
@@ -1239,8 +1252,7 @@ replaced (derived as in the next entry), and it records their run ids as `supers
 
 Amended on 2026-10-09, still proposed: the security class and advisory ids are derived
 from durable data, the difference between `:latest` and the candidate (`release-class.toml`
-in the commit range, `dnf updateinfo` over the changed Fedora packages), and fail closed
-(PL55, PB4b). Section 3.3 records `class`, `advisories` and `superseded`. PL57 covers a hand
+in the commit range, `dnf updateinfo` over the changed Fedora packages) (PL55, PB4b). Section 3.3 records `class`, `advisories` and `superseded`. PL57 covers a hand
 release of `main` replacing an `iso-v0` release. PL35 states that the ISO's `:latest` moves
 only on a hand release of `main`. PQ4, PQ17 and PQ18 follow the dispatch model.
 
@@ -1260,6 +1272,14 @@ timestamp, for audit (PL55, section 3.3, PB4b).
 
 Amended on 2026-10-09, still proposed: no switch file. The class is per repository. A
 missing, unlabelled or non-ancestor baseline `:latest` gives `class = feature`, no
-advisories and a `class_reason`, the rule of ADR-0094 item 5, shown in the run summary and
+advisories and a `class_reason`, extending ADR-0094 item 5's rule, shown in the run summary and
 in the promotion's job summary. With a known baseline, an unavailable updateinfo source
 fails `candidate` (PL55, PL58, PL60, section 3.3, PB4b).
+
+Amended on 2026-10-09, still proposed: the fallback covers bootstrap only. The git range
+`<label>..<candidate>` is defined for a non-ancestor baseline, so `baseline-not-ancestor`
+is dropped, and a label commit absent from the repository fails. The revision label is a
+build check (PB13), so an unlabelled `:latest` predates PB13; for it the Fedora half still
+runs and can give `security`. The fallback extends ADR-0094 item 5's rule to a signed record
+with `class_reason`. The record holds one entry per repository, and its digest match applies
+before `tag-latest` (PL55, section 3.3, PB4b, PB13).
