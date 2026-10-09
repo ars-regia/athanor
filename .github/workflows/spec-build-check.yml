@@ -12,30 +12,16 @@ name: Spec Build Check
 # pull request, bot-merge.yml runs forge/scripts/bot_merge.py, which merges it when every bump keeps its leading non-zero version component (semver-compatible).
 # The kernel (forge/specs/azoth) is Kernel Build's.
 #
-# The workflow runs on every pull request, without a path filter, so that its gate job
-# always reports: "Spec gate" is a required check of the branch protection
-# (.github/settings/branch-protection.json), and a required check of a workflow that a path
-# filter skipped would stay pending. select decides what is built; a change that selects
-# nothing passes in seconds.
+# pr.yml calls this workflow as its `specs` job when changes.json selects the specs (doc_ci.md
+# CP4): it has no run of its own, its gate job reports as `specs / Spec gate` inside the run of
+# pr.yml, and the concurrency group of pr.yml covers it.
 
 on:
-  pull_request:
-  # pr.yml calls this workflow as its `specs` job when changes.json selects the specs. Until
-  # this pull_request trigger is removed, together with "Spec gate" in branch-protection.json
-  # (docs/operations/github-settings.md section 8), both run. A call is part of the run of
-  # pr.yml, not a run of its own, so bot-merge.yml follows the direct run only.
   workflow_call:
 
 permissions:
   contents: read
   packages: read
-
-# In a call, github is the caller's context: the workflow name keeps the call of pr.yml and the
-# direct run in separate groups, so neither cancels the other, and a merge group (no pull
-# request number) has its own ref.
-concurrency:
-  group: spec-build-check-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
 
 jobs:
   select:

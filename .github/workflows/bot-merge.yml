@@ -7,13 +7,13 @@ name: Bot Merge
 # a pull request edits. The merge is made with a bots App token, so that it triggers the push
 # workflows and the Orchestrator publishes what merged.
 #
-# Spec Build Check and System Image Check each run on the pull request itself. The run of
-# Spec Build Check that pr.yml calls is part of the run of pr.yml, not a run of its own, so it
-# starts nothing here.
+# The spec bot's pull request is followed through the run of the Pull Request workflow (pr.yml),
+# whose `specs` job runs Spec Build Check (doc_ci.md CP4); System Image Check runs on the pull
+# request itself.
 
 on:
   workflow_run:
-    workflows: [Spec Build Check, System Image Check]
+    workflows: [Pull Request, System Image Check]
     types: [completed]
 
 permissions:
@@ -29,7 +29,7 @@ jobs:
     if: >-
       ${{ github.event.workflow_run.event == 'pull_request'
       && github.event.workflow_run.head_repository.full_name == github.repository
-      && ((github.event.workflow_run.name == 'Spec Build Check'
+      && ((github.event.workflow_run.name == 'Pull Request'
       && github.event.workflow_run.head_branch == 'chore/update-specs-zero-trust')
       || (github.event.workflow_run.name == 'System Image Check'
       && startsWith(github.event.workflow_run.head_branch, 'bump/system-'))) }}

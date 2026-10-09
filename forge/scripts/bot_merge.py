@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Merge a bot pull request whose change has exactly the shape the bot produces.
 
-bot-merge.yml calls it, from the default branch's workflow file, when Spec Build Check ends on the spec
-bot's pull request (`spec`) or System Image Check on a system bump (`system`); BUILD_RESULT is the
-conclusion of that run. The script reads the
+bot-merge.yml calls it, from the default branch's workflow file, when the Pull Request workflow
+(pr.yml, whose `specs` job runs Spec Build Check) ends on the spec bot's pull request (`spec`) or
+System Image Check on a system bump (`system`); BUILD_RESULT is the conclusion of that run. A
+spec bump also needs the `specs / Spec gate` job of that pull request's newest pr.yml run green,
+so a run that did not select the specs merges nothing. The script reads the
 changed files from the GitHub API (status, path and patch of each), checks every changed line
 against the bot's shape, waits for the required checks of the branch protection and merges
 at HEAD_SHA, so a push after the check makes the merge fail instead of landing unchecked.
@@ -54,8 +56,9 @@ BRANCH_PROTECTION = ".github/settings/branch-protection.json"
 CHECK_WORKFLOWS = {
     "gate": "pr.yml",
     "Kernel gate": "kernel-build.yml",
-    "Spec gate": "spec-build-check.yml",
 }
+# The job of pr.yml that builds the specs a change selects (spec-build-check.yml's gate).
+SPECS_JOB = "specs / Spec gate"
 SYSTEM_PATH = re.compile(rf"system/(Containerfile|nvidia/locks/{NAME}\.lock)")
 VERSION = re.compile(r"Version:[ \t]+(\d+(?:\.\d+)*)")
 RELEASE = re.compile(r"Release:[ \t]+\d+%\{\?dist\}")
@@ -246,8 +249,7 @@ def gate_conclusion(name, workflow, sha, gh):
     earlier run on the same commit (a reopened pull request, a rerun) does not count while a
     newer run has not reported its own, and the merge is refused. So the newest run is
     followed, not any check run of that name, and its gate job is read in the latest attempt.
-    The job, not the run: Spec Build Check calls this script from its own run, whose gate job
-    has ended while the run is still in progress.
+    The job, not the run: a required check is a job, and so is the specs job of a spec bump.
     """
     repo = os.environ["GITHUB_REPOSITORY"]
     runs = json.loads(
@@ -304,6 +306,10 @@ def main(kind, pr, sha, build, gh=run_gh, merge=merge_gh):
         if build != "success":
             raise Refused(f"build is {build}")
         base = check(kind, pr, sha, gh)
+        if kind == "spec":
+            specs = gate_conclusion(SPECS_JOB, "pr.yml", sha, gh)
+            if specs != "success":
+                raise Refused(f"{SPECS_JOB} of pr.yml is {specs}: the specs did not build")
     except Refused as reason:
         report(pr, f"stays for a person: {reason}")
         return 0

@@ -73,16 +73,13 @@ class BotMergeTest(unittest.TestCase):
         (root / bot.WATCH_FILE).write_text(json.dumps(watch))
         (root / ".github/settings").mkdir(parents=True)
         os.chdir(root)
-        self.protect({"iso-v0": ["Kernel gate", "Spec gate", "gate"]})
+        self.protect({"iso-v0": ["Kernel gate", "gate"]})
         self.root = root
         self.runs = [{"id": 1, "status": "completed"}]
-        # Spec Build Check calls the bot from its own run: the gate job has ended, the run has not.
-        self.spec_runs = [{"id": 101, "status": "in_progress"}]
         # The Pull Request workflow's gate, whose own build jobs carry the caller's prefix.
         self.pr_runs = [{"id": 201, "status": "completed"}]
         self.jobs = {
             1: [{"name": "Kernel gate", "conclusion": "success"}],
-            101: [{"name": "Spec gate", "conclusion": "success"}, {"name": "merge", "conclusion": None}],
             201: [{"name": "specs / Spec gate", "conclusion": "success"}, {"name": "gate", "conclusion": "success"}],
         }
 
@@ -134,12 +131,10 @@ class BotMergeTest(unittest.TestCase):
         return [c for c in self.calls if c[:2] == ("pr", "merge")]
 
     def actions(self, endpoint):
-        """The Actions API of the fake repository: Kernel Build, Spec Build Check and Pull
-        Request runs on SHA and their jobs."""
+        """The Actions API of the fake repository: Kernel Build and Pull Request runs on SHA
+        and their jobs."""
         if endpoint == f"repos/owner/repo/actions/workflows/kernel-build.yml/runs?head_sha={SHA}&event=pull_request":
             return json.dumps({"workflow_runs": self.runs})
-        if endpoint == f"repos/owner/repo/actions/workflows/spec-build-check.yml/runs?head_sha={SHA}&event=pull_request":
-            return json.dumps({"workflow_runs": self.spec_runs})
         if endpoint == f"repos/owner/repo/actions/workflows/pr.yml/runs?head_sha={SHA}&event=pull_request":
             return json.dumps({"workflow_runs": self.pr_runs})
         run = int(endpoint.split("/runs/")[1].split("/")[0])
@@ -351,25 +346,22 @@ class BotMergeTest(unittest.TestCase):
             self.wait(sleep=lambda _: None)
 
 
-    def test_red_or_missing_spec_gate_fails_without_merging(self):
-        self.jobs[101] = [{"name": "Spec gate", "conclusion": "failure"}]
+    def test_spec_bump_whose_specs_did_not_build_stays_for_a_person(self):
+        # The spec bot's evidence is the specs job of the Pull Request run: with the specs not
+        # selected, or their gate red, a green run merges nothing.
+        for jobs in (
+            [{"name": "gate", "conclusion": "success"}],
+            [{"name": "specs / Spec gate", "conclusion": "failure"}, {"name": "gate", "conclusion": "success"}],
+        ):
+            self.jobs[201] = jobs
+            self.assertEqual(self.spec(), [])
+
+    def test_a_protection_still_requiring_spec_gate_fails_without_merging(self):
+        # No workflow reports Spec gate once CP4 removed its pull_request run.
+        self.protect({"iso-v0": ["Spec gate", "gate"]})
         with self.assertRaises(SystemExit):
-            self.system()
+            self.spec()
         self.assertFalse([c for c in self.calls if c[:2] == ("pr", "merge")])
-        self.spec_runs = [{"id": 101, "status": "completed"}]
-        self.jobs[101] = [{"name": "select", "conclusion": "success"}]
-        with self.assertRaises(SystemExit):
-            self.wait(sleep=lambda _: None)
-
-    def test_spec_gate_pending_is_awaited(self):
-        self.jobs[101] = [{"name": "Spec gate", "conclusion": None}]
-        with self.assertRaises(SystemExit):
-            self.wait(sleep=lambda _: None, polls=3)
-
-        def finish(_):
-            self.jobs[101] = [{"name": "Spec gate", "conclusion": "success"}]
-
-        self.wait(sleep=finish)
 
     def test_red_pull_request_gate_fails_without_merging(self):
         self.jobs[201] = [{"name": "specs / Spec gate", "conclusion": "success"}, {"name": "gate", "conclusion": "failure"}]

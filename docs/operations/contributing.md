@@ -64,7 +64,7 @@ A new `verify.py` check is registered with `@check` like the others and has a te
 
 - **Area owners** are listed in `.github/CODEOWNERS`; the area map is [ownership.md](ownership.md).
 - **Two-person review** for signing, attestation, polkit, cryptography and authentication: two approvals, at least one from an owner of the area, never the author. Today the maintainer is the only owner, so every such change waits for the maintainer.
-- Enforcement: the `product-review` ruleset (`.github/settings/rulesets.json`) requires the review of a code owner and no other approval, so a pull request touching only a path with no owner merges without a review ([ADR-0107](../decisions/0107-code-owner-review-with-unowned-paths.md)); `iso-v0` also requires the status checks `Spec gate` and `gate` (`.github/settings/branch-protection.json`), and `gate` alone once the specs follow-up of `github-settings.md` section 8 removes the legacy `Spec gate` trigger.
+- Enforcement: the `product-review` ruleset (`.github/settings/rulesets.json`) requires the review of a code owner and no other approval, so a pull request touching only a path with no owner merges without a review ([ADR-0107](../decisions/0107-code-owner-review-with-unowned-paths.md)); `iso-v0` also requires the status check `gate` (`.github/settings/branch-protection.json`).
 
 ## CT7. Red CI (decided 2026-10-08, [ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md))
 
