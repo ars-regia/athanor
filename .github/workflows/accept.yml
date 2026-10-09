@@ -66,15 +66,19 @@ jobs:
           sudo apt-get install --no-install-recommends -y \
             qemu-system-x86 qemu-utils ovmf e2fsprogs
 
+      - name: 🔑 Log in to the registry
+        # Before the resolve step: skopeo reads podman's auth file, and a private package
+        # answers 401 without it, which would be recorded as a fail verdict.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "${GITHUB_TOKEN}" | podman login "${REGISTRY%%/*}" -u "${{ github.actor }}" --password-stdin
+
       - name: 🎯 Resolve the run
         run: bash system/accept-target.sh "${BUILD_RUN_ID}" target
 
       - name: 💽 Fetch the ISO
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          echo "${GITHUB_TOKEN}" | podman login "${REGISTRY%%/*}" -u "${{ github.actor }}" --password-stdin
 
           # The ISO ships inside a scratch image with one file in it, so a container of
           # that image is the only thing to unpack.
