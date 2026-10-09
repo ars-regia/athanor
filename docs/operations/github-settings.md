@@ -94,7 +94,7 @@ Since then the files have moved ahead of GitHub (2026-10-07, ADR-0064): the two 
 | Dependabot alerts and Dependabot security updates are off; secret scanning and push protection are on; private vulnerability reporting is on | `repository.json` |
 | Only `iso-v0` is protected: required checks `Kernel gate` and `Spec gate` (not strict), no review, `enforce_admins` off, force push and deletion off | `branch-protection.json` (now also `main`, section 7) |
 | No repository ruleset | `rulesets.json` |
-| Environment `signing`: reviewer `hr-mes`, branches `iso-v0` and `main`, admin bypass on, four secrets | `environments.json` until 2026-10-07 (now section 7) |
+| Environment `signing`: reviewer `hr-mes`, branches `iso-v0` and `main`, admin bypass on, five secrets | `environments.json` until 2026-10-07 (now section 7) |
 | Environment `github-pages`: branches `gh-pages` and `main`; no workflow deploys to it since the DNF channel was removed (ADR-0076, decision 2) | deleted by hand, absent from the export of 2026-10-09 |
 | Environment `delete`: no rule, no secret | deleted by hand, absent from the export of 2026-10-09 |
 | Pages: legacy build from `main:/docs`; `gh api repos/ars-regia/athanor/pages` reports `"status": "errored"` (status is volatile, not stored) | `pages.json`; off since 2026-10-09, when the file became `null` |
