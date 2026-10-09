@@ -1,8 +1,9 @@
 # qemu with KVM or TCG and SeaBIOS; OVMF with Secure Boot; the Microsoft-signed Fedora
 # shim; ukify and the systemd stub for the UKI, sbsign to sign it; virt-firmware to write
-# the MOK into the varstore; busybox (static) and bpftool for the test initramfs;
+# the MOK into the varstore; busybox (static), bpftool and keyutils (keyctl, for the keyring
+# assertions) for the test initramfs;
 # e2fsprogs for the ext4 rootfs of the guest kernel; realtime-tests (hackbench), fio and
 # netperf for the benchmark.
 qemu-system-x86-core edk2-ovmf shim-x64
 systemd-ukify systemd-boot-unsigned sbsigntools python3-virt-firmware
-busybox bpftool cpio zstd openssl e2fsprogs realtime-tests fio netperf
+busybox bpftool keyutils cpio zstd openssl e2fsprogs realtime-tests fio netperf

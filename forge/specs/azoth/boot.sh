@@ -59,7 +59,11 @@ K3_CERTS=''
 for cert in "$HERE"/keys/modules/*.pem "$HERE"/keys/revoked/*.pem; do
   K3_CERTS+="${K3_CERTS:+,}$(skid "$cert")"
 done
-TEST_CMDLINE="$CMDLINE console=ttyS0,115200 panic=-1 k3.uname=$KVER k3.certs=$K3_CERTS"
+# The builtin keyring holds exactly the certificates of keys/modules and the key the kernel
+# build generates for its own modules (measured on the 7.2 series: "Loading compiled-in X.509
+# certificates" loads the Fedora-generated signing key and the Athanor module signing key).
+K3_BUILTIN=$(( $(find "$HERE/keys/modules" -name '*.pem' | wc -l) + 1 ))
+TEST_CMDLINE="$CMDLINE console=ttyS0,115200 panic=-1 k3.uname=$KVER k3.certs=$K3_CERTS k3.builtin=$K3_BUILTIN"
 
 WORK=$(mktemp -d)
 mkdir -p "$OUT"
@@ -75,13 +79,18 @@ install -m 755 /usr/sbin/busybox "$R/bin/busybox"
 # Relative links: `busybox --install` would make them absolute towards $R, which does not
 # exist in the guest.
 for applet in $(/usr/sbin/busybox --list); do ln -s busybox "$R/bin/$applet"; done
-# bpftool with its libraries: the Fedora one drags libLLVM along (140 MB uncompressed,
-# 39 MB compressed), the price of `bpftool feature probe` done with the real tool.
-install -m 755 /usr/sbin/bpftool "$R/usr/sbin/bpftool"
-# All of them in /lib64, the default path of the loader: the guest has no ld.so.cache and
-# libLLVM lives in a directory that on the host is reachable only through ld.so.conf.d.
-ldd /usr/sbin/bpftool | awk '/=> \//{print $3} /^\s*\/lib64\/ld-linux/{print $1}' \
-  | while read -r lib; do install -D "$lib" "$R/lib64/${lib##*/}"; done
+# Binaries with their libraries, all in /lib64, the default path of the loader: the guest
+# has no ld.so.cache and libLLVM lives in a directory that on the host is reachable only
+# through ld.so.conf.d.
+install_binary() { # install_binary PATH: the binary and its libraries
+  install -D -m 755 "$1" "$R$1"
+  ldd "$1" | awk '/=> \//{print $3} /^\s*\/lib64\/ld-linux/{print $1}' \
+    | while read -r lib; do install -D "$lib" "$R/lib64/${lib##*/}"; done
+}
+# bpftool: the Fedora one drags libLLVM along (140 MB uncompressed, 39 MB compressed), the
+# price of `bpftool feature probe` done with the real tool. keyctl: the keyring assertions.
+install_binary /usr/sbin/bpftool
+install_binary /usr/bin/keyctl
 install -m 755 "$HERE/boot/init" "$R/init"
 # The modules under test, numbered: two branches share the same nvidia.ko. The k3.insmod
 # parameter lists file:errno and goes into the command line of every case.

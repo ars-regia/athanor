@@ -192,10 +192,28 @@ class PlatformAssertions(unittest.TestCase):
         prelude = self.cmdline("x=1") + f'\nmount() {{ return 19; }}\ndebugfs_dir="{self.dir}/debugfs"'
         self.assertEqual(run_function("debugfs_off", prelude).returncode, 0)
 
+    def keyring(self, count):
+        ids = " ".join(str(100 + i) for i in range(count))
+        return f'keyctl() {{ case $1 in rlist) echo "{ids}" ;; list) echo "{count} keys" ;; esac; }}'
+
+    def test_the_expected_number_of_builtin_keys_passes(self):
+        self.assertEqual(run_function("builtin_exact", self.keyring(2) + "\nbuiltin_expected=2").returncode, 0)
+
+    def test_an_extra_builtin_key_fails(self):
+        self.assertNotEqual(run_function("builtin_exact", self.keyring(3) + "\nbuiltin_expected=2").returncode, 0)
+
+    def test_a_missing_expectation_fails(self):
+        self.assertNotEqual(run_function("builtin_exact", self.keyring(2) + "\nbuiltin_expected=").returncode, 0)
+
+    def test_an_unreadable_keyring_fails(self):
+        prelude = "keyctl() { echo 'keyctl: Required key not available' >&2; return 1; }\nbuiltin_expected=0"
+        self.assertNotEqual(run_function("builtin_exact", prelude).returncode, 0)
+
     def test_init_runs_the_platform_checks(self):
         text = INIT.read_text()
         for needle in ("check preempt", "check aslr", "check iommu", "check mesh-platform",
-                       "check lockdown    lockdown_forced", "check init-on-free", "check vsyscall", "check debugfs"):
+                       "check lockdown    lockdown_forced", "check init-on-free", "check vsyscall", "check debugfs",
+                       "check builtin-set builtin_exact"):
             self.assertIn(needle, text)
 
 
