@@ -52,8 +52,14 @@ the acceptance key `acc-1`, and published to the acceptance registry under its o
 
 - `bad-greeter`: a drop-in that makes `greetd.service` run `/usr/bin/false` (the image of
   `doc_recovery.md` acceptance 7);
-- `panic`: `/usr/lib/bootc/kargs.d/90-s1-panic.toml` with `kargs = ["init=/usr/bin/false", "panic=10"]`,
-  so PID 1 exits, the kernel panics and reboots after ten seconds, on every try;
+- `panic`: `/usr/lib/bootc/kargs.d/90-s1-panic.toml` with `kargs = ["panic=10"]`, and a
+  unit `s1-panic.service` enabled in `sysinit.target` (`DefaultDependencies=no`,
+  `Before=sysinit.target`, `ExecStart=/bin/sh -c 'echo c > /proc/sysrq-trigger'`). It runs in
+  the real root after the switch from the initrd, so nothing in the initrd's handling of the
+  command line can skip it, and before greenboot, which never runs. A write of `c` to
+  `/proc/sysrq-trigger` by root crashes the kernel whatever `kernel.sysrq` says (that sysctl
+  gates the keyboard only), and `panic=10` reboots ten seconds later, so every try is spent
+  the same way;
 - `unsigned-kernel`: the deployment's `vmlinuz` with its Authenticode signature removed
   (`sbattach --remove`, in a build stage that has `sbsigntools`);
 - `etc-v2`: `v2` plus a `sysusers.d` user `s1img`, a new file `/etc/s1-new.conf`, and a
@@ -82,14 +88,16 @@ both greenboot units enabled by `80-athanor-recovery.preset`; `GREENBOOT_AUTO_RE
 D39 subjects the state `doc_kernel_profile.md` section 12 item 5 requires: "a rollback boots
 with the `/etc` state that the design chosen for D39 assigns to the previous version".
 
-**Run.** Three phases on the F45 guest, the same record taken at each point (`R`):
+**Run.** Three phases on the F45 guest, the same record taken at each point (`R`), kept
+whole: the AVC part of the record taken on `v1` in phase 1 is the baseline later records are
+compared with.
 
 ```
 R = { getent passwd s1a s1b s1img; sudo getent shadow s1a | cut -d: -f1,3;
       cat /etc/machine-id;
       nmcli -g NAME connection show;
       sudo semanage boolean -l -C; sudo semodule -l | grep s1;
-      getenforce; sudo ausearch -m AVC -ts boot 2>&1 | tail -n 3;
+      getenforce; sudo ausearch -m AVC -ts boot --format text;
       cat /etc/issue; ls /etc/s1-new.conf; sudo ostree admin config-diff | wc -l }
 ```
 
@@ -99,9 +107,11 @@ R = { getent passwd s1a s1b s1img; sudo getent shadow s1a | cut -d: -f1,3;
    Take `R`.
 2. Update to `etc-v2` through the update service (download, `Apply()`). Take `R`.
 3. On `etc-v2`: `useradd s1b`; `passwd s1a` (password P2); `nmcli connection add type dummy
-   ifname s1d1 con-name s1-after`; `semanage boolean -m --on virt_sandbox_use_all_caps`. Take
-   `R`. Then `GoBack()` (bootc rollback) and reboot. Take `R` on `v1`. Then roll forward with
-   `bootc rollback` and take `R` once more.
+   ifname s1d1 con-name s1-after`; `semanage boolean -m --on virt_sandbox_use_all_caps`;
+   `groupadd s1g`; `gpasswd -a s1a s1g`. Take `R`, with `getent group s1g` and
+   `sudo getent gshadow s1g`. Then `GoBack()` (bootc rollback) and reboot. Take `R` on `v1`,
+   read the rollback notice (`screenshot.sh`), and log in as `s1a` with P2. Then roll forward
+   with `bootc rollback` and take `R` once more.
 4. The same three phases across the major upgrade: from the Fedora 43 guest that `create.sh`
    installs, switch to the F45 `v1` image, then roll back to Fedora 43.
 
@@ -109,23 +119,33 @@ R = { getent passwd s1a s1b s1img; sudo getent shadow s1a | cut -d: -f1,3;
 
 - *User and group databases.* After phase 2, `s1a` and `s1img` both resolve; the merge keeps
   the local `/etc/issue` and adds `/etc/s1-new.conf` (the three-way merge). After the rollback,
-  the users, groups and passwords match the record of phase 1 exactly.
+  see the rule of phase 3 below.
 - *`machine-id`.* The same value in every record, across both Fedora releases.
 - *NetworkManager connections.* `s1-before` survives the update; after the rollback the list
   matches phase 1.
 - *SELinux policy store.* After the update, `getenforce` reads `Enforcing`, the local boolean
-  and module of phase 1 are present, and no AVC denial appears; after the rollback the policy
-  store loads with the phase 1 customisations and no relabel is required.
+  and module of phase 1 are present, and no AVC denial appears that the `v1` baseline does
+  not hold; after the rollback the policy store loads with the phase 1 customisations and no
+  relabel is required.
+
+**Phase 3 after the rollback** (rule decided by the maintainer on 2026-10-09, ADR pending; not
+yet specification text). On rollback, `passwd`, `shadow`, `group` and `gshadow` are carried
+forward from the current state; the rest of `/etc` reverts to the previous deployment's, and
+the rollback notice says so.
+
+- *Pass:* on `v1`, `s1b` and `s1g` resolve, `s1a` is a member of `s1g`, the `shadow` change
+  date of `s1a` is the phase 3 one and P2 logs in while P1 does not; `s1-after` and the second
+  boolean are absent and `/etc/issue` is `v1`'s; the notice states that the configuration
+  returned to the previous version except accounts and passwords. After the roll forward, the
+  four files again equal the state just before it.
+- *Fail:* any of those four files taken from the previous deployment (P1 working again,
+  `s1b` or `s1g` gone), any other `/etc` file carried forward, or a notice that does not say
+  so. With ostree's model, where the previous deployment keeps the `/etc` it had, today's
+  bootc is expected to fail this; that failure is the finding the report records.
 
 **Fail.** A subject that loses phase 1 state through the update, a `machine-id` that changes, an
-AVC denial or a non-enforcing boot, or an `/etc` that no longer matches either deployment.
-
-**Recorded, for the maintainer's judgement.** What phase 3 leaves behind after the rollback:
-with ostree's model, the previous deployment's `/etc` is the one it had, so `s1b`,
-`s1-after`, the second boolean and **password P2** are expected to be absent, and P1 is
-expected to work again. Section 12 does not say whether reviving a changed password, or losing
-a network added after an update, is the state D39 assigns to the previous version. The report
-states the observed result; closing D39's acceptance needs the maintainer's ruling on it.
+AVC denial absent from the `v1` baseline, a non-enforcing boot, or an `/etc` that no longer
+matches either deployment.
 
 **Answer.** Not run.
 
@@ -153,7 +173,7 @@ happens to a deployment that never reaches user space, where greenboot cannot ru
   using the counter.
 
 **Pass.** G1 as written in `doc_recovery.md` acceptance 7, 8 and 10. G0 and G3 are records.
-G2 has no pass criterion yet (see section 5, point 3).
+G2 as section 5 point 3 states it.
 **Fail.** G1: any reboot nobody asked for, no mark, a return to the bad digest, or a download
 of it.
 
@@ -229,8 +249,10 @@ signature copied from another repository. In addition: `bootc status --format js
 differently.
 
 **Recorded.** The release 1.0 chain verifies a key signature and refuses a build time older
-than the booted one (UT5, PL31); it has no expiry, which `doc_pipeline.md` PL42 leaves out on
-purpose, while D41 lists one. See section 5, point 2.
+than the booted one (UT5, PL31). D41 lists an expiry; `doc_pipeline.md` section 4.8, under
+PL31, leaves it out on purpose, because an expiry needs a key in a scheduled job. Decided by
+the maintainer on 2026-10-09, ADR pending: no expiry at 1.0; rollback protection comes from
+the signed build time (UT5), which the `older` stage checks.
 
 **Answer.** Not run.
 
@@ -305,7 +327,18 @@ Fedora 45 has boot counting yet, the condition A2-8 sets for release 1.1.
   from Nix. **No `qemu-system-x86_64`, `edk2-ovmf` or `virt-fw-vars`**: the booted image
   `43.20261008.253` predates #321 (ADR-0091), which ships QEMU and OVMF again. The runner
   service restarts every few seconds and exits with `qemu-system-x86_64: command not found`.
-  The dev VM disk `base.qcow2` dates from 2026-09-18.
+  The maintainer's dev VM state, `~/.local/share/athanor-devvm`, holds `base.qcow2` of
+  2026-09-18 and the development overlay `dev.qcow2`; S1 never touches it.
+- State directory. `create.sh`, `reset.sh` and `start.sh` take no state-directory option; the
+  location comes from `devvm.env`, documented in `scripts/devvm/README.md` as
+  `${XDG_DATA_HOME:-~/.local/share}/athanor-devvm`, and `create.sh` replaces `base.qcow2`
+  and `dev.qcow2` there. S1 therefore runs every dev VM script with
+  `XDG_DATA_HOME=/var/tmp/athanor-s1/xdg`, so its state is
+  `/var/tmp/athanor-s1/xdg/athanor-devvm`. `devvm.env` itself was not read in this session
+  (the local command gate blocks shell reads of `*.env` names), so section 5 lists the
+  confirmation as a prerequisite. `XDG_DATA_HOME` also moves rootless podman's storage, so the
+  image builds run without it. `forge/specs/azoth/boot.sh` writes only under its `--out`
+  directory and its own temporary work directory.
 
 ### Commands
 
@@ -319,7 +352,15 @@ gh api 'repos/ars-regia/athanor/actions/runs?status=in_progress' --jq .total_cou
 command -v qemu-system-x86_64 swtpm virt-fw-vars
 ```
 
-Build the Fedora 45 variant in a throwaway worktree (no commit, no push):
+Build the Fedora 45 variant in a throwaway worktree (no commit, no push), in containers
+only: `scripts/devvm/local-image.sh` builds the `athanor-update` RPM in the builder image
+(`athanor-builder`, as `call-dag-compile.yml` does), serves it through a tier 3 overlay on the
+acceptance registry, and builds the system image with `system/build-image.sh`, which resolves
+the kernel and tier digests itself. Nothing is installed on the host. Four jobs: the builder's
+`cargo` reads `CARGO_BUILD_JOBS` and `rpmbuild` reads `RPM_BUILD_NCPUS`, which a
+containers.conf override puts into every container (checked on 2026-10-09: a container started
+with the override prints `4 4` for the two variables; `taskset` on the host does not reach a
+rootless container, which still saw 16 CPUs).
 
 ```
 git -C /var/home/hr-mes/athanor worktree add --detach /var/tmp/athanor-wt/s1-build origin/iso-v0
@@ -327,8 +368,12 @@ W=/var/tmp/athanor-wt/s1-build
 sed -i -e 's|^FROM quay.io/fedora-ostree-desktops/base-atomic:43@sha256:[0-9a-f]* AS system$|FROM quay.io/fedora-ostree-desktops/base-atomic:45@sha256:2c4fec150532fe1f3c30645f532e63c1ff3280791828c31364aedbd616c8c842 AS system|' \
        -e 's|^ARG FEDORA_VERSION=43$|ARG FEDORA_VERSION=45|' "$W/system/Containerfile"
 git -C "$W" diff --numstat                    # 2 2 system/Containerfile
-(cd "$W" && system/kernel-artifacts.sh resolve && system/tier-digests.sh resolve)
-(cd "$W" && system/build-image.sh --gpu none --registry localhost:5000/s1 --tag f45)
+mkdir -p /var/tmp/athanor-s1
+printf '[containers]\nenv = ["CARGO_BUILD_JOBS=4", "RPM_BUILD_NCPUS=4"]\n' > /var/tmp/athanor-s1/jobs.conf
+export CONTAINERS_CONF_OVERRIDE=/var/tmp/athanor-s1/jobs.conf
+bash "$W/scripts/devvm/local-image.sh" athanor-update
+# -> RPMs in $W/.scratch/local-image/rpms, the image localhost:5000/acc/athanor-system:<tag>,
+#    with <tag> in $W/.scratch/local-image/tag
 ```
 
 If the tier 3 transaction fails on Fedora 45 (the tier repositories hold fc43 builds), the
@@ -339,14 +384,26 @@ the report.
 
 Acceptance images and test images:
 
+`images.sh` takes the `athanor-update` RPM from `ACC_RPM_DIR` (default `RPMS_OUT/` at the
+root) and the base from `ACC_BASE`; both come from the step above. Its keys and registry
+configuration go to `ACC_STATE`, kept out of the maintainer's state:
+
 ```
-bash forge/scripts/build_rolling_local.sh update
-ACC_BASE=localhost:5000/s1/athanor-system:f45 scripts/devvm/acceptance/images.sh
+ACC_BASE=localhost:5000/acc/athanor-system:$(cat "$W/.scratch/local-image/tag") \
+ACC_RPM_DIR=$W/.scratch/local-image/rpms ACC_STATE=/var/tmp/athanor-s1/acceptance \
+  bash "$W/scripts/devvm/acceptance/images.sh"
 # then bad-greeter, panic, unsigned-kernel and etc-v2 FROM localhost:5000/acc/athanor-system:v2,
 # pushed and signed with acc-1 as images.sh's build and sign functions do
 ```
 
-Install, path A (primary): `scripts/devvm/create.sh` from the newest published ISO, then
+Install, path A (primary), in S1's own state:
+
+```
+export XDG_DATA_HOME=/var/tmp/athanor-s1/xdg ACC_STATE=/var/tmp/athanor-s1/acceptance CPUS=4 MEMORY=8G
+bash "$W/scripts/devvm/create.sh"                  # newest published ISO, into S1's state only
+bash "$W/scripts/devvm/acceptance/run.sh" install  # switches the guest to the F45 v1
+```
+
 `run.sh install` switches the guest to the F45 `v1`. This also exercises the major upgrade of
 item 1 phase 4 and item 4. Path B (once, for item 6 S1-e): a fresh disk from the F45 image with
 `bootc install to-disk --via-loopback --filesystem btrfs` in a privileged root `podman run` of
@@ -357,7 +414,7 @@ QEMU command plus these differences (a `start.sh` option is left for the run, if
 show it is worth keeping):
 
 ```
-S=$HOME/.local/share/athanor-devvm; mkdir -p "$S/s1/tpm"
+S=/var/tmp/athanor-s1/xdg/athanor-devvm; mkdir -p "$S/s1/tpm"
 virt-fw-vars -i /usr/share/edk2/ovmf/OVMF_VARS.secboot.fd -o "$S/s1/vars.fd" \
   --add-mok "$(cat /proc/sys/kernel/random/uuid)" forge/specs/azoth/keys/secureboot/athanor-secureboot.pem
 swtpm socket --tpm2 --tpmstate "dir=$S/s1/tpm" --ctrl "type=unixio,path=$S/s1/swtpm.sock" --daemon
@@ -372,7 +429,8 @@ Path B omits `--add-mok`, so the first boot reaches MokManager (item 6, S1-e).
 
 ### Estimated time
 
-An estimate, not a measurement: about **2 hours of builds** (the F45 system image at 4 jobs,
+An estimate, not a measurement: about **2 hours of builds** (the F45 system image at 4 jobs
+through `CONTAINERS_CONF_OVERRIDE` above,
 `images.sh` about 20 minutes, the four test images) and about **4 hours of VM time** over two
 or three sittings: the `run.sh` acceptance about 90 minutes, item 1 about 40 minutes, item 2
 about 45 minutes (G2 alone 15), item 3 about 40 minutes, item 6 about 30 minutes, item 7's
@@ -380,11 +438,13 @@ composefs install about 20 minutes.
 
 ## 4. Constraints for the run
 
-- One VM at a time. The runner guest and the dev VM never run together: the runner service is
-  stopped for the length of a sitting, and `run.sh` refuses to start while a workflow run is
-  in progress.
-- At most 4 vCPU for the guest (`CPUS=4`), 8 GB of memory, and local builds at 4 jobs.
-- Never the runner VM: S1 uses only the dev VM state directory and its own `s1/` beside it.
+- One VM at a time. The runner guest and the S1 guest never run together: S1 starts only when
+  `pgrep -a qemu-system` prints nothing, and `run.sh` refuses to start while a workflow run is
+  in progress. How S1 and the runner share the host is the maintainer's call (section 5).
+- At most 4 vCPU for the guest (`CPUS=4`, `-smp 4`), 8 GB of memory, and builds at 4 jobs
+  (`CONTAINERS_CONF_OVERRIDE`, section 3).
+- Never the runner VM, and never the maintainer's dev VM state: S1 uses only
+  `/var/tmp/athanor-s1`.
 - `uptime` before every start: a load average above 4 waits.
 - Fixed inputs: the digests of section 1 for the whole run; a newer Fedora 45 compose is a new
   run, recorded as such.
@@ -396,18 +456,19 @@ composefs install about 20 minutes.
    `qemu-system-x86_64` or OVMF and the runner service fails at every start. An upgrade and
    reboot of the desktop into an image with #321 is the first step; `virt-fw-vars` then comes
    from Nix or the boot-matrix container.
-2. **D41 on bootc.** D41 asks for a manifest with an expiry signed with the integrity key;
-   `doc_pipeline.md` PL42 leaves expiry out and PL31's release attestation carries the build
-   time and class. Which artefact is the 1.0 manifest, and whether expiry is required, decides
-   what item 5 must pass.
+2. **S1 against the runner VM** (`2026-10-08-update-chain-order.md`, section 5, point 5).
+   Under "one VM at a time" S1 and the runner guest compete for the host; whether the runner is
+   stopped for a sitting, and when, is the maintainer's decision. Open.
 3. **Boot counting on 1.0.** D6, section 8 and `doc_recovery.md` R5 all rely on GRUB's boot
    counter with greenboot; A2-26 only turns off greenboot's own reboot. A kernel panic or hang
    in a new deployment never reaches greenboot, so the counter alone returns the machine: item 2
    G2 passes when, after the boots the user starts, GRUB selects the previous deployment once
    the tries are spent, with no step at the console. It fails if the panicking deployment stays
    the default.
-4. **D39's acceptance.** D39 is closed (B2-1) with these four checks; the state after a rollback
-   of changes made since the update (item 1, phase 3, among them a changed password that comes
-   back) needs the maintainer's judgement to close S1.
+4. **S1's own dev VM state.** The dev VM scripts have no state-directory option; S1 relies on
+   `devvm.env` deriving its state from `XDG_DATA_HOME`, as `scripts/devvm/README.md` documents.
+   Prerequisite before the first `create.sh`: confirm that line of `devvm.env` (this session's
+   gate kept it unread), or give the scripts a state-directory variable, so that `create.sh`
+   cannot replace the maintainer's `base.qcow2` and `dev.qcow2`.
 5. **Issue #124.** Its body still describes the bake-off and asks for D6 and D39 to be closed;
    both are closed. Update the body or let the A2-8 comment stand.
