@@ -34,8 +34,10 @@ class ChecksumTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             fake = pathlib.Path(tmp) / "fake"
             fake.mkdir()
-            (fake / "curl").write_text(FAKE_CURL)
-            (fake / "curl").chmod(0o755)
+            # python3 is faked too, so the pip steps before the download need no network.
+            for name, text in (("curl", FAKE_CURL), ("python3", FAKE_PYTHON)):
+                (fake / name).write_text(text)
+                (fake / name).chmod(0o755)
             out = pathlib.Path(tmp) / "tools"
             env = {**os.environ, "LC_ALL": "C", "PATH": f"{fake}:{os.environ['PATH']}"}
             run = subprocess.run(
