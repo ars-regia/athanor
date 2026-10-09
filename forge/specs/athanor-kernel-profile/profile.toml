@@ -40,6 +40,84 @@ CONFIG_RANDOMIZE_KSTACK_OFFSET_DEFAULT = { value = "y", decision = "section 6", 
 CONFIG_INIT_ON_ALLOC_DEFAULT_ON = { value = "y", decision = "section 6", locked = true }
 CONFIG_IMA_DEFAULT_HASH_SHA256 = { value = "y", decision = "section 6", locked = true }
 CONFIG_CPU_MITIGATIONS = { value = "y", decision = "section 6", locked = true }
+# Block P2 (section 5): the build profile, mirrored from the P2 block of kernel-local.
+CONFIG_SECURITY_LOCKDOWN_LSM = { value = "y", decision = "section 5", locked = true }
+CONFIG_SECURITY_LOCKDOWN_LSM_EARLY = { value = "y", decision = "section 5", locked = true }
+CONFIG_LOCK_DOWN_KERNEL_FORCE_INTEGRITY = { value = "y", decision = "section 5", locked = true }
+CONFIG_LOCK_DOWN_KERNEL_FORCE_NONE = { value = "n", decision = "section 5", locked = true }
+CONFIG_LOCK_DOWN_KERNEL_FORCE_CONFIDENTIALITY = { value = "n", decision = "section 5", locked = true }
+CONFIG_INIT_ON_FREE_DEFAULT_ON = { value = "y", decision = "section 5", locked = true }
+CONFIG_LEGACY_VSYSCALL_NONE = { value = "y", decision = "section 5", locked = true }
+CONFIG_LEGACY_VSYSCALL_XONLY = { value = "n", decision = "section 5", locked = true }
+CONFIG_DEBUG_FS_ALLOW_NONE = { value = "y", decision = "section 5", locked = true }
+CONFIG_DEBUG_FS_ALLOW_ALL = { value = "n", decision = "section 5", locked = true }
+CONFIG_PANIC_TIMEOUT = { value = "10", decision = "D19", locked = true }
+CONFIG_EFI_VARS_PSTORE = { value = "y", decision = "D19", locked = true }
+CONFIG_EFI_VARS_PSTORE_DEFAULT_DISABLE = { value = "n", decision = "D19", locked = true }
+CONFIG_KSTACK_ERASE = { value = "y", decision = "section 5", locked = true }
+CONFIG_PAGE_TABLE_CHECK = { value = "y", decision = "section 5", locked = true }
+CONFIG_PAGE_TABLE_CHECK_ENFORCED = { value = "y", decision = "section 5", locked = true }
+CONFIG_DEBUG_VIRTUAL = { value = "y", decision = "section 5", locked = true }
+CONFIG_DEBUG_SG = { value = "y", decision = "section 5", locked = true }
+CONFIG_DEBUG_NOTIFIERS = { value = "y", decision = "section 5", locked = true }
+CONFIG_ARCH_MMAP_RND_BITS = { value = "32", decision = "section 5", locked = true }
+CONFIG_ARCH_MMAP_RND_COMPAT_BITS = { value = "16", decision = "section 5", locked = true }
+CONFIG_PROC_MEM_FORCE_PTRACE = { value = "y", decision = "section 5", locked = true }
+CONFIG_PROC_MEM_ALWAYS_FORCE = { value = "n", decision = "section 5", locked = true }
+CONFIG_PROC_MEM_NO_FORCE = { value = "n", decision = "section 5", locked = true }
+CONFIG_SECONDARY_TRUSTED_KEYRING = { value = "y", decision = "D40", locked = true }
+CONFIG_SECONDARY_TRUSTED_KEYRING_SIGNED_BY_BUILTIN = { value = "y", decision = "D40", locked = true }
+CONFIG_UBSAN_TRAP = { value = "y", decision = "section 5", locked = true }
+CONFIG_PROC_KCORE = { value = "n", decision = "section 5", locked = true }
+CONFIG_BLK_DEV_WRITE_MOUNTED = { value = "n", decision = "section 5", locked = true }
+CONFIG_CHECKPOINT_RESTORE = { value = "n", decision = "section 5", locked = true }
+CONFIG_KCMP = { value = "y", decision = "section 5", locked = true }
+CONFIG_MSEAL_SYSTEM_MAPPINGS = { value = "y", decision = "section 5", locked = true }
+CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIG = { value = "y", decision = "D40", locked = true }
+CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIG_SECONDARY_KEYRING = { value = "n", decision = "D40", locked = true }
+CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIG_PLATFORM_KEYRING = { value = "n", decision = "D40", locked = true }
+CONFIG_IPE_POLICY_SIG_SECONDARY_KEYRING = { value = "n", decision = "D40", locked = true }
+CONFIG_IPE_POLICY_SIG_PLATFORM_KEYRING = { value = "n", decision = "D40", locked = true }
+CONFIG_IMA_KEYRINGS_PERMIT_SIGNED_BY_BUILTIN_OR_SECONDARY = { value = "n", decision = "D46", locked = true }
+CONFIG_INTEGRITY_MACHINE_KEYRING = { value = "y", decision = "D40", locked = true }
+CONFIG_INTEGRITY_CA_MACHINE_KEYRING = { value = "y", decision = "D40", locked = true }
+CONFIG_KEXEC = { value = "n", decision = "section 5", locked = true }
+CONFIG_KEXEC_FILE = { value = "n", decision = "section 5", locked = true }
+CONFIG_KEXEC_HANDOVER = { value = "n", decision = "section 5", locked = true }
+CONFIG_CRASH_DUMP = { value = "n", decision = "section 5", locked = true }
+CONFIG_LIVEPATCH = { value = "n", decision = "section 5", locked = true }
+CONFIG_HIBERNATION = { value = "n", decision = "section 5", locked = true }
+CONFIG_SECURITY_TOMOYO = { value = "n", decision = "section 5", locked = true }
+CONFIG_X86_IOPL_IOPERM = { value = "n", decision = "section 5", locked = true }
+CONFIG_LSM = { value = '"lockdown,yama,selinux,bpf,landlock,ipe"', decision = "section 5", locked = true }
+CONFIG_AUTOFDO_CLANG = { value = "y", decision = "section 5", locked = true }
+CONFIG_PREEMPT = { value = "n", decision = "D13", locked = true }
+CONFIG_SATA_AHCI = { value = "y", decision = "D17", locked = true }
+CONFIG_VIRTIO_BLK = { value = "y", decision = "D17", locked = true }
+CONFIG_USB_HID = { value = "y", decision = "D17", locked = true }
+CONFIG_SERIO_I8042 = { value = "y", decision = "D17", locked = true }
+CONFIG_PINCTRL_AMD = { value = "y", decision = "D17", locked = true }
+CONFIG_I2C_DESIGNWARE_CORE = { value = "y", decision = "D17", locked = true }
+CONFIG_I2C_DESIGNWARE_PLATFORM = { value = "y", decision = "D17", locked = true }
+CONFIG_ATA_PIIX = { value = "y", decision = "D17", locked = true }
+CONFIG_BLK_DEV_SD = { value = "y", decision = "D17", locked = true }
+CONFIG_VIRTIO_PCI = { value = "y", decision = "D17", locked = true }
+CONFIG_USB_XHCI_HCD = { value = "y", decision = "D17", locked = true }
+CONFIG_USB_XHCI_PCI = { value = "y", decision = "D17", locked = true }
+CONFIG_USB_EHCI_HCD = { value = "y", decision = "D17", locked = true }
+CONFIG_USB_EHCI_PCI = { value = "y", decision = "D17", locked = true }
+CONFIG_USB_OHCI_HCD = { value = "y", decision = "D17", locked = true }
+CONFIG_USB_OHCI_HCD_PCI = { value = "y", decision = "D17", locked = true }
+CONFIG_USB_UHCI_HCD = { value = "y", decision = "D17", locked = true }
+CONFIG_HID_GENERIC = { value = "y", decision = "D17", locked = true }
+CONFIG_KEYBOARD_ATKBD = { value = "y", decision = "D17", locked = true }
+CONFIG_MFD_INTEL_LPSS_PCI = { value = "y", decision = "D17", locked = true }
+CONFIG_MFD_INTEL_LPSS_ACPI = { value = "y", decision = "D17", locked = true }
+CONFIG_SERIAL_8250_DW = { value = "y", decision = "D17", locked = true }
+CONFIG_SERIAL_DEV_BUS = { value = "y", decision = "D17", locked = true }
+CONFIG_TCG_TIS = { value = "y", decision = "D17", locked = true }
+CONFIG_TCG_CRB = { value = "y", decision = "D17", locked = true }
+CONFIG_DRM_SIMPLEDRM = { value = "y", decision = "D17", locked = true }
 
 [base.sysctl]
 "kernel.kptr_restrict" = { value = "2", decision = "D47", locked = true }

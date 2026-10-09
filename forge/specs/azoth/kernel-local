@@ -82,3 +82,107 @@ CONFIG_IKCONFIG_PROC=y
 # available, is checked at boot (boot/init).
 CONFIG_SECURITY_LANDLOCK=y
 CONFIG_MEMCG=y
+
+# Kernel profile, block P2 (docs/architecture/doc_kernel_profile.md, section 5). Every option
+# between the markers is also a locked [base.kconfig] entry of
+# forge/specs/athanor-kernel-profile/profile.toml, so athanor-profile-check verifies it on the
+# machine; tests/test_kernel_profile.py keeps the two equal. Items marked P4b, P5 or P6 in
+# section 5 are not here.
+# BEGIN kernel profile P2
+# From the command line into the build (section 6 drops lockdown, init_on_free, vsyscall
+# and debugfs from [base.cmdline]). Forced lockdown is registered early and cannot be
+# lowered at boot. The 7.2 tree has no DEBUG_FS_DISALLOW_MOUNT: the debugfs choice is
+# ALLOW_ALL or ALLOW_NONE.
+CONFIG_SECURITY_LOCKDOWN_LSM=y
+CONFIG_SECURITY_LOCKDOWN_LSM_EARLY=y
+CONFIG_LOCK_DOWN_KERNEL_FORCE_INTEGRITY=y
+# CONFIG_LOCK_DOWN_KERNEL_FORCE_NONE is not set
+# CONFIG_LOCK_DOWN_KERNEL_FORCE_CONFIDENTIALITY is not set
+CONFIG_INIT_ON_FREE_DEFAULT_ON=y
+CONFIG_LEGACY_VSYSCALL_NONE=y
+# CONFIG_LEGACY_VSYSCALL_XONLY is not set
+CONFIG_DEBUG_FS_ALLOW_NONE=y
+# CONFIG_DEBUG_FS_ALLOW_ALL is not set
+# Reliability (D19, section 11): crash evidence through EFI pstore.
+CONFIG_PANIC_TIMEOUT=10
+CONFIG_EFI_VARS_PSTORE=y
+# CONFIG_EFI_VARS_PSTORE_DEFAULT_DISABLE is not set
+# New hardening.
+CONFIG_KSTACK_ERASE=y
+CONFIG_PAGE_TABLE_CHECK=y
+CONFIG_PAGE_TABLE_CHECK_ENFORCED=y
+CONFIG_DEBUG_VIRTUAL=y
+CONFIG_DEBUG_SG=y
+CONFIG_DEBUG_NOTIFIERS=y
+CONFIG_ARCH_MMAP_RND_BITS=32
+CONFIG_ARCH_MMAP_RND_COMPAT_BITS=16
+CONFIG_PROC_MEM_FORCE_PTRACE=y
+# CONFIG_PROC_MEM_ALWAYS_FORCE is not set
+# CONFIG_PROC_MEM_NO_FORCE is not set
+CONFIG_SECONDARY_TRUSTED_KEYRING=y
+CONFIG_SECONDARY_TRUSTED_KEYRING_SIGNED_BY_BUILTIN=y
+# Applied unless the boot matrix fails; withdrawn only through a recorded decision. MSEAL
+# needs CHECKPOINT_RESTORE off (no CRIU, gVisor, rr, UML); Mesa and systemd use kcmp().
+CONFIG_UBSAN_TRAP=y
+# CONFIG_PROC_KCORE is not set
+# CONFIG_BLK_DEV_WRITE_MOUNTED is not set
+# CONFIG_CHECKPOINT_RESTORE is not set
+CONFIG_KCMP=y
+CONFIG_MSEAL_SYSTEM_MAPPINGS=y
+# Keyrings (D40, D46): root hashes and IPE policies verify against the builtin keyring only;
+# the user path of D40 goes through the machine keyring.
+CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIG=y
+# CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIG_SECONDARY_KEYRING is not set
+# CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIG_PLATFORM_KEYRING is not set
+CONFIG_SECURITY_IPE=y
+# CONFIG_IPE_POLICY_SIG_SECONDARY_KEYRING is not set
+# CONFIG_IPE_POLICY_SIG_PLATFORM_KEYRING is not set
+# CONFIG_IMA_KEYRINGS_PERMIT_SIGNED_BY_BUILTIN_OR_SECONDARY is not set
+CONFIG_INTEGRITY_MACHINE_KEYRING=y
+CONFIG_INTEGRITY_CA_MACHINE_KEYRING=y
+CONFIG_INTEGRITY_CA_MACHINE_KEYRING_MAX=y
+# Attack surface removed (unused by every role).
+# CONFIG_KEXEC is not set
+# CONFIG_KEXEC_FILE is not set
+# CONFIG_KEXEC_HANDOVER is not set
+# CONFIG_CRASH_DUMP is not set
+# CONFIG_LIVEPATCH is not set
+# CONFIG_HIBERNATION is not set
+# CONFIG_SECURITY_TOMOYO is not set
+# CONFIG_X86_IOPL_IOPERM is not set
+CONFIG_LSM="lockdown,yama,selinux,bpf,landlock,ipe"
+# Codegen (D13): preemption lazy, dynamic; AutoFDO profiles arrive in P7.
+CONFIG_AUTOFDO_CLANG=y
+CONFIG_PREEMPT_DYNAMIC=y
+CONFIG_PREEMPT_LAZY=y
+# CONFIG_PREEMPT is not set
+# Built-in drivers of D17, kept on purpose; I2C_DESIGNWARE_CORE because the platform driver
+# needs it.
+CONFIG_SATA_AHCI=y
+CONFIG_VIRTIO_BLK=y
+CONFIG_USB_HID=y
+CONFIG_SERIO_I8042=y
+CONFIG_PINCTRL_AMD=y
+CONFIG_I2C_DESIGNWARE_CORE=y
+CONFIG_I2C_DESIGNWARE_PLATFORM=y
+CONFIG_ATA_PIIX=y
+CONFIG_BLK_DEV_SD=y
+CONFIG_VIRTIO_PCI=y
+CONFIG_USB_XHCI_HCD=y
+CONFIG_USB_XHCI_PCI=y
+CONFIG_USB_EHCI_HCD=y
+CONFIG_USB_EHCI_PCI=y
+CONFIG_USB_OHCI_HCD=y
+CONFIG_USB_OHCI_HCD_PCI=y
+CONFIG_USB_UHCI_HCD=y
+CONFIG_HID_GENERIC=y
+CONFIG_KEYBOARD_ATKBD=y
+CONFIG_MFD_INTEL_LPSS_PCI=y
+CONFIG_MFD_INTEL_LPSS_ACPI=y
+CONFIG_SERIAL_8250_DW=y
+CONFIG_SERIAL_DEV_BUS=y
+CONFIG_TCG_TIS=y
+CONFIG_TCG_CRB=y
+CONFIG_DRM_SIMPLEDRM=y
+CONFIG_BTRFS_FS=y
+# END kernel profile P2
