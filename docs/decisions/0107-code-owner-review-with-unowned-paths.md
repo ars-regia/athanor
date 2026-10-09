@@ -3,7 +3,7 @@ id: ADR-0107
 title: "Code-owner review with unowned low-risk paths"
 date: 2026-10-09
 status: accepted
-issues: []
+issues: [363]
 areas: [process, security]
 ---
 
@@ -40,7 +40,8 @@ Decided by the maintainer on 2026-10-09, as recommended.
    enforces this, not an agent's rule.
 3. **Two paths have no owner:** `/docs/superpowers/plans/` and `/docs/spikes/`. Implementation
    plans and spike plans change nothing at runtime, and each one argues from a specification
-   or record the maintainer has already approved. A pull request that touches only these paths
+   or record the maintainer has already approved. A plan steers the agents that execute it,
+   but it cannot widen what they may do: the code they write lands under owned paths. A pull request that touches only these paths
    merges once the auditor finds it clean and the required checks pass. Any decision a plan
    leaves open is still asked of the maintainer in conversation and recorded in a decision
    record, which stays owned.
@@ -66,15 +67,18 @@ Decided by the maintainer on 2026-10-09, as recommended.
   from Code Owners' stays off while there is one code owner". With 0 required approvals, the
   sole owner's review is the requirement itself, so the reason for keeping it off no longer
   holds.
+- This amends [ADR-0098](0098-update-delivery-ci-operations-batch-4.md) item 5 in its line
+  "CT6 (code-owner enforcement) stays conditional on a second owner": it takes effect now.
 - This amends [ADR-0103](0103-audit-5-decisions.md) D2 only in what the maintainer approves.
   Agents still open pull requests as the App, and the App still has no bypass.
 - `.github/CODEOWNERS` lists the two unowned paths, and `.github/settings/rulesets.json` records
   the new review parameters. The maintainer applies the ruleset with
   `scripts/github-settings/ghsettings.py`.
-- GitHub never requires a code owner's review of a pull request that the code owner authored.
+- GitHub does not require a code owner's review of a pull request that the code owner
+  authored: in the spike, pull requests opened by the maintainer's account were never blocked.
   With 0 required approvals, a pull request opened under the maintainer's account would merge
   with no review at all. The bump workflows open their pull requests with a token of the
-  maintainer's account. Their tokens move to the App before the ruleset is applied, so that no
+  maintainer's account. Their tokens move to the App before the ruleset is applied (issue #363), so that no
   pull request is authored by the code owner except by the maintainer's own hand.
 - The maintainer updates the merge rule in `CLAUDE.md`, which is their file, so that it
   describes merging an unowned-path pull request without an approval.

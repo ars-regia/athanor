@@ -283,8 +283,8 @@ reject force pushes and deletions, require a pull request, require the `gate` ch
 `pr.yml` and linear history. The rulesets live in `.github/settings/rulesets.json`, as two
 rulesets, because a bypass actor is exempt from every rule of the ruleset that names it: the
 integrity ruleset (merge queue, required `gate`, linear history, no force push, no deletion)
-has **no bypass actor**; the review ruleset (pull request, with a code-owner review once a
-second code owner exists, PL4) is the only one with a bypass actor, in the "for pull requests
+has **no bypass actor**; the review ruleset (pull request, with a code-owner review and no other
+approval, PL4, ADR-0107) is the only one with a bypass actor, in the "for pull requests
 only" mode. The bypass actor is the repository Admin role (`RepositoryRole` 5), which the
 maintainer alone holds today: a ruleset does not accept a single user as a bypass actor.
 Today `rulesets.json` (PR #264) holds one ruleset, `product-branches`, whose bypass therefore
@@ -303,10 +303,10 @@ job decides which jobs run, so a required check is never left pending
 (https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/troubleshooting-required-status-checks).
 
 **PL4. CODEOWNERS names existing owners and existing paths,** and `verify.py` checks both.
-Pull requests opened by an agent or a bot require the review of a code owner once a second
-code owner exists: until then "Require review from Code Owners" stays off
-([ADR-0062](../decisions/0062-governance-targets-confirmed.md), A2-25; PR #264 sets it in
-`.github/settings/`), and the merge queue and `gate` are the controls on those pull requests. The
+Pull requests opened by an agent or a bot require the review of a code owner, and no other
+approval, except on the paths `.github/CODEOWNERS` leaves without an owner
+([ADR-0107](../decisions/0107-code-owner-review-with-unowned-paths.md), amending ADR-0062;
+recorded in `.github/settings/`); the merge queue and `gate` are the controls on every pull request. The
 repository Admin role, held by the maintainer alone, is the bypass actor of the review ruleset
 only, in the "for pull requests only" mode, recorded in the settings file (PL1, PQ5): the maintainer's own pull requests merge without a second
 review and still pass the merge queue and `gate`. No one pushes directly to a product
@@ -1118,7 +1118,7 @@ The maintainer answered PQ13-PQ18, the questions of revision 3, on 2026-10-09
 | PQ2  | How is the ISO signed? | Keylessly, by the stage that builds it, `call-iso.yml` (PL32): the ISO is built after the images are signed, so signing it with the cosign key would need a second `signing-images` job and a third approval. A key-based signature for offline verification is reconsidered if users ask for it. |
 | PQ3  | Where do kernel builds of pull requests run? | Same-repository pull requests on the ephemeral self-hosted guest with a pull-request-only cache volume; forks never on self-hosted. |
 | PQ4  | Who signs the security class of a release? Today a security-class promotion goes through `promote.sh` in a signing environment (doc_update_delivery.md, decision 3), which can make three approvals in a cycle. | Set the class, with its advisory ids, when the release is signed, since the class is never taken from a dispatch input (PL55; ADR-0088, rationale updated by ADR-0104 item 11), and sign it in `signing-images` with the images; `promote.yml` then holds no key. |
-| PQ5  | Review on the maintainer's own pull requests | The repository Admin role, held by the maintainer alone, is the recorded bypass actor of the review ruleset only, in the "for pull requests only" mode; the integrity ruleset has none (PL1, PL4, ADR-0088). Agent and bot pull requests require a code-owner review once a second code owner exists, as ADR-0062 (A2-25) decided (PL4); agents push with their own App identity (PL5). `prevent_self_review` is switched on when a second human reviewer is listed in both signing environments (PL5). |
+| PQ5  | Review on the maintainer's own pull requests | The repository Admin role, held by the maintainer alone, is the recorded bypass actor of the review ruleset only, in the "for pull requests only" mode; the integrity ruleset has none (PL1, PL4, ADR-0088). Agent and bot pull requests require a code-owner review, except on the unowned paths of ADR-0107 (PL4); agents push with their own App identity (PL5). `prevent_self_review` is switched on when a second human reviewer is listed in both signing environments (PL5). |
 | PQ6  | Length of the postpone (ADR-0082) | One postpone per update, up to seven days, then the update applies at the next shutdown. |
 | PQ7  | What is the "product line" whose five years run, and from when? | Each major version (1.x), from the date 1.0 is placed on the market; `SUPPORT_END` set from it. |
 | PQ8  | The CVD contact besides GitHub private reporting | A project e-mail alias owned by the maintainer, named in `SECURITY.md` [LAWYER for the CSIRT]. |
@@ -1244,9 +1244,9 @@ already did differently, `iso-v0` wins:
 - PR #261 (PB7) shipped `SUPPORT_END=2031-12-31`, five years from 2026. The maintainer
   decided PQ7 on 2026-10-07: the five years run from 1.0, so `SUPPORT_END` leaves
   `os-release` until the 1.0 release sets it (section 5, PB7).
-- ADR-0062 (A2-25) keeps "Require review from Code Owners" off while there is one code owner:
-  the code-owner review of agent and bot pull requests applies once a second code owner
-  exists (PL1, PL4, PQ5).
+- ADR-0107 turns on "Require review from Code Owners" with no other approval, amending
+  ADR-0062 (A2-25): agent and bot pull requests need the code owner's review except on the
+  unowned paths (PL1, PL4, PQ5).
 - Self-review: section 2 names the amendments of ADR-0080 that ADR-0088 records; PL33 and the diagram
   name the key-signed release attestation of PL31, which PQ4 chose over a promotion
   attestation; the obsolete note on doc_ci.md's range leaves section 14.

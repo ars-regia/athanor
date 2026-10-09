@@ -2,7 +2,7 @@
 id: ADR-0098
 title: "Update delivery, CI and operations decisions (batch 4)"
 date: 2026-10-08
-status: amended by ADR-0103, ADR-0104
+status: amended by ADR-0103, ADR-0104, ADR-0107
 issues: []
 areas: [update, build, signing, process]
 ---
