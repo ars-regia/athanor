@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Merge a bot pull request whose change has exactly the shape the bot produces.
 
-Spec Build Check calls it with `spec` after a green build of the spec bot's pull request,
-System Image Check with `system` after a green build of a system bump. The script reads the
+bot-merge.yml calls it, from the default branch's workflow file, when Spec Build Check ends on the spec
+bot's pull request (`spec`) or System Image Check on a system bump (`system`); BUILD_RESULT is the
+conclusion of that run. The script reads the
 changed files from the GitHub API (status, path and patch of each), checks every changed line
 against the bot's shape, waits for the required checks of the branch protection and merges
 at HEAD_SHA, so a push after the check makes the merge fail instead of landing unchecked.
@@ -291,6 +292,8 @@ def wait_for_required_checks(sha, checks, gh, sleep=time.sleep, polls=160):
 
 
 def main(kind, pr, sha, build, gh=run_gh, merge=merge_gh):
+    if not pr.isdigit():
+        sys.exit(f"bot_merge: no pull request number ({pr!r}): the run is not on a pull request")
     try:
         if build != "success":
             raise Refused(f"build is {build}")

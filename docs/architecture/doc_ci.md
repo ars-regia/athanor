@@ -83,8 +83,8 @@ Two rulesets (`.github/settings/rulesets.json`, active) apply on top of the bran
 |---|---|---|---|---|
 | `gate` | CI27 | every PR and merge group (no path filter) | yes | `just check` (actionlint, Justfile syntax, every `verify.py` check with `scripts/ci/known-red.txt`, every Python test directory, `cargo test` over the root workspace in the rig's build stage through `just check-rust`); the kernel check (CI28), CI14 and CI15 when `scripts/ci/changes.py` selects them |
 | `Kernel gate` | CI8 | every PR (no path filter) | until CP4 | lint (CI2), kernel prep/build, boot matrix, NVIDIA module build |
-| System Image Check | CI13 | the image inputs change | no | the three images build as in the pipeline, without a key; package delta; merges `bump/system-*` PRs |
-| `Spec gate` | CI14 | every PR (no path filter) | until CP4 | changed specs build as the DAG builds them; a change that selects none passes; merges the spec bot's PR |
+| System Image Check | CI13 | the image inputs change | no | the three images build as in the pipeline, without a key; package delta |
+| `Spec gate` | CI14 | every PR (no path filter) | until CP4 | changed specs build as the DAG builds them; a change that selects none passes |
 | Rust Security & FFI Audit | CI22 | every PR to `iso-v0` | no | clippy, cargo-deny advisories (`deny.toml`) over the root lockfile; licences, bans and sources run in CI27 (`just check-deny`) |
 | Nix Vanguard | CI24 | only PRs based on `main` | no | see section 3 |
 | Shell surfaces | CI15 | through CI27 when `changes.json` selects `shell`: a crate the rig draws, `forge/test/shell/**`, `Cargo.toml`, `Cargo.lock` or `.cargo/` changes | through `gate` | rig tests of the greeter, layout, compositor client, shelld, bar, dock, launcher; also CI2 |
@@ -203,18 +203,18 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 
 ### CI13 System Image Check
 
-- **File:** `system-image-check.yml`. **Purpose:** PR build of the system images as the pipeline builds them (no key reaches a build), without pushing, plus the package delta against the published image; merges the bot's `bump/system-*` PRs (O7).
-- **Triggers:** `pull_request` on the image inputs (`system/Containerfile`, `system/nvidia/**`, `system/scripts/**`, `system/keys/**`, `forge/config/packages.json`, ...). **Output:** artifact `kernel-artifacts`; a merge.
-- **Secrets, variables:** `GITHUB_TOKEN`, `BOT_APP_PRIVATE_KEY`, `BOT_APP_ID` (job `merge` only: a merge made with an App token triggers the push workflows), `KERNEL_REGISTRY`. **Environment:** `bots` (job `merge`). **Runner:** hosted. **Concurrency:** `system-image-check-<PR>`, cancels in progress.
-- **Scripts:** `system/kernel-artifacts.sh`, `build-image.sh`, `rechunk-image.sh`, `package-delta.sh`, `nvidia/gate.sh`, `forge/specs/azoth/nvr.sh`, `forge/scripts/bot_merge.py`, `retry.sh`.
+- **File:** `system-image-check.yml`. **Purpose:** PR build of the system images as the pipeline builds them (no key reaches a build), without pushing, plus the package delta against the published image (O7). CI32 merges the bot's `bump/system-*` PRs once it ends.
+- **Triggers:** `pull_request` on the image inputs (`system/Containerfile`, `system/nvidia/**`, `system/scripts/**`, `system/keys/**`, `forge/config/packages.json`, ...). **Output:** artifact `kernel-artifacts`.
+- **Secrets, variables:** `GITHUB_TOKEN`, `KERNEL_REGISTRY`. **Environment:** none. **Runner:** hosted. **Concurrency:** `system-image-check-<PR>`, cancels in progress.
+- **Scripts:** `system/kernel-artifacts.sh`, `build-image.sh`, `rechunk-image.sh`, `package-delta.sh`, `nvidia/gate.sh`, `forge/specs/azoth/nvr.sh`, `retry.sh`.
 - **Health:** `gh run list --workflow system-image-check.yml --branch iso-v0 --limit 5`.
 
 ### CI14 Spec Build Check
 
-- **File:** `spec-build-check.yml`. **Purpose:** PR build of changed forge specs in the builder image; merges the spec bot's PR when every bump keeps its major version.
-- **Triggers:** every `pull_request` (until CP4 removes the trigger); `workflow_call` from CI27 job `specs` with `from_pr_gate: true`, which builds and judges but leaves the bot merge to the direct run; `select_check_specs.py` picks the changed specs (not `azoth`), or all of them when `forge/config/rpmmacros`, the builder or the build scripts change. **Required check:** `Spec gate` until CP4. **Output:** a merge.
-- **Secrets, variables:** `BOT_APP_PRIVATE_KEY`, `BOT_APP_ID` (job `merge` only, as CI13), `REGISTRY_HOST`. **Environment:** `bots` (job `merge`). **Runner:** hosted. **Concurrency:** `spec-build-check-<workflow>-<PR or ref>`, cancels in progress; the workflow name keeps the direct run and the call of CI27 apart.
-- **Scripts:** `forge/scripts/build_changed_specs.sh`, `build_spec.sh`, `run_spec_build.sh`, `fetch_sources.sh`, `retry.sh`, `bot_merge.py`.
+- **File:** `spec-build-check.yml`. **Purpose:** PR build of changed forge specs in the builder image. CI32 merges the spec bot's PR once it ends, when every bump keeps its major version.
+- **Triggers:** every `pull_request` (until CP4 removes the trigger); `workflow_call` from CI27 job `specs` (part of the run of CI27, not a run of its own, so CI32 does not follow it); `select_check_specs.py` picks the changed specs (not `azoth`), or all of them when `forge/config/rpmmacros`, the builder or the build scripts change. **Required check:** `Spec gate` until CP4.
+- **Secrets, variables:** `REGISTRY_HOST`. **Environment:** none. **Runner:** hosted. **Concurrency:** `spec-build-check-<workflow>-<PR or ref>`, cancels in progress; the workflow name keeps the direct run and the call of CI27 apart.
+- **Scripts:** `forge/scripts/build_changed_specs.sh`, `build_spec.sh`, `run_spec_build.sh`, `fetch_sources.sh`, `retry.sh`.
 - **Health:** `gh run list --workflow spec-build-check.yml --branch iso-v0 --limit 5`.
 
 ### CI15 Shell surfaces
@@ -352,6 +352,14 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 - **Layout:** `fuzz/` is a cargo-fuzz project with its own workspace and lock file, excluded from the root workspace so that the gate needs no nightly. Its targets call `system/athanor-fuzz-entries`, a root-workspace crate on stable; its test `replay` feeds `fuzz/corpus/<target>/` through the same entry points, so `cargo test --workspace` in CI27 replays the corpus. A crash found here is committed to the corpus with its fix and stays a regression test.
 - **Health:** `gh run list --workflow fuzz.yml --branch iso-v0 --limit 5`.
 
+### CI32 Bot Merge
+
+- **File:** `bot-merge.yml`. **Purpose:** merges the spec bot's pull request (branch `chore/update-specs-zero-trust`, from CI20) when CI14 ends on it, and the system bump bot's (branch `bump/system-*`, from CI9) when CI13 ends on it, at the head the run checked and once the required checks pass. A pull request of another shape or a run that is not green is left for a person (`forge/scripts/bot_merge.py`).
+- **Triggers:** `workflow_run` `completed` of `Spec Build Check` and `System Image Check`, for `pull_request` runs of a branch of this repository only. The pull request is `workflow_run.pull_requests[0]`, the head `workflow_run.head_sha`; a run with no pull request fails the job. A `workflow_run` workflow runs the default branch's file, so the key of the `bots` environment is reachable only from a workflow file on `iso-v0` or `main`, never from one a pull request edits. **Outputs:** the merge, a summary.
+- **Secrets, variables:** `BOT_APP_PRIVATE_KEY`, `BOT_APP_ID` (a merge made with an App token triggers the push workflows), `GITHUB_TOKEN` (read-only: the pull request, the runs). **Environment:** `bots`. **Runner:** hosted. **Concurrency:** none; the job waits up to 90 minutes for the required checks.
+- **Scripts:** `forge/scripts/bot_merge.py`.
+- **Health:** `gh run list --workflow bot-merge.yml --branch iso-v0 --limit 5`.
+
 ## 3. Known broken workflows
 
 | Id | Workflow | Cause | Evidence |
@@ -381,11 +389,11 @@ Every name below is described in the secrets inventory, `docs/operations/secrets
 
 | Name | Kind | Defined in | Used by |
 |---|---|---|---|
-| `GITHUB_TOKEN` | automatic token | GitHub | CI1, CI3-CI9, CI10-CI13, CI20, CI25, CI26, CI30 |
+| `GITHUB_TOKEN` | automatic token | GitHub | CI1, CI3-CI9, CI10-CI13, CI20, CI25, CI26, CI30, CI32 |
 | `KERNEL_BUMP_TOKEN` | secret (PAT), retired 2026-10-09 and replaced by `BOT_APP_PRIVATE_KEY`; the rename to `BOT_PR_TOKEN` of [ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md) is void | repository | none |
 | `SPECS_UPDATE_TOKEN` | secret (PAT), retired 2026-10-09 and replaced by `BOT_APP_PRIVATE_KEY` | repository | none |
-| `BOT_APP_PRIVATE_KEY` | secret (private key of the bots GitHub App) | environment `bots` | CI9, CI13, CI14, CI17, CI19, CI20, CI30 |
-| `BOT_APP_ID` | variable, no default | environment `bots` | CI9, CI13, CI14, CI17, CI19, CI20, CI30 |
+| `BOT_APP_PRIVATE_KEY` | secret (private key of the bots GitHub App) | environment `bots` | CI9, CI17, CI19, CI20, CI30, CI32 |
+| `BOT_APP_ID` | variable, no default | environment `bots` | CI9, CI17, CI19, CI20, CI30, CI32 |
 | `FORGE_PAT` | secret (PAT, delete:packages) | repository | CI21 |
 | `SECUREBOOT_SIGNING_KEY` | secret | environments `signing-kernel` and `signing` | CI1 |
 | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | secret | environments `signing-images` and `signing` | CI1 |

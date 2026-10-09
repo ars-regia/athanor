@@ -253,6 +253,11 @@ class BotMergeTest(unittest.TestCase):
         self.assertEqual(self.spec(state="CLOSED"), [])
         self.assertEqual(self.spec(build="failure"), [])
 
+    def test_missing_pull_request_number_fails(self):
+        for pr in ("", "null"):
+            with self.assertRaises(SystemExit):
+                bot.main("spec", pr, SHA, "success")
+
     def test_system_digest_bump_merges(self):
         self.assertNotEqual(self.system(), [])
 

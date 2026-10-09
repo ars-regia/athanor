@@ -9,7 +9,7 @@ name: Spec Build Check
 # a one-day workflow artifact, never pushed); any other in the published athanor-builder:latest.
 # Each spec builds in its own job with forge/scripts/run_spec_build.sh, the script of
 # call-dag-compile.yml (fetch with network, build without). On a green build of the spec bot's
-# pull request, forge/scripts/bot_merge.py merges it when every bump keeps its leading non-zero version component (semver-compatible).
+# pull request, bot-merge.yml runs forge/scripts/bot_merge.py, which merges it when every bump keeps its leading non-zero version component (semver-compatible).
 # The kernel (forge/specs/azoth) is Kernel Build's.
 #
 # The workflow runs on every pull request, without a path filter, so that its gate job
@@ -22,14 +22,9 @@ on:
   pull_request:
   # pr.yml calls this workflow as its `specs` job when changes.json selects the specs. Until
   # this pull_request trigger is removed, together with "Spec gate" in branch-protection.json
-  # (docs/operations/github-settings.md section 8), both run, and only the direct run merges
-  # the spec bot's pull requests.
+  # (docs/operations/github-settings.md section 8), both run. A call is part of the run of
+  # pr.yml, not a run of its own, so bot-merge.yml follows the direct run only.
   workflow_call:
-    inputs:
-      from_pr_gate:
-        description: "Set by pr.yml: the call builds and judges, and leaves the bot merge to the direct run."
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -140,46 +135,6 @@ jobs:
           [[ $(result builder) == success || $(result builder) == skipped ]]
           [[ $(result build) == success || $(result build) == skipped ]]
 
-  merge:
-    needs: gate
-    # The spec bot's pull requests only, whatever the build's outcome: forge/scripts/bot_merge.py
-    # merges a green one of the bot's shape at its head once the required checks pass, and
-    # reports why it leaves any other. The script is the base branch's copy; the workflow
-    # file, as for any same-repository pull_request, is the pull request's own, and forks get
-    # no secrets.
-    if: ${{ always() && !inputs.from_pr_gate && github.head_ref == 'chore/update-specs-zero-trust' && github.event.pull_request.head.repo.full_name == github.repository }}
-    runs-on: ubuntu-24.04
-    # The job's own token reads the pull request and the Kernel Build runs; the App token only merges.
-    environment: bots
-    permissions:
-      actions: read
-      contents: read
-      pull-requests: read
-    # It waits for the checks .github/settings/branch-protection.json requires before merging.
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ github.base_ref }}
-
-      # A bots App installation token, not the GITHUB_TOKEN: a merge made with the
-      # GITHUB_TOKEN triggers no push workflow, and the Orchestrator must publish what merged.
-      - id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          app-id: ${{ vars.BOT_APP_ID }}
-          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-contents: write
-          permission-pull-requests: write
-
-      - name: Merge a green spec update of the bot's shape (forge/scripts/bot_merge.py)
-        env:
-          GH_TOKEN: ${{ github.token }}
-          MERGE_TOKEN: ${{ steps.app-token.outputs.token }}
-          PR: ${{ github.event.pull_request.number }}
-          SHA: ${{ github.event.pull_request.head.sha }}
-          # The gate's result: a change that selects no spec builds nothing and passes.
-          BUILD: ${{ needs.gate.result }}
-        run: python3 forge/scripts/bot_merge.py spec "$PR" "$SHA" "$BUILD"
+  # The bot merge is not a job here: bot-merge.yml runs after this workflow, from the
+  # default branch's file, because the key of the `bots` environment must never be reachable
+  # from a workflow file a pull request edits.
