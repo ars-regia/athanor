@@ -27,7 +27,9 @@ ruleset of 0 required approvals and code-owner review on, and a `CODEOWNERS` fil
 plus one path with no owner:
 
 - a pull request touching only the unowned path merged with no review;
-- a pull request touching an owned path was blocked, and review was requested from the owner.
+- a pull request touching an owned path was blocked, and review was requested from the owner;
+- a pull request opened by the owner's own account was never blocked, so the test pull
+  requests had to come from another identity (a workflow's `github-actions[bot]`).
 
 ## Decision
 
