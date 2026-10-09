@@ -129,7 +129,7 @@ jobs:
       - name: Build the kernel builder image
         env:
           BUILDAH_ISOLATION: chroot
-        run: podman build -t localhost/azoth-builder -f forge/specs/azoth/builder/Containerfile forge/specs/azoth
+        run: bash scripts/ci/build-builder.sh
 
       - name: Manifests for the new pins
         run: |

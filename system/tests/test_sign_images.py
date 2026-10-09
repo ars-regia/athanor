@@ -150,6 +150,7 @@ class SignImages(unittest.TestCase):
             "STUB_STATE": str(self.state),
             "RETRY_ATTEMPTS": "1",
             "TAG_READBACK_DELAY": "0",
+            "GITHUB_REF": "refs/heads/iso-v0",
             "SIGN_KEYS_DIR": str(self.dir / "keys"),
             "VERIFY_KEYS_DIR": str(self.dir / "keys"),
             "XDG_RUNTIME_DIR": str(self.dir / "runtime"),
@@ -421,6 +422,17 @@ class SignImages(unittest.TestCase):
             recorded,
         )
         self.assertEqual(r.stdout.count(":latest -> sha256:"), 3)
+
+    def test_latest_moves_only_from_a_trusted_ref(self):
+        self.digests()
+        before = self.calls()
+        for ref in ("refs/heads/feature/x", "refs/heads/iso-v0-x", "refs/tags/iso-v0", ""):
+            with self.subTest(ref=ref):
+                r = self.tag(GITHUB_REF=ref)
+                self.assertEqual(r.returncode, 1)
+                self.assertIn("not a trusted ref", r.stderr)
+                self.assertEqual(self.calls(), before)
+        self.assertEqual(self.tag(GITHUB_REF="refs/heads/main").returncode, 0)
 
     def test_a_tag_that_does_not_read_back_fails(self):
         self.digests()

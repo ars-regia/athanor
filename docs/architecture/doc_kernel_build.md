@@ -426,6 +426,26 @@ kernel-core dell'immagine pubblicata: un push che tocca solo test, retention o
 workflow costa i minuti della matrice, non l'ora di build. Un bump dei pin
 ricompila. La prova del riuso è una firma verificata, non un tag.
 
+**Promotion (ADR-0110, approved by the maintainer on 2026-10-09).** It takes effect once the
+single pull request build (#368) and the trusted builder build (#373) are merged; until then
+the push builds. When the inputs change,
+the push to `iso-v0` publishes the RPMs built by the merged pull request's `pull_request` run
+(`pr.yml` through `call-kernel.yml`) instead of building them again, only when all four
+conditions hold, and builds otherwise: (1) the run is this repository's `pull_request` run that
+builds the kernel, its `kernel / build` job and kernel verdict are green, and it is found through
+the API by the pull request's head commit; (2) the tree of `forge/specs/azoth` and the blobs of
+`pr.yml` and `call-kernel.yml` are equal at the run's `head_sha` and at the pushed commit, and
+likewise at the base commit recorded when the run started, with values taken from GitHub's
+metadata and the pushed checkout, never from the run's outputs or artifacts; (3)
+`build-inputs.py` at the pushed commit equals the run's, and `out/nvr` equals the NVR of the
+pins; (4) the artifact is fetched by id and its SHA-256 digest equals the one the API reports.
+`boot` and `kmod` still run on the promoted RPMs; `publish` signs with the `iso-v0` identity and
+the predicate names the source run, its merge commit, the compared tree hashes and the artifact
+digest. The weekly `repro` job stays the independent audit of promoted builds. Actions artifacts
+last 90 days, the maximum allowed; when the artifact is missing or expired, the push builds. With
+#368, the kernel verdict on `iso-v0` comes from `gate` of `pr.yml` and `Kernel gate` is no longer
+required there; `main` keeps it.
+
 ## 8. Auto-manutenzione: il bot di bump
 
 Workflow `kernel-bump.yml`: il gruppo kernel ogni lunedì, il gruppo system ogni giorno
