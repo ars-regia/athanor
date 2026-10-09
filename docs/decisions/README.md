@@ -168,3 +168,4 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0098 | 0098 | [Update delivery, CI and operations decisions (batch 4)](0098-update-delivery-ci-operations-batch-4.md) | accepted | update, build, signing, process |
 | ADR-0099 | 0099 | [Desktop specs review (batch 4): accessibility, overview, visual language](0099-desktop-specs-batch-4.md) | accepted | shell, session, security, desktop |
 | ADR-0100 | 0100 | [Notification center revision 2: battery notices in the session daemon](0100-notification-center-rev2.md) | accepted | shell, session, desktop |
+| ADR-0101 | 0101 | [One backup mechanism: athanor-backup, without athanor-timewarp](0101-backup-one-mechanism.md) | accepted | software, backup |
