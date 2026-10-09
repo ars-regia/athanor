@@ -1,59 +1,50 @@
-name: ISO Acceptance
+name: Acceptance
 
-# Installs a published Athanor ISO in a virtual machine, restarts into what was
+# Installs the ISO of one build run in a virtual machine, restarts into what was
 # installed, logs in at the greeter that came up, and reports whether a desktop session
 # followed. It answers the one question the build cannot: not whether an ISO was
 # produced, but whether it installs a system that starts and can be logged into.
 #
-# It is deliberately not part of every orchestrator run: the build already takes half an
-# hour and this adds a full install on top of it, so it runs weekly and on request. The
-# run itself is short. On a runner with KVM the install takes about eight minutes and the
-# job about twelve, because the console ends the run as soon as it has an answer rather
-# than waiting out a clock. What it produces is meant to be looked at: the console log,
-# the verdict, and a screenshot every thirty seconds of both the installer and the first
-# boot, published as an artifact. The assertion says the session started; the pictures say
-# whether it started looking the way it should, and that judgement is a person's.
+# It is dispatched with the id of the build run whose ISO it tests, by hand or by
+# release.yml (PB13), and writes the iso-acceptance evidence of UD4 for that run's
+# athanor-system digest, on a pass and on a fail. The run itself is short. On a runner
+# with KVM the install takes about eight minutes and the job about twelve, because the
+# console ends the run as soon as it has an answer rather than waiting out a clock. What
+# it produces is meant to be looked at: the console log, the verdict, and a screenshot
+# every thirty seconds of both the installer and the first boot, published as an
+# artifact. The assertion says the session started; the pictures say whether it started
+# looking the way it should, and that judgement is a person's.
 #
 # The published ISO is used exactly as it ships, with its attended installer intact. The
 # answers a person would give are handed to it on a second disk (forge/test/iso), so
 # nothing inside the artifact under test is rewritten.
 
 on:
-  schedule:
-    - cron: "17 3 * * 1"
   workflow_dispatch:
     inputs:
-      iso_tag:
-        description: "tag of athanor-iso to install: a run id, `latest`, or `newest` to resolve the most recent published one"
+      run_id:
+        description: "Run id of the build run whose ISO is accepted"
+        required: true
         type: string
-        default: newest
-  push:
-    branches: [main, iso-v0]
-    paths:
-      - .github/workflows/iso-acceptance.yml
-      - forge/test/iso/**
 
 concurrency:
-  group: iso-acceptance-${{ github.ref }}
+  group: accept-${{ inputs.run_id }}
   cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  lint:
-    uses: ./.github/workflows/call-lint.yml
-
   install:
-    needs: [lint]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       contents: read
       packages: read
+      actions: read
     env:
-      ISO_IMAGE: ghcr.io/${{ github.repository_owner }}/athanor-iso
-      ISO_TAG: ${{ inputs.iso_tag || 'newest' }}
+      REGISTRY: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}
+      BUILD_RUN_ID: ${{ inputs.run_id }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -75,35 +66,24 @@ jobs:
           sudo apt-get install --no-install-recommends -y \
             qemu-system-x86 qemu-utils ovmf e2fsprogs
 
-      - name: 💽 Fetch the published ISO
+      - name: 🔑 Log in to the registry
+        # Before the resolve step: skopeo reads podman's auth file, and a private package
+        # answers 401 without it, which would be recorded as a fail verdict.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "${GITHUB_TOKEN}" | podman login "${REGISTRY%%/*}" -u "${{ github.actor }}" --password-stdin
+
+      - name: 🎯 Resolve the run
+        run: bash system/accept-target.sh "${BUILD_RUN_ID}" target
+
+      - name: 💽 Fetch the ISO
         run: |
           set -euo pipefail
-          echo "${GITHUB_TOKEN}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
-
-          # `latest` is published only from main, so on a working branch it names nothing
-          # and the pull fails with "manifest unknown". `newest` asks the registry for
-          # the most recently published tag instead, which is what someone running this
-          # on a branch means by "test the ISO we just built".
-          #
-          # The tags are the run id that produced each ISO, so the highest is the most
-          # recent. The package API lives under users/ for an account and orgs/ for an
-          # organisation, and each answers 404 for the other.
-          if [[ $ISO_TAG == newest ]]; then
-            case $(gh api "users/${GITHUB_REPOSITORY_OWNER}" --jq .type) in
-              User) root=users ;; Organization) root=orgs ;; *) echo "unknown owner type" >&2; exit 1 ;;
-            esac
-            ISO_TAG=$(gh api "${root}/${GITHUB_REPOSITORY_OWNER}/packages/container/athanor-iso/versions" \
-              --jq 'map(.metadata.container.tags[]) | map(select(test("^[0-9]+$"))) | max')
-            [[ -n $ISO_TAG && $ISO_TAG != null ]] || { echo "no published athanor-iso tag to test" >&2; exit 1; }
-            echo "resolved newest published ISO: ${ISO_TAG}"
-          fi
 
           # The ISO ships inside a scratch image with one file in it, so a container of
           # that image is the only thing to unpack.
-          podman pull "${ISO_IMAGE}:${ISO_TAG}"
-          ctr=$(podman create "${ISO_IMAGE}:${ISO_TAG}" /bin/true)
+          podman pull "$(<target/iso-ref)"
+          ctr=$(podman create "$(<target/iso-ref)" /bin/true)
           mkdir -p iso
           podman cp "${ctr}:/." iso/
           podman rm "$ctr" > /dev/null
@@ -132,10 +112,27 @@ jobs:
         if: always() && hashFiles('iso-test/verdict.md') != ''
         run: cat ./iso-test/verdict.md >> "${GITHUB_STEP_SUMMARY}"
 
-      - uses: actions/upload-artifact@v4
+      - name: 🧾 Write the iso-acceptance evidence (UD4)
+        # Pass and fail both leave evidence: promote.sh refuses a fail, and a missing file
+        # would say nothing about why. Skipped only when the run never resolved a digest.
+        if: always() && hashFiles('target/default-digest') != ''
+        run: >-
+          python3 -B scripts/ci/evidence.py write --gate iso-acceptance --image athanor-system
+          --digest "$(<target/default-digest)" --run-id "${BUILD_RUN_ID}" --verdict-json iso-test/verdict.json
+          --run-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --out evidence
+
+      - name: 📎 Hand the evidence to the promotion
+        if: always() && hashFiles('evidence/*.json') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: evidence-${{ inputs.run_id }}-iso-acceptance
+          path: evidence/
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
-          name: iso-acceptance-${{ github.run_id }}
+          name: acceptance-${{ inputs.run_id }}-${{ github.run_id }}
           path: |
             iso-test/*.png
             iso-test/serial.log

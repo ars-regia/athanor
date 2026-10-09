@@ -322,12 +322,31 @@ jobs:
           LABEL org.opencontainers.image.version="${RUN_ID}"
           COPY $(basename "$iso") /athanor-${RUN_ID}.iso
           CONTAINERFILE
-          bash forge/scripts/retry.sh podman push "${image}:${RUN_ID}"
+          bash forge/scripts/retry.sh podman push --digestfile artifacts/iso-image.digest "${image}:${RUN_ID}"
+          # Name the ISO by digest and bind it to the system image it installs, so accept.yml
+          # takes nothing from a tag. build_iso.sh pulled that image by tag into root storage,
+          # where the builder read it: its digest there must be the one image-digests.txt
+          # recorded after the push, or the tag moved in between and the step fails.
+          system_digest=$(sudo podman image inspect --format '{{.Digest}}' "${IMAGE_REGISTRY}/athanor-system:${RUN_ID}")
+          recorded=$(awk -v repo="${IMAGE_REGISTRY}/athanor-system" '$1 == repo { print $3 }' artifacts/image-digests.txt)
+          [[ $system_digest == "$recorded" ]] || {
+            echo "the local athanor-system digest '${system_digest}' is not the pushed one '${recorded}'" >&2
+            exit 1
+          }
+          printf '%s %s\n%s %s\n' "${image}" "$(<artifacts/iso-image.digest)" \
+            "${IMAGE_REGISTRY}/athanor-system" "${system_digest}" > artifacts/iso-digest.txt
           {
             echo "### Installer ISO"
             echo
             echo "\`${image}:${RUN_ID}\`, $(du -h "$iso" | cut -f1)"
           } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: 📎 Hand the ISO digest to the acceptance
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: iso-digest
+          path: artifacts/iso-digest.txt
+          if-no-files-found: error
 
       - name: 🧹 Fix Workspace Permissions (GH Actions Cleanup)
         if: always()
