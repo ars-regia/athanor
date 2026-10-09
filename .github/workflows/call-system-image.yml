@@ -322,12 +322,32 @@ jobs:
           LABEL org.opencontainers.image.version="${RUN_ID}"
           COPY $(basename "$iso") /athanor-${RUN_ID}.iso
           CONTAINERFILE
-          bash forge/scripts/retry.sh podman push "${image}:${RUN_ID}"
+          bash forge/scripts/retry.sh podman push --digestfile artifacts/iso-image.digest "${image}:${RUN_ID}"
+          # Name the ISO by digest and bind it to the system image it installs, so accept.yml
+          # takes nothing from a tag. The local athanor-system digest must be the manifest
+          # digest the registry holds, which image-digests.txt recorded by skopeo after the
+          # push: the step fails when the two differ, instead of recording a digest the
+          # registry does not serve.
+          system_digest=$(podman image inspect --format '{{.Digest}}' "${IMAGE_REGISTRY}/athanor-system:${RUN_ID}")
+          recorded=$(awk -v repo="${IMAGE_REGISTRY}/athanor-system" '$1 == repo { print $3 }' artifacts/image-digests.txt)
+          [[ $system_digest == "$recorded" ]] || {
+            echo "the local athanor-system digest '${system_digest}' is not the pushed one '${recorded}'" >&2
+            exit 1
+          }
+          printf '%s %s\n%s %s\n' "${image}" "$(<artifacts/iso-image.digest)" \
+            "${IMAGE_REGISTRY}/athanor-system" "${system_digest}" > artifacts/iso-digest.txt
           {
             echo "### Installer ISO"
             echo
             echo "\`${image}:${RUN_ID}\`, $(du -h "$iso" | cut -f1)"
           } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: 📎 Hand the ISO digest to the acceptance
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: iso-digest
+          path: artifacts/iso-digest.txt
+          if-no-files-found: error
 
       - name: 🧹 Fix Workspace Permissions (GH Actions Cleanup)
         if: always()
