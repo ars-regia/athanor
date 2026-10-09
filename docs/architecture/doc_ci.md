@@ -34,7 +34,7 @@ CI1 athanor-forge-orchestrator.yml        concurrency: one run per ref, the newe
 
 Kernel path (doc_build_ordering.md, O1):
 CI9 kernel-bump.yml (PR) -> merge -> CI8 kernel-build.yml (publish azoth) -> dispatches CI1
-Release path: CI1 publishes :<run_id> and :latest -> CI12 iso-acceptance.yml (weekly) -> CI11 promote-stable.yml (manual, :stable)
+Release path: CI1 publishes :<run_id> and :latest -> CI12 accept.yml (dispatched with the run id) -> CI11 promote-stable.yml (manual, :stable)
 ```
 
 CI1 runs CI2 once, as its first job, and calls CI3, CI4 and CI5 only after it passed; they have no lint of their own. They used to repeat it, so one Orchestrator run linted four times, about 2 minutes each on the critical path (run 37384733899 lists the jobs `lint`, `build-builder / lint`, `dag-compile / lint`, `system-image / lint`). CI8 calls it as its first job.
@@ -110,7 +110,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 ### CI2 Reusable Workflow Lint
 
 - **File:** `call-lint.yml`. **Purpose:** actionlint with shellcheck, `scripts/verify.py workflows kickstart os-release boundary cmdline services polkit-model registry licence ci coverage`, and the Python unit test suites of the kernel profile, Azoth, Nix support, NVIDIA, build ordering, update, recovery, system config, ISO verdict, `scripts/tests`, Calmo, forge scripts and shell rig. `verify.py workflows` carries the D43 lint: it parses every workflow with PyYAML (installed by this job; the lint fails without it) and fails a signing secret read outside the sign step of a job of the environment that holds it, any read of the secrets context other than by name, a signing job with another action or input, a container, defaults, a runner that is not a GitHub-hosted ubuntu label, a `run:` that is not one of the exact allow-listed commands, a `shell:` or `working-directory:` of its own, an `env:` name (job, step or workflow) outside the secrets of its environment and a short list of plain values, or a download into the checkout, an environment named by an expression (names compare without regard to case), `pull_request_target` in any workflow, `secrets: inherit` into a workflow with a signing job, a signing job in a workflow with `workflow_call` among its triggers (its keys would be empty, actions/runner#4453), and any secret that neither `.github/settings/environments.json` (an environment holds it) nor `actions.json` (a repository secret, which no signing environment may hold) declares, `GITHUB_TOKEN` aside. It is a regression guard against drift in reviewed workflows, not a security boundary: the environment protection and the review of every workflow change are.
-- **Triggers:** `workflow_call` only (CI1, CI8, CI11, CI12, CI15). **Inputs, outputs:** none.
+- **Triggers:** `workflow_call` only (CI1, CI8, CI11, CI15). **Inputs, outputs:** none.
 - **Secrets, variables:** none. **Environment:** none. **Runner:** hosted. **Concurrency:** caller's.
 - **Scripts:** `scripts/verify.py`, `forge/specs/athanor-kernel-profile/kernel_profile.py`, `forge/test/iso/test_verdict.py`, `system/athanor-style/calmo/contrast.py`, `generate.py`.
 - **Health:** `gh run list --workflow call-lint.yml --branch iso-v0 --limit 5`.
@@ -193,13 +193,13 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 - **Scripts:** `system/promote.sh`.
 - **Health:** `gh run list --workflow promote-stable.yml --branch iso-v0 --limit 5`.
 
-### CI12 ISO Acceptance
+### CI12 Acceptance
 
-- **File:** `iso-acceptance.yml`. **Purpose:** installs a published ISO in a KVM guest, reboots, logs in at the greeter and checks that a session starts; screenshots.
-- **Triggers:** cron `17 3 * * 1`; dispatch (`iso_tag`); push of its file or `forge/test/iso/**`. **Output:** artifact `iso-acceptance-<run_id>`.
-- **Secrets, variables:** `GITHUB_TOKEN`. **Environment:** none. **Runner:** hosted with KVM. **Concurrency:** `iso-acceptance-<ref>`, no cancel.
-- **Scripts:** `forge/test/iso/run_iso_test.sh`, `screenshots.py`, `forge/scripts/retry.sh`.
-- **Health:** `gh run list --workflow iso-acceptance.yml --branch iso-v0 --limit 5`.
+- **File:** `accept.yml`. **Purpose:** installs the ISO of one build run in a KVM guest, reboots, logs in at the greeter and checks that a session starts; screenshots; writes the `iso-acceptance` evidence of UD4 for the run's `athanor-system` digest.
+- **Triggers:** dispatch (`run_id`, the build run). **Output:** artifacts `evidence-<run_id>-iso-acceptance` and `acceptance-<run_id>-<acceptance run id>`.
+- **Secrets, variables:** `GITHUB_TOKEN`, `REGISTRY_HOST`. **Environment:** none. **Runner:** hosted with KVM. **Concurrency:** `accept-<run_id>`, no cancel.
+- **Scripts:** `forge/test/iso/run_iso_test.sh`, `screenshots.py`, `forge/scripts/retry.sh`, `system/accept-target.sh`, `system/trusted-run.sh`, `scripts/ci/evidence.py`.
+- **Health:** `gh run list --workflow accept.yml --branch iso-v0 --limit 5`.
 
 ### CI13 System Image Check
 
@@ -388,7 +388,7 @@ Every name below is described in the secrets inventory, `docs/operations/secrets
 | `SECUREBOOT_SIGNING_KEY` | secret | environments `signing-kernel` and `signing` | CI1 |
 | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | secret | environments `signing-images` and `signing` | CI1 |
 | `MODULE_SIGNING_KEY` | secret | environments `signing-kernel` and `signing` | CI1 |
-| `REGISTRY_HOST` | variable, default `ghcr.io` | not set | CI1, CI3, CI4, CI11, CI14, CI21, CI22 |
+| `REGISTRY_HOST` | variable, default `ghcr.io` | not set | CI1, CI3, CI4, CI11, CI12, CI14, CI21, CI22 |
 | `KERNEL_REGISTRY` | variable, default `ghcr.io/<owner>` | not set | CI1, CI6, CI8, CI9, CI13, CI25, CI26, CI28, CI30 |
 | `BUILDER_STABLE_TAG` | variable, default `latest` | not set | CI21, CI22 |
 | `SETTINGS_APP_PRIVATE_KEY` | secret (GitHub App key, read-only App) | repository | CI29 |

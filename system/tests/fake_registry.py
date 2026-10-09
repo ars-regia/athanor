@@ -33,11 +33,14 @@ Fixture keys:
   user_packages ["package", ...]  the container packages of the owner
   owner_type    "User" (the default) or "Organization", what /users/<owner> reports
   runs          [{"databaseId": 1, "headBranch": "iso-v0"}]
+  api           {"/repos/owner/repo/actions/runs/N": {...}}  the JSON `gh api` prints for that path
+  run_artifacts {"run id": {"artifact name": {"relative path": "text"}}}  what `gh run download` writes
 """
 
 import base64
 import json
 import os
+import pathlib
 import re
 import sys
 
@@ -132,10 +135,22 @@ def gh(args, fx):
     if args[:2] == ["run", "list"]:
         print(json.dumps(fx.get("runs", [])))
         return 0
+    if args[:2] == ["run", "download"]:
+        files = fx.get("run_artifacts", {}).get(args[2], {}).get(args[args.index("-n") + 1])
+        if files is None:
+            return fail("no artifact matches any of the names or patterns provided")
+        dest = pathlib.Path(args[args.index("-D") + 1])
+        for rel, text in files.items():
+            (dest / rel).parent.mkdir(parents=True, exist_ok=True)
+            (dest / rel).write_text(text)
+        return 0
     if args[0] == "api":
         if "DELETE" in args:
             return 0
         path = next(a for a in args[1:] if a.startswith("/"))
+        if path in fx.get("api", {}):
+            print(json.dumps(fx["api"][path]))
+            return 0
         if re.fullmatch(r"/users/[^/?]+", path):
             print(fx.get("owner_type", "User"))
             return 0
