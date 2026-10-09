@@ -17,7 +17,7 @@ request never publishes (`kernel-build.yml:286`), so after a change to the input
 image exists, and the push rebuilds. The skip only helps pushes that leave the inputs unchanged
 (`doc_kernel_build.md:420-427`).
 
-**Measured.** Nine of the last ten push runs took 6 to 9 minutes: the reuse path. The tenth,
+**Measured.** Nine of the last ten push runs took 6 to 9 minutes: the reuse path. One of the ten,
 run 37634580519 (the bump of PR #270), rebuilt. Of the last 100 push runs, 44 took more than
 30 minutes of wall time, queue included. Compile time is 48 to 74 minutes, p50 65.8
 (`doc_pipeline.md:911`).
@@ -46,7 +46,7 @@ design, because the module signing key is generated in every build.
 
 | Design | Runner hours saved per kernel change | Complexity | Provenance |
 | --- | --- | --- | --- |
-| (a) Status quo | 0 (three builds, about 3.5 h) | none | unchanged |
+| (a) Status quo | 0 (three builds, 3.9 h measured on PR #270) | none | unchanged |
 | (e) One pull request build | about 1.1 h | low | unchanged |
 | (b) Quarantine publication and re-signing | about 1.1 h | high | weaker unless (d)'s checks are added; widens pull request permissions |
 | (c) Reproducible comparison | 0, or about 1.1 h with detection only | medium; blocked on `repro` | strongest when it gates; weaker when it only detects |
@@ -84,15 +84,20 @@ a substitution after it shipped. Both wait for a green `repro`. (c) is the right
 looks for a reusable run and promotes its artifact only when all of these hold, else it
 rebuilds as today:
 
-1. The run is a `pull_request` run of `.github/workflows/kernel-build.yml` in this repository,
-   with `build` and `Kernel gate` green, found through the API by the merged pull request's
-   head commit (the same trust root as the OIDC issuer).
-2. The tree of `forge/specs/azoth` and the blob of `kernel-build.yml` at the run's merge
-   commit equal those at the pushed commit (`git rev-parse <sha>:<path>`). `build.sh` reads
-   nothing outside its directory (`build.sh:30`). This is the check that turns "a pull request
-   run" into "the reviewed code that is now on `iso-v0`". Whole-tree equality would fail too
-   often, since the branch protection does not require up-to-date branches
-   (`branch-protection.json:28`).
+1. The run is the `pull_request` run that builds the kernel in this repository. After (e)
+   that is `pr.yml` through `call-kernel.yml`, not `kernel-build.yml`. Its `kernel / build`
+   job and kernel verdict are green, and it is found through the API by the merged pull
+   request's head commit (the same trust root as the OIDC issuer).
+2. The tree of `forge/specs/azoth` and the blobs of `pr.yml` and `call-kernel.yml` at the
+   run's `head_sha` equal those at the pushed commit (`git rev-parse <sha>:<path>`). Every
+   value compared comes from metadata GitHub sets (the run's `head_sha`, the pull request API)
+   and from the pushed checkout, never from the run's own output or artifacts: otherwise the
+   pull request's code would attest itself. When the trees differ, the push rebuilds. This is
+   the check that turns "a pull request run" into "the reviewed code that is now on
+   `iso-v0`". The source inputs are pinned and hash-checked (`build.sh:120`), but the build
+   also reads the runner's persistent cache (`build.sh:32`, `kernel-build.yml:142`), which no
+   tree comparison binds. Whole-tree equality would fail too often, since the branch
+   protection does not require up-to-date branches (`branch-protection.json:28`).
 3. `build-inputs.py` at the pushed commit equals the run's, and `out/nvr` equals the NVR of the
    pins, as `publish` checks today (`kernel-build.yml:325`).
 4. The artifact is fetched by id and its SHA-256 digest matches the one the API reports.
@@ -104,18 +109,17 @@ digest. `attest-build-provenance` alone would describe the push run as the build
 RPMs, which would be untrue for promoted bits.
 
 Threat analysis. A pull request author controls the code of their run, but condition 2 binds
-the promoted bytes to a run whose code equals the merged code. Another pull request cannot
-write into this run's artifacts. Deletion leads to a rebuild, not a substitution. The residual risk is the runner hardening of section 3, which affects the
+the promoted bytes to a run whose code equals the merged code. Once the hardening of
+section 3 is in place, another pull request cannot write into this run's artifacts or
+inputs. Deletion leads to a rebuild, not a substitution. The residual risk is the runner hardening of section 3, which affects the
 status quo equally today; (d) holds only if promoted pull request builds run under the same
 hardening. The SLSA build level does not change: a self-hosted
 runner cannot claim hosted isolation in either design.
 
 ## 3. Runner hardening
 
-The study found two hardening items in the kernel build path, one in the state the
-self-hosted runner keeps between jobs and one in the signer identity the reuse check
-accepts. They affect the status quo, not only reuse, and are tracked outside this public
-document. Design (d) assumes both are fixed first.
+The study found two hardening items in the kernel build path, tracked outside this
+document. They affect the status quo, not only reuse. Design (d) assumes both are fixed first.
 
 ## 4. Recommendation
 
@@ -134,6 +138,6 @@ document. Design (d) assumes both are fixed first.
    (d)?
 3. Is the required `Kernel gate` check renamed or kept as an alias when (e) moves the verdict
    to `pr.yml`, and does `main` still need it?
-4. Which fix for the runner item of section 3 (asked in conversation, not here).
+4. The fixes for section 3 are decided outside this document.
 5. Is the Actions artifact retention long enough for the time between a pull request run and its
    merge, or should the fallback rebuild be expected for older pull requests?
