@@ -400,9 +400,12 @@ composefs install about 20 minutes.
    `doc_pipeline.md` PL42 leaves expiry out and PL31's release attestation carries the build
    time and class. Which artefact is the 1.0 manifest, and whether expiry is required, decides
    what item 5 must pass.
-3. **Boot counting on 1.0.** D6 and section 8 name GRUB's boot counter with greenboot; R5
-   (A2-26) does not use the counter. A kernel panic or hang in a new deployment then has no
-   automatic return: item 2 G2 measures it, and its pass criterion needs a ruling.
+3. **Boot counting on 1.0.** D6, section 8 and `doc_recovery.md` R5 all rely on GRUB's boot
+   counter with greenboot; A2-26 only turns off greenboot's own reboot. A kernel panic or hang
+   in a new deployment never reaches greenboot, so the counter alone returns the machine: item 2
+   G2 passes when, after the boots the user starts, GRUB selects the previous deployment once
+   the tries are spent, with no step at the console. It fails if the panicking deployment stays
+   the default.
 4. **D39's acceptance.** D39 is closed (B2-1) with these four checks; the state after a rollback
    of changes made since the update (item 1, phase 3, among them a changed password that comes
    back) needs the maintainer's judgement to close S1.
