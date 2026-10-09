@@ -155,7 +155,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0085 | 0085 | [Keyring prompter: the secret exchange comes from upstream oo7](0085-keyring-prompter-secret-exchange-source.md) | amended by ADR-0103 | security, shell |
 | ADR-0086 | 0086 | [toolbox is not isolation; podman as container_t or the dev VM is](0086-toolbox-is-not-isolation.md) | accepted | security, apps |
 | ADR-0087 | 0087 | [Keep athanor-attestation outside the workspace until its Keylime rewrite](0087-attestation-outside-the-workspace.md) | amended by ADR-0103 | security, build |
-| ADR-0088 | 0088 | [Pipeline revision 2](0088-pipeline-revision-2.md) | amended by ADR-0098 | build, signing, security |
+| ADR-0088 | 0088 | [Pipeline revision 2](0088-pipeline-revision-2.md) | amended by ADR-0098, ADR-0104 | build, signing, security |
 | ADR-0089 | 0089 | [Defaults that contact or listen are off until the person turns them on](0089-defaults-that-contact-or-listen.md) | amended by ADR-0103 | security, network |
 | ADR-0090 | 0090 | [Account lockout through authselect's with-faillock](0090-account-lockout-faillock.md) | accepted | security |
 | ADR-0091 | 0091 | [QEMU stays in the image for the runner and the development VM](0091-qemu-in-the-image.md) | accepted | packages |
@@ -165,7 +165,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0095 | 0095 | [Specifications, review batches 2 and 3, approved](0095-specs-review-batches-2-3.md) | amended by ADR-0103 | kernel, session, security, storage, desktop |
 | ADR-0096 | 0096 | [Kernel artefacts are signed with the project key, not the workflow's OIDC identity](0096-kernel-artefacts-project-key.md) | amended by ADR-0098 | security, pipeline |
 | ADR-0097 | 0097 | [Component owners, 1.0 execution control, the Firefox switch and one process per surface](0097-owners-execution-firefox-processes.md) | accepted | security, kernel, shell, apps, governance |
-| ADR-0098 | 0098 | [Update delivery, CI and operations decisions (batch 4)](0098-update-delivery-ci-operations-batch-4.md) | amended by ADR-0103 | update, build, signing, process |
+| ADR-0098 | 0098 | [Update delivery, CI and operations decisions (batch 4)](0098-update-delivery-ci-operations-batch-4.md) | amended by ADR-0103, ADR-0104 | update, build, signing, process |
 | ADR-0099 | 0099 | [Desktop specs review (batch 4): accessibility, overview, visual language](0099-desktop-specs-batch-4.md) | accepted | shell, session, security, desktop |
 | ADR-0100 | 0100 | [Notification center revision 2: battery notices in the session daemon](0100-notification-center-rev2.md) | accepted | shell, session, desktop |
 | ADR-0101 | 0101 | [One backup mechanism: athanor-backup, without athanor-timewarp](0101-backup-one-mechanism.md) | amended by ADR-0103 | software, backup |

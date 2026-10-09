@@ -136,7 +136,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 - **File:** `call-system-image.yml`. **Purpose:** aggregates the tier repositories, builds the three system images and the ISO, signs them keyless; CI1 `sign-system-images` signs them with the update key after it.
 - **Triggers:** `workflow_call` (CI1). **Input:** `builder_content_hash`. **Outputs:** tier repository images, system images, ISO image; artifacts `image-digests` and `upgrade-bytes` (`artifacts/metrics/upgrade-bytes.json`, UD34).
 - **Secrets, variables:** `GITHUB_TOKEN`.
-- **Environment:** none. `dag-system-image` holds no key; the vmlinuz arrives signed, from `azoth-boot` by digest, and the key-based signature of the images is CI1 `sign-system-images`, one maintainer approval per run (D43), none once the job is back in `signing-images` at the end of the key rotation and until the 1.0 tag (ADR-0098 item 6).
+- **Environment:** none. `dag-system-image` holds no key; the vmlinuz arrives signed, from `azoth-boot` by digest, and the key-based signature of the images is CI1 `sign-system-images`, one maintainer approval per run (D43), none once the job is back in `signing-images` at the end of the key rotation, 1.0 included (ADR-0098 item 6, ADR-0104 item 8).
 - **Runner:** hosted. **Concurrency:** caller's.
 - **Scripts:** `scripts/fetch_repo_rpms.sh` (in `forge/`), `system/build-image.sh`, `system/rechunk-image.sh`, `system/shared-layers.sh`, `system/check-image-kernel.sh`, `system/check-image-rpms.sh`, `system/check-image-contacts.sh`, `system/image-digests.sh`, `system/upgrade-bytes.sh`, `forge/scripts/sbom_rootfs.sh`, `sign_attest.sh`, `build_iso.sh`, `retry.sh`.
 - **Health:** `gh run list --workflow call-system-image.yml --branch iso-v0 --limit 5`.
@@ -399,7 +399,7 @@ Environments (`gh api repos/ars-regia/athanor/environments`):
 | Environment | Protection | Used by |
 |---|---|---|
 | `signing-kernel` | required reviewer `hr-mes`, no administrator bypass; branches `iso-v0`, `main`, both protected | CI1 (`nvidia-kmod-sign`) |
-| `signing-images` | as `signing-kernel`; without the required reviewer once `sign-system-images` is back in it at the end of the image key rotation, until the 1.0 tag (ADR-0098 item 6) | CI1 (`sign-system-images`, as `signing` during the image key rotation) |
+| `signing-images` | as `signing-kernel`; without the required reviewer once `sign-system-images` is back in it at the end of the image key rotation, 1.0 included (ADR-0098 item 6, ADR-0104 item 8) | CI1 (`sign-system-images`, as `signing` during the image key rotation) |
 | `signing` | required reviewer `hr-mes`, no administrator bypass; branches `iso-v0`, `main`; the alias of `signing-images` and `signing-kernel` during the image key rotation (`docs/operations/secrets.md` section 4.1) | CI1 (`sign-system-images`) |
 | `release` | required reviewer `hr-mes`, no administrator bypass; branches `iso-v0`, `main`; no secret | no job yet; the job of CI11 that moves `:stable` moves behind it, so only a promotion asks for it, and the image signing does not wait for it ([ADR-0104](../decisions/0104-release-workflow-and-stable-gate.md), amending [ADR-0103](../decisions/0103-audit-5-decisions.md) D2, D25) |
 

@@ -15,8 +15,9 @@
   ADR-0088. The maintainer approved revision 1 and
   answered PQ1-PQ12 as recommended on 2026-10-07; the blocks of section 12 are built in order. Measured figures come from the GitHub API run data of 2026-09-23 to
   2026-10-07 (784 runs) collected by the pipeline review of 2026-10-07; every other number is
-  labelled as an estimate. Amended 2026-10-07 (#265): the target's two signing jobs are jobs of `release.yml`,
-  not reusable stages, because a called workflow's job does not read its environment's secrets
+  labelled as an estimate. Amended 2026-10-07 (#265): the target's two signing jobs are jobs of an entry workflow,
+  not reusable stages (since revision 3, `sign-kernel` of `build.yml` and `sign-images` of
+  `release.yml`), because a called workflow's job does not read its environment's secrets
   ([actions/runner#4453](https://github.com/actions/runner/issues/4453); section 3.2).
 - **Depends on:** [doc_update_delivery.md](doc_update_delivery.md) (UD1-UD44: channels,
   promotion, retention, pinning), [doc_update_trust.md](doc_update_trust.md) (UT1-UT13),
@@ -36,7 +37,7 @@
   signing outside the builds' concurrency group),
   [ADR-0104](../decisions/0104-release-workflow-and-stable-gate.md) (`release.yml`, `:latest`
   signed with no approval, `release` gates `:stable`).
-- **Defines:** PL1-PL60 (requirements), PB0-PB13 and PB5b (plan blocks), PQ1-PQ12 (decisions on the review questions), PQ13-PQ18 (open questions of revision 3).
+- **Defines:** PL1-PL60 (requirements), PB0-PB13 and PB5b (plan blocks), PQ1-PQ12 (decisions on the review questions), PQ13-PQ18 (decisions on the questions of revision 3).
 - **Enforced by:** `python3 scripts/verify.py` once the checks of section 10 exist; until
   then, by review against this document.
 
@@ -101,12 +102,13 @@ These are the maintainer's, and this document does not reopen them.
    approval once the build's tests are green. The `release` approval gates only the
    promotion to `:stable`, which also needs the evidence and the dwell of UD4 and UD5
    (A2-4). Until step 3 of the image key rotation the signing job runs in `signing`, which
-   keeps its required reviewer; from step 3 in `signing-images`, without one until the 1.0
-   tag (ADR-0098 item 6); `signing-kernel` keeps its reviewer. The LUKS2 key backup is made
+   keeps its required reviewer; from step 3 in `signing-images`, without one, 1.0 included
+   (ADR-0098 item 6, ADR-0104 item 8); `signing-kernel` keeps its reviewer. The LUKS2 key backup is made
    with the key hierarchy of ADR-0103 D5, before 1.0, and D25's prohibition of a key-2
    transitional release before that hierarchy stands. ADR-0104 amends ADR-0080 item 1
-   (`release.yml` no longer builds), ADR-0103 D2 and D25, and A2-4 (the promotion is
-   approved, not automatic). Section 4.10 specifies it.
+   (`release.yml` no longer builds), ADR-0103 D2, D3 and D25, ADR-0098 item 6 (the
+   reviewer of `signing-images` does not return at 1.0), the rationale of ADR-0088 item 5,
+   and A2-4 (the promotion is approved, not automatic). Section 4.10 specifies it.
 
 Merged work is part of the system this document targets: PR #248 (packages consumed by
 content hash, `hash-` tags written last from the signed digest), PR #249 (the `system`
@@ -139,8 +141,8 @@ jobs that sign, which are jobs of the entry workflow that runs them: `sign-kerne
 | ---------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `pr.yml`         | `pull_request`, `merge_group`                  | change detection, `just check`, the build checks the change selects (specs, kernel, image, shell surfaces) on `pull_request` only (PL44), one aggregate job `gate`, the only required check |
 | `build.yml`      | `push` to `iso-v0` and `main`, `workflow_dispatch` | plan, packages, kernel and modules when their inputs changed, signing of the kernel, images pushed by `:<run_id>`; its last job dispatches `release.yml` for the run (PL54) |
-| `release.yml`    | `workflow_dispatch` only, from `build.yml` or by hand, input `build_run_id` (PL54) | the candidate and its order (PL55, PL58), signing of the images, `:latest`, ISO, release evidence, then `accept.yml` (PL56) |
-| `accept.yml`     | `workflow_call` from `release.yml`, `workflow_dispatch` with a run id | ISO and upgrade acceptance on the run's own digests (UD17, UD18), evidence files, the VSA                                       |
+| `release.yml`    | `workflow_dispatch` only, from `build.yml` or by hand, input `build_run_id` (PL54) | the candidate and its order (PL55, PL58), signing of the images, `:latest`, ISO, release evidence; its last job dispatches `accept.yml` (PL56) |
+| `accept.yml`     | `workflow_dispatch` with a run id, from the last job of `release.yml` or by hand (PL56) | ISO and upgrade acceptance on the run's own digests (UD17, UD18), evidence files, the VSA                                       |
 | `promote.yml`    | hourly `schedule`, `workflow_dispatch`         | selects the candidate with complete evidence after the dwell (UD5), runs the policy check, promotes by digest after the `release` approval (PL60), publishes the evidence bundle; checks out `RELEASE_BRANCH` (VAR4), not the default branch the schedule runs on |
 | `bots.yml`       | daily `schedule`, `workflow_dispatch`          | one matrix over the bump scripts (kernel, cosmic-comp, nixpkgs registry, specs, NVIDIA locks); each opens or updates one pull request through one shared script  |
 | `maintenance.yml`| daily and weekly `schedule`, `workflow_dispatch` | vulnerability rescan, settings drift check, run statistics; weekly: janitor, reproducibility and benchmark, patch rebase drill, two-output layout, Scorecard |
@@ -229,7 +231,7 @@ flowchart LR
     SI --> L["call-tag<br/>:latest"]
     SI --> ISO["call-iso<br/>ISO"]
   end
-  R --> A["accept.yml<br/>evidence + VSA"]
+  R -->|workflow_dispatch| A["accept.yml<br/>evidence + VSA"]
   A --> PR2["promote.yml<br/>policy, dwell,<br/>env release, :stable"]
   PR2 --> GH["GitHub Release<br/>evidence bundle"]
   PR2 --> M["machines verify signature<br/>(+ signed release attestation from 1.0)"]
@@ -402,8 +404,8 @@ not from a pattern.
 **PL15. Two key domains, two environments** (D43): `signing-kernel` (Secure Boot key for
 `vmlinuz`, module key for the NVIDIA modules) and `signing-images` (cosign key). Each
 deploys only from `iso-v0` and `main`, has `can_admins_bypass: false`, and lists required
-reviewers, except `signing-images` from step 3 of the image key rotation until the 1.0 tag
-(ADR-0098 item 6). A release that does not change the kernel asks for one approval until
+reviewers, except `signing-images` from step 3 of the image key rotation on, 1.0 included
+(ADR-0098 item 6, ADR-0104 item 8). A release that does not change the kernel asks for one approval until
 step 3 and none after it; the promotion to `:stable` asks for the `release` approval (PL56,
 PL60, ADR-0104).
 
@@ -554,12 +556,17 @@ jobs of `release.yml`, and the ISO is still built in `call-system-image.yml`, wi
 **PL54. `release.yml` starts on `workflow_dispatch` only, from the build it releases.** The
 last job of `build.yml`, `request-release`, runs when every other job succeeded, writes
 `release-request.json` (PL55) and dispatches `release.yml` on the build's own ref with one
-input, `build_run_id`. That job alone has `actions: write`. A dispatch made with
+input, `build_run_id`; the nightly schedule of the build (04:00 UTC) requests the release
+as a push does (PQ18). That job and `request-acceptance` (PL56) alone have `actions:
+write`. The permission also lets them dispatch any other workflow of the repository; the
+environment `release` on every job that moves `:stable` (PL60) and the candidate check of
+PL55 bound what such a dispatch can publish. A dispatch made with
 `GITHUB_TOKEN` starts a run, unlike the other events that token creates
 (https://docs.github.com/en/actions/security-for-github-actions/security-guides/automatic-token-authentication).
 The maintainer may dispatch `release.yml` by hand with a build run id, on the build's ref,
-to release a build again. The security class and the build time are never inputs: they come
-from the commit and the images (PL31, PQ4). A failed dispatch fails the build. `verify.py
+to release a build again. The security class, its advisory ids and the build time are never
+dispatch inputs: they are read from the build run's recorded data and the images (PL31,
+PQ4, PQ17). A failed dispatch fails the build. `verify.py
 workflows` rejects any other trigger in `release.yml`. Rejected: `workflow_run`, which runs
 the default branch's file with the default branch as `github.ref`, so neither the
 environment's branch policy nor the concurrency group can tell `iso-v0` from `main`, and
@@ -574,7 +581,9 @@ attempt, the workflow path, the ref, the commit, the builder content hash and th
 `image-digests`. The `candidate` job of `release.yml` downloads both through the API
 (`actions: read`) and runs `scripts/ci/release_candidate.py`, which refuses the request
 unless the API's record of the build run agrees with it: the workflow path is that of
-`build.yml`; `head_branch` is the release run's ref; the event is `push`,
+`build.yml`; the run attempt is the request's; `head_branch` is the release run's ref, which
+must be `iso-v0` or `main`: `candidate` refuses any other ref itself, not only through the
+environment's branch policy; the event is `push`,
 `workflow_dispatch` or `schedule`; every job other than `request-release` concluded
 `success` or `skipped`, and the image job `success`; `head_sha` is the request's commit and
 an ancestor of the ref's tip; and the hash of `image-digests.txt` is the request's. It
@@ -584,7 +593,8 @@ artifact of its own run (PL11). The green tests before the automatic signing (AD
 item 2) are therefore the build's own checks: the checks the plan selected and the image
 checks of `call-image.yml` (installed RPMs, enabled units, `vmlinuz` against the Secure Boot
 certificate, shared layers). The ISO and upgrade acceptance (UD17, UD18) run after
-`:latest` moves and gate `:stable` (PQ16).
+`:latest` moves, outside `release.yml`, and are evidence for `:stable` (UD4), not a
+precondition of `:latest` (PQ16).
 
 **PL56. The jobs of `release.yml`, and the approvals of a release.**
 
@@ -594,24 +604,33 @@ certificate, shared layers). The ISO and upgrade acceptance (UD17, UD18) run aft
 | `sign-images` | `signing` until step 3 of the image key rotation, `signing-images` after it | signs the digests of `release-candidate` with the cosign key and writes the key-signed release attestation (PL31, PQ4); builds nothing and runs no third-party action (PL11) |
 | `verify-images` | none | verifies the key-based signature as a machine does (PL16) |
 | `tag-latest` | none | runs the order check of PL58 again, then moves `:latest` of the system images, and on `main` the ISO's (PL35) |
-| `accept` | none | calls `accept.yml` on the released digests (UD17, UD18) |
+| `request-acceptance` | none | dispatches `accept.yml` with the build run id (`actions: write`), so the acceptance runs outside the release group and its evidence feeds UD4 (UD17, UD18) |
 
 | Period | `:latest`, no kernel or module change | `:latest`, kernel or module change | Promotion to `:stable` |
 | --- | --- | --- | --- |
 | Until step 3 of the image key rotation | one, `signing` | two, `signing-kernel` in the build and `signing` | one, `release` |
-| From step 3 to the 1.0 tag | none | one, `signing-kernel` in the build | one, `release` |
-| From the 1.0 tag | `signing-images` regains its reviewer (ADR-0098 item 6); PQ14 | as the cell to the left, plus `signing-kernel` | one, `release` |
+| From step 3 on, 1.0 included (PQ14) | none | one, `signing-kernel` in the build | one, `release` |
+
+The ceiling of two approvals of section 2 item 1 counts the approvals of one build's
+publication; the later promotion to `:stable` is a separate act and does not count (PQ13).
 
 No job of `release.yml` uses the environment `release`. `verify.py workflows` rejects a job
-in `signing` or `signing-images` outside `release.yml`, and a second writer of `:latest`.
+in `signing` or `signing-images` outside `release.yml`, a second writer of `:latest`, and a
+job that runs `system/promote.sh` or writes `:stable` outside the environment `release`
+(PL60).
 
 **PL57. Two concurrency groups, neither held by the other's approval.** `build.yml` keeps
 one group per ref at workflow level with `cancel-in-progress: false` (O6) and releases it
-when `request-release` ends. `release.yml` declares `${{ github.workflow }}-${{ github.ref }}`
-at workflow level, also with `cancel-in-progress: false`. A release run that waits for the
+when `request-release` ends. `release.yml` declares one group for every release ref,
+`${{ github.workflow }}`, at workflow level, also with `cancel-in-progress: false`:
+`:latest` is one tag for `iso-v0` and `main` (`system/tag-images.sh` moves it from both), so
+the releases of the two refs queue behind each other. A pending release of one ref is
+therefore replaced by a newer release of the other (PL49); that build is released again by
+hand (PL59), and it is rare while `main` is frozen (PQ1). A release run that waits for the
 image signing approval holds only the release group: the next build runs, and its release
 run waits as the pending run of PL49. A build that changes the kernel or the modules still
-holds the build group while `sign-kernel` waits for its approval (PQ15). `verify.py
+holds the build group while `sign-kernel` waits for its approval; this is accepted until the
+key hierarchy of ADR-0103 D5, when it is revisited (PQ15). `verify.py
 workflows` checks both declarations.
 
 **PL58. `:latest` never moves backwards.** `release_candidate.py order` compares, for each
@@ -620,8 +639,9 @@ repository of `image-digests.txt`, the candidate with the current `:latest`. A m
 fails. An equal digest is a no-op. Otherwise the candidate's
 `org.opencontainers.image.created` must be strictly later, and the commit that the
 `org.opencontainers.image.revision` label of the `:latest` image names must be an ancestor
-of the candidate's commit (`git merge-base --is-ancestor`). `system/build-image.sh` adds the
-label in PB13; a `:latest` without it is compared by build time alone. The check runs in
+of the candidate's commit (`git merge-base --is-ancestor`) when that commit is on the
+candidate's ref. A `:latest` built from the other release ref, or without the label, is
+compared by build time alone. `system/build-image.sh` adds the label in PB13. The check runs in
 `candidate` and again in `tag-latest`, just before the tag moves, because a release run may
 wait for its approval or be re-run after a newer release moved `:latest`.
 `system/promote.sh` already refuses an older candidate for `:stable` by build time.
@@ -636,7 +656,9 @@ dispatching `release.yml` with its run id, which PL58 refuses once a newer build
 **PL60. The promotion to `:stable` waits for the `release` approval** (ADR-0104 item 3,
 UD5). The job that moves `:stable`, in `promote-stable.yml` today and in `promote.yml` from
 PB5, runs in the environment `release`, which holds no key and has a required reviewer, no
-administrator bypass and the branches `iso-v0` and `main`. It starts only for a candidate
+administrator bypass and the branches `iso-v0` and `main`; `verify.py workflows` fails a job
+that runs `system/promote.sh` or writes `:stable` in any other environment (PL56). It starts
+only for a candidate
 whose evidence is complete (UD4) and whose dwell has passed (UD5). Before the approval, the
 job summary names the build run, the three digests and the evidence; after it, the job
 checks the evidence, the order (UD7) and the policy of PL30 again before it moves the tag.
@@ -650,8 +672,8 @@ wait with it. Promotion holds no key in any class (UD6).
 ## 5. Release channels and retention
 
 **PL35. One rule per tag, one writer per tag** (UD1). `:<run_id>` and `hash-<h>` are
-immutable names written once; `:latest` is written on a push to the default branch only, in
-`release.yml` (PL56): for the system images by `call-tag.yml` after it verified the key-based signature as a machine does (UD25),
+immutable names written once; `:latest` is written only by `release.yml` (PL56), for a build of
+`iso-v0` or `main`: for the system images by `call-tag.yml` after it verified the key-based signature as a machine does (UD25),
 for the ISO by `call-iso.yml` after its keyless signature verified (PL32); the
 kernel has no `:latest`, since every consumer reads it by digest (PL13). `:stable`,
 `:stable-previous`, `:stable-<YYYYMMDD>` are written only by `promote.sh`. There is one
@@ -837,8 +859,8 @@ therefore follow the maintainer's approval sessions, not the merges, and the mai
 rejects a stale waiting run when a newer one is pending. Revision 2's job-level groups
 inside one workflow are withdrawn (ADR-0104 item 1); PB13 measures that a release run
 waiting for its approval holds the release group and not the build group. The approval
-latency is a metric of PL53, reported and not gated. The nightly orchestrator schedule (04:00 UTC today) is removed: a release runs
-when something merged.
+latency is a metric of PL53, reported and not gated. The nightly schedule (04:00 UTC)
+stays on `build.yml`, which then requests the release as a push does (PL54, PQ18).
 
 **PL50. Caches hold what is restored.** Release-path builds restore none (PL10). A cache
 no job restores is removed, and the
@@ -897,7 +919,7 @@ runs (Node runtime, action majors), so a deprecation has an owner before it brea
 
 | Check              | Requirement                                                                 |
 | ------------------ | --------------------------------------------------------------------------- |
-| `workflows` (ext.) | PL3, PL7, PL10 (no cache on the release path), PL11, PL14, PL35, PL47, PL54, PL56 and PL57 (the release workflow), section 9 rules |
+| `workflows` (ext.) | PL3, PL7, PL10 (no cache on the release path), PL11, PL14, PL35, PL47, PL54, PL56 and PL57 (the release workflow), PL60 (every job that runs `promote.sh` or writes `:stable` runs in `release`), section 9 rules |
 | `docs` (ext.)      | section 3.5 matches `.github/workflows` until PB12                          |
 | `pinning` (new)    | PL8, PL13 (actions in PB2; containers and the flake in PB3)                  |
 | `owners` (new)     | PL4                                                                          |
@@ -952,21 +974,22 @@ step only the maintainer can take.
 | **PB10** | Update control (ADR-0082) | `athanor-update`, Settings, doc_update_trust.md (UT13) | dev-VM harness: a security update applies at the next shutdown by default; postpone holds it until its limit, then it applies; the opt-out stops automatic application, shows the warning, and still notifies | PB5 | 3 (estimate) |
 | **PB11** | Performance | `pr.yml` selections, the bar job, timeouts, concurrency, caches, NVIDIA modules once | the section 7.2 targets measured by `scripts/ci/run_stats.py` over five runs per path, driven by `workflow_dispatch` with a forced selection where a path is rare, and timed from the start of the first job, so approval waits are reported (PL49) and not gated | PB1 | 3 (estimate) |
 | **PB12** | Topology consolidation | the 29 workflows to the 14 of section 3, the Orchestrator renamed `build.yml`, `bots.yml`, `maintenance.yml`, `dag_orchestrator.py` (PL48), doc_ci.md, `docs/operations/ci-runbook.md` | `ls .github/workflows` matches section 3; `python3 scripts/verify.py` green with the checks of section 10; a release run dispatched with a fixture spec at graph depth 3 or more builds it in the single matrix | PB3, PB11 | 5 (estimate) |
-| **PB13** | Release workflow (ADR-0104, section 4.10) | `release.yml`; the `request-release` job of `athanor-forge-orchestrator.yml` and the removal of its `sign-system-images`, `verify-system-images` and `tag-system-images` jobs; `scripts/ci/release_request.py`, `scripts/ci/release_candidate.py` and the schema of section 3.3; the `org.opencontainers.image.revision` label in `system/build-image.sh`; the rules of PL54, PL56 and PL57 in `scripts/verify.py workflows`; the environment `release` on the promote job of `promote-stable.yml` (PL60); `.github/settings/environments.json`, doc_ci.md, secrets.md | `python3 scripts/verify.py workflows ci` green with the rules of PL54, PL56 and PL57; `python3 -B -m unittest discover -s scripts/tests` green with `test_release_candidate.py` (a request whose commit, ref, workflow or digest hash differs; an older candidate; a missing `:latest`; an equal digest); on `iso-v0`, `gh run view <build run> --json jobs --jq '.jobs[].name'` lists no image signing, verification or tagging job; after the release run, `skopeo inspect --format '{{.Digest}}' docker://<registry>/athanor-system:latest` equals the digest of the build's `image-digests.txt`; a second build completes while a release run waits for its approval; a dispatch of an older build fails in `candidate` and leaves `:latest` unchanged; a promotion waits for the `release` approval and a rejection leaves `:stable` unchanged; the actor of the dispatched run is recorded in PL5 | PB0 | 2-3 (estimate) |
+| **PB13** | Release workflow (ADR-0104, section 4.10) | `release.yml`; the `request-release` job of `athanor-forge-orchestrator.yml` and the removal of its `sign-system-images`, `verify-system-images` and `tag-system-images` jobs; `scripts/ci/release_request.py`, `scripts/ci/release_candidate.py` and the schema of section 3.3; the `org.opencontainers.image.revision` label in `system/build-image.sh`; the rules of PL54, PL56, PL57 and PL60 in `scripts/verify.py workflows`; the environment `release` on the promote job of `promote-stable.yml` (PL60); `.github/settings/environments.json`, doc_ci.md, secrets.md | `python3 scripts/verify.py workflows ci` green with the rules of PL54, PL56, PL57 and PL60; `python3 -B -m unittest discover -s scripts/tests` green with `test_release_candidate.py` (a request whose commit, run attempt, ref, workflow or digest hash differs; a ref other than `iso-v0` and `main`; an older candidate; a missing `:latest`; an equal digest); on `iso-v0`, `gh run view <build run> --json jobs --jq '.jobs[].name'` lists no image signing, verification or tagging job; after the release run, `skopeo inspect --format '{{.Digest}}' docker://<registry>/athanor-system:latest` equals the digest of the build's `image-digests.txt`; a second build completes while a release run waits for its approval; a dispatch of an older build fails in `candidate` and leaves `:latest` unchanged; a promotion waits for the `release` approval and a rejection leaves `:stable` unchanged; the actor of the dispatched run is recorded in PL5 | PB0 | 2-3 (estimate) |
 | | **[M]** create the environment `release` (ADR-0103); approve the first release runs in `signing` and the first promotion in `release` | | | | |
 
 ## 13. Decisions on the review questions
 
 The maintainer answered PQ1-PQ12 as recommended on 2026-10-07. Items marked
 [LAWYER] stand as decided and are confirmed with counsel before the CRA obligations apply.
-PQ13-PQ18 are the questions revision 3 leaves open for the maintainer.
+The maintainer answered PQ13-PQ18, the questions of revision 3, on 2026-10-09
+(ADR-0104 items 7 to 12).
 
 | #    | Question | Decision |
 | ---- | -------- | -------------- |
 | PQ1  | Does `main` keep a release role, now that `iso-v0` is the default branch? | Keep it protected by the same ruleset and frozen, since D43 allows it to deploy; decide its future with the 1.0 branch model. |
 | PQ2  | How is the ISO signed? | Keylessly, by the stage that builds it, `call-iso.yml` (PL32): the ISO is built after the images are signed, so signing it with the cosign key would need a second `signing-images` job and a third approval. A key-based signature for offline verification is reconsidered if users ask for it. |
 | PQ3  | Where do kernel builds of pull requests run? | Same-repository pull requests on the ephemeral self-hosted guest with a pull-request-only cache volume; forks never on self-hosted. |
-| PQ4  | Who signs the security class of a release? Today a security-class promotion goes through `promote.sh` in a signing environment (doc_update_delivery.md, decision 3), which can make three approvals in a cycle. | Set the class, with its advisory ids, when the release is signed, since releases run on push and are not dispatched (ADR-0088), and sign it in `signing-images` with the images; `promote.yml` then holds no key. |
+| PQ4  | Who signs the security class of a release? Today a security-class promotion goes through `promote.sh` in a signing environment (doc_update_delivery.md, decision 3), which can make three approvals in a cycle. | Set the class, with its advisory ids, when the release is signed, since releases run on push and the class is not taken from a dispatch input (ADR-0088; rationale updated by ADR-0104 item 11), and sign it in `signing-images` with the images; `promote.yml` then holds no key. |
 | PQ5  | Review on the maintainer's own pull requests | The repository Admin role, held by the maintainer alone, is the recorded bypass actor of the review ruleset only, in the "for pull requests only" mode; the integrity ruleset has none (PL1, PL4, ADR-0088). Agent and bot pull requests require a code-owner review once a second code owner exists, as ADR-0062 (A2-25) decided (PL4); agents push with their own App identity (PL5). `prevent_self_review` is switched on when a second human reviewer is listed in both signing environments (PL5). |
 | PQ6  | Length of the postpone (ADR-0082) | One postpone per update, up to seven days, then the update applies at the next shutdown. |
 | PQ7  | What is the "product line" whose five years run, and from when? | Each major version (1.x), from the date 1.0 is placed on the market; `SUPPORT_END` set from it. |
@@ -975,12 +998,12 @@ PQ13-PQ18 are the questions revision 3 leaves open for the maintainer.
 | PQ10 | Visibility of `azoth-nvidia` | Public for the open-module branch; the legacy branch only after a licence check [LAWYER]. |
 | PQ11 | Which edge of the `update → recovery` cycle is wrong? | Drop the synthetic all-to-all tier edges and build the graph from the specs' requirements only; tiers stay as publication groups. The edge removal lands with the `graph` check, in PB12. |
 | PQ12 | Red verify checks when `just check` becomes the gate | Adopt with `known-red.txt` (one entry per finding, not per check, with issue and expiry; only shrinking) rather than blocking PB1 on fixing them all first. |
-| PQ13 | During the image key rotation a build that changes the kernel asks for `signing-kernel` and `signing`, and its promotion for `release`: three approvals for one build that reaches `:stable`. Does the ceiling of two approvals of a release cycle (section 2 item 1, A2-27) count the promotion? | Open. |
-| PQ14 | At the 1.0 tag ADR-0098 item 6 returns the required reviewer of `signing-images`. Does it return beside the `release` approval of the promotion, or does ADR-0104 make it unnecessary? | Open. |
-| PQ15 | A build that changes the kernel or the modules holds the build group while `sign-kernel` waits for `signing-kernel` (PL57). Is that accepted, or does the kernel signing also leave the build? | Open. |
-| PQ16 | The green tests before the automatic `:latest` signing are the build's own checks (PL55). Do the ISO and upgrade acceptance, which run after `:latest` moves (UD17, UD18), also run before the signing? | Open. |
-| PQ17 | PQ4 and ADR-0088 item 5 rest on releases that run on push and are not dispatched; `release.yml` is dispatched, with the build run id as its only input (PL54). Does ADR-0088 item 5 need an amending record? | Open. |
-| PQ18 | PL49 removes the nightly schedule of the build (04:00 UTC today), which also rebuilds the images on Fedora updates without a merge. Is it removed, kept, or moved to another entry? | Open. |
+| PQ13 | During the image key rotation a build that changes the kernel asks for `signing-kernel` and `signing`, and its promotion for `release`: three approvals for one build that reaches `:stable`. Does the ceiling of two approvals of a release cycle (section 2 item 1, A2-27) count the promotion? | It counts the approvals of one build's publication; the later promotion to `:stable` is a separate act and does not count (ADR-0104 item 7). |
+| PQ14 | At the 1.0 tag ADR-0098 item 6 returns the required reviewer of `signing-images`. Does it return beside the `release` approval of the promotion, or does ADR-0104 make it unnecessary? | It does not return: the human gate is the `release` approval of the promotion (ADR-0104 item 8, amending ADR-0098 item 6). |
+| PQ15 | A build that changes the kernel or the modules holds the build group while `sign-kernel` waits for `signing-kernel` (PL57). Is that accepted, or does the kernel signing also leave the build? | It stays in the build and holds its group for now; revisited with the key hierarchy of ADR-0103 D5 (ADR-0104 item 9). |
+| PQ16 | The green tests before the automatic `:latest` signing are the build's own checks (PL55). Do the ISO and upgrade acceptance, which run after `:latest` moves (UD17, UD18), also run before the signing? | No: `:latest` is signed after the build's own checks, and the acceptance stays evidence for `:stable` (UD4) (ADR-0104 item 10). |
+| PQ17 | PQ4 and ADR-0088 item 5 rest on releases that run on push and are not dispatched; `release.yml` is dispatched, with the build run id as its only input (PL54). Does ADR-0088 item 5 need an amending record? | The class and advisory ids are read from the build run's recorded data, never from a dispatch input; ADR-0088 item 5 holds in substance and ADR-0104 item 11 updates its rationale. |
+| PQ18 | PL49 removes the nightly schedule of the build (04:00 UTC today), which also rebuilds the images on Fedora updates without a merge. Is it removed, kept, or moved to another entry? | Kept as a schedule of the build entry workflow, which requests the release as a push does (ADR-0104 item 12). |
 
 ## 14. Changes to other documents
 
@@ -1135,3 +1158,13 @@ maintainer's decisions of 2026-10-09 recorded in ADR-0104, written on `iso-v0` a
 - PL49's job-level groups are withdrawn; PL15 and section 7.2 count the approvals of each
   period of the image key rotation (PL56).
 - New block PB13; PB5b's gate lists `release`; open questions PQ13-PQ18.
+
+Amended on 2026-10-09, still proposed: the maintainer answered PQ13-PQ18 (ADR-0104 items 7
+to 12), and the review of the revision is applied. The release group is one group for
+`iso-v0` and `main` (PL57), and the order of `:latest` across the two refs falls back to the
+build time (PL58). The acceptance leaves `release.yml` for a dispatched run (PL56, sections
+3.1 and 3.4). `candidate` also compares the run attempt and refuses any ref other than the
+release refs (PL55). PL54 states what `actions: write` allows. `verify.py workflows` keeps
+every job that moves `:stable` in `release` (PL56, PL60, section 10, PB13). The
+`signing-images` reviewer stays off after 1.0 (section 2, PL15, PL56), the nightly build stays
+(PL49, PL54), and PL35 and the header are aligned.

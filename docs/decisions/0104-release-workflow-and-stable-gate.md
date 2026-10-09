@@ -50,22 +50,43 @@ Decided by the maintainer on 2026-10-09.
 4. **The image signing approval until step 3 of the rotation.** Until step 3 of the image key
    rotation (`docs/operations/secrets.md` section 4.1) the signing job runs in `signing`
    (key 1), which keeps its required reviewer, so `:latest` still asks that one approval until
-   then. From step 3 the job runs in `signing-images`, without a required reviewer until the
-   1.0 tag (ADR-0098 item 6). `signing-kernel` keeps its required reviewer.
+   then. From step 3 the job runs in `signing-images`, without a required reviewer (ADR-0098
+   item 6), which does not return at the 1.0 tag (item 8). `signing-kernel` keeps its
+   required reviewer.
 5. **The key backup comes with the key hierarchy.** The LUKS2 backup of the keys on two
    drives, on which the key hierarchy of ADR-0103 D5 depends, is made when the work reaches the
    hierarchy, before 1.0, not deferred to 1.0. The prohibition of D25 stands: no transitional
    release signed with key 2 is cut before the hierarchy exists.
 6. **An exception to the freeze.** Revision 3 of `doc_pipeline.md`, which specifies items 1
    to 4, is exempt from the freeze of new specification revisions in ADR-0103 D3. It serves the
-   update delivery, the first priority, and it ends the wait of every build behind a signing
-   approval. The freeze stands for every other revision.
+   update delivery, the first priority. The freeze stands for every other revision.
+7. **The approval ceiling counts one build's publication** (PQ13 of `doc_pipeline.md`). The
+   ceiling of two approvals per release cycle (ADR-0080 item 4, A2-27) counts the approvals
+   of one build's publication: `signing-kernel` and the image signing approval. The later
+   promotion to `:stable` is a separate act and does not count.
+8. **The `signing-images` reviewer does not return at the 1.0 tag** (PQ14). The human gate
+   of the images is the `release` approval of the promotion. This amends ADR-0098 item 6,
+   which suspended the reviewer "until the 1.0 tag, when it returns".
+9. **Kernel signing stays in the build for now** (PQ15). It holds the build's concurrency
+   group while it waits for `signing-kernel`. The choice is revisited with the key hierarchy
+   of ADR-0103 D5.
+10. **`:latest` is signed after the build's own checks** (PQ16). The ISO and upgrade
+    acceptance in a virtual machine stay evidence for `:stable` (UD4), not a precondition of
+    `:latest`.
+11. **The security class is never a dispatch input** (PQ17). The class and the advisory ids
+    are read from the build run's recorded data. ADR-0088 item 5 holds in substance; its
+    rationale "releases run on push and are not dispatched" becomes "the class is not
+    taken from a dispatch input".
+12. **The nightly build stays** (PQ18). The 04:00 UTC schedule stays on the build entry
+    workflow, which then requests the release as a push does.
 
-**Rationale.** Distributions with a public update channel sign automatically in an isolated
-service and gate the stable channel with tests: Fedora signs with robosignatory and gates
+**Rationale.** The maintainer decided after a comparison with distributions that publish an
+update channel, which sign automatically in an isolated service and gate the stable channel
+with tests: Fedora signs with robosignatory and gates
 updates in Bodhi, openSUSE gates Tumbleweed snapshots built in OBS with openQA, and Universal
 Blue signs its images with cosign in CI. `:latest` is the testers' channel; new installs
-follow `:stable` (`doc_update_delivery.md` UD2).
+follow `:stable` (`doc_update_delivery.md` UD2). Moving the image signing out of the build
+also ends the wait of every build behind a signing approval.
 
 ## Consequences
 
@@ -80,8 +101,12 @@ follow `:stable` (`doc_update_delivery.md` UD2).
   `release`, not automatic. `doc_update_delivery.md` UD5 and the gate of its phase P2 are
   aligned in the same pull request. The evidence and the dwell of UD4 and UD5 are unchanged.
 - **ADR-0080** is amended in item 1 only: `release.yml` no longer builds. The build stays in an
-  entry workflow of its own, today the Orchestrator, which starts `release.yml` when it
-  succeeds.
+  entry workflow of its own, today the Orchestrator, and `release.yml` runs after a successful
+  build; its trigger is specified in `doc_pipeline.md` revision 3 (proposed).
+- **ADR-0098** is amended in item 6 only (item 8): `signing-images` stays without a required
+  reviewer after the 1.0 tag, so the exemption of `signing-images` in the D43 check of
+  `scripts/verify.py workflows` does not end at 1.0.
+- **ADR-0088** is amended in the rationale of item 5 only (item 11).
 - `doc_pipeline.md` revision 3 specifies `release.yml` and the gate of the promotion (PL54 to
   PL60, plan block PB13) and replaces the job-level groups of PL49. No workflow changes until
   the maintainer approves that revision (ADR-0074 item 5). `doc_ci.md`,
