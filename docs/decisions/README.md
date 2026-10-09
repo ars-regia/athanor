@@ -171,3 +171,4 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0101 | 0101 | [One backup mechanism: athanor-backup, without athanor-timewarp](0101-backup-one-mechanism.md) | amended by ADR-0103 | software, backup |
 | ADR-0102 | 0102 | [Audit calendar and audit types](0102-audit-calendar.md) | accepted | process, security |
 | ADR-0103 | 0103 | [Audit 5 decisions and the scope of 1.0](0103-audit-5-decisions.md) | accepted | platform, kernel, build, signing, security, shell, apps, docs |
+| ADR-0105 | 0105 | [Four releases before 1.0: chain, base, defences, surface](0105-releases-before-1-0.md) | accepted | platform, build, signing, security, shell, docs, process |
