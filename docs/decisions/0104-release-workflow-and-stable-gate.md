@@ -74,11 +74,13 @@ Decided by the maintainer on 2026-10-09.
     acceptance in a virtual machine stay evidence for `:stable` (UD4), not a precondition of
     `:latest`.
 11. **The security class is never a dispatch input** (PQ17). The class and the advisory ids
-    are derived from durable data, never from a dispatch input (`doc_pipeline.md` PL55). ADR-0088 item 5 holds in substance; its
-    rationale "releases run on push and are not dispatched" becomes "the class is not
-    taken from a dispatch input".
+    are read from the build run's recorded data, never from a dispatch input. ADR-0088
+    item 5 holds in substance; its rationale "releases run on push and are not
+    dispatched" becomes "the class is not taken from a dispatch input".
+    *(Mechanism proposed in review on 2026-10-09, awaiting the maintainer's confirmation: the class is derived from the difference between the current `:latest` and the candidate, see doc_pipeline PL55.)*
 12. **The nightly build stays** (PQ18). The 04:00 UTC schedule stays on the build entry
-    workflow, which then requests the release as it does after a push.
+    workflow, which then requests the release as a push does.
+    *(Mechanism proposed in review on 2026-10-09, awaiting the maintainer's confirmation: on `iso-v0` the build's `request-release` job dispatches the release, see doc_pipeline PL54.)*
 
 **Rationale.** The maintainer decided after a comparison with distributions that publish an
 update channel, which sign automatically in an isolated service and gate the stable channel
