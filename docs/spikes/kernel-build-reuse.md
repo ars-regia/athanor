@@ -93,10 +93,10 @@ rebuilds as today:
    value compared comes from metadata GitHub sets (the run's `head_sha`, the pull request API)
    and from the pushed checkout, never from the run's own output or artifacts: otherwise the
    pull request's code would attest itself. The run built a merge commit, so the same
-   comparison also holds for the base commit the run merged (from the run's API record): an
-   azoth change on the base that was later reverted would otherwise pass. When any tree
-   differs, the push rebuilds. This is
-   the check that turns "a pull request run" into "the reviewed code that is now on
+   comparison also holds for the base commit recorded when the run started (the run's API
+   record): an azoth change on the base that was later reverted would otherwise pass. That
+   record may name a later base than the one the merge ref used; the gap is a residual risk.
+   When any tree differs, the push rebuilds. This is the check that turns "a pull request run" into "the reviewed code that is now on
    `iso-v0`". The source inputs are pinned and hash-checked (`build.sh:120`), but the build
    also reads the runner's persistent cache (`build.sh:32`, `kernel-build.yml:142`), which no
    tree comparison binds. Whole-tree equality would fail too often, since the branch
