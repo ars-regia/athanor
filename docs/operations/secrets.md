@@ -50,7 +50,7 @@ No repository variable is set (`gh variable list` is empty), so every default be
 | VAR5 | `PROMOTE_DWELL_HOURS` | `24` | PR #180 only: `promote-stable.yml` |
 | VAR6 | `SETTINGS_APP_CLIENT_ID` | none; not set yet | `maintenance.yml` `settings-drift`: client id of the settings GitHub App (SEC13) |
 | VAR7 | removed 2026-10-09 (ADR-0103 D4) | | |
-| VAR8 | `BOT_APP_ID` | none; not set yet | environment `bots`: id of the bots GitHub App (SEC15), read as `vars.BOT_APP_ID` by the jobs of SEC15 |
+| VAR8 | `BOT_APP_CLIENT_ID` | none | environment `bots`: client id of the bots GitHub App `athanor-bots` (SEC15), read as `vars.BOT_APP_CLIENT_ID` by the jobs of SEC15 |
 
 | Id | Environment | Secrets | Protection (`.github/settings/environments.json`; `signing` stays beside the split until the image key rotation of section 4.1 ends) | Referenced by |
 | --- | --- | --- | --- | --- |

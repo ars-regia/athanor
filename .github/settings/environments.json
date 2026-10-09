@@ -21,7 +21,7 @@
       "BOT_APP_PRIVATE_KEY"
     ],
     "variables": [
-      "BOT_APP_ID"
+      "BOT_APP_CLIENT_ID"
     ],
     "wait_timer": 0
   },
