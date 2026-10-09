@@ -459,12 +459,13 @@ composefs install about 20 minutes.
 2. **S1 against the runner VM** (`2026-10-08-update-chain-order.md`, section 5, point 5).
    Under "one VM at a time" S1 and the runner guest compete for the host; whether the runner is
    stopped for a sitting, and when, is the maintainer's decision. Open.
-3. **Boot counting on 1.0.** D6, section 8 and `doc_recovery.md` R5 all rely on GRUB's boot
-   counter with greenboot; A2-26 only turns off greenboot's own reboot. A kernel panic or hang
-   in a new deployment never reaches greenboot, so the counter alone returns the machine: item 2
-   G2 passes when, after the boots the user starts, GRUB selects the previous deployment once
-   the tries are spent, with no step at the console. It fails if the panicking deployment stays
-   the default.
+3. **Boot counting on 1.0.** The specification contradicts itself. D6, section 8 and the R5
+   statement (`doc_recovery.md:30`) name GRUB's boot counter with greenboot; the A2-26
+   settlement of R5 (`doc_recovery.md:41`) says the counter is not used, because Fedora's
+   `grub-boot-success.timer` sets `boot_success=1` after two minutes of any session. Without the
+   counter, a kernel panic or hang in a new deployment never reaches greenboot and has no
+   automatic return. Item 2 G2 measures it; its pass criterion waits for the maintainer's
+   ruling on which text holds.
 4. **S1's own dev VM state.** The dev VM scripts have no state-directory option; S1 relies on
    `devvm.env` deriving its state from `XDG_DATA_HOME`, as `scripts/devvm/README.md` documents.
    Prerequisite before the first `create.sh`: confirm that line of `devvm.env` (this session's
