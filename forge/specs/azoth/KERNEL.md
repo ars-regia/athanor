@@ -29,7 +29,7 @@ directory e come si usa.
 | `builder/Containerfile`, `builder/toolchain.packages`, `builder/toolchain.lock` | l'ambiente: Fedora pinnata per digest piu' la toolchain LLVM e le BuildRequires dello spec, ogni RPM per sha256 nel lock |
 | `lock.sh`, `boot/*.packages`, `boot/*.lock`, `nvidia/toolchain.*` | i lock degli ambienti, uno per stadio di Containerfile: `lock.sh generate` riscrive quelli i cui input sono cambiati (base, lista dei pacchetti, e per il builder SRPM pinnato e bcond; `--force`: anche a input fermi), `lock.sh check` li controlla tutti in `build.sh` |
 | `bconds.sh` | i bcond di kernel.spec, gli stessi per `dnf builddep`, `rpmbuild` e il lock |
-| `boot.sh` | la boot matrix: dal kernel-core a quattro avvii QEMU con le asserzioni della spec |
+| `boot.sh` | the boot matrix: from kernel-core to six QEMU boots with the assertions of the spec |
 | `boot/Containerfile`, `boot/init` | l'ambiente della boot matrix (qemu, OVMF, shim, ukify, Firecracker, strumenti di benchmark) e il PID 1 dell'initramfs di prova |
 | `microvm/kernel-local`, `microvm/azoth-microvm.spec` | il kernel guest per le MicroVM (spec, sezione 9): frammento sopra x86_64_defconfig + kvm_guest.config e lo spec minimo che mette vmlinux, bzImage, config e release in `/usr/lib/athanor/microvm/` |
 | `microvm/boot.sh`, `microvm/init` | il gate del kernel guest: vmlinux in Firecracker con una rootfs ext4 di prova, `K6 RESULT ok` sulla seriale |
@@ -90,18 +90,26 @@ podman build -t localhost/azoth-boot -f forge/specs/azoth/boot/Containerfile for
 podman run --rm --device /dev/kvm -v "$PWD:/forge" -w /forge localhost/azoth-boot bash forge/specs/azoth/boot.sh --rpms /forge/out --out /forge/boot-out
 ```
 
-Quattro avvii, firmware {SeaBIOS, OVMF con Secure Boot via shim} x CPU {Nehalem,
-host}, ognuno con le asserzioni di `boot/init` (uname, BTF, bpftool, sched_ext, IMA,
-lockdown, BBR v3, taint, dmesg; in UEFI anche Secure Boot acceso e MOK arruolata).
-Serve solo il kernel-core: `--rpms` accetta l'`out/` di build.sh o una directory con
-il solo RPM. Senza `/dev/kvm` (WSL, podman machine) aggiungi `--accel tcg`: minuti
-invece di secondi, e `host` diventa `max`. Log seriali e riepilogo in `boot-out/`.
-Con `--mok CERT` arruola altri certificati in MokList e con `--insmod FILE.ko:ERRNO`
-carica moduli nel guest, in tutti i casi, pretendendo l'errno di insmod: `ENODEV` per un
-modulo firmato con la chiave dei moduli compilata nel kernel, senza il suo hardware,
-`EKEYREJECTED` per uno non firmato o firmato da una MOK arruolata. Ogni caso verifica
-anche che i certificati di `keys/modules` e `keys/revoked` siano stati caricati. E' la
-prova della catena dei moduli esterni (spec, sezione 7, gate 4).
+Six boots: firmware {SeaBIOS, OVMF with Secure Boot via shim} x CPU {Penryn, host}
+(`bios-penryn`, `bios-host`, `uefi-penryn`, `uefi-host`), plus `iommu-intel` and
+`iommu-amd`, SeaBIOS on the host CPU with an emulated IOMMU; `--case NAME` (repeatable)
+restricts the matrix. Penryn (x86-64-v1, no POPCNT or SSE4.2; D14 of
+`doc_kernel_profile.md`) proves that no instruction beyond the baseline made it into the
+kernel. Every case runs the assertions of `boot/init`: uname, BTF, bpftool, sched_ext,
+IMA, BBR v3, Landlock, memcg, taint, dmesg, and the profile the build enforces (lockdown,
+`init_on_free`, `vsyscall` and `debugfs` with none of them on the command line, lazy
+preemption, ASLR bits, the mesh platform options); the IOMMU cases also check lazy
+`DMA-FQ` domains, and UEFI checks Secure Boot on and the MOK enrolled.
+Only kernel-core is needed: `--rpms` takes the `out/` of build.sh or a directory with
+that RPM alone. Without `/dev/kvm` (WSL, podman machine) add `--accel tcg`: minutes
+instead of seconds, and `host` becomes `max`. Serial logs and the summary go to
+`boot-out/`. `--mok CERT` enrols more certificates in MokList and `--insmod FILE.ko:ERRNO`
+loads modules in the guest, in every case, expecting that errno from insmod: `ENODEV` for
+a module signed with the module key compiled into the kernel, without its hardware,
+`EKEYREJECTED` for one unsigned or signed by an enrolled MOK. Every case also checks that
+the certificates of `keys/modules` and `keys/revoked` were loaded, and that the builtin
+keyring holds exactly those of `keys/modules` plus the key the build generates. It is the
+proof of the external module chain (spec, section 7, gate 4).
 
 ## Kernel guest MicroVM
 
