@@ -597,11 +597,15 @@ difference between the current `:latest` and the candidate, never from per-build
 or images that expire (section 5), and never from a dispatch input:
 
 - the `release-class.toml` files of ADR-0094 item 4 committed in the git range
-  `<label>..<candidate>`, the commits reachable from the candidate's commit and not from
-  the commit of the `org.opencontainers.image.revision` label of `:latest`. The range is
-  defined whether or not that commit is an ancestor of the candidate (a `main` release
-  after an `iso-v0` one, for example), as long as the commit exists in the repository; a
-  label commit absent from the repository fails `candidate`;
+  `<base>..<candidate>`, the commits reachable from the candidate's commit and not from
+  `<base>`. `<base>` is the commit of the `org.opencontainers.image.revision` label of
+  `:latest` when it has one; otherwise it is the `revision` recorded by the PB4b release
+  attestation of the newest image of the repository that carries one, which section 5
+  keeps. A hand release of the frozen `main` in between therefore costs nothing: the range
+  starts at the last attested release. The range is defined whether or not `<base>` is an
+  ancestor of the candidate, as long as the commit exists in the repository; a `<base>`
+  absent from the repository fails `candidate`, and so does a kept attestation that the
+  registry lists but that cannot be read or verified;
 - for each Fedora package whose NEVRA differs between the RPM databases of `:latest` and
   the candidate, the Fedora updateinfo advisories whose fixed NEVRA is newer than the
   `:latest` one and not newer than the candidate's, so nothing outside the difference is
@@ -615,22 +619,23 @@ The class is security if any source says so, and the advisory ids are their unio
 content of a release whose pending run was replaced (PL49) is in that difference, so the
 next release carries its class. The class is per repository: each image repository's own
 `:latest` is its baseline. The revision label is a build check: an image without it fails
-the image checks of its own build (PB13), so it never becomes `:latest`, and an unlabelled
-`:latest` can only be one published before PB13. Two bootstrap cases remain, and nowhere
-else does `candidate` fall back:
+the image checks of its own build (PB13), so an unlabelled `:latest` is one published
+before PB13 or a hand release of the frozen `main`, whose tree lacks the label. Two
+bootstrap cases remain, and nowhere else does `candidate` fall back:
 
 - `no-baseline`, the first release of a repository: there is nothing to compare and
   nothing to lose, so `candidate` records `class = feature`, `advisories = []`;
-- `unlabelled-baseline`, a baseline published before PB13: the git half is skipped, and
-  the Fedora half still runs against the baseline image. If it finds advisories, the class
+- `unlabelled-baseline`, an unlabelled `:latest` while no image of the repository carries a
+  PB4b release attestation yet: the git half is skipped, and the Fedora half still runs
+  against the `:latest` image, its baseline in every case. If it finds advisories, the class
   is `security` with those advisories; otherwise it is `feature` with none.
 
 In both, `class_reason` records the case. The fallback to `feature` extends the rule of
 ADR-0094 item 5, that an unknown class reads as feature, the side that asks the user to
 confirm, to a signed record that carries `class_reason`, as part of this proposal. It is
 not silent: `class_reason` goes in the run summary and in the job summary the maintainer
-approves for the promotion to `:stable` (PL60). Each repository's first release after
-PB13 ends its fallback, so the step needs no switch. At bootstrap the maintainer does
+approves for the promotion to `:stable` (PL60). Each repository's first release with a
+PB4b attestation ends its fallback, so the step needs no switch. At bootstrap the maintainer does
 nothing on a `class_reason`; anywhere else it is a defect to report. With a labelled
 baseline, a missing or unavailable updateinfo source, or an unreadable image, fails
 `candidate`, because the answer would otherwise be wrong.
@@ -643,11 +648,12 @@ it fell back) and `updateinfo_timestamp`, into `release-candidate.json` under
 `$RUNNER_TEMP/out/`.
 It uploads that file with `image-digests.txt` as the artifact `release-candidate`, so a
 cancelled release stays visible in the run that replaced it. Every later job reads only
-that artifact of its own run (PL11). A job before `tag-latest`, or a re-run of it, reads the
-class back only while each repository's current `:latest` and candidate still have the
-recorded `baseline_digest` and `candidate_digest`; otherwise the job fails, and the release
-is run again from `candidate`, which recomputes it. Once the tag has moved, later jobs and
-re-runs compare `:latest` with the recorded `candidate_digest` instead. The green tests before the automatic signing (ADR-0104
+that artifact of its own run (PL11). Every later job, and every re-run, reads the class back
+only after checking each repository's entry: its `:latest` must equal the entry's
+`baseline_digest` (not yet tagged) or its `candidate_digest` (tagged). Any other value
+means another release moved `:latest`; the job fails, and a new dispatch goes through
+PL58 again. `tag-latest` retags only the repositories still at their baseline, so a
+partial `tag-latest` re-run completes the tag and never needs a re-run from `candidate`. The green tests before the automatic signing (ADR-0104
 item 2) are therefore the build's own checks: the checks the plan selected and the image
 checks of `call-image.yml` (installed RPMs, enabled units, `vmlinuz` against the Secure Boot
 certificate, shared layers, the revision label). The ISO and upgrade acceptance (UD17, UD18) run after
@@ -707,8 +713,8 @@ registry error fails. An equal digest is a no-op. Otherwise the candidate's
 of the candidate's commit (`git merge-base --is-ancestor`) when that commit is on the
 candidate's ref. A `:latest` built from the other release ref, which only a hand release
 of `main` produces (PL54), or without the label, is compared by build time alone. These
-fallbacks are for the order only; the class derivation of PL55 has its own, to the feature
-class. `system/build-image.sh` adds the label in PB13. The check runs in
+fallbacks are for the order only; the class derivation of PL55 has its own bootstrap cases,
+in which an unlabelled baseline can still give `security` from the Fedora half. `system/build-image.sh` adds the label in PB13. The check runs in
 `candidate` and again in `tag-latest`, just before the tag moves, because a release run may
 wait for its approval or be re-run after a newer release moved `:latest`.
 `system/promote.sh` already refuses an older candidate for `:stable` by build time.
@@ -766,15 +772,22 @@ Retention, by ADR-0081 (this amends the 90-day figure of UT10 and UD8):
 | `hash-<h>` package and tier images named by the provenance of a promoted release | as long as that release: they are the inputs it rebuilds from |
 | other `hash-<h>` images                                              | 30 days after the last run that referenced them              |
 | referrers of a kept digest (signatures, attestations, SBOMs, VSAs)   | as long as the digest                                        |
+| per repository, the digest `:latest` names                           | while `:latest` names it                                     |
+| per repository, the newest image with a PB4b release attestation, and that attestation | until a newer image carries one (PL55)        |
 | ISOs of promoted runs                                                | forever (UD8)                                                |
 | `:<run_id>` images never promoted                                    | 90 days                                                      |
 | untagged manifests not referenced by a kept index or signature       | 7 days                                                       |
 | evidence bundle per promoted release                                 | attached to its GitHub Release, never deleted                |
 | workflow artifacts                                                   | the repository default of 90 days, unless the upload sets fewer |
 
+The two per-repository rows are part of this revision, at most two more digests per
+repository, and they fix a defect of the current kept set, which protects no unpromoted
+image, not even the one `:latest` names. ADR-0081 item 3 sets what is never deleted and
+does not limit the kept set to it.
+
 The janitor (`forge/scripts/clean_ghcr.sh`, weekly in `maintenance.yml`) computes the kept
-set by reachability from the promoted roots: the promoted digests, the inputs their
-provenance names, and the referrers of each. It always runs its dry run first, refuses to
+set by reachability from the promoted roots and the two per-repository digests above: the
+promoted digests, the inputs their provenance names, and the referrers of each. It always runs its dry run first, refuses to
 delete a member of that set, and has a unit test on a fixture graph. Today a tier image
 carries only `latest` until UD44 adds its `hash-` and run tags, so the digest a system image
 installed lives on as an untagged manifest once `latest` moves. The retention of the janitor
@@ -1036,7 +1049,7 @@ step only the maintainer can take.
 | | **[M]** create one GitHub App per role, each private key in an environment scoped to its token-minting job with a row in secrets.md; create the agents' App, its private key in the maintainer's secret store (PL5); apply the two rulesets; enable the merge queue; enable SHA pinning once every action is pinned by SHA | | | | |
 | **PB3** | Pinned inputs, verified hops (PL8, PL12-PL14) | `.github/actions/verify-input`, `scripts/ci/registry.sh`, `forge/config/images.json`, the key-isolation constants of `scripts/verify.py`, `scripts/runner/` (PL8) | `python3 scripts/verify.py pinning images workflows` green, with no literal registry host in the key-isolation lint; a release run's logs show a verification for every hop of PL12; the runner VM does not replace its pinned runner release | PB1 | 3-4 (estimate) |
 | **PB4** | SLSA provenance (Build L3 hosted, L2 self-hosted, PL21) and CycloneDX SBOM for every artifact | the seven stages, the `azoth-signer` image, `.github/actions/attest`, `scripts/ci/verify_release.sh`, `scripts/ci/sbom_check.py`, `docs/compliance/` (the SHA-512 deviation record of PL24) | `scripts/ci/verify_release.sh <run_id>` exits 0 for a release run, covering every digest in `image-digests.txt` and `kernel-artifacts.env`, the signed `vmlinuz` and modules with provenance from `call-kernel-publish.yml` naming the unsigned digest and the signing run (PL19), and refuses an L3 claim on an attestation from a self-hosted runner or for a signed derivative; the `sbom_check.py` fixture tests pass for each ecosystem; `grep -ril sha-512 docs/compliance` names the deviation record of PL24 | PB3 | 3 (estimate) |
-| **PB4b** | Release attestation (PQ4, PL31, ADR-0094): the key-signed in-toto statement with `class`, `advisories` and `build_time`, produced under `scripts/ci/` and signed in `sign-images` | the block is specified when its plan is written | the class and advisory ids a client verifies before UT13 acts, derived by `candidate` as in PL55; `test_release_candidate.py`: a missing baseline `:latest` gives `class = feature`, `advisories = []` and `class_reason` `no-baseline`; an unlabelled one skips the git half and records `unlabelled-baseline`, with `security` when the Fedora half finds an advisory and `feature` otherwise; a labelled baseline whose commit is not an ancestor uses the range `<label>..<candidate>`; a label commit absent from the repository fails; with a labelled baseline, a missing or unavailable updateinfo source fails; a security `release-class.toml` in the commit range, or a Fedora advisory whose fixed NEVRA lies after the `:latest` one and at or before the candidate's, sets the class; an advisory fixed at or before the `:latest` NEVRA, or after the candidate's, is not claimed; an empty updateinfo result gives no Fedora advisory; before `tag-latest` a re-run reads the recorded result only while the baseline and candidate digests match, and a moved `:latest` forces a recomputation; after it, `:latest` is compared with the recorded candidate digest | PB4, PB13 | not estimated |
+| **PB4b** | Release attestation (PQ4, PL31, ADR-0094): the key-signed in-toto statement with `class`, `advisories`, `build_time` and `revision` (the candidate's commit, PL55), produced under `scripts/ci/` and signed in `sign-images` | the block is specified when its plan is written | the class and advisory ids a client verifies before UT13 acts, derived by `candidate` as in PL55; `test_release_candidate.py`: a missing baseline `:latest` gives `class = feature`, `advisories = []` and `class_reason` `no-baseline`; an unlabelled one takes `<base>` from the `revision` of the newest kept release attestation; with no such attestation it skips the git half and records `unlabelled-baseline`, with `security` when the Fedora half finds an advisory and `feature` otherwise; a listed attestation that cannot be read fails; the janitor's dry run keeps the `:latest` digest and the newest attested image of each repository; a labelled baseline whose commit is not an ancestor uses the range `<label>..<candidate>`; a label commit absent from the repository fails; with a labelled baseline, a missing or unavailable updateinfo source fails; a security `release-class.toml` in the commit range, or a Fedora advisory whose fixed NEVRA lies after the `:latest` one and at or before the candidate's, sets the class; an advisory fixed at or before the `:latest` NEVRA, or after the candidate's, is not claimed; an empty updateinfo result gives no Fedora advisory; a re-run reads the recorded result only while each repository's `:latest` equals its `baseline_digest` or its `candidate_digest`, and any other value fails; a partial `tag-latest` re-run retags only the repositories still at their baseline | PB4, PB13 | not estimated |
 | **PB5** | Evidence, VSA and the policy gate | the Conforma `ec` spike first (PL30), `accept.yml`, `promote.yml` (its promote job in the environment `release`, PL60), `system/promote.sh`, `scripts/ci/policy_check.py`, `scripts/ci/policy.json` | doc_update_delivery.md phases P1 and P2 gates, plus: `policy_check.py` refuses a candidate with each single piece of evidence removed (unit test), and the first promotion approved in `release` carries a VSA (PL60) | PB4 | 4 (estimate) |
 | **PB5b** | Close of the image key rotation (secrets.md section 4.1) | `system/keys/`, `.github/settings/environments.json`, the `sign-system-images` job of `athanor-forge-orchestrator.yml` (`sign-images` of `release.yml` after PB13), `docs/operations/secrets.md`, the `signing` alias of `scripts/verify.py` | a release signed with key 2 alone was promoted to `:stable` and one more release followed; `athanor-image-1.pub` is gone from `system/keys/`; the live environments and `environments.json` list `signing-kernel`, `signing-images` and `release` only; `MOK_PRIVATE_KEY` is absent | PB5 | 0.5 (estimate) |
 | | **[M]** decide that the machines meant to keep updating have booted a key-2 release (secrets.md section 4.1, step 2), then delete `signing` | | | | |
@@ -1271,15 +1284,28 @@ advisory can change the answer, and the record pins the one used, with its updat
 timestamp, for audit (PL55, section 3.3, PB4b).
 
 Amended on 2026-10-09, still proposed: no switch file. The class is per repository. A
-missing, unlabelled or non-ancestor baseline `:latest` gives `class = feature`, no
-advisories and a `class_reason`, extending ADR-0094 item 5's rule, shown in the run summary and
+missing or unlabelled baseline `:latest` falls back with a `class_reason` (narrowed in the
+next entry), extending ADR-0094 item 5's rule, shown in the run summary and
 in the promotion's job summary. With a known baseline, an unavailable updateinfo source
 fails `candidate` (PL55, PL58, PL60, section 3.3, PB4b).
 
 Amended on 2026-10-09, still proposed: the fallback covers bootstrap only. The git range
 `<label>..<candidate>` is defined for a non-ancestor baseline, so `baseline-not-ancestor`
 is dropped, and a label commit absent from the repository fails. The revision label is a
-build check (PB13), so an unlabelled `:latest` predates PB13; for it the Fedora half still
+build check (PB13), so an unlabelled `:latest` predates PB13 or comes from `main` (see the
+next entries); for it the Fedora half still
 runs and can give `security`. The fallback extends ADR-0094 item 5's rule to a signed record
 with `class_reason`. The record holds one entry per repository, and its digest match applies
 before `tag-latest` (PL55, section 3.3, PB4b, PB13).
+
+Amended on 2026-10-09, still proposed: the digest check is per repository. `:latest` must
+equal the entry's `baseline_digest` or `candidate_digest`, and a partial `tag-latest`
+re-run retags only the repositories still at their baseline (PL55, PB4b). PL58 and the
+history no longer say that an unlabelled baseline always gives the feature class.
+
+Amended on 2026-10-09, still proposed: the PB4b attestation records `revision`. The git
+half's lower bound is the `:latest` label, or else the `revision` of the newest attested
+image, so a hand release of `main` costs nothing, and only a true bootstrap skips the git
+half. Section 5 keeps, per repository, the digest `:latest` names and the newest attested
+image with its attestation, which fixes a kept set that protected no unpromoted image
+(PL55, section 5, PB4b).
