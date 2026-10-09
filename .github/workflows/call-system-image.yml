@@ -59,33 +59,7 @@ jobs:
             -e GITHUB_ACTOR="${GITHUB_ACTOR}" \
             -e GITHUB_REPOSITORY_OWNER="${GITHUB_REPOSITORY_OWNER}" \
             "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/athanor-builder:${BUILDER_CONTENT_HASH}" \
-            bash <<'EOF'
-            set -e
-            export BUILDAH_ISOLATION=chroot
-            export XDG_DATA_HOME=/var/tmp
-            export XDG_CONFIG_HOME=/var/tmp
-            export XDG_CACHE_HOME=/var/tmp
-            export _CONTAINERS_USERNS_CONFIGURED=done
-
-            # Container storage on the workspace mount, i.e. the runner's disk, addressed
-            # by path: no bind mount, which the builder could not perform anyway.
-            mkdir -p /workspace/var-tmp/containers
-            {
-              echo '[storage]'
-              echo 'driver = "vfs"'
-              echo 'runroot = "/workspace/var-tmp/containers/runroot"'
-              echo 'graphroot = "/workspace/var-tmp/containers/storage"'
-              echo '[storage.options.vfs]'
-              echo 'ignore_chown_errors = "true"'
-            } > /var/tmp/storage.conf
-            export CONTAINERS_STORAGE_CONF=/var/tmp/storage.conf
-
-            echo "${GITHUB_TOKEN}" | buildah login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-            bash scripts/fetch_repo_rpms.sh "${GITHUB_REPOSITORY_OWNER}"
-
-            # The tier images, and the digests the image build of this run installs (UD28).
-            bash scripts/publish_tiers.sh /workspace/tier-digests/tier-digests.json
-          EOF
+            bash scripts/aggregate_tier_repos.sh
 
       - name: Hand the tier digests to the image build
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -304,42 +278,7 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
           GITHUB_SERVER_URL: ${{ github.server_url }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          iso=$(find ./output -name '*.iso' -type f | head -n 1)
-          [[ -n $iso ]] || { echo "the ISO build produced no .iso under ./output" >&2; exit 1; }
-          echo "${GITHUB_TOKEN}" | podman login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-          image="${IMAGE_REGISTRY}/athanor-iso"
-          # podman, not buildah: this job builds and pushes the system image with it, so
-          # it is certainly on the runner. A Containerfile on stdin keeps the context to
-          # the ISO alone.
-          podman build --format docker -t "${image}:${RUN_ID}" \
-            --annotation "org.opencontainers.image.revision=${GITHUB_SHA}" \
-            --annotation "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
-            -f - "$(dirname "$iso")" <<CONTAINERFILE
-          FROM scratch
-          LABEL org.opencontainers.image.title="Athanor installer ISO"
-          LABEL org.opencontainers.image.version="${RUN_ID}"
-          COPY $(basename "$iso") /athanor-${RUN_ID}.iso
-          CONTAINERFILE
-          bash forge/scripts/retry.sh podman push --digestfile artifacts/iso-image.digest "${image}:${RUN_ID}"
-          # Name the ISO by digest and bind it to the system image it installs, so accept.yml
-          # takes nothing from a tag. build_iso.sh pulled that image by tag into root storage,
-          # where the builder read it: its digest there must be the one image-digests.txt
-          # recorded after the push, or the tag moved in between and the step fails.
-          system_digest=$(sudo podman image inspect --format '{{.Digest}}' "${IMAGE_REGISTRY}/athanor-system:${RUN_ID}")
-          recorded=$(awk -v repo="${IMAGE_REGISTRY}/athanor-system" '$1 == repo { print $3 }' artifacts/image-digests.txt)
-          [[ $system_digest == "$recorded" ]] || {
-            echo "the local athanor-system digest '${system_digest}' is not the pushed one '${recorded}'" >&2
-            exit 1
-          }
-          printf '%s %s\n%s %s\n' "${image}" "$(<artifacts/iso-image.digest)" \
-            "${IMAGE_REGISTRY}/athanor-system" "${system_digest}" > artifacts/iso-digest.txt
-          {
-            echo "### Installer ISO"
-            echo
-            echo "\`${image}:${RUN_ID}\`, $(du -h "$iso" | cut -f1)"
-          } >> "${GITHUB_STEP_SUMMARY}"
+        run: bash forge/scripts/publish_iso.sh
 
       - name: 📎 Hand the ISO digest to the acceptance
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

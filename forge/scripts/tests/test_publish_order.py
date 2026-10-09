@@ -6,7 +6,17 @@ import pathlib
 import re
 import unittest
 
-WORKFLOW = pathlib.Path(__file__).resolve().parents[3] / ".github/workflows/call-dag-compile.yml"
+ROOT = pathlib.Path(__file__).resolve().parents[3]
+WORKFLOW = ROOT / ".github/workflows/call-dag-compile.yml"
+SCRIPT = ROOT / "forge/scripts/dag_package.sh"
+
+
+def script_step(name):
+    """The body of step_<name> in dag_package.sh, which the workflow step of that name runs."""
+    match = re.search(rf"^step_{name}\(\) {{\n(.*?)^}}\n", SCRIPT.read_text(), re.S | re.M)
+    if match is None:
+        raise AssertionError(f"dag_package.sh has no step_{name}")
+    return match.group(1)
 
 
 class PublishOrderTest(unittest.TestCase):
@@ -34,14 +44,18 @@ class PublishOrderTest(unittest.TestCase):
             if publish is None:
                 continue
             title = job.splitlines()[0]
-            self.assertIn("--digestfile", publish, title)
-            for name in ("Generate SBOM", "Sign & Attest"):
-                step = next(v for k, v in by_name.items() if k.startswith(name))
-                self.assertNotIn(":latest", step, f"{title}: {name} must use the digest")
-                self.assertIn("image.digest", step, f"{title}: {name}")
+            # The steps run their bodies from dag_package.sh (#138), signing stays inline.
+            sbom = next(v for k, v in by_name.items() if k.startswith("Generate SBOM"))
             last = next(v for k, v in by_name.items() if k.startswith("Publish the hash tag"))
-            self.assertIn("tag_signed_image.sh", last, title)
-            self.assertNotIn("buildah push", last, title)
+            for step, name in ((publish, "publish"), (sbom, "sbom"), (last, "tag")):
+                self.assertIn(f"scripts/dag_package.sh {name}\n", step, title)
+            self.assertIn("--digestfile", script_step("publish"), title)
+            sign = next(v for k, v in by_name.items() if k.startswith("Sign & Attest"))
+            for name, body in (("Generate SBOM", script_step("sbom")), ("Sign & Attest", sign)):
+                self.assertNotIn(":latest", body, f"{title}: {name} must use the digest")
+                self.assertIn("image.digest", body, f"{title}: {name}")
+            self.assertIn("tag_signed_image.sh", script_step("tag"), title)
+            self.assertNotIn("buildah push", script_step("tag"), title)
 
 
 if __name__ == "__main__":
