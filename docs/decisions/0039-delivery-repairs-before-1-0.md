@@ -2,7 +2,7 @@
 id: A2-4
 title: "Delivery repairs before 1.0"
 date: 2026-10-05
-status: accepted
+status: amended by ADR-0104
 issues: []
 areas: [update, ci]
 ---

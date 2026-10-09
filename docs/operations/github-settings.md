@@ -134,10 +134,11 @@ its entry leaves `environments.json`; an entry left behind fails the lint, becau
 then held twice.
 
 `release` holds no key and has the same protection as the signing environments: required
-reviewer `hr-mes`, no administrator bypass, branches `iso-v0` and `main`. It is the one approval
-of a release ([ADR-0103](../decisions/0103-audit-5-decisions.md) D2, D25): the signing and
-promotion jobs move behind it, so the run's concurrency group is not held while it waits. Until
-that workflow change lands, no job uses it.
+reviewer `hr-mes`, no administrator bypass, branches `iso-v0` and `main`. It gates only the
+promotion to `:stable` ([ADR-0104](../decisions/0104-release-workflow-and-stable-gate.md),
+amending [ADR-0103](../decisions/0103-audit-5-decisions.md) D2 and D25): the job that moves
+`:stable` runs in it after the evidence and the dwell, and the image signing does not wait
+for it. Until PB13 of `docs/architecture/doc_pipeline.md` lands, no job uses it.
 
 `signing-kernel` and `signing-images` have the same protection in `environments.json`: required reviewer `hr-mes`; administrator
 bypass off (`can_admins_bypass: false`, set by hand: section 4); deployment branches `iso-v0` and

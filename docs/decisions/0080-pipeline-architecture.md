@@ -2,7 +2,7 @@
 id: ADR-0080
 title: "Pipeline architecture"
 date: 2026-10-07
-status: amended by ADR-0088, ADR-0098
+status: amended by ADR-0088, ADR-0098, ADR-0104
 issues: []
 areas: [build, signing, security]
 ---

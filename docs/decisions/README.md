@@ -106,7 +106,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-1 | 0036 | [Shipped-image health block before stage 4](0036-shipped-image-health-block.md) | accepted | update, security |
 | A2-2 | 0037 | [Secure Boot at 1.0 with a real MOK chain](0037-secure-boot-mok-chain.md) | accepted | signing, security |
 | A2-3 | 0038 | [GPL-3.0-or-later for all own code](0038-licence-gpl-3-or-later.md) | accepted | docs, ci |
-| A2-4 | 0039 | [Delivery repairs before 1.0](0039-delivery-repairs-before-1-0.md) | accepted | update, ci |
+| A2-4 | 0039 | [Delivery repairs before 1.0](0039-delivery-repairs-before-1-0.md) | amended by ADR-0104 | update, ci |
 | A2-5 | 0040 | [Security-class updates apply at the next shutdown](0040-security-updates-at-next-shutdown.md) | amended by ADR-0082 | update |
 | A2-6 | 0041 | [Trusted path built on cosmic-comp PR #1441](0041-trusted-path-on-cosmic-comp.md) | amended by ADR-0092 | security, shell |
 | A2-7 | 0042 | [SystemPrompter reuses the oo7 secret exchange](0042-system-prompter-reuses-oo7.md) | accepted | security, shell |
@@ -147,7 +147,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0077 | 0077 | [Desktop decisions from Audit 3](0077-desktop-decisions.md) | accepted | shell, apps, security |
 | ADR-0078 | 0078 | [Fedora 45 is the next base, with Fedora 44 as the fallback](0078-fedora-release-target.md) | amended by ADR-0103 | platform |
 | ADR-0079 | 0079 | [Captive portals under strict DNS over TLS](0079-captive-portals-under-strict-dot.md) | amended by ADR-0103 | network, security |
-| ADR-0080 | 0080 | [Pipeline architecture](0080-pipeline-architecture.md) | amended by ADR-0088, ADR-0098 | build, signing, security |
+| ADR-0080 | 0080 | [Pipeline architecture](0080-pipeline-architecture.md) | amended by ADR-0088, ADR-0098, ADR-0104 | build, signing, security |
 | ADR-0081 | 0081 | [CRA compliance posture](0081-cra-compliance-posture.md) | amended by ADR-0103 | security, update, product |
 | ADR-0082 | 0082 | [Update control: postpone and opt-out](0082-update-control.md) | amended by ADR-0094 | update, security |
 | ADR-0083 | 0083 | [One supported desktop; derived images stay open](0083-one-desktop-derived-images-open.md) | accepted | product, shell, update |
@@ -170,4 +170,5 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0100 | 0100 | [Notification center revision 2: battery notices in the session daemon](0100-notification-center-rev2.md) | accepted | shell, session, desktop |
 | ADR-0101 | 0101 | [One backup mechanism: athanor-backup, without athanor-timewarp](0101-backup-one-mechanism.md) | amended by ADR-0103 | software, backup |
 | ADR-0102 | 0102 | [Audit calendar and audit types](0102-audit-calendar.md) | accepted | process, security |
-| ADR-0103 | 0103 | [Audit 5 decisions and the scope of 1.0](0103-audit-5-decisions.md) | accepted | platform, kernel, build, signing, security, shell, apps, docs |
+| ADR-0103 | 0103 | [Audit 5 decisions and the scope of 1.0](0103-audit-5-decisions.md) | amended by ADR-0104 | platform, kernel, build, signing, security, shell, apps, docs |
+| ADR-0104 | 0104 | [Sign :latest automatically in its own release workflow; approve only the promotion to :stable](0104-release-workflow-and-stable-gate.md) | accepted | build, signing |
