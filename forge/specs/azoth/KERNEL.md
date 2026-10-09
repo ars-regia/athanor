@@ -177,7 +177,7 @@ delta e del Containerfile, immagine base del builder); la principale ha anche la
 provenance SLSA di GitHub. `:latest` si muove solo sul branch di default del repository. Verifica:
 
 ```sh
-cosign verify --certificate-identity-regexp '^https://github.com/ars-regia/athanor/' \
+cosign verify --certificate-identity 'https://github.com/ars-regia/athanor/.github/workflows/kernel-build.yml@refs/heads/iso-v0' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   "ghcr.io/ars-regia/azoth:$(bash nvr.sh)"
 gh attestation verify "oci://ghcr.io/ars-regia/azoth:$(bash nvr.sh)" --repo ars-regia/athanor
@@ -187,7 +187,7 @@ gh attestation verify "oci://ghcr.io/ars-regia/azoth:$(bash nvr.sh)" --repo ars-
 
 Il bot (`kernel-bump.yml`, spec sezione 8) apre ogni giorno, dal branch di default, una
 PR con i pin nuovi, i manifesti rigenerati, l'esito di `prep` e le opzioni derivate, e
-le mette l'auto-merge, che su `iso-v0` aspetta i check di `branch-protection.json` (`gate` di `pr.yml`, che include il controllo del kernel, e `Spec gate`), ma solo se `prep` e' verde e nessun lock NVIDIA si muove: altrimenti la fonde una persona. A mano, nella stessa
+le mette l'auto-merge, che su `iso-v0` aspetta i check di `branch-protection.json` (`gate` di `pr.yml`, che include il controllo del kernel e quello delle spec), ma solo se `prep` e' verde e nessun lock NVIDIA si muove: altrimenti la fonde una persona. A mano, nella stessa
 sequenza:
 
 1. `python3 bump.py check --group kernel` mostra cosa muoverebbe;
