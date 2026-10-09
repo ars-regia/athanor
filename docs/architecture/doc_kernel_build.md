@@ -437,7 +437,9 @@ builds the kernel, its `kernel / build` job and kernel verdict are green, and it
 the API by the pull request's head commit; (2) the tree of `forge/specs/azoth` and the blobs of
 `pr.yml`, `call-kernel.yml` and `scripts/ci/build-builder.sh` are equal at the run's `head_sha`
 and at the pushed commit, and likewise at the base the pull request records and at the pushed
-commit's parent, a pull request whose base was changed never promotes, and the values are taken
+commit's parent, the last commit of the pushed commit's parent that changed each of them is in
+the history of the run's `head_sha` (GitHub records no base for a run, so a change made and
+reverted on `iso-v0` after the head branched cannot pass), a pull request whose base was changed never promotes, and the values are taken
 from GitHub's metadata and the pushed checkout, never from the run's outputs or artifacts; (3)
 `build-inputs.py` at the pushed commit equals the run's, and `out/nvr` equals the NVR of the
 pins; (4) the artifact is fetched by id and its SHA-256 digest equals the one the API reports.
