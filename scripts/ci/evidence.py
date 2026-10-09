@@ -36,7 +36,7 @@ def args(argv):
     w.add_argument("--out", required=True, type=pathlib.Path)
     sub.choices["check"].add_argument("--dir", required=True, type=pathlib.Path)
     a = p.parse_args(argv)
-    if not (IMAGE.match(a.image) and DIGEST.match(a.digest) and a.run_id.isdigit()):
+    if not (IMAGE.match(a.image) and DIGEST.match(a.digest) and re.fullmatch(r"[0-9]+", a.run_id)):
         p.error("--image, --digest or --run-id is malformed")
     return a
 

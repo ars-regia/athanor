@@ -91,7 +91,7 @@ class Evidence(unittest.TestCase):
         self.assertIn("verdict is fail", self.check().stderr)
 
     def test_bad_arguments_are_refused_at_write(self):
-        for kwargs in ({"gate": "hardware"}, {"digest": "sha256:abc"}, {"run_id": "12a"}, {"image": "../x"}):
+        for kwargs in ({"gate": "hardware"}, {"digest": "sha256:abc"}, {"run_id": "12a"}, {"run_id": "\u00b2"}, {"image": "../x"}):
             with self.subTest(**kwargs):
                 self.assertEqual(self.write(**kwargs).returncode, 2)
 
