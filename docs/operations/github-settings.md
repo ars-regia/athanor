@@ -97,7 +97,7 @@ Since then the files have moved ahead of GitHub (2026-10-07, ADR-0064): the two 
 | Environment `signing`: reviewer `hr-mes`, branches `iso-v0` and `main`, admin bypass on, four secrets | `environments.json` until 2026-10-07 (now section 7) |
 | Environment `github-pages`: branches `gh-pages` and `main`; no workflow deploys to it since the DNF channel was removed (ADR-0076, decision 2) | deleted by hand, absent from the export of 2026-10-09 |
 | Environment `delete`: no rule, no secret | deleted by hand, absent from the export of 2026-10-09 |
-| Pages: legacy build from `main:/docs`; `gh api repos/ars-regia/athanor/pages` reports `"status": "errored"` (status is volatile, not stored) | `pages.json` |
+| Pages: legacy build from `main:/docs`; `gh api repos/ars-regia/athanor/pages` reports `"status": "errored"` (status is volatile, not stored) | `pages.json`; off since 2026-10-09, when the file became `null` |
 | Actions: all actions allowed, SHA pinning not required, default token read-only, Actions cannot approve pull requests, approval required for all external contributors | `actions.json` |
 
 ## 6. Open points (decided 2026-10-08, [ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md))
