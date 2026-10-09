@@ -104,7 +104,7 @@ These are the maintainer's, and this document does not reopen them.
    (A2-4). Until step 3 of the image key rotation the signing job runs in `signing`, which
    keeps its required reviewer; from step 3 in `signing-images`, without one, 1.0 included
    (ADR-0098 item 6, ADR-0104 item 8); `signing-kernel` keeps its reviewer. The LUKS2 key backup is made
-   with the key hierarchy of ADR-0103 D5, before 1.0, and D25's prohibition of a key-2
+   before the key hierarchy of ADR-0103 D5, in the week of 2026-10-09 (ADR-0105), and D25's prohibition of a key-2
    transitional release before that hierarchy stands. ADR-0104 amends ADR-0080 item 1
    (`release.yml` no longer builds), ADR-0103 D2, D3 and D25, ADR-0098 item 6 (the
    reviewer of `signing-images` does not return at 1.0), the rationale of ADR-0088 item 5,

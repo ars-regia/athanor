@@ -53,9 +53,9 @@ Decided by the maintainer on 2026-10-09.
    then. From step 3 the job runs in `signing-images`, without a required reviewer (ADR-0098
    item 6), which does not return at the 1.0 tag (item 8). `signing-kernel` keeps its
    required reviewer.
-5. **The key backup comes with the key hierarchy.** The LUKS2 backup of the keys on two
-   drives, on which the key hierarchy of ADR-0103 D5 depends, is made when the work reaches the
-   hierarchy, before 1.0, not deferred to 1.0. The prohibition of D25 stands: no transitional
+5. **The key backup comes before the key hierarchy.** The LUKS2 backup of the keys on two
+   drives, on which the key hierarchy of ADR-0103 D5 depends, is made before the work reaches
+   the hierarchy, in the week of 2026-10-09 (ADR-0105), not deferred to 1.0. The prohibition of D25 stands: no transitional
    release signed with key 2 is cut before the hierarchy exists.
 6. **An exception to the freeze.** Revision 3 of `doc_pipeline.md`, which specifies items 1
    to 4, is exempt from the freeze of new specification revisions in ADR-0103 D3. It serves the
