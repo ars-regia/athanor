@@ -92,7 +92,10 @@ rebuilds as today:
    run's `head_sha` equal those at the pushed commit (`git rev-parse <sha>:<path>`). Every
    value compared comes from metadata GitHub sets (the run's `head_sha`, the pull request API)
    and from the pushed checkout, never from the run's own output or artifacts: otherwise the
-   pull request's code would attest itself. When the trees differ, the push rebuilds. This is
+   pull request's code would attest itself. The run built a merge commit, so the same
+   comparison also holds for the base commit the run merged (from the run's API record): an
+   azoth change on the base that was later reverted would otherwise pass. When any tree
+   differs, the push rebuilds. This is
    the check that turns "a pull request run" into "the reviewed code that is now on
    `iso-v0`". The source inputs are pinned and hash-checked (`build.sh:120`), but the build
    also reads the runner's persistent cache (`build.sh:32`, `kernel-build.yml:142`), which no
