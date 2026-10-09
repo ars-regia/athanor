@@ -45,4 +45,5 @@ local commands.
 
 `python3 -B -m unittest discover -s forge/specs/azoth/tests`. The kernel build needs the
 builder container and about an hour on 16 cores; the `Kernel gate` check of
-`kernel-build.yml`, required on `iso-v0` and `main`, runs it in CI.
+`kernel-build.yml`, required on `main`, runs it in CI on pull requests to `main`; on `iso-v0` the
+`gate` check of `pr.yml` runs it.

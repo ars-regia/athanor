@@ -142,7 +142,7 @@ for it. Until PB13 of `docs/architecture/doc_pipeline.md` lands, no job uses it.
 
 `signing-kernel` and `signing-images` have the same protection in `environments.json`: required reviewer `hr-mes`; administrator
 bypass off (`can_admins_bypass: false`, set by hand: section 4); deployment branches `iso-v0` and
-`main`, both protected by `branch-protection.json` (required checks `Kernel gate`, `Spec gate`
+`main`, both protected by `branch-protection.json` (required checks `Spec gate`
 and `gate` on `iso-v0`, `Kernel gate` on `main`, section 8; no force push, no deletion). Once the
 rotation of `secrets.md` section 4.1 ends, `signing-images` loses the required reviewer, which
 does not return at the 1.0 tag (ADR-0098 item 6, amended by ADR-0104 item 8): the human gate
@@ -230,10 +230,10 @@ turns a failed scheduled job into a `ci-alert` issue is not part of this change.
 `gate` is the aggregate job of `pr.yml` (PB1, ADR-0075). It runs `just check`, which tolerates
 the findings of `scripts/ci/known-red.txt` until their expiry, so the ruleset adds no
 exception of its own for known red checks. `branch-protection.json` requires `gate` next to
-`Kernel gate` and `Spec gate` on `iso-v0` (section 8); the ruleset requires `gate` alone on
+`Spec gate` on `iso-v0` and `Kernel gate` on `main` (section 8); the ruleset requires `gate` alone on
 both branches. Classic branch protection and the ruleset both apply until the maintainer
-decides to retire the former; section 8 step 4 and step 5 drop the two legacy contexts, and
-they must be done before the merge queue returns (see below).
+decides to retire the former; section 8 steps 4a to 5b drop the legacy contexts of `iso-v0`, and
+they must be done before a merge queue on `iso-v0` returns (see below).
 
 The ruleset declares no merge queue for now (maintainer decision of 2026-10-08, PIPE-N06): the
 required checks do not run on `merge_group`, so a queue could not be satisfied, and `apply`
@@ -267,9 +267,10 @@ The order of the maintainer's steps, each followed by `ghsettings.py diff`:
    permissions before the daily run is trusted.
 3. Check that `gate` reports on pull requests and merge groups (section 8, step 2), because
    the ruleset requires it.
-4. Precondition: section 8 steps 4 and 5 are done, so `branch-protection.json` no longer
-   requires `Kernel gate` and `Spec gate` and the live protection of `iso-v0` and `main` has
-   dropped them. Only `pr.yml` has a `merge_group` trigger; `kernel-build.yml` and
+4. Precondition: section 8 steps 4a to 5b are done, so `branch-protection.json` no longer
+   requires `Kernel gate` and `Spec gate` on `iso-v0` and the live protection of `iso-v0` has
+   dropped them (`main` keeps `Kernel gate` by design and does not matter for a queue on
+   `iso-v0`). Only `pr.yml` has a `merge_group` trigger; `kernel-build.yml` and
    `spec-build-check.yml` do not, so a merge group never gets those two contexts and a queue
    enabled while they are still required cannot be satisfied. Check with
    `ghsettings.py diff` and by reading the required contexts of both branches, then apply
