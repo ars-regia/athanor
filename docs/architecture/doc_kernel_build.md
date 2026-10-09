@@ -354,23 +354,39 @@ Ogni PR di bump e ogni cambio in `forge/specs/azoth/**` passa:
 
 1. **build** sul runner self-hosted (60 min misurati su 16 core con ThinLTO);
 2. **config**: `process_configs.sh` con controlli accesi;
-3. **boot matrix** (job `boot`, runner GitHub-hosted `ubuntu-24.04` con KVM,
-   `boot.sh` nell'immagine `boot/Containerfile`): firmware {SeaBIOS, OVMF con
-   Secure Boot} × CPU {`-cpu Nehalem`, `-cpu host`}. Nehalem prova che nessuna
-   istruzione oltre il baseline è entrata. Il caso UEFI passa dallo shim Fedora
-   firmato Microsoft a una UKI di prova (vmlinuz, initramfs di prova, `cmdline`)
-   firmata con una MOK effimera arruolata nel varstore OVMF con `virt-fw-vars`:
-   la catena della sezione 6 con una chiave usa e getta al posto della MOK del
-   progetto, così il gate gira anche sulle PR, senza segreti. Asserzioni
-   (`boot/init`, sulla seriale): `uname -r` atteso, `/sys/kernel/btf/vmlinux`,
-   `bpftool feature probe`, `/sys/kernel/sched_ext`, lista misure IMA (con
-   `ima_policy=tcb` solo nella riga di comando di prova), lockdown `integrity`,
-   `tcp_congestion_control=bbr3`, `tainted=0`, `dmesg` senza splat (`BUG:`,
-   `WARNING: CPU:`, `Oops:`, `Call Trace:`; gli avvisi hw-vuln come SRSO non lo
-   sono); i certificati compilati nel kernel (chiave dei moduli e revocati)
-   caricati, per subject key identifier (`Loaded X.509 cert` nel log); in UEFI
-   anche `SecureBoot=1` e `MokListRT` presente. `publish`
-   dipende da `boot`: senza matrice verde non si pubblica;
+3. **boot matrix** (job `boot`, GitHub-hosted `ubuntu-24.04` runner with KVM,
+   `boot.sh` in the `boot/Containerfile` image): six cases. Firmware {SeaBIOS,
+   OVMF with Secure Boot} × CPU {`-cpu Penryn`, `-cpu host`} gives `bios-penryn`,
+   `bios-host`, `uefi-penryn` and `uefi-host`; `iommu-intel` and `iommu-amd` boot
+   SeaBIOS on `-cpu host` with an emulated Intel or AMD IOMMU and interrupt
+   remapping (`doc_kernel_profile.md`, section 12). Penryn (x86-64-v1, no POPCNT
+   or SSE4.2; D14 of `doc_kernel_profile.md`) proves that no instruction beyond
+   the baseline made it into the kernel. The UEFI cases go from the
+   Microsoft-signed Fedora shim to a test UKI (vmlinuz, test initramfs,
+   `cmdline`) signed with an ephemeral MOK enrolled in the OVMF varstore with
+   `virt-fw-vars`: the chain of section 6 with a throwaway key in place of the
+   project MOK, so the gate runs on pull requests too, with no secrets.
+   Assertions (`boot/init`, on the serial console): the expected `uname -r`,
+   `/sys/kernel/btf/vmlinux`, `bpftool feature probe`, `/sys/kernel/sched_ext`,
+   the IMA measurement list (with `ima_policy=tcb` only on the test command
+   line), `tcp_congestion_control=bbr3`, Landlock in the active LSM list, the
+   memory controller, `tainted=0`, a `dmesg` free of splats (`BUG:`,
+   `WARNING: CPU:`, `Oops:`, `Call Trace:`; hw-vuln notices such as SRSO are
+   not). The profile the build enforces (`doc_kernel_profile.md`, sections 5 and
+   6): lockdown `integrity` with no `lockdown=` argument, `init_on_free`,
+   `vsyscall` and `debugfs` off with none of them on the command line,
+   `Dynamic Preempt: lazy`, ASLR at 32 mmap bits and 16 compat bits, and the
+   mesh platform options (WireGuard, KVM, vsock, virtiofs, virtio-gpu, udmabuf,
+   VFIO, TPM) in the running config; `DEBUG_FS_ALLOW_NONE` and
+   `IOMMU_DEFAULT_DMA_LAZY` in the running config too; in the IOMMU cases every
+   group has a lazy `DMA-FQ` domain, or a strict `DMA` domain when the kernel logs
+   that the virtual IOMMU forced strict mode (AMD-Vi "strict mode due to
+   virtualization", VT-d "batching disallowed due to virtualization"), never an
+   identity one. The certificates compiled into the kernel (module key and
+   revoked ones) are loaded, by subject key identifier (`Loaded X.509 cert` in
+   the log), and the builtin keyring holds exactly those of `keys/modules` plus
+   the key the build generates; in UEFI also `SecureBoot=1` and `MokListRT`
+   present. `publish` depends on `boot`: no green matrix, no publication;
 4. **kmod NVIDIA** (job `kmod` di `kernel-build.yml`, che chiama il workflow
    riusabile `nvidia-build.yml`; sezione 10): `nvidia-open` (610) e ramo legacy
    580 compilano con `nvidia.sh` contro il `kernel-devel` appena costruito, o
@@ -695,7 +711,7 @@ CachyOS: candidati da valutare con il benchmark, non default.
 | ---- | -------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
 | K1   | `pins.env`, manifest, `build.sh`, `kernel-local`, `patches.list`; rimozione di script, vendoring e README; workflow `kernel-build.yml` | RPM prodotti in locale e in CI, config onorato     |
 | K2   | pubblicazione OCI con cosign, SBOM, SLSA; debuginfo separato                                                                           | `cosign verify` sul tag                            |
-| K3   | boot matrix in QEMU con le asserzioni della sezione 7                                                                                  | verde su Nehalem, host, UEFI+SB, BIOS              |
+| K3   | boot matrix in QEMU con le asserzioni della sezione 7                                                                                  | green on Penryn, host, UEFI+SB, BIOS, IOMMU        |
 | K4   | `nvidia-kmod.yml` con i due rami, firma MOK                                                                                            | kmod compilati, firmati, accettati sotto SB        |
 | K5   | bot di bump con auto-merge                                                                                                             | una PR di bump verde end-to-end                    |
 | K6   | kernel guest MicroVM                                                                                                                   | `vmlinux` avvia in Firecracker con rootfs di prova |

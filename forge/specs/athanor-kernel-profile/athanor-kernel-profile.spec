@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-kernel-profile
 Version:        1.0.0
-Release:        3%{?dist}
+Release:        4%{?dist}
 Summary:        Athanor kernel profile: effective settings per role combination and their checker
 
 License:        GPL-3.0-or-later
@@ -38,6 +38,12 @@ install -D -m 0644 %{_sourcedir}/usr/lib/sysctl.d/90-athanor-kernel-profile.conf
 %{_prefix}/lib/sysctl.d/90-athanor-kernel-profile.conf
 
 %changelog
+* Fri Oct 09 2026 Athanor Forge <forge@athanor.os> - 1.0.0-4
+- Add the P2 build options of doc_kernel_profile.md section 5 to profile.toml and
+  the generated profiles the checker reads
+- Drop lockdown=integrity, init_on_free=1, vsyscall=none and debugfs=off from the
+  kernel command line: the P2 kernel builds each of them in
+
 * Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-3
 - Ship the base sysctls of D47 as a sysctl.d file generated from profile.toml:
   ptrace_scope 1, suid_dumpable 0, ldisc_autoload 0, protected_fifos and

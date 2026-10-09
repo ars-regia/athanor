@@ -1,6 +1,7 @@
-"""The LSM and memory controller assertions of forge/specs/azoth/boot/init, run against
-files the test writes (python3 -B -m unittest discover -s forge/specs/azoth/tests)."""
+"""The assertions of forge/specs/azoth/boot/init, run against files and stub commands
+the test writes (python3 -B -m unittest discover -s forge/specs/azoth/tests)."""
 
+import gzip
 import pathlib
 import re
 import subprocess
@@ -62,6 +63,196 @@ class BootAssertions(unittest.TestCase):
     def test_init_runs_both_checks_and_mounts_what_they_read(self):
         text = INIT.read_text()
         for needle in ("check landlock    landlock", "check memcg       memcg", "mount -t cgroup2 cgroup2 /sys/fs/cgroup"):
+            self.assertIn(needle, text)
+
+
+def run_function(name, prelude="", args=""):
+    script = f"{prelude}\n{function(name)}\n{name} {args}\n"
+    return subprocess.run(["sh", "-c", script], capture_output=True, text=True)
+
+
+class PlatformAssertions(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = pathlib.Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def log(self, text):
+        (self.dir / "dmesg").write_text(text)
+        return f'dmesg() {{ cat "{self.dir}/dmesg"; }}'
+
+    def test_preempt_lazy_passes(self):
+        self.assertEqual(run_function("preempt_lazy", self.log("[0.1] Dynamic Preempt: lazy\n")).returncode, 0)
+
+    def test_preempt_full_fails(self):
+        self.assertNotEqual(run_function("preempt_lazy", self.log("[0.1] Dynamic Preempt: full\n")).returncode, 0)
+
+    def test_preempt_line_missing_fails(self):
+        self.assertNotEqual(run_function("preempt_lazy", self.log("[0.1] nothing\n")).returncode, 0)
+
+    def vm(self, bits, compat):
+        (self.dir / "mmap_rnd_bits").write_text(f"{bits}\n")
+        (self.dir / "mmap_rnd_compat_bits").write_text(f"{compat}\n")
+        return f'vm_dir="{self.dir}"'
+
+    def test_aslr_bits_pass(self):
+        self.assertEqual(run_function("aslr_bits", self.vm(32, 16)).returncode, 0)
+
+    def test_aslr_bits_too_low_fail(self):
+        self.assertNotEqual(run_function("aslr_bits", self.vm(28, 8)).returncode, 0)
+
+    def groups(self, *types, log="[0.1] nothing\n", dma="CONFIG_IOMMU_DEFAULT_DMA_LAZY=y\n"):
+        for i, kind in enumerate(types):
+            (self.dir / "groups" / str(i)).mkdir(parents=True)
+            (self.dir / "groups" / str(i) / "type").write_text(f"{kind}\n")
+        (self.dir / "groups").mkdir(exist_ok=True)
+        config = self.config(dma) + "\n" + function("kconfig_enabled")
+        return f'iommu_groups="{self.dir}/groups"\n' + self.log(log) + "\n" + config
+
+    def test_lazy_domains_pass(self):
+        self.assertEqual(run_function("iommu_domains", self.groups("DMA-FQ", "DMA-FQ")).returncode, 0)
+
+    def test_a_strict_domain_fails(self):
+        self.assertNotEqual(run_function("iommu_domains", self.groups("DMA-FQ", "DMA")).returncode, 0)
+
+    def test_no_iommu_group_fails(self):
+        self.assertNotEqual(run_function("iommu_domains", self.groups()).returncode, 0)
+
+    def test_an_identity_domain_fails(self):
+        self.assertNotEqual(run_function("iommu_domains", self.groups("identity")).returncode, 0)
+
+    def test_strict_domains_forced_by_a_virtual_iommu_pass(self):
+        log = "[0.2] AMD-Vi: Using strict mode due to virtualization\n"
+        self.assertEqual(run_function("iommu_domains", self.groups("DMA", "DMA", log=log)).returncode, 0)
+
+    def test_a_strict_build_fails_even_when_a_virtual_iommu_forces_strict(self):
+        log = "[0.2] AMD-Vi: Using strict mode due to virtualization\n"
+        prelude = self.groups("DMA", "DMA", log=log, dma="CONFIG_IOMMU_DEFAULT_DMA_STRICT=y\n")
+        self.assertNotEqual(run_function("iommu_domains", prelude).returncode, 0)
+
+    def test_an_identity_domain_fails_even_on_a_virtual_iommu(self):
+        log = "[0.2] AMD-Vi: Using strict mode due to virtualization\n"
+        self.assertNotEqual(run_function("iommu_domains", self.groups("DMA", "identity", log=log)).returncode, 0)
+
+    def config(self, text):
+        with gzip.open(self.dir / "config.gz", "wt") as handle:
+            handle.write(text)
+        return f'kernel_config="{self.dir}/config.gz"'
+
+    def test_module_or_builtin_passes(self):
+        prelude = self.config("CONFIG_WIREGUARD=m\nCONFIG_KVM_AMD=y\n")
+        self.assertEqual(run_function("kconfig_enabled", prelude, "WIREGUARD KVM_AMD").returncode, 0)
+
+    def test_a_missing_option_fails_and_is_named(self):
+        prelude = self.config("CONFIG_WIREGUARD=m\n# CONFIG_UDMABUF is not set\n")
+        result = run_function("kconfig_enabled", prelude, "WIREGUARD UDMABUF")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("UDMABUF", result.stdout)
+
+    def cmdline(self, text):
+        (self.dir / "cmdline").write_text(text + "\n")
+        return f'cmdline_file="{self.dir}/cmdline"\n' + function("not_on_cmdline")
+
+    def lockdown(self, cmdline):
+        (self.dir / "lockdown").write_text("none [integrity] confidentiality\n")
+        return self.cmdline(cmdline) + f'\nlockdown_file="{self.dir}/lockdown"'
+
+    def test_forced_lockdown_passes_without_the_parameter(self):
+        self.assertEqual(run_function("lockdown_forced", self.lockdown("intel_iommu=on")).returncode, 0)
+
+    def test_lockdown_from_the_command_line_does_not_count(self):
+        self.assertNotEqual(run_function("lockdown_forced", self.lockdown("lockdown=integrity")).returncode, 0)
+
+    def test_init_on_free_from_the_build(self):
+        log = self.log("mem auto-init: stack:all(zero), heap alloc:on, heap free:on\n")
+        self.assertEqual(run_function("init_on_free_built_in", self.cmdline("x=1") + "\n" + log).returncode, 0)
+
+    def test_init_on_free_off_fails(self):
+        log = self.log("mem auto-init: stack:all(zero), heap alloc:on, heap free:off\n")
+        self.assertNotEqual(run_function("init_on_free_built_in", self.cmdline("x=1") + "\n" + log).returncode, 0)
+
+    def test_init_on_free_from_the_command_line_does_not_count(self):
+        log = self.log("mem auto-init: stack:all(zero), heap alloc:on, heap free:on\n")
+        prelude = self.cmdline("init_on_free=1") + "\n" + log
+        self.assertNotEqual(run_function("init_on_free_built_in", prelude).returncode, 0)
+
+    def maps(self, text):
+        (self.dir / "maps").write_text(text)
+        return self.cmdline("x=1") + f'\nmaps_file="{self.dir}/maps"'
+
+    def test_a_vsyscall_page_fails(self):
+        prelude = self.maps("ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0 [vsyscall]\n")
+        self.assertNotEqual(run_function("vsyscall_none", prelude).returncode, 0)
+
+    def test_no_vsyscall_page_passes(self):
+        prelude = self.maps("7ffd1000-7ffd3000 r-xp 00000000 00:00 0 [vdso]\n")
+        self.assertEqual(run_function("vsyscall_none", prelude).returncode, 0)
+
+    def debugfs(self, mount_status, config="CONFIG_DEBUG_FS_ALLOW_NONE=y\n"):
+        stubs = f'\nmount() {{ return {mount_status}; }}\ndebugfs_dir="{self.dir}/debugfs"\n'
+        return self.cmdline("x=1") + stubs + self.config(config) + "\n" + function("kconfig_enabled")
+
+    def test_debugfs_that_mounts_fails(self):
+        self.assertNotEqual(run_function("debugfs_off", self.debugfs(0)).returncode, 0)
+
+    def test_debugfs_refused_passes(self):
+        self.assertEqual(run_function("debugfs_off", self.debugfs(19)).returncode, 0)
+
+    def test_debugfs_refused_without_allow_none_in_the_config_fails(self):
+        prelude = self.debugfs(19, "CONFIG_DEBUG_FS_ALLOW_ALL=y\n")
+        self.assertNotEqual(run_function("debugfs_off", prelude).returncode, 0)
+
+    def keyring(self, count):
+        ids = " ".join(str(100 + i) for i in range(count))
+        return f'keyctl() {{ case $1 in rlist) echo "{ids}" ;; list) echo "{count} keys" ;; esac; }}'
+
+    def test_the_expected_number_of_builtin_keys_passes(self):
+        self.assertEqual(run_function("builtin_exact", self.keyring(2) + "\nbuiltin_expected=2").returncode, 0)
+
+    def test_an_extra_builtin_key_fails(self):
+        self.assertNotEqual(run_function("builtin_exact", self.keyring(3) + "\nbuiltin_expected=2").returncode, 0)
+
+    def test_a_missing_expectation_fails(self):
+        self.assertNotEqual(run_function("builtin_exact", self.keyring(2) + "\nbuiltin_expected=").returncode, 0)
+
+    def test_an_unreadable_keyring_fails(self):
+        prelude = "keyctl() { echo 'keyctl: Required key not available' >&2; return 1; }\nbuiltin_expected=0"
+        self.assertNotEqual(run_function("builtin_exact", prelude).returncode, 0)
+
+    def ima(self, describe_rc, padd_rc, listed="", why="Required key not available", key="/bin/sh"):
+        return (f'keyctl() {{ case $1 in describe) return {describe_rc} ;; '
+                f'padd) echo "add_key: {why}" >&2; return {padd_rc} ;; '
+                f'list) echo "{listed}" ;; esac; }}\nimakey_file={key}')
+
+    def test_a_refused_key_passes(self):
+        self.assertEqual(run_function("ima_key_refused", self.ima(0, 1)).returncode, 0)
+
+    def test_an_accepted_key_fails(self):
+        self.assertNotEqual(run_function("ima_key_refused", self.ima(0, 0)).returncode, 0)
+
+    def test_ima_refusal_needs_the_keyring(self):
+        self.assertNotEqual(run_function("ima_key_refused", self.ima(1, 1)).returncode, 0)
+
+    def test_a_refusal_for_another_reason_fails(self):
+        self.assertNotEqual(run_function("ima_key_refused", self.ima(0, 1, why="Bad message")).returncode, 0)
+
+    def test_a_rejected_signature_is_not_the_missing_ca(self):
+        # EKEYREJECTED comes from verify_signature(), after a trusted signer was found: the
+        # CA was in a keyring .ima trusts, which is what the check must rule out.
+        self.assertNotEqual(
+            run_function("ima_key_refused", self.ima(0, 1, why="Key was rejected by service")).returncode, 0
+        )
+
+    def test_a_missing_key_file_fails(self):
+        self.assertNotEqual(run_function("ima_key_refused", self.ima(0, 1, key="/nonexistent/key.der")).returncode, 0)
+
+    def test_init_runs_the_platform_checks(self):
+        text = INIT.read_text()
+        for needle in ("check preempt", "check aslr", "check iommu", "check mesh-platform",
+                       "check lockdown    lockdown_forced", "check init-on-free", "check vsyscall", "check debugfs",
+                       "check builtin-set builtin_exact"):
             self.assertIn(needle, text)
 
 

@@ -149,7 +149,7 @@ class SignerRun(unittest.TestCase):
                 self.assertIn(target, ("/out", "/modules"), mount)
                 self.assertIn(
                     source.removeprefix(f"{self.root}/"),
-                    ("kernel-unsigned", "kernel-signed", "out", "mok"),
+                    ("kernel-unsigned", "kernel-signed", "out", "mok", "mokca", "mokleaf"),
                     mount,
                 )
 
@@ -246,17 +246,18 @@ class SignerRun(unittest.TestCase):
 
     def test_prepare_signs_a_copy_the_allow_list_admits_and_ships_its_certificate(self):
         """The certificate of the test MOK stays outside the tree the signer checks and signs,
-        and joins mok/ only afterwards, for the boot job."""
-        profile = "forge/specs/azoth/keys/profiles/secureboot.cnf"
-        (self.root / profile).parent.mkdir(parents=True)
-        shutil.copy(REPO / profile, self.root / profile)
+        and joins mok/ only afterwards, for the boot job. The user CA and its leaf (D40) follow."""
+        for profile in ("secureboot.cnf", "test-user-ca.cnf"):
+            rel = f"forge/specs/azoth/keys/profiles/{profile}"
+            (self.root / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(REPO / rel, self.root / rel)
         self.digest()
         self.modules()
         self.write("out/open-rm.log", "log")
         r = self.run_script("prepare", KERNEL_DIGEST=KERNEL)
         self.assertEqual(r.returncode, 0, r.stderr)
         runs = self.runs()
-        self.assertEqual(len(runs), 3)
+        self.assertEqual(len(runs), 5)
         for run in runs:
             self.assert_confined(run)
         self.assertIn(f"-v {self.root}/mok:/modules ", runs[2])
@@ -264,10 +265,30 @@ class SignerRun(unittest.TestCase):
         self.assertFalse(
             pathlib.Path(cert).is_relative_to(self.root / "mok"), "outside the checked tree"
         )
+        self.assertIn(f"-v {self.root}/mokca:/modules ", runs[3])
+        self.assertIn(f"-v {self.root}/mokleaf:/modules ", runs[4])
         self.assertEqual(
-            sum("nothing else" in c for c in self.calls()), 2, "out/ and mok/ both admitted"
+            sum("nothing else" in c for c in self.calls()),
+            4,
+            "out/, mok/, mokca/, mokleaf/ admitted",
         )
         self.assertIn("BEGIN CERTIFICATE", (self.root / "mok/test-mok.pem").read_text())
+        self.assertIn("BEGIN CERTIFICATE", (self.root / "mokca/test-ca.pem").read_text())
+        self.assertIn("BEGIN CERTIFICATE", (self.root / "mokleaf/test-leaf.pem").read_text())
+        ca = subprocess.run(
+            ["openssl", "x509", "-in", str(self.root / "mokca/test-ca.pem"), "-noout", "-ext", "basicConstraints,keyUsage"],
+            capture_output=True,
+            text=True,
+        ).stdout
+        self.assertIn("CA:TRUE", ca)
+        self.assertIn("Certificate Sign", ca)
+        self.assertNotIn("Digital Signature", ca)
+        verify = subprocess.run(
+            ["openssl", "verify", "-CAfile", str(self.root / "mokca/test-ca.pem"), str(self.root / "mokleaf/test-leaf.pem")],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(verify.returncode, 0, verify.stdout + verify.stderr)
 
     def test_inputs_refuses_a_kernel_the_registry_does_not_verify(self):
         self.digest()

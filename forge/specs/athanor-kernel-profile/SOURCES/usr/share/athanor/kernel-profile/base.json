@@ -8,10 +8,6 @@
         "decision": "section 6",
         "value": "active"
       },
-      "debugfs": {
-        "decision": "section 6",
-        "value": "off"
-      },
       "efi": {
         "decision": "section 6",
         "value": "disable_early_pci_dma"
@@ -20,28 +16,40 @@
         "decision": "D23",
         "value": "tcb"
       },
-      "init_on_free": {
-        "decision": "section 6",
-        "value": "1"
-      },
       "intel_iommu": {
         "decision": "D16",
         "value": "on"
       },
-      "lockdown": {
-        "decision": "section 6",
-        "value": "integrity"
-      },
       "page_alloc.shuffle": {
         "decision": "section 6",
         "value": "1"
-      },
-      "vsyscall": {
-        "decision": "section 6",
-        "value": "none"
       }
     },
     "kconfig": {
+      "CONFIG_ARCH_MMAP_RND_BITS": {
+        "decision": "section 5",
+        "value": "32"
+      },
+      "CONFIG_ARCH_MMAP_RND_COMPAT_BITS": {
+        "decision": "section 5",
+        "value": "16"
+      },
+      "CONFIG_ATA_PIIX": {
+        "decision": "D17",
+        "value": "y"
+      },
+      "CONFIG_AUTOFDO_CLANG": {
+        "decision": "section 5",
+        "value": "y"
+      },
+      "CONFIG_BLK_DEV_SD": {
+        "decision": "D17",
+        "value": "y"
+      },
+      "CONFIG_BLK_DEV_WRITE_MOUNTED": {
+        "decision": "section 5",
+        "value": "n"
+      },
       "CONFIG_BPF_LSM": {
         "decision": "section 5",
         "value": "y"
@@ -54,25 +62,93 @@
         "decision": "section 5",
         "value": "y"
       },
+      "CONFIG_CHECKPOINT_RESTORE": {
+        "decision": "section 5",
+        "value": "n"
+      },
       "CONFIG_CPU_MITIGATIONS": {
         "decision": "section 6",
+        "value": "y"
+      },
+      "CONFIG_CRASH_DUMP": {
+        "decision": "section 5",
+        "value": "n"
+      },
+      "CONFIG_DEBUG_FS_ALLOW_ALL": {
+        "decision": "section 5",
+        "value": "n"
+      },
+      "CONFIG_DEBUG_FS_ALLOW_NONE": {
+        "decision": "section 5",
+        "value": "y"
+      },
+      "CONFIG_DEBUG_NOTIFIERS": {
+        "decision": "section 5",
+        "value": "y"
+      },
+      "CONFIG_DEBUG_SG": {
+        "decision": "section 5",
+        "value": "y"
+      },
+      "CONFIG_DEBUG_VIRTUAL": {
+        "decision": "section 5",
         "value": "y"
       },
       "CONFIG_DEFAULT_TCP_CONG": {
         "decision": "section 6",
         "value": "\"bbr3\""
       },
+      "CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIG": {
+        "decision": "D40",
+        "value": "y"
+      },
+      "CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIG_PLATFORM_KEYRING": {
+        "decision": "D40",
+        "value": "n"
+      },
+      "CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIG_SECONDARY_KEYRING": {
+        "decision": "D40",
+        "value": "n"
+      },
       "CONFIG_DRM_PANIC": {
         "decision": "section 11",
         "value": "y"
+      },
+      "CONFIG_DRM_SIMPLEDRM": {
+        "decision": "D17",
+        "value": "y"
+      },
+      "CONFIG_EFI_VARS_PSTORE": {
+        "decision": "D19",
+        "value": "y"
+      },
+      "CONFIG_EFI_VARS_PSTORE_DEFAULT_DISABLE": {
+        "decision": "D19",
+        "value": "n"
       },
       "CONFIG_EROFS_FS": {
         "decision": "section 5",
         "value": "y"
       },
+      "CONFIG_HIBERNATION": {
+        "decision": "section 5",
+        "value": "n"
+      },
+      "CONFIG_HID_GENERIC": {
+        "decision": "D17",
+        "value": "y"
+      },
       "CONFIG_HZ": {
         "decision": "section 6",
         "value": "1000"
+      },
+      "CONFIG_I2C_DESIGNWARE_CORE": {
+        "decision": "D17",
+        "value": "y"
+      },
+      "CONFIG_I2C_DESIGNWARE_PLATFORM": {
+        "decision": "D17",
+        "value": "y"
       },
       "CONFIG_IA32_EMULATION": {
         "decision": "section 5",
@@ -86,12 +162,104 @@
         "decision": "section 6",
         "value": "y"
       },
+      "CONFIG_IMA_KEYRINGS_PERMIT_SIGNED_BY_BUILTIN_OR_SECONDARY": {
+        "decision": "D46",
+        "value": "n"
+      },
       "CONFIG_INIT_ON_ALLOC_DEFAULT_ON": {
         "decision": "section 6",
         "value": "y"
       },
+      "CONFIG_INIT_ON_FREE_DEFAULT_ON": {
+        "decision": "section 5",
+        "value": "y"
+      },
+      "CONFIG_INTEGRITY_CA_MACHINE_KEYRING": {
+        "decision": "D40",
+        "value": "y"
+      },
       "CONFIG_INTEGRITY_CA_MACHINE_KEYRING_MAX": {
         "decision": "D40",
+        "value": "y"
+      },
+      "CONFIG_INTEGRITY_MACHINE_KEYRING": {
+        "decision": "D40",
+        "value": "y"
+      },
+      "CONFIG_IOMMU_DEFAULT_DMA_LAZY": {
+        "decision": "D16",
+        "value": "y"
+      },
+      "CONFIG_IOMMU_DEFAULT_DMA_STRICT": {
+        "decision": "D16",
+        "value": "n"
+      },
+      "CONFIG_IPE_POLICY_SIG_PLATFORM_KEYRING": {
+        "decision": "D40",
+        "value": "n"
+      },
+      "CONFIG_IPE_POLICY_SIG_SECONDARY_KEYRING": {
+        "decision": "D40",
+        "value": "n"
+      },
+      "CONFIG_KCMP": {
+        "decision": "section 5",
+        "value": "y"
+      },
+      "CONFIG_KEXEC": {
+        "decision": "section 5",
+        "value": "n"
+      },
+      "CONFIG_KEXEC_FILE": {
+        "decision": "section 5",
+        "value": "n"
+      },
+      "CONFIG_KEXEC_HANDOVER": {
+        "decision": "section 5",
+        "value": "n"
+      },
+      "CONFIG_KEYBOARD_ATKBD": {
+        "decision": "D17",
+        "value": "y"
+      },
+      "CONFIG_KSTACK_ERASE": {
+        "decision": "section 5",
+        "value": "y"
+      },
+      "CONFIG_LEGACY_VSYSCALL_NONE": {
+        "decision": "section 5",
+        "value": "y"
+      },
+      "CONFIG_LEGACY_VSYSCALL_XONLY": {
+        "decision": "section 5",
+        "value": "n"
+      },
+      "CONFIG_LIVEPATCH": {
+        "decision": "section 5",
+        "value": "n"
+      },
+      "CONFIG_LOCK_DOWN_KERNEL_FORCE_CONFIDENTIALITY": {
+        "decision": "section 5",
+        "value": "n"
+      },
+      "CONFIG_LOCK_DOWN_KERNEL_FORCE_INTEGRITY": {
+        "decision": "section 5",
+        "value": "y"
+      },
+      "CONFIG_LOCK_DOWN_KERNEL_FORCE_NONE": {
+        "decision": "section 5",
+        "value": "n"
+      },
+      "CONFIG_LSM": {
+        "decision": "section 5",
+        "value": "\"lockdown,yama,selinux,bpf,landlock,ipe\""
+      },
+      "CONFIG_MFD_INTEL_LPSS_ACPI": {
+        "decision": "D17",
+        "value": "y"
+      },
+      "CONFIG_MFD_INTEL_LPSS_PCI": {
+        "decision": "D17",
         "value": "y"
       },
       "CONFIG_MODIFY_LDT_SYSCALL": {
@@ -102,6 +270,30 @@
         "decision": "section 5",
         "value": "y"
       },
+      "CONFIG_MSEAL_SYSTEM_MAPPINGS": {
+        "decision": "section 5",
+        "value": "y"
+      },
+      "CONFIG_PAGE_TABLE_CHECK": {
+        "decision": "section 5",
+        "value": "y"
+      },
+      "CONFIG_PAGE_TABLE_CHECK_ENFORCED": {
+        "decision": "section 5",
+        "value": "y"
+      },
+      "CONFIG_PANIC_TIMEOUT": {
+        "decision": "D19",
+        "value": "10"
+      },
+      "CONFIG_PINCTRL_AMD": {
+        "decision": "D17",
+        "value": "y"
+      },
+      "CONFIG_PREEMPT": {
+        "decision": "D13",
+        "value": "n"
+      },
       "CONFIG_PREEMPT_DYNAMIC": {
         "decision": "D13",
         "value": "y"
@@ -109,6 +301,22 @@
       "CONFIG_PREEMPT_LAZY": {
         "decision": "D13",
         "value": "y"
+      },
+      "CONFIG_PROC_KCORE": {
+        "decision": "section 5",
+        "value": "n"
+      },
+      "CONFIG_PROC_MEM_ALWAYS_FORCE": {
+        "decision": "section 5",
+        "value": "n"
+      },
+      "CONFIG_PROC_MEM_FORCE_PTRACE": {
+        "decision": "section 5",
+        "value": "y"
+      },
+      "CONFIG_PROC_MEM_NO_FORCE": {
+        "decision": "section 5",
+        "value": "n"
       },
       "CONFIG_RANDOMIZE_KSTACK_OFFSET_DEFAULT": {
         "decision": "section 6",
@@ -118,8 +326,20 @@
         "decision": "D4",
         "value": "y"
       },
+      "CONFIG_SATA_AHCI": {
+        "decision": "D17",
+        "value": "y"
+      },
       "CONFIG_SCHED_BORE": {
         "decision": "D5",
+        "value": "y"
+      },
+      "CONFIG_SECONDARY_TRUSTED_KEYRING": {
+        "decision": "D40",
+        "value": "y"
+      },
+      "CONFIG_SECONDARY_TRUSTED_KEYRING_SIGNED_BY_BUILTIN": {
+        "decision": "D40",
         "value": "y"
       },
       "CONFIG_SECURITY_IPE": {
@@ -130,6 +350,30 @@
         "decision": "section 10",
         "value": "y"
       },
+      "CONFIG_SECURITY_LOCKDOWN_LSM": {
+        "decision": "section 5",
+        "value": "y"
+      },
+      "CONFIG_SECURITY_LOCKDOWN_LSM_EARLY": {
+        "decision": "section 5",
+        "value": "y"
+      },
+      "CONFIG_SECURITY_TOMOYO": {
+        "decision": "section 5",
+        "value": "n"
+      },
+      "CONFIG_SERIAL_8250_DW": {
+        "decision": "D17",
+        "value": "y"
+      },
+      "CONFIG_SERIAL_DEV_BUS": {
+        "decision": "D17",
+        "value": "y"
+      },
+      "CONFIG_SERIO_I8042": {
+        "decision": "D17",
+        "value": "y"
+      },
       "CONFIG_SHUFFLE_PAGE_ALLOCATOR": {
         "decision": "section 5",
         "value": "y"
@@ -138,9 +382,65 @@
         "decision": "section 6",
         "value": "n"
       },
+      "CONFIG_TCG_CRB": {
+        "decision": "D17",
+        "value": "y"
+      },
+      "CONFIG_TCG_TIS": {
+        "decision": "D17",
+        "value": "y"
+      },
+      "CONFIG_UBSAN_TRAP": {
+        "decision": "section 5",
+        "value": "y"
+      },
+      "CONFIG_USB_EHCI_HCD": {
+        "decision": "D17",
+        "value": "y"
+      },
+      "CONFIG_USB_EHCI_PCI": {
+        "decision": "D17",
+        "value": "y"
+      },
+      "CONFIG_USB_HID": {
+        "decision": "D17",
+        "value": "y"
+      },
+      "CONFIG_USB_OHCI_HCD": {
+        "decision": "D17",
+        "value": "y"
+      },
+      "CONFIG_USB_OHCI_HCD_PCI": {
+        "decision": "D17",
+        "value": "y"
+      },
+      "CONFIG_USB_UHCI_HCD": {
+        "decision": "D17",
+        "value": "y"
+      },
+      "CONFIG_USB_XHCI_HCD": {
+        "decision": "D17",
+        "value": "y"
+      },
+      "CONFIG_USB_XHCI_PCI": {
+        "decision": "D17",
+        "value": "y"
+      },
+      "CONFIG_VIRTIO_BLK": {
+        "decision": "D17",
+        "value": "y"
+      },
+      "CONFIG_VIRTIO_PCI": {
+        "decision": "D17",
+        "value": "y"
+      },
       "CONFIG_X86_64_VERSION": {
         "decision": "D14",
         "value": "1"
+      },
+      "CONFIG_X86_IOPL_IOPERM": {
+        "decision": "section 5",
+        "value": "n"
       }
     },
     "runtime": {

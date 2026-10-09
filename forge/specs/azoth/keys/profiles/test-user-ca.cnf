@@ -1,0 +1,26 @@
+# Test-only certificate profiles of the D40 user path (docs/architecture/doc_kernel_profile.md,
+# section 12 item 2): a user CA enrolled in MokList and trusted for the machine keyring, and a
+# leaf it issues. signer/run.sh prepare generates both keys in its own work directory; no key
+# of this profile ever leaves the CI job.
+[ req ]
+default_bits = 2048
+default_md = sha256
+distinguished_name = req_distinguished_name
+prompt = no
+string_mask = utf8only
+x509_extensions = ca
+
+[ req_distinguished_name ]
+CN = Athanor OS K3 test user CA
+
+[ ca ]
+basicConstraints = critical,CA:TRUE
+keyUsage = critical,keyCertSign
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid
+
+[ leaf ]
+basicConstraints = critical,CA:FALSE
+keyUsage = digitalSignature
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid

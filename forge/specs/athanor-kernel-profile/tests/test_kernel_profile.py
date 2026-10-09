@@ -6,6 +6,7 @@ Run: python3 -B -m unittest discover -s forge/specs/athanor-kernel-profile/tests
 import io
 import json
 import pathlib
+import re
 import sys
 import tempfile
 import textwrap
@@ -297,6 +298,66 @@ class Generation(unittest.TestCase):
         code, text = run_tool("check")
         self.assertEqual(code, 0, text)
         self.assertIn("rejected combination desktop+mesh", text)
+
+
+KERNEL_LOCAL = PACKAGE.parent / "azoth" / "kernel-local"
+
+
+def p2_block() -> dict:
+    """{CONFIG_X: value} between the P2 markers of kernel-local; `is not set` reads as n."""
+    lines = KERNEL_LOCAL.read_text().splitlines()
+    start = lines.index("# BEGIN kernel profile P2")
+    end = lines.index("# END kernel profile P2")
+    options = {}
+    for line in lines[start + 1 : end]:
+        if match := re.fullmatch(r"(CONFIG_\w+)=(.*)", line):
+            options[match[1]] = match[2]
+        elif match := re.fullmatch(r"# (CONFIG_\w+) is not set", line):
+            options[match[1]] = "n"
+    return options
+
+
+class KernelLocalAgreement(unittest.TestCase):
+    def test_every_p2_option_is_a_locked_base_setting_with_the_same_value(self) -> None:
+        with open(PACKAGE / "profile.toml", "rb") as handle:
+            kconfig = tomllib.load(handle)["base"]["kconfig"]
+        block = p2_block()
+        self.assertGreaterEqual(len(block), 60)
+        for name, wanted in block.items():
+            with self.subTest(name):
+                self.assertIn(name, kconfig)
+                self.assertEqual(kconfig[name]["value"], wanted)
+                self.assertTrue(kconfig[name].get("locked"))
+
+    def test_the_block_lists_each_option_once(self) -> None:
+        names = re.findall(
+            r"^(?:# )?(CONFIG_\w+)(?:=| is not set$)", KERNEL_LOCAL.read_text(), re.M
+        )
+        duplicates = sorted({n for n in names if names.count(n) > 1})
+        self.assertEqual(duplicates, [], "kernel-local sets these options twice")
+
+
+BUILT_IN = {
+    "lockdown": ("CONFIG_LOCK_DOWN_KERNEL_FORCE_INTEGRITY", "y"),
+    "init_on_free": ("CONFIG_INIT_ON_FREE_DEFAULT_ON", "y"),
+    "vsyscall": ("CONFIG_LEGACY_VSYSCALL_NONE", "y"),
+    "debugfs": ("CONFIG_DEBUG_FS_ALLOW_NONE", "y"),
+}
+
+
+class CommandLineAlignment(unittest.TestCase):
+    def test_every_removed_parameter_has_a_built_in_replacement(self) -> None:
+        with open(PACKAGE / "profile.toml", "rb") as handle:
+            base = tomllib.load(handle)["base"]
+        for parameter, (option, wanted) in BUILT_IN.items():
+            with self.subTest(parameter):
+                self.assertNotIn(parameter, base["cmdline"])
+                self.assertEqual(base["kconfig"][option]["value"], wanted)
+                self.assertTrue(base["kconfig"][option]["locked"])
+
+    def test_the_boot_matrix_command_line_carries_none_of_them(self) -> None:
+        words = (PACKAGE.parent / "azoth" / "cmdline").read_text().split()
+        self.assertFalse([w for w in words if w.split("=")[0] in BUILT_IN])
 
 
 if __name__ == "__main__":

@@ -244,7 +244,8 @@ jobs:
         run: podman build -t localhost/azoth-boot -f forge/specs/azoth/boot/Containerfile forge/specs/azoth
 
       - name: Run boot.sh
-        # Four boots: {SeaBIOS, OVMF+Secure Boot via shim} x {Nehalem, host}, each one
+        # Six boots: {SeaBIOS, OVMF+Secure Boot via shim} x {Penryn, host} and the Intel
+        # and AMD IOMMU cases, each one
         # must end with `K3 RESULT ok` on the serial console (assertions in boot/init).
         run: |
           set -euo pipefail

@@ -110,3 +110,15 @@ jobs:
           name: nvidia-mok-signed
           path: mok/
           if-no-files-found: error
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nvidia-mokca-signed
+          path: mokca/
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nvidia-mokleaf-signed
+          path: mokleaf/
+          if-no-files-found: error

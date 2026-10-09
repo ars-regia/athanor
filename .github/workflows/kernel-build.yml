@@ -4,7 +4,7 @@ name: Kernel Build
 # lint: the shared lint (call-lint.yml) runs first, and the gate requires it.
 # build: on the self-hosted runner, `prep` (sources, patches, config gate) in a few
 # minutes or `build` (RPMs) in about an hour. boot: on a GitHub runner with KVM, the boot
-# matrix (SeaBIOS and OVMF with Secure Boot, Nehalem and host CPUs) with the assertions
+# matrix (SeaBIOS and OVMF with Secure Boot, Penryn and host CPUs, Intel and AMD IOMMU) with the assertions
 # of the spec. publish: on a GitHub runner, publishes the RPMs as four OCI images
 # (kernel, devel, debuginfo, and the MicroVM guest kernel as the <nvr>-microvm tag of the
 # kernel) signed with cosign keyless, with SBOM, SLSA provenance and the attestation of
@@ -279,7 +279,8 @@ jobs:
         run: podman build -t localhost/azoth-boot -f forge/specs/azoth/boot/Containerfile forge/specs/azoth
 
       - name: Run boot.sh
-        # Four boots: {SeaBIOS, OVMF+Secure Boot via shim} x {Nehalem, host}, each one
+        # Six boots: {SeaBIOS, OVMF+Secure Boot via shim} x {Penryn, host} and the Intel
+        # and AMD IOMMU cases, each one
         # must end with `K3 RESULT ok` on the serial console (assertions in boot/init).
         run: |
           set -euo pipefail
