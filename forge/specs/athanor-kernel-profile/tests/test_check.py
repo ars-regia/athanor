@@ -148,7 +148,7 @@ class Checker(unittest.TestCase):
         self.system.write("proc/cmdline", f"BOOT_IMAGE=/vmlinuz root=UUID=1 {arguments} rw\n")
         code, text = run(self.system.root, PROFILES)
         self.assertEqual(code, 0, text)
-        self.assertIn("base: 121/121 settings hold", text)
+        self.assertIn("base: 117/117 settings hold", text)
 
     def test_cmdline_drift_is_reported(self) -> None:
         self.system.write("proc/cmdline", "BOOT_IMAGE=/vmlinuz lockdown=none vsyscall=none rw\n")

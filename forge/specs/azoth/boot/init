@@ -49,6 +49,28 @@ cgroup_controllers=${K3_CGROUP_CONTROLLERS:-/sys/fs/cgroup/cgroup.controllers}
 vm_dir=${K3_VM_DIR:-/proc/sys/vm}
 iommu_groups=${K3_IOMMU_GROUPS:-/sys/kernel/iommu_groups}
 kernel_config=${K3_CONFIG:-/proc/config.gz}
+cmdline_file=${K3_CMDLINE:-/proc/cmdline}
+lockdown_file=${K3_LOCKDOWN:-/sys/kernel/security/lockdown}
+maps_file=${K3_MAPS:-/proc/self/maps}
+debugfs_dir=${K3_DEBUGFS_DIR:-/tmp/debugfs}
+not_on_cmdline() { # not_on_cmdline NAME: the build, not the command line, sets NAME
+  if tr ' ' '\n' < "$cmdline_file" | grep -q "^$1="; then echo "$1= is on the command line"; return 1; fi
+}
+lockdown_forced() { # LOCK_DOWN_KERNEL_FORCE_INTEGRITY, with no lockdown= to lean on
+  echo "lockdown: $(cat "$lockdown_file")"
+  not_on_cmdline lockdown && grep -q '\[integrity\]' "$lockdown_file"
+}
+init_on_free_built_in() { # INIT_ON_FREE_DEFAULT_ON
+  dmesg | grep 'mem auto-init:'; not_on_cmdline init_on_free && dmesg | grep -q 'heap free:on'
+}
+vsyscall_none() { # LEGACY_VSYSCALL_NONE: no vsyscall page in any process
+  not_on_cmdline vsyscall && ! grep -q '\[vsyscall\]' "$maps_file"
+}
+debugfs_off() { # DEBUG_FS_ALLOW_NONE: debugfs never registers, so it cannot be mounted
+  not_on_cmdline debugfs || return 1
+  mkdir -p "$debugfs_dir"
+  if mount -t debugfs debugfs "$debugfs_dir"; then echo "debugfs mounted"; return 1; fi
+}
 preempt_lazy() { # D13: debugfs is off, so the mode is read from the boot log
   line=$(dmesg | grep -o 'Dynamic Preempt: [a-z]*')
   echo "${line:-no Dynamic Preempt line}"; [ "$line" = "Dynamic Preempt: lazy" ]
@@ -111,7 +133,10 @@ check btf         test -s /sys/kernel/btf/vmlinux
 check bpftool     sh -c 'bpftool feature probe kernel | grep -q "^bpf() syscall is available"'
 check sched_ext   test -d /sys/kernel/sched_ext
 check ima         ima
-check lockdown    grep -q '\[integrity\]' /sys/kernel/security/lockdown
+check lockdown    lockdown_forced
+check init-on-free init_on_free_built_in
+check vsyscall    vsyscall_none
+check debugfs     debugfs_off
 check bbr         bbr
 check landlock    landlock
 check memcg       memcg

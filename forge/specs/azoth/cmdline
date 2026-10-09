@@ -1,1 +1,1 @@
-amd_pstate=active debugfs=off efi=disable_early_pci_dma ima_policy=tcb init_on_free=1 intel_iommu=on lockdown=integrity page_alloc.shuffle=1 vsyscall=none
+amd_pstate=active efi=disable_early_pci_dma ima_policy=tcb intel_iommu=on page_alloc.shuffle=1

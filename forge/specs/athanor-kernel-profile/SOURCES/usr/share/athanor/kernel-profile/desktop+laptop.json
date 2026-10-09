@@ -11,10 +11,6 @@
         "decision": "section 6",
         "value": "active"
       },
-      "debugfs": {
-        "decision": "section 6",
-        "value": "off"
-      },
       "efi": {
         "decision": "section 6",
         "value": "disable_early_pci_dma"
@@ -23,25 +19,13 @@
         "decision": "D23",
         "value": "tcb"
       },
-      "init_on_free": {
-        "decision": "section 6",
-        "value": "1"
-      },
       "intel_iommu": {
         "decision": "D16",
         "value": "on"
       },
-      "lockdown": {
-        "decision": "section 6",
-        "value": "integrity"
-      },
       "page_alloc.shuffle": {
         "decision": "section 6",
         "value": "1"
-      },
-      "vsyscall": {
-        "decision": "section 6",
-        "value": "none"
       }
     },
     "kconfig": {

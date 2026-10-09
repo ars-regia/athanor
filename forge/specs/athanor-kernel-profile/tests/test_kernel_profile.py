@@ -337,5 +337,28 @@ class KernelLocalAgreement(unittest.TestCase):
         self.assertEqual(duplicates, [], "kernel-local sets these options twice")
 
 
+BUILT_IN = {
+    "lockdown": ("CONFIG_LOCK_DOWN_KERNEL_FORCE_INTEGRITY", "y"),
+    "init_on_free": ("CONFIG_INIT_ON_FREE_DEFAULT_ON", "y"),
+    "vsyscall": ("CONFIG_LEGACY_VSYSCALL_NONE", "y"),
+    "debugfs": ("CONFIG_DEBUG_FS_ALLOW_NONE", "y"),
+}
+
+
+class CommandLineAlignment(unittest.TestCase):
+    def test_every_removed_parameter_has_a_built_in_replacement(self) -> None:
+        with open(PACKAGE / "profile.toml", "rb") as handle:
+            base = tomllib.load(handle)["base"]
+        for parameter, (option, wanted) in BUILT_IN.items():
+            with self.subTest(parameter):
+                self.assertNotIn(parameter, base["cmdline"])
+                self.assertEqual(base["kconfig"][option]["value"], wanted)
+                self.assertTrue(base["kconfig"][option]["locked"])
+
+    def test_the_boot_matrix_command_line_carries_none_of_them(self) -> None:
+        words = (PACKAGE.parent / "azoth" / "cmdline").read_text().split()
+        self.assertFalse([w for w in words if w.split("=")[0] in BUILT_IN])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -136,18 +136,15 @@ lockdown = { value = "integrity", decision = "section 5", locked = true }
 lsm = { value = ["lockdown", "yama", "selinux", "bpf", "landlock", "ipe"], decision = "section 5" }
 
 # The base kernel command line (section 6). module.sig_enforce is not here because
-# CONFIG_MODULE_SIG_FORCE already enforces it; lockdown, init_on_free, vsyscall and debugfs
-# stay until block P2 builds them in; intel_iommu and efi until block P4b builds them in
+# CONFIG_MODULE_SIG_FORCE already enforces it; block P2 built lockdown, init_on_free,
+# vsyscall and debugfs into the kernel (kernel-local); intel_iommu and efi stay until block
+# P4b builds them in
 # with the compatibility profile of D45; ima_policy until P4b replaces it with the policy
 # of D46. Capability-specific parameters (mem_encrypt, kvm_amd.sev, kvm_intel.tdx) belong
 # to roles (block P5), never to the base.
 [base.cmdline]
 "page_alloc.shuffle" = { value = "1", decision = "section 6", locked = true }
 amd_pstate = { value = "active", decision = "section 6" }
-lockdown = { value = "integrity", decision = "section 6", locked = true }
-init_on_free = { value = "1", decision = "section 6", locked = true }
-vsyscall = { value = "none", decision = "section 6", locked = true }
-debugfs = { value = "off", decision = "section 6", locked = true }
 intel_iommu = { value = "on", decision = "D16", locked = true }
 efi = { value = "disable_early_pci_dma", decision = "section 6", locked = true }
 ima_policy = { value = "tcb", decision = "D23", locked = true }

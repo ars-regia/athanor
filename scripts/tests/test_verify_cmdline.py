@@ -47,8 +47,8 @@ class Cmdline(unittest.TestCase):
 
     def test_a_parameter_the_decisions_reject_is_named_where_it_is_found(self):
         cases = [
-            ("forge/specs/azoth/cmdline", "vsyscall=none", "vsyscall=none zswap.enabled=1", "zswap.enabled=1", "D15"),
-            (KARGS, '"vsyscall=none",', '"vsyscall=none",\n    "oops=panic",', "oops=panic", "D19"),
+            ("forge/specs/azoth/cmdline", "page_alloc.shuffle=1", "page_alloc.shuffle=1 zswap.enabled=1", "zswap.enabled=1", "D15"),
+            (KARGS, '"page_alloc.shuffle=1",', '"page_alloc.shuffle=1",\n    "oops=panic",', "oops=panic", "D19"),
             (NVIDIA_KARGS, '"nvidia-drm.modeset=1",', '"nvidia-drm.modeset=1", "iommu=pt",', "iommu=pt", "D16"),
         ]
         for site, old, new, parameter, why in cases:
@@ -59,11 +59,11 @@ class Cmdline(unittest.TestCase):
                 self.edit(site, new, old)
 
     def test_every_zswap_parameter_is_rejected(self):
-        self.edit("forge/specs/azoth/cmdline", "vsyscall=none", "vsyscall=none zswap.compressor=zstd")
+        self.edit("forge/specs/azoth/cmdline", "page_alloc.shuffle=1", "page_alloc.shuffle=1 zswap.compressor=zstd")
         self.assertTrue(any("zswap.compressor=zstd" in p for p in self.problems()))
 
     def test_a_parameter_that_only_contains_a_rejected_one_passes(self):
-        self.edit("forge/specs/azoth/cmdline", "vsyscall=none", "vsyscall=none xiommu=pt not_iommu=pt")
+        self.edit("forge/specs/azoth/cmdline", "page_alloc.shuffle=1", "page_alloc.shuffle=1 xiommu=pt not_iommu=pt")
         self.assertEqual(self.problems(), [])
 
     def test_a_site_whose_line_cannot_be_read_is_reported(self):

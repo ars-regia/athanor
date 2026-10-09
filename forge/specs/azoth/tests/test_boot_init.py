@@ -145,9 +145,57 @@ class PlatformAssertions(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("UDMABUF", result.stdout)
 
+    def cmdline(self, text):
+        (self.dir / "cmdline").write_text(text + "\n")
+        return f'cmdline_file="{self.dir}/cmdline"\n' + function("not_on_cmdline")
+
+    def lockdown(self, cmdline):
+        (self.dir / "lockdown").write_text("none [integrity] confidentiality\n")
+        return self.cmdline(cmdline) + f'\nlockdown_file="{self.dir}/lockdown"'
+
+    def test_forced_lockdown_passes_without_the_parameter(self):
+        self.assertEqual(run_function("lockdown_forced", self.lockdown("intel_iommu=on")).returncode, 0)
+
+    def test_lockdown_from_the_command_line_does_not_count(self):
+        self.assertNotEqual(run_function("lockdown_forced", self.lockdown("lockdown=integrity")).returncode, 0)
+
+    def test_init_on_free_from_the_build(self):
+        log = self.log("mem auto-init: stack:all(zero), heap alloc:on, heap free:on\n")
+        self.assertEqual(run_function("init_on_free_built_in", self.cmdline("x=1") + "\n" + log).returncode, 0)
+
+    def test_init_on_free_off_fails(self):
+        log = self.log("mem auto-init: stack:all(zero), heap alloc:on, heap free:off\n")
+        self.assertNotEqual(run_function("init_on_free_built_in", self.cmdline("x=1") + "\n" + log).returncode, 0)
+
+    def test_init_on_free_from_the_command_line_does_not_count(self):
+        log = self.log("mem auto-init: stack:all(zero), heap alloc:on, heap free:on\n")
+        prelude = self.cmdline("init_on_free=1") + "\n" + log
+        self.assertNotEqual(run_function("init_on_free_built_in", prelude).returncode, 0)
+
+    def maps(self, text):
+        (self.dir / "maps").write_text(text)
+        return self.cmdline("x=1") + f'\nmaps_file="{self.dir}/maps"'
+
+    def test_a_vsyscall_page_fails(self):
+        prelude = self.maps("ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0 [vsyscall]\n")
+        self.assertNotEqual(run_function("vsyscall_none", prelude).returncode, 0)
+
+    def test_no_vsyscall_page_passes(self):
+        prelude = self.maps("7ffd1000-7ffd3000 r-xp 00000000 00:00 0 [vdso]\n")
+        self.assertEqual(run_function("vsyscall_none", prelude).returncode, 0)
+
+    def test_debugfs_that_mounts_fails(self):
+        prelude = self.cmdline("x=1") + f'\nmount() {{ return 0; }}\ndebugfs_dir="{self.dir}/debugfs"'
+        self.assertNotEqual(run_function("debugfs_off", prelude).returncode, 0)
+
+    def test_debugfs_refused_passes(self):
+        prelude = self.cmdline("x=1") + f'\nmount() {{ return 19; }}\ndebugfs_dir="{self.dir}/debugfs"'
+        self.assertEqual(run_function("debugfs_off", prelude).returncode, 0)
+
     def test_init_runs_the_platform_checks(self):
         text = INIT.read_text()
-        for needle in ("check preempt", "check aslr", "check iommu", "check mesh-platform"):
+        for needle in ("check preempt", "check aslr", "check iommu", "check mesh-platform",
+                       "check lockdown    lockdown_forced", "check init-on-free", "check vsyscall", "check debugfs"):
             self.assertIn(needle, text)
 
 
