@@ -293,7 +293,7 @@ also covers the merge queue and `gate`; PB2 splits it in two.
 
 **PL2. Changes land through the merge queue.** The `gate` runs on the `merge_group` commit,
 so what lands passed `just check` in its merged state, and its builds are proven on the pull
-request and again by the release build (PL44), and the required check stays `strict: false` without
+request and again by the release build (PL44; for the kernel, ADR-0110), and the required check stays `strict: false` without
 losing that guarantee. (Scorecard Branch-Protection.) Deferred on 2026-10-08 (PIPE-N06): the queue is not in `.github/settings/rulesets.json` until every required context is reported on `merge_group` (the legacy `Kernel gate` and `Spec gate` are not), and `verify.py workflows` refuses it before then; until it returns, a pull request lands by squash-merge once `gate` is green on its head.
 
 **PL3. One required check, always reported.** `gate` depends on every job of `pr.yml`, runs
@@ -945,7 +945,10 @@ candidates in the `merge_group` run instead is not adopted now: the queue's ref 
 protected branch, so its provenance identity is not one PL12 can match exactly, and the job
 would publish from code not yet on the branch; PB11's measurements reopen it.
 `build.yml` refuses a commit whose `gate` check is not green, and `release.yml` signs only a
-build run that succeeded (PL55). Today `pr.yml` runs its
+build run that succeeded (PL55). The kernel is the exception (ADR-0110), once #368 and #373
+are merged: the push to `iso-v0`
+publishes the RPMs of the merged pull request's `pr.yml` kernel build when the four
+conditions of `doc_kernel_build.md` section 7 hold, and builds otherwise. Today `pr.yml` runs its
 selected builds on `merge_group` too; PB11 restricts them to `pull_request`.
 
 **PL45. The bar is built once per run** and its output passed to the jobs that test it.
@@ -1378,3 +1381,9 @@ dispatch of `main` in an earlier entry is withdrawn: a hand release of `main` ru
 through `main`'s old jobs, without a marker, until ADR-0098 option A deletes `main`. The
 marker has two writers, the jobs `tag-latest` and `mark-current`, counted per job (PL35,
 PL54-PL58, section 10).
+
+Amended on 2026-10-09 and approved by the maintainer with ADR-0110, independently of the rest
+of revision 3: the push to `iso-v0` may publish the kernel RPMs
+built by the merged pull request's run instead of building them again, under four conditions
+and with a rebuild as the fallback, once #368 and #373 are merged (PL44, ADR-0110;
+`doc_kernel_build.md` section 7).

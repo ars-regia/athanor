@@ -177,3 +177,4 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0107 | 0107 | [Code-owner review with unowned low-risk paths](0107-code-owner-review-with-unowned-paths.md) | accepted | process, security |
 | ADR-0108 | 0108 | [A GitHub App for the bump and merge bots, with a review-only bypass](0108-bots-github-app.md) | accepted | process, security, build |
 | ADR-0109 | 0109 | [Weekly kernel bumps](0109-weekly-kernel-bumps.md) | accepted | kernel, build, process |
+| ADR-0110 | 0110 | [Promote the pull request's kernel build to the release](0110-kernel-artifact-promotion.md) | accepted | kernel, build, signing, process |
