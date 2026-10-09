@@ -85,10 +85,11 @@ jobs:
           # The same NVR that rpmbuild produces with `%buildid .azoth` (build.sh);
           # publish checks that they match.
           nvr=$(bash forge/specs/azoth/nvr.sh)
+          identity=$(bash system/kernel-artifacts.sh identity kernel)
           python3 forge/specs/azoth/build-inputs.py > inputs.json
           reuse=false
           if cosign verify-attestation --type custom \
-               --certificate-identity-regexp "^${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/" \
+               --certificate-identity-regexp "$identity" \
                --certificate-oidc-issuer https://token.actions.githubusercontent.com \
                "${IMAGE}:${nvr}" 2> /dev/null \
              | jq -cS '.payload | @base64d | fromjson | .predicate.Data | fromjson' \
@@ -98,7 +99,7 @@ jobs:
             reuse=true
             for ref in "${IMAGE}:${nvr}" "${IMAGE}:${nvr}-microvm" "${IMAGE}-devel:${nvr}" "${IMAGE}-debuginfo:${nvr}"; do
               cosign verify \
-                --certificate-identity-regexp "^${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/" \
+                --certificate-identity-regexp "$identity" \
                 --certificate-oidc-issuer https://token.actions.githubusercontent.com "$ref" > /dev/null 2>&1 \
                 || { echo "${ref} is not signed: build required"; reuse=false; }
             done
@@ -398,11 +399,12 @@ jobs:
         run: |
           set -euo pipefail
           ref="${IMAGE}@$(cat digests/kernel)"
+          identity=$(bash system/kernel-artifacts.sh identity kernel)
           cosign verify \
-            --certificate-identity-regexp "^${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/" \
+            --certificate-identity-regexp "$identity" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com "$ref" > /dev/null
           cosign verify-attestation --type spdxjson \
-            --certificate-identity-regexp "^${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/" \
+            --certificate-identity-regexp "$identity" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com "$ref" > /dev/null
           gh attestation verify "oci://${ref}" --repo "${GITHUB_REPOSITORY}"
           echo "verified: $ref"
