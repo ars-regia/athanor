@@ -887,8 +887,10 @@ postpone limited in time, an opt-out in Settings with a warning (Annex I Part I(
 version (UT9), with the SBOMs, provenance, VSA, scan report, VEX, `promotion.json` and
 the acceptance evidence, plus a `bundle.sha256` file that `promote.yml` signs keylessly (Sigstore, the workflow
 identity), since the bundle exists only at promotion, long after the release's signing
-jobs ended; promotion therefore holds no key. ADR-0081 accepts GitHub as the only store
-for now.
+jobs ended; promotion therefore holds no key. Each promotion also copies the bundle to an OCI registry
+off GitHub named by the variable `EVIDENCE_REGISTRY`, which has no default: unset, promotion
+fails closed (ADR-0106 item 4). In release 0.3 that copy is the only store; the GitHub Release
+follows in 0.5 (ADR-0106 item 7).
 
 Known gaps, documented in `docs/compliance/` rather than hidden: full wipe (LUKS
 crypto-erase) after 1.0 (ADR-0076), the harmonised standards still in draft (ETSI EN
