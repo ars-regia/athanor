@@ -130,7 +130,9 @@ ima_key_refused() { # D40, D46: a key vouched only by a machine-keyring CA never
   [ -s "$imakey_file" ] || { echo "no key to offer: $imakey_file"; return 1; }
   out=$(keyctl padd asymmetric '' %:.ima < "$imakey_file" 2>&1) && { echo "the key was accepted"; return 1; }
   case $out in
-    *'Key was rejected by service'*) ;; # EKEYREJECTED: the CA was consulted and refused
+    # ENOKEY: restrict_link_by_signature() found no signer in the keyring .ima trusts, the
+    # builtin one; EKEYREJECTED would mean a signer was found and the signature failed.
+    *'Required key not available'*) ;;
     *) echo "refused for another reason: $out"; return 1 ;;
   esac
   keyctl list %:.ima

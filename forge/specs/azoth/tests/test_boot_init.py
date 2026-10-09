@@ -221,7 +221,7 @@ class PlatformAssertions(unittest.TestCase):
         prelude = "keyctl() { echo 'keyctl: Required key not available' >&2; return 1; }\nbuiltin_expected=0"
         self.assertNotEqual(run_function("builtin_exact", prelude).returncode, 0)
 
-    def ima(self, describe_rc, padd_rc, listed="", why="Key was rejected by service", key="/bin/sh"):
+    def ima(self, describe_rc, padd_rc, listed="", why="Required key not available", key="/bin/sh"):
         return (f'keyctl() {{ case $1 in describe) return {describe_rc} ;; '
                 f'padd) echo "add_key: {why}" >&2; return {padd_rc} ;; '
                 f'list) echo "{listed}" ;; esac; }}\nimakey_file={key}')
@@ -237,6 +237,13 @@ class PlatformAssertions(unittest.TestCase):
 
     def test_a_refusal_for_another_reason_fails(self):
         self.assertNotEqual(run_function("ima_key_refused", self.ima(0, 1, why="Bad message")).returncode, 0)
+
+    def test_a_rejected_signature_is_not_the_missing_ca(self):
+        # EKEYREJECTED comes from verify_signature(), after a trusted signer was found: the
+        # CA was in a keyring .ima trusts, which is what the check must rule out.
+        self.assertNotEqual(
+            run_function("ima_key_refused", self.ima(0, 1, why="Key was rejected by service")).returncode, 0
+        )
 
     def test_a_missing_key_file_fails(self):
         self.assertNotEqual(run_function("ima_key_refused", self.ima(0, 1, key="/nonexistent/key.der")).returncode, 0)
