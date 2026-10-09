@@ -173,7 +173,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 - **File:** `kernel-bump.yml`. **Purpose:** bump bot. Group `kernel` moves the kernel pins and opens a `kernel-bump` PR with auto-merge when prep is green; group `system` moves the base image pins and opens a `system-bump` PR; every run mirrors the locked NVIDIA RPMs (O7, O8).
 - **Triggers:** cron `17 5 * * 1` (both groups) and `17 5 * * 0,2-6` (group `system` only, ADR-0109); dispatch; push of its own file. **Outputs:** PRs; artifacts `bump-pins`, `bump-prep`; image `KERNEL_REGISTRY/athanor-nvidia-rpms`.
 - **Secrets, variables:** `KERNEL_BUMP_TOKEN` (PRs that trigger checks), `GITHUB_TOKEN`, `KERNEL_REGISTRY`. **Environment:** none.
-- **Runner:** `prep` self-hosted (`:112`), the rest hosted. **Concurrency:** `kernel-bump`, no cancel.
+- **Runner:** `prep` self-hosted (`:116`), the rest hosted. **Concurrency:** `kernel-bump`, no cancel.
 - **Scripts:** `forge/specs/azoth/bump.py`, `build.sh`, `lock.sh`, `nvidia.sh`, `SOURCES/sources.sh`, `nvidia/sources.sh`, `system/nvidia/mirror.sh`, `mirror-locks.sh`, `forge/scripts/bot_merge.py`.
 - **Health:** `gh run list --workflow kernel-bump.yml --branch iso-v0 --limit 5`.
 
@@ -370,7 +370,7 @@ One runner is registered (`athanor-vm-<timestamp>`, labels `self-hosted`, `Linux
 | Job | Why self-hosted |
 |---|---|
 | CI8 `build` (`kernel-build.yml:125`) | the kernel RPM build takes about an hour and a persistent cache (`~/.cache/azoth`) |
-| CI9 `prep` (`kernel-bump.yml:112`) | `build.sh --stage prep` of the new pins, in the same builder |
+| CI9 `prep` (`kernel-bump.yml:116`) | `build.sh --stage prep` of the new pins, in the same builder |
 | CI10 `repro`, `variant` (`kernel-weekly.yml:54,128`) | full kernel rebuilds |
 
 CI8 runs on every PR; its `build` job is skipped for PRs from forks (`kernel-build.yml:124`), so outside code never reaches the runner through it.
