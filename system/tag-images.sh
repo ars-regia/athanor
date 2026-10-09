@@ -21,6 +21,10 @@
 #        (lines: "REPOSITORY TAG DIGEST", image-digests.sh)
 #        tag-images.sh --registry REGISTRY/OWNER --tag TAG --iso RUN_ID
 # The registry login is the caller's business.
+#
+# It moves a tag only for a run of a trusted branch: GITHUB_REF must be refs/heads/<b> with <b>
+# in KERNEL_TRUSTED_REFS (default "iso-v0 main", as system/kernel-artifacts.sh). A
+# workflow_dispatch can be started from any branch, and the tag is what machines follow.
 set -euo pipefail
 
 usage() {
@@ -36,6 +40,15 @@ case $# in
     6) [[ $5 == --iso && $6 =~ ^[0-9]+$ ]] || usage ;;
     *) usage ;;
 esac
+
+trusted=false
+for b in ${KERNEL_TRUSTED_REFS:-iso-v0 main}; do
+    [[ ${GITHUB_REF:-} == "refs/heads/$b" ]] && trusted=true
+done
+$trusted || {
+    echo "${0##*/}: '${GITHUB_REF:-}' is not a trusted ref; $tag is not moved" >&2
+    exit 1
+}
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 retry="$root/forge/scripts/retry.sh"
