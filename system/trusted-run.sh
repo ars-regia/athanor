@@ -32,14 +32,20 @@ why=$(jq -r --arg repo "$GITHUB_REPOSITORY" --arg branch "${RELEASE_BRANCH:-iso-
     (if (.conclusion | IN($conclusions[])) then empty else "conclusion \(.conclusion)" end)
   ] | join(", ")' "${@:2}" <<< "$run")
 # A tag can be named like the release branch, so head_branch alone proves nothing: the commit
-# the run built must be on the branch (the branch is identical to it or ahead of it).
+# the run built must be on the branch (the branch head is identical to it or ahead of it).
 if [[ -z $why ]]; then
     branch=${RELEASE_BRANCH:-iso-v0}
     sha=$(jq -r '.head_sha' <<< "$run")
     [[ $sha =~ ^[0-9a-f]{40}$ ]] || why="sha '$sha' is not a commit"
 fi
 if [[ -z $why ]]; then
-    status=$(gh api "/repos/$GITHUB_REPOSITORY/compare/$sha...$branch" --jq .status)
+    # The branches endpoint knows branches only, and the compare below takes two commit ids:
+    # a tag named like the branch can steer neither.
+    branch_sha=$(gh api "/repos/$GITHUB_REPOSITORY/branches/$branch" --jq .commit.sha)
+    [[ $branch_sha =~ ^[0-9a-f]{40}$ ]] || why="branch $branch has no commit id ('$branch_sha')"
+fi
+if [[ -z $why ]]; then
+    status=$(gh api "/repos/$GITHUB_REPOSITORY/compare/$sha...$branch_sha" --jq .status)
     [[ $status == identical || $status == ahead ]] || why="sha $sha is not on $branch ($status)"
 fi
 [[ -z $why ]] || {

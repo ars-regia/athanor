@@ -33,7 +33,7 @@ Fixture keys:
   user_packages ["package", ...]  the container packages of the owner
   owner_type    "User" (the default) or "Organization", what /users/<owner> reports
   runs          [{"databaseId": 1, "headBranch": "iso-v0"}]
-  api           {"/repos/owner/repo/actions/runs/N": {...}}  the JSON `gh api` prints for that path (`--jq .key` prints that key)
+  api           {"/repos/owner/repo/actions/runs/N": {...}}  the JSON `gh api` prints for that path (`--jq .a.b` prints that key path)
   run_artifacts {"run id": {"artifact name": {"relative path": "text"}}}  what `gh run download` writes
 """
 
@@ -151,7 +151,12 @@ def gh(args, fx):
         if path in fx.get("api", {}):
             body = fx["api"][path]
             jq = args[args.index("--jq") + 1] if "--jq" in args else ""
-            print(body[jq[1:]] if re.fullmatch(r"\.\w+", jq) else json.dumps(body))
+            if re.fullmatch(r"(\.\w+)+", jq):
+                for key in jq[1:].split("."):
+                    body = body[key]
+                print(body)
+            else:
+                print(json.dumps(body))
             return 0
         if re.fullmatch(r"/users/[^/?]+", path):
             print(fx.get("owner_type", "User"))

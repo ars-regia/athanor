@@ -14,7 +14,11 @@ REG = "registry.example/owner"
 NAMES = ["athanor-system", "athanor-system-nvidia", "athanor-system-nvidia-legacy"]
 ORCH = ".github/workflows/athanor-forge-orchestrator.yml"
 SHA = "c" * 40
-COMPARE = f"/repos/ars-regia/athanor/compare/{SHA}...iso-v0"
+BRANCH_SHA = "d" * 40
+BRANCH = "/repos/ars-regia/athanor/branches/iso-v0"
+COMPARE = f"/repos/ars-regia/athanor/compare/{SHA}...{BRANCH_SHA}"
+# What a tag named iso-v0 would have matched, had the compare taken the name.
+BY_NAME = f"/repos/ars-regia/athanor/compare/{SHA}...iso-v0"
 
 
 def digest(n):
@@ -36,14 +40,14 @@ def run_object(**over):
 
 
 class AcceptTarget(Tool):
-    def github(self, run=None, iso_version="412", iso_system=None, iso_artifact=True, compare="identical"):
+    def github(self, run=None, iso_version="412", iso_system=None, iso_artifact=True, compare="identical", branch_sha=BRANCH_SHA):
         digests = "".join(f"{REG}/{name} 412 {digest(i + 1)}\n" for i, name in enumerate(NAMES))
         iso = digest(9)
         artifacts = {"image-digests": {"image-digests.txt": digests}}
         if iso_artifact:
             artifacts["iso-digest"] = {"iso-digest.txt": f"{REG}/athanor-iso {iso}\n{REG}/athanor-system {iso_system or digest(1)}\n"}
         self.registry({
-            "api": {"/repos/ars-regia/athanor/actions/runs/412": run or run_object(), COMPARE: {"status": compare}},
+            "api": {"/repos/ars-regia/athanor/actions/runs/412": run or run_object(), BRANCH: {"commit": {"sha": branch_sha}}, COMPARE: {"status": compare}, BY_NAME: {"status": "identical"}},
             "run_artifacts": {"412": artifacts},
             "configs": {f"{REG}/athanor-iso@{iso}": {"org.opencontainers.image.version": iso_version}},
         })
@@ -132,6 +136,19 @@ class AcceptTarget(Tool):
                 r = self.trusted()
                 self.assertEqual(r.returncode, 10)
                 self.assertIn("sha", r.stderr)
+
+    def test_a_tag_named_like_the_branch_does_not_vouch_for_a_sha(self):
+        # By name the compare would answer identical (the tag); by the branch's commit id it diverges.
+        self.github(compare="diverged")
+        r = self.trusted()
+        self.assertEqual(r.returncode, 10)
+        self.assertIn("diverged", r.stderr)
+
+    def test_a_branch_head_that_is_not_a_commit_id_is_not_trusted(self):
+        self.github(branch_sha="iso-v0")
+        r = self.trusted()
+        self.assertEqual(r.returncode, 10)
+        self.assertIn("commit id", r.stderr)
 
     def test_a_sha_contained_in_the_branch_is_trusted(self):
         self.github(compare="ahead")
