@@ -187,6 +187,25 @@ jobs:
           bash system/shared-layers.sh --system "$(<artifacts/system-image.iid)" --registry "${IMAGE_REGISTRY}" --tag "${RUN_ID}" \
             --variants artifacts/variants.txt | tee -a "${GITHUB_STEP_SUMMARY}"
 
+      - name: 📜 Record the resolved package set of each image (D16)
+        # Read from local storage before the push, like the check above.
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # A for loop over the names, not `while read`: a command in the body may read stdin.
+          mapfile -t names < artifacts/variants.txt
+          for name in "${names[@]}"; do
+            bash system/package-set.sh "${IMAGE_REGISTRY}/${name}:${RUN_ID}" "artifacts/packages/${name}.txt"
+          done
+
+      - name: 📎 Keep the package sets for the evidence bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: package-sets
+          path: artifacts/packages/
+          if-no-files-found: error
+
       - name: 📤 Push OS Images
         # By run id only: :latest moves in tag-system-images of the Orchestrator, after the
         # key-based signature of these digests verified (doc_update_delivery.md, UD24, UD25).
