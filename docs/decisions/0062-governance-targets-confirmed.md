@@ -2,7 +2,7 @@
 id: A2-25
 title: "Governance targets confirmed"
 date: 2026-10-06
-status: accepted
+status: amended by ADR-0107
 issues: [160]
 areas: [security, process]
 ---

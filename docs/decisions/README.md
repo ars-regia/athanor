@@ -129,7 +129,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-22 | 0059 | [Installer for 1.0: Anaconda web UI](0059-installer-anaconda-web-ui.md) | accepted | installer |
 | A2-23 | 0060 | [authselect without nullok](0060-authselect-without-nullok.md) | accepted | security |
 | A2-24 | 0061 | [Desktop minor decisions](0061-desktop-minor-decisions.md) | accepted | shell |
-| A2-25 | 0062 | [Governance targets confirmed](0062-governance-targets-confirmed.md) | accepted | security, process |
+| A2-25 | 0062 | [Governance targets confirmed](0062-governance-targets-confirmed.md) | amended by ADR-0107 | security, process |
 | A2-26 | 0063 | [Update policy](0063-update-policy.md) | amended by ADR-0082 | update |
 | A2-27 | 0064 | [Signing approvals and MOK enrolment](0064-signing-approvals-and-mok-enrolment.md) | amended by A2-35, ADR-0080, ADR-0098 | signing, installer |
 | A2-28 | 0065 | [Bazaar waits for the Fedora 45 base](0065-bazaar-waits-for-fedora-45.md) | accepted | packages, shell |
@@ -170,7 +170,8 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0100 | 0100 | [Notification center revision 2: battery notices in the session daemon](0100-notification-center-rev2.md) | accepted | shell, session, desktop |
 | ADR-0101 | 0101 | [One backup mechanism: athanor-backup, without athanor-timewarp](0101-backup-one-mechanism.md) | amended by ADR-0103 | software, backup |
 | ADR-0102 | 0102 | [Audit calendar and audit types](0102-audit-calendar.md) | accepted | process, security |
-| ADR-0103 | 0103 | [Audit 5 decisions and the scope of 1.0](0103-audit-5-decisions.md) | amended by ADR-0104 | platform, kernel, build, signing, security, shell, apps, docs |
+| ADR-0103 | 0103 | [Audit 5 decisions and the scope of 1.0](0103-audit-5-decisions.md) | amended by ADR-0104, ADR-0107 | platform, kernel, build, signing, security, shell, apps, docs |
 | ADR-0104 | 0104 | [Sign :latest automatically in its own release workflow; approve only the promotion to :stable](0104-release-workflow-and-stable-gate.md) | accepted | build, signing |
 | ADR-0105 | 0105 | [Four releases before 1.0: chain, base, defences, surface](0105-releases-before-1-0.md) | accepted | platform, build, signing, security, shell, docs, process |
 | ADR-0106 | 0106 | [Update chain decisions for release 0.3](0106-update-chain-decisions-2026-10-09.md) | accepted | update, build, signing, security, kernel |
+| ADR-0107 | 0107 | [Code-owner review with unowned low-risk paths](0107-code-owner-review-with-unowned-paths.md) | accepted | process, security |

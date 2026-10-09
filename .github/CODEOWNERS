@@ -2,12 +2,15 @@
 #
 # The last matching pattern wins, so the protected paths come last. The owner is the
 # maintainer's account; the repository belongs to the organisation ars-regia.
-# Review by a code owner is enforced only when the branch protection rule "Require review
-# from Code Owners" is on. It stays off while there is one code owner, who could not approve
-# their own changes (ADR-0062). The per-path rules below name the owner who must review once
-# code-owner review is enabled.
+# Review by a code owner is enforced by the ruleset product-branches, with no other approval
+# required (ADR-0107). A path with no owner merges without a review.
 
 * @hr-mes
+
+# No owner (ADR-0107): implementation plans and spike plans. They change nothing at
+# runtime; the list grows only by a new decision.
+/docs/superpowers/plans/
+/docs/spikes/
 
 # Core OS and kernel
 /system/athanor-ebpf-sched/ @hr-mes
