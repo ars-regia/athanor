@@ -32,12 +32,12 @@ Automate the class, audit the delta, probe the runtime.
 
 | Audit | When | Who runs it |
 | --- | --- | --- |
-| Reviewer on the pull request | every pull request, before merge | an agent (`auditor`) |
+| Reviewer on the pull request | every pull request, before merge | an agent (the reviewer) |
 | Delta audit: security, pipeline, packages, decisions | weekly, or every 15 to 20 merged pull requests, whichever comes first | agents |
 | Runtime audit: the documented promises checked on a booted VM | every image that is a promotion candidate, and at least monthly on the booted signed image (exposed services, `systemd-analyze security`, SELinux denials, PAM, update and trust state) | agents; the mechanical part moves into the ISO acceptance |
 | Coherence of open pull requests | when two or more open pull requests touch the same area | an agent |
 | Documents against the tree: cited lines, versions, workflows | monthly | an agent; cited-line checks move into `verify.py` |
-| CI review | quarterly, and after a large pipeline change | an agent; `actionlint` and `zizmor` cover the mechanical part |
+| CI review | quarterly, and after a large pipeline change | an agent; `actionlint` covers the mechanical part, a workflow linter such as `zizmor` is to add |
 | Specifications against decision records | quarterly, and before 1.0 | an agent |
 | Broad audit: comparison with other projects, ecosystem, trust model | every milestone: before 1.0, then every major release | agents |
 | Agent rules and the permission gate | monthly | an agent, adversarial |
@@ -46,6 +46,9 @@ Specification reviews run when a specification asks for approval, the 1.0 invent
 request, and research when a question needs it: none of them is periodic.
 
 ## Audit types
+
+Decided on 2026-10-09; none of them exists yet. Each lands with its own pull request, and
+until it does an issue names it.
 
 | Type | When | Who runs it |
 | --- | --- | --- |
@@ -58,5 +61,5 @@ request, and research when a question needs it: none of them is periodic.
 | Resource regressions: boot time, bar start-up, memory against the per-service limits of `doc_shell_standard.md` (ST5) | every image, kept as a trend | CI |
 | Licences of the image | every release | CI, reviewed by an agent |
 
-Fuzzing stays retired (PR #310); reopening it for the parsers that read untrusted input is
-a separate decision.
+Fuzzing is not on the calendar because CI already repeats it: 15 `cargo-fuzz` targets run
+weekly in `fuzz.yml`, with the corpus replayed in the gate (PR #310).

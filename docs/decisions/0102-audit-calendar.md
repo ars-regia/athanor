@@ -14,8 +14,7 @@ areas: [process, security]
 `docs/operations/audits.md` ran audits on events only: before a milestone, after a Fedora
 major release bump, after a batch of merges in a sensitive area, plus a monthly runtime
 audit. Between events nothing ran, and the delta audits of 2026-10-07 and 2026-10-08 found
-defects already merged, among them a registry cleanup that deleted
-releases meant to be kept. Several properties no audit measured at all: vulnerabilities in
+defects that were already merged. Several properties no audit measured at all: vulnerabilities in
 the published image (`cargo deny` reads only the sources), whether a key backup opens
 (the kit of 2026-10-07 did not), whether a confined application can escape, whether a
 build is reproducible, accessibility with a screen reader, resource regressions, and the
@@ -35,9 +34,12 @@ Decided by the maintainer on 2026-10-09, accepting the proposal in full.
    confinement escape attempts, build reproducibility, accessibility with Orca, resource
    regressions, and image licences.
 3. **Mechanical parts become checks.** Where a part of an audit can be scripted (cited
-   lines, `actionlint` and `zizmor`, the AT-SPI tree diff, the scans), it moves into
+   lines, `actionlint` and a workflow linter such as `zizmor` still to add, the AT-SPI tree
+   diff, the scans), it moves into
    `verify.py` or CI in its own pull request, and the audit keeps only what needs judgement.
-4. **Fuzzing stays retired** (PR #310). Reopening it is a separate decision.
+4. **Fuzzing stays where it is**: 15 `cargo-fuzz` targets run weekly in `fuzz.yml`, with
+   the corpus replayed in the gate (PR #310). CI already repeats it, so it is not on the
+   calendar.
 
 `docs/operations/audits.md` holds the calendar, the types and who runs each.
 
