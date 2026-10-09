@@ -58,7 +58,7 @@ Decided by the maintainer on 2026-10-09, each as recommended.
    of PL42 is not part of 0.3 (item 7).
 5. **`-nvidia` promotes in 0.3 under a recorded hardware override.** Its promotion record names
    the override "no hardware evidence until 0.9". `-nvidia-legacy` still waits for its evidence
-   at 0.9 (ADR-0105 item 1).
+   at 0.9 (ADR-0105 item 3).
 6. **NVIDIA failure isolation covers the kernel-module stage in 0.3.** A failed legacy module
    removes only `-nvidia-legacy` from the run. The change touches the `signing-kernel` cycle, so
    its diff is shown to the maintainer before the push.
@@ -87,4 +87,5 @@ Decided by the maintainer on 2026-10-09, each as recommended.
 - The maintainer creates `EVIDENCE_REGISTRY` and its push credential before the first `:stable`
   promotion.
 - Masking `grub-boot-success.timer` ships with the image, in the package that owns greenboot's
-  configuration, as part of P4a.
+  configuration, as part of P4a; the timer's entry in `forge/config/contacts.toml` changes with
+  it.

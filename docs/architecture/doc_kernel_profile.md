@@ -586,7 +586,7 @@ service of 1.0, not an interim one, and the `systemd-sysupdate` branch is not ta
 1. Applications update through Flatpak with no interruption (class A).
 2. A system update is a full image, downloaded and verified in the background. The
    Athanor update service first checks the update manifest (D41): its signature with the
-   integrity key, its expiry, the minimum version and the image digest. S1 then chooses
+   integrity key, the minimum version and the image digest (no expiry, ADR-0106). S1 then chooses
    the verification path. With `systemd-sysupdate`, it runs as
    `/usr/lib/systemd/systemd-sysupdate --definitions=/usr/lib/sysupdate.d update <version>` with the
    version the manifest names, so definitions in `/etc/sysupdate.d` are ignored and
@@ -690,7 +690,7 @@ the module key could sign them too, because both are builtin, hence the shared c
 **Revocation and rollback** (D41): `keys/revoked/` covers compiled-in certificates for the
 kernels built after the revocation; superseded UKIs older than the fallback version are
 revoked through MokListX hashes confirmed by the owner, or by a rotation of the Secure
-Boot key; manifests carry an expiry and a minimum version.
+Boot key; manifests carry a minimum version (no expiry at 1.0, ADR-0106).
 Who holds and who can use these keys when the maintainer is absent, and the expiry of the `:stable` image, are in `doc_update_trust.md`, "Key succession" (maintainer decision A2-18, #160); the choice of successor is open.
 
 **Measurements:** PCR 7 (Secure Boot state and the authorities used, including db, dbx,
@@ -992,7 +992,7 @@ There is no kdump.
    and `/etc/ima/ima-policy` masked (D46), and from P5, when a TPM is present, that the roles applied under `/run` match the
    role addons in the PCR 12 event log.
 5. **Release 1.0 updates** (P4b, in a VM with Secure Boot and swtpm): an update with an
-   invalid manifest signature, an expired manifest, a version below the minimum or a
+   invalid manifest signature, a build time older than the running image, a version below the minimum or a
    digest mismatch is refused; a new version does not become the boot default before the
    user confirms; with `systemd-sysupdate`, the preferred entry is set and read back before anything new
    is written (with bootc, the staged deployment stays locked until confirmation); a reboot, a crash and a power loss during installation or before confirmation
