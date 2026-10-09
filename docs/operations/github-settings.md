@@ -4,7 +4,7 @@
 | --- | --- |
 | Purpose | Which GitHub settings of the repository are kept in files, and how to export, compare and apply them |
 | Owner | the maintainer (`@hr-mes`) |
-| Status | revision 1, 2026-10-06. Sections 1 to 5 are fact; section 6 is _(Proposal for the maintainer)_ |
+| Status | revision 2, 2026-10-08. Sections 1 to 5 are fact; section 6 is decided ([ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md)) and its file changes and hand deletions are not made yet |
 | Depends on | `docs/operations/secrets.md` for secret values (separate change) |
 | Defines | GHS1 to GHS10 |
 
@@ -100,17 +100,17 @@ Since then the files have moved ahead of GitHub (2026-10-07, ADR-0064): the two 
 | Pages: legacy build from `main:/docs`; `gh api repos/ars-regia/athanor/pages` reports `"status": "errored"` (status is volatile, not stored) | `pages.json` |
 | Actions: all actions allowed, SHA pinning not required, default token read-only, Actions cannot approve pull requests, approval required for all external contributors | `actions.json` |
 
-## 6. Open points _(Proposal for the maintainer)_
+## 6. Open points (decided 2026-10-08, [ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md))
 
-Each one is a change to a file followed by `apply`; none has been made.
+Each one is a change to a file followed by `apply`, or a deletion by hand followed by an export; none has been made yet.
 
-| Point | Proposal |
+| Point | Decision |
 | --- | --- |
-| Description `ermete-os` | Set the Athanor description in `repository.json` |
-| Dependabot alerts off | Set `vulnerability_alerts` to `true` |
-| Environment `delete` has no rule and no secret, and no workflow names it (`grep -rn "environment:" .github/workflows` finds only `signing-kernel` and `signing-images`) | Delete it by hand and re-export |
-| Pages builds `main:/docs` and errors, and nothing publishes to the `gh-pages` branch since the DNF channel was removed (ADR-0076, decision 2) | Turn Pages off in `pages.json`, then delete the `gh-pages` branch and the `github-pages` environment by hand and re-export |
-| `enforce_admins` is off on `iso-v0` and `main`: the admin may push past the required check | Decide whether the single admin should be bound by the branch protection, as the signing environments already bind them (section 7) |
+| Description `ermete-os` | Set the Athanor description in `repository.json` (the file change follows this record) |
+| Dependabot alerts off | Set `vulnerability_alerts` to `true` in `repository.json` |
+| Environment `delete` has no rule and no secret, and no workflow names it (`grep -rn "environment:" .github/workflows` finds only `signing-kernel` and `signing-images`) | The maintainer deletes it by hand, then exports again |
+| Pages builds `main:/docs` and errors, and nothing publishes to the `gh-pages` branch since the DNF channel was removed (ADR-0076, decision 2) | Turn Pages off in `pages.json`; the maintainer then deletes the `gh-pages` branch and the `github-pages` environment by hand and exports again |
+| `enforce_admins` is off on `iso-v0` and `main`: the admin may push past the required check | Stays off while there is a single maintainer: turned on, it would block every merge, because nobody else can approve. Turn it on when a second maintainer joins. The signing environments bind the admin already (section 7) |
 | No scheduled drift check | _(Done in PB2, section 9)_ `maintenance.yml` runs `diff` daily with a read-only token of a GitHub App, not an admin token |
 
 ## 7. Signing environments (ADR-0064)
@@ -136,7 +136,9 @@ because its keys are then held twice.
 Both have the same protection in `environments.json`: required reviewer `hr-mes`; administrator
 bypass off (`can_admins_bypass: false`, set by hand: section 4); deployment branches `iso-v0` and
 `main`, both protected by `branch-protection.json` (required checks `Kernel gate`, `Spec gate`
-and `gate` on `iso-v0`, `Kernel gate` on `main`, section 8; no force push, no deletion).
+and `gate` on `iso-v0`, `Kernel gate` on `main`, section 8; no force push, no deletion). Once the
+rotation of `secrets.md` section 4.1 ends, `signing-images` loses the required reviewer until
+the 1.0 tag (ADR-0098 item 6); `signing-kernel` and `bridge` keep it.
 
 `prevent_self_review` stays `false`, deferred until a second reviewer exists (secrets.md
 KC1). GitHub refuses the approval of the person who triggered the run, and a release run, or a
