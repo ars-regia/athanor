@@ -14,9 +14,9 @@ applies to Claude Code only.
   `cd`, relative paths cannot be checked against the permission rules, so every such command
   asks for approval. Use paths relative to the root, `git -C <dir>`, `cargo -p <crate>`, or
   an absolute path.
-- **Merging.** The `product-branches` ruleset requires one approval on `iso-v0` and `main`
-  and dismisses it on every push. Claude Code opens, pushes and merges pull requests as the
-  `athanor-agent` GitHub App (`athanor-agent <command>` runs the command with a one-hour
+- **Merging.** The `product-review` ruleset requires the review of a code owner on `iso-v0`
+  and `main`, and no other approval, and dismisses it on every push (ADR-0107). Claude Code
+  opens, pushes and merges pull requests as the `athanor-agent` GitHub App (`athanor-agent <command>` runs the command with a one-hour
   token of the App; commits keep the maintainer's git author). Claude never submits, edits
   or dismisses a review under any account, the maintainer's included, and the App is never a
   bypass actor of a ruleset.
@@ -38,6 +38,9 @@ applies to Claude Code only.
   `APPROVED` review by `hr-mes` whose `commit.oid` in `gh pr view <n> --json reviews` is the
   card's head sha and whose `submittedAt` is later than the card; Claude then merges with
   `athanor-agent gh pr merge <n> --squash --match-head-commit <full sha>`, never `--admin`.
+  An App pull request whose files are all under a path with no owner in `.github/CODEOWNERS`
+  (ADR-0107: `docs/superpowers/plans/`, `docs/spikes/`) needs no approval: after the card
+  and the reading above, Claude merges it the same way, and the card names the unowned path.
   One opened under the maintainer's account, which they cannot approve, needs a message
   typed by the maintainer in this conversation, after the card, naming it; Claude then merges
   with `gh pr merge <n> --squash --admin --match-head-commit <full sha>`, and since `--admin`

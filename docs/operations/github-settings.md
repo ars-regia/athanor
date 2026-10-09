@@ -191,8 +191,9 @@ GHS10 **Declared, not stored.** A settings file may hold keys GitHub does not st
 `export` keeps them from the file, `apply` never reads them, and `diff` acts on them. The
 only one is `personal_tokens` in `actions.json`: the personal access tokens
 `FORGE_PAT`, `KERNEL_BUMP_TOKEN` and `SPECS_UPDATE_TOKEN`, which the GitHub App identities
-replace (doc_pipeline.md PL5). While `retired` is `false` they are ordinary entries of
-`secrets`. Once the App has replaced them, the maintainer sets `retired` to `true` and drops
+replace (doc_pipeline.md PL5). While `retired` is `false`, each one still set is an ordinary
+entry of `secrets`, and each one already deleted leaves `secrets` (`KERNEL_BUMP_TOKEN` and
+`SPECS_UPDATE_TOKEN` since 2026-10-09). Once the App has replaced them all, the maintainer sets `retired` to `true` and drops
 them from `secrets`; from then on `diff` reports each of them still set as drift, which is
 the PB2 gate "the three personal tokens are absent from the secrets list".
 

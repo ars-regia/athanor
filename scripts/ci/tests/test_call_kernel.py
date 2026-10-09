@@ -32,6 +32,12 @@ class MirrorTest(unittest.TestCase):
     def test_the_mirror_publishes_and_signs_nothing(self):
         self.assertEqual(set(jobs("call-kernel.yml")), {*MIRRORED, "verdict"})
 
+    def test_the_signer_identity_comes_from_kernel_artifacts(self):
+        for name in ("kernel-build.yml", "call-kernel.yml"):
+            with self.subTest(workflow=name):
+                text = (WORKFLOWS / name).read_text()
+                self.assertNotIn('--certificate-identity-regexp "^${GITHUB_SERVER_URL}', text)
+
 
 if __name__ == "__main__":
     unittest.main()
