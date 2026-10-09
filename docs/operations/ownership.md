@@ -11,7 +11,7 @@
 ## 1. Today (facts)
 
 - `.github/CODEOWNERS` on `iso-v0` names `@hr-mes-architect` and the path `/forge/specs/kernel/`, which no longer exists (the kernel is `forge/specs/azoth/`).
-- PR #170 replaces it: owner `@hr-mes`, the protected paths last (polkit, attestation, `system/Containerfile`, signing and promotion, `CLAUDE.md`), and "Require review from Code Owners" off while there is a single owner.
+- PR #170 replaces it: owner `@hr-mes`, the protected paths last (polkit, attestation, `system/Containerfile`, signing and promotion, `CLAUDE.md`), and "Require review from Code Owners" off while there is a single owner. [ADR-0107](../decisions/0107-code-owner-review-with-unowned-paths.md) turns it on with no other approval and two paths without an owner.
 - The repository belongs to the organisation `ars-regia` since 2026-10-06 (moved from the personal account `hr-mes`, [transfer-to-organisation.md](transfer-to-organisation.md)). GitHub teams, and with them per-area owner groups, are now possible; none exists yet.
 - The Gatekeeper left the tree in #121 (`ca00f23b`); its area stays reserved under `security` for its return.
 

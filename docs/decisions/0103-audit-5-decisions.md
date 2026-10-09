@@ -2,7 +2,7 @@
 id: ADR-0103
 title: "Audit 5 decisions and the scope of 1.0"
 date: 2026-10-09
-status: amended by ADR-0104
+status: amended by ADR-0104, ADR-0107
 issues: [122, 124, 231]
 areas: [platform, kernel, build, signing, security, shell, apps, docs]
 ---
