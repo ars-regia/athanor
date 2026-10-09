@@ -1,4 +1,38 @@
 {
+  "bot-branches": {
+    "bypass_actors": [
+      {
+        "actor_id": 5253226,
+        "actor_type": "Integration",
+        "bypass_mode": "always"
+      }
+    ],
+    "conditions": {
+      "ref_name": {
+        "exclude": [],
+        "include": [
+          "refs/heads/chore/update-specs-zero-trust",
+          "refs/heads/bump/system-*"
+        ]
+      }
+    },
+    "enforcement": "active",
+    "rules": [
+      {
+        "type": "creation"
+      },
+      {
+        "type": "non_fast_forward"
+      },
+      {
+        "parameters": {
+          "update_allows_fetch_and_merge": false
+        },
+        "type": "update"
+      }
+    ],
+    "target": "branch"
+  },
   "product-branches": {
     "bypass_actors": [],
     "conditions": {

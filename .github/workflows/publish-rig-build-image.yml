@@ -82,7 +82,6 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-contents: write
-          permission-issues: write
           permission-pull-requests: write
       - name: Branch, commit, PR (never auto-merged)
         env:
