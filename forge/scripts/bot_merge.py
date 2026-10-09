@@ -40,6 +40,10 @@ NAME = r"[A-Za-z0-9._+-]+"
 HEX64 = r"[0-9a-f]{64}"
 SPEC_FILE = re.compile(rf"(?:{NAME}\.spec|SOURCES/sources\.sha256)")
 WATCH_FILE = "forge/upstream-watch.json"
+# How gh reports the bots GitHub App (athanor-bots) as the author of a pull request. Only
+# the App opens the branches this script merges (ruleset bot-branches), so a pull request
+# of any other author is left for a person.
+BOT_AUTHOR = "app/athanor-bots"
 # The bot waits for the checks the branch protection of the base branch requires, read from
 # the checkout: the protection does not bind administrators (enforce_admins: false) and the
 # merging App is a bypass actor of the pull request rule, so this wait is what keeps a red check from merging. Switching
@@ -171,11 +175,13 @@ def check(kind, pr, sha, gh):
             "view",
             pr,
             "--json",
-            "state,baseRefName,headRefName,headRefOid,isCrossRepository,labels,changedFiles",
+            "state,author,baseRefName,headRefName,headRefOid,isCrossRepository,labels,changedFiles",
         )
     )
     if view["state"] != "OPEN":
         raise Refused("is not open")
+    if view["author"]["login"] != BOT_AUTHOR:
+        raise Refused(f"is by {view['author']['login']}, not by {BOT_AUTHOR}")
     if view["isCrossRepository"]:
         raise Refused("comes from a fork")
     if view["headRefOid"] != sha:

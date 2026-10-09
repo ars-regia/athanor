@@ -105,6 +105,7 @@ class BotMergeTest(unittest.TestCase):
     ):
         data = dict(
             state="OPEN",
+            author={"login": bot.BOT_AUTHOR},
             baseRefName="iso-v0",
             headRefName=branch,
             headRefOid=SHA,
@@ -252,6 +253,10 @@ class BotMergeTest(unittest.TestCase):
         self.assertEqual(self.spec(headRefOid="b" * 40), [])
         self.assertEqual(self.spec(state="CLOSED"), [])
         self.assertEqual(self.spec(build="failure"), [])
+
+    def test_pull_request_of_another_author_stays(self):
+        self.assertEqual(self.spec(author={"login": "hr-mes"}), [])
+        self.assertEqual(self.system(author={"login": "app/athanor-agent"}), [])
 
     def test_missing_pull_request_number_fails(self):
         for pr in ("", "null"):
