@@ -558,14 +558,17 @@ last job of `build.yml`, `request-release`, runs when every other job succeeded 
 `release-request.json` (PL55). On `iso-v0`, the default branch, it then dispatches
 `release.yml` on that ref with one input, `build_run_id`, after a push and after the
 nightly schedule (04:00 UTC) alike (PQ18). On `main` it dispatches nothing: `main` is
-frozen (PQ1), so a release of a `main` build is only a dispatch the maintainer starts by
-hand. This implements PQ1 and is part of this proposal, not a separate decision. That job and `request-acceptance` (PL56) alone have `actions:
+frozen (PQ1), and `release.yml` releases only from `iso-v0`: every job checks that the
+run's ref is `refs/heads/iso-v0`. A hand release of `main` remains possible only through
+`main`'s own old jobs, which write no marker and leave `:latest` unlabelled, the fallback
+of PL55. ADR-0098 option A archives and deletes `main` (`docs/operations/branching.md`
+section 3), and after that this fallback disappears. This implements PQ1 and is part of this proposal, not a separate decision. That job and `request-acceptance` (PL56) alone have `actions:
 write`. The permission also lets them dispatch any other workflow of the repository; the
 environment `release` on every job that moves `:stable` (PL60) and the candidate check of
 PL55 bound what such a dispatch can publish. A dispatch made with
 `GITHUB_TOKEN` starts a run, unlike the other events that token creates
 (https://docs.github.com/en/actions/security-for-github-actions/security-guides/automatic-token-authentication).
-The maintainer may dispatch `release.yml` by hand with a build run id, on the build's ref,
+The maintainer may dispatch `release.yml` by hand with a build run id, on `iso-v0`,
 to release a build again. The security class, its advisory ids and the build time are never
 dispatch inputs: `candidate` derives them from the difference between the current
 `:latest` and the candidate, and the build time from the images (PL31, PL55, PQ4, PQ17). A failed dispatch fails the build. `verify.py
@@ -584,7 +587,7 @@ attempt, the workflow path, the ref, the commit, the builder content hash and th
 (`actions: read`) and runs `scripts/ci/release_candidate.py`, which refuses the request
 unless the API's record of the build run agrees with it: the workflow path is that of
 `build.yml`; the run attempt is the request's; `head_branch` is the release run's ref, which
-must be `iso-v0` or `main`: `candidate` refuses any other ref itself, not only through the
+must be `iso-v0`: `candidate` refuses a build of any other branch itself, not only through the
 environment's branch policy; the event is `push`,
 `workflow_dispatch` or `schedule`; every job other than `request-release` concluded
 `success` or `skipped`, and the image job `success`; `head_sha` is the request's commit and
@@ -601,8 +604,8 @@ or images that expire (section 5), and never from a dispatch input:
   `<base>`. `<base>` is the commit of the `org.opencontainers.image.revision` label of
   `:latest` when it has one; otherwise it is the `revision` of the newest release marker
   of the repository, which section 5 keeps. From PB4b, `tag-latest` pushes the marker
-  `released-<revision>-<build_run_id>` on each digest it moves `:latest` to, after the
-  move, so a marker never names an unreleased image. It is an immutable
+  `released-<revision>-<build_run_id>` on each digest it moved `:latest` to, after the
+  move, so a marker names a digest that `:latest` held and never an unreleased image. It is an immutable
   tag, with no key, whose prefix no other tag scheme uses (`<run_id>`, `hash-<h>`,
   `sha256-<hex>`, `latest`, `stable*`, `main`), and whose run id keeps it unique when the
   nightly build releases the same commit again. Markers are ordered by the `revision` of
@@ -611,10 +614,11 @@ or images that expire (section 5), and never from a dispatch input:
   the history of `iso-v0`, ties going to the larger run id; build time does not order
   markers. Every marker counts: one whose attested revision is not in the history of
   `iso-v0`, including a commit on no branch, fails `candidate`, as a missing label commit
-  does. `release.yml` does not exist on `main`, so no marker comes from it. Only the PB4b attestation on the digest a marker names counts, so an image signed
+  does. `release.yml` releases only from `iso-v0` (PL54), so such a marker cannot come
+  from it, and if one appears, failing is correct. Only the PB4b attestation on the digest a marker names counts, so an image signed
   but never tagged, after a failed `verify-images` or `tag-latest` (PL59), is never the
-  base and its commits stay in the range. A hand release of the frozen `main` in between
-  costs nothing: the range starts at the last marked `iso-v0` release. The range is defined
+  base and its commits stay in the range. A hand release of the frozen `main` in between,
+  through `main`'s old jobs, costs nothing: the range starts at the last marked `iso-v0` release. The range is defined
   whether or not `<base>` is an ancestor of the candidate, as long as the commit exists in
   the repository; a `<base>` absent from the repository fails `candidate`, and so does a
   marker whose attestation is missing or does not verify with the keys the candidate's
@@ -690,11 +694,11 @@ precondition of `:latest` (PQ16).
 
 | Job | Environment | What it does |
 | --- | --- | --- |
-| `mark-current` | none | from PB4b, with `packages: write` only and no key: for each repository whose `:latest` carries a PB4b release attestation that verifies with the keys of the checked-out tree and no marker on that digest, writes the marker `released-<revision>-<build_run_id>` from the attested `revision` and `build_run_id`, and nothing else. It takes no input and reads only verified registry data. An attestation that does not verify, or a revision not in the history of `iso-v0`, fails the job (PL55, PL59) |
+| `mark-current` | none | from PB4b, with `packages: write` only and no key: for each repository whose `:latest` carries a PB4b release attestation that verifies with the keys of the checked-out tree and no marker on that digest, writes the marker `released-<revision>-<build_run_id>` from the attested `revision` and `build_run_id`, and nothing else; it is the marker's second writer (PL35). It takes no input and reads only verified registry data. An attestation that does not verify, or a revision not in the history of `iso-v0`, fails the job (PL55, PL59) |
 | `candidate` | none | after `mark-current`: PL55, then the order check of PL58 |
 | `sign-images` | `signing` until step 3 of the image key rotation, `signing-images` after it | signs the digests of `release-candidate` with the cosign key and writes the key-signed release attestation (PL31, PQ4); builds nothing and runs no third-party action (PL11) |
 | `verify-images` | none | verifies the key-based signature as a machine does (PL16) |
-| `tag-latest` | none | runs the order check of PL58 again, then moves `:latest` of the system images, and on `main` the ISO's (PL35); from PB4b it then pushes the marker `released-<revision>-<build_run_id>` on each digest it tagged, and a re-run writes only what is missing (PL55) |
+| `tag-latest` | none | runs the order check of PL58 again, then moves `:latest` of the system images (PL35); from PB4b it then pushes the marker `released-<revision>-<build_run_id>` on each digest it tagged, and a re-run writes only what is missing (PL55) |
 | `request-acceptance` | none | dispatches `accept.yml` with the build run id (`actions: write`), so the acceptance runs outside the release group and its evidence feeds UD4 (UD17, UD18) |
 
 | Period | `:latest`, no kernel or module change | `:latest`, kernel or module change | Promotion to `:stable` |
@@ -706,25 +710,22 @@ The ceiling of two approvals of section 2 item 1 counts the approvals of one bui
 publication; the later promotion to `:stable` is a separate act and does not count (PQ13).
 
 No job of `release.yml` uses the environment `release`. `verify.py workflows` rejects a job
-in `signing` or `signing-images` outside `release.yml`, a second writer of `:latest`, and a
+of `release.yml` that does not check that the run's ref is `refs/heads/iso-v0` (PL54), a
+job in `signing` or `signing-images` outside `release.yml`, a second writer of `:latest`, and a
 job that runs `system/promote.sh` or writes `:stable` outside the environment `release`
 (PL60).
 
 **PL57. Two concurrency groups, neither held by the other's approval.** `build.yml` keeps
 one group per ref at workflow level with `cancel-in-progress: false` (O6) and releases it
-when `request-release` ends. `release.yml` declares one group for every release ref,
-`${{ github.workflow }}`, at workflow level, also with `cancel-in-progress: false`:
-`:latest` is one tag for `iso-v0` and `main` (`system/tag-images.sh` moves it from both), so
-the releases of the two refs queue behind each other. Since only `iso-v0` requests a release by
+when `request-release` ends. `release.yml` declares one group,
+`${{ github.workflow }}`, at workflow level, also with `cancel-in-progress: false`, so
+its releases, all from `iso-v0` (PL54), queue behind each other. Since only `iso-v0` requests a release by
 itself (PL54), a pending release is replaced only by the release of a newer `iso-v0` build,
 whose commit descends from it and whose packages are at least as new, and whose difference from
-`:latest` contains its content (PL55). The shared group also works the other way. A pending
-`main` release, started by hand, can be replaced by an `iso-v0` release, and the maintainer
-sees its cancellation on that run. A hand dispatch of `main` can replace a pending
-automatic `iso-v0` release. Nothing is lost either way: the replaced run shows as cancelled
+`:latest` contains its content (PL55). Nothing is lost: the replaced run shows as cancelled
 in the run list, and the next `iso-v0` release, at the latest the 04:00 UTC nightly, is
 computed against the then-current `:latest`, carries the difference and lists the replaced
-`iso-v0` build as `superseded` (PL55). A `main` release lists only builds of `main`. A release run that waits for the
+`iso-v0` build as `superseded` (PL55). A release run that waits for the
 image signing approval holds only the release group: the next build runs, and its release
 run waits as the pending run of PL49. A build that changes the kernel or the modules still
 holds the build group while `sign-kernel` waits for its approval; this is accepted until the
@@ -738,8 +739,8 @@ registry error fails. An equal digest is a no-op. Otherwise the candidate's
 `org.opencontainers.image.created` must be strictly later, and the commit that the
 `org.opencontainers.image.revision` label of the `:latest` image names must be an ancestor
 of the candidate's commit (`git merge-base --is-ancestor`) when that commit is on the
-candidate's ref. A `:latest` built from the other release ref, which only a hand release
-of `main` produces (PL54), or without the label, is compared by build time alone. These
+candidate's ref. A `:latest` built from `main`, which only a hand release
+through `main`'s old jobs produces (PL54), or without the label, is compared by build time alone. These
 fallbacks are for the order only; the class derivation of PL55 has its own bootstrap cases,
 in which an unlabelled baseline can still give `security` from the Fedora half. `system/build-image.sh` adds the label in PB13. The check runs in
 `candidate` and again in `tag-latest`, just before the tag moves, because a release run may
@@ -778,16 +779,21 @@ wait with it. Promotion holds no key in any class (UD6).
 
 **PL35. One rule per tag, one writer per tag** (UD1). `:<run_id>`, `hash-<h>` and the
 marker `released-<revision>-<build_run_id>` are immutable names written once, the marker
-only by `tag-latest` (PL55); `:latest` is written only by `release.yml` (PL56), for a build of
-`iso-v0` or `main`: for the system images by `call-tag.yml` after it verified the
-key-based signature as a machine does (UD25), for the ISO by `call-iso.yml` after its
-keyless signature verified (PL32); the kernel has no `:latest`, since every consumer
-reads it by digest (PL13). The ISO's `:latest` moves on `main` only. With `main` frozen
-and released only by hand (PL54), it moves only on a hand release of `main`. Before this
-revision only `main` moved it too, so this is no regression. `:stable`,
+only by the jobs `tag-latest` and `mark-current` of `release.yml` (PL55, PL56); `:latest`
+is written by `release.yml` (PL56) only for a build of `iso-v0`: for the system images by
+`call-tag.yml` after it verified the key-based signature as a machine does (UD25); the
+kernel has no `:latest`, since every consumer reads it by digest (PL13). The ISO's
+`:latest` moves on `main` only, through `main`'s old jobs, not `release.yml`: with `main`
+frozen (PL54), it moves only on a hand release of `main`, which also moves the system
+images' `:latest` without a marker (PL55). Those old jobs are outside this rule until
+ADR-0098 option A deletes `main`; a later ISO release path names its writer (PL32).
+Before this revision only `main` moved the ISO's `:latest` too, so this is no regression. `:stable`,
 `:stable-previous`, `:stable-<YYYYMMDD>` are written only by `promote.sh`. There is one
 writer per tag and repository, and `verify.py workflows` enforces it in the workflows and in
 the scripts they call (`system/sign-images.sh`, `system/promote.sh`) (UD1 acceptance).
+The check counts writers per job: the marker has two, `tag-latest` and `mark-current`,
+both in `release.yml`, and the pull request that adds `release.yml` extends the check to
+allow that pair.
 Today the `dag-system-image` job of `call-system-image.yml` pushes the system images by
 `:<run_id>` only, and `tag-system-images` of the Orchestrator moves their `:latest` after
 `verify-system-images` verified the key-based signature, and on `main` the ISO's `:latest`
@@ -1039,7 +1045,7 @@ runs (Node runtime, action majors), so a deprecation has an owner before it brea
 
 | Check              | Requirement                                                                 |
 | ------------------ | --------------------------------------------------------------------------- |
-| `workflows` (ext.) | PL3, PL7, PL10 (no cache on the release path), PL11, PL14, PL35, PL47, PL54, PL56 and PL57 (the release workflow), PL60 (every job that runs `promote.sh` or writes `:stable` runs in `release`), section 9 rules |
+| `workflows` (ext.) | PL3, PL7, PL10 (no cache on the release path), PL11, PL14, PL35 (one writer per tag and repository, counted per job: the marker's are `tag-latest` and `mark-current`), PL47, PL54, PL56 and PL57 (the release workflow), PL60 (every job that runs `promote.sh` or writes `:stable` runs in `release`), section 9 rules |
 | `docs` (ext.)      | section 3.5 matches `.github/workflows` until PB12                          |
 | `pinning` (new)    | PL8, PL13 (actions in PB2; containers and the flake in PB3)                  |
 | `owners` (new)     | PL4                                                                          |
@@ -1363,3 +1369,10 @@ Amended on 2026-10-09, still proposed: a key-free first job of `release.yml`,
 data, in place of failing `candidate`; PL59 says a failed `tag-latest` can leave
 `:latest` moved. The PB4b attestation records `build_run_id`. Every marker counts, and one
 whose attested revision is not in the history of `iso-v0` fails (PL55, PL56, PL59, PB4b).
+
+Amended on 2026-10-09, still proposed: `release.yml` releases only from `iso-v0`. Every
+job checks the run's ref, `candidate` refuses a build of another branch, and the hand
+dispatch of `main` in an earlier entry is withdrawn: a hand release of `main` runs only
+through `main`'s old jobs, without a marker, until ADR-0098 option A deletes `main`. The
+marker has two writers, the jobs `tag-latest` and `mark-current`, counted per job (PL35,
+PL54-PL58, section 10).
