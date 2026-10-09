@@ -10,7 +10,8 @@
 # Usage: run.sh prepare|inputs|sign|verify
 #   prepare  key-less job, after the module build: what `inputs` derives, then mok/: out/open
 #            signed by an ephemeral key with the Secure Boot profile, the negative sample of
-#            the boot job (a Secure Boot key never authorises a module)
+#            the boot job (a Secure Boot key never authorises a module); mokca/ and mokleaf/
+#            likewise with a test user CA and with a leaf that CA issued (D40)
 #   inputs   key-less step of the sign job, before the step that holds the keys. Everything
 #            that step signs is derived here, in the same job, never taken from another job's
 #            artifact: system/kernel-artifacts.sh resolve runs again (cosign verifies azoth
@@ -40,6 +41,7 @@ ROOT=$(cd "$HERE/../../../.." && pwd)
 SECUREBOOT_CERT=forge/specs/azoth/keys/secureboot/athanor-secureboot.pem
 MODULE_CERT=forge/specs/azoth/keys/modules/athanor-modules.pem
 SECUREBOOT_PROFILE=forge/specs/azoth/keys/profiles/secureboot.cnf
+USER_CA_PROFILE=forge/specs/azoth/keys/profiles/test-user-ca.cnf
 SIGN_KERNEL=/usr/local/bin/sign-kernel.sh
 
 die() {
@@ -163,6 +165,26 @@ prepare)
         modules --key /run/keys/test-mok --cert /run/certs/test-mok.pem --hash /in/module-sig-hash \
         --kver "$(< kernel-unsigned/kver)" --dir /modules
     cp "$WORK/test-mok.pem" mok/test-mok.pem
+    # D40: a user CA (CA:TRUE, keyCertSign only) signs one copy directly, and a leaf it issued
+    # signs another. boot.sh enrols and trusts the CA; the kernel must accept the first copy
+    # under UEFI and refuse the second everywhere.
+    mkdir mokca mokleaf
+    cp -a out/open mokca/open
+    cp -a out/open mokleaf/open
+    openssl req -x509 -newkey rsa:2048 -nodes -days 2 -config "$ROOT/$USER_CA_PROFILE" \
+        -keyout "$WORK/test-ca" -out "$WORK/test-ca.pem"
+    openssl req -new -newkey rsa:2048 -nodes -subj '/CN=Athanor OS K3 test user leaf/' \
+        -keyout "$WORK/test-leaf" -out "$WORK/test-leaf.csr"
+    openssl x509 -req -days 2 -in "$WORK/test-leaf.csr" -CA "$WORK/test-ca.pem" -CAkey "$WORK/test-ca" \
+        -extfile "$ROOT/$USER_CA_PROFILE" -extensions leaf -out "$WORK/test-leaf.pem"
+    for pair in ca:mokca leaf:mokleaf; do
+        name=${pair%%:*} tree=${pair#*:}
+        signer -v "$ROOT/$tree:/modules" -v "$ROOT/kernel-unsigned:/in:ro" \
+            -v "$WORK/test-$name:/run/keys/test-$name:ro" -v "$WORK/test-$name.pem:/run/certs/test-$name.pem:ro" -- \
+            modules --key "/run/keys/test-$name" --cert "/run/certs/test-$name.pem" --hash /in/module-sig-hash \
+            --kver "$(< kernel-unsigned/kver)" --dir "/modules"
+        cp "$WORK/test-$name.pem" "$tree/test-$name.pem"
+    done
     ;;
 inputs)
     derive
