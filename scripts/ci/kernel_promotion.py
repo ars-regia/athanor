@@ -177,6 +177,26 @@ def build_inputs(repo, rev, tmp):
     return json.loads(out)
 
 
+def fetch_artifact(api, repository, run, dest):
+    """Condition 4: the one kernel-build artifact of RUN, downloaded by id, digest checked."""
+    listing = api.json(f"/repos/{repository}/actions/runs/{run['id']}/artifacts?name={ARTIFACT}&per_page=100")
+    found = [a for a in listing["artifacts"] if a["name"] == ARTIFACT and a["workflow_run"]["id"] == run["id"]]
+    # ponytail: a run whose build job ran twice has two kernel-build artifacts and builds again;
+    # pick by the latest attempt if re-runs make that common.
+    if len(found) != 1:
+        raise Refused(f"condition 4: run {run['id']} has {len(found)} artifacts named {ARTIFACT}, expected one")
+    artifact = found[0]
+    if artifact["expired"]:
+        raise Refused(f"condition 4: artifact {artifact['id']} of run {run['id']} has expired")
+    expected = artifact.get("digest") or ""
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", expected):
+        raise Refused(f"condition 4: the API reports no SHA-256 digest for artifact {artifact['id']}")
+    actual = "sha256:" + api.download(f"/repos/{repository}/actions/artifacts/{artifact['id']}/zip", dest)
+    if actual != expected:
+        raise Refused(f"condition 4: artifact {artifact['id']} has digest {actual}, the API reports {expected}")
+    return artifact
+
+
 def decide(api, repo, repository, sha, nvr, tmp):
     """The decision for a promotion; raises Refused when a condition does not hold."""
     tmp = pathlib.Path(tmp)
@@ -202,6 +222,16 @@ def decide(api, repo, repository, sha, nvr, tmp):
         raise Refused("condition 3: build-inputs.py gives other inputs at the run's head than at the pushed commit")
     canonical = json.dumps(inputs, sort_keys=True, separators=(",", ":")).encode()
     decision["build_inputs_sha256"] = hashlib.sha256(canonical).hexdigest()
+    artifact = fetch_artifact(api, repository, run, tmp / "artifact.zip")
+    decision["artifact"] = {"id": artifact["id"], "name": ARTIFACT, "digest": artifact["digest"]}
+    # Condition 3, second half: read from the artifact only now that its digest matched.
+    with zipfile.ZipFile(tmp / "artifact.zip") as archive:
+        if "nvr" not in archive.namelist():
+            raise Refused(f"condition 3: artifact {artifact['id']} holds no nvr")
+        built = archive.read("nvr").decode().strip()
+    if built != nvr:
+        raise Refused(f"condition 3: artifact {artifact['id']} holds NVR {built}, the pins give {nvr}")
+    decision["nvr"] = nvr
     return decision
 
 
@@ -209,7 +239,11 @@ def promote(api, repo, repository, sha, nvr, extract):
     """decide, then unpack the artifact into EXTRACT; any failure is a decision to build."""
     try:
         with tempfile.TemporaryDirectory() as tmp:
-            return decide(api, repo, repository, sha, nvr, tmp)
+            decision = decide(api, repo, repository, sha, nvr, tmp)
+            pathlib.Path(extract).mkdir(parents=True)
+            with zipfile.ZipFile(pathlib.Path(tmp) / "artifact.zip") as archive:
+                archive.extractall(extract)
+            return decision
     except Refused as refused:
         return {"promoted": False, "reason": str(refused)}
     except ERRORS as error:

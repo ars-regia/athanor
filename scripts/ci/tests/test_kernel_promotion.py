@@ -295,6 +295,98 @@ class ConditionThreeTest(Case):
             decision = self.run_promotion(shas, api, checkout)
         self.assertRefused(decision, "condition 3: build-inputs.py")
 
+    def test_an_artifact_built_for_another_nvr_builds(self):
+        shas, api, checkout = self.promote()
+        self.assertRefused(
+            self.run_promotion(shas, api, checkout, nvr="6.17.2-100.azoth.fc43"),
+            f"holds NVR {NVR}, the pins give 6.17.2-100.azoth.fc43",
+        )
+
+    def test_an_artifact_without_nvr_builds(self):
+        shas, api, checkout = self.promote()
+        with zipfile.ZipFile(api.zip_path, "w") as archive:
+            archive.writestr("kernel/kernel-core.rpm", b"rpm")
+        api.artifacts["artifacts"][0]["digest"] = "sha256:" + sha256(api.zip_path)
+        self.assertRefused(self.run_promotion(shas, api, checkout), "holds no nvr")
+
+
+class ConditionFourTest(Case):
+    def test_a_digest_that_differs_from_the_api_builds(self):
+        shas, api, checkout = self.promote()
+        api.artifacts["artifacts"][0]["digest"] = "sha256:" + "0" * 64
+        self.assertRefused(self.run_promotion(shas, api, checkout), "condition 4: artifact 11482498571 has digest")
+
+    def test_an_artifact_without_a_digest_builds(self):
+        shas, api, checkout = self.promote()
+        api.artifacts["artifacts"][0]["digest"] = None
+        self.assertRefused(self.run_promotion(shas, api, checkout), "reports no SHA-256 digest")
+
+    def test_an_expired_artifact_builds(self):
+        shas, api, checkout = self.promote()
+        api.artifacts["artifacts"][0]["expired"] = True
+        self.assertRefused(self.run_promotion(shas, api, checkout), "has expired")
+
+    def test_a_missing_or_duplicated_artifact_builds(self):
+        for artifacts in ([], "twice"):
+            with self.subTest(artifacts=artifacts):
+                self.tmp = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
+                shas, api, checkout = self.promote()
+                found = api.artifacts["artifacts"]
+                api.artifacts["artifacts"] = found * 2 if artifacts == "twice" else []
+                self.assertRefused(
+                    self.run_promotion(shas, api, checkout), "artifacts named kernel-build, expected one"
+                )
+
+    def test_an_artifact_of_another_run_is_never_taken(self):
+        shas, api, checkout = self.promote()
+        api.artifacts["artifacts"][0]["workflow_run"]["id"] = RUN + 1
+        self.assertRefused(self.run_promotion(shas, api, checkout), "has 0 artifacts")
+
+
+class PromotedTest(Case):
+    def test_all_four_conditions_promote_and_unpack_the_artifact(self):
+        shas, api, checkout = self.promote()
+        decision = self.run_promotion(shas, api, checkout)
+        self.assertTrue(decision["promoted"], decision)
+        self.assertEqual((self.tmp / "out" / "nvr").read_text(), NVR + "\n")
+        self.assertTrue((self.tmp / "out" / "kernel" / f"kernel-core-{NVR}.x86_64.rpm").is_file())
+
+    def test_the_decision_names_the_source_run_the_trees_and_the_digest(self):
+        shas, api, checkout = self.promote()
+        decision = self.run_promotion(shas, api, checkout)
+        self.assertEqual(decision["source_run"]["id"], RUN)
+        self.assertEqual(decision["pull_request"]["number"], 270)
+        self.assertEqual(decision["pull_request"]["merge_commit"], shas["pushed"])
+        self.assertEqual(decision["pushed"], {"commit": shas["pushed"], "parent": shas["parent"]})
+        self.assertEqual(decision["artifact"]["digest"], "sha256:" + sha256(self.tmp / "artifact.zip"))
+        self.assertEqual(set(decision["trees"]), set(promotion.COMPARED))
+        azoth = decision["trees"]["forge/specs/azoth"]
+        self.assertEqual(azoth["head"], azoth["pushed"])
+        self.assertEqual(azoth["base"], azoth["parent"])
+        self.assertNotEqual(azoth["head"], azoth["base"])
+
+
+class ErrorTest(Case):
+    def test_an_api_error_builds(self):
+        for error in (
+            urllib.error.HTTPError("u", 502, "Bad Gateway", {}, None),
+            urllib.error.URLError("timed out"),
+            http.client.IncompleteRead(b"partial"),
+            ValueError("not JSON"),
+        ):
+            with self.subTest(error=error):
+                self.tmp = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
+                shas, api, checkout = self.promote()
+                api.error = error
+                self.assertRefused(self.run_promotion(shas, api, checkout), "error: ")
+
+    def test_an_existing_extract_directory_builds(self):
+        shas, api, checkout = self.promote()
+        (self.tmp / "out").mkdir()
+        decision = self.run_promotion(shas, api, checkout)
+        self.assertFalse(decision["promoted"])
+        self.assertIn("FileExistsError", decision["reason"])
+
 
 if __name__ == "__main__":
     unittest.main()
