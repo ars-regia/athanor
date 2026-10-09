@@ -2,7 +2,7 @@
 id: ADR-0081
 title: "CRA compliance posture"
 date: 2026-10-07
-status: accepted
+status: amended by ADR-0103
 issues: []
 areas: [security, update, product]
 ---

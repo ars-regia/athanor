@@ -2,7 +2,7 @@
 id: ADR-0087
 title: "Keep athanor-attestation outside the workspace until its Keylime rewrite"
 date: 2026-10-07
-status: accepted
+status: amended by ADR-0103
 issues: [151, 201]
 areas: [security, build]
 ---

@@ -2,7 +2,7 @@
 id: W1-FOLLOWUP
 title: "Follow-up decisions after wave 1"
 date: 2026-10-05
-status: accepted
+status: amended by ADR-0103
 issues: []
 areas: [shell, security, storage]
 ---
