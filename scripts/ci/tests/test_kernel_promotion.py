@@ -443,9 +443,7 @@ class ErrorTest(Case):
 
 
 class MainTest(Case):
-    def test_main_writes_the_decision_and_the_summary_and_exits_zero(self):
-        shas, api, checkout = self.promote()
-        api.artifacts["artifacts"][0]["expired"] = True
+    def main(self, shas, api, checkout):
         out = self.tmp / "promotion"
         env = {"GITHUB_REPOSITORY": REPOSITORY, "GH_TOKEN": "token"}
         with (
@@ -457,10 +455,24 @@ class MainTest(Case):
                 ["--sha", shas["pushed"], "--nvr", NVR, "--out", str(out),
                  "--extract", str(self.tmp / "out"), "--repo", str(checkout)]
             )
+        return status, printed.getvalue(), out
+
+    def test_main_writes_the_decision_and_the_summary_and_exits_zero(self):
+        shas, api, checkout = self.promote()
+        api.artifacts["artifacts"][0]["expired"] = True
+        status, printed, out = self.main(shas, api, checkout)
         self.assertEqual(status, 0)
-        self.assertIn("::notice title=Kernel promotion::not promoted", printed.getvalue())
+        self.assertIn("::notice title=Kernel promotion::not promoted", printed)
         self.assertFalse(json.loads((out / "decision.json").read_text())["promoted"])
         self.assertIn("Not promoted, the push builds: condition 4", (out / "summary.md").read_text())
+
+    def test_an_error_rather_than_a_refusal_is_a_warning(self):
+        # An unexpected error disables promotion until someone reads it: it must not look routine.
+        shas, api, checkout = self.promote()
+        api.error = lzma.LZMAError("Corrupt input data")
+        status, printed, _ = self.main(shas, api, checkout)
+        self.assertEqual(status, 0)
+        self.assertIn("::warning title=Kernel promotion::not promoted, the push builds: error: LZMAError", printed)
 
     def test_the_summary_of_a_promotion_lists_every_compared_path(self):
         shas, api, checkout = self.promote()

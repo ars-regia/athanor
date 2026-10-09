@@ -334,7 +334,9 @@ def main(argv=None):
     (out / "decision.json").write_text(json.dumps(decision, indent=2, sort_keys=True) + "\n")
     (out / "summary.md").write_text(summary(decision))
     outcome = "promoted" if decision["promoted"] else f"not promoted, the push builds: {decision['reason']}"
-    print(f"::notice title=Kernel promotion::{outcome}")
+    # A refusal is routine; an error disables promotion until someone reads it.
+    level = "warning" if decision["reason"].startswith("error: ") else "notice"
+    print(f"::{level} title=Kernel promotion::{outcome}")
     return 0
 
 
