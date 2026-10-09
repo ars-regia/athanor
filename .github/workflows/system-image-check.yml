@@ -135,34 +135,6 @@ jobs:
           set -euo pipefail
           bash system/package-delta.sh "ghcr.io/${OWNER,,}/athanor-system:latest" localhost/athanor-system:check | tee -a "$GITHUB_STEP_SUMMARY"
 
-  merge:
-    needs: build
-    # The system bump bot's pull requests only, whatever the build's outcome: forge/scripts/bot_merge.py
-    # merges a green one of the bot's shape at its head once the required checks pass, and
-    # reports why it leaves any other. The script is the base branch's copy; the workflow
-    # file, as for any same-repository pull_request, is the pull request's own, and forks get
-    # no secrets.
-    if: ${{ always() && startsWith(github.head_ref, 'bump/system-') && github.event.pull_request.head.repo.full_name == github.repository }}
-    runs-on: ubuntu-24.04
-    # The job's own token reads the pull request and the Kernel Build runs; the PAT only merges.
-    permissions:
-      actions: read
-      contents: read
-      pull-requests: read
-    # It waits for the checks .github/settings/branch-protection.json requires before merging.
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ github.base_ref }}
-
-      - name: Merge a green system bump of the bot's shape (forge/scripts/bot_merge.py)
-        env:
-          GH_TOKEN: ${{ github.token }}
-          # A PAT: a merge made with the GITHUB_TOKEN triggers no push workflow, and the
-          # Orchestrator must publish what merged.
-          MERGE_TOKEN: ${{ secrets.KERNEL_BUMP_TOKEN }}
-          PR: ${{ github.event.pull_request.number }}
-          SHA: ${{ github.event.pull_request.head.sha }}
-          BUILD: ${{ needs.build.result }}
-        run: python3 forge/scripts/bot_merge.py system "$PR" "$SHA" "$BUILD"
+  # The bot merge is not a job here: bot-merge.yml runs after this workflow, from the
+  # default branch's file, because the key of the `bots` environment must never be reachable
+  # from a workflow file a pull request edits.

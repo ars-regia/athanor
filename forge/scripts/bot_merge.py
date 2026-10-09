@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Merge a bot pull request whose change has exactly the shape the bot produces.
 
-Spec Build Check calls it with `spec` after a green build of the spec bot's pull request,
-System Image Check with `system` after a green build of a system bump. The script reads the
+bot-merge.yml calls it, from the default branch's workflow file, when Spec Build Check ends on the spec
+bot's pull request (`spec`) or System Image Check on a system bump (`system`); BUILD_RESULT is the
+conclusion of that run. The script reads the
 changed files from the GitHub API (status, path and patch of each), checks every changed line
 against the bot's shape, waits for the required checks of the branch protection and merges
 at HEAD_SHA, so a push after the check makes the merge fail instead of landing unchecked.
@@ -20,8 +21,8 @@ system — branch bump/system-* with label system-bump (kernel-bump.yml, system 
          lock's own `# repository` line.
 
 Usage: bot_merge.py spec|system PR HEAD_SHA BUILD_RESULT
-       GH_TOKEN: reads the pull request and the Actions runs; MERGE_TOKEN: merges it (a PAT,
-       so that the merge triggers the push workflows)
+       GH_TOKEN: reads the pull request and the Actions runs; MERGE_TOKEN: merges it (a token of
+       the bots GitHub App, so that the merge triggers the push workflows)
 
 A pull request of another shape, or a build that is not `success`, is reported in the log and
 the job summary and the script exits 0. A failing gh call, a failing required check or a
@@ -39,9 +40,13 @@ NAME = r"[A-Za-z0-9._+-]+"
 HEX64 = r"[0-9a-f]{64}"
 SPEC_FILE = re.compile(rf"(?:{NAME}\.spec|SOURCES/sources\.sha256)")
 WATCH_FILE = "forge/upstream-watch.json"
+# How gh reports the bots GitHub App (athanor-bots) as the author of a pull request. Only
+# the App opens the branches this script merges (ruleset bot-branches), so a pull request
+# of any other author is left for a person.
+BOT_AUTHOR = "app/athanor-bots"
 # The bot waits for the checks the branch protection of the base branch requires, read from
 # the checkout: the protection does not bind administrators (enforce_admins: false) and the
-# merging PAT is a maintainer's, so this wait is what keeps a red check from merging. Switching
+# merging App is a bypass actor of the pull request rule, so this wait is what keeps a red check from merging. Switching
 # the required check (docs/operations/github-settings.md section 8) is a change of that file.
 BRANCH_PROTECTION = ".github/settings/branch-protection.json"
 # The workflow whose newest pull_request run reports each check a branch may require, as the
@@ -170,11 +175,13 @@ def check(kind, pr, sha, gh):
             "view",
             pr,
             "--json",
-            "state,baseRefName,headRefName,headRefOid,isCrossRepository,labels,changedFiles",
+            "state,author,baseRefName,headRefName,headRefOid,isCrossRepository,labels,changedFiles",
         )
     )
     if view["state"] != "OPEN":
         raise Refused("is not open")
+    if view["author"]["login"] != BOT_AUTHOR:
+        raise Refused(f"is by {view['author']['login']}, not by {BOT_AUTHOR}")
     if view["isCrossRepository"]:
         raise Refused("comes from a fork")
     if view["headRefOid"] != sha:
@@ -291,6 +298,8 @@ def wait_for_required_checks(sha, checks, gh, sleep=time.sleep, polls=160):
 
 
 def main(kind, pr, sha, build, gh=run_gh, merge=merge_gh):
+    if not pr.isdigit():
+        sys.exit(f"bot_merge: no pull request number ({pr!r}): the run is not on a pull request")
     try:
         if build != "success":
             raise Refused(f"build is {build}")

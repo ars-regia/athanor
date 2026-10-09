@@ -101,8 +101,6 @@ jobs:
       packages: read
       pull-requests: read
     uses: ./.github/workflows/spec-build-check.yml
-    with:
-      from_pr_gate: true
 
   shell:
     needs: changes
