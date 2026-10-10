@@ -29,6 +29,7 @@ Fixture keys:
                 `skopeo copy --policy` accepts the image only when that key is among the
                 keyPaths of the policy scope for the repository, and only when --registries.d
                 is passed (without it containers/image never looks for sigstore attachments)
+  moves         true: `skopeo copy` without --policy points the destination tag at the source
   packages      {"package": [package versions as the GitHub API returns them]}
   user_packages ["package", ...]  the container packages of the owner
   owner_type    "User" (the default) or "Organization", what /users/<owner> reports
@@ -77,8 +78,15 @@ def skopeo(args, fx):
     if "copy" in args:
         if "--policy" in args:
             return verify(args, fx)
-        # Recorded in FAKE_LOG by main(); the fixture is read-only, so nothing moves.
-        return fail("fake skopeo: copy failed", 1) if args[-1].removeprefix("docker://") in fx.get("errors", []) else 0
+        # Recorded in FAKE_LOG by main(). Nothing moves unless the fixture says "moves".
+        if args[-1].removeprefix("docker://") in fx.get("errors", []):
+            return fail("fake skopeo: copy failed", 1)
+        if fx.get("moves"):
+            src, dest = args[-2].removeprefix("docker://"), args[-1].removeprefix("docker://")
+            fx["tags"][dest] = src.split("@", 1)[1] if "@" in src else fx["tags"][src]
+            with open(os.environ["FAKE_REGISTRY"], "w") as f:
+                json.dump(fx, f)
+        return 0
     ref = args[-1].removeprefix("docker://")
     if ref in fx.get("errors", []):
         return fail(f'time="2026-09-17T00:00:00Z" level=fatal msg="Error parsing image name \\"docker://{ref}\\": pinging container registry: dial tcp: i/o timeout"')
