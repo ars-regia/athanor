@@ -33,6 +33,11 @@ fi
 for name in "${promote[@]}"; do
     repository=$REGISTRY/$name
     digest=${recorded[$name]}
+    # Read again just before it moves: the copies of the images before this one take minutes
+    # with their retries, and a :stable moved from outside meanwhile is not overwritten.
+    stable=$(stable_of "$repository")
+    [[ $stable == "${previous[$name]:-}" ]] ||
+        die "$repository:stable moved to ${stable:-nothing} since the record named ${previous[$name]:-no stable}: plan again"
     if [[ -n ${previous[$name]:-} ]]; then
         bash "$retry" skopeo copy --preserve-digests "docker://$repository@${previous[$name]}" "docker://$repository:stable-previous"
     fi

@@ -98,9 +98,10 @@ class Promote(Tool):
             }
         self.registry(fx)
 
-    def promote(self, *flags, run="412", plan=True, between=None):
+    def promote(self, *flags, run="412", plan=True, between=None, apply_env=None):
         """The two jobs of promote-stable.yml: promotion-plan.sh, then BETWEEN (what may change
-        while the approval waits), then promote.sh. Returns the last result and its tag copies."""
+        while the approval waits), then promote.sh with APPLY_ENV added to its environment.
+        Returns the last result and its tag copies."""
         env = {**self.env, "REGISTRY": REG, "PROMOTE_ARTIFACTS": str(self.artifacts)}
         if plan:
             p = subprocess.run(
@@ -115,7 +116,10 @@ class Promote(Tool):
             between()
         (self.dir / "calls.log").unlink(missing_ok=True)
         r = subprocess.run(
-            ["bash", str(PROMOTE), *flags, run], capture_output=True, text=True, env=env
+            ["bash", str(PROMOTE), *flags, run],
+            capture_output=True,
+            text=True,
+            env={**env, **(apply_env or {})},
         )
         log = self.dir / "calls.log"
         calls = (
@@ -242,6 +246,58 @@ class Promote(Tool):
         self.assertIn("differs from the plan", r.stderr)
         self.assertEqual(copies, [])
 
+    def test_a_stable_that_cannot_be_read_is_refused(self):
+        # Only "manifest unknown" means there is no stable yet: a registry outage must not
+        # skip the UT5 check and stable-previous.
+        self.published()
+        fx = json.loads((self.dir / "registry.json").read_text())
+        fx["errors"] = [f"{REG}/athanor-system:stable"]
+        self.registry(fx)
+        r, copies = self.promote()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("i/o timeout", r.stderr)
+        self.assertEqual(copies, [])
+
+    def test_a_stable_moved_during_the_apply_is_not_overwritten(self):
+        # nvidia's :stable moves from outside while athanor-system's copies run.
+        self.published()
+        fx = json.loads((self.dir / "registry.json").read_text())
+        nvidia = f"{REG}/athanor-system-nvidia"
+        fx["on_copy"] = {
+            f"{REG}/athanor-system:stable": {f"{nvidia}:stable": digest(9)}
+        }
+        self.registry(fx)
+        r, copies = self.promote("--hardware-override", "athanor-system-nvidia")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn(f"{nvidia}:stable moved to {digest(9)}", r.stderr)
+        self.assertEqual([dest for _, dest in copies if dest.startswith(nvidia)], [])
+
+    def test_a_package_set_changed_after_the_plan_is_refused_at_apply(self):
+        self.published()
+        r, copies = self.promote(
+            between=lambda: (
+                self.artifacts / "packages" / "athanor-system.txt"
+            ).write_text("bash-5.3-1.fc43.x86_64 cc\n")
+        )
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("differs from the plan", r.stderr)
+        self.assertEqual(copies, [])
+
+    def test_a_dwell_or_keys_other_than_the_plans_are_refused_at_apply(self):
+        keys = self.dir / "keys"
+        keys.mkdir()
+        (keys / KEY.name).write_bytes(KEY.read_bytes())
+        for apply_env in (
+            {"PROMOTE_DWELL_HOURS": "0"},
+            {"PROMOTE_KEYS_DIR": str(keys)},
+        ):
+            with self.subTest(apply_env=apply_env):
+                self.published()
+                r, copies = self.promote(apply_env=apply_env)
+                self.assertEqual(r.returncode, 1)
+                self.assertIn("differs from the plan", r.stderr)
+                self.assertEqual(copies, [])
+
     def test_a_run_tag_moved_after_the_plan_is_refused_at_apply(self):
         self.published()
         r, copies = self.promote(
@@ -256,6 +312,17 @@ class Promote(Tool):
             "%Y-%m-%dT%H:%M:%SZ"
         )
         self.published(finished=now)
+        r, copies = self.promote()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("dwell", r.stderr)
+        self.assertEqual(copies, [])
+
+    def test_the_dwell_counts_from_the_newest_evidence(self):
+        now = datetime.datetime.now(datetime.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        self.published()
+        self.evidence("signature", "athanor-system", digest(1), finished=now)
         r, copies = self.promote()
         self.assertEqual(r.returncode, 1)
         self.assertIn("dwell", r.stderr)
@@ -302,9 +369,14 @@ class Promote(Tool):
         r, copies = self.promote("--hardware-override", "athanor-system-nvidia")
         self.assertEqual(r.returncode, 0, r.stderr)
         nvidia = f"{REG}/athanor-system-nvidia"
-        self.assertEqual(copies, [(f"{nvidia}@{digest(5)}", f"{nvidia}:stable-previous"),
-                                  (f"{nvidia}@{digest(2)}", f"{nvidia}:stable-{self.record()['day']}"),
-                                  (f"{nvidia}@{digest(2)}", f"{nvidia}:stable")])
+        self.assertEqual(
+            copies,
+            [
+                (f"{nvidia}@{digest(5)}", f"{nvidia}:stable-previous"),
+                (f"{nvidia}@{digest(2)}", f"{nvidia}:stable-{self.record()['day']}"),
+                (f"{nvidia}@{digest(2)}", f"{nvidia}:stable"),
+            ],
+        )
         reasons = {s["name"]: s["reason"] for s in self.record()["skipped"]}
         self.assertEqual(reasons["athanor-system"], f"already stable at {digest(1)}")
 
@@ -333,6 +405,15 @@ class Promote(Tool):
         self.published()
         self.promote()
         self.assertEqual(self.record()["registry"], REG)
+
+    def test_the_record_names_the_keys_and_the_dwell(self):
+        self.published()
+        self.promote()
+        record = self.record()
+        self.assertEqual(record["dwell_hours"], 24)
+        self.assertEqual(
+            record["keys"][KEY.name], hashlib.sha256(KEY.read_bytes()).hexdigest()
+        )
 
     def test_a_run_signed_only_with_a_cosign_3_bundle_is_refused(self):
         self.published(signature=BUNDLE)
@@ -371,7 +452,9 @@ class Promote(Tool):
             record = self.record()
             record["overrides"] = ["athanor-system-nvidia"]
             # Laid out as the plan writes it, so only the content differs.
-            (self.artifacts / "promotion.json").write_text(json.dumps(record, sort_keys=True, indent=2) + "\n")
+            (self.artifacts / "promotion.json").write_text(
+                json.dumps(record, sort_keys=True, indent=2) + "\n"
+            )
 
         r, copies = self.promote(between=tamper)
         self.assertEqual(r.returncode, 1)

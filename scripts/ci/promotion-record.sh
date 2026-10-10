@@ -17,8 +17,8 @@
 #     the policy rendered from the public keys under system/keys, as a machine would;
 #   - its build time is newer than the current stable's: a machine never follows a tag
 #     backwards (UT5).
-# Defines promotion_args "$@" (sets run and override) and promotion_record DAY OUT (runs
-# every check, writes the record to OUT, sets promote, recorded and previous).
+# Defines promotion_args "$@" (sets run and override), promotion_record DAY OUT (runs every
+# check, writes the record to OUT, sets promote, recorded and previous) and stable_of REPOSITORY.
 # Environment: REGISTRY (default ghcr.io/<GITHUB_REPOSITORY_OWNER>); PROMOTE_ARTIFACTS
 #              (default artifacts); PROMOTE_DWELL_HOURS (default 24); PROMOTE_KEYS_DIR
 #              (default system/keys); skopeo logged in.
@@ -78,14 +78,25 @@ evidence() { # evidence GATE IMAGE DIGEST -> the evidence's finished_at, seconds
     python3 -B "$root/scripts/ci/evidence.py" check --dir "$artifacts/evidence" --gate "$1" --image "$2" --digest "$3" --run-id "$run"
 }
 
-sums() { # sums PATH... (relative to $artifacts) -> {"PATH": "<sha256>", ...}
-    (cd "$artifacts" && sha256sum -- "$@") |
+stable_of() { # stable_of REPOSITORY -> the digest :stable names, nothing when there is no stable yet
+    if skopeo inspect --format '{{.Digest}}' "docker://$1:stable" 2> "$err"; then return; fi
+    # Anything but "there is no stable tag yet" is a real failure.
+    grep -q 'manifest unknown' "$err" || {
+        cat "$err" >&2
+        return 1
+    }
+}
+
+sums() { # sums DIR PATH... (relative to DIR) -> {"PATH": "<sha256>", ...}
+    local dir=$1
+    shift
+    (cd "$dir" && sha256sum -- "$@") |
         jq -R -s '[splits("\n") | select(length > 0) | capture("^(?<sha>[0-9a-f]{64})  (?<path>.+)$") | {(.path): .sha}] | add'
 }
 
 promotion_record() { # promotion_record DAY OUT
-    local day=$1 out=$2 repository tag digest name gate finished current stable new old age images skips trigger evidence_sums package_sums
-    local -a gates package_files evidence_files
+    local day=$1 out=$2 repository tag digest name gate finished current stable new old age images skips trigger evidence_sums package_sums key_sums
+    local -a gates package_files evidence_files key_files
     bash "$root/forge/specs/athanor-update/SOURCES/usr/libexec/athanor-update/render-policy" \
         --registry "$REGISTRY" --keys-dir "$keys_dir" --out "$work/policy"
     bash "$root/system/image-digests.sh" --registry "$REGISTRY" --check "$artifacts/image-digests.txt"
@@ -134,7 +145,8 @@ promotion_record() { # promotion_record DAY OUT
             "docker://$repository@$digest" "dir:$work/pull" ||
             die "$repository@$digest does not verify with the keys under system/keys: machines would refuse it"
         rm -r "$work/pull"
-        if stable=$(skopeo inspect --format '{{.Digest}}' "docker://$repository:stable" 2> "$err"); then
+        stable=$(stable_of "$repository")
+        if [[ -n $stable ]]; then
             if [[ $stable == "$digest" ]]; then
                 # Promoted already, or by a partial apply: moving it again would point stable-previous
                 # at stable and lose the rollback target.
@@ -146,10 +158,6 @@ promotion_record() { # promotion_record DAY OUT
             new=$(created "$repository" "$digest")
             old=$(created "$repository" "$stable")
             ((new > old)) || die "$repository:$run is not newer than the current stable: machines would not follow it"
-        elif ! grep -q 'manifest unknown' "$err"; then
-            # Anything but "there is no stable tag yet" is a real failure.
-            cat "$err" >&2
-            exit 1
         fi
         promote+=("$name")
     done
@@ -165,8 +173,12 @@ promotion_record() { # promotion_record DAY OUT
     for name in "${promote[@]}"; do package_files+=("packages/$name.txt"); done
     evidence_files=("$artifacts"/evidence/*.json)
     # Assigned, not passed inline, so a failed hash stops the record instead of writing null.
-    evidence_sums=$(sums "${evidence_files[@]#"$artifacts/"}")
-    package_sums=$(sums "${package_files[@]}")
+    evidence_sums=$(sums "$artifacts" "${evidence_files[@]#"$artifacts/"}")
+    package_sums=$(sums "$artifacts" "${package_files[@]}")
+    # The keys and the dwell come from the job's checkout and environment, not the artifacts:
+    # recorded, so an apply that checks with other ones differs from the plan.
+    key_files=("$keys_dir"/*.pub)
+    key_sums=$(sums "$keys_dir" "${key_files[@]##*/}")
     images=$(for name in "${promote[@]}"; do
         jq -n --arg name "$name" --arg digest "${recorded[$name]}" --arg previous "${previous[$name]:-}" \
             '{name: $name, digest: $digest, previous_stable: (if $previous == "" then null else $previous end)}'
@@ -179,7 +191,9 @@ promotion_record() { # promotion_record DAY OUT
     jq -n -S --indent 2 --argjson run "$run" --arg day "$day" --arg registry "$REGISTRY" --arg trigger "$trigger" --arg override "$override" \
         --argjson images "$images" --argjson skipped "$skips" \
         --argjson evidence "$evidence_sums" --argjson packages "$package_sums" \
+        --argjson keys "$key_sums" --argjson dwell_hours "$((dwell / 3600))" \
         '{run_id: $run, day: $day, registry: $registry, trigger: $trigger, images: $images, skipped: $skipped,
-      overrides: (if $override == "" then [] else [$override] end), evidence: $evidence, packages: $packages}' \
+      overrides: (if $override == "" then [] else [$override] end), evidence: $evidence, packages: $packages,
+      keys: $keys, dwell_hours: $dwell_hours}' \
         > "$out"
 }
