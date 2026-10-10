@@ -34,7 +34,7 @@ CI1 athanor-forge-orchestrator.yml        concurrency: one run per ref, the newe
 
 Kernel path (doc_build_ordering.md, O1):
 CI9 kernel-bump.yml (PR) -> merge -> CI8 kernel-build.yml (publish azoth) -> dispatches CI1
-Release path: CI1 publishes :<run_id> and :latest -> CI12 accept.yml (dispatched with the run id) -> CI11 promote-stable.yml (manual, :stable)
+Release path: CI1 publishes :<run_id> and :latest -> CI12 accept.yml (dispatched with the run id) -> CI11 promote-stable.yml (manual, on evidence and the release approval, :stable)
 ```
 
 CI1 runs CI2 once, as its first job, and calls CI3, CI4 and CI5 only after it passed; they have no lint of their own. They used to repeat it, so one Orchestrator run linted four times, about 2 minutes each on the critical path (run 37384733899 lists the jobs `lint`, `build-builder / lint`, `dag-compile / lint`, `system-image / lint`). CI8 calls it as its first job.
@@ -186,10 +186,10 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 
 ### CI11 Promote a system image run to stable
 
-- **File:** `promote-stable.yml`. **Purpose:** moves `:stable` of the three system images to the images of one Orchestrator run (doc_update_trust.md, D1). No signing key.
-- **Triggers:** dispatch (`run_id`). **Output:** tag `stable`.
-- **Secrets, variables:** `GITHUB_TOKEN`, `REGISTRY_HOST`. **Environment:** none. **Runner:** hosted. **Concurrency:** `promote-stable`, no cancel.
-- **Scripts:** `system/promote.sh`.
+- **File:** `promote-stable.yml`. **Purpose:** moves `:stable` of the system images of one build run on the evidence of UD4, by digest, after the signed evidence bundle was copied off GitHub and verified (D23) and after the `release` approval (PL60); the NVIDIA image only with the recorded hardware override (ADR-0106), `-nvidia-legacy` not before 0.9. No signing key: the bundle is signed keylessly.
+- **Jobs:** `plan` (no environment), `promote` (environment `release`). **Triggers:** dispatch (`run_id`, `hardware_override`). **Output:** tags `stable`, `stable-previous`, `stable-<day>`, artifact `promotion-<run_id>`, the image `athanor-evidence:<run_id>-<promotion run id>` in `EVIDENCE_REGISTRY`.
+- **Secrets, variables:** `GITHUB_TOKEN`, `REGISTRY_HOST`, `EVIDENCE_REGISTRY`, `EVIDENCE_REGISTRY_USER`, `EVIDENCE_REGISTRY_TOKEN`. **Environment:** `release` (job `promote`). **Runner:** hosted. **Concurrency:** `promote-stable`, no cancel.
+- **Scripts:** `system/fetch-evidence.sh`, `system/trusted-run.sh`, `scripts/ci/evidence.py`, `scripts/ci/promotion-plan.sh`, `scripts/ci/promotion-record.sh`, `system/evidence-bundle.sh`, `system/promote-login.sh`, `system/promote.sh`.
 - **Health:** `gh run list --workflow promote-stable.yml --branch iso-v0 --limit 5`.
 
 ### CI12 Acceptance
@@ -402,6 +402,8 @@ Every name below is described in the secrets inventory, `docs/operations/secrets
 | `BUILDER_STABLE_TAG` | variable, default `latest` | not set | CI21, CI22 |
 | `SETTINGS_APP_PRIVATE_KEY` | secret (GitHub App key, read-only App) | repository | CI29 |
 | `SETTINGS_APP_CLIENT_ID` | variable, no default | repository | CI29 |
+| `EVIDENCE_REGISTRY`, `EVIDENCE_REGISTRY_USER` | variable, no default: unset, promotion fails closed (ADR-0106 item 4) | not set; the maintainer creates them | CI11 |
+| `EVIDENCE_REGISTRY_TOKEN` | secret (push credential of `EVIDENCE_REGISTRY`) | not set; the maintainer creates it in the repository, since the `plan` job, which has no environment, publishes the bundle | CI11 |
 
 Environments (`gh api repos/ars-regia/athanor/environments`):
 
@@ -410,7 +412,7 @@ Environments (`gh api repos/ars-regia/athanor/environments`):
 | `signing-kernel` | required reviewer `hr-mes`, no administrator bypass; branches `iso-v0`, `main`, both protected | CI1 (`nvidia-kmod-sign`) |
 | `signing-images` | as `signing-kernel`; without the required reviewer once `sign-system-images` is back in it at the end of the image key rotation, 1.0 included (ADR-0098 item 6, ADR-0104 item 8) | CI1 (`sign-system-images`, as `signing` during the image key rotation) |
 | `signing` | required reviewer `hr-mes`, no administrator bypass; branches `iso-v0`, `main`; the alias of `signing-images` and `signing-kernel` during the image key rotation (`docs/operations/secrets.md` section 4.1) | CI1 (`sign-system-images`) |
-| `release` | required reviewer `hr-mes`, no administrator bypass; branches `iso-v0`, `main`; no secret | no job yet; the job of CI11 that moves `:stable` moves behind it, so only a promotion asks for it, and the image signing does not wait for it ([ADR-0104](../decisions/0104-release-workflow-and-stable-gate.md), amending [ADR-0103](../decisions/0103-audit-5-decisions.md) D2, D25) |
+| `release` | required reviewer `hr-mes`, no administrator bypass; branches `iso-v0`, `main`; no secret | CI11 (`promote`), so only a promotion asks for it, and the image signing does not wait for it ([ADR-0104](../decisions/0104-release-workflow-and-stable-gate.md), amending [ADR-0103](../decisions/0103-audit-5-decisions.md) D2, D25) |
 
 ## 6. Proposals
 
