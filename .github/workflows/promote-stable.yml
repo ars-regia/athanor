@@ -57,12 +57,12 @@ jobs:
       packages: read
       actions: read
       id-token: write
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Release only from iso-v0 (PL54, PL60)
         run: '[[ $GITHUB_REF == refs/heads/iso-v0 ]] || { echo "::error::promote-stable.yml runs only on refs/heads/iso-v0, not $GITHUB_REF"; exit 1; }'
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Install Nix
         uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
         with:
@@ -77,6 +77,9 @@ jobs:
           EVIDENCE_REGISTRY_TOKEN: ${{ secrets.EVIDENCE_REGISTRY_TOKEN }}
         run: bash system/promote-login.sh
       - name: 📥 Fetch the run's evidence (system/fetch-evidence.sh)
+        # The job token only where gh runs: no action and no nix fetch of this job sees it.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash system/fetch-evidence.sh "${RUN_ID}" artifacts
       - name: 🧮 Plan the promotion (scripts/ci/promotion-plan.sh)
         run: bash scripts/ci/promotion-plan.sh ${OVERRIDE:+--hardware-override "$OVERRIDE"} "${RUN_ID}"
@@ -88,6 +91,8 @@ jobs:
           name: promotion-${{ inputs.run_id }}
           path: bundle/
           if-no-files-found: error
+          # A re-run of a failed plan replaces it; a new plan asks for a new approval anyway.
+          overwrite: true
       - name: 📤 Copy the bundle off GitHub (D23)
         run: bash system/evidence-bundle.sh publish bundle "${EVIDENCE_REF}"
       - name: 🔎 Verify the copy against its signature
@@ -105,12 +110,12 @@ jobs:
       contents: read
       packages: write
       actions: read
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Release only from iso-v0 (PL54, PL60)
         run: '[[ $GITHUB_REF == refs/heads/iso-v0 ]] || { echo "::error::promote-stable.yml runs only on refs/heads/iso-v0, not $GITHUB_REF"; exit 1; }'
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Install Nix
         uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
         with:
@@ -125,6 +130,8 @@ jobs:
           EVIDENCE_REGISTRY_TOKEN: ${{ secrets.EVIDENCE_REGISTRY_TOKEN }}
         run: bash system/promote-login.sh
       - name: 📥 Fetch the run's evidence again (system/fetch-evidence.sh)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash system/fetch-evidence.sh "${RUN_ID}" artifacts
       - name: 📎 The approved plan
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4

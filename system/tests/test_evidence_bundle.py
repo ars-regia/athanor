@@ -146,6 +146,20 @@ class EvidenceBundle(Tool):
                      "| iso-acceptance | athanor-system | pass |", "athanor-system-nvidia-legacy"):
             self.assertIn(text, r.stdout)
 
+    def test_the_summary_refuses_a_missing_field(self):
+        # A plan without overrides would read "Hardware override: none" in the approval.
+        plan = {"run_id": 412, "images": [], "skipped": [], "overrides": []}
+        evidence = {"gate": "iso-acceptance", "image": "athanor-system", "verdict": "pass", "finished_at": "t"}
+        for name, document, field in (("promotion.json", plan, "overrides"),
+                                      ("evidence/iso-acceptance.athanor-system.json", evidence, "verdict")):
+            with self.subTest(field=field):
+                (self.artifacts / "promotion.json").write_text(json.dumps(plan))
+                (self.artifacts / "evidence" / "iso-acceptance.athanor-system.json").write_text(json.dumps(evidence))
+                (self.artifacts / name).write_text(json.dumps({k: v for k, v in document.items() if k != field}))
+                r = self.run_script("summary", str(self.artifacts))
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn(field, r.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
