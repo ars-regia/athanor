@@ -532,7 +532,10 @@ After `bash "$root/system/image-digests.sh" --registry "$registry" --check "$dig
 kernel_registry=${KERNEL_REGISTRY:-$registry}
 # It reaches sed and the rendered registries.d: the pattern render-policy holds the image registry to.
 registry_pattern='^[a-z0-9]([a-z0-9._:/-]*[a-z0-9])?$'
-[[ $kernel_registry =~ $registry_pattern ]] || { echo "${0##*/}: not a registry/owner: '$kernel_registry'" >&2; exit 2; }
+[[ $kernel_registry =~ $registry_pattern ]] || {
+    echo "${0##*/}: not a registry/owner: '$kernel_registry'" >&2
+    exit 2
+}
 [[ -z $kernel ]] || bash "$root/system/image-digests.sh" --registry "$kernel_registry" --check-kernel "$kernel"
 ```
 
