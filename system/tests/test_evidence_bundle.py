@@ -71,6 +71,15 @@ class EvidenceBundle(Tool):
         self.assertIn("promotion-plan.sh", r.stderr)
         self.assertFalse(self.bundle.exists())
 
+    def test_create_refuses_a_symlink(self):
+        (self.artifacts / "evidence" / "link.json").symlink_to(
+            "iso-acceptance.athanor-system.json"
+        )
+        r = self.run_script("create", str(self.artifacts), str(self.bundle))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("evidence/link.json", r.stderr)
+        self.assertFalse((self.bundle / "bundle.sha256").exists())
+
     def test_an_intact_copy_verifies(self):
         copy = self.created()
         r = self.run_script("verify-dir", str(copy), str(self.artifacts))

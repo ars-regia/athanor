@@ -27,6 +27,13 @@ create() {
     mkdir -p "$2"
     cp "$1/promotion.json" "$1/image-digests.txt" "$2/"
     cp -r "$1/evidence" "$1/packages" "$2/"
+    # verify-dir compares names line by line: refuse what it could not, before anything is signed.
+    local nl=$'\n' bad
+    bad=$(cd "$2" && find . ! -type d \( ! -type f -o -name '*\\*' -o -name "*${nl}*" \) -printf '%P\n')
+    [[ -z $bad ]] || {
+        echo "${0##*/}: not a regular file, or a name with a backslash or newline: $bad" >&2
+        exit 1
+    }
     (cd "$2" && find . -type f ! -path ./bundle.sha256 ! -path ./bundle.sha256.sigstore.json -printf '%P\0' |
         LC_ALL=C sort -z | xargs -0 sha256sum) > "$2/bundle.sha256"
     cosign sign-blob --yes --bundle "$2/bundle.sha256.sigstore.json" "$2/bundle.sha256"
@@ -65,7 +72,7 @@ publish)
 verify)
     [[ $# -eq 3 ]] || usage
     work=$(mktemp -d) ctr=''
-    trap 'rm -rf "$work"; [[ -z $ctr ]] || podman rm "$ctr"' EXIT
+    trap 'rm -rf "$work"; [[ -z $ctr ]] || podman rm -f "$ctr" > /dev/null || echo "${0##*/}: could not remove container $ctr" >&2' EXIT
     bash "$(dirname "$0")/../forge/scripts/retry.sh" podman pull "$2"
     ctr=$(podman create "$2" /bin/true)
     podman cp "$ctr:/." "$work/"
