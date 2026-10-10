@@ -316,7 +316,13 @@ def _protection(p):
 
 
 def export_branch_protection(repo):
-    names = [b["name"] for b in gh_list(f"repos/{repo}/branches?protected=true")]
+    # `protected` is also true for a branch that only a ruleset covers; its classic
+    # protection answers 404, and rulesets are their own area.
+    names = [
+        b["name"]
+        for b in gh_list(f"repos/{repo}/branches?protected=true")
+        if b["protection"]["enabled"]
+    ]
     return {
         n: _protection(get(f"repos/{repo}/branches/{q(n)}/protection")) for n in names
     }

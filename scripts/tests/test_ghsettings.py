@@ -97,7 +97,9 @@ LIVE = {
         }
     },
     f"{R}/private-vulnerability-reporting": {"enabled": True},
-    f"{R}/branches": [{"name": "main", "protected": True}],
+    f"{R}/branches": [
+        {"name": "main", "protected": True, "protection": {"enabled": True}}
+    ],
     f"{R}/branches/main/protection": {
         "url": "x",
         "required_status_checks": {
@@ -310,6 +312,18 @@ class GhSettings(unittest.TestCase):
         result = self.run_script("diff")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("matches", result.stdout)
+
+    def test_a_branch_protected_only_by_a_ruleset_has_no_branch_protection(self):
+        # GitHub lists a branch a ruleset covers as protected, while its classic
+        # protection answers 404 (maintenance.yml run 38047666686, a bot branch).
+        live = json.loads(self.state.read_text())
+        live[f"{R}/branches"].append(
+            {"name": "bump/x", "protected": True, "protection": {"enabled": False}}
+        )
+        self.state.write_text(json.dumps(live))
+        result = self.run_script("diff")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn(f"{R}/branches/bump%2Fx/protection", self.log.read_text())
 
     def test_diff_reports_a_changed_setting(self):
         self.edit("repository", lambda d: d.update(allow_merge_commit=False))
