@@ -221,6 +221,23 @@ class PlatformAssertions(unittest.TestCase):
         prelude = "keyctl() { echo 'keyctl: Required key not available' >&2; return 1; }\nbuiltin_expected=0"
         self.assertNotEqual(run_function("builtin_exact", prelude).returncode, 0)
 
+    def machine(self, listed, rc=0):
+        return f'keyctl() {{ [ "$1 $2" = "list %:.machine" ] || return 1; echo "{listed}"; return {rc}; }}'
+
+    CA = "1 key in keyring:\n42: ---lswrv     0     0 asymmetric: Athanor OS K3 test user CA: ead2e631"
+
+    def test_a_user_ca_in_the_machine_keyring_passes(self):
+        self.assertEqual(run_function("machine_ca", self.machine(self.CA), "ead2e631").returncode, 0)
+
+    def test_a_user_ca_missing_from_the_machine_keyring_fails(self):
+        self.assertNotEqual(run_function("machine_ca", self.machine("keyring is empty"), "ead2e631").returncode, 0)
+
+    def test_another_key_whose_id_ends_like_the_ca_fails(self):
+        self.assertNotEqual(run_function("machine_ca", self.machine(self.CA + "ff"), "ead2e631").returncode, 0)
+
+    def test_an_unreadable_machine_keyring_fails(self):
+        self.assertNotEqual(run_function("machine_ca", self.machine(self.CA, rc=1), "ead2e631").returncode, 0)
+
     def ima(self, describe_rc, padd_rc, listed="", why="Required key not available", key="/bin/sh"):
         return (f'keyctl() {{ case $1 in describe) return {describe_rc} ;; '
                 f'padd) echo "add_key: {why}" >&2; return {padd_rc} ;; '
