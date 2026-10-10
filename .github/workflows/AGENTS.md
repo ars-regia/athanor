@@ -22,7 +22,7 @@ there, or when the document names a workflow file that does not exist.
   `if ...; then` / `fi` is a bash syntax error. `verify.py workflows` catches both.
 - **Never send logs to an external service.** Use `actions/upload-artifact` and
   `$GITHUB_STEP_SUMMARY`.
-- **Keep the required checks running on every pull request**: `Spec gate` and `gate` on
+- **Keep the required checks running on every pull request**: `gate` on
   `iso-v0`, `Kernel gate` on `main` (`kernel-build.yml` runs on pull requests to `main` only) (`.github/settings/branch-protection.json`), and
   `gate` through the `product-branches` ruleset (`rulesets.json`).
 - **A workflow on a non-default branch is not registered** until a push matches its
