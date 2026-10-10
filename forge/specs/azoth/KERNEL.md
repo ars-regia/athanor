@@ -178,11 +178,16 @@ delta e del Containerfile, immagine base del builder); la principale ha anche la
 provenance SLSA di GitHub. `:latest` si muove solo sul branch di default del repository. Verifica:
 
 ```sh
-cosign verify --certificate-identity 'https://github.com/ars-regia/athanor/.github/workflows/kernel-build.yml@refs/heads/iso-v0' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+cosign verify --key system/keys/athanor-image-1.pub --new-bundle-format=false --insecure-ignore-tlog=true \
   "ghcr.io/ars-regia/azoth:$(bash nvr.sh)"
 gh attestation verify "oci://ghcr.io/ars-regia/azoth:$(bash nvr.sh)" --repo ars-regia/athanor
 ```
+
+La firma con la chiave del progetto la aggiunge il passo di firma del rilascio (ADR-0096):
+un kernel pubblicato dopo l'ultimo run dell'Orchestrator porta solo la firma keyless di
+build. Il blocco nomina la chiave 1, che firma finche' la rotazione di
+`docs/operations/secrets.md` sezione 4.1 e' aperta: il passo della rotazione che sposta la
+firma sulla chiave 2 lo cambia.
 
 ## Bump
 
