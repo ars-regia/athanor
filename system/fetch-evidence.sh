@@ -26,6 +26,13 @@ declare -A gate_workflows=(
 declare -A gate_flags=(['iso-acceptance']=--completed [signature]='')
 read -ra build <<< "${BUILD_WORKFLOWS:-$orch}"
 
+# A gate without trusted evidence downloads nothing, so a file left by another run would pass
+# for this run's evidence.
+[[ ! -e $out ]] || [[ -d $out && -z $(find "$out" -mindepth 1 -print -quit) ]] || {
+    echo "${0##*/}: $out is not empty: evidence left there would be read as run $run's" >&2
+    exit 2
+}
+
 bash "$root/system/trusted-run.sh" "$run" "${build[@]}"
 mkdir -p "$out/evidence" "$out/packages"
 gh run download "$run" -n image-digests -D "$out"
@@ -36,7 +43,10 @@ for gate in iso-acceptance signature; do
     read -ra workflows <<< "${gate_workflows[$gate]}"
     read -ra flags <<< "${gate_flags[$gate]}"
     candidates=$(gh api "/repos/$GITHUB_REPOSITORY/actions/artifacts?name=$name&per_page=100" |
-        jq -r '[.artifacts[] | select(.expired | not)] | sort_by(.created_at) | reverse | .[].workflow_run.id')
+        jq -r --arg name "$name" '
+          if (.total_count // 0) > (.artifacts | length)
+          then error("\(.total_count) artifacts named \($name), more than one page: refusing to pick from part of them")
+          else [.artifacts[] | select(.expired | not)] | sort_by(.created_at) | reverse | .[].workflow_run.id end')
     picked=''
     while read -r source_run; do
         [[ -n $source_run ]] || continue
@@ -55,5 +65,14 @@ for gate in iso-acceptance signature; do
         echo "${0##*/}: no trusted $name artifact; promote.sh will refuse the run without it" >&2
         continue
     fi
-    gh run download "$picked" -n "$name" -D "$out/evidence"
+    # The run is trusted for this gate only: every file it carries must be one of this gate.
+    gh run download "$picked" -n "$name" -D "$out/.$gate"
+    for file in "$out/.$gate"/*; do
+        [[ -f $file && ${file##*/} == "$gate".*.json ]] || {
+            echo "${0##*/}: $name of run $picked carries ${file##*/}, not a $gate evidence file" >&2
+            exit 1
+        }
+    done
+    mv "$out/.$gate"/* "$out/evidence/"
+    rmdir "$out/.$gate"
 done
