@@ -70,7 +70,12 @@ CMDLINE=$(< "$HERE/cmdline")
 # reboot on panic (with -no-reboot QEMU exits) and the parameters read by boot/init.
 # The certificates the kernel must have compiled in (kernel-local), by subject key
 # identifier, the id the kernel logs them with: the module signing one and the revoked.
-skid() { openssl x509 -in "$1" -noout -ext subjectKeyIdentifier | tail -n 1 | tr -d ' :' | tr 'A-F' 'a-f'; }
+skid() {
+  local id
+  id=$(openssl x509 -in "$1" -noout -ext subjectKeyIdentifier | tail -n 1 | tr -d ' :' | tr 'A-F' 'a-f')
+  [[ $id =~ ^[0-9a-f]+$ ]] || { echo "boot.sh: $1 has no subject key identifier" >&2; return 1; }
+  echo "$id"
+}
 K3_CERTS=''
 for cert in "$HERE"/keys/modules/*.pem "$HERE"/keys/revoked/*.pem; do
   K3_CERTS+="${K3_CERTS:+,}$(skid "$cert")"
