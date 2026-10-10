@@ -272,6 +272,21 @@ class Promote(Tool):
         self.assertIn(f"{nvidia}:stable moved to {digest(9)}", r.stderr)
         self.assertEqual([dest for _, dest in copies if dest.startswith(nvidia)], [])
 
+    def test_a_stable_that_cannot_be_read_again_before_the_copies_is_refused(self):
+        # The re-read of the apply stops on a registry error as the record does: a swallowed
+        # error would read as "no stable" and move an image whose stable was never seen.
+        self.published()
+        fx = json.loads((self.dir / "registry.json").read_text())
+        nvidia = f"{REG}/athanor-system-nvidia"
+        # No stable at plan time: a swallowed error would match the empty record and move it.
+        del fx["tags"][f"{nvidia}:stable"]
+        fx["errors_on_copy"] = {f"{REG}/athanor-system:stable": [f"{nvidia}:stable"]}
+        self.registry(fx)
+        r, copies = self.promote("--hardware-override", "athanor-system-nvidia")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("i/o timeout", r.stderr)
+        self.assertEqual([dest for _, dest in copies if dest.startswith(nvidia)], [])
+
     def test_a_package_set_changed_after_the_plan_is_refused_at_apply(self):
         self.published()
         r, copies = self.promote(

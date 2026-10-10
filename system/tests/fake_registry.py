@@ -32,6 +32,7 @@ Fixture keys:
   moves         true: `skopeo copy` without --policy points the destination tag at the source
   on_copy       {"dest": {"ref": "digest"}}: with moves, a copy to dest also sets those tags,
                 as another writer would meanwhile
+  errors_on_copy {"dest": ["ref", ...]}: with moves, a copy to dest adds those refs to errors
   packages      {"package": [package versions as the GitHub API returns them]}
   user_packages ["package", ...]  the container packages of the owner
   owner_type    "User" (the default) or "Organization", what /users/<owner> reports
@@ -87,6 +88,7 @@ def skopeo(args, fx):
             src, dest = args[-2].removeprefix("docker://"), args[-1].removeprefix("docker://")
             fx["tags"][dest] = src.split("@", 1)[1] if "@" in src else fx["tags"][src]
             fx["tags"].update(fx.get("on_copy", {}).get(dest, {}))
+            fx["errors"] = fx.get("errors", []) + fx.get("errors_on_copy", {}).get(dest, [])
             with open(os.environ["FAKE_REGISTRY"], "w") as f:
                 json.dump(fx, f)
         return 0
