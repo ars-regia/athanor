@@ -111,13 +111,16 @@ jobs:
           set -euo pipefail
           mkdir -p boot-out
           ko="lib/modules/${nvr}.x86_64/extra/nvidia/nvidia.ko"
+          legacy=()
+          # D24: a run whose legacy branch failed to build has no signed/legacy to load.
+          if [[ -d signed/legacy ]]; then legacy=(--insmod "signed/legacy/${ko}:ENODEV"); fi
           podman run --rm --device /dev/kvm -v "$GITHUB_WORKSPACE:/forge" -w /forge localhost/azoth-boot \
             bash forge/specs/azoth/boot.sh --rpms /forge/out --out /forge/boot-out \
               --mok mok/test-mok.pem \
               --mok-ca mokca/test-ca.pem \
               --ima-key mokleaf/test-leaf.pem \
               --insmod "signed/open/${ko}:ENODEV" \
-              --insmod "signed/legacy/${ko}:ENODEV" \
+              "${legacy[@]}" \
               --insmod "unsigned/open/${ko}:EKEYREJECTED" \
               --insmod "mok/open/${ko}:EKEYREJECTED" \
               --insmod "mokca/open/${ko}:ENODEV:EKEYREJECTED" \

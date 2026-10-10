@@ -5,7 +5,8 @@
 # system/kernel-artifacts.sh names for the kernel digest; an SPDX SBOM, a keyless signature
 # and the custom attestation of the NVIDIA pins and of the azoth and azoth-devel digests the
 # modules were built against. A branch whose tag kernel-artifacts.env already lists with a
-# digest is published, signed and attested, and is never overwritten.
+# digest is published, signed and attested, and is never overwritten. A legacy branch absent
+# from SIGNED_DIR (its build failed, ADR-0103 D24) is left unpublished; the open one is required.
 # The vmlinuz of the same kernel, signed for Secure Boot in the same sign job, goes the same
 # way: azoth-boot:<nvr>-k<12 hex of the kernel digest>, a scratch image of /vmlinuz and /kver
 # that system/Containerfile copies in by digest, keyless-signed and attested with the kernel
@@ -50,6 +51,12 @@ for driver in open legacy; do
   if [[ -n $existing ]]; then
     echo "${image}:${tag} already holds ${existing}, which the anonymous resolve did not see: make the package public; refusing to overwrite it" >&2
     exit 1
+  fi
+  # D24: a legacy build that failed leaves the sign job no legacy tree; open is required.
+  if [[ ! -d $SIGNED/$driver ]]; then
+    [[ $driver == legacy ]] || { echo "the open modules are missing from ${SIGNED}" >&2; exit 1; }
+    echo "- \`${image}:${tag}\`: not built in this run, so not published (ADR-0103 D24)" | tee -a "$OUT/summary.md"
+    continue
   fi
   version=$(artifact get "nvidia_${driver}_version")
   built=$(cat "$SIGNED/$driver/version")

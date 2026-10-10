@@ -8,7 +8,8 @@
 #                                       kernel artefacts NVIDIA kmod publishes are the two module
 #                                       branches and azoth-boot (vmlinuz signed for Secure Boot
 #                                       by the certificate committed in keys/secureboot):
-#                                       modules-missing when any of them is. Exit 0 for
+#                                       modules-missing when any of them is, with missing=
+#                                       naming them (boot, open, legacy). Exit 0 for
 #                                       the three states; 1 on a registry, Rekor, network or data
 #                                       error, or when azoth:<nvr> is still D's own NVR but no
 #                                       longer resolves to D (republished or withdrawn since). D
@@ -18,11 +19,15 @@
 #                                       different NVR, D no longer applies and this resolves
 #                                       exactly as an unconstrained caller would, never as an
 #                                       error just because the pins moved on (O5)
-#   require-ready                       resolve, then exit 1 unless state=ready
+#   require-ready                       resolve, then exit 1 unless state=ready, or
+#                                       modules-missing with only the legacy branch missing
+#                                       (ADR-0103 D24)
 #   cycle --event E [--before B] [--after A] [--sha S] [--head H]
 #                                       after resolve, for an Orchestrator run (O4): append
-#                                       cycle=build or cycle=defer; exit 1 when the kernel is
-#                                       missing and no other cycle owns it
+#                                       cycle=build or cycle=defer, and kmod=build or kmod=skip
+#                                       (skip: only the legacy branch is missing and the run
+#                                       moves no pin, D24); exit 1 when the kernel is missing
+#                                       and no other cycle owns it
 #   check-plan --base REV --head REV    after resolve, for System Image Check (O7): append
 #                                       check_gpus and check_delta; exit 1 for a failing row
 #   get KEY                             print the value of KEY; exit 1 when the file lacks it
@@ -39,7 +44,8 @@
 #                                       (signer: the signer image, azoth-signer.yml)
 #   signed REF key                      signed or unsigned with a project key, any
 #                                       athanor-image-*.pub of $KERNEL_KEYS_DIR (ADR-0096)
-#   release-digests ALL UNSIGNED        after require-ready: write every kernel artefact a release
+#   release-digests ALL UNSIGNED        after require-ready (without the legacy branch when it
+#                                       alone is missing, D24): write every kernel artefact a release
 #                                       consumes ("REPOSITORY TAG DIGEST", image-digests.sh) to
 #                                       ALL, and those without a project key signature to UNSIGNED;
 #                                       the guest kernel, debuginfo and signer, which the state
@@ -319,6 +325,7 @@ pins_moved() { # pins_moved NVR EXPECT: whether EXPECT names a different NVR tha
 
 resolve() {
   local expect='' nvr kernel devel kernel_signed devel_signed branch version tag digest verdict state=ready
+  local -a missing=()
   while [[ $# -gt 0 ]]; do
     case $1 in
       --expect-kernel-digest) [[ $# -ge 2 ]] || usage; expect=$2; shift 2 ;;
@@ -367,6 +374,7 @@ resolve() {
     lines+=("boot_digest=$digest")
   else
     state=modules-missing
+    missing+=(boot)
   fi
   for branch in open legacy; do
     version=$(sed -n "s/^NVIDIA_${branch^^}_VERSION=//p" "$PINS")
@@ -380,8 +388,10 @@ resolve() {
       lines+=("nvidia_${branch}_digest=$digest")
     else
       state=modules-missing
+      missing+=("$branch")
     fi
   done
+  (( ${#missing[@]} == 0 )) || lines+=("missing=${missing[*]}")
   write "$state" "${lines[@]}"
 }
 
@@ -397,6 +407,20 @@ matches_any() { # matches_any PATH PATTERN...
     # shellcheck disable=SC2053 # the right-hand side is a glob on purpose
     [[ $path == $pattern ]] && return 0
   done
+  return 1
+}
+
+legacy_only() { # legacy_only: whether the legacy NVIDIA branch is the only signed kernel artefact missing (D24)
+  [[ $(get state) == modules-missing ]] && grep -qx 'missing=legacy' "$FILE"
+}
+
+pins_touched() { # pins_touched BASE HEAD: whether the diff moves a file of KERNEL_PIN_FILES
+  local files file
+  files=$(changed_files "$1" "$2")
+  while IFS= read -r file; do
+    [[ -n $file ]] || continue
+    if matches_any "$file" "${KERNEL_PIN_FILES[@]}"; then return 0; fi
+  done <<< "$files"
   return 1
 }
 
@@ -467,8 +491,21 @@ cycle() {
         ;;
     esac
   fi
-  set_kv "cycle=$decision"
-  echo "kernel-artifacts: cycle=$decision"
+  # A legacy branch that keeps failing must not ask for a signing-kernel approval on every
+  # run: it is rebuilt when a pin moves or on a dispatch, and the images go on without it.
+  local kmod=build
+  if legacy_only; then
+    case $event in
+      workflow_dispatch) ;;
+      push) if [[ $before =~ ^0+$ ]] || ! pins_touched "$before" "$after"; then kmod=skip; fi ;;
+      *) kmod=skip ;;
+    esac
+    if [[ $kmod == skip ]]; then
+      annotate warning "the legacy NVIDIA modules of azoth:$nvr are missing and this $event moves no pin: no kmod cycle for them in this run; a push that moves the kernel or NVIDIA pins, or a dispatch, builds them (ADR-0103 D24)"
+    fi
+  fi
+  set_kv "cycle=$decision" "kmod=$kmod"
+  echo "kernel-artifacts: cycle=$decision kmod=$kmod"
 }
 
 check_plan() {
@@ -508,10 +545,15 @@ check_plan() {
       annotate warning "azoth:$nvr is not published yet: Kernel Build on this pull request proves the kernel and the modules build and boot; the images are built after the merge"
       ;;
     modules-missing)
-      [[ $only_nvidia_pins == true && $nvidia_moved == true && $other_moved == false ]] || die "the signed kernel artefacts of azoth:$nvr (NVIDIA modules, signed vmlinuz) are not published: with unchanged NVIDIA pins publishing them is the Orchestrator's job (bootstrap, interrupted publication or a new Secure Boot certificate), and NVIDIA pins move in their own pull request"
-      grep -q '^boot_digest=.' "$FILE" || die "the signed vmlinuz of azoth:$nvr is not published, and every image copies it in: the Orchestrator publishes it (NVIDIA kmod) before an NVIDIA pin bump can be checked"
-      gpus=none delta=true
-      annotate warning "the NVIDIA modules of the new pins are not published yet: only the default image is built; the variants are built and gated after the merge"
+      if legacy_only && [[ $nvidia_moved == false ]]; then
+        gpus='none nvidia' delta=true
+        annotate warning "the legacy NVIDIA modules of azoth:$nvr are not published: the check builds the default and nvidia images only (ADR-0103 D24)"
+      else
+        [[ $only_nvidia_pins == true && $nvidia_moved == true && $other_moved == false ]] || die "the signed kernel artefacts of azoth:$nvr (NVIDIA modules, signed vmlinuz) are not published: with unchanged NVIDIA pins publishing them is the Orchestrator's job (bootstrap, interrupted publication or a new Secure Boot certificate), and NVIDIA pins move in their own pull request"
+        grep -q '^boot_digest=.' "$FILE" || die "the signed vmlinuz of azoth:$nvr is not published, and every image copies it in: the Orchestrator publishes it (NVIDIA kmod) before an NVIDIA pin bump can be checked"
+        gpus=none delta=true
+        annotate warning "the NVIDIA modules of the new pins are not published yet: only the default image is built; the variants are built and gated after the merge"
+      fi
       ;;
     *) die "$FILE: unknown state '$state'" ;;
   esac
@@ -521,7 +563,7 @@ check_plan() {
 
 release_digests() { # release_digests ALL UNSIGNED
   [[ $# -eq 2 ]] || usage
-  [[ $(get state) == ready ]] || die "release-digests needs state=ready: run require-ready first"
+  [[ $(get state) == ready ]] || legacy_only || die "release-digests needs state=ready, or the legacy NVIDIA branch alone missing: run require-ready first"
   local nvr kernel devel boot_tag boot open_tag open legacy_tag legacy ref repo tag digest verdict line
   # One assignment per value: a get that fails inside an array literal would not stop the script.
   nvr=$(get nvr)
@@ -531,15 +573,18 @@ release_digests() { # release_digests ALL UNSIGNED
   boot=$(get boot_digest)
   open_tag=$(get nvidia_open_tag)
   open=$(get nvidia_open_digest)
-  legacy_tag=$(get nvidia_legacy_tag)
-  legacy=$(get nvidia_legacy_digest)
   local -a lines=(
     "$REGISTRY/azoth $nvr $kernel"
     "$REGISTRY/azoth-devel $nvr $devel"
     "$REGISTRY/azoth-boot $boot_tag $boot"
     "$REGISTRY/azoth-nvidia $open_tag $open"
-    "$REGISTRY/azoth-nvidia $legacy_tag $legacy"
   )
+  # Without the legacy branch (D24) the release signs the rest and ships no -nvidia-legacy.
+  if ! legacy_only; then
+    legacy_tag=$(get nvidia_legacy_tag)
+    legacy=$(get nvidia_legacy_digest)
+    lines+=("$REGISTRY/azoth-nvidia $legacy_tag $legacy")
+  fi
   # Not in the state file: resolved by tag and held to their keyless build record, as every
   # check before the release signing step is (ADR-0096 item 2).
   for ref in "azoth:$nvr-microvm" "azoth-debuginfo:$nvr"; do
@@ -592,8 +637,12 @@ case $command in
   require-ready)
     [[ $# -eq 0 ]] || usage
     resolve
+    if legacy_only; then
+      annotate warning "the legacy NVIDIA modules of azoth:$(get nvr) are not published: this run builds no athanor-system-nvidia-legacy (ADR-0103 D24)"
+      exit 0
+    fi
     state=$(get state)
-    [[ $state == ready ]] || die "state=$state: the kernel of the pins, its signed vmlinuz and both NVIDIA module branches must be published, signed and attested"
+    [[ $state == ready ]] || die "state=$state: the kernel of the pins, its signed vmlinuz and the open NVIDIA module branch must be published, signed and attested"
     ;;
   cycle) cycle "$@" ;;
   check-plan) check_plan "$@" ;;

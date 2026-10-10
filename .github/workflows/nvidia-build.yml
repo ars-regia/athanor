@@ -25,6 +25,10 @@ on:
         description: "registry system/kernel-artifacts.sh resolved devel-digest against (get registry), required when devel-artifact is empty"
         type: string
         default: ""
+      optional-legacy:
+        description: "the legacy branch may fail without failing the job (the kmod cycle, ADR-0103 D24); the gate on pull requests keeps it required"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -76,17 +80,22 @@ jobs:
           mkdir -p devel && podman cp "${ctr}:/." devel/ && podman rm "$ctr" > /dev/null
 
       - name: Run nvidia.sh build
+        # An optional branch that fails leaves out/ removed and out.dropped behind
+        # (system/optional-branch.sh): no upload, and the run goes on with the other branch.
+        env:
+          OPTIONAL: ${{ matrix.driver == 'legacy' && inputs.optional-legacy }}
         run: |
           set -euo pipefail
           ls devel
           mkdir -p "$HOME/.cache/azoth" out
-          podman run --rm \
+          bash system/optional-branch.sh "${{ matrix.driver }}" "${OPTIONAL}" out -- podman run --rm \
             -v "$GITHUB_WORKSPACE:/forge" \
             -v "$HOME/.cache/azoth:/var/cache/azoth" \
             -w /forge localhost/azoth-nvidia \
             bash forge/specs/azoth/nvidia.sh build --driver "${{ matrix.driver }}" --devel /forge/devel --out /forge/out
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ hashFiles('out.dropped') == '' }}
         with:
           name: nvidia-${{ matrix.driver }}-unsigned
           path: out/

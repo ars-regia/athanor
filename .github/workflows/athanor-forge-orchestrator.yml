@@ -154,6 +154,7 @@ jobs:
     outputs:
       state: ${{ steps.artifacts.outputs.state }}
       cycle: ${{ steps.artifacts.outputs.cycle }}
+      kmod: ${{ steps.artifacts.outputs.kmod }}
       kernel_digest: ${{ steps.artifacts.outputs.kernel_digest }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -169,7 +170,7 @@ jobs:
           set -euo pipefail
           bash system/kernel-artifacts.sh resolve
           bash system/kernel-artifacts.sh cycle --event "$EVENT" --before "$BEFORE" --after "$AFTER" --sha "$SHA" --head "$GITHUB_SHA"
-          grep -E '^(state|cycle|kernel_digest)=' kernel-artifacts/kernel-artifacts.env >> "$GITHUB_OUTPUT"
+          grep -E '^(state|cycle|kmod|kernel_digest)=' kernel-artifacts/kernel-artifacts.env >> "$GITHUB_OUTPUT"
 
   # The NVIDIA kmod cycle, in three steps (nvidia-kmod.yml): the key-less prepare part, the
   # sign job, the boot and publish part. The sign job is here, not in a called workflow: a
@@ -179,7 +180,7 @@ jobs:
   nvidia-kmod:
     # Only when the modules of the pins are missing; its approval comes before the image's.
     needs: [kernel-artifacts]
-    if: ${{ needs.kernel-artifacts.outputs.cycle == 'build' && needs.kernel-artifacts.outputs.state == 'modules-missing' }}
+    if: ${{ needs.kernel-artifacts.outputs.cycle == 'build' && needs.kernel-artifacts.outputs.state == 'modules-missing' && needs.kernel-artifacts.outputs.kmod == 'build' }}
     permissions:
       contents: read
       packages: read
