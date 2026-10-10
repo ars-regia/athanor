@@ -153,10 +153,11 @@ manifest degli hash); `--devel` e' una directory con il `kernel-devel-*.rpm` (l'
 di build.sh, o l'immagine `azoth-devel:<nvr>`). I `.ko` finiscono in
 `nvidia-out/<driver>/lib/modules/<kver>/extra/nvidia/` (il layout che l'immagine di
 sistema copia) con il vermagic del kernel e i preamboli kCFI, senza firma:
-`nvidia.sh sign --key K --cert C --devel DIR --out DIR` li firma con sign-file del
-kernel-devel, in locale con una chiave effimera, in CI con la chiave dei moduli del
-progetto (job `nvidia-kmod-sign` di `.github/workflows/athanor-forge-orchestrator.yml`;
-poi `nvidia-kmod.yml` li carica in QEMU con `boot.sh --mok --insmod` prima di pubblicarli).
+`sign-kernel.sh modules --key K --cert C --hash FILE --kver KVER --dir DIR` li firma
+con sign-file del kernel-devel e rilegge firmatario e chiave con `modinfo`, in locale con
+una chiave effimera, in CI nell'immagine del signer con la chiave dei moduli del progetto
+(job `sign` di `.github/workflows/nvidia-kmod.yml`, che poi li carica in QEMU con
+`boot.sh --mok --insmod` prima di pubblicarli).
 
 ## Pubblicazione
 

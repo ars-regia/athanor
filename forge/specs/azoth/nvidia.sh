@@ -14,46 +14,38 @@
 # kCFI or return thunks: the calls into it are a known risk, verifiable only on hardware.
 #
 # Usage: nvidia.sh build --driver open|legacy --devel DIR --out DIR
-#        nvidia.sh sign  --key FILE --cert FILE --devel DIR --out DIR
 #        nvidia.sh manifest --out DIR
 #   --devel    directory holding kernel-devel-*.rpm (the out/devel of build.sh or the image)
 #   --out      build: the .ko files in OUT/<driver>/lib/modules/<kver>/extra/nvidia/, the
 #              layout the system image copies and syft catalogs, with `version` and
-#              `kver` in OUT/<driver>/; sign: signs every .ko under OUT with the sign-file
-#              of the kernel-devel and verifies it with modinfo; manifest: downloads the
+#              `kver` in OUT/<driver>/, unsigned (sign-kernel.sh modules signs them in the
+#              signer image); manifest: downloads the
 #              .run of the legacy branch pinned in pins.env, compares it with the hash
 #              NVIDIA publishes next to it and writes OUT/sources.sha256 (the bump bot
 #              copies it to nvidia/sources.sha256)
-#   --key/--cert  private key and certificate (PEM or DER) of the signer: in CI the
-#              project module signing key (`signing-kernel` environment, keys/modules), locally
-#              an ephemeral one
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CACHE=${AZOTH_CACHE:-/var/cache/azoth}
 STAGE=${1:-}
 [[ $# -gt 0 ]] && shift
-DRIVER='' DEVEL='' OUT='' KEY='' CERT=''
+DRIVER='' DEVEL='' OUT=''
 while [[ $# -gt 0 ]]; do
   case $1 in
     --driver) DRIVER=$2; shift 2 ;;
     --devel) DEVEL=$2; shift 2 ;;
     --out) OUT=$2; shift 2 ;;
-    --key) KEY=$2; shift 2 ;;
-    --cert) CERT=$2; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 usage() {
   echo "usage: nvidia.sh build --driver open|legacy --devel DIR --out DIR" >&2
-  echo "       nvidia.sh sign --key FILE --cert FILE --devel DIR --out DIR" >&2
   echo "       nvidia.sh manifest --out DIR" >&2
   exit 2
 }
 [[ $OUT ]] || usage
 case $STAGE in
   build) [[ $DEVEL && ( $DRIVER == open || $DRIVER == legacy ) ]] || usage ;;
-  sign) [[ $DEVEL && $KEY && $CERT ]] || usage ;;
   manifest) ;;
   *) usage ;;
 esac
@@ -195,30 +187,6 @@ build() {
   echo "$DRIVER modules $version: $(find "$OUT/$DRIVER" -name '*.ko' -printf '%f ')"
 }
 
-cert_cn() { # cert_cn FILE: the CN of the certificate, PEM or DER
-  local subject
-  subject=$(openssl x509 -in "$1" -noout -subject -nameopt RFC2253 2> /dev/null \
-    || openssl x509 -in "$1" -inform DER -noout -subject -nameopt RFC2253)
-  subject=${subject#subject=}; subject=${subject#CN=}; echo "${subject%%,*}"
-}
-
-sign() {
-  local hash cn ko signer
-  devel_tree
-  hash=$(sed -n 's/^CONFIG_MODULE_SIG_HASH="\(.*\)"$/\1/p' "$SYSSRC/.config")
-  [[ $hash ]] || die "CONFIG_MODULE_SIG_HASH missing from the config"
-  cn=$(cert_cn "$CERT")
-  step "signing with $hash, certificate \"$cn\""
-  mapfile -t KOS < <(find "$OUT" -path '*/lib/modules/*' -name '*.ko' | sort)
-  [[ ${#KOS[@]} -gt 0 ]] || die "no module under $OUT/*/lib/modules/"
-  for ko in "${KOS[@]}"; do
-    "$SYSSRC/scripts/sign-file" "$hash" "$KEY" "$CERT" "$ko"
-    signer=$(modinfo -F signer "$ko")
-    [[ $signer == "$cn" ]] || die "${ko##*/}: signer \"$signer\", expected \"$cn\""
-    echo "${ko#"$OUT"/}: signed by \"$signer\", $(modinfo -F sig_hashalgo "$ko"), key $(modinfo -F sig_key "$ko" | cut -c1-23)..."
-  done
-}
-
 manifest() {
   local run="NVIDIA-Linux-x86_64-$NVIDIA_LEGACY_VERSION-no-compat32.run"
   local url="https://download.nvidia.com/XFree86/Linux-x86_64/$NVIDIA_LEGACY_VERSION"
@@ -232,5 +200,5 @@ manifest() {
   echo "manifest in $OUT/sources.sha256"
 }
 
-case $STAGE in build) build ;; sign) sign ;; manifest) manifest ;; esac
+case $STAGE in build) build ;; manifest) manifest ;; esac
 step "done: $(find "$OUT" -type f -name '*.ko' -printf '%P ')"

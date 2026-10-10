@@ -632,9 +632,9 @@ funzione C, che è come si manifesta un flag mancante. Restano circa
 cinquecento avvisi, contati e non bloccanti perché sono proprietà del codice
 NVIDIA e non dei flag: clang non estende kCFI alle chiamate virtuali né i
 return thunk ai thunk del C++ di DisplayPort in `nvidia-modeset.o`, e il RM
-ha code di funzione irraggiungibili. `nvidia.sh sign` firma con `scripts/sign-file` del
-kernel-devel e l'hash di `CONFIG_MODULE_SIG_HASH`, e rilegge il firmatario con
-`modinfo`. Il workflow `nvidia-kmod.yml`: `artifacts` (`system/kernel-artifacts.sh`
+ha code di funzione irraggiungibili. `sign-kernel.sh modules`, nell'immagine del signer,
+firma con `scripts/sign-file` del kernel-devel e l'hash di `CONFIG_MODULE_SIG_HASH`, e
+rilegge firmatario e chiave con `modinfo`. Il workflow `nvidia-kmod.yml`: `artifacts` (`system/kernel-artifacts.sh`
 risolve il kernel dei pin e i tag dei moduli; se non mancano, il run finisce lì),
 `build` (matrice dei due rami, runner GitHub, `azoth-devel` per digest),
 `sign` (runner GitHub, environment `signing-kernel`: vede solo i `.ko` e la chiave,
