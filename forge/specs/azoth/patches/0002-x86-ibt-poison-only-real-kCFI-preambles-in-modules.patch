@@ -26,6 +26,8 @@ module's .cfi_sites, sort them, and poison only a sealed function whose
 preamble is among them. vmlinux keeps the current behaviour, since every
 function it seals comes from Kbuild. A module that cannot get the
 memory for the table fails to load instead of being sealed blindly.
+UML, which builds this module.c without alternative.c, gets a stub
+next to its other ones.
 ---
 --- a/arch/x86/include/asm/alternative.h
 +++ b/arch/x86/include/asm/alternative.h
@@ -154,3 +156,17 @@ memory for the table fails to load instead of being sealed blindly.
  	}
  	if (locks) {
  		void *lseg = (void *)locks->sh_addr;
+--- a/arch/um/kernel/um_arch.c
++++ b/arch/um/kernel/um_arch.c
+@@ -434,6 +434,11 @@
+ {
+ }
+ 
++int apply_seal_endbr_module(s32 *start, s32 *end, s32 *start_cfi, s32 *end_cfi)
++{
++	return 0;
++}
++
+ void apply_retpolines(s32 *start, s32 *end)
+ {
+ }
