@@ -70,7 +70,12 @@ CMDLINE=$(< "$HERE/cmdline")
 # reboot on panic (with -no-reboot QEMU exits) and the parameters read by boot/init.
 # The certificates the kernel must have compiled in (kernel-local), by subject key
 # identifier, the id the kernel logs them with: the module signing one and the revoked.
-skid() { openssl x509 -in "$1" -noout -ext subjectKeyIdentifier | tail -n 1 | tr -d ' :' | tr 'A-F' 'a-f'; }
+skid() {
+  local id
+  id=$(openssl x509 -in "$1" -noout -ext subjectKeyIdentifier | tail -n 1 | tr -d ' :' | tr 'A-F' 'a-f')
+  [[ $id =~ ^[0-9a-f]+$ ]] || { echo "boot.sh: $1 has no subject key identifier" >&2; return 1; }
+  echo "$id"
+}
 K3_CERTS=''
 for cert in "$HERE"/keys/modules/*.pem "$HERE"/keys/revoked/*.pem; do
   K3_CERTS+="${K3_CERTS:+,}$(skid "$cert")"
@@ -125,6 +130,10 @@ if [[ $IMA_KEY ]]; then
 fi
 BIOS_CMDLINE="$TEST_CMDLINE${K3_INSMOD_BIOS:+ k3.insmod=$K3_INSMOD_BIOS}"
 UEFI_CMDLINE="$TEST_CMDLINE${K3_INSMOD_UEFI:+ k3.insmod=$K3_INSMOD_UEFI} k3.sb=1"
+# The user CAs the UEFI cases must find in the machine keyring, by subject key identifier.
+K3_MOKCA=''
+for cert in "${MOK_CAS[@]}"; do K3_MOKCA+="${K3_MOKCA:+,}$(skid "$cert")"; done
+UEFI_CMDLINE+="${K3_MOKCA:+ k3.mokca=$K3_MOKCA}"
 (cd "$R" && find . | cpio -o -H newc --quiet | zstd -q -T0 -19 -o "$WORK/initramfs.img")
 echo "initramfs: $(du -sh "$R" | cut -f1) uncompressed, $(du -h "$WORK/initramfs.img" | cut -f1) compressed"
 
@@ -144,15 +153,11 @@ OVMF_CODE=/usr/share/edk2/ovmf/OVMF_CODE.secboot.fd
 # never modules.
 ADD_MOK=()
 for cert in "$OUT/mok.pem" "${MOKS[@]}"; do ADD_MOK+=(--add-mok "$(< /proc/sys/kernel/random/uuid)" "$cert"); done
-# D40: a user CA enrolled in MokList and trusted for the machine keyring (mokutil --trust-mok
-# sets MokListTrusted, which shim mirrors to MokListTrustedRT).
+# D40: a user CA enrolled in MokList, trusted for the machine keyring. Since 15.6 shim
+# mirrors MokListTrustedRT, the trust the kernel reads, unless MokListTrusted exists
+# (mokutil --untrust-mok creates it): the variable is left unset, so the CA is trusted.
 for cert in "${MOK_CAS[@]}"; do ADD_MOK+=(--add-mok "$(< /proc/sys/kernel/random/uuid)" "$cert"); done
-SET_JSON=()
-if [[ ${#MOK_CAS[@]} -gt 0 ]]; then
-  printf '%s\n' '{"version": 2, "variables": [{"name": "MokListTrusted", "guid": "605dab50-e046-4300-abb6-3dd810dd8b23", "attr": 3, "data": "01"}]}' > "$WORK/moktrust.json"
-  SET_JSON=(--set-json "$WORK/moktrust.json")
-fi
-virt-fw-vars -i /usr/share/edk2/ovmf/OVMF_VARS.secboot.fd -o "$WORK/vars.fd" "${ADD_MOK[@]}" "${SET_JSON[@]}" > "$OUT/varstore.log"
+virt-fw-vars -i /usr/share/edk2/ovmf/OVMF_VARS.secboot.fd -o "$WORK/vars.fd" "${ADD_MOK[@]}" > "$OUT/varstore.log"
 # ESP: shim at the removable path, the UKI where shim looks for the second stage.
 mkdir -p "$WORK/esp/EFI/BOOT"
 cp /boot/efi/EFI/fedora/shimx64.efi "$WORK/esp/EFI/BOOT/BOOTX64.EFI"

@@ -23,6 +23,7 @@ for w in $(cat /proc/cmdline); do
     k3.iommu=*) iommu=${w#*=} ;;
     k3.builtin=*) builtin_expected=${w#*=} ;;
     k3.imakey=1) imakey=1 ;;
+    k3.mokca=*) mokca_list=${w#*=} ;;
   esac
 done
 
@@ -137,6 +138,12 @@ ima_key_refused() { # D40, D46: a key vouched only by a machine-keyring CA never
   esac
   keyctl list %:.ima
 }
+machine_ca() { # machine_ca SKID: D40, the kernel trusted this user CA for the machine keyring
+  # A MOK the kernel does not trust lands in .platform, which never verifies modules.
+  keys=$(keyctl list %:.machine) || { echo "cannot read .machine"; return 1; }
+  echo "$keys"
+  echo "$keys" | grep -qE "asymmetric: .*: $1\$"
+}
 builtin_exact() { # D40: the builtin keyring holds exactly the expected keys
   keyctl list %:.builtin_trusted_keys
   ids=$(keyctl rlist %:.builtin_trusted_keys) || { echo "cannot read .builtin_trusted_keys"; return 1; }
@@ -180,6 +187,9 @@ check builtin-set builtin_exact
 if [ "$sb" ]; then
   check secureboot secureboot
   check moklist    test -e /sys/firmware/efi/efivars/MokListRT-605dab50-e046-4300-abb6-3dd810dd8b23
+  for skid in $(echo "$mokca_list" | tr ',' ' '); do
+    check "machine-ca-$skid" machine_ca "$skid"
+  done
 fi
 [ "$imakey" ] && check ima-key ima_key_refused
 # Last: an external module taints the kernel (taint O, P) even when its init fails, and
