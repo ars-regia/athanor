@@ -4,7 +4,7 @@
 
 **Goal:** Every OCI artefact of the kernel cycle that an image or the release consumes is signed with the project image key in `sign-system-images`, and every check after that step verifies it against `system/keys/athanor-image-*.pub` (issue #141).
 
-**Architecture:** The keyless job that already resolves the kernel (`kernel-artifacts-final`) writes two lists in the digests-file format of `image-digests.sh`: every kernel artefact of the release, and those not yet signed with a project key. `sign-system-images` validates the second list against a fixed set of kernel repositories and signs it with the same `skopeo copy --sign-by-sigstore-private-key` call it uses for the system images. `verify-system-images` then checks the first list with `cosign verify --key`, the command `KERNEL.md` documents for a verifier outside GitHub.
+**Architecture:** A new keyless job, `kernel-digests`, reads the state `kernel-artifacts-final` required and writes two lists in the digests-file format of `image-digests.sh`: every kernel artefact of the release, and those not yet signed with a project key. `sign-system-images` validates the second list against a fixed set of kernel repositories and signs it with the same `skopeo copy --sign-by-sigstore-private-key` call it uses for the system images. `verify-system-images` then checks the first list with `cosign verify --key`, the command `KERNEL.md` documents for a verifier outside GitHub.
 
 **Tech Stack:** bash, skopeo, cosign v3.1.3 (pinned by `sigstore/cosign-installer`), GitHub Actions, Python `unittest` with the offline fakes of `system/tests`.
 
@@ -17,7 +17,8 @@
 - The signing job runs no tool beside skopeo and holds the key alone (UT2 "The key is alone in its job", D43). Anything that needs cosign runs in a job without the key.
 - The keyless signature stays as the build record. Checks before the signing step keep verifying it (ADR-0096 item 2).
 - No new approval: the kernel artefacts are signed in the existing `sign-system-images` job (ADR-0096 item 1, ADR-0064).
-- Stop-and-ask files: `system/sign-images.sh`, `system/image-digests.sh --check` and the `sign-system-images` job of `.github/workflows/athanor-forge-orchestrator.yml`. Show the maintainer the diff before the push.
+- Stop-and-ask files: `system/sign-images.sh`, `system/image-digests.sh --check`, the D43 allow-lists of `scripts/verify.py` and the `sign-system-images` job of `.github/workflows/athanor-forge-orchestrator.yml`. Show the maintainer the diff before the push.
+- `python3 scripts/verify.py workflows` (D43) passes at every commit: no container engine named in `sign-images.sh`, downloads of the signing job only into `out` or `artifacts`, its commands only from `SIGN_JOB_COMMANDS`.
 - No `|| true`, no `2>/dev/null` hiding an error, no `continue-on-error`. Every message and comment is in English.
 - Approved documents (`doc_update_trust.md`, `doc_pipeline.md`, `doc_ci.md`) change only through the pull request the maintainer approves.
 
@@ -27,14 +28,14 @@
 2. **A registry or Rekor outage read as "unsigned"** would only add a signature, never skip one. Still, the probe classifies cosign's two observed "no key signature" messages and fails on anything else (Task 1 test).
 3. **`--new-bundle-format` is deprecated in cosign 3.1.3**, and a later cosign may stop reading the classic attachment. The pipeline pins cosign through `cosign-installer`, and a cosign bump that breaks it fails `verify-system-images` loudly. Test: the fake refuses a call without `--new-bundle-format=false`, as real cosign does ("expected key signature, not certificate").
 4. **A digests file that names a repository outside the kernel set**, or another registry, never reaches skopeo (Task 2 test).
-5. **A run whose signing job was skipped or failed ends red**: `verify-system-images` runs anyway and refuses a kernel artefact without a key signature (Task 3 test).
+5. **A run whose signing job was skipped or failed ends red**: `verify-system-images` keeps its `if`, which already runs it when `sign-system-images` was skipped or failed, and `verify-key` refuses a kernel artefact without a key signature (Task 1 test `test_verify_key_refuses_an_unsigned_artefact`). A failed `kernel-digests` fails the download step of `verify-system-images`.
 
 Observed facts, 2026-10-10, cosign v3.1.3 against ghcr.io:
 - `cosign verify --key system/keys/athanor-image-1.pub --new-bundle-format=false --insecure-ignore-tlog=true ghcr.io/ars-regia/athanor-system@sha256:64e40ca7…` verifies the skopeo signature (rc 0).
 - The same call on `azoth@sha256:d2b4083f…`, which has no key signature, prints `Error: no signatures found` (rc 10).
 - The call with key 2 on an image signed with key 1 prints `Error: no matching signatures: invalid signature when validating ASN.1 encoded signature` (rc 12).
 - Without `--new-bundle-format=false` the call fails with `expected key signature, not certificate`.
-- `vars.KERNEL_REGISTRY` is unset, so the kernel registry equals the image registry `ghcr.io/<owner>`.
+- `vars.KERNEL_REGISTRY` is unset, so the kernel registry equals the image registry `ghcr.io/<owner>`. It is still a documented knob (`kernel-artifacts.sh`: `KERNEL_REGISTRY` overrides `ghcr.io/<owner>`), so the signing job receives it and checks the kernel list against it.
 
 ---
 
@@ -237,14 +238,23 @@ Add after `check_plan`:
 release_digests() { # release_digests ALL UNSIGNED
   [[ $# -eq 2 ]] || usage
   [[ $(get state) == ready ]] || die "release-digests needs state=ready: run require-ready first"
-  local nvr ref repo tag digest verdict line
+  local nvr kernel devel boot_tag boot open_tag open legacy_tag legacy ref repo tag digest verdict line
+  # One assignment per value: a get that fails inside an array literal would not stop the script.
   nvr=$(get nvr)
+  kernel=$(get kernel_digest)
+  devel=$(get devel_digest)
+  boot_tag=$(get boot_tag)
+  boot=$(get boot_digest)
+  open_tag=$(get nvidia_open_tag)
+  open=$(get nvidia_open_digest)
+  legacy_tag=$(get nvidia_legacy_tag)
+  legacy=$(get nvidia_legacy_digest)
   local -a lines=(
-    "$REGISTRY/azoth $nvr $(get kernel_digest)"
-    "$REGISTRY/azoth-devel $nvr $(get devel_digest)"
-    "$REGISTRY/azoth-boot $(get boot_tag) $(get boot_digest)"
-    "$REGISTRY/azoth-nvidia $(get nvidia_open_tag) $(get nvidia_open_digest)"
-    "$REGISTRY/azoth-nvidia $(get nvidia_legacy_tag) $(get nvidia_legacy_digest)"
+    "$REGISTRY/azoth $nvr $kernel"
+    "$REGISTRY/azoth-devel $nvr $devel"
+    "$REGISTRY/azoth-boot $boot_tag $boot"
+    "$REGISTRY/azoth-nvidia $open_tag $open"
+    "$REGISTRY/azoth-nvidia $legacy_tag $legacy"
   )
   # Not in the state file: resolved by tag and held to their keyless build record, as every
   # check before the release signing step is (ADR-0096 item 2).
@@ -320,16 +330,38 @@ git commit -m "feat(kernel): list the kernel artefacts a release signs with the 
 ### Task 2: Signing the kernel list in `sign-images.sh` [stop-and-ask: diff before push]
 
 **Files:**
+- Create: `system/kernel-registries.d.yaml.in` (the pipeline-only registries.d of the kernel repositories)
 - Modify: `system/image-digests.sh` (new `--check-kernel FILE` mode)
 - Modify: `system/sign-images.sh` (optional `--kernel-digests FILE`)
-- Test: `system/tests/test_sign_images.py`
+- Test: `system/tests/test_sign_images.py` (the skopeo stub checks the exact repository; kernel tests)
 
 **Interfaces:**
 - Consumes: the UNSIGNED list of Task 1. It may be empty when every artefact is already signed.
 - Produces: `image-digests.sh --registry R --check-kernel FILE` exits 0 for an empty file or for lines naming only `R/{azoth,azoth-devel,azoth-debuginfo,azoth-boot,azoth-nvidia,azoth-signer}` by digest, each `repo@digest` once. Otherwise it exits 2 before anything is signed.
-- Produces: `sign-images.sh --registry R [--kernel-digests FILE] DIGESTS_FILE`, which signs the system images, then each kernel line, printing `signed: repo@digest`.
+- Produces: `sign-images.sh --registry R [--kernel-digests FILE] DIGESTS_FILE`. It signs the system images, then each kernel line, printing `signed: repo@digest`. The kernel lines are checked against `${KERNEL_REGISTRY:-R}`, the default of `system/kernel-artifacts.sh`, so both scripts name the same registry whether or not `vars.KERNEL_REGISTRY` is set.
 
-- [ ] **Step 1: Write the failing tests**
+`scripts/verify.py workflows` (D43) fails on any line of `sign-images.sh` outside a comment that names a container engine, `docker` included, unless it is followed by `://`. So the registries.d text, whose top key is `docker:`, lives in a template file, never in the script.
+
+- [ ] **Step 1: Make the skopeo stub check the exact repository**
+
+The stub accepts today any `*.yaml` holding `use-sigstore-attachments: true`. `athanor.yaml` always holds it, so a missing or wrong kernel file would go unnoticed. In the `STUB` string of `system/tests/test_sign_images.py`, replace:
+
+```python
+        if conf is None or "use-sigstore-attachments: true" not in "".join(f.read_text() for f in conf.glob("*.yaml")):
+```
+
+with the lines below. `STUB` is a string literal, so the newlines are written `\\n` there:
+
+```python
+        scope = args[-1].removeprefix("docker://").split("@")[0]
+        enabled = f"  {scope}:\\n    use-sigstore-attachments: true\\n"
+        if conf is None or enabled not in "".join(f.read_text() for f in conf.glob("*.yaml")):
+```
+
+Run: `python3 -m unittest discover -s system/tests -p test_sign_images.py`
+Expected: every existing test still PASSES, because `athanor.yaml.in` names each system repository in that shape.
+
+- [ ] **Step 2: Write the failing tests**
 
 In `system/tests/test_sign_images.py`, add after `NAMES`:
 
@@ -363,6 +395,7 @@ Add to `SignImages`:
         )
 
     def test_the_kernel_artefacts_are_signed_after_the_images(self):
+        """The stub writes an attachment only for a repository a registries.d file names."""
         self.digests()
         r = self.sign_kernel(self.kernel_file(KERNEL_LINES))
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -376,30 +409,63 @@ Add to `SignImages`:
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(json.loads((self.state / "signed.json").read_text()), list(self.tags.values()))
 
+    def test_the_kernel_registry_is_the_one_kernel_artifacts_uses(self):
+        """KERNEL_REGISTRY moves the kernel artefacts, not the system images."""
+        self.digests()
+        moved = [line.replace(REG, "registry.example/kernel", 1) for line in KERNEL_LINES]
+        path = self.kernel_file(moved)
+        r = self.sign_kernel(path)
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("not a kernel repository under", r.stderr)
+        r = self.sign_kernel(path, KERNEL_REGISTRY="registry.example/kernel")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.count("signed: "), 6)
+
     def test_a_kernel_line_outside_the_kernel_set_is_refused_before_signing(self):
-        for line in (
-            f"{REG}/athanor-system 412 sha256:{'d' * 64}",
-            f"ghcr.io/elsewhere/azoth 7.2.9 sha256:{'d' * 64}",
-            f"{REG}/azoth 7.2.9 latest",
-            KERNEL_LINES[0],
+        for lines in (
+            [f"{REG}/athanor-system 412 sha256:{'d' * 64}"],
+            [f"ghcr.io/elsewhere/azoth 7.2.9 sha256:{'d' * 64}"],
+            [f"{REG}/azoth 7.2.9 latest"],
+            [KERNEL_LINES[0], KERNEL_LINES[0]],
         ):
-            with self.subTest(line=line):
+            with self.subTest(lines=lines):
                 self.digests()
-                lines = [line] if line != KERNEL_LINES[0] else [line, line]
                 path = self.dir / "artifacts" / "kernel-unsigned.txt"
-                path.write_text("".join(f"{x}\n" for x in lines))
+                path.write_text("".join(f"{line}\n" for line in lines))
                 (self.state / "calls.log").unlink(missing_ok=True)
                 r = self.sign_kernel(path)
                 self.assertEqual(r.returncode, 2, r.stderr)
                 self.assertFalse((self.state / "calls.log").exists())
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [ ] **Step 3: Run the tests to verify they fail**
 
 Run: `python3 -m unittest discover -s system/tests -p test_sign_images.py -k kernel -v`
-Expected: FAIL. `sign-images.sh` prints its usage and exits 2 on `--kernel-digests`.
+Expected: FAIL. `sign-images.sh` prints its usage and exits 2 on `--kernel-digests`, so the refusal test passes for the wrong reason until Step 6. Confirm that the other three fail.
 
-- [ ] **Step 3: Implement `--check-kernel` in `system/image-digests.sh`**
+- [ ] **Step 4: Create `system/kernel-registries.d.yaml.in`**
+
+```yaml
+# Pipeline only (ADR-0096): system/sign-images.sh renders this file into the registries.d of
+# the signing job, so skopeo writes the sigstore attachments of the kernel artefacts. Machines
+# never pull them, so the shipped policy (render-policy) does not name them. One entry per
+# repository: a scope that two registries.d files declare is a hard error in containers/image.
+docker:
+  @REGISTRY@/azoth:
+    use-sigstore-attachments: true
+  @REGISTRY@/azoth-devel:
+    use-sigstore-attachments: true
+  @REGISTRY@/azoth-debuginfo:
+    use-sigstore-attachments: true
+  @REGISTRY@/azoth-boot:
+    use-sigstore-attachments: true
+  @REGISTRY@/azoth-nvidia:
+    use-sigstore-attachments: true
+  @REGISTRY@/azoth-signer:
+    use-sigstore-attachments: true
+```
+
+- [ ] **Step 5: Implement `--check-kernel` in `system/image-digests.sh`**
 
 Add to the header, after the `--check` paragraph:
 
@@ -411,7 +477,7 @@ Add to the header, after the `--check` paragraph:
 #        image-digests.sh --registry REGISTRY/OWNER --check-kernel FILE
 ```
 
-Parse the option: `check_kernel=''` in the variable line, and `--check-kernel) check_kernel=$2 ;;` in the `case`. Add `--check-kernel FILE` to `usage`. Then, before `if [[ -n $check ]]; then`:
+Parse the option: add `check_kernel=''` to the variable line, and `--check-kernel) check_kernel=$2 ;;` to the `case`. Add `--check-kernel FILE` to `usage`. Then, before `if [[ -n $check ]]; then`:
 
 ```bash
 kernel=(azoth azoth-devel azoth-debuginfo azoth-boot azoth-nvidia azoth-signer)
@@ -419,8 +485,8 @@ if [[ -n $check_kernel ]]; then
   [[ -n $registry && -z $tag && -z $out && -z $variants && -z $check ]] || usage
   [[ -f $check_kernel ]] || { echo "${0##*/}: $check_kernel is missing" >&2; exit 2; }
   declare -A seen=()
-  while read -r repository tag digest; do
-    [[ $digest =~ ^sha256:[0-9a-f]{64}$ && -n $tag ]] || { echo "${0##*/}: malformed line in $check_kernel: '$repository $tag $digest'" >&2; exit 2; }
+  while read -r repository line_tag digest; do
+    [[ $digest =~ ^sha256:[0-9a-f]{64}$ && -n $line_tag ]] || { echo "${0##*/}: malformed line in $check_kernel: '$repository $line_tag $digest'" >&2; exit 2; }
     [[ ${repository%/*} == "$registry" && " ${kernel[*]} " == *" ${repository##*/} "* ]] ||
       { echo "${0##*/}: $check_kernel names $repository, not a kernel repository under $registry" >&2; exit 2; }
     [[ -z ${seen[$repository@$digest]:-} ]] || { echo "${0##*/}: $check_kernel names $repository@$digest twice" >&2; exit 2; }
@@ -430,9 +496,11 @@ if [[ -n $check_kernel ]]; then
 fi
 ```
 
-- [ ] **Step 4: Implement `--kernel-digests` in `system/sign-images.sh`**
+The set in `kernel` must match the template of Step 4.
 
-Header: add the kernel artefacts to the first paragraph ("…of the published system images and, with --kernel-digests, of the kernel artefacts a release consumes (ADR-0096)…"), and change the usage line to `sign-images.sh --registry REGISTRY/OWNER [--kernel-digests FILE] DIGESTS_FILE`.
+- [ ] **Step 6: Implement `--kernel-digests` in `system/sign-images.sh`**
+
+Header: add the kernel artefacts to the first paragraph ("…of the published system images and, with --kernel-digests, of the kernel artefacts a release consumes (ADR-0096)…"). Change the usage line to `sign-images.sh --registry REGISTRY/OWNER [--kernel-digests FILE] DIGESTS_FILE`.
 
 Replace the argument check with:
 
@@ -451,24 +519,15 @@ fi
 After `bash "$root/system/image-digests.sh" --registry "$registry" --check "$digests"`:
 
 ```bash
-[[ -z $kernel ]] || bash "$root/system/image-digests.sh" --registry "$registry" --check-kernel "$kernel"
+# The kernel artefacts live where system/kernel-artifacts.sh resolved them.
+kernel_registry=${KERNEL_REGISTRY:-$registry}
+[[ -z $kernel ]] || bash "$root/system/image-digests.sh" --registry "$kernel_registry" --check-kernel "$kernel"
 ```
 
 After `render-policy`:
 
 ```bash
-if [[ -n $kernel ]]; then
-    # Machines never pull the kernel artefacts, so the shipped registries.d does not name them:
-    # this file, written only here, lets skopeo write their sigstore attachments. The repository
-    # list is its own command so that a failure of cut or sort fails the job (pipefail).
-    cut -d' ' -f1 "$kernel" | sort -u > "$work/kernel-repositories"
-    {
-        echo docker:
-        while read -r repository; do
-            printf '  %s:\n    use-sigstore-attachments: true\n' "$repository"
-        done < "$work/kernel-repositories"
-    } > "$work/policy/registries.d/athanor-kernel.yaml"
-fi
+[[ -z $kernel ]] || sed "s|@REGISTRY@|$kernel_registry|g" "$root/system/kernel-registries.d.yaml.in" > "$work/policy/registries.d/athanor-kernel.yaml"
 ```
 
 Move the signing loop into a function and call it for both files:
@@ -488,39 +547,131 @@ sign_file "$digests"
 [[ -z $kernel ]] || sign_file "$kernel"
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [ ] **Step 7: Run the tests to verify they pass**
 
 Run: `python3 -m unittest discover -s system/tests -p test_sign_images.py -v`
 Expected: every test PASS.
 
-- [ ] **Step 6: Lint, full suite, show the diff**
+- [ ] **Step 8: Lint, full suites, show the diff**
 
-Run: `shellcheck system/sign-images.sh system/image-digests.sh`, `shfmt -d system/sign-images.sh`, `python3 -m unittest discover -s system/tests`.
-Then show the maintainer `git diff origin/iso-v0 -- system/sign-images.sh system/image-digests.sh` in chat before the push.
+Run:
+- `shellcheck system/sign-images.sh system/image-digests.sh`
+- `shfmt -d system/sign-images.sh`
+- `python3 scripts/verify.py workflows`: no `sign-images.sh … starts a container` problem.
+- `python3 -m unittest discover -s system/tests`
+- `python3 -m unittest discover -s scripts/tests`
 
-- [ ] **Step 7: Commit**
+Then show the maintainer `git diff origin/iso-v0 -- system/sign-images.sh system/image-digests.sh system/kernel-registries.d.yaml.in` in chat, before the push.
+
+- [ ] **Step 9: Commit**
 
 ```bash
-git add system/image-digests.sh system/sign-images.sh system/tests/test_sign_images.py
+git add system/kernel-registries.d.yaml.in system/image-digests.sh system/sign-images.sh system/tests/test_sign_images.py
 git commit -m "feat(signing): sign the kernel artefacts of a release with the project key (ADR-0096)"
 ```
 
-### Task 3: Orchestrator wiring [stop-and-ask: diff before push]
+### Task 3: Orchestrator wiring and the D43 allow-lists [stop-and-ask: diff before push]
 
 **Files:**
-- Modify: `.github/workflows/athanor-forge-orchestrator.yml` (jobs `kernel-artifacts-final`, `sign-system-images`, `verify-system-images`)
-- Test: `python3 scripts/verify.py workflows`, `actionlint`
+- Modify: `.github/workflows/athanor-forge-orchestrator.yml`: new job `kernel-digests`; jobs `sign-system-images` and `verify-system-images`
+- Modify: `scripts/verify.py` (`SIGN_JOB_COMMANDS` and `SIGN_SCRIPTS`), with an exact-replace script
+- Test: `scripts/tests/test_verify_signing.py`
 
 **Interfaces:**
 - Consumes: `release-digests` and `verify-key` (Task 1), and `sign-images.sh --kernel-digests` (Task 2).
-- Produces: the artifact `kernel-digests`, with `kernel-digests.txt` (every artefact) and `kernel-unsigned.txt` (to sign).
+- Produces: the artifact `kernel-digests`, holding `kernel-digests.txt` (every artefact) and `kernel-unsigned.txt` (those to sign) at its root.
 
-- [ ] **Step 1: `kernel-artifacts-final` writes and uploads the lists**
+Rulings this task carries:
+- **The lists come from their own job, `kernel-digests`, not from `kernel-artifacts-final`.** `system-image` needs `kernel-artifacts-final`, and until now only `require-ready` could stop the nightly image build. A missing debuginfo or guest-kernel tag, or an outage during the extra probes, now fails `kernel-digests`. That skips `sign-system-images`, so `verify-system-images` fails and the run ends red. The image is still built and published, as before.
+- **The job reads the state file `kernel-artifacts-final` uploaded**, instead of resolving again: one resolve's registry and Rekor cost less.
+- **The signing job downloads into `artifacts`**, a directory of `SIGN_JOB_DOWNLOADS`, so that allow-list does not grow.
+- **The new sign command replaces the old one** in both D43 lists, in the same commit as the workflow, because `verify.py workflows` must pass at every commit. The command without `--kernel-digests` is no longer allowed: every run signs the kernel list.
 
-After its `Require ready` step:
+- [ ] **Step 1: Write the failing test**
+
+Add to the D43 test class of `scripts/tests/test_verify_signing.py`, after `test_rule_7_the_image_sign_script_starts_no_container`:
+
+```python
+    def test_rule_7_the_image_sign_step_also_signs_the_kernel_list(self):
+        """ADR-0096: the image signing step signs the kernel artefacts too, from the allow-listed
+        download directory. Another path, or the step without the kernel list, is not allowed."""
+        good = (
+            'bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"'
+            ' --kernel-digests artifacts/kernel-unsigned.txt artifacts/image-digests.txt'
+            ' | tee -a "${GITHUB_STEP_SUMMARY}"'
+        )
+        self.assertRegex(good, verify.SIGN_SCRIPTS)
+        self.assertIn(good, verify.SIGN_JOB_COMMANDS)
+        for bad in (
+            good.replace("artifacts/kernel-unsigned.txt", "out/kernel-unsigned.txt"),
+            good.replace(" --kernel-digests artifacts/kernel-unsigned.txt", ""),
+        ):
+            with self.subTest(bad=bad):
+                self.assertIsNone(verify.SIGN_SCRIPTS.match(bad))
+                self.assertNotIn(bad, verify.SIGN_JOB_COMMANDS)
+```
+
+Run: `python3 -m unittest discover -s scripts/tests -p test_verify_signing.py -k kernel_list -v`
+Expected: FAIL. The good command is not in the lists, and the second bad command still is.
+
+- [ ] **Step 2: Change the two D43 lists in `scripts/verify.py`**
+
+Use an exact-replace script, then `git diff --numstat scripts/verify.py`, which must show 3 insertions and 2 deletions. In `SIGN_JOB_COMMANDS`, replace
+
+```python
+    'bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" artifacts/image-digests.txt'
+    ' | tee -a "${GITHUB_STEP_SUMMARY}"',
+```
+
+with
+
+```python
+    'bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"'
+    ' --kernel-digests artifacts/kernel-unsigned.txt artifacts/image-digests.txt'
+    ' | tee -a "${GITHUB_STEP_SUMMARY}"',
+```
+
+In `SIGN_SCRIPTS`, replace
+
+```python
+    r'|system/sign-images\.sh --registry "ghcr\.io/\$\{GITHUB_REPOSITORY_OWNER,,\}" artifacts/image-digests\.txt'
+```
+
+with
+
+```python
+    r'|system/sign-images\.sh --registry "ghcr\.io/\$\{GITHUB_REPOSITORY_OWNER,,\}"'
+    r' --kernel-digests artifacts/kernel-unsigned\.txt artifacts/image-digests\.txt'
+```
+
+- [ ] **Step 3: New job `kernel-digests`**
+
+Add after `kernel-artifacts-final`:
 
 ```yaml
-      - name: Kernel artefacts the release signs with the project key (ADR-0096)
+  kernel-digests:
+    # The kernel artefacts a release signs with the project key (ADR-0096), from the state
+    # kernel-artifacts-final required. A job of its own: a missing artefact stops the signing,
+    # and the run ends red, but not the image build that needs kernel-artifacts-final.
+    needs: [kernel-artifacts-final]
+    if: ${{ !cancelled() && needs.kernel-artifacts-final.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+      - name: 📎 State required by kernel-artifacts-final
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: kernel-artifacts
+          path: kernel-artifacts
+      - name: Kernel artefacts the release signs (system/kernel-artifacts.sh)
         run: bash system/kernel-artifacts.sh release-digests kernel-artifacts/kernel-digests.txt kernel-artifacts/kernel-unsigned.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -531,29 +682,43 @@ After its `Require ready` step:
           if-no-files-found: error
 ```
 
-- [ ] **Step 2: `sign-system-images` signs the unsigned list**
+- [ ] **Step 4: `sign-system-images` signs the unsigned list**
 
-Add a download step after `📎 Digests recorded by the build job`:
+- Set `needs: [system-image, kernel-digests]`.
+- Add `&& needs.kernel-digests.result == 'success'` to its `if`.
+- Add after the `📎 Digests recorded by the build job` step:
 
 ```yaml
       - name: 📎 Kernel artefacts without the project key signature
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: kernel-digests
+          path: artifacts
+```
+
+In the `🔏 Sign by digest` step, add `KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}` to its `env` (`SIGN_JOB_ENV` allows it). Change its `run` to:
+
+```yaml
+        run: bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" --kernel-digests artifacts/kernel-unsigned.txt artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
+```
+
+Extend the job comment: "It also signs the kernel artefacts that carry no project key signature yet (ADR-0096): kernel-digests lists them in a keyless job, and image-digests.sh --check-kernel checks the list before anything is signed. The registry login covers ghcr.io only, so a KERNEL_REGISTRY on another host fails at the first kernel signature."
+
+- [ ] **Step 5: `verify-system-images` checks every kernel artefact**
+
+- Add `kernel-digests` to its `needs`. Leave its `if` unchanged: when `kernel-digests` failed, the download below fails, and the run ends red.
+- Add `- uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6` after its checkout.
+- Add after its `📎 Digests recorded by the build job` step:
+
+```yaml
+      - name: 📎 Kernel artefacts of the release
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: kernel-digests
           path: kernel
 ```
 
-Change the signing command to:
-
-```yaml
-        run: bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" --kernel-digests kernel/kernel-unsigned.txt artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
-```
-
-Extend the job comment: "It also signs the kernel artefacts that carry no project key signature yet (ADR-0096); the list comes from a keyless job and is checked by image-digests.sh --check-kernel."
-
-- [ ] **Step 3: `verify-system-images` checks every kernel artefact**
-
-Add `- uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6` after its checkout, the same download step as in Step 2, and, after the image verification:
+- Add after the image verification step:
 
 ```yaml
       - name: 🔎 Kernel artefacts carry the project key signature (ADR-0096)
@@ -562,17 +727,19 @@ Add `- uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6`
 
 Add to the job comment: "It also verifies every kernel artefact of the release with cosign verify --key, the command KERNEL.md gives a verifier outside GitHub."
 
-- [ ] **Step 4: Check the workflow**
+- [ ] **Step 6: Check**
 
-Run: `actionlint .github/workflows/athanor-forge-orchestrator.yml` and `python3 scripts/verify.py workflows`
-Expected: both clean. D43 still holds: the signing job runs only skopeo.
+Run:
+- `python3 -m unittest discover -s scripts/tests -p test_verify_signing.py -v`: PASS.
+- `actionlint .github/workflows/athanor-forge-orchestrator.yml`: clean.
+- `python3 scripts/verify.py workflows`: clean, with no "downloads into", "outside the allow-list" or "hands … to a step" problem.
 
-- [ ] **Step 5: Show the diff and commit**
+- [ ] **Step 7: Show the diff and commit**
 
-Show `git diff origin/iso-v0 -- .github/workflows/athanor-forge-orchestrator.yml` in chat, then:
+Show `git diff origin/iso-v0 -- .github/workflows/athanor-forge-orchestrator.yml scripts/verify.py` in chat, then:
 
 ```bash
-git add .github/workflows/athanor-forge-orchestrator.yml
+git add .github/workflows/athanor-forge-orchestrator.yml scripts/verify.py scripts/tests/test_verify_signing.py
 git commit -m "ci(orchestrator): sign and verify the kernel artefacts with the project key (ADR-0096)"
 ```
 
@@ -587,7 +754,7 @@ Edit with an exact-replace Python script, then `git diff --numstat` (repository 
 
 - [ ] **Step 2: PL17.** Append: "The kernel artefacts follow the same rule from the release signing step on (ADR-0096); checks before that step keep verifying the keyless record."
 
-- [ ] **Step 3: doc_ci.md line 72.** Replace "This is the decided target and is not landed." with "`sign-system-images` signs them, from the list `kernel-artifacts-final` writes, and `verify-system-images` verifies them."
+- [ ] **Step 3: doc_ci.md line 72.** Replace "This is the decided target and is not landed." with "`sign-system-images` signs them, from the list the `kernel-digests` job writes, and `verify-system-images` verifies them."
 
 - [ ] **Step 4: KERNEL.md.** Replace the `cosign verify --certificate-identity …` line of the verification block with the key-based command, and keep the `gh attestation verify` line as the build record:
 
