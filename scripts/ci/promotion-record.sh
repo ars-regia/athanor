@@ -84,7 +84,7 @@ sums() { # sums PATH... (relative to $artifacts) -> {"PATH": "<sha256>", ...}
 }
 
 promotion_record() { # promotion_record DAY OUT
-    local day=$1 out=$2 repository tag digest name gate finished current stable age images skips trigger evidence_sums package_sums
+    local day=$1 out=$2 repository tag digest name gate finished current stable new old age images skips trigger evidence_sums package_sums
     local -a gates package_files evidence_files
     bash "$root/forge/specs/athanor-update/SOURCES/usr/libexec/athanor-update/render-policy" \
         --registry "$REGISTRY" --keys-dir "$keys_dir" --out "$work/policy"
@@ -136,8 +136,11 @@ promotion_record() { # promotion_record DAY OUT
         rm -r "$work/pull"
         if stable=$(skopeo inspect --format '{{.Digest}}' "docker://$repository:stable" 2> "$err"); then
             previous[$name]=$stable
-            if [[ $stable != "$digest" && $(created "$repository" "$digest") -le $(created "$repository" "$stable") ]]; then
-                die "$repository:$run is not newer than the current stable: machines would not follow it"
+            if [[ $stable != "$digest" ]]; then
+                # Assigned first: a substitution inside [[ ]] would not stop the script when it fails.
+                new=$(created "$repository" "$digest")
+                old=$(created "$repository" "$stable")
+                ((new > old)) || die "$repository:$run is not newer than the current stable: machines would not follow it"
             fi
         elif ! grep -q 'manifest unknown' "$err"; then
             # Anything but "there is no stable tag yet" is a real failure.
@@ -168,10 +171,10 @@ promotion_record() { # promotion_record DAY OUT
     done | jq -s 'sort_by(.name)')
     trigger=manual
     if [[ -n ${GITHUB_RUN_ID:-} ]]; then trigger=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID; fi
-    jq -n -S --indent 2 --argjson run "$run" --arg day "$day" --arg trigger "$trigger" --arg override "$override" \
+    jq -n -S --indent 2 --argjson run "$run" --arg day "$day" --arg registry "$REGISTRY" --arg trigger "$trigger" --arg override "$override" \
         --argjson images "$images" --argjson skipped "$skips" \
         --argjson evidence "$evidence_sums" --argjson packages "$package_sums" \
-        '{run_id: $run, day: $day, trigger: $trigger, images: $images, skipped: $skipped,
+        '{run_id: $run, day: $day, registry: $registry, trigger: $trigger, images: $images, skipped: $skipped,
       overrides: (if $override == "" then [] else [$override] end), evidence: $evidence, packages: $packages}' \
         > "$out"
 }

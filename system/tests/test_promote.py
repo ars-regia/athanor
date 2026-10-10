@@ -294,6 +294,23 @@ class Promote(Tool):
                 self.assertIn("not newer than the current stable", r.stderr)
                 self.assertEqual(copies, [])
 
+    def test_a_stable_without_a_build_time_is_refused(self):
+        # An older run against a stable whose build time cannot be read: the UT5 check must
+        # refuse, not compare against an empty value.
+        self.published(run_created="2026-09-01T10:00:00Z")
+        fx = json.loads((self.dir / "registry.json").read_text())
+        fx["configs"][f"{REG}/athanor-system@{digest(4)}"] = {}
+        self.registry(fx)
+        r, copies = self.promote()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("no org.opencontainers.image.created label", r.stderr)
+        self.assertEqual(copies, [])
+
+    def test_the_record_names_the_registry(self):
+        self.published()
+        self.promote()
+        self.assertEqual(self.record()["registry"], REG)
+
     def test_a_run_signed_only_with_a_cosign_3_bundle_is_refused(self):
         self.published(signature=BUNDLE)
         r, copies = self.promote()
@@ -330,7 +347,8 @@ class Promote(Tool):
         def tamper():
             record = self.record()
             record["overrides"] = ["athanor-system-nvidia"]
-            (self.artifacts / "promotion.json").write_text(json.dumps(record))
+            # Laid out as the plan writes it, so only the content differs.
+            (self.artifacts / "promotion.json").write_text(json.dumps(record, sort_keys=True, indent=2) + "\n")
 
         r, copies = self.promote(between=tamper)
         self.assertEqual(r.returncode, 1)
