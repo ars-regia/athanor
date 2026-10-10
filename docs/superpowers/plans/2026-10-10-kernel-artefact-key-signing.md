@@ -363,13 +363,18 @@ Expected: every existing test still PASSES, because `athanor.yaml.in` names each
 
 - [ ] **Step 2: Write the failing tests**
 
-In `system/tests/test_sign_images.py`, add after `NAMES`:
+In `system/tests/test_sign_images.py`, add after `REG`. The list is the shape of a release that `release-digests` writes, and it names all six kernel repositories, so a repository missing from the template or from the `kernel` set of `--check-kernel` fails a test:
 
 ```python
 KERNEL_LINES = [
     f"{REG}/azoth 7.2.9-100.azoth.fc43 sha256:{'a' * 64}",
-    f"{REG}/azoth 7.2.9-100.azoth.fc43-microvm sha256:{'b' * 64}",
-    f"{REG}/azoth-signer image.digest sha256:{'c' * 64}",
+    f"{REG}/azoth-devel 7.2.9-100.azoth.fc43 sha256:{'b' * 64}",
+    f"{REG}/azoth-boot 7.2.9-100.azoth.fc43 sha256:{'c' * 64}",
+    f"{REG}/azoth-nvidia 615-7.2.9-100.azoth.fc43 sha256:{'d' * 64}",
+    f"{REG}/azoth-nvidia 580-7.2.9-100.azoth.fc43 sha256:{'e' * 64}",
+    f"{REG}/azoth 7.2.9-100.azoth.fc43-microvm sha256:{'f' * 64}",
+    f"{REG}/azoth-debuginfo 7.2.9-100.azoth.fc43 sha256:{'9' * 64}",
+    f"{REG}/azoth-signer image.digest sha256:{'8' * 64}",
 ]
 ```
 
@@ -401,7 +406,7 @@ Add to `SignImages`:
         self.assertEqual(r.returncode, 0, r.stderr)
         signed = json.loads((self.state / "signed.json").read_text())
         self.assertEqual(signed, list(self.tags.values()) + [line.split()[2] for line in KERNEL_LINES])
-        self.assertEqual(r.stdout.count("signed: "), 6)
+        self.assertEqual(r.stdout.count("signed: "), len(NAMES) + len(KERNEL_LINES))
 
     def test_an_empty_kernel_list_signs_the_images_alone(self):
         self.digests()
@@ -419,7 +424,11 @@ Add to `SignImages`:
         self.assertIn("not a kernel repository under", r.stderr)
         r = self.sign_kernel(path, KERNEL_REGISTRY="registry.example/kernel")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stdout.count("signed: "), 6)
+        self.assertEqual(r.stdout.count("signed: "), len(NAMES) + len(KERNEL_LINES))
+        # It reaches sed and the rendered registries.d: held to the pattern render-policy uses.
+        r = self.sign_kernel(path, KERNEL_REGISTRY="registry.example/kernel|x")
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("not a registry/owner", r.stderr)
 
     def test_a_kernel_line_outside_the_kernel_set_is_refused_before_signing(self):
         for lines in (
@@ -521,6 +530,9 @@ After `bash "$root/system/image-digests.sh" --registry "$registry" --check "$dig
 ```bash
 # The kernel artefacts live where system/kernel-artifacts.sh resolved them.
 kernel_registry=${KERNEL_REGISTRY:-$registry}
+# It reaches sed and the rendered registries.d: the pattern render-policy holds the image registry to.
+registry_pattern='^[a-z0-9]([a-z0-9._:/-]*[a-z0-9])?$'
+[[ $kernel_registry =~ $registry_pattern ]] || { echo "${0##*/}: not a registry/owner: '$kernel_registry'" >&2; exit 2; }
 [[ -z $kernel ]] || bash "$root/system/image-digests.sh" --registry "$kernel_registry" --check-kernel "$kernel"
 ```
 
@@ -582,7 +594,7 @@ git commit -m "feat(signing): sign the kernel artefacts of a release with the pr
 - Produces: the artifact `kernel-digests`, holding `kernel-digests.txt` (every artefact) and `kernel-unsigned.txt` (those to sign) at its root.
 
 Rulings this task carries:
-- **The lists come from their own job, `kernel-digests`, not from `kernel-artifacts-final`.** `system-image` needs `kernel-artifacts-final`, and until now only `require-ready` could stop the nightly image build. A missing debuginfo or guest-kernel tag, or an outage during the extra probes, now fails `kernel-digests`. That skips `sign-system-images`, so `verify-system-images` fails and the run ends red. The image is still built and published, as before.
+- **The lists come from their own job, `kernel-digests`, not from `kernel-artifacts-final`.** `system-image` needs `kernel-artifacts-final`, and until now only `require-ready` could stop the nightly image build. A missing debuginfo or guest-kernel tag, or an outage during the extra probes, now fails `kernel-digests`. That skips `sign-system-images`, so `verify-system-images` fails and the run ends red. The image is still built and published, as before, but it is not signed, and `tag-system-images` does not move `:latest`. A missing debuginfo, guest-kernel or signer record therefore holds the release, as a kernel failure does. This is intended: a release whose kernel artefacts cannot be listed for the project key is not released (ADR-0096).
 - **The job reads the state file `kernel-artifacts-final` uploaded**, instead of resolving again: one resolve's registry and Rekor cost less.
 - **The signing job downloads into `artifacts`**, a directory of `SIGN_JOB_DOWNLOADS`, so that allow-list does not grow.
 - **The new sign command replaces the old one** in both D43 lists, in the same commit as the workflow, because `verify.py workflows` must pass at every commit. The command without `--kernel-digests` is no longer allowed: every run signs the kernel list.
@@ -616,7 +628,7 @@ Expected: FAIL. The good command is not in the lists, and the second bad command
 
 - [ ] **Step 2: Change the two D43 lists in `scripts/verify.py`**
 
-Use an exact-replace script, then `git diff --numstat scripts/verify.py`, which must show 3 insertions and 2 deletions. In `SIGN_JOB_COMMANDS`, replace
+Use an exact-replace script, then `git diff --numstat scripts/verify.py`, which must show 4 insertions and 2 deletions. In `SIGN_JOB_COMMANDS`, replace
 
 ```python
     'bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" artifacts/image-digests.txt'
@@ -759,11 +771,11 @@ Edit with an exact-replace Python script, then `git diff --numstat` (repository 
 - [ ] **Step 4: KERNEL.md.** Replace the `cosign verify --certificate-identity …` line of the verification block with the key-based command, and keep the `gh attestation verify` line as the build record:
 
 ```sh
-cosign verify --key system/keys/athanor-image-2.pub --new-bundle-format=false --insecure-ignore-tlog=true \
+cosign verify --key system/keys/athanor-image-1.pub --new-bundle-format=false --insecure-ignore-tlog=true \
   "ghcr.io/ars-regia/azoth:$(bash nvr.sh)"
 ```
 
-Add one sentence after the block, in the file's language: the key signature is added by the release signing step, so a kernel published since the last Orchestrator run carries only its keyless build record. Use key 1 while the rotation of `secrets.md` section 4.1 is open.
+Add one sentence after the block, in the file's language: the key signature is added by the release signing step, so a kernel published since the last Orchestrator run carries only its keyless build record. The block names key 1, which signs while the rotation of `secrets.md` section 4.1 is open: the step of that rotation that moves signing to key 2 changes it.
 
 - [ ] **Step 5: Check and commit**
 
