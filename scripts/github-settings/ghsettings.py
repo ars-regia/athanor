@@ -315,13 +315,23 @@ def _protection(p):
     return out
 
 
+def _classic_protection_enabled(branch):
+    enabled = (branch.get("protection") or {}).get("enabled")
+    if not isinstance(enabled, bool):
+        raise GhError(
+            f"branch {branch['name']}: the branch list does not say whether its "
+            "classic protection is enabled"
+        )
+    return enabled
+
+
 def export_branch_protection(repo):
     # `protected` is also true for a branch that only a ruleset covers; its classic
     # protection answers 404, and rulesets are their own area.
     names = [
         b["name"]
         for b in gh_list(f"repos/{repo}/branches?protected=true")
-        if b["protection"]["enabled"]
+        if _classic_protection_enabled(b)
     ]
     return {
         n: _protection(get(f"repos/{repo}/branches/{q(n)}/protection")) for n in names
