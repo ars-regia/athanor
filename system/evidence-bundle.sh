@@ -29,7 +29,7 @@ create() {
     cp -r "$1/evidence" "$1/packages" "$2/"
     # verify-dir compares names line by line: refuse what it could not, before anything is signed.
     local nl=$'\n' bad
-    bad=$(cd "$2" && find . ! -type d \( ! -type f -o -name '*\\*' -o -name "*${nl}*" \) -printf '%P\n')
+    bad=$(cd "$2" && find . ! -type d \( ! -type f -o -path '*\\*' -o -path "*${nl}*" \) -printf '%P\n')
     [[ -z $bad ]] || {
         echo "${0##*/}: not a regular file, or a name with a backslash or newline: $bad" >&2
         exit 1

@@ -80,6 +80,14 @@ class EvidenceBundle(Tool):
         self.assertIn("evidence/link.json", r.stderr)
         self.assertFalse((self.bundle / "bundle.sha256").exists())
 
+    def test_create_refuses_a_backslash_in_a_directory_name(self):
+        odd = self.artifacts / "evidence" / "a\\b"
+        odd.mkdir()
+        (odd / "f.json").write_text("{}")
+        r = self.run_script("create", str(self.artifacts), str(self.bundle))
+        self.assertEqual(r.returncode, 1)
+        self.assertFalse((self.bundle / "bundle.sha256").exists())
+
     def test_an_intact_copy_verifies(self):
         copy = self.created()
         r = self.run_script("verify-dir", str(copy), str(self.artifacts))
