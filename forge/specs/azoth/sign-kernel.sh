@@ -80,13 +80,28 @@ one() { # one GLOB: the single path the glob names
     echo "${found[0]}"
 }
 
-cert_cn() { # cert_cn FILE: the CN of the certificate, PEM or DER
-    local subject
-    subject=$(openssl x509 -in "$1" -noout -subject -nameopt RFC2253 2> /dev/null ||
-        openssl x509 -in "$1" -inform DER -noout -subject -nameopt RFC2253)
-    subject=${subject#subject=}
-    subject=${subject#CN=}
-    echo "${subject%%,*}"
+cert_field() { # cert_field FILE OPTION: openssl x509 -OPTION of the certificate, PEM or DER
+    local value
+    value=$(openssl x509 -in "$1" -noout "-$2" -nameopt RFC2253 2> /dev/null ||
+        openssl x509 -in "$1" -inform DER -noout "-$2" -nameopt RFC2253)
+    echo "${value#"$2"=}"
+}
+
+cert_cn() { # cert_cn FILE [subject|issuer]: the CN of the certificate's subject, or issuer
+    local name
+    name=$(cert_field "$1" "${2:-subject}")
+    name=${name#CN=}
+    echo "${name%%,*}"
+}
+
+cert_key() { # cert_key FILE: the certificate's serial as modinfo prints sig_key (AA:BB:...)
+    local serial key=''
+    serial=$(cert_field "$1" serial)
+    while [[ $serial ]]; do
+        key+="${key:+:}${serial:0:2}"
+        serial=${serial:2}
+    done
+    echo "$key"
 }
 
 signatures() { # signatures FILE: how many signatures the PE image carries
@@ -180,17 +195,23 @@ check_modules() { # sets KOS, the modules under $DIR, once $DIR passed the allow
 }
 
 modules() {
-    local hash cn ko signer sign_file
+    local hash cn key ko signer sig_key sign_file
     [[ $KEY && $CERT && $HASH && $KVER && $DIR ]] || usage
     hash=$(< "$HASH")
     [[ " $HASHES " == *" $hash "* ]] || die "$HASH names '$hash', not one of: $HASHES"
     sign_file=${SIGN_FILE:-$(one '/usr/src/kernels/*/scripts/sign-file')}
-    cn=$(cert_cn "$CERT")
+    # modinfo names a signature by the PKCS#7 issuerAndSerialNumber of its certificate: the
+    # issuer's CN as signer, the serial as sig_key. For a self-signed key the issuer is the
+    # subject; for a leaf it is the CA that issued it.
+    cn=$(cert_cn "$CERT" issuer)
+    key=$(cert_key "$CERT")
     check_modules
     for ko in "${KOS[@]}"; do
         "$sign_file" "$hash" "$KEY" "$CERT" "$ko"
         signer=$(modinfo -F signer "$ko")
+        sig_key=$(modinfo -F sig_key "$ko")
         [[ $signer == "$cn" ]] || die "${ko##*/}: signer \"$signer\", expected \"$cn\""
+        [[ $sig_key == "$key" ]] || die "${ko##*/}: key \"$sig_key\", expected \"$key\" (the serial of $CERT)"
         echo "${ko#"$DIR"/}: signed by \"$signer\" with $hash"
     done
 }
