@@ -133,6 +133,33 @@ class EvidenceBundle(Tool):
         self.assertEqual(r.returncode, 1)
         self.assertIn("promotion.json", r.stderr)
 
+    def test_the_summary_names_what_the_approval_covers(self):
+        (self.artifacts / "promotion.json").write_text(json.dumps({
+            "run_id": 412, "images": [{"name": "athanor-system", "digest": "sha256:" + "a" * 64, "previous_stable": None}],
+            "skipped": [{"name": "athanor-system-nvidia-legacy", "reason": "not promoted before 0.9"}],
+            "overrides": ["athanor-system-nvidia"]}))
+        (self.artifacts / "evidence" / "iso-acceptance.athanor-system.json").write_text(json.dumps({
+            "gate": "iso-acceptance", "image": "athanor-system", "verdict": "pass", "finished_at": "2026-10-09T10:00:00Z"}))
+        r = self.run_script("summary", str(self.artifacts))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for text in ("build run 412", "sha256:" + "a" * 64, "Hardware override: athanor-system-nvidia",
+                     "| iso-acceptance | athanor-system | pass |", "athanor-system-nvidia-legacy"):
+            self.assertIn(text, r.stdout)
+
+    def test_the_summary_refuses_a_missing_field(self):
+        # A plan without overrides would read "Hardware override: none" in the approval.
+        plan = {"run_id": 412, "images": [], "skipped": [], "overrides": []}
+        evidence = {"gate": "iso-acceptance", "image": "athanor-system", "verdict": "pass", "finished_at": "t"}
+        for name, document, field in (("promotion.json", plan, "overrides"),
+                                      ("evidence/iso-acceptance.athanor-system.json", evidence, "verdict")):
+            with self.subTest(field=field):
+                (self.artifacts / "promotion.json").write_text(json.dumps(plan))
+                (self.artifacts / "evidence" / "iso-acceptance.athanor-system.json").write_text(json.dumps(evidence))
+                (self.artifacts / name).write_text(json.dumps({k: v for k, v in document.items() if k != field}))
+                r = self.run_script("summary", str(self.artifacts))
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn(field, r.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
