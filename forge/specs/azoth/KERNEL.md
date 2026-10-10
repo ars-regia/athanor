@@ -33,7 +33,7 @@ directory e come si usa.
 | `boot/Containerfile`, `boot/init` | l'ambiente della boot matrix (qemu, OVMF, shim, ukify, Firecracker, strumenti di benchmark) e il PID 1 dell'initramfs di prova |
 | `microvm/kernel-local`, `microvm/azoth-microvm.spec` | il kernel guest per le MicroVM (spec, sezione 9): frammento sopra x86_64_defconfig + kvm_guest.config e lo spec minimo che mette vmlinux, bzImage, config e release in `/usr/lib/athanor/microvm/` |
 | `microvm/boot.sh`, `microvm/init` | il gate del kernel guest: vmlinux in Firecracker con una rootfs ext4 di prova, `K6 RESULT ok` sulla seriale |
-| `nvidia.sh` | i moduli kernel NVIDIA, rami `open` (610) e `legacy` (580), contro il kernel-devel: `build`, `sign` e `manifest` (l'hash del `.run` legacy) |
+| `nvidia.sh` | i moduli kernel NVIDIA, rami `open` (610) e `legacy` (580), contro il kernel-devel: `build` e `manifest` (l'hash del `.run` legacy) |
 | `nvidia/Containerfile`, `nvidia/sources.sha256` | l'ambiente di nvidia.sh (la toolchain LLVM del kernel, kmod, openssl) e l'hash del `.run` legacy |
 | `sign-kernel.sh` | le firme degli artefatti del kernel (D43): vmlinuz con sbsign, moduli NVIDIA con sign-file dopo l'allow-list `check-modules`, `verify` contro il vmlinuz dell'RPM; gira solo nell'immagine del signer |
 | `signer/Containerfile`, `signer/toolchain.*`, `signer/publish.sh`, `signer/run.sh`, `signer/cosign.pin` | il signer: immagine con sbsigntools e il sign-file di kernel-devel dal lock e `sign-kernel.sh` dentro, taggata dall'hash dei suoi input (`publish.sh`) e usata per digest (`signer/image.digest`); `run.sh` la lancia senza rete, con gli input in sola lettura, negli step senza chiave (`prepare`, `inputs`, che risolve di nuovo il kernel con cosign scaricato per sha256) e nello step con le chiavi (`sign`) |
@@ -153,10 +153,11 @@ manifest degli hash); `--devel` e' una directory con il `kernel-devel-*.rpm` (l'
 di build.sh, o l'immagine `azoth-devel:<nvr>`). I `.ko` finiscono in
 `nvidia-out/<driver>/lib/modules/<kver>/extra/nvidia/` (il layout che l'immagine di
 sistema copia) con il vermagic del kernel e i preamboli kCFI, senza firma:
-`nvidia.sh sign --key K --cert C --devel DIR --out DIR` li firma con sign-file del
-kernel-devel, in locale con una chiave effimera, in CI con la chiave dei moduli del
-progetto (job `nvidia-kmod-sign` di `.github/workflows/athanor-forge-orchestrator.yml`;
-poi `nvidia-kmod.yml` li carica in QEMU con `boot.sh --mok --insmod` prima di pubblicarli).
+`sign-kernel.sh modules --key K --cert C --hash FILE --kver KVER --dir DIR` li firma
+con sign-file del kernel-devel e rilegge firmatario e chiave con `modinfo`, nell'immagine
+del signer con la chiave dei moduli del progetto (job `nvidia-kmod-sign` di
+`.github/workflows/athanor-forge-orchestrator.yml`; poi `nvidia-kmod.yml` li carica in
+QEMU con `boot.sh --mok --insmod` prima di pubblicarli).
 
 ## Pubblicazione
 
