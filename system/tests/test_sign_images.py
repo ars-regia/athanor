@@ -21,6 +21,16 @@ A_KEY = (
 )
 NAMES = ["athanor-system", "athanor-system-nvidia", "athanor-system-nvidia-legacy"]
 REG = "registry.example/owner"
+KERNEL_LINES = [
+    f"{REG}/azoth 7.2.9-100.azoth.fc43 sha256:{'a' * 64}",
+    f"{REG}/azoth-devel 7.2.9-100.azoth.fc43 sha256:{'b' * 64}",
+    f"{REG}/azoth-boot 7.2.9-100.azoth.fc43 sha256:{'c' * 64}",
+    f"{REG}/azoth-nvidia 615-7.2.9-100.azoth.fc43 sha256:{'d' * 64}",
+    f"{REG}/azoth-nvidia 580-7.2.9-100.azoth.fc43 sha256:{'e' * 64}",
+    f"{REG}/azoth 7.2.9-100.azoth.fc43-microvm sha256:{'f' * 64}",
+    f"{REG}/azoth-debuginfo 7.2.9-100.azoth.fc43 sha256:{'9' * 64}",
+    f"{REG}/azoth-signer image.digest sha256:{'8' * 64}",
+]
 SECRET = "-----BEGIN ENCRYPTED SIGSTORE PRIVATE KEY-----\nnot-a-real-key\n-----END ENCRYPTED SIGSTORE PRIVATE KEY-----\n"
 
 STUB = textwrap.dedent("""\
@@ -52,7 +62,9 @@ STUB = textwrap.dedent("""\
     elif "--sign-by-sigstore-private-key" in args:
         # containers/image writes a sigstore attachment only where registries.d enables it.
         conf = pathlib.Path(args[args.index("--registries.d") + 1]) if "--registries.d" in args else None
-        if conf is None or "use-sigstore-attachments: true" not in "".join(f.read_text() for f in conf.glob("*.yaml")):
+        scope = args[-1].removeprefix("docker://").split("@")[0]
+        enabled = f"  {scope}:\\n    use-sigstore-attachments: true\\n"
+        if conf is None or enabled not in "".join(f.read_text() for f in conf.glob("*.yaml")):
             sys.exit("writing signatures: writing sigstore attachments is disabled by configuration")
         key = pathlib.Path(args[args.index("--sign-by-sigstore-private-key") + 1])
         phrase = pathlib.Path(args[args.index("--sign-passphrase-file") + 1])
@@ -187,6 +199,25 @@ class SignImages(unittest.TestCase):
             text=True,
             env={**self.env, **env},
         )
+
+    def kernel_file(self, lines):
+        path = self.dir / "artifacts" / "kernel-unsigned.txt"
+        path.write_text("".join(f"{line}\n" for line in lines))
+        tags = json.loads((self.state / "tags.json").read_text())
+        for line in lines:
+            repo, tag, digest = line.split()
+            tags[f"{repo}:{tag}"] = digest
+        (self.state / "tags.json").write_text(json.dumps(tags))
+        return path
+
+    def sign_kernel(self, path, **env):
+        return subprocess.run(
+            ["bash", str(SIGN), "--registry", REG, "--kernel-digests", str(path), str(self.file)],
+            capture_output=True,
+            text=True,
+            env={**self.env, **env},
+        )
+
 
     def verify(self, *args, **env):
         # The verification job holds no key.
@@ -575,6 +606,54 @@ class SignImages(unittest.TestCase):
                 self.assertEqual(r.returncode, 2, r.stderr)
                 self.assertIn(message, r.stderr)
                 self.assertFalse(self.file.exists())
+
+
+    def test_the_kernel_artefacts_are_signed_after_the_images(self):
+        """The stub writes an attachment only for a repository a registries.d file names."""
+        self.digests()
+        r = self.sign_kernel(self.kernel_file(KERNEL_LINES))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        signed = json.loads((self.state / "signed.json").read_text())
+        self.assertEqual(signed, list(self.tags.values()) + [line.split()[2] for line in KERNEL_LINES])
+        self.assertEqual(r.stdout.count("signed: "), len(NAMES) + len(KERNEL_LINES))
+
+    def test_an_empty_kernel_list_signs_the_images_alone(self):
+        self.digests()
+        r = self.sign_kernel(self.kernel_file([]))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads((self.state / "signed.json").read_text()), list(self.tags.values()))
+
+    def test_the_kernel_registry_is_the_one_kernel_artifacts_uses(self):
+        """KERNEL_REGISTRY moves the kernel artefacts, not the system images."""
+        self.digests()
+        moved = [line.replace(REG, "registry.example/kernel", 1) for line in KERNEL_LINES]
+        path = self.kernel_file(moved)
+        r = self.sign_kernel(path)
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("not a kernel repository under", r.stderr)
+        r = self.sign_kernel(path, KERNEL_REGISTRY="registry.example/kernel")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.count("signed: "), len(NAMES) + len(KERNEL_LINES))
+        # It reaches sed and the rendered registries.d: held to the pattern render-policy uses.
+        r = self.sign_kernel(path, KERNEL_REGISTRY="registry.example/kernel|x")
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("not a registry/owner", r.stderr)
+
+    def test_a_kernel_line_outside_the_kernel_set_is_refused_before_signing(self):
+        for lines in (
+            [f"{REG}/athanor-system 412 sha256:{'d' * 64}"],
+            [f"ghcr.io/elsewhere/azoth 7.2.9 sha256:{'d' * 64}"],
+            [f"{REG}/azoth 7.2.9 latest"],
+            [KERNEL_LINES[0], KERNEL_LINES[0]],
+        ):
+            with self.subTest(lines=lines):
+                self.digests()
+                path = self.dir / "artifacts" / "kernel-unsigned.txt"
+                path.write_text("".join(f"{line}\n" for line in lines))
+                (self.state / "calls.log").unlink(missing_ok=True)
+                r = self.sign_kernel(path)
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertFalse((self.state / "calls.log").exists())
 
 
 if __name__ == "__main__":

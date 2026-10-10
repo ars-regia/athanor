@@ -12,18 +12,39 @@
 # file must name the default image and any NVIDIA variant the run built, under it, once each,
 # by digest. A build job cannot steer the key, the verification or a tag onto another
 # repository; leaving a variant out only keeps that variant's previous :latest.
+#
+# With --check-kernel it reads the list of kernel artefacts the signing job signs with the
+# project key (system/kernel-artifacts.sh release-digests, ADR-0096): every line names a kernel
+# repository under the registry the caller gives, by digest, each repo@digest once. The list
+# may be empty: every artefact was already signed.
 # Usage: image-digests.sh --registry REGISTRY/OWNER --tag TAG --out FILE [--variants FILE]
 #        image-digests.sh --registry REGISTRY/OWNER --check FILE
+#        image-digests.sh --registry REGISTRY/OWNER --check-kernel FILE
 set -euo pipefail
 
-usage() { echo "usage: ${0##*/} --registry REGISTRY/OWNER (--tag TAG --out FILE [--variants FILE] | --check FILE)" >&2; exit 2; }
-registry='' tag='' out='' check='' variants=''
+usage() { echo "usage: ${0##*/} --registry REGISTRY/OWNER (--tag TAG --out FILE [--variants FILE] | --check FILE | --check-kernel FILE)" >&2; exit 2; }
+registry='' tag='' out='' check='' variants='' check_kernel=''
 while [[ $# -gt 0 ]]; do
   [[ $# -ge 2 ]] || usage
-  case $1 in --registry) registry=$2 ;; --tag) tag=$2 ;; --out) out=$2 ;; --check) check=$2 ;; --variants) variants=$2 ;; *) usage ;; esac
+  case $1 in --registry) registry=$2 ;; --tag) tag=$2 ;; --out) out=$2 ;; --check) check=$2 ;; --variants) variants=$2 ;; --check-kernel) check_kernel=$2 ;; *) usage ;; esac
   shift 2
 done
 shipped=(athanor-system athanor-system-nvidia athanor-system-nvidia-legacy)
+
+kernel=(azoth azoth-devel azoth-debuginfo azoth-boot azoth-nvidia azoth-signer)
+if [[ -n $check_kernel ]]; then
+  [[ -n $registry && -z $tag && -z $out && -z $variants && -z $check ]] || usage
+  [[ -f $check_kernel ]] || { echo "${0##*/}: $check_kernel is missing" >&2; exit 2; }
+  declare -A seen=()
+  while read -r repository line_tag digest; do
+    [[ $digest =~ ^sha256:[0-9a-f]{64}$ && -n $line_tag ]] || { echo "${0##*/}: malformed line in $check_kernel: '$repository $line_tag $digest'" >&2; exit 2; }
+    [[ ${repository%/*} == "$registry" && " ${kernel[*]} " == *" ${repository##*/} "* ]] ||
+      { echo "${0##*/}: $check_kernel names $repository, not a kernel repository under $registry" >&2; exit 2; }
+    [[ -z ${seen[$repository@$digest]:-} ]] || { echo "${0##*/}: $check_kernel names $repository@$digest twice" >&2; exit 2; }
+    seen[$repository@$digest]=1
+  done < "$check_kernel"
+  exit 0
+fi
 
 if [[ -n $check ]]; then
   [[ -n $registry && -z $tag && -z $out && -z $variants ]] || usage

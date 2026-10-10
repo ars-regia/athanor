@@ -199,7 +199,8 @@ SIGN_JOB_COMMANDS = {
     "bash forge/specs/azoth/signer/run.sh inputs",
     "bash forge/specs/azoth/signer/run.sh sign",
     'echo "${GITHUB_TOKEN}" | skopeo login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin',
-    'bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" artifacts/image-digests.txt'
+    'bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"'
+    ' --kernel-digests artifacts/kernel-unsigned.txt artifacts/image-digests.txt'
     ' | tee -a "${GITHUB_STEP_SUMMARY}"',
 }
 # The names a signing job, its steps and its workflow may set in env besides the secrets of the
@@ -216,7 +217,8 @@ GITHUB_HOSTED = re.compile(r"^ubuntu-(?:latest|\d{2}\.\d{2})$")
 # The only commands a step holding a signing secret may run, whole: the sign scripts (D43).
 SIGN_SCRIPTS = re.compile(
     r"^bash (?:forge/specs/azoth/signer/run\.sh sign"
-    r'|system/sign-images\.sh --registry "ghcr\.io/\$\{GITHUB_REPOSITORY_OWNER,,\}" artifacts/image-digests\.txt'
+    r'|system/sign-images\.sh --registry "ghcr\.io/\$\{GITHUB_REPOSITORY_OWNER,,\}"'
+    r' --kernel-digests artifacts/kernel-unsigned\.txt artifacts/image-digests\.txt'
     r' \| tee -a "\$\{GITHUB_STEP_SUMMARY\}")$')
 EXPRESSION = re.compile(r"\$\{\{(.*?)\}\}", re.S)
 # Contexts are case-insensitive: secrets.cosign_private_key reads COSIGN_PRIVATE_KEY.

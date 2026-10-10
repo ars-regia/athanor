@@ -69,7 +69,7 @@ CI1 runs CI2 once, as its first job, and calls CI3, CI4 and CI5 only after it pa
 | `KERNEL_REGISTRY/azoth-signer` | CI25 | `<12 hex of a sha256 over the Containerfile, the lock, lock.sh and sign-kernel.sh>`: the sign toolchain (sbsigntools, sign-file) and `sign-kernel.sh`, run by the digest committed in `forge/specs/azoth/signer/image.digest` |
 | `KERNEL_REGISTRY/athanor-nvidia-rpms` | CI9 `system` | the locked NVIDIA RPMs (`system/nvidia/mirror.sh`) |
 
-The kernel artefacts are signed only keylessly today. ADR-0096 decides that the project key signs them in `sign-system-images`, with the keyless signature kept as the build record, and [ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md) widens its scope to every artefact of the kernel cycle that a machine or the release consumes: `azoth`, `azoth-devel`, `azoth-debuginfo`, the MicroVM guest kernel, `azoth-boot`, `azoth-nvidia` and `azoth-signer`. This is the decided target and is not landed.
+The kernel artefacts are signed only keylessly today. ADR-0096 decides that the project key signs them in `sign-system-images`, with the keyless signature kept as the build record, and [ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md) widens its scope to every artefact of the kernel cycle that a machine or the release consumes: `azoth`, `azoth-devel`, `azoth-debuginfo`, the MicroVM guest kernel, `azoth-boot`, `azoth-nvidia` and `azoth-signer`. `sign-system-images` signs them, from the list the `kernel-digests` job writes, and `verify-system-images` verifies them.
 
 The tier repositories are published as OCI images only; there is no DNF channel on GitHub Pages (ADR-0076, decision 2).
 

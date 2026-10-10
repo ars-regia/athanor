@@ -415,7 +415,8 @@ through the same policy a machine uses before any tag moves.
 
 **PL17. Keyless signatures accompany key-based ones** (UT2): the keyless Sigstore
 signature carries the workflow identity; the key-based one is what machines verify
-offline.
+offline. The kernel artefacts follow the same rule from the release signing step on
+(ADR-0096); checks before that step keep verifying the keyless record.
 
 **PL18. Key rotation and revocation are runbooks,** in `docs/operations/`, each a
 sequence of releases (UD27): new key shipped in a promoted image, then used.

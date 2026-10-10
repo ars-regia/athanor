@@ -1,0 +1,17 @@
+# Pipeline only (ADR-0096): system/sign-images.sh renders this file into the registries.d of
+# the signing job, so skopeo writes the sigstore attachments of the kernel artefacts. Machines
+# never pull them, so the shipped policy (render-policy) does not name them. One entry per
+# repository: a scope that two registries.d files declare is a hard error in containers/image.
+docker:
+  @REGISTRY@/azoth:
+    use-sigstore-attachments: true
+  @REGISTRY@/azoth-devel:
+    use-sigstore-attachments: true
+  @REGISTRY@/azoth-debuginfo:
+    use-sigstore-attachments: true
+  @REGISTRY@/azoth-boot:
+    use-sigstore-attachments: true
+  @REGISTRY@/azoth-nvidia:
+    use-sigstore-attachments: true
+  @REGISTRY@/azoth-signer:
+    use-sigstore-attachments: true

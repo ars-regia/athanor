@@ -1100,5 +1100,97 @@ class KernelInputs(Tool):
         self.assertIsNone(self.state_file())
 
 
+MICROVM = "sha256:" + "6" * 64
+DEBUGINFO = "sha256:" + "7" * 64
+SIGNER_DIGEST = (ROOT / "forge/specs/azoth/signer/image.digest").read_text().strip()
+
+
+def releasable():
+    """published() plus the artefacts resolve() does not record: guest kernel, debuginfo, signer."""
+    fx = published()
+    fx["tags"][f"{REG}/azoth:{NVR}-microvm"] = MICROVM
+    fx["tags"][f"{REG}/azoth-debuginfo:{NVR}"] = DEBUGINFO
+    fx["signatures"][f"{REG}/azoth@{MICROVM}"] = KERNEL_BUILD
+    fx["signatures"][f"{REG}/azoth-debuginfo@{DEBUGINFO}"] = KERNEL_BUILD
+    fx["signatures"][f"{REG}/azoth-signer@{SIGNER_DIGEST}"] = SIGNER + "iso-v0"
+    return fx
+
+
+class ProjectKey(Tool):
+    def setUp(self):
+        super().setUp()
+        self.keys = self.dir / "keys"
+        self.keys.mkdir()
+        for name in ("athanor-image-1.pub", "athanor-image-2.pub"):
+            (self.keys / name).write_text("-----BEGIN PUBLIC KEY-----\n")
+        self.env["KERNEL_KEYS_DIR"] = str(self.keys)
+
+    def lists(self, fx):
+        self.registry(fx)
+        self.assertEqual(self.run_script("require-ready").returncode, 0)
+        r = self.run_script("release-digests", str(self.dir / "all.txt"), str(self.dir / "unsigned.txt"))
+        return r
+
+    def test_signed_with_any_project_key(self):
+        ref = f"{REG}/azoth@{KERNEL}"
+        for signer, verdict in (("athanor-image-1.pub", "signed"), ("athanor-image-2.pub", "signed"), ("other.pub", "unsigned"), (None, "unsigned")):
+            with self.subTest(signer=signer):
+                self.registry({"key_signatures": {ref: signer} if signer else {}, "errors": []})
+                r = self.run_script("signed", ref, "key")
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(r.stdout.strip(), verdict)
+
+    def test_an_outage_is_an_error_not_unsigned(self):
+        ref = f"{REG}/azoth@{KERNEL}"
+        self.registry({"errors": [ref]})
+        r = self.run_script("signed", ref, "key")
+        self.assertEqual(r.returncode, 1)
+        self.assertNotIn("signed", r.stdout)
+
+    def test_release_lists_every_kernel_artefact(self):
+        r = self.lists(releasable())
+        self.assertEqual(r.returncode, 0, r.stderr)
+        want = [
+            f"{REG}/azoth {NVR} {KERNEL}",
+            f"{REG}/azoth-devel {NVR} {DEVEL}",
+            f"{REG}/azoth-boot {boot_tag()} {BOOT}",
+            f"{REG}/azoth-nvidia {tag('open')} {MODULE['open']}",
+            f"{REG}/azoth-nvidia {tag('legacy')} {MODULE['legacy']}",
+            f"{REG}/azoth {NVR}-microvm {MICROVM}",
+            f"{REG}/azoth-debuginfo {NVR} {DEBUGINFO}",
+            f"{REG}/azoth-signer image.digest {SIGNER_DIGEST}",
+        ]
+        self.assertEqual((self.dir / "all.txt").read_text().splitlines(), want)
+        self.assertEqual((self.dir / "unsigned.txt").read_text().splitlines(), want)
+
+    def test_an_artefact_already_signed_with_the_key_is_not_signed_again(self):
+        fx = releasable()
+        fx["key_signatures"] = {f"{REG}/azoth@{KERNEL}": "athanor-image-1.pub"}
+        r = self.lists(fx)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        unsigned = (self.dir / "unsigned.txt").read_text()
+        self.assertNotIn(f"{REG}/azoth {NVR} {KERNEL}", unsigned)
+        self.assertEqual(len(unsigned.splitlines()), 7)
+
+    def test_a_debuginfo_without_its_build_record_is_refused(self):
+        fx = releasable()
+        del fx["signatures"][f"{REG}/azoth-debuginfo@{DEBUGINFO}"]
+        r = self.lists(fx)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("azoth-debuginfo", r.stderr)
+        self.assertFalse((self.dir / "all.txt").exists())
+
+    def test_verify_key_refuses_an_unsigned_artefact(self):
+        fx = releasable()
+        fx["key_signatures"] = {f"{REG}/azoth@{KERNEL}": "athanor-image-2.pub"}
+        self.registry(fx)
+        listed = self.dir / "all.txt"
+        listed.write_text(f"{REG}/azoth {NVR} {KERNEL}\n{REG}/azoth-devel {NVR} {DEVEL}\n")
+        r = self.run_script("verify-key", str(listed))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn(f"signed with a project key: {REG}/azoth:{NVR}@{KERNEL}", r.stdout)
+        self.assertIn("azoth-devel", r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

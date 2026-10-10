@@ -178,11 +178,18 @@ delta e del Containerfile, immagine base del builder); la principale ha anche la
 provenance SLSA di GitHub. `:latest` si muove solo sul branch di default del repository. Verifica:
 
 ```sh
-cosign verify --certificate-identity 'https://github.com/ars-regia/athanor/.github/workflows/kernel-build.yml@refs/heads/iso-v0' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  "ghcr.io/ars-regia/azoth:$(bash nvr.sh)"
-gh attestation verify "oci://ghcr.io/ars-regia/azoth:$(bash nvr.sh)" --repo ars-regia/athanor
+cosign verify --key system/keys/athanor-image-1.pub --new-bundle-format=false --insecure-ignore-tlog=true \
+  "ghcr.io/ars-regia/azoth:$(bash forge/specs/azoth/nvr.sh)"
+gh attestation verify "oci://ghcr.io/ars-regia/azoth:$(bash forge/specs/azoth/nvr.sh)" --repo ars-regia/athanor
 ```
+
+Both commands run from the repository root. The first is the verification of a released
+kernel artefact: the release signing step adds the project key signature (ADR-0096), so a
+kernel published since the last Orchestrator run carries only its keyless build record. The
+second checks that build record and GitHub's provenance; no verification of a release relies
+on it (ADR-0096 item 2). The block names key 1, which signs while the rotation of
+`docs/operations/secrets.md` section 4.1 is open; the rotation step that moves signing to
+key 2 changes it.
 
 ## Bump
 

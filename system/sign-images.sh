@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Key-based signature of the published system images (docs/architecture/doc_update_trust.md,
-# UT2). Runs in a job that holds the key and does nothing else: it reads the digests file the
+# Key-based signature of the published system images and, with --kernel-digests, of the kernel
+# artefacts a release consumes (docs/architecture/doc_update_trust.md, UT2; ADR-0096). Runs in a job that holds the key and does nothing else: it reads the digests file the
 # build job wrote, signs, ends. It starts no container and runs no tool beside skopeo
 # (scripts/verify.py, D43); system/verify-images.sh verifies the signatures as a machine does,
 # in a job of its own that holds no key.
@@ -21,14 +21,19 @@
 # image-digests.sh --check requires it to name the default image and any NVIDIA variant the
 # run built, under the registry the caller gives, once each.
 #
-# Usage: sign-images.sh --registry REGISTRY/OWNER DIGESTS_FILE
+# Usage: sign-images.sh --registry REGISTRY/OWNER [--kernel-digests FILE] DIGESTS_FILE
 #        (lines: "REPOSITORY TAG DIGEST", image-digests.sh)
 # Environment: COSIGN_PRIVATE_KEY, COSIGN_PASSWORD; SIGN_KEYS_DIR (default system/keys, for the
 #              rendered registries.d); the registry login is the caller's business.
 set -euo pipefail
 
+kernel=''
+if [[ $# -eq 5 && $3 == --kernel-digests ]]; then
+    kernel=$4
+    set -- "$1" "$2" "$5"
+fi
 [[ $# -eq 3 && $1 == --registry && -n $2 && -s $3 ]] || {
-    echo "usage: ${0##*/} --registry REGISTRY/OWNER DIGESTS_FILE" >&2
+    echo "usage: ${0##*/} --registry REGISTRY/OWNER [--kernel-digests FILE] DIGESTS_FILE" >&2
     exit 2
 }
 registry=$2
@@ -54,15 +59,29 @@ printf '%s' "$COSIGN_PASSWORD" > "$work/passphrase"
 unset COSIGN_PRIVATE_KEY COSIGN_PASSWORD
 
 bash "$root/system/image-digests.sh" --registry "$registry" --check "$digests"
+# The kernel artefacts live where system/kernel-artifacts.sh resolved them.
+kernel_registry=${KERNEL_REGISTRY:-$registry}
+# It reaches sed and the rendered registries.d: the pattern render-policy holds the image registry to.
+registry_pattern='^[a-z0-9]([a-z0-9._:/-]*[a-z0-9])?$'
+[[ $kernel_registry =~ $registry_pattern ]] || {
+    echo "${0##*/}: not a registry/owner: '$kernel_registry'" >&2
+    exit 2
+}
+[[ -z $kernel ]] || bash "$root/system/image-digests.sh" --registry "$kernel_registry" --check-kernel "$kernel"
 keys_dir=$(cd "$keys_dir" && pwd)
 bash "$root/forge/specs/athanor-update/SOURCES/usr/libexec/athanor-update/render-policy" \
     --registry "$registry" --keys-dir "$keys_dir" --out "$work/policy"
+[[ -z $kernel ]] || sed "s|@REGISTRY@|$kernel_registry|g" "$root/system/kernel-registries.d.yaml.in" > "$work/policy/registries.d/athanor-kernel.yaml"
 
-while read -r repository _ digest; do
-    # skopeo writes the sigstore attachment only where registries.d enables it: the rendered
-    # one does, for exactly these repositories, and the runner's default does not. A copy onto
-    # a digest reference fails unless the manifest still has that digest.
-    bash "$retry" skopeo --registries.d "$work/policy/registries.d" copy --preserve-digests --sign-by-sigstore-private-key "$work/key" --sign-passphrase-file "$work/passphrase" \
-        "docker://$repository@$digest" "docker://$repository@$digest"
-    echo "signed: $repository@$digest"
-done < "$digests"
+sign_file() {
+    while read -r repository _ digest; do
+        # skopeo writes the sigstore attachment only where registries.d enables it: the rendered
+        # one does, for exactly these repositories, and the runner's default does not. A copy onto
+        # a digest reference fails unless the manifest still has that digest.
+        bash "$retry" skopeo --registries.d "$work/policy/registries.d" copy --preserve-digests --sign-by-sigstore-private-key "$work/key" --sign-passphrase-file "$work/passphrase" \
+            "docker://$repository@$digest" "docker://$repository@$digest"
+        echo "signed: $repository@$digest"
+    done < "$1"
+}
+sign_file "$digests"
+[[ -z $kernel ]] || sign_file "$kernel"

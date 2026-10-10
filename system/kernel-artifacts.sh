@@ -37,6 +37,15 @@
 #                                       the registry denies its package (never published)
 #   signed REF kernel|modules|signer    signed or unsigned, by the workflow that publishes it
 #                                       (signer: the signer image, azoth-signer.yml)
+#   signed REF key                      signed or unsigned with a project key, any
+#                                       athanor-image-*.pub of $KERNEL_KEYS_DIR (ADR-0096)
+#   release-digests ALL UNSIGNED        after require-ready: write every kernel artefact a release
+#                                       consumes ("REPOSITORY TAG DIGEST", image-digests.sh) to
+#                                       ALL, and those without a project key signature to UNSIGNED;
+#                                       the guest kernel, debuginfo and signer, which the state
+#                                       file does not record, must carry their keyless build record
+#   verify-key FILE                     exit 1 unless every artefact of FILE is signed with a
+#                                       project key
 #   predicates REF modules              the custom predicates of REF, one JSON per line, or
 #                                       unverified
 #   probe digest|signed|predicates|config ...
@@ -90,6 +99,10 @@ declare -A IDENTITY=(
 # is transient (a Rekor or cert-chain fetch failure), and an unanchored match would swallow
 # that outage as a plain "unsigned" verdict instead of failing (O3).
 UNVERIFIED='no signatures found|no matching signatures: *$|no matching attestations: *$|no matching CertificateIdentity'
+KEYS_DIR=${KERNEL_KEYS_DIR:-$ROOT/system/keys}
+# cosign v3 reports a kernel artefact without a signature by the given key with these messages
+# (observed 2026-10-10). Any other failure is an error.
+KEY_UNVERIFIED='no signatures found|no matching signatures: invalid signature when validating ASN\.1 encoded signature$'
 # The push paths of .github/workflows/kernel-build.yml (a unit test keeps them equal).
 KERNEL_BUILD_PATHS=('forge/specs/azoth/*' '.github/workflows/kernel-build.yml' '.github/workflows/nvidia-build.yml')
 # The files .github/workflows/kernel-bump.yml regenerates with the pins, except
@@ -131,6 +144,7 @@ probe_digest() {
 }
 
 probe_signed() {
+  [[ $2 != key ]] || { probe_key_signed "$1"; return; }
   local status=0 regex
   regex=$(identity "$2")
   cosign verify --certificate-identity-regexp "$regex" --certificate-oidc-issuer "$ISSUER" "$1" > /dev/null 2> "$TMP/err" || status=$?
@@ -144,6 +158,23 @@ probe_signed() {
     cat "$TMP/err" >&2
     return 1
   fi
+}
+
+probe_key_signed() { # probe_key_signed REF: signed when any project key verifies REF
+  local key status keys=("$KEYS_DIR"/athanor-image-*.pub)
+  [[ -f ${keys[0]} ]] || die "no athanor-image-*.pub under $KEYS_DIR"
+  for key in "${keys[@]}"; do
+    status=0
+    # skopeo's sigstore attachment is the classic format and has no Rekor entry: the key is the
+    # trust root (UT2), so the transparency log is not consulted.
+    cosign verify --key "$key" --new-bundle-format=false --insecure-ignore-tlog=true "$1" > /dev/null 2> "$TMP/err" || status=$?
+    if [[ $status -eq 0 ]]; then
+      echo signed
+      return 0
+    fi
+    grep -qE "$KEY_UNVERIFIED" "$TMP/err" || { cat "$TMP/err" >&2; return 1; }
+  done
+  echo unsigned
 }
 
 probe_predicates() {
@@ -488,6 +519,71 @@ check_plan() {
   echo "kernel-artifacts: check_gpus='$gpus' check_delta=$delta"
 }
 
+release_digests() { # release_digests ALL UNSIGNED
+  [[ $# -eq 2 ]] || usage
+  [[ $(get state) == ready ]] || die "release-digests needs state=ready: run require-ready first"
+  local nvr kernel devel boot_tag boot open_tag open legacy_tag legacy ref repo tag digest verdict line
+  # One assignment per value: a get that fails inside an array literal would not stop the script.
+  nvr=$(get nvr)
+  kernel=$(get kernel_digest)
+  devel=$(get devel_digest)
+  boot_tag=$(get boot_tag)
+  boot=$(get boot_digest)
+  open_tag=$(get nvidia_open_tag)
+  open=$(get nvidia_open_digest)
+  legacy_tag=$(get nvidia_legacy_tag)
+  legacy=$(get nvidia_legacy_digest)
+  local -a lines=(
+    "$REGISTRY/azoth $nvr $kernel"
+    "$REGISTRY/azoth-devel $nvr $devel"
+    "$REGISTRY/azoth-boot $boot_tag $boot"
+    "$REGISTRY/azoth-nvidia $open_tag $open"
+    "$REGISTRY/azoth-nvidia $legacy_tag $legacy"
+  )
+  # Not in the state file: resolved by tag and held to their keyless build record, as every
+  # check before the release signing step is (ADR-0096 item 2).
+  for ref in "azoth:$nvr-microvm" "azoth-debuginfo:$nvr"; do
+    digest=$(ask digest "$REGISTRY/$ref")
+    [[ -n $digest ]] || die "$REGISTRY/$ref is not published"
+    verdict=$(ask signed "$REGISTRY/${ref%%:*}@$digest" kernel)
+    [[ $verdict == signed ]] || die "$REGISTRY/$ref is not signed by Kernel Build"
+    lines+=("$REGISTRY/${ref%%:*} ${ref#*:} $digest")
+  done
+  digest=$(< "$ROOT/forge/specs/azoth/signer/image.digest")
+  [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || die "forge/specs/azoth/signer/image.digest is not a digest: '$digest'"
+  verdict=$(ask signed "$REGISTRY/azoth-signer@$digest" signer)
+  [[ $verdict == signed ]] || die "$REGISTRY/azoth-signer@$digest is not signed by azoth-signer.yml"
+  lines+=("$REGISTRY/azoth-signer image.digest $digest")
+  printf '%s\n' "${lines[@]}" > "$1.tmp"
+  : > "$2.tmp"
+  for line in "${lines[@]}"; do
+    read -r repo tag digest <<< "$line"
+    verdict=$(ask signed "$repo@$digest" key)
+    # Signing a signed digest again appends a signature to its .sig manifest on every run.
+    [[ $verdict == signed ]] || echo "$line" >> "$2.tmp"
+  done
+  mv "$1.tmp" "$1"
+  mv "$2.tmp" "$2"
+}
+
+verify_key() { # verify_key FILE
+  [[ $# -eq 1 && -s $1 ]] || usage
+  local -a lines
+  local line repo tag digest verdict failed=0
+  mapfile -t lines < "$1"
+  for line in "${lines[@]}"; do
+    read -r repo tag digest <<< "$line"
+    verdict=$(ask signed "$repo@$digest" key)
+    if [[ $verdict == signed ]]; then
+      echo "signed with a project key: $repo:$tag@$digest"
+    else
+      echo "kernel-artifacts: $repo:$tag@$digest carries no project key signature" >&2
+      failed=1
+    fi
+  done
+  return "$failed"
+}
+
 [[ $# -ge 1 ]] || usage
 command=$1
 shift
@@ -501,6 +597,8 @@ case $command in
     ;;
   cycle) cycle "$@" ;;
   check-plan) check_plan "$@" ;;
+  release-digests) release_digests "$@" ;;
+  verify-key) verify_key "$@" ;;
   get) [[ $# -eq 1 ]] || usage; get "$1" ;;
   has) [[ $# -eq 1 ]] || usage; [[ -f $FILE ]] && grep -q "^$1=." "$FILE" ;;
   registry) [[ $# -eq 0 ]] || usage; echo "$REGISTRY" ;;
