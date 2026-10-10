@@ -68,7 +68,8 @@ class EvidenceBundle(Tool):
         (self.artifacts / "promotion.json").unlink()
         r = self.run_script("create", str(self.artifacts), str(self.bundle))
         self.assertEqual(r.returncode, 1)
-        self.assertIn("promotion.json", r.stderr)
+        self.assertIn("promotion-plan.sh", r.stderr)
+        self.assertFalse(self.bundle.exists())
 
     def test_an_intact_copy_verifies(self):
         copy = self.created()
@@ -82,6 +83,20 @@ class EvidenceBundle(Tool):
         )
         r = self.run_script("verify-dir", str(copy), str(self.artifacts))
         self.assertNotEqual(r.returncode, 0)
+
+    def test_an_unlisted_file_is_refused(self):
+        copy = self.created()
+        (copy / "evidence" / "iso-acceptance.extra.json").write_text("{}")
+        r = self.run_script("verify-dir", str(copy), str(self.artifacts))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("do not list", r.stderr)
+
+    def test_a_missing_file_is_refused(self):
+        copy = self.created()
+        (copy / "packages" / "athanor-system.txt").unlink()
+        r = self.run_script("verify-dir", str(copy), str(self.artifacts))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("athanor-system.txt", r.stderr)
 
     def test_another_signer_is_refused(self):
         self.run_script(
