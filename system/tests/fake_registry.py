@@ -42,6 +42,7 @@ Fixture keys:
 """
 
 import base64
+import hashlib
 import json
 import os
 import pathlib
@@ -116,6 +117,20 @@ def skopeo(args, fx):
 
 
 def cosign(args, fx):
+    if args[0] == "sign-blob":
+        blob = pathlib.Path(args[-1])
+        pathlib.Path(args[args.index("--bundle") + 1]).write_text(json.dumps({
+            "identity": os.environ.get("FAKE_SIGNER", fx.get("signer", "")),
+            "sha256": hashlib.sha256(blob.read_bytes()).hexdigest()}))
+        return 0
+    if args[0] == "verify-blob":
+        blob = pathlib.Path(args[-1])
+        bundle = json.loads(pathlib.Path(args[args.index("--bundle") + 1]).read_text())
+        if bundle["identity"] != args[args.index("--certificate-identity") + 1]:
+            return fail(f'Error: none of the expected identities matched what was in the certificate, got subjects [{bundle["identity"]}]')
+        if bundle["sha256"] != hashlib.sha256(blob.read_bytes()).hexdigest():
+            return fail("Error: error verifying bundle: invalid signature when validating ASN.1 encoded signature")
+        return 0
     ref = args[-1]
     if ref in fx.get("errors", []):
         return fail("Error: getting trusted root: GET https://tuf-repo-cdn.sigstore.dev/timestamp.json: 502 Bad Gateway")
