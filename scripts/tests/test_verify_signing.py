@@ -613,6 +613,24 @@ class SigningTest(unittest.TestCase):
                 self.assertEqual(len(problems), 1, problems)
                 self.assertRegex(problems[0], r"^system/sign-images\.sh:3 starts a container beside the key")
 
+    def test_rule_7_the_image_sign_step_also_signs_the_kernel_list(self):
+        """ADR-0096: the image signing step signs the kernel artefacts too, from the allow-listed
+        download directory. Another path, or the step without the kernel list, is not allowed."""
+        good = (
+            'bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"'
+            ' --kernel-digests artifacts/kernel-unsigned.txt artifacts/image-digests.txt'
+            ' | tee -a "${GITHUB_STEP_SUMMARY}"'
+        )
+        self.assertRegex(good, verify.SIGN_SCRIPTS)
+        self.assertIn(good, verify.SIGN_JOB_COMMANDS)
+        for bad in (
+            good.replace("artifacts/kernel-unsigned.txt", "out/kernel-unsigned.txt"),
+            good.replace(" --kernel-digests artifacts/kernel-unsigned.txt", ""),
+        ):
+            with self.subTest(bad=bad):
+                self.assertIsNone(verify.SIGN_SCRIPTS.match(bad))
+                self.assertNotIn(bad, verify.SIGN_JOB_COMMANDS)
+
     def test_without_pyyaml_the_lint_fails_closed(self):
         saved, verify.yaml = verify.yaml, None
         try:

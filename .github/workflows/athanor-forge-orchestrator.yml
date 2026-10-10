@@ -277,6 +277,38 @@ jobs:
           path: kernel-artifacts/kernel-artifacts.env
           if-no-files-found: error
 
+  kernel-digests:
+    # The kernel artefacts a release signs with the project key (ADR-0096), from the state
+    # kernel-artifacts-final required. A job of its own: a missing artefact stops the signing,
+    # and the run ends red, but not the image build that needs kernel-artifacts-final.
+    needs: [kernel-artifacts-final]
+    if: ${{ !cancelled() && needs.kernel-artifacts-final.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+      - name: 📎 State required by kernel-artifacts-final
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: kernel-artifacts
+          path: kernel-artifacts
+      - name: Kernel artefacts the release signs (system/kernel-artifacts.sh)
+        run: bash system/kernel-artifacts.sh release-digests kernel-artifacts/kernel-digests.txt kernel-artifacts/kernel-unsigned.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kernel-digests
+          path: |
+            kernel-artifacts/kernel-digests.txt
+            kernel-artifacts/kernel-unsigned.txt
+          if-no-files-found: error
+
   dag-compile:
     needs: [orchestrator-brain, build-builder]
     uses: ./.github/workflows/call-dag-compile.yml
@@ -303,11 +335,15 @@ jobs:
     # Here, not in call-system-image.yml: a called workflow's job reads the secrets of its
     # environment only when its caller inherits every secret (actions/runner#4453, D43).
     # It does not verify: verify-system-images does, without the key.
-    needs: [system-image]
+    # It also signs the kernel artefacts that carry no project key signature yet (ADR-0096):
+    # kernel-digests lists them in a keyless job, and image-digests.sh --check-kernel checks the
+    # list before anything is signed. The registry login covers ghcr.io only, so a
+    # KERNEL_REGISTRY on another host fails at the first kernel signature.
+    needs: [system-image, kernel-digests]
     # Explicit: the implicit success() also requires every transitive need to have succeeded,
     # and the NVIDIA kmod jobs upstream of system-image are skipped on most runs, which
     # skipped this job with them.
-    if: ${{ !cancelled() && needs.system-image.result == 'success' }}
+    if: ${{ !cancelled() && needs.system-image.result == 'success' && needs.kernel-digests.result == 'success' }}
     runs-on: ubuntu-24.04
     # Image key rotation (docs/operations/secrets.md section 4.1): until a release that carries
     # athanor-image-2.pub is published, the images are signed with key 1, which only the old
@@ -329,6 +365,11 @@ jobs:
         with:
           name: image-digests
           path: artifacts
+      - name: 📎 Kernel artefacts without the project key signature
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: kernel-digests
+          path: artifacts
       - name: 🔑 Login to the registry
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -338,7 +379,8 @@ jobs:
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
-        run: bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
+          KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
+        run: bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" --kernel-digests artifacts/kernel-unsigned.txt artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
 
   verify-system-images:
     name: 🔎 Verify the signatures as a machine does
@@ -349,7 +391,9 @@ jobs:
     # fails the verification, so a run never ends green with unsigned images.
     # build-builder: the runner's skopeo is too old for the keyPaths of the shipped policy, so
     # the verification runs the skopeo of this run's builder image (system/verify-images.sh).
-    needs: [system-image, sign-system-images, build-builder]
+    # It also verifies every kernel artefact of the release with cosign verify --key, the
+    # command KERNEL.md gives a verifier outside GitHub.
+    needs: [system-image, sign-system-images, build-builder, kernel-digests]
     if: ${{ !cancelled() && needs.system-image.result == 'success' }}
     runs-on: ubuntu-24.04
     # -o pipefail, as in sign-system-images: a failed verification piped into tee fails the job.
@@ -363,15 +407,23 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
       - name: 📎 Digests recorded by the build job
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: image-digests
           path: artifacts
+      - name: 📎 Kernel artefacts of the release
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: kernel-digests
+          path: kernel
       - name: 🔎 Pull each image through the shipped policy (system/verify-images.sh)
         env:
           BUILDER_HASH: ${{ needs.build-builder.outputs.content_hash }}
         run: bash system/verify-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" --builder "${BUILDER_HASH}" --evidence evidence --build-run-id "${GITHUB_RUN_ID}" artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
+      - name: 🔎 Kernel artefacts carry the project key signature (ADR-0096)
+        run: bash system/kernel-artifacts.sh verify-key kernel/kernel-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
       - name: 📎 Hand the signature evidence to the promotion
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
