@@ -29,6 +29,9 @@ Fixture keys:
                 `skopeo copy --policy` accepts the image only when that key is among the
                 keyPaths of the policy scope for the repository, and only when --registries.d
                 is passed (without it containers/image never looks for sigstore attachments)
+  key_signatures {"registry/repo@digest": "file name of the .pub whose private half signed it"}
+                `cosign verify --key` accepts it only with that key, and only with
+                --new-bundle-format=false (cosign v3 otherwise looks for a bundle)
   moves         true: `skopeo copy` without --policy points the destination tag at the source
   on_copy       {"dest": {"ref": "digest"}}: with moves, a copy to dest also sets those tags,
                 as another writer would meanwhile
@@ -136,6 +139,15 @@ def cosign(args, fx):
         return fail("Error: getting trusted root: GET https://tuf-repo-cdn.sigstore.dev/timestamp.json: 502 Bad Gateway")
     if ref in fx.get("signature_transient_errors", []) and args[0] == "verify":
         return fail("Error: no matching signatures: rekor lookup: 502 Bad Gateway\nerror during command execution: no matching signatures: rekor lookup: 502 Bad Gateway")
+    if "--key" in args:
+        if "--new-bundle-format=false" not in args:
+            return fail("Error: no matching attestations: expected key signature, not certificate\nerror during command execution: no matching attestations: expected key signature, not certificate")
+        signer = fx.get("key_signatures", {}).get(ref)
+        if signer is None:
+            return fail("Error: no signatures found\nerror during command execution: no signatures found", 10)
+        if signer != pathlib.Path(args[args.index("--key") + 1]).name:
+            return fail("Error: no matching signatures: invalid signature when validating ASN.1 encoded signature\nerror during command execution: no matching signatures: invalid signature when validating ASN.1 encoded signature", 12)
+        return 0
     regex = args[args.index("--certificate-identity-regexp") + 1]
     if args[0] == "verify":
         identity = fx.get("signatures", {}).get(ref)
