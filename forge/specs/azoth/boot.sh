@@ -21,8 +21,8 @@
 #   --case   restricts the matrix (repeatable): bios-penryn bios-host uefi-penryn uefi-host iommu-intel iommu-amd
 #   --mok    certificate (PEM) to enrol in MokList besides the ephemeral one of the UKI,
 #            to prove an enrolled MOK does not authorise modules
-#   --mok-ca user CA (PEM) to enrol in MokList and trust for the machine keyring, as
-#            `mokutil --trust-mok` does (D40)
+#   --mok-ca user CA (PEM) to enrol in MokList, which shim trusts for the machine keyring
+#            by default while MokListTrusted is unset (D40)
 #   --ima-key certificate (PEM) the guest offers to the .ima keyring, which must refuse it
 #            (D40, D46)
 #   --insmod module to load in the guest and the errno expected from insmod (ENODEV,
