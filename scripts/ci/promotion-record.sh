@@ -135,13 +135,17 @@ promotion_record() { # promotion_record DAY OUT
             die "$repository@$digest does not verify with the keys under system/keys: machines would refuse it"
         rm -r "$work/pull"
         if stable=$(skopeo inspect --format '{{.Digest}}' "docker://$repository:stable" 2> "$err"); then
-            previous[$name]=$stable
-            if [[ $stable != "$digest" ]]; then
-                # Assigned first: a substitution inside [[ ]] would not stop the script when it fails.
-                new=$(created "$repository" "$digest")
-                old=$(created "$repository" "$stable")
-                ((new > old)) || die "$repository:$run is not newer than the current stable: machines would not follow it"
+            if [[ $stable == "$digest" ]]; then
+                # Promoted already, or by a partial apply: moving it again would point stable-previous
+                # at stable and lose the rollback target.
+                skipped[$name]="already stable at $digest"
+                continue
             fi
+            previous[$name]=$stable
+            # Assigned first: a substitution inside [[ ]] or (( )) would not stop the script when it fails.
+            new=$(created "$repository" "$digest")
+            old=$(created "$repository" "$stable")
+            ((new > old)) || die "$repository:$run is not newer than the current stable: machines would not follow it"
         elif ! grep -q 'manifest unknown' "$err"; then
             # Anything but "there is no stable tag yet" is a real failure.
             cat "$err" >&2
@@ -149,6 +153,7 @@ promotion_record() { # promotion_record DAY OUT
         fi
         promote+=("$name")
     done
+    ((${#promote[@]} > 0)) || die "nothing to promote from run $run:$(for name in "${!skipped[@]}"; do printf ' %s %s;' "$name" "${skipped[$name]}"; done)"
 
     age=$(($(date -u +%s) - newest))
     ((age >= dwell)) ||

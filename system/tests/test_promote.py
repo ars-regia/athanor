@@ -294,6 +294,29 @@ class Promote(Tool):
                 self.assertIn("not newer than the current stable", r.stderr)
                 self.assertEqual(copies, [])
 
+    def test_an_image_already_stable_at_the_digest_is_skipped(self):
+        # After a partial apply: athanor-system moved, the nvidia copy failed. Planning again
+        # moves only nvidia and leaves stable-previous of athanor-system where it was.
+        self.published()
+        self.set_tag(f"{REG}/athanor-system:stable", digest(1))
+        r, copies = self.promote("--hardware-override", "athanor-system-nvidia")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        nvidia = f"{REG}/athanor-system-nvidia"
+        self.assertEqual(copies, [(f"{nvidia}@{digest(5)}", f"{nvidia}:stable-previous"),
+                                  (f"{nvidia}@{digest(2)}", f"{nvidia}:stable-{self.record()['day']}"),
+                                  (f"{nvidia}@{digest(2)}", f"{nvidia}:stable")])
+        reasons = {s["name"]: s["reason"] for s in self.record()["skipped"]}
+        self.assertEqual(reasons["athanor-system"], f"already stable at {digest(1)}")
+
+    def test_a_run_already_promoted_has_nothing_to_promote(self):
+        self.published()
+        r, _ = self.promote()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r, copies = self.promote()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("nothing to promote", r.stderr)
+        self.assertEqual(copies, [])
+
     def test_a_stable_without_a_build_time_is_refused(self):
         # An older run against a stable whose build time cannot be read: the UT5 check must
         # refuse, not compare against an empty value.
