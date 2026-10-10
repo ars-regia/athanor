@@ -60,6 +60,35 @@ def cert(directory, cn):
     return key, crt
 
 
+def leaf(directory, ca_key, ca_crt, cn):
+    """A throwaway certificate CA_CRT issued, and its private key, as (key, cert) paths."""
+    key, csr, crt = directory / f"{cn}.priv", directory / f"{cn}.csr", directory / f"{cn}.crt"
+    subprocess.run(
+        ["openssl", "req", "-new", "-newkey", "rsa:2048", "-nodes", "-subj", f"/CN={cn}/",
+         "-keyout", key, "-out", csr],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["openssl", "x509", "-req", "-days", "1", "-in", csr, "-CA", ca_crt, "-CAkey", ca_key,
+         "-out", crt],
+        check=True,
+        capture_output=True,
+    )
+    return key, crt
+
+
+def sig_key(crt):
+    """The serial of CRT as modinfo prints a module's sig_key: hex bytes joined by colons."""
+    serial = subprocess.run(
+        ["openssl", "x509", "-in", crt, "-noout", "-serial"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip().removeprefix("serial=")
+    return ":".join(serial[i:i + 2] for i in range(0, len(serial), 2))
+
+
 def sign_module(ko, key, crt):
     """Append to KO the signature sign-file appends: a detached CMS over the module, without
     attributes or certificates, then struct module_signature (id_type 2, PKCS#7) and the magic."""
@@ -200,11 +229,13 @@ class SignKernel(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("found 2", result.stderr)
 
-    def modinfo(self, signer="Athanor test modules"):
-        """modinfo: the vermagic a module names in its first line (else KVER's), and SIGNER."""
+    def modinfo(self, signer="Athanor test modules", key=""):
+        """modinfo: the vermagic a module names in its first line (else KVER's), SIGNER and KEY
+        (the sig_key)."""
         self.stub(
             "modinfo",
             f'if [[ $2 == vermagic ]]; then v=$(head -n 1 "$3"); [[ $v == vermagic=* ]] && echo "${{v#vermagic=}}" || echo "{KVER} SMP preempt mod_unload"; '
+            f'elif [[ $2 == sig_key ]]; then echo "{key}"; '
             f'else echo "{signer}"; fi\n',
         )
 
@@ -321,13 +352,15 @@ class SignKernel(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("open/run.sh", result.stderr)
 
-    def modules(self, signer, hash_name="sha512", tree=None):
-        key, crt = cert(self.tmp, "Athanor test modules")
+    def modules(self, signer, hash_name="sha512", tree=None, key_crt=None, serial_of=None):
+        """modules with a stub sign-file, and a modinfo that names SIGNER and the serial of
+        SERIAL_OF (default: the certificate used) as the signer and sig_key."""
+        key, crt = key_crt or cert(self.tmp, "Athanor test modules")
         signed = tree or self.nvidia_tree(self.tmp / "signed", branches=("open",))
         ko = signed / "open/lib/modules" / KVER / "extra/nvidia/nvidia.ko"
         (self.tmp / "hash").write_text(f"{hash_name}\n")
         self.stub("sign-file", 'printf "%s|%s|%s" "$1" "${2##*/}" "${3##*/}" >> "$4"\n')
-        self.modinfo(signer)
+        self.modinfo(signer, sig_key(serial_of or crt))
         result = self.run_script(
             "modules",
             "--key",
@@ -358,6 +391,29 @@ class SignKernel(unittest.TestCase):
         self.assertIn(
             'signer "Someone else", expected "Athanor test modules"', result.stderr
         )
+
+    def test_modules_accepts_a_leaf_by_its_issuer_and_serial(self):
+        # modinfo names the issuer of the signing certificate and its serial (kmod reads the
+        # PKCS#7 issuerAndSerialNumber): a leaf of a CA shows the CA's name.
+        ca = cert(self.tmp, "Athanor test user CA")
+        result, _ = self.modules(
+            "Athanor test user CA", key_crt=leaf(self.tmp, *ca, "Athanor test user leaf")
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_modules_fails_when_a_leaf_shows_its_own_name(self):
+        ca = cert(self.tmp, "Athanor test user CA")
+        result, _ = self.modules(
+            "Athanor test user leaf", key_crt=leaf(self.tmp, *ca, "Athanor test user leaf")
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('expected "Athanor test user CA"', result.stderr)
+
+    def test_modules_fails_when_modinfo_names_another_key(self):
+        other = cert(self.tmp, "Athanor test other")
+        result, _ = self.modules("Athanor test modules", serial_of=other[1])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(f'key "{sig_key(other[1])}"', result.stderr)
 
     def test_modules_signs_nothing_outside_the_allow_list(self):
         tree = self.nvidia_tree(self.tmp / "signed", branches=("open",))
