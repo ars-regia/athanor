@@ -471,3 +471,58 @@ jobs:
         env:
           RUN_ID: ${{ github.run_id }}
         run: bash system/tag-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" --tag latest --iso "${RUN_ID}" | tee -a "${GITHUB_STEP_SUMMARY}"
+
+  request-release:
+    # The last job of the build (doc_pipeline.md PL54, PL55): writes release-request.json, what
+    # release.yml releases. It runs only when every other job succeeded or was skipped and the
+    # image job succeeded, an explicit list: !cancelled() alone is true after a failure too.
+    # PB13's first pull request: it dispatches nothing yet, and the maintainer dispatches
+    # release.yml by hand; the second turns the dispatch on and removes the three jobs above.
+    needs: [lint, orchestrator-brain, build-builder, kernel-artifacts, nvidia-kmod, nvidia-kmod-sign,
+      nvidia-kmod-publish, kernel-artifacts-final, kernel-digests, dag-compile, system-image,
+      sign-system-images, verify-system-images, tag-system-images]
+    if: >-
+      ${{ !cancelled() && needs.system-image.result == 'success'
+      && contains(fromJSON('["success", "skipped"]'), needs.lint.result)
+      && contains(fromJSON('["success", "skipped"]'), needs.orchestrator-brain.result)
+      && contains(fromJSON('["success", "skipped"]'), needs.build-builder.result)
+      && contains(fromJSON('["success", "skipped"]'), needs.kernel-artifacts.result)
+      && contains(fromJSON('["success", "skipped"]'), needs.nvidia-kmod.result)
+      && contains(fromJSON('["success", "skipped"]'), needs.nvidia-kmod-sign.result)
+      && contains(fromJSON('["success", "skipped"]'), needs.nvidia-kmod-publish.result)
+      && contains(fromJSON('["success", "skipped"]'), needs.kernel-artifacts-final.result)
+      && contains(fromJSON('["success", "skipped"]'), needs.kernel-digests.result)
+      && contains(fromJSON('["success", "skipped"]'), needs.dag-compile.result)
+      && contains(fromJSON('["success", "skipped"]'), needs.sign-system-images.result)
+      && contains(fromJSON('["success", "skipped"]'), needs.verify-system-images.result)
+      && contains(fromJSON('["success", "skipped"]'), needs.tag-system-images.result) }}
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: 📎 Digests recorded by the build job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: image-digests
+          path: artifacts
+      - name: 📎 Kernel artefacts of the release
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: kernel-digests
+          path: kernel
+      - name: 📨 Write the release request (scripts/ci/release_request.py)
+        env:
+          BUILDER_HASH: ${{ needs.build-builder.outputs.content_hash }}
+        run: python3 -B scripts/ci/release_request.py --image-digests artifacts/image-digests.txt --kernel-digests kernel --out "${RUNNER_TEMP}/out" | tee -a "${GITHUB_STEP_SUMMARY}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-request
+          path: ${{ runner.temp }}/out/release-request.json
+          if-no-files-found: error
