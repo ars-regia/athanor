@@ -291,6 +291,22 @@ class Resolve(Tool):
         self.assertIn("keys/modules/athanor-modules.pem", r.stderr)
         self.assertFalse((self.dir / "calls.log.buildah").exists(), "nothing built")
 
+    def test_publish_goes_on_without_a_legacy_branch_the_run_dropped(self):
+        # D24: the legacy build failed, so the sign job had no legacy tree; open and the
+        # vmlinuz are published already, and nothing is left to do.
+        self.registry(published(branches=("open",)))
+        self.assertEqual(self.run_script("resolve").returncode, 0)
+        r = self.run_script(str(self.dir / "signed"), str(self.dir / "boot"), script=ROOT / "forge/specs/azoth/nvidia-publish.sh")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(f"azoth-nvidia:{tag('legacy')}`: not built in this run", r.stdout)
+
+    def test_publish_refuses_a_run_without_the_open_branch(self):
+        self.registry(published(branches=("legacy",)))
+        self.assertEqual(self.run_script("resolve").returncode, 0)
+        r = self.run_script(str(self.dir / "signed"), str(self.dir / "boot"), script=ROOT / "forge/specs/azoth/nvidia-publish.sh")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("the open modules are missing", r.stderr)
+
     def test_publish_takes_the_signed_vmlinuz_directory(self):
         r = self.run_script(str(self.dir / "signed"), script=ROOT / "forge/specs/azoth/nvidia-publish.sh")
         self.assertEqual(r.returncode, 2)
@@ -656,10 +672,59 @@ class Resolve(Tool):
         self.assertEqual(self.state_file()["state"], "kernel-missing")
 
     def test_require_ready(self):
-        self.registry(published(branches=("open",)))
+        self.registry(published(branches=("legacy",)))
         self.assertEqual(self.run_script("require-ready").returncode, 1)
         self.registry(published())
         self.assertEqual(self.run_script("require-ready").returncode, 0)
+
+    def test_a_missing_legacy_branch_alone_is_recorded(self):
+        self.registry(published(branches=("open",)))
+        self.assertEqual(self.run_script("resolve").returncode, 0)
+        got = self.state_file()
+        self.assertEqual((got["state"], got["missing"]), ("modules-missing", "legacy"))
+
+    def test_require_ready_accepts_a_missing_legacy_branch_alone(self):
+        self.registry(published(branches=("open",)))
+        r = self.run_script("require-ready")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("athanor-system-nvidia-legacy", r.stdout)
+        self.assertNotIn("nvidia_legacy_digest", self.state_file())
+
+    def test_require_ready_still_refuses_a_missing_open_branch_or_vmlinuz(self):
+        for fx in (published(branches=("legacy",)), published(branches=("open",), boot=False), published(branches=())):
+            with self.subTest(missing=fx["tags"].keys()):
+                self.registry(fx)
+                self.assertEqual(self.run_script("require-ready").returncode, 1)
+
+    def test_require_ready_refuses_a_missing_legacy_branch_this_run_signed(self):
+        # Gate K4 after publication: D24 excuses only a legacy branch the run never built.
+        self.registry(published(branches=("open",)))
+        signed = self.dir / "out"
+        (signed / "open").mkdir(parents=True)
+        self.assertEqual(self.run_script("require-ready", "--signed", str(signed)).returncode, 0)
+        (signed / "legacy").mkdir()
+        self.assertEqual(self.run_script("require-ready", "--signed", str(signed)).returncode, 1)
+        self.registry(published())
+        r = self.run_script("require-ready", "--signed", str(signed))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        # An empty or mistyped DIR would read as "no legacy branch": refused, never lenient.
+        for bad in ("", str(self.dir / "absent")):
+            with self.subTest(signed=bad):
+                self.assertEqual(self.run_script("require-ready", "--signed", bad).returncode, 2)
+
+    def test_check_ready_reads_the_file_as_require_ready_decides(self):
+        # fetch_repo_rpms.sh and release-digests read the file require-ready accepted: a
+        # missing legacy branch alone passes, without a second registry call (D24).
+        self.registry(published(branches=("open",)))
+        self.run_script("resolve")
+        self.registry({})
+        r = self.run_script("check-ready")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for fx in (published(branches=("legacy",)), published(branches=("open",), boot=False)):
+            with self.subTest(missing=fx["tags"].keys()):
+                self.registry(fx)
+                self.run_script("resolve")
+                self.assertEqual(self.run_script("check-ready").returncode, 1)
 
     def test_get_and_has(self):
         self.registry(published(branches=("open",)))
@@ -815,7 +880,41 @@ class Cycle(Repo):
         self.state("modules-missing", kernel_digest=KERNEL)
         r = self.cycle("--event", "schedule")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(self.state_file()["cycle"], "build")
+        self.assertEqual((self.state_file()["cycle"], self.state_file()["kmod"]), ("build", "build"))
+
+    def test_a_scheduled_run_does_not_rebuild_a_missing_legacy_branch(self):
+        self.state("modules-missing", kernel_digest=KERNEL, missing="legacy")
+        r = self.cycle("--event", "schedule")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((self.state_file()["cycle"], self.state_file()["kmod"]), ("build", "skip"))
+        self.assertIn("legacy", r.stdout)
+
+    def test_a_push_without_a_pin_does_not_rebuild_a_missing_legacy_branch(self):
+        self.state("modules-missing", kernel_digest=KERNEL, missing="legacy")
+        before = self.git("rev-parse", "HEAD")
+        after = self.commit({"system/x": "1\n"})
+        r = self.cycle("--event", "push", "--before", before, "--after", after)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.state_file()["kmod"], "skip")
+
+    def test_a_pin_push_or_a_dispatch_rebuilds_a_missing_legacy_branch(self):
+        self.state("modules-missing", kernel_digest=KERNEL, missing="legacy")
+        before = self.git("rev-parse", "HEAD")
+        after = self.commit({"system/nvidia/locks/legacy.lock": "l\n"})
+        clone = self.shallow()
+        r = self.cycle("--event", "push", "--before", before, "--after", after, cwd=clone)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.state_file()["kmod"], "build")
+        self.state("modules-missing", kernel_digest=KERNEL, missing="legacy")
+        r = self.cycle("--event", "workflow_dispatch", cwd=clone)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.state_file()["kmod"], "build")
+
+    def test_other_missing_modules_always_build(self):
+        self.state("modules-missing", kernel_digest=KERNEL, missing="open legacy")
+        r = self.cycle("--event", "schedule")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.state_file()["kmod"], "build")
 
     def test_unfetchable_base_commit_fails(self):
         self.state("kernel-missing")
@@ -894,6 +993,13 @@ class CheckPlan(Repo):
         r = self.plan({**self.pin_change(FEDORA_KERNEL_NVR="7.2.6-100.fc43"), "system/Containerfile": "FROM x\n"})
         self.assertEqual(r.returncode, 1)
         self.assertIn("own pull request", r.stderr)
+
+    def test_a_missing_legacy_branch_alone_checks_the_default_and_nvidia_images(self):
+        self.state("modules-missing", kernel_digest=KERNEL, boot_digest=BOOT, missing="legacy")
+        r = self.plan({"system/x": "1\n"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((self.state_file()["check_gpus"], self.state_file()["check_delta"]), ("none nvidia", "true"))
+        self.assertIn("legacy", r.stdout)
 
     def test_nvidia_pin_bump_builds_the_default_image(self):
         self.state("modules-missing", kernel_digest=KERNEL, boot_digest=BOOT)
@@ -1162,6 +1268,25 @@ class ProjectKey(Tool):
         ]
         self.assertEqual((self.dir / "all.txt").read_text().splitlines(), want)
         self.assertEqual((self.dir / "unsigned.txt").read_text().splitlines(), want)
+
+    def test_a_release_without_the_legacy_branch_lists_the_rest(self):
+        fx = releasable()
+        del fx["tags"][f"{REG}/azoth-nvidia:{tag('legacy')}"]
+        r = self.lists(fx)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        listed = (self.dir / "all.txt").read_text().splitlines()
+        self.assertEqual(len(listed), 7)
+        self.assertIn(f"{REG}/azoth-nvidia {tag('open')} {MODULE['open']}", listed)
+        self.assertNotIn(tag("legacy"), "\n".join(listed))
+
+    def test_a_release_without_the_open_branch_is_refused(self):
+        fx = releasable()
+        del fx["tags"][f"{REG}/azoth-nvidia:{tag('open')}"]
+        self.registry(fx)
+        self.assertEqual(self.run_script("resolve").returncode, 0)
+        r = self.run_script("release-digests", str(self.dir / "all.txt"), str(self.dir / "unsigned.txt"))
+        self.assertEqual(r.returncode, 1)
+        self.assertFalse((self.dir / "all.txt").exists())
 
     def test_an_artefact_already_signed_with_the_key_is_not_signed_again(self):
         fx = releasable()

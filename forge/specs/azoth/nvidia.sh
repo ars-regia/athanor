@@ -23,6 +23,8 @@
 #              .run of the legacy branch pinned in pins.env, compares it with the hash
 #              NVIDIA publishes next to it and writes OUT/sources.sha256 (the bump bot
 #              copies it to nvidia/sources.sha256)
+# Exit status: 1 a failed build, 2 a usage error, 4 a source that does not match its pin
+# (system/optional-branch.sh never drops a branch for it, ADR-0103 D24).
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -51,6 +53,7 @@ case $STAGE in
 esac
 
 die() { echo "error: $*" >&2; exit 1; }
+unpinned() { echo "error: $*" >&2; exit 4; }
 step() { echo; echo "== $*"; }
 fetch() { # fetch URL: into the cache, when missing
   local url=$1 name=${1##*/}
@@ -116,7 +119,7 @@ build() {
       git -c advice.detachedHead=false clone -q --depth 1 --branch "$NVIDIA_OPEN_VERSION" \
         https://github.com/NVIDIA/open-gpu-kernel-modules "$WORK/src" 2> /dev/null
       [[ $(git -C "$WORK/src" rev-parse HEAD) == "$NVIDIA_OPEN_COMMIT" ]] \
-        || die "tag $NVIDIA_OPEN_VERSION does not point to the pinned commit $NVIDIA_OPEN_COMMIT"
+        || unpinned "tag $NVIDIA_OPEN_VERSION does not point to the pinned commit $NVIDIA_OPEN_COMMIT"
       src="$WORK/src"; kodir="$src/kernel-open"; version=$NVIDIA_OPEN_VERSION
       # NVIDIA does not build the RM with kCFI: the patches give the functions it calls
       # indirectly the type of their call sites. A patch that no longer applies after a
@@ -138,7 +141,8 @@ build() {
       local run="NVIDIA-Linux-x86_64-$NVIDIA_LEGACY_VERSION-no-compat32.run"
       step "proprietary modules $NVIDIA_LEGACY_VERSION from the .run"
       fetch "https://download.nvidia.com/XFree86/Linux-x86_64/$NVIDIA_LEGACY_VERSION/$run"
-      (cd "$CACHE" && grep " $run\$" "$HERE/nvidia/sources.sha256" | sha256sum --check --quiet --strict)
+      (cd "$CACHE" && grep " $run\$" "$HERE/nvidia/sources.sha256" | sha256sum --check --quiet --strict) \
+        || unpinned "$run does not match its sha256 in nvidia/sources.sha256"
       sh "$CACHE/$run" --extract-only --target "$WORK/run" > /dev/null
       src="$WORK/run/kernel"; kodir="$src"; version=$NVIDIA_LEGACY_VERSION
       ;;

@@ -82,6 +82,7 @@ jobs:
     with:
       devel-digest: ${{ needs.artifacts.outputs.devel_digest }}
       registry: ${{ needs.artifacts.outputs.registry }}
+      optional-legacy: true
 
   prepare:
     # The negative sample of the boot job, outside the signing environment.

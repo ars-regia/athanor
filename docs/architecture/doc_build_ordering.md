@@ -62,7 +62,7 @@ and the same with `-legacy-<NVIDIA_LEGACY_VERSION>`. A republished kernel with t
 
 - **Contents of the file:** `state=ready`, `state=modules-missing` or `state=kernel-missing`, followed by the verified digests:
   - `ready`: the kernel, both module tags and the signed vmlinuz (`azoth-boot:<nvr>-k<12 hex of the kernel digest>`, `boot_digest`) exist, are signed by NVIDIA kmod, and carry an attestation matching the pins (for `azoth-boot`, the sha256 of the committed Secure Boot certificate) and the kernel digest;
-  - `modules-missing`: the kernel is signed, but a module tag or the signed vmlinuz is missing or has no valid signature or attestation. NVIDIA kmod produces both, in its one sign-kernel job (D43);
+  - `modules-missing`: the kernel is signed, but a module tag or the signed vmlinuz is missing or has no valid signature or attestation. NVIDIA kmod produces both, in its one sign-kernel job (D43). A `missing=` line names what is absent; the legacy branch absent alone is `missing=legacy` (ADR-0103 D24, ADR-0106 item 6);
   - `kernel-missing`: `azoth:<nvr>` does not exist for the pinned NVR.
 - **Exit status:** 0 for all three states. Non-zero only for an error (registry, Rekor, network, malformed data), and the calling job then fails.
 - **Retries:** registry and Rekor calls go through `retry.sh`. A persistent outage is a red run, never a skip.
@@ -72,8 +72,8 @@ and the same with `-legacy-<NVIDIA_LEGACY_VERSION>`. A republished kernel with t
 **O4. The Orchestrator pipeline.** Four jobs in order, all before and outside the signing environments except where noted.
 
 1. **`kernel-artifacts`:** runs the script.
-2. **`nvidia-kmod`:** the reusable workflow, only when the state is `modules-missing`. It receives the kernel digest.
-3. **`kernel-artifacts-final`:** runs the script again and requires `ready`; any other state fails the run. It is the single source of the digests that later jobs use. A job cannot run twice, hence a separate job.
+2. **`nvidia-kmod`:** the reusable workflow, only when the state is `modules-missing` and the script writes `kmod=build`. It receives the kernel digest. The legacy branch is optional there: a legacy build that fails is dropped with an error annotation and the run goes on, while a source that does not match its pin still fails it. With `missing=legacy` alone, the script writes `kmod=build` only on a dispatch or on a push that moves the kernel or NVIDIA pins, and `kmod=skip` otherwise, so a legacy branch that keeps failing does not ask for a signing approval on every run.
+3. **`kernel-artifacts-final`:** runs the script again with `require-ready`, which accepts `ready`, or `missing=legacy` alone; then the run builds no `-nvidia-legacy` image. Any other state fails the run. A legacy branch the kmod cycle did sign must be published: its publish job runs `require-ready --signed`, which refuses `missing=legacy` then, and this job runs only when that publish succeeded or did not run. It is the single source of the digests that later jobs use. A job cannot run twice, hence a separate job.
 4. **`build-repo`, then `dag-system-image`:**
    - tier 0 pulls `azoth@<digest>`;
    - the system stage replaces its vmlinuz with the one of `azoth-boot@<boot_digest>`, signed for Secure Boot; `dag-system-image` holds no key and runs outside the signing environments (D43);

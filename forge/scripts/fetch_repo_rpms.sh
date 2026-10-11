@@ -35,11 +35,11 @@ readarray -t UPSTREAM_CLI < <(jq -r '.upstream_cli[] // empty' config/packages.j
 
 # Per-tier package images, by the hash tag of dag-state/hashes.json. The kernel is the
 # azoth image of the pins by the digest system/kernel-artifacts.sh verified, never by tag
-# (docs/architecture/doc_build_ordering.md, O4): run its require-ready first. The NVIDIA
-# modules are not RPMs: system/Containerfile copies them from their image by digest.
+# (docs/architecture/doc_build_ordering.md, O4): run its require-ready first; check-ready
+# repeats its decision on the file, so a missing legacy branch alone passes (ADR-0103 D24).
+# The NVIDIA modules are not RPMs: system/Containerfile copies them from their image by digest.
 ARTIFACTS="$(dirname "${BASH_SOURCE[0]}")/../../system/kernel-artifacts.sh"
-KERNEL_STATE=$(bash "$ARTIFACTS" get state)
-[[ $KERNEL_STATE == ready ]] || { echo "[FATAL] kernel artifacts are ${KERNEL_STATE}, not ready: run system/kernel-artifacts.sh require-ready first" >&2; exit 1; }
+bash "$ARTIFACTS" check-ready
 KERNEL_NVR=$(bash "$ARTIFACTS" get nvr)
 PINNED_NVR=$(bash "$(dirname "${BASH_SOURCE[0]}")/../specs/azoth/nvr.sh")
 [[ $KERNEL_NVR == "$PINNED_NVR" ]] || { echo "[FATAL] kernel artifacts were resolved for ${KERNEL_NVR}, the pins give ${PINNED_NVR}: run system/kernel-artifacts.sh resolve again" >&2; exit 2; }
