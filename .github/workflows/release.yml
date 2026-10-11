@@ -40,6 +40,8 @@ jobs:
           persist-credentials: false
       - name: 🌿 Release only from iso-v0
         run: '[[ "${GITHUB_REF}" == refs/heads/iso-v0 ]] || { echo "::error::release.yml releases only from refs/heads/iso-v0, not ${GITHUB_REF}"; exit 1; }'
+      - name: 👤 Who dispatched this release
+        run: echo "Dispatched by ${GITHUB_TRIGGERING_ACTOR}." >> "${GITHUB_STEP_SUMMARY}"
       - name: 🧾 Check the request against the build run (scripts/ci/release_candidate.py)
         env:
           GH_TOKEN: ${{ github.token }}
