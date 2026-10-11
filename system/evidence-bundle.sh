@@ -67,7 +67,8 @@ summary() { # summary ARTIFACTS_DIR: Markdown for the job summary the release ap
     "| Image | Digest | Previous stable |", "| --- | --- | --- |",
     (must("images")[] | "| \(must("name")) | `\(must("digest"))` | `\(.previous_stable // "none")` |"), "",
     "Skipped: " + ([must("skipped")[] | "\(must("name")) (\(must("reason")))"] | if length == 0 then "none" else join("; ") end), "",
-    "Hardware override: " + (must("overrides") | if length == 0 then "none" else join(", ") end), ""' "$1/promotion.json"
+    "Hardware override: " + (must("overrides") | if length == 0 then "none" else join(", ") end), "",
+    "Signatures verified in: athanor-builder:\(must("builder_content_hash"))", ""' "$1/promotion.json"
     jq -r -s 'def must(k): .[k] // error("an evidence file has no \(k)");
     "| Evidence | Image | Verdict | Finished |", "| --- | --- | --- | --- |",
     (.[] | "| \(must("gate")) | \(must("image")) | \(must("verdict")) | \(must("finished_at")) |")' "$1"/evidence/*.json

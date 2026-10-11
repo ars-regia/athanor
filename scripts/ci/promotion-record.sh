@@ -17,7 +17,10 @@
 #   - the image carries the classic cosign attachment machines verify, and it pulls through
 #     the policy rendered from the public keys under system/keys, as a machine would
 #     (system/verify-images.sh --builder, with the builder_content_hash of the run's
-#     release-request.json);
+#     release-request.json, which the record names: the tag is a content hash, not a digest,
+#     so the approval covers which image verified). The builder must still be in the registry:
+#     forge/scripts/clean_ghcr.sh keeps its two newest versions, so a run whose builder inputs
+#     changed twice since cannot be promoted, and its plan stops on the pull;
 #   - its build time is newer than the current stable's: a machine never follows a tag
 #     backwards (UT5).
 # Defines promotion_args "$@" (sets run and override), promotion_record DAY OUT (runs every
@@ -192,12 +195,12 @@ promotion_record() { # promotion_record DAY OUT
     done | jq -s 'sort_by(.name)')
     trigger=manual
     if [[ -n ${GITHUB_RUN_ID:-} ]]; then trigger=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID; fi
-    jq -n -S --indent 2 --argjson run "$run" --arg day "$day" --arg registry "$REGISTRY" --arg trigger "$trigger" --arg override "$override" \
+    jq -n -S --indent 2 --argjson run "$run" --arg day "$day" --arg registry "$REGISTRY" --arg trigger "$trigger" --arg override "$override" --arg builder "$builder" \
         --argjson images "$images" --argjson skipped "$skips" \
         --argjson evidence "$evidence_sums" --argjson packages "$package_sums" \
         --argjson keys "$key_sums" --argjson dwell_hours "$((dwell / 3600))" \
         '{run_id: $run, day: $day, registry: $registry, trigger: $trigger, images: $images, skipped: $skipped,
       overrides: (if $override == "" then [] else [$override] end), evidence: $evidence, packages: $packages,
-      keys: $keys, dwell_hours: $dwell_hours}' \
+      keys: $keys, dwell_hours: $dwell_hours, builder_content_hash: $builder}' \
         > "$out"
 }

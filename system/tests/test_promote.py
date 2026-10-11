@@ -464,6 +464,20 @@ class Promote(Tool):
         # athanor-system alone, verified by the plan and again by the apply.
         self.assertEqual([run["image"] for run in runs], [f"{REG}/athanor-builder:{BUILDER}"] * 2)
         self.assertIn((f"{REG}/athanor-system@{digest(1)}", f"{REG}/athanor-system:stable"), copies)
+        self.assertEqual(self.record()["builder_content_hash"], BUILDER)
+
+    def test_another_builder_after_the_plan_is_refused_at_apply(self):
+        self.published()
+
+        def rebuild():
+            (self.artifacts / "release-request.json").write_text(
+                json.dumps({"builder_content_hash": "cd" * 32})
+            )
+
+        r, copies = self.promote(between=rebuild)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("differs from the plan", r.stderr)
+        self.assertEqual(copies, [])
 
     def test_a_release_request_without_a_builder_image_fails_the_plan(self):
         self.published(builder=None)

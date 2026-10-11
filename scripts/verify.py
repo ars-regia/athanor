@@ -587,7 +587,8 @@ def signing_problems(root):
     return problems
 
 
-POLICY_PULL = re.compile(r"\bcopy\b.*--policy\b")
+# Either order: --policy is a global flag of skopeo and may come before the subcommand.
+POLICY_PULL = re.compile(r"(?=.*\bcopy\b).*--policy\b")
 # verify-images.sh runs the pull in the builder image; the dev VM runs Fedora's skopeo.
 POLICY_PULLERS = {"system/verify-images.sh", "scripts/devvm/acceptance/run.sh"}
 
@@ -598,7 +599,8 @@ def policy_pull_problems(root):
     keyPaths (promote-stable run 38180393678). Tests are not scanned."""
     root = Path(root)
     problems = []
-    files = [*walk(root, ".sh"), *walk(root / ".github/workflows", ".yml")]
+    # ponytail: shell and workflow files only; extend if a pull lands in Python or a Justfile.
+    files = [*walk(root, ".sh"), *walk(root / ".github/workflows", ".yml"), *walk(root / ".github/workflows", ".yaml")]
     for path in sorted(files):
         name = path.relative_to(root).as_posix()
         if name in POLICY_PULLERS or "tests" in path.relative_to(root).parts:
