@@ -127,8 +127,13 @@ args=("${common[@]}" --build-arg "GPU=$GPU" --label "io.athanor.azoth.digest=$ke
 now=${SOURCE_DATE_EPOCH:-$(date -u +%s)}
 fedora=$(sed -n 's/^ARG FEDORA_VERSION=//p' "$ROOT/system/Containerfile")
 [[ $fedora =~ ^[0-9]+$ ]] || { echo "${0##*/}: system/Containerfile declares no ARG FEDORA_VERSION=<major>" >&2; exit 2; }
+# The commit the image was built from (doc_pipeline.md PL58): a release compares it with the
+# commit of :latest. GITHUB_SHA in the pipeline, HEAD in a local build.
+revision=${GITHUB_SHA:-$(git -C "$ROOT" rev-parse HEAD)}
+[[ $revision =~ ^[0-9a-f]{40}$ ]] || { echo "${0##*/}: revision '$revision' is not a commit" >&2; exit 2; }
 args+=(--label "org.opencontainers.image.version=$fedora.$(date -u -d "@$now" +%Y%m%d).$SERIAL"
-  --label "org.opencontainers.image.created=$(date -u -d "@$now" +%Y-%m-%dT%H:%M:%SZ)")
+  --label "org.opencontainers.image.created=$(date -u -d "@$now" +%Y-%m-%dT%H:%M:%SZ)"
+  --label "org.opencontainers.image.revision=$revision")
 case $GPU in
   nvidia) modules=$(artifact nvidia_open_digest); args+=(--build-arg "NVIDIA_OPEN_DIGEST=$modules" --label "io.athanor.azoth-nvidia.digest=$modules") ;;
   nvidia-legacy) modules=$(artifact nvidia_legacy_digest); args+=(--build-arg "NVIDIA_LEGACY_DIGEST=$modules" --label "io.athanor.azoth-nvidia.digest=$modules") ;;

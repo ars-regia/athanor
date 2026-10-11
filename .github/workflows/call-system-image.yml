@@ -177,6 +177,18 @@ jobs:
             --tag "${RUN_ID}" --serial "${RUN_NUMBER}" --out artifacts/variants.txt
           df -h
 
+      - name: 🔖 Check that every image names its commit (system/check-image-revision.sh)
+        # The order check of a release compares the commit of :latest with the candidate's
+        # (doc_pipeline.md PL58): an image without the label fails here, before the push.
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mapfile -t names < artifacts/variants.txt
+          images=()
+          for name in "${names[@]}"; do images+=("${IMAGE_REGISTRY}/${name}:${RUN_ID}"); done
+          bash system/check-image-revision.sh "${GITHUB_SHA}" "${images[@]}" | tee -a "${GITHUB_STEP_SUMMARY}"
+
       - name: 🧩 Check that the images share the system layers
         # The acceptance of UD40: each image starts with every layer of the system image.
         # Read from local storage before the push, so a failure publishes no tag.
