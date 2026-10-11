@@ -707,6 +707,10 @@ class Resolve(Tool):
         self.registry(published())
         r = self.run_script("require-ready", "--signed", str(signed))
         self.assertEqual(r.returncode, 0, r.stderr)
+        # An empty or mistyped DIR would read as "no legacy branch": refused, never lenient.
+        for bad in ("", str(self.dir / "absent")):
+            with self.subTest(signed=bad):
+                self.assertEqual(self.run_script("require-ready", "--signed", bad).returncode, 2)
 
     def test_check_ready_reads_the_file_as_require_ready_decides(self):
         # fetch_repo_rpms.sh and release-digests read the file require-ready accepted: a

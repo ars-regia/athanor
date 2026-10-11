@@ -650,7 +650,7 @@ case $command in
   resolve) resolve "$@" ;;
   require-ready)
     signed=''
-    if [[ $# -eq 2 && $1 == --signed ]]; then signed=$2; elif [[ $# -ne 0 ]]; then usage; fi
+    if [[ $# -eq 2 && $1 == --signed && -d $2 ]]; then signed=$2; elif [[ $# -ne 0 ]]; then usage; fi
     resolve
     check_ready "$signed"
     if legacy_only; then
