@@ -10,7 +10,7 @@ on:
 
 # The key-based signature of the images is not here: a called workflow's job reads the secrets
 # of its environment only when its caller inherits every secret (actions/runner#4453), so it is
-# sign-system-images of athanor-forge-orchestrator.yml, after this workflow (D43).
+# sign-images of release.yml, which the build's request-release job dispatches (D43, PL54).
 
 jobs:
   # No lint job of its own: the Orchestrator, its only caller, runs call-lint.yml once and
@@ -93,7 +93,7 @@ jobs:
     runs-on: ubuntu-24.04
     # No key and no environment (D43): the vmlinuz arrives signed for Secure Boot, by the
     # azoth-boot digest in the kernel artifacts, and the images are signed with the update key
-    # by sign-system-images of the Orchestrator, from the digests this job records.
+    # by sign-images of release.yml, from the digests this job records.
     timeout-minutes: 180
     permissions:
       contents: write
@@ -219,8 +219,8 @@ jobs:
           if-no-files-found: error
 
       - name: 📤 Push OS Images
-        # By run id only: :latest moves in tag-system-images of the Orchestrator, after the
-        # key-based signature of these digests verified (doc_update_delivery.md, UD24, UD25).
+        # By run id only: :latest moves in tag-latest of release.yml, after the key-based
+        # signature of these digests verified (doc_update_delivery.md, UD24, UD25).
         env:
           RUN_ID: ${{ github.run_id }}
         run: |
@@ -248,7 +248,7 @@ jobs:
 
       - name: 📏 Measure what an upgrade downloads
         # UD34: the new layers against the image machines run today (:stable, :latest until
-        # the first promotion), read before tag-system-images moves :latest to this run.
+        # the first promotion), read before tag-latest of release.yml moves :latest to this run.
         run: |
           set -euo pipefail
           bash system/upgrade-bytes.sh --registry "${IMAGE_REGISTRY}" --out artifacts/metrics/upgrade-bytes.json artifacts/image-digests.txt \
@@ -308,8 +308,8 @@ jobs:
       - name: 📀 Publish the ISO
         # As an OCI image, the way kernel-build.yml publishes the kernel artifacts: the
         # ISO carries the whole system image and is far past the 2 GB an Actions
-        # artifact takes. By run id only: tag-system-images of the Orchestrator moves :latest,
-        # on main, after the image this ISO installs verified (doc_update_delivery.md, UD25).
+        # artifact takes. By run id only: the ISO's :latest moves on main alone, through main's
+        # own Orchestrator, after the image this ISO installs verified (doc_update_delivery.md, UD25).
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}

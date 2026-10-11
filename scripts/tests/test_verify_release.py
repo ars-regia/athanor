@@ -61,10 +61,9 @@ class ReleaseProblems(unittest.TestCase):
 
     def test_request_release_without_a_need_fails(self):
         def drop(text):
-            return text.replace("sign-system-images, verify-system-images, tag-system-images]",
-                                "sign-system-images, verify-system-images]", 1)
+            return text.replace("dag-compile, system-image]", "system-image]", 1)
         self.assertEqual(self.problems(orchestrator=drop),
-                         ["athanor-forge-orchestrator.yml: request-release does not need tag-system-images"])
+                         ["athanor-forge-orchestrator.yml: request-release does not need dag-compile"])
 
     def test_request_release_accepting_a_failure_fails(self):
         def loosen(text):

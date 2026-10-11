@@ -329,158 +329,14 @@ jobs:
     with:
       builder_content_hash: ${{ needs.build-builder.outputs.content_hash }}
 
-  sign-system-images:
-    name: 🔏 Key-based signature of the system images
-    # The only job that receives COSIGN_*. It builds nothing and runs no third-party tool
-    # beside the key: checkout, registry login, system/sign-images.sh (doc_update_trust.md UT2).
-    # Here, not in call-system-image.yml: a called workflow's job reads the secrets of its
-    # environment only when its caller inherits every secret (actions/runner#4453, D43).
-    # It does not verify: verify-system-images does, without the key.
-    # It also signs the kernel artefacts that carry no project key signature yet (ADR-0096):
-    # kernel-digests lists them in a keyless job, and image-digests.sh --check-kernel checks the
-    # list before anything is signed. The registry login covers ghcr.io only, so a
-    # KERNEL_REGISTRY on another host fails at the first kernel signature.
-    needs: [system-image, kernel-digests]
-    # Explicit: the implicit success() also requires every transitive need to have succeeded,
-    # and the NVIDIA kmod jobs upstream of system-image are skipped on most runs, which
-    # skipped this job with them.
-    if: ${{ !cancelled() && needs.system-image.result == 'success' && needs.kernel-digests.result == 'success' }}
-    runs-on: ubuntu-24.04
-    # Image key rotation (docs/operations/secrets.md section 4.1): until a release that carries
-    # athanor-image-2.pub is published, the images are signed with key 1, which only the old
-    # `signing` environment still holds. The next step moves this job back to `signing-images`.
-    environment: signing
-    # An explicit bash shell runs every step with -o pipefail, so a signing failure piped
-    # into tee fails the job instead of passing with the summary of a failed run.
-    defaults:
-      run:
-        shell: bash
-    timeout-minutes: 60
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: 📎 Digests recorded by the build job
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: image-digests
-          path: artifacts
-      - name: 📎 Kernel artefacts without the project key signature
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: kernel-digests
-          path: artifacts
-      - name: 🔑 Login to the registry
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_ACTOR: ${{ github.actor }}
-        run: echo "${GITHUB_TOKEN}" | skopeo login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-      - name: 🔏 Sign by digest (system/sign-images.sh)
-        env:
-          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
-          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
-          KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
-        run: bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" --kernel-digests artifacts/kernel-unsigned.txt artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
-
-  verify-system-images:
-    name: 🔎 Verify the signatures as a machine does
-    # No environment, no secret and no registry login: the images and the builder are public,
-    # and each image is pulled anonymously through the shipped policy, as a machine pulls
-    # (doc_update_trust.md UT2, UT3; D43). It runs whenever the images were published, also
-    # when sign-system-images was skipped or failed: an image without the key-based signature
-    # fails the verification, so a run never ends green with unsigned images.
-    # build-builder: the runner's skopeo is too old for the keyPaths of the shipped policy, so
-    # the verification runs the skopeo of this run's builder image (system/verify-images.sh).
-    # It also verifies every kernel artefact of the release with cosign verify --key, the
-    # command KERNEL.md gives a verifier outside GitHub.
-    needs: [system-image, sign-system-images, build-builder, kernel-digests]
-    if: ${{ !cancelled() && needs.system-image.result == 'success' }}
-    runs-on: ubuntu-24.04
-    # -o pipefail, as in sign-system-images: a failed verification piped into tee fails the job.
-    defaults:
-      run:
-        shell: bash
-    timeout-minutes: 60
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
-      - name: 📎 Digests recorded by the build job
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: image-digests
-          path: artifacts
-      - name: 📎 Kernel artefacts of the release
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: kernel-digests
-          path: kernel
-      - name: 🔎 Pull each image through the shipped policy (system/verify-images.sh)
-        env:
-          BUILDER_HASH: ${{ needs.build-builder.outputs.content_hash }}
-        run: bash system/verify-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" --builder "${BUILDER_HASH}" --evidence evidence --build-run-id "${GITHUB_RUN_ID}" artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
-      - name: 🔎 Kernel artefacts carry the project key signature (ADR-0096)
-        run: bash system/kernel-artifacts.sh verify-key kernel/kernel-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
-      - name: 📎 Hand the signature evidence to the promotion
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: evidence-${{ github.run_id }}-signature
-          path: evidence/
-          if-no-files-found: error
-
-  tag-system-images:
-    name: 🏷️ Move :latest to the verified images
-    # :latest moves only after the key-based signature of the same digests verified as a
-    # machine verifies it (doc_update_delivery.md UD25): a machine that follows :latest never
-    # meets an image the shipped policy refuses, nor an ISO that installs one. No key; the
-    # token writes the tags.
-    needs: [verify-system-images]
-    if: ${{ !cancelled() && needs.verify-system-images.result == 'success' }}
-    runs-on: ubuntu-24.04
-    defaults:
-      run:
-        shell: bash
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - name: 📎 Digests recorded by the build job
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: image-digests
-          path: artifacts
-      - name: 🔑 Login to the registry
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_ACTOR: ${{ github.actor }}
-        run: echo "${GITHUB_TOKEN}" | skopeo login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-      - name: 🏷️ Point :latest at the verified digests (system/tag-images.sh)
-        run: bash system/tag-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" --tag latest artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
-      - name: 📀 Point the ISO's :latest at this run's ISO, on main only (system/tag-images.sh)
-        # The ISO installs the default image verified above; :latest only from main, as the
-        # kernel does.
-        if: github.ref == 'refs/heads/main'
-        env:
-          RUN_ID: ${{ github.run_id }}
-        run: bash system/tag-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" --tag latest --iso "${RUN_ID}" | tee -a "${GITHUB_STEP_SUMMARY}"
-
   request-release:
     # The last job of the build (doc_pipeline.md PL54, PL55): writes release-request.json, what
     # release.yml releases. It runs only when every other job succeeded or was skipped and the
     # image job succeeded, an explicit list: !cancelled() alone is true after a failure too.
-    # PB13's first pull request: it dispatches nothing yet, and the maintainer dispatches
-    # release.yml by hand; the second turns the dispatch on and removes the three jobs above.
+    # On iso-v0 it then dispatches release.yml with this run's id (PL54); on any other ref it
+    # dispatches nothing: main is frozen, and release.yml fails on any ref but iso-v0.
     needs: [lint, orchestrator-brain, build-builder, kernel-artifacts, nvidia-kmod, nvidia-kmod-sign,
-      nvidia-kmod-publish, kernel-artifacts-final, kernel-digests, dag-compile, system-image,
-      sign-system-images, verify-system-images, tag-system-images]
+      nvidia-kmod-publish, kernel-artifacts-final, kernel-digests, dag-compile, system-image]
     if: >-
       ${{ !cancelled() && needs.system-image.result == 'success'
       && contains(fromJSON('["success", "skipped"]'), needs.lint.result)
@@ -492,10 +348,7 @@ jobs:
       && contains(fromJSON('["success", "skipped"]'), needs.nvidia-kmod-publish.result)
       && contains(fromJSON('["success", "skipped"]'), needs.kernel-artifacts-final.result)
       && contains(fromJSON('["success", "skipped"]'), needs.kernel-digests.result)
-      && contains(fromJSON('["success", "skipped"]'), needs.dag-compile.result)
-      && contains(fromJSON('["success", "skipped"]'), needs.sign-system-images.result)
-      && contains(fromJSON('["success", "skipped"]'), needs.verify-system-images.result)
-      && contains(fromJSON('["success", "skipped"]'), needs.tag-system-images.result) }}
+      && contains(fromJSON('["success", "skipped"]'), needs.dag-compile.result) }}
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -503,6 +356,9 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      # The dispatch of release.yml (PL54). It could dispatch any workflow of the repository;
+      # the candidate check of PL55 bounds what a dispatch gets signed.
+      actions: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -526,3 +382,9 @@ jobs:
           name: release-request
           path: ${{ runner.temp }}/out/release-request.json
           if-no-files-found: error
+      - name: 🚀 Dispatch the release of this build (release.yml)
+        if: github.ref == 'refs/heads/iso-v0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run release.yml --ref iso-v0 -f build_run_id="${GITHUB_RUN_ID}"

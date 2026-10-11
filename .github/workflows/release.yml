@@ -1,7 +1,7 @@
 name: Release
 # Releases one build of iso-v0 to :latest (docs/architecture/doc_pipeline.md section 4.10,
-# PL54 to PL59; ADR-0104). The build's request-release job will dispatch it with the build run
-# id (PB13's second pull request); until then the maintainer dispatches it by hand:
+# PL54 to PL59; ADR-0104). The build's request-release job dispatches it on iso-v0 with the
+# build run id; the maintainer can release a build again by hand:
 #   gh workflow run release.yml --ref iso-v0 -f build_run_id=<run id>
 # Every job checks the ref and fails on any other: release.yml releases only from iso-v0.
 # build_run_id reaches scripts through env only, and candidate refuses one that is not a number.
