@@ -74,6 +74,27 @@ class AcceptTarget(Tool):
         self.github()
         self.assertEqual(self.trusted().returncode, 0)
 
+    def test_in_progress_trusts_a_build_still_running_its_last_job(self):
+        self.github(run_object(status="in_progress", conclusion=None))
+        self.assertEqual(self.trusted("--in-progress").returncode, 0)
+        self.assertEqual(self.trusted().returncode, 10)
+
+    def test_in_progress_trusts_a_completed_successful_run(self):
+        self.github()
+        self.assertEqual(self.trusted("--in-progress").returncode, 0)
+
+    def test_in_progress_refuses_a_failed_or_waiting_run(self):
+        for over in ({"conclusion": "failure"}, {"status": "queued", "conclusion": None},
+                     {"status": "waiting", "conclusion": None}, {"status": "in_progress", "conclusion": "failure"}):
+            with self.subTest(**over):
+                self.github(run_object(**over))
+                r = self.trusted("--in-progress")
+                self.assertEqual(r.returncode, 10, r.stderr)
+
+    def test_in_progress_still_requires_the_commit_on_the_branch(self):
+        self.github(run_object(status="in_progress", conclusion=None), compare="diverged")
+        self.assertEqual(self.trusted("--in-progress").returncode, 10)
+
     def test_a_pull_request_run_is_not_trusted(self):
         for event in ("pull_request", "pull_request_target"):
             with self.subTest(event=event):
