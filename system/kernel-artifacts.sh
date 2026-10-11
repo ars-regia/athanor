@@ -19,9 +19,13 @@
 #                                       different NVR, D no longer applies and this resolves
 #                                       exactly as an unconstrained caller would, never as an
 #                                       error just because the pins moved on (O5)
-#   require-ready                       resolve, then exit 1 unless state=ready, or
+#   require-ready [--signed DIR]        resolve, then exit 1 unless state=ready, or
 #                                       modules-missing with only the legacy branch missing
-#                                       (ADR-0103 D24)
+#                                       (ADR-0103 D24); with DIR, the signed tree a run
+#                                       published, not when DIR/legacy exists: D24 excuses
+#                                       only a legacy branch the run never built
+#   check-ready                         the same decision on the file require-ready wrote, with
+#                                       no network call, for the jobs that consume it
 #   cycle --event E [--before B] [--after A] [--sha S] [--head H]
 #                                       after resolve, for an Orchestrator run (O4): append
 #                                       cycle=build or cycle=defer, and kmod=build or kmod=skip
@@ -414,6 +418,16 @@ legacy_only() { # legacy_only: whether the legacy NVIDIA branch is the only sign
   [[ $(get state) == modules-missing ]] && grep -qx 'missing=legacy' "$FILE"
 }
 
+check_ready() { # check_ready [SIGNED]: exit 1 unless the file is ready, or the legacy branch alone is missing and SIGNED has none (D24)
+  local state
+  if legacy_only; then
+    [[ -z ${1:-} || ! -d $1/legacy ]] || die "the legacy NVIDIA modules this run signed in $1 are not published, signed and attested"
+    return 0
+  fi
+  state=$(get state)
+  [[ $state == ready ]] || die "state=$state: the kernel of the pins, its signed vmlinuz and the open NVIDIA module branch must be published, signed and attested"
+}
+
 pins_touched() { # pins_touched BASE HEAD: whether the diff moves a file of KERNEL_PIN_FILES
   local files file
   files=$(changed_files "$1" "$2")
@@ -563,7 +577,7 @@ check_plan() {
 
 release_digests() { # release_digests ALL UNSIGNED
   [[ $# -eq 2 ]] || usage
-  [[ $(get state) == ready ]] || legacy_only || die "release-digests needs state=ready, or the legacy NVIDIA branch alone missing: run require-ready first"
+  check_ready
   local nvr kernel devel boot_tag boot open_tag open legacy_tag legacy ref repo tag digest verdict line
   # One assignment per value: a get that fails inside an array literal would not stop the script.
   nvr=$(get nvr)
@@ -635,15 +649,15 @@ shift
 case $command in
   resolve) resolve "$@" ;;
   require-ready)
-    [[ $# -eq 0 ]] || usage
+    signed=''
+    if [[ $# -eq 2 && $1 == --signed ]]; then signed=$2; elif [[ $# -ne 0 ]]; then usage; fi
     resolve
+    check_ready "$signed"
     if legacy_only; then
       annotate warning "the legacy NVIDIA modules of azoth:$(get nvr) are not published: this run builds no athanor-system-nvidia-legacy (ADR-0103 D24)"
-      exit 0
     fi
-    state=$(get state)
-    [[ $state == ready ]] || die "state=$state: the kernel of the pins, its signed vmlinuz and the open NVIDIA module branch must be published, signed and attested"
     ;;
+  check-ready) [[ $# -eq 0 ]] || usage; check_ready ;;
   cycle) cycle "$@" ;;
   check-plan) check_plan "$@" ;;
   release-digests) release_digests "$@" ;;

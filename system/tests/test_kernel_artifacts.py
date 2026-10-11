@@ -696,6 +696,32 @@ class Resolve(Tool):
                 self.registry(fx)
                 self.assertEqual(self.run_script("require-ready").returncode, 1)
 
+    def test_require_ready_refuses_a_missing_legacy_branch_this_run_signed(self):
+        # Gate K4 after publication: D24 excuses only a legacy branch the run never built.
+        self.registry(published(branches=("open",)))
+        signed = self.dir / "out"
+        (signed / "open").mkdir(parents=True)
+        self.assertEqual(self.run_script("require-ready", "--signed", str(signed)).returncode, 0)
+        (signed / "legacy").mkdir()
+        self.assertEqual(self.run_script("require-ready", "--signed", str(signed)).returncode, 1)
+        self.registry(published())
+        r = self.run_script("require-ready", "--signed", str(signed))
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_check_ready_reads_the_file_as_require_ready_decides(self):
+        # fetch_repo_rpms.sh and release-digests read the file require-ready accepted: a
+        # missing legacy branch alone passes, without a second registry call (D24).
+        self.registry(published(branches=("open",)))
+        self.run_script("resolve")
+        self.registry({})
+        r = self.run_script("check-ready")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for fx in (published(branches=("legacy",)), published(branches=("open",), boot=False)):
+            with self.subTest(missing=fx["tags"].keys()):
+                self.registry(fx)
+                self.run_script("resolve")
+                self.assertEqual(self.run_script("check-ready").returncode, 1)
+
     def test_get_and_has(self):
         self.registry(published(branches=("open",)))
         self.run_script("resolve")

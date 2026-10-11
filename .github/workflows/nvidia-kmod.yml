@@ -208,8 +208,8 @@ jobs:
       - name: Verify (gate K4)
         # The resolver verifies the three tags again after the retention: signature by this
         # workflow, and an attestation naming the pins (the certificate for azoth-boot) and the
-        # kernel digest.
-        run: bash system/kernel-artifacts.sh require-ready
+        # kernel digest; a legacy branch this run signed is required too (D24).
+        run: bash system/kernel-artifacts.sh require-ready --signed out
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
