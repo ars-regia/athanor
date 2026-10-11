@@ -192,6 +192,10 @@ SIGN_ONLY_INPUTS = {
 # Where a sign-only job may download: a directory that is not in the checkout, so an artifact
 # never replaces the sign script (a download without a path lands on the workspace root).
 SIGN_JOB_DOWNLOADS = {"out", "artifacts"}
+# The ref check of every job of release.yml (doc_pipeline.md PL54): a release run on any ref but
+# iso-v0 fails, never skips. A signing job may run it: it reads no secret and changes nothing.
+RELEASE_REF_CHECK = ('[[ "${GITHUB_REF}" == refs/heads/iso-v0 ]] || '
+                     '{ echo "::error::release.yml releases only from refs/heads/iso-v0, not ${GITHUB_REF}"; exit 1; }')
 # The only commands a step of a signing job may run, whole. A sign-only job receives built
 # artefacts and runs no build step, and an earlier step must not be able to rewrite the sign
 # script or the environment of the step that holds the key ($GITHUB_ENV, BASH_ENV) (D43).
@@ -202,6 +206,7 @@ SIGN_JOB_COMMANDS = {
     'bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"'
     ' --kernel-digests artifacts/kernel-unsigned.txt artifacts/image-digests.txt'
     ' | tee -a "${GITHUB_STEP_SUMMARY}"',
+    RELEASE_REF_CHECK,
 }
 # The names a signing job, its steps and its workflow may set in env besides the secrets of the
 # job's environment: plain values, none read by bash, the dynamic loader or a PATH lookup.
