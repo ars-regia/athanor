@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "release-request.json (docs/architecture/doc_pipeline.md, PL55)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "build_run_id", "build_run_attempt", "workflow_path", "ref", "commit", "builder_content_hash", "sha256"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "build_run_id": {"type": "integer", "minimum": 1},
+    "build_run_attempt": {"type": "integer", "minimum": 1},
+    "workflow_path": {"type": "string", "pattern": "^\\.github/workflows/[a-z0-9-]+\\.ya?ml$"},
+    "ref": {"type": "string", "pattern": "^refs/(heads|tags)/[A-Za-z0-9._/-]+$"},
+    "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "builder_content_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "sha256": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image-digests.txt", "kernel-digests.txt", "kernel-unsigned.txt"],
+      "properties": {
+        "image-digests.txt": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "kernel-digests.txt": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "kernel-unsigned.txt": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
+}

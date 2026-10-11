@@ -138,6 +138,22 @@ class BuildImage(unittest.TestCase):
         self.assertIn("org.opencontainers.image.created=2026-09-15T10:00:00Z", args)
         self.assertIn("IMAGE_REGISTRY=localhost", args)
 
+    def test_every_image_names_the_commit_it_was_built_from(self):
+        self.artifacts_file()
+        self.env["GITHUB_SHA"] = "e" * 40
+        r = subprocess.run(["bash", str(BUILD), "--gpu", "none", "--registry", "localhost", "--tag", "check"],
+                           capture_output=True, text=True, env=self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("org.opencontainers.image.revision=" + "e" * 40, self.calls()[-1])
+
+    def test_a_revision_that_is_not_a_commit_builds_nothing(self):
+        self.artifacts_file()
+        self.env["GITHUB_SHA"] = "iso-v0"
+        r = subprocess.run(["bash", str(BUILD), "--gpu", "none", "--registry", "localhost", "--tag", "check"],
+                           capture_output=True, text=True, env=self.env)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("not a commit", r.stderr)
+
     def test_a_local_build_has_serial_zero_and_a_serial_is_a_number(self):
         self.artifacts_file()
         self.env["SOURCE_DATE_EPOCH"] = "1789466400"

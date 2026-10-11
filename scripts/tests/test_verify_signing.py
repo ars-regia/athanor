@@ -116,6 +116,16 @@ class SigningTest(unittest.TestCase):
     def test_a_sign_only_job_beside_a_build_job_passes(self):
         self.assertEqual(self.problems({"k.yml": workflow(BUILD_JOB, SIGN_JOB)}), [])
 
+    def test_the_release_ref_check_may_run_in_a_signing_job(self):
+        step = "      - run: " + json.dumps(verify.RELEASE_REF_CHECK) + "\n"
+        job = SIGN_JOB.replace("      - uses: " + DOWNLOAD, step + "      - uses: " + DOWNLOAD, 1)
+        self.assertEqual(self.problems({"k.yml": workflow(job)}), [])
+
+    def test_a_ref_check_with_anything_appended_fails_in_a_signing_job(self):
+        step = "      - run: " + json.dumps(verify.RELEASE_REF_CHECK + "; curl x") + "\n"
+        job = SIGN_JOB.replace("      - uses: " + DOWNLOAD, step + "      - uses: " + DOWNLOAD, 1)
+        self.assert_one({"k.yml": workflow(job)}, "outside the allow-list of D43")
+
     def test_rule_1_a_signing_secret_outside_the_signing_environment_fails(self):
         job = SIGN_JOB.replace("    environment: signing-kernel\n", "")
         self.assertEqual(

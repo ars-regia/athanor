@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "release-candidate.json (docs/architecture/doc_pipeline.md, PL55 and PL58)",
+  "description": "request is checked against release-request.schema.json on its own: the subset has no $ref.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "request", "order", "superseded"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "request": {"type": "object"},
+    "order": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["repository", "candidate_digest", "latest_digest", "latest_created", "verdict"],
+        "properties": {
+          "repository": {"type": "string", "pattern": "^[a-z0-9.-]+(/[a-z0-9._-]+)+$"},
+          "candidate_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "latest_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
+          "latest_created": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$"},
+          "verdict": {"enum": ["absent", "equal", "newer"]}
+        }
+      }
+    },
+    "superseded": {"type": "array", "items": {"type": "integer", "minimum": 1}}
+  }
+}

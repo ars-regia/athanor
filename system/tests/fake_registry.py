@@ -187,6 +187,9 @@ def gh(args, fx):
     if args[0] == "api":
         if "DELETE" in args:
             return 0
+        # gh refuses --slurp without --paginate; a fixture of a paged path is the list of pages.
+        if "--slurp" in args and "--paginate" not in args:
+            return fail("gh: --slurp needs --paginate", 2)
         path = next(a for a in args[1:] if a.startswith("/"))
         if path in fx.get("api", {}):
             body = fx["api"][path]

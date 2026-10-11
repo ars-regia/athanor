@@ -1,0 +1,193 @@
+name: Release
+# Releases one build of iso-v0 to :latest (docs/architecture/doc_pipeline.md section 4.10,
+# PL54 to PL59; ADR-0104). The build's request-release job will dispatch it with the build run
+# id (PB13's second pull request); until then the maintainer dispatches it by hand:
+#   gh workflow run release.yml --ref iso-v0 -f build_run_id=<run id>
+# Every job checks the ref and fails on any other: release.yml releases only from iso-v0.
+# build_run_id reaches scripts through env only, and candidate refuses one that is not a number.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: Run id of the athanor-forge-orchestrator.yml build to release
+        required: true
+        type: string
+
+permissions: {}
+
+# One release at a time; a running release is never cancelled (PL57). GitHub keeps only the
+# newest waiting run of the group, so an older waiting one is cancelled: the newest build wins,
+# and order() keeps :latest from moving backwards.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    name: 🧾 Check the build and the order of :latest
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: 🌿 Release only from iso-v0
+        run: '[[ "${GITHUB_REF}" == refs/heads/iso-v0 ]] || { echo "::error::release.yml releases only from refs/heads/iso-v0, not ${GITHUB_REF}"; exit 1; }'
+      - name: 🧾 Check the request against the build run (scripts/ci/release_candidate.py)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+        run: python3 -B scripts/ci/release_candidate.py check --out "${RUNNER_TEMP}/out" | tee -a "${GITHUB_STEP_SUMMARY}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-candidate
+          path: ${{ runner.temp }}/out/
+          if-no-files-found: error
+
+  sign-images:
+    name: 🔏 Key-based signature of the candidate
+    # The only job of release.yml that receives COSIGN_* (D43). It runs the steps of the
+    # Orchestrator's sign-system-images on the files of release-candidate, which candidate
+    # checked against the build run: the images and the kernel artefacts without the project
+    # key signature (ADR-0096). It builds nothing and verifies nothing: verify-images does.
+    needs: [candidate]
+    runs-on: ubuntu-24.04
+    # Image key rotation (docs/operations/secrets.md section 4.1): `signing` until step 3,
+    # then `signing-images` (PL56).
+    environment: signing
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: 🌿 Release only from iso-v0
+        run: '[[ "${GITHUB_REF}" == refs/heads/iso-v0 ]] || { echo "::error::release.yml releases only from refs/heads/iso-v0, not ${GITHUB_REF}"; exit 1; }'
+      - name: 📎 The checked candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: release-candidate
+          path: artifacts
+      - name: 🔑 Login to the registry
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: echo "${GITHUB_TOKEN}" | skopeo login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+      - name: 🔏 Sign by digest (system/sign-images.sh)
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+          KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
+        run: bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" --kernel-digests artifacts/kernel-unsigned.txt artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
+
+  verify-images:
+    name: 🔎 Verify the signatures as a machine does
+    # No environment, no secret, no login (PL16, D43). It runs also when sign-images was
+    # skipped or failed: an unsigned image fails the verification, so the run ends red.
+    needs: [candidate, sign-images]
+    if: ${{ !cancelled() && needs.candidate.result == 'success' }}
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: 🌿 Release only from iso-v0
+        run: '[[ "${GITHUB_REF}" == refs/heads/iso-v0 ]] || { echo "::error::release.yml releases only from refs/heads/iso-v0, not ${GITHUB_REF}"; exit 1; }'
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+      - name: 📎 The checked candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: release-candidate
+          path: artifacts
+      - name: 🔎 Pull each image through the shipped policy (system/verify-images.sh)
+        env:
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+        run: |
+          set -euo pipefail
+          builder=$(jq -r .request.builder_content_hash artifacts/release-candidate.json)
+          bash system/verify-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" --builder "${builder}" \
+            --evidence evidence --build-run-id "${BUILD_RUN_ID}" artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
+      - name: 🔎 Kernel artefacts carry the project key signature (ADR-0096)
+        run: bash system/kernel-artifacts.sh verify-key artifacts/kernel-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
+      - name: 📎 Hand the signature evidence to the promotion, named by the build run (PL56)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: evidence-${{ inputs.build_run_id }}-signature
+          path: evidence/
+          if-no-files-found: error
+
+  tag-latest:
+    name: 🏷️ Move :latest to the verified candidate
+    # PL58 again, just before the tag moves: the run may have waited for its approval, or be a
+    # re-run after a newer release moved :latest. No key; the token writes the tags.
+    needs: [verify-images]
+    if: ${{ !cancelled() && needs.verify-images.result == 'success' }}
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: 🌿 Release only from iso-v0
+        run: '[[ "${GITHUB_REF}" == refs/heads/iso-v0 ]] || { echo "::error::release.yml releases only from refs/heads/iso-v0, not ${GITHUB_REF}"; exit 1; }'
+      - name: 📎 The checked candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: release-candidate
+          path: artifacts
+      - name: ⏱️ :latest never moves backwards (scripts/ci/release_candidate.py order)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 -B scripts/ci/release_candidate.py order --dir artifacts | tee -a "${GITHUB_STEP_SUMMARY}"
+      - name: 🔑 Login to the registry
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: echo "${GITHUB_TOKEN}" | skopeo login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+      - name: 🏷️ Point :latest at the verified digests (system/tag-images.sh)
+        run: bash system/tag-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" --tag latest artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
+
+  request-acceptance:
+    name: 🧪 Dispatch the acceptance of the build
+    # accept.yml runs outside the release group, and its evidence feeds UD4 (PL56, UD17, UD18).
+    needs: [tag-latest]
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: 🌿 Release only from iso-v0
+        run: '[[ "${GITHUB_REF}" == refs/heads/iso-v0 ]] || { echo "::error::release.yml releases only from refs/heads/iso-v0, not ${GITHUB_REF}"; exit 1; }'
+      - name: 🧪 Dispatch accept.yml with the build run id
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+        run: gh workflow run accept.yml --ref iso-v0 -f run_id="${BUILD_RUN_ID}"
