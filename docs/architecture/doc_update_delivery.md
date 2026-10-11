@@ -144,7 +144,7 @@ UD45 to UD50 specified a Bridge for machines that follow the previous owner's fr
 
 ## 6. Upgrade test in CI (priority 2)
 
-**UD17. ISO acceptance tests the run, not the newest ISO, and runs whatever `lint` says.** `iso-acceptance.yml` (`accept.yml` in the target pipeline, PB5 of [doc_pipeline.md](doc_pipeline.md)) gains an input `run_id` and installs `athanor-iso:<run_id>`. The last job of `release.yml` dispatches it with the run id after the tagging job of UD25, on every release that moves `:latest`, so the acceptance does not hold the release workflow's group (PL56 of [doc_pipeline.md](doc_pipeline.md), ADR-0104); until that workflow exists, the orchestrator calls it after its tagging job. The scheduled weekly run keeps `newest` and loses `needs: [lint]`: `lint` is the pull-request gate (ADR-0075), and a lint failure on `iso-v0` must not hide a boot regression. `verdict.py` writes the evidence file of UD4. Acceptance: one orchestrator run whose ISO acceptance reports the same `run_id` and digest as its `image-digests.txt`.
+**UD17. ISO acceptance tests the run, not the newest ISO, and runs whatever `lint` says.** `iso-acceptance.yml` (`accept.yml` in the target pipeline, PB5 of [doc_pipeline.md](doc_pipeline.md)) gains an input `run_id` and installs `athanor-iso:<run_id>`. The last job of `release.yml` dispatches it with the run id after the tagging job of UD25, on every release that moves `:latest`, so the acceptance does not hold the release workflow's group (PL56 of [doc_pipeline.md](doc_pipeline.md), ADR-0104). The scheduled weekly run keeps `newest` and loses `needs: [lint]`: `lint` is the pull-request gate (ADR-0075), and a lint failure on `iso-v0` must not hide a boot regression. `verdict.py` writes the evidence file of UD4. Acceptance: one orchestrator run whose ISO acceptance reports the same `run_id` and digest as its `image-digests.txt`.
 
 **UD18. The upgrade test boots the previous release and upgrades it to the candidate through the client's own path.** A new job `upgrade-acceptance` in `iso-acceptance.yml` (`accept.yml` in the target pipeline, PB5), on `ubuntu-24.04` with `./.github/actions/kvm`, runs after the ISO acceptance of the same run:
 
@@ -175,14 +175,14 @@ The policy, keys, registries.d and verification are UT2, UT3 and UT5. This secti
 
 **UD25. Sign, verify, then tag.** _(Landed, #299.)_ The order of a release run becomes:
 
-PB13 moves these steps into `release.yml` (doc_pipeline.md PL56: `sign-images`, `verify-images`, `tag-latest`), in the same order, after a `candidate` job that checks the build; the Orchestrator's jobs below leave with PB13's second pull request.
+Since PB13 these steps run in `release.yml` (doc_pipeline.md PL56), in the same order, after a `candidate` job that checks the build; the build's last job, `request-release`, dispatches it on `iso-v0`. The Orchestrator signs, verifies and tags no system image; `main`'s own copy of it keeps the old jobs for a hand release of `main`.
 
 1. the build job pushes `:<run_id>` and writes `image-digests.txt`;
-2. `sign-system-images` (the `signing` environment, the key alone in its job, UT2) signs by digest, then writes the `signature` evidence file;
-3. `verify-system-images` (no environment, no secret) pulls each digest anonymously through the shipped policy (`system/verify-images.sh`); it runs also when signing was skipped, so an unsigned image fails the run;
-4. `tag-system-images` (no key) copies `docker://<repo>@<digest>` to `:latest` and re-reads it (`system/tag-images.sh`); the script refuses a run whose branch is not in `KERNEL_TRUSTED_REFS` (`iso-v0`, `main`), so a dispatch from another branch publishes `:<run_id>` and leaves `:latest` alone. The job needs the whole build job, ISO included, so `:latest` never moves ahead of the ISO of its run.
+2. `sign-images` (the `signing` environment, the key alone in its job, UT2) signs by digest;
+3. `verify-images` (no environment, no secret) pulls each digest anonymously through the shipped policy (`system/verify-images.sh`); it runs also when signing was skipped, so an unsigned image fails the run, and it uploads the `signature` evidence as `evidence-<build_run_id>-signature`;
+4. `tag-latest` (no key) checks again that `:latest` never moves backwards (PL58), then copies `docker://<repo>@<digest>` to `:latest` and re-reads it (`system/tag-images.sh`); the script refuses a run whose branch is not in `KERNEL_TRUSTED_REFS` (`iso-v0`, `main`), so a dispatch from another branch publishes `:<run_id>` and leaves `:latest` alone. The release starts only after the whole build job, ISO included, so `:latest` never moves ahead of the ISO of its build.
 
-The ISO is still built in the build job from `:<run_id>`. Acceptance: in one run, the registry's first write of `:latest` (from the job logs) comes after the `sign-system-images` job finishes. `sign-images.sh` addresses digests, not tags (its tag comparison of today stays as a guard).
+The ISO is still built in the build job from `:<run_id>`. Acceptance: in one run, the registry's first write of `:latest` (from the job logs) comes after the `sign-images` job of `release.yml` finishes. `sign-images.sh` addresses digests, not tags (its tag comparison of today stays as a guard).
 
 **UD26. The transition from unverified references needs no step of its own.** UT4's migration moves every machine whose image carries the policy. A machine on an image older than the policy reaches one through its normal unverified `upgrade` of `:latest` until `:latest` names an image with the policy, then migrates. Images pushed to `:latest` after UD25 are all signed, which closes the unsigned window of F2. Acceptance: dev-VM stage `migrate` (exists).
 

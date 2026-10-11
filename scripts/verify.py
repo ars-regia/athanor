@@ -393,6 +393,23 @@ def job_contexts(root, doc, depth=0):
 
 RELEASE_YML = ".github/workflows/release.yml"
 ORCHESTRATOR_YML = ".github/workflows/athanor-forge-orchestrator.yml"
+RELEASE_GROUP = "${{ github.workflow }}"
+BUILD_GROUP = "${{ github.workflow }}-${{ github.ref }}"
+ON_ISO_V0 = "github.ref == 'refs/heads/iso-v0'"
+RELEASE_DISPATCH = 'gh workflow run release.yml --ref iso-v0 -f build_run_id="${GITHUB_RUN_ID}"'
+# The whole dispatch step but its name: no continue-on-error, shell or other token may qualify it.
+RELEASE_DISPATCH_STEP = {
+    "if": ON_ISO_V0,
+    "env": {"GH_TOKEN": "${{ github.token }}", "GH_REPO": "${{ github.repository }}"},
+    "run": RELEASE_DISPATCH,
+}
+# ponytail: an input reached without the word, as in toJSON(github.event), is not recognised.
+INPUT_IN_RUN = re.compile(r"\$\{\{(?:(?!\}\}).)*\binputs\b", re.S)
+# system/tag-images.sh is the one script that moves a tag of the system images (PL35); a raw
+# skopeo copy onto :latest is not recognised, nor a tag held in a variable, and ADR-0111 item 5
+# accepts that the registry itself binds no workflow.
+LATEST_WRITER = re.compile(r"tag-images\.sh\b[^\n]*--tag(?:=|\s+)[\"']?latest\b(?![-.\w])")
+STABLE_WRITER = re.compile(r"promote\.sh\b|tag-images\.sh\b[^\n]*--tag(?:=|\s+)[\"']?stable\b(?![-.\w])")
 
 
 def release_problems(root):
@@ -400,12 +417,21 @@ def release_problems(root):
     before any step but a checkout, in a step with no if or continue-on-error, so a run on
     another ref fails in each job; the build's
     request-release job needs every other job of the build, and its condition asks a success
-    of system-image and a success or a skip of each other job."""
+    of system-image and a success or a skip of each other job. release.yml starts on
+    workflow_dispatch alone and interpolates no input into run:; request-release dispatches it
+    once, on iso-v0 alone, with the build's run id. PL57: each workflow keeps its one
+    concurrency group without cancel-in-progress, and no job of release.yml declares its own.
+    PL56, PL60: no job outside release.yml runs in signing or signing-images, only tag-latest
+    of release.yml moves :latest of the system images, and only a job of the environment
+    release runs system/promote.sh or writes :stable."""
     root = Path(root)
-    if yaml is None or not (root / RELEASE_YML).exists():
+    if yaml is None:
         return []
+    if not (root / RELEASE_YML).exists():
+        return ["release.yml: missing (PL54)"]
     problems = []
-    for job_id, job in yaml.safe_load(read(root / RELEASE_YML))["jobs"].items():
+    release = yaml.safe_load(read(root / RELEASE_YML))
+    for job_id, job in release["jobs"].items():
         for step in job.get("steps", []):
             if step.get("run") == RELEASE_REF_CHECK:
                 # Nothing may make the check optional: no if, no continue-on-error.
@@ -418,7 +444,8 @@ def release_problems(root):
                 break
         else:
             problems.append(f"release.yml: job {job_id} never runs RELEASE_REF_CHECK")
-    jobs = yaml.safe_load(read(root / ORCHESTRATOR_YML))["jobs"]
+    orchestrator = yaml.safe_load(read(root / ORCHESTRATOR_YML))
+    jobs = orchestrator["jobs"]
     request = jobs.get("request-release")
     if request is None:
         return problems + [f"{Path(ORCHESTRATOR_YML).name}: no request-release job"]
@@ -433,6 +460,38 @@ def release_problems(root):
                 problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not ask a success of system-image")
         elif f"""contains(fromJSON('["success", "skipped"]'), needs.{job_id}.result)""" not in condition:
             problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not ask a success or a skip of {job_id}")
+    dispatches = [{key: value for key, value in step.items() if key != "name"}
+                  for step in request.get("steps", []) if "release.yml" in str(step.get("run", ""))]
+    if dispatches != [RELEASE_DISPATCH_STEP]:
+        problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not dispatch release.yml once, "
+                        "on iso-v0 alone, with its run id (PL54)")
+    if triggers(release) != {"workflow_dispatch"}:
+        problems.append(f"release.yml: starts on {sorted(triggers(release))}, not on workflow_dispatch alone (PL54)")
+    for name, doc, group in (("release.yml", release, RELEASE_GROUP),
+                             (Path(ORCHESTRATOR_YML).name, orchestrator, BUILD_GROUP)):
+        if doc.get("concurrency") != {"group": group, "cancel-in-progress": False}:
+            problems.append(f"{name}: concurrency is not the group {group} without cancel-in-progress (PL57)")
+    for job_id, job in release["jobs"].items():
+        if "concurrency" in job:
+            problems.append(f"release.yml: job {job_id} declares a concurrency group of its own (PL57)")
+        if any(INPUT_IN_RUN.search(str(step.get("run", ""))) for step in job.get("steps", [])):
+            problems.append(f"release.yml: job {job_id} interpolates an input into run:, which only env may carry (PL54)")
+    for wf in sorted((root / ".github/workflows").glob("*.y*ml")):
+        try:
+            doc = yaml.safe_load(read(wf))
+        except yaml.YAMLError:
+            continue  # signing_problems reports a workflow it cannot read
+        for job_id, job in (doc.get("jobs") or {}).items() if isinstance(doc, dict) else ():
+            environment = (job_environment(job) or "").lower()
+            if environment in ("signing", "signing-images") and wf.name != "release.yml":
+                problems.append(f"{wf.name}: job {job_id} runs in {environment}, which only release.yml may use (PL56)")
+            for step in job.get("steps", []):
+                run = re.sub(r"\\\n\s*", " ", str(step.get("run", "")))
+                if LATEST_WRITER.search(run) and (wf.name, job_id) != ("release.yml", "tag-latest"):
+                    problems.append(f"{wf.name}: job {job_id} moves :latest of the system images, "
+                                    "which only tag-latest of release.yml writes (PL35, PL56)")
+                if STABLE_WRITER.search(run) and environment != "release":
+                    problems.append(f"{wf.name}: job {job_id} writes :stable outside the environment release (PL60)")
     return problems
 
 

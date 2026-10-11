@@ -147,7 +147,7 @@ On a pure pin bump the variants are therefore built and gated only after the mer
 
 ## 4. Risks
 
-- **Approvals in the same run:** two approvals arrive minutes apart in the same run on a pin bump. Both are needed; rejecting either makes the run red. Maintainer decision A2-27 (#131, #145): the two approvals per release cycle stay, `sign-kernel` first and `sign-system-images` after it.
+- **Two approvals on a pin bump:** two approvals arrive minutes apart on a pin bump, `sign-kernel` in the build run and `sign-images` in the `release.yml` run the build dispatches. Both are needed; rejecting the first makes the build red, rejecting the second makes the release red and leaves `:latest` where it was. Maintainer decision A2-27 (#131, #145): the two approvals per release cycle stay, `sign-kernel` first and `sign-images` after it.
 - **Unanswered approvals:** a run waiting for a signing approval holds its concurrency group for up to 30 days; `timeout-minutes` does not count that wait. An approval nobody answers stops image builds on that branch, and on a pin bump there are two such waits. Rejecting the pending approval is how to unblock it.
 - **Queueing:** `cancel-in-progress: false` means a long cycle delays the next one instead of being cut. GitHub keeps only the newest pending run.
 - **Variants on pin bumps:** they are tested only after the merge (O7).

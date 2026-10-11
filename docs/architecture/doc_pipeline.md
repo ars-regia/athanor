@@ -411,9 +411,9 @@ step 3 and none after it; the promotion to `:stable` asks for the `release` appr
 PL60, ADR-0104).
 
 **PL16. Sign, verify, then tag** (UD25). The signature the signing job wrote is verified
-through the same policy a machine uses before any tag moves: today by
-`verify-system-images` of the Orchestrator, from PB13 by `verify-images` of `release.yml`
-(PL56).
+through the same policy a machine uses before any tag moves, by `verify-images` of
+`release.yml` (PL56); `main`'s own copy of the Orchestrator keeps `verify-system-images` for a
+hand release of `main`.
 
 **PL17. Keyless signatures accompany key-based ones** (UT2): the keyless Sigstore
 signature carries the workflow identity; the key-based one is what machines verify
@@ -834,14 +834,16 @@ images' `:latest` without a marker (PL55). Those old jobs are outside this rule 
 ADR-0098 option A deletes `main`; a later ISO release path names its writer (PL32).
 Before this revision only `main` moved the ISO's `:latest` too, so this is no regression. `:stable`,
 `:stable-previous`, `:stable-<YYYYMMDD>` are written only by `promote.sh`. There is one
-writer per tag and repository. `verify.py workflows` does not check this yet: the check is
+writer per tag and repository. Since PB13 `verify.py workflows` refuses a call of
+`system/tag-images.sh` that moves `:latest` outside `tag-latest` of `release.yml`, and a call of
+`promote.sh` or a move of `:stable` outside a job of the environment `release`; the full check is
 a gain of section 10 (UD1 acceptance), over the workflows and the scripts they call
 (`system/sign-images.sh`, `system/promote.sh`). It is to count writers per job: the marker has two, `tag-latest` and `mark-current`,
 both in `release.yml`, and the check allows that pair.
 Today the `dag-system-image` job of `call-system-image.yml` pushes the system images by
-`:<run_id>` only, and `tag-system-images` of the Orchestrator moves their `:latest` after
-`verify-system-images` verified the key-based signature, and on `main` the ISO's `:latest`
-in the same job; `call-build-builder.yml` moves the builder's `:latest` on default-branch runs
+`:<run_id>` only, and `tag-latest` of `release.yml` moves their `:latest` after
+`verify-images` verified the key-based signature; on `main`, `main`'s own copy of the
+Orchestrator moves the ISO's `:latest` in its `tag-system-images` job; `call-build-builder.yml` moves the builder's `:latest` on default-branch runs
 (`forge/scripts/promote_builder_latest.sh`, PR #228), which the pull-request spec check
 reads until it consumes the builder by digest (PL13).
 
