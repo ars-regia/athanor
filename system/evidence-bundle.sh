@@ -9,6 +9,7 @@
 #        evidence-bundle.sh publish BUNDLE_DIR REF
 #        evidence-bundle.sh verify REF ARTIFACTS_DIR
 #        evidence-bundle.sh verify-dir COPY_DIR ARTIFACTS_DIR
+#        evidence-bundle.sh summary ARTIFACTS_DIR
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -59,6 +60,19 @@ verify_dir() {
         }
 }
 
+summary() { # summary ARTIFACTS_DIR: Markdown for the job summary the release approval covers (PL60)
+    # A missing field is an error, never "none": the text is what the approval covers.
+    jq -r 'def must(k): .[k] // error("promotion.json has no \(k)");
+    "### Promotion plan of build run \(must("run_id"))", "",
+    "| Image | Digest | Previous stable |", "| --- | --- | --- |",
+    (must("images")[] | "| \(must("name")) | `\(must("digest"))` | `\(.previous_stable // "none")` |"), "",
+    "Skipped: " + ([must("skipped")[] | "\(must("name")) (\(must("reason")))"] | if length == 0 then "none" else join("; ") end), "",
+    "Hardware override: " + (must("overrides") | if length == 0 then "none" else join(", ") end), ""' "$1/promotion.json"
+    jq -r -s 'def must(k): .[k] // error("an evidence file has no \(k)");
+    "| Evidence | Image | Verdict | Finished |", "| --- | --- | --- | --- |",
+    (.[] | "| \(must("gate")) | \(must("image")) | \(must("verdict")) | \(must("finished_at")) |")' "$1"/evidence/*.json
+}
+
 case ${1:-} in
 create)
     [[ $# -eq 3 ]] || usage
@@ -81,6 +95,10 @@ verify)
 verify-dir)
     [[ $# -eq 3 ]] || usage
     verify_dir "$2" "$3"
+    ;;
+summary)
+    [[ $# -eq 2 ]] || usage
+    summary "$2"
     ;;
 *) usage ;;
 esac

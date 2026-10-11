@@ -14,11 +14,14 @@
     "retired": false
   },
   "secrets": [
+    "EVIDENCE_REGISTRY_TOKEN",
     "FORGE_PAT",
     "SETTINGS_APP_PRIVATE_KEY"
   ],
   "selected_actions": null,
   "variables": [
+    "EVIDENCE_REGISTRY",
+    "EVIDENCE_REGISTRY_USER",
     "SETTINGS_APP_CLIENT_ID"
   ],
   "workflow_permissions": {
