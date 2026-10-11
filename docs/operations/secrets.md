@@ -40,7 +40,7 @@ OIDC identity and need no secret.
 
 ### 1.2 Variables and environments
 
-No repository variable is set (`gh variable list` is empty), so every default below is in force.
+The repository variables set are `SETTINGS_APP_CLIENT_ID`, `EVIDENCE_REGISTRY` and `EVIDENCE_REGISTRY_USER` (`gh variable list`, 2026-10-11); every other default below is in force.
 
 | Id | Name | Default | Used by |
 | --- | --- | --- | --- |
@@ -49,10 +49,10 @@ No repository variable is set (`gh variable list` is empty), so every default be
 | VAR3 | `BUILDER_STABLE_TAG` | `latest` | `forge-ghcr-cleanup.yml:25`, `rust-security-audit.yml:28` |
 | VAR4 | `RELEASE_BRANCH` | `iso-v0` | PR #180 only: orchestrator, `call-system-image.yml`, `accept.yml`, `promote-stable.yml` |
 | VAR5 | `PROMOTE_DWELL_HOURS` | `24` | PR #180 only: `promote-stable.yml` |
-| VAR6 | `SETTINGS_APP_CLIENT_ID` | none; not set yet | `maintenance.yml` `settings-drift`: client id of the settings GitHub App (SEC13) |
+| VAR6 | `SETTINGS_APP_CLIENT_ID` | none; set by the maintainer | `maintenance.yml` `settings-drift`: client id of the settings GitHub App (SEC13) |
 | VAR7 | removed 2026-10-09 (ADR-0103 D4) | | |
-| VAR9 | `EVIDENCE_REGISTRY` | none: unset, promotion fails closed (ADR-0106 item 4); created by the maintainer | `promote-stable.yml` `plan` and `promote`, through `system/promote-login.sh` and `system/evidence-bundle.sh`: the OCI registry off GitHub that keeps the evidence bundle of every promotion |
-| VAR10 | `EVIDENCE_REGISTRY_USER` | none; created by the maintainer | as VAR9: the user of SEC16 |
+| VAR9 | `EVIDENCE_REGISTRY` | none: unset, promotion fails closed (ADR-0106 item 4); set by the maintainer on 2026-10-11 to `quay.io/ars-regia` | `promote-stable.yml` `plan` and `promote`, through `system/promote-login.sh` and `system/evidence-bundle.sh`: the OCI registry off GitHub that keeps the evidence bundle of every promotion |
+| VAR10 | `EVIDENCE_REGISTRY_USER` | none; set by the maintainer on 2026-10-11 | as VAR9: the user of SEC16 |
 | VAR8 | `BOT_APP_CLIENT_ID` | none | environment `bots`: client id of the bots GitHub App `athanor-bots` (SEC15), read as `vars.BOT_APP_CLIENT_ID` by the jobs of SEC15 |
 
 | Id | Environment | Secrets | Protection (`.github/settings/environments.json`; `signing` stays beside the split until the image key rotation of section 4.1 ends) | Referenced by |
