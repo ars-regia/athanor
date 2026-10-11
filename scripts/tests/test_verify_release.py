@@ -1,5 +1,7 @@
-"""PL54: verify.py refuses a job of release.yml that does not check the ref first, and a
-request-release job that does not wait for every job of the build."""
+"""PL54, PL56, PL57, PL60: verify.py refuses a job of release.yml that does not check the ref
+first, a request-release job that does not wait for every job of the build or dispatches the
+release off iso-v0, another trigger or concurrency group, an input interpolated into run:, and a
+signing job, a writer of :latest or of :stable outside the place the spec gives it."""
 
 import importlib.util
 import pathlib
@@ -78,6 +80,71 @@ class ReleaseProblems(unittest.TestCase):
             return head + "  request-release:" + tail.replace("needs.system-image.result == 'success'", "true", 1)
         self.assertEqual(self.problems(orchestrator=loosen),
                          ["athanor-forge-orchestrator.yml: request-release does not ask a success of system-image"])
+
+
+    def test_a_trigger_beside_workflow_dispatch_fails(self):
+        def push(text):
+            return text.replace("on:\n  workflow_dispatch:\n", "on:\n  push:\n  workflow_dispatch:\n", 1)
+        self.assertEqual(self.problems(release=push),
+                         ["release.yml: starts on ['push', 'workflow_dispatch'], not on workflow_dispatch alone (PL54)"])
+
+    def test_an_input_interpolated_into_run_fails(self):
+        def interpolate(text):
+            return text.replace('--out "${RUNNER_TEMP}/out" |',
+                                '--out "${RUNNER_TEMP}/out" --run ${{ inputs.build_run_id }} |', 1)
+        self.assertEqual(self.problems(release=interpolate),
+                         ["release.yml: job candidate interpolates an input into run:, which only env may carry (PL54)"])
+
+    def test_another_release_group_fails(self):
+        def regroup(text):
+            return text.replace("  group: ${{ github.workflow }}\n",
+                                "  group: ${{ github.workflow }}-${{ github.ref }}\n", 1)
+        self.assertEqual(self.problems(release=regroup),
+                         ["release.yml: concurrency is not the group ${{ github.workflow }} without "
+                          "cancel-in-progress (PL57)"])
+
+    def test_another_build_group_fails(self):
+        def cancel(text):
+            return text.replace("cancel-in-progress: false", "cancel-in-progress: true", 1)
+        self.assertEqual(self.problems(orchestrator=cancel),
+                         ["athanor-forge-orchestrator.yml: concurrency is not the group "
+                          "${{ github.workflow }}-${{ github.ref }} without cancel-in-progress (PL57)"])
+
+    def test_a_job_level_group_fails(self):
+        def group(text):
+            return text.replace("  candidate:\n", "  candidate:\n    concurrency: other\n", 1)
+        self.assertEqual(self.problems(release=group),
+                         ["release.yml: job candidate declares a concurrency group of its own (PL57)"])
+
+    def test_a_dispatch_off_iso_v0_fails(self):
+        def anywhere(text):
+            return text.replace("if: github.ref == 'refs/heads/iso-v0'", "if: always()", 1)
+        self.assertEqual(self.problems(orchestrator=anywhere),
+                         ["athanor-forge-orchestrator.yml: request-release does not dispatch release.yml once, "
+                          "on iso-v0 alone, with its run id (PL54)"])
+
+    def test_a_signing_job_outside_release_fails(self):
+        for name in ("signing", "Signing-Images"):
+            with self.subTest(environment=name):
+                def move(text, name=name):
+                    return text.replace("environment: signing-kernel", f"environment: {name}", 1)
+                self.assertEqual(self.problems(orchestrator=move),
+                                 [f"athanor-forge-orchestrator.yml: job nvidia-kmod-sign runs in {name.lower()}, "
+                                  "which only release.yml may use (PL56)"])
+
+    def test_a_second_writer_of_latest_fails(self):
+        def tag(text):
+            return text + "      - run: bash system/tag-images.sh --registry r --tag latest d.txt\n"
+        self.assertEqual(self.problems(orchestrator=tag),
+                         ["athanor-forge-orchestrator.yml: job request-release moves :latest of the system "
+                          "images, which only tag-latest of release.yml writes (PL35, PL56)"])
+
+    def test_stable_outside_release_fails(self):
+        def promote(text):
+            return text + "      - run: bash system/promote.sh 412\n"
+        self.assertEqual(self.problems(orchestrator=promote),
+                         ["athanor-forge-orchestrator.yml: job request-release writes :stable outside the "
+                          "environment release (PL60)"])
 
 
 if __name__ == "__main__":
