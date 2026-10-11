@@ -9,6 +9,7 @@ import subprocess
 import unittest
 
 from test_kernel_artifacts import Tool
+from test_sign_images import BUILDER, PODMAN
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PROMOTE = ROOT / "system" / "promote.sh"
@@ -33,6 +34,13 @@ def digest(n):
 
 
 class Promote(Tool):
+    def setUp(self):
+        super().setUp()
+        podman = self.dir / "bin" / "podman"
+        podman.write_text(PODMAN)
+        podman.chmod(0o755)
+        self.env["STUB_STATE"] = str(self.dir)
+
     def published(
         self,
         names=NAMES,
@@ -43,7 +51,11 @@ class Promote(Tool):
         moves=True,
         evidence=True,
         finished=OLD,
+        builder=BUILDER,
     ):
+        self.artifacts.mkdir(parents=True, exist_ok=True)
+        request = {"builder_content_hash": builder} if builder else {}
+        (self.artifacts / "release-request.json").write_text(json.dumps(request))
         fx = {"tags": {}, "configs": {}, "raw": {}, "sigstore_keys": {}, "moves": moves}
         lines = []
         for i, name in enumerate(NAMES):
@@ -443,6 +455,23 @@ class Promote(Tool):
         self.assertEqual(r.returncode, 1)
         self.assertIn("does not verify with the keys under system/keys", r.stderr)
         self.assertEqual(copies, [])
+
+    def test_the_policy_pull_runs_in_the_builder_image(self):
+        self.published()
+        r, copies = self.promote()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        runs = [json.loads(line) for line in (self.dir / "podman.log").read_text().splitlines()]
+        # athanor-system alone, verified by the plan and again by the apply.
+        self.assertEqual([run["image"] for run in runs], [f"{REG}/athanor-builder:{BUILDER}"] * 2)
+        self.assertIn((f"{REG}/athanor-system@{digest(1)}", f"{REG}/athanor-system:stable"), copies)
+
+    def test_a_release_request_without_a_builder_image_fails_the_plan(self):
+        self.published(builder=None)
+        r, copies = self.promote()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("no builder_content_hash", r.stderr)
+        self.assertEqual(copies, [])
+        self.assertFalse((self.dir / "podman.log").exists())
 
     def test_a_run_id_is_a_number(self):
         self.published()

@@ -60,6 +60,7 @@ class FetchEvidence(Tool):
                     + "a" * 64
                     + "\n"
                 },
+                "release-request": {"release-request.json": '{"builder_content_hash": "' + "b" * 64 + '"}\n'},
                 "package-sets": {"athanor-system.txt": "bash-5.2-1.fc43.x86_64 bb\n"},
             }
         }
@@ -109,6 +110,7 @@ class FetchEvidence(Tool):
         self.assertEqual(r.returncode, 0, r.stderr)
         for rel in (
             "image-digests.txt",
+            "release-request.json",
             "packages/athanor-system.txt",
             "evidence/signature.athanor-system.json",
             "evidence/iso-acceptance.athanor-system.json",

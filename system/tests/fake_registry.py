@@ -76,7 +76,8 @@ def verify(args, fx):
         if f.read() not in keys:
             return fail("FATA[0000] Source image rejected: cryptographic signature verification failed: "
                         "invalid signature when validating ASN.1 encoded signature")
-    if args[-1].startswith("dir:"):
+    # In the builder image (the fake podman of test_sign_images) the pull stays in the container.
+    if args[-1].startswith("dir:") and not os.environ.get("STUB_IN_CONTAINER"):
         os.mkdir(args[-1].removeprefix("dir:"))
     return 0
 
