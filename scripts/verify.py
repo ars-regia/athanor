@@ -155,7 +155,7 @@ def check_workflows():
                     r.fail(f"{wf.name}:{i+1} log inviati a un servizio esterno ({host})")
 
     # 1e. D43: signing keys only in sign-only jobs
-    for problem in signing_problems(ROOT) + merge_queue_problems(ROOT):
+    for problem in signing_problems(ROOT) + merge_queue_problems(ROOT) + release_problems(ROOT):
         r.fail(problem)
 
     # 1d. actionlint, se disponibile
@@ -389,6 +389,46 @@ def job_contexts(root, doc, depth=0):
         else:
             patterns.add(f"{name} / *")
     return patterns
+
+
+RELEASE_YML = ".github/workflows/release.yml"
+ORCHESTRATOR_YML = ".github/workflows/athanor-forge-orchestrator.yml"
+
+
+def release_problems(root):
+    """PL54 (doc_pipeline.md section 4.10): every job of release.yml runs RELEASE_REF_CHECK
+    before any step but a checkout, so a run on another ref fails in each job; the build's
+    request-release job needs every other job of the build, and its condition asks a success
+    of system-image and a success or a skip of each other job."""
+    root = Path(root)
+    if yaml is None or not (root / RELEASE_YML).exists():
+        return []
+    problems = []
+    for job_id, job in yaml.safe_load(read(root / RELEASE_YML))["jobs"].items():
+        for step in job.get("steps", []):
+            if step.get("run") == RELEASE_REF_CHECK:
+                break
+            if not str(step.get("uses", "")).startswith("actions/checkout@"):
+                problems.append(f"release.yml: job {job_id} runs a step before RELEASE_REF_CHECK")
+                break
+        else:
+            problems.append(f"release.yml: job {job_id} never runs RELEASE_REF_CHECK")
+    jobs = yaml.safe_load(read(root / ORCHESTRATOR_YML))["jobs"]
+    request = jobs.get("request-release")
+    if request is None:
+        return problems + [f"{Path(ORCHESTRATOR_YML).name}: no request-release job"]
+    condition = request.get("if", "")
+    if "!cancelled()" not in condition:
+        problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not ask !cancelled()")
+    for job_id in sorted(set(jobs) - {"request-release"}):
+        if job_id not in request.get("needs", []):
+            problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not need {job_id}")
+        elif job_id == "system-image":
+            if "needs.system-image.result == 'success'" not in condition:
+                problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not ask a success of system-image")
+        elif f"""contains(fromJSON('["success", "skipped"]'), needs.{job_id}.result)""" not in condition:
+            problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not ask a success or a skip of {job_id}")
+    return problems
 
 
 def signing_problems(root):
