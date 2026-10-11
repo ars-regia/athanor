@@ -402,8 +402,8 @@ Every name below is described in the secrets inventory, `docs/operations/secrets
 | `BUILDER_STABLE_TAG` | variable, default `latest` | not set | CI21, CI22 |
 | `SETTINGS_APP_PRIVATE_KEY` | secret (GitHub App key, read-only App) | repository | CI29 |
 | `SETTINGS_APP_CLIENT_ID` | variable, no default | repository | CI29 |
-| `EVIDENCE_REGISTRY`, `EVIDENCE_REGISTRY_USER` | variable, no default: unset, promotion fails closed (ADR-0106 item 4) | not set; the maintainer creates them | CI11 |
-| `EVIDENCE_REGISTRY_TOKEN` | secret (push credential of `EVIDENCE_REGISTRY`) | not set; the maintainer creates it in the repository, since the `plan` job, which has no environment, publishes the bundle | CI11 |
+| `EVIDENCE_REGISTRY`, `EVIDENCE_REGISTRY_USER` | variable, no default: unset, promotion fails closed (ADR-0106 item 4) | repository, set by the maintainer on 2026-10-11 | CI11 |
+| `EVIDENCE_REGISTRY_TOKEN` | secret (push credential of `EVIDENCE_REGISTRY`) | repository, set by the maintainer on 2026-10-11; repository-wide because the `plan` job, which has no environment, publishes the bundle | CI11 |
 
 Environments (`gh api repos/ars-regia/athanor/environments`):
 
