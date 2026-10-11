@@ -397,12 +397,18 @@ RELEASE_GROUP = "${{ github.workflow }}"
 BUILD_GROUP = "${{ github.workflow }}-${{ github.ref }}"
 ON_ISO_V0 = "github.ref == 'refs/heads/iso-v0'"
 RELEASE_DISPATCH = 'gh workflow run release.yml --ref iso-v0 -f build_run_id="${GITHUB_RUN_ID}"'
-INPUT_IN_RUN = re.compile(r"\$\{\{[^}]*inputs\.")
+# The whole dispatch step but its name: no continue-on-error, shell or other token may qualify it.
+RELEASE_DISPATCH_STEP = {
+    "if": ON_ISO_V0,
+    "env": {"GH_TOKEN": "${{ github.token }}", "GH_REPO": "${{ github.repository }}"},
+    "run": RELEASE_DISPATCH,
+}
+INPUT_IN_RUN = re.compile(r"\$\{\{(?:(?!\}\}).)*\binputs\b", re.S)
 # system/tag-images.sh is the one script that moves a tag of the system images (PL35); a raw
-# skopeo copy onto :latest is not recognised, and ADR-0111 item 5 accepts that the registry
-# itself binds no workflow.
-LATEST_WRITER = re.compile(r"system/tag-images\.sh\b[^\n]*--tag latest\b")
-STABLE_WRITER = re.compile(r"system/promote\.sh\b|system/tag-images\.sh\b[^\n]*--tag stable")
+# skopeo copy onto :latest is not recognised, nor a tag held in a variable, and ADR-0111 item 5
+# accepts that the registry itself binds no workflow.
+LATEST_WRITER = re.compile(r"tag-images\.sh\b[^\n]*--tag[= ][\"']?latest\b(?![-.\w])")
+STABLE_WRITER = re.compile(r"promote\.sh\b|tag-images\.sh\b[^\n]*--tag[= ][\"']?stable\b(?![-.\w])")
 
 
 def release_problems(root):
@@ -418,8 +424,10 @@ def release_problems(root):
     of release.yml moves :latest of the system images, and only a job of the environment
     release runs system/promote.sh or writes :stable."""
     root = Path(root)
-    if yaml is None or not (root / RELEASE_YML).exists():
+    if yaml is None:
         return []
+    if not (root / RELEASE_YML).exists():
+        return ["release.yml: missing (PL54)"]
     problems = []
     release = yaml.safe_load(read(root / RELEASE_YML))
     for job_id, job in release["jobs"].items():
@@ -451,9 +459,9 @@ def release_problems(root):
                 problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not ask a success of system-image")
         elif f"""contains(fromJSON('["success", "skipped"]'), needs.{job_id}.result)""" not in condition:
             problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not ask a success or a skip of {job_id}")
-    dispatches = [(step.get("if"), step.get("run")) for step in request.get("steps", [])
-                  if "release.yml" in str(step.get("run", ""))]
-    if dispatches != [(ON_ISO_V0, RELEASE_DISPATCH)]:
+    dispatches = [{key: value for key, value in step.items() if key != "name"}
+                  for step in request.get("steps", []) if "release.yml" in str(step.get("run", ""))]
+    if dispatches != [RELEASE_DISPATCH_STEP]:
         problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not dispatch release.yml once, "
                         "on iso-v0 alone, with its run id (PL54)")
     if triggers(release) != {"workflow_dispatch"}:
@@ -477,7 +485,7 @@ def release_problems(root):
             if environment in ("signing", "signing-images") and wf.name != "release.yml":
                 problems.append(f"{wf.name}: job {job_id} runs in {environment}, which only release.yml may use (PL56)")
             for step in job.get("steps", []):
-                run = str(step.get("run", ""))
+                run = re.sub(r"\\\n\s*", " ", str(step.get("run", "")))
                 if LATEST_WRITER.search(run) and (wf.name, job_id) != ("release.yml", "tag-latest"):
                     problems.append(f"{wf.name}: job {job_id} moves :latest of the system images, "
                                     "which only tag-latest of release.yml writes (PL35, PL56)")
