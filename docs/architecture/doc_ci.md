@@ -30,11 +30,12 @@ CI1 athanor-forge-orchestrator.yml        concurrency: one run per ref, the newe
  |- system-image .................... CI5 call-system-image.yml: build-repo -> dag-system-image
  |- sign-system-images .............. environment signing (signing-images)   [signing approval]
  |- verify-system-images ............ system/verify-images.sh: no key, anonymous pulls through the shipped policy
- `- tag-system-images ............... system/tag-images.sh: :latest -> the verified digests; athanor-iso:latest on main
+ |- tag-system-images ............... system/tag-images.sh: :latest -> the verified digests; athanor-iso:latest on main
+ `- request-release ................. scripts/ci/release_request.py -> artifact release-request (PB13; dispatches CI33 from PB13's second pull request)
 
 Kernel path (doc_build_ordering.md, O1):
 CI9 kernel-bump.yml (PR) -> merge -> CI8 kernel-build.yml (publish azoth) -> dispatches CI1
-Release path: CI1 publishes :<run_id> and :latest -> CI12 accept.yml (dispatched with the run id) -> CI11 promote-stable.yml (manual, on evidence and the release approval, :stable)
+Release path: CI1 publishes :<run_id> and :latest (until PB13's second pull request) and writes release-request -> CI33 release.yml (by hand until then) signs, verifies and moves :latest -> CI12 accept.yml (dispatched with the run id) -> CI11 promote-stable.yml (manual, on evidence and the release approval, :stable)
 ```
 
 CI1 runs CI2 once, as its first job, and calls CI3, CI4 and CI5 only after it passed; they have no lint of their own. They used to repeat it, so one Orchestrator run linted four times, about 2 minutes each on the critical path (run 37384733899 lists the jobs `lint`, `build-builder / lint`, `dag-compile / lint`, `system-image / lint`). CI8 calls it as its first job.
@@ -358,6 +359,14 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 - **Secrets, variables:** `BOT_APP_PRIVATE_KEY`, `BOT_APP_CLIENT_ID` (a merge made with an App token triggers the push workflows), `GITHUB_TOKEN` (read-only: the pull request, the runs). **Environment:** `bots`. **Runner:** hosted. **Concurrency:** none; the job waits up to 90 minutes for the required checks.
 - **Scripts:** `forge/scripts/bot_merge.py`.
 - **Health:** `gh run list --workflow bot-merge.yml --branch iso-v0 --limit 5`.
+
+### CI33 Release
+
+- **File:** `release.yml`. **Purpose:** releases one build of `iso-v0` to `:latest` (doc_pipeline.md section 4.10, PL54 to PL59): checks the build's `release-request` against the API's record of the run and the order of `:latest`, signs the images and the kernel artefacts with the project key, verifies them as a machine does, moves `:latest`, and dispatches CI12. Every job fails on a ref other than `refs/heads/iso-v0`.
+- **Jobs:** `candidate`, `sign-images` (environment `signing`, the alias of `signing-images` during the image key rotation), `verify-images`, `tag-latest`, `request-acceptance`. **Triggers:** dispatch (`build_run_id`), by hand until PB13's second pull request turns on the dispatch of CI1's `request-release`. **Outputs:** artifacts `release-candidate` and `evidence-<build_run_id>-signature`, the tag `latest` of the system images, a run of CI12.
+- **Secrets, variables:** `GITHUB_TOKEN`, `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD`, `KERNEL_REGISTRY`. **Environment:** `signing` (job `sign-images`). **Runner:** hosted. **Concurrency:** `Release`, no cancel (PL57).
+- **Scripts:** `scripts/ci/release_candidate.py`, `scripts/ci/schema.py`, `system/trusted-run.sh`, `system/sign-images.sh`, `system/verify-images.sh`, `system/kernel-artifacts.sh`, `system/tag-images.sh`.
+- **Health:** `gh run list --workflow release.yml --branch iso-v0 --limit 5`.
 
 ## 3. Known broken workflows
 

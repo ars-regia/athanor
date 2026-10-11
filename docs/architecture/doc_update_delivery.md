@@ -175,6 +175,8 @@ The policy, keys, registries.d and verification are UT2, UT3 and UT5. This secti
 
 **UD25. Sign, verify, then tag.** _(Landed, #299.)_ The order of a release run becomes:
 
+PB13 moves these steps into `release.yml` (doc_pipeline.md PL56: `sign-images`, `verify-images`, `tag-latest`), in the same order, after a `candidate` job that checks the build; the Orchestrator's jobs below leave with PB13's second pull request.
+
 1. the build job pushes `:<run_id>` and writes `image-digests.txt`;
 2. `sign-system-images` (the `signing` environment, the key alone in its job, UT2) signs by digest, then writes the `signature` evidence file;
 3. `verify-system-images` (no environment, no secret) pulls each digest anonymously through the shipped policy (`system/verify-images.sh`); it runs also when signing was skipped, so an unsigned image fails the run;
