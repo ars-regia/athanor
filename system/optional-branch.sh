@@ -4,7 +4,8 @@
 # whatever it holds, so nothing half-built can be uploaded, the marker OUT_DIR.dropped is
 # written for the upload step's condition, the failure is named in an annotation and in the
 # job summary, and the step succeeds, so the run goes on with the other branch. A required
-# branch ends the step with the command's status.
+# branch, or a source that does not match its pin (exit 4 of nvidia.sh), ends the step with
+# the command's status: an integrity failure is never a build failure the run may leave.
 # Usage: optional-branch.sh BRANCH true|false OUT_DIR -- COMMAND...
 set -euo pipefail
 shopt -s inherit_errexit
@@ -16,7 +17,7 @@ shift 4
 rm -f -- "$out.dropped"
 status=0
 "$@" || status=$?
-if (( status != 0 )) && [[ $optional == true ]]; then
+if (( status != 0 && status != 4 )) && [[ $optional == true ]]; then
   if [[ -e $out ]]; then rm -r -- "$out"; fi
   echo "the $branch NVIDIA modules failed to build (exit $status)" > "$out.dropped"
   echo "::error title=Branch dropped::the $branch NVIDIA modules failed to build (exit $status); this run continues without them and builds no image that needs them (ADR-0103 D24)"

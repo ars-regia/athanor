@@ -43,6 +43,14 @@ class OptionalBranch(unittest.TestCase):
         self.assertFalse(self.out.exists())
         self.assertTrue(self.marker.is_file())
 
+    def test_a_source_that_does_not_match_its_pin_stops_even_an_optional_branch(self):
+        # nvidia.sh exits 4 when a pinned source (the legacy .run's sha256) does not match:
+        # an integrity failure, never a build failure the run may leave behind.
+        r, summary = self.run_with("true", 'mkdir -p "$OUT" && exit 4')
+        self.assertEqual(r.returncode, 4)
+        self.assertFalse(self.marker.exists())
+        self.assertNotIn("Branch dropped", r.stdout)
+
     def test_a_required_branch_fails_with_its_status(self):
         r, summary = self.run_with("false", HALF_BUILT)
         self.assertEqual(r.returncode, 3)
