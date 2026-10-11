@@ -364,7 +364,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 
 - **File:** `release.yml`. **Purpose:** releases one build of `iso-v0` to `:latest` (doc_pipeline.md section 4.10, PL54 to PL59): checks the build's `release-request` against the API's record of the run and the order of `:latest`, signs the images and the kernel artefacts with the project key, verifies them as a machine does, moves `:latest`, and dispatches CI12. Every job fails on a ref other than `refs/heads/iso-v0`.
 - **Jobs:** `candidate`, `sign-images` (environment `signing`, the alias of `signing-images` during the image key rotation), `verify-images`, `tag-latest`, `request-acceptance`. **Triggers:** dispatch (`build_run_id`), by hand until PB13's second pull request turns on the dispatch of CI1's `request-release`. **Outputs:** artifacts `release-candidate` and `evidence-<build_run_id>-signature`, the tag `latest` of the system images, a run of CI12.
-- **Secrets, variables:** `GITHUB_TOKEN`, `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD`, `KERNEL_REGISTRY`. **Environment:** `signing` (job `sign-images`). **Runner:** hosted. **Concurrency:** `Release`, no cancel (PL57).
+- **Secrets, variables:** `GITHUB_TOKEN`, `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD`, `KERNEL_REGISTRY`. **Environment:** `signing` (job `sign-images`). **Runner:** hosted. **Concurrency:** `Release`, one run at a time and a running release never cancelled (PL57); GitHub keeps only the newest waiting run.
 - **Scripts:** `scripts/ci/release_candidate.py`, `scripts/ci/schema.py`, `system/trusted-run.sh`, `system/sign-images.sh`, `system/verify-images.sh`, `system/kernel-artifacts.sh`, `system/tag-images.sh`.
 - **Health:** `gh run list --workflow release.yml --branch iso-v0 --limit 5`.
 

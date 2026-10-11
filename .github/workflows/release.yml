@@ -16,7 +16,9 @@ on:
 
 permissions: {}
 
-# Releases queue behind each other and none is cancelled by a newer one (PL57).
+# One release at a time; a running release is never cancelled (PL57). GitHub keeps only the
+# newest waiting run of the group, so an older waiting one is cancelled: the newest build wins,
+# and order() keeps :latest from moving backwards.
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
