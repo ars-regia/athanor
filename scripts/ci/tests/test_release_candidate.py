@@ -15,7 +15,7 @@ from test_kernel_artifacts import Tool  # noqa: E402
 
 SCRIPT = ROOT / "scripts/ci/release_candidate.py"
 R = "ars-regia/athanor"
-REG = "ghcr.io/ars-regia"
+REG = "ghcr.io/owner"
 ORCH = ".github/workflows/athanor-forge-orchestrator.yml"
 SHA, TIP, OLD = "c" * 40, "d" * 40, "b" * 40
 IMAGE_JOB = "system-image / 💿 System Image & Disk Build"

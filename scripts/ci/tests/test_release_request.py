@@ -33,7 +33,7 @@ class ReleaseRequest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = pathlib.Path(self.tmp.name)
         (self.dir / "image-digests.txt").write_text(
-            "ghcr.io/ars-regia/athanor-system 412 sha256:" + "1" * 64 + "\n"
+            "ghcr.io/owner/athanor-system 412 sha256:" + "1" * 64 + "\n"
         )
         (self.dir / "kernel").mkdir()
         (self.dir / "kernel/kernel-digests.txt").write_text("k\n")
