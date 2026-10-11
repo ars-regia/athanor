@@ -138,7 +138,7 @@ reviewer `hr-mes`, no administrator bypass, branches `iso-v0` and `main`. It gat
 promotion to `:stable` ([ADR-0104](../decisions/0104-release-workflow-and-stable-gate.md),
 amending [ADR-0103](../decisions/0103-audit-5-decisions.md) D2 and D25): the job that moves
 `:stable` runs in it after the evidence and the dwell, and the image signing does not wait
-for it. Until PB13 of `docs/architecture/doc_pipeline.md` lands, no job uses it.
+for it. The `promote` job of `promote-stable.yml` runs in it (#399).
 
 `signing-kernel` and `signing-images` have the same protection in `environments.json`: required reviewer `hr-mes`; administrator
 bypass off (`can_admins_bypass: false`, set by hand: section 4); deployment branches `iso-v0` and
