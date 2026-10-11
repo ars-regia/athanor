@@ -397,7 +397,8 @@ ORCHESTRATOR_YML = ".github/workflows/athanor-forge-orchestrator.yml"
 
 def release_problems(root):
     """PL54 (doc_pipeline.md section 4.10): every job of release.yml runs RELEASE_REF_CHECK
-    before any step but a checkout, so a run on another ref fails in each job; the build's
+    before any step but a checkout, in a step with no if or continue-on-error, so a run on
+    another ref fails in each job; the build's
     request-release job needs every other job of the build, and its condition asks a success
     of system-image and a success or a skip of each other job."""
     root = Path(root)
@@ -407,6 +408,10 @@ def release_problems(root):
     for job_id, job in yaml.safe_load(read(root / RELEASE_YML))["jobs"].items():
         for step in job.get("steps", []):
             if step.get("run") == RELEASE_REF_CHECK:
+                # Nothing may make the check optional: no if, no continue-on-error.
+                if set(step) - {"name", "run"}:
+                    problems.append(f"release.yml: job {job_id} qualifies RELEASE_REF_CHECK with "
+                                    f"{', '.join(sorted(set(step) - {'name', 'run'}))}")
                 break
             if not str(step.get("uses", "")).startswith("actions/checkout@"):
                 problems.append(f"release.yml: job {job_id} runs a step before RELEASE_REF_CHECK")

@@ -53,6 +53,12 @@ class ReleaseProblems(unittest.TestCase):
         self.assertEqual(self.problems(release=move),
                          ["release.yml: job candidate runs a step before RELEASE_REF_CHECK"])
 
+    def test_a_ref_check_that_may_be_skipped_or_fail_fails(self):
+        def qualify(text):
+            return text.replace(CHECK, CHECK + "        continue-on-error: true\n        if: false\n", 1)
+        self.assertEqual(self.problems(release=qualify),
+                         ["release.yml: job candidate qualifies RELEASE_REF_CHECK with continue-on-error, if"])
+
     def test_request_release_without_a_need_fails(self):
         def drop(text):
             return text.replace("sign-system-images, verify-system-images, tag-system-images]",
