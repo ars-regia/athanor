@@ -225,7 +225,7 @@ class Candidate(Tool):
 
     def test_a_run_id_that_is_not_a_number_refuses(self):
         self.github()
-        self.refused("build_run_id", run_id="412; echo")
+        self.refused("build_run_id '412; echo' is not a run id", run_id="412; echo")
 
     def test_a_release_run_on_another_ref_refuses(self):
         self.github()
@@ -411,6 +411,38 @@ class Candidate(Tool):
             env={**self.env, "GITHUB_REF": "refs/heads/main"},
         )
         self.assertEqual(r.returncode, 1)
+        self.assertIn(
+            "releases only from refs/heads/iso-v0, not refs/heads/main", r.stderr
+        )
+
+    def test_a_run_id_with_a_leading_zero_refuses(self):
+        self.github()
+        self.refused("build_run_id '0412' is not a run id", run_id="0412")
+
+    def test_a_latest_created_with_an_offset_is_ordered_and_stored_as_utc(self):
+        self.github(
+            labels={"org.opencontainers.image.created": "2026-10-10T02:00:00.5+02:00"}
+        )
+        self.assertEqual(self.check().returncode, 0)
+        doc = json.loads((self.dir / "out/release-candidate.json").read_text())
+        self.assertEqual(doc["order"][0]["latest_created"], "2026-10-10T00:00:00Z")
+
+    def test_a_latest_created_that_is_not_a_time_refuses(self):
+        self.github(labels={"org.opencontainers.image.created": "yesterday"})
+        self.refused("org.opencontainers.image.created label 'yesterday' is not a time")
+
+    def test_a_latest_created_without_a_time_zone_refuses(self):
+        self.github(labels={"org.opencontainers.image.created": "2026-10-10T00:00:00"})
+        self.refused("label '2026-10-10T00:00:00' names no time zone")
+
+    def test_a_candidate_labelled_with_another_commit_refuses(self):
+        self.github()
+        fx = self.fixture()
+        fx["configs"][f"{REG}/{NAMES[0]}@{digest(1)}"][
+            "org.opencontainers.image.revision"
+        ] = OLD
+        self.registry(fx)
+        self.refused(f"candidate names revision '{OLD}', not the request's commit {SHA}")
 
 
 if __name__ == "__main__":

@@ -79,7 +79,13 @@ def labels(ref):
 def when(text, what):
     if not isinstance(text, str) or not text:
         raise Refused(f"{what}: no {CREATED} label")
-    return datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    try:
+        time = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        raise Refused(f"{what}: {CREATED} label '{text}' is not a time") from None
+    if time.tzinfo is None:
+        raise Refused(f"{what}: {CREATED} label '{text}' names no time zone")
+    return time.astimezone(datetime.timezone.utc)
 
 
 def order(repo, digests, commit):
@@ -125,8 +131,14 @@ def order(repo, digests, commit):
                 labels(f"{repository}@{latest}"),
                 labels(f"{repository}@{candidate}"),
             )
-            entry["latest_created"] = old.get(CREATED)
-            if not when(new.get(CREATED), candidate) > when(old.get(CREATED), latest):
+            latest_time = when(old.get(CREATED), latest)
+            entry["latest_created"] = latest_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+            # The build checks the label (system/check-image-revision.sh); the release does too.
+            if new.get(REVISION) != commit:
+                why.append(
+                    f"{repository}: candidate names revision '{new.get(REVISION)}', not the request's commit {commit}"
+                )
+            if not when(new.get(CREATED), candidate) > latest_time:
                 why.append(
                     f"{repository}: candidate created {new.get(CREATED)} is not later than :latest {old.get(CREATED)}"
                 )
@@ -178,7 +190,7 @@ def superseded(repo, run, verdicts):
 
 def check(out):
     run_id = os.environ.get("BUILD_RUN_ID", "")
-    if not re.fullmatch(r"[0-9]+", run_id):
+    if not re.fullmatch(r"[1-9][0-9]*", run_id):
         raise Refused(f"build_run_id '{run_id}' is not a run id")
     ref = os.environ.get("GITHUB_REF", "")
     if ref != RELEASE_REF:
@@ -254,7 +266,10 @@ def check(out):
         "order": verdicts,
         "superseded": superseded(repo, run, verdicts),
     }
-    schema.validate(candidate, schema.load("release-candidate"))
+    try:
+        schema.validate(candidate, schema.load("release-candidate"))
+    except ValueError as error:
+        raise Refused(f"release-candidate.json: {error}") from None
     (out / "release-candidate.json").write_text(json.dumps(candidate, indent=2) + "\n")
     return candidate
 
@@ -270,7 +285,9 @@ def main(argv):
             result = check(a.out)
         else:
             if os.environ.get("GITHUB_REF") != RELEASE_REF:
-                raise Refused(f"release.yml releases only from {RELEASE_REF}")
+                raise Refused(
+                    f"release.yml releases only from {RELEASE_REF}, not {os.environ.get('GITHUB_REF', '')}"
+                )
             candidate = json.loads((a.dir / "release-candidate.json").read_text())
             result = order(
                 os.environ["GITHUB_REPOSITORY"],
