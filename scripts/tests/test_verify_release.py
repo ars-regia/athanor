@@ -169,6 +169,8 @@ class ReleaseProblems(unittest.TestCase):
 
     def test_a_writer_of_latest_in_another_spelling_fails(self):
         for call in ("bash system/tag-images.sh --registry r \\\n          --tag latest d.txt",
+                     "bash system/tag-images.sh --registry r --tag \\\n            latest d.txt",
+                     "bash system/tag-images.sh --registry r --tag\tlatest d.txt",
                      "bash system/tag-images.sh --registry r --tag=latest d.txt",
                      "bash system/tag-images.sh --registry r --tag \"latest\" d.txt",
                      "cd system && bash tag-images.sh --registry r --tag latest d.txt"):

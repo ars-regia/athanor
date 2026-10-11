@@ -403,12 +403,13 @@ RELEASE_DISPATCH_STEP = {
     "env": {"GH_TOKEN": "${{ github.token }}", "GH_REPO": "${{ github.repository }}"},
     "run": RELEASE_DISPATCH,
 }
+# ponytail: an input reached without the word, as in toJSON(github.event), is not recognised.
 INPUT_IN_RUN = re.compile(r"\$\{\{(?:(?!\}\}).)*\binputs\b", re.S)
 # system/tag-images.sh is the one script that moves a tag of the system images (PL35); a raw
 # skopeo copy onto :latest is not recognised, nor a tag held in a variable, and ADR-0111 item 5
 # accepts that the registry itself binds no workflow.
-LATEST_WRITER = re.compile(r"tag-images\.sh\b[^\n]*--tag[= ][\"']?latest\b(?![-.\w])")
-STABLE_WRITER = re.compile(r"promote\.sh\b|tag-images\.sh\b[^\n]*--tag[= ][\"']?stable\b(?![-.\w])")
+LATEST_WRITER = re.compile(r"tag-images\.sh\b[^\n]*--tag(?:=|\s+)[\"']?latest\b(?![-.\w])")
+STABLE_WRITER = re.compile(r"promote\.sh\b|tag-images\.sh\b[^\n]*--tag(?:=|\s+)[\"']?stable\b(?![-.\w])")
 
 
 def release_problems(root):
