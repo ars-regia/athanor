@@ -493,6 +493,20 @@ class SignImages(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stderr)
         self.assertIn("after the copy", r.stderr)
 
+    def test_a_rerun_after_a_partial_move_completes_the_others(self):
+        """tag-latest stopped after its first repository: the re-run moves the others to the
+        recorded digests and leaves the first where it is (PB13 gate)."""
+        self.digests()
+        recorded = {f"{REG}/{name}": self.tags[f"{REG}/{name}:412"] for name in NAMES}
+        first, *rest = sorted(recorded)
+        self.tags[f"{first}:latest"] = recorded[first]
+        self.tags.update({f"{repository}:latest": "sha256:" + "0" * 64 for repository in rest})
+        (self.state / "tags.json").write_text(json.dumps(self.tags))
+        r = self.tag()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        tags = json.loads((self.state / "tags.json").read_text())
+        self.assertEqual({repository: tags[f"{repository}:latest"] for repository in recorded}, recorded)
+
     def test_the_iso_latest_moves_to_the_digest_of_its_run(self):
         iso = "sha256:" + "7" * 64
         self.tags[f"{REG}/athanor-iso:412"] = iso
