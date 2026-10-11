@@ -175,14 +175,14 @@ The policy, keys, registries.d and verification are UT2, UT3 and UT5. This secti
 
 **UD25. Sign, verify, then tag.** _(Landed, #299.)_ The order of a release run becomes:
 
-PB13 moves these steps into `release.yml` (doc_pipeline.md PL56: `sign-images`, `verify-images`, `tag-latest`), in the same order, after a `candidate` job that checks the build; the Orchestrator's jobs below leave with PB13's second pull request.
+Since PB13 these steps run in `release.yml` (doc_pipeline.md PL56), in the same order, after a `candidate` job that checks the build; the build's last job, `request-release`, dispatches it on `iso-v0`. The Orchestrator signs, verifies and tags no system image; `main`'s own copy of it keeps the old jobs for a hand release of `main`.
 
 1. the build job pushes `:<run_id>` and writes `image-digests.txt`;
-2. `sign-system-images` (the `signing` environment, the key alone in its job, UT2) signs by digest, then writes the `signature` evidence file;
-3. `verify-system-images` (no environment, no secret) pulls each digest anonymously through the shipped policy (`system/verify-images.sh`); it runs also when signing was skipped, so an unsigned image fails the run;
-4. `tag-system-images` (no key) copies `docker://<repo>@<digest>` to `:latest` and re-reads it (`system/tag-images.sh`); the script refuses a run whose branch is not in `KERNEL_TRUSTED_REFS` (`iso-v0`, `main`), so a dispatch from another branch publishes `:<run_id>` and leaves `:latest` alone. The job needs the whole build job, ISO included, so `:latest` never moves ahead of the ISO of its run.
+2. `sign-images` (the `signing` environment, the key alone in its job, UT2) signs by digest;
+3. `verify-images` (no environment, no secret) pulls each digest anonymously through the shipped policy (`system/verify-images.sh`); it runs also when signing was skipped, so an unsigned image fails the run, and it uploads the `signature` evidence as `evidence-<build_run_id>-signature`;
+4. `tag-latest` (no key) checks again that `:latest` never moves backwards (PL58), then copies `docker://<repo>@<digest>` to `:latest` and re-reads it (`system/tag-images.sh`); the script refuses a run whose branch is not in `KERNEL_TRUSTED_REFS` (`iso-v0`, `main`), so a dispatch from another branch publishes `:<run_id>` and leaves `:latest` alone. The release starts only after the whole build job, ISO included, so `:latest` never moves ahead of the ISO of its build.
 
-The ISO is still built in the build job from `:<run_id>`. Acceptance: in one run, the registry's first write of `:latest` (from the job logs) comes after the `sign-system-images` job finishes. `sign-images.sh` addresses digests, not tags (its tag comparison of today stays as a guard).
+The ISO is still built in the build job from `:<run_id>`. Acceptance: in one run, the registry's first write of `:latest` (from the job logs) comes after the `sign-images` job of `release.yml` finishes. `sign-images.sh` addresses digests, not tags (its tag comparison of today stays as a guard).
 
 **UD26. The transition from unverified references needs no step of its own.** UT4's migration moves every machine whose image carries the policy. A machine on an image older than the policy reaches one through its normal unverified `upgrade` of `:latest` until `:latest` names an image with the policy, then migrates. Images pushed to `:latest` after UD25 are all signed, which closes the unsigned window of F2. Acceptance: dev-VM stage `migrate` (exists).
 

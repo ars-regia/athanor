@@ -121,8 +121,8 @@ no job holds a key it does not use:
 | Environment | Secrets | Job |
 | --- | --- | --- |
 | `signing-kernel` | `SECUREBOOT_SIGNING_KEY`, `MODULE_SIGNING_KEY` | `nvidia-kmod-sign` of `athanor-forge-orchestrator.yml`, only when a kernel or NVIDIA change leaves the signed vmlinuz or modules missing |
-| `signing-images` | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | `sign-system-images` of `athanor-forge-orchestrator.yml` |
-| `signing` | the four keys it still holds; `MOK_PRIVATE_KEY`, a fifth that no workflow used, was deleted by the maintainer before the export of 2026-10-09 | `sign-system-images` of `athanor-forge-orchestrator.yml`, during the image key rotation only |
+| `signing-images` | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | `sign-images` of `release.yml` |
+| `signing` | the four keys it still holds; `MOK_PRIVATE_KEY`, a fifth that no workflow used, was deleted by the maintainer before the export of 2026-10-09 | `sign-images` of `release.yml`, during the image key rotation only, and `main`'s own copy of `athanor-forge-orchestrator.yml` for a hand release of `main` |
 
 `signing` is the environment the split replaces. It holds image key 1, which signs the
 transitional release of the image key rotation (`docs/operations/secrets.md` section 4.1), so

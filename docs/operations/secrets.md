@@ -22,7 +22,7 @@ Workflow references are `file:line` under `.github/workflows/` at `e238b833` (`o
 | --- | --- | --- | --- | --- | --- |
 | SEC1 | `SECUREBOOT_SIGNING_KEY` | environment `signing-kernel` | X.509 private key, RSA 4096, PEM, unencrypted | `athanor-forge-orchestrator.yml` `nvidia-kmod-sign` (:190, environment :203), the sign-kernel job of D43, through `forge/specs/azoth/signer/run.sh sign`: written to a 0600 file for the one command, mounted read-only into the signer image run by digest without network, `sign-kernel.sh vmlinuz` signs the kernel's vmlinuz (`azoth-boot`). No image build sees it; 1.0 has no UKI (A2-8) | `forge/specs/azoth/keys/secureboot/athanor-secureboot.pem` and `.der` (the form `mokutil --import` takes) |
 | SEC2 | `MODULE_SIGNING_KEY` | environment `signing-kernel` | X.509 private key, RSA 4096, PEM, unencrypted | `athanor-forge-orchestrator.yml` `nvidia-kmod-sign`, as SEC1, through `forge/specs/azoth/signer/run.sh sign`, as SEC1; `sign-kernel.sh modules` signs the NVIDIA modules | `forge/specs/azoth/keys/modules/athanor-modules.pem`, compiled into Azoth (`kernel-local:42`, `CONFIG_SYSTEM_TRUSTED_KEYS`) |
-| SEC3 | `COSIGN_PRIVATE_KEY` | environment `signing-images` | cosign key pair, ECDSA P-256, private half encrypted with SEC4 | `athanor-forge-orchestrator.yml` `sign-system-images` (:299, environment :310) and `release.yml` `sign-images` (PB13) through `system/sign-images.sh:34-49`; the key-based image signature of UT2 | `system/keys/athanor-image-1.pub`, rendered into the image policy (UT3) |
+| SEC3 | `COSIGN_PRIVATE_KEY` | environment `signing-images` | cosign key pair, ECDSA P-256, private half encrypted with SEC4 | `release.yml` `sign-images` (PB13) through `system/sign-images.sh:34-49`; the key-based image signature of UT2 | `system/keys/athanor-image-1.pub`, rendered into the image policy (UT3) |
 | SEC4 | `COSIGN_PASSWORD` | environment `signing-images` | passphrase of SEC3 | as SEC3 (:335) | none |
 | SEC7 | retired 2026-10-09 (replaced by SEC15; the maintainer deletes `KERNEL_BUMP_TOKEN`, then sets `retired` in `personal_tokens` of `actions.json`) | | | | |
 | SEC8 | retired 2026-10-09 (replaced by SEC15; the maintainer deletes `SPECS_UPDATE_TOKEN`, as for SEC7) | | | | |
@@ -61,9 +61,9 @@ The repository variables set are `SETTINGS_APP_CLIENT_ID`, `EVIDENCE_REGISTRY` a
 | ENV2 | `stable-override` | none | **missing on GitHub** | PR #180 only (`promote-stable.yml`, checked by `system/require-review.sh`); `doc_update_trust.md` on that branch asks for required reviewers, the release branch only and no administrator bypass |
 | ENV3 | `delete` | none | deleted by the maintainer; absent from the export of 2026-10-09 | nothing |
 | ENV4 | `github-pages` | none | deleted with the `gh-pages` branch; absent from the export of 2026-10-09 | nothing; it served the DNF channel, removed by ADR-0076 decision 2 |
-| ENV5 | `signing-images` | SEC3, SEC4 | required reviewer `hr-mes`, self-review allowed (`prevent_self_review` false, see `github-settings.md` section 7), no administrator bypass; deployment branches `iso-v0` and `main`, both protected (required check `gate` on `iso-v0`, `Kernel gate` on `main`; no force push, no deletion) | `athanor-forge-orchestrator.yml:299` (`sign-system-images`) and `release.yml` `sign-images` (PB13), both still in `signing` during the rotation of section 4.1, which moves them back to `signing-images` |
+| ENV5 | `signing-images` | SEC3, SEC4 | required reviewer `hr-mes`, self-review allowed (`prevent_self_review` false, see `github-settings.md` section 7), no administrator bypass; deployment branches `iso-v0` and `main`, both protected (required check `gate` on `iso-v0`, `Kernel gate` on `main`; no force push, no deletion) | `release.yml` `sign-images` (PB13), in `signing` during the rotation of section 4.1, which moves it to `signing-images`; `verify.py workflows` refuses both environments outside `release.yml` (PL56) |
 | ENV7 | removed 2026-10-09 (ADR-0103 D4) | | | |
-| ENV6 | `signing` | SEC1 to SEC4 (`MOK_PRIVATE_KEY`, which no workflow used, deleted by the maintainer; absent from the export of 2026-10-09) | as ENV5; declared in `environments.json` only during the image key rotation (section 4.1), as an alias of ENV5 for `scripts/verify.py` | `athanor-forge-orchestrator.yml` `sign-system-images` and `release.yml` `sign-images` (PB13) until step 3 of section 4.1; deleted at step 4 |
+| ENV6 | `signing` | SEC1 to SEC4 (`MOK_PRIVATE_KEY`, which no workflow used, deleted by the maintainer; absent from the export of 2026-10-09) | as ENV5; declared in `environments.json` only during the image key rotation (section 4.1), as an alias of ENV5 for `scripts/verify.py` | `release.yml` `sign-images` (PB13) until step 3 of section 4.1, and `main`'s own copy of the Orchestrator for a hand release of `main`; deleted at step 4 |
 | ENV8 | `release` | none | required reviewer `hr-mes`, self-review allowed, no administrator bypass; deployment branches `iso-v0` and `main` | `promote-stable.yml` `promote`, so only a promotion asks for it, and the image signing does not wait for it ([ADR-0104](../decisions/0104-release-workflow-and-stable-gate.md), amending [ADR-0103](../decisions/0103-audit-5-decisions.md) D2, D25) |
 | ENV9 | `bots` | SEC15, VAR8 | no reviewer, no wait timer, no administrator bypass; deployment branches `iso-v0` and `main`. The environment is on the jobs that mint a token and on no other (PL5) | the jobs of SEC15 |
 
@@ -168,10 +168,10 @@ Lines marked _(Proposal)_ take effect when a second maintainer joins.
 Today: one maintainer holds every key. `signing-kernel` and `signing-images` each have one
 required reviewer, who may approve their own runs, because no second signing reviewer is named
 (ADR-0062). Decision A2-27 keeps two approvals per release cycle (`sign-kernel` in
-`signing-kernel`, then `sign-system-images` in `signing-images`; ADR-0064). `sign-kernel` is the
+`signing-kernel`, then `sign-images` of `release.yml` in `signing-images`; ADR-0064). `sign-kernel` is the
 `nvidia-kmod-sign` job of the Orchestrator (a manual cycle dispatches the Orchestrator), which
 runs only when a kernel or NVIDIA change leaves the signed modules or vmlinuz missing; any other
-cycle asks for `sign-system-images` alone.
+cycle asks for `sign-images` alone.
 
 | Id | Rule |
 | --- | --- |
@@ -230,8 +230,8 @@ because the Orchestrator, not a pull request, publishes the signed vmlinuz.
    `nvidia-kmod-sign` job waits for the `signing-kernel` approval; once approved, `publish` of
    NVIDIA kmod verifies the signed vmlinuz and publishes `azoth-boot` beside the modules.
 5. **The system images build.** In the same Orchestrator run, the system stage copies the signed
-   vmlinuz from `azoth-boot` by digest, and `sign-system-images` waits for the `signing-images`
-   approval. From then on a cycle without a kernel or NVIDIA change asks only for that approval.
+   vmlinuz from `azoth-boot` by digest; the run then dispatches `release.yml`, whose `sign-images`
+   waits for the `signing-images` approval. From then on a cycle without a kernel or NVIDIA change asks only for that approval.
 
 ### 4.1 Image key rotation, October 2026
 
@@ -243,14 +243,14 @@ before that environment is deleted, and no installed machine needs the out-of-ba
    there and in `signing-images`, which holds key 2 as SEC3 and SEC4. Key 1 is archived without
    its password. `system/keys/athanor-image-2.pub` is committed, so every image built from then
    on trusts both keys.
-2. **A transitional release is signed with key 1.** `sign-system-images` runs in `signing` until
+2. **A transitional release is signed with key 1.** `sign-images` runs in `signing` until
    a release that carries key 2 is promoted to `stable` and the machines meant to keep updating
    without recovery have booted it: bootc checks an image against the policy of the booted
    deployment. `promote.sh` and `sign-images.sh` verify against the keys of the checkout, which
    already holds both, so they cannot tell when this holds: the maintainer decides it. Until
    step 4, the D43 lint of `scripts/verify.py` treats `signing` as `signing-images`; the
    environment has the same reviewer, branches and no administrator bypass.
-3. **The images are signed with key 2.** `sign-system-images` moves back to `signing-images`, and
+3. **The images are signed with key 2.** `sign-images` moves to `signing-images`, and
    `sign-images.sh` verifies the signature against `athanor-image-2.pub` alone, so an image still
    signed with key 1 fails there instead of passing a policy that trusts both keys.
 4. **Key 1 leaves.** One release after the first image signed with key 2,
