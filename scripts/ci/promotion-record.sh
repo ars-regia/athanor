@@ -4,7 +4,8 @@
 # environment) and system/promote.sh (the promote job, environment release) both source it,
 # so the record the bundle signs and the release approval covers is computed by the same code
 # that checks it again after the approval (doc_pipeline.md PL60). Nothing here writes to a
-# registry: the only copy is the policy pull into a local directory.
+# registry: the only copy is the policy pull of system/verify-images.sh, which runs it in the
+# build run's builder image, because the runner's skopeo predates the policy's keyPaths.
 # The checks, for each image promoted:
 #   - image-digests.txt is this run's and passes image-digests.sh --check, and :RUN_ID still
 #     names the recorded digest;
@@ -14,14 +15,19 @@
 #     its hardware evidence in 0.9 (release-1.0.md 4.2);
 #   - the newest evidence is older than the dwell (UD5), and the package set is there (D16);
 #   - the image carries the classic cosign attachment machines verify, and it pulls through
-#     the policy rendered from the public keys under system/keys, as a machine would;
+#     the policy rendered from the public keys under system/keys, as a machine would
+#     (system/verify-images.sh --builder, with the builder_content_hash of the run's
+#     release-request.json, which the record names: the tag is a content hash, not a digest,
+#     so the approval covers which image verified). The builder must still be in the registry:
+#     forge/scripts/clean_ghcr.sh keeps its two newest versions, so a run whose builder inputs
+#     changed twice since cannot be promoted, and its plan stops on the pull;
 #   - its build time is newer than the current stable's: a machine never follows a tag
 #     backwards (UT5).
 # Defines promotion_args "$@" (sets run and override), promotion_record DAY OUT (runs every
 # check, writes the record to OUT, sets promote, recorded and previous) and stable_of REPOSITORY.
 # Environment: REGISTRY (default ghcr.io/<GITHUB_REPOSITORY_OWNER>); PROMOTE_ARTIFACTS
-#              (default artifacts); PROMOTE_DWELL_HOURS (default 24); PROMOTE_KEYS_DIR
-#              (default system/keys); skopeo logged in.
+#              (default artifacts, as system/fetch-evidence.sh writes it); PROMOTE_DWELL_HOURS
+#              (default 24); PROMOTE_KEYS_DIR (default system/keys); skopeo logged in; podman.
 
 usage() {
     echo "usage: ${0##*/} [--hardware-override athanor-system-nvidia] RUN_ID" >&2
@@ -55,7 +61,6 @@ promotion_args() {
 }
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-retry="$root/forge/scripts/retry.sh"
 keys_dir=${PROMOTE_KEYS_DIR:-$root/system/keys}
 artifacts=${PROMOTE_ARTIFACTS:-artifacts}
 dwell=$((${PROMOTE_DWELL_HOURS:-24} * 3600))
@@ -96,10 +101,11 @@ sums() { # sums DIR PATH... (relative to DIR) -> {"PATH": "<sha256>", ...}
 
 promotion_record() { # promotion_record DAY OUT
     local day=$1 out=$2 repository tag digest name gate finished current stable new old age images skips trigger evidence_sums package_sums key_sums
-    local -a gates package_files evidence_files key_files
-    bash "$root/forge/specs/athanor-update/SOURCES/usr/libexec/athanor-update/render-policy" \
-        --registry "$REGISTRY" --keys-dir "$keys_dir" --out "$work/policy"
+    local -a gates package_files evidence_files key_files verify=()
+    local builder
     bash "$root/system/image-digests.sh" --registry "$REGISTRY" --check "$artifacts/image-digests.txt"
+    builder=$(jq -r '.builder_content_hash // empty' "$artifacts/release-request.json")
+    [[ -n $builder ]] || die "$artifacts/release-request.json has no builder_content_hash: no image to verify in"
     declare -gA recorded=() previous=()
     while read -r repository tag digest; do
         [[ $tag == "$run" ]] || die "image-digests.txt is for run $tag, not $run"
@@ -141,10 +147,7 @@ promotion_record() { # promotion_record DAY OUT
         skopeo inspect --raw "docker://$repository:sha256-${digest#sha256:}.sig" |
             jq -e --arg type "$SIMPLE_SIGNING" '.layers | any(.mediaType == $type)' > /dev/null ||
             die "$repository@$digest has no signature a machine can verify (sha256-<hex>.sig)"
-        bash "$retry" skopeo --registries.d "$work/policy/registries.d" copy --policy "$work/policy/policy.json" \
-            "docker://$repository@$digest" "dir:$work/pull" ||
-            die "$repository@$digest does not verify with the keys under system/keys: machines would refuse it"
-        rm -r "$work/pull"
+        verify+=("$repository $run $digest")
         stable=$(stable_of "$repository")
         if [[ -n $stable ]]; then
             if [[ $stable == "$digest" ]]; then
@@ -161,6 +164,10 @@ promotion_record() { # promotion_record DAY OUT
         fi
         promote+=("$name")
     done
+    # One call: the digests file must name the default image, which is always among them.
+    printf '%s\n' "${verify[@]}" > "$work/verify.txt"
+    VERIFY_KEYS_DIR=$keys_dir bash "$root/system/verify-images.sh" --registry "$REGISTRY" --builder "$builder" "$work/verify.txt" >&2 ||
+        die "$(awk '{ printf "%s@%s ", $1, $3 }' "$work/verify.txt")- one of them does not verify with the keys under system/keys: machines would refuse it"
     ((${#promote[@]} > 0)) || die "nothing to promote from run $run:$(for name in "${!skipped[@]}"; do printf ' %s %s;' "$name" "${skipped[$name]}"; done)"
 
     age=$(($(date -u +%s) - newest))
@@ -188,12 +195,12 @@ promotion_record() { # promotion_record DAY OUT
     done | jq -s 'sort_by(.name)')
     trigger=manual
     if [[ -n ${GITHUB_RUN_ID:-} ]]; then trigger=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID; fi
-    jq -n -S --indent 2 --argjson run "$run" --arg day "$day" --arg registry "$REGISTRY" --arg trigger "$trigger" --arg override "$override" \
+    jq -n -S --indent 2 --argjson run "$run" --arg day "$day" --arg registry "$REGISTRY" --arg trigger "$trigger" --arg override "$override" --arg builder "$builder" \
         --argjson images "$images" --argjson skipped "$skips" \
         --argjson evidence "$evidence_sums" --argjson packages "$package_sums" \
         --argjson keys "$key_sums" --argjson dwell_hours "$((dwell / 3600))" \
         '{run_id: $run, day: $day, registry: $registry, trigger: $trigger, images: $images, skipped: $skipped,
       overrides: (if $override == "" then [] else [$override] end), evidence: $evidence, packages: $packages,
-      keys: $keys, dwell_hours: $dwell_hours}' \
+      keys: $keys, dwell_hours: $dwell_hours, builder_content_hash: $builder}' \
         > "$out"
 }

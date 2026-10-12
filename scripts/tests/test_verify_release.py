@@ -200,5 +200,25 @@ class ReleaseProblems(unittest.TestCase):
                           "environment release (PL60)"])
 
 
+class PolicyPullProblems(unittest.TestCase):
+    def test_policy_pull_the_repository_passes(self):
+        self.assertEqual(verify.policy_pull_problems(ROOT), [])
+
+    def test_policy_pull_outside_verify_images_fails(self):
+        root = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root)
+        (root / "scripts/ci/tests").mkdir(parents=True)
+        (root / "system").mkdir()
+        (root / "scripts/ci/promote.sh").write_text(
+            'skopeo --registries.d "$d" \\\n    copy --policy "$p" docker://r@d dir:x\n')
+        (root / "scripts/ci/global.sh").write_text("skopeo --policy p copy docker://r@d dir:x\n")
+        (root / "scripts/ci/comment.sh").write_text("# skopeo copy --policy p\n")
+        (root / "scripts/ci/tests/fake.sh").write_text("skopeo copy --policy p\n")
+        (root / "system/verify-images.sh").write_text("skopeo copy --policy p\n")
+        self.assertEqual(verify.policy_pull_problems(root), [
+            f"scripts/ci/{name}: pulls through a policy outside system/verify-images.sh, which runs it "
+            "in the builder image (runner skopeo 1.13)" for name in ("global.sh", "promote.sh")])
+
+
 if __name__ == "__main__":
     unittest.main()

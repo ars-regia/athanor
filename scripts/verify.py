@@ -155,7 +155,7 @@ def check_workflows():
                     r.fail(f"{wf.name}:{i+1} log inviati a un servizio esterno ({host})")
 
     # 1e. D43: signing keys only in sign-only jobs
-    for problem in signing_problems(ROOT) + merge_queue_problems(ROOT) + release_problems(ROOT):
+    for problem in signing_problems(ROOT) + merge_queue_problems(ROOT) + release_problems(ROOT) + policy_pull_problems(ROOT):
         r.fail(problem)
 
     # 1d. actionlint, se disponibile
@@ -584,6 +584,31 @@ def signing_problems(root):
         for secret in sorted(undeclared):
             problems.append(f"{name}: reads {secret}, which neither {ENVIRONMENTS_JSON} nor {ACTIONS_JSON} "
                             "declares (D43)")
+    return problems
+
+
+# Either order: --policy is a global flag of skopeo and may come before the subcommand.
+POLICY_PULL = re.compile(r"(?=.*\bcopy\b).*--policy\b")
+# verify-images.sh runs the pull in the builder image; the dev VM runs Fedora's skopeo.
+POLICY_PULLERS = {"system/verify-images.sh", "scripts/devvm/acceptance/run.sh"}
+
+
+def policy_pull_problems(root):
+    """A pull through the shipped policy (skopeo copy --policy) happens in system/verify-images.sh
+    alone, which runs skopeo in the builder image: the runner's skopeo 1.13 rejects the policy's
+    keyPaths (promote-stable run 38180393678). Tests are not scanned."""
+    root = Path(root)
+    problems = []
+    # ponytail: shell and workflow files only; extend if a pull lands in Python or a Justfile.
+    files = [*walk(root, ".sh"), *walk(root / ".github/workflows", ".yml"), *walk(root / ".github/workflows", ".yaml")]
+    for path in sorted(files):
+        name = path.relative_to(root).as_posix()
+        if name in POLICY_PULLERS or "tests" in path.relative_to(root).parts:
+            continue
+        code = re.sub(r"\\\n\s*", " ", read(path))
+        if any(POLICY_PULL.search(line) for line in code.splitlines() if not line.lstrip().startswith("#")):
+            problems.append(f"{name}: pulls through a policy outside system/verify-images.sh, which runs it "
+                            "in the builder image (runner skopeo 1.13)")
     return problems
 
 

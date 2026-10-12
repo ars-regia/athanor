@@ -18,6 +18,7 @@ shopt -s inherit_errexit
 # shellcheck source-path=SCRIPTDIR
 source "$(dirname "${BASH_SOURCE[0]}")/../scripts/ci/promotion-record.sh"
 promotion_args "$@"
+retry="$root/forge/scripts/retry.sh"
 plan=$artifacts/promotion.json
 [[ -f $plan ]] || die "no $plan: run scripts/ci/promotion-plan.sh first, then publish and verify the bundle"
 day=$(jq -r '.day' "$plan")
