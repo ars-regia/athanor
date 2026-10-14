@@ -12,10 +12,11 @@
 # that name already on the remote, left by a run that failed after the push, stops the script
 # naming it: remove it, or open its PR by hand. The PR is never merged here. LABEL must be on
 # the repository, declared with its colour in .github/settings/labels.json: the script checks
-# it before the push and never creates it. Needs git and an authenticated gh. The summary goes to $GITHUB_STEP_SUMMARY when it is set, else to stdout.
+# it before the push and never creates it. Needs git and an authenticated gh. The summary goes
+# to $GITHUB_STEP_SUMMARY when it is set, else to stdout.
 set -euo pipefail
 
-(($# >= 4 && $# <= 5)) || { sed -n '2,15p' "$0" >&2; exit 2; }
+(($# >= 4 && $# <= 5)) || { sed -n '2,16p' "$0" >&2; exit 2; }
 label=$1 prefix=$2 path=$3 out=$4
 base=${5:-$(git rev-parse --abbrev-ref HEAD)}
 [[ $base != HEAD ]] || { echo "open_bump_pr.sh: detached HEAD: give BASE" >&2; exit 2; }
