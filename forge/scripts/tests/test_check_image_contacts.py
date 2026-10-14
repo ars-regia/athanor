@@ -49,6 +49,21 @@ class ImageContacts(unittest.TestCase):
         self.write_dns("[Resolve]\nDNSOverTLS=yes\n")
         self.assertEqual(len(mod.config_problems(CONTACTS, self.root)), 1)
 
+    def test_a_commented_mode_does_not_count(self):
+        self.write_dns("[Resolve]\n# DNSOverTLS=opportunistic\nDNSOverTLS=yes\n")
+        self.assertEqual(len(mod.config_problems(CONTACTS, self.root)), 1)
+        self.write_dns("[Resolve]\nDNSOverTLS=yes\n# DNSOverTLS=opportunistic\n")
+        self.assertEqual(len(mod.config_problems(CONTACTS, self.root)), 1)
+
+    def test_a_later_drop_in_setting_the_mode_fails(self):
+        self.write_dns("[Resolve]\nDNSOverTLS=opportunistic\n")
+        for d in ("etc", "usr/lib"):
+            f = self.root / d / "systemd/resolved.conf.d/60-local.conf"
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text("[Resolve]\nDNSOverTLS=no\n")
+            self.assertEqual(len(mod.config_problems(CONTACTS, self.root)), 1)
+            f.unlink()
+
     def test_a_missing_resolver_drop_in_fails(self):
         self.assertIn("cannot read", mod.config_problems(CONTACTS, self.root)[0])
 
