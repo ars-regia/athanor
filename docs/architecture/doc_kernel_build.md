@@ -1,8 +1,10 @@
 # Athanor OS: Specifica del Kernel (costruzione, pin, manutenzione automatica)
 
-Stato: **approvata il 2026-09-03**; **revisione 2 del 2026-10-14 in attesa di approvazione del maintainer** (sezione 10: i job di `nvidia-kmod.yml` e della firma dei moduli, già in vigore dopo #388 e ADR-0110) (serie `stable` 7.x, `-O2` dal 2026-09-05, debuginfo
+Stato: **approvata il 2026-09-03** (serie `stable` 7.x, `-O2` dal 2026-09-05, debuginfo
 come OCI separato con retention di due versioni; dal 2026-09-04 Rust acceso,
-ThinLTO e `RANDSTRUCT` spenti, sezione 13). Sostituisce il
+ThinLTO e `RANDSTRUCT` spenti, sezione 13); **revisione 2 del 2026-10-14**, approvata con la
+pull request che la introduce: allinea le sezioni 7 e 10 ai job reali dei workflow dei moduli NVIDIA
+(#388, ADR-0110). Sostituisce il
 README "Testo Sacro" di `forge/specs/azoth/` e lo script
 `prepare-chimera.sh`. Il profilo del kernel e della piattaforma (configurazione, riga di
 comando, ruoli, integrità) è definito in [doc_kernel_profile.md](doc_kernel_profile.md):
@@ -396,10 +398,10 @@ Ogni PR di bump e ogni cambio in `forge/specs/azoth/**` passa:
    commit (`sha`) quando ha pubblicato un kernel nuovo o quando
    `system/kernel-artifacts.sh` non risponde `ready`; l'Orchestrator chiama il
    workflow riusabile `nvidia-kmod.yml` quando lo stato è `modules-missing`
-   (`doc_build_ordering.md`, O1-O4). Lì il job `artifacts` risolve il kernel per
-   digest e chiude con una nota se i moduli ci sono già (O5); il job `sign` li firma con la
+   (`doc_build_ordering.md`, O1-O4). Il workflow `call-nvidia-kmod-prepare.yml` ha i job `prepare`, `build` e `artifacts`: `artifacts` risolve il kernel per
+   digest e chiude con una nota se i moduli ci sono già (O5); il job `nvidia-kmod-sign` dell'Orchestrator li firma con la
    chiave dei moduli del progetto e firma una copia con una MOK effimera dal
-   profilo Secure Boot; il job `boot` (`boot.sh --mok --insmod`, tutti e quattro
+   profilo Secure Boot; il job `boot` di `nvidia-kmod.yml` (`boot.sh --mok --insmod`, tutti e quattro
    i casi) arruola quella MOK e nel guest carica il `nvidia.ko` firmato di ogni
    ramo, atteso `ENODEV` (firma accettata, GPU assente), una copia non firmata e
    quella firmata dalla MOK, attese `EKEYREJECTED`: SeaBIOS prova che la fiducia
@@ -520,8 +522,8 @@ la PR va in merge da sola; con prep rosso, o con il check rosso, resta aperta
 con il log del gate fallito. È l'unico momento in cui serve una persona, e sa
 già dove guardare. Al merge il push fa partire
 Kernel Build, che pubblica il kernel e avvia l'Orchestrator: questo chiama
-`nvidia-kmod.yml` per boot e pubblicazione dei moduli (firmati prima dal job
-`nvidia-kmod-sign`) e poi costruisce le
+`nvidia-kmod.yml` per boot e pubblicazione dei moduli (firmati prima dal job `nvidia-kmod-sign`
+dell'Orchestrator) e poi costruisce le
 immagini (`doc_build_ordering.md`, O1). Il cambio di release Fedora della rootfs
 (43→44) e il cambio di `KERNEL_CHANNEL` restano PR umane.
 
@@ -638,7 +640,7 @@ firma con `scripts/sign-file` del kernel-devel e l'hash di `CONFIG_MODULE_SIG_HA
 rilegge firmatario e chiave con `modinfo`. L'Orchestrator (`athanor-forge-orchestrator.yml`) risolve il kernel dei pin e i tag dei moduli
 (`system/kernel-artifacts.sh`; se non mancano, il ciclo finisce lì), costruisce i due rami
 (`call-nvidia-kmod-prepare.yml`: matrice, runner GitHub, `azoth-devel` per digest) e li firma nel
-job `nvidia-kmod-sign` (runner GitHub, environment `signing-kernel`: vede solo i `.ko` e la chiave,
+job `nvidia-kmod-sign` dell'Orchestrator (runner GitHub, environment `signing-kernel`: vede solo i `.ko` e la chiave,
 montata in sola lettura per la durata del comando). Il workflow `nvidia-kmod.yml` ha due job: `boot` (la catena della
 firma end-to-end in QEMU, gate 4 della sezione 7), `publish` (un'immagine
 `scratch` per ramo con `lib/modules/<kver>/extra/nvidia/*.ko`, il layout che
