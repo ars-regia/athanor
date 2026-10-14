@@ -17,16 +17,16 @@ image.
 implementation and its acceptance, #444, merge after it. The helper drop-in of section 5, #445,
 is merged (`e8dde2b8`).
 
-**The approved specifications that this choice departs from.** `doc_shell.md` SH1 (stage 4)
-and SH3 (the rows of cosmic-greeter as locker and of cosmic-osd) replace both components with
-"our lock" and "our polkit agent" in stage 4, and `doc_osd.md` OD15 keeps cosmic-osd's agent
-failure "reported, not patched" until the retirement step. For 0.9, ADR-0115 item 4 supersedes
-them: the lock and the polkit agent are upstream components packaged in Fedora, and Athanor's
-own lock and agent move to 1.1. Its consequences (the amendment of ADR-0103 D13) state that the
-lock and prompts specifications keep their words and are not edited, so `doc_shell.md` and
-`doc_osd.md` are not edited here either; they describe 1.1. The drop-in of section 5 does not
-patch cosmic-osd: it configures polkit's own helper unit, `polkit-agent-helper@.service`, and
-cosmic-osd's unit and program are unchanged.
+**The approved specifications.** `doc_shell.md` SH3 gives "our lock" and "our polkit agent"
+as the replacements of cosmic-greeter as locker and of cosmic-osd, in stage 4 (SH1), and
+`doc_osd.md` OD15 keeps cosmic-osd's agent failure "reported, not patched" until the retirement
+step. Keeping both components in 0.9 follows from SH3 itself: "A component leaves only when its
+replacement passes SH1's rule; until then the image keeps it" (`doc_shell.md:75`). ADR-0115
+item 4 moves Athanor's own lock and agent to 1.1, and its proposals leave the choice of the
+upstream components to the pull request that ships them; it names neither `doc_shell.md` nor
+`doc_osd.md`. SH3's stage 4 target and OD15's "not patched" remain as written, and this spike
+edits neither. The drop-in of section 5 does not patch cosmic-osd: it configures polkit's own
+helper unit, `polkit-agent-helper@.service`, and cosmic-osd's unit and program are unchanged.
 
 ## 1. What the image runs today
 
@@ -173,8 +173,9 @@ The tally exists after any login. The account phase of system-auth's pam_failloc
 `open_tally(create=1)` (`pam_faillock.c:272-287`), so the first successful login creates
 `/run/faillock/<user>`, 0 bytes, mode 0660. From then on the helper, under
 `ProtectSystem=strict`, gets `EROFS` when it opens the file `O_RDWR`; `check_tally` does not
-tolerate `EROFS`, preauth returns `PAM_SYSTEM_ERR`, and every polkit prompt fails until reboot,
-whatever the agent. This is the cause of #144. The desktop has `/run/faillock/hr-mes`, so it is
+tolerate `EROFS`, preauth returns `PAM_SYSTEM_ERR`, and every polkit prompt fails, whatever the
+agent. A reboot empties `/run/faillock`, but the next login creates the tally again, so in a
+logged-in session polkit always fails. This is the cause of #144. The desktop has `/run/faillock/hr-mes`, so it is
 in the failing state now. This is read from source (linux-pam `v1.7.1`) and configuration, not
 run.
 
