@@ -17,8 +17,12 @@ DNSOverTLS=opportunistic, ADR-0103 D11).
 A contact that names remote_file, remote_url, remote_fingerprint and remote_key_sha256 needs that
 .flatpakrepo in the image to carry, in [Flatpak Repo], the Url and a GPGKey that is exactly the pinned
 blob, with the pinned fingerprint and an expiry more than 90 days away, and no Filter or Subset
-line (the Flathub remote, doc_software.md decision 6). A contact with must_enable = true needs its
-unit enabled.
+line, and no key outside REMOTE_KEYS (the Flathub remote, doc_software.md decision 6). A contact with
+must_enable = true needs its unit enabled.
+The check sees timers and the listed units only. It does not follow Wants=, Requires=, Upholds=,
+OnSuccess= or OnFailure= written inside another unit, nor sockets, paths or D-Bus activation, so a
+beacon pulled in that way is not seen. scripts/verify.py contacts makes the same comparison against
+the presets of the checkout.
 """
 
 import base64
@@ -32,6 +36,8 @@ from datetime import datetime, timedelta, timezone
 
 
 EXPIRY_WARNING_DAYS = 90
+# The keys of [Flatpak Repo] the remote file may carry; NoEnumerate, NoDeps and the like are refused.
+REMOTE_KEYS = {"title", "url", "homepage", "comment", "description", "icon", "gpgkey"}
 SCOPES = (("etc/systemd/system", "usr/lib/systemd/system"), ("etc/systemd/user", "usr/lib/systemd/user"))
 
 
@@ -185,6 +191,8 @@ def remote_problems(contacts, root, enabled, now=None):
             ini.read_string(text)
             repo = ini["Flatpak Repo"]
             url, key = repo.get("Url"), repo.get("GPGKey", "")
+            for extra in sorted(set(repo) - REMOTE_KEYS):
+                found.append(f"{c['id']}: {name} sets {extra}, which the remote file may not")
             blob = base64.b64decode(key, validate=True)
             got = key_fingerprint(key)
             expiry = key_expiry(blob)

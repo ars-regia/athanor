@@ -10,7 +10,7 @@ import re
 import tempfile
 import tomllib
 import unittest
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 spec = importlib.util.spec_from_file_location("check_image_contacts", ROOT / "forge/scripts/check_image_contacts.py")
@@ -128,6 +128,8 @@ class ImageContacts(unittest.TestCase):
 
 SHIPPED = ROOT / "forge/specs/athanor-system-config/SOURCES/usr/share/flatpak/remotes.d/flathub.flatpakrepo"
 REMOTE = "usr/share/flatpak/remotes.d/flathub.flatpakrepo"
+# A fixed clock, 200 days before the pinned key expires, so the tests do not age with the calendar.
+CLOCK = datetime(2027, 6, 14, tzinfo=timezone.utc) - timedelta(days=200)
 
 
 class FlathubRemote(unittest.TestCase):
@@ -143,7 +145,7 @@ class FlathubRemote(unittest.TestCase):
     def write(self, text):
         (self.root / REMOTE).write_text(text)
 
-    def problems(self, enabled=("athanor-flatpak-update.timer",), now=None):
+    def problems(self, enabled=("athanor-flatpak-update.timer",), now=CLOCK):
         return mod.remote_problems(CONTACTS, self.root, set(enabled), now)
 
     def blob(self):
@@ -181,6 +183,11 @@ class FlathubRemote(unittest.TestCase):
 
     def test_a_filter_or_a_subset_fails(self):
         for line in ("Filter=/etc/flatpak/x.filter", "subset = verified"):
+            self.write(SHIPPED.read_text() + line + "\n")
+            self.assertTrue(any("Filter or Subset" in p for p in self.problems()), line)
+
+    def test_a_key_outside_the_allowed_list_fails(self):
+        for line in ("NoEnumerate=true", "NoDeps=true"):
             self.write(SHIPPED.read_text() + line + "\n")
             self.assertEqual(len(self.problems()), 1, line)
 

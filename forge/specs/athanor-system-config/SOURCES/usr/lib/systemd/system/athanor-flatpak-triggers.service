@@ -1,7 +1,7 @@
 [Unit]
 Description=Refresh the caches of the system Flatpak exports
 Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_software.md
-# Started by athanor-flatpak-update.service (OnSuccess=). Flatpak runs these triggers in
+# Started by athanor-flatpak-update.service (OnSuccess= and OnFailure=). Flatpak runs these triggers in
 # bubblewrap, which needs CAP_SYS_ADMIN as root; the update unit has none and AGENTS.md
 # forbids giving it, so the update runs with no triggers and this unit runs them instead.
 # They parse files the applications' authors control: no capability, no network, no IPC,

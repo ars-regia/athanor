@@ -3,7 +3,11 @@ Description=Update the system Flatpak applications
 Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_software.md
 After=network-online.target
 Wants=network-online.target
+# The triggers also run after a failed update: an update that installed some applications and
+# failed on another (an apply_extra that cannot run) has still changed the exports, and the
+# caches would otherwise stay stale on every run.
 OnSuccess=athanor-flatpak-triggers.service
+OnFailure=athanor-flatpak-triggers.service
 
 [Service]
 Type=oneshot
