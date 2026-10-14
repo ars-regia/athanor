@@ -2,7 +2,7 @@
 id: ADR-0105
 title: "Four releases before 1.0: chain, base, defences, surface"
 date: 2026-10-09
-status: amended by ADR-0112
+status: amended by ADR-0112, ADR-0115
 issues: [122, 124, 126, 231, 252]
 areas: [platform, build, signing, security, shell, docs, process]
 ---
