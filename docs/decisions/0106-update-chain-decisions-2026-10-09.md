@@ -2,7 +2,7 @@
 id: ADR-0106
 title: "Update chain decisions for release 0.3"
 date: 2026-10-09
-status: accepted
+status: amended by ADR-0115
 issues: [124, 146, 122]
 areas: [update, build, signing, security, kernel]
 ---
