@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Run by .github/workflows/call-system-image.yml on the system image. Fails when a timer enabled in IMAGE is not listed in forge/config/contacts.toml, or when a unit
-# the list calls silent is enabled (forge/scripts/check_image_contacts.py). Unlike
+# the list calls silent is enabled, or when the resolver drop-in lacks the mode the list names
+# (DNSOverTLS=opportunistic, ADR-0103 D11) (forge/scripts/check_image_contacts.py). Unlike
 # check-image-rpms.sh it compares units with a file, so it holds on every build.
 # Usage: check-image-contacts.sh IMAGE
 set -euo pipefail

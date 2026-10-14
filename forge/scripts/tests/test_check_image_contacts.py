@@ -36,6 +36,22 @@ class ImageContacts(unittest.TestCase):
     def run_check(self):
         return mod.problems(CONTACTS, mod.enabled_units(self.root))
 
+    def write_dns(self, text):
+        f = self.root / "usr/lib/systemd/resolved.conf.d/50-athanor-dns.conf"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(text)
+
+    def test_the_resolver_mode_is_opportunistic(self):
+        self.write_dns("[Resolve]\nDNSOverTLS=opportunistic\n")
+        self.assertEqual(mod.config_problems(CONTACTS, self.root), [])
+
+    def test_a_strict_resolver_fails_until_the_probe_ships(self):
+        self.write_dns("[Resolve]\nDNSOverTLS=yes\n")
+        self.assertEqual(len(mod.config_problems(CONTACTS, self.root)), 1)
+
+    def test_a_missing_resolver_drop_in_fails(self):
+        self.assertIn("cannot read", mod.config_problems(CONTACTS, self.root)[0])
+
     def test_the_listed_timers_pass(self):
         for unit in ("athanor-update-check.timer", "fstrim.timer", "dnf-makecache.timer"):
             self.enable(unit)

@@ -848,12 +848,14 @@ def contacts_problems(root=None):
         if c.get("unit") and not c.get("planned") and c["unit"] not in enabled:
             problems += [f"{CONTACTS}: contact {c['id']} lists {c['unit']}, which no preset enables"]
         if c.get("config"):
+            wanted = c.get("config_contains", "")
             try:
-                found = c.get("config_contains", "") in read(root / c["config"])
+                text = read(root / c["config"])
+                found = all(s in text for s in ([wanted] if isinstance(wanted, str) else wanted))
             except OSError:
                 found = False
             if not found:
-                problems += [f"{CONTACTS}: contact {c['id']} expects {c.get('config_contains', '')!r} in {c['config']}"]
+                problems += [f"{CONTACTS}: contact {c['id']} expects {wanted!r} in {c['config']}"]
     known = groups["contact"] | groups["local"] | groups["inert"]
     problems += [f"{where}: enables {u}, a timer {CONTACTS} does not list as a contact, local or inert"
                  for verb, u, where in lines if verb == "enable" and u.endswith(".timer") and u not in known]

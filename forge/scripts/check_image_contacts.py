@@ -11,6 +11,8 @@ symlink to /dev/null or an empty file. Two defects fail:
   - an enabled timer that the list gives as neither a contact, a local timer nor an inert one,
     which is how a Fedora update adds a beacon;
   - a unit the list calls silent that is enabled.
+A contact that names image_file and image_contains must find that text in the file (the resolver
+mode, DNSOverTLS=opportunistic, ADR-0103 D11).
 The check sees timers and the listed units only. It does not follow Wants=, Requires= or
 Upholds= written inside another unit, nor sockets, paths or D-Bus activation, so a beacon pulled
 in that way is not seen. scripts/verify.py contacts makes the same comparison against the presets
@@ -56,13 +58,28 @@ def problems(contacts, enabled):
     return found
 
 
+def config_problems(contacts, root):
+    """A contact with image_file and image_contains must find that text in the file of the image."""
+    found = []
+    for c in contacts.get("contact", []):
+        if c.get("image_file"):
+            try:
+                text = (root / c["image_file"]).read_text()
+            except OSError as err:
+                found.append(f"{c['id']}: cannot read {c['image_file']} in the image ({err})")
+                continue
+            if c.get("image_contains", "") not in text:
+                found.append(f"{c['id']}: {c['image_file']} in the image lacks {c.get('image_contains', '')!r}")
+    return found
+
+
 def main(argv):
     if len(argv) not in (2, 3):
         print(__doc__, file=sys.stderr)
         return 2
     contacts = tomllib.loads(pathlib.Path(argv[1]).read_text())
     root = pathlib.Path(argv[2] if len(argv) == 3 else "/")
-    found = problems(contacts, enabled_units(root))
+    found = problems(contacts, enabled_units(root)) + config_problems(contacts, root)
     for line in found:
         print(line, file=sys.stderr)
     return 1 if found else 0
