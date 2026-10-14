@@ -15,7 +15,7 @@ RUN rpm -Uvh --replacepkgs --replacefiles /tmp/acceptance-rpm/athanor-update-*.r
     systemctl --global preset athanor-update-notify.service && \
     printf '[[registry]]\nlocation = "%s"\ninsecure = true\n' "${REGISTRY%%/*}" > /etc/containers/registries.conf.d/50-acceptance.conf && \
     mkdir -p /usr/lib/systemd/system/athanor-update-check.timer.d && \
-    printf '[Timer]\nOnBootSec=\nOnBootSec=2min\nRandomizedDelaySec=0\n' > /usr/lib/systemd/system/athanor-update-check.timer.d/10-acceptance.conf && \
+    printf '[Timer]\nOnBootSec=\nOnBootSec=2min\nOnUnitActiveSec=6h\nRandomizedDelaySec=0\n' > /usr/lib/systemd/system/athanor-update-check.timer.d/10-acceptance.conf && \
     printf '\n[initial_session]\ncommand = "/usr/bin/athanor-session"\nuser = "%s"\n' "${GUEST_USER}" >> /usr/share/athanor-system-config/greetd.toml && \
     echo "${MARKER}" > /usr/share/athanor-acceptance-marker && \
     bootc container lint
