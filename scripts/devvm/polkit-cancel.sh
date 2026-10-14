@@ -59,6 +59,9 @@ no_helper() {
 }
 
 mkdir -p "$shots"
+# faillock prints no row and exits 0 when the tally file is missing, which would read as zero
+# failures. pam_faillock's account phase creates it at login.
+[[ -f /run/faillock/$user ]] || fail "no pam_faillock tally for $user"
 before=$(failures) || fail "faillock --user $user failed"
 # The stage stops at the first new failure, so it adds at most one; with a margin of two below
 # deny= no run of it can lock the account.
