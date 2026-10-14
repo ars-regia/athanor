@@ -12,6 +12,9 @@ OnFailure=athanor-flatpak-triggers.service
 [Service]
 Type=oneshot
 ExecStart=/usr/libexec/athanor-flatpak-update
+# A oneshot has no start timeout by default: a pull that stalls would keep the unit active, and
+# the timer would skip every later run. A stalled update fails instead, and OnFailure= runs.
+TimeoutStartSec=4h
 # Flatpak runs its triggers in bubblewrap, which needs CAP_SYS_ADMIN as root (and would fail
 # here without a word). An empty triggers directory makes it run none; the unit above does.
 Environment=FLATPAK_TRIGGERSDIR=/usr/share/athanor-system-config/flatpak-no-triggers
