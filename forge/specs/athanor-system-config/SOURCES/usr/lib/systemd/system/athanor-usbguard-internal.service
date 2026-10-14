@@ -5,7 +5,7 @@ Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture
 # present then (PresentDevicePolicy=apply-policy). Running Before= it needs no reload and
 # no second start. Before= the greeter: nobody types a PIN or looks at a camera before it.
 # It runs once: the marker in /var/lib/athanor ends it (ADR-0103 D12, DK21).
-After=systemd-udevd.service
+After=systemd-udevd.service systemd-udev-trigger.service
 Before=usbguard.service greetd.service
 ConditionPathExists=!/var/lib/athanor/usbguard-internal.done
 

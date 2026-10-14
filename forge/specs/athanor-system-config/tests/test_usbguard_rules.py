@@ -121,11 +121,15 @@ class InternalSnapshot(unittest.TestCase):
         self.rules = self.work / "50-athanor-internal.conf"
         self.marker = self.work / "state/usbguard-internal.done"
 
-    def device(self, name, vid, pid, interfaces, serial=None):
+    def device(self, name, vid, pid, interfaces, serial=None, configured=True, vanished=False):
         d = self.sysfs / name
         d.mkdir()
-        (d / "idVendor").write_text(vid + "\n")
+        if not vanished:
+            (d / "idVendor").write_text(vid + "\n")
         (d / "idProduct").write_text(pid + "\n")
+        (d / "bConfigurationValue").write_text(("1" if configured else "") + "\n")
+        if not configured:
+            return
         if serial is not None:
             (d / "serial").write_text(serial + "\n")
         for i, (cls, sub, proto) in enumerate(interfaces):
@@ -135,14 +139,22 @@ class InternalSnapshot(unittest.TestCase):
             (f / "bInterfaceSubClass").write_text(sub + "\n")
             (f / "bInterfaceProtocol").write_text(proto + "\n")
 
-    def run_script(self):
+    def run_script(self, sync=None, check=True):
+        """Runs the script; `sync` is the body of a stand-in for sync(1), put first on PATH."""
         env = dict(
             os.environ,
             ATHANOR_USB_SYSFS=str(self.sysfs),
             ATHANOR_USBGUARD_RULES=str(self.rules),
             ATHANOR_USBGUARD_MARKER=str(self.marker),
+            ATHANOR_USBGUARD_WAIT_TENTHS="2",
         )
-        return subprocess.run([LIBEXEC], env=env, capture_output=True, text=True, check=True)
+        if sync is not None:
+            bin_dir = self.work / "bin"
+            bin_dir.mkdir(exist_ok=True)
+            (bin_dir / "sync").write_text("#!/bin/bash\n" + sync)
+            (bin_dir / "sync").chmod(0o755)
+            env["PATH"] = f"{bin_dir}:{env['PATH']}"
+        return subprocess.run([LIBEXEC], env=env, capture_output=True, text=True, check=check)
 
     def written(self):
         return [l for l in self.rules.read_text().splitlines() if not l.startswith("#")]
@@ -185,6 +197,42 @@ class InternalSnapshot(unittest.TestCase):
         self.device("1-2", "058f", "9540", [("0b", "00", "00")])
         self.run_script()
         self.assertEqual(len(self.written()), 1)
+
+    def test_a_failure_writing_the_rules_leaves_no_marker_and_no_rules_file(self):
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
+        done = self.run_script(sync="exit 1\n", check=False)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertFalse(self.marker.exists())
+        self.assertEqual(list(self.work.glob("50-athanor-internal.conf*")), [])
+
+    def test_the_marker_is_written_after_the_rules_are_on_disk(self):
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
+        log = self.work / "sync.log"
+        self.run_script(
+            sync=f'echo "rules=$([[ -e {self.rules} ]] && echo yes || echo no) '
+            f'marker=$([[ -e {self.marker} ]] && echo yes || echo no) $*" >> {log}\n'
+        )
+        calls = log.read_text().splitlines()
+        self.assertEqual(len(calls), 3, calls)
+        self.assertTrue(calls[0].startswith("rules=no marker=no "), calls[0])
+        self.assertTrue(calls[1].startswith("rules=yes marker=no "), calls[1])
+        self.assertTrue(calls[2].startswith("rules=yes marker=yes "), calls[2])
+
+    def test_a_vanished_device_is_skipped_and_the_others_are_written(self):
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")], vanished=True)
+        self.device("1-2", "058f", "9540", [("0b", "00", "00")])
+        done = self.run_script()
+        self.assertEqual(len(self.written()), 1)
+        self.assertIn("058f:9540", self.written()[0])
+        self.assertIn("Skipping 1-1", done.stderr)
+        self.assertTrue(self.marker.exists())
+
+    def test_a_device_with_no_configuration_is_skipped_after_the_wait(self):
+        self.device("1-1", "0c45", "6a10", [], configured=False)
+        self.device("1-2", "058f", "9540", [("0b", "00", "00")])
+        done = self.run_script()
+        self.assertEqual(len(self.written()), 1)
+        self.assertIn("Skipping 0c45:6a10 on 1-1", done.stderr)
 
     def test_unit_orders_before_usbguard_and_runs_once(self):
         unit = UNIT.read_text()

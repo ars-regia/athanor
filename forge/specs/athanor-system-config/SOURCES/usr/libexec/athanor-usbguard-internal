@@ -10,45 +10,99 @@ shopt -s nullglob
 usb=${ATHANOR_USB_SYSFS:-/sys/bus/usb/devices}
 rules=${ATHANOR_USBGUARD_RULES:-/etc/usbguard/rules.d/50-athanor-internal.conf}
 marker=${ATHANOR_USBGUARD_MARKER:-/var/lib/athanor/usbguard-internal.done}
+# The bound on the wait for enumeration, in tenths of a second. Ten seconds is long enough for a
+# hub and its children to be configured on the boots seen so far, and short enough not to hold
+# the greeter back for a device that never answers; such a device is logged and skipped.
+wait_tenths=${ATHANOR_USBGUARD_WAIT_TENTHS:-100}
 
 [[ -e $marker ]] && exit 0
+
+# attr FILE VAR: reads the first line of a sysfs attribute into VAR; fails when it cannot be
+# read (the device is gone, or has no such attribute), after bash has said why on stderr.
+attr() {
+    local -n target=$2
+    # shellcheck disable=SC2034
+    IFS= read -r target <"$1"
+}
+
+# configured DEVICE: succeeds once the device has a configuration and its interfaces exist.
+# `udevadm settle` only drains the udev queue; it does not wait for the bus to enumerate.
+configured() {
+    local value
+    [[ -r $1/bConfigurationValue ]] && attr "$1/bConfigurationValue" value && [[ -n $value ]] &&
+        compgen -G "$1/${1##*/}:*" >/dev/null
+}
+
+devices() {
+    local dev
+    for dev in "$usb"/*; do
+        [[ ${dev##*/} == *:* ]] || echo "$dev" # an interface is read with its device
+    done
+}
+
+tries=0
+while ((tries < wait_tenths)); do
+    pending=no
+    while read -r dev; do
+        configured "$dev" || pending=yes
+    done < <(devices)
+    [[ $pending == no ]] && break
+    sleep 0.1
+    tries=$((tries + 1))
+done
+
+# device_rule DEVICE: prints the rule for the device, or fails after saying on stderr why it
+# gets none. A device that vanishes while it is read is skipped, and the others go on.
+device_rule() {
+    local dev=$1 name vid pid serial='' iface class sub proto ifaces='' storage=no
+    name=${dev##*/}
+    if ! { attr "$dev/idVendor" vid && attr "$dev/idProduct" pid; }; then
+        echo "<4>Skipping $name: its descriptor cannot be read." >&2
+        return 1
+    fi
+    [[ -r $dev/serial ]] && { attr "$dev/serial" serial || serial=; }
+    if [[ ! $vid =~ ^[0-9a-f]{4}$ || ! $pid =~ ^[0-9a-f]{4}$ || ! $name =~ ^[0-9A-Za-z.-]+$ ||
+        ! $serial =~ ^[0-9A-Za-z._:+\ -]*$ ]]; then
+        echo "<4>Skipping $name: a descriptor holds characters a rule cannot carry." >&2
+        return 1
+    fi
+    if ! configured "$dev"; then
+        echo "<4>Skipping $vid:$pid on $name: not configured after the wait." >&2
+        return 1
+    fi
+    for iface in "$dev/$name":*; do
+        if ! { attr "$iface/bInterfaceClass" class && attr "$iface/bInterfaceSubClass" sub &&
+            attr "$iface/bInterfaceProtocol" proto; }; then
+            echo "<4>Skipping $vid:$pid on $name: an interface cannot be read." >&2
+            return 1
+        fi
+        [[ $class == 08 ]] && storage=yes
+        ifaces+=" $class:$sub:$proto"
+    done
+    if [[ $storage == yes ]]; then
+        echo "<6>Not admitting $vid:$pid on $name: mass storage." >&2
+        return 1
+    fi
+    echo "allow id $vid:$pid serial \"$serial\" via-port \"$name\" with-interface equals {$ifaces }"
+}
 
 out=$(mktemp "$rules.XXXXXX")
 trap 'rm -f -- "$out"' EXIT
 echo "# Written once by athanor-usbguard-internal.service: the USB devices connected at the first boot." >"$out"
 
-for dev in "$usb"/*; do
-    name=${dev##*/}
-    [[ $name == *:* ]] && continue # an interface, read with its device
-    vid=$(<"$dev/idVendor")
-    pid=$(<"$dev/idProduct")
-    serial=
-    [[ -r $dev/serial ]] && serial=$(<"$dev/serial")
-    if [[ ! $vid =~ ^[0-9a-f]{4}$ || ! $pid =~ ^[0-9a-f]{4}$ || ! $name =~ ^[0-9A-Za-z.-]+$ ||
-        ! $serial =~ ^[0-9A-Za-z._:+\ -]*$ ]]; then
-        echo "<4>Skipping $name: a descriptor holds characters a rule cannot carry."
-        continue
+while read -r dev; do
+    if rule=$(device_rule "$dev"); then
+        echo "$rule" >>"$out"
     fi
-    ifaces=
-    storage=no
-    for iface in "$dev/$name":*; do
-        class=$(<"$iface/bInterfaceClass")
-        [[ $class == 08 ]] && storage=yes
-        ifaces+=" $class:$(<"$iface/bInterfaceSubClass"):$(<"$iface/bInterfaceProtocol")"
-    done
-    if [[ $storage == yes ]]; then
-        echo "<6>Not admitting $vid:$pid on $name: mass storage."
-        continue
-    fi
-    if [[ -z $ifaces ]]; then
-        echo "<4>Skipping $vid:$pid on $name: no configured interface."
-        continue
-    fi
-    echo "allow id $vid:$pid serial \"$serial\" via-port \"$name\" with-interface equals {$ifaces }" >>"$out"
-done
+done < <(devices)
 
+# Rules first, durably, then the marker: a crash between them runs the snapshot again, a crash
+# before the rules are on disk can never leave a marker for rules that are not.
 chmod 0600 "$out"
+sync -- "$out"
 mv -- "$out" "$rules"
 trap - EXIT
+sync -- "${rules%/*}"
 mkdir -p -- "${marker%/*}"
 : >"$marker"
+sync -- "$marker" "${marker%/*}"
