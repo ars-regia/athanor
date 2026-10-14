@@ -246,21 +246,23 @@ fn move_to_signed_copy<T: Tools>(ctx: &Context<'_, T>, status: &mut Status, cand
         }
         failure = downloaded(ctx, status, &candidate.digest);
     }
-    let unlocked = ctx.tools.apply_downloaded().and_then(|()| ctx.tools.status());
+    // The record names the deployment before it is unlocked: once unlocked, a copy that does
+    // not boot is counted, whatever fails after. Without a record, nothing is unlocked.
+    record.staged = status.staged.as_ref().and_then(|staged| staged.deployment.clone());
+    let unlocked = match ctx.store.set_move_record(&record) {
+        Ok(()) => ctx.tools.apply_downloaded().and_then(|()| ctx.tools.status()),
+        Err(_) => Err(Failure { code: ErrorCode::Storage, host: None }),
+    };
     *status = match unlocked {
         Ok(status) => status,
         Err(unlock) => {
             if let Some(earlier) = failure {
                 tracing::warn!(code = ?earlier.code, "the signature object of the signed copy was not stored; the next check fetches it");
             }
-            tracing::error!(code = ?unlock.code, digest = %candidate.digest, "the signed copy was not unlocked; the next check tries again");
+            tracing::error!(code = ?unlock.code, digest = %candidate.digest, "the signed copy was not unlocked, or its status not read; the next check tries again");
             return (UpdateState::None, Some(unlock));
         }
     };
-    record.staged = status.staged.as_ref().and_then(|staged| staged.deployment.clone());
-    if ctx.store.set_move_record(&record).is_err() {
-        failure = failure.or(Some(Failure { code: ErrorCode::Storage, host: None }));
-    }
     (local_update(ctx, status), failure)
 }
 
@@ -651,6 +653,24 @@ pub(crate) mod tests {
         tools.broken_after_unlock = true;
         let state = run(&machine.ctx(&tools, 5000), false).expect("check");
         assert_eq!((state.update, state.last_error), (UpdateState::None, ErrorCode::Internal));
+    }
+
+    #[test]
+    fn a_copy_unlocked_before_a_failed_status_is_counted_when_it_does_not_boot() {
+        let machine = Machine::new("signed-copy-status-no-boot", &["real/k1.pub"]);
+        let mut tools = Fake::booted(deployed(&digest(9), 1000)).offering(SIGNED, 1000);
+        tools.download = Ok(Deployed { download_only: true, deployment: Some("copy.0".into()), ..deployed(SIGNED, 1000) });
+        tools.broken_after_unlock = true;
+        for now in [5000, 6000] {
+            assert_eq!(run(&machine.ctx(&tools, now), false).expect("check").update, UpdateState::None);
+            assert!(tools.status.borrow().staged.as_ref().is_some_and(|staged| !staged.download_only), "unlocked");
+            // bootc answers again; the copy is deployed, does not boot, and the machine is back.
+            tools.status_fails.set(false);
+            let mut status = tools.status.borrow_mut();
+            status.rollback = status.staged.take();
+        }
+        assert_eq!(run(&machine.ctx(&tools, 7000), false).expect("check").update, UpdateState::Held);
+        assert_eq!(downloads(&tools), 2);
     }
 
     #[test]
