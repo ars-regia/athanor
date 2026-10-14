@@ -122,7 +122,7 @@ capture_greeter() {
         in_rig "$(rig_image)" env ATHANOR_GREETER_VARIANT="$variant" ATHANOR_LOGIN_USER=rig RIG_LOCALE="$locale" \
             RIG_DATA_OVERLAY=/out/greeter-icons "${override[@]}" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1920 1080 "$scale" "$tag" -- \
-            bash -c "python3 /repo/forge/test/shell/trust_state.py verified && exec /out/bin/athanor-greeter-ui"
+            python3 /repo/forge/test/shell/bar_session.py --client athanor-greeter-ui
     done < <(python3 -B "$rig/cases.py" greeter)
 }
 
@@ -667,7 +667,7 @@ atspi)
             ATSPI_REQUIRED_NAME="System image verified" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-greeter-ui 6" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-greeter -- \
-            bash -c "$enable && python3 /repo/forge/test/shell/trust_state.py verified && exec /out/bin/athanor-greeter-ui"
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-greeter-ui"
         ;;
     chooser)
         # 8 interactive widgets under the float preset: three styles, two panel edges, three docks.

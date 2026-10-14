@@ -17,19 +17,24 @@
 #     to is a filesystem socket bound in below.
 #   - The filesystem is empty except for what is bound in: /usr and /etc read-only,
 #     sysfs read-only and the DRM nodes for rendering, the Wayland socket of this
-#     compositor, greetd's IPC socket ($GREETD_SOCK), a filtered system bus, the
-#     AccountsService avatars and the trust state directory of the seal. /tmp, $HOME and
-#     $XDG_RUNTIME_DIR are private tmpfs mounts. No home directory, no /var.
+#     compositor, greetd's IPC socket ($GREETD_SOCK), a filtered system bus and the
+#     AccountsService avatars. /tmp, $HOME and $XDG_RUNTIME_DIR are private tmpfs
+#     mounts. No home directory, no /var.
 #   - The system bus is not the real one. The process that reads the password would
 #     otherwise hold every call polkit grants an active local session (udisks2,
 #     NetworkManager, ...). xdg-dbus-proxy runs outside the sandbox, as the same user, and
-#     the greeter sees only its socket, which forwards three methods and nothing else:
+#     the greeter sees only its socket, which forwards four methods and nothing else:
 #     Suspend, Reboot and PowerOff of org.freedesktop.login1.Manager on
-#     /org/freedesktop/login1, the calls behind the greeter's power buttons. The rest of
-#     logind stays out of reach -- before anyone has authenticated, polkit's defaults for
-#     an active local session would otherwise let the greeter pick the boot loader entry
-#     or firmware setup for the next boot, take inhibitors or lock sessions. Nothing
-#     else is asked of the system bus.
+#     /org/freedesktop/login1, the calls behind the greeter's power buttons, and State of
+#     os.athanor.Update1 on /os/athanor/Update1, the trust state behind the seal
+#     (doc_update_trust.md, UT7), which returns what the service publishes to anyone. The
+#     rest of logind stays out of reach -- before anyone has authenticated, polkit's
+#     defaults for an active local session would otherwise let the greeter pick the boot
+#     loader entry or firmware setup for the next boot, take inhibitors or lock sessions --
+#     and so do Apply and GoBack of the update service. The bus driver's
+#     GetConnectionUnixUser, which the seal asks to learn that root sent the State reply,
+#     needs no rule: the proxy answers it for a name the greeter may see. Nothing else is
+#     asked of the system bus.
 #   - The session bus is filtered the same way, for accessibility: the greeter may own
 #     its GApplication name and talk to org.a11y.Bus, which hands out the address of the
 #     AT-SPI bus, and that bus's socket alone is bound read-only, so a screen reader can
@@ -80,7 +85,8 @@ set -- unix:path=/run/dbus/system_bus_socket "$dbus_dir/system" \
     --filter \
     --call=org.freedesktop.login1=org.freedesktop.login1.Manager.Suspend@/org/freedesktop/login1 \
     --call=org.freedesktop.login1=org.freedesktop.login1.Manager.Reboot@/org/freedesktop/login1 \
-    --call=org.freedesktop.login1=org.freedesktop.login1.Manager.PowerOff@/org/freedesktop/login1
+    --call=org.freedesktop.login1=org.freedesktop.login1.Manager.PowerOff@/org/freedesktop/login1 \
+    --call=os.athanor.Update1=os.athanor.Update1.State@/os/athanor/Update1
 session_bus=$XDG_RUNTIME_DIR/bus
 if [ -S "$session_bus" ]; then
     set -- "$@" "unix:path=$session_bus" "$dbus_dir/session" \
@@ -133,34 +139,6 @@ fi
 for node in /dev/nvidiactl /dev/nvidia-modeset /dev/nvidia[0-9]*; do
     set -- "$@" --dev-bind-try "$node" "$node"
 done
-
-# The trust state of the seal (doc_shell.md, SH12, package 1d; doc_update_trust.md, UT7).
-# The directory is bound, not the file: the system side renames a new file into place, and
-# a bind of the file would keep showing the old one. Inside the sandbox root is the
-# overflow uid, which the greeter cannot tell from another user's, so the owner is checked
-# here, outside it: a directory that is root's and that nobody else can write holds only
-# what root put there. A directory that fails the check is not bound, and the seal then
-# shows the exclamation mark; the greeter still starts, because the seal must not lock
-# anyone out.
-# The directory is opened once, checked through that descriptor and bound from it, so
-# what is checked is what is bound: a path swapped after the check changes nothing.
-# bwrap closes the descriptor after the bind, and the greeter never holds it. The symlink
-# test is on the path alone; a symlink there could only be root's, as /run is.
-trust_dir=/run/athanor-update
-trust_owner=
-trust_mode=
-if [ -d "$trust_dir" ] && [ ! -L "$trust_dir" ] && command exec 5< "$trust_dir"; then
-    if [ -d /dev/fd/5 ]; then
-        trust_owner=$(stat -L -c %u /dev/fd/5)
-        trust_mode=$(stat -L -c %a /dev/fd/5)
-    fi
-fi
-if [ "$trust_owner" = 0 ] && [ $((0$trust_mode & 022)) -eq 0 ]; then
-    set -- "$@" --ro-bind-fd 5 "$trust_dir"
-else
-    exec 5<&-
-    echo "athanor-greeter-client: $trust_dir is missing or not root's alone, the seal shows no trust state" >&2
-fi
 
 # /dev/dri is absent on a machine with no DRM driver at all, where GTK renders in
 # software: its bind is optional, like the udev database, the avatar and font cache

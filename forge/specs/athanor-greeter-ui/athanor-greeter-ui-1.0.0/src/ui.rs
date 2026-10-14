@@ -5,13 +5,16 @@
 //! Every interactive widget carries an accessible name and every string goes through
 //! gettext (SH13).
 
+use std::cell::Cell;
 use std::rc::Rc;
+
+use athanor_trust_state::{ReadError, State};
 
 use athanor_style::calmo::{self, Variant};
 use gtk4::accessible::Property;
 use gtk4::prelude::*;
 use gtk4::{
-    gdk, gio, Align, Application, ApplicationWindow, Box, Button, Image, Label, Orientation,
+    gdk, Align, Application, ApplicationWindow, Box, Button, Image, Label, Orientation,
     PasswordEntry, ToggleButton,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
@@ -19,9 +22,13 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use crate::auth::{authenticate_interactive, discover_target_user, UserInfo};
 use crate::i18n::{tr, tr_with};
 
-/// The seal is read again every hour: the badge ages ("checked within 14 days" turns false
-/// without the file changing), and a directory watch that missed an event heals.
+/// The seal's state is asked again every hour: the badge ages ("checked within 14 days"
+/// turns false without the state changing).
 const SEAL_AGAIN_SECS: u32 = 3600;
+/// After no answer, the next questions come this many seconds later, then hourly: the
+/// greeter starts with the machine, and a service slow to start under the boot's load must
+/// not leave the seal unverified for an hour. The bar's delays (doc_bar.md, BR6).
+const SEAL_RETRY_SECS: [u32; 3] = [5, 30, 300];
 
 /// The icons come from the theme the image ships (doc_shell.md, SH5: cosmic-icon-theme
 /// stays in stage 1); the seal is ours, installed into hicolor, which every theme inherits.
@@ -50,8 +57,8 @@ fn icon_chip(id: &str, icon: &str, label: &str) -> Button {
 }
 
 /// The seal of SH12 (package 1d): the badge the trust state backs, its header as words and
-/// accessible name, the reason as tooltip. It follows the file: the system side renames a
-/// new one into the directory (UT7), which the watch sees, and it is read again hourly.
+/// accessible name, the reason as tooltip. The state is asked of the update service at
+/// start, every hour and soon again after no answer.
 fn seal_chip() -> Box {
     let seal = Box::builder()
         .orientation(Orientation::Horizontal)
@@ -66,41 +73,50 @@ fn seal_chip() -> Box {
     let words = Label::new(None);
     seal.append(&icon);
     seal.append(&words);
-    let refresh = {
+    let show: Rc<ShowSeal> = {
         let seal = seal.clone();
-        move || {
-            let (read, now) = (crate::seal::read(), crate::seal::now());
-            let badge = crate::seal::badge(&read, now);
+        Rc::new(move |read| {
+            let now = crate::seal::now();
+            let badge = crate::seal::badge(read, now);
             let header = crate::seal::header(badge);
             icon.set_icon_name(Some(crate::seal::icon(badge)));
             icon.update_property(&[Property::Label(&header)]);
             words.set_label(&header);
-            seal.set_tooltip_text(Some(&crate::seal::detail(&read, now)));
-        }
+            seal.set_tooltip_text(Some(&crate::seal::detail(read, now)));
+        })
     };
-    refresh();
-    let directory = std::path::Path::new(athanor_trust_state::STATE_PATH)
-        .parent()
-        .map(gio::File::for_path);
-    let watch = directory.and_then(|directory| {
-        directory
-            .monitor_directory(gio::FileMonitorFlags::WATCH_MOVES, gio::Cancellable::NONE)
-            .map_err(|err| {
-                tracing::error!(error = %err, "cannot watch the trust state; the seal is read hourly")
-            })
-            .ok()
-    });
-    if let Some(watch) = &watch {
-        let refresh = refresh.clone();
-        watch.connect_changed(move |_, _, _, _| refresh());
-    }
+    // Until the service answers, nothing backs the badge.
+    show(&Err(ReadError::Io(std::io::ErrorKind::NotConnected)));
+    let asked = Rc::new(Cell::new(0));
+    ask_seal(&show, &asked, 0);
     glib::timeout_add_seconds_local(SEAL_AGAIN_SECS, move || {
-        // The timer owns the watch: a dropped monitor stops watching.
-        let _watch = &watch;
-        refresh();
+        ask_seal(&show, &asked, 0);
         glib::ControlFlow::Continue
     });
     seal
+}
+
+/// Draws the seal for one answer of the update service.
+type ShowSeal = dyn Fn(&Result<State, ReadError>);
+
+/// Asks the state once and shows the answer, unless a newer question was asked meanwhile.
+/// After no answer the next of `SEAL_RETRY_SECS` follows; `missed` counts them.
+fn ask_seal(show: &Rc<ShowSeal>, asked: &Rc<Cell<u64>>, missed: usize) {
+    let question = asked.get().wrapping_add(1);
+    asked.set(question);
+    let (show, asked) = (show.clone(), asked.clone());
+    glib::MainContext::default().spawn_local(async move {
+        let read = crate::seal::ask().await;
+        if asked.get() != question {
+            return;
+        }
+        show(&read);
+        if let (Err(ReadError::Io(_)), Some(&delay)) = (&read, SEAL_RETRY_SECS.get(missed)) {
+            glib::timeout_add_seconds_local_once(delay, move || {
+                ask_seal(&show, &asked, missed + 1)
+            });
+        }
+    });
 }
 
 fn now_text(format: &str) -> String {

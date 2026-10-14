@@ -1,57 +1,100 @@
 //! The seal of SH12 in the greeter's top end corner (doc_shell.md, package 1d): the badge
-//! the trust state file backs, read through `athanor-trust-state` so the rule exists once.
+//! the trust state backs, decided through `athanor-trust-state` so the rule exists once.
 //!
-//! athanor-greeter-client binds `/run/athanor-update` read-only into the sandbox, and only
-//! after it checked, outside the sandbox, that the directory is root's and nobody else can
-//! write it. Inside, the sandbox's user namespace maps only the greeter's own uid, so root's
-//! file carries the overflow uid: that is the owner the reader requires there, and the
-//! launcher's check is what makes it root's. Where this namespace has a root of its own (an
-//! unconfined run, the test rig), the owner must be that root. A file that cannot be read
+//! The state comes from `os.athanor.Update1.State`, as the bar's does (doc_update_trust.md,
+//! UT7), not from the file: inside the greeter's sandbox root is the overflow uid, so only
+//! the root service can check the file's owner. athanor-greeter-client's filter lets that
+//! one method through. The reply is trusted only when the bus, outside every namespace,
+//! says root sent it. No answer, another sender, an error or a reply that is not a state
 //! backs nothing: the seal shows the exclamation mark, never the check. The words are our
-//! own translations; nothing from the file is shown.
+//! own translations; nothing from the state is shown.
 
-use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use athanor_trust_state::{
-    Badge, ReadError, Reason, State, UpdateState, STALE_AFTER_SECS, STATE_PATH,
+    state_reply, Badge, ReadError, Reason, State, UpdateState, STALE_AFTER_SECS, STATE_METHOD,
+    UPDATE_INTERFACE, UPDATE_NAME, UPDATE_PATH,
 };
 
 use crate::i18n::tr;
 
-/// The uid root's files carry here: 0 when uid 0 is mapped in this user namespace, the
-/// kernel's overflow uid otherwise.
-fn root_uid_here(uid_map: &str, overflow_uid: u32) -> u32 {
-    let maps_zero = uid_map.lines().any(|line| {
-        let mut fields = line.split_whitespace().map(str::parse::<u64>);
-        matches!((fields.next(), fields.nth(1)), (Some(Ok(0)), Some(Ok(count))) if count > 0)
-    });
-    if maps_zero {
-        0
-    } else {
-        overflow_uid
+/// How long the service and the bus get to answer, as the bar gives them.
+const ANSWER_WITHIN: Duration = Duration::from_secs(5);
+
+/// The state, asked of the update service on the system bus; the call starts the service.
+pub async fn ask() -> Result<State, ReadError> {
+    match tokio::time::timeout(ANSWER_WITHIN, ask_once()).await {
+        Ok(read) => read,
+        Err(_) => {
+            tracing::warn!("the update service did not answer State in time");
+            state_reply(Err(None), None)
+        }
     }
 }
 
-/// The owner [`read`] requires. When `/proc` cannot say, root's uid 0, which a root file
-/// seen from inside the sandbox never carries: the seal then shows the file as untrusted.
-fn expected_owner() -> u32 {
-    let proc_text = |path: &str| {
-        std::fs::read_to_string(path)
-            .map_err(|err| tracing::warn!(path, error = %err, "cannot read; the trust state is taken as untrusted"))
-            .ok()
+async fn ask_once() -> Result<State, ReadError> {
+    let no_answer = state_reply(Err(None), None);
+    let connection = match zbus::Connection::system().await {
+        Ok(connection) => connection,
+        Err(err) => {
+            tracing::warn!(error = %err, "no system bus; the trust state cannot be asked");
+            return no_answer;
+        }
     };
-    let Some(uid_map) = proc_text("/proc/self/uid_map") else {
-        return 0;
+    let reply = connection
+        .call_method(
+            Some(UPDATE_NAME),
+            UPDATE_PATH,
+            Some(UPDATE_INTERFACE),
+            STATE_METHOD,
+            &(),
+        )
+        .await;
+    let (message, answer) = match &reply {
+        // A body that is not one string is not a state: it parses as nothing.
+        Ok(message) => (
+            message,
+            Ok(message.body().deserialize::<String>().unwrap_or_default()),
+        ),
+        Err(zbus::Error::MethodError(name, _, message)) => (message, Err(name.as_str())),
+        Err(err) => {
+            tracing::warn!(error = %err, "the update service did not answer State");
+            return no_answer;
+        }
     };
-    let overflow =
-        proc_text("/proc/sys/kernel/overflowuid").and_then(|text| text.trim().parse().ok());
-    overflow.map_or(0, |overflow| root_uid_here(&uid_map, overflow))
+    let sender_uid = match message.header().sender() {
+        Some(sender) => uid_of(&connection, sender).await,
+        None => None,
+    };
+    let read = match &answer {
+        Ok(json) => state_reply(Ok(json), sender_uid),
+        Err(name) => state_reply(Err(Some(name)), sender_uid),
+    };
+    if let Err(err) = &read {
+        tracing::warn!(?err, ?sender_uid, "the trust state is not trusted");
+    }
+    read
 }
 
-/// The published state, as the seal may trust it.
-pub fn read() -> Result<State, ReadError> {
-    athanor_trust_state::read_owned_by(Path::new(STATE_PATH), expected_owner())
+/// The uid the bus daemon recorded for the connection that sent the reply: the sender is
+/// set by the bus, so this is who answered, not whoever owns the name by now.
+async fn uid_of(
+    connection: &zbus::Connection,
+    sender: &zbus::names::UniqueName<'_>,
+) -> Option<u32> {
+    let uid = async {
+        zbus::fdo::DBusProxy::new(connection)
+            .await?
+            .get_connection_unix_user(sender.clone().into())
+            .await
+    };
+    match uid.await {
+        Ok(uid) => Some(uid),
+        Err(err) => {
+            tracing::warn!(error = %err, %sender, "the bus did not say who answered State");
+            None
+        }
+    }
 }
 
 pub fn now() -> i64 {
@@ -62,7 +105,7 @@ pub fn now() -> i64 {
         })
 }
 
-/// SH12's badge; a file that cannot be read backs nothing, so it is the exclamation mark.
+/// SH12's badge; a state that was not trusted backs nothing, so it is the exclamation mark.
 pub fn badge(read: &Result<State, ReadError>, now: i64) -> Badge {
     read.as_ref().map_or(Badge::Attention, |state| {
         athanor_trust_state::badge(state, now)
@@ -95,9 +138,8 @@ pub fn detail(read: &Result<State, ReadError>, now: i64) -> String {
         Err(ReadError::Untrusted) => {
             return tr("The trust state file is not owned by the system and was ignored")
         }
-        Err(ReadError::Malformed | ReadError::Io(_)) => {
-            return tr("The trust state file could not be read")
-        }
+        Err(ReadError::Malformed) => return tr("The trust state file could not be read"),
+        Err(ReadError::Io(_)) => return tr("The update service did not answer"),
     };
     if state.update == UpdateState::Refused {
         return tr("The last update was refused by the policy");
@@ -140,7 +182,6 @@ mod tests {
     use athanor_trust_state::{Deployment, ErrorCode, Policy, SecureBoot, SCHEMA};
 
     const NOW: i64 = 1_789_725_600;
-    const OVERFLOW: u32 = 65534;
 
     fn verified() -> State {
         let booted = Deployment {
@@ -172,24 +213,6 @@ mod tests {
             last_error: ErrorCode::None,
             last_error_host: None,
         }
-    }
-
-    #[test]
-    fn root_is_the_overflow_uid_only_where_the_namespace_has_no_root() {
-        // bwrap's namespace: only the greeter's own uid.
-        assert_eq!(
-            root_uid_here("      977        977          1\n", OVERFLOW),
-            OVERFLOW
-        );
-        // The initial namespace, and a rootless container whose root is a user outside.
-        assert_eq!(
-            root_uid_here("         0          0 4294967295\n", OVERFLOW),
-            0
-        );
-        assert_eq!(root_uid_here("0 1000 1\n1 524288 65536\n", OVERFLOW), 0);
-        // A range that maps nothing, or text that is not a map, maps no root.
-        assert_eq!(root_uid_here("0 0 0\n", OVERFLOW), OVERFLOW);
-        assert_eq!(root_uid_here("garbage\n", OVERFLOW), OVERFLOW);
     }
 
     #[test]
@@ -255,6 +278,10 @@ mod tests {
         assert_eq!(
             detail(&Err(ReadError::Untrusted), NOW),
             "The trust state file is not owned by the system and was ignored"
+        );
+        assert_eq!(
+            detail(&Err(ReadError::Io(std::io::ErrorKind::NotConnected)), NOW),
+            "The update service did not answer"
         );
     }
 }
