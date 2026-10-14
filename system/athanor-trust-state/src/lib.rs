@@ -2,8 +2,8 @@
 //! `/run/athanor-update/state.json` (docs/architecture/doc_update_trust.md, UT7), and the
 //! badge rule of the trust shield (docs/architecture/doc_shell.md, SH12).
 //!
-//! The greeter, the shield and the notifier all read the file through this crate, so the
-//! rule exists once. The file is untrusted input for a reader: it is opened without
+//! The greeter, the shield and the notifier all take the state through this crate, from the
+//! file or from the update service's `State`, so the rule exists once. The file is untrusted input for a reader: it is opened without
 //! following a link, its owner is checked, its size is capped, every list in it is closed,
 //! and [`display`] is the only way one of its strings should reach a widget.
 
@@ -18,6 +18,15 @@ pub const STATE_PATH: &str = "/run/athanor-update/state.json";
 pub const SCHEMA: u32 = 1;
 /// A machine whose last successful check is older than this is not shown as verified.
 pub const STALE_AFTER_SECS: i64 = 14 * 24 * 60 * 60;
+/// The update service on the system bus (UT7). Its `State` method returns the state's JSON,
+/// read by the service as root; a reader in a user namespace, where root is the overflow
+/// uid, asks this instead of opening the file.
+pub const UPDATE_NAME: &str = "os.athanor.Update1";
+pub const UPDATE_PATH: &str = "/os/athanor/Update1";
+pub const UPDATE_INTERFACE: &str = "os.athanor.Update1";
+pub const STATE_METHOD: &str = "State";
+/// The prefix of the service's D-Bus error names.
+pub const ERROR_PREFIX: &str = "os.athanor.Update1.Error.";
 const MAX_STATE_BYTES: u64 = 64 * 1024;
 const MAX_DISPLAY_CHARS: usize = 128;
 
@@ -211,6 +220,41 @@ pub fn read_owned_by(path: &Path, owner: u32) -> Result<State, ReadError> {
     parse(&text)
 }
 
+/// The state `os.athanor.Update1.State` answered: its JSON, or its D-Bus error name (`None`
+/// for a local error), and the uid of the connection that sent the reply. Only root's
+/// answer is trusted, whatever it says: the service reads the file as root, which is the
+/// owner check this process cannot make from inside its user namespace.
+///
+/// # Errors
+/// `Io` when the service did not answer or the bus could not name the sender's uid,
+/// `Untrusted` when another user answered, and the service's own verdict otherwise.
+pub fn state_reply(
+    answer: Result<&str, Option<&str>>,
+    sender_uid: Option<u32>,
+) -> Result<State, ReadError> {
+    let service_error = match answer {
+        Err(None) => return Err(ReadError::Io(std::io::ErrorKind::NotConnected)),
+        Err(Some(name)) => match name.strip_prefix(ERROR_PREFIX) {
+            Some(error) => Some(error),
+            // The bus answered for it: not activatable, no reply in time.
+            None => return Err(ReadError::Io(std::io::ErrorKind::NotConnected)),
+        },
+        Ok(_) => None,
+    };
+    match sender_uid {
+        Some(0) => {}
+        Some(_) => return Err(ReadError::Untrusted),
+        // Not trusted either way; but no one was shown to be another user.
+        None => return Err(ReadError::Io(std::io::ErrorKind::NotConnected)),
+    }
+    match (answer, service_error) {
+        (Ok(json), _) => parse(json),
+        (_, Some("NoState")) => Err(ReadError::Missing),
+        (_, Some("Untrusted")) => Err(ReadError::Untrusted),
+        _ => Err(ReadError::Malformed),
+    }
+}
+
 /// The three badges of SH12.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Badge {
@@ -395,6 +439,40 @@ mod tests {
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o666)).expect("chmod");
         assert_eq!(read_owned_by(&file, me), Err(ReadError::Untrusted));
         std::fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    #[test]
+    fn a_state_reply_is_trusted_only_from_root() {
+        let json = serde_json::to_string(&verified_state()).expect("serialisable");
+        let json = json.as_str();
+        assert_eq!(state_reply(Ok(json), Some(0)), Ok(verified_state()));
+        assert_eq!(state_reply(Ok(json), Some(1000)), Err(ReadError::Untrusted), "another user owns the name");
+        assert_eq!(
+            state_reply(Ok(json), None),
+            Err(ReadError::Io(std::io::ErrorKind::NotConnected)),
+            "the bus could not say who answered: not trusted, and asked again"
+        );
+        assert_eq!(state_reply(Ok("{}"), Some(0)), Err(ReadError::Malformed));
+        assert_eq!(state_reply(Ok(""), Some(0)), Err(ReadError::Malformed), "a reply that is not one string");
+    }
+
+    #[test]
+    fn every_state_error_has_its_row() {
+        for (name, read) in [
+            ("os.athanor.Update1.Error.NoState", Err(ReadError::Missing)),
+            ("os.athanor.Update1.Error.Untrusted", Err(ReadError::Untrusted)),
+            ("os.athanor.Update1.Error.Unreadable", Err(ReadError::Malformed)),
+            ("os.athanor.Update1.Error.SomethingNew", Err(ReadError::Malformed)),
+        ] {
+            assert_eq!(state_reply(Err(Some(name)), Some(0)), read, "{name}");
+            assert_eq!(state_reply(Err(Some(name)), Some(1000)), Err(ReadError::Untrusted), "{name} from another user");
+        }
+        for name in [Some("org.freedesktop.DBus.Error.ServiceUnknown"), Some("org.freedesktop.DBus.Error.NoReply"), None] {
+            assert!(
+                matches!(state_reply(Err(name), None), Err(ReadError::Io(_))),
+                "{name:?}: the service did not answer"
+            );
+        }
     }
 
     #[test]

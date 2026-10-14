@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-greeter-ui
 Version:        1.0.0
-Release:        4%{?dist}
+Release:        5%{?dist}
 Summary:        The Athanor greeter
 License:        GPL-3.0-only
 
@@ -43,6 +43,15 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-greeter
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-greeter-ui.mo
 
 %changelog
+* Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
+- The seal shows the badge the trust state backs (doc_shell.md, SH12, package 1d):
+  the check, the exclamation mark or the cross, asked of os.athanor.Update1.State on the
+  filtered system bus, as the bar asks it (doc_update_trust.md, UT7), at start, every
+  hour and soon again after no answer. The reply is trusted only when the bus says root
+  sent it (GetConnectionUnixUser), through the rule athanor-trust-state shares with the
+  bar. Its words are the header of the bar's shield, its tooltip the reason. No answer,
+  another sender, an error or a reply that is not a state shows the exclamation mark.
+
 * Thu Sep 24 2026 Athanor Forge <forge@athanor.os> - 1.0.0-4
 - Grant the Landlock ruleset WriteFile on the NVIDIA driver's control, modeset and
   per-GPU nodes, one rule per node. The proprietary EGL stack opens them read-write;

@@ -4,8 +4,11 @@
 doc_shell.md, SH13: "every interactive widget exposes a role and a name in the AT-SPI
 tree". Walks the tree of one application on the accessibility bus and fails when a
 showing interactive widget has no name, or when fewer interactive widgets than expected
-are found, which is what an empty or missing tree looks like.
+are found, which is what an empty or missing tree looks like. With ATSPI_REQUIRED_NAME
+set, a showing node must carry that name: the greeter's seal says its badge so (section 7,
+item 3). An environment variable, because scene.sh splits RIG_HOLD on spaces.
 """
+import os
 import sys
 import time
 
@@ -15,9 +18,10 @@ INTERACTIVE = {"button", "push button", "toggle button", "check box", "radio but
                "radio menu item", "switch"}
 
 
-def problems(nodes, expected):
+def problems(nodes, expected, required=()):
     """nodes: [(role, name, showing)]."""
-    found = []
+    found = [f"no showing node is named {name!r}" for name in required
+             if not any(showing and node_name == name for _, node_name, showing in nodes)]
     interactive = [(role, name) for role, name, showing in nodes if showing and role in INTERACTIVE]
     for role, name in interactive:
         if not name.strip():
@@ -66,7 +70,8 @@ def main(argv):
     tree = walk(app, Atspi)
     for role, name, showing, depth in tree:
         print(f"{'  ' * depth}{role}: {name!r}{'' if showing else ' (hidden)'}")
-    found = problems([(role, name, showing) for role, name, showing, _ in tree], int(argv[1]))
+    found = problems([(role, name, showing) for role, name, showing, _ in tree], int(argv[1]),
+                     [name for name in [os.environ.get("ATSPI_REQUIRED_NAME", "")] if name])
     for line in found:
         print(f"FAIL {line}", file=sys.stderr)
     return 1 if found else 0

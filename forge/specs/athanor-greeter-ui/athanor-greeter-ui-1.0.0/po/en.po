@@ -29,57 +29,129 @@ msgstr "The login service gave an unexpected answer."
 msgid "Too many authentication steps."
 msgstr "Too many authentication steps."
 
-#: src/ui.rs:110
+#: src/seal.rs:121
+msgid "System image verified"
+msgstr "System image verified"
+
+#: src/seal.rs:122
+msgid "Not verified yet"
+msgstr "Not verified yet"
+
+#: src/seal.rs:123
+msgid "Update refused"
+msgstr "Update refused"
+
+#: src/seal.rs:131
+msgid "No trust state yet: the first check has not run"
+msgstr "No trust state yet: the first check has not run"
+
+#: src/seal.rs:133
+msgid "The trust state file is not owned by the system and was ignored"
+msgstr "The trust state file is not owned by the system and was ignored"
+
+#: src/seal.rs:135
+msgid "The trust state file could not be read"
+msgstr "The trust state file could not be read"
+
+#: src/seal.rs:136
+msgid "The update service did not answer"
+msgstr "The update service did not answer"
+
+#: src/seal.rs:139
+msgid "The last update was refused by the policy"
+msgstr "The last update was refused by the policy"
+
+#: src/seal.rs:143
+msgid "Not verified: installed from media"
+msgstr "Not verified: installed from media"
+
+#: src/seal.rs:144
+msgid "Not verified: no signature"
+msgstr "Not verified: no signature"
+
+#: src/seal.rs:145
+msgid "Not verified: its key is not in the policy"
+msgstr "Not verified: its key is not in the policy"
+
+#: src/seal.rs:146
+msgid "Not verified: fetched under a permissive policy"
+msgstr "Not verified: fetched under a permissive policy"
+
+#: src/seal.rs:148
+msgid "Not verified: the image is outside the policy's scope"
+msgstr "Not verified: the image is outside the policy's scope"
+
+#: src/seal.rs:150
+msgid "Not verified: the system was changed on this machine"
+msgstr "Not verified: the system was changed on this machine"
+
+#: src/seal.rs:152
+msgid "Not verified: waiting for the stable channel to be published"
+msgstr "Not verified: waiting for the stable channel to be published"
+
+#: src/seal.rs:155
+msgid "Not verified: this machine does not verify its updates"
+msgstr "Not verified: this machine does not verify its updates"
+
+#: src/seal.rs:158
+msgid "Signed, but pinned to one build: it receives no updates"
+msgstr "Signed, but pinned to one build: it receives no updates"
+
+#: src/seal.rs:162
+msgid "This version is older than one this machine has run"
+msgstr "This version is older than one this machine has run"
+
+#: src/seal.rs:168
+msgid "No check for updates has succeeded for 14 days"
+msgstr "No check for updates has succeeded for 14 days"
+
+#: src/seal.rs:170
+msgid "Signed with a key of the policy in force"
+msgstr "Signed with a key of the policy in force"
+
+#: src/ui.rs:175
 #, rust-format
 msgid "Keyboard layout: {layout}"
 msgstr "Keyboard layout: {layout}"
 
-#: src/ui.rs:201
-msgid "The system image has not been verified yet."
-msgstr "The system image has not been verified yet."
-
-#: src/ui.rs:206 src/ui.rs:208
-msgid "Not verified"
-msgstr "Not verified"
-
-#: src/ui.rs:228
+#: src/ui.rs:280
 msgid "%A %-d %B"
 msgstr "%A %-d %B"
 
-#: src/ui.rs:246
+#: src/ui.rs:298
 msgid "Password"
 msgstr "Password"
 
-#: src/ui.rs:251
+#: src/ui.rs:303
 #, rust-format
 msgid "Password for {name}"
 msgstr "Password for {name}"
 
-#: src/ui.rs:262
+#: src/ui.rs:314
 msgid "Sign in"
 msgstr "Sign in"
 
-#: src/ui.rs:306
+#: src/ui.rs:358
 msgid "Signing in…"
 msgstr "Signing in…"
 
-#: src/ui.rs:327
+#: src/ui.rs:379
 #, rust-format
 msgid "Sign-in failed: {reason}"
 msgstr "Sign-in failed: {reason}"
 
-#: src/ui.rs:371 src/ui.rs:372
+#: src/ui.rs:423 src/ui.rs:424
 msgid "High contrast"
 msgstr "High contrast"
 
-#: src/ui.rs:392
+#: src/ui.rs:444
 msgid "Suspend"
 msgstr "Suspend"
 
-#: src/ui.rs:398
+#: src/ui.rs:450
 msgid "Restart"
 msgstr "Restart"
 
-#: src/ui.rs:404
+#: src/ui.rs:456
 msgid "Shut down"
 msgstr "Shut down"

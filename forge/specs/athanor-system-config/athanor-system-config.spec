@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:57.fc43}
+Release:        %{?autorelease}%{!?autorelease:58.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -85,6 +85,11 @@ done
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-58
+- athanor-greeter-client's system bus filter lets one more method through, State of
+  os.athanor.Update1 on /os/athanor/Update1, for the greeter's seal (doc_shell.md, SH12,
+  package 1d; doc_update_trust.md, UT7). Apply and GoBack stay out of reach.
+
 * Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-57
 - athanor-session, athanor-greeter-session and 50-athanor-desktop.conf set
   GTK_IM_MODULE=simple: GTK 4.20's wayland module dropped dead keys and Compose

@@ -37,57 +37,129 @@ msgstr ""
 msgid "Too many authentication steps."
 msgstr ""
 
-#: src/ui.rs:110
+#: src/seal.rs:121
+msgid "System image verified"
+msgstr ""
+
+#: src/seal.rs:122
+msgid "Not verified yet"
+msgstr ""
+
+#: src/seal.rs:123
+msgid "Update refused"
+msgstr ""
+
+#: src/seal.rs:131
+msgid "No trust state yet: the first check has not run"
+msgstr ""
+
+#: src/seal.rs:133
+msgid "The trust state file is not owned by the system and was ignored"
+msgstr ""
+
+#: src/seal.rs:135
+msgid "The trust state file could not be read"
+msgstr ""
+
+#: src/seal.rs:136
+msgid "The update service did not answer"
+msgstr ""
+
+#: src/seal.rs:139
+msgid "The last update was refused by the policy"
+msgstr ""
+
+#: src/seal.rs:143
+msgid "Not verified: installed from media"
+msgstr ""
+
+#: src/seal.rs:144
+msgid "Not verified: no signature"
+msgstr ""
+
+#: src/seal.rs:145
+msgid "Not verified: its key is not in the policy"
+msgstr ""
+
+#: src/seal.rs:146
+msgid "Not verified: fetched under a permissive policy"
+msgstr ""
+
+#: src/seal.rs:148
+msgid "Not verified: the image is outside the policy's scope"
+msgstr ""
+
+#: src/seal.rs:150
+msgid "Not verified: the system was changed on this machine"
+msgstr ""
+
+#: src/seal.rs:152
+msgid "Not verified: waiting for the stable channel to be published"
+msgstr ""
+
+#: src/seal.rs:155
+msgid "Not verified: this machine does not verify its updates"
+msgstr ""
+
+#: src/seal.rs:158
+msgid "Signed, but pinned to one build: it receives no updates"
+msgstr ""
+
+#: src/seal.rs:162
+msgid "This version is older than one this machine has run"
+msgstr ""
+
+#: src/seal.rs:168
+msgid "No check for updates has succeeded for 14 days"
+msgstr ""
+
+#: src/seal.rs:170
+msgid "Signed with a key of the policy in force"
+msgstr ""
+
+#: src/ui.rs:175
 #, rust-format
 msgid "Keyboard layout: {layout}"
 msgstr ""
 
-#: src/ui.rs:201
-msgid "The system image has not been verified yet."
-msgstr ""
-
-#: src/ui.rs:206 src/ui.rs:208
-msgid "Not verified"
-msgstr ""
-
-#: src/ui.rs:228
+#: src/ui.rs:280
 msgid "%A %-d %B"
 msgstr ""
 
-#: src/ui.rs:246
+#: src/ui.rs:298
 msgid "Password"
 msgstr ""
 
-#: src/ui.rs:251
+#: src/ui.rs:303
 #, rust-format
 msgid "Password for {name}"
 msgstr ""
 
-#: src/ui.rs:262
+#: src/ui.rs:314
 msgid "Sign in"
 msgstr ""
 
-#: src/ui.rs:306
+#: src/ui.rs:358
 msgid "Signing in…"
 msgstr ""
 
-#: src/ui.rs:327
+#: src/ui.rs:379
 #, rust-format
 msgid "Sign-in failed: {reason}"
 msgstr ""
 
-#: src/ui.rs:371 src/ui.rs:372
+#: src/ui.rs:423 src/ui.rs:424
 msgid "High contrast"
 msgstr ""
 
-#: src/ui.rs:392
+#: src/ui.rs:444
 msgid "Suspend"
 msgstr ""
 
-#: src/ui.rs:398
+#: src/ui.rs:450
 msgid "Restart"
 msgstr ""
 
-#: src/ui.rs:404
+#: src/ui.rs:456
 msgid "Shut down"
 msgstr ""
