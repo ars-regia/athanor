@@ -4,6 +4,7 @@ its arguments (python3 -B -m unittest discover -s system/tests -v)."""
 import json
 import os
 import pathlib
+import re
 import subprocess
 import tempfile
 import textwrap
@@ -29,6 +30,7 @@ class BuildImage(unittest.TestCase):
         (bin_dir / "podman").write_text(textwrap.dedent(f"""\
             #!/bin/bash
             printf '%s\\n' "$@" -- >> {self.dir}/podman.args
+            echo "${{SOURCE_DATE_EPOCH-unset}}" >> {self.dir}/podman.epoch
             while [[ $# -gt 0 ]]; do
                 [[ $1 != --iidfile ]] || echo "sha256:{SYSTEM}" > "$2"
                 shift
@@ -137,6 +139,19 @@ class BuildImage(unittest.TestCase):
         self.assertIn("org.opencontainers.image.version=43.20260915.412", args)
         self.assertIn("org.opencontainers.image.created=2026-09-15T10:00:00Z", args)
         self.assertIn("IMAGE_REGISTRY=localhost", args)
+
+    def test_every_layer_carries_the_epoch_of_the_containerfile_and_podman_no_build_time(self):
+        # Two builds of the same tree write the same layers (#146, UD34). podman 5 refuses a
+        # SOURCE_DATE_EPOCH of the environment beside --timestamp; it stays the label's build time.
+        self.artifacts_file()
+        epoch = re.search(r"^ARG SOURCE_DATE_EPOCH=([0-9]+)$", (ROOT / "system" / "Containerfile").read_text(), re.M)[1]
+        self.env["SOURCE_DATE_EPOCH"] = "1789466400"
+        r, _ = self.build("none")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for args in self.calls():
+            self.assertEqual(args[args.index("--timestamp") + 1], epoch)
+        self.assertEqual((self.dir / "podman.epoch").read_text().split(), ["unset", "unset"])
+        self.assertIn("org.opencontainers.image.created=2026-09-15T10:00:00Z", self.calls()[-1])
 
     def test_every_image_names_the_commit_it_was_built_from(self):
         self.artifacts_file()

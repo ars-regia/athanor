@@ -103,9 +103,18 @@ for n in 0 1 2 3; do
   tier_args+=(--build-arg "TIER${n}_DIGEST=$digest")
   tier_labels+=(--label "io.athanor.forge-tier$n.digest=$digest")
 done
+# Every file of every layer, and the `created` of the image configuration, carry the
+# Containerfile's SOURCE_DATE_EPOCH (--timestamp), so two builds of the same tree write the same
+# layers (doc_update_delivery.md, UD34); the build time is the created label below. podman 5 takes
+# a SOURCE_DATE_EPOCH of the environment for --source-date-epoch and refuses it beside
+# --timestamp: it is read for the label here and kept from podman.
+epoch=$(sed -n 's/^ARG SOURCE_DATE_EPOCH=//p' "$ROOT/system/Containerfile")
+[[ $epoch =~ ^[0-9]+$ ]] || { echo "${0##*/}: system/Containerfile declares no ARG SOURCE_DATE_EPOCH=<seconds>" >&2; exit 2; }
+now=${SOURCE_DATE_EPOCH:-$(date -u +%s)}
+unset SOURCE_DATE_EPOCH
 # docker format: the OCI format has no SHELL instruction and podman would drop the
 # bash -o pipefail the Containerfile sets for every RUN, in the system stage image as well.
-common=(--layers --pull=newer --format docker --build-arg "AZOTH_NVR=$nvr" --build-arg "IMAGE_REGISTRY=$REGISTRY"
+common=(--layers --pull=newer --format docker --timestamp "$epoch" --build-arg "AZOTH_NVR=$nvr" --build-arg "IMAGE_REGISTRY=$REGISTRY"
   --build-arg "KERNEL_REGISTRY=$registry" --build-arg "FORGE_REGISTRY=$forge_registry" --build-arg "BOOT_DIGEST=$boot"
   "${tier_args[@]}")
 build_system() {
@@ -123,8 +132,7 @@ args=("${common[@]}" --build-arg "GPU=$GPU" --label "io.athanor.azoth.digest=$ke
   "${tier_labels[@]}")
 # Every published image has a version of its own and says when it was built (UT9). Machines
 # order images by `created`, never by the version string; bootc reports it as the
-# deployment's timestamp. SOURCE_DATE_EPOCH, when set, is the build time.
-now=${SOURCE_DATE_EPOCH:-$(date -u +%s)}
+# deployment's timestamp. SOURCE_DATE_EPOCH, when set, is the build time (`now`, above).
 fedora=$(sed -n 's/^ARG FEDORA_VERSION=//p' "$ROOT/system/Containerfile")
 [[ $fedora =~ ^[0-9]+$ ]] || { echo "${0##*/}: system/Containerfile declares no ARG FEDORA_VERSION=<major>" >&2; exit 2; }
 # The commit the image was built from (doc_pipeline.md PL58): a release compares it with the
