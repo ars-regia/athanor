@@ -95,6 +95,11 @@
     "name": "question"
   },
   {
+    "color": "C5DEF5",
+    "description": "PR opened by publish-rig-build-image.yml",
+    "name": "rig-build-image"
+  },
+  {
     "color": "000000",
     "description": "Pull requests that update rust code",
     "name": "rust"

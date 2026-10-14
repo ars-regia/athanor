@@ -12,12 +12,14 @@ PREFIX = "bump/cosmic-comp"
 NEW = "1.9.0-1.fc43"
 
 # The stub answers `gh pr list` with $STUB_PRS, already in the shape the script's --jq
-# selects ("<number> <head branch>" per line), and logs every call.
+# selects ("<number> <head branch>" per line), fails `gh api` when $STUB_NO_LABEL is set,
+# and logs every call.
 STUB_GH = """#!/usr/bin/env bash
 echo "$*" >> "$STUB_LOG"
 case "$1 $2" in
 "pr list") printf '%s' "$STUB_PRS" ;;
 "pr create") echo "https://example.invalid/pull/1" ;;
+api*) [[ -z ${STUB_NO_LABEL:-} ]] ;;
 esac
 """
 
@@ -65,9 +67,10 @@ class OpenBumpPr(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_script(self, open_prs):
+    def run_script(self, open_prs, **extra):
         env = {
             **self.env,
+            **extra,
             "STUB_PRS": "".join(f"{number} {head}\n" for number, head in open_prs),
         }
         return subprocess.run(
@@ -121,6 +124,13 @@ class OpenBumpPr(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("PR #7", result.stderr)
         self.assertNotIn("PR #12", result.stderr)
+
+    def test_a_missing_label_fails_before_the_push(self):
+        result = self.run_script([], STUB_NO_LABEL="1")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(f"the label {LABEL} is not on the repository", result.stderr)
+        self.assertFalse(self.pushed())
+        self.assertNotIn("pr create", self.calls())
 
     def test_nothing_moved_opens_nothing(self):
         (self.out / "title").unlink()
