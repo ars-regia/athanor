@@ -27,7 +27,8 @@
 #              the agent. Fails on images built before #445 merged: polkit-agent-helper@.service
 #              could not write /run/faillock (#144).
 #   cancel     six polkit requests cancelled while the agent's dialog is open leave no failure
-#              in the tally. Fails until #447 is fixed (polkit-org/polkit#713). It cancels by
+#              in the tally. Fails on images with a polkit before 127-2.fc43.2.athanor3, which
+#              patches polkit-org/polkit#713 (#447). It cancels by
 #              stopping pkexec, which makes polkitd cancel the request at the agent; the
 #              dialog has no key for Cancel. Each cancel first checks that pkexec still runs
 #              and a helper instance is alive, after the 2 s of the screenshot. That shows a
