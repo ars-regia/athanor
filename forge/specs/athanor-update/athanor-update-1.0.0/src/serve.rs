@@ -60,12 +60,25 @@ impl Logind<'_> {
     }
 }
 
+/// One entry of `login1.Manager.ListInhibitors`: what, who, why, mode, uid, pid.
+type Inhibitor = (String, String, String, String, u32, u32);
+
+/// Whether the inhibitors logind listed block a shutdown. A list that could not be had
+/// refuses the request as failed: it never goes ahead on a question logind did not answer,
+/// and it never claims an inhibitor nobody saw (ADR-0103 D22).
+fn blocks_shutdown(listed: zbus::Result<Vec<Inhibitor>>) -> Result<bool, Refusal> {
+    match listed {
+        Ok(inhibitors) => Ok(inhibitors.iter().any(|(what, _, _, mode, _, _)| mode == "block" && what.split(':').any(|kind| kind == "shutdown"))),
+        Err(err) => {
+            tracing::error!(%err, "logind's inhibitors could not be listed: the request is refused");
+            Err(Refusal::Failed)
+        }
+    }
+}
+
 impl Power for Logind<'_> {
-    async fn blocked(&self) -> bool {
-        type Inhibitor = (String, String, String, String, u32, u32);
-        let Ok(reply) = self.call("ListInhibitors", &()).await else { return false };
-        let inhibitors: Vec<Inhibitor> = reply.body().deserialize().unwrap_or_default();
-        inhibitors.iter().any(|(what, _, _, mode, _, _)| mode == "block" && what.split(':').any(|kind| kind == "shutdown"))
+    async fn blocked(&self) -> Result<bool, Refusal> {
+        blocks_shutdown(self.call("ListInhibitors", &()).await.and_then(|reply| reply.body().deserialize()))
     }
 
     async fn reboot(&self) -> Result<(), RebootError> {
@@ -254,6 +267,67 @@ mod tests {
         let state = published(&path);
         let json = state_json(&path, owner).expect("state");
         assert_eq!(athanor_trust_state::parse(&json), Ok(state));
+    }
+
+    fn inhibitor(what: &str, mode: &str) -> Inhibitor {
+        (what.into(), "who".into(), "why".into(), mode.into(), 1000, 4242)
+    }
+
+    #[test]
+    fn a_failing_inhibitor_query_refuses_as_failed() {
+        assert_eq!(blocks_shutdown(Err(zbus::Error::Failure("logind did not answer".into()))), Err(Refusal::Failed));
+    }
+
+    #[test]
+    fn only_a_block_inhibitor_on_shutdown_blocks() {
+        assert_eq!(blocks_shutdown(Ok(vec![])), Ok(false), "no inhibitor");
+        assert_eq!(blocks_shutdown(Ok(vec![inhibitor("shutdown", "delay"), inhibitor("sleep:idle", "block")])), Ok(false), "delay, or not shutdown");
+        assert_eq!(blocks_shutdown(Ok(vec![inhibitor("sleep:shutdown", "block")])), Ok(true), "shutdown among several kinds");
+    }
+
+    /// `login1.Manager.ListInhibitors` on a private bus, with a well-formed answer.
+    struct Inhibits(Vec<Inhibitor>);
+
+    #[zbus::interface(name = "org.freedesktop.login1.Manager")]
+    impl Inhibits {
+        fn list_inhibitors(&self) -> Vec<Inhibitor> {
+            self.0.clone()
+        }
+    }
+
+    /// The same method answering with a body of the wrong signature.
+    struct Garbled;
+
+    #[zbus::interface(name = "org.freedesktop.login1.Manager")]
+    impl Garbled {
+        fn list_inhibitors(&self) -> String {
+            "not a list".into()
+        }
+    }
+
+    async fn ask_logind<I: zbus::object_server::Interface>(name: &str, logind: Option<I>) -> Result<bool, Refusal> {
+        let bus = crate::goback::tests::Bus::start(name);
+        let mut service = None;
+        if let Some(logind) = logind {
+            let builder = bus.builder().name("org.freedesktop.login1").expect("name").serve_at("/org/freedesktop/login1", logind).expect("serve");
+            service = Some(builder.build().await.expect("logind"));
+        }
+        let client = bus.builder().build().await.expect("client");
+        let answer = Logind(&client).blocked().await;
+        drop(service);
+        answer
+    }
+
+    #[tokio::test]
+    async fn logind_is_asked_and_its_answer_read() {
+        assert_eq!(ask_logind("logind-block", Some(Inhibits(vec![inhibitor("shutdown", "block")]))).await, Ok(true));
+        assert_eq!(ask_logind("logind-none", Some(Inhibits(vec![]))).await, Ok(false));
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_or_missing_logind_refuses_as_failed() {
+        assert_eq!(ask_logind("logind-garbled", Some(Garbled)).await, Err(Refusal::Failed), "a reply of the wrong signature");
+        assert_eq!(ask_logind::<Garbled>("logind-absent", None).await, Err(Refusal::Failed), "no logind on the bus");
     }
 
     #[test]

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Rust security audit: clippy over the root workspace and the advisory check of the
+# Rust security audit: clippy (warnings denied) over the root workspace and the advisory check of the
 # cargo-deny policy (deny.toml) over its lockfile. Licences, bans and sources of the same
 # policy run in the pull request gate (`just check-deny`), so they are not repeated here.
 # Logs land in $AUDIT_OUT (default: audit-out) so a workflow can upload the directory.
@@ -10,10 +10,11 @@ out="${AUDIT_OUT:-$root/audit-out}"
 mkdir -p "$out"
 cd "$root"
 
+# Warnings fail the job: the unsafe lints of .cargo/config.toml are set to warn there.
 # cargo unifies features across the packages of one invocation: glycin drives zbus with
 # async-io, the rest of the workspace with tokio, so the preview decoder is linted alone.
-cargo clippy --workspace --exclude athanor-preview-render --all-targets --all-features 2>&1 | tee "$out/clippy.log"
-cargo clippy -p athanor-preview-render --all-targets --all-features 2>&1 | tee -a "$out/clippy.log"
+cargo clippy --workspace --exclude athanor-preview-render --all-targets --all-features -- -D warnings 2>&1 | tee "$out/clippy.log"
+cargo clippy -p athanor-preview-render --all-targets --all-features -- -D warnings 2>&1 | tee -a "$out/clippy.log"
 
 # --config is explicit: cargo-deny would otherwise look for a deny.toml next to the
 # manifest and fall back to its defaults.
