@@ -4,7 +4,7 @@ These rules add to the root `AGENTS.md`. `system/README.md` describes the image,
 pipeline and installation; the image is specified in
 `docs/architecture/doc_system_image.md`.
 
-- **Stop and ask** before editing `athanor-bus-api/src/polkit.rs`, `confidential_computing/`,
+- **Stop and ask** before editing `athanor-bus-api/src/polkit.rs`,
   `keys/`, `sign-images.sh` or `promote.sh`.
 - **Enable units with a preset file, never `systemctl enable` in the `Containerfile`.** The
   `Containerfile` runs `systemctl preset-all` after it and again in the GPU stages, and

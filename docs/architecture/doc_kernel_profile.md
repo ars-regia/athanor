@@ -117,7 +117,6 @@ self-hosted KVM runner. Section 15 turns the rest into gated blocks.
 - Roles: desktop, laptop, mesh; a machine may hold several. The mesh is personal: it
   joins the devices of one owner, and it comes after release 1.0 (D26, D38).
 - Areas that require explicit maintainer approval before any code change remain so:
-  attestation (`system/confidential_computing/athanor-attestation`) and
   `system/athanor-bus-api/src/polkit.rs`. This document fixes requirements and kernel
   primitives for them, not their code. The Gatekeeper was removed on 2026-10-05.
 
@@ -722,13 +721,12 @@ is never the Secure Boot key: a compromise of one must not give the other (D43).
 verified TPM quote and with the dm-verity option, the active IPE class derived from PCR 11 and the PCR 12 event log (D38, section 10).
 Keylime's example measured-boot policy considers PCRs 0–9 and 14 only, so a dedicated
 policy covers PCR 11 and the command line events of the allowed role sets in PCR 12. The
-attestation code in the repository today returns fixed results and quotes the wrong PCRs;
-it is replaced, with the maintainer's approval, before any mesh admission depends on it.
+attestation code the repository held returned fixed results and quoted the wrong PCRs.
 Amended 2026-10-06 (maintainer decision A2-9 (#151)): attestation is outside the threat
-model of 1.0 (`doc_threat_model.md`, TM7). Decided 2026-10-07 by the maintainer:
-`athanor-attestation` leaves the workspace members and stays in `system/confidential_computing`
-(ADR-0087; `experimental/EXEMPT` records the reason) and is rewritten on Keylime with the PCR 11 and PCR 12 policy above
-before any mesh admission depends on it; it is not deleted.
+model of 1.0 (`doc_threat_model.md`, TM7). Decided 2026-10-14 by the maintainer
+(ADR-0103 D10, reversing ADR-0087): `athanor-attestation` is deleted; a Keylime attestation
+with the PCR 11 and PCR 12 policy above starts from a new approved specification before any
+mesh admission depends on it.
 
 ## 10. Execution integrity and security primitives
 
