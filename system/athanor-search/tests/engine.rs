@@ -6,14 +6,14 @@ use std::time::Duration;
 
 use athanor_search::board::Rows;
 use athanor_search::command::Refusal;
-use athanor_search::engine::{Engine, DEADLINE, DEBOUNCE};
+use athanor_search::engine::{Engine, DEBOUNCE};
 use athanor_search::item::Group;
 
 /// `live_qalc` counts the children of the whole process: the tests that start qalc take turns.
 static QALC: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 mod common;
-use common::{live_qalc, wait_until};
+use common::live_qalc;
 
 #[test]
 fn in_memory_sources_answer_before_the_debounce() {
@@ -100,29 +100,6 @@ fn a_query_made_by_the_listener_aborts_the_outer_generation() {
                 gio::glib::timeout_future(DEBOUNCE + Duration::from_millis(15)).await;
                 assert_eq!(live_qalc().len(), 1, "only the second generation runs qalc");
                 slot.replace(None);
-            })
-        })
-        .expect("a fresh context is free");
-}
-
-#[test]
-fn a_dropped_engine_stops_its_pending_work() {
-    let _turn = QALC.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let context = gio::glib::MainContext::new();
-    context
-        .with_thread_default(|| {
-            context.block_on(async {
-                let calls = Rc::new(std::cell::Cell::new(0));
-                let count = calls.clone();
-                let engine = Engine::new(state("dropped"), None, Vec::new(), move |_| count.set(count.get() + 1));
-                engine.query("1+1");
-                let before = calls.get();
-                // Known blind spot: the engine is dropped before the debounce, so no qalc ever starts
-                // and the last assertion holds without any kill. cancel.rs covers a running child.
-                drop(engine);
-                gio::glib::timeout_future(DEBOUNCE + Duration::from_millis(300)).await;
-                assert_eq!(calls.get(), before, "the listener is never called again");
-                assert!(wait_until(DEADLINE * 2, || live_qalc().is_empty()).await, "the pending qalc was killed");
             })
         })
         .expect("a fresh context is free");
