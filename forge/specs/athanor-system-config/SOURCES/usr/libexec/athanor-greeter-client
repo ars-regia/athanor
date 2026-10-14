@@ -33,7 +33,8 @@
 #     loader entry or firmware setup for the next boot, take inhibitors or lock sessions --
 #     and so do Apply and GoBack of the update service. The bus driver's
 #     GetConnectionUnixUser, which the seal asks to learn that root sent the State reply,
-#     needs no rule: the proxy answers it for a name the greeter may see. Nothing else is
+#     needs no rule: the proxy lets that call of the bus driver through for any name, so
+#     the greeter can learn the uid of any peer, as every bus client can. Nothing else is
 #     asked of the system bus.
 #   - The session bus is filtered the same way, for accessibility: the greeter may own
 #     its GApplication name and talk to org.a11y.Bus, which hands out the address of the
