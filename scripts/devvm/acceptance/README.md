@@ -26,7 +26,7 @@ the user's name) and the `polkitd` line that grants `os.athanor.update.apply-mul
 absence of one as no helper, no grant and `Blocked`. Since #433 this harness's own SSH login is a
 counting session, so `call_active` arms the call from a user timer and the login is over when it
 arrives; `guest_ssh` does not multiplex (no ControlMaster), so every call is a login of its own and
-the stage opens none between arming a call and its first check. `second-count.sh` bind-mounts a
+the stage opens none between arming a call and its first check. The run's registry tunnel (`ssh -f -N`) is a login of the same user that lasts the whole run, and the service counts it as a second session: the stage closes it (`untunnel`) before the first case and reopens it at the end. The transient timer is given `AccuracySec=1ms`, as its default of a minute let a call arrive late. `second-count.sh` bind-mounts a
 wrapper over `bootc` that holds `bootc upgrade --from-downloaded` at the unlock while it takes a
 block inhibitor and opens a session of the other user (the stage's own inhibitor is dropped only
 after `nsenter` shows the update service the wrapper, and no harness login is open meanwhile); the prompt is then refused by stopping

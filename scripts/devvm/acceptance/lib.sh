@@ -38,6 +38,21 @@ tunnel() {
     -f -N -R "$ACC_PORT:127.0.0.1:$ACC_PORT" "$GUEST_USER@127.0.0.1"
 }
 
+# The tunnel is a login of the guest user with no terminal that lasts the whole run: logind
+# lists it as a session of class user, and since #433 the update service counts it as a second
+# session of the caller's user. The sessions stage closes it, so that the cases make every
+# session the service counts, and opens it again at the end.
+untunnel() {
+  if pgrep -f -- "-R $ACC_PORT:127.0.0.1:$ACC_PORT" > /dev/null; then
+    pkill -f -- "-R $ACC_PORT:127.0.0.1:$ACC_PORT"
+  fi
+  for _ in $(seq 20); do
+    guest_ssh "! ss -ltn | grep -q ':$ACC_PORT '" && return 0
+    sleep 1
+  done
+  die "FAIL  the tunnel to the registry is still open 20 s after it was closed"
+}
+
 boot_id() { guest_ssh cat /proc/sys/kernel/random/boot_id; }
 # Succeeds once the guest answers from a boot other than BOOT: with a deployment staged, the
 # old boot keeps answering for a while, as ostree finalizes the deployment on the way down.
@@ -124,13 +139,15 @@ expect_until() { # expect_until DESCRIPTION JQ-FILTER VALUE MINUTES
 # by a user timer ACC_CALL_DELAY seconds after this SSH login has ended: since ADR-0103 D22 any
 # session of class user besides the caller's makes Apply() ask for an administrator, and the
 # login that carries this command is one. call_active_start only arms the call.
+# The timer is told to fire to the millisecond: its default accuracy is a minute, and a call
+# that came late met the polling logins of the harness.
 ACC_CALL_DELAY=8
 ACC_CALL_SETTLE=45
 call_out() { printf '/var/tmp/acc-call-%s.out' "$1"; }
 call_active_start() { # call_active_start METHOD
   local out
   out=$(call_out "$1")
-  guest_ssh "sudo rm -f $out && sudo systemd-run --quiet --user --machine=$GUEST_USER@.host --on-active=$ACC_CALL_DELAY --collect --unit=acc-call-$1 -p StandardOutput=file:$out dbus-send --system --print-reply --dest=${UPDATE1[0]} ${UPDATE1[1]} ${UPDATE1[2]}.$1"
+  guest_ssh "sudo rm -f $out && sudo systemd-run --quiet --user --machine=$GUEST_USER@.host --on-active=$ACC_CALL_DELAY --timer-property=AccuracySec=1ms --collect --unit=acc-call-$1 -p StandardOutput=file:$out dbus-send --system --print-reply --dest=${UPDATE1[0]} ${UPDATE1[1]} ${UPDATE1[2]}.$1"
 }
 call_active() { # call_active METHOD: the reply, or the error, of the call
   local out

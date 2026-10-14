@@ -54,6 +54,7 @@ ACC_OTHER_MADE=''
 sessions_cleanup() {
   local failed=() unit state
   end_call || failed+=(end_call)
+  tunnel || failed+=(tunnel)
   end_units || failed+=(end_units)
   if [[ -n $ACC_SSH_HELD ]]; then
     end_ssh_session || failed+=(end_ssh_session)
@@ -75,6 +76,7 @@ stage_sessions() { # item 2, the other-session rule of UT6 (ADR-0103 D22, #433);
   expect "2: a downloaded update to ask about" .update downloaded
   polkit_pattern_selfcheck
   trap sessions_cleanup EXIT
+  untunnel
   guest_ssh "sudo useradd -m -p '*' $ACC_OTHER"
   ACC_OTHER_MADE=1
   # Every call below ends at this inhibitor if it is authorised, so none can reboot the guest
