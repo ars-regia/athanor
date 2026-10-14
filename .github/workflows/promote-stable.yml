@@ -150,7 +150,7 @@ jobs:
     name: Point the installer ISO's stable at the run
     needs: [promote]
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     environment: release
     permissions:
       contents: read
@@ -162,6 +162,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - name: Install Nix
+        uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
+        with:
+          extra_nix_config: "experimental-features = nix-command flakes"
       - name: Log in to the registries
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -171,15 +175,22 @@ jobs:
           EVIDENCE_REGISTRY_USER: ${{ vars.EVIDENCE_REGISTRY_USER }}
           EVIDENCE_REGISTRY_TOKEN: ${{ secrets.EVIDENCE_REGISTRY_TOKEN }}
         run: bash system/promote-login.sh
+      - name: 📥 Fetch the run's evidence again (system/fetch-evidence.sh)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash system/fetch-evidence.sh "${RUN_ID}" artifacts
       - name: 📎 The approved plan
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
         with:
           name: promotion-${{ inputs.run_id }}
           path: approved
-      - name: 💿 Point the installer ISO's stable at the ISO the acceptance tested (system/tag-images.sh)
-        # After the system images, so the ISO users download never installs a build :stable
-        # has not reached (doc_pipeline.md PL35, ADR-0114). The digest is the plan's, which
-        # promote.sh found unchanged before it moved anything.
+      - name: 🔎 Verify the copy off GitHub against the approved plan
         run: |
-          iso=$(jq -er .iso approved/promotion.json)
-          bash system/tag-images.sh --registry "$REGISTRY" --tag stable --iso "$RUN_ID" "$iso" | tee -a "${GITHUB_STEP_SUMMARY}"
+          cp approved/promotion.json artifacts/promotion.json
+          nix shell --inputs-from . nixpkgs#cosign -c bash system/evidence-bundle.sh verify "${EVIDENCE_REF}" artifacts
+      - name: 💿 Point the installer ISO's stable at the ISO the acceptance tested (system/promote-iso.sh)
+        # After the system images, so the ISO users download never installs a build :stable
+        # has not reached (doc_pipeline.md PL35, ADR-0114). The digest is the verified plan's,
+        # which promote.sh found unchanged before it moved anything; promote-iso.sh refuses once
+        # athanor-system:stable names another build, so a late re-run never moves the ISO back.
+        run: bash system/promote-iso.sh "${RUN_ID}" artifacts/promotion.json | tee -a "${GITHUB_STEP_SUMMARY}"

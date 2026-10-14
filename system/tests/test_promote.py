@@ -14,6 +14,7 @@ from test_sign_images import BUILDER, PODMAN
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PROMOTE = ROOT / "system" / "promote.sh"
 PLAN = ROOT / "scripts" / "ci" / "promotion-plan.sh"
+PROMOTE_ISO = ROOT / "system" / "promote-iso.sh"
 KEY = ROOT / "system/keys/athanor-image-1.pub"
 OTHER_KEY = (
     ROOT / "forge/specs/athanor-update/athanor-update-1.0.0/tests/vectors/made/a.pub"
@@ -176,6 +177,7 @@ class Promote(Tool):
         r, _ = self.promote()
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.record()["iso"], ISO)
+        self.assertEqual(self.record()["iso_system"], digest(1))
 
     def test_an_unknown_or_unbound_iso_is_refused_and_nothing_moves(self):
         for name, text in (
@@ -201,6 +203,47 @@ class Promote(Tool):
         )
         self.assertEqual(r.returncode, 1, r.stderr)
         self.assertIn("athanor-iso:412 moved", r.stderr)
+        self.assertEqual(copies, [])
+
+    def promote_iso(self, run="412"):
+        """The iso job: promote-iso.sh on the plan directory, after the promote job."""
+        (self.dir / "calls.log").unlink(missing_ok=True)
+        r = subprocess.run(
+            ["bash", str(PROMOTE_ISO), run, str(self.artifacts / "promotion.json")],
+            capture_output=True,
+            text=True,
+            env={**self.env, "REGISTRY": REG, "GITHUB_REF": "refs/heads/iso-v0"},
+        )
+        log = self.dir / "calls.log"
+        calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+        return r, [c[-1].removeprefix("docker://") for c in calls if c[:2] == ["skopeo", "copy"]]
+
+    def test_the_iso_job_moves_the_iso_the_record_names(self):
+        self.published()
+        r, _ = self.promote()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r, copies = self.promote_iso()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(copies, [f"{REG}/athanor-iso:stable"])
+        self.assertIn(f"{REG}/athanor-iso:stable -> {ISO}", r.stdout)
+
+    def test_the_iso_job_refuses_once_a_later_promotion_moved_the_system(self):
+        """A late re-run of an older promotion's iso job would put the ISO behind the system."""
+        self.published()
+        r, _ = self.promote()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.set_tag(f"{REG}/athanor-system:stable", digest(9))
+        r, copies = self.promote_iso()
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("the system images moved on", r.stderr)
+        self.assertEqual(copies, [])
+
+    def test_the_iso_job_refuses_the_plan_of_another_run(self):
+        self.published()
+        r, _ = self.promote()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r, copies = self.promote_iso(run="413")
+        self.assertEqual(r.returncode, 1, r.stderr)
         self.assertEqual(copies, [])
 
     def test_the_first_promotion_has_no_previous_stable(self):

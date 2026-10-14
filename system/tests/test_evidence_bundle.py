@@ -144,6 +144,7 @@ class EvidenceBundle(Tool):
         (self.artifacts / "promotion.json").write_text(json.dumps({
             "run_id": 412, "images": [{"name": "athanor-system", "digest": "sha256:" + "a" * 64, "previous_stable": None}],
             "skipped": [{"name": "athanor-system-nvidia-legacy", "reason": "not promoted before 0.9"}],
+            "iso": "sha256:" + "c" * 64, "iso_system": "sha256:" + "a" * 64,
             "overrides": ["athanor-system-nvidia"], "builder_content_hash": "b" * 64}))
         (self.artifacts / "evidence" / "iso-acceptance.athanor-system.json").write_text(json.dumps({
             "gate": "iso-acceptance", "image": "athanor-system", "verdict": "pass", "finished_at": "2026-10-09T10:00:00Z"}))
@@ -151,15 +152,18 @@ class EvidenceBundle(Tool):
         self.assertEqual(r.returncode, 0, r.stderr)
         for text in ("build run 412", "sha256:" + "a" * 64, "Hardware override: athanor-system-nvidia",
                      "Signatures verified in: athanor-builder:" + "b" * 64,
-                     "| iso-acceptance | athanor-system | pass |", "athanor-system-nvidia-legacy"):
+                     "| iso-acceptance | athanor-system | pass |", "athanor-system-nvidia-legacy",
+                     "Installer ISO (athanor-iso:stable after the system images): `sha256:" + "c" * 64 + "`"):
             self.assertIn(text, r.stdout)
 
     def test_the_summary_refuses_a_missing_field(self):
         # A plan without overrides would read "Hardware override: none" in the approval.
-        plan = {"run_id": 412, "images": [], "skipped": [], "overrides": [], "builder_content_hash": "b" * 64}
+        plan = {"run_id": 412, "images": [], "skipped": [], "overrides": [], "builder_content_hash": "b" * 64,
+                "iso": "sha256:" + "c" * 64, "iso_system": "sha256:" + "a" * 64}
         evidence = {"gate": "iso-acceptance", "image": "athanor-system", "verdict": "pass", "finished_at": "t"}
         for name, document, field in (("promotion.json", plan, "overrides"),
                                       ("promotion.json", plan, "builder_content_hash"),
+                                      ("promotion.json", plan, "iso"),
                                       ("evidence/iso-acceptance.athanor-system.json", evidence, "verdict")):
             with self.subTest(field=field):
                 (self.artifacts / "promotion.json").write_text(json.dumps(plan))

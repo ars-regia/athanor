@@ -837,8 +837,9 @@ images' `:latest` without a marker (PL55). Those old jobs are outside this rule 
 ADR-0098 option A deletes `main`; a later ISO release path names its writer (PL32).
 Before this revision only `main` moved the ISO's `:latest` too, so this is no regression. `:stable`,
 `:stable-previous`, `:stable-<YYYYMMDD>` are written only by `promote.sh`; the ISO's
-`:stable` only by `system/tag-images.sh --iso` in the `iso` job of `promote-stable.yml`,
-after `promote.sh` (ADR-0114). There is one
+`:stable` only by `system/promote-iso.sh`, through `system/tag-images.sh --iso`, in the `iso`
+job of `promote-stable.yml`, after `promote.sh` and only while the system's `:stable` names
+the build the ISO installs (ADR-0114). There is one
 writer per tag and repository. Since PB13 `verify.py workflows` refuses a call of
 `system/tag-images.sh` that moves `:latest` outside `tag-latest` of `release.yml`, and a call of
 `promote.sh` or a move of `:stable` outside a job of the environment `release`; the full check is

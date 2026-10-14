@@ -211,10 +211,10 @@ promotion_record() { # promotion_record DAY OUT
     trigger=manual
     if [[ -n ${GITHUB_RUN_ID:-} ]]; then trigger=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID; fi
     jq -n -S --indent 2 --argjson run "$run" --arg day "$day" --arg registry "$REGISTRY" --arg trigger "$trigger" --arg override "$override" --arg builder "$builder" \
-        --argjson images "$images" --argjson skipped "$skips" --arg iso "$iso_digest" \
+        --argjson images "$images" --argjson skipped "$skips" --arg iso "$iso_digest" --arg iso_system "$iso_bound" \
         --argjson evidence "$evidence_sums" --argjson packages "$package_sums" \
         --argjson keys "$key_sums" --argjson dwell_hours "$((dwell / 3600))" \
-        '{run_id: $run, day: $day, registry: $registry, trigger: $trigger, images: $images, iso: $iso, skipped: $skipped,
+        '{run_id: $run, day: $day, registry: $registry, trigger: $trigger, images: $images, iso: $iso, iso_system: $iso_system, skipped: $skipped,
       overrides: (if $override == "" then [] else [$override] end), evidence: $evidence, packages: $packages,
       keys: $keys, dwell_hours: $dwell_hours, builder_content_hash: $builder}' \
         > "$out"

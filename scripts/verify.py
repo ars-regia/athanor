@@ -409,7 +409,7 @@ INPUT_IN_RUN = re.compile(r"\$\{\{(?:(?!\}\}).)*\binputs\b", re.S)
 # skopeo copy onto :latest is not recognised, nor a tag held in a variable, and ADR-0111 item 5
 # accepts that the registry itself binds no workflow.
 LATEST_WRITER = re.compile(r"tag-images\.sh\b[^\n]*--tag(?:=|\s+)[\"']?latest\b(?![-.\w])")
-STABLE_WRITER = re.compile(r"promote\.sh\b|tag-images\.sh\b[^\n]*--tag(?:=|\s+)[\"']?stable\b(?![-.\w])")
+STABLE_WRITER = re.compile(r"promote(?:-iso)?\.sh\b|tag-images\.sh\b[^\n]*--tag(?:=|\s+)[\"']?stable\b(?![-.\w])")
 
 
 def release_problems(root):

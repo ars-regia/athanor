@@ -59,12 +59,16 @@ This record implements the two decisions as follows.
    fetches the run's `iso-digest.txt`, the file `accept.yml` read to find the ISO it tested.
    `scripts/ci/promotion-record.sh` checks that it names the athanor-system digest being
    promoted and that `athanor-iso:<run_id>` still names it, and writes it into the record as
-   `iso`, which the bundle signs and the `release` approval covers. `promote.sh` recomputes
+   `iso`, with that athanor-system digest as `iso_system`. The bundle signs the record, and
+   the job summary the `release` approval covers prints both. `promote.sh` recomputes
    the record before it moves anything, so it refuses when the ISO is gone or moved. The `iso`
-   job of `promote-stable.yml` (`needs: [promote]`, environment `release`) then moves
-   `athanor-iso:stable` to that digest with `system/tag-images.sh --iso`, which refuses when
-   `athanor-iso:<run_id>` names another digest. Re-running the failed jobs retries the ISO
-   alone.
+   job of `promote-stable.yml` (`needs: [promote]`, environment `release`) then verifies the
+   approved plan against the signed copy off GitHub, as the `promote` job does, and runs
+   `system/promote-iso.sh`. It refuses unless `athanor-system:stable` still names
+   `iso_system`, so a late re-run of an older promotion's `iso` job never moves the ISO
+   behind the system images, and moves `athanor-iso:stable` to `iso` with
+   `system/tag-images.sh --iso`, which refuses when `athanor-iso:<run_id>` names another
+   digest. Re-running the failed jobs retries the ISO alone.
 3. **The checks.** `verify.py install-channel` fails when any kickstart names `:latest` or runs
    `bootc switch` without the flag, and when the three kickstarts lack the `%post`, run it
    without `--erroronfail`, or differ in it; a comment that quotes the command does not count.
