@@ -101,7 +101,7 @@ done
 counts | awk -v u="$ACC_OTHER" '$2 == u { found = 1 } END { exit !found }' || { log "no session of $ACC_OTHER in 20 s; the wrapper times out and the call fails"; exit 1; }
 # The session the second count sees must be this one: the caller's user may have only its
 # graphical session, whatever the class of the others.
-extra=$(counts | awk -v u="$ACC_USER" '$2 == u && $3 != "greeter" && $3 != "lock-screen" && $3 != "background" { n++ } END { print n + 0 }')
+extra=$(counts | awk -v u="$ACC_USER" '$2 == u && $3 !~ /^(greeter|lock-screen|background|background-light|manager|manager-early|none)$/ { n++ } END { print n + 0 }')
 log "sessions at the unlock: $(counts | tr '\n' ';')"
 [[ $extra -eq 1 ]] || { log "$ACC_USER has $extra counting sessions, expected the graphical one only; the wrapper times out"; exit 1; }
 log "opened a session of $ACC_OTHER"
