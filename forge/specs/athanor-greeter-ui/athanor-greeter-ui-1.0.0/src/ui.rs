@@ -5,7 +5,7 @@
 //! Every interactive widget carries an accessible name and every string goes through
 //! gettext (SH13).
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use athanor_trust_state::{ReadError, State};
@@ -14,12 +14,14 @@ use athanor_style::calmo::{self, Variant};
 use gtk4::accessible::Property;
 use gtk4::prelude::*;
 use gtk4::{
-    gdk, Align, Application, ApplicationWindow, Box, Button, Image, Label, Orientation,
+    gdk, Align, Application, ApplicationWindow, Box, Button, Entry, Image, Label, Orientation,
     PasswordEntry, ToggleButton,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
-use crate::auth::{authenticate_interactive, discover_target_user, UserInfo};
+use tokio::sync::oneshot;
+
+use crate::auth::{authenticate_interactive, discover_target_user, Conversation, Prompt, UserInfo};
 use crate::i18n::{tr, tr_with};
 
 /// The seal's state is asked again every hour: the badge ages ("checked within 14 days"
@@ -219,6 +221,98 @@ fn power_chip(id: &str, icon: &str, label: &str, which: Power) -> Button {
     button
 }
 
+/// Names a text field for a screen reader: the entry and the text widget inside it, which
+/// is the node a screen reader lands on.
+fn label_field<W: IsA<gtk4::Editable> + IsA<gtk4::Accessible>>(field: &W, label: &str) {
+    field.update_property(&[Property::Label(label)]);
+    if let Some(delegate) = field.delegate() {
+        delegate.update_property(&[Property::Label(label)]);
+    }
+}
+
+/// The card's fields as one sign-in sees them: PAM's messages are shown on it, and its
+/// further questions are put on it, each answered from the field its type calls for.
+#[derive(Clone)]
+struct SignInForm {
+    password: PasswordEntry,
+    password_label: String,
+    answer: Entry,
+    question: Label,
+    submit: Button,
+    status: Label,
+    error: Label,
+    /// Where the answer to PAM's open question goes, while one is open.
+    pending: Rc<RefCell<Option<oneshot::Sender<zeroize::Zeroizing<String>>>>>,
+}
+
+impl SignInForm {
+    /// Nothing can be typed while greetd has the turn.
+    fn wait(&self) {
+        self.password.set_sensitive(false);
+        self.answer.set_sensitive(false);
+        self.submit.set_sensitive(false);
+    }
+
+    /// The card as it was before the sign-in: the password field, ready.
+    fn reset(&self) {
+        self.pending.take();
+        self.question.set_visible(false);
+        self.answer.set_text("");
+        self.answer.set_visible(false);
+        self.password.set_text("");
+        label_field(&self.password, &self.password_label);
+        self.password.set_visible(true);
+        self.password.set_sensitive(true);
+        self.submit.set_sensitive(true);
+        self.password.grab_focus();
+    }
+}
+
+impl Conversation for SignInForm {
+    fn status(&self, text: &str) {
+        self.status.set_label(text);
+        self.status.set_visible(true);
+    }
+
+    fn error(&self, text: &str) {
+        let shown = if self.error.is_visible() {
+            format!("{}\n{text}", self.error.label())
+        } else {
+            text.to_string()
+        };
+        self.error.set_label(&shown);
+        self.error.set_visible(true);
+    }
+
+    fn ask(
+        &self,
+        prompt: Prompt,
+    ) -> impl std::future::Future<Output = Option<zeroize::Zeroizing<String>>> {
+        let (reply, answer) = oneshot::channel();
+        self.pending.replace(Some(reply));
+        self.status.set_visible(false);
+        let (text, secret) = match prompt {
+            Prompt::Secret(text) => (text, true),
+            Prompt::Visible(text) => (text, false),
+        };
+        self.question.set_label(&text);
+        self.question.set_visible(true);
+        self.password.set_visible(secret);
+        self.answer.set_visible(!secret);
+        let field: &gtk4::Widget = if secret {
+            label_field(&self.password, &text);
+            self.password.upcast_ref()
+        } else {
+            label_field(&self.answer, &text);
+            self.answer.upcast_ref()
+        };
+        field.set_sensitive(true);
+        self.submit.set_sensitive(true);
+        field.grab_focus();
+        async move { answer.await.ok() }
+    }
+}
+
 pub fn build_ui(app: &Application) {
     // The direction comes from the language of the catalog in use, not from a process
     // locale, and has to be set before the first widget exists.
@@ -304,10 +398,15 @@ pub fn build_ui(app: &Application) {
         .build();
     let password_label = tr_with("Password for {name}", "name", &user.real_name);
     named(&password, "greeter-password", &password_label);
-    if let Some(delegate) = password.delegate() {
-        // The text widget inside the entry is the node a screen reader lands on.
-        delegate.update_property(&[Property::Label(&password_label)]);
-    }
+    label_field(&password, &password_label);
+    // The field for PAM's questions whose answer is shown as it is typed (a one-time code):
+    // hidden until PAM asks one.
+    let answer = Entry::builder()
+        .hexpand(true)
+        .css_classes(["greeter-field"])
+        .visible(false)
+        .build();
+    answer.set_widget_name("greeter-answer");
     let submit = Button::builder()
         .icon_name("go-next-symbolic")
         .css_classes(["greeter-submit"])
@@ -319,8 +418,16 @@ pub fn build_ui(app: &Application) {
         .spacing(6)
         .build();
     field_row.append(&password);
+    field_row.append(&answer);
     field_row.append(&submit);
 
+    // PAM's question after the password (a new password, a one-time code), in its words.
+    let question = Label::builder()
+        .css_classes(["greeter-status"])
+        .margin_bottom(8)
+        .wrap(true)
+        .visible(false)
+        .build();
     let status = Label::builder()
         .css_classes(["greeter-status"])
         .margin_top(12)
@@ -336,54 +443,62 @@ pub fn build_ui(app: &Application) {
     // A failed sign-in is announced, not only painted.
     error.set_accessible_role(gtk4::AccessibleRole::Alert);
 
-    {
+    for field in [password.upcast_ref::<gtk4::Editable>(), answer.upcast_ref()] {
         let (status, error) = (status.clone(), error.clone());
-        password.connect_changed(move |_| {
+        field.connect_changed(move |_| {
             status.set_visible(false);
             error.set_visible(false);
         });
     }
 
+    let form = SignInForm {
+        password: password.clone(),
+        password_label,
+        answer: answer.clone(),
+        question: question.clone(),
+        submit: submit.clone(),
+        status: status.clone(),
+        error: error.clone(),
+        pending: Rc::new(RefCell::new(None)),
+    };
     let sign_in = Rc::new({
-        let (app, password, submit, status, error) = (
-            app.clone(),
-            password.clone(),
-            submit.clone(),
-            status.clone(),
-            error.clone(),
-        );
+        let app = app.clone();
         move || {
-            let secret = zeroize::Zeroizing::new(password.text().to_string());
-            password.set_sensitive(false);
-            submit.set_sensitive(false);
-            error.set_visible(false);
-            status.set_label(&tr("Signing in…"));
-            status.set_visible(true);
-            let (app, password, submit, status, error) = (
-                app.clone(),
-                password.clone(),
-                submit.clone(),
-                status.clone(),
-                error.clone(),
-            );
+            // A question of PAM's is open: this is its answer, not a new sign-in.
+            if let Some(reply) = form.pending.take() {
+                let field: &gtk4::Editable = if WidgetExt::is_visible(&form.answer) {
+                    form.answer.upcast_ref()
+                } else {
+                    form.password.upcast_ref()
+                };
+                let text = zeroize::Zeroizing::new(field.text().to_string());
+                field.set_text("");
+                form.wait();
+                if reply.send(text).is_err() {
+                    tracing::warn!("the sign-in ended before its question was answered");
+                }
+                return;
+            }
+            let secret = zeroize::Zeroizing::new(form.password.text().to_string());
+            // Cleared before anything is shown: clearing a field hides the messages.
+            form.password.set_text("");
+            form.wait();
+            form.error.set_visible(false);
+            form.status.set_label(&tr("Signing in…"));
+            form.status.set_visible(true);
+            let (app, form) = (app.clone(), form.clone());
             glib::MainContext::default().spawn_local(async move {
-                // PAM's own prompts (a fingerprint reader asking for a touch) are shown as
-                // they arrive.
-                let progress = status.clone();
-                match authenticate_interactive(&secret, &move |message: &str| {
-                    progress.set_label(message)
-                })
-                .await
-                {
+                match authenticate_interactive(&secret, &form).await {
                     Ok(()) => app.quit(),
                     Err(reason) => {
-                        status.set_visible(false);
-                        error.set_label(&tr_with("Sign-in failed: {reason}", "reason", &reason));
-                        error.set_visible(true);
-                        password.set_text("");
-                        password.set_sensitive(true);
-                        submit.set_sensitive(true);
-                        password.grab_focus();
+                        form.reset();
+                        form.status.set_visible(false);
+                        form.error.set_label(&tr_with(
+                            "Sign-in failed: {reason}",
+                            "reason",
+                            &reason,
+                        ));
+                        form.error.set_visible(true);
                     }
                 }
             });
@@ -392,6 +507,10 @@ pub fn build_ui(app: &Application) {
     {
         let sign_in = sign_in.clone();
         password.connect_activate(move |_| sign_in());
+    }
+    {
+        let sign_in = sign_in.clone();
+        answer.connect_activate(move |_| sign_in());
     }
     submit.connect_clicked(move |_| sign_in());
 
@@ -402,6 +521,7 @@ pub fn build_ui(app: &Application) {
         .build();
     card.append(&avatar(&user));
     card.append(&name);
+    card.append(&question);
     card.append(&field_row);
     card.append(&status);
     card.append(&error);
