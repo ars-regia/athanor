@@ -3021,6 +3021,48 @@ def check_coverage():
     return r
 
 
+BUS_API_MESH_IDENT = re.compile(r"\b(?:mesh\w*|\w*mesh\w*|NodeIdentityPayload|AiDecisionPayload|KernelTelemetry)\b", re.I)
+BUS_API_DENIED_DEPS = ("x25519-dalek", "ed25519-dalek", "ring", "rand_core", "zeroize", "subtle")
+BUS_API_DEP_TABLES = ("dependencies", "dev-dependencies", "build-dependencies")
+
+
+def bus_api_residue(root):
+    """The mesh and post-quantum residue ADR-0103 D10 deletes from athanor-bus-api.
+
+    Only lib.rs and polkit.rs may exist under src/, deliberately: the crate is the shared
+    polkit client and nothing else (ADR-0103 D10). Any other file in the crate, tests/ and
+    build.rs included, is searched for mesh identifiers (case-insensitive), and every
+    dependency table of Cargo.toml (target-specific ones too) is checked against a deny-list."""
+    crate = root / "system" / "athanor-bus-api"
+    problems = []
+    for f in sorted(crate.rglob("*.rs")):
+        rel = f.relative_to(root)
+        if f.parent == crate / "src" and f.name in ("lib.rs", "polkit.rs"):
+            pass
+        elif f.parent == crate / "src" or "src" in f.relative_to(crate).parts:
+            problems.append(f"{rel}: module outside lib.rs and polkit.rs (ADR-0103 D10)")
+        for m in sorted({m.group(0) for m in BUS_API_MESH_IDENT.finditer(f.read_text())}):
+            problems.append(f"{rel}: {m} is mesh or post-quantum residue (ADR-0103 D10)")
+    manifest = crate / "Cargo.toml"
+    if manifest.exists():
+        data = tomllib.loads(manifest.read_text())
+        tables = [data.get(t, {}) for t in BUS_API_DEP_TABLES]
+        for target in data.get("target", {}).values():
+            tables += [target.get(t, {}) for t in BUS_API_DEP_TABLES]
+        for dep in sorted({d for t in tables for d in t}):
+            if dep in BUS_API_DENIED_DEPS or dep.startswith("pqcrypto"):
+                problems.append(f"{manifest.relative_to(root)}: dependency {dep} is post-quantum residue (ADR-0103 D10)")
+    return problems
+
+
+@check("bus-api-residue", "athanor-bus-api holds no mesh or post-quantum residue (ADR-0103 D10)")
+def check_bus_api_residue():
+    r = Result()
+    for problem in bus_api_residue(ROOT):
+        r.fail(problem)
+    return r
+
+
 # --------------------------------------------------------------------------- #
 # agent-docs: the instructions agents read name things that exist
 # --------------------------------------------------------------------------- #
