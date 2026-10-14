@@ -93,6 +93,13 @@ class EvidenceBundle(Tool):
         r = self.run_script("verify-dir", str(copy), str(self.artifacts))
         self.assertEqual(r.returncode, 0, r.stderr)
 
+    def test_a_copy_verifies_outside_actions(self):
+        copy = self.created()
+        for name in ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY"):
+            del self.env[name]
+        r = self.run_script("verify-dir", str(copy), str(self.artifacts))
+        self.assertEqual(r.returncode, 0, r.stderr)
+
     def test_a_changed_file_is_refused(self):
         copy = self.created()
         (copy / "evidence" / "iso-acceptance.athanor-system.json").write_text(

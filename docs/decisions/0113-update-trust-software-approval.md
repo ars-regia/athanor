@@ -32,8 +32,8 @@ the disk utility, Firefox is the Flatpak ([ADR-0097](0097-owners-execution-firef
 and Bazaar follows the Fedora 45 base ([A2-28](0065-bazaar-waits-for-fedora-45.md), D8). The
 table of decision 7 still read as before section 9.
 
-The freeze of ADR-0103 D3 on specification revisions is lifted by ADR-0112, the record
-proposed in #417; this approval relies on it.
+The freeze of ADR-0103 D3 on specification revisions is lifted by
+[ADR-0112](0112-pace-to-0-9.md); this approval relies on it.
 
 ## Decision
 
