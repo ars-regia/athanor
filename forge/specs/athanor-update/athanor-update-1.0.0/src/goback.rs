@@ -55,6 +55,13 @@ pub(crate) mod tests {
     use super::*;
     use crate::serve::Error;
 
+    /// Held by every test that starts a process, while it spawns, and by every test that
+    /// releases the store lock and takes it again. Between fork and exec the child holds a
+    /// copy of each open file, so a lock released in that window stays taken until the exec
+    /// and the next `try_lock` answers busy. The service never meets it: it spawns only with
+    /// the lock held.
+    pub(crate) static SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// A private dbus-daemon, as the tests of `athanor-shelld` use.
     pub(crate) struct Bus {
         daemon: Child,
@@ -80,12 +87,14 @@ pub(crate) mod tests {
                 ),
             )
             .expect("bus.conf");
+            let spawning = SPAWN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut daemon = Command::new("dbus-daemon")
                 .args(["--nofork", "--nopidfile", "--print-address"])
                 .arg(format!("--config-file={}", config.display()))
                 .stdout(Stdio::piped())
                 .spawn()
                 .expect("dbus-daemon");
+            drop(spawning);
             let mut address = String::new();
             BufReader::new(daemon.stdout.take().expect("stdout"))
                 .read_line(&mut address)

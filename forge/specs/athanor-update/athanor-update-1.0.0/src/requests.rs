@@ -159,16 +159,18 @@ mod tests {
         assert_eq!(published(&machine), UpdateState::WillApplyAtNextShutdown);
     }
 
+    // A machine per request: a store lock released and taken again can meet a child process
+    // of another test between fork and exec (goback::tests::SPAWN).
     #[tokio::test]
     async fn apply_refuses_with_nothing_downloaded_and_never_downloads() {
-        let machine = Machine::new("apply-nothing", &["real/k1.pub"]);
         let unlocked = downloaded();
         unlocked.status.borrow_mut().staged.as_mut().expect("staged").download_only = false;
         let held = downloaded();
-        machine.store.set_held(&digest(2)).expect("held");
         let queued = downloaded();
         queued.status.borrow_mut().rollback_queued = true;
-        for tools in [Fake::booted(deployed(&digest(1), 1000)).offering(&digest(2), 2000), unlocked, held, queued] {
+        for (case, tools) in [("offered", Fake::booted(deployed(&digest(1), 1000)).offering(&digest(2), 2000)), ("unlocked", unlocked), ("held", held), ("queued", queued)] {
+            let machine = Machine::new(&format!("apply-nothing-{case}"), &["real/k1.pub"]);
+            machine.store.set_held(&digest(2)).expect("held");
             let power = FakePower::new(false, Ok(()));
             assert_eq!(apply(&machine.ctx(&tools, 5000), &power).await, Err(Refusal::NothingDownloaded));
             assert!(tools.calls.borrow().is_empty() && !power.rebooted.get());
@@ -200,6 +202,7 @@ mod tests {
         assert_eq!(*tools.calls.borrow(), ["apply_downloaded", "relock"]);
         assert_eq!(published(&machine), UpdateState::Downloaded);
 
+        let machine = Machine::new("apply-relock-stuck", &["real/k1.pub"]);
         let mut stuck = downloaded();
         stuck.relock = Err(crate::tools::Failure { code: athanor_trust_state::ErrorCode::Internal, host: None });
         assert_eq!(apply(&machine.ctx(&stuck, 5000), &FakePower::new(false, Err(RebootError::Failed))).await, Err(Refusal::Failed));
@@ -218,6 +221,7 @@ mod tests {
         let machine = Machine::new("go-back", &["real/k1.pub"]);
         let tools = Fake::booted(deployed(&digest(2), 2000));
         assert_eq!(go_back(&machine.ctx(&tools, 5000), &FakePower::new(false, Ok(()))).await, Err(Refusal::NoPreviousVersion));
+        let machine = Machine::new("go-back-again", &["real/k1.pub"]);
         tools.status.borrow_mut().rollback = Some(deployed(&digest(1), 1000));
         let power = FakePower::new(false, Ok(()));
         assert_eq!(go_back(&machine.ctx(&tools, 5000), &power).await, Ok(()));
