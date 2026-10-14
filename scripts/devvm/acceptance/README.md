@@ -12,6 +12,12 @@ throwaway registry and throwaway keys. Nothing here touches the project registry
 The 31 GB host cannot hold the CI runner guest (16 GB) and this VM (8 GB) together:
 `run.sh` refuses to start while a workflow run is in progress. Do not dispatch one meanwhile.
 
+The `probes` stage (issue #312) runs `probes.py` on the finished guest: listening sockets and
+firewall zones, `systemd-analyze security` ceilings, SELinux denials since boot, PAM, sysctl,
+masked units, the trust state and one Nix build with `nix store gc`, each against
+`expectations.toml`. It fails naming the check; `run.sh probes` runs it alone. Change a line of
+the expectations only with the review of the exposure it declares.
+
 Looked at by hand, with `scripts/devvm/screenshot.sh`: the "update ready" notification after
 the `download` stage, the "now running" notification after `apply`, and the administrator
 prompt that `busctl --system call os.athanor.Update1 /os/athanor/Update1 os.athanor.Update1 GoBack`
