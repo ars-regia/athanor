@@ -17,7 +17,9 @@ usage() {
     sed -n 's/^# Usage: //p; s/^#        //p' "$0" >&2
     exit 2
 }
-identity="${GITHUB_SERVER_URL:?}/${GITHUB_REPOSITORY:?}/.github/workflows/promote-stable.yml@refs/heads/${RELEASE_BRANCH:-iso-v0}"
+# Outside Actions (a verify from a workstation) the host and repository default as in
+# kernel-artifacts.sh.
+identity="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-ars-regia/athanor}/.github/workflows/promote-stable.yml@refs/heads/${RELEASE_BRANCH:-iso-v0}"
 issuer=https://token.actions.githubusercontent.com
 
 create() {
