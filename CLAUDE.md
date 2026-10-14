@@ -30,9 +30,10 @@ applies to Claude Code only.
   (`gh api repos/<repo>/rules/branches/<base>` and `.../branches/<base>/protection`, where a
   404 means only the rulesets count), never from the pull request's own files, present and `pass`,
   and a base with no required check is not merged on this rule; every other check `pass` or
-  `skipping`; not a draft; `mergeable` is `MERGEABLE`; `reviewDecision` is `REVIEW_REQUIRED`
-  or `APPROVED`; base and head sha equal the card's. A new commit or a retarget voids the
-  card and any approval given on it.
+  `skipping`; not a draft; `mergeable` is `MERGEABLE`; `reviewDecision` is `REVIEW_REQUIRED`,
+  `APPROVED` or empty, never `CHANGES_REQUESTED` (with no approval count, ADR-0107, GitHub
+  leaves it empty even after the approval checked below; 2026-10-14); base and head sha equal
+  the card's. A new commit or a retarget voids the card and any approval given on it.
 
   The authorisation depends on who opened the pull request. One the App opened needs an
   `APPROVED` review by `hr-mes` whose `commit.oid` in `gh pr view <n> --json reviews` is the
