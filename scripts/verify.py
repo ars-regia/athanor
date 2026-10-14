@@ -879,6 +879,10 @@ def check_contacts():
 # 3. polkit — ogni azione applicata dal codice deve essere dichiarata
 # --------------------------------------------------------------------------- #
 
+# An action id in code, read whole: polkit allows "-" in an id, as in apply-multi-session.
+POLKIT_ACTION_IN_CODE = re.compile(r"os\.athanor\.[a-z0-9_-]+\.[a-z0-9_-]+")
+
+
 @check("polkit", "Ogni action-id polkit applicata dal codice è dichiarata in un .policy")
 def check_polkit():
     r = Result()
@@ -886,7 +890,7 @@ def check_polkit():
     used = {}   # action -> {file:riga}
     for p in rust_files():
         for i, line in enumerate(read(p).split("\n"), 1):
-            for a in re.findall(r"os\.athanor\.[a-z0-9_]+\.[a-z0-9_]+", line):
+            for a in POLKIT_ACTION_IN_CODE.findall(line):
                 used.setdefault(a, set()).add(f"{rel(p)}:{i}")
 
     declared = {}   # action -> file .policy
