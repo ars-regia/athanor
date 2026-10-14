@@ -792,11 +792,16 @@ def install_channel_problems(root=None):
             if re.search(r"\bbootc\s+switch\b", code) and "--enforce-container-sigpolicy" not in code:
                 problems.append(f"{relative}:{i}: bootc switch without --enforce-container-sigpolicy (UD2)")
         if relative in INSTALL_KICKSTARTS:
-            found = [b for b in KICKSTART_POST.findall(text) if STABLE_SWITCH in b]
-            if len(found) == 1:
-                blocks[relative] = found[0]
-            else:
+            # A line of its own, so a comment that quotes the command does not count.
+            found = [b for b in KICKSTART_POST.findall(text)
+                     if STABLE_SWITCH in (line.strip() for line in b.split("\n"))]
+            if len(found) != 1:
                 problems.append(f"{relative}: needs one %post that runs `{STABLE_SWITCH}` (UD2)")
+            elif "--erroronfail" not in found[0].split("\n", 1)[0].split():
+                problems.append(f"{relative}: the :stable %post needs --erroronfail, or a failed switch "
+                                f"leaves an install that follows the unverified run tag (UD2)")
+            else:
+                blocks[relative] = found[0]
     if len(set(blocks.values())) > 1:
         problems.append(f"the :stable %post differs between {', '.join(sorted(blocks))}: keep them identical")
     return problems

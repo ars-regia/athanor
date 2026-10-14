@@ -48,6 +48,16 @@ class InstallChannelTest(unittest.TestCase):
         self.edit("system/disk_config/iso.toml", "    exit 1\nfi\nreference", "    exit 2\nfi\nreference")
         self.assertIn("differs between", " ".join(verify.install_channel_problems(self.root)))
 
+    def test_a_switch_quoted_in_a_comment_does_not_count(self):
+        self.edit("forge/test/iso/collaudo.ks", "\nbootc switch --mutate-in-place", "\n# bootc switch --mutate-in-place")
+        problems = " ".join(verify.install_channel_problems(self.root))
+        self.assertIn("forge/test/iso/collaudo.ks: needs one %post", problems)
+
+    def test_a_post_without_erroronfail_fails(self):
+        self.edit("system/athanor-install.ks", "%post --erroronfail\nset -eu\nset --", "%post\nset -eu\nset --")
+        problems = " ".join(verify.install_channel_problems(self.root))
+        self.assertIn("system/athanor-install.ks: the :stable %post needs --erroronfail", problems)
+
     def test_comments_are_not_read(self):
         (self.root / "other.ks").write_text("# this kickstart once followed :latest\n")
         self.assertEqual(verify.install_channel_problems(self.root), [])
