@@ -1641,6 +1641,43 @@ def check_cmdline():
     return r
 
 
+# The base sysctls have one source, the [base.sysctl] table of profile.toml, which
+# kernel_profile.py writes into the sysctl.d file of athanor-kernel-profile. A second
+# sysctl.d file that sets one of them either repeats it or, sorting later, overrides it
+# (99-bore.conf did both, doc_kernel_profile.md section 6).
+PROFILE_MANIFEST = "forge/specs/athanor-kernel-profile/profile.toml"
+PROFILE_SYSCTL = "forge/specs/athanor-kernel-profile/SOURCES/usr/lib/sysctl.d/90-athanor-kernel-profile.conf"
+SYSCTL_GLOBS = ("forge/specs/**/sysctl.d/*.conf", "system/**/sysctl.d/*.conf")
+
+
+def sysctl_problems(root=None):
+    """No sysctl.d file of the repository but the generated one sets a base sysctl."""
+    root = root or ROOT
+    try:
+        base = set(tomllib.loads(read(root / PROFILE_MANIFEST))["base"]["sysctl"])
+    except (OSError, KeyError, tomllib.TOMLDecodeError) as err:
+        return [f"{PROFILE_MANIFEST}: cannot read the base sysctls ({err})"]
+    problems = []
+    files = sorted({path for pattern in SYSCTL_GLOBS for path in root.glob(pattern)})
+    for path in files:
+        relative = path.relative_to(root).as_posix()
+        if relative == PROFILE_SYSCTL:
+            continue
+        for number, line in enumerate(read(path).splitlines(), 1):
+            name = line.split("=", 1)[0].strip().lstrip("-").replace("/", ".")
+            if "=" in line and not line.lstrip().startswith(("#", ";")) and name in base:
+                problems.append(f"{relative}:{number}: sets {name}, a base sysctl of {PROFILE_MANIFEST}")
+    return problems
+
+
+@check("sysctl", "The base sysctls have one source, profile.toml")
+def check_sysctl():
+    r = Result()
+    for problem in sysctl_problems():
+        r.fail(problem)
+    return r
+
+
 PAM_CONTAINERFILE = "system/Containerfile"
 NULLOK_GUARD = re.compile(r"^RUN authselect enable-feature without-nullok\b", re.MULTILINE)
 PWQUALITY_MINLEN = "'minlen = 12'"
