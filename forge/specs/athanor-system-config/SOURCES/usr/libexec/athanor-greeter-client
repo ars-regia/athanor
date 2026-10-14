@@ -17,9 +17,9 @@
 #     to is a filesystem socket bound in below.
 #   - The filesystem is empty except for what is bound in: /usr and /etc read-only,
 #     sysfs read-only and the DRM nodes for rendering, the Wayland socket of this
-#     compositor, greetd's IPC socket ($GREETD_SOCK), a filtered system bus and the
-#     AccountsService avatars. /tmp, $HOME and $XDG_RUNTIME_DIR are private tmpfs
-#     mounts. No home directory, no /var.
+#     compositor, greetd's IPC socket ($GREETD_SOCK), a filtered system bus, the
+#     AccountsService avatars and the trust state directory of the seal. /tmp, $HOME and
+#     $XDG_RUNTIME_DIR are private tmpfs mounts. No home directory, no /var.
 #   - The system bus is not the real one. The process that reads the password would
 #     otherwise hold every call polkit grants an active local session (udisks2,
 #     NetworkManager, ...). xdg-dbus-proxy runs outside the sandbox, as the same user, and
@@ -133,6 +133,27 @@ fi
 for node in /dev/nvidiactl /dev/nvidia-modeset /dev/nvidia[0-9]*; do
     set -- "$@" --dev-bind-try "$node" "$node"
 done
+
+# The trust state of the seal (doc_shell.md, SH12, package 1d; doc_update_trust.md, UT7).
+# The directory is bound, not the file: the system side renames a new file into place, and
+# a bind of the file would keep showing the old one. Inside the sandbox root is the
+# overflow uid, which the greeter cannot tell from another user's, so the owner is checked
+# here, outside it: a directory that is root's and that nobody else can write holds only
+# what root put there. A directory that fails the check is not bound, and the seal then
+# shows the exclamation mark; the greeter still starts, because the seal must not lock
+# anyone out.
+trust_dir=/run/athanor-update
+trust_owner=
+trust_mode=
+if [ -d "$trust_dir" ] && [ ! -L "$trust_dir" ]; then
+    trust_owner=$(stat -c %u "$trust_dir")
+    trust_mode=$(stat -c %a "$trust_dir")
+fi
+if [ "$trust_owner" = 0 ] && [ $((0$trust_mode & 022)) -eq 0 ]; then
+    set -- "$@" --ro-bind "$trust_dir" "$trust_dir"
+else
+    echo "athanor-greeter-client: $trust_dir is missing or not root's alone, the seal shows no trust state" >&2
+fi
 
 # /dev/dri is absent on a machine with no DRM driver at all, where GTK renders in
 # software: its bind is optional, like the udev database, the avatar and font cache

@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-greeter-ui
 Version:        1.0.0
-Release:        4%{?dist}
+Release:        5%{?dist}
 Summary:        The Athanor greeter
 License:        GPL-3.0-only
 
@@ -43,6 +43,14 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-greeter
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-greeter-ui.mo
 
 %changelog
+* Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
+- The seal shows the badge the trust state backs (doc_shell.md, SH12, package 1d):
+  the check, the exclamation mark or the cross, read from /run/athanor-update/state.json
+  through athanor-trust-state, again whenever the file is replaced and every hour. Its
+  words are the header of the bar's shield, its tooltip the reason. A state that cannot
+  be read shows the exclamation mark. Inside the sandbox root is the overflow uid, so
+  that is the owner required there; athanor-greeter-client checks the directory outside.
+
 * Thu Sep 24 2026 Athanor Forge <forge@athanor.os> - 1.0.0-4
 - Grant the Landlock ruleset WriteFile on the NVIDIA driver's control, modeset and
   per-GPU nodes, one rule per node. The proprietary EGL stack opens them read-write;

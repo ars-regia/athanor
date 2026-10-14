@@ -122,7 +122,7 @@ capture_greeter() {
         in_rig "$(rig_image)" env ATHANOR_GREETER_VARIANT="$variant" ATHANOR_LOGIN_USER=rig RIG_LOCALE="$locale" \
             RIG_DATA_OVERLAY=/out/greeter-icons "${override[@]}" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1920 1080 "$scale" "$tag" -- \
-            /out/bin/athanor-greeter-ui
+            bash -c "python3 /repo/forge/test/shell/trust_state.py verified && exec /out/bin/athanor-greeter-ui"
     done < <(python3 -B "$rig/cases.py" greeter)
 }
 
@@ -661,11 +661,13 @@ atspi)
     enable='busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true'
     case "${2:-}" in
     greeter)
-        # 6 interactive widgets: password, sign in, contrast, three power chips.
+        # 6 interactive widgets: password, sign in, contrast, three power chips; and the seal,
+        # which names the badge a verified state backs (doc_shell.md, section 7, item 3).
         in_rig "$(rig_image)" env GTK_A11Y=atspi ATHANOR_LOGIN_USER=rig RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=6 \
+            ATSPI_REQUIRED_NAME="System image verified" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-greeter-ui 6" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-greeter -- \
-            bash -c "$enable && exec /out/bin/athanor-greeter-ui"
+            bash -c "$enable && python3 /repo/forge/test/shell/trust_state.py verified && exec /out/bin/athanor-greeter-ui"
         ;;
     chooser)
         # 8 interactive widgets under the float preset: three styles, two panel edges, three docks.

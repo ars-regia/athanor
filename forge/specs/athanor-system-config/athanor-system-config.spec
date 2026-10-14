@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:57.fc43}
+Release:        %{?autorelease}%{!?autorelease:58.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -85,6 +85,12 @@ done
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-58
+- athanor-greeter-client binds /run/athanor-update read-only into the greeter's
+  sandbox, for the seal (doc_shell.md, SH12, package 1d), after checking outside the
+  sandbox that the directory is root's and that nobody else can write it. A directory
+  that fails the check is not bound and the seal shows the exclamation mark.
+
 * Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-57
 - athanor-session, athanor-greeter-session and 50-athanor-desktop.conf set
   GTK_IM_MODULE=simple: GTK 4.20's wayland module dropped dead keys and Compose

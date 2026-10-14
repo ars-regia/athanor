@@ -12,11 +12,17 @@ msgstr ""
 msgid "The sign-in service sent a reply of {size} bytes, too large to read"
 msgstr "Der Anmeldedienst hat eine Antwort von {size} Bytes gesendet, zu groß zum Lesen"
 
-msgid "Not verified"
-msgstr "Nicht verifiziert"
+msgid "System image verified"
+msgstr "Systemabbild verifiziert"
 
-msgid "The system image has not been verified yet."
-msgstr "Das Systemabbild wurde noch nicht verifiziert."
+msgid "Not verified yet"
+msgstr "Noch nicht verifiziert"
+
+msgid "Update refused"
+msgstr "Aktualisierung abgelehnt"
+
+msgid "Signed with a key of the policy in force"
+msgstr "Mit einem Schlüssel der geltenden Richtlinie signiert"
 
 msgid "Password"
 msgstr "Passwort"

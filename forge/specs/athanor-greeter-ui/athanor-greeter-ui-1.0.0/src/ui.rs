@@ -11,7 +11,7 @@ use athanor_style::calmo::{self, Variant};
 use gtk4::accessible::Property;
 use gtk4::prelude::*;
 use gtk4::{
-    gdk, Align, Application, ApplicationWindow, Box, Button, Image, Label, Orientation,
+    gdk, gio, Align, Application, ApplicationWindow, Box, Button, Image, Label, Orientation,
     PasswordEntry, ToggleButton,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
@@ -19,12 +19,9 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use crate::auth::{authenticate_interactive, discover_target_user, UserInfo};
 use crate::i18n::{tr, tr_with};
 
-/// The seal's state. The greeter has no verifier to ask yet: package 1b-shield binds the
-/// root-owned trust state file into the sandbox and replaces this constant with what
-/// that file says. Until then the only claim the greeter can back is "not verified", so
-/// it shows the exclamation badge and never the check (doc_shell.md, SH1 "no facades",
-/// SH12 "the shield reports only what a verifier backs").
-const SEAL_ICON: &str = "athanor-seal-attention-symbolic";
+/// The seal is read again every hour: the badge ages ("checked within 14 days" turns false
+/// without the file changing), and a directory watch that missed an event heals.
+const SEAL_AGAIN_SECS: u32 = 3600;
 
 /// The icons come from the theme the image ships (doc_shell.md, SH5: cosmic-icon-theme
 /// stays in stage 1); the seal is ours, installed into hicolor, which every theme inherits.
@@ -50,6 +47,60 @@ fn icon_chip(id: &str, icon: &str, label: &str) -> Button {
         .build();
     named(&button, id, label);
     button
+}
+
+/// The seal of SH12 (package 1d): the badge the trust state backs, its header as words and
+/// accessible name, the reason as tooltip. It follows the file: the system side renames a
+/// new one into the directory (UT7), which the watch sees, and it is read again hourly.
+fn seal_chip() -> Box {
+    let seal = Box::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(8)
+        .css_classes(["greeter-chip"])
+        .build();
+    seal.set_widget_name("greeter-seal");
+    let icon = Image::builder()
+        .css_classes(["athanor-seal"])
+        .pixel_size(24)
+        .build();
+    let words = Label::new(None);
+    seal.append(&icon);
+    seal.append(&words);
+    let refresh = {
+        let seal = seal.clone();
+        move || {
+            let (read, now) = (crate::seal::read(), crate::seal::now());
+            let badge = crate::seal::badge(&read, now);
+            let header = crate::seal::header(badge);
+            icon.set_icon_name(Some(crate::seal::icon(badge)));
+            icon.update_property(&[Property::Label(&header)]);
+            words.set_label(&header);
+            seal.set_tooltip_text(Some(&crate::seal::detail(&read, now)));
+        }
+    };
+    refresh();
+    let directory = std::path::Path::new(athanor_trust_state::STATE_PATH)
+        .parent()
+        .map(gio::File::for_path);
+    let watch = directory.and_then(|directory| {
+        directory
+            .monitor_directory(gio::FileMonitorFlags::WATCH_MOVES, gio::Cancellable::NONE)
+            .map_err(|err| {
+                tracing::error!(error = %err, "cannot watch the trust state; the seal is read hourly")
+            })
+            .ok()
+    });
+    if let Some(watch) = &watch {
+        let refresh = refresh.clone();
+        watch.connect_changed(move |_, _, _, _| refresh());
+    }
+    glib::timeout_add_seconds_local(SEAL_AGAIN_SECS, move || {
+        // The timer owns the watch: a dropped monitor stops watching.
+        let _watch = &watch;
+        refresh();
+        glib::ControlFlow::Continue
+    });
+    seal
 }
 
 fn now_text(format: &str) -> String {
@@ -192,21 +243,7 @@ pub fn build_ui(app: &Application) {
         .label("Athanor")
         .css_classes(["greeter-wordmark"])
         .build();
-    let seal = Box::builder()
-        .orientation(Orientation::Horizontal)
-        .spacing(8)
-        .css_classes(["greeter-chip"])
-        .build();
-    seal.set_widget_name("greeter-seal");
-    seal.set_tooltip_text(Some(&tr("The system image has not been verified yet.")));
-    let seal_icon = Image::builder()
-        .icon_name(SEAL_ICON)
-        .css_classes(["athanor-seal"])
-        .pixel_size(24)
-        .build();
-    seal_icon.update_property(&[Property::Label(&tr("Not verified"))]);
-    seal.append(&seal_icon);
-    seal.append(&Label::new(Some(&tr("Not verified"))));
+    let seal = seal_chip();
     let top = gtk4::CenterBox::builder()
         .margin_top(12)
         .margin_start(20)

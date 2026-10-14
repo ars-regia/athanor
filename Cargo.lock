@@ -402,6 +402,7 @@ version = "1.0.0"
 dependencies = [
  "athanor-i18n",
  "athanor-style",
+ "athanor-trust-state",
  "glib",
  "greetd_ipc",
  "gtk4",
