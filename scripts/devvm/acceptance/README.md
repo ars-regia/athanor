@@ -18,6 +18,17 @@ masked units, the trust state and one Nix build with `nix store gc`, each agains
 `expectations.toml`. It fails naming the check; `run.sh probes` runs it alone. Change a line of
 the expectations only with the review of the exposure it declares.
 
+The `sessions` stage (issue #436) runs the other-session cases of item 2 (UT6, ADR-0103 D22) with
+the update downloaded and a shutdown inhibitor held, so that no case can reboot the guest: an
+authorised call ends at `Error.Blocked`. A prompt is observed as a `polkit-agent-helper@`
+instance opened by the graphical session's agent, the password typed into it (the dev VM's is
+the user's name) and the `polkitd` line that grants `os.athanor.update.apply-multi-session`; the
+absence of one as no helper, no grant and `Blocked`. Since #433 this harness's own SSH login is a
+counting session, so `call_active` arms the call from a user timer and the login is over when it
+arrives. `second-count.sh` holds `bootc upgrade --from-downloaded` still while a session of the
+other user opens. Not driven: the greeter's fast user switch (a session of another uid stands
+in), a text console (SSH stands in) and a prompt that times out (a refusal stands in).
+
 Looked at by hand, with `scripts/devvm/screenshot.sh`: the "update ready" notification after
 the `download` stage, the "now running" notification after `apply`, and the administrator
 prompt that `busctl --system call os.athanor.Update1 /os/athanor/Update1 os.athanor.Update1 GoBack`

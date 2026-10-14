@@ -8,7 +8,7 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 guard_no_ci
-STAGES=(install migrate download apply refuse older goback rotate recover podman probes report)
+STAGES=(install migrate download sessions apply refuse older goback rotate recover podman probes report)
 start=${1:-install}
 [[ " ${STAGES[*]} " == *" $start "* ]] || die "unknown stage '$start': one of ${STAGES[*]}"
 
@@ -46,6 +46,83 @@ stage_download() { # item 1
   [[ $(marker) == v1 ]] || die "FAIL  1: a poweroff applied the update"
   pass "1: a poweroff boots the old version"
   expect_until "8: and it keeps updating" .update downloaded 20
+}
+
+# What the stage `sessions` leaves behind is taken away on every exit, a failed one included.
+ACC_SSH_HELD=''
+ACC_OTHER_MADE=''
+sessions_cleanup() {
+  end_units
+  if [[ -n $ACC_SSH_HELD ]]; then end_ssh_session; ACC_SSH_HELD=''; fi
+  if [[ -n $ACC_OTHER_MADE ]]; then
+    guest_ssh "sudo loginctl terminate-user $ACC_OTHER && sudo userdel -r $ACC_OTHER"
+    ACC_OTHER_MADE=''
+  fi
+}
+
+stage_sessions() { # item 2, the other-session rule of UT6 (ADR-0103 D22, #433); nothing is applied
+  local since
+  expect "2: a downloaded update to ask about" .update downloaded
+  trap sessions_cleanup EXIT
+  guest_ssh "sudo useradd -m -p '*' $ACC_OTHER"
+  ACC_OTHER_MADE=1
+  # Every call below ends at this inhibitor if it is authorised, so none can reboot the guest
+  # (the order of Apply() is the polkit check, then the inhibitor query, then the unlock).
+  start_unit acc-inhibit-sessions systemd-inhibit --what=shutdown --mode=block --who=acceptance --why=ut6 sleep 3600
+
+  expect_no_prompt "2: a caller launched from a user unit, its user's session the only one: no administrator prompt"
+
+  class_session greeter
+  class_session lock-screen
+  class_session background
+  expect_no_prompt "2: only greeter, lock-screen and background sessions besides the caller's: no password"
+  end_units
+
+  # A second user left logged in: the state a fast user switch leaves, a session of another
+  # uid. The greeter's way of making it is not driven here.
+  class_session user
+  expect_prompts "2: a second user's session: Apply() asks for administrator authentication" os.athanor.update.apply-multi-session 1
+  end_units
+
+  ssh_session
+  ACC_SSH_HELD=1
+  guest_ssh pgrep -f '[a]cc-session-hold' > /dev/null || die "FAIL  the second SSH session of $GUEST_USER did not start"
+  expect_prompts "2: a second session of the same user, over SSH: it asks for administrator authentication" os.athanor.update.apply-multi-session 1
+  # The session is kept for the next case: with it open, nothing is kept between two calls.
+  expect_prompts "2: with another session open, two consecutive calls each ask: nothing is kept" os.athanor.update.apply-multi-session 2
+  end_ssh_session
+  ACC_SSH_HELD=''
+
+  # A counting session that opens after the unlock and before the reboot. No inhibitor now: the
+  # call must get as far as the unlock, where second-count.sh holds bootc still, opens the
+  # session and lets it go. The administrator is then refused (the request is cancelled).
+  end_unit acc-inhibit-sessions
+  guest_ssh "sudo tee /var/tmp/acc-second-count.sh > /dev/null" < "$ACC_HERE/second-count.sh"
+  since=$(now_guest)
+  guest_ssh "sudo systemd-run --quiet --unit=acc-second-count --collect -E ACC_USER=$GUEST_USER -E ACC_OTHER=$ACC_OTHER -E ACC_DELAY=$ACC_CALL_DELAY -E ACC_LOG=/var/tmp/acc-second-count.log bash /var/tmp/acc-second-count.sh"
+  sleep $((ACC_CALL_DELAY + 25)) # no SSH login meanwhile: it would be a counting session at the first count
+  for _ in $(seq 60); do
+    prompted "$since" && break
+    sleep 1
+  done
+  log=$(guest_ssh cat /var/tmp/acc-second-count.log)
+  ACC_UNITS+=(acc-class-user)
+  prompted "$since" || die "FAIL  2: no administrator prompt after the session opened between the unlock and the reboot (second-count.sh logged: $log)"
+  grep -q 'opened a session' <<< "$log" || die "FAIL  2: the session was not opened while bootc was held: $log"
+  deployment_locked || die "FAIL  2: the deployment was unlocked while the second prompt waited"
+  pass "2: a session opened after the unlock: the deployment is locked again while the second prompt waits"
+  guest_ssh sudo systemctl --user --machine="$GUEST_USER@.host" stop acc-call-Apply.service # a refusal
+  sleep 5
+  deployment_locked || die "FAIL  2: the deployment was unlocked after the prompt was refused"
+  [[ $(marker) == v1 ]] || die "FAIL  2: the guest rebooted after the prompt was refused"
+  ! polkit_grants "$since" os.athanor.update.apply-multi-session > /dev/null || die "FAIL  2: polkitd granted the second prompt"
+  echo "EVIDENCE  second count: second-count.sh logged: $(tr '\n' ';' <<< "$log")"
+  echo "EVIDENCE  second count: polkit-agent-helper@ lines: $(guest_ssh sudo journalctl -q -b --since "@$since" -o cat -u "'polkit-agent-helper@*'" | head -n 3 | tr '\n' ';')"
+  pass "2: and it stays locked, with no reboot, when the prompt is refused"
+
+  sessions_cleanup
+  trap - EXIT
+  [[ $(state .update) == downloaded ]] || die "FAIL  2: the update is no longer downloaded"
 }
 
 stage_apply() { # items 2, 3 and 14

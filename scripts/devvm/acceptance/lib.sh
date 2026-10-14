@@ -120,8 +120,22 @@ expect_until() { # expect_until DESCRIPTION JQ-FILTER VALUE MINUTES
 }
 
 # dbus-send, not busctl: an error is asserted by its name, and busctl prints only its message.
-# A call as the user of the graphical session (active, local): what the notifier is.
-call_active() { guest_ssh sudo systemd-run --quiet --wait --pipe --user --machine="$GUEST_USER@.host" dbus-send --system --print-reply --dest="${UPDATE1[0]}" "${UPDATE1[1]}" "${UPDATE1[2]}.$1" 2>&1; }
+# A call as the user of the graphical session (active, local): what the notifier is. It is made
+# by a user timer ACC_CALL_DELAY seconds after this SSH login has ended: since ADR-0103 D22 any
+# session of class user besides the caller's makes Apply() ask for an administrator, and the
+# login that carries this command is one. call_active_start only arms the call.
+ACC_CALL_DELAY=8
+call_out() { printf '/var/tmp/acc-call-%s.out' "$1"; }
+call_active_start() { # call_active_start METHOD
+  local out
+  out=$(call_out "$1")
+  guest_ssh "sudo rm -f $out && sudo systemd-run --quiet --user --machine=$GUEST_USER@.host --on-active=$ACC_CALL_DELAY --collect --unit=acc-call-$1 -p StandardOutput=file:$out dbus-send --system --print-reply --dest=${UPDATE1[0]} ${UPDATE1[1]} ${UPDATE1[2]}.$1"
+}
+call_active() { # call_active METHOD: the reply, or the error, of the call
+  call_active_start "$1"
+  sleep $((ACC_CALL_DELAY + 6))
+  guest_ssh cat "$(call_out "$1")"
+}
 # A call from this SSH session (inactive, no polkit agent).
 call_ssh() { guest_ssh -T dbus-send --system --print-reply --dest="${UPDATE1[0]}" "${UPDATE1[1]}" "${UPDATE1[2]}.$1" 2>&1; }
 # A call as root, which polkit always authorizes: drives a scenario past a password prompt.
@@ -140,4 +154,107 @@ request_and_reboot() { # request_and_reboot CALLER METHOD EXPECTED-MARKER DESCRI
   wait_reboot "$boot" || die "FAIL  $4: no reboot in 10 minutes (call exit $status: $out)"
   [[ $(marker) == "$3" ]] || die "FAIL  $4: booted $(marker), expected $3 (call exit $status: $out)"
   pass "$4"
+}
+
+# --- The other-session rule of UT6 (doc_update_trust.md section 6, item 2; ADR-0103 D22) ---
+# The prompt is observed in two places. The agent of the graphical session opens a
+# polkit-agent-helper@ instance for each request that needs a password (a request polkit
+# answers by itself opens none), and polkitd logs the action it granted once the password is
+# typed. The password of the dev VM is the user's name.
+ACC_OTHER=acc-other
+ACC_UNITS=()
+
+now_guest() { guest_ssh date +%s; }
+type_keys() { guest_ssh "sudo python3 - $(printf '%q ' "$@")" < "$ACC_HERE/../keyboard_type.py"; }
+# Whether the agent opened a helper since the epoch second SINCE.
+prompted() { [[ -n $(guest_ssh sudo journalctl -q -b --since "@$1" -o cat -u "'polkit-agent-helper@*'") ]]; }
+# The polkitd lines since SINCE that granted ACTION (stdout); fails when there are none.
+polkit_grants() { guest_ssh sudo journalctl -q -b --since "@$1" -o cat -u polkit.service | grep -F "authorization for action $2 "; }
+# Waits SECONDS at most for the output of a call to hold TEXT.
+call_says() { # call_says METHOD TEXT SECONDS
+  for _ in $(seq "$3"); do
+    guest_ssh grep -qF -- "$2" "$(call_out "$1")" && return 0
+    sleep 1
+  done
+  return 1
+}
+deployment_locked() { [[ $(guest_ssh sudo bootc status --format json | jq -r .status.staged.downloadOnly) == true ]]; }
+
+# A transient unit that is stopped by end_units, whatever happens.
+start_unit() { # start_unit NAME systemd-run-ARGUMENT...
+  local name=$1
+  shift
+  guest_ssh sudo systemd-run --quiet "--unit=$name" "$@"
+  ACC_UNITS+=("$name")
+}
+end_unit() { # end_unit NAME
+  local unit keep=()
+  guest_ssh sudo systemctl stop "$1.service"
+  for unit in "${ACC_UNITS[@]}"; do [[ $unit == "$1" ]] || keep+=("$unit"); done
+  ACC_UNITS=("${keep[@]}")
+}
+end_units() {
+  while ((${#ACC_UNITS[@]})); do end_unit "${ACC_UNITS[0]}"; done
+}
+# A session of the other user, of the logind class CLASS, held open by a unit with a PAM stack.
+class_session() { # class_session CLASS
+  local classes
+  start_unit "acc-class-$1" -p "User=$ACC_OTHER" -p PAMName=login -p "Environment=XDG_SESSION_CLASS=$1" sleep 3600
+  for _ in $(seq 20); do
+    classes=$(other_classes)
+    grep -qx "$1" <<< "$classes" && return 0
+    sleep 1
+  done
+  die "FAIL  no session of class $1 for $ACC_OTHER after 20 s (classes: $(tr '\n' ' ' <<< "$classes"))"
+}
+other_classes() { # the logind class of each session of the other user, one per line
+  guest_ssh bash -s "$ACC_OTHER" <<'REMOTE'
+for s in $(loginctl list-sessions --no-legend | awk -v u="$1" '$3 == u { print $1 }'); do
+  loginctl show-session "$s" -p Class --value
+done
+REMOTE
+}
+# A second login of the user of the graphical session, over SSH; ended by end_ssh_session.
+ssh_session() { guest_ssh -f -T 'exec -a acc-session-hold sleep 900' < /dev/null; }
+end_ssh_session() { guest_ssh pkill -f '[a]cc-session-hold'; }
+
+# Arms Apply() from the graphical session and checks that it asked an administrator: the
+# agent opens a helper, the password is typed into it, polkitd logs the grant of ACTION once
+# and the call comes back as Blocked (the stage holds a shutdown inhibitor, so nothing is
+# applied). Called N times in a row it checks that each call asked again.
+expect_prompts() { # expect_prompts DESCRIPTION ACTION N
+  local since call n
+  since=$(now_guest)
+  for n in $(seq "$3"); do
+    call=$(now_guest)
+    call_active_start Apply
+    for _ in $(seq $((ACC_CALL_DELAY + 30))); do
+      prompted "$call" && break
+      sleep 1
+    done
+    prompted "$call" || die "FAIL  $1: call $n opened no prompt in the agent"
+    sleep 2 # the dialog takes the keys only once it is drawn
+    type_keys "$(guest_ssh id -un)" @enter
+    call_says Apply os.athanor.Update1.Error.Blocked 30 || die "FAIL  $1: call $n did not reach the inhibitor check after the password: $(guest_ssh cat "$(call_out Apply)")"
+    [[ $(polkit_grants "$since" "$2" | grep -c .) -eq $n ]] || die "FAIL  $1: after call $n polkitd logged $(polkit_grants "$since" "$2" | grep -c .) grants of $2, expected $n"
+  done
+  deployment_locked || die "FAIL  $1: the deployment was unlocked"
+  echo "EVIDENCE  $1:"
+  polkit_grants "$since" "$2" | sed 's/^/EVIDENCE    /'
+  pass "$1"
+}
+
+# Arms Apply() and checks that no one was asked: no helper opens, polkitd grants nothing, and
+# the call is authorised, so it ends at the inhibitor the stage holds.
+expect_no_prompt() { # expect_no_prompt DESCRIPTION
+  local since
+  since=$(now_guest)
+  call_active_start Apply
+  sleep $((ACC_CALL_DELAY + 6))
+  call_says Apply os.athanor.Update1.Error.Blocked 20 || die "FAIL  $1: not authorised without a password: $(guest_ssh cat "$(call_out Apply)")"
+  ! prompted "$since" || die "FAIL  $1: the agent opened a prompt"
+  ! polkit_grants "$since" os.athanor.update > /dev/null || die "FAIL  $1: polkitd granted an action after a password"
+  deployment_locked || die "FAIL  $1: the deployment was unlocked"
+  echo "EVIDENCE  $1: no polkit-agent-helper@ instance and no polkitd grant since @$since; the call ended at os.athanor.Update1.Error.Blocked"
+  pass "$1"
 }
