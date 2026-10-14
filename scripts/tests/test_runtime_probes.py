@@ -179,10 +179,83 @@ class Expectations(unittest.TestCase):
                 f["rc"][name]["rc"] = rc
                 self.assertEqual(failed(f), {check}, (name, rc))
 
+    def test_the_tunnel_is_accepted_on_loopback_only(self):
+        tunnel = {
+            "proto": "tcp",
+            "address": "127.0.0.1",
+            "port": 5000,
+            "process": "sshd-session",
+        }
+        f = good()
+        f["listeners"].append(tunnel)
+        self.assertEqual(failed(f), set())
+        f["listeners"][-1] = tunnel | {"address": "0.0.0.0"}
+        self.assertEqual(failed(f), {"listeners"})
+
+    def test_resolved_llmnr_and_sshd_5000_are_not_declared(self):
+        for process, port in (("systemd-resolve", 5355), ("sshd", 5000)):
+            f = good()
+            f["listeners"].append(
+                {
+                    "proto": "tcp",
+                    "address": "127.0.0.1",
+                    "port": port,
+                    "process": process,
+                }
+            )
+            self.assertEqual(failed(f), {"listeners"})
+
+    def test_a_firewall_zone_with_a_failing_probe_fails_among_good_ones(self):
+        f = good()
+        f["firewall"] = {"public": ["dhcpv6-client"], "work": []}
+        f["rc"] |= {
+            "firewall": {"rc": 0, "err": ""},
+            "firewall:public": {"rc": 0, "err": ""},
+            "firewall:work": {"rc": 1, "err": "boom"},
+        }
+        self.assertEqual(failed(f) - {"firewall"}, set())
+        self.assertEqual(failed(f), {"firewall"})
+
+    def test_firewall_cmd_failing_is_not_absent(self):
+        f = good()
+        f["firewall"] = {}
+        f["rc"]["firewall"] = {"rc": 1, "err": "FirewallD is not running"}
+        self.assertEqual(failed(f), {"firewall"})
+
+    def test_the_public_zone_opens_what_the_image_declares(self):
+        f = good()
+        f["firewall"] = {"public": ["dhcpv6-client", "ssh"]}
+        self.assertEqual(failed(f), {"firewall"})
+
+    def test_avc_rc_1_with_stderr_is_an_error(self):
+        f = good()
+        f["rc"]["avc"] = {"rc": 1, "err": "Failed to open journal"}
+        self.assertEqual(failed(f), {"selinux"})
+
     def test_journalctl_grep_without_a_match_is_clean(self):
         f = good()
         f["rc"]["avc"]["rc"] = 1
         self.assertEqual(failed(f), set())
+
+    def test_collect_fails_trust_on_a_state_that_is_not_json(self):
+        calls = {"cat /run/athanor-update/state.json": (0, "not json", "")}
+        real_run, real_which = probes.run, probes.shutil.which
+        probes.run = lambda argv, sudo=False: calls.get(" ".join(argv), (0, "", ""))
+        probes.shutil.which = lambda *a, **k: None
+        try:
+            facts = probes.collect()
+        finally:
+            probes.run, probes.shutil.which = real_run, real_which
+        self.assertEqual(facts["rc"]["trust"]["rc"], 65)
+        self.assertIn(
+            "trust",
+            {
+                c
+                for c, _ in probes.evaluate(
+                    facts | {"pam": good()["pam"]}, EXPECT, CONTACTS
+                )
+            },
+        )
 
     def test_a_timeout_names_the_probe(self):
         probes.TIMEOUT = 1

@@ -8,16 +8,21 @@
 # without a unit listens for the machine itself and never reaches out on its own.
 [[listener]]
 process = "sshd"
-ports = [22, 5000] # 5000: the acceptance registry tunnel (lib.sh); new installs have sshd off
+ports = [22] # new installs have sshd off
 unit = "sshd.service"
 
 [[listener]]
+process = "sshd-session" # OpenSSH 9.8 and later: the session process owns a forwarded port
+ports = [5000] # acceptance only: the registry tunnel `ssh -R 5000:...` of lib.sh, on loopback
+address = ["127.0.0.1", "::1"]
+
+[[listener]]
 process = "systemd-resolve"
-ports = [53, 5355] # the local stub resolver on 127.0.0.53/54 and LLMNR; no unit in contacts.toml: it forwards to the DoT resolver already declared as the `dns` contact
+ports = [53] # the local stub resolver on 127.0.0.53/54 (LLMNR is off: resolved.conf.d/50-athanor-dns.conf); no unit in contacts.toml: it forwards to the DoT resolver already declared as the `dns` contact
 
 [[listener]]
 process = "NetworkManager"
-ports = [68] # its DHCP client socket on the local link
+ports = [68, 546] # its DHCP and DHCPv6 client sockets on the local link (public.xml keeps dhcpv6-client)
 
 [[listener]]
 process = "chronyd"
@@ -25,7 +30,7 @@ ports = [323] # the chronyc command port on loopback; the time servers are the `
 
 [firewall]
 required = false
-zones = {}
+zones = { public = ["dhcpv6-client"] } # forge/specs/athanor-base-config/SOURCES/etc/firewalld/zones/public.xml
 
 [security]
 # Ceilings of `systemd-analyze security` exposure per shipped athanor-*.service (not templates).

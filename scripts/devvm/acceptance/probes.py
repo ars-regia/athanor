@@ -100,7 +100,7 @@ def parse_security(text):
 # --- collector --------------------------------------------------------------------------------
 
 NIX_EXPR = 'derivation { name = "probe-%d"; system = builtins.currentSystem; builder = "/bin/sh"; args = [ "-c" "echo ok > $out" ]; }'
-# Exit codes a probe may return besides 0, and why. Any other code, or a timeout (124), fails
+# Exit codes a probe may return besides 0, and why, only with an empty stderr. Any other code, or a timeout (124), fails
 # the probe's check: an empty output of a failed command must never read as a clean guest.
 ALLOWED_RC = {"avc": (0, 1)}  # journalctl --grep exits 1 when nothing matches
 CHECK_OF = {
@@ -131,7 +131,7 @@ def collect():
         zones = {}
         for zone in [x for x in out.splitlines() if x and not x.startswith(" ")]:
             listed = probe(
-                "firewall",
+                f"firewall:{zone}",
                 ["firewall-cmd", f"--zone={zone}", "--list-services"],
                 sudo=True,
             )
@@ -203,6 +203,17 @@ def collect():
 # --- evaluation (pure) --------------------------------------------------------------------------
 
 
+def declares(entry, socket):
+    """Whether a declared listener covers a socket: process and port, and the address when declared."""
+    addresses = entry.get("address", [])
+    addresses = [addresses] if isinstance(addresses, str) else addresses
+    return (
+        entry["process"] == socket["process"]
+        and socket["port"] in entry["ports"]
+        and (not addresses or socket["address"] in addresses)
+    )
+
+
 def evaluate(facts, expect, contacts):
     """Every violated expectation as (check, detail); empty when the guest conforms."""
     bad = []
@@ -213,7 +224,7 @@ def evaluate(facts, expect, contacts):
     # A probe that did not run cleanly says nothing about the guest: its check fails.
     for name, r in sorted(facts["rc"].items()):
         base = name.split(":")[0]
-        if r["rc"] not in (0, *ALLOWED_RC.get(base, ())):
+        if r["rc"] != 0 and not (r["rc"] in ALLOWED_RC.get(base, ()) and not r["err"]):
             fail(CHECK_OF.get(base, base), f"probe {name} exited {r['rc']}: {r['err']}")
 
     # Listening sockets: each one is declared by process and port; the declarations and the
@@ -232,9 +243,7 @@ def evaluate(facts, expect, contacts):
             f"{unit} is a [[listener]] of contacts.toml but not declared in expectations.toml",
         )
     for s in facts["listeners"]:
-        if not any(
-            e["process"] == s["process"] and s["port"] in e["ports"] for e in listeners
-        ):
+        if not any(declares(e, s) for e in listeners):
             fail(
                 "listeners",
                 f"undeclared {s['proto']} listener {s['address']}:{s['port']} ({s['process'] or 'unknown process'})",
