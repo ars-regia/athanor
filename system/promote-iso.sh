@@ -25,7 +25,7 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 planned=$(jq -er '.run_id' "$plan")
 [[ $planned == "$run" ]] || die "$plan is the plan of run $planned, not $run"
 iso=$(jq -er '.iso' "$plan")
-system=$(jq -er '.iso_system' "$plan")
+system=$(jq -r '.iso_system // empty' "$plan")
 [[ $system =~ ^sha256:[0-9a-f]{64}$ ]] || die "$plan names no athanor-system digest for its ISO (iso_system)"
 stable=$(bash "$root/forge/scripts/retry.sh" skopeo inspect --format '{{.Digest}}' "docker://$REGISTRY/athanor-system:stable")
 [[ $stable == "$system" ]] ||

@@ -164,6 +164,7 @@ class EvidenceBundle(Tool):
         for name, document, field in (("promotion.json", plan, "overrides"),
                                       ("promotion.json", plan, "builder_content_hash"),
                                       ("promotion.json", plan, "iso"),
+                                      ("promotion.json", plan, "iso_system"),
                                       ("evidence/iso-acceptance.athanor-system.json", evidence, "verdict")):
             with self.subTest(field=field):
                 (self.artifacts / "promotion.json").write_text(json.dumps(plan))

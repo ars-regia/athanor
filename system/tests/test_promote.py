@@ -246,6 +246,17 @@ class Promote(Tool):
         self.assertEqual(r.returncode, 1, r.stderr)
         self.assertEqual(copies, [])
 
+    def test_the_iso_job_names_a_plan_without_the_iso_system_digest(self):
+        self.published()
+        r, _ = self.promote()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        plan = self.artifacts / "promotion.json"
+        plan.write_text(json.dumps({k: v for k, v in json.loads(plan.read_text()).items() if k != "iso_system"}))
+        r, copies = self.promote_iso()
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("names no athanor-system digest", r.stderr)
+        self.assertEqual(copies, [])
+
     def test_the_first_promotion_has_no_previous_stable(self):
         self.published(stable_created=None)
         r, copies = self.promote()
