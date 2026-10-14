@@ -1,0 +1,31 @@
+[Unit]
+Description=Update the system Flatpak applications
+Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_software.md
+After=network-online.target
+Wants=network-online.target
+# The triggers also run after a failed update: an update that installed some applications and
+# failed on another (an apply_extra that cannot run) has still changed the exports, and the
+# caches would otherwise stay stale on every run.
+OnSuccess=athanor-flatpak-triggers.service
+OnFailure=athanor-flatpak-triggers.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/athanor-flatpak-update
+# A oneshot has no start timeout by default: a pull that stalls would keep the unit active, and
+# the timer would skip every later run. A stalled update fails instead, and OnFailure= runs.
+TimeoutStartSec=4h
+# Flatpak runs its triggers in bubblewrap, which needs CAP_SYS_ADMIN as root (and would fail
+# here without a word). An empty triggers directory makes it run none; the unit above does.
+Environment=FLATPAK_TRIGGERSDIR=/usr/share/athanor-system-config/flatpak-no-triggers
+# ProtectHome hides /root, where GLib would put dconf's cache and warn on every run.
+Environment=GSETTINGS_BACKEND=memory
+# doc_software.md, decision 6 (i) and SW15. The system installation only; the unit reaches
+# the network (Flathub) and the system bus (NetworkManager's Metered), nothing else.
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/flatpak /var/tmp
+CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_FSETID CAP_SETUID CAP_SETGID
