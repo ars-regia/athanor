@@ -542,7 +542,7 @@ path = "system/athanor-bus-api"
 kind = "crate"
 area = "security"
 status = "missing"
-purpose = "Shared D-Bus types and the polkit subject check every system service uses"
+purpose = "The polkit subject check every system service uses"
 
 [[component]]
 path = "system/athanor-compositor-client"
@@ -676,14 +676,6 @@ status = "specified"
 spec = "doc_system_image.md"
 item = "S8"
 purpose = "Builds the three system image variants"
-
-[[component]]
-path = "system/confidential_computing"
-kind = "crate"
-area = "security"
-status = "out-of-1.0"
-issue = 151
-purpose = "athanor-attestation, a confidential computing attestation tool; outside the workspace until its Keylime rewrite, protected path"
 
 [[component]]
 path = "system/disk_config"

@@ -8,6 +8,7 @@ mod i18n;
 mod layer_guard;
 mod power;
 mod sandbox;
+mod seal;
 mod ui;
 
 use gtk4::prelude::*;

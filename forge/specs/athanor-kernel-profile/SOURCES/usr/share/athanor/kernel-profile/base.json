@@ -458,6 +458,26 @@
           "landlock",
           "ipe"
         ]
+      },
+      "mglru": {
+        "decision": "section 6",
+        "value": "on"
+      },
+      "swap": {
+        "decision": "D15",
+        "value": "zram"
+      },
+      "thp": {
+        "decision": "section 6",
+        "value": "madvise"
+      },
+      "thp_defrag": {
+        "decision": "section 6",
+        "value": "defer+madvise"
+      },
+      "zswap": {
+        "decision": "D15",
+        "value": "N"
       }
     },
     "sysctl": {
@@ -484,6 +504,14 @@
       "kernel.kptr_restrict": {
         "decision": "D47",
         "value": "2"
+      },
+      "kernel.oops_limit": {
+        "decision": "D19",
+        "value": "100"
+      },
+      "kernel.sysrq": {
+        "decision": "section 6",
+        "value": "176"
       },
       "kernel.yama.ptrace_scope": {
         "decision": "D47",

@@ -55,6 +55,15 @@ struct Inner {
     listener: Box<dyn Fn(&Rows)>,
 }
 
+/// A dropped engine aborts its tasks: a running `qalc` dies with its future, not at `DEADLINE`.
+impl Drop for Inner {
+    fn drop(&mut self) {
+        for task in self.tasks.get_mut().drain(..) {
+            task.abort();
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Engine(Rc<Inner>);
 

@@ -205,9 +205,20 @@ struct RpmOstreeDeployment {
     container_image_reference: Option<String>,
     container_image_reference_digest: Option<String>,
     version: Option<String>,
-    /// The base image's commit time, which is its `org.opencontainers.image.created`; the
-    /// deployment's own `timestamp` is when the packages were layered on this machine.
-    base_timestamp: Option<i64>,
+    /// The base commit's metadata. Its `ostree.container.image-config` is the image's
+    /// configuration as a JSON string, which carries the `org.opencontainers.image.created`
+    /// label. Neither `timestamp`, when the packages were layered on this machine, nor
+    /// `base-timestamp`, the configuration's `created` that the build pins to a fixed epoch
+    /// (UD29), is the build time.
+    #[serde(default)]
+    base_commit_meta: serde_json::Map<String, serde_json::Value>,
+}
+
+/// The `org.opencontainers.image.created` label of the image configuration in a base commit's
+/// metadata, seconds since the epoch; 0 when absent, as `bootc status` reports it.
+fn label_time(meta: &serde_json::Map<String, serde_json::Value>) -> i64 {
+    let config = meta.get("ostree.container.image-config").and_then(serde_json::Value::as_str).and_then(|config| serde_json::from_str::<serde_json::Value>(config).ok());
+    config.as_ref().and_then(|config| config["config"]["Labels"]["org.opencontainers.image.created"].as_str()).and_then(unix_time).unwrap_or(0)
 }
 
 /// The image a container reference of rpm-ostree names, without its transport:
@@ -232,7 +243,7 @@ pub fn parse_local(json: &str) -> Option<Deployed> {
         image: image_of(&reference)?.to_owned(),
         digest: booted.container_image_reference_digest?,
         version: booted.version.unwrap_or_default(),
-        build_time: booted.base_timestamp.unwrap_or(0),
+        build_time: label_time(&booted.base_commit_meta),
         enforcing: reference.starts_with("ostree-image-signed:"),
         download_only: false,
         local_changes: true,
@@ -392,7 +403,9 @@ mod tests {
     const RPM_OSTREE_BOOTED: &str = r#"{"deployments":[{"booted":true,"staged":false,
       "container-image-reference":"ostree-unverified-registry:ghcr.io/owner/athanor-system-nvidia:latest",
       "container-image-reference-digest":"sha256:b6a2b14800b8c6799d04c4adf870e806fb5b8b655cd8fa622e3b9618a985d61d",
-      "version":"43.20261001.137","timestamp":1790852801,"base-timestamp":1790849302,"requested-packages":["nvidia-container-toolkit"]}]}"#;
+      "version":"43.20261001.137","timestamp":1790852801,"base-timestamp":1704067200,"requested-packages":["nvidia-container-toolkit"],
+      "base-commit-meta":{"ostree.manifest-digest":"sha256:b6a2b14800b8c6799d04c4adf870e806fb5b8b655cd8fa622e3b9618a985d61d",
+        "ostree.container.image-config":"{\"created\":\"2024-01-01T00:00:00Z\",\"config\":{\"Labels\":{\"org.opencontainers.image.created\":\"2026-10-01T10:08:22Z\"}}}"}}]}"#;
 
     #[test]
     fn an_incompatible_booted_deployment_is_read_from_rpm_ostree() {
@@ -400,7 +413,7 @@ mod tests {
         let booted = status.booted;
         assert_eq!(booted.image, "ghcr.io/owner/athanor-system-nvidia:latest");
         assert_eq!(booted.digest, "sha256:b6a2b14800b8c6799d04c4adf870e806fb5b8b655cd8fa622e3b9618a985d61d");
-        assert_eq!((booted.version.as_str(), booted.build_time), ("43.20261001.137", 1_790_849_302), "the base image's time, not the layering's");
+        assert_eq!((booted.version.as_str(), booted.build_time), ("43.20261001.137", 1_790_849_302), "the label's time, not the layering's nor the pinned epoch's");
         assert!(booted.local_changes && !booted.enforcing && !booted.download_only);
         assert_eq!((status.staged, status.rollback), (None, None));
         assert_eq!(parse_status(INCOMPATIBLE, || None), None, "no description of the booted deployment, no status");
@@ -421,6 +434,16 @@ mod tests {
         let signed = RPM_OSTREE_BOOTED.replace("ostree-unverified-registry:", "ostree-image-signed:docker://");
         assert!(parse_local(&signed).expect("local").enforcing);
         assert_eq!(parse_local(r#"{"deployments":[{"booted":false}]}"#), None);
+    }
+
+    #[test]
+    fn a_local_build_time_comes_from_the_label_alone() {
+        let unlabelled = RPM_OSTREE_BOOTED.replace(r#"\"Labels\":{\"org.opencontainers.image.created\":\"2026-10-01T10:08:22Z\"}"#, r#"\"Labels\":{}"#);
+        assert_ne!(unlabelled, RPM_OSTREE_BOOTED);
+        assert_eq!(parse_local(&unlabelled).expect("local").build_time, 0, "never the pinned 2024 epoch of base-timestamp");
+        let mut without_meta: serde_json::Value = serde_json::from_str(RPM_OSTREE_BOOTED).expect("json");
+        assert!(without_meta["deployments"][0].as_object_mut().expect("deployment").remove("base-commit-meta").is_some());
+        assert_eq!(parse_local(&without_meta.to_string()).expect("local").build_time, 0);
     }
 
     #[test]

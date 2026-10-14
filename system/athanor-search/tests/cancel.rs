@@ -48,8 +48,36 @@ impl Drop for SlowFirstQalc {
     }
 }
 
+/// Both tests start the stub and count the process's qalc children: they take turns.
+static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[test]
+fn a_dropped_engine_kills_its_running_calculator() {
+    let _turn = TURN.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _slow = SlowFirstQalc::install();
+    let context = gio::glib::MainContext::new();
+    context
+        .with_thread_default(|| {
+            context.block_on(async {
+                let state = std::env::temp_dir()
+                    .join(format!("athanor-engine-drop-{}/usage.json", std::process::id()));
+                let engine = Engine::new(state, None, Vec::new(), |_| {});
+                engine.query("1+1");
+                gio::glib::timeout_future(DEBOUNCE + Duration::from_millis(15)).await;
+                assert_eq!(live_qalc().len(), 1, "the stub qalc is running before the drop");
+                drop(engine);
+                assert!(
+                    wait_until(DEADLINE / 2, || live_qalc().is_empty()).await,
+                    "the drop killed the running qalc"
+                );
+            })
+        })
+        .expect("a fresh context is free");
+}
+
 #[test]
 fn typing_cancels_the_previous_generation() {
+    let _turn = TURN.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let _slow = SlowFirstQalc::install();
     let context = gio::glib::MainContext::new();
     context

@@ -29,57 +29,129 @@ msgstr "Il servizio di accesso ha dato una risposta inattesa."
 msgid "Too many authentication steps."
 msgstr "Troppi passaggi di autenticazione."
 
-#: src/ui.rs:110
+#: src/seal.rs:121
+msgid "System image verified"
+msgstr "Immagine di sistema verificata"
+
+#: src/seal.rs:122
+msgid "Not verified yet"
+msgstr "Non ancora verificata"
+
+#: src/seal.rs:123
+msgid "Update refused"
+msgstr "Aggiornamento rifiutato"
+
+#: src/seal.rs:131
+msgid "No trust state yet: the first check has not run"
+msgstr "Nessuno stato di fiducia: il primo controllo non è ancora avvenuto"
+
+#: src/seal.rs:133
+msgid "The trust state file is not owned by the system and was ignored"
+msgstr "Il file dello stato di fiducia non appartiene al sistema ed è stato ignorato"
+
+#: src/seal.rs:135
+msgid "The trust state file could not be read"
+msgstr "Impossibile leggere il file dello stato di fiducia"
+
+#: src/seal.rs:136
+msgid "The update service did not answer"
+msgstr "Il servizio di aggiornamento non ha risposto"
+
+#: src/seal.rs:139
+msgid "The last update was refused by the policy"
+msgstr "L'ultimo aggiornamento è stato rifiutato dalla policy"
+
+#: src/seal.rs:143
+msgid "Not verified: installed from media"
+msgstr "Non verificata: installata da supporto"
+
+#: src/seal.rs:144
+msgid "Not verified: no signature"
+msgstr "Non verificata: nessuna firma"
+
+#: src/seal.rs:145
+msgid "Not verified: its key is not in the policy"
+msgstr "Non verificata: la sua chiave non è nella policy"
+
+#: src/seal.rs:146
+msgid "Not verified: fetched under a permissive policy"
+msgstr "Non verificata: scaricata con una policy permissiva"
+
+#: src/seal.rs:148
+msgid "Not verified: the image is outside the policy's scope"
+msgstr "Non verificata: l'immagine è fuori dall'ambito della policy"
+
+#: src/seal.rs:150
+msgid "Not verified: the system was changed on this machine"
+msgstr "Non verificata: il sistema è stato modificato su questa macchina"
+
+#: src/seal.rs:152
+msgid "Not verified: waiting for the stable channel to be published"
+msgstr "Non verificata: in attesa della pubblicazione del canale stabile"
+
+#: src/seal.rs:155
+msgid "Not verified: this machine does not verify its updates"
+msgstr "Non verificata: questa macchina non verifica i suoi aggiornamenti"
+
+#: src/seal.rs:158
+msgid "Signed, but pinned to one build: it receives no updates"
+msgstr "Firmata, ma ferma su una sola build: non riceve aggiornamenti"
+
+#: src/seal.rs:162
+msgid "This version is older than one this machine has run"
+msgstr "Questa versione è più vecchia di una già avviata su questa macchina"
+
+#: src/seal.rs:168
+msgid "No check for updates has succeeded for 14 days"
+msgstr "Nessun controllo degli aggiornamenti è riuscito negli ultimi 14 giorni"
+
+#: src/seal.rs:170
+msgid "Signed with a key of the policy in force"
+msgstr "Firmata con una chiave della policy in vigore"
+
+#: src/ui.rs:175
 #, rust-format
 msgid "Keyboard layout: {layout}"
 msgstr "Disposizione della tastiera: {layout}"
 
-#: src/ui.rs:201
-msgid "The system image has not been verified yet."
-msgstr "L'immagine di sistema non è ancora stata verificata."
-
-#: src/ui.rs:206 src/ui.rs:208
-msgid "Not verified"
-msgstr "Non verificato"
-
-#: src/ui.rs:228
+#: src/ui.rs:280
 msgid "%A %-d %B"
 msgstr "%A %-d %B"
 
-#: src/ui.rs:246
+#: src/ui.rs:298
 msgid "Password"
 msgstr "Password"
 
-#: src/ui.rs:251
+#: src/ui.rs:303
 #, rust-format
 msgid "Password for {name}"
 msgstr "Password di {name}"
 
-#: src/ui.rs:262
+#: src/ui.rs:314
 msgid "Sign in"
 msgstr "Accedi"
 
-#: src/ui.rs:306
+#: src/ui.rs:358
 msgid "Signing in…"
 msgstr "Accesso in corso…"
 
-#: src/ui.rs:327
+#: src/ui.rs:379
 #, rust-format
 msgid "Sign-in failed: {reason}"
 msgstr "Accesso non riuscito: {reason}"
 
-#: src/ui.rs:371 src/ui.rs:372
+#: src/ui.rs:423 src/ui.rs:424
 msgid "High contrast"
 msgstr "Contrasto elevato"
 
-#: src/ui.rs:392
+#: src/ui.rs:444
 msgid "Suspend"
 msgstr "Sospendi"
 
-#: src/ui.rs:398
+#: src/ui.rs:450
 msgid "Restart"
 msgstr "Riavvia"
 
-#: src/ui.rs:404
+#: src/ui.rs:456
 msgid "Shut down"
 msgstr "Spegni"

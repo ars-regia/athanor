@@ -30,8 +30,6 @@
 # Protected paths: the maintainer reviews every change (see the section "Limiti inviolabili" of CLAUDE.md).
 # Authorisation (polkit subject checks)
 /system/athanor-bus-api/src/polkit.rs @hr-mes
-# Attestation
-/system/confidential_computing/athanor-attestation/ @hr-mes
 # Image definition: PAM and authselect configuration live here
 /system/Containerfile @hr-mes
 # Signing, promotion and the keys' public halves

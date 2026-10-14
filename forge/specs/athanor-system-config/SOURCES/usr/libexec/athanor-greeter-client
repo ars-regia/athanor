@@ -23,13 +23,19 @@
 #   - The system bus is not the real one. The process that reads the password would
 #     otherwise hold every call polkit grants an active local session (udisks2,
 #     NetworkManager, ...). xdg-dbus-proxy runs outside the sandbox, as the same user, and
-#     the greeter sees only its socket, which forwards three methods and nothing else:
+#     the greeter sees only its socket, which forwards four methods and nothing else:
 #     Suspend, Reboot and PowerOff of org.freedesktop.login1.Manager on
-#     /org/freedesktop/login1, the calls behind the greeter's power buttons. The rest of
-#     logind stays out of reach -- before anyone has authenticated, polkit's defaults for
-#     an active local session would otherwise let the greeter pick the boot loader entry
-#     or firmware setup for the next boot, take inhibitors or lock sessions. Nothing
-#     else is asked of the system bus.
+#     /org/freedesktop/login1, the calls behind the greeter's power buttons, and State of
+#     os.athanor.Update1 on /os/athanor/Update1, the trust state behind the seal
+#     (doc_update_trust.md, UT7), which returns what the service publishes to anyone. The
+#     rest of logind stays out of reach -- before anyone has authenticated, polkit's
+#     defaults for an active local session would otherwise let the greeter pick the boot
+#     loader entry or firmware setup for the next boot, take inhibitors or lock sessions --
+#     and so do Apply and GoBack of the update service. The bus driver's
+#     GetConnectionUnixUser, which the seal asks to learn that root sent the State reply,
+#     needs no rule: the proxy lets that call of the bus driver through for any name, so
+#     the greeter can learn the uid of any peer, as every bus client can. Nothing else is
+#     asked of the system bus.
 #   - The session bus is filtered the same way, for accessibility: the greeter may own
 #     its GApplication name and talk to org.a11y.Bus, which hands out the address of the
 #     AT-SPI bus, and that bus's socket alone is bound read-only, so a screen reader can
@@ -80,7 +86,8 @@ set -- unix:path=/run/dbus/system_bus_socket "$dbus_dir/system" \
     --filter \
     --call=org.freedesktop.login1=org.freedesktop.login1.Manager.Suspend@/org/freedesktop/login1 \
     --call=org.freedesktop.login1=org.freedesktop.login1.Manager.Reboot@/org/freedesktop/login1 \
-    --call=org.freedesktop.login1=org.freedesktop.login1.Manager.PowerOff@/org/freedesktop/login1
+    --call=org.freedesktop.login1=org.freedesktop.login1.Manager.PowerOff@/org/freedesktop/login1 \
+    --call=os.athanor.Update1=os.athanor.Update1.State@/os/athanor/Update1
 session_bus=$XDG_RUNTIME_DIR/bus
 if [ -S "$session_bus" ]; then
     set -- "$@" "unix:path=$session_bus" "$dbus_dir/session" \

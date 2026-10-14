@@ -44,7 +44,7 @@ fn describe(name: &str, detail: Option<&str>) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::io::{BufRead, BufReader};
     use std::process::{Child, Command, Stdio};
     use std::{env, fs, path::PathBuf, process};
@@ -55,15 +55,22 @@ mod tests {
     use super::*;
     use crate::serve::Error;
 
+    /// Held by every test that starts a process, while it spawns, and by every test that
+    /// releases the store lock and takes it again. Between fork and exec the child holds a
+    /// copy of each open file, so a lock released in that window stays taken until the exec
+    /// and the next `try_lock` answers busy. The service never meets it: it spawns only with
+    /// the lock held.
+    pub(crate) static SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// A private dbus-daemon, as the tests of `athanor-shelld` use.
-    struct Bus {
+    pub(crate) struct Bus {
         daemon: Child,
         address: String,
         dir: PathBuf,
     }
 
     impl Bus {
-        fn start(name: &str) -> Bus {
+        pub(crate) fn start(name: &str) -> Bus {
             let dir = env::temp_dir().join(format!("athanor-update-{name}-{}", process::id()));
             fs::create_dir_all(&dir).expect("mkdir");
             // A configuration of our own: `--session` reads the distribution's session.conf,
@@ -80,12 +87,14 @@ mod tests {
                 ),
             )
             .expect("bus.conf");
+            let spawning = SPAWN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut daemon = Command::new("dbus-daemon")
                 .args(["--nofork", "--nopidfile", "--print-address"])
                 .arg(format!("--config-file={}", config.display()))
                 .stdout(Stdio::piped())
                 .spawn()
                 .expect("dbus-daemon");
+            drop(spawning);
             let mut address = String::new();
             BufReader::new(daemon.stdout.take().expect("stdout"))
                 .read_line(&mut address)
@@ -94,7 +103,7 @@ mod tests {
             Bus { daemon, address: address.trim().to_owned(), dir }
         }
 
-        fn builder(&self) -> Builder<'static> {
+        pub(crate) fn builder(&self) -> Builder<'static> {
             Builder::address(self.address.as_str()).expect("address")
         }
     }

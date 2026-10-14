@@ -58,7 +58,7 @@ Before this revision each specification wrote its own adversary paragraph, and t
 
 **TM7. Tier 3: root and the image** belong to `doc_kernel_profile.md` (sections 8 to 10: image signatures, Secure Boot and the MOK chain, module signing, SELinux, the root boundary and its residual risks). This document does not restate them, with one
 exception because it holds for 1.0 only: tampering with `/usr` offline, by someone with access
-to the disk, is not detected until the 1.1 seal (ADR-0076 point 1, ADR-0097). Attestation (`system/confidential_computing/athanor-attestation`) is not part of any tier at 1.0. On 2026-10-07 the maintainer decided that the crate leaves the workspace (PR #280) and is rewritten on Keylime with the PCR 11 and PCR 12 policy of `doc_kernel_profile.md` section 9 before mesh admission depends on it; it is kept, not deleted.
+to the disk, is not detected until the 1.1 seal (ADR-0076 point 1, ADR-0097). Attestation is not part of any tier at 1.0. The `athanor-attestation` crate was deleted on 2026-10-14 (ADR-0103 D10, reversing ADR-0087); a Keylime attestation with the PCR 11 and PCR 12 policy of `doc_kernel_profile.md` section 9 starts from a new approved specification.
 
 ## 3. The rule for services
 
@@ -76,7 +76,8 @@ to the disk, is not detected until the 1.1 seal (ADR-0076 point 1, ADR-0097). At
 
 | Action | Declared in | Active session | Shipped | Notes |
 | --- | --- | --- | --- | --- |
-| `os.athanor.update.apply` | `forge/specs/athanor-update/SOURCES/usr/share/polkit-1/actions/os.athanor.update.policy` | `yes` | yes | Applies an update the service has already verified (`doc_update_trust.md`). Inactive and remote sessions: `auth_admin_keep`. |
+| `os.athanor.update.apply` | `forge/specs/athanor-update/SOURCES/usr/share/polkit-1/actions/os.athanor.update.policy` | `yes` | yes | Applies an update the service has already verified (`doc_update_trust.md`). Inactive and remote sessions: `auth_admin_keep`. While another session is open, of the same user or another, the service checks `os.athanor.update.apply-multi-session` instead, `auth_admin` for every subject and never kept (`doc_update_trust.md` UT6, ADR-0103 D22). |
+| `os.athanor.update.apply-multi-session` | `forge/specs/athanor-update/SOURCES/usr/share/polkit-1/actions/os.athanor.update.policy` | `auth_admin` | yes | Checked by `Apply()` in place of `os.athanor.update.apply` while a counting session other than the caller's is open, or when the count fails, an undetermined caller session included; when the first check was `os.athanor.update.apply`, checked before the reboot if a counting session opened during the request. Never kept (`doc_update_trust.md` UT6, ADR-0103 D22). |
 | `os.athanor.update.rollback` | `forge/specs/athanor-update/SOURCES/usr/share/polkit-1/actions/os.athanor.update.policy` | `auth_admin` | yes | Returns to the previous deployment. |
 | `org.freedesktop.login1.inhibit-block-sleep` | `scripts/runner/50-athanor-runner-inhibit.rules` | `yes` | no | Installed on the CI runner host only, for the user `athanor-runner`, which runs outside any session. |
 

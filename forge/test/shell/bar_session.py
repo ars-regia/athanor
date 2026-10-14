@@ -23,7 +23,8 @@ ALLOW_REPLACEMENT, so shield_e2e.py can put an impostor of another user in its p
 the private bus admits every user for that.
 
 --client names the binary under /out/bin that runs as the client, athanor-bar by default;
-the dock's rig session runs athanor-dock through it, with every other flag unchanged.
+the dock's rig session runs athanor-dock through it, with every other flag unchanged, and the
+greeter's captures run athanor-greeter-ui, whose seal asks the fake os.athanor.Update1 State.
 
 --notifications starts fake_notifications.py (athanor-shelld's private interface, faked:
 the real daemon admits only athanor-bar.service). --tray starts the real athanor-shelld as

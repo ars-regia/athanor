@@ -21,11 +21,13 @@ unit = "athanor-update-check.timer"
 
 [[contact]]
 id = "dns"
-purpose = "Name resolution, encrypted (DNS over TLS, strict)"
+purpose = "Name resolution, encrypted (DNS over TLS, opportunistic until the captive-portal probe ships, then strict)"
 destination = "Quad9: 9.9.9.9, 149.112.112.112, 2620:fe::fe, 2620:fe::9 (ADR-0046, ADR-0056)"
 where_off = "first run and Settings, Network: Quad9, Cloudflare, the network's own, or a custom resolver"
 config = "forge/specs/athanor-system-tweaks/SOURCES/usr/lib/systemd/resolved.conf.d/50-athanor-dns.conf"
-config_contains = "dns.quad9.net"
+config_contains = ["dns.quad9.net", "DNSOverTLS=opportunistic"]
+image_file = "usr/lib/systemd/resolved.conf.d/50-athanor-dns.conf"
+image_contains = "DNSOverTLS=opportunistic"
 
 [[contact]]
 id = "ntp"

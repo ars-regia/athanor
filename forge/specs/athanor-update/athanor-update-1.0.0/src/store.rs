@@ -253,6 +253,7 @@ mod tests {
 
     #[test]
     fn a_second_taker_of_the_lock_is_told_it_is_busy() {
+        let _spawning = crate::goback::tests::SPAWN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let store = scratch("lock");
         let held = store.lock().expect("lock");
         assert_eq!(store.try_lock().err().map(|err| err.kind()), Some(std::io::ErrorKind::WouldBlock));

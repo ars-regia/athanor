@@ -1,0 +1,65 @@
+# What the booted image must look like, checked by probes.py in the `probes` stage of run.sh
+# (issue #312). Changing a line here is the review of a change of the image's exposure.
+# Calibrated against the image's own sources; the first acceptance run on a booted image
+# confirms it, and a finding is fixed in its own pull request, not by loosening a line.
+
+# Listeners: process name (15 characters at most, as ss prints it) and ports. Each `unit` must be
+# a [[listener]] of forge/config/contacts.toml and each of those must appear here. A process
+# without a unit listens for the machine itself and never reaches out on its own.
+[[listener]]
+process = "sshd"
+ports = [22] # new installs have sshd off
+unit = "sshd.service"
+
+[[listener]]
+process = "sshd-session" # OpenSSH 9.8 and later: the session process owns a forwarded port
+ports = [5000] # acceptance only: the registry tunnel `ssh -R 5000:...` of lib.sh, on loopback
+address = ["127.0.0.1", "::1"]
+
+[[listener]]
+process = "systemd-resolve"
+ports = [53] # the local stub resolver on 127.0.0.53/54 (LLMNR is off: resolved.conf.d/50-athanor-dns.conf); no unit in contacts.toml: it forwards to the DoT resolver already declared as the `dns` contact
+
+[[listener]]
+process = "NetworkManager"
+ports = [68, 546] # its DHCP and DHCPv6 client sockets on the local link (public.xml keeps dhcpv6-client)
+
+[[listener]]
+process = "chronyd"
+ports = [323] # the chronyc command port on loopback; the time servers are the `ntp` contact
+
+[firewall]
+required = false
+zones = { public = ["dhcpv6-client"] } # forge/specs/athanor-base-config/SOURCES/etc/firewalld/zones/public.xml
+
+[security]
+# Ceilings of `systemd-analyze security` exposure per shipped athanor-*.service (not templates).
+# Lower is stricter. A shipped unit without a line fails; so does one above its line.
+# Scale 0 to 10, as systemd-analyze prints it. Measured offline on the unit files of the
+# repository (systemd 258) and rounded up by 0.3; update and update-check keep the
+# thresholds the update acceptance has always used (5.5, 6.0).
+"athanor-backup-hourly.service" = 2.7
+"athanor-nix-gc.service" = 6.0
+"athanor-nix-relabel.service" = 7.2
+"athanor-recovery-notice.service" = 1.9
+"athanor-recovery.service" = 5.5
+"athanor-update.service" = 5.5
+"athanor-update-check.service" = 6.0
+"athanor-update-migrate.service" = 6.0
+"athanor-update-state.service" = 5.6
+
+[selinux]
+# Denials since boot, as source_type:target_type:class. None are declared yet.
+allow = []
+
+[pam]
+profile = "local"
+features = ["with-faillock", "without-nullok"]
+faillock = { deny = 5, fail_interval = 900, unlock_time = 600 } # ADR-0090
+
+[units]
+masked = ["rpm-ostree-countme.timer"]
+disabled = ["unbound-anchor.timer"]
+
+[trust]
+reason = "signature" # the channel under test is the signed :stable of the acceptance registry

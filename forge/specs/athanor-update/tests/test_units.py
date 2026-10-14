@@ -113,13 +113,14 @@ class Bus(unittest.TestCase):
         lines = (SOURCES / "usr/share/dbus-1/system-services/os.athanor.Update1.service").read_text().splitlines()
         self.assertEqual(lines, ["[D-BUS Service]", "Name=os.athanor.Update1", "Exec=/bin/false", "User=root", "SystemdService=athanor-update.service"])
 
-    def test_the_polkit_defaults_are_logind_s_for_apply_and_auth_admin_for_going_back(self):
+    def test_the_polkit_defaults_are_logind_s_for_apply_and_auth_admin_otherwise(self):
         doc = xml.dom.minidom.parse(str(SOURCES / "usr/share/polkit-1/actions/os.athanor.update.policy"))
         found = {}
         for action in doc.getElementsByTagName("action"):
             defaults = action.getElementsByTagName("defaults")[0]
             found[action.getAttribute("id")] = tuple(defaults.getElementsByTagName(tag)[0].firstChild.data for tag in ("allow_any", "allow_inactive", "allow_active"))
         self.assertEqual(found, {"os.athanor.update.apply": ("auth_admin_keep", "auth_admin_keep", "yes"),
+                                 "os.athanor.update.apply-multi-session": ("auth_admin", "auth_admin", "auth_admin"),
                                  "os.athanor.update.rollback": ("auth_admin", "auth_admin", "auth_admin")})
 
 

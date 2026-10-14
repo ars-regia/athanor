@@ -33,6 +33,13 @@ config() {
         jq -Sc '.Labels //= {} | .Labels["ostree.commit"] |= if . then "present" else null end'
 }
 before=$(config "$source")
+# The source's `created` is the Containerfile's SOURCE_DATE_EPOCH (build-image.sh, --timestamp).
+# rpm-ostree gets it too, for any time it writes of its own (doc_update_delivery.md, UD29).
+epoch=$(podman image inspect --format '{{.Created.Unix}}' "$source")
+[[ $epoch =~ ^[0-9]+$ ]] || {
+    echo "${0##*/}: the system image has no creation time" >&2
+    exit 2
+}
 
 # rpm-ostree runs from the system image itself and writes through the caller's containers-storage,
 # mounted at its own path because its database records that path. A rootless store lives under
@@ -46,6 +53,7 @@ printf '[storage]\ndriver = "%s"\ngraphroot = "%s"\nrunroot = "%s"\n' "$driver" 
 podman rmi --ignore "$out" > /dev/null
 podman run --rm --privileged --security-opt label=disable --tmpfs /var/home \
     -v "$graphroot:$graphroot" -v "$runroot:$runroot" -v "$work:/var/tmp" -e CONTAINERS_STORAGE_CONF=/var/tmp/storage.conf \
+    -e "SOURCE_DATE_EPOCH=$epoch" \
     --entrypoint /usr/bin/rpm-ostree "$source" \
     compose build-chunked-oci --bootc --format-version=2 --max-layers=115 --from "$source" --output "containers-storage:$out"
 

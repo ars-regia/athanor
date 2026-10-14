@@ -5,7 +5,10 @@
 //! Every interactive widget carries an accessible name and every string goes through
 //! gettext (SH13).
 
+use std::cell::Cell;
 use std::rc::Rc;
+
+use athanor_trust_state::{ReadError, State};
 
 use athanor_style::calmo::{self, Variant};
 use gtk4::accessible::Property;
@@ -19,12 +22,13 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use crate::auth::{authenticate_interactive, discover_target_user, UserInfo};
 use crate::i18n::{tr, tr_with};
 
-/// The seal's state. The greeter has no verifier to ask yet: package 1b-shield binds the
-/// root-owned trust state file into the sandbox and replaces this constant with what
-/// that file says. Until then the only claim the greeter can back is "not verified", so
-/// it shows the exclamation badge and never the check (doc_shell.md, SH1 "no facades",
-/// SH12 "the shield reports only what a verifier backs").
-const SEAL_ICON: &str = "athanor-seal-attention-symbolic";
+/// The seal's state is asked again every hour: the badge ages ("checked within 14 days"
+/// turns false without the state changing).
+const SEAL_AGAIN_SECS: u32 = 3600;
+/// After no answer, the next questions come this many seconds later, then hourly: the
+/// greeter starts with the machine, and a service slow to start under the boot's load must
+/// not leave the seal unverified for an hour. The bar's delays (doc_bar.md, BR6).
+const SEAL_RETRY_SECS: [u32; 3] = [5, 30, 300];
 
 /// The icons come from the theme the image ships (doc_shell.md, SH5: cosmic-icon-theme
 /// stays in stage 1); the seal is ours, installed into hicolor, which every theme inherits.
@@ -50,6 +54,69 @@ fn icon_chip(id: &str, icon: &str, label: &str) -> Button {
         .build();
     named(&button, id, label);
     button
+}
+
+/// The seal of SH12 (package 1d): the badge the trust state backs, its header as words and
+/// accessible name, the reason as tooltip. The state is asked of the update service at
+/// start, every hour and soon again after no answer.
+fn seal_chip() -> Box {
+    let seal = Box::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(8)
+        .css_classes(["greeter-chip"])
+        .build();
+    seal.set_widget_name("greeter-seal");
+    let icon = Image::builder()
+        .css_classes(["athanor-seal"])
+        .pixel_size(24)
+        .build();
+    let words = Label::new(None);
+    seal.append(&icon);
+    seal.append(&words);
+    let show: Rc<ShowSeal> = {
+        let seal = seal.clone();
+        Rc::new(move |read| {
+            let now = crate::seal::now();
+            let badge = crate::seal::badge(read, now);
+            let header = crate::seal::header(badge);
+            icon.set_icon_name(Some(crate::seal::icon(badge)));
+            icon.update_property(&[Property::Label(&header)]);
+            words.set_label(&header);
+            seal.set_tooltip_text(Some(&crate::seal::detail(read, now)));
+        })
+    };
+    // Until the service answers, nothing backs the badge.
+    show(&Err(ReadError::Io(std::io::ErrorKind::NotConnected)));
+    let asked = Rc::new(Cell::new(0));
+    ask_seal(&show, &asked, 0);
+    glib::timeout_add_seconds_local(SEAL_AGAIN_SECS, move || {
+        ask_seal(&show, &asked, 0);
+        glib::ControlFlow::Continue
+    });
+    seal
+}
+
+/// Draws the seal for one answer of the update service.
+type ShowSeal = dyn Fn(&Result<State, ReadError>);
+
+/// Asks the state once and shows the answer, unless a newer question was asked meanwhile.
+/// After no answer the next of `SEAL_RETRY_SECS` follows; `missed` counts them.
+fn ask_seal(show: &Rc<ShowSeal>, asked: &Rc<Cell<u64>>, missed: usize) {
+    let question = asked.get().wrapping_add(1);
+    asked.set(question);
+    let (show, asked) = (show.clone(), asked.clone());
+    glib::MainContext::default().spawn_local(async move {
+        let read = crate::seal::ask().await;
+        if asked.get() != question {
+            return;
+        }
+        show(&read);
+        if let (Err(ReadError::Io(_)), Some(&delay)) = (&read, SEAL_RETRY_SECS.get(missed)) {
+            glib::timeout_add_seconds_local_once(delay, move || {
+                ask_seal(&show, &asked, missed + 1)
+            });
+        }
+    });
 }
 
 fn now_text(format: &str) -> String {
@@ -192,21 +259,7 @@ pub fn build_ui(app: &Application) {
         .label("Athanor")
         .css_classes(["greeter-wordmark"])
         .build();
-    let seal = Box::builder()
-        .orientation(Orientation::Horizontal)
-        .spacing(8)
-        .css_classes(["greeter-chip"])
-        .build();
-    seal.set_widget_name("greeter-seal");
-    seal.set_tooltip_text(Some(&tr("The system image has not been verified yet.")));
-    let seal_icon = Image::builder()
-        .icon_name(SEAL_ICON)
-        .css_classes(["athanor-seal"])
-        .pixel_size(24)
-        .build();
-    seal_icon.update_property(&[Property::Label(&tr("Not verified"))]);
-    seal.append(&seal_icon);
-    seal.append(&Label::new(Some(&tr("Not verified"))));
+    let seal = seal_chip();
     let top = gtk4::CenterBox::builder()
         .margin_top(12)
         .margin_start(20)

@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-desktop-ui
 Version:        1.0.0
-Release:        14%{?dist}
+Release:        15%{?dist}
 Summary:        Athanor OS Desktop UI configurations
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -21,7 +21,7 @@ Requires:       wireplumber nautilus ptyxis gnome-text-editor gnome-disk-utility
 
 %description
 Runtime dependencies of the Athanor OS desktop (clipboard, screenshot, brightness,
-media and audio tools) and a udev rule granting i2c access for ddcutil.
+media and audio tools) and the Firefox policy.
 
 %prep
 # Nothing to prep
@@ -30,21 +30,22 @@ media and audio tools) and a udev rule granting i2c access for ddcutil.
 # Nothing to build
 
 %install
-mkdir -p %{buildroot}/usr/lib/udev/rules.d
 mkdir -p %{buildroot}/usr/lib/systemd/user
-
-# Copy UDEV rules
-cp -p %{_sourcedir}/etc/udev/rules.d/99-ddcutil-i2c.rules %{buildroot}/usr/lib/udev/rules.d/
 
 # Firefox policy (Fedora's package ships no policies.json, only distribution.ini)
 mkdir -p %{buildroot}/usr/lib64/firefox/distribution
 cp -p %{_sourcedir}/usr/lib64/firefox/distribution/policies.json %{buildroot}/usr/lib64/firefox/distribution/
 
 %files
-/usr/lib/udev/rules.d/99-ddcutil-i2c.rules
 /usr/lib64/firefox/distribution/policies.json
 
 %changelog
+* Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-15
+- Drop 99-ddcutil-i2c.rules (doc_kernel_profile.md, section 14, boot ordering): it set
+  GROUP="i2c", a group nothing defines, so udev logged "Unknown group 'i2c'" at every
+  boot. ddcutil's own 60-ddcutil-i2c.rules grants the seat user access to the i2c
+  devices of display adapters through uaccess
+
 * Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-14
 - Ship a Firefox policy that turns off telemetry, studies, the default-browser agent, Pocket
   and sponsored content, until Firefox moves to Flatpak (doc_software.md, section 6)
