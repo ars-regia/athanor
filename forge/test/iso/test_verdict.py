@@ -31,14 +31,14 @@ import zlib
 HERE = pathlib.Path(__file__).resolve().parent
 
 
-def verdict(tmp: pathlib.Path, phases, qemu_status=0):
+def verdict(tmp: pathlib.Path, phases, qemu_status=0, *extra: str):
     out = tmp / "run"
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)
     (out / "phases.txt").write_text("".join(f"{n} {t}\n" for n, t in phases))
     (out / "serial.log").write_bytes(b"console output\n")
     proc = subprocess.run(
-        [sys.executable, str(HERE / "verdict.py"), str(out), "900", str(qemu_status)],
+        [sys.executable, str(HERE / "verdict.py"), str(out), "900", str(qemu_status), *extra],
         capture_output=True,
         text=True,
     )
@@ -56,6 +56,7 @@ def test_pass(tmp: pathlib.Path) -> None:
             ("greeter-alive", 400),
             ("session-alive", 460),
             ("settings-alive", 500),
+            ("mok-enrolled", 380),
         ],
     )
     assert code == 0, f"a complete run must pass, got {code}"
@@ -65,6 +66,7 @@ def test_pass(tmp: pathlib.Path) -> None:
     assert "first boot to greeter: 300s" in report, report
     assert "greeter to session: 60s" in report, report
     assert "session to settings: 40s" in report, report
+    assert "Secure Boot certificate enrolled: mok-enrolled" in report, report
 
 
 COMPLETE = [
@@ -75,6 +77,7 @@ COMPLETE = [
     ("greeter-alive", 400),
     ("session-alive", 460),
     ("settings-alive", 500),
+    ("mok-enrolled", 380),
 ]
 
 
@@ -82,7 +85,8 @@ def test_verdict_json_on_pass(tmp: pathlib.Path) -> None:
     """The promotion reads a machine verdict, never the Markdown report (UD4, UD17)."""
     code, _ = verdict(tmp, COMPLETE)
     data = json.loads((tmp / "run" / "verdict.json").read_text())
-    assert code == 0 and data["pass"] is True, data
+    # The MOK check is taken out first; test_mok_missing_fails is about it.
+    assert code == 0 and data["pass"] is True and data["checks"].pop("mok") is True, data
     assert data["checks"] == {
         "installed": True, "kickstart-done": True, "profile": True, "karg": True,
         "greeter": True, "session": True, "settings": True, "no-guest-failure": True,
@@ -222,6 +226,7 @@ def test_karg_not_applicable_passes(tmp: pathlib.Path) -> None:
             ("greeter-alive", 400),
             ("session-alive", 460),
             ("settings-alive", 500),
+            ("mok-enrolled", 380),
         ],
     )
     assert code == 0, f"a non-btrfs root must pass without the karg, got {code}"
@@ -690,6 +695,156 @@ def test_karg_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
             assert cmdline in proc.stdout, "a missing karg must print the command line"
 
 
+def test_mok_missing_fails(tmp: pathlib.Path) -> None:
+    """A desktop on a machine whose certificate never reached MokList is a fail: the
+    installer's request, its password or MokManager broke, and Secure Boot cannot hold."""
+    without = [p for p in COMPLETE if p[0] != "mok-enrolled"]
+    for phases in (without, without + [("mok-missing", 380)]):
+        code, report = verdict(tmp, phases)
+        data = json.loads((tmp / "run" / "verdict.json").read_text())
+        assert code != 0 and "**FAIL**" in report, report
+        assert "Secure Boot certificate enrolled: NO" in report, report
+        assert data["checks"]["mok"] is False, data
+
+
+def test_secure_boot_case_requires_enforcement(tmp: pathlib.Path) -> None:
+    """With `secure-boot` the run passes only on Secure Boot enabled and enforced; shim
+    validation switched off reads "SecureBoot enabled" too, and must not pass. Without it
+    the state is reported and decides nothing."""
+    code, report = verdict(tmp, COMPLETE + [("secureboot-enabled", 381)], 0, "secure-boot")
+    assert code == 0, report
+    assert "Secure Boot: secureboot-enabled (required: secureboot-enabled)" in report, report
+    for state in ("secureboot-not-enforced", "secureboot-disabled"):
+        code, report = verdict(tmp, COMPLETE + [(state, 381)], 0, "secure-boot")
+        data = json.loads((tmp / "run" / "verdict.json").read_text())
+        assert code != 0 and data["checks"]["secure-boot"] is False, (state, data)
+    # Firmware without Secure Boot passes the default case and never the Secure Boot one.
+    without_mok = [p for p in COMPLETE if p[0] != "mok-enrolled"] + [("mok-not-applicable", 380)]
+    code, report = verdict(tmp, without_mok)
+    assert code == 0 and "Secure Boot certificate enrolled: mok-not-applicable" in report, report
+    code, _ = verdict(tmp, without_mok + [("secureboot-enabled", 381)], 0, "secure-boot")
+    assert code != 0, "the Secure Boot case passed without the certificate enrolled"
+    code, report = verdict(tmp, COMPLETE + [("secureboot-disabled", 381)])
+    data = json.loads((tmp / "run" / "verdict.json").read_text())
+    assert code == 0 and "secure-boot" not in data["checks"], data
+    assert "Secure Boot: secureboot-disabled" in report, report
+    proc = subprocess.run([sys.executable, str(HERE / "verdict.py"), str(tmp / "run"), "900", "0", "secure"],
+                          capture_output=True, text=True)
+    assert proc.returncode == 2, "an unknown case must be refused, not ignored"
+
+
+def test_console_answers_the_mok_request(tmp: pathlib.Path) -> None:
+    """The password the installer shows is acknowledged with Enter, and at the first boot
+    each MokManager screen gets its keys, the password typed letter by letter, in order."""
+    if not hasattr(socket, "AF_UNIX"):
+        print("  skip test_console_answers_the_mok_request: no unix sockets")
+        return
+    sys.path.insert(0, str(HERE))
+    import console
+
+    run = tmp / "mok"
+    shutil.rmtree(run, ignore_errors=True)
+    run.mkdir(parents=True)
+    server = socket.socket(socket.AF_UNIX)
+    server.bind(str(run / "serial.sock"))
+    server.listen(1)
+    monitor = socket.socket(socket.AF_UNIX)
+    monitor.bind(str(run / "monitor.sock"))
+    monitor.listen(8)
+    pressed: list[bytes] = []
+    threading.Thread(target=play_the_monitor, args=(monitor, pressed), daemon=True).start()
+    proc = subprocess.Popen(
+        [sys.executable, str(HERE / "console.py"), str(run / "serial.sock"), str(run / "serial.log"),
+         str(run / "phases.txt"), str(run / "monitor.sock")],
+        stdout=subprocess.DEVNULL,
+        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01"},
+    )
+
+    def keys() -> list[str]:
+        return [w for w in b"".join(pressed).decode().split() if w != "sendkey"]
+
+    def wait_for_keys(count: int) -> None:
+        # monitor.py spends 1.5 s on each key.
+        deadline = time.time() + 60
+        while len(keys()) < count and time.time() < deadline:
+            time.sleep(0.1)
+        assert len(keys()) >= count, keys()
+
+    try:
+        conn, _ = server.accept()
+        conn.settimeout(2)
+        # The installer's page, with the colour escapes a terminal may add.
+        conn.sendall(b"\x1b[1m    One-time password: bcde fghj\x1b[0m knpr stuv\r\n")
+        wait_for_keys(1)
+        # The rest of the page names MokManager's screens: no key may answer it.
+        conn.sendall(b"  1. Choose Enroll MOK, then Continue, then Yes.\r\n"
+                     b"press one, choose Enroll key from disk, then the EFI partition\r\n")
+        time.sleep(1)
+        assert keys() == ["ret"], f"the installer's page was answered as MokManager: {keys()}"
+        conn.sendall(b"Install finished\r\nAthanor kickstart finished\r\n")
+        # MokManager, screen by screen, each drawn only after the previous answer.
+        expected = ["ret"]
+        for needle, step_keys in console.MOK_MANAGER_STEPS:
+            conn.sendall(b"\x1b[2J\x1b[1;1H" + needle + b"\r\n")
+            if needle == b"Password:":
+                step_keys = (*"bcdefghjknprstuv", *step_keys)
+            expected += step_keys
+            wait_for_keys(len(expected))
+        time.sleep(0.5)
+        conn.close()
+        proc.wait(timeout=30)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        server.close()
+        monitor.close()
+
+    assert keys() == expected, keys()
+    phases = dict(line.split() for line in (run / "phases.txt").read_text().splitlines())
+    for name in ("mok-password-shown", "mokmanager-shown", "mok-confirmed"):
+        assert name in phases, f"{name} not recorded: {sorted(phases)}"
+
+
+def test_mok_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
+    """The question the guest is asked, run as a shell command against a mokutil stub:
+    the certificate's subject decides MOK_*, and only the exact "SecureBoot enabled" is
+    ENABLED."""
+    sys.path.insert(0, str(HERE))
+    import console
+
+    work = tmp / "mokprobe"
+    shutil.rmtree(work, ignore_errors=True)
+    (work / "bin").mkdir(parents=True)
+    (work / "efivars").mkdir()
+    variable = work / "efivars" / "SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"
+    (work / "bin" / "mokutil").write_text(
+        '#!/bin/sh\ncase $1 in --list-enrolled) printf "%s\\n" "$FAKE_LIST";;'
+        ' --sb-state) printf "%s\\n" "$FAKE_SB";; esac\n'
+    )
+    (work / "bin" / "mokutil").chmod(0o755)
+    probe = console.MOK_PROBE.replace(b"/sys/firmware/efi/efivars/", f"{work}/efivars/".encode())
+    assert probe != console.MOK_PROBE, "the probe no longer reads the SecureBoot variable"
+    (work / "probe.sh").write_bytes(probe + b"\n")
+    athanor = "Subject: " + console.MOK_CERTIFICATE.decode()
+    cases = (
+        (athanor, "SecureBoot enabled", ["MOK_ENROLLED", "SECUREBOOT_ENABLED"]),
+        ("Subject: CN=Other Key", "SecureBoot disabled", ["MOK_MISSING", "SECUREBOOT_DISABLED"]),
+        (athanor, "SecureBoot enabled\nSecureBoot validation is disabled in shim",
+         ["MOK_ENROLLED", "SECUREBOOT_NOT_ENFORCED"]),
+        ("", "This system doesn't support Secure Boot", ["MOK_NOT_APPLICABLE", "SECUREBOOT_DISABLED"]),
+    )
+    for listing, state, expected in cases:
+        if expected[0] == "MOK_NOT_APPLICABLE":
+            variable.unlink(missing_ok=True)
+        else:
+            variable.write_bytes(b"\x06\x00\x00\x00\x01")
+        proc = subprocess.run(
+            ["sh", str(work / "probe.sh")], capture_output=True, text=True,
+            env={**os.environ, "PATH": f"{work}/bin:{os.environ['PATH']}", "FAKE_LIST": listing, "FAKE_SB": state},
+        )
+        assert proc.stdout.split() == expected, (listing, state, proc.stdout, proc.stderr)
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as name:
         tmp = pathlib.Path(name)
@@ -715,6 +870,10 @@ def main() -> int:
             test_console_boots_our_kickstart,
             test_installed_systems_own_grub_is_not_a_loop,
             test_console_logs_in_opens_settings_and_stops,
+            test_mok_missing_fails,
+            test_secure_boot_case_requires_enforcement,
+            test_console_answers_the_mok_request,
+            test_mok_probe_answers_from_the_guest,
         ):
             test(tmp)
             print(f"  ok  {test.__name__}")

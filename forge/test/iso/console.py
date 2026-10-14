@@ -44,6 +44,7 @@ import re
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 from memory_case import MEMORY_PROBE, MEMORY_PROBE_WAIT
@@ -87,6 +88,17 @@ MARKERS = (
     # running after it has had time to open its window or to die trying.
     (b"SETTINGS_ALIVE", "settings-alive"),
     (b"SETTINGS_DEAD", "settings-dead"),
+    # And to MOK_PROBE: whether the certificate the installer asked shim to enrol is in
+    # MokList, and the Secure Boot state the firmware reports. ENABLED only for the exact
+    # answer: with MokSBState set, mokutil adds "SecureBoot validation is disabled in
+    # shim" below "SecureBoot enabled", and shim then checks nothing it loads.
+    # NOT_APPLICABLE: firmware without Secure Boot, where the installer requests nothing.
+    (b"MOK_ENROLLED", "mok-enrolled"),
+    (b"MOK_MISSING", "mok-missing"),
+    (b"MOK_NOT_APPLICABLE", "mok-not-applicable"),
+    (b"SECUREBOOT_ENABLED", "secureboot-enabled"),
+    (b"SECUREBOOT_NOT_ENFORCED", "secureboot-not-enforced"),
+    (b"SECUREBOOT_DISABLED", "secureboot-disabled"),
 )
 ANSI = re.compile(rb"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
@@ -388,6 +400,43 @@ SETTINGS_DIAGNOSTICS = (
     b"journalctl --user -b --no-pager -u " + SETTINGS_UNIT + b".service | tail -40",
     b"coredumpctl info --no-pager 2>&1 | grep -aE 'Signal|Command Line|#[0-9]+ ' | head -30",
 )
+# The installer's %post requests the enrolment of the Athanor Secure Boot certificate and
+# shows its one-time password, on virtual terminal 8 and on the serial console, then waits
+# for Enter on that terminal (doc_kernel_profile.md section 4). The console reads the
+# password from the serial line and presses Enter on the machine's keyboard, as the person
+# would after writing it down.
+MOK_PASSWORD = re.compile(rb"One-time password: ([a-z]{4}) ([a-z]{4}) ([a-z]{4}) ([a-z]{4})")
+# At the first boot shim starts MokManager on the request, straight on its menu because the
+# installer set no countdown. Each screen is recognised by its own text on the serial
+# console, which OVMF's console includes, and answered on the keyboard: Enroll MOK (second
+# entry), Continue (after View key 0), Yes (second), the password, then Reboot (first
+# entry of the menu shown once the key is enrolled). The installer's page names some of
+# these screens, so they are looked for only once the installer has finished.
+MOK_MANAGER_STEPS = (
+    (b"Enroll key from disk", ("down", "ret")),
+    (b"View key 0", ("down", "ret")),
+    (b"Enroll the key(s)?", ("down", "ret")),
+    (b"Password:", ("ret",)),
+    (b"Reboot", ("ret",)),
+)
+# MokManager draws a screen in pieces; a key pressed before it is drawn is lost.
+MOK_SETTLE = 2.0
+# Ask the installed system whether the certificate is enrolled and whether Secure Boot is
+# on. printf assembles the markers, as in the other probes.
+MOK_CERTIFICATE = b"CN=Athanor Secure Boot Signing Key"
+MOK_PROBE = (
+    b"if [ ! -e /sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c ];"
+    b" then printf 'MOK_%s\\n' NOT_APPLICABLE;"
+    b" elif mokutil --list-enrolled | grep -qF '" + MOK_CERTIFICATE + b"';"
+    b" then printf 'MOK_%s\\n' ENROLLED; else printf 'MOK_%s\\n' MISSING; fi;"
+    b" case $(mokutil --sb-state) in"
+    b" *'validation is disabled'*) printf 'SECUREBOOT_%s\\n' NOT_ENFORCED;;"
+    b" 'SecureBoot enabled') printf 'SECUREBOOT_%s\\n' ENABLED;;"
+    b" *) printf 'SECUREBOOT_%s\\n' DISABLED;;"
+    b" esac"
+)
+# A few EFI variable reads.
+MOK_PROBE_WAIT = 5.0
 # The tests drive a fake guest that answers at once and scale every wait in the login
 # path down through this; the run itself leaves it at one.
 PACE = float(os.environ.get("ATHANOR_CONSOLE_PACE", "1"))
@@ -414,6 +463,9 @@ def main() -> int:
     tail = b""
     grub_done = False
     last_data = time.time()
+    mok_password = b""
+    mok_step = 0
+    mok_armed = False
 
     def note(name: str) -> None:
         if name in seen:
@@ -446,12 +498,21 @@ def main() -> int:
         script = str(pathlib.Path(__file__).with_name("monitor.py"))
         subprocess.run([sys.executable, script, monitor_path, *commands], check=True)
 
+    def press_soon(*keys: str) -> None:
+        """Press keys after MOK_SETTLE, while this loop goes on reading the serial line:
+        QEMU drops what the guest writes once the socket stops taking it, and MokManager
+        redraws whole screens. Run 2026-10-14 lost "View key 0" to a blocking wait."""
+        commands = [f"sendkey {key}" for key in keys]
+        threading.Timer(MOK_SETTLE * PACE, monitor, args=commands).start()
+
     def ask_about_the_greeter() -> None:
         """Log in over the serial and ask whether the greeter is up."""
         s.sendall(GUEST_USER + b"\n")
         time.sleep(DIAGNOSTIC_PAUSE * PACE)
         s.sendall(GUEST_PASSWORD + b"\n")
         time.sleep(DIAGNOSTIC_PAUSE * PACE)
+        ask(MOK_PROBE, MOK_PROBE_WAIT)
+        note("mok-asked")
         ask(PROFILE_PROBE, PROFILE_PROBE_WAIT)
         note("profile-asked")
         ask(KARG_PROBE, KARG_PROBE_WAIT)
@@ -527,6 +588,30 @@ def main() -> int:
         if "installed" in seen and BOOTED_FROM_CD in tail:
             note("reinstall-loop")
             break
+
+        # The installer shows the one-time password of the MOK request and waits for
+        # Enter. Once.
+        if not mok_password and (found := MOK_PASSWORD.search(ANSI.sub(b"", tail))):
+            mok_password = b"".join(found.groups())
+            note("mok-password-shown")
+            press_soon("ret")
+            tail = b""
+
+        # At the first boot MokManager asks for it: one screen at a time, in order.
+        if "kickstart-done" in seen and not mok_armed:
+            mok_armed = True
+            tail = ANSI.sub(b"", tail).rpartition(b"Athanor kickstart finished")[2]
+        if mok_armed and mok_password and mok_step < len(MOK_MANAGER_STEPS):
+            needle, keys = MOK_MANAGER_STEPS[mok_step]
+            if needle in ANSI.sub(b"", tail):
+                if needle == b"Password:":
+                    keys = (*mok_password.decode(), *keys)
+                press_soon(*keys)
+                mok_step += 1
+                note("mokmanager-shown" if mok_step == 1 else f"mokmanager-step-{mok_step}")
+                if mok_step == len(MOK_MANAGER_STEPS):
+                    note("mok-confirmed")
+                tail = b""
 
         # A login prompt on the installed system is where the questions start. Ask once,
         # then keep reading: the answers arrive as ordinary console output and land in
