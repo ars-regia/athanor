@@ -38,8 +38,10 @@ proposed in #417; this approval relies on it.
 ## Decision
 
 The maintainer approved both revisions on 2026-10-14, with the text aligned to ADR-0103 and
-to section 9. The alignment follows D22 literally; where it needs a mechanism D22 does not
-name, the mechanism below is the one this record writes into UT6, with its reason, and not
+to section 9. D22's "other sessions" is read as the sessions where a person can lose work:
+greeter, lock-screen, background, manager and none sessions are excluded as this record's
+refinement, not the maintainer's. Where the alignment needs a mechanism D22 does not name,
+the mechanism below is the one this record writes into UT6, with its reason, and not
 a decision of the maintainer's own.
 
 1. **`doc_update_trust.md` revision 4 is approved, with UT2 and UT6 aligned to ADR-0103 D5
@@ -53,8 +55,11 @@ a decision of the maintainer's own.
      caller's is open, of the same uid or another; only the classes `greeter`,
      `lock-screen`, `background`, `background-light`, `manager`, `manager-early` and `none`
      do not count. Otherwise it checks `os.athanor.update.apply`. A failed `ListSessions`,
-     an unreadable class or an unknown caller session checks the stricter action, and the
-     service counts again just before the unlock. The alternative, the service refusing or escalating on its own, was weighed and
+     an unreadable class or an unknown caller session checks the stricter action. The
+     caller's session is the logind session of the sender's PID from the bus daemon
+     (`GetSessionByPID`), or its user's display session when the caller has none, as polkit
+     assigns it. The service counts again after the unlock, immediately before the reboot,
+     and re-locks finalization when that check refuses. The alternative, the service refusing or escalating on its own, was weighed and
      not taken: the defaults of one polkit action are fixed and a rule cannot see the other
      sessions, so polkit asks for an administrator in this case only through an action of
      its own, and a refusal would leave an administrator no way to apply from the desktop.
@@ -84,5 +89,5 @@ a decision of the maintainer's own.
 - ADR-0103's Consequences name UT2, UT6 and TM9 among the texts to align; this change aligns
   them, and the specifications now carry D5 and D22.
 - This record amends ADR-0103 D22 in its mechanism only: the second polkit action, the
-  classes that do not count, the second count before the unlock, and the refusal as
+  classes that do not count, the second count before the reboot, and the refusal as
   failed when the inhibitor query fails. What D22 decides is unchanged.
