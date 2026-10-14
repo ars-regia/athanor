@@ -17,11 +17,12 @@ die() { echo "build-rpms.sh: $*" >&2; exit 1; }
 pin() { sed -n "s/^$1=//p" "$SRC/forge/specs/azoth/pins.env"; }
 # The build time and file times of the RPMs built here are the epoch of system/Containerfile, not
 # the clock or a spec's changelog, so the rpm database of an NVIDIA variant is the same on every
-# build of the same tree (doc_update_delivery.md, UD29).
+# build of the same tree (doc_update_delivery.md, UD29). The build host, the RUN step's random
+# hostname otherwise, enters the rpm header too.
 : "${SOURCE_DATE_EPOCH:?build-rpms.sh: SOURCE_DATE_EPOCH is not set: run it in a stage that declares ARG SOURCE_DATE_EPOCH}"
 export SOURCE_DATE_EPOCH
 epoch=(--define "source_date_epoch_from_changelog 0" --define "use_source_date_epoch_as_buildtime 1"
-  --define "clamp_mtime_to_source_date_epoch 1")
+  --define "clamp_mtime_to_source_date_epoch 1" --define "_buildhost athanor-build")
 checksig() {
   local rpm
   for rpm in "$1"/*.rpm; do

@@ -117,6 +117,7 @@ class BuildState(unittest.TestCase):
             "source_date_epoch_from_changelog 0",
             "use_source_date_epoch_as_buildtime 1",
             "clamp_mtime_to_source_date_epoch 1",
+            "_buildhost athanor-build",
         ):
             self.assertIn(f'--define "{macro}"', text)
         calls = re.findall(r"^\s*rpmbuild\b.*$", text, re.M)
