@@ -86,6 +86,20 @@ class ImageSession(unittest.TestCase):
         self.edit(mod.AGENT_UNIT, "NoNewPrivileges=true", "NoNewPrivileges=false")
         self.assertEqual(len(mod.problems(self.root)), 1)
 
+    def test_a_drop_in_that_lifts_no_new_privileges_fails(self):
+        self.write(mod.AGENT_DROPINS[1] + "/50-x.conf", "[Service]\nNoNewPrivileges=no\n")
+        self.assertEqual(len(mod.problems(self.root)), 1)
+
+    def test_a_later_drop_in_that_restores_no_new_privileges_passes(self):
+        self.write(mod.AGENT_DROPINS[0] + "/10-x.conf", "[Service]\nNoNewPrivileges=no\n")
+        self.write(mod.AGENT_DROPINS[1] + "/20-y.conf", "[Service]\nNoNewPrivileges=true\n")
+        self.assertEqual(mod.problems(self.root), [])
+
+    def test_a_masked_agent_fails(self):
+        (self.root / mod.AGENT_OVERRIDE).parent.mkdir(parents=True)
+        (self.root / mod.AGENT_OVERRIDE).symlink_to("/dev/null")
+        self.assertEqual(len(mod.problems(self.root)), 1)
+
     def test_a_session_that_does_not_want_the_agent_fails(self):
         self.edit(mod.SESSION_TARGET, " cosmic-osd.service", "")
         self.assertEqual(len(mod.problems(self.root)), 1)

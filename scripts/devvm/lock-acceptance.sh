@@ -60,18 +60,21 @@ shot() {
 type_keys() { guest_ssh "sudo python3 - $(printf '%q ' "$@")" < "$HERE/keyboard_type.py"; }
 
 USER_NAME=$(guest_ssh id -un)
-SESSION=$(guest_ssh loginctl show-user "$USER_NAME" -p Display --value)
+SESSION=$(guest_ssh loginctl show-user "$USER_NAME" -p Display --value) || SESSION=
 [[ -n $SESSION ]] || fail "no graphical session for $USER_NAME: log in at the greeter first"
 # cosmic-greeter keeps this file from the lock request to the unlock (src/locker.rs:41-44).
 LOCKFILE="/run/user/\$(id -u)/cosmic-greeter-$SESSION.lock"
 
-locked() { in_session test -e "$LOCKFILE"; }
-unlocked() { ! locked; }
+# Prints locked or unlocked; nothing when SSH fails, so that neither predicate holds then.
+lock_state() { in_session "if test -e $LOCKFILE; then echo locked; else echo unlocked; fi"; }
+locked() { [[ $(lock_state) == locked ]]; }
+unlocked() { [[ $(lock_state) == unlocked ]]; }
 
 stage_inhibitor() {
     local list
-    list=$(guest_ssh systemd-inhibit --list --no-legend --what=sleep --mode=delay)
-    grep -q 'COSMIC Greeter' <<< "$list" || fail "no delay sleep inhibitor from cosmic-greeter: $list"
+    # --list prints every inhibitor whatever --what and --mode say: match the row's columns.
+    list=$(guest_ssh systemd-inhibit --list --no-legend)
+    grep 'COSMIC Greeter' <<< "$list" | grep -w sleep | grep -qw delay || fail "no delay sleep inhibitor from cosmic-greeter: $list"
 }
 
 stage_lock() {
@@ -97,20 +100,23 @@ stage_unlock() {
 
 stage_idle() {
     unlocked || fail "the session is locked before the stage"
-    local before idle_locked=0
-    before=$(in_session "if test -e ~/$IDLE_KEY; then cat ~/$IDLE_KEY; else echo ABSENT; fi")
+    IDLE_BEFORE=$(in_session "if test -e ~/$IDLE_KEY; then cat ~/$IDLE_KEY; else echo ABSENT; fi")
+    # Restored on every exit, a failed one included; the user's lock stays theirs to open.
+    trap restore_idle EXIT
     in_session "mkdir -p ~/${IDLE_KEY%/*} && echo 'Some(5000)' > ~/$IDLE_KEY"
-    if wait_until 30 locked; then
-        idle_locked=1
-        type_keys "$USER_NAME" @enter
-    fi
-    if [[ $before == ABSENT ]]; then
+    wait_until 30 locked || fail "no lock 30 s after a 5 s idle time"
+    restore_idle
+    trap - EXIT
+    type_keys "$USER_NAME" @enter
+    wait_until 10 unlocked || fail "still locked 10 s after the password"
+}
+
+restore_idle() {
+    if [[ $IDLE_BEFORE == ABSENT ]]; then
         in_session "rm ~/$IDLE_KEY"
     else
-        in_session "printf '%s\\n' $(printf '%q' "$before") > ~/$IDLE_KEY"
+        in_session "printf '%s\\n' $(printf '%q' "$IDLE_BEFORE") > ~/$IDLE_KEY"
     fi
-    ((idle_locked)) || fail "no lock 30 s after a 5 s idle time"
-    wait_until 10 unlocked || fail "still locked 10 s after the password"
 }
 
 # What polkit-agent-helper@ instances logged since the epoch second SINCE; fails when nothing.
@@ -130,7 +136,10 @@ authenticate() {
     local unit=$PKEXEC_UNIT-$RANDOM since status
     since=$(guest_ssh date +%s)
     in_session systemd-run --user --unit="$unit" -p RemainAfterExit=yes pkexec /usr/bin/true
-    wait_until 15 helper_log "$since" > /dev/null || fail "the agent opened no helper connection in 15 s"
+    if ! wait_until 15 helper_log "$since" > /dev/null; then
+        in_session systemctl --user stop "$unit"
+        fail "the agent opened no helper connection in 15 s"
+    fi
     shot prompt
     type_keys "$USER_NAME" @enter
     if ! wait_until 15 exited "$unit"; then

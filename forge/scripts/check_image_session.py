@@ -9,11 +9,12 @@ cosmic-greeter as the locker and cosmic-idle as the idle trigger, both children 
 athanor-desktop inside the logind session, and cosmic-osd as the polkit agent on polkit 127's
 socket-activated helper. Each line below is a way the image has lost one of them without a
 build failure: a package dropped from packages.json, a launcher line removed, the agent's unit
-no longer wanted by the session or no longer under NoNewPrivileges, the helper socket not
+no longer wanted by the session, masked, or taken out of NoNewPrivileges by a drop-in, the helper socket not
 enabled or the helper setuid again (polkit 126), and the root greeter daemon of
 CVE-2026-25704 enabled.
 """
 
+import os
 import pathlib
 import stat
 import sys
@@ -28,6 +29,8 @@ LAUNCHED = (
 )
 LOCKER_PAM = ("etc/pam.d/cosmic-greeter", "usr/lib/pam.d/cosmic-greeter")
 AGENT_UNIT = "usr/lib/systemd/user/cosmic-osd.service"
+AGENT_OVERRIDE = "etc/systemd/user/cosmic-osd.service"
+AGENT_DROPINS = (AGENT_UNIT + ".d", AGENT_OVERRIDE + ".d")
 SESSION_TARGET = "usr/lib/systemd/user/athanor-session.target"
 HELPER = "usr/lib/polkit-1/polkit-agent-helper-1"
 HELPER_SOCKET = "polkit-agent-helper.socket"
@@ -42,6 +45,16 @@ def settings(path, key):
         if eq and name.strip() == key:
             values += value.split()
     return values
+
+
+def agent_files(root):
+    """The agent's unit file then its drop-ins, in the order systemd applies them: by file name,
+    one in /etc replacing the same name in /usr/lib."""
+    dropins = {}
+    for d in AGENT_DROPINS:
+        if (root / d).is_dir():
+            dropins.update({p.name: p for p in (root / d).glob("*.conf")})
+    return [root / AGENT_UNIT] + [dropins[n] for n in sorted(dropins)]
 
 
 def problems(root):
@@ -59,8 +72,10 @@ def problems(root):
     agent = root / AGENT_UNIT
     if not agent.is_file():
         found.append(f"/{AGENT_UNIT} is missing")
-    elif settings(agent, "NoNewPrivileges") != ["true"]:
-        found.append(f"/{AGENT_UNIT} does not set NoNewPrivileges=true")
+    elif [v for f in agent_files(root) for v in settings(f, "NoNewPrivileges")][-1:] != ["true"]:
+        found.append(f"/{AGENT_UNIT} with its drop-ins does not set NoNewPrivileges=true")
+    if os.path.lexists(root / AGENT_OVERRIDE):
+        found.append(f"/{AGENT_OVERRIDE} masks or replaces the agent's unit")
     target = root / SESSION_TARGET
     if not target.is_file() or "cosmic-osd.service" not in settings(target, "Wants"):
         found.append(f"/{SESSION_TARGET} does not want cosmic-osd.service")
