@@ -72,10 +72,10 @@ release is a signed tag on `iso-v0` plus a `:stable` promotion of that build on 
 (BRN4 of `branching.md`), with the `release` approval. 1.0 is 0.9 with no blocking defect,
 before 2026-12-02.
 
-**Freeze (D3), in force.** No new specification revision and no non-critical shell work until
-P2 of the update-chain plan (the kernel build profile and boot matrix, #122) and spike S1
-(#124) are green. They run in parallel inside 0.3, within the machine's CPU budget; S1 is
-time-boxed. The Fedora 45 rebase does not wait for P3 (D26); the Fedora 44 fallback date
+**Freeze (D3), lifted on 2026-10-14** ([ADR-0112](../decisions/0112-pace-to-0-9.md)). P2 of
+the update-chain plan (#122) is green; spike S1 (#124) still gates P4b and release 0.5, and
+specification revisions and shell work run in parallel with it, within the machine's CPU
+budget. The Fedora 45 rebase does not wait for P3 (D26); the Fedora 44 fallback date
 holds. In the release half of the pipeline the PB5 slice comes first (D15), then the evidence
 copy (D23); the key hierarchy (D5) waits for the maintainer's LUKS2 key backup, which is done
 in the week of 2026-10-09.
