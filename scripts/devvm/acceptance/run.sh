@@ -52,17 +52,26 @@ stage_download() { # item 1
 ACC_SSH_HELD=''
 ACC_OTHER_MADE=''
 sessions_cleanup() {
-  end_call
-  end_units
-  if [[ -n $ACC_SSH_HELD ]]; then end_ssh_session; ACC_SSH_HELD=''; fi
+  local failed=() unit state
+  end_call || failed+=(end_call)
+  end_units || failed+=(end_units)
+  if [[ -n $ACC_SSH_HELD ]]; then
+    end_ssh_session || failed+=(end_ssh_session)
+    ACC_SSH_HELD=''
+  fi
   for unit in acc-second-count acc-inhibit-second "$ACC_INHIBITOR"; do
-    if unit_loaded "$unit.service"; then guest_ssh sudo systemctl stop "$unit.service"; fi
+    stop_system_unit "$unit.service" || failed+=("stop $unit")
   done
-  if [[ -n $ACC_OTHER_MADE ]]; then remove_other; ACC_OTHER_MADE=''; fi
+  unmount_wrapper || failed+=(unmount_wrapper)
+  if [[ -n $ACC_OTHER_MADE ]]; then
+    remove_other || failed+=(remove_other)
+    ACC_OTHER_MADE=''
+  fi
+  ((${#failed[@]} == 0)) || { echo "FAIL  the cleanup of the sessions stage failed at: ${failed[*]}" >&2; return 1; }
 }
 
 stage_sessions() { # item 2, the other-session rule of UT6 (ADR-0103 D22, #433); nothing is applied
-  local since log
+  local since log since_agent m
   expect "2: a downloaded update to ask about" .update downloaded
   polkit_pattern_selfcheck
   trap sessions_cleanup EXIT
@@ -96,14 +105,16 @@ stage_sessions() { # item 2, the other-session rule of UT6 (ADR-0103 D22, #433);
   ACC_SSH_HELD=''
 
   # A counting session that opens after the unlock and before the reboot. The sessions inhibitor
-  # would end the call before the unlock, so second-count.sh takes its own once bootc is held at
-  # the unlock (see the script), and the administrator is then refused by stopping the agent.
-  guest_ssh sudo systemctl stop "$ACC_INHIBITOR.service"
+  # would end the call before the unlock, so second-count.sh drops it once the wrapper is seen
+  # from the update service's own mount namespace, takes its own when bootc is held at the
+  # unlock, and the administrator is then refused by stopping the agent.
   guest_ssh "sudo tee /var/tmp/acc-second-count.sh > /dev/null" < "$ACC_HERE/second-count.sh"
   since=$(now_guest)
   ACC_UNITS+=(acc-class-user)
-  guest_ssh sudo systemd-run --quiet --unit=acc-second-count --collect -E "ACC_USER=$GUEST_USER" -E "ACC_OTHER=$ACC_OTHER" -E "ACC_DELAY=$ACC_CALL_DELAY" -E ACC_LOG=/var/tmp/acc-second-count.log bash /var/tmp/acc-second-count.sh
-  sleep $((ACC_CALL_DELAY + 20)) # no SSH login meanwhile: it would be a counting session at the first count
+  guest_ssh sudo systemd-run --quiet --unit=acc-second-count --collect -E "ACC_USER=$GUEST_USER" -E "ACC_OTHER=$ACC_OTHER" -E "ACC_DELAY=$ACC_CALL_DELAY" -E "ACC_INHIBITOR=$ACC_INHIBITOR" -E ACC_LOG=/var/tmp/acc-second-count.log bash /var/tmp/acc-second-count.sh
+  # No SSH login until the script has opened its session and bootc has gone on, so that the
+  # session the second count sees is the one made on purpose (the script checks the rest).
+  sleep $((ACC_CALL_DELAY + 60))
   for _ in $(seq 60); do
     prompted "$since" && break
     sleep 1
@@ -116,6 +127,7 @@ stage_sessions() { # item 2, the other-session rule of UT6 (ADR-0103 D22, #433);
   pass "2: a session opened after the unlock: the deployment is locked again while the second prompt waits"
   # The refusal: the agent goes away, polkitd cancels the pending check and the service gets
   # an answer other than a grant. (Stopping the dbus-send would leave the check pending.)
+  since_agent=$(now_guest)
   guest_ssh pkill -x cosmic-osd
   call_says Apply os.athanor.Update1.Error.NotAuthorized 30 || die "FAIL  2: the refused prompt did not end as NotAuthorized: $(guest_ssh cat "$(call_out Apply)")"
   deployment_locked || die "FAIL  2: the deployment was unlocked after the prompt was refused"
@@ -124,10 +136,19 @@ stage_sessions() { # item 2, the other-session rule of UT6 (ADR-0103 D22, #433);
   echo "EVIDENCE  second count: second-count.sh logged: $(tr '\n' ';' <<< "$log")"
   echo "EVIDENCE  second count: polkit-agent-helper@ lines: $(journal_since "$since" 'polkit-agent-helper@*' | head -n 3 | tr '\n' ';')"
   pass "2: and it stays locked, with no reboot, when the prompt is refused"
-  for _ in $(seq 30); do guest_ssh pgrep -x cosmic-osd > /dev/null && break; sleep 1; done # the pid, not wanted
-  guest_ssh pgrep -x cosmic-osd > /dev/null || echo "note: cosmic-osd did not come back in 30 s: the session's polkit agent is gone until the next login" >&2
+  # SIGTERM is a clean exit, which the unit does not restart: bring the agent back.
+  guest_ssh sudo systemctl --user --machine="$GUEST_USER@.host" restart cosmic-osd.service
+  for _ in $(seq 30); do
+    polkit_grants_agent "$since_agent" && break
+    sleep 1
+  done
+  polkit_grants_agent "$since_agent" || die "FAIL  cosmic-osd did not register as the polkit agent again in 30 s"
+  guest_ssh sudo systemctl --user --machine="$GUEST_USER@.host" is-active --quiet cosmic-osd.service || die "FAIL  cosmic-osd is not active"
+  for m in /usr/bin/bootc /run/acc-bootc-real; do
+    guest_ssh "findmnt -n $m; test \$? -eq 1" || die "FAIL  $m is still a mount point: the wrapper of second-count.sh was not removed"
+  done
 
-  sessions_cleanup
+  sessions_cleanup || die "FAIL  the cleanup of the sessions stage"
   trap - EXIT
   [[ $(state .update) == downloaded ]] || die "FAIL  2: the update is no longer downloaded"
 }

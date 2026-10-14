@@ -125,6 +125,7 @@ expect_until() { # expect_until DESCRIPTION JQ-FILTER VALUE MINUTES
 # session of class user besides the caller's makes Apply() ask for an administrator, and the
 # login that carries this command is one. call_active_start only arms the call.
 ACC_CALL_DELAY=8
+ACC_CALL_SETTLE=45
 call_out() { printf '/var/tmp/acc-call-%s.out' "$1"; }
 call_active_start() { # call_active_start METHOD
   local out
@@ -134,8 +135,9 @@ call_active_start() { # call_active_start METHOD
 call_active() { # call_active METHOD: the reply, or the error, of the call
   local out
   call_active_start "$1"
-  # No login meanwhile: it would be a counting session when the call arrives.
-  sleep $((ACC_CALL_DELAY + 2))
+  # No login until the call is over: one open at the count before the reboot, which follows
+  # the unlock by a few seconds, is a session of the caller's uid and makes the service ask.
+  sleep $((ACC_CALL_DELAY + ACC_CALL_SETTLE))
   for _ in $(seq 40); do
     out=$(guest_ssh cat "$(call_out "$1")") && [[ -n $out ]] && { echo "$out"; return 0; }
     sleep 1
@@ -190,6 +192,12 @@ polkit_grants() { # polkit_grants SINCE TEXT
   out=$(journal_since "$1" polkit.service) || die "FAIL  reading the polkitd journal"
   grep -F "authorization for $2" <<< "$out"
 }
+# Whether polkitd logged the registration of an authentication agent since SINCE.
+polkit_grants_agent() {
+  local out
+  out=$(journal_since "$1" polkit.service) || die "FAIL  reading the polkitd journal"
+  grep -qF "Registered Authentication Agent" <<< "$out"
+}
 # The shape of the line polkitd logs for a granted prompt, matched by both forms above.
 POLKIT_SAMPLE='Operator of unix-session:c2 successfully authenticated as unix-user:x to gain ONE-SHOT authorization for action os.athanor.update.apply-multi-session for system-bus-name::1.55 [dbus-send] (owned by unix-user:x)'
 polkit_pattern_selfcheck() {
@@ -210,26 +218,36 @@ deployment_locked() { [[ $(guest_ssh sudo bootc status --format json | jq -r .st
 # can reboot the guest: started by the stage, checked before each call.
 need_inhibitor() { guest_ssh systemctl is-active --quiet "$ACC_INHIBITOR.service" || die "FAIL  the shutdown inhibitor $ACC_INHIBITOR is gone: a call could reboot the guest"; }
 
-unit_loaded() { [[ $(guest_ssh systemctl show -p LoadState --value "$1") == loaded ]]; }
+# The LoadState of a unit of the system manager; fails when it cannot be read.
+unit_state() { guest_ssh systemctl show -p LoadState --value "$1"; }
 # Units of the class_session kind, stopped by end_units. A name is registered before the unit
-# is started, and a unit that never loaded is not stopped.
+# is started, and a unit that never loaded is not stopped. The cleanup functions run every step
+# and return 1 if one failed (set -e does not apply to them: they are called in a list).
+stop_system_unit() { # stop_system_unit UNIT.service
+  local state
+  state=$(unit_state "$1") || return 1
+  if [[ $state == loaded ]]; then guest_ssh sudo systemctl stop "$1" || return 1; fi
+}
 end_unit() { # end_unit NAME
-  local unit keep=()
-  if unit_loaded "$1.service"; then guest_ssh sudo systemctl stop "$1.service"; fi
+  local unit keep=() rc=0
+  stop_system_unit "$1.service" || rc=1
   for unit in "${ACC_UNITS[@]}"; do [[ $unit == "$1" ]] || keep+=("$unit"); done
   ACC_UNITS=("${keep[@]}")
+  return $rc
 }
 end_units() {
-  while ((${#ACC_UNITS[@]})); do end_unit "${ACC_UNITS[0]}"; done
+  local rc=0
+  while ((${#ACC_UNITS[@]})); do end_unit "${ACC_UNITS[0]}" || rc=1; done
+  return $rc
 }
 # A pending or finished call of the user manager, its timer included.
 end_call() {
-  local unit
+  local unit state rc=0
   for unit in acc-call-Apply.timer acc-call-Apply.service; do
-    if [[ $(guest_ssh sudo systemctl --user --machine="$GUEST_USER@.host" show -p LoadState --value "$unit") == loaded ]]; then
-      guest_ssh sudo systemctl --user --machine="$GUEST_USER@.host" stop "$unit"
-    fi
+    state=$(guest_ssh sudo systemctl --user --machine="$GUEST_USER@.host" show -p LoadState --value "$unit") || { rc=1; continue; }
+    if [[ $state == loaded ]]; then guest_ssh sudo systemctl --user --machine="$GUEST_USER@.host" stop "$unit" || rc=1; fi
   done
+  return $rc
 }
 # A session of the other user, of the logind class CLASS, held open by a unit with a PAM stack.
 class_session() { # class_session CLASS
@@ -250,15 +268,19 @@ for s in $(loginctl list-sessions --no-legend | awk -v u="$1" '$3 == u { print $
 done
 REMOTE
 }
+# Whether the other user still has processes (exit 1) or none (0).
+other_gone() { guest_ssh "loginctl list-users --no-legend | awk -v u=$ACC_OTHER '\$2 == u { f = 1 } END { exit f }'"; }
 # Waits for the other user to have no session, then removes the account.
 remove_other() {
-  guest_ssh sudo loginctl terminate-user "$ACC_OTHER"
-  for _ in $(seq 30); do
-    guest_ssh "loginctl list-users --no-legend | awk -v u=$ACC_OTHER '\$2 == u { f = 1 } END { exit f }'" && break
-    sleep 1
-  done
-  guest_ssh "loginctl list-users --no-legend | awk -v u=$ACC_OTHER '\$2 == u { f = 1 } END { exit f }'" || die "FAIL  $ACC_OTHER still has processes 30 s after terminate-user"
+  guest_ssh sudo loginctl terminate-user "$ACC_OTHER" || return 1
+  for _ in $(seq 30); do other_gone && break; sleep 1; done
+  other_gone || { echo "FAIL  $ACC_OTHER still has processes 30 s after terminate-user" >&2; return 1; }
   guest_ssh sudo userdel -r "$ACC_OTHER"
+}
+# The wrapper of second-count.sh over bootc, if it is still mounted.
+unmount_wrapper() {
+  # shellcheck disable=SC2016 # expanded by the guest's shell
+  guest_ssh 'for m in /usr/bin/bootc /run/acc-bootc-real; do if findmnt -n "$m" > /dev/null; then sudo umount "$m" || exit 1; fi; done'
 }
 # A second login of the user of the graphical session, over SSH; ended by end_ssh_session.
 ssh_session() {
@@ -269,7 +291,15 @@ ssh_session() {
   done
   die "FAIL  the second SSH session of $GUEST_USER did not start in 20 s"
 }
-end_ssh_session() { guest_ssh pkill -f '[a]cc-session-hold'; }
+end_ssh_session() { # a process already gone is fine (pgrep 1); an SSH failure is not
+  local rc=0
+  guest_ssh pgrep -f '[a]cc-session-hold' > /dev/null || rc=$? # the pid is not wanted
+  case $rc in
+    0) guest_ssh pkill -f '[a]cc-session-hold' ;;
+    1) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 # Arms Apply() from the graphical session and checks that it asked an administrator: the
 # agent opens a helper, the password is typed into it, polkitd logs the grant of ACTION once
