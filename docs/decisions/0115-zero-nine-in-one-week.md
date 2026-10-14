@@ -23,8 +23,9 @@ fallback; Fedora 43 reaches its end of life on 2026-12-02.
 
 ## Decision
 
-Decided by the maintainer on 2026-10-14, in questions answered that day. Item 5, except row 10, was
-proposed by the agent and accepted with the plan.
+Decided by the maintainer on 2026-10-14, in questions answered that day. The moves of
+rows 13, 14, 16 and 21 and of the `-nvidia-legacy` evidence (item 5) were proposed with the plan
+and are decided by the approval of this record; the maintainer chose the other moves directly.
 
 1. **Release 0.9 ships within one week, about 2026-10-21.** Rows that do not fit move to 1.1.
 2. **Only 0.3 and then 0.9.** The release points 0.5 and 0.7 are dropped. 0.3 stays as defined:
@@ -38,10 +39,10 @@ proposed by the agent and accepted with the plan.
    in Fedora, confined and checked. Athanor's own lock, polkit agent and SystemPrompter
    (`doc_lock_and_prompts.md` LP18) move to 1.1, with compositor patch 5.
 5. **Moved to 1.1:**
-   - row 10: LUKS2 on by default (D6). Anaconda on Fedora 43 has no setting that makes
-     encryption default-on. The only patch-free route is an encrypted autopart in the
-     kickstart, which preselects the disks and stops asking for the disk; the maintainer
-     rejected that trade-off. Until 1.1, encryption stays the person's choice in the
+   - row 10: LUKS2 on by default (D6). The record's wording of the reason: Anaconda on
+     Fedora 43 has no setting that makes encryption default-on, and the only patch-free route,
+     an encrypted autopart in the kickstart, preselects the disks and stops asking for the
+     disk, a trade-off the maintainer rejected. Until 1.1, encryption stays the person's choice in the
      installer, as `doc_platform_experience.md` section 1 says;
    - row 13: cosmic-comp patches 5 and 6;
    - row 14: the keyring prompter exchange; GNOME Keyring keeps its own gcr prompter until
@@ -57,7 +58,8 @@ proposed by the agent and accepted with the plan.
 7. **Stay in 0.9:** rows 8, 9, 11, 15, 17, 18, 19, 20, 22, 23 and 24, and the rest of row 12
    (bar, dock, launcher, screenshot and screen share acceptance, coexistence), no decision
    moving them. Row 15 (Flathub remote, update timer) is being built: the image has flatpak
-   but no remote and no timer today (SWa of `doc_software.md` decision 6).
+   but no remote and no timer today (`system/Containerfile` line 199 installs flatpak only, and
+   no flatpak timer unit exists under `system/`).
 8. **The hardware work of section 4.3 of `release-1.0.md` stays in 0.9**, minus the
    `-nvidia-legacy` evidence. It needs a maintainer session in that week.
 
@@ -68,7 +70,7 @@ record approves them.
 
 - **S1 (#124) and P4b (#126) come after 0.9, with the rebase.** They sat in 0.5 (ADR-0112
   item 4); S1 gates P4b and the rebase.
-- **The image key rotation closes before 1.0.** The approved definition of PB5b needs a key-2
+- **The close of the image key rotation (PB5b) stays open until the UT2 amendment decides it.** The approved definition of PB5b needs a key-2
   release on `:stable` and one more release. With 0.9 and 1.0 the only releases left and row 7
   out of 0.9, either 0.9 carries key 2, which row 7's move forbids, or PB5b closes after 1.0.
   The UT2 amendment of item 6 decides.

@@ -10,7 +10,7 @@
 
 1.0 is the first release a person outside the project can install and keep. It is narrow on
 purpose (D1): a signed image, its update chain, the installer, recovery, one complete desktop
-session and encryption. Everything else waits.
+session, and encryption offered in the installer as the person's choice. Everything else waits.
 
 The date is set outside the project. Fedora 43 reaches its end of life on 2026-12-02. Fedora 45
 final is due on 2026-10-20; if its image is not green by mid-November 2026, the base moves to
@@ -56,8 +56,8 @@ pull request that builds the row adds it, under that name or a better one.
   answers Orca alone, AX4) (rows 12 and 13), and the
   keyring prompter exchange carried by Athanor (row 14, D20); until then GNOME Keyring keeps
   its own gcr prompter ([ADR-0115](../decisions/0115-zero-nine-in-one-week.md)).
-- LUKS2 on by default (row 10, D6). Anaconda on Fedora 43 has no setting that makes encryption
-  default-on; the only patch-free route, an encrypted autopart in the kickstart, preselects the
+- LUKS2 on by default (row 10, D6). The record's wording of the reason: Anaconda on Fedora 43 has
+  no setting that makes encryption default-on; the only patch-free route, an encrypted autopart in the kickstart, preselects the
   disks and stops asking for the disk, and the maintainer rejected it. Until 1.1 encryption stays
   the person's choice in the installer (`doc_platform_experience.md` section 1)
   ([ADR-0115](../decisions/0115-zero-nine-in-one-week.md)).
@@ -97,7 +97,7 @@ waits for the maintainer's LUKS2 key backup, which is done in the week of 2026-1
 | Release | Target (estimate) | Contents: rows of section 2 and work outside them | Exit |
 | --- | --- | --- | --- |
 | 0.3 "chain" | its exit was met on 2026-10-14; tagged when its remaining issues close | rows 1 (image, three variants, without the `-nvidia-legacy` evidence), 2, 3, 4, 5, 6; `release.yml` (PB13, [ADR-0104](../decisions/0104-release-workflow-and-stable-gate.md), merged in #354); P2 (#122) | The first `:stable` promotion on evidence. Existing: `python3 -B -m unittest discover -s system/tests` (`test_promote.py`). `system/promote.sh` reads `:stable` back and refuses unless it is the evidence digest (`test_promote.py` `test_stable_is_read_back`) |
-| 0.9 "surface" | about 2026-10-21 (one week) | rows 8, 9, 11, 12, 13 (patches 1 and 2), 15 (being built: the image has flatpak but no remote and no timer today, SWa of `doc_software.md` decision 6), 17, 18, 19, 20, 22, 23, 24; the ISO acceptance under Secure Boot (#252, the "to add" of row 8); the hardware work of 4.3; the visual language and accessibility, without the keyboard monitor that answers Orca alone (AX4, patch 6, in 1.1); the maintainer's aesthetic sign-offs (ST8, VL12). It ships on Fedora 43 | The release candidate: every row placed here holds and the hardware matrix is a recorded run. Existing: `scripts/devvm/bar-acceptance.sh`, `dock-acceptance.sh`, `launcher-acceptance.sh`, `compositor-acceptance.sh`, `python3 scripts/verify.py services pam polkit polkit-model contacts shipped coverage`, `forge/test/iso/run_iso_test.sh ISO OUTPUT_DIR`, and the unit tests the rows name. To add: the image checks and acceptance cases the rows mark "to add", the ISO test under Secure Boot firmware ending in an update to a newer `:stable`, and the hardware matrix |
+| 0.9 "surface" | about 2026-10-21 (one week) | rows 8, 9, 11, 12, 13 (patches 1 and 2), 15 (being built: the image has flatpak but no remote and no timer today: `system/Containerfile` line 199 installs flatpak only, and no flatpak timer unit exists under `system/`), 17, 18, 19, 20, 22, 23, 24; the ISO acceptance under Secure Boot (#252, the "to add" of row 8); the hardware work of 4.3; the visual language and accessibility, without the keyboard monitor that answers Orca alone (AX4, patch 6, in 1.1); the maintainer's aesthetic sign-offs (ST8, VL12). It ships on Fedora 43 | The release candidate: every row placed here holds and the hardware matrix is a recorded run. Existing: `scripts/devvm/bar-acceptance.sh`, `dock-acceptance.sh`, `launcher-acceptance.sh`, `compositor-acceptance.sh`, `python3 scripts/verify.py services pam polkit polkit-model contacts shipped coverage`, `forge/test/iso/run_iso_test.sh ISO OUTPUT_DIR`, and the unit tests the rows name. To add: the image checks and acceptance cases the rows mark "to add", the ISO test under Secure Boot firmware ending in an update to a newer `:stable`, and the hardware matrix |
 | 1.0 | before 2026-12-02 | 0.9 rebased onto Fedora 45, or Fedora 44 per [ADR-0078](../decisions/0078-fedora-release-target.md); row 7 (key hierarchy, not-after and revocation) with the image key rotation (PB5b) and its key ceremony, in the window between 0.9 and 1.0; proposed, with the rebase: S1 (#124) and P4b (#126), the bootc two-step update chain; no blocking defect | To add: a query for open blocking issues that must return none |
 
 Row numbers are those of revision 2 of this file, so that issues and records that cite them
