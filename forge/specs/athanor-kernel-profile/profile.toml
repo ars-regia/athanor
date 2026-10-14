@@ -130,12 +130,23 @@ CONFIG_DRM_SIMPLEDRM = { value = "y", decision = "D17", locked = true }
 "fs.protected_regular" = { value = "2", decision = "D47", locked = true }
 "fs.suid_dumpable" = { value = "0", decision = "D47", locked = true }
 "net.core.default_qdisc" = { value = "fq", decision = "section 6", locked = true }
+"kernel.oops_limit" = { value = "100", decision = "D19", locked = true }
+# Sync, remount read-only and reboot; roles may narrow it (section 7: the mesh role sets 0).
+"kernel.sysrq" = { value = "176", decision = "section 6" }
 
 [base.runtime]
 # The lockdown level selected in /sys/kernel/security/lockdown.
 lockdown = { value = "integrity", decision = "section 5", locked = true }
 # LSMs that must be active; others (capability, ima, evm) may be present as well.
 lsm = { value = ["lockdown", "yama", "selinux", "bpf", "landlock", "ipe"], decision = "section 5" }
+# Memory (section 6): swap on zram with zstd, sized by the zram-generator drop-in of this
+# package, and zswap off (D15); transparent huge pages on madvise with defrag
+# defer+madvise; MGLRU on.
+swap = { value = "zram", decision = "D15", locked = true }
+zswap = { value = "N", decision = "D15", locked = true }
+thp = { value = "madvise", decision = "section 6", locked = true }
+thp_defrag = { value = "defer+madvise", decision = "section 6", locked = true }
+mglru = { value = "on", decision = "section 6", locked = true }
 
 # The base kernel command line (section 6). module.sig_enforce is not here because
 # CONFIG_MODULE_SIG_FORCE already enforces it; block P2 built lockdown, init_on_free,
