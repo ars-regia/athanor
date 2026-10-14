@@ -76,7 +76,7 @@ to the disk, is not detected until the 1.1 seal (ADR-0076 point 1, ADR-0097). At
 
 | Action | Declared in | Active session | Shipped | Notes |
 | --- | --- | --- | --- | --- |
-| `os.athanor.update.apply` | `forge/specs/athanor-update/SOURCES/usr/share/polkit-1/actions/os.athanor.update.policy` | `yes` | yes | Applies an update the service has already verified (`doc_update_trust.md`). Inactive and remote sessions: `auth_admin_keep`. |
+| `os.athanor.update.apply` | `forge/specs/athanor-update/SOURCES/usr/share/polkit-1/actions/os.athanor.update.policy` | `yes` | yes | Applies an update the service has already verified (`doc_update_trust.md`). Inactive and remote sessions: `auth_admin_keep`. While a session of another user is open, the service checks `os.athanor.update.apply-multi-session` instead, `auth_admin` for every subject and never kept (`doc_update_trust.md` UT6, ADR-0103 D22); that action gets its row in the change that declares it in the `.policy` file. |
 | `os.athanor.update.rollback` | `forge/specs/athanor-update/SOURCES/usr/share/polkit-1/actions/os.athanor.update.policy` | `auth_admin` | yes | Returns to the previous deployment. |
 | `org.freedesktop.login1.inhibit-block-sleep` | `scripts/runner/50-athanor-runner-inhibit.rules` | `yes` | no | Installed on the CI runner host only, for the user `athanor-runner`, which runs outside any session. |
 

@@ -179,3 +179,4 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0109 | 0109 | [Weekly kernel bumps](0109-weekly-kernel-bumps.md) | accepted | kernel, build, process |
 | ADR-0110 | 0110 | [Promote the pull request's kernel build to the release](0110-kernel-artifact-promotion.md) | accepted | kernel, build, signing, process |
 | ADR-0111 | 0111 | [Approve pipeline revision 3 with its review fixes and four accepted risks](0111-pipeline-revision-3-approval.md) | accepted | build, signing, release, process |
+| ADR-0113 | 0113 | [Approve update trust revision 4 and software revision 3, aligned to ADR-0103](0113-update-trust-software-approval.md) | accepted | update, security, apps |
