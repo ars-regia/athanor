@@ -9,9 +9,10 @@ cosmic-greeter as the locker and cosmic-idle as the idle trigger, both children 
 athanor-desktop inside the logind session, and cosmic-osd as the polkit agent on polkit 127's
 socket-activated helper. Each line below is a way the image has lost one of them without a
 build failure: a package dropped from packages.json, a launcher line removed, the agent's unit
-no longer wanted by the session, masked, or taken out of NoNewPrivileges by a drop-in, the helper socket not
-enabled or the helper setuid again (polkit 126), and the root greeter daemon of
-CVE-2026-25704 enabled.
+no longer wanted by the session, masked, taken out of NoNewPrivileges or given another ExecStart
+by a drop-in, the helper socket not enabled or enabled without its unit file, the helper setuid
+again (polkit 126), the helper's sandbox read-only over pam_faillock's tally directory (#144,
+#445), and the root greeter daemon of CVE-2026-25704 enabled.
 """
 
 import os
@@ -28,33 +29,75 @@ LAUNCHED = (
     'session_component "$$" cosmic-idle &',
 )
 LOCKER_PAM = ("etc/pam.d/cosmic-greeter", "usr/lib/pam.d/cosmic-greeter")
-AGENT_UNIT = "usr/lib/systemd/user/cosmic-osd.service"
-AGENT_OVERRIDE = "etc/systemd/user/cosmic-osd.service"
-AGENT_DROPINS = (AGENT_UNIT + ".d", AGENT_OVERRIDE + ".d")
+USER_UNITS = ("usr/lib/systemd/user", "etc/systemd/user")
+SYSTEM_UNITS = ("usr/lib/systemd/system", "etc/systemd/system")
+AGENT = "cosmic-osd.service"
+AGENT_UNIT = f"{USER_UNITS[0]}/{AGENT}"
+AGENT_OVERRIDE = f"{USER_UNITS[1]}/{AGENT}"
 SESSION_TARGET = "usr/lib/systemd/user/athanor-session.target"
 HELPER = "usr/lib/polkit-1/polkit-agent-helper-1"
 HELPER_SOCKET = "polkit-agent-helper.socket"
+HELPER_SERVICE = "polkit-agent-helper@.service"
+TALLY_DIR = "/run/faillock"
 GREETER_DAEMON = "cosmic-greeter-daemon.service"
 
 
-def settings(path, key):
-    """Every value of the active `key=` lines of a unit file, split on whitespace."""
+def assignments(path, key):
+    """The values of the active `key=` lines of a unit file, in order; an empty one resets."""
     values = []
     for line in path.read_text().splitlines():
         name, eq, value = line.partition("=")
         if eq and name.strip() == key:
-            values += value.split()
+            values.append(value.strip())
     return values
 
 
-def agent_files(root):
-    """The agent's unit file then its drop-ins, in the order systemd applies them: by file name,
-    one in /etc replacing the same name in /usr/lib."""
-    dropins = {}
-    for d in AGENT_DROPINS:
-        if (root / d).is_dir():
-            dropins.update({p.name: p for p in (root / d).glob("*.conf")})
-    return [root / AGENT_UNIT] + [dropins[n] for n in sorted(dropins)]
+def settings(path, key):
+    """Every value of the active `key=` lines of a unit file, split on whitespace."""
+    return [w for v in assignments(path, key) for w in v.split()]
+
+
+def dropins(root, dirs, unit):
+    """The unit's *.conf drop-ins in the order systemd applies them: by file name, one in /etc
+    replacing the same name in /usr/lib."""
+    found = {}
+    for d in dirs:
+        if (root / d / f"{unit}.d").is_dir():
+            found.update({p.name: p for p in (root / d / f"{unit}.d").glob("*.conf")})
+    return [found[n] for n in sorted(found)]
+
+
+def path_list(files, key):
+    """The effective value of a path-list setting such as ReadWritePaths= across files."""
+    paths = []
+    for f in files:
+        for v in assignments(f, key):
+            paths = paths + v.split() if v else []
+    return paths
+
+
+def covers(entry, path):
+    """Whether a ReadWritePaths= entry (optionally prefixed by - or +) covers path."""
+    entry = entry.lstrip("-+").rstrip("/") + "/"
+    return (path + "/").startswith(entry)
+
+
+def helper_problems(root):
+    unit = root / SYSTEM_UNITS[0] / HELPER_SERVICE
+    if not unit.is_file():
+        return [f"/{SYSTEM_UNITS[0]}/{HELPER_SERVICE} is missing"]
+    files = [unit] + dropins(root, SYSTEM_UNITS, HELPER_SERVICE)
+    strict = [v for f in files for v in settings(f, "ProtectSystem")][-1:] == ["strict"]
+    if strict and not any(
+        covers(e, TALLY_DIR) for e in path_list(files, "ReadWritePaths")
+    ):
+        return [
+            (
+                f"{HELPER_SERVICE} sets ProtectSystem=strict and no ReadWritePaths= covering "
+                f"{TALLY_DIR}: pam_faillock fails every polkit prompt once the user has a tally (#144)"
+            )
+        ]
+    return []
 
 
 def problems(root):
@@ -72,8 +115,18 @@ def problems(root):
     agent = root / AGENT_UNIT
     if not agent.is_file():
         found.append(f"/{AGENT_UNIT} is missing")
-    elif [v for f in agent_files(root) for v in settings(f, "NoNewPrivileges")][-1:] != ["true"]:
-        found.append(f"/{AGENT_UNIT} with its drop-ins does not set NoNewPrivileges=true")
+    else:
+        agent_dropins = dropins(root, USER_UNITS, AGENT)
+        files = [agent] + agent_dropins
+        if [v for f in files for v in settings(f, "NoNewPrivileges")][-1:] != ["true"]:
+            found.append(
+                f"/{AGENT_UNIT} with its drop-ins does not set NoNewPrivileges=true"
+            )
+        found += [
+            f"/{f.relative_to(root)} overrides the agent's ExecStart"
+            for f in agent_dropins
+            if assignments(f, "ExecStart")
+        ]
     if os.path.lexists(root / AGENT_OVERRIDE):
         found.append(f"/{AGENT_OVERRIDE} masks or replaces the agent's unit")
     target = root / SESSION_TARGET
@@ -86,11 +139,14 @@ def problems(root):
         found.append(
             f"/{HELPER} is setuid: the image carries polkit 126, not the forge's 127"
         )
+    found += helper_problems(root)
     enabled = enabled_units(root)
     if HELPER_SOCKET not in enabled:
         found.append(
             f"{HELPER_SOCKET} is not enabled: no polkit prompt can authenticate"
         )
+    elif not any((root / d / HELPER_SOCKET).is_file() for d in SYSTEM_UNITS):
+        found.append(f"{HELPER_SOCKET} is enabled but its unit file is missing")
     if GREETER_DAEMON in enabled:
         found.append(
             f"{GREETER_DAEMON} is enabled: Athanor's greeter is greetd's, not COSMIC's"

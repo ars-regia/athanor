@@ -7,16 +7,29 @@
 # password is the dev VM's, the user's name (README.md). With no argument it runs every stage
 # in order; with arguments, only those, in the order given. Prints PASS <stage> or
 # FAIL <stage>: <what was read>, and exits non-zero on the first failure. Screenshots go to
-# .scratch/lock-acceptance/; look at them, they are the only check of what the lock draws.
+# .scratch/lock-acceptance/; look at them.
+#
+# What "locked" means here. The stages read cosmic-greeter's marker file, which the locker
+# writes before it asks cosmic-comp for the lock and removes before it releases it
+# (src/locker.rs:41-44). That is the locker's intent, not the compositor's state: cosmic-comp
+# logs nothing on lock or unlock and offers no query, so a stage can pass while the compositor
+# still shows the session. The screenshots are the only check of what the compositor draws.
 #
 #   inhibitor  the locker holds logind's delay sleep inhibitor, so suspend and a closed lid lock
 #   lock       `loginctl lock-session` on the graphical session locks it
-#   wrong      a wrong password leaves it locked
+#   wrong      a wrong password, seen failing in PAM's journal line, leaves it locked
+#   crash      the locker killed with SIGKILL while locked: the session stays locked and
+#              athanor-desktop starts a new locker, which the next stage unlocks
 #   unlock     the password unlocks it
 #   idle       cosmic-idle locks after a 5 s idle time (the user's setting is restored after)
-#   polkit     `pkexec true` from the session succeeds once the password is typed into the agent
-#   tally      the same after a failed login left a pam_faillock tally file: it fails until
-#              polkit-agent-helper@.service may write /run/faillock (doc_lock_and_prompts.md LP11)
+#   polkit     the login left the user's pam_faillock tally, /run/faillock/$USER, and with it
+#              present `pkexec true` from the session succeeds once the password is typed into
+#              the agent. Fails on images built before #445 merged: polkit-agent-helper@.service
+#              could not write /run/faillock (#144).
+#   cancel     six polkit requests cancelled while the agent's dialog is open leave no failure
+#              in the tally. Fails until #447 is fixed (polkit-org/polkit#713). It cancels by
+#              stopping pkexec, which makes polkitd cancel the request at the agent; the
+#              dialog has no key for Cancel.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -25,7 +38,7 @@ ROOT=$(cd "$HERE/../.." && pwd)
 source "$HERE/devvm.env"
 
 SHOTS=$ROOT/.scratch/lock-acceptance
-STAGES=(inhibitor lock wrong unlock idle polkit tally)
+STAGES=(inhibitor lock wrong crash unlock idle polkit cancel)
 IDLE_KEY=.config/cosmic/com.system76.CosmicIdle/v1/screen_off_time
 PKEXEC_UNIT=lock-acceptance-pkexec
 STAGE=
@@ -37,11 +50,12 @@ in_session() {
     DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/\$(id -u)/bus; $*"
 }
 
-# Polls COMMAND once a second until it succeeds; returns 1 after SECONDS.
+# Polls COMMAND once a second until it succeeds; returns 1 after SECONDS. What COMMAND writes
+# to stderr goes through, so a broken SSH connection shows beside the FAIL line.
 wait_until() { # wait_until SECONDS COMMAND...
     local deadline=$((SECONDS + $1))
     shift
-    until "$@" 2> /dev/null; do
+    until "$@"; do
         ((SECONDS < deadline)) || return 1
         sleep 1
     done
@@ -64,11 +78,25 @@ SESSION=$(guest_ssh loginctl show-user "$USER_NAME" -p Display --value) || SESSI
 [[ -n $SESSION ]] || fail "no graphical session for $USER_NAME: log in at the greeter first"
 # cosmic-greeter keeps this file from the lock request to the unlock (src/locker.rs:41-44).
 LOCKFILE="/run/user/\$(id -u)/cosmic-greeter-$SESSION.lock"
+TALLY=/run/faillock/$USER_NAME
 
 # Prints locked or unlocked; nothing when SSH fails, so that neither predicate holds then.
 lock_state() { in_session "if test -e $LOCKFILE; then echo locked; else echo unlocked; fi"; }
 locked() { [[ $(lock_state) == locked ]]; }
 unlocked() { [[ $(lock_state) == unlocked ]]; }
+
+# The newest cosmic-greeter process of the user, the locker; fails when none runs.
+locker_pid() { guest_ssh pgrep -n -u "$USER_NAME" -x cosmic-greeter; }
+new_locker() { # new_locker OLD-PID
+    local pid
+    pid=$(locker_pid) && [[ $pid != "$1" ]]
+}
+
+# Whether the journal holds, since the epoch second SINCE, a line containing TEXT.
+journal_has() { # journal_has SINCE TEXT
+    local log
+    log=$(guest_ssh sudo journalctl -q -b --since "@$1" -o cat) && grep -qF -- "$2" <<< "$log"
+}
 
 stage_inhibitor() {
     local list
@@ -86,9 +114,23 @@ stage_lock() {
 
 stage_wrong() {
     locked || fail "the session is not locked"
+    local since
+    since=$(guest_ssh date +%s)
     type_keys not-the-password @enter
-    sleep 4
+    # The locker's PAM service is cosmic-greeter; pam_unix logs the refused password under it.
+    wait_until 10 journal_has "$since" "pam_unix(cosmic-greeter:auth): authentication failure" ||
+        fail "no PAM failure of cosmic-greeter in the journal 10 s after the keys: they did not reach the locker"
     locked || fail "a wrong password unlocked the session"
+}
+
+stage_crash() {
+    locked || fail "the session is not locked"
+    local pid
+    pid=$(locker_pid) || fail "no cosmic-greeter process of $USER_NAME"
+    guest_ssh kill -KILL "$pid"
+    wait_until 15 new_locker "$pid" || fail "no new cosmic-greeter 15 s after killing $pid"
+    locked || fail "the lock marker is gone after the locker died"
+    shot crashed
 }
 
 stage_unlock() {
@@ -128,36 +170,62 @@ helper_log() { # helper_log SINCE
 
 exited() { [[ $(in_session systemctl --user show -p SubState --value "$1") == exited ]]; }
 
-# Runs `pkexec true` in a transient user unit: in the user manager, outside the SSH session, so
-# polkit reaches the agent of the graphical session. Types the password once the agent has
-# opened a connection to the helper socket, and checks pkexec's exit status.
-authenticate() {
+# Starts `pkexec true` in a transient user unit: in the user manager, outside the SSH session,
+# so polkit reaches the agent of the graphical session. Returns once the agent has opened a
+# connection to the helper socket, with the unit in PROMPT and its start in PROMPT_SINCE.
+open_prompt() {
     unlocked || fail "the session is locked before the stage"
-    local unit=$PKEXEC_UNIT-$RANDOM since status
-    since=$(guest_ssh date +%s)
-    in_session systemd-run --user --unit="$unit" -p RemainAfterExit=yes pkexec /usr/bin/true
-    if ! wait_until 15 helper_log "$since" > /dev/null; then
-        in_session systemctl --user stop "$unit"
+    PROMPT=$PKEXEC_UNIT-$RANDOM
+    PROMPT_SINCE=$(guest_ssh date +%s)
+    in_session systemd-run --user --unit="$PROMPT" -p RemainAfterExit=yes pkexec /usr/bin/true
+    if ! wait_until 15 helper_log "$PROMPT_SINCE" > /dev/null; then
+        in_session systemctl --user stop "$PROMPT"
         fail "the agent opened no helper connection in 15 s"
     fi
-    shot prompt
-    type_keys "$USER_NAME" @enter
-    if ! wait_until 15 exited "$unit"; then
-        in_session systemctl --user stop "$unit"
-        fail "pkexec still waiting 15 s after the password; the helper logged: $(helper_log "$since")"
-    fi
-    status=$(in_session systemctl --user show -p ExecMainStatus --value "$unit")
-    in_session systemctl --user stop "$unit"
-    [[ $status == 0 ]] || fail "pkexec exited $status; the helper logged: $(helper_log "$since")"
 }
 
-stage_polkit() { authenticate; }
+# Types the password into a new prompt and checks pkexec's exit status.
+authenticate() {
+    local status
+    open_prompt
+    shot prompt
+    type_keys "$USER_NAME" @enter
+    if ! wait_until 15 exited "$PROMPT"; then
+        in_session systemctl --user stop "$PROMPT"
+        fail "pkexec still waiting 15 s after the password; the helper logged: $(helper_log "$PROMPT_SINCE")"
+    fi
+    status=$(in_session systemctl --user show -p ExecMainStatus --value "$PROMPT")
+    in_session systemctl --user stop "$PROMPT"
+    [[ $status == 0 ]] || fail "pkexec exited $status; the helper logged: $(helper_log "$PROMPT_SINCE")"
+}
 
-stage_tally() {
-    # What a wrong password at sudo or at the greeter leaves behind (pam_faillock, faillock.c:80-91).
-    guest_ssh sudo install -m 0660 -o "$USER_NAME" -g root /dev/null "/run/faillock/$USER_NAME"
-    trap 'guest_ssh sudo rm -f "/run/faillock/$USER_NAME"' EXIT
+# Sets FAILURES to the number of failures pam_faillock holds for the user: `faillock` prints
+# one row per failure, each starting with its date.
+count_failures() {
+    local out
+    out=$(guest_ssh sudo faillock --user "$USER_NAME") || fail "faillock --user $USER_NAME failed"
+    FAILURES=$(grep -c '^[0-9]' <<< "$out") || FAILURES=0
+}
+
+stage_polkit() {
+    # The account phase of pam_faillock creates the tally at login (pam_faillock.c:527-560).
+    guest_ssh sudo test -f "$TALLY" || fail "no $TALLY after the login"
     authenticate
+}
+
+stage_cancel() {
+    local before n
+    count_failures
+    before=$FAILURES
+    for n in 1 2 3 4 5 6; do
+        open_prompt
+        in_session systemctl --user stop "$PROMPT"
+        sleep 2
+        count_failures
+        # Stops at the first failure, before five could lock the account for ten minutes.
+        ((FAILURES == before)) ||
+            fail "cancel $n recorded a pam_faillock failure (#447); sudo faillock --user $USER_NAME --reset clears it"
+    done
 }
 
 run=("$@")
