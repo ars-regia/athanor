@@ -28,7 +28,7 @@ ORCHESTRATOR = "athanor-forge-orchestrator"
 LIST = r"((?:`[\w-]+`(?:, | e )?)+)"
 # job `x` of/in/nel [workflow] `w.yml` | dell'Orchestrator | of the Orchestrator
 JOB_OF = re.compile(
-    r"job\s+`([\w-]+)`\s+(?:(?:di|of|del|nel|in)\s+(?:workflow\s+)?(?:riusabile\s+)?(?:`([\w-]+)(?:\.yml)?`|([\w-]+)\.yml)"
+    r"job\s+`([\w-]+)`\s+(?:(?:di|of|del|nel|in)\s+(?:workflow\s+)?(?:riusabile\s+)?(?:`(?:\.github/workflows/)?([\w-]+)(?:\.yml)?`|([\w-]+)\.yml)"
     r"|(dell'Orchestrator|of the Orchestrator))"
 )
 # the workflow `w.yml` ha due job: `a` (...), `b` (...) | ha i job `a`, `b` e `c`

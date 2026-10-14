@@ -400,8 +400,8 @@ Ogni PR di bump e ogni cambio in `forge/specs/azoth/**` passa:
    workflow riusabile `nvidia-kmod.yml` quando lo stato è `modules-missing`
    (`doc_build_ordering.md`, O1-O4). Il workflow `call-nvidia-kmod-prepare.yml` ha i job `prepare`, `build` e `artifacts`: `artifacts` risolve il kernel per
    digest e chiude con una nota se i moduli ci sono già (O5); il job `nvidia-kmod-sign` dell'Orchestrator li firma con la
-   chiave dei moduli del progetto e firma una copia con una MOK effimera dal
-   profilo Secure Boot; il job `boot` di `nvidia-kmod.yml` (`boot.sh --mok --insmod`, tutti e quattro
+   chiave dei moduli del progetto; il job `prepare`, senza chiavi, firma una copia con una MOK
+   effimera dal profilo Secure Boot; il job `boot` di `nvidia-kmod.yml` (`boot.sh --mok --insmod`, tutti e quattro
    i casi) arruola quella MOK e nel guest carica il `nvidia.ko` firmato di ogni
    ramo, atteso `ENODEV` (firma accettata, GPU assente), una copia non firmata e
    quella firmata dalla MOK, attese `EKEYREJECTED`: SeaBIOS prova che la fiducia
