@@ -88,8 +88,10 @@ done
 * Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-58
 - athanor-greeter-client binds /run/athanor-update read-only into the greeter's
   sandbox, for the seal (doc_shell.md, SH12, package 1d), after checking outside the
-  sandbox that the directory is root's and that nobody else can write it. A directory
-  that fails the check is not bound and the seal shows the exclamation mark.
+  sandbox that the directory is root's and that nobody else can write it. The check and
+  the bind use one open descriptor (bwrap --ro-bind-fd), so the path cannot be swapped
+  between them. A directory that fails the check is not bound and the seal shows the
+  exclamation mark.
 
 * Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-57
 - athanor-session, athanor-greeter-session and 50-athanor-desktop.conf set

@@ -142,16 +142,23 @@ done
 # what root put there. A directory that fails the check is not bound, and the seal then
 # shows the exclamation mark; the greeter still starts, because the seal must not lock
 # anyone out.
+# The directory is opened once, checked through that descriptor and bound from it, so
+# what is checked is what is bound: a path swapped after the check changes nothing.
+# bwrap closes the descriptor after the bind, and the greeter never holds it. The symlink
+# test is on the path alone; a symlink there could only be root's, as /run is.
 trust_dir=/run/athanor-update
 trust_owner=
 trust_mode=
-if [ -d "$trust_dir" ] && [ ! -L "$trust_dir" ]; then
-    trust_owner=$(stat -c %u "$trust_dir")
-    trust_mode=$(stat -c %a "$trust_dir")
+if [ -d "$trust_dir" ] && [ ! -L "$trust_dir" ] && command exec 5< "$trust_dir"; then
+    if [ -d /dev/fd/5 ]; then
+        trust_owner=$(stat -L -c %u /dev/fd/5)
+        trust_mode=$(stat -L -c %a /dev/fd/5)
+    fi
 fi
 if [ "$trust_owner" = 0 ] && [ $((0$trust_mode & 022)) -eq 0 ]; then
-    set -- "$@" --ro-bind "$trust_dir" "$trust_dir"
+    set -- "$@" --ro-bind-fd 5 "$trust_dir"
 else
+    exec 5<&-
     echo "athanor-greeter-client: $trust_dir is missing or not root's alone, the seal shows no trust state" >&2
 fi
 
