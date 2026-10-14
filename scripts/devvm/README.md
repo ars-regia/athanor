@@ -101,6 +101,19 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   restricted socket in a transient unit, a `Terminal=true` entry through `xdg-terminal-exec`,
   and the three COSMIC openers, cold and warm. Screenshots land in
   `.scratch/compositor-acceptance/`; look at the openers' ones.
+- `lock-acceptance.sh [stage...]` checks the session lock and the polkit agent of release 0.9
+  on the image as installed (ADR-0115, `docs/spikes/lock-and-polkit-agent-0-9.md`): the sleep
+  inhibitor, `loginctl lock-session`, a wrong password (seen in PAM's journal line) and a
+  right one, a locker killed while locked that leaves the session locked and comes back, the
+  idle lock, `pkexec true` answered in cosmic-osd's dialog with the user's pam_faillock tally
+  present, and six cancelled prompts that must record no failure (the stage refuses to start
+  within two failures of `deny=`, so it never locks the account). Before each cancel it
+  checks only that a helper is alive, 2 s after the prompt opened: no state or log line shows
+  that the helper is asking for the password. "Locked" is cosmic-greeter's
+  marker file, the locker's intent: cosmic-comp exposes no lock state, so the screenshots in
+  `.scratch/lock-acceptance/` are the only check of what the compositor draws; look at them.
+  The login creates the tally, so `polkit` fails on images built before #445 merged
+  (#144), and `cancel` fails until #447 is fixed. Log in at the greeter first.
 - Settings are in `devvm.env` and are overridden from the environment: `CPUS=4`,
   `MEMORY=8G`, `DISK_GIB=40`, `GPU_OUTPUTS=2` (the second head starts disconnected, so
   every other stage sees one output; `bar-acceptance.sh hotplug` is the one that needs

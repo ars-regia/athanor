@@ -1,0 +1,14 @@
+#!/usr/bin/bash
+# Run Flatpak's triggers (icon, desktop and MIME caches) over the system installation.
+# Every trigger runs; the unit fails when any of them did.
+set -u
+
+status=0
+for trigger in /usr/share/flatpak/triggers/*.trigger; do
+    echo "<6>running $trigger"
+    "$trigger" /var/lib/flatpak || {
+        echo "<3>$trigger failed"
+        status=1
+    }
+done
+exit "$status"
