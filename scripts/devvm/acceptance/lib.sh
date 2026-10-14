@@ -212,6 +212,11 @@ call_says() { # call_says METHOD TEXT SECONDS
   done
   return 1
 }
+# What the user manager did with the armed call, for a failure message: the timer and the
+# service state, and the unit's lines of the user journal.
+call_diag() { # call_diag METHOD
+  guest_ssh "sudo systemctl --user --machine=$GUEST_USER@.host list-timers --all --no-pager; sudo systemctl --user --machine=$GUEST_USER@.host status acc-call-$1.timer acc-call-$1.service --no-pager; sudo journalctl _UID=\$(id -u $GUEST_USER) -u user@\$(id -u $GUEST_USER).service --since -3min --no-pager | tail -n 20" 2>&1
+}
 deployment_locked() { [[ $(guest_ssh sudo bootc status --format json | jq -r .status.staged.downloadOnly) == true ]]; }
 
 # The inhibitor that ends every authorised call of the stage at Error.Blocked, so that no case
@@ -272,7 +277,10 @@ REMOTE
 other_gone() { guest_ssh "loginctl list-users --no-legend | awk -v u=$ACC_OTHER '\$2 == u { f = 1 } END { exit f }'"; }
 # Waits for the other user to have no session, then removes the account.
 remove_other() {
-  guest_ssh sudo loginctl terminate-user "$ACC_OTHER" || return 1
+  # terminate-user fails for a user with no session and no lingering: nothing to end then.
+  if [[ -n $(guest_ssh loginctl list-users --no-legend | awk -v u="$ACC_OTHER" '$2 == u') ]]; then
+    guest_ssh sudo loginctl terminate-user "$ACC_OTHER" || return 1
+  fi
   for _ in $(seq 30); do other_gone && break; sleep 1; done
   other_gone || { echo "FAIL  $ACC_OTHER still has processes 30 s after terminate-user" >&2; return 1; }
   guest_ssh sudo userdel -r "$ACC_OTHER"
@@ -337,7 +345,7 @@ expect_no_prompt() { # expect_no_prompt DESCRIPTION
   since=$(now_guest)
   call_active_start Apply
   sleep $((ACC_CALL_DELAY + 2))
-  call_says Apply os.athanor.Update1.Error.Blocked 30 || die "FAIL  $1: not authorised without a password: $(guest_ssh cat "$(call_out Apply)")"
+  call_says Apply os.athanor.Update1.Error.Blocked 30 || die "FAIL  $1: not authorised without a password: $(guest_ssh cat "$(call_out Apply)" 2>&1; call_diag Apply)"
   ! prompted "$since" || die "FAIL  $1: the agent opened a prompt"
   ! polkit_grants "$since" "action os.athanor.update." > /dev/null || die "FAIL  $1: polkitd granted an action after a password"
   deployment_locked || die "FAIL  $1: the deployment was unlocked"
