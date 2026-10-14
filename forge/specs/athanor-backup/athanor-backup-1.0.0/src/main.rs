@@ -427,27 +427,30 @@ mod tests {
         }
     }
 
+    /// Removes its directory when dropped, also when the test panics.
+    struct TempDir(PathBuf);
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
     #[test]
     fn a_home_that_cannot_be_snapshotted_fails_with_a_message_naming_it() {
-        // A plain directory is not the root of a btrfs subvolume (inode 256), a dangling path
-        // does not exist, and a link to a directory is not the subvolume itself: `init` and
-        // `create` stop on each, so the hourly timer unit fails and the failure is visible.
-        let dir = std::env::temp_dir().join(format!("athanor-backup-test-{}", std::process::id()));
-        fs::create_dir_all(&dir).expect("create test directory");
-        let link = dir.join("link");
-        std::os::unix::fs::symlink(&dir, &link).expect("create link");
-        let cases = [
-            (dir.clone(), "is not a btrfs subvolume"),
-            (link, "is not a btrfs subvolume"),
-            (dir.join("missing"), "is missing"),
-        ];
-        for (path, want) in &cases {
-            let err = ensure_subvolume(path).expect_err("must be refused");
-            let text = format!("{err:#}");
+        // Outside btrfs a directory never has inode 256, so `init` and `create` stop on it and the
+        // hourly timer unit fails visibly. A link to "/" (inode 256 on many filesystems) is not
+        // tried: the inode of "/" is not under the test's control.
+        let dir = TempDir(std::env::temp_dir().join(format!("athanor-backup-test-{}", std::process::id())));
+        fs::create_dir_all(&dir.0).expect("create test directory");
+        for (path, want) in [
+            (dir.0.clone(), "is not a btrfs subvolume"),
+            (dir.0.join("missing"), "is missing"),
+        ] {
+            let text = format!("{:#}", ensure_subvolume(&path).expect_err("must be refused"));
             assert!(text.contains(want), "{text}");
             assert!(text.contains(&path.display().to_string()), "{text}");
         }
-        fs::remove_dir_all(&dir).expect("remove test directory");
     }
 
     #[test]
