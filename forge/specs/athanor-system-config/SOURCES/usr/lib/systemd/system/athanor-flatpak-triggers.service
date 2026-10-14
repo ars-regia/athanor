@@ -1,0 +1,35 @@
+[Unit]
+Description=Refresh the caches of the system Flatpak exports
+Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_software.md
+# Started by athanor-flatpak-update.service (OnSuccess=). Flatpak runs these triggers in
+# bubblewrap, which needs CAP_SYS_ADMIN as root; the update unit has none and AGENTS.md
+# forbids giving it, so the update runs with no triggers and this unit runs them instead.
+# They parse files the applications' authors control: no capability, no network, no IPC,
+# and the exports directory is the only path they can write.
+After=athanor-flatpak-update.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/athanor-flatpak-triggers
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+PrivateNetwork=yes
+PrivateIPC=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/flatpak/exports
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=none
+RestrictSUIDSGID=yes
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallArchitectures=native
+UMask=0022

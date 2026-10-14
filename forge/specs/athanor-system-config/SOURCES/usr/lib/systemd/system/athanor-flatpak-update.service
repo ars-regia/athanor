@@ -3,10 +3,14 @@ Description=Update the system Flatpak applications
 Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_software.md
 After=network-online.target
 Wants=network-online.target
+OnSuccess=athanor-flatpak-triggers.service
 
 [Service]
 Type=oneshot
 ExecStart=/usr/libexec/athanor-flatpak-update
+# Flatpak runs its triggers in bubblewrap, which needs CAP_SYS_ADMIN as root (and would fail
+# here without a word). An empty triggers directory makes it run none; the unit above does.
+Environment=FLATPAK_TRIGGERSDIR=/usr/share/athanor-system-config/flatpak-no-triggers
 # doc_software.md, decision 6 (i) and SW15. The system installation only; the unit reaches
 # the network (Flathub) and the system bus (NetworkManager's Metered), nothing else.
 NoNewPrivileges=yes

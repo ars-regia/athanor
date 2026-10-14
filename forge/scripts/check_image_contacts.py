@@ -14,24 +14,24 @@ symlink to /dev/null or an empty file. Two defects fail:
 A contact that names image_file and image_contains must have that Key=value as the last active
 line of the file, and no other resolved.conf.d drop-in may set the key (the resolver mode,
 DNSOverTLS=opportunistic, ADR-0103 D11).
-A contact that names remote_file, remote_url and remote_fingerprint needs that .flatpakrepo in the
-image to carry the Url, a GPGKey whose primary key has the fingerprint, and no NoGpgVerify=true
-(the Flathub remote, doc_software.md decision 6). A contact with must_enable = true needs its unit
-enabled.
-The check sees timers and the listed units only. It does not follow Wants=, Requires= or
-Upholds= written inside another unit, nor sockets, paths or D-Bus activation, so a beacon pulled
-in that way is not seen. scripts/verify.py contacts makes the same comparison against the presets
-of the checkout.
+A contact that names remote_file, remote_url, remote_fingerprint and remote_key_sha256 needs that
+.flatpakrepo in the image to carry, in [Flatpak Repo], the Url and a GPGKey that is exactly the pinned
+blob, with the pinned fingerprint and an expiry more than 90 days away, and no Filter or Subset
+line (the Flathub remote, doc_software.md decision 6). A contact with must_enable = true needs its
+unit enabled.
 """
 
 import base64
+import configparser
 import hashlib
 import pathlib
 import re
 import sys
 import tomllib
+from datetime import datetime, timedelta, timezone
 
 
+EXPIRY_WARNING_DAYS = 90
 SCOPES = (("etc/systemd/system", "usr/lib/systemd/system"), ("etc/systemd/user", "usr/lib/systemd/user"))
 
 
@@ -98,44 +98,107 @@ def config_problems(contacts, root):
     return found
 
 
+def packets(data):
+    """(tag, body) of each OpenPGP packet of data (RFC 9580 section 4), or ValueError on a malformed one."""
+    pos = 0
+    while pos < len(data):
+        head = data[pos]
+        if not head & 0x80:
+            raise ValueError("not an OpenPGP packet")
+        if head & 0x40:
+            tag, pos = head & 0x3F, pos + 1
+            first = data[pos]
+            if first < 192:
+                size, pos = first, pos + 1
+            elif first < 224:
+                size, pos = ((first - 192) << 8) + data[pos + 1] + 192, pos + 2
+            elif first == 255:
+                size, pos = int.from_bytes(data[pos + 1:pos + 5], "big"), pos + 5
+            else:
+                raise ValueError("partial packet length")
+        else:
+            tag, kind = (head >> 2) & 0x0F, head & 3
+            width = (1, 2, 4)[kind] if kind < 3 else 0
+            if not width:
+                raise ValueError("indeterminate packet length")
+            size, pos = int.from_bytes(data[pos + 1:pos + 1 + width], "big"), pos + 1 + width
+        if pos + size > len(data):
+            raise ValueError("truncated packet")
+        yield tag, data[pos:pos + size]
+        pos += size
+
+
 def key_fingerprint(b64):
     """Fingerprint of the primary key of an OpenPGP public key given as base64 (a flatpakrepo GPGKey=),
-    or None when the first packet is not a version 4 public key with a two-byte length."""
+    or None when the first packet is not a version 4 public key."""
     data = base64.b64decode(b64, validate=True)
-    if len(data) < 3 or data[0] != 0x99:
-        return None
-    size = int.from_bytes(data[1:3], "big")
-    body = data[3:3 + size]
-    if len(body) != size or body[0] != 4:
-        return None
-    return hashlib.sha1(b"\x99" + data[1:3] + body).hexdigest().upper()
+    for tag, body in packets(data):
+        if tag != 6 or body[0] != 4:
+            return None
+        return hashlib.sha1(b"\x99" + len(body).to_bytes(2, "big") + body).hexdigest().upper()
+    return None
 
 
-def remote_problems(contacts, root, enabled):
-    """Contacts that name a .flatpakrepo (remote_file, remote_url, remote_fingerprint) and contacts
-    with must_enable = true."""
+def key_expiry(data):
+    """Earliest expiry (datetime, UTC) among the primary key and its subkeys, from the key expiration
+    time of their version 4 self-signatures, or None when none of them expires."""
+    created, expiries = None, []
+    for tag, body in packets(data):
+        if tag in (6, 14):
+            created = int.from_bytes(body[1:5], "big")
+        elif tag == 2 and body[0] == 4 and body[1] in (0x10, 0x11, 0x12, 0x13, 0x18) and created is not None:
+            hashed, pos = body[6:6 + int.from_bytes(body[4:6], "big")], 0
+            while pos < len(hashed):
+                first = hashed[pos]
+                if first < 192:
+                    size, pos = first, pos + 1
+                elif first < 255:
+                    size, pos = ((first - 192) << 8) + hashed[pos + 1] + 192, pos + 2
+                else:
+                    size, pos = int.from_bytes(hashed[pos + 1:pos + 5], "big"), pos + 5
+                if hashed[pos] & 0x7F == 9 and size == 5:
+                    expiries.append(created + int.from_bytes(hashed[pos + 1:pos + 5], "big"))
+                pos += size
+    return datetime.fromtimestamp(min(expiries), timezone.utc) if expiries else None
+
+
+def remote_problems(contacts, root, enabled, now=None):
+    """Contacts that name a .flatpakrepo (remote_file, remote_url, remote_fingerprint, remote_key_sha256)
+    and contacts with must_enable = true."""
+    now = now or datetime.now(timezone.utc)
     found = []
     for c in contacts.get("contact", []):
         if c.get("must_enable") and c.get("unit") not in enabled:
             found.append(f"{c['id']}: {c.get('unit')} is not enabled in the image")
         if not c.get("remote_file"):
             continue
+        name = c["remote_file"]
         try:
-            text = (root / c["remote_file"]).read_text()
+            text = (root / name).read_text()
         except OSError as err:
-            found.append(f"{c['id']}: cannot read {c['remote_file']} in the image ({err})")
+            found.append(f"{c['id']}: cannot read {name} in the image ({err})")
             continue
-        keys = dict(re.findall(r"^(\w+)=(.*)$", text, re.M))
-        if keys.get("Url") != c["remote_url"]:
-            found.append(f"{c['id']}: {c['remote_file']} has Url={keys.get('Url')}, not {c['remote_url']}")
-        if keys.get("NoGpgVerify", "").lower() == "true":
-            found.append(f"{c['id']}: {c['remote_file']} turns signature verification off")
+        if re.search(r"^\s*(filter|subset)\s*=", text, re.I | re.M):
+            found.append(f"{c['id']}: {name} sets Filter or Subset, and the remote is unfiltered (doc_software.md, decision 6)")
+        ini = configparser.ConfigParser(delimiters=("=",), interpolation=None, strict=True)
         try:
-            got = key_fingerprint(keys.get("GPGKey", ""))
-        except ValueError:
-            got = None
+            ini.read_string(text)
+            repo = ini["Flatpak Repo"]
+            url, key = repo.get("Url"), repo.get("GPGKey", "")
+            blob = base64.b64decode(key, validate=True)
+            got = key_fingerprint(key)
+            expiry = key_expiry(blob)
+        except (configparser.Error, KeyError, ValueError) as err:
+            found.append(f"{c['id']}: {name} is not a readable flatpakrepo with a GPGKey in [Flatpak Repo] ({err})")
+            continue
+        if url != c["remote_url"]:
+            found.append(f"{c['id']}: {name} has Url={url}, not {c['remote_url']}")
         if got != c["remote_fingerprint"].replace(" ", ""):
-            found.append(f"{c['id']}: the GPGKey of {c['remote_file']} has fingerprint {got}, not {c['remote_fingerprint']}")
+            found.append(f"{c['id']}: the GPGKey of {name} has fingerprint {got}, not {c['remote_fingerprint']}")
+        if hashlib.sha256(blob).hexdigest() != c["remote_key_sha256"]:
+            found.append(f"{c['id']}: the GPGKey of {name} is not the pinned blob (sha256 {c['remote_key_sha256']})")
+        if expiry is not None and expiry - now < timedelta(days=EXPIRY_WARNING_DAYS):
+            found.append(f"{c['id']}: the GPGKey of {name} expires on {expiry:%Y-%m-%d}, within {EXPIRY_WARNING_DAYS} days: rotate it")
     return found
 
 

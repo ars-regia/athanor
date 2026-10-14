@@ -43,14 +43,15 @@ where_off = "NetworkManager connectivity setting"
 
 [[contact]]
 id = "applications"
-purpose = "Update the system Flatpak applications, daily, not on a metered connection (doc_software.md, decision 6 and SW15)"
-destination = "dl.flathub.org, the Flathub system remote (GPG key pinned in the remote file)"
-where_off = "Software once it ships; until then systemctl disable --now athanor-flatpak-update.timer"
+purpose = "Update the installed applications (Flatpak), once a day, not on a metered connection (doc_software.md, decision 6)"
+destination = "dl.flathub.org, the Flathub repository, checked against Flathub's signing key"
+where_off = "no switch in Settings yet; an administrator can turn the daily application update off from a terminal"
 unit = "athanor-flatpak-update.timer"
 must_enable = true
 remote_file = "usr/share/flatpak/remotes.d/flathub.flatpakrepo"
 remote_url = "https://dl.flathub.org/repo/"
 remote_fingerprint = "6E5C05D979C76DAF93C081354184DD4D907A7CAE"
+remote_key_sha256 = "8bdc20abc4e19c0796460beb5bfe0e7aa4138716999e19c6f2dbdd78cc41aeaa"
 
 # Timers the image enables that never leave the computer.
 

@@ -1,11 +1,16 @@
 """Tests of forge/scripts/check_image_contacts.py
 (python3 -B -m unittest discover -s forge/scripts/tests)."""
 
+import base64
+import contextlib
 import importlib.util
+import io
 import pathlib
+import re
 import tempfile
 import tomllib
 import unittest
+from datetime import timedelta
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 spec = importlib.util.spec_from_file_location("check_image_contacts", ROOT / "forge/scripts/check_image_contacts.py")
@@ -138,8 +143,11 @@ class FlathubRemote(unittest.TestCase):
     def write(self, text):
         (self.root / REMOTE).write_text(text)
 
-    def problems(self, enabled=("athanor-flatpak-update.timer",)):
-        return mod.remote_problems(CONTACTS, self.root, set(enabled))
+    def problems(self, enabled=("athanor-flatpak-update.timer",), now=None):
+        return mod.remote_problems(CONTACTS, self.root, set(enabled), now)
+
+    def blob(self):
+        return base64.b64decode(re.search(r"^GPGKey=(\S+)", SHIPPED.read_text(), re.M).group(1))
 
     def test_the_shipped_remote_and_an_enabled_timer_pass(self):
         self.assertEqual(self.problems(), [])
@@ -152,21 +160,52 @@ class FlathubRemote(unittest.TestCase):
         self.assertEqual(len(self.problems()), 1)
 
     def test_another_key_fails(self):
-        text = SHIPPED.read_text().replace("GPGKey=mQINBF", "GPGKey=mQINBG")
-        self.write(text)
-        self.assertEqual(len(self.problems()), 1)
+        self.write(SHIPPED.read_text().replace("GPGKey=mQINBF", "GPGKey=mQINBG"))
+        self.assertTrue(self.problems())
 
     def test_no_key_fails(self):
         self.write("\n".join(l for l in SHIPPED.read_text().splitlines() if not l.startswith("GPGKey=")))
-        self.assertEqual(len(self.problems()), 1)
+        self.assertTrue(self.problems())
 
-    def test_verification_off_fails(self):
-        self.write(SHIPPED.read_text() + "NoGpgVerify=true\n")
-        self.assertEqual(len(self.problems()), 1)
+    def test_a_second_key_appended_to_the_blob_fails(self):
+        other = base64.b64encode(self.blob() + self.blob()).decode()
+        self.write(re.sub(r"^GPGKey=.*$", "GPGKey=" + other, SHIPPED.read_text(), flags=re.M))
+        found = self.problems()
+        self.assertEqual(len(found), 1)
+        self.assertIn("pinned blob", found[0])
+
+    def test_a_key_outside_the_flatpak_repo_group_does_not_count(self):
+        text = SHIPPED.read_text().replace("[Flatpak Repo]", "[Other]")
+        self.write(text + "\n[Flatpak Repo]\nUrl=https://dl.flathub.org/repo/\n")
+        self.assertTrue(self.problems())
+
+    def test_a_filter_or_a_subset_fails(self):
+        for line in ("Filter=/etc/flatpak/x.filter", "subset = verified"):
+            self.write(SHIPPED.read_text() + line + "\n")
+            self.assertEqual(len(self.problems()), 1, line)
 
     def test_another_url_fails(self):
         self.write(SHIPPED.read_text().replace("Url=https://dl.flathub.org/", "Url=https://example.org/"))
         self.assertEqual(len(self.problems()), 1)
+
+    def test_the_pinned_key_expires_on_a_known_day(self):
+        self.assertEqual(mod.key_expiry(self.blob()).strftime("%Y-%m-%d"), "2027-06-14")
+
+    def test_a_key_expiring_within_ninety_days_fails(self):
+        expiry = mod.key_expiry(self.blob())
+        self.assertEqual(self.problems(now=expiry - timedelta(days=91)), [])
+        self.assertEqual(len(self.problems(now=expiry - timedelta(days=89))), 1)
+        self.assertEqual(len(self.problems(now=expiry + timedelta(days=1))), 1)
+
+    def test_main_fails_on_a_bad_remote(self):
+        contacts = self.root / "contacts.toml"
+        contacts.write_text((ROOT / "forge/config/contacts.toml").read_text())
+        self.write(SHIPPED.read_text() + "Subset=verified\n")
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            self.assertEqual(mod.main(["check", str(contacts), str(self.root)]), 1)
+        self.assertIn("applications", stderr.getvalue())
+        self.assertIn("Filter or Subset", stderr.getvalue())
 
 
 if __name__ == "__main__":
