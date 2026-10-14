@@ -143,7 +143,10 @@ done
 
 # /dev/dri is absent on a machine with no DRM driver at all, where GTK renders in
 # software: its bind is optional, like the udev database, the avatar and font cache
-# directories.
+# directories, and pam_lastlog2's database directory.
+# /var/lib/lastlog is read-only: the greeter orders its account list by the latest greetd
+# sign-in recorded there, and opens the database read-only without waiting on a lock
+# (doc_lock_and_prompts.md, LP19, D22). Without it the list follows the name order.
 # /sys is bound by the device-tree directories libdrm, udev and the GPU drivers read,
 # the set Flatpak exposes, rather than whole: a recursive read-only bind of /sys would
 # also carry efivarfs, securityfs, tracefs, bpffs, pstore and the cgroup tree, and
@@ -171,6 +174,7 @@ exec bwrap \
     --tmpfs /tmp \
     --ro-bind-try /var/cache/fontconfig /var/cache/fontconfig \
     --ro-bind-try /var/lib/AccountsService/icons /var/lib/AccountsService/icons \
+    --ro-bind-try /var/lib/lastlog /var/lib/lastlog \
     --symlink ../run /var/run \
     --ro-bind "$dbus_dir/system" /run/dbus/system_bus_socket \
     --ro-bind "$GREETD_SOCK" "$GREETD_SOCK" \
