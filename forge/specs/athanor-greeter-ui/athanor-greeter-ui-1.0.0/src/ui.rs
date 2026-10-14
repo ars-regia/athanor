@@ -21,7 +21,9 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use tokio::sync::oneshot;
 
-use crate::auth::{authenticate_interactive, discover_target_user, Conversation, Prompt, UserInfo};
+use crate::auth::{
+    authenticate_interactive, discover_target_user, Conversation, Outcome, Prompt, UserInfo,
+};
 use crate::i18n::{tr, tr_with};
 
 /// The seal's state is asked again every hour: the badge ages ("checked within 14 days"
@@ -230,15 +232,31 @@ fn label_field<W: IsA<gtk4::Editable> + IsA<gtk4::Accessible>>(field: &W, label:
     }
 }
 
-/// Adds `text` as a line under what `label` already shows.
-fn add_line(label: &Label, text: &str) {
-    let shown = if label.is_visible() {
-        format!("{}\n{text}", label.label())
-    } else {
-        text.to_string()
-    };
-    label.set_label(&shown);
-    label.set_visible(true);
+/// What the card says of one sign-in besides its fields, kept free of GTK so that its rules
+/// are tested: PAM's PAM_TEXT_INFO and PAM_ERROR_MSG lines, apart from the greeter's own
+/// line, and whether a question of PAM's is open, which is when it can be cancelled.
+#[derive(Debug, Default, PartialEq)]
+struct Notices {
+    info: Vec<String>,
+    error: Vec<String>,
+    cancellable: bool,
+}
+
+impl Notices {
+    /// A new sign-in starts: nothing of the previous one is left on the card.
+    fn start(&mut self) {
+        *self = Notices::default();
+    }
+
+    /// PAM put a question: it can be cancelled until it is answered.
+    fn ask(&mut self) {
+        self.cancellable = true;
+    }
+
+    /// The question is answered, cancelled or gone with the sign-in; PAM's lines stay.
+    fn close_question(&mut self) {
+        self.cancellable = false;
+    }
 }
 
 /// The card's fields as one sign-in sees them: PAM's messages are shown on it, and its
@@ -255,10 +273,10 @@ struct SignInForm {
     status: Label,
     /// The greeter's line for a sign-in that failed.
     error: Label,
-    /// PAM's PAM_TEXT_INFO and PAM_ERROR_MSG lines, apart from the greeter's own: they stay
-    /// through PAM's questions and after a failure, until the next sign-in starts.
+    /// PAM's PAM_TEXT_INFO and PAM_ERROR_MSG lines, drawn from `notices`.
     pam_info: Label,
     pam_error: Label,
+    notices: Rc<RefCell<Notices>>,
     /// Where the answer to PAM's open question goes, while one is open.
     pending: Rc<RefCell<Option<oneshot::Sender<zeroize::Zeroizing<String>>>>>,
 }
@@ -269,21 +287,35 @@ impl SignInForm {
         self.password.set_sensitive(false);
         self.answer.set_sensitive(false);
         self.submit.set_sensitive(false);
-        self.cancel.set_visible(false);
+        self.notices.borrow_mut().close_question();
+        self.show_notices();
     }
 
     /// A new sign-in starts: the messages of the previous one go.
-    fn clear_messages(&self) {
-        for label in [&self.error, &self.pam_info, &self.pam_error] {
-            label.set_label("");
-            label.set_visible(false);
+    fn start(&self) {
+        self.error.set_visible(false);
+        self.notices.borrow_mut().start();
+        self.show_notices();
+    }
+
+    /// Draws `notices` on the card.
+    fn show_notices(&self) {
+        let notices = self.notices.borrow();
+        for (label, lines) in [
+            (&self.pam_info, &notices.info),
+            (&self.pam_error, &notices.error),
+        ] {
+            label.set_label(&lines.join("\n"));
+            label.set_visible(!lines.is_empty());
         }
+        self.cancel.set_visible(notices.cancellable);
     }
 
     /// The card as it was before the sign-in: the password field, ready.
     fn reset(&self) {
         self.pending.take();
-        self.cancel.set_visible(false);
+        self.notices.borrow_mut().close_question();
+        self.show_notices();
         self.question.set_visible(false);
         self.answer.set_text("");
         self.answer.set_visible(false);
@@ -303,11 +335,13 @@ impl Conversation for SignInForm {
     }
 
     fn info(&self, text: &str) {
-        add_line(&self.pam_info, text);
+        self.notices.borrow_mut().info.push(text.to_string());
+        self.show_notices();
     }
 
     fn error(&self, text: &str) {
-        add_line(&self.pam_error, text);
+        self.notices.borrow_mut().error.push(text.to_string());
+        self.show_notices();
     }
 
     fn ask(
@@ -334,7 +368,8 @@ impl Conversation for SignInForm {
         };
         field.set_sensitive(true);
         self.submit.set_sensitive(true);
-        self.cancel.set_visible(true);
+        self.notices.borrow_mut().ask();
+        self.show_notices();
         field.grab_focus();
         async move { answer.await.ok() }
     }
@@ -511,13 +546,14 @@ pub fn build_ui(app: &Application) {
         error: error.clone(),
         pam_info: pam_info.clone(),
         pam_error: pam_error.clone(),
+        notices: Rc::new(RefCell::new(Notices::default())),
         pending: Rc::new(RefCell::new(None)),
     };
     {
         let form = form.clone();
         cancel.connect_clicked(move |_| {
             // Dropping the sender leaves the question unanswered: the conversation tells
-            // greetd to cancel the session, and the failure puts the card back as it was.
+            // greetd to cancel the session, and the card goes back as it was.
             if form.pending.take().is_some() {
                 form.wait();
             }
@@ -560,13 +596,19 @@ pub fn build_ui(app: &Application) {
             // Cleared before anything is shown: clearing a field hides the messages.
             form.password.set_text("");
             form.wait();
-            form.clear_messages();
+            form.start();
             form.status.set_label(&tr("Signing in…"));
             form.status.set_visible(true);
             let (app, form) = (app.clone(), form.clone());
             glib::MainContext::default().spawn_local(async move {
                 match authenticate_interactive(&secret, &form).await {
-                    Ok(()) => app.quit(),
+                    Ok(Outcome::SignedIn) => app.quit(),
+                    // The person's own choice, not a failure: said plainly, not alerted.
+                    Ok(Outcome::Cancelled) => {
+                        form.reset();
+                        form.status.set_label(&tr("Sign-in was cancelled."));
+                        form.status.set_visible(true);
+                    }
                     Err(reason) => {
                         form.reset();
                         form.status.set_visible(false);
@@ -671,4 +713,31 @@ pub fn build_ui(app: &Application) {
     // The first key pressed is the first character of the password.
     password.grab_focus();
     window.present();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Notices;
+
+    #[test]
+    fn pams_lines_stay_through_the_sign_in_and_go_when_the_next_one_starts() {
+        let mut notices = Notices::default();
+        notices.info.push("Last login: yesterday".to_string());
+        notices
+            .error
+            .push("There were 2 failed login attempts".to_string());
+        assert!(!notices.cancellable, "no question, nothing to cancel");
+        notices.ask();
+        assert!(notices.cancellable, "an open question can be cancelled");
+        notices.close_question();
+        assert!(!notices.cancellable, "an answered question cannot");
+        assert_eq!(notices.info, ["Last login: yesterday"], "PAM's lines stay");
+        assert_eq!(notices.error, ["There were 2 failed login attempts"]);
+        notices.start();
+        assert_eq!(
+            notices,
+            Notices::default(),
+            "the next sign-in starts with none of the previous one's lines"
+        );
+    }
 }

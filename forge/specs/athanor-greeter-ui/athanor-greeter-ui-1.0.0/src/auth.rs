@@ -253,18 +253,28 @@ fn post_no_answer(stream: &mut UnixStream) -> Result<Response, String> {
     send_request(stream, &Request::PostAuthMessageResponse { response: None })
 }
 
-/// Puts `prompt` to the person and answers greetd with their reply. With no reply the
-/// session is cancelled, so that greetd is never left waiting on this connection.
+/// How a sign-in that met no error ended.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Outcome {
+    /// greetd started the session.
+    SignedIn,
+    /// The person left PAM's question unanswered, and the session was cancelled.
+    Cancelled,
+}
+
+/// Puts `prompt` to the person and answers greetd with their reply: greetd's next message,
+/// or None when the person gave no reply. Then the session is cancelled, so that greetd is
+/// never left waiting on this connection.
 async fn ask_and_answer<C: Conversation>(
     stream: &mut UnixStream,
     person: &C,
     prompt: Prompt,
-) -> Result<Response, String> {
+) -> Result<Option<Response>, String> {
     match person.ask(prompt).await {
-        Some(reply) => post_answer(stream, &reply),
+        Some(reply) => post_answer(stream, &reply).map(Some),
         None => {
             send_request(stream, &Request::CancelSession)?;
-            Err(tr("Sign-in was cancelled."))
+            Ok(None)
         }
     }
 }
@@ -278,7 +288,7 @@ async fn converse<C: Conversation>(
     password: &str,
     session_cmd: String,
     person: &C,
-) -> Result<(), String> {
+) -> Result<Outcome, String> {
     let mut resp = send_request(
         stream,
         &Request::CreateSession {
@@ -307,10 +317,18 @@ async fn converse<C: Conversation>(
                         person.progress(&tr("Checking your credentials…"));
                         post_answer(stream, password)?
                     }
-                    None => ask_and_answer(stream, person, Prompt::Secret(auth_message)).await?,
+                    None => {
+                        match ask_and_answer(stream, person, Prompt::Secret(auth_message)).await? {
+                            Some(resp) => resp,
+                            None => return Ok(Outcome::Cancelled),
+                        }
+                    }
                 },
                 AuthMessageType::Visible => {
-                    ask_and_answer(stream, person, Prompt::Visible(auth_message)).await?
+                    match ask_and_answer(stream, person, Prompt::Visible(auth_message)).await? {
+                        Some(resp) => resp,
+                        None => return Ok(Outcome::Cancelled),
+                    }
                 }
             },
             Response::Success => {
@@ -324,7 +342,7 @@ async fn converse<C: Conversation>(
                     ],
                 };
                 return match send_request(stream, &req)? {
-                    Response::Success => Ok(()),
+                    Response::Success => Ok(Outcome::SignedIn),
                     Response::Error { description, .. } => Err(description),
                     Response::AuthMessage { .. } => {
                         Err(tr("The login service gave an unexpected answer."))
@@ -340,7 +358,7 @@ async fn converse<C: Conversation>(
 pub async fn authenticate_interactive<C: Conversation>(
     password: &str,
     person: &C,
-) -> Result<(), String> {
+) -> Result<Outcome, String> {
     let path = std::env::var("GREETD_SOCK").unwrap_or_else(|_| "/run/greetd.sock".to_string());
     if !std::path::Path::new(&path).exists() {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -557,7 +575,7 @@ mod tests {
     fn login(
         script: Vec<Response>,
         person: &Person,
-    ) -> (Result<(), String>, Vec<serde_json::Value>) {
+    ) -> (Result<Outcome, String>, Vec<serde_json::Value>) {
         let (mut greeter, greetd) = fake_greetd(script);
         let result = tokio::runtime::Builder::new_current_thread()
             .build()
@@ -603,7 +621,7 @@ mod tests {
             ],
             &person,
         );
-        assert_eq!(result, Ok(()));
+        assert_eq!(result, Ok(Outcome::SignedIn));
         assert_eq!(requests[0]["type"], "create_session");
         assert_eq!(requests[0]["username"], "tester");
         assert_eq!(
@@ -641,7 +659,7 @@ mod tests {
             ],
             &person,
         );
-        assert_eq!(result, Ok(()));
+        assert_eq!(result, Ok(Outcome::SignedIn));
         assert_eq!(
             answers(&requests),
             [Some(PASSWORD.to_string()), Some("493021".to_string())]
@@ -666,7 +684,7 @@ mod tests {
             ],
             &person,
         );
-        assert_eq!(result, Ok(()));
+        assert_eq!(result, Ok(Outcome::SignedIn));
         assert_eq!(
             answers(&requests),
             [Some("493021".to_string()), Some(PASSWORD.to_string())],
@@ -694,7 +712,7 @@ mod tests {
             ],
             &person,
         );
-        assert_eq!(result, Ok(()));
+        assert_eq!(result, Ok(Outcome::SignedIn));
         assert_eq!(
             answers(&requests),
             [
@@ -764,7 +782,7 @@ mod tests {
             ],
             &person,
         );
-        assert!(result.is_err());
+        assert_eq!(result, Ok(Outcome::Cancelled), "a cancel is not an error");
         assert_eq!(requests[1]["type"], "cancel_session");
         assert_eq!(password_sent(&requests), 0);
     }

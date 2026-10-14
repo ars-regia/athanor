@@ -13,23 +13,19 @@ msgstr ""
 msgid "The sign-in service sent a reply of {size} bytes, too large to read"
 msgstr "Il servizio di accesso ha inviato una risposta di {size} byte, troppo grande da leggere"
 
-#: src/auth.rs:267
-msgid "Sign-in was cancelled."
-msgstr "Accesso annullato."
-
-#: src/auth.rs:307
+#: src/auth.rs:317
 msgid "Checking your credentials…"
 msgstr "Verifica delle credenziali…"
 
-#: src/auth.rs:330
+#: src/auth.rs:348
 msgid "The login service gave an unexpected answer."
 msgstr "Il servizio di accesso ha dato una risposta inattesa."
 
-#: src/auth.rs:337
+#: src/auth.rs:355
 msgid "Too many authentication steps."
 msgstr "Troppi passaggi di autenticazione."
 
-#: src/auth.rs:347
+#: src/auth.rs:365
 msgid "The login service cannot be reached."
 msgstr "Il servizio di accesso non è raggiungibile."
 
@@ -113,53 +109,57 @@ msgstr "Nessun controllo degli aggiornamenti è riuscito negli ultimi 14 giorni"
 msgid "Signed with a key of the policy in force"
 msgstr "Firmata con una chiave della policy in vigore"
 
-#: src/ui.rs:179
+#: src/ui.rs:181
 #, rust-format
 msgid "Keyboard layout: {layout}"
 msgstr "Disposizione della tastiera: {layout}"
 
-#: src/ui.rs:403
+#: src/ui.rs:438
 msgid "%A %-d %B"
 msgstr "%A %-d %B"
 
-#: src/ui.rs:421
+#: src/ui.rs:456
 msgid "Password"
 msgstr "Password"
 
-#: src/ui.rs:426
+#: src/ui.rs:461
 #, rust-format
 msgid "Password for {name}"
 msgstr "Password di {name}"
 
-#: src/ui.rs:442
+#: src/ui.rs:477
 msgid "Sign in"
 msgstr "Accedi"
 
-#: src/ui.rs:445 src/ui.rs:449
+#: src/ui.rs:480 src/ui.rs:484
 msgid "Cancel"
 msgstr "Annulla"
 
-#: src/ui.rs:564
+#: src/ui.rs:600
 msgid "Signing in…"
 msgstr "Accesso in corso…"
 
-#: src/ui.rs:574
+#: src/ui.rs:609
+msgid "Sign-in was cancelled."
+msgstr "Accesso annullato."
+
+#: src/ui.rs:616
 #, rust-format
 msgid "Sign-in failed: {reason}"
 msgstr "Accesso non riuscito: {reason}"
 
-#: src/ui.rs:624 src/ui.rs:625
+#: src/ui.rs:666 src/ui.rs:667
 msgid "High contrast"
 msgstr "Contrasto elevato"
 
-#: src/ui.rs:645
+#: src/ui.rs:687
 msgid "Suspend"
 msgstr "Sospendi"
 
-#: src/ui.rs:651
+#: src/ui.rs:693
 msgid "Restart"
 msgstr "Riavvia"
 
-#: src/ui.rs:657
+#: src/ui.rs:699
 msgid "Shut down"
 msgstr "Spegni"
