@@ -40,6 +40,17 @@ class FakeSystem:
         self.write(
             "sys/kernel/security/lsm", "lockdown,capability,yama,selinux,bpf,landlock,ipe,ima,evm"
         )
+        self.write(
+            "proc/swaps",
+            "Filename\tType\tSize\tUsed\tPriority\n/dev/zram0  partition\t8388604\t0\t100\n",
+        )
+        self.write("sys/module/zswap/parameters/enabled", "N\n")
+        self.write("sys/kernel/mm/transparent_hugepage/enabled", "always [madvise] never\n")
+        self.write(
+            "sys/kernel/mm/transparent_hugepage/defrag",
+            "always defer [defer+madvise] madvise never\n",
+        )
+        self.write("sys/kernel/mm/lru_gen/enabled", "0x0007\n")
 
     def write(self, relative: str, text: str) -> None:
         path = self.root / relative
@@ -148,7 +159,52 @@ class Checker(unittest.TestCase):
         self.system.write("proc/cmdline", f"BOOT_IMAGE=/vmlinuz root=UUID=1 {arguments} rw\n")
         code, text = run(self.system.root, PROFILES)
         self.assertEqual(code, 0, text)
-        self.assertIn("base: 119/119 settings hold", text)
+        self.assertIn("base: 126/126 settings hold", text)
+
+    def test_memory_drift_is_reported(self) -> None:
+        memory = {
+            "swap": "zram",
+            "zswap": "N",
+            "thp": "madvise",
+            "thp_defrag": "defer+madvise",
+            "mglru": "on",
+        }
+        profile(self.profiles, "base", {"runtime": memory})
+        code, text = run(self.system.root, self.profiles)
+        self.assertEqual(code, 0, text)
+        self.system.write(
+            "proc/swaps",
+            "Filename\tType\tSize\tUsed\tPriority\n"
+            "/dev/zram0  partition\t8388604\t0\t100\n/dev/dm-1  partition\t4194300\t0\t-2\n",
+        )
+        self.system.write("sys/module/zswap/parameters/enabled", "Y\n")
+        self.system.write("sys/kernel/mm/transparent_hugepage/enabled", "[always] madvise never\n")
+        self.system.write(
+            "sys/kernel/mm/transparent_hugepage/defrag", "always defer defer+madvise [madvise] never\n"
+        )
+        self.system.write("sys/kernel/mm/lru_gen/enabled", "0x0000\n")
+        code, text = run(self.system.root, self.profiles)
+        self.assertEqual(code, 1, text)
+        self.assertIn("DRIFT runtime.swap: expected 'zram', found ['/dev/zram0', '/dev/dm-1']", text)
+        self.assertIn("DRIFT runtime.zswap: expected 'N', found 'Y'", text)
+        self.assertIn("DRIFT runtime.thp: expected 'madvise', found 'always'", text)
+        self.assertIn("DRIFT runtime.thp_defrag: expected 'defer+madvise', found 'madvise'", text)
+        self.assertIn("DRIFT runtime.mglru: expected 'on', found 'off'", text)
+        self.assertIn("base: 0/5 settings hold", text)
+
+    def test_no_swap_is_drift(self) -> None:
+        self.system.write("proc/swaps", "Filename\tType\tSize\tUsed\tPriority\n")
+        profile(self.profiles, "base", {"runtime": {"swap": "zram"}})
+        code, text = run(self.system.root, self.profiles)
+        self.assertEqual(code, 1, text)
+        self.assertIn("DRIFT runtime.swap: expected 'zram', found []", text)
+
+    def test_unparsable_mglru_mask_is_drift(self) -> None:
+        self.system.write("sys/kernel/mm/lru_gen/enabled", "y\n")
+        profile(self.profiles, "base", {"runtime": {"mglru": "on"}})
+        code, text = run(self.system.root, self.profiles)
+        self.assertEqual(code, 1, text)
+        self.assertIn("DRIFT runtime.mglru: expected 'on', found \"unreadable: invalid literal", text)
 
     def test_cmdline_drift_is_reported(self) -> None:
         self.system.write("proc/cmdline", "BOOT_IMAGE=/vmlinuz lockdown=none vsyscall=none rw\n")

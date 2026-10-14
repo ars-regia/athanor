@@ -542,7 +542,7 @@ path = "system/athanor-bus-api"
 kind = "crate"
 area = "security"
 status = "missing"
-purpose = "Shared D-Bus types and the polkit subject check every system service uses"
+purpose = "The polkit subject check every system service uses"
 
 [[component]]
 path = "system/athanor-compositor-client"

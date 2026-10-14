@@ -27,6 +27,7 @@ pub fn live_qalc() -> Vec<u32> {
 
 /// Waits up to `bound` for a killed child to be gone: the kill and the reap take longer on a loaded runner.
 /// The bound of the cancellation wait stays under `DEADLINE`, or the deadline would hide a missing abort.
+#[allow(dead_code)] // each test binary compiles this module; engine.rs does not wait
 pub async fn wait_until(bound: Duration, mut done: impl FnMut() -> bool) -> bool {
     let end = Instant::now() + bound;
     while Instant::now() < end {
