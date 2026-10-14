@@ -155,7 +155,7 @@ class InternalSnapshot(unittest.TestCase):
             (bin_dir / "sync").write_text("#!/bin/bash\n" + sync)
             (bin_dir / "sync").chmod(0o755)
             env["PATH"] = f"{bin_dir}:{env['PATH']}"
-        return subprocess.run([LIBEXEC], env=env, capture_output=True, text=True, check=check)
+        return subprocess.run([LIBEXEC], env=env, capture_output=True, text=True, check=check, timeout=30)
 
     def written(self):
         return [l for l in self.rules.read_text().splitlines() if not l.startswith("#")]
