@@ -8,7 +8,7 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 guard_no_ci
-STAGES=(install migrate download apply refuse older goback rotate recover podman report)
+STAGES=(install migrate download apply refuse older goback rotate recover podman probes report)
 start=${1:-install}
 [[ " ${STAGES[*]} " == *" $start "* ]] || die "unknown stage '$start': one of ${STAGES[*]}"
 
@@ -171,6 +171,13 @@ stage_recover() { # item 10
 stage_podman() { # item 15
   guest_ssh 'podman pull docker.io/library/busybox:latest && podman save -o /var/tmp/acc-busybox.tar busybox && podman rmi busybox && podman load -i /var/tmp/acc-busybox.tar && printf "FROM busybox\nRUN true\n" | podman build -t acc-build - && rm /var/tmp/acc-busybox.tar'
   pass "15: podman pull from another registry, podman load and podman build work with the policy in force"
+}
+
+stage_probes() { # the runtime audit probes (issue #312), against expectations.toml
+  local facts=$ACC_STATE/probes-facts.json
+  guest_ssh python3 - collect < "$ACC_HERE/probes.py" > "$facts"
+  # The verdict names each check; a failure stops the run, and the facts stay in $ACC_STATE.
+  python3 -B "$ACC_HERE/probes.py" check "$facts" "$ACC_HERE/expectations.toml" "$ROOT/forge/config/contacts.toml" || die "FAIL  runtime probes (facts: $facts)"
 }
 
 stage_report() {
