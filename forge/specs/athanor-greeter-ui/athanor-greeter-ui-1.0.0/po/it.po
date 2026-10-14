@@ -13,145 +13,153 @@ msgstr ""
 msgid "The sign-in service sent a reply of {size} bytes, too large to read"
 msgstr "Il servizio di accesso ha inviato una risposta di {size} byte, troppo grande da leggere"
 
-#: src/auth.rs:215
-msgid "The login service cannot be reached."
-msgstr "Il servizio di accesso non è raggiungibile."
-
-#: src/auth.rs:248
+#: src/auth.rs:317
 msgid "Checking your credentials…"
 msgstr "Verifica delle credenziali…"
 
-#: src/auth.rs:279
+#: src/auth.rs:348
 msgid "The login service gave an unexpected answer."
 msgstr "Il servizio di accesso ha dato una risposta inattesa."
 
-#: src/auth.rs:285
+#: src/auth.rs:355
 msgid "Too many authentication steps."
 msgstr "Troppi passaggi di autenticazione."
 
-#: src/seal.rs:121
+#: src/auth.rs:365
+msgid "The login service cannot be reached."
+msgstr "Il servizio di accesso non è raggiungibile."
+
+#: src/seal.rs:127
 msgid "System image verified"
 msgstr "Immagine di sistema verificata"
 
-#: src/seal.rs:122
+#: src/seal.rs:128
 msgid "Not verified yet"
 msgstr "Non ancora verificata"
 
-#: src/seal.rs:123
+#: src/seal.rs:129
 msgid "Update refused"
 msgstr "Aggiornamento rifiutato"
 
-#: src/seal.rs:131
+#: src/seal.rs:137
 msgid "No trust state yet: the first check has not run"
 msgstr "Nessuno stato di fiducia: il primo controllo non è ancora avvenuto"
 
-#: src/seal.rs:133
+#: src/seal.rs:139
 msgid "The trust state file is not owned by the system and was ignored"
 msgstr "Il file dello stato di fiducia non appartiene al sistema ed è stato ignorato"
 
-#: src/seal.rs:135
+#: src/seal.rs:141
 msgid "The trust state file could not be read"
 msgstr "Impossibile leggere il file dello stato di fiducia"
 
-#: src/seal.rs:136
+#: src/seal.rs:142
 msgid "The update service did not answer"
 msgstr "Il servizio di aggiornamento non ha risposto"
 
-#: src/seal.rs:139
+#: src/seal.rs:145
 msgid "The last update was refused by the policy"
 msgstr "L'ultimo aggiornamento è stato rifiutato dalla policy"
 
-#: src/seal.rs:143
+#: src/seal.rs:149
 msgid "Not verified: installed from media"
 msgstr "Non verificata: installata da supporto"
 
-#: src/seal.rs:144
+#: src/seal.rs:150
 msgid "Not verified: no signature"
 msgstr "Non verificata: nessuna firma"
 
-#: src/seal.rs:145
+#: src/seal.rs:151
 msgid "Not verified: its key is not in the policy"
 msgstr "Non verificata: la sua chiave non è nella policy"
 
-#: src/seal.rs:146
+#: src/seal.rs:152
 msgid "Not verified: fetched under a permissive policy"
 msgstr "Non verificata: scaricata con una policy permissiva"
 
-#: src/seal.rs:148
+#: src/seal.rs:154
 msgid "Not verified: the image is outside the policy's scope"
 msgstr "Non verificata: l'immagine è fuori dall'ambito della policy"
 
-#: src/seal.rs:150
+#: src/seal.rs:156
 msgid "Not verified: the system was changed on this machine"
 msgstr "Non verificata: il sistema è stato modificato su questa macchina"
 
-#: src/seal.rs:152
+#: src/seal.rs:158
 msgid "Not verified: waiting for the stable channel to be published"
 msgstr "Non verificata: in attesa della pubblicazione del canale stabile"
 
-#: src/seal.rs:155
+#: src/seal.rs:161
 msgid "Not verified: this machine does not verify its updates"
 msgstr "Non verificata: questa macchina non verifica i suoi aggiornamenti"
 
-#: src/seal.rs:158
+#: src/seal.rs:164
 msgid "Signed, but pinned to one build: it receives no updates"
 msgstr "Firmata, ma ferma su una sola build: non riceve aggiornamenti"
 
-#: src/seal.rs:162
+#: src/seal.rs:168
 msgid "This version is older than one this machine has run"
 msgstr "Questa versione è più vecchia di una già avviata su questa macchina"
 
-#: src/seal.rs:168
+#: src/seal.rs:174
 msgid "No check for updates has succeeded for 14 days"
 msgstr "Nessun controllo degli aggiornamenti è riuscito negli ultimi 14 giorni"
 
-#: src/seal.rs:170
+#: src/seal.rs:176
 msgid "Signed with a key of the policy in force"
 msgstr "Firmata con una chiave della policy in vigore"
 
-#: src/ui.rs:175
+#: src/ui.rs:181
 #, rust-format
 msgid "Keyboard layout: {layout}"
 msgstr "Disposizione della tastiera: {layout}"
 
-#: src/ui.rs:280
+#: src/ui.rs:438
 msgid "%A %-d %B"
 msgstr "%A %-d %B"
 
-#: src/ui.rs:298
+#: src/ui.rs:456
 msgid "Password"
 msgstr "Password"
 
-#: src/ui.rs:303
+#: src/ui.rs:461
 #, rust-format
 msgid "Password for {name}"
 msgstr "Password di {name}"
 
-#: src/ui.rs:314
+#: src/ui.rs:477
 msgid "Sign in"
 msgstr "Accedi"
 
-#: src/ui.rs:358
+#: src/ui.rs:480 src/ui.rs:484
+msgid "Cancel"
+msgstr "Annulla"
+
+#: src/ui.rs:600
 msgid "Signing in…"
 msgstr "Accesso in corso…"
 
-#: src/ui.rs:379
+#: src/ui.rs:609
+msgid "Sign-in was cancelled."
+msgstr "Accesso annullato."
+
+#: src/ui.rs:616
 #, rust-format
 msgid "Sign-in failed: {reason}"
 msgstr "Accesso non riuscito: {reason}"
 
-#: src/ui.rs:423 src/ui.rs:424
+#: src/ui.rs:666 src/ui.rs:667
 msgid "High contrast"
 msgstr "Contrasto elevato"
 
-#: src/ui.rs:444
+#: src/ui.rs:687
 msgid "Suspend"
 msgstr "Sospendi"
 
-#: src/ui.rs:450
+#: src/ui.rs:693
 msgid "Restart"
 msgstr "Riavvia"
 
-#: src/ui.rs:456
+#: src/ui.rs:699
 msgid "Shut down"
 msgstr "Spegni"

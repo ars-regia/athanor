@@ -5,7 +5,7 @@
 //! Every interactive widget carries an accessible name and every string goes through
 //! gettext (SH13).
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use athanor_trust_state::{ReadError, State};
@@ -14,12 +14,16 @@ use athanor_style::calmo::{self, Variant};
 use gtk4::accessible::Property;
 use gtk4::prelude::*;
 use gtk4::{
-    gdk, Align, Application, ApplicationWindow, Box, Button, Image, Label, Orientation,
+    gdk, Align, Application, ApplicationWindow, Box, Button, Entry, Image, Label, Orientation,
     PasswordEntry, ToggleButton,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
-use crate::auth::{authenticate_interactive, discover_target_user, UserInfo};
+use tokio::sync::oneshot;
+
+use crate::auth::{
+    authenticate_interactive, discover_target_user, Conversation, Outcome, Prompt, UserInfo,
+};
 use crate::i18n::{tr, tr_with};
 
 /// The seal's state is asked again every hour: the badge ages ("checked within 14 days"
@@ -219,6 +223,158 @@ fn power_chip(id: &str, icon: &str, label: &str, which: Power) -> Button {
     button
 }
 
+/// Names a text field for a screen reader: the entry and the text widget inside it, which
+/// is the node a screen reader lands on.
+fn label_field<W: IsA<gtk4::Editable> + IsA<gtk4::Accessible>>(field: &W, label: &str) {
+    field.update_property(&[Property::Label(label)]);
+    if let Some(delegate) = field.delegate() {
+        delegate.update_property(&[Property::Label(label)]);
+    }
+}
+
+/// What the card says of one sign-in besides its fields, kept free of GTK so that its rules
+/// are tested: PAM's PAM_TEXT_INFO and PAM_ERROR_MSG lines, apart from the greeter's own
+/// line, and whether a question of PAM's is open, which is when it can be cancelled.
+#[derive(Debug, Default, PartialEq)]
+struct Notices {
+    info: Vec<String>,
+    error: Vec<String>,
+    cancellable: bool,
+}
+
+impl Notices {
+    /// A new sign-in starts: nothing of the previous one is left on the card.
+    fn start(&mut self) {
+        *self = Notices::default();
+    }
+
+    /// PAM put a question: it can be cancelled until it is answered.
+    fn ask(&mut self) {
+        self.cancellable = true;
+    }
+
+    /// The question is answered, cancelled or gone with the sign-in; PAM's lines stay.
+    fn close_question(&mut self) {
+        self.cancellable = false;
+    }
+}
+
+/// The card's fields as one sign-in sees them: PAM's messages are shown on it, and its
+/// further questions are put on it, each answered from the field its type calls for.
+#[derive(Clone)]
+struct SignInForm {
+    password: PasswordEntry,
+    password_label: String,
+    answer: Entry,
+    question: Label,
+    submit: Button,
+    cancel: Button,
+    /// The greeter's own line of progress.
+    status: Label,
+    /// The greeter's line for a sign-in that failed.
+    error: Label,
+    /// PAM's PAM_TEXT_INFO and PAM_ERROR_MSG lines, drawn from `notices`.
+    pam_info: Label,
+    pam_error: Label,
+    notices: Rc<RefCell<Notices>>,
+    /// Where the answer to PAM's open question goes, while one is open.
+    pending: Rc<RefCell<Option<oneshot::Sender<zeroize::Zeroizing<String>>>>>,
+}
+
+impl SignInForm {
+    /// Nothing can be typed while greetd has the turn.
+    fn wait(&self) {
+        self.password.set_sensitive(false);
+        self.answer.set_sensitive(false);
+        self.submit.set_sensitive(false);
+        self.notices.borrow_mut().close_question();
+        self.show_notices();
+    }
+
+    /// A new sign-in starts: the messages of the previous one go.
+    fn start(&self) {
+        self.error.set_visible(false);
+        self.notices.borrow_mut().start();
+        self.show_notices();
+    }
+
+    /// Draws `notices` on the card.
+    fn show_notices(&self) {
+        let notices = self.notices.borrow();
+        for (label, lines) in [
+            (&self.pam_info, &notices.info),
+            (&self.pam_error, &notices.error),
+        ] {
+            label.set_label(&lines.join("\n"));
+            label.set_visible(!lines.is_empty());
+        }
+        self.cancel.set_visible(notices.cancellable);
+    }
+
+    /// The card as it was before the sign-in: the password field, ready.
+    fn reset(&self) {
+        self.pending.take();
+        self.notices.borrow_mut().close_question();
+        self.show_notices();
+        self.question.set_visible(false);
+        self.answer.set_text("");
+        self.answer.set_visible(false);
+        self.password.set_text("");
+        label_field(&self.password, &self.password_label);
+        self.password.set_visible(true);
+        self.password.set_sensitive(true);
+        self.submit.set_sensitive(true);
+        self.password.grab_focus();
+    }
+}
+
+impl Conversation for SignInForm {
+    fn progress(&self, text: &str) {
+        self.status.set_label(text);
+        self.status.set_visible(true);
+    }
+
+    fn info(&self, text: &str) {
+        self.notices.borrow_mut().info.push(text.to_string());
+        self.show_notices();
+    }
+
+    fn error(&self, text: &str) {
+        self.notices.borrow_mut().error.push(text.to_string());
+        self.show_notices();
+    }
+
+    fn ask(
+        &self,
+        prompt: Prompt,
+    ) -> impl std::future::Future<Output = Option<zeroize::Zeroizing<String>>> {
+        let (reply, answer) = oneshot::channel();
+        self.pending.replace(Some(reply));
+        self.status.set_visible(false);
+        let (text, secret) = match prompt {
+            Prompt::Secret(text) => (text, true),
+            Prompt::Visible(text) => (text, false),
+        };
+        self.question.set_label(&text);
+        self.question.set_visible(true);
+        self.password.set_visible(secret);
+        self.answer.set_visible(!secret);
+        let field: &gtk4::Widget = if secret {
+            label_field(&self.password, &text);
+            self.password.upcast_ref()
+        } else {
+            label_field(&self.answer, &text);
+            self.answer.upcast_ref()
+        };
+        field.set_sensitive(true);
+        self.submit.set_sensitive(true);
+        self.notices.borrow_mut().ask();
+        self.show_notices();
+        field.grab_focus();
+        async move { answer.await.ok() }
+    }
+}
+
 pub fn build_ui(app: &Application) {
     // The direction comes from the language of the catalog in use, not from a process
     // locale, and has to be set before the first widget exists.
@@ -304,23 +460,44 @@ pub fn build_ui(app: &Application) {
         .build();
     let password_label = tr_with("Password for {name}", "name", &user.real_name);
     named(&password, "greeter-password", &password_label);
-    if let Some(delegate) = password.delegate() {
-        // The text widget inside the entry is the node a screen reader lands on.
-        delegate.update_property(&[Property::Label(&password_label)]);
-    }
+    label_field(&password, &password_label);
+    // The field for PAM's questions whose answer is shown as it is typed (a one-time code):
+    // hidden until PAM asks one.
+    let answer = Entry::builder()
+        .hexpand(true)
+        .css_classes(["greeter-field"])
+        .visible(false)
+        .build();
+    answer.set_widget_name("greeter-answer");
     let submit = Button::builder()
         .icon_name("go-next-symbolic")
         .css_classes(["greeter-submit"])
         .valign(Align::Center)
         .build();
     named(&submit, "greeter-submit", &tr("Sign in"));
+    // Ends an open question of PAM's, and with it the sign-in: shown only while one is open.
+    let cancel = Button::builder()
+        .label(tr("Cancel"))
+        .valign(Align::Center)
+        .visible(false)
+        .build();
+    named(&cancel, "greeter-cancel", &tr("Cancel"));
     let field_row = Box::builder()
         .orientation(Orientation::Horizontal)
         .spacing(6)
         .build();
     field_row.append(&password);
+    field_row.append(&answer);
     field_row.append(&submit);
+    field_row.append(&cancel);
 
+    // PAM's question after the password (a new password, a one-time code), in its words.
+    let question = Label::builder()
+        .css_classes(["greeter-status"])
+        .margin_bottom(8)
+        .wrap(true)
+        .visible(false)
+        .build();
     let status = Label::builder()
         .css_classes(["greeter-status"])
         .margin_top(12)
@@ -335,55 +512,112 @@ pub fn build_ui(app: &Application) {
         .build();
     // A failed sign-in is announced, not only painted.
     error.set_accessible_role(gtk4::AccessibleRole::Alert);
+    let pam_info = Label::builder()
+        .css_classes(["greeter-status"])
+        .margin_bottom(8)
+        .wrap(true)
+        .visible(false)
+        .build();
+    let pam_error = Label::builder()
+        .css_classes(["greeter-error"])
+        .margin_bottom(8)
+        .wrap(true)
+        .visible(false)
+        .build();
+    pam_error.set_accessible_role(gtk4::AccessibleRole::Alert);
 
-    {
+    // Typing hides the greeter's own lines; PAM's stay until the next sign-in starts.
+    for field in [password.upcast_ref::<gtk4::Editable>(), answer.upcast_ref()] {
         let (status, error) = (status.clone(), error.clone());
-        password.connect_changed(move |_| {
+        field.connect_changed(move |_| {
             status.set_visible(false);
             error.set_visible(false);
         });
     }
 
+    let form = SignInForm {
+        password: password.clone(),
+        password_label,
+        answer: answer.clone(),
+        question: question.clone(),
+        submit: submit.clone(),
+        cancel: cancel.clone(),
+        status: status.clone(),
+        error: error.clone(),
+        pam_info: pam_info.clone(),
+        pam_error: pam_error.clone(),
+        notices: Rc::new(RefCell::new(Notices::default())),
+        pending: Rc::new(RefCell::new(None)),
+    };
+    {
+        let form = form.clone();
+        cancel.connect_clicked(move |_| {
+            // Dropping the sender leaves the question unanswered: the conversation tells
+            // greetd to cancel the session, and the card goes back as it was.
+            if form.pending.take().is_some() {
+                form.wait();
+            }
+        });
+    }
+    // Escape cancels an open question, as the button does; otherwise it goes on its way.
+    let escape = gtk4::EventControllerKey::new();
+    escape.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    {
+        let cancel = cancel.clone();
+        escape.connect_key_pressed(move |_, key, _, _| {
+            if key == gtk4::gdk::Key::Escape && cancel.is_visible() {
+                cancel.emit_clicked();
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+    }
+    window.add_controller(escape);
     let sign_in = Rc::new({
-        let (app, password, submit, status, error) = (
-            app.clone(),
-            password.clone(),
-            submit.clone(),
-            status.clone(),
-            error.clone(),
-        );
+        let app = app.clone();
         move || {
-            let secret = zeroize::Zeroizing::new(password.text().to_string());
-            password.set_sensitive(false);
-            submit.set_sensitive(false);
-            error.set_visible(false);
-            status.set_label(&tr("Signing in…"));
-            status.set_visible(true);
-            let (app, password, submit, status, error) = (
-                app.clone(),
-                password.clone(),
-                submit.clone(),
-                status.clone(),
-                error.clone(),
-            );
+            // A question of PAM's is open: this is its answer, not a new sign-in.
+            if let Some(reply) = form.pending.take() {
+                let field: &gtk4::Editable = if WidgetExt::is_visible(&form.answer) {
+                    form.answer.upcast_ref()
+                } else {
+                    form.password.upcast_ref()
+                };
+                let text = zeroize::Zeroizing::new(field.text().to_string());
+                field.set_text("");
+                form.wait();
+                if reply.send(text).is_err() {
+                    tracing::warn!("the sign-in ended before its question was answered");
+                }
+                return;
+            }
+            let secret = zeroize::Zeroizing::new(form.password.text().to_string());
+            // Cleared before anything is shown: clearing a field hides the messages.
+            form.password.set_text("");
+            form.wait();
+            form.start();
+            form.status.set_label(&tr("Signing in…"));
+            form.status.set_visible(true);
+            let (app, form) = (app.clone(), form.clone());
             glib::MainContext::default().spawn_local(async move {
-                // PAM's own prompts (a fingerprint reader asking for a touch) are shown as
-                // they arrive.
-                let progress = status.clone();
-                match authenticate_interactive(&secret, &move |message: &str| {
-                    progress.set_label(message)
-                })
-                .await
-                {
-                    Ok(()) => app.quit(),
+                match authenticate_interactive(&secret, &form).await {
+                    Ok(Outcome::SignedIn) => app.quit(),
+                    // The person's own choice, not a failure: said plainly, not alerted.
+                    Ok(Outcome::Cancelled) => {
+                        form.reset();
+                        form.status.set_label(&tr("Sign-in was cancelled."));
+                        form.status.set_visible(true);
+                    }
                     Err(reason) => {
-                        status.set_visible(false);
-                        error.set_label(&tr_with("Sign-in failed: {reason}", "reason", &reason));
-                        error.set_visible(true);
-                        password.set_text("");
-                        password.set_sensitive(true);
-                        submit.set_sensitive(true);
-                        password.grab_focus();
+                        form.reset();
+                        form.status.set_visible(false);
+                        form.error.set_label(&tr_with(
+                            "Sign-in failed: {reason}",
+                            "reason",
+                            &reason,
+                        ));
+                        form.error.set_visible(true);
                     }
                 }
             });
@@ -392,6 +626,10 @@ pub fn build_ui(app: &Application) {
     {
         let sign_in = sign_in.clone();
         password.connect_activate(move |_| sign_in());
+    }
+    {
+        let sign_in = sign_in.clone();
+        answer.connect_activate(move |_| sign_in());
     }
     submit.connect_clicked(move |_| sign_in());
 
@@ -402,6 +640,9 @@ pub fn build_ui(app: &Application) {
         .build();
     card.append(&avatar(&user));
     card.append(&name);
+    card.append(&pam_info);
+    card.append(&pam_error);
+    card.append(&question);
     card.append(&field_row);
     card.append(&status);
     card.append(&error);
@@ -472,4 +713,31 @@ pub fn build_ui(app: &Application) {
     // The first key pressed is the first character of the password.
     password.grab_focus();
     window.present();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Notices;
+
+    #[test]
+    fn pams_lines_stay_through_the_sign_in_and_go_when_the_next_one_starts() {
+        let mut notices = Notices::default();
+        notices.info.push("Last login: yesterday".to_string());
+        notices
+            .error
+            .push("There were 2 failed login attempts".to_string());
+        assert!(!notices.cancellable, "no question, nothing to cancel");
+        notices.ask();
+        assert!(notices.cancellable, "an open question can be cancelled");
+        notices.close_question();
+        assert!(!notices.cancellable, "an answered question cannot");
+        assert_eq!(notices.info, ["Last login: yesterday"], "PAM's lines stay");
+        assert_eq!(notices.error, ["There were 2 failed login attempts"]);
+        notices.start();
+        assert_eq!(
+            notices,
+            Notices::default(),
+            "the next sign-in starts with none of the previous one's lines"
+        );
+    }
 }
