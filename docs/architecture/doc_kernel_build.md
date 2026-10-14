@@ -1,6 +1,6 @@
 # Athanor OS: Specifica del Kernel (costruzione, pin, manutenzione automatica)
 
-Stato: **approvata il 2026-09-03** (serie `stable` 7.x, `-O2` dal 2026-09-05, debuginfo
+Stato: **approvata il 2026-09-03**; **revisione 2 del 2026-10-14 in attesa di approvazione del maintainer** (sezione 10: i job di `nvidia-kmod.yml` e della firma dei moduli, già in vigore dopo #388 e ADR-0110) (serie `stable` 7.x, `-O2` dal 2026-09-05, debuginfo
 come OCI separato con retention di due versioni; dal 2026-09-04 Rust acceso,
 ThinLTO e `RANDSTRUCT` spenti, sezione 13). Sostituisce il
 README "Testo Sacro" di `forge/specs/azoth/` e lo script
@@ -304,7 +304,7 @@ patchano i Makefile per forzarlo.
   ai branch `main` e `iso-v0`. Un secret non è più sicuro per essere nato sul
   runner: conta dove si usa, e chi ne ha la custodia.
 - **Chiave Secure Boot**: firma con sbsign il vmlinuz di ogni nuovo kernel, nel
-  job `sign` di nvidia-kmod (`sign-kernel.sh vmlinuz`, D43); l'immagine system lo
+  job `nvidia-kmod-sign` dell'Orchestrator (`sign-kernel.sh vmlinuz`, D43); l'immagine system lo
   prende già firmato da `azoth-boot`. Nessuna fase assembla una UKI (ADR-0037): avvio shim, GRUB,
   vmlinuz firmato. L'immagine non crea alcun keyslot TPM: l'unico percorso è
   `athanor-uki-enroll`, lanciato da un amministratore, che aggiunge un keyslot TPM
@@ -520,7 +520,8 @@ la PR va in merge da sola; con prep rosso, o con il check rosso, resta aperta
 con il log del gate fallito. È l'unico momento in cui serve una persona, e sa
 già dove guardare. Al merge il push fa partire
 Kernel Build, che pubblica il kernel e avvia l'Orchestrator: questo chiama
-`nvidia-kmod.yml` per firma, boot e pubblicazione dei moduli e poi costruisce le
+`nvidia-kmod.yml` per boot e pubblicazione dei moduli (firmati prima dal job
+`nvidia-kmod-sign`) e poi costruisce le
 immagini (`doc_build_ordering.md`, O1). Il cambio di release Fedora della rootfs
 (43→44) e il cambio di `KERNEL_CHANNEL` restano PR umane.
 
@@ -634,11 +635,11 @@ NVIDIA e non dei flag: clang non estende kCFI alle chiamate virtuali né i
 return thunk ai thunk del C++ di DisplayPort in `nvidia-modeset.o`, e il RM
 ha code di funzione irraggiungibili. `sign-kernel.sh modules`, nell'immagine del signer,
 firma con `scripts/sign-file` del kernel-devel e l'hash di `CONFIG_MODULE_SIG_HASH`, e
-rilegge firmatario e chiave con `modinfo`. Il workflow `nvidia-kmod.yml`: `artifacts` (`system/kernel-artifacts.sh`
-risolve il kernel dei pin e i tag dei moduli; se non mancano, il run finisce lì),
-`build` (matrice dei due rami, runner GitHub, `azoth-devel` per digest),
-`sign` (runner GitHub, environment `signing-kernel`: vede solo i `.ko` e la chiave,
-montata in sola lettura per la durata del comando), `boot` (la catena della
+rilegge firmatario e chiave con `modinfo`. L'Orchestrator (`athanor-forge-orchestrator.yml`) risolve il kernel dei pin e i tag dei moduli
+(`system/kernel-artifacts.sh`; se non mancano, il ciclo finisce lì), costruisce i due rami
+(`call-nvidia-kmod-prepare.yml`: matrice, runner GitHub, `azoth-devel` per digest) e li firma nel
+job `nvidia-kmod-sign` (runner GitHub, environment `signing-kernel`: vede solo i `.ko` e la chiave,
+montata in sola lettura per la durata del comando). Il workflow `nvidia-kmod.yml` ha due job: `boot` (la catena della
 firma end-to-end in QEMU, gate 4 della sezione 7), `publish` (un'immagine
 `scratch` per ramo con `lib/modules/<kver>/extra/nvidia/*.ko`, il layout che
 l'immagine di sistema copia e che syft cataloga, più `version` e `kver`;
