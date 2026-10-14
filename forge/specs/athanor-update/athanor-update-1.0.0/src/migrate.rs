@@ -3,7 +3,8 @@
 //! the ISO and for a machine installed before the policy existed.
 use crate::check::Context;
 use crate::sigobj;
-use crate::tools::{Failure, Tools};
+use crate::store::MoveRecord;
+use crate::tools::{Failure, Status, Tools};
 
 /// The tag machines follow (decision D1).
 pub const CHANNEL: &str = "stable";
@@ -71,20 +72,7 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>) -> Result<Outcome, Failure> {
         return Ok(Outcome::Waiting("channel-absent"));
     };
     ctx.store.set_channel_absent(false).map_err(storage)?;
-    let mut record = ctx.store.move_record(&candidate.digest);
-    if let Some(staged) = record.staged.take() {
-        // The staging of an earlier run is gone (restart-pending returned above). Deployed and
-        // left, it is the rollback deployment now: it did not boot for good, and greenboot or
-        // the person went back. Not there, a power cycle discarded it before it was finalized,
-        // which says nothing about the digest (spike U1, section 4). Only the deployment's name
-        // tells the two apart once an earlier deployment of the digest is the rollback.
-        let left = status.rollback.as_ref().is_some_and(|rollback| rollback.digest == candidate.digest && rollback.deployment.as_deref() == Some(staged.as_str()));
-        if left {
-            record.failed_boots += 1;
-            tracing::warn!(digest = %candidate.digest, failed_boots = record.failed_boots, "the switched deployment did not boot");
-        }
-        ctx.store.set_move_record(&record).map_err(storage)?;
-    }
+    let mut record = record_of(ctx, &status, &candidate.digest)?;
     // Nothing releases a held digest, and the migration never stages one: the user went back
     // from it, or greenboot rolled it back. Nor does it stage again a digest whose deployments
     // failed to boot ATTEMPTS times; that is the migration's own record, not the held file,
@@ -125,6 +113,29 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>) -> Result<Outcome, Failure> {
     // No stamp yet: the machine has migrated once it boots the signed reference, so a
     // deployment that does not boot leaves it to switch again, up to ATTEMPTS failed boots.
     Ok(Outcome::Switched)
+}
+
+/// The record of the moves to `digest`, with the staging of an earlier run accounted for. The
+/// caller has seen that it is no longer staged, so it booted, failed or vanished.
+///
+/// # Errors
+/// The record cannot be written.
+pub(crate) fn record_of<T: Tools>(ctx: &Context<'_, T>, status: &Status, digest: &str) -> Result<MoveRecord, Failure> {
+    let mut record = ctx.store.move_record(digest);
+    if let Some(staged) = record.staged.take() {
+        // Deployed and left, the staging is the rollback deployment now: it did not boot for
+        // good, and greenboot or the person went back. Not there, a power cycle discarded it
+        // before it was finalized, which says nothing about the digest (spike U1, section 4).
+        // Only the deployment's name tells the two apart once an earlier deployment of the
+        // digest is the rollback.
+        let left = status.rollback.as_ref().is_some_and(|rollback| rollback.digest == digest && rollback.deployment.as_deref() == Some(staged.as_str()));
+        if left {
+            record.failed_boots += 1;
+            tracing::warn!(%digest, failed_boots = record.failed_boots, "the staged deployment did not boot");
+        }
+        ctx.store.set_move_record(&record).map_err(|_| Failure { code: athanor_trust_state::ErrorCode::Storage, host: None })?;
+    }
+    Ok(record)
 }
 
 #[cfg(test)]
@@ -304,8 +315,8 @@ mod tests {
     fn a_stamped_machine_does_not_ask_bootc() {
         let machine = Machine::new("migrate-finished", &["real/k1.pub"]);
         machine.store.set_migrated().expect("stamp");
-        let mut tools = Fake::booted(deployed(SIGNED, 1000));
-        tools.status_fails = true;
+        let tools = Fake::booted(deployed(SIGNED, 1000));
+        tools.status_fails.set(true);
         assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Done));
     }
 

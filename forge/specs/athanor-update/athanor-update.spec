@@ -75,12 +75,14 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
 
 %changelog
 * Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-11
-- A machine on a channel whose candidate is the build it runs under another digest, as a
-  fresh install from the ISO is (UD2), downloads that signed copy under the policy and
-  unlocks it to boot at the next shutdown, with no prompt and no relock. The state reads
+- A machine on a channel that runs a digest nothing verifies, as a fresh install from the
+  ISO does (UD2), and whose candidate is the same build (build time and version) under
+  another digest, downloads that signed copy under the policy and unlocks exactly that
+  digest to boot at the next shutdown, with no prompt and no relock. The state reads
   `media` and `will-apply-at-next-shutdown`, no longer `no-signature` and
-  `older-than-booted`. A run tag or digest, an older build and a refused download are
-  unchanged.
+  `older-than-booted`. A failed unlock reads `none` with its error code and is retried; a
+  copy that fails to boot twice reads `held`. A verified boot, a run tag or digest, an
+  unlabelled or older build and a refused download are unchanged.
 
 * Fri Oct 09 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
 - The migration to a project's new owner is removed (ADR-0103 D4, issue #349): `moved-from`,

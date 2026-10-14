@@ -3,7 +3,7 @@
 use crate::policy::{InForce, PolicyPaths};
 use crate::sigobj;
 use crate::store::Store;
-use crate::tools::{Deployed, Failure, Status, Tools};
+use crate::tools::{Candidate, Deployed, Failure, Status, Tools};
 use athanor_trust_state::{Deployment, ErrorCode, Reason, State, UpdateState, SCHEMA};
 use std::path::PathBuf;
 
@@ -48,9 +48,9 @@ fn reason<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &Status) -> 
         return Reason::PolicyNotInForce;
     }
     let repository = sigobj::repository_of(&booted.image);
-    let Some(key_paths) = policy.scopes.get(repository) else {
+    if !policy.scopes.contains_key(repository) {
         return Reason::ReferenceOutOfScope;
-    };
+    }
     if !booted.enforcing {
         let pending = status.staged.as_ref().is_some_and(|staged| staged.enforcing);
         // The migration ran and nothing enforcing is staged: the reference was switched
@@ -62,33 +62,53 @@ fn reason<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &Status) -> 
         // The installer's reference, or an install that has not migrated yet (UT4).
         return if ctx.store.channel_absent() { Reason::ChannelAbsent } else { Reason::Media };
     }
-    let keys: Vec<_> = key_paths.iter().filter_map(|path| std::fs::read_to_string(path).ok()).filter_map(|pem| sigobj::load_key(&pem)).collect();
-    let claims = ctx.store.signature_dir(&booted.digest).and_then(|dir| sigobj::claims(&dir, &keys).ok()).unwrap_or_default();
-    let covers = |claim: &&sigobj::Claim| claim.manifest_digest == booted.digest && claim.repository == repository;
-    match claims.iter().filter(covers).map(|claim| claim.backed).max() {
+    match booted_claim(ctx, policy, booted) {
         // Verified, but a run-number tag or a digest names one build: nothing newer is ever
         // published under it (doc_update_delivery.md, UD51).
         Some(true) if !follows_a_channel(&booted.image[repository.len()..]) => Reason::PinnedBuild,
         Some(true) => Reason::Signature,
         Some(false) => Reason::KeyNotInPolicy,
-        // The install from media, staged to boot the signed digest of its own build (UT4).
-        None if status.staged.as_ref().is_some_and(|staged| staged.enforcing && signed_copy(booted, staged)) => Reason::Media,
+        // The install from media, staged to boot the signed copy of its own build (UT5).
+        None if status.staged.as_ref().is_some_and(|staged| staged.enforcing && staged.image == booted.image && same_build(booted, &staged.digest, &staged.version, staged.build_time)) => Reason::Media,
         None => Reason::NoSignature,
     }
 }
 
-/// True when `other` is the build `booted` runs under another digest. bootc-image-builder
-/// installs from an OCI layout, which gives the build a digest no signature covers; the
-/// channel's digest of the same build is its signed copy (UT4).
-fn signed_copy(booted: &Deployed, other: &Deployed) -> bool {
-    other.digest != booted.digest && other.build_time == booted.build_time
+/// What the stored signature objects say of the booted digest: `Some(true)` when a key the
+/// policy in force names for its repository signed it, `Some(false)` when only other keys
+/// did, `None` when nothing covers it.
+fn booted_claim<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, booted: &Deployed) -> Option<bool> {
+    let repository = sigobj::repository_of(&booted.image);
+    let key_paths = policy.scopes.get(repository)?;
+    let keys: Vec<_> = key_paths.iter().filter_map(|path| std::fs::read_to_string(path).ok()).filter_map(|pem| sigobj::load_key(&pem)).collect();
+    let claims = ctx.store.signature_dir(&booted.digest).and_then(|dir| sigobj::claims(&dir, &keys).ok()).unwrap_or_default();
+    let covers = |claim: &&sigobj::Claim| claim.manifest_digest == booted.digest && claim.repository == repository;
+    claims.iter().filter(covers).map(|claim| claim.backed).max()
+}
+
+/// True when `digest` is the build `booted` runs under another digest: the same build time
+/// and the same version, both known. A build time of 0 is an absent label, which says
+/// nothing about the build.
+fn same_build(booted: &Deployed, digest: &str, version: &str, build_time: i64) -> bool {
+    digest != booted.digest && booted.build_time > 0 && build_time == booted.build_time && version == booted.version
+}
+
+/// True when `candidate` is the signed copy of the booted build (UT5). bootc-image-builder
+/// installs from an OCI layout, which gives the build a digest no signature covers, and the
+/// kickstart already writes the signed channel reference (UD2). Only such a boot moves: the
+/// machine follows a channel under the policy, and nothing verifies the digest it runs.
+fn signed_copy<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, booted: &Deployed, candidate: &Candidate) -> bool {
+    enforced(policy, booted)
+        && follows_a_channel(&booted.image[sigobj::repository_of(&booted.image).len()..])
+        && same_build(booted, &candidate.digest, &candidate.version, candidate.build_time)
+        && booted_claim(ctx, policy, booted) != Some(true)
 }
 
 /// The update state that needs no network: what is staged, and what was refused.
 fn local_update(ctx: &Context<'_, impl Tools>, status: &Status) -> UpdateState {
     match &status.staged {
         Some(staged) if !staged.download_only => UpdateState::WillApplyAtNextShutdown,
-        Some(staged) if offerable(ctx.store, &status.booted, &staged.digest, staged.build_time) == UpdateState::Available => UpdateState::Downloaded,
+        Some(staged) if offerable(ctx.store, &status.booted, &staged.digest, staged.build_time, false) == UpdateState::Available => UpdateState::Downloaded,
         _ if ctx.store.refused().is_some() => UpdateState::Refused,
         _ => UpdateState::None,
     }
@@ -105,15 +125,13 @@ fn follows_a_channel(suffix: &str) -> bool {
 
 /// `Available` when `digest` may be offered; otherwise why not. The order of the build
 /// times is the only ordering: bootc has none, and a moved tag is a downgrade the policy
-/// cannot see. The same build under another digest is offered only on a channel: it is the
-/// signed copy of an install from media, which the check unlocks once downloaded.
-fn offerable(store: &Store, booted: &Deployed, digest: &str, build_time: i64) -> UpdateState {
-    let on_a_channel = follows_a_channel(&booted.image[sigobj::repository_of(&booted.image).len()..]);
+/// cannot see. The one exception is `signed_copy`, the booted build itself.
+fn offerable(store: &Store, booted: &Deployed, digest: &str, build_time: i64, signed_copy: bool) -> UpdateState {
     if digest == booted.digest {
         UpdateState::None
     } else if store.held().as_deref() == Some(digest) {
         UpdateState::Held
-    } else if build_time < booted.build_time || (build_time == booted.build_time && !on_a_channel) {
+    } else if build_time <= booted.build_time && !signed_copy {
         UpdateState::OlderThanBooted
     } else {
         UpdateState::Available
@@ -126,6 +144,22 @@ fn offerable(store: &Store, booted: &Deployed, digest: &str, build_time: i64) ->
 /// deployment with local changes is never upgraded: bootc refuses it.
 fn enforced(policy: &InForce, booted: &Deployed) -> bool {
     booted.enforcing && !booted.local_changes && policy.scopes.contains_key(sigobj::repository_of(&booted.image))
+}
+
+/// A download the policy refused: the digest is recorded, and the refusal survives a reboot.
+fn refused(store: &Store, digest: &str, failure: Failure) -> (UpdateState, Option<Failure>) {
+    let stored = store.set_refused(Some(digest));
+    (UpdateState::Refused, Some(stored.map_or(Failure { code: ErrorCode::Storage, host: None }, |()| failure)))
+}
+
+/// After a download that passed the policy: the refusal is cleared and the signature object
+/// of `staged` is stored, unless it already is.
+fn downloaded(ctx: &Context<'_, impl Tools>, status: &Status, staged: &str) -> Option<Failure> {
+    let failure = ctx.store.set_refused(None).err().map(|_| Failure { code: ErrorCode::Storage, host: None });
+    match ctx.store.signature_dir(staged).filter(|dir| !dir.join("manifest.json").exists()) {
+        Some(dir) => failure.or(ctx.tools.fetch_signature(sigobj::repository_of(&status.booted.image), staged, &dir).err()),
+        None => failure,
+    }
 }
 
 fn online_update<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &mut Status) -> (UpdateState, Option<Failure>) {
@@ -144,9 +178,13 @@ fn online_update<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &mut 
         tracing::error!(%err, "cannot record the successful check");
         return (local, Some(Failure { code: ErrorCode::Storage, host: None }));
     }
-    let verdict = offerable(ctx.store, &status.booted, &candidate.digest, candidate.build_time);
+    let copy = signed_copy(ctx, policy, &status.booted, &candidate);
+    let verdict = offerable(ctx.store, &status.booted, &candidate.digest, candidate.build_time, copy);
     if verdict != UpdateState::Available {
         return (if verdict == UpdateState::None { local } else { verdict }, None);
+    }
+    if copy {
+        return move_to_signed_copy(ctx, status, &candidate);
     }
     if status.staged.as_ref().is_some_and(|staged| staged.download_only && staged.digest == candidate.digest) {
         return (UpdateState::Downloaded, None);
@@ -155,10 +193,7 @@ fn online_update<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &mut 
         return (UpdateState::Available, None);
     }
     match ctx.tools.download() {
-        Err(failure) if failure.code == ErrorCode::Policy => {
-            let stored = ctx.store.set_refused(Some(&candidate.digest));
-            (UpdateState::Refused, Some(stored.map_or(Failure { code: ErrorCode::Storage, host: None }, |()| failure)))
-        }
+        Err(failure) if failure.code == ErrorCode::Policy => refused(ctx.store, &candidate.digest, failure),
         Err(failure) => (UpdateState::Available, Some(failure)),
         Ok(()) => {
             *status = match ctx.tools.status() {
@@ -171,28 +206,60 @@ fn online_update<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &mut 
                 return (UpdateState::Available, None);
             }
             let staged = status.staged.as_ref().map(|staged| staged.digest.clone()).unwrap_or_default();
-            let mut failure = ctx.store.set_refused(None).err().map(|_| Failure { code: ErrorCode::Storage, host: None });
-            if let Some(dir) = ctx.store.signature_dir(&staged).filter(|dir| !dir.join("manifest.json").exists()) {
-                failure = failure.or(ctx.tools.fetch_signature(sigobj::repository_of(&status.booted.image), &staged, &dir).err());
-            }
-            (UpdateState::Downloaded, failure)
+            (UpdateState::Downloaded, downloaded(ctx, status, &staged))
         }
     }
 }
 
-/// The signed copy of the booted build, downloaded under the policy, is not an update: it is
-/// unlocked to boot at the next shutdown with no prompt and no relock, as the migration stages
-/// the same build (UT4). A failed unlock leaves it downloaded, and the next check tries again.
-fn unlock_signed_copy<T: Tools>(ctx: &Context<'_, T>, status: &mut Status, update: UpdateState, failure: Option<Failure>) -> (UpdateState, Option<Failure>) {
-    if update != UpdateState::Downloaded || !status.staged.as_ref().is_some_and(|staged| signed_copy(&status.booted, staged)) {
-        return (update, failure);
+/// The signed copy of the booted build is not an update (UT5). Downloaded under the policy,
+/// it is unlocked to boot at the next shutdown with no prompt and no relock, as the migration
+/// stages the same build. Only the copy the registry named in this check is unlocked, and a
+/// copy whose deployments failed to boot `ATTEMPTS` times is not staged again, as in the
+/// migration. Until it is unlocked the state never reads `downloaded`: it is no update to
+/// announce or to apply.
+fn move_to_signed_copy<T: Tools>(ctx: &Context<'_, T>, status: &mut Status, candidate: &Candidate) -> (UpdateState, Option<Failure>) {
+    let mut record = match crate::migrate::record_of(ctx, status, &candidate.digest) {
+        Ok(record) => record,
+        Err(failure) => return (UpdateState::None, Some(failure)),
+    };
+    if record.failed_boots >= crate::migrate::ATTEMPTS {
+        return (UpdateState::Held, None);
     }
-    if let Err(unlock) = ctx.tools.apply_downloaded() {
-        return (update, failure.or(Some(unlock)));
+    let staged_copy = |status: &Status| status.staged.as_ref().is_some_and(|staged| staged.download_only && staged.enforcing && staged.image == status.booted.image && staged.digest == candidate.digest);
+    let mut failure = None;
+    if !staged_copy(status) {
+        if ctx.tools.metered() {
+            return (UpdateState::Available, None);
+        }
+        match ctx.tools.download() {
+            Err(refusal) if refusal.code == ErrorCode::Policy => return refused(ctx.store, &candidate.digest, refusal),
+            Err(failure) => return (UpdateState::Available, Some(failure)),
+            Ok(()) => {}
+        }
+        *status = match ctx.tools.status() {
+            Ok(status) => status,
+            Err(failure) => return (UpdateState::Available, Some(failure)),
+        };
+        if !staged_copy(status) {
+            tracing::error!(digest = %candidate.digest, "the download did not stage the signed copy the registry named");
+            return (UpdateState::Available, None);
+        }
+        failure = downloaded(ctx, status, &candidate.digest);
     }
-    match ctx.tools.status() {
-        Ok(after) => *status = after,
-        Err(read) => return (update, failure.or(Some(read))),
+    let unlocked = ctx.tools.apply_downloaded().and_then(|()| ctx.tools.status());
+    *status = match unlocked {
+        Ok(status) => status,
+        Err(unlock) => {
+            if let Some(earlier) = failure {
+                tracing::warn!(code = ?earlier.code, "the signature object of the signed copy was not stored; the next check fetches it");
+            }
+            tracing::error!(code = ?unlock.code, digest = %candidate.digest, "the signed copy was not unlocked; the next check tries again");
+            return (UpdateState::None, Some(unlock));
+        }
+    };
+    record.staged = status.staged.as_ref().and_then(|staged| staged.deployment.clone());
+    if ctx.store.set_move_record(&record).is_err() {
+        failure = failure.or(Some(Failure { code: ErrorCode::Storage, host: None }));
     }
     (local_update(ctx, status), failure)
 }
@@ -217,8 +284,7 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failu
     } else if offline {
         (local_update(ctx, &status), None)
     } else {
-        let (update, failure) = online_update(ctx, &policy, &mut status);
-        unlock_signed_copy(ctx, &mut status, update, failure)
+        online_update(ctx, &policy, &mut status)
     };
     if !offline && enforced(&policy, &status.booted) {
         // A machine whose signature object was never stored, or was lost, heals here. A
@@ -250,8 +316,7 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failu
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::tools::Candidate;
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::path::Path;
 
     pub(crate) const REPO: &str = "localhost:5000/spike/athanor-system";
@@ -274,10 +339,14 @@ pub(crate) mod tests {
         pub download: Result<Deployed, Failure>,
         pub metered: bool,
         pub relock: Result<(), Failure>,
+        /// How `apply_downloaded` fails, if it does.
+        pub unlock: Result<(), Failure>,
+        /// `bootc status` fails from the next unlock on.
+        pub broken_after_unlock: bool,
         /// Whether `switch` stages a deployment, or returns as if it had and stages nothing.
         pub stages: bool,
         /// `bootc status` fails, as it does when bootc cannot read the sysroot.
-        pub status_fails: bool,
+        pub status_fails: Cell<bool>,
         /// Whether bootc names a deployment by its ostree checksum and deploy serial.
         pub names: bool,
         pub calls: RefCell<Vec<String>>,
@@ -291,8 +360,10 @@ pub(crate) mod tests {
                 download: Err(Failure { code: ErrorCode::Internal, host: None }),
                 metered: false,
                 relock: Ok(()),
+                unlock: Ok(()),
+                broken_after_unlock: false,
                 stages: true,
-                status_fails: false,
+                status_fails: Cell::new(false),
                 names: true,
                 calls: RefCell::new(Vec::new()),
             }
@@ -315,7 +386,7 @@ pub(crate) mod tests {
 
     impl Tools for Fake {
         fn status(&self) -> Result<Status, Failure> {
-            if self.status_fails {
+            if self.status_fails.get() {
                 return Err(Failure { code: ErrorCode::Internal, host: None });
             }
             Ok(self.status.borrow().clone())
@@ -331,6 +402,8 @@ pub(crate) mod tests {
         }
         fn apply_downloaded(&self) -> Result<(), Failure> {
             self.call("apply_downloaded");
+            self.unlock.clone()?;
+            self.status_fails.set(self.broken_after_unlock);
             if let Some(staged) = self.status.borrow_mut().staged.as_mut() {
                 staged.download_only = false;
             }
@@ -465,7 +538,8 @@ pub(crate) mod tests {
     fn a_tag_moved_to_an_older_build_or_a_run_tag_on_the_same_build_is_published_and_not_downloaded() {
         let machine = Machine::new("older", &["real/k1.pub"]);
         let pinned = Deployed { image: format!("{REPO}:37691917204"), ..deployed(&digest(1), 1000) };
-        for (booted, build_time) in [(deployed(&digest(1), 1000), 500), (pinned.clone(), 500), (pinned, 1000)] {
+        let by_digest = Deployed { image: format!("{REPO}@{}", digest(1)), ..deployed(&digest(1), 1000) };
+        for (booted, build_time) in [(deployed(&digest(1), 1000), 500), (pinned.clone(), 500), (pinned, 1000), (by_digest, 1000)] {
             let tools = Fake::booted(booted).offering(&digest(2), build_time);
             assert_eq!(run(&machine.ctx(&tools, 5000), false).expect("check").update, UpdateState::OlderThanBooted);
             assert!(!tools.called("download"));
@@ -492,6 +566,123 @@ pub(crate) mod tests {
         let restarted = Fake::booted(tools.status.borrow().staged.clone().expect("staged"));
         let state = run(&machine.ctx(&restarted, 7000), true).expect("offline");
         assert_eq!((state.verified.value, state.verified.reason, state.update), (true, Reason::Signature, UpdateState::None));
+    }
+
+    fn downloads(tools: &Fake) -> usize {
+        tools.calls.borrow().iter().filter(|call| *call == "download").count()
+    }
+
+    #[test]
+    fn a_verified_boot_never_takes_another_digest_of_its_build() {
+        let machine = Machine::new("signed-copy-verified", &["real/k1.pub"]);
+        machine.store_signature(SIGNED, "real");
+        let tools = Fake::booted(deployed(SIGNED, 1000)).offering(&digest(2), 1000);
+        let state = run(&machine.ctx(&tools, 5000), false).expect("check");
+        assert_eq!((state.verified.reason, state.update), (Reason::Signature, UpdateState::OlderThanBooted));
+        assert!(!tools.called("download") && !tools.called("apply_downloaded"));
+    }
+
+    #[test]
+    fn an_unlabelled_build_or_another_version_is_not_the_same_build() {
+        let machine = Machine::new("signed-copy-unknown", &["real/k1.pub"]);
+        let unlabelled = Fake::booted(deployed(&digest(9), 0)).offering(SIGNED, 0);
+        let mut other_version = Fake::booted(deployed(&digest(9), 1000)).offering(SIGNED, 1000);
+        if let Ok(Some(candidate)) = other_version.candidate.as_mut() {
+            candidate.version = "43.20261014.1".into();
+        }
+        for (case, tools) in [("unlabelled", unlabelled), ("other version", other_version)] {
+            assert_eq!(run(&machine.ctx(&tools, 5000), false).expect("check").update, UpdateState::OlderThanBooted, "{case}");
+            assert!(!tools.called("download"), "{case}");
+        }
+    }
+
+    #[test]
+    fn only_the_copy_the_registry_named_is_unlocked() {
+        let machine = Machine::new("signed-copy-staged", &["real/k1.pub"]);
+        let locked = |deployed: Deployed| Deployed { download_only: true, ..deployed };
+        let cases = [
+            ("not enforcing", Deployed { enforcing: false, ..locked(deployed(SIGNED, 1000)) }),
+            ("another image", Deployed { image: format!("{REPO}:latest"), ..locked(deployed(SIGNED, 1000)) }),
+            ("another digest", locked(deployed(&digest(5), 1000))),
+        ];
+        for (case, staged) in cases {
+            let mut tools = Fake::booted(deployed(&digest(9), 1000)).offering(SIGNED, 1000);
+            tools.download = Err(Failure { code: ErrorCode::Network, host: None });
+            tools.status.borrow_mut().staged = Some(staged);
+            let state = run(&machine.ctx(&tools, 5000), false).expect("check");
+            assert_eq!((state.update, state.last_error), (UpdateState::Available, ErrorCode::Network), "{case}");
+            assert!(!tools.called("apply_downloaded"), "{case}");
+        }
+        // A machine that does not enforce the policy, with a copy an administrator staged.
+        let tools = Fake::booted(Deployed { enforcing: false, ..deployed(&digest(9), 1000) }).offering(SIGNED, 1000);
+        tools.status.borrow_mut().staged = Some(Deployed { enforcing: false, ..locked(deployed(SIGNED, 1000)) });
+        assert_eq!(run(&machine.ctx(&tools, 5000), false).expect("check").update, UpdateState::None);
+        assert!(tools.calls.borrow().is_empty(), "{:?}", tools.calls.borrow());
+    }
+
+    #[test]
+    fn a_staged_copy_is_not_unlocked_while_the_registry_does_not_answer() {
+        let machine = Machine::new("signed-copy-offline-registry", &["real/k1.pub"]);
+        let tools = Fake::booted(deployed(&digest(9), 1000));
+        tools.status.borrow_mut().staged = Some(Deployed { download_only: true, ..deployed(SIGNED, 1000) });
+        let state = run(&machine.ctx(&tools, 5000), false).expect("check");
+        assert_eq!((state.update, state.last_error), (UpdateState::None, ErrorCode::Network));
+        assert!(!tools.called("apply_downloaded"));
+    }
+
+    #[test]
+    fn a_failed_unlock_is_no_update_and_the_next_check_tries_again() {
+        let machine = Machine::new("signed-copy-unlock", &["real/k1.pub"]);
+        let mut tools = Fake::booted(deployed(&digest(9), 1000)).offering(SIGNED, 1000);
+        tools.unlock = Err(Failure { code: ErrorCode::Internal, host: None });
+        let state = run(&machine.ctx(&tools, 5000), false).expect("check");
+        assert_eq!((state.update, state.last_error), (UpdateState::None, ErrorCode::Internal));
+        assert_eq!(run(&machine.ctx(&tools, 5000), true).expect("offline").update, UpdateState::None, "never announced as downloaded");
+        tools.unlock = Ok(());
+        let state = run(&machine.ctx(&tools, 6000), false).expect("check");
+        assert_eq!((state.update, state.last_error), (UpdateState::WillApplyAtNextShutdown, ErrorCode::None));
+        assert_eq!(downloads(&tools), 1, "the staged copy is unlocked, not downloaded again");
+    }
+
+    #[test]
+    fn a_status_that_fails_after_the_unlock_is_no_update() {
+        let machine = Machine::new("signed-copy-status", &["real/k1.pub"]);
+        let mut tools = Fake::booted(deployed(&digest(9), 1000)).offering(SIGNED, 1000);
+        tools.broken_after_unlock = true;
+        let state = run(&machine.ctx(&tools, 5000), false).expect("check");
+        assert_eq!((state.update, state.last_error), (UpdateState::None, ErrorCode::Internal));
+    }
+
+    #[test]
+    fn a_held_copy_or_a_metered_network_downloads_nothing() {
+        let machine = Machine::new("signed-copy-held", &["real/k1.pub"]);
+        machine.store.set_held(SIGNED).expect("GoBack()");
+        let tools = Fake::booted(deployed(&digest(9), 1000)).offering(SIGNED, 1000);
+        assert_eq!(run(&machine.ctx(&tools, 5000), false).expect("check").update, UpdateState::Held);
+        assert!(!tools.called("download"));
+
+        let machine = Machine::new("signed-copy-metered", &["real/k1.pub"]);
+        let mut tools = Fake::booted(deployed(&digest(9), 1000)).offering(SIGNED, 1000);
+        tools.metered = true;
+        assert_eq!(run(&machine.ctx(&tools, 5000), false).expect("check").update, UpdateState::Available);
+        assert!(!tools.called("download"));
+    }
+
+    #[test]
+    fn a_signed_copy_that_does_not_boot_is_staged_once_more_and_then_held() {
+        let machine = Machine::new("signed-copy-no-boot", &["real/k1.pub"]);
+        let mut tools = Fake::booted(deployed(&digest(9), 1000)).offering(SIGNED, 1000);
+        tools.download = Ok(Deployed { download_only: true, deployment: Some("copy.0".into()), ..deployed(SIGNED, 1000) });
+        for now in [5000, 6000] {
+            assert_eq!(run(&machine.ctx(&tools, now), false).expect("check").update, UpdateState::WillApplyAtNextShutdown);
+            // The copy is deployed, does not boot, and the machine is back on the install.
+            let mut status = tools.status.borrow_mut();
+            status.rollback = status.staged.take();
+        }
+        for now in [7000, 8000] {
+            assert_eq!(run(&machine.ctx(&tools, now), false).expect("check").update, UpdateState::Held);
+        }
+        assert_eq!(downloads(&tools), 2);
     }
 
     #[test]
