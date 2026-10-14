@@ -41,7 +41,7 @@ pull request that builds the row adds it, under that name or a better one.
 | Application installation: verified Flathub remote, Flatpak update timer, the packaged store (D8) | `doc_software.md` SW15 to SW17 | `python3 scripts/verify.py contacts`; to add: an image check for the remote and the enabled timer |
 | Tetragon: step 1, three or four journal-only policies, SELinux CIL type (D9) | `doc_tetragon.md` TG10, TG11 | `python3 scripts/verify.py services`; to add: an image check that asserts the daemon's real state |
 | athanor-attestation and the mesh and post-quantum residue deleted (D10) | ADR-0103 D10 | `python3 scripts/verify.py shipped coverage`; to add: a check that the crate directory and the mesh and post-quantum modules of `athanor-bus-api` are absent |
-| DNS over TLS opportunistic until the captive-portal probe ships, then strict (D11) | [ADR-0079](../decisions/0079-captive-portals-under-strict-dot.md) | `python3 scripts/verify.py contacts`; to add: an image check of the resolver mode |
+| DNS over TLS opportunistic until the captive-portal probe ships, then strict (D11) | [ADR-0079](../decisions/0079-captive-portals-under-strict-dot.md) | `python3 scripts/verify.py contacts`; the image check of the resolver mode (`system/check-image-contacts.sh`) |
 | USBGuard class allowlist; confirmation for new external devices once the notice exists (D12) | `doc_disks.md` DK21 | to add: a rule test over the admitted and blocked classes |
 | Existing machines with `sshd` enabled keep it; off on new installs (D18) | [ADR-0089](../decisions/0089-defaults-that-contact-or-listen.md) items 2, 3 | to add: a test of both paths, `sshd` enabled and not enabled |
 | SearXNG feature (D19) | `doc_software.md` (section to write) | `python3 scripts/verify.py contacts`; to add: a feature test once the section exists |
@@ -72,10 +72,10 @@ release is a signed tag on `iso-v0` plus a `:stable` promotion of that build on 
 (BRN4 of `branching.md`), with the `release` approval. 1.0 is 0.9 with no blocking defect,
 before 2026-12-02.
 
-**Freeze (D3), in force.** No new specification revision and no non-critical shell work until
-P2 of the update-chain plan (the kernel build profile and boot matrix, #122) and spike S1
-(#124) are green. They run in parallel inside 0.3, within the machine's CPU budget; S1 is
-time-boxed. The Fedora 45 rebase does not wait for P3 (D26); the Fedora 44 fallback date
+**Freeze (D3), lifted on 2026-10-14** ([ADR-0112](../decisions/0112-pace-to-0-9.md)). P2 of
+the update-chain plan (#122) is green; spike S1 (#124) still gates P4b and release 0.5, and
+specification revisions and shell work run in parallel with it, within the machine's CPU
+budget. The Fedora 45 rebase does not wait for P3 (D26); the Fedora 44 fallback date
 holds. In the release half of the pipeline the PB5 slice comes first (D15), then the evidence
 copy (D23); the key hierarchy (D5) waits for the maintainer's LUKS2 key backup, which is done
 in the week of 2026-10-09.
@@ -84,8 +84,8 @@ in the week of 2026-10-09.
 
 | Release | Target (estimate) | Contents: rows of section 2 and work outside them | Exit |
 | --- | --- | --- | --- |
-| 0.3 "chain" | about 2026-10-20 | rows 1 (image, three variants, without the `-nvidia-legacy` evidence), 2, 3, 4, 5, 6; `release.yml` (PB13, [ADR-0104](../decisions/0104-release-workflow-and-stable-gate.md), merged in #354); P2 (#122); S1 (#124) | The first `:stable` promotion on evidence. Existing: `python3 -B -m unittest discover -s system/tests` (`test_promote.py`). `system/promote.sh` reads `:stable` back and refuses unless it is the evidence digest (`test_promote.py` `test_stable_is_read_back`) |
-| 0.5 "base" | about 2026-11-07 | rows 7, 8, 10; the Fedora 45 rebase, or Fedora 44 per [ADR-0078](../decisions/0078-fedora-release-target.md); P4b (#126), the bootc two-step update chain; the start of the image key rotation to key 2 (its close, PB5b, needs a key-2 release on `:stable` and one more release, so it lands in 0.7); the ISO acceptance under Secure Boot (#252) | An ISO install, encrypted and under Secure Boot, updates itself to the next `:stable`. Existing: `forge/test/iso/run_iso_test.sh ISO OUTPUT_DIR`. To add: that test under Secure Boot firmware, ending in an update to a newer `:stable` |
+| 0.3 "chain" | about 2026-10-20 | rows 1 (image, three variants, without the `-nvidia-legacy` evidence), 2, 3, 4, 5, 6; `release.yml` (PB13, [ADR-0104](../decisions/0104-release-workflow-and-stable-gate.md), merged in #354); P2 (#122) | The first `:stable` promotion on evidence. Existing: `python3 -B -m unittest discover -s system/tests` (`test_promote.py`). `system/promote.sh` reads `:stable` back and refuses unless it is the evidence digest (`test_promote.py` `test_stable_is_read_back`) |
+| 0.5 "base" | about 2026-11-07 | rows 7, 8, 10; the Fedora 45 rebase, or Fedora 44 per [ADR-0078](../decisions/0078-fedora-release-target.md); P4b (#126), the bootc two-step update chain, and spike S1 (#124), which gates it ([ADR-0112](../decisions/0112-pace-to-0-9.md)); the start of the image key rotation to key 2 (its close, PB5b, needs a key-2 release on `:stable` and one more release, so it lands in 0.7); the ISO acceptance under Secure Boot (#252) | An ISO install, encrypted and under Secure Boot, updates itself to the next `:stable`. Existing: `forge/test/iso/run_iso_test.sh ISO OUTPUT_DIR`. To add: that test under Secure Boot firmware, ending in an update to a newer `:stable` |
 | 0.7 "defences" | about 2026-11-20 | rows 9, 11 (acceptance 1 and 7 of `doc_recovery.md` on the dev VM), 12 (lock, polkit agent, SystemPrompter), 14 to 24; the close of the image key rotation (PB5b) | Every row placed here holds. Existing: `python3 scripts/verify.py services pam polkit polkit-model contacts shipped coverage` and the unit tests the rows name. To add: the image checks and acceptance cases the rows mark "to add" |
 | 0.9 "surface" | about 2026-11-27 | rows 12 (screenshot and screen share, bar, dock, launcher, coexistence), 13, and the hardware work below; the visual language and accessibility; the maintainer's aesthetic sign-offs (ST8, VL12) | The release candidate. Existing: `scripts/devvm/bar-acceptance.sh`, `dock-acceptance.sh`, `launcher-acceptance.sh`, `compositor-acceptance.sh`. To add: the hardware matrix as a recorded run |
 | 1.0 | before 2026-12-02 | 0.9 with no blocking defect | To add: a query for open blocking issues that must return none |

@@ -11,6 +11,9 @@ symlink to /dev/null or an empty file. Two defects fail:
   - an enabled timer that the list gives as neither a contact, a local timer nor an inert one,
     which is how a Fedora update adds a beacon;
   - a unit the list calls silent that is enabled.
+A contact that names image_file and image_contains must have that Key=value as the last active
+line of the file, and no other resolved.conf.d drop-in may set the key (the resolver mode,
+DNSOverTLS=opportunistic, ADR-0103 D11).
 The check sees timers and the listed units only. It does not follow Wants=, Requires= or
 Upholds= written inside another unit, nor sockets, paths or D-Bus activation, so a beacon pulled
 in that way is not seen. scripts/verify.py contacts makes the same comparison against the presets
@@ -56,13 +59,45 @@ def problems(contacts, enabled):
     return found
 
 
+def last_setting(path, key):
+    """The value of the last active `key=` line of a file (comments ignored), or None."""
+    value = None
+    for line in path.read_text().splitlines():
+        name, eq, val = line.partition("=")
+        if eq and name.strip() == key:
+            value = val.strip()
+    return value
+
+
+def config_problems(contacts, root):
+    """A contact with image_file and image_contains ("Key=value") needs the last active Key= line of that
+    file to be the value, and no other resolved.conf.d drop-in of the image to set Key at all."""
+    found = []
+    for c in contacts.get("contact", []):
+        if not c.get("image_file"):
+            continue
+        key, _, want = c.get("image_contains", "").partition("=")
+        try:
+            got = last_setting(root / c["image_file"], key)
+        except OSError as err:
+            found.append(f"{c['id']}: cannot read {c['image_file']} in the image ({err})")
+            continue
+        if got != want:
+            found.append(f"{c['id']}: {c['image_file']} in the image sets {key}={got}, not {want}")
+        for d in ("etc/systemd/resolved.conf.d", "usr/lib/systemd/resolved.conf.d"):
+            for f in sorted((root / d).glob("*.conf")):
+                if f != root / c["image_file"] and last_setting(f, key) is not None:
+                    found.append(f"{c['id']}: {d}/{f.name} in the image sets {key}")
+    return found
+
+
 def main(argv):
     if len(argv) not in (2, 3):
         print(__doc__, file=sys.stderr)
         return 2
     contacts = tomllib.loads(pathlib.Path(argv[1]).read_text())
     root = pathlib.Path(argv[2] if len(argv) == 3 else "/")
-    found = problems(contacts, enabled_units(root))
+    found = problems(contacts, enabled_units(root)) + config_problems(contacts, root)
     for line in found:
         print(line, file=sys.stderr)
     return 1 if found else 0
