@@ -20,6 +20,7 @@ Nessuna dipendenza oltre a python3 e git. Va eseguito dalla radice del repo.
 import collections
 import datetime
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -409,7 +410,7 @@ INPUT_IN_RUN = re.compile(r"\$\{\{(?:(?!\}\}).)*\binputs\b", re.S)
 # skopeo copy onto :latest is not recognised, nor a tag held in a variable, and ADR-0111 item 5
 # accepts that the registry itself binds no workflow.
 LATEST_WRITER = re.compile(r"tag-images\.sh\b[^\n]*--tag(?:=|\s+)[\"']?latest\b(?![-.\w])")
-STABLE_WRITER = re.compile(r"promote\.sh\b|tag-images\.sh\b[^\n]*--tag(?:=|\s+)[\"']?stable\b(?![-.\w])")
+STABLE_WRITER = re.compile(r"promote(?:-iso)?\.sh\b|tag-images\.sh\b[^\n]*--tag(?:=|\s+)[\"']?stable\b(?![-.\w])")
 
 
 def release_problems(root):
@@ -721,6 +722,147 @@ def signing_job_problems(where, job, steps, environment, holders):
 
 
 # --------------------------------------------------------------------------- #
+# installer — the machine check and the MOK request run in every kickstart that installs
+# --------------------------------------------------------------------------- #
+
+# The kickstarts that install Athanor: the manual one, the ISO's own, and the acceptance
+# test's, which repeats the ISO's blocks because it includes osbuild-base.ks instead. The
+# first is the reference the other two must carry word for word.
+INSTALLER_KICKSTARTS = (
+    "system/athanor-install.ks",
+    "system/disk_config/iso.toml",
+    "forge/test/iso/collaudo.ks",
+)
+SECUREBOOT_CERT = "/usr/share/athanor/secureboot/athanor-secureboot.der"
+# The SHA-256 of the certificate the image ships, in sha256sum's format; the ISO
+# acceptance compares the key enrolled in MokList with it.
+SECUREBOOT_PIN = "system/secureboot-pin.sha256"
+# What each block must say, so a copy that still matches but no longer checks is caught too.
+INSTALLER_CPU_NEEDS = (
+    "[ ! -d /sys/firmware/efi ]",
+    "grep -q 'x86-64-v3 (supported'",
+    "exit 1",
+)
+INSTALLER_MOK_NEEDS = (
+    f"cert={SECUREBOOT_CERT}",
+    "mokutil --timeout -1",
+    'mokutil --import "$cert" --hash-file /dev/stdin',
+    "mokutil --generate-hash |",
+)
+
+
+def kickstart_text(root, relative):
+    """The kickstart a file carries: the file itself, or the installer customisation of a
+    bootc-image-builder TOML, with TOML's escapes already applied."""
+    text = read(root / relative)
+    if relative.endswith(".toml"):
+        return tomllib.loads(text)["customizations"]["installer"]["kickstart"][
+            "contents"
+        ]
+    return text
+
+
+def kickstart_sections(text):
+    """Every %pre and %post section of a kickstart, from its header to its %end."""
+    return re.findall(r"^%(?:pre|post)\b.*?^%end$", text, re.M | re.S)
+
+
+def installer_problems(root=None):
+    """doc_kernel_profile.md D3, D14 and section 4: every kickstart that installs refuses a
+    machine without UEFI or x86-64-v3 in a %pre, and asks shim to enrol the certificate the
+    image ships in a %post, under the hash of a password given to mokutil on standard input."""
+    root = root or ROOT
+    problems, sections = [], {}
+    for relative in INSTALLER_KICKSTARTS:
+        try:
+            sections[relative] = kickstart_sections(kickstart_text(root, relative))
+        except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError) as err:
+            problems.append(f"{relative}: cannot read its kickstart ({err!r})")
+    reference = INSTALLER_KICKSTARTS[0]
+    blocks = {
+        "machine check": (
+            [s for s in sections.get(reference, []) if s.startswith("%pre")],
+            "%pre --erroronfail",
+            INSTALLER_CPU_NEEDS,
+        ),
+        "MOK enrolment request": (
+            [s for s in sections.get(reference, []) if "mokutil --import" in s],
+            "%post --erroronfail",
+            INSTALLER_MOK_NEEDS,
+        ),
+    }
+    for name, (found, header, needs) in blocks.items():
+        if len(found) != 1:
+            problems.append(
+                f"{reference}: {len(found)} sections hold the {name}, one is expected"
+            )
+            continue
+        block = found[0]
+        if block.splitlines()[0] != header:
+            problems.append(
+                f"{reference}: the {name} must open with {header!r}, so that it stops the install"
+            )
+        problems.extend(
+            f"{reference}: the {name} lacks {need!r}"
+            for need in needs
+            if need not in block
+        )
+        for relative in INSTALLER_KICKSTARTS[1:]:
+            if relative in sections and block not in sections[relative]:
+                problems.append(
+                    f"{relative}: lacks the {name} of {reference}, or carries a copy that drifted"
+                )
+    if "--generate-hash=" in "".join(blocks["MOK enrolment request"][0]):
+        problems.append(
+            f"{reference}: the MOK password is passed on a command line; mokutil reads it on stdin"
+        )
+    containerfile = "system/Containerfile"
+    try:
+        shipped = re.search(
+            rf"^COPY (\S+) {re.escape(SECUREBOOT_CERT)}$",
+            read(root / containerfile),
+            re.M,
+        )
+    except OSError as err:
+        return problems + [f"{containerfile}: cannot read ({err})"]
+    if not shipped:
+        problems.append(
+            f"{containerfile}: does not COPY the certificate the installer enrols to {SECUREBOOT_CERT}"
+        )
+        return problems
+    rotation = "a key rotation updates the pin in the same pull request"
+    try:
+        pinned, pinned_path = read(root / SECUREBOOT_PIN).split()
+    except (OSError, ValueError) as err:
+        return problems + [f"{SECUREBOOT_PIN}: cannot read one 'sha256  path' line ({err})"]
+    if pinned_path != shipped.group(1):
+        problems.append(
+            f"{SECUREBOOT_PIN}: pins {pinned_path}, but {containerfile} ships {shipped.group(1)}; {rotation}"
+        )
+        return problems
+    try:
+        actual = hashlib.sha256((root / pinned_path).read_bytes()).hexdigest()
+    except OSError as err:
+        return problems + [f"{pinned_path}: cannot read ({err})"]
+    if actual != pinned:
+        problems.append(
+            f"{pinned_path}: SHA-256 {actual} differs from {pinned} in {SECUREBOOT_PIN}; {rotation}"
+        )
+    return problems
+
+
+@check(
+    "installer",
+    "Every installing kickstart refuses machines without UEFI or x86-64-v3 and requests the MOK enrolment",
+)
+def check_installer():
+    r = Result()
+    for problem in installer_problems():
+        r.fail(problem)
+    return r
+
+
+# --------------------------------------------------------------------------- #
 # 2. kickstart — una direttiva che Anaconda non riconosce ferma l'installazione
 # --------------------------------------------------------------------------- #
 
@@ -753,6 +895,65 @@ def check_kickstart():
             detail = " ".join(p.stderr.split()) or " ".join(p.stdout.split())
             r.fail(f"{rel(ks)}: {detail}")
 
+    return r
+
+
+# --------------------------------------------------------------------------- #
+# install-channel — installed systems follow :stable, signed (UD2, ADR-0114)
+# --------------------------------------------------------------------------- #
+
+# The kickstarts that install a machine for a person, and the one that tests that install.
+# Each carries the same %post, which records <repository>:stable through ostree-image-signed.
+INSTALL_KICKSTARTS = ("system/athanor-install.ks", "system/disk_config/iso.toml",
+                      "forge/test/iso/collaudo.ks")
+STABLE_SWITCH = ('bootc switch --mutate-in-place --enforce-container-sigpolicy '
+                 '--transport registry "$repository:stable"')
+KICKSTART_POST = re.compile(r"^%post\b.*?^%end$", re.M | re.S)
+
+
+def install_channel_problems(root=None):
+    """No kickstart names :latest or runs `bootc switch` without the signature policy, and each
+    install kickstart carries the one %post that records :stable, signed (doc_update_delivery.md
+    UD2). Comment lines are not read: they may name what the code must not."""
+    root = Path(root or ROOT)
+    problems = []
+    blocks = {}
+    for path in sorted({*(root / f for f in INSTALL_KICKSTARTS), *walk(root, ".ks")}):
+        relative = path.relative_to(root).as_posix()
+        try:
+            text = read(path)
+        except OSError as err:
+            problems.append(f"{relative}: cannot read ({err})")
+            continue
+        for i, line in enumerate(text.split("\n"), 1):
+            code = line.strip()
+            if code.startswith("#"):
+                continue
+            if re.search(r":latest\b", code):
+                problems.append(f"{relative}:{i}: names :latest; installed systems follow :stable (UD2)")
+            if re.search(r"\bbootc\s+switch\b", code) and "--enforce-container-sigpolicy" not in code:
+                problems.append(f"{relative}:{i}: bootc switch without --enforce-container-sigpolicy (UD2)")
+        if relative in INSTALL_KICKSTARTS:
+            # A line of its own, so a comment that quotes the command does not count.
+            found = [b for b in KICKSTART_POST.findall(text)
+                     if STABLE_SWITCH in (line.strip() for line in b.split("\n"))]
+            if len(found) != 1:
+                problems.append(f"{relative}: needs one %post that runs `{STABLE_SWITCH}` (UD2)")
+            elif "--erroronfail" not in found[0].split("\n", 1)[0].split():
+                problems.append(f"{relative}: the :stable %post needs --erroronfail, or a failed switch "
+                                f"leaves an install that follows the unverified run tag (UD2)")
+            else:
+                blocks[relative] = found[0]
+    if len(set(blocks.values())) > 1:
+        problems.append(f"the :stable %post differs between {', '.join(sorted(blocks))}: keep them identical")
+    return problems
+
+
+@check("install-channel", "Install kickstarts leave the machine on :stable with the signature policy enforced")
+def check_install_channel():
+    r = Result()
+    for problem in install_channel_problems():
+        r.fail(problem)
     return r
 
 
@@ -943,6 +1144,14 @@ def path_problems(relative_path, text):
             problems.append(f"{relative_path}:{i} percorso hard-coded in /tmp — usa "
                             f"/run/athanor (0700) per stato privilegiato")
     return problems
+
+
+@check("attestation-absent", "athanor-attestation stays deleted (ADR-0103 D10)")
+def check_attestation_absent():
+    r = Result()
+    if (ROOT / "system" / "confidential_computing").exists():
+        r.fail("system/confidential_computing exists: athanor-attestation is deleted (ADR-0103 D10)")
+    return r
 
 
 @check("paths", "Nessun artefatto runtime da target/, nessuno stato privilegiato in /tmp")
@@ -2163,8 +2372,6 @@ OWN_LICENCE_EXCEPTIONS = {
 # The crate whose dependency forces the exception above; a crate that depends on it must be
 # in the table, and a crate in the table must still depend on it.
 GPL3_ONLY_DEPENDENCY = "greetd_ipc"
-# Crates whose manifests agents may not edit without the maintainer's approval.
-PROTECTED_CRATES = {"system/confidential_computing/athanor-attestation/Cargo.toml"}
 # Files that carry packaging metadata outside Cargo.toml and *.spec.
 NFPM_FILES = ["flake.nix"]
 # The SPDX identifiers the repository actually uses. A new one is added here on purpose.
@@ -2233,9 +2440,7 @@ def licence_problems(root=None):
             lic = pkg.get("license")
             want = OWN_LICENCE_EXCEPTIONS.get(f, (OWN_LICENCE,))[0]
             if lic != want:
-                note = " (change awaits maintainer approval: protected crate)" \
-                    if f in PROTECTED_CRATES else ""
-                out.append(f"{f}: license = {lic!r}, expected {want!r}{note}")
+                out.append(f"{f}: license = {lic!r}, expected {want!r}")
         elif name.endswith(".spec"):
             m = re.search(r"^License:\s*(.*?)\s*$", read(root / f), re.M)
             if not m:

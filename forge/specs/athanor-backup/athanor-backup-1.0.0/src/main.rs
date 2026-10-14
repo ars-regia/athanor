@@ -427,6 +427,32 @@ mod tests {
         }
     }
 
+    /// Removes its directory when dropped, also when the test panics.
+    struct TempDir(PathBuf);
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn a_home_that_cannot_be_snapshotted_fails_with_a_message_naming_it() {
+        // Outside btrfs a directory never has inode 256, so `init` and `create` stop on it and the
+        // hourly timer unit fails visibly. A link to "/" (inode 256 on many filesystems) is not
+        // tried: the inode of "/" is not under the test's control.
+        let dir = TempDir(std::env::temp_dir().join(format!("athanor-backup-test-{}", std::process::id())));
+        fs::create_dir_all(&dir.0).expect("create test directory");
+        for (path, want) in [
+            (dir.0.clone(), "is not a btrfs subvolume"),
+            (dir.0.join("missing"), "is missing"),
+        ] {
+            let text = format!("{:#}", ensure_subvolume(&path).expect_err("must be refused"));
+            assert!(text.contains(want), "{text}");
+            assert!(text.contains(&path.display().to_string()), "{text}");
+        }
+    }
+
     #[test]
     fn a_non_root_caller_is_told_to_use_sudo_and_a_bad_command_gets_the_usage() {
         let err = run(&["frobnicate".to_owned()]).expect_err("unknown command");

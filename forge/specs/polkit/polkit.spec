@@ -20,11 +20,17 @@
 #   - explicit meson commands instead of %%meson, which the builder does not define, as
 #     forge/specs/athanor-ananicy does for cmake;
 #   - Source0 is pinned in SOURCES/sources.sha256. The Release is Fedora's 127-2.fc44.2 with
-#     the dist tag of Fedora 43 and .athanor1 appended: it sorts above Fedora 43's 126 and
+#     the dist tag of Fedora 43 and .athanorN appended: it sorts above Fedora 43's 126 and
 #     below every later Fedora 127 build (127-2.fc43.3, 127-2.fc44.N), so a Fedora rebuild
 #     replaces this backport instead of being hidden by it;
 #   - drop-ins limit the agent helper socket to 8 connections per UID and end a helper
 #     that has run for 5 minutes, so one local user cannot hold every helper;
+#   - a drop-in lets the helper write /run/faillock, where system-auth's pam_faillock keeps
+#     its tallies (issue #144);
+#   - athanor-agent-helper-cancel-before-answer.patch ends the helper when the agent hangs
+#     up before answering any prompt, so a cancelled dialog does not reach pam_faillock's
+#     authfail (polkit-org/polkit#713, open upstream; issue #447); %%check drives the patched
+#     conversation with agent-helper-hangup-check.c;
 #   - os_type=redhat is set, as meson cannot detect the distribution in the builder.
 #
 # Exit condition: drop this backport (spec directory and the "polkit" entries of
@@ -37,7 +43,7 @@
 Summary: An authorization framework
 Name: polkit
 Version: 127
-Release: 2.fc43.2.athanor1
+Release: 2.fc43.2.athanor3
 License: LGPL-2.0-or-later
 URL: https://github.com/polkit-org/polkit
 Source0: https://github.com/polkit-org/polkit/archive/refs/tags/%{version}.tar.gz#/polkit-%{version}.tar.gz
@@ -45,6 +51,8 @@ Source1: polkit.sysusers
 Source2: 80-athanor-polkit.preset
 Source3: polkit-agent-helper-socket-limits.conf
 Source4: polkit-agent-helper-service-limits.conf
+Source5: polkit-agent-helper-service-faillock.conf
+Source6: agent-helper-hangup-check.c
 
 Patch1: 0001-polkit-agent-helper-service-simplify-sandbox-rules.patch
 Patch2: 0002-agent-helper-Send-standard-error-to-journal.patch
@@ -52,6 +60,7 @@ Patch3: 0004-polkitsubject-Fix-GVariant-ref-leak-for-pidfd-withou.patch
 Patch4: 0005-Aisle-www.aisle.com-reported-an-issue-with-unsanitiz.patch
 Patch5: 0006-Add-Kazakh-translation.patch
 Patch6: CVE-2026-4897-getline-string-overflow.patch
+Patch7: athanor-agent-helper-cancel-before-answer.patch
 
 BuildRequires: gcc-c++
 BuildRequires: glib2-devel >= 2.32
@@ -129,6 +138,7 @@ install -Dpm 0644 %{SOURCE1} %{buildroot}%{_sysusersdir}/polkit.conf
 install -Dpm 0644 %{SOURCE2} %{buildroot}/usr/lib/systemd/system-preset/80-athanor-polkit.preset
 install -Dpm 0644 %{SOURCE3} %{buildroot}%{_unitdir}/polkit-agent-helper.socket.d/50-athanor-limits.conf
 install -Dpm 0644 %{SOURCE4} %{buildroot}%{_unitdir}/polkit-agent-helper@.service.d/50-athanor-limits.conf
+install -Dpm 0644 %{SOURCE5} %{buildroot}%{_unitdir}/polkit-agent-helper@.service.d/50-athanor-faillock.conf
 
 rm -f %{buildroot}%{_libdir}/*.la
 
@@ -164,6 +174,12 @@ done
 # small binary may legitimately import neither; the flags are proven applied when any binary does.
 [ "$protected" = 1 ] || { echo "no stack protector (__stack_chk_fail) import in any binary"; fail=1; }
 [ "$fortified" = 1 ] || { echo "no _FORTIFY_SOURCE (*_chk) import in any binary"; fail=1; }
+# The agent helper's conversation, compiled from the patched source, ends the process on a
+# hang-up before any answer and fails the conversation on one after it (Patch7).
+gcc $CFLAGS $LDFLAGS -D_GNU_SOURCE -include build/config.h -D_POLKIT_COMPILATION \
+    -Isrc/polkitagent -Isrc -Ibuild/src $(pkg-config --cflags glib-2.0) \
+    -o build/agent-helper-hangup-check %{SOURCE6} $(pkg-config --libs glib-2.0) -lpam
+build/agent-helper-hangup-check || fail=1
 exit $fail
 
 %post
@@ -188,6 +204,7 @@ exit $fail
 %dir %{_unitdir}/polkit-agent-helper@.service.d
 %{_unitdir}/polkit-agent-helper.socket.d/50-athanor-limits.conf
 %{_unitdir}/polkit-agent-helper@.service.d/50-athanor-limits.conf
+%{_unitdir}/polkit-agent-helper@.service.d/50-athanor-faillock.conf
 /usr/lib/systemd/system-preset/80-athanor-polkit.preset
 %dir %{_datadir}/polkit-1/
 %dir %{_datadir}/polkit-1/actions
@@ -226,6 +243,14 @@ exit $fail
 %{_libdir}/girepository-1.0/*.typelib
 
 %changelog
+* Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 127-2.fc43.2.athanor3
+- End the agent helper when the agent hangs up before answering, so a cancelled polkit
+  dialog no longer counts as a pam_faillock failure (polkit-org/polkit#713, #447)
+
+* Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 127-2.fc43.2.athanor2
+- Let the agent helper write /run/faillock, so a pam_faillock tally no longer fails every
+  polkit prompt (#144)
+
 * Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 127-2.fc43.2.athanor1
 - Release sorts below every later Fedora 127 build, so a Fedora rebuild replaces it
 - Limit the agent helper socket to 8 connections per UID and end a helper after 5 minutes

@@ -21,9 +21,11 @@ lang en_US.UTF-8
 # certificate enrolled as a MOK at first boot.
 
 # The bootc image is the identity of the system, not a user choice. This kickstart
-# follows :latest; an installation that needs a fixed build replaces the tag with a
-# run-id tag of the image.
-ostreecontainer --url=ghcr.io/ars-regia/athanor-system:latest --transport=registry
+# installs the promoted build that :stable names, and the second %post below leaves the
+# machine following :stable with the signature policy enforced (doc_update_delivery.md
+# UD2). The pull itself is not verified: the installer's own policy does not carry the
+# project key. The first update the machine takes is.
+ostreecontainer --url=ghcr.io/ars-regia/athanor-system:stable --transport=registry
 
 # The root account stays locked: administration is through the wheel user Anaconda
 # creates. No user is declared here, so Anaconda asks the installer to create one.
@@ -41,6 +43,195 @@ services --disabled=sshd
 # opens its partitioning screen. Accounts are classic: the image disables systemd-homed by preset.
 
 reboot
+
+%pre --erroronfail
+# Athanor installs on UEFI machines with an x86-64-v3 processor, and on no other
+# (doc_kernel_profile.md D3 and D14, A2-22), so this script refuses any other machine
+# before the installer touches a disk. The dynamic loader lists the x86-64 levels the
+# processor supports; a legacy BIOS boot leaves no /sys/firmware/efi.
+#
+# %pre runs before Anaconda opens its screens, and a %pre that fails ends Anaconda with a
+# traceback rather than a message. So the script states the reason itself, on virtual
+# terminal 8, which it brings to the front, and on every serial console of the kernel, then
+# waits for Enter on that terminal and switches the machine off. The exit status is the
+# backstop if the power-off does not happen.
+# ponytail: Enter is read from terminal 8 only; on a serial-only machine the message shows
+# and the installer waits until the machine is switched off by hand.
+set -eu
+reason=''
+if [ ! -d /sys/firmware/efi ]; then
+    reason='The installer was started in legacy BIOS mode, and Athanor needs UEFI.
+Switch off CSM or legacy boot in the firmware settings, then start the
+installer again in UEFI mode.'
+elif ! /lib64/ld-linux-x86-64.so.2 --help | grep -q 'x86-64-v3 (supported'; then
+    reason='This processor does not support x86-64-v3 (AVX2, BMI2, FMA, MOVBE), and
+Athanor needs it: Intel Core from Haswell (2013) on, AMD from Excavator (2015)
+on. Many Intel Atom, Celeron and Pentium processors lack it.'
+fi
+if [ -z "$reason" ]; then
+    exit 0
+fi
+show() {
+    for console in $(cat /sys/class/tty/console/active); do
+        case $console in
+            tty[0-9]*) ;;
+            *) echo "$1" >> "/dev/$console" ;;
+        esac
+    done
+    echo "$1" >> /dev/tty8
+}
+chvt 8
+show "
+Athanor cannot be installed on this computer.
+
+$reason
+
+Nothing has been written to any disk. Press Enter to switch the computer off.
+"
+read -r _ < /dev/tty8
+systemctl poweroff
+exit 1
+%end
+
+%post --erroronfail
+# Ask shim to enrol the Athanor Secure Boot certificate at the first boot
+# (doc_kernel_profile.md section 4, A2-35). mokutil records the request under the SHA-512
+# crypt hash of a one-time password made here; shim starts MokManager at the next boot
+# whether Secure Boot is on or off, and MokManager asks for that password. A copy of the
+# certificate goes on the ESP for MokManager's "Enroll key from disk".
+#
+# The password reaches mokutil on standard input only and the person on the screen only:
+# never a command line, a file or this script's output, which Anaconda keeps in its logs.
+# It is shown on virtual terminal 8 and on every serial console of the kernel, and the
+# installer goes on when Enter is pressed on that terminal.
+# ponytail: a terminal page, not the installer's last page: Anaconda's GTK interface gives
+# kickstart scripts no page, and the web interface of ADR-0059 is not built. On a
+# serial-only machine Enter is still read from terminal 8.
+set -eu
+cert=/usr/share/athanor/secureboot/athanor-secureboot.der
+esp_dir=/boot/efi/EFI/athanor
+
+show() {
+    for console in $(cat /sys/class/tty/console/active); do
+        case $console in
+            tty[0-9]*) ;;
+            *) echo "$1" >> "/dev/$console" ;;
+        esac
+    done
+    echo "$1" >> /dev/tty8
+}
+
+# An image built before the certificate was shipped (one installed from :stable before
+# its first promotion with it) has nothing to enrol. The installation goes on as it did
+# before the request existed, and the screen says so; the ISO acceptance fails such an
+# image (mok-cert-absent).
+if [ ! -e "$cert" ]; then
+    echo "athanor: $cert is absent: this image predates the Secure Boot key enrolment"
+    previous=$(fgconsole)
+    chvt 8
+    show "
+Athanor: this image predates the Secure Boot key enrolment, so none is requested.
+
+With Secure Boot on, this computer cannot start the installed system: turn Secure
+Boot off in the firmware settings. After the first update, an administrator
+enrols the key with:
+
+    sudo mokutil --import $cert
+
+Press Enter to finish the installation; it goes on by itself in two minutes.
+"
+    status=0
+    read -r -t 120 _ < /dev/tty8 || status=$?
+    # Over 128: the two minutes ran out. Anything else is a terminal that cannot be read.
+    [ "$status" -eq 0 ] || [ "$status" -gt 128 ]
+    chvt "$previous"
+    exit 0
+fi
+
+# Firmware without Secure Boot has no SecureBoot variable: shim verifies nothing there,
+# mokutil refuses every request, and there is nothing to enrol.
+if [ ! -e /sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c ]; then
+    echo "athanor: this firmware has no Secure Boot; no certificate enrolment is requested"
+    exit 0
+fi
+
+# mokutil answers in words, and its exit status is 1 both for "not enrolled" and for an
+# error, so the words decide.
+status=0
+state=$(mokutil --test-key "$cert") || status=$?
+case $state in
+    *'is already enrolled'* | *'is already in db'*)
+        echo "athanor: the Secure Boot certificate is already trusted: $state"
+        exit 0
+        ;;
+    *'is already in the enrollment request'*)
+        # Left by an earlier installation on this machine, under a password nobody has
+        # any more: replaced, not kept.
+        mokutil --revoke-import
+        ;;
+    *'is not enrolled'*) ;;
+    *)
+        echo "athanor: mokutil --test-key $cert exited $status: $state" >&2
+        exit 1
+        ;;
+esac
+
+# Sixteen letters out of seventeen, about 65 bits. Each letter sits on the same key on
+# QWERTY, QWERTZ and AZERTY keyboards, because MokManager reads every keyboard as US, and
+# none is easily misread (no i, l or o).
+password=$(tr -dc bcdefghjknprstuvx < /dev/urandom | head -c 16)
+if [ ${#password} -ne 16 ]; then
+    echo "athanor: could not draw a one-time password" >&2
+    exit 1
+fi
+if ! hash=$( { echo "$password"; echo "$password"; } | mokutil --generate-hash | grep '^[$]6[$]'); then
+    echo "athanor: mokutil --generate-hash gave no SHA-512 crypt hash" >&2
+    exit 1
+fi
+
+# MokManager then waits for the person instead of counting down 10 seconds.
+mokutil --timeout -1
+printf '%s' "$hash" | mokutil --import "$cert" --hash-file /dev/stdin
+case $(mokutil --test-key "$cert") in
+    *'is already in the enrollment request'*) ;;
+    *)
+        echo "athanor: mokutil recorded no enrolment request for $cert" >&2
+        exit 1
+        ;;
+esac
+if ! mountpoint -q /boot/efi; then
+    echo "athanor: /boot/efi is not mounted, so the certificate cannot go on the ESP" >&2
+    exit 1
+fi
+mkdir -p "$esp_dir"
+cp "$cert" "$esp_dir/athanor-secureboot.der"
+
+grouped="${password:0:4} ${password:4:4} ${password:8:4} ${password:12:4}"
+previous=$(fgconsole)
+chvt 8
+show "
+Athanor: write down this one-time password before the computer restarts.
+
+    One-time password: $grouped
+
+Athanor signs its kernel with its own Secure Boot key. At the first restart a
+blue screen, Shim UEFI key management, asks for this password to trust that key.
+Type the 16 letters without the spaces:
+
+  1. Choose Enroll MOK, then Continue, then Yes.
+  2. Type the password and press Enter.
+  3. Choose Reboot.
+
+If the key is not enrolled there, a computer with Secure Boot on returns to that
+screen at every start and waits 10 seconds for a key: press one, choose Enroll
+key from disk, then the EFI partition, EFI, athanor, athanor-secureboot.der.
+With Secure Boot off, Athanor starts and offers the enrolment again.
+
+Press Enter to finish the installation.
+"
+read -r _ < /dev/tty8
+chvt "$previous"
+%end
 
 %post --erroronfail
 set -eu
@@ -82,4 +273,32 @@ root_fstype=$(stat -f -c %T /sysroot)
 if [ "$root_fstype" = btrfs ]; then
     ostree admin instutil set-kargs --merge rootflags=compress=zstd:1
 fi
+%end
+
+# Installed systems follow :stable with the signature policy enforced (doc_update_delivery.md
+# UD2, ADR-0114). The installer records the image it installed without a signature policy:
+# Anaconda's ostreecontainer has no option for a signed reference, and on the ISO the
+# builder's own %post, which runs before this one, names the run the ISO was built from
+# (osbuild/image-builder issue 380). This %post rewrites that record and installs nothing:
+# `--mutate-in-place` changes the origin of the deployment just written, and
+# `--enforce-container-sigpolicy` makes it ostree-image-signed, so every later pull is
+# verified against the policy the image ships.
+# The repository is read from the record, never written out here, so the owner the image
+# was built under is the one the policy names.
+%post --erroronfail
+set -eu
+set -- /sysroot/ostree/deploy/*/deploy/*.origin
+if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
+    echo "expected one deployment origin, found: $*" >&2
+    exit 1
+fi
+reference=$(sed -n 's/^container-image-reference=//p' "$1")
+case $reference in
+    *docker://*) image=${reference##*docker://} ;;
+    ostree-unverified-registry:*) image=${reference#ostree-unverified-registry:} ;;
+    *) echo "unexpected image reference '$reference' in $1" >&2; exit 1 ;;
+esac
+repository=${image%@*}
+case ${repository##*/} in *:*) repository=${repository%:*} ;; esac
+bootc switch --mutate-in-place --enforce-container-sigpolicy --transport registry "$repository:stable"
 %end

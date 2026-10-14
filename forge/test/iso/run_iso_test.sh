@@ -50,12 +50,29 @@ vars="${output}/OVMF_VARS.fd"
 # are tried rather than one being assumed, and the 4M pair is preferred because it is what
 # a current Ubuntu runner actually has. The plain names come second so a Fedora host, or
 # an older Ubuntu, still works.
+#
+# SECURE_BOOT=1 runs the Secure Boot case (#252): the Secure Boot build of OVMF with a
+# variable store that has Secure Boot on and the Microsoft keys that trust shim enrolled,
+# OVMF_VARS_4M.ms.fd on Ubuntu and OVMF_VARS.secboot.fd on Fedora. Its variables live in
+# SMM, out of the guest's reach. Nothing of Athanor is preloaded: the certificate reaches
+# MokList through the installer's request and MokManager, as on a real machine, and the
+# verdict then also requires the installed system to report Secure Boot enabled.
+machine=q35,i8042=off
+secure_boot=()
+verdict_case=()
+firmware=(OVMF_CODE_4M.fd:OVMF_VARS_4M.fd OVMF_CODE.fd:OVMF_VARS.fd)
+if [[ ${SECURE_BOOT:-0} == 1 ]]; then
+    machine=q35,smm=on,i8042=off
+    secure_boot=(-global 'driver=cfi.pflash01,property=secure,value=on')
+    verdict_case=(secure-boot)
+    firmware=(OVMF_CODE_4M.secboot.fd:OVMF_VARS_4M.ms.fd OVMF_CODE.secboot.fd:OVMF_VARS.secboot.fd)
+fi
 ovmf_code=''
 ovmf_vars=''
 for dir in /usr/share/OVMF /usr/share/edk2/ovmf /usr/share/ovmf; do
-    for suffix in _4M ''; do
-        candidate_code="${dir}/OVMF_CODE${suffix}.fd"
-        candidate_vars="${dir}/OVMF_VARS${suffix}.fd"
+    for pair in "${firmware[@]}"; do
+        candidate_code="${dir}/${pair%%:*}"
+        candidate_vars="${dir}/${pair#*:}"
         if [[ -f $candidate_code && -f $candidate_vars ]]; then
             ovmf_code=$candidate_code
             ovmf_vars=$candidate_vars
@@ -64,7 +81,7 @@ for dir in /usr/share/OVMF /usr/share/edk2/ovmf /usr/share/ovmf; do
     done
 done
 [[ -n $ovmf_code ]] || {
-    echo "OVMF firmware not found; looked for OVMF_CODE[_4M].fd in:" >&2
+    echo "OVMF firmware not found; looked for ${firmware[*]} in:" >&2
     echo "  /usr/share/OVMF /usr/share/edk2/ovmf /usr/share/ovmf" >&2
     exit 2
 }
@@ -142,7 +159,7 @@ shots_pid=$!
 # type into while this test stayed green.
 set +e
 timeout "$TIMEOUT" qemu-system-x86_64 \
-    -machine q35,i8042=off -accel "$accel" -cpu max -smp "${VCPUS:-4}" -m "${MEMORY_MIB:-6144}" \
+    -machine "$machine" "${secure_boot[@]}" -accel "$accel" -cpu max -smp "${VCPUS:-4}" -m "${MEMORY_MIB:-6144}" \
     -device qemu-xhci -device usb-kbd \
     -drive "if=pflash,format=raw,readonly=on,file=${ovmf_code}" \
     -drive "if=pflash,format=raw,file=${vars}" \
@@ -178,6 +195,6 @@ kill "$shots_pid" 2> /dev/null || true
 # Both run whatever the first answers, so a failed install still gets its memory report and
 # a session over budget still gets its verdict; the script exits with the worse of the two.
 status=0
-python3 "${here}/verdict.py" "$output" "$GREETER_WAIT" "$qemu_status" || status=$?
+python3 "${here}/verdict.py" "$output" "$GREETER_WAIT" "$qemu_status" "${verdict_case[@]}" || status=$?
 python3 "${here}/../../../scripts/session-memory/report.py" "${output}/serial.log" "${output}/memory.json" || status=$?
 exit "$status"

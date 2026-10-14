@@ -7,7 +7,9 @@ enable firewalld.service
 enable nix-daemon.socket
 enable fstrim.timer
 enable athanor-backup-hourly.timer
+enable athanor-flatpak-update.timer
 enable usbguard.service
+enable athanor-usbguard-internal.service
 enable boltd.service
 
 # Accounts are classic. Fedora's 90-systemd.preset enables homed, and this file sorts first.
