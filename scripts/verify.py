@@ -879,6 +879,10 @@ def check_contacts():
 # 3. polkit — ogni azione applicata dal codice deve essere dichiarata
 # --------------------------------------------------------------------------- #
 
+# An action id in code, read whole: polkit allows "-" in an id, as in apply-multi-session.
+POLKIT_ACTION_IN_CODE = re.compile(r"os\.athanor\.[a-z0-9_-]+\.[a-z0-9_-]+")
+
+
 @check("polkit", "Ogni action-id polkit applicata dal codice è dichiarata in un .policy")
 def check_polkit():
     r = Result()
@@ -886,7 +890,7 @@ def check_polkit():
     used = {}   # action -> {file:riga}
     for p in rust_files():
         for i, line in enumerate(read(p).split("\n"), 1):
-            for a in re.findall(r"os\.athanor\.[a-z0-9_]+\.[a-z0-9_]+", line):
+            for a in POLKIT_ACTION_IN_CODE.findall(line):
                 used.setdefault(a, set()).add(f"{rel(p)}:{i}")
 
     declared = {}   # action -> file .policy
@@ -1639,6 +1643,79 @@ def cmdline_problems(root=None):
 def check_cmdline():
     r = Result()
     for problem in cmdline_problems():
+        r.fail(problem)
+    return r
+
+
+# The base sysctls have one source, the [base.sysctl] table of profile.toml, which
+# kernel_profile.py writes into the sysctl.d file of athanor-kernel-profile. A second
+# sysctl.d file that sets one of them either repeats it or, sorting later, overrides it
+# (99-bore.conf did both, doc_kernel_profile.md section 6).
+PROFILE_MANIFEST = "forge/specs/athanor-kernel-profile/profile.toml"
+PROFILE_SYSCTL = "forge/specs/athanor-kernel-profile/SOURCES/usr/lib/sysctl.d/90-athanor-kernel-profile.conf"
+SYSCTL_GLOBS = ("forge/specs/**/sysctl.d/*.conf", "system/**/sysctl.d/*.conf")
+
+
+def sysctl_problems(root=None):
+    """No sysctl.d file of the repository but the generated one sets a base sysctl."""
+    root = root or ROOT
+    try:
+        base = set(tomllib.loads(read(root / PROFILE_MANIFEST))["base"]["sysctl"])
+    except (OSError, KeyError, tomllib.TOMLDecodeError) as err:
+        return [f"{PROFILE_MANIFEST}: cannot read the base sysctls ({err})"]
+    problems = []
+    files = sorted({path for pattern in SYSCTL_GLOBS for path in root.glob(pattern)})
+    for path in files:
+        relative = path.relative_to(root).as_posix()
+        if relative == PROFILE_SYSCTL:
+            continue
+        for number, line in enumerate(read(path).splitlines(), 1):
+            name = line.split("=", 1)[0].strip().lstrip("-").replace("/", ".")
+            if "=" in line and not line.lstrip().startswith(("#", ";")) and name in base:
+                problems.append(f"{relative}:{number}: sets {name}, a base sysctl of {PROFILE_MANIFEST}")
+    return problems
+
+
+@check("sysctl", "The base sysctls have one source, profile.toml")
+def check_sysctl():
+    r = Result()
+    for problem in sysctl_problems():
+        r.fail(problem)
+    return r
+
+
+# A udev rule that sets GROUP= to a group no sysusers.d file declares makes udev log
+# "Unknown group" at every boot and fall back to root (doc_kernel_profile.md section 14,
+# boot ordering). A group the Fedora base declares goes into athanor-base-config's
+# 10-athanor-hw-groups.conf, which also declares it early in boot, before a rule names it.
+UDEV_GROUP = re.compile(r'\bGROUP\s*:?=\s*"([^"]+)"')
+SYSUSERS_GROUP = re.compile(r"^\s*[gu]\s+(\S+)", re.MULTILINE)
+
+
+def udev_group_problems(root=None):
+    """Every GROUP= of a repository udev rule names a group a repository sysusers.d file declares."""
+    root = root or ROOT
+    declared = set()
+    for pattern in ("forge/specs/**/sysusers.d/*.conf", "forge/specs/**/*.sysusers", "system/**/sysusers.d/*.conf"):
+        for path in root.glob(pattern):
+            declared.update(SYSUSERS_GROUP.findall(read(path)))
+    problems = []
+    rules = sorted({p for pattern in ("forge/specs/**/rules.d/*.rules", "system/**/rules.d/*.rules") for p in root.glob(pattern)})
+    for path in rules:
+        relative = path.relative_to(root).as_posix()
+        for number, line in enumerate(read(path).splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            for group in UDEV_GROUP.findall(line):
+                if group not in declared:
+                    problems.append(f"{relative}:{number}: GROUP=\"{group}\" is declared by no sysusers.d file")
+    return problems
+
+
+@check("udev-groups", "Every GROUP= of a udev rule names a group a sysusers.d file declares")
+def check_udev_groups():
+    r = Result()
+    for problem in udev_group_problems():
         r.fail(problem)
     return r
 
@@ -2945,6 +3022,48 @@ def check_coverage():
         r.fail(problem)
     for note in notes:
         r.note(note)
+    return r
+
+
+BUS_API_MESH_IDENT = re.compile(r"\b(?:mesh\w*|\w*mesh\w*|NodeIdentityPayload|AiDecisionPayload|KernelTelemetry)\b", re.I)
+BUS_API_DENIED_DEPS = ("x25519-dalek", "ed25519-dalek", "ring", "rand_core", "zeroize", "subtle")
+BUS_API_DEP_TABLES = ("dependencies", "dev-dependencies", "build-dependencies")
+
+
+def bus_api_residue(root):
+    """The mesh and post-quantum residue ADR-0103 D10 deletes from athanor-bus-api.
+
+    Only lib.rs and polkit.rs may exist under src/, deliberately: the crate is the shared
+    polkit client and nothing else (ADR-0103 D10). Any other file in the crate, tests/ and
+    build.rs included, is searched for mesh identifiers (case-insensitive), and every
+    dependency table of Cargo.toml (target-specific ones too) is checked against a deny-list."""
+    crate = root / "system" / "athanor-bus-api"
+    problems = []
+    for f in sorted(crate.rglob("*.rs")):
+        rel = f.relative_to(root)
+        if f.parent == crate / "src" and f.name in ("lib.rs", "polkit.rs"):
+            pass
+        elif f.parent == crate / "src" or "src" in f.relative_to(crate).parts:
+            problems.append(f"{rel}: module outside lib.rs and polkit.rs (ADR-0103 D10)")
+        for m in sorted({m.group(0) for m in BUS_API_MESH_IDENT.finditer(f.read_text())}):
+            problems.append(f"{rel}: {m} is mesh or post-quantum residue (ADR-0103 D10)")
+    manifest = crate / "Cargo.toml"
+    if manifest.exists():
+        data = tomllib.loads(manifest.read_text())
+        tables = [data.get(t, {}) for t in BUS_API_DEP_TABLES]
+        for target in data.get("target", {}).values():
+            tables += [target.get(t, {}) for t in BUS_API_DEP_TABLES]
+        for dep in sorted({d for t in tables for d in t}):
+            if dep in BUS_API_DENIED_DEPS or dep.startswith("pqcrypto"):
+                problems.append(f"{manifest.relative_to(root)}: dependency {dep} is post-quantum residue (ADR-0103 D10)")
+    return problems
+
+
+@check("bus-api-residue", "athanor-bus-api holds no mesh or post-quantum residue (ADR-0103 D10)")
+def check_bus_api_residue():
+    r = Result()
+    for problem in bus_api_residue(ROOT):
+        r.fail(problem)
     return r
 
 

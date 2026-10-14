@@ -1,9 +1,10 @@
 //! `athanor-update serve`: the D-Bus service `os.athanor.Update1` (UT6). Two acting methods
 //! and one read method, no arguments, no property. The subject polkit judges is the bus
-//! sender, never a PID. `State` asks no polkit: the state is not secret, and a reader in a
+//! sender, never a PID; the caller's session, for the count of other sessions, comes from the
+//! bus daemon's credentials for that sender, never from the caller. `State` asks no polkit: the state is not secret, and a reader in a
 //! user namespace cannot check the file's owner itself, so the service checks it.
 use crate::check::Context;
-use crate::requests::{self, Power, RebootError, Refusal};
+use crate::requests::{self, Caller, Power, RebootError, Refusal};
 use crate::tools::System;
 use athanor_bus_api::polkit::check_polkit_auth_zbus;
 use athanor_trust_state::ReadError;
@@ -12,11 +13,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use zbus::message::Header;
+use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue};
 use zbus::{interface, Connection};
 
 pub const BUS_NAME: &str = "os.athanor.Update1";
 pub const OBJECT_PATH: &str = "/os/athanor/Update1";
-const ACTION_APPLY: &str = "os.athanor.update.apply";
 const ACTION_ROLLBACK: &str = "os.athanor.update.rollback";
 /// The service is D-Bus activated: it leaves after this long without a request.
 const IDLE: Duration = Duration::from_secs(60);
@@ -43,6 +44,7 @@ pub enum Error {
 impl From<Refusal> for Error {
     fn from(refusal: Refusal) -> Self {
         match refusal {
+            Refusal::NotAuthorized => Self::NotAuthorized("not authorized".into()),
             Refusal::Busy => Self::Busy("a check or another request is running".into()),
             Refusal::NothingDownloaded => Self::NothingDownloaded("no update is downloaded; the timer downloads at its next run".into()),
             Refusal::NoPreviousVersion => Self::NoPreviousVersion("there is no previous version to go back to".into()),
@@ -52,11 +54,102 @@ impl From<Refusal> for Error {
     }
 }
 
+const LOGIND: &str = "org.freedesktop.login1";
+
 struct Logind<'a>(&'a Connection);
 
 impl Logind<'_> {
     async fn call<B: serde::Serialize + zbus::zvariant::DynamicType>(&self, method: &str, body: &B) -> zbus::Result<zbus::Message> {
-        self.0.call_method(Some("org.freedesktop.login1"), "/org/freedesktop/login1", Some("org.freedesktop.login1.Manager"), method, body).await
+        self.0.call_method(Some(LOGIND), "/org/freedesktop/login1", Some("org.freedesktop.login1.Manager"), method, body).await
+    }
+
+    /// A property of one of logind's objects, read with `org.freedesktop.DBus.Properties.Get`.
+    async fn property<T: TryFrom<OwnedValue, Error = zbus::zvariant::Error>>(&self, path: &ObjectPath<'_>, interface: &str, name: &str) -> zbus::Result<T> {
+        let reply = self.0.call_method(Some(LOGIND), path, Some("org.freedesktop.DBus.Properties"), "Get", &(interface, name)).await?;
+        Ok(T::try_from(reply.body().deserialize::<OwnedValue>()?)?)
+    }
+}
+
+/// Session classes that hold nobody's work: they never count as another session (UT6,
+/// ADR-0103 D22). Every other class counts, one this list does not name included.
+const UNCOUNTED_CLASSES: [&str; 7] = ["greeter", "lock-screen", "background", "background-light", "manager", "manager-early", "none"];
+
+/// One entry of `login1.Manager.ListSessions`: id, uid, user name, seat, object path.
+type Session = (String, u32, String, String, OwnedObjectPath);
+
+/// The caller's logind session: the session of the sender's PID as the bus daemon reports it
+/// (`GetConnectionCredentials`), else the display session of the uid of the same credentials,
+/// as polkit assigns one to a process of a systemd user unit. Never a value the caller supplies.
+async fn caller_session(conn: &Connection, sender: &str) -> zbus::Result<OwnedObjectPath> {
+    let name = zbus::names::BusName::try_from(sender)?;
+    let credentials = zbus::fdo::DBusProxy::new(conn).await?.get_connection_credentials(name).await?;
+    let logind = Logind(conn);
+    // PID 0 would name the service's own process to logind.
+    if let Some(pid) = credentials.process_id().filter(|pid| *pid != 0) {
+        match logind.call("GetSessionByPID", &(pid,)).await.and_then(|reply| reply.body().deserialize::<OwnedObjectPath>()) {
+            Ok(session) => return Ok(session),
+            Err(err) => tracing::info!(%err, pid, "the caller's process has no session: its user's display session is used"),
+        }
+    }
+    let uid = credentials.unix_user_id().ok_or_else(|| zbus::Error::Failure("the bus daemon reported no uid for the caller".into()))?;
+    let user: OwnedObjectPath = logind.call("GetUser", &(uid,)).await?.body().deserialize()?;
+    let (id, display): (String, OwnedObjectPath) = logind.property(&user, "org.freedesktop.login1.User", "Display").await?;
+    if id.is_empty() {
+        return Err(zbus::Error::Failure(format!("user {uid} has no display session")));
+    }
+    Ok(display)
+}
+
+/// Whether a counting session other than `caller` is open. Any error is the caller's to
+/// read as "open": a class that cannot be read is never taken as one that does not count.
+async fn others_open(conn: &Connection, caller: &ObjectPath<'_>) -> zbus::Result<bool> {
+    let logind = Logind(conn);
+    let sessions: Vec<Session> = logind.call("ListSessions", &()).await?.body().deserialize()?;
+    for (_, _, _, _, path) in sessions.iter().filter(|session| session.4.as_str() != caller.as_str()) {
+        let class: String = logind.property(path, "org.freedesktop.login1.Session", "Class").await?;
+        if !UNCOUNTED_CLASSES.contains(&class.as_str()) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// The sender of `Apply()`, with its session found once when the request arrives.
+struct Sender<'a> {
+    conn: &'a Connection,
+    name: String,
+    session: Option<OwnedObjectPath>,
+}
+
+impl<'a> Sender<'a> {
+    async fn new(conn: &'a Connection, name: String) -> Sender<'a> {
+        let session = match caller_session(conn, &name).await {
+            Ok(session) => Some(session),
+            Err(err) => {
+                tracing::warn!(%err, "the caller's session could not be determined: other sessions are assumed open");
+                None
+            }
+        };
+        Sender { conn, name, session }
+    }
+}
+
+impl Caller for Sender<'_> {
+    async fn others_open(&self) -> bool {
+        let Some(session) = &self.session else {
+            return true;
+        };
+        match others_open(self.conn, session).await {
+            Ok(open) => open,
+            Err(err) => {
+                tracing::warn!(%err, "logind's sessions could not be counted: other sessions are assumed open");
+                true
+            }
+        }
+    }
+
+    async fn authorize(&self, action: &str) -> Result<(), Refusal> {
+        polkit(self.conn, &self.name, action).await
     }
 }
 
@@ -128,14 +221,18 @@ struct Update1 {
     activity: Arc<Activity>,
 }
 
-async fn authorize(conn: &Connection, header: &Header<'_>, action: &str) -> Result<String, Error> {
-    let sender = header.sender().ok_or_else(|| Error::NotAuthorized("the call has no sender".into()))?.to_string();
-    match check_polkit_auth_zbus(conn, &sender, action, true).await {
-        Ok(true) => Ok(sender),
-        Ok(false) => Err(Error::NotAuthorized("not authorized".into())),
+/// The unique name the bus daemon stamped on the call: the subject polkit judges.
+fn sender_of(header: &Header<'_>) -> Result<String, Error> {
+    Ok(header.sender().ok_or_else(|| Error::NotAuthorized("the call has no sender".into()))?.to_string())
+}
+
+async fn polkit(conn: &Connection, sender: &str, action: &str) -> Result<(), Refusal> {
+    match check_polkit_auth_zbus(conn, sender, action, true).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(Refusal::NotAuthorized),
         Err(err) => {
             tracing::error!(%err, action, "polkit could not be asked");
-            Err(Error::NotAuthorized("polkit could not be asked".into()))
+            Err(Refusal::NotAuthorized)
         }
     }
 }
@@ -175,15 +272,16 @@ impl Update1 {
 impl Update1 {
     async fn apply(&self, #[zbus(header)] header: Header<'_>, #[zbus(connection)] conn: &Connection) -> Result<(), Error> {
         let _in_flight = self.activity.enter();
-        authorize(conn, &header, ACTION_APPLY).await?;
+        let caller = Sender::new(conn, sender_of(&header)?).await;
         let (tools, store) = (System, crate::store::Store::system());
         let ctx = Context::system(&tools, &store, now());
-        Ok(requests::apply(&ctx, &Logind(conn)).await?)
+        Ok(requests::apply(&ctx, &Logind(conn), &caller).await?)
     }
 
     async fn go_back(&self, #[zbus(header)] header: Header<'_>, #[zbus(connection)] conn: &Connection) -> Result<(), Error> {
         let _in_flight = self.activity.enter();
-        let sender = authorize(conn, &header, ACTION_ROLLBACK).await?;
+        let sender = sender_of(&header)?;
+        polkit(conn, &sender, ACTION_ROLLBACK).await?;
         // UT6: the caller's uid at notice. It identifies who asked; polkit already decided.
         let uid = uid_of(conn, &sender).await;
         tracing::info!(?uid, "going back to the previous version was requested and authorized");
@@ -328,6 +426,163 @@ mod tests {
     async fn an_unreadable_or_missing_logind_refuses_as_failed() {
         assert_eq!(ask_logind("logind-garbled", Some(Garbled)).await, Err(Refusal::Failed), "a reply of the wrong signature");
         assert_eq!(ask_logind::<Garbled>("logind-absent", None).await, Err(Refusal::Failed), "no logind on the bus");
+    }
+
+    /// logind on a private bus, as the count of other sessions reads it. Every connection of
+    /// a test shares this process's PID, so `GetSessionByPID` answers for the caller.
+    #[derive(Clone, Default)]
+    struct Seats {
+        /// Listed sessions: id and class; a class of `None` has no object to read it from.
+        sessions: Vec<(&'static str, u32, Option<&'static str>)>,
+        /// The session of the caller's process; `None` for a process of a systemd user unit.
+        by_pid: Option<&'static str>,
+        /// The display session of the caller's user.
+        display: Option<&'static str>,
+        list_fails: bool,
+    }
+
+    fn session_path(id: &str) -> OwnedObjectPath {
+        OwnedObjectPath::try_from(format!("/org/freedesktop/login1/session/s{id}")).expect("path")
+    }
+
+    const USER_PATH: &str = "/org/freedesktop/login1/user/u1000";
+
+    #[zbus::interface(name = "org.freedesktop.login1.Manager")]
+    impl Seats {
+        fn list_sessions(&self) -> zbus::fdo::Result<Vec<Session>> {
+            if self.list_fails {
+                return Err(zbus::fdo::Error::Failed("ListSessions failed".into()));
+            }
+            Ok(self.sessions.iter().map(|(id, uid, _)| ((*id).into(), *uid, format!("user{uid}"), "seat0".into(), session_path(id))).collect())
+        }
+
+        #[zbus(name = "GetSessionByPID")]
+        fn get_session_by_pid(&self, pid: u32) -> zbus::fdo::Result<OwnedObjectPath> {
+            match self.by_pid {
+                Some(id) if pid == std::process::id() => Ok(session_path(id)),
+                _ => Err(zbus::fdo::Error::Failed("no session for this PID".into())),
+            }
+        }
+
+        fn get_user(&self, _uid: u32) -> OwnedObjectPath {
+            OwnedObjectPath::try_from(USER_PATH).expect("path")
+        }
+    }
+
+    struct SessionObject(&'static str);
+
+    #[zbus::interface(name = "org.freedesktop.login1.Session")]
+    impl SessionObject {
+        #[zbus(property)]
+        fn class(&self) -> String {
+            self.0.into()
+        }
+    }
+
+    struct UserObject(Option<&'static str>);
+
+    #[zbus::interface(name = "org.freedesktop.login1.User")]
+    impl UserObject {
+        #[zbus(property)]
+        fn display(&self) -> (String, OwnedObjectPath) {
+            // logind's answer for a user without a display session: an empty id and "/".
+            self.0.map_or_else(|| (String::new(), OwnedObjectPath::try_from("/").expect("path")), |id| (id.into(), session_path(id)))
+        }
+    }
+
+    /// The first count of `Apply()` for a caller on `seats`, through the bus daemon's
+    /// credentials of the caller's unique name, as the service makes it.
+    async fn count(name: &str, seats: Seats) -> bool {
+        let bus = crate::goback::tests::Bus::start(name);
+        let mut builder = bus.builder().name(LOGIND).expect("name").serve_at("/org/freedesktop/login1", seats.clone()).expect("serve");
+        for (id, _, class) in &seats.sessions {
+            if let Some(class) = class {
+                builder = builder.serve_at(session_path(id), SessionObject(class)).expect("session");
+            }
+        }
+        let logind = builder.serve_at(USER_PATH, UserObject(seats.display)).expect("user").build().await.expect("logind");
+        let client = bus.builder().build().await.expect("client");
+        let sender = client.unique_name().expect("unique name").to_string();
+        let open = Sender::new(&client, sender).await.others_open().await;
+        drop(logind);
+        open
+    }
+
+    fn alone() -> Seats {
+        Seats { sessions: vec![("2", 1000, Some("user"))], by_pid: Some("2"), display: None, list_fails: false }
+    }
+
+    #[tokio::test]
+    async fn the_caller_alone_counts_no_other_session() {
+        assert!(!count("count-alone", alone()).await);
+    }
+
+    #[tokio::test]
+    async fn a_user_unit_caller_resolves_to_its_display_session() {
+        assert!(!count("count-user-unit", Seats { by_pid: None, display: Some("2"), ..alone() }).await);
+    }
+
+    #[tokio::test]
+    async fn another_session_counts_whatever_its_uid() {
+        let other_user = Seats { sessions: vec![("2", 1000, Some("user")), ("3", 1001, Some("user"))], ..alone() };
+        assert!(count("count-other-user", other_user).await, "another user behind a fast user switch");
+        let same_user = Seats { sessions: vec![("2", 1000, Some("user")), ("c1", 1000, Some("user"))], ..alone() };
+        assert!(count("count-same-user", same_user).await, "a second session of the caller's own user");
+    }
+
+    #[tokio::test]
+    async fn only_uncounted_classes_count_no_other_session() {
+        let mut sessions = vec![("2", 1000, Some("user"))];
+        sessions.extend(UNCOUNTED_CLASSES.iter().zip(["g", "l", "b", "bl", "m", "me", "n"]).map(|(class, id)| (id, 0, Some(*class))));
+        assert!(!count("count-uncounted", Seats { sessions, ..alone() }).await);
+    }
+
+    #[tokio::test]
+    async fn every_other_class_counts_an_unknown_one_included() {
+        for class in ["user", "user-early", "user-incomplete", "user-light", "a-class-logind-adds-later"] {
+            let seats = Seats { sessions: vec![("2", 1000, Some("user")), ("3", 1001, Some(class))], ..alone() };
+            assert!(count(&format!("count-class-{class}"), seats).await, "{class}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_count_fails_closed() {
+        assert!(count("count-list-fails", Seats { list_fails: true, ..alone() }).await, "ListSessions failing");
+        assert!(count("count-unreadable", Seats { sessions: vec![("2", 1000, Some("user")), ("3", 1001, None)], ..alone() }).await, "a class that cannot be read");
+        assert!(count("count-undetermined", Seats { by_pid: None, ..alone() }).await, "a caller without a session");
+    }
+
+    /// polkit answering every check with an error, not a "no".
+    struct BrokenPolkit;
+
+    #[zbus::interface(name = "org.freedesktop.PolicyKit1.Authority")]
+    impl BrokenPolkit {
+        fn check_authorization(
+            &self,
+            _subject: (String, std::collections::HashMap<String, OwnedValue>),
+            _action: String,
+            _details: std::collections::HashMap<String, String>,
+            _flags: u32,
+            _cancellation: String,
+        ) -> zbus::fdo::Result<(bool, bool, std::collections::HashMap<String, String>)> {
+            Err(zbus::fdo::Error::Failed("polkit failed".into()))
+        }
+    }
+
+    #[tokio::test]
+    async fn a_polkit_that_errs_or_is_absent_does_not_authorize() {
+        for (name, broken) in [("polkit-errs", true), ("polkit-absent", false)] {
+            let bus = crate::goback::tests::Bus::start(name);
+            let mut service = None;
+            if broken {
+                let builder = bus.builder().name("org.freedesktop.PolicyKit1").expect("name").serve_at("/org/freedesktop/PolicyKit1/Authority", BrokenPolkit).expect("serve");
+                service = Some(builder.build().await.expect("polkit"));
+            }
+            let client = bus.builder().build().await.expect("client");
+            let caller = Sender { conn: &client, name: client.unique_name().expect("unique name").to_string(), session: None };
+            assert_eq!(caller.authorize(requests::ACTION_APPLY).await, Err(Refusal::NotAuthorized), "{name}");
+            drop(service);
+        }
     }
 
     #[test]

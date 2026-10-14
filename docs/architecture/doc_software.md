@@ -43,7 +43,7 @@ Checked in the repository at `27378de3`, and, where the repository cannot answer
 
 - `podman` 5.8.4 and `toolbox` are on the desktop, from the base image: neither is in `forge/config/packages.json`. Quadlet's generators are installed for both managers: `/usr/lib/systemd/system-generators/podman-system-generator` and `/usr/lib/systemd/user-generators/podman-user-generator`, both links to `/usr/libexec/podman/quadlet` (desktop). The maintainer already runs three user Quadlet containers.
 - The signature policy accepts any image outside the three system repositories: `transports.docker[""]` is `insecureAcceptAnything` (`doc_update_trust.md:52`).
-- User namespaces are available to rootless podman (`doc_kernel_profile.md:704-706`; `kernel.unprivileged_userns_clone = 1` in `forge/specs/athanor-system-tweaks/SOURCES/usr/lib/sysctl.d/99-bore.conf:20`). Unprivileged ports start at 1024 (desktop).
+- User namespaces are available to rootless podman (`doc_kernel_profile.md:704-706`; `kernel.unprivileged_userns_clone` is 1 by default in Azoth, which nothing in the image overrides, verified on Azoth 7.2.9). Unprivileged ports start at 1024 (desktop).
 
 **Services and presets.**
 

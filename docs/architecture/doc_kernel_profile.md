@@ -1109,7 +1109,11 @@ Found on the running system and in the repository (2026-09-14):
 - **Sysctl and memory** (P3): `99-bore.conf` forces BBRv1 and CFS tunables that fail
   under EEVDF; `99-azoth-sysfs.conf` enabled KSM on every machine (removed on 2026-10-08, see section 6); the machine has no swap at all;
   `kernel.yama.ptrace_scope` is 0, and `oops=panic` sets `kernel.panic_on_oops=1` on the
-  desktop (D47, D19).
+  desktop (D47, D19). *Done on 2026-10-14 (P3, #123):* `99-bore.conf` is removed;
+  `athanor-kernel-profile` sizes zram at `min(ram / 2, 8192)` with zstd, sets
+  `kernel.oops_limit` and `kernel.sysrq`, and `athanor-profile-check` checks swap on zram,
+  zswap, transparent huge pages and MGLRU; `verify.py sysctl` fails when another
+  `sysctl.d` file sets a base sysctl.
 - **Image content** (P3): `kernel-devel` and `kernel-headers` 6.18 from another vendor,
   `kernel-uki-virt` with addons unused by the boot path, `athanor-tetragon` and a
   Fedora 41 `bore-sysctl` package are installed; `bcachefs-tools` left the image on
@@ -1135,7 +1139,10 @@ Found on the running system and in the repository (2026-09-14):
   and bound LUKS to PCRs 0, 2, 7 and 11. It is removed (issue #148); the LUKS policy of D42
   replaces it, and nothing in the image enrols the TPM until that mechanism exists.
 - **Boot ordering** (P3): udev reports unknown groups (`disk`, `kvm`, `render`, `audio`,
-  `lp` and others) and tmpfiles cannot apply the journal ACLs early in boot.
+  `lp` and others) and tmpfiles cannot apply the journal ACLs early in boot. *Amended on
+  2026-10-14 (P3, #123):* the one unknown group left in the boot journal of the maintainer's desktop, `i2c`, came from a ddcutil rule of
+  `athanor-desktop-ui`, now removed; `verify.py udev-groups` fails on a rule whose group no
+  `sysusers.d` file declares.
 - **Desktop** (P3): `cosmic-panel.service`, shipped by `athanor-system-services`, sets
   `MemoryHigh=1G` and `MemoryMax=1536M`, which kill the panel under normal use; the limits
   are removed in that package. Since the switch of stage 2 of the shell (PR #83) the unit is gone with cosmic-panel.
