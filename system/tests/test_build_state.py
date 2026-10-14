@@ -24,8 +24,17 @@ WRITERS = re.compile(
     r"\bdnf5 +(install|remove|clean)\b|\bldconfig\b|initramfs\.sh|\brpm +-[UiFe]"
 )
 CLEAR = "rm -f $BUILD_STATE"
-# The throwaway stage: rpm-build never reaches an image.
-THROWAWAY = {"nvidia-rpms"}
+# Commands that stamp a time into what reaches an image: rpm's install times, the /etc/shadow
+# last-change field, the font cache checksums, an RPM's build and file times, the initramfs.
+STAMPERS = re.compile(
+    r"\bdnf5 +install\b|\brpm +-U|\brpmbuild\b|build-rpms\.sh|initramfs\.sh"
+)
+# The scripts those stages run, which must take the epoch of the Containerfile and keep none of
+# their own.
+SCRIPTS = (
+    ROOT / "system" / "scripts" / "initramfs.sh",
+    ROOT / "system" / "nvidia" / "build-rpms.sh",
+)
 
 
 def stages(text):
@@ -48,11 +57,19 @@ def stages(text):
 
 class BuildState(unittest.TestCase):
     def setUp(self):
-        self.stages = stages(CONTAINERFILE.read_text())
+        text = CONTAINERFILE.read_text()
+        self.stages = stages(text)
         self.by_name = dict(self.stages)
+        self.copied_from = set(re.findall(r"(?:--|,)from=([\w-]+)", text))
 
-    def shipped(self):
-        return [(name, body) for name, body in self.stages[1:] if name not in THROWAWAY]
+    def layered(self):
+        """The stages whose own layers reach an image; a stage read only through COPY --from or
+        a mount's from= gives the image just the paths read from it."""
+        return [
+            (name, body)
+            for name, body in self.stages[1:]
+            if name not in self.copied_from
+        ]
 
     def test_the_epoch_and_the_state_are_declared_for_every_stage(self):
         glob = self.by_name[""]
@@ -64,20 +81,48 @@ class BuildState(unittest.TestCase):
         for path in STATE:
             self.assertIn(path, state, f"ARG BUILD_STATE does not name {path}")
 
-    def test_every_stage_that_installs_packages_has_the_epoch_first(self):
-        # rpm's install times, the /etc/shadow last-change field and the font cache checksums.
-        for name, body in self.shipped():
+    def test_every_stage_that_stamps_a_time_has_the_epoch_first(self):
+        for name, body in self.stages[1:]:
             runs = [
                 n
                 for n, i in enumerate(body)
-                if i.startswith("RUN ") and re.search(r"\bdnf5 +install\b|\brpm +-U", i)
+                if i.startswith("RUN ") and STAMPERS.search(i)
             ]
             if runs:
                 arg = [n for n, i in enumerate(body) if i == "ARG SOURCE_DATE_EPOCH"]
                 self.assertTrue(
                     arg and arg[0] < runs[0],
-                    f"stage {name} installs packages without ARG SOURCE_DATE_EPOCH first",
+                    f"stage {name} stamps a time without ARG SOURCE_DATE_EPOCH first",
                 )
+
+    def test_the_scripts_take_the_epoch_of_the_containerfile(self):
+        for script in SCRIPTS:
+            text = script.read_text()
+            self.assertIn(
+                "${SOURCE_DATE_EPOCH:?",
+                text,
+                f"{script.name} does not require the epoch",
+            )
+            self.assertNotRegex(
+                text,
+                r"SOURCE_DATE_EPOCH(:?-|=[0-9])",
+                f"{script.name} keeps an epoch of its own",
+            )
+
+    def test_every_rpm_built_for_an_image_carries_the_epoch(self):
+        # rpmbuild of Fedora takes the build time from the clock, and the epoch from the spec's
+        # changelog, unless told otherwise; the rpm database records both.
+        text = (ROOT / "system" / "nvidia" / "build-rpms.sh").read_text()
+        for macro in (
+            "source_date_epoch_from_changelog 0",
+            "use_source_date_epoch_as_buildtime 1",
+            "clamp_mtime_to_source_date_epoch 1",
+        ):
+            self.assertIn(f'--define "{macro}"', text)
+        calls = re.findall(r"^\s*rpmbuild\b.*$", text, re.M)
+        self.assertTrue(calls, "build-rpms.sh runs no rpmbuild")
+        for call in calls:
+            self.assertIn('"${epoch[@]}"', call, f"{call.strip()[:80]}...")
 
     def test_the_system_stage_ends_by_clearing_the_state_before_the_rechunk(self):
         body = self.by_name["system"]
@@ -96,7 +141,7 @@ class BuildState(unittest.TestCase):
 
     def test_every_later_run_clears_the_state_it_writes(self):
         # The stages after the rechunk are not regrouped: a layer keeps what its own RUN wrote.
-        for name, body in self.shipped():
+        for name, body in self.layered():
             if name == "system":
                 continue
             for run in (i for i in body if i.startswith("RUN ")):

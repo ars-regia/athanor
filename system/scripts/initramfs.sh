@@ -7,8 +7,9 @@
 # Usage: initramfs.sh KVER
 set -euo pipefail
 
-# Deterministic build timestamp (reproducible builds).
-export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-1723320000}
+# The epoch of system/Containerfile (ARG SOURCE_DATE_EPOCH), which dracut --reproducible gives
+# every file of the initramfs. No default here, so the two cannot drift apart.
+export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:?initramfs.sh: SOURCE_DATE_EPOCH is not set: run it in a stage that declares ARG SOURCE_DATE_EPOCH}
 KVER=${1:?usage: initramfs.sh KVER}
 [[ -f /usr/lib/modules/$KVER/vmlinuz ]] || { echo "initramfs.sh: no vmlinuz in /usr/lib/modules/$KVER" >&2; exit 1; }
 

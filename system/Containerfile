@@ -63,9 +63,12 @@ FROM ${FORGE_REGISTRY}/athanor-forge-tier3-repo@${TIER3_DIGEST} AS tier3-repo
 
 # The vendor RPMs of both NVIDIA branches, verified by hash and GPG, with the shim and the
 # configuration package, and NVIDIA's container toolkit (system/nvidia/build-rpms.sh). A throwaway stage: rpm-build never
-# reaches an image. KERNEL_REGISTRY locates the mirror of the locked RPMs (lock.py).
+# reaches an image. KERNEL_REGISTRY locates the mirror of the locked RPMs (lock.py). The two RPMs
+# built here carry SOURCE_DATE_EPOCH as their build time and file times, which the rpm database of
+# the NVIDIA variants records.
 FROM registry.fedoraproject.org/fedora:43@sha256:c45b30a84cf2fb151e3d8f8683707ce42356f674357f10951b4dd71014a502f3 AS nvidia-rpms
 ARG KERNEL_REGISTRY
+ARG SOURCE_DATE_EPOCH
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 COPY forge/specs/azoth/pins.env /src/forge/specs/azoth/pins.env
 COPY system/nvidia/ /src/system/nvidia/
@@ -358,6 +361,7 @@ RUN --mount=type=bind,from=nvidia-rpms,source=/out/legacy,target=/tmp/nvidia-rpm
 FROM gpu-${GPU} AS final
 ARG GPU
 ARG AZOTH_NVR
+ARG SOURCE_DATE_EPOCH
 ARG BUILD_STATE
 COPY forge/specs/azoth/pins.env /scripts/pins.env
 COPY system/nvidia/gate.sh /scripts/nvidia-gate.sh
