@@ -75,6 +75,10 @@ MARKERS = (
     (b"KARG_MISSING", "karg-compress-missing"),
     (b"KARG_NOTBTRFS", "karg-compress-not-applicable"),
     (b"KARG_UNREADABLE", "karg-compress-unreadable"),
+    # The guest's own answer to ORIGIN_PROBE below: whether the image the installed system
+    # follows is :stable through the signature policy, or anything else.
+    (b"ORIGIN_OK", "origin-stable-signed"),
+    (b"ORIGIN_WRONG", "origin-wrong"),
     # The guest's own answer to GREETER_PROBE below: a greeter session that is still
     # there, with the shell inside it, after it has had time to die.
     (b"GREETER_ALIVE", "greeter-alive"),
@@ -286,6 +290,25 @@ KARG_PROBE = (
 # Two file reads, and a margin for the command line printed when the argument is missing.
 KARG_PROBE_WAIT = 5.0
 
+# Ask the guest which image it follows (doc_update_delivery.md UD2, ADR-0114). The
+# installer's %post records <repository>:stable through the signature policy; a system
+# that follows :latest, a run's own tag, or any reference bootc does not verify against
+# containers-policy.json answers WRONG with what it follows instead. The reference is the
+# booted deployment's, read from bootc itself, which is what every later update starts
+# from. bootc names an enforced policy `containerPolicy`; an unverified reference carries
+# `insecure` or no signature at all, so OK needs the word itself. As with the other probes
+# printf assembles the marker, so the echo of the typed line cannot pass for the answer.
+ORIGIN_PROBE = (
+    b"o=$(printf 'collaudo\\n' | sudo -S bootc status --format=json"
+    b" | jq -r '.status.booted.image.image | \"\\(.image) \\(.signature)\"');"
+    b' case "$o" in'
+    b" *:stable\\ containerPolicy) printf 'ORIGIN_%s %s\\n' OK \"$o\";;"
+    b" *) printf 'ORIGIN_%s %s\\n' WRONG \"$o\";;"
+    b" esac"
+)
+# bootc reads the deployment and the image's manifest from local storage, under sudo.
+ORIGIN_PROBE_WAIT = 10.0
+
 # The password as QEMU's `sendkey` wants it, one key per command. QEMU names a letter key
 # by the letter, and letters are all the password has.
 GREETER_PASSWORD_KEYS = tuple(GUEST_PASSWORD.decode())
@@ -456,6 +479,8 @@ def main() -> int:
         note("profile-asked")
         ask(KARG_PROBE, KARG_PROBE_WAIT)
         note("karg-asked")
+        ask(ORIGIN_PROBE, ORIGIN_PROBE_WAIT)
+        note("origin-asked")
         ask(GREETER_PROBE, GREETER_PROBE_WAIT)
         note("greeter-asked")
 

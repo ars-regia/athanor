@@ -68,6 +68,7 @@ summary() { # summary ARTIFACTS_DIR: Markdown for the job summary the release ap
     "### Promotion plan of build run \(must("run_id"))", "",
     "| Image | Digest | Previous stable |", "| --- | --- | --- |",
     (must("images")[] | "| \(must("name")) | `\(must("digest"))` | `\(.previous_stable // "none")` |"), "",
+    "Installer ISO (athanor-iso:stable after the system images): `\(must("iso"))`, built from athanor-system `\(must("iso_system"))`", "",
     "Skipped: " + ([must("skipped")[] | "\(must("name")) (\(must("reason")))"] | if length == 0 then "none" else join("; ") end), "",
     "Hardware override: " + (must("overrides") | if length == 0 then "none" else join(", ") end), "",
     "Signatures verified in: athanor-builder:\(must("builder_content_hash"))", ""' "$1/promotion.json"

@@ -7,7 +7,7 @@ Reads phases.txt, written by console.py, and the console log beside it. Prints a
 on stdout, writes the same report to OUTPUT_DIR/verdict.md for the job summary, and
 exits non-zero when the run did not reach a desktop session.
 
-Seven things have to be true for a pass, and they are checked separately so a failure
+Eight things have to be true for a pass, and they are checked separately so a failure
 says which part broke:
 
   installed        the ISO's own kickstart finished, so ostreecontainer wrote the image
@@ -17,6 +17,8 @@ says which part broke:
   karg             the compression argument the installer's %post sets on a btrfs root is
                    on the command line the system booted with -- or the root is not btrfs,
                    where the installer sets nothing and there is nothing to find
+  origin           the installed system follows <repository>:stable with the signature
+                   policy enforced, the reference every later update starts from (UD2)
   greeter          the installed system reports a greeter session alive and steady
   session          after the password is typed at that greeter, the account's own
                    desktop session is alive and steady, panel and wallpaper included
@@ -59,6 +61,11 @@ PROFILE_SIGNALS = ("profile-ok",)
 # leaving this unset. Without this line the gate cannot tell a root mounted with
 # compression from one mounted without it -- the desktop comes up either way.
 KARG_SIGNALS = ("karg-compress-ok", "karg-compress-not-applicable")
+# And the image the system follows: ORIGIN_OK is the guest's report that bootc's booted
+# reference is <repository>:stable verified by containers-policy.json (UD2, ADR-0114).
+# ORIGIN_WRONG fails the run by leaving this unset: an installed system on :latest, or on
+# an unverified reference, passes every other check and updates from the wrong place.
+ORIGIN_SIGNALS = ("origin-stable-signed",)
 # "reinstall-loop" is not a crash but it is a failure, and a distinctive one: the machine
 # booted the installer again instead of the system it had just written, so the run says
 # nothing about first boot no matter how long it is left going.
@@ -86,6 +93,7 @@ def main() -> int:
     kickstart_done = "kickstart-done" in phases
     profile = next((s for s in PROFILE_SIGNALS if s in phases), None)
     karg = next((s for s in KARG_SIGNALS if s in phases), None)
+    origin = next((s for s in ORIGIN_SIGNALS if s in phases), None)
     greeter = next((s for s in GREETER_SIGNALS if s in phases), None)
     session = next((s for s in SESSION_SIGNALS if s in phases), None)
     settings = next((s for s in SETTINGS_SIGNALS if s in phases), None)
@@ -98,6 +106,7 @@ def main() -> int:
     )
     lines.append(f"- kernel profile holds: {profile if profile else 'NO'}")
     lines.append(f"- btrfs compression karg: {karg if karg else 'NO'}")
+    lines.append(f"- follows :stable, signed: {origin if origin else 'NO'}")
     lines.append(f"- greeter reached: {greeter if greeter else 'NO'}")
     lines.append(f"- session started: {session if session else 'NO'}")
     lines.append(f"- settings opened: {settings if settings else 'NO'}")
@@ -125,6 +134,7 @@ def main() -> int:
         "kickstart-done": kickstart_done,
         "profile": profile is not None,
         "karg": karg is not None,
+        "origin": origin is not None,
         "greeter": greeter is not None,
         "session": session is not None,
         "settings": settings is not None,

@@ -1,0 +1,19 @@
+#!/usr/bin/bash
+# Update the system Flatpak applications (doc_software.md, decision 6 (i), SW15).
+# Skips the run when NetworkManager reports a metered connection (doc_update_trust.md, UT12).
+# NetworkManager not answering is not a reason to skip: the run goes on, and says so.
+set -euo pipefail
+
+if reply=$(busctl --system get-property org.freedesktop.NetworkManager \
+    /org/freedesktop/NetworkManager org.freedesktop.NetworkManager Metered); then
+    case "$reply" in
+    "u 1" | "u 3")
+        echo "<5>The connection is metered (Metered=${reply#u }): no application update this run."
+        exit 0
+        ;;
+    esac
+else
+    echo "<4>NetworkManager did not answer the Metered query: updating anyway."
+fi
+
+exec flatpak update --system --noninteractive --assumeyes

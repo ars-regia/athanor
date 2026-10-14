@@ -7,6 +7,7 @@ enable firewalld.service
 enable nix-daemon.socket
 enable fstrim.timer
 enable athanor-backup-hourly.timer
+enable athanor-flatpak-update.timer
 enable usbguard.service
 enable boltd.service
 
