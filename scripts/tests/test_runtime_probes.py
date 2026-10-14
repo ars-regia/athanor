@@ -17,7 +17,21 @@ CONTACTS = probes.load(ROOT / "forge" / "config" / "contacts.toml")
 
 def good():
     """Facts of a guest that conforms to the committed expectations."""
+    names = (
+        "listeners",
+        "units",
+        "avc",
+        "trust",
+        "pam:check",
+        "sysctl",
+        "nix:build",
+        "nix:gc",
+    )
     return {
+        "rc": {
+            n: {"rc": 0, "err": ""}
+            for n in (*names, *(f"security:{u}" for u in EXPECT["security"]))
+        },
         "listeners": [
             {"proto": "tcp", "address": "0.0.0.0", "port": 22, "process": "sshd"}
         ],
@@ -27,13 +41,11 @@ def good():
         "security": dict(EXPECT["security"]),
         "avc": [],
         "pam": {
-            "check_rc": 0,
             "current": ["local", *EXPECT["pam"]["features"], "with-mdns4"],
             "faillock": {k: str(v) for k, v in EXPECT["pam"]["faillock"].items()},
         },
-        "sysctl": {"rc": 0, "stderr": ""},
+        "sysctl": "",
         "trust": {"reason": "signature"},
-        "nix": {"build_rc": 0, "gc_rc": 0, "stderr": ""},
     }
 
 
@@ -111,7 +123,6 @@ class Expectations(unittest.TestCase):
 
     def test_pam_drift_fails(self):
         for mutate in (
-            lambda p: p.update(check_rc=1),
             lambda p: p["current"].remove("with-faillock"),
             lambda p: p["faillock"].update(deny="10"),
         ):
@@ -121,7 +132,7 @@ class Expectations(unittest.TestCase):
 
     def test_a_sysctl_error_fails(self):
         f = good()
-        f["sysctl"] = {"rc": 0, "stderr": "Couldn't write '1' to 'kernel/x'"}
+        f["sysctl"] = "Couldn't write '1' to 'kernel/x'"
         self.assertEqual(failed(f), {"sysctl"})
 
     def test_a_unit_in_the_wrong_state_fails(self):
@@ -134,10 +145,53 @@ class Expectations(unittest.TestCase):
         f["trust"] = {"reason": "media"}
         self.assertEqual(failed(f), {"trust"})
 
-    def test_a_failed_nix_build_fails(self):
+    def test_a_listener_on_another_port_fails(self):
         f = good()
-        f["nix"]["build_rc"] = 1
-        self.assertEqual(failed(f), {"nix"})
+        f["listeners"][0]["port"] = 2222
+        self.assertEqual(failed(f), {"listeners"})
+
+    def test_a_listener_contact_missing_from_the_expectations_fails(self):
+        contacts = {"listener": [*CONTACTS["listener"], {"unit": "telnet.socket"}]}
+        self.assertEqual(
+            {c for c, _ in probes.evaluate(good(), EXPECT, contacts)}, {"listeners"}
+        )
+
+    def test_a_ceiling_without_a_measurement_fails(self):
+        f = good()
+        del f["security"]["athanor-update.service"]
+        self.assertEqual(failed(f), {"security"})
+
+    def test_a_failing_probe_fails_its_check(self):
+        checks = {
+            "listeners": "listeners",
+            "units": "units",
+            "avc": "selinux",
+            "trust": "trust",
+            "pam:check": "pam",
+            "sysctl": "sysctl",
+            "nix:build": "nix",
+            "nix:gc": "nix",
+            "security:athanor-update.service": "security",
+        }
+        for name, check in checks.items():
+            for rc in (2, 124):
+                f = good()
+                f["rc"][name]["rc"] = rc
+                self.assertEqual(failed(f), {check}, (name, rc))
+
+    def test_journalctl_grep_without_a_match_is_clean(self):
+        f = good()
+        f["rc"]["avc"]["rc"] = 1
+        self.assertEqual(failed(f), set())
+
+    def test_a_timeout_names_the_probe(self):
+        probes.TIMEOUT = 1
+        try:
+            rc, _, err = probes.run(["sleep", "5"])
+        finally:
+            probes.TIMEOUT = 600
+        self.assertEqual(rc, 124)
+        self.assertIn("sleep 5", err)
 
 
 if __name__ == "__main__":

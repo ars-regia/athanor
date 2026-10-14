@@ -10,10 +10,13 @@ an expectation is a change of expectations.toml, hence reviewed."""
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
 import tomllib
+
+TIMEOUT = 600
 
 
 def run(argv, sudo=False):
@@ -24,10 +27,12 @@ def run(argv, sudo=False):
             capture_output=True,
             check=False,
             text=True,
-            timeout=600,
+            timeout=TIMEOUT,
         )
     except FileNotFoundError:
         return 127, "", f"{argv[0]}: not found"
+    except subprocess.TimeoutExpired:
+        return 124, "", f"timed out after {TIMEOUT}s: {' '.join(argv)}"
     return p.returncode, p.stdout, p.stderr
 
 
@@ -95,26 +100,45 @@ def parse_security(text):
 # --- collector --------------------------------------------------------------------------------
 
 NIX_EXPR = 'derivation { name = "probe-%d"; system = builtins.currentSystem; builder = "/bin/sh"; args = [ "-c" "echo ok > $out" ]; }'
+# Exit codes a probe may return besides 0, and why. Any other code, or a timeout (124), fails
+# the probe's check: an empty output of a failed command must never read as a clean guest.
+ALLOWED_RC = {"avc": (0, 1)}  # journalctl --grep exits 1 when nothing matches
+CHECK_OF = {
+    "listeners": "listeners",
+    "firewall": "firewall",
+    "units": "units",
+    "avc": "selinux",
+    "trust": "trust",
+}
 
 
 def collect():
-    facts = {}
-    facts["listeners"] = parse_listeners(run(["ss", "-H", "-ltunp"], sudo=True)[1])
-    rc, out, _ = run(["firewall-cmd", "--get-active-zones"], sudo=True)
-    zones = {}
-    for zone in (
-        []
-        if rc
-        else [line for line in out.splitlines() if line and not line.startswith(" ")]
-    ):
-        zones[zone] = sorted(
-            run(["firewall-cmd", f"--zone={zone}", "--list-services"], sudo=True)[
-                1
-            ].split()
-        )
-    facts["firewall"] = None if rc else zones
+    facts = {"rc": {}}
+
+    def probe(name, argv, sudo=False):
+        rc, out, err = run(argv, sudo=sudo)
+        facts["rc"][name] = {"rc": rc, "err": err.strip()[-300:]}
+        return out
+
+    facts["listeners"] = parse_listeners(
+        probe("listeners", ["ss", "-H", "-ltunp"], sudo=True)
+    )
+    # Absent means the binary is not installed, decided before sudo can muddy the exit code.
+    present = shutil.which("firewall-cmd", path="/usr/bin:/usr/sbin") is not None
+    zones = None
+    if present:
+        out = probe("firewall", ["firewall-cmd", "--get-active-zones"], sudo=True)
+        zones = {}
+        for zone in [x for x in out.splitlines() if x and not x.startswith(" ")]:
+            listed = probe(
+                "firewall",
+                ["firewall-cmd", f"--zone={zone}", "--list-services"],
+                sudo=True,
+            )
+            zones[zone] = sorted(listed.split())
+    facts["firewall"] = zones
     units = parse_unit_files(
-        run(["systemctl", "list-unit-files", "--no-legend", "--no-pager"])[1]
+        probe("units", ["systemctl", "list-unit-files", "--no-legend", "--no-pager"])
     )
     facts["units"] = units
     names = [
@@ -124,41 +148,55 @@ def collect():
         and u.endswith(".service")
         and not u.endswith("@.service")
     ]
-    facts["security"] = parse_security(
-        "".join(run(["systemd-analyze", "security", "--no-pager", u])[1] for u in names)
-    )
+    facts["security"] = {}
+    for u in names:
+        facts["security"] |= parse_security(
+            probe(f"security:{u}", ["systemd-analyze", "security", "--no-pager", u])
+        )
     facts["avc"] = parse_avc(
-        run(
+        probe(
+            "avc",
             ["journalctl", "-b", "--no-pager", "-o", "cat", "--grep", "avc: +denied"],
             sudo=True,
-        )[1]
+        )
     )
     facts["pam"] = {
-        "check_rc": run(["authselect", "check"], sudo=True)[0],
-        "current": run(["authselect", "current", "--raw"], sudo=True)[1].split(),
-        "faillock": parse_faillock(run(["cat", "/etc/security/faillock.conf"])[1]),
+        "current": probe(
+            "pam:current", ["authselect", "current", "--raw"], sudo=True
+        ).split(),
+        "faillock": parse_faillock(
+            probe("pam:faillock", ["cat", "/etc/security/faillock.conf"])
+        ),
     }
-    rc, _, err = run(["/usr/lib/systemd/systemd-sysctl"], sudo=True)
-    facts["sysctl"] = {"rc": rc, "stderr": err.strip()}
-    facts["trust"] = json.loads(
-        run(["cat", "/run/athanor-update/state.json"])[1] or "{}"
-    ).get("verified", {})
-    rc1, _, e1 = run(
+    probe("pam:check", ["authselect", "check"], sudo=True)
+    facts["sysctl"] = probe(
+        "sysctl",
         [
-            "nix",
-            "--extra-experimental-features",
-            "nix-command",
-            "build",
-            "--no-link",
-            "--impure",
-            "--expr",
-            NIX_EXPR % os.getpid(),
-        ]
+            "journalctl",
+            "-b",
+            "-u",
+            "systemd-sysctl.service",
+            "-p",
+            "warning",
+            "--no-pager",
+            "-o",
+            "cat",
+        ],
+        sudo=True,
+    ).strip()
+    state = probe("trust", ["cat", "/run/athanor-update/state.json"])
+    try:
+        facts["trust"] = json.loads(state or "{}").get("verified", {})
+    except json.JSONDecodeError:
+        facts["trust"] = {}
+        facts["rc"]["trust"]["err"] = "state.json is not JSON"
+        facts["rc"]["trust"]["rc"] = 65
+    nix = ["nix", "--extra-experimental-features", "nix-command"]
+    probe(
+        "nix:build",
+        [*nix, "build", "--no-link", "--impure", "--expr", NIX_EXPR % os.getpid()],
     )
-    rc2, _, e2 = run(
-        ["nix", "--extra-experimental-features", "nix-command", "store", "gc"]
-    )
-    facts["nix"] = {"build_rc": rc1, "gc_rc": rc2, "stderr": (e1 + e2).strip()[-400:]}
+    probe("nix:gc", [*nix, "store", "gc"])
     return facts
 
 
@@ -172,18 +210,30 @@ def evaluate(facts, expect, contacts):
     def fail(check, detail):
         bad.append((check, detail))
 
-    # Listening sockets: each one is declared, and each declared unit is a listener of contacts.toml.
+    # A probe that did not run cleanly says nothing about the guest: its check fails.
+    for name, r in sorted(facts["rc"].items()):
+        base = name.split(":")[0]
+        if r["rc"] not in (0, *ALLOWED_RC.get(base, ())):
+            fail(CHECK_OF.get(base, base), f"probe {name} exited {r['rc']}: {r['err']}")
+
+    # Listening sockets: each one is declared by process and port; the declarations and the
+    # listener contacts of contacts.toml cover each other.
+    listeners = expect.get("listener", [])
     declared_units = {x["unit"] for x in contacts.get("listener", [])}
-    for entry in expect.get("listener", []):
+    for entry in listeners:
         if entry.get("unit") and entry["unit"] not in declared_units:
             fail(
                 "listeners",
                 f"{entry['unit']} is in expectations.toml but not a [[listener]] of contacts.toml",
             )
+    for unit in sorted(declared_units - {e.get("unit") for e in listeners}):
+        fail(
+            "listeners",
+            f"{unit} is a [[listener]] of contacts.toml but not declared in expectations.toml",
+        )
     for s in facts["listeners"]:
         if not any(
-            e["process"] == s["process"] and e.get("port", s["port"]) == s["port"]
-            for e in expect.get("listener", [])
+            e["process"] == s["process"] and s["port"] in e["ports"] for e in listeners
         ):
             fail(
                 "listeners",
@@ -191,13 +241,13 @@ def evaluate(facts, expect, contacts):
             )
     fw = facts["firewall"]
     if fw is None and expect.get("firewall", {}).get("required"):
-        fail("firewall", "firewall-cmd is absent but the firewall is required")
+        fail("firewall", "firewall-cmd is not installed but the firewall is required")
     for zone, services in (fw or {}).items():
         want = sorted(expect.get("firewall", {}).get("zones", {}).get(zone, []))
         if services != want:
             fail("firewall", f"zone {zone} opens {services}, declared {want}")
 
-    # Exposure ceilings: a unit above its ceiling, or without one, fails.
+    # Exposure ceilings: a unit above its ceiling, without one, or never measured fails.
     ceilings = expect.get("security", {})
     for unit, exposure in sorted(facts["security"].items()):
         if unit not in ceilings:
@@ -210,6 +260,8 @@ def evaluate(facts, expect, contacts):
                 "security",
                 f"{unit} exposure {exposure} is above its ceiling {ceilings[unit]}",
             )
+    for unit in sorted(set(ceilings) - set(facts["security"])):
+        fail("security", f"{unit} has a ceiling but was not measured")
 
     allowed = set(expect.get("selinux", {}).get("allow", []))
     for key in facts["avc"]:
@@ -217,8 +269,6 @@ def evaluate(facts, expect, contacts):
             fail("selinux", f"denial {key} is not in the allow-list")
 
     pam, want = facts["pam"], expect.get("pam", {})
-    if pam["check_rc"] != 0:
-        fail("pam", f"authselect check exits {pam['check_rc']}")
     if pam["current"][:1] != [want.get("profile")]:
         fail(
             "pam",
@@ -236,11 +286,8 @@ def evaluate(facts, expect, contacts):
                 "pam", f"faillock {key} is {pam['faillock'].get(key)}, declared {value}"
             )
 
-    if facts["sysctl"]["rc"] != 0 or facts["sysctl"]["stderr"]:
-        fail(
-            "sysctl",
-            f"systemd-sysctl exit {facts['sysctl']['rc']}: {facts['sysctl']['stderr'][:200]}",
-        )
+    if facts["sysctl"]:
+        fail("sysctl", f"systemd-sysctl logged at boot: {facts['sysctl'][:200]}")
 
     for state in ("masked", "disabled"):
         for unit in expect.get("units", {}).get(state, []):
@@ -255,12 +302,6 @@ def evaluate(facts, expect, contacts):
         fail(
             "trust",
             f"verified.reason is {facts['trust'].get('reason')}, expected {reason}",
-        )
-
-    if facts["nix"]["build_rc"] != 0 or facts["nix"]["gc_rc"] != 0:
-        fail(
-            "nix",
-            f"build exit {facts['nix']['build_rc']}, gc exit {facts['nix']['gc_rc']}: {facts['nix']['stderr']}",
         )
     return bad
 

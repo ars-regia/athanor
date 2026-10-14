@@ -3,20 +3,25 @@
 # Calibrated against the image's own sources; the first acceptance run on a booted image
 # confirms it, and a finding is fixed in its own pull request, not by loosening a line.
 
-# Listeners: process name (15 characters at most, as ss prints it) and port. Each `unit` must
-# also be a [[listener]] of forge/config/contacts.toml.
+# Listeners: process name (15 characters at most, as ss prints it) and ports. Each `unit` must be
+# a [[listener]] of forge/config/contacts.toml and each of those must appear here. A process
+# without a unit listens for the machine itself and never reaches out on its own.
 [[listener]]
 process = "sshd"
-unit = "sshd.service" # the development VM is reached by SSH; new installs have it off
+ports = [22, 5000] # 5000: the acceptance registry tunnel (lib.sh); new installs have sshd off
+unit = "sshd.service"
 
 [[listener]]
 process = "systemd-resolve"
+ports = [53, 5355] # the local stub resolver on 127.0.0.53/54 and LLMNR; no unit in contacts.toml: it forwards to the DoT resolver already declared as the `dns` contact
 
 [[listener]]
 process = "NetworkManager"
+ports = [68] # its DHCP client socket on the local link
 
 [[listener]]
 process = "chronyd"
+ports = [323] # the chronyc command port on loopback; the time servers are the `ntp` contact
 
 [firewall]
 required = false
