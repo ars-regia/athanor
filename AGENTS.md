@@ -61,10 +61,10 @@ hours: never use it as a check.
   links in code, commits, pull requests or documents.
 - **One logical change per commit.** Report unrelated problems instead of fixing them in
   passing.
-- **At most five open pull requests** (suspended until the 0.9 tag, ADR-0112). With five
-  open, finish before starting: a new pull request waits until one is merged or closed, and
-  reviewers' findings on open ones are closed before new work begins. A branch without an
-  open pull request is merged, archived as a tag `archive/<branch>`, or deleted.
+- **At most five open pull requests** (no limit until the signed 0.9 tag, ADR-0112). With
+  five open, finish before starting: a new pull request waits until one is merged or closed,
+  and reviewers' findings on open ones are closed before new work begins. A branch without
+  an open pull request is merged, archived as a tag `archive/<branch>`, or deleted.
 - **Every class of defect an audit finds becomes an automatic check** in the pull request that
   fixes it, or an issue that names the check to add. Audit reports stay outside the public
   repository. When audits run and what they re-examine: `docs/operations/audits.md`.

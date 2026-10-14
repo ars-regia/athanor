@@ -172,11 +172,11 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0102 | 0102 | [Audit calendar and audit types](0102-audit-calendar.md) | accepted | process, security |
 | ADR-0103 | 0103 | [Audit 5 decisions and the scope of 1.0](0103-audit-5-decisions.md) | amended by ADR-0104, ADR-0107, ADR-0112 | platform, kernel, build, signing, security, shell, apps, docs |
 | ADR-0104 | 0104 | [Sign :latest automatically in its own release workflow; approve only the promotion to :stable](0104-release-workflow-and-stable-gate.md) | accepted | build, signing |
-| ADR-0105 | 0105 | [Four releases before 1.0: chain, base, defences, surface](0105-releases-before-1-0.md) | accepted | platform, build, signing, security, shell, docs, process |
+| ADR-0105 | 0105 | [Four releases before 1.0: chain, base, defences, surface](0105-releases-before-1-0.md) | amended by ADR-0112 | platform, build, signing, security, shell, docs, process |
 | ADR-0106 | 0106 | [Update chain decisions for release 0.3](0106-update-chain-decisions-2026-10-09.md) | accepted | update, build, signing, security, kernel |
 | ADR-0107 | 0107 | [Code-owner review with unowned low-risk paths](0107-code-owner-review-with-unowned-paths.md) | accepted | process, security |
 | ADR-0108 | 0108 | [A GitHub App for the bump and merge bots, with a review-only bypass](0108-bots-github-app.md) | accepted | process, security, build |
 | ADR-0109 | 0109 | [Weekly kernel bumps](0109-weekly-kernel-bumps.md) | accepted | kernel, build, process |
 | ADR-0110 | 0110 | [Promote the pull request's kernel build to the release](0110-kernel-artifact-promotion.md) | accepted | kernel, build, signing, process |
 | ADR-0111 | 0111 | [Approve pipeline revision 3 with its review fixes and four accepted risks](0111-pipeline-revision-3-approval.md) | accepted | build, signing, release, process |
-| ADR-0112 | 0112 | [Pace to 0.9: the D3 freeze lifted, the open pull request limit suspended](0112-pace-to-0-9.md) | accepted | process, docs, shell |
+| ADR-0112 | 0112 | [Pace to 0.9: the D3 freeze lifted, the open pull request limit suspended, S1 in 0.5](0112-pace-to-0-9.md) | accepted | process, docs, shell |
