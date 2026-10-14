@@ -3,7 +3,9 @@
 
 import importlib.util
 import pathlib
+import tempfile
 import unittest
+from unittest import mock
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "verify.py"
 spec = importlib.util.spec_from_file_location("verify", SCRIPT)
@@ -376,6 +378,18 @@ class PolkitModelTest(unittest.TestCase):
     def test_an_action_id_in_code_is_read_whole_hyphens_included(self):
         line = 'pub const ACTION: &str = "os.athanor.update.apply-multi-session";'
         self.assertEqual(verify.POLKIT_ACTION_IN_CODE.findall(line), ["os.athanor.update.apply-multi-session"])
+
+    def test_an_undeclared_hyphenated_action_in_code_fails_the_polkit_check(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "system/x/src").mkdir(parents=True)
+            (root / "system/x/src/main.rs").write_text('const A: &str = "os.athanor.x.apply-multi-session";\n')
+            (root / "system/x/os.athanor.x.policy").write_text('<policyconfig><action id="os.athanor.x.apply"/></policyconfig>\n')
+            (root / "system/x/x.spec").write_text("%{_datadir}/polkit-1/actions/os.athanor.x.policy\n")
+            with mock.patch.object(verify, "ROOT", root):
+                result = verify.check_polkit()
+        self.assertEqual(len(result.problems), 1, result.problems)
+        self.assertIn("os.athanor.x.apply-multi-session", result.problems[0])
 
 if __name__ == "__main__":
     unittest.main()
