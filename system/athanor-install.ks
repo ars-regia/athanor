@@ -111,6 +111,43 @@ set -eu
 cert=/usr/share/athanor/secureboot/athanor-secureboot.der
 esp_dir=/boot/efi/EFI/athanor
 
+show() {
+    for console in $(cat /sys/class/tty/console/active); do
+        case $console in
+            tty[0-9]*) ;;
+            *) echo "$1" >> "/dev/$console" ;;
+        esac
+    done
+    echo "$1" >> /dev/tty8
+}
+
+# An image built before the certificate was shipped (one installed from :stable before
+# its first promotion with it) has nothing to enrol. The installation goes on as it did
+# before the request existed, and the screen says so; the ISO acceptance fails such an
+# image (mok-cert-absent).
+if [ ! -e "$cert" ]; then
+    echo "athanor: $cert is absent: this image predates the Secure Boot key enrolment"
+    previous=$(fgconsole)
+    chvt 8
+    show "
+Athanor: this image predates the Secure Boot key enrolment, so none is requested.
+
+With Secure Boot on, this computer cannot start the installed system: turn Secure
+Boot off in the firmware settings. After the first update, an administrator
+enrols the key with:
+
+    sudo mokutil --import $cert
+
+Press Enter to finish the installation; it goes on by itself in two minutes.
+"
+    status=0
+    read -r -t 120 _ < /dev/tty8 || status=$?
+    # Over 128: the two minutes ran out. Anything else is a terminal that cannot be read.
+    [ "$status" -eq 0 ] || [ "$status" -gt 128 ]
+    chvt "$previous"
+    exit 0
+fi
+
 # Firmware without Secure Boot has no SecureBoot variable: shim verifies nothing there,
 # mokutil refuses every request, and there is nothing to enrol.
 if [ ! -e /sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c ]; then
@@ -169,15 +206,6 @@ fi
 mkdir -p "$esp_dir"
 cp "$cert" "$esp_dir/athanor-secureboot.der"
 
-show() {
-    for console in $(cat /sys/class/tty/console/active); do
-        case $console in
-            tty[0-9]*) ;;
-            *) echo "$1" >> "/dev/$console" ;;
-        esac
-    done
-    echo "$1" >> /dev/tty8
-}
 grouped="${password:0:4} ${password:4:4} ${password:8:4} ${password:12:4}"
 previous=$(fgconsole)
 chvt 8

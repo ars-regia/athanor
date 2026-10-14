@@ -259,6 +259,19 @@ class MokRequest(unittest.TestCase):
         self.assertEqual(self.block.read("mok.log"), "")
         self.assertEqual(self.block.read("dev/tty8"), "")
 
+    def test_an_image_without_the_certificate_says_so_and_installs(self):
+        # An image installed from :stable before its first promotion that ships the DER.
+        (self.tmp / "cert.der").unlink()
+        proc = self.block.run()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("predates the Secure Boot key enrolment", proc.stdout)
+        for console in ("dev/tty8", "dev/ttyS0"):
+            self.assertIn("predates the Secure Boot key enrolment", self.block.read(console))
+            self.assertNotIn("One-time password", self.block.read(console))
+        self.assertEqual(self.block.read("mok.log"), "")
+        self.assertEqual(self.block.read("calls"), "chvt 8\nchvt 6\n")
+        self.assertFalse((self.tmp / "esp/EFI/athanor").exists())
+
     def test_a_request_left_by_an_earlier_install_is_replaced(self):
         self.block.state({"request": "$6$old$lost"})
         proc = self.block.run()
