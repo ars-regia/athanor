@@ -10,9 +10,9 @@
 # branch BRANCH_PREFIX-<last word of the title, the new NVR>, pushed, and a PR with LABEL is
 # opened against BASE (default: the current branch; give it on a detached HEAD). A branch of
 # that name already on the remote, left by a run that failed after the push, stops the script
-# naming it: remove it, or open its PR by hand. The PR is never merged here. LABEL must exist:
-# .github/settings/labels.json declares it with its colour. Needs git and an
-# authenticated gh. The summary goes to $GITHUB_STEP_SUMMARY when it is set, else to stdout.
+# naming it: remove it, or open its PR by hand. The PR is never merged here. LABEL must be on
+# the repository, declared with its colour in .github/settings/labels.json: the script checks
+# it before the push and never creates it. Needs git and an authenticated gh. The summary goes to $GITHUB_STEP_SUMMARY when it is set, else to stdout.
 set -euo pipefail
 
 (($# >= 4 && $# <= 5)) || { sed -n '2,15p' "$0" >&2; exit 2; }
@@ -43,6 +43,10 @@ if [[ -n $open ]]; then
 fi
 if git ls-remote --exit-code --heads origin "$branch" > /dev/null; then
     echo "open_bump_pr.sh: the branch ${branch} is already on the remote without an open PR with the label ${label}: remove it or open its PR" >&2
+    exit 1
+fi
+if ! gh api "repos/{owner}/{repo}/labels/${label}" --silent; then
+    echo "open_bump_pr.sh: the label ${label} is not on the repository: declare it in .github/settings/labels.json and apply the settings" >&2
     exit 1
 fi
 git add -- "$path"
