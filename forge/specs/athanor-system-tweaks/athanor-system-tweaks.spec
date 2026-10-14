@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-system-tweaks
 Version:        1.0.0
-Release:        10%{?dist}
+Release:        11%{?dist}
 Summary:        Athanor OS athanor-system-tweaks
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -50,6 +50,10 @@ cp -a %{_sourcedir}/usr/lib/NetworkManager/conf.d/50-athanor-hostname.conf %{bui
 /usr/lib/tmpfiles.d/99-azoth-sysfs.conf
 /usr/lib/NetworkManager/conf.d/50-athanor-hostname.conf
 %changelog
+* Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-11
+- resolved: DNSOverTLS=opportunistic (was yes) until the captive-portal probe ships, then strict (ADR-0103 D11, amending ADR-0079 item 1); the captive-portal note in
+  50-athanor-hostname.conf describes both modes
+
 * Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
 - resolved: MulticastDNS=no (was resolve); mDNS is let in by the firewall's home zone only
 
