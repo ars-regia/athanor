@@ -152,6 +152,7 @@ class BuildImage(unittest.TestCase):
             self.assertEqual(args[args.index("--timestamp") + 1], epoch)
         self.assertEqual((self.dir / "podman.epoch").read_text().split(), ["unset", "unset"])
         self.assertIn("org.opencontainers.image.created=2026-09-15T10:00:00Z", self.calls()[-1])
+        self.assertIn(f"SOURCE_DATE_EPOCH=1789466400 sets the created and version labels only; the layers carry {epoch}", r.stderr)
 
     def test_every_image_names_the_commit_it_was_built_from(self):
         self.artifacts_file()

@@ -111,6 +111,8 @@ done
 epoch=$(sed -n 's/^ARG SOURCE_DATE_EPOCH=//p' "$ROOT/system/Containerfile")
 [[ $epoch =~ ^[0-9]+$ ]] || { echo "${0##*/}: system/Containerfile declares no ARG SOURCE_DATE_EPOCH=<seconds>" >&2; exit 2; }
 now=${SOURCE_DATE_EPOCH:-$(date -u +%s)}
+[[ -z ${SOURCE_DATE_EPOCH:-} ]] ||
+  echo "${0##*/}: note: SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH sets the created and version labels only; the layers carry $epoch of system/Containerfile" >&2
 unset SOURCE_DATE_EPOCH
 # docker format: the OCI format has no SHELL instruction and podman would drop the
 # bash -o pipefail the Containerfile sets for every RUN, in the system stage image as well.
