@@ -6,8 +6,11 @@ use crate::tools::Tools;
 
 /// logind, as far as the requests need it.
 pub trait Power {
-    /// A block inhibitor on shutdown is held, or logind could not say: the answer fails closed.
-    async fn blocked(&self) -> bool;
+    /// Whether a block inhibitor on shutdown is held.
+    ///
+    /// # Errors
+    /// [`Refusal::Failed`] when logind could not say: the request is refused, never waved through.
+    async fn blocked(&self) -> Result<bool, Refusal>;
     /// `login1.Manager.Reboot(false)`: inhibitors honoured, never the skip-inhibitors flag.
     async fn reboot(&self) -> Result<(), RebootError>;
 }
@@ -66,7 +69,7 @@ pub async fn apply<T: Tools, P: Power>(ctx: &Context<'_, T>, power: &P) -> Resul
     }
     // A courtesy that keeps the deployment locked in the common case. The authority is
     // logind's own check inside Reboot, handled below.
-    if power.blocked().await {
+    if power.blocked().await? {
         return Err(Refusal::Blocked);
     }
     ctx.tools.apply_downloaded().map_err(|_| Refusal::Failed)?;
@@ -91,7 +94,7 @@ pub async fn go_back<T: Tools, P: Power>(ctx: &Context<'_, T>, power: &P) -> Res
     if status.rollback.is_none() {
         return Err(Refusal::NoPreviousVersion);
     }
-    if power.blocked().await {
+    if power.blocked().await? {
         return Err(Refusal::Blocked);
     }
     // Held first: if the rollback then fails, the worst case is a digest not offered again.
@@ -114,19 +117,19 @@ mod tests {
     use std::cell::Cell;
 
     struct FakePower {
-        blocked: bool,
+        blocked: Result<bool, Refusal>,
         reboot: Result<(), RebootError>,
         rebooted: Cell<bool>,
     }
 
     impl FakePower {
         fn new(blocked: bool, reboot: Result<(), RebootError>) -> Self {
-            Self { blocked, reboot, rebooted: Cell::new(false) }
+            Self { blocked: Ok(blocked), reboot, rebooted: Cell::new(false) }
         }
     }
 
     impl Power for FakePower {
-        async fn blocked(&self) -> bool {
+        async fn blocked(&self) -> Result<bool, Refusal> {
             self.blocked
         }
         async fn reboot(&self) -> Result<(), RebootError> {
@@ -178,6 +181,15 @@ mod tests {
         let (tools, power) = (downloaded(), FakePower::new(true, Ok(())));
         assert_eq!(apply(&machine.ctx(&tools, 5000), &power).await, Err(Refusal::Blocked));
         assert!(tools.calls.borrow().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_unanswered_inhibitor_query_refuses_as_failed_and_unlocks_nothing() {
+        let machine = Machine::new("apply-unanswered", &["real/k1.pub"]);
+        let tools = downloaded();
+        let power = FakePower { blocked: Err(Refusal::Failed), ..FakePower::new(false, Ok(())) };
+        assert_eq!(apply(&machine.ctx(&tools, 5000), &power).await, Err(Refusal::Failed));
+        assert!(tools.calls.borrow().is_empty() && !power.rebooted.get());
     }
 
     #[tokio::test]

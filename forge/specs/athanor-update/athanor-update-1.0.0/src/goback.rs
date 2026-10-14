@@ -44,7 +44,7 @@ fn describe(name: &str, detail: Option<&str>) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::io::{BufRead, BufReader};
     use std::process::{Child, Command, Stdio};
     use std::{env, fs, path::PathBuf, process};
@@ -56,14 +56,14 @@ mod tests {
     use crate::serve::Error;
 
     /// A private dbus-daemon, as the tests of `athanor-shelld` use.
-    struct Bus {
+    pub(crate) struct Bus {
         daemon: Child,
         address: String,
         dir: PathBuf,
     }
 
     impl Bus {
-        fn start(name: &str) -> Bus {
+        pub(crate) fn start(name: &str) -> Bus {
             let dir = env::temp_dir().join(format!("athanor-update-{name}-{}", process::id()));
             fs::create_dir_all(&dir).expect("mkdir");
             // A configuration of our own: `--session` reads the distribution's session.conf,
@@ -94,7 +94,7 @@ mod tests {
             Bus { daemon, address: address.trim().to_owned(), dir }
         }
 
-        fn builder(&self) -> Builder<'static> {
+        pub(crate) fn builder(&self) -> Builder<'static> {
             Builder::address(self.address.as_str()).expect("address")
         }
     }
