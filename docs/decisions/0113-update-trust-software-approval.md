@@ -21,7 +21,7 @@ aligned:
   short-lived online signing key and a timestamp, clients pin the root, and the interim for
   the Machine Owner Key is a signed key set with a not-after date and revocation.
 - UT6 gives `os.athanor.update.apply` the defaults `auth_admin_keep` / `auth_admin_keep` /
-  `yes`, with no case for the sessions of other users. D22 asks an administrator when other
+  `yes`, with no case for other sessions. D22 asks an administrator when other
   sessions exist, allows the active session alone, and has `blocked()` fail closed; the
   service's inhibitor query answers "not blocked" today when it fails.
 
@@ -32,11 +32,15 @@ the disk utility, Firefox is the Flatpak ([ADR-0097](0097-owners-execution-firef
 and Bazaar follows the Fedora 45 base ([A2-28](0065-bazaar-waits-for-fedora-45.md), D8). The
 table of decision 7 still read as before section 9.
 
-ADR-0112 (#417) lifts the freeze of ADR-0103 D3 on specification revisions.
+The freeze of ADR-0103 D3 on specification revisions is lifted by ADR-0112, the record
+proposed in #417; this approval relies on it.
 
 ## Decision
 
-Decided by the maintainer on 2026-10-14.
+The maintainer approved both revisions on 2026-10-14, with the text aligned to ADR-0103 and
+to section 9. The alignment follows D22 literally; where it needs a mechanism D22 does not
+name, the mechanism below is the one this record writes into UT6, with its reason, and not
+a decision of the maintainer's own.
 
 1. **`doc_update_trust.md` revision 4 is approved, with UT2 and UT6 aligned to ADR-0103 D5
    and D22.**
@@ -45,17 +49,20 @@ Decided by the maintainer on 2026-10-14.
      not-after date, revocation by the root, and the Machine Owner Key's interim key set.
    - UT6 adds a second polkit action, `os.athanor.update.apply-multi-session`,
      `auth_admin` for every subject and never kept. The service lists logind's sessions
-     when `Apply()` arrives and checks that action while a `user` session of another uid is
-     open, and `os.athanor.update.apply` otherwise; a failed count checks the stricter
-     action. The alternative, the service refusing or escalating on its own, was weighed and
+     when `Apply()` arrives and checks that action while any session other than the
+     caller's is open, of the same uid or another; only the classes `greeter`,
+     `lock-screen`, `background`, `background-light`, `manager`, `manager-early` and `none`
+     do not count. Otherwise it checks `os.athanor.update.apply`. A failed `ListSessions`,
+     an unreadable class or an unknown caller session checks the stricter action, and the
+     service counts again just before the unlock. The alternative, the service refusing or escalating on its own, was weighed and
      not taken: the defaults of one polkit action are fixed and a rule cannot see the other
      sessions, so polkit asks for an administrator in this case only through an action of
      its own, and a refusal would leave an administrator no way to apply from the desktop.
      The second action is the pattern of logind's own `reboot` and
      `reboot-multiple-sessions`, whose defaults UT6 already follows.
    - The inhibitor check before `Apply()` and `GoBack()` fails closed: a failed or unreadable
-     `ListInhibitors` counts as blocked, and the request is refused before anything is
-     unlocked.
+     `ListInhibitors` refuses the request as failed, not as blocked, because no inhibitor was
+     seen, and nothing is unlocked.
    - `doc_threat_model.md` TM9 notes the second action on the row of
      `os.athanor.update.apply`; the action gets its own row in the change that declares it,
      as TM9 requires.
@@ -70,8 +77,12 @@ Decided by the maintainer on 2026-10-14.
 
 - Both documents may be implemented as approved. The `.policy` file, the service's session
   count and the fail-closed inhibitor query of D22 land in a later pull request, which adds
-  the TM9 row of `os.athanor.update.apply-multi-session` and the acceptance case of UT6.
+  the TM9 row of `os.athanor.update.apply-multi-session` and the other-session cases of
+  acceptance item 2.
 - The key hierarchy of D5 still waits for the LUKS2 key backup; its mechanism is specified by
   the revision that builds it.
 - ADR-0103's Consequences name UT2, UT6 and TM9 among the texts to align; this change aligns
   them, and the specifications now carry D5 and D22.
+- This record amends ADR-0103 D22 in its mechanism only: the second polkit action, the
+  classes that do not count, the second count before the unlock, and the refusal as
+  failed when the inhibitor query fails. What D22 decides is unchanged.
