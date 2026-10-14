@@ -995,6 +995,19 @@ mod tests {
     }
 
     #[test]
+    #[allow(unsafe_code)]
+    fn a_comparison_leaves_the_threads_locale_as_it_found_it() {
+        let collator = Collator::new("en_US.UTF-8").expect("the locale is installed");
+        // SAFETY: a null locale only asks for the thread's current one.
+        let before = unsafe { libc::uselocale(std::ptr::null_mut()) };
+        collator.compare("dan", "Zoe");
+        // SAFETY: as above.
+        let after = unsafe { libc::uselocale(std::ptr::null_mut()) };
+        assert_eq!(after, before);
+        assert_ne!(after, collator.0);
+    }
+
+    #[test]
     fn the_collation_locale_comes_from_locale_conf_when_the_environment_names_none() {
         // The environment of the test run decides first; only its absence is testable here.
         if ["LC_ALL", "LC_COLLATE", "LANG"]
