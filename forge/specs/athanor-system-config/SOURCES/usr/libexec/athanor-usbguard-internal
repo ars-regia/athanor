@@ -60,7 +60,10 @@ device_rule() {
         echo "<4>Skipping $name: its descriptor cannot be read." >&2
         return 1
     fi
-    [[ -r $dev/serial ]] && { attr "$dev/serial" serial || serial=; }
+    if [[ -e $dev/serial ]] && ! attr "$dev/serial" serial; then
+        echo "<4>Skipping $vid:$pid on $name: its serial cannot be read." >&2
+        return 1
+    fi
     if [[ ! $vid =~ ^[0-9a-f]{4}$ || ! $pid =~ ^[0-9a-f]{4}$ || ! $name =~ ^[0-9A-Za-z.-]+$ ||
         ! $serial =~ ^[0-9A-Za-z._:+\ -]*$ ]]; then
         echo "<4>Skipping $name: a descriptor holds characters a rule cannot carry." >&2

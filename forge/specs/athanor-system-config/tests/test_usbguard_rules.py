@@ -18,6 +18,7 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -139,14 +140,14 @@ class InternalSnapshot(unittest.TestCase):
             (f / "bInterfaceSubClass").write_text(sub + "\n")
             (f / "bInterfaceProtocol").write_text(proto + "\n")
 
-    def run_script(self, sync=None, check=True):
+    def run_script(self, sync=None, check=True, wait_tenths=2):
         """Runs the script; `sync` is the body of a stand-in for sync(1), put first on PATH."""
         env = dict(
             os.environ,
             ATHANOR_USB_SYSFS=str(self.sysfs),
             ATHANOR_USBGUARD_RULES=str(self.rules),
             ATHANOR_USBGUARD_MARKER=str(self.marker),
-            ATHANOR_USBGUARD_WAIT_TENTHS="2",
+            ATHANOR_USBGUARD_WAIT_TENTHS=str(wait_tenths),
         )
         if sync is not None:
             bin_dir = self.work / "bin"
@@ -233,6 +234,52 @@ class InternalSnapshot(unittest.TestCase):
         done = self.run_script()
         self.assertEqual(len(self.written()), 1)
         self.assertIn("Skipping 0c45:6a10 on 1-1", done.stderr)
+
+    def test_the_wait_lets_a_device_finish_enumerating(self):
+        self.device("1-1", "0c45", "6a10", [], configured=False)
+        d = self.sysfs / "1-1"
+
+        def finish():
+            (d / "bConfigurationValue").write_text("1\n")
+            f = d / "1-1:1.0"
+            f.mkdir()
+            for name, value in (("Class", "0e"), ("SubClass", "01"), ("Protocol", "00")):
+                (f / f"bInterface{name}").write_text(value + "\n")
+
+        timer = threading.Timer(0.4, finish)
+        timer.start()
+        self.addCleanup(timer.join)
+        self.run_script(wait_tenths=50)
+        self.assertEqual(len(self.written()), 1)
+        self.assertIn("0c45:6a10", self.written()[0])
+
+    def test_an_empty_configuration_value_is_not_configured(self):
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
+        (self.sysfs / "1-1/bConfigurationValue").write_text("\n")
+        done = self.run_script()
+        self.assertEqual(self.written(), [])
+        self.assertIn("not configured", done.stderr)
+
+    def test_the_rules_file_is_the_renamed_temporary_file(self):
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
+        log = self.work / "inodes.log"
+        self.run_script(sync=f'if [[ -f "$2" ]]; then stat -c %i "$2" >> {log}; fi\n')
+        first = log.read_text().split()[0]
+        self.assertEqual(str(self.rules.stat().st_ino), first)
+        self.assertEqual(list(self.work.glob("50-athanor-internal.conf.*")), [])
+
+    def test_a_serial_that_cannot_be_read_skips_the_device(self):
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
+        (self.sysfs / "1-1/serial").mkdir()  # reading a directory fails, as a vanished file does
+        self.device("1-2", "058f", "9540", [("0b", "00", "00")])
+        done = self.run_script()
+        self.assertEqual(len(self.written()), 1)
+        self.assertIn("serial cannot be read", done.stderr)
+
+    def test_a_missing_serial_is_an_empty_serial(self):
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
+        self.run_script()
+        self.assertIn('serial ""', self.written()[0])
 
     def test_unit_orders_before_usbguard_and_runs_once(self):
         unit = UNIT.read_text()
