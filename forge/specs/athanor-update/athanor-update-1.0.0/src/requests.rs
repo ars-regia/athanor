@@ -2,7 +2,7 @@
 //! the bus, polkit and logind around them.
 use crate::check::Context;
 use crate::sigobj;
-use crate::tools::Tools;
+use crate::tools::{Deployed, Status, Tools};
 
 pub const ACTION_APPLY: &str = "os.athanor.update.apply";
 /// `Apply()` while another session is open: a restart ends that work too (ADR-0103 D22).
@@ -64,6 +64,24 @@ fn republish<T: Tools>(ctx: &Context<'_, T>) {
     }
 }
 
+/// The staged deployment `Apply()` may unlock: downloaded and locked, newer than the booted
+/// one, not held, and on a repository the policy in force covers.
+fn downloaded<'s, T: Tools>(ctx: &Context<'_, T>, status: &'s Status) -> Option<&'s Deployed> {
+    // bootc rollback discards the staged deployment; one staged after it would replace the
+    // queued return (doc_recovery.md, R5), so a queued rollback has nothing to apply.
+    if status.rollback_queued {
+        return None;
+    }
+    let policy = crate::policy::in_force(&ctx.policy);
+    status.staged.as_ref().filter(|staged| {
+        staged.download_only
+            && status.booted.enforcing
+            && policy.scopes.contains_key(sigobj::repository_of(&status.booted.image))
+            && staged.build_time > status.booted.build_time
+            && ctx.store.held().as_deref() != Some(staged.digest.as_str())
+    })
+}
+
 /// `Apply()`: unlock what the timer downloaded and reboot, in one request. Never downloads.
 /// With another session open it asks for [`ACTION_APPLY_MULTI_SESSION`], counted when the
 /// request arrives and again before the reboot (UT6, ADR-0103 D22).
@@ -73,21 +91,11 @@ fn republish<T: Tools>(ctx: &Context<'_, T>) {
 pub async fn apply<T: Tools, P: Power, C: Caller>(ctx: &Context<'_, T>, power: &P, caller: &C) -> Result<(), Refusal> {
     let others = caller.others_open().await;
     caller.authorize(if others { ACTION_APPLY_MULTI_SESSION } else { ACTION_APPLY }).await?;
-    let _lock = ctx.store.try_lock().map_err(|_| Refusal::Busy)?;
+    let mut lock = ctx.store.try_lock().map_err(|_| Refusal::Busy)?;
     let status = ctx.tools.status().map_err(|_| Refusal::Failed)?;
-    let policy = crate::policy::in_force(&ctx.policy);
-    // bootc rollback discards the staged deployment; one staged after it would replace the
-    // queued return (doc_recovery.md, R5), so a queued rollback has nothing to apply.
-    let ready = !status.rollback_queued && status.staged.as_ref().is_some_and(|staged| {
-        staged.download_only
-            && status.booted.enforcing
-            && policy.scopes.contains_key(sigobj::repository_of(&status.booted.image))
-            && staged.build_time > status.booted.build_time
-            && ctx.store.held().as_deref() != Some(staged.digest.as_str())
-    });
-    if !ready {
+    let Some(staged) = downloaded(ctx, &status).cloned() else {
         return Err(Refusal::NothingDownloaded);
-    }
+    };
     // A courtesy that keeps the deployment locked in the common case. The authority is
     // logind's own check inside Reboot, handled below.
     if power.blocked().await? {
@@ -104,7 +112,20 @@ pub async fn apply<T: Tools, P: Power, C: Caller>(ctx: &Context<'_, T>, power: &
             tracing::error!("the deployment could not be locked again: it applies at the next shutdown");
             return Err(Refusal::Failed);
         }
+        // The prompt can wait for minutes: checks and other requests are not held up by it.
+        drop(lock);
         caller.authorize(ACTION_APPLY_MULTI_SESSION).await?;
+        lock = ctx.store.try_lock().map_err(|_| Refusal::Busy)?;
+        // A check or another request may have run during the prompt: only the deployment
+        // the caller was asked about is unlocked, and only while nothing inhibits a restart.
+        let now = ctx.tools.status().map_err(|_| Refusal::Failed)?;
+        if downloaded(ctx, &now) != Some(&staged) {
+            tracing::error!("the staged deployment changed while polkit was asked: it stays locked");
+            return Err(Refusal::Failed);
+        }
+        if power.blocked().await? {
+            return Err(Refusal::Blocked);
+        }
         ctx.tools.apply_downloaded().map_err(|_| Refusal::Failed)?;
         republish(ctx);
     }
@@ -115,6 +136,7 @@ pub async fn apply<T: Tools, P: Power, C: Caller>(ctx: &Context<'_, T>, power: &
         republish(ctx);
         return Err(err.into());
     }
+    drop(lock);
     Ok(())
 }
 
@@ -151,20 +173,20 @@ mod tests {
     use std::cell::{Cell, RefCell};
 
     struct FakePower {
-        blocked: Result<bool, Refusal>,
+        blocked: Cell<Result<bool, Refusal>>,
         reboot: Result<(), RebootError>,
         rebooted: Cell<bool>,
     }
 
     impl FakePower {
         fn new(blocked: bool, reboot: Result<(), RebootError>) -> Self {
-            Self { blocked: Ok(blocked), reboot, rebooted: Cell::new(false) }
+            Self { blocked: Cell::new(Ok(blocked)), reboot, rebooted: Cell::new(false) }
         }
     }
 
     impl Power for FakePower {
         async fn blocked(&self) -> Result<bool, Refusal> {
-            self.blocked
+            self.blocked.get()
         }
         async fn reboot(&self) -> Result<(), RebootError> {
             self.rebooted.set(self.reboot.is_ok());
@@ -179,11 +201,13 @@ mod tests {
         grants: &'a [&'a str],
         tools: &'a Fake,
         asked: RefCell<Vec<(String, Vec<String>)>>,
+        /// Runs while polkit is asked, as the prompt waits.
+        meanwhile: Option<&'a dyn Fn(&str)>,
     }
 
     impl<'a> FakeCaller<'a> {
         fn new(tools: &'a Fake, counts: &[bool], grants: &'a [&'a str]) -> Self {
-            Self { counts: RefCell::new(counts.iter().copied().collect()), grants, tools, asked: RefCell::new(Vec::new()) }
+            Self { counts: RefCell::new(counts.iter().copied().collect()), grants, tools, asked: RefCell::new(Vec::new()), meanwhile: None }
         }
 
         /// No other session at either count, and polkit grants everything.
@@ -202,6 +226,9 @@ mod tests {
         }
         async fn authorize(&self, action: &str) -> Result<(), Refusal> {
             self.asked.borrow_mut().push((action.into(), self.tools.calls.borrow().clone()));
+            if let Some(meanwhile) = self.meanwhile {
+                meanwhile(action);
+            }
             if self.grants.contains(&action) {
                 Ok(())
             } else {
@@ -261,7 +288,7 @@ mod tests {
     async fn an_unanswered_inhibitor_query_refuses_as_failed_and_unlocks_nothing() {
         let machine = Machine::new("apply-unanswered", &["real/k1.pub"]);
         let tools = downloaded();
-        let power = FakePower { blocked: Err(Refusal::Failed), ..FakePower::new(false, Ok(())) };
+        let power = FakePower { blocked: Cell::new(Err(Refusal::Failed)), ..FakePower::new(false, Ok(())) };
         assert_eq!(apply(&machine.ctx(&tools, 5000), &power, &FakeCaller::alone(&tools)).await, Err(Refusal::Failed));
         assert!(tools.calls.borrow().is_empty() && !power.rebooted.get());
     }
@@ -316,8 +343,10 @@ mod tests {
         assert!(tools.calls.borrow().is_empty() && !power.rebooted.get());
     }
 
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn a_session_opened_before_the_reboot_is_asked_about_with_the_deployment_locked() {
+        let _spawn = no_spawn();
         let machine = Machine::new("apply-second-count", &["real/k1.pub"]);
         let (tools, power) = (downloaded(), FakePower::new(false, Ok(())));
         let caller = FakeCaller::new(&tools, &[false, true], &[ACTION_APPLY, ACTION_APPLY_MULTI_SESSION]);
@@ -327,6 +356,64 @@ mod tests {
         assert_eq!(*tools.calls.borrow(), ["apply_downloaded", "relock", "apply_downloaded"], "unlocked again only once granted");
         assert!(power.rebooted.get());
         assert_eq!(published(&machine), UpdateState::WillApplyAtNextShutdown);
+    }
+
+    /// Held by a test whose request releases the store lock and takes it again (SPAWN).
+    fn no_spawn() -> std::sync::MutexGuard<'static, ()> {
+        crate::goback::tests::SPAWN.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    // SPAWN is held across the request on purpose: no test may fork while the store lock is
+    // released and taken again, or the next try_lock meets the child's copy and says busy.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn the_second_prompt_waits_with_the_store_lock_free() {
+        let _spawn = no_spawn();
+        let machine = Machine::new("apply-second-unheld", &["real/k1.pub"]);
+        let (tools, power) = (downloaded(), FakePower::new(false, Ok(())));
+        let free = RefCell::new(Vec::new());
+        let probe = |action: &str| free.borrow_mut().push((action.to_owned(), machine.store.try_lock().is_ok()));
+        let caller = FakeCaller { meanwhile: Some(&probe), ..FakeCaller::new(&tools, &[false, true], &[ACTION_APPLY, ACTION_APPLY_MULTI_SESSION]) };
+        assert_eq!(apply(&machine.ctx(&tools, 5000), &power, &caller).await, Ok(()));
+        assert_eq!(*free.borrow(), [(ACTION_APPLY.to_owned(), true), (ACTION_APPLY_MULTI_SESSION.to_owned(), true)]);
+        assert!(power.rebooted.get());
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_deployment_changed_during_the_second_prompt_stays_locked() {
+        let _spawn = no_spawn();
+        let machine = Machine::new("apply-second-changed", &["real/k1.pub"]);
+        let (tools, power) = (downloaded(), FakePower::new(false, Ok(())));
+        let restaged = |action: &str| {
+            if action == ACTION_APPLY_MULTI_SESSION {
+                tools.status.borrow_mut().staged = Some(Deployed { download_only: true, ..deployed(&digest(3), 3000) });
+            }
+        };
+        let caller = FakeCaller { meanwhile: Some(&restaged), ..FakeCaller::new(&tools, &[false, true], &[ACTION_APPLY, ACTION_APPLY_MULTI_SESSION]) };
+        assert_eq!(apply(&machine.ctx(&tools, 5000), &power, &caller).await, Err(Refusal::Failed));
+        assert_eq!(*tools.calls.borrow(), ["apply_downloaded", "relock"], "never unlocked again");
+        assert!(!power.rebooted.get());
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn an_inhibitor_taken_during_the_second_prompt_is_honoured() {
+        let _spawn = no_spawn();
+        for (case, inhibitor, refusal) in [("blocked", Ok(true), Refusal::Blocked), ("unanswered", Err(Refusal::Failed), Refusal::Failed)] {
+            let machine = Machine::new(&format!("apply-second-{case}"), &["real/k1.pub"]);
+            let (tools, power) = (downloaded(), FakePower::new(false, Ok(())));
+            let inhibit = |action: &str| {
+                if action == ACTION_APPLY_MULTI_SESSION {
+                    power.blocked.set(inhibitor);
+                }
+            };
+            let caller = FakeCaller { meanwhile: Some(&inhibit), ..FakeCaller::new(&tools, &[false, true], &[ACTION_APPLY, ACTION_APPLY_MULTI_SESSION]) };
+            assert_eq!(apply(&machine.ctx(&tools, 5000), &power, &caller).await, Err(refusal), "{case}");
+            assert_eq!(*tools.calls.borrow(), ["apply_downloaded", "relock"], "{case}: never unlocked again");
+            assert!(!power.rebooted.get(), "{case}");
+            assert_eq!(published(&machine), UpdateState::Downloaded, "{case}");
+        }
     }
 
     #[tokio::test]

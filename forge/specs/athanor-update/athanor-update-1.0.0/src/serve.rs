@@ -552,6 +552,39 @@ mod tests {
         assert!(count("count-undetermined", Seats { by_pid: None, ..alone() }).await, "a caller without a session");
     }
 
+    /// polkit answering every check with an error, not a "no".
+    struct BrokenPolkit;
+
+    #[zbus::interface(name = "org.freedesktop.PolicyKit1.Authority")]
+    impl BrokenPolkit {
+        fn check_authorization(
+            &self,
+            _subject: (String, std::collections::HashMap<String, OwnedValue>),
+            _action: String,
+            _details: std::collections::HashMap<String, String>,
+            _flags: u32,
+            _cancellation: String,
+        ) -> zbus::fdo::Result<(bool, bool, std::collections::HashMap<String, String>)> {
+            Err(zbus::fdo::Error::Failed("polkit failed".into()))
+        }
+    }
+
+    #[tokio::test]
+    async fn a_polkit_that_errs_or_is_absent_does_not_authorize() {
+        for (name, broken) in [("polkit-errs", true), ("polkit-absent", false)] {
+            let bus = crate::goback::tests::Bus::start(name);
+            let mut service = None;
+            if broken {
+                let builder = bus.builder().name("org.freedesktop.PolicyKit1").expect("name").serve_at("/org/freedesktop/PolicyKit1/Authority", BrokenPolkit).expect("serve");
+                service = Some(builder.build().await.expect("polkit"));
+            }
+            let client = bus.builder().build().await.expect("client");
+            let caller = Sender { conn: &client, name: client.unique_name().expect("unique name").to_string(), session: None };
+            assert_eq!(caller.authorize(requests::ACTION_APPLY).await, Err(Refusal::NotAuthorized), "{name}");
+            drop(service);
+        }
+    }
+
     #[test]
     fn an_activity_is_busy_until_its_call_ends() {
         let activity = Arc::new(Activity::default());
