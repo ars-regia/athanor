@@ -721,8 +721,7 @@ is never the Secure Boot key: a compromise of one must not give the other (D43).
 verified TPM quote and with the dm-verity option, the active IPE class derived from PCR 11 and the PCR 12 event log (D38, section 10).
 Keylime's example measured-boot policy considers PCRs 0–9 and 14 only, so a dedicated
 policy covers PCR 11 and the command line events of the allowed role sets in PCR 12. The
-attestation code in the repository today returns fixed results and quotes the wrong PCRs;
-it is replaced, with the maintainer's approval, before any mesh admission depends on it.
+attestation code the repository held returned fixed results and quoted the wrong PCRs.
 Amended 2026-10-06 (maintainer decision A2-9 (#151)): attestation is outside the threat
 model of 1.0 (`doc_threat_model.md`, TM7). Decided 2026-10-14 by the maintainer
 (ADR-0103 D10, reversing ADR-0087): `athanor-attestation` is deleted; a Keylime attestation

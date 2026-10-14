@@ -17,8 +17,8 @@ paths:
      configured and loaded for none of its files. `verify.py agent-docs` now fails a glob
      that matches no tracked file. -->
 
-You are working on a security component. `system/athanor-bus-api/src/polkit.rs` and
-attestation, including the signed release attestation, are stop-and-ask areas (`AGENTS.md`):
+You are working on a security component. `system/athanor-bus-api/src/polkit.rs`,
+`forge/scripts/sign_attest.sh` and any new attestation code are stop-and-ask areas (`AGENTS.md`):
 confirm with the contributor before editing them.
 
 ## No security theatre
