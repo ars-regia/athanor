@@ -237,6 +237,67 @@ class Expectations(unittest.TestCase):
         f["rc"]["avc"]["rc"] = 1
         self.assertEqual(failed(f), set())
 
+    def collect_with(self, calls, which=None):
+        """collect() with the commands stubbed: calls maps a command line to (rc, stdout, stderr)."""
+        real_run, real_which = probes.run, probes.shutil.which
+        probes.run = lambda argv, sudo=False: calls.get(" ".join(argv), (0, "", ""))
+        probes.shutil.which = lambda *a, **k: which
+        try:
+            return probes.collect()
+        finally:
+            probes.run, probes.shutil.which = real_run, real_which
+
+    def firewall_checks(self, facts):
+        return [
+            d for c, d in probes.evaluate(facts, EXPECT, CONTACTS) if c == "firewall"
+        ]
+
+    def test_collect_keeps_one_probe_key_per_zone(self):
+        calls = {
+            "firewall-cmd --get-active-zones": (
+                0,
+                "work\n  interfaces: a\npublic\n  interfaces: b\n",
+                "",
+            ),
+            "firewall-cmd --zone=work --list-services": (1, "", "boom"),
+            "firewall-cmd --zone=public --list-services": (0, "dhcpv6-client\n", ""),
+        }
+        facts = self.collect_with(calls, which="/usr/bin/firewall-cmd")
+        self.assertEqual(facts["rc"]["firewall:work"]["rc"], 1)
+        self.assertEqual(facts["rc"]["firewall:public"]["rc"], 0)
+        self.assertTrue(any("firewall:work" in d for d in self.firewall_checks(facts)))
+
+    def test_the_public_zone_as_the_image_declares_it_is_accepted(self):
+        calls = {
+            "firewall-cmd --get-active-zones": (0, "public\n  interfaces: b\n", ""),
+            "firewall-cmd --zone=public --list-services": (0, "dhcpv6-client\n", ""),
+        }
+        facts = self.collect_with(calls, which="/usr/bin/firewall-cmd")
+        self.assertEqual(facts["firewall"], {"public": ["dhcpv6-client"]})
+        self.assertEqual(self.firewall_checks(facts), [])
+        f = good()
+        f["firewall"] = {"public": ["dhcpv6-client"]}
+        self.assertEqual(failed(f), set())
+
+    def test_networkmanager_dhcpv6_is_accepted(self):
+        f = good()
+        f["listeners"].append(
+            {"proto": "udp", "address": "::", "port": 546, "process": "NetworkManager"}
+        )
+        self.assertEqual(failed(f), set())
+
+    def test_an_absent_firewall_cmd_passes_unless_required(self):
+        facts = self.collect_with({}, which=None)
+        self.assertIsNone(facts["firewall"])
+        self.assertNotIn("firewall", facts["rc"])
+        self.assertEqual(self.firewall_checks(facts), [])
+
+    def test_a_present_firewall_cmd_that_fails_fails_the_check(self):
+        calls = {"firewall-cmd --get-active-zones": (1, "", "FirewallD is not running")}
+        facts = self.collect_with(calls, which="/usr/bin/firewall-cmd")
+        self.assertEqual(facts["rc"]["firewall"]["rc"], 1)
+        self.assertEqual(len(self.firewall_checks(facts)), 1)
+
     def test_collect_fails_trust_on_a_state_that_is_not_json(self):
         calls = {"cat /run/athanor-update/state.json": (0, "not json", "")}
         real_run, real_which = probes.run, probes.shutil.which
