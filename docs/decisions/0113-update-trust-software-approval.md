@@ -58,8 +58,10 @@ a decision of the maintainer's own.
      an unreadable class or an unknown caller session checks the stricter action. The
      caller's session is the logind session of the sender's PID from the bus daemon
      (`GetSessionByPID`), or its user's display session when the caller has none, as polkit
-     assigns it. The service counts again after the unlock, immediately before the reboot,
-     and re-locks finalization when that check refuses. The alternative, the service refusing or escalating on its own, was weighed and
+     assigns it. The service counts again after the unlock, immediately before the reboot;
+     when that count selects the stricter action, it re-locks finalization first, checks
+     the action, and unlocks again and reboots only when it is granted, so no prompt waits
+     on an unlocked deployment. The alternative, the service refusing or escalating on its own, was weighed and
      not taken: the defaults of one polkit action are fixed and a rule cannot see the other
      sessions, so polkit asks for an administrator in this case only through an action of
      its own, and a refusal would leave an administrator no way to apply from the desktop.
