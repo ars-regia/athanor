@@ -518,7 +518,7 @@ msgid "The last update was refused by the policy"
 msgstr ""
 
 #: src/ui/shield.rs:325
-msgid "You went back from the newest version; only a newer one is offered"
+msgid "The offered version is held back: you went back from it, or it did not start. Only a newer one is offered"
 msgstr ""
 
 #: src/ui/shield.rs:327

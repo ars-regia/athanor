@@ -510,8 +510,8 @@ msgid "The last update was refused by the policy"
 msgstr "L'ultimo aggiornamento è stato rifiutato dalla policy"
 
 #: src/ui/shield.rs:325
-msgid "You went back from the newest version; only a newer one is offered"
-msgstr "Sei tornato indietro dalla versione più recente; verrà proposta solo una versione più nuova"
+msgid "The offered version is held back: you went back from it, or it did not start. Only a newer one is offered"
+msgstr "La versione proposta è trattenuta: ci sei tornato indietro, oppure non si è avviata. Verrà proposta solo una versione più nuova"
 
 #: src/ui/shield.rs:327
 msgid "This version is older than one this machine has run"

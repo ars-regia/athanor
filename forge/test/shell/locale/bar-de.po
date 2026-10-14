@@ -221,8 +221,8 @@ msgstr "Die Aktualisierung wird beim nächsten Neustart installiert"
 msgid "The last update was refused by the policy"
 msgstr "Die letzte Aktualisierung wurde von der Richtlinie abgelehnt"
 
-msgid "You went back from the newest version; only a newer one is offered"
-msgstr "Sie sind von der neuesten Version zurückgekehrt; angeboten wird nur eine neuere"
+msgid "The offered version is held back: you went back from it, or it did not start. Only a newer one is offered"
+msgstr "Die angebotene Version wird zurückgehalten: Sie sind von ihr zurückgekehrt, oder sie ist nicht gestartet. Angeboten wird nur eine neuere"
 
 msgid "This version is older than one this machine has run"
 msgstr "Diese Version ist älter als eine, die auf diesem Rechner bereits lief"

@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        10%{?dist}
+Release:        11%{?dist}
 Summary:        The Athanor bar
 License:        GPL-3.0-or-later
 
@@ -73,6 +73,10 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
+* Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-11
+- The shield's held line names both causes: the user went back from the offered version,
+  or it did not start, as the signed copy of a fresh install's build can (UT5).
+
 * Fri Oct 09 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
 - The shield no longer names the owner-moved, owner-moved-waiting and owner-moved-held
   reasons, which athanor-update no longer publishes (ADR-0103 D4, issue #349).

@@ -322,7 +322,7 @@ fn update_words(update: UpdateState) -> String {
         UpdateState::WillApplyAtNextShutdown => tr("The update installs at the next restart"),
         UpdateState::Refused => tr("The last update was refused by the policy"),
         UpdateState::Held => {
-            tr("You went back from the newest version; only a newer one is offered")
+            tr("The offered version is held back: you went back from it, or it did not start. Only a newer one is offered")
         }
         UpdateState::OlderThanBooted => tr("This version is older than one this machine has run"),
     }
