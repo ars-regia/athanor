@@ -91,9 +91,11 @@ class BaselineTest(unittest.TestCase):
 
     def test_rejections_come_before_every_allow(self):
         # The seeded rules.conf line comes first but admits only a device that is a hub and nothing else.
-        found = [r for r in rules() if r[1] != "equals"]
-        targets = [r[0] for r in found]
-        self.assertLess(max(i for i, t in enumerate(targets) if t == "reject"), targets.index("allow"))
+        found = rules()
+        first_reject = [r[0] for r in found].index("reject")
+        self.assertEqual(found[:first_reject], [("allow", "equals", ["09:*:*"])])
+        after = [r[0] for r in found[first_reject:]]
+        self.assertLess(max(i for i, t in enumerate(after) if t == "reject"), after.index("allow"))
 
     def test_inserted_devices_are_blocked_and_present_ones_follow_the_rules(self):
         conf = (SOURCES / "usbguard-daemon.conf").read_text()
