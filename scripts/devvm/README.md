@@ -106,7 +106,8 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   inhibitor, `loginctl lock-session`, a wrong password (seen in PAM's journal line) and a
   right one, a locker killed while locked that leaves the session locked and comes back, the
   idle lock, `pkexec true` answered in cosmic-osd's dialog with the user's pam_faillock tally
-  present, and six cancelled prompts that must record no failure. "Locked" is cosmic-greeter's
+  present, and six cancelled prompts that must record no failure (the stage refuses to start
+  within two failures of `deny=`, so it never locks the account). "Locked" is cosmic-greeter's
   marker file, the locker's intent: cosmic-comp exposes no lock state, so the screenshots in
   `.scratch/lock-acceptance/` are the only check of what the compositor draws; look at them.
   The login creates the tally, so `polkit` fails on images built before #445 merged

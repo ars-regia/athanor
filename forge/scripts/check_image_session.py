@@ -20,7 +20,7 @@ import pathlib
 import stat
 import sys
 
-from check_image_contacts import enabled_units
+from check_image_contacts import enabled_units, is_masked
 
 LAUNCHER = "usr/bin/athanor-desktop"
 BINARIES = ("usr/bin/cosmic-greeter", "usr/bin/cosmic-idle", "usr/bin/cosmic-osd")
@@ -30,7 +30,7 @@ LAUNCHED = (
 )
 LOCKER_PAM = ("etc/pam.d/cosmic-greeter", "usr/lib/pam.d/cosmic-greeter")
 USER_UNITS = ("usr/lib/systemd/user", "etc/systemd/user")
-SYSTEM_UNITS = ("usr/lib/systemd/system", "etc/systemd/system")
+SYSTEM_UNITS = ("usr/lib/systemd/system", "run/systemd/system", "etc/systemd/system")
 AGENT = "cosmic-osd.service"
 AGENT_UNIT = f"{USER_UNITS[0]}/{AGENT}"
 AGENT_OVERRIDE = f"{USER_UNITS[1]}/{AGENT}"
@@ -42,24 +42,30 @@ TALLY_DIR = "/run/faillock"
 GREETER_DAEMON = "cosmic-greeter-daemon.service"
 
 
-def assignments(path, key):
-    """The values of the active `key=` lines of a unit file, in order; an empty one resets."""
+def assignments(path, key, section="Service"):
+    """The values of the active `key=` lines of one section of a unit file, in order; an empty
+    value is kept, since it resets a list."""
     values = []
+    current = None
     for line in path.read_text().splitlines():
+        line = line.strip()
+        if line.startswith("[") and line.endswith("]"):
+            current = line[1:-1]
+            continue
         name, eq, value = line.partition("=")
-        if eq and name.strip() == key:
+        if eq and current == section and name.strip() == key:
             values.append(value.strip())
     return values
 
 
-def settings(path, key):
-    """Every value of the active `key=` lines of a unit file, split on whitespace."""
-    return [w for v in assignments(path, key) for w in v.split()]
+def settings(path, key, section="Service"):
+    """Every value of the active `key=` lines of one section, split on whitespace."""
+    return [w for v in assignments(path, key, section) for w in v.split()]
 
 
 def dropins(root, dirs, unit):
-    """The unit's *.conf drop-ins in the order systemd applies them: by file name, one in /etc
-    replacing the same name in /usr/lib."""
+    """The unit's *.conf drop-ins in the order systemd applies them: by file name, one in a
+    later directory of `dirs` replacing the same name in an earlier one."""
     found = {}
     for d in dirs:
         if (root / d / f"{unit}.d").is_dir():
@@ -68,7 +74,8 @@ def dropins(root, dirs, unit):
 
 
 def path_list(files, key):
-    """The effective value of a path-list setting such as ReadWritePaths= across files."""
+    """The effective value of a path-list setting such as ReadWritePaths= across files: each
+    assignment adds to the list and an empty one empties it."""
     paths = []
     for f in files:
         for v in assignments(f, key):
@@ -76,27 +83,61 @@ def path_list(files, key):
     return paths
 
 
-def covers(entry, path):
-    """Whether a ReadWritePaths= entry (optionally prefixed by - or +) covers path."""
-    entry = entry.lstrip("-+").rstrip("/") + "/"
-    return (path + "/").startswith(entry)
+def normalised(entry):
+    """A path entry without its - and + prefixes, with %t expanded to /run (the runtime
+    directory of a system unit) and with repeated and trailing slashes removed. Any other
+    specifier raises ValueError: this check does not expand it."""
+    path = entry.lstrip("-+").replace("%t", "/run")
+    if "%" in path:
+        raise ValueError(entry)
+    return "/" + "/".join(part for part in path.split("/") if part)
+
+
+def depth_covering(entries, path):
+    """The depth of the deepest entry that is path or one of its parents; -1 when none is."""
+    depths = [-1]
+    for entry in entries:
+        e = normalised(entry)
+        if e == "/" or path == e or path.startswith(e + "/"):
+            depths.append(0 if e == "/" else e.count("/"))
+    return max(depths)
 
 
 def helper_problems(root):
-    unit = root / SYSTEM_UNITS[0] / HELPER_SERVICE
-    if not unit.is_file():
+    """The helper unit as systemd loads it (/etc over /run over /usr/lib, then drop-ins) must
+    leave /run/faillock writable when it sets ProtectSystem=strict. Of the ReadWritePaths=,
+    ReadOnlyPaths= and InaccessiblePaths= entries covering it, the deepest decides, as in
+    systemd's namespace; at equal depth a read-only or inaccessible entry wins."""
+    units = [root / d / HELPER_SERVICE for d in SYSTEM_UNITS]
+    for d in SYSTEM_UNITS[1:]:
+        if is_masked(root / d, HELPER_SERVICE):
+            return [
+                f"{HELPER_SERVICE} is masked in /{d}: no polkit prompt can authenticate"
+            ]
+    present = [u for u in units if u.is_file()]
+    if not present:
         return [f"/{SYSTEM_UNITS[0]}/{HELPER_SERVICE} is missing"]
-    files = [unit] + dropins(root, SYSTEM_UNITS, HELPER_SERVICE)
-    strict = [v for f in files for v in settings(f, "ProtectSystem")][-1:] == ["strict"]
-    if strict and not any(
-        covers(e, TALLY_DIR) for e in path_list(files, "ReadWritePaths")
-    ):
-        return [
-            (
-                f"{HELPER_SERVICE} sets ProtectSystem=strict and no ReadWritePaths= covering "
-                f"{TALLY_DIR}: pam_faillock fails every polkit prompt once the user has a tally (#144)"
-            )
-        ]
+    files = [present[-1]] + dropins(root, SYSTEM_UNITS, HELPER_SERVICE)
+    if [v for f in files for v in assignments(f, "ProtectSystem")][-1:] != ["strict"]:
+        return []
+    try:
+        writable = depth_covering(path_list(files, "ReadWritePaths"), TALLY_DIR)
+        closed = max(
+            depth_covering(path_list(files, key), TALLY_DIR)
+            for key in ("ReadOnlyPaths", "InaccessiblePaths")
+        )
+    except ValueError as e:
+        message = (
+            f"{HELPER_SERVICE} names the path {e} with a specifier other than %t, "
+            "which this check does not expand"
+        )
+        return [message]
+    if writable < 0 or closed >= writable:
+        message = (
+            f"{HELPER_SERVICE} sets ProtectSystem=strict and leaves {TALLY_DIR} read-only: "
+            "pam_faillock fails every polkit prompt once the user has a tally (#144)"
+        )
+        return [message]
     return []
 
 
@@ -130,7 +171,9 @@ def problems(root):
     if os.path.lexists(root / AGENT_OVERRIDE):
         found.append(f"/{AGENT_OVERRIDE} masks or replaces the agent's unit")
     target = root / SESSION_TARGET
-    if not target.is_file() or "cosmic-osd.service" not in settings(target, "Wants"):
+    if not target.is_file() or "cosmic-osd.service" not in settings(
+        target, "Wants", "Unit"
+    ):
         found.append(f"/{SESSION_TARGET} does not want cosmic-osd.service")
     helper = root / HELPER
     if not helper.is_file():

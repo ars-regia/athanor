@@ -37,6 +37,7 @@ SOCKETS_WANTS = "etc/systemd/system/sockets.target.wants"
 HELPER_UNIT = "usr/lib/systemd/system/polkit-agent-helper@.service"
 HELPER_LIB_DROPINS = "usr/lib/systemd/system/polkit-agent-helper@.service.d"
 HELPER_ETC_DROPINS = "etc/systemd/system/polkit-agent-helper@.service.d"
+READ_ONLY_TALLY = "leaves /run/faillock read-only"
 # The sandbox line of polkit 127's own helper unit that matters here.
 HELPER_UNIT_TEXT = "[Service]\nExecStart=/usr/lib/polkit-1/polkit-agent-helper-1\nProtectSystem=strict\n"
 
@@ -97,9 +98,30 @@ class ImageSession(unittest.TestCase):
     def test_the_repository_sources_pass(self):
         self.assertEqual(mod.problems(self.root), [])
 
-    def test_a_missing_locker_fails(self):
-        (self.root / "usr/bin/cosmic-greeter").unlink()
-        self.assertProblem("/usr/bin/cosmic-greeter is missing")
+    def test_each_missing_binary_fails(self):
+        for binary in (
+            "usr/bin/cosmic-greeter",
+            "usr/bin/cosmic-idle",
+            "usr/bin/cosmic-osd",
+        ):
+            with self.subTest(binary=binary):
+                (self.root / binary).unlink()
+                self.assertProblem(f"/{binary} is missing")
+                self.write(binary, "")
+
+    def test_an_assignment_with_spaces_around_the_equals_sign_counts(self):
+        self.write(
+            f"{AGENT_ETC_DROPINS}/50-x.conf", "[Service]\n  NoNewPrivileges = no  \n"
+        )
+        self.assertProblem("NoNewPrivileges=true")
+
+    def test_a_setting_outside_the_service_section_is_ignored(self):
+        self.write(f"{AGENT_ETC_DROPINS}/50-x.conf", "[Unit]\nNoNewPrivileges=no\n")
+        self.assertEqual(mod.problems(self.root), [])
+
+    def test_a_session_target_that_wants_the_agent_outside_unit_fails(self):
+        self.write(SESSION_TARGET, "[Install]\nWants=cosmic-osd.service\n")
+        self.assertProblem("does not want cosmic-osd.service")
 
     def test_a_missing_launcher_fails(self):
         (self.root / LAUNCHER).unlink()
@@ -208,15 +230,15 @@ class ImageSession(unittest.TestCase):
 
     def test_a_strict_helper_without_the_faillock_drop_in_fails(self):
         (self.root / HELPER_LIB_DROPINS / "50-athanor-faillock.conf").unlink()
-        self.assertProblem("no ReadWritePaths= covering /run/faillock")
+        self.assertProblem(READ_ONLY_TALLY)
 
     def test_a_later_drop_in_that_resets_read_write_paths_fails(self):
         self.write(f"{HELPER_ETC_DROPINS}/90-x.conf", "[Service]\nReadWritePaths=\n")
-        self.assertProblem("no ReadWritePaths= covering /run/faillock")
+        self.assertProblem(READ_ONLY_TALLY)
 
     def test_an_etc_drop_in_of_the_same_name_replaces_the_faillock_one(self):
         self.write(f"{HELPER_ETC_DROPINS}/50-athanor-faillock.conf", "[Service]\n")
-        self.assertProblem("no ReadWritePaths= covering /run/faillock")
+        self.assertProblem(READ_ONLY_TALLY)
 
     def test_a_parent_directory_or_an_optional_entry_covers_the_tally(self):
         for entry in ("/run", "-/run/faillock", "/run/faillock/"):
@@ -232,11 +254,84 @@ class ImageSession(unittest.TestCase):
             f"{HELPER_LIB_DROPINS}/50-athanor-faillock.conf",
             "[Service]\nReadWritePaths=/run/fail\n",
         )
-        self.assertProblem("no ReadWritePaths= covering /run/faillock")
+        self.assertProblem(READ_ONLY_TALLY)
 
     def test_a_helper_without_protect_system_strict_needs_no_drop_in(self):
         (self.root / HELPER_LIB_DROPINS / "50-athanor-faillock.conf").unlink()
         self.edit(HELPER_UNIT, "ProtectSystem=strict", "ProtectSystem=full")
+        self.assertEqual(mod.problems(self.root), [])
+
+    def faillock_dropin(self, text):
+        self.write(f"{HELPER_LIB_DROPINS}/50-athanor-faillock.conf", text)
+
+    def test_the_faillock_drop_in_outside_the_service_section_fails(self):
+        self.faillock_dropin("[Unit]\nReadWritePaths=/run/faillock\n")
+        self.assertProblem(READ_ONLY_TALLY)
+
+    def test_a_later_protect_system_decides(self):
+        (self.root / HELPER_LIB_DROPINS / "50-athanor-faillock.conf").unlink()
+        self.write(f"{HELPER_ETC_DROPINS}/90-x.conf", "[Service]\nProtectSystem=full\n")
+        self.assertEqual(mod.problems(self.root), [])
+        self.edit(HELPER_UNIT, "ProtectSystem=strict", "ProtectSystem=full")
+        self.write(
+            f"{HELPER_ETC_DROPINS}/90-x.conf", "[Service]\nProtectSystem=strict\n"
+        )
+        self.assertProblem(READ_ONLY_TALLY)
+
+    def test_read_write_paths_add_up_across_drop_ins(self):
+        self.write(
+            f"{HELPER_ETC_DROPINS}/90-x.conf", "[Service]\nReadWritePaths=/var/tmp\n"
+        )
+        self.assertEqual(mod.problems(self.root), [])
+
+    def test_a_read_only_or_inaccessible_tally_fails(self):
+        for key in ("ReadOnlyPaths", "InaccessiblePaths"):
+            for entry in ("/run/faillock", "/run/faillock/", "-/run//faillock"):
+                with self.subTest(key=key, entry=entry):
+                    self.write(
+                        f"{HELPER_ETC_DROPINS}/90-x.conf", f"[Service]\n{key}={entry}\n"
+                    )
+                    self.assertProblem(READ_ONLY_TALLY)
+
+    def test_a_deeper_read_write_path_wins_over_a_read_only_parent(self):
+        self.write(f"{HELPER_ETC_DROPINS}/90-x.conf", "[Service]\nReadOnlyPaths=/run\n")
+        self.assertEqual(mod.problems(self.root), [])
+
+    def test_a_deeper_read_only_path_wins_over_a_writable_parent(self):
+        self.faillock_dropin(
+            "[Service]\nReadWritePaths=/run\nReadOnlyPaths=/run/faillock\n"
+        )
+        self.assertProblem(READ_ONLY_TALLY)
+
+    def test_slashes_are_normalised(self):
+        for entry in ("//run//faillock", "/run/faillock//", "+/run/faillock"):
+            with self.subTest(entry=entry):
+                self.faillock_dropin(f"[Service]\nReadWritePaths={entry}\n")
+                self.assertEqual(mod.problems(self.root), [])
+
+    def test_the_runtime_directory_specifier_expands_to_run(self):
+        self.faillock_dropin("[Service]\nReadWritePaths=%t/faillock\n")
+        self.assertEqual(mod.problems(self.root), [])
+
+    def test_another_specifier_fails_as_unsupported(self):
+        self.faillock_dropin("[Service]\nReadWritePaths=%S/faillock\n")
+        self.assertProblem("specifier other than %t")
+
+    def test_a_masked_helper_unit_fails(self):
+        for d in ("etc/systemd/system", "run/systemd/system"):
+            with self.subTest(dir=d):
+                mask = self.root / d / "polkit-agent-helper@.service"
+                mask.parent.mkdir(parents=True, exist_ok=True)
+                mask.symlink_to("/dev/null")
+                self.assertProblem("polkit-agent-helper@.service is masked")
+                mask.unlink()
+
+    def test_an_etc_helper_unit_replaces_the_usr_lib_one(self):
+        self.write(
+            "etc/systemd/system/polkit-agent-helper@.service",
+            HELPER_UNIT_TEXT.replace("strict", "full"),
+        )
+        (self.root / HELPER_LIB_DROPINS / "50-athanor-faillock.conf").unlink()
         self.assertEqual(mod.problems(self.root), [])
 
     def test_the_enabled_greeter_daemon_fails(self):

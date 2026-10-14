@@ -29,7 +29,9 @@
 #   cancel     six polkit requests cancelled while the agent's dialog is open leave no failure
 #              in the tally. Fails until #447 is fixed (polkit-org/polkit#713). It cancels by
 #              stopping pkexec, which makes polkitd cancel the request at the agent; the
-#              dialog has no key for Cancel.
+#              dialog has no key for Cancel. Each cancel waits until the helper is waiting for
+#              the password. It refuses to start unless the user's recorded failures are at
+#              least two below faillock.conf's deny=, so it can never lock the account.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -130,6 +132,9 @@ stage_crash() {
     guest_ssh kill -KILL "$pid"
     wait_until 15 new_locker "$pid" || fail "no new cosmic-greeter 15 s after killing $pid"
     locked || fail "the lock marker is gone after the locker died"
+    # No log line marks the new locker's surfaces as drawn; on a virgl VM they can take a few
+    # seconds, and keys typed before they map reach no surface. A fixed settle time.
+    sleep 5
     shot crashed
 }
 
@@ -168,7 +173,21 @@ helper_log() { # helper_log SINCE
     [[ -n $log ]] && echo "$log"
 }
 
-exited() { [[ $(in_session systemctl --user show -p SubState --value "$1") == exited ]]; }
+# Whether pkexec's unit has finished: `exited` after status 0, `failed` after any other.
+finished() {
+    local state
+    state=$(in_session systemctl --user show -p SubState --value "$1") && [[ $state == exited || $state == failed ]]
+}
+
+# Whether the prompt is in its PAM conversation: pkexec still runs and a helper instance is
+# active. The helper blocks only while pam_unix waits for the password; a helper whose
+# preauth failed (#144) has already exited.
+in_conversation() {
+    local pkexec helpers
+    pkexec=$(in_session systemctl --user show -p SubState --value "$PROMPT") &&
+        helpers=$(guest_ssh systemctl list-units --no-legend --state=active "'polkit-agent-helper@*'") &&
+        [[ $pkexec == running && -n $helpers ]]
+}
 
 # Starts `pkexec true` in a transient user unit: in the user manager, outside the SSH session,
 # so polkit reaches the agent of the graphical session. Returns once the agent has opened a
@@ -190,7 +209,7 @@ authenticate() {
     open_prompt
     shot prompt
     type_keys "$USER_NAME" @enter
-    if ! wait_until 15 exited "$PROMPT"; then
+    if ! wait_until 15 finished "$PROMPT"; then
         in_session systemctl --user stop "$PROMPT"
         fail "pkexec still waiting 15 s after the password; the helper logged: $(helper_log "$PROMPT_SINCE")"
     fi
@@ -213,12 +232,29 @@ stage_polkit() {
     authenticate
 }
 
+# The deny= of /etc/security/faillock.conf; pam_faillock's default, 3, when it sets none.
+faillock_deny() {
+    local conf
+    conf=$(guest_ssh cat /etc/security/faillock.conf) || fail "/etc/security/faillock.conf is unreadable"
+    DENY=$(sed -n 's/^[[:space:]]*deny[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' <<< "$conf" | tail -n 1)
+    DENY=${DENY:-3}
+}
+
 stage_cancel() {
     local before n
+    faillock_deny
     count_failures
     before=$FAILURES
+    # The stage stops at the first new failure, so it adds at most one; with a margin of two
+    # below deny= no run of it can lock the account.
+    ((before < DENY - 2)) ||
+        fail "$before failures already recorded, deny = $DENY: run sudo faillock --user $USER_NAME --reset first"
     for n in 1 2 3 4 5 6; do
         open_prompt
+        # Cancelling before the helper asks for the password would not exercise #447, and on an
+        # image where preauth fails (#144) it would pass without a conversation.
+        shot "cancel-$n"
+        in_conversation || fail "prompt $n is not waiting for a password; the helper logged: $(helper_log "$PROMPT_SINCE")"
         in_session systemctl --user stop "$PROMPT"
         sleep 2
         count_failures
