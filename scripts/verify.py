@@ -2946,6 +2946,34 @@ def check_coverage():
     return r
 
 
+BUS_API_RESIDUE = re.compile(
+    r"\b(?:Mesh\w*|NodeIdentityPayload|AiDecisionPayload|KernelTelemetry|x25519\w*|ring|"
+    r"rand_core|zeroize|subtle)\b")
+
+
+def bus_api_residue(root):
+    """The mesh and post-quantum residue ADR-0103 D10 deletes from athanor-bus-api: a module
+    other than polkit, or one of its types or cryptographic dependencies."""
+    crate = root / "system" / "athanor-bus-api"
+    problems = []
+    for f in sorted((crate / "src").glob("*.rs")):
+        if f.name not in ("lib.rs", "polkit.rs"):
+            problems.append(f"{f.relative_to(root)}: module outside polkit (ADR-0103 D10)")
+    for f in (crate / "src" / "lib.rs", crate / "Cargo.toml"):
+        if f.exists():
+            for m in sorted({m.group(0) for m in BUS_API_RESIDUE.finditer(f.read_text())}):
+                problems.append(f"{f.relative_to(root)}: {m} is mesh or post-quantum residue (ADR-0103 D10)")
+    return problems
+
+
+@check("bus-api-residue", "athanor-bus-api holds no mesh or post-quantum residue (ADR-0103 D10)")
+def check_bus_api_residue():
+    r = Result()
+    for problem in bus_api_residue(ROOT):
+        r.fail(problem)
+    return r
+
+
 # --------------------------------------------------------------------------- #
 # agent-docs: the instructions agents read name things that exist
 # --------------------------------------------------------------------------- #
