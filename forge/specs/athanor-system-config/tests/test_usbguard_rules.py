@@ -1,6 +1,9 @@
 """The shipped USBGuard baseline against the device classes it admits and blocks (doc_disks.md DK21)
 (python3 -B -m unittest discover -s forge/specs/athanor-system-config/tests -v).
 
+Also athanor-usbguard-internal, which admits the USB devices connected at the first boot, once
+(ADR-0103 D12, DK21), run here against a fake sysfs tree.
+
 evaluate() models the rules of the shipped policy: the file RuleFile names (the one line
 tmpfiles.d/10-athanor-greetd.conf seeds into /etc/usbguard/rules.conf), then the *.conf files of
 RuleFolder in name order (the baseline), assuming usbguard-daemon reads them in that order. The first
@@ -11,12 +14,17 @@ time, and every attribute other than the interfaces, are not modelled.
 """
 
 import fnmatch
+import os
 import re
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
 SOURCES = Path(__file__).resolve().parents[1] / "SOURCES/etc/usbguard"
 TMPFILES = Path(__file__).resolve().parents[1] / "SOURCES/usr/lib/tmpfiles.d/10-athanor-greetd.conf"
+LIBEXEC = Path(__file__).resolve().parents[1] / "SOURCES/usr/libexec/athanor-usbguard-internal"
+UNIT = Path(__file__).resolve().parents[1] / "SOURCES/usr/lib/systemd/system/athanor-usbguard-internal.service"
 RULE = re.compile(r"^(allow|reject|block) with-interface (all-of|one-of|equals) \{ ([0-9a-f:* ]+) \}$")
 
 
@@ -101,6 +109,107 @@ class BaselineTest(unittest.TestCase):
         conf = (SOURCES / "usbguard-daemon.conf").read_text()
         self.assertIn("\nInsertedDevicePolicy=block\n", conf)
         self.assertIn("\nPresentDevicePolicy=apply-policy\n", conf)
+
+
+class InternalSnapshot(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.work = Path(tmp.name)
+        self.sysfs = self.work / "sys"
+        self.sysfs.mkdir()
+        self.rules = self.work / "50-athanor-internal.conf"
+        self.marker = self.work / "state/usbguard-internal.done"
+
+    def device(self, name, vid, pid, interfaces, serial=None):
+        d = self.sysfs / name
+        d.mkdir()
+        (d / "idVendor").write_text(vid + "\n")
+        (d / "idProduct").write_text(pid + "\n")
+        if serial is not None:
+            (d / "serial").write_text(serial + "\n")
+        for i, (cls, sub, proto) in enumerate(interfaces):
+            f = d / f"{name}:1.{i}"
+            f.mkdir()
+            (f / "bInterfaceClass").write_text(cls + "\n")
+            (f / "bInterfaceSubClass").write_text(sub + "\n")
+            (f / "bInterfaceProtocol").write_text(proto + "\n")
+
+    def run_script(self):
+        env = dict(
+            os.environ,
+            ATHANOR_USB_SYSFS=str(self.sysfs),
+            ATHANOR_USBGUARD_RULES=str(self.rules),
+            ATHANOR_USBGUARD_MARKER=str(self.marker),
+        )
+        return subprocess.run([LIBEXEC], env=env, capture_output=True, text=True, check=True)
+
+    def written(self):
+        return [l for l in self.rules.read_text().splitlines() if not l.startswith("#")]
+
+    def test_admits_webcam_reader_bluetooth_and_hub(self):
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00"), ("0e", "02", "00")], "CAM1")
+        self.device("1-2", "058f", "9540", [("0b", "00", "00")], "RD1")
+        self.device("1-3", "8087", "0029", [("e0", "01", "01"), ("e0", "01", "01")])
+        self.device("usb1", "1d6b", "0002", [("09", "00", "00")])
+        self.run_script()
+        rules = self.written()
+        self.assertEqual(len(rules), 4)
+        self.assertIn(
+            'allow id 0c45:6a10 serial "CAM1" via-port "1-1" with-interface equals { 0e:01:00 0e:02:00 }',
+            rules,
+        )
+        self.assertTrue(any("id 058f:9540" in r and "{ 0b:00:00 }" in r for r in rules))
+        self.assertTrue(any("id 8087:0029" in r and "e0:01:01" in r for r in rules))
+        self.assertTrue(any("id 1d6b:0002" in r and "09:00:00" in r for r in rules))
+        self.assertEqual(self.rules.stat().st_mode & 0o777, 0o600)
+
+    def test_no_rule_for_mass_storage(self):
+        self.device("1-1", "0781", "5583", [("08", "06", "50")], "STICK")
+        self.device("1-2", "046d", "c52b", [("03", "01", "01"), ("08", "06", "50")], "MIX")
+        self.device("1-3", "0c45", "6a10", [("0e", "01", "00")])
+        self.run_script()
+        rules = self.written()
+        self.assertEqual(len(rules), 1)
+        self.assertIn("0c45:6a10", rules[0])
+
+    def test_skips_descriptor_that_would_inject_a_rule(self):
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")], 'x" allow id 0781:5583 "')
+        self.run_script()
+        self.assertEqual(self.written(), [])
+
+    def test_runs_once(self):
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
+        self.run_script()
+        self.assertTrue(self.marker.exists())
+        self.device("1-2", "058f", "9540", [("0b", "00", "00")])
+        self.run_script()
+        self.assertEqual(len(self.written()), 1)
+
+    def test_unit_orders_before_usbguard_and_runs_once(self):
+        unit = UNIT.read_text()
+        self.assertIn("Before=usbguard.service greetd.service", unit)
+        self.assertIn("ConditionPathExists=!/var/lib/athanor/usbguard-internal.done", unit)
+
+
+class BaselineUnchangedTest(unittest.TestCase):
+    def test_baseline_is_unchanged(self):
+        rules = [l for l in (SOURCES / 'rules.d/10-athanor-baseline.conf').read_text().splitlines() if l and not l.startswith("#")]
+        self.assertEqual(
+            rules,
+            [
+                "reject with-interface all-of { 08:*:* 03:*:* }",
+                "reject with-interface all-of { 02:*:* 03:*:* }",
+                "reject with-interface all-of { e0:*:* 03:*:* }",
+                "allow with-interface one-of { 09:00:* }",
+                "allow with-interface one-of { 03:*:* }",
+            ],
+        )
+
+    def test_daemon_blocks_by_default_and_reads_the_rule_folder(self):
+        conf = (SOURCES / 'usbguard-daemon.conf').read_text().splitlines()
+        self.assertIn("RuleFolder=/etc/usbguard/rules.d/", conf)
+        self.assertIn("ImplicitPolicyTarget=block", conf)
 
 
 if __name__ == "__main__":

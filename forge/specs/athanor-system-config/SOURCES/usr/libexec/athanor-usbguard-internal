@@ -1,0 +1,54 @@
+#!/usr/bin/bash
+# Snapshot of the internal USB devices (doc_disks.md DK21, ADR-0103 D12).
+# Writes one allow rule for each USB device connected now, except those with a mass-storage
+# interface (class 08), then records that it ran. The paths come from the environment only
+# for the tests; the unit sets none.
+set -euo pipefail
+umask 0077
+shopt -s nullglob
+
+usb=${ATHANOR_USB_SYSFS:-/sys/bus/usb/devices}
+rules=${ATHANOR_USBGUARD_RULES:-/etc/usbguard/rules.d/50-athanor-internal.conf}
+marker=${ATHANOR_USBGUARD_MARKER:-/var/lib/athanor/usbguard-internal.done}
+
+[[ -e $marker ]] && exit 0
+
+out=$(mktemp "$rules.XXXXXX")
+trap 'rm -f -- "$out"' EXIT
+echo "# Written once by athanor-usbguard-internal.service: the USB devices connected at the first boot." >"$out"
+
+for dev in "$usb"/*; do
+    name=${dev##*/}
+    [[ $name == *:* ]] && continue # an interface, read with its device
+    vid=$(<"$dev/idVendor")
+    pid=$(<"$dev/idProduct")
+    serial=
+    [[ -r $dev/serial ]] && serial=$(<"$dev/serial")
+    if [[ ! $vid =~ ^[0-9a-f]{4}$ || ! $pid =~ ^[0-9a-f]{4}$ || ! $name =~ ^[0-9A-Za-z.-]+$ ||
+        ! $serial =~ ^[0-9A-Za-z._:+\ -]*$ ]]; then
+        echo "<4>Skipping $name: a descriptor holds characters a rule cannot carry."
+        continue
+    fi
+    ifaces=
+    storage=no
+    for iface in "$dev/$name":*; do
+        class=$(<"$iface/bInterfaceClass")
+        [[ $class == 08 ]] && storage=yes
+        ifaces+=" $class:$(<"$iface/bInterfaceSubClass"):$(<"$iface/bInterfaceProtocol")"
+    done
+    if [[ $storage == yes ]]; then
+        echo "<6>Not admitting $vid:$pid on $name: mass storage."
+        continue
+    fi
+    if [[ -z $ifaces ]]; then
+        echo "<4>Skipping $vid:$pid on $name: no configured interface."
+        continue
+    fi
+    echo "allow id $vid:$pid serial \"$serial\" via-port \"$name\" with-interface equals {$ifaces }" >>"$out"
+done
+
+chmod 0600 "$out"
+mv -- "$out" "$rules"
+trap - EXIT
+mkdir -p -- "${marker%/*}"
+: >"$marker"
