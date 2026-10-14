@@ -156,6 +156,12 @@ jobs:
         # enabled timer it does not list, or an enabled unit it calls silent, fails the build.
         run: bash system/check-image-contacts.sh "$(<artifacts/system-image.iid)"
 
+      - name: 🔐 Check the session lock and the polkit agent
+        # Release 0.9 ships cosmic-greeter's locker, cosmic-idle and cosmic-osd's agent on polkit
+        # 127's socket helper (ADR-0115, docs/spikes/lock-and-polkit-agent-0-9.md); an image that
+        # lost one of them builds but never locks or never authenticates.
+        run: bash system/check-image-session.sh "$(<artifacts/system-image.iid)"
+
       - name: 🥾 Check the vmlinuz of the image against the Secure Boot certificate
         # The Containerfile checks the kernel azoth-boot names; this checks the file the image
         # ships: exactly one Authenticode signature, by the project certificate. An image signed

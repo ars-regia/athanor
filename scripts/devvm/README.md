@@ -101,6 +101,11 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   restricted socket in a transient unit, a `Terminal=true` entry through `xdg-terminal-exec`,
   and the three COSMIC openers, cold and warm. Screenshots land in
   `.scratch/compositor-acceptance/`; look at the openers' ones.
+- `lock-acceptance.sh [stage...]` checks the session lock and the polkit agent of release 0.9
+  on the image as installed (ADR-0115, `docs/spikes/lock-and-polkit-agent-0-9.md`): the sleep
+  inhibitor, `loginctl lock-session`, a wrong and a right password, the idle lock, and
+  `pkexec true` answered in cosmic-osd's dialog, before and after a pam_faillock tally file
+  exists. Log in at the greeter first. Screenshots land in `.scratch/lock-acceptance/`.
 - Settings are in `devvm.env` and are overridden from the environment: `CPUS=4`,
   `MEMORY=8G`, `DISK_GIB=40`, `GPU_OUTPUTS=2` (the second head starts disconnected, so
   every other stage sees one output; `bar-acceptance.sh hotplug` is the one that needs
