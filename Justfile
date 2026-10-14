@@ -154,10 +154,10 @@ check-rust:
 # The dependency policy of deny.toml over every lockfile that resolves a shipped binary:
 # licences, bans and sources. Advisories are not here: they depend on a database that changes
 # without a commit, so rust-security-audit.yml runs them (scripts/ci/security-audit.sh) on pull
-# requests, pushes and a weekly schedule. The recovery kiosk and
-# the attestation crate are excluded from the root workspace but still inherit its
-# [workspace.dependencies], so cargo cannot resolve them on their own and cargo-deny cannot
-# read them; they join this list when they get a workspace of their own. The calmo theme tool
+# requests, pushes and a weekly schedule. The recovery kiosk
+# is excluded from the root workspace but still inherits its
+# [workspace.dependencies], so cargo cannot resolve it on its own and cargo-deny cannot
+# read it; it joins this list when it gets a workspace of its own. The calmo theme tool
 # is a build-time derive tool that no spec installs and pins libcosmic to a git revision.
 [group('QA & Security')]
 check-deny:

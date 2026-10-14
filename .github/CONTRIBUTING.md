@@ -33,7 +33,7 @@ the upstream is a vendor that takes patches (for example the kCFI fixes for the 
 of PR #54), the patch is offered to it, not only carried. A carried patch without an offer, or
 without an owner who rebases it at every bump, is not merged.
 
-Changes to the protected paths listed in `.github/CODEOWNERS` (polkit, attestation, the
+Changes to the protected paths listed in `.github/CODEOWNERS` (polkit, the
 Containerfile, signing and promotion) need the maintainer's review.
 
 ## Reporting vulnerabilities
