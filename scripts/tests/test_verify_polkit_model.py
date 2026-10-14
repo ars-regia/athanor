@@ -373,5 +373,9 @@ class PolkitModelTest(unittest.TestCase):
     def test_an_assignment_in_an_admin_rule_fails(self):
         self.unreadable("polkit.addAdminRule(function(action, subject) { polkit.Result.NO = polkit.Result.YES; });\n")
 
+    def test_an_action_id_in_code_is_read_whole_hyphens_included(self):
+        line = 'pub const ACTION: &str = "os.athanor.update.apply-multi-session";'
+        self.assertEqual(verify.POLKIT_ACTION_IN_CODE.findall(line), ["os.athanor.update.apply-multi-session"])
+
 if __name__ == "__main__":
     unittest.main()
