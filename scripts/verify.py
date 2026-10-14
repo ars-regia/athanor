@@ -20,6 +20,7 @@ Nessuna dipendenza oltre a python3 e git. Va eseguito dalla radice del repo.
 import collections
 import datetime
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -733,6 +734,9 @@ INSTALLER_KICKSTARTS = (
     "forge/test/iso/collaudo.ks",
 )
 SECUREBOOT_CERT = "/usr/share/athanor/secureboot/athanor-secureboot.der"
+# The SHA-256 of the certificate the image ships, in sha256sum's format; the ISO
+# acceptance compares the key enrolled in MokList with it.
+SECUREBOOT_PIN = "system/secureboot-pin.sha256"
 # What each block must say, so a copy that still matches but no longer checks is caught too.
 INSTALLER_CPU_NEEDS = (
     "[ ! -d /sys/firmware/efi ]",
@@ -815,7 +819,7 @@ def installer_problems(root=None):
     containerfile = "system/Containerfile"
     try:
         shipped = re.search(
-            rf"^COPY \S+ {re.escape(SECUREBOOT_CERT)}$",
+            rf"^COPY (\S+) {re.escape(SECUREBOOT_CERT)}$",
             read(root / containerfile),
             re.M,
         )
@@ -824,6 +828,25 @@ def installer_problems(root=None):
     if not shipped:
         problems.append(
             f"{containerfile}: does not COPY the certificate the installer enrols to {SECUREBOOT_CERT}"
+        )
+        return problems
+    rotation = "a key rotation updates the pin in the same pull request"
+    try:
+        pinned, pinned_path = read(root / SECUREBOOT_PIN).split()
+    except (OSError, ValueError) as err:
+        return problems + [f"{SECUREBOOT_PIN}: cannot read one 'sha256  path' line ({err})"]
+    if pinned_path != shipped.group(1):
+        problems.append(
+            f"{SECUREBOOT_PIN}: pins {pinned_path}, but {containerfile} ships {shipped.group(1)}; {rotation}"
+        )
+        return problems
+    try:
+        actual = hashlib.sha256((root / pinned_path).read_bytes()).hexdigest()
+    except OSError as err:
+        return problems + [f"{pinned_path}: cannot read ({err})"]
+    if actual != pinned:
+        problems.append(
+            f"{pinned_path}: SHA-256 {actual} differs from {pinned} in {SECUREBOOT_PIN}; {rotation}"
         )
     return problems
 

@@ -15,6 +15,7 @@ markers it recognises across chunk boundaries, when it stops, and the PNG conver
 checked on the pixels rather than on the file existing.
 """
 
+import hashlib
 import json
 import os
 import pathlib
@@ -774,6 +775,8 @@ def test_mok_missing_fails(tmp: pathlib.Path) -> None:
         assert code != 0 and "**FAIL**" in report, report
         assert "Secure Boot certificate enrolled: NO" in report, report
         assert data["checks"]["mok"] is False, data
+    code, report = verdict(tmp, without + [("mok-cert-absent", 380)])
+    assert code != 0 and "the image ships none (mok-cert-absent)" in report, report
 
 
 def test_secure_boot_case_requires_enforcement(tmp: pathlib.Path) -> None:
@@ -876,7 +879,8 @@ def test_console_answers_the_mok_request(tmp: pathlib.Path) -> None:
 
 def test_mok_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
     """The question the guest is asked, run as a shell command against a mokutil stub:
-    the certificate's subject decides MOK_*, and only the exact "SecureBoot enabled" is
+    the SHA-256 of an exported key decides MOK_*, whatever its subject says, an image
+    without the certificate is CERT_ABSENT, and only the exact "SecureBoot enabled" is
     ENABLED."""
     sys.path.insert(0, str(HERE))
     import console
@@ -886,32 +890,47 @@ def test_mok_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
     (work / "bin").mkdir(parents=True)
     (work / "efivars").mkdir()
     variable = work / "efivars" / "SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"
+    # As mokutil --export does: each key in MokList as MOK-NNNN.der in the current directory.
     (work / "bin" / "mokutil").write_text(
-        '#!/bin/sh\ncase $1 in --list-enrolled) printf "%s\\n" "$FAKE_LIST";;'
+        '#!/bin/sh\ncase $1 in --export) [ -n "$FAKE_DER" ] || exit 1;'
+        ' printf "%s" "$FAKE_DER" > MOK-0001.der; printf "%s" other > MOK-0002.der;;'
         ' --sb-state) printf "%s\\n" "$FAKE_SB";; esac\n'
     )
     (work / "bin" / "mokutil").chmod(0o755)
-    probe = console.MOK_PROBE.replace(b"/sys/firmware/efi/efivars/", f"{work}/efivars/".encode())
-    assert probe != console.MOK_PROBE, "the probe no longer reads the SecureBoot variable"
+    pin = (HERE.parents[2] / "system" / "secureboot-pin.sha256").read_text().split()[0]
+    assert console.MOK_CERTIFICATE_SHA256 == pin.encode(), "the probe must use the pin"
+    certificate = work / "athanor-secureboot.der"
+    probe = (
+        console.MOK_PROBE.replace(b"/sys/firmware/efi/efivars/", f"{work}/efivars/".encode())
+        .replace(b"/usr/share/athanor/secureboot/athanor-secureboot.der", str(certificate).encode())
+        .replace(pin.encode(), hashlib.sha256(b"athanor").hexdigest().encode())
+    )
+    assert probe.count(str(work).encode()) == 2, "the probe no longer reads both paths"
+    assert pin.encode() not in probe, "the probe no longer compares the pinned SHA-256"
     (work / "probe.sh").write_bytes(probe + b"\n")
-    athanor = "Subject: " + console.MOK_CERTIFICATE.decode()
     cases = (
-        (athanor, "SecureBoot enabled", ["MOK_ENROLLED", "SECUREBOOT_ENABLED"]),
-        ("Subject: CN=Other Key", "SecureBoot disabled", ["MOK_MISSING", "SECUREBOOT_DISABLED"]),
-        (athanor, "SecureBoot enabled\nSecureBoot validation is disabled in shim",
+        ("athanor", "SecureBoot enabled", ["MOK_ENROLLED", "SECUREBOOT_ENABLED"]),
+        ("athanor-like", "SecureBoot disabled", ["MOK_MISSING", "SECUREBOOT_DISABLED"]),
+        ("", "SecureBoot enabled", ["MOK_MISSING", "SECUREBOOT_ENABLED"]),
+        ("athanor", "SecureBoot enabled\nSecureBoot validation is disabled in shim",
          ["MOK_ENROLLED", "SECUREBOOT_NOT_ENFORCED"]),
         ("", "This system doesn't support Secure Boot", ["MOK_NOT_APPLICABLE", "SECUREBOOT_DISABLED"]),
+        ("athanor", "SecureBoot enabled", ["MOK_CERT_ABSENT", "SECUREBOOT_ENABLED"]),
     )
-    for listing, state, expected in cases:
+    for der, state, expected in cases:
         if expected[0] == "MOK_NOT_APPLICABLE":
             variable.unlink(missing_ok=True)
         else:
             variable.write_bytes(b"\x06\x00\x00\x00\x01")
+        if expected[0] == "MOK_CERT_ABSENT":
+            certificate.unlink(missing_ok=True)
+        else:
+            certificate.write_bytes(b"certificate")
         proc = subprocess.run(
             ["sh", str(work / "probe.sh")], capture_output=True, text=True,
-            env={**os.environ, "PATH": f"{work}/bin:{os.environ['PATH']}", "FAKE_LIST": listing, "FAKE_SB": state},
+            env={**os.environ, "PATH": f"{work}/bin:{os.environ['PATH']}", "FAKE_DER": der, "FAKE_SB": state},
         )
-        assert proc.stdout.split() == expected, (listing, state, proc.stdout, proc.stderr)
+        assert proc.stdout.split() == expected, (der, state, proc.stdout, proc.stderr)
 
 
 def main() -> int:

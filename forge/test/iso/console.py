@@ -97,7 +97,9 @@ MARKERS = (
     # answer: with MokSBState set, mokutil adds "SecureBoot validation is disabled in
     # shim" below "SecureBoot enabled", and shim then checks nothing it loads.
     # NOT_APPLICABLE: firmware without Secure Boot, where the installer requests nothing.
+    # CERT_ABSENT: the image ships no certificate, so the installer requested nothing.
     (b"MOK_ENROLLED", "mok-enrolled"),
+    (b"MOK_CERT_ABSENT", "mok-cert-absent"),
     (b"MOK_MISSING", "mok-missing"),
     (b"MOK_NOT_APPLICABLE", "mok-not-applicable"),
     (b"SECUREBOOT_ENABLED", "secureboot-enabled"),
@@ -445,12 +447,22 @@ MOK_MANAGER_STEPS = (
 # MokManager draws a screen in pieces; a key pressed before it is drawn is lost.
 MOK_SETTLE = 2.0
 # Ask the installed system whether the certificate is enrolled and whether Secure Boot is
-# on. printf assembles the markers, as in the other probes.
-MOK_CERTIFICATE = b"CN=Athanor Secure Boot Signing Key"
+# on. printf assembles the markers, as in the other probes. The keys in MokList are
+# exported and compared with the SHA-256 the repository pins (scripts/verify.py
+# installer), so a key under the same name is not taken for Athanor's.
+MOK_CERTIFICATE_SHA256 = (
+    (pathlib.Path(__file__).resolve().parents[3] / "system" / "secureboot-pin.sha256")
+    .read_text()
+    .split()[0]
+    .encode()
+)
 MOK_PROBE = (
-    b"if [ ! -e /sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c ];"
+    b"if [ ! -e /usr/share/athanor/secureboot/athanor-secureboot.der ];"
+    b" then printf 'MOK_%s\\n' CERT_ABSENT;"
+    b" elif [ ! -e /sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c ];"
     b" then printf 'MOK_%s\\n' NOT_APPLICABLE;"
-    b" elif mokutil --list-enrolled | grep -qF '" + MOK_CERTIFICATE + b"';"
+    b" elif (cd \"$(mktemp -d)\" && mokutil --export && sha256sum MOK-*.der)"
+    b" | grep -q '^" + MOK_CERTIFICATE_SHA256 + b" ';"
     b" then printf 'MOK_%s\\n' ENROLLED; else printf 'MOK_%s\\n' MISSING; fi;"
     b" case $(mokutil --sb-state) in"
     b" *'validation is disabled'*) printf 'SECUREBOOT_%s\\n' NOT_ENFORCED;;"

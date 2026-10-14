@@ -32,7 +32,8 @@ more, checked the same way:
                    installer's request reached MokManager, the one-time password it
                    showed was accepted there, and shim enrolled the key; on firmware
                    without Secure Boot the installer requests nothing, and the guest
-                   says so (mok-not-applicable)
+                   says so (mok-not-applicable); an image without the certificate fails
+                   (mok-cert-absent)
 
 and with `secure-boot`, the case run_iso_test.sh runs with SECURE_BOOT=1 on Secure Boot
 firmware, a last one:
@@ -86,8 +87,9 @@ ORIGIN_SIGNALS = ("origin-stable-signed",)
 # nothing about first boot no matter how long it is left going.
 FAILURE_SIGNALS = ("panic", "emergency", "reinstall-loop")
 # MOK_ENROLLED in console.py: the certificate is in MokList. MOK_NOT_APPLICABLE: firmware
-# without Secure Boot, not accepted in the Secure Boot case. MOK_MISSING fails the run by
-# leaving this unset.
+# without Secure Boot, not accepted in the Secure Boot case. MOK_MISSING and
+# MOK_CERT_ABSENT (an image without the certificate, which an ISO built from this tree
+# must carry) fail the run by leaving this unset.
 MOK_SIGNALS = ("mok-enrolled", "mok-not-applicable")
 # The guest's Secure Boot state, required to be enabled only in the Secure Boot case.
 SECUREBOOT_SIGNALS = ("secureboot-enabled", "secureboot-not-enforced", "secureboot-disabled")
@@ -137,7 +139,14 @@ def main() -> int:
     lines.append(f"- greeter reached: {greeter if greeter else 'NO'}")
     lines.append(f"- session started: {session if session else 'NO'}")
     lines.append(f"- settings opened: {settings if settings else 'NO'}")
-    lines.append(f"- Secure Boot certificate enrolled: {mok if mok else 'NO'}")
+    if mok:
+        lines.append(f"- Secure Boot certificate enrolled: {mok}")
+    elif "mok-cert-absent" in phases:
+        lines.append(
+            "- Secure Boot certificate enrolled: NO, the image ships none (mok-cert-absent)"
+        )
+    else:
+        lines.append("- Secure Boot certificate enrolled: NO")
     lines.append(
         f"- Secure Boot: {secure_boot if secure_boot else 'NO ANSWER'}"
         f"{' (required: secureboot-enabled)' if secure_boot_required else ''}"

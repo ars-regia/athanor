@@ -14,7 +14,12 @@ spec = importlib.util.spec_from_file_location("verify", ROOT / "scripts" / "veri
 verify = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(verify)
 
-FILES = (*verify.INSTALLER_KICKSTARTS, "system/Containerfile")
+FILES = (
+    *verify.INSTALLER_KICKSTARTS,
+    "system/Containerfile",
+    verify.SECUREBOOT_PIN,
+    "forge/specs/azoth/keys/secureboot/athanor-secureboot.der",
+)
 
 
 class Installer(unittest.TestCase):
@@ -120,6 +125,20 @@ class Installer(unittest.TestCase):
                 f"system/Containerfile: does not COPY the certificate the installer enrols to {verify.SECUREBOOT_CERT}",
             ],
         )
+
+
+    def test_a_certificate_that_differs_from_the_pin_fails(self):
+        (self.root / "forge/specs/azoth/keys/secureboot/athanor-secureboot.der").write_bytes(b"another certificate")
+        problems = verify.installer_problems(self.root)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertTrue(problems[0].startswith("forge/specs/azoth/keys/secureboot/athanor-secureboot.der: SHA-256 "), problems)
+        self.assertIn("a key rotation updates the pin in the same pull request", problems[0])
+
+    def test_a_pin_on_another_file_fails(self):
+        self.edit(verify.SECUREBOOT_PIN, "  forge/", "  system/")
+        problems = verify.installer_problems(self.root)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("but system/Containerfile ships forge/specs/azoth/keys/secureboot/athanor-secureboot.der", problems[0])
 
 
 if __name__ == "__main__":
