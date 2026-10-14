@@ -74,7 +74,7 @@ hours: never use it as a check.
 - Signing, keys, Secure Boot and MOK: `forge/specs/azoth/keys/`, `system/keys/`,
   `system/sign-images.sh`, `system/promote.sh`, `forge/scripts/sign_attest.sh`, and workflow
   jobs that use the `signing-kernel`, `signing-images` or `signing` environments.
-- Polkit: `system/athanor-bus-api/src/polkit.rs`. Attestation: `system/confidential_computing/`.
+- Polkit: `system/athanor-bus-api/src/polkit.rs`.
 - Authentication: PAM, the greeter's login path, token validation.
 - Migrations of data or on-disk state, and anything destructive: force push, history
   rewrite, `git reset --hard`, deleting branches, tags, releases or registry images.

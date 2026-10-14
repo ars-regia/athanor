@@ -2,10 +2,8 @@
 paths:
   - "**/polkit*.rs"
   - "**/*.policy"
-  - "**/*attestation*/**"
   - "**/*bus-api*/**"
   - "**/*trust-state*/**"
-  - "system/confidential_computing/**"
   - "forge/specs/polkit/**"
   - "forge/specs/athanor-selinux/**"
   - "forge/specs/athanor-keylime/**"
@@ -18,9 +16,8 @@ paths:
      configured and loaded for none of its files. `verify.py agent-docs` now fails a glob
      that matches no tracked file. -->
 
-You are working on a security component. `system/athanor-bus-api/src/polkit.rs` and
-`system/confidential_computing/` are stop-and-ask paths (`AGENTS.md`): confirm with the
-contributor before editing them.
+You are working on a security component. `system/athanor-bus-api/src/polkit.rs` is a stop-and-ask path (`AGENTS.md`): confirm with the
+contributor before editing it.
 
 ## No security theatre
 
@@ -30,8 +27,8 @@ later, it is a vulnerability**. If you cannot implement the real thing now, do n
 fake one: stop and say so.
 
 - No post-quantum crate is a workspace dependency. `pqc_dilithium`, a pre-standard
-  Dilithium rather than FIPS 204 ML-DSA, survives only in `athanor-attestation`, outside the
-  workspace (ADR-0087): add no new use. Propose a KEM or signature crate in a decision record.
+  Dilithium rather than FIPS 204 ML-DSA, left the tree with `athanor-attestation` (ADR-0103
+  D10): add no new use. Propose a KEM or signature crate in a decision record.
 - Hash with `sha2`, wipe secret material with `zeroize`, compare secrets in constant time
   with `subtle`. All three are workspace dependencies.
 

@@ -58,7 +58,7 @@ Before this revision each specification wrote its own adversary paragraph, and t
 
 **TM7. Tier 3: root and the image** belong to `doc_kernel_profile.md` (sections 8 to 10: image signatures, Secure Boot and the MOK chain, module signing, SELinux, the root boundary and its residual risks). This document does not restate them, with one
 exception because it holds for 1.0 only: tampering with `/usr` offline, by someone with access
-to the disk, is not detected until the 1.1 seal (ADR-0076 point 1, ADR-0097). Attestation (`system/confidential_computing/athanor-attestation`) is not part of any tier at 1.0. On 2026-10-07 the maintainer decided that the crate leaves the workspace (PR #280) and is rewritten on Keylime with the PCR 11 and PCR 12 policy of `doc_kernel_profile.md` section 9 before mesh admission depends on it; it is kept, not deleted.
+to the disk, is not detected until the 1.1 seal (ADR-0076 point 1, ADR-0097). Attestation is not part of any tier at 1.0. The `athanor-attestation` crate was deleted on 2026-10-14 (ADR-0103 D10, reversing ADR-0087); a Keylime attestation with the PCR 11 and PCR 12 policy of `doc_kernel_profile.md` section 9 starts from a new approved specification.
 
 ## 3. The rule for services
 

@@ -939,6 +939,14 @@ def path_problems(relative_path, text):
     return problems
 
 
+@check("attestation-absent", "athanor-attestation stays deleted (ADR-0103 D10)")
+def check_attestation_absent():
+    r = Result()
+    if (ROOT / "system" / "confidential_computing").exists():
+        r.fail("system/confidential_computing exists: athanor-attestation is deleted (ADR-0103 D10)")
+    return r
+
+
 @check("paths", "Nessun artefatto runtime da target/, nessuno stato privilegiato in /tmp")
 def check_paths():
     r = Result()
@@ -2084,8 +2092,6 @@ OWN_LICENCE_EXCEPTIONS = {
 # The crate whose dependency forces the exception above; a crate that depends on it must be
 # in the table, and a crate in the table must still depend on it.
 GPL3_ONLY_DEPENDENCY = "greetd_ipc"
-# Crates whose manifests agents may not edit without the maintainer's approval.
-PROTECTED_CRATES = {"system/confidential_computing/athanor-attestation/Cargo.toml"}
 # Files that carry packaging metadata outside Cargo.toml and *.spec.
 NFPM_FILES = ["flake.nix"]
 # The SPDX identifiers the repository actually uses. A new one is added here on purpose.
@@ -2154,9 +2160,7 @@ def licence_problems(root=None):
             lic = pkg.get("license")
             want = OWN_LICENCE_EXCEPTIONS.get(f, (OWN_LICENCE,))[0]
             if lic != want:
-                note = " (change awaits maintainer approval: protected crate)" \
-                    if f in PROTECTED_CRATES else ""
-                out.append(f"{f}: license = {lic!r}, expected {want!r}{note}")
+                out.append(f"{f}: license = {lic!r}, expected {want!r}")
         elif name.endswith(".spec"):
             m = re.search(r"^License:\s*(.*?)\s*$", read(root / f), re.M)
             if not m:
