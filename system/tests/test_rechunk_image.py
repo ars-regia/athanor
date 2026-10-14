@@ -13,6 +13,8 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "system" / "rechunk-image.sh"
 SOURCE = "a" * 64
+# The source's `created`, the Containerfile's SOURCE_DATE_EPOCH.
+EPOCH = 1704067200
 NEW = "b" * 64
 OUT = f"localhost/athanor-system-rechunked:{SOURCE[:12]}"
 LABELS = {
@@ -46,7 +48,11 @@ class RechunkImage(unittest.TestCase):
               "info --format") echo /store/graph /run/store overlay ;;
               "image inspect")
                 jq -ce --arg ref "$5" '.[$ref] // error("image not known: " + $ref)' {self.images} |
-                  if [[ $4 == '{{{{.Id}}}}' ]]; then jq -r .id; else jq -c .config; fi ;;
+                  case $4 in
+                    '{{{{.Id}}}}') jq -r .id ;;
+                    '{{{{.Created.Unix}}}}') jq -r .created ;;
+                    *) jq -c .config ;;
+                  esac ;;
               "rmi --ignore") ;;
               run\\ *)
                 status=$(cat {self.dir}/run.status 2>/dev/null || echo 0)
@@ -59,7 +65,9 @@ class RechunkImage(unittest.TestCase):
         )
         (bin_dir / "podman").chmod(0o755)
         self.env = {"PATH": f"{bin_dir}:/usr/bin:/bin"}
-        self.images.write_text(json.dumps({SOURCE: {"id": SOURCE, "config": config(LABELS)}}))
+        self.images.write_text(
+            json.dumps({SOURCE: {"id": SOURCE, "created": EPOCH, "config": config(LABELS)}})
+        )
         self.iidfile = self.dir / "artifacts" / "system-image.iid"
         self.iidfile.parent.mkdir()
         self.iidfile.write_text(f"sha256:{SOURCE}")
@@ -97,6 +105,7 @@ class RechunkImage(unittest.TestCase):
             f" --output containers-storage:{OUT}",
             run,
         )
+        self.assertIn(f"-e SOURCE_DATE_EPOCH={EPOCH} ", run)
         # The store is mounted at its own path: its database records that path.
         self.assertIn("-v /store/graph:/store/graph -v /run/store:/run/store", run)
         # Without a baseline: nothing is left under the output name before the run.
@@ -135,6 +144,15 @@ class RechunkImage(unittest.TestCase):
         r = self.rechunk()
         self.assertNotEqual(r.returncode, 0)
         self.assertEqual(self.iidfile.read_text(), f"sha256:{SOURCE}")
+
+    def test_a_source_without_a_creation_time_is_refused(self):
+        images = json.loads(self.images.read_text())
+        images[SOURCE]["created"] = None
+        self.images.write_text(json.dumps(images))
+        r = self.rechunk()
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("no creation time", r.stderr)
+        self.assertFalse(any(c.startswith("run ") for c in self.calls.read_text().splitlines()))
 
     def test_the_iid_file_must_hold_an_image_id(self):
         self.iidfile.write_text("localhost/athanor-system:latest")

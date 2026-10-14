@@ -4,7 +4,7 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-update
 Version:        1.0.0
-Release:        11%{?dist}
+Release:        12%{?dist}
 Summary:        Athanor system image updates and trust state
 
 License:        GPL-3.0-or-later
@@ -74,7 +74,7 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
 %doc /usr/share/doc/athanor-update/RECOVERY.md
 
 %changelog
-* Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-11
+* Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-12
 - A machine on a channel that runs a digest nothing verifies, as a fresh install from the
   ISO does (UD2), and whose candidate is the same build (build time and version) under
   another digest, downloads that signed copy under the policy and unlocks exactly that
@@ -83,6 +83,12 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
   `older-than-booted`. A failed unlock reads `none` with its error code and is retried; a
   copy that fails to boot twice reads `held`. A verified boot, a run tag or digest, an
   unlabelled or older build and a refused download are unchanged.
+
+* Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-11
+- A booted deployment with local changes takes its build time from the
+  `org.opencontainers.image.created` label of the image configuration in the base commit's
+  metadata, as `bootc status` does, no longer from `base-timestamp`, which is the configuration's
+  `created` and now the fixed epoch of the image build (doc_update_delivery.md, UD29).
 
 * Fri Oct 09 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
 - The migration to a project's new owner is removed (ADR-0103 D4, issue #349): `moved-from`,
