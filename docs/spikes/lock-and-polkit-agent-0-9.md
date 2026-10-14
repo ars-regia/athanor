@@ -13,10 +13,27 @@ registers for the session, runs as the user, never as root, and a crash of the a
 an authorisation (LP10, LP11). Issue #144 reports that every polkit prompt fails on the shipped
 image.
 
+**Order of the pull requests.** #438 (ADR-0115) is merged; this spike merges next; the
+implementation and its acceptance, #444, merge after it. The helper drop-in of section 5, #445,
+is merged (`e8dde2b8`).
+
+**The approved specifications that this choice departs from.** `doc_shell.md` SH1 (stage 4)
+and SH3 (the rows of cosmic-greeter as locker and of cosmic-osd) replace both components with
+"our lock" and "our polkit agent" in stage 4, and `doc_osd.md` OD15 keeps cosmic-osd's agent
+failure "reported, not patched" until the retirement step. For 0.9, ADR-0115 item 4 supersedes
+them: the lock and the polkit agent are upstream components packaged in Fedora, and Athanor's
+own lock and agent move to 1.1. Its consequences (the amendment of ADR-0103 D13) state that the
+lock and prompts specifications keep their words and are not edited, so `doc_shell.md` and
+`doc_osd.md` are not edited here either; they describe 1.1. The drop-in of section 5 does not
+patch cosmic-osd: it configures polkit's own helper unit, `polkit-agent-helper@.service`, and
+cosmic-osd's unit and program are unchanged.
+
 ## 1. What the image runs today
 
 Read from the checkout and from the maintainer's desktop (Athanor, booted 2026-10-10, polkit
-127-2.fc43.2.athanor1, cosmic-greeter 1.9.1, cosmic-osd 1.9.0, cosmic-idle 1.9.0).
+127-2.fc43.2.athanor1). The image runs cosmic-greeter-1.9.1-3.fc43, cosmic-osd-1.9.0-1.fc43,
+cosmic-idle-1.9.0-1.fc43 and cosmic-comp-1.9.0-1.fc43.athanor1, older than the 1.10.0 builds in
+Fedora 43's `updates` (section 2).
 
 - **Lock:** cosmic-greeter in locker mode, a child of `athanor-desktop` inside the logind session
   (`forge/specs/athanor-system-config/SOURCES/usr/bin/athanor-desktop`, `session_component`),
@@ -47,8 +64,13 @@ against the Athanor image `localhost/ud40/athanor-system:rehearsal` (built 2026-
 | gtklock, hyprlock, waylock, gtk-session-lock | not packaged | | | | | |
 | kscreenlocker, light-locker | packaged, but KDE's locker needs Plasma's kwin; light-locker needs LightDM and X11 | | | | | |
 
-Versions are taken from the source tags that match Fedora's package (`epoch-1.10.0` for COSMIC),
-read on raw.githubusercontent.com on 2026-10-14.
+The Fedora 43 column is the repository's version; the image runs the older builds of section 1.
+Line references are read at the tag `epoch-1.10.0` on raw.githubusercontent.com on 2026-10-14.
+They hold for what the image runs: cosmic-greeter's `src/locker.rs`, `src/logind.rs` and
+`src/main.rs` are identical at `epoch-1.9.1` and `epoch-1.10.0`, and so are cosmic-osd's
+`src/components/polkit_dialog.rs`, `src/subscriptions/polkit_agent.rs` and
+`src/subscriptions/polkit_agent_helper.rs` at `epoch-1.9.0` and `epoch-1.10.0` (compared byte for
+byte on 2026-10-14).
 
 ### The agent
 
@@ -86,6 +108,13 @@ system-auth (with `pam_faillock`, ADR-0090) and hands the password to the option
 modules (`pam_gnome_keyring`, `pam_oo7`), which LP8 forbids for Athanor's own lock; swaylock's
 `login` stack (system-auth and postlogin, read in the 2026-10-07 image) carries no keyring
 module. No new PAM service file is needed for the chosen lock.
+
+**The lock screen and the tally.** cosmic-greeter's locker runs as the user, and `/run/faillock`
+is owned by root with mode 0755, so the locker cannot create a tally: `open_tally` fails with
+`EACCES`, which pam_faillock tolerates, and the failure is not recorded. Once the tally exists it
+is owned by the user with mode 0660 (`modules/pam_faillock/faillock.c:80-104`), so the locker
+can write it, and failures at the lock screen count. The first login creates it (section 5), so
+failures at the lock screen are counted only from then on.
 
 **A crash of the lock.** Under `ext-session-lock-v1`, cosmic-comp keeps a lock whose client died:
 the outputs stay dark and locked (LP10). Both lockers use the protocol. cosmic-greeter, restarted
@@ -135,28 +164,34 @@ polkit 127's helper unit, `polkit-agent-helper@.service`, sets `ProtectSystem=st
 `/run/faillock` is read-only inside it. The image enables authselect's `with-faillock`
 (ADR-0090), so system-auth, and through it polkit-1, starts with
 `auth required pam_faillock.so preauth silent`. pam_faillock 1.7.1 opens the user's tally with
-`O_RDWR` (`modules/pam_faillock/faillock.c:55-80`); on any error other than `ENOENT` or `EACCES`
-its preauth logs "Error opening the tally file" and returns `PAM_SYSTEM_ERR`
-(`pam_faillock.c:199-208`), and that `required` line fails the transaction.
+`O_RDWR` (`modules/pam_faillock/faillock.c:55-80`). Its preauth, `check_tally`, tolerates only
+`ENOENT` and `EACCES`; on any other error it logs "Error opening the tally file" and returns
+`PAM_SYSTEM_ERR` (`pam_faillock.c:199-208`), and that `required` line fails the transaction.
 
-So once the user has a tally file, which the first failed root-side authentication creates (a
-wrong password at `sudo` or at the greeter), every polkit authentication fails until reboot,
-whatever the agent. Before that file exists, polkit's failures are not counted, so the lockout of
-ADR-0090 does not cover polkit. The desktop has `/run/faillock/hr-mes`, created 2026-10-11, so it
-is in the failing state now. This is read from source and configuration, not run.
+The tally exists after any login. The account phase of system-auth's pam_faillock,
+`pam_sm_acct_mgmt` (`pam_faillock.c:527-560`), calls `reset_tally`, which calls
+`open_tally(create=1)` (`pam_faillock.c:272-287`), so the first successful login creates
+`/run/faillock/<user>`, 0 bytes, mode 0660. From then on the helper, under
+`ProtectSystem=strict`, gets `EROFS` when it opens the file `O_RDWR`; `check_tally` does not
+tolerate `EROFS`, preauth returns `PAM_SYSTEM_ERR`, and every polkit prompt fails until reboot,
+whatever the agent. This is the cause of #144. The desktop has `/run/faillock/hr-mes`, so it is
+in the failing state now. This is read from source (linux-pam `v1.7.1`) and configuration, not
+run.
 
-LP11 already names the fix, a drop-in that the polkit 127 package of #198 did not ship. It
-changes the sandbox of the root PAM helper, an authentication path that `AGENTS.md` asks to stop
-before, so it is not in this spike's pull request:
+The remedy is #445, merged as `e8dde2b8`, the drop-in that LP11 names and that the polkit 127
+package of #198 did not ship. polkit `127-2.fc43.2.athanor2` installs
+`/usr/lib/systemd/system/polkit-agent-helper@.service.d/50-athanor-faillock.conf` with
+`ReadWritePaths=/run/faillock` and nothing else. It configures the polkit helper unit, not
+cosmic-osd. It reaches users with the first system image built after the merge.
 
-```ini
-# forge/specs/polkit: /usr/lib/systemd/system/polkit-agent-helper@.service.d/50-athanor-faillock.conf
-# Athanor: pam_faillock (system-auth, ADR-0090) writes the user's tally in /run/faillock; under
-# ProtectSystem=strict a read-only tally makes preauth fail with PAM_SYSTEM_ERR
-# (doc_lock_and_prompts.md LP8, LP11). Fedora's pam creates the directory at boot (tmpfiles pam.conf).
-[Service]
-ReadWritePaths=/run/faillock
-```
+**A side effect, tracked in #447.** With the tally writable, pam_faillock records polkit
+failures as ADR-0090 intends, and a cancelled dialog is one of them: cancelling closes the
+agent's connection, the conversation fails, `pam_unix` fails and the stack reaches
+`pam_faillock authfail` (upstream polkit-org/polkit#713). With ADR-0090's `deny = 5`,
+`fail_interval = 900` and `unlock_time = 600`, five cancelled prompts within 15 minutes lock the
+account out of login, `sudo`, the lock screen and polkit for 10 minutes. #447 tracks the fix: a
+backport of the upstream fix, or a patch that ends the transaction without `authfail` when the
+agent's connection closes.
 
 ## 6. What this leaves open for 0.9
 
@@ -171,4 +206,5 @@ ReadWritePaths=/run/faillock
 - The lock before suspend is armed by cosmic-greeter's inhibitor; a real suspend and resume is not
   part of the VM acceptance and is judged on the reference laptop.
 - Not run here: the lock, the unlock and a polkit prompt in a booted image. The implementation
-  pull request adds the dev VM acceptance that runs them.
+  pull request, #444, adds the dev VM acceptance that runs them.
+- A cancelled polkit dialog counts as a failure until #447 is fixed (section 5).
