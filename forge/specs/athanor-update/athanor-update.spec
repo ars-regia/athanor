@@ -4,7 +4,7 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-update
 Version:        1.0.0
-Release:        10%{?dist}
+Release:        11%{?dist}
 Summary:        Athanor system image updates and trust state
 
 License:        GPL-3.0-or-later
@@ -74,6 +74,14 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
 %doc /usr/share/doc/athanor-update/RECOVERY.md
 
 %changelog
+* Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-11
+- A machine on a channel whose candidate is the build it runs under another digest, as a
+  fresh install from the ISO is (UD2), downloads that signed copy under the policy and
+  unlocks it to boot at the next shutdown, with no prompt and no relock. The state reads
+  `media` and `will-apply-at-next-shutdown`, no longer `no-signature` and
+  `older-than-booted`. A run tag or digest, an older build and a refused download are
+  unchanged.
+
 * Fri Oct 09 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
 - The migration to a project's new owner is removed (ADR-0103 D4, issue #349): `moved-from`,
   `render-policy --moved-from`, the successor lookup and the owner-moved, owner-moved-waiting
