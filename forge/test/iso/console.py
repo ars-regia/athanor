@@ -80,6 +80,7 @@ MARKERS = (
     # follows is :stable through the signature policy, or anything else.
     (b"ORIGIN_OK", "origin-stable-signed"),
     (b"ORIGIN_WRONG", "origin-wrong"),
+    (b"ORIGIN_UNREADABLE", "origin-unreadable"),
     # The guest's own answer to GREETER_PROBE below: a greeter session that is still
     # there, with the shell inside it, after it has had time to die.
     (b"GREETER_ALIVE", "greeter-alive"),
@@ -306,21 +307,29 @@ KARG_PROBE_WAIT = 5.0
 
 # Ask the guest which image it follows (doc_update_delivery.md UD2, ADR-0114). The
 # installer's %post records <repository>:stable through the signature policy; a system
-# that follows :latest, a run's own tag, or any reference bootc does not verify against
-# containers-policy.json answers WRONG with what it follows instead. The reference is the
-# booted deployment's, read from bootc itself, which is what every later update starts
-# from. bootc names an enforced policy `containerPolicy`; an unverified reference carries
-# `insecure` or no signature at all, so OK needs the word itself. As with the other probes
-# printf assembles the marker, so the echo of the typed line cannot pass for the answer.
+# that follows :latest, a run's own tag, or any reference not verified against
+# containers-policy.json answers WRONG with the reference it found. The reference is read
+# from the booted deployment's `.origin` file, not from `bootc status`: that command takes
+# the sysroot lock, and while another process holds it (first boot, greenboot) it prints
+# "Waiting for sysroot lock..." instead of JSON (issue 459). The `ostree=` argument of
+# /proc/cmdline names the booted deployment, `<deployment>.origin` sits beside it, and
+# `bootc switch --enforce-container-sigpolicy` writes `ostree-image-signed:` there
+# (SignatureSource::ContainerPolicy), which is what bootc reports as `containerPolicy`.
+# A reference that cannot be read at all answers UNREADABLE with the `ostree=` value,
+# so the run does not call a lock or a missing file a wrong origin. As with the other
+# probes printf assembles the marker, so the echo of the typed line cannot pass for the
+# answer.
 ORIGIN_PROBE = (
-    b"o=$(printf 'collaudo\\n' | sudo -S bootc status --format=json"
-    b" | jq -r '.status.booted.image.image | \"\\(.image) \\(.signature)\"');"
+    b"p=$(tr ' ' '\\n' < /proc/cmdline | sed -n 's/^ostree=//p');"
+    b" o=$(printf 'collaudo\\n' | sudo -S sh -c 'cat \"$(readlink -f /sysroot$1).origin\"' _ \"$p\""
+    b" | sed -n 's/^container-image-reference=//p');"
     b' case "$o" in'
-    b" *:stable\\ containerPolicy) printf 'ORIGIN_%s %s\\n' OK \"$o\";;"
+    b" ostree-image-signed:docker://*:stable) printf 'ORIGIN_%s %s\\n' OK \"$o\";;"
+    b" \"\") printf 'ORIGIN_%s %s\\n' UNREADABLE \"$p\";;"
     b" *) printf 'ORIGIN_%s %s\\n' WRONG \"$o\";;"
     b" esac"
 )
-# bootc reads the deployment and the image's manifest from local storage, under sudo.
+# A cmdline read, a symlink and a file read under sudo.
 ORIGIN_PROBE_WAIT = 10.0
 
 # The password as QEMU's `sendkey` wants it, one key per command. QEMU names a letter key
