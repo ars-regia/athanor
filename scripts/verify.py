@@ -757,6 +757,60 @@ def check_kickstart():
 
 
 # --------------------------------------------------------------------------- #
+# install-channel — installed systems follow :stable, signed (UD2, ADR-0114)
+# --------------------------------------------------------------------------- #
+
+# The kickstarts that install a machine for a person, and the one that tests that install.
+# Each carries the same %post, which records <repository>:stable through ostree-image-signed.
+INSTALL_KICKSTARTS = ("system/athanor-install.ks", "system/disk_config/iso.toml",
+                      "forge/test/iso/collaudo.ks")
+STABLE_SWITCH = ('bootc switch --mutate-in-place --enforce-container-sigpolicy '
+                 '--transport registry "$repository:stable"')
+KICKSTART_POST = re.compile(r"^%post\b.*?^%end$", re.M | re.S)
+
+
+def install_channel_problems(root=None):
+    """No kickstart names :latest or runs `bootc switch` without the signature policy, and each
+    install kickstart carries the one %post that records :stable, signed (doc_update_delivery.md
+    UD2). Comment lines are not read: they may name what the code must not."""
+    root = Path(root or ROOT)
+    problems = []
+    blocks = {}
+    for path in sorted({*(root / f for f in INSTALL_KICKSTARTS), *walk(root, ".ks")}):
+        relative = path.relative_to(root).as_posix()
+        try:
+            text = read(path)
+        except OSError as err:
+            problems.append(f"{relative}: cannot read ({err})")
+            continue
+        for i, line in enumerate(text.split("\n"), 1):
+            code = line.strip()
+            if code.startswith("#"):
+                continue
+            if re.search(r":latest\b", code):
+                problems.append(f"{relative}:{i}: names :latest; installed systems follow :stable (UD2)")
+            if re.search(r"\bbootc\s+switch\b", code) and "--enforce-container-sigpolicy" not in code:
+                problems.append(f"{relative}:{i}: bootc switch without --enforce-container-sigpolicy (UD2)")
+        if relative in INSTALL_KICKSTARTS:
+            found = [b for b in KICKSTART_POST.findall(text) if STABLE_SWITCH in b]
+            if len(found) == 1:
+                blocks[relative] = found[0]
+            else:
+                problems.append(f"{relative}: needs one %post that runs `{STABLE_SWITCH}` (UD2)")
+    if len(set(blocks.values())) > 1:
+        problems.append(f"the :stable %post differs between {', '.join(sorted(blocks))}: keep them identical")
+    return problems
+
+
+@check("install-channel", "Install kickstarts leave the machine on :stable with the signature policy enforced")
+def check_install_channel():
+    r = Result()
+    for problem in install_channel_problems():
+        r.fail(problem)
+    return r
+
+
+# --------------------------------------------------------------------------- #
 # os-release — bootc-image-builder reads it to build the ISO
 # --------------------------------------------------------------------------- #
 

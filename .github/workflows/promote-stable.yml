@@ -144,3 +144,8 @@ jobs:
           nix shell --inputs-from . nixpkgs#cosign -c bash system/evidence-bundle.sh verify "${EVIDENCE_REF}" artifacts
       - name: ⭐ Check again and promote (system/promote.sh)
         run: bash system/promote.sh ${OVERRIDE:+--hardware-override "$OVERRIDE"} "${RUN_ID}" | tee -a "${GITHUB_STEP_SUMMARY}"
+      - name: 💿 Point the installer ISO's stable at the run (system/tag-images.sh)
+        # After the system images, so the ISO users download never installs a build :stable
+        # has not reached (doc_pipeline.md PL35, ADR-0114). The run's ISO passed the
+        # acceptance this promotion read, and installs that run's default image.
+        run: bash system/tag-images.sh --registry "$REGISTRY" --tag stable --iso "$RUN_ID" | tee -a "${GITHUB_STEP_SUMMARY}"

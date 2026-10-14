@@ -108,3 +108,33 @@ if [ "$root_fstype" = btrfs ]; then
     ostree admin instutil set-kargs --merge rootflags=compress=zstd:1
 fi
 %end
+
+# The same %post as the shipped ISO's kickstart, repeated for the reason xconfig is. It
+# is what the ORIGIN probe of console.py checks on the installed system.
+# Installed systems follow :stable with the signature policy enforced (doc_update_delivery.md
+# UD2, ADR-0114). The installer records the image it installed without a signature policy:
+# Anaconda's ostreecontainer has no option for a signed reference, and on the ISO the
+# builder's own %post, which runs before this one, names the run the ISO was built from
+# (osbuild/image-builder issue 380). This %post rewrites that record and installs nothing:
+# `--mutate-in-place` changes the origin of the deployment just written, and
+# `--enforce-container-sigpolicy` makes it ostree-image-signed, so every later pull is
+# verified against the policy the image ships.
+# The repository is read from the record, never written out here, so the owner the image
+# was built under is the one the policy names.
+%post --erroronfail
+set -eu
+set -- /sysroot/ostree/deploy/*/deploy/*.origin
+if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
+    echo "expected one deployment origin, found: $*" >&2
+    exit 1
+fi
+reference=$(sed -n 's/^container-image-reference=//p' "$1")
+case $reference in
+    *docker://*) image=${reference##*docker://} ;;
+    ostree-unverified-registry:*) image=${reference#ostree-unverified-registry:} ;;
+    *) echo "unexpected image reference '$reference' in $1" >&2; exit 1 ;;
+esac
+repository=${image%@*}
+case ${repository##*/} in *:*) repository=${repository%:*} ;; esac
+bootc switch --mutate-in-place --enforce-container-sigpolicy --transport registry "$repository:stable"
+%end

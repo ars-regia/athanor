@@ -15,12 +15,16 @@ contents = """
 #   /usr/lib/systemd/system/default.target -> graphical.target
 #
 # xconfig --startxonboot is the kickstart directive that states the intent explicitly, and
-# Anaconda honours it ahead of its package-based guess. The %post that used to live here ran
-# a second `bootc switch` and made the installed system disagree with itself (101e5781), so
-# this file stays limited to what the installer must be told and what only the installer
-# can undo: the one %post below removes the / line Anaconda itself writes to /etc/fstab.
-# forge/test/iso/collaudo.ks repeats both, because it includes osbuild-base.ks rather than
-# this file.
+# Anaconda honours it ahead of its package-based guess. This file stays limited to what the
+# installer must be told and what only the installer can undo: the first %post below removes
+# the / line Anaconda itself writes to /etc/fstab, and the second records :stable, signed, as
+# the image the machine follows. A second `bootc switch` once made the installed system
+# disagree with itself (101e5781): it named a moving tag while the disk held the ISO's build.
+# The ISO users are given carries the build :stable names when it is published, because
+# athanor-iso:stable moves only with the system images' :stable (promote-stable.yml,
+# ADR-0114), and :stable never moves to an older build without a promotion that says so.
+# forge/test/iso/collaudo.ks repeats all three, because it includes osbuild-base.ks rather
+# than this file.
 xconfig --startxonboot
 
 # Remote login is off on new installs (doc_software.md, decision 2). The image's preset
@@ -68,6 +72,34 @@ root_fstype=$(stat -f -c %T /sysroot)
 if [ "$root_fstype" = btrfs ]; then
     ostree admin instutil set-kargs --merge rootflags=compress=zstd:1
 fi
+%end
+
+# Installed systems follow :stable with the signature policy enforced (doc_update_delivery.md
+# UD2, ADR-0114). The installer records the image it installed without a signature policy:
+# Anaconda's ostreecontainer has no option for a signed reference, and on the ISO the
+# builder's own %post, which runs before this one, names the run the ISO was built from
+# (osbuild/image-builder issue 380). This %post rewrites that record and installs nothing:
+# `--mutate-in-place` changes the origin of the deployment just written, and
+# `--enforce-container-sigpolicy` makes it ostree-image-signed, so every later pull is
+# verified against the policy the image ships.
+# The repository is read from the record, never written out here, so the owner the image
+# was built under is the one the policy names.
+%post --erroronfail
+set -eu
+set -- /sysroot/ostree/deploy/*/deploy/*.origin
+if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
+    echo "expected one deployment origin, found: $*" >&2
+    exit 1
+fi
+reference=$(sed -n 's/^container-image-reference=//p' "$1")
+case $reference in
+    *docker://*) image=${reference##*docker://} ;;
+    ostree-unverified-registry:*) image=${reference#ostree-unverified-registry:} ;;
+    *) echo "unexpected image reference '$reference' in $1" >&2; exit 1 ;;
+esac
+repository=${image%@*}
+case ${repository##*/} in *:*) repository=${repository%:*} ;; esac
+bootc switch --mutate-in-place --enforce-container-sigpolicy --transport registry "$repository:stable"
 %end
 """
 

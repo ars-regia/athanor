@@ -537,8 +537,10 @@ doc_update_trust.md before any key is placed in a scheduled job.
 images are signed, so its `SHA256SUMS` is signed keylessly (Sigstore) by the stage that
 built it, `call-iso.yml`, with build provenance beside it, and published with the ISO: no key and no
 approval, and a user verifies it with `cosign verify-blob` against that exact workflow
-identity (PQ2). The kickstart installs the promoted digest through the signed transport
-(UD2), and the installer carries the policy of UT3 (UD22).
+identity (PQ2). The ISO users are given is the one `:stable` names: the `promote` job moves
+`athanor-iso:stable` to the promoted run's ISO (PL35). Its kickstart leaves the machine on
+`:stable` through the signed transport (UD2, ADR-0114), and the installer carries the policy
+of UT3 (UD22).
 
 **PL33. Every machine verifies before it switches** (UD11, UD23): signature through the
 shipped policy, and from 1.0 the key-signed release attestation of PL31 (build time and
@@ -833,7 +835,9 @@ frozen (PL54), it moves only on a hand release of `main`, which also moves the s
 images' `:latest` without a marker (PL55). Those old jobs are outside this rule until
 ADR-0098 option A deletes `main`; a later ISO release path names its writer (PL32).
 Before this revision only `main` moved the ISO's `:latest` too, so this is no regression. `:stable`,
-`:stable-previous`, `:stable-<YYYYMMDD>` are written only by `promote.sh`. There is one
+`:stable-previous`, `:stable-<YYYYMMDD>` are written only by `promote.sh`; the ISO's
+`:stable` only by `system/tag-images.sh --iso` in the `promote` job of `promote-stable.yml`,
+after `promote.sh` (ADR-0114). There is one
 writer per tag and repository. Since PB13 `verify.py workflows` refuses a call of
 `system/tag-images.sh` that moves `:latest` outside `tag-latest` of `release.yml`, and a call of
 `promote.sh` or a move of `:stable` outside a job of the environment `release`; the full check is
