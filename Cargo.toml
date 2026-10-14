@@ -97,6 +97,9 @@ nix = "0.29.0"
 clap = { version = "4.6.4", features = ["derive"] }
 greetd_ipc = "0.10.3"
 landlock = "0.4"
+# The greeter's read of the lastlog2 database (doc_lock_and_prompts.md LP19): linked to the
+# system SQLite, never a bundled copy, so that its security updates come with the image.
+rusqlite = { version = "0.40.2", default-features = false }
 rand = "0.8.5"
 chrono = "0.4.45"
 

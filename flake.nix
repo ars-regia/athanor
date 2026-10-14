@@ -55,6 +55,8 @@
           # athanor-launcher and athanor-preview-render: tinysparql (tracker-sys, the localsearch client),
           # poppler-glib (the PDF decoder), libseccomp and fontconfig (glycin)
           tinysparql poppler libseccomp fontconfig
+          # athanor-greeter-ui: rusqlite reads lastlog2 through the system libsqlite3
+          sqlite
         ];
         system-lib-closure = pkgs.lib.closePropagation (map pkgs.lib.getDev system-libs);
         system-dev = map pkgs.lib.getDev system-lib-closure;

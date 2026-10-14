@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:60.fc43}
+Release:        %{?autorelease}%{!?autorelease:61.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -97,6 +97,11 @@ done
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-61
+- athanor-greeter-client binds /var/lib/lastlog read-only into the greeter's sandbox, so
+  that the account list puts the latest greetd sign-in first (doc_lock_and_prompts.md,
+  LP19). Nothing in it is writable; a machine without the directory skips the bind.
+
 * Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-60
 - Ships athanor-usbguard-internal.service, a root oneshot that runs once at the first boot,
   before usbguard.service and the greeter, and writes an allow rule for each USB device then

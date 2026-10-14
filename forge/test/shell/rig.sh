@@ -102,6 +102,11 @@ stage_greeter_icons() {
         "$out/greeter-icons/icons/hicolor/scalable/status/"
 }
 
+# The greeter lists the accounts NSS returns (doc_lock_and_prompts.md, LP19), and the rig
+# image has none in the human range: each greeter run first adds `rig`, uid 1000, to the
+# container's /etc/passwd, so the default card is Rig's.
+with_account=(bash -c 'echo "rig:x:1000:1000:Rig:/home/rig:/bin/bash" >> /etc/passwd && exec "$@"' with-account)
+
 # Each capture_<surface> runs every case of its surface and appends the tags to $tags.
 capture_greeter() {
     # Test-only catalogs: German for length, the pseudo-language for right-to-left.
@@ -119,7 +124,7 @@ capture_greeter() {
         if [ "$catalog" != - ]; then
             override=(ATHANOR_I18N_CATALOG="/out/locale/$catalog")
         fi
-        in_rig "$(rig_image)" env ATHANOR_GREETER_VARIANT="$variant" ATHANOR_LOGIN_USER=rig RIG_LOCALE="$locale" \
+        in_rig "$(rig_image)" "${with_account[@]}" env ATHANOR_GREETER_VARIANT="$variant" RIG_LOCALE="$locale" \
             RIG_DATA_OVERLAY=/out/greeter-icons "${override[@]}" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1920 1080 "$scale" "$tag" -- \
             python3 /repo/forge/test/shell/bar_session.py --client athanor-greeter-ui
@@ -619,7 +624,7 @@ layer-guard)
     esac
     rm -f "$out/layer-guard-$surface.status"
     # Preloading libwayland-client reproduces the wrong load order on purpose.
-    in_rig "$(rig_image)" env RIG_SETTLE=6 ATHANOR_LOGIN_USER=rig \
+    in_rig "$(rig_image)" "${with_account[@]}" env RIG_SETTLE=6 \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 "layer-guard-$surface" -- \
         bash -c "LD_PRELOAD=/usr/lib64/libwayland-client.so.0 /out/bin/$binary; echo \$? > /out/layer-guard-$surface.status; sleep 60"
     # A surface that never exits writes no status file: report that, do not die on cat.
@@ -633,7 +638,7 @@ layer-guard)
 greeter-preview)
     stage_greeter_icons
     for variant in light dark light-hc dark-hc; do
-        in_rig "$(rig_image)" env ATHANOR_GREETER_VARIANT="$variant" ATHANOR_LOGIN_USER=ermete RIG_LOCALE=en_US.UTF-8 \
+        in_rig "$(rig_image)" "${with_account[@]}" env ATHANOR_GREETER_VARIANT="$variant" RIG_LOCALE=en_US.UTF-8 \
             RIG_DATA_OVERLAY=/out/greeter-icons \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1920 1080 1.0 "greeter-preview-$variant" -- \
             /out/bin/athanor-greeter-ui
@@ -661,11 +666,12 @@ atspi)
     enable='busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true'
     case "${2:-}" in
     greeter)
-        # 6 interactive widgets: password, sign in, contrast, three power chips; and the seal,
-        # which names the badge a verified state backs (doc_shell.md, section 7, item 3).
-        in_rig "$(rig_image)" env GTK_A11Y=atspi ATHANOR_LOGIN_USER=rig RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=6 \
+        # 7 interactive widgets: back to the list, password, sign in, contrast, three power
+        # chips; and the seal, which names the badge a verified state backs (doc_shell.md,
+        # section 7, item 3).
+        in_rig "$(rig_image)" "${with_account[@]}" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=6 \
             ATSPI_REQUIRED_NAME="System image verified" \
-            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-greeter-ui 6" \
+            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-greeter-ui 7" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-greeter -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-greeter-ui"
         ;;

@@ -14,16 +14,15 @@ use athanor_style::calmo::{self, Variant};
 use gtk4::accessible::Property;
 use gtk4::prelude::*;
 use gtk4::{
-    gdk, Align, Application, ApplicationWindow, Box, Button, Entry, Image, Label, Orientation,
-    PasswordEntry, ToggleButton,
+    gdk, Align, Application, ApplicationWindow, Box, Button, Entry, Image, Label, ListBox,
+    ListBoxRow, Orientation, PasswordEntry, ScrolledWindow, Stack, ToggleButton,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use tokio::sync::oneshot;
 
-use crate::auth::{
-    authenticate_interactive, discover_target_user, Conversation, Outcome, Prompt, UserInfo,
-};
+use crate::accounts::{typed_name_is_valid, Account};
+use crate::auth::{authenticate_interactive, Conversation, Outcome, Prompt};
 use crate::i18n::{tr, tr_with};
 
 /// The seal's state is asked again every hour: the badge ages ("checked within 14 days"
@@ -130,30 +129,103 @@ fn now_text(format: &str) -> String {
         .unwrap_or_default()
 }
 
-/// The avatar: the account's picture when there is one, the initial on the accent otherwise.
-fn avatar(user: &UserInfo) -> gtk4::Widget {
-    if let Some(path) = &user.avatar_path {
-        let picture = gtk4::Picture::for_filename(path);
-        picture.set_size_request(60, 60);
-        picture.set_content_fit(gtk4::ContentFit::Cover);
-        picture.set_overflow(gtk4::Overflow::Hidden);
-        picture.add_css_class("greeter-avatar");
-        picture.set_halign(Align::Center);
-        picture.update_property(&[Property::Label(&user.real_name)]);
-        return picture.upcast();
+/// The avatar of a card: the initial of its name on the accent, or, for "Other user", a
+/// generic person. No picture: the greeter decodes no image an account supplied and reads
+/// no file under a home directory (doc_lock_and_prompts.md, LP19).
+#[derive(Clone)]
+struct Avatar {
+    disc: Box,
+    initial: Label,
+    anyone: Image,
+}
+
+impl Avatar {
+    fn new() -> Self {
+        let disc = Box::builder()
+            .css_classes(["greeter-avatar"])
+            .halign(Align::Center)
+            .valign(Align::Center)
+            .build();
+        let initial = Label::builder()
+            .hexpand(true)
+            .halign(Align::Center)
+            .valign(Align::Center)
+            .build();
+        let anyone = Image::builder()
+            .icon_name("avatar-default-symbolic")
+            .pixel_size(28)
+            .hexpand(true)
+            .halign(Align::Center)
+            .valign(Align::Center)
+            .visible(false)
+            .build();
+        disc.append(&initial);
+        disc.append(&anyone);
+        Avatar {
+            disc,
+            initial,
+            anyone,
+        }
     }
-    let initial: String = user
-        .real_name
-        .chars()
-        .next()
-        .map(|c| c.to_uppercase().collect())
-        .unwrap_or_default();
-    Label::builder()
-        .label(initial)
-        .css_classes(["greeter-avatar"])
-        .halign(Align::Center)
-        .build()
-        .upcast()
+
+    /// The initial of `account`, or the generic person when there is none.
+    fn show(&self, account: Option<&Account>) {
+        self.initial
+            .set_label(&account.map(Account::initial).unwrap_or_default());
+        self.initial.set_visible(account.is_some());
+        self.anyone.set_visible(account.is_none());
+    }
+}
+
+/// One entry of the list: the avatar, the full name and, when another account has the same
+/// one, the user name; None is "Other user". A screen reader reads "Ada Lovelace, ada".
+fn account_row(account: Option<&Account>) -> ListBoxRow {
+    let avatar = Avatar::new();
+    avatar.show(account);
+    let (name, accessible) = match account {
+        Some(account) => (account.full_name.clone(), account.accessible_name()),
+        None => (tr("Other user"), tr("Other user")),
+    };
+    let lines = Box::builder()
+        .orientation(Orientation::Vertical)
+        .valign(Align::Center)
+        .build();
+    lines.append(
+        &Label::builder()
+            .label(&name)
+            .css_classes(["greeter-name"])
+            .halign(Align::Start)
+            .build(),
+    );
+    if let Some(account) = account.filter(|account| account.shows_user) {
+        lines.append(
+            &Label::builder()
+                .label(&account.user)
+                .css_classes(["greeter-status"])
+                .halign(Align::Start)
+                .build(),
+        );
+    }
+    let content = Box::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(14)
+        .margin_top(4)
+        .margin_bottom(4)
+        .build();
+    content.append(&avatar.disc);
+    content.append(&lines);
+    let row = ListBoxRow::builder().child(&content).build();
+    row.update_property(&[Property::Label(&accessible)]);
+    row
+}
+
+/// The entry a typed `letter` moves to: the next after `from` whose name starts with it,
+/// round the end of the list; None when no name does.
+fn next_match(names: &[String], from: usize, letter: char) -> Option<usize> {
+    let letter: String = letter.to_lowercase().collect();
+    (1..=names.len())
+        .map(|step| (from + step) % names.len())
+        .find(|&index| names[index].to_lowercase().starts_with(&letter))
 }
 
 /// The keyboard layout, read from the seat. Hidden when the seat names none: the chip
@@ -259,12 +331,52 @@ impl Notices {
     }
 }
 
+/// Which sign-in owns the card. The greeter never has two greetd sessions open: a sign-in
+/// starts only when the last one has finished talking to greetd. And a sign-in the person
+/// left, by going back to the list, never draws on the card of the next.
+#[derive(Debug, Default)]
+struct Turn {
+    attempt: u64,
+    conversing: bool,
+}
+
+impl Turn {
+    /// A sign-in starts: its number, or None while the previous one is still talking to
+    /// greetd (a cancelled one sends CancelSession on its way out).
+    fn begin(&mut self) -> Option<u64> {
+        if self.conversing {
+            return None;
+        }
+        self.conversing = true;
+        self.attempt += 1;
+        Some(self.attempt)
+    }
+
+    /// The person left the card: what the running sign-in says next is not drawn.
+    fn leave(&mut self) {
+        self.attempt += 1;
+    }
+
+    /// Sign-in `attempt` is over: whether its outcome is still the card's to draw.
+    fn end(&mut self, attempt: u64) -> bool {
+        self.conversing = false;
+        self.attempt == attempt
+    }
+}
+
 /// The card's fields as one sign-in sees them: PAM's messages are shown on it, and its
 /// further questions are put on it, each answered from the field its type calls for.
 #[derive(Clone)]
 struct SignInForm {
     password: PasswordEntry,
-    password_label: String,
+    password_label: Rc<RefCell<String>>,
+    /// "Other user"'s field, shown only on its card and only until PAM asks.
+    user_name: Entry,
+    /// The card is "Other user"'s.
+    other: Rc<Cell<bool>>,
+    /// Back to the list, beside the field; hidden when there is no list.
+    back: Button,
+    turn: Rc<RefCell<Turn>>,
     answer: Entry,
     question: Label,
     submit: Button,
@@ -285,8 +397,10 @@ impl SignInForm {
     /// Nothing can be typed while greetd has the turn.
     fn wait(&self) {
         self.password.set_sensitive(false);
+        self.user_name.set_sensitive(false);
         self.answer.set_sensitive(false);
         self.submit.set_sensitive(false);
+        self.back.set_sensitive(false);
         self.notices.borrow_mut().close_question();
         self.show_notices();
     }
@@ -311,7 +425,9 @@ impl SignInForm {
         self.cancel.set_visible(notices.cancellable);
     }
 
-    /// The card as it was before the sign-in: the password field, ready.
+    /// The card as it was before the sign-in: the password field, ready, or on "Other
+    /// user"'s card the name field, emptied, so that a password typed there by mistake
+    /// stays neither on screen nor in the accessibility tree.
     fn reset(&self) {
         self.pending.take();
         self.notices.borrow_mut().close_question();
@@ -320,11 +436,20 @@ impl SignInForm {
         self.answer.set_text("");
         self.answer.set_visible(false);
         self.password.set_text("");
-        label_field(&self.password, &self.password_label);
-        self.password.set_visible(true);
+        label_field(&self.password, &self.password_label.borrow());
+        self.user_name.set_text("");
+        let other = self.other.get();
+        self.user_name.set_visible(other);
+        self.user_name.set_sensitive(true);
+        self.password.set_visible(!other);
         self.password.set_sensitive(true);
         self.submit.set_sensitive(true);
-        self.password.grab_focus();
+        self.back.set_sensitive(true);
+        if other {
+            self.user_name.grab_focus();
+        } else {
+            self.password.grab_focus();
+        }
     }
 }
 
@@ -357,6 +482,8 @@ impl Conversation for SignInForm {
         };
         self.question.set_label(&text);
         self.question.set_visible(true);
+        self.user_name.set_visible(false);
+        self.back.set_sensitive(true);
         self.password.set_visible(secret);
         self.answer.set_visible(!secret);
         let field: &gtk4::Widget = if secret {
@@ -375,7 +502,7 @@ impl Conversation for SignInForm {
     }
 }
 
-pub fn build_ui(app: &Application) {
+pub fn build_ui(app: &Application, accounts: &[Account]) {
     // The direction comes from the language of the catalog in use, not from a process
     // locale, and has to be set before the first widget exists.
     if crate::i18n::is_rtl() {
@@ -444,13 +571,29 @@ pub fn build_ui(app: &Application) {
         glib::ControlFlow::Continue
     });
 
-    let user = discover_target_user();
+    // The cards (doc_lock_and_prompts.md, LP19): the list, when there is one, and the card
+    // of the entry selected, with its password field. Without a list, "Other user" alone.
+    let accounts: Rc<[Account]> = accounts.into();
+    let listed = !accounts.is_empty();
+    // The account whose card is open; None is "Other user".
+    let selected: Rc<Cell<Option<usize>>> = Rc::new(Cell::new(None));
+
+    let avatar = Avatar::new();
     let name = Label::builder()
-        .label(&user.real_name)
         .css_classes(["greeter-name"])
         .margin_top(10)
+        .build();
+    // The user name, under a full name that another listed account shares.
+    let user_line = Label::builder()
+        .css_classes(["greeter-status"])
+        .visible(false)
+        .build();
+    let name_lines = Box::builder()
+        .orientation(Orientation::Vertical)
         .margin_bottom(14)
         .build();
+    name_lines.append(&name);
+    name_lines.append(&user_line);
 
     let password = PasswordEntry::builder()
         .placeholder_text(tr("Password"))
@@ -458,9 +601,17 @@ pub fn build_ui(app: &Application) {
         .hexpand(true)
         .css_classes(["greeter-field"])
         .build();
-    let password_label = tr_with("Password for {name}", "name", &user.real_name);
-    named(&password, "greeter-password", &password_label);
-    label_field(&password, &password_label);
+    // Its accessible name, "Password for {name}", is the open card's.
+    password.set_widget_name("greeter-password");
+    // "Other user"'s name, sent to greetd as typed.
+    let user_name = Entry::builder()
+        .placeholder_text(tr("User name"))
+        .hexpand(true)
+        .css_classes(["greeter-field"])
+        .visible(false)
+        .build();
+    named(&user_name, "greeter-user-name", &tr("User name"));
+    label_field(&user_name, &tr("User name"));
     // The field for PAM's questions whose answer is shown as it is typed (a one-time code):
     // hidden until PAM asks one.
     let answer = Entry::builder()
@@ -469,6 +620,14 @@ pub fn build_ui(app: &Application) {
         .visible(false)
         .build();
     answer.set_widget_name("greeter-answer");
+    let back = Button::builder()
+        .icon_name("go-previous-symbolic")
+        .css_classes(["greeter-chip"])
+        .valign(Align::Center)
+        .tooltip_text(tr("Back to the list"))
+        .visible(listed)
+        .build();
+    named(&back, "greeter-back", &tr("Back to the list"));
     let submit = Button::builder()
         .icon_name("go-next-symbolic")
         .css_classes(["greeter-submit"])
@@ -486,6 +645,8 @@ pub fn build_ui(app: &Application) {
         .orientation(Orientation::Horizontal)
         .spacing(6)
         .build();
+    field_row.append(&back);
+    field_row.append(&user_name);
     field_row.append(&password);
     field_row.append(&answer);
     field_row.append(&submit);
@@ -527,7 +688,11 @@ pub fn build_ui(app: &Application) {
     pam_error.set_accessible_role(gtk4::AccessibleRole::Alert);
 
     // Typing hides the greeter's own lines; PAM's stay until the next sign-in starts.
-    for field in [password.upcast_ref::<gtk4::Editable>(), answer.upcast_ref()] {
+    for field in [
+        password.upcast_ref::<gtk4::Editable>(),
+        user_name.upcast_ref(),
+        answer.upcast_ref(),
+    ] {
         let (status, error) = (status.clone(), error.clone());
         field.connect_changed(move |_| {
             status.set_visible(false);
@@ -537,7 +702,11 @@ pub fn build_ui(app: &Application) {
 
     let form = SignInForm {
         password: password.clone(),
-        password_label,
+        password_label: Rc::new(RefCell::new(String::new())),
+        user_name: user_name.clone(),
+        other: Rc::new(Cell::new(false)),
+        back: back.clone(),
+        turn: Rc::new(RefCell::new(Turn::default())),
         answer: answer.clone(),
         question: question.clone(),
         submit: submit.clone(),
@@ -559,13 +728,190 @@ pub fn build_ui(app: &Application) {
             }
         });
     }
-    // Escape cancels an open question, as the button does; otherwise it goes on its way.
+
+    let card = Box::builder()
+        .orientation(Orientation::Vertical)
+        .halign(Align::Center)
+        .css_classes(["greeter-card"])
+        .build();
+    card.append(&avatar.disc);
+    card.append(&name_lines);
+    card.append(&pam_info);
+    card.append(&pam_error);
+    card.append(&question);
+    card.append(&field_row);
+    card.append(&status);
+    card.append(&error);
+
+    let pages = Stack::builder()
+        .hhomogeneous(false)
+        .vhomogeneous(false)
+        .build();
+    pages.add_named(&card, Some("card"));
+
+    // Opens the card of `index`, or "Other user"'s for None, with its field ready.
+    let open: Rc<dyn Fn(Option<usize>)> = Rc::new({
+        let (accounts, selected, form, pages) = (
+            accounts.clone(),
+            selected.clone(),
+            form.clone(),
+            pages.clone(),
+        );
+        move |index| {
+            let account = index.and_then(|index| accounts.get(index));
+            selected.set(account.and(index));
+            avatar.show(account);
+            match account {
+                Some(account) => {
+                    name.set_label(&account.full_name);
+                    user_line.set_label(&account.user);
+                    user_line.set_visible(account.shows_user);
+                    form.password_label.replace(tr_with(
+                        "Password for {name}",
+                        "name",
+                        &account.full_name,
+                    ));
+                }
+                None => {
+                    name.set_label(&tr("Other user"));
+                    user_line.set_visible(false);
+                }
+            }
+            form.other.set(account.is_none());
+            form.start();
+            form.status.set_visible(false);
+            pages.set_visible_child_name("card");
+            form.reset();
+        }
+    });
+
+    // The list: one entry per account, then "Other user". Never built when it is hidden,
+    // so that no account name reaches the accessibility tree.
+    let list = listed.then(|| {
+        let list = ListBox::builder()
+            .css_classes(["navigation-sidebar"])
+            .build();
+        list.update_property(&[Property::Label(&tr("Accounts"))]);
+        for account in accounts.iter() {
+            list.append(&account_row(Some(account)));
+        }
+        list.append(&account_row(None));
+        list.connect_selected_rows_changed(|list| {
+            let mut index = 0;
+            while let Some(row) = list.row_at_index(index) {
+                row.update_state(&[gtk4::accessible::State::Selected(Some(row.is_selected()))]);
+                index += 1;
+            }
+        });
+        {
+            let open = open.clone();
+            let count = accounts.len();
+            list.connect_row_activated(move |_, row| {
+                let index = usize::try_from(row.index()).ok();
+                open(index.filter(|index| *index < count));
+            });
+        }
+        // A typed letter moves to the next entry whose name starts with it.
+        let names: Vec<String> = accounts
+            .iter()
+            .map(|account| account.full_name.clone())
+            .chain([tr("Other user")])
+            .collect();
+        let typing = gtk4::EventControllerKey::new();
+        {
+            let list = list.clone();
+            typing.connect_key_pressed(move |_, key, _, modifiers| {
+                let chord = gdk::ModifierType::CONTROL_MASK
+                    | gdk::ModifierType::ALT_MASK
+                    | gdk::ModifierType::SUPER_MASK;
+                let letter = key.to_unicode().filter(|letter| letter.is_alphanumeric());
+                let (Some(letter), false) = (letter, modifiers.intersects(chord)) else {
+                    return glib::Propagation::Proceed;
+                };
+                let from = list
+                    .selected_row()
+                    .and_then(|row| usize::try_from(row.index()).ok())
+                    .unwrap_or(names.len() - 1);
+                let row = next_match(&names, from, letter)
+                    .and_then(|index| i32::try_from(index).ok())
+                    .and_then(|index| list.row_at_index(index));
+                match row {
+                    Some(row) => {
+                        list.select_row(Some(&row));
+                        row.grab_focus();
+                        glib::Propagation::Stop
+                    }
+                    None => glib::Propagation::Proceed,
+                }
+            });
+        }
+        list.add_controller(typing);
+        let scroller = ScrolledWindow::builder()
+            .hscrollbar_policy(gtk4::PolicyType::Never)
+            .propagate_natural_height(true)
+            .max_content_height(360)
+            .child(&list)
+            .build();
+        let list_card = Box::builder()
+            .orientation(Orientation::Vertical)
+            .halign(Align::Center)
+            .css_classes(["greeter-card"])
+            .build();
+        list_card.append(&scroller);
+        pages.add_named(&list_card, Some("list"));
+        list
+    });
+
+    // Back to the list: PAM's open question goes unanswered, so the conversation sends
+    // CancelSession, and nothing the left sign-in says next is drawn.
+    let go_back: Rc<dyn Fn()> = Rc::new({
+        let (accounts, selected, form, pages) = (
+            accounts.clone(),
+            selected.clone(),
+            form.clone(),
+            pages.clone(),
+        );
+        move || {
+            // No list, or greetd has the turn.
+            let Some(list) = list.as_ref().filter(|_| form.back.is_sensitive()) else {
+                return;
+            };
+            form.pending.take();
+            form.turn.borrow_mut().leave();
+            form.password.set_text("");
+            form.answer.set_text("");
+            form.user_name.set_text("");
+            pages.set_visible_child_name("list");
+            let entry = selected.get().unwrap_or(accounts.len());
+            if let Some(row) = i32::try_from(entry)
+                .ok()
+                .and_then(|entry| list.row_at_index(entry))
+            {
+                list.select_row(Some(&row));
+                row.grab_focus();
+            }
+        }
+    });
+    {
+        let go_back = go_back.clone();
+        back.connect_clicked(move |_| go_back());
+    }
+
+    // Escape goes back to the list from a card; without a list it cancels an open
+    // question, as the button does; otherwise it goes on its way.
     let escape = gtk4::EventControllerKey::new();
     escape.set_propagation_phase(gtk4::PropagationPhase::Capture);
     {
-        let cancel = cancel.clone();
+        let (cancel, back, pages) = (cancel.clone(), back.clone(), pages.clone());
         escape.connect_key_pressed(move |_, key, _, _| {
-            if key == gtk4::gdk::Key::Escape && cancel.is_visible() {
+            if key != gdk::Key::Escape {
+                return glib::Propagation::Proceed;
+            }
+            let on_card = pages.visible_child_name().as_deref() == Some("card");
+            if on_card && back.is_visible() && back.is_sensitive() {
+                go_back();
+                glib::Propagation::Stop
+            } else if cancel.is_visible() {
                 cancel.emit_clicked();
                 glib::Propagation::Stop
             } else {
@@ -592,7 +938,31 @@ pub fn build_ui(app: &Application) {
                 }
                 return;
             }
-            let secret = zeroize::Zeroizing::new(form.password.text().to_string());
+            let other = form.other.get();
+            let username = if other {
+                form.user_name.text().to_string()
+            } else {
+                let Some(account) = selected.get().and_then(|index| accounts.get(index)) else {
+                    return;
+                };
+                account.user.clone()
+            };
+            if other && !typed_name_is_valid(&username) {
+                // Cleared before the text is shown: clearing a field hides the messages.
+                form.user_name.set_text("");
+                form.error.set_label(&tr(
+                    "Enter a user name of at most 256 bytes, without control characters.",
+                ));
+                form.error.set_visible(true);
+                return;
+            }
+            // The previous sign-in is still closing its session: never two at once.
+            let Some(attempt) = form.turn.borrow_mut().begin() else {
+                return;
+            };
+            // "Other user" has typed no password yet: PAM asks for it in its own words.
+            let secret =
+                (!other).then(|| zeroize::Zeroizing::new(form.password.text().to_string()));
             // Cleared before anything is shown: clearing a field hides the messages.
             form.password.set_text("");
             form.wait();
@@ -601,7 +971,13 @@ pub fn build_ui(app: &Application) {
             form.status.set_visible(true);
             let (app, form) = (app.clone(), form.clone());
             glib::MainContext::default().spawn_local(async move {
-                match authenticate_interactive(&secret, &form).await {
+                let password = secret.as_ref().map(|secret| secret.as_str());
+                let outcome = authenticate_interactive(&username, password, &form).await;
+                // The person went back to the list meanwhile: the card is another's now.
+                if !form.turn.borrow_mut().end(attempt) {
+                    return;
+                }
+                match outcome {
                     Ok(Outcome::SignedIn) => app.quit(),
                     // The person's own choice, not a failure: said plainly, not alerted.
                     Ok(Outcome::Cancelled) => {
@@ -627,25 +1003,11 @@ pub fn build_ui(app: &Application) {
         let sign_in = sign_in.clone();
         password.connect_activate(move |_| sign_in());
     }
-    {
+    for field in [&user_name, &answer] {
         let sign_in = sign_in.clone();
-        answer.connect_activate(move |_| sign_in());
+        field.connect_activate(move |_| sign_in());
     }
     submit.connect_clicked(move |_| sign_in());
-
-    let card = Box::builder()
-        .orientation(Orientation::Vertical)
-        .halign(Align::Center)
-        .css_classes(["greeter-card"])
-        .build();
-    card.append(&avatar(&user));
-    card.append(&name);
-    card.append(&pam_info);
-    card.append(&pam_error);
-    card.append(&question);
-    card.append(&field_row);
-    card.append(&status);
-    card.append(&error);
 
     let centre = Box::builder()
         .orientation(Orientation::Vertical)
@@ -655,7 +1017,7 @@ pub fn build_ui(app: &Application) {
         .build();
     centre.append(&clock);
     centre.append(&date);
-    centre.append(&card);
+    centre.append(&pages);
 
     // Bottom right: keyboard layout, accessibility, power.
     let contrast = ToggleButton::builder()
@@ -710,14 +1072,15 @@ pub fn build_ui(app: &Application) {
     root.append(&bottom);
     window.set_child(Some(&root));
 
-    // The first key pressed is the first character of the password.
-    password.grab_focus();
+    // The default card is the first: the first key pressed is the first character of its
+    // password. Without a list, of "Other user"'s name.
+    open(listed.then_some(0));
     window.present();
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Notices;
+    use super::{next_match, Notices, Turn};
 
     #[test]
     fn pams_lines_stay_through_the_sign_in_and_go_when_the_next_one_starts() {
@@ -739,5 +1102,39 @@ mod tests {
             Notices::default(),
             "the next sign-in starts with none of the previous one's lines"
         );
+    }
+
+    #[test]
+    fn one_sign_in_at_a_time_and_a_left_one_draws_nothing() {
+        let mut turn = Turn::default();
+        let first = turn.begin().expect("the first sign-in starts");
+        assert_eq!(
+            turn.begin(),
+            None,
+            "no second session while the first talks to greetd"
+        );
+        // The person goes back to the list: the first sign-in cancels and ends unseen.
+        turn.leave();
+        assert!(!turn.end(first), "a left sign-in does not draw on the card");
+        let second = turn
+            .begin()
+            .expect("the next sign-in starts once the first ended");
+        assert!(turn.end(second), "a sign-in nobody left draws its outcome");
+        let third = turn.begin().expect("and the next");
+        assert_ne!(third, second);
+    }
+
+    #[test]
+    fn a_typed_letter_moves_to_the_next_name_that_starts_with_it() {
+        let names: Vec<String> = ["Ada", "anna", "Bea", "Émile", "Other user"]
+            .map(str::to_string)
+            .into();
+        assert_eq!(next_match(&names, 4, 'a'), Some(0), "round the end");
+        assert_eq!(next_match(&names, 0, 'A'), Some(1), "the next, in any case");
+        assert_eq!(next_match(&names, 1, 'a'), Some(0));
+        assert_eq!(next_match(&names, 0, 'é'), Some(3));
+        assert_eq!(next_match(&names, 0, 'o'), Some(4));
+        assert_eq!(next_match(&names, 0, 'z'), None);
+        assert_eq!(next_match(&names, 2, 'b'), Some(2), "the only one stays");
     }
 }

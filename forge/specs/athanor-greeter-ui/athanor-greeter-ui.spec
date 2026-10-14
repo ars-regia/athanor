@@ -1,11 +1,11 @@
 %global debug_package %{nil}
 Name:           athanor-greeter-ui
 Version:        1.0.0
-Release:        5%{?dist}
+Release:        6%{?dist}
 Summary:        The Athanor greeter
 License:        GPL-3.0-only
 
-BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gtk4-layer-shell-devel binutils python3 gettext
+BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gtk4-layer-shell-devel binutils python3 gettext sqlite-devel
 Requires:       gtk4 gtk4-layer-shell greetd athanor-calmo cosmic-icon-theme
 
 %description
@@ -43,6 +43,17 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-greeter
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-greeter-ui.mo
 
 %changelog
+* Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
+- The greeter lists the accounts (doc_lock_and_prompts.md, LP19): every account NSS returns
+  with a uid from UID_MIN to UID_MAX of /etc/login.defs and a shell in /etc/shells, locked
+  and expired ones included. The latest greetd sign-in in pam_lastlog2's database comes
+  first, then the full names in the locale's collation; the database is opened read-only,
+  never waited on and ignored above 1 MiB, and any failure falls back to the name order.
+  Cards show the initial, never a picture. "Other user" sends a typed name and lets PAM
+  ask for the password; Back and Escape return to the list and cancel the open session.
+  `user-list = false` in /etc/athanor/greeter.toml hides the list. The package now links
+  the system libsqlite3.
+
 * Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
 - The seal shows the badge the trust state backs (doc_shell.md, SH12, package 1d):
   the check, the exclamation mark or the cross, asked of os.athanor.Update1.State on the

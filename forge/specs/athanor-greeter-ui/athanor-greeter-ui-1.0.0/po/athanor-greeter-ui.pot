@@ -21,19 +21,19 @@ msgstr ""
 msgid "The sign-in service sent a reply of {size} bytes, too large to read"
 msgstr ""
 
-#: src/auth.rs:317
+#: src/auth.rs:219
 msgid "Checking your credentials…"
 msgstr ""
 
-#: src/auth.rs:348
+#: src/auth.rs:250
 msgid "The login service gave an unexpected answer."
 msgstr ""
 
-#: src/auth.rs:355
+#: src/auth.rs:257
 msgid "Too many authentication steps."
 msgstr ""
 
-#: src/auth.rs:365
+#: src/auth.rs:270
 msgid "The login service cannot be reached."
 msgstr ""
 
@@ -117,57 +117,77 @@ msgstr ""
 msgid "Signed with a key of the policy in force"
 msgstr ""
 
-#: src/ui.rs:181
+#: src/ui.rs:187 src/ui.rs:776 src/ui.rs:818
+msgid "Other user"
+msgstr ""
+
+#: src/ui.rs:253
 #, rust-format
 msgid "Keyboard layout: {layout}"
 msgstr ""
 
-#: src/ui.rs:438
+#: src/ui.rs:565
 msgid "%A %-d %B"
 msgstr ""
 
-#: src/ui.rs:456
+#: src/ui.rs:599
 msgid "Password"
 msgstr ""
 
-#: src/ui.rs:461
+#: src/ui.rs:608 src/ui.rs:613 src/ui.rs:614
+msgid "User name"
+msgstr ""
+
+#: src/ui.rs:627 src/ui.rs:630
+msgid "Back to the list"
+msgstr ""
+
+#: src/ui.rs:636
+msgid "Sign in"
+msgstr ""
+
+#: src/ui.rs:639 src/ui.rs:643
+msgid "Cancel"
+msgstr ""
+
+#: src/ui.rs:770
 #, rust-format
 msgid "Password for {name}"
 msgstr ""
 
-#: src/ui.rs:477
-msgid "Sign in"
+#: src/ui.rs:794
+msgid "Accounts"
 msgstr ""
 
-#: src/ui.rs:480 src/ui.rs:484
-msgid "Cancel"
+#: src/ui.rs:954
+msgid "Enter a user name of at most 256 bytes, without control characters."
 msgstr ""
 
-#: src/ui.rs:600
+#: src/ui.rs:970
 msgid "Signing in…"
 msgstr ""
 
-#: src/ui.rs:609
+#: src/ui.rs:985
 msgid "Sign-in was cancelled."
 msgstr ""
 
-#: src/ui.rs:616
+#: src/ui.rs:992
 #, rust-format
 msgid "Sign-in failed: {reason}"
 msgstr ""
 
-#: src/ui.rs:666 src/ui.rs:667
+#: src/ui.rs:1028 src/ui.rs:1029
 msgid "High contrast"
 msgstr ""
 
-#: src/ui.rs:687
+#: src/ui.rs:1049
 msgid "Suspend"
 msgstr ""
 
-#: src/ui.rs:693
+#: src/ui.rs:1055
 msgid "Restart"
 msgstr ""
 
-#: src/ui.rs:699
+#: src/ui.rs:1061
 msgid "Shut down"
 msgstr ""

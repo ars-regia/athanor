@@ -73,105 +73,6 @@ pub fn send_request(stream: &mut UnixStream, req: &Request) -> Result<Response, 
     serde_json::from_slice(&reply_buf).map_err(|e| e.to_string())
 }
 
-fn capitalize_first(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        None => String::new(),
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct UserInfo {
-    pub username: String,
-    pub real_name: String,
-    pub avatar_path: Option<String>,
-}
-
-/// The uid below which an account is a system account, not a person: greetd runs the
-/// greeter as its own daemon user, and whatever that user is called it is never the one
-/// who is about to log in.
-const FIRST_HUMAN_UID: u32 = 1000;
-
-/// Whether `name` is a system account in /etc/passwd (uid below FIRST_HUMAN_UID). An
-/// unknown name counts as a system account: there is no person to greet by that name.
-fn is_system_account(name: &str) -> bool {
-    let Ok(content) = std::fs::read_to_string("/etc/passwd") else {
-        return true;
-    };
-    content
-        .lines()
-        .filter_map(|line| {
-            let mut parts = line.split(':');
-            let user = parts.next()?;
-            let uid = parts.nth(1)?.parse::<u32>().ok()?;
-            (user == name).then_some(uid)
-        })
-        .next()
-        .is_none_or(|uid| uid < FIRST_HUMAN_UID)
-}
-
-pub fn discover_target_user() -> UserInfo {
-    let env_user = std::env::var("USER").unwrap_or_default();
-    // Running as the greeter (greetd's daemon user, whatever its name) or with no user at
-    // all: find the person to greet instead of showing the daemon on the card.
-    let target_user = if env_user.is_empty() || is_system_account(&env_user) {
-        std::env::var("ATHANOR_LOGIN_USER").unwrap_or_else(|_| {
-            if let Ok(content) = std::fs::read_to_string("/etc/passwd") {
-                for line in content.lines() {
-                    let parts: Vec<&str> = line.split(':').collect();
-                    if parts.len() >= 7 {
-                        if let Ok(uid) = parts[2].parse::<u32>() {
-                            if (FIRST_HUMAN_UID..65534).contains(&uid)
-                                && (parts[6].ends_with("bash")
-                                    || parts[6].ends_with("zsh")
-                                    || parts[6].ends_with("fish"))
-                            {
-                                return parts[0].to_string();
-                            }
-                        }
-                    }
-                }
-            }
-            "athanor".to_string()
-        })
-    } else {
-        env_user
-    };
-
-    let mut real_name = capitalize_first(&target_user);
-    let mut home_dir = format!("/home/{}", target_user);
-    if let Ok(content) = std::fs::read_to_string("/etc/passwd") {
-        for line in content.lines() {
-            let parts: Vec<&str> = line.split(':').collect();
-            if parts.len() >= 6 && parts[0] == target_user {
-                let gecos = parts[4].split(',').next().unwrap_or(parts[0]);
-                if !gecos.trim().is_empty() {
-                    real_name = gecos.trim().to_string();
-                }
-                home_dir = parts[5].to_string();
-                break;
-            }
-        }
-    }
-
-    let face_path = format!("{}/.face", home_dir);
-    let acc_path = format!("/var/lib/AccountsService/icons/{}", target_user);
-    let avatar_path = if std::path::Path::new(&face_path).exists() {
-        Some(face_path)
-    } else if std::path::Path::new(&acc_path).exists() {
-        Some(acc_path)
-    } else {
-        None
-    };
-
-    UserInfo {
-        username: target_user,
-        real_name,
-        avatar_path,
-    }
-}
-
 /// The session type the greeter asks greetd for. The badge on the greeter card reads it
 /// from here, so what the card says and what the greeter requests cannot drift apart.
 pub const SESSION_TYPE: &str = "wayland";
@@ -281,11 +182,12 @@ async fn ask_and_answer<C: Conversation>(
 
 /// One login over an open greetd connection: creates the session for `username`, answers
 /// PAM's messages by their type and never by their text, and starts `session_cmd` once
-/// greetd accepts.
+/// greetd accepts. `password` is what was typed on an account's card; "Other user" has
+/// none, and PAM's first secret question is put to the person.
 async fn converse<C: Conversation>(
     stream: &mut UnixStream,
     username: &str,
-    password: &str,
+    password: Option<&str>,
     session_cmd: String,
     person: &C,
 ) -> Result<Outcome, String> {
@@ -297,7 +199,7 @@ async fn converse<C: Conversation>(
     )?;
     // The password typed on the card answers PAM's first secret question and no other: a
     // further one (a new password, its confirmation) is put to the person in PAM's words.
-    let mut password = Some(password);
+    let mut password = password;
     for _ in 0..MAX_AUTH_STEPS {
         resp = match resp {
             Response::AuthMessage {
@@ -355,8 +257,11 @@ async fn converse<C: Conversation>(
     Err(tr("Too many authentication steps."))
 }
 
+/// Signs `username` in through greetd, with the password typed on the card when there is
+/// one. The name is sent as it is: the greeter looks no account up.
 pub async fn authenticate_interactive<C: Conversation>(
-    password: &str,
+    username: &str,
+    password: Option<&str>,
     person: &C,
 ) -> Result<Outcome, String> {
     let path = std::env::var("GREETD_SOCK").unwrap_or_else(|_| "/run/greetd.sock".to_string());
@@ -366,8 +271,7 @@ pub async fn authenticate_interactive<C: Conversation>(
     }
 
     let mut stream = UnixStream::connect(path).map_err(|e| e.to_string())?;
-    let username = discover_target_user().username;
-    converse(&mut stream, &username, password, session_command(), person).await
+    converse(&mut stream, username, password, session_command(), person).await
 }
 
 #[cfg(test)]
@@ -571,22 +475,37 @@ mod tests {
         }
     }
 
-    /// Plays one login against the fake greetd: the result, and every request it received.
+    /// Plays one login from a card against the fake greetd: the result, and every request
+    /// it received.
     fn login(
         script: Vec<Response>,
         person: &Person,
     ) -> (Result<Outcome, String>, Vec<serde_json::Value>) {
+        logins(script, person, &[("tester", Some(PASSWORD))])
+    }
+
+    /// Plays `attempts` one after the other over one connection to the fake greetd, each a
+    /// user name and the password typed on its card, if any: the last result, and every
+    /// request the fake received.
+    fn logins(
+        script: Vec<Response>,
+        person: &Person,
+        attempts: &[(&str, Option<&str>)],
+    ) -> (Result<Outcome, String>, Vec<serde_json::Value>) {
         let (mut greeter, greetd) = fake_greetd(script);
-        let result = tokio::runtime::Builder::new_current_thread()
+        let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
-            .expect("a runtime")
-            .block_on(converse(
+            .expect("a runtime");
+        let mut result = Err("no attempt".to_string());
+        for (username, password) in attempts {
+            result = runtime.block_on(converse(
                 &mut greeter,
-                "tester",
-                PASSWORD,
+                username,
+                *password,
                 "athanor-session".to_string(),
                 person,
             ));
+        }
         drop(greeter);
         (result, greetd.join().expect("the fake greetd"))
     }
@@ -785,6 +704,151 @@ mod tests {
         assert_eq!(result, Ok(Outcome::Cancelled), "a cancel is not an error");
         assert_eq!(requests[1]["type"], "cancel_session");
         assert_eq!(password_sent(&requests), 0);
+    }
+
+    /// The type of every request, in order.
+    fn kinds(requests: &[serde_json::Value]) -> Vec<&str> {
+        requests
+            .iter()
+            .map(|request| request["type"].as_str().unwrap_or("?"))
+            .collect()
+    }
+
+    #[test]
+    fn the_session_is_created_for_the_selected_name() {
+        let person = Person::default();
+        let (result, requests) = logins(
+            vec![
+                message(AuthMessageType::Secret, "Password: "),
+                Response::Success,
+                Response::Success,
+            ],
+            &person,
+            &[("ada", Some(PASSWORD))],
+        );
+        assert_eq!(result, Ok(Outcome::SignedIn));
+        assert_eq!(requests[0]["type"], "create_session");
+        assert_eq!(requests[0]["username"], "ada");
+    }
+
+    #[test]
+    fn leaving_a_card_cancels_its_session_before_the_next_is_created() {
+        // Back to the list from ada's card while PAM asks for a code, then bea's card.
+        let person = Person::answering(&[]);
+        let (result, requests) = logins(
+            vec![
+                message(AuthMessageType::Visible, "Verification code: "),
+                Response::Success,
+                message(AuthMessageType::Secret, "Password: "),
+                Response::Success,
+                Response::Success,
+            ],
+            &person,
+            &[("ada", Some(PASSWORD)), ("bea", Some(PASSWORD))],
+        );
+        assert_eq!(result, Ok(Outcome::SignedIn));
+        assert_eq!(
+            kinds(&requests),
+            [
+                "create_session",
+                "cancel_session",
+                "create_session",
+                "post_auth_message_response",
+                "start_session"
+            ]
+        );
+        assert_eq!(requests[0]["username"], "ada");
+        assert_eq!(requests[2]["username"], "bea");
+    }
+
+    /// One "Other user" attempt with a wrong password: everything the greeter did.
+    fn other_user(username: &str) -> (Result<Outcome, String>, Vec<serde_json::Value>, Person) {
+        let person = Person::answering(&["wrong"]);
+        let (result, requests) = logins(
+            vec![
+                message(AuthMessageType::Secret, "Password: "),
+                auth_error("authentication error: pam_authenticate: AUTH_ERR"),
+            ],
+            &person,
+            &[(username, None)],
+        );
+        (result, requests, person)
+    }
+
+    #[test]
+    fn other_user_does_the_same_for_a_name_with_and_without_an_account() {
+        // The fake answers both alike, as greetd and PAM do (section 1): what the greeter
+        // sends and shows must not differ either, apart from the name itself.
+        let (present, mut present_requests, present_person) = other_user("ada");
+        let (absent, mut absent_requests, absent_person) = other_user("nobody-here");
+        assert_eq!(present_requests[0]["username"], "ada");
+        assert_eq!(absent_requests[0]["username"], "nobody-here");
+        for requests in [&mut present_requests, &mut absent_requests] {
+            requests[0]["username"] = serde_json::Value::Null;
+        }
+        assert_eq!(present, absent);
+        assert!(present.is_err());
+        assert_eq!(present_requests, absent_requests);
+        assert_eq!(
+            *present_person.asked.borrow(),
+            *absent_person.asked.borrow()
+        );
+        assert_eq!(
+            *present_person.progress.borrow(),
+            *absent_person.progress.borrow()
+        );
+        assert_eq!(
+            *present_person.errors.borrow(),
+            *absent_person.errors.borrow()
+        );
+        assert_eq!(
+            *present_person.infos.borrow(),
+            *absent_person.infos.borrow()
+        );
+        // With no card, PAM's first question is put to the person, in PAM's words.
+        assert_eq!(
+            *present_person.asked.borrow(),
+            [Prompt::Secret("Password: ".to_string())]
+        );
+        assert_eq!(answers(&present_requests), [Some("wrong".to_string())]);
+    }
+
+    #[test]
+    fn lockout_and_expiry_from_other_user_are_reported_in_pams_words() {
+        let locked = "The account is locked due to 5 failed logins.";
+        let person = Person::answering(&[]);
+        let (result, requests) = logins(
+            vec![
+                message(AuthMessageType::Error, locked),
+                auth_error("authentication error: pam_authenticate: AUTH_ERR"),
+            ],
+            &person,
+            &[("ada", None)],
+        );
+        assert!(result.is_err());
+        assert_eq!(*person.errors.borrow(), [locked]);
+        assert!(
+            person.asked.borrow().is_empty(),
+            "no prompt after the lockout"
+        );
+        assert_eq!(answers(&requests), [None]);
+
+        let expired =
+            "You are required to change your password immediately (administrator enforced)";
+        let person = Person::answering(&[PASSWORD]);
+        let (result, requests) = logins(
+            vec![
+                message(AuthMessageType::Secret, "Password: "),
+                message(AuthMessageType::Error, expired),
+                auth_error("authentication error: pam_acct_mgmt: NEW_AUTHTOK_REQD"),
+            ],
+            &person,
+            &[("ada", None)],
+        );
+        assert!(result.is_err());
+        assert_eq!(*person.errors.borrow(), [expired]);
+        assert_eq!(person.asked.borrow().len(), 1, "no further prompt");
+        assert_eq!(answers(&requests), [Some(PASSWORD.to_string()), None]);
     }
 
     #[test]
