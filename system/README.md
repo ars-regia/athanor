@@ -57,7 +57,9 @@ image that is already signed.
 bootc-image-builder generates the kickstart that fixes the image, and `iso.toml` adds the
 display configuration and the `%post` steps. `athanor-install.ks` is the equivalent kickstart for a manual
 Anaconda installation. In both, the disk layout and the user account are chosen in
-Anaconda's interactive screens.
+Anaconda's interactive screens, and the last `%post` leaves the machine following
+`:stable` with the signature policy enforced (ADR-0114). Users take `athanor-iso:stable`,
+the ISO of the promoted run.
 
 An existing Fedora Atomic machine switches with:
 

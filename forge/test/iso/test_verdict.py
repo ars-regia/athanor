@@ -53,6 +53,7 @@ def test_pass(tmp: pathlib.Path) -> None:
             ("kickstart-done", 110),
             ("profile-ok", 390),
             ("karg-compress-ok", 395),
+            ("origin-stable-signed", 397),
             ("greeter-alive", 400),
             ("session-alive", 460),
             ("settings-alive", 500),
@@ -62,6 +63,7 @@ def test_pass(tmp: pathlib.Path) -> None:
     assert "**PASS**" in report, report
     assert "kernel profile holds: profile-ok" in report, report
     assert "btrfs compression karg: karg-compress-ok" in report, report
+    assert "follows :stable, signed: origin-stable-signed" in report, report
     assert "first boot to greeter: 300s" in report, report
     assert "greeter to session: 60s" in report, report
     assert "session to settings: 40s" in report, report
@@ -72,6 +74,7 @@ COMPLETE = [
     ("kickstart-done", 110),
     ("profile-ok", 390),
     ("karg-compress-ok", 395),
+    ("origin-stable-signed", 397),
     ("greeter-alive", 400),
     ("session-alive", 460),
     ("settings-alive", 500),
@@ -85,7 +88,7 @@ def test_verdict_json_on_pass(tmp: pathlib.Path) -> None:
     assert code == 0 and data["pass"] is True, data
     assert data["checks"] == {
         "installed": True, "kickstart-done": True, "profile": True, "karg": True,
-        "greeter": True, "session": True, "settings": True, "no-guest-failure": True,
+        "origin": True, "greeter": True, "session": True, "settings": True, "no-guest-failure": True,
     }, data
 
 
@@ -219,6 +222,7 @@ def test_karg_not_applicable_passes(tmp: pathlib.Path) -> None:
             ("kickstart-done", 110),
             ("profile-ok", 390),
             ("karg-compress-not-applicable", 395),
+            ("origin-stable-signed", 397),
             ("greeter-alive", 400),
             ("session-alive", 460),
             ("settings-alive", 500),
@@ -579,6 +583,9 @@ def test_console_logs_in_opens_settings_and_stops(tmp: pathlib.Path) -> None:
         if b"KARG_%s" not in typed:
             typed += typed_until(conn, b"KARG_%s", 20)
         conn.sendall(b"KARG_OK btrfs\r\n")
+        if b"ORIGIN_%s" not in typed:
+            typed += typed_until(conn, b"ORIGIN_%s", 20)
+        conn.sendall(b"ORIGIN_OK ghcr.io/acme/athanor-system:stable containerPolicy\r\n")
         if b"GREETER_%s" not in typed:
             typed_until(conn, b"GREETER_%s", 20)
         conn.sendall(b"GREETER_ALIVE c5\r\n")
@@ -614,6 +621,7 @@ def test_console_logs_in_opens_settings_and_stops(tmp: pathlib.Path) -> None:
     for expected in (
         "profile-ok",
         "karg-compress-ok",
+        "origin-stable-signed",
         "greeter-alive",
         "login-sent",
         "session-alive",
@@ -690,6 +698,67 @@ def test_karg_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
             assert cmdline in proc.stdout, "a missing karg must print the command line"
 
 
+def test_origin_missing_or_wrong_fails(tmp: pathlib.Path) -> None:
+    """An installed system that follows :latest, or follows :stable without the signature
+    policy, passes every other check; the verdict must fail it (UD2)."""
+    for phases in (
+        [p for p in COMPLETE if p[0] != "origin-stable-signed"],
+        [p for p in COMPLETE if p[0] != "origin-stable-signed"] + [("origin-wrong", 397)],
+    ):
+        code, report = verdict(tmp, phases)
+        data = json.loads((tmp / "run" / "verdict.json").read_text())
+        assert code != 0 and data["checks"]["origin"] is False, data
+        assert "follows :stable, signed: NO" in report, report
+
+
+def test_origin_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
+    """ORIGIN_PROBE run verbatim, with `sudo` and `bootc` on PATH replaced by a fake that
+    prints the status JSON of each case. `jq` is the real one: the probe's filter is part
+    of what is checked. A system on :latest, one on :stable through an unverified
+    reference, a bootc that fails and a field that is not there must all answer WRONG."""
+    if shutil.which("jq") is None:
+        print("  skip test_origin_probe_answers_from_the_guest: no jq here")
+        return
+    sys.path.insert(0, str(HERE))
+    import console
+
+    work = tmp / "origin"
+    shutil.rmtree(work, ignore_errors=True)
+    (work / "bin").mkdir(parents=True)
+    (work / "bin" / "sudo").write_text('#!/bin/sh\n[ "$1" = -S ] && shift\ncat >/dev/null\nexec "$@"\n')
+    (work / "bin" / "bootc").write_text('#!/bin/sh\n[ -n "$FAKE_STATUS" ] || exit 1\nprintf "%s\\n" "$FAKE_STATUS"\n')
+    for tool in ("sudo", "bootc"):
+        (work / "bin" / tool).chmod(0o755)
+    (work / "probe.sh").write_bytes(console.ORIGIN_PROBE + b"\n")
+
+    def status(image, signature):
+        reference = {"image": image, "transport": "registry"}
+        if signature is not None:
+            reference["signature"] = signature
+        return json.dumps({"status": {"booted": {"image": {"image": reference}}}})
+
+    repository = "ghcr.io/acme/athanor-system"
+    cases = (
+        (status(f"{repository}:stable", "containerPolicy"), "ORIGIN_OK"),
+        (status(f"{repository}:latest", "containerPolicy"), "ORIGIN_WRONG"),
+        (status(f"{repository}:stable", "insecure"), "ORIGIN_WRONG"),
+        (status(f"{repository}:stable", None), "ORIGIN_WRONG"),
+        (status(f"{repository}:38546669761", "containerPolicy"), "ORIGIN_WRONG"),
+        (json.dumps({"status": {"booted": None}}), "ORIGIN_WRONG"),
+        ("", "ORIGIN_WRONG"),
+    )
+    for fake, expected in cases:
+        proc = subprocess.run(
+            ["sh", str(work / "probe.sh")],
+            env={**os.environ, "PATH": f"{work}/bin:{os.environ['PATH']}", "FAKE_STATUS": fake},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        answer = proc.stdout.split(" ")[0].strip()
+        assert answer == expected, f"{fake!r}: {proc.stdout!r} != {expected!r}"
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as name:
         tmp = pathlib.Path(name)
@@ -705,6 +774,8 @@ def main() -> int:
             test_karg_unreadable_fails,
             test_karg_not_applicable_passes,
             test_karg_probe_answers_from_the_guest,
+            test_origin_missing_or_wrong_fails,
+            test_origin_probe_answers_from_the_guest,
             test_greetd_starting_is_not_a_greeter,
             test_installed_but_no_greeter,
             test_text_login_is_not_a_greeter,

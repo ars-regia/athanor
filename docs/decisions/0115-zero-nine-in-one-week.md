@@ -119,12 +119,12 @@ record approves them.
   it is moved by this record, and those documents are not edited:
   - ADR-0106 item 7 ("Out of 0.3, into 0.5"): the hourly promotion schedule, upgrade
     acceptance (UD18), the VSA (PL29) and the GitHub Release of PL42;
-  - `doc_pipeline.md` line 91: the evidence bundle attached to a GitHub Release "from release
+  - `doc_pipeline.md` section 2: the evidence bundle attached to a GitHub Release "from release
     0.5";
-  - `doc_pipeline.md` line 863: the same attachment "from 0.5" in the retention table;
-  - `doc_pipeline.md` line 933 (PL42): "From release 0.5, each promotion publishes a GitHub
+  - `doc_pipeline.md`, the retention table: the same attachment "from 0.5";
+  - `doc_pipeline.md` PL42: "From release 0.5, each promotion publishes a GitHub
     Release";
-  - `doc_pipeline.md` line 940: "the GitHub Release follows in 0.5 (ADR-0106 item 7)".
+  - `doc_pipeline.md` PL42, its last sentence: "the GitHub Release follows in 0.5 (ADR-0106 item 7)".
 
   The maintainer's approval of this record accepts that these join 0.9 or asks for them to be
   moved. They read "0.9" where they say "0.5".
