@@ -6,7 +6,7 @@ use crate::tools::Tools;
 
 /// logind, as far as the requests need it.
 pub trait Power {
-    /// A block inhibitor on shutdown is held.
+    /// A block inhibitor on shutdown is held, or logind could not say: the answer fails closed.
     async fn blocked(&self) -> bool;
     /// `login1.Manager.Reboot(false)`: inhibitors honoured, never the skip-inhibitors flag.
     async fn reboot(&self) -> Result<(), RebootError>;

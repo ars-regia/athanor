@@ -60,12 +60,24 @@ impl Logind<'_> {
     }
 }
 
+/// One entry of `login1.Manager.ListInhibitors`: what, who, why, mode, uid, pid.
+type Inhibitor = (String, String, String, String, u32, u32);
+
+/// Whether the inhibitors logind listed block a shutdown. A list that could not be had
+/// blocks too: a request never goes ahead on a question logind did not answer (ADR-0103 D22).
+fn blocks_shutdown(listed: zbus::Result<Vec<Inhibitor>>) -> bool {
+    match listed {
+        Ok(inhibitors) => inhibitors.iter().any(|(what, _, _, mode, _, _)| mode == "block" && what.split(':').any(|kind| kind == "shutdown")),
+        Err(err) => {
+            tracing::error!(%err, "logind's inhibitors could not be listed: the restart is treated as blocked");
+            true
+        }
+    }
+}
+
 impl Power for Logind<'_> {
     async fn blocked(&self) -> bool {
-        type Inhibitor = (String, String, String, String, u32, u32);
-        let Ok(reply) = self.call("ListInhibitors", &()).await else { return false };
-        let inhibitors: Vec<Inhibitor> = reply.body().deserialize().unwrap_or_default();
-        inhibitors.iter().any(|(what, _, _, mode, _, _)| mode == "block" && what.split(':').any(|kind| kind == "shutdown"))
+        blocks_shutdown(self.call("ListInhibitors", &()).await.and_then(|reply| reply.body().deserialize()))
     }
 
     async fn reboot(&self) -> Result<(), RebootError> {
@@ -254,6 +266,22 @@ mod tests {
         let state = published(&path);
         let json = state_json(&path, owner).expect("state");
         assert_eq!(athanor_trust_state::parse(&json), Ok(state));
+    }
+
+    fn inhibitor(what: &str, mode: &str) -> Inhibitor {
+        (what.into(), "who".into(), "why".into(), mode.into(), 1000, 4242)
+    }
+
+    #[test]
+    fn a_failing_inhibitor_query_blocks() {
+        assert!(blocks_shutdown(Err(zbus::Error::Failure("logind did not answer".into()))));
+    }
+
+    #[test]
+    fn only_a_block_inhibitor_on_shutdown_blocks() {
+        assert!(!blocks_shutdown(Ok(vec![])), "no inhibitor");
+        assert!(!blocks_shutdown(Ok(vec![inhibitor("shutdown", "delay"), inhibitor("sleep:idle", "block")])), "delay, or not shutdown");
+        assert!(blocks_shutdown(Ok(vec![inhibitor("sleep:shutdown", "block")])), "shutdown among several kinds");
     }
 
     #[test]
