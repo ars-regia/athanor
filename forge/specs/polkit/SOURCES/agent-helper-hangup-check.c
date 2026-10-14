@@ -94,6 +94,7 @@ answer_then_hang_up (const char *expected)
 
 static int line_then_hang_up (void) { return answer_then_hang_up ("guess"); }
 static int partial_then_hang_up (void) { return answer_then_hang_up ("gu"); }
+static int empty_then_hang_up (void) { return answer_then_hang_up (""); }
 
 static int
 expect (const char *name, int status, int code)
@@ -117,5 +118,7 @@ main (void)
                   run ("guess\n", line_then_hang_up), 0);
   fail |= expect ("hang-up after an answer without newline fails the conversation",
                   run ("gu", partial_then_hang_up), 0);
+  fail |= expect ("hang-up after an empty answer fails the conversation",
+                  run ("\n", empty_then_hang_up), 0);
   return fail;
 }

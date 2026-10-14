@@ -65,6 +65,7 @@ class AgentHelperCancel(unittest.TestCase):
             'run ("", hang_up_before_answer), 2)',
             'run ("guess\\n", line_then_hang_up), 0)',
             'run ("gu", partial_then_hang_up), 0)',
+            'run ("\\n", empty_then_hang_up), 0)',
         ):
             self.assertIn(case, cases)
 
