@@ -36,26 +36,40 @@ pointed elsewhere, and an older ISO gave a machine that announced itself as curr
 
 ## Decision
 
-Decided by the maintainer on 2026-10-14 (option A of the three put to them).
+The maintainer decided on 2026-10-14, choosing option A of the three put to them:
 
-1. **The kickstarts record the channel in a `%post`.** `system/disk_config/iso.toml`,
-   `system/athanor-install.ks` and the acceptance's `forge/test/iso/collaudo.ks` end with one
-   identical `%post` that reads the repository from the deployment's origin and runs
+1. **The kickstarts switch the installed system to `:stable` with the signature policy
+   enforced**, in a `%post` (`bootc switch --mutate-in-place --enforce-container-sigpolicy`).
+2. **The ISO published for users carries a promoted digest.**
+
+## Mechanism
+
+This record implements the two decisions as follows.
+
+1. **One `%post`.** `system/disk_config/iso.toml`, `system/athanor-install.ks` and the
+   acceptance's `forge/test/iso/collaudo.ks` end with one identical `%post --erroronfail` that
+   reads the repository from the deployment's origin and runs
    `bootc switch --mutate-in-place --enforce-container-sigpolicy --transport registry
    <repository>:stable`. bootc 1.16 honours the flag in that mode and writes
    `ostree-image-signed:docker://<repository>:stable`; nothing is downloaded at install. The
    repository is read, not written out, so the owner the image was built under is the one
    the shipped policy and `registries.d` name. A missing or unexpected origin fails the
    install.
-2. **Users take the ISO that `:stable` names.** The `promote` job of `promote-stable.yml`,
-   after `promote.sh`, moves `athanor-iso:stable` to the run's ISO with
-   `system/tag-images.sh --iso`. The ISO a user downloads carries, when it is published,
-   the build the system images' `:stable` names. `athanor-iso:<run_id>` stays what it was,
-   the run's ISO, unpromoted.
-3. **The check.** `verify.py install-channel` fails when any kickstart names `:latest` or runs
-   `bootc switch` without the flag, and when the three kickstarts lack the `%post` or differ
-   in it. The ISO acceptance asks the installed guest for bootc's booted reference and fails
-   unless it ends in `:stable` with the signature `containerPolicy` (UD2).
+2. **The promotion names the ISO, and a job of its own moves it.** `system/fetch-evidence.sh`
+   fetches the run's `iso-digest.txt`, the file `accept.yml` read to find the ISO it tested.
+   `scripts/ci/promotion-record.sh` checks that it names the athanor-system digest being
+   promoted and that `athanor-iso:<run_id>` still names it, and writes it into the record as
+   `iso`, which the bundle signs and the `release` approval covers. `promote.sh` recomputes
+   the record before it moves anything, so it refuses when the ISO is gone or moved. The `iso`
+   job of `promote-stable.yml` (`needs: [promote]`, environment `release`) then moves
+   `athanor-iso:stable` to that digest with `system/tag-images.sh --iso`, which refuses when
+   `athanor-iso:<run_id>` names another digest. Re-running the failed jobs retries the ISO
+   alone.
+3. **The checks.** `verify.py install-channel` fails when any kickstart names `:latest` or runs
+   `bootc switch` without the flag, and when the three kickstarts lack the `%post`, run it
+   without `--erroronfail`, or differ in it; a comment that quotes the command does not count.
+   The ISO acceptance asks the installed guest for bootc's booted reference and fails unless
+   it ends in `:stable` with the signature `containerPolicy` (UD2).
 
 ## Why 101e5781's concern no longer applies
 
@@ -82,18 +96,13 @@ against the shipped policy.
 
 - `doc_update_delivery.md` UD2 names the `%post` as the mechanism and drops the
   _(to verify)_ note; `doc_pipeline.md` PL32 and PL35 and the `athanor-iso` row of `doc_ci.md`
-  name `tag-images.sh --iso` in the `promote` job as the writer of the ISO's `:stable`.
+  name `tag-images.sh --iso` in the `iso` job as the writer of the ISO's `:stable`.
   ADR-0098 item 2 (UD2) is amended by this record.
-- **Open, for the maintainer.** The ISO installs the image through an OCI layout, which changes
-  the manifest digest, as the context of `doc_update_trust.md` records. A fresh install is enforcing from its
-  first boot with a booted digest no signature names, so the client reads it, from the code
-  of `check.rs` and not from a machine, as `NoSignature` rather than `Media`, and
-  `migrate.rs` treats an enforcing machine as done. `offerable()` refuses a build not newer
-  than the booted one, so the client never offers the same build's signed digest: the machine
-  stays on the unsigned digest until the next promotion. `bootc upgrade` run by hand does
-  stage it, since the digest differs. `doc_update_trust.md` acceptance item 7 expects `media`
-  until a migration and then `signature` with no update between; the client or that item
-  needs a decision. This record changes neither.
+- The ISO installs the image through an OCI layout, which changes the manifest digest, as the
+  context of `doc_update_trust.md` records: a fresh install is enforcing from its first boot
+  on a digest no signature names. The maintainer chose on 2026-10-14 to fix the client, so a
+  fresh install moves to the signed digest of its own build at the first check (pull request
+  `fix/update-same-build-signed`, which merges before this record's).
 - **Not verified on a machine.** The acceptance probe and the `%post` are tested with a fake
   `bootc`; no ISO built with them has been installed when this record was written. The upgrade
   case is written and unverified: install from an `athanor-iso:<run_id>` older than the
