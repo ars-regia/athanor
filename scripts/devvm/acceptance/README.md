@@ -25,9 +25,13 @@ instance opened by the graphical session's agent, the password typed into it (th
 the user's name) and the `polkitd` line that grants `os.athanor.update.apply-multi-session`; the
 absence of one as no helper, no grant and `Blocked`. Since #433 this harness's own SSH login is a
 counting session, so `call_active` arms the call from a user timer and the login is over when it
-arrives. `second-count.sh` holds `bootc upgrade --from-downloaded` still while a session of the
-other user opens. Not driven: the greeter's fast user switch (a session of another uid stands
-in), a text console (SSH stands in) and a prompt that times out (a refusal stands in).
+arrives; `guest_ssh` does not multiplex (no ControlMaster), so every call is a login of its own and
+the stage opens none between arming a call and its first check. `second-count.sh` bind-mounts a
+wrapper over `bootc` that holds `bootc upgrade --from-downloaded` at the unlock while it takes a
+block inhibitor and opens a session of the other user; the prompt is then refused by stopping
+the agent (`cosmic-osd`), which ends the call as `NotAuthorized`. Not driven: the greeter's fast
+user switch (a session of another uid stands in), a text console (SSH stands in), a prompt that
+times out (the agent's removal stands in), and a grant of the second prompt, which restarts the guest.
 
 Looked at by hand, with `scripts/devvm/screenshot.sh`: the "update ready" notification after
 the `download` stage, the "now running" notification after `apply`, and the administrator

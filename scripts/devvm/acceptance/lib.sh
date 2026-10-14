@@ -132,9 +132,15 @@ call_active_start() { # call_active_start METHOD
   guest_ssh "sudo rm -f $out && sudo systemd-run --quiet --user --machine=$GUEST_USER@.host --on-active=$ACC_CALL_DELAY --collect --unit=acc-call-$1 -p StandardOutput=file:$out dbus-send --system --print-reply --dest=${UPDATE1[0]} ${UPDATE1[1]} ${UPDATE1[2]}.$1"
 }
 call_active() { # call_active METHOD: the reply, or the error, of the call
+  local out
   call_active_start "$1"
-  sleep $((ACC_CALL_DELAY + 6))
-  guest_ssh cat "$(call_out "$1")"
+  # No login meanwhile: it would be a counting session when the call arrives.
+  sleep $((ACC_CALL_DELAY + 2))
+  for _ in $(seq 40); do
+    out=$(guest_ssh cat "$(call_out "$1")") && [[ -n $out ]] && { echo "$out"; return 0; }
+    sleep 1
+  done
+  return 1
 }
 # A call from this SSH session (inactive, no polkit agent).
 call_ssh() { guest_ssh -T dbus-send --system --print-reply --dest="${UPDATE1[0]}" "${UPDATE1[1]}" "${UPDATE1[2]}.$1" 2>&1; }
@@ -160,16 +166,36 @@ request_and_reboot() { # request_and_reboot CALLER METHOD EXPECTED-MARKER DESCRI
 # The prompt is observed in two places. The agent of the graphical session opens a
 # polkit-agent-helper@ instance for each request that needs a password (a request polkit
 # answers by itself opens none), and polkitd logs the action it granted once the password is
-# typed. The password of the dev VM is the user's name.
+# typed. The password of the dev VM is the user's name. guest_ssh does not multiplex
+# (ControlMaster off, no ControlPersist): each call is a login of its own, and a login of the
+# graphical session's user is a counting session while it lasts, hence the waits before a call.
 ACC_OTHER=acc-other
+ACC_INHIBITOR=acc-inhibit-sessions
 ACC_UNITS=()
 
 now_guest() { guest_ssh date +%s; }
 type_keys() { guest_ssh "sudo python3 - $(printf '%q ' "$@")" < "$ACC_HERE/../keyboard_type.py"; }
+# The journal of the units matching UNIT-GLOB since the epoch second SINCE; an SSH or
+# journalctl failure stops the run instead of reading as an empty journal.
+journal_since() { # journal_since SINCE UNIT
+  guest_ssh sudo journalctl -q -b --since "@$1" -o cat -u "'$2'" || die "FAIL  the journal of $2 could not be read"
+}
 # Whether the agent opened a helper since the epoch second SINCE.
-prompted() { [[ -n $(guest_ssh sudo journalctl -q -b --since "@$1" -o cat -u "'polkit-agent-helper@*'") ]]; }
-# The polkitd lines since SINCE that granted ACTION (stdout); fails when there are none.
-polkit_grants() { guest_ssh sudo journalctl -q -b --since "@$1" -o cat -u polkit.service | grep -F "authorization for action $2 "; }
+prompted() { local out; out=$(journal_since "$1" 'polkit-agent-helper@*') || die "FAIL  reading the helper journal"; [[ -n $out ]]; }
+# The polkitd lines since SINCE that granted an action: TEXT is a fixed string of the line,
+# "action os.athanor.update.apply-multi-session for" for one action, "action os.athanor.update."
+# for any of ours. Fails when there are none.
+polkit_grants() { # polkit_grants SINCE TEXT
+  local out
+  out=$(journal_since "$1" polkit.service) || die "FAIL  reading the polkitd journal"
+  grep -F "authorization for $2" <<< "$out"
+}
+# The shape of the line polkitd logs for a granted prompt, matched by both forms above.
+POLKIT_SAMPLE='Operator of unix-session:c2 successfully authenticated as unix-user:x to gain ONE-SHOT authorization for action os.athanor.update.apply-multi-session for system-bus-name::1.55 [dbus-send] (owned by unix-user:x)'
+polkit_pattern_selfcheck() {
+  grep -qF "authorization for action os.athanor.update.apply-multi-session for" <<< "$POLKIT_SAMPLE" || die "FAIL  the polkitd pattern for one action does not match a granted line"
+  grep -qF "authorization for action os.athanor.update." <<< "$POLKIT_SAMPLE" || die "FAIL  the polkitd pattern for any of our actions does not match a granted line"
+}
 # Waits SECONDS at most for the output of a call to hold TEXT.
 call_says() { # call_says METHOD TEXT SECONDS
   for _ in $(seq "$3"); do
@@ -180,26 +206,36 @@ call_says() { # call_says METHOD TEXT SECONDS
 }
 deployment_locked() { [[ $(guest_ssh sudo bootc status --format json | jq -r .status.staged.downloadOnly) == true ]]; }
 
-# A transient unit that is stopped by end_units, whatever happens.
-start_unit() { # start_unit NAME systemd-run-ARGUMENT...
-  local name=$1
-  shift
-  guest_ssh sudo systemd-run --quiet "--unit=$name" "$@"
-  ACC_UNITS+=("$name")
-}
+# The inhibitor that ends every authorised call of the stage at Error.Blocked, so that no case
+# can reboot the guest: started by the stage, checked before each call.
+need_inhibitor() { guest_ssh systemctl is-active --quiet "$ACC_INHIBITOR.service" || die "FAIL  the shutdown inhibitor $ACC_INHIBITOR is gone: a call could reboot the guest"; }
+
+unit_loaded() { [[ $(guest_ssh systemctl show -p LoadState --value "$1") == loaded ]]; }
+# Units of the class_session kind, stopped by end_units. A name is registered before the unit
+# is started, and a unit that never loaded is not stopped.
 end_unit() { # end_unit NAME
   local unit keep=()
-  guest_ssh sudo systemctl stop "$1.service"
+  if unit_loaded "$1.service"; then guest_ssh sudo systemctl stop "$1.service"; fi
   for unit in "${ACC_UNITS[@]}"; do [[ $unit == "$1" ]] || keep+=("$unit"); done
   ACC_UNITS=("${keep[@]}")
 }
 end_units() {
   while ((${#ACC_UNITS[@]})); do end_unit "${ACC_UNITS[0]}"; done
 }
+# A pending or finished call of the user manager, its timer included.
+end_call() {
+  local unit
+  for unit in acc-call-Apply.timer acc-call-Apply.service; do
+    if [[ $(guest_ssh sudo systemctl --user --machine="$GUEST_USER@.host" show -p LoadState --value "$unit") == loaded ]]; then
+      guest_ssh sudo systemctl --user --machine="$GUEST_USER@.host" stop "$unit"
+    fi
+  done
+}
 # A session of the other user, of the logind class CLASS, held open by a unit with a PAM stack.
 class_session() { # class_session CLASS
   local classes
-  start_unit "acc-class-$1" -p "User=$ACC_OTHER" -p PAMName=login -p "Environment=XDG_SESSION_CLASS=$1" sleep 3600
+  ACC_UNITS+=("acc-class-$1")
+  guest_ssh sudo systemd-run --quiet "--unit=acc-class-$1" -p "User=$ACC_OTHER" -p PAMName=login -p "Environment=XDG_SESSION_CLASS=$1" sleep 3600
   for _ in $(seq 20); do
     classes=$(other_classes)
     grep -qx "$1" <<< "$classes" && return 0
@@ -214,8 +250,25 @@ for s in $(loginctl list-sessions --no-legend | awk -v u="$1" '$3 == u { print $
 done
 REMOTE
 }
+# Waits for the other user to have no session, then removes the account.
+remove_other() {
+  guest_ssh sudo loginctl terminate-user "$ACC_OTHER"
+  for _ in $(seq 30); do
+    guest_ssh "loginctl list-users --no-legend | awk -v u=$ACC_OTHER '\$2 == u { f = 1 } END { exit f }'" && break
+    sleep 1
+  done
+  guest_ssh "loginctl list-users --no-legend | awk -v u=$ACC_OTHER '\$2 == u { f = 1 } END { exit f }'" || die "FAIL  $ACC_OTHER still has processes 30 s after terminate-user"
+  guest_ssh sudo userdel -r "$ACC_OTHER"
+}
 # A second login of the user of the graphical session, over SSH; ended by end_ssh_session.
-ssh_session() { guest_ssh -f -T 'exec -a acc-session-hold sleep 900' < /dev/null; }
+ssh_session() {
+  guest_ssh -f -T 'exec -a acc-session-hold sleep 900' < /dev/null
+  for _ in $(seq 20); do
+    guest_ssh pgrep -f '[a]cc-session-hold' > /dev/null && return 0 # the output is the pid; its absence is the exit status
+    sleep 1
+  done
+  die "FAIL  the second SSH session of $GUEST_USER did not start in 20 s"
+}
 end_ssh_session() { guest_ssh pkill -f '[a]cc-session-hold'; }
 
 # Arms Apply() from the graphical session and checks that it asked an administrator: the
@@ -226,9 +279,11 @@ expect_prompts() { # expect_prompts DESCRIPTION ACTION N
   local since call n
   since=$(now_guest)
   for n in $(seq "$3"); do
+    need_inhibitor
     call=$(now_guest)
     call_active_start Apply
-    for _ in $(seq $((ACC_CALL_DELAY + 30))); do
+    sleep $((ACC_CALL_DELAY + 2)) # no login meanwhile: the count is of the sessions the case made
+    for _ in $(seq 30); do
       prompted "$call" && break
       sleep 1
     done
@@ -236,11 +291,11 @@ expect_prompts() { # expect_prompts DESCRIPTION ACTION N
     sleep 2 # the dialog takes the keys only once it is drawn
     type_keys "$(guest_ssh id -un)" @enter
     call_says Apply os.athanor.Update1.Error.Blocked 30 || die "FAIL  $1: call $n did not reach the inhibitor check after the password: $(guest_ssh cat "$(call_out Apply)")"
-    [[ $(polkit_grants "$since" "$2" | grep -c .) -eq $n ]] || die "FAIL  $1: after call $n polkitd logged $(polkit_grants "$since" "$2" | grep -c .) grants of $2, expected $n"
+    [[ $(polkit_grants "$since" "action $2 for" | grep -c .) -eq $n ]] || die "FAIL  $1: after call $n polkitd logged $(polkit_grants "$since" "action $2 for" | grep -c .) grants of $2, expected $n"
   done
   deployment_locked || die "FAIL  $1: the deployment was unlocked"
   echo "EVIDENCE  $1:"
-  polkit_grants "$since" "$2" | sed 's/^/EVIDENCE    /'
+  polkit_grants "$since" "action $2 for" | sed 's/^/EVIDENCE    /'
   pass "$1"
 }
 
@@ -248,12 +303,13 @@ expect_prompts() { # expect_prompts DESCRIPTION ACTION N
 # the call is authorised, so it ends at the inhibitor the stage holds.
 expect_no_prompt() { # expect_no_prompt DESCRIPTION
   local since
+  need_inhibitor
   since=$(now_guest)
   call_active_start Apply
-  sleep $((ACC_CALL_DELAY + 6))
-  call_says Apply os.athanor.Update1.Error.Blocked 20 || die "FAIL  $1: not authorised without a password: $(guest_ssh cat "$(call_out Apply)")"
+  sleep $((ACC_CALL_DELAY + 2))
+  call_says Apply os.athanor.Update1.Error.Blocked 30 || die "FAIL  $1: not authorised without a password: $(guest_ssh cat "$(call_out Apply)")"
   ! prompted "$since" || die "FAIL  $1: the agent opened a prompt"
-  ! polkit_grants "$since" os.athanor.update > /dev/null || die "FAIL  $1: polkitd granted an action after a password"
+  ! polkit_grants "$since" "action os.athanor.update." > /dev/null || die "FAIL  $1: polkitd granted an action after a password"
   deployment_locked || die "FAIL  $1: the deployment was unlocked"
   echo "EVIDENCE  $1: no polkit-agent-helper@ instance and no polkitd grant since @$since; the call ended at os.athanor.Update1.Error.Blocked"
   pass "$1"
