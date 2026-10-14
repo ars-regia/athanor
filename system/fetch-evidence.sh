@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Gathers what system/promote.sh reads for one build run (doc_update_delivery.md, UD4) into
-# one directory: the run's digests, release request (its builder image) and package sets
-# from the run itself, and for each gate
+# one directory: the run's digests, ISO digest (the ISO accept.yml tested, ADR-0114), release
+# request (its builder image) and package sets from the run itself, and for each gate
 # the newest evidence artifact whose run trusted-run.sh accepts. Trust is checked before the
 # pick: an artifact name is free for any workflow to reuse, so an untrusted artifact is
 # named and passed over, and never hides an older trusted one.
@@ -37,6 +37,7 @@ read -ra build <<< "${BUILD_WORKFLOWS:-$orch}"
 bash "$root/system/trusted-run.sh" "$run" "${build[@]}"
 mkdir -p "$out/evidence" "$out/packages"
 gh run download "$run" -n image-digests -D "$out"
+gh run download "$run" -n iso-digest -D "$out"
 gh run download "$run" -n release-request -D "$out"
 gh run download "$run" -n package-sets -D "$out/packages"
 

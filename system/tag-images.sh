@@ -5,9 +5,9 @@
 # image is copied by digest onto the tag, then the tag is read back. Nothing is signed here and
 # no key is needed: the signature is by digest, so it carries.
 #
-# With --iso RUN_ID it moves the tag of the installer ISO instead, to the digest of
-# athanor-iso:RUN_ID, which the build job of the same run built from the default image this
-# run verified. The ISO itself carries no key-based signature.
+# With --iso RUN_ID DIGEST it moves the tag of the installer ISO instead, to DIGEST, the ISO
+# the run's acceptance tested (the promotion record names it, ADR-0114), and refuses unless
+# athanor-iso:RUN_ID still names it. The ISO itself carries no key-based signature.
 #
 # The images are tagged one after the other, so a failure part-way leaves the tag on this
 # run's digest in some repositories and on the previous one in the others. Every digest this
@@ -19,7 +19,7 @@
 #
 # Usage: tag-images.sh --registry REGISTRY/OWNER --tag TAG DIGESTS_FILE
 #        (lines: "REPOSITORY TAG DIGEST", image-digests.sh)
-#        tag-images.sh --registry REGISTRY/OWNER --tag TAG --iso RUN_ID
+#        tag-images.sh --registry REGISTRY/OWNER --tag TAG --iso RUN_ID DIGEST
 # The registry login is the caller's business.
 #
 # It moves a tag only for a run of a trusted branch: GITHUB_REF must be refs/heads/<b> with <b>
@@ -28,7 +28,7 @@
 set -euo pipefail
 
 usage() {
-    echo "usage: ${0##*/} --registry REGISTRY/OWNER --tag TAG (DIGESTS_FILE | --iso RUN_ID)" >&2
+    echo "usage: ${0##*/} --registry REGISTRY/OWNER --tag TAG (DIGESTS_FILE | --iso RUN_ID DIGEST)" >&2
     exit 2
 }
 [[ $# -ge 5 && $1 == --registry && -n $2 && $3 == --tag ]] || usage
@@ -37,7 +37,7 @@ registry=$2
 tag=$4
 case $# in
     5) ;;
-    6) [[ $5 == --iso && $6 =~ ^[0-9]+$ ]] || usage ;;
+    7) [[ $5 == --iso && $6 =~ ^[0-9]+$ && $7 =~ ^sha256:[0-9a-f]{64}$ ]] || usage ;;
     *) usage ;;
 esac
 
@@ -71,14 +71,14 @@ move() { # move REPOSITORY DIGEST: REPOSITORY@DIGEST onto the tag $tag of REPOSI
     return 1
 }
 
-if [[ $# -eq 6 ]]; then
+if [[ $# -eq 7 ]]; then
     iso="$registry/athanor-iso"
     digest=$(bash "$retry" skopeo inspect --format '{{.Digest}}' "docker://$iso:$6")
-    [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || {
-        echo "${0##*/}: $iso:$6 has no digest: '$digest'" >&2
+    [[ $digest == "$7" ]] || {
+        echo "${0##*/}: $iso:$6 names '$digest', not $7, the ISO the acceptance tested: $tag is not moved" >&2
         exit 1
     }
-    move "$iso" "$digest"
+    move "$iso" "$7"
     exit 0
 fi
 

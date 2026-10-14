@@ -27,6 +27,7 @@ BUNDLE = {
     "manifests": [{"artifactType": "application/vnd.dev.sigstore.bundle.v0.3+json"}]
 }
 OLD = "2026-09-15T11:00:00Z"
+ISO = "sha256:" + "c" * 64
 
 
 def digest(n):
@@ -83,6 +84,10 @@ class Promote(Tool):
                         self.evidence("iso-acceptance", name, new, finished=finished)
         self.artifacts.mkdir(parents=True, exist_ok=True)
         (self.artifacts / "image-digests.txt").write_text("\n".join(lines) + "\n")
+        fx["tags"][f"{REG}/athanor-iso:412"] = ISO
+        (self.artifacts / "iso-digest.txt").write_text(
+            f"{REG}/athanor-iso {ISO}\n{REG}/athanor-system {digest(1)}\n"
+        )
         self.registry(fx)
 
     def evidence(self, gate, name, digest_, run_id=412, verdict="pass", finished=OLD):
@@ -165,6 +170,38 @@ class Promote(Tool):
         skipped = {s["name"]: s["reason"] for s in self.record()["skipped"]}
         self.assertIn("hardware", skipped["athanor-system-nvidia"])
         self.assertIn("0.9", skipped["athanor-system-nvidia-legacy"])
+
+    def test_the_record_names_the_iso_the_acceptance_tested(self):
+        self.published()
+        r, _ = self.promote()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.record()["iso"], ISO)
+
+    def test_an_unknown_or_unbound_iso_is_refused_and_nothing_moves(self):
+        for name, text in (
+            ("missing", None),
+            ("unbound", f"{REG}/athanor-iso {ISO}\n{REG}/athanor-system {digest(9)}\n"),
+            ("no iso", f"{REG}/athanor-system {digest(1)}\n"),
+        ):
+            with self.subTest(name=name):
+                self.published()
+                path = self.artifacts / "iso-digest.txt"
+                if text is None:
+                    path.unlink()
+                else:
+                    path.write_text(text)
+                r, copies = self.promote()
+                self.assertEqual(r.returncode, 1, r.stderr)
+                self.assertEqual(copies, [])
+
+    def test_an_iso_run_tag_moved_after_the_plan_stops_the_promotion(self):
+        self.published()
+        r, copies = self.promote(
+            between=lambda: self.set_tag(f"{REG}/athanor-iso:412", "sha256:" + "d" * 64)
+        )
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("athanor-iso:412 moved", r.stderr)
+        self.assertEqual(copies, [])
 
     def test_the_first_promotion_has_no_previous_stable(self):
         self.published(stable_created=None)

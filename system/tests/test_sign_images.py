@@ -511,7 +511,7 @@ class SignImages(unittest.TestCase):
         iso = "sha256:" + "7" * 64
         self.tags[f"{REG}/athanor-iso:412"] = iso
         (self.state / "tags.json").write_text(json.dumps(self.tags))
-        r = self.tag("--iso", "412")
+        r = self.tag("--iso", "412", iso)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(
             json.loads((self.state / "tags.json").read_text())[
@@ -519,9 +519,22 @@ class SignImages(unittest.TestCase):
             ],
             iso,
         )
-        for value in ("latest", "412 extra"):
+        for value in ("latest", "412", f"412 {iso} extra", "412 sha256:abc"):
             with self.subTest(value=value):
                 self.assertEqual(self.tag("--iso", *value.split()).returncode, 2)
+
+    def test_the_iso_is_not_moved_when_its_run_tag_names_another_digest(self):
+        """The digest the acceptance tested is the one moved; a run tag pushed again since is
+        refused, not followed (ADR-0114)."""
+        self.tags[f"{REG}/athanor-iso:412"] = "sha256:" + "8" * 64
+        (self.state / "tags.json").write_text(json.dumps(self.tags))
+        r = self.tag("--iso", "412", "sha256:" + "7" * 64)
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("the ISO the acceptance tested", r.stderr)
+        self.assertNotIn(
+            f"{REG}/athanor-iso:latest",
+            json.loads((self.state / "tags.json").read_text()),
+        )
 
     def test_verify_and_tag_refuse_a_repository_outside_the_shipped_set(self):
         self.digests()

@@ -21,7 +21,7 @@ contents = """
 # the image the machine follows. A second `bootc switch` once made the installed system
 # disagree with itself (101e5781): it named a moving tag while the disk held the ISO's build.
 # The ISO users are given carries the build :stable names when it is published, because
-# athanor-iso:stable moves only with the system images' :stable (promote-stable.yml,
+# athanor-iso:stable moves only after the system images' :stable (promote-stable.yml,
 # ADR-0114), and :stable never moves to an older build without a promotion that says so.
 # forge/test/iso/collaudo.ks repeats all three, because it includes osbuild-base.ks rather
 # than this file.

@@ -22,7 +22,12 @@
 #     forge/scripts/clean_ghcr.sh keeps its two newest versions, so a run whose builder inputs
 #     changed twice since cannot be promoted, and its plan stops on the pull;
 #   - its build time is newer than the current stable's: a machine never follows a tag
-#     backwards (UT5).
+#     backwards (UT5);
+#   - and, once for the run, the installer ISO users will take (ADR-0114): the digest of the
+#     run's iso-digest.txt, the file accept.yml's accept-target.sh read to find the ISO it
+#     tested, built from the athanor-system digest recorded above and still named by
+#     athanor-iso:RUN_ID. The record names it; the iso job of promote-stable.yml moves
+#     athanor-iso:stable to exactly that digest.
 # Defines promotion_args "$@" (sets run and override), promotion_record DAY OUT (runs every
 # check, writes the record to OUT, sets promote, recorded and previous) and stable_of REPOSITORY.
 # Environment: REGISTRY (default ghcr.io/<GITHUB_REPOSITORY_OWNER>); PROMOTE_ARTIFACTS
@@ -112,6 +117,16 @@ promotion_record() { # promotion_record DAY OUT
         recorded[${repository##*/}]=$digest
     done < "$artifacts/image-digests.txt"
 
+    local iso_repository=$REGISTRY/athanor-iso iso_digest iso_bound
+    [[ -f $artifacts/iso-digest.txt ]] || die "no $artifacts/iso-digest.txt: the ISO run $run tested is unknown (ADR-0114)"
+    iso_digest=$(awk -v repo="$iso_repository" '$1 == repo { print $2 }' "$artifacts/iso-digest.txt")
+    iso_bound=$(awk -v repo="$REGISTRY/athanor-system" '$1 == repo { print $2 }' "$artifacts/iso-digest.txt")
+    [[ $iso_digest =~ ^sha256:[0-9a-f]{64}$ ]] || die "iso-digest.txt names no $iso_repository digest"
+    [[ $iso_bound == "${recorded[athanor-system]:-}" ]] ||
+        die "the ISO of run $run was built from athanor-system '$iso_bound', not '${recorded[athanor-system]:-}'"
+    current=$(skopeo inspect --format '{{.Digest}}' "docker://$iso_repository:$run")
+    [[ $current == "$iso_digest" ]] || die "$iso_repository:$run moved to $current since run $run recorded $iso_digest"
+
     local -A skipped=()
     promote=()
     local newest=0
@@ -196,10 +211,10 @@ promotion_record() { # promotion_record DAY OUT
     trigger=manual
     if [[ -n ${GITHUB_RUN_ID:-} ]]; then trigger=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID; fi
     jq -n -S --indent 2 --argjson run "$run" --arg day "$day" --arg registry "$REGISTRY" --arg trigger "$trigger" --arg override "$override" --arg builder "$builder" \
-        --argjson images "$images" --argjson skipped "$skips" \
+        --argjson images "$images" --argjson skipped "$skips" --arg iso "$iso_digest" \
         --argjson evidence "$evidence_sums" --argjson packages "$package_sums" \
         --argjson keys "$key_sums" --argjson dwell_hours "$((dwell / 3600))" \
-        '{run_id: $run, day: $day, registry: $registry, trigger: $trigger, images: $images, skipped: $skipped,
+        '{run_id: $run, day: $day, registry: $registry, trigger: $trigger, images: $images, iso: $iso, skipped: $skipped,
       overrides: (if $override == "" then [] else [$override] end), evidence: $evidence, packages: $packages,
       keys: $keys, dwell_hours: $dwell_hours, builder_content_hash: $builder}' \
         > "$out"
