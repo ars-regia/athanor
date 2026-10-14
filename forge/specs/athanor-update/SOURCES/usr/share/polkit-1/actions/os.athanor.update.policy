@@ -19,6 +19,20 @@
     </defaults>
   </action>
 
+  <!-- Checked by Apply() in place of apply while another session is open, of the same user or
+       another: a restart ends that work too. Never kept (doc_update_trust.md UT6, ADR-0103 D22). -->
+  <action id="os.athanor.update.apply-multi-session">
+    <description>Restart to install the downloaded system update while other sessions are open</description>
+    <description xml:lang="it">Riavvia per installare l'aggiornamento di sistema scaricato mentre altre sessioni sono aperte</description>
+    <message>Authentication is required to restart and install the system update while other sessions are open</message>
+    <message xml:lang="it">È richiesta l'autenticazione per riavviare e installare l'aggiornamento di sistema mentre altre sessioni sono aperte</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
   <!-- Never kept: every return to the previous version is authenticated on its own. -->
   <action id="os.athanor.update.rollback">
     <description>Go back to the previous system version</description>
