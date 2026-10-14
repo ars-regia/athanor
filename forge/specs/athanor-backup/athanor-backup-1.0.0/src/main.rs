@@ -428,6 +428,29 @@ mod tests {
     }
 
     #[test]
+    fn a_home_that_cannot_be_snapshotted_fails_with_a_message_naming_it() {
+        // A plain directory is not the root of a btrfs subvolume (inode 256), a dangling path
+        // does not exist, and a link to a directory is not the subvolume itself: `init` and
+        // `create` stop on each, so the hourly timer unit fails and the failure is visible.
+        let dir = std::env::temp_dir().join(format!("athanor-backup-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).expect("create test directory");
+        let link = dir.join("link");
+        std::os::unix::fs::symlink(&dir, &link).expect("create link");
+        let cases = [
+            (dir.clone(), "is not a btrfs subvolume"),
+            (link, "is not a btrfs subvolume"),
+            (dir.join("missing"), "is missing"),
+        ];
+        for (path, want) in &cases {
+            let err = ensure_subvolume(path).expect_err("must be refused");
+            let text = format!("{err:#}");
+            assert!(text.contains(want), "{text}");
+            assert!(text.contains(&path.display().to_string()), "{text}");
+        }
+        fs::remove_dir_all(&dir).expect("remove test directory");
+    }
+
+    #[test]
     fn a_non_root_caller_is_told_to_use_sudo_and_a_bad_command_gets_the_usage() {
         let err = run(&["frobnicate".to_owned()]).expect_err("unknown command");
         assert!(err.to_string().starts_with("usage:"));
