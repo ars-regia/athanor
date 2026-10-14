@@ -21,23 +21,23 @@ msgstr ""
 msgid "The sign-in service sent a reply of {size} bytes, too large to read"
 msgstr ""
 
-#: src/auth.rs:264
+#: src/auth.rs:267
 msgid "Sign-in was cancelled."
 msgstr ""
 
-#: src/auth.rs:308
+#: src/auth.rs:307
 msgid "Checking your credentials…"
 msgstr ""
 
-#: src/auth.rs:331
+#: src/auth.rs:330
 msgid "The login service gave an unexpected answer."
 msgstr ""
 
-#: src/auth.rs:341
+#: src/auth.rs:337
 msgid "Too many authentication steps."
 msgstr ""
 
-#: src/auth.rs:351
+#: src/auth.rs:347
 msgid "The login service cannot be reached."
 msgstr ""
 
@@ -126,44 +126,48 @@ msgstr ""
 msgid "Keyboard layout: {layout}"
 msgstr ""
 
-#: src/ui.rs:376
+#: src/ui.rs:403
 msgid "%A %-d %B"
 msgstr ""
 
-#: src/ui.rs:394
+#: src/ui.rs:421
 msgid "Password"
 msgstr ""
 
-#: src/ui.rs:399
+#: src/ui.rs:426
 #, rust-format
 msgid "Password for {name}"
 msgstr ""
 
-#: src/ui.rs:415
+#: src/ui.rs:442
 msgid "Sign in"
 msgstr ""
 
-#: src/ui.rs:487
+#: src/ui.rs:445 src/ui.rs:449
+msgid "Cancel"
+msgstr ""
+
+#: src/ui.rs:564
 msgid "Signing in…"
 msgstr ""
 
-#: src/ui.rs:497
+#: src/ui.rs:574
 #, rust-format
 msgid "Sign-in failed: {reason}"
 msgstr ""
 
-#: src/ui.rs:545 src/ui.rs:546
+#: src/ui.rs:624 src/ui.rs:625
 msgid "High contrast"
 msgstr ""
 
-#: src/ui.rs:566
+#: src/ui.rs:645
 msgid "Suspend"
 msgstr ""
 
-#: src/ui.rs:572
+#: src/ui.rs:651
 msgid "Restart"
 msgstr ""
 
-#: src/ui.rs:578
+#: src/ui.rs:657
 msgid "Shut down"
 msgstr ""

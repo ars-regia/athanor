@@ -13,23 +13,23 @@ msgstr ""
 msgid "The sign-in service sent a reply of {size} bytes, too large to read"
 msgstr "Il servizio di accesso ha inviato una risposta di {size} byte, troppo grande da leggere"
 
-#: src/auth.rs:264
+#: src/auth.rs:267
 msgid "Sign-in was cancelled."
 msgstr "Accesso annullato."
 
-#: src/auth.rs:308
+#: src/auth.rs:307
 msgid "Checking your credentials…"
 msgstr "Verifica delle credenziali…"
 
-#: src/auth.rs:331
+#: src/auth.rs:330
 msgid "The login service gave an unexpected answer."
 msgstr "Il servizio di accesso ha dato una risposta inattesa."
 
-#: src/auth.rs:341
+#: src/auth.rs:337
 msgid "Too many authentication steps."
 msgstr "Troppi passaggi di autenticazione."
 
-#: src/auth.rs:351
+#: src/auth.rs:347
 msgid "The login service cannot be reached."
 msgstr "Il servizio di accesso non è raggiungibile."
 
@@ -118,44 +118,48 @@ msgstr "Firmata con una chiave della policy in vigore"
 msgid "Keyboard layout: {layout}"
 msgstr "Disposizione della tastiera: {layout}"
 
-#: src/ui.rs:376
+#: src/ui.rs:403
 msgid "%A %-d %B"
 msgstr "%A %-d %B"
 
-#: src/ui.rs:394
+#: src/ui.rs:421
 msgid "Password"
 msgstr "Password"
 
-#: src/ui.rs:399
+#: src/ui.rs:426
 #, rust-format
 msgid "Password for {name}"
 msgstr "Password di {name}"
 
-#: src/ui.rs:415
+#: src/ui.rs:442
 msgid "Sign in"
 msgstr "Accedi"
 
-#: src/ui.rs:487
+#: src/ui.rs:445 src/ui.rs:449
+msgid "Cancel"
+msgstr "Annulla"
+
+#: src/ui.rs:564
 msgid "Signing in…"
 msgstr "Accesso in corso…"
 
-#: src/ui.rs:497
+#: src/ui.rs:574
 #, rust-format
 msgid "Sign-in failed: {reason}"
 msgstr "Accesso non riuscito: {reason}"
 
-#: src/ui.rs:545 src/ui.rs:546
+#: src/ui.rs:624 src/ui.rs:625
 msgid "High contrast"
 msgstr "Contrasto elevato"
 
-#: src/ui.rs:566
+#: src/ui.rs:645
 msgid "Suspend"
 msgstr "Sospendi"
 
-#: src/ui.rs:572
+#: src/ui.rs:651
 msgid "Restart"
 msgstr "Riavvia"
 
-#: src/ui.rs:578
+#: src/ui.rs:657
 msgid "Shut down"
 msgstr "Spegni"

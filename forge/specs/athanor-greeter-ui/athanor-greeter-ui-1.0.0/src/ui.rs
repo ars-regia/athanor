@@ -230,6 +230,17 @@ fn label_field<W: IsA<gtk4::Editable> + IsA<gtk4::Accessible>>(field: &W, label:
     }
 }
 
+/// Adds `text` as a line under what `label` already shows.
+fn add_line(label: &Label, text: &str) {
+    let shown = if label.is_visible() {
+        format!("{}\n{text}", label.label())
+    } else {
+        text.to_string()
+    };
+    label.set_label(&shown);
+    label.set_visible(true);
+}
+
 /// The card's fields as one sign-in sees them: PAM's messages are shown on it, and its
 /// further questions are put on it, each answered from the field its type calls for.
 #[derive(Clone)]
@@ -239,8 +250,15 @@ struct SignInForm {
     answer: Entry,
     question: Label,
     submit: Button,
+    cancel: Button,
+    /// The greeter's own line of progress.
     status: Label,
+    /// The greeter's line for a sign-in that failed.
     error: Label,
+    /// PAM's PAM_TEXT_INFO and PAM_ERROR_MSG lines, apart from the greeter's own: they stay
+    /// through PAM's questions and after a failure, until the next sign-in starts.
+    pam_info: Label,
+    pam_error: Label,
     /// Where the answer to PAM's open question goes, while one is open.
     pending: Rc<RefCell<Option<oneshot::Sender<zeroize::Zeroizing<String>>>>>,
 }
@@ -251,11 +269,21 @@ impl SignInForm {
         self.password.set_sensitive(false);
         self.answer.set_sensitive(false);
         self.submit.set_sensitive(false);
+        self.cancel.set_visible(false);
+    }
+
+    /// A new sign-in starts: the messages of the previous one go.
+    fn clear_messages(&self) {
+        for label in [&self.error, &self.pam_info, &self.pam_error] {
+            label.set_label("");
+            label.set_visible(false);
+        }
     }
 
     /// The card as it was before the sign-in: the password field, ready.
     fn reset(&self) {
         self.pending.take();
+        self.cancel.set_visible(false);
         self.question.set_visible(false);
         self.answer.set_text("");
         self.answer.set_visible(false);
@@ -269,19 +297,17 @@ impl SignInForm {
 }
 
 impl Conversation for SignInForm {
-    fn status(&self, text: &str) {
+    fn progress(&self, text: &str) {
         self.status.set_label(text);
         self.status.set_visible(true);
     }
 
+    fn info(&self, text: &str) {
+        add_line(&self.pam_info, text);
+    }
+
     fn error(&self, text: &str) {
-        let shown = if self.error.is_visible() {
-            format!("{}\n{text}", self.error.label())
-        } else {
-            text.to_string()
-        };
-        self.error.set_label(&shown);
-        self.error.set_visible(true);
+        add_line(&self.pam_error, text);
     }
 
     fn ask(
@@ -308,6 +334,7 @@ impl Conversation for SignInForm {
         };
         field.set_sensitive(true);
         self.submit.set_sensitive(true);
+        self.cancel.set_visible(true);
         field.grab_focus();
         async move { answer.await.ok() }
     }
@@ -413,6 +440,13 @@ pub fn build_ui(app: &Application) {
         .valign(Align::Center)
         .build();
     named(&submit, "greeter-submit", &tr("Sign in"));
+    // Ends an open question of PAM's, and with it the sign-in: shown only while one is open.
+    let cancel = Button::builder()
+        .label(tr("Cancel"))
+        .valign(Align::Center)
+        .visible(false)
+        .build();
+    named(&cancel, "greeter-cancel", &tr("Cancel"));
     let field_row = Box::builder()
         .orientation(Orientation::Horizontal)
         .spacing(6)
@@ -420,6 +454,7 @@ pub fn build_ui(app: &Application) {
     field_row.append(&password);
     field_row.append(&answer);
     field_row.append(&submit);
+    field_row.append(&cancel);
 
     // PAM's question after the password (a new password, a one-time code), in its words.
     let question = Label::builder()
@@ -442,7 +477,21 @@ pub fn build_ui(app: &Application) {
         .build();
     // A failed sign-in is announced, not only painted.
     error.set_accessible_role(gtk4::AccessibleRole::Alert);
+    let pam_info = Label::builder()
+        .css_classes(["greeter-status"])
+        .margin_bottom(8)
+        .wrap(true)
+        .visible(false)
+        .build();
+    let pam_error = Label::builder()
+        .css_classes(["greeter-error"])
+        .margin_bottom(8)
+        .wrap(true)
+        .visible(false)
+        .build();
+    pam_error.set_accessible_role(gtk4::AccessibleRole::Alert);
 
+    // Typing hides the greeter's own lines; PAM's stay until the next sign-in starts.
     for field in [password.upcast_ref::<gtk4::Editable>(), answer.upcast_ref()] {
         let (status, error) = (status.clone(), error.clone());
         field.connect_changed(move |_| {
@@ -457,10 +506,38 @@ pub fn build_ui(app: &Application) {
         answer: answer.clone(),
         question: question.clone(),
         submit: submit.clone(),
+        cancel: cancel.clone(),
         status: status.clone(),
         error: error.clone(),
+        pam_info: pam_info.clone(),
+        pam_error: pam_error.clone(),
         pending: Rc::new(RefCell::new(None)),
     };
+    {
+        let form = form.clone();
+        cancel.connect_clicked(move |_| {
+            // Dropping the sender leaves the question unanswered: the conversation tells
+            // greetd to cancel the session, and the failure puts the card back as it was.
+            if form.pending.take().is_some() {
+                form.wait();
+            }
+        });
+    }
+    // Escape cancels an open question, as the button does; otherwise it goes on its way.
+    let escape = gtk4::EventControllerKey::new();
+    escape.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    {
+        let cancel = cancel.clone();
+        escape.connect_key_pressed(move |_, key, _, _| {
+            if key == gtk4::gdk::Key::Escape && cancel.is_visible() {
+                cancel.emit_clicked();
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+    }
+    window.add_controller(escape);
     let sign_in = Rc::new({
         let app = app.clone();
         move || {
@@ -483,7 +560,7 @@ pub fn build_ui(app: &Application) {
             // Cleared before anything is shown: clearing a field hides the messages.
             form.password.set_text("");
             form.wait();
-            form.error.set_visible(false);
+            form.clear_messages();
             form.status.set_label(&tr("Signing in…"));
             form.status.set_visible(true);
             let (app, form) = (app.clone(), form.clone());
@@ -521,6 +598,8 @@ pub fn build_ui(app: &Application) {
         .build();
     card.append(&avatar(&user));
     card.append(&name);
+    card.append(&pam_info);
+    card.append(&pam_error);
     card.append(&question);
     card.append(&field_row);
     card.append(&status);

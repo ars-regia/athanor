@@ -217,9 +217,12 @@ pub enum Prompt {
 /// The person's side of one greetd conversation. The greeter's window plays it; the tests
 /// play it from a script.
 pub trait Conversation {
-    /// Shows a line of progress or PAM's PAM_TEXT_INFO.
-    fn status(&self, text: &str);
-    /// Shows PAM's PAM_ERROR_MSG as an error.
+    /// Shows the greeter's own line of progress, which the next step replaces.
+    fn progress(&self, text: &str);
+    /// Shows PAM's PAM_TEXT_INFO, kept until the next sign-in starts.
+    fn info(&self, text: &str);
+    /// Shows PAM's PAM_ERROR_MSG, kept until the next sign-in starts: a locked account or an
+    /// expired password is told in PAM's words, not guessed from greetd's code.
     fn error(&self, text: &str);
     /// Puts `prompt` to the person and waits for the answer; None when none will come.
     fn ask(&self, prompt: Prompt) -> impl std::future::Future<Output = Option<Zeroizing<String>>>;
@@ -285,9 +288,6 @@ async fn converse<C: Conversation>(
     // The password typed on the card answers PAM's first secret question and no other: a
     // further one (a new password, its confirmation) is put to the person in PAM's words.
     let mut password = Some(password);
-    // PAM's error messages, kept to say why an attempt ended: a locked account or an expired
-    // password is told in PAM's words, not guessed from greetd's code.
-    let mut errors: Vec<String> = Vec::new();
     for _ in 0..MAX_AUTH_STEPS {
         resp = match resp {
             Response::AuthMessage {
@@ -295,17 +295,16 @@ async fn converse<C: Conversation>(
                 auth_message,
             } => match auth_message_type {
                 AuthMessageType::Info => {
-                    person.status(&auth_message);
+                    person.info(&auth_message);
                     post_no_answer(stream)?
                 }
                 AuthMessageType::Error => {
                     person.error(&auth_message);
-                    errors.push(auth_message);
                     post_no_answer(stream)?
                 }
                 AuthMessageType::Secret => match password.take() {
                     Some(password) => {
-                        person.status(&tr("Checking your credentials…"));
+                        person.progress(&tr("Checking your credentials…"));
                         post_answer(stream, password)?
                     }
                     None => ask_and_answer(stream, person, Prompt::Secret(auth_message)).await?,
@@ -332,10 +331,7 @@ async fn converse<C: Conversation>(
                     }
                 };
             }
-            Response::Error { description, .. } => {
-                errors.push(description);
-                return Err(errors.join("\n"));
-            }
+            Response::Error { description, .. } => return Err(description),
         };
     }
     Err(tr("Too many authentication steps."))
@@ -509,7 +505,8 @@ mod tests {
     struct Person {
         answers: std::cell::RefCell<std::collections::VecDeque<&'static str>>,
         asked: std::cell::RefCell<Vec<Prompt>>,
-        statuses: std::cell::RefCell<Vec<String>>,
+        progress: std::cell::RefCell<Vec<String>>,
+        infos: std::cell::RefCell<Vec<String>>,
         errors: std::cell::RefCell<Vec<String>>,
     }
 
@@ -523,8 +520,11 @@ mod tests {
     }
 
     impl Conversation for Person {
-        fn status(&self, text: &str) {
-            self.statuses.borrow_mut().push(text.to_string());
+        fn progress(&self, text: &str) {
+            self.progress.borrow_mut().push(text.to_string());
+        }
+        fn info(&self, text: &str) {
+            self.infos.borrow_mut().push(text.to_string());
         }
         fn error(&self, text: &str) {
             self.errors.borrow_mut().push(text.to_string());
@@ -613,7 +613,15 @@ mod tests {
         );
         assert_eq!(requests[4]["type"], "start_session");
         assert_eq!(requests[4]["cmd"][0], "athanor-session");
-        assert_eq!(person.statuses.borrow()[0], "Last login: yesterday");
+        assert_eq!(*person.infos.borrow(), ["Last login: yesterday"]);
+        assert!(
+            !person
+                .progress
+                .borrow()
+                .iter()
+                .any(|line| line.contains("Last login")),
+            "PAM's messages are kept apart from the greeter's progress line"
+        );
         assert_eq!(
             *person.errors.borrow(),
             ["There were 2 failed login attempts"]
@@ -637,6 +645,32 @@ mod tests {
         assert_eq!(
             answers(&requests),
             [Some(PASSWORD.to_string()), Some("493021".to_string())]
+        );
+        assert_eq!(
+            *person.asked.borrow(),
+            [Prompt::Visible("Verification code: ".to_string())]
+        );
+        assert_eq!(password_sent(&requests), 1);
+    }
+
+    #[test]
+    fn a_visible_question_first_leaves_the_password_for_the_secret_one() {
+        // A PAM stack that asks a one-time code before the password.
+        let person = Person::answering(&["493021"]);
+        let (result, requests) = login(
+            vec![
+                message(AuthMessageType::Visible, "Verification code: "),
+                message(AuthMessageType::Secret, "Password: "),
+                Response::Success,
+                Response::Success,
+            ],
+            &person,
+        );
+        assert_eq!(result, Ok(()));
+        assert_eq!(
+            answers(&requests),
+            [Some("493021".to_string()), Some(PASSWORD.to_string())],
+            "the code comes from the person, the password goes to the secret question"
         );
         assert_eq!(
             *person.asked.borrow(),
@@ -693,7 +727,6 @@ mod tests {
             &person,
         );
         let reason = result.expect_err("a locked account does not sign in");
-        assert!(reason.contains(locked), "{reason}");
         assert!(reason.contains("AUTH_ERR"), "{reason}");
         assert_eq!(*person.errors.borrow(), [locked]);
         assert_eq!(answers(&requests), [None]);
@@ -715,8 +748,8 @@ mod tests {
             &person,
         );
         let reason = result.expect_err("an expired password does not sign in");
-        assert!(reason.contains(expired), "{reason}");
         assert!(reason.contains("NEW_AUTHTOK_REQD"), "{reason}");
+        assert_eq!(*person.errors.borrow(), [expired]);
         assert_eq!(answers(&requests), [Some(PASSWORD.to_string()), None]);
         assert_eq!(password_sent(&requests), 1);
     }
