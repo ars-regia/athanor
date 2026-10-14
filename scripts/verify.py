@@ -20,6 +20,7 @@ Nessuna dipendenza oltre a python3 e git. Va eseguito dalla radice del repo.
 import collections
 import datetime
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -718,6 +719,147 @@ def signing_job_problems(where, job, steps, environment, holders):
             problems.append(f"{where} downloads into {inputs.get('path', 'the workspace root')}: only into one of "
                             f"{sorted(SIGN_JOB_DOWNLOADS)}, outside the checkout (D43)")
     return problems
+
+
+# --------------------------------------------------------------------------- #
+# installer — the machine check and the MOK request run in every kickstart that installs
+# --------------------------------------------------------------------------- #
+
+# The kickstarts that install Athanor: the manual one, the ISO's own, and the acceptance
+# test's, which repeats the ISO's blocks because it includes osbuild-base.ks instead. The
+# first is the reference the other two must carry word for word.
+INSTALLER_KICKSTARTS = (
+    "system/athanor-install.ks",
+    "system/disk_config/iso.toml",
+    "forge/test/iso/collaudo.ks",
+)
+SECUREBOOT_CERT = "/usr/share/athanor/secureboot/athanor-secureboot.der"
+# The SHA-256 of the certificate the image ships, in sha256sum's format; the ISO
+# acceptance compares the key enrolled in MokList with it.
+SECUREBOOT_PIN = "system/secureboot-pin.sha256"
+# What each block must say, so a copy that still matches but no longer checks is caught too.
+INSTALLER_CPU_NEEDS = (
+    "[ ! -d /sys/firmware/efi ]",
+    "grep -q 'x86-64-v3 (supported'",
+    "exit 1",
+)
+INSTALLER_MOK_NEEDS = (
+    f"cert={SECUREBOOT_CERT}",
+    "mokutil --timeout -1",
+    'mokutil --import "$cert" --hash-file /dev/stdin',
+    "mokutil --generate-hash |",
+)
+
+
+def kickstart_text(root, relative):
+    """The kickstart a file carries: the file itself, or the installer customisation of a
+    bootc-image-builder TOML, with TOML's escapes already applied."""
+    text = read(root / relative)
+    if relative.endswith(".toml"):
+        return tomllib.loads(text)["customizations"]["installer"]["kickstart"][
+            "contents"
+        ]
+    return text
+
+
+def kickstart_sections(text):
+    """Every %pre and %post section of a kickstart, from its header to its %end."""
+    return re.findall(r"^%(?:pre|post)\b.*?^%end$", text, re.M | re.S)
+
+
+def installer_problems(root=None):
+    """doc_kernel_profile.md D3, D14 and section 4: every kickstart that installs refuses a
+    machine without UEFI or x86-64-v3 in a %pre, and asks shim to enrol the certificate the
+    image ships in a %post, under the hash of a password given to mokutil on standard input."""
+    root = root or ROOT
+    problems, sections = [], {}
+    for relative in INSTALLER_KICKSTARTS:
+        try:
+            sections[relative] = kickstart_sections(kickstart_text(root, relative))
+        except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError) as err:
+            problems.append(f"{relative}: cannot read its kickstart ({err!r})")
+    reference = INSTALLER_KICKSTARTS[0]
+    blocks = {
+        "machine check": (
+            [s for s in sections.get(reference, []) if s.startswith("%pre")],
+            "%pre --erroronfail",
+            INSTALLER_CPU_NEEDS,
+        ),
+        "MOK enrolment request": (
+            [s for s in sections.get(reference, []) if "mokutil --import" in s],
+            "%post --erroronfail",
+            INSTALLER_MOK_NEEDS,
+        ),
+    }
+    for name, (found, header, needs) in blocks.items():
+        if len(found) != 1:
+            problems.append(
+                f"{reference}: {len(found)} sections hold the {name}, one is expected"
+            )
+            continue
+        block = found[0]
+        if block.splitlines()[0] != header:
+            problems.append(
+                f"{reference}: the {name} must open with {header!r}, so that it stops the install"
+            )
+        problems.extend(
+            f"{reference}: the {name} lacks {need!r}"
+            for need in needs
+            if need not in block
+        )
+        for relative in INSTALLER_KICKSTARTS[1:]:
+            if relative in sections and block not in sections[relative]:
+                problems.append(
+                    f"{relative}: lacks the {name} of {reference}, or carries a copy that drifted"
+                )
+    if "--generate-hash=" in "".join(blocks["MOK enrolment request"][0]):
+        problems.append(
+            f"{reference}: the MOK password is passed on a command line; mokutil reads it on stdin"
+        )
+    containerfile = "system/Containerfile"
+    try:
+        shipped = re.search(
+            rf"^COPY (\S+) {re.escape(SECUREBOOT_CERT)}$",
+            read(root / containerfile),
+            re.M,
+        )
+    except OSError as err:
+        return problems + [f"{containerfile}: cannot read ({err})"]
+    if not shipped:
+        problems.append(
+            f"{containerfile}: does not COPY the certificate the installer enrols to {SECUREBOOT_CERT}"
+        )
+        return problems
+    rotation = "a key rotation updates the pin in the same pull request"
+    try:
+        pinned, pinned_path = read(root / SECUREBOOT_PIN).split()
+    except (OSError, ValueError) as err:
+        return problems + [f"{SECUREBOOT_PIN}: cannot read one 'sha256  path' line ({err})"]
+    if pinned_path != shipped.group(1):
+        problems.append(
+            f"{SECUREBOOT_PIN}: pins {pinned_path}, but {containerfile} ships {shipped.group(1)}; {rotation}"
+        )
+        return problems
+    try:
+        actual = hashlib.sha256((root / pinned_path).read_bytes()).hexdigest()
+    except OSError as err:
+        return problems + [f"{pinned_path}: cannot read ({err})"]
+    if actual != pinned:
+        problems.append(
+            f"{pinned_path}: SHA-256 {actual} differs from {pinned} in {SECUREBOOT_PIN}; {rotation}"
+        )
+    return problems
+
+
+@check(
+    "installer",
+    "Every installing kickstart refuses machines without UEFI or x86-64-v3 and requests the MOK enrolment",
+)
+def check_installer():
+    r = Result()
+    for problem in installer_problems():
+        r.fail(problem)
+    return r
 
 
 # --------------------------------------------------------------------------- #
