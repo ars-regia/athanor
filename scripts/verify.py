@@ -1678,6 +1678,42 @@ def check_sysctl():
     return r
 
 
+# A udev rule that sets GROUP= to a group no sysusers.d file declares makes udev log
+# "Unknown group" at every boot and fall back to root (doc_kernel_profile.md section 14,
+# boot ordering). A group the Fedora base declares goes into athanor-base-config's
+# 10-athanor-hw-groups.conf, which also declares it early in boot, before a rule names it.
+UDEV_GROUP = re.compile(r'\bGROUP\s*:?=\s*"([^"]+)"')
+SYSUSERS_GROUP = re.compile(r"^\s*[gu]\s+(\S+)", re.MULTILINE)
+
+
+def udev_group_problems(root=None):
+    """Every GROUP= of a repository udev rule names a group a repository sysusers.d file declares."""
+    root = root or ROOT
+    declared = set()
+    for pattern in ("forge/specs/**/sysusers.d/*.conf", "forge/specs/**/*.sysusers", "system/**/sysusers.d/*.conf"):
+        for path in root.glob(pattern):
+            declared.update(SYSUSERS_GROUP.findall(read(path)))
+    problems = []
+    rules = sorted({p for pattern in ("forge/specs/**/rules.d/*.rules", "system/**/rules.d/*.rules") for p in root.glob(pattern)})
+    for path in rules:
+        relative = path.relative_to(root).as_posix()
+        for number, line in enumerate(read(path).splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            for group in UDEV_GROUP.findall(line):
+                if group not in declared:
+                    problems.append(f"{relative}:{number}: GROUP=\"{group}\" is declared by no sysusers.d file")
+    return problems
+
+
+@check("udev-groups", "Every GROUP= of a udev rule names a group a sysusers.d file declares")
+def check_udev_groups():
+    r = Result()
+    for problem in udev_group_problems():
+        r.fail(problem)
+    return r
+
+
 PAM_CONTAINERFILE = "system/Containerfile"
 NULLOK_GUARD = re.compile(r"^RUN authselect enable-feature without-nullok\b", re.MULTILINE)
 PWQUALITY_MINLEN = "'minlen = 12'"
