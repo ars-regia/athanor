@@ -5,7 +5,7 @@ Release:        5%{?dist}
 Summary:        The Athanor greeter
 License:        GPL-3.0-only
 
-BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gtk4-layer-shell-devel binutils python3 gettext
+BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gtk4-layer-shell-devel binutils python3 gettext sqlite-devel
 Requires:       gtk4 gtk4-layer-shell greetd athanor-calmo cosmic-icon-theme
 
 %description

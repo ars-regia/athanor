@@ -13,19 +13,19 @@ msgstr ""
 msgid "The sign-in service sent a reply of {size} bytes, too large to read"
 msgstr "Il servizio di accesso ha inviato una risposta di {size} byte, troppo grande da leggere"
 
-#: src/auth.rs:317
+#: src/auth.rs:219
 msgid "Checking your credentials…"
 msgstr "Verifica delle credenziali…"
 
-#: src/auth.rs:348
+#: src/auth.rs:250
 msgid "The login service gave an unexpected answer."
 msgstr "Il servizio di accesso ha dato una risposta inattesa."
 
-#: src/auth.rs:355
+#: src/auth.rs:257
 msgid "Too many authentication steps."
 msgstr "Troppi passaggi di autenticazione."
 
-#: src/auth.rs:365
+#: src/auth.rs:270
 msgid "The login service cannot be reached."
 msgstr "Il servizio di accesso non è raggiungibile."
 
@@ -109,57 +109,77 @@ msgstr "Nessun controllo degli aggiornamenti è riuscito negli ultimi 14 giorni"
 msgid "Signed with a key of the policy in force"
 msgstr "Firmata con una chiave della policy in vigore"
 
-#: src/ui.rs:181
+#: src/ui.rs:187 src/ui.rs:776 src/ui.rs:818
+msgid "Other user"
+msgstr "Altro utente"
+
+#: src/ui.rs:253
 #, rust-format
 msgid "Keyboard layout: {layout}"
 msgstr "Disposizione della tastiera: {layout}"
 
-#: src/ui.rs:438
+#: src/ui.rs:565
 msgid "%A %-d %B"
 msgstr "%A %-d %B"
 
-#: src/ui.rs:456
+#: src/ui.rs:599
 msgid "Password"
 msgstr "Password"
 
-#: src/ui.rs:461
+#: src/ui.rs:608 src/ui.rs:613 src/ui.rs:614
+msgid "User name"
+msgstr "Nome utente"
+
+#: src/ui.rs:627 src/ui.rs:630
+msgid "Back to the list"
+msgstr "Torna all'elenco"
+
+#: src/ui.rs:636
+msgid "Sign in"
+msgstr "Accedi"
+
+#: src/ui.rs:639 src/ui.rs:643
+msgid "Cancel"
+msgstr "Annulla"
+
+#: src/ui.rs:770
 #, rust-format
 msgid "Password for {name}"
 msgstr "Password di {name}"
 
-#: src/ui.rs:477
-msgid "Sign in"
-msgstr "Accedi"
+#: src/ui.rs:794
+msgid "Accounts"
+msgstr "Account"
 
-#: src/ui.rs:480 src/ui.rs:484
-msgid "Cancel"
-msgstr "Annulla"
+#: src/ui.rs:954
+msgid "Enter a user name of at most 256 bytes, without control characters."
+msgstr "Inserisci un nome utente di al massimo 256 byte, senza caratteri di controllo."
 
-#: src/ui.rs:600
+#: src/ui.rs:970
 msgid "Signing in…"
 msgstr "Accesso in corso…"
 
-#: src/ui.rs:609
+#: src/ui.rs:985
 msgid "Sign-in was cancelled."
 msgstr "Accesso annullato."
 
-#: src/ui.rs:616
+#: src/ui.rs:992
 #, rust-format
 msgid "Sign-in failed: {reason}"
 msgstr "Accesso non riuscito: {reason}"
 
-#: src/ui.rs:666 src/ui.rs:667
+#: src/ui.rs:1028 src/ui.rs:1029
 msgid "High contrast"
 msgstr "Contrasto elevato"
 
-#: src/ui.rs:687
+#: src/ui.rs:1049
 msgid "Suspend"
 msgstr "Sospendi"
 
-#: src/ui.rs:693
+#: src/ui.rs:1055
 msgid "Restart"
 msgstr "Riavvia"
 
-#: src/ui.rs:699
+#: src/ui.rs:1061
 msgid "Shut down"
 msgstr "Spegni"

@@ -24,3 +24,9 @@ serde_json = { workspace = true }
 zeroize = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
+# NSS (getpwent) and the locale's collation (newlocale, strcoll) for the account list (LP19).
+libc = { workspace = true }
+# lastlog2, read-only, for the order of the account list (LP19, D20).
+rusqlite = { workspace = true }
+# /etc/athanor/greeter.toml, the switch that hides the account list (LP19, D23).
+toml = { workspace = true }
