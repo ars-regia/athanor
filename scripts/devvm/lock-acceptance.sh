@@ -29,9 +29,12 @@
 #   cancel     six polkit requests cancelled while the agent's dialog is open leave no failure
 #              in the tally. Fails until #447 is fixed (polkit-org/polkit#713). It cancels by
 #              stopping pkexec, which makes polkitd cancel the request at the agent; the
-#              dialog has no key for Cancel. Each cancel waits until the helper is waiting for
-#              the password. It refuses to start unless the user's recorded failures are at
-#              least two below faillock.conf's deny=, so it can never lock the account.
+#              dialog has no key for Cancel. Each cancel first checks that pkexec still runs
+#              and a helper instance is alive, after the 2 s of the screenshot. That shows a
+#              helper started and has not exited, not that it is asking for the password: no
+#              state or log line marks that. It refuses to start unless the user's recorded
+#              failures are at least two below faillock.conf's deny=, so it can never lock
+#              the account.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -179,13 +182,15 @@ finished() {
     state=$(in_session systemctl --user show -p SubState --value "$1") && [[ $state == exited || $state == failed ]]
 }
 
-# Whether the prompt is in its PAM conversation: pkexec still runs and a helper instance is
-# active. The helper blocks only while pam_unix waits for the password; a helper whose
-# preauth failed (#144) has already exited.
-in_conversation() {
+# Whether the prompt still has a live helper: pkexec still runs and a polkit-agent-helper@
+# instance has not exited. The unit is Type=oneshot, so it stays `activating` while the
+# helper runs, from before pam_start to its exit. This does not show that the helper is
+# asking for the password, only that it started and has not exited; a helper whose preauth
+# failed (#144) has. The 2 s of the screenshot taken before it narrow the window.
+helper_alive() {
     local pkexec helpers
     pkexec=$(in_session systemctl --user show -p SubState --value "$PROMPT") &&
-        helpers=$(guest_ssh systemctl list-units --no-legend --state=active "'polkit-agent-helper@*'") &&
+        helpers=$(guest_ssh systemctl list-units --no-legend --all --state=activating "'polkit-agent-helper@*'") &&
         [[ $pkexec == running && -n $helpers ]]
 }
 
@@ -254,7 +259,7 @@ stage_cancel() {
         # Cancelling before the helper asks for the password would not exercise #447, and on an
         # image where preauth fails (#144) it would pass without a conversation.
         shot "cancel-$n"
-        in_conversation || fail "prompt $n is not waiting for a password; the helper logged: $(helper_log "$PROMPT_SINCE")"
+        helper_alive || fail "prompt $n has no live helper; the helper logged: $(helper_log "$PROMPT_SINCE")"
         in_session systemctl --user stop "$PROMPT"
         sleep 2
         count_failures

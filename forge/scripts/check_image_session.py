@@ -85,19 +85,25 @@ def path_list(files, key):
 
 def normalised(entry):
     """A path entry without its - and + prefixes, with %t expanded to /run (the runtime
-    directory of a system unit) and with repeated and trailing slashes removed. Any other
-    specifier raises ValueError: this check does not expand it."""
+    directory of a system unit) and with repeated and trailing slashes removed; None for a
+    relative path, which systemd rejects and drops. Any other specifier raises ValueError:
+    this check does not expand it."""
     path = entry.lstrip("-+").replace("%t", "/run")
     if "%" in path:
         raise ValueError(entry)
+    if not path.startswith("/"):
+        return None
     return "/" + "/".join(part for part in path.split("/") if part)
 
 
 def depth_covering(entries, path):
-    """The depth of the deepest entry that is path or one of its parents; -1 when none is."""
+    """The depth of the deepest entry that is path or one of its parents, / being 0; -1 when
+    none is."""
     depths = [-1]
     for entry in entries:
         e = normalised(entry)
+        if e is None:
+            continue
         if e == "/" or path == e or path.startswith(e + "/"):
             depths.append(0 if e == "/" else e.count("/"))
     return max(depths)
@@ -105,9 +111,10 @@ def depth_covering(entries, path):
 
 def helper_problems(root):
     """The helper unit as systemd loads it (/etc over /run over /usr/lib, then drop-ins) must
-    leave /run/faillock writable when it sets ProtectSystem=strict. Of the ReadWritePaths=,
-    ReadOnlyPaths= and InaccessiblePaths= entries covering it, the deepest decides, as in
-    systemd's namespace; at equal depth a read-only or inaccessible entry wins."""
+    leave /run/faillock writable when it sets ProtectSystem=strict. Any InaccessiblePaths=
+    entry covering it fails, whatever its depth: systemd drops every mount below an
+    inaccessible one (namespace.c drop_inaccessible). Of the ReadWritePaths= and
+    ReadOnlyPaths= entries covering it, the deepest decides, and read-only wins a tie."""
     units = [root / d / HELPER_SERVICE for d in SYSTEM_UNITS]
     for d in SYSTEM_UNITS[1:]:
         if is_masked(root / d, HELPER_SERVICE):
@@ -122,17 +129,15 @@ def helper_problems(root):
         return []
     try:
         writable = depth_covering(path_list(files, "ReadWritePaths"), TALLY_DIR)
-        closed = max(
-            depth_covering(path_list(files, key), TALLY_DIR)
-            for key in ("ReadOnlyPaths", "InaccessiblePaths")
-        )
+        read_only = depth_covering(path_list(files, "ReadOnlyPaths"), TALLY_DIR)
+        hidden = depth_covering(path_list(files, "InaccessiblePaths"), TALLY_DIR)
     except ValueError as e:
         message = (
             f"{HELPER_SERVICE} names the path {e} with a specifier other than %t, "
             "which this check does not expand"
         )
         return [message]
-    if writable < 0 or closed >= writable:
+    if writable < 0 or read_only >= writable or hidden >= 0:
         message = (
             f"{HELPER_SERVICE} sets ProtectSystem=strict and leaves {TALLY_DIR} read-only: "
             "pam_faillock fails every polkit prompt once the user has a tally (#144)"

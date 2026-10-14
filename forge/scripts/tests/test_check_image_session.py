@@ -37,6 +37,7 @@ SOCKETS_WANTS = "etc/systemd/system/sockets.target.wants"
 HELPER_UNIT = "usr/lib/systemd/system/polkit-agent-helper@.service"
 HELPER_LIB_DROPINS = "usr/lib/systemd/system/polkit-agent-helper@.service.d"
 HELPER_ETC_DROPINS = "etc/systemd/system/polkit-agent-helper@.service.d"
+HELPER_RUN_DROPINS = "run/systemd/system/polkit-agent-helper@.service.d"
 READ_ONLY_TALLY = "leaves /run/faillock read-only"
 # The sandbox line of polkit 127's own helper unit that matters here.
 HELPER_UNIT_TEXT = "[Service]\nExecStart=/usr/lib/polkit-1/polkit-agent-helper-1\nProtectSystem=strict\n"
@@ -332,6 +333,81 @@ class ImageSession(unittest.TestCase):
             HELPER_UNIT_TEXT.replace("strict", "full"),
         )
         (self.root / HELPER_LIB_DROPINS / "50-athanor-faillock.conf").unlink()
+        self.assertEqual(mod.problems(self.root), [])
+
+    def test_an_etc_helper_unit_replaces_the_run_one(self):
+        (self.root / HELPER_LIB_DROPINS / "50-athanor-faillock.conf").unlink()
+        relaxed = HELPER_UNIT_TEXT.replace("strict", "full")
+        self.write("run/systemd/system/polkit-agent-helper@.service", HELPER_UNIT_TEXT)
+        self.write("etc/systemd/system/polkit-agent-helper@.service", relaxed)
+        self.assertEqual(mod.problems(self.root), [])
+        self.write("run/systemd/system/polkit-agent-helper@.service", relaxed)
+        self.write("etc/systemd/system/polkit-agent-helper@.service", HELPER_UNIT_TEXT)
+        self.assertProblem(READ_ONLY_TALLY)
+
+    def test_a_run_drop_in_counts(self):
+        self.write(
+            f"{HELPER_RUN_DROPINS}/90-x.conf",
+            "[Service]\nReadOnlyPaths=/run/faillock\n",
+        )
+        self.assertProblem(READ_ONLY_TALLY)
+
+    def test_an_etc_drop_in_replaces_the_run_one_of_the_same_name(self):
+        self.write(
+            f"{HELPER_RUN_DROPINS}/90-x.conf",
+            "[Service]\nReadOnlyPaths=/run/faillock\n",
+        )
+        self.write(f"{HELPER_ETC_DROPINS}/90-x.conf", "[Service]\n")
+        self.assertEqual(mod.problems(self.root), [])
+        self.write(f"{HELPER_RUN_DROPINS}/90-x.conf", "[Service]\n")
+        self.write(
+            f"{HELPER_ETC_DROPINS}/90-x.conf",
+            "[Service]\nReadOnlyPaths=/run/faillock\n",
+        )
+        self.assertProblem(READ_ONLY_TALLY)
+
+    def test_an_inaccessible_parent_fails_whatever_its_depth(self):
+        for entry in ("/run", "/"):
+            with self.subTest(entry=entry):
+                self.faillock_dropin(
+                    f"[Service]\nReadWritePaths=/run/faillock\nInaccessiblePaths={entry}\n"
+                )
+                self.assertProblem(READ_ONLY_TALLY)
+
+    def test_a_relative_path_is_dropped(self):
+        self.faillock_dropin("[Service]\nReadWritePaths=run/faillock\n")
+        self.assertProblem(READ_ONLY_TALLY)
+
+    def test_a_sibling_with_a_common_prefix_does_not_cover(self):
+        self.faillock_dropin("[Service]\nReadWritePaths=/run/fail\n")
+        self.assertProblem(READ_ONLY_TALLY)
+
+    def test_an_indented_drop_in_counts(self):
+        self.faillock_dropin("  [Service]\n  ReadWritePaths=/run/faillock\n")
+        self.assertEqual(mod.problems(self.root), [])
+
+    def test_the_root_covers_at_depth_zero(self):
+        self.faillock_dropin("[Service]\nReadWritePaths=/\n")
+        self.assertEqual(mod.problems(self.root), [])
+        self.faillock_dropin("[Service]\nReadWritePaths=/\nReadOnlyPaths=/run\n")
+        self.assertProblem(READ_ONLY_TALLY)
+        self.faillock_dropin("[Service]\nReadWritePaths=/run\nReadOnlyPaths=/\n")
+        self.assertEqual(mod.problems(self.root), [])
+
+    def test_the_deepest_of_several_entries_counts(self):
+        self.faillock_dropin(
+            "[Service]\nReadWritePaths=/run /run/faillock\nReadOnlyPaths=/run\n"
+        )
+        self.assertEqual(mod.problems(self.root), [])
+        self.faillock_dropin(
+            "[Service]\nReadWritePaths=/run/faillock\nReadOnlyPaths=/run /run/faillock\n"
+        )
+        self.assertProblem(READ_ONLY_TALLY)
+
+    def test_an_exec_start_pre_drop_in_does_not_override_exec_start(self):
+        self.write(
+            f"{AGENT_ETC_DROPINS}/60-y.conf", "[Service]\nExecStartPre=/bin/true\n"
+        )
         self.assertEqual(mod.problems(self.root), [])
 
     def test_the_enabled_greeter_daemon_fails(self):
