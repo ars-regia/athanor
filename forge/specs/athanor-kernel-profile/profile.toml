@@ -131,7 +131,8 @@ CONFIG_DRM_SIMPLEDRM = { value = "y", decision = "D17", locked = true }
 "fs.suid_dumpable" = { value = "0", decision = "D47", locked = true }
 "net.core.default_qdisc" = { value = "fq", decision = "section 6", locked = true }
 "kernel.oops_limit" = { value = "100", decision = "D19", locked = true }
-# Sync, remount read-only and reboot; roles may narrow it (section 7: the mesh role sets 0).
+# Sync, remount read-only and reboot; roles may narrow it. Section 7 sets 0 for the mesh role,
+# whose settings arrive with the mesh specification (D27): [roles.mesh] is still empty.
 "kernel.sysrq" = { value = "176", decision = "section 6" }
 
 [base.runtime]

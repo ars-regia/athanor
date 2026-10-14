@@ -16,7 +16,7 @@ profile.toml (docs/architecture/doc_kernel_profile.md), and athanor-profile-chec
 compares the running system with the profile of its role combination. The base kernel
 command line of the image, as a bootc kargs.d file, and the base sysctls, as a sysctl.d
 file, both generated from the same manifest, and the size and compression of the zram
-swap device.
+swap device. Swap on zram is a locked setting of the base profile.
 
 %prep
 # Nothing to unpack: the installed files come from SOURCES.
@@ -45,7 +45,8 @@ install -D -m 0644 %{_sourcedir}/usr/lib/systemd/zram-generator.conf.d/90-athano
 %changelog
 * Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
 - Block P3 of the kernel profile (doc_kernel_profile.md, section 6): size the zram swap
-  device at half of the memory, at most 8 GiB, with zstd, through a zram-generator drop-in
+  device at half of the memory, at most 8 GiB, with zstd, through a zram-generator drop-in;
+  swap on zram is locked, and a later drop-in with zram-size = 0 disables it
 - Add the base sysctls kernel.oops_limit=100 (D19) and kernel.sysrq=176, which roles may
   override
 - athanor-profile-check checks swap on zram, zswap off, transparent huge pages on madvise
