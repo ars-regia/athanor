@@ -218,9 +218,13 @@ RUN systemctl enable tetragon.service systemd-sysext.service && systemd-sysusers
 # (scripts/verify.py shipped forbids enabling it in the sources; this is the image check).
 RUN ! systemctl is-enabled --quiet keylime_agent.service
 
-# systemd-homed stays disabled by 80-athanor-system.preset (athanor-system-config 1.0.0-54 and later, #292);
+# systemd-homed stays disabled by 80-athanor-system.preset (athanor-system-config 1.0.0-53 and later, #292);
 # accounts are classic. scripts/verify.py shipped forbids enabling it in the sources; this is the image check.
-RUN ! systemctl is-enabled --quiet systemd-homed.service systemd-homed-activate.service
+# Each unit must read "disabled": a renamed or missing unit fails the build instead of passing unseen.
+RUN for unit in systemd-homed systemd-homed-activate; do \
+        test "$(systemctl is-enabled "$unit.service")" = disabled \
+            || { echo "$unit.service is not disabled" >&2; exit 1; }; \
+    done
 
 # No account authenticates with an empty password (#152). The base image's "local" authselect
 # profile ships nullok on pam_unix; the feature removes it from every generated stack.
