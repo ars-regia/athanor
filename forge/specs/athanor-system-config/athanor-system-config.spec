@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:58.fc43}
+Release:        %{?autorelease}%{!?autorelease:59.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -21,6 +21,8 @@ Requires: xdg-desktop-portal-athanor
 Requires: usbguard bolt
 # athanor-uki-enroll reads the LUKS2 header, the Secure Boot state and PCR 7.
 Requires: cryptsetup mokutil python3 systemd
+# athanor-flatpak-update runs flatpak against the Flathub remote this package ships.
+Requires: flatpak
 
 %description
 Provides athanor-system-config for Athanor OS.
@@ -71,6 +73,10 @@ done
 %attr(0755,root,root) /usr/bin/athanor-usbguard-hook
 %attr(0755,root,root) /usr/bin/athanor-uki-enroll
 %attr(0755,root,root) /usr/libexec/athanor-greeter-client
+%attr(0755,root,root) /usr/libexec/athanor-flatpak-update
+/usr/lib/systemd/system/athanor-flatpak-update.service
+/usr/lib/systemd/system/athanor-flatpak-update.timer
+/usr/share/flatpak/remotes.d/flathub.flatpakrepo
 %dir /usr/lib/systemd/system/greetd.service.d
 /usr/lib/systemd/system/greetd.service.d/10-athanor-wantedby.conf
 /usr/lib/systemd/system-preset/80-athanor-display-manager.preset
@@ -85,6 +91,12 @@ done
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-59
+- Ships the Flathub system remote (flathub.flatpakrepo with its GPG key embedded, signature
+  verification on) and athanor-flatpak-update.timer, a daily system oneshot that updates the
+  system Flatpak applications and skips a metered connection (doc_software.md, decision 6
+  and SW15, as amended on 2026-10-14). The preset enables the timer.
+
 * Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-58
 - athanor-greeter-client's system bus filter lets one more method through, State of
   os.athanor.Update1 on /os/athanor/Update1, for the greeter's seal (doc_shell.md, SH12,

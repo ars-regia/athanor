@@ -1,0 +1,11 @@
+[Unit]
+Description=Update the system Flatpak applications
+Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_software.md
+
+[Timer]
+OnCalendar=daily
+Persistent=yes
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target

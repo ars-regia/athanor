@@ -1,0 +1,18 @@
+[Unit]
+Description=Update the system Flatpak applications
+Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_software.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/athanor-flatpak-update
+# doc_software.md, decision 6 (i) and SW15. The system installation only; the unit reaches
+# the network (Flathub) and the system bus (NetworkManager's Metered), nothing else.
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/flatpak /var/tmp
+CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_FSETID CAP_SETUID CAP_SETGID

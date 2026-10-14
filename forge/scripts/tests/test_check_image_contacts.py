@@ -121,5 +121,53 @@ class ImageContacts(unittest.TestCase):
         self.assertEqual(len(self.run_check()), 1)
 
 
+SHIPPED = ROOT / "forge/specs/athanor-system-config/SOURCES/usr/share/flatpak/remotes.d/flathub.flatpakrepo"
+REMOTE = "usr/share/flatpak/remotes.d/flathub.flatpakrepo"
+
+
+class FlathubRemote(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self.tmp.name)
+        (self.root / REMOTE).parent.mkdir(parents=True)
+        self.write(SHIPPED.read_text())
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write(self, text):
+        (self.root / REMOTE).write_text(text)
+
+    def problems(self, enabled=("athanor-flatpak-update.timer",)):
+        return mod.remote_problems(CONTACTS, self.root, set(enabled))
+
+    def test_the_shipped_remote_and_an_enabled_timer_pass(self):
+        self.assertEqual(self.problems(), [])
+
+    def test_a_timer_that_is_not_enabled_fails(self):
+        self.assertEqual(len(self.problems(enabled=())), 1)
+
+    def test_a_missing_remote_fails(self):
+        (self.root / REMOTE).unlink()
+        self.assertEqual(len(self.problems()), 1)
+
+    def test_another_key_fails(self):
+        text = SHIPPED.read_text().replace("GPGKey=mQINBF", "GPGKey=mQINBG")
+        self.write(text)
+        self.assertEqual(len(self.problems()), 1)
+
+    def test_no_key_fails(self):
+        self.write("\n".join(l for l in SHIPPED.read_text().splitlines() if not l.startswith("GPGKey=")))
+        self.assertEqual(len(self.problems()), 1)
+
+    def test_verification_off_fails(self):
+        self.write(SHIPPED.read_text() + "NoGpgVerify=true\n")
+        self.assertEqual(len(self.problems()), 1)
+
+    def test_another_url_fails(self):
+        self.write(SHIPPED.read_text().replace("Url=https://dl.flathub.org/", "Url=https://example.org/"))
+        self.assertEqual(len(self.problems()), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

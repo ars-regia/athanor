@@ -14,13 +14,20 @@ symlink to /dev/null or an empty file. Two defects fail:
 A contact that names image_file and image_contains must have that Key=value as the last active
 line of the file, and no other resolved.conf.d drop-in may set the key (the resolver mode,
 DNSOverTLS=opportunistic, ADR-0103 D11).
+A contact that names remote_file, remote_url and remote_fingerprint needs that .flatpakrepo in the
+image to carry the Url, a GPGKey whose primary key has the fingerprint, and no NoGpgVerify=true
+(the Flathub remote, doc_software.md decision 6). A contact with must_enable = true needs its unit
+enabled.
 The check sees timers and the listed units only. It does not follow Wants=, Requires= or
 Upholds= written inside another unit, nor sockets, paths or D-Bus activation, so a beacon pulled
 in that way is not seen. scripts/verify.py contacts makes the same comparison against the presets
 of the checkout.
 """
 
+import base64
+import hashlib
 import pathlib
+import re
 import sys
 import tomllib
 
@@ -91,13 +98,55 @@ def config_problems(contacts, root):
     return found
 
 
+def key_fingerprint(b64):
+    """Fingerprint of the primary key of an OpenPGP public key given as base64 (a flatpakrepo GPGKey=),
+    or None when the first packet is not a version 4 public key with a two-byte length."""
+    data = base64.b64decode(b64, validate=True)
+    if len(data) < 3 or data[0] != 0x99:
+        return None
+    size = int.from_bytes(data[1:3], "big")
+    body = data[3:3 + size]
+    if len(body) != size or body[0] != 4:
+        return None
+    return hashlib.sha1(b"\x99" + data[1:3] + body).hexdigest().upper()
+
+
+def remote_problems(contacts, root, enabled):
+    """Contacts that name a .flatpakrepo (remote_file, remote_url, remote_fingerprint) and contacts
+    with must_enable = true."""
+    found = []
+    for c in contacts.get("contact", []):
+        if c.get("must_enable") and c.get("unit") not in enabled:
+            found.append(f"{c['id']}: {c.get('unit')} is not enabled in the image")
+        if not c.get("remote_file"):
+            continue
+        try:
+            text = (root / c["remote_file"]).read_text()
+        except OSError as err:
+            found.append(f"{c['id']}: cannot read {c['remote_file']} in the image ({err})")
+            continue
+        keys = dict(re.findall(r"^(\w+)=(.*)$", text, re.M))
+        if keys.get("Url") != c["remote_url"]:
+            found.append(f"{c['id']}: {c['remote_file']} has Url={keys.get('Url')}, not {c['remote_url']}")
+        if keys.get("NoGpgVerify", "").lower() == "true":
+            found.append(f"{c['id']}: {c['remote_file']} turns signature verification off")
+        try:
+            got = key_fingerprint(keys.get("GPGKey", ""))
+        except ValueError:
+            got = None
+        if got != c["remote_fingerprint"].replace(" ", ""):
+            found.append(f"{c['id']}: the GPGKey of {c['remote_file']} has fingerprint {got}, not {c['remote_fingerprint']}")
+    return found
+
+
 def main(argv):
     if len(argv) not in (2, 3):
         print(__doc__, file=sys.stderr)
         return 2
     contacts = tomllib.loads(pathlib.Path(argv[1]).read_text())
     root = pathlib.Path(argv[2] if len(argv) == 3 else "/")
-    found = problems(contacts, enabled_units(root)) + config_problems(contacts, root)
+    enabled = enabled_units(root)
+    found = problems(contacts, enabled) + config_problems(contacts, root) + remote_problems(contacts, root, enabled)
     for line in found:
         print(line, file=sys.stderr)
     return 1 if found else 0
