@@ -1,27 +1,28 @@
 #!/usr/bin/env bash
 # =============================================================================
 # ATHANOR FORGE - fetch_sources.sh
-# Scarica le sorgenti remote dichiarate in una spec (Source*/Patch* con URL)
-# in <sourcedir> e ne verifica il checksum contro SOURCES/sources.sha256.
+# Downloads the remote sources a spec declares (Source*/Patch* with a URL) into
+# <sourcedir> and verifies their checksums against SOURCES/sources.sha256.
 #
-# Sostituisce `spectool -g -R`: non esiste in nixpkgs e non verifica nulla.
-# Dipendenze: rpmspec, curl, sha256sum (tutte nel builder).
+# Replaces `spectool -g -R`: it is not in nixpkgs and it verifies nothing.
+# Dependencies: rpmspec, curl, sha256sum (all in the builder).
 #
-# Uso: fetch_sources.sh [--pin] <spec-dir> <sourcedir>
+# Usage: fetch_sources.sh [--pin] <spec-dir> <sourcedir>
 #
 # --pin downloads every remote source again and rewrites the manifest from what it
 # downloaded: the spec updater runs it after it moves Version, so the new hashes come
 # from the same URL and file-name rules the build verifies against.
 #
-# Convenzioni:
-#   - URL con frammento `#/nome.tar.gz` (stile Fedora): il file locale prende
-#     quel nome; altrimenti il basename dell'URL.
-#   - Le sorgenti senza URL sono file tracciati in git, già copiati in
-#     <sourcedir> dal chiamante: non vengono toccate.
-#   - Manifest: righe `sha256  nomefile`, il formato di `sha256sum`.
+# Conventions:
+#   - A URL with a fragment `#/name.tar.gz` (Fedora style): the local file takes
+#     that name; otherwise the basename of the URL.
+#   - Sources without a URL are files tracked in git, already copied into
+#     <sourcedir> by the caller: they are not touched.
+#   - Manifest: lines `sha256  filename`, the format of `sha256sum`.
 #
-# Esce con errore se un URL non è scaricabile, se un file manca nel manifest
-# o se il checksum non corrisponde. Nessun fallimento è silenzioso.
+# Exits with an error if rpmspec cannot parse the spec, if a URL cannot be
+# downloaded, if a file is missing from the manifest or if a checksum does not
+# match. No failure is silent.
 # =============================================================================
 set -euo pipefail
 
@@ -30,22 +31,26 @@ if [[ ${1:-} == --pin ]]; then
   pin=true
   shift
 fi
-SPEC_DIR="${1:?uso: fetch_sources.sh [--pin] <spec-dir> <sourcedir>}"
-SOURCE_DIR="${2:?uso: fetch_sources.sh [--pin] <spec-dir> <sourcedir>}"
+SPEC_DIR="${1:?usage: fetch_sources.sh [--pin] <spec-dir> <sourcedir>}"
+SOURCE_DIR="${2:?usage: fetch_sources.sh [--pin] <spec-dir> <sourcedir>}"
 MANIFEST="$SPEC_DIR/SOURCES/sources.sha256"
 
 spec=$(find "$SPEC_DIR" -maxdepth 1 -name '*.spec' | head -n 1)
 if [[ -z "$spec" ]]; then
-  echo "fetch_sources: nessuna .spec in $SPEC_DIR" >&2
+  echo "fetch_sources: no .spec in $SPEC_DIR" >&2
   exit 1
 fi
 mkdir -p "$SOURCE_DIR"
 
-mapfile -t remote < <(rpmspec -P "$spec" \
-  | sed -nE 's/^(Source|Patch)[0-9]*:[[:space:]]*((https?|ftp):\/\/[^[:space:]]+).*/\2/p')
+# Not `mapfile < <(rpmspec ...)`: a process substitution hides rpmspec's exit status.
+if ! expanded=$(rpmspec -P "$spec"); then
+  echo "fetch_sources: rpmspec cannot parse $(basename "$spec")" >&2
+  exit 1
+fi
+mapfile -t remote < <(sed -nE 's/^(Source|Patch)[0-9]*:[[:space:]]*((https?|ftp):\/\/[^[:space:]]+).*/\2/p' <<<"$expanded")
 
 if [[ ${#remote[@]} -eq 0 ]]; then
-  echo "fetch_sources: nessuna sorgente remota in $(basename "$spec")"
+  echo "fetch_sources: no remote source in $(basename "$spec")"
   exit 0
 fi
 if [[ $pin == true ]]; then
@@ -53,7 +58,7 @@ if [[ $pin == true ]]; then
   pinned=$(mktemp)
   trap 'rm -f "$pinned"' EXIT
 elif [[ ! -f "$MANIFEST" ]]; then
-  echo "fetch_sources: $(basename "$spec") dichiara sorgenti remote ma manca $MANIFEST" >&2
+  echo "fetch_sources: $(basename "$spec") declares remote sources but the manifest is missing: $MANIFEST" >&2
   exit 1
 fi
 
@@ -64,15 +69,15 @@ for entry in "${remote[@]}"; do
   else
     file=$(basename "$url")
   fi
-  # Il nome viene da un frammento libero della spec: deve restare un singolo
-  # componente di percorso dentro <sourcedir>, mai "..", mai un percorso.
+  # The name comes from a free fragment of the spec: it must stay a single path
+  # component inside <sourcedir>, never "..", never a path.
   if [[ -z "$file" || "$file" == */* || "$file" == .* ]]; then
-    echo "fetch_sources: nome file non valido derivato da $entry: '$file'" >&2
+    echo "fetch_sources: invalid file name derived from $entry: '$file'" >&2
     exit 1
   fi
 
   if [[ $pin == true ]]; then
-    echo "fetch_sources: scarico $file da $url"
+    echo "fetch_sources: downloading $file from $url"
     curl -fsSL --retry 3 --retry-delay 5 -o "$SOURCE_DIR/$file" "$url"
     (cd "$SOURCE_DIR" && sha256sum -- "$file") >> "$pinned"
     continue
@@ -80,25 +85,25 @@ for entry in "${remote[@]}"; do
 
   expected=$(awk -v f="$file" '$2 == f { print $1 }' "$MANIFEST")
   if [[ -z "$expected" ]]; then
-    echo "fetch_sources: $file non è nel manifest $MANIFEST" >&2
+    echo "fetch_sources: $file is not in the manifest $MANIFEST" >&2
     exit 1
   fi
 
   if [[ ! -f "$SOURCE_DIR/$file" ]]; then
-    echo "fetch_sources: scarico $file da $url"
+    echo "fetch_sources: downloading $file from $url"
     curl -fsSL --retry 3 --retry-delay 5 -o "$SOURCE_DIR/$file" "$url"
   fi
 
   if ! echo "$expected  $SOURCE_DIR/$file" | sha256sum -c --quiet -; then
-    echo "fetch_sources: checksum errato per $file (atteso $expected)" >&2
+    echo "fetch_sources: checksum mismatch for $file (expected $expected)" >&2
     exit 1
   fi
-  echo "fetch_sources: $file verificato"
+  echo "fetch_sources: $file verified"
 done
 
 if [[ $pin == true ]]; then
   mv "$pinned" "$MANIFEST"
   chmod 644 "$MANIFEST"
   trap - EXIT
-  echo "fetch_sources: $MANIFEST riscritto"
+  echo "fetch_sources: $MANIFEST rewritten"
 fi
