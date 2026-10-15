@@ -31,7 +31,7 @@ def args(argv):
     w = sub.choices["write"]
     v = w.add_mutually_exclusive_group(required=True)
     v.add_argument("--verdict", choices=("pass", "fail"))
-    v.add_argument("--verdict-json", type=pathlib.Path)
+    v.add_argument("--verdict-json", type=pathlib.Path, nargs="+")
     w.add_argument("--run-url", required=True)
     w.add_argument("--out", required=True, type=pathlib.Path)
     sub.choices["check"].add_argument("--dir", required=True, type=pathlib.Path)
@@ -41,9 +41,10 @@ def args(argv):
     return a
 
 
-def verdict_of(path):
+def verdict_of(paths):
+    """pass only when every verdict file says pass; an unreadable one is a fail."""
     try:
-        return "pass" if json.loads(path.read_text()).get("pass") is True else "fail"
+        return "pass" if all(json.loads(p.read_text()).get("pass") is True for p in paths) else "fail"
     except (OSError, ValueError, AttributeError):
         return "fail"
 

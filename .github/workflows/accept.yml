@@ -99,18 +99,38 @@ jobs:
           MEMORY_MIB: "6144"
         run: bash forge/test/iso/run_iso_test.sh "${ISO_PATH}" ./iso-test
 
-      # These two run after a failure as well, because a run that broke halfway is
+      # The same ISO again on firmware with Secure Boot enforced (#252, #145): the Athanor
+      # certificate reaches MokList through the installer's request and MokManager, and the
+      # verdict passes only when the installed system reports Secure Boot enabled and
+      # enforced. After the first case, never beside it: one VM at a time on this runner.
+      - name: 🔒 Install again with Secure Boot enforced
+        env:
+          SECURE_BOOT: "1"
+          TIMEOUT: "1500"
+          VCPUS: "4"
+          MEMORY_MIB: "6144"
+        run: bash forge/test/iso/run_iso_test.sh "${ISO_PATH}" ./iso-test-sb
+
+      # These run after a failure as well, because a run that broke halfway is
       # exactly when its screenshots and console are worth having. They are conditioned
       # on the directory rather than made unconditional: a job that failed before the VM
       # ever started has nothing to convert or report, and a second error about a missing
       # file only buries the first one.
       - name: 🖼️ Convert the screenshots
-        if: always() && hashFiles('iso-test/*.ppm') != ''
-        run: python3 forge/test/iso/screenshots.py ./iso-test
+        if: always() && (hashFiles('iso-test/*.ppm') != '' || hashFiles('iso-test-sb/*.ppm') != '')
+        run: |
+          set -euo pipefail
+          for dir in iso-test iso-test-sb; do
+            if compgen -G "${dir}/*.ppm" > /dev/null; then python3 forge/test/iso/screenshots.py "./${dir}"; fi
+          done
 
       - name: 📋 Report
-        if: always() && hashFiles('iso-test/verdict.md') != ''
-        run: cat ./iso-test/verdict.md >> "${GITHUB_STEP_SUMMARY}"
+        if: always() && (hashFiles('iso-test/verdict.md') != '' || hashFiles('iso-test-sb/verdict.md') != '')
+        run: |
+          set -euo pipefail
+          for dir in iso-test iso-test-sb; do
+            if [[ -f ${dir}/verdict.md ]]; then echo "### ${dir}"; cat "${dir}/verdict.md"; fi
+          done >> "${GITHUB_STEP_SUMMARY}"
 
       - name: 🧾 Write the iso-acceptance evidence (UD4)
         # Pass and fail both leave evidence: promote.sh refuses a fail, and a missing file
@@ -118,7 +138,7 @@ jobs:
         if: always() && hashFiles('target/default-digest') != ''
         run: >-
           python3 -B scripts/ci/evidence.py write --gate iso-acceptance --image athanor-system
-          --digest "$(<target/default-digest)" --run-id "${BUILD_RUN_ID}" --verdict-json iso-test/verdict.json
+          --digest "$(<target/default-digest)" --run-id "${BUILD_RUN_ID}" --verdict-json iso-test/verdict.json iso-test-sb/verdict.json
           --run-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --out evidence
 
       - name: 📎 Hand the evidence to the promotion
@@ -139,6 +159,11 @@ jobs:
             iso-test/phases.txt
             iso-test/verdict.md
             iso-test/memory.json
+            iso-test-sb/*.png
+            iso-test-sb/serial.log
+            iso-test-sb/phases.txt
+            iso-test-sb/verdict.md
+            iso-test-sb/memory.json
           # A job that failed before the VM started has nothing to upload, and the empty
           # upload should not be a second error on top of the real one.
           if-no-files-found: ignore

@@ -90,6 +90,15 @@ class Evidence(unittest.TestCase):
         self.write("--verdict-json", str(verdict))
         self.assertIn("verdict is fail", self.check().stderr)
 
+    def test_every_verdict_json_must_pass(self):
+        good, bad = self.dir / "good.json", self.dir / "bad.json"
+        good.write_text(json.dumps({"pass": True}))
+        bad.write_text(json.dumps({"pass": False}))
+        self.write("--verdict-json", str(good), str(good))
+        self.assertEqual(self.check().returncode, 0)
+        self.write("--verdict-json", str(good), str(bad))
+        self.assertIn("verdict is fail", self.check().stderr)
+
     def test_bad_arguments_are_refused_at_write(self):
         for kwargs in ({"gate": "hardware"}, {"digest": "sha256:abc"}, {"run_id": "12a"}, {"run_id": "\u00b2"}, {"image": "../x"}):
             with self.subTest(**kwargs):
