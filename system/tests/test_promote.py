@@ -412,6 +412,18 @@ class Promote(Tool):
         self.assertIn("i/o timeout", r.stderr)
         self.assertEqual([dest for _, dest in copies if dest.startswith(nvidia)], [])
 
+    def test_a_promoted_tag_that_cannot_be_read_during_the_apply_is_refused(self):
+        # promoted-<run_id> is immutable: a registry error read as "absent" would copy over it.
+        self.published()
+        fx = json.loads((self.dir / "registry.json").read_text())
+        nvidia = f"{REG}/athanor-system-nvidia"
+        fx["errors_on_copy"] = {f"{REG}/athanor-system:stable": [f"{nvidia}:promoted-412"]}
+        self.registry(fx)
+        r, copies = self.promote("--hardware-override", "athanor-system-nvidia")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("i/o timeout", r.stderr)
+        self.assertEqual([dest for _, dest in copies if dest.startswith(nvidia)], [])
+
     def test_a_package_set_changed_after_the_plan_is_refused_at_apply(self):
         self.published()
         r, copies = self.promote(
@@ -609,9 +621,20 @@ class Promote(Tool):
 
     def test_stable_is_read_back(self):
         self.published(moves=False)
+        # promoted-412 already at the digest: the copy that does not land is :stable's.
+        fx = json.loads((self.dir / "registry.json").read_text())
+        fx["tags"][f"{REG}/athanor-system:promoted-412"] = digest(1)
+        self.registry(fx)
         r, _ = self.promote()
         self.assertEqual(r.returncode, 1)
-        self.assertIn("stable points at", r.stderr)
+        self.assertIn("athanor-system:stable points at", r.stderr)
+
+    def test_promoted_is_read_back_before_stable_moves(self):
+        self.published(moves=False)
+        r, copies = self.promote()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("athanor-system:promoted-412 points at nothing", r.stderr)
+        self.assertEqual([dest for _, dest in copies if not dest.endswith(":promoted-412")], [])
 
     def test_the_apply_needs_the_plan_it_signed(self):
         self.published()

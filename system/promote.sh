@@ -42,10 +42,14 @@ for name in "${promote[@]}"; do
     [[ $stable == "${previous[$name]:-}" ]] ||
         die "$repository:stable moved to ${stable:-nothing} since the record named ${previous[$name]:-no stable}: plan again"
     # The immutable tag first: a partial apply that rerun finds it at the same digest and goes on.
+    # Assigned first: a substitution inside [[ ]] would not stop the script when it fails.
     check_promoted "$repository" "$digest"
-    if [[ -z $(tag_of "$repository" "promoted-$run") ]]; then
+    at=$(tag_of "$repository" "promoted-$run")
+    if [[ -z $at ]]; then
         bash "$retry" skopeo copy --preserve-digests "docker://$repository@$digest" "docker://$repository:promoted-$run"
+        at=$(tag_of "$repository" "promoted-$run")
     fi
+    [[ $at == "$digest" ]] || die "$repository:promoted-$run points at ${at:-nothing}, not the evidence digest $digest"
     if [[ -n ${previous[$name]:-} ]]; then
         bash "$retry" skopeo copy --preserve-digests "docker://$repository@${previous[$name]}" "docker://$repository:stable-previous"
     fi
@@ -53,7 +57,5 @@ for name in "${promote[@]}"; do
     bash "$retry" skopeo copy --preserve-digests "docker://$repository@$digest" "docker://$repository:stable"
     now=$(skopeo inspect --format '{{.Digest}}' "docker://$repository:stable")
     [[ $now == "$digest" ]] || die "$repository:stable points at $now, not the evidence digest $digest"
-    at=$(tag_of "$repository" "promoted-$run")
-    [[ $at == "$digest" ]] || die "$repository:promoted-$run points at $at, not the evidence digest $digest"
     echo "stable -> $repository@$digest"
 done
