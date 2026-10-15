@@ -49,6 +49,11 @@ Revision 4 is approved with three placements, which the maintainer decided on 20
 - PB4, not PB3, covers the verification of the rig build image (PL12): nothing signs the image
   before PB4, which signs it at the workflow that publishes it and has `rig.sh` verify it,
   and its gate reads a `pr.yml` run. PB3's gate keeps to the hops a release run consumes.
+  The gate holds once the first pin of the build image has merged: no pin exists on `iso-v0`
+  yet. PB12 moves `rig.sh`'s expected identity with the publisher and re-bumps the pin in the
+  same step.
+- The shell rig image `athanor-shell-rig`, which `rig.sh` also pulls, is published by hand
+  with no workflow: a named exception in PL12, PL19 and PB4, not yet a verified hop (#505).
 - These consequences follow from the three decisions or from the review of this revision,
   not from separate decisions of the maintainer: the corrected `bot-merge.yml` rationale,
   the added scope of PB12, the verification gate of the rig image and the wording of
