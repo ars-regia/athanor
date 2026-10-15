@@ -5,14 +5,18 @@
 #   - the system images (athanor-system*) keep what a machine can still use
 #     (docs/architecture/doc_update_trust.md, UT10): every image tagged latest, stable or
 #     stable-previous, every image pushed in the last RETENTION_DAYS (each was `latest` when
-#     pushed), every image promoted in that time (tag stable-<YYYYMMDD>, system/promote.sh),
-#     and whatever signs a kept image: the tags sha256-<hex>, sha256-<hex>.sig, .att and
+#     pushed), every image ever promoted (tag stable-<YYYYMMDD>, system/promote.sh), which is
+#     never deleted (doc_update_delivery.md UD8), and whatever signs a kept image: the tags sha256-<hex>, sha256-<hex>.sig, .att and
 #     .sbom, and the untagged members of the cosign 3 index at sha256-<hex>. cosign 3 and
 #     containers/image write the signatures of one digest to two different tags, and a
 #     signature is never deleted while its digest is kept. Ninety days is an interim number;
 #   - athanor-nvidia-rpms, the mirror the NVIDIA locks index, is never pruned;
 #   - every other package keeps its two newest tagged versions and every version tagged
 #     latest, main or stable; the other tagged versions and the untagged ones are deleted.
+#     athanor-iso also keeps the ISO of every promoted run, athanor-iso:<run_id> (UD8): the
+#     run ids an athanor-system image tagged stable, stable-previous or stable-<YYYYMMDD>
+#     carries. When that set cannot be read, or misses the run of athanor-iso:stable, the
+#     janitor stops before it deletes any ISO.
 # Usage: clean_ghcr.sh OWNER. Needs gh with read:packages and delete:packages, and for the
 # system images skopeo logged in to the registry.
 set -euo pipefail
@@ -40,10 +44,9 @@ delete() { # delete PACKAGE API: version ids on stdin
 }
 
 prune_system_image() { # prune_system_image PACKAGE API VERSIONS
-  local package=$1 api=$2 versions=$3 cutoff cutoff_day digest hex member
+  local package=$1 api=$2 versions=$3 cutoff digest hex member
   local -A live=()
   cutoff=$((NOW - RETENTION_DAYS * 86400))
-  cutoff_day=$(date -u -d "@$cutoff" +%Y%m%d)
   while IFS= read -r digest; do
     [[ -n $digest ]] || continue
     live[$digest]=1
@@ -54,17 +57,29 @@ prune_system_image() { # prune_system_image PACKAGE API VERSIONS
       while IFS= read -r member; do [[ -z $member ]] || live[$member]=1; done < <(
         skopeo inspect --raw "docker://${REGISTRY_HOST}/${OWNER}/${package}:sha256-${hex}" | jq -r '.manifests[]?.digest')
     fi
-  done < <(jq -r --argjson cutoff "$cutoff" --arg day "$cutoff_day" '
+  done < <(jq -r --argjson cutoff "$cutoff" '
     .[]
     | select(.metadata.container.tags | any(startswith("sha256-") | not))
-    | select((.metadata.container.tags | any(test("^(latest|stable|stable-previous)$")))
-          or ((.created_at | fromdateiso8601) >= $cutoff)
-          or (.metadata.container.tags | any(capture("^stable-(?<day>[0-9]{8})$") | .day >= $day)))
+    | select((.metadata.container.tags | any(test("^(latest|stable|stable-previous|stable-[0-9]{8})$")))
+          or ((.created_at | fromdateiso8601) >= $cutoff))
     | .name' <<< "$versions")
   echo "${package}: ${#live[@]} manifests reachable from a kept image"
   while read -r id digest; do
     [[ -n ${live[$digest]:-} ]] || echo "$id"
   done < <(jq -r '.[] | "\(.id) \(.name)"' <<< "$versions") | delete "$package" "$api"
+}
+
+promoted_runs() { # promoted_runs ISO_VERSIONS -> JSON array of the run ids ever promoted
+  local runs
+  # Assigned first, so a failed read stops the janitor instead of keeping no ISO.
+  runs=$(gh api --paginate "${PACKAGES_API}/container/athanor-system/versions?per_page=100" | jq -sc 'add // []
+    | [.[].metadata.container.tags | select(any(test("^(stable|stable-previous|stable-[0-9]{8})$"))) | .[]
+       | select(test("^[0-9]+$"))] | unique')
+  jq -e --argjson runs "$runs" 'all(.[].metadata.container.tags | select(index("stable")); any(.[]; IN($runs[])))' <<< "$1" > /dev/null || {
+    echo "athanor-iso: the ISO tagged stable has no run id that a promoted athanor-system image carries; the promoted runs are unknown, no ISO deleted" >&2
+    exit 1
+  }
+  echo "$runs"
 }
 
 packages=$(gh api --paginate "${PACKAGES_API}?package_type=container" | jq -rs 'add // [] | .[].name')
@@ -84,10 +99,12 @@ while IFS= read -r package; do
       prune_system_image "$package" "$api" "$versions"
       continue ;;
   esac
-  jq -r '
+  promoted='[]'
+  if [[ $package == athanor-iso ]]; then promoted=$(promoted_runs "$versions"); fi
+  jq -r --argjson promoted "$promoted" '
     ([.[] | select(.metadata.container.tags | length > 0)] | sort_by(.created_at) | reverse | .[:2] | map(.id)) as $newest
     | .[]
     | select((.id as $id | $newest | index($id)) | not)
-    | select(.metadata.container.tags | any(test("^(latest|main|stable)$")) | not)
+    | select(.metadata.container.tags | any(test("^(latest|main|stable)$") or IN($promoted[])) | not)
     | .id' <<< "$versions" | delete "$package" "$api"
 done <<< "$packages"

@@ -84,15 +84,50 @@ class SystemImages(Tool):
         versions = [image(1, ["100", "stable"], OLD), *referrers(10, 1), image(4, ["80"], OLD), *referrers(40, 4)]
         self.assertEqual(self.prune(versions, {**self.index(1, 12), **self.index(4, 42)}), [4, 40, 41, 42])
 
-    def test_ninety_days_of_pushes_and_of_promotions_stay(self):
+    def test_ninety_days_of_pushes_stay_and_promotions_stay_forever(self):
+        """UD8: a digest ever promoted (stable-<YYYYMMDD>) is never deleted, however old."""
         versions = [image(5, ["105"], RECENT), *referrers(50, 5, RECENT),
                     image(6, ["70", "stable-20260801"], OLD), *referrers(60, 6),
-                    image(7, ["60", "stable-20260501"], OLD)]
-        self.assertEqual(self.prune(versions, {**self.index(5, 52), **self.index(6, 62)}), [7])
+                    image(7, ["60", "stable-20250501"], OLD), image(8, ["50"], OLD)]
+        self.assertEqual(self.prune(versions, {**self.index(5, 52), **self.index(6, 62)}), [8])
 
     def test_an_untagged_manifest_no_kept_index_lists_is_deleted(self):
         versions = [image(1, ["100", "stable"], OLD), *referrers(10, 1), image(99, [], RECENT)]
         self.assertEqual(self.prune(versions, self.index(1, 12)), [99])
+
+
+PROMOTED_SYSTEM = [image(1, ["100", "stable", "stable-20260914"], RECENT), image(2, ["90", "stable-previous", "stable-20260801"], OLD),
+                   image(3, ["80", "stable-20250501"], OLD), image(4, ["70"], OLD), image(5, ["released-3-101", "101"], RECENT)]
+
+
+class Isos(Tool):
+    """UD8: athanor-iso keeps the ISO of every promoted run, the runs read from athanor-system."""
+
+    ISOS = [version(11, ["80"], 1), version(12, ["90"], 2), version(13, ["100", "stable"], 3), version(14, ["70"], 0),
+            version(15, ["101"], 4), version(16, ["102"], 5), version(17, ["103", "latest"], 6), version(18, [], 7)]
+
+    def prune(self, isos, system=PROMOTED_SYSTEM):
+        packages = {"athanor-iso": isos} if system is None else {"athanor-iso": isos, "athanor-system": system}
+        self.registry({"user_packages": ["athanor-iso"], "packages": packages})
+        r = subprocess.run(["bash", str(JANITOR), "hr-mes"], capture_output=True, text=True, env=self.env)
+        calls = [json.loads(line) for line in (self.dir / "calls.log").read_text().splitlines()]
+        return r, sorted(int(c[-1].rsplit("/", 1)[1]) for c in calls if "DELETE" in c)
+
+    def test_no_promoted_iso_is_among_the_deletions(self):
+        r, deleted = self.prune(self.ISOS)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(deleted, [14, 15, 18])  # never promoted, and not among the two newest or untagged
+
+    def test_an_unreadable_promoted_set_deletes_no_iso(self):
+        r, deleted = self.prune(self.ISOS, system=None)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(deleted, [])
+
+    def test_a_stable_iso_of_no_promoted_run_deletes_no_iso(self):
+        r, deleted = self.prune(self.ISOS, system=[image(1, ["100", "latest"], RECENT)])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("the promoted runs are unknown, no ISO deleted", r.stderr)
+        self.assertEqual(deleted, [])
 
 
 if __name__ == "__main__":
