@@ -45,7 +45,7 @@ zones = { public = ["dhcpv6-client"] } # forge/specs/athanor-base-config/SOURCES
 # thresholds the update acceptance has always used (5.5, 6.0).
 "athanor-backup-hourly.service" = 2.7
 "athanor-flatpak-triggers.service" = 1.6
-"athanor-flatpak-update.service" = 6.9 # measured 6.6, the worst of these; hardening: #478
+"athanor-flatpak-update.service" = 3.5
 "athanor-nix-gc.service" = 6.0
 "athanor-nix-relabel.service" = 7.2
 "athanor-recovery-notice.service" = 1.9

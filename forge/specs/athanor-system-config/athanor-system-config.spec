@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:62.fc43}
+Release:        %{?autorelease}%{!?autorelease:63.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -102,6 +102,12 @@ done
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-63
+- Hardens athanor-flatpak-update.service from an exposure of 6.6 to 3.2 (#478): address
+  families, a system call allow-list that fails with EPERM, private devices, and the kernel,
+  clock, hostname and /proc protections. It still runs as root, reaches the network and
+  writes /var/lib/flatpak.
+
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-62
 - Ships the GSettings schema org.athanor.desktop.appearance with the two keys GNOME has no
   key for, accent-mode (fixed or wallpaper) and accent-computed (doc_visual_language.md,
