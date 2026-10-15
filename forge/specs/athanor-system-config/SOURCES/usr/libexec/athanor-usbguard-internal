@@ -196,6 +196,18 @@ identity() {
     echo "$name $vid:$pid${serial:+ $serial}"
 }
 
+# serial_field DEVICE: prints the serial a pending line records for the device, or "" when it
+# has none, from its serial alone: a device not configured yet has one to read. Fails when the
+# device is gone or its serial cannot be read.
+serial_field() {
+    local serial=''
+    [[ -e $1/idVendor ]] || return 1
+    if [[ -e $1/serial ]]; then
+        attr "$1/serial" serial || return 1
+    fi
+    echo "${serial:-\"\"}"
+}
+
 # matches DEVICE DESCRIPTION: succeeds when a settled device is the one its pending line names:
 # the same port and ids, and the same serial, or none, when the first run read it.
 matches() {
@@ -236,8 +248,8 @@ device_rule() {
 # leaves the bus stops being listed and is not waited for.
 # The first run lists each device it sees in the pending file, from its ids alone, which the
 # kernel serves without the device lock, before it reads anything that takes the lock; the
-# serial is added as soon as a read gives it. An entry leaves the file only after its rule is
-# on disk, or when its device left the bus before the end of the run.
+# serial, or its absence, is added as soon as a read of the serial succeeds. An entry leaves the
+# file only after its rule is on disk, or when its device left the bus before the end of the run.
 declare -A last=() why=() settled=() resolved=()
 admitted=()
 clock
@@ -257,16 +269,17 @@ while :; do
     unsettled=()
     for dev in "${listed[@]}"; do
         [[ -v settled[$dev] ]] && continue
+        port=${dev##*/}
+        if [[ $first == yes && -v wanted[$port] && ${wanted[$port]#* } != *\ * ]] &&
+            serial=$(serial_field "$dev") && [[ $serial =~ ^([0-9A-Za-z._:+\ -]+|\"\")$ ]]; then
+            wanted[$port]+=" $serial"
+            write_pending
+        fi
         if ! desc=$(describe "$dev"); then
             unset 'last[$dev]'
             why[$dev]=$desc
             unsettled+=("$dev")
             continue
-        fi
-        if [[ $first == yes && -v wanted[${dev##*/}] ]] && entry=$(identity "$dev" "$desc") &&
-            [[ $entry != "${wanted[${dev##*/}]}" ]]; then
-            wanted[${dev##*/}]=$entry
-            write_pending
         fi
         if [[ -v last[$dev] && ${last[$dev]} == "$desc" ]]; then
             settled[$dev]=yes

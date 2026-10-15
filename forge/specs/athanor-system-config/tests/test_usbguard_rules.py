@@ -131,10 +131,10 @@ class InternalSnapshot(unittest.TestCase):
             (d / "idVendor").write_text(vid + "\n")
         (d / "idProduct").write_text(pid + "\n")
         (d / "bConfigurationValue").write_text(("1" if configured else "") + "\n")
-        if not configured:
-            return
         if serial is not None:
             (d / "serial").write_text(serial + "\n")
+        if not configured:
+            return
         for i, (cls, sub, proto) in enumerate(interfaces):
             f = d / f"{name}:1.{i}"
             f.mkdir()
@@ -202,7 +202,7 @@ case $(wc -l < {count}) in
         self.device("1-2", "058f", "9540", [("0b", "00", "00")])
         done = self.run_script(check=False, wait_tenths=3)
         self.assert_not_done(done, "1-1")
-        self.assertEqual(self.pending.read_text(), "runs 1\n1-1 0c45:6a10\n")
+        self.assertEqual(self.pending.read_text(), 'runs 1\n1-1 0c45:6a10 ""\n')
         return done
 
     def written(self):
@@ -349,6 +349,12 @@ case $(wc -l < {count}) in
         self.assertEqual(len(self.written()), 1)
         self.assertIn("058f:9540", self.written()[0])
 
+    def test_the_serial_of_a_device_not_configured_at_the_bound_is_recorded(self):
+        self.device("1-1", "0c45", "6a10", [], "CAM1", configured=False)
+        done = self.run_script(check=False, wait_tenths=3)
+        self.assert_not_done(done, "1-1")
+        self.assertEqual(self.pending.read_text(), "runs 1\n1-1 0c45:6a10 CAM1\n")
+
     def test_a_device_with_no_configuration_at_the_bound_is_left_pending(self):
         done = self.first_run_leaves_1_1_pending()
         self.assertIn("1-1 did not settle within 0.3 s: not configured", done.stderr)
@@ -379,7 +385,7 @@ case $(wc -l < {count}) in
         self.device("1-4", "046d", "c52b", [("03", "01", "01")])
         done = self.run_script(check=False, wait_tenths=3)
         self.assert_not_done(done, "1-1")
-        self.assertEqual(self.pending.read_text(), "runs 2\n1-1 0c45:6a10\n")
+        self.assertEqual(self.pending.read_text(), 'runs 2\n1-1 0c45:6a10 ""\n')
         self.assertEqual(len(self.written()), 1)
         self.assertNotIn("1-4", done.stderr)
 
@@ -391,7 +397,7 @@ case $(wc -l < {count}) in
         self.assertTrue(self.marker.exists())
         self.assertFalse(self.pending.exists())
         self.assertIn(
-            '<3>Leaving 1-1 (0c45:6a10) blocked after 3 runs: allow it from Settings, USB devices, with "Allow always".',
+            '<3>Leaving 1-1 (0c45:6a10 "") blocked after 3 runs: allow it from Settings, USB devices, with "Allow always".',
             done.stderr,
         )
         self.assertEqual(len(self.written()), 1)
@@ -517,8 +523,9 @@ case $(wc -l < {count}) in
         self.kill_when_blocked(self.start(), lambda: True)
         self.assertFalse(self.marker.exists())
         self.assertEqual(list(self.work.glob("50-athanor-internal.conf*")), [])
-        # Its ids were read before the blocking read, so the next boot reads that port only.
-        self.assertEqual(self.pending.read_text(), "runs 1\n1-1 0c45:6a10\n")
+        # Its ids and its lack of a serial were read before the blocking read, so the next boot
+        # reads that port only, for a device with no serial.
+        self.assertEqual(self.pending.read_text(), 'runs 1\n1-1 0c45:6a10 ""\n')
 
     def start(self, sleep=None):
         """Starts the script in its own process group, with a bound of 0.3 s: a run that did not
