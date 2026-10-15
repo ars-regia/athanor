@@ -83,8 +83,10 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 - athanor-usbguard-internal records a USB device only when two consecutive passes read the
   same configuration, interfaces and interface classes, so a device reconfigured while it is
   read is read again rather than skipped (#490). A device that does not settle within the
-  ten-second bound, unreadable, unconfigured or changing, leaves the marker unwritten: the
-  settled devices are admitted for this boot and the snapshot runs again at the next one.
+  ten-second bound, unreadable, unconfigured or changing, is recorded as pending in
+  /var/lib/athanor/usbguard-internal.pending by port, ids and serial: the next boots read only
+  that port and admit only the same device, never one connected since. After three runs the
+  marker is written and the journal names the devices left blocked.
   athanor-usbguard-internal.service bounds its start at 30 seconds, so a driver probe that
   holds a device lock cannot hold back the greeter indefinitely.
 

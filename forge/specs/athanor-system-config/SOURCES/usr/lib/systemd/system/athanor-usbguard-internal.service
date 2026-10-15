@@ -16,7 +16,9 @@ Type=oneshot
 # waits for the device lock, which a driver probe can hold; the stop signal interrupts that
 # wait, so the greeter waits at most TimeoutStartSec= plus TimeoutStopSec=. greetd and
 # usbguard.service are only ordered after this unit, so they start whether it succeeds, fails
-# or times out; a run that does not finish leaves no marker and runs again at the next boot.
+# or times out. A run that does not finish leaves no marker. A run that reads pending devices
+# counts itself first, so retries killed at every boot still end after three runs; a first run
+# killed leaves nothing and runs whole again at the next boot (#490).
 TimeoutStartSec=30s
 TimeoutStopSec=5s
 ExecStartPre=/usr/bin/udevadm settle --timeout=10

@@ -1,8 +1,10 @@
 #!/usr/bin/bash
 # Snapshot of the internal USB devices (doc_disks.md DK21, ADR-0103 D12).
-# Writes one allow rule for each USB device connected now, except those with a mass-storage
-# interface (class 08), then records that it ran. The paths come from the environment only
-# for the tests; the unit sets none.
+# Writes one allow rule for each USB device connected at the first run, except those with a
+# mass-storage interface (class 08), then records that it ran. A device that does not settle
+# within the bound is recorded as pending, by port and ids, and only that device is read again
+# at the next boots, for at most three runs in all (#490). The paths come from the environment
+# only for the tests; the unit sets none.
 set -euo pipefail
 umask 0077
 shopt -s nullglob
@@ -10,11 +12,14 @@ shopt -s nullglob
 usb=${ATHANOR_USB_SYSFS:-/sys/bus/usb/devices}
 rules=${ATHANOR_USBGUARD_RULES:-/etc/usbguard/rules.d/50-athanor-internal.conf}
 marker=${ATHANOR_USBGUARD_MARKER:-/var/lib/athanor/usbguard-internal.done}
-# The bound on the whole snapshot, in tenths of a second: the wait for enumeration, and the
-# passes until every device reads the same twice. Ten seconds is long enough for a hub and its
-# children to be configured on the boots seen so far, and short enough not to hold the greeter
-# back for a device that never settles. Reaching it leaves the marker unwritten (#490).
+pending=${ATHANOR_USBGUARD_PENDING:-/var/lib/athanor/usbguard-internal.pending}
+# The bound on one run, in tenths of a second: the wait for enumeration, and the passes until
+# every device reads the same twice. Ten seconds is long enough for a hub and its children to be
+# configured on the boots seen so far, and short enough not to hold the greeter back for a
+# device that never settles.
 wait_tenths=${ATHANOR_USBGUARD_WAIT_TENTHS:-100}
+# The runs that read a pending device, the first run included, before it is left blocked.
+max_runs=3
 
 [[ -e $marker ]] && exit 0
 
@@ -27,10 +32,84 @@ attr() {
     { IFS= read -r target <"$1"; } 2>&1
 }
 
+# put FILE: replaces FILE with standard input, durably: a crash leaves the old file or the new.
+put() {
+    mkdir -p -- "${1%/*}"
+    tmp=$(mktemp "$1.XXXXXX")
+    trap 'rm -f -- "$tmp"' EXIT
+    cat >"$tmp"
+    chmod 0600 "$tmp"
+    sync -- "$tmp"
+    mv -- "$tmp" "$1"
+    trap - EXIT
+    sync -- "${1%/*}"
+}
+
+# The pending file: a line "runs N", the runs that have read its devices, then one line for each
+# device still owed a rule, "PORT VID:PID", followed by " SERIAL" when its serial was read.
+declare -A wanted=()
+runs=0
+first=yes
+if [[ -e $pending ]]; then
+    first=no
+    n=0
+    line=''
+    while IFS= read -r line; do
+        n=$((n + 1))
+        if ((n == 1)) && [[ $line =~ ^runs\ ([1-9])$ ]]; then
+            runs=${BASH_REMATCH[1]}
+        elif ((n > 1)) && [[ $line =~ ^([0-9A-Za-z.-]+)\ [0-9a-f]{4}:[0-9a-f]{4}(\ [0-9A-Za-z._:+\ -]+)?$ ]]; then
+            wanted[${BASH_REMATCH[1]}]=$line
+        else
+            n=0
+            break
+        fi
+    done <"$pending" || n=0 # a file that cannot be opened
+    [[ -z $line ]] || n=0  # a last line with no newline: cut short
+    # A file that cannot be trusted is never replaced by a fresh snapshot: that would admit the
+    # devices connected since the first run.
+    if ((n == 0)); then
+        echo "<3>$pending is not valid; no device is recorded. Allow the internal devices from Settings, USB devices." >&2
+        exit 1
+    fi
+fi
+
+write_pending() {
+    local body="runs $runs" entry
+    for entry in "${wanted[@]}"; do
+        body+=$'\n'$entry
+    done
+    put "$pending" <<<"$body"
+}
+
+# give_up: leaves the devices still pending blocked, and ends the snapshot.
+give_up() {
+    local entry
+    for entry in "${wanted[@]}"; do
+        echo "<3>Leaving ${entry%% *} (${entry#* }) blocked after $max_runs runs: allow it from Settings, USB devices, with \"Allow always\"." >&2
+    done
+    put "$marker" </dev/null
+    rm -f -- "$pending"
+    sync -- "${pending%/*}"
+    exit 0
+}
+
+# A run killed by the start timeout counts: the count is on disk before any device is read.
+if [[ $first == no ]]; then
+    ((runs < max_runs)) || give_up
+    runs=$((runs + 1))
+    write_pending
+fi
+
+# devices: the devices this run reads. The first run reads every device; a later one only the
+# ports still pending, so a device connected since the first run is never a candidate.
 devices() {
     local dev
     for dev in "$usb"/*; do
-        [[ ${dev##*/} == *:* ]] || echo "$dev" # an interface is read with its device
+        [[ ${dev##*/} == *:* ]] && continue # an interface is read with its device
+        if [[ $first == yes || -v wanted[${dev##*/}] ]]; then
+            echo "$dev"
+        fi
     done
 }
 
@@ -60,6 +139,29 @@ describe() {
     fi
     printf '%s\n' "$vid" "$pid" "$serial" "$config"
     printf '%s' "$ifaces"
+}
+
+# identity DEVICE [DESCRIPTION]: prints the pending line of a device, from its description or,
+# without one, from its ids alone. Fails when they cannot be read, printing why, or when a rule
+# could not carry them; a serial a rule could not carry is left out.
+identity() {
+    local name=${1##*/} vid pid serial=''
+    if [[ -n ${2-} ]]; then
+        { IFS= read -r vid && IFS= read -r pid && IFS= read -r serial; } <<<"$2"
+    else
+        { attr "$1/idVendor" vid && attr "$1/idProduct" pid; } || return 1
+    fi
+    [[ $vid =~ ^[0-9a-f]{4}$ && $pid =~ ^[0-9a-f]{4}$ && $name =~ ^[0-9A-Za-z.-]+$ ]] || return 1
+    [[ $serial =~ ^[0-9A-Za-z._:+\ -]*$ ]] || serial=''
+    echo "$name $vid:$pid${serial:+ $serial}"
+}
+
+# matches DEVICE DESCRIPTION: succeeds when a settled device is the one its pending line names:
+# the same port and ids, and the same serial when one was recorded.
+matches() {
+    local entry=${wanted[${1##*/}]} now
+    now=$(identity "$1" "$2") || return 1
+    [[ $now == "$entry" || (${entry#* } != *\ * && ${now#* } == "${entry#* }"\ *) ]]
 }
 
 # device_rule DEVICE DESCRIPTION: prints the rule for a device from its settled description, or
@@ -97,53 +199,77 @@ admitted=()
 # Microseconds of the wall clock, in any locale; the unit's start timeout is the monotonic bound.
 deadline=$((${EPOCHREALTIME//[!0-9]/} + wait_tenths * 100000))
 while :; do
-    pending=()
+    unsettled=()
     while read -r dev; do
         [[ -v settled[$dev] ]] && continue
         if ! desc=$(describe "$dev"); then
             unset 'last[$dev]'
             why[$dev]=$desc
-            pending+=("$dev")
+            unsettled+=("$dev")
         elif [[ -v last[$dev] && ${last[$dev]} == "$desc" ]]; then
             settled[$dev]=yes
+            if [[ $first == no ]]; then
+                if ! matches "$dev" "$desc"; then
+                    echo "<4>${dev##*/} now holds a device other than the ${wanted[${dev##*/}]#* } of the first run: not admitted." >&2
+                    continue
+                fi
+                unset 'wanted[${dev##*/}]'
+            fi
             if rule=$(device_rule "$dev" "$desc"); then
                 admitted+=("$rule")
             fi
         else
             last[$dev]=$desc
             why[$dev]="no two consecutive passes read it the same"
-            pending+=("$dev")
+            unsettled+=("$dev")
         fi
     done < <(devices)
-    ((${#pending[@]} == 0)) && break
+    ((${#unsettled[@]} == 0)) && break
     ((${EPOCHREALTIME//[!0-9]/} < deadline)) || break
     sleep 0.1
 done
 
-out=$(mktemp "$rules.XXXXXX")
-trap 'rm -f -- "$out"' EXIT
-echo "# Written once by athanor-usbguard-internal.service: the USB devices connected at the first boot." >"$out"
-if ((${#admitted[@]})); then
-    printf '%s\n' "${admitted[@]}" >>"$out"
-fi
-
-# Rules first, durably, then the marker: a crash between them runs the snapshot again, a crash
-# before the rules are on disk can never leave a marker for rules that are not.
-chmod 0600 "$out"
-sync -- "$out"
-mv -- "$out" "$rules"
-trap - EXIT
-sync -- "${rules%/*}"
-
-# A device still unsettled at the bound may be internal: the rules of the settled ones stand for
-# this boot, and the snapshot runs again at the next one rather than leave it blocked for good.
-if ((${#pending[@]})); then
-    for dev in "${pending[@]}"; do
-        echo "<3>${dev##*/} did not settle within $((wait_tenths / 10)).$((wait_tenths % 10)) s: ${why[$dev]//$'\n'/; }" >&2
+for dev in "${unsettled[@]}"; do
+    echo "<3>${dev##*/} did not settle within $((wait_tenths / 10)).$((wait_tenths % 10)) s: ${why[$dev]//$'\n'/; }" >&2
+done
+# The first run owes a rule to each device it did not settle; one whose ids cannot be read has
+# no identity a later run could check, and stays blocked.
+if [[ $first == yes ]]; then
+    for dev in "${unsettled[@]}"; do
+        if entry=$(identity "$dev" "${last[$dev]-}"); then
+            wanted[${dev##*/}]=$entry
+        else
+            echo "<3>Leaving ${dev##*/} blocked: its ids cannot be read. ${entry//$'\n'/; }" >&2
+        fi
     done
-    echo "<3>Not recording the snapshot as done: it runs again at the next boot." >&2
-    exit 1
 fi
-mkdir -p -- "${marker%/*}"
-: >"$marker"
-sync -- "$marker" "${marker%/*}"
+
+# Rules first, durably, then the pending file or the marker: a crash between them reads the
+# devices again, and a rule already written is kept and never written twice.
+body=$(
+    if [[ -e $rules ]]; then
+        cat -- "$rules"
+    else
+        echo "# Written by athanor-usbguard-internal.service: the USB devices connected at its first run, admitted then or at the next boots (doc_disks.md DK21)."
+    fi
+    for rule in "${admitted[@]}"; do
+        if [[ ! -e $rules ]] || ! grep -qFx -- "$rule" "$rules"; then
+            echo "$rule"
+        fi
+    done
+)
+put "$rules" <<<"$body"
+
+if ((${#wanted[@]} == 0)); then
+    put "$marker" </dev/null
+    if [[ $first == no ]]; then
+        rm -f -- "$pending"
+        sync -- "${pending%/*}"
+    fi
+    exit 0
+fi
+[[ $first == yes ]] && runs=1
+((runs < max_runs)) || give_up
+write_pending
+echo "<3>Not recording the snapshot as done: ${#wanted[@]} device(s) pending after run $runs of $max_runs, read again at the next boot." >&2
+exit 1

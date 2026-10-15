@@ -121,6 +121,7 @@ class InternalSnapshot(unittest.TestCase):
         self.sysfs.mkdir()
         self.rules = self.work / "50-athanor-internal.conf"
         self.marker = self.work / "state/usbguard-internal.done"
+        self.pending = self.work / "state/usbguard-internal.pending"
 
     def device(self, name, vid, pid, interfaces, serial=None, configured=True, vanished=False):
         d = self.sysfs / name
@@ -153,6 +154,7 @@ class InternalSnapshot(unittest.TestCase):
             ATHANOR_USB_SYSFS=str(self.sysfs),
             ATHANOR_USBGUARD_RULES=str(self.rules),
             ATHANOR_USBGUARD_MARKER=str(self.marker),
+            ATHANOR_USBGUARD_PENDING=str(self.pending),
             ATHANOR_USBGUARD_WAIT_TENTHS=str(wait_tenths),
             LC_ALL="C",  # the messages bash gives in English
         )
@@ -180,7 +182,27 @@ case $(wc -l < {count}) in
         self.assertFalse(self.marker.exists())
         for name in unsettled:
             self.assertIn(f"<3>{name} did not settle within 0.3 s: ", done.stderr)
-        self.assertIn("Not recording the snapshot as done: it runs again at the next boot.", done.stderr)
+        self.assertIn("Not recording the snapshot as done: ", done.stderr)
+
+    def configure(self, name, interfaces):
+        """Finishes the enumeration of a device made with configured=False."""
+        d = self.sysfs / name
+        for i, (cls, sub, proto) in enumerate(interfaces):
+            f = d / f"{name}:1.{i}"
+            f.mkdir()
+            (f / "bInterfaceClass").write_text(cls + "\n")
+            (f / "bInterfaceSubClass").write_text(sub + "\n")
+            (f / "bInterfaceProtocol").write_text(proto + "\n")
+        (d / "bConfigurationValue").write_text("1\n")
+
+    def first_run_leaves_1_1_pending(self):
+        """A first run in which 1-1 never configures and 1-2 is admitted."""
+        self.device("1-1", "0c45", "6a10", [], configured=False)
+        self.device("1-2", "058f", "9540", [("0b", "00", "00")])
+        done = self.run_script(check=False, wait_tenths=3)
+        self.assert_not_done(done, "1-1")
+        self.assertEqual(self.pending.read_text(), "runs 1\n1-1 0c45:6a10\n")
+        return done
 
     def written(self):
         return [l for l in self.rules.read_text().splitlines() if not l.startswith("#")]
@@ -239,10 +261,11 @@ case $(wc -l < {count}) in
             f'marker=$([[ -e {self.marker} ]] && echo yes || echo no) $*" >> {log}\n'
         )
         calls = log.read_text().splitlines()
-        self.assertEqual(len(calls), 3, calls)
+        self.assertEqual(len(calls), 4, calls)
         self.assertTrue(calls[0].startswith("rules=no marker=no "), calls[0])
         self.assertTrue(calls[1].startswith("rules=yes marker=no "), calls[1])
-        self.assertTrue(calls[2].startswith("rules=yes marker=yes "), calls[2])
+        self.assertTrue(calls[2].startswith("rules=yes marker=no "), calls[2])
+        self.assertTrue(calls[3].startswith("rules=yes marker=yes "), calls[3])
 
     def test_a_device_that_leaves_the_bus_is_not_waited_for(self):
         self.device("1-1", "0c45", "6a10", [("0e", "01", "00")], vanished=True)
@@ -284,25 +307,127 @@ case $(wc -l < {count}) in
         self.assertEqual(len((self.work / "waits").read_text().splitlines()), 3)
         self.assertTrue(self.marker.exists())
 
-    def test_a_device_that_never_reads_the_same_twice_leaves_no_marker(self):
-        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
+    def test_a_device_that_never_reads_the_same_twice_is_left_pending_with_its_serial(self):
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")], "CAM1")
         self.device("1-2", "058f", "9540", [("0b", "00", "00")])
         proto = self.sysfs / "1-1/1-1:1.0/bInterfaceProtocol"
         done = self.run_script(sleep=f"echo 0$((1 - $(< {proto}))) > {proto}\n", check=False, wait_tenths=3)
         self.assert_not_done(done, "1-1")
         self.assertIn("1-1 did not settle within 0.3 s: no two consecutive passes read it the same", done.stderr)
+        self.assertEqual(self.pending.read_text(), "runs 1\n1-1 0c45:6a10 CAM1\n")
         # The device that settled is admitted for this boot; the snapshot is taken again.
         self.assertEqual(len(self.written()), 1)
         self.assertIn("058f:9540", self.written()[0])
 
-    def test_a_device_with_no_configuration_at_the_bound_leaves_no_marker(self):
-        self.device("1-1", "0c45", "6a10", [], configured=False)
-        self.device("1-2", "058f", "9540", [("0b", "00", "00")])
-        done = self.run_script(check=False, wait_tenths=3)
-        self.assert_not_done(done, "1-1")
+    def test_a_device_with_no_configuration_at_the_bound_is_left_pending(self):
+        done = self.first_run_leaves_1_1_pending()
         self.assertIn("1-1 did not settle within 0.3 s: not configured", done.stderr)
+        self.assertIn("1 device(s) pending after run 1 of 3", done.stderr)
         self.assertEqual(len(self.written()), 1)
         self.assertIn("058f:9540", self.written()[0])
+        self.assertEqual(self.pending.stat().st_mode & 0o777, 0o600)
+
+    def test_the_next_boot_admits_the_pending_device_and_never_a_new_one(self):
+        self.first_run_leaves_1_1_pending()
+        first = self.written()
+        self.configure("1-1", [("0e", "01", "00")])
+        # Connected since the first run: a keyboard at another port, and a webcam.
+        self.device("1-4", "046d", "c52b", [("03", "01", "01")], "KBD")
+        self.device("1-5", "0c45", "6a11", [("0e", "01", "00")])
+        done = self.run_script()
+        self.assertEqual(
+            self.written(),
+            first + ['allow id 0c45:6a10 serial "" via-port "1-1" with-interface equals { 0e:01:00 }'],
+        )
+        self.assertTrue(self.marker.exists())
+        self.assertFalse(self.pending.exists())
+        self.assertNotIn("1-4", done.stderr)
+        self.assertNotIn("1-5", done.stderr)
+
+    def test_a_pending_device_still_unsettled_is_read_again_and_nothing_else(self):
+        self.first_run_leaves_1_1_pending()
+        self.device("1-4", "046d", "c52b", [("03", "01", "01")])
+        done = self.run_script(check=False, wait_tenths=3)
+        self.assert_not_done(done, "1-1")
+        self.assertEqual(self.pending.read_text(), "runs 2\n1-1 0c45:6a10\n")
+        self.assertEqual(len(self.written()), 1)
+        self.assertNotIn("1-4", done.stderr)
+
+    def test_after_three_runs_the_devices_left_are_named_and_the_snapshot_ends(self):
+        self.first_run_leaves_1_1_pending()
+        self.assertEqual(self.run_script(check=False, wait_tenths=3).returncode, 1)
+        done = self.run_script(check=False, wait_tenths=3)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue(self.marker.exists())
+        self.assertFalse(self.pending.exists())
+        self.assertIn(
+            '<3>Leaving 1-1 (0c45:6a10) blocked after 3 runs: allow it from Settings, USB devices, with "Allow always".',
+            done.stderr,
+        )
+        self.assertEqual(len(self.written()), 1)
+
+    def test_runs_killed_by_the_timeout_count(self):
+        # The third run counted itself and was killed: the fourth boot reads nothing.
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
+        self.pending.parent.mkdir()
+        self.pending.write_text("runs 3\n1-1 0c45:6a10\n")
+        done = self.run_script()
+        self.assertTrue(self.marker.exists())
+        self.assertFalse(self.rules.exists())
+        self.assertIn("<3>Leaving 1-1 (0c45:6a10) blocked after 3 runs", done.stderr)
+
+    def test_a_pending_port_that_holds_another_device_is_not_admitted(self):
+        self.device("1-1", "046d", "c52b", [("03", "01", "01")], "KBD")
+        self.device("1-2", "0c45", "6a10", [("0e", "01", "00")], "CAM2")
+        self.pending.parent.mkdir()
+        self.pending.write_text("runs 1\n1-1 0c45:6a10\n1-2 0c45:6a10 CAM1\n")
+        done = self.run_script(check=False)
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("<4>1-1 now holds a device other than the 0c45:6a10 of the first run", done.stderr)
+        self.assertIn("<4>1-2 now holds a device other than the 0c45:6a10 CAM1 of the first run", done.stderr)
+        self.assertEqual(self.written(), [])
+        self.assertFalse(self.marker.exists())
+        self.assertEqual(self.pending.read_text(), "runs 2\n1-1 0c45:6a10\n1-2 0c45:6a10 CAM1\n")
+
+    def test_a_pending_device_with_its_recorded_serial_is_admitted(self):
+        self.device("1-2", "0c45", "6a10", [("0e", "01", "00")], "CAM 2")
+        self.pending.parent.mkdir()
+        self.pending.write_text("runs 2\n1-2 0c45:6a10 CAM 2\n")
+        self.run_script()
+        self.assertEqual(
+            self.written(),
+            ['allow id 0c45:6a10 serial "CAM 2" via-port "1-2" with-interface equals { 0e:01:00 }'],
+        )
+        self.assertTrue(self.marker.exists())
+        self.assertFalse(self.pending.exists())
+
+    def test_a_pending_file_that_cannot_be_trusted_fails_without_a_new_snapshot(self):
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
+        for body in (
+            "",
+            "runs 0\n",
+            "1-1 0c45:6a10\n",
+            "runs 1\n1-1 0c45:6a10\nallow id 0781:5583\n",
+            "runs 1\n1-1 0c45:6a10",  # no final newline: a line cut short
+            "runs 1\n1-1 0c45:6a1\n",
+            None,  # a directory: cannot be read
+        ):
+            with self.subTest(body=body):
+                self.pending.parent.mkdir(exist_ok=True)
+                if self.pending.is_dir():
+                    self.pending.rmdir()
+                for leftover in (self.pending, self.marker, self.rules):
+                    if leftover.is_file():
+                        leftover.unlink()
+                if body is None:
+                    self.pending.mkdir()
+                else:
+                    self.pending.write_text(body)
+                done = self.run_script(check=False)
+                self.assertEqual(done.returncode, 1)
+                self.assertIn(f"<3>{self.pending} is not valid; no device is recorded.", done.stderr)
+                self.assertFalse(self.marker.exists())
+                self.assertFalse(self.rules.exists())
 
     def test_a_kill_while_a_read_blocks_leaves_no_marker_and_no_rules(self):
         # A read of bConfigurationValue waits for the device lock while a driver probe holds it;
