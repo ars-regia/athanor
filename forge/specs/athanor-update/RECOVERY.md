@@ -41,5 +41,10 @@ digest the user went back from.
 Read the journal of `athanor-update` for the file named in the error, then either remove it
 as root (`sudo rm /var/lib/athanor-update/held`, which releases that digest) or go back
 again with `GoBack()` (`sudo athanor-update go-back`), which writes `held` anew. `refused`
-and `newest-booted` heal themselves at the next check; `last-success` is rewritten by the
+heals itself at the next check; `last-success` is rewritten by the
 next successful check.
+
+`newest-booted` does not heal itself: while it is unreadable the state publishes a newest
+booted build time of the largest possible value, so the shield shows Attention rather than
+"Check again" on a record that cannot be trusted, and nothing is offered. Remove it as root
+(`sudo rm /var/lib/athanor-update/newest-booted`); the next boot records the booted build.

@@ -307,16 +307,15 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failu
     let mut status = ctx.tools.status()?;
     let storage = |_| Failure { code: ErrorCode::Storage, host: None };
     // An unreadable record of the newest build is a storage failure, not a reason to publish
-    // nothing: it is replaced by the booted build (offerable() compares with the booted build
-    // time, never with this file), and nothing is offered until the next check.
+    // nothing. The file is left as it is, and `i64::MAX` is published: the badge reads it as a
+    // build newer than the booted one (Attention), so a machine that went back never shows
+    // "Check again" on a record it cannot trust. The administrator removes the file
+    // (RECOVERY.md); nothing is offered until then.
     let (newest, unreadable_newest) = match ctx.store.record_booted(status.booted.build_time) {
         Ok(newest) => (newest, None),
         Err(err) => {
-            tracing::error!(%err, "cannot read the newest booted build time; it is reset to the booted build");
-            if let Err(err) = ctx.store.reset_booted(status.booted.build_time) {
-                tracing::error!(%err, "cannot reset the newest booted build time");
-            }
-            (status.booted.build_time, Some(Failure { code: ErrorCode::Storage, host: None }))
+            tracing::error!(%err, "cannot read the newest booted build time; publishing it as unknown");
+            (i64::MAX, Some(Failure { code: ErrorCode::Storage, host: None }))
         }
     };
     // `refused` is no gate: a refused image is verified again when it is downloaded again. An
@@ -618,15 +617,18 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_garbled_newest_booted_is_published_as_storage_and_rewritten() {
+    fn a_garbled_newest_booted_is_published_as_unknown_and_left_alone() {
         let machine = Machine::new("newest-garbled", &["real/k1.pub"]);
         std::fs::write(machine.store.var.join("newest-booted"), "soon\n").expect("write");
         let tools = Fake::booted(deployed(&digest(1), 1000)).offering(&digest(2), 2000);
         let state = run(&machine.ctx(&tools, 5000), false).expect("a state is published");
-        assert_eq!((state.update, state.last_error, state.newest_booted_build_time), (UpdateState::None, ErrorCode::Storage, 1000));
+        assert_eq!((state.update, state.last_error, state.newest_booted_build_time), (UpdateState::None, ErrorCode::Storage, i64::MAX));
         assert!(!tools.called("download"));
-        assert_eq!(machine.store.newest_booted().expect("healed"), 1000);
-        assert_eq!(run(&machine.ctx(&tools, 5000), false).expect("check").update, UpdateState::Downloaded);
+        assert_eq!(std::fs::read_to_string(machine.store.var.join("newest-booted")).expect("read"), "soon\n", "the file is not rewritten");
+        assert_eq!(run(&machine.ctx(&tools, 5000), false).expect("state").last_error, ErrorCode::Storage, "it stays so until the file is removed");
+        std::fs::remove_file(machine.store.var.join("newest-booted")).expect("the administrator removes it");
+        let state = run(&machine.ctx(&tools, 5000), false).expect("check");
+        assert_eq!((state.update, state.newest_booted_build_time), (UpdateState::Downloaded, 1000));
     }
 
     #[test]
