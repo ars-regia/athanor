@@ -177,6 +177,8 @@ COPY forge/config/packages.json /usr/share/athanor/packages.json
 # enrol it as a MOK and copies it to the ESP (doc_kernel_profile.md section 4, A2-35);
 # scripts/verify.py installer checks that this path is the one the kickstarts read.
 COPY forge/specs/azoth/keys/secureboot/athanor-secureboot.der /usr/share/athanor/secureboot/athanor-secureboot.der
+# The guided step that files the same request again on a machine where it was never confirmed (#252).
+COPY system/secureboot/athanor-secureboot-enroll /usr/bin/athanor-secureboot-enroll
 
 # UPSTREAM PACKAGES: the desktop (COSMIC), media, and CLI packages the manifest lists
 # under upstream_*. Today these are the official Fedora and RPM Fusion binaries,

@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# Guided enrolment of the Athanor Secure Boot certificate as a Machine Owner Key
+# (doc_kernel_profile.md, section 4). GRUB boots the Azoth vmlinuz through shim, and shim
+# accepts it with Secure Boot on only once this certificate is in MokList. The installer
+# files the same request before the first reboot; this command files it again on a machine
+# where that request was never confirmed in MokManager.
+#
+# The script files the enrolment request with `mokutil --import` and explains the next boot.
+# mokutil asks for a one-time password on the terminal and MokManager asks for it again at
+# the next boot: the person types it both times, nothing here supplies or stores it, so a
+# request cannot be filed or confirmed without someone at the keyboard of the machine.
+#
+# Usage: athanor-secureboot-enroll [--status]   (as root, for example through sudo)
+#   --status   report the Secure Boot state and whether the certificate is enrolled, change nothing
+#
+# The two paths come from the environment only for the tests; nothing else sets them.
+set -euo pipefail
+
+cert=${ATHANOR_SECUREBOOT_CERT:-/usr/share/athanor/secureboot/athanor-secureboot.der}
+efi=${ATHANOR_SECUREBOOT_EFI:-/sys/firmware/efi}
+
+die() {
+    echo "athanor-secureboot-enroll: $*" >&2
+    exit 1
+}
+[[ $# -eq 0 || ($# -eq 1 && $1 == --status) ]] || {
+    echo "usage: athanor-secureboot-enroll [--status]" >&2
+    exit 2
+}
+[[ -d $efi ]] || die "this machine did not boot through UEFI: Secure Boot and MOK do not apply"
+[[ -r $cert ]] || die "$cert is missing from the image"
+
+# The exit status of mokutil differs between releases: 0.7.2 returns 0 for both Secure Boot
+# states and for a certificate that is not enrolled, later releases return 1 for those. So the
+# exact text decides, and the status only goes into the message of an answer that matches
+# nothing. --sb-state is read with its error output, where 0.7.2 prints that the firmware has
+# no Secure Boot. --test-key is read from its output alone: its error output carries
+# diagnostics such as "Failed to access kernel trusted keyring", which reach the terminal.
+status=0
+sb_state=$(mokutil --sb-state 2>&1) || status=$?
+# The second line of an enabled state is printed when MokSBState is set: the firmware
+# enforces, shim does not, so nothing it loads is checked. The step that turns enforcement on
+# differs with the state; it comes after the enrolment, since shim refuses Azoth without it.
+case $sb_state in
+"SecureBoot enabled")
+    secure_boot=enabled
+    turn_on=
+    ;;
+$'SecureBoot enabled\nSecureBoot validation is disabled in shim')
+    secure_boot="not enforced: on in the firmware, but shim's validation is disabled"
+    turn_on="Turn shim's validation back on: sudo mokutil --enable-validation, then confirm it in MokManager at the next boot."
+    ;;
+"SecureBoot disabled")
+    secure_boot=disabled
+    turn_on="Turn Secure Boot on in the firmware settings."
+    ;;
+$'SecureBoot disabled\nPlatform is in Setup Mode')
+    secure_boot="disabled: the firmware is in setup mode"
+    turn_on="The firmware has no platform key: restore its factory Secure Boot keys in the firmware settings, then turn Secure Boot on."
+    ;;
+# mokutil 0.7.2 prints this whenever it cannot read the SecureBoot variable: on firmware
+# without Secure Boot, and also where efivarfs is not mounted.
+"This system doesn't support Secure Boot")
+    echo "Secure Boot: not reported: the firmware has no Secure Boot, or efivarfs is not mounted, so there is no Machine Owner Key to enrol"
+    exit 0
+    ;;
+*) die "mokutil --sb-state gave an unexpected answer (exit $status): $sb_state" ;;
+esac
+
+# mokutil 0.7.2 looks in db, MokList and the pending request before dbx and MokListX, so a
+# certificate that is also blocked reads as enrolled: shim refuses what it signs regardless.
+test_key() {
+    local status=0
+    test_key=$(mokutil --test-key "$cert") || status=$?
+    case $test_key in
+    "$cert is already enrolled") enrolment=enrolled ;;
+    "$cert is already in db") enrolment=db ;;
+    "$cert is already in the enrollment request") enrolment=requested ;;
+    "$cert is not enrolled") enrolment=absent ;;
+    *) die "mokutil --test-key gave an unexpected answer (exit $status): $test_key" ;;
+    esac
+}
+test_key
+
+echo "Secure Boot: $secure_boot"
+case $enrolment in
+enrolled) echo "Athanor certificate: enrolled as a Machine Owner Key" ;;
+db) echo "Athanor certificate: trusted by the firmware's own database, nothing to enrol" ;;
+requested)
+    echo "Athanor certificate: enrolment requested, to be confirmed in MokManager at the next boot"
+    echo "  (a request whose password is lost is withdrawn with sudo mokutil --revoke-import)"
+    ;;
+absent) echo "Athanor certificate: not enrolled" ;;
+esac
+[[ -z $turn_on || $enrolment == absent ]] || echo "$turn_on"
+[[ $# -eq 0 && $enrolment == absent ]] || exit 0
+
+[[ $EUID -eq 0 ]] || die "filing the enrolment request needs root: run it again with sudo"
+echo
+echo "mokutil now asks for a one-time password, twice. Choose one you can type at the next"
+echo "boot: MokManager runs before the keyboard layout is loaded and reads a US layout."
+# As the installer does: MokManager waits for the person instead of counting down.
+mokutil --timeout -1
+mokutil --import "$cert"
+test_key
+[[ $enrolment == requested ]] || die "mokutil --import ended, but mokutil --test-key does not see the request: $test_key"
+
+cat << 'EOF'
+
+The enrolment request is filed. To complete it:
+  1. Restart the computer. Before Athanor starts, a blue screen titled "Perform MOK
+     management" appears and waits.
+  2. Choose "Enroll MOK", then "Continue", then "Yes".
+  3. Type the one-time password you just chose, then choose "Reboot".
+If the password is lost, withdraw the request with sudo mokutil --revoke-import and run
+athanor-secureboot-enroll again.
+EOF
+[[ -z $turn_on ]] || echo "  4. $turn_on"
