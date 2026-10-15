@@ -207,11 +207,13 @@ journal_since() { # journal_since SINCE UNIT
 prompted() { local out; out=$(journal_since "$1" 'polkit-agent-helper@*') || die "FAIL  reading the helper journal"; [[ -n $out ]]; }
 # The polkitd lines since SINCE that granted an action: TEXT is a fixed string of the line,
 # "action os.athanor.update.apply-multi-session for" for one action, "action os.athanor.update."
-# for any of ours. Fails when there are none.
+# for any of ours. Fails when there are none. A refusal reads "FAILED to authenticate to gain
+# authorization for action ...", so a grant is also a line of "successfully authenticated".
+polkit_grant_lines() { grep -F "successfully authenticated" | grep -F "authorization for $1"; }
 polkit_grants() { # polkit_grants SINCE TEXT
   local out
   out=$(journal_since "$1" polkit.service) || die "FAIL  reading the polkitd journal"
-  grep -F "authorization for $2" <<< "$out"
+  polkit_grant_lines "$2" <<< "$out"
 }
 # Whether polkitd logged the registration of an authentication agent since SINCE.
 polkit_grants_agent() {
@@ -251,9 +253,13 @@ polkit_log_restore() {
 }
 # The shape of the line polkitd logs for a granted prompt, matched by both forms above.
 POLKIT_SAMPLE='Operator of unix-session:c2 successfully authenticated as unix-user:x to gain ONE-SHOT authorization for action os.athanor.update.apply-multi-session for system-bus-name::1.55 [dbus-send] (owned by unix-user:x)'
+POLKIT_FAILED_SAMPLE='Operator of unix-session:1 FAILED to authenticate to gain authorization for action os.athanor.update.apply-multi-session for system-bus-name::1.122 [dbus-send] (owned by unix-user:x)'
 polkit_pattern_selfcheck() {
-  grep -qF "authorization for action os.athanor.update.apply-multi-session for" <<< "$POLKIT_SAMPLE" || die "FAIL  the polkitd pattern for one action does not match a granted line"
-  grep -qF "authorization for action os.athanor.update." <<< "$POLKIT_SAMPLE" || die "FAIL  the polkitd pattern for any of our actions does not match a granted line"
+  local text
+  for text in "action os.athanor.update.apply-multi-session for" "action os.athanor.update."; do
+    polkit_grant_lines "$text" <<< "$POLKIT_SAMPLE" > /dev/null || die "FAIL  the polkitd pattern '$text' does not match a granted line"
+    ! polkit_grant_lines "$text" <<< "$POLKIT_FAILED_SAMPLE" > /dev/null || die "FAIL  the polkitd pattern '$text' matches a refused line"
+  done
 }
 # Waits SECONDS at most for the output of a call to hold TEXT.
 call_says() { # call_says METHOD TEXT SECONDS
