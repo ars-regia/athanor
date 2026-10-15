@@ -14,7 +14,7 @@
 # that it offers "Restart to update" only for a downloaded update and "Go back to the
 # previous version" when the state names a previous deployment (SH11, SH12; doc_shell.md
 # section 8, item 5). No stage presses them: either restarts the machine. It needs no deploy
-# stage first, and then reads the athanor-bar the image ships.
+# stage first, and then reads the athanor-bar and athanor-update the image ships.
 # athanor-update-check.timer and athanor-update-state.service are masked for the run, so
 # nothing rewrites the fixture; cleanup unmasks them and republishes the real
 # state with athanor-update-state.service.
@@ -120,7 +120,6 @@ stage_deploy() {
     [[ -x $BIN/athanor-bar ]] || fail "no $BIN/athanor-bar: run forge/test/shell/rig.sh build-bar"
     [[ -x $UPDATE_BIN ]] ||
         fail "no $UPDATE_BIN: run forge/test/shell/rig.sh cargo build --locked --release -p athanor-update"
-    mkdir -p "$SHOTS"
     "$HERE/deploy.sh" \
         "$BIN/athanor-bar:/usr/bin/athanor-bar" \
         "$DATA/athanor-bar.service:/usr/lib/systemd/user/athanor-bar.service" \
