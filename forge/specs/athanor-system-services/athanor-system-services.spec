@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-system-services
 Version:        1.0.1
-Release:        27%{?dist}
+Release:        28%{?dist}
 Summary:        Athanor OS athanor-system-services
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -37,6 +37,12 @@ cp -a %{_sourcedir}/usr/lib/systemd/user/* %{buildroot}/usr/lib/systemd/user/
 /usr/lib/systemd/user/cosmic-osd.service
 
 %changelog
+* Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.1-28
+- cosmic-settings-daemon runs with GSETTINGS_BACKEND=memory: its gsettings writes of
+  icon-theme, font-name, monospace-font-name, button-layout, color-scheme and gtk-theme
+  no longer reach the user's GNOME keys, which are the appearance store
+  (doc_visual_language.md, VL4; doc_session_daemons.md, SD2). It read none of them.
+
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.1-27
 - cosmic-settings-daemon: ReadWritePaths=%%t so the varlink bind under ProtectSystem=strict
   no longer panics and the volume keys work again (#144).
