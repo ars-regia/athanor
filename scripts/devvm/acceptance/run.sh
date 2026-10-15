@@ -73,7 +73,8 @@ sessions_cleanup() {
 
 stage_sessions() { # item 2, the other-session rule of UT6 (ADR-0103 D22, #433); nothing is applied
   local since log since_agent m
-  # A run that starts here boots cold: the timer downloads again, as after stage_download's poweroff.
+  # A run that starts here boots cold, and the boot's check ran before the tunnel was up.
+  [[ $(state .update) == downloaded ]] || check_now
   expect_until "2: a downloaded update to ask about" .update downloaded 20
   polkit_pattern_selfcheck
   trap sessions_cleanup EXIT
@@ -294,6 +295,8 @@ stage_report() {
   echo "acceptance complete"
 }
 
+# stage_install waits for the guest itself; a later start needs its SSH and the registry tunnel.
+[[ $start == install ]] || wait_ssh
 run=''
 for stage in "${STAGES[@]}"; do
   [[ $stage == "$start" ]] && run=1
