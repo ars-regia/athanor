@@ -99,6 +99,7 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
   none; the serial is read on its own, so a device not configured at the bound has it on
   record, and only a device whose serial could never be read matches by port and ids alone.
   A device whose serial a rule cannot carry is left blocked, named, and kept out of pending.
+  A device that leaves the bus during the first run is named in the journal too.
   The bound is measured on the time since boot, which a step of the wall clock does not move.
 
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-65

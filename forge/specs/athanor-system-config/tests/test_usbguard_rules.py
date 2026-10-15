@@ -300,7 +300,8 @@ case $(wc -l < {count}) in
     def test_a_device_that_leaves_the_bus_after_its_ids_were_read_is_not_pending(self):
         self.device("1-1", "0c45", "6a10", [], configured=False)
         self.device("1-2", "058f", "9540", [("0b", "00", "00")])
-        self.run_script(sleep=self.on_wait(f"rm -r {self.sysfs / '1-1'}"))
+        done = self.run_script(sleep=self.on_wait(f"rm -r {self.sysfs / '1-1'}"))
+        self.assertIn('<4>Leaving 1-1 (0c45:6a10 "") blocked: it left the bus during the first run.', done.stderr)
         self.assertEqual(len(self.written()), 1)
         self.assertIn("058f:9540", self.written()[0])
         self.assertTrue(self.marker.exists())

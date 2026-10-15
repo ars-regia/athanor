@@ -328,7 +328,10 @@ if [[ $first == yes ]]; then
         present[${dev##*/}]=yes
     done
     for port in "${!wanted[@]}"; do
-        [[ -v present[$port] ]] || resolved[$port]=yes
+        if [[ ! -v present[$port] ]]; then
+            echo "<4>Leaving $port (${wanted[$port]#* }) blocked: it left the bus during the first run." >&2
+            resolved[$port]=yes
+        fi
     done
 fi
 for port in "${!resolved[@]}"; do
