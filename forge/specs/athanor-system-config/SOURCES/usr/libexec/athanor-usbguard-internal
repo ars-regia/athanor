@@ -250,7 +250,9 @@ device_rule() {
 # kernel serves without the device lock, before it reads anything that takes the lock; the
 # serial, or its absence, is added as soon as a read of the serial succeeds. An entry leaves the
 # file only after its rule is on disk, or when its device left the bus before the end of the run.
-declare -A last=() why=() settled=() resolved=()
+# A device whose serial a rule cannot carry can never be admitted: the first run leaves it
+# blocked and out of the pending file, where it would match any serial, and lists it no more.
+declare -A last=() why=() settled=() resolved=() dropped=()
 admitted=()
 clock
 deadline=$((now + wait_tenths * 10))
@@ -259,7 +261,7 @@ while :; do
     if [[ $first == yes ]]; then
         seen=no
         for dev in "${listed[@]}"; do
-            if [[ ! -v wanted[${dev##*/}] ]] && entry=$(identity "$dev"); then
+            if [[ ! -v wanted[${dev##*/}] && ! -v dropped[${dev##*/}] ]] && entry=$(identity "$dev"); then
                 wanted[${dev##*/}]=$entry
                 seen=yes
             fi
@@ -268,12 +270,19 @@ while :; do
     fi
     unsettled=()
     for dev in "${listed[@]}"; do
-        [[ -v settled[$dev] ]] && continue
         port=${dev##*/}
+        [[ -v settled[$dev] || -v dropped[$port] ]] && continue
         if [[ $first == yes && -v wanted[$port] && ${wanted[$port]#* } != *\ * ]] &&
-            serial=$(serial_field "$dev") && [[ $serial =~ ^([0-9A-Za-z._:+\ -]+|\"\")$ ]]; then
-            wanted[$port]+=" $serial"
+            serial=$(serial_field "$dev"); then
+            if [[ $serial =~ ^([0-9A-Za-z._:+\ -]+|\"\")$ ]]; then
+                wanted[$port]+=" $serial"
+            else
+                echo "<4>Leaving $port (${wanted[$port]#* }) blocked: its serial holds characters a rule cannot carry." >&2
+                unset "wanted[$port]"
+                dropped[$port]=yes
+            fi
             write_pending
+            [[ -v dropped[$port] ]] && continue
         fi
         if ! desc=$(describe "$dev"); then
             unset 'last[$dev]'

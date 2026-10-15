@@ -355,6 +355,21 @@ case $(wc -l < {count}) in
         self.assert_not_done(done, "1-1")
         self.assertEqual(self.pending.read_text(), "runs 1\n1-1 0c45:6a10 CAM1\n")
 
+    def test_a_serial_a_rule_cannot_carry_leaves_the_device_blocked_and_not_pending(self):
+        # Pending without its serial it would match any serial, though it can never be admitted.
+        self.device("1-1", "0c45", "6a10", [], 'CAM"1', configured=False)
+        self.device("1-2", "058f", "9540", [("0b", "00", "00")])
+        done = self.run_script(wait_tenths=3)
+        self.assertIn(
+            "<4>Leaving 1-1 (0c45:6a10) blocked: its serial holds characters a rule cannot carry.",
+            done.stderr,
+        )
+        self.assertNotIn("1-1 did not settle", done.stderr)
+        self.assertEqual(len(self.written()), 1)
+        self.assertIn("058f:9540", self.written()[0])
+        self.assertTrue(self.marker.exists())
+        self.assertFalse(self.pending.exists())
+
     def test_a_device_with_no_configuration_at_the_bound_is_left_pending(self):
         done = self.first_run_leaves_1_1_pending()
         self.assertIn("1-1 did not settle within 0.3 s: not configured", done.stderr)
