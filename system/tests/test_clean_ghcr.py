@@ -100,14 +100,19 @@ PROMOTED_SYSTEM = [image(1, ["100", "stable", "stable-20260914"], RECENT), image
                    image(3, ["80", "stable-20250501"], OLD), image(4, ["70"], OLD), image(5, ["released-3-101", "101"], RECENT)]
 
 
+ABSENT = object()  # no athanor-system package: the fake gh answers 404
+
+
 class Isos(Tool):
     """UD8: athanor-iso keeps the ISO of every promoted run, the runs read from athanor-system."""
 
     ISOS = [version(11, ["80"], 1), version(12, ["90"], 2), version(13, ["100", "stable"], 3), version(14, ["70"], 0),
             version(15, ["101"], 4), version(16, ["102"], 5), version(17, ["103", "latest"], 6), version(18, [], 7)]
+    # Today's registry: no ISO tagged stable yet, so only the athanor-system checks can stop the janitor.
+    UNSTABLE_ISOS = [v if v["id"] != 13 else version(13, ["100"], 3) for v in ISOS]
 
     def prune(self, isos, system=PROMOTED_SYSTEM):
-        packages = {"athanor-iso": isos} if system is None else {"athanor-iso": isos, "athanor-system": system}
+        packages = {"athanor-iso": isos} if system is ABSENT else {"athanor-iso": isos, "athanor-system": system}
         self.registry({"user_packages": ["athanor-iso"], "packages": packages})
         r = subprocess.run(["bash", str(JANITOR), "hr-mes"], capture_output=True, text=True, env=self.env)
         calls = [json.loads(line) for line in (self.dir / "calls.log").read_text().splitlines()]
@@ -118,16 +123,30 @@ class Isos(Tool):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(deleted, [14, 15, 18])  # never promoted, and not among the two newest or untagged
 
-    def test_an_unreadable_promoted_set_deletes_no_iso(self):
-        r, deleted = self.prune(self.ISOS, system=None)
-        self.assertNotEqual(r.returncode, 0)
+    def assert_kept(self, system, reason, isos=UNSTABLE_ISOS):
+        r, deleted = self.prune(isos, system=system)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn(f"athanor-iso: {reason}; the promoted runs are unknown, no ISO deleted", r.stderr)
         self.assertEqual(deleted, [])
 
+    def test_an_unreadable_promoted_set_deletes_no_iso(self):
+        self.assert_kept(ABSENT, "the athanor-system versions could not be read")
+
+    def test_an_empty_or_null_answer_deletes_no_iso(self):
+        for body in ([], None):
+            with self.subTest(body=body):
+                self.assert_kept(body, "no athanor-system version is tagged stable")
+
+    def test_no_stable_system_image_deletes_no_iso(self):
+        self.assert_kept([image(1, ["100", "latest"], RECENT)], "no athanor-system version is tagged stable")
+
+    def test_a_promoted_system_image_without_its_run_id_deletes_no_iso(self):
+        self.assert_kept([image(1, ["100", "stable"], RECENT), image(2, ["stable-20260801"], OLD)],
+                         "an athanor-system version tagged stable, stable-previous or stable-<YYYYMMDD> carries no run id")
+
     def test_a_stable_iso_of_no_promoted_run_deletes_no_iso(self):
-        r, deleted = self.prune(self.ISOS, system=[image(1, ["100", "latest"], RECENT)])
-        self.assertEqual(r.returncode, 1)
-        self.assertIn("the promoted runs are unknown, no ISO deleted", r.stderr)
-        self.assertEqual(deleted, [])
+        self.assert_kept([image(2, ["90", "stable"], RECENT)],
+                         "the ISO tagged stable has no run id that a promoted athanor-system image carries", isos=self.ISOS)
 
 
 if __name__ == "__main__":

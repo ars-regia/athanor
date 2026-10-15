@@ -6,17 +6,19 @@
 #     (docs/architecture/doc_update_trust.md, UT10): every image tagged latest, stable or
 #     stable-previous, every image pushed in the last RETENTION_DAYS (each was `latest` when
 #     pushed), every image ever promoted (tag stable-<YYYYMMDD>, system/promote.sh), which is
-#     never deleted (doc_update_delivery.md UD8), and whatever signs a kept image: the tags sha256-<hex>, sha256-<hex>.sig, .att and
-#     .sbom, and the untagged members of the cosign 3 index at sha256-<hex>. cosign 3 and
-#     containers/image write the signatures of one digest to two different tags, and a
-#     signature is never deleted while its digest is kept. Ninety days is an interim number;
+#     never deleted (doc_update_delivery.md UD8), and whatever signs a kept image: the tags
+#     sha256-<hex>, sha256-<hex>.sig, .att and .sbom, and the untagged members of the cosign 3
+#     index at sha256-<hex>. cosign 3 and containers/image write the signatures of one digest
+#     to two different tags, and a signature is never deleted while its digest is kept. Ninety
+#     days is an interim number;
 #   - athanor-nvidia-rpms, the mirror the NVIDIA locks index, is never pruned;
 #   - every other package keeps its two newest tagged versions and every version tagged
 #     latest, main or stable; the other tagged versions and the untagged ones are deleted.
 #     athanor-iso also keeps the ISO of every promoted run, athanor-iso:<run_id> (UD8): the
 #     run ids an athanor-system image tagged stable, stable-previous or stable-<YYYYMMDD>
-#     carries. When that set cannot be read, or misses the run of athanor-iso:stable, the
-#     janitor stops before it deletes any ISO.
+#     carries. The janitor stops before it deletes any ISO when that set cannot be read, when
+#     no athanor-system image is tagged stable, when a promoted athanor-system image carries no
+#     run id, or when the set misses the run of athanor-iso:stable.
 # Usage: clean_ghcr.sh OWNER. Needs gh with read:packages and delete:packages, and for the
 # system images skopeo logged in to the registry.
 set -euo pipefail
@@ -69,16 +71,25 @@ prune_system_image() { # prune_system_image PACKAGE API VERSIONS
   done < <(jq -r '.[] | "\(.id) \(.name)"' <<< "$versions") | delete "$package" "$api"
 }
 
+keep_isos() { # keep_isos REASON: stops the janitor before it deletes any ISO
+  echo "athanor-iso: $1; the promoted runs are unknown, no ISO deleted" >&2
+  exit 1
+}
+
 promoted_runs() { # promoted_runs ISO_VERSIONS -> JSON array of the run ids ever promoted
-  local runs
-  # Assigned first, so a failed read stops the janitor instead of keeping no ISO.
-  runs=$(gh api --paginate "${PACKAGES_API}/container/athanor-system/versions?per_page=100" | jq -sc 'add // []
-    | [.[].metadata.container.tags | select(any(test("^(stable|stable-previous|stable-[0-9]{8})$"))) | .[]
-       | select(test("^[0-9]+$"))] | unique')
-  jq -e --argjson runs "$runs" 'all(.[].metadata.container.tags | select(index("stable")); any(.[]; IN($runs[])))' <<< "$1" > /dev/null || {
-    echo "athanor-iso: the ISO tagged stable has no run id that a promoted athanor-system image carries; the promoted runs are unknown, no ISO deleted" >&2
-    exit 1
-  }
+  local system runs
+  system=$(gh api --paginate "${PACKAGES_API}/container/athanor-system/versions?per_page=100" | jq -sc 'add // []') ||
+    keep_isos "the athanor-system versions could not be read"
+  # Each check stands on its own: an empty or partial answer must not read as "none promoted".
+  jq -e 'type == "array" and any(.[]; .metadata.container.tags | index("stable"))' <<< "$system" > /dev/null ||
+    keep_isos "no athanor-system version is tagged stable"
+  jq -e 'all(.[].metadata.container.tags | select(any(test("^(stable|stable-previous|stable-[0-9]{8})$")));
+    any(test("^[0-9]+$")))' <<< "$system" > /dev/null ||
+    keep_isos "an athanor-system version tagged stable, stable-previous or stable-<YYYYMMDD> carries no run id"
+  runs=$(jq -c '[.[].metadata.container.tags | select(any(test("^(stable|stable-previous|stable-[0-9]{8})$"))) | .[]
+    | select(test("^[0-9]+$"))] | unique' <<< "$system")
+  jq -e --argjson runs "$runs" 'all(.[].metadata.container.tags | select(index("stable")); any(.[]; IN($runs[])))' <<< "$1" > /dev/null ||
+    keep_isos "the ISO tagged stable has no run id that a promoted athanor-system image carries"
   echo "$runs"
 }
 
