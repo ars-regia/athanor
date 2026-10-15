@@ -33,7 +33,12 @@ printf '[[registry]]\nlocation = "%s"\ninsecure = true\n' "${ACC_REGISTRY%%/*}" 
 mkdir -p "$ACC_STATE/registries.d"
 printf 'docker:\n  %s:\n    use-sigstore-attachments: true\n' "$ACC_REGISTRY" > "$ACC_STATE/registries.d/acceptance.yaml"
 
-podman container exists athanor-acc-registry || podman run -d --name athanor-acc-registry -p "127.0.0.1:$ACC_PORT:5000" docker.io/library/registry:2
+# An existing container may be stopped (reboot, podman stop): start it, which is a no-op when it runs.
+if podman container exists athanor-acc-registry; then
+  podman start athanor-acc-registry
+else
+  podman run -d --name athanor-acc-registry -p "127.0.0.1:$ACC_PORT:5000" docker.io/library/registry:2
+fi
 rpm=$(find "$ACC_RPM_DIR" -name 'athanor-update-1*.x86_64.rpm' | sort -V | tail -n 1)
 [[ -n $rpm ]] || die "no athanor-update RPM under $ACC_RPM_DIR: run forge/scripts/build_rolling_local.sh update"
 
