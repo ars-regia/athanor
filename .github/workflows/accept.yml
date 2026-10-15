@@ -108,8 +108,10 @@ jobs:
       # The same ISO again on firmware with Secure Boot enforced (#252, #145): the Athanor
       # certificate reaches MokList through the installer's request and MokManager, and the
       # verdict passes only when the installed system reports Secure Boot enabled and
-      # enforced. After the first case, never beside it: one VM at a time on this runner.
+      # enforced. After the first case, never beside it: one VM at a time on this runner. It
+      # runs after a failed first case too, so a red run says whether Secure Boot also failed.
       - name: 🔒 Install again with Secure Boot enforced
+        if: ${{ !cancelled() && env.ISO_PATH != '' }}
         env:
           SECURE_BOOT: "1"
           TIMEOUT: "1500"

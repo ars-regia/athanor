@@ -14,6 +14,9 @@ import re
 import sys
 
 GATES = ("iso-acceptance", "signature")
+# The checks a gate's verdict files must hold, each true in one of them: the ISO acceptance is
+# a pass only with the case run on Secure Boot firmware (#252, #145).
+REQUIRED_CHECKS = {"iso-acceptance": ("secure-boot",)}
 FIELDS = {"gate", "image", "digest", "run_id", "verdict", "workflow_run_url", "finished_at"}
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 IMAGE = re.compile(r"^athanor-[a-z0-9-]+$")
@@ -41,19 +44,23 @@ def args(argv):
     return a
 
 
-def verdict_of(paths):
-    """pass only when every verdict file says pass; an unreadable one is a fail."""
+def verdict_of(paths, required=()):
+    """pass only when every verdict file says pass and each REQUIRED check is true in one of
+    them; an unreadable one is a fail."""
     try:
-        return "pass" if all(json.loads(p.read_text()).get("pass") is True for p in paths) else "fail"
+        verdicts = [json.loads(p.read_text()) for p in paths]
+        held = {name for v in verdicts for name, ok in v.get("checks", {}).items() if ok is True}
+        ok = all(v.get("pass") is True for v in verdicts) and held.issuperset(required)
     except (OSError, ValueError, AttributeError):
         return "fail"
+    return "pass" if ok else "fail"
 
 
 def write(a):
     a.out.mkdir(parents=True, exist_ok=True)
     data = {
         "gate": a.gate, "image": a.image, "digest": a.digest, "run_id": int(a.run_id),
-        "verdict": a.verdict or verdict_of(a.verdict_json), "workflow_run_url": a.run_url,
+        "verdict": a.verdict or verdict_of(a.verdict_json, REQUIRED_CHECKS.get(a.gate, ())), "workflow_run_url": a.run_url,
         "finished_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     (a.out / f"{a.gate}.{a.image}.json").write_text(json.dumps(data, indent=2) + "\n")
