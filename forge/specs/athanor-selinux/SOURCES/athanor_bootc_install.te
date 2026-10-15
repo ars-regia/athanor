@@ -1,0 +1,25 @@
+module athanor_bootc_install 1.0;
+
+# athanor-update (bin_t) runs in unconfined_service_t and executes bootc and ostree
+# (install_exec_t). The base policy has no transition from that domain into install_t,
+# so bootc stayed in unconfined_service_t, without mac_admin, which it needs to write
+# labels the running policy does not define, and its install_t probe (`chcon` to an
+# unknown type, then a re-exec) was denied twice on every boot (#476). These rules give
+# unconfined_service_t the transition init_t already has, through no_new_privs too,
+# since every athanor-update unit sets NoNewPrivileges=yes. bootc in install_t runs mount,
+# which enters mount_t: that transition must pass no_new_privs too.
+#
+# Scope: the rule covers the whole unconfined_service_t domain, not athanor-update alone.
+# Any service in it that executes an install_exec_t file (bootc, ostree, rpm-ostree,
+# rpm-ostreed, anaconda, anaconda-yum, initial-setup)
+# enters install_t and so gains mac_admin, the one capability unconfined_service_t lacks.
+# A dedicated athanor_update_t domain would be narrower.
+require {
+    type unconfined_service_t; type install_exec_t; type install_t; type mount_t;
+    class process { transition };
+    class process2 { nnp_transition nosuid_transition };
+}
+type_transition unconfined_service_t install_exec_t:process install_t;
+allow unconfined_service_t install_t:process transition;
+allow unconfined_service_t install_t:process2 { nnp_transition nosuid_transition };
+allow install_t mount_t:process2 { nnp_transition nosuid_transition };

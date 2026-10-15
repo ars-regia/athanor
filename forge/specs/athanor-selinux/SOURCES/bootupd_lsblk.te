@@ -8,6 +8,7 @@ require {
 allow bootupd_t passwd_file_t:file { read open getattr };
 allow bootupd_t systemd_userdbd_runtime_t:dir { search read open getattr };
 allow bootupd_t proc_t:file { read open getattr };
+allow bootupd_t proc_t:dir { read }; # bootupctl lists /proc at boot (#476)
 allow bootupd_t mount_var_run_t:dir { search };
 
 # [FIX] Autorizza bootupd_t a risolvere utenti in systemd-userdbd (Cluster Mode) mitigando AVC Denial
