@@ -7,6 +7,9 @@
 # keyboard grab, and the click on the shield that would give it one needs a pointer QEMU's
 # monitor cannot move under egl-headless. The state stage checks that the unit trusts the state
 # root's os.athanor.Update1 answers with, and that the update service exits idle after the call.
+# The stale stage moves the guest's clock 15 days past the last successful check, with no
+# check since, and the shield must read "Not verified yet" (SH12, 14 days); the clock goes
+# back to the host's, and NTP as it was, before the stage ends or in the cleanup.
 # No stage presses Restart to update or Go back.
 # athanor-update-check.timer and athanor-update-state.service are masked for the run, so
 # nothing rewrites the fixture; cleanup unmasks them and republishes the real
@@ -31,7 +34,10 @@ UPDATE_POLICY=$ROOT/forge/specs/athanor-update/SOURCES/usr/share/dbus-1/system.d
 IDLE_EXIT_SECONDS=90 # the service's 60 s idle limit, polled every 5 s, plus margin
 DATA=$ROOT/forge/specs/athanor-bar/athanor-bar-1.0.0/data
 SHOTS=$ROOT/.scratch/shield-acceptance
-STAGES=(deploy sheet state cleanup)
+STAGES=(deploy sheet state stale cleanup)
+STALE_SECONDS=$((15 * 86400))
+CLOCK_MOVED=0
+GUEST_NTP=
 STAGE=
 CLEANED=0
 UPDATE_UNITS=(athanor-update-check.timer athanor-update-state.service)
@@ -40,7 +46,8 @@ SETTINGS_UNIT=shield-acceptance-settings
 # The shield's three headers, and the rows only an open sheet shows: the Secure Boot row of
 # a state that was read, or why none was (shield_probe.py matches any name of a list).
 SHIELD="System image verified|Not verified yet|Update refused"
-ROW="Secure Boot on|Secure Boot off: this machine runs in the declared degraded mode"
+READ_ROW="Secure Boot on|Secure Boot off: this machine runs in the declared degraded mode"
+ROW=$READ_ROW
 ROW+="|No trust state yet: the first check has not run"
 ROW+="|The trust state file is not owned by the system and was ignored"
 ROW+="|The trust state file could not be read"
@@ -92,8 +99,11 @@ open_sheet() { # open_sheet HOW
     probe showing "$ROW" || fail "$1: the sheet did not open (none of '$ROW' showed)"
 }
 
-# The trust state trust_state.py writes, dated now, installed as the system publishes it.
+# The trust state trust_state.py writes, dated now, installed as the system publishes it,
+# with the units that would rewrite it masked.
 write_state() { # write_state NAME
+    guest_ssh "sudo systemctl mask --runtime --now ${UPDATE_UNITS[*]}" > /dev/null ||
+        fail "masking ${UPDATE_UNITS[*]}"
     in_session python3 - "$1" --now "\$(date +%s)" --out /tmp/athanor-state.json \
         < "$ROOT/forge/test/shell/trust_state.py" || fail "trust_state.py $1"
     guest_ssh "sudo install -m 0644 -o root -g root /tmp/athanor-state.json /run/athanor-update/state.json" ||
@@ -121,8 +131,6 @@ stage_deploy() {
 # Item 13: the sheet closes on a click outside it and when the focus moves.
 stage_sheet() {
     command -v socat > /dev/null || fail "socat is not on the host: QEMU's monitor is reached through it"
-    guest_ssh "sudo systemctl mask --runtime --now ${UPDATE_UNITS[*]}" > /dev/null ||
-        fail "masking ${UPDATE_UNITS[*]}"
     write_state verified
     fresh_start
     sleep 3
@@ -160,9 +168,52 @@ stage_state() {
     done
 }
 
+# SH12 in the real session: with no successful check for more than 14 days the shield turns
+# to "Not verified yet". The check timer stays masked, as on a machine with no network, and
+# the bar starts after the clock has moved, as on a machine left off for two weeks.
+stage_stale() {
+    write_state verified
+    fresh_start
+    probe showing "System image verified" ||
+        fail "the shield is not 'System image verified' before the clock moves"
+    GUEST_NTP=$(guest_ssh timedatectl show -p NTP --value) || fail "reading the guest's NTP setting"
+    # Set first, so a failure of either call below still sends the cleanup to restore_clock.
+    CLOCK_MOVED=1
+    guest_ssh "sudo timedatectl set-ntp false" || fail "timedatectl set-ntp false"
+    guest_ssh "sudo date -s @$(($(date +%s) + STALE_SECONDS))" > /dev/null ||
+        fail "moving the guest's clock 15 days ahead"
+    fresh_start
+    # Until the state is read, and when it cannot be, the shield reads "Not verified yet" too:
+    # the sheet's Secure Boot row shows the state was read, and the header is asked again after it.
+    probe press "$SHIELD" > /dev/null || fail "no showing shield named any of '$SHIELD'"
+    probe showing "$READ_ROW" || fail "the sheet shows no Secure Boot row: the state was not read"
+    probe showing "Not verified yet" ||
+        fail "the shield is not 'Not verified yet' 15 days after the last successful check"
+    "$HERE/screenshot.sh" "$SHOTS/stale.png" > /dev/null
+    restore_clock || fail "restoring the guest's clock"
+    fresh_start
+    probe showing "System image verified" ||
+        fail "the shield is not 'System image verified' again once the clock is back"
+}
+
+# The guest's clock back to the host's, and NTP on again if it was on.
+restore_clock() {
+    guest_ssh "sudo date -s @$(date +%s)" > /dev/null || return 1
+    if [[ $GUEST_NTP == yes ]]; then
+        guest_ssh "sudo timedatectl set-ntp true" || return 1
+    fi
+    CLOCK_MOVED=0
+}
+
 stage_cleanup() {
     CLEANED=1
     local failed=0
+    if ((CLOCK_MOVED)); then
+        restore_clock || {
+            echo "cleanup: restoring the guest's clock failed" >&2
+            failed=1
+        }
+    fi
     if loaded "$SETTINGS_UNIT.service"; then
         in_session systemctl --user stop "$SETTINGS_UNIT" || {
             echo "cleanup: stopping $SETTINGS_UNIT failed" >&2
