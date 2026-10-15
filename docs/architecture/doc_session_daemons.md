@@ -70,7 +70,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08.** This revision 
 | Headset detection on a combo jack                              | `athanor-sessiond` (SD15), dialog in `athanor-osd` (OD19)                       | this document            |
 | Varlink audio server                                           | not replaced: the profile change becomes a command of the audio model (SD15)    | this document            |
 | Mono audio (`mono_sound`) | `athanor-sessiond` applies it (SD15); the setting and its page belong to accessibility | `doc_accessibility.md` |
-| `button-layout` and `icon-theme`                               | GSettings vendor defaults and a one-time reset (SD16)                           | this document            |
+| `button-layout` and `icon-theme`                               | GSettings vendor defaults and the reset of COSMIC's values at login (SD16)      | this document            |
 | GTK CSS export, Flatpak overrides, `color-scheme`, `gtk-theme` | the apply function of `athanor-style` (VL4); no CSS export, no Flatpak override | `doc_visual_language.md` |
 | Dark and light by sunrise and sunset                           | excluded (SD21)                                                                 | this document            |
 | Low battery notices and sounds                                 | `athanor-sessiond` notices, no sounds (SD14)                                    | this document            |
@@ -220,6 +220,13 @@ Status: **revision 2, approved by the maintainer on 2026-10-08.** This revision 
   - `athanor-wallpaper` copies `com.system76.CosmicBackground` v1: a `Path` source of `all` to `picture` (the hearth's path to `"hearth"`), each `output.<name>` path to `per-output`, `same-on-all` as it is; a `Color` source becomes `"hearth"`;
   - `athanor-sessiond` resets `icon-theme` when its value is `'Cosmic'`.
   - It then sets `migrated`. A file that does not parse is skipped with one journal line at warning; the defaults apply. The COSMIC files are left in place.
+- **The reset of COSMIC's appearance values.** *Amended 2026-10-15 (maintainer decision, #473):* it runs at every login, not once, and covers the two fonts besides `icon-theme`.
+  - Until `athanor-sessiond` exists, `athanor-appearance-reset.service`, a oneshot user unit of `athanor-system-services` in the class of the session steps (`doc_session.md` SN6), `PartOf=graphical-session.target` and `WantedBy=athanor-session.target` by preset (SN3), runs it at every login.
+  - It resets each of these keys of `org.gnome.desktop.interface` only when the user's own value, read from dconf's user database and never from the vendor default, is exactly the one cosmic-settings-daemon wrote before it was put on `GSETTINGS_BACKEND=memory` (#474): `icon-theme` `'Cosmic'`, `font-name` `'Open Sans'`, `monospace-font-name` `'Noto Sans Mono'`. The vendor defaults then apply: `'Adwaita'` (above) and the fonts of `doc_visual_language.md` VL6. Any other value is the user's and is kept.
+  - `org.gnome.desktop.wm.preferences button-layout` is kept as a user value: the daemon copied the user's own COSMIC choice into it.
+  - The rule is idempotent, so it needs no `migrated` key, and none is added for `athanor-sessiond`. A failing read or reset is logged to the journal and leaves the unit failed; the login goes on.
+  - Accepted risk: a user who deliberately chooses exactly `Open Sans` as the interface font or `Noto Sans Mono` as the monospace font sees it reset at the next login.
+  - At SD22 step 3 the reset moves into `athanor-sessiond`, with the same rule at each of its starts, and the unit leaves. The reset goes through the dconf service on the bus, so SD17's "writes nothing" holds.
 
 **SD17. The daemons' own confinement.**
 
@@ -384,3 +391,7 @@ Taken by the maintainer on 2026-10-08, accepting the recommendations of review b
 
 15. **Decision 15 (review batch 2, `doc_tetragon.md` decision 18, Q1). Runtime security events.** `athanor-sessiond` subscribes to `os.athanor.RuntimeEvents1` and raises the notices of `doc_tetragon.md` TG8; it needs no new filesystem access, so SD17's "reads only" holds.
 16. **Decision 16 (review batch 2, threat model Q5). A stale reference.** SD9's residual risk no longer cites the open doubt T2 of the threat model, which is decided.
+
+Taken by the maintainer on 2026-10-15 (#473):
+
+17. **COSMIC's appearance values are reset at every login, from a session step until `athanor-sessiond` exists** (SD16). `icon-theme` `'Cosmic'`, `font-name` `'Open Sans'` and `monospace-font-name` `'Noto Sans Mono'` are reset when the user's value is exactly that; `button-layout` is kept. Reason: cosmic-settings-daemon wrote them into every account until #474, and the accounts should not wait for step 3 of SD22; an exact match is idempotent and keeps every other choice, at the accepted cost of resetting a user who chose exactly one of those two fonts.
