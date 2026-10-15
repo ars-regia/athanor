@@ -5,7 +5,11 @@
   of a manufacturer, and the ordered plan that reaches it. [doc_ci.md](doc_ci.md) describes
   the workflows as they are; this document describes what they become and why.
 - **Owner:** the maintainer.
-- **Status:** revision 3 (2026-10-09), approved by the maintainer on 2026-10-11 with the fixes
+- **Status:** revision 4 (2026-10-15), approved by the maintainer on 2026-10-15
+  ([ADR-0118](../decisions/0118-pipeline-revision-4-approval.md)): it places the three workflows that
+  revision 3 left to #406, `bot-merge.yml` as a target entry of its own, `fuzz.yml` in
+  `maintenance.yml` and the shell rig build image in `bots.yml` (section 3.5).
+  Revision 3 (2026-10-09) was approved by the maintainer on 2026-10-11 with the fixes
   of its review, as an exception to the freeze of ADR-0103 D3 ([ADR-0111](../decisions/0111-pipeline-revision-3-approval.md)): it moves
   the image signing into `release.yml`, signs `:latest` with no approval and gates the
   promotion to `:stable` with the `release` approval (ADR-0104, section 15).
@@ -19,6 +23,8 @@
   not reusable stages (since revision 3, `sign-kernel` of `build.yml` and `sign-images` of
   `release.yml`), because a called workflow's job does not read its environment's secrets
   ([actions/runner#4453](https://github.com/actions/runner/issues/4453); section 3.2).
+  Amended 2026-10-15 (#406), a factual correction and no new target decision: section 3.5
+  lists the workflow files of `iso-v0` as they are (section 15).
 - **Depends on:** [doc_update_delivery.md](doc_update_delivery.md) (UD1-UD44: channels,
   promotion, retention, pinning), [doc_update_trust.md](doc_update_trust.md) (UT1-UT13),
   [doc_build_ordering.md](doc_build_ordering.md) (O1-O9), [doc_build_system.md](doc_build_system.md),
@@ -122,19 +128,20 @@ spec in the system stage).
 ## 3. Target topology
 
 This section describes the target. Of its files, only `pr.yml` and `call-kernel.yml` (PR
-#266), `maintenance.yml` (PR #264, with the settings drift check of PL52 alone) and the `kvm`
-composite action exist on `iso-v0`; every other entry workflow, stage and
-composite action, and the `sign-kernel` and `sign-images` jobs, are proposed. Today the
-two signing jobs are `nvidia-kmod-sign` (environment `signing-kernel`) and
-`sign-system-images` (environment `signing` during the image key rotation of
-[secrets.md](../operations/secrets.md) section 4.1) of `athanor-forge-orchestrator.yml`
-(PR #265). Revision 3 splits the release in two entries: `build.yml`, which builds, and
-`release.yml`, which signs the images and moves `:latest` (section 4.10, ADR-0104). Section
-3.5 maps each of today's workflows to its target.
+#266), `maintenance.yml` (PR #264, with the settings drift check of PL52 alone),
+`accept.yml` (PR #364), `bot-merge.yml` (ADR-0108, PR #365), `release.yml` (PB13, PRs #408
+and #409) and the `kvm` composite action exist on `iso-v0`; every other entry workflow, stage and composite action, and the
+`sign-kernel` job, are proposed. Today the kernel signing job is `nvidia-kmod-sign`
+(environment `signing-kernel`) of `athanor-forge-orchestrator.yml` (PR #265), and the image
+signing job is `sign-images` of `release.yml` (environment `signing` during the image key
+rotation of [secrets.md](../operations/secrets.md) section 4.1). Revision 3 splits the
+release in two entries: `build.yml`, which builds, and `release.yml`, which signs the images
+and moves `:latest` (section 4.10, ADR-0104). Section 3.5 maps each of today's workflows to
+its target.
 
 ### 3.1 Entry workflows
 
-Seven workflows have triggers. Everything else is a reusable stage they call, except the two
+Eight workflows have triggers. Everything else is a reusable stage they call, except the two
 jobs that sign, which are jobs of the entry workflow that runs them: `sign-kernel` of
 `build.yml` and `sign-images` of `release.yml` (section 3.2).
 
@@ -145,8 +152,9 @@ jobs that sign, which are jobs of the entry workflow that runs them: `sign-kerne
 | `release.yml`    | `workflow_dispatch` only, from `build.yml` on `iso-v0` or by hand, input `build_run_id` (PL54) | the candidate and its order (PL55, PL58), signing of the images, `:latest`, ISO, release evidence; its last job dispatches `accept.yml` (PL56) |
 | `accept.yml`     | `workflow_dispatch` with a run id, from the last job of `release.yml` or by hand (PL56) | ISO and upgrade acceptance on the run's own digests (UD17, UD18), evidence files, the VSA                                       |
 | `promote.yml`    | hourly `schedule`, `workflow_dispatch`         | selects the candidate with complete evidence after the dwell (UD5), runs the policy check, promotes by digest after the `release` approval (PL60), publishes the evidence bundle; checks out `RELEASE_BRANCH` (VAR4), not the default branch the schedule runs on |
-| `bots.yml`       | daily `schedule`, `workflow_dispatch`          | one matrix over the bump scripts (kernel, cosmic-comp, nixpkgs registry, specs, NVIDIA locks); each opens or updates one pull request through one shared script  |
-| `maintenance.yml`| daily and weekly `schedule`, `workflow_dispatch` | vulnerability rescan, settings drift check, run statistics; weekly: janitor, reproducibility and benchmark, patch rebase drill, two-output layout, Scorecard |
+| `bots.yml`       | daily `schedule`, `workflow_dispatch`          | one matrix over the bump scripts (kernel, system image, cosmic-comp, nixpkgs registry, specs, NVIDIA locks); each opens or updates one pull request through one shared script; the signer image and the shell rig build image, each built by the content hash of its inputs, with the bump of its pin as one of those pull requests (PL19); the pin pull requests are never merged by `bot-merge.yml` and wait for the code owner's review (ADR-0107, CI30)  |
+| `bot-merge.yml`  | `workflow_run`, after the checks of a bot pull request | merges two kinds of bot pull request through `forge/scripts/bot_merge.py` (CI32): the spec bot's (`chore/update-specs-zero-trust`) and the system bump's (`bump/system-*`), once the checks of the pull request end green. The kernel bump uses `gh pr merge --auto` when its preparation is green and no NVIDIA lock moves, and otherwise waits for a person (ADR-0108), and the pin pull requests of the signer and rig build images are not merged by it. It stays apart from `bots.yml` because it runs on `workflow_run`, the verdict of the checks of the pull request, and so from the default branch's file (ADR-0108 item 2): one file opens bot pull requests, another merges two kinds of them |
+| `maintenance.yml`| daily and weekly `schedule`, `workflow_dispatch` | vulnerability rescan, settings drift check, run statistics; weekly: janitor, reproducibility and benchmark, fuzzing of the parsers that read untrusted input, patch rebase drill, two-output layout, Scorecard |
 
 ### 3.2 Reusable stages and composite actions
 
@@ -238,24 +246,25 @@ flowchart LR
   PR2 --> M["machines verify signature<br/>(+ signed release attestation from 1.0)"]
 ```
 
-### 3.5 Today's 29 workflows
+### 3.5 Today's 32 workflows
 
 | Workflow                         | Target                                                                                             |
 | -------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `athanor-forge-orchestrator.yml` | renamed `build.yml` in PB12; its `nvidia-kmod-sign` job (PR #265) becomes `sign-kernel`. Its `sign-system-images`, `verify-system-images` and `tag-system-images` jobs leave it for `release.yml` in PB13, as `sign-images`, `verify-images` and `tag-latest` (PL56) |
+| `accept.yml`                     | kept: the acceptance entry of section 3.1, dispatched with a build run id (UD17, PL56); it replaced `iso-acceptance.yml` (PR #364) |
+| `athanor-forge-orchestrator.yml` | renamed `build.yml` in PB12; its `nvidia-kmod-sign` job (PR #265) becomes `sign-kernel`. Its `sign-system-images`, `verify-system-images` and `tag-system-images` jobs left it for `release.yml` in PB13 (PR #409), as `sign-images`, `verify-images` and `tag-latest` (PL56) |
 | `azoth-signer.yml`               | merged into `bots.yml`: the signer image is built by the content hash of its inputs, with provenance (PL19), and the bump of `forge/specs/azoth/signer/image.digest` is a bot pull request, not a hand edit |
+| `bot-merge.yml`                  | kept: the bot merge entry of section 3.1, apart from `bots.yml` because it runs on `workflow_run`, the verdict of the checks of the pull request (ADR-0108 item 2, PR #365; doc_ci.md CI32; ADR-0118) |
 | `call-build-builder.yml`         | kept as `call-builder.yml`, consumed by digest                                                     |
 | `call-dag-compile.yml`           | renamed `call-packages.yml`; it already builds every dirty package in one matrix (PR #268, PL48) |
 | `call-kernel.yml`                | kept: today the kernel check of `pr.yml` (PR #266); it gains the release build of `kernel-build.yml` and the module build of `call-nvidia-kmod-prepare.yml` |
 | `call-lint.yml`                  | deleted: `just check` in `pr.yml`; the release path does not lint again (PL44). Today the Orchestrator calls it once per run (PR #268) and `kernel-build.yml` once more |
 | `call-nvidia-kmod-prepare.yml`   | merged into `call-kernel.yml`: since PR #265 it holds the artifacts, build and prepare jobs of the module cycle |
-| `call-system-image.yml`          | split into `call-image.yml`, `call-tag.yml` and `call-iso.yml`, which takes over its ISO build; its signing job already moved to the Orchestrator (PR #265) and becomes the `sign-images` job of `release.yml` |
+| `call-system-image.yml`          | split into `call-image.yml`, `call-tag.yml` and `call-iso.yml`, which takes over its ISO build; its signing job moved to the Orchestrator (PR #265), then to `release.yml` as `sign-images` (PR #409) |
 | `cosmic-comp-bump.yml`           | merged into `bots.yml`                                                                             |
 | `cosmic-comp-rebase.yml`         | merged into `maintenance.yml` (weekly)                                                             |
 | `forge-ghcr-cleanup.yml`         | merged into `maintenance.yml` (weekly janitor, section 5)                                               |
 | `forge-util-update-specs.yml`    | merged into `bots.yml`                                                                             |
-| `fuzzing.yml`                    | deleted: it had no targets (`tests/fuzz` is gone); fuzzing returned as `fuzz.yml` (weekly, doc_ci.md CI31) |
-| `iso-acceptance.yml`             | replaced by `accept.yml`, addressed by run id (UD17)                                               |
+| `fuzz.yml`                       | merged into `maintenance.yml` (weekly fuzz job, like the janitor and the reproducibility checks; doc_ci.md CI31, PR #310; ADR-0118) |
 | `kernel-build.yml`               | split: the check into `pr.yml` (done through `call-kernel.yml`, PR #266; its own `pull_request` trigger goes with the PB1 follow-up), the build and the publication into `call-kernel.yml`. It signs nothing: `vmlinuz` is signed by the Orchestrator's `nvidia-kmod-sign`, which becomes `sign-kernel` |
 | `kernel-bump.yml`                | merged into `bots.yml`                                                                             |
 | `kernel-weekly.yml`              | merged into `maintenance.yml` (weekly)                                                             |
@@ -266,13 +275,16 @@ flowchart LR
 | `nvidia-kmod.yml`                | since PR #265 the boot and publication of the signed modules and `azoth-boot`: becomes `call-kernel-publish.yml`, whose identity `system/kernel-artifacts.sh` then trusts (PL12, D43) |
 | `pr.yml`                         | kept (PR #266); gains the image check and the shell surfaces (PB11, PB12)                         |
 | `promote-stable.yml`             | replaced by `promote.yml`                                                                          |
+| `publish-rig-build-image.yml`    | merged into `bots.yml`: the build image of the shell rig is built by the content hash of its inputs, with provenance (PL19), and the bump of its pin is a bot pull request that waits for the code owner's review, as the signer's does, not a manual publication (doc_ci.md CI30, PR #303; ADR-0118) |
+| `release.yml`                    | kept: the release entry of section 3.1 (PB13, ADR-0104, PRs #408 and #409) |
 | `rust-security-audit.yml`        | deleted: `cargo deny` in `just check` (ADR-0075), the daily rescan in `maintenance.yml`            |
 | `shell-layout-outputs.yml`       | merged into `maintenance.yml` (weekly)                                                             |
 | `shell-surfaces.yml`             | merged into `pr.yml`, selected by change detection, the bar built once (PL45)                      |
 | `spec-build-check.yml`           | merged into `pr.yml`, selected by change detection                                                 |
 | `system-image-check.yml`         | merged into `pr.yml`, selected by change detection                                                 |
 
-29 files become 14 (seven entries, seven stages) plus five composite actions.
+The target has 15 files (eight entries, seven stages) plus five composite actions. Every one of
+today's 32 files maps onto them or is deleted.
 
 ## 4. The trust chain, end to end
 
@@ -381,11 +393,14 @@ and such a job in a reusable workflow (section 3.2).
 ### 4.3 Intermediate artifacts
 
 **PL12. Every hop is consumed by digest and verified with an exact identity.** Each
-artifact one stage hands to another (builder image, the `azoth-signer` image, package images
+artifact one stage hands to another (builder image, the `azoth-signer` image, the shell rig build image, package images
 by `hash-` tag, tier repositories, kernel, devel, modules, boot image) is resolved to a digest once, verified
 with `cosign verify` (or `gh attestation verify`) against the exact certificate identity
 of the stage that produced it, and used only by that digest. An identity is matched as an
-exact string, not a pattern. This extends UD44 from tier repositories to every hop.
+exact string, not a pattern. This extends UD44 from tier repositories to every hop. One
+named exception: the shell rig image `athanor-shell-rig@<rig-image.digest>` that `rig.sh`
+pulls is published by hand with `rig.sh publish-image`, no workflow publishes it, and so it
+is not yet a verified hop (#505).
 
 **PL13. Tags inside the build chain are names, not inputs.** `hash-<h>` and `<run_id>` tags
 are written once, after the signature of the digest they name verified (PR #248, UD25);
@@ -426,14 +441,15 @@ sequence of releases (UD27): new key shipped in a promoted image, then used.
 ### 4.5 Provenance
 
 **PL19. Every artifact has SLSA provenance:** packages, tier repositories, builder image,
-the `azoth-signer` image, kernel, devel, modules, boot image, the three system images and the ISO. Provenance is the
+the `azoth-signer` image, the shell rig build image, kernel, devel, modules, boot image, the three system images and the ISO. Provenance is the
 `https://slsa.dev/provenance/v1` predicate, generated by `actions/attest-build-provenance`
 inside the stage that built the artifact, in the job that built it, so the provenance's
 runner environment is the build's. The signed derivatives are the one exception: the signed
 `vmlinuz` of `azoth-boot` and the signed NVIDIA modules of `azoth-nvidia` are new bytes
 written by the `sign-kernel` job, which runs no step but the signer (PL11). Their provenance
 is generated by `call-kernel-publish.yml`, names the unsigned digest and the signing run as
-its inputs, and claims Build L2 (PL21).
+its inputs, and claims Build L2 (PL21). The shell rig image `athanor-shell-rig` is outside
+this list until a workflow publishes it (#505).
 
 **PL20. Provenance names its inputs by digest:** source commit, builder digest, base image
 digest, tier digests, kernel artifacts. A digest absent from the provenance is an input
@@ -1142,8 +1158,9 @@ step only the maintainer can take.
 | | **[M]** apply `branch-protection.json`, which adds `gate` to `Kernel gate` and `Spec gate` on `iso-v0` (`docs/operations/github-settings.md` section 8); the follow-up that drops their `pull_request` triggers removes the two names from the file in the same change. The kernel half is done (doc_ci.md CP4): Kernel Build runs on pull requests to `main` only. Until the specs half, Spec Build Check still runs on a PR that selects no spec | | | | |
 | **PB2** | Source, review and settings controls, alerting | `.github/settings/rulesets.json`, `actions.json`, `environments.json`, `CODEOWNERS`, `scripts/github-settings/ghsettings.py` (extended), `.github/actions/alert`, the three action references still pinned by tag (`call-dag-compile.yml`, `iso-acceptance.yml`, `nix-vanguard.yml`), `scripts/verify.py` (the action part of `pinning`) | `python3 scripts/github-settings/ghsettings.py diff` exits 0 against the live repository; the integrity ruleset (merge queue, `gate`, no bypass actor) and the review ruleset (the Admin role as bypass actor, for pull requests only) are live on both product branches; every action is pinned by full commit SHA (the action part of `verify.py pinning`; containers and the flake are PB3's) before SHA pinning is switched on; a release run triggered by the maintainer is approvable by the maintainer (PL5), and the actor GitHub records for a push made by the merge queue is measured on a live merge and written into PL5; the three personal tokens are absent from the secrets list; a forced failure of a scheduled job opens a `ci-alert` issue | PB1 | 2 (estimate) |
 | | **[M]** create one GitHub App per role, each private key in an environment scoped to its token-minting job with a row in secrets.md; create the agents' App, its private key in the maintainer's secret store (PL5); apply the two rulesets; enable the merge queue; enable SHA pinning once every action is pinned by SHA | | | | |
-| **PB3** | Pinned inputs, verified hops (PL8, PL12-PL14) | `.github/actions/verify-input`, `scripts/ci/registry.sh`, `forge/config/images.json`, the key-isolation constants of `scripts/verify.py`, `scripts/runner/` (PL8) | `python3 scripts/verify.py pinning images workflows` green, with no literal registry host in the key-isolation lint; a release run's logs show a verification for every hop of PL12; the runner VM does not replace its pinned runner release | PB1 | 3-4 (estimate) |
-| **PB4** | SLSA provenance (Build L3 hosted, L2 self-hosted, PL21) and CycloneDX SBOM for every artifact | the seven stages, the `azoth-signer` image, `.github/actions/attest`, `scripts/ci/verify_release.sh`, `scripts/ci/sbom_check.py`, `docs/compliance/` (the SHA-512 deviation record of PL24) | `scripts/ci/verify_release.sh <run_id>` exits 0 for a release run, covering every digest in `image-digests.txt` and `kernel-artifacts.env`, the signed `vmlinuz` and modules with provenance from `call-kernel-publish.yml` naming the unsigned digest and the signing run (PL19), and refuses an L3 claim on an attestation from a self-hosted runner or for a signed derivative; the `sbom_check.py` fixture tests pass for each ecosystem; `grep -ril sha-512 docs/compliance` names the deviation record of PL24 | PB3 | 3 (estimate) |
+| **PB3** | Pinned inputs, verified hops (PL8, PL12-PL14) | `.github/actions/verify-input`, `scripts/ci/registry.sh`, `forge/config/images.json`, the key-isolation constants of `scripts/verify.py`, `scripts/runner/` (PL8) | `python3 scripts/verify.py pinning images workflows` green, with no literal registry host in the key-isolation lint; a release run's logs show a verification for every hop of PL12 that a release run consumes (the shell rig build image is not one: PB4); the runner VM does not replace its pinned runner release | PB1 | 3-4 (estimate) |
+| **PB4** | SLSA provenance (Build L3 hosted, L2 self-hosted, PL21) and CycloneDX SBOM for every artifact | the seven stages, the `azoth-signer` image, the shell rig build image (signed by the workflow that publishes it at that time, and pulled by `forge/test/shell/rig.sh` after a `cosign verify` with an exact identity, PL12; the shell rig image `athanor-shell-rig`, published by hand, is not yet a verified hop, #505), `.github/actions/attest`, `scripts/ci/verify_release.sh`, `scripts/ci/sbom_check.py`, `docs/compliance/` (the SHA-512 deviation record of PL24) | `scripts/ci/verify_release.sh <run_id>` exits 0 for a release run, covering every digest in `image-digests.txt` and `kernel-artifacts.env`, the signed `vmlinuz` and modules with provenance from `call-kernel-publish.yml` naming the unsigned digest and the signing run (PL19), and refuses an L3 claim on an attestation from a self-hosted runner or for a signed derivative; the `sbom_check.py` fixture tests pass for each ecosystem; the pin pull request of a rig build image published after its signing step has merged (`forge/test/shell/build-image.digest` does not exist on `iso-v0` yet, and until it does `rig.sh` builds the stage locally, doc_ci.md CI27); `cosign verify` with the exact identity of the rig image's publisher passes on the pinned rig build image, and a `pr.yml` run's logs show that verification before the image is used; `grep -ril sha-512 docs/compliance` names the deviation record of PL24 | PB3 | 3 (estimate) |
+| | **[M]** once the signing step has merged, dispatch the workflow that publishes the rig build image (`publish-rig-build-image.yml`, or `bots.yml` if PB12 came first), make its package public on the first publication and approve its pin pull request (CI27, CI30); a pin merged before the signing step names an unsigned digest and is published and pinned again; the change that makes `rig.sh` verify the image merges after the pin of a signed image, or its own `pr.yml` run fails on the unsigned pin | | | | |
 | **PB4b** | Release attestation (PQ4, PL31, ADR-0094): the key-signed in-toto statement with `class`, `advisories`, `build_time`, `revision` (the candidate's commit) and `build_run_id` (PL55), produced under `scripts/ci/` and signed in `sign-images` | the block is specified when its plan is written | the class and advisory ids a client verifies before UT13 acts, derived by `candidate` as in PL55; `test_release_candidate.py`: a missing baseline `:latest` gives `class = feature`, `advisories = []` and `class_reason` `no-baseline`; an unlabelled one takes `<base>` from the newest release marker in the history of `iso-v0`, ties to the larger run id; an image signed but never tagged has no marker and is never the base; a verified marker whose attested revision is not in the history of `iso-v0` fails; a marker whose tag-name revision differs from its attestation's fails; `mark-current` writes the missing marker of a `:latest` with a verified PB4b attestation and nothing else, and fails on an unverifiable attestation or a revision not in the history of `iso-v0`; a `tag-latest` re-run at `candidate_digest` with no marker writes the marker only, and one at `baseline_digest` moves `:latest` before writing it; with no marker it skips the git half and records `unlabelled-baseline`, with `security` when the Fedora half finds an advisory and `feature` otherwise; a marker whose attestation is missing or does not verify with the keys of the checked-out tree is ignored and named in the run summary, and never becomes the base; `tag-latest` pushes the marker on each digest it tags; the janitor's dry run keeps the `:latest` digest and the newest marker's image, marker and attestation of each repository; a labelled baseline whose commit is not an ancestor uses the range `<label>..<candidate>`; a label commit absent from the repository fails; with a labelled baseline, a missing or unavailable updateinfo source fails; a security `release-class.toml` in the commit range, or a Fedora advisory whose fixed NEVRA lies after the `:latest` one and at or before the candidate's, sets the class; an advisory fixed at or before the `:latest` NEVRA, or after the candidate's, is not claimed; an empty updateinfo result gives no Fedora advisory; a re-run reads the recorded result only while each repository's `:latest` equals its `baseline_digest` or its `candidate_digest`, and any other value fails; a partial `tag-latest` re-run retags only the repositories still at their baseline | PB4, PB13 | not estimated |
 | **PB5** | Evidence, VSA and the policy gate | the Conforma `ec` spike first (PL30), `accept.yml`, `promote.yml` (its promote job in the environment `release`, PL60), `system/promote.sh`, `scripts/ci/policy_check.py`, `scripts/ci/policy.json` | doc_update_delivery.md phases P1 and P2 gates, plus: `policy_check.py` refuses a candidate with each single piece of evidence removed (unit test), and the first promotion approved in `release` carries a VSA (PL60) | PB4 | 4 (estimate) |
 | **PB5b** | Close of the image key rotation (secrets.md section 4.1) | `system/keys/`, `.github/settings/environments.json`, the `sign-system-images` job of `athanor-forge-orchestrator.yml` (`sign-images` of `release.yml` after PB13), `docs/operations/secrets.md`, the `signing` alias of `scripts/verify.py` | a release signed with key 2 alone was promoted to `:stable` and one more release followed; `athanor-image-1.pub` is gone from `system/keys/`; the live environments and `environments.json` list `signing-kernel`, `signing-images` and `release` only; `MOK_PRIVATE_KEY` is absent | PB5 | 0.5 (estimate) |
@@ -1156,7 +1173,8 @@ step only the maintainer can take.
 | **PB9** | Retention and the evidence archive | `forge/scripts/clean_ghcr.sh`, `promote.yml` (GitHub Release), UT10 and UD8 text | the janitor's unit test on a fixture graph keeps every member of the reachable set of section 5 and ages out the rest; its dry run on the live registry deletes no member; the first promotion has a GitHub Release with the bundle and a verifying `bundle.sha256` signature | PB5 | 2 (estimate) |
 | **PB10** | Update control (ADR-0082) | `athanor-update`, Settings, doc_update_trust.md (UT13) | dev-VM harness: a security update applies at the next shutdown by default; postpone holds it until its limit, then it applies; the opt-out stops automatic application, shows the warning, and still notifies | PB5 | 3 (estimate) |
 | **PB11** | Performance | `pr.yml` selections, the bar job, timeouts, concurrency, caches, NVIDIA modules once | the section 7.2 targets measured by `scripts/ci/run_stats.py` over five runs per path, driven by `workflow_dispatch` with a forced selection where a path is rare, and timed from the start of the first job, so approval waits are reported (PL49) and not gated | PB1 | 3 (estimate) |
-| **PB12** | Topology consolidation | the 29 workflows to the 14 of section 3, the Orchestrator renamed `build.yml`, `bots.yml`, `maintenance.yml`, `dag_orchestrator.py` (PL48), the trusted workflow paths of `system/fetch-evidence.sh`, `system/accept-target.sh` and `system/trusted-run.sh`, doc_ci.md, `docs/operations/ci-runbook.md` | `ls .github/workflows` matches section 3; `python3 scripts/verify.py` green with the checks of section 10; `system/fetch-evidence.sh` finds the evidence of a run of `build.yml`; a release run dispatched with a fixture spec at graph depth 3 or more builds it in the single matrix | PB3, PB11 | 5 (estimate) |
+| **PB12** | Topology consolidation | the workflows of section 3.5 to the 15 of section 3, the Orchestrator renamed `build.yml`, `bots.yml`, `maintenance.yml`, `dag_orchestrator.py` (PL48), `forge/test/shell/rig.sh` (the hand-over of the rig build image's publisher: see the maintainer step below), `bot-merge.yml` and `forge/scripts/bot_merge.py` (when `system-image-check.yml` and `spec-build-check.yml` fold into `pr.yml`, they read the verdicts of the system bump and of the spec bot from `gate` and stop filtering the runs by the names `Pull Request` and `System Image Check`), the trusted workflow paths of `system/fetch-evidence.sh`, `system/accept-target.sh` and `system/trusted-run.sh`, doc_ci.md, `docs/operations/ci-runbook.md` | `ls .github/workflows` matches section 3; `python3 scripts/verify.py` green with the checks of section 10; `system/fetch-evidence.sh` finds the evidence of a run of `build.yml`; a release run dispatched with a fixture spec at graph depth 3 or more builds it in the single matrix | PB3, PB11 | 5 (estimate) |
+| | **[M]** hand over the rig build image's publisher: dispatch the rig build image job of `bots.yml`, then merge one pull request, opened by an agent and not by the bot, that sets `forge/test/shell/build-image.digest` to that digest, removes `publish-rig-build-image.yml` and, if PB4 has landed, changes `rig.sh`'s expected identity to `bots.yml`, so the digest and the identity it is checked against change together, and close the pin pull request `bots.yml` opens for the same digest, which changes the pin alone; if PB4 has not landed, PB4 signs from `bots.yml` | | | | |
 | **PB13** | Release workflow (ADR-0104, section 4.10) | two pull requests, since a workflow whose only trigger is `workflow_dispatch` cannot run before it is merged. The first adds `release.yml` and the `request-release` job of `athanor-forge-orchestrator.yml`, which writes and uploads the request but does not dispatch yet. The only planned run of `release.yml` in between is one hand dispatch, by the maintainer, of the build now on `:latest` in every repository of its `image-digests.txt`, one that ran after the first pull request merged and so has a `release-request`: `tag-latest` finds `:latest` at the candidate digest and moves nothing, `sign-images` adds a second signature with the same key, and `request-acceptance` runs one more acceptance of that build. Until the second pull request, a hand dispatch of a newer build would make `tag-latest` a second writer of `:latest` beside the old jobs, bounded by its PL58 check; the `verify.py workflows` rule against a second writer comes with the second pull request. The second, after that run is green, removes the Orchestrator's `sign-system-images`, `verify-system-images` and `tag-system-images` jobs, turns the dispatch on and adds the `verify.py workflows` rules; `scripts/ci/release_request.py`, `scripts/ci/release_candidate.py` and the schemas of `release-request.json` and `release-candidate.json` (section 3.3); the `in_progress` mode of `system/trusted-run.sh` (PL55), `system/sign-images.sh`, `system/verify-images.sh` and `system/tag-images.sh` as `release.yml` calls them (`system/fetch-evidence.sh` already trusts `release.yml` for the `signature` gate, and its build path changes with PB12); the `org.opencontainers.image.revision` label in `system/build-image.sh` and its image check in `call-image.yml`; the rules of PL54 (`request-release` dispatches only on `iso-v0`; `build_run_id` numeric and passed through `env`), PL56, PL57 and PL60 in `scripts/verify.py workflows`; `.github/settings/environments.json`, doc_ci.md, doc_update_delivery.md (UD25), secrets.md | `python3 scripts/verify.py workflows ci` green with the rules of PL54, PL56, PL57 and PL60, and a fixture that each rule rejects: a trigger other than `workflow_dispatch`, a job without the ref check, `build_run_id` interpolated into `run:`, a job in `signing` or `signing-images` outside `release.yml`, a second writer of `:latest`, a job that runs `system/promote.sh` or writes `:stable` outside `release`, another concurrency group; `python3 -B -m unittest discover -s scripts/tests` green with `test_release_candidate.py` (a request whose commit, run attempt, ref, workflow, image digest hash or kernel digest hash differs; a ref other than `iso-v0`, which it refuses; an event other than `push`, `workflow_dispatch` and `schedule`; a failed or cancelled job; a `head_repository` other than the repository; a `head_sha` not on `iso-v0`, and one that only a tag named `iso-v0` reaches; an older candidate; an unreleased build of its ref between `:latest` and the candidate, which it lists as `superseded`; a missing `:latest`, which the order passes; a `:latest` without the revision label (a hand release of `main` through its old jobs), ordered by build time; a labelled `:latest` whose commit is not an ancestor; an equal digest; no class field before PB4b); an image built without the revision label fails the image checks of its build; after the first pull request, the hand-dispatched release run of the build on `:latest` is green and leaves `:latest` unchanged; after the second, the first push to `iso-v0` dispatches its release run through `request-release` with `GITHUB_TOKEN`, and on `iso-v0` `gh run view <build run> --json jobs --jq '.jobs[].name'` lists no image signing, verification or tagging job; after the release run, for each repository of the build's `image-digests.txt`, `skopeo inspect --format '{{.Digest}}' docker://<repository>:latest` equals its digest and the key-based signature verifies as a machine verifies it, and the kernel artefacts of `kernel-digests` verify with the project key (`system/kernel-artifacts.sh verify-key`); `system/fetch-evidence.sh <build run>` finds the `signature` evidence the release run wrote; a scheduled (nightly) build on `iso-v0` dispatches a release run; a second build completes while a release run waits for its approval; a dispatch of an older build fails in `candidate` and leaves `:latest` unchanged; until step 3, a rejected signing approval leaves `:latest` unchanged; a `:latest` moved by another release between `candidate` and `tag-latest` fails `tag-latest` and stays where that release put it; a re-run of a `tag-latest` stopped after its first repository completes the others (`system/tests`, a fake registry); the summary of a dispatched release run names the actor who dispatched it (`triggering_actor`) | PB0; the alert of PL59 comes with PB2 | 2-3 (estimate) |
 | | **[M]** create the environment `release` (ADR-0103); approve the first release runs in `signing` and the first promotion in `release` | | | | |
 
@@ -1456,3 +1474,46 @@ copied onto `:stable` outside the promotion until #405 (PL54); `:latest` is sign
 human approval from step 3 (PL56). PB13 lands in two pull requests and its gate gains the
 negative cases; PB12 lists the trusted workflow paths. The mechanisms of PQ17 and PQ18 are
 confirmed. The out-of-date inventory of section 3.5 is left to #406.
+
+Amended on 2026-10-15 (#406), a correction of the inventory and not a new target decision:
+section 3.5 lists the 32 workflow files of `iso-v0` at `0ffc78df`. It gains `accept.yml` and
+`release.yml`, which section 3.1 places, and `bot-merge.yml`, `fuzz.yml` and
+`publish-rig-build-image.yml`, which this revision does not place and whose target is left to
+#406; it drops `fuzzing.yml` and `iso-acceptance.yml`, which no longer exist, and records
+that the image signing left the Orchestrator for `release.yml` in PB13 (PR #409). The opening
+of section 3 names `accept.yml` and `release.yml` among the target files that exist, and the
+count line and PB12 follow the table. `verify.py docs` checks section 3.5 against
+`.github/workflows` in both directions (section 10).
+
+**Revision 4 (2026-10-15), approved on 2026-10-15 ([ADR-0118](../decisions/0118-pipeline-revision-4-approval.md)).**
+Places the three workflows that section 3.5 marked "not placed by this revision; see #406",
+written on `iso-v0` at `1cb53d25`. The maintainer decided on 2026-10-15 that `bot-merge.yml` stays a separate entry, that `fuzz.yml` joins the weekly run of `maintenance.yml`, and that the rig build image is built by content hash with its pin bumped from `bots.yml`. The rest follows from those decisions or from the review of this revision:
+
+- `bot-merge.yml` becomes an eighth target entry, apart from `bots.yml`: it runs on
+  `workflow_run`, the verdict of the checks of the pull request, so one file opens bot pull
+  requests and another merges two kinds of them, the spec bot's and the system bump's
+  (ADR-0108 item 2, CI32). The target counts eight entries and 15 files (sections 3, 3.1,
+  3.5, PB12). When `system-image-check.yml` and `spec-build-check.yml` fold into `pr.yml`,
+  PB12 moves its verdicts to `gate`.
+- `fuzz.yml` joins `maintenance.yml` as its weekly fuzz job, like the janitor and the
+  reproducibility checks (CI31).
+- `publish-rig-build-image.yml` goes away as a manual step: the build image of the shell rig is
+  built by the content hash of its inputs, with provenance and a pin bump that `bots.yml`
+  opens as a pull request that waits for the code owner's review, as for the `azoth-signer`
+  image (PL19) and the builder image (UD42) (CI30). PL12, PL19 and PB4 name the image beside
+  the signer image. Until the pin pull request merges, a change to the inputs is checked
+  with the image the pin names, as the consumers of the signer image use the pin until its
+  bump merges; the document gives neither image a staleness check. PB3's gate verifies
+  every hop a release run consumes, which covers the signer image and not the rig build
+  image, which `pr.yml` will consume once its first pin has merged (no pin exists on `iso-v0`
+  yet, and `rig.sh` builds the stage locally until then) and which nothing signs before PB4:
+  PB4 signs it at the workflow that publishes it and makes `rig.sh` verify it, and its gate
+  reads a `pr.yml` run after that first pin. PB12's maintainer step hands the publisher over
+  to `bots.yml` in one pull request that changes the pin, removes the old workflow and, after
+  PB4, the expected identity, so digest and identity change together. The shell rig image
+  `athanor-shell-rig`, which `rig.sh` also pulls and which is published by hand, is a named
+  exception: not yet a verified hop, because no workflow publishes it (#505).
+- Section 3.5 now places every one of the 32 workflow files of `iso-v0`; the statements of
+  the amendments of 2026-10-15 above and in revision 3 that these three are left to #406 are
+  superseded by this entry. The opening of section 3 lists `bot-merge.yml` among the files
+  that exist and no longer says that a workflow is left unplaced. Closes #406.

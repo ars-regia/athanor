@@ -9,7 +9,7 @@
 
 **Target.** This document describes the workflows as they are. The architecture they converge on, and the plan that gets there, is [doc_pipeline.md](doc_pipeline.md) (ADR-0080).
 
-There are 30 workflow files at `9587d06e`: CI1 to CI31, of which CI23 is retired and has no file. The count was 24 on 2026-10-06. Section 3.5 of [doc_pipeline.md](doc_pipeline.md) says 29, one short of the tree.
+There are 30 workflow files at `9587d06e`: CI1 to CI31, of which CI23 is retired and has no file. The count was 24 on 2026-10-06. Section 3.5 of [doc_pipeline.md](doc_pipeline.md) lists every workflow file, checked by `verify.py docs`.
 
 ## 1. The pipeline
 

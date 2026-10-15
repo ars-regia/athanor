@@ -1,0 +1,24 @@
+#!/usr/bin/bash
+# Reset the GNOME appearance keys that cosmic-settings-daemon wrote into the account before
+# it was put on the memory backend (#474), so that the vendor defaults apply again
+# (doc_session_daemons.md, SD16, amended 2026-10-15, #473). A key is reset only when its
+# value is exactly the daemon's: any other value is the user's choice and is kept, and so is
+# button-layout, where the daemon copied the user's own COSMIC choice. `dconf read` reads
+# dconf's databases only, so the schema's default and the vendor override never read as a
+# user value, and an unset key reads empty. A failing dconf call fails the unit.
+set -euo pipefail
+
+dir=/org/gnome/desktop/interface
+
+reset_if() {
+    local key=$1 cosmic=$2 value
+    value=$(dconf read "$dir/$key")
+    if [ "$value" = "$cosmic" ]; then
+        dconf reset "$dir/$key"
+        echo "<5>$key held cosmic-settings-daemon's $cosmic: reset to the default."
+    fi
+}
+
+reset_if icon-theme "'Cosmic'"
+reset_if font-name "'Open Sans'"
+reset_if monospace-font-name "'Noto Sans Mono'"
