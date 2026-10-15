@@ -9,4 +9,3 @@
 # finding not listed is red. The list may only shrink: verify.py --known-red-base refuses a
 # finding the base branch does not list and a later expiry, and a listed finding the check no
 # longer reports must be removed in the same change.
-forge-rules #223 2027-01-07 forge/specs/athanor-system-config/athanor-system-config.spec: rule 2, %post writes under /usr or /etc: install the file in %install or create it with tmpfiles.d

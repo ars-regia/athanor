@@ -59,9 +59,8 @@ scriptlet that edits them escapes the image's content and signature.
 `systemd-tmpfiles` (`tmpfiles.d`), users and groups with `sysusers.d`, and enable units
 with a preset file under `/usr/lib/systemd/system-preset/` and the `%systemd_post` macros.
 
-**Enforced by** `python3 scripts/verify.py forge-rules`. The check is not yet part of the
-lint workflow: `athanor-system-config` still edits `/etc/group` and creates two
-directories under `/etc` in its `%post`, and the check reports those three lines.
+**Enforced by** `python3 scripts/verify.py forge-rules`, which `just check` runs with every
+other `verify.py` check.
 
 ### Rule 3: no disabled security
 

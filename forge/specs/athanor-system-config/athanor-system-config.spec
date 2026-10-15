@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:63.fc43}
+Release:        %{?autorelease}%{!?autorelease:64.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -45,29 +45,6 @@ mkdir -p %{buildroot}/usr/share/athanor-system-config/flatpak-no-triggers
 mv %{buildroot}/etc/usbguard/usbguard-daemon.conf %{buildroot}/usr/share/athanor-system-config/usbguard-daemon.conf
 mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-system-config/greenboot.conf
 
-%post
-# Configurations are now managed declaratively via tmpfiles.d (10-athanor-greetd.conf)
-#
-# The greeter needs the devices it draws and listens on. Fedora creates the greetd user
-# with no supplementary groups. That was not what kept the compositor from starting --
-# logind grants the active session the card through an ACL, and runs 34293193136 and
-# 34365841089 showed cage past libseat with the membership making no difference -- but
-# a session that owns a screen belongs in video and tty either way.
-#
-# On this image video and tty live in /usr/lib/group, the read-only half of the split
-# that ostree systems use, and every tool that edits group membership works on
-# /etc/group alone. systemd-sysusers given an `m greetd video` line answers "Group video
-# already exists" and makes no membership; gpasswd is blunter about it -- "group 'video'
-# does not exist in /etc/group" -- and usermod fails silently. So the group is copied
-# into /etc/group first, where nss then merges it with the /usr/lib entry, and the
-# membership is added there.
-for group in video tty; do
-    if ! grep -q "^${group}:" /etc/group && getent group "$group" > /dev/null 2>&1; then
-        getent group "$group" >> /etc/group
-    fi
-    gpasswd -a greetd "$group" > /dev/null 2>&1 || :
-done
-
 %files
 %dir /usr/share/athanor-system-config
 %attr(0755,root,root) /usr/bin/athanor-session
@@ -102,6 +79,13 @@ done
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-64
+- Drops the %post that copied the video and tty groups into /etc/group and added greetd to
+  them (forge rule 2, #223). logind grants the greeter's session its devices through ACLs,
+  so the membership was not needed; systemd-sysusers cannot express it on this image, where
+  both groups live only in /usr/lib/group. Machines installed earlier keep their /etc/group
+  entries.
+
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-63
 - Hardens athanor-flatpak-update.service from an exposure of 6.6 to 3.2 (#478): address
   families, a system call allow-list that fails with EPERM, private devices, and the kernel,
