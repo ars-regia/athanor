@@ -52,7 +52,8 @@ settle; a device that does not is left blocked and named.
   product id alone, whatever its serial.
 - A pending file that is not valid, or a rules file that cannot be read, admits nothing and
   fails the unit at every boot until an administrator ends the snapshot or repairs the file. A
-  run that cannot read the rules file is not counted among the three.
+  later run that cannot read the rules file is not counted among the three; the first run
+  counts as soon as its pending file is written.
 - It amends one clause of ADR-0103 D12, "the internal devices present at install (webcam,
   Bluetooth, readers) are allowed": they are allowed when they settle, and a device that does
   not is left blocked and named. The rest of D12, admission by class and the confirmation of a

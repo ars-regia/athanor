@@ -29,7 +29,8 @@ Type=oneshot
 # first, so retries killed at every boot still end after three runs. Two cases are left to an
 # administrator, and the unit fails at every boot, admitting nothing, until one acts: a pending
 # file that is not valid (create the marker to end the snapshot, or remove the file to take a
-# new one), and a rules file that cannot be read (make it readable again), which counts no run.
+# new one), and a rules file that cannot be read (make it readable again), which counts no later
+# run.
 TimeoutStartSec=30s
 TimeoutStopSec=5s
 ExecStart=/usr/libexec/athanor-usbguard-internal
