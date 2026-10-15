@@ -28,3 +28,25 @@ registry, and compare its SHA-256 with the published one:
        sudo athanor-update recover-key finish
 
    It refuses until the booted image names the new key for every system image repository.
+
+# A state file under `/var/lib/athanor-update` that cannot be read
+
+`held`, `refused`, `newest-booted`, `last-success` and `move-record` are read as "absent"
+only when the file is missing. A file that exists and cannot be read (I/O error, bad
+permissions, not UTF-8, a number that is not a number) is a storage failure: the state
+shows `last_error: storage`, and for `held` the check offers nothing, `Apply()` refuses and
+`athanor-update-migrate` stages nothing, because reading the file as absent would release the
+digest the user went back from.
+
+Read the journal of `athanor-update` for the file named in the error, then either remove it
+as root (`sudo rm /var/lib/athanor-update/held`, which releases that digest) or go back
+again with `GoBack()` (`sudo athanor-update go-back`), which writes `held` anew. `refused`
+heals itself at the next check; `last-success` is rewritten by the
+next successful check.
+
+`newest-booted` does not heal itself: while it is unreadable the state publishes a newest
+booted build time of the largest possible value, so the shield shows Attention rather than
+"Check again" on a record that cannot be trusted, and nothing is offered. Remove it as root
+(`sudo rm /var/lib/athanor-update/newest-booted`); the next boot records the booted build.
+The same happens when the record cannot be written (no space left on `/var`, a read-only
+filesystem): free space on `/var` first, then remove the file if it is still unreadable.

@@ -72,9 +72,22 @@ impl Store {
         Ok(Lock(file))
     }
 
-    fn read_line(&self, name: &str) -> Option<String> {
-        let text = std::fs::read_to_string(self.var.join(name)).ok()?;
-        Some(text.trim().to_owned()).filter(|line| !line.is_empty())
+    /// The first value of a state file: `None` only when the file is absent or empty.
+    ///
+    /// # Errors
+    /// The file exists and cannot be read, or is not UTF-8. An unreadable answer is never
+    /// "no value": for `held` that would release the digest the user went back from.
+    fn read_line(&self, name: &str) -> std::io::Result<Option<String>> {
+        match std::fs::read_to_string(self.var.join(name)) {
+            Ok(text) => Ok(Some(text.trim().to_owned()).filter(|line| !line.is_empty())),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// As [`Store::read_line`], parsed; a value that is no number is `InvalidData`.
+    fn read_number(&self, name: &str) -> std::io::Result<Option<i64>> {
+        self.read_line(name)?.map(|line| line.parse().map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{name}: {err}")))).transpose()
     }
 
     pub(crate) fn replace(dir: &Path, name: &str, mode: u32, contents: &[u8]) -> std::io::Result<()> {
@@ -91,8 +104,9 @@ impl Store {
         std::fs::rename(&temporary, dir.join(name))
     }
 
-    #[must_use]
-    pub fn held(&self) -> Option<String> {
+    /// # Errors
+    /// The file exists and cannot be read.
+    pub fn held(&self) -> std::io::Result<Option<String>> {
         self.read_line("held")
     }
 
@@ -102,8 +116,9 @@ impl Store {
         Self::replace(&self.var, "held", 0o644, format!("{digest}\n").as_bytes())
     }
 
-    #[must_use]
-    pub fn refused(&self) -> Option<String> {
+    /// # Errors
+    /// The file exists and cannot be read.
+    pub fn refused(&self) -> std::io::Result<Option<String>> {
         self.read_line("refused")
     }
 
@@ -119,9 +134,10 @@ impl Store {
         }
     }
 
-    #[must_use]
-    pub fn newest_booted(&self) -> i64 {
-        self.read_line("newest-booted").and_then(|line| line.parse().ok()).unwrap_or(0)
+    /// # Errors
+    /// The file exists and cannot be read or parsed: reading it as 0 would let an older build pass.
+    pub fn newest_booted(&self) -> std::io::Result<i64> {
+        Ok(self.read_number("newest-booted")?.unwrap_or(0))
     }
 
     /// Records `build_time` when it is newer than the record, and returns the record.
@@ -129,7 +145,7 @@ impl Store {
     /// # Errors
     /// The file cannot be written.
     pub fn record_booted(&self, build_time: i64) -> std::io::Result<i64> {
-        let newest = self.newest_booted();
+        let newest = self.newest_booted()?;
         if build_time <= newest {
             return Ok(newest);
         }
@@ -137,9 +153,10 @@ impl Store {
         Ok(build_time)
     }
 
-    #[must_use]
-    pub fn last_success(&self) -> Option<i64> {
-        self.read_line("last-success").and_then(|line| line.parse().ok())
+    /// # Errors
+    /// The file exists and cannot be read or parsed.
+    pub fn last_success(&self) -> std::io::Result<Option<i64>> {
+        self.read_number("last-success")
     }
 
     /// # Errors
@@ -183,16 +200,18 @@ impl Store {
     }
 
     /// What `migrate` recorded of its moves to `digest`; an empty record for any other digest.
-    #[must_use]
-    pub fn move_record(&self, digest: &str) -> MoveRecord {
-        let line = self.read_line("move-record").unwrap_or_default();
+    ///
+    /// # Errors
+    /// The file exists and cannot be read.
+    pub fn move_record(&self, digest: &str) -> std::io::Result<MoveRecord> {
+        let line = self.read_line("move-record")?.unwrap_or_default();
         let mut fields = line.split(' ');
         let mut record = MoveRecord { digest: digest.to_owned(), failed_boots: 0, staged: None };
         if fields.next() == Some(digest) {
             record.failed_boots = fields.next().and_then(|count| count.parse().ok()).unwrap_or(0);
             record.staged = fields.next().map(str::to_owned);
         }
-        record
+        Ok(record)
     }
 
     /// # Errors
@@ -236,19 +255,41 @@ mod tests {
         let store = scratch("newest");
         assert_eq!(store.record_booted(2000).expect("write"), 2000);
         assert_eq!(store.record_booted(1000).expect("write"), 2000, "booting an older image after going back");
-        assert_eq!(store.newest_booted(), 2000);
+        assert_eq!(store.newest_booted().expect("read"), 2000);
     }
 
     #[test]
     fn held_and_refused_survive_and_only_refused_clears() {
         let store = scratch("held");
-        assert_eq!((store.held(), store.refused()), (None, None));
+        assert_eq!((store.held().expect("read"), store.refused().expect("read")), (None, None));
         store.set_held("sha256:aa").expect("write");
         store.set_refused(Some("sha256:bb")).expect("write");
-        assert_eq!((store.held().as_deref(), store.refused().as_deref()), (Some("sha256:aa"), Some("sha256:bb")));
+        assert_eq!((store.held().expect("read").as_deref(), store.refused().expect("read").as_deref()), (Some("sha256:aa"), Some("sha256:bb")));
         store.set_refused(None).expect("clear");
         store.set_refused(None).expect("clearing twice is fine");
-        assert_eq!(store.refused(), None);
+        assert_eq!(store.refused().expect("read"), None);
+    }
+
+    #[test]
+    fn a_state_file_that_cannot_be_read_is_an_error_and_only_an_absent_one_is_none() {
+        let store = scratch("unreadable");
+        for name in ["held", "refused", "newest-booted", "last-success", "move-record"] {
+            assert_eq!(store.read_line(name).expect("absent"), None, "{name}");
+            // A directory in place of the file fails with EISDIR, whoever runs the test.
+            std::fs::create_dir(store.var.join(name)).expect("mkdir");
+            assert!(store.read_line(name).is_err(), "{name}");
+        }
+        assert!(store.held().is_err() && store.refused().is_err());
+        assert!(store.newest_booted().is_err() && store.last_success().is_err());
+        assert!(store.move_record("sha256:aa").is_err());
+        assert!(store.record_booted(1).is_err(), "an unreadable record is not read as 0");
+    }
+
+    #[test]
+    fn a_number_file_that_is_not_a_number_is_an_error() {
+        let store = scratch("garbled");
+        std::fs::write(store.var.join("newest-booted"), "soon\n").expect("write");
+        assert_eq!(store.newest_booted().expect_err("garbled").kind(), std::io::ErrorKind::InvalidData);
     }
 
     #[test]
@@ -265,14 +306,14 @@ mod tests {
     fn the_move_record_survives_and_belongs_to_one_digest() {
         let store = scratch("move-record");
         let empty = MoveRecord { digest: "sha256:aa".into(), failed_boots: 0, staged: None };
-        assert_eq!(store.move_record("sha256:aa"), empty);
+        assert_eq!(store.move_record("sha256:aa").expect("read"), empty);
         let record = MoveRecord { failed_boots: 1, staged: Some("b87d.1".into()), ..empty.clone() };
         store.set_move_record(&record).expect("write");
-        assert_eq!(store.move_record("sha256:aa"), record);
-        assert_eq!(store.move_record("sha256:a").failed_boots, 0, "a prefix is another digest");
+        assert_eq!(store.move_record("sha256:aa").expect("read"), record);
+        assert_eq!(store.move_record("sha256:a").expect("read").failed_boots, 0, "a prefix is another digest");
         store.set_move_record(&MoveRecord { staged: None, ..record }).expect("write");
-        assert_eq!(store.move_record("sha256:aa").staged, None);
-        assert_eq!(store.move_record("sha256:bb"), MoveRecord { digest: "sha256:bb".into(), ..empty });
+        assert_eq!(store.move_record("sha256:aa").expect("read").staged, None);
+        assert_eq!(store.move_record("sha256:bb").expect("read"), MoveRecord { digest: "sha256:bb".into(), ..empty });
     }
 
     #[test]

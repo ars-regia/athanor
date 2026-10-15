@@ -66,20 +66,30 @@ fn republish<T: Tools>(ctx: &Context<'_, T>) {
 
 /// The staged deployment `Apply()` may unlock: downloaded and locked, newer than the booted
 /// one, not held, and on a repository the policy in force covers.
-fn downloaded<'s, T: Tools>(ctx: &Context<'_, T>, status: &'s Status) -> Option<&'s Deployed> {
+///
+/// # Errors
+/// [`Refusal::Failed`] when the held digest cannot be read: that is no answer, and it must not
+/// release the digest the user went back from (UT6).
+fn downloaded<'s, T: Tools>(ctx: &Context<'_, T>, status: &'s Status) -> Result<Option<&'s Deployed>, Refusal> {
     // bootc rollback discards the staged deployment; one staged after it would replace the
     // queued return (doc_recovery.md, R5), so a queued rollback has nothing to apply.
     if status.rollback_queued {
-        return None;
+        return Ok(None);
     }
+    let held = ctx.store.held().map_err(|err| {
+        tracing::error!(%err, "cannot read the held digest; Apply() refuses");
+        // The state names the failure, so the shield stops offering "Restart to update".
+        republish(ctx);
+        Refusal::Failed
+    })?;
     let policy = crate::policy::in_force(&ctx.policy);
-    status.staged.as_ref().filter(|staged| {
+    Ok(status.staged.as_ref().filter(|staged| {
         staged.download_only
             && status.booted.enforcing
             && policy.scopes.contains_key(sigobj::repository_of(&status.booted.image))
             && staged.build_time > status.booted.build_time
-            && ctx.store.held().as_deref() != Some(staged.digest.as_str())
-    })
+            && held.as_deref() != Some(staged.digest.as_str())
+    }))
 }
 
 /// `Apply()`: unlock what the timer downloaded and reboot, in one request. Never downloads.
@@ -93,7 +103,7 @@ pub async fn apply<T: Tools, P: Power, C: Caller>(ctx: &Context<'_, T>, power: &
     caller.authorize(if others { ACTION_APPLY_MULTI_SESSION } else { ACTION_APPLY }).await?;
     let mut lock = ctx.store.try_lock().map_err(|_| Refusal::Busy)?;
     let status = ctx.tools.status().map_err(|_| Refusal::Failed)?;
-    let Some(staged) = downloaded(ctx, &status).cloned() else {
+    let Some(staged) = downloaded(ctx, &status)?.cloned() else {
         return Err(Refusal::NothingDownloaded);
     };
     // A courtesy that keeps the deployment locked in the common case. The authority is
@@ -119,7 +129,7 @@ pub async fn apply<T: Tools, P: Power, C: Caller>(ctx: &Context<'_, T>, power: &
         // A check or another request may have run during the prompt: only the deployment
         // the caller was asked about is unlocked, and only while nothing inhibits a restart.
         let now = ctx.tools.status().map_err(|_| Refusal::Failed)?;
-        if downloaded(ctx, &now) != Some(&staged) {
+        if downloaded(ctx, &now)? != Some(&staged) {
             tracing::error!("the staged deployment changed while polkit was asked: it stays locked");
             return Err(Refusal::Failed);
         }
@@ -274,6 +284,17 @@ mod tests {
             assert_eq!(apply(&machine.ctx(&tools, 5000), &power, &FakeCaller::alone(&tools)).await, Err(Refusal::NothingDownloaded));
             assert!(tools.calls.borrow().is_empty() && !power.rebooted.get());
         }
+    }
+
+    #[tokio::test]
+    async fn apply_refuses_when_the_held_digest_cannot_be_read() {
+        let machine = Machine::new("apply-held-unreadable", &["real/k1.pub"]);
+        // A directory in place of the file fails with EISDIR, whoever runs the test.
+        std::fs::create_dir(machine.store.var.join("held")).expect("mkdir");
+        let (tools, power) = (downloaded(), FakePower::new(false, Ok(())));
+        assert_eq!(apply(&machine.ctx(&tools, 5000), &power, &FakeCaller::alone(&tools)).await, Err(Refusal::Failed));
+        assert!(tools.calls.borrow().is_empty() && !power.rebooted.get());
+        assert_eq!(published(&machine), UpdateState::None, "the shield stops offering the restart");
     }
 
     #[tokio::test]
@@ -446,7 +467,7 @@ mod tests {
         tools.status.borrow_mut().rollback = Some(deployed(&digest(1), 1000));
         let power = FakePower::new(false, Ok(()));
         assert_eq!(go_back(&machine.ctx(&tools, 5000), &power).await, Ok(()));
-        assert_eq!(machine.store.held(), Some(digest(2)));
+        assert_eq!(machine.store.held().expect("read"), Some(digest(2)));
         assert_eq!(*tools.calls.borrow(), ["rollback"]);
         assert!(power.rebooted.get());
     }
@@ -459,7 +480,7 @@ mod tests {
         tools.status.borrow_mut().rollback_queued = true;
         let power = FakePower::new(false, Ok(()));
         assert_eq!(go_back(&machine.ctx(&tools, 5000), &power).await, Ok(()));
-        assert_eq!(machine.store.held(), Some(digest(2)));
+        assert_eq!(machine.store.held().expect("read"), Some(digest(2)));
         assert!(tools.calls.borrow().is_empty(), "no second rollback");
         assert!(power.rebooted.get());
     }

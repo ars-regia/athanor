@@ -97,15 +97,19 @@ msgstr "Not verified: this machine does not verify its updates"
 msgid "Signed, but pinned to one build: it receives no updates"
 msgstr "Signed, but pinned to one build: it receives no updates"
 
-#: src/seal.rs:168
+#: src/seal.rs:171
+msgid "The update state on this machine could not be read"
+msgstr "The update state on this machine could not be read"
+
+#: src/seal.rs:173
 msgid "This version is older than one this machine has run"
 msgstr "This version is older than one this machine has run"
 
-#: src/seal.rs:174
+#: src/seal.rs:179
 msgid "No check for updates has succeeded for 14 days"
 msgstr "No check for updates has succeeded for 14 days"
 
-#: src/seal.rs:176
+#: src/seal.rs:181
 msgid "Signed with a key of the policy in force"
 msgstr "Signed with a key of the policy in force"
 

@@ -12,8 +12,8 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use athanor_trust_state::{
-    state_reply, Badge, ReadError, Reason, State, UpdateState, STALE_AFTER_SECS, STATE_METHOD,
-    UPDATE_INTERFACE, UPDATE_NAME, UPDATE_PATH,
+    state_reply, Badge, ErrorCode, ReadError, Reason, State, UpdateState, STALE_AFTER_SECS,
+    STATE_METHOD, UPDATE_INTERFACE, UPDATE_NAME, UPDATE_PATH,
 };
 
 use crate::i18n::tr;
@@ -165,6 +165,11 @@ pub fn detail(read: &Result<State, ReadError>, now: i64) -> String {
         }
     }
     if state.booted.build_time < state.newest_booted_build_time {
+        // An unreadable record of the newest booted build is published as the largest build
+        // time: the cause is then the disk, not an older version.
+        if state.last_error == ErrorCode::Storage {
+            return tr("The update state on this machine could not be read");
+        }
         return tr("This version is older than one this machine has run");
     }
     if !state
@@ -179,7 +184,7 @@ pub fn detail(read: &Result<State, ReadError>, now: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use athanor_trust_state::{Deployment, ErrorCode, Policy, SecureBoot, SCHEMA};
+    use athanor_trust_state::{Deployment, Policy, SecureBoot, SCHEMA};
 
     const NOW: i64 = 1_789_725_600;
 
@@ -267,6 +272,22 @@ mod tests {
                 ..verified()
             }),
             "This version is older than one this machine has run"
+        );
+        assert_eq!(
+            detail_of(State {
+                newest_booted_build_time: i64::MAX,
+                last_error: ErrorCode::Storage,
+                ..verified()
+            }),
+            "The update state on this machine could not be read"
+        );
+        // A storage error the check got past leaves the verdict of the badge to stand.
+        assert_eq!(
+            detail_of(State {
+                last_error: ErrorCode::Storage,
+                ..verified()
+            }),
+            "Signed with a key of the policy in force"
         );
         assert_eq!(
             detail_of(State {
