@@ -26,7 +26,8 @@ WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
 # No UKI may reach the ESP before sealed composefs (release 1.1): the bootupd payload,
-# /usr/lib/ostree-boot and /boot of the image hold none. plus the *.efi of /usr/lib/modules. A tar of those paths is read on the host.
+# /usr/lib/ostree-boot, /boot and the *.efi of the kernel directories under /usr/lib/modules
+# hold none. A tar of those paths is read on the host.
 podman run --rm --network=none --entrypoint /bin/sh "$1" -c \
     'cd / && for d in usr/lib/bootupd usr/lib/ostree-boot boot; do [ -e "$d" ] && set -- "$@" "$d"; done
     set -- "$@" $(find usr/lib/modules -maxdepth 2 -name "*.efi")
