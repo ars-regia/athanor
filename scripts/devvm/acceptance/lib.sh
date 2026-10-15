@@ -44,8 +44,8 @@ tunnel() {
 
 # The tunnel is a login of the guest user with no terminal that lasts the whole run: logind
 # lists it as a session of class user, and since #433 the update service counts it as a second
-# session of the caller's user. The sessions stage closes it, so that the cases make every
-# session the service counts, and opens it again at the end.
+# session of the caller's user. A call from the active session closes it, so that the cases
+# make every session the service counts; check_now opens it again, as the check needs it.
 untunnel() {
   if pgrep -f -- "-R $ACC_PORT:127.0.0.1:$ACC_PORT" > /dev/null; then
     pkill -f -- "-R $ACC_PORT:127.0.0.1:$ACC_PORT"
@@ -89,7 +89,7 @@ power_cycle() {
 
 state() { guest_ssh cat /run/athanor-update/state.json | jq -r "$1"; }
 marker() { guest_ssh cat /usr/share/athanor-acceptance-marker; }
-check_now() { guest_ssh sudo systemctl start athanor-update-check.service; }
+check_now() { tunnel && guest_ssh sudo systemctl start athanor-update-check.service; }
 point_stable() { skopeo copy --src-tls-verify=false --dest-tls-verify=false "docker://$REPO:$1" "docker://$REPO:stable" > /dev/null; }
 # The images outside the acceptance set do not know the throwaway registry, which serves
 # plain HTTP: a switch from one of them needs the drop-in every acceptance image ships
@@ -151,6 +151,7 @@ call_out() { printf '/var/tmp/acc-call-%s.out' "$1"; }
 call_active_start() { # call_active_start METHOD
   local out
   out=$(call_out "$1")
+  untunnel
   guest_ssh "sudo rm -f $out && sudo systemd-run --quiet --user --machine=$GUEST_USER@.host --on-active=$ACC_CALL_DELAY --timer-property=AccuracySec=1ms --collect --unit=acc-call-$1 -p StandardOutput=file:$out dbus-send --system --print-reply --dest=${UPDATE1[0]} ${UPDATE1[1]} ${UPDATE1[2]}.$1"
 }
 call_active() { # call_active METHOD: the reply, or the error, of the call
