@@ -118,7 +118,20 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   marker file, the locker's intent: cosmic-comp exposes no lock state, so the screenshots in
   `.scratch/lock-acceptance/` are the only check of what the compositor draws; look at them.
   The login creates the tally, so `polkit` fails on images built before #445 merged
-  (#144), and `cancel` fails until #447 is fixed. Log in at the greeter first.
+  (#144), and `cancel` fails until #447 is fixed. `lock-acceptance.sh polkit` is the polkit
+  criterion of #144. Log in at the greeter first.
+- `session-acceptance.sh [stage...]` checks the other two criteria of #144 in the real
+  session. `volume`: cosmic-settings-daemon is active with its varlink socket bound, the
+  image binds the volume keys to the system action, and on a null sink the script makes
+  with `pactl` (the VM has no sound device) three volume-up presses raise and three
+  volume-down presses lower the volume `wpctl` reads, with no "panicked" in the daemon's
+  journal. `portal`: Flatpak org.gnome.TextEditor (installed from Flathub on the first run)
+  opens a file of the home directory through the file chooser, which the document portal
+  must export under `$XDG_RUNTIME_DIR/doc/by-app/<app id>/`, and a typed character saved
+  with Ctrl+S must change the file. Keys come from `keyboard_type.py`, which knows
+  `@volup`, `@voldown` and `@mute`. The chooser has no log line, so the stage waits a fixed
+  time for it; the screenshots in `.scratch/session-acceptance/` are the only check of what
+  is drawn. Log in at the greeter first.
 - Settings are in `devvm.env` and are overridden from the environment: `CPUS=4`,
   `MEMORY=8G`, `DISK_GIB=40`, `GPU_OUTPUTS=2` (the second head starts disconnected, so
   every other stage sees one output; `bar-acceptance.sh hotplug` is the one that needs
