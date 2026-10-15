@@ -88,7 +88,9 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
   that port and admit only the same device, never one connected since. After three runs the
   marker is written and the journal names the devices left blocked.
   athanor-usbguard-internal.service bounds its start at 30 seconds, so a driver probe that
-  holds a device lock cannot hold back the greeter indefinitely.
+  holds a device lock cannot hold back the greeter indefinitely. The first run keeps the
+  pending file as it sees the devices, so a first run stopped by that bound is continued at the
+  ports it saw; one stopped before it read any device's ids admits nothing at the next boot.
 
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-65
 - %install copies the usr and etc source trees without hiding a failure (AGENTS.md,

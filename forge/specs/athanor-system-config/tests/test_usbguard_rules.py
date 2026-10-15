@@ -19,6 +19,7 @@ import re
 import signal
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -257,15 +258,21 @@ case $(wc -l < {count}) in
         self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
         log = self.work / "sync.log"
         self.run_script(
-            sync=f'echo "rules=$([[ -e {self.rules} ]] && echo yes || echo no) '
-            f'marker=$([[ -e {self.marker} ]] && echo yes || echo no) $*" >> {log}\n'
+            sync=f'echo "$([[ -e {self.pending} ]] && echo P)$([[ -e {self.rules} ]] && echo R)'
+            f'$([[ -e {self.marker} ]] && echo M)- $2" >> {log}\n'
         )
-        calls = log.read_text().splitlines()
-        self.assertEqual(len(calls), 4, calls)
-        self.assertTrue(calls[0].startswith("rules=no marker=no "), calls[0])
-        self.assertTrue(calls[1].startswith("rules=yes marker=no "), calls[1])
-        self.assertTrue(calls[2].startswith("rules=yes marker=no "), calls[2])
-        self.assertTrue(calls[3].startswith("rules=yes marker=yes "), calls[3])
+        # What exists at each sync: the pending file first, then the rules, then the marker,
+        # and the pending file goes last.
+        calls = [line.split() for line in log.read_text().splitlines()]
+        self.assertTrue(calls[0][1].startswith(f"{self.pending}."), calls)
+        self.assertEqual(calls[0][0], "-", calls)
+        rules_at = next(i for i, c in enumerate(calls) if c[1].startswith(f"{self.rules}."))
+        marker_at = next(i for i, c in enumerate(calls) if c[1].startswith(f"{self.marker}."))
+        self.assertEqual(calls[rules_at][0], "P-", calls)
+        self.assertEqual(calls[rules_at + 1], ["PR-", str(self.work)], calls)
+        self.assertEqual(calls[marker_at][0], "PR-", calls)
+        self.assertEqual(calls[-1], ["RM-", str(self.pending.parent)], calls)
+        self.assertLess(rules_at, marker_at)
 
     def test_a_device_that_leaves_the_bus_is_not_waited_for(self):
         self.device("1-1", "0c45", "6a10", [("0e", "01", "00")], vanished=True)
@@ -275,6 +282,15 @@ case $(wc -l < {count}) in
         self.assertEqual(len(self.written()), 1)
         self.assertIn("058f:9540", self.written()[0])
         self.assertTrue(self.marker.exists())
+
+    def test_a_device_that_leaves_the_bus_after_its_ids_were_read_is_not_pending(self):
+        self.device("1-1", "0c45", "6a10", [], configured=False)
+        self.device("1-2", "058f", "9540", [("0b", "00", "00")])
+        self.run_script(sleep=self.on_wait(f"rm -r {self.sysfs / '1-1'}"))
+        self.assertEqual(len(self.written()), 1)
+        self.assertIn("058f:9540", self.written()[0])
+        self.assertTrue(self.marker.exists())
+        self.assertFalse(self.pending.exists())
 
     def test_a_descriptor_unreadable_then_readable_is_recorded(self):
         self.device("1-1", "0c45", "6a10", [("0e", "01", "00")], vanished=True)
@@ -435,21 +451,85 @@ case $(wc -l < {count}) in
         self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
         (self.sysfs / "1-1/bConfigurationValue").unlink()
         os.mkfifo(self.sysfs / "1-1/bConfigurationValue")
-        run = subprocess.Popen(
+        self.kill_when_blocked(self.start(), lambda: True)
+        self.assertFalse(self.marker.exists())
+        self.assertEqual(list(self.work.glob("50-athanor-internal.conf*")), [])
+        # Its ids were read before the blocking read, so the next boot reads that port only.
+        self.assertEqual(self.pending.read_text(), "runs 1\n1-1 0c45:6a10\n")
+
+    def start(self, sleep=None):
+        """Starts the script in its own process group, with a bound of 0.3 s: a run that did not
+        block would end long before kill_when_blocked looks."""
+        return subprocess.Popen(
             [LIBEXEC],
-            env=self.environment(None, None, 3),  # a run that did not block would end within 0.3 s
+            env=self.environment(None, sleep, 3),
             start_new_session=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+
+    def kill_when_blocked(self, run, ready):
+        """Waits for `ready`, then checks the run is still blocked a second later and stops it as
+        the unit's start timeout would."""
         try:
+            for _ in range(100):
+                if ready():
+                    break
+                self.assertIsNone(run.poll(), "the run ended before it blocked")
+                time.sleep(0.1)
+            else:
+                self.fail("the run never reached the blocking read")
             with self.assertRaises(subprocess.TimeoutExpired):
                 run.wait(1)
         finally:
             os.killpg(run.pid, signal.SIGTERM)
         self.assertEqual(run.wait(30), -signal.SIGTERM)
+
+    def test_a_first_run_killed_after_seeing_two_devices_is_continued_at_their_ports_only(self):
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")], "CAM1")
+        self.device("1-2", "058f", "9540", [("0b", "00", "00")])
+        config = self.sysfs / "1-2/bConfigurationValue"
+        # After the first pass 1-1 settles, and the read of 1-2's configuration blocks.
+        self.kill_when_blocked(
+            self.start(sleep=self.on_wait(f"rm {config} && mkfifo {config}")),
+            lambda: (self.work / "waits").exists(),
+        )
         self.assertFalse(self.marker.exists())
-        self.assertEqual(list(self.work.glob("50-athanor-internal.conf*")), [])
+        self.assertFalse(self.rules.exists())
+        self.assertEqual(self.pending.read_text(), "runs 1\n1-1 0c45:6a10 CAM1\n1-2 058f:9540\n")
+        config.unlink()
+        config.write_text("1\n")
+        self.device("1-4", "046d", "c52b", [("03", "01", "01")], "KBD")  # connected since
+        done = self.run_script()
+        self.assertEqual(
+            sorted(self.written()),
+            [
+                'allow id 058f:9540 serial "" via-port "1-2" with-interface equals { 0b:00:00 }',
+                'allow id 0c45:6a10 serial "CAM1" via-port "1-1" with-interface equals { 0e:01:00 }',
+            ],
+        )
+        self.assertTrue(self.marker.exists())
+        self.assertFalse(self.pending.exists())
+        self.assertNotIn("1-4", done.stderr)
+
+    def test_a_first_run_killed_before_it_read_any_ids_admits_nothing(self):
+        # A FIFO as idVendor blocks the first read of all, which the kernel serves without a lock.
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
+        vendor = self.sysfs / "1-1/idVendor"
+        vendor.unlink()
+        os.mkfifo(vendor)
+        self.kill_when_blocked(self.start(), lambda: self.pending.exists())
+        self.assertEqual(self.pending.read_text(), "runs 1\n")
+        vendor.unlink()
+        vendor.write_text("0c45\n")
+        done = self.run_script()
+        self.assertIn(
+            "<3>The first run of the snapshot stopped before it read any device: no internal device is admitted.",
+            done.stderr,
+        )
+        self.assertTrue(self.marker.exists())
+        self.assertFalse(self.pending.exists())
+        self.assertFalse(self.rules.exists())
 
     def test_the_wait_lets_a_device_finish_enumerating(self):
         self.device("1-1", "0c45", "6a10", [], configured=False)
@@ -484,7 +564,7 @@ fi
     def test_the_rules_file_is_the_renamed_temporary_file(self):
         self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
         log = self.work / "inodes.log"
-        self.run_script(sync=f'if [[ -f "$2" ]]; then stat -c %i "$2" >> {log}; fi\n')
+        self.run_script(sync=f'if [[ $2 == {self.rules}.* ]]; then stat -c %i "$2" >> {log}; fi\n')
         first = log.read_text().split()[0]
         self.assertEqual(str(self.rules.stat().st_ino), first)
         self.assertEqual(list(self.work.glob("50-athanor-internal.conf.*")), [])

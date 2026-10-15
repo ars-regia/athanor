@@ -3,8 +3,9 @@
 # Writes one allow rule for each USB device connected at the first run, except those with a
 # mass-storage interface (class 08), then records that it ran. A device that does not settle
 # within the bound is recorded as pending, by port and ids, and only that device is read again
-# at the next boots, for at most three runs in all (#490). The paths come from the environment
-# only for the tests; the unit sets none.
+# at the next boots, for at most three runs in all (#490). The first run keeps the pending file
+# as it sees the devices, so a run cut short never leads to a snapshot of what is connected
+# later. The paths come from the environment only for the tests; the unit sets none.
 set -euo pipefail
 umask 0077
 shopt -s nullglob
@@ -82,24 +83,38 @@ write_pending() {
     put "$pending" <<<"$body"
 }
 
-# give_up: leaves the devices still pending blocked, and ends the snapshot.
-give_up() {
-    local entry
-    for entry in "${wanted[@]}"; do
-        echo "<3>Leaving ${entry%% *} (${entry#* }) blocked after $max_runs runs: allow it from Settings, USB devices, with \"Allow always\"." >&2
-    done
+# finish: records that the snapshot is done. The marker comes before the pending file goes, so
+# a crash between them never starts a snapshot again.
+finish() {
     put "$marker" </dev/null
     rm -f -- "$pending"
     sync -- "${pending%/*}"
     exit 0
 }
 
-# A run killed by the start timeout counts: the count is on disk before any device is read.
+# give_up: leaves the devices still pending blocked, and ends the snapshot.
+give_up() {
+    local entry
+    for entry in "${wanted[@]}"; do
+        echo "<3>Leaving ${entry%% *} (${entry#* }) blocked after $max_runs runs: allow it from Settings, USB devices, with \"Allow always\"." >&2
+    done
+    finish
+}
+
+# The count is on disk before any device is read, so a run killed by the start timeout counts.
+# A first run killed before it read any device's ids left no entry: what was connected then is
+# unknown, and reading the devices now could admit one connected since, so none is admitted.
 if [[ $first == no ]]; then
+    if ((${#wanted[@]} == 0)); then
+        echo "<3>The first run of the snapshot stopped before it read any device: no internal device is admitted. Allow them from Settings, USB devices, with \"Allow always\"." >&2
+        finish
+    fi
     ((runs < max_runs)) || give_up
     runs=$((runs + 1))
-    write_pending
+else
+    runs=1
 fi
+write_pending
 
 # devices: the devices this run reads. The first run reads every device; a later one only the
 # ports still pending, so a device connected since the first run is never a candidate.
@@ -194,27 +209,47 @@ device_rule() {
 # reconfigured between the read of bConfigurationValue and the reads of its interfaces
 # (usb_modeswitch, a udev rule, usbfs) reads differently twice and is read again. A device that
 # leaves the bus stops being listed and is not waited for.
-declare -A last=() why=() settled=()
+# The first run lists each device it sees in the pending file, from its ids alone, which the
+# kernel serves without the device lock, before it reads anything that takes the lock; the
+# serial is added as soon as a read gives it. An entry leaves the file only after its rule is
+# on disk, or when its device left the bus before the end of the run.
+declare -A last=() why=() settled=() resolved=()
 admitted=()
 # Microseconds of the wall clock, in any locale; the unit's start timeout is the monotonic bound.
 deadline=$((${EPOCHREALTIME//[!0-9]/} + wait_tenths * 100000))
 while :; do
+    mapfile -t listed < <(devices)
+    if [[ $first == yes ]]; then
+        seen=no
+        for dev in "${listed[@]}"; do
+            if [[ ! -v wanted[${dev##*/}] ]] && entry=$(identity "$dev"); then
+                wanted[${dev##*/}]=$entry
+                seen=yes
+            fi
+        done
+        [[ $seen == no ]] || write_pending
+    fi
     unsettled=()
-    while read -r dev; do
+    for dev in "${listed[@]}"; do
         [[ -v settled[$dev] ]] && continue
         if ! desc=$(describe "$dev"); then
             unset 'last[$dev]'
             why[$dev]=$desc
             unsettled+=("$dev")
-        elif [[ -v last[$dev] && ${last[$dev]} == "$desc" ]]; then
+            continue
+        fi
+        if [[ $first == yes && -v wanted[${dev##*/}] ]] && entry=$(identity "$dev" "$desc") &&
+            [[ $entry != "${wanted[${dev##*/}]}" ]]; then
+            wanted[${dev##*/}]=$entry
+            write_pending
+        fi
+        if [[ -v last[$dev] && ${last[$dev]} == "$desc" ]]; then
             settled[$dev]=yes
-            if [[ $first == no ]]; then
-                if ! matches "$dev" "$desc"; then
-                    echo "<4>${dev##*/} now holds a device other than the ${wanted[${dev##*/}]#* } of the first run: not admitted." >&2
-                    continue
-                fi
-                unset 'wanted[${dev##*/}]'
+            if [[ $first == no ]] && ! matches "$dev" "$desc"; then
+                echo "<4>${dev##*/} now holds a device other than the ${wanted[${dev##*/}]#* } of the first run: not admitted." >&2
+                continue
             fi
+            resolved[${dev##*/}]=yes
             if rule=$(device_rule "$dev" "$desc"); then
                 admitted+=("$rule")
             fi
@@ -223,7 +258,7 @@ while :; do
             why[$dev]="no two consecutive passes read it the same"
             unsettled+=("$dev")
         fi
-    done < <(devices)
+    done
     ((${#unsettled[@]} == 0)) && break
     ((${EPOCHREALTIME//[!0-9]/} < deadline)) || break
     sleep 0.1
@@ -232,17 +267,25 @@ done
 for dev in "${unsettled[@]}"; do
     echo "<3>${dev##*/} did not settle within $((wait_tenths / 10)).$((wait_tenths % 10)) s: ${why[$dev]//$'\n'/; }" >&2
 done
-# The first run owes a rule to each device it did not settle; one whose ids cannot be read has
-# no identity a later run could check, and stays blocked.
+# A device whose ids could never be read has no identity a later run could check: it stays
+# blocked.
+for dev in "${unsettled[@]}"; do
+    if [[ ! -v wanted[${dev##*/}] ]]; then
+        echo "<3>Leaving ${dev##*/} blocked: its ids cannot be read." >&2
+    fi
+done
 if [[ $first == yes ]]; then
-    for dev in "${unsettled[@]}"; do
-        if entry=$(identity "$dev" "${last[$dev]-}"); then
-            wanted[${dev##*/}]=$entry
-        else
-            echo "<3>Leaving ${dev##*/} blocked: its ids cannot be read. ${entry//$'\n'/; }" >&2
-        fi
+    declare -A present=()
+    for dev in "${listed[@]}"; do
+        present[${dev##*/}]=yes
+    done
+    for port in "${!wanted[@]}"; do
+        [[ -v present[$port] ]] || resolved[$port]=yes
     done
 fi
+for port in "${!resolved[@]}"; do
+    unset "wanted[$port]" # a port name holds no character the subscript would expand
+done
 
 # Rules first, durably, then the pending file or the marker: a crash between them reads the
 # devices again, and a rule already written is kept and never written twice.
@@ -260,15 +303,7 @@ body=$(
 )
 put "$rules" <<<"$body"
 
-if ((${#wanted[@]} == 0)); then
-    put "$marker" </dev/null
-    if [[ $first == no ]]; then
-        rm -f -- "$pending"
-        sync -- "${pending%/*}"
-    fi
-    exit 0
-fi
-[[ $first == yes ]] && runs=1
+((${#wanted[@]} == 0)) && finish
 ((runs < max_runs)) || give_up
 write_pending
 echo "<3>Not recording the snapshot as done: ${#wanted[@]} device(s) pending after run $runs of $max_runs, read again at the next boot." >&2
