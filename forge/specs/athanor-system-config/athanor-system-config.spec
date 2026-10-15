@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:65.fc43}
+Release:        %{?autorelease}%{!?autorelease:66.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -79,6 +79,34 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-66
+- athanor-usbguard-internal records a USB device only when two consecutive passes read the
+  same configuration, interfaces and interface classes, so a device reconfigured while it is
+  read is read again rather than skipped (#490). A device that does not settle within the
+  ten-second bound, unreadable, unconfigured or changing, is recorded as pending in
+  /var/lib/athanor/usbguard-internal.pending by port, ids and serial: the next boots read only
+  that port and admit only the same device, never one connected since. After three runs the
+  marker is written and the journal names the devices left blocked.
+  athanor-usbguard-internal.service bounds its start at 30 seconds, so a driver probe that
+  holds a device lock cannot hold back the greeter indefinitely. The first run keeps the
+  pending file as it sees the devices, so a first run stopped by that bound is continued at the
+  ports it saw; one stopped before it read any device's ids admits nothing at the next boot.
+  The unit no longer runs `udevadm settle` first: under NoNewPrivileges= SELinux denied it
+  udev's socket, so the unit failed at every boot before the script ran.
+  A later run waits until the bound for a pending port that has not enumerated yet.
+  A rules file that cannot be read fails the run and is kept as it is.
+  A pending device read with no serial is recorded as such and matches only a device with
+  none; the serial is read on its own, so a device not configured at the bound has it on
+  record, and only a device whose serial could never be read matches by port and ids alone.
+  A device whose serial a rule cannot carry is left blocked, named, and kept out of pending.
+  A device that leaves the bus during the first run is named in the journal too.
+  An invalid pending file or an unreadable rules file fails the unit at every boot, admitting
+  nothing, and the journal tells the administrator how to end it.
+  The bound is measured on the time since boot, which a step of the wall clock does not move.
+  A later run that cannot read the rules file is not counted among the three.
+  A serial such as -n is recorded as it reads, no longer taken for an option of echo.
+  A device admitted before it leaves the bus is no longer named as left blocked.
+
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-65
 - %install copies the usr and etc source trees without hiding a failure (AGENTS.md,
   "No hidden failures", #223): both directories ship with the package, so a missing one now fails the build
