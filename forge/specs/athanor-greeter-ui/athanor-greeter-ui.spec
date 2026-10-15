@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-greeter-ui
 Version:        1.0.0
-Release:        6%{?dist}
+Release:        7%{?dist}
 Summary:        The Athanor greeter
 License:        GPL-3.0-only
 
@@ -43,6 +43,11 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-greeter
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-greeter-ui.mo
 
 %changelog
+* Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
+- Requires libsqlite3.so.0, the soname of Fedora's sqlite-libs. Release 6 was linked against
+  the builder's sqlite, which had no SONAME, and required libsqlite3.so, which no package
+  provides, so the system image could not install it.
+
 * Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
 - The greeter lists the accounts (doc_lock_and_prompts.md, LP19): every account NSS returns
   with a uid from UID_MIN to UID_MAX of /etc/login.defs and a shell in /etc/shells, locked

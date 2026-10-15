@@ -43,6 +43,13 @@
             version = "0.2.0";
             hash = "sha256-6xmWBrPHghjok43eIDGeshpUEQTuwWLXNHg7CnBUt3Q=";
           }) { };
+        # sqlite with the soname of the rootfs. nixpkgs builds it with autosetup's default,
+        # which sets no SONAME: a binary linked against it records the file name
+        # libsqlite3.so, and rpm then requires libsqlite3.so()(64bit), which no Fedora package
+        # provides. --soname=legacy gives libsqlite3.so.0, the soname of Fedora's sqlite-libs.
+        sqlite-target = pkgs.sqlite.overrideAttrs (old: {
+          configureFlags = old.configureFlags ++ [ "--soname=legacy" ];
+        });
         system-libs = with pkgs; [
           zlib openssl curl spdlog systemd fmt speechd ncurses
           # polkit (forge/specs/polkit): its BuildRequires. meson, ninja, gobject-introspection and
@@ -56,7 +63,7 @@
           # poppler-glib (the PDF decoder), libseccomp and fontconfig (glycin)
           tinysparql poppler libseccomp fontconfig
           # athanor-greeter-ui: rusqlite reads lastlog2 through the system libsqlite3
-          sqlite
+          sqlite-target
         ];
         system-lib-closure = pkgs.lib.closePropagation (map pkgs.lib.getDev system-libs);
         system-dev = map pkgs.lib.getDev system-lib-closure;
