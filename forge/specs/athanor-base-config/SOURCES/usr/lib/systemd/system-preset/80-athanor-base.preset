@@ -15,6 +15,8 @@ disable NetworkManager-wait-online.service
 disable systemd-networkd-wait-online.service
 # Machine checks are reported by the kernel on every vendor; mcelog is deprecated upstream and fails on AMD family 17h+.
 disable mcelog.service
+# Runs once, before firewalld, on installs whose public zone the installer wrote (ADR-0116).
+enable athanor-firewall-zone-migrate.service
 
 # Contacts the project did not choose (forge/config/contacts.toml lists what the image does
 # contact, and verify.py contacts fails when a silent unit is enabled).

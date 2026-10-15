@@ -1,0 +1,40 @@
+[Unit]
+Description=Give back the public firewall zone to the image where the installer wrote it
+Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/decisions/0116-migrate-the-installer-firewall-zone.md
+# firewalld reads its zones once, when it starts: running Before= it needs no reload.
+# It runs once: the marker in /var/lib/athanor ends it, whatever it found (ADR-0116).
+Before=firewalld.service
+ConditionPathExists=!/var/lib/athanor/firewall-public-zone.done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/athanor-firewall-zone-migrate
+StateDirectory=athanor
+ReadWritePaths=/etc/firewalld/zones
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+PrivateNetwork=yes
+PrivateIPC=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallArchitectures=native
+UMask=0022
+
+[Install]
+WantedBy=multi-user.target

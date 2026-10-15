@@ -1,0 +1,92 @@
+#!/usr/bin/python3
+"""Give back firewalld's public zone to the image, once, where the installer wrote it (ADR-0116).
+
+Anaconda ran `firewall-offline-cmd --enabled --service=ssh` on every install before the kickstarts
+said `firewall --use-system-defaults` (#479). That wrote a local /etc/firewalld/zones/public.xml
+with ssh, and mdns too on installs older than the image's own zone, and kept the file it replaced
+as public.xml.old. A local file is configuration, so it hides the zone the image ships (ADR-0089
+decision 2) through every upgrade. This replaces it with the image's zone, only when it is still
+the installer's: public.xml.old exists, the zone is not newer than the installer's log, and it
+holds nothing but the services ssh, mdns and dhcpv6-client. firewalld also leaves a public.xml.old
+at every permanent change, so the .old alone does not prove the installer wrote the zone: the log
+does, since nothing changes the zone during the installation and the /etc merge keeps the time of
+the file. A zone edited by hand is left alone. Either way the marker ends it.
+
+The paths come from the environment only for the tests; the unit sets none.
+"""
+
+import os
+import sys
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+ZONES = Path(os.environ.get("ATHANOR_FIREWALL_ZONES", "/etc/firewalld/zones"))
+IMAGE_ZONE = Path(os.environ.get("ATHANOR_FIREWALL_IMAGE_ZONE", "/usr/etc/firewalld/zones/public.xml"))
+MARKER = Path(os.environ.get("ATHANOR_FIREWALL_MARKER", "/var/lib/athanor/firewall-public-zone.done"))
+INSTALL_LOG = Path(os.environ.get("ATHANOR_INSTALL_LOG", "/var/log/anaconda/anaconda.log"))
+INSTALLER_SERVICES = {"ssh", "mdns", "dhcpv6-client"}
+PLAIN_ELEMENTS = {"short", "description", "forward"}
+
+
+def installer_zone(path):
+    """Whether the zone holds nothing the installer did not write: no attribute on the zone, the
+    plain elements without attributes or children, and only the installer's services."""
+    root = ET.parse(path).getroot()
+    if root.tag != "zone" or root.attrib:
+        return False
+    for child in root:
+        if child.tag in PLAIN_ELEMENTS and not child.attrib and len(child) == 0:
+            continue
+        if child.tag == "service" and child.keys() == ["name"] and child.get("name") in INSTALLER_SERVICES:
+            continue
+        return False
+    return True
+
+
+def migrate():
+    """Returns what was done, in one sentence for the journal."""
+    zone = ZONES / "public.xml"
+    old = ZONES / "public.xml.old"
+    if not zone.exists():
+        return "no local public zone: the image's zone applies, nothing to do"
+    if not old.exists():
+        return f"{zone} left alone: there is no public.xml.old, so the installer did not write it"
+    if not INSTALL_LOG.exists():
+        return f"{zone} left alone: there is no {INSTALL_LOG}, so nothing shows the installer wrote it"
+    if zone.stat().st_mtime > INSTALL_LOG.stat().st_mtime:
+        return f"{zone} left alone: it changed after the installation"
+    try:
+        ours = installer_zone(zone)
+    except ET.ParseError as error:
+        return f"{zone} left alone: it is not well-formed XML ({error})"
+    if not ours:
+        return f"{zone} left alone: it holds more than the installer wrote (a service other than ssh, mdns and dhcpv6-client, a port, a rule or another setting)"
+    image = IMAGE_ZONE.read_bytes()
+    temporary = ZONES / ".public.xml.athanor-migrate"
+    with open(temporary, "wb") as out:
+        out.write(image)
+        out.flush()
+        os.fsync(out.fileno())
+    os.chmod(temporary, 0o644)
+    os.replace(temporary, zone)
+    old.unlink()
+    # The marker lives on /var, which may be another file system: the rename and the unlink
+    # reach the disk before it, or a crash could keep the marker and lose the migration.
+    directory = os.open(ZONES, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+    return f"{zone} replaced with the image's zone ({IMAGE_ZONE}): ssh and mdns are no longer open in public"
+
+
+def main():
+    if MARKER.exists():
+        return 0
+    print(migrate())
+    MARKER.touch()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

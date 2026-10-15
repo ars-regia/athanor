@@ -39,6 +39,11 @@ scripts/devvm/reset.sh             # back to the freshly installed system
 - The account is the host user's name, password equal to the name (for the greeter),
   passwordless sudo, and SSH with `~/.ssh/id_ed25519` (or a key generated in the state
   directory). This is a development VM only: SSH listens on `127.0.0.1:2222` alone.
+  `devvm.ks` binds the host, `10.0.2.2` inside the guest, to the firewall's `home` zone,
+  because `public` has no `ssh` (ADR-0089, ADR-0116). A base created before that binding
+  loses SSH at the first boot of an image that carries ADR-0116's migration: once after
+  every `reset.sh`, run `ssh.sh sudo firewall-cmd --permanent --zone=home --add-source=10.0.2.2`
+  before booting such an image, or recreate the base with `create.sh`.
 - `deploy.sh SRC:DEST...` installs local files at guest paths. `/usr` is read-only, so the
   first deploy of a boot runs `bootc usr-overlay`: **files under `/usr` vanish when the
   guest reboots**. `--restart-session` restarts greetd (you log in again),

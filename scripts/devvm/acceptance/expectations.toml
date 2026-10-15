@@ -35,7 +35,9 @@ ports = [323] # the chronyc command port on loopback; the time servers are the `
 
 [firewall]
 required = false
-zones = { public = ["dhcpv6-client"] } # forge/specs/athanor-base-config/SOURCES/etc/firewalld/zones/public.xml
+# public: forge/specs/athanor-base-config/SOURCES/etc/firewalld/zones/public.xml. home: Fedora's zone,
+# active on the dev VM only because devvm.ks binds the host (10.0.2.2) to it for ssh (ADR-0116).
+zones = { public = ["dhcpv6-client"], home = ["dhcpv6-client", "mdns", "samba-client", "ssh"] }
 
 [security]
 # Ceilings of `systemd-analyze security` exposure per shipped athanor-*.service (not templates).
@@ -45,6 +47,7 @@ zones = { public = ["dhcpv6-client"] } # forge/specs/athanor-base-config/SOURCES
 # thresholds the update acceptance has always used (5.5, 6.0).
 "athanor-backup-hourly.service" = 2.7
 "athanor-flatpak-triggers.service" = 1.6
+"athanor-firewall-zone-migrate.service" = 1.4
 "athanor-flatpak-update.service" = 3.5
 "athanor-nix-gc.service" = 6.0
 "athanor-nix-relabel.service" = 7.2
