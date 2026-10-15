@@ -1,0 +1,84 @@
+From b99f1c9bd041aa31fdb06242460c3cd89b35e831 Mon Sep 17 00:00:00 2001
+From: Ermete Architect <esenese@proton.me>
+Date: Thu, 15 Oct 2026 21:15:24 +0200
+Subject: [PATCH] main: Add --keep-shortcuts to keep the key bindings with a
+ command
+
+A command on the command line runs the compositor in kiosk mode, and
+kiosk mode loads no key bindings: neither the defaults, nor the system
+actions such as the volume keys, nor the user's custom bindings.
+
+A desktop session can also be started as the compositor's child, so
+that the compositor exits when the session does. Such a session needs
+its key bindings. --keep-shortcuts loads them even when a command is
+given; without it nothing changes, so a greeter or a kiosk started with
+a command stays without bindings.
+---
+ src/lib.rs   | 6 ++++++
+ src/state.rs | 5 ++++-
+ 2 files changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/src/lib.rs b/src/lib.rs
+index 98bfa2a..0ff8362 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -118,6 +118,7 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
+ 
+     let mut kiosk_command = None;
+     let mut with_xwayland = true;
++    let mut keep_shortcuts = false;
+     // Parse the arguments
+     while let Some(arg) = raw_args.next_os(&mut cursor) {
+         match arg.to_str() {
+@@ -129,6 +130,9 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
+                 tracing::info!("Running without Xwayland");
+                 with_xwayland = false;
+             }
++            Some("--keep-shortcuts") => {
++                keep_shortcuts = true;
++            }
+             Some("--version") | Some("-V") => {
+                 println!(
+                     "cosmic-comp {} (git commit {})",
+@@ -176,6 +180,7 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
+         event_loop.get_signal(),
+         with_xwayland,
+         kiosk_command,
++        keep_shortcuts,
+     );
+     // Set up the libei sender side before the backend spawns Xwayland.
+     let ei_sender = libei::setup_ei(&event_loop.handle());
+@@ -289,6 +294,7 @@ Project home page: https://github.com/pop-os/cosmic-comp
+ Options:
+   -h, --help          Show this message
+   --no-xwayland       Run without Xwayland
++  --keep-shortcuts    Load the key bindings even when a command is given
+   -V, --version       Show the version of cosmic-comp"#
+     );
+ }
+diff --git a/src/state.rs b/src/state.rs
+index 86f5e23..5a1d059 100644
+--- a/src/state.rs
++++ b/src/state.rs
+@@ -660,6 +660,7 @@ impl State {
+         signal: LoopSignal,
+         with_xwayland: bool,
+         kiosk_command: Option<Command>,
++        keep_shortcuts: bool,
+     ) -> State {
+         let requested_languages = DesktopLanguageRequester::requested_languages();
+         i18n_embed::select(&*LANG_LOADER, &Localizations, &requested_languages)
+@@ -667,7 +668,9 @@ impl State {
+             .unwrap();
+ 
+         let clock = Clock::new();
+-        let config = Config::load(&handle, kiosk_command.is_some());
++        // A command runs the compositor in kiosk mode, which drops the key bindings, unless
++        // --keep-shortcuts asks for them: a desktop session started as the compositor's child.
++        let config = Config::load(&handle, kiosk_command.is_some() && !keep_shortcuts);
+         let compositor_state = CompositorState::new::<Self>(dh);
+         let corner_radius_state = CornerRadiusState::new::<Self>(dh);
+         let data_device_state = DataDeviceState::new::<Self>(dh);
+-- 
+2.56.0
+

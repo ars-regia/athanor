@@ -1,5 +1,5 @@
 # Athanor's cosmic-comp: the upstream release at Fedora's version, built from upstream's
-# archive with two patches of ours; Fedora's own downstream patches are not carried, and
+# archive with three patches of ours; Fedora's own downstream patches are not carried, and
 # License and Requires were copied from Fedora's spec, so a bump diffs them by hand. Same
 # Name so that it replaces Fedora's build instead of sitting beside it (like
 # forge/specs/just). The release spells out Fedora's, so that 1.8.0-1.fc43.athanor1 sorts
@@ -11,16 +11,19 @@
 
 Name:           cosmic-comp
 Version:        1.10.0
-Release:        %{fedora_release}.athanor1
+Release:        %{fedora_release}.athanor2
 Summary:        Wayland compositor of the COSMIC desktop, with Athanor's focus fix
 
 # Fedora's full expression: the binary statically links the crates. GPL-3.0-only is cosmic-comp's own.
 License:        (0BSD OR Apache-2.0 OR MIT) AND (Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT) AND (Apache-2.0 OR BSD-2-Clause OR MIT) AND (Apache-2.0 OR BSD-3-Clause OR MIT) AND (Apache-2.0 OR BSD-3-Clause) AND (Apache-2.0 OR CC0-1.0 OR MIT) AND (Apache-2.0 OR GPL-2.0-only) AND (Apache-2.0 OR LGPL-2.1-or-later OR MIT) AND (Apache-2.0 OR MIT OR Unlicense) AND (Apache-2.0 OR MIT OR Zlib) AND (Apache-2.0 OR MIT) AND (LGPL-3.0-or-later OR MIT) AND (MIT OR Unlicense) AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND CC0-1.0 AND GPL-3.0-only AND ISC AND MIT AND MPL-2.0 AND Unicode-3.0 AND Zlib
 URL:            https://github.com/pop-os/cosmic-comp
 Source0:        https://github.com/pop-os/cosmic-comp/archive/epoch-%{version}/cosmic-comp-%{version}.tar.gz
-# Both submitted upstream; drop each when a release carries it.
+# Patch0 and Patch1 are submitted upstream; drop each when a release carries it.
 Patch0:         0001-shell-focus-Reconcile-focus-when-a-layer-surface-cha.patch
 Patch1:         0002-build-Take-the-commit-hash-from-GIT_HASH-when-it-is-.patch
+# A command makes cosmic-comp a kiosk with no key bindings; athanor-session starts the
+# desktop as that command and passes --keep-shortcuts to keep them (#144). Not submitted yet.
+Patch2:         0003-main-Add-keep-shortcuts-to-keep-the-key-bindings-wit.patch
 
 BuildRequires:  cargo rust
 
@@ -60,6 +63,10 @@ install -Dm0644 data/tiling-exceptions.ron \
 %{_datadir}/cosmic/com.system76.CosmicSettings.WindowRules/v1/tiling_exception_defaults
 
 %changelog
+* Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.10.0-2.fc43.athanor2
+- Add --keep-shortcuts: with a command on the command line cosmic-comp ran as a kiosk and
+  loaded no key bindings, so the desktop session had no shortcuts, volume keys included (#144).
+
 * Fri Oct 09 2026 Athanor Forge <forge@athanor.os> - 1.10.0-2.fc43.athanor1
 - Fedora's cosmic-comp 1.10.0-2.fc43.
 
