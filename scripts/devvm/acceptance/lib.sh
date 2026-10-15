@@ -219,6 +219,36 @@ polkit_grants_agent() {
   out=$(journal_since "$1" polkit.service) || die "FAIL  reading the polkitd journal"
   grep -qF "Registered Authentication Agent" <<< "$out"
 }
+# polkitd logs a grant and an agent's registration at info, and the image runs it at notice:
+# the stage raises the level in a /run drop-in, so the grants it counts are in the journal. The
+# restart drops the agent, so cosmic-osd is restarted, and its registration, an info line,
+# proves the level took. polkit_log_restore takes the drop-in back; a reboot would too.
+ACC_POLKIT_DROPIN=/run/systemd/system/polkit.service.d/50-acceptance-log-info.conf
+polkit_restart_agent() {
+  local since
+  since=$(now_guest)
+  guest_ssh "sudo systemctl daemon-reload && sudo systemctl restart polkit.service" || return 1
+  guest_ssh sudo systemctl --user --machine="$GUEST_USER@.host" restart cosmic-osd.service || return 1
+  for _ in $(seq 30); do
+    polkit_grants_agent "$since" && return 0
+    sleep 1
+  done
+  return 1
+}
+polkit_log_info() {
+  local exec
+  exec=$(guest_ssh systemctl cat polkit.service | grep '^ExecStart=/') || die "FAIL  no ExecStart in polkit.service"
+  [[ $exec == *--log-level=notice* ]] || die "FAIL  polkitd is not started at --log-level=notice: $exec"
+  printf '[Service]\nExecStart=\n%s\n' "${exec/--log-level=notice/--log-level=info}" |
+    guest_ssh "sudo mkdir -p ${ACC_POLKIT_DROPIN%/*} && sudo tee $ACC_POLKIT_DROPIN > /dev/null"
+  polkit_restart_agent || die "FAIL  cosmic-osd did not register with polkitd at --log-level=info in 30 s"
+}
+polkit_log_restore() {
+  guest_ssh "test -e $ACC_POLKIT_DROPIN" || return 0
+  guest_ssh sudo rm -f "$ACC_POLKIT_DROPIN" || return 1
+  guest_ssh "sudo systemctl daemon-reload && sudo systemctl restart polkit.service" || return 1
+  guest_ssh sudo systemctl --user --machine="$GUEST_USER@.host" restart cosmic-osd.service
+}
 # The shape of the line polkitd logs for a granted prompt, matched by both forms above.
 POLKIT_SAMPLE='Operator of unix-session:c2 successfully authenticated as unix-user:x to gain ONE-SHOT authorization for action os.athanor.update.apply-multi-session for system-bus-name::1.55 [dbus-send] (owned by unix-user:x)'
 polkit_pattern_selfcheck() {

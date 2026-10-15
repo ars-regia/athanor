@@ -64,6 +64,7 @@ sessions_cleanup() {
     stop_system_unit "$unit.service" || failed+=("stop $unit")
   done
   unmount_wrapper || failed+=(unmount_wrapper)
+  polkit_log_restore || failed+=(polkit_log_restore)
   if [[ -n $ACC_OTHER_MADE ]]; then
     remove_other || failed+=(remove_other)
     ACC_OTHER_MADE=''
@@ -78,6 +79,7 @@ stage_sessions() { # item 2, the other-session rule of UT6 (ADR-0103 D22, #433);
   expect_until "2: a downloaded update to ask about" .update downloaded 20
   polkit_pattern_selfcheck
   trap sessions_cleanup EXIT
+  polkit_log_info
   untunnel
   # A run killed before its trap ran leaves the user behind: take it away first.
   if guest_ssh getent passwd "$ACC_OTHER" > /dev/null; then remove_other; fi
