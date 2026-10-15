@@ -345,8 +345,9 @@ if [[ $first == yes ]]; then
     for dev in "${listed[@]}"; do
         present[${dev##*/}]=yes
     done
+    # A device that settled before it left was admitted, or named, already.
     for port in "${!wanted[@]}"; do
-        if [[ ! -v present[$port] ]]; then
+        if [[ ! -v present[$port] && ! -v resolved[$port] ]]; then
             echo "<4>Leaving $port (${wanted[$port]#* }) blocked: it left the bus during the first run." >&2
             resolved[$port]=yes
         fi

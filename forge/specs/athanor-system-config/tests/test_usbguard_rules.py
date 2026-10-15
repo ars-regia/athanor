@@ -365,6 +365,19 @@ case $(wc -l < {count}) in
         self.assertEqual(len((self.work / "waits").read_text().splitlines()), 3)
         self.assertTrue(self.marker.exists())
 
+    def test_a_device_admitted_before_it_leaves_the_bus_is_not_named_as_left(self):
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")], "CAM1")
+        self.device("1-2", "058f", "9540", [], configured=False)
+        # 1-1 reads the same at the second pass, and is removed after it.
+        done = self.run_script(sleep=self.on_wait(":", f"rm -r {self.sysfs / '1-1'}"), check=False, wait_tenths=3)
+        self.assert_not_done(done, "1-2")
+        self.assertNotIn("left the bus", done.stderr)
+        self.assertEqual(
+            self.written(),
+            ['allow id 0c45:6a10 serial "CAM1" via-port "1-1" with-interface equals { 0e:01:00 }'],
+        )
+        self.assertEqual(self.pending.read_text(), 'runs 1\n1-2 058f:9540 ""\n')
+
     def test_a_device_that_never_reads_the_same_twice_is_left_pending_with_its_serial(self):
         self.device("1-1", "0c45", "6a10", [("0e", "01", "00")], "CAM1")
         self.device("1-2", "058f", "9540", [("0b", "00", "00")])
