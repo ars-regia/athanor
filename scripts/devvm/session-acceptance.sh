@@ -81,12 +81,13 @@ shot() {
 type_keys() { guest_ssh "sudo python3 - $(printf '%q ' "$@")" < "$HERE/keyboard_type.py"; }
 
 # Undoes what the stages changed, on every exit, a failed one included. A step that fails is
-# named, and the exit status stays the stage's.
+# named, and a run that passed fails: it left the guest changed.
 cleanup() {
-    local step
+    local status=$? step failed=0
     for step in "${CLEANUP[@]}"; do
-        "$step" || echo "note: cleanup step $step failed" >&2
+        "$step" || { echo "FAIL cleanup step $step: the guest keeps what it undoes" >&2; failed=1; }
     done
+    ((status != 0 || failed == 0)) || exit 1
 }
 trap cleanup EXIT
 
@@ -94,11 +95,6 @@ USER_NAME=$(guest_ssh id -un)
 SESSION=$(guest_ssh loginctl show-user "$USER_NAME" -p Display --value) || SESSION=
 [[ -n $SESSION ]] || fail "no graphical session for $USER_NAME: log in at the greeter first"
 
-# Whether the daemon's user journal holds, since the epoch second SINCE, a line containing TEXT.
-daemon_journal_has() { # daemon_journal_has SINCE TEXT
-    local log
-    log=$(guest_ssh sudo journalctl -q -b --since "@$1" -o cat "_SYSTEMD_USER_UNIT=$DAEMON") && grep -qF -- "$2" <<< "$log"
-}
 
 # The default sink's volume in whole percent; nothing when wpctl or SSH fails.
 volume() {
@@ -137,7 +133,7 @@ unload_sink() {
 }
 
 stage_volume() {
-    local since up down
+    local since up down log
     since=$(guest_ssh date +%s)
     [[ $(in_session systemctl --user is-active $DAEMON) == active ]] || fail "$DAEMON is not active"
     in_session "test -S $SOCKET" || fail "no socket $SOCKET: the daemon's audio service did not bind (ReadWritePaths=%t, #144)"
@@ -147,34 +143,48 @@ stage_volume() {
         fail "$SHORTCUTS does not bind XF86AudioRaiseVolume to VolumeRaise"
     in_session "grep -h VolumeRaise /usr/share/cosmic/*/v1/system_actions" | grep -q . ||
         fail "no system_actions file under /usr/share/cosmic names VolumeRaise"
+    # Given a command, cosmic-comp runs as a kiosk and loads no key bindings at all, unless
+    # Athanor's patch is told to keep them (#510).
+    in_session "pgrep -a -x cosmic-comp" | grep -qF -- --keep-shortcuts ||
+        fail "the session's cosmic-comp runs without --keep-shortcuts: it loads no key bindings (#510)"
 
     PREVIOUS_SINK=$(in_session pactl get-default-sink) || fail "pactl get-default-sink: no PulseAudio server in the session"
     CLEANUP+=(unload_sink restore_sink)
     NULL_MODULE=$(in_session pactl load-module module-null-sink "sink_name=$SINK") || fail "pactl could not load a null sink"
-    in_session pactl set-default-sink "$SINK"
+    in_session pactl set-default-sink "$SINK" || fail "pactl set-default-sink $SINK"
     wait_until 10 default_sink_is "$SINK" || fail "the default sink is not $SINK 10 s after set-default-sink"
-    in_session wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.40
+    in_session wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.40 || fail "wpctl set-volume"
     wait_until 10 volume_is 40 || fail "the default sink's volume is '$(volume)' %, not 40, 10 s after wpctl set-volume"
     # The daemon follows the default sink through PipeWire's events; no log line says it has.
     sleep 2
     shot volume-before
 
-    type_keys '@volup*3:0.5'
+    type_keys '@volup*3:0.5' || fail "keyboard_type.py could not press volume up"
     wait_until 10 volume_above 40 || fail "the volume is '$(volume)' % 10 s after three volume-up presses, from 40: the keys did not reach the daemon"
     up=$(volume)
     shot volume-up
-    type_keys '@voldown*3:0.5'
+    type_keys '@voldown*3:0.5' || fail "keyboard_type.py could not press volume down"
     wait_until 10 volume_below "$up" || fail "the volume is '$(volume)' % 10 s after three volume-down presses, from $up"
     down=$(volume)
     shot volume-down
     echo "volume: 40 -> $up -> $down"
 
-    if daemon_journal_has "$since" panicked; then
-        fail "$DAEMON panicked since the stage started: $(guest_ssh sudo journalctl -q -b --since "@$since" -o cat "_SYSTEMD_USER_UNIT=$DAEMON" | grep -F panicked)"
+    # A journal that cannot be read fails the stage: it must not read as one without a panic.
+    log=$(guest_ssh sudo journalctl -q -b --since "@$since" -o cat "_SYSTEMD_USER_UNIT=$DAEMON") ||
+        fail "cannot read $DAEMON's journal"
+    if grep -F panicked <<< "$log"; then
+        fail "$DAEMON panicked since the stage started"
     fi
 }
 
-stop_editor() { in_session systemctl --user stop "$EDITOR_UNIT"; }
+# Flatpak moves the application into a scope of its own: stopping $EDITOR_UNIT stops only
+# `flatpak run`, and a surviving instance takes over the next run's window.
+stop_editor() {
+    local apps
+    apps=$(in_session flatpak ps --columns=application) || return 1
+    grep -qx "$APP" <<< "$apps" || return 0
+    in_session flatpak kill "$APP"
+}
 reset_override() { in_session flatpak override --user --reset "$APP"; }
 remove_document() { in_session "rm -f $DOCUMENT"; }
 
@@ -200,33 +210,39 @@ stage_portal() {
 
     # shellcheck disable=SC2016 # expanded by the guest's shell
     home=$(guest_ssh 'printf %s "$HOME"')
-    NAME=session-acceptance-144.txt
+    # A name of this run: the document portal keeps a record of every document it exported,
+    # and a record left by an earlier run would read as this run's export.
+    NAME=session-acceptance-$(date +%s).txt
     DOCUMENT=$home/$NAME
+    ! editor_runs || fail "$APP already runs: the stage needs an instance it starts (flatpak kill $APP)"
     CLEANUP+=(stop_editor remove_document)
     # Flathub's Text Editor holds --filesystem=host, and the portal exports a chosen file only to
     # an application that cannot already reach it: without this override the file opens by its
-    # own path and the document portal is never exercised. The dev VM's user override goes too.
+    # own path and the document portal is never exercised. The cleanup resets the user override,
+    # so the stage refuses to start over one it did not write.
+    [[ -z $(in_session flatpak override --user --show "$APP") ]] ||
+        fail "$APP has a user override; the stage would replace it (flatpak override --user --show $APP)"
     CLEANUP+=(reset_override)
     in_session flatpak override --user --nofilesystem=host "$APP" || fail "flatpak override --nofilesystem=host $APP"
-    in_session "printf 'athanor session acceptance\\n' > $DOCUMENT"
-    before=$(in_session "sha256sum < $DOCUMENT")
+    in_session "printf 'athanor session acceptance\\n' > $DOCUMENT" || fail "cannot write $DOCUMENT"
+    before=$(in_session "sha256sum < $DOCUMENT") || fail "cannot read $DOCUMENT"
 
-    in_session systemd-run --user --collect --unit="$EDITOR_UNIT" flatpak run "$APP"
+    in_session systemd-run --user --collect --unit="$EDITOR_UNIT" flatpak run "$APP" || fail "systemd-run $APP"
     wait_until 60 editor_runs || fail "$APP is not in flatpak ps 60 s after it was started"
     # No log line marks the window as drawn: a fixed settle time, as for the locker's surfaces.
     sleep 8
     shot editor
 
-    type_keys @ctrl+o
+    type_keys @ctrl+o || fail "keyboard_type.py could not press Ctrl+O"
     sleep 4
     shot chooser
-    type_keys @ctrl+l "$DOCUMENT" @enter
+    type_keys @ctrl+l "$DOCUMENT" @enter || fail "keyboard_type.py could not type the path"
     shot path
     # GTK 4.20's chooser in xdg-desktop-portal-gtk keeps the dialog open after the first Enter
     # in its location entry (seen on the dev VM, 2026-10-15); the second opens the file. A
     # second Enter after an opened file would type into the editor, so it is pressed only when
     # the first exported nothing.
-    wait_until 5 document_exported || type_keys @enter
+    wait_until 5 document_exported || type_keys @enter || fail "keyboard_type.py could not press Enter"
     wait_until 20 document_exported || {
         shot no-export
         fail "no $DOCS/by-app/$APP/*/$NAME 20 s after the path: $(in_session "ls -R $DOCS/by-app 2>&1" | head -n 20 | tr '\n' '|')"
@@ -234,10 +250,10 @@ stage_portal() {
     sleep 2
     shot opened
 
-    type_keys x @ctrl+s
+    type_keys x @ctrl+s || fail "keyboard_type.py could not type and save"
     sleep 2
     shot saved
-    after=$(in_session "sha256sum < $DOCUMENT")
+    after=$(in_session "sha256sum < $DOCUMENT") || fail "cannot read $DOCUMENT after the save"
     [[ $after != "$before" ]] || fail "$DOCUMENT is unchanged after a typed character and Ctrl+S"
 }
 

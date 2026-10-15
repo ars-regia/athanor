@@ -122,13 +122,15 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   criterion of #144. Log in at the greeter first.
 - `session-acceptance.sh [stage...]` checks the other two criteria of #144 in the real
   session. `volume`: cosmic-settings-daemon is active with its varlink socket bound, the
-  image binds the volume keys to the system action, and on a null sink the script makes
-  with `pactl` (the VM has no sound device) three volume-up presses raise and three
-  volume-down presses lower the volume `wpctl` reads, with no "panicked" in the daemon's
-  journal. `portal`: Flatpak org.gnome.TextEditor (installed from Flathub on the first run)
-  opens a file of the home directory through the file chooser, which the document portal
-  must export under `$XDG_RUNTIME_DIR/doc/by-app/<app id>/`, and a typed character saved
-  with Ctrl+S must change the file. Keys come from `keyboard_type.py`, which knows
+  image binds the volume keys to the system action, the session's cosmic-comp keeps its key
+  bindings (`--keep-shortcuts`, #510), and on a null sink the script makes with `pactl`
+  (the VM has no sound device) three volume-up presses raise and three volume-down presses
+  lower the volume `wpctl` reads, with no "panicked" in the daemon's journal. `portal`:
+  Flatpak org.gnome.TextEditor (installed from Flathub on the first run), its host access
+  dropped by a user override that the cleanup resets (the stage refuses to start over an
+  existing one), opens a file of the home directory through the file chooser, which the
+  document portal must export under `$XDG_RUNTIME_DIR/doc/by-app/<app id>/`, and a typed
+  character saved with Ctrl+S must change the file. Keys come from `keyboard_type.py`, which knows
   `@volup`, `@voldown` and `@mute`. The chooser has no log line, so the stage waits a fixed
   time for it; the screenshots in `.scratch/session-acceptance/` are the only check of what
   is drawn. Log in at the greeter first.
