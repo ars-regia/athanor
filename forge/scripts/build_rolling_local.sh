@@ -12,7 +12,7 @@ PACKAGE="${1:-}"
 echo "========================================"
 echo "=== INIZIALIZZAZIONE AMBIENTE BEDROCK =="
 echo "========================================"
-sudo dnf install -y rpm-build dnf-plugins-core rpmdevtools
+sudo dnf install -y rpm-build dnf-plugins-core rpmdevtools mold
 RPMBUILD_DIR=$(mktemp -d)
 RPMMACROS_BAK=$(mktemp)
 if [ -f ~/.rpmmacros ]; then
