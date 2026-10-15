@@ -3,6 +3,8 @@
 
 import importlib.util
 import pathlib
+import re
+import subprocess
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -321,6 +323,36 @@ class Expectations(unittest.TestCase):
                 )
             },
         )
+
+    def test_every_shipped_system_service_has_a_ceiling(self):
+        # The guest probe fails a unit without a line only once an acceptance runs; this
+        # holds the same rule on every pull request (#509: a unit came without its line).
+        # Shipped: a non-template athanor-*.service in a SOURCES unit directory of any spec in
+        # the repository, or one a spec names under the unit directory outside its comments and
+        # its changelog. A unit installed only by a glob or a loop over a tarball is not seen.
+        def tracked(*patterns):
+            out = subprocess.run(
+                ["git", "-C", str(ROOT), "ls-files", "--", *patterns],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+            return [ROOT / line for line in out.splitlines()]
+
+        shipped = {
+            p.name
+            for p in tracked("*/SOURCES/usr/lib/systemd/system/athanor-*.service")
+            if "@" not in p.name
+        }
+        unit_path = re.compile(
+            r"(?:%\{_unitdir\}|/usr/lib/systemd/system)/(athanor-[A-Za-z0-9_.-]*\.service)"
+        )
+        for spec_file in tracked("*.spec"):
+            body = spec_file.read_text().split("\n%changelog", 1)[0]
+            for line in body.splitlines():
+                if not line.lstrip().startswith("#"):
+                    shipped |= set(unit_path.findall(line))
+        self.assertEqual(set(EXPECT["security"]), shipped)
 
     def test_a_timeout_names_the_probe(self):
         probes.TIMEOUT = 1

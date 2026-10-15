@@ -56,6 +56,7 @@ zones = { public = ["dhcpv6-client"], home = ["dhcpv6-client", "mdns", "samba-cl
 "athanor-update-check.service" = 6.0
 "athanor-update-migrate.service" = 6.0
 "athanor-update-state.service" = 5.6
+"athanor-usbguard-internal.service" = 2.3
 
 [selinux]
 # Denials since boot, as source_type:target_type:class. None are declared yet.
