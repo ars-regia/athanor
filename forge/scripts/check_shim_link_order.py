@@ -9,6 +9,7 @@ of how cargo orders its -l flags (spike P2). This check turns the accident into 
 contract: it runs in %check and fails the package.
 """
 
+import os
 import re
 import subprocess
 import sys
@@ -40,7 +41,11 @@ def main(argv):
         print(__doc__, file=sys.stderr)
         return 2
     output = subprocess.run(
-        ["readelf", "-d", argv[0]], check=True, capture_output=True, text=True
+        ["readelf", "-d", argv[0]],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "LC_ALL": "C"},  # needed() matches the English labels
     ).stdout
     found = problems(needed(output))
     for line in found:
