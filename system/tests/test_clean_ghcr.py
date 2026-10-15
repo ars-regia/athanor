@@ -91,6 +91,14 @@ class SystemImages(Tool):
                     image(7, ["60", "stable-20250501"], OLD), image(8, ["50"], OLD)]
         self.assertEqual(self.prune(versions, {**self.index(5, 52), **self.index(6, 62)}), [8])
 
+    def test_two_promotions_on_one_day_then_a_third_keep_all_three_images(self):
+        """Issue 500: stable-<day> moved to B, stable-previous to B, so A had no tag but promoted-<run_id>."""
+        versions = [image(1, ["promoted-100"], OLD), *referrers(10, 1),
+                    image(2, ["promoted-101", "stable-20260801"], OLD), *referrers(20, 2),
+                    image(3, ["promoted-102", "stable", "stable-20260802"], OLD), *referrers(30, 3),
+                    image(4, ["103"], OLD)]
+        self.assertEqual(self.prune(versions, {**self.index(1, 12), **self.index(2, 22), **self.index(3, 32)}), [4])
+
     def test_an_untagged_manifest_no_kept_index_lists_is_deleted(self):
         versions = [image(1, ["100", "stable"], OLD), *referrers(10, 1), image(99, [], RECENT)]
         self.assertEqual(self.prune(versions, self.index(1, 12)), [99])
@@ -142,7 +150,15 @@ class Isos(Tool):
 
     def test_a_promoted_system_image_without_its_run_id_deletes_no_iso(self):
         self.assert_kept([image(1, ["100", "stable"], RECENT), image(2, ["stable-20260801"], OLD)],
-                         "an athanor-system version tagged stable, stable-previous or stable-<YYYYMMDD> carries no run id")
+                         "an athanor-system version tagged stable, stable-previous, stable-<YYYYMMDD> or promoted-<run_id> carries no run id")
+
+    def test_two_promotions_on_one_day_then_a_third_keep_all_three_isos(self):
+        """Issue 500: the runs come from promoted-<run_id>, which the day tag and stable-previous cannot lose."""
+        system = [image(1, ["promoted-80"], OLD), image(2, ["promoted-90", "stable-20260801"], OLD),
+                  image(3, ["promoted-100", "stable", "stable-20260802"], RECENT), image(4, ["70"], OLD)]
+        r, deleted = self.prune(self.ISOS, system=system)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(deleted, [14, 15, 18])  # ISOs 80, 90 and 100 stay; 70 was never promoted
 
     def test_a_stable_iso_of_no_promoted_run_deletes_no_iso(self):
         self.assert_kept([image(2, ["90", "stable"], RECENT)],

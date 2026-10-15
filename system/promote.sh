@@ -7,8 +7,10 @@
 # record with scripts/ci/promotion-record.sh, the code that wrote the plan, refuses unless it
 # equals the plan the bundle signed and the approval covered, moves the tags by digest and
 # reads :stable back. The plan is scripts/ci/promotion-plan.sh's; this script has no plan mode.
-# Besides `stable`, each promoted image gets `stable-previous` (the digest stable pointed at)
-# and `stable-<YYYYMMDD>` of the plan's day; forge/scripts/clean_ghcr.sh keeps all three (UT10).
+# Besides `stable`, each promoted image gets `stable-previous` (the digest stable pointed at),
+# `stable-<YYYYMMDD>` of the plan's day and `promoted-<run_id>`, written once and never moved:
+# a second promotion of the day moves the day tag, this one stays. forge/scripts/clean_ghcr.sh
+# keeps all four (UT10, UD8).
 # Usage: promote.sh [--hardware-override athanor-system-nvidia] RUN_ID
 # Environment: as scripts/ci/promotion-record.sh; $PROMOTE_ARTIFACTS/promotion.json is the
 #              plan, verified against its copy off GitHub before this runs.
@@ -39,6 +41,15 @@ for name in "${promote[@]}"; do
     stable=$(stable_of "$repository")
     [[ $stable == "${previous[$name]:-}" ]] ||
         die "$repository:stable moved to ${stable:-nothing} since the record named ${previous[$name]:-no stable}: plan again"
+    # The immutable tag first: a partial apply that rerun finds it at the same digest and goes on.
+    # Assigned first: a substitution inside [[ ]] would not stop the script when it fails.
+    check_promoted "$repository" "$digest"
+    at=$(tag_of "$repository" "promoted-$run")
+    if [[ -z $at ]]; then
+        bash "$retry" skopeo copy --preserve-digests "docker://$repository@$digest" "docker://$repository:promoted-$run"
+        at=$(tag_of "$repository" "promoted-$run")
+    fi
+    [[ $at == "$digest" ]] || die "$repository:promoted-$run points at ${at:-nothing}, not the evidence digest $digest"
     if [[ -n ${previous[$name]:-} ]]; then
         bash "$retry" skopeo copy --preserve-digests "docker://$repository@${previous[$name]}" "docker://$repository:stable-previous"
     fi

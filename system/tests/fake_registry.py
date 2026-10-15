@@ -36,6 +36,8 @@ Fixture keys:
   on_copy       {"dest": {"ref": "digest"}}: with moves, a copy to dest also sets those tags,
                 as another writer would meanwhile
   errors_on_copy {"dest": ["ref", ...]}: with moves, a copy to dest adds those refs to errors
+  errors_after_reads {"ref": N}: `skopeo inspect` of ref answers N times, then fails as errors
+                does; the reads are counted in the fixture, across every process of a test
   packages      {"package": [package versions as the GitHub API returns them]}
   user_packages ["package", ...]  the container packages of the owner
   owner_type    "User" (the default) or "Organization", what /users/<owner> reports
@@ -98,6 +100,13 @@ def skopeo(args, fx):
                 json.dump(fx, f)
         return 0
     ref = args[-1].removeprefix("docker://")
+    if ref in fx.get("errors_after_reads", {}):
+        reads = fx.setdefault("reads", {})
+        reads[ref] = reads.get(ref, 0) + 1
+        with open(os.environ["FAKE_REGISTRY"], "w") as f:
+            json.dump(fx, f)
+        if reads[ref] > fx["errors_after_reads"][ref]:
+            fx["errors"] = fx.get("errors", []) + [ref]
     if ref in fx.get("errors", []):
         return fail(f'time="2026-09-17T00:00:00Z" level=fatal msg="Error parsing image name \\"docker://{ref}\\": pinging container registry: dial tcp: i/o timeout"')
     if re.sub(r"[:@][^/]*$", "", ref) in fx.get("unpublished", []):
