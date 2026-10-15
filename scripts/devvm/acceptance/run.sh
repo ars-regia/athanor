@@ -73,7 +73,8 @@ sessions_cleanup() {
 
 stage_sessions() { # item 2, the other-session rule of UT6 (ADR-0103 D22, #433); nothing is applied
   local since log since_agent m
-  expect "2: a downloaded update to ask about" .update downloaded
+  # A run that starts here boots cold: the timer downloads again, as after stage_download's poweroff.
+  expect_until "2: a downloaded update to ask about" .update downloaded 20
   polkit_pattern_selfcheck
   trap sessions_cleanup EXIT
   untunnel
