@@ -86,8 +86,10 @@ log "stage inhibitor dropped"
 sleep "$ACC_DELAY" # the SSH login that started this unit is over before the first count
 out=/var/tmp/acc-call-Apply.out
 rm -f "$out"
+# The call lasts until the harness refuses the second prompt, past a minute: dbus-send's own
+# reply timeout of 25 s would end it first, as NoReply.
 systemd-run --quiet --user --machine="$ACC_USER@.host" --collect --unit=acc-call-Apply -p "StandardOutput=file:$out" \
-  dbus-send --system --print-reply --dest=os.athanor.Update1 /os/athanor/Update1 os.athanor.Update1.Apply
+  dbus-send --system --print-reply --reply-timeout=600000 --dest=os.athanor.Update1 /os/athanor/Update1 os.athanor.Update1.Apply
 log "called Apply"
 for _ in $(seq 600); do
   [[ -e /run/acc-bootc-entered ]] && break
