@@ -27,6 +27,7 @@ class SkelSync(unittest.TestCase):
     def run_exec_start(self, home):
         """Runs the unit's ExecStart with a test skeleton in place of /etc/skel."""
         command = re.search(r"(?m)^ExecStart=/usr/bin/bash -c '(.*)'$", UNIT).group(1)
+        self.assertIn("/etc/skel/.", command)
         command = command.replace("/etc/skel/.", f"{self.skel}/.")
         return subprocess.run(["bash", "-c", command], env=dict(os.environ, HOME=str(home), LC_ALL="C"),
                               capture_output=True, text=True, check=False)
@@ -50,9 +51,13 @@ class SkelSync(unittest.TestCase):
 
     @unittest.skipIf(os.geteuid() == 0, "root writes a read-only directory")
     def test_failed_copy_fails_and_leaves_no_marker(self):
+        # The home and ~/.config are writable: only the copy fails, half way, at ~/.local.
+        (self.skel / ".local").mkdir()
+        (self.skel / ".local/x").write_text("x\n")
         home = self.root / "home"
-        home.mkdir(mode=0o555)
-        self.addCleanup(home.chmod, 0o755)
+        (home / ".config").mkdir(parents=True)
+        (home / ".local").mkdir(mode=0o555)
+        self.addCleanup((home / ".local").chmod, 0o755)
         r = self.run_exec_start(home)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("Permission denied", r.stderr)
