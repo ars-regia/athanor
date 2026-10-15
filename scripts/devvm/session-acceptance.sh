@@ -26,9 +26,11 @@
 #           color-scheme answers 0, 1 and 0 (doc_visual_language.md VL4, #157), and a
 #           libadwaita window started before the first change (adw_scheme.py) reads a scheme
 #           from the system and draws light, dark and light again. The window runs with
-#           GSETTINGS_BACKEND=memory: outside a sandbox libadwaita falls back to reading
-#           org.gnome.desktop.interface itself, and the memory backend leaves the portal as its
-#           only source, as for a Flatpak. The user's value is restored.
+#           GSETTINGS_BACKEND=memory: outside a sandbox libadwaita also reads
+#           org.gnome.desktop.interface itself, and the memory backend pins that source to the
+#           schema's default, so only the portal can turn the window dark. The dark step is
+#           the proof; system=true alone does not show that the portal answered. The user's
+#           value is restored.
 #
 # volume needs a session whose cosmic-comp keeps its key bindings (--keep-shortcuts, #510).
 # portal refuses to start while the editor runs or holds a user override, since its cleanup
@@ -62,7 +64,10 @@ EDITOR_UNIT=session-acceptance-editor
 DOCS='$XDG_RUNTIME_DIR/doc'
 PORTALS_CONF=/usr/share/xdg-desktop-portal/athanor-portals.conf
 SCHEME_UNIT=session-acceptance-scheme
-SCHEME_PROBE=/var/tmp/session-acceptance-adw-scheme.py
+# In the user's private runtime directory. Expanded by the guest's shell.
+# shellcheck disable=SC2016 # expanded by the guest's shell
+SCHEME_PROBE='$XDG_RUNTIME_DIR/session-acceptance-adw-scheme.py'
+PREVIOUS_SCHEME=
 CLEANUP=()
 
 # Runs a command as the session user, with the session's bus and compositor.
@@ -297,28 +302,33 @@ probe_line() {
 }
 probe_reads() { [[ $(probe_line) == "scheme: $1" ]]; }
 stop_probe() {
-    [[ $(in_session systemctl --user show -p LoadState --value "$SCHEME_UNIT") == loaded ]] || return 0
+    local state
+    state=$(in_session systemctl --user show -p LoadState --value "$SCHEME_UNIT") || return 1
+    [[ $state == loaded ]] || return 0
     in_session systemctl --user stop "$SCHEME_UNIT"
 }
-remove_probe() { guest_ssh rm -f "$SCHEME_PROBE"; }
+remove_probe() { in_session "rm -f $SCHEME_PROBE"; }
 
 stage_scheme() {
-    PREVIOUS_SCHEME=$(in_session gsettings get org.gnome.desktop.interface color-scheme) ||
-        fail "gsettings get org.gnome.desktop.interface color-scheme"
     [[ $(in_session systemctl --user show -p LoadState --value "$SCHEME_UNIT") != loaded ]] ||
         fail "$SCHEME_UNIT already runs: the stage needs an instance it starts"
-    CLEANUP+=(restore_scheme)
+    # Read once per run: a stage given twice must not take the first one's value for the user's.
+    if [[ -z $PREVIOUS_SCHEME ]]; then
+        PREVIOUS_SCHEME=$(in_session gsettings get org.gnome.desktop.interface color-scheme) ||
+            fail "gsettings get org.gnome.desktop.interface color-scheme"
+        CLEANUP+=(restore_scheme)
+    fi
     set_scheme default || fail "gsettings set color-scheme default"
     wait_until 10 portal_scheme_is 0 || fail "the portal answers color-scheme '$(portal_scheme)', not 0, 10 s after 'default'"
 
     SCHEME_SINCE=$(guest_ssh date +%s) || fail "cannot read the guest's clock"
     CLEANUP+=(stop_probe remove_probe)
-    guest_ssh "cat > $SCHEME_PROBE" < "$HERE/adw_scheme.py" || fail "cannot copy adw_scheme.py to the guest"
+    in_session "cat > $SCHEME_PROBE" < "$HERE/adw_scheme.py" || fail "cannot copy adw_scheme.py to the guest"
     in_session systemd-run --user --collect --unit="$SCHEME_UNIT" -E GSETTINGS_BACKEND=memory \
         python3 -u "$SCHEME_PROBE" ||
         fail "systemd-run adw_scheme.py"
     wait_until 30 probe_reads "system=true dark=false" ||
-        fail "adw_scheme.py reads '$(probe_line)' 30 s after it started, not a light scheme from the portal"
+        fail "adw_scheme.py reads '$(probe_line)' 30 s after it started, not a light scheme from the system"
     shot scheme-light
 
     set_scheme prefer-dark || fail "gsettings set color-scheme prefer-dark"
@@ -332,6 +342,7 @@ stage_scheme() {
     wait_until 10 probe_reads "system=true dark=false" ||
         fail "adw_scheme.py reads '$(probe_line)' 10 s after 'default': the window did not turn light again"
     shot scheme-light-again
+    stop_probe || fail "cannot stop $SCHEME_UNIT"
 }
 
 run=("$@")

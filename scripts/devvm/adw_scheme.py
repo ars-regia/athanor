@@ -2,8 +2,8 @@
 
 A libadwaita window that prints what its style manager reads: whether a colour scheme
 reaches it from the system (system-supports-color-schemes: from the Settings portal, or
-outside a sandbox from org.gnome.desktop.interface, which the stage hides with
-GSETTINGS_BACKEND=memory) and whether it draws dark. One line when the window is shown and
+outside a sandbox from org.gnome.desktop.interface, which the stage pins to the schema's
+default with GSETTINGS_BACKEND=memory) and whether it draws dark. One line when the window is shown and
 one at every change, `scheme: system=<bool> dark=<bool>`; it runs until it is stopped.
 """
 
