@@ -7,6 +7,8 @@ the checker fails a test instead of moving the fake image with it."""
 import importlib.util
 import os
 import pathlib
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -972,6 +974,58 @@ class ImageSession(unittest.TestCase):
             "usr/lib/systemd/system/multi-user.target.wants",
         )
         self.assertProblem("cosmic-greeter-daemon.service is enabled")
+
+
+class SchemaTest(unittest.TestCase):
+    """schema_problems with the real glib tools, on the schemas of the host plus the shipped
+    ones; skipped where they are not installed."""
+
+    SHIPPED = SOURCES / "athanor-system-config/SOURCES/usr/share/glib-2.0/schemas"
+
+    def setUp(self):
+        if not (
+            shutil.which("glib-compile-schemas")
+            and shutil.which("gsettings")
+            and pathlib.Path("/usr/share/glib-2.0/schemas").is_dir()
+        ):
+            self.skipTest("glib tools or the base schemas are not installed")
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = pathlib.Path(tmp.name)
+        base = pathlib.Path("/usr/share/glib-2.0/schemas")
+        for name in (
+            "org.gnome.desktop.enums.xml",
+            "org.gnome.desktop.interface.gschema.xml",
+            "org.gnome.desktop.wm.preferences.gschema.xml",
+        ):
+            if not (base / name).is_file():
+                self.skipTest(f"{name} is not installed")
+            shutil.copy(base / name, self.dir)
+        for f in self.SHIPPED.iterdir():
+            shutil.copy(f, self.dir)
+        self.compile()
+
+    def compile(self):
+        # What glib's transfiletriggerin does in the image; gsettings reads the compiled file.
+        subprocess.run(["glib-compile-schemas", str(self.dir)], check=True)
+
+    def test_the_shipped_schemas_pass(self):
+        self.assertEqual(mod.schema_problems(str(self.dir)), [])
+
+    def test_an_override_of_a_missing_key_fails_the_compile(self):
+        with open(self.dir / "90_athanor-appearance.gschema.override", "a") as f:
+            f.write("[org.gnome.desktop.interface]\no-such-key='x'\n")
+        found = mod.schema_problems(str(self.dir))
+        self.assertEqual(len(found), 1)
+        self.assertIn("glib-compile-schemas --strict --dry-run", found[0])
+
+    def test_a_changed_default_fails_the_readback(self):
+        override = self.dir / "90_athanor-appearance.gschema.override"
+        override.write_text(override.read_text().replace("'purple'", "'blue'"))
+        self.compile()
+        found = mod.schema_problems(str(self.dir))
+        self.assertEqual(len(found), 1)
+        self.assertIn("accent-color gives \"'blue'\", not 'purple'", found[0])
 
 
 if __name__ == "__main__":
