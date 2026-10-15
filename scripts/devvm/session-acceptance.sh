@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # session-acceptance.sh [stage...]
-# The two criteria of issue #144 that no test of the repository reaches, in the dev VM's real
-# session: the volume keys and a Flatpak application's Open and Save. Keys reach the compositor
+# The criteria of issues #144 and #157 that no test of the repository reaches, in the dev VM's
+# real session: the volume keys, a Flatpak application's Open and Save, and a libadwaita
+# application following a change of colour scheme. Keys reach the compositor
 # through a throwaway uinput keyboard (keyboard_type.py). With no argument it runs every stage
 # in order; with arguments, only those, in the order given. Prints PASS <stage> or
 # FAIL <stage>: <what was read>, and exits non-zero on the first failure. Screenshots go to
@@ -20,6 +21,14 @@
 #           athanor-portals.conf routes to xdg-desktop-portal-gtk (#171); the document portal
 #           exports it under $XDG_RUNTIME_DIR/doc/by-app/<app id>/<document id>/; a character
 #           typed and saved with Ctrl+S changes the file on disk, so the grant is writable.
+#   scheme  with org.gnome.desktop.interface color-scheme set to 'default', then 'prefer-dark',
+#           then 'default' again, the Settings portal's ReadOne of org.freedesktop.appearance
+#           color-scheme answers 0, 1 and 0 (doc_visual_language.md VL4, #157), and a
+#           libadwaita window started before the first change (adw_scheme.py) reads a scheme
+#           from the system and draws light, dark and light again. The window runs with
+#           GSETTINGS_BACKEND=memory: outside a sandbox libadwaita falls back to reading
+#           org.gnome.desktop.interface itself, and the memory backend leaves the portal as its
+#           only source, as for a Flatpak. The user's value is restored.
 #
 # volume needs a session whose cosmic-comp keeps its key bindings (--keep-shortcuts, #510).
 # portal refuses to start while the editor runs or holds a user override, since its cleanup
@@ -38,7 +47,7 @@ ROOT=$(cd "$HERE/../.." && pwd)
 source "$HERE/devvm.env"
 
 SHOTS=$ROOT/.scratch/session-acceptance
-STAGES=(volume portal)
+STAGES=(volume portal scheme)
 STAGE=
 DAEMON=cosmic-settings-daemon.service
 # cosmic-settings-daemon's varlink audio service binds this name in the runtime directory
@@ -52,6 +61,8 @@ EDITOR_UNIT=session-acceptance-editor
 # shellcheck disable=SC2016 # expanded by the guest's shell
 DOCS='$XDG_RUNTIME_DIR/doc'
 PORTALS_CONF=/usr/share/xdg-desktop-portal/athanor-portals.conf
+SCHEME_UNIT=session-acceptance-scheme
+SCHEME_PROBE=/var/tmp/session-acceptance-adw-scheme.py
 CLEANUP=()
 
 # Runs a command as the session user, with the session's bus and compositor.
@@ -265,6 +276,62 @@ stage_portal() {
     shot saved
     after=$(in_session "sha256sum < $DOCUMENT") || fail "cannot read $DOCUMENT after the save"
     [[ $after != "$before" ]] || fail "$DOCUMENT is unchanged after a typed character and Ctrl+S"
+}
+
+# What the Settings portal answers for org.freedesktop.appearance color-scheme: 0 no
+# preference, 1 dark, 2 light; nothing when the call fails.
+portal_scheme() {
+    in_session gdbus call --session --dest org.freedesktop.portal.Desktop \
+        --object-path /org/freedesktop/portal/desktop \
+        --method org.freedesktop.portal.Settings.ReadOne org.freedesktop.appearance color-scheme |
+        sed -n 's/^(<<*uint32 \([0-9]\)>>*,)$/\1/p'
+}
+portal_scheme_is() { [[ $(portal_scheme) == "$1" ]]; }
+set_scheme() { in_session gsettings set org.gnome.desktop.interface color-scheme "$1"; }
+restore_scheme() { set_scheme "$PREVIOUS_SCHEME"; }
+
+# The last line adw_scheme.py printed since the stage started; nothing before its first.
+probe_line() {
+    guest_ssh sudo journalctl -q -b --since "@$SCHEME_SINCE" -o cat "_SYSTEMD_USER_UNIT=$SCHEME_UNIT.service" |
+        grep '^scheme: ' | tail -n 1
+}
+probe_reads() { [[ $(probe_line) == "scheme: $1" ]]; }
+stop_probe() {
+    [[ $(in_session systemctl --user show -p LoadState --value "$SCHEME_UNIT") == loaded ]] || return 0
+    in_session systemctl --user stop "$SCHEME_UNIT"
+}
+remove_probe() { guest_ssh rm -f "$SCHEME_PROBE"; }
+
+stage_scheme() {
+    PREVIOUS_SCHEME=$(in_session gsettings get org.gnome.desktop.interface color-scheme) ||
+        fail "gsettings get org.gnome.desktop.interface color-scheme"
+    [[ $(in_session systemctl --user show -p LoadState --value "$SCHEME_UNIT") != loaded ]] ||
+        fail "$SCHEME_UNIT already runs: the stage needs an instance it starts"
+    CLEANUP+=(restore_scheme)
+    set_scheme default || fail "gsettings set color-scheme default"
+    wait_until 10 portal_scheme_is 0 || fail "the portal answers color-scheme '$(portal_scheme)', not 0, 10 s after 'default'"
+
+    SCHEME_SINCE=$(guest_ssh date +%s) || fail "cannot read the guest's clock"
+    CLEANUP+=(stop_probe remove_probe)
+    guest_ssh "cat > $SCHEME_PROBE" < "$HERE/adw_scheme.py" || fail "cannot copy adw_scheme.py to the guest"
+    in_session systemd-run --user --collect --unit="$SCHEME_UNIT" -E GSETTINGS_BACKEND=memory \
+        python3 -u "$SCHEME_PROBE" ||
+        fail "systemd-run adw_scheme.py"
+    wait_until 30 probe_reads "system=true dark=false" ||
+        fail "adw_scheme.py reads '$(probe_line)' 30 s after it started, not a light scheme from the portal"
+    shot scheme-light
+
+    set_scheme prefer-dark || fail "gsettings set color-scheme prefer-dark"
+    wait_until 10 portal_scheme_is 1 || fail "the portal answers color-scheme '$(portal_scheme)', not 1, 10 s after 'prefer-dark'"
+    wait_until 10 probe_reads "system=true dark=true" ||
+        fail "adw_scheme.py reads '$(probe_line)' 10 s after 'prefer-dark': the window did not turn dark"
+    shot scheme-dark
+
+    set_scheme default || fail "gsettings set color-scheme default"
+    wait_until 10 portal_scheme_is 0 || fail "the portal answers color-scheme '$(portal_scheme)', not 0, 10 s after 'default'"
+    wait_until 10 probe_reads "system=true dark=false" ||
+        fail "adw_scheme.py reads '$(probe_line)' 10 s after 'default': the window did not turn light again"
+    shot scheme-light-again
 }
 
 run=("$@")
