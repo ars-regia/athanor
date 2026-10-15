@@ -717,14 +717,25 @@ def test_origin_missing_or_wrong_fails(tmp: pathlib.Path) -> None:
         assert "follows :stable, signed: NO" in report, report
 
 
+def test_origin_unreadable_is_not_wrong(tmp: pathlib.Path) -> None:
+    """An origin the guest could not read is reported as unreadable, apart from a wrong
+    one; both fail the run (issue 459)."""
+    code, report = verdict(
+        tmp, [p for p in COMPLETE if p[0] != "origin-stable-signed"] + [("origin-unreadable", 397)]
+    )
+    data = json.loads((tmp / "run" / "verdict.json").read_text())
+    assert code != 0 and data["checks"]["origin"] is False, data
+    assert "follows :stable, signed: unreadable (origin-unreadable)" in report, report
+
+
 def test_origin_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
-    """ORIGIN_PROBE run verbatim, with `sudo` and `bootc` on PATH replaced by a fake that
-    prints the status JSON of each case. `jq` is the real one: the probe's filter is part
-    of what is checked. A system on :latest, one on :stable through an unverified
-    reference, a bootc that fails and a field that is not there must all answer WRONG."""
-    if shutil.which("jq") is None:
-        print("  skip test_origin_probe_answers_from_the_guest: no jq here")
-        return
+    """ORIGIN_PROBE run verbatim against a fake sysroot: /proc/cmdline and /sysroot are
+    pointed at a scratch directory and `sudo` is a pass-through. `ostree=` names the
+    deployment through the boot.N symlinks, as on a booted system. A signed :stable origin
+    answers OK; :latest, an unverified :stable and a remote-verified :stable answer
+    WRONG with what they carry, and an origin with no container reference WRONG with
+    `none`; an empty or missing origin, or no `ostree=`, answers UNREADABLE. Under sh and
+    under bash, the guest's shell."""
     sys.path.insert(0, str(HERE))
     import console
 
@@ -732,37 +743,51 @@ def test_origin_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
     shutil.rmtree(work, ignore_errors=True)
     (work / "bin").mkdir(parents=True)
     (work / "bin" / "sudo").write_text('#!/bin/sh\n[ "$1" = -S ] && shift\ncat >/dev/null\nexec "$@"\n')
-    (work / "bin" / "bootc").write_text('#!/bin/sh\n[ -n "$FAKE_STATUS" ] || exit 1\nprintf "%s\\n" "$FAKE_STATUS"\n')
-    for tool in ("sudo", "bootc"):
-        (work / "bin" / tool).chmod(0o755)
-    (work / "probe.sh").write_bytes(console.ORIGIN_PROBE + b"\n")
-
-    def status(image, signature):
-        reference = {"image": image, "transport": "registry"}
-        if signature is not None:
-            reference["signature"] = signature
-        return json.dumps({"status": {"booted": {"image": {"image": reference}}}})
+    (work / "bin" / "sudo").chmod(0o755)
+    deploy = work / "sysroot" / "ostree" / "deploy" / "athanor" / "deploy"
+    (deploy / "abc.0").mkdir(parents=True)
+    # /ostree/boot.1 -> boot.1.1, and boot.1.1/<os>/<bootcsum>/<serial> -> the deployment.
+    boot = work / "sysroot" / "ostree" / "boot.1.1" / "athanor" / "bc"
+    boot.mkdir(parents=True)
+    (boot / "0").symlink_to("../../../deploy/athanor/deploy/abc.0")
+    (work / "sysroot" / "ostree" / "boot.1").symlink_to("boot.1.1")
+    booted = "root=UUID=x ostree=/ostree/boot.1/athanor/bc/0 rw\n"
+    probe = console.ORIGIN_PROBE.replace(b"/proc/cmdline", str(work / "cmdline").encode())
+    probe = probe.replace(b"/sysroot", str(work / "sysroot").encode())
+    (work / "probe.sh").write_bytes(probe + b"\n")
 
     repository = "ghcr.io/acme/athanor-system"
-    cases = (
-        (status(f"{repository}:stable", "containerPolicy"), "ORIGIN_OK"),
-        (status(f"{repository}:latest", "containerPolicy"), "ORIGIN_WRONG"),
-        (status(f"{repository}:stable", "insecure"), "ORIGIN_WRONG"),
-        (status(f"{repository}:stable", None), "ORIGIN_WRONG"),
-        (status(f"{repository}:38546669761", "containerPolicy"), "ORIGIN_WRONG"),
-        (json.dumps({"status": {"booted": None}}), "ORIGIN_WRONG"),
-        ("", "ORIGIN_WRONG"),
-    )
-    for fake, expected in cases:
-        proc = subprocess.run(
-            ["sh", str(work / "probe.sh")],
-            env={**os.environ, "PATH": f"{work}/bin:{os.environ['PATH']}", "FAKE_STATUS": fake},
-            capture_output=True,
-            text=True,
-            check=False,
+    unread = "ORIGIN_UNREADABLE /ostree/boot.1/athanor/bc/0"
+    cases = tuple(
+        (booted, f"[origin]\ncontainer-image-reference={ref}\n", f"ORIGIN_{answer} {ref}")
+        for ref, answer in (
+            (f"ostree-image-signed:docker://{repository}:stable", "OK"),
+            (f"ostree-image-signed:docker://{repository}:latest", "WRONG"),
+            (f"ostree-unverified-image:docker://{repository}:stable", "WRONG"),
+            (f"ostree-remote-image:fedora:docker://{repository}:stable", "WRONG"),
+            (f"ostree-image-signed:docker://{repository}:38546669761", "WRONG"),
         )
-        answer = proc.stdout.split(" ")[0].strip()
-        assert answer == expected, f"{fake!r}: {proc.stdout!r} != {expected!r}"
+    ) + (
+        (booted, "[origin]\nrefspec=x\n", "ORIGIN_WRONG none"),
+        (booted, "", unread),
+        (booted, None, unread),
+        ("root=UUID=x rw\n", f"[origin]\ncontainer-image-reference=ostree-image-signed:docker://{repository}:stable\n", "ORIGIN_UNREADABLE none"),
+    )
+    for shell in ("sh", "bash"):
+        for cmdline, content, expected in cases:
+            (work / "cmdline").write_text(cmdline)
+            origin_file = deploy / "abc.0.origin"
+            origin_file.unlink(missing_ok=True)
+            if content is not None:
+                origin_file.write_text(content)
+            proc = subprocess.run(
+                [shell, str(work / "probe.sh")],
+                env={**os.environ, "PATH": f"{work}/bin:{os.environ['PATH']}"},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert proc.stdout.strip() == expected, f"{shell} {cmdline!r} {content!r}: {proc.stdout!r} != {expected!r}"
 
 
 def test_mok_missing_fails(tmp: pathlib.Path) -> None:
@@ -949,6 +974,7 @@ def main() -> int:
             test_karg_not_applicable_passes,
             test_karg_probe_answers_from_the_guest,
             test_origin_missing_or_wrong_fails,
+            test_origin_unreadable_is_not_wrong,
             test_origin_probe_answers_from_the_guest,
             test_greetd_starting_is_not_a_greeter,
             test_installed_but_no_greeter,
