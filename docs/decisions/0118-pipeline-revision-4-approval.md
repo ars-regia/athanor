@@ -51,8 +51,9 @@ Revision 4 is approved with three placements, which the maintainer decided on 20
   and its gate reads a `pr.yml` run. PB3's gate keeps to the hops a release run consumes.
   No pin of the build image exists on `iso-v0` yet: PB4's maintainer step publishes it after
   the signing step and approves its pin, and the gate reads a `pr.yml` run after that pin.
-  PB12 changes `rig.sh`'s expected identity in the pull request of the first pin that
-  `bots.yml` publishes, so the digest and the identity change together.
+  PB12's maintainer step hands the publisher over to `bots.yml` in one pull request that
+  changes the pin, removes the old workflow and, after PB4, `rig.sh`'s expected identity, so
+  the digest and the identity change together.
 - The shell rig image `athanor-shell-rig`, which `rig.sh` also pulls, is published by hand
   with no workflow: a named exception in PL12, PL19 and PB4, not yet a verified hop (#505).
 - These consequences follow from the three decisions or from the review of this revision,
