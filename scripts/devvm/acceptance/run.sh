@@ -52,23 +52,32 @@ metered_cleanup() {
   ACC_METERED_DEV=''
 }
 
+# The check is started by hand, and a start of the service moves the timer's next run six hours
+# on: the stage stops the timer for its duration and ends with a reboot, whose timer run two
+# minutes after boot is the one the download stage waits for.
 stage_metered() { # UT12; doc_shell.md section 7, item 4: on a metered network the check runs and the download does not
-  local before
+  local before metered
+  guest_ssh sudo systemctl stop athanor-update-check.timer
   ACC_METERED_DEV=$(default_device)
   [[ -n $ACC_METERED_DEV ]] || die "FAIL  UT12: the guest has no default route"
   trap metered_cleanup EXIT
   guest_ssh sudo nmcli device modify "$ACC_METERED_DEV" connection.metered yes > /dev/null
-  [[ $(nm_metered) == 'u 1' ]] || die "FAIL  UT12: NetworkManager reads Metered '$(nm_metered)' after the mark, expected 'u 1'"
+  metered=$(nm_metered)
+  [[ $metered == 'u 1' ]] || die "FAIL  UT12: NetworkManager reads Metered '$metered' after the mark, expected 'u 1'"
   before=$(state .last_successful_check)
   point_stable v2
   check_now
   expect "UT12: on a metered network the check finds the update" .update available
+  # A download that failed also leaves the update available: only no error shows that none was tried.
+  expect "UT12: with no error" .last_error none
   [[ $(state .last_successful_check) != "$before" ]] || die "FAIL  UT12: the check did not reach the registry"
   [[ $(guest_ssh sudo bootc status --format json | jq -c .status.staged) == null ]] || die "FAIL  UT12: a deployment was staged on a metered network"
   pass "UT12: and nothing is downloaded"
   metered_cleanup
   trap - EXIT
-  [[ $(nm_metered) != 'u 1' ]] || die "FAIL  UT12: the network is still marked metered after the cleanup"
+  metered=$(nm_metered)
+  [[ $metered == 'u 4' ]] || die "FAIL  UT12: NetworkManager reads Metered '$metered' after the cleanup, expected 'u 4' (guessed no)"
+  reboot_guest
 }
 
 stage_download() { # item 1
