@@ -23,7 +23,9 @@ metered with `nmcli device modify`, which changes the applied connection and not
 disk, publishes v2 and runs the check: the update must read available with no error and nothing
 staged. It stops the check timer for its duration, because a check started by hand moves the
 timer's next run six hours on, and ends with a reboot, which also drops the mark; the `download`
-stage then waits for the timer's run two minutes after that boot.
+stage then waits for the timer's run two minutes after that boot. A run that stops inside the
+stage leaves the timer stopped, and starting it again does not fire a boot trigger already
+past: reboot the guest before resuming at `download`.
 
 The `sessions` stage (issue #436) runs the other-session cases of item 2 (UT6, ADR-0103 D22) with
 the update downloaded and a shutdown inhibitor held, so that no case can reboot the guest: an
