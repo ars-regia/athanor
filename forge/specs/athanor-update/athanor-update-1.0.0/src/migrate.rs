@@ -78,7 +78,10 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>) -> Result<Outcome, Failure> {
     // failed to boot ATTEMPTS times; that is the migration's own record, not the held file,
     // which keeps the digest the person went back from. Either way the machine stays where it
     // is until the tag names a newer build.
-    let held = ctx.store.held().as_deref() == Some(candidate.digest.as_str());
+    let held = ctx.store.held().map_err(|err| {
+        tracing::error!(%err, "cannot read the held digest; nothing is staged");
+        Failure { code: athanor_trust_state::ErrorCode::Storage, host: None }
+    })?.as_deref() == Some(candidate.digest.as_str());
     let failed = record.failed_boots >= ATTEMPTS;
     if held {
         return Ok(Outcome::Waiting("held"));
@@ -121,7 +124,10 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>) -> Result<Outcome, Failure> {
 /// # Errors
 /// The record cannot be written.
 pub(crate) fn record_of<T: Tools>(ctx: &Context<'_, T>, status: &Status, digest: &str) -> Result<MoveRecord, Failure> {
-    let mut record = ctx.store.move_record(digest);
+    let mut record = ctx.store.move_record(digest).map_err(|err| {
+        tracing::error!(%err, "cannot read the move record");
+        Failure { code: athanor_trust_state::ErrorCode::Storage, host: None }
+    })?;
     if let Some(staged) = record.staged.take() {
         // Deployed and left, the staging is the rollback deployment now: it did not boot for
         // good, and greenboot or the person went back. Not there, a power cycle discarded it
@@ -223,7 +229,7 @@ mod tests {
                 assert_eq!(run(&machine.ctx(&tools, now)), Ok(Outcome::Waiting("boot-failed")), "{n}");
             }
             assert_eq!(switches(&tools), 2);
-            assert_eq!(machine.store.held(), Some(digest(7)), "the held digest of GoBack() is not released");
+            assert_eq!(machine.store.held().expect("read"), Some(digest(7)), "the held digest of GoBack() is not released");
             assert!(!machine.store.migrated());
             // A newer build under the tag has not failed: the move resumes, locked for the user.
             let newer = Fake::booted(tools.status.borrow().booted.clone()).offering(&digest(4), 3000);
@@ -245,7 +251,7 @@ mod tests {
             assert_eq!(run(&machine.ctx(&tools, now)), Ok(Outcome::Switched), "{now}");
             power_off(&tools);
         }
-        assert_eq!(machine.store.move_record(SIGNED).failed_boots, 0);
+        assert_eq!(machine.store.move_record(SIGNED).expect("read").failed_boots, 0);
         // A real failure: greenboot queues the return and the check of that boot holds the digest.
         let machine = Machine::new("migrate-unnamed-greenboot", &["real/k1.pub"]);
         let mut tools = Fake::booted(on_media(&digest(1), 1000)).offering(SIGNED, 2000);
@@ -291,7 +297,7 @@ mod tests {
                 power_off(&tools);
             }
             assert_eq!(switches(&tools), 4);
-            assert_eq!(machine.store.held(), Some(digest(7)));
+            assert_eq!(machine.store.held().expect("read"), Some(digest(7)));
         }
     }
 

@@ -105,12 +105,31 @@ fn signed_copy<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, booted: &Deploy
 }
 
 /// The update state that needs no network: what is staged, and what was refused.
-fn local_update(ctx: &Context<'_, impl Tools>, status: &Status) -> UpdateState {
-    match &status.staged {
+///
+/// # Errors
+/// `Storage` when the held or refused digest cannot be read: nothing is offered then.
+fn local_update(ctx: &Context<'_, impl Tools>, status: &Status) -> Result<UpdateState, Failure> {
+    Ok(match &status.staged {
         Some(staged) if !staged.download_only => UpdateState::WillApplyAtNextShutdown,
-        Some(staged) if offerable(ctx.store, &status.booted, &staged.digest, staged.build_time, false) == UpdateState::Available => UpdateState::Downloaded,
-        _ if ctx.store.refused().is_some() => UpdateState::Refused,
+        Some(staged) if offerable(ctx.store, &status.booted, &staged.digest, staged.build_time, false)? == UpdateState::Available => UpdateState::Downloaded,
+        _ if store_read(ctx.store.refused())?.is_some() => UpdateState::Refused,
         _ => UpdateState::None,
+    })
+}
+
+/// A state file that exists and cannot be read is a storage failure, logged, never "no value".
+fn store_read<V>(read: std::io::Result<V>) -> Result<V, Failure> {
+    read.map_err(|err| {
+        tracing::error!(%err, "cannot read the update state on disk");
+        Failure { code: ErrorCode::Storage, host: None }
+    })
+}
+
+/// The pair a check step returns: the state, and the failure that goes with it.
+fn settle(update: Result<UpdateState, Failure>, failure: Option<Failure>) -> (UpdateState, Option<Failure>) {
+    match update {
+        Ok(update) => (update, failure),
+        Err(unreadable) => (UpdateState::None, Some(unreadable)),
     }
 }
 
@@ -126,16 +145,19 @@ fn follows_a_channel(suffix: &str) -> bool {
 /// `Available` when `digest` may be offered; otherwise why not. The order of the build
 /// times is the only ordering: bootc has none, and a moved tag is a downgrade the policy
 /// cannot see. The one exception is `signed_copy`, the booted build itself.
-fn offerable(store: &Store, booted: &Deployed, digest: &str, build_time: i64, signed_copy: bool) -> UpdateState {
-    if digest == booted.digest {
+///
+/// # Errors
+/// `Storage` when the held digest cannot be read: an unreadable file must not release it (UT6).
+fn offerable(store: &Store, booted: &Deployed, digest: &str, build_time: i64, signed_copy: bool) -> Result<UpdateState, Failure> {
+    Ok(if digest == booted.digest {
         UpdateState::None
-    } else if store.held().as_deref() == Some(digest) {
+    } else if store_read(store.held())?.as_deref() == Some(digest) {
         UpdateState::Held
     } else if build_time <= booted.build_time && !signed_copy {
         UpdateState::OlderThanBooted
     } else {
         UpdateState::Available
-    }
+    })
 }
 
 /// True when a download would be verified: the booted origin makes bootc apply the host
@@ -163,7 +185,10 @@ fn downloaded(ctx: &Context<'_, impl Tools>, status: &Status, staged: &str) -> O
 }
 
 fn online_update<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &mut Status) -> (UpdateState, Option<Failure>) {
-    let local = local_update(ctx, status);
+    let local = match local_update(ctx, status) {
+        Ok(local) => local,
+        Err(failure) => return (UpdateState::None, Some(failure)),
+    };
     if !enforced(policy, &status.booted) || local == UpdateState::WillApplyAtNextShutdown {
         return (local, None);
     }
@@ -179,7 +204,10 @@ fn online_update<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &mut 
         return (local, Some(Failure { code: ErrorCode::Storage, host: None }));
     }
     let copy = signed_copy(ctx, policy, &status.booted, &candidate);
-    let verdict = offerable(ctx.store, &status.booted, &candidate.digest, candidate.build_time, copy);
+    let verdict = match offerable(ctx.store, &status.booted, &candidate.digest, candidate.build_time, copy) {
+        Ok(verdict) => verdict,
+        Err(failure) => return (local, Some(failure)),
+    };
     if verdict != UpdateState::Available {
         return (if verdict == UpdateState::None { local } else { verdict }, None);
     }
@@ -201,7 +229,10 @@ fn online_update<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &mut 
                 Err(failure) => return (UpdateState::Available, Some(failure)),
             };
             // What bootc staged is what counts, not what the tag said a moment earlier.
-            let after = local_update(ctx, status);
+            let after = match local_update(ctx, status) {
+                Ok(after) => after,
+                Err(failure) => return (UpdateState::Available, Some(failure)),
+            };
             if after != UpdateState::Downloaded {
                 return (UpdateState::Available, None);
             }
@@ -263,7 +294,7 @@ fn move_to_signed_copy<T: Tools>(ctx: &Context<'_, T>, status: &mut Status, cand
             return (UpdateState::None, Some(unlock));
         }
     };
-    (local_update(ctx, status), failure)
+    settle(local_update(ctx, status), failure)
 }
 
 /// Runs one check and publishes the state. `offline` is the run at boot, before the
@@ -282,9 +313,9 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failu
     // of the next boot in place of the return.
     let (update, failure) = if status.rollback_queued {
         let held = ctx.store.set_held(&status.booted.digest).err().map(|_| Failure { code: ErrorCode::Storage, host: None });
-        (local_update(ctx, &status), held)
+        settle(local_update(ctx, &status), held)
     } else if offline {
-        (local_update(ctx, &status), None)
+        settle(local_update(ctx, &status), None)
     } else {
         online_update(ctx, &policy, &mut status)
     };
@@ -307,7 +338,7 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failu
         policy: policy.info,
         secure_boot: crate::secureboot::read(&ctx.efivars, &ctx.lockdown),
         newest_booted_build_time: newest,
-        last_successful_check: ctx.store.last_success(),
+        last_successful_check: ctx.store.last_success().map_err(storage)?,
         last_error: failure.as_ref().map_or(ErrorCode::None, |failure| failure.code),
         last_error_host: failure.and_then(|failure| failure.host),
     };
@@ -517,7 +548,7 @@ pub(crate) mod tests {
             tools.status.borrow_mut().rollback = Some(deployed(&digest(1), 1000));
             tools.status.borrow_mut().rollback_queued = true;
             let state = run(&machine.ctx(&tools, 5000), offline).expect("state");
-            assert_eq!(machine.store.held(), Some(digest(2)));
+            assert_eq!(machine.store.held().expect("read"), Some(digest(2)));
             assert_eq!(state.update, UpdateState::None);
             assert!(!tools.called("candidate") && !tools.called("download"));
         }
@@ -534,6 +565,21 @@ pub(crate) mod tests {
         assert!(!tools.called("download"));
         let newer = Fake::booted(deployed(&digest(1), 1000)).offering(&digest(3), 3000);
         assert_eq!(run(&machine.ctx(&newer, 5000), false).expect("check").update, UpdateState::Downloaded);
+    }
+
+    #[test]
+    fn an_unreadable_held_file_offers_and_downloads_nothing() {
+        let machine = Machine::new("held-unreadable", &["real/k1.pub"]);
+        // A directory in place of the file fails with EISDIR, whoever runs the test.
+        std::fs::create_dir(machine.store.var.join("held")).expect("mkdir");
+        let tools = Fake::booted(deployed(&digest(1), 1000)).offering(&digest(2), 2000);
+        let state = run(&machine.ctx(&tools, 5000), false).expect("state");
+        assert_eq!((state.update, state.last_error), (UpdateState::None, ErrorCode::Storage));
+        assert!(!tools.called("download"));
+        // The staged download is not announced as downloaded either.
+        tools.status.borrow_mut().staged = Some(Deployed { download_only: true, ..deployed(&digest(2), 2000) });
+        let state = run(&machine.ctx(&tools, 5000), true).expect("state");
+        assert_eq!((state.update, state.last_error), (UpdateState::None, ErrorCode::Storage));
     }
 
     #[test]
@@ -731,7 +777,7 @@ pub(crate) mod tests {
 
         let passing = Fake::booted(deployed(&digest(1), 1000)).offering(&digest(3), 3000);
         assert_eq!(run(&machine.ctx(&passing, 6000), false).expect("check").update, UpdateState::Downloaded);
-        assert_eq!(machine.store.refused(), None);
+        assert_eq!(machine.store.refused().expect("read"), None);
     }
 
     #[test]
