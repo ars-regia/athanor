@@ -2,13 +2,15 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:66.fc43}
+Release:        %{?autorelease}%{!?autorelease:67.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
 BuildArch:      noarch
 
 Requires: cosmic-comp greetd greenboot systemd-ukify nodejs
+# athanor-session passes --keep-shortcuts, which Athanor's cosmic-comp patch adds (#144).
+Requires: cosmic-comp >= 1.10.0-2.fc43.athanor2
 # athanor-greeter-client builds the greeter's sandbox with bwrap and filters its system
 # bus through xdg-dbus-proxy.
 Requires: bubblewrap xdg-dbus-proxy
@@ -79,6 +81,11 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-67
+- athanor-session starts cosmic-comp with --keep-shortcuts. With athanor-desktop as its
+  command cosmic-comp ran as a kiosk and loaded no key bindings: no launcher on Super, no
+  volume keys, no custom shortcut (#144).
+
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-66
 - athanor-usbguard-internal records a USB device only when two consecutive passes read the
   same configuration, interfaces and interface classes, so a device reconfigured while it is
