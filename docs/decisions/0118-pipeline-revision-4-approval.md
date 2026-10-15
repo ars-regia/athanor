@@ -21,16 +21,19 @@ consolidate them. The D3 freeze of [ADR-0103](0103-audit-5-decisions.md) was lif
 
 ## Decision
 
-Revision 4 is approved on 2026-10-15 with these three placements:
+Decided by the maintainer on 2026-10-15. Revision 4 is approved with these three placements:
 
 1. **`bot-merge.yml` is an eighth target entry**, kept apart from `bots.yml` because it
-   holds a merge-capable token and has a distinct trigger (`workflow_run`): one file opens
-   bot pull requests, another merges them.
+   runs on `workflow_run`, the verdict of the checks of the pull request, and so from the
+   default branch's file (ADR-0108 item 2). It merges two kinds of bot pull request, the
+   spec bot's (`chore/update-specs-zero-trust`) and the system bump's (`bump/system-*`),
+   through `forge/scripts/bot_merge.py`. The kernel bump uses `gh pr merge --auto`, and the
+   pin pull requests of the signer and rig build images are not merged by it.
 2. **`fuzz.yml` joins `maintenance.yml`** as its weekly fuzz job, like the janitor and the
    reproducibility checks.
 3. **`publish-rig-build-image.yml` goes away as a manual step.** The shell rig's build image
    is built by the content hash of its inputs, with provenance, and `bots.yml` opens the pull
-   request that bumps its pin, as for the `azoth-signer` image (PL19) and the builder image
+   request that bumps its pin, which waits for the code owner's review (CI30), as for the `azoth-signer` image (PL19) and the builder image
    (UD42).
 
 ## Consequences
@@ -38,4 +41,10 @@ Revision 4 is approved on 2026-10-15 with these three placements:
 - The target is eight entries and 15 files (seven stages); section 3.5 places every workflow
   file of `iso-v0`. PB12 consolidates to the 15 files.
 - PL12, PL19 and PB4 name the rig build image beside the `azoth-signer` image.
+- PB12 also covers `bot-merge.yml` and `forge/scripts/bot_merge.py`: when
+  `system-image-check.yml` and `spec-build-check.yml` fold into `pr.yml`, they read the
+  verdicts of the system bump and of the spec bot from `gate`, not from the names of those
+  two workflows.
+- PB3's gate also reads a `pr.yml` run for the verification of the rig build image, which
+  `pr.yml` consumes and a release run does not (PL12).
 - doc_ci.md CI30, CI31 and CI32 change when PB12 moves the files, not in this revision.
