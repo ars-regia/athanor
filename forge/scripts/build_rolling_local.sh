@@ -12,7 +12,7 @@ PACKAGE="${1:-}"
 echo "========================================"
 echo "=== INIZIALIZZAZIONE AMBIENTE BEDROCK =="
 echo "========================================"
-sudo dnf install -y rpm-build dnf-plugins-core rpmdevtools
+sudo dnf install -y rpm-build dnf-plugins-core rpmdevtools mold
 RPMBUILD_DIR=$(mktemp -d)
 RPMMACROS_BAK=$(mktemp)
 if [ -f ~/.rpmmacros ]; then
@@ -22,14 +22,17 @@ else
     trap 'rm -rf "$RPMBUILD_DIR"; rm -f ~/.rpmmacros; rm -f "$RPMMACROS_BAK"' EXIT
 fi
 
-echo "%_topdir $RPMBUILD_DIR" > ~/.rpmmacros
-cat "$(dirname "$0")/../config/rpmmacros" >> ~/.rpmmacros
+# The shared macros set %_topdir to ~/rpmbuild; ours comes last so it wins.
+cat "$(dirname "$0")/../config/rpmmacros" > ~/.rpmmacros
+echo "%_topdir $RPMBUILD_DIR" >> ~/.rpmmacros
 mkdir -p "$RPMBUILD_DIR"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 
 echo "========================================"
 echo "=== PREPARAZIONE REPOSITORIES (RPMFusion) ==="
 echo "========================================"
-sudo dnf install -y https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-43.noarch.rpm https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-43.noarch.rpm || true
+if ! rpm -q rpmfusion-free-release rpmfusion-nonfree-release > /dev/null; then
+    sudo dnf install -y https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-43.noarch.rpm https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-43.noarch.rpm
+fi
 
 
 SPEC_DIR="$(realpath "$(dirname "$0")/../specs")"
@@ -42,12 +45,17 @@ if [ -d "$CUSTOM_DIR" ]; then
     echo "========================================"
     echo "=== [ZERO-TRUST] PACCHETTO LOCALE ==="
     echo "========================================"
-    cp -a "$CUSTOM_DIR"/* "$RPMBUILD_DIR"/SOURCES/
-    mv "$RPMBUILD_DIR"/SOURCES/*.spec "$RPMBUILD_DIR"/SPECS/ 2>/dev/null || true
+    # Stage as build_spec.sh does: the spec's SOURCES/ directory into SOURCES, the remote
+    # Source files fetched and verified, the spec into SPECS.
+    if [ -d "$CUSTOM_DIR/SOURCES" ]; then
+        cp -a "$CUSTOM_DIR/SOURCES/." "$RPMBUILD_DIR/SOURCES/"
+    fi
+    bash "$(dirname "$0")/fetch_sources.sh" "$CUSTOM_DIR" "$RPMBUILD_DIR/SOURCES"
+    cp "$CUSTOM_DIR"/*.spec "$RPMBUILD_DIR/SPECS/"
     echo "========================================"
     echo "=== INSTALLAZIONE DIPENDENZE E FIX ==="
     echo "========================================"
-    sudo dnf builddep -y "$RPMBUILD_DIR"/SPECS/*.spec || true
+    sudo dnf builddep -y "$RPMBUILD_DIR"/SPECS/*.spec
 else
     echo "========================================"
     echo "=== DOWNLOAD SORGENTI UPSTREAM ==="
@@ -57,11 +65,11 @@ else
     echo "========================================"
     echo "=== INSTALLAZIONE DIPENDENZE E FIX ==="
     echo "========================================"
-    sudo dnf builddep -y *.src.rpm
+    sudo dnf builddep -y ./*.src.rpm
     echo "========================================"
     echo "=== ESTRAZIONE E INIEZIONE PONYTAIL ==="
     echo "========================================"
-    rpm -ivh *.src.rpm
+    rpm -ivh ./*.src.rpm
 fi
 
 
@@ -74,7 +82,14 @@ done
 echo "========================================"
 echo "=== COMPILAZIONE ESTREMA (ROLLING) ==="
 echo "========================================"
-rpmbuild -bb --nocheck "$RPMBUILD_DIR"/SPECS/*.spec
+# A spec without Source builds the checkout in place, from the repository root, as
+# build_spec.sh does: its %build runs cargo and reads paths relative to the root.
+if [ -z "$(rpmspec -q --srpm --qf '[%{SOURCE} ]' "$RPMBUILD_DIR"/SPECS/*.spec)" ]; then
+    REPO_ROOT="$(realpath "$(dirname "$0")/../..")"
+    (cd "$REPO_ROOT" && rpmbuild -bb --nocheck --build-in-place "$RPMBUILD_DIR"/SPECS/*.spec)
+else
+    rpmbuild -bb --nocheck "$RPMBUILD_DIR"/SPECS/*.spec
+fi
 
 echo "=================================================="
 echo "🎯 PACCHETTO ROLLING '$PACKAGE' COMPILATO CON SUCCESSO! 🎯"
