@@ -106,8 +106,9 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   state athanor-update answers with (`state`), the sheet offers "Restart to update" and
   "Go back to the previous version" only when the state allows them (`actions`), and a
   machine with no check for 15 days reads "Not verified yet" (`stale`). `deploy` installs a
-  locally built athanor-bar and athanor-update (`forge/test/shell/rig.sh build-bar`); without
-  it the stages read the image's. `cleanup` unmasks the units and republishes the real state.
+  locally built athanor-bar and athanor-update (`forge/test/shell/rig.sh build-bar`, and
+  `rig.sh cargo build --locked --release -p athanor-update`); without it the stages read the
+  image's. `cleanup` unmasks the units and republishes the real state.
   Screenshots land in `.scratch/shield-acceptance/`.
 - `compositor-acceptance.sh [stage...]` deploys `cc-probe` from `.scratch/shell-rig/bin`
   (build it with `forge/test/shell/rig.sh build-compositor-client`) and checks, in the VM's
