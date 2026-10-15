@@ -25,6 +25,9 @@ USER_UNIT_SOURCES = SOURCES / "athanor-system-services/SOURCES/usr/lib/systemd/u
 FAILLOCK_DROPIN_SOURCE = (
     SOURCES / "polkit/SOURCES/polkit-agent-helper-service-faillock.conf"
 )
+PORTAL_SOURCES = (
+    SOURCES / "athanor-xdg-desktop-portal-athanor/xdg-desktop-portal-athanor-1.0.0"
+)
 
 LAUNCHER = "usr/bin/athanor-desktop"
 AGENT_UNIT = "usr/lib/systemd/user/cosmic-osd.service"
@@ -39,6 +42,44 @@ HELPER_LIB_DROPINS = "usr/lib/systemd/system/polkit-agent-helper@.service.d"
 HELPER_ETC_DROPINS = "etc/systemd/system/polkit-agent-helper@.service.d"
 HELPER_RUN_DROPINS = "run/systemd/system/polkit-agent-helper@.service.d"
 READ_ONLY_TALLY = "leaves /run/faillock read-only"
+SETTINGS_DAEMON_UNIT = "usr/lib/systemd/user/cosmic-settings-daemon.service"
+# The user unit directories, the lowest priority first (systemd.unit(5)).
+USER_DIRS = (
+    "usr/lib/systemd/user",
+    "usr/local/lib/systemd/user",
+    "usr/share/systemd/user",
+    "usr/local/share/systemd/user",
+    "run/systemd/user",
+    "etc/systemd/user",
+    "etc/xdg/systemd/user",
+)
+SETTINGS_DAEMON_ETC_DROPINS = "etc/systemd/user/cosmic-settings-daemon.service.d"
+READ_ONLY_RUNTIME = "leaves /run/user/UID read-only"
+PORTALS_CONF = "usr/share/xdg-desktop-portal/athanor-portals.conf"
+PORTALS = "usr/share/xdg-desktop-portal/portals"
+DBUS_SERVICES = "usr/share/dbus-1/services"
+FILE_CHOOSER_LINE = "org.freedesktop.impl.portal.FileChooser=gtk\n"
+# The portal files of xdg-desktop-portal-gtk 1.15.3 and gnome-keyring 48, as Fedora 43 ships them.
+GTK_PORTAL_TEXT = (
+    "[portal]\nDBusName=org.freedesktop.impl.portal.desktop.gtk\n"
+    "Interfaces=org.freedesktop.impl.portal.FileChooser;org.freedesktop.impl.portal.AppChooser;"
+    "org.freedesktop.impl.portal.Print;org.freedesktop.impl.portal.Notification;"
+    "org.freedesktop.impl.portal.Inhibit;org.freedesktop.impl.portal.Access;"
+    "org.freedesktop.impl.portal.Account;org.freedesktop.impl.portal.Email;"
+    "org.freedesktop.impl.portal.DynamicLauncher;org.freedesktop.impl.portal.Settings;\n"
+    "UseIn=gnome\n"
+)
+KEYRING_PORTAL_TEXT = (
+    "[portal]\nDBusName=org.freedesktop.secrets\n"
+    "Interfaces=org.freedesktop.impl.portal.Secret\nUseIn=gnome\n"
+)
+
+
+def activation(name, exec_path=None, extra=""):
+    """A D-Bus activation file for `name`, running a binary the fixture installs."""
+    return f"[D-BUS Service]\nName={name}\nExec={exec_path or '/usr/libexec/' + name}\n{extra}"
+
+
 # The sandbox line of polkit 127's own helper unit that matters here.
 HELPER_UNIT_TEXT = "[Service]\nExecStart=/usr/lib/polkit-1/polkit-agent-helper-1\nProtectSystem=strict\n"
 
@@ -62,6 +103,23 @@ class ImageSession(unittest.TestCase):
         self.write(
             SESSION_TARGET, (USER_UNIT_SOURCES / "athanor-session.target").read_text()
         )
+        self.write(
+            SETTINGS_DAEMON_UNIT,
+            (USER_UNIT_SOURCES / "cosmic-settings-daemon.service").read_text(),
+        )
+        self.write(PORTALS_CONF, (PORTAL_SOURCES / "athanor-portals.conf").read_text())
+        self.write(
+            f"{PORTALS}/athanor.portal", (PORTAL_SOURCES / "athanor.portal").read_text()
+        )
+        self.write(f"{PORTALS}/gtk.portal", GTK_PORTAL_TEXT)
+        self.write(f"{PORTALS}/gnome-keyring.portal", KEYRING_PORTAL_TEXT)
+        for name in (
+            "org.freedesktop.impl.portal.desktop.athanor",
+            "org.freedesktop.impl.portal.desktop.gtk",
+            "org.freedesktop.secrets",
+        ):
+            self.write(f"{DBUS_SERVICES}/{name}.service", activation(name))
+            self.write(f"usr/libexec/{name}", "")
         self.write(HELPER, "")
         os.chmod(self.root / HELPER, 0o755)
         self.write(HELPER_SOCKET_UNIT, "[Socket]\n")
@@ -404,10 +462,508 @@ class ImageSession(unittest.TestCase):
         )
         self.assertProblem(READ_ONLY_TALLY)
 
+    def test_a_settings_daemon_without_its_runtime_directory_fails(self):
+        self.edit(SETTINGS_DAEMON_UNIT, "ReadWritePaths=%t\n", "")
+        self.assertProblem(READ_ONLY_RUNTIME)
+
+    def test_a_settings_daemon_drop_in_that_resets_read_write_paths_fails(self):
+        self.write(
+            f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf", "[Service]\nReadWritePaths=\n"
+        )
+        self.assertProblem(READ_ONLY_RUNTIME)
+
+    def test_a_settings_daemon_runtime_directory_made_read_only_fails(self):
+        self.write(
+            f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf", "[Service]\nReadOnlyPaths=%t\n"
+        )
+        self.assertProblem(READ_ONLY_RUNTIME)
+
+    def test_t_expands_to_the_user_runtime_directory_below_run(self):
+        self.write(
+            f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf",
+            "[Service]\nReadOnlyPaths=/run\n",
+        )
+        self.assertEqual(mod.problems(self.root), [])
+
+    def test_a_settings_daemon_without_protect_system_strict_passes(self):
+        self.edit(SETTINGS_DAEMON_UNIT, "ReadWritePaths=%t\n", "")
+        self.edit(SETTINGS_DAEMON_UNIT, "ProtectSystem=strict", "ProtectSystem=full")
+        self.edit(SETTINGS_DAEMON_UNIT, "ProtectHome=read-only", "ProtectHome=no")
+        self.assertEqual(mod.problems(self.root), [])
+
+    def test_a_missing_or_masked_settings_daemon_fails(self):
+        self.write("etc/systemd/user/cosmic-settings-daemon.service", "")
+        self.assertProblem("cosmic-settings-daemon.service is masked")
+        (self.root / "etc/systemd/user/cosmic-settings-daemon.service").unlink()
+        (self.root / SETTINGS_DAEMON_UNIT).unlink()
+        self.assertProblem(f"/{SETTINGS_DAEMON_UNIT} is missing")
+
+    def test_a_missing_portals_conf_fails(self):
+        (self.root / PORTALS_CONF).unlink()
+        self.assertProblem(f"/{PORTALS_CONF} is missing")
+
+    def test_a_file_chooser_routed_to_none_or_not_routed_fails(self):
+        for line in ("org.freedesktop.impl.portal.FileChooser=none\n", ""):
+            with self.subTest(line=line):
+                self.write(
+                    PORTALS_CONF,
+                    (PORTAL_SOURCES / "athanor-portals.conf").read_text(),
+                )
+                self.edit(PORTALS_CONF, FILE_CHOOSER_LINE, line)
+                self.assertProblem("FileChooser no backend")
+
+    def test_a_wildcard_resolves_to_the_first_portal_file_that_lists_the_interface(
+        self,
+    ):
+        self.edit(
+            PORTALS_CONF,
+            FILE_CHOOSER_LINE,
+            "org.freedesktop.impl.portal.FileChooser=*\n",
+        )
+        self.assertEqual(mod.problems(self.root), [])
+        # athanor.portal sorts before gtk.portal: once it lists FileChooser, `*` is validated
+        # against it, and its bus name has no activation file.
+        self.write(
+            f"{PORTALS}/athanor.portal",
+            "[portal]\nDBusName=org.absent\n"
+            "Interfaces=org.freedesktop.impl.portal.FileChooser;\n",
+        )
+        found = mod.problems(self.root)
+        self.assertTrue(
+            any(
+                f.startswith(
+                    "org.freedesktop.impl.portal.FileChooser goes to athanor, and nothing activates"
+                )
+                for f in found
+            ),
+            found,
+        )
+
+    def test_a_wildcard_prefers_a_portal_file_used_in_the_session_desktop(self):
+        self.edit(
+            PORTALS_CONF,
+            FILE_CHOOSER_LINE,
+            "org.freedesktop.impl.portal.FileChooser=*\n",
+        )
+        # zz.portal sorts after gtk.portal by name, but UseIn=COSMIC puts it first.
+        self.write(
+            f"{PORTALS}/zz.portal",
+            "[portal]\nDBusName=org.absent\nUseIn=gnome;COSMIC\n"
+            "Interfaces=org.freedesktop.impl.portal.FileChooser;\n",
+        )
+        self.assertProblem("FileChooser goes to zz, and nothing activates")
+        # Athanor comes before COSMIC in XDG_CURRENT_DESKTOP, so a file used in it wins.
+        self.write(
+            f"{PORTALS}/zzz.portal",
+            "[portal]\nDBusName=org.absent\nUseIn=Athanor\n"
+            "Interfaces=org.freedesktop.impl.portal.FileChooser;\n",
+        )
+        self.assertProblem("FileChooser goes to zzz, and nothing activates")
+
+    def test_a_wildcard_that_no_portal_file_lists_fails(self):
+        self.edit(
+            PORTALS_CONF,
+            FILE_CHOOSER_LINE,
+            "org.freedesktop.impl.portal.FileChooser=*\n",
+        )
+        for rel in ("gtk.portal", "athanor.portal", "gnome-keyring.portal"):
+            (self.root / PORTALS / rel).unlink()
+        found = mod.problems(self.root)
+        self.assertIn(
+            "org.freedesktop.impl.portal.FileChooser goes to *, and no portal file lists it",
+            found,
+        )
+
+    def test_a_wildcard_is_resolved_for_every_interface(self):
+        self.edit(
+            PORTALS_CONF,
+            "org.freedesktop.impl.portal.Screenshot=none\n",
+            "org.freedesktop.impl.portal.Screenshot=*\n",
+        )
+        self.assertProblem("Screenshot goes to *, and no portal file lists it")
+
+    def test_cosmic_portals_conf_alone_is_read(self):
+        none = (
+            (PORTAL_SOURCES / "athanor-portals.conf")
+            .read_text()
+            .replace(
+                FILE_CHOOSER_LINE, "org.freedesktop.impl.portal.FileChooser=none\n"
+            )
+        )
+        (self.root / PORTALS_CONF).unlink()
+        self.write("usr/share/xdg-desktop-portal/cosmic-portals.conf", none)
+        self.assertProblem("FileChooser no backend")
+
+    def test_the_data_directories_of_portals_conf_are_ranked(self):
+        shipped = (PORTAL_SOURCES / "athanor-portals.conf").read_text()
+        none = shipped.replace(
+            FILE_CHOOSER_LINE, "org.freedesktop.impl.portal.FileChooser=none\n"
+        )
+        local = "usr/local/share/xdg-desktop-portal/athanor-portals.conf"
+        defaults = (
+            "usr/share/athanor/cosmic-defaults/xdg-desktop-portal/athanor-portals.conf"
+        )
+        self.write(local, none)
+        self.assertProblem("FileChooser no backend")
+        self.write(defaults, shipped)
+        self.assertEqual(mod.problems(self.root), [])
+        self.write(defaults, none)
+        self.write(local, shipped)
+        self.assertProblem("FileChooser no backend")
+
+    def test_an_etc_portals_conf_overrides_the_shipped_one(self):
+        shipped = (PORTAL_SOURCES / "athanor-portals.conf").read_text()
+        none = shipped.replace(
+            FILE_CHOOSER_LINE, "org.freedesktop.impl.portal.FileChooser=none\n"
+        )
+        for rel in (
+            "etc/xdg-desktop-portal/athanor-portals.conf",
+            "etc/xdg/xdg-desktop-portal/athanor-portals.conf",
+            "etc/xdg-desktop-portal/portals.conf",
+        ):
+            with self.subTest(rel=rel):
+                self.write(rel, none)
+                self.assertProblem("FileChooser no backend")
+                (self.root / rel).unlink()
+
+    def test_the_portals_conf_search_order_decides(self):
+        shipped = (PORTAL_SOURCES / "athanor-portals.conf").read_text()
+        none = shipped.replace(
+            FILE_CHOOSER_LINE, "org.freedesktop.impl.portal.FileChooser=none\n"
+        )
+        # /etc/xdg beats /etc, and a desktop-specific name beats portals.conf in one directory.
+        self.write("etc/xdg-desktop-portal/athanor-portals.conf", none)
+        self.write("etc/xdg/xdg-desktop-portal/athanor-portals.conf", shipped)
+        self.assertEqual(mod.problems(self.root), [])
+        self.write("etc/xdg/xdg-desktop-portal/athanor-portals.conf", none)
+        self.write("etc/xdg-desktop-portal/athanor-portals.conf", shipped)
+        self.assertProblem("FileChooser no backend")
+        (self.root / "etc/xdg/xdg-desktop-portal/athanor-portals.conf").unlink()
+        self.write("etc/xdg-desktop-portal/portals.conf", none)
+        self.assertEqual(mod.problems(self.root), [])
+
+    def test_a_file_chooser_routed_to_a_missing_backend_fails(self):
+        self.edit(
+            PORTALS_CONF,
+            FILE_CHOOSER_LINE,
+            "org.freedesktop.impl.portal.FileChooser=athanor-files\n",
+        )
+        self.assertProblem(f"/{PORTALS}/athanor-files.portal is missing")
+
+    def test_an_interface_routed_to_a_backend_that_does_not_list_it_fails(self):
+        self.edit(
+            PORTALS_CONF,
+            "org.freedesktop.impl.portal.Screenshot=none\n",
+            "org.freedesktop.impl.portal.Screenshot=gtk\n",
+        )
+        self.assertProblem("Screenshot goes to gtk, whose portal file does not list it")
+
+    def test_a_backend_the_bus_cannot_activate_fails(self):
+        (self.root / DBUS_SERVICES / "org.freedesktop.secrets.service").unlink()
+        self.assertProblem("nothing activates its bus name 'org.freedesktop.secrets'")
+
+    def activation_file(self, name="org.freedesktop.secrets"):
+        return f"{DBUS_SERVICES}/{name}.service"
+
+    def test_an_activation_file_must_name_the_bus_name_and_a_present_binary(self):
+        name = "org.freedesktop.secrets"
+        words = f"nothing activates its bus name '{name}'"
+        cases = {
+            "wrong Name": "[D-BUS Service]\nName=org.other\nExec=/usr/libexec/"
+            + name
+            + "\n",
+            "no Name": "[D-BUS Service]\nExec=/usr/libexec/" + name + "\n",
+            "bare": "[D-BUS Service]\n",
+            "missing binary": activation(name, "/usr/libexec/absent"),
+            "no Exec": f"[D-BUS Service]\nName={name}\n",
+            "missing unit": activation(
+                name, "/usr/libexec/absent", "SystemdService=x.service\n"
+            ),
+        }
+        for label, text in cases.items():
+            with self.subTest(label):
+                self.write(self.activation_file(), text)
+                found = mod.problems(self.root)
+                self.assertEqual(len(found), 1, found)
+                self.assertIn(words, found[0])
+
+    def test_an_activation_file_with_a_systemd_unit_or_arguments_passes(self):
+        name = "org.freedesktop.secrets"
+        self.write("usr/lib/systemd/user/x.service", "[Service]\n")
+        self.write(
+            self.activation_file(),
+            activation(name, "/usr/libexec/absent", "SystemdService=x.service\n"),
+        )
+        self.assertEqual(mod.problems(self.root), [])
+        self.write(
+            self.activation_file(), activation(name, f"/usr/libexec/{name} --replace")
+        )
+        self.assertEqual(mod.problems(self.root), [])
+
+    def test_a_present_exec_does_not_replace_a_missing_systemd_unit(self):
+        name = "org.freedesktop.secrets"
+        self.write(
+            self.activation_file(), activation(name, extra="SystemdService=x.service\n")
+        )
+        self.assertProblem(f"nothing activates its bus name '{name}'")
+
+    def test_a_masked_activation_unit_does_not_count(self):
+        name = "org.freedesktop.secrets"
+        self.write("usr/lib/systemd/user/x.service", "[Service]\n")
+        (self.root / "etc/systemd/user").mkdir(parents=True, exist_ok=True)
+        (self.root / "etc/systemd/user/x.service").symlink_to("/dev/null")
+        self.write(
+            self.activation_file(),
+            activation(name, extra="SystemdService=x.service\n"),
+        )
+        self.assertProblem(f"nothing activates its bus name '{name}'")
+
+    def test_an_empty_or_missing_dbus_name_fails(self):
+        for text in (
+            "[portal]\nInterfaces=org.freedesktop.impl.portal.Secret\n",
+            "[portal]\nDBusName=\nInterfaces=org.freedesktop.impl.portal.Secret\n",
+        ):
+            with self.subTest(text=text):
+                self.write(f"{PORTALS}/gnome-keyring.portal", text)
+                self.assertProblem("nothing activates its bus name ''")
+
+    def test_a_portal_file_without_interfaces_fails(self):
+        self.write(
+            f"{PORTALS}/gnome-keyring.portal",
+            "[portal]\nDBusName=org.freedesktop.secrets\n",
+        )
+        self.assertProblem(
+            "Secret goes to gnome-keyring, whose portal file does not list it"
+        )
+
     def test_an_exec_start_pre_drop_in_does_not_override_exec_start(self):
         self.write(
             f"{AGENT_ETC_DROPINS}/60-y.conf", "[Service]\nExecStartPre=/bin/true\n"
         )
+        self.assertEqual(mod.problems(self.root), [])
+
+    def test_a_user_unit_in_a_higher_directory_replaces_the_usr_lib_one(self):
+        daemon = "cosmic-settings-daemon.service"
+        relaxed = (USER_UNIT_SOURCES / daemon).read_text().replace("strict", "full")
+        for d in USER_DIRS[1:]:
+            with self.subTest(dir=d):
+                self.write(f"{d}/{daemon}", relaxed)
+                self.edit(SETTINGS_DAEMON_UNIT, "ReadWritePaths=%t\n", "")
+                self.assertEqual(mod.problems(self.root), [])
+                (self.root / d / daemon).unlink()
+                self.write(
+                    SETTINGS_DAEMON_UNIT, (USER_UNIT_SOURCES / daemon).read_text()
+                )
+
+    def test_the_user_unit_directories_are_ranked_as_systemd_ranks_them(self):
+        daemon = "cosmic-settings-daemon.service"
+        good = (USER_UNIT_SOURCES / daemon).read_text()
+        bad = good.replace("ReadWritePaths=%t\n", "")
+        # Each directory beats every one before it in USER_DIRS and loses to every one after it.
+        for i, high in enumerate(USER_DIRS[1:], 1):
+            for low in USER_DIRS[:i]:
+                with self.subTest(high=high, low=low):
+                    self.write(f"{low}/{daemon}", bad)
+                    self.write(f"{high}/{daemon}", good)
+                    self.assertEqual(mod.problems(self.root), [])
+                    self.write(f"{low}/{daemon}", good)
+                    self.write(f"{high}/{daemon}", bad)
+                    self.assertProblem(READ_ONLY_RUNTIME)
+                    (self.root / high / daemon).unlink()
+                    (self.root / low / daemon).unlink()
+                    self.write(SETTINGS_DAEMON_UNIT, good)
+
+    def test_a_dev_null_symlink_masks_a_user_unit_in_any_higher_directory(self):
+        daemon = "cosmic-settings-daemon.service"
+        for d in USER_DIRS[1:]:
+            with self.subTest(dir=d):
+                (self.root / d).mkdir(parents=True, exist_ok=True)
+                (self.root / d / daemon).symlink_to("/dev/null")
+                self.assertProblem(f"{daemon} is masked in /{d}")
+                (self.root / d / daemon).unlink()
+
+    def test_a_higher_real_unit_beats_a_lower_mask(self):
+        daemon = "cosmic-settings-daemon.service"
+        (self.root / "run/systemd/user").mkdir(parents=True)
+        (self.root / "run/systemd/user" / daemon).symlink_to("/dev/null")
+        self.write(
+            f"etc/systemd/user/{daemon}", (USER_UNIT_SOURCES / daemon).read_text()
+        )
+        self.assertEqual(mod.problems(self.root), [])
+
+    def test_a_usr_lib_drop_in_counts(self):
+        self.write(
+            "usr/lib/systemd/user/cosmic-settings-daemon.service.d/90-x.conf",
+            "[Service]\nReadWritePaths=\n",
+        )
+        self.assertProblem(READ_ONLY_RUNTIME)
+
+    def test_drop_ins_of_every_user_directory_count(self):
+        for d in USER_DIRS[1:]:
+            with self.subTest(dir=d):
+                self.write(
+                    f"{d}/cosmic-settings-daemon.service.d/90-x.conf",
+                    "[Service]\nReadOnlyPaths=%t\n",
+                )
+                self.assertProblem(READ_ONLY_RUNTIME)
+                (self.root / d / "cosmic-settings-daemon.service.d/90-x.conf").unlink()
+
+    def test_a_user_drop_in_beats_the_same_name_in_a_lower_directory(self):
+        name = "cosmic-settings-daemon.service.d/90-x.conf"
+        for i, high in enumerate(USER_DIRS[1:], 1):
+            for low in USER_DIRS[:i]:
+                with self.subTest(high=high, low=low):
+                    self.write(f"{low}/{name}", "[Service]\nReadWritePaths=\n")
+                    self.write(f"{high}/{name}", "[Service]\n")
+                    self.assertEqual(mod.problems(self.root), [])
+                    self.write(f"{low}/{name}", "[Service]\n")
+                    self.write(f"{high}/{name}", "[Service]\nReadWritePaths=\n")
+                    self.assertProblem(READ_ONLY_RUNTIME)
+                    (self.root / low / name).unlink()
+                    (self.root / high / name).unlink()
+
+    def test_a_replaced_agent_unit_fails_in_every_user_directory(self):
+        for d in USER_DIRS[1:]:
+            with self.subTest(dir=d):
+                self.write(f"{d}/cosmic-osd.service", "[Service]\n")
+                self.assertProblem("masks or replaces")
+                (self.root / d / "cosmic-osd.service").unlink()
+
+    def test_a_masked_agent_in_a_run_or_local_directory_fails(self):
+        for d in (
+            "run/systemd/user",
+            "usr/local/lib/systemd/user",
+            "etc/xdg/systemd/user",
+        ):
+            with self.subTest(dir=d):
+                (self.root / d).mkdir(parents=True, exist_ok=True)
+                (self.root / d / "cosmic-osd.service").symlink_to("/dev/null")
+                self.assertProblem("masks or replaces")
+                (self.root / d / "cosmic-osd.service").unlink()
+
+    def test_a_hiding_protect_home_makes_the_runtime_directory_unusable(self):
+        for value in ("yes", "y", "true", "t", "tmpfs", "on", "1"):
+            with self.subTest(value=value):
+                self.write(
+                    f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf",
+                    f"[Service]\nProtectHome={value}\n",
+                )
+                self.assertProblem(READ_ONLY_RUNTIME)
+
+    def test_a_read_only_protect_home_without_strict_needs_the_runtime_directory(self):
+        self.edit(SETTINGS_DAEMON_UNIT, "ProtectSystem=strict", "ProtectSystem=full")
+        self.write(
+            f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf",
+            "[Service]\nProtectHome=Read-Only\n",
+        )
+        self.assertEqual(mod.problems(self.root), [])
+        self.edit(SETTINGS_DAEMON_UNIT, "ReadWritePaths=%t\n", "")
+        self.assertProblem(READ_ONLY_RUNTIME)
+
+    def test_a_read_only_runtime_directory_without_strict_fails(self):
+        self.edit(SETTINGS_DAEMON_UNIT, "ProtectSystem=strict", "ProtectSystem=full")
+        self.edit(SETTINGS_DAEMON_UNIT, "ProtectHome=read-only", "ProtectHome=no")
+        self.write(
+            f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf",
+            "[Service]\nReadWritePaths=\nReadOnlyPaths=%t\n",
+        )
+        self.assertProblem(READ_ONLY_RUNTIME)
+
+    def test_protect_home_is_case_insensitive(self):
+        self.write(
+            f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf", "[Service]\nProtectHome=YES\n"
+        )
+        self.assertProblem(READ_ONLY_RUNTIME)
+
+    def test_the_last_protect_home_decides(self):
+        self.write(
+            f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf",
+            "[Service]\nProtectHome=yes\nProtectHome=read-only\n",
+        )
+        self.assertEqual(mod.problems(self.root), [])
+        self.write(
+            f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf",
+            "[Service]\nProtectHome=no\nProtectHome=yes\n",
+        )
+        self.assertProblem(READ_ONLY_RUNTIME)
+
+    def test_protect_home_does_not_touch_the_tally_directory(self):
+        self.faillock_dropin(
+            "[Service]\nReadWritePaths=/run/faillock\nProtectHome=yes\n"
+        )
+        self.assertEqual(mod.problems(self.root), [])
+
+    def test_a_temporary_file_system_over_the_runtime_directory_fails(self):
+        for entry in ("/run/user", "/run", "/run/user/UID:ro", "/"):
+            with self.subTest(entry=entry):
+                self.write(
+                    f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf",
+                    f"[Service]\nTemporaryFileSystem={entry}\n",
+                )
+                self.assertProblem(READ_ONLY_RUNTIME)
+
+    def test_a_temporary_file_system_elsewhere_or_reset_passes(self):
+        self.write(
+            f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf",
+            "[Service]\nTemporaryFileSystem=/var:ro\nTemporaryFileSystem=\n"
+            "TemporaryFileSystem=/run/user/UID2:ro\n",
+        )
+        self.assertEqual(mod.problems(self.root), [])
+
+    def test_protect_home_hides_a_path_below_home_or_root(self):
+        for path in ("/home/user", "/root/x"):
+            with self.subTest(path=path):
+                unit = (
+                    "[Service]\nProtectHome=yes\nProtectSystem=strict\nReadWritePaths="
+                    + path
+                )
+                self.write("usr/lib/systemd/user/probe.service", unit + "\n")
+                found = mod.writable_problems(
+                    self.root,
+                    USER_DIRS,
+                    "probe.service",
+                    path,
+                    "/run/user/UID",
+                    "m",
+                    "r",
+                )
+                self.assertEqual(len(found), 1, found)
+
+    def test_hiding_does_not_depend_on_protect_system(self):
+        for text in (
+            "[Service]\nProtectSystem=full\nProtectHome=yes\n",
+            "[Service]\nTemporaryFileSystem=/run/user\n",
+        ):
+            with self.subTest(text=text):
+                self.write(f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf", text)
+                self.edit(
+                    SETTINGS_DAEMON_UNIT, "ProtectSystem=strict", "ProtectSystem=full"
+                )
+                self.assertProblem(READ_ONLY_RUNTIME)
+                self.edit(SETTINGS_DAEMON_UNIT, "ProtectSystem=full\n", "")
+                self.assertProblem(READ_ONLY_RUNTIME)
+                self.write(
+                    SETTINGS_DAEMON_UNIT,
+                    (USER_UNIT_SOURCES / "cosmic-settings-daemon.service").read_text(),
+                )
+
+    def test_a_dev_null_unit_in_the_lowest_directory_is_missing_not_masked(self):
+        # The lowest directory holds the packaged unit; a null link there is no override.
+        daemon = self.root / SETTINGS_DAEMON_UNIT
+        daemon.unlink()
+        daemon.symlink_to("/dev/null")
+        self.assertProblem(f"/{SETTINGS_DAEMON_UNIT} is missing")
+
+    def test_the_system_unit_directories_are_ranked(self):
+        relaxed = HELPER_UNIT_TEXT.replace("strict", "full")
+        (self.root / HELPER_LIB_DROPINS / "50-athanor-faillock.conf").unlink()
+        self.write(HELPER_UNIT, relaxed)
+        self.write(
+            "usr/local/lib/systemd/system/polkit-agent-helper@.service",
+            HELPER_UNIT_TEXT,
+        )
+        self.assertProblem(READ_ONLY_TALLY)
+        self.write("run/systemd/system/polkit-agent-helper@.service", relaxed)
         self.assertEqual(mod.problems(self.root), [])
 
     def test_the_enabled_greeter_daemon_fails(self):

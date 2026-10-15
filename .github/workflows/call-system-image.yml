@@ -156,10 +156,13 @@ jobs:
         # enabled timer it does not list, or an enabled unit it calls silent, fails the build.
         run: bash system/check-image-contacts.sh "$(<artifacts/system-image.iid)"
 
-      - name: 🔐 Check the session lock and the polkit agent
+      - name: 🔐 Check the desktop session
         # Release 0.9 ships cosmic-greeter's locker, cosmic-idle and cosmic-osd's agent on polkit
         # 127's socket helper (ADR-0115, docs/spikes/lock-and-polkit-agent-0-9.md); an image that
-        # lost one of them builds but never locks or never authenticates.
+        # lost one of them builds but never locks or never authenticates. cosmic-settings-daemon
+        # must be able to bind its socket in the runtime directory, or the volume keys are dead;
+        # every portal backend athanor-portals.conf names must serve its interface, and
+        # FileChooser must have one, or Flatpak applications cannot open or save.
         run: bash system/check-image-session.sh "$(<artifacts/system-image.iid)"
 
       - name: 🥾 Check the vmlinuz of the image against the Secure Boot certificate
