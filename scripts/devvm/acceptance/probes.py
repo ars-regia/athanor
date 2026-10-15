@@ -39,6 +39,16 @@ def run(argv, sudo=False):
 # --- parsers (pure) -------------------------------------------------------------------------
 
 
+def parse_active_zones(text):
+    """`firewall-cmd --get-active-zones` -> zone names. firewalld 2 marks the default zone
+    "public (default)" and lists its interfaces and sources on indented lines."""
+    return [
+        line.split()[0]
+        for line in text.splitlines()
+        if line.strip() and not line[0].isspace()
+    ]
+
+
 def parse_listeners(text):
     """`ss -H -ltunp` -> [{proto, address, port, process}]."""
     out = []
@@ -129,7 +139,7 @@ def collect():
     if present:
         out = probe("firewall", ["firewall-cmd", "--get-active-zones"], sudo=True)
         zones = {}
-        for zone in [x for x in out.splitlines() if x and not x.startswith(" ")]:
+        for zone in parse_active_zones(out):
             listed = probe(
                 f"firewall:{zone}",
                 ["firewall-cmd", f"--zone={zone}", "--list-services"],
