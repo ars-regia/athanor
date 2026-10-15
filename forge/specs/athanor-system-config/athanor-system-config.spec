@@ -92,6 +92,7 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
   pending file as it sees the devices, so a first run stopped by that bound is continued at the
   ports it saw; one stopped before it read any device's ids admits nothing at the next boot.
   A later run waits until the bound for a pending port that has not enumerated yet.
+  A rules file that cannot be read fails the run and is kept as it is.
 
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-65
 - %install copies the usr and etc source trees without hiding a failure (AGENTS.md,

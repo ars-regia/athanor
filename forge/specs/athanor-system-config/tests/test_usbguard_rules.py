@@ -254,6 +254,20 @@ case $(wc -l < {count}) in
         self.assertFalse(self.marker.exists())
         self.assertEqual(list(self.work.glob("50-athanor-internal.conf*")), [])
 
+    @unittest.skipIf(os.geteuid() == 0, "root reads a file whatever its mode")
+    def test_a_rules_file_that_cannot_be_read_is_kept_and_leaves_no_marker(self):
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
+        earlier = '# header\nallow id 058f:9540 serial "" via-port "1-2" with-interface equals { 0b:00:00 }\n'
+        self.rules.write_text(earlier)
+        self.rules.chmod(0)
+        done = self.run_script(check=False)
+        self.rules.chmod(0o600)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("Permission denied", done.stderr)
+        self.assertEqual(self.rules.read_text(), earlier)
+        self.assertFalse(self.marker.exists())
+        self.assertTrue(self.pending.exists())  # the next boot reads the same devices again
+
     def test_the_marker_is_written_after_the_rules_are_on_disk(self):
         self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
         log = self.work / "sync.log"

@@ -296,20 +296,21 @@ for port in "${!resolved[@]}"; do
 done
 
 # Rules first, durably, then the pending file or the marker: a crash between them reads the
-# devices again, and a rule already written is kept and never written twice.
-body=$(
-    if [[ -e $rules ]]; then
-        cat -- "$rules"
-    else
-        echo "# Written by athanor-usbguard-internal.service: the USB devices connected at its first run, admitted then or at the next boots (doc_disks.md DK21)."
-    fi
-    for rule in "${admitted[@]}"; do
-        if [[ ! -e $rules ]] || ! grep -qFx -- "$rule" "$rules"; then
-            echo "$rule"
-        fi
+# devices again, and a rule already written is kept and never written twice. A rules file that
+# cannot be read ends the run here (set -e), before anything is replaced and without the marker.
+if [[ -e $rules ]]; then
+    mapfile -t lines <"$rules"
+else
+    lines=("# Written by athanor-usbguard-internal.service: the USB devices connected at its first run, admitted then or at the next boots (doc_disks.md DK21).")
+fi
+for rule in "${admitted[@]}"; do
+    for line in "${lines[@]}"; do
+        [[ $line == "$rule" ]] && continue 2
     done
-)
-put "$rules" <<<"$body"
+    lines+=("$rule")
+done
+printf -v body '%s\n' "${lines[@]}"
+put "$rules" <<<"${body%$'\n'}"
 
 ((${#wanted[@]} == 0)) && finish
 ((runs < max_runs)) || give_up
