@@ -40,11 +40,18 @@ LOCKER_PAM = ("etc/pam.d/cosmic-greeter", "usr/lib/pam.d/cosmic-greeter")
 USER_UNITS = (
     "usr/lib/systemd/user",
     "usr/local/lib/systemd/user",
+    "usr/share/systemd/user",
+    "usr/local/share/systemd/user",
     "run/systemd/user",
     "etc/systemd/user",
     "etc/xdg/systemd/user",
 )
-SYSTEM_UNITS = ("usr/lib/systemd/system", "run/systemd/system", "etc/systemd/system")
+SYSTEM_UNITS = (
+    "usr/lib/systemd/system",
+    "usr/local/lib/systemd/system",
+    "run/systemd/system",
+    "etc/systemd/system",
+)
 AGENT = "cosmic-osd.service"
 AGENT_UNIT = f"{USER_UNITS[0]}/{AGENT}"
 SESSION_TARGET = "usr/lib/systemd/user/athanor-session.target"
@@ -66,6 +73,8 @@ PORTALS_CONF = "usr/share/xdg-desktop-portal/athanor-portals.conf"
 PORTALS_CONF_DIRS = (
     "etc/xdg/xdg-desktop-portal",
     "etc/xdg-desktop-portal",
+    # 60-athanor-cosmic-defaults.conf prepends this directory to XDG_DATA_DIRS.
+    "usr/share/athanor/cosmic-defaults/xdg-desktop-portal",
     "usr/local/share/xdg-desktop-portal",
     "usr/share/xdg-desktop-portal",
 )
@@ -163,18 +172,25 @@ def writable_problems(root, dirs, unit, path, runtime, if_masked, if_read_only):
     runtime. Any InaccessiblePaths= entry covering path fails, whatever its depth: systemd
     drops every mount below an inaccessible one (namespace.c drop_inaccessible). Of the
     ReadWritePaths= and ReadOnlyPaths= entries covering it, the deepest decides, and read-only
-    wins a tie. if_masked and if_read_only say what breaks."""
+    wins a tie. A ProtectHome= that hides /home, /root and /run/user, a TemporaryFileSystem= or an
+    InaccessiblePaths= over path fails with or without ProtectSystem=strict. A bind mount that
+    re-exposes a hidden path is not modelled and is reported as hidden: a false failure, which
+    is fail-closed and acceptable because no shipped unit does it. if_masked and if_read_only
+    say what breaks."""
     unit_file, masked_in = locate(root, dirs, unit)
     if masked_in:
         return [f"{unit} is masked in /{masked_in}: {if_masked}"]
     if not unit_file:
         return [f"/{dirs[0]}/{unit} is missing"]
     files = [unit_file] + dropins(root, dirs, unit)
-    if [v for f in files for v in assignments(f, "ProtectSystem")][-1:] != ["strict"]:
-        return []
+    strict = [v for f in files for v in assignments(f, "ProtectSystem")][-1:] == [
+        "strict"
+    ]
+    writable = read_only = 0
     try:
-        writable = depth_covering(path_list(files, "ReadWritePaths"), path, runtime)
-        read_only = depth_covering(path_list(files, "ReadOnlyPaths"), path, runtime)
+        if strict:
+            writable = depth_covering(path_list(files, "ReadWritePaths"), path, runtime)
+            read_only = depth_covering(path_list(files, "ReadOnlyPaths"), path, runtime)
         hidden = depth_covering(path_list(files, "InaccessiblePaths"), path, runtime)
         tmpfs = [e.split(":")[0] for e in path_list(files, "TemporaryFileSystem")]
         emptied = depth_covering(tmpfs, path, runtime)
@@ -188,12 +204,9 @@ def writable_problems(root, dirs, unit, path, runtime, if_masked, if_read_only):
     home_hidden = protect_home[0].lower() in HOME_HIDING if protect_home else False
     if home_hidden and any(path == h or path.startswith(h + "/") for h in HOME_DIRS):
         hidden = max(hidden, 0)
-    if writable < 0 or read_only >= writable or hidden >= 0 or emptied >= 0:
-        message = (
-            f"{unit} sets ProtectSystem=strict and leaves {path} read-only or hidden: "
-            f"{if_read_only}"
-        )
-        return [message]
+    unwritable = strict and (writable < 0 or read_only >= writable)
+    if unwritable or hidden >= 0 or emptied >= 0:
+        return [f"{unit} leaves {path} read-only or hidden: {if_read_only}"]
     return []
 
 
@@ -208,7 +221,7 @@ def ini(path):
 def activation_problem(root, bus_name):
     """Why the bus cannot start bus_name from /usr/share/dbus-1/services, or None: the file
     must exist, name the bus name, and have an Exec= binary in the image or a SystemdService=
-    unit among the user units."""
+    unit among the user units; SystemdService=, when set, is the one that counts."""
     if not bus_name:
         return "the portal file has no DBusName"
     service = root / DBUS_SERVICES / f"{bus_name}.service"
@@ -220,17 +233,15 @@ def activation_problem(root, bus_name):
         return f"unreadable activation file ({e.__class__.__name__})"
     if entry.get("Name") != bus_name:
         return f"the activation file names '{entry.get('Name', '')}'"
+    unit = entry.get("SystemdService")
+    if unit:  # the bus starts the unit; Exec= is only a fallback
+        if locate(root, USER_UNITS, unit)[0]:
+            return None
+        return f"its SystemdService= unit {unit} is absent or masked"
     exec_line = entry.get("Exec", "").split()
     if exec_line and os.path.lexists(root / exec_line[0].lstrip("/")):
         return None
-    if (
-        entry.get("SystemdService")
-        and locate(root, USER_UNITS, entry["SystemdService"])[0]
-    ):
-        return None
-    return (
-        "its Exec= binary and its SystemdService= unit are both absent from the image"
-    )
+    return "its Exec= binary is absent from the image"
 
 
 def portal_problems(root):
@@ -253,7 +264,24 @@ def portal_problems(root):
     for interface, value in routes.items():
         if interface == "default":
             continue
-        for name in [n for n in value.split(";") if n not in ("", "none", "*")]:
+        names = []
+        for n in value.split(";"):
+            if n == "*":  # the first portal file, by name, that lists the interface
+                first = next(
+                    (
+                        q.stem
+                        for q in sorted((root / PORTALS_DIR).glob("*.portal"))
+                        if interface
+                        in ini(q).get("portal", {}).get("Interfaces", "").split(";")
+                    ),
+                    None,
+                )
+                if first is None:
+                    found.append(f"{interface} goes to *, and no portal file lists it")
+                names.append(first)
+            elif n not in ("", "none"):
+                names.append(n)
+        for name in [n for n in names if n]:
             portal = root / PORTALS_DIR / f"{name}.portal"
             if not portal.is_file():
                 found.append(
@@ -273,7 +301,7 @@ def portal_problems(root):
                     f"'{bus_name}' (/{DBUS_SERVICES}): {reason}"
                 )
     if not [
-        n for n in routes.get(FILE_CHOOSER, "").split(";") if n not in ("", "none", "*")
+        n for n in routes.get(FILE_CHOOSER, "").split(";") if n not in ("", "none")
     ]:
         found.append(
             f"/{PORTALS_CONF} gives {FILE_CHOOSER} no backend: every Open and Save of a "
