@@ -115,14 +115,30 @@ give_up() {
     finish
 }
 
+# read_rules: reads the rules file into lines. A rules file that cannot be read ends the run,
+# before anything is replaced and without the marker, at every boot until an administrator makes
+# it readable again.
+read_rules() {
+    if [[ ! -e $rules ]]; then
+        lines=("# Written by athanor-usbguard-internal.service: the USB devices connected at its first run, admitted then or at the next boots (doc_disks.md DK21).")
+    elif ! mapfile -t lines <"$rules"; then
+        echo "<3>$rules cannot be read: no device is admitted until an administrator makes it readable again." >&2
+        exit 1
+    fi
+}
+
 # The count is on disk before any device is read, so a run killed by the start timeout counts.
 # A first run killed before it read any device's ids left no entry: what was connected then is
 # unknown, and reading the devices now could admit one connected since, so none is admitted.
+# A later run reads the rules file before it counts itself: a run that could write no rule is
+# not one of the three. The first run reads it at the end, after its pending file records the
+# devices it saw, so that the snapshot stays the one of the first boot.
 if [[ $first == no ]]; then
     if ((${#wanted[@]} == 0)); then
         echo "<3>The first run of the snapshot stopped before it read any device: no internal device is admitted. Allow them from Settings, USB devices, with \"Allow always\"." >&2
         finish
     fi
+    read_rules
     ((runs < max_runs)) || give_up
     runs=$((runs + 1))
 else
@@ -341,17 +357,8 @@ for port in "${!resolved[@]}"; do
 done
 
 # Rules first, durably, then the pending file or the marker: a crash between them reads the
-# devices again, and a rule already written is kept and never written twice. A rules file that
-# cannot be read ends the run here, before anything is replaced and without the marker, at every
-# boot until an administrator makes it readable again.
-if [[ -e $rules ]]; then
-    if ! mapfile -t lines <"$rules"; then
-        echo "<3>$rules cannot be read: no device is admitted until an administrator makes it readable again." >&2
-        exit 1
-    fi
-else
-    lines=("# Written by athanor-usbguard-internal.service: the USB devices connected at its first run, admitted then or at the next boots (doc_disks.md DK21).")
-fi
+# devices again, and a rule already written is kept and never written twice.
+[[ $first == no ]] || read_rules
 for rule in "${admitted[@]}"; do
     for line in "${lines[@]}"; do
         [[ $line == "$rule" ]] && continue 2

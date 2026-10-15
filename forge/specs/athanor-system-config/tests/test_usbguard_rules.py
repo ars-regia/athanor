@@ -271,6 +271,30 @@ case $(wc -l < {count}) in
         self.assertFalse(self.marker.exists())
         self.assertTrue(self.pending.exists())  # the next boot reads the same devices again
 
+    @unittest.skipIf(os.geteuid() == 0, "root reads a file whatever its mode")
+    def test_runs_that_cannot_read_the_rules_file_do_not_count(self):
+        self.first_run_leaves_1_1_pending()
+        first = self.written()
+        self.configure("1-1", [("0e", "01", "00")])
+        self.rules.chmod(0)
+        for _ in range(4):
+            done = self.run_script(check=False)
+            self.assertEqual(done.returncode, 1, done.stderr)
+            self.assertIn(
+                f"<3>{self.rules} cannot be read: no device is admitted until an administrator makes it readable again.",
+                done.stderr,
+            )
+            self.assertFalse(self.marker.exists())
+            self.assertEqual(self.pending.read_text(), 'runs 1\n1-1 0c45:6a10 ""\n')
+        self.rules.chmod(0o600)
+        self.run_script()
+        self.assertEqual(
+            self.written(),
+            first + ['allow id 0c45:6a10 serial "" via-port "1-1" with-interface equals { 0e:01:00 }'],
+        )
+        self.assertTrue(self.marker.exists())
+        self.assertFalse(self.pending.exists())
+
     def test_the_marker_is_written_after_the_rules_are_on_disk(self):
         self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
         log = self.work / "sync.log"
