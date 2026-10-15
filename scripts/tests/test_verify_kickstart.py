@@ -42,7 +42,10 @@ class Validation(unittest.TestCase):
         problems = verify.kickstart_problems(self.root)
         self.assertEqual(len(problems), 1, problems)
         self.assertTrue(
-            problems[0].startswith("system/disk_config/iso.toml: "), problems
+            problems[0].startswith(
+                "system/disk_config/iso.toml, its kickstart contents: "
+            ),
+            problems,
         )
 
     def test_an_iso_toml_without_a_kickstart_fails(self):

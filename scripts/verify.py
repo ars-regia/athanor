@@ -891,12 +891,13 @@ def kickstart_problems(root=None):
             except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError) as err:
                 problems.append(f"{relative}: cannot read its kickstart ({err!r})")
                 continue
-            targets.append((relative, extracted))
+            # ksvalidator counts lines from the start of the kickstart, not of the TOML file.
+            targets.append((f"{relative}, its kickstart contents", extracted))
         for relative, path in targets:
             # Without --followincludes an %include is accepted unread: collaudo.ks includes a
             # file that exists only on the installation medium (/run/install/repo).
             p = subprocess.run(["ksvalidator", "--version", KICKSTART_SYNTAX, str(path)],
-                               cwd=root, capture_output=True, text=True, timeout=60)
+                               capture_output=True, text=True, timeout=60)
             if p.returncode != 0:
                 detail = " ".join(p.stderr.split()) or " ".join(p.stdout.split())
                 problems.append(f"{relative}: {detail}")
