@@ -92,6 +92,12 @@ class PipelineWorkflowsTest(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn("counts 29", problems[0])
 
+    def test_a_heading_without_a_count_is_reported(self):
+        doc = self.table("a.yml", "b.yaml").replace("Today's 2 workflows", "Today's workflows")
+        problems = self.problems(doc)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("states no workflow count", problems[0])
+
     def test_an_empty_table_fails(self):
         problems = self.problems(self.table(n=0))
         self.assertEqual(len(problems), 1)

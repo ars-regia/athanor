@@ -1757,7 +1757,9 @@ def pipeline_workflow_problems(doc, workflows):
     problems += [f"{PIPELINE_DOC}: section 3.5 lists {name} twice"
                  for name in sorted({name for name in rows if rows.count(name) > 1})]
     count = re.search(r"\d+", heading[len("### 3.5 "):])
-    if count and int(count.group()) != len(rows):
+    if not count:
+        problems.append(f"{PIPELINE_DOC}: the heading of section 3.5 states no workflow count")
+    elif int(count.group()) != len(rows):
         problems.append(f"{PIPELINE_DOC}: the heading of section 3.5 counts {count.group()} "
                         f"workflows, its table has {len(rows)} rows")
     return problems
