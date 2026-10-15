@@ -81,6 +81,7 @@ PORTALS_CONF_DIRS = (
 PORTALS_CONF_NAMES = ("athanor-portals.conf", "cosmic-portals.conf", "portals.conf")
 # ProtectHome= values that make /run/user inaccessible or empty (systemd.exec(5)).
 HOME_HIDING = ("1", "yes", "true", "on", "tmpfs")
+DESKTOPS = ("athanor", "cosmic")  # XDG_CURRENT_DESKTOP=Athanor:COSMIC, lowercased
 HOME_DIRS = ("/home", "/root", "/run/user")
 PORTALS_DIR = "usr/share/xdg-desktop-portal/portals"
 DBUS_SERVICES = "usr/share/dbus-1/services"
@@ -172,7 +173,8 @@ def writable_problems(root, dirs, unit, path, runtime, if_masked, if_read_only):
     runtime. Any InaccessiblePaths= entry covering path fails, whatever its depth: systemd
     drops every mount below an inaccessible one (namespace.c drop_inaccessible). Of the
     ReadWritePaths= and ReadOnlyPaths= entries covering it, the deepest decides, and read-only
-    wins a tie. A ProtectHome= that hides /home, /root and /run/user, a TemporaryFileSystem= or an
+    wins a tie; ProtectHome=read-only counts as ReadOnlyPaths=/home /root /run/user, and
+    ProtectSystem=strict leaves read-only what no ReadWritePaths= covers. A ProtectHome= that hides those three, a TemporaryFileSystem= or an
     InaccessiblePaths= over path fails with or without ProtectSystem=strict. A bind mount that
     re-exposes a hidden path is not modelled and is reported as hidden: a false failure, which
     is fail-closed and acceptable because no shipped unit does it. if_masked and if_read_only
@@ -186,11 +188,9 @@ def writable_problems(root, dirs, unit, path, runtime, if_masked, if_read_only):
     strict = [v for f in files for v in assignments(f, "ProtectSystem")][-1:] == [
         "strict"
     ]
-    writable = read_only = 0
     try:
-        if strict:
-            writable = depth_covering(path_list(files, "ReadWritePaths"), path, runtime)
-            read_only = depth_covering(path_list(files, "ReadOnlyPaths"), path, runtime)
+        writable = depth_covering(path_list(files, "ReadWritePaths"), path, runtime)
+        read_only = depth_covering(path_list(files, "ReadOnlyPaths"), path, runtime)
         hidden = depth_covering(path_list(files, "InaccessiblePaths"), path, runtime)
         tmpfs = [e.split(":")[0] for e in path_list(files, "TemporaryFileSystem")]
         emptied = depth_covering(tmpfs, path, runtime)
@@ -201,10 +201,14 @@ def writable_problems(root, dirs, unit, path, runtime, if_masked, if_read_only):
         )
         return [message]
     protect_home = [v for f in files for v in assignments(f, "ProtectHome")][-1:]
-    home_hidden = protect_home[0].lower() in HOME_HIDING if protect_home else False
-    if home_hidden and any(path == h or path.startswith(h + "/") for h in HOME_DIRS):
-        hidden = max(hidden, 0)
-    unwritable = strict and (writable < 0 or read_only >= writable)
+    home = protect_home[0].lower() if protect_home else ""
+    for h in HOME_DIRS:
+        if path == h or path.startswith(h + "/"):
+            if home in HOME_HIDING:
+                hidden = max(hidden, 0)
+            elif home == "read-only":
+                read_only = max(read_only, h.count("/"))
+    unwritable = (strict and writable < 0) or (read_only >= 0 and read_only >= writable)
     if unwritable or hidden >= 0 or emptied >= 0:
         return [f"{unit} leaves {path} read-only or hidden: {if_read_only}"]
     return []
@@ -216,6 +220,25 @@ def ini(path):
     parser.optionxform = str
     parser.read_string(path.read_text(), str(path))
     return {s: dict(parser[s]) for s in parser.sections()}
+
+
+def wildcard_backend(root, interface):
+    """The portal file a `*` route picks for interface, as xdg-desktop-portal 1.20 sorts them
+    (sort_impl_by_use_in_and_name): the first of the session's desktops a file's UseIn= names
+    goes first, then the file name; None when no file lists the interface."""
+
+    def rank(q):
+        use_in = ini(q).get("portal", {}).get("UseIn", "").lower().split(";")
+        return next(
+            (i for i, d in enumerate(DESKTOPS) if d in use_in), len(DESKTOPS)
+        ), q.name
+
+    listing = [
+        q
+        for q in (root / PORTALS_DIR).glob("*.portal")
+        if interface in ini(q).get("portal", {}).get("Interfaces", "").split(";")
+    ]
+    return min(listing, key=rank).stem if listing else None
 
 
 def activation_problem(root, bus_name):
@@ -266,16 +289,8 @@ def portal_problems(root):
             continue
         names = []
         for n in value.split(";"):
-            if n == "*":  # the first portal file, by name, that lists the interface
-                first = next(
-                    (
-                        q.stem
-                        for q in sorted((root / PORTALS_DIR).glob("*.portal"))
-                        if interface
-                        in ini(q).get("portal", {}).get("Interfaces", "").split(";")
-                    ),
-                    None,
-                )
+            if n == "*":
+                first = wildcard_backend(root, interface)
                 if first is None:
                     found.append(f"{interface} goes to *, and no portal file lists it")
                 names.append(first)

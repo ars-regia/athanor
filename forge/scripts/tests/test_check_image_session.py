@@ -488,6 +488,7 @@ class ImageSession(unittest.TestCase):
     def test_a_settings_daemon_without_protect_system_strict_passes(self):
         self.edit(SETTINGS_DAEMON_UNIT, "ReadWritePaths=%t\n", "")
         self.edit(SETTINGS_DAEMON_UNIT, "ProtectSystem=strict", "ProtectSystem=full")
+        self.edit(SETTINGS_DAEMON_UNIT, "ProtectHome=read-only", "ProtectHome=no")
         self.assertEqual(mod.problems(self.root), [])
 
     def test_a_missing_or_masked_settings_daemon_fails(self):
@@ -537,6 +538,20 @@ class ImageSession(unittest.TestCase):
             ),
             found,
         )
+
+    def test_a_wildcard_prefers_a_portal_file_used_in_the_session_desktop(self):
+        self.edit(
+            PORTALS_CONF,
+            FILE_CHOOSER_LINE,
+            "org.freedesktop.impl.portal.FileChooser=*\n",
+        )
+        # zz.portal sorts after gtk.portal by name, but UseIn=COSMIC puts it first.
+        self.write(
+            f"{PORTALS}/zz.portal",
+            "[portal]\nDBusName=org.absent\nUseIn=gnome;COSMIC\n"
+            "Interfaces=org.freedesktop.impl.portal.FileChooser;\n",
+        )
+        self.assertProblem("FileChooser goes to zz, and nothing activates")
 
     def test_a_wildcard_that_no_portal_file_lists_fails(self):
         self.edit(
@@ -827,6 +842,30 @@ class ImageSession(unittest.TestCase):
                     f"[Service]\nProtectHome={value}\n",
                 )
                 self.assertProblem(READ_ONLY_RUNTIME)
+
+    def test_a_read_only_protect_home_without_strict_needs_the_runtime_directory(self):
+        self.edit(SETTINGS_DAEMON_UNIT, "ProtectSystem=strict", "ProtectSystem=full")
+        self.write(
+            f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf",
+            "[Service]\nProtectHome=Read-Only\n",
+        )
+        self.assertEqual(mod.problems(self.root), [])
+        self.edit(SETTINGS_DAEMON_UNIT, "ReadWritePaths=%t\n", "")
+        self.assertProblem(READ_ONLY_RUNTIME)
+
+    def test_a_read_only_runtime_directory_without_strict_fails(self):
+        self.edit(SETTINGS_DAEMON_UNIT, "ProtectSystem=strict", "ProtectSystem=full")
+        self.write(
+            f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf",
+            "[Service]\nReadWritePaths=\nReadOnlyPaths=%t\n",
+        )
+        self.assertProblem(READ_ONLY_RUNTIME)
+
+    def test_protect_home_is_case_insensitive(self):
+        self.write(
+            f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf", "[Service]\nProtectHome=YES\n"
+        )
+        self.assertProblem(READ_ONLY_RUNTIME)
 
     def test_the_last_protect_home_decides(self):
         self.write(
