@@ -64,6 +64,10 @@ class Parsers(unittest.TestCase):
             ],
         )
 
+    def test_active_zones(self):
+        text = "public (default)\n  interfaces: enp1s0\nhome\n  sources: 192.0.2.0/24\n"
+        self.assertEqual(probes.parse_active_zones(text), ["public", "home"])
+
     def test_security(self):
         text = "→ Overall exposure level for a.service: 5.3 MEDIUM 😐\n→ Overall exposure level for b.service: 1.6 OK 🙂\n"
         self.assertEqual(

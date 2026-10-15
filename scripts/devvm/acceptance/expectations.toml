@@ -25,6 +25,10 @@ process = "NetworkManager"
 ports = [68, 546] # its DHCP and DHCPv6 client sockets on the local link (public.xml keeps dhcpv6-client)
 
 [[listener]]
+process = "avahi-daemon"
+ports = [5353] # mDNS browsing for printers and services; it publishes nothing and the public zone keeps inbound mDNS closed (ADR-0089, decision 2)
+
+[[listener]]
 process = "chronyd"
 ports = [323] # the chronyc command port on loopback; the time servers are the `ntp` contact
 
@@ -39,10 +43,11 @@ zones = { public = ["dhcpv6-client"] } # forge/specs/athanor-base-config/SOURCES
 # repository (systemd 258) and rounded up by 0.3; update and update-check keep the
 # thresholds the update acceptance has always used (5.5, 6.0).
 "athanor-backup-hourly.service" = 2.7
+"athanor-flatpak-triggers.service" = 1.6
+"athanor-flatpak-update.service" = 6.9
 "athanor-nix-gc.service" = 6.0
 "athanor-nix-relabel.service" = 7.2
 "athanor-recovery-notice.service" = 1.9
-"athanor-recovery.service" = 5.5
 "athanor-update.service" = 5.5
 "athanor-update-check.service" = 6.0
 "athanor-update-migrate.service" = 6.0
