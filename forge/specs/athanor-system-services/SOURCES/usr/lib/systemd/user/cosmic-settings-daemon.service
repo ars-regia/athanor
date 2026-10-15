@@ -21,6 +21,9 @@ ExecStart=/usr/bin/cosmic-settings-daemon
 # change: icon-theme 'Cosmic', a font-name without a size, button-layout, and color-scheme
 # and gtk-theme when apply_theme_global is on (cosmic-settings-daemon 1.9.0, src/theme.rs).
 # It reads no GSettings key, so the memory backend discards those writes and nothing else.
+# Until athanor-style's apply function lands (VL12 step 2), COSMIC Settings' "apply the
+# theme to GNOME apps" (apply_theme_global, off by default) no longer carries its dark and
+# light switch to GTK applications: the GNOME key itself does.
 Environment=GSETTINGS_BACKEND=memory
 Restart=on-failure
 RestartSec=2s

@@ -42,6 +42,8 @@ cp -a %{_sourcedir}/usr/lib/systemd/user/* %{buildroot}/usr/lib/systemd/user/
   icon-theme, font-name, monospace-font-name, button-layout, color-scheme and gtk-theme
   no longer reach the user's GNOME keys, which are the appearance store
   (doc_visual_language.md, VL4; doc_session_daemons.md, SD2). It read none of them.
+  COSMIC Settings' apply_theme_global (off by default) no longer carries the dark and
+  light switch to GTK applications until athanor-style's apply function lands.
 
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.1-27
 - cosmic-settings-daemon: ReadWritePaths=%%t so the varlink bind under ProtectSystem=strict
