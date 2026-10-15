@@ -1,6 +1,6 @@
 #!/usr/bin/python3
-"""Fail when a system image lacks the session lock, the polkit agent or the volume keys that
-release 0.9 ships.
+"""Fail when a system image lacks the session lock, the polkit agent, the volume keys or the file
+chooser that release 0.9 ships.
 
 Usage: check_image_session.py [IMAGE_ROOT]
 system/check-image-session.sh runs it inside a built image (IMAGE_ROOT defaults to /).
@@ -14,10 +14,13 @@ no longer wanted by the session, masked, taken out of NoNewPrivileges or given a
 by a drop-in, the helper socket not enabled or enabled without its unit file, the helper setuid
 again (polkit 126), the helper's sandbox read-only over pam_faillock's tally directory (#144,
 #445), the settings daemon's sandbox read-only over the runtime directory where it binds the
-socket of its audio service, which leaves the volume keys dead (#144), and the root greeter
-daemon of CVE-2026-25704 enabled.
+socket of its audio service, which leaves the volume keys dead (#144), a portal interface
+routed by athanor-portals.conf to a backend that is not installed, does not implement it or
+cannot be activated, FileChooser routed to none, which fails every Open and Save of a Flatpak
+application (#144), and the root greeter daemon of CVE-2026-25704 enabled.
 """
 
+import configparser
 import os
 import pathlib
 import stat
@@ -47,6 +50,12 @@ TALLY_DIR = "/run/faillock"
 SETTINGS_DAEMON = "cosmic-settings-daemon.service"
 # What %t expands to in a user unit: the user's runtime directory, any user's.
 USER_RUNTIME_DIR = "/run/user/UID"
+# xdg-desktop-portal reads athanor-portals.conf for XDG_CURRENT_DESKTOP=Athanor:COSMIC
+# (doc_portal.md PT1); each backend it names is a portal file whose DBusName the bus activates.
+PORTALS_CONF = "usr/share/xdg-desktop-portal/athanor-portals.conf"
+PORTALS_DIR = "usr/share/xdg-desktop-portal/portals"
+DBUS_SERVICES = "usr/share/dbus-1/services"
+FILE_CHOOSER = "org.freedesktop.impl.portal.FileChooser"
 GREETER_DAEMON = "cosmic-greeter-daemon.service"
 
 
@@ -149,6 +158,54 @@ def writable_problems(root, dirs, unit, path, runtime, if_masked, if_read_only):
     return []
 
 
+def ini(path):
+    """A key file as {section: {key: value}}, keys kept as written."""
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.optionxform = str
+    parser.read_string(path.read_text(), str(path))
+    return {s: dict(parser[s]) for s in parser.sections()}
+
+
+def portal_problems(root):
+    """Every backend athanor-portals.conf names, other than none, must be an installed portal
+    file that lists the interface, with a D-Bus activation file for its DBusName; FileChooser
+    must name one. The default= line is not followed: PT1 names every interface."""
+    conf = root / PORTALS_CONF
+    if not conf.is_file():
+        return [f"/{PORTALS_CONF} is missing"]
+    routes = ini(conf).get("preferred", {})
+    found = []
+    for interface, value in routes.items():
+        if interface == "default":
+            continue
+        for name in [n for n in value.split(";") if n not in ("", "none", "*")]:
+            portal = root / PORTALS_DIR / f"{name}.portal"
+            if not portal.is_file():
+                found.append(
+                    f"{interface} goes to {name}, and /{portal.relative_to(root)} is missing"
+                )
+                continue
+            entry = ini(portal).get("portal", {})
+            if interface not in entry.get("Interfaces", "").split(";"):
+                found.append(
+                    f"{interface} goes to {name}, whose portal file does not list it"
+                )
+            bus_name = entry.get("DBusName", "")
+            if not (root / DBUS_SERVICES / f"{bus_name}.service").is_file():
+                found.append(
+                    f"{interface} goes to {name}, and nothing activates its bus name "
+                    f"'{bus_name}' (/{DBUS_SERVICES})"
+                )
+    if not [
+        n for n in routes.get(FILE_CHOOSER, "").split(";") if n not in ("", "none")
+    ]:
+        found.append(
+            f"/{PORTALS_CONF} gives {FILE_CHOOSER} no backend: every Open and Save of a "
+            "Flatpak application fails (#144)"
+        )
+    return found
+
+
 def problems(root):
     found = [f"/{b} is missing" for b in BINARIES if not (root / b).is_file()]
     launcher = root / LAUNCHER
@@ -209,6 +266,7 @@ def problems(root):
         "the daemon cannot bind its audio service's socket there, and the volume "
         "keys do nothing (#144)",
     )
+    found += portal_problems(root)
     enabled = enabled_units(root)
     if HELPER_SOCKET not in enabled:
         found.append(

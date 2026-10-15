@@ -25,6 +25,9 @@ USER_UNIT_SOURCES = SOURCES / "athanor-system-services/SOURCES/usr/lib/systemd/u
 FAILLOCK_DROPIN_SOURCE = (
     SOURCES / "polkit/SOURCES/polkit-agent-helper-service-faillock.conf"
 )
+PORTAL_SOURCES = (
+    SOURCES / "athanor-xdg-desktop-portal-athanor/xdg-desktop-portal-athanor-1.0.0"
+)
 
 LAUNCHER = "usr/bin/athanor-desktop"
 AGENT_UNIT = "usr/lib/systemd/user/cosmic-osd.service"
@@ -42,6 +45,24 @@ READ_ONLY_TALLY = "leaves /run/faillock read-only"
 SETTINGS_DAEMON_UNIT = "usr/lib/systemd/user/cosmic-settings-daemon.service"
 SETTINGS_DAEMON_ETC_DROPINS = "etc/systemd/user/cosmic-settings-daemon.service.d"
 READ_ONLY_RUNTIME = "leaves /run/user/UID read-only"
+PORTALS_CONF = "usr/share/xdg-desktop-portal/athanor-portals.conf"
+PORTALS = "usr/share/xdg-desktop-portal/portals"
+DBUS_SERVICES = "usr/share/dbus-1/services"
+FILE_CHOOSER_LINE = "org.freedesktop.impl.portal.FileChooser=gtk\n"
+# The portal files of xdg-desktop-portal-gtk 1.15.3 and gnome-keyring 48, as Fedora 43 ships them.
+GTK_PORTAL_TEXT = (
+    "[portal]\nDBusName=org.freedesktop.impl.portal.desktop.gtk\n"
+    "Interfaces=org.freedesktop.impl.portal.FileChooser;org.freedesktop.impl.portal.AppChooser;"
+    "org.freedesktop.impl.portal.Print;org.freedesktop.impl.portal.Notification;"
+    "org.freedesktop.impl.portal.Inhibit;org.freedesktop.impl.portal.Access;"
+    "org.freedesktop.impl.portal.Account;org.freedesktop.impl.portal.Email;"
+    "org.freedesktop.impl.portal.DynamicLauncher;org.freedesktop.impl.portal.Settings;\n"
+    "UseIn=gnome\n"
+)
+KEYRING_PORTAL_TEXT = (
+    "[portal]\nDBusName=org.freedesktop.secrets\n"
+    "Interfaces=org.freedesktop.impl.portal.Secret\nUseIn=gnome\n"
+)
 # The sandbox line of polkit 127's own helper unit that matters here.
 HELPER_UNIT_TEXT = "[Service]\nExecStart=/usr/lib/polkit-1/polkit-agent-helper-1\nProtectSystem=strict\n"
 
@@ -69,6 +90,18 @@ class ImageSession(unittest.TestCase):
             SETTINGS_DAEMON_UNIT,
             (USER_UNIT_SOURCES / "cosmic-settings-daemon.service").read_text(),
         )
+        self.write(PORTALS_CONF, (PORTAL_SOURCES / "athanor-portals.conf").read_text())
+        self.write(
+            f"{PORTALS}/athanor.portal", (PORTAL_SOURCES / "athanor.portal").read_text()
+        )
+        self.write(f"{PORTALS}/gtk.portal", GTK_PORTAL_TEXT)
+        self.write(f"{PORTALS}/gnome-keyring.portal", KEYRING_PORTAL_TEXT)
+        for name in (
+            "org.freedesktop.impl.portal.desktop.athanor",
+            "org.freedesktop.impl.portal.desktop.gtk",
+            "org.freedesktop.secrets",
+        ):
+            self.write(f"{DBUS_SERVICES}/{name}.service", "[D-BUS Service]\n")
         self.write(HELPER, "")
         os.chmod(self.root / HELPER, 0o755)
         self.write(HELPER_SOCKET_UNIT, "[Socket]\n")
@@ -445,6 +478,40 @@ class ImageSession(unittest.TestCase):
         (self.root / "etc/systemd/user/cosmic-settings-daemon.service").unlink()
         (self.root / SETTINGS_DAEMON_UNIT).unlink()
         self.assertProblem(f"/{SETTINGS_DAEMON_UNIT} is missing")
+
+    def test_a_missing_portals_conf_fails(self):
+        (self.root / PORTALS_CONF).unlink()
+        self.assertProblem(f"/{PORTALS_CONF} is missing")
+
+    def test_a_file_chooser_routed_to_none_or_not_routed_fails(self):
+        for line in ("org.freedesktop.impl.portal.FileChooser=none\n", ""):
+            with self.subTest(line=line):
+                self.write(
+                    PORTALS_CONF,
+                    (PORTAL_SOURCES / "athanor-portals.conf").read_text(),
+                )
+                self.edit(PORTALS_CONF, FILE_CHOOSER_LINE, line)
+                self.assertProblem("FileChooser no backend")
+
+    def test_a_file_chooser_routed_to_a_missing_backend_fails(self):
+        self.edit(
+            PORTALS_CONF,
+            FILE_CHOOSER_LINE,
+            "org.freedesktop.impl.portal.FileChooser=athanor-files\n",
+        )
+        self.assertProblem(f"/{PORTALS}/athanor-files.portal is missing")
+
+    def test_an_interface_routed_to_a_backend_that_does_not_list_it_fails(self):
+        self.edit(
+            PORTALS_CONF,
+            "org.freedesktop.impl.portal.Screenshot=none\n",
+            "org.freedesktop.impl.portal.Screenshot=gtk\n",
+        )
+        self.assertProblem("Screenshot goes to gtk, whose portal file does not list it")
+
+    def test_a_backend_the_bus_cannot_activate_fails(self):
+        (self.root / DBUS_SERVICES / "org.freedesktop.secrets.service").unlink()
+        self.assertProblem("nothing activates its bus name 'org.freedesktop.secrets'")
 
     def test_an_exec_start_pre_drop_in_does_not_override_exec_start(self):
         self.write(
