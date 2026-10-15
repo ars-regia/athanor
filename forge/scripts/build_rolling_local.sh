@@ -82,7 +82,14 @@ done
 echo "========================================"
 echo "=== COMPILAZIONE ESTREMA (ROLLING) ==="
 echo "========================================"
-rpmbuild -bb --nocheck "$RPMBUILD_DIR"/SPECS/*.spec
+# A spec without Source builds the checkout in place, from the repository root, as
+# build_spec.sh does: its %build runs cargo and reads paths relative to the root.
+if [ -z "$(rpmspec -q --srpm --qf '[%{SOURCE} ]' "$RPMBUILD_DIR"/SPECS/*.spec)" ]; then
+    REPO_ROOT="$(realpath "$(dirname "$0")/../..")"
+    (cd "$REPO_ROOT" && rpmbuild -bb --nocheck --build-in-place "$RPMBUILD_DIR"/SPECS/*.spec)
+else
+    rpmbuild -bb --nocheck "$RPMBUILD_DIR"/SPECS/*.spec
+fi
 
 echo "=================================================="
 echo "🎯 PACCHETTO ROLLING '$PACKAGE' COMPILATO CON SUCCESSO! 🎯"
