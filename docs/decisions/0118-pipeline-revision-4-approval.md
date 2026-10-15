@@ -21,13 +21,14 @@ consolidate them. The D3 freeze of [ADR-0103](0103-audit-5-decisions.md) was lif
 
 ## Decision
 
-Decided by the maintainer on 2026-10-15. Revision 4 is approved with these three placements:
+Decided by the maintainer on 2026-10-15: items 1 to 3 below, as to what is decided of each. Revision 4 is approved with these three placements:
 
 1. **`bot-merge.yml` is an eighth target entry**, kept apart from `bots.yml` because it
    runs on `workflow_run`, the verdict of the checks of the pull request, and so from the
    default branch's file (ADR-0108 item 2). It merges two kinds of bot pull request, the
    spec bot's (`chore/update-specs-zero-trust`) and the system bump's (`bump/system-*`),
-   through `forge/scripts/bot_merge.py`. The kernel bump uses `gh pr merge --auto`, and the
+   through `forge/scripts/bot_merge.py`. The kernel bump uses `gh pr merge --auto` when its
+   preparation is green and no NVIDIA lock moves, and otherwise waits for a person, and the
    pin pull requests of the signer and rig build images are not merged by it.
 2. **`fuzz.yml` joins `maintenance.yml`** as its weekly fuzz job, like the janitor and the
    reproducibility checks.
@@ -45,6 +46,11 @@ Decided by the maintainer on 2026-10-15. Revision 4 is approved with these three
   `system-image-check.yml` and `spec-build-check.yml` fold into `pr.yml`, they read the
   verdicts of the system bump and of the spec bot from `gate`, not from the names of those
   two workflows.
-- PB3's gate also reads a `pr.yml` run for the verification of the rig build image, which
-  `pr.yml` consumes and a release run does not (PL12).
+- PB4, not PB3, covers the verification of the rig build image (PL12): nothing signs the image
+  before PB4, which signs it at the workflow that publishes it and has `rig.sh` verify it,
+  and its gate reads a `pr.yml` run. PB3's gate keeps to the hops a release run consumes.
+- These consequences follow from the three decisions or from the review of this revision,
+  not from separate decisions of the maintainer: the corrected `bot-merge.yml` rationale,
+  the added scope of PB12, the verification gate of the rig image and the wording of
+  section 3.
 - doc_ci.md CI30, CI31 and CI32 change when PB12 moves the files, not in this revision.
