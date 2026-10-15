@@ -16,6 +16,7 @@ SPEC_DIR = Path(__file__).resolve().parents[1]
 SPEC = SPEC_DIR / "greenboot-rs.spec"
 AUTO_REBOOT = "0001-feat-add-GREENBOOT_AUTO_REBOOT-to-roll-back-without-.patch"
 DOWNLOAD_ONLY = "0002-fix-set-no-rollback-trigger-for-a-download-only-stag.patch"
+DELIBERATE_ROLLBACK = "0003-fix-do-not-take-a-rollback-made-on-purpose-for-a-GRU.patch"
 SECTIONS = (
     "prep build install check post preun postun files changelog package description"
 )
@@ -45,12 +46,15 @@ def added_lines(patch):
 
 
 class DownloadOnly(unittest.TestCase):
-    def test_spec_applies_both_patches_in_order(self):
+    def test_spec_applies_the_patches_in_order(self):
         spec = SPEC.read_text()
         patches = re.findall(r"(?m)^Patch(\d+):\s*(\S+)$", spec)
-        self.assertEqual(patches, [("0", AUTO_REBOOT), ("1", DOWNLOAD_ONLY)])
+        self.assertEqual(
+            patches,
+            [("0", AUTO_REBOOT), ("1", DOWNLOAD_ONLY), ("2", DELIBERATE_ROLLBACK)],
+        )
         self.assertIn("%autosetup -p1", section(spec, "%prep"))
-        for name in (AUTO_REBOOT, DOWNLOAD_ONLY):
+        for name in (AUTO_REBOOT, DOWNLOAD_ONLY, DELIBERATE_ROLLBACK):
             self.assertTrue((SPEC_DIR / "SOURCES" / name).is_file(), name)
 
     def test_patch_changes_only_the_bootc_staged_lookup(self):
@@ -85,6 +89,36 @@ class DownloadOnly(unittest.TestCase):
         check = section(SPEC.read_text(), "%check")
         self.assertIn("cargo test --release --locked --lib handler::tests", check)
         self.assertIn("cargo test --release --locked --bin greenboot", check)
+
+
+class DeliberateRollback(unittest.TestCase):
+    """The third patch (#521): a boot that starts the default deployment is no GRUB fallback,
+    so `GoBack()` is not undone when the health check of the deployment left did not finish."""
+
+    def setUp(self):
+        self.patch = (SPEC_DIR / "SOURCES" / DELIBERATE_ROLLBACK).read_text()
+
+    def test_patch_changes_the_fallback_detection_and_the_default_lookup(self):
+        self.assertEqual(
+            re.findall(r"(?m)^diff --git a/(\S+)", self.patch),
+            ["src/lib/handler.rs", "src/main.rs"],
+        )
+        added = added_lines(self.patch)
+        self.assertRegex(added, r"if booted_is_default\(\) == Some\(true\) \{")
+        self.assertIn('.get("rollbackQueued")', added)
+        # The stale trigger is cleared, as after a fallback made permanent.
+        self.assertIn("unset_next_deployment_id()?;", added)
+
+    def test_patch_tests_both_lookups(self):
+        added = added_lines(self.patch)
+        self.assertIn(
+            "assert_eq!(bootc_booted_is_default(&queued(json!(true))), Some(false));",
+            added,
+        )
+        self.assertRegex(
+            added,
+            r"rpm_ostree_booted_is_default\(&deployments\(\[false, true\]\)\),\s*Some\(false\)",
+        )
 
 
 if __name__ == "__main__":
