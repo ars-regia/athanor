@@ -672,8 +672,9 @@ fi
         self.assertIn("ConditionPathExists=!/var/lib/athanor/usbguard-internal.done", unit)
 
     def test_unit_start_is_bounded_beyond_the_scripts_own_bound(self):
-        # udevadm settle (10 s) and the script's bound (10 s) fit within the start timeout, and
-        # greetd and usbguard.service are ordered after the unit without depending on it.
+        # udevadm settle (10 s) and the script's bound (10 s) each fit within the start timeout,
+        # which systemd arms for each command, and greetd and usbguard.service are ordered after
+        # the unit without depending on it.
         unit = UNIT.read_text()
         self.assertIn("\nExecStartPre=/usr/bin/udevadm settle --timeout=10\n", unit)
         self.assertIn("\nTimeoutStartSec=30s\nTimeoutStopSec=5s\n", unit)
