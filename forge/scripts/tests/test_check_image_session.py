@@ -43,6 +43,14 @@ HELPER_ETC_DROPINS = "etc/systemd/system/polkit-agent-helper@.service.d"
 HELPER_RUN_DROPINS = "run/systemd/system/polkit-agent-helper@.service.d"
 READ_ONLY_TALLY = "leaves /run/faillock read-only"
 SETTINGS_DAEMON_UNIT = "usr/lib/systemd/user/cosmic-settings-daemon.service"
+# The user unit directories, the lowest priority first (systemd.unit(5)).
+USER_DIRS = (
+    "usr/lib/systemd/user",
+    "usr/local/lib/systemd/user",
+    "run/systemd/user",
+    "etc/systemd/user",
+    "etc/xdg/systemd/user",
+)
 SETTINGS_DAEMON_ETC_DROPINS = "etc/systemd/user/cosmic-settings-daemon.service.d"
 READ_ONLY_RUNTIME = "leaves /run/user/UID read-only"
 PORTALS_CONF = "usr/share/xdg-desktop-portal/athanor-portals.conf"
@@ -63,6 +71,13 @@ KEYRING_PORTAL_TEXT = (
     "[portal]\nDBusName=org.freedesktop.secrets\n"
     "Interfaces=org.freedesktop.impl.portal.Secret\nUseIn=gnome\n"
 )
+
+
+def activation(name, exec_path=None, extra=""):
+    """A D-Bus activation file for `name`, running a binary the fixture installs."""
+    return f"[D-BUS Service]\nName={name}\nExec={exec_path or '/usr/libexec/' + name}\n{extra}"
+
+
 # The sandbox line of polkit 127's own helper unit that matters here.
 HELPER_UNIT_TEXT = "[Service]\nExecStart=/usr/lib/polkit-1/polkit-agent-helper-1\nProtectSystem=strict\n"
 
@@ -101,7 +116,8 @@ class ImageSession(unittest.TestCase):
             "org.freedesktop.impl.portal.desktop.gtk",
             "org.freedesktop.secrets",
         ):
-            self.write(f"{DBUS_SERVICES}/{name}.service", "[D-BUS Service]\n")
+            self.write(f"{DBUS_SERVICES}/{name}.service", activation(name))
+            self.write(f"usr/libexec/{name}", "")
         self.write(HELPER, "")
         os.chmod(self.root / HELPER, 0o755)
         self.write(HELPER_SOCKET_UNIT, "[Socket]\n")
@@ -493,6 +509,45 @@ class ImageSession(unittest.TestCase):
                 self.edit(PORTALS_CONF, FILE_CHOOSER_LINE, line)
                 self.assertProblem("FileChooser no backend")
 
+    def test_a_file_chooser_routed_to_a_wildcard_fails(self):
+        self.edit(
+            PORTALS_CONF,
+            FILE_CHOOSER_LINE,
+            "org.freedesktop.impl.portal.FileChooser=*\n",
+        )
+        self.assertProblem("FileChooser no backend")
+
+    def test_an_etc_portals_conf_overrides_the_shipped_one(self):
+        shipped = (PORTAL_SOURCES / "athanor-portals.conf").read_text()
+        none = shipped.replace(
+            FILE_CHOOSER_LINE, "org.freedesktop.impl.portal.FileChooser=none\n"
+        )
+        for rel in (
+            "etc/xdg-desktop-portal/athanor-portals.conf",
+            "etc/xdg/xdg-desktop-portal/athanor-portals.conf",
+            "etc/xdg-desktop-portal/portals.conf",
+        ):
+            with self.subTest(rel=rel):
+                self.write(rel, none)
+                self.assertProblem("FileChooser no backend")
+                (self.root / rel).unlink()
+
+    def test_the_portals_conf_search_order_decides(self):
+        shipped = (PORTAL_SOURCES / "athanor-portals.conf").read_text()
+        none = shipped.replace(
+            FILE_CHOOSER_LINE, "org.freedesktop.impl.portal.FileChooser=none\n"
+        )
+        # /etc/xdg beats /etc, and a desktop-specific name beats portals.conf in one directory.
+        self.write("etc/xdg-desktop-portal/athanor-portals.conf", none)
+        self.write("etc/xdg/xdg-desktop-portal/athanor-portals.conf", shipped)
+        self.assertEqual(mod.problems(self.root), [])
+        self.write("etc/xdg/xdg-desktop-portal/athanor-portals.conf", none)
+        self.write("etc/xdg-desktop-portal/athanor-portals.conf", shipped)
+        self.assertProblem("FileChooser no backend")
+        (self.root / "etc/xdg/xdg-desktop-portal/athanor-portals.conf").unlink()
+        self.write("etc/xdg-desktop-portal/portals.conf", none)
+        self.assertEqual(mod.problems(self.root), [])
+
     def test_a_file_chooser_routed_to_a_missing_backend_fails(self):
         self.edit(
             PORTALS_CONF,
@@ -513,9 +568,219 @@ class ImageSession(unittest.TestCase):
         (self.root / DBUS_SERVICES / "org.freedesktop.secrets.service").unlink()
         self.assertProblem("nothing activates its bus name 'org.freedesktop.secrets'")
 
+    def activation_file(self, name="org.freedesktop.secrets"):
+        return f"{DBUS_SERVICES}/{name}.service"
+
+    def test_an_activation_file_must_name_the_bus_name_and_a_present_binary(self):
+        name = "org.freedesktop.secrets"
+        words = f"nothing activates its bus name '{name}'"
+        cases = {
+            "wrong Name": "[D-BUS Service]\nName=org.other\nExec=/usr/libexec/"
+            + name
+            + "\n",
+            "no Name": "[D-BUS Service]\nExec=/usr/libexec/" + name + "\n",
+            "bare": "[D-BUS Service]\n",
+            "missing binary": activation(name, "/usr/libexec/absent"),
+            "no Exec": f"[D-BUS Service]\nName={name}\n",
+            "missing unit": activation(
+                name, "/usr/libexec/absent", "SystemdService=x.service\n"
+            ),
+        }
+        for label, text in cases.items():
+            with self.subTest(label):
+                self.write(self.activation_file(), text)
+                found = mod.problems(self.root)
+                self.assertEqual(len(found), 1, found)
+                self.assertIn(words, found[0])
+
+    def test_an_activation_file_with_a_systemd_unit_or_arguments_passes(self):
+        name = "org.freedesktop.secrets"
+        self.write("usr/lib/systemd/user/x.service", "[Service]\n")
+        self.write(
+            self.activation_file(),
+            activation(name, "/usr/libexec/absent", "SystemdService=x.service\n"),
+        )
+        self.assertEqual(mod.problems(self.root), [])
+        self.write(
+            self.activation_file(), activation(name, f"/usr/libexec/{name} --replace")
+        )
+        self.assertEqual(mod.problems(self.root), [])
+
+    def test_a_masked_activation_unit_does_not_count(self):
+        name = "org.freedesktop.secrets"
+        self.write("usr/lib/systemd/user/x.service", "[Service]\n")
+        (self.root / "etc/systemd/user").mkdir(parents=True, exist_ok=True)
+        (self.root / "etc/systemd/user/x.service").symlink_to("/dev/null")
+        self.write(
+            self.activation_file(),
+            activation(name, "/usr/libexec/absent", "SystemdService=x.service\n"),
+        )
+        self.assertProblem(f"nothing activates its bus name '{name}'")
+
+    def test_an_empty_or_missing_dbus_name_fails(self):
+        for text in (
+            "[portal]\nInterfaces=org.freedesktop.impl.portal.Secret\n",
+            "[portal]\nDBusName=\nInterfaces=org.freedesktop.impl.portal.Secret\n",
+        ):
+            with self.subTest(text=text):
+                self.write(f"{PORTALS}/gnome-keyring.portal", text)
+                self.assertProblem("nothing activates its bus name ''")
+
+    def test_a_portal_file_without_interfaces_fails(self):
+        self.write(
+            f"{PORTALS}/gnome-keyring.portal",
+            "[portal]\nDBusName=org.freedesktop.secrets\n",
+        )
+        self.assertProblem(
+            "Secret goes to gnome-keyring, whose portal file does not list it"
+        )
+
     def test_an_exec_start_pre_drop_in_does_not_override_exec_start(self):
         self.write(
             f"{AGENT_ETC_DROPINS}/60-y.conf", "[Service]\nExecStartPre=/bin/true\n"
+        )
+        self.assertEqual(mod.problems(self.root), [])
+
+    def test_a_user_unit_in_a_higher_directory_replaces_the_usr_lib_one(self):
+        daemon = "cosmic-settings-daemon.service"
+        relaxed = (USER_UNIT_SOURCES / daemon).read_text().replace("strict", "full")
+        for d in USER_DIRS[1:]:
+            with self.subTest(dir=d):
+                self.write(f"{d}/{daemon}", relaxed)
+                self.edit(SETTINGS_DAEMON_UNIT, "ReadWritePaths=%t\n", "")
+                self.assertEqual(mod.problems(self.root), [])
+                (self.root / d / daemon).unlink()
+                self.write(
+                    SETTINGS_DAEMON_UNIT, (USER_UNIT_SOURCES / daemon).read_text()
+                )
+
+    def test_the_user_unit_directories_are_ranked_as_systemd_ranks_them(self):
+        daemon = "cosmic-settings-daemon.service"
+        good = (USER_UNIT_SOURCES / daemon).read_text()
+        bad = good.replace("ReadWritePaths=%t\n", "")
+        # Each directory beats every one before it in USER_DIRS and loses to every one after it.
+        for i, high in enumerate(USER_DIRS[1:], 1):
+            for low in USER_DIRS[:i]:
+                with self.subTest(high=high, low=low):
+                    self.write(f"{low}/{daemon}", bad)
+                    self.write(f"{high}/{daemon}", good)
+                    self.assertEqual(mod.problems(self.root), [])
+                    self.write(f"{low}/{daemon}", good)
+                    self.write(f"{high}/{daemon}", bad)
+                    self.assertProblem(READ_ONLY_RUNTIME)
+                    (self.root / high / daemon).unlink()
+                    (self.root / low / daemon).unlink()
+                    self.write(SETTINGS_DAEMON_UNIT, good)
+
+    def test_a_dev_null_symlink_masks_a_user_unit_in_any_higher_directory(self):
+        daemon = "cosmic-settings-daemon.service"
+        for d in USER_DIRS[1:]:
+            with self.subTest(dir=d):
+                (self.root / d).mkdir(parents=True, exist_ok=True)
+                (self.root / d / daemon).symlink_to("/dev/null")
+                self.assertProblem(f"{daemon} is masked in /{d}")
+                (self.root / d / daemon).unlink()
+
+    def test_a_higher_real_unit_beats_a_lower_mask(self):
+        daemon = "cosmic-settings-daemon.service"
+        (self.root / "run/systemd/user").mkdir(parents=True)
+        (self.root / "run/systemd/user" / daemon).symlink_to("/dev/null")
+        self.write(
+            f"etc/systemd/user/{daemon}", (USER_UNIT_SOURCES / daemon).read_text()
+        )
+        self.assertEqual(mod.problems(self.root), [])
+
+    def test_a_usr_lib_drop_in_counts(self):
+        self.write(
+            "usr/lib/systemd/user/cosmic-settings-daemon.service.d/90-x.conf",
+            "[Service]\nReadWritePaths=\n",
+        )
+        self.assertProblem(READ_ONLY_RUNTIME)
+
+    def test_drop_ins_of_every_user_directory_count(self):
+        for d in USER_DIRS[1:]:
+            with self.subTest(dir=d):
+                self.write(
+                    f"{d}/cosmic-settings-daemon.service.d/90-x.conf",
+                    "[Service]\nReadOnlyPaths=%t\n",
+                )
+                self.assertProblem(READ_ONLY_RUNTIME)
+                (self.root / d / "cosmic-settings-daemon.service.d/90-x.conf").unlink()
+
+    def test_a_user_drop_in_beats_the_same_name_in_a_lower_directory(self):
+        name = "cosmic-settings-daemon.service.d/90-x.conf"
+        for i, high in enumerate(USER_DIRS[1:], 1):
+            for low in USER_DIRS[:i]:
+                with self.subTest(high=high, low=low):
+                    self.write(f"{low}/{name}", "[Service]\nReadWritePaths=\n")
+                    self.write(f"{high}/{name}", "[Service]\n")
+                    self.assertEqual(mod.problems(self.root), [])
+                    self.write(f"{low}/{name}", "[Service]\n")
+                    self.write(f"{high}/{name}", "[Service]\nReadWritePaths=\n")
+                    self.assertProblem(READ_ONLY_RUNTIME)
+                    (self.root / low / name).unlink()
+                    (self.root / high / name).unlink()
+
+    def test_a_replaced_agent_unit_fails_in_every_user_directory(self):
+        for d in USER_DIRS[1:]:
+            with self.subTest(dir=d):
+                self.write(f"{d}/cosmic-osd.service", "[Service]\n")
+                self.assertProblem("masks or replaces")
+                (self.root / d / "cosmic-osd.service").unlink()
+
+    def test_a_masked_agent_in_a_run_or_local_directory_fails(self):
+        for d in (
+            "run/systemd/user",
+            "usr/local/lib/systemd/user",
+            "etc/xdg/systemd/user",
+        ):
+            with self.subTest(dir=d):
+                (self.root / d).mkdir(parents=True, exist_ok=True)
+                (self.root / d / "cosmic-osd.service").symlink_to("/dev/null")
+                self.assertProblem("masks or replaces")
+                (self.root / d / "cosmic-osd.service").unlink()
+
+    def test_a_hiding_protect_home_makes_the_runtime_directory_unusable(self):
+        for value in ("yes", "true", "tmpfs", "on", "1"):
+            with self.subTest(value=value):
+                self.write(
+                    f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf",
+                    f"[Service]\nProtectHome={value}\n",
+                )
+                self.assertProblem(READ_ONLY_RUNTIME)
+
+    def test_the_last_protect_home_decides(self):
+        self.write(
+            f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf",
+            "[Service]\nProtectHome=yes\nProtectHome=read-only\n",
+        )
+        self.assertEqual(mod.problems(self.root), [])
+        self.write(
+            f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf",
+            "[Service]\nProtectHome=no\nProtectHome=yes\n",
+        )
+        self.assertProblem(READ_ONLY_RUNTIME)
+
+    def test_protect_home_does_not_touch_the_tally_directory(self):
+        self.faillock_dropin(
+            "[Service]\nReadWritePaths=/run/faillock\nProtectHome=yes\n"
+        )
+        self.assertEqual(mod.problems(self.root), [])
+
+    def test_a_temporary_file_system_over_the_runtime_directory_fails(self):
+        for entry in ("/run/user", "/run", "/run/user/UID:ro", "/"):
+            with self.subTest(entry=entry):
+                self.write(
+                    f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf",
+                    f"[Service]\nTemporaryFileSystem={entry}\n",
+                )
+                self.assertProblem(READ_ONLY_RUNTIME)
+
+    def test_a_temporary_file_system_elsewhere_or_reset_passes(self):
+        self.write(
+            f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf",
+            "[Service]\nTemporaryFileSystem=/var:ro\nTemporaryFileSystem=\n"
+            "TemporaryFileSystem=/run/user/UID2:ro\n",
         )
         self.assertEqual(mod.problems(self.root), [])
 
