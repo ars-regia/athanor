@@ -3,6 +3,7 @@
 
 import importlib.util
 import pathlib
+import re
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -321,6 +322,24 @@ class Expectations(unittest.TestCase):
                 )
             },
         )
+
+    def test_every_shipped_system_service_has_a_ceiling(self):
+        # The guest probe fails a unit without a line only once an acceptance runs; this
+        # holds the same rule on every pull request (#509: a unit came without its line).
+        # Shipped: a non-template athanor-*.service in a spec's SOURCES unit directory, or
+        # one a spec installs into the unit directory.
+        specs = ROOT / "forge" / "specs"
+        shipped = {
+            p.name
+            for p in specs.glob("*/SOURCES/usr/lib/systemd/system/athanor-*.service")
+            if "@" not in p.name
+        }
+        unit_path = re.compile(
+            r"(?:%\{_unitdir\}|/usr/lib/systemd/system)/(athanor-[A-Za-z0-9_.-]*\.service)"
+        )
+        for spec_file in specs.glob("*/*.spec"):
+            shipped |= set(unit_path.findall(spec_file.read_text()))
+        self.assertEqual(set(EXPECT["security"]), shipped)
 
     def test_a_timeout_names_the_probe(self):
         probes.TIMEOUT = 1
