@@ -8,7 +8,7 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 guard_no_ci
-STAGES=(install migrate download apply refuse older goback rotate recover podman probes report)
+STAGES=(install migrate download sessions apply refuse older goback rotate recover podman probes report)
 start=${1:-install}
 [[ " ${STAGES[*]} " == *" $start "* ]] || die "unknown stage '$start': one of ${STAGES[*]}"
 
@@ -46,6 +46,119 @@ stage_download() { # item 1
   [[ $(marker) == v1 ]] || die "FAIL  1: a poweroff applied the update"
   pass "1: a poweroff boots the old version"
   expect_until "8: and it keeps updating" .update downloaded 20
+}
+
+# What the stage `sessions` leaves behind is taken away on every exit, a failed one included.
+ACC_SSH_HELD=''
+ACC_OTHER_MADE=''
+sessions_cleanup() {
+  local failed=() unit state
+  end_call || failed+=(end_call)
+  tunnel || failed+=(tunnel)
+  end_units || failed+=(end_units)
+  if [[ -n $ACC_SSH_HELD ]]; then
+    end_ssh_session || failed+=(end_ssh_session)
+    ACC_SSH_HELD=''
+  fi
+  for unit in acc-second-count acc-inhibit-second "$ACC_INHIBITOR"; do
+    stop_system_unit "$unit.service" || failed+=("stop $unit")
+  done
+  unmount_wrapper || failed+=(unmount_wrapper)
+  polkit_log_restore || failed+=(polkit_log_restore)
+  if [[ -n $ACC_OTHER_MADE ]]; then
+    remove_other || failed+=(remove_other)
+    ACC_OTHER_MADE=''
+  fi
+  ((${#failed[@]} == 0)) || { echo "FAIL  the cleanup of the sessions stage failed at: ${failed[*]}" >&2; return 1; }
+}
+
+stage_sessions() { # item 2, the other-session rule of UT6 (ADR-0103 D22, #433); nothing is applied
+  local since log since_agent m
+  # A run that starts here boots cold, and the boot's check ran before the tunnel was up.
+  [[ $(state .update) == downloaded ]] || check_now
+  expect_until "2: a downloaded update to ask about" .update downloaded 20
+  polkit_pattern_selfcheck
+  trap sessions_cleanup EXIT
+  polkit_log_info
+  untunnel
+  # A run killed before its trap ran leaves the user behind: take it away first.
+  if guest_ssh getent passwd "$ACC_OTHER" > /dev/null; then remove_other; fi
+  guest_ssh "sudo useradd -m -p '*' $ACC_OTHER"
+  ACC_OTHER_MADE=1
+  # Every call below ends at this inhibitor if it is authorised, so none can reboot the guest
+  # (the order of Apply() is the polkit check, then the inhibitor query, then the unlock). It
+  # is not one of ACC_UNITS, which end_units empties, and each call checks that it is held.
+  guest_ssh sudo systemd-run --quiet "--unit=$ACC_INHIBITOR" systemd-inhibit --what=shutdown --mode=block --who=acceptance --why=ut6 sleep 3600
+
+  expect_no_prompt "2: a caller launched from a user unit, its user's session the only one: no administrator prompt"
+
+  class_session greeter
+  class_session lock-screen
+  class_session background
+  expect_no_prompt "2: only greeter, lock-screen and background sessions besides the caller's: no password"
+  end_units
+
+  # A second user left logged in: the state a fast user switch leaves, a session of another
+  # uid. The greeter's way of making it is not driven here.
+  class_session user
+  expect_prompts "2: a second user's session: Apply() asks for administrator authentication" os.athanor.update.apply-multi-session 1
+  end_units
+
+  ssh_session
+  ACC_SSH_HELD=1
+  expect_prompts "2: a second session of the same user, over SSH: it asks for administrator authentication" os.athanor.update.apply-multi-session 1
+  # The session is kept for the next case: with it open, nothing is kept between two calls.
+  expect_prompts "2: with another session open, two consecutive calls each ask: nothing is kept" os.athanor.update.apply-multi-session 2
+  end_ssh_session
+  ACC_SSH_HELD=''
+
+  # A counting session that opens after the unlock and before the reboot. The sessions inhibitor
+  # would end the call before the unlock, so second-count.sh drops it once the wrapper is seen
+  # from the update service's own mount namespace, takes its own when bootc is held at the
+  # unlock, and the administrator is then refused by stopping the agent.
+  guest_ssh "sudo tee /var/tmp/acc-second-count.sh > /dev/null" < "$ACC_HERE/second-count.sh"
+  since=$(now_guest)
+  ACC_UNITS+=(acc-class-user)
+  guest_ssh sudo systemd-run --quiet --unit=acc-second-count --collect -E "ACC_USER=$GUEST_USER" -E "ACC_OTHER=$ACC_OTHER" -E "ACC_DELAY=$ACC_CALL_DELAY" -E "ACC_INHIBITOR=$ACC_INHIBITOR" -E ACC_LOG=/var/tmp/acc-second-count.log bash /var/tmp/acc-second-count.sh
+  # No SSH login until the script has opened its session and bootc has gone on, so that the
+  # session the second count sees is the one made on purpose (the script checks the rest).
+  sleep $((ACC_CALL_DELAY + 60))
+  for _ in $(seq 60); do
+    prompted "$since" && break
+    sleep 1
+  done
+  log=$(guest_ssh cat /var/tmp/acc-second-count.log)
+  prompted "$since" || die "FAIL  2: no administrator prompt after the session opened between the unlock and the reboot (second-count.sh logged: $log)"
+  grep -q 'bootc held' <<< "$log" || die "FAIL  2: bootc was not held at the unlock: $log"
+  grep -q 'opened a session' <<< "$log" || die "FAIL  2: the session did not open while bootc was held: $log"
+  deployment_locked || die "FAIL  2: the deployment was unlocked while the second prompt waited"
+  pass "2: a session opened after the unlock: the deployment is locked again while the second prompt waits"
+  # The refusal: the agent goes away, polkitd cancels the pending check and the service gets
+  # an answer other than a grant. (Stopping the dbus-send would leave the check pending.)
+  since_agent=$(now_guest)
+  guest_ssh pkill -x cosmic-osd
+  call_says Apply os.athanor.Update1.Error.NotAuthorized 30 || die "FAIL  2: the refused prompt did not end as NotAuthorized: $(guest_ssh cat "$(call_out Apply)")"
+  deployment_locked || die "FAIL  2: the deployment was unlocked after the prompt was refused"
+  [[ $(marker) == v1 ]] || die "FAIL  2: the guest rebooted after the prompt was refused"
+  ! polkit_grants "$since" "action os.athanor.update.apply-multi-session for" > /dev/null || die "FAIL  2: polkitd granted the second prompt"
+  echo "EVIDENCE  second count: second-count.sh logged: $(tr '\n' ';' <<< "$log")"
+  echo "EVIDENCE  second count: polkit-agent-helper@ lines: $(journal_since "$since" 'polkit-agent-helper@*' | head -n 3 | tr '\n' ';')"
+  pass "2: and it stays locked, with no reboot, when the prompt is refused"
+  # SIGTERM is a clean exit, which the unit does not restart: bring the agent back.
+  guest_ssh sudo systemctl --user --machine="$GUEST_USER@.host" restart cosmic-osd.service
+  for _ in $(seq 30); do
+    polkit_grants_agent "$since_agent" && break
+    sleep 1
+  done
+  polkit_grants_agent "$since_agent" || die "FAIL  cosmic-osd did not register as the polkit agent again in 30 s"
+  guest_ssh sudo systemctl --user --machine="$GUEST_USER@.host" is-active --quiet cosmic-osd.service || die "FAIL  cosmic-osd is not active"
+  for m in /usr/bin/bootc /run/acc-bootc-real; do
+    guest_ssh "findmnt -n $m; test \$? -eq 1" || die "FAIL  $m is still a mount point: the wrapper of second-count.sh was not removed"
+  done
+
+  sessions_cleanup || die "FAIL  the cleanup of the sessions stage"
+  trap - EXIT
+  [[ $(state .update) == downloaded ]] || die "FAIL  2: the update is no longer downloaded"
 }
 
 stage_apply() { # items 2, 3 and 14
@@ -186,6 +299,8 @@ stage_report() {
   echo "acceptance complete"
 }
 
+# stage_install waits for the guest itself; a later start needs its SSH and the registry tunnel.
+[[ $start == install ]] || wait_ssh
 run=''
 for stage in "${STAGES[@]}"; do
   [[ $stage == "$start" ]] && run=1

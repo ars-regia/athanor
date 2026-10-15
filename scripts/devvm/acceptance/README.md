@@ -18,6 +18,22 @@ masked units, the trust state and one Nix build with `nix store gc`, each agains
 `expectations.toml`. It fails naming the check; `run.sh probes` runs it alone. Change a line of
 the expectations only with the review of the exposure it declares.
 
+The `sessions` stage (issue #436) runs the other-session cases of item 2 (UT6, ADR-0103 D22) with
+the update downloaded and a shutdown inhibitor held, so that no case can reboot the guest: an
+authorised call ends at `Error.Blocked`. A prompt is observed as a `polkit-agent-helper@`
+instance opened by the graphical session's agent, the password typed into it (the dev VM's is
+the user's name) and the `polkitd` line that grants `os.athanor.update.apply-multi-session`; the
+absence of one as no helper, no grant and `Blocked`. Since #433 this harness's own SSH login is a
+counting session, so `call_active` arms the call from a user timer and the login is over when it
+arrives; `guest_ssh` does not multiplex (no ControlMaster), so every call is a login of its own and
+the stage opens none between arming a call and its first check. The run's registry tunnel (`ssh -f -N`) is a login of the same user that lasts the whole run, and the service counts it as a second session: the stage closes it (`untunnel`) before the first case and reopens it at the end. The transient timer is given `AccuracySec=1ms`, as its default of a minute let a call arrive late. `second-count.sh` bind-mounts a
+wrapper over `bootc` that holds `bootc upgrade --from-downloaded` at the unlock while it takes a
+block inhibitor and opens a session of the other user (the stage's own inhibitor is dropped only
+after `nsenter` shows the update service the wrapper, and no harness login is open meanwhile); the prompt is then refused by stopping
+the agent (`cosmic-osd`), which ends the call as `NotAuthorized`; the agent is then restarted. Not driven: the greeter's fast
+user switch (a session of another uid stands in), a text console (SSH stands in), a prompt that
+times out (the agent's removal stands in), and a grant of the second prompt, which restarts the guest.
+
 Looked at by hand, with `scripts/devvm/screenshot.sh`: the "update ready" notification after
 the `download` stage, the "now running" notification after `apply`, and the administrator
 prompt that `busctl --system call os.athanor.Update1 /os/athanor/Update1 os.athanor.Update1 GoBack`
