@@ -56,9 +56,11 @@ pub struct Change {
 /// Opens the served schemas and Athanor's on the calling thread's main context, fills the
 /// store and follows every change. The returned objects must live as long as the watch.
 /// `backend` is where the values live; `None` is the default one, dconf in a session.
+/// `schemas` is where the schemas are looked up; `None` is the installed ones.
 pub fn watch(
     changes: UnboundedSender<Change>,
     backend: Option<&gio::SettingsBackend>,
+    schemas: Option<&gio::SettingsSchemaSource>,
 ) -> (Arc<RwLock<Store>>, Vec<gio::Settings>) {
     let watcher = Rc::new(Watcher {
         store: Arc::new(RwLock::new(Store::new())),
@@ -67,7 +69,7 @@ pub fn watch(
     });
     let mut opened = Vec::new();
     for id in GNOME_SCHEMAS.into_iter().chain([ATHANOR]) {
-        let Some(settings) = open(id, backend) else {
+        let Some(settings) = open(id, backend, schemas) else {
             tracing::info!(schema = id, "not installed; not served");
             continue;
         };
@@ -89,8 +91,15 @@ pub fn watch(
     (Arc::clone(&watcher.store), opened)
 }
 
-fn open(id: &str, backend: Option<&gio::SettingsBackend>) -> Option<gio::Settings> {
-    let schema = gio::SettingsSchemaSource::default()?.lookup(id, true)?;
+fn open(
+    id: &str,
+    backend: Option<&gio::SettingsBackend>,
+    schemas: Option<&gio::SettingsSchemaSource>,
+) -> Option<gio::Settings> {
+    let schema = match schemas {
+        Some(schemas) => schemas.lookup(id, true),
+        None => gio::SettingsSchemaSource::default()?.lookup(id, true),
+    }?;
     Some(gio::Settings::new_full(&schema, backend, None))
 }
 
@@ -445,12 +454,12 @@ mod tests {
         // A backend of the test's own, passed in: setting GSETTINGS_BACKEND would write
         // the environment while other tests' threads read it.
         let backend = gio::memory_settings_backend_new();
-        let schema = |id: &str| open(id, Some(&backend)).expect(id);
+        let schema = |id: &str| open(id, Some(&backend), None).expect(id);
         let context = glib::MainContext::new();
         context
             .with_thread_default(|| {
                 let (sender, mut received) = tokio::sync::mpsc::unbounded_channel();
-                let (store, _watched) = watch(sender, Some(&backend));
+                let (store, _watched) = watch(sender, Some(&backend), None);
                 let appearance = |key: &str| store.read().unwrap()[APPEARANCE][key].clone();
                 assert_eq!(appearance("color-scheme"), 0u32.to_variant());
                 assert_eq!(appearance("contrast"), 0u32.to_variant());
@@ -500,5 +509,92 @@ mod tests {
                 assert!(matches!(received.try_recv(), Err(TryRecvError::Empty)));
             })
             .expect("own the test's main context");
+    }
+
+    /// The schema and the vendor defaults athanor-system-config ships, compiled with
+    /// `--strict` beside the build machine's GNOME desktop schemas (gsettings-desktop-schemas)
+    /// into a directory of the test's own: a key or a value the override gets wrong fails here.
+    fn shipped_schemas(dir: &std::path::Path) -> gio::SettingsSchemaSource {
+        let shipped = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../athanor-system-config/SOURCES/usr/share/glib-2.0/schemas");
+        std::fs::create_dir_all(dir).expect("mkdir");
+        let gnome = std::fs::read_dir("/usr/share/glib-2.0/schemas")
+            .expect("the GNOME schemas")
+            .map(|entry| entry.expect("entry").path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("org.gnome.desktop."))
+            });
+        let ours = std::fs::read_dir(&shipped)
+            .expect("the shipped schemas")
+            .map(|entry| entry.expect("entry").path());
+        for path in gnome.chain(ours) {
+            std::fs::copy(&path, dir.join(path.file_name().expect("a name"))).expect("copy");
+        }
+        let status = std::process::Command::new("glib-compile-schemas")
+            .arg("--strict")
+            .arg(dir)
+            .status()
+            .expect("glib-compile-schemas");
+        assert!(status.success(), "the shipped schemas compile: {status}");
+        gio::SettingsSchemaSource::from_directory(dir, None, true).expect("the compiled schemas")
+    }
+
+    /// With the shipped schema and defaults: the factory accent is purple, the Athanor keys
+    /// are read and not served, and only a change of the served accent is announced.
+    #[test]
+    fn the_shipped_schema_gives_the_factory_accent_and_the_wallpaper_mode() {
+        let dir =
+            std::env::temp_dir().join(format!("athanor-portal-schemas-{}", std::process::id()));
+        let schemas = shipped_schemas(&dir);
+        let backend = gio::memory_settings_backend_new();
+        let athanor = open(ATHANOR, Some(&backend), Some(&schemas)).expect(ATHANOR);
+        let context = glib::MainContext::new();
+        context
+            .with_thread_default(|| {
+                let (sender, mut received) = tokio::sync::mpsc::unbounded_channel();
+                let (store, _watched) = watch(sender, Some(&backend), Some(&schemas));
+                let appearance = |key: &str| store.read().unwrap()[APPEARANCE][key].clone();
+                let purple = values::accent_color(None, "purple", "").0.to_variant();
+                assert_eq!(appearance("accent-color"), purple);
+                assert!(
+                    !store.read().unwrap().contains_key(ATHANOR),
+                    "read, not served"
+                );
+                while received.try_recv().is_ok() {}
+                let mut announced = || {
+                    while context.iteration(false) {}
+                    let mut changes = Vec::new();
+                    while let Ok(change) = received.try_recv() {
+                        changes.push((change.namespace, change.key, change.value));
+                    }
+                    changes
+                };
+                let accent = |value: &Variant| {
+                    vec![(
+                        APPEARANCE.to_owned(),
+                        "accent-color".to_owned(),
+                        value.clone(),
+                    )]
+                };
+
+                // The wallpaper mode with no computed colour yet keeps the fixed accent.
+                athanor.set_string("accent-mode", "wallpaper").unwrap();
+                assert!(announced().is_empty());
+                assert_eq!(appearance("accent-color"), purple);
+
+                athanor.set_string("accent-computed", "#2190a4").unwrap();
+                let computed = values::accent_color(Some("wallpaper"), "purple", "#2190a4")
+                    .0
+                    .to_variant();
+                assert_eq!(announced(), accent(&computed));
+
+                athanor.set_string("accent-mode", "fixed").unwrap();
+                assert_eq!(announced(), accent(&purple));
+            })
+            .expect("own the test's main context");
+        // Test teardown: a directory already gone is fine.
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
