@@ -175,6 +175,7 @@ stage_volume() {
 }
 
 stop_editor() { in_session systemctl --user stop "$EDITOR_UNIT"; }
+reset_override() { in_session flatpak override --user --reset "$APP"; }
 remove_document() { in_session "rm -f $DOCUMENT"; }
 
 editor_runs() {
@@ -202,6 +203,11 @@ stage_portal() {
     NAME=session-acceptance-144.txt
     DOCUMENT=$home/$NAME
     CLEANUP+=(stop_editor remove_document)
+    # Flathub's Text Editor holds --filesystem=host, and the portal exports a chosen file only to
+    # an application that cannot already reach it: without this override the file opens by its
+    # own path and the document portal is never exercised. The dev VM's user override goes too.
+    CLEANUP+=(reset_override)
+    in_session flatpak override --user --nofilesystem=host "$APP" || fail "flatpak override --nofilesystem=host $APP"
     in_session "printf 'athanor session acceptance\\n' > $DOCUMENT"
     before=$(in_session "sha256sum < $DOCUMENT")
 
@@ -215,8 +221,16 @@ stage_portal() {
     sleep 4
     shot chooser
     type_keys @ctrl+l "$DOCUMENT" @enter
-    wait_until 20 document_exported ||
+    shot path
+    # GTK 4.20's chooser in xdg-desktop-portal-gtk keeps the dialog open after the first Enter
+    # in its location entry (seen on the dev VM, 2026-10-15); the second opens the file. A
+    # second Enter after an opened file would type into the editor, so it is pressed only when
+    # the first exported nothing.
+    wait_until 5 document_exported || type_keys @enter
+    wait_until 20 document_exported || {
+        shot no-export
         fail "no $DOCS/by-app/$APP/*/$NAME 20 s after the path: $(in_session "ls -R $DOCS/by-app 2>&1" | head -n 20 | tr '\n' '|')"
+    }
     sleep 2
     shot opened
 
