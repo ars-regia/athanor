@@ -29,8 +29,8 @@ boots only the devices that did not (2026-10-15, option 1).
    interfaces with their classes agree, within a bound of ten seconds for each run, measured
    on the time since boot. The unit's start is bounded by systemd.
 2. A device that does not settle within the bound is recorded as pending, by port and vendor
-   and product id, with its serial or the fact that it has none once a read of the device gave
-   it. The first run records each device as soon as it reads its ids, so a first run stopped by
+   and product id, with its serial or the fact that it has none once a read of its serial
+   succeeded. The first run records each device as soon as it reads its ids, so a first run stopped by
    the timeout is continued at the ports it saw.
 3. The next boots read only the pending ports and admit only the same device there, never a
    device that was absent at the first run, for at most three runs in all, the first included.
@@ -48,7 +48,11 @@ settle; a device that does not is left blocked and named.
   bound on the greeter's wait.
 - `athanor-usbguard-internal` keeps `/var/lib/athanor/usbguard-internal.pending` until the
   snapshot is done, and the unit runs at each boot until then.
-- A device of which no read succeeded at the first run is matched by port and vendor and
+- A device whose serial could not be read at the first run is matched by port and vendor and
   product id alone, whatever its serial.
-- The rest of D12, admission by class and the confirmation of a new external device, does not
-  change.
+- A pending file that is not valid, or a rules file that cannot be read, admits nothing and
+  fails the unit at every boot until an administrator ends the snapshot or repairs the file.
+- It amends one clause of ADR-0103 D12, "the internal devices present at install (webcam,
+  Bluetooth, readers) are allowed": they are allowed when they settle, and a device that does
+  not is left blocked and named. The rest of D12, admission by class and the confirmation of a
+  new external device, does not change.
