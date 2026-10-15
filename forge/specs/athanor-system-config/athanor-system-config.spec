@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:67.fc43}
+Release:        %{?autorelease}%{!?autorelease:68.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -28,6 +28,8 @@ Requires: flatpak
 # The appearance store: the GNOME schemas the vendor defaults override, and the icon theme
 # they name (doc_visual_language.md, VL4; doc_session_daemons.md, SD16).
 Requires: gsettings-desktop-schemas adwaita-icon-theme
+# 90_athanor-network.gschema.override sets a key of gvfs's org.gnome.system.wsdd schema.
+Requires: gvfs
 
 %description
 Provides athanor-system-config for Athanor OS.
@@ -73,6 +75,7 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 /usr/lib/environment.d/50-athanor-desktop.conf
 /usr/share/glib-2.0/schemas/org.athanor.desktop.appearance.gschema.xml
 /usr/share/glib-2.0/schemas/90_athanor-appearance.gschema.override
+/usr/share/glib-2.0/schemas/90_athanor-network.gschema.override
 /usr/share/athanor-system-config/greetd.toml
 /usr/share/athanor-system-config/usbguard-daemon.conf
 /usr/share/athanor-system-config/greenboot.conf
@@ -81,6 +84,12 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-68
+- Turn off gvfs's WS-Discovery browsing: org.gnome.system.wsdd display-mode defaults to
+  disabled, so opening the Network location no longer starts wsdd listening on UDP 3702. The
+  image ships no gvfs-smb, and gvfs's network backends are not used (doc_files.md, FM15; #509).
+  Requires gvfs, whose schema the override sets.
+
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-67
 - athanor-session starts cosmic-comp with --keep-shortcuts. With athanor-desktop as its
   command cosmic-comp ran as a kiosk and loaded no key bindings: no launcher on Super, no

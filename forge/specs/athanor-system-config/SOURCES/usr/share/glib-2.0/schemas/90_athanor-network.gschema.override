@@ -1,0 +1,6 @@
+# gvfs's network backend starts `wsdd --discovery` for every user who opens the Network
+# location, and wsdd listens on UDP 3702 on every address and on the WS-Discovery multicast
+# groups. The image ships no gvfs-smb, so a share it finds cannot be opened, and gvfs's network
+# backends are not used (doc_files.md, FM15). Off by maintainer decision of 2026-10-15 (#509).
+[org.gnome.system.wsdd]
+display-mode='disabled'

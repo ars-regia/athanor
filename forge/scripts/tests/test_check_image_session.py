@@ -985,6 +985,7 @@ class SchemaStubTest(unittest.TestCase):
         "accent-color": "'purple'",
         "icon-theme": "'Adwaita'",
         "accent-mode": "'fixed'",
+        "display-mode": "'disabled'",
     }
 
     def stub(self, name, body):
@@ -1024,13 +1025,13 @@ class SchemaStubTest(unittest.TestCase):
     def test_a_mismatched_readback_is_a_finding(self):
         self.stub("gsettings", "echo \"'blue'\"")
         found = mod.schema_problems("/schemas")
-        self.assertEqual(len(found), 3)
+        self.assertEqual(len(found), 4)
         self.assertIn("accent-color gives \"'blue'\", not 'purple'", found[0])
 
     def test_a_failed_gsettings_is_a_finding(self):
         self.stub("gsettings", "echo no schema >&2; exit 1")
         found = mod.schema_problems("/schemas")
-        self.assertEqual(len(found), 3)
+        self.assertEqual(len(found), 4)
         self.assertIn("gives 'no schema'", found[0])
 
     def test_a_missing_tool_is_a_finding(self):
@@ -1077,6 +1078,8 @@ class SchemaTest(unittest.TestCase):
             "org.gnome.desktop.enums.xml",
             "org.gnome.desktop.interface.gschema.xml",
             "org.gnome.desktop.wm.preferences.gschema.xml",
+            "org.gnome.system.gvfs.enums.xml",
+            "org.gnome.system.wsdd.gschema.xml",
         ):
             if not (base / name).is_file():
                 self.skipTest(f"{name} is not installed")
