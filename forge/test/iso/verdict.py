@@ -77,10 +77,11 @@ PROFILE_SIGNALS = ("profile-ok",)
 # leaving this unset. Without this line the gate cannot tell a root mounted with
 # compression from one mounted without it -- the desktop comes up either way.
 KARG_SIGNALS = ("karg-compress-ok", "karg-compress-not-applicable")
-# And the image the system follows: ORIGIN_OK is the guest's report that bootc's booted
-# reference is <repository>:stable verified by containers-policy.json (UD2, ADR-0114).
-# ORIGIN_WRONG and ORIGIN_UNREADABLE (no origin file read; reported apart) fail the run by leaving this unset: an installed system on :latest, or on
-# an unverified reference, passes every other check and updates from the wrong place.
+# And the image the system follows: ORIGIN_OK is the guest's report that the booted
+# deployment's origin is <repository>:stable verified by containers-policy.json (UD2,
+# ADR-0114). ORIGIN_WRONG, and ORIGIN_UNREADABLE (no origin file read; reported apart),
+# fail the run by leaving this unset: an installed system on :latest, or on an
+# unverified reference, passes every other check and updates from the wrong place.
 ORIGIN_SIGNALS = ("origin-stable-signed",)
 # "reinstall-loop" is not a crash but it is a failure, and a distinctive one: the machine
 # booted the installer again instead of the system it had just written, so the run says

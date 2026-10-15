@@ -315,19 +315,19 @@ KARG_PROBE_WAIT = 5.0
 # /proc/cmdline names the booted deployment, `<deployment>.origin` sits beside it, and
 # `bootc switch --enforce-container-sigpolicy` writes `ostree-image-signed:` there
 # (SignatureSource::ContainerPolicy), which is what bootc reports as `containerPolicy`.
-# A reference that cannot be read at all answers UNREADABLE with the `ostree=` value,
-# so the run does not call a lock or a missing file a wrong origin. As with the other
-# probes printf assembles the marker, so the echo of the typed line cannot pass for the
-# answer.
+# An origin file that cannot be read, or a command line without `ostree=`, answers
+# UNREADABLE with the `ostree=` value, so the run does not call a missing file a wrong
+# origin; a file read without a container reference follows no image and answers WRONG
+# with `none`. As with the other probes printf assembles the marker, so the echo of the
+# typed line cannot pass for the answer.
 ORIGIN_PROBE = (
     b"p=$(tr ' ' '\\n' < /proc/cmdline | sed -n 's/^ostree=//p');"
-    b" o=$(printf 'collaudo\\n' | sudo -S sh -c 'cat \"$(readlink -f /sysroot$1).origin\"' _ \"$p\""
-    b" | sed -n 's/^container-image-reference=//p');"
-    b' case "$o" in'
+    b" f=$(printf 'collaudo\\n' | sudo -S sh -c 'cat \"$(readlink -f /sysroot$1).origin\"' _ \"$p\");"
+    b" o=$(printf '%s\\n' \"$f\" | sed -n 's/^container-image-reference=//p');"
+    b' if [ -z "$f" ]; then printf \'ORIGIN_%s %s\\n\' UNREADABLE "${p:-none}"; else case "$o" in'
     b" ostree-image-signed:docker://*:stable) printf 'ORIGIN_%s %s\\n' OK \"$o\";;"
-    b" \"\") printf 'ORIGIN_%s %s\\n' UNREADABLE \"$p\";;"
-    b" *) printf 'ORIGIN_%s %s\\n' WRONG \"$o\";;"
-    b" esac"
+    b" *) printf 'ORIGIN_%s %s\\n' WRONG \"${o:-none}\";;"
+    b" esac; fi"
 )
 # A cmdline read, a symlink and a file read under sudo.
 ORIGIN_PROBE_WAIT = 10.0

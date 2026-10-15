@@ -730,9 +730,12 @@ def test_origin_unreadable_is_not_wrong(tmp: pathlib.Path) -> None:
 
 def test_origin_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
     """ORIGIN_PROBE run verbatim against a fake sysroot: /proc/cmdline and /sysroot are
-    pointed at a scratch directory and `sudo` is a pass-through. A signed :stable origin
+    pointed at a scratch directory and `sudo` is a pass-through. `ostree=` names the
+    deployment through the boot.N symlinks, as on a booted system. A signed :stable origin
     answers OK; :latest, an unverified :stable and a remote-verified :stable answer
-    WRONG with what they carry; an empty or missing origin answers UNREADABLE."""
+    WRONG with what they carry, and an origin with no container reference WRONG with
+    `none`; an empty or missing origin, or no `ostree=`, answers UNREADABLE. Under sh and
+    under bash, the guest's shell."""
     sys.path.insert(0, str(HERE))
     import console
 
@@ -743,41 +746,48 @@ def test_origin_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
     (work / "bin" / "sudo").chmod(0o755)
     deploy = work / "sysroot" / "ostree" / "deploy" / "athanor" / "deploy"
     (deploy / "abc.0").mkdir(parents=True)
-    (work / "cmdline").write_text("root=UUID=x ostree=/ostree/deploy/athanor/deploy/abc.0 rw\n")
+    # /ostree/boot.1 -> boot.1.1, and boot.1.1/<os>/<bootcsum>/<serial> -> the deployment.
+    boot = work / "sysroot" / "ostree" / "boot.1.1" / "athanor" / "bc"
+    boot.mkdir(parents=True)
+    (boot / "0").symlink_to("../../../deploy/athanor/deploy/abc.0")
+    (work / "sysroot" / "ostree" / "boot.1").symlink_to("boot.1.1")
+    booted = "root=UUID=x ostree=/ostree/boot.1/athanor/bc/0 rw\n"
     probe = console.ORIGIN_PROBE.replace(b"/proc/cmdline", str(work / "cmdline").encode())
     probe = probe.replace(b"/sysroot", str(work / "sysroot").encode())
     (work / "probe.sh").write_bytes(probe + b"\n")
 
     repository = "ghcr.io/acme/athanor-system"
-    origin = lambda ref: f"[origin]\ncontainer-image-reference={ref}\n"
-    cases = (
-        (origin(f"ostree-image-signed:docker://{repository}:stable"), "ORIGIN_OK"),
-        (origin(f"ostree-image-signed:docker://{repository}:latest"), "ORIGIN_WRONG"),
-        (origin(f"ostree-unverified-image:docker://{repository}:stable"), "ORIGIN_WRONG"),
-        (origin(f"ostree-remote-image:fedora:docker://{repository}:stable"), "ORIGIN_WRONG"),
-        (origin(f"ostree-image-signed:docker://{repository}:38546669761"), "ORIGIN_WRONG"),
-        ("[origin]\nrefspec=x\n", "ORIGIN_UNREADABLE"),
-        ("", "ORIGIN_UNREADABLE"),
-        (None, "ORIGIN_UNREADABLE"),
-    )
-    for content, expected in cases:
-        origin_file = deploy / "abc.0.origin"
-        origin_file.unlink(missing_ok=True)
-        if content is not None:
-            origin_file.write_text(content)
-        proc = subprocess.run(
-            ["sh", str(work / "probe.sh")],
-            env={**os.environ, "PATH": f"{work}/bin:{os.environ['PATH']}"},
-            capture_output=True,
-            text=True,
-            check=False,
+    unread = "ORIGIN_UNREADABLE /ostree/boot.1/athanor/bc/0"
+    cases = tuple(
+        (booted, f"[origin]\ncontainer-image-reference={ref}\n", f"ORIGIN_{answer} {ref}")
+        for ref, answer in (
+            (f"ostree-image-signed:docker://{repository}:stable", "OK"),
+            (f"ostree-image-signed:docker://{repository}:latest", "WRONG"),
+            (f"ostree-unverified-image:docker://{repository}:stable", "WRONG"),
+            (f"ostree-remote-image:fedora:docker://{repository}:stable", "WRONG"),
+            (f"ostree-image-signed:docker://{repository}:38546669761", "WRONG"),
         )
-        answer = proc.stdout.split(" ")[0].strip()
-        assert answer == expected, f"{content!r}: {proc.stdout!r} != {expected!r}"
-        if expected == "ORIGIN_WRONG":
-            assert content.split("=", 1)[1].strip() in proc.stdout, "a wrong origin must print what it found"
-        if expected == "ORIGIN_UNREADABLE":
-            assert "ostree=" not in proc.stdout and "abc.0" in proc.stdout, proc.stdout
+    ) + (
+        (booted, "[origin]\nrefspec=x\n", "ORIGIN_WRONG none"),
+        (booted, "", unread),
+        (booted, None, unread),
+        ("root=UUID=x rw\n", f"[origin]\ncontainer-image-reference=ostree-image-signed:docker://{repository}:stable\n", "ORIGIN_UNREADABLE none"),
+    )
+    for shell in ("sh", "bash"):
+        for cmdline, content, expected in cases:
+            (work / "cmdline").write_text(cmdline)
+            origin_file = deploy / "abc.0.origin"
+            origin_file.unlink(missing_ok=True)
+            if content is not None:
+                origin_file.write_text(content)
+            proc = subprocess.run(
+                [shell, str(work / "probe.sh")],
+                env={**os.environ, "PATH": f"{work}/bin:{os.environ['PATH']}"},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert proc.stdout.strip() == expected, f"{shell} {cmdline!r} {content!r}: {proc.stdout!r} != {expected!r}"
 
 
 def test_mok_missing_fails(tmp: pathlib.Path) -> None:
