@@ -26,7 +26,7 @@ HOST_VMLINUZ = sorted(
 )
 PODMAN = """#!/bin/sh
 case "$*" in
-*"tar -C"*) tar -cf - -C "${FAKE_ROOT:-/var/empty}" . ;;
+*"tar -cf"*) tar -cf - -C "${FAKE_ROOT:-/var/empty}" . ;;
 */bin/sh*) [ -n "$FAKE_KERNEL_PATH" ] && echo "$FAKE_KERNEL_PATH" ;;
 */bin/cat*) cat "$FAKE_VMLINUZ" ;;
 esac
@@ -190,6 +190,31 @@ class CheckImageUki(unittest.TestCase):
 
     def test_refuses_an_efi_under_efi_linux_by_name(self):
         self.assertEqual(len(self.findings({"boot/efi/EFI/Linux/a.efi": b"x"})), 1)
+
+    def test_refuses_a_uki_in_a_kernel_directory(self):
+        found = self.findings(
+            {"usr/lib/modules/7.0/vmlinuz-virt.efi": fake_pe(".linux")}
+        )
+        self.assertEqual(len(found), 1)
+
+    def test_fails_closed_on_a_header_past_the_cap(self):
+        head = bytearray(fake_pe(".text"))
+        struct.pack_into("<I", head, 0x3C, 1 << 20)
+        found = self.findings({"boot/x.efi": bytes(head)})
+        self.assertEqual(len(found), 1)
+        self.assertIn("past 64 KiB", found[0])
+
+    def test_matches_efi_linux_in_any_case(self):
+        self.assertEqual(len(self.findings({"./boot/efi/efi/linux/A.EFI": b"x"})), 1)
+
+    def test_a_truncated_stream_exits_2(self):
+        result = subprocess.run(
+            [sys.executable, "-B", str(HERE.parent / "check_image_uki.py")],
+            input=b"not a tar" * 100,
+            capture_output=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(b"could not read", result.stderr)
 
     def test_accepts_an_empty_boot_content(self):
         self.assertEqual(self.findings({}), [])
