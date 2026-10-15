@@ -68,6 +68,8 @@ jobs:
         run: bash forge/test/shell/rig.sh layer-guard greeter
       - name: Accessibility tree of the greeter
         run: bash forge/test/shell/rig.sh atspi greeter
+      - name: Accessibility tree of the greeter in Italian
+        run: bash forge/test/shell/rig.sh atspi greeter it
       - name: Greeter surface cases (12) against the goldens
         run: bash forge/test/shell/rig.sh surface greeter
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -97,6 +99,8 @@ jobs:
         run: bash forge/test/shell/rig.sh surface layout
       - name: Accessibility tree of the chooser
         run: bash forge/test/shell/rig.sh atspi chooser
+      - name: Accessibility tree of the chooser in Italian
+        run: bash forge/test/shell/rig.sh atspi chooser it
       - name: Chooser surface cases (12) against the goldens
         run: bash forge/test/shell/rig.sh surface chooser
       - name: A preset picked in the chooser applies without a restart
@@ -165,6 +169,8 @@ jobs:
         run: bash forge/test/shell/rig.sh layer-guard bar
       - name: Accessibility tree of the bar
         run: bash forge/test/shell/rig.sh atspi bar
+      - name: Accessibility tree of the bar in Italian
+        run: bash forge/test/shell/rig.sh atspi bar it
       - name: Accessibility tree of the bar with every system module
         run: bash forge/test/shell/rig.sh atspi bar-modules
       - name: Live layout, mandatory keys, running windows, the power menu and memory
@@ -250,6 +256,8 @@ jobs:
         run: bash forge/test/shell/rig.sh layer-guard dock
       - name: Accessibility tree of the dock
         run: bash forge/test/shell/rig.sh atspi dock
+      - name: Accessibility tree of the dock in Italian
+        run: bash forge/test/shell/rig.sh atspi dock it
       - name: Openers, running windows, pinning, the knob and presets live, and memory
         run: bash forge/test/shell/rig.sh dock-e2e
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

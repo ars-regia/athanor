@@ -32,6 +32,7 @@
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
 #   rig.sh atspi <greeter|chooser|bar|bar-modules|dock|launcher>   every interactive widget has a role and a name
+#   rig.sh atspi <greeter|chooser|bar|dock> it   the same in Italian, with the shipped catalog
 #   rig.sh launcher-e2e     athanor-launcher in seven scenes, confined: READY, calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch, accessible tree, a command and a refused one
 #   rig.sh launcher-window-preview   the window row's preview carries the window's thumbnail
 #   rig.sh chooser-e2e      press a preset in the chooser and wait until the bar and the dock draw it (run build-bar and build-dock first)
@@ -664,20 +665,39 @@ EOF
 atspi)
     # A screen reader announces itself by setting IsEnabled; GTK exports its tree then.
     enable='busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true'
+    # In Italian as well as English (doc_shell.md, section 7 item 3 and section 8 item 6): the
+    # shipped catalog, and a node that must carry its Italian name, so an English tree fails.
+    lang=(RIG_LOCALE=en_US.UTF-8)
+    required=
+    case "${3:-}" in
+    '' | it) ;;
+    *) echo "atspi: the language is 'it' or none, not '$3'" >&2; exit 2 ;;
+    esac
+    if [ "${3:-}" = it ]; then
+        declare -A italian=([greeter]="athanor-greeter-ui Immagine di sistema verificata"
+            [chooser]="athanor-layout-chooser Isola" [bar]="athanor-bar Alimentazione"
+            [dock]="athanor-dock Applicazioni")
+        [ -n "${italian[${2:-}]:-}" ] || { echo "atspi ${2:-} has no Italian check" >&2; exit 2; }
+        read -r component required <<< "${italian[$2]}"
+        in_rig "$(rig_image)" bash -c "mkdir -p /out/locale/it &&
+            msgfmt --check -o /out/locale/it/$component.mo /repo/forge/specs/$component/$component-1.0.0/po/it.po"
+        lang=(RIG_LOCALE=it_IT.UTF-8 ATHANOR_I18N_CATALOG="/out/locale/it/$component.mo")
+    fi
     case "${2:-}" in
     greeter)
         # 7 interactive widgets: back to the list, password, sign in, contrast, three power
         # chips; and the seal, which names the badge a verified state backs (doc_shell.md,
         # section 7, item 3).
-        in_rig "$(rig_image)" "${with_account[@]}" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=6 \
-            ATSPI_REQUIRED_NAME="System image verified" \
+        in_rig "$(rig_image)" "${with_account[@]}" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
+            ATSPI_REQUIRED_NAME="${required:-System image verified}" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-greeter-ui 7" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-greeter -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-greeter-ui"
         ;;
     chooser)
         # 8 interactive widgets under the float preset: three styles, two panel edges, three docks.
-        in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=6 \
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
+            ATSPI_REQUIRED_NAME="$required" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-layout-chooser 8" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-chooser -- \
             bash -c "$enable && exec /out/bin/athanor-layout-chooser"
@@ -687,8 +707,8 @@ atspi)
         # accessibility, tiling, power, the shield.
         stage_greeter_icons
         seed_bar "$out/seed-atspi-bar" float top visible light
-        in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-bar \
-            RIG_DATA_OVERLAY="$bar_overlay" \
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-bar \
+            RIG_DATA_OVERLAY="$bar_overlay" ATSPI_REQUIRED_NAME="$required" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar 8" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-bar -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py"
@@ -708,7 +728,8 @@ atspi)
         # 4 interactive widgets under float: launcher, workspaces, the pinned COSMIC
         # Settings of the seed, applications.
         seed_bar "$out/seed-atspi-dock" float top visible light
-        in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-dock \
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-dock \
+            ATSPI_REQUIRED_NAME="$required" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-dock 4" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-dock -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-dock"
