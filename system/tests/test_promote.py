@@ -424,6 +424,20 @@ class Promote(Tool):
         self.assertIn("i/o timeout", r.stderr)
         self.assertEqual([dest for _, dest in copies if dest.startswith(nvidia)], [])
 
+    def test_a_promoted_tag_read_once_then_unreadable_is_not_taken_for_absent(self):
+        # The plan, the apply's record and check_promoted read it (3 reads); the 4th, the one
+        # that decides whether to copy, fails: it must stop, not copy over an unseen tag.
+        self.published()
+        fx = json.loads((self.dir / "registry.json").read_text())
+        fx["errors_after_reads"] = {f"{REG}/athanor-system:promoted-412": 3}
+        self.registry(fx)
+        r, copies = self.promote()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("i/o timeout", r.stderr)
+        self.assertEqual(copies, [])
+        reads = json.loads((self.dir / "registry.json").read_text())["reads"]
+        self.assertEqual(reads[f"{REG}/athanor-system:promoted-412"], 4)
+
     def test_a_package_set_changed_after_the_plan_is_refused_at_apply(self):
         self.published()
         r, copies = self.promote(
