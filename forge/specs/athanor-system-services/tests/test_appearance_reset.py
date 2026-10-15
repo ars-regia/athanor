@@ -111,6 +111,8 @@ class AppearanceReset(unittest.TestCase):
         self.assertIn("PartOf=graphical-session.target", unit)
         self.assertIn("WantedBy=athanor-session.target", unit)
         self.assertIn("ExecStart=/usr/libexec/athanor-appearance-reset", unit)
+        self.assertIn("TimeoutStartSec=15", unit)
+        self.assertIn("Before=athanor-bar.service athanor-dock.service", unit)
         self.assertIn(
             "enable athanor-appearance-reset.service", PRESET.read_text().splitlines()
         )

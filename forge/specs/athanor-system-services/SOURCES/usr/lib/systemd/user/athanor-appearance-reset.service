@@ -12,6 +12,8 @@ PartOf=graphical-session.target
 Type=oneshot
 Slice=session.slice
 ExecStart=/usr/libexec/athanor-appearance-reset
+# A dconf service that never answers fails this unit instead of holding the bar and the dock.
+TimeoutStartSec=15
 
 # The reset goes through the dconf service on the bus; the dconf client itself writes only
 # its invalidation file beneath the runtime directory.

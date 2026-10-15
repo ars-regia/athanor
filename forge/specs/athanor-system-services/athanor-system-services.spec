@@ -51,6 +51,7 @@ install -D -m 0644 %{_sourcedir}/usr/lib/systemd/user-preset/80-athanor-system-s
   'Open Sans' and monospace-font-name 'Noto Sans Mono' when the account holds exactly
   those values, which cosmic-settings-daemon wrote until 1.0.1-28; any other value and
   button-layout are kept (doc_session_daemons.md, SD16, amended 2026-10-15, #473).
+  TimeoutStartSec=15 fails it, rather than holding the bar and the dock, when dconf hangs.
 
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.1-28
 - cosmic-settings-daemon runs with GSETTINGS_BACKEND=memory: its gsettings writes of
