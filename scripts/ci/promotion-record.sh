@@ -29,7 +29,8 @@
 #     athanor-iso:RUN_ID. The record names it; the iso job of promote-stable.yml moves
 #     athanor-iso:stable to exactly that digest.
 # Defines promotion_args "$@" (sets run and override), promotion_record DAY OUT (runs every
-# check, writes the record to OUT, sets promote, recorded and previous) and stable_of REPOSITORY.
+# check, writes the record to OUT, sets promote, recorded and previous), stable_of REPOSITORY and
+# tag_of REPOSITORY TAG, check_promoted REPOSITORY DIGEST (promoted-RUN_ID is immutable).
 # Environment: REGISTRY (default ghcr.io/<GITHUB_REPOSITORY_OWNER>); PROMOTE_ARTIFACTS
 #              (default artifacts, as system/fetch-evidence.sh writes it); PROMOTE_DWELL_HOURS
 #              (default 24); PROMOTE_KEYS_DIR (default system/keys); skopeo logged in; podman.
@@ -88,13 +89,22 @@ evidence() { # evidence GATE IMAGE DIGEST -> the evidence's finished_at, seconds
     python3 -B "$root/scripts/ci/evidence.py" check --dir "$artifacts/evidence" --gate "$1" --image "$2" --digest "$3" --run-id "$run"
 }
 
-stable_of() { # stable_of REPOSITORY -> the digest :stable names, nothing when there is no stable yet
-    if skopeo inspect --format '{{.Digest}}' "docker://$1:stable" 2> "$err"; then return; fi
-    # Anything but "there is no stable tag yet" is a real failure.
+tag_of() { # tag_of REPOSITORY TAG -> the digest the tag names, nothing when the tag does not exist yet
+    if skopeo inspect --format '{{.Digest}}' "docker://$1:$2" 2> "$err"; then return; fi
+    # Anything but "there is no such tag yet" is a real failure.
     grep -q 'manifest unknown' "$err" || {
         cat "$err" >&2
         return 1
     }
+}
+
+stable_of() { tag_of "$1" stable; }
+
+# promoted-<run_id> never moves (issue 500): one that exists names the digest or the plan stops.
+check_promoted() { # check_promoted REPOSITORY DIGEST
+    local at
+    at=$(tag_of "$1" "promoted-$run")
+    [[ -z $at || $at == "$2" ]] || die "$1:promoted-$run names $at, not the evidence digest $2: it is immutable, so something is wrong"
 }
 
 sums() { # sums DIR PATH... (relative to DIR) -> {"PATH": "<sha256>", ...}
@@ -162,6 +172,7 @@ promotion_record() { # promotion_record DAY OUT
         skopeo inspect --raw "docker://$repository:sha256-${digest#sha256:}.sig" |
             jq -e --arg type "$SIMPLE_SIGNING" '.layers | any(.mediaType == $type)' > /dev/null ||
             die "$repository@$digest has no signature a machine can verify (sha256-<hex>.sig)"
+        check_promoted "$repository" "$digest"
         verify+=("$repository $run $digest")
         stable=$(stable_of "$repository")
         if [[ -n $stable ]]; then

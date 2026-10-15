@@ -65,7 +65,7 @@ Checked on 2026-10-06 against branch `iso-v0` at eda61571, the maintainer's desk
 | --------------------------------------------------- | ------------------------------------------------ | ----------------------------------- |
 | `:<run_id>`                                         | build job (UD24), once                           | nobody; the immutable name of a run |
 | `:latest`                                           | tagging job, after the signature verified (UD25) | test machines that opt in           |
-| `:stable`, `:stable-previous`, `:stable-<YYYYMMDD>` | `system/promote.sh` only (UD3)                   | every installed machine (UT4)       |
+| `:stable`, `:stable-previous`, `:stable-<YYYYMMDD>`, `:promoted-<run_id>` | `system/promote.sh` only (UD3)                   | every installed machine (UT4)       |
 
 Acceptance: `python3 scripts/verify.py workflows` gains a check that no workflow step other than the tagging job and `promote.sh` passes `--tag latest`, `:latest` or `:stable` to `podman push` or `skopeo copy`.
 
@@ -73,7 +73,7 @@ Acceptance: `python3 scripts/verify.py workflows` gains a check that no workflow
 
 ### 4.2 Promotion
 
-**UD3. `system/promote.sh` is the only promoter, and it promotes by digest.** It takes a run id, reads the three digests from that run's `image-digests.txt`, verifies each through the shipped policy (`skopeo copy --policy`, as today), and copies `docker://<repo>@<digest>`, never a tag, to `:stable-previous` (the old `:stable` digest), `:stable-<YYYYMMDD>` and `:stable`. It then re-reads `:stable` and fails unless it names the verified digest. Acceptance: `system/tests/test_promote.py` runs `promote.sh` against a local registry in which `:<run_id>` is moved to another image after the check, and asserts that the promotion is refused and nothing is copied.
+**UD3. `system/promote.sh` is the only promoter, and it promotes by digest.** It takes a run id, reads the three digests from that run's `image-digests.txt`, verifies each through the shipped policy (`skopeo copy --policy`, as today), and copies `docker://<repo>@<digest>`, never a tag, to `:promoted-<run_id>` (written once and never moved: one that exists at another digest stops the promotion), `:stable-previous` (the old `:stable` digest), `:stable-<YYYYMMDD>` and `:stable`. It then re-reads `:stable` and `:promoted-<run_id>` and fails unless each names the verified digest. Acceptance: `system/tests/test_promote.py` runs `promote.sh` against a local registry in which `:<run_id>` is moved to another image after the check, and asserts that the promotion is refused and nothing is copied.
 
 **UD4. Promotion requires evidence for the same digests.** `promote.sh` refuses unless an evidence file exists for each required gate and names the exact digest being promoted:
 
@@ -89,7 +89,7 @@ An evidence file is JSON written by the gate's script, one per gate and image, n
 
 **UD7. Promotion never moves a machine backwards and never strands one on a key.** Beyond the existing build-time refusal, `promote.sh` refuses a digest whose key-based signature verifies only with a key that the current `:stable` image does not carry in its `keyPaths` (UT3 rotation: key _n+1_ must ship in a promoted image signed with _n_ before an image signed with _n+1_ is promoted). Acceptance, to add: a case in `system/tests/test_promote.py` with two test keys that covers both orders.
 
-**UD8. Retention keeps every promoted digest and its evidence, and never deletes them.** `clean_ghcr.sh` treats `:stable-<YYYYMMDD>` as UT10 treats `:stable`, and keeps the ISO of each promoted run (`athanor-iso:<run_id>`), which UD18 boots. Promoted digests, their referrers and promoted ISOs are never deleted (UT10 as amended by ADR-0081; retention in section 5 of [doc_pipeline.md](doc_pipeline.md)); the 90-day figure of UT10 applies only to runs that were never promoted. Acceptance: the janitor's dry run lists no promoted digest or promoted ISO among its deletions.
+**UD8. Retention keeps every promoted digest and its evidence, and never deletes them.** `clean_ghcr.sh` treats `:stable-<YYYYMMDD>` and `:promoted-<run_id>` as UT10 treats `:stable` (the day tag moves when two promotions share a day; `:promoted-<run_id>` does not), and keeps the ISO of each promoted run (`athanor-iso:<run_id>`), which UD18 boots. Promoted digests, their referrers and promoted ISOs are never deleted (UT10 as amended by ADR-0081; retention in section 5 of [doc_pipeline.md](doc_pipeline.md)); the 90-day figure of UT10 applies only to runs that were never promoted. Acceptance: the janitor's dry run lists no promoted digest or promoted ISO among its deletions.
 
 ### 4.3 How machines reach `stable`
 
