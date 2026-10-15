@@ -104,6 +104,7 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
   nothing, and the journal tells the administrator how to end it.
   The bound is measured on the time since boot, which a step of the wall clock does not move.
   A later run that cannot read the rules file is not counted among the three.
+  A serial such as -n is recorded as it reads, no longer taken for an option of echo.
 
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-65
 - %install copies the usr and etc source trees without hiding a failure (AGENTS.md,

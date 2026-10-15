@@ -223,7 +223,7 @@ serial_field() {
     if [[ -e $1/serial ]]; then
         attr "$1/serial" serial || return 1
     fi
-    echo "${serial:-\"\"}"
+    printf '%s\n' "${serial:-\"\"}" # a serial can read as an option of echo, such as -n
 }
 
 # matches DEVICE DESCRIPTION: succeeds when a settled device is the one its pending line names:

@@ -383,6 +383,12 @@ case $(wc -l < {count}) in
         self.assert_not_done(done, "1-1")
         self.assertEqual(self.pending.read_text(), "runs 1\n1-1 0c45:6a10 CAM1\n")
 
+    def test_a_serial_read_as_an_option_of_echo_is_recorded(self):
+        self.device("1-1", "0c45", "6a10", [], "-n", configured=False)
+        done = self.run_script(check=False, wait_tenths=3)
+        self.assert_not_done(done, "1-1")
+        self.assertEqual(self.pending.read_text(), "runs 1\n1-1 0c45:6a10 -n\n")
+
     def test_a_serial_a_rule_cannot_carry_leaves_the_device_blocked_and_not_pending(self):
         # Pending without its serial it would match any serial, though it can never be admitted.
         self.device("1-1", "0c45", "6a10", [], 'CAM"1', configured=False)
