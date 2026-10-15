@@ -166,10 +166,11 @@ jobs:
         # GSettings schemas must compile strictly and read back the appearance defaults.
         run: bash system/check-image-session.sh "$(<artifacts/system-image.iid)"
 
-      - name: 🥾 Check the vmlinuz of the image against the Secure Boot certificate
+      - name: 🥾 Check the vmlinuz of the image against the Secure Boot certificate, and that no UKI ships
         # The Containerfile checks the kernel azoth-boot names; this checks the file the image
         # ships: exactly one Authenticode signature, by the project certificate. An image signed
         # only by pesign's test certificate fails under Secure Boot with "bad shim signature".
+        # It also fails when the boot content of the image carries a UKI (none ships before 1.1).
         run: nix shell nixpkgs#sbsigntool -c bash system/check-image-kernel.sh "$(<artifacts/system-image.iid)"
 
       - name: 🐳 Build OS Images
