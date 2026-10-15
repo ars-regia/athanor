@@ -669,6 +669,10 @@ atspi)
     # shipped catalog, and a node that must carry its Italian name, so an English tree fails.
     lang=(RIG_LOCALE=en_US.UTF-8)
     required=
+    case "${3:-}" in
+    '' | it) ;;
+    *) echo "atspi: the language is 'it' or none, not '$3'" >&2; exit 2 ;;
+    esac
     if [ "${3:-}" = it ]; then
         declare -A italian=([greeter]="athanor-greeter-ui Immagine di sistema verificata"
             [chooser]="athanor-layout-chooser Isola" [bar]="athanor-bar Alimentazione"
