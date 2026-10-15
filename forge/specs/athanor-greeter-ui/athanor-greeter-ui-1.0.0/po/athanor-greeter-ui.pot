@@ -105,7 +105,7 @@ msgstr ""
 msgid "Signed, but pinned to one build: it receives no updates"
 msgstr ""
 
-#: src/seal.rs:170
+#: src/seal.rs:171
 msgid "The update state on this machine could not be read"
 msgstr ""
 

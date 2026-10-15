@@ -97,7 +97,7 @@ msgstr "Non verificata: questa macchina non verifica i suoi aggiornamenti"
 msgid "Signed, but pinned to one build: it receives no updates"
 msgstr "Firmata, ma ferma su una sola build: non riceve aggiornamenti"
 
-#: src/seal.rs:170
+#: src/seal.rs:171
 msgid "The update state on this machine could not be read"
 msgstr "Impossibile leggere lo stato degli aggiornamenti di questa macchina"
 
