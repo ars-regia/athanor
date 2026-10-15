@@ -240,6 +240,8 @@ polkit_restart_agent() {
 }
 polkit_log_info() {
   local exec
+  # A drop-in left by a killed run would be read back as a second ExecStart.
+  polkit_log_restore || die "FAIL  could not remove a leftover $ACC_POLKIT_DROPIN"
   exec=$(guest_ssh systemctl cat polkit.service | grep '^ExecStart=/') || die "FAIL  no ExecStart in polkit.service"
   [[ $exec == *--log-level=notice* ]] || die "FAIL  polkitd is not started at --log-level=notice: $exec"
   printf '[Service]\nExecStart=\n%s\n' "${exec/--log-level=notice/--log-level=info}" |
@@ -247,7 +249,13 @@ polkit_log_info() {
   polkit_restart_agent || die "FAIL  cosmic-osd did not register with polkitd at --log-level=info in 30 s"
 }
 polkit_log_restore() {
-  guest_ssh "test -e $ACC_POLKIT_DROPIN" || return 0
+  local rc=0
+  guest_ssh "test -e $ACC_POLKIT_DROPIN" || rc=$?
+  case $rc in
+    0) ;;
+    1) return 0 ;; # no drop-in
+    *) return 1 ;; # ssh failed: the drop-in may still be there
+  esac
   guest_ssh sudo rm -f "$ACC_POLKIT_DROPIN" || return 1
   guest_ssh "sudo systemctl daemon-reload && sudo systemctl restart polkit.service" || return 1
   guest_ssh sudo systemctl --user --machine="$GUEST_USER@.host" restart cosmic-osd.service
