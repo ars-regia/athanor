@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-selinux
 Version:        1.0
-Release:        10%{?dist}
+Release:        11%{?dist}
 Summary:        Custom SELinux policies for Athanor OS
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -9,6 +9,7 @@ Source0:        bootupd_lsblk.te
 Source1:        athanor_scx.te
 Source2:        athanor_nix_daemon.cil
 Source3:        athanor_nvidia_modules_load.te
+Source4:        athanor_bootc_install.te
 
 BuildArch:      noarch
 BuildRequires:  checkpolicy
@@ -16,12 +17,12 @@ BuildRequires:  checkpolicy
 %description
 Custom SELinux Type Enforcement policies for Athanor OS.
 Includes mitigations for bootupd, the scx eBPF schedulers and the NVIDIA driver's
-capability probes at module load, and the Nix policy: types for the store, its
+capability probes at module load, bootc's install_t from system services, and the Nix policy: types for the store, its
 state and the daemon socket, a confined nix-daemon domain and a builder domain.
 
 %prep
 %setup -q -c -T
-cp %{SOURCE0} %{SOURCE1} %{SOURCE2} %{SOURCE3} .
+cp %{SOURCE0} %{SOURCE1} %{SOURCE2} %{SOURCE3} %{SOURCE4} .
 
 %build
 # checkmodule compiles each .te into a CIL module (the require block resolves
@@ -29,7 +30,7 @@ cp %{SOURCE0} %{SOURCE1} %{SOURCE2} %{SOURCE3} .
 # semodule_package step: `semodule -i module.cil` loads it as it is.
 # athanor_nix_daemon is written in CIL directly, because it declares file
 # contexts, which a .te compiled by checkmodule cannot carry.
-for module in bootupd_lsblk athanor_scx athanor_nvidia_modules_load; do
+for module in bootupd_lsblk athanor_scx athanor_nvidia_modules_load athanor_bootc_install; do
   checkmodule -M -m -C -o "${module}.cil" "${module}.te"
 done
 
@@ -38,14 +39,23 @@ install -D -m 0644 bootupd_lsblk.cil %{buildroot}%{_datadir}/selinux/packages/bo
 install -D -m 0644 athanor_scx.cil %{buildroot}%{_datadir}/selinux/packages/athanor_scx.cil
 install -D -m 0644 athanor_nix_daemon.cil %{buildroot}%{_datadir}/selinux/packages/athanor_nix_daemon.cil
 install -D -m 0644 athanor_nvidia_modules_load.cil %{buildroot}%{_datadir}/selinux/packages/athanor_nvidia_modules_load.cil
+install -D -m 0644 athanor_bootc_install.cil %{buildroot}%{_datadir}/selinux/packages/athanor_bootc_install.cil
 
 %files
 %{_datadir}/selinux/packages/bootupd_lsblk.cil
 %{_datadir}/selinux/packages/athanor_scx.cil
 %{_datadir}/selinux/packages/athanor_nix_daemon.cil
 %{_datadir}/selinux/packages/athanor_nvidia_modules_load.cil
+%{_datadir}/selinux/packages/athanor_bootc_install.cil
 
 %changelog
+* Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0-11
+- Add athanor_bootc_install: bootc and ostree executed by athanor-update (unconfined_service_t)
+  enter install_t, as they do from init_t, also under no_new_privs, and bootc's mount enters
+  mount_t under no_new_privs. bootc now holds mac_admin for the labels of a new image, and its
+  install_t probe is no longer denied twice on every boot (#476).
+- bootupd_lsblk: let bootupd_t read the /proc directory, which bootupctl lists at boot (#476).
+
 * Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0-10
 - athanor_nix_daemon: let nix_daemon_t build for unprivileged users (runtime audit 2026-10-08,
   RT-N2): read nsfs_t (setns into the sandbox mount namespace), sys_ptrace in its user
