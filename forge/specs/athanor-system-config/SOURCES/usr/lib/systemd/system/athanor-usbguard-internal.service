@@ -4,14 +4,35 @@ Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture
 # usbguard.service reads its rules once, when it starts, and applies them to the devices
 # present then (PresentDevicePolicy=apply-policy). Running Before= it needs no reload and
 # no second start. Before= the greeter: nobody types a PIN or looks at a camera before it.
-# It runs once: the marker in /var/lib/athanor ends it (ADR-0103 D12, DK21).
+# It runs at each boot until the snapshot is recorded as done, reading at the boots after the
+# first only the devices still pending, for three runs at most: the marker in /var/lib/athanor
+# then ends it (ADR-0103 D12, DK21).
 After=systemd-udevd.service systemd-udev-trigger.service
 Before=usbguard.service greetd.service
 ConditionPathExists=!/var/lib/athanor/usbguard-internal.done
 
 [Service]
 Type=oneshot
-ExecStartPre=/usr/bin/udevadm settle --timeout=10
+# The bound on the start (#490). The script has TimeoutStartSec= for its 10 s bound, a read in
+# progress at the bound and the syncs. A read of bConfigurationValue or of the serial waits for
+# the device lock, which a driver probe can hold; the wait is interruptible, so at the timeout
+# SIGTERM ends the script and the greeter waits about 30 s at most. A process that survived
+# SIGKILL, in a wait the kernel does not interrupt, would add TimeoutStopSec= four times
+# (SIGTERM, SIGKILL, the final SIGTERM and SIGKILL, src/core/service.c of systemd 258) before
+# systemd marks the unit failed: about 50 s, a case not verified on hardware.
+# No `udevadm settle` before the script: under NoNewPrivileges= it cannot enter udev_t, SELinux
+# denies init_t udev's varlink socket, and its failure skipped the script at every boot. The
+# script waits for the devices itself, reading each until two passes agree.
+# greetd and usbguard.service are only ordered after this unit, so they start whether it
+# succeeds, fails or times out. A run that does not finish leaves no marker, and the next boot
+# reads only the devices the pending file names; a run that reads pending devices counts itself
+# first, so retries killed at every boot still end after three runs. Two cases are left to an
+# administrator, and the unit fails at every boot, admitting nothing, until one acts: a pending
+# file that is not valid (create the marker to end the snapshot, or remove the file to take a
+# new one), and a rules file that cannot be read (make it readable again), which counts no later
+# run.
+TimeoutStartSec=30s
+TimeoutStopSec=5s
 ExecStart=/usr/libexec/athanor-usbguard-internal
 StateDirectory=athanor
 ReadWritePaths=/etc/usbguard/rules.d

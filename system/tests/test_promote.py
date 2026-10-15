@@ -163,6 +163,7 @@ class Promote(Tool):
         self.assertEqual(
             copies,
             [
+                (f"{base}@{digest(1)}", f"{base}:promoted-412"),
                 (f"{base}@{digest(4)}", f"{base}:stable-previous"),
                 (f"{base}@{digest(1)}", f"{base}:stable-{self.record()['day']}"),
                 (f"{base}@{digest(1)}", f"{base}:stable"),
@@ -171,6 +172,27 @@ class Promote(Tool):
         skipped = {s["name"]: s["reason"] for s in self.record()["skipped"]}
         self.assertIn("hardware", skipped["athanor-system-nvidia"])
         self.assertIn("0.9", skipped["athanor-system-nvidia-legacy"])
+
+    def test_a_promoted_tag_at_another_digest_is_refused_and_nothing_moves(self):
+        # promoted-<run_id> never moves (issue 500): at plan time and when it appears meanwhile.
+        base = f"{REG}/athanor-system"
+        for name, between in (("at plan", None), ("at apply", True)):
+            with self.subTest(name=name):
+                self.published()
+                other = lambda: self.set_tag(f"{base}:promoted-412", digest(9))
+                if between is None:
+                    other()
+                r, copies = self.promote(between=other if between else None)
+                self.assertEqual(r.returncode, 1, r.stderr)
+                self.assertIn("promoted-412 names", r.stderr)
+                self.assertEqual(copies, [])
+
+    def test_a_promoted_tag_already_at_the_digest_is_kept_not_copied_again(self):
+        self.published()
+        self.set_tag(f"{REG}/athanor-system:promoted-412", digest(1))
+        r, copies = self.promote()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(any(dest.endswith(":promoted-412") for _, dest in copies))
 
     def test_the_record_names_the_iso_the_acceptance_tested(self):
         self.published()
@@ -261,7 +283,7 @@ class Promote(Tool):
         self.published(stable_created=None)
         r, copies = self.promote()
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(len(copies), 2)
+        self.assertEqual(len(copies), 3)
         self.assertFalse(any(dest.endswith(":stable-previous") for _, dest in copies))
         self.assertIsNone(self.record()["images"][0]["previous_stable"])
 
@@ -269,7 +291,7 @@ class Promote(Tool):
         self.published()
         r, copies = self.promote("--hardware-override", "athanor-system-nvidia")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(len(copies), 6)
+        self.assertEqual(len(copies), 8)
         self.assertEqual(self.record()["overrides"], ["athanor-system-nvidia"])
 
     def test_the_legacy_variant_cannot_be_overridden(self):
@@ -282,7 +304,7 @@ class Promote(Tool):
         self.published(names=["athanor-system"])
         r, copies = self.promote("--hardware-override", "athanor-system-nvidia")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(len(copies), 3)
+        self.assertEqual(len(copies), 4)
         reasons = {s["name"]: s["reason"] for s in self.record()["skipped"]}
         self.assertEqual(reasons["athanor-system-nvidia"], "not built by run 412")
 
@@ -390,6 +412,50 @@ class Promote(Tool):
         self.assertIn("i/o timeout", r.stderr)
         self.assertEqual([dest for _, dest in copies if dest.startswith(nvidia)], [])
 
+    def test_a_promoted_tag_that_cannot_be_read_during_the_apply_is_refused(self):
+        # promoted-<run_id> is immutable: a registry error read as "absent" would copy over it.
+        self.published()
+        fx = json.loads((self.dir / "registry.json").read_text())
+        nvidia = f"{REG}/athanor-system-nvidia"
+        fx["errors_on_copy"] = {f"{REG}/athanor-system:stable": [f"{nvidia}:promoted-412"]}
+        self.registry(fx)
+        r, copies = self.promote("--hardware-override", "athanor-system-nvidia")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("i/o timeout", r.stderr)
+        self.assertEqual([dest for _, dest in copies if dest.startswith(nvidia)], [])
+
+    def test_no_read_of_the_promoted_tag_before_its_copy_is_taken_for_absent(self):
+        # Each read of promoted-<run_id> made before the copy that creates it fails in turn, and
+        # each must stop the apply before any copy. A clean run counts those reads, so one added
+        # later is covered too and the read that decides the copy is always the last of them.
+        ref = f"{REG}/athanor-system:promoted-412"
+
+        def run(reads):
+            self.published()
+            fx = json.loads((self.dir / "registry.json").read_text())
+            fx["errors_after_reads"] = {ref: reads}
+            self.registry(fx)
+            return self.promote()
+
+        r, _ = run(10**6)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        calls = [json.loads(line) for line in (self.dir / "calls.log").read_text().splitlines()]
+        first_copy = next(i for i, c in enumerate(calls) if c[:2] == ["skopeo", "copy"])
+        later = sum(
+            1
+            for c in calls[first_copy:]
+            if c[:2] == ["skopeo", "inspect"] and c[-1].removeprefix("docker://") == ref
+        )
+        before = json.loads((self.dir / "registry.json").read_text())["reads"][ref] - later
+        # At least the plan's record, the apply's record, check_promoted and the copy decision.
+        self.assertGreaterEqual(before, 4)
+        for reads in range(before):
+            with self.subTest(reads=reads):
+                r, copies = run(reads)
+                self.assertEqual(r.returncode, 1)
+                self.assertIn("i/o timeout", r.stderr)
+                self.assertEqual(copies, [])
+
     def test_a_package_set_changed_after_the_plan_is_refused_at_apply(self):
         self.published()
         r, copies = self.promote(
@@ -490,6 +556,7 @@ class Promote(Tool):
         self.assertEqual(
             copies,
             [
+                (f"{nvidia}@{digest(2)}", f"{nvidia}:promoted-412"),
                 (f"{nvidia}@{digest(5)}", f"{nvidia}:stable-previous"),
                 (f"{nvidia}@{digest(2)}", f"{nvidia}:stable-{self.record()['day']}"),
                 (f"{nvidia}@{digest(2)}", f"{nvidia}:stable"),
@@ -586,9 +653,20 @@ class Promote(Tool):
 
     def test_stable_is_read_back(self):
         self.published(moves=False)
+        # promoted-412 already at the digest: the copy that does not land is :stable's.
+        fx = json.loads((self.dir / "registry.json").read_text())
+        fx["tags"][f"{REG}/athanor-system:promoted-412"] = digest(1)
+        self.registry(fx)
         r, _ = self.promote()
         self.assertEqual(r.returncode, 1)
-        self.assertIn("stable points at", r.stderr)
+        self.assertIn("athanor-system:stable points at", r.stderr)
+
+    def test_promoted_is_read_back_before_stable_moves(self):
+        self.published(moves=False)
+        r, copies = self.promote()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("athanor-system:promoted-412 points at nothing", r.stderr)
+        self.assertEqual([dest for _, dest in copies if not dest.endswith(":promoted-412")], [])
 
     def test_the_apply_needs_the_plan_it_signed(self):
         self.published()

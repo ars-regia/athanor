@@ -1,8 +1,11 @@
 #!/usr/bin/bash
 # Snapshot of the internal USB devices (doc_disks.md DK21, ADR-0103 D12).
-# Writes one allow rule for each USB device connected now, except those with a mass-storage
-# interface (class 08), then records that it ran. The paths come from the environment only
-# for the tests; the unit sets none.
+# Writes one allow rule for each USB device connected at the first run, except those with a
+# mass-storage interface (class 08), then records that it ran. A device that does not settle
+# within the bound is recorded as pending, by port and ids, and only that device is read again
+# at the next boots, for at most three runs in all (#490). The first run keeps the pending file
+# as it sees the devices, so a run cut short never leads to a snapshot of what is connected
+# later. The paths come from the environment only for the tests; the unit sets none.
 set -euo pipefail
 umask 0077
 shopt -s nullglob
@@ -10,78 +13,246 @@ shopt -s nullglob
 usb=${ATHANOR_USB_SYSFS:-/sys/bus/usb/devices}
 rules=${ATHANOR_USBGUARD_RULES:-/etc/usbguard/rules.d/50-athanor-internal.conf}
 marker=${ATHANOR_USBGUARD_MARKER:-/var/lib/athanor/usbguard-internal.done}
-# The bound on the wait for enumeration, in tenths of a second. Ten seconds is long enough for a
-# hub and its children to be configured on the boots seen so far, and short enough not to hold
-# the greeter back for a device that never answers; such a device is logged and skipped.
+pending=${ATHANOR_USBGUARD_PENDING:-/var/lib/athanor/usbguard-internal.pending}
+uptime=${ATHANOR_UPTIME:-/proc/uptime}
+# The bound on one run, in tenths of a second: the wait for enumeration, and the passes until
+# every device reads the same twice. Ten seconds is long enough for a hub and its children to be
+# configured on the boots seen so far, and short enough not to hold the greeter back for a
+# device that never settles.
 wait_tenths=${ATHANOR_USBGUARD_WAIT_TENTHS:-100}
+# The runs that read a pending device, the first run included, before it is left blocked.
+max_runs=3
 
 [[ -e $marker ]] && exit 0
 
 # attr FILE VAR: reads the first line of a sysfs attribute into VAR; fails when it cannot be
-# read (the device is gone, or has no such attribute), after bash has said why on stderr.
+# read (the device is gone, or has no such attribute), after bash has said why on stdout, so
+# that describe returns the reason.
 attr() {
     local -n target=$2
     # shellcheck disable=SC2034
-    IFS= read -r target <"$1"
+    { IFS= read -r target <"$1"; } 2>&1
 }
 
-# configured DEVICE: succeeds once the device has a configuration and its interfaces exist.
-# `udevadm settle` only drains the udev queue; it does not wait for the bus to enumerate.
-configured() {
-    local value
-    [[ -r $1/bConfigurationValue ]] && attr "$1/bConfigurationValue" value && [[ -n $value ]] &&
-        compgen -G "$1/${1##*/}:*" >/dev/null
+# clock: sets now to the time since boot in hundredths of a second, which a step of the wall
+# clock at first boot (NTP, the RTC read late) does not move. A malformed value is an
+# arithmetic error, which ends the script.
+clock() {
+    local up
+    read -r up _ <"$uptime"
+    now=$((10#${up/./}))
 }
 
+# put FILE: replaces FILE with standard input, durably: a crash leaves the old file or the new.
+put() {
+    mkdir -p -- "${1%/*}"
+    tmp=$(mktemp "$1.XXXXXX")
+    trap 'rm -f -- "$tmp"' EXIT
+    cat >"$tmp"
+    chmod 0600 "$tmp"
+    sync -- "$tmp"
+    mv -- "$tmp" "$1"
+    trap - EXIT
+    sync -- "${1%/*}"
+}
+
+# The pending file: a line "runs N", the runs that have read its devices, then one line for each
+# device still owed a rule, "PORT VID:PID", followed by " SERIAL" when its serial was read, or by
+# ' ""' when the device was read with no serial (USBGuard's serial ""). A line with neither, from
+# a device whose description was never read, matches any serial at that port and VID:PID.
+declare -A wanted=()
+runs=0
+first=yes
+if [[ -e $pending ]]; then
+    first=no
+    n=0
+    line=''
+    while IFS= read -r line; do
+        n=$((n + 1))
+        if ((n == 1)) && [[ $line =~ ^runs\ ([1-9])$ ]]; then
+            runs=${BASH_REMATCH[1]}
+        elif ((n > 1)) && [[ $line =~ ^([0-9A-Za-z.-]+)\ [0-9a-f]{4}:[0-9a-f]{4}(\ [0-9A-Za-z._:+\ -]+|\ \"\")?$ ]]; then
+            wanted[${BASH_REMATCH[1]}]=$line
+        else
+            n=0
+            break
+        fi
+    done <"$pending" || n=0 # a file that cannot be opened
+    [[ -z $line ]] || n=0  # a last line with no newline: cut short
+    # A file that cannot be trusted is never replaced by a fresh snapshot, which would admit the
+    # devices connected since the first run, nor taken as the end of the snapshot: put() replaces
+    # it atomically, so an invalid one was damaged or written by something else. The unit fails
+    # at every boot, admitting nothing, until an administrator chooses.
+    if ((n == 0)); then
+        echo "<3>$pending is not valid: no device is admitted until an administrator creates $marker to end the snapshot, or removes $pending to take a new one. Allow the internal devices from Settings, USB devices." >&2
+        exit 1
+    fi
+fi
+
+write_pending() {
+    local body="runs $runs" entry
+    for entry in "${wanted[@]}"; do
+        body+=$'\n'$entry
+    done
+    put "$pending" <<<"$body"
+}
+
+# finish: records that the snapshot is done. The marker comes before the pending file goes, so
+# a crash between them never starts a snapshot again.
+finish() {
+    put "$marker" </dev/null
+    rm -f -- "$pending"
+    sync -- "${pending%/*}"
+    exit 0
+}
+
+# give_up: leaves the devices still pending blocked, and ends the snapshot.
+give_up() {
+    local entry
+    for entry in "${wanted[@]}"; do
+        echo "<3>Leaving ${entry%% *} (${entry#* }) blocked after $max_runs runs: allow it from Settings, USB devices, with \"Allow always\"." >&2
+    done
+    finish
+}
+
+# read_rules: reads the rules file into lines. A rules file that cannot be read ends the run,
+# before anything is replaced and without the marker, at every boot until an administrator makes
+# it readable again.
+read_rules() {
+    if [[ ! -e $rules ]]; then
+        lines=("# Written by athanor-usbguard-internal.service: the USB devices connected at its first run, admitted then or at the next boots (doc_disks.md DK21).")
+    elif ! mapfile -t lines <"$rules"; then
+        echo "<3>$rules cannot be read: no device is admitted until an administrator makes it readable again." >&2
+        exit 1
+    fi
+}
+
+# The count is on disk before any device is read, so a run killed by the start timeout counts.
+# A first run killed before it read any device's ids left no entry: what was connected then is
+# unknown, and reading the devices now could admit one connected since, so none is admitted.
+# A later run reads the rules file before it counts itself: a run that could write no rule is
+# not one of the three. The first run reads it at the end, after its pending file records the
+# devices it saw, so that the snapshot stays the one of the first boot.
+if [[ $first == no ]]; then
+    if ((${#wanted[@]} == 0)); then
+        echo "<3>The first run of the snapshot stopped before it read any device: no internal device is admitted. Allow them from Settings, USB devices, with \"Allow always\"." >&2
+        finish
+    fi
+    read_rules
+    ((runs < max_runs)) || give_up
+    runs=$((runs + 1))
+else
+    runs=1
+fi
+write_pending
+
+# devices: the devices this run reads. The first run reads every device on the bus; a later
+# one every port still pending, connected yet or not, so a device connected since the first run
+# is never a candidate and a pending device still enumerating is waited for.
 devices() {
-    local dev
+    local dev port
+    if [[ $first == no ]]; then
+        for port in "${!wanted[@]}"; do
+            echo "$usb/$port"
+        done
+        return
+    fi
     for dev in "$usb"/*; do
         [[ ${dev##*/} == *:* ]] || echo "$dev" # an interface is read with its device
     done
 }
 
-tries=0
-while ((tries < wait_tenths)); do
-    pending=no
-    while read -r dev; do
-        configured "$dev" || pending=yes
-    done < <(devices)
-    [[ $pending == no ]] && break
-    sleep 0.1
-    tries=$((tries + 1))
-done
+# describe DEVICE: prints what one pass reads of the device, a value a line: idVendor,
+# idProduct, serial, bConfigurationValue, then each interface as "NAME CLASS:SUBCLASS:PROTOCOL".
+# Fails, printing why, when any of it cannot be read or the device is not configured yet.
+# The two passes are the only wait for the bus: the unit runs no `udevadm settle`, which drains
+# the udev queue but does not wait for a device to enumerate.
+describe() {
+    local dev=$1 name=${1##*/} vid pid serial='' config iface class sub proto ifaces=''
+    if [[ ! -e $dev ]]; then
+        echo "not connected"
+        return 1
+    fi
+    { attr "$dev/idVendor" vid && attr "$dev/idProduct" pid; } || return 1
+    if [[ -e $dev/serial ]]; then
+        attr "$dev/serial" serial || return 1
+    fi
+    # An unconfigured device has an empty bConfigurationValue, read as end of file.
+    if ! attr "$dev/bConfigurationValue" config || [[ -z $config ]]; then
+        echo "not configured"
+        return 1
+    fi
+    for iface in "$dev/$name":*; do
+        { attr "$iface/bInterfaceClass" class && attr "$iface/bInterfaceSubClass" sub &&
+            attr "$iface/bInterfaceProtocol" proto; } || return 1
+        ifaces+="${iface##*/} $class:$sub:$proto"$'\n'
+    done
+    if [[ -z $ifaces ]]; then
+        echo "configured, with no interface yet"
+        return 1
+    fi
+    printf '%s\n' "$vid" "$pid" "$serial" "$config"
+    printf '%s' "$ifaces"
+}
 
-# device_rule DEVICE: prints the rule for the device, or fails after saying on stderr why it
-# gets none. A device that vanishes while it is read is skipped, and the others go on.
+# identity DEVICE [DESCRIPTION]: prints the pending line of a device, from its description or,
+# without one, from its ids alone. Fails when they cannot be read, printing why, or when a rule
+# could not carry them; a serial a rule could not carry is left out, as an unread one is.
+identity() {
+    local name=${1##*/} vid pid serial=''
+    if [[ -n ${2-} ]]; then
+        { IFS= read -r vid && IFS= read -r pid && IFS= read -r serial; } <<<"$2"
+    else
+        { attr "$1/idVendor" vid && attr "$1/idProduct" pid; } || return 1
+    fi
+    [[ $vid =~ ^[0-9a-f]{4}$ && $pid =~ ^[0-9a-f]{4}$ && $name =~ ^[0-9A-Za-z.-]+$ ]] || return 1
+    if [[ ! $serial =~ ^[0-9A-Za-z._:+\ -]*$ ]]; then
+        serial=''
+    elif [[ -n ${2-} && -z $serial ]]; then
+        serial='""'
+    fi
+    echo "$name $vid:$pid${serial:+ $serial}"
+}
+
+# serial_field DEVICE: prints the serial a pending line records for the device, or "" when it
+# has none, from its serial alone: a device not configured yet has one to read. Fails when the
+# device is gone or its serial cannot be read.
+serial_field() {
+    local serial=''
+    [[ -e $1/idVendor ]] || return 1
+    if [[ -e $1/serial ]]; then
+        attr "$1/serial" serial || return 1
+    fi
+    printf '%s\n' "${serial:-\"\"}" # a serial can read as an option of echo, such as -n
+}
+
+# matches DEVICE DESCRIPTION: succeeds when a settled device is the one its pending line names:
+# the same port and ids, and the same serial, or none, when the first run read it.
+matches() {
+    local entry=${wanted[${1##*/}]} now
+    now=$(identity "$1" "$2") || return 1
+    [[ $now == "$entry" || (${entry#* } != *\ * && ${now#* } == "${entry#* }"\ *) ]]
+}
+
+# device_rule DEVICE DESCRIPTION: prints the rule for a device from its settled description, or
+# fails after saying on stderr why it gets none.
 device_rule() {
-    local dev=$1 name vid pid serial='' iface class sub proto ifaces='' storage=no
-    name=${dev##*/}
-    if ! { attr "$dev/idVendor" vid && attr "$dev/idProduct" pid; }; then
-        echo "<4>Skipping $name: its descriptor cannot be read." >&2
-        return 1
-    fi
-    if [[ -e $dev/serial ]] && ! attr "$dev/serial" serial; then
-        echo "<4>Skipping $vid:$pid on $name: its serial cannot be read." >&2
-        return 1
-    fi
+    local name=${1##*/} vid pid serial class ifaces='' storage=no
+    {
+        IFS= read -r vid
+        IFS= read -r pid
+        IFS= read -r serial
+        IFS= read -r _ # bConfigurationValue
+        while read -r _ class; do
+            [[ $class == 08:* ]] && storage=yes
+            ifaces+=" $class"
+        done
+    } <<<"$2"
     if [[ ! $vid =~ ^[0-9a-f]{4}$ || ! $pid =~ ^[0-9a-f]{4}$ || ! $name =~ ^[0-9A-Za-z.-]+$ ||
         ! $serial =~ ^[0-9A-Za-z._:+\ -]*$ ]]; then
         echo "<4>Skipping $name: a descriptor holds characters a rule cannot carry." >&2
         return 1
     fi
-    if ! configured "$dev"; then
-        echo "<4>Skipping $vid:$pid on $name: not configured after the wait." >&2
-        return 1
-    fi
-    for iface in "$dev/$name":*; do
-        if ! { attr "$iface/bInterfaceClass" class && attr "$iface/bInterfaceSubClass" sub &&
-            attr "$iface/bInterfaceProtocol" proto; }; then
-            echo "<4>Skipping $vid:$pid on $name: an interface cannot be read." >&2
-            return 1
-        fi
-        [[ $class == 08 ]] && storage=yes
-        ifaces+=" $class:$sub:$proto"
-    done
     if [[ $storage == yes ]]; then
         echo "<6>Not admitting $vid:$pid on $name: mass storage." >&2
         return 1
@@ -89,23 +260,117 @@ device_rule() {
     echo "allow id $vid:$pid serial \"$serial\" via-port \"$name\" with-interface equals {$ifaces }"
 }
 
-out=$(mktemp "$rules.XXXXXX")
-trap 'rm -f -- "$out"' EXIT
-echo "# Written once by athanor-usbguard-internal.service: the USB devices connected at the first boot." >"$out"
-
-while read -r dev; do
-    if rule=$(device_rule "$dev"); then
-        echo "$rule" >>"$out"
+# A device is recorded only when two consecutive passes read the same description: a device
+# reconfigured between the read of bConfigurationValue and the reads of its interfaces
+# (usb_modeswitch, a udev rule, usbfs) reads differently twice and is read again. A device that
+# leaves the bus stops being listed and is not waited for.
+# The first run lists each device it sees in the pending file, from its ids alone, which the
+# kernel serves without the device lock, before it reads anything that takes the lock; the
+# serial, or its absence, is added as soon as a read of the serial succeeds. An entry leaves the
+# file only after its rule is on disk, or when its device left the bus before the end of the run.
+# A device whose serial a rule cannot carry can never be admitted: the first run leaves it
+# blocked and out of the pending file, where it would match any serial, and lists it no more.
+declare -A last=() why=() settled=() resolved=() dropped=()
+admitted=()
+clock
+deadline=$((now + wait_tenths * 10))
+while :; do
+    mapfile -t listed < <(devices)
+    if [[ $first == yes ]]; then
+        seen=no
+        for dev in "${listed[@]}"; do
+            if [[ ! -v wanted[${dev##*/}] && ! -v dropped[${dev##*/}] ]] && entry=$(identity "$dev"); then
+                wanted[${dev##*/}]=$entry
+                seen=yes
+            fi
+        done
+        [[ $seen == no ]] || write_pending
     fi
-done < <(devices)
+    unsettled=()
+    for dev in "${listed[@]}"; do
+        port=${dev##*/}
+        [[ -v settled[$dev] || -v dropped[$port] ]] && continue
+        if [[ $first == yes && -v wanted[$port] && ${wanted[$port]#* } != *\ * ]] &&
+            serial=$(serial_field "$dev"); then
+            if [[ $serial =~ ^([0-9A-Za-z._:+\ -]+|\"\")$ ]]; then
+                wanted[$port]+=" $serial"
+            else
+                echo "<4>Leaving $port (${wanted[$port]#* }) blocked: its serial holds characters a rule cannot carry." >&2
+                unset "wanted[$port]"
+                dropped[$port]=yes
+            fi
+            write_pending
+            [[ -v dropped[$port] ]] && continue
+        fi
+        if ! desc=$(describe "$dev"); then
+            unset 'last[$dev]'
+            why[$dev]=$desc
+            unsettled+=("$dev")
+            continue
+        fi
+        if [[ -v last[$dev] && ${last[$dev]} == "$desc" ]]; then
+            settled[$dev]=yes
+            if [[ $first == no ]] && ! matches "$dev" "$desc"; then
+                echo "<4>${dev##*/} now holds a device other than the ${wanted[${dev##*/}]#* } of the first run: not admitted." >&2
+                continue
+            fi
+            resolved[${dev##*/}]=yes
+            if rule=$(device_rule "$dev" "$desc"); then
+                admitted+=("$rule")
+            fi
+        else
+            last[$dev]=$desc
+            why[$dev]="no two consecutive passes read it the same"
+            unsettled+=("$dev")
+        fi
+    done
+    ((${#unsettled[@]} == 0)) && break
+    clock
+    ((now < deadline)) || break
+    sleep 0.1
+done
 
-# Rules first, durably, then the marker: a crash between them runs the snapshot again, a crash
-# before the rules are on disk can never leave a marker for rules that are not.
-chmod 0600 "$out"
-sync -- "$out"
-mv -- "$out" "$rules"
-trap - EXIT
-sync -- "${rules%/*}"
-mkdir -p -- "${marker%/*}"
-: >"$marker"
-sync -- "$marker" "${marker%/*}"
+for dev in "${unsettled[@]}"; do
+    echo "<3>${dev##*/} did not settle within $((wait_tenths / 10)).$((wait_tenths % 10)) s: ${why[$dev]//$'\n'/; }" >&2
+done
+# A device whose ids could never be read has no identity a later run could check: it stays
+# blocked.
+for dev in "${unsettled[@]}"; do
+    if [[ ! -v wanted[${dev##*/}] ]]; then
+        echo "<3>Leaving ${dev##*/} blocked: its ids cannot be read." >&2
+    fi
+done
+if [[ $first == yes ]]; then
+    declare -A present=()
+    for dev in "${listed[@]}"; do
+        present[${dev##*/}]=yes
+    done
+    # A device that settled before it left was admitted, or named, already.
+    for port in "${!wanted[@]}"; do
+        if [[ ! -v present[$port] && ! -v resolved[$port] ]]; then
+            echo "<4>Leaving $port (${wanted[$port]#* }) blocked: it left the bus during the first run." >&2
+            resolved[$port]=yes
+        fi
+    done
+fi
+for port in "${!resolved[@]}"; do
+    unset "wanted[$port]" # a port name holds no character the subscript would expand
+done
+
+# Rules first, durably, then the pending file or the marker: a crash between them reads the
+# devices again, and a rule already written is kept and never written twice.
+[[ $first == no ]] || read_rules
+for rule in "${admitted[@]}"; do
+    for line in "${lines[@]}"; do
+        [[ $line == "$rule" ]] && continue 2
+    done
+    lines+=("$rule")
+done
+printf -v body '%s\n' "${lines[@]}"
+put "$rules" <<<"${body%$'\n'}"
+
+((${#wanted[@]} == 0)) && finish
+((runs < max_runs)) || give_up
+write_pending
+echo "<3>Not recording the snapshot as done: ${#wanted[@]} device(s) pending after run $runs of $max_runs, read again at the next boot." >&2
+exit 1
