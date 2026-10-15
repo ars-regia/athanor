@@ -424,19 +424,37 @@ class Promote(Tool):
         self.assertIn("i/o timeout", r.stderr)
         self.assertEqual([dest for _, dest in copies if dest.startswith(nvidia)], [])
 
-    def test_a_promoted_tag_read_once_then_unreadable_is_not_taken_for_absent(self):
-        # The plan, the apply's record and check_promoted read it (3 reads); the 4th, the one
-        # that decides whether to copy, fails: it must stop, not copy over an unseen tag.
-        self.published()
-        fx = json.loads((self.dir / "registry.json").read_text())
-        fx["errors_after_reads"] = {f"{REG}/athanor-system:promoted-412": 3}
-        self.registry(fx)
-        r, copies = self.promote()
-        self.assertEqual(r.returncode, 1)
-        self.assertIn("i/o timeout", r.stderr)
-        self.assertEqual(copies, [])
-        reads = json.loads((self.dir / "registry.json").read_text())["reads"]
-        self.assertEqual(reads[f"{REG}/athanor-system:promoted-412"], 4)
+    def test_no_read_of_the_promoted_tag_before_its_copy_is_taken_for_absent(self):
+        # Each read of promoted-<run_id> made before the copy that creates it fails in turn, and
+        # each must stop the apply before any copy. A clean run counts those reads, so one added
+        # later is covered too and the read that decides the copy is always the last of them.
+        ref = f"{REG}/athanor-system:promoted-412"
+
+        def run(reads):
+            self.published()
+            fx = json.loads((self.dir / "registry.json").read_text())
+            fx["errors_after_reads"] = {ref: reads}
+            self.registry(fx)
+            return self.promote()
+
+        r, _ = run(10**6)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        calls = [json.loads(line) for line in (self.dir / "calls.log").read_text().splitlines()]
+        first_copy = next(i for i, c in enumerate(calls) if c[:2] == ["skopeo", "copy"])
+        later = sum(
+            1
+            for c in calls[first_copy:]
+            if c[:2] == ["skopeo", "inspect"] and c[-1].removeprefix("docker://") == ref
+        )
+        before = json.loads((self.dir / "registry.json").read_text())["reads"][ref] - later
+        # At least the plan's record, the apply's record, check_promoted and the copy decision.
+        self.assertGreaterEqual(before, 4)
+        for reads in range(before):
+            with self.subTest(reads=reads):
+                r, copies = run(reads)
+                self.assertEqual(r.returncode, 1)
+                self.assertIn("i/o timeout", r.stderr)
+                self.assertEqual(copies, [])
 
     def test_a_package_set_changed_after_the_plan_is_refused_at_apply(self):
         self.published()
