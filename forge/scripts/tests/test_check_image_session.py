@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "forge/scripts"))
@@ -974,6 +975,85 @@ class ImageSession(unittest.TestCase):
             "usr/lib/systemd/system/multi-user.target.wants",
         )
         self.assertProblem("cosmic-greeter-daemon.service is enabled")
+
+
+class SchemaStubTest(unittest.TestCase):
+    """schema_problems with stub glib-compile-schemas and gsettings first on PATH, so these run
+    on any machine."""
+
+    VALUES = {
+        "accent-color": "'purple'",
+        "icon-theme": "'Adwaita'",
+        "accent-mode": "'fixed'",
+    }
+
+    def stub(self, name, body):
+        path = self.bin / name
+        path.write_text(f"#!/bin/sh\n{body}\n")
+        path.chmod(0o755)
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.bin = pathlib.Path(tmp.name)
+        patcher = mock.patch.dict(
+            os.environ, {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.stub("glib-compile-schemas", "exit 0")
+        self.stub(
+            "gsettings",
+            'case "$3" in\n'
+            + "\n".join(f'{k}) echo "{v}";;' for k, v in self.VALUES.items())
+            + "\nesac",
+        )
+
+    def test_good_schemas_give_no_finding(self):
+        self.assertEqual(mod.schema_problems("/schemas"), [])
+
+    def test_a_failed_compile_is_a_finding(self):
+        self.stub("glib-compile-schemas", "echo bad key >&2; exit 1")
+        found = mod.schema_problems("/schemas")
+        self.assertEqual(len(found), 1)
+        self.assertIn(
+            "glib-compile-schemas --strict --dry-run /schemas fails", found[0]
+        )
+        self.assertIn("bad key", found[0])
+
+    def test_a_mismatched_readback_is_a_finding(self):
+        self.stub("gsettings", "echo \"'blue'\"")
+        found = mod.schema_problems("/schemas")
+        self.assertEqual(len(found), 3)
+        self.assertIn("accent-color gives \"'blue'\", not 'purple'", found[0])
+
+    def test_a_failed_gsettings_is_a_finding(self):
+        self.stub("gsettings", "echo no schema >&2; exit 1")
+        found = mod.schema_problems("/schemas")
+        self.assertEqual(len(found), 3)
+        self.assertIn("gives 'no schema'", found[0])
+
+    def test_a_missing_tool_is_a_finding(self):
+        (self.bin / "gsettings").unlink()
+        with mock.patch.dict(os.environ, {"PATH": str(self.bin)}):
+            found = mod.schema_problems("/schemas")
+        self.assertEqual(len(found), 1)
+        self.assertIn("gsettings cannot run in the image", found[0])
+
+
+class SchemaMainTest(unittest.TestCase):
+    def test_schemas_are_checked_only_for_the_running_image(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(mod, "problems", return_value=[]),
+            mock.patch.object(mod, "schema_problems", return_value=[]) as schemas,
+        ):
+            self.assertEqual(mod.main(["x", tmp]), 0)
+            schemas.assert_not_called()
+            self.assertEqual(mod.main(["x", "/"]), 0)
+            schemas.assert_called_once_with()
+            schemas.return_value = ["broken"]
+            self.assertEqual(mod.main(["x"]), 1)
 
 
 class SchemaTest(unittest.TestCase):

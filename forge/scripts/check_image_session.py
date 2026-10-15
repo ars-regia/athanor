@@ -420,12 +420,15 @@ def schema_problems(schema_dir=SCHEMA_DIR):
     """glib-compile-schemas --strict --dry-run must accept schema_dir, and the memory backend
     must read the vendor defaults back from it: a key of an override that the schemas no longer
     have fails the whole compile, silently in the image build."""
-    compile_run = subprocess.run(
-        ["glib-compile-schemas", "--strict", "--dry-run", schema_dir],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        compile_run = subprocess.run(
+            ["glib-compile-schemas", "--strict", "--dry-run", schema_dir],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as e:
+        return [f"glib-compile-schemas cannot run in the image: {e}"]
     if compile_run.returncode:
         return [
             f"glib-compile-schemas --strict --dry-run {schema_dir} fails, so the image has "
@@ -434,13 +437,16 @@ def schema_problems(schema_dir=SCHEMA_DIR):
     env = dict(os.environ, GSETTINGS_BACKEND="memory", GSETTINGS_SCHEMA_DIR=schema_dir)
     found = []
     for schema, key, expected in SCHEMA_DEFAULTS:
-        read = subprocess.run(
-            ["gsettings", "get", schema, key],
-            capture_output=True,
-            text=True,
-            check=False,
-            env=env,
-        )
+        try:
+            read = subprocess.run(
+                ["gsettings", "get", schema, key],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+        except OSError as e:
+            return found + [f"gsettings cannot run in the image: {e}"]
         value = read.stdout.strip()
         if read.returncode or value != expected:
             found.append(
@@ -456,7 +462,7 @@ def main(argv):
         return 2
     root = pathlib.Path(argv[1] if len(argv) == 2 else "/")
     found = problems(root)
-    if str(root) == "/":
+    if root.resolve() == pathlib.Path("/"):
         found += schema_problems()
     for line in found:
         print(line, file=sys.stderr)
