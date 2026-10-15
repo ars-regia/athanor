@@ -65,6 +65,9 @@ real_sum=$(sha256sum /usr/bin/bootc | cut -d' ' -f1)
 wrapper_sum=$(sha256sum "$wrapper" | cut -d' ' -f1)
 : > /run/acc-bootc-real
 mount --bind /usr/bin/bootc /run/acc-bootc-real
+# / is a shared mount, and the bind of one of its files joins its peer group: without this, the
+# wrapper mounted on /usr/bin/bootc would show through /run/acc-bootc-real as well.
+mount --make-private /run/acc-bootc-real
 mount --bind "$wrapper" /usr/bin/bootc
 log "wrapper mounted"
 
