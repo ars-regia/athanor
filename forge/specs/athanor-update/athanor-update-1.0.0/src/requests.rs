@@ -78,6 +78,8 @@ fn downloaded<'s, T: Tools>(ctx: &Context<'_, T>, status: &'s Status) -> Result<
     }
     let held = ctx.store.held().map_err(|err| {
         tracing::error!(%err, "cannot read the held digest; Apply() refuses");
+        // The state names the failure, so the shield stops offering "Restart to update".
+        republish(ctx);
         Refusal::Failed
     })?;
     let policy = crate::policy::in_force(&ctx.policy);
@@ -292,6 +294,7 @@ mod tests {
         let (tools, power) = (downloaded(), FakePower::new(false, Ok(())));
         assert_eq!(apply(&machine.ctx(&tools, 5000), &power, &FakeCaller::alone(&tools)).await, Err(Refusal::Failed));
         assert!(tools.calls.borrow().is_empty() && !power.rebooted.get());
+        assert_eq!(published(&machine), UpdateState::None, "the shield stops offering the restart");
     }
 
     #[tokio::test]

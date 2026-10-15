@@ -140,6 +140,14 @@ impl Store {
         Ok(self.read_number("newest-booted")?.unwrap_or(0))
     }
 
+    /// Replaces an unreadable record with `build_time`, without reading it.
+    ///
+    /// # Errors
+    /// The file cannot be written.
+    pub fn reset_booted(&self, build_time: i64) -> std::io::Result<()> {
+        Self::replace(&self.var, "newest-booted", 0o644, format!("{build_time}\n").as_bytes())
+    }
+
     /// Records `build_time` when it is newer than the record, and returns the record.
     ///
     /// # Errors

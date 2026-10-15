@@ -306,12 +306,38 @@ fn move_to_signed_copy<T: Tools>(ctx: &Context<'_, T>, status: &mut Status, cand
 pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failure> {
     let mut status = ctx.tools.status()?;
     let storage = |_| Failure { code: ErrorCode::Storage, host: None };
-    let newest = ctx.store.record_booted(status.booted.build_time).map_err(storage)?;
+    // An unreadable record of the newest build is a storage failure, not a reason to publish
+    // nothing: it is replaced by the booted build (offerable() compares with the booted build
+    // time, never with this file), and nothing is offered until the next check.
+    let (newest, unreadable_newest) = match ctx.store.record_booted(status.booted.build_time) {
+        Ok(newest) => (newest, None),
+        Err(err) => {
+            tracing::error!(%err, "cannot read the newest booted build time; it is reset to the booted build");
+            if let Err(err) = ctx.store.reset_booted(status.booted.build_time) {
+                tracing::error!(%err, "cannot reset the newest booted build time");
+            }
+            (status.booted.build_time, Some(Failure { code: ErrorCode::Storage, host: None }))
+        }
+    };
+    // `refused` is no gate: a refused image is verified again when it is downloaded again. An
+    // unreadable record is reported and cleared, so it cannot block every download for ever.
+    let unreadable_refused = match ctx.store.refused() {
+        Ok(_) => None,
+        Err(err) => {
+            tracing::error!(%err, "cannot read the refused digest; it is cleared");
+            if let Err(err) = ctx.store.set_refused(None) {
+                tracing::error!(%err, "cannot clear the refused digest");
+            }
+            Some(Failure { code: ErrorCode::Storage, host: None })
+        }
+    };
     let policy = crate::policy::in_force(&ctx.policy);
     // A queued rollback leaves the booted digest (doc_recovery.md, R5): it is held, as GoBack()
     // holds it, and nothing is downloaded, since a staged deployment would become the default
     // of the next boot in place of the return.
-    let (update, failure) = if status.rollback_queued {
+    let (update, failure) = if unreadable_newest.is_some() {
+        (UpdateState::None, unreadable_newest)
+    } else if status.rollback_queued {
         let held = ctx.store.set_held(&status.booted.digest).err().map(|_| Failure { code: ErrorCode::Storage, host: None });
         settle(local_update(ctx, &status), held)
     } else if offline {
@@ -328,6 +354,15 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failu
             }
         }
     }
+    // Read after the check, which rewrites it when the registry answers: a garbled record heals.
+    let (last_successful_check, unreadable_last) = match ctx.store.last_success() {
+        Ok(last) => (last, None),
+        Err(err) => {
+            tracing::error!(%err, "cannot read the time of the last successful check");
+            (None, Some(Failure { code: ErrorCode::Storage, host: None }))
+        }
+    };
+    let failure = unreadable_refused.or(failure).or(unreadable_last);
     let state = State {
         schema: SCHEMA,
         verified: reason(ctx, &policy, &status).into(),
@@ -338,7 +373,7 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failu
         policy: policy.info,
         secure_boot: crate::secureboot::read(&ctx.efivars, &ctx.lockdown),
         newest_booted_build_time: newest,
-        last_successful_check: ctx.store.last_success().map_err(storage)?,
+        last_successful_check,
         last_error: failure.as_ref().map_or(ErrorCode::None, |failure| failure.code),
         last_error_host: failure.and_then(|failure| failure.host),
     };
@@ -580,6 +615,40 @@ pub(crate) mod tests {
         tools.status.borrow_mut().staged = Some(Deployed { download_only: true, ..deployed(&digest(2), 2000) });
         let state = run(&machine.ctx(&tools, 5000), true).expect("state");
         assert_eq!((state.update, state.last_error), (UpdateState::None, ErrorCode::Storage));
+    }
+
+    #[test]
+    fn a_garbled_newest_booted_is_published_as_storage_and_rewritten() {
+        let machine = Machine::new("newest-garbled", &["real/k1.pub"]);
+        std::fs::write(machine.store.var.join("newest-booted"), "soon\n").expect("write");
+        let tools = Fake::booted(deployed(&digest(1), 1000)).offering(&digest(2), 2000);
+        let state = run(&machine.ctx(&tools, 5000), false).expect("a state is published");
+        assert_eq!((state.update, state.last_error, state.newest_booted_build_time), (UpdateState::None, ErrorCode::Storage, 1000));
+        assert!(!tools.called("download"));
+        assert_eq!(machine.store.newest_booted().expect("healed"), 1000);
+        assert_eq!(run(&machine.ctx(&tools, 5000), false).expect("check").update, UpdateState::Downloaded);
+    }
+
+    #[test]
+    fn an_unreadable_last_success_is_published_as_storage_and_healed_by_the_check() {
+        let machine = Machine::new("last-success-garbled", &["real/k1.pub"]);
+        std::fs::write(machine.store.var.join("last-success"), "soon\n").expect("write");
+        let tools = Fake::booted(deployed(&digest(1), 1000)).offering(&digest(2), 2000);
+        let state = run(&machine.ctx(&tools, 5000), true).expect("a state is published");
+        assert_eq!((state.last_error, state.last_successful_check), (ErrorCode::Storage, None));
+        let state = run(&machine.ctx(&tools, 6000), false).expect("check");
+        assert_eq!(state.last_successful_check, Some(6000));
+    }
+
+    #[test]
+    fn an_unreadable_refused_is_cleared_reported_and_does_not_stop_the_download() {
+        let machine = Machine::new("refused-garbled", &["real/k1.pub"]);
+        std::fs::write(machine.store.var.join("refused"), [0xff, 0xfe]).expect("write");
+        let tools = Fake::booted(deployed(&digest(1), 1000)).offering(&digest(2), 2000);
+        let state = run(&machine.ctx(&tools, 5000), false).expect("check");
+        assert!(tools.called("download"));
+        assert_eq!((state.update, state.last_error), (UpdateState::Downloaded, ErrorCode::Storage));
+        assert_eq!(machine.store.refused().expect("cleared"), None);
     }
 
     #[test]

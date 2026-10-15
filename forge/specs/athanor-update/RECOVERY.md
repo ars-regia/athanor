@@ -28,3 +28,18 @@ registry, and compare its SHA-256 with the published one:
        sudo athanor-update recover-key finish
 
    It refuses until the booted image names the new key for every system image repository.
+
+# A state file under `/var/lib/athanor-update` that cannot be read
+
+`held`, `refused`, `newest-booted`, `last-success` and `move-record` are read as "absent"
+only when the file is missing. A file that exists and cannot be read (I/O error, bad
+permissions, not UTF-8, a number that is not a number) is a storage failure: the state
+shows `last_error: storage`, and for `held` the check offers nothing, `Apply()` refuses and
+`athanor-update-migrate` stages nothing, because reading the file as absent would release the
+digest the user went back from.
+
+Read the journal of `athanor-update` for the file named in the error, then either remove it
+as root (`sudo rm /var/lib/athanor-update/held`, which releases that digest) or go back
+again with `GoBack()` (`sudo athanor-update go-back`), which writes `held` anew. `refused`
+and `newest-booted` heal themselves at the next check; `last-success` is rewritten by the
+next successful check.

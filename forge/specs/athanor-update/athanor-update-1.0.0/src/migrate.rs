@@ -64,6 +64,17 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>) -> Result<Outcome, Failure> {
     if status.staged.as_ref().is_some_and(|staged| staged.enforcing && staged.image == target) {
         return Ok(Outcome::Waiting("restart-pending"));
     }
+    // Read before the registry is asked: a file that stays unreadable must not cost a query at
+    // every run of the timer. The move record is read for the same reason; which digest it
+    // names is decided once the candidate is known.
+    let held = ctx.store.held().map_err(|err| {
+        tracing::error!(%err, "cannot read the held digest; nothing is staged");
+        Failure { code: athanor_trust_state::ErrorCode::Storage, host: None }
+    })?;
+    ctx.store.move_record(&target).map_err(|err| {
+        tracing::error!(%err, "cannot read the move record; nothing is staged");
+        Failure { code: athanor_trust_state::ErrorCode::Storage, host: None }
+    })?;
     // The build-time rule of UT5 holds here too: the migration never moves a machine back.
     let Some(candidate) = ctx.tools.candidate(&target)? else {
         // The channel is not published yet (A2-4). Record it for the state and wait: the unit
@@ -78,10 +89,7 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>) -> Result<Outcome, Failure> {
     // failed to boot ATTEMPTS times; that is the migration's own record, not the held file,
     // which keeps the digest the person went back from. Either way the machine stays where it
     // is until the tag names a newer build.
-    let held = ctx.store.held().map_err(|err| {
-        tracing::error!(%err, "cannot read the held digest; nothing is staged");
-        Failure { code: athanor_trust_state::ErrorCode::Storage, host: None }
-    })?.as_deref() == Some(candidate.digest.as_str());
+    let held = held.as_deref() == Some(candidate.digest.as_str());
     let failed = record.failed_boots >= ATTEMPTS;
     if held {
         return Ok(Outcome::Waiting("held"));
@@ -315,6 +323,19 @@ mod tests {
         }
         assert_eq!(switches(tools), 1, "the held digest is never staged again");
         assert!(tools.status.borrow().staged.is_none());
+    }
+
+    #[test]
+    fn an_unreadable_held_or_move_record_fails_before_the_registry_is_asked() {
+        for name in ["held", "move-record"] {
+            let machine = Machine::new(&format!("migrate-unreadable-{name}"), &["real/k1.pub"]);
+            // A directory in place of the file fails with EISDIR, whoever runs the test.
+            std::fs::create_dir(machine.store.var.join(name)).expect("mkdir");
+            let tools = Fake::booted(from_media(1000)).offering(SIGNED, 2000);
+            let storage = Failure { code: athanor_trust_state::ErrorCode::Storage, host: None };
+            assert_eq!(run(&machine.ctx(&tools, 5000)), Err(storage), "{name}");
+            assert!(!tools.called("candidate") && !tools.called("switch"), "{name}");
+        }
     }
 
     #[test]
