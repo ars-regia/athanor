@@ -595,6 +595,24 @@ case $(wc -l < {count}) in
         self.assertFalse(self.pending.exists())
         self.assertFalse(self.rules.exists())
 
+    def test_the_bound_is_measured_on_the_time_since_boot(self):
+        # The stand-in for sleep(1) returns at once and moves the time since boot on by 0.1 s:
+        # the bound of 0.3 s is three waits, whatever the wall clock does meanwhile.
+        self.device("1-1", "0c45", "6a10", [], configured=False)
+        uptime = self.work / "uptime"
+        uptime.write_text("12.00 40.00\n")
+        waits = self.work / "waits"
+        sleep = f'''echo >> {waits}
+read -r up _ < {uptime}
+c=$((10#${{up/./}} + 10))
+printf '%d.%02d 0.00\\n' $((c / 100)) $((c % 100)) > {uptime}
+'''
+        env = dict(self.environment(None, sleep, 3), ATHANOR_UPTIME=str(uptime))
+        done = subprocess.run([LIBEXEC], env=env, capture_output=True, text=True, timeout=30)
+        self.assert_not_done(done, "1-1")
+        self.assertEqual(len(waits.read_text().splitlines()), 3)
+        self.assertEqual(uptime.read_text(), "12.30 0.00\n")
+
     def test_the_wait_lets_a_device_finish_enumerating(self):
         self.device("1-1", "0c45", "6a10", [], configured=False)
         d = self.sysfs / "1-1"

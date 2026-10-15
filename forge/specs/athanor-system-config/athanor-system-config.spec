@@ -95,6 +95,7 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
   A rules file that cannot be read fails the run and is kept as it is.
   A pending device read with no serial is recorded as such and matches only a device with
   none; only a device never read matches by port and ids alone.
+  The bound is measured on the time since boot, which a step of the wall clock does not move.
 
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-65
 - %install copies the usr and etc source trees without hiding a failure (AGENTS.md,

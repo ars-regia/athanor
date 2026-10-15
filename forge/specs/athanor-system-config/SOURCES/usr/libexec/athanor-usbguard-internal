@@ -14,6 +14,7 @@ usb=${ATHANOR_USB_SYSFS:-/sys/bus/usb/devices}
 rules=${ATHANOR_USBGUARD_RULES:-/etc/usbguard/rules.d/50-athanor-internal.conf}
 marker=${ATHANOR_USBGUARD_MARKER:-/var/lib/athanor/usbguard-internal.done}
 pending=${ATHANOR_USBGUARD_PENDING:-/var/lib/athanor/usbguard-internal.pending}
+uptime=${ATHANOR_UPTIME:-/proc/uptime}
 # The bound on one run, in tenths of a second: the wait for enumeration, and the passes until
 # every device reads the same twice. Ten seconds is long enough for a hub and its children to be
 # configured on the boots seen so far, and short enough not to hold the greeter back for a
@@ -31,6 +32,15 @@ attr() {
     local -n target=$2
     # shellcheck disable=SC2034
     { IFS= read -r target <"$1"; } 2>&1
+}
+
+# clock: sets now to the time since boot in hundredths of a second, which a step of the wall
+# clock at first boot (NTP, the RTC read late) does not move. A malformed value is an
+# arithmetic error, which ends the script.
+clock() {
+    local up
+    read -r up _ <"$uptime"
+    now=$((10#${up/./}))
 }
 
 # put FILE: replaces FILE with standard input, durably: a crash leaves the old file or the new.
@@ -229,8 +239,8 @@ device_rule() {
 # on disk, or when its device left the bus before the end of the run.
 declare -A last=() why=() settled=() resolved=()
 admitted=()
-# Microseconds of the wall clock, in any locale; the unit's start timeout is the monotonic bound.
-deadline=$((${EPOCHREALTIME//[!0-9]/} + wait_tenths * 100000))
+clock
+deadline=$((now + wait_tenths * 10))
 while :; do
     mapfile -t listed < <(devices)
     if [[ $first == yes ]]; then
@@ -274,7 +284,8 @@ while :; do
         fi
     done
     ((${#unsettled[@]} == 0)) && break
-    ((${EPOCHREALTIME//[!0-9]/} < deadline)) || break
+    clock
+    ((now < deadline)) || break
     sleep 0.1
 done
 
