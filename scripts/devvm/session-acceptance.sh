@@ -21,6 +21,10 @@
 #           exports it under $XDG_RUNTIME_DIR/doc/by-app/<app id>/<document id>/; a character
 #           typed and saved with Ctrl+S changes the file on disk, so the grant is writable.
 #
+# volume needs a session whose cosmic-comp keeps its key bindings (--keep-shortcuts, #510).
+# portal refuses to start while the editor runs or holds a user override, since its cleanup
+# stops the editor and resets that override.
+#
 # What this does not show. No log line marks the chooser as drawn: the stage waits a fixed time
 # after Ctrl+O, and the screenshots are the only check of what it looks like. The volume keys
 # are pressed on the compositor's default shortcuts: a user's own binding of the key in
@@ -91,7 +95,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-USER_NAME=$(guest_ssh id -un)
+USER_NAME=$(guest_ssh id -un) || fail "cannot reach the guest over SSH"
 SESSION=$(guest_ssh loginctl show-user "$USER_NAME" -p Display --value) || SESSION=
 [[ -n $SESSION ]] || fail "no graphical session for $USER_NAME: log in at the greeter first"
 
@@ -134,7 +138,7 @@ unload_sink() {
 
 stage_volume() {
     local since up down log
-    since=$(guest_ssh date +%s)
+    since=$(guest_ssh date +%s) || fail "cannot read the guest's clock"
     [[ $(in_session systemctl --user is-active $DAEMON) == active ]] || fail "$DAEMON is not active"
     in_session "test -S $SOCKET" || fail "no socket $SOCKET: the daemon's audio service did not bind (ReadWritePaths=%t, #144)"
     # cosmic-comp runs the system action for the key (doc_osd.md, section 1): its defaults bind
@@ -181,6 +185,9 @@ stage_volume() {
 # `flatpak run`, and a surviving instance takes over the next run's window.
 stop_editor() {
     local apps
+    if [[ $(in_session systemctl --user show -p LoadState --value "$EDITOR_UNIT") == loaded ]]; then
+        in_session systemctl --user stop "$EDITOR_UNIT" || return 1
+    fi
     apps=$(in_session flatpak ps --columns=application) || return 1
     grep -qx "$APP" <<< "$apps" || return 0
     in_session flatpak kill "$APP"
@@ -198,10 +205,10 @@ editor_runs() {
 document_exported() { in_session "compgen -G \"$DOCS/by-app/$APP/*/$NAME\"" > /dev/null; }
 
 stage_portal() {
-    local flatpaks home before after
+    local flatpaks overrides home before after
     guest_ssh grep -qx 'org.freedesktop.impl.portal.FileChooser=gtk' "$PORTALS_CONF" ||
         fail "$PORTALS_CONF does not route FileChooser to gtk"
-    flatpaks=$(in_session flatpak list --app --columns=application)
+    flatpaks=$(in_session flatpak list --app --columns=application) || fail "flatpak list"
     if ! grep -qx "$APP" <<< "$flatpaks"; then
         in_session flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo ||
             fail "flatpak remote-add flathub"
@@ -209,18 +216,21 @@ stage_portal() {
     fi
 
     # shellcheck disable=SC2016 # expanded by the guest's shell
-    home=$(guest_ssh 'printf %s "$HOME"')
+    home=$(guest_ssh 'printf %s "$HOME"') || fail "cannot read the guest user's home"
     # A name of this run: the document portal keeps a record of every document it exported,
     # and a record left by an earlier run would read as this run's export.
     NAME=session-acceptance-$(date +%s).txt
     DOCUMENT=$home/$NAME
-    ! editor_runs || fail "$APP already runs: the stage needs an instance it starts (flatpak kill $APP)"
+    flatpaks=$(in_session flatpak ps --columns=application) || fail "flatpak ps"
+    ! grep -qx "$APP" <<< "$flatpaks" ||
+        fail "$APP already runs: the stage needs an instance it starts (flatpak kill $APP)"
     CLEANUP+=(stop_editor remove_document)
     # Flathub's Text Editor holds --filesystem=host, and the portal exports a chosen file only to
     # an application that cannot already reach it: without this override the file opens by its
     # own path and the document portal is never exercised. The cleanup resets the user override,
     # so the stage refuses to start over one it did not write.
-    [[ -z $(in_session flatpak override --user --show "$APP") ]] ||
+    overrides=$(in_session flatpak override --user --show "$APP") || fail "flatpak override --user --show $APP"
+    [[ -z $overrides ]] ||
         fail "$APP has a user override; the stage would replace it (flatpak override --user --show $APP)"
     CLEANUP+=(reset_override)
     in_session flatpak override --user --nofilesystem=host "$APP" || fail "flatpak override --nofilesystem=host $APP"
