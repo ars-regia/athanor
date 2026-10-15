@@ -125,8 +125,9 @@ check base="HEAD":
     python3 -B forge/specs/athanor-kernel-profile/kernel_profile.py check
     python3 -B system/athanor-style/calmo/contrast.py
     python3 -B system/athanor-style/calmo/generate.py --check
-    # This suite holds no TestCase: its own main() runs the cases, and discovery would find none.
+    # These suites hold no TestCase: their own main() runs the cases, and discovery would find none.
     python3 -B forge/test/iso/test_verdict.py
+    python3 -B forge/test/iso/test_report.py
     dirs=$(git ls-files -- ':(glob)**/test_*.py' | xargs -n1 dirname | sort -u | grep -vx 'forge/test/iso')
     for dir in $dirs; do
         echo "check: unit tests in $dir"

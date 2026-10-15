@@ -83,11 +83,33 @@ class Evidence(unittest.TestCase):
 
     def test_the_verdict_json_decides_and_its_absence_is_a_fail(self):
         verdict = self.dir / "verdict.json"
-        verdict.write_text(json.dumps({"pass": True, "checks": {}}))
+        verdict.write_text(json.dumps({"pass": True, "checks": {"secure-boot": True}}))
         self.write("--verdict-json", str(verdict))
         self.assertEqual(self.check().returncode, 0)
         verdict.unlink()
         self.write("--verdict-json", str(verdict))
+        self.assertIn("verdict is fail", self.check().stderr)
+
+    def test_every_verdict_json_must_pass(self):
+        good, bad = self.dir / "good.json", self.dir / "bad.json"
+        good.write_text(json.dumps({"pass": True, "checks": {"secure-boot": True}}))
+        bad.write_text(json.dumps({"pass": False}))
+        self.write("--verdict-json", str(good), str(good))
+        self.assertEqual(self.check().returncode, 0)
+        self.write("--verdict-json", str(good), str(bad))
+        self.assertIn("verdict is fail", self.check().stderr)
+
+    def test_the_iso_acceptance_needs_the_secure_boot_case(self):
+        plain, sb = self.dir / "plain.json", self.dir / "sb.json"
+        plain.write_text(json.dumps({"pass": True, "checks": {"greeter": True}}))
+        sb.write_text(json.dumps({"pass": True, "checks": {"greeter": True, "secure-boot": True}}))
+        for files, verdict in (((plain,), "fail"), ((plain, plain), "fail"), ((plain, sb), "pass")):
+            with self.subTest(files=[f.name for f in files]):
+                self.write("--verdict-json", *map(str, files))
+                data = json.loads((self.dir / "iso-acceptance.athanor-system.json").read_text())
+                self.assertEqual(data["verdict"], verdict)
+        sb.write_text(json.dumps({"pass": True, "checks": {"secure-boot": "yes"}}))
+        self.write("--verdict-json", str(plain), str(sb))
         self.assertIn("verdict is fail", self.check().stderr)
 
     def test_bad_arguments_are_refused_at_write(self):

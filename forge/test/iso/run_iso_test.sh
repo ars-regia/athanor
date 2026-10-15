@@ -197,4 +197,6 @@ kill "$shots_pid" 2> /dev/null || true
 status=0
 python3 "${here}/verdict.py" "$output" "$GREETER_WAIT" "$qemu_status" "${verdict_case[@]}" || status=$?
 python3 "${here}/../../../scripts/session-memory/report.py" "${output}/serial.log" "${output}/memory.json" || status=$?
+# REMOVE_DISK=1 frees the disk image once the verdict is written; logs and screenshots stay.
+if [[ ${REMOVE_DISK:-0} == 1 ]]; then rm -f "$disk"; fi
 exit "$status"

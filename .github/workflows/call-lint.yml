@@ -71,6 +71,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -B forge/test/iso/test_verdict.py
+          python3 -B forge/test/iso/test_report.py
 
       - name: Forge scripts (unit tests)
         run: python3 -B -m unittest discover -s forge/scripts/tests -v
