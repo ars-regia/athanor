@@ -52,8 +52,10 @@ install -D -m 0644 athanor_bootc_install.cil %{buildroot}%{_datadir}/selinux/pac
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0-11
 - Add athanor_bootc_install: bootc and ostree executed by athanor-update (unconfined_service_t)
   enter install_t, as they do from init_t, also under no_new_privs, and bootc's mount enters
-  mount_t under no_new_privs. bootc now holds mac_admin for the labels of a new image, and its
-  install_t probe is no longer denied twice on every boot (#476).
+  mount_t under no_new_privs. bootc's install_t probe is no longer denied twice on every boot
+  (#476), and bootc holds mac_admin, which it needs to write the labels of an image whose
+  policy adds a type; the download path is not yet exercised with this module. The rule covers
+  every unconfined_service_t process that executes an install_exec_t file.
 - bootupd_lsblk: let bootupd_t read the /proc directory, which bootupctl lists at boot (#476).
 
 * Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.0-10
