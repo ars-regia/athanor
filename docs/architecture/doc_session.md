@@ -30,7 +30,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08.** This revision 
 | `athanor-launcher.service` (built, not enabled) | as the dock | `on-failure`, 1 s, `RestartSteps=5`, `RestartMaxDelaySec=60s`, start limit 10 in 600 s | `forge/specs/athanor-launcher/athanor-launcher-1.0.0/data/athanor-launcher.service:6-25` |
 | `cosmic-bg`, `cosmic-osd`, `cosmic-settings-daemon` | as the dock; `WantedBy=graphical-session.target` | `on-failure`, 2 s | `forge/specs/athanor-system-services/SOURCES/usr/lib/systemd/user/cosmic-bg.service:4-20,38` and its siblings |
 | `athanor-update-notify.service` | `After=` and `PartOf=graphical-session.target`; `WantedBy=graphical-session.target` | `on-failure`, 30 s | `forge/specs/athanor-update/SOURCES/usr/lib/systemd/user/athanor-update-notify.service:4-19` |
-| `athanor-skel-sync.service` | oneshot, before bar and dock; `WantedBy=niri-session.target graphical-session.target` | none | `forge/specs/athanor-system-services/SOURCES/usr/lib/systemd/user/athanor-skel-sync.service:4,12,31` |
+| `athanor-skel-sync.service` | oneshot, before bar and dock; wanted by `athanor-session.target`, `WantedBy=graphical-session.target` | none | `forge/specs/athanor-system-services/SOURCES/usr/lib/systemd/user/athanor-skel-sync.service:4,12,32` |
 | `app-athanor-<id>@<random>.service` | no ordering and no binding: only `Type=exec`, `ExitType=cgroup`, `CollectMode=inactive-or-failed` | none | `system/athanor-compositor-client/src/unit.rs:86-99` |
 | `xdg-desktop-portal.service` (upstream) | `PartOf=graphical-session.target`, `Type=dbus` | none | `/usr/lib/systemd/user/xdg-desktop-portal.service` on the image, read 2026-10-06 |
 
